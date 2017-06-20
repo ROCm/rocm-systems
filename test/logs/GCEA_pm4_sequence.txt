@@ -1,0 +1,49 @@
+// Start counters PM4 packets sequence
+// GRBM_GFX_INDEX broadcast
+'SET_UCONFIG_REG' size(3)                              : c0017900 00000200 e0000000
+// Disable RLC Perfmon Clock Gating, RLC_PERFMON_CLK_CNTL = 1
+'SET_UCONFIG_REG' size(3)                              : c0017900 00001cbf 00000001
+// CP_PERFMON_CNTL reset
+'SET_UCONFIG_REG' size(3)                              : c0017900 00001808 00000000
+// GRBM_GFX_INDEX to block instance (0)
+'SET_UCONFIG_REG' size(3)                              : c0017900 00000200 a0000000
+// Reset counter, PERFCOUNTER_RSLT_CNTL.CLEAR_ALL = 1
+'COPY_DATA dst_sel=4' size(6)                          : c0044000 00000405 02000000 00000000 00002afb 00000000
+// Setup counter, PERFCOUNTER*_CFG{PERF_SEL = event, PERF_MODE = ACCUM, ENABLE = 1}
+'COPY_DATA dst_sel=4' size(6)                          : c0044000 00000405 10000000 00000000 00002af9 00000000
+// Config counter, PERFCOUNTER_RSLT_CNTL = slot
+'COPY_DATA dst_sel=4' size(6)                          : c0044000 00000405 00000000 00000000 00002afb 00000000
+// Start counter, PERFCOUNTER_RSLT_CNTL.ENABLE_ANY = 1
+'COPY_DATA dst_sel=4' size(6)                          : c0044000 00000405 01000000 00000000 00002afb 00000000
+// GRBM_GFX_INDEX broadcast
+'SET_UCONFIG_REG' size(3)                              : c0017900 00000200 e0000000
+// Set COMPUTE_PERFCOUNT_ENABLE
+'SET_SH_REG' size(3)                                   : c0017600 0000020b 00000001
+// CP_PERFMON_CNTL reset
+'SET_UCONFIG_REG' size(3)                              : c0017900 00001808 00000000
+// CP_PERFMON_CNTL start
+'SET_UCONFIG_REG' size(3)                              : c0017900 00001808 00000001
+// Issue barrier command to apply the commands to configure perfcounters
+'BarrierCommand' size(2)                               : c0004600 00000407
+'CacheFlushPacket' size(7)                             : c0055800 28c40000 ffffffff 00ffffff 00000000 00000000 00000004
+
+// Stop/Sample counters PM4 packets sequence
+// Issue barrier command to wait for dispatch to complete
+'BarrierCommand' size(2)                               : c0004600 00000407
+'CacheFlushPacket' size(7)                             : c0055800 28c40000 ffffffff 00ffffff 00000000 00000000 00000004
+// CP_PERFMON_CNTL stop/sample
+'SET_UCONFIG_REG' size(3)                              : c0017900 00001808 00000402
+// GRBM_GFX_INDEX broadcast
+'SET_UCONFIG_REG' size(3)                              : c0017900 00000200 e0000000
+// GRBM_GFX_INDEX to block instance (0)
+'SET_UCONFIG_REG' size(3)                              : c0017900 00000200 a0000000
+// Config counter, PERFCOUNTER_RSLT_CNTL = slot
+'COPY_DATA dst_sel=4' size(6)                          : c0044000 00000405 00000000 00000000 00002afb 00000000
+// Read Perfcounter LO word
+'COPY_DATA src_sel=4' size(6)                          : c0044000 02002504 00002af7 00000000 04d32000 00000000
+// Read Perfcounter HI word
+'COPY_DATA src_sel=4' size(6)                          : c0044000 02002504 00002af8 00000000 04d32004 00000000
+// GRBM_GFX_INDEX broadcast
+'SET_UCONFIG_REG' size(3)                              : c0017900 00000200 e0000000
+// Enable RLC Perfmon Clock Gating, RLC_PERFMON_CLK_CNTL = 0
+'SET_UCONFIG_REG' size(3)                              : c0017900 00001cbf 00000000
