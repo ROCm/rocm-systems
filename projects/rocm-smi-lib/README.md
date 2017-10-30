@@ -4,10 +4,10 @@ C++ Library interface for ROCm-SMI to allow you to monitor/trace GPU system atri
 
 - GPU Clocks
 - Memory Clocks
-- Temperature 
-- Fan Speed 
+- GPU Temperature 
+- GPU Fan Speed  - If you have active cooled device with a fan. 
 
-Example application is logging this with performance data to track kerenl execution time with GPU and Memory Clocks 
+Example application is logging performance data like Kerenl execution time  vs GPU Temprature,  GPU and Memory Clocks 
 
 ### To build library and example:
 mkdir -p build
