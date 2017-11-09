@@ -1,0 +1,1 @@
+echo /opt/rocm/librocprofiler/lib > /etc/ld.so.conf.d/libhsa-rocprofiler64.conf && ldconfig
