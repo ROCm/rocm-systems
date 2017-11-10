@@ -4,7 +4,7 @@ and AqlProfile HSA extension.
 
 Library supports GFX8/GFX9 APIs.
 The library source tree:
- - doc  - Documantation
+ - doc  - Documentation
  - inc/rocprofiler.h - Library public API
  - src  - Library sources
    - core - Library API sources
