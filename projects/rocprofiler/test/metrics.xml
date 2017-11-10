@@ -2,14 +2,42 @@
   <metric name=SQ_CYCLES block=SQ event=2 ></metric>
   <metric name=SQ_WAVES block=SQ event=4 ></metric>
   <metric name=SQ_ITEMS block=SQ event=14 ></metric>
+  <metric name=SQ_INSTS_VMEM_WR block=SQ event=27 ></metric>
+  <metric name=SQ_INSTS_VMEM_RD block=SQ event=28 ></metric>
+  <metric name=SQ_INSTS_SMEM block=SQ event=31 ></metric>
   <metric name=SQ_WAVE_READY block=SQ event=47 ></metric>
+
+  <metric name=TA_FLAT_READ_WAVEFRONTS block=TA event=101 ></metric>
+  <metric name=TA_FLAT_WRITE_WAVEFRONTS block=TA event=102 ></metric>
+
   <metric name=TCC_CYCLE block=TCC event=1 ></metric>
   <metric name=TCC_REQ block=TCC event=3 ></metric>
   <metric name=TCC_WRITEBACK block=TCC event=22 ></metric>
+
   <metric name=CPC_ALWAYS_COUNT block=CPC event=0 ></metric>
   <metric name=CPC_ME1_STALL_WAIT_ON_RCIU_READ block=CPC event=8 ></metric>
+
+  <metric
+    name=TA_FLAT_READ_WAVEFRONTS_sum
+    expr=TA_FLAT_READ_WAVEFRONTS[0]+TA_FLAT_READ_WAVEFRONTS[1]
+  ></metric>
+  <metric
+    name=TA_FLAT_WRITE_WAVEFRONTS_sum
+    expr=TA_FLAT_WRITE_WAVEFRONTS[0]+TA_FLAT_WRITE_WAVEFRONTS[1]
+  ></metric>
 </gfx8>
 
 <global>
-  <metric name=WAVE_STALLS_RATE expr=CPC_ME1_STALL_WAIT_ON_RCIU_READ*(SQ_WAVES+SQ_WAVE_READY)*100/(SQ_CYCLES/SQ_ITEMS) ></metric>
+  # VFETCH_INSTS
+  # The average number of vector fetch instructions from the video memory executed per work-item (affected by flow control).
+  # Excludes FLAT instructions that fetch from video memory.
+  <metric name=VFETCH_INSTS expr=1000*(SQ_INSTS_VMEM_RD-TA_FLAT_READ_WAVEFRONTS_sum)/SQ_WAVES ></metric>
+
+  # VWRITE_INSTS
+  # The average number of vector write instructions to the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that write to video memory.
+  <metric name=VWRITE_INSTS expr=1000*(SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES ></metric>
+
+  # SFETCH_INSTS
+  # The average number of scalar fetch instructions from the video memory executed per work-item (affected by flow control).
+  <metric name=SFETCH_INSTS expr=1000*SQ_INSTS_SMEM/SQ_WAVES ></metric>
 </global>
