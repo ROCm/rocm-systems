@@ -7,6 +7,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <thread>
 #include <map>
 #include <vector>
 
@@ -62,6 +63,8 @@ class MetricsDict {
   public:
   typedef std::map<std::string, const Metric*> cache_t;
   typedef cache_t::const_iterator const_iterator_t;
+  typedef std::map<std::string, MetricsDict*> map_t;
+  typedef std::mutex mutex_t;
 
   class ExprCache : public xml::expr_cache_t {
     public:
@@ -80,14 +83,12 @@ class MetricsDict {
     const cache_t* const cache_;
   };
 
-  MetricsDict(const util::AgentInfo* agent_info) : xml_(NULL) {
-    const char* xml_name = getenv("ROCP_METRICS");
-    if (xml_name != NULL) {
-      xml_ = new xml::Xml(xml_name);
-      std::cout << "ROCProfiler: importing metrics from '" << xml_name << "':" << std::endl;
-      ImportMetrics(agent_info, agent_info->gfxip);
-      ImportMetrics(agent_info, "global");
-    }
+  static MetricsDict* Create(const util::AgentInfo* agent_info) {
+    std::lock_guard<mutex_t> lck(mutex_);
+    if (map_ == NULL) map_ = new map_t;
+    auto ret = map_->insert({agent_info->gfxip, NULL});
+    if (ret.second) ret.first->second = new MetricsDict(agent_info);
+    return ret.first->second;
   }
 
   const Metric* Get(const std::string& name) const {
@@ -98,6 +99,16 @@ class MetricsDict {
   }
 
   private:
+  MetricsDict(const util::AgentInfo* agent_info) : xml_(NULL) {
+    const char* xml_name = getenv("ROCP_METRICS");
+    if (xml_name != NULL) {
+      xml_ = new xml::Xml(xml_name);
+      std::cout << "ROCProfiler: importing metrics from '" << xml_name << "':" << std::endl;
+      ImportMetrics(agent_info, agent_info->gfxip);
+      ImportMetrics(agent_info, "global");
+    }
+  }
+
   void ImportMetrics(const util::AgentInfo* agent_info, const char* scope) {
     auto scope_list = xml_->GetNodes("top." + std::string(scope) + ".metric");
     if (!scope_list.empty()) {
@@ -159,9 +170,11 @@ class MetricsDict {
     }
   }
 
-  // Metrics map
   xml::Xml* xml_;
   cache_t cache_;
+
+  static map_t* map_;
+  static mutex_t mutex_;
 };
 
 }  // namespace rocprofiler

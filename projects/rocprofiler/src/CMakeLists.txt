@@ -7,6 +7,7 @@ set ( LIB_SRC
   ${LIB_DIR}/core/proxy_queue.cpp
   ${LIB_DIR}/core/simple_proxy_queue.cpp
   ${LIB_DIR}/core/intercept_queue.cpp
+  ${LIB_DIR}/core/metrics.cpp
   ${LIB_DIR}/util/hsa_rsrc_factory.cpp
 )
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )

@@ -129,9 +129,10 @@ class Context {
     agent_info_(agent_info),
     queue_(queue),
     hsa_rsrc_(&util::HsaRsrcFactory::Instance()),
-    api_(hsa_rsrc_->AqlProfileApi()),
-    metrics_(agent_info)
+    api_(hsa_rsrc_->AqlProfileApi())
   {
+    metrics_ = MetricsDict::Create(agent_info);
+    if (metrics_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "MetricsDict create failed");
     Initialize(info, info_count);
     Finalize();
   }
@@ -163,7 +164,7 @@ class Context {
       const char* name = info->name;
 
       if (type == ROCPROFILER_TYPE_METRIC) {
-        const Metric* metric = metrics_.Get(name);
+        const Metric* metric = metrics_->Get(name);
         if (metric == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "' is not found");
         auto ret = metrics_map_.insert({name, metric});
         if (!ret.second) EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "' is registered more then once");
@@ -385,7 +386,7 @@ class Context {
   // Profile group set
   std::vector<Group> set_;
   // Metrics dictionary 
-  MetricsDict metrics_;
+  MetricsDict* metrics_;
   // Groups map
   std::map<block_des_t, block_status_t, lt_block_des> groups_map_;
   // Info map
