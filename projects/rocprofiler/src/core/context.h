@@ -147,7 +147,10 @@ class Context {
     }
   }
 
+  // Initialize rocprofiler context
   void Initialize(rocprofiler_info_t* info_array, const uint32_t info_count) {
+    // Set input features filter, to not duplicate referenced features
+    // Set iput features data as uninitialized
     info_map_t input_map;
     for (unsigned i = 0; i < info_count; ++i) {
       rocprofiler_info_t* info = &info_array[i];
@@ -155,27 +158,33 @@ class Context {
       info->data.kind = ROCPROFILER_UNINIT;
     }
 
+    // Adding zero group, always present
     if (info_count) set_.push_back(Group(agent_info_, this, 0));
 
+    // Processing input features
     for (unsigned i = 0; i < info_count; ++i) {
       rocprofiler_info_t* info = &info_array[i];
+      info->data.kind = ROCPROFILER_UNINIT;
       info_map_[info->name] = info;
       const rocprofiler_type_t type = info->type;
       const char* name = info->name;
 
-      if (type == ROCPROFILER_TYPE_METRIC) {
+      if (type == ROCPROFILER_TYPE_METRIC) { // Processing metrics features
         const Metric* metric = metrics_->Get(name);
-        if (metric == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "' is not found");
+        if (metric == NULL) EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
         auto ret = metrics_map_.insert({name, metric});
-        if (!ret.second) EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "' is registered more then once");
+        if (!ret.second) EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is registered more then once");
 
         counters_vec_t counters_vec = metric->GetCounters();
-        if (counters_vec.empty()) EXC_RAISING(HSA_STATUS_ERROR, "metric name '" << name << "' is not found");
+        if (counters_vec.empty()) EXC_RAISING(HSA_STATUS_ERROR, "bad metric '" << name << "' is empty");
 
         for (const counter_t* counter : counters_vec) {
+          // For metrics expressions checking that there is no the same counter in the input metrics
+          // and also that the counter wasn't registered already by another input metric expression
           if (metric->GetExpr()) {
-            auto it = input_map.find(counter->name);
-            if (it != input_map.end()) {
+            auto inp_it = input_map.find(counter->name);
+            auto inf_it = info_map_.find(counter->name);
+            if ((inp_it != input_map.end()) || (inf_it != info_map_.end())) {
               continue;
             } else {
               info = NewCounterInfo(counter);
@@ -208,9 +217,9 @@ class Context {
           const uint32_t group_index = block_status.group_index;
           set_[group_index].Insert(profile_info_t{event, NULL, 0, info});
         }
-      } else if (type == ROCPROFILER_TYPE_TRACE) {
+      } else if (type == ROCPROFILER_TYPE_TRACE) { // Processing traces features
         set_[0].Insert(profile_info_t{NULL, info->parameters, info->parameter_count, info});
-      } else {
+      } else { 
         EXC_RAISING(HSA_STATUS_ERROR, "bad rocprofiler type (" << type << ")");
       }
     }

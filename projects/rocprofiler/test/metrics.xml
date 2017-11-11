@@ -1,4 +1,7 @@
 <gfx8>
+  <metric name=GRBM_COUNT block=GRBM event=0 ></metric>
+  <metric name=GRBM_GUI_ACTIVE block=GRBM event=2 ></metric>
+
   <metric name=SQ_CYCLES block=SQ event=2 ></metric>
   <metric name=SQ_WAVES block=SQ event=4 ></metric>
   <metric name=SQ_ITEMS block=SQ event=14 ></metric>
@@ -10,33 +13,133 @@
   <metric name=SQ_INSTS_LDS block=SQ event=34 ></metric>
   <metric name=SQ_WAVE_READY block=SQ event=47 ></metric>
 
+  <metric name=TA_BUSY block=TA event=15 ></metric>
   <metric name=TA_FLAT_READ_WAVEFRONTS block=TA event=101 ></metric>
   <metric name=TA_FLAT_WRITE_WAVEFRONTS block=TA event=102 ></metric>
 
   <metric name=TCC_CYCLE block=TCC event=1 ></metric>
   <metric name=TCC_REQ block=TCC event=3 ></metric>
+  <metric name=TCC_HIT block=TCC event=18 ></metric>
+  <metric name=TCC_MISS block=TCC event=19 ></metric>
   <metric name=TCC_WRITEBACK block=TCC event=22 ></metric>
+  <metric name=TCC_MC_RDREQ block=TCC event=35 ></metric>
 
   <metric name=CPC_ALWAYS_COUNT block=CPC event=0 ></metric>
   <metric name=CPC_ME1_STALL_WAIT_ON_RCIU_READ block=CPC event=8 ></metric>
 
+  # average for (16 instances x 4 shader engines)
+  <metric
+    name=TA_BUSY_avr
+    expr=(TA_BUSY[0]+TA_BUSY[1]+TA_BUSY[2]+TA_BUSY[3]+TA_BUSY[4]+TA_BUSY[5]+TA_BUSY[6]+TA_BUSY[7]+TA_BUSY[8]+TA_BUSY[9]+TA_BUSY[10]+TA_BUSY[11]+TA_BUSY[12]+TA_BUSY[13]+TA_BUSY[14]+TA_BUSY[15])/(16*4)
+  ></metric>
+  # sun for 16 instances
   <metric
     name=TA_FLAT_WRITE_WAVEFRONTS_sum
-    expr=TA_FLAT_WRITE_WAVEFRONTS[0]+TA_FLAT_WRITE_WAVEFRONTS[1]+TA_FLAT_WRITE_WAVEFRONTS[2]+TA_FLAT_WRITE_WAVEFRONTS[3]
+    expr=TA_FLAT_WRITE_WAVEFRONTS[0]+TA_FLAT_WRITE_WAVEFRONTS[1]+TA_FLAT_WRITE_WAVEFRONTS[2]+TA_FLAT_WRITE_WAVEFRONTS[3]+TA_FLAT_WRITE_WAVEFRONTS[4]+TA_FLAT_WRITE_WAVEFRONTS[5]+TA_FLAT_WRITE_WAVEFRONTS[6]+TA_FLAT_WRITE_WAVEFRONTS[7]+TA_FLAT_WRITE_WAVEFRONTS[8]+TA_FLAT_WRITE_WAVEFRONTS[9]+TA_FLAT_WRITE_WAVEFRONTS[10]+TA_FLAT_WRITE_WAVEFRONTS[11]+TA_FLAT_WRITE_WAVEFRONTS[12]+TA_FLAT_WRITE_WAVEFRONTS[13]+TA_FLAT_WRITE_WAVEFRONTS[14]+TA_FLAT_WRITE_WAVEFRONTS[15]
   ></metric>
+  <metric
+    name=TCC_HIT_sum
+    expr=TCC_HIT[0]+TCC_HIT[1]+TCC_HIT[2]+TCC_HIT[3]+TCC_HIT[4]+TCC_HIT[5]+TCC_HIT[6]+TCC_HIT[7]+TCC_HIT[8]+TCC_HIT[9]+TCC_HIT[10]+TCC_HIT[11]+TCC_HIT[12]+TCC_HIT[13]+TCC_HIT[14]+TCC_HIT[15]
+  ></metric>
+  <metric
+    name=TCC_MISS_sum
+    expr=TCC_MISS[0]+TCC_MISS[1]+TCC_MISS[2]+TCC_MISS[3]+TCC_MISS[4]+TCC_MISS[5]+TCC_MISS[6]+TCC_MISS[7]+TCC_MISS[8]+TCC_MISS[9]+TCC_MISS[10]+TCC_MISS[11]+TCC_MISS[12]+TCC_MISS[13]+TCC_MISS[14]+TCC_MISS[15]
+  ></metric>
+  <metric
+    name=TCC_MC_RDREQ_sum
+    expr=TCC_MC_RDREQ[0]+TCC_MC_RDREQ[1]+TCC_MC_RDREQ[2]+TCC_MC_RDREQ[3]+TCC_MC_RDREQ[4]+TCC_MC_RDREQ[5]+TCC_MC_RDREQ[6]+TCC_MC_RDREQ[7]+TCC_MC_RDREQ[8]+TCC_MC_RDREQ[9]+TCC_MC_RDREQ[10]+TCC_MC_RDREQ[11]+TCC_MC_RDREQ[12]+TCC_MC_RDREQ[13]+TCC_MC_RDREQ[14]+TCC_MC_RDREQ[15]
+  ></metric>
+
+  # FETCH_SIZE, kilobytes
+  # The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
+  <metric name=FETCH_SIZE expr=(TCC_MC_RDREQ_sum*32)/1024 ></metric>
 </gfx8>
 
+<gfx9>
+  <metric name=GRBM_COUNT block=GRBM event=0 ></metric>
+  <metric name=GRBM_GUI_ACTIVE block=GRBM event=2 ></metric>
+
+  <metric name=SQ_CYCLES block=SQ event=2 ></metric>
+  <metric name=SQ_WAVES block=SQ event=4 ></metric>
+  <metric name=SQ_ITEMS block=SQ event=14 ></metric>
+  <metric name=SQ_INSTS_VALU block=SQ event=26 ></metric>
+  <metric name=SQ_INSTS_VMEM_WR block=SQ event=30 ></metric>
+  <metric name=SQ_INSTS_VMEM_RD block=SQ event=31 ></metric>
+  <metric name=SQ_INSTS_SMEM block=SQ event=31 ></metric>
+  <metric name=SQ_INSTS_FLAT_LDS_ONLY block=SQ event=33 ></metric>
+  <metric name=SQ_INSTS_LDS block=SQ event=34 ></metric>
+  <metric name=SQ_WAVE_READY block=SQ event=47 ></metric>
+
+  <metric name=TA_BUSY block=TA event=15 ></metric>
+  <metric name=TA_FLAT_READ_WAVEFRONTS block=TA event=101 ></metric>
+  <metric name=TA_FLAT_WRITE_WAVEFRONTS block=TA event=102 ></metric>
+
+  <metric name=TCC_CYCLE block=TCC event=1 ></metric>
+  <metric name=TCC_REQ block=TCC event=3 ></metric>
+  <metric name=TCC_HIT block=TCC event=17 ></metric>
+  <metric name=TCC_MISS block=TCC event=19 ></metric>
+  <metric name=TCC_WRITEBACK block=TCC event=22 ></metric>
+  <metric name=TCC_EA_RDREQ block=TCC event=36 ></metric>
+  <metric name=TCC_EA_RDREQ_32B block=TCC event=37 ></metric>
+
+  <metric name=CPC_ALWAYS_COUNT block=CPC event=0 ></metric>
+  <metric name=CPC_ME1_STALL_WAIT_ON_RCIU_READ block=CPC event=8 ></metric>
+
+  # average for (16 instances x 4 shader engines)
+  <metric
+    name=TA_BUSY_avr
+    expr=(TA_BUSY[0]+TA_BUSY[1]+TA_BUSY[2]+TA_BUSY[3]+TA_BUSY[4]+TA_BUSY[5]+TA_BUSY[6]+TA_BUSY[7]+TA_BUSY[8]+TA_BUSY[9]+TA_BUSY[10]+TA_BUSY[11]+TA_BUSY[12]+TA_BUSY[13]+TA_BUSY[14]+TA_BUSY[15])/(16*4)
+  ></metric>
+  # sum for 16 instances
+  <metric
+    name=TA_FLAT_WRITE_WAVEFRONTS_sum
+    expr=TA_FLAT_WRITE_WAVEFRONTS[0]+TA_FLAT_WRITE_WAVEFRONTS[1]+TA_FLAT_WRITE_WAVEFRONTS[2]+TA_FLAT_WRITE_WAVEFRONTS[3]+TA_FLAT_WRITE_WAVEFRONTS[4]+TA_FLAT_WRITE_WAVEFRONTS[5]+TA_FLAT_WRITE_WAVEFRONTS[6]+TA_FLAT_WRITE_WAVEFRONTS[7]+TA_FLAT_WRITE_WAVEFRONTS[8]+TA_FLAT_WRITE_WAVEFRONTS[9]+TA_FLAT_WRITE_WAVEFRONTS[10]+TA_FLAT_WRITE_WAVEFRONTS[11]+TA_FLAT_WRITE_WAVEFRONTS[12]+TA_FLAT_WRITE_WAVEFRONTS[13]+TA_FLAT_WRITE_WAVEFRONTS[14]+TA_FLAT_WRITE_WAVEFRONTS[15]
+  ></metric>
+
+  <metric
+    name=TCC_HIT_sum
+    expr=TCC_HIT[0]+TCC_HIT[1]+TCC_HIT[2]+TCC_HIT[3]+TCC_HIT[4]+TCC_HIT[5]+TCC_HIT[6]+TCC_HIT[7]+TCC_HIT[8]+TCC_HIT[9]+TCC_HIT[10]+TCC_HIT[11]+TCC_HIT[12]+TCC_HIT[13]+TCC_HIT[14]+TCC_HIT[15]
+  ></metric>
+  <metric
+    name=TCC_MISS_sum
+    expr=TCC_MISS[0]+TCC_MISS[1]+TCC_MISS[2]+TCC_MISS[3]+TCC_MISS[4]+TCC_MISS[5]+TCC_MISS[6]+TCC_MISS[7]+TCC_MISS[8]+TCC_MISS[9]+TCC_MISS[10]+TCC_MISS[11]+TCC_MISS[12]+TCC_MISS[13]+TCC_MISS[14]+TCC_MISS[15]
+  ></metric>
+  <metric
+    name=TCC_EA_RDREQ_sum
+    expr=TCC_EA_RDREQ[0]+TCC_EA_RDREQ[1]+TCC_EA_RDREQ[2]+TCC_EA_RDREQ[3]+TCC_EA_RDREQ[4]+TCC_EA_RDREQ[5]+TCC_EA_RDREQ[6]+TCC_EA_RDREQ[7]+TCC_EA_RDREQ[8]+TCC_EA_RDREQ[9]+TCC_EA_RDREQ[10]+TCC_EA_RDREQ[11]+TCC_EA_RDREQ[12]+TCC_EA_RDREQ[13]+TCC_EA_RDREQ[14]+TCC_EA_RDREQ[15]
+  ></metric>
+  <metric
+    name=TCC_EA_RDREQ_32B_sum
+    expr=TCC_EA_RDREQ_32B[0]+TCC_EA_RDREQ_32B[1]+TCC_EA_RDREQ_32B[2]+TCC_EA_RDREQ_32B[3]+TCC_EA_RDREQ_32B[4]+TCC_EA_RDREQ_32B[5]+TCC_EA_RDREQ_32B[6]+TCC_EA_RDREQ_32B[7]+TCC_EA_RDREQ_32B[8]+TCC_EA_RDREQ_32B[9]+TCC_EA_RDREQ_32B[10]+TCC_EA_RDREQ_32B[11]+TCC_EA_RDREQ_32B[12]+TCC_EA_RDREQ_32B[13]+TCC_EA_RDREQ_32B[14]+TCC_EA_RDREQ_32B[15]
+  ></metric>
+
+  # FETCH_SIZE, kilobytes
+  # The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
+  <metric name=FETCH_SIZE expr=((TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64+TCC_EA_RDREQ_32B_sum*32)/1024 ></metric>
+</gfx9>
+
 <global>
+  # GPU_BUSY, percentage
+  # The percentage of time GPU was busy.
+  <metric name=GPU_BUSY expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT ></metric>
+
+  # MEM_BUSY_AVR, percentage
+  # The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound).
+  <metric name=MEM_BUSY_AVR expr=100*TA_BUSY_avr/GRBM_GUI_ACTIVE ></metric>
+
   # VWRITE_INSTS
   # The average number of vector write instructions to the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that write to video memory.
-  <metric name=VWRITE_INSTS expr=1000*(SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES ></metric>
+  <metric name=VWRITE_INSTS expr=(SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES ></metric>
 
   # SFETCH_INSTS
   # The average number of scalar fetch instructions from the video memory executed per work-item (affected by flow control).
-  <metric name=SFETCH_INSTS expr=1000*SQ_INSTS_SMEM/SQ_WAVES ></metric>
+  <metric name=SFETCH_INSTS expr=SQ_INSTS_SMEM/SQ_WAVES ></metric>
 
   # VALU_INSTS
   # The average number of vector ALU instructions executed per work-item (affected by flow control).
   <metric name=VALU_INSTS expr=SQ_INSTS_VALU/SQ_WAVES ></metric>
 
+  # L2CACHE_HIT, percentage
+  # The percentage of fetch, write, atomic, and other instructions that hit the data in L2 cache. Value range: 0% (no hit) to 100% (optimal).
+  <metric name=L2CACHE_HIT expr=100*TCC_HIT_sum/(TCC_HIT_sum+TCC_MISS_sum) ></metric>
 </global>
