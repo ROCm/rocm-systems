@@ -1,7 +1,11 @@
+#include <fcntl.h>
 #include <hsa.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <iostream>
 #include <map>
 #include <vector>
@@ -49,9 +53,11 @@ hsa_status_t trace_data_cb(
   hsa_ven_amd_aqlprofile_info_data_t* info_data,
   void* data)
 {
+  FILE* file = reinterpret_cast<FILE*>(data);
   hsa_status_t status = HSA_STATUS_SUCCESS;
   if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
-    printf("    data ptr (%p), size(%u)\n", info_data->sqtt_data.ptr, info_data->sqtt_data.size);
+    fprintf(file, "    data ptr (%p), size(%u)\n", info_data->sqtt_data.ptr, info_data->sqtt_data.size);
+
   } else status = HSA_STATUS_ERROR;
   return status;
 }
@@ -68,23 +74,38 @@ void print_info(FILE* file, const rocprofiler_info_t* info, const unsigned info_
         fprintf(file, "(%lu)\n", p->data.result_int64);
         break;
       case ROCPROFILER_BYTES: {
-        fprintf(file, "(\n");
         if (p->data.result_bytes.copy) {
-          fprintf(file, "    system memory copy\n");
-          const char* ptr = reinterpret_cast<const char*>(p->data.result_bytes.ptr);
           uint64_t size = 0;
+
+          const char* ptr = reinterpret_cast<const char*>(p->data.result_bytes.ptr);
           for (unsigned i = 0; i < p->data.result_bytes.instance_count; ++i) {
-            size = *reinterpret_cast<const uint64_t*>(ptr);
-            const char* data = ptr + sizeof(size);
-            fprintf(file, "    data (%p), size (%lu)\n", data, size);
-            size = align_size(size, sizeof(uint64_t));
-            ptr = data + size;
+            uint64_t chunk_size = *reinterpret_cast<const uint64_t*>(ptr);
+            const char* data = ptr + sizeof(uint64_t);
+            chunk_size = align_size(chunk_size, sizeof(uint64_t));
+            ptr = data + chunk_size;
+            size += chunk_size;
+          }
+          fprintf(file, "size(%lu)\n", size);
+          if (size > p->data.result_bytes.size) {
+            fprintf(stderr, "SQTT data size is out of the result buffer size\n");
+            exit(1);
+          }
+
+          const int fd = open("trace_data.sqtt", O_RDWR|O_CREAT|O_TRUNC, 0640);
+          if (fd == -1) {
+            perror("open 'trace_data.sqtt'");
+            exit(1);
+          }
+          const size_t write_size = write(fd, p->data.result_bytes.ptr, size);
+          if (write_size < size) {
+            fprintf(stderr, "SQTT data size(%lu) write failed, returned size(%zd)\n", size, write_size);
+            exit(1);
           }
         } else {
-          fprintf(file, "    local memory buffer\n");
-          rocprofiler_iterate_trace_data(context, trace_data_cb, NULL);
+          fprintf(file, "iterate GPU local memory (\n");
+          rocprofiler_iterate_trace_data(context, trace_data_cb, reinterpret_cast<void*>(file));
+          fprintf(file, "  )\n");
         }
-        fprintf(file, "  )\n");
         break;
       }
       default:

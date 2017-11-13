@@ -123,9 +123,9 @@
   # The percentage of time GPU was busy.
   <metric name=GPU_BUSY expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT ></metric>
 
-  # MEM_BUSY_AVR, percentage
+  # MEM_BUSY, percentage
   # The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound).
-  <metric name=MEM_BUSY_AVR expr=100*TA_BUSY_avr/GRBM_GUI_ACTIVE ></metric>
+  <metric name=MEM_BUSY expr=100*TA_BUSY_avr/GRBM_GUI_ACTIVE ></metric>
 
   # VWRITE_INSTS
   # The average number of vector write instructions to the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that write to video memory.
