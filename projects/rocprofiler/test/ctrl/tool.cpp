@@ -1,3 +1,9 @@
+///////////////////////////////////////////////////////////////////////////////
+//                                                                           //
+// Test tool used as ROC profiler library demo                               //
+//                                                                           //
+///////////////////////////////////////////////////////////////////////////////
+
 #include <fcntl.h>
 #include <hsa.h>
 #include <pthread.h>
@@ -17,6 +23,7 @@
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
 
+// Disoatch callback data type
 struct dispatch_data_t {
   rocprofiler_info_t* info;
   unsigned info_count;
@@ -24,6 +31,7 @@ struct dispatch_data_t {
   FILE* file_handle;
 };
 
+// Context stored entry type
 struct context_entry_t {
   uint32_t index;
   rocprofiler_group_t* group;
@@ -33,13 +41,18 @@ struct context_entry_t {
   FILE* file_handle;
 };
 
+// Dispatch callbacks and context handlers synchronization
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+// Stored contexts array size
 unsigned context_array_size = 1;
+// Stored contexts array
 context_entry_t* context_array = NULL;
+// Number of stored contexts
 unsigned context_array_count = 0;
-
+// File for dumping profiling output data
 const char* file_name = NULL;
 
+// Check returned HSA API status
 void check_status(hsa_status_t status) {
   if (status != HSA_STATUS_SUCCESS) {
     const char* error_string = NULL;
@@ -49,6 +62,33 @@ void check_status(hsa_status_t status) {
   }
 }
 
+// Allocate entry to store profiling context
+context_entry_t* alloc_context_entry() {
+  context_entry_t* ptr = 0;
+
+  if(pthread_mutex_lock(&mutex) != 0) {
+    perror("pthread_mutex_lock");
+    exit(1);
+  }
+
+  if ((context_array == NULL) || (context_array_count >= context_array_size)) {
+    context_array_size *= 2;
+    context_array = reinterpret_cast<context_entry_t*>(realloc(context_array, context_array_size * sizeof(context_entry_t)));
+  }
+  ptr = &context_array[context_array_count];
+  *ptr = {};
+  ptr->index = context_array_count;
+  context_array_count += 1;
+
+  if (pthread_mutex_unlock(&mutex) != 0) {
+    perror("pthread_mutex_unlock");
+    exit(1);
+  }
+
+  return ptr;
+}
+
+// Trace data callbacl for getting trace data from GPU local mamory
 hsa_status_t trace_data_cb(
   hsa_ven_amd_aqlprofile_info_type_t info_type,
   hsa_ven_amd_aqlprofile_info_data_t* info_data,
@@ -63,17 +103,21 @@ hsa_status_t trace_data_cb(
   return status;
 }
 
+// Align to specified alignment
 unsigned align_size(unsigned size, unsigned alignment) { return ((size + alignment - 1) & ~(alignment - 1)); }
 
-void print_info(FILE* file, const rocprofiler_info_t* info, const unsigned info_count, rocprofiler_t* context, const char* str) {
+// Output profiling results for input features
+void output_results(FILE* file, const rocprofiler_info_t* info, const unsigned info_count, rocprofiler_t* context, const char* str) {
   if (str) fprintf(file, "%s:\n", str);
   for (unsigned i= 0; i < info_count; ++i) {
     const rocprofiler_info_t* p = &info[i];
     fprintf(file, "  %s ", p->name);
     switch (p->data.kind) {
+      // Output metrics results
       case ROCPROFILER_INT64:
         fprintf(file, "(%lu)\n", p->data.result_int64);
         break;
+      // Output trace results
       case ROCPROFILER_BYTES: {
         if (p->data.result_bytes.copy) {
           uint64_t size = 0;
@@ -115,38 +159,15 @@ void print_info(FILE* file, const rocprofiler_info_t* info, const unsigned info_
   }
 }
 
-void print_group(FILE* file, const rocprofiler_group_t* group, const char* str) {
+// Output group intermeadate profiling results, created internally for complex metrics
+void output_group(FILE* file, const rocprofiler_group_t* group, const char* str) {
   if (str) fprintf(file, "%s:\n", str);
   for (unsigned i= 0; i < group->info_count; ++i) {
-    print_info(file, group->info[i], 1, group->context, NULL);
+    output_results(file, group->info[i], 1, group->context, NULL);
   }
 }
 
-context_entry_t* alloc_entry() {
-  context_entry_t* ptr = 0;
-
-  if(pthread_mutex_lock(&mutex) != 0) {
-    perror("pthread_mutex_lock");
-    exit(1);
-  }
-
-  if ((context_array == NULL) || (context_array_count >= context_array_size)) {
-    context_array_size *= 2;
-    context_array = reinterpret_cast<context_entry_t*>(realloc(context_array, context_array_size * sizeof(context_entry_t)));
-  }
-  ptr = &context_array[context_array_count];
-  *ptr = {};
-  ptr->index = context_array_count;
-  context_array_count += 1;
-
-  if (pthread_mutex_unlock(&mutex) != 0) {
-    perror("pthread_mutex_unlock");
-    exit(1);
-  }
-
-  return ptr;
-}
-
+// Dump stored context profiling output data
 void dump_context(context_entry_t* entry) {
   hsa_status_t status = HSA_STATUS_ERROR;
   rocprofiler_group_t* group = entry->group;
@@ -161,11 +182,11 @@ void dump_context(context_entry_t* entry) {
   
     status = rocprofiler_get_group_data(group);
     check_status(status);
-    //print_group(file, group, "Group[0] data");
+    //output_group(file, group, "Group[0] data");
   
     status = rocprofiler_get_metrics(group->context);
     check_status(status);
-    print_info(file_handle, info, info_count, group->context, NULL);
+    output_results(file_handle, info, info_count, group->context, NULL);
   
     // Finishing cleanup
     // Deleting profiling context will delete all allocated resources
@@ -174,7 +195,8 @@ void dump_context(context_entry_t* entry) {
   }
 }
 
-void dumping_data() {
+// Dump all stored contexts profiling output data
+void dump_context_array() {
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
     exit(1);
@@ -190,6 +212,7 @@ void dumping_data() {
   }
 }
 
+// Profiling completion handler
 void handler(rocprofiler_group_t group, void* arg) {
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
@@ -205,7 +228,7 @@ void handler(rocprofiler_group_t group, void* arg) {
   }
 }
 
-// profiling callback
+// Kernel disoatch callback
 hsa_status_t dispatch_callback(
     const rocprofiler_callback_data_t* callback_data,
     void* user_data,
@@ -217,7 +240,7 @@ hsa_status_t dispatch_callback(
   // Profiling context
   rocprofiler_t* context = NULL;
   // Context entry
-  context_entry_t* entry = alloc_entry();
+  context_entry_t* entry = alloc_context_entry();
   // context properties
   rocprofiler_properties_t properties{};
   properties.handler = (file_name != NULL) ? handler : NULL;
@@ -243,6 +266,7 @@ hsa_status_t dispatch_callback(
   return status;
 }
 
+// Tool constructor
 CONSTRUCTOR_API void constructor() {
   std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
   parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET"] = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET;
@@ -344,8 +368,8 @@ CONSTRUCTOR_API void constructor() {
     ++index;
   }
 
+  // Adding dispatch observer
   if (info_count) {
-    // Adding dispatch observer
     dispatch_data_t* dispatch_data = new dispatch_data_t{};
     dispatch_data->info = info;
     dispatch_data->info_count = info_count;
@@ -355,6 +379,7 @@ CONSTRUCTOR_API void constructor() {
   }
 }
 
+// Tool destructor
 DESTRUCTOR_API void destructor() {
   printf("\nROCPRofiler: %u contexts collected", context_array_count);
   if (file_name == NULL) {
@@ -362,5 +387,6 @@ DESTRUCTOR_API void destructor() {
   } else {
     printf(", dumping to %s\n", file_name);
   }
-  dumping_data();
+  // Dump profiling output data which hasn't yet dumped by completi onhandler
+  dump_context_array();
 }
