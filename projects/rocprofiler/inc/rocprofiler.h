@@ -138,17 +138,23 @@ typedef struct {
   rocprofiler_t* context; // context object
 } rocprofiler_group_t;
 
-// Profiling mode
+// Profiling mode mask
 typedef enum {
     ROCPROFILER_MODE_STANDALONE = 1,
     ROCPROFILER_MODE_CREATEQUEUE = 2,
+    ROCPROFILER_MODE_SINGLEGROUP = 4
 } rocprofiler_mode_t;
+
+// Profiling handler, calling on profiling completion
+typedef void (*rocprofiler_handler_t)(rocprofiler_group_t group, void* arg);
 
 // Profiling preperties
 typedef struct {
     hsa_queue_t* queue;                      // queue for STANDALONE mode
                                              // the queue is created and returned in CREATEQUEUE mode
     uint32_t queue_depth;                    // created queue depth
+    rocprofiler_handler_t handler;           // handler on completion
+    void* handler_arg;                       // the handler arg
 } rocprofiler_properties_t;
 
 // Create new profiling context
@@ -163,6 +169,11 @@ hsa_status_t rocprofiler_open(
 // Delete profiling info
 hsa_status_t rocprofiler_close(
     rocprofiler_t* context); // [in] profiling context
+
+// Context reset before reusing
+hsa_status_t rocprofiler_reset(
+    rocprofiler_t* context, // [in] profiling context
+    uint32_t group_index);  // group index
 
 ////////////////////////////////////////////////////////////////////////////////
 // Runtime API observer
@@ -239,7 +250,7 @@ hsa_status_t rocprofiler_get_group_data(
   rocprofiler_group_t* group); // [in/out] profiling group
 
 // Get metrics data
-hsa_status_t rocprofiler_get_metrics_data(
+hsa_status_t rocprofiler_get_metrics(
   const rocprofiler_t* context); // [in/out] profiling context
 
 // Definition of output data iterator callback

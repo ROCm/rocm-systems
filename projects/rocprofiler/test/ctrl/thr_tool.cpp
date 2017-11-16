@@ -124,7 +124,7 @@ void dump_context(FILE *file, unsigned index) {
   check_status(status);
   //print_group(file, group, "Group[0] data");
 
-  status = rocprofiler_get_metrics_data(group->context);
+  status = rocprofiler_get_metrics(group->context);
   check_status(status);
   print_info(file, info, info_count, NULL);
 

@@ -13,9 +13,10 @@ export ROCPROFILER_LOG=1
 export HSA_TOOLS_LIB=librocprofiler64.so
 export ROCP_TOOL_LIB=test/libtool.so
 export ROCP_HSA_INTERCEPT=1
+unset ROCP_PROXY_QUEUE
 export ROCP_METRICS=metrics.xml
 export ROCP_INPUT=input.xml
-unset ROCP_PROXY_QUEUE
+export ROCP_OUTPUT=output.txt
 
 echo "Run simple profiling test"
 if [ -n "$1" ] ; then

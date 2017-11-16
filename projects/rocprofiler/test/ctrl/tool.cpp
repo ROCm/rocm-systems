@@ -21,23 +21,24 @@ struct dispatch_data_t {
   rocprofiler_info_t* info;
   unsigned info_count;
   unsigned group_index;
+  FILE* file_handle;
 };
 
 struct context_entry_t {
+  uint32_t index;
   rocprofiler_group_t* group;
   rocprofiler_info_t* info;
   unsigned info_count;
   rocprofiler_callback_data_t data;
+  FILE* file_handle;
 };
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 unsigned context_array_size = 1;
 context_entry_t* context_array = NULL;
-unsigned context_array_index = 0;
-unsigned dump_index = 0;
+unsigned context_array_count = 0;
 
 const char* file_name = NULL;
-FILE* file_handle = NULL;
 
 void check_status(hsa_status_t status) {
   if (status != HSA_STATUS_SUCCESS) {
@@ -121,46 +122,56 @@ void print_group(FILE* file, const rocprofiler_group_t* group, const char* str) 
   }
 }
 
-void store_entry(const context_entry_t& context_entry) {
+context_entry_t* alloc_entry() {
+  context_entry_t* ptr = 0;
+
   if(pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
     exit(1);
   }
 
-  if ((context_array == NULL) || (context_array_index >= context_array_size)) {
+  if ((context_array == NULL) || (context_array_count >= context_array_size)) {
     context_array_size *= 2;
     context_array = reinterpret_cast<context_entry_t*>(realloc(context_array, context_array_size * sizeof(context_entry_t)));
   }
-  context_array[context_array_index] = context_entry;
-  context_array_index += 1;
+  ptr = &context_array[context_array_count];
+  *ptr = {};
+  ptr->index = context_array_count;
+  context_array_count += 1;
 
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
     exit(1);
   }
+
+  return ptr;
 }
 
-void dump_context(FILE *file, context_entry_t* entry, unsigned index) {
+void dump_context(context_entry_t* entry) {
   hsa_status_t status = HSA_STATUS_ERROR;
-
   rocprofiler_group_t* group = entry->group;
-  const rocprofiler_info_t* info = entry->info;
-  const unsigned info_count = entry->info_count;
-  fprintf(file, "Dispatch[%u], kernel_object(0x%lx):\n", index, entry->data.kernel_object);
 
-  status = rocprofiler_get_group_data(group);
-  check_status(status);
-  //print_group(file, group, "Group[0] data");
+  if (group) {
+    uint32_t index = entry->index;
+    const rocprofiler_info_t* info = entry->info;
+    const unsigned info_count = entry->info_count;
+    FILE* file_handle = entry->file_handle;
 
-  status = rocprofiler_get_metrics_data(group->context);
-  check_status(status);
-  print_info(file, info, info_count, group->context, NULL);
-
-  // Finishing cleanup
-  // Deleting profiling context will delete all allocated resources
-  rocprofiler_close(group->context);
-
-  dump_index = index;
+    fprintf(file_handle, "Dispatch[%u], kernel_object(0x%lx):\n", index, entry->data.kernel_object);
+  
+    status = rocprofiler_get_group_data(group);
+    check_status(status);
+    //print_group(file, group, "Group[0] data");
+  
+    status = rocprofiler_get_metrics(group->context);
+    check_status(status);
+    print_info(file_handle, info, info_count, group->context, NULL);
+  
+    // Finishing cleanup
+    // Deleting profiling context will delete all allocated resources
+    rocprofiler_close(group->context);
+    entry->group = NULL;
+  }
 }
 
 void dumping_data() {
@@ -169,9 +180,24 @@ void dumping_data() {
     exit(1);
   }
 
-  for (unsigned index = 0; index < context_array_index; ++index) {
-    dump_context(file_handle, &context_array[index], index);
+  for (unsigned index = 0; index < context_array_count; ++index) {
+    dump_context(&context_array[index]);
   }
+
+  if (pthread_mutex_unlock(&mutex) != 0) {
+    perror("pthread_mutex_unlock");
+    exit(1);
+  }
+}
+
+void handler(rocprofiler_group_t group, void* arg) {
+  if (pthread_mutex_lock(&mutex) != 0) {
+    perror("pthread_mutex_lock");
+    exit(1);
+  }
+
+  context_entry_t* entry = reinterpret_cast<context_entry_t*>(arg);
+  dump_context(entry);
 
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
@@ -184,16 +210,21 @@ hsa_status_t dispatch_callback(
     const rocprofiler_callback_data_t* callback_data,
     void* user_data,
     rocprofiler_group_t** group) {
+  // HSA status
   hsa_status_t status = HSA_STATUS_ERROR;
   // Passed tool data
   dispatch_data_t* tool_data = reinterpret_cast<dispatch_data_t*>(user_data);
   // Profiling context
   rocprofiler_t* context = NULL;
+  // Context entry
+  context_entry_t* entry = alloc_entry();
   // context properties
   rocprofiler_properties_t properties{};
+  properties.handler = (file_name != NULL) ? handler : NULL;
+  properties.handler_arg = (void*)entry;
 
   // Open profiling context
-  status = rocprofiler_open(0, tool_data->info, tool_data->info_count, &context, 0, &properties);
+  status = rocprofiler_open(0, tool_data->info, tool_data->info_count, &context, 0/*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
   check_status(status);
 
   rocprofiler_group_t* groups = NULL;
@@ -203,12 +234,11 @@ hsa_status_t dispatch_callback(
   assert(group_count == 1);
 
   *group = &groups[0];
-  context_entry_t entry;
-  entry.group = *group;
-  entry.info = tool_data->info;
-  entry.info_count = tool_data->info_count;
-  entry.data = *callback_data;
-  store_entry(entry);
+  entry->group = *group;
+  entry->info = tool_data->info;
+  entry->info_count = tool_data->info_count;
+  entry->data = *callback_data;
+  entry->file_handle = tool_data->file_handle;
 
   return status;
 }
@@ -223,6 +253,7 @@ CONSTRUCTOR_API void constructor() {
 
   // Set output file
   file_name = getenv("ROCP_OUTPUT");
+  FILE* file_handle = NULL;
   if (file_name != NULL) {
     file_handle = fopen(file_name, "w");
     if (file_handle == NULL) {
@@ -319,12 +350,13 @@ CONSTRUCTOR_API void constructor() {
     dispatch_data->info = info;
     dispatch_data->info_count = info_count;
     dispatch_data->group_index = 0;
+    dispatch_data->file_handle = file_handle;
     rocprofiler_set_dispatch_observer(dispatch_callback, dispatch_data);
   }
 }
 
 DESTRUCTOR_API void destructor() {
-  printf("\nROCPRofiler: %u contexts collected", context_array_index);
+  printf("\nROCPRofiler: %u contexts collected", context_array_count);
   if (file_name == NULL) {
     printf("\n");
   } else {

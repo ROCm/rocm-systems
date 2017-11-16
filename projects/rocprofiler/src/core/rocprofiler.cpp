@@ -127,7 +127,7 @@ PUBLIC_API hsa_status_t rocprofiler_open(
     }
   }
 
-  *handle = (void*) new rocprofiler::Context(agent_info, queue, info, info_count);
+  *handle = (void*) new rocprofiler::Context(agent_info, queue, info, info_count, properties->handler, properties->handler_arg);
   API_METHOD_SUFFIX
 }
 
@@ -137,6 +137,15 @@ PUBLIC_API hsa_status_t rocprofiler_close(rocprofiler_t* handle)
   API_METHOD_PREFIX
   rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
   if (context) delete context;
+  API_METHOD_SUFFIX
+}
+
+// Reset context
+PUBLIC_API hsa_status_t rocprofiler_reset(rocprofiler_t* handle, uint32_t group_index)
+{
+  API_METHOD_PREFIX
+  rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
+  context->Reset(group_index);
   API_METHOD_SUFFIX
 }
 
@@ -199,7 +208,7 @@ PUBLIC_API hsa_status_t rocprofiler_get_group_data(rocprofiler_group_t* group) {
 }
 
 // Get metrics data
-PUBLIC_API hsa_status_t rocprofiler_get_metrics_data(const rocprofiler_t* handle) {
+PUBLIC_API hsa_status_t rocprofiler_get_metrics(const rocprofiler_t* handle) {
   API_METHOD_PREFIX
   const rocprofiler::Context* context = reinterpret_cast<const rocprofiler::Context*>(handle);
   context->GetMetricsData();

@@ -143,6 +143,8 @@ class Profile {
     }
   }
 
+  bool Empty() const { return info_vector_.empty(); }
+
   protected:
   virtual hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) = 0;
 
