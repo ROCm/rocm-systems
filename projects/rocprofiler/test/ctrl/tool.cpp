@@ -24,8 +24,8 @@
 
 // Disoatch callback data type
 struct dispatch_data_t {
-  rocprofiler_info_t* info;
-  unsigned info_count;
+  rocprofiler_feature_t* features;
+  unsigned feature_count;
   unsigned group_index;
   FILE* file_handle;
 };
@@ -33,9 +33,9 @@ struct dispatch_data_t {
 // Context stored entry type
 struct context_entry_t {
   uint32_t index;
-  rocprofiler_group_t* group;
-  rocprofiler_info_t* info;
-  unsigned info_count;
+  rocprofiler_group_t group;
+  rocprofiler_feature_t* features;
+  unsigned feature_count;
   rocprofiler_callback_data_t data;
   FILE* file_handle;
 };
@@ -49,9 +49,7 @@ context_entry_t* context_array = NULL;
 // Number of stored contexts
 unsigned context_array_count = 0;
 // Profiling results output file name
-const char* result_file_name = NULL;
-// SQTT output file base name
-const char* sqtt_file_name = "thread_trace";
+const char* result_prefix = NULL;
 
 // Check returned HSA API status
 void check_status(hsa_status_t status) {
@@ -91,19 +89,21 @@ context_entry_t* alloc_context_entry() {
 
 // Dump trace data to file
 void dump_sqtt_trace(const uint32_t chunk, const void* data, const uint32_t& size) {
-  // Opening SQTT file
-  std::ostringstream oss;
-  oss << sqtt_file_name << ".se" << chunk << ".out";
-  FILE* file = fopen(oss.str().c_str(), "w");
-  if (file == NULL) {
-    perror("result file fopen");
-    exit(1);
-  }
-
-  // Write the buffer in terms of shorts (16 bits)
-  const unsigned short* ptr = reinterpret_cast<const unsigned short*>(data);
-  for (uint32_t i = 0; i < (size / sizeof(short)); ++i) {
-    fprintf(file, "%04x\n", ptr[i]);
+  if (result_prefix != NULL) {
+    // Opening SQTT file
+    std::ostringstream oss;
+    oss << result_prefix << "/thread_trace.se" << chunk << ".out";
+    FILE* file = fopen(oss.str().c_str(), "w");
+    if (file == NULL) {
+      perror("result file fopen");
+      exit(1);
+    }
+  
+    // Write the buffer in terms of shorts (16 bits)
+    const unsigned short* ptr = reinterpret_cast<const unsigned short*>(data);
+    for (uint32_t i = 0; i < (size / sizeof(short)); ++i) {
+      fprintf(file, "%04x\n", ptr[i]);
+    }
   }
 }
 
@@ -127,18 +127,18 @@ hsa_status_t trace_data_cb(
 unsigned align_size(unsigned size, unsigned alignment) { return ((size + alignment - 1) & ~(alignment - 1)); }
 
 // Output profiling results for input features
-void output_results(FILE* file, const rocprofiler_info_t* info, const unsigned info_count, rocprofiler_t* context, const char* str) {
+void output_results(FILE* file, const rocprofiler_feature_t* features, const unsigned feature_count, rocprofiler_t* context, const char* str) {
   if (str) fprintf(file, "%s:\n", str);
-  for (unsigned i= 0; i < info_count; ++i) {
-    const rocprofiler_info_t* p = &info[i];
+  for (unsigned i= 0; i < feature_count; ++i) {
+    const rocprofiler_feature_t* p = &features[i];
     fprintf(file, "  %s ", p->name);
     switch (p->data.kind) {
       // Output metrics results
-      case ROCPROFILER_INT64:
+      case ROCPROFILER_DATA_KIND_INT64:
         fprintf(file, "(%lu)\n", p->data.result_int64);
         break;
       // Output trace results
-      case ROCPROFILER_BYTES: {
+      case ROCPROFILER_DATA_KIND_BYTES: {
         if (p->data.result_bytes.copy) {
           uint64_t size = 0;
 
@@ -173,36 +173,36 @@ void output_results(FILE* file, const rocprofiler_info_t* info, const unsigned i
 // Output group intermeadate profiling results, created internally for complex metrics
 void output_group(FILE* file, const rocprofiler_group_t* group, const char* str) {
   if (str) fprintf(file, "%s:\n", str);
-  for (unsigned i= 0; i < group->info_count; ++i) {
-    output_results(file, group->info[i], 1, group->context, NULL);
+  for (unsigned i= 0; i < group->feature_count; ++i) {
+    output_results(file, group->features[i], 1, group->context, NULL);
   }
 }
 
 // Dump stored context profiling output data
 void dump_context(context_entry_t* entry) {
   hsa_status_t status = HSA_STATUS_ERROR;
-  rocprofiler_group_t* group = entry->group;
+  const rocprofiler_feature_t* features = entry->features;
 
-  if (group) {
+  if (features) {
+    rocprofiler_group_t group = entry->group;
     uint32_t index = entry->index;
-    const rocprofiler_info_t* info = entry->info;
-    const unsigned info_count = entry->info_count;
+    const unsigned feature_count = entry->feature_count;
     FILE* file_handle = entry->file_handle;
 
     fprintf(file_handle, "Dispatch[%u], kernel_object(0x%lx):\n", index, entry->data.kernel_object);
   
-    status = rocprofiler_get_group_data(group);
+    status = rocprofiler_group_get_data(&group);
     check_status(status);
     //output_group(file, group, "Group[0] data");
   
-    status = rocprofiler_get_metrics(group->context);
+    status = rocprofiler_get_metrics(group.context);
     check_status(status);
-    output_results(file_handle, info, info_count, group->context, NULL);
+    output_results(file_handle, features, feature_count, group.context, NULL);
   
     // Finishing cleanup
     // Deleting profiling context will delete all allocated resources
-    rocprofiler_close(group->context);
-    entry->group = NULL;
+    rocprofiler_close(group.context);
+    entry->features = NULL;
   }
 }
 
@@ -243,7 +243,7 @@ void handler(rocprofiler_group_t group, void* arg) {
 hsa_status_t dispatch_callback(
     const rocprofiler_callback_data_t* callback_data,
     void* user_data,
-    rocprofiler_group_t** group) {
+    rocprofiler_group_t* group) {
   // HSA status
   hsa_status_t status = HSA_STATUS_ERROR;
   // Passed tool data
@@ -254,23 +254,27 @@ hsa_status_t dispatch_callback(
   context_entry_t* entry = alloc_context_entry();
   // context properties
   rocprofiler_properties_t properties{};
-  properties.handler = (result_file_name != NULL) ? handler : NULL;
+  properties.handler = (result_prefix != NULL) ? handler : NULL;
   properties.handler_arg = (void*)entry;
 
   // Open profiling context
-  status = rocprofiler_open(0, tool_data->info, tool_data->info_count, &context, 0/*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
+  status = rocprofiler_open(callback_data->agent, tool_data->features, tool_data->feature_count, &context, 0/*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
   check_status(status);
 
-  rocprofiler_group_t* groups = NULL;
+  // Check that we have only one profiling group
   uint32_t group_count = 0;
-  status = rocprofiler_get_groups(context, &groups, &group_count);
+  status = rocprofiler_group_count(context, &group_count);
   check_status(status);
   assert(group_count == 1);
+  // Get group[0]
+  const uint32_t group_index = 0;
+  status = rocprofiler_get_group(context, group_index, group);
+  check_status(status);
 
-  *group = &groups[0];
+  // Fill profiling context entry
   entry->group = *group;
-  entry->info = tool_data->info;
-  entry->info_count = tool_data->info_count;
+  entry->features = tool_data->features;
+  entry->feature_count = tool_data->feature_count;
   entry->data = *callback_data;
   entry->file_handle = tool_data->file_handle;
 
@@ -287,10 +291,12 @@ CONSTRUCTOR_API void constructor() {
   parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2"] = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
 
   // Set output file
-  result_file_name = getenv("ROCP_OUTPUT");
+  result_prefix = getenv("ROCP_OUTPUT_DIR");
   FILE* file_handle = NULL;
-  if (result_file_name != NULL) {
-    file_handle = fopen(result_file_name, "w");
+  if (result_prefix != NULL) {
+    std::ostringstream oss;
+    oss << result_prefix << "/results.txt";
+    file_handle = fopen(oss.str().c_str(), "w");
     if (file_handle == NULL) {
       perror("result file fopen");
       exit(1);
@@ -324,17 +330,17 @@ CONSTRUCTOR_API void constructor() {
   // Getting traces
   auto traces_list = xml->GetNodes("top.trace");
 
-  const unsigned info_count = metrics_vec.size() + traces_list.size();
-  rocprofiler_info_t* info= new rocprofiler_info_t[info_count];
-  memset(info, 0, info_count * sizeof(rocprofiler_info_t));
+  const unsigned feature_count = metrics_vec.size() + traces_list.size();
+  rocprofiler_feature_t* features= new rocprofiler_feature_t[feature_count];
+  memset(features, 0, feature_count * sizeof(rocprofiler_feature_t));
 
   printf("  %d metrics\n", (int) metrics_vec.size());
   for (unsigned i = 0; i < metrics_vec.size(); ++i) {
     const std::string& name = metrics_vec[i];
     printf("%s%s", (i == 0) ? "    " : ", ", name.c_str());
-    info[i] = {};
-    info[i].type = ROCPROFILER_TYPE_METRIC;
-    info[i].name = strdup(name.c_str());
+    features[i] = {};
+    features[i].kind = ROCPROFILER_FEATURE_KIND_METRIC;
+    features[i].name = strdup(name.c_str());
   }
   if (metrics_vec.size()) printf("\n");
 
@@ -349,10 +355,10 @@ CONSTRUCTOR_API void constructor() {
     const std::string& name = entry->opts["name"];
     const bool to_copy_data = (entry->opts["copy"] == "true");
     printf("    %s (\n", name.c_str());
-    info[index] = {};
-    info[index].type = ROCPROFILER_TYPE_TRACE;
-    info[index].name = strdup(name.c_str());
-    info[index].data.result_bytes.copy = to_copy_data;
+    features[index] = {};
+    features[index].kind = ROCPROFILER_FEATURE_KIND_TRACE;
+    features[index].name = strdup(name.c_str());
+    features[index].data.result_bytes.copy = to_copy_data;
 
     for (auto* params : params_list) {
       const unsigned parameter_count = params->opts.size();
@@ -372,31 +378,31 @@ CONSTRUCTOR_API void constructor() {
         ++p_index;
       }
 
-      info[index].parameters = parameters;
-      info[index].parameter_count = parameter_count;
+      features[index].parameters = parameters;
+      features[index].parameter_count = parameter_count;
     }
     printf("    )\n");
     ++index;
   }
 
   // Adding dispatch observer
-  if (info_count) {
+  if (feature_count) {
     dispatch_data_t* dispatch_data = new dispatch_data_t{};
-    dispatch_data->info = info;
-    dispatch_data->info_count = info_count;
+    dispatch_data->features = features;
+    dispatch_data->feature_count = feature_count;
     dispatch_data->group_index = 0;
     dispatch_data->file_handle = file_handle;
-    rocprofiler_set_dispatch_observer(dispatch_callback, dispatch_data);
+    rocprofiler_set_dispatch_callback(dispatch_callback, dispatch_data);
   }
 }
 
 // Tool destructor
 DESTRUCTOR_API void destructor() {
   printf("\nROCPRofiler: %u contexts collected", context_array_count);
-  if (result_file_name == NULL) {
+  if (result_prefix == NULL) {
     printf("\n");
   } else {
-    printf(", dumping to %s\n", result_file_name);
+    printf(", dumping to %s\n", result_prefix);
   }
   // Dump profiling output data which hasn't yet dumped by completi onhandler
   dump_context_array();

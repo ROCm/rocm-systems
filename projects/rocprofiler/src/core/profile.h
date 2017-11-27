@@ -15,9 +15,9 @@ struct profile_info_t {
   const event_t* event;
   const parameter_t* parameters;
   uint32_t parameter_count;
-  rocprofiler_info_t* rinfo;
+  rocprofiler_feature_t* rinfo;
 };
-typedef std::vector<rocprofiler_info_t*> info_vector_t;
+typedef std::vector<rocprofiler_feature_t*> info_vector_t;
 typedef std::vector<packet_t> pkt_vector_t;
 struct profile_tuple_t {
   const profile_t* profile;

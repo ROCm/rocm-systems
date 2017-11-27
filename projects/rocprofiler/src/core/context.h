@@ -47,14 +47,14 @@ class MetricArgs : public xml::args_cache_t {
   public:
   MetricArgs(const Map& map) : map_(map) {}
   bool Lookup(const std::string& name, uint64_t& result) const {
-    rocprofiler_info_t* info = NULL;
+    rocprofiler_feature_t* info = NULL;
     auto it = map_.find(name);
     if (it == map_.end()) EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' is not found");
     info = it->second;
     if (info) {
       result = info->data.result_int64;
-      if (info->data.kind == ROCPROFILER_UNINIT) EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' is uninitialized");
-      if (info->data.kind != ROCPROFILER_INT64) EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' is of incompatible type, not INT64");
+      if (info->data.kind == ROCPROFILER_DATA_KIND_UNINIT) EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' is uninitialized");
+      if (info->data.kind != ROCPROFILER_DATA_KIND_INT64) EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' is of incompatible type, not INT64");
     } else EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' info is NULL");
     return (info != NULL);
   }
@@ -75,17 +75,17 @@ class Group {
   {}
 
   void Insert(const profile_info_t& info) {
-    const rocprofiler_type_t type = info.rinfo->type;
+    const rocprofiler_feature_kind_t kind = info.rinfo->kind;
     info_vector_.push_back(info.rinfo);
-    switch (type) {
-      case ROCPROFILER_TYPE_METRIC:
+    switch (kind) {
+      case ROCPROFILER_FEATURE_KIND_METRIC:
         pmc_profile_.Insert(info);
         break;
-      case ROCPROFILER_TYPE_TRACE:
+      case ROCPROFILER_FEATURE_KIND_TRACE:
         sqtt_profile_.Insert(info);
         break;
       default:
-        EXC_RAISING(HSA_STATUS_ERROR, "bad rocprofiler type (" << type << ")");
+        EXC_RAISING(HSA_STATUS_ERROR, "bad rocprofiler feature kind (" << kind << ")");
     }
   }
 
@@ -141,9 +141,9 @@ class Group {
 class Context {
   public:
   typedef std::mutex mutex_t;
-  typedef std::map<std::string, rocprofiler_info_t*> info_map_t;
+  typedef std::map<std::string, rocprofiler_feature_t*> info_map_t;
 
-  Context(const util::AgentInfo* agent_info, Queue* queue, rocprofiler_info_t* info, const uint32_t info_count, rocprofiler_handler_t handler, void* handler_arg) :
+  Context(const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info, const uint32_t info_count, rocprofiler_handler_t handler, void* handler_arg) :
     agent_(agent_info->dev_id),
     agent_info_(agent_info),
     queue_(queue),
@@ -177,22 +177,22 @@ class Context {
   ~Context() {
     for (const auto& v : info_map_) {
       const std::string& name = v.first;
-      const rocprofiler_info_t* info = v.second;
-      if ((info->type == ROCPROFILER_TYPE_METRIC) && (metrics_map_.find(name) == metrics_map_.end())) {
+      const rocprofiler_feature_t* info = v.second;
+      if ((info->kind == ROCPROFILER_FEATURE_KIND_METRIC) && (metrics_map_.find(name) == metrics_map_.end())) {
         delete info;
       }
     }
   }
 
   // Initialize rocprofiler context
-  void Initialize(rocprofiler_info_t* info_array, const uint32_t info_count) {
+  void Initialize(rocprofiler_feature_t* info_array, const uint32_t info_count) {
     // Set input features filter, to not duplicate referenced features
     // Set iput features data as uninitialized
     info_map_t input_map;
     for (unsigned i = 0; i < info_count; ++i) {
-      rocprofiler_info_t* info = &info_array[i];
+      rocprofiler_feature_t* info = &info_array[i];
       input_map[info->name] = info;
-      info->data.kind = ROCPROFILER_UNINIT;
+      info->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
     }
 
     // Adding zero group, always present
@@ -200,13 +200,13 @@ class Context {
 
     // Processing input features
     for (unsigned i = 0; i < info_count; ++i) {
-      rocprofiler_info_t* info = &info_array[i];
-      info->data.kind = ROCPROFILER_UNINIT;
+      rocprofiler_feature_t* info = &info_array[i];
+      info->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
       info_map_[info->name] = info;
-      const rocprofiler_type_t type = info->type;
+      const rocprofiler_feature_kind_t kind = info->kind;
       const char* name = info->name;
 
-      if (type == ROCPROFILER_TYPE_METRIC) { // Processing metrics features
+      if (kind == ROCPROFILER_FEATURE_KIND_METRIC) { // Processing metrics features
         const Metric* metric = metrics_->Get(name);
         if (metric == NULL) EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
         auto ret = metrics_map_.insert({name, metric});
@@ -254,10 +254,10 @@ class Context {
           const uint32_t group_index = block_status.group_index;
           set_[group_index].Insert(profile_info_t{event, NULL, 0, info});
         }
-      } else if (type == ROCPROFILER_TYPE_TRACE) { // Processing traces features
+      } else if (kind == ROCPROFILER_FEATURE_KIND_TRACE) { // Processing traces features
         set_[0].Insert(profile_info_t{NULL, info->parameters, info->parameter_count, info});
       } else { 
-        EXC_RAISING(HSA_STATUS_ERROR, "bad rocprofiler type (" << type << ")");
+        EXC_RAISING(HSA_STATUS_ERROR, "bad rocprofiler feature kind (" << kind << ")");
       }
     }
   }
@@ -278,8 +278,8 @@ class Context {
   rocprofiler_group_t GetGroupInfo(const uint32_t& index) {
     rocprofiler::info_vector_t& info_vector = set_[index].GetInfoVector();
     rocprofiler_group_t group = {};
-    group.info_count = info_vector.size();
-    group.info = &info_vector[0];
+    group.feature_count = info_vector.size();
+    group.features = &info_vector[0];
     group.context = reinterpret_cast<rocprofiler_t*>(this);
     group.index = index;
     return group;
@@ -336,9 +336,9 @@ class Context {
       if (expr) {
         auto it = info_map_.find(name);
         if (it == info_map_.end()) EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "', rocprofiler info is not found");
-        rocprofiler_info_t* info = it->second;
+        rocprofiler_feature_t* info = it->second;
         info->data.result_int64 = expr->Eval(args);
-        info->data.kind = ROCPROFILER_INT64;
+        info->data.kind = ROCPROFILER_DATA_KIND_INT64;
       }
     }
   }
@@ -389,11 +389,11 @@ class Context {
     callback_data->index = index;
 
     if (index < info_vector.size()) {
-      rocprofiler_info_t* rinfo = info_vector[index];
+      rocprofiler_feature_t* rinfo = info_vector[index];
       if (ainfo_type == HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA) {
         if (ainfo_data->sample_id == 0) rinfo->data.result_int64 = 0;
         rinfo->data.result_int64 += ainfo_data->pmc_data.result;
-        rinfo->data.kind = ROCPROFILER_INT64;
+        rinfo->data.kind = ROCPROFILER_DATA_KIND_INT64;
       } else if (ainfo_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
         if (rinfo->data.result_bytes.copy) {
           char* result_bytes_ptr = reinterpret_cast<char*>(rinfo->data.result_bytes.ptr);
@@ -408,14 +408,14 @@ class Context {
             hsa_status_t status = hsa_memory_copy(dest, src, size);
             if (status == HSA_STATUS_SUCCESS) {
               *header = size;
-              rinfo->data.kind = ROCPROFILER_BYTES;
+              rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
               rinfo->data.result_bytes.instance_count = sample_id + 1;
               callback_data->ptr = dest + align_size(size, sizeof(uint64_t));
             }
           } else status = HSA_STATUS_ERROR;
         } else {
           if (sample_id == 0) {
-            rinfo->data.kind = ROCPROFILER_BYTES;
+            rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
             rinfo->data.result_bytes.ptr = ainfo_data->sqtt_data.ptr;
             rinfo->data.result_bytes.instance_count = UINT32_MAX;
           }
@@ -427,9 +427,9 @@ class Context {
     return status;
   }
 
-  rocprofiler_info_t* NewCounterInfo(const counter_t* counter) {
-    rocprofiler_info_t* info = new rocprofiler_info_t{};
-    info->type = ROCPROFILER_TYPE_METRIC;
+  rocprofiler_feature_t* NewCounterInfo(const counter_t* counter) {
+    rocprofiler_feature_t* info = new rocprofiler_feature_t{};
+    info->kind = ROCPROFILER_FEATURE_KIND_METRIC;
     info->name = counter->name.c_str();
     return info;
   }

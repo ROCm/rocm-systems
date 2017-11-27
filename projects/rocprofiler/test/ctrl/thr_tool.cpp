@@ -56,7 +56,7 @@ void print_info(FILE* file, const rocprofiler_info_t* info, const unsigned info_
     const rocprofiler_info_t* p = &info[i];
     fprintf(file, "  %s ", p->name);
     switch (p->data.kind) {
-      case ROCPROFILER_INT64:
+      case ROCPROFILER_DATA_KIND_INT64:
         fprintf(file, "(%lu)\n", p->data.result64);
         break;
       case ROCPROFILER_BYTES: {

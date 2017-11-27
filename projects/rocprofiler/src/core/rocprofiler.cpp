@@ -99,8 +99,8 @@ PUBLIC_API hsa_status_t rocprofiler_error_string(const char** str) {
 
 // Create new profiling context
 PUBLIC_API hsa_status_t rocprofiler_open(
-    unsigned agent_id,
-    rocprofiler_info_t* info,
+    hsa_agent_t agent,
+    rocprofiler_feature_t* info,
     uint32_t info_count,
     rocprofiler_t** handle,
     uint32_t mode,
@@ -108,9 +108,9 @@ PUBLIC_API hsa_status_t rocprofiler_open(
 {
   API_METHOD_PREFIX
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
-  const rocprofiler::util::AgentInfo* agent_info;
-  if (!hsa_rsrc->GetGpuAgentInfo(agent_id, &agent_info)) {
-    EXC_RAISING(HSA_STATUS_ERROR, "agent[" << agent_id << "] is not found");
+  const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
+  if (agent_info == NULL) {
+    EXC_RAISING(HSA_STATUS_ERROR, "agent is not found");
   }
 
   rocprofiler::Queue* queue = NULL;
@@ -127,7 +127,7 @@ PUBLIC_API hsa_status_t rocprofiler_open(
     }
   }
 
-  *handle = (void*) new rocprofiler::Context(agent_info, queue, info, info_count, properties->handler, properties->handler_arg);
+  *handle = new rocprofiler::Context(agent_info, queue, info, info_count, properties->handler, properties->handler_arg);
   API_METHOD_SUFFIX
 }
 
@@ -149,15 +149,19 @@ PUBLIC_API hsa_status_t rocprofiler_reset(rocprofiler_t* handle, uint32_t group_
   API_METHOD_SUFFIX
 }
 
-// Get profiling groups
-PUBLIC_API hsa_status_t rocprofiler_get_groups(rocprofiler_t* handle, rocprofiler_group_t** group_array, uint32_t* group_count) {
+// Get profiling group count
+PUBLIC_API hsa_status_t rocprofiler_group_count(const rocprofiler_t* handle, uint32_t* group_count) {
+  API_METHOD_PREFIX
+  const rocprofiler::Context* context = reinterpret_cast<const rocprofiler::Context*>(handle);
+  *group_count = context->GetGroupCount();
+  API_METHOD_SUFFIX
+}
+
+// Get profiling group for a given group index
+PUBLIC_API hsa_status_t rocprofiler_get_group(rocprofiler_t* handle, uint32_t group_index, rocprofiler_group_t* group) {
   API_METHOD_PREFIX
   rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
-  const uint32_t count = context->GetGroupCount();
-  rocprofiler_group_t* groups = (rocprofiler_group_t*) calloc(count, sizeof(rocprofiler_group_t));
-  for (unsigned i = 0; i < count; ++i) groups[i] = context->GetGroupInfo(i);
-  *group_array = groups;
-  *group_count = count;
+  *group = context->GetGroupInfo(group_index);
   API_METHOD_SUFFIX
 }
 
@@ -200,7 +204,7 @@ PUBLIC_API hsa_status_t rocprofiler_group_stop(rocprofiler_group_t* group) {
 }
 
 // Get profiling data
-PUBLIC_API hsa_status_t rocprofiler_get_group_data(rocprofiler_group_t* group) {
+PUBLIC_API hsa_status_t rocprofiler_group_get_data(rocprofiler_group_t* group) {
   API_METHOD_PREFIX
   rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(group->context);
   context->GetData(group->index);
@@ -216,14 +220,14 @@ PUBLIC_API hsa_status_t rocprofiler_get_metrics(const rocprofiler_t* handle) {
 }
 
 // Set kernel dispatch observer
-PUBLIC_API hsa_status_t rocprofiler_set_dispatch_observer(rocprofiler_callback_t callback, void* data) {
+PUBLIC_API hsa_status_t rocprofiler_set_dispatch_callback(rocprofiler_callback_t callback, void* data) {
   API_METHOD_PREFIX
   rocprofiler::InterceptQueue::SetDispatchCB(callback, data);
   API_METHOD_SUFFIX
 }
 
 // Set kernel dispatch observer
-PUBLIC_API hsa_status_t rocprofiler_remove_dispatch_observer() {
+PUBLIC_API hsa_status_t rocprofiler_remove_dispatch_callback() {
   API_METHOD_PREFIX
   rocprofiler::InterceptQueue::UnsetDispatchCB();
   API_METHOD_SUFFIX

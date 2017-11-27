@@ -79,48 +79,48 @@ extern "C" {
 
 // Profiling feature type
 typedef enum {
-    ROCPROFILER_TYPE_METRIC = 0,
-    ROCPROFILER_TYPE_TRACE = 1
-} rocprofiler_type_t;
+    ROCPROFILER_FEATURE_KIND_METRIC = 0,
+    ROCPROFILER_FEATURE_KIND_TRACE = 1
+} rocprofiler_feature_kind_t;
 
 // Profiling feture parameter
 typedef hsa_ven_amd_aqlprofile_parameter_t rocprofiler_parameter_t;
 
 // Profiling data kind
 typedef enum {
-    ROCPROFILER_UNINIT = 0,
-    ROCPROFILER_INT32 = 1,
-    ROCPROFILER_INT64 = 2,
-    ROCPROFILER_FLOAT = 3,
-    ROCPROFILER_DOUBLE = 4,
-    ROCPROFILER_BYTES = 5
-} rocprofiler_metric_kind_t;
+    ROCPROFILER_DATA_KIND_UNINIT = 0,
+    ROCPROFILER_DATA_KIND_INT32 = 1,
+    ROCPROFILER_DATA_KIND_INT64 = 2,
+    ROCPROFILER_DATA_KIND_FLOAT = 3,
+    ROCPROFILER_DATA_KIND_DOUBLE = 4,
+    ROCPROFILER_DATA_KIND_BYTES = 5
+} rocprofiler_data_kind_t;
 
 // Profiling data type
 typedef struct {
-  rocprofiler_metric_kind_t kind;  // result kind
+  rocprofiler_data_kind_t kind;  // result kind
   union {
-    uint32_t result_int32;     // 32bit integer result
-    uint64_t result_int64;     // 64bit integer result
-    float result_float;    // float single-precision result
-    double result_double;  // float double-precision result
+    uint32_t result_int32;       // 32bit integer result
+    uint64_t result_int64;       // 64bit integer result
+    float result_float;          // float single-precision result
+    double result_double;        // float double-precision result
     struct {
       void* ptr;
       uint32_t size;
       uint32_t instance_count;
       bool copy;
-    } result_bytes;         // data by ptr and byte size
+    } result_bytes;              // data by ptr and byte size
   };
 } rocprofiler_data_t;
 
 // Profiling feature info 
 typedef struct {
-    rocprofiler_type_t type;                          // feature type
-    const char* name;                                 // [in] feature name
+    rocprofiler_feature_kind_t kind;                  // feature kind
+    const char* name;                                 // feature name
     const rocprofiler_parameter_t* parameters;        // feature parameters array
     uint32_t parameter_count;                         // feature parameters count
-    rocprofiler_data_t data;                          // [out] profiling data
-} rocprofiler_info_t;
+    rocprofiler_data_t data;                          // profiling data
+} rocprofiler_feature_t;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Profiling context
@@ -132,17 +132,17 @@ typedef void rocprofiler_t;
 
 // Profiling group object
 typedef struct {
-  unsigned index; // group index
-  rocprofiler_info_t** info; // profiling info array
-  uint32_t info_count; // profiling info count
-  rocprofiler_t* context; // context object
+  unsigned index;                   // group index
+  rocprofiler_feature_t** features; // profiling info array
+  uint32_t feature_count;           // profiling info count
+  rocprofiler_t* context;           // context object
 } rocprofiler_group_t;
 
 // Profiling mode mask
 typedef enum {
-    ROCPROFILER_MODE_STANDALONE = 1,
-    ROCPROFILER_MODE_CREATEQUEUE = 2,
-    ROCPROFILER_MODE_SINGLEGROUP = 4
+    ROCPROFILER_MODE_STANDALONE = 1,   // standalone mode when ROC profiler supports a queue
+    ROCPROFILER_MODE_CREATEQUEUE = 2,  // ROC profiler creates queue in standalone mode
+    ROCPROFILER_MODE_SINGLEGROUP = 4   // only one group is allowed, failed otherwise
 } rocprofiler_mode_t;
 
 // Profiling handler, calling on profiling completion
@@ -159,21 +159,21 @@ typedef struct {
 
 // Create new profiling context
 hsa_status_t rocprofiler_open(
-    unsigned gpu_index, // GPU index
-    rocprofiler_info_t* info, // [in] profiling info array
-    uint32_t info_count, // profiling info count
-    rocprofiler_t** context, // [out] context object
-    uint32_t mode, // profiling mode mask
-    rocprofiler_properties_t* properties); // profiling properties
+    hsa_agent_t agent,                       // GPU handle
+    rocprofiler_feature_t* features,                // [in] profiling info array
+    uint32_t feature_count,                     // profiling info count
+    rocprofiler_t** context,                 // [out] context object
+    uint32_t mode,                           // profiling mode mask
+    rocprofiler_properties_t* properties);   // profiling properties
 
 // Delete profiling info
 hsa_status_t rocprofiler_close(
-    rocprofiler_t* context); // [in] profiling context
+    rocprofiler_t* context);                 // [in] profiling context
 
 // Context reset before reusing
 hsa_status_t rocprofiler_reset(
-    rocprofiler_t* context, // [in] profiling context
-    uint32_t group_index);  // group index
+    rocprofiler_t* context,                  // [in] profiling context
+    uint32_t group_index);                   // group index
 
 ////////////////////////////////////////////////////////////////////////////////
 // Runtime API observer
@@ -182,33 +182,24 @@ hsa_status_t rocprofiler_reset(
 
 // Profiling callback data
 typedef struct {
+    hsa_agent_t agent;
     uint64_t kernel_object;
     uint64_t queue_index;
-    uint32_t gpu_index;
 } rocprofiler_callback_data_t;
 
 // Profiling callback type
 typedef hsa_status_t (*rocprofiler_callback_t)(
-    const rocprofiler_callback_data_t* callback_data, // [in] callback data union, data depends on
-                                                      // the callback API id
-    void* user_data,                                  // [in/out] user data passed to the callback 
-    rocprofiler_group_t** group);                     // [out] profiling group
-
-// Provided standard profiling callback
-static inline hsa_status_t rocprofiler_set_dispatch_callback(
-    const rocprofiler_callback_data_t* callback_data,
-    void* user_data,
-    rocprofiler_group_t** group) {
-  *group = reinterpret_cast<rocprofiler_group_t*>(user_data);
-  return HSA_STATUS_SUCCESS;
-}
+    const rocprofiler_callback_data_t* callback_data,  // [in] callback data union, data depends on
+                                                       // the callback API id
+    void* user_data,                                   // [in/out] user data passed to the callback 
+    rocprofiler_group_t* group);                       // [out] profiling group
 
 // Set/remove kernel dispatch observer
-hsa_status_t rocprofiler_set_dispatch_observer(
-    rocprofiler_callback_t callback, // observer callback
-    void* data);                     // [in/out] passed callback data
+hsa_status_t rocprofiler_set_dispatch_callback(
+    rocprofiler_callback_t callback,                   // observer callback
+    void* data);                                       // [in/out] passed callback data
 
-hsa_status_t rocprofiler_remove_dispatch_observer();
+hsa_status_t rocprofiler_remove_dispatch_callback();
 
 ////////////////////////////////////////////////////////////////////////////////
 // Start/stop profiling
@@ -231,22 +222,27 @@ hsa_status_t rocprofiler_get_data(
     rocprofiler_t* context, // [in/out] profiling context
     uint32_t group_index = 0); // group index
 
-// Get profiling groups
-hsa_status_t rocprofiler_get_groups(
-  rocprofiler_t* context, // [in] profiling context
-  rocprofiler_group_t** groups, // [out] profiling groups
+// Get profiling groups count
+hsa_status_t rocprofiler_group_count(
+  const rocprofiler_t* context, // [in] profiling context
   uint32_t* group_count); // [out] profiling groups count
 
+// Get profiling group for a given index
+hsa_status_t rocprofiler_get_group(
+  rocprofiler_t* context, // [in] profiling context
+  uint32_t group_index, // [in] profiling group index
+  rocprofiler_group_t* group); // [out] profiling group
+
 // Start profiling
-hsa_status_t rocprofiler_start_group(
+hsa_status_t rocprofiler_group_start(
   rocprofiler_group_t* group); // [in/out] profiling group
 
 // Stop profiling
-hsa_status_t rocprofiler_stop_group(
+hsa_status_t rocprofiler_group_stop(
   rocprofiler_group_t* group); // [in/out] profiling group
 
 // Get profiling data
-hsa_status_t rocprofiler_get_group_data(
+hsa_status_t rocprofiler_group_get_data(
   rocprofiler_group_t* group); // [in/out] profiling group
 
 // Get metrics data
@@ -258,9 +254,9 @@ typedef hsa_ven_amd_aqlprofile_data_callback_t rocprofiler_trace_data_callback_t
 
 // Method for iterating the events output data
 hsa_status_t rocprofiler_iterate_trace_data(
-    rocprofiler_t* context,                     // [in] profiling context
+    rocprofiler_t* context,                      // [in] profiling context
     rocprofiler_trace_data_callback_t callback,  // [in] callback to iterate the output data
-    void* data);                                      // [in/out] callback data 
+    void* data);                                 // [in/out] callback data 
 
 ////////////////////////////////////////////////////////////////////////////////
 // Returning the error string method

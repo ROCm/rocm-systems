@@ -88,14 +88,14 @@ class InterceptQueue {
       const packet_t* packet = &packets_arr[j];
 
       if ((GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) && (on_dispatch_cb_ != NULL)) {
-        rocprofiler_group_t* group = NULL;
+        rocprofiler_group_t group = {};
         const hsa_kernel_dispatch_packet_t* dispatch_packet = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
-        rocprofiler_callback_data_t data = {dispatch_packet->kernel_object, user_que_idx, obj->agent_info_->dev_index};
+        rocprofiler_callback_data_t data = {obj->agent_info_->dev_id, dispatch_packet->kernel_object, user_que_idx};
         hsa_status_t status = on_dispatch_cb_(&data, on_dispatch_cb_data_, &group);
-        if ((status == HSA_STATUS_SUCCESS) && (group != NULL)) {
-          Context* context = reinterpret_cast<Context*>(group->context);
-          const pkt_vector_t& start_vector = context->StartPackets(group->index);
-          const pkt_vector_t& stop_vector = context->StopPackets(group->index);
+        if (status == HSA_STATUS_SUCCESS) {
+          Context* context = reinterpret_cast<Context*>(group.context);
+          const pkt_vector_t& start_vector = context->StartPackets(group.index);
+          const pkt_vector_t& stop_vector = context->StopPackets(group.index);
 
           pkt_vector_t packets = start_vector;
           packets.insert(packets.end(), *packet);

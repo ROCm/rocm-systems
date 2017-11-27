@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
         for (rocprofiler_info_t* p = info; p < info + info_count; ++p) {
           std::cout << (p - info) << ": " << p->name;
           switch (p->data.kind) {
-            case ROCPROFILER_INT64:
+            case ROCPROFILER_DATA_KIND_INT64:
               std::cout << std::dec << " result64 (" << p->data.result64 << ")" << std::endl;
               break;
             case ROCPROFILER_BYTES: {
