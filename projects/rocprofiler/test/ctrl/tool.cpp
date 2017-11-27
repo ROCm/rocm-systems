@@ -4,16 +4,15 @@
 //                                                                           //
 ///////////////////////////////////////////////////////////////////////////////
 
-#include <fcntl.h>
 #include <hsa.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 
 #include <iostream>
 #include <map>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include "inc/rocprofiler.h"
@@ -49,8 +48,10 @@ unsigned context_array_size = 1;
 context_entry_t* context_array = NULL;
 // Number of stored contexts
 unsigned context_array_count = 0;
-// File for dumping profiling output data
-const char* file_name = NULL;
+// Profiling results output file name
+const char* result_file_name = NULL;
+// SQTT output file base name
+const char* sqtt_file_name = "thread_trace";
 
 // Check returned HSA API status
 void check_status(hsa_status_t status) {
@@ -88,7 +89,25 @@ context_entry_t* alloc_context_entry() {
   return ptr;
 }
 
-// Trace data callbacl for getting trace data from GPU local mamory
+// Dump trace data to file
+void dump_sqtt_trace(const uint32_t chunk, const void* data, const uint32_t& size) {
+  // Opening SQTT file
+  std::ostringstream oss;
+  oss << sqtt_file_name << ".se" << chunk << ".out";
+  FILE* file = fopen(oss.str().c_str(), "w");
+  if (file == NULL) {
+    perror("result file fopen");
+    exit(1);
+  }
+
+  // Write the buffer in terms of shorts (16 bits)
+  const unsigned short* ptr = reinterpret_cast<const unsigned short*>(data);
+  for (uint32_t i = 0; i < (size / sizeof(short)); ++i) {
+    fprintf(file, "%04x\n", ptr[i]);
+  }
+}
+
+// Trace data callback for getting trace data from GPU local mamory
 hsa_status_t trace_data_cb(
   hsa_ven_amd_aqlprofile_info_type_t info_type,
   hsa_ven_amd_aqlprofile_info_data_t* info_data,
@@ -98,6 +117,7 @@ hsa_status_t trace_data_cb(
   hsa_status_t status = HSA_STATUS_SUCCESS;
   if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
     fprintf(file, "    data ptr (%p), size(%u)\n", info_data->sqtt_data.ptr, info_data->sqtt_data.size);
+    dump_sqtt_trace(info_data->sample_id, info_data->sqtt_data.ptr, info_data->sqtt_data.size);
 
   } else status = HSA_STATUS_ERROR;
   return status;
@@ -124,26 +144,17 @@ void output_results(FILE* file, const rocprofiler_info_t* info, const unsigned i
 
           const char* ptr = reinterpret_cast<const char*>(p->data.result_bytes.ptr);
           for (unsigned i = 0; i < p->data.result_bytes.instance_count; ++i) {
-            uint64_t chunk_size = *reinterpret_cast<const uint64_t*>(ptr);
-            const char* data = ptr + sizeof(uint64_t);
-            chunk_size = align_size(chunk_size, sizeof(uint64_t));
-            ptr = data + chunk_size;
+            const uint32_t chunk_size = *reinterpret_cast<const uint64_t*>(ptr);
+            const char* chunk_data = ptr + sizeof(uint64_t);
+            dump_sqtt_trace(i, chunk_data, chunk_size);
+
+            const uint32_t off = align_size(chunk_size, sizeof(uint64_t));
+            ptr = chunk_data + off;
             size += chunk_size;
           }
           fprintf(file, "size(%lu)\n", size);
           if (size > p->data.result_bytes.size) {
             fprintf(stderr, "SQTT data size is out of the result buffer size\n");
-            exit(1);
-          }
-
-          const int fd = open("trace_data.sqtt", O_RDWR|O_CREAT|O_TRUNC, 0640);
-          if (fd == -1) {
-            perror("open 'trace_data.sqtt'");
-            exit(1);
-          }
-          const size_t write_size = write(fd, p->data.result_bytes.ptr, size);
-          if (write_size < size) {
-            fprintf(stderr, "SQTT data size(%lu) write failed, returned size(%zd)\n", size, write_size);
             exit(1);
           }
         } else {
@@ -243,7 +254,7 @@ hsa_status_t dispatch_callback(
   context_entry_t* entry = alloc_context_entry();
   // context properties
   rocprofiler_properties_t properties{};
-  properties.handler = (file_name != NULL) ? handler : NULL;
+  properties.handler = (result_file_name != NULL) ? handler : NULL;
   properties.handler_arg = (void*)entry;
 
   // Open profiling context
@@ -276,12 +287,12 @@ CONSTRUCTOR_API void constructor() {
   parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2"] = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
 
   // Set output file
-  file_name = getenv("ROCP_OUTPUT");
+  result_file_name = getenv("ROCP_OUTPUT");
   FILE* file_handle = NULL;
-  if (file_name != NULL) {
-    file_handle = fopen(file_name, "w");
+  if (result_file_name != NULL) {
+    file_handle = fopen(result_file_name, "w");
     if (file_handle == NULL) {
-      perror("fopen");
+      perror("result file fopen");
       exit(1);
     }
   } else file_handle = stdout;
@@ -382,10 +393,10 @@ CONSTRUCTOR_API void constructor() {
 // Tool destructor
 DESTRUCTOR_API void destructor() {
   printf("\nROCPRofiler: %u contexts collected", context_array_count);
-  if (file_name == NULL) {
+  if (result_file_name == NULL) {
     printf("\n");
   } else {
-    printf(", dumping to %s\n", file_name);
+    printf(", dumping to %s\n", result_file_name);
   }
   // Dump profiling output data which hasn't yet dumped by completi onhandler
   dump_context_array();

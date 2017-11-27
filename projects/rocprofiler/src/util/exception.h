@@ -1,11 +1,11 @@
 #ifndef SRC_UTIL_EXCEPTION_H_
 #define SRC_UTIL_EXCEPTION_H_
 
-#include <exception>
-#include <string>
-#include <sstream>
-
 #include <hsa_ven_amd_aqlprofile.h>
+
+#include <exception>
+#include <sstream>
+#include <string>
 
 #define EXC_RAISING(error, stream) { \
   std::ostringstream oss; oss << __FUNCTION__ << "(), " << stream; \
