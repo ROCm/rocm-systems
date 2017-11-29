@@ -28,6 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <hsa.h>
 #include <hsa_ext_finalize.h>
 #include <hsa_ven_amd_aqlprofile.h>
+#include <hsa_ven_amd_loader.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -223,6 +224,9 @@ class HsaRsrcFactory {
   // Return AqlProfile API table
   const hsa_ven_amd_aqlprofile_1_00_pfn_t* AqlProfileApi() const { return &aqlprofile_api_; }
 
+  // Return Loader API table
+  const hsa_ven_amd_loader_1_00_pfn_t* LoaderApi() const { return &loader_api_; }
+
  private:
   // System agents iterating callback
   static hsa_status_t GetHsaAgentsCallback(hsa_agent_t agent, void* data);
@@ -254,6 +258,9 @@ class HsaRsrcFactory {
 
   // AqlProfile API table
   hsa_ven_amd_aqlprofile_1_00_pfn_t aqlprofile_api_;
+
+  // Loader API table
+  hsa_ven_amd_loader_1_00_pfn_t loader_api_;
 };
 
 }  // namespace util

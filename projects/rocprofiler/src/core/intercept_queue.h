@@ -1,7 +1,9 @@
 #ifndef _SRC_CORE_INTERCEPT_QUEUE_H
 #define _SRC_CORE_INTERCEPT_QUEUE_H
 
+#include <amd_hsa_kernel_code.h>
 #include <dlfcn.h>
+
 #include <atomic>
 #include <iostream>
 #include <map>
@@ -90,8 +92,9 @@ class InterceptQueue {
         rocprofiler_group_t group = {};
         const hsa_kernel_dispatch_packet_t* dispatch_packet =
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
-        rocprofiler_callback_data_t data = {obj->agent_info_->dev_id,
-                                            dispatch_packet->kernel_object, user_que_idx};
+        rocprofiler_callback_data_t data = {obj->agent_info_->dev_id, user_que_idx,
+                                            dispatch_packet->kernel_object,
+                                            GetKernelName(dispatch_packet)};
         hsa_status_t status = on_dispatch_cb_(&data, on_dispatch_cb_data_, &group);
         if (status == HSA_STATUS_SUCCESS) {
           Context* context = reinterpret_cast<Context*>(group.context);
@@ -143,6 +146,21 @@ class InterceptQueue {
   static packet_word_t GetHeaderType(const packet_t* packet) {
     const packet_word_t* header = reinterpret_cast<const packet_word_t*>(packet);
     return (*header >> HSA_PACKET_HEADER_TYPE) & header_type_mask;
+  }
+
+  static const char* GetKernelName(const hsa_kernel_dispatch_packet_t* dispatch_packet) {
+    const amd_kernel_code_t* kernel_code = NULL;
+    hsa_status_t status =
+        util::HsaRsrcFactory::Instance().LoaderApi()->hsa_ven_amd_loader_query_host_address(
+            reinterpret_cast<const void*>(dispatch_packet->kernel_object),
+            reinterpret_cast<const void**>(&kernel_code));
+    if (HSA_STATUS_SUCCESS != status) {
+      kernel_code = reinterpret_cast<amd_kernel_code_t*>(dispatch_packet->kernel_object);
+    }
+    amd_runtime_loader_debug_info_t* dbg_info = reinterpret_cast<amd_runtime_loader_debug_info_t*>(
+        kernel_code->runtime_loader_kernel_symbol);
+    const char* kernel_name = (dbg_info != NULL) ? dbg_info->kernel_name : NULL;
+    return (kernel_name != NULL) ? strdup(kernel_name) : NULL;
   }
 
   static mutex_t mutex_;

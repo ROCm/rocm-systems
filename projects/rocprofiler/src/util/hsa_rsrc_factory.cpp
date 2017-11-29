@@ -83,8 +83,14 @@ HsaRsrcFactory::HsaRsrcFactory() {
   CHECK_STATUS("Error Calling hsa_iterate_agents", status);
 
   // Get AqlProfile API table
+  aqlprofile_api_ = {0};
   status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_AQLPROFILE, 1, 0, &aqlprofile_api_);
   CHECK_STATUS("aqlprofile API table query failed", status);
+
+  // Get Loader API table
+  loader_api_ = {0};
+  status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_LOADER, 1, 0, &loader_api_);
+  CHECK_STATUS("loader API table query failed", status);
 }
 
 // Destructor of the class

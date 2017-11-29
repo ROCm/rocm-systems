@@ -192,7 +192,9 @@ void dump_context(context_entry_t* entry) {
     const unsigned feature_count = entry->feature_count;
     FILE* file_handle = entry->file_handle;
 
-    fprintf(file_handle, "Dispatch[%u], kernel_object(0x%lx):\n", index, entry->data.kernel_object);
+    fprintf(file_handle,
+            "Dispatch[%u], queue_index(%lu), kernel_object(0x%lx), kernel_name(\"%s\"):\n", index,
+            entry->data.queue_index, entry->data.kernel_object, entry->data.kernel_name);
 
     status = rocprofiler_group_get_data(&group);
     check_status(status);

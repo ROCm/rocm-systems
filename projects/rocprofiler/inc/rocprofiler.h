@@ -180,8 +180,9 @@ hsa_status_t rocprofiler_reset(rocprofiler_t* context,  // [in] profiling contex
 // Profiling callback data
 typedef struct {
   hsa_agent_t agent;
-  uint64_t kernel_object;
   uint64_t queue_index;
+  uint64_t kernel_object;
+  const char* kernel_name;
 } rocprofiler_callback_data_t;
 
 // Profiling callback type
