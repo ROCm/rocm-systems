@@ -6,7 +6,7 @@
 namespace rocprofiler {
 
 class Queue {
-  public:
+ public:
   Queue() {}
   virtual ~Queue() {}
   virtual void Submit(const packet_t* packet) = 0;
@@ -15,6 +15,6 @@ class Queue {
   }
 };
 
-} // namespace rocprofiler
+}  // namespace rocprofiler
 
-#endif // _SRC_CORE_QUEUE_H
+#endif  // _SRC_CORE_QUEUE_H

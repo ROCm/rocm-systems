@@ -26,13 +26,13 @@ struct profile_tuple_t {
 };
 typedef std::vector<profile_tuple_t> profile_vector_t;
 
-template<class Item> class ConfigBase {};
+template <class Item> class ConfigBase {};
 
-template<> class ConfigBase<event_t> {
-  public:
-  ConfigBase(profile_t *profile) : profile_(profile) {}
+template <> class ConfigBase<event_t> {
+ public:
+  ConfigBase(profile_t* profile) : profile_(profile) {}
 
-  protected:
+ protected:
   void* Array() { return const_cast<event_t*>(profile_->events); }
   unsigned Count() const { return profile_->event_count; }
   void Set(event_t* events, const unsigned& count) {
@@ -42,11 +42,11 @@ template<> class ConfigBase<event_t> {
   profile_t* profile_;
 };
 
-template<> class ConfigBase<parameter_t> {
-  public:
-  ConfigBase(profile_t *profile) : profile_(profile) {}
+template <> class ConfigBase<parameter_t> {
+ public:
+  ConfigBase(profile_t* profile) : profile_(profile) {}
 
-  protected:
+ protected:
   void* Array() { return const_cast<parameter_t*>(profile_->parameters); }
   unsigned Count() const { return profile_->parameter_count; }
   void Set(parameter_t* parameters, const unsigned& count) {
@@ -56,23 +56,25 @@ template<> class ConfigBase<parameter_t> {
   profile_t* profile_;
 };
 
-template<class Item> 
-class Config : protected ConfigBase<Item> {
+template <class Item> class Config : protected ConfigBase<Item> {
   typedef ConfigBase<Item> Parent;
-  public:
-  Config(profile_t *profile) : Parent(profile) {}
+
+ public:
+  Config(profile_t* profile) : Parent(profile) {}
   void Insert(const Item& item) {
     auto count = Parent::Count();
     count += 1;
-    Item* array = reinterpret_cast<Item*>(realloc(const_cast<void*>(Parent::Array()), count * sizeof(Item)));
+    Item* array =
+        reinterpret_cast<Item*>(realloc(const_cast<void*>(Parent::Array()), count * sizeof(Item)));
     array[count - 1] = item;
     Parent::Set(array, count);
   }
 };
 
 class Profile {
-  public:
-  static const uint32_t LEGACY_SLOT_SIZE_PKT = HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE / sizeof(packet_t);
+ public:
+  static const uint32_t LEGACY_SLOT_SIZE_PKT =
+      HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE / sizeof(packet_t);
 
   Profile(const util::AgentInfo* agent_info) : agent_info_(agent_info) {
     profile_ = {};
@@ -86,9 +88,7 @@ class Profile {
     free(const_cast<parameter_t*>(profile_.parameters));
   }
 
-  virtual void Insert(const profile_info_t& info) {
-    info_vector_.push_back(info.rinfo);
-  }
+  virtual void Insert(const profile_info_t& info) { info_vector_.push_back(info.rinfo); }
 
   hsa_status_t Finalize(pkt_vector_t& start_vector, pkt_vector_t& stop_vector) {
     hsa_status_t status = HSA_STATUS_SUCCESS;
@@ -124,10 +124,14 @@ class Profile {
 
         start_vector.insert(start_vector.end(), LEGACY_SLOT_SIZE_PKT, packet_t{});
         stop_vector.insert(stop_vector.end(), LEGACY_SLOT_SIZE_PKT, packet_t{});
-        status = api->hsa_ven_amd_aqlprofile_legacy_get_pm4(&start, reinterpret_cast<void*>(&start_vector[start_index]));
-        if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
-        status = api->hsa_ven_amd_aqlprofile_legacy_get_pm4(&stop, reinterpret_cast<void*>(&stop_vector[stop_index]));
-        if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+        status = api->hsa_ven_amd_aqlprofile_legacy_get_pm4(
+            &start, reinterpret_cast<void*>(&start_vector[start_index]));
+        if (status != HSA_STATUS_SUCCESS)
+          AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+        status = api->hsa_ven_amd_aqlprofile_legacy_get_pm4(
+            &stop, reinterpret_cast<void*>(&stop_vector[stop_index]));
+        if (status != HSA_STATUS_SUCCESS)
+          AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
       } else {
         start_vector.push_back(start);
         stop_vector.push_back(stop);
@@ -145,7 +149,7 @@ class Profile {
 
   bool Empty() const { return info_vector_.empty(); }
 
-  protected:
+ protected:
   virtual hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) = 0;
 
   const util::AgentInfo* const agent_info_;
@@ -156,7 +160,7 @@ class Profile {
 };
 
 class PmcProfile : public Profile {
-  public:
+ public:
   PmcProfile(const util::AgentInfo* agent_info) : Profile(agent_info) {
     profile_.type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC;
   }
@@ -167,14 +171,16 @@ class PmcProfile : public Profile {
   }
 
   hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) {
-    profile_.command_buffer.ptr = rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
+    profile_.command_buffer.ptr =
+        rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
     profile_.output_buffer.ptr = rsrc->AllocateSysMemory(agent_info_, profile_.output_buffer.size);
-    return (profile_.command_buffer.ptr && profile_.output_buffer.ptr) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+    return (profile_.command_buffer.ptr && profile_.output_buffer.ptr) ? HSA_STATUS_SUCCESS
+                                                                       : HSA_STATUS_ERROR;
   }
 };
 
 class SqttProfile : public Profile {
-  public:
+ public:
   static const uint32_t output_buffer_size = 0x2000000;  // 32M
 
   SqttProfile(const util::AgentInfo* agent_info) : Profile(agent_info) {
@@ -197,9 +203,12 @@ class SqttProfile : public Profile {
 
   hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) {
     profile_.output_buffer.size = output_buffer_size;
-    profile_.command_buffer.ptr = rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
-    profile_.output_buffer.ptr = rsrc->AllocateLocalMemory(agent_info_, profile_.output_buffer.size);
-    return (profile_.command_buffer.ptr && profile_.output_buffer.ptr) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+    profile_.command_buffer.ptr =
+        rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
+    profile_.output_buffer.ptr =
+        rsrc->AllocateLocalMemory(agent_info_, profile_.output_buffer.size);
+    return (profile_.command_buffer.ptr && profile_.output_buffer.ptr) ? HSA_STATUS_SUCCESS
+                                                                       : HSA_STATUS_ERROR;
   }
 };
 

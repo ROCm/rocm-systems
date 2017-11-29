@@ -12,4 +12,4 @@ void* InterceptQueue::on_dispatch_cb_data_ = NULL;
 const char* InterceptQueue::tool_lib_ = NULL;
 void* InterceptQueue::tool_handle_ = NULL;
 InterceptQueue::obj_map_t* InterceptQueue::obj_map_ = NULL;
-} // namespace rocprofiler
+}  // namespace rocprofiler

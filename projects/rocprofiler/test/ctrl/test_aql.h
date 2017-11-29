@@ -37,7 +37,9 @@ OF THE POSSIBILITY OF SUCH DAMAGE.
 class TestAql {
  public:
   explicit TestAql(TestAql* t = 0) : test_(t) {}
-  virtual ~TestAql() { if (test_) delete test_; }
+  virtual ~TestAql() {
+    if (test_) delete test_;
+  }
 
   TestAql* Test() { return test_; }
   virtual AgentInfo* GetAgentInfo() { return (test_) ? test_->GetAgentInfo() : 0; }

@@ -16,7 +16,7 @@ export ROCP_HSA_INTERCEPT=1
 unset ROCP_PROXY_QUEUE
 export ROCP_METRICS=metrics.xml
 export ROCP_INPUT=input.xml
-export ROCP_OUTPUT=output.txt
+export ROCP_OUTPUT_DIR=./
 
 echo "Run simple profiling test"
 if [ -n "$1" ] ; then

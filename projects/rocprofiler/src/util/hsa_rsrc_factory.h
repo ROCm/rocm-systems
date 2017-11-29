@@ -256,7 +256,7 @@ class HsaRsrcFactory {
   hsa_ven_amd_aqlprofile_1_00_pfn_t aqlprofile_api_;
 };
 
-} // namespace util
-} // namespace rocprofiler
+}  // namespace util
+}  // namespace rocprofiler
 
 #endif  // SRC_UTIL_HSA_RSRC_FACTORY_H_

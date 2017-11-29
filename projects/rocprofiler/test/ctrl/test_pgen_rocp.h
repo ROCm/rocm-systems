@@ -35,8 +35,8 @@ OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "util/test_assert.h"
 
 hsa_status_t TestPGenRocpCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
-                                 hsa_ven_amd_aqlprofile_info_data_t* info_data,
-                                 void* callback_data) {
+                                  hsa_ven_amd_aqlprofile_info_data_t* info_data,
+                                  void* callback_data) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   typedef std::vector<hsa_ven_amd_aqlprofile_info_data_t> passed_data_t;
   reinterpret_cast<passed_data_t*>(callback_data)->push_back(*info_data);

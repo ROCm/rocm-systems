@@ -13,6 +13,7 @@ class exception_t : public std::exception {
  public:
   explicit exception_t(const std::string& msg) : str_(msg) {}
   const char* what() const throw() { return str_.c_str(); }
+
  protected:
   const std::string str_;
 };
@@ -21,9 +22,8 @@ typedef uint64_t args_t;
 typedef std::map<std::string, args_t> args_map_t;
 class Expr;
 
-template <class T>
-class any_cache_t {
-  public:
+template <class T> class any_cache_t {
+ public:
   virtual ~any_cache_t() {}
   virtual bool Lookup(const std::string& name, T& result) const = 0;
 };
@@ -32,9 +32,10 @@ typedef any_cache_t<std::string> expr_cache_t;
 typedef any_cache_t<args_t> args_cache_t;
 
 class bin_expr_t {
-  public:
-  static const bin_expr_t* CreateExpr(const bin_expr_t* arg1, const bin_expr_t* arg2, const char op);
-  static const bin_expr_t* CreateArg(Expr *obj, const std::string str);
+ public:
+  static const bin_expr_t* CreateExpr(const bin_expr_t* arg1, const bin_expr_t* arg2,
+                                      const char op);
+  static const bin_expr_t* CreateArg(Expr* obj, const std::string str);
 
   bin_expr_t() : arg1_(NULL), arg2_(NULL) {}
   bin_expr_t(const bin_expr_t* arg1, const bin_expr_t* arg2) : arg1_(arg1), arg2_(arg2) {}
@@ -44,37 +45,34 @@ class bin_expr_t {
 
   std::string String() const {
     std::string str;
-    if (arg1_) { str = "(" + arg1_->String() + " " + Symbol() + " " + arg2_->String() + ")"; }
-    else str = Symbol();
+    if (arg1_) {
+      str = "(" + arg1_->String() + " " + Symbol() + " " + arg2_->String() + ")";
+    } else
+      str = Symbol();
     return str;
   }
 
-  protected:
+ protected:
   const bin_expr_t* arg1_;
   const bin_expr_t* arg2_;
 };
 
 class Expr {
-  public:
-  explicit Expr(const std::string& expr, const expr_cache_t* cache) :
-    expr_(expr),
-    pos_(0),
-    sub_count_(0),
-    cache_(cache)
-  {
+ public:
+  explicit Expr(const std::string& expr, const expr_cache_t* cache)
+      : expr_(expr), pos_(0), sub_count_(0), cache_(cache) {
     sub_vec_ = new std::vector<const Expr*>;
     var_vec_ = new std::vector<std::string>;
     tree_ = ParseExpr();
   }
 
-  explicit Expr(const std::string& expr, const Expr* obj) :
-    expr_(expr),
-    pos_(0),
-    sub_count_(0),
-    cache_(obj->cache_),
-    sub_vec_(obj->sub_vec_),
-    var_vec_(obj->var_vec_)
-  {
+  explicit Expr(const std::string& expr, const Expr* obj)
+      : expr_(expr),
+        pos_(0),
+        sub_count_(0),
+        cache_(obj->cache_),
+        sub_vec_(obj->sub_vec_),
+        var_vec_(obj->var_vec_) {
     sub_vec_->push_back(this);
     tree_ = ParseExpr();
     if (!SubCheck()) throw exception_t("expr '" + expr_ + "', bad parenthesis count");
@@ -95,13 +93,15 @@ class Expr {
 
   std::string Lookup(const std::string& str) const {
     std::string result;
-    if (cache_ && !(cache_->Lookup(str, result))) throw exception_t("expr '" + expr_ + "', lookup '" + str + "' failed");
+    if (cache_ && !(cache_->Lookup(str, result)))
+      throw exception_t("expr '" + expr_ + "', lookup '" + str + "' failed");
     return result;
   }
 
   void AddVar(const std::string& str) {
     bool found = false;
-    for (std::string s : *var_vec_) if (s == str) found = true;
+    for (std::string s : *var_vec_)
+      if (s == str) found = true;
     if (!found) var_vec_->push_back(str);
   }
 
@@ -109,7 +109,7 @@ class Expr {
 
   std::string String() const { return tree_->String(); }
 
-  private:
+ private:
   const bin_expr_t* ParseExpr() {
     const bin_expr_t* expr = ParseArg();
     while (!IsEnd()) {
@@ -119,7 +119,8 @@ class Expr {
         Next();
         SubClose();
         break;
-      } if (IsSymb('*') || IsSymb('/')) {
+      }
+      if (IsSymb('*') || IsSymb('/')) {
         Next();
         second_arg = ParseArg();
         expr = bin_expr_t::CreateExpr(expr, second_arg, op);
@@ -173,7 +174,7 @@ class Expr {
       }
       ++i;
     }
-    end:
+  end:
     return i;
   }
   std::string CutTill(const unsigned pos) {
@@ -192,39 +193,44 @@ class Expr {
 };
 
 class add_expr_t : public bin_expr_t {
-  public:
+ public:
   add_expr_t(const bin_expr_t* arg1, const bin_expr_t* arg2) : bin_expr_t(arg1, arg2) {}
   args_t Eval(const args_cache_t& args) const { return (arg1_->Eval(args) + arg2_->Eval(args)); }
   std::string Symbol() const { return "+"; }
 };
 class sub_expr_t : public bin_expr_t {
-  public:
+ public:
   sub_expr_t(const bin_expr_t* arg1, const bin_expr_t* arg2) : bin_expr_t(arg1, arg2) {}
   args_t Eval(const args_cache_t& args) const { return (arg1_->Eval(args) - arg2_->Eval(args)); }
   std::string Symbol() const { return "-"; }
 };
 class mul_expr_t : public bin_expr_t {
-  public:
+ public:
   mul_expr_t(const bin_expr_t* arg1, const bin_expr_t* arg2) : bin_expr_t(arg1, arg2) {}
   args_t Eval(const args_cache_t& args) const { return (arg1_->Eval(args) * arg2_->Eval(args)); }
   std::string Symbol() const { return "*"; }
 };
 class div_expr_t : public bin_expr_t {
-  public:
+ public:
   div_expr_t(const bin_expr_t* arg1, const bin_expr_t* arg2) : bin_expr_t(arg1, arg2) {}
   args_t Eval(const args_cache_t& args) const { return (arg1_->Eval(args) / arg2_->Eval(args)); }
   std::string Symbol() const { return "/"; }
 };
 class const_expr_t : public bin_expr_t {
-  public:
+ public:
   const_expr_t(const args_t value) : value_(value) {}
   args_t Eval(const args_cache_t&) const { return value_; }
-  std::string Symbol() const { std::ostringstream os; os << value_; return os.str(); }
-  private:
+  std::string Symbol() const {
+    std::ostringstream os;
+    os << value_;
+    return os.str();
+  }
+
+ private:
   const args_t value_;
 };
 class var_expr_t : public bin_expr_t {
-  public:
+ public:
   var_expr_t(const std::string name) : name_(name) {}
   args_t Eval(const args_cache_t& args) const {
     args_t result = 0;
@@ -232,11 +238,13 @@ class var_expr_t : public bin_expr_t {
     return result;
   }
   std::string Symbol() const { return name_; }
-  private:
+
+ private:
   const std::string name_;
 };
 
-inline const bin_expr_t* bin_expr_t::CreateExpr(const bin_expr_t* arg1, const bin_expr_t* arg2, const char op) {
+inline const bin_expr_t* bin_expr_t::CreateExpr(const bin_expr_t* arg1, const bin_expr_t* arg2,
+                                                const char op) {
   const bin_expr_t* expr = NULL;
   switch (op) {
     case '+':
@@ -274,6 +282,6 @@ inline const bin_expr_t* bin_expr_t::CreateArg(Expr* obj, const std::string str)
   return arg;
 }
 
-} // namespace xml
+}  // namespace xml
 
-#endif // _SRC_XML_EXPR_H
+#endif  // _SRC_XML_EXPR_H

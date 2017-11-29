@@ -124,11 +124,11 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &agent_info->max_queue_size);
     agent_info->profile = hsa_profile_t(108);
     hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE, &agent_info->profile);
-  
+
     // Initialize memory regions to zero
     agent_info->kernarg_region.handle = 0;
     agent_info->coarse_region.handle = 0;
-  
+
     // Find and Bind Memory regions of the Gpu agent
     hsa_agent_iterate_regions(agent, FindMemRegionsCallback, agent_info);
 
@@ -216,7 +216,8 @@ bool HsaRsrcFactory::GetCpuAgentInfo(uint32_t idx, const AgentInfo** agent_info)
 //
 // @return bool true if successful, false otherwise
 //
-bool HsaRsrcFactory::CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts, hsa_queue_t** queue) {
+bool HsaRsrcFactory::CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts,
+                                 hsa_queue_t** queue) {
   hsa_status_t status;
   status = hsa_queue_create(agent_info->dev_id, num_pkts, HSA_QUEUE_TYPE_MULTI, NULL, NULL,
                             UINT32_MAX, UINT32_MAX, queue);
@@ -388,5 +389,5 @@ bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
 HsaRsrcFactory* HsaRsrcFactory::instance_ = NULL;
 HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;
 
-} // namespace util
-} // namespace rocprofiler
+}  // namespace util
+}  // namespace rocprofiler

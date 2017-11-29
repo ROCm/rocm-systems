@@ -59,7 +59,7 @@ HsaRsrcFactory* TestHsa::HsaInstantiate(const uint32_t agent_ind) {
     // Create an instance of Aql Queue
     if (hsa_queue_ == NULL) {
       uint32_t num_pkts = 128;
-      if(hsa_rsrc_->CreateQueue(agent_info_, num_pkts, &hsa_queue_) == false) {
+      if (hsa_rsrc_->CreateQueue(agent_info_, num_pkts, &hsa_queue_) == false) {
         hsa_queue_ = NULL;
       }
     }
@@ -67,7 +67,9 @@ HsaRsrcFactory* TestHsa::HsaInstantiate(const uint32_t agent_ind) {
   return hsa_rsrc_;
 }
 
-void TestHsa::HsaShutdown() { if (hsa_rsrc_) hsa_rsrc_->Destroy(); }
+void TestHsa::HsaShutdown() {
+  if (hsa_rsrc_) hsa_rsrc_->Destroy();
+}
 
 bool TestHsa::Initialize(int arg_cnt, char** arg_list) {
   std::clog << "TestHsa::Initialize :" << std::endl;

@@ -8,4 +8,4 @@ void SimpleProxyQueue::HsaIntercept(HsaApiTable* table) {
 }
 
 std::map<signal_handle_t, SimpleProxyQueue*> SimpleProxyQueue::queue_map_;
-} // namespace rocprofiler
+}  // namespace rocprofiler

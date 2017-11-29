@@ -19,7 +19,9 @@ namespace rocprofiler {
 struct rocprofiler_contex_t;
 class Context;
 
-inline unsigned align_size(unsigned size, unsigned alignment) { return ((size + alignment - 1) & ~(alignment - 1)); }
+inline unsigned align_size(unsigned size, unsigned alignment) {
+  return ((size + alignment - 1) & ~(alignment - 1));
+}
 
 // Block descriptor
 struct block_des_t {
@@ -42,9 +44,8 @@ struct block_status_t {
 };
 
 // Metrics arguments
-template <class Map>
-class MetricArgs : public xml::args_cache_t {
-  public:
+template <class Map> class MetricArgs : public xml::args_cache_t {
+ public:
   MetricArgs(const Map& map) : map_(map) {}
   bool Lookup(const std::string& name, uint64_t& result) const {
     rocprofiler_feature_t* info = NULL;
@@ -53,26 +54,29 @@ class MetricArgs : public xml::args_cache_t {
     info = it->second;
     if (info) {
       result = info->data.result_int64;
-      if (info->data.kind == ROCPROFILER_DATA_KIND_UNINIT) EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' is uninitialized");
-      if (info->data.kind != ROCPROFILER_DATA_KIND_INT64) EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' is of incompatible type, not INT64");
-    } else EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' info is NULL");
+      if (info->data.kind == ROCPROFILER_DATA_KIND_UNINIT)
+        EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' is uninitialized");
+      if (info->data.kind != ROCPROFILER_DATA_KIND_INT64)
+        EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' is of incompatible type, not INT64");
+    } else
+      EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' info is NULL");
     return (info != NULL);
   }
-  private:
+
+ private:
   const Map& map_;
 };
 
 // Profiling group
 class Group {
-  public:
-  Group(const util::AgentInfo* agent_info, Context *context, const uint32_t& index) :
-    pmc_profile_(agent_info),
-    sqtt_profile_(agent_info),
-    n_profiles_(0),
-    refs_(1),
-    context_(context),
-    index_(index)
-  {}
+ public:
+  Group(const util::AgentInfo* agent_info, Context* context, const uint32_t& index)
+      : pmc_profile_(agent_info),
+        sqtt_profile_(agent_info),
+        n_profiles_(0),
+        refs_(1),
+        context_(context),
+        index_(index) {}
 
   void Insert(const profile_info_t& info) {
     const rocprofiler_feature_kind_t kind = info.rinfo->kind;
@@ -106,9 +110,7 @@ class Group {
     sqtt_profile_.GetProfiles(vec);
   }
 
-  void GetTraceProfiles(profile_vector_t& vec) {
-    sqtt_profile_.GetProfiles(vec);
-  }
+  void GetTraceProfiles(profile_vector_t& vec) { sqtt_profile_.GetProfiles(vec); }
 
   info_vector_t& GetInfoVector() { return info_vector_; }
   const pkt_vector_t& GetStartVector() const { return start_vector_; }
@@ -125,7 +127,7 @@ class Group {
     return refs_;
   }
 
-  private:
+ private:
   PmcProfile pmc_profile_;
   SqttProfile sqtt_profile_;
   info_vector_t info_vector_;
@@ -139,19 +141,19 @@ class Group {
 
 // Profiling context
 class Context {
-  public:
+ public:
   typedef std::mutex mutex_t;
   typedef std::map<std::string, rocprofiler_feature_t*> info_map_t;
 
-  Context(const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info, const uint32_t info_count, rocprofiler_handler_t handler, void* handler_arg) :
-    agent_(agent_info->dev_id),
-    agent_info_(agent_info),
-    queue_(queue),
-    hsa_rsrc_(&util::HsaRsrcFactory::Instance()),
-    api_(hsa_rsrc_->AqlProfileApi()),
-    handler_(handler),
-    handler_arg_(handler_arg)
-  {
+  Context(const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info,
+          const uint32_t info_count, rocprofiler_handler_t handler, void* handler_arg)
+      : agent_(agent_info->dev_id),
+        agent_info_(agent_info),
+        queue_(queue),
+        hsa_rsrc_(&util::HsaRsrcFactory::Instance()),
+        api_(hsa_rsrc_->AqlProfileApi()),
+        handler_(handler),
+        handler_arg_(handler_arg) {
     metrics_ = MetricsDict::Create(agent_info);
     if (metrics_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "MetricsDict create failed");
     Initialize(info, info_count);
@@ -163,12 +165,8 @@ class Context {
         const profile_vector_t profile_vector = GetProfiles(group_index);
         for (auto& tuple : profile_vector) {
           // Handler for stop packet completion
-          hsa_amd_signal_async_handler(
-            tuple.completion_signal,
-            HSA_SIGNAL_CONDITION_LT,
-            1,
-            Handler,
-            &set_[group_index]);
+          hsa_amd_signal_async_handler(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, Handler,
+                                       &set_[group_index]);
         }
       }
     }
@@ -178,7 +176,8 @@ class Context {
     for (const auto& v : info_map_) {
       const std::string& name = v.first;
       const rocprofiler_feature_t* info = v.second;
-      if ((info->kind == ROCPROFILER_FEATURE_KIND_METRIC) && (metrics_map_.find(name) == metrics_map_.end())) {
+      if ((info->kind == ROCPROFILER_FEATURE_KIND_METRIC) &&
+          (metrics_map_.find(name) == metrics_map_.end())) {
         delete info;
       }
     }
@@ -206,14 +205,18 @@ class Context {
       const rocprofiler_feature_kind_t kind = info->kind;
       const char* name = info->name;
 
-      if (kind == ROCPROFILER_FEATURE_KIND_METRIC) { // Processing metrics features
+      if (kind == ROCPROFILER_FEATURE_KIND_METRIC) {  // Processing metrics features
         const Metric* metric = metrics_->Get(name);
-        if (metric == NULL) EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
+        if (metric == NULL)
+          EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
         auto ret = metrics_map_.insert({name, metric});
-        if (!ret.second) EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is registered more then once");
+        if (!ret.second)
+          EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name
+                                                         << "' is registered more then once");
 
         counters_vec_t counters_vec = metric->GetCounters();
-        if (counters_vec.empty()) EXC_RAISING(HSA_STATUS_ERROR, "bad metric '" << name << "' is empty");
+        if (counters_vec.empty())
+          EXC_RAISING(HSA_STATUS_ERROR, "bad metric '" << name << "' is empty");
 
         for (const counter_t* counter : counters_vec) {
           // For metrics expressions checking that there is no the same counter in the input metrics
@@ -238,9 +241,10 @@ class Context {
             query.agent = agent_;
             query.type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC;
             query.events = event;
-  
+
             uint32_t block_counters;
-            hsa_status_t status = api_->hsa_ven_amd_aqlprofile_get_info(&query, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS, &block_counters);
+            hsa_status_t status = api_->hsa_ven_amd_aqlprofile_get_info(
+                &query, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS, &block_counters);
             if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "get block_counters info");
             block_status.max_counters = block_counters;
           }
@@ -254,9 +258,9 @@ class Context {
           const uint32_t group_index = block_status.group_index;
           set_[group_index].Insert(profile_info_t{event, NULL, 0, info});
         }
-      } else if (kind == ROCPROFILER_FEATURE_KIND_TRACE) { // Processing traces features
+      } else if (kind == ROCPROFILER_FEATURE_KIND_TRACE) {  // Processing traces features
         set_[0].Insert(profile_info_t{NULL, info->parameters, info->parameter_count, info});
-      } else { 
+      } else {
         EXC_RAISING(HSA_STATUS_ERROR, "bad rocprofiler feature kind (" << kind << ")");
       }
     }
@@ -269,9 +273,7 @@ class Context {
     }
   }
 
-  void Reset(const uint32_t& group_index) {
-    set_[group_index].ResetRefs();
-  }
+  void Reset(const uint32_t& group_index) { set_[group_index].ResetRefs(); }
 
   uint32_t GetGroupCount() const { return set_.size(); }
 
@@ -285,8 +287,12 @@ class Context {
     return group;
   }
 
-  const pkt_vector_t& StartPackets(const uint32_t& group_index) const { return set_[group_index].GetStartVector(); }
-  const pkt_vector_t& StopPackets(const uint32_t& group_index) const { return set_[group_index].GetStopVector(); }
+  const pkt_vector_t& StartPackets(const uint32_t& group_index) const {
+    return set_[group_index].GetStartVector();
+  }
+  const pkt_vector_t& StopPackets(const uint32_t& group_index) const {
+    return set_[group_index].GetStopVector();
+  }
 
   void Start(const uint32_t& group_index, Queue* const queue = NULL) {
     const pkt_vector_t& start_packets = StartPackets(group_index);
@@ -315,14 +321,11 @@ class Context {
     const profile_vector_t profile_vector = GetProfiles(group_index);
     for (auto& tuple : profile_vector) {
       // Wait for stop packet to complete
-      hsa_signal_wait_scacquire(
-        tuple.completion_signal,
-        HSA_SIGNAL_CONDITION_LT,
-        1,
-        (uint64_t)-1,
-        HSA_WAIT_STATE_BLOCKED);
+      hsa_signal_wait_scacquire(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                HSA_WAIT_STATE_BLOCKED);
       callback_data_t callback_data{tuple.info_vector, tuple.info_vector->size(), NULL};
-      const hsa_status_t status = api_->hsa_ven_amd_aqlprofile_iterate_data(tuple.profile, DataCallback, &callback_data);
+      const hsa_status_t status =
+          api_->hsa_ven_amd_aqlprofile_iterate_data(tuple.profile, DataCallback, &callback_data);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "context iterate data failed");
     }
   }
@@ -335,7 +338,8 @@ class Context {
       const xml::Expr* expr = metric->GetExpr();
       if (expr) {
         auto it = info_map_.find(name);
-        if (it == info_map_.end()) EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "', rocprofiler info is not found");
+        if (it == info_map_.end())
+          EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "', rocprofiler info is not found");
         rocprofiler_feature_t* info = it->second;
         info->data.result_int64 = expr->Eval(args);
         info->data.kind = ROCPROFILER_DATA_KIND_INT64;
@@ -343,16 +347,17 @@ class Context {
     }
   }
 
-  void IterateTraceData(rocprofiler_trace_data_callback_t callback, void *data) {
+  void IterateTraceData(rocprofiler_trace_data_callback_t callback, void* data) {
     profile_vector_t profile_vector;
     set_[0].GetTraceProfiles(profile_vector);
     for (auto& tuple : profile_vector) {
-      const hsa_status_t status = api_->hsa_ven_amd_aqlprofile_iterate_data(tuple.profile, callback, data);
+      const hsa_status_t status =
+          api_->hsa_ven_amd_aqlprofile_iterate_data(tuple.profile, callback, data);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "context iterate data failed");
     }
   }
 
-  private:
+ private:
   // Getting profling packets
   profile_vector_t GetProfiles(const uint32_t& index) {
     profile_vector_t vec;
@@ -374,8 +379,7 @@ class Context {
   }
 
   static hsa_status_t DataCallback(hsa_ven_amd_aqlprofile_info_type_t ainfo_type,
-                                   hsa_ven_amd_aqlprofile_info_data_t* ainfo_data,
-                                   void* data) {
+                                   hsa_ven_amd_aqlprofile_info_data_t* ainfo_data, void* data) {
     hsa_status_t status = HSA_STATUS_SUCCESS;
     callback_data_t* callback_data = reinterpret_cast<callback_data_t*>(data);
     info_vector_t& info_vector = *(callback_data->info_vector);
@@ -403,7 +407,7 @@ class Context {
           char* ptr = (sample_id == 0) ? result_bytes_ptr : callback_data->ptr;
           uint64_t* header = reinterpret_cast<uint64_t*>(ptr);
           char* dest = ptr + sizeof(*header);
-  
+
           if ((dest + size) < end) {
             hsa_status_t status = hsa_memory_copy(dest, src, size);
             if (status == HSA_STATUS_SUCCESS) {
@@ -412,7 +416,8 @@ class Context {
               rinfo->data.result_bytes.instance_count = sample_id + 1;
               callback_data->ptr = dest + align_size(size, sizeof(uint64_t));
             }
-          } else status = HSA_STATUS_ERROR;
+          } else
+            status = HSA_STATUS_ERROR;
         } else {
           if (sample_id == 0) {
             rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
@@ -421,8 +426,10 @@ class Context {
           }
           rinfo->data.result_bytes.instance_count += 1;
         }
-      } else status = HSA_STATUS_ERROR;
-    } else status = HSA_STATUS_ERROR;
+      } else
+        status = HSA_STATUS_ERROR;
+    } else
+      status = HSA_STATUS_ERROR;
 
     return status;
   }
@@ -445,7 +452,7 @@ class Context {
   const pfn_t* api_;
   // Profile group set
   std::vector<Group> set_;
-  // Metrics dictionary 
+  // Metrics dictionary
   MetricsDict* metrics_;
   // Groups map
   std::map<block_des_t, block_status_t, lt_block_des> groups_map_;

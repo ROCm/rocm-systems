@@ -48,8 +48,7 @@ bool TestPMgr::AddPacketGfx9(const packet_t* packet) {
   *slot = aql_packet;
   // After AQL packet is fully copied into queue buffer
   // update packet header from invalid state to valid state
-  auto header_atomic_ptr =
-      reinterpret_cast<std::atomic<uint16_t>*>(&slot->header);
+  auto header_atomic_ptr = reinterpret_cast<std::atomic<uint16_t>*>(&slot->header);
   header_atomic_ptr->store(header, std::memory_order_release);
 
   // Increment the write index and ring the doorbell to dispatch the kernel.

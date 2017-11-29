@@ -20,13 +20,10 @@ typedef decltype(hsa_signal_t::handle) signal_handle_t;
 
 
 class SimpleProxyQueue : public ProxyQueue {
-  public:
+ public:
   static void HsaIntercept(HsaApiTable* table);
- 
-  static void SignalStore(
-    hsa_signal_t signal,
-    hsa_signal_value_t que_idx)
-  {
+
+  static void SignalStore(hsa_signal_t signal, hsa_signal_value_t que_idx) {
     auto it = queue_map_.find(signal.handle);
     if (it != queue_map_.end()) {
       SimpleProxyQueue* instance = it->second;
@@ -37,17 +34,17 @@ class SimpleProxyQueue : public ProxyQueue {
         // Submited packet
         const uint32_t idx = j & instance->queue_mask_;
         packet_t* packet = reinterpret_cast<packet_t*>(instance->queue_->base_address) + idx;
-        if (instance->on_submit_cb_ != NULL) instance->on_submit_cb_(packet, 1, j, instance->on_submit_cb_data_, NULL);
-        else instance->Submit(packet);
+        if (instance->on_submit_cb_ != NULL)
+          instance->on_submit_cb_(packet, 1, j, instance->on_submit_cb_data_, NULL);
+        else
+          instance->Submit(packet);
       }
     } else {
       hsa_signal_store_relaxed_fn(signal, que_idx);
     }
   }
-  
-  static uint64_t LoadIndex(
-    const hsa_queue_t *queue)
-  {
+
+  static uint64_t LoadIndex(const hsa_queue_t* queue) {
     uint64_t index = 0;
     auto it = queue_map_.find(queue->doorbell_signal.handle);
     if (it != queue_map_.end()) {
@@ -60,10 +57,7 @@ class SimpleProxyQueue : public ProxyQueue {
     return index;
   }
 
-  static void StoreIndex(
-    const hsa_queue_t *queue,
-    uint64_t value)
-  {
+  static void StoreIndex(const hsa_queue_t* queue, uint64_t value) {
     auto it = queue_map_.find(queue->doorbell_signal.handle);
     if (it != queue_map_.end()) {
       SimpleProxyQueue* instance = it->second;
@@ -107,31 +101,24 @@ class SimpleProxyQueue : public ProxyQueue {
     hsa_signal_store_relaxed_fn(doorbell_signal_, que_idx);
   }
 
-  SimpleProxyQueue() :
-    agent_info_(NULL),
-    queue_(NULL),
-    base_address_(NULL),
-    doorbell_signal_({}),
-    queue_index_(0),
-    queue_mask_(0),
-    submit_index_(0),
-    on_submit_cb_(0),
-    on_submit_cb_data_(0)
-  {}
+  SimpleProxyQueue()
+      : agent_info_(NULL),
+        queue_(NULL),
+        base_address_(NULL),
+        doorbell_signal_({}),
+        queue_index_(0),
+        queue_mask_(0),
+        submit_index_(0),
+        on_submit_cb_(0),
+        on_submit_cb_data_(0) {}
 
   ~SimpleProxyQueue() {}
 
-  private:
-  hsa_status_t Init(
-    hsa_agent_t agent,
-    uint32_t size,
-    hsa_queue_type32_t type,
-    void (*callback)(hsa_status_t status, hsa_queue_t *source, void *data),
-    void *data,
-    uint32_t private_segment_size,
-    uint32_t group_segment_size,
-    hsa_queue_t **queue)
-  {
+ private:
+  hsa_status_t Init(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+                    void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
+                    void* data, uint32_t private_segment_size, uint32_t group_segment_size,
+                    hsa_queue_t** queue) {
     auto status = Init(agent, size);
     *queue = queue_;
     return status;
@@ -142,13 +129,14 @@ class SimpleProxyQueue : public ProxyQueue {
     agent_info_ = util::HsaRsrcFactory::Instance().GetAgentInfo(agent);
     if (agent_info_ != NULL) {
       if (agent_info_->dev_type == HSA_DEVICE_TYPE_GPU) {
-        status = hsa_queue_create_fn(agent, size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, UINT32_MAX, UINT32_MAX, &queue_);
+        status = hsa_queue_create_fn(agent, size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, UINT32_MAX,
+                                     UINT32_MAX, &queue_);
         if (status == HSA_STATUS_SUCCESS) {
           base_address_ = reinterpret_cast<packet_t*>(queue_->base_address);
           doorbell_signal_ = queue_->doorbell_signal;
           data_array_ = calloc(size + 1, sizeof(packet_t));
           uintptr_t addr = (uintptr_t)data_array_;
-          queue_->base_address = (void*) ((addr + align_mask_) & ~align_mask_);
+          queue_->base_address = (void*)((addr + align_mask_) & ~align_mask_);
           status = hsa_signal_create(1, 0, NULL, &(queue_->doorbell_signal));
           queue_mask_ = size - 1;
           queue_map_[queue_->doorbell_signal.handle] = this;
@@ -182,6 +170,6 @@ class SimpleProxyQueue : public ProxyQueue {
   void* data_array_;
 };
 
-} // namespace rocprofiler
+}  // namespace rocprofiler
 
-#endif // _SRC_CORE_SIMPLE_PROXY_QUEUE_H
+#endif  // _SRC_CORE_SIMPLE_PROXY_QUEUE_H

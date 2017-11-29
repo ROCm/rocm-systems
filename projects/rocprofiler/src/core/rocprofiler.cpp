@@ -18,15 +18,15 @@
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
 
-#define API_METHOD_PREFIX \
-  hsa_status_t status = HSA_STATUS_SUCCESS; \
+#define API_METHOD_PREFIX                                                                          \
+  hsa_status_t status = HSA_STATUS_SUCCESS;                                                        \
   try {
-
-#define API_METHOD_SUFFIX \
-  } catch (std::exception& e) { \
-    ERR_LOGGING(__FUNCTION__ << "(), " << e.what()); \
-    status = rocprofiler::GetExcStatus(e); \
-  } \
+#define API_METHOD_SUFFIX                                                                          \
+  }                                                                                                \
+  catch (std::exception & e) {                                                                     \
+    ERR_LOGGING(__FUNCTION__ << "(), " << e.what());                                               \
+    status = rocprofiler::GetExcStatus(e);                                                         \
+  }                                                                                                \
   return status;
 
 namespace rocprofiler {
@@ -80,12 +80,12 @@ DESTRUCTOR_API void destructor() {
 
 hsa_status_t GetExcStatus(const std::exception& e) {
   const util::exception* rocprofiler_exc_ptr = dynamic_cast<const util::exception*>(&e);
-  return (rocprofiler_exc_ptr) ? static_cast<hsa_status_t>(rocprofiler_exc_ptr->status()) : HSA_STATUS_ERROR;
+  return (rocprofiler_exc_ptr) ? static_cast<hsa_status_t>(rocprofiler_exc_ptr->status())
+                               : HSA_STATUS_ERROR;
 }
 
 util::Logger::mutex_t util::Logger::mutex_;
 util::Logger* util::Logger::instance_ = NULL;
-
 }
 
 extern "C" {
@@ -98,14 +98,9 @@ PUBLIC_API hsa_status_t rocprofiler_error_string(const char** str) {
 }
 
 // Create new profiling context
-PUBLIC_API hsa_status_t rocprofiler_open(
-    hsa_agent_t agent,
-    rocprofiler_feature_t* info,
-    uint32_t info_count,
-    rocprofiler_t** handle,
-    uint32_t mode,
-    rocprofiler_properties_t* properties)
-{
+PUBLIC_API hsa_status_t rocprofiler_open(hsa_agent_t agent, rocprofiler_feature_t* info,
+                                         uint32_t info_count, rocprofiler_t** handle, uint32_t mode,
+                                         rocprofiler_properties_t* properties) {
   API_METHOD_PREFIX
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
   const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
@@ -117,7 +112,8 @@ PUBLIC_API hsa_status_t rocprofiler_open(
   if (mode != 0) {
     if (mode & ROCPROFILER_MODE_STANDALONE) {
       if (mode & ROCPROFILER_MODE_CREATEQUEUE) {
-        if (hsa_rsrc->CreateQueue(agent_info, properties->queue_depth, &(properties->queue)) == false) {
+        if (hsa_rsrc->CreateQueue(agent_info, properties->queue_depth, &(properties->queue)) ==
+            false) {
           EXC_RAISING(HSA_STATUS_ERROR, "CreateQueue() failed");
         }
       }
@@ -127,13 +123,13 @@ PUBLIC_API hsa_status_t rocprofiler_open(
     }
   }
 
-  *handle = new rocprofiler::Context(agent_info, queue, info, info_count, properties->handler, properties->handler_arg);
+  *handle = new rocprofiler::Context(agent_info, queue, info, info_count, properties->handler,
+                                     properties->handler_arg);
   API_METHOD_SUFFIX
 }
 
 // Delete profiling info
-PUBLIC_API hsa_status_t rocprofiler_close(rocprofiler_t* handle)
-{
+PUBLIC_API hsa_status_t rocprofiler_close(rocprofiler_t* handle) {
   API_METHOD_PREFIX
   rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
   if (context) delete context;
@@ -141,8 +137,7 @@ PUBLIC_API hsa_status_t rocprofiler_close(rocprofiler_t* handle)
 }
 
 // Reset context
-PUBLIC_API hsa_status_t rocprofiler_reset(rocprofiler_t* handle, uint32_t group_index)
-{
+PUBLIC_API hsa_status_t rocprofiler_reset(rocprofiler_t* handle, uint32_t group_index) {
   API_METHOD_PREFIX
   rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
   context->Reset(group_index);
@@ -150,7 +145,8 @@ PUBLIC_API hsa_status_t rocprofiler_reset(rocprofiler_t* handle, uint32_t group_
 }
 
 // Get profiling group count
-PUBLIC_API hsa_status_t rocprofiler_group_count(const rocprofiler_t* handle, uint32_t* group_count) {
+PUBLIC_API hsa_status_t rocprofiler_group_count(const rocprofiler_t* handle,
+                                                uint32_t* group_count) {
   API_METHOD_PREFIX
   const rocprofiler::Context* context = reinterpret_cast<const rocprofiler::Context*>(handle);
   *group_count = context->GetGroupCount();
@@ -158,7 +154,8 @@ PUBLIC_API hsa_status_t rocprofiler_group_count(const rocprofiler_t* handle, uin
 }
 
 // Get profiling group for a given group index
-PUBLIC_API hsa_status_t rocprofiler_get_group(rocprofiler_t* handle, uint32_t group_index, rocprofiler_group_t* group) {
+PUBLIC_API hsa_status_t rocprofiler_get_group(rocprofiler_t* handle, uint32_t group_index,
+                                              rocprofiler_group_t* group) {
   API_METHOD_PREFIX
   rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
   *group = context->GetGroupInfo(group_index);
@@ -220,7 +217,8 @@ PUBLIC_API hsa_status_t rocprofiler_get_metrics(const rocprofiler_t* handle) {
 }
 
 // Set kernel dispatch observer
-PUBLIC_API hsa_status_t rocprofiler_set_dispatch_callback(rocprofiler_callback_t callback, void* data) {
+PUBLIC_API hsa_status_t rocprofiler_set_dispatch_callback(rocprofiler_callback_t callback,
+                                                          void* data) {
   API_METHOD_PREFIX
   rocprofiler::InterceptQueue::SetDispatchCB(callback, data);
   API_METHOD_SUFFIX
@@ -234,18 +232,16 @@ PUBLIC_API hsa_status_t rocprofiler_remove_dispatch_callback() {
 }
 
 // Method for iterating the events output data
-PUBLIC_API hsa_status_t rocprofiler_iterate_trace_data(rocprofiler_t* handle, hsa_ven_amd_aqlprofile_data_callback_t callback, void* data) {
+PUBLIC_API hsa_status_t rocprofiler_iterate_trace_data(
+    rocprofiler_t* handle, hsa_ven_amd_aqlprofile_data_callback_t callback, void* data) {
   API_METHOD_PREFIX
   rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
   context->IterateTraceData(callback, data);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API bool OnLoad(
-    HsaApiTable* table,
-    uint64_t runtime_version,
-    uint64_t failed_tool_count,
-    const char* const * failed_tool_names) {
+PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
+                       const char* const* failed_tool_names) {
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
   rocprofiler::InterceptQueue::SetTool(getenv("ROCP_TOOL_LIB"));
@@ -257,8 +253,6 @@ PUBLIC_API bool OnLoad(
   return true;
 }
 
-PUBLIC_API void OnUnload() {
-  rocprofiler::RestoreHsaApi();
-}
+PUBLIC_API void OnUnload() { rocprofiler::RestoreHsaApi(); }
 
-} // extern "C"
+}  // extern "C"

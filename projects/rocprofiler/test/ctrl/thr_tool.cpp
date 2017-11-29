@@ -48,11 +48,14 @@ void check_status(hsa_status_t status) {
   }
 }
 
-unsigned align_size(unsigned size, unsigned alignment) { return ((size + alignment - 1) & ~(alignment - 1)); }
+unsigned align_size(unsigned size, unsigned alignment) {
+  return ((size + alignment - 1) & ~(alignment - 1));
+}
 
-void print_info(FILE* file, const rocprofiler_info_t* info, const unsigned info_count, const char* str) {
+void print_info(FILE* file, const rocprofiler_info_t* info, const unsigned info_count,
+                const char* str) {
   if (str) fprintf(file, "%s:\n", str);
-  for (unsigned i= 0; i < info_count; ++i) {
+  for (unsigned i = 0; i < info_count; ++i) {
     const rocprofiler_info_t* p = &info[i];
     fprintf(file, "  %s ", p->name);
     switch (p->data.kind) {
@@ -81,29 +84,30 @@ void print_info(FILE* file, const rocprofiler_info_t* info, const unsigned info_
 
 void print_group(FILE* file, const rocprofiler_group_t* group, const char* str) {
   if (str) fprintf(file, "%s:\n", str);
-  for (unsigned i= 0; i < group->info_count; ++i) {
+  for (unsigned i = 0; i < group->info_count; ++i) {
     print_info(file, group->info[i], 1, NULL);
   }
 }
 
 void store_context(context_entry_t context_entry) {
-  if(pthread_mutex_lock(&mutex) != 0) {
+  if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
     exit(1);
   }
   if ((context_array == NULL) || (context_array_index >= context_array_size)) {
     context_array_size *= 2;
-    context_array = reinterpret_cast<context_entry_t*>(realloc(context_array, context_array_size * sizeof(context_entry_t)));
+    context_array = reinterpret_cast<context_entry_t*>(
+        realloc(context_array, context_array_size * sizeof(context_entry_t)));
   }
   context_array_index += 1;
   context_array[context_array_index - 1] = context_entry;
-  if(pthread_mutex_unlock(&mutex) != 0) {
+  if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
     exit(1);
   }
 }
 
-void dump_context(FILE *file, unsigned index) {
+void dump_context(FILE* file, unsigned index) {
   hsa_status_t status = HSA_STATUS_ERROR;
 
   if (pthread_mutex_lock(&mutex) != 0) {
@@ -122,7 +126,7 @@ void dump_context(FILE *file, unsigned index) {
 
   status = rocprofiler_get_group_data(group);
   check_status(status);
-  //print_group(file, group, "Group[0] data");
+  // print_group(file, group, "Group[0] data");
 
   status = rocprofiler_get_metrics(group->context);
   check_status(status);
@@ -134,10 +138,8 @@ void dump_context(FILE *file, unsigned index) {
 }
 
 // Provided standard profiling callback
-hsa_status_t dispatch_callback(
-    const rocprofiler_callback_data_t* callback_data,
-    void* user_data,
-    rocprofiler_group_t** group) {
+hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
+                               rocprofiler_group_t** group) {
   hsa_status_t status = HSA_STATUS_ERROR;
   // Passed tool data
   dispatch_data_t* tool_data = reinterpret_cast<dispatch_data_t*>(user_data);
@@ -173,17 +175,30 @@ void* dumping_data(void*) {
 
 CONSTRUCTOR_API void constructor() {
   std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
-  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET"] = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET;
-  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK"] = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK;
-  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK"] = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK;
-  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK"] = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK;
-  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2"] = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
+  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET"] =
+      HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET;
+  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK"] =
+      HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK;
+  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK"] =
+      HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK;
+  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK"] =
+      HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK;
+  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2"] =
+      HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
 
 #ifdef TOOL_THREAD
   int err = pthread_attr_init(&thr_attr);
-  if (err) { errno = err; perror("pthread_attr_init"); exit(1); }
+  if (err) {
+    errno = err;
+    perror("pthread_attr_init");
+    exit(1);
+  }
   err = pthread_create(&thread, &thr_attr, dumping_data, NULL);
-  if (err) { errno = err; perror("pthread_create"); exit(1); }
+  if (err) {
+    errno = err;
+    perror("pthread_create");
+    exit(1);
+  }
 #endif
 
   // Set output file
@@ -194,7 +209,8 @@ CONSTRUCTOR_API void constructor() {
       perror("fopen");
       exit(1);
     }
-  } else file_handle = stdout;
+  } else
+    file_handle = stdout;
 
   // Getting input
   const char* xml_name = getenv("ROCP_INPUT");
@@ -211,7 +227,7 @@ CONSTRUCTOR_API void constructor() {
   for (auto* entry : metrics_list) {
     const std::string entry_str = entry->opts["name"];
     size_t pos1 = 0;
-    while(pos1 < entry_str.length()) {
+    while (pos1 < entry_str.length()) {
       const size_t pos2 = entry_str.find(",", pos1);
       const std::string metric_name = entry_str.substr(pos1, pos2 - pos1);
       metrics_vec.push_back(metric_name);
@@ -224,10 +240,10 @@ CONSTRUCTOR_API void constructor() {
   auto traces_list = xml->GetNodes("top.trace");
 
   const unsigned info_count = metrics_vec.size() + traces_list.size();
-  rocprofiler_info_t* info= new rocprofiler_info_t[info_count];
+  rocprofiler_info_t* info = new rocprofiler_info_t[info_count];
   memset(info, 0, info_count * sizeof(rocprofiler_info_t));
 
-  printf("  %d metrics\n", (int) metrics_vec.size());
+  printf("  %d metrics\n", (int)metrics_vec.size());
   for (unsigned i = 0; i < metrics_vec.size(); ++i) {
     const std::string& name = metrics_vec[i];
     printf("%s%s", (i == 0) ? "    " : ", ", name.c_str());
@@ -237,7 +253,7 @@ CONSTRUCTOR_API void constructor() {
   }
   if (metrics_vec.size()) printf("\n");
 
-  printf("  %d traces\n", (int) traces_list.size());
+  printf("  %d traces\n", (int)traces_list.size());
   unsigned index = metrics_vec.size();
   for (auto* entry : traces_list) {
     auto params_list = xml->GetNodes("top.trace.parameters");
@@ -253,7 +269,7 @@ CONSTRUCTOR_API void constructor() {
 
     for (auto* params : params_list) {
       const unsigned parameter_count = params->opts.size();
-      rocprofiler_parameter_t *parameters = new rocprofiler_parameter_t[parameter_count];
+      rocprofiler_parameter_t* parameters = new rocprofiler_parameter_t[parameter_count];
       unsigned p_index = 0;
       for (auto& v : params->opts) {
         const std::string parameter_name = v.first;
