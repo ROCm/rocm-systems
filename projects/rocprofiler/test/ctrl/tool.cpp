@@ -114,8 +114,7 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
   FILE* file = reinterpret_cast<FILE*>(data);
   hsa_status_t status = HSA_STATUS_SUCCESS;
   if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
-    fprintf(file, "    data ptr (%p), size(%u)\n", info_data->sqtt_data.ptr,
-            info_data->sqtt_data.size);
+    fprintf(file, "    SE(%u) size(%u)\n", info_data->sample_id, info_data->sqtt_data.size);
     dump_sqtt_trace(info_data->sample_id, info_data->sqtt_data.ptr, info_data->sqtt_data.size);
 
   } else
@@ -161,7 +160,8 @@ void output_results(FILE* file, const rocprofiler_feature_t* features, const uns
             exit(1);
           }
         } else {
-          fprintf(file, "iterate GPU local memory (\n");
+          //fprintf(file, "iterate GPU local memory ");
+          fprintf(file, "(\n");
           rocprofiler_iterate_trace_data(context, trace_data_cb, reinterpret_cast<void*>(file));
           fprintf(file, "  )\n");
         }

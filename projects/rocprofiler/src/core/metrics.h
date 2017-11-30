@@ -158,7 +158,7 @@ class MetricsDict {
                                                                                 << "'");
         } else {
           xml::Expr* expr_obj = new xml::Expr(expr_str, new ExprCache(&cache_));
-          std::cout << "    " << name << " = " << expr_obj->String() << std::endl;
+          //std::cout << "    " << name << " = " << expr_obj->String() << std::endl;
           counters_vec_t counters_vec;
           for (const std::string var : expr_obj->GetVars()) {
             auto it = cache_.find(var);
