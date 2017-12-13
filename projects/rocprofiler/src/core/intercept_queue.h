@@ -2,6 +2,7 @@
 #define _SRC_CORE_INTERCEPT_QUEUE_H
 
 #include <amd_hsa_kernel_code.h>
+#include <cxxabi.h>
 #include <dlfcn.h>
 
 #include <atomic>
@@ -160,7 +161,17 @@ class InterceptQueue {
     amd_runtime_loader_debug_info_t* dbg_info = reinterpret_cast<amd_runtime_loader_debug_info_t*>(
         kernel_code->runtime_loader_kernel_symbol);
     const char* kernel_name = (dbg_info != NULL) ? dbg_info->kernel_name : NULL;
-    return (kernel_name != NULL) ? strdup(kernel_name) : NULL;
+
+    // Kernel name is mangled name
+    // apply __cxa_demangle() to demangle it
+    char* funcname = NULL;
+    if (kernel_name != NULL) {
+      size_t funcnamesize = 0;
+      int status;
+      char* ret = abi::__cxa_demangle(kernel_name, NULL, &funcnamesize, &status);
+      funcname = (ret != 0) ? ret : strdup(kernel_name);
+    }
+    return funcname;
   }
 
   static mutex_t mutex_;
