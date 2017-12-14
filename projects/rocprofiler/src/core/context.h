@@ -370,8 +370,9 @@ class Context {
 
   static bool Handler(hsa_signal_value_t value, void* arg) {
     Group* group = reinterpret_cast<Group*>(arg);
-    std::lock_guard<mutex_t> lck(group->GetContext()->mutex_);
+    group->GetContext()->mutex_.lock();
     uint32_t r = group->DecrRefs();
+    group->GetContext()->mutex_.unlock();
     if (r == 0) {
       group->GetContext()->handler_(group->GetGroup(), group->GetContext()->handler_arg_);
     }
