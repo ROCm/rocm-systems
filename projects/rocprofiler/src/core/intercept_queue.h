@@ -55,11 +55,13 @@ class InterceptQueue {
 
     ProxyQueue* proxy = ProxyQueue::Create(agent, size, type, callback, data, private_segment_size,
                                            group_segment_size, queue, &status);
-    if (status != HSA_STATUS_SUCCESS) {
+    if (status == HSA_STATUS_SUCCESS) {
       InterceptQueue* obj = new InterceptQueue(agent, proxy);
       (*obj_map_)[(uint64_t)(*queue)] = obj;
       status = proxy->SetInterceptCB(OnSubmitCB, obj);
     }
+
+    if (status != HSA_STATUS_SUCCESS) abort();
 
     return status;
   }
@@ -97,7 +99,7 @@ class InterceptQueue {
                                             dispatch_packet->kernel_object,
                                             GetKernelName(dispatch_packet)};
         hsa_status_t status = on_dispatch_cb_(&data, on_dispatch_cb_data_, &group);
-        if (status == HSA_STATUS_SUCCESS) {
+        if ((status == HSA_STATUS_SUCCESS) && (group.context != NULL)) {
           Context* context = reinterpret_cast<Context*>(group.context);
           const pkt_vector_t& start_vector = context->StartPackets(group.index);
           const pkt_vector_t& stop_vector = context->StopPackets(group.index);

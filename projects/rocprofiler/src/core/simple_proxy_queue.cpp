@@ -7,5 +7,5 @@ void SimpleProxyQueue::HsaIntercept(HsaApiTable* table) {
   table->core_->hsa_queue_store_write_index_relaxed_fn = rocprofiler::SimpleProxyQueue::StoreIndex;
 }
 
-std::map<signal_handle_t, SimpleProxyQueue*> SimpleProxyQueue::queue_map_;
+SimpleProxyQueue::queue_map_t* SimpleProxyQueue::queue_map_ = NULL;
 }  // namespace rocprofiler

@@ -62,7 +62,7 @@ bool TestPMgr::AddPacketGfx8(const packet_t* packet) {
   // Create legacy devices PM4 data
   const hsa_ext_amd_aql_pm4_packet_t* aql_packet = (const hsa_ext_amd_aql_pm4_packet_t*)packet;
   slot_pm4_t data;
-  api_.hsa_ven_amd_aqlprofile_legacy_get_pm4(aql_packet, reinterpret_cast<void*>(data.words));
+  api_->hsa_ven_amd_aqlprofile_legacy_get_pm4(aql_packet, reinterpret_cast<void*>(data.words));
 
   // Compute the write index of queue and copy Aql packet into it
   uint64_t que_idx = hsa_queue_load_write_index_relaxed(GetQueue());
@@ -128,16 +128,14 @@ bool TestPMgr::Initialize(int argc, char** argv) {
   hsa_status_t status = HSA_STATUS_ERROR;
   status = hsa_signal_create(1, 0, NULL, &post_signal_);
   TEST_ASSERT(status == HSA_STATUS_SUCCESS);
-  status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_AQLPROFILE, 1, 0, &api_);
-  TEST_ASSERT(status == HSA_STATUS_SUCCESS);
+  api_ = HsaRsrcFactory::Instance().AqlProfileApi();;
 
   return true;
 }
 
-TestPMgr::TestPMgr(TestAql* t) : TestAql(t), api_({0}) {
+TestPMgr::TestPMgr(TestAql* t) : TestAql(t), api_(NULL) {
   memset(&pre_packet_, 0, sizeof(pre_packet_));
   memset(&post_packet_, 0, sizeof(post_packet_));
   dummy_signal_.handle = 0;
   post_signal_ = dummy_signal_;
-  memset(&api_, 0, sizeof(api_));
 }

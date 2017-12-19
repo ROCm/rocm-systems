@@ -27,6 +27,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include <hsa.h>
 #include <hsa_ext_finalize.h>
+#include <hsa_ven_amd_aqlprofile.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,7 +55,7 @@ static const unsigned MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
 
 // Encapsulates information about a Hsa Agent such as its
 // handle, name, max queue size, max wavefront size, etc.
-typedef struct {
+struct AgentInfo {
   // Handle of Agent
   hsa_agent_t dev_id;
 
@@ -78,8 +79,7 @@ typedef struct {
 
   // Memory region supporting kernel arguments
   hsa_region_t kernarg_region;
-
-} AgentInfo;
+};
 
 class HsaRsrcFactory {
  public:
@@ -207,7 +207,14 @@ class HsaRsrcFactory {
   // Print the various fields of Hsa Gpu Agents
   bool PrintGpuAgents(const std::string& header);
 
+  // Return AqlProfile API table
+  typedef hsa_ven_amd_aqlprofile_1_00_pfn_t aqlprofile_pfn_t;
+  const aqlprofile_pfn_t* AqlProfileApi() const { return &aqlprofile_api_; }
+
  private:
+  // Load AQL profile HSA extension library directly
+  static hsa_status_t LoadAqlProfileLib(aqlprofile_pfn_t* api);
+
   // Constructor of the class. Will initialize the Hsa Runtime and
   // query the system topology to get the list of Cpu and Gpu devices
   HsaRsrcFactory();
@@ -229,6 +236,9 @@ class HsaRsrcFactory {
 
   // Used to maintain a list of Hsa Cpu Agent Info
   std::vector<AgentInfo*> cpu_list_;
+
+  // AqlProfile API table
+  aqlprofile_pfn_t aqlprofile_api_;
 };
 
 #endif  // TEST_UTIL_HSA_RSRC_FACTORY_H_

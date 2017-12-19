@@ -27,6 +27,33 @@ class Xml {
 
   enum { DECL_STATE, BODY_STATE };
 
+  static Xml* Create(const char* file_name) {
+    Xml* xml = new Xml(file_name);
+    if (xml->fd_ == -1) {
+      delete xml;
+      xml = NULL;
+    }
+    return xml;
+  }
+
+  static void Destroy(Xml *xml) { delete xml; }
+
+  std::vector<level_t*> GetNodes(std::string global_tag) { return map_[global_tag]; }
+
+  void Print() const {
+    for (auto& elem : map_) {
+      for (auto node : elem.second) {
+        if (node->opts.size()) {
+          std::cout << elem.first << ":" << std::endl;
+          for (auto& opt : node->opts) {
+            std::cout << "  " << opt.first << " = " << opt.second << std::endl;
+          }
+        }
+      }
+    }
+  }
+
+ private:
   Xml(const char* file_name)
       : file_name_(file_name),
         file_line_(0),
@@ -39,7 +66,7 @@ class Xml {
 
     fd_ = open(file_name, O_RDONLY);
     if (fd_ == -1) {
-      std::cout << "XML file not found: " << file_name << std::endl;
+      perror("open XML file");
       return;
     }
 
@@ -117,22 +144,8 @@ class Xml {
     }
   }
 
-  std::vector<level_t*> GetNodes(std::string global_tag) { return map_[global_tag]; }
+  ~Xml() {}
 
-  void Print() const {
-    for (auto& elem : map_) {
-      for (auto node : elem.second) {
-        if (node->opts.size()) {
-          std::cout << elem.first << ":" << std::endl;
-          for (auto& opt : node->opts) {
-            std::cout << "  " << opt.first << " = " << opt.second << std::endl;
-          }
-        }
-      }
-    }
-  }
-
- private:
   bool LineEndCheck() {
     bool found = false;
     if (buffer_[index_] == '\n') {

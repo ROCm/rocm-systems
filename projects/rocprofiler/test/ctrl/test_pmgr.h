@@ -47,7 +47,7 @@ class TestPMgr : public TestAql {
   hsa_signal_t dummy_signal_;
   hsa_signal_t post_signal_;
 
-  hsa_ven_amd_aqlprofile_1_00_pfn_t api_;
+  HsaRsrcFactory::aqlprofile_pfn_t* api_;
 
   virtual bool BuildPackets() { return false; }
   virtual bool DumpData() { return false; }

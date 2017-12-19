@@ -24,6 +24,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "util/hsa_rsrc_factory.h"
 
+#include <dlfcn.h>
 #include <hsa.h>
 #include <hsa_ext_finalize.h>
 #include <stdint.h>
@@ -116,12 +117,51 @@ HsaRsrcFactory::HsaRsrcFactory() {
   // Discover the set of Gpu devices available on the platform
   status = hsa_iterate_agents(GetHsaAgentsCallback, this);
   CHECK_STATUS("Error Calling hsa_iterate_agents", status);
+
+  // Get AqlProfile API table
+  aqlprofile_api_ = {0};
+  status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_AQLPROFILE, 1, 0, &aqlprofile_api_);
+  if (status != HSA_STATUS_SUCCESS) status = LoadAqlProfileLib(&aqlprofile_api_);
+  CHECK_STATUS("aqlprofile API table load failed", status);
 }
 
 // Destructor of the class
 HsaRsrcFactory::~HsaRsrcFactory() {
   hsa_status_t status = hsa_shut_down();
   CHECK_STATUS("Error in hsa_shut_down", status);
+}
+
+hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
+    void* handle = dlopen(kAqlProfileLib, RTLD_NOW);
+    if (handle == NULL) {
+      fprintf(stderr, "Loading '%s' failed, %s\n", kAqlProfileLib, dlerror());
+      return HSA_STATUS_ERROR;
+    }
+    dlerror(); /* Clear any existing error */
+
+    api->hsa_ven_amd_aqlprofile_error_string =
+      (decltype(::hsa_ven_amd_aqlprofile_error_string)*)
+        dlsym(handle, "hsa_ven_amd_aqlprofile_error_string");
+    api->hsa_ven_amd_aqlprofile_validate_event =
+      (decltype(::hsa_ven_amd_aqlprofile_validate_event)*)
+        dlsym(handle, "hsa_ven_amd_aqlprofile_validate_event");
+    api->hsa_ven_amd_aqlprofile_start =
+      (decltype(::hsa_ven_amd_aqlprofile_start)*)
+        dlsym(handle, "hsa_ven_amd_aqlprofile_start");
+    api->hsa_ven_amd_aqlprofile_stop =
+      (decltype(::hsa_ven_amd_aqlprofile_stop)*)
+        dlsym(handle, "hsa_ven_amd_aqlprofile_stop");
+    api->hsa_ven_amd_aqlprofile_legacy_get_pm4 =
+      (decltype(::hsa_ven_amd_aqlprofile_legacy_get_pm4)*)
+        dlsym(handle, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+    api->hsa_ven_amd_aqlprofile_get_info =
+      (decltype(::hsa_ven_amd_aqlprofile_get_info)*)
+        dlsym(handle, "hsa_ven_amd_aqlprofile_get_info");
+    api->hsa_ven_amd_aqlprofile_iterate_data =
+      (decltype(::hsa_ven_amd_aqlprofile_iterate_data)*)
+        dlsym(handle, "hsa_ven_amd_aqlprofile_iterate_data");
+
+  return HSA_STATUS_SUCCESS;
 }
 
 // Get the count of Hsa Gpu Agents available on the platform

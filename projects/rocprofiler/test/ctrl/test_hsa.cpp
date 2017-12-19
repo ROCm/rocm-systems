@@ -61,6 +61,7 @@ HsaRsrcFactory* TestHsa::HsaInstantiate(const uint32_t agent_ind) {
       uint32_t num_pkts = 128;
       if (hsa_rsrc_->CreateQueue(agent_info_, num_pkts, &hsa_queue_) == false) {
         hsa_queue_ = NULL;
+        TEST_ASSERT(false);
       }
     }
   }

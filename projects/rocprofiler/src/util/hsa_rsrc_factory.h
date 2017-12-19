@@ -222,7 +222,8 @@ class HsaRsrcFactory {
   bool PrintGpuAgents(const std::string& header);
 
   // Return AqlProfile API table
-  const hsa_ven_amd_aqlprofile_1_00_pfn_t* AqlProfileApi() const { return &aqlprofile_api_; }
+  typedef hsa_ven_amd_aqlprofile_1_00_pfn_t aqlprofile_pfn_t;
+  const aqlprofile_pfn_t* AqlProfileApi() const { return &aqlprofile_api_; }
 
   // Return Loader API table
   const hsa_ven_amd_loader_1_00_pfn_t* LoaderApi() const { return &loader_api_; }
@@ -233,6 +234,9 @@ class HsaRsrcFactory {
 
   // Callback function to find and bind kernarg region of an agent
   static hsa_status_t FindMemRegionsCallback(hsa_region_t region, void* data);
+
+  // Load AQL profile HSA extension library directly
+  static hsa_status_t LoadAqlProfileLib(aqlprofile_pfn_t* api);
 
   // Constructor of the class. Will initialize the Hsa Runtime and
   // query the system topology to get the list of Cpu and Gpu devices
@@ -257,7 +261,7 @@ class HsaRsrcFactory {
   std::map<hsa_agent_handle_t, const AgentInfo*> agent_map_;
 
   // AqlProfile API table
-  hsa_ven_amd_aqlprofile_1_00_pfn_t aqlprofile_api_;
+  aqlprofile_pfn_t aqlprofile_api_;
 
   // Loader API table
   hsa_ven_amd_loader_1_00_pfn_t loader_api_;

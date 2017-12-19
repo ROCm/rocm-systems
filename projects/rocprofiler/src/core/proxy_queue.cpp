@@ -24,7 +24,7 @@ ProxyQueue* ProxyQueue::Create(hsa_agent_t agent, uint32_t size, hsa_queue_type3
   ProxyQueue* instance = new SimpleProxyQueue();
 #endif
   if (instance != NULL) {
-    const auto suc = instance->Init(agent, size, type, callback, data, private_segment_size,
+    suc = instance->Init(agent, size, type, callback, data, private_segment_size,
                                     group_segment_size, queue);
     if (suc != HSA_STATUS_SUCCESS) {
       delete instance;
@@ -32,10 +32,12 @@ ProxyQueue* ProxyQueue::Create(hsa_agent_t agent, uint32_t size, hsa_queue_type3
     }
   }
   *status = suc;
+  assert(*status == HSA_STATUS_SUCCESS);
   return instance;
 }
 
 hsa_status_t ProxyQueue::Destroy(const ProxyQueue* obj) {
+  assert(obj != NULL);
   auto suc = obj->Cleanup();
   delete obj;
   return suc;

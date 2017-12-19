@@ -320,7 +320,11 @@ CONSTRUCTOR_API void constructor() {
     exit(1);
   }
   printf("ROCProfiler: input from \"%s\"\n", xml_name);
-  xml::Xml* xml = new xml::Xml(xml_name);
+  xml::Xml* xml = xml::Xml::Create(xml_name);
+  if (xml == NULL) {
+    fprintf(stderr, "Input file not found '%s'\n", xml_name);
+    exit(1);
+  }
 
   // Getting metrics
   auto metrics_list = xml->GetNodes("top.metric");

@@ -110,11 +110,16 @@ class MetricsDict {
   MetricsDict(const util::AgentInfo* agent_info) : xml_(NULL) {
     const char* xml_name = getenv("ROCP_METRICS");
     if (xml_name != NULL) {
-      xml_ = new xml::Xml(xml_name);
+      xml_ = xml::Xml::Create(xml_name);
+      if (xml_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
       std::cout << "ROCProfiler: importing metrics from '" << xml_name << "':" << std::endl;
       ImportMetrics(agent_info, agent_info->gfxip);
       ImportMetrics(agent_info, "global");
     }
+  }
+
+  ~MetricsDict() {
+    xml::Xml::Destroy(xml_);
   }
 
   void ImportMetrics(const util::AgentInfo* agent_info, const char* scope) {
