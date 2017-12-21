@@ -4,6 +4,7 @@
 //                                                                           //
 ///////////////////////////////////////////////////////////////////////////////
 
+#include <assert.h>
 #include <hsa.h>
 #include <pthread.h>
 #include <stdio.h>
