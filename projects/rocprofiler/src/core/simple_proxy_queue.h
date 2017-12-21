@@ -10,12 +10,25 @@
 #include "core/types.h"
 #include "util/hsa_rsrc_factory.h"
 
+#ifndef ROCP_PROXY_LOCK
+# define ROCP_PROXY_LOCK 1
+#endif
+
 namespace rocprofiler {
 extern decltype(hsa_queue_create)* hsa_queue_create_fn;
 extern decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
+
 extern decltype(hsa_signal_store_relaxed)* hsa_signal_store_relaxed_fn;
+extern decltype(hsa_signal_store_relaxed)* hsa_signal_store_screlease_fn;
+
 extern decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed_fn;
 extern decltype(hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed_fn;
+extern decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed_fn;
+
+extern decltype(hsa_queue_load_write_index_scacquire)* hsa_queue_load_write_index_scacquire_fn;
+extern decltype(hsa_queue_store_write_index_screlease)* hsa_queue_store_write_index_screlease_fn;
+extern decltype(hsa_queue_load_read_index_scacquire)* hsa_queue_load_read_index_scacquire_fn;
+
 typedef decltype(hsa_signal_t::handle) signal_handle_t;
 
 
@@ -27,9 +40,11 @@ class SimpleProxyQueue : public ProxyQueue {
     auto it = queue_map_->find(signal.handle);
     if (it != queue_map_->end()) {
       SimpleProxyQueue* instance = it->second;
+      instance->mutex_lock();
       const uint64_t begin = instance->submit_index_;
       const uint64_t end = que_idx + 1;
       instance->submit_index_ = end;
+      instance->mutex_unlock();
       for (uint64_t j = begin; j < end; ++j) {
         // Submited packet
         const uint32_t idx = j & instance->queue_mask_;
@@ -44,12 +59,24 @@ class SimpleProxyQueue : public ProxyQueue {
     }
   }
 
-  static uint64_t LoadIndex(const hsa_queue_t* queue) {
+  static uint64_t GetSubmitIndex(const hsa_queue_t* queue) {
     uint64_t index = 0;
     auto it = queue_map_->find(queue->doorbell_signal.handle);
     if (it != queue_map_->end()) {
       SimpleProxyQueue* instance = it->second;
-      instance->mutex_.lock();
+      index = instance->submit_index_;
+    } else {
+      index = hsa_queue_load_read_index_relaxed_fn(queue);
+    }
+    return index;
+  }
+
+  static uint64_t GetQueueIndex(const hsa_queue_t* queue) {
+    uint64_t index = 0;
+    auto it = queue_map_->find(queue->doorbell_signal.handle);
+    if (it != queue_map_->end()) {
+      SimpleProxyQueue* instance = it->second;
+      instance->mutex_lock();
       index = instance->queue_index_;
     } else {
       index = hsa_queue_load_write_index_relaxed_fn(queue);
@@ -57,12 +84,12 @@ class SimpleProxyQueue : public ProxyQueue {
     return index;
   }
 
-  static void StoreIndex(const hsa_queue_t* queue, uint64_t value) {
+  static void SetQueueIndex(const hsa_queue_t* queue, uint64_t value) {
     auto it = queue_map_->find(queue->doorbell_signal.handle);
     if (it != queue_map_->end()) {
       SimpleProxyQueue* instance = it->second;
       instance->queue_index_ = value;
-      instance->mutex_.unlock();
+      instance->mutex_unlock();
     } else {
       hsa_queue_store_write_index_relaxed_fn(queue, value);
     }
@@ -75,9 +102,13 @@ class SimpleProxyQueue : public ProxyQueue {
   }
 
   void Submit(const packet_t* packet) {
-    // Compute the write index of queue and copy Aql packet into it
+    // Compute the write index of queue
     const uint64_t que_idx = hsa_queue_load_write_index_relaxed_fn(queue_);
-    // Increment the write index and ring the doorbell to submit the packet.
+
+    // Waiting untill there is a free space in the queue
+    while (que_idx >= (hsa_queue_load_read_index_relaxed_fn(queue_) + size_));
+
+    // Increment the write index
     hsa_queue_store_write_index_relaxed_fn(queue_, que_idx + 1);
 
     const uint32_t mask = queue_->size - 1;
@@ -92,12 +123,12 @@ class SimpleProxyQueue : public ProxyQueue {
 
     // To maintain global order to ensure the prior copy of the packet contents is made visible
     // before the header is updated.
-    // With in-order CP it will wait until the first packet in the blob will be valid
+    // With in-order CP it will wait until the first packet in the blob will be valid.
     std::atomic<packet_word_t>* header_atomic_ptr =
         reinterpret_cast<std::atomic<packet_word_t>*>(&dst[0]);
     header_atomic_ptr->store(src[0], std::memory_order_release);
 
-    // Doorbell signaling
+    // Doorbell signaling to submit the packet
     hsa_signal_store_relaxed_fn(doorbell_signal_, que_idx);
   }
 
@@ -121,6 +152,7 @@ class SimpleProxyQueue : public ProxyQueue {
                     void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
                     void* data, uint32_t private_segment_size, uint32_t group_segment_size,
                     hsa_queue_t** queue) {
+    size_ = size;
     auto status = Init(agent, size);
     *queue = queue_;
     return status;
@@ -131,7 +163,6 @@ class SimpleProxyQueue : public ProxyQueue {
     agent_info_ = util::HsaRsrcFactory::Instance().GetAgentInfo(agent);
     if (agent_info_ != NULL) {
       if (agent_info_->dev_type == HSA_DEVICE_TYPE_GPU) {
-        printf("queue_create size 0x%x(%d)\n", size, (int)size);
         status = hsa_queue_create_fn(agent, size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, UINT32_MAX,
                                      UINT32_MAX, &queue_);
         if (status == HSA_STATUS_SUCCESS) {
@@ -163,6 +194,19 @@ class SimpleProxyQueue : public ProxyQueue {
     return status;
   }
 
+  void mutex_lock() {
+#if ROCP_PROXY_LOCK
+    mutex_.lock();
+#endif
+  }
+
+  void mutex_unlock() {
+#if ROCP_PROXY_LOCK
+    mutex_.unlock();
+#endif
+  }
+
+  uint32_t size_;
   static queue_map_t* queue_map_;
   const util::AgentInfo* agent_info_;
   hsa_queue_t* queue_;

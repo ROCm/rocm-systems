@@ -253,11 +253,6 @@ hsa_status_t rocprofiler_iterate_trace_data(
 hsa_status_t rocprofiler_error_string(
     const char** str);  // [out] the API error string pointer returning
 
-////////////////////////////////////////////////////////////////////////////////
-// HSA-runtime tool on-load method
-bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-            const char* const* failed_tool_names);
-
 #ifdef __cplusplus
 }  // extern "C" block
 #endif  // __cplusplus

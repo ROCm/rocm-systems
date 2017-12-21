@@ -32,9 +32,18 @@
 namespace rocprofiler {
 decltype(hsa_queue_create)* hsa_queue_create_fn;
 decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
+
 decltype(hsa_signal_store_relaxed)* hsa_signal_store_relaxed_fn;
+decltype(hsa_signal_store_relaxed)* hsa_signal_store_screlease_fn;
+
 decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed_fn;
 decltype(hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed_fn;
+decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed_fn;
+
+decltype(hsa_queue_load_write_index_scacquire)* hsa_queue_load_write_index_scacquire_fn;
+decltype(hsa_queue_store_write_index_screlease)* hsa_queue_store_write_index_screlease_fn;
+decltype(hsa_queue_load_read_index_scacquire)* hsa_queue_load_read_index_scacquire_fn;
+
 #ifdef ROCP_HSA_PROXY
 decltype(hsa_amd_queue_intercept_create)* hsa_amd_queue_intercept_create_fn;
 decltype(hsa_amd_queue_intercept_register)* hsa_amd_queue_intercept_register_fn;
@@ -46,9 +55,18 @@ void SaveHsaApi(::HsaApiTable* table) {
   kHsaApiTable = table;
   hsa_queue_create_fn = table->core_->hsa_queue_create_fn;
   hsa_queue_destroy_fn = table->core_->hsa_queue_destroy_fn;
+
   hsa_signal_store_relaxed_fn = table->core_->hsa_signal_store_relaxed_fn;
+  hsa_signal_store_screlease_fn = table->core_->hsa_signal_store_screlease_fn;
+
   hsa_queue_load_write_index_relaxed_fn = table->core_->hsa_queue_load_write_index_relaxed_fn;
   hsa_queue_store_write_index_relaxed_fn = table->core_->hsa_queue_store_write_index_relaxed_fn;
+  hsa_queue_load_read_index_relaxed_fn = table->core_->hsa_queue_load_read_index_relaxed_fn;
+
+  hsa_queue_load_write_index_scacquire_fn = table->core_->hsa_queue_load_write_index_scacquire_fn;
+  hsa_queue_store_write_index_screlease_fn = table->core_->hsa_queue_store_write_index_screlease_fn;
+  hsa_queue_load_read_index_scacquire_fn = table->core_->hsa_queue_load_read_index_scacquire_fn;
+
 #ifdef ROCP_HSA_PROXY
   hsa_amd_queue_intercept_create_fn = table->amd_ext_->hsa_amd_queue_intercept_create_fn;
   hsa_amd_queue_intercept_register_fn = table->amd_ext_->hsa_amd_queue_intercept_register_fn;
@@ -59,9 +77,18 @@ void RestoreHsaApi() {
   ::HsaApiTable* table = kHsaApiTable;
   table->core_->hsa_queue_create_fn = hsa_queue_create_fn;
   table->core_->hsa_queue_destroy_fn = hsa_queue_destroy_fn;
+
   table->core_->hsa_signal_store_relaxed_fn = hsa_signal_store_relaxed_fn;
+  table->core_->hsa_signal_store_screlease_fn = hsa_signal_store_screlease_fn;
+
   table->core_->hsa_queue_load_write_index_relaxed_fn = hsa_queue_load_write_index_relaxed_fn;
   table->core_->hsa_queue_store_write_index_relaxed_fn = hsa_queue_store_write_index_relaxed_fn;
+  table->core_->hsa_queue_load_read_index_relaxed_fn = hsa_queue_load_read_index_relaxed_fn;
+
+  table->core_->hsa_queue_load_write_index_scacquire_fn = hsa_queue_load_write_index_scacquire_fn;
+  table->core_->hsa_queue_store_write_index_screlease_fn = hsa_queue_store_write_index_screlease_fn;
+  table->core_->hsa_queue_load_read_index_scacquire_fn = hsa_queue_load_read_index_scacquire_fn;
+
 #ifdef ROCP_HSA_PROXY
   table->amd_ext_->hsa_amd_queue_intercept_create_fn = hsa_amd_queue_intercept_create_fn;
   table->amd_ext_->hsa_amd_queue_intercept_register_fn = hsa_amd_queue_intercept_register_fn;
@@ -240,6 +267,7 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_trace_data(
   API_METHOD_SUFFIX
 }
 
+// HSA-runtime tool on-load method
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
   rocprofiler::SaveHsaApi(table);
@@ -253,6 +281,7 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
   return true;
 }
 
+// HSA-runtime tool on-unload method
 PUBLIC_API void OnUnload() { rocprofiler::RestoreHsaApi(); }
 
 }  // extern "C"
