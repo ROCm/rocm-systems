@@ -191,7 +191,6 @@ class Context {
     for (unsigned i = 0; i < info_count; ++i) {
       rocprofiler_feature_t* info = &info_array[i];
       input_map[info->name] = info;
-      info->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
     }
 
     // Adding zero group, always present
@@ -200,7 +199,6 @@ class Context {
     // Processing input features
     for (unsigned i = 0; i < info_count; ++i) {
       rocprofiler_feature_t* info = &info_array[i];
-      info->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
       info_map_[info->name] = info;
       const rocprofiler_feature_kind_t kind = info->kind;
       const char* name = info->name;
@@ -323,6 +321,7 @@ class Context {
       // Wait for stop packet to complete
       hsa_signal_wait_scacquire(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
                                 HSA_WAIT_STATE_BLOCKED);
+      for (rocprofiler_feature_t* rinfo : *(tuple.info_vector)) rinfo->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
       callback_data_t callback_data{tuple.info_vector, tuple.info_vector->size(), NULL};
       const hsa_status_t status =
           api_->hsa_ven_amd_aqlprofile_iterate_data(tuple.profile, DataCallback, &callback_data);
@@ -394,7 +393,9 @@ class Context {
     callback_data->index = index;
 
     if (index < info_vector.size()) {
-      rocprofiler_feature_t* rinfo = info_vector[index];
+      rocprofiler_feature_t* const rinfo = info_vector[index];
+      rinfo->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
+
       if (ainfo_type == HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA) {
         if (ainfo_data->sample_id == 0) rinfo->data.result_int64 = 0;
         rinfo->data.result_int64 += ainfo_data->pmc_data.result;
@@ -413,19 +414,19 @@ class Context {
             hsa_status_t status = hsa_memory_copy(dest, src, size);
             if (status == HSA_STATUS_SUCCESS) {
               *header = size;
-              rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
-              rinfo->data.result_bytes.instance_count = sample_id + 1;
               callback_data->ptr = dest + align_size(size, sizeof(uint64_t));
+              rinfo->data.result_bytes.instance_count = sample_id + 1;
+              rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
             }
           } else
             status = HSA_STATUS_ERROR;
         } else {
           if (sample_id == 0) {
-            rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
             rinfo->data.result_bytes.ptr = ainfo_data->sqtt_data.ptr;
             rinfo->data.result_bytes.instance_count = UINT32_MAX;
           }
           rinfo->data.result_bytes.instance_count += 1;
+          rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
         }
       } else
         status = HSA_STATUS_ERROR;
