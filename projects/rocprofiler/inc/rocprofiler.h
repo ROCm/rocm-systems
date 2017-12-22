@@ -206,15 +206,15 @@ hsa_status_t rocprofiler_remove_dispatch_callback();
 
 // Start profiling
 hsa_status_t rocprofiler_start(rocprofiler_t* context,     // [in/out] profiling context
-                               uint32_t group_index = 0);  // group index
+                               uint32_t group_index);      // group index
 
 // Stop profiling
 hsa_status_t rocprofiler_stop(rocprofiler_t* context,     // [in/out] profiling context
-                              uint32_t group_index = 0);  // group index
+                              uint32_t group_index);      // group index
 
 // Read profiling data
-hsa_status_t rocprofiler_get_data(rocprofiler_t* context,     // [in/out] profiling context
-                                  uint32_t group_index = 0);  // group index
+hsa_status_t rocprofiler_get_data(rocprofiler_t* context, // [in/out] profiling context
+                                  uint32_t group_index);  // group index
 
 // Get profiling groups count
 hsa_status_t rocprofiler_group_count(const rocprofiler_t* context,  // [in] profiling context
