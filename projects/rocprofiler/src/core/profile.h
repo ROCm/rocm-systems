@@ -82,10 +82,15 @@ class Profile {
     is_legacy_ = (strncmp(agent_info->name, "gfx8", 4) == 0);
   }
   virtual ~Profile() {
-    hsa_memory_free(profile_.command_buffer.ptr);
-    hsa_memory_free(profile_.output_buffer.ptr);
-    free(const_cast<event_t*>(profile_.events));
-    free(const_cast<parameter_t*>(profile_.parameters));
+    if (!info_vector_.empty()) {
+      info_vector_.clear();
+      hsa_memory_free(profile_.command_buffer.ptr);
+      hsa_memory_free(profile_.output_buffer.ptr);
+      free(const_cast<event_t*>(profile_.events));
+      free(const_cast<parameter_t*>(profile_.parameters));
+      hsa_status_t status = hsa_signal_destroy(completion_signal_);
+      if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_destroy " << std::hex << status);
+    }
   }
 
   virtual void Insert(const profile_info_t& info) { info_vector_.push_back(info.rinfo); }
@@ -114,7 +119,7 @@ class Profile {
       start.completion_signal = dummy_signal;
       hsa_signal_t post_signal;
       status = hsa_signal_create(1, 0, NULL, &post_signal);
-      if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "hsa_signal_create");
+      if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
       stop.completion_signal = post_signal;
       completion_signal_ = post_signal;
 

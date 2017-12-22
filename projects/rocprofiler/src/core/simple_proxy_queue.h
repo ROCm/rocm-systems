@@ -186,11 +186,20 @@ class SimpleProxyQueue : public ProxyQueue {
   }
 
   hsa_status_t Cleanup() const {
-    hsa_status_t status = HSA_STATUS_SUCCESS;
+    hsa_status_t status = HSA_STATUS_ERROR;
+    hsa_signal_t queue_signal = queue_->doorbell_signal;
+
+    // Destroy original HSA queue
     queue_->base_address = base_address_;
     queue_->doorbell_signal = doorbell_signal_;
     status = hsa_queue_destroy_fn(queue_);
+    if (status != HSA_STATUS_SUCCESS) abort();
+
+    // Destroy overloaded virtual queue data and signal
     free(data_array_);
+    status = hsa_signal_destroy(queue_signal);
+    if (status != HSA_STATUS_SUCCESS) abort();
+
     return status;
   }
 

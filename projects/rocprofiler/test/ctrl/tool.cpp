@@ -169,7 +169,7 @@ void output_results(FILE* file, const rocprofiler_feature_t* features, const uns
         break;
       }
       default:
-        std::cout << "Bad result kind (" << p->data.kind << ")" << std::endl;
+        fprintf(file, "undefined data kind(%u)\n", p->data.kind);
     }
   }
 }
@@ -194,7 +194,7 @@ void dump_context(context_entry_t* entry) {
     FILE* file_handle = entry->file_handle;
 
     fprintf(file_handle,
-            "Dispatch[%u], queue_index(%lu), kernel_object(0x%lx), kernel_name(\"%s\"):\n", index,
+            "dispatch[%u], cntx(%p), queue_index(%lu), kernel_object(0x%lx), kernel_name(\"%s\"):\n", index, group.context,
             entry->data.queue_index, entry->data.kernel_object, entry->data.kernel_name);
 
     status = rocprofiler_group_get_data(&group);
@@ -416,9 +416,9 @@ DESTRUCTOR_API void destructor() {
   printf("\nROCPRofiler: %u contexts collected", context_array_count);
   if (result_prefix == NULL) {
     printf("\n");
+    // Dump profiling output data
+    dump_context_array();
   } else {
     printf(", dumping to %s\n", result_prefix);
   }
-  // Dump profiling output data which hasn't yet dumped by completi onhandler
-  dump_context_array();
 }

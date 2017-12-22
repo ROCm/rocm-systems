@@ -29,7 +29,6 @@ class HsaProxyQueue : public ProxyQueue {
                     void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
                     void* data, uint32_t private_segment_size, uint32_t group_segment_size,
                     hsa_queue_t** queue) {
-    printf("HsaProxyQueue::Init()\n");
     const auto status = hsa_amd_queue_intercept_create_fn(
         agent, size, type, callback, data, private_segment_size, group_segment_size, &queue_);
     *queue = queue_;
