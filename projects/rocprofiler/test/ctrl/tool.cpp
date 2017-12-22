@@ -242,7 +242,7 @@ void dump_context_array() {
     exit(1);
   }
 
-  for (auto& v : *context_array) dump_context(&v.second);
+  if (context_array) for (auto& v : *context_array) dump_context(&v.second);
 
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
