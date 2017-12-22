@@ -2,13 +2,8 @@
 
 test_bin_dflt=./test/ctrl
 
-#export HSA_LIB=/home/evgeny/pkg/compute-psdb-16453/lib
-export HSA_LIB=/home/evgeny/git/compute/out/ubuntu-16.04/16.04/lib
-#export OCL_LIB=/home/evgeny/pkg/opencl_modified/opencl_x86_64/lib
-#export OCL_LIB=/home/evgeny/Perforce/eshcherb_opencl/drivers/opencl/dist/linux/debug/lib/x86_64
-
 # paths to ROC profiler and oher libraries
-export LD_LIBRARY_PATH=$PWD:$HSA_LIB
+export LD_LIBRARY_PATH=$PWD
 # enable error messages logging to '/tmp/rocprofiler_log.txt'
 export ROCPROFILER_LOG=1
 

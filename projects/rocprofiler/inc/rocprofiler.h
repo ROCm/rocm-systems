@@ -63,7 +63,6 @@
 #define INC_ROCPROFILER_H_
 
 #include <hsa.h>
-#include <hsa_api_trace.h>
 #include <hsa_ven_amd_aqlprofile.h>
 #include <stdint.h>
 
