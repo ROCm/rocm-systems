@@ -5,10 +5,12 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #include <assert.h>
+#include <dirent.h>
 #include <hsa.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/types.h>
 
 #include <iostream>
 #include <map>
@@ -34,6 +36,7 @@ struct dispatch_data_t {
 
 // Context stored entry type
 struct context_entry_t {
+  int valid;
   uint32_t index;
   rocprofiler_group_t group;
   rocprofiler_feature_t* features;
@@ -114,7 +117,9 @@ void dump_sqtt_trace(const char* label, const uint32_t chunk, const void* data, 
     oss << result_prefix << "/thread_trace_" << label << "_se" << chunk << ".out";
     FILE* file = fopen(oss.str().c_str(), "w");
     if (file == NULL) {
-      perror("result file fopen");
+      std::ostringstream errmsg;
+      errmsg << "fopen error, file '" << oss.str().c_str() << "'";
+      perror(errmsg.str().c_str());
       exit(1);
     }
 
@@ -209,30 +214,33 @@ void output_group(FILE* file, const rocprofiler_group_t* group, const char* str)
 // Dump stored context profiling output data
 void dump_context(context_entry_t* entry) {
   hsa_status_t status = HSA_STATUS_ERROR;
-  const rocprofiler_feature_t* features = entry->features;
 
-  rocprofiler_group_t group = entry->group;
-  uint32_t index = entry->index;
-  const unsigned feature_count = entry->feature_count;
-  FILE* file_handle = entry->file_handle;
+  if (entry->valid) {
+    entry->valid = 0;
+    const uint32_t index = entry->index;
+    FILE* file_handle = entry->file_handle;
+    const rocprofiler_feature_t* features = entry->features;
+    const unsigned feature_count = entry->feature_count;
 
-  fprintf(file_handle,
-          "dispatch[%u], cntx(%p), queue_index(%lu), kernel_object(0x%lx), kernel_name(\"%s\"):\n", index, group.context,
-          entry->data.queue_index, entry->data.kernel_object, entry->data.kernel_name);
+    fprintf(file_handle,
+            "dispatch[%u], queue_index(%lu), kernel_object(0x%lx), kernel_name(\"%s\"):\n", index,
+            entry->data.queue_index, entry->data.kernel_object, entry->data.kernel_name);
 
-  status = rocprofiler_group_get_data(&group);
-  check_status(status);
-  // output_group(file, group, "Group[0] data");
-
-  status = rocprofiler_get_metrics(group.context);
-  check_status(status);
-  std::ostringstream oss;
-  oss << index << "__" << entry->data.kernel_name;
-  output_results(file_handle, features, feature_count, group.context, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
-
-  // Finishing cleanup
-  // Deleting profiling context will delete all allocated resources
-  rocprofiler_close(group.context);
+    rocprofiler_group_t group = entry->group;
+    status = rocprofiler_group_get_data(&group);
+    check_status(status);
+    // output_group(file, group, "Group[0] data");
+  
+    status = rocprofiler_get_metrics(group.context);
+    check_status(status);
+    std::ostringstream oss;
+    oss << index << "__" << entry->data.kernel_name;
+    output_results(file_handle, features, feature_count, group.context, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
+  
+    // Finishing cleanup
+    // Deleting profiling context will delete all allocated resources
+    rocprofiler_close(group.context);
+  }
 }
 
 // Dump all stored contexts profiling output data
@@ -307,12 +315,14 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   entry->feature_count = tool_data->feature_count;
   entry->data = *callback_data;
   entry->file_handle = tool_data->file_handle;
+  entry->valid = 1;
 
   return status;
 }
 
 // Tool constructor
-CONSTRUCTOR_API void constructor() {
+CONSTRUCTOR_API void constructor()
+{
   std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
   parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET"] =
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET;
@@ -328,11 +338,20 @@ CONSTRUCTOR_API void constructor() {
   // Set output file
   result_prefix = getenv("ROCP_OUTPUT_DIR");
   if (result_prefix != NULL) {
+    DIR* dir = opendir(result_prefix);
+    if (dir == NULL) {
+      std::ostringstream errmsg;
+      errmsg << "Cannot open output directory '" << result_prefix << "'";
+      perror(errmsg.str().c_str());
+      exit(1);
+    }
     std::ostringstream oss;
     oss << result_prefix << "/results.txt";
     result_file_handle = fopen(oss.str().c_str(), "w");
     if (result_file_handle == NULL) {
-      perror("result file fopen");
+      std::ostringstream errmsg;
+      errmsg << "fopen error, file '" << oss.str().c_str() << "'";
+      perror(errmsg.str().c_str());
       exit(1);
     }
   } else
@@ -437,15 +456,15 @@ CONSTRUCTOR_API void constructor() {
 
 // Tool destructor
 DESTRUCTOR_API void destructor() {
+  const bool result_file_opened = (result_prefix != NULL) && (result_file_handle != NULL);
+
   printf("\nROCPRofiler: %u contexts collected", context_count);
-  if (result_prefix == NULL) {
-    printf("\n");
-  } else {
-    printf(", dumping to %s\n", result_prefix);
-  }
+  if (result_file_opened) printf(", output directory %s", result_prefix);
+  printf("\n");
+
   // Dump stored profiling output data
   dump_context_array();
 
   // Close output file
-  if (result_prefix != NULL) fclose(result_file_handle);
+  if (result_file_opened) fclose(result_file_handle);
 }
