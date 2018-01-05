@@ -79,8 +79,7 @@ bool TestHsa::Initialize(int arg_cnt, char** arg_list) {
   setup_timer_idx_ = hsa_timer_.CreateTimer();
   dispatch_timer_idx_ = hsa_timer_.CreateTimer();
 
-  hsa_rsrc_ = HsaInstantiate(agent_id_);
-  if (hsa_rsrc_ == NULL) {
+  if (HsaInstantiate(agent_id_) == NULL) {
     TEST_ASSERT(false);
     return false;
   }

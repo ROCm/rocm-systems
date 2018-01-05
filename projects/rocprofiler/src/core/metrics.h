@@ -27,6 +27,7 @@ typedef std::vector<const counter_t*> counters_vec_t;
 class Metric {
  public:
   Metric(const std::string& name) : name_(name) {}
+  virtual ~Metric() {}
   std::string GetName() const { return name_; }
   virtual void GetCounters(counters_vec_t& vec) const = 0;
   counters_vec_t GetCounters() const {
@@ -64,7 +65,6 @@ class ExprMetric : public Metric {
   const xml::Expr* expr_;
 };
 
-
 class MetricsDict {
  public:
   typedef std::map<std::string, const Metric*> cache_t;
@@ -99,12 +99,22 @@ class MetricsDict {
     return ret.first->second;
   }
 
+  static void Destroy() {
+    for (auto& entry : *map_) delete entry.second;
+    delete map_;
+    map_ = NULL;
+  }
+
   const Metric* Get(const std::string& name) const {
     const Metric* metric = NULL;
     auto it = cache_.find(name);
     if (it != cache_.end()) metric = it->second;
     return metric;
   }
+
+  uint32_t Size() const { return cache_.size(); }
+  const_iterator_t Begin() const { return cache_.begin(); }
+  const_iterator_t End() const { return cache_.end(); }
 
  private:
   MetricsDict(const util::AgentInfo* agent_info) : xml_(NULL) {
@@ -120,6 +130,7 @@ class MetricsDict {
 
   ~MetricsDict() {
     xml::Xml::Destroy(xml_);
+    for (auto& entry : cache_) delete entry.second;
   }
 
   void ImportMetrics(const util::AgentInfo* agent_info, const char* scope) {
@@ -163,7 +174,6 @@ class MetricsDict {
                                                                                 << "'");
         } else {
           xml::Expr* expr_obj = new xml::Expr(expr_str, new ExprCache(&cache_));
-          //std::cout << "    " << name << " = " << expr_obj->String() << std::endl;
           counters_vec_t counters_vec;
           for (const std::string var : expr_obj->GetVars()) {
             auto it = cache_.find(var);
@@ -175,18 +185,18 @@ class MetricsDict {
           cache_[name] = new ExprMetric(name, counters_vec, expr_obj);
         }
       }
+    }
+  }
 
-#if 0
-      for (auto& v : cache_) {
-        const Metric* metric = v.second;
-        counters_vec_t counters_vec;
-        printf("> Metric '%s'\n", metric->GetName().c_str());
-        metric->GetCounters(counters_vec);
-        for (auto c : counters_vec) {
-          printf("  counter %s, b(%u), i (%u), e (%u)\n", c->name.c_str(), c->event.block_name, c->event.block_index, c->event.counter_id);
-        }
+  void Print() {
+    for (auto& v : cache_) {
+      const Metric* metric = v.second;
+      counters_vec_t counters_vec;
+      printf("> Metric '%s'\n", metric->GetName().c_str());
+      metric->GetCounters(counters_vec);
+      for (auto c : counters_vec) {
+        printf("  counter %s, b(%u), i (%u), e (%u)\n", c->name.c_str(), c->event.block_name, c->event.block_index, c->event.counter_id);
       }
-#endif
     }
   }
 

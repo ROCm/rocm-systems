@@ -34,7 +34,7 @@ set ( CMAKE_SKIP_BUILD_RPATH TRUE )
 
 ## CLANG options
 if ( "$ENV{CXX}" STREQUAL "/usr/bin/clang++" )
-set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ferror-limit=1000000" )
+  set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ferror-limit=1000000" )
 endif()
 
 ## Enable debug trace
@@ -52,7 +52,12 @@ if ( NOT "$ENV{CMAKE_HSA_PROXY}" STREQUAL "no" )
   add_definitions ( -DROCP_HSA_PROXY=1 )
 endif()
 
-## Check env vars
+## Enable direct loading of AQL-profile HSA extension
+if ( DEFINED ENV{CMAKE_LD_AQLPROFILE} )
+  add_definitions ( -DROCP_LD_AQLPROFILE=1 )
+endif()
+
+## Make env vars
 if ( NOT DEFINED CMAKE_BUILD_TYPE OR "${CMAKE_BUILD_TYPE}" STREQUAL "" )
   if ( DEFINED ENV{CMAKE_BUILD_TYPE} )
     set ( CMAKE_BUILD_TYPE $ENV{CMAKE_BUILD_TYPE} )
@@ -83,19 +88,15 @@ elseif ( ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86" )
 endif ()
 
 ## Find hsa-runtime headers/lib
-find_file ( HSA_RUNTIME_INC "hsa/hsa.h" )
-get_filename_component ( HSA_RUNTIME_INC_PATH ${HSA_RUNTIME_INC} DIRECTORY )
+find_file ( HSA_RUNTIME_INC "hsa.h" )
 if ( "${HSA_RUNTIME_INC_PATH}" STREQUAL "" )
-  find_file ( HSA_RUNTIME_INC "hsa.h" )
-  get_filename_component ( HSA_RUNTIME_INC_PATH ${HSA_RUNTIME_INC} DIRECTORY )
+  find_file ( HSA_RUNTIME_INC "hsa/hsa.h" )
 endif()
-
-set ( HSA_RUNTIME_NAME "hsa-runtime64" )
-find_library ( HSA_RUNTIME_LIB "lib${HSA_RUNTIME_NAME}.so" )
+find_library ( HSA_RUNTIME_LIB "libhsa-runtime${NBIT}.so" )
+get_filename_component ( HSA_RUNTIME_INC_PATH ${HSA_RUNTIME_INC} DIRECTORY )
 get_filename_component ( HSA_RUNTIME_LIB_PATH ${HSA_RUNTIME_LIB} DIRECTORY )
 
-set ( HSA_KMT_NAME "hsakmt" )
-find_library ( HSA_KMT_LIB "lib${HSA_KMT_NAME}.so" )
+find_library ( HSA_KMT_LIB "libhsakmt.so" )
 get_filename_component ( HSA_KMT_LIB_PATH ${HSA_KMT_LIB} DIRECTORY )
 
 set ( API_PATH ${HSA_RUNTIME_INC_PATH} )

@@ -17,7 +17,7 @@ The library source tree:
 
 Build environment:
 
-$ export CMAKE_PREFIX_PATH="<path to hsa-runtime includes>;<path to hsa-runtime library>"
+$ export CMAKE_PREFIX_PATH=<path to hsa-runtime includes>:<path to hsa-runtime library>
 $ export CMAKE_BUILD_TYPE=<debug|release> # release by default
 $ export CMAKE_DEBUG_TRACE=1 # 1 to enable debug tracing
 

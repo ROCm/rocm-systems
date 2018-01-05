@@ -120,8 +120,11 @@ HsaRsrcFactory::HsaRsrcFactory() {
 
   // Get AqlProfile API table
   aqlprofile_api_ = {0};
+#ifdef ROCP_LD_AQLPROFILE
+  status = LoadAqlProfileLib(&aqlprofile_api_);
+#else
   status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_AQLPROFILE, 1, 0, &aqlprofile_api_);
-  if (status != HSA_STATUS_SUCCESS) status = LoadAqlProfileLib(&aqlprofile_api_);
+#endif
   CHECK_STATUS("aqlprofile API table load failed", status);
 }
 
