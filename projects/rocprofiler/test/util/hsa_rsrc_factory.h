@@ -196,16 +196,19 @@ class HsaRsrcFactory {
   // @param code_desc Handle of finalized Code Descriptor that could
   // be used to submit for execution
   //
-  // @return bool true if successful, false otherwise
+  // @return code buffer, non NULL if successful, NULL otherwise
   //
-  bool LoadAndFinalize(AgentInfo* agent_info, const char* brig_path, char* kernel_name,
-                       hsa_executable_symbol_t* code_desc);
+  void* LoadAndFinalize(AgentInfo* agent_info, const char* brig_path, const char* kernel_name,
+                        hsa_executable_t* hsa_exec, hsa_executable_symbol_t* code_desc);
 
   // Add an instance of AgentInfo representing a Hsa Gpu agent
   void AddAgentInfo(AgentInfo* agent_info, bool gpu);
 
   // Print the various fields of Hsa Gpu Agents
   bool PrintGpuAgents(const std::string& header);
+
+  // Submit AQL packet to given queue
+  static uint64_t Submit(hsa_queue_t* queue, void* packet);
 
   // Return AqlProfile API table
   typedef hsa_ven_amd_aqlprofile_1_00_pfn_t aqlprofile_pfn_t;
@@ -224,12 +227,6 @@ class HsaRsrcFactory {
 
   static HsaRsrcFactory* instance_;
   static mutex_t mutex_;
-
-  // Used to maintain a list of Hsa Queue handles
-  std::vector<hsa_queue_t*> queue_list_;
-
-  // Used to maintain a list of Hsa Signal handles
-  std::vector<hsa_signal_t*> signal_list_;
 
   // Used to maintain a list of Hsa Gpu Agent Info
   std::vector<AgentInfo*> gpu_list_;

@@ -31,7 +31,7 @@ OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ctrl/test_hsa.h"
 #include "util/test_assert.h"
 
-template <class Kernel, class Test> bool RunKernel(int argc, char* argv[]) {
+template <class Kernel, class Test> bool RunKernel(int argc, char* argv[], int count = 1) {
   bool ret_val = false;
 
   // Create test kernel object
@@ -58,11 +58,13 @@ template <class Kernel, class Test> bool RunKernel(int argc, char* argv[]) {
   }
 
   // Run test kernel
-  ret_val = test_aql->Run();
-  if (ret_val == false) {
-    std::cerr << "Error in running the test kernel" << std::endl;
-    TEST_ASSERT(ret_val);
-    return false;
+  for (int i = 0; i < count; ++i) {
+    ret_val = test_aql->Run();
+    if (ret_val == false) {
+      std::cerr << "Error in running the test kernel" << std::endl;
+      TEST_ASSERT(ret_val);
+      return false;
+    }
   }
 
   // Verify the results of the execution

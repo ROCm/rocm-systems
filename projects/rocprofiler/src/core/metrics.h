@@ -100,9 +100,11 @@ class MetricsDict {
   }
 
   static void Destroy() {
-    for (auto& entry : *map_) delete entry.second;
-    delete map_;
-    map_ = NULL;
+    if (map_ != NULL) {
+      for (auto& entry : *map_) delete entry.second;
+      delete map_;
+      map_ = NULL;
+    }
   }
 
   const Metric* Get(const std::string& name) const {

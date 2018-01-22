@@ -76,10 +76,11 @@ extern "C" {
 // Profiling info objects have profiling feature info, type, parameters and data
 // Also profiling data samplaes can be iterated using a callback
 
-// Profiling feature type
+// Profiling feature kind
 typedef enum {
-  ROCPROFILER_FEATURE_KIND_METRIC = 0,
-  ROCPROFILER_FEATURE_KIND_TRACE = 1
+  ROCPROFILER_FEATURE_KIND_COUNTER = 0,
+  ROCPROFILER_FEATURE_KIND_METRIC = 1,
+  ROCPROFILER_FEATURE_KIND_TRACE = 2
 } rocprofiler_feature_kind_t;
 
 // Profiling feture parameter
@@ -112,14 +113,23 @@ typedef struct {
   };
 } rocprofiler_data_t;
 
-// Profiling feature info
+// Profiling feature type
 typedef struct {
   rocprofiler_feature_kind_t kind;            // feature kind
-  const char* name;                           // feature name
+  union {
+    const char* name;                         // feature name
+    struct {
+      const char* block;                      // counter block name
+      uint32_t event;                         // counter event id
+    } counter;
+  };
   const rocprofiler_parameter_t* parameters;  // feature parameters array
   uint32_t parameter_count;                   // feature parameters count
   rocprofiler_data_t data;                    // profiling data
 } rocprofiler_feature_t;
+
+// Profiling features set type
+typedef void rocprofiler_feature_set_t;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Profiling context
@@ -158,11 +168,22 @@ typedef struct {
 
 // Create new profiling context
 hsa_status_t rocprofiler_open(hsa_agent_t agent,                      // GPU handle
-                              rocprofiler_feature_t* features,        // [in] profiling info array
+                              rocprofiler_feature_t* features,        // [in] profiling features array
                               uint32_t feature_count,                 // profiling info count
                               rocprofiler_t** context,                // [out] context object
                               uint32_t mode,                          // profiling mode mask
                               rocprofiler_properties_t* properties);  // profiling properties
+
+// Add feature to e features set
+hsa_status_t rocprofiler_add_feature(const rocprofiler_feature_t* feature,     // [in]
+                                     rocprofiler_feature_set_t* features_set); // [in/out] profiling features set
+
+// Create new profiling context
+hsa_status_t rocprofiler_features_set_open(hsa_agent_t agent,                       // GPU handle
+                                           rocprofiler_feature_set_t* features_set, // [in] profiling features set
+                                           rocprofiler_t** context,                 // [out] context object
+                                           uint32_t mode,                           // profiling mode mask
+                                           rocprofiler_properties_t* properties);   // profiling properties
 
 // Delete profiling info
 hsa_status_t rocprofiler_close(rocprofiler_t* context);  // [in] profiling context

@@ -18,6 +18,11 @@ class exception_t : public std::exception {
   const std::string str_;
 };
 
+class div_zero_exception_t : public exception_t {
+ public:
+  explicit div_zero_exception_t(const std::string& msg) : exception_t("Divide by zero exception " + msg) {}
+};
+
 typedef uint64_t args_t;
 typedef std::map<std::string, args_t> args_map_t;
 class Expr;
@@ -89,7 +94,17 @@ class Expr {
   const expr_cache_t* GetCache() const { return cache_; }
   const bin_expr_t* GetTree() const { return tree_; }
 
-  args_t Eval(const args_cache_t& args) const { return tree_->Eval(args); }
+  args_t Eval(const args_cache_t& args) const {
+    args_t result = 0;
+    try {
+      result = tree_->Eval(args);
+    } catch (const div_zero_exception_t& e) {
+      if (div_zero_exc_on) std::cout << "Expr::Eval() exc(" << e.what() << ") : " << String() << std::endl;
+    } catch (const exception_t& e) {
+      throw e;
+    }
+    return result;
+  }
 
   std::string Lookup(const std::string& str) const {
     std::string result;
@@ -190,6 +205,7 @@ class Expr {
   const expr_cache_t* const cache_;
   std::vector<const Expr*>* sub_vec_;
   std::vector<std::string>* var_vec_;
+  static const bool div_zero_exc_on = false;
 };
 
 class add_expr_t : public bin_expr_t {
@@ -213,7 +229,11 @@ class mul_expr_t : public bin_expr_t {
 class div_expr_t : public bin_expr_t {
  public:
   div_expr_t(const bin_expr_t* arg1, const bin_expr_t* arg2) : bin_expr_t(arg1, arg2) {}
-  args_t Eval(const args_cache_t& args) const { return (arg1_->Eval(args) / arg2_->Eval(args)); }
+  args_t Eval(const args_cache_t& args) const {
+    const args_t denominator = arg2_->Eval(args);
+    if (denominator == 0) throw div_zero_exception_t("div_expr_t::Eval()");
+    return (arg1_->Eval(args) / denominator);
+  }
   std::string Symbol() const { return "/"; }
 };
 class const_expr_t : public bin_expr_t {

@@ -69,6 +69,7 @@ HsaRsrcFactory* TestHsa::HsaInstantiate(const uint32_t agent_ind) {
 }
 
 void TestHsa::HsaShutdown() {
+  if (hsa_queue_ != NULL) hsa_queue_destroy(hsa_queue_);
   if (hsa_rsrc_) hsa_rsrc_->Destroy();
 }
 
@@ -121,11 +122,11 @@ bool TestHsa::Setup() {
 
   // Load and Finalize Kernel Code Descriptor
   char* brig_path = (char*)brig_path_obj_.c_str();
-  const bool ret_val =
-      hsa_rsrc_->LoadAndFinalize(agent_info_, brig_path, strdup(name_.c_str()), &kernel_code_desc_);
-  if (ret_val == false) {
+  code_buf_ =
+      hsa_rsrc_->LoadAndFinalize(agent_info_, brig_path, name_.c_str(), &hsa_exec_, &kernel_code_desc_);
+  if (code_buf_ == NULL) {
     std::cerr << "Error in loading and finalizing Kernel" << std::endl;
-    return ret_val;
+    return false;
   }
 
   // Stop the timer object
@@ -187,32 +188,16 @@ bool TestHsa::Run() {
   aql.group_segment_size = group_segment_size;
   aql.private_segment_size = private_segment_size;
   // Initialize Aql packet with handle of signal
+  hsa_signal_store_relaxed(hsa_signal_, 1);
   aql.completion_signal = hsa_signal_;
-
-  // Compute the write index of queue and copy Aql packet into it
-  const uint64_t que_idx = hsa_queue_load_write_index_relaxed(hsa_queue_);
-  const uint32_t mask = hsa_queue_->size - 1;
 
   std::clog << "> Executing kernel: \"" << name_ << "\"" << std::endl;
 
   // Start the timer object
   hsa_timer_.StartTimer(dispatch_timer_idx_);
 
-  // Disable packet so that submission to HW is complete
-  const auto header = aql.header;
-  aql.header = HSA_PACKET_TYPE_INVALID << HSA_PACKET_HEADER_TYPE;
-
-  // Copy Aql packet into queue buffer
-  ((hsa_kernel_dispatch_packet_t*)(hsa_queue_->base_address))[que_idx & mask] = aql;
-
-  // After AQL packet is fully copied into queue buffer
-  // update packet header from invalid state to valid state
-  std::atomic_thread_fence(std::memory_order_release);
-  ((hsa_kernel_dispatch_packet_t*)(hsa_queue_->base_address))[que_idx & mask].header = header;
-
-  // Increment the write index and ring the doorbell to dispatch the kernel.
-  hsa_queue_store_write_index_relaxed(hsa_queue_, (que_idx + 1));
-  hsa_signal_store_relaxed(hsa_queue_->doorbell_signal, que_idx);
+  // Submit AQL packet to the queue
+  const uint64_t que_idx = hsa_rsrc_->Submit(hsa_queue_, &aql);
 
   std::clog << "> Waiting on kernel dispatch signal, que_idx=" << que_idx << std::endl;
 
@@ -251,4 +236,9 @@ void TestHsa::PrintTime() {
             << std::endl;
 }
 
-bool TestHsa::Cleanup() { return true; }
+bool TestHsa::Cleanup() {
+  hsa_executable_destroy(hsa_exec_);
+  hsa_memory_free(code_buf_);
+  hsa_signal_destroy(hsa_signal_);
+  return true;
+}

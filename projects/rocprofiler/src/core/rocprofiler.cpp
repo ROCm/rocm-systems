@@ -101,6 +101,7 @@ CONSTRUCTOR_API void constructor() {
 }
 
 DESTRUCTOR_API void destructor() {
+  rocprofiler::MetricsDict::Destroy();
   util::HsaRsrcFactory::Destroy();
   util::Logger::Destroy();
 }

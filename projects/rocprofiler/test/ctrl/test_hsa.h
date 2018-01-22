@@ -47,6 +47,8 @@ class TestHsa : public TestAql {
     total_time_taken_ = 0;
     setup_time_taken_ = 0;
     dispatch_time_taken_ = 0;
+    code_buf_ = NULL;
+    hsa_exec_ = {};
   }
 
   // Get methods for Agent Info, HAS queue, HSA Resourcse Manager
@@ -120,6 +122,10 @@ class TestHsa : public TestAql {
 
   // Test kernel name
   std::string name_;
+
+  // Kernel code buffer
+  void* code_buf_;
+  hsa_executable_t hsa_exec_;
 };
 
 #endif  // TEST_CTRL_TEST_HSA_H_
