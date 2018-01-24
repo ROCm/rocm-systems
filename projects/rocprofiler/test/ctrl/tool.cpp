@@ -184,13 +184,13 @@ void output_results(FILE* file, const rocprofiler_feature_t* features, const uns
             ptr = chunk_data + off;
             size += chunk_size;
           }
-          free(p->data.result_bytes.ptr);
-
           fprintf(file, "size(%lu)\n", size);
           if (size > p->data.result_bytes.size) {
             fprintf(stderr, "SQTT data size is out of the result buffer size\n");
             exit(1);
           }
+          free(p->data.result_bytes.ptr);
+          const_cast<rocprofiler_feature_t*>(p)->data.result_bytes.size = 0;
         } else {
           fprintf(file, "(\n");
           trace_data_arg_t trace_data_arg{file, label};

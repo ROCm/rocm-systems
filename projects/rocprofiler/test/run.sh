@@ -29,6 +29,8 @@ else
   tbin=$test_bin_dflt
 fi
 echo "Run $tbin"
+export ROCP_KITER=100
+export ROCP_DITER=100
 eval $tbin
 
 exit 0

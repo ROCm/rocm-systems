@@ -185,12 +185,10 @@ class Context {
 
   // Initialize rocprofiler context
   void Initialize(rocprofiler_feature_t* info_array, const uint32_t info_count) {
-    // Set input features filter, to not duplicate referenced features
-    // Set iput features data as uninitialized
-    info_map_t input_map;
+    // Register input features to not duplicate by features referencing
     for (unsigned i = 0; i < info_count; ++i) {
       rocprofiler_feature_t* info = &info_array[i];
-      input_map[info->name] = info;
+      info_map_[info->name] = info;
     }
 
     // Adding zero group, always present
@@ -199,11 +197,10 @@ class Context {
     // Processing input features
     for (unsigned i = 0; i < info_count; ++i) {
       rocprofiler_feature_t* info = &info_array[i];
-      info_map_[info->name] = info;
       const rocprofiler_feature_kind_t kind = info->kind;
       const char* name = info->name;
 
-      if (kind == ROCPROFILER_FEATURE_KIND_METRIC) {  // Processing metrics features
+      if (kind != ROCPROFILER_FEATURE_KIND_TRACE) {  // Processing metrics features
         const Metric* metric = metrics_->Get(name);
         if (metric == NULL)
           EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
@@ -220,9 +217,7 @@ class Context {
           // For metrics expressions checking that there is no the same counter in the input metrics
           // and also that the counter wasn't registered already by another input metric expression
           if (metric->GetExpr()) {
-            auto inp_it = input_map.find(counter->name);
-            auto inf_it = info_map_.find(counter->name);
-            if ((inp_it != input_map.end()) || (inf_it != info_map_.end())) {
+            if (info_map_.find(counter->name) != info_map_.end()) {
               continue;
             } else {
               info = NewCounterInfo(counter);
@@ -402,6 +397,16 @@ class Context {
         rinfo->data.kind = ROCPROFILER_DATA_KIND_INT64;
       } else if (ainfo_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
         if (rinfo->data.result_bytes.copy) {
+          if (sample_id == 0) {
+            if (rinfo->data.result_bytes.size == 0) {
+              const uint32_t output_buffer_size = SqttProfile::output_buffer_size;
+              const uint32_t output_buffer_size64 = output_buffer_size / sizeof(uint64_t);
+              rinfo->data.result_bytes.ptr = calloc(output_buffer_size64, sizeof(uint64_t));
+              rinfo->data.result_bytes.size = output_buffer_size;
+            } else if (rinfo->data.result_bytes.size != SqttProfile::output_buffer_size) {
+              EXC_RAISING(HSA_STATUS_ERROR, "result bytes copy mode, data array size mismatch(" << rinfo->data.result_bytes.size << ")");
+            }
+          }
           char* result_bytes_ptr = reinterpret_cast<char*>(rinfo->data.result_bytes.ptr);
           const char* end = result_bytes_ptr + rinfo->data.result_bytes.size;
           const char* src = reinterpret_cast<char*>(ainfo_data->sqtt_data.ptr);

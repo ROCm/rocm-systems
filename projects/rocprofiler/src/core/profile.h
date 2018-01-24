@@ -197,13 +197,6 @@ class SqttProfile : public Profile {
     for (unsigned j = 0; j < info.parameter_count; ++j) {
       Config<parameter_t>(&profile_).Insert(info.parameters[j]);
     }
-
-    info.rinfo->data.result_bytes.size = output_buffer_size;
-    if (info.rinfo->data.result_bytes.copy) {
-      const uint32_t output_buffer_size64 = output_buffer_size / sizeof(uint64_t);
-      info.rinfo->data.result_bytes.ptr = calloc(output_buffer_size64, sizeof(uint64_t));
-      memset(info.rinfo->data.result_bytes.ptr, 0, output_buffer_size);
-    }
   }
 
   hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) {
