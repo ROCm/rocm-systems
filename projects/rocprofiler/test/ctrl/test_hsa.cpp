@@ -34,7 +34,7 @@ OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "util/hsa_rsrc_factory.h"
 
 HsaRsrcFactory* TestHsa::hsa_rsrc_ = NULL;
-AgentInfo* TestHsa::agent_info_ = NULL;
+const AgentInfo* TestHsa::agent_info_ = NULL;
 hsa_queue_t* TestHsa::hsa_queue_ = NULL;
 uint32_t TestHsa::agent_id_ = 0;
 
@@ -43,7 +43,7 @@ HsaRsrcFactory* TestHsa::HsaInstantiate(const uint32_t agent_ind) {
   if (hsa_rsrc_ == NULL) {
     agent_id_ = agent_ind;
 
-    hsa_rsrc_ = HsaRsrcFactory::Create();
+    hsa_rsrc_ = HsaRsrcFactory::CreateInstance();
 
     // Print properties of the agents
     hsa_rsrc_->PrintGpuAgents("> GPU agents");

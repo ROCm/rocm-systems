@@ -26,6 +26,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include <dlfcn.h>
 #include <hsa.h>
+#include <hsa_ext_amd.h>
 #include <hsa_ext_finalize.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -39,8 +40,17 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <string>
 #include <vector>
 
+// Callback function to get available in the system agents
+hsa_status_t HsaRsrcFactory::GetHsaAgentsCallback(hsa_agent_t agent, void* data) {
+  hsa_status_t status = HSA_STATUS_ERROR;
+  HsaRsrcFactory* hsa_rsrc = reinterpret_cast<HsaRsrcFactory*>(data);
+  const AgentInfo* agent_info = hsa_rsrc->AddAgentInfo(agent);
+  if (agent_info != NULL) status = HSA_STATUS_SUCCESS;
+  return status;
+}
+
 // Callback function to find and bind kernarg region of an agent
-static hsa_status_t FindMemRegionsCallback(hsa_region_t region, void* data) {
+hsa_status_t HsaRsrcFactory::FindMemRegionsCallback(hsa_region_t region, void* data) {
   hsa_region_global_flag_t flags;
   hsa_region_segment_t segment_id;
 
@@ -58,53 +68,6 @@ static hsa_status_t FindMemRegionsCallback(hsa_region_t region, void* data) {
   if (flags & HSA_REGION_GLOBAL_FLAG_KERNARG) {
     agent_info->kernarg_region = region;
   }
-
-  return HSA_STATUS_SUCCESS;
-}
-
-// Callback function to get the number of agents
-static hsa_status_t GetHsaAgentsCallback(hsa_agent_t agent, void* data) {
-  // Copy handle of agent and increment number of agents reported
-  HsaRsrcFactory* rsrcFactory = reinterpret_cast<HsaRsrcFactory*>(data);
-
-  // Determine if device is a Gpu agent
-  hsa_status_t status;
-  hsa_device_type_t type;
-  status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
-  CHECK_STATUS("Error Calling hsa_agent_get_info", status);
-  if (type == HSA_DEVICE_TYPE_DSP) {
-    return HSA_STATUS_SUCCESS;
-  }
-
-  if (type == HSA_DEVICE_TYPE_CPU) {
-    AgentInfo* agent_info = reinterpret_cast<AgentInfo*>(malloc(sizeof(AgentInfo)));
-    agent_info->dev_id = agent;
-    agent_info->dev_type = HSA_DEVICE_TYPE_CPU;
-    rsrcFactory->AddAgentInfo(agent_info, false);
-    return HSA_STATUS_SUCCESS;
-  }
-
-  // Device is a Gpu agent, build an instance of AgentInfo
-  AgentInfo* agent_info = reinterpret_cast<AgentInfo*>(malloc(sizeof(AgentInfo)));
-  agent_info->dev_id = agent;
-  agent_info->dev_type = HSA_DEVICE_TYPE_GPU;
-  hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_info->name);
-  agent_info->max_wave_size = 0;
-  hsa_agent_get_info(agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &agent_info->max_wave_size);
-  agent_info->max_queue_size = 0;
-  hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &agent_info->max_queue_size);
-  agent_info->profile = hsa_profile_t(108);
-  hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE, &agent_info->profile);
-
-  // Initialize memory regions to zero
-  agent_info->kernarg_region.handle = 0;
-  agent_info->coarse_region.handle = 0;
-
-  // Find and Bind Memory regions of the Gpu agent
-  hsa_agent_iterate_regions(agent, FindMemRegionsCallback, agent_info);
-
-  // Save the instance of AgentInfo
-  rsrcFactory->AddAgentInfo(agent_info, true);
 
   return HSA_STATUS_SUCCESS;
 }
@@ -128,12 +91,17 @@ HsaRsrcFactory::HsaRsrcFactory() {
   status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_AQLPROFILE, 1, 0, &aqlprofile_api_);
 #endif
   CHECK_STATUS("aqlprofile API table load failed", status);
+
+  // Get Loader API table
+  loader_api_ = {0};
+  status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_LOADER, 1, 0, &loader_api_);
+  CHECK_STATUS("loader API table query failed", status);
 }
 
 // Destructor of the class
 HsaRsrcFactory::~HsaRsrcFactory() {
-  for (auto p : cpu_list_) free(p);
-  for (auto p : gpu_list_) free(p);
+  for (auto p : cpu_list_) free(const_cast<AgentInfo*>(p));
+  for (auto p : gpu_list_) free(const_cast<AgentInfo*>(p));
 
   printf("HSA shutdown\n");
   hsa_status_t status = hsa_shut_down();
@@ -173,6 +141,68 @@ hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
   return HSA_STATUS_SUCCESS;
 }
 
+// Add system agent info
+const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
+  // Determine if device is a Gpu agent
+  hsa_status_t status;
+  AgentInfo* agent_info = NULL;
+
+  hsa_device_type_t type;
+  status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
+  CHECK_STATUS("Error Calling hsa_agent_get_info", status);
+
+  if (type == HSA_DEVICE_TYPE_CPU) {
+    agent_info = new AgentInfo{};
+    agent_info->dev_id = agent;
+    agent_info->dev_type = HSA_DEVICE_TYPE_CPU;
+    agent_info->dev_index = cpu_list_.size();
+    cpu_list_.push_back(agent_info);
+  }
+
+  if (type == HSA_DEVICE_TYPE_GPU) {
+    agent_info = new AgentInfo{};
+    agent_info->dev_id = agent;
+    agent_info->dev_type = HSA_DEVICE_TYPE_GPU;
+    hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_info->name);
+    strncpy(agent_info->gfxip, agent_info->name, 4);
+    agent_info->gfxip[4] = '\0';
+    hsa_agent_get_info(agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &agent_info->max_wave_size);
+    hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &agent_info->max_queue_size);
+    hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE, &agent_info->profile);
+    agent_info->is_apu = (agent_info->profile == HSA_PROFILE_FULL) ? true : false;
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &agent_info->cu_num);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU), &agent_info->waves_per_cu);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU), &agent_info->simds_per_cu);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES), &agent_info->se_num);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE), &agent_info->shader_arrays_per_se);
+
+    // Initialize memory regions to zero
+    agent_info->kernarg_region.handle = 0;
+    agent_info->coarse_region.handle = 0;
+
+    // Find and Bind Memory regions of the Gpu agent
+    hsa_agent_iterate_regions(agent, FindMemRegionsCallback, agent_info);
+
+    // Set GPU index
+    agent_info->dev_index = gpu_list_.size();
+    gpu_list_.push_back(agent_info);
+  }
+
+  if (agent_info) agent_map_[agent.handle] = agent_info;
+
+  return agent_info;
+}
+
+// Return systen agent info
+const AgentInfo* HsaRsrcFactory::GetAgentInfo(const hsa_agent_t agent) {
+  const AgentInfo* agent_info = NULL;
+  auto it = agent_map_.find(agent.handle);
+  if (it != agent_map_.end()) {
+    agent_info = it->second;
+  }
+  return agent_info;
+}
+
 // Get the count of Hsa Gpu Agents available on the platform
 //
 // @return uint32_t Number of Gpu agents on platform
@@ -193,7 +223,7 @@ uint32_t HsaRsrcFactory::GetCountOfCpuAgents() { return uint32_t(cpu_list_.size(
 //
 // @return bool true if successful, false otherwise
 //
-bool HsaRsrcFactory::GetGpuAgentInfo(uint32_t idx, AgentInfo** agent_info) {
+bool HsaRsrcFactory::GetGpuAgentInfo(uint32_t idx, const AgentInfo** agent_info) {
   // Determine if request is valid
   uint32_t size = uint32_t(gpu_list_.size());
   if (idx >= size) {
@@ -202,6 +232,7 @@ bool HsaRsrcFactory::GetGpuAgentInfo(uint32_t idx, AgentInfo** agent_info) {
 
   // Copy AgentInfo from specified index
   *agent_info = gpu_list_[idx];
+
   return true;
 }
 
@@ -213,7 +244,7 @@ bool HsaRsrcFactory::GetGpuAgentInfo(uint32_t idx, AgentInfo** agent_info) {
 //
 // @return bool true if successful, false otherwise
 //
-bool HsaRsrcFactory::GetCpuAgentInfo(uint32_t idx, AgentInfo** agent_info) {
+bool HsaRsrcFactory::GetCpuAgentInfo(uint32_t idx, const AgentInfo** agent_info) {
   // Determine if request is valid
   uint32_t size = uint32_t(cpu_list_.size());
   if (idx >= size) {
@@ -236,7 +267,8 @@ bool HsaRsrcFactory::GetCpuAgentInfo(uint32_t idx, AgentInfo** agent_info) {
 //
 // @return bool true if successful, false otherwise
 //
-bool HsaRsrcFactory::CreateQueue(AgentInfo* agent_info, uint32_t num_pkts, hsa_queue_t** queue) {
+bool HsaRsrcFactory::CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts,
+                                 hsa_queue_t** queue) {
   hsa_status_t status;
   status = hsa_queue_create(agent_info->dev_id, num_pkts, HSA_QUEUE_TYPE_MULTI, NULL, NULL,
                             UINT32_MAX, UINT32_MAX, queue);
@@ -324,7 +356,7 @@ bool HsaRsrcFactory::TransferData(void* dest_buff, void* src_buff, uint32_t leng
 //
 // @return bool true if successful, false otherwise
 //
-void* HsaRsrcFactory::LoadAndFinalize(AgentInfo* agent_info, const char* brig_path,
+void* HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path,
                                       const char* kernel_name, hsa_executable_t* hsa_exec, hsa_executable_symbol_t* code_desc) {
   // Finalize the Hsail object into code object
   hsa_status_t status;
@@ -387,32 +419,27 @@ void* HsaRsrcFactory::LoadAndFinalize(AgentInfo* agent_info, const char* brig_pa
   return code_buf;
 }
 
-// Add an instance of AgentInfo representing a Hsa Gpu agent
-void HsaRsrcFactory::AddAgentInfo(AgentInfo* agent_info, bool gpu) {
-  // Add input to Gpu list
-  if (gpu) {
-    gpu_list_.push_back(agent_info);
-    return;
-  }
-
-  // Add input to Cpu list
-  cpu_list_.push_back(agent_info);
-}
-
 // Print the various fields of Hsa Gpu Agents
 bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
   std::clog << header << " :" << std::endl;
 
-  AgentInfo* agent_info;
+  const AgentInfo* agent_info;
   int size = uint32_t(gpu_list_.size());
   for (int idx = 0; idx < size; idx++) {
     agent_info = gpu_list_[idx];
 
     std::clog << "> agent[" << idx << "] :" << std::endl;
     std::clog << ">> Name : " << agent_info->name << std::endl;
+    std::clog << ">> APU : " << agent_info->is_apu << std::endl;
+    std::clog << ">> HSAIL profile : " << agent_info->profile << std::endl;
     std::clog << ">> Max Wave Size : " << agent_info->max_wave_size << std::endl;
     std::clog << ">> Max Queue Size : " << agent_info->max_queue_size << std::endl;
     std::clog << ">> Kernarg Region Id : " << agent_info->coarse_region.handle << std::endl;
+    std::clog << ">> CU number : " << agent_info->cu_num << std::endl;
+    std::clog << ">> Waves per CU : " << agent_info->waves_per_cu << std::endl;
+    std::clog << ">> SIMDs per CU : " << agent_info->simds_per_cu << std::endl;
+    std::clog << ">> SE number : " << agent_info->se_num << std::endl;
+    std::clog << ">> Shader Arrays per SE : " << agent_info->shader_arrays_per_se << std::endl;
   }
   return true;
 }

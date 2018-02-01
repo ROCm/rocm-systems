@@ -41,6 +41,7 @@ class Xml {
   std::vector<level_t*> GetNodes(std::string global_tag) { return map_[global_tag]; }
 
   void Print() const {
+    std::cout << "XML file '" << file_name_ << "':" << std::endl;
     for (auto& elem : map_) {
       for (auto node : elem.second) {
         if (node->opts.size()) {
@@ -74,12 +75,13 @@ class Xml {
     while (1) {
       token_t token = (remainder.size()) ? remainder : NextToken();
       remainder.clear();
+
+//      token_t token1 = token;
+//      token1.push_back('\0');
+//      std::cout << "> " << &token1[0] << std::endl;
+
       // End of file
       if (token.size() == 0) break;
-
-      //      token_t token1 = token;
-      //      token1.push_back('\0');
-      //      std::cout << "> " << &token1[0] << std::endl;
 
       switch (state_) {
         case BODY_STATE:
@@ -146,6 +148,11 @@ class Xml {
 
   ~Xml() {}
 
+  bool SpaceCheck() const {
+    bool cond = ((buffer_[index_] == ' ') || (buffer_[index_] == '	'));
+    return cond;
+  }
+
   bool LineEndCheck() {
     bool found = false;
     if (buffer_[index_] == '\n') {
@@ -162,24 +169,55 @@ class Xml {
 
   token_t NextToken() {
     token_t token;
+    bool in_string = false;
+    bool special_symb = false;
 
     while (1) {
       if (data_size_ == 0) {
         data_size_ = read(fd_, buffer_, buf_size_);
         if (data_size_ <= 0) break;
       }
+
       if (token.empty())
-        while ((index_ < data_size_) && ((buffer_[index_] == ' ') || LineEndCheck())) {
+        while ((index_ < data_size_) && (SpaceCheck() || LineEndCheck())) {
           ++index_;
         }
-      while ((index_ < data_size_) && (buffer_[index_] != ' ') && !LineEndCheck()) {
-        token.push_back(buffer_[index_++]);
+      while ((index_ < data_size_) && (in_string || !(SpaceCheck() || LineEndCheck()))) {
+        const char symb = buffer_[index_];
+        bool skip_symb = false;
+
+        switch (symb) {
+          case '\\':
+            if (special_symb) special_symb = false;
+            else {
+              special_symb = true;
+              skip_symb = true;
+            }
+            break;
+          case '"':
+            if (special_symb) special_symb = false;
+            else {
+              in_string = !in_string;
+              if (!in_string) {
+                buffer_[index_] = ' ';
+                --index_;
+              }
+              skip_symb = true;
+            }
+            break;
+        }
+
+        if (!skip_symb) token.push_back(symb);
+        ++index_;
       }
+
       if (index_ == data_size_) {
         index_ = 0;
         data_size_ = 0;
-      } else
+      } else {
+        if (special_symb || in_string) BadFormat(token);
         break;
+      }
     }
 
     return token;

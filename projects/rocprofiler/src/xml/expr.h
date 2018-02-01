@@ -24,6 +24,7 @@ class div_zero_exception_t : public exception_t {
 };
 
 typedef uint64_t args_t;
+static const args_t ARGS_MAX = UINT64_MAX;
 typedef std::map<std::string, args_t> args_map_t;
 class Expr;
 
@@ -177,14 +178,19 @@ class Expr {
   bool SubCheck() const { return (sub_count_ == 0); }
   unsigned FindOp() const {
     unsigned i = pos_;
+    unsigned open_n = 0;
     while (i < expr_.length()) {
       switch (Symb(i)) {
         case '*':
         case '/':
         case '+':
         case '-':
+          goto end;
         case '(':
+          ++open_n;
+          break;
         case ')':
+          if (open_n != 0) i += 1;
           goto end;
       }
       ++i;
@@ -263,6 +269,74 @@ class var_expr_t : public bin_expr_t {
   const std::string name_;
 };
 
+class fun_expr_t : public bin_expr_t {
+ public:
+  typedef std::vector<var_expr_t> vvect_t;
+  fun_expr_t(const std::string& fname, const std::string& vname, const uint32_t& vnum) : fname_(fname) {
+    for (uint32_t i = 0; i < vnum; ++i) {
+      std::ostringstream var_full_name;
+      var_full_name << vname << "[" << i << "]";
+      vvect.push_back(var_expr_t(var_full_name.str()));
+    }
+  }
+  const vvect_t& GetVars() const { return vvect; }
+  std::string Symbol() const {
+    const std::string var = vvect[0].Symbol();
+    const std::string vname = var.substr(0, var.length() - 3);
+    std::ostringstream oss;
+    std::string str("(");
+    str.back() = ')';
+    oss << fname_ << "(" << vname << "," << vvect.size() << ")";
+    return oss.str();
+  }
+
+ private:
+  const std::string fname_;
+  vvect_t vvect;
+};
+class sum_expr_t : public fun_expr_t {
+ public:
+  sum_expr_t(const std::string& vname, const uint32_t& vnum) : fun_expr_t("sum", vname, vnum) {}
+  args_t Eval(const args_cache_t& args) const {
+    args_t result = 0;
+    for (const auto& var : GetVars()) result += var.Eval(args);
+    return result;
+  }
+};
+class avr_expr_t : public fun_expr_t {
+ public:
+  avr_expr_t(const std::string& vname, const uint32_t& vnum) : fun_expr_t("avr", vname, vnum) {}
+  args_t Eval(const args_cache_t& args) const {
+    args_t result = 0;
+    for (const auto& var : GetVars()) result += var.Eval(args);
+    return result / GetVars().size();
+  }
+};
+class min_expr_t : public fun_expr_t {
+ public:
+  min_expr_t(const std::string& vname, const uint32_t& vnum) : fun_expr_t("min", vname, vnum) {}
+  args_t Eval(const args_cache_t& args) const {
+    args_t result = ARGS_MAX;
+    for (const auto& var : GetVars()) {
+      args_t val = var.Eval(args);
+      result = (val < result) ? val : result;
+    }
+    return result;
+  }
+};
+class max_expr_t : public fun_expr_t {
+ public:
+  max_expr_t(const std::string& vname, const uint32_t& vnum) : fun_expr_t("max", vname, vnum) {}
+  args_t Eval(const args_cache_t& args) const {
+    args_t result = 0;
+    for (const auto& var : GetVars()) {
+      args_t val = var.Eval(args);
+      result = (val > result) ? val : result;
+    }
+    return result;
+  }
+};
+
 inline const bin_expr_t* bin_expr_t::CreateExpr(const bin_expr_t* arg1, const bin_expr_t* arg2,
                                                 const char op) {
   const bin_expr_t* expr = NULL;
@@ -285,11 +359,41 @@ inline const bin_expr_t* bin_expr_t::CreateExpr(const bin_expr_t* arg1, const bi
 
 inline const bin_expr_t* bin_expr_t::CreateArg(Expr* obj, const std::string str) {
   const bin_expr_t* arg = NULL;
+
   const unsigned i = strspn(str.c_str(), "1234567890");
   if (i == str.length()) {
     const unsigned value = atoi(str.c_str());
     arg = new const_expr_t(value);
-  } else {
+  }
+
+  if (arg == NULL) {
+    const std::size_t pos = str.find('(');
+    if (pos != std::string::npos) {
+      char* fname = NULL;
+      char* vname = NULL;
+      int vnum = 0;
+      int ret = sscanf(str.c_str(), "%m[a-zA-Z_](%m[0-9a-zA-Z_],%d)", &fname, &vname, &vnum);
+      if (ret == 3) {
+        const std::string fun_name(fname);
+        const fun_expr_t* farg = NULL;
+        if (fun_name == "sum") {
+          farg = new sum_expr_t(vname, vnum);
+        } else if (fun_name == "avr") {
+          farg = new avr_expr_t(vname, vnum);
+        } else if (fun_name == "min") {
+          farg = new min_expr_t(vname, vnum);
+        } else if (fun_name == "max") {
+          farg = new max_expr_t(vname, vnum);
+        }
+        if (farg) for (const auto& var : farg->GetVars()) obj->AddVar(var.Symbol());
+        arg = farg;
+      }
+      free(fname);
+      free(vname);
+    }
+  }
+
+  if (arg == NULL) {
     const std::string sub_expr = obj->Lookup(str);
     if (sub_expr.empty()) {
       arg = new var_expr_t(str);
@@ -299,6 +403,7 @@ inline const bin_expr_t* bin_expr_t::CreateArg(Expr* obj, const std::string str)
       arg = expr->GetTree();
     }
   }
+
   return arg;
 }
 

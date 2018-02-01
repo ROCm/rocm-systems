@@ -67,6 +67,9 @@ struct AgentInfo {
   // Agent type - Cpu = 0, Gpu = 1 or Dsp = 2
   uint32_t dev_type;
 
+  // APU flag
+  bool is_apu;
+
   // Agent system index
   uint32_t dev_index;
 
@@ -90,6 +93,21 @@ struct AgentInfo {
 
   // Memory region supporting kernel arguments
   hsa_region_t kernarg_region;
+
+  // The number of compute unit available in the agent.
+  uint32_t cu_num;
+
+  // Maximum number of waves possible in a Compute Unit.
+  uint32_t waves_per_cu;
+
+  // Number of SIMD's per compute unit CU
+  uint32_t simds_per_cu;
+
+  // Number of Shader Engines (SE) in Gpu
+  uint32_t se_num;
+
+  // Number of Shader Arrays Per Shader Engines in Gpu
+  uint32_t shader_arrays_per_se;
 };
 
 class HsaRsrcFactory {
@@ -213,13 +231,16 @@ class HsaRsrcFactory {
   // @param code_desc Handle of finalized Code Descriptor that could
   // be used to submit for execution
   //
-  // @return bool true if successful, false otherwise
+  // @return code buffer, non NULL if successful, NULL otherwise
   //
-  bool LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path, char* kernel_name,
-                       hsa_executable_symbol_t* code_desc);
+  void* LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path, const char* kernel_name,
+                        hsa_executable_t* hsa_exec, hsa_executable_symbol_t* code_desc);
 
   // Print the various fields of Hsa Gpu Agents
   bool PrintGpuAgents(const std::string& header);
+
+  // Submit AQL packet to given queue
+  static uint64_t Submit(hsa_queue_t* queue, void* packet);
 
   // Return AqlProfile API table
   typedef hsa_ven_amd_aqlprofile_1_00_pfn_t aqlprofile_pfn_t;

@@ -78,9 +78,8 @@ extern "C" {
 
 // Profiling feature kind
 typedef enum {
-  ROCPROFILER_FEATURE_KIND_COUNTER = 0,
-  ROCPROFILER_FEATURE_KIND_METRIC = 1,
-  ROCPROFILER_FEATURE_KIND_TRACE = 2
+  ROCPROFILER_FEATURE_KIND_METRIC = 0,
+  ROCPROFILER_FEATURE_KIND_TRACE = 1
 } rocprofiler_feature_kind_t;
 
 // Profiling feture parameter

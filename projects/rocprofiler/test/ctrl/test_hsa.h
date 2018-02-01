@@ -52,7 +52,7 @@ class TestHsa : public TestAql {
   }
 
   // Get methods for Agent Info, HAS queue, HSA Resourcse Manager
-  AgentInfo* GetAgentInfo() { return agent_info_; }
+  const AgentInfo* GetAgentInfo() { return agent_info_; }
   hsa_queue_t* GetQueue() { return hsa_queue_; }
   HsaRsrcFactory* GetRsrcFactory() { return hsa_rsrc_; }
 
@@ -115,7 +115,7 @@ class TestHsa : public TestAql {
   static uint32_t agent_id_;
 
   // Handle to an Hsa Gpu Agent
-  static AgentInfo* agent_info_;
+  static const AgentInfo* agent_info_;
 
   // Handle to an Hsa Queue
   static hsa_queue_t* hsa_queue_;

@@ -200,7 +200,7 @@ class Context {
       const rocprofiler_feature_kind_t kind = info->kind;
       const char* name = info->name;
 
-      if (kind != ROCPROFILER_FEATURE_KIND_TRACE) {  // Processing metrics features
+      if (kind == ROCPROFILER_FEATURE_KIND_METRIC) {  // Processing metrics features
         const Metric* metric = metrics_->Get(name);
         if (metric == NULL)
           EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");

@@ -21,7 +21,7 @@ export ROCP_METRICS=metrics.xml
 export ROCP_INPUT=input.xml
 # output directory for the tool library, for metrics results file 'results.txt'
 # and SQTT trace files 'thread_trace.se<n>.out'
-#export ROCP_OUTPUT_DIR=./
+export ROCP_OUTPUT_DIR=./RESULTS
 
 if [ -n "$1" ] ; then
   tbin="$*"

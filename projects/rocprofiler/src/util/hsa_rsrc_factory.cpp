@@ -26,12 +26,14 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include <dlfcn.h>
 #include <hsa.h>
+#include <hsa_ext_amd.h>
 #include <hsa_ext_finalize.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
+#include <atomic>
 #include <cassert>
 #include <fstream>
 #include <iostream>
@@ -76,6 +78,7 @@ hsa_status_t HsaRsrcFactory::FindMemRegionsCallback(hsa_region_t region, void* d
 // Constructor of the class
 HsaRsrcFactory::HsaRsrcFactory() {
   // Initialize the Hsa Runtime
+  printf("HSA init\n");
   hsa_status_t status = hsa_init();
   CHECK_STATUS("Error in hsa_init", status);
 
@@ -100,6 +103,10 @@ HsaRsrcFactory::HsaRsrcFactory() {
 
 // Destructor of the class
 HsaRsrcFactory::~HsaRsrcFactory() {
+  for (auto p : cpu_list_) free(const_cast<AgentInfo*>(p));
+  for (auto p : gpu_list_) free(const_cast<AgentInfo*>(p));
+
+  printf("HSA shutdown\n");
   hsa_status_t status = hsa_shut_down();
   CHECK_STATUS("Error in hsa_shut_down", status);
 }
@@ -162,12 +169,15 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_info->name);
     strncpy(agent_info->gfxip, agent_info->name, 4);
     agent_info->gfxip[4] = '\0';
-    agent_info->max_wave_size = 0;
     hsa_agent_get_info(agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &agent_info->max_wave_size);
-    agent_info->max_queue_size = 0;
     hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &agent_info->max_queue_size);
-    agent_info->profile = hsa_profile_t(108);
     hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE, &agent_info->profile);
+    agent_info->is_apu = (agent_info->profile == HSA_PROFILE_FULL) ? true : false;
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &agent_info->cu_num);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU), &agent_info->waves_per_cu);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU), &agent_info->simds_per_cu);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES), &agent_info->se_num);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE), &agent_info->shader_arrays_per_se);
 
     // Initialize memory regions to zero
     agent_info->kernarg_region.handle = 0;
@@ -349,8 +359,8 @@ bool HsaRsrcFactory::TransferData(void* dest_buff, void* src_buff, uint32_t leng
 //
 // @return bool true if successful, false otherwise
 //
-bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path,
-                                     char* kernel_name, hsa_executable_symbol_t* code_desc) {
+void* HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path,
+                                      const char* kernel_name, hsa_executable_t* hsa_exec, hsa_executable_symbol_t* code_desc) {
   // Finalize the Hsail object into code object
   hsa_status_t status;
   hsa_code_object_t code_object;
@@ -364,52 +374,52 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
   if (!codeStream) {
     std::cerr << "Error: failed to load " << filename << std::endl;
     assert(false);
-    return false;
+    return NULL;
   }
 
   // Allocate memory to read in code object from file
   size_t size = std::string::size_type(codeStream.tellg());
-  char* codeBuff = (char*)AllocateSysMemory(agent_info, size);
-  if (!codeBuff) {
+  char* code_buf = (char*)AllocateSysMemory(agent_info, size);
+  if (!code_buf) {
     std::cerr << "Error: failed to allocate memory for code object." << std::endl;
     assert(false);
-    return false;
+    return NULL;
   }
 
   // Read the code object into allocated memory
   codeStream.seekg(0, std::ios::beg);
-  std::copy(std::istreambuf_iterator<char>(codeStream), std::istreambuf_iterator<char>(), codeBuff);
+  std::copy(std::istreambuf_iterator<char>(codeStream), std::istreambuf_iterator<char>(), code_buf);
 
   // De-Serialize the code object that has been read into memory
-  status = hsa_code_object_deserialize(codeBuff, size, NULL, &code_object);
+  status = hsa_code_object_deserialize(code_buf, size, NULL, &code_object);
   if (status != HSA_STATUS_SUCCESS) {
     std::cerr << "Failed to deserialize code object" << std::endl;
-    return false;
+    if (code_buf) hsa_memory_free(code_buf);
+    return NULL;
   }
 
   // Create executable.
-  hsa_executable_t hsaExecutable;
   status =
-      hsa_executable_create(HSA_PROFILE_FULL, HSA_EXECUTABLE_STATE_UNFROZEN, "", &hsaExecutable);
+      hsa_executable_create(HSA_PROFILE_FULL, HSA_EXECUTABLE_STATE_UNFROZEN, "", hsa_exec);
   CHECK_STATUS("Error in creating executable object", status);
 
   // Load code object.
-  status = hsa_executable_load_code_object(hsaExecutable, agent_info->dev_id, code_object, "");
+  status = hsa_executable_load_code_object(*hsa_exec, agent_info->dev_id, code_object, "");
   CHECK_STATUS("Error in loading executable object", status);
 
   // Freeze executable.
-  status = hsa_executable_freeze(hsaExecutable, "");
+  status = hsa_executable_freeze(*hsa_exec, "");
   CHECK_STATUS("Error in freezing executable object", status);
 
   // Get symbol handle.
   hsa_executable_symbol_t kernelSymbol;
-  status = hsa_executable_get_symbol(hsaExecutable, NULL, kernel_name, agent_info->dev_id, 0,
+  status = hsa_executable_get_symbol(*hsa_exec, NULL, kernel_name, agent_info->dev_id, 0,
                                      &kernelSymbol);
   CHECK_STATUS("Error in looking up kernel symbol", status);
 
   // Update output parameter
   *code_desc = kernelSymbol;
-  return true;
+  return code_buf;
 }
 
 // Print the various fields of Hsa Gpu Agents
@@ -423,11 +433,45 @@ bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
 
     std::clog << "> agent[" << idx << "] :" << std::endl;
     std::clog << ">> Name : " << agent_info->name << std::endl;
+    std::clog << ">> APU : " << agent_info->is_apu << std::endl;
+    std::clog << ">> HSAIL profile : " << agent_info->profile << std::endl;
     std::clog << ">> Max Wave Size : " << agent_info->max_wave_size << std::endl;
     std::clog << ">> Max Queue Size : " << agent_info->max_queue_size << std::endl;
     std::clog << ">> Kernarg Region Id : " << agent_info->coarse_region.handle << std::endl;
+    std::clog << ">> CU number : " << agent_info->cu_num << std::endl;
+    std::clog << ">> Waves per CU : " << agent_info->waves_per_cu << std::endl;
+    std::clog << ">> SIMDs per CU : " << agent_info->simds_per_cu << std::endl;
+    std::clog << ">> SE number : " << agent_info->se_num << std::endl;
+    std::clog << ">> Shader Arrays per SE : " << agent_info->shader_arrays_per_se << std::endl;
   }
   return true;
+}
+
+uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, void* packet) {
+  const uint32_t slot_size_b = 0x40;
+
+  // adevance command queue
+  const uint64_t write_idx = hsa_queue_load_write_index_relaxed(queue);
+  hsa_queue_store_write_index_relaxed(queue, write_idx + 1);
+  while ((write_idx - hsa_queue_load_read_index_relaxed(queue)) >= queue->size) {
+    sched_yield();
+  }
+
+  uint32_t slot_idx = (uint32_t)(write_idx % queue->size);
+  uint32_t* queue_slot = (uint32_t*)((uintptr_t)(queue->base_address) + (slot_idx * slot_size_b));
+  uint32_t* slot_data = (uint32_t*)packet;
+
+  // Copy buffered commands into the queue slot.
+  // Overwrite the AQL invalid header (first dword) last.
+  // This prevents the slot from being read until it's fully written.
+  memcpy(&queue_slot[1], &slot_data[1], slot_size_b - sizeof(uint32_t));
+  std::atomic<uint32_t>* header_atomic_ptr = reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
+  header_atomic_ptr->store(slot_data[0], std::memory_order_release);
+
+  // ringdoor bell
+  hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
+
+  return write_idx;
 }
 
 HsaRsrcFactory* HsaRsrcFactory::instance_ = NULL;

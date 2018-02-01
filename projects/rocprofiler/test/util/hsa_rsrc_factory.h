@@ -28,6 +28,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <hsa.h>
 #include <hsa_ext_finalize.h>
 #include <hsa_ven_amd_aqlprofile.h>
+#include <hsa_ven_amd_loader.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,6 +36,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include <iostream>
 #include <mutex>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -52,6 +54,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 static const unsigned MEM_PAGE_BYTES = 0x1000;
 static const unsigned MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
+typedef decltype(hsa_agent_t::handle) hsa_agent_handle_t;
 
 // Encapsulates information about a Hsa Agent such as its
 // handle, name, max queue size, max wavefront size, etc.
@@ -61,6 +64,15 @@ struct AgentInfo {
 
   // Agent type - Cpu = 0, Gpu = 1 or Dsp = 2
   uint32_t dev_type;
+
+  // APU flag
+  bool is_apu;
+
+  // Agent system index
+  uint32_t dev_index;
+
+  // GFXIP name
+  char gfxip[64];
 
   // Name of Agent whose length is less than 64
   char name[64];
@@ -79,18 +91,42 @@ struct AgentInfo {
 
   // Memory region supporting kernel arguments
   hsa_region_t kernarg_region;
+
+  // The number of compute unit available in the agent.
+  uint32_t cu_num;
+
+  // Maximum number of waves possible in a Compute Unit.
+  uint32_t waves_per_cu;
+
+  // Number of SIMD's per compute unit CU
+  uint32_t simds_per_cu;
+
+  // Number of Shader Engines (SE) in Gpu
+  uint32_t se_num;
+
+  // Number of Shader Arrays Per Shader Engines in Gpu
+  uint32_t shader_arrays_per_se;
 };
 
 class HsaRsrcFactory {
  public:
   typedef std::recursive_mutex mutex_t;
 
-  static HsaRsrcFactory* Create() {
+  static HsaRsrcFactory* Create() { return NULL; }
+
+  static HsaRsrcFactory* CreateInstance() {
     std::lock_guard<mutex_t> lck(mutex_);
-    if (HsaRsrcFactory::instance_ == NULL) {
-      HsaRsrcFactory::instance_ = new HsaRsrcFactory();
+    if (instance_ == NULL) {
+      instance_ = new HsaRsrcFactory();
     }
     return instance_;
+  }
+
+  static HsaRsrcFactory& Instance() {
+    CreateInstance();
+    hsa_status_t status = (instance_ != NULL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+    CHECK_STATUS("HsaRsrcFactory::Instance() is not found", status);
+    return *instance_;
   }
 
   static void Destroy() {
@@ -99,11 +135,8 @@ class HsaRsrcFactory {
     instance_ = NULL;
   }
 
-  static HsaRsrcFactory& Instance() {
-    hsa_status_t status = (instance_ != NULL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
-    CHECK_STATUS("HsaRsrcFactory::Instance()", status);
-    return *instance_;
-  }
+  // Return system agent info
+  const AgentInfo* GetAgentInfo(const hsa_agent_t agent);
 
   // Get the count of Hsa Gpu Agents available on the platform
   //
@@ -125,7 +158,7 @@ class HsaRsrcFactory {
   //
   // @return bool true if successful, false otherwise
   //
-  bool GetGpuAgentInfo(uint32_t idx, AgentInfo** agent_info);
+  bool GetGpuAgentInfo(uint32_t idx, const AgentInfo** agent_info);
 
   // Get the AgentInfo handle of a Cpu device
   //
@@ -135,7 +168,7 @@ class HsaRsrcFactory {
   //
   // @return bool true if successful, false otherwise
   //
-  bool GetCpuAgentInfo(uint32_t idx, AgentInfo** agent_info);
+  bool GetCpuAgentInfo(uint32_t idx, const AgentInfo** agent_info);
 
   // Create a Queue object and return its handle. The queue object is expected
   // to support user requested number of Aql dispatch packets.
@@ -148,7 +181,7 @@ class HsaRsrcFactory {
   //
   // @return bool true if successful, false otherwise
   //
-  bool CreateQueue(AgentInfo* agent_info, uint32_t num_pkts, hsa_queue_t** queue);
+  bool CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts, hsa_queue_t** queue);
 
   // Create a Signal object and return its handle.
   //
@@ -198,11 +231,8 @@ class HsaRsrcFactory {
   //
   // @return code buffer, non NULL if successful, NULL otherwise
   //
-  void* LoadAndFinalize(AgentInfo* agent_info, const char* brig_path, const char* kernel_name,
+  void* LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path, const char* kernel_name,
                         hsa_executable_t* hsa_exec, hsa_executable_symbol_t* code_desc);
-
-  // Add an instance of AgentInfo representing a Hsa Gpu agent
-  void AddAgentInfo(AgentInfo* agent_info, bool gpu);
 
   // Print the various fields of Hsa Gpu Agents
   bool PrintGpuAgents(const std::string& header);
@@ -214,7 +244,16 @@ class HsaRsrcFactory {
   typedef hsa_ven_amd_aqlprofile_1_00_pfn_t aqlprofile_pfn_t;
   const aqlprofile_pfn_t* AqlProfileApi() const { return &aqlprofile_api_; }
 
+  // Return Loader API table
+  const hsa_ven_amd_loader_1_00_pfn_t* LoaderApi() const { return &loader_api_; }
+
  private:
+  // System agents iterating callback
+  static hsa_status_t GetHsaAgentsCallback(hsa_agent_t agent, void* data);
+
+  // Callback function to find and bind kernarg region of an agent
+  static hsa_status_t FindMemRegionsCallback(hsa_region_t region, void* data);
+
   // Load AQL profile HSA extension library directly
   static hsa_status_t LoadAqlProfileLib(aqlprofile_pfn_t* api);
 
@@ -225,17 +264,26 @@ class HsaRsrcFactory {
   // Destructor of the class
   ~HsaRsrcFactory();
 
+  // Add an instance of AgentInfo representing a Hsa Gpu agent
+  const AgentInfo* AddAgentInfo(const hsa_agent_t agent);
+
   static HsaRsrcFactory* instance_;
   static mutex_t mutex_;
 
   // Used to maintain a list of Hsa Gpu Agent Info
-  std::vector<AgentInfo*> gpu_list_;
+  std::vector<const AgentInfo*> gpu_list_;
 
   // Used to maintain a list of Hsa Cpu Agent Info
-  std::vector<AgentInfo*> cpu_list_;
+  std::vector<const AgentInfo*> cpu_list_;
+
+  // System agents map
+  std::map<hsa_agent_handle_t, const AgentInfo*> agent_map_;
 
   // AqlProfile API table
   aqlprofile_pfn_t aqlprofile_api_;
+
+  // Loader API table
+  hsa_ven_amd_loader_1_00_pfn_t loader_api_;
 };
 
 #endif  // TEST_UTIL_HSA_RSRC_FACTORY_H_

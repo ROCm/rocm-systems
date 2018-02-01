@@ -371,6 +371,7 @@ CONSTRUCTOR_API void constructor()
     fprintf(stderr, "Input file not found '%s'\n", xml_name);
     exit(1);
   }
+  xml->Print();
 
   // Getting metrics
   auto metrics_list = xml->GetNodes("top.metric");

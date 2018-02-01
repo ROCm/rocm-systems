@@ -38,7 +38,7 @@ class Metric {
   virtual const xml::Expr* GetExpr() const = 0;
 
  private:
-  std::string name_;
+  const std::string name_;
 };
 
 class BaseMetric : public Metric {
@@ -107,10 +107,38 @@ class MetricsDict {
     }
   }
 
-  const Metric* Get(const std::string& name) const {
+  const Metric* Get(const std::string& name) {
     const Metric* metric = NULL;
+
     auto it = cache_.find(name);
     if (it != cache_.end()) metric = it->second;
+    else {
+      const std::size_t pos = name.find(':');
+      if (pos != std::string::npos) {
+        std::string block_name = name.substr(0, pos);
+        const std::string event_str = name.substr(pos + 1);
+
+        uint32_t block_index = 0;
+        bool indexed = false;
+        const std::size_t pos1 = block_name.find('[');
+        if (pos1 != std::string::npos) {
+          const std::size_t pos2 = block_name.find(']');
+          if (pos2 == std::string::npos) EXC_RAISING(HSA_STATUS_ERROR, "Malformed metric name '" << name << "'");
+          block_name = name.substr(0, pos1);
+          const std::string block_index_str = name.substr(pos1 + 1, pos2 - (pos1 + 1)); 
+          block_index = atol(block_index_str.c_str());
+          indexed = true;
+        }
+
+        const hsa_ven_amd_aqlprofile_id_query_t query = Translate(agent_info_, block_name);
+        const hsa_ven_amd_aqlprofile_block_name_t block_id = (hsa_ven_amd_aqlprofile_block_name_t)query.id;
+        if ((query.instance_count > 1) && (indexed == false)) EXC_RAISING(HSA_STATUS_ERROR, "Malformed indexed metric name '" << name << "'");
+        const uint32_t event_id = atol(event_str.c_str());
+        const counter_t counter = {name, {block_id, block_index, event_id}};
+        metric = new BaseMetric(name, counter);
+      }
+    }
+
     return metric;
   }
 
@@ -119,12 +147,15 @@ class MetricsDict {
   const_iterator_t End() const { return cache_.end(); }
 
  private:
-  MetricsDict(const util::AgentInfo* agent_info) : xml_(NULL) {
+  MetricsDict(const util::AgentInfo* agent_info) : xml_(NULL), agent_info_(agent_info) {
     const char* xml_name = getenv("ROCP_METRICS");
     if (xml_name != NULL) {
       xml_ = xml::Xml::Create(xml_name);
       if (xml_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
-      std::cout << "ROCProfiler: importing metrics from '" << xml_name << "':" << std::endl;
+      xml_->AddConst("top.const.metric", "NUM_SIMDS", 64);
+      xml_->AddConst("top.const.metric", "NUM_SHADER_ENGINES", 4);
+      std::cout << "ROCProfiler: importing '" << xml_name << "':" << std::endl;
+      ImportMetrics(agent_info, "const");
       ImportMetrics(agent_info, agent_info->gfxip);
       ImportMetrics(agent_info, "global");
     }
@@ -135,47 +166,53 @@ class MetricsDict {
     for (auto& entry : cache_) delete entry.second;
   }
 
-  void ImportMetrics(const util::AgentInfo* agent_info, const char* scope) {
-    auto scope_list = xml_->GetNodes("top." + std::string(scope) + ".metric");
+  static hsa_ven_amd_aqlprofile_id_query_t Translate(const util::AgentInfo* agent_info, const std::string& block_name) {
+    hsa_ven_amd_aqlprofile_profile_t profile;
+    profile.agent = agent_info->dev_id;
+    hsa_ven_amd_aqlprofile_id_query_t query = {block_name.c_str(), 0, 0};
+    hsa_status_t status =
+        util::HsaRsrcFactory::Instance().AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
+            &profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query);
+    if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(HSA_STATUS_ERROR, "ImportMetrics: bad block name '" << block_name << "'");
+    return query;
+  }
+
+  void ImportMetrics(const util::AgentInfo* agent_info, const std::string& scope) {
+    auto scope_list = xml_->GetNodes("top." + scope + ".metric");
     if (!scope_list.empty()) {
       std::cout << "  " << scope_list.size() << " " << scope << " metrics found" << std::endl;
 
       for (auto node : scope_list) {
         const std::string name = node->opts["name"];
-        if (cache_.find(name) != cache_.end())
-          EXC_RAISING(HSA_STATUS_ERROR, "ImportMetrics: metrics redefined '" << name << "'");
-
         const std::string expr_str = node->opts["expr"];
+        std::string descr = node->opts["descr"];
+        if (descr.empty()) descr = (expr_str.empty()) ? name : expr_str;
+
         if (expr_str.empty()) {
           const std::string block_name = node->opts["block"];
-          const uint32_t event_id = atoi(node->opts["event"].c_str());
+          const std::string event_str = node->opts["event"];
+          const uint32_t event_id = atol(event_str.c_str());
 
-          hsa_ven_amd_aqlprofile_profile_t profile;
-          profile.agent = agent_info->dev_id;
-          hsa_ven_amd_aqlprofile_id_query_t query = {block_name.c_str(), 0, 0};
-          hsa_status_t status =
-              util::HsaRsrcFactory::Instance().AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
-                  &profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query);
-          if (status == HSA_STATUS_SUCCESS) {
-            const hsa_ven_amd_aqlprofile_block_name_t block_id =
-                (hsa_ven_amd_aqlprofile_block_name_t)query.id;
-            if (query.instance_count > 1) {
-              for (unsigned block_index = 0; block_index < query.instance_count; ++block_index) {
-                std::ostringstream os;
-                os << name << '[' << block_index << ']';
-                const std::string full_name = os.str();
-                const counter_t counter = {full_name, {block_id, block_index, event_id}};
-                cache_[full_name] = new BaseMetric(full_name, counter);
-              }
-            } else {
-              const counter_t counter = {name, {block_id, 0, event_id}};
-              cache_[name] = new BaseMetric(name, counter);
+          const hsa_ven_amd_aqlprofile_id_query_t query = Translate(agent_info, block_name);
+          const hsa_ven_amd_aqlprofile_block_name_t block_id = (hsa_ven_amd_aqlprofile_block_name_t)query.id;
+          if (query.instance_count > 1) {
+            for (unsigned block_index = 0; block_index < query.instance_count; ++block_index) {
+              std::ostringstream full_name;
+              full_name << name << '[' << block_index << ']';
+              std::ostringstream alias;
+              alias << block_name << "[" << block_index << "]:" << event_str;
+              const counter_t counter = {full_name.str(), {block_id, block_index, event_id}};
+              AddMetric(full_name.str(), alias.str(), counter);
             }
-          } else
-            AQL_EXC_RAISING(HSA_STATUS_ERROR, "ImportMetrics: bad block name '" << block_name
-                                                                                << "'");
+          } else {
+            const std::string alias = block_name + ":" + event_str;
+            const counter_t counter = {name, {block_id, 0, event_id}};
+            AddMetric(name, alias, counter);
+          }
         } else {
           xml::Expr* expr_obj = new xml::Expr(expr_str, new ExprCache(&cache_));
+          std::cout << "# " << descr << std::endl;
+          std::cout << name << "=" << expr_obj->String() << "\n" << std::endl;
           counters_vec_t counters_vec;
           for (const std::string var : expr_obj->GetVars()) {
             auto it = cache_.find(var);
@@ -184,11 +221,45 @@ class MetricsDict {
                                                            << "' is not found");
             it->second->GetCounters(counters_vec);
           }
-          cache_[name] = new ExprMetric(name, counters_vec, expr_obj);
+          AddMetric(name, counters_vec, expr_obj);
         }
       }
     }
   }
+
+  const Metric* AddMetric(const std::string& name, const std::string& /*alias*/, const counter_t& counter) {
+    const Metric* metric = NULL;
+    const auto ret = cache_.insert({name, NULL});
+    if (ret.second) {
+      metric = new BaseMetric(name, counter);
+      ret.first->second = metric;
+    } else EXC_RAISING(HSA_STATUS_ERROR, "metric redefined '" << name << "'");
+#if 0
+    if (alias != name) {
+      if (cache_.find(alias) != cache_.end()) EXC_RAISING(HSA_STATUS_ERROR, "metric alias/name interference '" << alias << "'");
+      const auto ret = aliases_.insert({alias, name});
+      if (!ret.second) EXC_RAISING(HSA_STATUS_ERROR, "metric alias redefined '" << alias << "'");
+    }
+#endif
+    return metric;
+  }
+
+  const Metric* AddMetric(const std::string& name, const counters_vec_t& counters_vec, const xml::Expr* expr_obj) {
+    const Metric* metric = NULL;
+    const auto ret = cache_.insert({name, NULL});
+    if (ret.second) {
+      metric = new ExprMetric(name, counters_vec, expr_obj);
+      ret.first->second = metric;
+    } else EXC_RAISING(HSA_STATUS_ERROR, "expr-metric redefined '" << name << "'");
+    return metric;
+  }
+
+#if 0
+  std::string UnAlias(const std::string& name) const {
+    auto it = aliases_.find(name);
+    return (it != aliases_.end()) ? it->second : name;
+  }
+#endif
 
   void Print() {
     for (auto& v : cache_) {
@@ -203,7 +274,11 @@ class MetricsDict {
   }
 
   xml::Xml* xml_;
+  const util::AgentInfo* agent_info_;
   cache_t cache_;
+#if 0
+  std::map<std::string, std::string> aliases_;
+#endif
 
   static map_t* map_;
   static mutex_t mutex_;

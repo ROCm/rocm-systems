@@ -42,7 +42,7 @@ class TestAql {
   }
 
   TestAql* Test() { return test_; }
-  virtual AgentInfo* GetAgentInfo() { return (test_) ? test_->GetAgentInfo() : 0; }
+  virtual const AgentInfo* GetAgentInfo() { return (test_) ? test_->GetAgentInfo() : 0; }
   virtual hsa_queue_t* GetQueue() { return (test_) ? test_->GetQueue() : 0; }
   virtual HsaRsrcFactory* GetRsrcFactory() { return (test_) ? test_->GetRsrcFactory() : 0; }
 

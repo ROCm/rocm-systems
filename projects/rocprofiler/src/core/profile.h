@@ -79,15 +79,16 @@ class Profile {
   Profile(const util::AgentInfo* agent_info) : agent_info_(agent_info) {
     profile_ = {};
     profile_.agent = agent_info->dev_id;
+    completion_signal_ = {};
     is_legacy_ = (strncmp(agent_info->name, "gfx8", 4) == 0);
   }
   virtual ~Profile() {
-    if (!info_vector_.empty()) {
-      info_vector_.clear();
-      hsa_memory_free(profile_.command_buffer.ptr);
-      hsa_memory_free(profile_.output_buffer.ptr);
-      free(const_cast<event_t*>(profile_.events));
-      free(const_cast<parameter_t*>(profile_.parameters));
+    info_vector_.clear();
+    if (profile_.command_buffer.ptr) hsa_memory_free(profile_.command_buffer.ptr);
+    if (profile_.output_buffer.ptr) hsa_memory_free(profile_.output_buffer.ptr);
+    if (profile_.events) free(const_cast<event_t*>(profile_.events));
+    if (profile_.parameters) free(const_cast<parameter_t*>(profile_.parameters));
+    if (completion_signal_.handle) {
       hsa_status_t status = hsa_signal_destroy(completion_signal_);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_destroy " << std::hex << status);
     }
