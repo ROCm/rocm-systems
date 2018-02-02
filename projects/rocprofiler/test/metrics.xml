@@ -81,7 +81,7 @@
   <metric name=SQ_WAVE_READY block=SQ event=47 ></metric>
 
   <metric name=SQ_WAIT_INST_LDS block=SQ event=63 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
-  <metric name=SQ_ACTIVE_INST_VALU block=SQ event=72 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
+  <metric name=SQ_ACTIVE_INST_VALU block=SQ event=71 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
   <metric name=SQ_INST_CYCLES_SALU block=SQ event=84 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
 
   <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=85 ></metric>
