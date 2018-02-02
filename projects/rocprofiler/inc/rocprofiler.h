@@ -71,9 +71,15 @@ extern "C" {
 #endif  // __cplusplus
 
 ////////////////////////////////////////////////////////////////////////////////
-// Profiling info
+// Returning the error string method
+
+hsa_status_t rocprofiler_error_string(
+    const char** str);  // [out] the API error string pointer returning
+
+////////////////////////////////////////////////////////////////////////////////
+// Profiling features and data
 //
-// Profiling info objects have profiling feature info, type, parameters and data
+// Profiling features objects have profiling feature info, type, parameters and data
 // Also profiling data samplaes can be iterated using a callback
 
 // Profiling feature kind
@@ -232,6 +238,10 @@ hsa_status_t rocprofiler_start(rocprofiler_t* context,     // [in/out] profiling
 hsa_status_t rocprofiler_stop(rocprofiler_t* context,     // [in/out] profiling context
                               uint32_t group_index);      // group index
 
+// Read profiling
+hsa_status_t rocprofiler_read(rocprofiler_t* context,     // [in/out] profiling context
+                              uint32_t group_index);      // group index
+
 // Read profiling data
 hsa_status_t rocprofiler_get_data(rocprofiler_t* context, // [in/out] profiling context
                                   uint32_t group_index);  // group index
@@ -242,7 +252,7 @@ hsa_status_t rocprofiler_group_count(const rocprofiler_t* context,  // [in] prof
 
 // Get profiling group for a given index
 hsa_status_t rocprofiler_get_group(rocprofiler_t* context,       // [in] profiling context
-                                   uint32_t group_index,         // [in] profiling group index
+                                   uint32_t group_index,         // profiling group index
                                    rocprofiler_group_t* group);  // [out] profiling group
 
 // Start profiling
@@ -250,6 +260,9 @@ hsa_status_t rocprofiler_group_start(rocprofiler_group_t* group);  // [in/out] p
 
 // Stop profiling
 hsa_status_t rocprofiler_group_stop(rocprofiler_group_t* group);  // [in/out] profiling group
+
+// Read profiling
+hsa_status_t rocprofiler_group_read(rocprofiler_group_t* group);  // [in/out] profiling group
 
 // Get profiling data
 hsa_status_t rocprofiler_group_get_data(rocprofiler_group_t* group);  // [in/out] profiling group
@@ -263,14 +276,74 @@ typedef hsa_ven_amd_aqlprofile_data_callback_t rocprofiler_trace_data_callback_t
 // Method for iterating the events output data
 hsa_status_t rocprofiler_iterate_trace_data(
     rocprofiler_t* context,                      // [in] profiling context
-    rocprofiler_trace_data_callback_t callback,  // [in] callback to iterate the output data
+    rocprofiler_trace_data_callback_t callback,  // callback to iterate the output data
     void* data);                                 // [in/out] callback data
 
 ////////////////////////////////////////////////////////////////////////////////
-// Returning the error string method
+// Profiling features and data
+//
+// Profiling features objects have profiling feature info, type, parameters and data
+// Also profiling data samplaes can be iterated using a callback
 
-hsa_status_t rocprofiler_error_string(
-    const char** str);  // [out] the API error string pointer returning
+// Profiling info kind
+typedef enum {
+  ROCPROFILER_INFO_KIND_METRIC = 0, // metric info
+  ROCPROFILER_INFO_KIND_METRIC_COUNT = 1, // metric features count, int32
+  ROCPROFILER_INFO_KIND_TRACE = 2, // trace info
+  ROCPROFILER_INFO_KIND_TRACE_COUNT = 3, // trace features count, int32
+  ROCPROFILER_INFO_KIND_TRACE_PARAMETER = 4, // trace parameter info
+  ROCPROFILER_INFO_KIND_TRACE_PARAMETER_COUNT = 5 // trace parameter count, int32
+} rocprofiler_info_kind_t;
+
+// Profiling info query
+typedef union {
+  rocprofiler_info_kind_t info_kind; // queried profiling info kind
+  struct {
+    const char* trace_name; // queried info trace name
+  } trace_parameter;
+} rocprofiler_info_query_t;
+
+// Profiling info data
+typedef struct {
+  rocprofiler_info_kind_t kind; // info data kind
+  union {
+    struct {
+      const char* name; // metric name
+      const char* description; // metric description
+    } metric;
+    struct {
+      const char* name; // trace name
+      const char* description; // trace description
+      uint32_t parameter_count; // supported by the trace number parameters
+    } trace;
+    struct {
+      uint32_t code; // parameter code
+      const char* trace_name; // trace name
+      const char* parameter_name; // parameter name
+      const char* description; // trace parameter description
+    } trace_parameter;
+  };
+} rocprofiler_info_data_t;
+
+// Return the info for a given info kind
+hsa_status_t rocprofiler_get_info(
+  hsa_agent_t agent, // GFXIP handle
+  rocprofiler_info_kind_t kind, // kind of iterated info
+  void *data); // [in/out] returned data
+
+// Iterate over the info for a given info kind, and invoke an application-defined callback on every iteration
+hsa_status_t rocprofiler_iterate_info(
+  hsa_agent_t agent, // GFXIP handle
+  rocprofiler_info_kind_t kind, // kind of iterated info
+  hsa_status_t (*callback)(const rocprofiler_info_data_t info, void *data), // callback
+  void *data); // [in/out] data passed to callback
+
+// Iterate over the info for a given info query, and invoke an application-defined callback on every iteration
+hsa_status_t rocprofiler_query_info(
+  hsa_agent_t agent, // GFXIP handle
+  rocprofiler_info_query_t query, // iterated info query
+  hsa_status_t (*callback)(const rocprofiler_info_data_t info, void *data), // callback
+  void *data); // [in/out] data passed to callback
 
 #ifdef __cplusplus
 }  // extern "C" block

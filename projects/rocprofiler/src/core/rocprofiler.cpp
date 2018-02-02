@@ -21,6 +21,7 @@
 #define API_METHOD_PREFIX                                                                          \
   hsa_status_t status = HSA_STATUS_SUCCESS;                                                        \
   try {
+
 #define API_METHOD_SUFFIX                                                                          \
   }                                                                                                \
   catch (std::exception & e) {                                                                     \
@@ -29,6 +30,9 @@
   }                                                                                                \
   return status;
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Internal library methods
+//
 namespace rocprofiler {
 decltype(hsa_queue_create)* hsa_queue_create_fn;
 decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
@@ -112,11 +116,42 @@ hsa_status_t GetExcStatus(const std::exception& e) {
                                : HSA_STATUS_ERROR;
 }
 
+const MetricsDict* GetMetrics(const hsa_agent_t& agent) {
+  rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
+  const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
+  if (agent_info == NULL) {
+    EXC_RAISING(HSA_STATUS_ERROR, "agent is not found");
+  }
+  const MetricsDict* metrics = MetricsDict::Create(agent_info);
+  if (metrics == NULL) EXC_RAISING(HSA_STATUS_ERROR, "MetricsDict create failed");
+  return metrics;
+}
+
 util::Logger::mutex_t util::Logger::mutex_;
 util::Logger* util::Logger::instance_ = NULL;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Public library methods
+//
 extern "C" {
+
+// HSA-runtime tool on-load method
+PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
+                       const char* const* failed_tool_names) {
+  rocprofiler::SaveHsaApi(table);
+  rocprofiler::ProxyQueue::InitFactory();
+  rocprofiler::InterceptQueue::SetTool(getenv("ROCP_TOOL_LIB"));
+  // HSA intercepting
+  if (getenv("ROCP_HSA_INTERCEPT") != NULL) {
+    rocprofiler::InterceptQueue::HsaIntercept(table);
+    rocprofiler::ProxyQueue::HsaIntercept(table);
+  }
+  return true;
+}
+
+// HSA-runtime tool on-unload method
+PUBLIC_API void OnUnload() { rocprofiler::RestoreHsaApi(); }
 
 // Returns the last error message
 PUBLIC_API hsa_status_t rocprofiler_error_string(const char** str) {
@@ -126,8 +161,8 @@ PUBLIC_API hsa_status_t rocprofiler_error_string(const char** str) {
 }
 
 // Create new profiling context
-PUBLIC_API hsa_status_t rocprofiler_open(hsa_agent_t agent, rocprofiler_feature_t* info,
-                                         uint32_t info_count, rocprofiler_t** handle, uint32_t mode,
+PUBLIC_API hsa_status_t rocprofiler_open(hsa_agent_t agent, rocprofiler_feature_t* features,
+                                         uint32_t feature_count, rocprofiler_t** handle, uint32_t mode,
                                          rocprofiler_properties_t* properties) {
   API_METHOD_PREFIX
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
@@ -151,7 +186,7 @@ PUBLIC_API hsa_status_t rocprofiler_open(hsa_agent_t agent, rocprofiler_feature_
     }
   }
 
-  *handle = new rocprofiler::Context(agent_info, queue, info, info_count, properties->handler,
+  *handle = new rocprofiler::Context(agent_info, queue, features, feature_count, properties->handler,
                                      properties->handler_arg);
   API_METHOD_SUFFIX
 }
@@ -268,21 +303,86 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_trace_data(
   API_METHOD_SUFFIX
 }
 
-// HSA-runtime tool on-load method
-PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-                       const char* const* failed_tool_names) {
-  rocprofiler::SaveHsaApi(table);
-  rocprofiler::ProxyQueue::InitFactory();
-  rocprofiler::InterceptQueue::SetTool(getenv("ROCP_TOOL_LIB"));
-  // HSA intercepting
-  if (getenv("ROCP_HSA_INTERCEPT") != NULL) {
-    rocprofiler::InterceptQueue::HsaIntercept(table);
-    rocprofiler::ProxyQueue::HsaIntercept(table);
+// Return the info for a given info kind
+PUBLIC_API hsa_status_t rocprofiler_get_info(
+  hsa_agent_t agent,
+  rocprofiler_info_kind_t kind,
+  void *data)
+{
+  API_METHOD_PREFIX
+  uint32_t* result_32bit_ptr = reinterpret_cast<uint32_t*>(data);
+
+  switch (kind) {
+    case ROCPROFILER_INFO_KIND_METRIC_COUNT:
+      *result_32bit_ptr = rocprofiler::GetMetrics(agent)->Size();
+      break;
+    case ROCPROFILER_INFO_KIND_TRACE_COUNT:
+      *result_32bit_ptr = 1;
+      break;
+    default:
+      EXC_RAISING(HSA_STATUS_ERROR, "unknown info kind(" << kind << ")");
   }
-  return true;
+  API_METHOD_SUFFIX
 }
 
-// HSA-runtime tool on-unload method
-PUBLIC_API void OnUnload() { rocprofiler::RestoreHsaApi(); }
+// Iterate over the info for a given info kind, and invoke an application-defined callback on every iteration
+PUBLIC_API hsa_status_t rocprofiler_iterate_info(
+  hsa_agent_t agent,
+  rocprofiler_info_kind_t kind,
+  hsa_status_t (*callback)(const rocprofiler_info_data_t info, void *data),
+  void *data)
+{
+  API_METHOD_PREFIX
+  rocprofiler_info_data_t info{};
+  info.kind = kind;
+
+  switch (kind) {
+    case ROCPROFILER_INFO_KIND_METRIC:
+    {
+      const rocprofiler::MetricsDict* dict = rocprofiler::GetMetrics(agent);
+      rocprofiler::MetricsDict::const_iterator_t it = dict->Begin();
+      rocprofiler::MetricsDict::const_iterator_t end = dict->End();
+      while (it != end) {
+        const rocprofiler::Metric* metric = it->second;
+        std::string name = metric->GetName();
+        const auto* expr = metric->GetExpr();
+        std::string description = "Performance metric " + name + " " + ((expr == NULL) ? "basic" : "= " + expr->String());
+        info.metric.name = strdup(name.c_str());
+        info.metric.description = strdup(description.c_str());
+        status = callback(info, data);
+
+        ++it;
+      }
+      break;
+    }
+    case ROCPROFILER_INFO_KIND_TRACE:
+    {
+      info.trace.name = strdup("TT");
+      info.trace.description = strdup("Thread Trace");
+      info.trace.parameter_count = 5;
+      status = callback(info, data);
+      break;
+    }
+    default:
+      EXC_RAISING(HSA_STATUS_ERROR, "unknown info kind(" << kind << ")");
+  }
+
+  if (status == HSA_STATUS_INFO_BREAK) status = HSA_STATUS_SUCCESS;
+  if (status != HSA_STATUS_SUCCESS) ERR_LOGGING("iterate_info error, info kind(" << kind << ")");
+
+  API_METHOD_SUFFIX
+}
+
+// Iterate over the info for a given info query, and invoke an application-defined callback on every iteration
+PUBLIC_API hsa_status_t rocprofiler_query_info(
+  hsa_agent_t agent,
+  rocprofiler_info_query_t query,
+  hsa_status_t (*callback)(const rocprofiler_info_data_t info, void *data),
+  void *data)
+{
+  API_METHOD_PREFIX
+  EXC_RAISING(HSA_STATUS_ERROR, "Not implemented");
+  API_METHOD_SUFFIX
+}
 
 }  // extern "C"
