@@ -10,6 +10,10 @@
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
 
+#ifndef AQL_PROFILE_READ_API_ENABLE
+#define AQL_PROFILE_READ_API_ENABLE 0
+#endif
+
 namespace rocprofiler {
 struct profile_info_t {
   const event_t* event;
@@ -96,7 +100,7 @@ class Profile {
 
   virtual void Insert(const profile_info_t& info) { info_vector_.push_back(info.rinfo); }
 
-  hsa_status_t Finalize(pkt_vector_t& start_vector, pkt_vector_t& stop_vector) {
+  hsa_status_t Finalize(pkt_vector_t& start_vector, pkt_vector_t& stop_vector, pkt_vector_t& read_vector) {
     hsa_status_t status = HSA_STATUS_SUCCESS;
 
     if (!info_vector_.empty()) {
@@ -104,6 +108,7 @@ class Profile {
       const pfn_t* api = rsrc->AqlProfileApi();
       packet_t start{};
       packet_t stop{};
+      packet_t read{};
 
       // Check the profile buffer sizes
       status = api->hsa_ven_amd_aqlprofile_start(&profile_, NULL);
@@ -114,6 +119,12 @@ class Profile {
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_start");
       status = api->hsa_ven_amd_aqlprofile_stop(&profile_, &stop);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_stop");
+
+#if AQL_PROFILE_READ_API_ENABLE
+      status = api->hsa_ven_amd_aqlprofile_read(&profile_, &read);
+      if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_read");
+#endif  // AQL_PROFILE_READ_API_ENABLE
+
       // Set completion signals
       hsa_signal_t dummy_signal{};
       dummy_signal.handle = 0;
@@ -122,6 +133,7 @@ class Profile {
       status = hsa_signal_create(1, 0, NULL, &post_signal);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
       stop.completion_signal = post_signal;
+      read.completion_signal = post_signal;
       completion_signal_ = post_signal;
 
       if (is_legacy_) {
@@ -130,6 +142,7 @@ class Profile {
 
         start_vector.insert(start_vector.end(), LEGACY_SLOT_SIZE_PKT, packet_t{});
         stop_vector.insert(stop_vector.end(), LEGACY_SLOT_SIZE_PKT, packet_t{});
+
         status = api->hsa_ven_amd_aqlprofile_legacy_get_pm4(
             &start, reinterpret_cast<void*>(&start_vector[start_index]));
         if (status != HSA_STATUS_SUCCESS)
@@ -138,9 +151,19 @@ class Profile {
             &stop, reinterpret_cast<void*>(&stop_vector[stop_index]));
         if (status != HSA_STATUS_SUCCESS)
           AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+
+#if AQL_PROFILE_READ_API_ENABLE
+        const uint32_t read_index = read_vector.size();
+        read_vector.insert(read_vector.end(), LEGACY_SLOT_SIZE_PKT, packet_t{});
+        status = api->hsa_ven_amd_aqlprofile_legacy_get_pm4(
+            &read, reinterpret_cast<void*>(&read_vector[read_index]));
+        if (status != HSA_STATUS_SUCCESS)
+          AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+#endif  // AQL_PROFILE_READ_API_ENABLE
       } else {
         start_vector.push_back(start);
         stop_vector.push_back(stop);
+        read_vector.push_back(read);
       }
     }
 

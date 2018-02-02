@@ -241,6 +241,14 @@ PUBLIC_API hsa_status_t rocprofiler_stop(rocprofiler_t* handle, uint32_t group_i
   API_METHOD_SUFFIX
 }
 
+// Read profiling
+PUBLIC_API hsa_status_t rocprofiler_read(rocprofiler_t* handle, uint32_t group_index) {
+  API_METHOD_PREFIX
+  rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
+  context->Read(group_index);
+  API_METHOD_SUFFIX
+}
+
 // Get profiling data
 PUBLIC_API hsa_status_t rocprofiler_get_data(rocprofiler_t* handle, uint32_t group_index) {
   API_METHOD_PREFIX
@@ -260,6 +268,13 @@ PUBLIC_API hsa_status_t rocprofiler_group_start(rocprofiler_group_t* group) {
 PUBLIC_API hsa_status_t rocprofiler_group_stop(rocprofiler_group_t* group) {
   API_METHOD_PREFIX
   rocprofiler_stop(group->context, group->index);
+  API_METHOD_SUFFIX
+}
+
+// Read profiling
+PUBLIC_API hsa_status_t rocprofiler_group_read(rocprofiler_group_t* group) {
+  API_METHOD_PREFIX
+  rocprofiler_read(group->context, group->index);
   API_METHOD_SUFFIX
 }
 

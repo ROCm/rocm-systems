@@ -104,8 +104,8 @@ HsaRsrcFactory::HsaRsrcFactory() {
 
 // Destructor of the class
 HsaRsrcFactory::~HsaRsrcFactory() {
-  for (auto p : cpu_list_) free(const_cast<AgentInfo*>(p));
-  for (auto p : gpu_list_) free(const_cast<AgentInfo*>(p));
+  for (auto p : cpu_list_) delete p;
+  for (auto p : gpu_list_) delete p;
 
   printf("HSA shutdown\n");
   hsa_status_t status = hsa_shut_down();

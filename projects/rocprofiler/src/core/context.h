@@ -94,9 +94,9 @@ class Group {
   }
 
   hsa_status_t Finalize() {
-    hsa_status_t status = pmc_profile_.Finalize(start_vector_, stop_vector_);
+    hsa_status_t status = pmc_profile_.Finalize(start_vector_, stop_vector_, read_vector_);
     if (status == HSA_STATUS_SUCCESS) {
-      status = sqtt_profile_.Finalize(start_vector_, stop_vector_);
+      status = sqtt_profile_.Finalize(start_vector_, stop_vector_, read_vector_);
     }
     if (status == HSA_STATUS_SUCCESS) {
       if (!pmc_profile_.Empty()) ++n_profiles_;
@@ -115,6 +115,7 @@ class Group {
   info_vector_t& GetInfoVector() { return info_vector_; }
   const pkt_vector_t& GetStartVector() const { return start_vector_; }
   const pkt_vector_t& GetStopVector() const { return stop_vector_; }
+  const pkt_vector_t& GetReadVector() const { return read_vector_; }
   Context* GetContext() { return context_; }
   uint32_t GetIndex() const { return index_; }
 
@@ -133,6 +134,7 @@ class Group {
   info_vector_t info_vector_;
   pkt_vector_t start_vector_;
   pkt_vector_t stop_vector_;
+  pkt_vector_t read_vector_;
   uint32_t n_profiles_;
   uint32_t refs_;
   Context* const context_;
@@ -286,6 +288,9 @@ class Context {
   const pkt_vector_t& StopPackets(const uint32_t& group_index) const {
     return set_[group_index].GetStopVector();
   }
+  const pkt_vector_t& ReadPackets(const uint32_t& group_index) const {
+    return set_[group_index].GetReadVector();
+  }
 
   void Start(const uint32_t& group_index, Queue* const queue = NULL) {
     const pkt_vector_t& start_packets = StartPackets(group_index);
@@ -296,6 +301,11 @@ class Context {
     const pkt_vector_t& stop_packets = StopPackets(group_index);
     Queue* const submit_queue = (queue != NULL) ? queue : queue_;
     submit_queue->Submit(&stop_packets[0], stop_packets.size());
+  }
+  void Read(const uint32_t& group_index, Queue* const queue = NULL) {
+    const pkt_vector_t& read_packets = StopPackets(group_index);
+    Queue* const submit_queue = (queue != NULL) ? queue : queue_;
+    submit_queue->Submit(&read_packets[0], read_packets.size());
   }
   void Submit(const uint32_t& group_index, const packet_t* packet, Queue* const queue = NULL) {
     Queue* const submit_queue = (queue != NULL) ? queue : queue_;
