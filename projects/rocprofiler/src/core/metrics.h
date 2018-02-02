@@ -107,7 +107,7 @@ class MetricsDict {
     }
   }
 
-  const Metric* Get(const std::string& name) {
+  const Metric* Get(const std::string& name) const {
     const Metric* metric = NULL;
 
     auto it = cache_.find(name);
