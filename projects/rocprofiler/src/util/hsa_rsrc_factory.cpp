@@ -40,6 +40,10 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <string>
 #include <vector>
 
+#ifndef AQL_PROFILE_READ_API_ENABLE
+#define AQL_PROFILE_READ_API_ENABLE 0
+#endif
+
 namespace rocprofiler {
 namespace util {
 
@@ -131,6 +135,11 @@ hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
     api->hsa_ven_amd_aqlprofile_stop =
       (decltype(::hsa_ven_amd_aqlprofile_stop)*)
         dlsym(handle, "hsa_ven_amd_aqlprofile_stop");
+#if AQL_PROFILE_READ_API_ENABLE
+    api->hsa_ven_amd_aqlprofile_read =
+      (decltype(::hsa_ven_amd_aqlprofile_read)*)
+        dlsym(handle, "hsa_ven_amd_aqlprofile_read");
+#endif  // AQL_PROFILE_READ_API_ENABLE
     api->hsa_ven_amd_aqlprofile_legacy_get_pm4 =
       (decltype(::hsa_ven_amd_aqlprofile_legacy_get_pm4)*)
         dlsym(handle, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
