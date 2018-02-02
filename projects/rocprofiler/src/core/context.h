@@ -460,7 +460,7 @@ class Context {
   // Profile group set
   std::vector<Group> set_;
   // Metrics dictionary
-  MetricsDict* metrics_;
+  const MetricsDict* metrics_;
   // Groups map
   std::map<block_des_t, block_status_t, lt_block_des> groups_map_;
   // Info map
