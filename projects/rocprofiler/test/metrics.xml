@@ -19,10 +19,8 @@
   <metric name=SQ_WAIT_INST_LDS block=SQ event=61 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
   <metric name=SQ_ACTIVE_INST_VALU block=SQ event=69 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
   <metric name=SQ_INST_CYCLES_SALU block=SQ event=86 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
-
-  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=89 ></metric>
-  <metric name=SQ_THREAD_CYCLES_VALU_MAX block=SQ event=90 ></metric>
-
+  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=89 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
+  <metric name=SQ_THREAD_CYCLES_VALU_MAX block=SQ event=90 descr="Maximum number of thread-cycles VALU operations that could have been executed given the instruction mix (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd, emulated)"></metric>
   <metric name=SQ_LDS_BANK_CONFLICT block=SQ event=97 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
 
   <metric name=TA_BUSY block=TA event=15 ></metric>
@@ -83,10 +81,8 @@
   <metric name=SQ_WAIT_INST_LDS block=SQ event=63 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
   <metric name=SQ_ACTIVE_INST_VALU block=SQ event=71 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
   <metric name=SQ_INST_CYCLES_SALU block=SQ event=84 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
-
-  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=85 ></metric>
-  <metric name=SQ_THREAD_CYCLES_VALU_MAX block=SQ event=86 ></metric>
-
+  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=85 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
+  <metric name=SQ_THREAD_CYCLES_VALU_MAX block=SQ event=86 descr="Maximum number of thread-cycles VALU operations that could have been executed given the instruction mix (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd, emulated)"></metric>
   <metric name=SQ_LDS_BANK_CONFLICT block=SQ event=93 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
 
   <metric name=TA_BUSY block=TA event=15 ></metric>
@@ -95,11 +91,16 @@
 
   <metric name=TCC_CYCLE block=TCC event=1 ></metric>
   <metric name=TCC_REQ block=TCC event=3 ></metric>
-  <metric name=TCC_HIT block=TCC event=17 ></metric>
-  <metric name=TCC_MISS block=TCC event=19 ></metric>
-  <metric name=TCC_WRITEBACK block=TCC event=22 ></metric>
-  <metric name=TCC_EA_RDREQ block=TCC event=36 ></metric>
-  <metric name=TCC_EA_RDREQ_32B block=TCC event=37 ></metric>
+  <metric name=TCC_HIT block=TCC event=20 ></metric>
+  <metric name=TCC_MISS block=TCC event=22 ></metric>
+  <metric name=TCC_WRITEBACK block=TCC event=25 ></metric>
+  <metric name=TCC_EA_WRREQ block=TCC event=29 ></metric>
+  <metric name=TCC_EA_WRREQ_64B block=TCC event=30 ></metric>
+  <metric name=TCC_EA_WRREQ_STALL block=TCC event=33 ></metric>
+  <metric name=TCC_EA_RDREQ block=TCC event=41 ></metric>
+  <metric name=TCC_EA_RDREQ_32B block=TCC event=42 ></metric>
+
+  <metric name=TCP_TA_DATA_STALL_CYCLES block=TCP event=6 descr="TCP stalls TA data interface. Now Windowed."></metric>
 
   <metric name=CPC_ALWAYS_COUNT block=CPC event=0 ></metric>
   <metric name=CPC_ME1_STALL_WAIT_ON_RCIU_READ block=CPC event=8 ></metric>
@@ -127,7 +128,7 @@
   # GPU_BUSY, percentage
   # The percentage of time GPU was busy.
   <metric
-    name=GPU_BUSY
+    name="GPUBusy"
     expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT
     descr="The percentage of time GPU was busy."
   ></metric>
@@ -169,7 +170,7 @@
 
   # VWriteInsts     The average number of vector write instructions to the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that write to video memory.
   <metric
-    name=VWriteInsts
+    name="VWriteInsts"
     expr=(SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES
     descr="The average number of vector write instructions to the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that write to video memory."
   ></metric>
@@ -219,7 +220,7 @@
   # SALUBusy        The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad) to 100% (optimal).
   <metric
     name="SALUBusy"
-    expr=100*SQ_INST_CYCLES_SALU*4/(NUM_SIMDS/NUM_SHADER_ENGINES)/GRBM_GUI_ACTIVE
+    expr=100*SQ_INST_CYCLES_SALU*4/NUM_SIMDS/GRBM_GUI_ACTIVE
     descr="The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."
   ></metric>
 

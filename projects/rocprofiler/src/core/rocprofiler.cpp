@@ -153,6 +153,10 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
 // HSA-runtime tool on-unload method
 PUBLIC_API void OnUnload() { rocprofiler::RestoreHsaApi(); }
 
+// Returns library vesrion
+PUBLIC_API uint32_t rocprofiler_version_major() { return ROCPROFILER_VERSION_MAJOR; }
+PUBLIC_API uint32_t rocprofiler_version_minor() { return ROCPROFILER_VERSION_MINOR; }
+
 // Returns the last error message
 PUBLIC_API hsa_status_t rocprofiler_error_string(const char** str) {
   API_METHOD_PREFIX
@@ -320,16 +324,17 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_trace_data(
 
 // Return the info for a given info kind
 PUBLIC_API hsa_status_t rocprofiler_get_info(
-  hsa_agent_t agent,
+  const hsa_agent_t *agent,
   rocprofiler_info_kind_t kind,
   void *data)
 {
   API_METHOD_PREFIX
+  if (agent == NULL) EXC_RAISING(HSA_STATUS_ERROR, "NULL agent");
   uint32_t* result_32bit_ptr = reinterpret_cast<uint32_t*>(data);
 
   switch (kind) {
     case ROCPROFILER_INFO_KIND_METRIC_COUNT:
-      *result_32bit_ptr = rocprofiler::GetMetrics(agent)->Size();
+      *result_32bit_ptr = rocprofiler::GetMetrics(*agent)->Size();
       break;
     case ROCPROFILER_INFO_KIND_TRACE_COUNT:
       *result_32bit_ptr = 1;
@@ -342,44 +347,63 @@ PUBLIC_API hsa_status_t rocprofiler_get_info(
 
 // Iterate over the info for a given info kind, and invoke an application-defined callback on every iteration
 PUBLIC_API hsa_status_t rocprofiler_iterate_info(
-  hsa_agent_t agent,
+  const hsa_agent_t* agent,
   rocprofiler_info_kind_t kind,
-  hsa_status_t (*callback)(const rocprofiler_info_data_t info, void *data),
-  void *data)
+  hsa_status_t (*callback)(const rocprofiler_info_data_t info, void* data),
+  void* data)
 {
   API_METHOD_PREFIX
+  rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
   rocprofiler_info_data_t info{};
   info.kind = kind;
+  uint32_t agent_idx = 0;
+  uint32_t agent_max = 0;
+  const rocprofiler::util::AgentInfo* agent_info = NULL;
 
-  switch (kind) {
-    case ROCPROFILER_INFO_KIND_METRIC:
-    {
-      const rocprofiler::MetricsDict* dict = rocprofiler::GetMetrics(agent);
-      rocprofiler::MetricsDict::const_iterator_t it = dict->Begin();
-      rocprofiler::MetricsDict::const_iterator_t end = dict->End();
-      while (it != end) {
-        const rocprofiler::Metric* metric = it->second;
-        std::string name = metric->GetName();
-        const auto* expr = metric->GetExpr();
-        std::string description = "Performance metric " + name + " " + ((expr == NULL) ? "basic" : "= " + expr->String());
-        info.metric.name = strdup(name.c_str());
-        info.metric.description = strdup(description.c_str());
-        status = callback(info, data);
+  if (agent != NULL) {
+    agent_info = hsa_rsrc->GetAgentInfo(*agent);
+    agent_idx = agent_info->dev_index;
+    agent_max = agent_idx + 1;
+  }
 
-        ++it;
+  while (hsa_rsrc->GetGpuAgentInfo(agent_idx, &agent_info)) {
+    info.agent_idx = agent_idx;
+
+    switch (kind) {
+      case ROCPROFILER_INFO_KIND_METRIC:
+      {
+        const rocprofiler::MetricsDict* dict = rocprofiler::GetMetrics(agent_info->dev_id);
+        rocprofiler::MetricsDict::const_iterator_t it = dict->Begin();
+        rocprofiler::MetricsDict::const_iterator_t end = dict->End();
+        while (it != end) {
+          const rocprofiler::Metric* metric = it->second;
+          std::string name = metric->GetName();
+          //std::string descr = metric->GetDescr();
+          const auto* expr = metric->GetExpr();
+          std::string description = "Performance metric " + name + " " + ((expr == NULL) ? "basic" : "= " + expr->String());
+          info.metric.name = strdup(name.c_str());
+          info.metric.description = strdup(description.c_str());
+          status = callback(info, data);
+          if (status != HSA_STATUS_SUCCESS) break;
+          ++it;
+        }
+        break;
       }
-      break;
+      case ROCPROFILER_INFO_KIND_TRACE:
+      {
+        info.trace.name = strdup("TT");
+        info.trace.description = strdup("Thread Trace");
+        info.trace.parameter_count = 5;
+        status = callback(info, data);
+        if (status != HSA_STATUS_SUCCESS) break;
+        break;
+      }
+      default:
+        EXC_RAISING(HSA_STATUS_ERROR, "unknown info kind(" << kind << ")");
     }
-    case ROCPROFILER_INFO_KIND_TRACE:
-    {
-      info.trace.name = strdup("TT");
-      info.trace.description = strdup("Thread Trace");
-      info.trace.parameter_count = 5;
-      status = callback(info, data);
-      break;
-    }
-    default:
-      EXC_RAISING(HSA_STATUS_ERROR, "unknown info kind(" << kind << ")");
+
+    ++agent_idx;
+    if (agent_idx == agent_max) break;
   }
 
   if (status == HSA_STATUS_INFO_BREAK) status = HSA_STATUS_SUCCESS;
@@ -390,7 +414,7 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_info(
 
 // Iterate over the info for a given info query, and invoke an application-defined callback on every iteration
 PUBLIC_API hsa_status_t rocprofiler_query_info(
-  hsa_agent_t agent,
+  const hsa_agent_t *agent,
   rocprofiler_info_query_t query,
   hsa_status_t (*callback)(const rocprofiler_info_data_t info, void *data),
   void *data)

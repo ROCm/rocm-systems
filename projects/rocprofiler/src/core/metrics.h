@@ -199,8 +199,10 @@ class MetricsDict {
             for (unsigned block_index = 0; block_index < query.instance_count; ++block_index) {
               std::ostringstream full_name;
               full_name << name << '[' << block_index << ']';
+              std::ostringstream block_insance;
+              block_insance << block_name << "[" << block_index << "]";
               std::ostringstream alias;
-              alias << block_name << "[" << block_index << "]:" << event_str;
+              alias << block_insance.str() << ":" << event_str;
               const counter_t counter = {full_name.str(), {block_id, block_index, event_id}};
               AddMetric(full_name.str(), alias.str(), counter);
             }
@@ -211,8 +213,10 @@ class MetricsDict {
           }
         } else {
           xml::Expr* expr_obj = new xml::Expr(expr_str, new ExprCache(&cache_));
+#if 0
           std::cout << "# " << descr << std::endl;
           std::cout << name << "=" << expr_obj->String() << "\n" << std::endl;
+#endif
           counters_vec_t counters_vec;
           for (const std::string var : expr_obj->GetVars()) {
             auto it = cache_.find(var);

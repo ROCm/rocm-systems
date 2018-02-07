@@ -91,6 +91,8 @@ class Logger {
     std::lock_guard<mutex_t> lck(mutex_);
     if (messaging) {
       message_[GetTid()] = "";
+    } else if (streaming_) {
+      Put("\n");
     }
     messaging_ = messaging;
     streaming_ = messaging;

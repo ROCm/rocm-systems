@@ -322,6 +322,11 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   return status;
 }
 
+static hsa_status_t info_callback(const rocprofiler_info_data_t info, void * arg) {
+    printf("  gpu-agent%d.%s : %s\n", info.agent_idx, info.metric.name, info.metric.description);
+    return HSA_STATUS_SUCCESS;
+}
+
 // Tool constructor
 CONSTRUCTOR_API void constructor()
 {
@@ -336,6 +341,11 @@ CONSTRUCTOR_API void constructor()
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK;
   parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2"] =
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
+
+  if (getenv("ROCP_INFO") != NULL) {
+    rocprofiler_iterate_info(NULL, ROCPROFILER_INFO_KIND_METRIC, info_callback, NULL);
+    return;
+  }
 
   // Set output file
   result_prefix = getenv("ROCP_OUTPUT_DIR");

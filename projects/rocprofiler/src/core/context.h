@@ -190,6 +190,7 @@ class Context {
     // Register input features to not duplicate by features referencing
     for (unsigned i = 0; i < info_count; ++i) {
       rocprofiler_feature_t* info = &info_array[i];
+      if (!info->name) EXC_RAISING(HSA_STATUS_ERROR, "input feature name is NULL");
       info_map_[info->name] = info;
     }
 

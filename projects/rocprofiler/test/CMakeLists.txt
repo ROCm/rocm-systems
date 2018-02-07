@@ -30,6 +30,7 @@ target_include_directories ( ${EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_R
 target_link_libraries( ${EXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} c stdc++ dl pthread rt atomic )
 execute_process ( COMMAND sh -xc "cp ${TEST_DIR}/run.sh ${PROJECT_BINARY_DIR}" )
 execute_process ( COMMAND sh -xc "cp ${TEST_DIR}/*.xml ${PROJECT_BINARY_DIR}" )
+execute_process ( COMMAND sh -xc "mkdir -p ${PROJECT_BINARY_DIR}/RESULTS" )
 
 ## Build test library
 set ( TEST_LIB "tool" )

@@ -66,9 +66,18 @@
 #include <hsa_ven_amd_aqlprofile.h>
 #include <stdint.h>
 
+#define ROCPROFILER_VERSION_MAJOR 1
+#define ROCPROFILER_VERSION_MINOR 0
+
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
+
+////////////////////////////////////////////////////////////////////////////////
+// Returning library version
+
+uint32_t rocprofiler_version_major();
+uint32_t rocprofiler_version_minor();
 
 ////////////////////////////////////////////////////////////////////////////////
 // Returning the error string method
@@ -305,6 +314,7 @@ typedef union {
 
 // Profiling info data
 typedef struct {
+  uint32_t agent_idx;
   rocprofiler_info_kind_t kind; // info data kind
   union {
     struct {
@@ -327,20 +337,20 @@ typedef struct {
 
 // Return the info for a given info kind
 hsa_status_t rocprofiler_get_info(
-  hsa_agent_t agent, // GFXIP handle
+  const hsa_agent_t* agent, // [in] GFXIP handle
   rocprofiler_info_kind_t kind, // kind of iterated info
   void *data); // [in/out] returned data
 
 // Iterate over the info for a given info kind, and invoke an application-defined callback on every iteration
 hsa_status_t rocprofiler_iterate_info(
-  hsa_agent_t agent, // GFXIP handle
+  const hsa_agent_t* agent, // [in] GFXIP handle
   rocprofiler_info_kind_t kind, // kind of iterated info
   hsa_status_t (*callback)(const rocprofiler_info_data_t info, void *data), // callback
   void *data); // [in/out] data passed to callback
 
 // Iterate over the info for a given info query, and invoke an application-defined callback on every iteration
 hsa_status_t rocprofiler_query_info(
-  hsa_agent_t agent, // GFXIP handle
+  const hsa_agent_t *agent, // [in] GFXIP handle
   rocprofiler_info_query_t query, // iterated info query
   hsa_status_t (*callback)(const rocprofiler_info_data_t info, void *data), // callback
   void *data); // [in/out] data passed to callback
