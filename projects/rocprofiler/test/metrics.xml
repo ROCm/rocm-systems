@@ -110,10 +110,10 @@
   # sum for 16 instances
   <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=sum(TA_FLAT_READ_WAVEFRONTS,16) ></metric>
   <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum" expr=sum(TA_FLAT_WRITE_WAVEFRONTS,16) ></metric>
-  <metric name=TCC_HIT_sum expr=sum(TCC_HIT,16) ></metric>
-  <metric name=TCC_MISS_sum expr=sum(TCC_MISS,16) ></metric>
-  <metric name=TCC_EA_RDREQ_sum expr=sum(TCC_EA_RDREQ,16) ></metric>
-  <metric name=TCC_EA_RDREQ_32B_sum expr=sum(TCC_EA_RDREQ_32B,16) ></metric>
+  <metric name="TCC_HIT_sum" expr=sum(TCC_HIT,16) ></metric>
+  <metric name="TCC_MISS_sum" expr=sum(TCC_MISS,16) ></metric>
+  <metric name="TCC_EA_RDREQ_sum" expr=sum(TCC_EA_RDREQ,16) ></metric>
+  <metric name="TCC_EA_RDREQ_32B_sum" expr=sum(TCC_EA_RDREQ_32B,16) ></metric>
 
   # FETCH_SIZE, kilobytes
   # The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
@@ -269,7 +269,7 @@
   # The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad).
   <metric
     name="ALUStalledByLDS"
-    expr=100*SQ_WAIT_INST_LDS/SQ_WAVES/GRBM_GUI_ACTIVE/NUM_SHADER_ENGINES
+    expr=100*SQ_WAIT_INST_LDS*4/SQ_WAVES/GRBM_GUI_ACTIVE
     descr="The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad)."
   ></metric>
 
