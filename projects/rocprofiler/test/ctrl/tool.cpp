@@ -323,8 +323,14 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
 }
 
 static hsa_status_t info_callback(const rocprofiler_info_data_t info, void * arg) {
-    printf("  gpu-agent%d.%s : %s\n", info.agent_idx, info.metric.name, info.metric.description);
-    return HSA_STATUS_SUCCESS;
+  const char symb = *reinterpret_cast<const char*>(arg);
+  if (((symb == 'b') && (info.metric.expr == NULL)) ||
+      ((symb == 'd') && (info.metric.expr != NULL)))
+  {
+    printf("\n  gpu-agent%d : %s : %s\n", info.agent_index, info.metric.name, info.metric.description);
+    if (info.metric.expr != NULL) printf("      %s = %s\n", info.metric.name, info.metric.expr);
+  }
+  return HSA_STATUS_SUCCESS;
 }
 
 // Tool constructor
@@ -342,9 +348,16 @@ CONSTRUCTOR_API void constructor()
   parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2"] =
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
 
-  if (getenv("ROCP_INFO") != NULL) {
-    rocprofiler_iterate_info(NULL, ROCPROFILER_INFO_KIND_METRIC, info_callback, NULL);
-    return;
+  char* info_symb = getenv("ROCP_INFO");
+  if (info_symb != NULL) {
+    if (*info_symb != 'b' && *info_symb != 'd') {
+      fprintf(stderr, "ROCProfiler: bad info symbol '%c', ROCP_INFO env", *info_symb);
+    } else {
+      if (*info_symb == 'b') printf("Basic HW counters:\n");
+      else printf("Derived metrics:\n");
+      rocprofiler_iterate_info(NULL, ROCPROFILER_INFO_KIND_METRIC, info_callback, info_symb);
+    }
+    exit(1);
   }
 
   // Set output file
@@ -381,7 +394,6 @@ CONSTRUCTOR_API void constructor()
     fprintf(stderr, "Input file not found '%s'\n", xml_name);
     exit(1);
   }
-  xml->Print();
 
   // Getting metrics
   auto metrics_list = xml->GetNodes("top.metric");
@@ -455,6 +467,7 @@ CONSTRUCTOR_API void constructor()
     printf("    )\n");
     ++index;
   }
+  fflush(stdout);
 
   // Adding dispatch observer
   if (feature_count) {

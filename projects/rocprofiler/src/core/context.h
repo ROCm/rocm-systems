@@ -207,6 +207,10 @@ class Context {
         const Metric* metric = metrics_->Get(name);
         if (metric == NULL)
           EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
+#if 0
+        std::cout << "    " << name << (metric->GetExpr() ? " = " + metric->GetExpr()->String() : " counter") << std::endl;
+#endif
+
         auto ret = metrics_map_.insert({name, metric});
         if (!ret.second)
           EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name

@@ -18,30 +18,66 @@ namespace xml {
 class Xml {
  public:
   typedef std::vector<char> token_t;
+
+  struct level_t;
+  typedef std::vector<level_t*> nodes_t;
+  typedef std::map<std::string, std::string> opts_t;
   struct level_t {
     std::string tag;
-    std::vector<level_t*> nodes;
-    std::map<std::string, std::string> opts;
+    nodes_t nodes;
+    opts_t opts;
   };
   typedef std::vector<level_t*> nodes_vec_t;
+  typedef std::map<std::string, nodes_vec_t> map_t;
 
   enum { DECL_STATE, BODY_STATE };
 
-  static Xml* Create(const char* file_name) {
-    Xml* xml = new Xml(file_name);
-    if (xml->fd_ == -1) {
-      delete xml;
-      xml = NULL;
+  static Xml* Create(const std::string& file_name, const Xml* obj = NULL) {
+    Xml* xml = new Xml(file_name.c_str(), obj);
+    if (xml != NULL) {
+      if (xml->Init() == false) {
+        delete xml;
+        xml = NULL;
+      } else {
+        const std::size_t pos = file_name.rfind('/');
+        const std::string path = (pos != std::string::npos) ? file_name.substr(0, pos + 1) : "";
+
+        xml->PreProcess();
+        nodes_t incl_nodes;
+        for (auto* node : xml->GetNodes("top.include")) {
+          if (node->opts.find("touch") == node->opts.end()) {
+            node->opts["touch"] = "";
+            incl_nodes.push_back(node);
+          }
+        }
+        for (auto* incl : incl_nodes) {
+          const std::string& incl_name = path + incl->opts["file"];
+          Xml *ixml = Create(incl_name, xml);
+          if (ixml == NULL) {
+            delete xml;
+            xml = NULL;
+            break;
+          } else {
+            delete(ixml);
+          }
+        }
+        if (xml) {
+          xml->Process();
+        }
+      }
     }
+
     return xml;
   }
+
+  static void Destroy(Xml *xml) { delete xml; }
 
   void AddExpr(const std::string& full_tag, const std::string& name, const std::string& expr) {
     const std::size_t pos = full_tag.rfind('.');
     const std::size_t pos1 = (pos == std::string::npos) ? 0 : pos + 1;
     const std::string level_tag = full_tag.substr(pos1);
     level_t* level = new level_t;
-    map_[full_tag].push_back(level);
+    (*map_)[full_tag].push_back(level);
     level->tag = level_tag;
     level->opts["name"] = name;
     level->opts["expr"] = expr;
@@ -53,13 +89,11 @@ class Xml {
     AddExpr(full_tag, name, oss.str());
   }
 
-  static void Destroy(Xml *xml) { delete xml; }
-
-  std::vector<level_t*> GetNodes(std::string global_tag) { return map_[global_tag]; }
+  nodes_t GetNodes(std::string global_tag) { return (*map_)[global_tag]; }
 
   void Print() const {
     std::cout << "XML file '" << file_name_ << "':" << std::endl;
-    for (auto& elem : map_) {
+    for (auto& elem : *map_) {
       for (auto node : elem.second) {
         if (node->opts.size()) {
           std::cout << elem.first << ":" << std::endl;
@@ -72,23 +106,91 @@ class Xml {
   }
 
  private:
-  Xml(const char* file_name)
-      : file_name_(file_name),
+  Xml(const char* file_name, const Xml* obj)
+      : file_name_(strdup(file_name)),
         file_line_(0),
         data_size_(0),
         index_(0),
         state_(BODY_STATE),
+        comment_(false),
+        included_(false),
         level_(NULL),
-        comment_(false) {
-    AddLevel("top");
+        map_(NULL)
+  {
+    if (obj != NULL) {
+      map_ = obj->map_;
+      level_ = obj->level_;
+      included_ = true;
+    }
+  }
 
-    fd_ = open(file_name, O_RDONLY);
+  ~Xml() {
+    if (included_ == false) delete map_;
+  }
+
+  bool Init() {
+    fd_ = open(file_name_, O_RDONLY);
     if (fd_ == -1) {
-      perror("open XML file");
-      return;
+      perror((std::string("open XML file ") + file_name_).c_str());
+      return false;
     }
 
+    if (map_ == NULL) {
+      map_ = new map_t;
+      if (map_ == NULL) return false;
+      AddLevel("top");
+    }
+
+    return true;
+  }
+
+  void PreProcess() {
+    uint32_t ind = 0;
+    const uint32_t buf_size = 128;
+    char buf[buf_size];
+    bool error = false;
+
+    while (1) {
+      const uint32_t pos = lseek(fd_, 0, SEEK_CUR);
+      uint32_t size = read(fd_, buf, buf_size);
+      if (size <= 0) break;
+      buf[size - 1] = '\0';
+
+      if (strncmp(buf, "#include \"", 10) == 0) {
+        for (ind = 0; (ind < size) && (buf[ind] != '\n'); ++ind);
+        if (ind == size) {
+          fprintf(stderr, "XML PreProcess failed, line size limit %d\n", (int)buf_size);
+          error = true;
+          break;
+        }
+        buf[ind] = '\0';
+        size = ind;
+        lseek(fd_, pos + ind + 1, SEEK_SET);
+
+        for (ind = 10; (ind < size) && (buf[ind] != '"'); ++ind);
+        if (ind == size) {
+          error = true;
+          break;
+        }
+        buf[ind] = '\0';
+
+        AddLevel("include");
+        AddOption("file", &buf[10]);
+        UpLevel();
+      }
+    }
+
+    if (error) {
+      fprintf(stderr, "XML PreProcess failed, line '%s'\n", buf);
+      exit(1);
+    }
+
+    lseek(fd_, 0, SEEK_SET);
+  }
+
+  void Process() {
     token_t remainder;
+
     while (1) {
       token_t token = (remainder.size()) ? remainder : NextToken();
       remainder.clear();
@@ -157,13 +259,11 @@ class Xml {
           }
           break;
         default:
-          std::cout << "Wrong state: " << state_ << std::endl;
+          std::cout << "XML parser error: wrong state: " << state_ << std::endl;
           exit(1);
       }
     }
   }
-
-  ~Xml() {}
 
   bool SpaceCheck() const {
     bool cond = ((buffer_[index_] == ' ') || (buffer_[index_] == '	'));
@@ -261,7 +361,7 @@ class Xml {
       global_tag += level->tag + ".";
     }
     global_tag += tag;
-    map_[global_tag].push_back(level_);
+    (*map_)[global_tag].push_back(level_);
   }
 
   void UpLevel() {
@@ -276,15 +376,18 @@ class Xml {
   const char* file_name_;
   unsigned file_line_;
   int fd_;
+
   static const unsigned buf_size_ = 256;
   char buffer_[buf_size_];
+
   unsigned data_size_;
   unsigned index_;
   unsigned state_;
-  level_t* level_;
-  std::vector<level_t*> stack_;
-  std::map<std::string, nodes_vec_t> map_;
   bool comment_;
+  std::vector<level_t*> stack_;
+  bool included_;
+  level_t* level_;
+  map_t* map_;
 };
 
 }  // namespace xml

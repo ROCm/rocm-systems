@@ -32,5 +32,8 @@ echo "Run $tbin"
 export ROCP_KITER=100
 export ROCP_DITER=100
 eval $tbin
+#valgrind --leak-check=full $tbin
+#valgrind --tool=massif $tbin
+#ms_print massif.out.<N>
 
 exit 0

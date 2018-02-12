@@ -92,7 +92,7 @@ class Logger {
     if (messaging) {
       message_[GetTid()] = "";
     } else if (streaming_) {
-      Put("\n");
+      //Put("\n");
     }
     messaging_ = messaging;
     streaming_ = messaging;

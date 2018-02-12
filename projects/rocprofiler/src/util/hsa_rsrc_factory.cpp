@@ -82,7 +82,6 @@ hsa_status_t HsaRsrcFactory::FindMemRegionsCallback(hsa_region_t region, void* d
 // Constructor of the class
 HsaRsrcFactory::HsaRsrcFactory() {
   // Initialize the Hsa Runtime
-  printf("HSA init\n");
   hsa_status_t status = hsa_init();
   CHECK_STATUS("Error in hsa_init", status);
 
@@ -110,7 +109,6 @@ HsaRsrcFactory::~HsaRsrcFactory() {
   for (auto p : cpu_list_) delete p;
   for (auto p : gpu_list_) delete p;
 
-  printf("HSA shutdown\n");
   hsa_status_t status = hsa_shut_down();
   CHECK_STATUS("Error in hsa_shut_down", status);
 }

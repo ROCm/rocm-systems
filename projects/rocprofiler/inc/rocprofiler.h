@@ -314,11 +314,12 @@ typedef union {
 
 // Profiling info data
 typedef struct {
-  uint32_t agent_idx;
+  uint32_t agent_index; // GPU HSA agent index
   rocprofiler_info_kind_t kind; // info data kind
   union {
     struct {
       const char* name; // metric name
+      const char* expr; // metric expression, NULL for basic counters
       const char* description; // metric description
     } metric;
     struct {

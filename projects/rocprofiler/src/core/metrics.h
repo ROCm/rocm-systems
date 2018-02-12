@@ -146,15 +146,21 @@ class MetricsDict {
   const_iterator_t Begin() const { return cache_.begin(); }
   const_iterator_t End() const { return cache_.end(); }
 
+  xml::Xml::nodes_t GetNodes(const std::string& scope) const {
+    return xml_->GetNodes("top." + scope + ".metric");
+  }
+
  private:
   MetricsDict(const util::AgentInfo* agent_info) : xml_(NULL), agent_info_(agent_info) {
     const char* xml_name = getenv("ROCP_METRICS");
     if (xml_name != NULL) {
+      //std::cout << "ROCProfiler: importing '" << xml_name << "':" << std::endl;
       xml_ = xml::Xml::Create(xml_name);
       if (xml_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
-      xml_->AddConst("top.const.metric", "NUM_SIMDS", 64);
-      xml_->AddConst("top.const.metric", "NUM_SHADER_ENGINES", 4);
-      std::cout << "ROCProfiler: importing '" << xml_name << "':" << std::endl;
+      xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE", agent_info->max_wave_size);
+      xml_->AddConst("top.const.metric", "CU_NUM", agent_info->cu_num);
+      xml_->AddConst("top.const.metric", "SIMD_NUM", agent_info->simds_per_cu * agent_info->cu_num);
+      xml_->AddConst("top.const.metric", "SE_NUM", agent_info->se_num);
       ImportMetrics(agent_info, "const");
       ImportMetrics(agent_info, agent_info->gfxip);
       ImportMetrics(agent_info, "global");
@@ -178,11 +184,11 @@ class MetricsDict {
   }
 
   void ImportMetrics(const util::AgentInfo* agent_info, const std::string& scope) {
-    auto scope_list = xml_->GetNodes("top." + scope + ".metric");
-    if (!scope_list.empty()) {
-      std::cout << "  " << scope_list.size() << " " << scope << " metrics found" << std::endl;
+    auto metrics_list = xml_->GetNodes("top." + scope + ".metric");
+    if (!metrics_list.empty()) {
+      //std::cout << "  " << metrics_list.size() << " " << scope << " metrics found" << std::endl;
 
-      for (auto node : scope_list) {
+      for (auto node : metrics_list) {
         const std::string name = node->opts["name"];
         const std::string expr_str = node->opts["expr"];
         std::string descr = node->opts["descr"];

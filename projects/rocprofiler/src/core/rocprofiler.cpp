@@ -367,25 +367,25 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_info(
   }
 
   while (hsa_rsrc->GetGpuAgentInfo(agent_idx, &agent_info)) {
-    info.agent_idx = agent_idx;
+    info.agent_index = agent_idx;
 
     switch (kind) {
       case ROCPROFILER_INFO_KIND_METRIC:
       {
         const rocprofiler::MetricsDict* dict = rocprofiler::GetMetrics(agent_info->dev_id);
-        rocprofiler::MetricsDict::const_iterator_t it = dict->Begin();
-        rocprofiler::MetricsDict::const_iterator_t end = dict->End();
-        while (it != end) {
-          const rocprofiler::Metric* metric = it->second;
-          std::string name = metric->GetName();
-          //std::string descr = metric->GetDescr();
-          const auto* expr = metric->GetExpr();
-          std::string description = "Performance metric " + name + " " + ((expr == NULL) ? "basic" : "= " + expr->String());
+        auto nodes_vec = dict->GetNodes(agent_info->gfxip);
+        auto global_vec = dict->GetNodes("global");
+        nodes_vec.insert(nodes_vec.end(), global_vec.begin(), global_vec.end());
+
+        for (auto* node : nodes_vec) {
+          const std::string& name = node->opts["name"];
+          const std::string& descr = node->opts["descr"];
+          const std::string& expr = node->opts["expr"];
           info.metric.name = strdup(name.c_str());
-          info.metric.description = strdup(description.c_str());
+          info.metric.description = strdup(descr.c_str());
+          info.metric.expr = expr.empty() ? NULL : strdup(expr.c_str());
           status = callback(info, data);
           if (status != HSA_STATUS_SUCCESS) break;
-          ++it;
         }
         break;
       }

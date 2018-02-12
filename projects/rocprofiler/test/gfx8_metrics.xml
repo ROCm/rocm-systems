@@ -1,0 +1,4040 @@
+<gfx8>
+  # CPC counters
+  <metric
+    name="CPC_ALWAYS_COUNT" block=CPC event=0 descr="Always Count."
+  ></metric>
+  <metric
+    name="CPC_RCIU_STALL_WAIT_ON_FREE" block=CPC event=1 descr="Rciu Stall Waiting on Free."
+  ></metric>
+  <metric
+    name="CPC_RCIU_STALL_PRIV_VIOLATION" block=CPC event=2 descr="Rciu Stall on Priv violation."
+  ></metric>
+  <metric
+    name="CPC_MIU_STALL_ON_RDREQ_FREE" block=CPC event=3 descr="Reserved."
+  ></metric>
+  <metric
+    name="CPC_MIU_STALL_ON_WRREQ_FREE" block=CPC event=4 descr="Reserved."
+  ></metric>
+  <metric
+    name="CPC_TCIU_STALL_WAIT_ON_FREE" block=CPC event=5 descr="Tciu Stall waiting for free."
+  ></metric>
+  <metric
+    name="CPC_ME1_STALL_WAIT_ON_RCIU_READY" block=CPC event=6 descr="Me1 stall waiting on Rciu Ready."
+  ></metric>
+  <metric
+    name="CPC_ME1_STALL_WAIT_ON_RCIU_READY_PERF" block=CPC event=7 descr="Me1 stall waiting on Rciu Ready Perf."
+  ></metric>
+  <metric
+    name="CPC_ME1_STALL_WAIT_ON_RCIU_READ" block=CPC event=8 descr="Me1 stall waiting on Rciu read."
+  ></metric>
+  <metric
+    name="CPC_ME1_STALL_WAIT_ON_MIU_READ" block=CPC event=9 descr="Reserved."
+  ></metric>
+  <metric
+    name="CPC_ME1_STALL_WAIT_ON_MIU_WRITE" block=CPC event=10 descr="Reserved."
+  ></metric>
+  <metric
+    name="CPC_ME1_STALL_ON_DATA_FROM_ROQ" block=CPC event=11 descr="Me1 stall on data from roq."
+  ></metric>
+  <metric
+    name="CPC_ME1_STALL_ON_DATA_FROM_ROQ_PERF" block=CPC event=12 descr="Me1 stall on data from roq Perf."
+  ></metric>
+  <metric
+    name="CPC_ME1_BUSY_FOR_PACKET_DECODE" block=CPC event=13 descr="Me1 busy for packet decode."
+  ></metric>
+  <metric
+    name="CPC_ME2_STALL_WAIT_ON_RCIU_READY" block=CPC event=14 descr="Me2 stall waiting on Rciu Ready. (Valid Only if ME2 is available"
+  ></metric>
+  <metric
+    name="CPC_ME2_STALL_WAIT_ON_RCIU_READY_PERF" block=CPC event=15 descr="Me2 stall waiting on Rciu Ready Perf. (Valid Only if ME2 is available"
+  ></metric>
+  <metric
+    name="CPC_ME2_STALL_WAIT_ON_RCIU_READ" block=CPC event=16 descr="Me2 stall waiting on Rciu read. (Valid Only if ME2 is available"
+  ></metric>
+  <metric
+    name="CPC_ME2_STALL_WAIT_ON_MIU_READ" block=CPC event=17 descr="Reserved."
+  ></metric>
+  <metric
+    name="CPC_ME2_STALL_WAIT_ON_MIU_WRITE" block=CPC event=18 descr="Reserved."
+  ></metric>
+  <metric
+    name="CPC_ME2_STALL_ON_DATA_FROM_ROQ" block=CPC event=19 descr="Me2 stall on data from roq. (Valid Only if ME2 is available"
+  ></metric>
+  <metric
+    name="CPC_ME2_STALL_ON_DATA_FROM_ROQ_PERF" block=CPC event=20 descr="Me2 stall on data from roq Perf. (Valid Only if ME2 is available"
+  ></metric>
+  <metric
+    name="CPC_ME2_BUSY_FOR_PACKET_DECODE" block=CPC event=21 descr="Me2 busy for packet decode. (Valid Only if ME2 is available"
+  ></metric>
+  <metric
+    name="CPC_ATCL2IU_STALL_WAIT_ON_FREE" block=CPC event=22 descr="ATCL2IU is stalled waiting on credits from the ATC L2."
+  ></metric>
+  <metric
+    name="CPC_ATCL2IU_STALL_WAIT_ON_TAGS" block=CPC event=23 descr="ATCL2IU has used all available tags and is waiting on the ATC L2 to return them."
+  ></metric>
+  # CPF counters
+  <metric
+    name="CPF_ALWAYS_COUNT" block=CPF event=0 descr="Always Count."
+  ></metric>
+  <metric
+    name="CPF_MIU_STALLED_WAITING_RDREQ_FREE" block=CPF event=1 descr="Reserved."
+  ></metric>
+  <metric
+    name="CPF_TCIU_STALLED_WAITING_ON_FREE" block=CPF event=2 descr="CPF Tciu stalled waiting on Free."
+  ></metric>
+  <metric
+    name="CPF_TCIU_STALLED_WAITING_ON_TAGS" block=CPF event=3 descr="CPF Tciu stalled waiting on tags."
+  ></metric>
+  <metric
+    name="CPF_CSF_BUSY_FOR_FETCHING_RING" block=CPF event=4 descr="CSF busy for fetching Ring data."
+  ></metric>
+  <metric
+    name="CPF_CSF_BUSY_FOR_FETCHING_IB1" block=CPF event=5 descr="CSF busy for fetching Indrirect buffer 1."
+  ></metric>
+  <metric
+    name="CPF_CSF_BUSY_FOR_FETCHING_IB2" block=CPF event=6 descr="CSF busy for fecthing Indirect buffer 2."
+  ></metric>
+  <metric
+    name="CPF_CSF_BUSY_FOR_FECTHINC_STATE" block=CPF event=7 descr="CSF busy for fetching state data."
+  ></metric>
+  <metric
+    name="CPF_MIU_BUSY_FOR_OUTSTANDING_TAGS" block=CPF event=8 descr="Reserved."
+  ></metric>
+  <metric
+    name="CPF_CSF_RTS_MIU_NOT_RTR" block=CPF event=9 descr="Reserved."
+  ></metric>
+  <metric
+    name="CPF_CSF_STATE_FIFO_NOT_RTR" block=CPF event=10 descr="CSF state fifo no RTR."
+  ></metric>
+  <metric
+    name="CPF_CSF_FETCHING_CMD_BUFFERS" block=CPF event=11 descr="CSF is fetching command buffers."
+  ></metric>
+  <metric
+    name="CPF_GRBM_DWORDS_SENT" block=CPF event=12 descr="CPF to GRBM dwords sent."
+  ></metric>
+  <metric
+    name="CPF_DYNAMIC_CLOCK_VALID" block=CPF event=13 descr="CPF Dynamic clock is valid."
+  ></metric>
+  <metric
+    name="CPF_REGISTER_CLOCK_VALID" block=CPF event=14 descr="CPF register clock is valid."
+  ></metric>
+  <metric
+    name="CPF_MIU_WRITE_REQUEST_SEND" block=CPF event=15 descr="Reserved."
+  ></metric>
+  <metric
+    name="CPF_MIU_READ_REQUEST_SEND" block=CPF event=16 descr="Reserved."
+  ></metric>
+  <metric
+    name="CPF_ATCL2IU_STALL_WAIT_ON_FREE" block=CPF event=17 descr="ATCL2IU is stalled waiting on credits from the ATC L2."
+  ></metric>
+  <metric
+    name="CPF_ATCL2IU_STALL_WAIT_ON_TAGS" block=CPF event=18 descr="ATCL2IU has used all available tags and is waiting on the ATC L2 to return them."
+  ></metric>
+  # GDS counters
+  <metric
+    name="GDS_DS_ADDR_CONFL" block=GDS event=0 descr="Number of conflicting addresses in DS memory"
+  ></metric>
+  <metric
+    name="GDS_DS_BANK_CONFL" block=GDS event=1 descr="Number of conflicting banks in DS memory"
+  ></metric>
+  <metric
+    name="GDS_WBUF_FLUSH" block=GDS event=2 descr="Number of times the RBIU write buffer is flushed"
+  ></metric>
+  <metric
+    name="GDS_WR_COMP" block=GDS event=3 descr="Number of times a WRITE_COMPLETE is put in write buffer"
+  ></metric>
+  <metric
+    name="GDS_WBUF_WR" block=GDS event=4 descr="Number of times the RBIU writes to buffer"
+  ></metric>
+  <metric
+    name="GDS_RBUF_HIT" block=GDS event=5 descr="Number of times an RBIU read hits in the buffer"
+  ></metric>
+  <metric
+    name="GDS_RBUF_MISS" block=GDS event=6 descr="Number of times an RBIU read misses the buffer"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_NORET" block=GDS event=7 descr="Number of commands that do not return data"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_RET" block=GDS event=8 descr="Number of commands that do return data"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_ORD_CNT" block=GDS event=9 descr="Number of ordered count operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_2COMP_REQ" block=GDS event=10 descr="Number of commands that return two components"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_ORD_WAVE_VALID" block=GDS event=11 descr="Number of valid wave ID's processed by ordered append"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_GDS_DATA_VALID" block=GDS event=12 descr="Number of valid write enables from the data bus"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_GDS_STALL_BY_ORD" block=GDS event=13 descr="Number of cycles GDS data is stalled due to Ordered count data"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_GDS_WR_OP" block=GDS event=14 descr="Number of GDS Write operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_GDS_RD_OP" block=GDS event=15 descr="Number of GDS Read operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_GDS_ATOM_OP" block=GDS event=16 descr="Number of GDS Atomic operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_GDS_REL_OP" block=GDS event=17 descr="Number of GDS Relative operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_GDS_CMPXCH_OP" block=GDS event=18 descr="Number of GDS Compare or Exchange operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_GDS_BYTE_OP" block=GDS event=19 descr="Number of GDS byte operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH0_GDS_SHORT_OP" block=GDS event=20 descr="Number of GDS short operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_NORET" block=GDS event=21 descr="Number of commands that do not return data"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_RET" block=GDS event=22 descr="Number of commands that do return data"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_ORD_CNT" block=GDS event=23 descr="Number of ordered count operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_2COMP_REQ" block=GDS event=24 descr="Number of commands that return two components"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_ORD_WAVE_VALID" block=GDS event=25 descr="Number of valid wave ID's processed by ordered append"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_GDS_DATA_VALID" block=GDS event=26 descr="Number of valid write enables from the data bus"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_GDS_STALL_BY_ORD" block=GDS event=27 descr="Number of cycles GDS data is stalled due to Ordered count data"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_GDS_WR_OP" block=GDS event=28 descr="Number of GDS Write operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_GDS_RD_OP" block=GDS event=29 descr="Number of GDS Read operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_GDS_ATOM_OP" block=GDS event=30 descr="Number of GDS Atomic operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_GDS_REL_OP" block=GDS event=31 descr="Number of GDS Relative operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_GDS_CMPXCH_OP" block=GDS event=32 descr="Number of GDS Compare or Exchange operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_GDS_BYTE_OP" block=GDS event=33 descr="Number of GDS byte operations"
+  ></metric>
+  <metric
+    name="GDS_SE0_SH1_GDS_SHORT_OP" block=GDS event=34 descr="Number of GDS short operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_NORET" block=GDS event=35 descr="Number of commands that do not return data"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_RET" block=GDS event=36 descr="Number of commands that do return data"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_ORD_CNT" block=GDS event=37 descr="Number of ordered count operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_2COMP_REQ" block=GDS event=38 descr="Number of commands that return two components"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_ORD_WAVE_VALID" block=GDS event=39 descr="Number of valid wave ID's processed by ordered append"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_GDS_DATA_VALID" block=GDS event=40 descr="Number of valid write enables from the data bus"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_GDS_STALL_BY_ORD" block=GDS event=41 descr="Number of cycles GDS data is stalled due to Ordered count data"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_GDS_WR_OP" block=GDS event=42 descr="Number of GDS Write operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_GDS_RD_OP" block=GDS event=43 descr="Number of GDS Read operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_GDS_ATOM_OP" block=GDS event=44 descr="Number of GDS Atomic operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_GDS_REL_OP" block=GDS event=45 descr="Number of GDS Relative operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_GDS_CMPXCH_OP" block=GDS event=46 descr="Number of GDS Compare or Exchange operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_GDS_BYTE_OP" block=GDS event=47 descr="Number of GDS byte operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH0_GDS_SHORT_OP" block=GDS event=48 descr="Number of GDS short operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_NORET" block=GDS event=49 descr="Number of commands that do not return data"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_RET" block=GDS event=50 descr="Number of commands that do return data"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_ORD_CNT" block=GDS event=51 descr="Number of ordered count operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_2COMP_REQ" block=GDS event=52 descr="Number of commands that return two components"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_ORD_WAVE_VALID" block=GDS event=53 descr="Number of valid wave ID's processed by ordered append"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_GDS_DATA_VALID" block=GDS event=54 descr="Number of valid write enables from the data bus"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_GDS_STALL_BY_ORD" block=GDS event=55 descr="Number of cycles GDS data is stalled due to Ordered count data"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_GDS_WR_OP" block=GDS event=56 descr="Number of GDS Write operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_GDS_RD_OP" block=GDS event=57 descr="Number of GDS Read operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_GDS_ATOM_OP" block=GDS event=58 descr="Number of GDS Atomic operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_GDS_REL_OP" block=GDS event=59 descr="Number of GDS Relative operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_GDS_CMPXCH_OP" block=GDS event=60 descr="Number of GDS Compare or Exchange operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_GDS_BYTE_OP" block=GDS event=61 descr="Number of GDS byte operations"
+  ></metric>
+  <metric
+    name="GDS_SE1_SH1_GDS_SHORT_OP" block=GDS event=62 descr="Number of GDS short operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_NORET" block=GDS event=63 descr="Number of commands that do not return data"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_RET" block=GDS event=64 descr="Number of commands that do return data"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_ORD_CNT" block=GDS event=65 descr="Number of ordered count operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_2COMP_REQ" block=GDS event=66 descr="Number of commands that return two components"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_ORD_WAVE_VALID" block=GDS event=67 descr="Number of valid wave ID's processed by ordered append"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_GDS_DATA_VALID" block=GDS event=68 descr="Number of valid write enables from the data bus"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_GDS_STALL_BY_ORD" block=GDS event=69 descr="Number of cycles GDS data is stalled due to Ordered count data"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_GDS_WR_OP" block=GDS event=70 descr="Number of GDS Write operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_GDS_RD_OP" block=GDS event=71 descr="Number of GDS Read operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_GDS_ATOM_OP" block=GDS event=72 descr="Number of GDS Atomic operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_GDS_REL_OP" block=GDS event=73 descr="Number of GDS Relative operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_GDS_CMPXCH_OP" block=GDS event=74 descr="Number of GDS Compare or Exchange operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_GDS_BYTE_OP" block=GDS event=75 descr="Number of GDS byte operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH0_GDS_SHORT_OP" block=GDS event=76 descr="Number of GDS short operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_NORET" block=GDS event=77 descr="Number of commands that do not return data"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_RET" block=GDS event=78 descr="Number of commands that do return data"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_ORD_CNT" block=GDS event=79 descr="Number of ordered count operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_2COMP_REQ" block=GDS event=80 descr="Number of commands that return two components"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_ORD_WAVE_VALID" block=GDS event=81 descr="Number of valid wave ID's processed by ordered append"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_GDS_DATA_VALID" block=GDS event=82 descr="Number of valid write enables from the data bus"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_GDS_STALL_BY_ORD" block=GDS event=83 descr="Number of cycles GDS data is stalled due to Ordered count data"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_GDS_WR_OP" block=GDS event=84 descr="Number of GDS Write operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_GDS_RD_OP" block=GDS event=85 descr="Number of GDS Read operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_GDS_ATOM_OP" block=GDS event=86 descr="Number of GDS Atomic operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_GDS_REL_OP" block=GDS event=87 descr="Number of GDS Relative operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_GDS_CMPXCH_OP" block=GDS event=88 descr="Number of GDS Compare or Exchange operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_GDS_BYTE_OP" block=GDS event=89 descr="Number of GDS byte operations"
+  ></metric>
+  <metric
+    name="GDS_SE2_SH1_GDS_SHORT_OP" block=GDS event=90 descr="Number of GDS short operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_NORET" block=GDS event=91 descr="Number of commands that do not return data"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_RET" block=GDS event=92 descr="Number of commands that do return data"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_ORD_CNT" block=GDS event=93 descr="Number of ordered count operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_2COMP_REQ" block=GDS event=94 descr="Number of commands that return two components"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_ORD_WAVE_VALID" block=GDS event=95 descr="Number of valid wave ID's processed by ordered append"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_GDS_DATA_VALID" block=GDS event=96 descr="Number of valid write enables from the data bus"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_GDS_STALL_BY_ORD" block=GDS event=97 descr="Number of cycles GDS data is stalled due to Ordered count data"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_GDS_WR_OP" block=GDS event=98 descr="Number of GDS Write operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_GDS_RD_OP" block=GDS event=99 descr="Number of GDS Read operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_GDS_ATOM_OP" block=GDS event=100 descr="Number of GDS Atomic operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_GDS_REL_OP" block=GDS event=101 descr="Number of GDS Relative operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_GDS_CMPXCH_OP" block=GDS event=102 descr="Number of GDS Compare or Exchange operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_GDS_BYTE_OP" block=GDS event=103 descr="Number of GDS byte operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH0_GDS_SHORT_OP" block=GDS event=104 descr="Number of GDS short operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_NORET" block=GDS event=105 descr="Number of commands that do not return data"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_RET" block=GDS event=106 descr="Number of commands that do return data"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_ORD_CNT" block=GDS event=107 descr="Number of ordered count operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_2COMP_REQ" block=GDS event=108 descr="Number of commands that return two components"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_ORD_WAVE_VALID" block=GDS event=109 descr="Number of valid wave ID's processed by ordered append"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_GDS_DATA_VALID" block=GDS event=110 descr="Number of valid write enables from the data bus"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_GDS_STALL_BY_ORD" block=GDS event=111 descr="Number of cycles GDS data is stalled due to Ordered count data"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_GDS_WR_OP" block=GDS event=112 descr="Number of GDS Write operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_GDS_RD_OP" block=GDS event=113 descr="Number of GDS Read operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_GDS_ATOM_OP" block=GDS event=114 descr="Number of GDS Atomic operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_GDS_REL_OP" block=GDS event=115 descr="Number of GDS Relative operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_GDS_CMPXCH_OP" block=GDS event=116 descr="Number of GDS Compare or Exchange operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_GDS_BYTE_OP" block=GDS event=117 descr="Number of GDS byte operations"
+  ></metric>
+  <metric
+    name="GDS_SE3_SH1_GDS_SHORT_OP" block=GDS event=118 descr="Number of GDS short operations"
+  ></metric>
+  <metric
+    name="GDS_GWS_RELEASED" block=GDS event=119 descr="Number of waves released by GWS"
+  ></metric>
+  # GRBM counters
+  <metric
+    name="GRBM_COUNT" block=GRBM event=0 descr="Tie High - Count Number of Clocks"
+  ></metric>
+  <metric
+    name="GRBM_USER_DEFINED" block=GRBM event=1 descr="User defined performance select."
+  ></metric>
+  <metric
+    name="GRBM_GUI_ACTIVE" block=GRBM event=2 descr="The GUI is Active"
+  ></metric>
+  <metric
+    name="GRBM_CP_BUSY" block=GRBM event=3 descr="Any of the Command Processor (CPG/CPC/CPF) blocks are busy."
+  ></metric>
+  <metric
+    name="GRBM_CP_COHER_BUSY" block=GRBM event=4 descr="The Command Processor Graphics (CPG) Surface Coherency Logic is busy."
+  ></metric>
+  <metric
+    name="GRBM_CP_DMA_BUSY" block=GRBM event=5 descr="The Command Processor Graphics (CPG) DMA Logic is busy."
+  ></metric>
+  <metric
+    name="GRBM_CB_BUSY" block=GRBM event=6 descr="Any of the Color Blocks (CB) are busy in the shader engine(s)."
+  ></metric>
+  <metric
+    name="GRBM_DB_BUSY" block=GRBM event=7 descr="Any of the Depth Blocks (DB) are busy in the shader engine(s)."
+  ></metric>
+  <metric
+    name="GRBM_PA_BUSY" block=GRBM event=8 descr="Any of the Primitive Assembly Blocks (PA) are busy in the shader engine(s)."
+  ></metric>
+  <metric
+    name="GRBM_SC_BUSY" block=GRBM event=9 descr="Any of the Scan Converter Blocks (SC) are busy in the shader engine(s)."
+  ></metric>
+  <metric
+    name="GRBM_RESERVED_6" block=GRBM event=10 descr="Reserved to maintain backwards compatibility."
+  ></metric>
+  <metric
+    name="GRBM_SPI_BUSY" block=GRBM event=11 descr="Any of the Shader Pipe Interpolators (SPI) are busy in the shader engine(s)."
+  ></metric>
+  <metric
+    name="GRBM_SX_BUSY" block=GRBM event=12 descr="Any of the Shader Export Blocks (SX) are busy."
+  ></metric>
+  <metric
+    name="GRBM_TA_BUSY" block=GRBM event=13 descr="Any of the Texture Pipes (TA) are busy in the shader engine(s)."
+  ></metric>
+  <metric
+    name="GRBM_CB_CLEAN" block=GRBM event=14 descr="Any of the Color Blocks (CB) are not clean in all shader engine(s)."
+  ></metric>
+  <metric
+    name="GRBM_DB_CLEAN" block=GRBM event=15 descr="Any of the Depth Blocks (DB) are not clean in all shader engine(s)."
+  ></metric>
+  <metric
+    name="GRBM_RESERVED_5" block=GRBM event=16 descr="Reserved to maintain backwards compatibility."
+  ></metric>
+  <metric
+    name="GRBM_VGT_BUSY" block=GRBM event=17 descr="Any of the Vertex Geometry Tessellator Blocks (VGT) are busy in the shader engine(s)."
+  ></metric>
+  <metric
+    name="GRBM_RESERVED_4" block=GRBM event=18 descr="Reserved to maintain backwards compatibility."
+  ></metric>
+  <metric
+    name="GRBM_RESERVED_3" block=GRBM event=19 descr="Reserved to maintain backwards compatibility."
+  ></metric>
+  <metric
+    name="GRBM_RESERVED_2" block=GRBM event=20 descr="Reserved to maintain backwards compatibility."
+  ></metric>
+  <metric
+    name="GRBM_RESERVED_1" block=GRBM event=21 descr="Reserved to maintain backwards compatibility."
+  ></metric>
+  <metric
+    name="GRBM_RESERVED_0" block=GRBM event=22 descr="Reserved to maintain backwards compatibility."
+  ></metric>
+  <metric
+    name="GRBM_IA_BUSY" block=GRBM event=23 descr="The Input Assembler (IA) is busy."
+  ></metric>
+  <metric
+    name="GRBM_IA_NO_DMA_BUSY" block=GRBM event=24 descr="The Input Assembler (IA) is busy; Does not include the Index DMA engine status."
+  ></metric>
+  <metric
+    name="GRBM_GDS_BUSY" block=GRBM event=25 descr="The Global Data Share (GDS) is busy."
+  ></metric>
+  <metric
+    name="GRBM_BCI_BUSY" block=GRBM event=26 descr="Any of the Barycentric Interpolators (BCI) are busy in the shader engine(s)."
+  ></metric>
+  <metric
+    name="GRBM_RLC_BUSY" block=GRBM event=27 descr="The Ring List Controller (RLC) is busy."
+  ></metric>
+  <metric
+    name="GRBM_TC_BUSY" block=GRBM event=28 descr="Any of the Texture Cache Blocks (TCP/TCI/TCA/TCC) are busy."
+  ></metric>
+  <metric
+    name="GRBM_CPG_BUSY" block=GRBM event=29 descr="The Command Processor Graphics (CPG) is busy."
+  ></metric>
+  <metric
+    name="GRBM_CPC_BUSY" block=GRBM event=30 descr="The Command Processor Compute (CPC) is busy."
+  ></metric>
+  <metric
+    name="GRBM_CPF_BUSY" block=GRBM event=31 descr="The Command Processor Fetchers (CPF) is busy."
+  ></metric>
+  <metric
+    name="GRBM_WD_BUSY" block=GRBM event=32 descr="The Work Distributor (WD) is busy."
+  ></metric>
+  # SPI counters
+  <metric
+    name="SPI_VS_WINDOW_VALID" block=SPI event=0 descr="Clock count enabled by perfcounter_start event."
+  ></metric>
+  <metric
+    name="SPI_VS_BUSY" block=SPI event=1 descr="Number of clocks with outstanding waves (SPI or SH)."
+  ></metric>
+  <metric
+    name="SPI_VS_FIRST_WAVE" block=SPI event=2 descr="Number of VS_IS_DS first waves"
+  ></metric>
+  <metric
+    name="SPI_VS_LAST_WAVE" block=SPI event=3 descr="Number of VS_IS_DS last waves"
+  ></metric>
+  <metric
+    name="SPI_VS_LSHS_DEALLOC" block=SPI event=4 descr="Number of VS_IS_DS lds dealloc waves"
+  ></metric>
+  <metric
+    name="SPI_VS_PC_STALL" block=SPI event=5 descr="Number of clocks stalled due to pc space."
+  ></metric>
+  <metric
+    name="SPI_VS_POS0_STALL" block=SPI event=6 descr="Number of clocks stalled due to pos buf space in SH0."
+  ></metric>
+  <metric
+    name="SPI_VS_POS1_STALL" block=SPI event=7 descr="Number of clocks stalled due to pos buf space in SH1."
+  ></metric>
+  <metric
+    name="SPI_VS_CRAWLER_STALL" block=SPI event=8 descr="Number of clocks event/wave order fifo is full"
+  ></metric>
+  <metric
+    name="SPI_VS_EVENT_WAVE" block=SPI event=9 descr="Number of events and waves"
+  ></metric>
+  <metric
+    name="SPI_VS_WAVE" block=SPI event=10 descr="Number of waves"
+  ></metric>
+  <metric
+    name="SPI_VS_PERS_UPD_FULL0" block=SPI event=11 descr="Number of clks VS persistent state update fifo0 is full."
+  ></metric>
+  <metric
+    name="SPI_VS_PERS_UPD_FULL1" block=SPI event=12 descr="Number of clks VS persistent state update fifo1 is full."
+  ></metric>
+  <metric
+    name="SPI_VS_LATE_ALLOC_FULL" block=SPI event=13 descr="Number of clks VS late alloc fifo is full."
+  ></metric>
+  <metric
+    name="SPI_VS_FIRST_SUBGRP" block=SPI event=14 descr="Number of first of subgroup waves"
+  ></metric>
+  <metric
+    name="SPI_VS_LAST_SUBGRP" block=SPI event=15 descr="Number of last of subgroup waves"
+  ></metric>
+  <metric
+    name="SPI_GS_WINDOW_VALID" block=SPI event=16 descr="Clock count enabled by perfcounter_start event."
+  ></metric>
+  <metric
+    name="SPI_GS_BUSY" block=SPI event=17 descr="Number of clocks with outstanding waves (SPI or SH)."
+  ></metric>
+  <metric
+    name="SPI_GS_CRAWLER_STALL" block=SPI event=18 descr="Number of clocks event/wave order fifo is full"
+  ></metric>
+  <metric
+    name="SPI_GS_EVENT_WAVE" block=SPI event=19 descr="Number of events and waves"
+  ></metric>
+  <metric
+    name="SPI_GS_WAVE" block=SPI event=20 descr="Number of waves"
+  ></metric>
+  <metric
+    name="SPI_GS_PERS_UPD_FULL0" block=SPI event=21 descr="Number of clks GS persistent state update fifo0 is full."
+  ></metric>
+  <metric
+    name="SPI_GS_PERS_UPD_FULL1" block=SPI event=22 descr="Number of clks GS persistent state update fifo1 is full."
+  ></metric>
+  <metric
+    name="SPI_GS_FIRST_SUBGRP" block=SPI event=23 descr="Number of first of subgroup waves"
+  ></metric>
+  <metric
+    name="SPI_GS_LAST_SUBGRP" block=SPI event=24 descr="Number of last of subgroup waves"
+  ></metric>
+  <metric
+    name="SPI_ES_WINDOW_VALID" block=SPI event=25 descr="Clock count enabled by perfcounter_start event."
+  ></metric>
+  <metric
+    name="SPI_ES_BUSY" block=SPI event=26 descr="Number of clocks with outstanding waves (SPI or SH)."
+  ></metric>
+  <metric
+    name="SPI_ES_CRAWLER_STALL" block=SPI event=27 descr="Number of clocks event/wave order fifo is full"
+  ></metric>
+  <metric
+    name="SPI_ES_FIRST_WAVE" block=SPI event=28 descr="Number of ES_IS_DS first waves"
+  ></metric>
+  <metric
+    name="SPI_ES_LAST_WAVE" block=SPI event=29 descr="Number of ES_IS_DS last waves"
+  ></metric>
+  <metric
+    name="SPI_ES_LSHS_DEALLOC" block=SPI event=30 descr="Number of ES_IS_DS lds dealloc waves"
+  ></metric>
+  <metric
+    name="SPI_ES_EVENT_WAVE" block=SPI event=31 descr="Number of events and waves"
+  ></metric>
+  <metric
+    name="SPI_ES_WAVE" block=SPI event=32 descr="Number of waves"
+  ></metric>
+  <metric
+    name="SPI_ES_PERS_UPD_FULL0" block=SPI event=33 descr="Number of clks ES persistent state update fifo0 is full."
+  ></metric>
+  <metric
+    name="SPI_ES_PERS_UPD_FULL1" block=SPI event=34 descr="Number of clks ES persistent state update fifo1 is full."
+  ></metric>
+  <metric
+    name="SPI_ES_FIRST_SUBGRP" block=SPI event=35 descr="Number of first of subgroup waves"
+  ></metric>
+  <metric
+    name="SPI_ES_LAST_SUBGRP" block=SPI event=36 descr="Number of last of subgroup waves"
+  ></metric>
+  <metric
+    name="SPI_HS_WINDOW_VALID" block=SPI event=37 descr="Clock count enabled by perfcounter_start event."
+  ></metric>
+  <metric
+    name="SPI_HS_BUSY" block=SPI event=38 descr="Number of clocks with outstanding waves (SPI or SH)."
+  ></metric>
+  <metric
+    name="SPI_HS_CRAWLER_STALL" block=SPI event=39 descr="Number of clocks event/wave order fifo is full"
+  ></metric>
+  <metric
+    name="SPI_HS_FIRST_WAVE" block=SPI event=40 descr="Number of first waves"
+  ></metric>
+  <metric
+    name="SPI_HS_LAST_WAVE" block=SPI event=41 descr="Number of last waves"
+  ></metric>
+  <metric
+    name="SPI_HS_LSHS_DEALLOC" block=SPI event=42 descr="Number of offchipHS lds dealloc waves"
+  ></metric>
+  <metric
+    name="SPI_HS_EVENT_WAVE" block=SPI event=43 descr="Number of events and waves"
+  ></metric>
+  <metric
+    name="SPI_HS_WAVE" block=SPI event=44 descr="Number of waves"
+  ></metric>
+  <metric
+    name="SPI_HS_PERS_UPD_FULL0" block=SPI event=45 descr="Number of clks HS persistent state update fifo0 is full."
+  ></metric>
+  <metric
+    name="SPI_HS_PERS_UPD_FULL1" block=SPI event=46 descr="Number of clks HS persistent state update fifo1 is full."
+  ></metric>
+  <metric
+    name="SPI_LS_WINDOW_VALID" block=SPI event=47 descr="Clock count enabled by perfcounter_start event."
+  ></metric>
+  <metric
+    name="SPI_LS_BUSY" block=SPI event=48 descr="Number of clocks with outstanding waves (SPI or SH)."
+  ></metric>
+  <metric
+    name="SPI_LS_CRAWLER_STALL" block=SPI event=49 descr="Number of clocks event/wave order fifo is full"
+  ></metric>
+  <metric
+    name="SPI_LS_FIRST_WAVE" block=SPI event=50 descr="Number of first waves"
+  ></metric>
+  <metric
+    name="SPI_LS_LAST_WAVE" block=SPI event=51 descr="Number of last waves"
+  ></metric>
+  <metric
+    name="SPI_OFFCHIP_LDS_STALL_LS" block=SPI event=52 descr="Number of clocks ls is stalled due to offchip LDS"
+  ></metric>
+  <metric
+    name="SPI_LS_EVENT_WAVE" block=SPI event=53 descr="Number of events and waves"
+  ></metric>
+  <metric
+    name="SPI_LS_WAVE" block=SPI event=54 descr="Number of waves"
+  ></metric>
+  <metric
+    name="SPI_LS_PERS_UPD_FULL0" block=SPI event=55 descr="Number of clks LS persistent state update fifo0 is full."
+  ></metric>
+  <metric
+    name="SPI_LS_PERS_UPD_FULL1" block=SPI event=56 descr="Number of clks LS persistent state update fifo1 is full."
+  ></metric>
+  <metric
+    name="SPI_CSG_WINDOW_VALID" block=SPI event=57 descr="Clock count enabled by perfcounter_start event."
+  ></metric>
+  <metric
+    name="SPI_CSG_BUSY" block=SPI event=58 descr="Number of clocks with outstanding waves (SPI or SH)."
+  ></metric>
+  <metric
+    name="SPI_CSG_NUM_THREADGROUPS" block=SPI event=59 descr="Number of threadgroups launched"
+  ></metric>
+  <metric
+    name="SPI_CSG_CRAWLER_STALL" block=SPI event=60 descr="Number of clocks event/wave order fifo is full"
+  ></metric>
+  <metric
+    name="SPI_CSG_EVENT_WAVE" block=SPI event=61 descr="Number of events and waves"
+  ></metric>
+  <metric
+    name="SPI_CSG_WAVE" block=SPI event=62 descr="Number of waves"
+  ></metric>
+  <metric
+    name="SPI_CSN_WINDOW_VALID" block=SPI event=63 descr="Clock count enabled by perfcounter_start event."
+  ></metric>
+  <metric
+    name="SPI_CSN_BUSY" block=SPI event=64 descr="Number of clocks with outstanding waves (SPI or SH)."
+  ></metric>
+  <metric
+    name="SPI_CSN_NUM_THREADGROUPS" block=SPI event=65 descr="Number of threadgroups launched"
+  ></metric>
+  <metric
+    name="SPI_CSN_CRAWLER_STALL" block=SPI event=66 descr="Number of clocks event/wave order fifo is full"
+  ></metric>
+  <metric
+    name="SPI_CSN_EVENT_WAVE" block=SPI event=67 descr="Number of events and waves"
+  ></metric>
+  <metric
+    name="SPI_CSN_WAVE" block=SPI event=68 descr="Number of waves"
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_WINDOW_VALID" block=SPI event=69 descr="Clock count enabled by perfcounter_start event."
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_BUSY" block=SPI event=70 descr="Number of clocks with outstanding waves (SPI or SH)."
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_ACTIVE" block=SPI event=71 descr="Number of clks ptr_buff is processing waves."
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_DEALLOC_BIN0" block=SPI event=72 descr="Count deallocs for SE matching bin0 range"
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_FPOS_BIN1_STALL" block=SPI event=73 descr="Number of clks stalled waiting for a VS done from SE matching bin1"
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_EVENT_WAVE" block=SPI event=74 descr="Number of events and waves"
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_WAVE" block=SPI event=75 descr="Number of waves"
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_OPT_WAVE" block=SPI event=76 descr="Number of waves with center+centroid+bc_optimize"
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_PASS_BIN0" block=SPI event=77 descr="Count waves with bin0 pc reads / attr, range is 1-16."
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_PASS_BIN1" block=SPI event=78 descr="Count waves with bin1 pc reads / attr, range is 1-16."
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_FPOS_BIN2" block=SPI event=79 descr="Count fpos for SE matching bin2 range"
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_PRIM_BIN0" block=SPI event=80 descr="Count waves with bin0 prims, range is 1-16."
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_PRIM_BIN1" block=SPI event=81 descr="Count waves with bin1 prims, range is 1-16."
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_CNF_BIN2" block=SPI event=82 descr="Count waves with bin2 conflicts, range is 0-15 but max is 8."
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_CNF_BIN3" block=SPI event=83 descr="Count waves with bin3 conflicts, range is 0-15 but max is 8."
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_CRAWLER_STALL" block=SPI event=84 descr="Number of clocks event/wave order fifo is full"
+  ></metric>
+  <metric
+    name="SPI_PS_CTL_LDS_RES_FULL" block=SPI event=85 descr="Number of clks PS per-wavefront storage is full"
+  ></metric>
+  <metric
+    name="SPI_PS_PERS_UPD_FULL0" block=SPI event=86 descr="Number of clks PS persistent state update fifo0 is full"
+  ></metric>
+  <metric
+    name="SPI_PS_PERS_UPD_FULL1" block=SPI event=87 descr="Number of clks PS persistent state update fifo1 is full"
+  ></metric>
+  <metric
+    name="SPI_PIX_ALLOC_PEND_CNT" block=SPI event=88 descr="Sum of number of pixel alloc requests pending per clk"
+  ></metric>
+  <metric
+    name="SPI_PIX_ALLOC_SCB_STALL" block=SPI event=89 descr="Number of clks pix alloc stalled due to color scoreboard."
+  ></metric>
+  <metric
+    name="SPI_PIX_ALLOC_DB0_STALL" block=SPI event=90 descr="Number of clks pix alloc stalled due to db0 color buffer."
+  ></metric>
+  <metric
+    name="SPI_PIX_ALLOC_DB1_STALL" block=SPI event=91 descr="Number of clks pix alloc stalled due to db1 color buffer."
+  ></metric>
+  <metric
+    name="SPI_PIX_ALLOC_DB2_STALL" block=SPI event=92 descr="Number of clks pix alloc stalled due to db2 color buffer."
+  ></metric>
+  <metric
+    name="SPI_PIX_ALLOC_DB3_STALL" block=SPI event=93 descr="Number of clks pix alloc stalled due to db3 color buffer."
+  ></metric>
+  <metric
+    name="SPI_LDS0_PC_VALID" block=SPI event=94 descr="Number of param cache reads sent to PC from SH0."
+  ></metric>
+  <metric
+    name="SPI_LDS1_PC_VALID" block=SPI event=95 descr="Number of param cache reads sent to PC from SH1."
+  ></metric>
+  <metric
+    name="SPI_RA_PIPE_REQ_BIN2" block=SPI event=96 descr="Arb cycles with bin2 mqcs pipe_arb req =sum(csprobe0, csproben)"
+  ></metric>
+  <metric
+    name="SPI_RA_TASK_REQ_BIN3" block=SPI event=97 descr="Arb cycles with bin3 requests =sum(mqcs0, mqcsn) + dxcs +sum(gfx)"
+  ></metric>
+  <metric
+    name="SPI_RA_WR_CTL_FULL" block=SPI event=98 descr="Arb cycles where RA is stalled due to wave launch fifo_full."
+  ></metric>
+  <metric
+    name="SPI_RA_REQ_NO_ALLOC" block=SPI event=99 descr="Arb cycles with requests but no allocation."
+  ></metric>
+  <metric
+    name="SPI_RA_REQ_NO_ALLOC_PS" block=SPI event=100 descr="Arb cycles with PS req and no PS alloc."
+  ></metric>
+  <metric
+    name="SPI_RA_REQ_NO_ALLOC_VS" block=SPI event=101 descr="Arb cycles with VS req and no VS alloc."
+  ></metric>
+  <metric
+    name="SPI_RA_REQ_NO_ALLOC_GS" block=SPI event=102 descr="Arb cycles with GS req and no GS alloc."
+  ></metric>
+  <metric
+    name="SPI_RA_REQ_NO_ALLOC_ES" block=SPI event=103 descr="Arb cycles with ES req and no ES alloc."
+  ></metric>
+  <metric
+    name="SPI_RA_REQ_NO_ALLOC_HS" block=SPI event=104 descr="Arb cycles with HS req and no HS alloc."
+  ></metric>
+  <metric
+    name="SPI_RA_REQ_NO_ALLOC_LS" block=SPI event=105 descr="Arb cycles with LS req and no LS alloc."
+  ></metric>
+  <metric
+    name="SPI_RA_REQ_NO_ALLOC_CSG" block=SPI event=106 descr="Arb cycles with CSg req and no CSg alloc."
+  ></metric>
+  <metric
+    name="SPI_RA_REQ_NO_ALLOC_CSN" block=SPI event=107 descr="Arb cycles with CSn req and no CSn alloc."
+  ></metric>
+  <metric
+    name="SPI_RA_RES_STALL_PS" block=SPI event=108 descr="Arb cycles with PS req and no PS fits."
+  ></metric>
+  <metric
+    name="SPI_RA_RES_STALL_VS" block=SPI event=109 descr="Arb cycles with VS req and no VS fits."
+  ></metric>
+  <metric
+    name="SPI_RA_RES_STALL_GS" block=SPI event=110 descr="Arb cycles with GS req and no GS fits."
+  ></metric>
+  <metric
+    name="SPI_RA_RES_STALL_ES" block=SPI event=111 descr="Arb cycles with ES req and no ES fits."
+  ></metric>
+  <metric
+    name="SPI_RA_RES_STALL_HS" block=SPI event=112 descr="Arb cycles with HS req and no HS fits."
+  ></metric>
+  <metric
+    name="SPI_RA_RES_STALL_LS" block=SPI event=113 descr="Arb cycles with LS req and no LS fits."
+  ></metric>
+  <metric
+    name="SPI_RA_RES_STALL_CSG" block=SPI event=114 descr="Arb cycles with CSg req and no CSg fits."
+  ></metric>
+  <metric
+    name="SPI_RA_RES_STALL_CSN" block=SPI event=115 descr="Arb cycles with CSn req and no CSn fits."
+  ></metric>
+  <metric
+    name="SPI_RA_TMP_STALL_PS" block=SPI event=116 descr="Cycles where ps wants to req but does not fit in temp space."
+  ></metric>
+  <metric
+    name="SPI_RA_TMP_STALL_VS" block=SPI event=117 descr="Cycles where vs wants to req but does not fit in temp space."
+  ></metric>
+  <metric
+    name="SPI_RA_TMP_STALL_GS" block=SPI event=118 descr="Cycles where gs wants to req but does not fit in temp space."
+  ></metric>
+  <metric
+    name="SPI_RA_TMP_STALL_ES" block=SPI event=119 descr="Cycles where es wants to req but does not fit in temp space."
+  ></metric>
+  <metric
+    name="SPI_RA_TMP_STALL_HS" block=SPI event=120 descr="Cycles where hs wants to req but does not fit in temp space."
+  ></metric>
+  <metric
+    name="SPI_RA_TMP_STALL_LS" block=SPI event=121 descr="Cycles where ls wants to req but does not fit in temp space."
+  ></metric>
+  <metric
+    name="SPI_RA_TMP_STALL_CSG" block=SPI event=122 descr="Cycles where csg wants to req but does not fit in temp space."
+  ></metric>
+  <metric
+    name="SPI_RA_TMP_STALL_CSN" block=SPI event=123 descr="Cycles where csn wants to req but does not fit in temp space."
+  ></metric>
+  <metric
+    name="SPI_RA_WAVE_SIMD_FULL_PS" block=SPI event=124 descr="Sum of SIMD where WAVE resource full when !ps_fits."
+  ></metric>
+  <metric
+    name="SPI_RA_WAVE_SIMD_FULL_VS" block=SPI event=125 descr="Sum of SIMD where WAVE resource full when !vs_fits."
+  ></metric>
+  <metric
+    name="SPI_RA_WAVE_SIMD_FULL_GS" block=SPI event=126 descr="Sum of SIMD where WAVE resource full when !gs_fits."
+  ></metric>
+  <metric
+    name="SPI_RA_WAVE_SIMD_FULL_ES" block=SPI event=127 descr="Sum of SIMD where WAVE resource full when !es_fits."
+  ></metric>
+  <metric
+    name="SPI_RA_WAVE_SIMD_FULL_HS" block=SPI event=128 descr="Sum of SIMD where WAVE can't take hs wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_WAVE_SIMD_FULL_LS" block=SPI event=129 descr="Sum of SIMD where WAVE resource full when !ls_fits."
+  ></metric>
+  <metric
+    name="SPI_RA_WAVE_SIMD_FULL_CSG" block=SPI event=130 descr="Sum of SIMD where WAVE can't take csg wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_WAVE_SIMD_FULL_CSN" block=SPI event=131 descr="Sum of SIMD where WAVE can't take csn wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_VGPR_SIMD_FULL_PS" block=SPI event=132 descr="Sum of SIMD where VGPR can't take ps wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_VGPR_SIMD_FULL_VS" block=SPI event=133 descr="Sum of SIMD where VGPR can't take vs wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_VGPR_SIMD_FULL_GS" block=SPI event=134 descr="Sum of SIMD where VGPR can't take gs wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_VGPR_SIMD_FULL_ES" block=SPI event=135 descr="Sum of SIMD where VGPR can't take es wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_VGPR_SIMD_FULL_HS" block=SPI event=136 descr="Sum of SIMD where VGPR can't take hs wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_VGPR_SIMD_FULL_LS" block=SPI event=137 descr="Sum of SIMD where VGPR can't take ls wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_VGPR_SIMD_FULL_CSG" block=SPI event=138 descr="Sum of SIMD where VGPR can't take csg wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_VGPR_SIMD_FULL_CSN" block=SPI event=139 descr="Sum of SIMD where VGPR can't take csn wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_SGPR_SIMD_FULL_PS" block=SPI event=140 descr="Sum of SIMD where SGPR can't take ps wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_SGPR_SIMD_FULL_VS" block=SPI event=141 descr="Sum of SIMD where SGPR can't take vs wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_SGPR_SIMD_FULL_GS" block=SPI event=142 descr="Sum of SIMD where SGPR can't take gs wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_SGPR_SIMD_FULL_ES" block=SPI event=143 descr="Sum of SIMD where SGPR can't take es wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_SGPR_SIMD_FULL_HS" block=SPI event=144 descr="Sum of SIMD where SGPR can't take hs wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_SGPR_SIMD_FULL_LS" block=SPI event=145 descr="Sum of SIMD where SGPR can't take ls wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_SGPR_SIMD_FULL_CSG" block=SPI event=146 descr="Sum of SIMD where SGPR can't take csg wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_SGPR_SIMD_FULL_CSN" block=SPI event=147 descr="Sum of SIMD where SGPR can't take csn wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_LDS_CU_FULL_PS" block=SPI event=148 descr="Sum of CU where LDS can't take ps wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_LDS_CU_FULL_LS" block=SPI event=149 descr="Sum of CU where LDS can't take ls wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_LDS_CU_FULL_ES" block=SPI event=150 descr="Sum of CU where LDS can't take es wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_LDS_CU_FULL_CSG" block=SPI event=151 descr="Sum of CU where LDS can't take csg wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_LDS_CU_FULL_CSN" block=SPI event=152 descr="Sum of CU where LDS can't take csn wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_BAR_CU_FULL_HS" block=SPI event=153 descr="Sum of CU where BARRIER can't take hs wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_BAR_CU_FULL_CSG" block=SPI event=154 descr="Sum of CU where BARRIER can't take csg wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_BAR_CU_FULL_CSN" block=SPI event=155 descr="Sum of CU where BARRIER can't take csn wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_BULKY_CU_FULL_CSG" block=SPI event=156 descr="Sum of CU where BULKY can't take csg wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_BULKY_CU_FULL_CSN" block=SPI event=157 descr="Sum of CU where BULKY can't take csn wave when !fits."
+  ></metric>
+  <metric
+    name="SPI_RA_TGLIM_CU_FULL_CSG" block=SPI event=158 descr="Cycles where csg wants to req but all CU are at tg_limit"
+  ></metric>
+  <metric
+    name="SPI_RA_TGLIM_CU_FULL_CSN" block=SPI event=159 descr="Cycles where csn wants to req but all CU are at tg_limit"
+  ></metric>
+  <metric
+    name="SPI_RA_WVLIM_STALL_PS" block=SPI event=160 descr="Number of clocks ps is stalled due to WAVE LIMIT."
+  ></metric>
+  <metric
+    name="SPI_RA_WVLIM_STALL_VS" block=SPI event=161 descr="Number of clocks vs is stalled due to WAVE LIMIT."
+  ></metric>
+  <metric
+    name="SPI_RA_WVLIM_STALL_GS" block=SPI event=162 descr="Number of clocks gs is stalled due to WAVE LIMIT."
+  ></metric>
+  <metric
+    name="SPI_RA_WVLIM_STALL_ES" block=SPI event=163 descr="Number of clocks es is stalled due to WAVE LIMIT."
+  ></metric>
+  <metric
+    name="SPI_RA_WVLIM_STALL_HS" block=SPI event=164 descr="Number of clocks hs is stalled due to WAVE LIMIT."
+  ></metric>
+  <metric
+    name="SPI_RA_WVLIM_STALL_LS" block=SPI event=165 descr="Number of clocks ls is stalled due to WAVE LIMIT."
+  ></metric>
+  <metric
+    name="SPI_RA_WVLIM_STALL_CSG" block=SPI event=166 descr="Number of clocks csg is stalled due to WAVE LIMIT."
+  ></metric>
+  <metric
+    name="SPI_RA_WVLIM_STALL_CSN" block=SPI event=167 descr="Number of clocks csn is stalled due to WAVE LIMIT."
+  ></metric>
+  <metric
+    name="SPI_RA_PS_LOCK_NA" block=SPI event=168 descr="Arb cycles PS has a CU locked when !fits and active_cnt < threshold."
+  ></metric>
+  <metric
+    name="SPI_RA_VS_LOCK" block=SPI event=169 descr="Arb cycles VS has a CU locked when !fits and active_cnt < threshold."
+  ></metric>
+  <metric
+    name="SPI_RA_GS_LOCK" block=SPI event=170 descr="Arb cycles GS has a CU locked when !fits and active_cnt < threshold."
+  ></metric>
+  <metric
+    name="SPI_RA_ES_LOCK" block=SPI event=171 descr="Arb cycles ES has a CU locked when !fits and active_cnt < threshold."
+  ></metric>
+  <metric
+    name="SPI_RA_HS_LOCK" block=SPI event=172 descr="Arb cycles HS has a CU locked when !fits and active_cnt < threshold."
+  ></metric>
+  <metric
+    name="SPI_RA_LS_LOCK" block=SPI event=173 descr="Arb cycles LS has a CU locked when !fits and active_cnt < threshold."
+  ></metric>
+  <metric
+    name="SPI_RA_CSG_LOCK" block=SPI event=174 descr="Arb cycles CSG has a CU locked when !fits and active_cnt < threshold."
+  ></metric>
+  <metric
+    name="SPI_RA_CSN_LOCK" block=SPI event=175 descr="Arb cycles CSN has a CU locked when !fits and active_cnt < threshold."
+  ></metric>
+  <metric
+    name="SPI_RA_RSV_UPD" block=SPI event=176 descr="Cycles spent doing updates for reservation changes"
+  ></metric>
+  <metric
+    name="SPI_EXP_ARB_COL_CNT" block=SPI event=177 descr="Sum of number of color exp requests pending each clk"
+  ></metric>
+  <metric
+    name="SPI_EXP_ARB_PAR_CNT" block=SPI event=178 descr="Sum of number of parameter exp requests pending each clk"
+  ></metric>
+  <metric
+    name="SPI_EXP_ARB_POS_CNT" block=SPI event=179 descr="Sum of number of position exp requests pending each clk"
+  ></metric>
+  <metric
+    name="SPI_EXP_ARB_GDS_CNT" block=SPI event=180 descr="Sum of number of gds exp requests pending each clk"
+  ></metric>
+  <metric
+    name="SPI_CLKGATE_BUSY_STALL" block=SPI event=181 descr="Number of clocks with spi busy and not all_clocks_on"
+  ></metric>
+  <metric
+    name="SPI_CLKGATE_ACTIVE_STALL" block=SPI event=182 descr="Number of clocks with spim_active and not all_clocks_on."
+  ></metric>
+  <metric
+    name="SPI_CLKGATE_ALL_CLOCKS_ON" block=SPI event=183 descr="Number of clocks with all_clocks_on."
+  ></metric>
+  <metric
+    name="SPI_CLKGATE_CGTT_DYN_ON" block=SPI event=184 descr="Number of clocks with spi cgtt dyn clk on."
+  ></metric>
+  <metric
+    name="SPI_CLKGATE_CGTT_REG_ON" block=SPI event=185 descr="Number of clocks with spi cgtt reg clk on."
+  ></metric>
+  <metric
+    name="SPI_NUM_VS_POS_EXPORTS" block=SPI event=186 descr="Number of VS position export grants in dwords"
+  ></metric>
+  <metric
+    name="SPI_NUM_VS_PARAM_EXPORTS" block=SPI event=187 descr="Number of VS parameter export grants in dwords"
+  ></metric>
+  <metric
+    name="SPI_NUM_PS_COL_EXPORTS" block=SPI event=188 descr="Number of PS color export grants in dwords"
+  ></metric>
+  <metric
+    name="SPI_ES_GRP_FIFO_FULL" block=SPI event=189 descr="ES Group FIFO full count"
+  ></metric>
+  <metric
+    name="SPI_GS_GRP_FIFO_FULL" block=SPI event=190 descr="GS Group FIFO full count"
+  ></metric>
+  <metric
+    name="SPI_HS_GRP_FIFO_FULL" block=SPI event=191 descr="HS Group FIFO full count"
+  ></metric>
+  <metric
+    name="SPI_LS_GRP_FIFO_FULL" block=SPI event=192 descr="LS Group FIFO full count"
+  ></metric>
+  <metric
+    name="SPI_VS_ALLOC_CNT" block=SPI event=193 descr="Number of launched VS waves that rasterize (alloc export space)"
+  ></metric>
+  <metric
+    name="SPI_VS_LATE_ALLOC_ACCUM" block=SPI event=194 descr="Accumulation of number of VS waves pending export allocation"
+  ></metric>
+  <metric
+    name="SPI_PC_ALLOC_CNT" block=SPI event=195 descr="Number of parameter cache lines allocated"
+  ></metric>
+  # SQ counters
+  <metric
+    name="SQ_NONE" block=SQ event=0 descr="Don't count anything."
+  ></metric>
+  <metric
+    name="SQ_ACCUM_PREV" block=SQ event=1 descr="For counter N, increment by the value of counter N-1. Only accumulates once every 4 cycles."
+  ></metric>
+  <metric
+    name="SQ_CYCLES" block=SQ event=2 descr="Clock cycles. (nondeterministic, per-simd, global)"
+  ></metric>
+  <metric
+    name="SQ_BUSY_CYCLES" block=SQ event=3 descr="Clock cycles while SQ is reporting that it is busy. (nondeterministic, per-simd, global)"
+  ></metric>
+  <metric
+    name="SQ_WAVES" block=SQ event=4 descr="Count number of waves sent to SQs. (per-simd, emulated, global)"
+  ></metric>
+  <metric
+    name="SQ_LEVEL_WAVES" block=SQ event=5 descr="Track the number of waves. Set ACCUM_PREV for the next counter to use this. (level, per-simd, global)"
+  ></metric>
+  <metric
+    name="SQ_WAVES_EQ_64" block=SQ event=6 descr="Count number of waves with exactly 64 active threads sent to SQs. (per-simd, emulated, global)"
+  ></metric>
+  <metric
+    name="SQ_WAVES_LT_64" block=SQ event=7 descr="Count number of waves with <64 active threads sent to SQs. (per-simd, emulated, global)"
+  ></metric>
+  <metric
+    name="SQ_WAVES_LT_48" block=SQ event=8 descr="Count number of waves with <48 active threads sent to SQs. (per-simd, emulated, global)"
+  ></metric>
+  <metric
+    name="SQ_WAVES_LT_32" block=SQ event=9 descr="Count number of waves sent <32 active threads sent to SQs. (per-simd, emulated, global)"
+  ></metric>
+  <metric
+    name="SQ_WAVES_LT_16" block=SQ event=10 descr="Count number of waves sent <16 active threads sent to SQs. (per-simd, emulated, global)"
+  ></metric>
+  <metric
+    name="SQ_WAVES_CU" block=SQ event=11 descr="Count number of waves sent to CUs. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_LEVEL_WAVES_CU" block=SQ event=12 descr="Track the number of waves. Set ACCUM_PREV for the next counter to use this. (level, per-simd)"
+  ></metric>
+  <metric
+    name="SQ_BUSY_CU_CYCLES" block=SQ event=13 descr="Count quad-cycles each CU is busy. (nondeterministic, per-simd)"
+  ></metric>
+  <metric
+    name="SQ_ITEMS" block=SQ event=14 descr="Number of valid items per wave. (per-simd, global)"
+  ></metric>
+  <metric
+    name="SQ_QUADS" block=SQ event=15 descr="Number of completely or partially covered quads per wave. (per-simd, emulated, global)"
+  ></metric>
+  <metric
+    name="SQ_EVENTS" block=SQ event=16 descr="Number of events. (unwindowed, emulated, global)"
+  ></metric>
+  <metric
+    name="SQ_SURF_SYNCS" block=SQ event=17 descr="Number of surface syncs. (unwindowed, emulated, global)"
+  ></metric>
+  <metric
+    name="SQ_TTRACE_REQS" block=SQ event=18 descr="Number of thread trace requests. (unwindowed, global, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_TTRACE_INFLIGHT_REQS" block=SQ event=19 descr="Number of in-flight thread trace requests. (nondeterministic, unwindowed, global)"
+  ></metric>
+  <metric
+    name="SQ_TTRACE_STALL" block=SQ event=20 descr="Number of cycles thread trace stalls stalled execution. (nondeterministic, unwindowed, global)"
+  ></metric>
+  <metric
+    name="SQ_MSG_CNTR" block=SQ event=21 descr="Number of counter messages. (nondeterministic, unwindowed, global)"
+  ></metric>
+  <metric
+    name="SQ_MSG_PERF" block=SQ event=22 descr="Number of perfcounter messages. (nondeterministic, unwindowed), global"
+  ></metric>
+  <metric
+    name="SQ_MSG_GSCNT" block=SQ event=23 descr="Number of geometry messages. (emulated, unwindowed, global)"
+  ></metric>
+  <metric
+    name="SQ_MSG_INTERRUPT" block=SQ event=24 descr="Number of interrupt messages. (emulated, unwindowed, global)"
+  ></metric>
+  <metric
+    name="SQ_INSTS" block=SQ event=25 descr="Number of instructions issued. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_VALU" block=SQ event=26 descr="Number of VALU instructions issued. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_VMEM_WR" block=SQ event=27 descr="Number of VMEM write instructions issued (including FLAT). (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_VMEM_RD" block=SQ event=28 descr="Number of VMEM read instructions issued (including FLAT). (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_VMEM" block=SQ event=29 descr="Number of VMEM instructions issued. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_SALU" block=SQ event=30 descr="Number of SALU instructions issued. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_SMEM" block=SQ event=31 descr="Number of SMEM instructions issued. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_FLAT" block=SQ event=32 descr="Number of FLAT instructions issued. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_FLAT_LDS_ONLY" block=SQ event=33 descr="Number of FLAT instructions issued that read/wrote only from/to LDS (only works if EARLY_TA_DONE is enabled). (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_LDS" block=SQ event=34 descr="Number of LDS instructions issued (including FLAT). (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_GDS" block=SQ event=35 descr="Number of GDS instructions issued. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_EXP" block=SQ event=36 descr="Number of EXP instructions issued, excluding skipped export instructions. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_EXP_GDS" block=SQ event=37 descr="Number of EXP and GDS instructions issued, excluding skipped export instructions. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_BRANCH" block=SQ event=38 descr="Number of Branch instructions issued. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_SENDMSG" block=SQ event=39 descr="Number of Sendmsg instructions issued. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_VSKIPPED" block=SQ event=40 descr="Number of vector instructions skipped. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_LEVEL_VMEM" block=SQ event=41 descr="Number of in-flight VMEM instructions. Set next counter to ACCUM_PREV and divide by INSTS_VMEM for average latency. Includes FLAT instructions. (per-simd, level, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_INST_LEVEL_SMEM" block=SQ event=42 descr="Number of in-flight SMEM instructions (*2 load/store; *2 atomic; *2 memtime; *4 wb/inv). Set next counter to ACCUM_PREV and divide by INSTS_SMEM for average latency per smem request. Falls slightly short of total request latency because some fetches are divided into two requests that may finish at different times and this counter collects the average latency of the two. (per-simd, level, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_INST_LEVEL_LDS" block=SQ event=43 descr="Number of in-flight LDS instructions. Set next counter to ACCUM_PREV and divide by INSTS_LDS for average latency. Includes FLAT instructions. (per-simd, level, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_INST_LEVEL_GDS" block=SQ event=44 descr="Number of in-flight GDS instructions. Set next counter to ACCUM_PREV and divide by INSTS_GDS for average latency. (per-simd, level, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_INST_LEVEL_EXP" block=SQ event=45 descr="Number of in-flight EXP instructions. Set next counter to ACCUM_PREV and divide by INSTS_EXP for average latency. (per-simd, level, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAVE_CYCLES" block=SQ event=46 descr="Number of wave-cycles spent by waves in the CUs (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAVE_READY" block=SQ event=47 descr="Number of wave-cycles waves were ready to execute the next instruction (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_CNT_VM" block=SQ event=48 descr="Number of wave-cycles spent waiting for VM counter. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_CNT_LGKM" block=SQ event=49 descr="Number of wave-cycles spent waiting for LGKM counter. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_CNT_EXP" block=SQ event=50 descr="Number of wave-cycles spent waiting for EXP counter. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_CNT_ANY" block=SQ event=51 descr="Number of wave-cycles spent waiting for any counter. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_BARRIER" block=SQ event=52 descr="Number of wave-cycles spent waiting for a barrier. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_EXP_ALLOC" block=SQ event=53 descr="Number of wave-cycles spent waiting for export allocation (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_SLEEP" block=SQ event=54 descr="Number of wave-cycles spent waiting for sleep to finish (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_OTHER" block=SQ event=55 descr="Number of wave-cycles spent waiting for dependency stalls (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_ANY" block=SQ event=56 descr="Number of wave-cycles spent waiting for anything (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_TTRACE" block=SQ event=57 descr="Number of wave-cycles spent waiting for thread trace stalls (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_IFETCH" block=SQ event=58 descr="Number of wave-cycles spent waiting for instructions to arrive (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_INST_VMEM" block=SQ event=59 descr="Number of wave-cycles spent waiting for VMEM instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_INST_SCA" block=SQ event=60 descr="Number of wave-cycles spent waiting for SALU or SMEM instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_INST_LDS" block=SQ event=61 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_INST_VALU" block=SQ event=62 descr="Number of wave-cycles spent waiting for VALU instrution issue. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_INST_EXP_GDS" block=SQ event=63 descr="Number of wave-cycles spent waiting for EXPORT or GDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_INST_MISC" block=SQ event=64 descr="Number of wave-cycles spent waiting for BRANCH or SENDMSG instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_WAIT_INST_FLAT" block=SQ event=65 descr="Number of wave-cycles spent waiting for flat instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ACTIVE_INST_ANY" block=SQ event=66 descr="Number of cycles each wave is working on an instruction. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ACTIVE_INST_VMEM" block=SQ event=67 descr="Number of cycles the SQ instruction arbiter is working on a VMEM instruction. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ACTIVE_INST_LDS" block=SQ event=68 descr="Number of cycles the SQ instruction arbiter is working on a LDS instruction. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ACTIVE_INST_VALU" block=SQ event=69 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ACTIVE_INST_SCA" block=SQ event=70 descr="Number of cycles the SQ instruction arbiter is working on a SALU or SMEM instruction. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ACTIVE_INST_EXP_GDS" block=SQ event=71 descr="Number of cycles the SQ instruction arbiter is working on an EXPORT or GDS instruction. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ACTIVE_INST_MISC" block=SQ event=72 descr="Number of cycles the SQ instruction aribter is working on a BRANCH or SENDMSG instruction. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ACTIVE_INST_FLAT" block=SQ event=73 descr="Number of cycles the SQ instruction arbiter is working on a FLAT instruction. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_VMEM_WR" block=SQ event=74 descr="Number of cycles needed to send addr and cmd data for VMEM write instructions. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_VMEM_RD" block=SQ event=75 descr="Number of cycles needed to send addr and cmd data for VMEM read instructions. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_VMEM_ADDR" block=SQ event=76 descr="Number of cycles needed to send VMEM read/write addresses to TA. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_VMEM_DATA" block=SQ event=77 descr="Number of cycles needed to send VMEM write data to TA. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_VMEM_CMD" block=SQ event=78 descr="Number of cycles needed to send VMEM command to TA. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_VMEM" block=SQ event=79 descr="Number of cycles needed to send addr and cmd data for VMEM instructions. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_LDS" block=SQ event=80 descr="Number of cycles needed to send instructions to LDS. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_VALU" block=SQ event=81 descr="Number of cycles needed to execute VALU instructions. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_EXP" block=SQ event=82 descr="Number of cycles needed to export data for EXP instructions. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_GDS" block=SQ event=83 descr="Number of cycles needed to export data for GDS instructions. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_SCA" block=SQ event=84 descr="Number of cycles needed to execute scalar instructions. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_SMEM" block=SQ event=85 descr="Number of cycles needed to execute scalar memory reads. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_SALU" block=SQ event=86 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_EXP_GDS" block=SQ event=87 descr="Number of cycles needed to export data for both EXP or GDS instructions (same as than INST_CYCLES_EXP + INST_CYCLES_GDS). (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_INST_CYCLES_MISC" block=SQ event=88 descr="Number of cycles needed to execute BRANCH or SENDMSG instructions. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_THREAD_CYCLES_VALU" block=SQ event=89 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"
+  ></metric>
+  <metric
+    name="SQ_THREAD_CYCLES_VALU_MAX" block=SQ event=90 descr="Maximum number of thread-cycles VALU operations that could have been executed given the instruction mix (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_IFETCH" block=SQ event=91 descr="Number of instruction fetch requests from cache. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_IFETCH_LEVEL" block=SQ event=92 descr="Number of instruction fetch requests from cache. (per-simd, level)"
+  ></metric>
+  <metric
+    name="SQ_CBRANCH_FORK" block=SQ event=93 descr="Number of conditional branch instructions. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_CBRANCH_FORK_SPLIT" block=SQ event=94 descr="Number of conditional branch instructions that take both branches. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_VALU_LDS_DIRECT_RD" block=SQ event=95 descr="Number of LDS direct reads issued (excluding interpolation ops). (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_VALU_LDS_INTERP_OP" block=SQ event=96 descr="Number of LDS interpolation ops issued. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_LDS_BANK_CONFLICT" block=SQ event=97 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_LDS_ADDR_CONFLICT" block=SQ event=98 descr="Number of cycles LDS is stalled by address conflicts. (emulated,nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_LDS_UNALIGNED_STALL" block=SQ event=99 descr="Number of cycles LDS is stalled processing flat unaligned load/store ops. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_LDS_MEM_VIOLATIONS" block=SQ event=100 descr="Number of threads that have a memory violation in the LDS.(emulated)"
+  ></metric>
+  <metric
+    name="SQ_LDS_ATOMIC_RETURN" block=SQ event=101 descr="Number of atomic return cycles in LDS. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_LDS_IDX_ACTIVE" block=SQ event=102 descr="Number of cycles LDS is used for indexed (non-direct,non-interpolation) operations. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_VALU_DEP_STALL" block=SQ event=103 descr="Number of cycles VALU is stalled by previous instructions due to dependencies (wait state count). (nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_VALU_STARVE" block=SQ event=104 descr="Number of cycles VALU is starved while waves are present. (per-simd, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_EXP_REQ_FIFO_FULL" block=SQ event=105 descr="Number of cycles export request fifo is full. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_LDS_BACK2BACK_STALL" block=SQ event=106 descr="Number of cycles LDS command stalled due to back to back requests. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_LDS_DATA_FIFO_FULL" block=SQ event=107 descr="Number of cycles LDS data fifo is full. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_LDS_CMD_FIFO_FULL" block=SQ event=108 descr="Number of cycles LDS command fifo is full. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_VMEM_BACK2BACK_STALL" block=SQ event=109 descr="Number of cycles texture requests are stalled due to back to back requests. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_VMEM_TA_ADDR_FIFO_FULL" block=SQ event=110 descr="Number of cycles texture requests are stalled due to full address fifo in TA. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_VMEM_TA_CMD_FIFO_FULL" block=SQ event=111 descr="Number of cycles texture requests are stalled due to full cmd fifo in TA. (nondeterministic, unwindowed)."
+  ></metric>
+  <metric
+    name="SQ_VMEM_EX_DATA_REG_BUSY" block=SQ event=112 descr="Number of cycles texture requests are stalled due to full data staging register in EX. (nondeterministic, unwindowed)."
+  ></metric>
+  <metric
+    name="SQ_VMEM_WR_BACK2BACK_STALL" block=SQ event=113 descr="Number of cycles texture writes are stalled due to back to back writes. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_VMEM_WR_TA_DATA_FIFO_FULL" block=SQ event=114 descr="Number of cycles texture writes are stalled due to full data fifo in TA. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_VALU_SRC_C_CONFLICT" block=SQ event=115 descr="Number of cycles VALU is stalled by arbitration due to src c conflict. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_VMEM_RD_SRC_CD_CONFLICT" block=SQ event=116 descr="Number of cycles VMEM_RD instructions are stalled due to VGPR port conflicts. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_VMEM_WR_SRC_CD_CONFLICT" block=SQ event=117 descr="Number of cycles VMEM_WR instructions are stalled due to VGPR port conflicts. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_FLAT_SRC_CD_CONFLICT" block=SQ event=118 descr="Number of cycles FLAT instructions are stalled due to VGPR port conflicts. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_LDS_SRC_CD_CONFLICT" block=SQ event=119 descr="Number of cycles LDS instructions are stalled due to VGPR port conflicts. (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_SRC_CD_BUSY" block=SQ event=120 descr="Number of total accesses of port C and D (up to 2 per cycle). (per-simd)"
+  ></metric>
+  <metric
+    name="SQ_PT_POWER_STALL" block=SQ event=121 descr="Number of cycles the power throttle indicated ALU should stall (ignores whether something actually got stalled). (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_USER0" block=SQ event=122 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 0. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER1" block=SQ event=123 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 1. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER2" block=SQ event=124 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 2. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER3" block=SQ event=125 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 3. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER4" block=SQ event=126 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 4. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER5" block=SQ event=127 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 5. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER6" block=SQ event=128 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 6. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER7" block=SQ event=129 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 7. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER8" block=SQ event=130 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 8. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER9" block=SQ event=131 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 9. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER10" block=SQ event=132 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 10. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER11" block=SQ event=133 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 11. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER12" block=SQ event=134 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 12. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER13" block=SQ event=135 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 13. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER14" block=SQ event=136 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 14. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER15" block=SQ event=137 descr="User counter. Incremented by S_INCPERFLEVEL when SIMM16[3:0] == 15. (emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL0" block=SQ event=138 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL when SIMM16[3:0] == 0. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL1" block=SQ event=139 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 1. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL2" block=SQ event=140 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 2. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL3" block=SQ event=141 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 3. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL4" block=SQ event=142 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 4. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL5" block=SQ event=143 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 5. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL6" block=SQ event=144 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 6. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL7" block=SQ event=145 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 7. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL8" block=SQ event=146 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 8. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL9" block=SQ event=147 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 9. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL10" block=SQ event=148 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 10. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL11" block=SQ event=149 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 11. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL12" block=SQ event=150 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 12. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL13" block=SQ event=151 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 13. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL14" block=SQ event=152 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 14. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_USER_LEVEL15" block=SQ event=153 descr="User level counter. Incremented by S_INCPERFLEVEL, decremented by S_DECPERFLEVEL SIMM16[3:0] == 15. (level, emulated)"
+  ></metric>
+  <metric
+    name="SQ_POWER_VALU" block=SQ event=154 descr="Number of CAC pulses for ALU instructions (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_POWER_VALU0" block=SQ event=155 descr="Number of CAC pulses for ALU instructions in group 0 (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_POWER_VALU1" block=SQ event=156 descr="Number of CAC pulses for ALU instructions in group 1 (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_POWER_VALU2" block=SQ event=157 descr="Number of CAC pulses for ALU instructions in group 2 (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_POWER_GPR_RD" block=SQ event=158 descr="Number of CAC pulses for GPR reads (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_POWER_GPR_WR" block=SQ event=159 descr="Number of CAC pulses for GPR writes (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_POWER_LDS_BUSY" block=SQ event=160 descr="Number of CAC pulses for cycles LDS clocks are active (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_POWER_ALU_BUSY" block=SQ event=161 descr="Number of CAC pulses for cycles ALU clocks are active (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_POWER_TEX_BUSY" block=SQ event=162 descr="Number of CAC pulses for cycles texture clocks are active (nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ACCUM_PREV_HIRES" block=SQ event=163 descr="For counter N, increment by the value of counter N-1."
+  ></metric>
+  <metric
+    name="SQ_WAVES_RESTORED" block=SQ event=164 descr="Count number of context-restored waves sent to SQs. (per-simd, emulated, global)"
+  ></metric>
+  <metric
+    name="SQ_WAVES_SAVED" block=SQ event=165 descr="Count number of context-saved waves. (per-simd, emulated, global)"
+  ></metric>
+#  <metric
+#    name="SQ_DUMMY_LAST" block=SQ event=167 descr="Just a placeholding enum to separate SQ from SQC counters. Not a real performance counter."
+#  ></metric>
+  <metric
+    name="SQ_ICACHE_INPUT_VALID_READY" block=SQ event=168 descr="Successful Transaction (per-SQ, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_INPUT_VALID_READYB" block=SQ event=169 descr="Input stalled by SQC (per-SQ, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_INPUT_VALIDB" block=SQ event=170 descr="SQC starved (per-SQ, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_INPUT_VALID_READY" block=SQ event=171 descr="Successful Transaction (per-SQ, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_INPUT_VALID_READYB" block=SQ event=172 descr="Input stalled by SQC (per-SQ, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_INPUT_VALIDB" block=SQ event=173 descr="SQC starved (per-SQ, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_TC_REQ" block=SQ event=174 descr="Total number of TC requests that were issued by instruction and constant caches. (No-Masking, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_TC_INST_REQ" block=SQ event=175 descr="Number of insruction requests to the TC (No-Masking, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_TC_DATA_READ_REQ" block=SQ event=176 descr="Number of data read requests to the TC (No-Masking, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_TC_DATA_WRITE_REQ" block=SQ event=177 descr="Number of data write requests to the TC (No-Masking, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_TC_DATA_ATOMIC_REQ" block=SQ event=178 descr="Number of data atomic requests to the TC (No-Masking, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_TC_STALL" block=SQ event=179 descr="Valid request stalled TC request interface (no-credits). (No-Masking, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_TC_STARVE" block=SQ event=180 descr="No requests sent to TC while credits available. (No-Masking, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_BUSY_CYCLES" block=SQ event=181 descr="Clock cycles while cache is reporting that it is busy. (No-Masking, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_REQ" block=SQ event=182 descr="Number of requests. (per-SQ, per-Bank)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_HITS" block=SQ event=183 descr="Number of cache hits. (per-SQ, per-Bank, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_MISSES" block=SQ event=184 descr="Number of cache misses, includes uncached requests. (per-SQ, per-Bank, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_MISSES_DUPLICATE" block=SQ event=185 descr="Number of misses that were duplicates (access to a non-resident, miss pending CL). (per-SQ, per-Bank, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_INVAL_INST" block=SQ event=186 descr="Number of cache invalidations caused by instructions (No-Masking)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_INVAL_ASYNC" block=SQ event=187 descr="Number of asynchronous invalidates (surface sync, register write, etc.) (No-Masking, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_INPUT_STALL_ARB_NO_GRANT" block=SQ event=188 descr="Number of arbitration stalls due to lost arbitration to other SQs. (per-SQ, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_INPUT_STALL_BANK_READYB" block=SQ event=189 descr="Number of arbitration stalls due to bank stalling. (per-SQ, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_CACHE_STALLED" block=SQ event=190 descr="Number of cache stalls. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_CACHE_STALL_INFLIGHT_NONZERO" block=SQ event=191 descr="Number of cycles stalled because allocated line has nonzero inflight. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_CACHE_STALL_INFLIGHT_MAX" block=SQ event=192 descr="Number of cycles stalled on a hit CL but inflight counter is maxed out. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_CACHE_STALL_OUTPUT" block=SQ event=193 descr="Number of cycles stalled at cache controller output. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_CACHE_STALL_OUTPUT_MISS_FIFO" block=SQ event=194 descr="Number of cycles stalled because the miss FIFO is full. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_CACHE_STALL_OUTPUT_HIT_FIFO" block=SQ event=195 descr="Number of cycles stalled because a hit FIFO is full. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_CACHE_STALL_OUTPUT_TC_IF" block=SQ event=196 descr="Number of cycles stalled because the TC request interface is stalled. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_STALL_OUTXBAR_ARB_NO_GRANT" block=SQ event=197 descr="Number of arbitration stalls due to lost arbitration for the output port. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_BUSY_CYCLES" block=SQ event=198 descr="Clock cycles while cache is reporting that it is busy. (No-Masking, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_REQ" block=SQ event=199 descr="Number of requests (post-bank-serialization). (per-SQ, per-Bank)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_HITS" block=SQ event=200 descr="Number of cache hits. (per-SQ, per-Bank, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_MISSES" block=SQ event=201 descr="Number of cache misses, includes uncached requests. (per-SQ, per-Bank, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_MISSES_DUPLICATE" block=SQ event=202 descr="Number of misses that were duplicates (access to a non-resident, miss pending CL). (per-SQ, per-Bank, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_HIT_LRU_READ" block=SQ event=203 descr="Number of HIT_LRU read requests. (per-SQ, per-Bank)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_MISS_EVICT_READ" block=SQ event=204 descr="Number of MISS_EVICT read requests. (per-SQ, per-Bank)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_WC_LRU_WRITE" block=SQ event=205 descr="Number of WC_LRU write requests. (per-SQ, per-Bank)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_WT_EVICT_WRITE" block=SQ event=206 descr="Number of WT_EVICT write requests. (per-SQ, per-Bank)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_ATOMIC" block=SQ event=207 descr="Number of atomic requests. (per-SQ, per-Bank)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_VOLATILE" block=SQ event=208 descr="Number of volatile cache requests. (per-SQ, per-Bank)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_INVAL_INST" block=SQ event=209 descr="Number of cache invalidations caused by instructions (No-Masking)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_INVAL_ASYNC" block=SQ event=210 descr="Number of asynchronous invalidates (surface sync, register write, etc.) (No-Masking, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_INVAL_VOLATILE_INST" block=SQ event=211 descr="Number of volatile cache invalidations caused by instructions (No-Masking)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_INVAL_VOLATILE_ASYNC" block=SQ event=212 descr="Number of asynchronous volatile invalidates (surface sync, register write, etc.) (No-Masking, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_WB_INST" block=SQ event=213 descr="Number of cache write-backs caused by instructions (No-Masking)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_WB_ASYNC" block=SQ event=214 descr="Number of asynchronous cache write-backs (surface sync, register write, etc.) (No-Masking, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_WB_VOLATILE_INST" block=SQ event=215 descr="Number of volatile cache write-backs caused by instructions (No-Masking)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_WB_VOLATILE_ASYNC" block=SQ event=216 descr="Number of asynchronous volatile cache write-backs (surface sync, register write, etc.) (No-Masking, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_INPUT_STALL_ARB_NO_GRANT" block=SQ event=217 descr="Number of arbitration stalls due to lost arbitration to other SQs. (per-SQ, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_INPUT_STALL_BANK_READYB" block=SQ event=218 descr="Number of arbitration stalls due to bank stalling. (per-SQ, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALLED" block=SQ event=219 descr="Number of cache stalls. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALL_INFLIGHT_MAX" block=SQ event=220 descr="Number of cycles stalled on a hit CL but inflight counter is maxed out. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALL_OUTPUT" block=SQ event=221 descr="Number of cycles stalled at cache controller output. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALL_EVICT" block=SQ event=222 descr="Number of cycles stalled trying to do an evict. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALL_UNORDERED" block=SQ event=223 descr="Number of cycles stalled due to an unordered access conflict. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALL_ALLOC_UNAVAILABLE" block=SQ event=224 descr="Number of cycles stalled due to not being able to allocate a line. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALL_FORCE_EVICT" block=SQ event=225 descr="Number of cycles stalled due to having to force an eviction. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALL_MULTI_FLUSH" block=SQ event=226 descr="Number of cycles stalled due to multiple flushes. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALL_FLUSH_DONE" block=SQ event=227 descr="Number of cycles stalled inserting flush done tokens into pipe. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALL_OUTPUT_MISS_FIFO" block=SQ event=228 descr="Number of cycles stalled because the miss FIFO is full. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALL_OUTPUT_HIT_FIFO" block=SQ event=229 descr="Number of cycles stalled because a hit FIFO is full. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_CACHE_STALL_OUTPUT_TC_IF" block=SQ event=230 descr="Number of cycles stalled because the TC request interface is stalled. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_STALL_OUTXBAR_ARB_NO_GRANT" block=SQ event=231 descr="Number of arbitration stalls due to lost arbitration for the output port. (per-Bank, nondeterministic, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_REQ_READ_1" block=SQ event=232 descr="Number of constant cache 1 dw read requests. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_REQ_READ_2" block=SQ event=233 descr="Number of constant cache 2 dw read requests. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_REQ_READ_4" block=SQ event=234 descr="Number of constant cache 4 dw read requests. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_REQ_READ_8" block=SQ event=235 descr="Number of constant cache 8 dw read requests. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_REQ_READ_16" block=SQ event=236 descr="Number of constant cache 16 dw read requests. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_REQ_TIME" block=SQ event=237 descr="Number of constant cache timestamp requests. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_REQ_WRITE_1" block=SQ event=238 descr="Number of constant cache 1 dw write requests. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_REQ_WRITE_2" block=SQ event=239 descr="Number of constant cache 2 dw write requests. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_REQ_WRITE_4" block=SQ event=240 descr="Number of constant cache 4 dw write requests. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_REQ_ATC_PROBE" block=SQ event=241 descr="Number of constant cache atc probe requests. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_SQ_DCACHE_REQS" block=SQ event=242 descr="Number of constant requests from SQ before any serialization (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_FLAT_REQ" block=SQ event=243 descr="Number of constant flat requests (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_NONFLAT_REQ" block=SQ event=244 descr="Number of constant non-flat requests (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_INFLIGHT_LEVEL" block=SQ event=245 descr="Level Counter: # total outstanding transactions in instruction cache (per-SQ, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_INFLIGHT_LEVEL" block=SQ event=246 descr="Level Counter: # total outstanding transactions in data cache (per-SQ, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_TC_INFLIGHT_LEVEL" block=SQ event=247 descr="Level Counter: total outstanding requests to TC (No-Masking, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_TC_INFLIGHT_LEVEL" block=SQ event=248 descr="Level Counter: # of outstanding instruction requests to TC (No-Masking, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_TC_INFLIGHT_LEVEL" block=SQ event=249 descr="Level Counter: # of outstanding data requests to TC (No-Masking, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_GATCL1_TRANSLATION_MISS" block=SQ event=250 descr="Total ICACHE gatcl1 translation misses"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_GATCL1_PERMISSION_MISS" block=SQ event=251 descr="Total ICACHE gatcl1 permission misses"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_GATCL1_REQUEST" block=SQ event=252 descr="Total ICACHE CLIENT_ATCL1 NORMAL requestes"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_GATCL1_STALL_INFLIGHT_MAX" block=SQ event=253 descr="Total ICACHE gatcl1 stalls due to inflight counter saturation"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_GATCL1_STALL_LRU_INFLIGHT" block=SQ event=254 descr="Total ICACHE gatcl1 stalls due to LRU cache line with traffic inflight"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_GATCL1_LFIFO_FULL" block=SQ event=255 descr="Total ICACHE gatcl1 atcl2 latency hiding fifo full cycles"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_GATCL1_STALL_LFIFO_NOT_RES" block=SQ event=256 descr="Total ICACHE gatcl1 stalls due to atcl2 latency hiding fifo output not resident"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_GATCL1_STALL_ATCL2_REQ_OUT_OF_CREDITS" block=SQ event=257 descr="Total ICACHE gatcl1 stalls due to atcl2_req out of credits"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_GATCL1_ATCL2_INFLIGHT" block=SQ event=258 descr="The sum of ICACHE inflight ATCL1_ATCL2 requests per cycle"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_GATCL1_STALL_MISSFIFO_FULL" block=SQ event=259 descr="Total ICACHE gatcl1 stalls due to full miss fifo"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_TRANSLATION_MISS" block=SQ event=260 descr="Total DCACHE gatcl1 translation misses"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_PERMISSION_MISS" block=SQ event=261 descr="Total DCACHE gatcl1 permission misses"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_REQUEST" block=SQ event=262 descr="Total DCACHE CLIENT_ATCL1 NORMAL requestes"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_STALL_INFLIGHT_MAX" block=SQ event=263 descr="Total DCACHE gatcl1 stalls due to inflight counter saturation"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_STALL_LRU_INFLIGHT" block=SQ event=264 descr="Total DCACHE gatcl1 stalls due to LRU cache line with traffic inflight"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_LFIFO_FULL" block=SQ event=265 descr="Total DCACHE gatcl1 atcl2 latency hiding fifo full cycles"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_STALL_LFIFO_NOT_RES" block=SQ event=266 descr="Total DCACHE gatcl1 stalls due to atcl2 latency hiding fifo output not resident"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_STALL_ATCL2_REQ_OUT_OF_CREDITS" block=SQ event=267 descr="Total DCACHE gatcl1 stalls due to atcl2_req out of credits"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_ATCL2_INFLIGHT" block=SQ event=268 descr="The sum of DCACHE inflight ATCL1_ATCL2 requests per cycle"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_STALL_MISSFIFO_FULL" block=SQ event=269 descr="Total DCACHE gatcl1 stalls due to full miss fifo"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_STALL_MULTI_MISS" block=SQ event=270 descr="Total DCACHE gatcl1 stalls due to arbitrated multiple misses"
+  ></metric>
+  <metric
+    name="SQ_DCACHE_GATCL1_HIT_FIFO_FULL" block=SQ event=271 descr="Total DCACHE gatcl1 hit fifo full cycles"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_PREFETCH_1" block=SQ event=272 descr="Number of +1 prefetch requests granted. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_PREFETCH_2" block=SQ event=273 descr="Number of +2 prefetch requests granted. (per-SQ)"
+  ></metric>
+  <metric
+    name="SQ_ICACHE_PREFETCH_FILTERED" block=SQ event=274 descr="Number of prefetch requests filtered out. (per-SQ)"
+  ></metric>
+#  <metric
+#    name="SQ_DUMMY_LAST" block=SQ event=275 descr="Just a placeholding enum to indicate the last SQC performance counter. Not a real performance counter."
+#  ></metric>
+  <metric
+    name="SQ_INSTS_SMEM_NORM" block=SQ event=276 descr="Number of SMEM instructions issued normalized to match smem_level (*2 load/store; *2 atomic; *2 memtime; *4 wb/inv). (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_ATC_INSTS_VMEM" block=SQ event=277 descr="Number of VMEM instructions issued to HSA space. (including FLAT) (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_ATC_INST_LEVEL_VMEM" block=SQ event=278 descr="Number of outstanding xnacks from TA. Set next counter to ACCUM_PREV and divide by SQ_PERF_SEL_ATC_INSTS_VMEM for average latency. (per-simd, level, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ATC_XNACK_FIRST" block=SQ event=279 descr="Number of first xnack from TA. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_ATC_XNACK_ALL" block=SQ event=280 descr="Number of all xnack from TA. (per-simd)"
+  ></metric>
+  <metric
+    name="SQ_ATC_XNACK_FIFO_FULL" block=SQ event=281 descr="Number of cycles XNACK fifo is full. (per-simd, unwindowed)"
+  ></metric>
+  <metric
+    name="SQ_ATC_INSTS_SMEM" block=SQ event=282 descr="Number of SMEM instructions issued to HSA space. (per-simd, emulated)"
+  ></metric>
+  <metric
+    name="SQ_ATC_INST_LEVEL_SMEM" block=SQ event=283 descr="Number of outstanding xnacks from SQC for waves with HSA address mode * 2. Set next counter to ACCUM_PREV and divide by SQ_PERF_SEL_ATC_INSTS_SMEM*2 for average smem xack/xnack latency. Falls slightly short of total request latency because some fetches are divided into two requests that may finish at different times and this counter collects the average latency of the two. (per-simd, level, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_IFETCH_XNACK" block=SQ event=284 descr="Number of instruction fetch xnack from SQC. (per-simd)"
+  ></metric>
+  <metric
+    name="SQ_TLB_SHOOTDOWN" block=SQ event=285 descr="Number of TLB shootdowns. (unwindowed, emulated, global)"
+  ></metric>
+  <metric
+    name="SQ_TLB_SHOOTDOWN_CYCLES" block=SQ event=286 descr="Number of cycles in which a TLB shootdown is active. (unwindowed, global)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_VMEM_WR_REPLAY" block=SQ event=287 descr="Number of VMEM write instructions replayed (including FLAT). (excluding instructions issued). (per-simd, emulated, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_VMEM_RD_REPLAY" block=SQ event=288 descr="Number of VMEM read instructions replayed (including FLAT). (excluding instructions issued). (per-simd, emulated, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_VMEM_REPLAY" block=SQ event=289 descr="Number of VMEM instructions replayed. (excluding instructions issued). (per-simd, emulated, nondeterministicd)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_SMEM_REPLAY" block=SQ event=290 descr="Number of SMEM instructions replayed. (excluding instructions issued). (per-simd, emulated, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_SMEM_NORM_REPLAY" block=SQ event=291 descr="Number of SMEM instructions replayed normalized to match smem_level (*2 load/store; *2 atomic; *2 memtime; *4 wb/inv). (excluding instructions issued). (per-simd, emulated, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_INSTS_FLAT_REPLAY" block=SQ event=292 descr="Number of FLAT instructions replayed. (excluding instructions issued). (per-simd, emulated, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ATC_INSTS_VMEM_REPLAY" block=SQ event=293 descr="Number of VMEM instructions replayed to HSA space. (including FLAT) (excluding instructions issued). (per-simd, emulated, nondeterministic)"
+  ></metric>
+  <metric
+    name="SQ_ATC_INSTS_SMEM_REPLAY" block=SQ event=294 descr="Number of SMEM instructions issued to HSA space. (excluding instructions issued). (per-simd, emulated, nondeterministic)"
+  ></metric>
+  # SX counters
+  <metric
+    name="SX_PA_IDLE_CYCLES" block=SX event=0 descr="Nr of cycles where PA was idle waiting to accept vectors from SX"
+  ></metric>
+  <metric
+    name="SX_PA_REQ" block=SX event=1 descr="Nr of PA requests received"
+  ></metric>
+  <metric
+    name="SX_PA_POS" block=SX event=2 descr="Nr of positions sent to the PA"
+  ></metric>
+  <metric
+    name="SX_CLOCK" block=SX event=3 descr="Nr of clocks where SX was busy in any way shape or form"
+  ></metric>
+  <metric
+    name="SX_GATE_EN1" block=SX event=4 descr="Nr of clocks for register accesses"
+  ></metric>
+  <metric
+    name="SX_GATE_EN2" block=SX event=5 descr="Nr of clocks for bus destination sort module"
+  ></metric>
+  <metric
+    name="SX_GATE_EN3" block=SX event=6 descr="Nr of clocks for color exports"
+  ></metric>
+  <metric
+    name="SX_GATE_EN4" block=SX event=7 descr="Nr of clocks for position exports"
+  ></metric>
+  <metric
+    name="SX_SH_POS_STARVE" block=SX event=8 descr="Nr of clocks SX is starved for Position data"
+  ></metric>
+  <metric
+    name="SX_SH_COLOR_STARVE" block=SX event=9 descr="Nr of clocks SX is starved for Color data"
+  ></metric>
+  <metric
+    name="SX_SH_POS_STALL" block=SX event=10 descr="Nr of clocks SX is being stalled by PA"
+  ></metric>
+  <metric
+    name="SX_SH_COLOR_STALL" block=SX event=11 descr="Nr of clocks SX is being stalled by at least one DB"
+  ></metric>
+  <metric
+    name="SX_DB0_PIXELS" block=SX event=12 descr="Number of pixels sent to the DB0"
+  ></metric>
+  <metric
+    name="SX_DB0_HALF_QUADS" block=SX event=13 descr="Number of half quads sent to the DB0"
+  ></metric>
+  <metric
+    name="SX_DB0_PIXEL_STALL" block=SX event=14 descr="Number of cycles where pixel traffic is stalled due to the DB0"
+  ></metric>
+  <metric
+    name="SX_DB0_PIXEL_IDLE" block=SX event=15 descr="Number of cycles where the pixel traffic was idle to DB0"
+  ></metric>
+  <metric
+    name="SX_DB0_PRED_PIXELS" block=SX event=16 descr="Nr of non predicated pixels sent to the DB0"
+  ></metric>
+  <metric
+    name="SX_DB1_PIXELS" block=SX event=17 descr="Number of pixels sent to the DB1"
+  ></metric>
+  <metric
+    name="SX_DB1_HALF_QUADS" block=SX event=18 descr="Number of half quads sent to the DB1"
+  ></metric>
+  <metric
+    name="SX_DB1_PIXEL_STALL" block=SX event=19 descr="Number of cycles where pixel traffic is stalled due to the DB1"
+  ></metric>
+  <metric
+    name="SX_DB1_PIXEL_IDLE" block=SX event=20 descr="Number of cycles where the pixel traffic was idle to DB1"
+  ></metric>
+  <metric
+    name="SX_DB1_PRED_PIXELS" block=SX event=21 descr="Nr of non predicated pixels sent to the DB1"
+  ></metric>
+  <metric
+    name="SX_DB2_PIXELS" block=SX event=22 descr="Number of pixels sent to the DB2"
+  ></metric>
+  <metric
+    name="SX_DB2_HALF_QUADS" block=SX event=23 descr="Number of half quads sent to the DB2"
+  ></metric>
+  <metric
+    name="SX_DB2_PIXEL_STALL" block=SX event=24 descr="Number of cycles where pixel traffic is stalled due to the DB2"
+  ></metric>
+  <metric
+    name="SX_DB2_PIXEL_IDLE" block=SX event=25 descr="Number of cycles where the pixel traffic was idle to DB2"
+  ></metric>
+  <metric
+    name="SX_DB2_PRED_PIXELS" block=SX event=26 descr="Nr of non predicated pixels sent to the DB2"
+  ></metric>
+  <metric
+    name="SX_DB3_PIXELS" block=SX event=27 descr="Number of pixels sent to the DB3"
+  ></metric>
+  <metric
+    name="SX_DB3_HALF_QUADS" block=SX event=28 descr="Number of half quads sent to the DB3"
+  ></metric>
+  <metric
+    name="SX_DB3_PIXEL_STALL" block=SX event=29 descr="Number of cycles where pixel traffic is stalled due to the DB3"
+  ></metric>
+  <metric
+    name="SX_DB3_PIXEL_IDLE" block=SX event=30 descr="Number of cycles where the pixel traffic was idle to DB3"
+  ></metric>
+  <metric
+    name="SX_DB3_PRED_PIXELS" block=SX event=31 descr="Nr of non predicated pixels sent to the DB3"
+  ></metric>
+  <metric
+    name="SX_COL_BUSY" block=SX event=32 descr="Number of cycles of color module's busy"
+  ></metric>
+  # TA counters
+  <metric
+    name="TA_NULL" block=TA event=0 descr="NULL"
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_BUSY" block=TA event=1 descr="sh_fifo subblock is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_CMD_BUSY" block=TA event=2 descr="sh_fifo subblock, cmd fifo section is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_ADDR_BUSY" block=TA event=3 descr="sh_fifo subblock, addr fifo section is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_DATA_BUSY" block=TA event=4 descr="sh_fifo subblock, data fifo section is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_DATA_SFIFO_BUSY" block=TA event=5 descr="sh_fifo subblock, data sfifo section is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_DATA_TFIFO_BUSY" block=TA event=6 descr="sh_fifo subblock, data tfifo section is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_GRADIENT_BUSY" block=TA event=7 descr="Deriv/Dispatch/Input subblocks are busy busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_GRADIENT_FIFO_BUSY" block=TA event=8 descr="Gradient FIFO subblock is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_LOD_BUSY" block=TA event=9 descr="Aniso subblock is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_LOD_FIFO_BUSY" block=TA event=10 descr="LOD FIFO subblock is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_ADDRESSER_BUSY" block=TA event=11 descr="Addresser subblock is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_ADDRESSER_FIFO_BUSY" block=TA event=12 descr="Addresser FIFO subblock is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_ALIGNER_BUSY" block=TA event=13 descr="Aligner subblock is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_WRITE_PATH_BUSY" block=TA event=14 descr="Write Path subblock is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_TA_BUSY" block=TA event=15 descr="TA block is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SQ_TA_CMD_CYCLES" block=TA event=16 descr="Number of input cycles input on SQ_TA_cmd interface. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SP_TA_ADDR_CYCLES" block=TA event=17 descr="Number of input cycles input on SP_TA_addr interface. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SP_TA_DATA_CYCLES" block=TA event=18 descr="Number of input cycles input on SP_TA_data interface. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_TA_FA_DATA_STATE_CYCLES" block=TA event=19 descr="Number of input cycles input on TA_FA wrts interface. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_ADDR_WAITING_ON_CMD_CYCLES" block=TA event=20 descr="Number of cycles addr waiting on cmd in sh_fifo subblock. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_CMD_WAITING_ON_ADDR_CYCLES" block=TA event=21 descr="Number of cycles cmd waiting on addr in sh_fifo subblock. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_ADDR_STARVED_WHILE_BUSY_CYCLES" block=TA event=22 descr="Number of cycles addr starved while busy in sh_fifo subblock. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_CMD_STARVED_WHILE_BUSY_CYCLES" block=TA event=23 descr="Number of cycles cmd starved while busy in sh_fifo subblock. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_DATA_WAITING_ON_DATA_STATE_CYCLES" block=TA event=24 descr="Number of cycles data waiting on data state in sh_fifo subblock. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_DATA_STATE_WAITING_ON_DATA_CYCLES" block=TA event=25 descr="Number of cycles data state waiting on data in sh_fifo subblock. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_DATA_STARVED_WHILE_BUSY_CYCLES" block=TA event=26 descr="Number of cycles data starved while busy in sh_fifo subblock. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_DATA_STATE_STARVED_WHILE_BUSY_CYCLES" block=TA event=27 descr="Number of cycles data state starved while busy in sh_fifo subblock. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_RESERVED_28" block=TA event=28 descr="RESERVED 28."
+  ></metric>
+  <metric
+    name="TA_RESERVED_29" block=TA event=29 descr="RESERVED 29."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_ADDR_CYCLES" block=TA event=30 descr="Number of address cycles issued by sh_fifo to sh_dispatch subblock."
+  ></metric>
+  <metric
+    name="TA_SH_FIFO_DATA_CYCLES" block=TA event=31 descr="Number of data cycles issued by sh_fifo to sh_dispatch subblock."
+  ></metric>
+  <metric
+    name="TA_TOTAL_WAVEFRONTS" block=TA event=32 descr="Total number of wavefronts processed by TA."
+  ></metric>
+  <metric
+    name="TA_GRADIENT_CYCLES" block=TA event=33 descr="Number of cycles issued by the per-pixel-gradient state machine."
+  ></metric>
+  <metric
+    name="TA_WALKER_CYCLES" block=TA event=34 descr="Number of cycles issued by the sampler state machine."
+  ></metric>
+  <metric
+    name="TA_ALIGNER_CYCLES" block=TA event=35 descr="Number of cycles issued by the aligner state machine."
+  ></metric>
+  <metric
+    name="TA_IMAGE_WAVEFRONTS" block=TA event=36 descr="Number of image wavefronts processed by TA."
+  ></metric>
+  <metric
+    name="TA_IMAGE_READ_WAVEFRONTS" block=TA event=37 descr="Number of image read (Sample*, Load*, Gather4*) wavefronts processed by TA."
+  ></metric>
+  <metric
+    name="TA_IMAGE_WRITE_WAVEFRONTS" block=TA event=38 descr="Number of image write wavefronts processed by TA."
+  ></metric>
+  <metric
+    name="TA_IMAGE_ATOMIC_WAVEFRONTS" block=TA event=39 descr="Number of image atomic wavefronts processed by TA."
+  ></metric>
+  <metric
+    name="TA_IMAGE_TOTAL_CYCLES" block=TA event=40 descr="Number of image cycles issued to TC."
+  ></metric>
+  <metric
+    name="TA_RESERVED_41" block=TA event=41 descr="RESERVED 41."
+  ></metric>
+  <metric
+    name="TA_RESERVED_42" block=TA event=42 descr="RESERVED 42."
+  ></metric>
+  <metric
+    name="TA_RESERVED_43" block=TA event=43 descr="RESERVED 43."
+  ></metric>
+  <metric
+    name="TA_BUFFER_WAVEFRONTS" block=TA event=44 descr="Number of buffer wavefronts processed by TA."
+  ></metric>
+  <metric
+    name="TA_BUFFER_READ_WAVEFRONTS" block=TA event=45 descr="Number of buffer read wavefronts processed by TA."
+  ></metric>
+  <metric
+    name="TA_BUFFER_WRITE_WAVEFRONTS" block=TA event=46 descr="Number of buffer write wavefronts processed by TA."
+  ></metric>
+  <metric
+    name="TA_BUFFER_ATOMIC_WAVEFRONTS" block=TA event=47 descr="Number of buffer atomic wavefronts processed by TA."
+  ></metric>
+  <metric
+    name="TA_BUFFER_COALESCABLE_WAVEFRONTS" block=TA event=48 descr="Number of buffer coalesceable wavefronts processed by TA."
+  ></metric>
+  <metric
+    name="TA_BUFFER_TOTAL_CYCLES" block=TA event=49 descr="Number of buffer cycles issued to TC."
+  ></metric>
+  <metric
+    name="TA_BUFFER_COALESCABLE_ADDR_MULTICYCLED_CYCLES" block=TA event=50 descr="Number of buffer coalesceable cycles issued to TC that were not coalesced due to addresser."
+  ></metric>
+  <metric
+    name="TA_BUFFER_COALESCABLE_CLAMP_16KDWORD_MULTICYCLED_CYCLES" block=TA event=51 descr="Number of buffer coalesceable cycles issued to TC that were not coalesced due to clamping or 64KB bounds check."
+  ></metric>
+  <metric
+    name="TA_BUFFER_COALESCED_READ_CYCLES" block=TA event=52 descr="Number of buffer coalesced read cycles issued to TC."
+  ></metric>
+  <metric
+    name="TA_BUFFER_COALESCED_WRITE_CYCLES" block=TA event=53 descr="Number of buffer coalesced write cycles issued to TC."
+  ></metric>
+  <metric
+    name="TA_ADDR_STALLED_BY_TC_CYCLES" block=TA event=54 descr="Number of cycles addr path stalled by TC. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_ADDR_STALLED_BY_TD_CYCLES" block=TA event=55 descr="Number of cycles addr path stalled by TD. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_DATA_STALLED_BY_TC_CYCLES" block=TA event=56 descr="Number of cycles data path stalled by TC. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_ADDRESSER_STALLED_BY_ALIGNER_ONLY_CYCLES" block=TA event=57 descr="Number of cycles Addresser stalled by Aligner and not further down the pipe. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_ADDRESSER_STALLED_CYCLES" block=TA event=58 descr="Number of cycles Addresser stalled. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_ANISO_STALLED_BY_ADDRESSER_ONLY_CYCLES" block=TA event=59 descr="Number of cycles Aniso stalled by Addresser and not further down the pipe. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_ANISO_STALLED_CYCLES" block=TA event=60 descr="Number of cycles Aniso stalled. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_DERIV_STALLED_BY_ANISO_ONLY_CYCLES" block=TA event=61 descr="Number of cycles Deriv stalled by Aniso and not further down the pipe. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_DERIV_STALLED_CYCLES" block=TA event=62 descr="Number of cycles Deriv stalled. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_ANISO_GT1_CYCLE_QUADS" block=TA event=63 descr="Number of quads requiring more than 1 aniso sample."
+  ></metric>
+  <metric
+    name="TA_COLOR_1_CYCLE_PIXELS" block=TA event=64 descr="Number of pixels requiring sampler state machine to take 1 cycle due to format."
+  ></metric>
+  <metric
+    name="TA_COLOR_2_CYCLE_PIXELS" block=TA event=65 descr="Number of pixels requiring sampler state machine to take 2 cycle due to format."
+  ></metric>
+  <metric
+    name="TA_COLOR_3_CYCLE_PIXELS" block=TA event=66 descr="Number of pixels requiring sampler state machine to take 3 cycle due to format."
+  ></metric>
+  <metric
+    name="TA_COLOR_4_CYCLE_PIXELS" block=TA event=67 descr="Number of pixels requiring sampler state machine to take 4 cycle due to format."
+  ></metric>
+  <metric
+    name="TA_MIP_1_CYCLE_PIXELS" block=TA event=68 descr="Number of pixels requiring sampler state machine to take 1 cycle due to mip filter."
+  ></metric>
+  <metric
+    name="TA_MIP_2_CYCLE_PIXELS" block=TA event=69 descr="Number of pixels requiring sampler state machine to take 2 cycle due to mip filter."
+  ></metric>
+  <metric
+    name="TA_VOL_1_CYCLE_PIXELS" block=TA event=70 descr="Number of pixels requiring sampler state machine to take 1 cycle due to z filter."
+  ></metric>
+  <metric
+    name="TA_VOL_2_CYCLE_PIXELS" block=TA event=71 descr="Number of pixels requiring sampler state machine to take 2 cycle due to z filter."
+  ></metric>
+  <metric
+    name="TA_BILIN_POINT_1_CYCLE_PIXELS" block=TA event=72 descr="Number of pixels requiring sampler state machine to take 1 cycle due to xy filter."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_0_SAMPLES" block=TA event=73 descr="Number of samples fetched from mip 0."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_1_SAMPLES" block=TA event=74 descr="Number of samples fetched from mip 1."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_2_SAMPLES" block=TA event=75 descr="Number of samples fetched from mip 2."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_3_SAMPLES" block=TA event=76 descr="Number of samples fetched from mip 3."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_4_SAMPLES" block=TA event=77 descr="Number of samples fetched from mip 4."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_5_SAMPLES" block=TA event=78 descr="Number of samples fetched from mip 5."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_6_SAMPLES" block=TA event=79 descr="Number of samples fetched from mip 6."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_7_SAMPLES" block=TA event=80 descr="Number of samples fetched from mip 7."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_8_SAMPLES" block=TA event=81 descr="Number of samples fetched from mip 8."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_9_SAMPLES" block=TA event=82 descr="Number of samples fetched from mip 9."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_10_SAMPLES" block=TA event=83 descr="Number of samples fetched from mip 10."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_11_SAMPLES" block=TA event=84 descr="Number of samples fetched from mip 11."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_12_SAMPLES" block=TA event=85 descr="Number of samples fetched from mip 12."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_13_SAMPLES" block=TA event=86 descr="Number of samples fetched from mip 13."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_LOD_14_SAMPLES" block=TA event=87 descr="Number of samples fetched from mip 14."
+  ></metric>
+  <metric
+    name="TA_MIPMAP_INVALID_SAMPLES" block=TA event=88 descr="Number of samples marked invalid using mip 15 method."
+  ></metric>
+  <metric
+    name="TA_ANISO_1_CYCLE_QUADS" block=TA event=89 descr="Number of quads requiring 1 aniso sample."
+  ></metric>
+  <metric
+    name="TA_ANISO_2_CYCLE_QUADS" block=TA event=90 descr="Number of quads requiring 2 aniso sample."
+  ></metric>
+  <metric
+    name="TA_ANISO_4_CYCLE_QUADS" block=TA event=91 descr="Number of quads requiring 4 aniso sample."
+  ></metric>
+  <metric
+    name="TA_ANISO_6_CYCLE_QUADS" block=TA event=92 descr="Number of quads requiring 6 aniso sample."
+  ></metric>
+  <metric
+    name="TA_ANISO_8_CYCLE_QUADS" block=TA event=93 descr="Number of quads requiring 8 aniso sample."
+  ></metric>
+  <metric
+    name="TA_ANISO_10_CYCLE_QUADS" block=TA event=94 descr="Number of quads requiring 10 aniso sample."
+  ></metric>
+  <metric
+    name="TA_ANISO_12_CYCLE_QUADS" block=TA event=95 descr="Number of quads requiring 12 aniso sample."
+  ></metric>
+  <metric
+    name="TA_ANISO_14_CYCLE_QUADS" block=TA event=96 descr="Number of quads requiring 14 aniso sample."
+  ></metric>
+  <metric
+    name="TA_ANISO_16_CYCLE_QUADS" block=TA event=97 descr="Number of quads requiring 16 aniso sample."
+  ></metric>
+  <metric
+    name="TA_WRITE_PATH_INPUT_CYCLES" block=TA event=98 descr="Number of cycles received from write datapath from sh_dispatct."
+  ></metric>
+  <metric
+    name="TA_WRITE_PATH_OUTPUT_CYCLES" block=TA event=99 descr="Number of cycles sent from write datapath to TC."
+  ></metric>
+  <metric
+    name="TA_FLAT_WAVEFRONTS" block=TA event=100 descr="Number of flat opcode wavfronts processed by the TA."
+  ></metric>
+  <metric
+    name="TA_FLAT_READ_WAVEFRONTS" block=TA event=101 descr="Number of flat opcode reads processed by the TA."
+  ></metric>
+  <metric
+    name="TA_FLAT_WRITE_WAVEFRONTS" block=TA event=102 descr="Number of flat opcode writes processed by the TA."
+  ></metric>
+  <metric
+    name="TA_FLAT_ATOMIC_WAVEFRONTS" block=TA event=103 descr="Number of flat opcode atomics processed by the TA."
+  ></metric>
+  <metric
+    name="TA_FLAT_COALESCEABLE_WAVEFRONTS" block=TA event=104 descr="Number of flat opcode coalesceale ops processed by the TA."
+  ></metric>
+  <metric
+    name="TA_REG_SCLK_VLD" block=TA event=105 descr="Number of cycles reg_sclk is active. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_LOCAL_CG_DYN_SCLK_GRP0_EN" block=TA event=106 descr="Number of cycles grp0 sclk is active. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_LOCAL_CG_DYN_SCLK_GRP1_EN" block=TA event=107 descr="Number of cycles grp1 sclk is active. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_LOCAL_CG_DYN_SCLK_GRP1_MEMS_EN" block=TA event=108 descr="Number of cycles grp1_mems sclk is active. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_LOCAL_CG_DYN_SCLK_GRP4_EN" block=TA event=109 descr="Number of cycles grp4 sclk is active. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_LOCAL_CG_DYN_SCLK_GRP5_EN" block=TA event=110 descr="Number of cycles grp5 sclk is active. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_XNACK_ON_PHASE0" block=TA event=111 descr="None zero Xnack mask returned on phase0. This counter is always 0x0 for configurations that do not support XNACKs. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_XNACK_ON_PHASE1" block=TA event=112 descr="None zero Xnack mask returned on phase1. This counter is always 0x0 for configurations that do not support XNACKs. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_XNACK_ON_PHASE2" block=TA event=113 descr="None zero Xnack mask returned on phase2. This counter is always 0x0 for configurations that do not support XNACKs. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_XNACK_ON_PHASE3" block=TA event=114 descr="None zero Xnack mask returned on phase3. This counter is always 0x0 for configurations that do not support XNACKs. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_FIRST_XNACK_ON_PHASE0" block=TA event=115 descr="First Xnack of an instruction occured on phase0. This counter is always 0x0 for configurations that do not support XNACKs. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_FIRST_XNACK_ON_PHASE1" block=TA event=116 descr="First Xnack of an instruction occured on phase1. This counter is always 0x0 for configurations that do not support XNACKs. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TA_FIRST_XNACK_ON_PHASE2" block=TA event=117 descr="First Xnack of an instruction occured on phase2. This counter is always 0x0 for configurations that do not support XNACKs. Perf_Windowing not supported for this counter."
+  ></metric>
+  # TCA counters
+  <metric
+    name="TCA_NONE" block=TCA event=0 descr="Don't count anything."
+  ></metric>
+  <metric
+    name="TCA_CYCLE" block=TCA event=1 descr="Number of cycles. Not windowable."
+  ></metric>
+  <metric
+    name="TCA_BUSY" block=TCA event=2 descr="Number of cycles we have a request pending. Not windowable."
+  ></metric>
+  <metric
+    name="TCA_FORCED_HOLE_TCC0" block=TCA event=3 descr="Number of TCC0 hole requests that waited so long that it was decided that they should be forced rather than opportunistic. The TCC number is based on the TCCs connected to this TCA and not on the global numbering."
+  ></metric>
+  <metric
+    name="TCA_FORCED_HOLE_TCC1" block=TCA event=4 descr=""
+  ></metric>
+  <metric
+    name="TCA_FORCED_HOLE_TCC2" block=TCA event=5 descr=""
+  ></metric>
+  <metric
+    name="TCA_FORCED_HOLE_TCC3" block=TCA event=6 descr=""
+  ></metric>
+  <metric
+    name="TCA_FORCED_HOLE_TCC4" block=TCA event=7 descr=""
+  ></metric>
+  <metric
+    name="TCA_FORCED_HOLE_TCC5" block=TCA event=8 descr=""
+  ></metric>
+  <metric
+    name="TCA_FORCED_HOLE_TCC6" block=TCA event=9 descr=""
+  ></metric>
+  <metric
+    name="TCA_FORCED_HOLE_TCC7" block=TCA event=10 descr=""
+  ></metric>
+  <metric
+    name="TCA_REQ_TCC0" block=TCA event=11 descr="Number of requests sent to TCC0. This should report the same thing as TCC_PERF_SEL_REQ in the corresponding TCC in the long run. It is only offered to create a deterministic counter in the TCA so that the counters may be sanity tested."
+  ></metric>
+  <metric
+    name="TCA_REQ_TCC1" block=TCA event=12 descr=""
+  ></metric>
+  <metric
+    name="TCA_REQ_TCC2" block=TCA event=13 descr=""
+  ></metric>
+  <metric
+    name="TCA_REQ_TCC3" block=TCA event=14 descr=""
+  ></metric>
+  <metric
+    name="TCA_REQ_TCC4" block=TCA event=15 descr=""
+  ></metric>
+  <metric
+    name="TCA_REQ_TCC5" block=TCA event=16 descr=""
+  ></metric>
+  <metric
+    name="TCA_REQ_TCC6" block=TCA event=17 descr=""
+  ></metric>
+  <metric
+    name="TCA_REQ_TCC7" block=TCA event=18 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_DOUBLE_ARB_TCC0" block=TCA event=19 descr="Number of cycles two requests were sent in one clock to TCC0. The TCC number is based on the TCCs connected to this TCA and not on the global numbering."
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_DOUBLE_ARB_TCC1" block=TCA event=20 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_DOUBLE_ARB_TCC2" block=TCA event=21 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_DOUBLE_ARB_TCC3" block=TCA event=22 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_DOUBLE_ARB_TCC4" block=TCA event=23 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_DOUBLE_ARB_TCC5" block=TCA event=24 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_DOUBLE_ARB_TCC6" block=TCA event=25 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_DOUBLE_ARB_TCC7" block=TCA event=26 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_STALL_TCC0" block=TCA event=27 descr="Number of cycles no requests could be sent to TCC0 because its fifos were expected to be full. The TCC number is based on the TCCs connected to this TCA and not on the global numbering."
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_STALL_TCC1" block=TCA event=28 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_STALL_TCC2" block=TCA event=29 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_STALL_TCC3" block=TCA event=30 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_STALL_TCC4" block=TCA event=31 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_STALL_TCC5" block=TCA event=32 descr=""
+  ></metric>
+  <metric
+    name="TCA_CROSSBAR_STALL_TCC6" block=TCA event=33 descr=""
+  ></metric>
+  # TCC counters
+  <metric
+    name="TCC_NONE" block=TCC event=0 descr="Don't count anything."
+  ></metric>
+  <metric
+    name="TCC_CYCLE" block=TCC event=1 descr="Number of cycles. Not windowable."
+  ></metric>
+  <metric
+    name="TCC_BUSY" block=TCC event=2 descr="Number of cycles we have a request pending. Not windowable."
+  ></metric>
+  <metric
+    name="TCC_REQ" block=TCC event=3 descr="Number of requests of all types. This is measured at the tag block. This may be more than the number of requests arriving at the TCC, but it is a good indication of the total amount of work that needs to be performed."
+  ></metric>
+  <metric
+    name="TCC_STREAMING_REQ" block=TCC event=4 descr="Number of streaming requests. This is measured at the tag block."
+  ></metric>
+  <metric
+    name="TCC_EXE_REQ" block=TCC event=5 descr="The number of exe requests. This is measured at the tag block."
+  ></metric>
+  <metric
+    name="TCC_COMPRESSED_REQ" block=TCC event=6 descr="Number of compressed requests. This includes requests that read 0 bytes of compressed data. Metadata requests are not included. This is measured at the tag block."
+  ></metric>
+  <metric
+    name="TCC_COMPRESSED_0_REQ" block=TCC event=7 descr="Number of compressed requests that read 0 bytes of compressed data. Metadata requests are not included. This is measured at the tag block."
+  ></metric>
+  <metric
+    name="TCC_METADATA_REQ" block=TCC event=8 descr="Number of metadata requests. This is measured at the tag block."
+  ></metric>
+  <metric
+    name="TCC_NC_VIRTUAL_REQ" block=TCC event=9 descr="The number of virtual noncoherently cached requests. This is measured at the tag block."
+  ></metric>
+  <metric
+    name="TCC_NC_PHYSICAL_REQ" block=TCC event=10 descr="The number of physical noncoherently cached requests. This is measured at the tag block."
+  ></metric>
+  <metric
+    name="TCC_UC_VIRTUAL_REQ" block=TCC event=11 descr="The number of virtual uncached requests. This is measured at the tag block."
+  ></metric>
+  <metric
+    name="TCC_UC_PHYSICAL_REQ" block=TCC event=12 descr="The number of physical uncached requests. This is measured at the tag block."
+  ></metric>
+  <metric
+    name="TCC_CC_PHYSICAL_REQ" block=TCC event=13 descr="The number of physical coherently cached requests. This is measured at the tag block."
+  ></metric>
+  <metric
+    name="TCC_PROBE" block=TCC event=14 descr="Number of probe requests. Not windowable."
+  ></metric>
+  <metric
+    name="TCC_READ" block=TCC event=15 descr="Number of read requests. Compressed reads are included in this, but metadata reads are not included."
+  ></metric>
+  <metric
+    name="TCC_WRITE" block=TCC event=16 descr="Number of write requests."
+  ></metric>
+  <metric
+    name="TCC_ATOMIC" block=TCC event=17 descr="Number of atomic requests of all types."
+  ></metric>
+  <metric
+    name="TCC_HIT" block=TCC event=18 descr="Number of cache hits."
+  ></metric>
+  <metric
+    name="TCC_MISS" block=TCC event=19 descr="Number of cache misses. UC reads count as misses."
+  ></metric>
+  <metric
+    name="TCC_DEWRITE_ALLOCATE_HIT" block=TCC event=20 descr="Number of times a read was performed on a cache line that had only been written into before. This can only occur once for the life of a cache line."
+  ></metric>
+  <metric
+    name="TCC_FULLY_WRITTEN_HIT" block=TCC event=21 descr="Number of times a read from the mc was avoided because the cache line was already fully written with data. This can only occur once for the life of a cache line."
+  ></metric>
+  <metric
+    name="TCC_WRITEBACK" block=TCC event=22 descr="Number of lines written back to main memory. This includes writebacks of dirty lines and uncached write/atomic requests."
+  ></metric>
+  <metric
+    name="TCC_LATENCY_FIFO_FULL" block=TCC event=23 descr="Number of cycles the latency fifo was full."
+  ></metric>
+  <metric
+    name="TCC_SRC_FIFO_FULL" block=TCC event=24 descr="Number of cycles the src fifo was expected to be full as measured at the IB block."
+  ></metric>
+  <metric
+    name="TCC_HOLE_FIFO_FULL" block=TCC event=25 descr="Number of cycles the hole fifos in the TCAs were expected to be full as measured at the IB block. This is usually an indication that there was insufficient bandwidth available on the data bus for source data."
+  ></metric>
+  <metric
+    name="TCC_MC_WRREQ" block=TCC event=26 descr="Number of 32-byte transactions going over the TC_MC_wrreq interface. Atomics may travel over the same interface and are generally classified as write requests."
+  ></metric>
+  <metric
+    name="TCC_MC_WRREQ_UNCACHED" block=TCC event=27 descr="Number of 32-byte transactions going over the TC_MC_wrreq interface due to uncached traffic. Note that CC mtypes can produce uncached requests, and those are included in this."
+  ></metric>
+  <metric
+    name="TCC_MC_WRREQ_STALL" block=TCC event=28 descr="Number of cycles a write request was stalled."
+  ></metric>
+  <metric
+    name="TCC_MC_WRREQ_CREDIT_STALL" block=TCC event=29 descr="Number of cycles a mc write request was stalled because the interface was out of credits."
+  ></metric>
+  <metric
+    name="TCC_MC_WRREQ_MC_HALT_STALL" block=TCC event=30 descr="Number of cycles a mc write request was stalled because the MC halted the interface."
+  ></metric>
+  <metric
+    name="TCC_TOO_MANY_MC_WRREQS_STALL" block=TCC event=31 descr="Number of cycles the TCC could not send a mc write request because it already reached its maximum number of pending mc write requests."
+  ></metric>
+  <metric
+    name="TCC_MC_WRREQ_LEVEL" block=TCC event=32 descr="The sum of the number of 32-byte mc write requests in flight. This is primarily meant for measure average mc write latency. Average write latency = TCC_PERF_SEL_MC_WRREQ_LEVEL/TCC_PERF_SEL_MC_WRREQ."
+  ></metric>
+  <metric
+    name="TCC_MC_ATOMIC" block=TCC event=33 descr="Number of 32-byte transactions going over the TC_MC_wrreq interface that are actually atomic requests."
+  ></metric>
+  <metric
+    name="TCC_MC_ATOMIC_LEVEL" block=TCC event=34 descr="The sum of the number of 32-byte mc atomics in flight. This is primarily meant for measure average mc atomic latency. Average atomic latency = TCC_PERF_SEL_MC_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_MC_WRREQ_ATOMIC."
+  ></metric>
+  <metric
+    name="TCC_MC_RDREQ" block=TCC event=35 descr="Number of 32-byte reads. The hardware actually does 64-byte reads but the number is adjusted to provide uniformity."
+  ></metric>
+  <metric
+    name="TCC_MC_RDREQ_UNCACHED" block=TCC event=36 descr="Number of 32-byte reads due to uncached traffic."
+  ></metric>
+  <metric
+    name="TCC_MC_RDREQ_MDC" block=TCC event=37 descr="Number of 32-byte reads due to MDC traffic."
+  ></metric>
+  <metric
+    name="TCC_MC_RDREQ_COMPRESSED" block=TCC event=38 descr="Number of 32-byte reads due to compressed data reads. This does not include MDC traffic."
+  ></metric>
+  <metric
+    name="TCC_MC_RDREQ_CREDIT_STALL" block=TCC event=39 descr="Number of cycles there was a stall because the read request interface was out of credits. Stalls occur regardless of whether a read needed to be performed or not."
+  ></metric>
+  <metric
+    name="TCC_MC_RDREQ_MC_HALT_STALL" block=TCC event=40 descr="Number of cycles there was a stall because the read request interface was halted by the MC. Stalls occur regardless of whether a read needed to be performed or not."
+  ></metric>
+  <metric
+    name="TCC_MC_RDREQ_LEVEL" block=TCC event=41 descr="The sum of the number of 32-byte mc read requests in flight. This is primarily meant for measure average mc read latency. Average read latency = TCC_PERF_SEL_MC_RDREQ_LEVEL/TCC_PERF_SEL_MC_RDREQ."
+  ></metric>
+  <metric
+    name="TCC_TAG_STALL" block=TCC event=42 descr="Number of cycles the normal request pipeline in the tag was stalled for any reason. Normally, stalls of this nature are measured exactly from one point the pipeline, but that is not the case for this counter. Probes can stall the pipeline at a variety of places, and there is no single point that can reasonably measure the total stalls accurately."
+  ></metric>
+  <metric
+    name="TCC_TAG_WRITEBACK_FIFO_FULL_STALL" block=TCC event=43 descr="Number of cycles the normal request pipeline in the tag was stalled due to the writeback fifo within the tag block being full."
+  ></metric>
+  <metric
+    name="TCC_TAG_MISS_NOTHING_REPLACEABLE_STALL" block=TCC event=44 descr="Number of cycles the normal request pipeline in the tag was stalled due to a cache miss and unavailabiliyt of a replaceable cache line."
+  ></metric>
+  <metric
+    name="TCC_TAG_UNCACHED_WRITE_ATOMIC_FIFO_FULL_STALL" block=TCC event=45 descr="Number of cycles the normal request pipeline in the tag was stalled due to the uncached write/atomic fifo being full."
+  ></metric>
+  <metric
+    name="TCC_TAG_NO_UNCACHED_WRITE_ATOMIC_ENTRIES_STALL" block=TCC event=46 descr="Number of cycles the normal request pipeline in the tag was stalled due to the lack of unused uncached write/atomic tracking entries."
+  ></metric>
+  <metric
+    name="TCC_TAG_PROBE_STALL" block=TCC event=47 descr="Number of cycles the normal request pipeline in the tag was stalled due to the presence of a probe."
+  ></metric>
+  <metric
+    name="TCC_TAG_PROBE_FILTER_STALL" block=TCC event=48 descr="Number of cycles the normal request pipeline in the tag was stalled due to the probe filter being in an inappropriate state."
+  ></metric>
+  <metric
+    name="TCC_READ_RETURN_TIMEOUT" block=TCC event=49 descr="Number of bubbles requests sent to the TCA because a mc read return waited so long for a cache ram port that it timed out."
+  ></metric>
+  <metric
+    name="TCC_WRITEBACK_READ_TIMEOUT" block=TCC event=50 descr="Number of bubbles requests sent to the TCA because a writeback waited so long for a cache ram port that it timed out."
+  ></metric>
+  <metric
+    name="TCC_READ_RETURN_FULL_BUBBLE" block=TCC event=51 descr="Number of bubbles requests sent to the TCA to prevent the mc read return fifos from overflowing. Not windowable."
+  ></metric>
+  <metric
+    name="TCC_BUBBLE" block=TCC event=52 descr="Total number of bubble requests sent to the TCA"
+  ></metric>
+  <metric
+    name="TCC_RETURN_ACK" block=TCC event=53 descr="Number of times only an ack was sent on the return bus."
+  ></metric>
+  <metric
+    name="TCC_RETURN_DATA" block=TCC event=54 descr="Number of times only data was sent on the return bus."
+  ></metric>
+  <metric
+    name="TCC_RETURN_HOLE" block=TCC event=55 descr="Number of times only a hole was sent on the return bus."
+  ></metric>
+  <metric
+    name="TCC_RETURN_ACK_HOLE" block=TCC event=56 descr="Number of times an ack and a hole were sent at the same time on the return bus."
+  ></metric>
+  <metric
+    name="TCC_IB_REQ" block=TCC event=57 descr="Number of requests through the IB. This measures the raw request count from graphics clients going to this TCC."
+  ></metric>
+  <metric
+    name="TCC_IB_STALL" block=TCC event=58 descr="Number of cycles the IB output was stalled."
+  ></metric>
+  <metric
+    name="TCC_IB_TAG_STALL" block=TCC event=59 descr="Number of cycles the IB output was stalled on the tag."
+  ></metric>
+  <metric
+    name="TCC_IB_MDC_STALL" block=TCC event=60 descr="Number of cycles the IB output was stalled on the mdc."
+  ></metric>
+  <metric
+    name="TCC_TCA_LEVEL" block=TCC event=61 descr="The sum of the number of requests sent to the TCA for output arbitration in flight. Average TCA arbitration latency = TCC_PERF_SEL_TCA_LEVEL/TCC_PERF_SEL_REQ."
+  ></metric>
+  <metric
+    name="TCC_HOLE_LEVEL" block=TCC event=62 descr="The sum of the number of hole requests in flight. Average hole latency = TCC_PERF_SEL_HOLE_LEVEL/(TCC_PERF_SEL_WRITE+TCC_PERF_SEL_ATOMIC). Not windowable."
+  ></metric>
+  <metric
+    name="TCC_MC_RDRET_NACK" block=TCC event=63 descr="The number of 32-byte mc read returns that were nacked."
+  ></metric>
+  <metric
+    name="TCC_MC_WRRET_NACK" block=TCC event=64 descr="The number of 32-byte mc write returns that were nacked."
+  ></metric>
+  <metric
+    name="TCC_NORMAL_WRITEBACK" block=TCC event=65 descr="Number of writebacks due to requests that are not writeback requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBL2_NC_WRITEBACK" block=TCC event=66 descr="Number of writebacks due to TC_OP_WBL2_NC requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_WRITEBACK" block=TCC event=67 descr="Number of writebacks due to TC_OP_WBINVL2 requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_NC_WRITEBACK" block=TCC event=68 descr="Number of writebacks due to TC_OP_WBINVL2_NC requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_SD_WRITEBACK" block=TCC event=69 descr="Number of writebacks due to TC_OP_WBINVL2_SD requests."
+  ></metric>
+  <metric
+    name="TCC_ALL_TC_OP_WB_WRITEBACK" block=TCC event=70 descr="Number of writebacks due to all TC_OP writeback requests."
+  ></metric>
+  <metric
+    name="TCC_NORMAL_EVICT" block=TCC event=71 descr="Number of evictions due to requests that are not invalidate or probe requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBL2_NC_EVICT" block=TCC event=72 descr="Number of evictions due to TC_OP_WBL2_NC requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_INVL2_NC_EVICT" block=TCC event=73 descr="Number of evictions due to TC_OP_INVL2_NC requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_EVICT" block=TCC event=74 descr="Number of evictions due to TC_OP_WBINVL2 requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_NC_EVICT" block=TCC event=75 descr="Number of evictions due to TC_OP_WBINVL2_NC requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_SD_EVICT" block=TCC event=76 descr="Number of evictions due to TC_OP_WBINVL2_SD requests."
+  ></metric>
+  <metric
+    name="TCC_ALL_TC_OP_INV_EVICT" block=TCC event=77 descr="Number of evictions due to all TC_OP invalidate requests."
+  ></metric>
+  <metric
+    name="TCC_PROBE_EVICT" block=TCC event=78 descr="Number of evictions due to probes. Not windowable."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBL2_NC_CYCLE" block=TCC event=79 descr="Number of cycles spent performing TC_OP_WBL2_NC requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_INVL2_NC_CYCLE" block=TCC event=80 descr="Number of cycles spent performing TC_OP_INVL2_NC requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_CYCLE" block=TCC event=81 descr="Number of cycles spent performing TC_OP_WBINVL2 requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_NC_CYCLE" block=TCC event=82 descr="Number of cycles spent performing TC_OP_WBINVL2_NC requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_SD_CYCLE" block=TCC event=83 descr="Number of cycles spent performing TC_OP_WBINVL2_SD requests."
+  ></metric>
+  <metric
+    name="TCC_ALL_TC_OP_WB_OR_INV_CYCLE" block=TCC event=84 descr="Number of cycles spent performing all TC_OP writeback or invalidate requests."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBL2_NC_START" block=TCC event=85 descr="Number of TC_OP_WBL2_NC requests started."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_INVL2_NC_START" block=TCC event=86 descr="Number of TC_OP_INVL2_NC requests started."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_START" block=TCC event=87 descr="Number of TC_OP_WBINVL2 requests started."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_NC_START" block=TCC event=88 descr="Number of TC_OP_WBINVL2_NC requests started."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_SD_START" block=TCC event=89 descr="Number of TC_OP_WBINVL2_SD requests started."
+  ></metric>
+  <metric
+    name="TCC_ALL_TC_OP_WB_OR_INV_START" block=TCC event=90 descr="Number of TC_OP writeback or invalidate requests started."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBL2_NC_FINISH" block=TCC event=91 descr="Number of TC_OP_WBL2_NC requests finished."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_INVL2_NC_FINISH" block=TCC event=92 descr="Number of TC_OP_INVL2_NC requests finished."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_FINISH" block=TCC event=93 descr="Number of TC_OP_WBINVL2 requests finished."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_NC_FINISH" block=TCC event=94 descr="Number of TC_OP_WBINVL2_NC requests finished."
+  ></metric>
+  <metric
+    name="TCC_TC_OP_WBINVL2_SD_FINISH" block=TCC event=95 descr="Number of TC_OP_WBINVL2_SD requests finished."
+  ></metric>
+  <metric
+    name="TCC_ALL_TC_OP_WB_OR_INV_FINISH" block=TCC event=96 descr="Number of TC_OP writeback or invalidate requests finished."
+  ></metric>
+  <metric
+    name="TCC_MDC_REQ" block=TCC event=97 descr="Number of requests passed through the metadata cache."
+  ></metric>
+  <metric
+    name="TCC_MDC_LEVEL" block=TCC event=98 descr="The sum of the number of mdc requests in flight. Average MDC latency=TCC_PERF_SEL_MDC_LEVEL/TCC_PERF_SEL_MDC_REQ."
+  ></metric>
+  <metric
+    name="TCC_MDC_TAG_HIT" block=TCC event=99 descr="Number of MDC tag hits. A tag contains multiple sectors, so many tag hits will be sector misses."
+  ></metric>
+  <metric
+    name="TCC_MDC_SECTOR_HIT" block=TCC event=100 descr="Number of MDC sector hits. A sector hit means that there actually is data in the cache for this request."
+  ></metric>
+  <metric
+    name="TCC_MDC_SECTOR_MISS" block=TCC event=101 descr="Number of MDC sector misses."
+  ></metric>
+  <metric
+    name="TCC_MDC_TAG_STALL" block=TCC event=102 descr="Number of cycles that the mdc tag is stalled."
+  ></metric>
+  <metric
+    name="TCC_MDC_TAG_REPLACEMENT_LINE_IN_USE_STALL" block=TCC event=103 descr="Number of cycles that the mdc tag is stalled because the line to be replaced is stalled."
+  ></metric>
+  <metric
+    name="TCC_MDC_TAG_DESECTORIZATION_FIFO_FULL_STALL" block=TCC event=104 descr="Number of cycles that the mdc tag is stalled because the desctorization fifo is full."
+  ></metric>
+  <metric
+    name="TCC_MDC_TAG_WAITING_FOR_INVALIDATE_COMPLETION_STALL" block=TCC event=105 descr="Number of cycles that the mdc tag is stalled because it is waiting for the previous invalidate to complete."
+  ></metric>
+  <metric
+    name="TCC_PROBE_FILTER_DISABLE_TRANSITION" block=TCC event=106 descr="Number of times the probe filter went from enabled to disabled."
+  ></metric>
+  <metric
+    name="TCC_PROBE_FILTER_DISABLED" block=TCC event=107 descr="Number of cycles the probe filter was disabled. The TCC can get probes during these cycles. Not windowable."
+  ></metric>
+  <metric
+    name="TCC_CLIENT0_REQ" block=TCC event=128 descr="Number of cycles client0 sent a request to this TCC."
+  ></metric>
+  <metric
+    name="TCC_CLIENT1_REQ" block=TCC event=129 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT2_REQ" block=TCC event=130 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT3_REQ" block=TCC event=131 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT4_REQ" block=TCC event=132 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT5_REQ" block=TCC event=133 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT6_REQ" block=TCC event=134 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT7_REQ" block=TCC event=135 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT8_REQ" block=TCC event=136 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT9_REQ" block=TCC event=137 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT10_REQ" block=TCC event=138 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT11_REQ" block=TCC event=139 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT12_REQ" block=TCC event=140 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT13_REQ" block=TCC event=141 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT14_REQ" block=TCC event=142 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT15_REQ" block=TCC event=143 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT16_REQ" block=TCC event=144 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT17_REQ" block=TCC event=145 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT18_REQ" block=TCC event=146 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT19_REQ" block=TCC event=147 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT20_REQ" block=TCC event=148 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT21_REQ" block=TCC event=149 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT22_REQ" block=TCC event=150 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT23_REQ" block=TCC event=151 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT24_REQ" block=TCC event=152 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT25_REQ" block=TCC event=153 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT26_REQ" block=TCC event=154 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT27_REQ" block=TCC event=155 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT28_REQ" block=TCC event=156 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT29_REQ" block=TCC event=157 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT30_REQ" block=TCC event=158 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT31_REQ" block=TCC event=159 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT32_REQ" block=TCC event=160 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT33_REQ" block=TCC event=161 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT34_REQ" block=TCC event=162 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT35_REQ" block=TCC event=163 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT36_REQ" block=TCC event=164 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT37_REQ" block=TCC event=165 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT38_REQ" block=TCC event=166 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT39_REQ" block=TCC event=167 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT40_REQ" block=TCC event=168 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT41_REQ" block=TCC event=169 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT42_REQ" block=TCC event=170 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT43_REQ" block=TCC event=171 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT44_REQ" block=TCC event=172 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT45_REQ" block=TCC event=173 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT46_REQ" block=TCC event=174 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT47_REQ" block=TCC event=175 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT48_REQ" block=TCC event=176 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT49_REQ" block=TCC event=177 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT50_REQ" block=TCC event=178 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT51_REQ" block=TCC event=179 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT52_REQ" block=TCC event=180 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT53_REQ" block=TCC event=181 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT54_REQ" block=TCC event=182 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT55_REQ" block=TCC event=183 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT56_REQ" block=TCC event=184 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT57_REQ" block=TCC event=185 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT58_REQ" block=TCC event=186 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT59_REQ" block=TCC event=187 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT60_REQ" block=TCC event=188 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT61_REQ" block=TCC event=189 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT62_REQ" block=TCC event=190 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT63_REQ" block=TCC event=191 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT64_REQ" block=TCC event=192 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT65_REQ" block=TCC event=193 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT66_REQ" block=TCC event=194 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT67_REQ" block=TCC event=195 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT68_REQ" block=TCC event=196 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT69_REQ" block=TCC event=197 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT70_REQ" block=TCC event=198 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT71_REQ" block=TCC event=199 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT72_REQ" block=TCC event=200 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT73_REQ" block=TCC event=201 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT74_REQ" block=TCC event=202 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT75_REQ" block=TCC event=203 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT76_REQ" block=TCC event=204 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT77_REQ" block=TCC event=205 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT78_REQ" block=TCC event=206 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT79_REQ" block=TCC event=207 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT80_REQ" block=TCC event=208 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT81_REQ" block=TCC event=209 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT82_REQ" block=TCC event=210 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT83_REQ" block=TCC event=211 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT84_REQ" block=TCC event=212 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT85_REQ" block=TCC event=213 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT86_REQ" block=TCC event=214 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT87_REQ" block=TCC event=215 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT88_REQ" block=TCC event=216 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT89_REQ" block=TCC event=217 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT90_REQ" block=TCC event=218 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT91_REQ" block=TCC event=219 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT92_REQ" block=TCC event=220 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT93_REQ" block=TCC event=221 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT94_REQ" block=TCC event=222 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT95_REQ" block=TCC event=223 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT96_REQ" block=TCC event=224 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT97_REQ" block=TCC event=225 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT98_REQ" block=TCC event=226 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT99_REQ" block=TCC event=227 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT100_REQ" block=TCC event=228 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT101_REQ" block=TCC event=229 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT102_REQ" block=TCC event=230 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT103_REQ" block=TCC event=231 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT104_REQ" block=TCC event=232 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT105_REQ" block=TCC event=233 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT106_REQ" block=TCC event=234 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT107_REQ" block=TCC event=235 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT108_REQ" block=TCC event=236 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT109_REQ" block=TCC event=237 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT110_REQ" block=TCC event=238 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT111_REQ" block=TCC event=239 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT112_REQ" block=TCC event=240 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT113_REQ" block=TCC event=241 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT114_REQ" block=TCC event=242 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT115_REQ" block=TCC event=243 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT116_REQ" block=TCC event=244 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT117_REQ" block=TCC event=245 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT118_REQ" block=TCC event=246 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT119_REQ" block=TCC event=247 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT120_REQ" block=TCC event=248 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT121_REQ" block=TCC event=249 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT122_REQ" block=TCC event=250 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT123_REQ" block=TCC event=251 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT124_REQ" block=TCC event=252 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT125_REQ" block=TCC event=253 descr=""
+  ></metric>
+  <metric
+    name="TCC_CLIENT126_REQ" block=TCC event=254 descr=""
+  ></metric>
+  # TCP counters
+  <metric
+    name="TCP_TA_TCP_ADDR_STARVE_CYCLES" block=TCP event=0 descr="TA starves TCP addr interface. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_TA_TCP_DATA_STARVE_CYCLES" block=TCP event=1 descr="TA starves TCP data interface. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_TCP_TA_ADDR_STALL_CYCLES" block=TCP event=2 descr="TCP stalls TA addr interface."
+  ></metric>
+  <metric
+    name="TCP_TCP_TA_DATA_STALL_CYCLES" block=TCP event=3 descr="TCP stalls TA data interface. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_TD_TCP_STALL_CYCLES" block=TCP event=4 descr="TD stalls TCP"
+  ></metric>
+  <metric
+    name="TCP_TCR_TCP_STALL_CYCLES" block=TCP event=5 descr="TCR stalls TCP"
+  ></metric>
+  <metric
+    name="TCP_LOD_STALL_CYCLES" block=TCP event=6 descr="Per Pixel LOD stall"
+  ></metric>
+  <metric
+    name="TCP_READ_TAGCONFLICT_STALL_CYCLES" block=TCP event=7 descr="Tagram conflict stall on a read"
+  ></metric>
+  <metric
+    name="TCP_WRITE_TAGCONFLICT_STALL_CYCLES" block=TCP event=8 descr="Tagram conflict stall on a write"
+  ></metric>
+  <metric
+    name="TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES" block=TCP event=9 descr="Tagram conflict stall on an atomic"
+  ></metric>
+  <metric
+    name="TCP_ALLOC_STALL_CYCLES" block=TCP event=10 descr="Alloc on inflight cache line stall"
+  ></metric>
+  <metric
+    name="TCP_LFIFO_STALL_CYCLES" block=TCP event=11 descr="Memory Latency fifos full stall"
+  ></metric>
+  <metric
+    name="TCP_RFIFO_STALL_CYCLES" block=TCP event=12 descr="Memory Request fifos full stall"
+  ></metric>
+  <metric
+    name="TCP_TCR_RDRET_STALL" block=TCP event=13 descr="write into cache stalled by read return from tcr"
+  ></metric>
+  <metric
+    name="TCP_WRITE_CONFLICT_STALL" block=TCP event=14 descr="write stall due to cache bank conflict"
+  ></metric>
+  <metric
+    name="TCP_HOLE_READ_STALL" block=TCP event=15 descr="read from cache stalled due to hole fill read"
+  ></metric>
+  <metric
+    name="TCP_READCONFLICT_STALL_CYCLES" block=TCP event=16 descr="Read conflict stall due to cache bank conflict"
+  ></metric>
+  <metric
+    name="TCP_PENDING_STALL_CYCLES" block=TCP event=17 descr="Pending stall"
+  ></metric>
+  <metric
+    name="TCP_READFIFO_STALL_CYCLES" block=TCP event=18 descr="Read fifo stall"
+  ></metric>
+  <metric
+    name="TCP_TCP_LATENCY" block=TCP event=19 descr="Total TCP wave latency (from first clock of wave entering to first clock of wave leaving), divide by TA_TCP_STATE_READ to avg wave latency"
+  ></metric>
+  <metric
+    name="TCP_TCC_READ_REQ_LATENCY" block=TCP event=20 descr="Total TCP->TCC request latency for reads and atomics with return. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_TCC_WRITE_REQ_LATENCY" block=TCP event=21 descr="Total TCP->TCC request latency for writes and atomics without return. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_TCC_WRITE_REQ_HOLE_LATENCY" block=TCP event=22 descr="Total TCP req ->TCC hole latency for writes and atomics. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_TCC_READ_REQ" block=TCP event=23 descr="Total read requests from TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_WRITE_REQ" block=TCP event=24 descr="Total write requests from TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_ATOMIC_WITH_RET_REQ" block=TCP event=25 descr="Total atomic with return requests from TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_ATOMIC_WITHOUT_RET_REQ" block=TCP event=26 descr="Total atomic without return requests from TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_LOCAL_READ" block=TCP event=27 descr="DEPRECATED. Replaced by TCP_PERF_SEL_TOTAL_HIT_LRU_READ."
+  ></metric>
+  <metric
+    name="TCP_TOTAL_GLOBAL_READ" block=TCP event=28 descr="DEPRECATED. Replaced by TCP_PERF_SEL_TOTAL_MISS_EVICT_READ."
+  ></metric>
+  <metric
+    name="TCP_TOTAL_LOCAL_WRITE" block=TCP event=29 descr="DEPRECATED. Replaced by TCP_PERF_SEL_TOTAL_MISS_LRU_WRITE."
+  ></metric>
+  <metric
+    name="TCP_TOTAL_GLOBAL_WRITE" block=TCP event=30 descr="DEPRECATED. Replaced by TCP_PERF_SEL_TOTAL_MISS_EVICT_WRITE."
+  ></metric>
+  <metric
+    name="TCP_TOTAL_ATOMIC_WITH_RET" block=TCP event=31 descr="Total number of atomic with return pixels/buffers from TA"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_ATOMIC_WITHOUT_RET" block=TCP event=32 descr="Total number of atomic without return pixels/buffers from TA"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_WBINVL1" block=TCP event=33 descr="Total number of wbinvl1 transactions from TA (from shader WBINVL1 instructions)"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_1" block=TCP event=34 descr="Count of image read pixels that use 1-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_8" block=TCP event=35 descr="Count of image read pixels that use 8-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_16" block=TCP event=36 descr="Count of image read pixels that use 16-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_32" block=TCP event=37 descr="Count of image read pixels that use 32-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_32_AS_8" block=TCP event=38 descr="Count of image read pixels that use 32_AS_8 formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_32_AS_16" block=TCP event=39 descr="Count of image read pixels that use 32_AS_8_8 formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_32_AS_128" block=TCP event=40 descr="Count of image read pixels that use 32_AS_8_8 formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_64_2_CYCLE" block=TCP event=41 descr="Count of image read pixels that use 64-bit 2-cycle formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_64_1_CYCLE" block=TCP event=42 descr="Count of image read pixels that use 64-bit 1-cycle formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_96" block=TCP event=43 descr="Count of image read pixels that use 96-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_128_4_CYCLE" block=TCP event=44 descr="Count of image read pixels that use 128-bit 4-cycle formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_128_1_CYCLE" block=TCP event=45 descr="Count of image read pixels that use 128-bit 1-cycle formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_BC1" block=TCP event=46 descr="Count of image read pixels that use BC1 format"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_BC2" block=TCP event=47 descr="Count of image read pixels that use BC2 format"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_BC3" block=TCP event=48 descr="Count of image read pixels that use BC3 format"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_BC4" block=TCP event=49 descr="Count of image read pixels that use BC4 format"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_BC5" block=TCP event=50 descr="Count of image read pixels that use BC5 format"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_BC6" block=TCP event=51 descr="Count of image read pixels that use BC6 format"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_BC7" block=TCP event=52 descr="Count of image read pixels that use BC7 format"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_I8" block=TCP event=53 descr="Count of image read pixels that use 8-bit interlaced formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_I16" block=TCP event=54 descr="Count of image read pixels that use 16-bit interlaced formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_I32" block=TCP event=55 descr="Count of image read pixels that use 32-bit interlaced formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_I32_AS_8" block=TCP event=56 descr="Count of image read pixels that use 32_AS_8 interlaced formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_I32_AS_16" block=TCP event=57 descr="Count of image read pixels that use 32_AS_8_8 interlaced formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_D8" block=TCP event=58 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_D16" block=TCP event=59 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_IMG_READ_FMT_D32" block=TCP event=60 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_IMG_WRITE_FMT_8" block=TCP event=61 descr="Count of image write pixels that use 8-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_WRITE_FMT_16" block=TCP event=62 descr="Count of image write pixels that use 16-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_WRITE_FMT_32" block=TCP event=63 descr="Count of image write pixels that use 32-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_WRITE_FMT_64" block=TCP event=64 descr="Count of image write pixels that use 64-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_WRITE_FMT_128" block=TCP event=65 descr="Count of image write pixels that use 128-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_WRITE_FMT_D8" block=TCP event=66 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_IMG_WRITE_FMT_D16" block=TCP event=67 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_IMG_WRITE_FMT_D32" block=TCP event=68 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_IMG_ATOMIC_WITH_RET_FMT_32" block=TCP event=69 descr="Count of image atomic with return pixels that use 32-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_ATOMIC_WITHOUT_RET_FMT_32" block=TCP event=70 descr="Count of image atomic without return pixels that use 32-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_ATOMIC_WITH_RET_FMT_64" block=TCP event=71 descr="Count of image atomic with return pixels that use 64-bit formats"
+  ></metric>
+  <metric
+    name="TCP_IMG_ATOMIC_WITHOUT_RET_FMT_64" block=TCP event=72 descr="Count of image atomic without return pixels that use 64-bit formats"
+  ></metric>
+  <metric
+    name="TCP_BUF_READ_FMT_8" block=TCP event=73 descr="Count of buffer reads that use 8-bit vertex format"
+  ></metric>
+  <metric
+    name="TCP_BUF_READ_FMT_16" block=TCP event=74 descr="Count of buffer reads that use 16-bit vertex format"
+  ></metric>
+  <metric
+    name="TCP_BUF_READ_FMT_32" block=TCP event=75 descr="Count of buffer reads that use 32-bit vertex format (includes 64b and 128b)"
+  ></metric>
+  <metric
+    name="TCP_BUF_WRITE_FMT_8" block=TCP event=76 descr="Count of buffer writes that use 8-bit vertex format"
+  ></metric>
+  <metric
+    name="TCP_BUF_WRITE_FMT_16" block=TCP event=77 descr="Count of buffer writes that use 16-bit vertex format"
+  ></metric>
+  <metric
+    name="TCP_BUF_WRITE_FMT_32" block=TCP event=78 descr="Count of buffer writes that use 32-bit vertex format (includes 64b and 128b)"
+  ></metric>
+  <metric
+    name="TCP_BUF_ATOMIC_WITH_RET_FMT_32" block=TCP event=79 descr="Count of buffer atomics with return that use 32-bit formats"
+  ></metric>
+  <metric
+    name="TCP_BUF_ATOMIC_WITHOUT_RET_FMT_32" block=TCP event=80 descr="Count of buffer atomics without return that use 32-bit formats"
+  ></metric>
+  <metric
+    name="TCP_BUF_ATOMIC_WITH_RET_FMT_64" block=TCP event=81 descr="Count of buffer atomics with return that use 64-bit formats"
+  ></metric>
+  <metric
+    name="TCP_BUF_ATOMIC_WITHOUT_RET_FMT_64" block=TCP event=82 descr="Count of buffer atomics without return that use 64-bit formats"
+  ></metric>
+  <metric
+    name="TCP_ARR_LINEAR_GENERAL" block=TCP event=83 descr="Count of buffers that use linear general memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_LINEAR_ALIGNED" block=TCP event=84 descr="Count of pixels that use linear aligned memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_1D_THIN1" block=TCP event=85 descr="Count of pixels that use 1d thin1 memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_1D_THICK" block=TCP event=86 descr="Count of pixels that use 1d thick memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_2D_THIN1" block=TCP event=87 descr="Count of pixels that use 2d thin1 memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_2D_THICK" block=TCP event=88 descr="Count of pixels that use 2d thick memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_2D_XTHICK" block=TCP event=89 descr="Count of pixels that use 2d xthick memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_3D_THIN1" block=TCP event=90 descr="Count of pixels that use 3d thin1 memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_3D_THICK" block=TCP event=91 descr="Count of pixels that use 3d thick memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_3D_XTHICK" block=TCP event=92 descr="Count of pixels that use 3d xthick memory tiling"
+  ></metric>
+  <metric
+    name="TCP_DIM_1D" block=TCP event=93 descr="Count of pixels that belong to 1D surfaces"
+  ></metric>
+  <metric
+    name="TCP_DIM_2D" block=TCP event=94 descr="Count of pixels that belong to 2D surfaces"
+  ></metric>
+  <metric
+    name="TCP_DIM_3D" block=TCP event=95 descr="Count of pixels that belong to 3D surfaces"
+  ></metric>
+  <metric
+    name="TCP_DIM_1D_ARRAY" block=TCP event=96 descr="Count of pixels that belong to 1D Array surfaces"
+  ></metric>
+  <metric
+    name="TCP_DIM_2D_ARRAY" block=TCP event=97 descr="Count of pixels that belong to 2D Array surfaces"
+  ></metric>
+  <metric
+    name="TCP_DIM_2D_MSAA" block=TCP event=98 descr="Count of pixels that belong to 2D MSAA surfaces"
+  ></metric>
+  <metric
+    name="TCP_DIM_2D_ARRAY_MSAA" block=TCP event=99 descr="Count of pixels that belong to 2D MSAA Array surfaces"
+  ></metric>
+  <metric
+    name="TCP_DIM_CUBE_ARRAY" block=TCP event=100 descr="Count of pixels that belong to Cube Array surfaces"
+  ></metric>
+  <metric
+    name="TCP_CP_TCP_INVALIDATE" block=TCP event=101 descr="Number of cache invalidates from the CP. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_TA_TCP_STATE_READ" block=TCP event=102 descr="Number of state reads"
+  ></metric>
+  <metric
+    name="TCP_TAGRAM0_REQ" block=TCP event=103 descr="Total L2 requests that mapped to tagram 0 from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TAGRAM1_REQ" block=TCP event=104 descr="Total L2 requests that mapped to tagram 1 from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TAGRAM2_REQ" block=TCP event=105 descr="Total L2 requests that mapped to tagram 2 from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TAGRAM3_REQ" block=TCP event=106 descr="Total L2 requests that mapped to tagram 3 from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_GATE_EN1" block=TCP event=107 descr="TCP interface clocks are turned on. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_GATE_EN2" block=TCP event=108 descr="TCP core clocks are turned on. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_CORE_REG_SCLK_VLD" block=TCP event=109 descr="TCP reg clocks are turned on. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_TCC_REQ" block=TCP event=110 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_NON_READ_REQ" block=TCP event=111 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_BYPASS_READ_REQ" block=TCP event=112 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_MISS_EVICT_READ_REQ" block=TCP event=113 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_VOLATILE_READ_REQ" block=TCP event=114 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_VOLATILE_BYPASS_READ_REQ" block=TCP event=115 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_VOLATILE_MISS_EVICT_READ_REQ" block=TCP event=116 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_BYPASS_WRITE_REQ" block=TCP event=117 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_MISS_EVICT_WRITE_REQ" block=TCP event=118 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_VOLATILE_BYPASS_WRITE_REQ" block=TCP event=119 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_VOLATILE_WRITE_REQ" block=TCP event=120 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_VOLATILE_MISS_EVICT_WRITE_REQ" block=TCP event=121 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_BYPASS_ATOMIC_REQ" block=TCP event=122 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_ATOMIC_REQ" block=TCP event=123 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_VOLATILE_ATOMIC_REQ" block=TCP event=124 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TCC_DATA_BUS_BUSY" block=TCP event=125 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TOTAL_ACCESSES" block=TCP event=126 descr="Total number of pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_READ+TCP_PERF_SEL_TOTAL_NONREAD"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_READ" block=TCP event=127 descr="Total number of read pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_HIT_LRU_READ ALPHA+ TCP_PERF_SEL_TOTAL_HIT_EVICT_READ ALPHA+ TCP_PERF_SEL_TOTAL_MISS_LRU_READ+ TCP_PERF_SEL_TOTAL_MISS_EVICT_READ"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_HIT_LRU_READ" block=TCP event=128 descr="Total number of read pixels/buffers from TA using the HIT_LRU policy"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_HIT_EVICT_READ" block=TCP event=129 descr="DEPRECATED. Do not use."
+  ></metric>
+  <metric
+    name="TCP_TOTAL_MISS_LRU_READ" block=TCP event=130 descr="Total number of read pixels/buffers from TA using the MISS_LRU policy"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_MISS_EVICT_READ" block=TCP event=131 descr="Total number of read pixels/buffers from TA using the MISS_EVICT policy"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_NON_READ" block=TCP event=132 descr="Total number of non-read pixels/buffers from TA. Equals TCP_PERF_SEL_WRITE + TCP_PERF_SEL_TOTAL_ATOMIC_WITH_RET + TCP_PERF_SEL_TOTOAL_ATOMIC_WITHOUT_RET"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_WRITE" block=TCP event=133 descr="Total number of local write pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_MISS_LRU_WRITE+ TCP_PERF_SEL_TOTAL_MISS_EVICT_WRITE"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_MISS_LRU_WRITE" block=TCP event=134 descr="Total number of local write pixels/buffers from TA using the MISS_LRU policy"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_MISS_EVICT_WRITE" block=TCP event=135 descr="Total number of global write pixels/buffers from TA using the MISS_EVICT policy"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_WBINVL1_VOL" block=TCP event=136 descr="Total number of volatile wbinvl1 transactions from TA (from shader WBINVL1_VOL instructions)"
+  ></metric>
+  <metric
+    name="TCP_TOTAL_WRITEBACK_INVALIDATES" block=TCP event=137 descr="Total number of cache invalidates. Equals TCP_PERF_SEL_TOTAL_WBINVL1+ TCP_PERF_SEL_TOTAL_WBINVL1_VOL+ TCP_PERF_SEL_CP_TCP_INVALIDATE+ TCP_PERF_SEL_SQ_TCP_INVALIDATE_VOL. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_DISPLAY_MICROTILING" block=TCP event=138 descr="Count of image pixels using display microtiling"
+  ></metric>
+  <metric
+    name="TCP_THIN_MICROTILING" block=TCP event=139 descr="Count of image pixels using thin microtiling"
+  ></metric>
+  <metric
+    name="TCP_DEPTH_MICROTILING" block=TCP event=140 descr="Count of image pixels using depth microtiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_PRT_THIN1" block=TCP event=141 descr="Count of pixels that use prt thin1 memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_PRT_2D_THIN1" block=TCP event=142 descr="Count of pixels that use 2d prt thin1 memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_PRT_3D_THIN1" block=TCP event=143 descr="Count of pixels that use 3d prt thin1 memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_PRT_THICK" block=TCP event=144 descr="Count of pixels that use prt thick memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_PRT_2D_THICK" block=TCP event=145 descr="Count of pixels that use 2d prt thick memory tiling"
+  ></metric>
+  <metric
+    name="TCP_ARR_PRT_3D_THICK" block=TCP event=146 descr="Count of pixels that use 3d prt thick memory tiling"
+  ></metric>
+  <metric
+    name="TCP_CP_TCP_INVALIDATE_VOL" block=TCP event=147 descr="Number of volatile cache invalidates from the CP. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_SQ_TCP_INVALIDATE_VOL" block=TCP event=148 descr="Number of volatile cache invalidates from the SQ. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_UNALIGNED" block=TCP event=149 descr="Count of unaligned buffer fetches"
+  ></metric>
+  <metric
+    name="TCP_ROTATED_MICROTILING" block=TCP event=150 descr="Count of image pixels using rotated microtiling"
+  ></metric>
+  <metric
+    name="TCP_THICK_MICROTILING" block=TCP event=151 descr="Count of image pixels using thick microtiling"
+  ></metric>
+  <metric
+    name="TCP_ATC" block=TCP event=152 descr="Count of pixels/buffers that use ATC"
+  ></metric>
+  <metric
+    name="TCP_POWER_STALL" block=TCP event=153 descr="Count of stalls due to power throttling"
+  ></metric>
+  <metric
+    name="TCP_RESERVED_154" block=TCP event=154 descr=""
+  ></metric>
+  <metric
+    name="TCP_TCC_LRU_REQ" block=TCP event=155 descr="Total requests with LRU L2 policy from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_STREAM_REQ" block=TCP event=156 descr="Total requests with STREAM L2 policy from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_NC_READ_REQ" block=TCP event=157 descr="Total read requests with NC mtype from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_NC_WRITE_REQ" block=TCP event=158 descr="Total write requests with NC mtype from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_NC_ATOMIC_REQ" block=TCP event=159 descr="Total atomic requests with NC mtype from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_UC_READ_REQ" block=TCP event=160 descr="Total read requests with UC mtype from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_UC_WRITE_REQ" block=TCP event=161 descr="Total write requests with UC mtype from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_UC_ATOMIC_REQ" block=TCP event=162 descr="Total atomic requests with UC mtype from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_CC_READ_REQ" block=TCP event=163 descr="Total write requests with CC mtype from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_CC_WRITE_REQ" block=TCP event=164 descr="Total write requests with CC mtype from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_CC_ATOMIC_REQ" block=TCP event=165 descr="Total atomic requests with CC mtype from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_DCC_REQ" block=TCP event=166 descr="Total DCC requests from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_TCC_PHYSICAL_REQ" block=TCP event=167 descr="Total physical address requests from this TCP to all TCCs"
+  ></metric>
+  <metric
+    name="TCP_UNORDERED_MTYPE_STALL" block=TCP event=168 descr="Total stalls due to UC/CC ordering"
+  ></metric>
+  <metric
+    name="TCP_VOLATILE" block=TCP event=169 descr="Total number of L1 volatile pixels/buffers from TA"
+  ></metric>
+  <metric
+    name="TCP_TC_TA_XNACK_STALL" block=TCP event=170 descr="Total number of cycles TA stalled the TCP xnack interface. Not Windowed."
+  ></metric>
+  <metric
+    name="TCP_ATCL1_SERIALIZATION_STALL" block=TCP event=171 descr="Total number of stalls due to serializing ATC requests through the ATCL1."
+  ></metric>
+  <metric
+    name="TCP_SHOOTDOWN" block=TCP event=172 descr="Total number of shootdowns executed by TCP. Not windowed."
+  ></metric>
+  <metric
+    name="TCP_GATCL1_TRANSLATION_MISS" block=TCP event=173 descr="Total gatcl1 translation misses"
+  ></metric>
+  <metric
+    name="TCP_GATCL1_PERMISSION_MISS" block=TCP event=174 descr="Total gatcl1 permission misses"
+  ></metric>
+  <metric
+    name="TCP_GATCL1_REQUEST" block=TCP event=175 descr="Total CLIENT_ATCL1 NORMAL requestes"
+  ></metric>
+  <metric
+    name="TCP_GATCL1_STALL_INFLIGHT_MAX" block=TCP event=176 descr="Total gatcl1 stalls due to inflight counter saturation"
+  ></metric>
+  <metric
+    name="TCP_GATCL1_STALL_LRU_INFLIGHT" block=TCP event=177 descr="Total gatcl1 stalls due to LRU cache line with traffic inflight"
+  ></metric>
+  <metric
+    name="TCP_GATCL1_LFIFO_FULL" block=TCP event=178 descr="Total gatcl1 atcl2 latency hiding fifo full cycles"
+  ></metric>
+  <metric
+    name="TCP_GATCL1_STALL_LFIFO_NOT_RES" block=TCP event=179 descr="Total gatcl1 stalls due to atcl2 latency hiding fifo output not resident"
+  ></metric>
+  <metric
+    name="TCP_GATCL1_STALL_ATCL2_REQ_OUT_OF_CREDITS" block=TCP event=180 descr="Total gatcl1 stalls due to atcl2_req out of credits"
+  ></metric>
+  <metric
+    name="TCP_GATCL1_ATCL2_INFLIGHT" block=TCP event=181 descr="The sum of inflight ATCL1_ATCL2 requests per cycle"
+  ></metric>
+  # TD counters
+  <metric
+    name="TD_NONE" block=TD event=0 descr="Won't count anything."
+  ></metric>
+  <metric
+    name="TD_TD_BUSY" block=TD event=1 descr="TD is processing or waiting for data. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TD_INPUT_BUSY" block=TD event=2 descr="TD input subblock is busy or waiting for data. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TD_OUTPUT_BUSY" block=TD event=3 descr="TD output subblock is busy for waiting for data. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TD_LERP_BUSY" block=TD event=4 descr="TD filter block is busy. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TD_REG_SCLK_VLD" block=TD event=5 descr="Clock gate enable for GRBM register reads & writes. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TD_LOCAL_CG_DYN_SCLK_GRP0_EN" block=TD event=6 descr="Clock gate enable for group0 - non-harvestable always_on domain. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TD_LOCAL_CG_DYN_SCLK_GRP1_EN" block=TD event=7 descr="Clock gate enable for group1 - harvestable texture logic domain. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TD_LOCAL_CG_DYN_SCLK_GRP4_EN" block=TD event=8 descr="Clock gate enable for group4 - non-harvestable GDS chain domain. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TD_LOCAL_CG_DYN_SCLK_GRP5_EN" block=TD event=9 descr="Clock gate enable for group5 - non-harvestable texture boundary domain. Perf_Windowing not supported for this counter."
+  ></metric>
+  <metric
+    name="TD_TC_TD_FIFO_FULL" block=TD event=10 descr="TC_TD input FIFO is full."
+  ></metric>
+  <metric
+    name="TD_CONSTANT_STATE_FULL" block=TD event=11 descr="TA_TD instruction FIFO is full."
+  ></metric>
+  <metric
+    name="TD_SAMPLE_STATE_FULL" block=TD event=12 descr="TA_TD sample FIFO is full."
+  ></metric>
+  <metric
+    name="TD_OUTPUT_FIFO_FULL" block=TD event=13 descr="TD output FIFO is full."
+  ></metric>
+  <metric
+    name="TD_RESERVED_14" block=TD event=14 descr="RESERVED_14"
+  ></metric>
+  <metric
+    name="TD_TC_STALL" block=TD event=15 descr="TD is stalled waiting for TC data."
+  ></metric>
+  <metric
+    name="TD_PC_STALL" block=TD event=16 descr="TD is stalled by PC waiting to send LDS data."
+  ></metric>
+  <metric
+    name="TD_GDS_STALL" block=TD event=17 descr="TD is stalled by GDS data."
+  ></metric>
+  <metric
+    name="TD_RESERVED_18" block=TD event=18 descr="RESERVED_18"
+  ></metric>
+  <metric
+    name="TD_RESERVED_19" block=TD event=19 descr="RESERVED_19"
+  ></metric>
+  <metric
+    name="TD_GATHER4_WAVEFRONT" block=TD event=20 descr="Count the wavefronts with opcode = gather4, includes gather4_c."
+  ></metric>
+  <metric
+    name="TD_SAMPLE_C_WAVEFRONT" block=TD event=21 descr="Count the wavefronts with opcode = sample_c, includes gather4_c."
+  ></metric>
+  <metric
+    name="TD_LOAD_WAVEFRONT" block=TD event=22 descr="Count the wavefronts with opcode = load, include atomics and store."
+  ></metric>
+  <metric
+    name="TD_ATOMIC_WAVEFRONT" block=TD event=23 descr="Count the wavefronts with opcode = atomic."
+  ></metric>
+  <metric
+    name="TD_STORE_WAVEFRONT" block=TD event=24 descr="Count the wavefronts with opcode = store."
+  ></metric>
+  <metric
+    name="TD_LDFPTR_WAVEFRONT" block=TD event=25 descr="Count the wavefronts with LDFPTR formats."
+  ></metric>
+  <metric
+    name="TD_RESERVED_26" block=TD event=26 descr="RESERVED_26"
+  ></metric>
+  <metric
+    name="TD_RESERVED_27" block=TD event=27 descr="RESERVED_27"
+  ></metric>
+  <metric
+    name="TD_D16_EN_WAVEFRONT" block=TD event=28 descr="Count the wavefronts that use d16 conversion"
+  ></metric>
+  <metric
+    name="TD_BICUBIC_FILTER_WAVEFRONT" block=TD event=29 descr="Count the wavefronts that use bicubic filtering. If the bicubic filter feature does not exist, this count will always be 0."
+  ></metric>
+  <metric
+    name="TD_BYPASS_FILTER_WAVEFRONT" block=TD event=30 descr="Count the wavefronts that bypass the filter, includes bypass opcode or bypass formats."
+  ></metric>
+  <metric
+    name="TD_MIN_MAX_FILTER_WAVEFRONT" block=TD event=31 descr="Count the wavefronts that use min/max filtering."
+  ></metric>
+  <metric
+    name="TD_COALESCABLE_WAVEFRONT" block=TD event=32 descr="Count wavefronts that TA finds coalescable."
+  ></metric>
+  <metric
+    name="TD_COALESCED_PHASE" block=TD event=33 descr="Count up when each phase is coalesced, if all phases in a wavefront were coalesced the count will be 16."
+  ></metric>
+  <metric
+    name="TD_FOUR_PHASE_WAVEFRONT" block=TD event=34 descr="dmask=1,2,4,8, wavefront was packed into a 4 phase packet for SP."
+  ></metric>
+  <metric
+    name="TD_EIGHT_PHASE_WAVEFRONT" block=TD event=35 descr="dmask=3,5,6,9,a,c, wavefront was packed into an 8 phase packet for SP."
+  ></metric>
+  <metric
+    name="TD_SIXTEEN_PHASE_WAVEFRONT" block=TD event=36 descr="dmask=7,b,d,e,f, wavefront was forwarded to SP in 16 phases."
+  ></metric>
+  <metric
+    name="TD_FOUR_PHASE_FORWARD_WAVEFRONT" block=TD event=37 descr="Count the wavefronts that were forwarded to SP in 4 phases (coalescable)."
+  ></metric>
+  <metric
+    name="TD_WRITE_ACK_WAVEFRONT" block=TD event=38 descr="Count write acknowledgments, sent to SQ and not to SP."
+  ></metric>
+  <metric
+    name="TD_RESERVED_39" block=TD event=39 descr="RESERVED_39."
+  ></metric>
+  <metric
+    name="TD_USER_DEFINED_BORDER" block=TD event=40 descr="Count the wavefronts that user defined border color was used."
+  ></metric>
+  <metric
+    name="TD_WHITE_BORDER" block=TD event=41 descr="Count the wavefronts that white border color was used."
+  ></metric>
+  <metric
+    name="TD_OPAQUE_BLACK_BORDER" block=TD event=42 descr="Count the wavefronts that opaque black border color was used."
+  ></metric>
+  <metric
+    name="TD_RESERVED_43" block=TD event=43 descr="RESERVED_43"
+  ></metric>
+  <metric
+    name="TD_RESERVED_44" block=TD event=44 descr="RESERVED_44"
+  ></metric>
+  <metric
+    name="TD_NACK" block=TD event=45 descr="Count the number of times an ack packet was generated and sent to SP/SQ."
+  ></metric>
+  <metric
+    name="TD_TD_SP_TRAFFIC" block=TD event=46 descr="Count the number of times this TD sends data to the SP."
+  ></metric>
+  <metric
+    name="TD_CONSUME_GDS_TRAFFIC" block=TD event=47 descr="Count the number of times GDS data was consumed by this TD, send to SP."
+  ></metric>
+  <metric
+    name="TD_ADDRESSCMD_POISON" block=TD event=48 descr="Count the wavefronts that had poisoned address or command."
+  ></metric>
+  <metric
+    name="TD_DATA_POISON" block=TD event=49 descr="Count the wavefronts that had poisoned data."
+  ></metric>
+  <metric
+    name="TD_START_CYCLE_0" block=TD event=50 descr="Count the number of times that had phase change as 0"
+  ></metric>
+  <metric
+    name="TD_START_CYCLE_1" block=TD event=51 descr="Count the number of times that had phase change as 1"
+  ></metric>
+  <metric
+    name="TD_START_CYCLE_2" block=TD event=52 descr="Count the number of times that had phase change as 2"
+  ></metric>
+  <metric
+    name="TD_START_CYCLE_3" block=TD event=53 descr="Count the number of times that had phase change as 3"
+  ></metric>
+</gfx8>
