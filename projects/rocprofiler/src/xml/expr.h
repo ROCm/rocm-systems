@@ -45,6 +45,10 @@ class bin_expr_t {
 
   bin_expr_t() : arg1_(NULL), arg2_(NULL) {}
   bin_expr_t(const bin_expr_t* arg1, const bin_expr_t* arg2) : arg1_(arg1), arg2_(arg2) {}
+  virtual ~bin_expr_t() {
+    if (arg1_) delete arg1_;
+    if (arg2_) delete arg2_;
+  }
 
   virtual args_t Eval(const args_cache_t& args) const = 0;
   virtual std::string Symbol() const = 0;
@@ -66,7 +70,8 @@ class bin_expr_t {
 class Expr {
  public:
   explicit Expr(const std::string& expr, const expr_cache_t* cache)
-      : expr_(expr), pos_(0), sub_count_(0), cache_(cache) {
+      : expr_(expr), pos_(0), sub_count_(0), cache_(cache), is_sub_expr_(false)
+  {
     sub_vec_ = new std::vector<const Expr*>;
     var_vec_ = new std::vector<std::string>;
     tree_ = ParseExpr();
@@ -78,17 +83,22 @@ class Expr {
         sub_count_(0),
         cache_(obj->cache_),
         sub_vec_(obj->sub_vec_),
-        var_vec_(obj->var_vec_) {
+        var_vec_(obj->var_vec_),
+        is_sub_expr_(true)
+  {
     sub_vec_->push_back(this);
     tree_ = ParseExpr();
     if (!SubCheck()) throw exception_t("expr '" + expr_ + "', bad parenthesis count");
   }
 
   ~Expr() {
-    delete cache_;
-    for (auto it : *sub_vec_) delete it;
-    delete sub_vec_;
-    delete var_vec_;
+    if (!is_sub_expr_) {
+      delete cache_;
+      for (auto it : *sub_vec_) delete it;
+      delete sub_vec_;
+      delete var_vec_;
+      delete tree_;
+    }
   }
 
   std::string GetStr() const { return expr_; }
@@ -204,6 +214,8 @@ class Expr {
     return str;
   }
 
+  static const bool div_zero_exc_on = false;
+
   const std::string expr_;
   unsigned pos_;
   unsigned sub_count_;
@@ -211,7 +223,7 @@ class Expr {
   const expr_cache_t* const cache_;
   std::vector<const Expr*>* sub_vec_;
   std::vector<std::string>* var_vec_;
-  static const bool div_zero_exc_on = false;
+  const bool is_sub_expr_;
 };
 
 class add_expr_t : public bin_expr_t {

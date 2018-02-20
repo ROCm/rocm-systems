@@ -95,10 +95,11 @@ class InterceptQueue {
         rocprofiler_group_t group = {};
         const hsa_kernel_dispatch_packet_t* dispatch_packet =
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
+        const char* kernel_name = GetKernelName(dispatch_packet);
         rocprofiler_callback_data_t data = {obj->agent_info_->dev_id, user_que_idx,
-                                            dispatch_packet->kernel_object,
-                                            GetKernelName(dispatch_packet)};
+                                            dispatch_packet->kernel_object, kernel_name};
         hsa_status_t status = on_dispatch_cb_(&data, on_dispatch_cb_data_, &group);
+        free(const_cast<char*>(kernel_name));
         if ((status == HSA_STATUS_SUCCESS) && (group.context != NULL)) {
           Context* context = reinterpret_cast<Context*>(group.context);
           const pkt_vector_t& start_vector = context->StartPackets(group.index);
@@ -151,7 +152,7 @@ class InterceptQueue {
     return (*header >> HSA_PACKET_HEADER_TYPE) & header_type_mask;
   }
 
-  static const char* GetKernelName(const hsa_kernel_dispatch_packet_t* dispatch_packet) {
+  static char* GetKernelName(const hsa_kernel_dispatch_packet_t* dispatch_packet) {
     const amd_kernel_code_t* kernel_code = NULL;
     hsa_status_t status =
         util::HsaRsrcFactory::Instance().LoaderApi()->hsa_ven_amd_loader_query_host_address(

@@ -55,6 +55,7 @@ class ExprMetric : public Metric {
  public:
   ExprMetric(const std::string& name, const counters_vec_t& counters, const xml::Expr* expr)
       : Metric(name), counters_(counters), expr_(expr) {}
+  ~ExprMetric() { delete expr_; }
   void GetCounters(counters_vec_t& vec) const {
     vec.insert(vec.end(), counters_.begin(), counters_.end());
   }

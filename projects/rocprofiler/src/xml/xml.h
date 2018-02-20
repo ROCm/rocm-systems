@@ -33,7 +33,7 @@ class Xml {
   enum { DECL_STATE, BODY_STATE };
 
   static Xml* Create(const std::string& file_name, const Xml* obj = NULL) {
-    Xml* xml = new Xml(file_name.c_str(), obj);
+    Xml* xml = new Xml(file_name, obj);
     if (xml != NULL) {
       if (xml->Init() == false) {
         delete xml;
@@ -91,23 +91,45 @@ class Xml {
 
   nodes_t GetNodes(std::string global_tag) { return (*map_)[global_tag]; }
 
-  void Print() const {
-    std::cout << "XML file '" << file_name_ << "':" << std::endl;
-    for (auto& elem : *map_) {
-      for (auto node : elem.second) {
-        if (node->opts.size()) {
-          std::cout << elem.first << ":" << std::endl;
-          for (auto& opt : node->opts) {
-            std::cout << "  " << opt.first << " = " << opt.second << std::endl;
-          }
-        }
+  template <class F>
+  F ForEach(const F& f_i) {
+    F f = f_i;
+    for (auto& entry : *map_) {
+      for (auto node : entry.second) {
+        if (f.fun(entry.first, node) == false) break;
       }
     }
+    return f;
+  }
+
+  template <class F>
+  F ForEach(const F& f_i) const {
+    F f = f_i;
+    for (auto& entry : *map_) {
+      for (auto node : entry.second) {
+        if (f.fun(entry.first, node) == false) break;
+      }
+    }
+    return f;
+  }
+
+  struct print_func {
+    bool fun(const std::string& global_tag, level_t* node) {
+      for (auto& opt : node->opts) {
+        std::cout << global_tag << "." << opt.first << " = " << opt.second << std::endl;
+      }
+      return true;
+    }
+  };
+
+  void Print() const {
+    std::cout << "XML file '" << file_name_ << "':" << std::endl;
+    ForEach(print_func());
   }
 
  private:
-  Xml(const char* file_name, const Xml* obj)
-      : file_name_(strdup(file_name)),
+  Xml(const std::string& file_name, const Xml* obj)
+      : file_name_(file_name),
         file_line_(0),
         data_size_(0),
         index_(0),
@@ -124,12 +146,22 @@ class Xml {
     }
   }
 
+  struct delete_func {
+    bool fun(const std::string&, level_t* node) {
+      delete node;
+      return true;
+    }
+  };
+
   ~Xml() {
-    if (included_ == false) delete map_;
+    if (included_ == false) {
+      ForEach(delete_func());
+      delete map_;
+    }
   }
 
   bool Init() {
-    fd_ = open(file_name_, O_RDONLY);
+    fd_ = open(file_name_.c_str(), O_RDONLY);
     if (fd_ == -1) {
       perror((std::string("open XML file ") + file_name_).c_str());
       return false;
@@ -228,11 +260,11 @@ class Xml {
             } else
               token[i] = '\0';
 
-            const char* tag = strdup(&token[ind]);
+            const char* tag = &token[ind];
             if (node_begin) {
               AddLevel(tag);
             } else {
-              if (strncmp(CurrentLevel().c_str(), tag, strlen(tag))) {
+              if (strncmp(CurrentLevel().c_str(), tag, strlen(tag)) != 0) {
                 token.back() = '>';
                 BadFormat(token);
               }
@@ -373,7 +405,7 @@ class Xml {
 
   void AddOption(const std::string& key, const std::string& value) { level_->opts[key] = value; }
 
-  const char* file_name_;
+  const std::string file_name_;
   unsigned file_line_;
   int fd_;
 

@@ -47,6 +47,8 @@ struct context_entry_t {
 
 // Dispatch callbacks and context handlers synchronization
 pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+// Dispatch callback data
+dispatch_data_t* dispatch_data = NULL;
 // Stored contexts array
 typedef std::map<uint32_t, context_entry_t> context_array_t;
 context_array_t* context_array = NULL;
@@ -238,6 +240,7 @@ void dump_context(context_entry_t* entry) {
     std::ostringstream oss;
     oss << index << "__" << entry->data.kernel_name;
     output_results(file_handle, features, feature_count, group.context, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
+    free(const_cast<char*>(entry->data.kernel_name));
   
     // Finishing cleanup
     // Deleting profiling context will delete all allocated resources
@@ -316,6 +319,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   entry->features = tool_data->features;
   entry->feature_count = tool_data->feature_count;
   entry->data = *callback_data;
+  entry->data.kernel_name = strdup(callback_data->kernel_name);
   entry->file_handle = tool_data->file_handle;
   entry->valid = 1;
 
@@ -471,13 +475,15 @@ CONSTRUCTOR_API void constructor()
 
   // Adding dispatch observer
   if (feature_count) {
-    dispatch_data_t* dispatch_data = new dispatch_data_t{};
+    dispatch_data = new dispatch_data_t{};
     dispatch_data->features = features;
     dispatch_data->feature_count = feature_count;
     dispatch_data->group_index = 0;
     dispatch_data->file_handle = result_file_handle;
     rocprofiler_set_dispatch_callback(dispatch_callback, dispatch_data);
   }
+
+  xml::Xml::Destroy(xml);
 }
 
 // Tool destructor
@@ -490,6 +496,13 @@ DESTRUCTOR_API void destructor() {
 
   // Dump stored profiling output data
   dump_context_array();
+
+  // Unregister dispatch callback and free callback data
+  rocprofiler_remove_dispatch_callback();
+  if (dispatch_data != NULL) {
+    delete[] dispatch_data->features;
+    delete dispatch_data;
+  }
 
   // Close output file
   if (result_file_opened) fclose(result_file_handle);
