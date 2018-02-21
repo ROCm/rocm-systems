@@ -141,7 +141,10 @@ class SimpleProxyQueue : public ProxyQueue {
         queue_mask_(0),
         submit_index_(0),
         on_submit_cb_(0),
-        on_submit_cb_data_(0) {}
+        on_submit_cb_data_(0)
+  {
+    printf("ROCProfiler: SimpleProxyQueue is enabled\n");
+  }
 
   ~SimpleProxyQueue() {}
 

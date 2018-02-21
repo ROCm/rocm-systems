@@ -329,8 +329,14 @@ class Context {
     const profile_vector_t profile_vector = GetProfiles(group_index);
     for (auto& tuple : profile_vector) {
       // Wait for stop packet to complete
-      hsa_signal_wait_scacquire(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                HSA_WAIT_STATE_BLOCKED);
+      const uint64_t timeout = UINT64_MAX;
+      bool complete = false;
+      while (!complete) {
+        const hsa_signal_value_t signal_value = hsa_signal_wait_scacquire(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, timeout,
+                                  HSA_WAIT_STATE_BLOCKED);
+        complete = (signal_value == 0);
+        if (!complete) printf("ROCProfiler: Signal timeout, signal(%d) timeout(%lx)\n", (int)signal_value, timeout);
+      }
       for (rocprofiler_feature_t* rinfo : *(tuple.info_vector)) rinfo->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
       callback_data_t callback_data{tuple.info_vector, tuple.info_vector->size(), NULL};
       const hsa_status_t status =

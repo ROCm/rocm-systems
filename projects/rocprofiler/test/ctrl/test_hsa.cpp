@@ -69,7 +69,10 @@ HsaRsrcFactory* TestHsa::HsaInstantiate(const uint32_t agent_ind) {
 }
 
 void TestHsa::HsaShutdown() {
-  if (hsa_queue_ != NULL) hsa_queue_destroy(hsa_queue_);
+  if (hsa_queue_ != NULL) {
+    hsa_queue_destroy(hsa_queue_);
+    hsa_queue_ = NULL;
+  }
   if (hsa_rsrc_) hsa_rsrc_->Destroy();
 }
 

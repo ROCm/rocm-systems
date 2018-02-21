@@ -13,6 +13,6 @@ int main(int argc, char** argv) {
   const int diter = (diter_s != NULL) ? atol(diter_s) : 1;
   TestHsa::HsaInstantiate();
   for (int i = 0; i < kiter; ++i) RunKernel<SimpleConvolution, TestAql>(argc, argv, diter);
-  //TestHsa::HsaShutdown();
+  TestHsa::HsaShutdown();
   return 0;
 }

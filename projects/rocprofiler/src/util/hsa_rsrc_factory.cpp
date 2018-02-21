@@ -81,10 +81,13 @@ hsa_status_t HsaRsrcFactory::FindMemRegionsCallback(hsa_region_t region, void* d
 
 // Constructor of the class
 HsaRsrcFactory::HsaRsrcFactory() {
+  hsa_status_t status;
+#if 0
   // Initialize the Hsa Runtime
-  hsa_status_t status = hsa_init();
+  printf("ROCProfiler: HSA init\n");
+  status = hsa_init();
   CHECK_STATUS("Error in hsa_init", status);
-
+#endif
   // Discover the set of Gpu devices available on the platform
   status = hsa_iterate_agents(GetHsaAgentsCallback, this);
   CHECK_STATUS("Error Calling hsa_iterate_agents", status);
@@ -108,9 +111,11 @@ HsaRsrcFactory::HsaRsrcFactory() {
 HsaRsrcFactory::~HsaRsrcFactory() {
   for (auto p : cpu_list_) delete p;
   for (auto p : gpu_list_) delete p;
-
+#if 0
+  printf("ROCProfiler: HSA shutdown\n");
   hsa_status_t status = hsa_shut_down();
   CHECK_STATUS("Error in hsa_shut_down", status);
+#endif
 }
 
 hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {

@@ -338,7 +338,7 @@ static hsa_status_t info_callback(const rocprofiler_info_data_t info, void * arg
 }
 
 // Tool constructor
-CONSTRUCTOR_API void constructor()
+extern "C" PUBLIC_API void OnLoadTool()
 {
   std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
   parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET"] =
@@ -487,23 +487,21 @@ CONSTRUCTOR_API void constructor()
 }
 
 // Tool destructor
-DESTRUCTOR_API void destructor() {
-  const bool result_file_opened = (result_prefix != NULL) && (result_file_handle != NULL);
+extern "C" PUBLIC_API void OnUnloadTool() {
+  // Unregister dispatch callback
+  rocprofiler_remove_dispatch_callback();
 
+  // Dump stored profiling output data
+  const bool result_file_opened = (result_prefix != NULL) && (result_file_handle != NULL);
   printf("\nROCPRofiler: %u contexts collected", context_count);
   if (result_file_opened) printf(", output directory %s", result_prefix);
   printf("\n");
-
-  // Dump stored profiling output data
   dump_context_array();
+  if (result_file_opened) fclose(result_file_handle);
 
-  // Unregister dispatch callback and free callback data
-  rocprofiler_remove_dispatch_callback();
+  // Cleanup
   if (dispatch_data != NULL) {
     delete[] dispatch_data->features;
     delete dispatch_data;
   }
-
-  // Close output file
-  if (result_file_opened) fclose(result_file_handle);
 }

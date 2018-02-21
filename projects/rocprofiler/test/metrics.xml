@@ -213,14 +213,14 @@
   # VALUBusy        The percentage of GPUTime vector ALU instructions are processed. Value range: 0% (bad) to 100% (optimal).
   <metric
     name="VALUBusy"
-    expr=100*SQ_ACTIVE_INST_VALU*4/NUM_SIMDS/GRBM_GUI_ACTIVE
+    expr=100*SQ_ACTIVE_INST_VALU*4/SIMD_NUM/GRBM_GUI_ACTIVE
     descr="The percentage of GPUTime vector ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."
   ></metric>
 
   # SALUBusy        The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad) to 100% (optimal).
   <metric
     name="SALUBusy"
-    expr=100*SQ_INST_CYCLES_SALU*4/NUM_SIMDS/GRBM_GUI_ACTIVE
+    expr=100*SQ_INST_CYCLES_SALU*4/SIMD_NUM/GRBM_GUI_ACTIVE
     descr="The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."
   ></metric>
 
@@ -248,14 +248,14 @@
   # MemUnitBusy     The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound).
   <metric
     name="MemUnitBusy"
-    expr=100*max(TA_BUSY,16)/GRBM_GUI_ACTIVE/NUM_SHADER_ENGINES
+    expr=100*max(TA_BUSY,16)/GRBM_GUI_ACTIVE/SE_NUM
     descr="The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound)."
   ></metric>
 
   # MemUnitStalled  The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad).
   <metric
     name="MemUnitStalled"
-    expr=100*max(TCP_TA_DATA_STALL_CYCLES,16)/GRBM_GUI_ACTIVE/NUM_SHADER_ENGINES
+    expr=100*max(TCP_TA_DATA_STALL_CYCLES,16)/GRBM_GUI_ACTIVE/SE_NUM
     descr="The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad)."
   ></metric>
 
@@ -276,7 +276,7 @@
   # LDSBankConflict The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad).
   <metric
     name="LDSBankConflict"
-    expr=100*SQ_LDS_BANK_CONFLICT/GRBM_GUI_ACTIVE/NUM_SIMDS
+    expr=100*SQ_LDS_BANK_CONFLICT/GRBM_GUI_ACTIVE/CU_NUM
     descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."
   ></metric>
 

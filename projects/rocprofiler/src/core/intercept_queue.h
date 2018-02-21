@@ -26,30 +26,13 @@ class InterceptQueue {
 
   static void HsaIntercept(HsaApiTable* table);
 
-  static void SetTool(const char* tool) { tool_lib_ = tool; }
-
-  static void UnloadTool() {
-    if (tool_handle_) dlclose(tool_handle_);
-  }
-
   static hsa_status_t QueueCreate(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
                                   void (*callback)(hsa_status_t status, hsa_queue_t* source,
                                                    void* data),
                                   void* data, uint32_t private_segment_size,
                                   uint32_t group_segment_size, hsa_queue_t** queue) {
-    std::lock_guard<mutex_t> lck(mutex_);
-
     hsa_status_t status = HSA_STATUS_ERROR;
-
-    if (tool_lib_) {
-      tool_handle_ = dlopen(tool_lib_, RTLD_NOW);
-      if (tool_handle_ == NULL) {
-        fprintf(stderr, "ROCProfiler: can't load tool library \"%s\"\n", tool_lib_);
-        fprintf(stderr, "%s\n", dlerror());
-        exit(1);
-      }
-      tool_lib_ = NULL;
-    }
+    std::lock_guard<mutex_t> lck(mutex_);
 
     if (!obj_map_) obj_map_ = new obj_map_t;
 
@@ -152,7 +135,7 @@ class InterceptQueue {
     return (*header >> HSA_PACKET_HEADER_TYPE) & header_type_mask;
   }
 
-  static char* GetKernelName(const hsa_kernel_dispatch_packet_t* dispatch_packet) {
+  static const char* GetKernelName(const hsa_kernel_dispatch_packet_t* dispatch_packet) {
     const amd_kernel_code_t* kernel_code = NULL;
     hsa_status_t status =
         util::HsaRsrcFactory::Instance().LoaderApi()->hsa_ven_amd_loader_query_host_address(
@@ -167,13 +150,15 @@ class InterceptQueue {
 
     // Kernel name is mangled name
     // apply __cxa_demangle() to demangle it
-    char* funcname = NULL;
+    const char* funcname = NULL;
     if (kernel_name != NULL) {
       size_t funcnamesize = 0;
       int status;
-      char* ret = abi::__cxa_demangle(kernel_name, NULL, &funcnamesize, &status);
+      const char* ret = abi::__cxa_demangle(kernel_name, NULL, &funcnamesize, &status);
       funcname = (ret != 0) ? ret : strdup(kernel_name);
     }
+    if (funcname == NULL) funcname = strdup(kernel_none_);
+
     return funcname;
   }
 
@@ -181,9 +166,8 @@ class InterceptQueue {
   static const packet_word_t header_type_mask = (1ul << HSA_PACKET_HEADER_WIDTH_TYPE) - 1;
   static rocprofiler_callback_t on_dispatch_cb_;
   static void* on_dispatch_cb_data_;
-  static const char* tool_lib_;
-  static void* tool_handle_;
   static obj_map_t* obj_map_;
+  static const char* kernel_none_;
 
   ProxyQueue* const proxy_;
   const util::AgentInfo* agent_info_;

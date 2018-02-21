@@ -9,7 +9,6 @@ void InterceptQueue::HsaIntercept(HsaApiTable* table) {
 InterceptQueue::mutex_t InterceptQueue::mutex_;
 rocprofiler_callback_t InterceptQueue::on_dispatch_cb_ = NULL;
 void* InterceptQueue::on_dispatch_cb_data_ = NULL;
-const char* InterceptQueue::tool_lib_ = NULL;
-void* InterceptQueue::tool_handle_ = NULL;
 InterceptQueue::obj_map_t* InterceptQueue::obj_map_ = NULL;
+const char* InterceptQueue::kernel_none_ = "";
 }  // namespace rocprofiler

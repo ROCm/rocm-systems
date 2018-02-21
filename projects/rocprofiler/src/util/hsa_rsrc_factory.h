@@ -114,9 +114,7 @@ class HsaRsrcFactory {
  public:
   typedef std::recursive_mutex mutex_t;
 
-  static HsaRsrcFactory* Create() { return NULL; }
-
-  static HsaRsrcFactory* CreateInstance() {
+  static HsaRsrcFactory* Create() {
     std::lock_guard<mutex_t> lck(mutex_);
     if (instance_ == NULL) {
       instance_ = new HsaRsrcFactory();
@@ -125,9 +123,9 @@ class HsaRsrcFactory {
   }
 
   static HsaRsrcFactory& Instance() {
-    CreateInstance();
+    if (instance_ == NULL) instance_ = Create();
     hsa_status_t status = (instance_ != NULL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
-    CHECK_STATUS("HsaRsrcFactory::Instance() is not found", status);
+    CHECK_STATUS("HsaRsrcFactory::Instance() failed", status);
     return *instance_;
   }
 

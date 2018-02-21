@@ -99,14 +99,53 @@ void RestoreHsaApi() {
 #endif
 }
 
+typedef void (*tool_handler_t)();
+void * kTtoolHandle = NULL;
+
+void LoadTool(const char* tool_lib) {
+  if (tool_lib) {
+    kTtoolHandle = dlopen(tool_lib, RTLD_NOW);
+    if (kTtoolHandle == NULL) {
+      fprintf(stderr, "ROCProfiler: can't load tool library \"%s\"\n", tool_lib);
+      fprintf(stderr, "%s\n", dlerror());
+      exit(1);
+    }
+    tool_handler_t handler = reinterpret_cast<tool_handler_t>(dlsym(kTtoolHandle, "OnLoadTool"));
+    if (handler == NULL) {
+      fprintf(stderr, "ROCProfiler: tool library corrupted, OnLoadTool() method is expected\n");
+      fprintf(stderr, "%s\n", dlerror());
+      exit(1);
+    }
+    tool_handler_t on_unload_handler = reinterpret_cast<tool_handler_t>(dlsym(kTtoolHandle, "OnUnloadTool"));
+    if (on_unload_handler == NULL) {
+      fprintf(stderr, "ROCProfiler: tool library corrupted, OnUnloadTool() method is expected\n");
+      fprintf(stderr, "%s\n", dlerror());
+      exit(1);
+    }
+    handler();
+  }
+}
+
+void UnloadTool() {
+  if (kTtoolHandle) {
+    tool_handler_t handler = reinterpret_cast<tool_handler_t>(dlsym(kTtoolHandle, "OnUnloadTool"));
+    if (handler == NULL) {
+      fprintf(stderr, "ROCProfiler error: tool library corrupted, OnUnloadTool() method is expected\n");
+      fprintf(stderr, "%s\n", dlerror());
+      exit(1);
+    }
+    handler();
+    dlclose(kTtoolHandle);
+  }
+}
+
 CONSTRUCTOR_API void constructor() {
   util::Logger::Create();
-  util::HsaRsrcFactory::Create();
 }
 
 DESTRUCTOR_API void destructor() {
-  rocprofiler::MetricsDict::Destroy();
   util::HsaRsrcFactory::Destroy();
+  rocprofiler::MetricsDict::Destroy();
   util::Logger::Destroy();
 }
 
@@ -139,19 +178,23 @@ extern "C" {
 // HSA-runtime tool on-load method
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
+  const bool intercept_mode = (getenv("ROCP_HSA_INTERCEPT") != NULL);
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
-  rocprofiler::InterceptQueue::SetTool(getenv("ROCP_TOOL_LIB"));
   // HSA intercepting
-  if (getenv("ROCP_HSA_INTERCEPT") != NULL) {
+  if (intercept_mode) {
     rocprofiler::InterceptQueue::HsaIntercept(table);
     rocprofiler::ProxyQueue::HsaIntercept(table);
   }
+  rocprofiler::LoadTool(getenv("ROCP_TOOL_LIB"));
   return true;
 }
 
 // HSA-runtime tool on-unload method
-PUBLIC_API void OnUnload() { rocprofiler::RestoreHsaApi(); }
+PUBLIC_API void OnUnload() {
+  rocprofiler::UnloadTool();
+  rocprofiler::RestoreHsaApi();
+}
 
 // Returns library vesrion
 PUBLIC_API uint32_t rocprofiler_version_major() { return ROCPROFILER_VERSION_MAJOR; }
