@@ -141,6 +141,12 @@ void UnloadTool() {
 
 CONSTRUCTOR_API void constructor() {
   util::Logger::Create();
+
+  const char* timeout_str = getenv("ROCP_DATA_TIMEOUT");
+  if (timeout_str != NULL) {
+    const uint64_t timeout_val = strtoull(timeout_str, NULL, 0);
+    Context::SetTimeout(timeout_val);
+  }
 }
 
 DESTRUCTOR_API void destructor() {
@@ -168,6 +174,7 @@ const MetricsDict* GetMetrics(const hsa_agent_t& agent) {
 
 util::Logger::mutex_t util::Logger::mutex_;
 util::Logger* util::Logger::instance_ = NULL;
+uint64_t Context::timeout_ = 1000;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -341,18 +348,17 @@ PUBLIC_API hsa_status_t rocprofiler_get_metrics(const rocprofiler_t* handle) {
   API_METHOD_SUFFIX
 }
 
-// Set kernel dispatch observer
-PUBLIC_API hsa_status_t rocprofiler_set_dispatch_callback(rocprofiler_callback_t callback,
-                                                          void* data) {
+// Set/remove queue callbacks
+PUBLIC_API hsa_status_t rocprofiler_set_queue_callbacks(rocprofiler_queue_callbacks_t callbacks, void* data) {
   API_METHOD_PREFIX
-  rocprofiler::InterceptQueue::SetDispatchCB(callback, data);
+  rocprofiler::InterceptQueue::SetCallbacks(callbacks.dispatch, callbacks.destroy, data);
   API_METHOD_SUFFIX
 }
 
-// Set kernel dispatch observer
-PUBLIC_API hsa_status_t rocprofiler_remove_dispatch_callback() {
+// Remove queue callbacks
+PUBLIC_API hsa_status_t rocprofiler_remove_queue_callbacks() {
   API_METHOD_PREFIX
-  rocprofiler::InterceptQueue::UnsetDispatchCB();
+  rocprofiler::InterceptQueue::SetCallbacks(NULL, NULL, NULL);
   API_METHOD_SUFFIX
 }
 

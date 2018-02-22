@@ -207,13 +207,15 @@ hsa_status_t rocprofiler_reset(rocprofiler_t* context,  // [in] profiling contex
                                uint32_t group_index);   // group index
 
 ////////////////////////////////////////////////////////////////////////////////
-// Runtime API observer
+// Queue callbacks
 //
-// Runtime API observer is called on enter and exit for the API
+// Queue callbacks for initiating profiling per kernel dispatch and to wait
+// the profiling data on the queue destroy.
 
 // Profiling callback data
 typedef struct {
   hsa_agent_t agent;
+  const hsa_queue_t* queue;
   uint64_t queue_index;
   uint64_t kernel_object;
   const char* kernel_name;
@@ -226,12 +228,19 @@ typedef hsa_status_t (*rocprofiler_callback_t)(
     void* user_data,                                   // [in/out] user data passed to the callback
     rocprofiler_group_t* group);                       // [out] profiling group
 
-// Set/remove kernel dispatch observer
-hsa_status_t rocprofiler_set_dispatch_callback(
-    rocprofiler_callback_t callback,  // observer callback
-    void* data);                      // [in/out] passed callback data
+// Queue callbacks
+typedef struct {
+    rocprofiler_callback_t dispatch;                          // dispatch callback
+    hsa_status_t (*destroy)(hsa_queue_t* queue, void* data);  // destroy callback
+} rocprofiler_queue_callbacks_t;
 
-hsa_status_t rocprofiler_remove_dispatch_callback();
+// Set queue callbacks
+hsa_status_t rocprofiler_set_queue_callbacks(
+    rocprofiler_queue_callbacks_t callbacks,           // callbacks
+    void* data);                                       // [in/out] passed callbacks data
+
+// Remove queue callbacks
+hsa_status_t rocprofiler_remove_queue_callbacks();
 
 ////////////////////////////////////////////////////////////////////////////////
 // Start/stop profiling

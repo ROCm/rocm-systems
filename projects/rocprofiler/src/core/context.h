@@ -329,7 +329,7 @@ class Context {
     const profile_vector_t profile_vector = GetProfiles(group_index);
     for (auto& tuple : profile_vector) {
       // Wait for stop packet to complete
-      const uint64_t timeout = UINT64_MAX;
+      const uint64_t timeout = timeout_;
       bool complete = false;
       while (!complete) {
         const hsa_signal_value_t signal_value = hsa_signal_wait_scacquire(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, timeout,
@@ -370,6 +370,10 @@ class Context {
           api_->hsa_ven_amd_aqlprofile_iterate_data(tuple.profile, callback, data);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "context iterate data failed");
     }
+  }
+
+  static void SetTimeout(uint64_t timeout) {
+    timeout_ = timeout;
   }
 
  private:
@@ -468,6 +472,9 @@ class Context {
     info->name = counter->name.c_str();
     return info;
   }
+
+  // Profiling data waiting timeout
+  static uint64_t timeout_;
 
   // GPU handel
   const hsa_agent_t agent_;

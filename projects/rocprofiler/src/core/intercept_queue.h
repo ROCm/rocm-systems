@@ -23,6 +23,7 @@ class InterceptQueue {
  public:
   typedef std::recursive_mutex mutex_t;
   typedef std::map<uint64_t, InterceptQueue*> obj_map_t;
+  typedef hsa_status_t (*queue_callback_t)(hsa_queue_t*, void* data);
 
   static void HsaIntercept(HsaApiTable* table);
 
@@ -39,7 +40,7 @@ class InterceptQueue {
     ProxyQueue* proxy = ProxyQueue::Create(agent, size, type, callback, data, private_segment_size,
                                            group_segment_size, queue, &status);
     if (status == HSA_STATUS_SUCCESS) {
-      InterceptQueue* obj = new InterceptQueue(agent, proxy);
+      InterceptQueue* obj = new InterceptQueue(agent, *queue, proxy);
       (*obj_map_)[(uint64_t)(*queue)] = obj;
       status = proxy->SetInterceptCB(OnSubmitCB, obj);
     }
@@ -53,9 +54,15 @@ class InterceptQueue {
     std::lock_guard<mutex_t> lck(mutex_);
     hsa_status_t status = HSA_STATUS_ERROR;
 
+   if (destroy_callback_ != NULL) {
+     status = destroy_callback_(queue, callback_data_);
+     if (status != HSA_STATUS_SUCCESS) return status;
+   }
+
     obj_map_t::iterator it = obj_map_->find((uint64_t)queue);
     if (it != obj_map_->end()) {
       const InterceptQueue* obj = it->second;
+      assert(queue == obj->queue_);
       delete obj;
       obj_map_->erase(it);
       status = HSA_STATUS_SUCCESS;
@@ -74,14 +81,17 @@ class InterceptQueue {
       bool to_submit = true;
       const packet_t* packet = &packets_arr[j];
 
-      if ((GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) && (on_dispatch_cb_ != NULL)) {
+      if ((GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) && (dispatch_callback_ != NULL)) {
         rocprofiler_group_t group = {};
         const hsa_kernel_dispatch_packet_t* dispatch_packet =
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
         const char* kernel_name = GetKernelName(dispatch_packet);
-        rocprofiler_callback_data_t data = {obj->agent_info_->dev_id, user_que_idx,
-                                            dispatch_packet->kernel_object, kernel_name};
-        hsa_status_t status = on_dispatch_cb_(&data, on_dispatch_cb_data_, &group);
+        rocprofiler_callback_data_t data = {obj->agent_info_->dev_id,
+                                            obj->queue_,
+                                            user_que_idx,
+                                            dispatch_packet->kernel_object,
+                                            kernel_name};
+        hsa_status_t status = dispatch_callback_(&data, callback_data_, &group);
         free(const_cast<char*>(kernel_name));
         if ((status == HSA_STATUS_SUCCESS) && (group.context != NULL)) {
           Context* context = reinterpret_cast<Context*>(group.context);
@@ -112,20 +122,18 @@ class InterceptQueue {
     }
   }
 
-  static void SetDispatchCB(rocprofiler_callback_t on_dispatch_cb, void* data) {
+  static void SetCallbacks(rocprofiler_callback_t dispatch_callback, queue_callback_t destroy_callback, void* data) {
     std::lock_guard<mutex_t> lck(mutex_);
-    on_dispatch_cb_ = on_dispatch_cb;
-    on_dispatch_cb_data_ = data;
-  }
-
-  static void UnsetDispatchCB() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    on_dispatch_cb_ = NULL;
-    on_dispatch_cb_data_ = NULL;
+    callback_data_ = data;
+    dispatch_callback_ = dispatch_callback;
+    destroy_callback_ = destroy_callback;
   }
 
  private:
-  InterceptQueue(const hsa_agent_t& agent, ProxyQueue* proxy) : proxy_(proxy) {
+  InterceptQueue(const hsa_agent_t& agent, hsa_queue_t* const queue, ProxyQueue* proxy) :
+    queue_(queue),
+    proxy_(proxy)
+  {
     agent_info_ = util::HsaRsrcFactory::Instance().GetAgentInfo(agent);
   }
   ~InterceptQueue() { ProxyQueue::Destroy(proxy_); }
@@ -164,11 +172,13 @@ class InterceptQueue {
 
   static mutex_t mutex_;
   static const packet_word_t header_type_mask = (1ul << HSA_PACKET_HEADER_WIDTH_TYPE) - 1;
-  static rocprofiler_callback_t on_dispatch_cb_;
-  static void* on_dispatch_cb_data_;
+  static rocprofiler_callback_t dispatch_callback_;
+  static queue_callback_t destroy_callback_;
+  static void* callback_data_;
   static obj_map_t* obj_map_;
   static const char* kernel_none_;
 
+  hsa_queue_t* const queue_;
   ProxyQueue* const proxy_;
   const util::AgentInfo* agent_info_;
 };

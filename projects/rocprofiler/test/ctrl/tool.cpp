@@ -27,7 +27,7 @@
 #define KERNEL_NAME_LEN_MAX 128
 
 // Disoatch callback data type
-struct dispatch_data_t {
+struct callbacks_data_t {
   rocprofiler_feature_t* features;
   unsigned feature_count;
   unsigned group_index;
@@ -48,7 +48,7 @@ struct context_entry_t {
 // Dispatch callbacks and context handlers synchronization
 pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 // Dispatch callback data
-dispatch_data_t* dispatch_data = NULL;
+callbacks_data_t* callbacks_data = NULL;
 // Stored contexts array
 typedef std::map<uint32_t, context_entry_t> context_array_t;
 context_array_t* context_array = NULL;
@@ -227,8 +227,7 @@ void dump_context(context_entry_t* entry) {
     const unsigned feature_count = entry->feature_count;
 
     fprintf(file_handle,
-            "dispatch[%u], queue_index(%lu), kernel_object(0x%lx), kernel_name(\"%s\"):\n", index,
-            entry->data.queue_index, entry->data.kernel_object, entry->data.kernel_name);
+            "dispatch[%u], queue_index(%lu), kernel_name(\"%s\"):\n", index, entry->data.queue_index, entry->data.kernel_name);
 
     rocprofiler_group_t group = entry->group;
     status = rocprofiler_group_get_data(&group);
@@ -289,7 +288,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   // HSA status
   hsa_status_t status = HSA_STATUS_ERROR;
   // Passed tool data
-  dispatch_data_t* tool_data = reinterpret_cast<dispatch_data_t*>(user_data);
+  callbacks_data_t* tool_data = reinterpret_cast<callbacks_data_t*>(user_data);
   // Profiling context
   rocprofiler_t* context = NULL;
   // Context entry
@@ -324,6 +323,11 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   entry->valid = 1;
 
   return status;
+}
+
+hsa_status_t destroy_callback(hsa_queue_t* queue, void*) {
+  dump_context_array();
+  return HSA_STATUS_SUCCESS;
 }
 
 static hsa_status_t info_callback(const rocprofiler_info_data_t info, void * arg) {
@@ -473,14 +477,20 @@ extern "C" PUBLIC_API void OnLoadTool()
   }
   fflush(stdout);
 
+
   // Adding dispatch observer
   if (feature_count) {
-    dispatch_data = new dispatch_data_t{};
-    dispatch_data->features = features;
-    dispatch_data->feature_count = feature_count;
-    dispatch_data->group_index = 0;
-    dispatch_data->file_handle = result_file_handle;
-    rocprofiler_set_dispatch_callback(dispatch_callback, dispatch_data);
+    rocprofiler_queue_callbacks_t callbacks_ptrs{0};
+    callbacks_ptrs.dispatch = dispatch_callback;
+    callbacks_ptrs.destroy = destroy_callback;
+
+    callbacks_data = new callbacks_data_t{};
+    callbacks_data->features = features;
+    callbacks_data->feature_count = feature_count;
+    callbacks_data->group_index = 0;
+    callbacks_data->file_handle = result_file_handle;
+
+    rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_data);
   }
 
   xml::Xml::Destroy(xml);
@@ -489,7 +499,7 @@ extern "C" PUBLIC_API void OnLoadTool()
 // Tool destructor
 extern "C" PUBLIC_API void OnUnloadTool() {
   // Unregister dispatch callback
-  rocprofiler_remove_dispatch_callback();
+  rocprofiler_remove_queue_callbacks();
 
   // Dump stored profiling output data
   const bool result_file_opened = (result_prefix != NULL) && (result_file_handle != NULL);
@@ -500,8 +510,8 @@ extern "C" PUBLIC_API void OnUnloadTool() {
   if (result_file_opened) fclose(result_file_handle);
 
   // Cleanup
-  if (dispatch_data != NULL) {
-    delete[] dispatch_data->features;
-    delete dispatch_data;
+  if (callbacks_data != NULL) {
+    delete[] callbacks_data->features;
+    delete callbacks_data;
   }
 }
