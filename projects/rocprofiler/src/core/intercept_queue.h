@@ -87,6 +87,7 @@ class InterceptQueue {
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
         const char* kernel_name = GetKernelName(dispatch_packet);
         rocprofiler_callback_data_t data = {obj->agent_info_->dev_id,
+                                            obj->agent_info_->dev_index,
                                             obj->queue_,
                                             user_que_idx,
                                             dispatch_packet->kernel_object,

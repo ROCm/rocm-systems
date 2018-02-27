@@ -32,6 +32,9 @@ struct callbacks_data_t {
   unsigned feature_count;
   unsigned group_index;
   FILE* file_handle;
+  std::vector<uint32_t>* gpu_index;
+  std::vector<std::string>* kernel_string;
+  std::vector<uint32_t>* range;
 };
 
 // Context stored entry type
@@ -54,10 +57,18 @@ typedef std::map<uint32_t, context_entry_t> context_array_t;
 context_array_t* context_array = NULL;
 // Contexts collected count
 uint32_t context_count = 0;
+uint32_t context_collected = 0;
 // Profiling results output file name
 const char* result_prefix = NULL;
 // Global results file handle
 FILE* result_file_handle = NULL;
+// Dispatch filters
+//  GPU index filter
+std::vector<uint32_t>* gpu_index_vec = NULL;
+//  Kernel name filter
+std::vector<std::string>* kernel_string_vec = NULL;
+//  DIspatch number range filter
+std::vector<uint32_t>* range_vec = NULL;
 
 // Check returned HSA API status
 void check_status(hsa_status_t status) {
@@ -67,6 +78,20 @@ void check_status(hsa_status_t status) {
     fprintf(stderr, "ERROR: %s\n", error_string);
     exit(1);
   }
+}
+
+uint32_t next_context_count() {
+  if (pthread_mutex_lock(&mutex) != 0) {
+    perror("pthread_mutex_lock");
+    exit(1);
+  }
+  const uint32_t prev_val = context_count;
+  context_count = prev_val + 1;
+  if (pthread_mutex_unlock(&mutex) != 0) {
+    perror("pthread_mutex_unlock");
+    exit(1);
+  }
+  return prev_val;
 }
 
 // Allocate entry to store profiling context
@@ -83,7 +108,6 @@ context_entry_t* alloc_context_entry() {
     fprintf(stderr, "context_array corruption, index repeated %u\n", index);
     abort();
   }
-  ++context_count;
 
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
@@ -91,7 +115,6 @@ context_entry_t* alloc_context_entry() {
   }
 
   context_entry_t* entry = &(ret.first->second);
-  entry->index = index;
   return entry;
 }
 
@@ -220,6 +243,7 @@ void dump_context(context_entry_t* entry) {
   hsa_status_t status = HSA_STATUS_ERROR;
 
   if (entry->valid) {
+    ++context_collected;
     entry->valid = 0;
     const uint32_t index = entry->index;
     FILE* file_handle = entry->file_handle;
@@ -285,10 +309,46 @@ void handler(rocprofiler_group_t group, void* arg) {
 // Kernel disoatch callback
 hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
                                rocprofiler_group_t* group) {
-  // HSA status
-  hsa_status_t status = HSA_STATUS_ERROR;
   // Passed tool data
   callbacks_data_t* tool_data = reinterpret_cast<callbacks_data_t*>(user_data);
+
+  // Checking dispatch condition
+  bool found = true;
+  std::vector<uint32_t>* range_ptr = tool_data->range;
+  if (found && range_ptr) {
+    found = false;
+    std::vector<uint32_t>& range = *range_ptr;
+    if (range.size() == 1) {
+      if (context_count >= range[0]) found = true;
+    } else if (range.size() == 2) {
+      if ((context_count >= range[0]) && (context_count < range[1])) found = true;
+    }
+  }
+  std::vector<uint32_t>* gpu_index = tool_data->gpu_index;
+  if (found && gpu_index) {
+    found = false;
+    for (uint32_t i : *gpu_index) {
+      if (i == callback_data->agent_index) {
+        found = true;
+      }
+    }
+  }
+  std::vector<std::string>* kernel_string  = tool_data->kernel_string;
+  if (found && kernel_string) {
+    found = false;
+    for (const std::string& s : *kernel_string) {
+      if (std::string(callback_data->kernel_name).find(s) != std::string::npos) {
+        found = true;
+      }
+    }
+  }
+  if (found == false) {
+    next_context_count();
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // HSA status
+  hsa_status_t status = HSA_STATUS_ERROR;
   // Profiling context
   rocprofiler_t* context = NULL;
   // Context entry
@@ -320,6 +380,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   entry->data = *callback_data;
   entry->data.kernel_name = strdup(callback_data->kernel_name);
   entry->file_handle = tool_data->file_handle;
+  entry->index = next_context_count();
   entry->valid = 1;
 
   return status;
@@ -341,19 +402,48 @@ static hsa_status_t info_callback(const rocprofiler_info_data_t info, void * arg
   return HSA_STATUS_SUCCESS;
 }
 
+void get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field, const std::string& delim, std::vector<std::string>* vec, const char* label = NULL) {
+  auto nodes = xml->GetNodes(tag);
+  auto rit = nodes.rbegin();
+  auto rend = nodes.rend();
+  while (rit != rend) {
+    auto& opts = (*rit)->opts;
+    if (opts.find(field) != opts.end()) break;
+    ++rit;
+  }
+  if (rit != rend) {
+    const std::string array_string = (*rit)->opts[field];
+    if (label != NULL) printf("%s%s = %s\n", label, field.c_str(), array_string.c_str());
+    size_t pos1 = 0;
+    while (pos1 < array_string.length()) {
+      const size_t pos2 = array_string.find(delim, pos1);
+      const std::string token = array_string.substr(pos1, pos2 - pos1);
+      vec->push_back(token);
+      if (pos2 == std::string::npos) break;
+      pos1 = pos2 + 1;
+    }
+  }
+}
+
+void get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field, const std::string& delim, std::vector<uint32_t>* vec, const char* label = NULL) {
+  std::vector<std::string> str_vec;
+  get_xml_array(xml, tag, field, delim, &str_vec, label);
+  for (const std::string& str : str_vec) vec->push_back(atoi(str.c_str()));
+}
+
 // Tool constructor
 extern "C" PUBLIC_API void OnLoadTool()
 {
   std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
-  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET"] =
+  parameters_dict["COMPUTE_UNIT_TARGET"] =
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET;
-  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK"] =
+  parameters_dict["VM_ID_MASK"] =
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK;
-  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK"] =
+  parameters_dict["MASK"] =
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK;
-  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK"] =
+  parameters_dict["TOKEN_MASK"] =
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK;
-  parameters_dict["HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2"] =
+  parameters_dict["TOKEN_MASK2"] =
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
 
   char* info_symb = getenv("ROCP_INFO");
@@ -374,7 +464,7 @@ extern "C" PUBLIC_API void OnLoadTool()
     DIR* dir = opendir(result_prefix);
     if (dir == NULL) {
       std::ostringstream errmsg;
-      errmsg << "Cannot open output directory '" << result_prefix << "'";
+      errmsg << "ROCProfiler: Cannot open output directory '" << result_prefix << "'";
       perror(errmsg.str().c_str());
       exit(1);
     }
@@ -383,7 +473,7 @@ extern "C" PUBLIC_API void OnLoadTool()
     result_file_handle = fopen(oss.str().c_str(), "w");
     if (result_file_handle == NULL) {
       std::ostringstream errmsg;
-      errmsg << "fopen error, file '" << oss.str().c_str() << "'";
+      errmsg << "ROCProfiler: fopen error, file '" << oss.str().c_str() << "'";
       perror(errmsg.str().c_str());
       exit(1);
     }
@@ -399,24 +489,23 @@ extern "C" PUBLIC_API void OnLoadTool()
   printf("ROCProfiler: input from \"%s\"\n", xml_name);
   xml::Xml* xml = xml::Xml::Create(xml_name);
   if (xml == NULL) {
-    fprintf(stderr, "Input file not found '%s'\n", xml_name);
+    fprintf(stderr, "ROCProfiler: Input file not found '%s'\n", xml_name);
     exit(1);
   }
 
   // Getting metrics
-  auto metrics_list = xml->GetNodes("top.metric");
   std::vector<std::string> metrics_vec;
-  for (auto* entry : metrics_list) {
-    const std::string entry_str = entry->opts["name"];
-    size_t pos1 = 0;
-    while (pos1 < entry_str.length()) {
-      const size_t pos2 = entry_str.find(",", pos1);
-      const std::string metric_name = entry_str.substr(pos1, pos2 - pos1);
-      metrics_vec.push_back(metric_name);
-      if (pos2 == std::string::npos) break;
-      pos1 = pos2 + 1;
-    }
-  }
+  get_xml_array(xml, "top.metric", "name", ",", &metrics_vec);
+
+  // Getting GPU indexes
+  gpu_index_vec = new std::vector<uint32_t>;
+  get_xml_array(xml, "top.metric", "gpu_index", ",", gpu_index_vec, "  ");
+  // Getting kernel names
+  kernel_string_vec = new std::vector<std::string>;
+  get_xml_array(xml, "top.metric", "kernel", ",", kernel_string_vec, "  ");
+  // Getting profiling range
+  range_vec = new std::vector<uint32_t>;
+  get_xml_array(xml, "top.metric", "range", ":", range_vec, "  ");
 
   // Getting traces
   auto traces_list = xml->GetNodes("top.trace");
@@ -458,7 +547,7 @@ extern "C" PUBLIC_API void OnLoadTool()
       for (auto& v : params->opts) {
         const std::string parameter_name = v.first;
         if (parameters_dict.find(parameter_name) == parameters_dict.end()) {
-          fprintf(stderr, "ROCProfiler: unknown trace parameter %s\n", parameter_name.c_str());
+          fprintf(stderr, "ROCProfiler: unknown trace parameter '%s'\n", parameter_name.c_str());
           exit(1);
         }
         const uint32_t value = strtol(v.second.c_str(), NULL, 0);
@@ -489,6 +578,9 @@ extern "C" PUBLIC_API void OnLoadTool()
     callbacks_data->feature_count = feature_count;
     callbacks_data->group_index = 0;
     callbacks_data->file_handle = result_file_handle;
+    callbacks_data->gpu_index = (gpu_index_vec->empty()) ? NULL : gpu_index_vec;
+    callbacks_data->kernel_string = (kernel_string_vec->empty()) ? NULL : kernel_string_vec;
+    callbacks_data->range = (range_vec->empty()) ? NULL : range_vec;;
 
     rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_data);
   }
@@ -503,7 +595,7 @@ extern "C" PUBLIC_API void OnUnloadTool() {
 
   // Dump stored profiling output data
   const bool result_file_opened = (result_prefix != NULL) && (result_file_handle != NULL);
-  printf("\nROCPRofiler: %u contexts collected", context_count);
+  printf("\nROCPRofiler: %u contexts collected", context_collected);
   if (result_file_opened) printf(", output directory %s", result_prefix);
   printf("\n");
   dump_context_array();
@@ -514,4 +606,7 @@ extern "C" PUBLIC_API void OnUnloadTool() {
     delete[] callbacks_data->features;
     delete callbacks_data;
   }
+  delete gpu_index_vec;
+  delete kernel_string_vec;
+  delete range_vec;
 }

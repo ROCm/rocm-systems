@@ -25,6 +25,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "util/hsa_rsrc_factory.h"
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <hsa.h>
 #include <hsa_ext_amd.h>
 #include <hsa_ext_finalize.h>
@@ -32,6 +33,8 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include <atomic>
 #include <cassert>
@@ -80,14 +83,13 @@ hsa_status_t HsaRsrcFactory::FindMemRegionsCallback(hsa_region_t region, void* d
 }
 
 // Constructor of the class
-HsaRsrcFactory::HsaRsrcFactory() {
+HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize_hsa) {
   hsa_status_t status;
-#if 0
   // Initialize the Hsa Runtime
-  printf("ROCProfiler: HSA init\n");
-  status = hsa_init();
-  CHECK_STATUS("Error in hsa_init", status);
-#endif
+  if (initialize_hsa_) {
+    status = hsa_init();
+    CHECK_STATUS("Error in hsa_init", status);
+  }
   // Discover the set of Gpu devices available on the platform
   status = hsa_iterate_agents(GetHsaAgentsCallback, this);
   CHECK_STATUS("Error Calling hsa_iterate_agents", status);
@@ -111,11 +113,10 @@ HsaRsrcFactory::HsaRsrcFactory() {
 HsaRsrcFactory::~HsaRsrcFactory() {
   for (auto p : cpu_list_) delete p;
   for (auto p : gpu_list_) delete p;
-#if 0
-  printf("ROCProfiler: HSA shutdown\n");
-  hsa_status_t status = hsa_shut_down();
-  CHECK_STATUS("Error in hsa_shut_down", status);
-#endif
+  if (initialize_hsa_) {
+    hsa_status_t status = hsa_shut_down();
+    CHECK_STATUS("Error in hsa_shut_down", status);
+  }
 }
 
 hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
@@ -371,67 +372,53 @@ bool HsaRsrcFactory::TransferData(void* dest_buff, void* src_buff, uint32_t leng
 //
 // @return bool true if successful, false otherwise
 //
-void* HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path,
-                                      const char* kernel_name, hsa_executable_t* hsa_exec, hsa_executable_symbol_t* code_desc) {
-  // Finalize the Hsail object into code object
-  hsa_status_t status;
-  hsa_code_object_t code_object;
+bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path,
+                                      const char* kernel_name, hsa_executable_t* executable, hsa_executable_symbol_t* code_desc) {
+  hsa_status_t status = HSA_STATUS_ERROR;
 
   // Build the code object filename
   std::string filename(brig_path);
   std::clog << "Code object filename: " << filename << std::endl;
 
   // Open the file containing code object
-  std::ifstream codeStream(filename.c_str(), std::ios::binary | std::ios::ate);
-  if (!codeStream) {
-    std::cerr << "Error: failed to load " << filename << std::endl;
+  hsa_file_t file_handle = open(filename.c_str(), O_RDONLY);
+  if (file_handle == -1) {
+    std::cerr << "Error: failed to load '" << filename << "'" << std::endl;
     assert(false);
-    return NULL;
+    return false;
   }
 
-  // Allocate memory to read in code object from file
-  size_t size = std::string::size_type(codeStream.tellg());
-  char* code_buf = (char*)AllocateSysMemory(agent_info, size);
-  if (!code_buf) {
-    std::cerr << "Error: failed to allocate memory for code object." << std::endl;
-    assert(false);
-    return NULL;
-  }
-
-  // Read the code object into allocated memory
-  codeStream.seekg(0, std::ios::beg);
-  std::copy(std::istreambuf_iterator<char>(codeStream), std::istreambuf_iterator<char>(), code_buf);
-
-  // De-Serialize the code object that has been read into memory
-  status = hsa_code_object_deserialize(code_buf, size, NULL, &code_object);
+  // Create code object reader
+  hsa_code_object_reader_t code_obj_rdr = {0};
+  status = hsa_code_object_reader_create_from_file(file_handle, &code_obj_rdr);
   if (status != HSA_STATUS_SUCCESS) {
-    std::cerr << "Failed to deserialize code object" << std::endl;
-    if (code_buf) hsa_memory_free(code_buf);
-    return NULL;
+    std::cerr << "Failed to create code object reader '" << filename << "'" << std::endl;
+    return false;
   }
 
   // Create executable.
-  status =
-      hsa_executable_create(HSA_PROFILE_FULL, HSA_EXECUTABLE_STATE_UNFROZEN, "", hsa_exec);
+  status = hsa_executable_create_alt(HSA_PROFILE_FULL,
+    HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, NULL, executable);
   CHECK_STATUS("Error in creating executable object", status);
 
   // Load code object.
-  status = hsa_executable_load_code_object(*hsa_exec, agent_info->dev_id, code_object, "");
+  status = hsa_executable_load_agent_code_object(*executable, agent_info->dev_id,
+    code_obj_rdr, NULL, NULL);
   CHECK_STATUS("Error in loading executable object", status);
 
   // Freeze executable.
-  status = hsa_executable_freeze(*hsa_exec, "");
+  status = hsa_executable_freeze(*executable, "");
   CHECK_STATUS("Error in freezing executable object", status);
 
   // Get symbol handle.
   hsa_executable_symbol_t kernelSymbol;
-  status = hsa_executable_get_symbol(*hsa_exec, NULL, kernel_name, agent_info->dev_id, 0,
+  status = hsa_executable_get_symbol(*executable, NULL, kernel_name, agent_info->dev_id, 0,
                                      &kernelSymbol);
   CHECK_STATUS("Error in looking up kernel symbol", status);
 
   // Update output parameter
   *code_desc = kernelSymbol;
-  return code_buf;
+  return true;
 }
 
 // Print the various fields of Hsa Gpu Agents

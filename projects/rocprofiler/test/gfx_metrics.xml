@@ -1,0 +1,93 @@
+<gfx8>
+  <metric name=GRBM_COUNT block=GRBM event=0 ></metric>
+  <metric name=GRBM_GUI_ACTIVE block=GRBM event=2 ></metric>
+
+  <metric name=SQ_CYCLES block=SQ event=2 ></metric>
+  <metric name=SQ_WAVES block=SQ event=4 ></metric>
+  <metric name=SQ_ITEMS block=SQ event=14 ></metric>
+  <metric name=SQ_INSTS_VALU block=SQ event=26 ></metric>
+  <metric name=SQ_INSTS_VMEM_WR block=SQ event=27 ></metric>
+  <metric name=SQ_INSTS_VMEM_RD block=SQ event=28 ></metric>
+  <metric name=SQ_INSTS_SALU block=SQ event=30 ></metric>
+  <metric name=SQ_INSTS_SMEM block=SQ event=31 ></metric>
+  <metric name=SQ_INSTS_FLAT block=SQ event=32 ></metric>
+  <metric name=SQ_INSTS_FLAT_LDS_ONLY block=SQ event=33 ></metric>
+  <metric name=SQ_INSTS_LDS block=SQ event=34 ></metric>
+  <metric name=SQ_INSTS_GDS block=SQ event=35 ></metric>
+  <metric name=SQ_WAVE_READY block=SQ event=47 ></metric>
+
+  <metric name=SQ_WAIT_INST_LDS block=SQ event=61 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
+  <metric name=SQ_ACTIVE_INST_VALU block=SQ event=69 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
+  <metric name=SQ_INST_CYCLES_SALU block=SQ event=86 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
+  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=89 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
+  <metric name=SQ_THREAD_CYCLES_VALU_MAX block=SQ event=90 descr="Maximum number of thread-cycles VALU operations that could have been executed given the instruction mix (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd, emulated)"></metric>
+  <metric name=SQ_LDS_BANK_CONFLICT block=SQ event=97 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
+
+  <metric name=TA_TA_BUSY block=TA event=15 ></metric>
+  <metric name=TA_FLAT_READ_WAVEFRONTS block=TA event=101 ></metric>
+  <metric name=TA_FLAT_WRITE_WAVEFRONTS block=TA event=102 ></metric>
+
+  <metric name=TCC_CYCLE block=TCC event=1 ></metric>
+  <metric name=TCC_REQ block=TCC event=3 ></metric>
+  <metric name=TCC_HIT block=TCC event=18 ></metric>
+  <metric name=TCC_MISS block=TCC event=19 ></metric>
+  <metric name=TCC_WRITEBACK block=TCC event=22 ></metric>
+  <metric name=TCC_EA_WRREQ block=TCC event=26 ></metric>
+  <metric name=TCC_EA_WRREQ_64B block=TCC event=27 ></metric>
+  <metric name=TCC_EA_WRREQ_STALL block=TCC event=30 ></metric>
+  <metric name=TCC_MC_RDREQ block=TCC event=35 ></metric>
+  <metric name="TCC_MC_WRREQ" block=TCC event=26 descr="Number of 32-byte transactions going over the TC_MC_wrreq interface. Atomics may travel over the same interface and are generally classified as write requests."></metric>
+  <metric name="TCC_MC_WRREQ_STALL" block=TCC event=28 descr="Number of cycles a write request was stalled."></metric>
+
+  <metric name="TCP_TA_DATA_STALL_CYCLES" block=TCP event=3 descr="TCP stalls TA data interface. Now Windowed."></metric>
+  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES" block=TCP event=3 descr="TCP stalls TA data interface. Not Windowed."></metric>
+
+  <metric name=CPC_ALWAYS_COUNT block=CPC event=0 ></metric>
+  <metric name=CPC_ME1_STALL_WAIT_ON_RCIU_READ block=CPC event=8 ></metric>
+</gfx8>
+
+<gfx9>
+  <metric name=GRBM_COUNT block=GRBM event=0 ></metric>
+  <metric name=GRBM_GUI_ACTIVE block=GRBM event=2 ></metric>
+
+  <metric name=SQ_CYCLES block=SQ event=2 ></metric>
+  <metric name=SQ_WAVES block=SQ event=4 ></metric>
+  <metric name=SQ_ITEMS block=SQ event=14 ></metric>
+  <metric name=SQ_INSTS_VALU block=SQ event=26 ></metric>
+  <metric name=SQ_INSTS_VMEM_WR block=SQ event=27 ></metric>
+  <metric name=SQ_INSTS_VMEM_RD block=SQ event=28 ></metric>
+  <metric name=SQ_INSTS_SALU block=SQ event=30 ></metric>
+  <metric name=SQ_INSTS_SMEM block=SQ event=31 ></metric>
+  <metric name=SQ_INSTS_FLAT block=SQ event=32 ></metric>
+  <metric name=SQ_INSTS_FLAT_LDS_ONLY block=SQ event=33 ></metric>
+  <metric name=SQ_INSTS_LDS block=SQ event=34 ></metric>
+  <metric name=SQ_INSTS_GDS block=SQ event=35 ></metric>
+  <metric name=SQ_WAVE_READY block=SQ event=47 ></metric>
+
+  <metric name=SQ_WAIT_INST_LDS block=SQ event=63 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
+  <metric name=SQ_ACTIVE_INST_VALU block=SQ event=71 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
+  <metric name=SQ_INST_CYCLES_SALU block=SQ event=84 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
+  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=85 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
+  <metric name=SQ_THREAD_CYCLES_VALU_MAX block=SQ event=86 descr="Maximum number of thread-cycles VALU operations that could have been executed given the instruction mix (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd, emulated)"></metric>
+  <metric name=SQ_LDS_BANK_CONFLICT block=SQ event=93 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
+
+  <metric name=TA_TA_BUSY block=TA event=15 ></metric>
+  <metric name=TA_FLAT_READ_WAVEFRONTS block=TA event=101 ></metric>
+  <metric name=TA_FLAT_WRITE_WAVEFRONTS block=TA event=102 ></metric>
+
+  <metric name=TCC_CYCLE block=TCC event=1 ></metric>
+  <metric name=TCC_REQ block=TCC event=3 ></metric>
+  <metric name=TCC_HIT block=TCC event=20 ></metric>
+  <metric name=TCC_MISS block=TCC event=22 ></metric>
+  <metric name=TCC_WRITEBACK block=TCC event=25 ></metric>
+  <metric name=TCC_EA_WRREQ block=TCC event=29 ></metric>
+  <metric name=TCC_EA_WRREQ_64B block=TCC event=30 ></metric>
+  <metric name=TCC_EA_WRREQ_STALL block=TCC event=33 ></metric>
+  <metric name=TCC_EA_RDREQ block=TCC event=41 ></metric>
+  <metric name=TCC_EA_RDREQ_32B block=TCC event=42 ></metric>
+
+  <metric name=TCP_TA_DATA_STALL_CYCLES block=TCP event=6 descr="TCP stalls TA data interface. Now Windowed."></metric>
+
+  <metric name=CPC_ALWAYS_COUNT block=CPC event=0 ></metric>
+  <metric name=CPC_ME1_STALL_WAIT_ON_RCIU_READ block=CPC event=8 ></metric>
+</gfx9>

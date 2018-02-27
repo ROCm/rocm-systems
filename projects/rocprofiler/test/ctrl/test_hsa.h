@@ -47,7 +47,6 @@ class TestHsa : public TestAql {
     total_time_taken_ = 0;
     setup_time_taken_ = 0;
     dispatch_time_taken_ = 0;
-    code_buf_ = NULL;
     hsa_exec_ = {};
   }
 
@@ -123,8 +122,7 @@ class TestHsa : public TestAql {
   // Test kernel name
   std::string name_;
 
-  // Kernel code buffer
-  void* code_buf_;
+  // Kernel executable
   hsa_executable_t hsa_exec_;
 };
 

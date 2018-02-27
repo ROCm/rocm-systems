@@ -1,283 +1,205 @@
+#include "gfx_metrics.xml"
+
 <gfx8>
-  <metric name=GRBM_COUNT block=GRBM event=0 ></metric>
-  <metric name=GRBM_GUI_ACTIVE block=GRBM event=2 ></metric>
-
-  <metric name=SQ_CYCLES block=SQ event=2 ></metric>
-  <metric name=SQ_WAVES block=SQ event=4 ></metric>
-  <metric name=SQ_ITEMS block=SQ event=14 ></metric>
-  <metric name=SQ_INSTS_VALU block=SQ event=26 ></metric>
-  <metric name=SQ_INSTS_VMEM_WR block=SQ event=27 ></metric>
-  <metric name=SQ_INSTS_VMEM_RD block=SQ event=28 ></metric>
-  <metric name=SQ_INSTS_SALU block=SQ event=30 ></metric>
-  <metric name=SQ_INSTS_SMEM block=SQ event=31 ></metric>
-  <metric name=SQ_INSTS_FLAT block=SQ event=32 ></metric>
-  <metric name=SQ_INSTS_FLAT_LDS_ONLY block=SQ event=33 ></metric>
-  <metric name=SQ_INSTS_LDS block=SQ event=34 ></metric>
-  <metric name=SQ_INSTS_GDS block=SQ event=35 ></metric>
-  <metric name=SQ_WAVE_READY block=SQ event=47 ></metric>
-
-  <metric name=SQ_WAIT_INST_LDS block=SQ event=61 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
-  <metric name=SQ_ACTIVE_INST_VALU block=SQ event=69 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
-  <metric name=SQ_INST_CYCLES_SALU block=SQ event=86 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
-  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=89 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
-  <metric name=SQ_THREAD_CYCLES_VALU_MAX block=SQ event=90 descr="Maximum number of thread-cycles VALU operations that could have been executed given the instruction mix (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd, emulated)"></metric>
-  <metric name=SQ_LDS_BANK_CONFLICT block=SQ event=97 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
-
-  <metric name=TA_BUSY block=TA event=15 ></metric>
-  <metric name=TA_FLAT_READ_WAVEFRONTS block=TA event=101 ></metric>
-  <metric name=TA_FLAT_WRITE_WAVEFRONTS block=TA event=102 ></metric>
-
-  <metric name=TCC_CYCLE block=TCC event=1 ></metric>
-  <metric name=TCC_REQ block=TCC event=3 ></metric>
-  <metric name=TCC_HIT block=TCC event=18 ></metric>
-  <metric name=TCC_MISS block=TCC event=19 ></metric>
-  <metric name=TCC_WRITEBACK block=TCC event=22 ></metric>
-  <metric name=TCC_EA_WRREQ block=TCC event=26 ></metric>
-  <metric name=TCC_EA_WRREQ_64B block=TCC event=27 ></metric>
-  <metric name=TCC_EA_WRREQ_STALL block=TCC event=30 ></metric>
-  <metric name=TCC_MC_RDREQ block=TCC event=35 ></metric>
-
-  <metric name=TCP_TA_DATA_STALL_CYCLES block=TCP event=3 descr="TCP stalls TA data interface. Now Windowed."></metric>
-
-  <metric name=CPC_ALWAYS_COUNT block=CPC event=0 ></metric>
-  <metric name=CPC_ME1_STALL_WAIT_ON_RCIU_READ block=CPC event=8 ></metric>
-
-  # average for (16 instances x 4 shader engines)
-  <metric name="TA_BUSY_avr" expr=avr(TA_BUSY,16)/4 ></metric>
+  # average for 16 instances
+  <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) ></metric>
+  <metric name="TA_BUSY_max" expr=max(TA_TA_BUSY,16) ></metric>
+  <metric name="TA_BUSY_min" expr=min(TA_TA_BUSY,16) ></metric>
   # sum for 16 instances
   <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=sum(TA_FLAT_READ_WAVEFRONTS,16) ></metric>
   <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum" expr=sum(TA_FLAT_WRITE_WAVEFRONTS,16) ></metric>
   <metric name="TCC_HIT_sum" expr=sum(TCC_HIT,16) ></metric>
   <metric name="TCC_MISS_sum" expr=sum(TCC_MISS,16) ></metric>
   <metric name="TCC_MC_RDREQ_sum" expr=sum(TCC_MC_RDREQ,16) ></metric>
+  <metric name="TCC_MC_WRREQ_sum" expr=sum(TCC_MC_WRREQ,16) ></metric>
+  <metric name="TCC_WRREQ_STALL_max" expr=max(TCC_MC_WRREQ_STALL,16) ></metric>
 
   # FETCH_SIZE, kilobytes
   # The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
-  <metric
-    name="FETCH_SIZE"
-    expr=(TCC_MC_RDREQ_sum*32)/1024
-    descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."
-  ></metric>
+  <metric name="FETCH_SIZE" expr=(TCC_MC_RDREQ_sum*32)/1024 ></metric>
+  # WRITE_SIZE
+  # The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
+  <metric name="WRITE_SIZE" expr=(TCC_MC_WRREQ_sum*32)/1024 ></metric>
 </gfx8>
 
 <gfx9>
-  <metric name=GRBM_COUNT block=GRBM event=0 ></metric>
-  <metric name=GRBM_GUI_ACTIVE block=GRBM event=2 ></metric>
-
-  <metric name=SQ_CYCLES block=SQ event=2 ></metric>
-  <metric name=SQ_WAVES block=SQ event=4 ></metric>
-  <metric name=SQ_ITEMS block=SQ event=14 ></metric>
-  <metric name=SQ_INSTS_VALU block=SQ event=26 ></metric>
-  <metric name=SQ_INSTS_VMEM_WR block=SQ event=27 ></metric>
-  <metric name=SQ_INSTS_VMEM_RD block=SQ event=28 ></metric>
-  <metric name=SQ_INSTS_SALU block=SQ event=30 ></metric>
-  <metric name=SQ_INSTS_SMEM block=SQ event=31 ></metric>
-  <metric name=SQ_INSTS_FLAT block=SQ event=32 ></metric>
-  <metric name=SQ_INSTS_FLAT_LDS_ONLY block=SQ event=33 ></metric>
-  <metric name=SQ_INSTS_LDS block=SQ event=34 ></metric>
-  <metric name=SQ_INSTS_GDS block=SQ event=35 ></metric>
-  <metric name=SQ_WAVE_READY block=SQ event=47 ></metric>
-
-  <metric name=SQ_WAIT_INST_LDS block=SQ event=63 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
-  <metric name=SQ_ACTIVE_INST_VALU block=SQ event=71 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
-  <metric name=SQ_INST_CYCLES_SALU block=SQ event=84 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
-  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=85 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
-  <metric name=SQ_THREAD_CYCLES_VALU_MAX block=SQ event=86 descr="Maximum number of thread-cycles VALU operations that could have been executed given the instruction mix (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd, emulated)"></metric>
-  <metric name=SQ_LDS_BANK_CONFLICT block=SQ event=93 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
-
-  <metric name=TA_BUSY block=TA event=15 ></metric>
-  <metric name=TA_FLAT_READ_WAVEFRONTS block=TA event=101 ></metric>
-  <metric name=TA_FLAT_WRITE_WAVEFRONTS block=TA event=102 ></metric>
-
-  <metric name=TCC_CYCLE block=TCC event=1 ></metric>
-  <metric name=TCC_REQ block=TCC event=3 ></metric>
-  <metric name=TCC_HIT block=TCC event=20 ></metric>
-  <metric name=TCC_MISS block=TCC event=22 ></metric>
-  <metric name=TCC_WRITEBACK block=TCC event=25 ></metric>
-  <metric name=TCC_EA_WRREQ block=TCC event=29 ></metric>
-  <metric name=TCC_EA_WRREQ_64B block=TCC event=30 ></metric>
-  <metric name=TCC_EA_WRREQ_STALL block=TCC event=33 ></metric>
-  <metric name=TCC_EA_RDREQ block=TCC event=41 ></metric>
-  <metric name=TCC_EA_RDREQ_32B block=TCC event=42 ></metric>
-
-  <metric name=TCP_TA_DATA_STALL_CYCLES block=TCP event=6 descr="TCP stalls TA data interface. Now Windowed."></metric>
-
-  <metric name=CPC_ALWAYS_COUNT block=CPC event=0 ></metric>
-  <metric name=CPC_ME1_STALL_WAIT_ON_RCIU_READ block=CPC event=8 ></metric>
-
-  # average for (16 instances x 4 shader engines)
-  <metric name="TA_BUSY_avr" expr=avr(TA_BUSY,16)/4 ></metric>
+  # average for 16 instances
+  <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) ></metric>
+  <metric name="TA_BUSY_max" expr=max(TA_TA_BUSY,16) ></metric>
+  <metric name="TA_BUSY_min" expr=min(TA_TA_BUSY,16) ></metric>
   # sum for 16 instances
   <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=sum(TA_FLAT_READ_WAVEFRONTS,16) ></metric>
   <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum" expr=sum(TA_FLAT_WRITE_WAVEFRONTS,16) ></metric>
   <metric name="TCC_HIT_sum" expr=sum(TCC_HIT,16) ></metric>
   <metric name="TCC_MISS_sum" expr=sum(TCC_MISS,16) ></metric>
-  <metric name="TCC_EA_RDREQ_sum" expr=sum(TCC_EA_RDREQ,16) ></metric>
   <metric name="TCC_EA_RDREQ_32B_sum" expr=sum(TCC_EA_RDREQ_32B,16) ></metric>
+  <metric name="TCC_EA_RDREQ_sum" expr=sum(TCC_EA_RDREQ,16) ></metric>
+  <metric name="TCC_EA_WRREQ_sum" expr=sum(TCC_EA_WRREQ,16) ></metric>
+  <metric name="TCC_EA_WRREQ_64B_sum" expr=sum(TCC_EA_WRREQ_64B,16) ></metric>
+  <metric name="TCC_WRREQ_STALL_max" expr=max(TCC_EA_WRREQ_STALL,16) ></metric>
 
   # FETCH_SIZE, kilobytes
   # The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
-  <metric
-    name="FETCH_SIZE"
-    expr=((TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64+TCC_EA_RDREQ_32B_sum*32)/1024
-    descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."
-  ></metric>
+  <metric name="FETCH_SIZE" expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024 ></metric>
+  # WRITE_SIZE
+  # The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
+  <metric name="WRITE_SIZE" expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 ></metric>
 </gfx9>
 
 <global>
-  # GPU_BUSY, percentage
+  # GPUBusy, percentage
   # The percentage of time GPU was busy.
   <metric
     name="GPUBusy"
-    expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT
     descr="The percentage of time GPU was busy."
+    expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT
   ></metric>
 
   # Wavefronts      Total wavefronts.,
   <metric
     name="Wavefronts"
-    expr=SQ_WAVES
     descr="Total wavefronts."
+    expr=SQ_WAVES
   ></metric>
 
   # VALUInsts       The average number of vector ALU instructions executed per work-item (affected by flow control).
   <metric
     name="VALUInsts"
-    expr=SQ_INSTS_VALU/SQ_WAVES
     descr="The average number of vector ALU instructions executed per work-item (affected by flow control)."
+    expr=SQ_INSTS_VALU/SQ_WAVES
   ></metric>
 
   # SALUInsts       The average number of scalar ALU instructions executed per work-item (affected by flow control).
   <metric
     name="SALUInsts"
-    expr=SQ_INSTS_SALU/SQ_WAVES
     descr="The average number of scalar ALU instructions executed per work-item (affected by flow control)."
+    expr=SQ_INSTS_SALU/SQ_WAVES
   ></metric>
   
   # VFetchInsts     The average number of vector fetch instructions from the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that fetch from video memory.
   <metric
     name="VFetchInsts"
-    expr=(SQ_INSTS_VMEM_RD-TA_FLAT_READ_WAVEFRONTS_sum)/SQ_WAVES
     descr="The average number of vector fetch instructions from the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that fetch from video memory."
+    expr=(SQ_INSTS_VMEM_RD-TA_FLAT_READ_WAVEFRONTS_sum)/SQ_WAVES
   ></metric>
 
   # SFetchInsts     The average number of scalar fetch instructions from the video memory executed per work-item (affected by flow control).
   <metric
     name="SFetchInsts"
-    expr=SQ_INSTS_SMEM/SQ_WAVES
     descr="The average number of scalar fetch instructions from the video memory executed per work-item (affected by flow control)."
+    expr=SQ_INSTS_SMEM/SQ_WAVES
   ></metric>
 
   # VWriteInsts     The average number of vector write instructions to the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that write to video memory.
   <metric
     name="VWriteInsts"
-    expr=(SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES
     descr="The average number of vector write instructions to the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that write to video memory."
+    expr=(SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES
   ></metric>
 
   # FlatVMemInsts   The average number of FLAT instructions that read from or write to the video memory executed per work item (affected by flow control). Includes FLAT instructions that read from or write to scratch.
   <metric
     name="FlatVMemInsts"
-    expr=(SQ_INSTS_FLAT-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES
     descr="The average number of FLAT instructions that read from or write to the video memory executed per work item (affected by flow control). Includes FLAT instructions that read from or write to scratch."
+    expr=(SQ_INSTS_FLAT-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES
   ></metric>
 
   # LDSInsts        The average number of LDS read or LDS write instructions executed per work item (affected by flow control).  Excludes FLAT instructions that read from or write to LDS.
   <metric
     name="LDSInsts"
-    expr=(SQ_INSTS_LDS-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES
     descr="The average number of LDS read or LDS write instructions executed per work item (affected by flow control).  Excludes FLAT instructions that read from or write to LDS."
+    expr=(SQ_INSTS_LDS-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES
   ></metric>
 
   # FlatLDSInsts    The average number of FLAT instructions that read or write to LDS executed per work item (affected by flow control).
   <metric
     name="FlatLDSInsts"
-    expr=SQ_INSTS_FLAT_LDS_ONLY/SQ_WAVES
     descr="The average number of FLAT instructions that read or write to LDS executed per work item (affected by flow control)."
+    expr=SQ_INSTS_FLAT_LDS_ONLY/SQ_WAVES
   ></metric>
 
   # GDSInsts        The average number of GDS read or GDS write instructions executed per work item (affected by flow control).
   <metric
     name="GDSInsts"
-    expr=SQ_INSTS_GDS/SQ_WAVES
     descr="The average number of GDS read or GDS write instructions executed per work item (affected by flow control)."
+    expr=SQ_INSTS_GDS/SQ_WAVES
   ></metric>
 
   # VALUUtilization The percentage of active vector ALU threads in a wave. A lower number can mean either more thread divergence in a wave or that the work-group size is not a multiple of 64. Value range: 0% (bad), 100% (ideal - no thread divergence).
   <metric
     name="VALUUtilization"
-    expr=100*SQ_THREAD_CYCLES_VALU/(SQ_ACTIVE_INST_VALU*64)
     descr="The percentage of active vector ALU threads in a wave. A lower number can mean either more thread divergence in a wave or that the work-group size is not a multiple of 64. Value range: 0% (bad), 100% (ideal - no thread divergence)."
+    expr=100*SQ_THREAD_CYCLES_VALU/(SQ_ACTIVE_INST_VALU*MAX_WAVE_SIZE)
   ></metric>
 
   # VALUBusy        The percentage of GPUTime vector ALU instructions are processed. Value range: 0% (bad) to 100% (optimal).
   <metric
     name="VALUBusy"
-    expr=100*SQ_ACTIVE_INST_VALU*4/SIMD_NUM/GRBM_GUI_ACTIVE
     descr="The percentage of GPUTime vector ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."
+    expr=100*SQ_ACTIVE_INST_VALU*4/SIMD_NUM/GRBM_GUI_ACTIVE
   ></metric>
 
   # SALUBusy        The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad) to 100% (optimal).
   <metric
     name="SALUBusy"
-    expr=100*SQ_INST_CYCLES_SALU*4/SIMD_NUM/GRBM_GUI_ACTIVE
     descr="The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."
+    expr=100*SQ_INST_CYCLES_SALU*4/SIMD_NUM/GRBM_GUI_ACTIVE
   ></metric>
 
   # FetchSize       The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
   <metric
     name="FetchSize"
-    expr=FETCH_SIZE
     descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."
+    expr=FETCH_SIZE
   ></metric>
 
   # WriteSize       The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
   <metric
     name="WriteSize"
-    expr=((sum(TCC_EA_WRREQ,16)-sum(TCC_EA_WRREQ_64B,16))*32+sum(TCC_EA_WRREQ_64B,16)*64)/1024
     descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."
+    expr=WRITE_SIZE
   ></metric>
 
   # L2CacheHit      The percentage of fetch, write, atomic, and other instructions that hit the data in L2 cache. Value range: 0% (no hit) to 100% (optimal).
   <metric
     name="L2CacheHit"
-    expr=100*sum(TCC_HIT,16)/(sum(TCC_HIT,16)+sum(TCC_MISS,16))
     descr="The percentage of fetch, write, atomic, and other instructions that hit the data in L2 cache. Value range: 0% (no hit) to 100% (optimal)."
+    expr=100*sum(TCC_HIT,16)/(sum(TCC_HIT,16)+sum(TCC_MISS,16))
   ></metric>
 
   # MemUnitBusy     The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound).
   <metric
     name="MemUnitBusy"
-    expr=100*max(TA_BUSY,16)/GRBM_GUI_ACTIVE/SE_NUM
     descr="The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound)."
+    expr=100*max(TA_TA_BUSY,16)/GRBM_GUI_ACTIVE/SE_NUM
   ></metric>
 
   # MemUnitStalled  The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad).
   <metric
     name="MemUnitStalled"
-    expr=100*max(TCP_TA_DATA_STALL_CYCLES,16)/GRBM_GUI_ACTIVE/SE_NUM
     descr="The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad)."
+    expr=100*max(TCP_TCP_TA_DATA_STALL_CYCLES,16)/GRBM_GUI_ACTIVE/SE_NUM
   ></metric>
 
   # WriteUnitStalled The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad).
   <metric
     name="WriteUnitStalled"
-    expr=100*max(TCC_EA_WRREQ_STALL,16)/GRBM_GUI_ACTIVE
     descr="The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad)."
+    expr=100*TCC_WRREQ_STALL_max/GRBM_GUI_ACTIVE
   ></metric>
 
   # The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad).
   <metric
     name="ALUStalledByLDS"
-    expr=100*SQ_WAIT_INST_LDS*4/SQ_WAVES/GRBM_GUI_ACTIVE
     descr="The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad)."
+    expr=100*SQ_WAIT_INST_LDS*4/SQ_WAVES/GRBM_GUI_ACTIVE
   ></metric>
 
   # LDSBankConflict The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad).
   <metric
     name="LDSBankConflict"
-    expr=100*SQ_LDS_BANK_CONFLICT/GRBM_GUI_ACTIVE/CU_NUM
     descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."
+    expr=100*SQ_LDS_BANK_CONFLICT/GRBM_GUI_ACTIVE/CU_NUM
   ></metric>
 
 </global>

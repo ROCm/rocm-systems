@@ -89,7 +89,7 @@ class Xml {
     AddExpr(full_tag, name, oss.str());
   }
 
-  nodes_t GetNodes(std::string global_tag) { return (*map_)[global_tag]; }
+  nodes_t GetNodes(const std::string& global_tag) { return (*map_)[global_tag]; }
 
   template <class F>
   F ForEach(const F& f_i) {

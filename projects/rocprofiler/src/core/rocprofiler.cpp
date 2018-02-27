@@ -174,7 +174,7 @@ const MetricsDict* GetMetrics(const hsa_agent_t& agent) {
 
 util::Logger::mutex_t util::Logger::mutex_;
 util::Logger* util::Logger::instance_ = NULL;
-uint64_t Context::timeout_ = 1000;
+uint64_t Context::timeout_ = UINT64_MAX;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

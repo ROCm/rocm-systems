@@ -43,7 +43,7 @@ HsaRsrcFactory* TestHsa::HsaInstantiate(const uint32_t agent_ind) {
   if (hsa_rsrc_ == NULL) {
     agent_id_ = agent_ind;
 
-    hsa_rsrc_ = HsaRsrcFactory::CreateInstance();
+    hsa_rsrc_ = HsaRsrcFactory::Create();
 
     // Print properties of the agents
     hsa_rsrc_->PrintGpuAgents("> GPU agents");
@@ -125,9 +125,8 @@ bool TestHsa::Setup() {
 
   // Load and Finalize Kernel Code Descriptor
   char* brig_path = (char*)brig_path_obj_.c_str();
-  code_buf_ =
-      hsa_rsrc_->LoadAndFinalize(agent_info_, brig_path, name_.c_str(), &hsa_exec_, &kernel_code_desc_);
-  if (code_buf_ == NULL) {
+  bool suc =  hsa_rsrc_->LoadAndFinalize(agent_info_, brig_path, name_.c_str(), &hsa_exec_, &kernel_code_desc_);
+  if (suc == false) {
     std::cerr << "Error in loading and finalizing Kernel" << std::endl;
     return false;
   }
@@ -241,7 +240,6 @@ void TestHsa::PrintTime() {
 
 bool TestHsa::Cleanup() {
   hsa_executable_destroy(hsa_exec_);
-  hsa_memory_free(code_buf_);
   hsa_signal_destroy(hsa_signal_);
   return true;
 }

@@ -114,16 +114,16 @@ class HsaRsrcFactory {
  public:
   typedef std::recursive_mutex mutex_t;
 
-  static HsaRsrcFactory* Create() {
+  static HsaRsrcFactory* Create(bool initialize_hsa = true) {
     std::lock_guard<mutex_t> lck(mutex_);
     if (instance_ == NULL) {
-      instance_ = new HsaRsrcFactory();
+      instance_ = new HsaRsrcFactory(initialize_hsa);
     }
     return instance_;
   }
 
   static HsaRsrcFactory& Instance() {
-    if (instance_ == NULL) instance_ = Create();
+    if (instance_ == NULL) instance_ = Create(false);
     hsa_status_t status = (instance_ != NULL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
     CHECK_STATUS("HsaRsrcFactory::Instance() failed", status);
     return *instance_;
@@ -229,9 +229,9 @@ class HsaRsrcFactory {
   // @param code_desc Handle of finalized Code Descriptor that could
   // be used to submit for execution
   //
-  // @return code buffer, non NULL if successful, NULL otherwise
+  // @return true if successful, false otherwise
   //
-  void* LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path, const char* kernel_name,
+  bool LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path, const char* kernel_name,
                         hsa_executable_t* hsa_exec, hsa_executable_symbol_t* code_desc);
 
   // Print the various fields of Hsa Gpu Agents
@@ -259,10 +259,13 @@ class HsaRsrcFactory {
 
   // Constructor of the class. Will initialize the Hsa Runtime and
   // query the system topology to get the list of Cpu and Gpu devices
-  HsaRsrcFactory();
+  HsaRsrcFactory(bool initialize_hsa);
 
   // Destructor of the class
   ~HsaRsrcFactory();
+
+  // HSA was initialized
+  const bool initialize_hsa_;
 
   // Add an instance of AgentInfo representing a Hsa Gpu agent
   const AgentInfo* AddAgentInfo(const hsa_agent_t agent);
