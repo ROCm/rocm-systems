@@ -48,6 +48,8 @@ struct context_entry_t {
   FILE* file_handle;
 };
 
+// Tool is unloaded
+bool is_unloaded = false;
 // Dispatch callbacks and context handlers synchronization
 pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 // Dispatch callback data
@@ -62,6 +64,8 @@ uint32_t context_collected = 0;
 const char* result_prefix = NULL;
 // Global results file handle
 FILE* result_file_handle = NULL;
+// True if a result file is opened
+bool result_file_opened = false;
 // Dispatch filters
 //  GPU index filter
 std::vector<uint32_t>* gpu_index_vec = NULL;
@@ -387,6 +391,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
 }
 
 hsa_status_t destroy_callback(hsa_queue_t* queue, void*) {
+  if (result_file_opened == false) printf("\nROCProfiler results:\n");
   dump_context_array();
   return HSA_STATUS_SUCCESS;
 }
@@ -479,6 +484,8 @@ extern "C" PUBLIC_API void OnLoadTool()
     }
   } else
     result_file_handle = stdout;
+
+  result_file_opened = (result_prefix != NULL) && (result_file_handle != NULL);
 
   // Getting input
   const char* xml_name = getenv("ROCP_INPUT");
@@ -590,11 +597,12 @@ extern "C" PUBLIC_API void OnLoadTool()
 
 // Tool destructor
 extern "C" PUBLIC_API void OnUnloadTool() {
+  is_unloaded = true;
+
   // Unregister dispatch callback
   rocprofiler_remove_queue_callbacks();
 
   // Dump stored profiling output data
-  const bool result_file_opened = (result_prefix != NULL) && (result_file_handle != NULL);
   printf("\nROCPRofiler: %u contexts collected", context_collected);
   if (result_file_opened) printf(", output directory %s", result_prefix);
   printf("\n");
@@ -605,8 +613,16 @@ extern "C" PUBLIC_API void OnUnloadTool() {
   if (callbacks_data != NULL) {
     delete[] callbacks_data->features;
     delete callbacks_data;
+    callbacks_data = NULL;
   }
   delete gpu_index_vec;
+  gpu_index_vec = NULL;
   delete kernel_string_vec;
+  kernel_string_vec = NULL;
   delete range_vec;
+  range_vec = NULL;
+}
+
+extern "C" DESTRUCTOR_API void destructor() {
+  if (is_unloaded == false) OnUnloadTool();
 }
