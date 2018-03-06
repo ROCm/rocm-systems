@@ -212,14 +212,23 @@ hsa_status_t rocprofiler_reset(rocprofiler_t* context,  // [in] profiling contex
 // Queue callbacks for initiating profiling per kernel dispatch and to wait
 // the profiling data on the queue destroy.
 
+// Dispatch record
+typedef struct {
+  uint64_t dispatch;                                   // dispatch timestamp
+  uint64_t begin;                                      // begin timestamp
+  uint64_t end;                                        // end timestamp
+  uint64_t complete;                                   // completion signal timestamp
+} rocprofiler_dispatch_record_t;
+
 // Profiling callback data
 typedef struct {
-  hsa_agent_t agent;
-  uint32_t agent_index;
-  const hsa_queue_t* queue;
-  uint64_t queue_index;
-  uint64_t kernel_object;
-  const char* kernel_name;
+  hsa_agent_t agent;                                   // GPU agent handle
+  uint32_t agent_index;                                // GPU index
+  const hsa_queue_t* queue;                            // HSA queue
+  uint64_t queue_index;                                // Index in the queue
+  uint64_t kernel_object;                              // Kernel object handle
+  const char* kernel_name;                             // Kernel name
+  const rocprofiler_dispatch_record_t* record;         // Dispatch record
 } rocprofiler_callback_data_t;
 
 // Profiling callback type

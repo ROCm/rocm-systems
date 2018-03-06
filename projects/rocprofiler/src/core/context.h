@@ -14,6 +14,7 @@
 #include "core/types.h"
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
+#include "util/logger.h"
 
 namespace rocprofiler {
 struct rocprofiler_contex_t;
@@ -155,7 +156,8 @@ class Context {
         hsa_rsrc_(&util::HsaRsrcFactory::Instance()),
         api_(hsa_rsrc_->AqlProfileApi()),
         handler_(handler),
-        handler_arg_(handler_arg) {
+        handler_arg_(handler_arg)
+  {
     metrics_ = MetricsDict::Create(agent_info);
     if (metrics_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "MetricsDict create failed");
     Initialize(info, info_count);
@@ -334,8 +336,8 @@ class Context {
       while (!complete) {
         const hsa_signal_value_t signal_value = hsa_signal_wait_scacquire(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, timeout,
                                   HSA_WAIT_STATE_BLOCKED);
-        complete = (signal_value == 0);
-        if (!complete) printf("ROCProfiler: Signal timeout, signal(%d) timeout(0x%lx)\n", (int)signal_value, timeout);
+        complete = (signal_value < 1);
+        if (!complete) WARN_LOGGING("timeout");
       }
       for (rocprofiler_feature_t* rinfo : *(tuple.info_vector)) rinfo->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
       callback_data_t callback_data{tuple.info_vector, tuple.info_vector->size(), NULL};

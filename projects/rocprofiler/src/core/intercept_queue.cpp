@@ -12,4 +12,6 @@ InterceptQueue::queue_callback_t InterceptQueue::destroy_callback_ = NULL;
 void* InterceptQueue::callback_data_ = NULL;
 InterceptQueue::obj_map_t* InterceptQueue::obj_map_ = NULL;
 const char* InterceptQueue::kernel_none_ = "";
+uint64_t InterceptQueue::timeout_ = UINT64_MAX;
+Tracker* InterceptQueue::tracker_ = NULL;
 }  // namespace rocprofiler

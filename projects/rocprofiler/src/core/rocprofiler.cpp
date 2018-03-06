@@ -146,6 +146,7 @@ CONSTRUCTOR_API void constructor() {
   if (timeout_str != NULL) {
     const uint64_t timeout_val = strtoull(timeout_str, NULL, 0);
     Context::SetTimeout(timeout_val);
+    InterceptQueue::SetTimeout(timeout_val);
   }
 }
 

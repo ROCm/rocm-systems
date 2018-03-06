@@ -12,7 +12,9 @@
 
 #include "core/context.h"
 #include "core/proxy_queue.h"
+#include "core/tracker.h"
 #include "core/types.h"
+#include "inc/rocprofiler.h"
 #include "util/hsa_rsrc_factory.h"
 
 namespace rocprofiler {
@@ -35,17 +37,18 @@ class InterceptQueue {
     hsa_status_t status = HSA_STATUS_ERROR;
     std::lock_guard<mutex_t> lck(mutex_);
 
-    if (!obj_map_) obj_map_ = new obj_map_t;
-
     ProxyQueue* proxy = ProxyQueue::Create(agent, size, type, callback, data, private_segment_size,
                                            group_segment_size, queue, &status);
-    if (status == HSA_STATUS_SUCCESS) {
-      InterceptQueue* obj = new InterceptQueue(agent, *queue, proxy);
-      (*obj_map_)[(uint64_t)(*queue)] = obj;
-      status = proxy->SetInterceptCB(OnSubmitCB, obj);
-    }
-
     if (status != HSA_STATUS_SUCCESS) abort();
+
+    if (!tracker_) tracker_ = new Tracker(timeout_);
+    status = hsa_amd_profiling_set_profiler_enabled(*queue, true);
+    if (status != HSA_STATUS_SUCCESS) abort();
+
+    if (!obj_map_) obj_map_ = new obj_map_t;
+    InterceptQueue* obj = new InterceptQueue(agent, *queue, proxy);
+    (*obj_map_)[(uint64_t)(*queue)] = obj;
+    status = proxy->SetInterceptCB(OnSubmitCB, obj);
 
     return status;
   }
@@ -86,12 +89,15 @@ class InterceptQueue {
         const hsa_kernel_dispatch_packet_t* dispatch_packet =
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
         const char* kernel_name = GetKernelName(dispatch_packet);
+        const auto* entry = tracker_->Add(obj->agent_info_->dev_id, dispatch_packet->completion_signal);
+        const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = entry->signal;
         rocprofiler_callback_data_t data = {obj->agent_info_->dev_id,
                                             obj->agent_info_->dev_index,
                                             obj->queue_,
                                             user_que_idx,
                                             dispatch_packet->kernel_object,
-                                            kernel_name};
+                                            kernel_name,
+                                            entry->record};
         hsa_status_t status = dispatch_callback_(&data, callback_data_, &group);
         free(const_cast<char*>(kernel_name));
         if ((status == HSA_STATUS_SUCCESS) && (group.context != NULL)) {
@@ -129,6 +135,8 @@ class InterceptQueue {
     dispatch_callback_ = dispatch_callback;
     destroy_callback_ = destroy_callback;
   }
+
+  static void SetTimeout(uint64_t timeout) { timeout_ = timeout; }
 
  private:
   InterceptQueue(const hsa_agent_t& agent, hsa_queue_t* const queue, ProxyQueue* proxy) :
@@ -178,6 +186,9 @@ class InterceptQueue {
   static void* callback_data_;
   static obj_map_t* obj_map_;
   static const char* kernel_none_;
+  static uint64_t timeout_;
+  static Tracker* tracker_;
+  static const bool tracker_on_ = true;
 
   hsa_queue_t* const queue_;
   ProxyQueue* const proxy_;

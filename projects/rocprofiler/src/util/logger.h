@@ -92,7 +92,8 @@ class Logger {
     if (messaging) {
       message_[GetTid()] = "";
     } else if (streaming_) {
-      //Put("\n");
+      Put("\n");
+      dirty_ = false;
     }
     messaging_ = messaging;
     streaming_ = messaging;
@@ -145,6 +146,13 @@ class Logger {
 #define INFO_LOGGING(stream)                                                                       \
   {                                                                                                \
     rocprofiler::util::Logger::Instance() << "info: " << rocprofiler::util::Logger::begm << stream \
+                                          << rocprofiler::util::Logger::endl;                      \
+  }
+
+#define WARN_LOGGING(stream)                                                                       \
+  {                                                                                                \
+    std::cerr << "ROCProfiler: " << stream << std::endl;                                                              \
+    rocprofiler::util::Logger::Instance() << "warning: " << rocprofiler::util::Logger::begm << stream \
                                           << rocprofiler::util::Logger::endl;                      \
   }
 

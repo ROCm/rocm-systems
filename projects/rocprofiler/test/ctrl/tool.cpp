@@ -254,24 +254,36 @@ void dump_context(context_entry_t* entry) {
     const rocprofiler_feature_t* features = entry->features;
     const unsigned feature_count = entry->feature_count;
 
-    fprintf(file_handle,
-            "dispatch[%u], queue_index(%lu), kernel_name(\"%s\"):\n", index, entry->data.queue_index, entry->data.kernel_name);
+    fprintf(file_handle, "dispatch[%u], queue_index(%lu), kernel_name(\"%s\"), time(%lu,%lu,%lu,%lu)\n",
+      index,
+      entry->data.queue_index,
+      entry->data.kernel_name,
+      entry->data.record->dispatch,
+      entry->data.record->begin,
+      entry->data.record->end,
+      entry->data.record->complete);
+    fflush(file_handle);
 
-    rocprofiler_group_t group = entry->group;
-    status = rocprofiler_group_get_data(&group);
-    check_status(status);
-    // output_group(file, group, "Group[0] data");
-  
-    status = rocprofiler_get_metrics(group.context);
-    check_status(status);
-    std::ostringstream oss;
-    oss << index << "__" << entry->data.kernel_name;
-    output_results(file_handle, features, feature_count, group.context, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
-    free(const_cast<char*>(entry->data.kernel_name));
-  
-    // Finishing cleanup
-    // Deleting profiling context will delete all allocated resources
-    rocprofiler_close(group.context);
+    delete entry->data.record;
+    entry->data.record = NULL;
+
+    rocprofiler_group_t& group = entry->group;
+    if (group.context != NULL) {
+      status = rocprofiler_group_get_data(&group);
+      check_status(status);
+      // output_group(file, group, "Group[0] data");
+    
+      status = rocprofiler_get_metrics(group.context);
+      check_status(status);
+      std::ostringstream oss;
+      oss << index << "__" << entry->data.kernel_name;
+      output_results(file_handle, features, feature_count, group.context, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
+      free(const_cast<char*>(entry->data.kernel_name));
+    
+      // Finishing cleanup
+      // Deleting profiling context will delete all allocated resources
+      rocprofiler_close(group.context);
+    }
   }
 }
 
@@ -362,20 +374,22 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   properties.handler = (result_prefix != NULL) ? handler : NULL;
   properties.handler_arg = (void*)entry;
 
-  // Open profiling context
-  status = rocprofiler_open(callback_data->agent, tool_data->features, tool_data->feature_count,
-                            &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
-  check_status(status);
-
-  // Check that we have only one profiling group
-  uint32_t group_count = 0;
-  status = rocprofiler_group_count(context, &group_count);
-  check_status(status);
-  assert(group_count == 1);
-  // Get group[0]
-  const uint32_t group_index = 0;
-  status = rocprofiler_get_group(context, group_index, group);
-  check_status(status);
+  if (tool_data->feature_count > 0) {
+    // Open profiling context
+    status = rocprofiler_open(callback_data->agent, tool_data->features, tool_data->feature_count,
+                              &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
+    check_status(status);
+  
+    // Check that we have only one profiling group
+    uint32_t group_count = 0;
+    status = rocprofiler_group_count(context, &group_count);
+    check_status(status);
+    assert(group_count == 1);
+    // Get group[0]
+    const uint32_t group_index = 0;
+    status = rocprofiler_get_group(context, group_index, group);
+    check_status(status);
+  }
 
   // Fill profiling context entry
   entry->group = *group;
@@ -575,22 +589,20 @@ extern "C" PUBLIC_API void OnLoadTool()
 
 
   // Adding dispatch observer
-  if (feature_count) {
-    rocprofiler_queue_callbacks_t callbacks_ptrs{0};
-    callbacks_ptrs.dispatch = dispatch_callback;
-    callbacks_ptrs.destroy = destroy_callback;
+  rocprofiler_queue_callbacks_t callbacks_ptrs{0};
+  callbacks_ptrs.dispatch = dispatch_callback;
+  callbacks_ptrs.destroy = destroy_callback;
 
-    callbacks_data = new callbacks_data_t{};
-    callbacks_data->features = features;
-    callbacks_data->feature_count = feature_count;
-    callbacks_data->group_index = 0;
-    callbacks_data->file_handle = result_file_handle;
-    callbacks_data->gpu_index = (gpu_index_vec->empty()) ? NULL : gpu_index_vec;
-    callbacks_data->kernel_string = (kernel_string_vec->empty()) ? NULL : kernel_string_vec;
-    callbacks_data->range = (range_vec->empty()) ? NULL : range_vec;;
+  callbacks_data = new callbacks_data_t{};
+  callbacks_data->features = features;
+  callbacks_data->feature_count = feature_count;
+  callbacks_data->group_index = 0;
+  callbacks_data->file_handle = result_file_handle;
+  callbacks_data->gpu_index = (gpu_index_vec->empty()) ? NULL : gpu_index_vec;
+  callbacks_data->kernel_string = (kernel_string_vec->empty()) ? NULL : kernel_string_vec;
+  callbacks_data->range = (range_vec->empty()) ? NULL : range_vec;;
 
-    rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_data);
-  }
+  rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_data);
 
   xml::Xml::Destroy(xml);
 }
