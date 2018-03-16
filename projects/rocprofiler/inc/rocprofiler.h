@@ -169,7 +169,7 @@ typedef enum {
 } rocprofiler_mode_t;
 
 // Profiling handler, calling on profiling completion
-typedef void (*rocprofiler_handler_t)(rocprofiler_group_t group, void* arg);
+typedef bool (*rocprofiler_handler_t)(rocprofiler_group_t group, void* arg);
 
 // Profiling preperties
 typedef struct {

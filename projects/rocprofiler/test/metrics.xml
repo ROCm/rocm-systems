@@ -178,7 +178,7 @@
   <metric
     name="MemUnitStalled"
     descr="The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad)."
-    expr=100*max(TCP_TCP_TA_DATA_STALL_CYCLES,16)/GRBM_GUI_ACTIVE/SE_NUM
+    expr=100*max(TCP_TA_DATA_STALL_CYCLES,16)/GRBM_GUI_ACTIVE/SE_NUM
   ></metric>
 
   # WriteUnitStalled The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad).

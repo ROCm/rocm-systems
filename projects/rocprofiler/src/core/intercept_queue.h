@@ -41,7 +41,7 @@ class InterceptQueue {
                                            group_segment_size, queue, &status);
     if (status != HSA_STATUS_SUCCESS) abort();
 
-    if (!tracker_) tracker_ = new Tracker(timeout_);
+    if (tracker_on_ && (tracker_ == NULL)) tracker_ = new Tracker(timeout_);
     status = hsa_amd_profiling_set_profiler_enabled(*queue, true);
     if (status != HSA_STATUS_SUCCESS) abort();
 
@@ -89,15 +89,19 @@ class InterceptQueue {
         const hsa_kernel_dispatch_packet_t* dispatch_packet =
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
         const char* kernel_name = GetKernelName(dispatch_packet);
-        const auto* entry = tracker_->Add(obj->agent_info_->dev_id, dispatch_packet->completion_signal);
-        const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = entry->signal;
+        const rocprofiler_dispatch_record_t* record = NULL;
+        if (tracker_ != NULL) {
+          const auto* entry = tracker_->Add(obj->agent_info_->dev_id, dispatch_packet->completion_signal);
+          const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = entry->signal;
+          record = entry->record;
+        }
         rocprofiler_callback_data_t data = {obj->agent_info_->dev_id,
                                             obj->agent_info_->dev_index,
                                             obj->queue_,
                                             user_que_idx,
                                             dispatch_packet->kernel_object,
                                             kernel_name,
-                                            entry->record};
+                                            record};
         hsa_status_t status = dispatch_callback_(&data, callback_data_, &group);
         free(const_cast<char*>(kernel_name));
         if ((status == HSA_STATUS_SUCCESS) && (group.context != NULL)) {
@@ -137,6 +141,7 @@ class InterceptQueue {
   }
 
   static void SetTimeout(uint64_t timeout) { timeout_ = timeout; }
+  static void TrackerOn(bool on) { tracker_on_ = on; }
 
  private:
   InterceptQueue(const hsa_agent_t& agent, hsa_queue_t* const queue, ProxyQueue* proxy) :
@@ -188,7 +193,7 @@ class InterceptQueue {
   static const char* kernel_none_;
   static uint64_t timeout_;
   static Tracker* tracker_;
-  static const bool tracker_on_ = true;
+  static bool tracker_on_;
 
   hsa_queue_t* const queue_;
   ProxyQueue* const proxy_;

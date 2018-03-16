@@ -148,6 +148,11 @@ CONSTRUCTOR_API void constructor() {
     Context::SetTimeout(timeout_val);
     InterceptQueue::SetTimeout(timeout_val);
   }
+  const char* tracker_on_str = getenv("ROCP_TRACKER_ON");
+  if (tracker_on_str != NULL) {
+    if (strncmp(tracker_on_str, "true", 4) == 0) InterceptQueue::TrackerOn(true);
+    if (strncmp(tracker_on_str, "false", 4) == 0) InterceptQueue::TrackerOn(false);
+  }
 }
 
 DESTRUCTOR_API void destructor() {
@@ -173,6 +178,7 @@ const MetricsDict* GetMetrics(const hsa_agent_t& agent) {
   return metrics;
 }
 
+rocprofiler::Tracker::mutex_t rocprofiler::Tracker::mutex_;
 util::Logger::mutex_t util::Logger::mutex_;
 util::Logger* util::Logger::instance_ = NULL;
 uint64_t Context::timeout_ = UINT64_MAX;

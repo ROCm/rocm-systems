@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <hsa.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -243,10 +244,15 @@ void output_group(FILE* file, const rocprofiler_group_t* group, const char* str)
 }
 
 // Dump stored context profiling output data
-void dump_context(context_entry_t* entry) {
+bool dump_context(context_entry_t* entry) {
   hsa_status_t status = HSA_STATUS_ERROR;
 
   if (entry->valid) {
+    const rocprofiler_dispatch_record_t* record = entry->data.record;
+    if (record) {
+      if (record->complete == 0) return false;
+    }
+
     ++context_collected;
     entry->valid = 0;
     const uint32_t index = entry->index;
@@ -254,18 +260,22 @@ void dump_context(context_entry_t* entry) {
     const rocprofiler_feature_t* features = entry->features;
     const unsigned feature_count = entry->feature_count;
 
-    fprintf(file_handle, "dispatch[%u], queue_index(%lu), kernel_name(\"%s\"), time(%lu,%lu,%lu,%lu)\n",
+    fprintf(file_handle, "dispatch[%u], queue_index(%lu), kernel_name(\"%s\")",
       index,
       entry->data.queue_index,
-      entry->data.kernel_name,
-      entry->data.record->dispatch,
-      entry->data.record->begin,
-      entry->data.record->end,
-      entry->data.record->complete);
+      entry->data.kernel_name);
+    if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
+      record->dispatch,
+      record->begin,
+      record->end,
+      record->complete);
+    fprintf(file_handle, "\n");
     fflush(file_handle);
 
-    delete entry->data.record;
-    entry->data.record = NULL;
+    if (record) {
+      delete record;
+      entry->data.record = NULL;
+    }
 
     rocprofiler_group_t& group = entry->group;
     if (group.context != NULL) {
@@ -285,6 +295,8 @@ void dump_context(context_entry_t* entry) {
       rocprofiler_close(group.context);
     }
   }
+
+  return true;
 }
 
 // Dump all stored contexts profiling output data
@@ -303,8 +315,9 @@ void dump_context_array() {
 }
 
 // Profiling completion handler
-void handler(rocprofiler_group_t group, void* arg) {
+bool handler(rocprofiler_group_t group, void* arg) {
   context_entry_t* entry = reinterpret_cast<context_entry_t*>(arg);
+  bool ret = false;
 
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
@@ -312,14 +325,16 @@ void handler(rocprofiler_group_t group, void* arg) {
   }
 
   if (context_array->find(entry->index) != context_array->end()) {
-    dump_context(entry);
-    dealloc_context_entry(entry);
+    if (dump_context(entry)) dealloc_context_entry(entry);
+    else ret = true;
   }
 
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
     exit(1);
   }
+
+  return ret;
 }
 
 // Kernel disoatch callback

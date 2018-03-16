@@ -6,6 +6,7 @@
 #include <hsa_ext_amd.h>
 
 #include <list>
+#include <mutex>
 
 #include "inc/rocprofiler.h"
 #include "util/exception.h"
@@ -15,6 +16,7 @@ namespace rocprofiler {
 
 class Tracker {
   public:
+  typedef std::mutex mutex_t;
   typedef rocprofiler_dispatch_record_t record_t;
   struct entry_t;
   typedef std::list<entry_t*> sig_list_t;
@@ -29,6 +31,7 @@ class Tracker {
 
   Tracker(uint64_t timeout = UINT64_MAX) : timeout_(timeout) {}
   ~Tracker() {
+    mutex_.lock();
     for (entry_t* entry : sig_list_) {
       assert(entry != NULL);
       while (1) {
@@ -43,6 +46,7 @@ class Tracker {
       }
       Del(entry);
     }
+    mutex_.unlock();
   }
 
   // Add tracker entry
@@ -50,7 +54,9 @@ class Tracker {
     entry_t* entry = new entry_t{};
     assert(entry);
     entry->tracker = this;
+    mutex_.lock();
     entry->it = sig_list_.insert(sig_list_.begin(), entry);
+    mutex_.unlock();
 
     entry->agent = agent;
     entry->orig = orig;
@@ -73,7 +79,9 @@ class Tracker {
   // Delete tracker entry
   void Del(entry_t* entry) {
     hsa_signal_destroy(entry->signal);
+    mutex_.lock();
     sig_list_.erase(entry->it);
+    mutex_.unlock();
     delete entry;
   } 
 
@@ -84,6 +92,7 @@ class Tracker {
 
     hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &record->complete);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP)");
+    if (record->complete == 0) EXC_RAISING(status, "hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP), time is zero");
 
     hsa_amd_profiling_dispatch_time_t dispatch_time{};
     status = hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
@@ -106,6 +115,8 @@ class Tracker {
   uint64_t timeout_;
   // Tracked signals list
   sig_list_t sig_list_;
+  // Inter-thread synchronization
+  static mutex_t mutex_;
 };
 
 } // namespace rocprofiler

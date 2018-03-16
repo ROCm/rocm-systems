@@ -6,6 +6,7 @@
 #include <hsa.h>
 #include <hsa_ext_amd.h>
 #include <map>
+#include <mutex>
 #include <vector>
 
 #include "core/metrics.h"
@@ -125,8 +126,7 @@ class Group {
   }
   void ResetRefs() { refs_ = n_profiles_; }
   uint32_t DecrRefs() {
-    --refs_;
-    return refs_;
+    return (refs_ > 0) ? --refs_ : 0;
   }
 
  private:
@@ -395,7 +395,7 @@ class Context {
     uint32_t r = group->DecrRefs();
     group->GetContext()->mutex_.unlock();
     if (r == 0) {
-      group->GetContext()->handler_(group->GetGroup(), group->GetContext()->handler_arg_);
+      return group->GetContext()->handler_(group->GetGroup(), group->GetContext()->handler_arg_);
     }
     return false;
   }
