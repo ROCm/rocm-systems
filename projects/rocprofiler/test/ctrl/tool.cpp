@@ -310,7 +310,7 @@ static inline bool dump_context_entry(context_entry_t* entry) {
 // Dump waiting entries
 static inline void  dump_wait_list() {
   auto it = wait_list->begin();
-  auto end = wait_list->begin();
+  auto end = wait_list->end();
   while (it != end) {
     auto cur = it++;
     if (dump_context_entry(*cur)) {
