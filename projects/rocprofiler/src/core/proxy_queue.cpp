@@ -19,7 +19,7 @@ ProxyQueue* ProxyQueue::Create(hsa_agent_t agent, uint32_t size, hsa_queue_type3
   hsa_status_t suc = HSA_STATUS_ERROR;
 #ifdef ROCP_HSA_PROXY
   ProxyQueue* instance =
-      (rocp_type_) ? (ProxyQueue*)new SimpleProxyQueue() : (ProxyQueue*)new HsaProxyQueue();
+      (rocp_type_) ? (ProxyQueue*) new SimpleProxyQueue() : (ProxyQueue*) new HsaProxyQueue();
 #else
   ProxyQueue* instance = new SimpleProxyQueue();
 #endif

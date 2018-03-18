@@ -8,12 +8,12 @@
 #include <dirent.h>
 #include <hsa.h>
 #include <pthread.h>
-#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 
 #include <iostream>
+#include <list>
 #include <map>
 #include <sstream>
 #include <string>
@@ -40,7 +40,6 @@ struct callbacks_data_t {
 
 // Context stored entry type
 struct context_entry_t {
-  int valid;
   uint32_t index;
   rocprofiler_group_t group;
   rocprofiler_feature_t* features;
@@ -49,8 +48,10 @@ struct context_entry_t {
   FILE* file_handle;
 };
 
+// Enable tracing
+static const bool trace_on = false;
 // Tool is unloaded
-bool is_unloaded = false;
+bool is_loaded = false;
 // Dispatch callbacks and context handlers synchronization
 pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 // Dispatch callback data
@@ -58,6 +59,8 @@ callbacks_data_t* callbacks_data = NULL;
 // Stored contexts array
 typedef std::map<uint32_t, context_entry_t> context_array_t;
 context_array_t* context_array = NULL;
+typedef std::list<context_entry_t*> wait_list_t;
+wait_list_t* wait_list = NULL;
 // Contexts collected count
 uint32_t context_count = 0;
 uint32_t context_collected = 0;
@@ -106,7 +109,6 @@ context_entry_t* alloc_context_entry() {
     exit(1);
   }
 
-  if (context_array == NULL) context_array = new context_array_t;
   const uint32_t index = context_count;
   auto ret = context_array->insert({index, context_entry_t{}});
   if (ret.second == false) {
@@ -247,56 +249,74 @@ void output_group(FILE* file, const rocprofiler_group_t* group, const char* str)
 bool dump_context(context_entry_t* entry) {
   hsa_status_t status = HSA_STATUS_ERROR;
 
-  if (entry->valid) {
-    const rocprofiler_dispatch_record_t* record = entry->data.record;
-    if (record) {
-      if (record->complete == 0) return false;
-    }
-
-    ++context_collected;
-    entry->valid = 0;
-    const uint32_t index = entry->index;
-    FILE* file_handle = entry->file_handle;
-    const rocprofiler_feature_t* features = entry->features;
-    const unsigned feature_count = entry->feature_count;
-
-    fprintf(file_handle, "dispatch[%u], queue_index(%lu), kernel_name(\"%s\")",
-      index,
-      entry->data.queue_index,
-      entry->data.kernel_name);
-    if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
-      record->dispatch,
-      record->begin,
-      record->end,
-      record->complete);
-    fprintf(file_handle, "\n");
-    fflush(file_handle);
-
-    if (record) {
-      delete record;
-      entry->data.record = NULL;
-    }
-
-    rocprofiler_group_t& group = entry->group;
-    if (group.context != NULL) {
-      status = rocprofiler_group_get_data(&group);
-      check_status(status);
-      // output_group(file, group, "Group[0] data");
-    
-      status = rocprofiler_get_metrics(group.context);
-      check_status(status);
-      std::ostringstream oss;
-      oss << index << "__" << entry->data.kernel_name;
-      output_results(file_handle, features, feature_count, group.context, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
-      free(const_cast<char*>(entry->data.kernel_name));
-    
-      // Finishing cleanup
-      // Deleting profiling context will delete all allocated resources
-      rocprofiler_close(group.context);
+  const rocprofiler_dispatch_record_t* record = entry->data.record;
+  if (record) {
+    if (record->complete == 0) {
+      return false;
     }
   }
 
+  ++context_collected;
+  const uint32_t index = entry->index;
+  FILE* file_handle = entry->file_handle;
+  const rocprofiler_feature_t* features = entry->features;
+  const unsigned feature_count = entry->feature_count;
+
+  fprintf(file_handle, "dispatch[%u], queue_index(%lu), kernel_name(\"%s\")",
+    index,
+    entry->data.queue_index,
+    entry->data.kernel_name);
+  if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
+    record->dispatch,
+    record->begin,
+    record->end,
+    record->complete);
+  fprintf(file_handle, "\n");
+  fflush(file_handle);
+
+  if (record) {
+    delete record;
+    entry->data.record = NULL;
+  }
+
+  rocprofiler_group_t& group = entry->group;
+  if (group.context != NULL) {
+    status = rocprofiler_group_get_data(&group);
+    check_status(status);
+    // output_group(file, group, "Group[0] data");
+
+    status = rocprofiler_get_metrics(group.context);
+    check_status(status);
+    std::ostringstream oss;
+    oss << index << "__" << entry->data.kernel_name;
+    output_results(file_handle, features, feature_count, group.context, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
+    free(const_cast<char*>(entry->data.kernel_name));
+
+    // Finishing cleanup
+    // Deleting profiling context will delete all allocated resources
+    rocprofiler_close(group.context);
+  }
+
   return true;
+}
+
+// Profiling completion handler
+static inline bool dump_context_entry(context_entry_t* entry) {
+  const bool ret = dump_context(entry);
+  if (ret) dealloc_context_entry(entry);
+  return ret;
+}
+
+// Dump waiting entries
+static inline void  dump_wait_list() {
+  auto it = wait_list->begin();
+  auto end = wait_list->begin();
+  while (it != end) {
+    auto cur = it++;
+    if (dump_context_entry(*cur)) {
+      wait_list->erase(cur);
+    }
+  }
 }
 
 // Dump all stored contexts profiling output data
@@ -306,7 +326,16 @@ void dump_context_array() {
     exit(1);
   }
 
-  if (context_array) for (auto& v : *context_array) dump_context(&v.second);
+  if (!wait_list->empty()) dump_wait_list();
+
+  if (context_array) {
+    auto it = context_array->begin();
+    auto end = context_array->end();
+    while (it != end) {
+      auto cur = it++;
+      dump_context_entry(&(cur->second));
+    }
+  }
 
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
@@ -317,16 +346,21 @@ void dump_context_array() {
 // Profiling completion handler
 bool handler(rocprofiler_group_t group, void* arg) {
   context_entry_t* entry = reinterpret_cast<context_entry_t*>(arg);
-  bool ret = false;
 
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
     exit(1);
   }
 
-  if (context_array->find(entry->index) != context_array->end()) {
-    if (dump_context(entry)) dealloc_context_entry(entry);
-    else ret = true;
+  if (!wait_list->empty()) dump_wait_list();
+
+  if (!dump_context_entry(entry)) {
+    wait_list->push_back(entry);
+  }
+
+  if (trace_on) {
+    fprintf(stdout, "tool::handler: context_array %d\n", (int)(context_array->size()));
+    fflush(stdout);
   }
 
   if (pthread_mutex_unlock(&mutex) != 0) {
@@ -334,7 +368,7 @@ bool handler(rocprofiler_group_t group, void* arg) {
     exit(1);
   }
 
-  return ret;
+  return false;
 }
 
 // Kernel disoatch callback
@@ -414,7 +448,11 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   entry->data.kernel_name = strdup(callback_data->kernel_name);
   entry->file_handle = tool_data->file_handle;
   entry->index = next_context_count();
-  entry->valid = 1;
+
+  if (trace_on) {
+    fprintf(stdout, "tool::dispatch: context_array %d\n", (int)(context_array->size()));
+    fflush(stdout);
+  }
 
   return status;
 }
@@ -468,6 +506,17 @@ void get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& fie
 // Tool constructor
 extern "C" PUBLIC_API void OnLoadTool()
 {
+  if (pthread_mutex_lock(&mutex) != 0) {
+    perror("pthread_mutex_lock");
+    exit(1);
+  }
+  if (is_loaded) return;
+  is_loaded = true;
+  if (pthread_mutex_unlock(&mutex) != 0) {
+    perror("pthread_mutex_unlock");
+    exit(1);
+  }
+
   std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
   parameters_dict["COMPUTE_UNIT_TARGET"] =
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET;
@@ -602,6 +651,9 @@ extern "C" PUBLIC_API void OnLoadTool()
   }
   fflush(stdout);
 
+  // Context array aloocation
+  context_array = new context_array_t;
+  wait_list = new wait_list_t;
 
   // Adding dispatch observer
   rocprofiler_queue_callbacks_t callbacks_ptrs{0};
@@ -624,7 +676,16 @@ extern "C" PUBLIC_API void OnLoadTool()
 
 // Tool destructor
 extern "C" PUBLIC_API void OnUnloadTool() {
-  is_unloaded = true;
+  if (pthread_mutex_lock(&mutex) != 0) {
+    perror("pthread_mutex_lock");
+    exit(1);
+  }
+  if (!is_loaded) return;
+  is_loaded = false;
+  if (pthread_mutex_unlock(&mutex) != 0) {
+    perror("pthread_mutex_unlock");
+    exit(1);
+  }
 
   // Unregister dispatch callback
   rocprofiler_remove_queue_callbacks();
@@ -648,8 +709,12 @@ extern "C" PUBLIC_API void OnUnloadTool() {
   kernel_string_vec = NULL;
   delete range_vec;
   range_vec = NULL;
+  delete context_array;
+  context_array = NULL;
+  delete wait_list;
+  wait_list = NULL;
 }
 
 extern "C" DESTRUCTOR_API void destructor() {
-  if (is_unloaded == false) OnUnloadTool();
+  if (is_loaded == true) OnUnloadTool();
 }

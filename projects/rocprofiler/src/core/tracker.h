@@ -1,6 +1,7 @@
 #ifndef SRC_CORE_TRACKER_H_
 #define SRC_CORE_TRACKER_H_
 
+#include <amd_hsa_signal.h>
 #include <assert.h>
 #include <hsa.h>
 #include <hsa_ext_amd.h>
@@ -29,7 +30,7 @@ class Tracker {
     record_t* record;
   };
 
-  Tracker(uint64_t timeout = UINT64_MAX) : timeout_(timeout) {}
+  Tracker(uint64_t timeout = UINT64_MAX) : timeout_(timeout), outstanding(0) {}
   ~Tracker() {
     mutex_.lock();
     for (entry_t* entry : sig_list_) {
@@ -51,6 +52,7 @@ class Tracker {
 
   // Add tracker entry
   entry_t* Add(const hsa_agent_t& agent, const hsa_signal_t& orig) {
+    hsa_status_t status = HSA_STATUS_ERROR;
     entry_t* entry = new entry_t{};
     assert(entry);
     entry->tracker = this;
@@ -60,7 +62,7 @@ class Tracker {
 
     entry->agent = agent;
     entry->orig = orig;
-    hsa_status_t status = hsa_signal_create(1, 0, NULL, &(entry->signal));
+    status = hsa_signal_create(1, 0, NULL, &(entry->signal));
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_signal_create");
 
     record_t* record = new record_t{};
@@ -71,6 +73,14 @@ class Tracker {
 
     hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
+
+    if (trace_on_) {
+      mutex_.lock();
+      entry->tracker->outstanding++;
+      fprintf(stdout, "Tracker::Add: entry %p, record %p, outst %lu\n", entry, entry->record, entry->tracker->outstanding);
+      fflush(stdout);
+      mutex_.unlock();
+    }
 
     return entry;
   }
@@ -90,6 +100,14 @@ class Tracker {
     entry_t* entry = reinterpret_cast<entry_t*>(arg);
     record_t* record = entry->record;
 
+    if (trace_on_) {
+      mutex_.lock();
+      entry->tracker->outstanding--;
+      fprintf(stdout, "Tracker::Handler: entry %p, record %p, outst %lu\n", entry, entry->record, entry->tracker->outstanding);
+      fflush(stdout);
+      mutex_.unlock();
+    }
+
     hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &record->complete);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP)");
     if (record->complete == 0) EXC_RAISING(status, "hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP), time is zero");
@@ -103,8 +121,13 @@ class Tracker {
 
     hsa_signal_t orig = entry->orig;
     if (orig.handle) {
+      amd_signal_t* orig_signal_ptr = reinterpret_cast<amd_signal_t*>(orig.handle);
+      amd_signal_t* prof_signal_ptr = reinterpret_cast<amd_signal_t*>(entry->signal.handle);
+      orig_signal_ptr->start_ts = prof_signal_ptr->start_ts;
+      orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
+
       const hsa_signal_value_t value = hsa_signal_load_relaxed(orig);
-      hsa_signal_store_relaxed(orig, value - 1);
+      hsa_signal_store_screlease(orig, value - 1);
     }
     entry->tracker->Del(entry);
 
@@ -117,6 +140,10 @@ class Tracker {
   sig_list_t sig_list_;
   // Inter-thread synchronization
   static mutex_t mutex_;
+  // Outstanding dispatches
+  uint64_t outstanding;
+  // Enable tracing
+  static const bool trace_on_ = false;
 };
 
 } // namespace rocprofiler

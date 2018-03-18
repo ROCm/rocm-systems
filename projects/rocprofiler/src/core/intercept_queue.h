@@ -41,9 +41,11 @@ class InterceptQueue {
                                            group_segment_size, queue, &status);
     if (status != HSA_STATUS_SUCCESS) abort();
 
-    if (tracker_on_ && (tracker_ == NULL)) tracker_ = new Tracker(timeout_);
-    status = hsa_amd_profiling_set_profiler_enabled(*queue, true);
-    if (status != HSA_STATUS_SUCCESS) abort();
+    if (tracker_on_ && (tracker_ == NULL)) {
+      tracker_ = new Tracker(timeout_);
+      status = hsa_amd_profiling_set_profiler_enabled(*queue, true);
+      if (status != HSA_STATUS_SUCCESS) abort();
+    }
 
     if (!obj_map_) obj_map_ = new obj_map_t;
     InterceptQueue* obj = new InterceptQueue(agent, *queue, proxy);
