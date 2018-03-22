@@ -33,6 +33,7 @@ struct callbacks_data_t {
   unsigned feature_count;
   unsigned group_index;
   FILE* file_handle;
+  int filter_on;
   std::vector<uint32_t>* gpu_index;
   std::vector<std::string>* kernel_string;
   std::vector<uint32_t>* range;
@@ -312,7 +313,7 @@ static inline bool dump_context_entry(context_entry_t* entry) {
 }
 
 // Dump waiting entries
-static inline void  dump_wait_list() {
+static inline void dump_wait_list() {
   auto it = wait_list->begin();
   auto end = wait_list->end();
   while (it != end) {
@@ -375,14 +376,9 @@ bool handler(rocprofiler_group_t group, void* arg) {
   return false;
 }
 
-// Kernel disoatch callback
-hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
-                               rocprofiler_group_t* group) {
-  // Passed tool data
-  callbacks_data_t* tool_data = reinterpret_cast<callbacks_data_t*>(user_data);
-
-  // Checking dispatch condition
+bool check_filter(const rocprofiler_callback_data_t* callback_data, const callbacks_data_t* tool_data) {
   bool found = true;
+
   std::vector<uint32_t>* range_ptr = tool_data->range;
   if (found && range_ptr) {
     found = false;
@@ -411,13 +407,25 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
       }
     }
   }
-  if (found == false) {
-    next_context_count();
-    return HSA_STATUS_SUCCESS;
-  }
 
+  return found;
+}
+
+// Kernel disoatch callback
+hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
+                               rocprofiler_group_t* group) {
+  // Passed tool data
+  callbacks_data_t* tool_data = reinterpret_cast<callbacks_data_t*>(user_data);
   // HSA status
   hsa_status_t status = HSA_STATUS_ERROR;
+
+  // Checking dispatch condition
+  if (tool_data->filter_on == 1) {
+    if (check_filter(callback_data, tool_data) == false) {
+      next_context_count();
+      return HSA_STATUS_SUCCESS;
+    }
+  }
   // Profiling context
   rocprofiler_t* context = NULL;
   // Context entry
@@ -672,6 +680,10 @@ extern "C" PUBLIC_API void OnLoadTool()
   callbacks_data->gpu_index = (gpu_index_vec->empty()) ? NULL : gpu_index_vec;
   callbacks_data->kernel_string = (kernel_string_vec->empty()) ? NULL : kernel_string_vec;
   callbacks_data->range = (range_vec->empty()) ? NULL : range_vec;;
+  callbacks_data->filter_on = (callbacks_data->gpu_index != NULL) ||
+                              (callbacks_data->kernel_string != NULL) ||
+                              (callbacks_data->range != NULL)
+                              ? 1 : 0;
 
   rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_data);
 
@@ -697,8 +709,16 @@ extern "C" PUBLIC_API void OnUnloadTool() {
   // Dump stored profiling output data
   printf("\nROCPRofiler: %u contexts collected", context_collected);
   if (result_file_opened) printf(", output directory %s", result_prefix);
-  printf("\n");
+  printf("\n"); fflush(stdout);
   dump_context_array();
+  if (!wait_list->empty()) {
+    printf("\nWaiting for outstanding dispatches..."); fflush(stdout);
+    while (wait_list->size() != 0) {
+      usleep(1000);
+      dump_wait_list();
+    }
+    printf(".done\n"); fflush(stdout);
+  }
   if (result_file_opened) fclose(result_file_handle);
 
   // Cleanup
