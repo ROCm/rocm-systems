@@ -40,6 +40,7 @@ struct callbacks_data_t {
 
 // Context stored entry type
 struct context_entry_t {
+  uint32_t valid;
   uint32_t index;
   rocprofiler_group_t group;
   rocprofiler_feature_t* features;
@@ -71,7 +72,7 @@ FILE* result_file_handle = NULL;
 // True if a result file is opened
 bool result_file_opened = false;
 // Dispatch filters
-//  GPU index filter
+// GPU index filter
 std::vector<uint32_t>* gpu_index_vec = NULL;
 //  Kernel name filter
 std::vector<std::string>* kernel_string_vec = NULL;
@@ -93,13 +94,12 @@ uint32_t next_context_count() {
     perror("pthread_mutex_lock");
     exit(1);
   }
-  const uint32_t prev_val = context_count;
-  context_count = prev_val + 1;
+  ++context_count;
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
     exit(1);
   }
-  return prev_val;
+  return context_count;
 }
 
 // Allocate entry to store profiling context
@@ -109,7 +109,7 @@ context_entry_t* alloc_context_entry() {
     exit(1);
   }
 
-  const uint32_t index = context_count;
+  const uint32_t index = next_context_count();
   auto ret = context_array->insert({index, context_entry_t{}});
   if (ret.second == false) {
     fprintf(stderr, "context_array corruption, index repeated %u\n", index);
@@ -122,6 +122,7 @@ context_entry_t* alloc_context_entry() {
   }
 
   context_entry_t* entry = &(ret.first->second);
+  entry->index = index;
   return entry;
 }
 
@@ -249,6 +250,8 @@ void output_group(FILE* file, const rocprofiler_group_t* group, const char* str)
 bool dump_context(context_entry_t* entry) {
   hsa_status_t status = HSA_STATUS_ERROR;
 
+  if (entry->valid == 0) return true;
+
   const rocprofiler_dispatch_record_t* record = entry->data.record;
   if (record) {
     if (record->complete == 0) {
@@ -263,7 +266,7 @@ bool dump_context(context_entry_t* entry) {
   const unsigned feature_count = entry->feature_count;
 
   fprintf(file_handle, "dispatch[%u], queue_index(%lu), kernel_name(\"%s\")",
-    index,
+    index - 1,
     entry->data.queue_index,
     entry->data.kernel_name);
   if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
@@ -297,10 +300,11 @@ bool dump_context(context_entry_t* entry) {
     rocprofiler_close(group.context);
   }
 
+  entry->valid = 0;
   return true;
 }
 
-// Profiling completion handler
+// Dump and clean a given context entry
 static inline bool dump_context_entry(context_entry_t* entry) {
   const bool ret = dump_context(entry);
   if (ret) dealloc_context_entry(entry);
@@ -333,7 +337,7 @@ void dump_context_array() {
     auto end = context_array->end();
     while (it != end) {
       auto cur = it++;
-      dump_context_entry(&(cur->second));
+      dump_context(&(cur->second));
     }
   }
 
@@ -447,7 +451,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   entry->data = *callback_data;
   entry->data.kernel_name = strdup(callback_data->kernel_name);
   entry->file_handle = tool_data->file_handle;
-  entry->index = next_context_count();
+  entry->valid = 1;
 
   if (trace_on) {
     fprintf(stdout, "tool::dispatch: context_array %d\n", (int)(context_array->size()));

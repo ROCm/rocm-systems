@@ -356,7 +356,7 @@ class Context {
       if (expr) {
         auto it = info_map_.find(name);
         if (it == info_map_.end())
-          EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "', rocprofiler info is not found");
+          EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "', rocprofiler info is not found " << this);
         rocprofiler_feature_t* info = it->second;
         info->data.result_int64 = expr->Eval(args);
         info->data.kind = ROCPROFILER_DATA_KIND_INT64;

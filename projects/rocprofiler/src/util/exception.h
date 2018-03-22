@@ -7,6 +7,14 @@
 #include <sstream>
 #include <string>
 
+#define EXC_ABORT(error, stream)                                                                   \
+  {                                                                                                \
+    std::ostringstream oss;                                                                        \
+    oss << __FUNCTION__ << "(), " << stream;                                                       \
+    std::cout << oss.str() << std::endl;                                                           \
+    abort();                                                                                       \
+  }
+
 #define EXC_RAISING(error, stream)                                                                 \
   {                                                                                                \
     std::ostringstream oss;                                                                        \
