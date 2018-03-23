@@ -142,12 +142,19 @@ void UnloadTool() {
 CONSTRUCTOR_API void constructor() {
   util::Logger::Create();
 
+  const char* sqtt_size_str = getenv("ROCP_SQTT_SIZE");
+  if (sqtt_size_str != NULL) {
+    const uint32_t sqtt_size_val = strtoull(sqtt_size_str, NULL, 0);
+    SqttProfile::SetSize(sqtt_size_val);
+  }
+  
   const char* timeout_str = getenv("ROCP_DATA_TIMEOUT");
   if (timeout_str != NULL) {
     const uint64_t timeout_val = strtoull(timeout_str, NULL, 0);
     Context::SetTimeout(timeout_val);
     InterceptQueue::SetTimeout(timeout_val);
   }
+
   const char* tracker_on_str = getenv("ROCP_TRACKER_ON");
   if (tracker_on_str != NULL) {
     if (strncmp(tracker_on_str, "true", 4) == 0) InterceptQueue::TrackerOn(true);
@@ -178,10 +185,11 @@ const MetricsDict* GetMetrics(const hsa_agent_t& agent) {
   return metrics;
 }
 
-rocprofiler::Tracker::mutex_t rocprofiler::Tracker::mutex_;
+uint64_t Context::timeout_ = UINT64_MAX;
+uint32_t SqttProfile::output_buffer_size_ = 0x2000000;  // 32M
+Tracker::mutex_t Tracker::mutex_;
 util::Logger::mutex_t util::Logger::mutex_;
 util::Logger* util::Logger::instance_ = NULL;
-uint64_t Context::timeout_ = UINT64_MAX;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

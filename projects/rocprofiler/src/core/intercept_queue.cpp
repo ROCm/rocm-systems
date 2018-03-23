@@ -14,5 +14,5 @@ InterceptQueue::obj_map_t* InterceptQueue::obj_map_ = NULL;
 const char* InterceptQueue::kernel_none_ = "";
 uint64_t InterceptQueue::timeout_ = UINT64_MAX;
 Tracker* InterceptQueue::tracker_ = NULL;
-bool InterceptQueue::tracker_on_ = false;
+bool InterceptQueue::tracker_on_ = true;
 }  // namespace rocprofiler

@@ -426,11 +426,11 @@ class Context {
         if (rinfo->data.result_bytes.copy) {
           if (sample_id == 0) {
             if (rinfo->data.result_bytes.size == 0) {
-              const uint32_t output_buffer_size = SqttProfile::output_buffer_size;
+              const uint32_t output_buffer_size = SqttProfile::GetSize();
               const uint32_t output_buffer_size64 = output_buffer_size / sizeof(uint64_t);
               rinfo->data.result_bytes.ptr = calloc(output_buffer_size64, sizeof(uint64_t));
               rinfo->data.result_bytes.size = output_buffer_size;
-            } else if (rinfo->data.result_bytes.size != SqttProfile::output_buffer_size) {
+            } else if (rinfo->data.result_bytes.size != SqttProfile::GetSize()) {
               EXC_RAISING(HSA_STATUS_ERROR, "result bytes copy mode, data array size mismatch(" << rinfo->data.result_bytes.size << ")");
             }
           }
@@ -450,8 +450,9 @@ class Context {
               rinfo->data.result_bytes.instance_count = sample_id + 1;
               rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
             }
-          } else
-            status = HSA_STATUS_ERROR;
+          } else {
+            EXC_RAISING(HSA_STATUS_ERROR, "result bytes copy mode, out of boundary, size = " << rinfo->data.result_bytes.size);
+          }
         } else {
           if (sample_id == 0) {
             rinfo->data.result_bytes.ptr = ainfo_data->sqtt_data.ptr;
@@ -460,8 +461,9 @@ class Context {
           rinfo->data.result_bytes.instance_count += 1;
           rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
         }
-      } else
-        status = HSA_STATUS_ERROR;
+      } else {
+        EXC_RAISING(HSA_STATUS_ERROR, "unknown data type = " << ainfo_type);
+      }
     } else
       status = HSA_STATUS_ERROR;
 

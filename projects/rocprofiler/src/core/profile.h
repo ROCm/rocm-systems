@@ -210,7 +210,8 @@ class PmcProfile : public Profile {
 
 class SqttProfile : public Profile {
  public:
-  static const uint32_t output_buffer_size = 0x2000000;  // 32M
+  static inline void SetSize(const uint32_t& size) { output_buffer_size_ = size; }
+  static inline uint32_t GetSize() { return output_buffer_size_; }
 
   SqttProfile(const util::AgentInfo* agent_info) : Profile(agent_info) {
     profile_.type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_SQTT;
@@ -224,7 +225,7 @@ class SqttProfile : public Profile {
   }
 
   hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) {
-    profile_.output_buffer.size = output_buffer_size;
+    profile_.output_buffer.size = output_buffer_size_;
     profile_.command_buffer.ptr =
         rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
     profile_.output_buffer.ptr =
@@ -232,6 +233,9 @@ class SqttProfile : public Profile {
     return (profile_.command_buffer.ptr && profile_.output_buffer.ptr) ? HSA_STATUS_SUCCESS
                                                                        : HSA_STATUS_ERROR;
   }
+
+ private:
+  static uint32_t output_buffer_size_;
 };
 
 }  // namespace rocprofiler

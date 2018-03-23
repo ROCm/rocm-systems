@@ -10,7 +10,9 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/syscall.h>   /* For SYS_xxx definitions */
 #include <sys/types.h>
+#include <unistd.h>
 
 #include <iostream>
 #include <list>
@@ -53,7 +55,7 @@ struct context_entry_t {
 // Enable tracing
 static const bool trace_on = false;
 // Tool is unloaded
-bool is_loaded = false;
+volatile bool is_loaded = false;
 // Dispatch callbacks and context handlers synchronization
 pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 // Dispatch callback data
@@ -64,8 +66,8 @@ context_array_t* context_array = NULL;
 typedef std::list<context_entry_t*> wait_list_t;
 wait_list_t* wait_list = NULL;
 // Contexts collected count
-uint32_t context_count = 0;
-uint32_t context_collected = 0;
+volatile uint32_t context_count = 0;
+volatile uint32_t context_collected = 0;
 // Profiling results output file name
 const char* result_prefix = NULL;
 // Global results file handle
@@ -79,6 +81,25 @@ std::vector<uint32_t>* gpu_index_vec = NULL;
 std::vector<std::string>* kernel_string_vec = NULL;
 //  DIspatch number range filter
 std::vector<uint32_t>* range_vec = NULL;
+// Otstanding dispatches parameters
+#if 0
+static uint32_t CTX_OUTSTANDING_MAX_DFLT = 10000;
+static uint32_t CTX_OUTSTANDING_WAIT_DFLT = 1000;
+static uint32_t CTX_OUTSTANDING_WAIT_MAX = 1000000;
+static uint32_t CTX_OUTSTANDING_MAX = CTX_OUTSTANDING_MAX_DFLT;
+static uint32_t CTX_OUTSTANDING_WAIT = CTX_OUTSTANDING_WAIT_DFLT;
+#endif
+static uint32_t CTX_OUTSTANDING_MAX = 0;
+static uint32_t CTX_OUTSTANDING_MON = 0;
+
+static inline uint32_t GetPid() { return syscall(__NR_getpid); }
+static inline uint32_t GetTid() { return syscall(__NR_gettid); }
+
+// Error handler
+void fatal(const char* msg) {
+  fprintf(stderr, "%s\n", msg);
+  abort();
+}
 
 // Check returned HSA API status
 void check_status(hsa_status_t status) {
@@ -86,28 +107,64 @@ void check_status(hsa_status_t status) {
     const char* error_string = NULL;
     rocprofiler_error_string(&error_string);
     fprintf(stderr, "ERROR: %s\n", error_string);
-    exit(1);
+    abort();
   }
+}
+
+void* monitor_thr_fun(void*) {
+  while (context_array != NULL) {
+    sleep(CTX_OUTSTANDING_MON);
+    if (pthread_mutex_lock(&mutex) != 0) {
+      perror("pthread_mutex_lock");
+      abort();
+    }
+    const uint32_t inflight = context_count - context_collected;
+    std::cout << "ROCProfiler: count(" << context_count << "), outstanding(" << inflight << "/" << CTX_OUTSTANDING_MAX << ")" << std::endl << std::flush;
+    if (pthread_mutex_unlock(&mutex) != 0) {
+      perror("pthread_mutex_unlock");
+      abort();
+    }
+  }
+  return NULL;
 }
 
 uint32_t next_context_count() {
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
-    exit(1);
+    abort();
   }
   ++context_count;
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
-    exit(1);
+    abort();
   }
   return context_count;
 }
 
 // Allocate entry to store profiling context
 context_entry_t* alloc_context_entry() {
+#if 0
+  uint32_t context_inflight = context_count - context_collected;
+  if (context_inflight > CTX_OUTSTANDING_MAX) {
+    if (trace_on) std::cout << "inflight " << context_inflight << " tid " << GetTid() << " <" << CTX_OUTSTANDING_WAIT << "usec, max " << CTX_OUTSTANDING_MAX << ">" <<  std::flush;
+    usleep(CTX_OUTSTANDING_WAIT);
+    if (CTX_OUTSTANDING_WAIT > CTX_OUTSTANDING_WAIT_MAX) {
+      CTX_OUTSTANDING_MAX = 1 + (CTX_OUTSTANDING_MAX >> 1);
+    } else {
+      CTX_OUTSTANDING_WAIT = CTX_OUTSTANDING_WAIT << 1;
+    }
+  } else {
+    CTX_OUTSTANDING_MAX = CTX_OUTSTANDING_MAX_DFLT;
+    CTX_OUTSTANDING_WAIT = CTX_OUTSTANDING_WAIT_DFLT;
+  }
+#endif
+  if (CTX_OUTSTANDING_MAX != 0) {
+    while((context_count - context_collected) > CTX_OUTSTANDING_MAX) usleep(1000);
+  }
+
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
-    exit(1);
+    abort();
   }
 
   const uint32_t index = next_context_count();
@@ -119,7 +176,7 @@ context_entry_t* alloc_context_entry() {
 
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
-    exit(1);
+    abort();
   }
 
   context_entry_t* entry = &(ret.first->second);
@@ -131,7 +188,7 @@ context_entry_t* alloc_context_entry() {
 void dealloc_context_entry(context_entry_t* entry) {
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
-    exit(1);
+    abort();
   }
 
   assert(context_array != NULL);
@@ -139,7 +196,7 @@ void dealloc_context_entry(context_entry_t* entry) {
 
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
-    exit(1);
+    abort();
   }
 }
 
@@ -154,7 +211,7 @@ void dump_sqtt_trace(const char* label, const uint32_t chunk, const void* data, 
       std::ostringstream errmsg;
       errmsg << "fopen error, file '" << oss.str().c_str() << "'";
       perror(errmsg.str().c_str());
-      exit(1);
+      abort();
     }
 
     // Write the buffer in terms of shorts (16 bits)
@@ -219,10 +276,7 @@ void output_results(FILE* file, const rocprofiler_feature_t* features, const uns
             size += chunk_size;
           }
           fprintf(file, "size(%lu)\n", size);
-          if (size > p->data.result_bytes.size) {
-            fprintf(stderr, "SQTT data size is out of the result buffer size\n");
-            exit(1);
-          }
+          if (size > p->data.result_bytes.size) fatal("SQTT data size is out of the result buffer size");
           free(p->data.result_bytes.ptr);
           const_cast<rocprofiler_feature_t*>(p)->data.result_bytes.size = 0;
         } else {
@@ -267,7 +321,7 @@ bool dump_context(context_entry_t* entry) {
   const unsigned feature_count = entry->feature_count;
 
   fprintf(file_handle, "dispatch[%u], queue_index(%lu), kernel_name(\"%s\")",
-    index - 1,
+    index,
     entry->data.queue_index,
     entry->data.kernel_name);
   if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
@@ -328,12 +382,12 @@ static inline void dump_wait_list() {
 void dump_context_array() {
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
-    exit(1);
+    abort();
   }
 
-  if (!wait_list->empty()) dump_wait_list();
-
   if (context_array) {
+    if (!wait_list->empty()) dump_wait_list();
+
     auto it = context_array->begin();
     auto end = context_array->end();
     while (it != end) {
@@ -344,7 +398,7 @@ void dump_context_array() {
 
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
-    exit(1);
+    abort();
   }
 }
 
@@ -354,7 +408,7 @@ bool handler(rocprofiler_group_t group, void* arg) {
 
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
-    exit(1);
+    abort();
   }
 
   if (!wait_list->empty()) dump_wait_list();
@@ -364,13 +418,13 @@ bool handler(rocprofiler_group_t group, void* arg) {
   }
 
   if (trace_on) {
-    fprintf(stdout, "tool::handler: context_array %d\n", (int)(context_array->size()));
+    fprintf(stdout, "tool::handler: context_array %d tid %u\n", (int)(context_array->size()), GetTid());
     fflush(stdout);
   }
 
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
-    exit(1);
+    abort();
   }
 
   return false;
@@ -462,7 +516,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   entry->valid = 1;
 
   if (trace_on) {
-    fprintf(stdout, "tool::dispatch: context_array %d\n", (int)(context_array->size()));
+    fprintf(stdout, "tool::dispatch: context_array %d tid %u\n", (int)(context_array->size()), GetTid());
     fflush(stdout);
   }
 
@@ -515,18 +569,23 @@ void get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& fie
   for (const std::string& str : str_vec) vec->push_back(atoi(str.c_str()));
 }
 
+static inline void check_env_var(const char* var_name, uint32_t& val) {
+  const char* str = getenv(var_name);
+  if (str != NULL ) val = atol(str);
+}
+
 // Tool constructor
 extern "C" PUBLIC_API void OnLoadTool()
 {
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
-    exit(1);
+    abort();
   }
   if (is_loaded) return;
   is_loaded = true;
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
-    exit(1);
+    abort();
   }
 
   std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
@@ -550,8 +609,26 @@ extern "C" PUBLIC_API void OnLoadTool()
       else printf("Derived metrics:\n");
       rocprofiler_iterate_info(NULL, ROCPROFILER_INFO_KIND_METRIC, info_callback, info_symb);
     }
-    exit(1);
+    abort();
   }
+  // Set outstanding dispatches parameter
+  check_env_var("ROCP_OUTSTANDING_MAX", CTX_OUTSTANDING_MAX);
+  check_env_var("ROCP_OUTSTANDING_MON", CTX_OUTSTANDING_MON);
+#if 0
+  // Set outstanding dispatches parameter
+  const char* dispatches_max = getenv("ROCP_OUTSTANDING_MAX");
+  const char* dispatches_wait = getenv("ROCP_OUTSTANDING_WAIT");
+  const char* dispatches_wait_max = getenv("ROCP_OUTSTANDING_WAIT_MAX");
+  if (dispatches_max != NULL ) {
+    if (dispatches_wait == NULL) fatal("ROCP_OUTSTANDING_WAIT should be defined together with ROCP_OUTSTANDING_MAX env var");
+    if (dispatches_wait_max == NULL) fatal("ROCP_OUTSTANDING_WAIT_MAX should be defined together with ROCP_OUTSTANDING_MAX env var");
+    CTX_OUTSTANDING_MAX_DFLT = atol(dispatches_max);
+    CTX_OUTSTANDING_WAIT_DFLT = atol(dispatches_wait);
+    CTX_OUTSTANDING_WAIT_MAX = atol(dispatches_wait_max);
+    CTX_OUTSTANDING_MAX = CTX_OUTSTANDING_MAX_DFLT;
+    CTX_OUTSTANDING_WAIT = CTX_OUTSTANDING_WAIT_DFLT;
+  }
+#endif
 
   // Set output file
   result_prefix = getenv("ROCP_OUTPUT_DIR");
@@ -561,7 +638,7 @@ extern "C" PUBLIC_API void OnLoadTool()
       std::ostringstream errmsg;
       errmsg << "ROCProfiler: Cannot open output directory '" << result_prefix << "'";
       perror(errmsg.str().c_str());
-      exit(1);
+      abort();
     }
     std::ostringstream oss;
     oss << result_prefix << "/results.txt";
@@ -570,7 +647,7 @@ extern "C" PUBLIC_API void OnLoadTool()
       std::ostringstream errmsg;
       errmsg << "ROCProfiler: fopen error, file '" << oss.str().c_str() << "'";
       perror(errmsg.str().c_str());
-      exit(1);
+      abort();
     }
   } else
     result_file_handle = stdout;
@@ -579,15 +656,12 @@ extern "C" PUBLIC_API void OnLoadTool()
 
   // Getting input
   const char* xml_name = getenv("ROCP_INPUT");
-  if (xml_name == NULL) {
-    fprintf(stderr, "ROCProfiler: input is not specified, ROCP_INPUT env");
-    exit(1);
-  }
+  if (xml_name == NULL) fatal("ROCProfiler: input is not specified, ROCP_INPUT env");
   printf("ROCProfiler: input from \"%s\"\n", xml_name);
   xml::Xml* xml = xml::Xml::Create(xml_name);
   if (xml == NULL) {
     fprintf(stderr, "ROCProfiler: Input file not found '%s'\n", xml_name);
-    exit(1);
+    abort();
   }
 
   // Getting metrics
@@ -627,7 +701,7 @@ extern "C" PUBLIC_API void OnLoadTool()
     auto params_list = xml->GetNodes("top.trace.parameters");
     if (params_list.size() != 1) {
       fprintf(stderr, "ROCProfiler: Single input 'parameters' section is supported\n");
-      exit(1);
+      abort();
     }
     const std::string& name = entry->opts["name"];
     const bool to_copy_data = (entry->opts["copy"] == "true");
@@ -645,7 +719,7 @@ extern "C" PUBLIC_API void OnLoadTool()
         const std::string parameter_name = v.first;
         if (parameters_dict.find(parameter_name) == parameters_dict.end()) {
           fprintf(stderr, "ROCProfiler: unknown trace parameter '%s'\n", parameter_name.c_str());
-          exit(1);
+          abort();
         }
         const uint32_t value = strtol(v.second.c_str(), NULL, 0);
         printf("      %s = 0x%x\n", parameter_name.c_str(), value);
@@ -688,36 +762,51 @@ extern "C" PUBLIC_API void OnLoadTool()
   rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_data);
 
   xml::Xml::Destroy(xml);
+
+  if (CTX_OUTSTANDING_MON != 0) {
+    pthread_t thread;
+    pthread_attr_t attr;
+    int err = pthread_attr_init(&attr);
+    if (err) { errno = err; perror("pthread_attr_init"); abort(); }
+    err = pthread_create(&thread, &attr, monitor_thr_fun, NULL);
+  }
 }
 
 // Tool destructor
 extern "C" PUBLIC_API void OnUnloadTool() {
+  printf("\nROCPRofiler: Finishing:\n"); fflush(stdout);
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
-    exit(1);
+    abort();
   }
   if (!is_loaded) return;
   is_loaded = false;
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
-    exit(1);
+    abort();
   }
 
   // Unregister dispatch callback
   rocprofiler_remove_queue_callbacks();
 
+  printf("ROCPRofiler: Waiting for outstanding dispatches ..."); fflush(stdout);
+  while(context_count != context_collected); usleep(1000);
+  printf(".done\n"); fflush(stdout);
+
   // Dump stored profiling output data
-  printf("\nROCPRofiler: %u contexts collected", context_collected);
+  printf("ROCPRofiler: %u contexts collected", context_collected);
   if (result_file_opened) printf(", output directory %s", result_prefix);
   printf("\n"); fflush(stdout);
-  dump_context_array();
-  if (!wait_list->empty()) {
-    printf("\nWaiting for outstanding dispatches..."); fflush(stdout);
-    while (wait_list->size() != 0) {
-      usleep(1000);
-      dump_wait_list();
+  //dump_context_array();
+  if (wait_list) {
+    if (!wait_list->empty()) {
+      printf("\nWaiting for pending kernels ..."); fflush(stdout);
+      while (wait_list->size() != 0) {
+        usleep(1000);
+        dump_wait_list();
+      }
+      printf(".done\n"); fflush(stdout);
     }
-    printf(".done\n"); fflush(stdout);
   }
   if (result_file_opened) fclose(result_file_handle);
 
