@@ -52,6 +52,8 @@ struct context_entry_t {
   FILE* file_handle;
 };
 
+// verbose mode
+static uint32_t verbose = 0;
 // Enable tracing
 static const bool trace_on = false;
 // Tool is unloaded
@@ -91,6 +93,8 @@ static uint32_t CTX_OUTSTANDING_WAIT = CTX_OUTSTANDING_WAIT_DFLT;
 #endif
 static uint32_t CTX_OUTSTANDING_MAX = 0;
 static uint32_t CTX_OUTSTANDING_MON = 0;
+// to truncate kernel names
+uint32_t to_truncate_names = 0;
 
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
@@ -109,6 +113,41 @@ void check_status(hsa_status_t status) {
     fprintf(stderr, "ERROR: %s\n", error_string);
     abort();
   }
+}
+
+std::string filtr_kernel_name(const std::string name) {
+  auto rit = name.rbegin();
+  auto rend = name.rend();
+  uint32_t counter = 0;
+  char open_token = 0;
+  char close_token = 0;
+  while (rit != rend) {
+    if (counter == 0) {
+      switch (*rit) {
+        case ')':
+          counter = 1;
+          open_token = ')';
+          close_token = '(';
+          break;
+        case '>':
+          counter = 1;
+          open_token = '>';
+          close_token = '<';
+          break;
+      }
+      if (counter == 0) break;
+    } else {
+      if (*rit == open_token) counter++;
+      if (*rit == close_token) counter--;
+    }
+    ++rit;
+  }
+  while (((*rit == ' ') || (*rit == '	')) && (rit != rend)) rit++;
+  auto rbeg = rit;
+  while ((*rit != ' ') && (*rit != ':') && (rit != rend)) rit++;
+  const uint32_t pos = rend - rit;
+  const uint32_t length = rit - rbeg;
+  return name.substr(pos, length);
 }
 
 void* monitor_thr_fun(void*) {
@@ -297,7 +336,9 @@ void output_results(FILE* file, const rocprofiler_feature_t* features, const uns
 // Output group intermeadate profiling results, created internally for complex metrics
 void output_group(FILE* file, const rocprofiler_group_t* group, const char* str) {
   for (unsigned i = 0; i < group->feature_count; ++i) {
-    output_results(file, group->features[i], 1, group->context, str);
+    if (group->features[i]->data.kind == ROCPROFILER_DATA_KIND_INT64) {
+      output_results(file, group->features[i], 1, group->context, str);
+    }
   }
 }
 
@@ -320,10 +361,12 @@ bool dump_context(context_entry_t* entry) {
   const rocprofiler_feature_t* features = entry->features;
   const unsigned feature_count = entry->feature_count;
 
+  const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
+
   fprintf(file_handle, "dispatch[%u], queue_index(%lu), kernel_name(\"%s\")",
     index,
     entry->data.queue_index,
-    entry->data.kernel_name);
+    nik_name.c_str());
   if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
     record->dispatch,
     record->begin,
@@ -341,12 +384,12 @@ bool dump_context(context_entry_t* entry) {
   if (group.context != NULL) {
     status = rocprofiler_group_get_data(&group);
     check_status(status);
-    // output_group(file, group, "Group[0] data");
+    if (verbose == 1)  output_group(file_handle, &group, "group0-data");
 
     status = rocprofiler_get_metrics(group.context);
     check_status(status);
     std::ostringstream oss;
-    oss << index << "__" << entry->data.kernel_name;
+    oss << index << "__" << filtr_kernel_name(entry->data.kernel_name);
     output_results(file_handle, features, feature_count, group.context, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
     free(const_cast<char*>(entry->data.kernel_name));
 
@@ -368,6 +411,11 @@ static inline bool dump_context_entry(context_entry_t* entry) {
 
 // Dump waiting entries
 static inline void dump_wait_list() {
+  if (pthread_mutex_lock(&mutex) != 0) {
+    perror("pthread_mutex_lock");
+    abort();
+  }
+
   auto it = wait_list->begin();
   auto end = wait_list->end();
   while (it != end) {
@@ -375,6 +423,11 @@ static inline void dump_wait_list() {
     if (dump_context_entry(*cur)) {
       wait_list->erase(cur);
     }
+  }
+
+  if (pthread_mutex_unlock(&mutex) != 0) {
+    perror("pthread_mutex_unlock");
+    abort();
   }
 }
 
@@ -494,7 +547,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
     status = rocprofiler_open(callback_data->agent, tool_data->features, tool_data->feature_count,
                               &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
     check_status(status);
-  
+
     // Check that we have only one profiling group
     uint32_t group_count = 0;
     status = rocprofiler_group_count(context, &group_count);
@@ -573,6 +626,10 @@ static inline void check_env_var(const char* var_name, uint32_t& val) {
   const char* str = getenv(var_name);
   if (str != NULL ) val = atol(str);
 }
+static inline void check_env_var(const char* var_name, uint64_t& val) {
+  const char* str = getenv(var_name);
+  if (str != NULL ) val = atoll(str);
+}
 
 // Tool constructor
 extern "C" PUBLIC_API void OnLoadTool()
@@ -609,8 +666,12 @@ extern "C" PUBLIC_API void OnLoadTool()
       else printf("Derived metrics:\n");
       rocprofiler_iterate_info(NULL, ROCPROFILER_INFO_KIND_METRIC, info_callback, info_symb);
     }
-    abort();
+    exit(1);
   }
+  // Enable verbose mode
+  check_env_var("ROCP_VERBOSE_MODE", verbose);
+  // Enable kernel names truncating
+  check_env_var("ROCP_TRUNCATE_NAMES", to_truncate_names);
   // Set outstanding dispatches parameter
   check_env_var("ROCP_OUTSTANDING_MAX", CTX_OUTSTANDING_MAX);
   check_env_var("ROCP_OUTSTANDING_MON", CTX_OUTSTANDING_MON);
@@ -774,7 +835,6 @@ extern "C" PUBLIC_API void OnLoadTool()
 
 // Tool destructor
 extern "C" PUBLIC_API void OnUnloadTool() {
-  printf("\nROCPRofiler: Finishing:\n"); fflush(stdout);
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
     abort();
@@ -789,15 +849,11 @@ extern "C" PUBLIC_API void OnUnloadTool() {
   // Unregister dispatch callback
   rocprofiler_remove_queue_callbacks();
 
-  printf("ROCPRofiler: Waiting for outstanding dispatches ..."); fflush(stdout);
-  while(context_count != context_collected); usleep(1000);
-  printf(".done\n"); fflush(stdout);
-
   // Dump stored profiling output data
-  printf("ROCPRofiler: %u contexts collected", context_collected);
+  printf("\nROCPRofiler: %u contexts collected", context_collected);
   if (result_file_opened) printf(", output directory %s", result_prefix);
   printf("\n"); fflush(stdout);
-  //dump_context_array();
+  dump_context_array();
   if (wait_list) {
     if (!wait_list->empty()) {
       printf("\nWaiting for pending kernels ..."); fflush(stdout);
