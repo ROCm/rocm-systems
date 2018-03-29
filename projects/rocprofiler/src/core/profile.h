@@ -94,7 +94,7 @@ class Profile {
     if (profile_.parameters) free(const_cast<parameter_t*>(profile_.parameters));
     if (completion_signal_.handle) {
       hsa_status_t status = hsa_signal_destroy(completion_signal_);
-      if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_destroy " << std::hex << status);
+      if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "signal_destroy " << std::hex << status);
     }
   }
 
