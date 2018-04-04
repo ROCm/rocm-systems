@@ -322,6 +322,7 @@ class Context {
   }
 
   struct callback_data_t {
+    const profile_t* profile;
     info_vector_t* info_vector;
     size_t index;
     char* ptr;
@@ -340,7 +341,7 @@ class Context {
         if (!complete) WARN_LOGGING("timeout");
       }
       for (rocprofiler_feature_t* rinfo : *(tuple.info_vector)) rinfo->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
-      callback_data_t callback_data{tuple.info_vector, tuple.info_vector->size(), NULL};
+      callback_data_t callback_data{tuple.profile, tuple.info_vector, tuple.info_vector->size(), NULL};
       const hsa_status_t status =
           api_->hsa_ven_amd_aqlprofile_iterate_data(tuple.profile, DataCallback, &callback_data);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "context iterate data failed");
@@ -404,6 +405,7 @@ class Context {
                                    hsa_ven_amd_aqlprofile_info_data_t* ainfo_data, void* data) {
     hsa_status_t status = HSA_STATUS_SUCCESS;
     callback_data_t* callback_data = reinterpret_cast<callback_data_t*>(data);
+    const profile_t* profile = callback_data->profile;
     info_vector_t& info_vector = *(callback_data->info_vector);
     uint32_t index = callback_data->index;
     const uint32_t sample_id = ainfo_data->sample_id;
@@ -425,39 +427,40 @@ class Context {
       } else if (ainfo_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
         if (rinfo->data.result_bytes.copy) {
           if (sample_id == 0) {
-            if (rinfo->data.result_bytes.size == 0) {
-              const uint32_t output_buffer_size = SqttProfile::GetSize();
+              const uint32_t output_buffer_size = profile->output_buffer.size;
               const uint32_t output_buffer_size64 = output_buffer_size / sizeof(uint64_t);
-              rinfo->data.result_bytes.ptr = calloc(output_buffer_size64, sizeof(uint64_t));
+              void* ptr = calloc(output_buffer_size64, sizeof(uint64_t));
               rinfo->data.result_bytes.size = output_buffer_size;
-            } else if (rinfo->data.result_bytes.size != SqttProfile::GetSize()) {
-              EXC_RAISING(HSA_STATUS_ERROR, "result bytes copy mode, data array size mismatch(" << rinfo->data.result_bytes.size << ")");
-            }
+              rinfo->data.result_bytes.ptr = ptr;
+              callback_data->ptr = reinterpret_cast<char*>(ptr);
           }
           char* result_bytes_ptr = reinterpret_cast<char*>(rinfo->data.result_bytes.ptr);
           const char* end = result_bytes_ptr + rinfo->data.result_bytes.size;
           const char* src = reinterpret_cast<char*>(ainfo_data->sqtt_data.ptr);
-          const uint32_t size = ainfo_data->sqtt_data.size;
-          char* ptr = (sample_id == 0) ? result_bytes_ptr : callback_data->ptr;
-          uint64_t* header = reinterpret_cast<uint64_t*>(ptr);
+          uint32_t size = ainfo_data->sqtt_data.size;
+          char* ptr = callback_data->ptr;
+          uint32_t* header = reinterpret_cast<uint32_t*>(ptr);
           char* dest = ptr + sizeof(*header);
 
-          if ((dest + size) < end) {
-            hsa_status_t status = hsa_memory_copy(dest, src, size);
-            if (status == HSA_STATUS_SUCCESS) {
-              *header = size;
-              callback_data->ptr = dest + align_size(size, sizeof(uint64_t));
-              rinfo->data.result_bytes.instance_count = sample_id + 1;
-              rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
-            }
-          } else {
-            EXC_RAISING(HSA_STATUS_ERROR, "result bytes copy mode, out of boundary, size = " << rinfo->data.result_bytes.size);
+          if ((dest + size) >= end) {
+            if (dest < end) size = end - dest;
+            else EXC_RAISING(HSA_STATUS_ERROR, "SQTT data out of output buffer");
+          }
+
+          hsa_status_t status = hsa_memory_copy(dest, src, size);
+          if (status == HSA_STATUS_SUCCESS) {
+            *header = size;
+            callback_data->ptr = dest + align_size(size, sizeof(uint32_t));
+            rinfo->data.result_bytes.instance_count = sample_id + 1;
+            rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
           }
         } else {
           if (sample_id == 0) {
-            rinfo->data.result_bytes.ptr = ainfo_data->sqtt_data.ptr;
+            rinfo->data.result_bytes.ptr = profile->output_buffer.ptr;
+            rinfo->data.result_bytes.size = profile->output_buffer.size;
             rinfo->data.result_bytes.instance_count = UINT32_MAX;
           }
+
           rinfo->data.result_bytes.instance_count += 1;
           rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
         }

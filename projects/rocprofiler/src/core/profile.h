@@ -113,7 +113,8 @@ class Profile {
       // Check the profile buffer sizes
       status = api->hsa_ven_amd_aqlprofile_start(&profile_, NULL);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_start(NULL)");
-      Allocate(rsrc);
+      status = Allocate(rsrc);
+      if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "Allocate()");
       // Generate start/stop profiling packets
       status = api->hsa_ven_amd_aqlprofile_start(&profile_, &start);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_start");
@@ -211,7 +212,7 @@ class PmcProfile : public Profile {
 class SqttProfile : public Profile {
  public:
   static inline void SetSize(const uint32_t& size) { output_buffer_size_ = size; }
-  static inline uint32_t GetSize() { return output_buffer_size_; }
+//  static inline uint32_t GetSize() { return output_buffer_size_; }
 
   SqttProfile(const util::AgentInfo* agent_info) : Profile(agent_info) {
     profile_.type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_SQTT;
@@ -225,9 +226,9 @@ class SqttProfile : public Profile {
   }
 
   hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) {
-    profile_.output_buffer.size = output_buffer_size_;
     profile_.command_buffer.ptr =
         rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
+    profile_.output_buffer.size = output_buffer_size_;
     profile_.output_buffer.ptr =
         rsrc->AllocateLocalMemory(agent_info_, profile_.output_buffer.size);
     return (profile_.command_buffer.ptr && profile_.output_buffer.ptr) ? HSA_STATUS_SUCCESS

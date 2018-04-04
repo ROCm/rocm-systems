@@ -100,8 +100,10 @@ static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
 // Error handler
-void fatal(const char* msg) {
-  fprintf(stderr, "%s\n", msg);
+void fatal(const std::string msg) {
+  fflush(stdout);
+  fprintf(stderr, "%s\n\n", msg.c_str());
+  fflush(stderr);
   abort();
 }
 
@@ -206,7 +208,7 @@ context_entry_t* alloc_context_entry() {
     abort();
   }
 
-  const uint32_t index = next_context_count();
+  const uint32_t index = next_context_count() - 1;
   auto ret = context_array->insert({index, context_entry_t{}});
   if (ret.second == false) {
     fprintf(stderr, "context_array corruption, index repeated %u\n", index);
@@ -277,7 +279,6 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
   if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
     fprintf(arg->file, "    SE(%u) size(%u)\n", info_data->sample_id, info_data->sqtt_data.size);
     dump_sqtt_trace(arg->label, info_data->sample_id, info_data->sqtt_data.ptr, info_data->sqtt_data.size);
-
   } else
     status = HSA_STATUS_ERROR;
   return status;
@@ -305,17 +306,18 @@ void output_results(FILE* file, const rocprofiler_feature_t* features, const uns
           uint64_t size = 0;
 
           const char* ptr = reinterpret_cast<const char*>(p->data.result_bytes.ptr);
+          const char* end = reinterpret_cast<const char*>(ptr + p->data.result_bytes.size);
           for (unsigned i = 0; i < p->data.result_bytes.instance_count; ++i) {
-            const uint32_t chunk_size = *reinterpret_cast<const uint64_t*>(ptr);
-            const char* chunk_data = ptr + sizeof(uint64_t);
-            dump_sqtt_trace(label, i, chunk_data, chunk_size);
+            const uint32_t chunk_size = *reinterpret_cast<const uint32_t*>(ptr);
+            const char* chunk_data = ptr + sizeof(uint32_t);
+            if (chunk_data >= end) fatal("SQTT data is out of the result buffer size");
 
-            const uint32_t off = align_size(chunk_size, sizeof(uint64_t));
+            dump_sqtt_trace(label, i, chunk_data, chunk_size);
+            const uint32_t off = align_size(chunk_size, sizeof(uint32_t));
             ptr = chunk_data + off;
-            size += chunk_size;
+            if (chunk_data >= end) fatal("SQTT data ptr is out of the result buffer size");
           }
           fprintf(file, "size(%lu)\n", size);
-          if (size > p->data.result_bytes.size) fatal("SQTT data size is out of the result buffer size");
           free(p->data.result_bytes.ptr);
           const_cast<rocprofiler_feature_t*>(p)->data.result_bytes.size = 0;
         } else {
@@ -646,7 +648,7 @@ extern "C" PUBLIC_API void OnLoadTool()
   }
 
   std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
-  parameters_dict["COMPUTE_UNIT_TARGET"] =
+  parameters_dict["TARGET_CU"] =
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET;
   parameters_dict["VM_ID_MASK"] =
       HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK;
@@ -760,13 +762,21 @@ extern "C" PUBLIC_API void OnLoadTool()
   unsigned index = metrics_vec.size();
   for (auto* entry : traces_list) {
     auto params_list = xml->GetNodes("top.trace.parameters");
-    if (params_list.size() != 1) {
-      fprintf(stderr, "ROCProfiler: Single input 'parameters' section is supported\n");
-      abort();
+    if (params_list.size() > 1) {
+      fatal("ROCProfiler: Single input 'parameters' section is supported");
     }
-    const std::string& name = entry->opts["name"];
-    const bool to_copy_data = (entry->opts["copy"] == "true");
-    printf("    %s (\n", name.c_str());
+    std::string name = "";
+    bool to_copy_data = false;
+    for (const auto& opt : entry->opts) {
+//      const std::string& name = entry->opts["name"];
+//      const bool to_copy_data = (entry->opts["copy"] == "true");
+      if (opt.first == "name") name = opt.second;
+      else if (opt.first == "copy") to_copy_data = (opt.second == "true");
+      else fatal("ROCProfiler: Bad trace property '" + opt.first + "'");
+    }
+    if (name == "") fatal("ROCProfiler: Bad trace properties, name is not specified");
+
+    printf("    %s (", name.c_str());
     features[index] = {};
     features[index].kind = ROCPROFILER_FEATURE_KIND_TRACE;
     features[index].name = strdup(name.c_str());
@@ -783,7 +793,7 @@ extern "C" PUBLIC_API void OnLoadTool()
           abort();
         }
         const uint32_t value = strtol(v.second.c_str(), NULL, 0);
-        printf("      %s = 0x%x\n", parameter_name.c_str(), value);
+        printf("\n      %s = 0x%x", parameter_name.c_str(), value);
         parameters[p_index] = {};
         parameters[p_index].parameter_name = parameters_dict[parameter_name];
         parameters[p_index].value = value;
@@ -793,7 +803,9 @@ extern "C" PUBLIC_API void OnLoadTool()
       features[index].parameters = parameters;
       features[index].parameter_count = parameter_count;
     }
-    printf("    )\n");
+    if (params_list.empty() == false) printf("\n    ");
+    printf(")\n");
+    fflush(stdout);
     ++index;
   }
   fflush(stdout);
