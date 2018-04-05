@@ -72,6 +72,8 @@ class Xml {
 
   static void Destroy(Xml *xml) { delete xml; }
 
+  std::string GetName() { return file_name_; }
+
   void AddExpr(const std::string& full_tag, const std::string& name, const std::string& expr) {
     const std::size_t pos = full_tag.rfind('.');
     const std::size_t pos1 = (pos == std::string::npos) ? 0 : pos + 1;
@@ -89,12 +91,12 @@ class Xml {
     AddExpr(full_tag, name, oss.str());
   }
 
-  nodes_t GetNodes(std::string global_tag) { return (*map_)[global_tag]; }
+  nodes_t GetNodes(const std::string& global_tag) { return (*map_)[global_tag]; }
 
   template <class F>
   F ForEach(const F& f_i) {
     F f = f_i;
-    for (auto& entry : *map_) {
+    if (map_) for (auto& entry : *map_) {
       for (auto node : entry.second) {
         if (f.fun(entry.first, node) == false) break;
       }
@@ -105,7 +107,7 @@ class Xml {
   template <class F>
   F ForEach(const F& f_i) const {
     F f = f_i;
-    for (auto& entry : *map_) {
+    if (map_) for (auto& entry : *map_) {
       for (auto node : entry.second) {
         if (f.fun(entry.first, node) == false) break;
       }
@@ -163,7 +165,7 @@ class Xml {
   bool Init() {
     fd_ = open(file_name_.c_str(), O_RDONLY);
     if (fd_ == -1) {
-      perror((std::string("open XML file ") + file_name_).c_str());
+      //perror((std::string("open XML file ") + file_name_).c_str());
       return false;
     }
 

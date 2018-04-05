@@ -94,7 +94,7 @@ class Xml {
   template <class F>
   F ForEach(const F& f_i) {
     F f = f_i;
-    for (auto& entry : *map_) {
+    if (map_) for (auto& entry : *map_) {
       for (auto node : entry.second) {
         if (f.fun(entry.first, node) == false) break;
       }
@@ -105,7 +105,7 @@ class Xml {
   template <class F>
   F ForEach(const F& f_i) const {
     F f = f_i;
-    for (auto& entry : *map_) {
+    if (map_) for (auto& entry : *map_) {
       for (auto node : entry.second) {
         if (f.fun(entry.first, node) == false) break;
       }
@@ -163,7 +163,7 @@ class Xml {
   bool Init() {
     fd_ = open(file_name_.c_str(), O_RDONLY);
     if (fd_ == -1) {
-      perror((std::string("open XML file ") + file_name_).c_str());
+      //perror((std::string("open XML file ") + file_name_).c_str());
       return false;
     }
 

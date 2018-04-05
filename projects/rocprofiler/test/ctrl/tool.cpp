@@ -52,6 +52,8 @@ struct context_entry_t {
   FILE* file_handle;
 };
 
+//
+const std::string rcfile_name = "rpl_rc.xml";
 // verbose mode
 static uint32_t verbose = 0;
 // Enable tracing
@@ -323,7 +325,8 @@ void output_results(FILE* file, const rocprofiler_feature_t* features, const uns
         } else {
           fprintf(file, "(\n");
           trace_data_arg_t trace_data_arg{file, label};
-          rocprofiler_iterate_trace_data(context, trace_data_cb, reinterpret_cast<void*>(&trace_data_arg));
+          hsa_status_t status = rocprofiler_iterate_trace_data(context, trace_data_cb, reinterpret_cast<void*>(&trace_data_arg));
+          check_status(status);
           fprintf(file, "  )\n");
         }
         break;
@@ -595,7 +598,8 @@ static hsa_status_t info_callback(const rocprofiler_info_data_t info, void * arg
   return HSA_STATUS_SUCCESS;
 }
 
-void get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field, const std::string& delim, std::vector<std::string>* vec, const char* label = NULL) {
+int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field, const std::string& delim, std::vector<std::string>* vec, const char* label = NULL) {
+  int parse_iter = 0;
   auto nodes = xml->GetNodes(tag);
   auto rit = nodes.rbegin();
   auto rend = nodes.rend();
@@ -608,20 +612,49 @@ void get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& fie
     const std::string array_string = (*rit)->opts[field];
     if (label != NULL) printf("%s%s = %s\n", label, field.c_str(), array_string.c_str());
     size_t pos1 = 0;
-    while (pos1 < array_string.length()) {
+    const size_t string_len = array_string.length();
+    while (pos1 < string_len) {
       const size_t pos2 = array_string.find(delim, pos1);
-      const std::string token = array_string.substr(pos1, pos2 - pos1);
-      vec->push_back(token);
+      const size_t token_len = (pos2 != std::string::npos) ? pos2 - pos1 : string_len - pos1;
+      const std::string token = array_string.substr(pos1, token_len);
+
+      const std::string space_chars_set = " \t";
+      const size_t first_pos = token.find_first_not_of(space_chars_set);
+      size_t norm_len = 0;
+      std::string error_str = "none";
+      if (first_pos != std::string::npos) {
+        const size_t last_pos = token.find_last_not_of(space_chars_set);
+        if (last_pos == std::string::npos) error_str = "token string error: \"" + token + "\"";
+        else {
+          const size_t end_pos = last_pos + 1; 
+          if (end_pos <= first_pos) error_str = "token string error: \"" + token + "\"";
+          else norm_len = end_pos - first_pos;
+        }
+      }
+
+      if (norm_len != 0) {
+        vec->push_back(token.substr(first_pos, norm_len));
+      }
+
+      if (((first_pos != std::string::npos) && (norm_len == 0)) ||
+          ((first_pos == std::string::npos) && (pos2 != std::string::npos))) { 
+        fatal("Tokens array parsing error, file '" + xml->GetName() + "', " + tag + "::" + field + ": " + error_str);
+      }
+
       if (pos2 == std::string::npos) break;
       pos1 = pos2 + 1;
+      ++parse_iter;
     }
   }
+
+  return parse_iter;
 }
 
-void get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field, const std::string& delim, std::vector<uint32_t>* vec, const char* label = NULL) {
+int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field, const std::string& delim, std::vector<uint32_t>* vec, const char* label = NULL) {
   std::vector<std::string> str_vec;
-  get_xml_array(xml, tag, field, delim, &str_vec, label);
+  const int parse_iter = get_xml_array(xml, tag, field, delim, &str_vec, label);
   for (const std::string& str : str_vec) vec->push_back(atoi(str.c_str()));
+  return parse_iter;
 }
 
 static inline void check_env_var(const char* var_name, uint32_t& val) {
@@ -645,6 +678,21 @@ extern "C" PUBLIC_API void OnLoadTool()
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
     abort();
+  }
+
+  xml::Xml* rcfile = xml::Xml::Create(std::string("./") + rcfile_name);
+  const char* home_dir = getenv("HOME");
+  if (rcfile == NULL && home_dir != NULL) {
+    rcfile = xml::Xml::Create(std::string(home_dir) + "/" + rcfile_name);
+  }
+  if (rcfile != NULL) {
+    // Getting defaults
+    auto defaults_list = rcfile->GetNodes("top.defaults");
+    for (auto* entry : defaults_list) {
+      for (const auto& opt : entry->opts) {
+        std::cout << "default: " << opt.first << " = " << opt.second << std::endl;
+      }
+    }
   }
 
   std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
@@ -734,12 +782,21 @@ extern "C" PUBLIC_API void OnLoadTool()
   // Getting GPU indexes
   gpu_index_vec = new std::vector<uint32_t>;
   get_xml_array(xml, "top.metric", "gpu_index", ",", gpu_index_vec, "  ");
+
   // Getting kernel names
   kernel_string_vec = new std::vector<std::string>;
   get_xml_array(xml, "top.metric", "kernel", ",", kernel_string_vec, "  ");
+
   // Getting profiling range
   range_vec = new std::vector<uint32_t>;
-  get_xml_array(xml, "top.metric", "range", ":", range_vec, "  ");
+  const int range_parse_iter = get_xml_array(xml, "top.metric", "range", ":", range_vec, "  ");
+  if ((range_vec->size() > 2) || (range_parse_iter > 1))
+  {
+    fatal("Bad range format, input file " + xml->GetName());
+  }
+  if ((range_vec->size() == 1) && (range_parse_iter == 0)) {
+    range_vec->push_back(*(range_vec->begin()) + 1);
+  }
 
   // Getting traces
   auto traces_list = xml->GetNodes("top.trace");
@@ -768,8 +825,6 @@ extern "C" PUBLIC_API void OnLoadTool()
     std::string name = "";
     bool to_copy_data = false;
     for (const auto& opt : entry->opts) {
-//      const std::string& name = entry->opts["name"];
-//      const bool to_copy_data = (entry->opts["copy"] == "true");
       if (opt.first == "name") name = opt.second;
       else if (opt.first == "copy") to_copy_data = (opt.second == "true");
       else fatal("ROCProfiler: Bad trace property '" + opt.first + "'");
