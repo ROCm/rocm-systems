@@ -24,7 +24,7 @@ export ROCP_INPUT=input.xml
 export ROCP_OUTPUT_DIR=./RESULTS
 
 if [ ! -e $ROCP_TOOL_LIB ] ; then
-  ln -s test/$ROCP_TOOL_LIB
+  export ROCP_TOOL_LIB=test/libtool.so
 fi
 
 if [ -n "$1" ] ; then
