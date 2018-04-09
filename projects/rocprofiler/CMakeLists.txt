@@ -76,11 +76,12 @@ endif ()
 ## Build tests
 add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 
-## Add the install directives for the runtime library.
-install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${ROCPROFILER_NAME}/lib COMPONENT ${ROCPROFILER_LIBRARY} )
+## Set install information
+install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${ROCPROFILER_NAME}/lib )
+install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/inc DESTINATION ${ROCPROFILER_NAME}/include )
 
-## Add the packaging directives for the runtime library.
-set ( CPACK_PACKAGE_NAME ${ROCPROFILER_NAME} )
+## Packaging directives
+set ( CPACK_PACKAGE_NAME "${ROCPROFILER_NAME}-dev" )
 set ( CPACK_PACKAGE_VENDOR "AMD" )
 set ( CPACK_PACKAGE_VERSION_MAJOR ${BUILD_VERSION_MAJOR} )
 set ( CPACK_PACKAGE_VERSION_MINOR ${BUILD_VERSION_MINOR} )
@@ -90,10 +91,12 @@ set ( CPACK_PACKAGE_DESCRIPTION_SUMMARY "ROCPROFILER library for AMD HSA runtime
 set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" )
 
 ## Debian package specific variables
+set ( CPACK_DEBIAN_PACKAGE_DEPENDS "hsa-rocr-dev" )
 set ( CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/RadeonOpenCompute/HSA-RocProfiler" )
 set ( CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst;${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm" )
 
 ## RPM package specific variables
+set ( CPACK_RPM_PACKAGE_DEPENDS "hsa-rocr-dev" )
 set ( CPACK_RPM_PRE_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_post" )
 set ( CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_postun" )
 
