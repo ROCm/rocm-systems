@@ -76,9 +76,9 @@ endif ()
 ## Build tests
 add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 
-## Set install information
+## Install information
 install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${ROCPROFILER_NAME}/lib )
-install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/inc DESTINATION ${ROCPROFILER_NAME}/include )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h DESTINATION ${ROCPROFILER_NAME}/include )
 
 ## Packaging directives
 set ( CPACK_PACKAGE_NAME "${ROCPROFILER_NAME}-dev" )
