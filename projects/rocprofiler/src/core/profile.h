@@ -212,7 +212,7 @@ class PmcProfile : public Profile {
 class SqttProfile : public Profile {
  public:
   static inline void SetSize(const uint32_t& size) { output_buffer_size_ = size; }
-//  static inline uint32_t GetSize() { return output_buffer_size_; }
+  static inline uint32_t GetSize() { return output_buffer_size_; }
 
   SqttProfile(const util::AgentInfo* agent_info) : Profile(agent_info) {
     profile_.type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_SQTT;

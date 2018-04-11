@@ -375,9 +375,8 @@ class Context {
     }
   }
 
-  static void SetTimeout(uint64_t timeout) {
-    timeout_ = timeout;
-  }
+  static void SetTimeout(uint64_t timeout) { timeout_ = timeout; }
+  static uint64_t GetTimeout() { return timeout_; }
 
  private:
   // Getting profling packets

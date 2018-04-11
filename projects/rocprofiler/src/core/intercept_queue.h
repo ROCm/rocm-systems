@@ -144,6 +144,7 @@ class InterceptQueue {
 
   static void SetTimeout(uint64_t timeout) { timeout_ = timeout; }
   static void TrackerOn(bool on) { tracker_on_ = on; }
+  static bool IsTrackerOn() { return tracker_on_; }
 
  private:
   InterceptQueue(const hsa_agent_t& agent, hsa_queue_t* const queue, ProxyQueue* proxy) :

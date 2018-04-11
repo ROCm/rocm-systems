@@ -20,14 +20,10 @@ typedef void (*on_submit_cb_t)(const void* packet, uint64_t count, uint64_t que_
 class ProxyQueue : public Queue {
  public:
   static void InitFactory() {
-#ifdef ROCP_HSA_PROXY
     const char* type = getenv("ROCP_PROXY_QUEUE");
     if (type != NULL) {
       if (strncmp(type, "rocp", 4) == 0) rocp_type_ = true;
     }
-#else
-    rocp_type_ = true;
-#endif
   }
 
   static void HsaIntercept(HsaApiTable* table);

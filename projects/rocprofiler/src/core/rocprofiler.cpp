@@ -48,10 +48,8 @@ decltype(hsa_queue_load_write_index_scacquire)* hsa_queue_load_write_index_scacq
 decltype(hsa_queue_store_write_index_screlease)* hsa_queue_store_write_index_screlease_fn;
 decltype(hsa_queue_load_read_index_scacquire)* hsa_queue_load_read_index_scacquire_fn;
 
-#ifdef ROCP_HSA_PROXY
 decltype(hsa_amd_queue_intercept_create)* hsa_amd_queue_intercept_create_fn;
 decltype(hsa_amd_queue_intercept_register)* hsa_amd_queue_intercept_register_fn;
-#endif
 
 ::HsaApiTable* kHsaApiTable;
 
@@ -71,10 +69,8 @@ void SaveHsaApi(::HsaApiTable* table) {
   hsa_queue_store_write_index_screlease_fn = table->core_->hsa_queue_store_write_index_screlease_fn;
   hsa_queue_load_read_index_scacquire_fn = table->core_->hsa_queue_load_read_index_scacquire_fn;
 
-#ifdef ROCP_HSA_PROXY
   hsa_amd_queue_intercept_create_fn = table->amd_ext_->hsa_amd_queue_intercept_create_fn;
   hsa_amd_queue_intercept_register_fn = table->amd_ext_->hsa_amd_queue_intercept_register_fn;
-#endif
 }
 
 void RestoreHsaApi() {
@@ -93,37 +89,58 @@ void RestoreHsaApi() {
   table->core_->hsa_queue_store_write_index_screlease_fn = hsa_queue_store_write_index_screlease_fn;
   table->core_->hsa_queue_load_read_index_scacquire_fn = hsa_queue_load_read_index_scacquire_fn;
 
-#ifdef ROCP_HSA_PROXY
   table->amd_ext_->hsa_amd_queue_intercept_create_fn = hsa_amd_queue_intercept_create_fn;
   table->amd_ext_->hsa_amd_queue_intercept_register_fn = hsa_amd_queue_intercept_register_fn;
-#endif
 }
 
 typedef void (*tool_handler_t)();
+typedef void (*tool_handler_prop_t)(rocprofiler_settings_t*);
 void * kTtoolHandle = NULL;
 
-void LoadTool(const char* tool_lib) {
+bool LoadTool() {
+  bool intercept_mode = false;
+  const char* tool_lib = getenv("ROCP_TOOL_LIB");
+
   if (tool_lib) {
+    intercept_mode = true;
+
     kTtoolHandle = dlopen(tool_lib, RTLD_NOW);
     if (kTtoolHandle == NULL) {
       fprintf(stderr, "ROCProfiler: can't load tool library \"%s\"\n", tool_lib);
       fprintf(stderr, "%s\n", dlerror());
-      exit(1);
+      abort();
     }
     tool_handler_t handler = reinterpret_cast<tool_handler_t>(dlsym(kTtoolHandle, "OnLoadTool"));
-    if (handler == NULL) {
-      fprintf(stderr, "ROCProfiler: tool library corrupted, OnLoadTool() method is expected\n");
+    tool_handler_prop_t handler_prop = reinterpret_cast<tool_handler_prop_t>(dlsym(kTtoolHandle, "OnLoadToolProp"));
+    if ((handler == NULL) && (handler_prop == NULL)) {
+      fprintf(stderr, "ROCProfiler: tool library corrupted, OnLoadTool()/OnLoadToolProp() method is expected\n");
       fprintf(stderr, "%s\n", dlerror());
-      exit(1);
+      abort();
     }
     tool_handler_t on_unload_handler = reinterpret_cast<tool_handler_t>(dlsym(kTtoolHandle, "OnUnloadTool"));
     if (on_unload_handler == NULL) {
       fprintf(stderr, "ROCProfiler: tool library corrupted, OnUnloadTool() method is expected\n");
       fprintf(stderr, "%s\n", dlerror());
-      exit(1);
+      abort();
     }
-    handler();
+
+    rocprofiler_settings_t settings{};
+    settings.intercept_mode = (intercept_mode) ? 1 : 0;
+    settings.sqtt_size = SqttProfile::GetSize();
+    settings.timeout = Context::GetTimeout();
+    settings.timestamp_on = InterceptQueue::IsTrackerOn() ? 1 : 0;
+
+    if (handler) handler();
+    else if (handler_prop) handler_prop(&settings);
+
+    intercept_mode = (settings.intercept_mode != 0);
+    SqttProfile::SetSize(settings.sqtt_size);
+    Context::SetTimeout(settings.timeout);
+    InterceptQueue::SetTimeout(settings.timeout);
+    InterceptQueue::TrackerOn(settings.timestamp_on != 0);
   }
+
+  return intercept_mode;
 }
 
 void UnloadTool() {
@@ -132,7 +149,7 @@ void UnloadTool() {
     if (handler == NULL) {
       fprintf(stderr, "ROCProfiler error: tool library corrupted, OnUnloadTool() method is expected\n");
       fprintf(stderr, "%s\n", dlerror());
-      exit(1);
+      abort();
     }
     handler();
     dlclose(kTtoolHandle);
@@ -141,25 +158,6 @@ void UnloadTool() {
 
 CONSTRUCTOR_API void constructor() {
   util::Logger::Create();
-
-  const char* sqtt_size_str = getenv("ROCP_SQTT_SIZE");
-  if (sqtt_size_str != NULL) {
-    const uint32_t sqtt_size_val = strtoull(sqtt_size_str, NULL, 0);
-    SqttProfile::SetSize(sqtt_size_val);
-  }
-  
-  const char* timeout_str = getenv("ROCP_DATA_TIMEOUT");
-  if (timeout_str != NULL) {
-    const uint64_t timeout_val = strtoull(timeout_str, NULL, 0);
-    Context::SetTimeout(timeout_val);
-    InterceptQueue::SetTimeout(timeout_val);
-  }
-
-  const char* tracker_on_str = getenv("ROCP_TRACKER_ON");
-  if (tracker_on_str != NULL) {
-    if (strncmp(tracker_on_str, "true", 4) == 0) InterceptQueue::TrackerOn(true);
-    if (strncmp(tracker_on_str, "false", 4) == 0) InterceptQueue::TrackerOn(false);
-  }
 }
 
 DESTRUCTOR_API void destructor() {
@@ -185,6 +183,7 @@ const MetricsDict* GetMetrics(const hsa_agent_t& agent) {
   return metrics;
 }
 
+rocprofiler_properties_t rocprofiler_properties;
 uint64_t Context::timeout_ = UINT64_MAX;
 uint32_t SqttProfile::output_buffer_size_ = 0x2000000;  // 32M
 Tracker::mutex_t Tracker::mutex_;
@@ -200,15 +199,14 @@ extern "C" {
 // HSA-runtime tool on-load method
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
-  const bool intercept_mode = (getenv("ROCP_HSA_INTERCEPT") != NULL);
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
+  const bool intercept_mode = rocprofiler::LoadTool();
   // HSA intercepting
   if (intercept_mode) {
-    rocprofiler::InterceptQueue::HsaIntercept(table);
     rocprofiler::ProxyQueue::HsaIntercept(table);
+    rocprofiler::InterceptQueue::HsaIntercept(table);
   }
-  rocprofiler::LoadTool(getenv("ROCP_TOOL_LIB"));
   return true;
 }
 

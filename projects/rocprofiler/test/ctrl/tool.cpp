@@ -86,13 +86,6 @@ std::vector<std::string>* kernel_string_vec = NULL;
 //  DIspatch number range filter
 std::vector<uint32_t>* range_vec = NULL;
 // Otstanding dispatches parameters
-#if 0
-static uint32_t CTX_OUTSTANDING_MAX_DFLT = 10000;
-static uint32_t CTX_OUTSTANDING_WAIT_DFLT = 1000;
-static uint32_t CTX_OUTSTANDING_WAIT_MAX = 1000000;
-static uint32_t CTX_OUTSTANDING_MAX = CTX_OUTSTANDING_MAX_DFLT;
-static uint32_t CTX_OUTSTANDING_WAIT = CTX_OUTSTANDING_WAIT_DFLT;
-#endif
 static uint32_t CTX_OUTSTANDING_MAX = 0;
 static uint32_t CTX_OUTSTANDING_MON = 0;
 // to truncate kernel names
@@ -162,6 +155,8 @@ void* monitor_thr_fun(void*) {
       abort();
     }
     const uint32_t inflight = context_count - context_collected;
+    std::cerr << std::flush;
+    std::clog << std::flush;
     std::cout << "ROCProfiler: count(" << context_count << "), outstanding(" << inflight << "/" << CTX_OUTSTANDING_MAX << ")" << std::endl << std::flush;
     if (pthread_mutex_unlock(&mutex) != 0) {
       perror("pthread_mutex_unlock");
@@ -186,21 +181,6 @@ uint32_t next_context_count() {
 
 // Allocate entry to store profiling context
 context_entry_t* alloc_context_entry() {
-#if 0
-  uint32_t context_inflight = context_count - context_collected;
-  if (context_inflight > CTX_OUTSTANDING_MAX) {
-    if (trace_on) std::cout << "inflight " << context_inflight << " tid " << GetTid() << " <" << CTX_OUTSTANDING_WAIT << "usec, max " << CTX_OUTSTANDING_MAX << ">" <<  std::flush;
-    usleep(CTX_OUTSTANDING_WAIT);
-    if (CTX_OUTSTANDING_WAIT > CTX_OUTSTANDING_WAIT_MAX) {
-      CTX_OUTSTANDING_MAX = 1 + (CTX_OUTSTANDING_MAX >> 1);
-    } else {
-      CTX_OUTSTANDING_WAIT = CTX_OUTSTANDING_WAIT << 1;
-    }
-  } else {
-    CTX_OUTSTANDING_MAX = CTX_OUTSTANDING_MAX_DFLT;
-    CTX_OUTSTANDING_WAIT = CTX_OUTSTANDING_WAIT_DFLT;
-  }
-#endif
   if (CTX_OUTSTANDING_MAX != 0) {
     while((context_count - context_collected) > CTX_OUTSTANDING_MAX) usleep(1000);
   }
@@ -598,6 +578,27 @@ static hsa_status_t info_callback(const rocprofiler_info_data_t info, void * arg
   return HSA_STATUS_SUCCESS;
 }
 
+std::string normalize_token(const std::string token, bool not_empty, std::string label) {
+  const std::string space_chars_set = " \t";
+  const size_t first_pos = token.find_first_not_of(space_chars_set);
+  size_t norm_len = 0;
+  std::string error_str = "none";
+  if (first_pos != std::string::npos) {
+    const size_t last_pos = token.find_last_not_of(space_chars_set);
+    if (last_pos == std::string::npos) error_str = "token string error: \"" + token + "\"";
+    else {
+      const size_t end_pos = last_pos + 1; 
+      if (end_pos <= first_pos) error_str = "token string error: \"" + token + "\"";
+      else norm_len = end_pos - first_pos;
+    }
+  }
+  if (((first_pos != std::string::npos) && (norm_len == 0)) ||
+      ((first_pos == std::string::npos) && not_empty)) { 
+    fatal(label + ": " + error_str);
+  }
+  return (norm_len != 0) ? token.substr(first_pos, norm_len) : std::string("");
+}
+
 int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field, const std::string& delim, std::vector<std::string>* vec, const char* label = NULL) {
   int parse_iter = 0;
   auto nodes = xml->GetNodes(tag);
@@ -615,33 +616,12 @@ int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& fiel
     const size_t string_len = array_string.length();
     while (pos1 < string_len) {
       const size_t pos2 = array_string.find(delim, pos1);
+      const bool found = (pos2 != std::string::npos);
       const size_t token_len = (pos2 != std::string::npos) ? pos2 - pos1 : string_len - pos1;
       const std::string token = array_string.substr(pos1, token_len);
-
-      const std::string space_chars_set = " \t";
-      const size_t first_pos = token.find_first_not_of(space_chars_set);
-      size_t norm_len = 0;
-      std::string error_str = "none";
-      if (first_pos != std::string::npos) {
-        const size_t last_pos = token.find_last_not_of(space_chars_set);
-        if (last_pos == std::string::npos) error_str = "token string error: \"" + token + "\"";
-        else {
-          const size_t end_pos = last_pos + 1; 
-          if (end_pos <= first_pos) error_str = "token string error: \"" + token + "\"";
-          else norm_len = end_pos - first_pos;
-        }
-      }
-
-      if (norm_len != 0) {
-        vec->push_back(token.substr(first_pos, norm_len));
-      }
-
-      if (((first_pos != std::string::npos) && (norm_len == 0)) ||
-          ((first_pos == std::string::npos) && (pos2 != std::string::npos))) { 
-        fatal("Tokens array parsing error, file '" + xml->GetName() + "', " + tag + "::" + field + ": " + error_str);
-      }
-
-      if (pos2 == std::string::npos) break;
+      const std::string norm_str = normalize_token(token, found, "Tokens array parsing error, file '" + xml->GetName() + "', " + tag + "::" + field);
+      if (norm_str.length() != 0) vec->push_back(norm_str);
+      if (!found) break;
       pos1 = pos2 + 1;
       ++parse_iter;
     }
@@ -667,7 +647,7 @@ static inline void check_env_var(const char* var_name, uint64_t& val) {
 }
 
 // Tool constructor
-extern "C" PUBLIC_API void OnLoadTool()
+extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
 {
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
@@ -680,33 +660,61 @@ extern "C" PUBLIC_API void OnLoadTool()
     abort();
   }
 
-  xml::Xml* rcfile = xml::Xml::Create(std::string("./") + rcfile_name);
+  // Loading configuration rcfile
+  std::string rcpath = std::string("./") + rcfile_name;
+  xml::Xml* rcfile = xml::Xml::Create(rcpath);
   const char* home_dir = getenv("HOME");
   if (rcfile == NULL && home_dir != NULL) {
-    rcfile = xml::Xml::Create(std::string(home_dir) + "/" + rcfile_name);
+    rcpath = std::string(home_dir) + "/" + rcfile_name;
+    rcfile = xml::Xml::Create(rcpath);
+  }
+  const char* pkg_dir = getenv("ROCP_PACKAGE_DIR");
+  if (rcfile == NULL && pkg_dir != NULL) {
+    rcpath = std::string(pkg_dir) + "/" + rcfile_name;
+    rcfile = xml::Xml::Create(rcpath);
   }
   if (rcfile != NULL) {
     // Getting defaults
+    printf("ROCProfiler: rc-file '%s'\n", rcpath.c_str()); 
     auto defaults_list = rcfile->GetNodes("top.defaults");
     for (auto* entry : defaults_list) {
-      for (const auto& opt : entry->opts) {
-        std::cout << "default: " << opt.first << " = " << opt.second << std::endl;
+      const auto& opts = entry->opts;
+      auto it = opts.find("basenames");
+      if (it != opts.end()) { to_truncate_names = (it->second == "on") ? 1 : 0; }
+      it = opts.find("timestamp");
+      if (it != opts.end()) { settings->timestamp_on = (it->second == "on") ? 1 : 0; }
+      it = opts.find("ctx-limit");
+      if (it != opts.end()) { CTX_OUTSTANDING_MAX = atol(it->second.c_str()); }
+      it = opts.find("heartbeat");
+      if (it != opts.end()) { CTX_OUTSTANDING_MON = atol(it->second.c_str()); }
+      it = opts.find("sqtt-size");
+      if (it != opts.end()) {
+        std::string str = normalize_token(it->second, true, "option sqtt-size");
+        uint32_t multiplier = 1;
+        switch (str.back()) {
+          case 'K': multiplier = 1024; break;
+          case 'M': multiplier = 1024 * 1024; break;
+        }
+        if (multiplier != 1) str = str.substr(0, str.length() - 1);
+        settings->sqtt_size = strtoull(str.c_str(), NULL, 0) * multiplier;
       }
     }
   }
+  // Enable verbose mode
+  check_env_var("ROCP_VERBOSE_MODE", verbose);
+  // Enable kernel names truncating
+  check_env_var("ROCP_TRUNCATE_NAMES", to_truncate_names);
+  // Set outstanding dispatches parameter
+  check_env_var("ROCP_OUTSTANDING_MAX", CTX_OUTSTANDING_MAX);
+  check_env_var("ROCP_OUTSTANDING_MON", CTX_OUTSTANDING_MON);
+  // Enable timestamping
+  check_env_var("ROCP_TIMESTAMP_ON", settings->timestamp_on);
+  // Set data timeout
+  check_env_var("ROCP_DATA_TIMEOUT", settings->timeout);
+  // Set SQTT size
+  check_env_var("ROCP_SQTT_SIZE", settings->sqtt_size);
 
-  std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
-  parameters_dict["TARGET_CU"] =
-      HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET;
-  parameters_dict["VM_ID_MASK"] =
-      HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK;
-  parameters_dict["MASK"] =
-      HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK;
-  parameters_dict["TOKEN_MASK"] =
-      HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK;
-  parameters_dict["TOKEN_MASK2"] =
-      HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
-
+  // Printing out info
   char* info_symb = getenv("ROCP_INFO");
   if (info_symb != NULL) {
     if (*info_symb != 'b' && *info_symb != 'd') {
@@ -718,28 +726,6 @@ extern "C" PUBLIC_API void OnLoadTool()
     }
     exit(1);
   }
-  // Enable verbose mode
-  check_env_var("ROCP_VERBOSE_MODE", verbose);
-  // Enable kernel names truncating
-  check_env_var("ROCP_TRUNCATE_NAMES", to_truncate_names);
-  // Set outstanding dispatches parameter
-  check_env_var("ROCP_OUTSTANDING_MAX", CTX_OUTSTANDING_MAX);
-  check_env_var("ROCP_OUTSTANDING_MON", CTX_OUTSTANDING_MON);
-#if 0
-  // Set outstanding dispatches parameter
-  const char* dispatches_max = getenv("ROCP_OUTSTANDING_MAX");
-  const char* dispatches_wait = getenv("ROCP_OUTSTANDING_WAIT");
-  const char* dispatches_wait_max = getenv("ROCP_OUTSTANDING_WAIT_MAX");
-  if (dispatches_max != NULL ) {
-    if (dispatches_wait == NULL) fatal("ROCP_OUTSTANDING_WAIT should be defined together with ROCP_OUTSTANDING_MAX env var");
-    if (dispatches_wait_max == NULL) fatal("ROCP_OUTSTANDING_WAIT_MAX should be defined together with ROCP_OUTSTANDING_MAX env var");
-    CTX_OUTSTANDING_MAX_DFLT = atol(dispatches_max);
-    CTX_OUTSTANDING_WAIT_DFLT = atol(dispatches_wait);
-    CTX_OUTSTANDING_WAIT_MAX = atol(dispatches_wait_max);
-    CTX_OUTSTANDING_MAX = CTX_OUTSTANDING_MAX_DFLT;
-    CTX_OUTSTANDING_WAIT = CTX_OUTSTANDING_WAIT_DFLT;
-  }
-#endif
 
   // Set output file
   result_prefix = getenv("ROCP_OUTPUT_DIR");
@@ -760,8 +746,7 @@ extern "C" PUBLIC_API void OnLoadTool()
       perror(errmsg.str().c_str());
       abort();
     }
-  } else
-    result_file_handle = stdout;
+  } else result_file_handle = stdout;
 
   result_file_opened = (result_prefix != NULL) && (result_file_handle != NULL);
 
@@ -836,6 +821,18 @@ extern "C" PUBLIC_API void OnLoadTool()
     features[index].kind = ROCPROFILER_FEATURE_KIND_TRACE;
     features[index].name = strdup(name.c_str());
     features[index].data.result_bytes.copy = to_copy_data;
+
+    std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
+    parameters_dict["TARGET_CU"] =
+        HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET;
+    parameters_dict["VM_ID_MASK"] =
+        HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK;
+    parameters_dict["MASK"] =
+        HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK;
+    parameters_dict["TOKEN_MASK"] =
+        HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK;
+    parameters_dict["TOKEN_MASK2"] =
+        HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
 
     for (auto* params : params_list) {
       const unsigned parameter_count = params->opts.size();

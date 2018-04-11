@@ -42,16 +42,6 @@ if ( DEFINED ENV{CMAKE_DEBUG_TRACE} )
   add_definitions ( -DDEBUG_TRACE=1 )
 endif()
 
-## Enable HSA APIs intersepting
-if ( NOT "$ENV{CMAKE_HSA_INTERCEPT}" STREQUAL "no" )
-  add_definitions ( -DROCP_HSA_INTERCEPT=1 )
-endif()
-
-## Enable HSA proxy queue
-if ( NOT "$ENV{CMAKE_HSA_PROXY}" STREQUAL "no" )
-  add_definitions ( -DROCP_HSA_PROXY=1 )
-endif()
-
 ## Enable direct loading of AQL-profile HSA extension
 if ( DEFINED ENV{CMAKE_LD_AQLPROFILE} )
   add_definitions ( -DROCP_LD_AQLPROFILE=1 )

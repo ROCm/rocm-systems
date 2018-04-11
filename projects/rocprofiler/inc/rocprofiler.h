@@ -80,6 +80,16 @@ uint32_t rocprofiler_version_major();
 uint32_t rocprofiler_version_minor();
 
 ////////////////////////////////////////////////////////////////////////////////
+// Global properties structure
+
+typedef struct {
+  uint32_t intercept_mode;
+  uint32_t sqtt_size;
+  uint64_t timeout;
+  uint32_t timestamp_on;
+} rocprofiler_settings_t;
+
+////////////////////////////////////////////////////////////////////////////////
 // Returning the error string method
 
 hsa_status_t rocprofiler_error_string(

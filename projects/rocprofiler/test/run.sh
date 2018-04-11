@@ -11,8 +11,6 @@ export ROCPROFILER_LOG=1
 export HSA_TOOLS_LIB=librocprofiler64.so
 # tool library loaded by ROC profiler
 export ROCP_TOOL_LIB=libtool.so
-# enable HSA dispatch intercepting by ROC profiler
-export ROCP_HSA_INTERCEPT=1
 # ROC profiler metrics config file
 unset ROCP_PROXY_QUEUE
 # ROC profiler metrics config file
