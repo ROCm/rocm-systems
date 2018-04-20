@@ -328,6 +328,7 @@ uint8_t* HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t
     status = hsa_memory_allocate(agent_info->kernarg_region, size, (void**)&buffer);
   }
 
+  CHECK_STATUS("hsa_memory_allocate", status);
   return (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
 }
 
@@ -345,14 +346,21 @@ uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t s
 
   uint8_t* buffer = NULL;
   status = hsa_memory_allocate(agent_info->kernarg_region, size, (void**)&buffer);
+  CHECK_STATUS("hsa_memory_allocate", status);
   return (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
 }
 
-// Transfer data method
-bool HsaRsrcFactory::TransferData(void* dest_buff, void* src_buff, uint32_t length,
-                                  bool host_to_dev) {
-  hsa_status_t status;
-  status = hsa_memory_copy(dest_buff, src_buff, length);
+// Memcopy method
+bool HsaRsrcFactory::CopyToHost(void* dest_buff, const void* src_buff, uint32_t length) {
+  const hsa_status_t status = hsa_memory_copy(dest_buff, src_buff, length);
+  CHECK_STATUS("hsa_memory_copy", status);
+  return (status == HSA_STATUS_SUCCESS);
+}
+
+// Free method
+bool HsaRsrcFactory::MemoryFree(void* ptr) {
+  const hsa_status_t status = hsa_memory_free(ptr);
+  CHECK_STATUS("hsa_memory_free", status);
   return (status == HSA_STATUS_SUCCESS);
 }
 

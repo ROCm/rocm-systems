@@ -446,8 +446,8 @@ class Context {
             else EXC_RAISING(HSA_STATUS_ERROR, "SQTT data out of output buffer");
           }
 
-          hsa_status_t status = hsa_memory_copy(dest, src, size);
-          if (status == HSA_STATUS_SUCCESS) {
+          const bool suc = util::HsaRsrcFactory::CopyToHost(dest, src, size);
+          if (suc) {
             *header = size;
             callback_data->ptr = dest + align_size(size, sizeof(uint32_t));
             rinfo->data.result_bytes.instance_count = sample_id + 1;

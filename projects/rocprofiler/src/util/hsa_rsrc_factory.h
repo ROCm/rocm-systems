@@ -215,8 +215,11 @@ class HsaRsrcFactory {
   //
   uint8_t* AllocateSysMemory(const AgentInfo* agent_info, size_t size);
 
-  // Transfer data method
-  bool TransferData(void* dest_buff, void* src_buff, uint32_t length, bool host_to_dev);
+  // Memcopy method
+  static bool CopyToHost(void* dest_buff, const void* src_buff, uint32_t length);
+
+  // Free method
+  static bool MemoryFree(void* ptr);
 
   // Loads an Assembled Brig file and Finalizes it into Device Isa
   //

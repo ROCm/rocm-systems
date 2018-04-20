@@ -10,6 +10,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/syscall.h>   /* For SYS_xxx definitions */
 #include <sys/types.h>
 #include <unistd.h>
@@ -22,6 +23,7 @@
 #include <vector>
 
 #include "inc/rocprofiler.h"
+#include "util/hsa_rsrc_factory.h"
 #include "util/xml.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
@@ -45,6 +47,7 @@ struct callbacks_data_t {
 struct context_entry_t {
   uint32_t valid;
   uint32_t index;
+  hsa_agent_t agent;
   rocprofiler_group_t group;
   rocprofiler_feature_t* features;
   unsigned feature_count;
@@ -251,6 +254,7 @@ void dump_sqtt_trace(const char* label, const uint32_t chunk, const void* data, 
 struct trace_data_arg_t {
   FILE* file;
   const char* label;
+  hsa_agent_t agent;
 };
 
 // Trace data callback for getting trace data from GPU local mamory
@@ -259,8 +263,19 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
   hsa_status_t status = HSA_STATUS_SUCCESS;
   trace_data_arg_t* arg = reinterpret_cast<trace_data_arg_t*>(data);
   if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
-    fprintf(arg->file, "    SE(%u) size(%u)\n", info_data->sample_id, info_data->sqtt_data.size);
-    dump_sqtt_trace(arg->label, info_data->sample_id, info_data->sqtt_data.ptr, info_data->sqtt_data.size);
+    const uint32_t data_size = info_data->sqtt_data.size;
+    const void* data_ptr = info_data->sqtt_data.ptr;
+    fprintf(arg->file, "    SE(%u) size(%u)\n", info_data->sample_id, data_size);
+#if 1
+    dump_sqtt_trace(arg->label, info_data->sample_id, data_ptr, data_size);
+#else
+    void* buffer = malloc(data_size);
+    memset(buffer, 0, data_size);
+    const bool suc = HsaRsrcFactory::Instance().CopyToHost(arg->agent, buffer, data_ptr, data_size);
+    if (suc) dump_sqtt_trace(arg->label, info_data->sample_id, buffer, data_size);
+    else fatal("SQTT data memcopy to host failed");
+    free(buffer);
+#endif
   } else
     status = HSA_STATUS_ERROR;
   return status;
@@ -272,8 +287,12 @@ unsigned align_size(unsigned size, unsigned alignment) {
 }
 
 // Output profiling results for input features
-void output_results(FILE* file, const rocprofiler_feature_t* features, const unsigned feature_count,
-                    rocprofiler_t* context, const char* label) {
+void output_results(const context_entry_t* entry, const char* label) {
+  FILE* file = entry->file_handle;
+  const rocprofiler_feature_t* features = entry->features;
+  const unsigned feature_count = entry->feature_count;
+  rocprofiler_t* context = entry->group.context;
+
   for (unsigned i = 0; i < feature_count; ++i) {
     const rocprofiler_feature_t* p = &features[i];
     fprintf(file, "  %s ", p->name);
@@ -298,13 +317,14 @@ void output_results(FILE* file, const rocprofiler_feature_t* features, const uns
             const uint32_t off = align_size(chunk_size, sizeof(uint32_t));
             ptr = chunk_data + off;
             if (chunk_data >= end) fatal("SQTT data ptr is out of the result buffer size");
+            size += chunk_size;
           }
           fprintf(file, "size(%lu)\n", size);
           free(p->data.result_bytes.ptr);
           const_cast<rocprofiler_feature_t*>(p)->data.result_bytes.size = 0;
         } else {
           fprintf(file, "(\n");
-          trace_data_arg_t trace_data_arg{file, label};
+          trace_data_arg_t trace_data_arg{file, label, entry->agent};
           hsa_status_t status = rocprofiler_iterate_trace_data(context, trace_data_cb, reinterpret_cast<void*>(&trace_data_arg));
           check_status(status);
           fprintf(file, "  )\n");
@@ -319,10 +339,14 @@ void output_results(FILE* file, const rocprofiler_feature_t* features, const uns
 }
 
 // Output group intermeadate profiling results, created internally for complex metrics
-void output_group(FILE* file, const rocprofiler_group_t* group, const char* str) {
+void output_group(const context_entry_t* entry, const char* label) {
+  const rocprofiler_group_t* group = &(entry->group);
+  context_entry_t group_entry = *entry;
   for (unsigned i = 0; i < group->feature_count; ++i) {
     if (group->features[i]->data.kind == ROCPROFILER_DATA_KIND_INT64) {
-      output_results(file, group->features[i], 1, group->context, str);
+      group_entry.features = group->features[i];
+      group_entry.feature_count = 1;
+      output_results(&group_entry, label);
     }
   }
 }
@@ -341,11 +365,9 @@ bool dump_context(context_entry_t* entry) {
   }
 
   ++context_collected;
+
   const uint32_t index = entry->index;
   FILE* file_handle = entry->file_handle;
-  const rocprofiler_feature_t* features = entry->features;
-  const unsigned feature_count = entry->feature_count;
-
   const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
 
   fprintf(file_handle, "dispatch[%u], queue_index(%lu), kernel_name(\"%s\")",
@@ -369,13 +391,13 @@ bool dump_context(context_entry_t* entry) {
   if (group.context != NULL) {
     status = rocprofiler_group_get_data(&group);
     check_status(status);
-    if (verbose == 1)  output_group(file_handle, &group, "group0-data");
+    if (verbose == 1) output_group(entry, "group0-data");
 
     status = rocprofiler_get_metrics(group.context);
     check_status(status);
     std::ostringstream oss;
     oss << index << "__" << filtr_kernel_name(entry->data.kernel_name);
-    output_results(file_handle, features, feature_count, group.context, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
+    output_results(entry, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
     free(const_cast<char*>(entry->data.kernel_name));
 
     // Finishing cleanup
@@ -545,6 +567,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   }
 
   // Fill profiling context entry
+  entry->agent = callback_data->agent;
   entry->group = *group;
   entry->features = tool_data->features;
   entry->feature_count = tool_data->feature_count;

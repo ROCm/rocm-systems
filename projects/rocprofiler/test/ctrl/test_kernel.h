@@ -31,6 +31,8 @@ OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdint.h>
 #include <map>
 
+#include "util/hsa_rsrc_factory.h"
+
 // Class implements kernel test
 class TestKernel {
  public:
@@ -49,7 +51,12 @@ class TestKernel {
   typedef mem_map_t::iterator mem_it_t;
   typedef mem_map_t::const_iterator mem_const_it_t;
 
-  virtual ~TestKernel() {}
+  virtual ~TestKernel() {
+    for (auto& entry : mem_map_) {
+      void* ptr = entry.second.ptr;
+      if (ptr != NULL) HsaRsrcFactory::MemoryFree(ptr);
+    }
+  }
 
   // Initialize method
   virtual void Init() = 0;

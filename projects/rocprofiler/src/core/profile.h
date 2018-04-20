@@ -88,8 +88,8 @@ class Profile {
   }
   virtual ~Profile() {
     info_vector_.clear();
-    if (profile_.command_buffer.ptr) hsa_memory_free(profile_.command_buffer.ptr);
-    if (profile_.output_buffer.ptr) hsa_memory_free(profile_.output_buffer.ptr);
+    if (profile_.command_buffer.ptr) util::HsaRsrcFactory::MemoryFree(profile_.command_buffer.ptr);
+    if (profile_.output_buffer.ptr) util::HsaRsrcFactory::MemoryFree(profile_.output_buffer.ptr);
     if (profile_.events) free(const_cast<event_t*>(profile_.events));
     if (profile_.parameters) free(const_cast<parameter_t*>(profile_.parameters));
     if (completion_signal_.handle) {

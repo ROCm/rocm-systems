@@ -214,11 +214,10 @@ bool TestHsa::Run() {
   total_time_taken_ += dispatch_time_taken_;
 
   // Copy kernel buffers from local memory into system memory
-  hsa_rsrc_->TransferData(test_->GetOutputPtr(), test_->GetLocalPtr(), test_->GetOutputSize(),
-                          false);
-  test_->PrintOutput();
+  const bool suc = hsa_rsrc_->CopyToHost(test_->GetOutputPtr(), test_->GetLocalPtr(), test_->GetOutputSize());
+  if (suc) test_->PrintOutput();
 
-  return true;
+  return suc;
 }
 
 bool TestHsa::VerifyResults() {
