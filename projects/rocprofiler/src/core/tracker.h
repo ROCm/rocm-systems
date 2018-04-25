@@ -36,7 +36,7 @@ class Tracker {
     timestamp_t timestamp_hz = 0;
     hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &timestamp_hz);
     if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY)");
-    timestamp_hz_ = (freq_t)timestamp_hz;
+    timestamp_factor_ = (freq_t)1000000000 / (freq_t)timestamp_hz;
   }
   ~Tracker() {
     mutex_.lock();
@@ -143,12 +143,12 @@ class Tracker {
   }
 
   inline timestamp_t timestamp2ns(const timestamp_t& timestamp) const {
-    const freq_t timestamp_sec = (freq_t)timestamp * 1000000000 / timestamp_hz_;
-    return (timestamp_t)timestamp_sec;
+    const freq_t timestamp_ns = (freq_t)timestamp * timestamp_factor_;
+    return (timestamp_t)timestamp_ns;
   }
 
   // Timestamp frequency
-  freq_t timestamp_hz_;
+  freq_t timestamp_factor_;
   // Timeout for wait on destruction
   timestamp_t timeout_;
   // Tracked signals list
