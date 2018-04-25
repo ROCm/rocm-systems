@@ -17,6 +17,8 @@ namespace rocprofiler {
 
 class Tracker {
   public:
+  typedef uint64_t timestamp_t;
+  typedef long double freq_t;
   typedef std::mutex mutex_t;
   typedef rocprofiler_dispatch_record_t record_t;
   struct entry_t;
@@ -30,7 +32,12 @@ class Tracker {
     record_t* record;
   };
 
-  Tracker(uint64_t timeout = UINT64_MAX) : timeout_(timeout), outstanding(0) {}
+  Tracker(uint64_t timeout = UINT64_MAX) : timeout_(timeout), outstanding(0) {
+    timestamp_t timestamp_hz = 0;
+    hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &timestamp_hz);
+    if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY)");
+    timestamp_hz_ = (freq_t)timestamp_hz;
+  }
   ~Tracker() {
     mutex_.lock();
     for (entry_t* entry : sig_list_) {
@@ -108,16 +115,17 @@ class Tracker {
       mutex_.unlock();
     }
 
-    hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &record->complete);
-    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP)");
-    if (record->complete == 0) EXC_RAISING(status, "hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP), time is zero");
-
+    timestamp_t complete_timestamp = 0;
     hsa_amd_profiling_dispatch_time_t dispatch_time{};
+
+    hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &complete_timestamp);
+    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP)");
     status = hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_dispatch_time");
 
-    record->begin = dispatch_time.start;
-    record->end = dispatch_time.end;
+    record->complete = entry->tracker->timestamp2ns(complete_timestamp);
+    record->begin = entry->tracker->timestamp2ns(dispatch_time.start);
+    record->end = entry->tracker->timestamp2ns(dispatch_time.end);
 
     hsa_signal_t orig = entry->orig;
     if (orig.handle) {
@@ -134,8 +142,15 @@ class Tracker {
     return false;
   }
 
+  inline timestamp_t timestamp2ns(const timestamp_t& timestamp) const {
+    const freq_t timestamp_sec = (freq_t)timestamp * 1000000000 / timestamp_hz_;
+    return (timestamp_t)timestamp_sec;
+  }
+
+  // Timestamp frequency
+  freq_t timestamp_hz_;
   // Timeout for wait on destruction
-  uint64_t timeout_;
+  timestamp_t timeout_;
   // Tracked signals list
   sig_list_t sig_list_;
   // Inter-thread synchronization
