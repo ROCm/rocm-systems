@@ -121,9 +121,6 @@ class Group {
   Context* GetContext() { return context_; }
   uint32_t GetIndex() const { return index_; }
 
-  rocprofiler_group_t GetGroup() {
-    return rocprofiler_group_t{index_, &info_vector_[0], (uint32_t)info_vector_.size(), context_};
-  }
   void ResetRefs() { refs_ = n_profiles_; }
   uint32_t DecrRefs() {
     return (refs_ > 0) ? --refs_ : 0;
@@ -279,14 +276,17 @@ class Context {
 
   uint32_t GetGroupCount() const { return set_.size(); }
 
-  rocprofiler_group_t GetGroupInfo(const uint32_t& index) {
-    rocprofiler::info_vector_t& info_vector = set_[index].GetInfoVector();
+  rocprofiler_group_t GetGroupInfo(Group* g) {
+    rocprofiler::info_vector_t& info_vector = g->GetInfoVector();
     rocprofiler_group_t group = {};
-    group.feature_count = info_vector.size();
-    group.features = &info_vector[0];
+    group.index = g->GetIndex();
     group.context = reinterpret_cast<rocprofiler_t*>(this);
-    group.index = index;
+    group.features = &info_vector[0];
+    group.feature_count = info_vector.size();
     return group;
+  }
+  rocprofiler_group_t GetGroupInfo(const uint32_t& index) {
+    return GetGroupInfo(&set_[index]);
   }
 
   const pkt_vector_t& StartPackets(const uint32_t& group_index) const {
@@ -391,11 +391,12 @@ class Context {
 
   static bool Handler(hsa_signal_value_t value, void* arg) {
     Group* group = reinterpret_cast<Group*>(arg);
-    group->GetContext()->mutex_.lock();
+    Context* context = group->GetContext();
+    context->mutex_.lock();
     uint32_t r = group->DecrRefs();
-    group->GetContext()->mutex_.unlock();
+    context->mutex_.unlock();
     if (r == 0) {
-      return group->GetContext()->handler_(group->GetGroup(), group->GetContext()->handler_arg_);
+      return context->handler_(context->GetGroupInfo(group), context->handler_arg_);
     }
     return false;
   }
@@ -427,8 +428,9 @@ class Context {
         if (rinfo->data.result_bytes.copy) {
           if (sample_id == 0) {
               const uint32_t output_buffer_size = profile->output_buffer.size;
-              const uint32_t output_buffer_size64 = output_buffer_size / sizeof(uint64_t);
-              void* ptr = calloc(output_buffer_size64, sizeof(uint64_t));
+              util::HsaRsrcFactory* hsa_rsrc = &util::HsaRsrcFactory::Instance();
+              const util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(profile->agent);
+              void* ptr = hsa_rsrc->AllocateSysMemory(agent_info, output_buffer_size);
               rinfo->data.result_bytes.size = output_buffer_size;
               rinfo->data.result_bytes.ptr = ptr;
               callback_data->ptr = reinterpret_cast<char*>(ptr);
@@ -446,7 +448,7 @@ class Context {
             else EXC_RAISING(HSA_STATUS_ERROR, "SQTT data out of output buffer");
           }
 
-          const bool suc = util::HsaRsrcFactory::CopyToHost(dest, src, size);
+          bool suc = util::HsaRsrcFactory::Memcpy(profile->agent, dest, src, size);
           if (suc) {
             *header = size;
             callback_data->ptr = dest + align_size(size, sizeof(uint32_t));

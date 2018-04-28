@@ -217,25 +217,17 @@ const AgentInfo* HsaRsrcFactory::GetAgentInfo(const hsa_agent_t agent) {
 }
 
 // Get the count of Hsa Gpu Agents available on the platform
-//
 // @return uint32_t Number of Gpu agents on platform
-//
 uint32_t HsaRsrcFactory::GetCountOfGpuAgents() { return uint32_t(gpu_list_.size()); }
 
 // Get the count of Hsa Cpu Agents available on the platform
-//
 // @return uint32_t Number of Cpu agents on platform
-//
 uint32_t HsaRsrcFactory::GetCountOfCpuAgents() { return uint32_t(cpu_list_.size()); }
 
 // Get the AgentInfo handle of a Gpu device
-//
 // @param idx Gpu Agent at specified index
-//
 // @param agent_info Output parameter updated with AgentInfo
-//
 // @return bool true if successful, false otherwise
-//
 bool HsaRsrcFactory::GetGpuAgentInfo(uint32_t idx, const AgentInfo** agent_info) {
   // Determine if request is valid
   uint32_t size = uint32_t(gpu_list_.size());
@@ -250,13 +242,9 @@ bool HsaRsrcFactory::GetGpuAgentInfo(uint32_t idx, const AgentInfo** agent_info)
 }
 
 // Get the AgentInfo handle of a Cpu device
-//
 // @param idx Cpu Agent at specified index
-//
 // @param agent_info Output parameter updated with AgentInfo
-//
 // @return bool true if successful, false otherwise
-//
 bool HsaRsrcFactory::GetCpuAgentInfo(uint32_t idx, const AgentInfo** agent_info) {
   // Determine if request is valid
   uint32_t size = uint32_t(cpu_list_.size());
@@ -271,15 +259,10 @@ bool HsaRsrcFactory::GetCpuAgentInfo(uint32_t idx, const AgentInfo** agent_info)
 
 // Create a Queue object and return its handle. The queue object is expected
 // to support user requested number of Aql dispatch packets.
-//
 // @param agent_info Gpu Agent on which to create a queue object
-//
 // @param num_Pkts Number of packets to be held by queue
-//
 // @param queue Output parameter updated with handle of queue object
-//
 // @return bool true if successful, false otherwise
-//
 bool HsaRsrcFactory::CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts,
                                  hsa_queue_t** queue) {
   hsa_status_t status;
@@ -289,13 +272,9 @@ bool HsaRsrcFactory::CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts,
 }
 
 // Create a Signal object and return its handle.
-//
 // @param value Initial value of signal object
-//
 // @param signal Output parameter updated with handle of signal object
-//
 // @return bool true if successful, false otherwise
-//
 bool HsaRsrcFactory::CreateSignal(uint32_t value, hsa_signal_t* signal) {
   hsa_status_t status;
   status = hsa_signal_create(value, 0, NULL, signal);
@@ -305,13 +284,9 @@ bool HsaRsrcFactory::CreateSignal(uint32_t value, hsa_signal_t* signal) {
 // Allocate memory for use by a kernel of specified size in specified
 // agent's memory region. Currently supports Global segment whose Kernarg
 // flag set.
-//
 // @param agent_info Agent from whose memory region to allocate
-//
 // @param size Size of memory in terms of bytes
-//
 // @return uint8_t* Pointer to buffer, null if allocation fails.
-//
 uint8_t* HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t size) {
   hsa_status_t status;
   uint8_t* buffer = NULL;
@@ -332,14 +307,10 @@ uint8_t* HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t
   return (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
 }
 
-// Allocate memory tp pass kernel parameters.
-//
+// Allocate host memory.
 // @param agent_info Agent from whose memory region to allocate
-//
 // @param size Size of memory in terms of bytes
-//
 // @return uint8_t* Pointer to buffer, null if allocation fails.
-//
 uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t size) {
   hsa_status_t status;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
@@ -350,33 +321,40 @@ uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t s
   return (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
 }
 
+// Allocate memory tp pass kernel parameters.
+// @param agent_info Agent from whose memory region to allocate
+// @param size Size of memory in terms of bytes
+// @return uint8_t* Pointer to buffer, null if allocation fails.
+uint8_t* HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size_t size) {
+  return AllocateSysMemory(agent_info, size);
+}
+
 // Memcopy method
-bool HsaRsrcFactory::CopyToHost(void* dest_buff, const void* src_buff, uint32_t length) {
+bool HsaRsrcFactory::Memcpy(hsa_agent_t agent, void* dest_buff, const void* src_buff, uint32_t length) {
+  (void)agent;
   const hsa_status_t status = hsa_memory_copy(dest_buff, src_buff, length);
   CHECK_STATUS("hsa_memory_copy", status);
   return (status == HSA_STATUS_SUCCESS);
 }
+bool HsaRsrcFactory::Memcpy(const AgentInfo* agent_info, void* dest_buff, const void* src_buff, uint32_t length) {
+  (void)agent_info;
+  return Memcpy(agent_info->dev_id, dest_buff, src_buff, length);
+}
 
 // Free method
-bool HsaRsrcFactory::MemoryFree(void* ptr) {
+bool HsaRsrcFactory::FreeMemory(void* ptr) {
   const hsa_status_t status = hsa_memory_free(ptr);
   CHECK_STATUS("hsa_memory_free", status);
   return (status == HSA_STATUS_SUCCESS);
 }
 
 // Loads an Assembled Brig file and Finalizes it into Device Isa
-//
 // @param agent_info Gpu device for which to finalize
-//
 // @param brig_path File path of the Assembled Brig file
-//
 // @param kernel_name Name of the kernel to finalize
-//
 // @param code_desc Handle of finalized Code Descriptor that could
 // be used to submit for execution
-//
 // @return bool true if successful, false otherwise
-//
 bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path,
                                       const char* kernel_name, hsa_executable_t* executable, hsa_executable_symbol_t* code_desc) {
   hsa_status_t status = HSA_STATUS_ERROR;

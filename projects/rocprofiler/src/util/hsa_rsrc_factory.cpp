@@ -359,9 +359,13 @@ bool HsaRsrcFactory::CopyToHost(void* dest_buff, const void* src_buff, uint32_t 
   CHECK_STATUS("hsa_memory_copy", status);
   return (status == HSA_STATUS_SUCCESS);
 }
+bool HsaRsrcFactory::Memcpy(hsa_agent_t agent, void* dest_buff, const void* src_buff, uint32_t length) {
+  (void)agent;
+  return CopyToHost(dest_buff, src_buff, length);
+}
 
 // Free method
-bool HsaRsrcFactory::MemoryFree(void* ptr) {
+bool HsaRsrcFactory::FreeMemory(void* ptr) {
   const hsa_status_t status = hsa_memory_free(ptr);
   CHECK_STATUS("hsa_memory_free", status);
   return (status == HSA_STATUS_SUCCESS);

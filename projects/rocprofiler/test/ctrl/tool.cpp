@@ -266,16 +266,14 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
     const uint32_t data_size = info_data->sqtt_data.size;
     const void* data_ptr = info_data->sqtt_data.ptr;
     fprintf(arg->file, "    SE(%u) size(%u)\n", info_data->sample_id, data_size);
-#if 1
-    dump_sqtt_trace(arg->label, info_data->sample_id, data_ptr, data_size);
-#else
-    void* buffer = malloc(data_size);
-    memset(buffer, 0, data_size);
-    const bool suc = HsaRsrcFactory::Instance().CopyToHost(arg->agent, buffer, data_ptr, data_size);
+
+    HsaRsrcFactory* hsa_rsrc = &HsaRsrcFactory::Instance();
+    const AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(arg->agent);
+    void* buffer = hsa_rsrc->AllocateSysMemory(agent_info, data_size);
+    const bool suc = HsaRsrcFactory::Memcpy(arg->agent, buffer, data_ptr, data_size);
     if (suc) dump_sqtt_trace(arg->label, info_data->sample_id, buffer, data_size);
     else fatal("SQTT data memcopy to host failed");
-    free(buffer);
-#endif
+    HsaRsrcFactory::FreeMemory(buffer);
   } else
     status = HSA_STATUS_ERROR;
   return status;
@@ -320,7 +318,7 @@ void output_results(const context_entry_t* entry, const char* label) {
             size += chunk_size;
           }
           fprintf(file, "size(%lu)\n", size);
-          free(p->data.result_bytes.ptr);
+          HsaRsrcFactory::FreeMemory(p->data.result_bytes.ptr);
           const_cast<rocprofiler_feature_t*>(p)->data.result_bytes.size = 0;
         } else {
           fprintf(file, "(\n");

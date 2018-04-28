@@ -36,6 +36,9 @@ OF THE POSSIBILITY OF SUCH DAMAGE.
 // Class implements SimpleConvolution kernel parameters
 class SimpleConvolution : public TestKernel {
  public:
+  // Kernel buffers IDs
+  enum { INPUT_BUF_ID, LOCAL_BUF_ID, MASK_BUF_ID, KERNARG_BUF_ID, REFOUT_BUF_ID };
+
   // Constructor
   SimpleConvolution();
 
@@ -46,7 +49,7 @@ class SimpleConvolution : public TestKernel {
   uint32_t GetGridSize() const { return width_ * height_; }
 
   // Print output
-  void PrintOutput() const;
+  void PrintOutput(const void* ptr) const;
 
   // Return name
   std::string Name() const { return std::string("SimpleConvolution"); }

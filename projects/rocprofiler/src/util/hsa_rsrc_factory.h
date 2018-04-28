@@ -217,9 +217,10 @@ class HsaRsrcFactory {
 
   // Memcopy method
   static bool CopyToHost(void* dest_buff, const void* src_buff, uint32_t length);
+  static bool Memcpy(hsa_agent_t agent, void* dest_buff, const void* src_buff, uint32_t length);
 
   // Free method
-  static bool MemoryFree(void* ptr);
+  static bool FreeMemory(void* ptr);
 
   // Loads an Assembled Brig file and Finalizes it into Device Isa
   //

@@ -67,7 +67,7 @@ __kernel void SimpleConvolution(__global  uint  * output,
   float sumFX = 0;
 
   for(uint i = left; i <= right; ++i) {
-    for(uint j = top ; j <= bottom; ++j) {
+    for(uint j = top; j <= bottom; ++j) {
       // performing wighted sum within the mask boundaries
       uint maskIndex = (j - (y - hstep)) * maskWidth  + (i - (x - vstep));
       uint index     = j                 * width      + i;

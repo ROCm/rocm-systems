@@ -115,11 +115,26 @@ bool TestHsa::Setup() {
   mem_map_t& mem_map = test_->GetMemMap();
   for (mem_it_t it = mem_map.begin(); it != mem_map.end(); ++it) {
     mem_descr_t& des = it->second;
-    void* ptr = (des.local) ? hsa_rsrc_->AllocateLocalMemory(agent_info_, des.size)
-                            : hsa_rsrc_->AllocateSysMemory(agent_info_, des.size);
-    des.ptr = ptr;
-    TEST_ASSERT(ptr != NULL);
-    if (ptr == NULL) return false;
+    switch (des.id) {
+      case TestKernel::LOCAL_DES_ID:
+        des.ptr = hsa_rsrc_->AllocateLocalMemory(agent_info_, des.size);
+        break;
+      case TestKernel::KERNARG_DES_ID:
+        des.ptr = hsa_rsrc_->AllocateKernArgMemory(agent_info_, des.size);
+        if (des.ptr) memset(des.ptr, 0, des.size);
+        break;
+      case TestKernel::SYS_DES_ID:
+        des.ptr = hsa_rsrc_->AllocateSysMemory(agent_info_, des.size);
+        if (des.ptr) memset(des.ptr, 0, des.size);
+        break;
+      case TestKernel::NULL_DES_ID:
+        des.ptr = NULL;
+        break;
+      default:
+        break;
+    };
+    TEST_ASSERT(des.ptr != NULL);
+    if (des.ptr == NULL) return false;
   }
   test_->Init();
 
@@ -208,24 +223,41 @@ bool TestHsa::Run() {
   hsa_signal_wait_acquire(hsa_signal_, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
                           HSA_WAIT_STATE_BLOCKED);
 
+  std::clog << "> DONE, que_idx=" << que_idx << std::endl;
+
   // Stop the timer object
   hsa_timer_.StopTimer(dispatch_timer_idx_);
   dispatch_time_taken_ = hsa_timer_.ReadTimer(dispatch_timer_idx_);
   total_time_taken_ += dispatch_time_taken_;
 
-  // Copy kernel buffers from local memory into system memory
-  const bool suc = hsa_rsrc_->CopyToHost(test_->GetOutputPtr(), test_->GetLocalPtr(), test_->GetOutputSize());
-  if (suc) test_->PrintOutput();
-
-  return suc;
+  return true;
 }
 
 bool TestHsa::VerifyResults() {
-  // Compare the results and see if they match
-  const void* const refout_ptr = test_->GetRefoutPtr();
-  const int32_t cmp_val =
-      (refout_ptr != NULL) ? memcmp(test_->GetOutputPtr(), refout_ptr, test_->GetOutputSize()) : 0;
-  return (cmp_val == 0);
+  bool cmp = false;
+  void* output = NULL;
+  const uint32_t size = test_->GetOutputSize();
+  bool suc = false;
+
+  // Copy local kernel output buffers from local memory into host memory
+  if (test_->IsOutputLocal()) {
+    output = hsa_rsrc_->AllocateSysMemory(agent_info_, size);
+    suc = hsa_rsrc_->Memcpy(agent_info_, output, test_->GetOutputPtr(), size);
+  } else {
+    output = test_->GetOutputPtr();;
+    suc = true;
+  }
+
+  if ((output != NULL) && suc) {
+    // Print the test output
+    test_->PrintOutput(output);
+    // Compare the results and see if they match
+    cmp = (memcmp(output, test_->GetRefOut(), size) == 0);
+  }
+
+  if (test_->IsOutputLocal() && (output != NULL)) hsa_rsrc_->FreeMemory(output);
+
+  return cmp;
 }
 
 void TestHsa::PrintTime() {
