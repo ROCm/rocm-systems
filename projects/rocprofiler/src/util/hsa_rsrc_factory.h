@@ -22,10 +22,11 @@ WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 POSSIBILITY OF SUCH DAMAGE.
 ********************************************************************/
 
-#ifndef SRC_UTIL_HSA_RSRC_FACTORY_H_
-#define SRC_UTIL_HSA_RSRC_FACTORY_H_
+#ifndef _HSA_RSRC_FACTORY_H_
+#define _HSA_RSRC_FACTORY_H_
 
 #include <hsa.h>
+#include <hsa_ext_amd.h>
 #include <hsa_ext_finalize.h>
 #include <hsa_ven_amd_aqlprofile.h>
 #include <hsa_ven_amd_loader.h>
@@ -52,10 +53,18 @@ POSSIBILITY OF SUCH DAMAGE.
     exit(1);                                                                                       \
   }
 
+#define CHECK_ITER_STATUS(msg, status)                                                             \
+  if (status != HSA_STATUS_INFO_BREAK) {                                                           \
+    const char* emsg = 0;                                                                          \
+    hsa_status_string(status, &emsg);                                                              \
+    printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                      \
+    exit(1);                                                                                       \
+  }
+
 namespace rocprofiler {
 namespace util {
-static const unsigned MEM_PAGE_BYTES = 0x1000;
-static const unsigned MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
+static const size_t MEM_PAGE_BYTES = 0x1000;
+static const size_t MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
 typedef decltype(hsa_agent_t::handle) hsa_agent_handle_t;
 
 // Encapsulates information about a Hsa Agent such as its
@@ -88,11 +97,10 @@ struct AgentInfo {
   // Hsail profile supported by agent
   hsa_profile_t profile;
 
-  // Memory region supporting kernel parameters
-  hsa_region_t coarse_region;
-
-  // Memory region supporting kernel arguments
-  hsa_region_t kernarg_region;
+  // CPU/GPU/kern-arg memory pools
+  hsa_amd_memory_pool_t cpu_pool;
+  hsa_amd_memory_pool_t gpu_pool;
+  hsa_amd_memory_pool_t kern_arg_pool;
 
   // The number of compute unit available in the agent.
   uint32_t cu_num;
@@ -139,102 +147,73 @@ class HsaRsrcFactory {
   const AgentInfo* GetAgentInfo(const hsa_agent_t agent);
 
   // Get the count of Hsa Gpu Agents available on the platform
-  //
   // @return uint32_t Number of Gpu agents on platform
-  //
   uint32_t GetCountOfGpuAgents();
 
   // Get the count of Hsa Cpu Agents available on the platform
-  //
   // @return uint32_t Number of Cpu agents on platform
-  //
   uint32_t GetCountOfCpuAgents();
 
   // Get the AgentInfo handle of a Gpu device
-  //
   // @param idx Gpu Agent at specified index
-  //
   // @param agent_info Output parameter updated with AgentInfo
-  //
   // @return bool true if successful, false otherwise
-  //
   bool GetGpuAgentInfo(uint32_t idx, const AgentInfo** agent_info);
 
   // Get the AgentInfo handle of a Cpu device
-  //
   // @param idx Cpu Agent at specified index
-  //
   // @param agent_info Output parameter updated with AgentInfo
-  //
   // @return bool true if successful, false otherwise
-  //
   bool GetCpuAgentInfo(uint32_t idx, const AgentInfo** agent_info);
 
   // Create a Queue object and return its handle. The queue object is expected
   // to support user requested number of Aql dispatch packets.
-  //
   // @param agent_info Gpu Agent on which to create a queue object
-  //
   // @param num_Pkts Number of packets to be held by queue
-  //
   // @param queue Output parameter updated with handle of queue object
-  //
   // @return bool true if successful, false otherwise
-  //
   bool CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts, hsa_queue_t** queue);
 
   // Create a Signal object and return its handle.
-  //
   // @param value Initial value of signal object
-  //
   // @param signal Output parameter updated with handle of signal object
-  //
   // @return bool true if successful, false otherwise
-  //
   bool CreateSignal(uint32_t value, hsa_signal_t* signal);
 
-  // Allocate memory for use by a kernel of specified size in specified
-  // agent's memory region. Currently supports Global segment whose Kernarg
-  // flag set.
-  //
+  // Allocate local GPU memory
   // @param agent_info Agent from whose memory region to allocate
-  //
   // @param size Size of memory in terms of bytes
-  //
   // @return uint8_t* Pointer to buffer, null if allocation fails.
-  //
   uint8_t* AllocateLocalMemory(const AgentInfo* agent_info, size_t size);
 
-  // Allocate memory tp pass kernel parameters.
-  //
+  // Allocate memory tp pass kernel parameters
+  // Memory is alocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
   // @param agent_info Agent from whose memory region to allocate
-  //
   // @param size Size of memory in terms of bytes
-  //
   // @return uint8_t* Pointer to buffer, null if allocation fails.
-  //
+  uint8_t* AllocateKernArgMemory(const AgentInfo* agent_info, size_t size);
+
+  // Allocate system memory accessible from both CPU and GPU
+  // Memory is alocated accessible to all CPU agents and AgentInfo parameter is ignored.
+  // @param agent_info Agent from whose memory region to allocate
+  // @param size Size of memory in terms of bytes
+  // @return uint8_t* Pointer to buffer, null if allocation fails.
   uint8_t* AllocateSysMemory(const AgentInfo* agent_info, size_t size);
 
-  // Memcopy method
-  static bool CopyToHost(void* dest_buff, const void* src_buff, uint32_t length);
-  static bool Memcpy(hsa_agent_t agent, void* dest_buff, const void* src_buff, uint32_t length);
+  // Copy data from GPU to host memory
+  bool Memcpy(const hsa_agent_t& agent, void* dst, const void* src, size_t size);
+  bool Memcpy(const AgentInfo* agent_info, void* dst, const void* src, size_t size);
 
-  // Free method
+  // Memory free method
   static bool FreeMemory(void* ptr);
 
   // Loads an Assembled Brig file and Finalizes it into Device Isa
-  //
   // @param agent_info Gpu device for which to finalize
-  //
   // @param brig_path File path of the Assembled Brig file
-  //
   // @param kernel_name Name of the kernel to finalize
-  //
   // @param code_desc Handle of finalized Code Descriptor that could
   // be used to submit for execution
-  //
   // @return true if successful, false otherwise
-  //
   bool LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path, const char* kernel_name,
                         hsa_executable_t* hsa_exec, hsa_executable_symbol_t* code_desc);
 
@@ -279,9 +258,11 @@ class HsaRsrcFactory {
 
   // Used to maintain a list of Hsa Gpu Agent Info
   std::vector<const AgentInfo*> gpu_list_;
+  std::vector<hsa_agent_t> gpu_agents_;
 
   // Used to maintain a list of Hsa Cpu Agent Info
   std::vector<const AgentInfo*> cpu_list_;
+  std::vector<hsa_agent_t> cpu_agents_;
 
   // System agents map
   std::map<hsa_agent_handle_t, const AgentInfo*> agent_map_;
@@ -296,4 +277,4 @@ class HsaRsrcFactory {
 }  // namespace util
 }  // namespace rocprofiler
 
-#endif  // SRC_UTIL_HSA_RSRC_FACTORY_H_
+#endif  // _HSA_RSRC_FACTORY_H_

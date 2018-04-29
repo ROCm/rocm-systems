@@ -426,11 +426,14 @@ class Context {
         rinfo->data.kind = ROCPROFILER_DATA_KIND_INT64;
       } else if (ainfo_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
         if (rinfo->data.result_bytes.copy) {
+          const bool sqtt_local = SqttProfile::IsLocal();
+          util::HsaRsrcFactory* hsa_rsrc = &util::HsaRsrcFactory::Instance();
           if (sample_id == 0) {
               const uint32_t output_buffer_size = profile->output_buffer.size;
-              util::HsaRsrcFactory* hsa_rsrc = &util::HsaRsrcFactory::Instance();
+              const uint32_t output_buffer_size64 = profile->output_buffer.size / sizeof(uint64_t);
               const util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(profile->agent);
-              void* ptr = hsa_rsrc->AllocateSysMemory(agent_info, output_buffer_size);
+              void* ptr = (sqtt_local) ? hsa_rsrc->AllocateSysMemory(agent_info, output_buffer_size) :
+                                         calloc(output_buffer_size64, sizeof(uint64_t));
               rinfo->data.result_bytes.size = output_buffer_size;
               rinfo->data.result_bytes.ptr = ptr;
               callback_data->ptr = reinterpret_cast<char*>(ptr);
@@ -448,13 +451,19 @@ class Context {
             else EXC_RAISING(HSA_STATUS_ERROR, "SQTT data out of output buffer");
           }
 
-          bool suc = util::HsaRsrcFactory::Memcpy(profile->agent, dest, src, size);
+          bool suc = true;
+          if (sqtt_local) {
+            suc = hsa_rsrc->Memcpy(profile->agent, dest, src, size);
+          } else {
+            memcpy(dest, src, size);
+          }
           if (suc) {
             *header = size;
             callback_data->ptr = dest + align_size(size, sizeof(uint32_t));
             rinfo->data.result_bytes.instance_count = sample_id + 1;
             rinfo->data.kind = ROCPROFILER_DATA_KIND_BYTES;
-          }
+          } else
+            EXC_RAISING(HSA_STATUS_ERROR, "Agent Memcpy failed, dst(" << (void*)dest << ") src(" << (void*)src << ") size(" << size << ")");
         } else {
           if (sample_id == 0) {
             rinfo->data.result_bytes.ptr = profile->output_buffer.ptr;

@@ -22,10 +22,11 @@ WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 POSSIBILITY OF SUCH DAMAGE.
 ********************************************************************/
 
-#ifndef TEST_UTIL_HSA_RSRC_FACTORY_H_
-#define TEST_UTIL_HSA_RSRC_FACTORY_H_
+#ifndef _HSA_RSRC_FACTORY_H_
+#define _HSA_RSRC_FACTORY_H_
 
 #include <hsa.h>
+#include <hsa_ext_amd.h>
 #include <hsa_ext_finalize.h>
 #include <hsa_ven_amd_aqlprofile.h>
 #include <hsa_ven_amd_loader.h>
@@ -52,8 +53,16 @@ POSSIBILITY OF SUCH DAMAGE.
     exit(1);                                                                                       \
   }
 
-static const unsigned MEM_PAGE_BYTES = 0x1000;
-static const unsigned MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
+#define CHECK_ITER_STATUS(msg, status)                                                             \
+  if (status != HSA_STATUS_INFO_BREAK) {                                                           \
+    const char* emsg = 0;                                                                          \
+    hsa_status_string(status, &emsg);                                                              \
+    printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                      \
+    exit(1);                                                                                       \
+  }
+
+static const size_t MEM_PAGE_BYTES = 0x1000;
+static const size_t MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
 typedef decltype(hsa_agent_t::handle) hsa_agent_handle_t;
 
 // Encapsulates information about a Hsa Agent such as its
@@ -86,11 +95,10 @@ struct AgentInfo {
   // Hsail profile supported by agent
   hsa_profile_t profile;
 
-  // Memory region supporting kernel parameters
-  hsa_region_t coarse_region;
-
-  // Memory region supporting kernel arguments
-  hsa_region_t kernarg_region;
+  // CPU/GPU/kern-arg memory pools
+  hsa_amd_memory_pool_t cpu_pool;
+  hsa_amd_memory_pool_t gpu_pool;
+  hsa_amd_memory_pool_t kern_arg_pool;
 
   // The number of compute unit available in the agent.
   uint32_t cu_num;
@@ -170,31 +178,31 @@ class HsaRsrcFactory {
   // @return bool true if successful, false otherwise
   bool CreateSignal(uint32_t value, hsa_signal_t* signal);
 
-  // Allocate memory for use by a kernel of specified size in specified
-  // agent's memory region. Currently supports Global segment whose Kernarg
-  // flag set.
+  // Allocate local GPU memory
   // @param agent_info Agent from whose memory region to allocate
   // @param size Size of memory in terms of bytes
   // @return uint8_t* Pointer to buffer, null if allocation fails.
   uint8_t* AllocateLocalMemory(const AgentInfo* agent_info, size_t size);
 
-  // Allocate system memory.
-  // @param agent_info Agent from whose memory region to allocate
-  // @param size Size of memory in terms of bytes
-  // @return uint8_t* Pointer to buffer, null if allocation fails.
-  uint8_t* AllocateSysMemory(const AgentInfo* agent_info, size_t size);
-
-  // Allocate memory tp pass kernel parameters.
+  // Allocate memory tp pass kernel parameters
+  // Memory is alocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
   // @param agent_info Agent from whose memory region to allocate
   // @param size Size of memory in terms of bytes
   // @return uint8_t* Pointer to buffer, null if allocation fails.
   uint8_t* AllocateKernArgMemory(const AgentInfo* agent_info, size_t size);
 
-  // Memcopy method
-  static bool Memcpy(const AgentInfo* agent_info, void* dest_buff, const void* src_buff, uint32_t length);
-  static bool Memcpy(hsa_agent_t agent, void* dest_buff, const void* src_buff, uint32_t length);
+  // Allocate system memory accessible from both CPU and GPU
+  // Memory is alocated accessible to all CPU agents and AgentInfo parameter is ignored.
+  // @param agent_info Agent from whose memory region to allocate
+  // @param size Size of memory in terms of bytes
+  // @return uint8_t* Pointer to buffer, null if allocation fails.
+  uint8_t* AllocateSysMemory(const AgentInfo* agent_info, size_t size);
 
-  // Free method
+  // Copy data from GPU to host memory
+  bool Memcpy(const hsa_agent_t& agent, void* dst, const void* src, size_t size);
+  bool Memcpy(const AgentInfo* agent_info, void* dst, const void* src, size_t size);
+
+  // Memory free method
   static bool FreeMemory(void* ptr);
 
   // Loads an Assembled Brig file and Finalizes it into Device Isa
@@ -248,9 +256,11 @@ class HsaRsrcFactory {
 
   // Used to maintain a list of Hsa Gpu Agent Info
   std::vector<const AgentInfo*> gpu_list_;
+  std::vector<hsa_agent_t> gpu_agents_;
 
   // Used to maintain a list of Hsa Cpu Agent Info
   std::vector<const AgentInfo*> cpu_list_;
+  std::vector<hsa_agent_t> cpu_agents_;
 
   // System agents map
   std::map<hsa_agent_handle_t, const AgentInfo*> agent_map_;
@@ -262,4 +272,5 @@ class HsaRsrcFactory {
   hsa_ven_amd_loader_1_00_pfn_t loader_api_;
 };
 
-#endif  // TEST_UTIL_HSA_RSRC_FACTORY_H_
+
+#endif  // _HSA_RSRC_FACTORY_H_

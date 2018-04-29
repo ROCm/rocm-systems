@@ -47,6 +47,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #define AQL_PROFILE_READ_API_ENABLE 0
 #endif
 
+
 // Callback function to get available in the system agents
 hsa_status_t HsaRsrcFactory::GetHsaAgentsCallback(hsa_agent_t agent, void* data) {
   hsa_status_t status = HSA_STATUS_ERROR;
@@ -56,27 +57,59 @@ hsa_status_t HsaRsrcFactory::GetHsaAgentsCallback(hsa_agent_t agent, void* data)
   return status;
 }
 
-// Callback function to find and bind kernarg region of an agent
-hsa_status_t HsaRsrcFactory::FindMemRegionsCallback(hsa_region_t region, void* data) {
-  hsa_region_global_flag_t flags;
-  hsa_region_segment_t segment_id;
+// This function checks to see if the provided
+// pool has the HSA_AMD_SEGMENT_GLOBAL property. If the kern_arg flag is true,
+// the function adds an additional requirement that the pool have the
+// HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT property. If kern_arg is false,
+// pools must NOT have this property.
+// Upon finding a pool that meets these conditions, HSA_STATUS_INFO_BREAK is
+// returned. HSA_STATUS_SUCCESS is returned if no errors were encountered, but
+// no pool was found meeting the requirements. If an error is encountered, we
+// return that error.
+static hsa_status_t
+FindGlobalPool(hsa_amd_memory_pool_t pool, void* data, bool kern_arg) {
+  hsa_status_t err;
+  hsa_amd_segment_t segment;
+  uint32_t flag;
 
-  hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment_id);
-  if (segment_id != HSA_REGION_SEGMENT_GLOBAL) {
+  if (nullptr == data) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT,
+                                     &segment);
+  CHECK_STATUS("hsa_amd_memory_pool_get_info", err);
+  if (HSA_AMD_SEGMENT_GLOBAL != segment) {
     return HSA_STATUS_SUCCESS;
   }
 
-  AgentInfo* agent_info = (AgentInfo*)data;
-  hsa_region_get_info(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags);
-  if (flags & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) {
-    agent_info->coarse_region = region;
+  err = hsa_amd_memory_pool_get_info(pool,
+                                HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag);
+  CHECK_STATUS("hsa_amd_memory_pool_get_info", err);
+
+  uint32_t karg_st = flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
+
+  if ((karg_st == 0 && kern_arg) ||
+      (karg_st != 0 && !kern_arg)) {
+    return HSA_STATUS_SUCCESS;
   }
 
-  if (flags & HSA_REGION_GLOBAL_FLAG_KERNARG) {
-    agent_info->kernarg_region = region;
-  }
+  *(reinterpret_cast<hsa_amd_memory_pool_t*>(data)) = pool;
+  return HSA_STATUS_INFO_BREAK;
+}
 
-  return HSA_STATUS_SUCCESS;
+// This is the call-back function for hsa_amd_agent_iterate_memory_pools() that
+// finds a pool with the properties of HSA_AMD_SEGMENT_GLOBAL and that is NOT
+// HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT
+hsa_status_t FindStandardPool(hsa_amd_memory_pool_t pool, void* data) {
+  return FindGlobalPool(pool, data, false);
+}
+
+// This is the call-back function for hsa_amd_agent_iterate_memory_pools() that
+// finds a pool with the properties of HSA_AMD_SEGMENT_GLOBAL and that IS
+// HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT
+hsa_status_t FindKernArgPool(hsa_amd_memory_pool_t pool, void* data) {
+  return FindGlobalPool(pool, data, true);
 }
 
 // Constructor of the class
@@ -169,7 +202,15 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     agent_info->dev_id = agent;
     agent_info->dev_type = HSA_DEVICE_TYPE_CPU;
     agent_info->dev_index = cpu_list_.size();
+
+    status = hsa_amd_agent_iterate_memory_pools(agent, FindStandardPool, &agent_info->cpu_pool);
+    CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(cpu pool)", status);
+    status = hsa_amd_agent_iterate_memory_pools(agent, FindKernArgPool, &agent_info->kern_arg_pool);
+    CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(kern arg pool)", status);
+    agent_info->gpu_pool = {};
+
     cpu_list_.push_back(agent_info);
+    cpu_agents_.push_back(agent);
   }
 
   if (type == HSA_DEVICE_TYPE_GPU) {
@@ -189,16 +230,15 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES), &agent_info->se_num);
     hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE), &agent_info->shader_arrays_per_se);
 
-    // Initialize memory regions to zero
-    agent_info->kernarg_region.handle = 0;
-    agent_info->coarse_region.handle = 0;
-
-    // Find and Bind Memory regions of the Gpu agent
-    hsa_agent_iterate_regions(agent, FindMemRegionsCallback, agent_info);
+    agent_info->cpu_pool = {};
+    agent_info->kern_arg_pool = {};
+    status = hsa_amd_agent_iterate_memory_pools(agent, FindStandardPool, &agent_info->gpu_pool);
+    CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(gpu pool)", status);
 
     // Set GPU index
     agent_info->dev_index = gpu_list_.size();
     gpu_list_.push_back(agent_info);
+    gpu_agents_.push_back(agent);
   }
 
   if (agent_info) agent_map_[agent.handle] = agent_info;
@@ -217,17 +257,25 @@ const AgentInfo* HsaRsrcFactory::GetAgentInfo(const hsa_agent_t agent) {
 }
 
 // Get the count of Hsa Gpu Agents available on the platform
+//
 // @return uint32_t Number of Gpu agents on platform
+//
 uint32_t HsaRsrcFactory::GetCountOfGpuAgents() { return uint32_t(gpu_list_.size()); }
 
 // Get the count of Hsa Cpu Agents available on the platform
+//
 // @return uint32_t Number of Cpu agents on platform
+//
 uint32_t HsaRsrcFactory::GetCountOfCpuAgents() { return uint32_t(cpu_list_.size()); }
 
 // Get the AgentInfo handle of a Gpu device
+//
 // @param idx Gpu Agent at specified index
+//
 // @param agent_info Output parameter updated with AgentInfo
+//
 // @return bool true if successful, false otherwise
+//
 bool HsaRsrcFactory::GetGpuAgentInfo(uint32_t idx, const AgentInfo** agent_info) {
   // Determine if request is valid
   uint32_t size = uint32_t(gpu_list_.size());
@@ -242,9 +290,13 @@ bool HsaRsrcFactory::GetGpuAgentInfo(uint32_t idx, const AgentInfo** agent_info)
 }
 
 // Get the AgentInfo handle of a Cpu device
+//
 // @param idx Cpu Agent at specified index
+//
 // @param agent_info Output parameter updated with AgentInfo
+//
 // @return bool true if successful, false otherwise
+//
 bool HsaRsrcFactory::GetCpuAgentInfo(uint32_t idx, const AgentInfo** agent_info) {
   // Determine if request is valid
   uint32_t size = uint32_t(cpu_list_.size());
@@ -259,10 +311,15 @@ bool HsaRsrcFactory::GetCpuAgentInfo(uint32_t idx, const AgentInfo** agent_info)
 
 // Create a Queue object and return its handle. The queue object is expected
 // to support user requested number of Aql dispatch packets.
+//
 // @param agent_info Gpu Agent on which to create a queue object
+//
 // @param num_Pkts Number of packets to be held by queue
+//
 // @param queue Output parameter updated with handle of queue object
+//
 // @return bool true if successful, false otherwise
+//
 bool HsaRsrcFactory::CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts,
                                  hsa_queue_t** queue) {
   hsa_status_t status;
@@ -282,66 +339,83 @@ bool HsaRsrcFactory::CreateSignal(uint32_t value, hsa_signal_t* signal) {
 }
 
 // Allocate memory for use by a kernel of specified size in specified
-// agent's memory region. Currently supports Global segment whose Kernarg
-// flag set.
+// agent's memory region.
 // @param agent_info Agent from whose memory region to allocate
 // @param size Size of memory in terms of bytes
 // @return uint8_t* Pointer to buffer, null if allocation fails.
 uint8_t* HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t size) {
-  hsa_status_t status;
+  hsa_status_t status = HSA_STATUS_ERROR;
   uint8_t* buffer = NULL;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-
-  if (agent_info->coarse_region.handle != 0) {
-    // Allocate in local memory if it is available
-    status = hsa_memory_allocate(agent_info->coarse_region, size, (void**)&buffer);
-    if (status == HSA_STATUS_SUCCESS) {
-      status = hsa_memory_assign_agent(buffer, agent_info->dev_id, HSA_ACCESS_PERMISSION_RW);
-    }
-  } else {
-    // Allocate in system memory if local memory is not available
-    status = hsa_memory_allocate(agent_info->kernarg_region, size, (void**)&buffer);
-  }
-
-  CHECK_STATUS("hsa_memory_allocate", status);
-  return (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+  status = hsa_amd_memory_pool_allocate(agent_info->gpu_pool, size, 0, (void**)&buffer);
+  uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+  return ptr;
 }
 
-// Allocate host memory.
-// @param agent_info Agent from whose memory region to allocate
-// @param size Size of memory in terms of bytes
-// @return uint8_t* Pointer to buffer, null if allocation fails.
-uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t size) {
-  hsa_status_t status;
-  size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-
-  uint8_t* buffer = NULL;
-  status = hsa_memory_allocate(agent_info->kernarg_region, size, (void**)&buffer);
-  CHECK_STATUS("hsa_memory_allocate", status);
-  return (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
-}
-
-// Allocate memory tp pass kernel parameters.
+// Allocate memory to pass kernel parameters.
+// Memory is alocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
 // @param agent_info Agent from whose memory region to allocate
 // @param size Size of memory in terms of bytes
 // @return uint8_t* Pointer to buffer, null if allocation fails.
 uint8_t* HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size_t size) {
-  return AllocateSysMemory(agent_info, size);
+  hsa_status_t status = HSA_STATUS_ERROR;
+  uint8_t* buffer = NULL;
+  if (!cpu_agents_.empty()) {
+    size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+    status = hsa_amd_memory_pool_allocate(cpu_list_[0]->kern_arg_pool, size, 0, (void**)&buffer);
+    // Both the CPU and GPU can access the kernel arguments
+    if (status == HSA_STATUS_SUCCESS) {
+      hsa_agent_t ag_list[1] = {agent_info->dev_id};
+      status = hsa_amd_agents_allow_access(1, ag_list, NULL, buffer);
+    }
+  }
+  uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+  return ptr;
 }
 
-// Memcopy method
-bool HsaRsrcFactory::Memcpy(hsa_agent_t agent, void* dest_buff, const void* src_buff, uint32_t length) {
-  (void)agent;
-  const hsa_status_t status = hsa_memory_copy(dest_buff, src_buff, length);
-  CHECK_STATUS("hsa_memory_copy", status);
+// Allocate system memory accessible by both CPU and GPU
+// @param agent_info Agent from whose memory region to allocate
+// @param size Size of memory in terms of bytes
+// @return uint8_t* Pointer to buffer, null if allocation fails.
+uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t size) {
+  hsa_status_t status = HSA_STATUS_ERROR;
+  uint8_t* buffer = NULL;
+  size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+  if (!cpu_agents_.empty()) {
+    status = hsa_amd_memory_pool_allocate(cpu_list_[0]->cpu_pool, size, 0, (void**)&buffer);
+    // Both the CPU and GPU can access the memory
+    if (status == HSA_STATUS_SUCCESS) {
+      hsa_agent_t ag_list[1] = {agent_info->dev_id};
+      status = hsa_amd_agents_allow_access(1, ag_list, NULL, buffer);
+    }
+  }
+  uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+  return ptr;
+}
+
+// Copy data from GPU to host memory
+bool HsaRsrcFactory::Memcpy(const hsa_agent_t& agent, void* dst, const void* src, size_t size) {
+  hsa_status_t status = HSA_STATUS_ERROR;
+  if (!cpu_agents_.empty()) {
+    hsa_signal_t s = {};
+    status = hsa_signal_create(1, 0, NULL, &s);
+    if (status == HSA_STATUS_SUCCESS) {
+      status = hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, NULL, s);
+      if (status == HSA_STATUS_SUCCESS) {
+        if (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0) {
+          status = HSA_STATUS_ERROR;
+        }
+      }
+      status = hsa_signal_destroy(s);
+    }
+  }
   return (status == HSA_STATUS_SUCCESS);
 }
-bool HsaRsrcFactory::Memcpy(const AgentInfo* agent_info, void* dest_buff, const void* src_buff, uint32_t length) {
-  (void)agent_info;
-  return Memcpy(agent_info->dev_id, dest_buff, src_buff, length);
+bool HsaRsrcFactory::Memcpy(const AgentInfo* agent_info, void* dst, const void* src, size_t size) {
+  return Memcpy(agent_info->dev_id, dst, src, size);
 }
 
-// Free method
+// Memory free method
 bool HsaRsrcFactory::FreeMemory(void* ptr) {
   const hsa_status_t status = hsa_memory_free(ptr);
   CHECK_STATUS("hsa_memory_free", status);
@@ -419,7 +493,6 @@ bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
     std::clog << ">> HSAIL profile : " << agent_info->profile << std::endl;
     std::clog << ">> Max Wave Size : " << agent_info->max_wave_size << std::endl;
     std::clog << ">> Max Queue Size : " << agent_info->max_queue_size << std::endl;
-    std::clog << ">> Kernarg Region Id : " << agent_info->coarse_region.handle << std::endl;
     std::clog << ">> CU number : " << agent_info->cu_num << std::endl;
     std::clog << ">> Waves per CU : " << agent_info->waves_per_cu << std::endl;
     std::clog << ">> SIMDs per CU : " << agent_info->simds_per_cu << std::endl;
@@ -458,3 +531,4 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, void* packet) {
 
 HsaRsrcFactory* HsaRsrcFactory::instance_ = NULL;
 HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;
+

@@ -220,8 +220,15 @@ bool TestHsa::Run() {
 
   // Wait on the dispatch signal until the kernel is finished.
   // Update wait condition to HSA_WAIT_STATE_ACTIVE for Polling
-  hsa_signal_wait_acquire(hsa_signal_, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                          HSA_WAIT_STATE_BLOCKED);
+  if (hsa_signal_wait_scacquire(
+    hsa_signal_,
+    HSA_SIGNAL_CONDITION_LT,
+    1,
+    UINT64_MAX,
+    HSA_WAIT_STATE_BLOCKED) != 0)
+  {
+    TEST_ASSERT("signal_wait failed");
+  }
 
   std::clog << "> DONE, que_idx=" << que_idx << std::endl;
 
@@ -243,6 +250,7 @@ bool TestHsa::VerifyResults() {
   if (test_->IsOutputLocal()) {
     output = hsa_rsrc_->AllocateSysMemory(agent_info_, size);
     suc = hsa_rsrc_->Memcpy(agent_info_, output, test_->GetOutputPtr(), size);
+    if (!suc) std::clog << "> VerifyResults: Memcpy failed" << std::endl << std::flush;
   } else {
     output = test_->GetOutputPtr();;
     suc = true;

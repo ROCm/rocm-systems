@@ -202,7 +202,7 @@ class PmcProfile : public Profile {
 
   hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) {
     profile_.command_buffer.ptr =
-        rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
+      rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
     profile_.output_buffer.ptr = rsrc->AllocateSysMemory(agent_info_, profile_.output_buffer.size);
     return (profile_.command_buffer.ptr && profile_.output_buffer.ptr) ? HSA_STATUS_SUCCESS
                                                                        : HSA_STATUS_ERROR;
@@ -213,6 +213,8 @@ class SqttProfile : public Profile {
  public:
   static inline void SetSize(const uint32_t& size) { output_buffer_size_ = size; }
   static inline uint32_t GetSize() { return output_buffer_size_; }
+  static inline void SetLocal(const bool& b) { output_buffer_local_ = b; }
+  static inline bool IsLocal() { return output_buffer_local_; }
 
   SqttProfile(const util::AgentInfo* agent_info) : Profile(agent_info) {
     profile_.type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_SQTT;
@@ -227,16 +229,18 @@ class SqttProfile : public Profile {
 
   hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) {
     profile_.command_buffer.ptr =
-        rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
+      rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
     profile_.output_buffer.size = output_buffer_size_;
-    profile_.output_buffer.ptr =
-        rsrc->AllocateLocalMemory(agent_info_, profile_.output_buffer.size);
+    profile_.output_buffer.ptr = (output_buffer_local_) ?
+      rsrc->AllocateLocalMemory(agent_info_, profile_.output_buffer.size) :
+      rsrc->AllocateSysMemory(agent_info_, profile_.output_buffer.size);
     return (profile_.command_buffer.ptr && profile_.output_buffer.ptr) ? HSA_STATUS_SUCCESS
                                                                        : HSA_STATUS_ERROR;
   }
 
  private:
   static uint32_t output_buffer_size_;
+  static bool output_buffer_local_;
 };
 
 }  // namespace rocprofiler

@@ -127,6 +127,7 @@ bool LoadTool() {
     rocprofiler_settings_t settings{};
     settings.intercept_mode = (intercept_mode) ? 1 : 0;
     settings.sqtt_size = SqttProfile::GetSize();
+    settings.sqtt_local = SqttProfile::IsLocal() ? 1: 0;
     settings.timeout = Context::GetTimeout();
     settings.timestamp_on = InterceptQueue::IsTrackerOn() ? 1 : 0;
 
@@ -135,6 +136,7 @@ bool LoadTool() {
 
     intercept_mode = (settings.intercept_mode != 0);
     SqttProfile::SetSize(settings.sqtt_size);
+    SqttProfile::SetLocal(settings.sqtt_local != 0);
     Context::SetTimeout(settings.timeout);
     InterceptQueue::SetTimeout(settings.timeout);
     InterceptQueue::TrackerOn(settings.timestamp_on != 0);
@@ -186,6 +188,7 @@ const MetricsDict* GetMetrics(const hsa_agent_t& agent) {
 rocprofiler_properties_t rocprofiler_properties;
 uint64_t Context::timeout_ = UINT64_MAX;
 uint32_t SqttProfile::output_buffer_size_ = 0x2000000;  // 32M
+bool SqttProfile::output_buffer_local_ = true;
 Tracker::mutex_t Tracker::mutex_;
 util::Logger::mutex_t util::Logger::mutex_;
 util::Logger* util::Logger::instance_ = NULL;

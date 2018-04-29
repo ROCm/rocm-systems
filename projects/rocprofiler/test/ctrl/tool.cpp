@@ -93,6 +93,8 @@ static uint32_t CTX_OUTSTANDING_MAX = 0;
 static uint32_t CTX_OUTSTANDING_MON = 0;
 // to truncate kernel names
 uint32_t to_truncate_names = 0;
+// local SQTT buffer
+bool is_sqtt_local = true;
 
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
@@ -263,17 +265,23 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
   hsa_status_t status = HSA_STATUS_SUCCESS;
   trace_data_arg_t* arg = reinterpret_cast<trace_data_arg_t*>(data);
   if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
-    const uint32_t data_size = info_data->sqtt_data.size;
     const void* data_ptr = info_data->sqtt_data.ptr;
+    const uint32_t data_size = info_data->sqtt_data.size;
     fprintf(arg->file, "    SE(%u) size(%u)\n", info_data->sample_id, data_size);
 
-    HsaRsrcFactory* hsa_rsrc = &HsaRsrcFactory::Instance();
-    const AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(arg->agent);
-    void* buffer = hsa_rsrc->AllocateSysMemory(agent_info, data_size);
-    const bool suc = HsaRsrcFactory::Memcpy(arg->agent, buffer, data_ptr, data_size);
-    if (suc) dump_sqtt_trace(arg->label, info_data->sample_id, buffer, data_size);
-    else fatal("SQTT data memcopy to host failed");
-    HsaRsrcFactory::FreeMemory(buffer);
+    if (is_sqtt_local) {
+      HsaRsrcFactory* hsa_rsrc = &HsaRsrcFactory::Instance();
+      const AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(arg->agent);
+      const uint32_t mem_size = data_size;
+      void* buffer = hsa_rsrc->AllocateSysMemory(agent_info, mem_size);
+      if(!hsa_rsrc->Memcpy(agent_info, buffer, data_ptr, mem_size)) {
+        fatal("SQTT data memcopy to host failed");
+      }
+      dump_sqtt_trace(arg->label, info_data->sample_id, buffer, data_size);
+      HsaRsrcFactory::FreeMemory(buffer);
+    } else {
+      dump_sqtt_trace(arg->label, info_data->sample_id, data_ptr, data_size);
+    }
   } else
     status = HSA_STATUS_ERROR;
   return status;
@@ -719,6 +727,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
         if (multiplier != 1) str = str.substr(0, str.length() - 1);
         settings->sqtt_size = strtoull(str.c_str(), NULL, 0) * multiplier;
       }
+      it = opts.find("sqtt-local");
+      if (it != opts.end()) { settings->sqtt_local = (it->second == "on"); }
     }
   }
   // Enable verbose mode
@@ -734,6 +744,10 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   check_env_var("ROCP_DATA_TIMEOUT", settings->timeout);
   // Set SQTT size
   check_env_var("ROCP_SQTT_SIZE", settings->sqtt_size);
+  // Set SQTT local buffer
+  check_env_var("ROCP_SQTT_LOCAL", settings->sqtt_local);
+
+  is_sqtt_local = settings->sqtt_local;
 
   // Printing out info
   char* info_symb = getenv("ROCP_INFO");
@@ -837,12 +851,6 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     }
     if (name == "") fatal("ROCProfiler: Bad trace properties, name is not specified");
 
-    printf("    %s (", name.c_str());
-    features[index] = {};
-    features[index].kind = ROCPROFILER_FEATURE_KIND_TRACE;
-    features[index].name = strdup(name.c_str());
-    features[index].data.result_bytes.copy = to_copy_data;
-
     std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
     parameters_dict["TARGET_CU"] =
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET;
@@ -856,6 +864,12 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
     parameters_dict["SE_MASK"] =
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK;
+
+    printf("    %s (", name.c_str());
+    features[index] = {};
+    features[index].kind = ROCPROFILER_FEATURE_KIND_TRACE;
+    features[index].name = strdup(name.c_str());
+    features[index].data.result_bytes.copy = to_copy_data;
 
     for (auto* params : params_list) {
       const unsigned parameter_count = params->opts.size();

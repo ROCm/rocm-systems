@@ -14,7 +14,7 @@
 ></metric>
 
 # SQTT trace with parameters
-<trace name=SQTT copy="true">
+<trace name="SQTT">
   <parameters
     MASK=0x0f00
     TOKEN_MASK=0x144b
