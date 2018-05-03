@@ -198,6 +198,12 @@ class HsaRsrcFactory {
   // @return uint8_t* Pointer to buffer, null if allocation fails.
   uint8_t* AllocateSysMemory(const AgentInfo* agent_info, size_t size);
 
+  // Allocate memory for command buffer.
+  // @param agent_info Agent from whose memory region to allocate
+  // @param size Size of memory in terms of bytes
+  // @return uint8_t* Pointer to buffer, null if allocation fails.
+  uint8_t* AllocateCmdMemory(const AgentInfo* agent_info, size_t size);
+
   // Copy data from GPU to host memory
   bool Memcpy(const hsa_agent_t& agent, void* dst, const void* src, size_t size);
   bool Memcpy(const AgentInfo* agent_info, void* dst, const void* src, size_t size);
@@ -245,11 +251,14 @@ class HsaRsrcFactory {
   // Destructor of the class
   ~HsaRsrcFactory();
 
-  // HSA was initialized
-  const bool initialize_hsa_;
-
   // Add an instance of AgentInfo representing a Hsa Gpu agent
   const AgentInfo* AddAgentInfo(const hsa_agent_t agent);
+
+  // To mmap command buffer memory
+  static const bool CMD_MEMORY_MMAP = false;
+
+  // HSA was initialized
+  const bool initialize_hsa_;
 
   static HsaRsrcFactory* instance_;
   static mutex_t mutex_;

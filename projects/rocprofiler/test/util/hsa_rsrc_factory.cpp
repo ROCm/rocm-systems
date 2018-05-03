@@ -33,6 +33,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -390,6 +391,18 @@ uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t s
     }
   }
   uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+  return ptr;
+}
+
+// Allocate memory for command buffer.
+// @param agent_info Agent from whose memory region to allocate
+// @param size Size of memory in terms of bytes
+// @return uint8_t* Pointer to buffer, null if allocation fails.
+uint8_t* HsaRsrcFactory::AllocateCmdMemory(const AgentInfo* agent_info, size_t size) {
+  size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+  uint8_t* ptr = (agent_info->is_apu && CMD_MEMORY_MMAP) ?
+    reinterpret_cast<uint8_t*>( mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED | MAP_ANONYMOUS, 0, 0)) :
+    AllocateSysMemory(agent_info, size);
   return ptr;
 }
 
