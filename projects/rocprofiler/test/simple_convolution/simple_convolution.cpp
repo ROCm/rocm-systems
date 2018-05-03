@@ -299,7 +299,7 @@ void SimpleConvolution::Init() {
   mem_descr_t input_des = GetDescr(INPUT_BUF_ID);
   mem_descr_t mask_des = GetDescr(MASK_BUF_ID);
   mem_descr_t output_des = GetDescr(LOCAL_BUF_ID);
-#if 0
+#if 1
   printf("kernarg_des %p 0x%x\n", kernarg_des.ptr, kernarg_des.size);
   printf("input_des %p 0x%x\n", input_des.ptr, input_des.size);
   printf("mask_des %p 0x%x\n", mask_des.ptr, mask_des.size);

@@ -64,6 +64,7 @@ class SimpleConvolution : public TestKernel {
     uint32_t arg41;
     uint32_t arg5;
     uint32_t arg51;
+    uint64_t pad[6];
   };
 
   // Reference CPU implementation of Simple Convolution
