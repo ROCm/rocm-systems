@@ -1,0 +1,31 @@
+HCC_PROFILE=2 ./MatrixTranspose
+Device name Device 67df
+<hipMalloc id(3) correlation_id(1) on-enter> ptr(0x7ffd20812ac8) size(0x400000)
+<hipMalloc id(3) correlation_id(1) on-exit> *ptr(0x0x901800000)
+<hipMalloc id(3) correlation_id(2) on-enter> ptr(0x7ffd20812ac0) size(0x400000)
+<hipMalloc id(3) correlation_id(2) on-exit> *ptr(0x0x901e00000)
+<hipMemcpy id(101) correlation_id(3) on-enter> dst(0x901800000) src(0x7f8d7de53010) size(0x400000) kind(1)
+<hipMemcpy id(101) correlation_id(3) on-exit> 
+<hipLaunchKernel id(38) correlation_id(4) on-enter> kernel(0x457010) straem((nil))
+<hipModuleLaunchKernel id(118) correlation_id(5) on-enter> kernel(_Z15matrixTransposeN8hip_impl17Empty_launch_parmEPfS1_i) straem((nil))
+<hipModuleLaunchKernel id(118) correlation_id(5) on-exit> 
+<hipLaunchKernel id(38) correlation_id(4) on-exit> 
+<hipMemcpy id(101) correlation_id(6) on-enter> dst(0x7f8d7d567010) src(0x901e00000) size(0x400000) kind(2)
+<hipKernel id(133) correlation_id(7) on-enter> kernel("_Z15matrixTransposeN8hip_impl17Empty_launch_parmEPfS1_i") start(83839566647773) end(83839568478493)
+<hipKernel id(133) correlation_id(7) on-exit> 
+<hipMemcpy id(101) correlation_id(6) on-exit> 
+PASSED!
+<hipFree id(80) correlation_id(8) on-enter> ptr(0x901800000)
+<hipFree id(80) correlation_id(8) on-exit> 
+<hipFree id(80) correlation_id(9) on-enter> ptr(0x901e00000)
+<hipFree id(80) correlation_id(9) on-exit> 
+Activity records:
+  hipMalloc id(3) correlation_id(1): begin_ns(1525888625904709559) end_ns(1525888625904912781)
+  hipMalloc id(3) correlation_id(2): begin_ns(1525888625904916451) end_ns(1525888625905101986)
+  hipMemcpy id(101) correlation_id(3): begin_ns(1525888625905109198) end_ns(1525888625906165995)
+  hipModuleLaunchKernel id(118) correlation_id(5): begin_ns(1525888625906184286) end_ns(1525888625906210781)
+  hipLaunchKernel id(38) correlation_id(4): begin_ns(1525888625906171593) end_ns(1525888625906212767)
+  hipKernel id(133) correlation_id(7): begin_ns(1525888625908107416) end_ns(1525888625908114094)
+  hipMemcpy id(101) correlation_id(6): begin_ns(1525888625906214261) end_ns(1525888625908785157)
+  hipFree id(80) correlation_id(8): begin_ns(1525888625924823273) end_ns(1525888625924893910)
+  hipFree id(80) correlation_id(9): begin_ns(1525888625924896385) end_ns(1525888625924922452)

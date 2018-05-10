@@ -1,0 +1,1 @@
+rm -f /etc/ld.so.conf.d/libhsa-roctracer64.conf && ldconfig
