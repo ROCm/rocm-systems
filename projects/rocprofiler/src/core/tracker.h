@@ -147,7 +147,7 @@ class Tracker {
     return (timestamp_t)timestamp_ns;
   }
 
-  // Timestamp frequency
+  // Timestamp frequency factor
   freq_t timestamp_factor_;
   // Timeout for wait on destruction
   timestamp_t timeout_;

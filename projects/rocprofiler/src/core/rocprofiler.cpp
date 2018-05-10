@@ -95,8 +95,10 @@ void RestoreHsaApi() {
 
 typedef void (*tool_handler_t)();
 typedef void (*tool_handler_prop_t)(rocprofiler_settings_t*);
-void * kTtoolHandle = NULL;
+void * tool_handle = NULL;
 
+// Load profiling tool library
+// Return true if intercepting mode is enabled
 bool LoadTool() {
   bool intercept_mode = false;
   const char* tool_lib = getenv("ROCP_TOOL_LIB");
@@ -104,20 +106,20 @@ bool LoadTool() {
   if (tool_lib) {
     intercept_mode = true;
 
-    kTtoolHandle = dlopen(tool_lib, RTLD_NOW);
-    if (kTtoolHandle == NULL) {
+    tool_handle = dlopen(tool_lib, RTLD_NOW);
+    if (tool_handle == NULL) {
       fprintf(stderr, "ROCProfiler: can't load tool library \"%s\"\n", tool_lib);
       fprintf(stderr, "%s\n", dlerror());
       abort();
     }
-    tool_handler_t handler = reinterpret_cast<tool_handler_t>(dlsym(kTtoolHandle, "OnLoadTool"));
-    tool_handler_prop_t handler_prop = reinterpret_cast<tool_handler_prop_t>(dlsym(kTtoolHandle, "OnLoadToolProp"));
+    tool_handler_t handler = reinterpret_cast<tool_handler_t>(dlsym(tool_handle, "OnLoadTool"));
+    tool_handler_prop_t handler_prop = reinterpret_cast<tool_handler_prop_t>(dlsym(tool_handle, "OnLoadToolProp"));
     if ((handler == NULL) && (handler_prop == NULL)) {
       fprintf(stderr, "ROCProfiler: tool library corrupted, OnLoadTool()/OnLoadToolProp() method is expected\n");
       fprintf(stderr, "%s\n", dlerror());
       abort();
     }
-    tool_handler_t on_unload_handler = reinterpret_cast<tool_handler_t>(dlsym(kTtoolHandle, "OnUnloadTool"));
+    tool_handler_t on_unload_handler = reinterpret_cast<tool_handler_t>(dlsym(tool_handle, "OnUnloadTool"));
     if (on_unload_handler == NULL) {
       fprintf(stderr, "ROCProfiler: tool library corrupted, OnUnloadTool() method is expected\n");
       fprintf(stderr, "%s\n", dlerror());
@@ -145,16 +147,17 @@ bool LoadTool() {
   return intercept_mode;
 }
 
+// Unload profiling tool librray
 void UnloadTool() {
-  if (kTtoolHandle) {
-    tool_handler_t handler = reinterpret_cast<tool_handler_t>(dlsym(kTtoolHandle, "OnUnloadTool"));
+  if (tool_handle) {
+    tool_handler_t handler = reinterpret_cast<tool_handler_t>(dlsym(tool_handle, "OnUnloadTool"));
     if (handler == NULL) {
       fprintf(stderr, "ROCProfiler error: tool library corrupted, OnUnloadTool() method is expected\n");
       fprintf(stderr, "%s\n", dlerror());
       abort();
     }
     handler();
-    dlclose(kTtoolHandle);
+    dlclose(tool_handle);
   }
 }
 
@@ -168,12 +171,6 @@ DESTRUCTOR_API void destructor() {
   util::Logger::Destroy();
 }
 
-hsa_status_t GetExcStatus(const std::exception& e) {
-  const util::exception* rocprofiler_exc_ptr = dynamic_cast<const util::exception*>(&e);
-  return (rocprofiler_exc_ptr) ? static_cast<hsa_status_t>(rocprofiler_exc_ptr->status())
-                               : HSA_STATUS_ERROR;
-}
-
 const MetricsDict* GetMetrics(const hsa_agent_t& agent) {
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
   const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
@@ -183,6 +180,12 @@ const MetricsDict* GetMetrics(const hsa_agent_t& agent) {
   const MetricsDict* metrics = MetricsDict::Create(agent_info);
   if (metrics == NULL) EXC_RAISING(HSA_STATUS_ERROR, "MetricsDict create failed");
   return metrics;
+}
+
+hsa_status_t GetExcStatus(const std::exception& e) {
+  const util::exception* rocprofiler_exc_ptr = dynamic_cast<const util::exception*>(&e);
+  return (rocprofiler_exc_ptr) ? static_cast<hsa_status_t>(rocprofiler_exc_ptr->status())
+                               : HSA_STATUS_ERROR;
 }
 
 rocprofiler_properties_t rocprofiler_properties;
@@ -204,7 +207,12 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
                        const char* const* failed_tool_names) {
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
-  const bool intercept_mode = rocprofiler::LoadTool();
+  bool intercept_mode = false;
+  const char* intercept_env = getenv("ROCP_HSA_INTERCEPT");
+  if (intercept_env != NULL) {
+    if (strncmp(intercept_env, "1", 1) == 0) intercept_mode = true;
+  }
+  if (rocprofiler::LoadTool()) intercept_mode = true;
   // HSA intercepting
   if (intercept_mode) {
     rocprofiler::ProxyQueue::HsaIntercept(table);
