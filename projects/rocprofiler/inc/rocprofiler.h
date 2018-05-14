@@ -167,9 +167,9 @@ typedef void rocprofiler_t;
 // Profiling group object
 typedef struct {
   unsigned index;                    // group index
-  rocprofiler_t* context;            // context object
   rocprofiler_feature_t** features;  // profiling info array
   uint32_t feature_count;            // profiling info count
+  rocprofiler_t* context;            // context object
 } rocprofiler_group_t;
 
 // Profiling mode mask
