@@ -33,6 +33,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -68,8 +69,7 @@ hsa_status_t HsaRsrcFactory::GetHsaAgentsCallback(hsa_agent_t agent, void* data)
 // returned. HSA_STATUS_SUCCESS is returned if no errors were encountered, but
 // no pool was found meeting the requirements. If an error is encountered, we
 // return that error.
-static hsa_status_t
-FindGlobalPool(hsa_amd_memory_pool_t pool, void* data, bool kern_arg) {
+static hsa_status_t FindGlobalPool(hsa_amd_memory_pool_t pool, void* data, bool kern_arg) {
   hsa_status_t err;
   hsa_amd_segment_t segment;
   uint32_t flag;
@@ -78,21 +78,18 @@ FindGlobalPool(hsa_amd_memory_pool_t pool, void* data, bool kern_arg) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT,
-                                     &segment);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
   CHECK_STATUS("hsa_amd_memory_pool_get_info", err);
   if (HSA_AMD_SEGMENT_GLOBAL != segment) {
     return HSA_STATUS_SUCCESS;
   }
 
-  err = hsa_amd_memory_pool_get_info(pool,
-                                HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag);
   CHECK_STATUS("hsa_amd_memory_pool_get_info", err);
 
   uint32_t karg_st = flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
 
-  if ((karg_st == 0 && kern_arg) ||
-      (karg_st != 0 && !kern_arg)) {
+  if ((karg_st == 0 && kern_arg) || (karg_st != 0 && !kern_arg)) {
     return HSA_STATUS_SUCCESS;
   }
 
@@ -152,39 +149,35 @@ HsaRsrcFactory::~HsaRsrcFactory() {
 }
 
 hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
-    void* handle = dlopen(kAqlProfileLib, RTLD_NOW);
-    if (handle == NULL) {
-      fprintf(stderr, "Loading '%s' failed, %s\n", kAqlProfileLib, dlerror());
-      return HSA_STATUS_ERROR;
-    }
-    dlerror(); /* Clear any existing error */
+  void* handle = dlopen(kAqlProfileLib, RTLD_NOW);
+  if (handle == NULL) {
+    fprintf(stderr, "Loading '%s' failed, %s\n", kAqlProfileLib, dlerror());
+    return HSA_STATUS_ERROR;
+  }
+  dlerror(); /* Clear any existing error */
 
-    api->hsa_ven_amd_aqlprofile_error_string =
-      (decltype(::hsa_ven_amd_aqlprofile_error_string)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_error_string");
-    api->hsa_ven_amd_aqlprofile_validate_event =
-      (decltype(::hsa_ven_amd_aqlprofile_validate_event)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_validate_event");
-    api->hsa_ven_amd_aqlprofile_start =
-      (decltype(::hsa_ven_amd_aqlprofile_start)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_start");
-    api->hsa_ven_amd_aqlprofile_stop =
-      (decltype(::hsa_ven_amd_aqlprofile_stop)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_stop");
+  api->hsa_ven_amd_aqlprofile_error_string =
+      (decltype(::hsa_ven_amd_aqlprofile_error_string)*)dlsym(
+          handle, "hsa_ven_amd_aqlprofile_error_string");
+  api->hsa_ven_amd_aqlprofile_validate_event =
+      (decltype(::hsa_ven_amd_aqlprofile_validate_event)*)dlsym(
+          handle, "hsa_ven_amd_aqlprofile_validate_event");
+  api->hsa_ven_amd_aqlprofile_start =
+      (decltype(::hsa_ven_amd_aqlprofile_start)*)dlsym(handle, "hsa_ven_amd_aqlprofile_start");
+  api->hsa_ven_amd_aqlprofile_stop =
+      (decltype(::hsa_ven_amd_aqlprofile_stop)*)dlsym(handle, "hsa_ven_amd_aqlprofile_stop");
 #if AQL_PROFILE_READ_API_ENABLE
-    api->hsa_ven_amd_aqlprofile_read =
-      (decltype(::hsa_ven_amd_aqlprofile_read)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_read");
+  api->hsa_ven_amd_aqlprofile_read =
+      (decltype(::hsa_ven_amd_aqlprofile_read)*)dlsym(handle, "hsa_ven_amd_aqlprofile_read");
 #endif  // AQL_PROFILE_READ_API_ENABLE
-    api->hsa_ven_amd_aqlprofile_legacy_get_pm4 =
-      (decltype(::hsa_ven_amd_aqlprofile_legacy_get_pm4)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
-    api->hsa_ven_amd_aqlprofile_get_info =
-      (decltype(::hsa_ven_amd_aqlprofile_get_info)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_get_info");
-    api->hsa_ven_amd_aqlprofile_iterate_data =
-      (decltype(::hsa_ven_amd_aqlprofile_iterate_data)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_iterate_data");
+  api->hsa_ven_amd_aqlprofile_legacy_get_pm4 =
+      (decltype(::hsa_ven_amd_aqlprofile_legacy_get_pm4)*)dlsym(
+          handle, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+  api->hsa_ven_amd_aqlprofile_get_info = (decltype(::hsa_ven_amd_aqlprofile_get_info)*)dlsym(
+      handle, "hsa_ven_amd_aqlprofile_get_info");
+  api->hsa_ven_amd_aqlprofile_iterate_data =
+      (decltype(::hsa_ven_amd_aqlprofile_iterate_data)*)dlsym(
+          handle, "hsa_ven_amd_aqlprofile_iterate_data");
 
   return HSA_STATUS_SUCCESS;
 }
@@ -226,11 +219,17 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &agent_info->max_queue_size);
     hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE, &agent_info->profile);
     agent_info->is_apu = (agent_info->profile == HSA_PROFILE_FULL) ? true : false;
-    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &agent_info->cu_num);
-    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU), &agent_info->waves_per_cu);
-    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU), &agent_info->simds_per_cu);
-    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES), &agent_info->se_num);
-    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE), &agent_info->shader_arrays_per_se);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
+                       &agent_info->cu_num);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU),
+                       &agent_info->waves_per_cu);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU),
+                       &agent_info->simds_per_cu);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
+                       &agent_info->se_num);
+    hsa_agent_get_info(agent,
+                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE),
+                       &agent_info->shader_arrays_per_se);
 
     agent_info->cpu_pool = {};
     agent_info->kern_arg_pool = {};
@@ -349,7 +348,7 @@ uint8_t* HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t
   hsa_status_t status = HSA_STATUS_ERROR;
   uint8_t* buffer = NULL;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-  status = hsa_amd_memory_pool_allocate(agent_info->gpu_pool, size, 0, (void**)&buffer);
+  status = hsa_amd_memory_pool_allocate(agent_info->gpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
   uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
   return ptr;
 }
@@ -364,7 +363,7 @@ uint8_t* HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size
   uint8_t* buffer = NULL;
   if (!cpu_agents_.empty()) {
     size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-    status = hsa_amd_memory_pool_allocate(cpu_list_[0]->kern_arg_pool, size, 0, (void**)&buffer);
+    status = hsa_amd_memory_pool_allocate(cpu_list_[0]->kern_arg_pool, size, 0, reinterpret_cast<void**>(&buffer));
     // Both the CPU and GPU can access the kernel arguments
     if (status == HSA_STATUS_SUCCESS) {
       hsa_agent_t ag_list[1] = {agent_info->dev_id};
@@ -384,7 +383,7 @@ uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t s
   uint8_t* buffer = NULL;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   if (!cpu_agents_.empty()) {
-    status = hsa_amd_memory_pool_allocate(cpu_list_[0]->cpu_pool, size, 0, (void**)&buffer);
+    status = hsa_amd_memory_pool_allocate(cpu_list_[0]->cpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
     // Both the CPU and GPU can access the memory
     if (status == HSA_STATUS_SUCCESS) {
       hsa_agent_t ag_list[1] = {agent_info->dev_id};
@@ -392,6 +391,19 @@ uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t s
     }
   }
   uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+  return ptr;
+}
+
+// Allocate memory for command buffer.
+// @param agent_info Agent from whose memory region to allocate
+// @param size Size of memory in terms of bytes
+// @return uint8_t* Pointer to buffer, null if allocation fails.
+uint8_t* HsaRsrcFactory::AllocateCmdMemory(const AgentInfo* agent_info, size_t size) {
+  size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+  uint8_t* ptr = (agent_info->is_apu && CMD_MEMORY_MMAP)
+      ? reinterpret_cast<uint8_t*>(
+            mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED | MAP_ANONYMOUS, 0, 0))
+      : AllocateSysMemory(agent_info, size);
   return ptr;
 }
 
@@ -404,7 +416,8 @@ bool HsaRsrcFactory::Memcpy(const hsa_agent_t& agent, void* dst, const void* src
     if (status == HSA_STATUS_SUCCESS) {
       status = hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, NULL, s);
       if (status == HSA_STATUS_SUCCESS) {
-        if (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0) {
+        if (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
+                                      HSA_WAIT_STATE_BLOCKED) != 0) {
           status = HSA_STATUS_ERROR;
         }
       }
@@ -432,7 +445,8 @@ bool HsaRsrcFactory::FreeMemory(void* ptr) {
 // be used to submit for execution
 // @return bool true if successful, false otherwise
 bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path,
-                                      const char* kernel_name, hsa_executable_t* executable, hsa_executable_symbol_t* code_desc) {
+                                     const char* kernel_name, hsa_executable_t* executable,
+                                     hsa_executable_symbol_t* code_desc) {
   hsa_status_t status = HSA_STATUS_ERROR;
 
   // Build the code object filename
@@ -456,13 +470,13 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
   }
 
   // Create executable.
-  status = hsa_executable_create_alt(HSA_PROFILE_FULL,
-    HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, NULL, executable);
+  status = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+                                     NULL, executable);
   CHECK_STATUS("Error in creating executable object", status);
 
   // Load code object.
-  status = hsa_executable_load_agent_code_object(*executable, agent_info->dev_id,
-    code_obj_rdr, NULL, NULL);
+  status = hsa_executable_load_agent_code_object(*executable, agent_info->dev_id, code_obj_rdr,
+                                                 NULL, NULL);
   CHECK_STATUS("Error in loading executable object", status);
 
   // Freeze executable.
@@ -504,7 +518,7 @@ bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
   return true;
 }
 
-uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, void* packet) {
+uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet) {
   const uint32_t slot_size_b = 0x40;
 
   // adevance command queue
@@ -515,18 +529,35 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, void* packet) {
   }
 
   uint32_t slot_idx = (uint32_t)(write_idx % queue->size);
-  uint32_t* queue_slot = (uint32_t*)((uintptr_t)(queue->base_address) + (slot_idx * slot_size_b));
-  uint32_t* slot_data = (uint32_t*)packet;
+  uint32_t* queue_slot = reinterpret_cast<uint32_t*>((uintptr_t)(queue->base_address) + (slot_idx * slot_size_b));
+  const uint32_t* slot_data = reinterpret_cast<const uint32_t*>(packet);
 
   // Copy buffered commands into the queue slot.
   // Overwrite the AQL invalid header (first dword) last.
   // This prevents the slot from being read until it's fully written.
   memcpy(&queue_slot[1], &slot_data[1], slot_size_b - sizeof(uint32_t));
-  std::atomic<uint32_t>* header_atomic_ptr = reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
+  std::atomic<uint32_t>* header_atomic_ptr =
+      reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
   header_atomic_ptr->store(slot_data[0], std::memory_order_release);
 
   // ringdoor bell
   hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
+
+  return write_idx;
+}
+uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes) {
+  const uint32_t slot_size_b = 0x40;
+  if ((size_bytes & (slot_size_b - 1)) != 0) {
+    fprintf(stderr, "HsaRsrcFactory::Submit: Bad packet size %zx\n", size_bytes);
+    abort();
+  }
+
+  const char* begin = reinterpret_cast<const char*>(packet);
+  const char* end = begin + size_bytes;
+  uint64_t write_idx = 0;
+  for (const char* ptr = begin; ptr < end; ptr += slot_size_b) {
+    write_idx = Submit(queue, ptr);
+  }
 
   return write_idx;
 }

@@ -22,8 +22,8 @@ WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 POSSIBILITY OF SUCH DAMAGE.
 ********************************************************************/
 
-#ifndef _HSA_RSRC_FACTORY_H_
-#define _HSA_RSRC_FACTORY_H_
+#ifndef SRC_UTIL_HSA_RSRC_FACTORY_H_
+#define SRC_UTIL_HSA_RSRC_FACTORY_H_
 
 #include <hsa.h>
 #include <hsa_ext_amd.h>
@@ -200,6 +200,12 @@ class HsaRsrcFactory {
   // @return uint8_t* Pointer to buffer, null if allocation fails.
   uint8_t* AllocateSysMemory(const AgentInfo* agent_info, size_t size);
 
+  // Allocate memory for command buffer.
+  // @param agent_info Agent from whose memory region to allocate
+  // @param size Size of memory in terms of bytes
+  // @return uint8_t* Pointer to buffer, null if allocation fails.
+  uint8_t* AllocateCmdMemory(const AgentInfo* agent_info, size_t size);
+
   // Copy data from GPU to host memory
   bool Memcpy(const hsa_agent_t& agent, void* dst, const void* src, size_t size);
   bool Memcpy(const AgentInfo* agent_info, void* dst, const void* src, size_t size);
@@ -215,13 +221,14 @@ class HsaRsrcFactory {
   // be used to submit for execution
   // @return true if successful, false otherwise
   bool LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path, const char* kernel_name,
-                        hsa_executable_t* hsa_exec, hsa_executable_symbol_t* code_desc);
+                       hsa_executable_t* hsa_exec, hsa_executable_symbol_t* code_desc);
 
   // Print the various fields of Hsa Gpu Agents
   bool PrintGpuAgents(const std::string& header);
 
   // Submit AQL packet to given queue
-  static uint64_t Submit(hsa_queue_t* queue, void* packet);
+  static uint64_t Submit(hsa_queue_t* queue, const void* packet);
+  static uint64_t Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes);
 
   // Return AqlProfile API table
   typedef hsa_ven_amd_aqlprofile_1_00_pfn_t aqlprofile_pfn_t;
@@ -242,16 +249,19 @@ class HsaRsrcFactory {
 
   // Constructor of the class. Will initialize the Hsa Runtime and
   // query the system topology to get the list of Cpu and Gpu devices
-  HsaRsrcFactory(bool initialize_hsa);
+  explicit HsaRsrcFactory(bool initialize_hsa);
 
   // Destructor of the class
   ~HsaRsrcFactory();
 
-  // HSA was initialized
-  const bool initialize_hsa_;
-
   // Add an instance of AgentInfo representing a Hsa Gpu agent
   const AgentInfo* AddAgentInfo(const hsa_agent_t agent);
+
+  // To mmap command buffer memory
+  static const bool CMD_MEMORY_MMAP = false;
+
+  // HSA was initialized
+  const bool initialize_hsa_;
 
   static HsaRsrcFactory* instance_;
   static mutex_t mutex_;
@@ -277,4 +287,4 @@ class HsaRsrcFactory {
 }  // namespace util
 }  // namespace rocprofiler
 
-#endif  // _HSA_RSRC_FACTORY_H_
+#endif  // SRC_UTIL_HSA_RSRC_FACTORY_H_

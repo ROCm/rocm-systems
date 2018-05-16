@@ -112,6 +112,15 @@ bool TestHsa::Setup() {
   // Start the timer object
   hsa_timer_.StartTimer(setup_timer_idx_);
 
+  // Load and Finalize Kernel Code Descriptor
+  const char* brig_path = brig_path_obj_.c_str();
+  bool suc = hsa_rsrc_->LoadAndFinalize(agent_info_, brig_path, name_.c_str(), &hsa_exec_,
+                                        &kernel_code_desc_);
+  if (suc == false) {
+    std::cerr << "Error in loading and finalizing Kernel" << std::endl;
+    return false;
+  }
+
   mem_map_t& mem_map = test_->GetMemMap();
   for (mem_it_t it = mem_map.begin(); it != mem_map.end(); ++it) {
     mem_descr_t& des = it->second;
@@ -119,10 +128,25 @@ bool TestHsa::Setup() {
       case TestKernel::LOCAL_DES_ID:
         des.ptr = hsa_rsrc_->AllocateLocalMemory(agent_info_, des.size);
         break;
-      case TestKernel::KERNARG_DES_ID:
-        des.ptr = hsa_rsrc_->AllocateKernArgMemory(agent_info_, des.size);
-        if (des.ptr) memset(des.ptr, 0, des.size);
+      case TestKernel::KERNARG_DES_ID: {
+        // Check the kernel args size
+        const size_t kernarg_size = des.size;
+        size_t size_info = 0;
+        hsa_executable_symbol_get_info(
+            kernel_code_desc_, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &size_info);
+        const bool kernarg_missmatch = (kernarg_size > size_info);
+        if (kernarg_missmatch) {
+          std::cout << "kernarg_size = " << kernarg_size << ", size_info = " << size_info
+                    << std::flush << std::endl;
+          TEST_ASSERT(!kernarg_missmatch);
+          break;
+        }
+        // ALlocate kernarg memory
+        des.size = size_info;
+        des.ptr = hsa_rsrc_->AllocateKernArgMemory(agent_info_, size_info);
+        if (des.ptr) memset(des.ptr, 0, size_info);
         break;
+      }
       case TestKernel::SYS_DES_ID:
         des.ptr = hsa_rsrc_->AllocateSysMemory(agent_info_, des.size);
         if (des.ptr) memset(des.ptr, 0, des.size);
@@ -132,19 +156,11 @@ bool TestHsa::Setup() {
         break;
       default:
         break;
-    };
+    }
     TEST_ASSERT(des.ptr != NULL);
     if (des.ptr == NULL) return false;
   }
   test_->Init();
-
-  // Load and Finalize Kernel Code Descriptor
-  char* brig_path = (char*)brig_path_obj_.c_str();
-  bool suc =  hsa_rsrc_->LoadAndFinalize(agent_info_, brig_path, name_.c_str(), &hsa_exec_, &kernel_code_desc_);
-  if (suc == false) {
-    std::cerr << "Error in loading and finalizing Kernel" << std::endl;
-    return false;
-  }
 
   // Stop the timer object
   hsa_timer_.StopTimer(setup_timer_idx_);
@@ -161,7 +177,6 @@ bool TestHsa::Run() {
   const uint32_t work_grid_size = test_->GetGridSize();
   uint32_t group_segment_size = 0;
   uint32_t private_segment_size = 0;
-  const size_t kernarg_segment_size = test_->GetKernargSize();
   uint64_t code_handle = 0;
 
   // Retrieve the amount of group memory needed
@@ -173,12 +188,6 @@ bool TestHsa::Run() {
                                  HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE,
                                  &private_segment_size);
 
-  // Check the kernel args size
-  size_t size_info = 0;
-  hsa_executable_symbol_get_info(
-      kernel_code_desc_, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &size_info);
-  TEST_ASSERT(kernarg_segment_size == size_info);
-  if (kernarg_segment_size != size_info) return false;
 
   // Retrieve handle of the code block
   hsa_executable_symbol_get_info(kernel_code_desc_, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
@@ -220,13 +229,8 @@ bool TestHsa::Run() {
 
   // Wait on the dispatch signal until the kernel is finished.
   // Update wait condition to HSA_WAIT_STATE_ACTIVE for Polling
-  if (hsa_signal_wait_scacquire(
-    hsa_signal_,
-    HSA_SIGNAL_CONDITION_LT,
-    1,
-    UINT64_MAX,
-    HSA_WAIT_STATE_BLOCKED) != 0)
-  {
+  if (hsa_signal_wait_scacquire(hsa_signal_, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
+                                HSA_WAIT_STATE_BLOCKED) != 0) {
     TEST_ASSERT("signal_wait failed");
   }
 
@@ -252,7 +256,7 @@ bool TestHsa::VerifyResults() {
     suc = hsa_rsrc_->Memcpy(agent_info_, output, test_->GetOutputPtr(), size);
     if (!suc) std::clog << "> VerifyResults: Memcpy failed" << std::endl << std::flush;
   } else {
-    output = test_->GetOutputPtr();;
+    output = test_->GetOutputPtr();
     suc = true;
   }
 

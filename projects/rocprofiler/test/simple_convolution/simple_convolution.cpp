@@ -299,16 +299,16 @@ void SimpleConvolution::Init() {
   mem_descr_t input_des = GetDescr(INPUT_BUF_ID);
   mem_descr_t mask_des = GetDescr(MASK_BUF_ID);
   mem_descr_t output_des = GetDescr(LOCAL_BUF_ID);
-#if 1
+#if 0
   printf("kernarg_des %p 0x%x\n", kernarg_des.ptr, kernarg_des.size);
   printf("input_des %p 0x%x\n", input_des.ptr, input_des.size);
   printf("mask_des %p 0x%x\n", mask_des.ptr, mask_des.size);
   printf("output_des %p 0x%x\n", output_des.ptr, output_des.size);
 #endif
-  uint32_t* input = (uint32_t*)input_des.ptr;
-  uint32_t* output_local = (uint32_t*)output_des.ptr;
-  float* mask = (float*)mask_des.ptr;
-  kernel_args_t* kernel_args = (kernel_args_t*)kernarg_des.ptr;
+  uint32_t* input = reinterpret_cast<uint32_t*>(input_des.ptr);
+  uint32_t* output_local = reinterpret_cast<uint32_t*>(output_des.ptr);
+  float* mask = reinterpret_cast<float*>(mask_des.ptr);
+  kernel_args_t* kernel_args = reinterpret_cast<kernel_args_t*>(kernarg_des.ptr);
 
   if (randomize_seed_) {
     // random initialisation of input

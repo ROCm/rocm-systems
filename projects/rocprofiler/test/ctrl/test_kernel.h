@@ -67,8 +67,8 @@ class TestKernel {
   bool IsLocal(const mem_descr_t& descr) const { return (descr.id == LOCAL_DES_ID); }
 
   // Methods to get the kernel attributes
-  const mem_descr_t& GetKernargDescr() { return *test_map_[KERNARG_EXP_ID]; };
-  const mem_descr_t& GetOutputDescr() { return *test_map_[OUTPUT_EXP_ID]; };
+  const mem_descr_t& GetKernargDescr() { return *test_map_[KERNARG_EXP_ID]; }
+  const mem_descr_t& GetOutputDescr() { return *test_map_[OUTPUT_EXP_ID]; }
   void* GetKernargPtr() { return GetKernargDescr().ptr; }
   uint32_t GetKernargSize() { return GetKernargDescr().size; }
   void* GetOutputPtr() { return GetOutputDescr().ptr; }
@@ -77,7 +77,7 @@ class TestKernel {
   virtual uint32_t GetGridSize() const = 0;
 
   // Return reference output
-  void* GetRefOut() { return test_map_[REFOUT_EXP_ID]->ptr; };
+  void* GetRefOut() { return test_map_[REFOUT_EXP_ID]->ptr; }
 
   // Print output
   virtual void PrintOutput(const void* ptr) const = 0;

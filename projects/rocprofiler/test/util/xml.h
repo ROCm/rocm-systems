@@ -1,5 +1,5 @@
-#ifndef SRC_XML_XML_H_
-#define SRC_XML_XML_H_
+#ifndef TEST_UTIL_XML_H_
+#define TEST_UTIL_XML_H_
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <string>
 #include <vector>
 
 namespace xml {
@@ -52,13 +53,13 @@ class Xml {
         }
         for (auto* incl : incl_nodes) {
           const std::string& incl_name = path + incl->opts["file"];
-          Xml *ixml = Create(incl_name, xml);
+          Xml* ixml = Create(incl_name, xml);
           if (ixml == NULL) {
             delete xml;
             xml = NULL;
             break;
           } else {
-            delete(ixml);
+            delete (ixml);
           }
         }
         if (xml) {
@@ -70,7 +71,7 @@ class Xml {
     return xml;
   }
 
-  static void Destroy(Xml *xml) { delete xml; }
+  static void Destroy(Xml* xml) { delete xml; }
 
   std::string GetName() { return file_name_; }
 
@@ -93,23 +94,25 @@ class Xml {
 
   nodes_t GetNodes(const std::string& global_tag) { return (*map_)[global_tag]; }
 
-  template <class F>
-  F ForEach(const F& f_i) {
+  template <class F> F ForEach(const F& f_i) {
     F f = f_i;
-    if (map_) for (auto& entry : *map_) {
-      for (auto node : entry.second) {
-        if (f.fun(entry.first, node) == false) break;
+    if (map_) {
+      for (auto& entry : *map_) {
+        for (auto node : entry.second) {
+          if (f.fun(entry.first, node) == false) break;
+        }
       }
     }
     return f;
   }
 
-  template <class F>
-  F ForEach(const F& f_i) const {
+  template <class F> F ForEach(const F& f_i) const {
     F f = f_i;
-    if (map_) for (auto& entry : *map_) {
-      for (auto node : entry.second) {
-        if (f.fun(entry.first, node) == false) break;
+    if (map_) {
+      for (auto& entry : *map_) {
+        for (auto node : entry.second) {
+          if (f.fun(entry.first, node) == false) break;
+        }
       }
     }
     return f;
@@ -139,8 +142,7 @@ class Xml {
         comment_(false),
         included_(false),
         level_(NULL),
-        map_(NULL)
-  {
+        map_(NULL) {
     if (obj != NULL) {
       map_ = obj->map_;
       level_ = obj->level_;
@@ -165,7 +167,7 @@ class Xml {
   bool Init() {
     fd_ = open(file_name_.c_str(), O_RDONLY);
     if (fd_ == -1) {
-      //perror((std::string("open XML file ") + file_name_).c_str());
+      // perror((std::string("open XML file ") + file_name_).c_str());
       return false;
     }
 
@@ -180,20 +182,19 @@ class Xml {
 
   void PreProcess() {
     uint32_t ind = 0;
-    const uint32_t buf_size = 128;
-    char buf[buf_size];
+    char buf[kBufSize];
     bool error = false;
 
     while (1) {
       const uint32_t pos = lseek(fd_, 0, SEEK_CUR);
-      uint32_t size = read(fd_, buf, buf_size);
+      uint32_t size = read(fd_, buf, kBufSize);
       if (size <= 0) break;
       buf[size - 1] = '\0';
 
       if (strncmp(buf, "#include \"", 10) == 0) {
-        for (ind = 0; (ind < size) && (buf[ind] != '\n'); ++ind);
+        for (ind = 0; (ind < size) && (buf[ind] != '\n'); ++ind) {}
         if (ind == size) {
-          fprintf(stderr, "XML PreProcess failed, line size limit %d\n", (int)buf_size);
+          fprintf(stderr, "XML PreProcess failed, line size limit %zu\n", kBufSize);
           error = true;
           break;
         }
@@ -201,7 +202,7 @@ class Xml {
         size = ind;
         lseek(fd_, pos + ind + 1, SEEK_SET);
 
-        for (ind = 10; (ind < size) && (buf[ind] != '"'); ++ind);
+        for (ind = 10; (ind < size) && (buf[ind] != '"'); ++ind) {}
         if (ind == size) {
           error = true;
           break;
@@ -229,9 +230,9 @@ class Xml {
       token_t token = (remainder.size()) ? remainder : NextToken();
       remainder.clear();
 
-//      token_t token1 = token;
-//      token1.push_back('\0');
-//      std::cout << "> " << &token1[0] << std::endl;
+      //      token_t token1 = token;
+      //      token1.push_back('\0');
+      //      std::cout << "> " << &token1[0] << std::endl;
 
       // End of file
       if (token.size() == 0) break;
@@ -259,8 +260,9 @@ class Xml {
               else
                 BadFormat(token);
               token.push_back('\0');
-            } else
+            } else {
               token[i] = '\0';
+            }
 
             const char* tag = &token[ind];
             if (node_begin) {
@@ -272,8 +274,9 @@ class Xml {
               }
               UpLevel();
             }
-          } else
+          } else {
             BadFormat(token);
+          }
           break;
         case DECL_STATE:
           if (token[0] == '>') {
@@ -300,7 +303,7 @@ class Xml {
   }
 
   bool SpaceCheck() const {
-    bool cond = ((buffer_[index_] == ' ') || (buffer_[index_] == '	'));
+    bool cond = ((buffer_[index_] == ' ') || (buffer_[index_] == '\t'));
     return cond;
   }
 
@@ -325,29 +328,32 @@ class Xml {
 
     while (1) {
       if (data_size_ == 0) {
-        data_size_ = read(fd_, buffer_, buf_size_);
+        data_size_ = read(fd_, buffer_, kBufSize);
         if (data_size_ <= 0) break;
       }
 
-      if (token.empty())
+      if (token.empty()) {
         while ((index_ < data_size_) && (SpaceCheck() || LineEndCheck())) {
           ++index_;
         }
+      }
       while ((index_ < data_size_) && (in_string || !(SpaceCheck() || LineEndCheck()))) {
         const char symb = buffer_[index_];
         bool skip_symb = false;
 
         switch (symb) {
           case '\\':
-            if (special_symb) special_symb = false;
-            else {
+            if (special_symb) {
+              special_symb = false;
+            } else {
               special_symb = true;
               skip_symb = true;
             }
             break;
           case '"':
-            if (special_symb) special_symb = false;
-            else {
+            if (special_symb) {
+              special_symb = false;
+            } else {
               in_string = !in_string;
               if (!in_string) {
                 buffer_[index_] = ' ';
@@ -411,8 +417,8 @@ class Xml {
   unsigned file_line_;
   int fd_;
 
-  static const unsigned buf_size_ = 256;
-  char buffer_[buf_size_];
+  static const size_t kBufSize = 256;
+  char buffer_[kBufSize];
 
   unsigned data_size_;
   unsigned index_;
@@ -426,4 +432,4 @@ class Xml {
 
 }  // namespace xml
 
-#endif  // SRC_XML_XML_H_
+#endif  // TEST_UTIL_XML_H_
