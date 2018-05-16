@@ -59,7 +59,7 @@ class Xml {
             xml = NULL;
             break;
           } else {
-            delete (ixml);
+            delete ixml;
           }
         }
         if (xml) {
