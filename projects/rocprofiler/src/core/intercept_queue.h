@@ -101,7 +101,7 @@ class InterceptQueue {
                                             obj->agent_info_->dev_index,
                                             obj->queue_,
                                             user_que_idx,
-                                            dispatch_packet->kernel_object,
+                                            dispatch_packet,
                                             kernel_name,
                                             record};
         hsa_status_t status = dispatch_callback_(&data, callback_data_, &group);

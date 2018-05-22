@@ -67,7 +67,7 @@
 #include <stdint.h>
 
 #define ROCPROFILER_VERSION_MAJOR 1
-#define ROCPROFILER_VERSION_MINOR 0
+#define ROCPROFILER_VERSION_MINOR 1
 
 #ifdef __cplusplus
 extern "C" {
@@ -237,7 +237,7 @@ typedef struct {
   uint32_t agent_index;                                // GPU index
   const hsa_queue_t* queue;                            // HSA queue
   uint64_t queue_index;                                // Index in the queue
-  uint64_t kernel_object;                              // Kernel object handle
+  const hsa_kernel_dispatch_packet_t* packet;          // HSA dispatch packet
   const char* kernel_name;                             // Kernel name
   const rocprofiler_dispatch_record_t* record;         // Dispatch record
 } rocprofiler_callback_data_t;

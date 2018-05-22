@@ -17,7 +17,7 @@
   # FETCH_SIZE, kilobytes
   # The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
   <metric name="FETCH_SIZE" expr=(TCC_MC_RDREQ_sum*32)/1024 ></metric>
-  # WRITE_SIZE
+  # WRITE_SIZE, kilobytes
   # The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
   <metric name="WRITE_SIZE" expr=(TCC_MC_WRREQ_sum*32)/1024 ></metric>
 </gfx8>
@@ -41,7 +41,7 @@
   # FETCH_SIZE, kilobytes
   # The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
   <metric name="FETCH_SIZE" expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024 ></metric>
-  # WRITE_SIZE
+  # WRITE_SIZE, kilobytes
   # The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
   <metric name="WRITE_SIZE" expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 ></metric>
 </gfx9>
