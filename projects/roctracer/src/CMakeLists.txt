@@ -8,4 +8,4 @@ set ( LIB_SRC
 )
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
 target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${HIP_INC_DIR} )
-target_link_libraries( ${TARGET_LIB} PRIVATE ${HSA_RUNTIME_LIB} c stdc++)
+target_link_libraries( ${TARGET_LIB} PRIVATE ${HSA_RUNTIME_LIB} c stdc++ ${HIP_INC_DIR}/../lib/libhip_hcc.so )

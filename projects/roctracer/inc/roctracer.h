@@ -65,7 +65,7 @@
 #include <stdint.h>
 
 #include <hip/hip_runtime.h>
-#include <hip/hip_cbstr.h>
+#include <hip/hip_cbapi.h>
 
 #define ROCTRACER_VERSION_MAJOR 1
 #define ROCTRACER_VERSION_MINOR 0
@@ -158,14 +158,27 @@ int roctracer_disable_api_callback(
 typedef void roctracer_pool_t;
 
 // Activity record
+#if 0
 typedef hip_act_record_t roctracer_record_t;
+typedef hip_dispatch_record_t roctracer_dispatch_record_t;
+typedef hip_copy_record_t roctracer_memcpy_record_t;
+typedef hip_barrier_record_t roctracer_barrier_record_t;
+#else
+typedef hip_act_record_t roctracer_record_t;
+typedef hip_copy_record_t roctracer_async_record_t;
+typedef roctracer_async_record_t roctracer_dispatch_record_t;
+typedef roctracer_async_record_t roctracer_memcpy_record_t;
+typedef roctracer_async_record_t roctracer_barrier_record_t;
+#endif
 
 // Return next record
 static inline int roctracer_next_record(
     const roctracer_record_t* record,                                   // [in] record ptr
     const roctracer_record_t** next)                                    // [out] next record ptr
 {
-  *next = (record + 1);
+  *next = (record->async) ?
+    reinterpret_cast<const roctracer_async_record_t*>(record) + 1 :
+    record + 1;
   return ROCTRACER_STATUS_SUCCESS;
 }
 

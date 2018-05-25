@@ -21,13 +21,11 @@ THE SOFTWARE.
 */
 
 #include <iostream>
-#include <string>
 
 // hip header file
-#include "hip/hip_runtime.h"
-#include "hip/hip_cbstr.h"
-#include "inc/roctracer.h"
+#include <hip/hip_runtime.h>
 
+#define ITERATIONS 1
 #define WIDTH 1024
 
 
@@ -55,12 +53,11 @@ void matrixTransposeCPUReference(float* output, float* input, const unsigned int
     }
 }
 
+int iterations = ITERATIONS;
 void init_tracing();
 void finish_tracing();
 
 int main() {
-    init_tracing();
-
     float* Matrix;
     float* TransposeMatrix;
     float* cpuTransposeMatrix;
@@ -76,68 +73,70 @@ int main() {
     int i;
     int errors;
 
-    int iterations = 10;
-    begin:
+    init_tracing();
+    while (iterations-- > 0) {
 
-    Matrix = (float*)malloc(NUM * sizeof(float));
-    TransposeMatrix = (float*)malloc(NUM * sizeof(float));
-    cpuTransposeMatrix = (float*)malloc(NUM * sizeof(float));
-
-    // initialize the input data
-    for (i = 0; i < NUM; i++) {
-        Matrix[i] = (float)i * 10.0f;
-    }
-
-    // allocate the memory on the device side
-    hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
-    hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
-
-    // Memory transfer from host to device
-    hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
-
-    // Lauching kernel from host
-    hipLaunchKernel(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
-                    dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
-                    gpuMatrix, WIDTH);
-
-    // Memory transfer from device to host
-    hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
-
-    // CPU MatrixTranspose computation
-    matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);
-
-    // verify the results
-    errors = 0;
-    double eps = 1.0E-6;
-    for (i = 0; i < NUM; i++) {
-        if (std::abs(TransposeMatrix[i] - cpuTransposeMatrix[i]) > eps) {
-            errors++;
+        Matrix = (float*)malloc(NUM * sizeof(float));
+        TransposeMatrix = (float*)malloc(NUM * sizeof(float));
+        cpuTransposeMatrix = (float*)malloc(NUM * sizeof(float));
+    
+        // initialize the input data
+        for (i = 0; i < NUM; i++) {
+            Matrix[i] = (float)i * 10.0f;
         }
+    
+        // allocate the memory on the device side
+        hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
+        hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
+    
+        // Memory transfer from host to device
+        hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
+    
+        // Lauching kernel from host
+        hipLaunchKernel(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
+                        dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
+                        gpuMatrix, WIDTH);
+    
+        // Memory transfer from device to host
+        hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
+    
+        // CPU MatrixTranspose computation
+        matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);
+    
+        // verify the results
+        errors = 0;
+        double eps = 1.0E-6;
+        for (i = 0; i < NUM; i++) {
+            if (std::abs(TransposeMatrix[i] - cpuTransposeMatrix[i]) > eps) {
+                errors++;
+            }
+        }
+        if (errors != 0) {
+            printf("FAILED: %d errors\n", errors);
+        } else {
+            printf("PASSED!\n");
+        }
+    
+        // free the resources on device side
+        hipFree(gpuMatrix);
+        hipFree(gpuTransposeMatrix);
+    
+        // free the resources on host side
+        free(Matrix);
+        free(TransposeMatrix);
+        free(cpuTransposeMatrix);
+
     }
-    if (errors != 0) {
-        printf("FAILED: %d errors\n", errors);
-    } else {
-        printf("PASSED!\n");
-    }
-
-    // free the resources on device side
-    hipFree(gpuMatrix);
-    hipFree(gpuTransposeMatrix);
-
-    // free the resources on host side
-    free(Matrix);
-    free(TransposeMatrix);
-    free(cpuTransposeMatrix);
-
-    if ((errors == 0) && (--iterations != 0)) goto begin;
-
     finish_tracing();
+
     return errors;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // HIP Callbacks/Activity tracing
 //
+#if 1
+#include <inc/roctracer.h>
 
 // Macro to check ROC-tracer calls status
 #define ROCTRACER_CALL(call)                                                                       \
@@ -165,7 +164,7 @@ extern "C" void hip_api_callback(
 {
   (void)arg;
   const hip_cb_data_t* data = reinterpret_cast<const hip_cb_data_t*>(callback_data);
-  fprintf(stdout, "<%s id(%u)\tcorrelation_id(%u) %s> ",
+  fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
     data->name,
     cid,
     data->correlation_id,
@@ -182,14 +181,14 @@ extern "C" void hip_api_callback(
       case HIP_API_ID_hipMalloc:
         fprintf(stdout, "ptr(%p) size(0x%x)",
           data->args.hipMalloc.ptr,
-          (uint32_t)(data->args.hipMalloc.sizeBytes));
+          (uint32_t)(data->args.hipMalloc.size));
         break;
       case HIP_API_ID_hipFree:
         fprintf(stdout, "ptr(%p)",
           data->args.hipFree.ptr);
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
-        fprintf(stdout, "kernel(%s) straem(%p)",
+        fprintf(stdout, "kernel(\"%s\") straem(%p)",
           data->args.hipModuleLaunchKernel.f->_name.c_str(),
           data->args.hipModuleLaunchKernel.stream);
         break;
@@ -199,8 +198,7 @@ extern "C" void hip_api_callback(
           data->args.hipLaunchKernel.stream);
         break;
       case HIP_API_ID_hipKernel:
-        fprintf(stdout, "kernel(\"%s\") start(%lu) end(%lu)",
-          data->args.hipKernel.name,
+        fprintf(stdout, "start(%lu) end(%lu)",
           data->args.hipKernel.start,
           data->args.hipKernel.end);
         break;
@@ -228,12 +226,15 @@ void activity_callback(const char* begin, const char* end, void* arg) {
   ROCTRACER_CALL(roctracer_next_record(record, &next));
   fprintf(stdout, "\tActivity records:\n"); fflush(stdout);
   while (reinterpret_cast<const char*>(next) <= end) {
-    fprintf(stdout, "\t%s id(%u)\tcorrelation_id(%lu): begin_ns(%lu) end_ns(%lu)\n",
-      record->name,
+    fprintf(stdout, "\tid(%u.%u.%u)\tcorrelation_id(%lu) host_ns(%lu:%lu)\n",
+      record->async,
+      record->op_id,
       record->activity_kind,
       record->correlation_id,
       record->begin_ns,
-      record->end_ns); fflush(stdout);
+      record->end_ns
+    );
+    fflush(stdout);
     record = next;
     ROCTRACER_CALL(roctracer_next_record(record, &next));
   }
@@ -245,25 +246,24 @@ void init_tracing() {
     ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipMemcpy, hip_api_callback, NULL));
     ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipMalloc, hip_api_callback, NULL));
     ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipFree, hip_api_callback, NULL));
-    ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipLaunchKernel, hip_api_callback, NULL));
     ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipModuleLaunchKernel, hip_api_callback, NULL));
-    ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipKernel, hip_api_callback, NULL));
 
     // Enable HIP activity tracing
     roctracer_properties_t properties{};
-    properties.buffer_size = 0x100;
+    properties.buffer_size = 8;
     properties.buffer_callback_fun = activity_callback;
     ROCTRACER_CALL(roctracer_open_pool(&properties));
     ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipMemcpy));
     ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipMalloc));
     ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipFree));
-    ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipLaunchKernel));
     ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipModuleLaunchKernel));
-    ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipKernel));
 }
 
 void finish_tracing() {
     ROCTRACER_CALL(roctracer_close_pool());
 }
-
+#else
+void init_tracing() {}
+void finish_tracing() {}
+#endif
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

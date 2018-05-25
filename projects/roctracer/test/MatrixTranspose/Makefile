@@ -1,28 +1,32 @@
 ROOT_PATH=../..
 LIB_PATH=$(ROOT_PATH)/b
 LIB_NAME=roctracer64
+ROC_LIBS=-L$(LIB_PATH) -l$(LIB_NAME)
 
-export HCC_HOME=/home/evgeny/git/compute/out/ubuntu-16.04/16.04/hcc
-HIP_PATH=/home/evgeny/git/compute/external/hip/hip
+HIP_PATH=/home/evgeny/work/roc-1.8.x/hip
+HCC_PATH=/home/evgeny/work/roc-1.8.x/hcc/b
+
 HIPCC=$(HIP_PATH)/bin/hipcc
+HCC_LIBS=-L$(HCC_PATH)/lib -lmcwamp_hsa
 
 SOURCES = MatrixTranspose.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
 
 EXECUTABLE=./MatrixTranspose
-export LD_LIBRARY_PATH=$(LIB_PATH)
+export LD_LIBRARY_PATH=$(LIB_PATH):$(HIP_PATH)/lib:$(HCC_PATH)/lib
+export HCC_HOME=$(HCC_PATH)
 
 .PHONY: test
 
 
-all: $(EXECUTABLE) test
+all: clean $(EXECUTABLE) test
 
-CXXFLAGS =-g -DCOMPILE_HIP_ATP_MARKER=1 -I$(ROOT_PATH)
+CXXFLAGS =-g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc
 CXX=$(HIPCC)
 
 
 $(EXECUTABLE): $(OBJECTS)
-	$(HIPCC) $(OBJECTS) -o $@ -L/home/evgeny/git/compute/out/ubuntu-16.04/16.04/hcc/lib -lmcwamp_hsa -L$(LIB_PATH) -l$(LIB_NAME)
+	$(HIPCC) $(OBJECTS) -o $@ $(HCC_LIBS) $(ROC_LIBS)
 
 
 test: $(EXECUTABLE)

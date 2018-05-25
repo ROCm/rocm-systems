@@ -46,6 +46,9 @@
   }                                                                                                \
   return err;
 
+// HCC API declaration
+extern "C" void HSAOp_set_activity_record(const uint64_t& record);
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Internal library methods
 //
@@ -99,7 +102,8 @@ class MemoryPool {
     }
 
     // Pool definition
-    buffer_size_ = properties.buffer_size;
+    buffer_size_shift_ = properties.buffer_size;
+    buffer_size_ = 1 << buffer_size_shift_;
     const size_t pool_size = 2 * buffer_size_;
     pool_begin_ = NULL;
     alloc_fun_(&pool_begin_, pool_size, alloc_arg_);
@@ -108,6 +112,10 @@ class MemoryPool {
     buffer_begin_ = pool_begin_;
     buffer_end_ = buffer_begin_ + buffer_size_;
     write_ptr_ = buffer_begin_;
+
+    // Pool references
+    buffer_refs_ = new uint32_t[buffer_refs_count_];
+    memset(buffer_refs_, 0, sizeof(uint32_t) * buffer_refs_count_);
 
     // Consuming read thread
     read_callback_fun_ = properties.buffer_callback_fun;
@@ -124,8 +132,9 @@ class MemoryPool {
   }
 
   template <typename Record>
-  void* Write(const Record& record) {
+  Record* getRecord() {
     std::lock_guard<mutex_t> lock(write_mutex_);
+
     char* next = write_ptr_ + sizeof(Record);
     if (next > buffer_end_) {
       if (write_ptr_ == buffer_begin_) EXC_ABORT(ROCTRACER_STATUS_ERROR, "buffer size(" << buffer_size_ << ") is less then the record(" << sizeof(Record) << ")");
@@ -136,9 +145,15 @@ class MemoryPool {
       next = write_ptr_ + sizeof(Record);
     }
     Record* ptr = reinterpret_cast<Record*>(write_ptr_);
-    *ptr = record;
     write_ptr_ = next;
-    return reinterpret_cast<void*>(ptr);
+
+    *ptr = {};
+    return ptr;
+  }
+
+  template <typename Record>
+  void Write(const Record& record) {
+    *getRecord<Record>() = record;
   }
 
   void Flush() {
@@ -148,6 +163,9 @@ class MemoryPool {
       buffer_begin_ = write_ptr_;
     }
   }
+
+  void incrementRef(void* ptr) { buffer_refs_[calc_buffer_index(ptr)] += 1; }
+  void decrementRef(void* ptr) { buffer_refs_[calc_buffer_index(ptr)] -= 1; }
 
   private:
   struct consumer_arg_t {
@@ -176,6 +194,10 @@ class MemoryPool {
       while (arg->valid == false) {
         PTHREAD_CALL(pthread_cond_wait(&(obj->read_cond_), &(obj->read_mutex_)));
       }
+
+      const uint32_t buffer_index = obj->calc_buffer_index(arg->begin);
+      while(obj->buffer_refs_[buffer_index] != 0) PTHREAD_CALL(pthread_yield());
+
       obj->read_callback_fun_(arg->begin, arg->end, obj->read_callback_arg_);
       reset_reader(arg);
       PTHREAD_CALL(pthread_mutex_unlock(&(obj->read_mutex_)));
@@ -192,11 +214,14 @@ class MemoryPool {
     PTHREAD_CALL(pthread_mutex_unlock(&read_mutex_));
   }
 
+  uint32_t calc_buffer_index(const void* ptr) const { return ((uintptr_t)ptr - (uintptr_t)pool_begin_) >> buffer_size_shift_; }
+
   // pool allocator
   roctracer_allocator_t alloc_fun_;
   void* alloc_arg_;
 
   // Pool definition
+  size_t buffer_size_shift_;
   size_t buffer_size_;
   char* pool_begin_;
   char* pool_end_;
@@ -204,6 +229,10 @@ class MemoryPool {
   char* buffer_end_;
   char* write_ptr_;
   mutex_t write_mutex_;
+
+  // Pool references
+  uint32_t* buffer_refs_;
+  static const uint32_t buffer_refs_count_ = 2;
 
   // Consuming read thread
   roctracer_buffer_callback_t read_callback_fun_;
@@ -246,10 +275,9 @@ DESTRUCTOR_API void destructor() {
   util::Logger::Destroy();
 }
 
-// Activity callback to generate an activity record
 void ActivityCallback(
-    roctracer_record_t* record,
     uint32_t activity_kind,
+    roctracer_record_t** record,
     const void* callback_data,
     void* arg)
 {
@@ -259,17 +287,82 @@ void ActivityCallback(
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
   if (pool == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback pool is NULL");
   if (data->phase == ROCTRACER_API_PHASE_ENTER) {
-    *record = {};
-    record->name = data->name;
-    record->activity_kind = activity_kind;
-    record->begin_ns = timer.timestamp_ns();
+    *record = pool->getRecord<roctracer_record_t>();
+    (*record)->activity_kind = activity_kind;
+    (*record)->begin_ns = timer.timestamp_ns();
     // Correlation ID generating
-    const auto correlation_id = GlobalCounter::Increment();
-    record->correlation_id = correlation_id;
-    const_cast<hip_cb_data_t*>(data)->correlation_id = correlation_id;
+    uint64_t correlation_id = data->correlation_id;
+    if (correlation_id == 0) {
+      correlation_id = GlobalCounter::Increment();
+      const_cast<hip_cb_data_t*>(data)->correlation_id = correlation_id;
+    }
+    (*record)->correlation_id = correlation_id;
+    // Passing record to HCC
+    HSAOp_set_activity_record(correlation_id);
   } else {
-    record->end_ns = timer.timestamp_ns();
-    pool->Write<roctracer_record_t>(*record);
+    (*record)->end_ns = timer.timestamp_ns();
+    // Clearing record in HCC
+    HSAOp_set_activity_record(0);
+  }
+}
+
+// HCC activity record type
+struct hcc_record_t {
+  uint32_t op_id;                                                     // operation id, dispatch/copy/barrier
+  uint32_t command_id;                                                // command kind
+  uint32_t async;                                                     // aysnc record, 0/1
+  uint64_t correlation_id;                                            // activity correlation ID
+  uint64_t begin_ns;                                                  // host begin timestamp, nano-seconds
+  uint64_t end_ns;                                                    // host end timestamp, nano-seconds
+  int device_id;
+  uint64_t stream_id;
+  size_t bytes;
+};
+
+void ActivityAsyncCallback(
+    uint32_t op_id,
+    void* record,
+    void* arg)
+{
+  if (op_id == 0) {
+    // HIP record Sync
+    roctracer_record_t* record_ptr = reinterpret_cast<roctracer_record_t*>(record);
+    *reinterpret_cast<uint64_t*>(arg) = record_ptr->correlation_id;
+  } else {
+    if (sizeof(hcc_record_t) != sizeof(roctracer_memcpy_record_t)) EXC_ABORT(ROCTRACER_STATUS_ERROR, "record types missmatch");
+    MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
+    switch (op_id) {
+      // Dispatch record
+      case 1: {
+        roctracer_dispatch_record_t* record_ptr = pool->getRecord<roctracer_dispatch_record_t>();
+        *record_ptr = *reinterpret_cast<roctracer_dispatch_record_t*>(record);
+        break;
+      }
+      // Memcpy record
+      case 2: {
+        roctracer_memcpy_record_t* record_ptr = pool->getRecord<roctracer_memcpy_record_t>();
+        *record_ptr = *reinterpret_cast<roctracer_memcpy_record_t*>(record);
+        break;
+      }
+      // Barrier record
+      case 3: {
+        roctracer_barrier_record_t* record_ptr = pool->getRecord<roctracer_barrier_record_t>();
+        *record_ptr = *reinterpret_cast<roctracer_barrier_record_t*>(record);
+        break;
+      }
+      // Unknown ID
+      default:
+        EXC_ABORT(ROCTRACER_STATUS_ERROR, "Unknown op ID");
+    }
+#if 0
+    std::cout << "ActivityAsyncCallback " << record_ptr->name
+      << " id(" << op_id << "." << record_ptr->activity_kind << ")"
+      << " record(" << record << ")"
+      << " correlation_id(" << record_ptr->correlation_id << ")"
+      << " time-ns(" << start << ":" << end << ")"
+      << " arg(" << arg << ")"
+      << std::endl << std::flush;
+#endif
   }
 }
 
@@ -380,7 +473,7 @@ PUBLIC_API int roctracer_enable_api_activity(
   if (pool == NULL) pool = roctracer_default_pool();
   switch (domain) {
     case ROCTRACER_API_DOMAIN_HIP: {
-      const hipError_t hip_err = hipRegisterActivityCallback(activity_kind, roctracer::ActivityCallback, pool);
+      const hipError_t hip_err = hipRegisterActivityCallback(activity_kind, roctracer::ActivityCallback, roctracer::ActivityAsyncCallback, pool);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterActivityCallback error(" << hip_err << ")");
       break;
     }
