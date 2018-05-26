@@ -165,7 +165,7 @@ extern "C" void hip_api_callback(
   (void)arg;
   const hip_cb_data_t* data = reinterpret_cast<const hip_cb_data_t*>(callback_data);
   fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
-    data->name,
+    roctracer_get_api_name(ROCTRACER_API_DOMAIN_HIP, cid),
     cid,
     data->correlation_id,
     (data->phase == ROCTRACER_API_PHASE_ENTER) ? "on-enter" : "on-exit");
@@ -188,12 +188,12 @@ extern "C" void hip_api_callback(
           data->args.hipFree.ptr);
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
-        fprintf(stdout, "kernel(\"%s\") straem(%p)",
+        fprintf(stdout, "kernel(\"%s\") stream(%p)",
           data->args.hipModuleLaunchKernel.f->_name.c_str(),
           data->args.hipModuleLaunchKernel.stream);
         break;
       case HIP_API_ID_hipLaunchKernel:
-        fprintf(stdout, "kernel(%p) straem(%p)",
+        fprintf(stdout, "kernel(%p) stream(%p)",
           data->args.hipLaunchKernel.kernel,
           data->args.hipLaunchKernel.stream);
         break;
@@ -226,14 +226,23 @@ void activity_callback(const char* begin, const char* end, void* arg) {
   ROCTRACER_CALL(roctracer_next_record(record, &next));
   fprintf(stdout, "\tActivity records:\n"); fflush(stdout);
   while (reinterpret_cast<const char*>(next) <= end) {
-    fprintf(stdout, "\tid(%u.%u.%u)\tcorrelation_id(%lu) host_ns(%lu:%lu)\n",
-      record->async,
+    const char * name = (record->op_id == 0) ?
+      roctracer_get_api_name(ROCTRACER_API_DOMAIN_HIP, record->activity_kind) :
+      roctracer_get_activity_name(ROCTRACER_API_DOMAIN_HIP, record->activity_kind);
+    fprintf(stdout, "\t%s op(%u) id(%u)\tcorrelation_id(%lu) time_ns(%lu:%lu)",
+      name,
       record->op_id,
       record->activity_kind,
       record->correlation_id,
       record->begin_ns,
       record->end_ns
     );
+    if (record->op_id != 0) {
+      const roctracer_async_record_t* async_record = reinterpret_cast<const roctracer_async_record_t*>(record);
+      fprintf(stdout, " device_id(%d) stream_id(%lu)", async_record->device_id, async_record->stream_id);
+      if (record->op_id == 2) fprintf(stdout, " bytes(0x%zx)", async_record->bytes);
+    }
+    fprintf(stdout, "\n");
     fflush(stdout);
     record = next;
     ROCTRACER_CALL(roctracer_next_record(record, &next));
@@ -250,7 +259,7 @@ void init_tracing() {
 
     // Enable HIP activity tracing
     roctracer_properties_t properties{};
-    properties.buffer_size = 8;
+    properties.buffer_size = 16;
     properties.buffer_callback_fun = activity_callback;
     ROCTRACER_CALL(roctracer_open_pool(&properties));
     ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipMemcpy));

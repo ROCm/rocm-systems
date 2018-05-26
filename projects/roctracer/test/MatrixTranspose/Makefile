@@ -3,8 +3,8 @@ LIB_PATH=$(ROOT_PATH)/b
 LIB_NAME=roctracer64
 ROC_LIBS=-L$(LIB_PATH) -l$(LIB_NAME)
 
-HIP_PATH=/home/evgeny/work/roc-1.8.x/hip
-HCC_PATH=/home/evgeny/work/roc-1.8.x/hcc/b
+HIP_PATH?=/home/evgeny/work/roc-1.8.x/hip
+HCC_PATH?=/home/evgeny/work/roc-1.8.x/hcc/b
 
 HIPCC=$(HIP_PATH)/bin/hipcc
 HCC_LIBS=-L$(HCC_PATH)/lib -lmcwamp_hsa

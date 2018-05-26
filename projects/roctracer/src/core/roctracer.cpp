@@ -46,8 +46,17 @@
   }                                                                                                \
   return err;
 
+#define API_METHOD_CATCH(X)                                                                        \
+  }                                                                                                \
+  catch (std::exception & e) {                                                                     \
+    ERR_LOGGING(__FUNCTION__ << "(), " << e.what());                                               \
+  }                                                                                                \
+  (void)err;                                                                                       \
+  return X;
+
 // HCC API declaration
 extern "C" void HSAOp_set_activity_record(const uint64_t& record);
+extern "C" const char* HSAOp_get_name(const uint32_t& id);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Internal library methods
@@ -387,8 +396,32 @@ PUBLIC_API const char* roctracer_error_string() {
 
 // Return method name by given API domain and call ID
 // NULL returned on the error and the library errno is set
-PUBLIC_API const char* roctracer_get_api_name(roctracer_api_domain_t domain, roctracer_hip_api_cid_t cid) {
-  return NULL;
+PUBLIC_API const char* roctracer_get_api_name(const uint32_t& domain, const uint32_t& cid) {
+  API_METHOD_PREFIX
+  switch (domain) {
+    case ROCTRACER_API_DOMAIN_HIP: {
+      return hipApiName(cid);
+      break;
+    }
+    default:
+      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+  }
+  API_METHOD_CATCH(NULL)
+}
+
+// Return activity name by given API domain and activity kind
+// NULL returned on the error and the library errno is set
+PUBLIC_API const char* roctracer_get_activity_name(const uint32_t& domain, const uint32_t& kind) {
+  API_METHOD_PREFIX
+  switch (domain) {
+    case ROCTRACER_API_DOMAIN_HIP: {
+      return HSAOp_get_name(kind);
+      break;
+    }
+    default:
+      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+  }
+  API_METHOD_CATCH(NULL)
 }
 
 // Enable runtime API callbacks

@@ -99,7 +99,7 @@ const char* roctracer_error_string();
 
 // Traced API domains
 typedef enum {
-  ROCTRACER_API_DOMAIN_ANY = 0,						// HIP API domain
+  ROCTRACER_API_DOMAIN_ANY = 0,						// Any domain
   ROCTRACER_API_DOMAIN_HIP = 1,						// HIP API domain
 } roctracer_api_domain_t;
 
@@ -112,8 +112,14 @@ typedef uint64_t roctracer_correletion_id_t;
 // Return method name by given API domain and call ID
 // NULL returned on the error and the library errno is set
 const char* roctracer_get_api_name(
-  roctracer_api_domain_t domain,                                        // API domain
-  roctracer_hip_api_cid_t cid);                                         // API call ID
+  const uint32_t& domain,                                               // API domain
+  const uint32_t& cid);                                                 // API call ID
+
+// Return activity name by given API domain operation ID and activity kind
+// NULL returned on the error and the library errno is set
+const char* roctracer_get_activity_name(
+  const uint32_t& domain,                                               // API domain
+  const uint32_t& kind);                                                // Activity kind
 
 ////////////////////////////////////////////////////////////////////////////////
 // Callback API
