@@ -35,6 +35,7 @@
 struct callbacks_data_t {
   rocprofiler_feature_t* features;
   unsigned feature_count;
+  std::vector<uint32_t>* set;
   unsigned group_index;
   FILE* file_handle;
   int filter_on;
@@ -82,6 +83,8 @@ FILE* result_file_handle = NULL;
 // True if a result file is opened
 bool result_file_opened = false;
 // Dispatch filters
+// Metrics set
+std::vector<uint32_t>* metrics_set = NULL;
 // GPU index filter
 std::vector<uint32_t>* gpu_index_vec = NULL;
 //  Kernel name filter
@@ -555,9 +558,27 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   properties.handler = (result_prefix != NULL) ? handler : NULL;
   properties.handler_arg = (void*)entry;
 
+  rocprofiler_feature_t* features = tool_data->features;
+  unsigned feature_count = tool_data->feature_count;
+
+  if (tool_data->set != NULL) {
+    uint32_t set_offset = 0;
+    uint32_t next_offset = 0;
+    const auto entry_index = entry->index;
+    if (entry_index < (tool_data->set->size() - 1)) {
+      set_offset = (*(tool_data->set))[entry_index];
+      next_offset = (*(tool_data->set))[entry_index + 1];
+    } else {
+      set_offset = tool_data->set->back();
+      next_offset = feature_count;
+    }
+    features += set_offset;
+    feature_count = next_offset - set_offset;
+  }
+
   if (tool_data->feature_count > 0) {
     // Open profiling context
-    status = rocprofiler_open(callback_data->agent, tool_data->features, tool_data->feature_count,
+    status = rocprofiler_open(callback_data->agent, features, feature_count,
                               &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
     check_status(status);
 
@@ -575,8 +596,8 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   // Fill profiling context entry
   entry->agent = callback_data->agent;
   entry->group = *group;
-  entry->features = tool_data->features;
-  entry->feature_count = tool_data->feature_count;
+  entry->features = features;
+  entry->feature_count = feature_count;
   entry->data = *callback_data;
   entry->data.kernel_name = strdup(callback_data->kernel_name);
   entry->file_handle = tool_data->file_handle;
@@ -799,6 +820,18 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   std::vector<std::string> metrics_vec;
   get_xml_array(xml, "top.metric", "name", ",", &metrics_vec);
 
+  // Metrics set
+  metrics_set = new std::vector<uint32_t>;
+  get_xml_array(xml, "top.metric", "set", ",", metrics_set, "  ");
+  if (metrics_set->size() != 0) {
+    uint32_t accum = 0;
+    metrics_set->insert(metrics_set->begin(), 0);
+    for (auto it = metrics_set->begin(); it != metrics_set->end(); ++it) {
+      accum += *it;
+      *it = accum;
+    }
+  }
+
   // Getting GPU indexes
   gpu_index_vec = new std::vector<uint32_t>;
   get_xml_array(xml, "top.metric", "gpu_index", ",", gpu_index_vec, "  ");
@@ -911,6 +944,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   callbacks_data = new callbacks_data_t{};
   callbacks_data->features = features;
   callbacks_data->feature_count = feature_count;
+  callbacks_data->set = (metrics_set->empty()) ? NULL : metrics_set;
   callbacks_data->group_index = 0;
   callbacks_data->file_handle = result_file_handle;
   callbacks_data->gpu_index = (gpu_index_vec->empty()) ? NULL : gpu_index_vec;
@@ -973,6 +1007,8 @@ extern "C" PUBLIC_API void OnUnloadTool() {
     delete callbacks_data;
     callbacks_data = NULL;
   }
+  delete metrics_set;
+  metrics_set = NULL;
   delete gpu_index_vec;
   gpu_index_vec = NULL;
   delete kernel_string_vec;

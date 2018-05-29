@@ -543,6 +543,7 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet) {
 
   return write_idx;
 }
+
 uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes) {
   const uint32_t slot_size_b = 0x40;
   if ((size_bytes & (slot_size_b - 1)) != 0) {
