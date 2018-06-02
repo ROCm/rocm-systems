@@ -25,7 +25,9 @@ THE SOFTWARE.
 // hip header file
 #include <hip/hip_runtime.h>
 
-#define ITERATIONS 1
+#ifndef ITERATIONS
+# define ITERATIONS 100
+#endif
 #define WIDTH 1024
 
 
@@ -148,13 +150,6 @@ int main() {
     }                                                                                              \
   } while (0)
 
-struct ihipModuleSymbol_t {
-    uint64_t _object;  // The kernel object.
-    uint32_t _groupSegmentSize;
-    uint32_t _privateSegmentSize;
-    std::string _name;  // TODO - review for performance cost.  Name is just used for debug.
-};
-
 // HIP API callback function
 extern "C" void hip_api_callback(
     uint32_t domain,
@@ -165,7 +160,7 @@ extern "C" void hip_api_callback(
   (void)arg;
   const hip_cb_data_t* data = reinterpret_cast<const hip_cb_data_t*>(callback_data);
   fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
-    roctracer_get_api_name(ROCTRACER_API_DOMAIN_HIP, cid),
+    roctracer_id_string(ROCTRACER_DOMAIN_HIP_API, cid),
     cid,
     data->correlation_id,
     (data->phase == ROCTRACER_API_PHASE_ENTER) ? "on-enter" : "on-exit");
@@ -189,7 +184,7 @@ extern "C" void hip_api_callback(
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
         fprintf(stdout, "kernel(\"%s\") stream(%p)",
-          data->args.hipModuleLaunchKernel.f->_name.c_str(),
+          hipKernelNameRef(data->args.hipModuleLaunchKernel.f),
           data->args.hipModuleLaunchKernel.stream);
         break;
       case HIP_API_ID_hipLaunchKernel:
@@ -222,13 +217,10 @@ extern "C" void hip_api_callback(
 //   hipMalloc id(3) correlation_id(1): begin_ns(1525888652762640464) end_ns(1525888652762877067)
 void activity_callback(const char* begin, const char* end, void* arg) {
   const roctracer_record_t* record = reinterpret_cast<const roctracer_record_t*>(begin);
-  const roctracer_record_t* next = NULL;
-  ROCTRACER_CALL(roctracer_next_record(record, &next));
+  const roctracer_record_t* end_record = reinterpret_cast<const roctracer_record_t*>(end);
   fprintf(stdout, "\tActivity records:\n"); fflush(stdout);
-  while (reinterpret_cast<const char*>(next) <= end) {
-    const char * name = (record->op_id == 0) ?
-      roctracer_get_api_name(ROCTRACER_API_DOMAIN_HIP, record->activity_kind) :
-      roctracer_get_activity_name(ROCTRACER_API_DOMAIN_HIP, record->activity_kind);
+  while (record < end_record) {
+    const char * name = roctracer_id_string(record->domain, record->activity_kind);
     fprintf(stdout, "\t%s op(%u) id(%u)\tcorrelation_id(%lu) time_ns(%lu:%lu)",
       name,
       record->op_id,
@@ -244,28 +236,22 @@ void activity_callback(const char* begin, const char* end, void* arg) {
     }
     fprintf(stdout, "\n");
     fflush(stdout);
-    record = next;
-    ROCTRACER_CALL(roctracer_next_record(record, &next));
+    ROCTRACER_CALL(roctracer_next_record(record, &record));
   }
 }
 
 // Initialize function
 void init_tracing() {
+    // Check tracer domains consitency
+    ROCTRACER_CALL(roctracer_validate_domains());
     // Enable HIP API callbacks
-    ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipMemcpy, hip_api_callback, NULL));
-    ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipMalloc, hip_api_callback, NULL));
-    ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipFree, hip_api_callback, NULL));
-    ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipModuleLaunchKernel, hip_api_callback, NULL));
-
+    ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_DOMAIN_ANY, 0, hip_api_callback, NULL));
     // Enable HIP activity tracing
     roctracer_properties_t properties{};
-    properties.buffer_size = 16;
+    properties.buffer_size = 8;
     properties.buffer_callback_fun = activity_callback;
     ROCTRACER_CALL(roctracer_open_pool(&properties));
-    ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipMemcpy));
-    ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipMalloc));
-    ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipFree));
-    ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_API_DOMAIN_HIP, HIP_API_ID_hipModuleLaunchKernel));
+    ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_DOMAIN_ANY, 0));
 }
 
 void finish_tracing() {

@@ -34,8 +34,15 @@
     }                                                                                              \
   } while (0)
 
+#define HIPAPI_CALL(call)                                                                          \
+  do {                                                                                             \
+    hipError_t err = call;                                                                         \
+    if (err != hipSuccess)                                                                         \
+      HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, #call " error(" << err << ")");                \
+  } while (0)
+
 #define API_METHOD_PREFIX                                                                          \
-  int err = 0;                                                                                     \
+  roctracer_status_t err = ROCTRACER_STATUS_SUCCESS;                                               \
   try {
 
 #define API_METHOD_SUFFIX                                                                          \
@@ -63,9 +70,9 @@ extern "C" const char* HSAOp_get_name(const uint32_t& id);
 //
 namespace roctracer {
 
-int GetExcStatus(const std::exception& e) {
+roctracer_status_t GetExcStatus(const std::exception& e) {
   const util::exception* roctracer_exc_ptr = dynamic_cast<const util::exception*>(&e);
-  return (roctracer_exc_ptr) ? static_cast<int>(roctracer_exc_ptr->status()) : 1;
+  return (roctracer_exc_ptr) ? static_cast<roctracer_status_t>(roctracer_exc_ptr->status()) : ROCTRACER_STATUS_ERROR;
 }
 
 class GlobalCounter {
@@ -147,12 +154,13 @@ class MemoryPool {
     char* next = write_ptr_ + sizeof(Record);
     if (next > buffer_end_) {
       if (write_ptr_ == buffer_begin_) EXC_ABORT(ROCTRACER_STATUS_ERROR, "buffer size(" << buffer_size_ << ") is less then the record(" << sizeof(Record) << ")");
-      spawn_reader(buffer_begin_, buffer_end_);
+      spawn_reader(buffer_begin_, write_ptr_);
       buffer_begin_ = (buffer_end_ == pool_end_) ? pool_begin_ : buffer_end_;
       buffer_end_ = buffer_begin_ + buffer_size_;
       write_ptr_ = buffer_begin_;
       next = write_ptr_ + sizeof(Record);
     }
+
     Record* ptr = reinterpret_cast<Record*>(write_ptr_);
     write_ptr_ = next;
 
@@ -297,6 +305,7 @@ void ActivityCallback(
   if (pool == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback pool is NULL");
   if (data->phase == ROCTRACER_API_PHASE_ENTER) {
     *record = pool->getRecord<roctracer_record_t>();
+    (*record)->domain = ROCTRACER_DOMAIN_HIP_API;
     (*record)->activity_kind = activity_kind;
     (*record)->begin_ns = timer.timestamp_ns();
     // Correlation ID generating
@@ -315,64 +324,15 @@ void ActivityCallback(
   }
 }
 
-// HCC activity record type
-struct hcc_record_t {
-  uint32_t op_id;                                                     // operation id, dispatch/copy/barrier
-  uint32_t command_id;                                                // command kind
-  uint32_t async;                                                     // aysnc record, 0/1
-  uint64_t correlation_id;                                            // activity correlation ID
-  uint64_t begin_ns;                                                  // host begin timestamp, nano-seconds
-  uint64_t end_ns;                                                    // host end timestamp, nano-seconds
-  int device_id;
-  uint64_t stream_id;
-  size_t bytes;
-};
-
 void ActivityAsyncCallback(
     uint32_t op_id,
     void* record,
     void* arg)
 {
-  if (op_id == 0) {
-    // HIP record Sync
-    roctracer_record_t* record_ptr = reinterpret_cast<roctracer_record_t*>(record);
-    *reinterpret_cast<uint64_t*>(arg) = record_ptr->correlation_id;
-  } else {
-    if (sizeof(hcc_record_t) != sizeof(roctracer_memcpy_record_t)) EXC_ABORT(ROCTRACER_STATUS_ERROR, "record types missmatch");
-    MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
-    switch (op_id) {
-      // Dispatch record
-      case 1: {
-        roctracer_dispatch_record_t* record_ptr = pool->getRecord<roctracer_dispatch_record_t>();
-        *record_ptr = *reinterpret_cast<roctracer_dispatch_record_t*>(record);
-        break;
-      }
-      // Memcpy record
-      case 2: {
-        roctracer_memcpy_record_t* record_ptr = pool->getRecord<roctracer_memcpy_record_t>();
-        *record_ptr = *reinterpret_cast<roctracer_memcpy_record_t*>(record);
-        break;
-      }
-      // Barrier record
-      case 3: {
-        roctracer_barrier_record_t* record_ptr = pool->getRecord<roctracer_barrier_record_t>();
-        *record_ptr = *reinterpret_cast<roctracer_barrier_record_t*>(record);
-        break;
-      }
-      // Unknown ID
-      default:
-        EXC_ABORT(ROCTRACER_STATUS_ERROR, "Unknown op ID");
-    }
-#if 0
-    std::cout << "ActivityAsyncCallback " << record_ptr->name
-      << " id(" << op_id << "." << record_ptr->activity_kind << ")"
-      << " record(" << record << ")"
-      << " correlation_id(" << record_ptr->correlation_id << ")"
-      << " time-ns(" << start << ":" << end << ")"
-      << " arg(" << arg << ")"
-      << std::endl << std::flush;
-#endif
-  }
+  MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
+  roctracer_async_record_t* record_ptr = pool->getRecord<roctracer_async_record_t>();
+  *record_ptr = *reinterpret_cast<roctracer_async_record_t*>(record);
+  record_ptr->domain = ROCTRACER_DOMAIN_HCC_OPS;
 }
 
 util::Logger::mutex_t util::Logger::mutex_;
@@ -394,28 +354,24 @@ PUBLIC_API const char* roctracer_error_string() {
   return strdup(roctracer::util::Logger::LastMessage().c_str());
 }
 
-// Return method name by given API domain and call ID
-// NULL returned on the error and the library errno is set
-PUBLIC_API const char* roctracer_get_api_name(const uint32_t& domain, const uint32_t& cid) {
+// Validates tracing domains revisions consistency
+PUBLIC_API roctracer_status_t roctracer_validate_domains() {
   API_METHOD_PREFIX
-  switch (domain) {
-    case ROCTRACER_API_DOMAIN_HIP: {
-      return hipApiName(cid);
-      break;
-    }
-    default:
-      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
-  }
-  API_METHOD_CATCH(NULL)
+  HIPAPI_CALL(hipValidateActivityRecord());
+  API_METHOD_SUFFIX
 }
 
-// Return activity name by given API domain and activity kind
+// Return ID string by given domain and activity/API ID
 // NULL returned on the error and the library errno is set
-PUBLIC_API const char* roctracer_get_activity_name(const uint32_t& domain, const uint32_t& kind) {
+PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_t& id) {
   API_METHOD_PREFIX
   switch (domain) {
-    case ROCTRACER_API_DOMAIN_HIP: {
-      return HSAOp_get_name(kind);
+    case ROCTRACER_DOMAIN_HIP_API: {
+      return hipApiName(id);
+      break;
+    }
+    case ROCTRACER_DOMAIN_HCC_OPS: {
+      return HSAOp_get_name(id);
       break;
     }
     default:
@@ -425,15 +381,17 @@ PUBLIC_API const char* roctracer_get_activity_name(const uint32_t& domain, const
 }
 
 // Enable runtime API callbacks
-PUBLIC_API int roctracer_enable_api_callback(
-    roctracer_api_domain_t domain,
+PUBLIC_API roctracer_status_t roctracer_enable_api_callback(
+    roctracer_domain_t domain,
     uint32_t cid,
     roctracer_api_callback_t callback,
     void* user_data)
 {
   API_METHOD_PREFIX
   switch (domain) {
-    case ROCTRACER_API_DOMAIN_HIP: {
+    case ROCTRACER_DOMAIN_ANY:
+      cid = 0;
+    case ROCTRACER_DOMAIN_HIP_API: {
       hipError_t hip_err = hipRegisterApiCallback(cid, callback, user_data);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterApiCallback error(" << hip_err << ")");
       break;
@@ -445,13 +403,15 @@ PUBLIC_API int roctracer_enable_api_callback(
 }
 
 // Enable runtime API callbacks
-PUBLIC_API int roctracer_disable_api_callback(
-    roctracer_api_domain_t domain,
+PUBLIC_API roctracer_status_t roctracer_disable_api_callback(
+    roctracer_domain_t domain,
     uint32_t cid)
 {
   API_METHOD_PREFIX
   switch (domain) {
-    case ROCTRACER_API_DOMAIN_HIP: {
+    case ROCTRACER_DOMAIN_ANY:
+      cid = 0;
+    case ROCTRACER_DOMAIN_HIP_API: {
       hipError_t hip_err = hipRemoveApiCallback(cid);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveApiCallback error(" << hip_err << ")");
       break;
@@ -471,7 +431,7 @@ roctracer_pool_t* roctracer_default_pool(roctracer_pool_t* pool) {
 }
 
 // Open memory pool
-PUBLIC_API int roctracer_open_pool(
+PUBLIC_API roctracer_status_t roctracer_open_pool(
     const roctracer_properties_t* properties,
     roctracer_pool_t** pool)
 {
@@ -487,7 +447,7 @@ PUBLIC_API int roctracer_open_pool(
 }
 
 // Close memory pool
-PUBLIC_API int roctracer_close_pool(roctracer_pool_t* pool) {
+PUBLIC_API roctracer_status_t roctracer_close_pool(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   roctracer_pool_t* ptr = (pool == NULL) ? roctracer_default_pool() : pool;
   roctracer::MemoryPool* memory_pool = reinterpret_cast<roctracer::MemoryPool*>(ptr);
@@ -497,15 +457,17 @@ PUBLIC_API int roctracer_close_pool(roctracer_pool_t* pool) {
 }
 
 // Enable activity records logging
-PUBLIC_API int roctracer_enable_api_activity(
-    roctracer_api_domain_t domain,
+PUBLIC_API roctracer_status_t roctracer_enable_api_activity(
+    roctracer_domain_t domain,
     uint32_t activity_kind,
     roctracer_pool_t* pool)
 {
   API_METHOD_PREFIX
   if (pool == NULL) pool = roctracer_default_pool();
   switch (domain) {
-    case ROCTRACER_API_DOMAIN_HIP: {
+    case ROCTRACER_DOMAIN_ANY:
+      activity_kind = 0;
+    case ROCTRACER_DOMAIN_HIP_API: {
       const hipError_t hip_err = hipRegisterActivityCallback(activity_kind, roctracer::ActivityCallback, roctracer::ActivityAsyncCallback, pool);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterActivityCallback error(" << hip_err << ")");
       break;
@@ -517,13 +479,15 @@ PUBLIC_API int roctracer_enable_api_activity(
 }
 
 // Disable activity records logging
-PUBLIC_API int roctracer_disable_api_activity(
-    roctracer_api_domain_t domain,
+PUBLIC_API roctracer_status_t roctracer_disable_api_activity(
+    roctracer_domain_t domain,
     uint32_t activity_kind)
 {
   API_METHOD_PREFIX
   switch (domain) {
-    case ROCTRACER_API_DOMAIN_HIP: {
+    case ROCTRACER_DOMAIN_ANY:
+      activity_kind = 0;
+    case ROCTRACER_DOMAIN_HIP_API: {
       const hipError_t hip_err = hipRemoveActivityCallback(activity_kind);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveActivityCallback error(" << hip_err << ")");
       break;
@@ -535,7 +499,7 @@ PUBLIC_API int roctracer_disable_api_activity(
 }
 
 // Flush available activity records
-PUBLIC_API int roctracer_flush_api_activity(roctracer_pool_t* pool) {
+PUBLIC_API roctracer_status_t roctracer_flush_api_activity(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   if (pool == NULL) pool = roctracer_default_pool();
   roctracer::MemoryPool* memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);
