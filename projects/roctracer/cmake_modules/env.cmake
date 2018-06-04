@@ -58,7 +58,7 @@ if ( NOT DEFINED CMAKE_PREFIX_PATH AND DEFINED ENV{CMAKE_PREFIX_PATH} )
   set ( CMAKE_PREFIX_PATH $ENV{CMAKE_PREFIX_PATH} )
 endif()
 
-set ( HIP_INC_DIR $ENV{HIP_INC_DIR} )
+set ( HIP_INC_DIR "$ENV{HIP_PATH}/include" )
 
 ## Extend Compiler flags based on build type
 string ( TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE )

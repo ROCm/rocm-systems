@@ -187,16 +187,6 @@ extern "C" void hip_api_callback(
           hipKernelNameRef(data->args.hipModuleLaunchKernel.f),
           data->args.hipModuleLaunchKernel.stream);
         break;
-      case HIP_API_ID_hipLaunchKernel:
-        fprintf(stdout, "kernel(%p) stream(%p)",
-          data->args.hipLaunchKernel.kernel,
-          data->args.hipLaunchKernel.stream);
-        break;
-      case HIP_API_ID_hipKernel:
-        fprintf(stdout, "start(%lu) end(%lu)",
-          data->args.hipKernel.start,
-          data->args.hipKernel.end);
-        break;
       default:
         break;
     }
