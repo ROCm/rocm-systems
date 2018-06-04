@@ -238,7 +238,7 @@ void init_tracing() {
     ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_DOMAIN_ANY, 0, hip_api_callback, NULL));
     // Enable HIP activity tracing
     roctracer_properties_t properties{};
-    properties.buffer_size = 8;
+    properties.buffer_size = 12;
     properties.buffer_callback_fun = activity_callback;
     ROCTRACER_CALL(roctracer_open_pool(&properties));
     ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_DOMAIN_ANY, 0));

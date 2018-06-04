@@ -14,7 +14,7 @@ export LD_LIBRARY_PATH=$(LIB_PATH):$(HIP_PATH)/lib:$(HCC_HOME)/lib
 
 .PHONY: test
 
-ITERATIONS?=10
+ITERATIONS?=100
 
 all: clean $(EXECUTABLE) test
 
