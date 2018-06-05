@@ -9,9 +9,9 @@ The library source tree:
  - test - test suit
    - MatrixTranspose - test based on HIP MatrixTranspose sample
 
-Environment:
-$ export HIP_PATH=<HIP path>
-$ export HCC_HOME=<HCC path>
+Environment example:
+$ export HIP_PATH=/opt/rocm/hip
+$ export HCC_HOME=/opt/rocm/hcc
 $ export CMAKE_PREFIX_PATH=/opt/rocm/lib:/opt/rocm/include/hsa
 
 To build:
