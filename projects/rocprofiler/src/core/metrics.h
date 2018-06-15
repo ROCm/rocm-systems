@@ -155,7 +155,6 @@ class MetricsDict {
   MetricsDict(const util::AgentInfo* agent_info) : xml_(NULL), agent_info_(agent_info) {
     const char* xml_name = getenv("ROCP_METRICS");
     if (xml_name != NULL) {
-      //std::cout << "ROCProfiler: importing '" << xml_name << "':" << std::endl;
       xml_ = xml::Xml::Create(xml_name);
       if (xml_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
       xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE", agent_info->max_wave_size);
@@ -187,8 +186,6 @@ class MetricsDict {
   void ImportMetrics(const util::AgentInfo* agent_info, const std::string& scope) {
     auto metrics_list = xml_->GetNodes("top." + scope + ".metric");
     if (!metrics_list.empty()) {
-      //std::cout << "  " << metrics_list.size() << " " << scope << " metrics found" << std::endl;
-
       for (auto node : metrics_list) {
         const std::string name = node->opts["name"];
         const std::string expr_str = node->opts["expr"];
@@ -245,13 +242,6 @@ class MetricsDict {
       metric = new BaseMetric(name, counter);
       ret.first->second = metric;
     } else EXC_RAISING(HSA_STATUS_ERROR, "metric redefined '" << name << "'");
-#if 0
-    if (alias != name) {
-      if (cache_.find(alias) != cache_.end()) EXC_RAISING(HSA_STATUS_ERROR, "metric alias/name interference '" << alias << "'");
-      const auto ret = aliases_.insert({alias, name});
-      if (!ret.second) EXC_RAISING(HSA_STATUS_ERROR, "metric alias redefined '" << alias << "'");
-    }
-#endif
     return metric;
   }
 
@@ -264,13 +254,6 @@ class MetricsDict {
     } else EXC_RAISING(HSA_STATUS_ERROR, "expr-metric redefined '" << name << "'");
     return metric;
   }
-
-#if 0
-  std::string UnAlias(const std::string& name) const {
-    auto it = aliases_.find(name);
-    return (it != aliases_.end()) ? it->second : name;
-  }
-#endif
 
   void Print() {
     for (auto& v : cache_) {
@@ -287,9 +270,6 @@ class MetricsDict {
   xml::Xml* xml_;
   const util::AgentInfo* agent_info_;
   cache_t cache_;
-#if 0
-  std::map<std::string, std::string> aliases_;
-#endif
 
   static map_t* map_;
   static mutex_t mutex_;
