@@ -143,7 +143,13 @@ class MemoryPool {
   }
 
   ~MemoryPool() {
+    std::lock_guard<mutex_t> lock(write_mutex_);
+
     Flush();
+    PTHREAD_CALL(pthread_cancel(consumer_thread_));
+    void *res;
+    PTHREAD_CALL(pthread_join(consumer_thread_, &res));
+    if (res != PTHREAD_CANCELED) EXC_ABORT(ROCTRACER_STATUS_ERROR, "consumer thread wasn't stopped correctly");
     allocator_default(&pool_begin_, 0, alloc_arg_);
   }
 
