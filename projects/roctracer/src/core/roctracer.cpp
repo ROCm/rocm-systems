@@ -396,7 +396,7 @@ PUBLIC_API roctracer_status_t roctracer_enable_api_callback(
   API_METHOD_PREFIX
   switch (domain) {
     case ROCTRACER_DOMAIN_ANY:
-      cid = 0;
+      if (cid != HIP_API_ID_ANY) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and cid != HIP_API_ID_ANY");
     case ROCTRACER_DOMAIN_HIP_API: {
       hipError_t hip_err = hipRegisterApiCallback(cid, callback, user_data);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterApiCallback error(" << hip_err << ")");
@@ -416,7 +416,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_api_callback(
   API_METHOD_PREFIX
   switch (domain) {
     case ROCTRACER_DOMAIN_ANY:
-      cid = 0;
+      if (cid != HIP_API_ID_ANY) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and cid != HIP_API_ID_ANY");
     case ROCTRACER_DOMAIN_HIP_API: {
       hipError_t hip_err = hipRemoveApiCallback(cid);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveApiCallback error(" << hip_err << ")");
@@ -472,7 +472,7 @@ PUBLIC_API roctracer_status_t roctracer_enable_api_activity(
   if (pool == NULL) pool = roctracer_default_pool();
   switch (domain) {
     case ROCTRACER_DOMAIN_ANY:
-      activity_kind = 0;
+      if (activity_kind != HIP_API_ID_ANY) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and activity_kind != HIP_API_ID_ANY");
     case ROCTRACER_DOMAIN_HIP_API: {
       const hipError_t hip_err = hipRegisterActivityCallback(activity_kind, roctracer::ActivityCallback, roctracer::ActivityAsyncCallback, pool);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterActivityCallback error(" << hip_err << ")");
@@ -492,7 +492,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_api_activity(
   API_METHOD_PREFIX
   switch (domain) {
     case ROCTRACER_DOMAIN_ANY:
-      activity_kind = 0;
+      if (activity_kind != HIP_API_ID_ANY) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and activity_kind != HIP_API_ID_ANY");
     case ROCTRACER_DOMAIN_HIP_API: {
       const hipError_t hip_err = hipRemoveActivityCallback(activity_kind);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveActivityCallback error(" << hip_err << ")");

@@ -87,7 +87,8 @@ typedef enum {
   ROCTRACER_STATUS_UNINIT = 2,
   ROCTRACER_STATUS_BREAK = 3,
   ROCTRACER_STATUS_BAD_DOMAIN = 4,
-  ROCTRACER_STATUS_HIP_API_ERR = 5,
+  ROCTRACER_STATUS_BAD_PARAMETER = 5,
+  ROCTRACER_STATUS_HIP_API_ERR = 6,
 } roctracer_status_t;
 
 ////////////////////////////////////////////////////////////////////////////////

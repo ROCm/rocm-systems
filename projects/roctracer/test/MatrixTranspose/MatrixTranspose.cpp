@@ -151,7 +151,7 @@ int main() {
   } while (0)
 
 // HIP API callback function
-extern "C" void hip_api_callback(
+void hip_api_callback(
     uint32_t domain,
     uint32_t cid,
     const void* callback_data,
@@ -235,18 +235,18 @@ void init_tracing() {
   // Check tracer domains consitency
   ROCTRACER_CALL(roctracer_validate_domains());
   // Enable HIP API callbacks
-  ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_DOMAIN_ANY, 0, hip_api_callback, NULL));
+  ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_DOMAIN_ANY, HIP_API_ID_ANY, hip_api_callback, NULL));
   // Enable HIP activity tracing
   roctracer_properties_t properties{};
   properties.buffer_size = 12;
   properties.buffer_callback_fun = activity_callback;
   ROCTRACER_CALL(roctracer_open_pool(&properties));
-  ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_DOMAIN_ANY, 0));
+  ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_DOMAIN_ANY, HIP_API_ID_ANY));
 }
 
 void finish_tracing() {
-  ROCTRACER_CALL(roctracer_disable_api_callback(ROCTRACER_DOMAIN_ANY, 0));
-  ROCTRACER_CALL(roctracer_disable_api_activity(ROCTRACER_DOMAIN_ANY, 0));
+  ROCTRACER_CALL(roctracer_disable_api_callback(ROCTRACER_DOMAIN_ANY, HIP_API_ID_ANY));
+  ROCTRACER_CALL(roctracer_disable_api_activity(ROCTRACER_DOMAIN_ANY, HIP_API_ID_ANY));
   ROCTRACER_CALL(roctracer_close_pool());
 }
 #else
