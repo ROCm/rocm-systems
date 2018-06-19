@@ -429,7 +429,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_api_callback(
 }
 
 // Return default pool and set new one if parameter pool is not NULL.
-roctracer_pool_t* roctracer_default_pool(roctracer_pool_t* pool) {
+PUBLIC_API roctracer_pool_t* roctracer_default_pool(roctracer_pool_t* pool) {
   roctracer_pool_t* p = reinterpret_cast<roctracer_pool_t*>(roctracer::memory_pool);
   if (pool != NULL) roctracer::memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);
   if (p == NULL) EXC_RAISING(ROCTRACER_STATUS_UNINIT, "default pool is not initialized");
