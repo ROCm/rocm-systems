@@ -1,8 +1,8 @@
 ROC Profiler library.
-Profiling with metrics and traces based perfcounters (PMC) and SQ threadtraces (SQTT)
-and AqlProfile HSA extension.
+Profiling with metrics and traces based on perfcounters (PMC) and SQ threadtraces (SQTT).
+Implementation is based on AqlProfile HSA extension.
+Library supports GFX8/GFX9.
 
-Library supports GFX8/GFX9 APIs.
 The library source tree:
  - doc  - Documentation
  - inc/rocprofiler.h - Library public API

@@ -17,6 +17,10 @@
 #include "util/hsa_rsrc_factory.h"
 #include "util/logger.h"
 
+#ifndef AQL_PROFILE_READ_API_ENABLE
+#define AQL_PROFILE_READ_API_ENABLE 0
+#endif
+
 namespace rocprofiler {
 struct rocprofiler_contex_t;
 class Context;
@@ -310,7 +314,8 @@ class Context {
     submit_queue->Submit(&stop_packets[0], stop_packets.size());
   }
   void Read(const uint32_t& group_index, Queue* const queue = NULL) {
-    const pkt_vector_t& read_packets = StopPackets(group_index);
+    const pkt_vector_t& read_packets = ReadPackets(group_index);
+    if (read_packets.size() == 0) EXC_RAISING(HSA_STATUS_ERROR, "Read API disabled");
     Queue* const submit_queue = (queue != NULL) ? queue : queue_;
     submit_queue->Submit(&read_packets[0], read_packets.size());
   }
