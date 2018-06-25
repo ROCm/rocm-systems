@@ -17,10 +17,6 @@
 #include "util/hsa_rsrc_factory.h"
 #include "util/logger.h"
 
-#ifndef AQL_PROFILE_READ_API_ENABLE
-#define AQL_PROFILE_READ_API_ENABLE 0
-#endif
-
 namespace rocprofiler {
 struct rocprofiler_contex_t;
 class Context;
