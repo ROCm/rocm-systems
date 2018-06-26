@@ -66,6 +66,11 @@ if ( DEFINED ENV{CMAKE_DEBUG_TRACE} )
   add_definitions ( -DDEBUG_TRACE=1 )
 endif()
 
+## Enable AQL-profile new API
+if ( NOT DEFINED ENV{CMAKE_CURR_API} )
+  add_definitions ( -DAQLPROF_NEW_API=1 )
+endif()
+
 ## Enable direct loading of AQL-profile HSA extension
 if ( DEFINED ENV{CMAKE_LD_AQLPROFILE} )
   add_definitions ( -DROCP_LD_AQLPROFILE=1 )

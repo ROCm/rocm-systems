@@ -919,8 +919,10 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK;
     parameters_dict["TOKEN_MASK2"] =
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
+#ifdef AQLPROF_NEW_API
     parameters_dict["SE_MASK"] =
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK;
+#endif
 
     printf("    %s (", name.c_str());
     features[index] = {};

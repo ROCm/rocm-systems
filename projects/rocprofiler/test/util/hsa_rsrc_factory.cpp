@@ -159,8 +159,10 @@ hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
       (decltype(::hsa_ven_amd_aqlprofile_start)*)dlsym(handle, "hsa_ven_amd_aqlprofile_start");
   api->hsa_ven_amd_aqlprofile_stop =
       (decltype(::hsa_ven_amd_aqlprofile_stop)*)dlsym(handle, "hsa_ven_amd_aqlprofile_stop");
+#ifdef AQLPROF_NEW_API
   api->hsa_ven_amd_aqlprofile_read =
       (decltype(::hsa_ven_amd_aqlprofile_read)*)dlsym(handle, "hsa_ven_amd_aqlprofile_read");
+#endif
   api->hsa_ven_amd_aqlprofile_legacy_get_pm4 =
       (decltype(::hsa_ven_amd_aqlprofile_legacy_get_pm4)*)dlsym(
           handle, "hsa_ven_amd_aqlprofile_legacy_get_pm4");

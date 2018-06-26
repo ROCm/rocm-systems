@@ -142,9 +142,13 @@ class Profile {
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_start");
       status = api->hsa_ven_amd_aqlprofile_stop(&profile_, &stop);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_stop");
+#ifdef AQLPROF_NEW_API
       hsa_status_t rd_status = api->hsa_ven_amd_aqlprofile_read(&profile_, &read);
 #if 0 // Read API returns error if disabled
       if (rd_status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_read");
+#endif
+#else
+      hsa_status_t rd_status = HSA_STATUS_ERROR;
 #endif
 
       // Set completion signal
