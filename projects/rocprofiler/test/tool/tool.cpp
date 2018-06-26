@@ -1,3 +1,27 @@
+/******************************************************************************
+MIT License
+
+Copyright (c) 2018 ROCm Core Technology
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*******************************************************************************/
+
 ///////////////////////////////////////////////////////////////////////////////
 //                                                                           //
 // Test tool used as ROC profiler library demo                               //
@@ -637,13 +661,13 @@ std::string normalize_token(const std::string token, bool not_empty, std::string
     const size_t last_pos = token.find_last_not_of(space_chars_set);
     if (last_pos == std::string::npos) error_str = "token string error: \"" + token + "\"";
     else {
-      const size_t end_pos = last_pos + 1; 
+      const size_t end_pos = last_pos + 1;
       if (end_pos <= first_pos) error_str = "token string error: \"" + token + "\"";
       else norm_len = end_pos - first_pos;
     }
   }
   if (((first_pos != std::string::npos) && (norm_len == 0)) ||
-      ((first_pos == std::string::npos) && not_empty)) { 
+      ((first_pos == std::string::npos) && not_empty)) {
     fatal(label + ": " + error_str);
   }
   return (norm_len != 0) ? token.substr(first_pos, norm_len) : std::string("");
@@ -725,7 +749,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   }
   if (rcfile != NULL) {
     // Getting defaults
-    printf("ROCProfiler: rc-file '%s'\n", rcpath.c_str()); 
+    printf("ROCProfiler: rc-file '%s'\n", rcpath.c_str());
     auto defaults_list = rcfile->GetNodes("top.defaults");
     for (auto* entry : defaults_list) {
       const auto& opts = entry->opts;

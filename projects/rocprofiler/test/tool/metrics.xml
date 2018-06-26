@@ -75,7 +75,7 @@
     descr="The average number of scalar ALU instructions executed per work-item (affected by flow control)."
     expr=SQ_INSTS_SALU/SQ_WAVES
   ></metric>
-  
+
   # VFetchInsts     The average number of vector fetch instructions from the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that fetch from video memory.
   <metric
     name="VFetchInsts"
