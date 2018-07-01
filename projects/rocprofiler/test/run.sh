@@ -57,10 +57,10 @@ export ROCP_DITER=100
 export ROCP_INPUT=input.xml
 eval $tbin
 
-export ROCP_KITER=1
-export ROCP_DITER=4
-export ROCP_INPUT=input1.xml
-eval $tbin
+#export ROCP_KITER=1
+#export ROCP_DITER=4
+#export ROCP_INPUT=input1.xml
+#eval $tbin
 
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
