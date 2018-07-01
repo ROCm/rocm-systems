@@ -13,11 +13,11 @@
   <metric name=SQ_INSTS_LDS block=SQ event=34 ></metric>
   <metric name=SQ_INSTS_GDS block=SQ event=35 ></metric>
 
-  <metric name=SQ_WAIT_INST_LDS block=SQ event=61 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
-  <metric name=SQ_ACTIVE_INST_VALU block=SQ event=69 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
-  <metric name=SQ_INST_CYCLES_SALU block=SQ event=86 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
-  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=89 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
-  <metric name=SQ_LDS_BANK_CONFLICT block=SQ event=97 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
+  <metric name=SQ_WAIT_INST_LDS block=SQ event=61 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles."></metric>
+  <metric name=SQ_ACTIVE_INST_VALU block=SQ event=69 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction."></metric>
+  <metric name=SQ_INST_CYCLES_SALU block=SQ event=86 descr="Number of cycles needed to execute non-memory read scalar operations."></metric>
+  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=89 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads)."></metric>
+  <metric name=SQ_LDS_BANK_CONFLICT block=SQ event=97 descr="Number of cycles LDS is stalled by bank conflicts."></metric>
 
   <metric name=TA_TA_BUSY block=TA event=15 ></metric>
   <metric name=TA_FLAT_READ_WAVEFRONTS block=TA event=101 ></metric>
@@ -26,8 +26,8 @@
   <metric name=TCC_HIT block=TCC event=18 ></metric>
   <metric name=TCC_MISS block=TCC event=19 ></metric>
   <metric name="TCC_MC_RDREQ" block=TCC event=35 ></metric>
-  <metric name="TCC_MC_WRREQ" block=TCC event=26 descr="Number of 32-byte transactions going over the TC_MC_wrreq interface. Atomics may travel over the same interface and are generally classified as write requests."></metric>
-  <metric name="TCC_MC_WRREQ_STALL" block=TCC event=28 descr="Number of cycles a write request was stalled."></metric>
+  <metric name="TCC_MC_WRREQ" block=TCC event=26 ></metric>
+  <metric name="TCC_MC_WRREQ_STALL" block=TCC event=28 ></metric>
 
   <metric name="TCP_TA_DATA_STALL_CYCLES" block=TCP event=3 descr="TCP stalls TA data interface. Now Windowed."></metric>
 </gfx8>
@@ -47,11 +47,11 @@
   <metric name=SQ_INSTS_LDS block=SQ event=34 ></metric>
   <metric name=SQ_INSTS_GDS block=SQ event=35 ></metric>
 
-  <metric name=SQ_WAIT_INST_LDS block=SQ event=63 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
-  <metric name=SQ_ACTIVE_INST_VALU block=SQ event=71 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
-  <metric name=SQ_INST_CYCLES_SALU block=SQ event=84 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
-  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=85 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
-  <metric name=SQ_LDS_BANK_CONFLICT block=SQ event=93 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
+  <metric name=SQ_WAIT_INST_LDS block=SQ event=63 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles."></metric>
+  <metric name=SQ_ACTIVE_INST_VALU block=SQ event=71 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction."></metric>
+  <metric name=SQ_INST_CYCLES_SALU block=SQ event=84 descr="Number of cycles needed to execute non-memory read scalar operations."></metric>
+  <metric name=SQ_THREAD_CYCLES_VALU block=SQ event=85 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads)."></metric>
+  <metric name=SQ_LDS_BANK_CONFLICT block=SQ event=93 descr="Number of cycles LDS is stalled by bank conflicts."></metric>
 
   <metric name=TA_TA_BUSY block=TA event=15 ></metric>
   <metric name=TA_FLAT_READ_WAVEFRONTS block=TA event=101 ></metric>

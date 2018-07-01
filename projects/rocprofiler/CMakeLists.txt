@@ -78,6 +78,22 @@ add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 ## Install information
 install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${ROCPROFILER_NAME}/lib )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h DESTINATION ${ROCPROFILER_NAME}/include )
+# rpl_run.sh tblextr.py txt2xml.sh
+install ( FILES
+          ${CMAKE_CURRENT_SOURCE_DIR}/bin/rpl_run.sh
+          ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2xml.sh
+          ${CMAKE_CURRENT_SOURCE_DIR}/bin/tblextr.py
+          DESTINATION ${ROCPROFILER_NAME}/bin
+          PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )
+# gfx_metrics.xml metrics.xml
+install ( FILES
+          ${CMAKE_CURRENT_SOURCE_DIR}/test/tool/metrics.xml
+          ${CMAKE_CURRENT_SOURCE_DIR}/test/tool/gfx_metrics.xml
+          DESTINATION ${ROCPROFILER_NAME}/lib )
+# libtool.so
+install ( FILES ${PROJECT_BINARY_DIR}/test/libtool.so DESTINATION ${ROCPROFILER_NAME}/tool )
+install ( FILES ${PROJECT_BINARY_DIR}/test/ctrl DESTINATION ${ROCPROFILER_NAME}/tool
+          PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )
 
 ## Packaging directives
 set ( CPACK_PACKAGE_NAME "${ROCPROFILER_NAME}-dev" )
