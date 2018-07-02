@@ -83,6 +83,7 @@ def parse_res(infile):
 # print results table method
 def print_tbl(outfile):
   global var_list
+  if len(var_table) == 0: return 1
 
   out = open(outfile, 'w')
 
@@ -107,6 +108,7 @@ def print_tbl(outfile):
     out.write("\n")
 
   out.close()
+  return 0
 #############################################################
 
 # main
@@ -116,6 +118,6 @@ outfile = sys.argv[1]
 infiles = sys.argv[2:]
 for f in infiles :
   parse_res(f)
-print_tbl(outfile)
-sys.exit(0)
+ret = print_tbl(outfile)
+sys.exit(ret)
 #############################################################

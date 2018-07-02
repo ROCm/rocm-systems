@@ -33,6 +33,7 @@ SOFTWARE.
 #include <mutex>
 #include <vector>
 
+#include "core/group_set.h"
 #include "core/metrics.h"
 #include "core/profile.h"
 #include "core/queue.h"
@@ -48,7 +49,7 @@ class Context;
 inline unsigned align_size(unsigned size, unsigned alignment) {
   return ((size + alignment - 1) & ~(alignment - 1));
 }
-
+#if 0
 // Block descriptor
 struct block_des_t {
   uint32_t id;
@@ -68,7 +69,7 @@ struct block_status_t {
   uint32_t counter_index;
   uint32_t group_index;
 };
-
+#endif
 // Metrics arguments
 template <class Map> class MetricArgs : public xml::args_cache_t {
  public:
@@ -181,7 +182,12 @@ class Context {
   {
     metrics_ = MetricsDict::Create(agent_info);
     if (metrics_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "MetricsDict create failed");
-    Initialize(info, info_count);
+    if (Initialize(info, info_count) == false) {
+      fprintf(stdout, "\nInput metrics out of HW limit. Proposed metrics group set:\n"); fflush(stdout);
+      MetricsGroupSet(agent_info, info, info_count).Print(stdout);
+      fprintf(stdout, "\n"); fflush(stdout);
+      EXC_RAISING(HSA_STATUS_ERROR, "Metrics list exceeds HW limits");
+    }
     Finalize();
 
     if (handler != NULL) {
@@ -209,7 +215,7 @@ class Context {
   }
 
   // Initialize rocprofiler context
-  void Initialize(rocprofiler_feature_t* info_array, const uint32_t info_count) {
+  bool Initialize(rocprofiler_feature_t* info_array, const uint32_t info_count) {
     // Register input features to not duplicate by features referencing
     for (unsigned i = 0; i < info_count; ++i) {
       rocprofiler_feature_t* info = &info_array[i];
@@ -272,9 +278,12 @@ class Context {
             block_status.max_counters = block_counters;
           }
           if (block_status.counter_index >= block_status.max_counters) {
+            return false;
+
             block_status.counter_index = 0;
             block_status.group_index += 1;
           }
+          block_status.counter_index += 1;
           if (block_status.group_index >= set_.size()) {
             set_.push_back(Group(agent_info_, this, block_status.group_index));
           }
@@ -287,6 +296,8 @@ class Context {
         EXC_RAISING(HSA_STATUS_ERROR, "bad rocprofiler feature kind (" << kind << ")");
       }
     }
+
+    return true;
   }
 
   void Finalize() {

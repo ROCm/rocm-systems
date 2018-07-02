@@ -327,10 +327,9 @@ done
 
 if [ -n "$csv_output" ] ; then
   python $BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST
-  if [ "$?" = 1 ] ; then
-    error "CSV generation error, profiling results '$RES_DIR'"
+  if [ "$?" -eq 0 ] ; then
+    echo "RPL: '$csv_output' is generated"
   fi
-  echo "RPL: '$csv_output' is generated"
 fi
 
 if [ "$DATA_PATH" = "$TMP_DIR" ] ; then
