@@ -197,7 +197,7 @@ class MetricsGroupSet {
 
   private:
   void Initialize(const rocprofiler_feature_t* info_array, const uint32_t info_count) {
-    std::multimap<uint32_t, const Metric*> input_metrics;
+    std::multimap<uint32_t, const Metric*, std::greater<uint32_t> > input_metrics;
     for (unsigned i = 0; i < info_count; ++i) {
       const rocprofiler_feature_t* info = &info_array[i];
       if (info->kind != ROCPROFILER_FEATURE_KIND_METRIC) continue;
@@ -209,22 +209,22 @@ class MetricsGroupSet {
         AQL_EXC_RAISING(HSA_STATUS_ERROR, "Metric '" << metric->GetName() << "' doesn't fit in one group");
       }
     }
-    uint32_t group_num = 0;
-    while (input_metrics.size() != 0) {
+#if 0
+    for (const auto& entry : input_metrics) {
+      printf("%u %s\n", entry.first, entry.second->GetName().c_str());
+    }
+#endif
+    auto end = input_metrics.end();
+    while (!input_metrics.empty()) {
       MetricsGroup* group = NextGroup();
-      ++group_num;
-      auto it = input_metrics.end();
-      --it;
-      bool to_cont = true;
+      auto it = input_metrics.begin();
       do {
-        const Metric* metric = it->second;
-        const bool to_erase = (group->AddMetric(metric) == true);
-        to_cont = (it != input_metrics.begin());
-
-        auto curr = it;
-        if (to_cont) --it;
-        if (to_erase) input_metrics.erase(curr);
-      } while (to_cont);
+        auto curr = it++;
+        const Metric* metric = curr->second;
+        if (group->AddMetric(metric) == true) {
+          input_metrics.erase(curr);
+        }
+      } while (it != end);
     }
   }
 
