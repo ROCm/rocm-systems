@@ -65,8 +65,8 @@ class InterceptQueue {
                                            group_segment_size, queue, &status);
     if (status != HSA_STATUS_SUCCESS) abort();
 
-    if (tracker_on_ && (tracker_ == NULL)) {
-      tracker_ = new Tracker(timeout_);
+    if (tracker_on_) {
+      if (tracker_ == NULL) tracker_ = new Tracker(timeout_);
       status = hsa_amd_profiling_set_profiler_enabled(*queue, true);
       if (status != HSA_STATUS_SUCCESS) abort();
     }
@@ -106,21 +106,26 @@ class InterceptQueue {
     InterceptQueue* obj = reinterpret_cast<InterceptQueue*>(data);
     Queue* proxy = obj->proxy_;
 
+    // Travers input packets
     for (uint64_t j = 0; j < count; ++j) {
-      bool to_submit = true;
       const packet_t* packet = &packets_arr[j];
+      bool to_submit = true;
 
+      // Checking for dispatch packet type
       if ((GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) && (dispatch_callback_ != NULL)) {
-        rocprofiler_group_t group = {};
         const hsa_kernel_dispatch_packet_t* dispatch_packet =
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
-        const char* kernel_name = GetKernelName(dispatch_packet);
+
+        // Adding kernel timing tracker
         const rocprofiler_dispatch_record_t* record = NULL;
         if (tracker_ != NULL) {
           const auto* entry = tracker_->Add(obj->agent_info_->dev_id, dispatch_packet->completion_signal);
           const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = entry->signal;
           record = entry->record;
         }
+
+        // Prepareing dispatch callback data
+        const char* kernel_name = GetKernelName(dispatch_packet);
         rocprofiler_callback_data_t data = {obj->agent_info_->dev_id,
                                             obj->agent_info_->dev_index,
                                             obj->queue_,
@@ -128,8 +133,12 @@ class InterceptQueue {
                                             dispatch_packet,
                                             kernel_name,
                                             record};
+
+        // Calling dispatch callback
+        rocprofiler_group_t group = {};
         hsa_status_t status = dispatch_callback_(&data, callback_data_, &group);
         free(const_cast<char*>(kernel_name));
+        // Injecting profiling start/stop packets
         if ((status == HSA_STATUS_SUCCESS) && (group.context != NULL)) {
           Context* context = reinterpret_cast<Context*>(group.context);
           const pkt_vector_t& start_vector = context->StartPackets(group.index);
@@ -147,6 +156,7 @@ class InterceptQueue {
         }
       }
 
+      // Submitting the original packets if profiling was not enabled
       if (to_submit) {
         if (writer != NULL) {
           writer(packet, 1);
@@ -154,8 +164,6 @@ class InterceptQueue {
           proxy->Submit(packet, 1);
         }
       }
-
-      packet += 1;
     }
   }
 
