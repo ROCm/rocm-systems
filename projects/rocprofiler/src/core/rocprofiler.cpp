@@ -481,6 +481,43 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_info(
           info.metric.name = strdup(name.c_str());
           info.metric.description = strdup(descr.c_str());
           info.metric.expr = expr.empty() ? NULL : strdup(expr.c_str());
+
+          if (expr.empty()) {
+            // Getting the block name
+            const std::string block_name = node->opts["block"];
+
+            // Querying profile
+            rocprofiler::profile_t profile = {};
+            profile.agent = agent_info->dev_id;
+            profile.type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC;
+
+            // Query block id info
+            hsa_ven_amd_aqlprofile_id_query_t query = {block_name.c_str(), 0, 0};
+            hsa_status_t status = rocprofiler::util::HsaRsrcFactory::Instance().AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
+              &profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query);
+            if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(HSA_STATUS_ERROR, "get block id info: '" << block_name << "'");
+
+            // Metric object
+            const std::string metric_name = (query.instance_count > 1) ? name + "[0]" : name;
+            const rocprofiler::Metric* metric = dict->Get(metric_name);
+            if (metric == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "' is not found");
+
+            // Process metrics counters
+            const rocprofiler::counters_vec_t& counters_vec = metric->GetCounters();
+            if (counters_vec.size() != 1) EXC_RAISING(HSA_STATUS_ERROR, "error: '" << metric->GetName() << "' is not basic");
+
+            // Query block counters number
+            uint32_t block_counters;
+            profile.events = &(counters_vec[0]->event);
+            status = rocprofiler::util::HsaRsrcFactory::Instance().AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
+                &profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS, &block_counters);
+            if (status != HSA_STATUS_SUCCESS) continue;
+
+            info.metric.instances = query.instance_count;
+            info.metric.block_name = block_name.c_str();
+            info.metric.block_counters = block_counters;
+          }
+
           status = callback(info, data);
           if (status != HSA_STATUS_SUCCESS) break;
         }

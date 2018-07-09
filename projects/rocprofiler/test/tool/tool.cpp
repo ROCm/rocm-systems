@@ -646,8 +646,16 @@ static hsa_status_t info_callback(const rocprofiler_info_data_t info, void * arg
   if (((symb == 'b') && (info.metric.expr == NULL)) ||
       ((symb == 'd') && (info.metric.expr != NULL)))
   {
-    printf("\n  gpu-agent%d : %s : %s\n", info.agent_index, info.metric.name, info.metric.description);
-    if (info.metric.expr != NULL) printf("      %s = %s\n", info.metric.name, info.metric.expr);
+    if (info.metric.expr != NULL) {
+      fprintf(stdout, "\n  gpu-agent%d : %s : %s\n", info.agent_index, info.metric.name, info.metric.description);
+      fprintf(stdout, "      %s = %s\n", info.metric.name, info.metric.expr);
+    } else {
+      fprintf(stdout, "\n  gpu-agent%d : %s", info.agent_index, info.metric.name);
+      if (info.metric.instances > 1) fprintf(stdout, "[0-%u]", info.metric.instances - 1);
+      fprintf(stdout, " : %s\n", info.metric.description);
+      fprintf(stdout, "      block %s has %u counters\n", info.metric.block_name, info.metric.block_counters);
+    }
+    fflush(stdout);
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -802,7 +810,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     } else {
       if (*info_symb == 'b') printf("Basic HW counters:\n");
       else printf("Derived metrics:\n");
-      rocprofiler_iterate_info(NULL, ROCPROFILER_INFO_KIND_METRIC, info_callback, info_symb);
+      hsa_status_t status = rocprofiler_iterate_info(NULL, ROCPROFILER_INFO_KIND_METRIC, info_callback, info_symb);
+      check_status(status);
     }
     exit(1);
   }

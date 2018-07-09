@@ -49,7 +49,7 @@ SOFTWARE.
 #define AQL_EXC_RAISING(error, stream)                                                             \
   {                                                                                                \
     const char* error_string = NULL;                                                               \
-    const rocprofiler::pfn_t* api = util::HsaRsrcFactory::Instance().AqlProfileApi();              \
+    const rocprofiler::pfn_t* api = rocprofiler::util::HsaRsrcFactory::Instance().AqlProfileApi(); \
     api->hsa_ven_amd_aqlprofile_error_string(&error_string);                                       \
     EXC_RAISING(error, stream << ", " << error_string);                                            \
   }

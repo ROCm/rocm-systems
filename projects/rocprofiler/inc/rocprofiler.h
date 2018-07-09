@@ -48,7 +48,7 @@ SOFTWARE.
 #include <hsa_ven_amd_aqlprofile.h>
 #include <stdint.h>
 
-#define ROCPROFILER_VERSION_MAJOR 1
+#define ROCPROFILER_VERSION_MAJOR 2
 #define ROCPROFILER_VERSION_MINOR 1
 
 #ifdef __cplusplus
@@ -331,8 +331,11 @@ typedef struct {
   union {
     struct {
       const char* name; // metric name
+      uint32_t instances; // instances number
       const char* expr; // metric expression, NULL for basic counters
       const char* description; // metric description
+      const char* block_name; // block name
+      uint32_t block_counters; // number of block counters
     } metric;
     struct {
       const char* name; // trace name
