@@ -53,22 +53,26 @@ class InterceptQueue {
 
   static void HsaIntercept(HsaApiTable* table);
 
-  static hsa_status_t QueueCreate(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+  static hsa_status_t InterceptQueueCreate(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
                                   void (*callback)(hsa_status_t status, hsa_queue_t* source,
                                                    void* data),
                                   void* data, uint32_t private_segment_size,
-                                  uint32_t group_segment_size, hsa_queue_t** queue) {
-    hsa_status_t status = HSA_STATUS_ERROR;
+                                  uint32_t group_segment_size, hsa_queue_t** queue,
+                                  const bool& tracker_on) {
     std::lock_guard<mutex_t> lck(mutex_);
+    hsa_status_t status = HSA_STATUS_ERROR;
+
+    if (in_constr_call_) EXC_ABORT(status, "recursive InterceptQueueCreate()");
+    in_constr_call_ = true;
 
     ProxyQueue* proxy = ProxyQueue::Create(agent, size, type, callback, data, private_segment_size,
                                            group_segment_size, queue, &status);
-    if (status != HSA_STATUS_SUCCESS) abort();
+    if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "ProxyQueue::Create()");
 
-    if (tracker_on_) {
+    if (tracker_on || tracker_on_) {
       if (tracker_ == NULL) tracker_ = new Tracker(timeout_);
       status = hsa_amd_profiling_set_profiler_enabled(*queue, true);
-      if (status != HSA_STATUS_SUCCESS) abort();
+      if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_set_profiler_enabled()");
     }
 
     if (!obj_map_) obj_map_ = new obj_map_t;
@@ -76,25 +80,36 @@ class InterceptQueue {
     (*obj_map_)[(uint64_t)(*queue)] = obj;
     status = proxy->SetInterceptCB(OnSubmitCB, obj);
 
+    in_constr_call_ = false;
     return status;
+  }
+
+  static hsa_status_t QueueCreate(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+                                  void (*callback)(hsa_status_t status, hsa_queue_t* source,
+                                                   void* data),
+                                  void* data, uint32_t private_segment_size,
+                                  uint32_t group_segment_size, hsa_queue_t** queue) {
+    return InterceptQueueCreate(agent, size, type, callback, data, private_segment_size, group_segment_size, queue, false);
+  }
+
+  static hsa_status_t QueueCreateTracked(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+                                  void (*callback)(hsa_status_t status, hsa_queue_t* source,
+                                                   void* data),
+                                  void* data, uint32_t private_segment_size,
+                                  uint32_t group_segment_size, hsa_queue_t** queue) {
+    return InterceptQueueCreate(agent, size, type, callback, data, private_segment_size, group_segment_size, queue, true);
   }
 
   static hsa_status_t QueueDestroy(hsa_queue_t* queue) {
     std::lock_guard<mutex_t> lck(mutex_);
     hsa_status_t status = HSA_STATUS_ERROR;
 
-   if (destroy_callback_ != NULL) {
-     status = destroy_callback_(queue, callback_data_);
-     if (status != HSA_STATUS_SUCCESS) return status;
-   }
+    if (destroy_callback_ != NULL) {
+      status = destroy_callback_(queue, callback_data_);
+    }
 
-    obj_map_t::iterator it = obj_map_->find((uint64_t)queue);
-    if (it != obj_map_->end()) {
-      const InterceptQueue* obj = it->second;
-      assert(queue == obj->queue_);
-      delete obj;
-      obj_map_->erase(it);
-      status = HSA_STATUS_SUCCESS;
+    if (status == HSA_STATUS_SUCCESS) {
+      status = DelObj(queue);
     }
 
     return status;
@@ -179,17 +194,9 @@ class InterceptQueue {
   static bool IsTrackerOn() { return tracker_on_; }
 
  private:
-  InterceptQueue(const hsa_agent_t& agent, hsa_queue_t* const queue, ProxyQueue* proxy) :
-    queue_(queue),
-    proxy_(proxy)
-  {
-    agent_info_ = util::HsaRsrcFactory::Instance().GetAgentInfo(agent);
-  }
-  ~InterceptQueue() { ProxyQueue::Destroy(proxy_); }
-
-  static packet_word_t GetHeaderType(const packet_t* packet) {
+  static hsa_packet_type_t GetHeaderType(const packet_t* packet) {
     const packet_word_t* header = reinterpret_cast<const packet_word_t*>(packet);
-    return (*header >> HSA_PACKET_HEADER_TYPE) & header_type_mask;
+    return static_cast<hsa_packet_type_t>((*header >> HSA_PACKET_HEADER_TYPE) & header_type_mask);
   }
 
   static const char* GetKernelName(const hsa_kernel_dispatch_packet_t* dispatch_packet) {
@@ -219,6 +226,41 @@ class InterceptQueue {
     return funcname;
   }
 
+  // method to get an intercept queue object
+  static InterceptQueue* GetObj(const hsa_queue_t* queue) {
+    std::lock_guard<mutex_t> lck(mutex_);
+    InterceptQueue* obj = NULL;
+    obj_map_t::const_iterator it = obj_map_->find((uint64_t)queue);
+    if (it != obj_map_->end()) {
+      obj = it->second;
+      assert(queue == obj->queue_);
+    }
+    return obj;
+  }
+
+  // method to delete an intercept queue object
+  static hsa_status_t DelObj(const hsa_queue_t* queue) {
+    std::lock_guard<mutex_t> lck(mutex_);
+    hsa_status_t status = HSA_STATUS_ERROR;
+    obj_map_t::const_iterator it = obj_map_->find((uint64_t)queue);
+    if (it != obj_map_->end()) {
+      const InterceptQueue* obj = it->second;
+      assert(queue == obj->queue_);
+      delete obj;
+      obj_map_->erase(it);
+      status = HSA_STATUS_SUCCESS;;
+    }
+    return status;
+  }
+
+  InterceptQueue(const hsa_agent_t& agent, hsa_queue_t* const queue, ProxyQueue* proxy) :
+    queue_(queue),
+    proxy_(proxy)
+  {
+    agent_info_ = util::HsaRsrcFactory::Instance().GetAgentInfo(agent);
+  }
+  ~InterceptQueue() { ProxyQueue::Destroy(proxy_); }
+
   static mutex_t mutex_;
   static const packet_word_t header_type_mask = (1ul << HSA_PACKET_HEADER_WIDTH_TYPE) - 1;
   static rocprofiler_callback_t dispatch_callback_;
@@ -229,6 +271,7 @@ class InterceptQueue {
   static uint64_t timeout_;
   static Tracker* tracker_;
   static bool tracker_on_;
+  static bool in_constr_call_;
 
   hsa_queue_t* const queue_;
   ProxyQueue* const proxy_;

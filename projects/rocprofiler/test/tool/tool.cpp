@@ -600,7 +600,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
     feature_count = next_offset - set_offset;
   }
 
-  if (tool_data->feature_count > 0) {
+  if (feature_count > 0) {
     // Open profiling context
     status = rocprofiler_open(callback_data->agent, features, feature_count,
                               &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);

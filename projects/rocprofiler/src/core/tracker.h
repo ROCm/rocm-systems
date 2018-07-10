@@ -99,8 +99,12 @@ class Tracker {
     record_t* record = new record_t{};
     assert(record);
     entry->record = record;
-    status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &record->dispatch);
+
+    timestamp_t dispatch_timestamp = 0;
+    status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &dispatch_timestamp);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP)");
+
+    record->dispatch = timestamp2ns(dispatch_timestamp);
 
     status = hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");

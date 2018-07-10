@@ -207,10 +207,10 @@ hsa_status_t rocprofiler_reset(rocprofiler_t* context,  // [in] profiling contex
 
 // Dispatch record
 typedef struct {
-  uint64_t dispatch;                                   // dispatch timestamp
-  uint64_t begin;                                      // begin timestamp
-  uint64_t end;                                        // end timestamp
-  uint64_t complete;                                   // completion signal timestamp
+  uint64_t dispatch;                                   // dispatch timestamp, ns
+  uint64_t begin;                                      // kernel begin timestamp, ns
+  uint64_t end;                                        // kernel end timestamp, ns
+  uint64_t complete;                                   // completion signal timestamp, ns
 } rocprofiler_dispatch_record_t;
 
 // Profiling callback data
@@ -370,6 +370,13 @@ hsa_status_t rocprofiler_query_info(
   rocprofiler_info_query_t query, // iterated info query
   hsa_status_t (*callback)(const rocprofiler_info_data_t info, void *data), // callback
   void *data); // [in/out] data passed to callback
+
+// Creates a profiled queue. All dispatches on this queue will be profiled
+hsa_status_t rocprofiler_queue_create_profiled(
+  hsa_agent_t agent_handle,uint32_t size, hsa_queue_type32_t type,
+  void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
+  void* data, uint32_t private_segment_size, uint32_t group_segment_size,
+  hsa_queue_t** queue);
 
 #ifdef __cplusplus
 }  // extern "C" block

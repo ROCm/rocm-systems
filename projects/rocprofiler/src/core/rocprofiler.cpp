@@ -232,11 +232,35 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
   bool intercept_mode = false;
+
+  // Checking environment to enable intercept mode
   const char* intercept_env = getenv("ROCP_HSA_INTERCEPT");
   if (intercept_env != NULL) {
-    if (strncmp(intercept_env, "1", 1) == 0) intercept_mode = true;
+    switch (atoi(intercept_env)) {
+      // Intercepting disabled
+      case 0:
+        intercept_mode = false;
+        rocprofiler::InterceptQueue::TrackerOn(false);
+        break;
+      // Intercepting enabled without timestamping
+      case 1:
+        intercept_mode = true;
+        rocprofiler::InterceptQueue::TrackerOn(false);
+        break;
+      // Intercepting enabled with timestamping
+      case 2:
+        intercept_mode = true;
+        rocprofiler::InterceptQueue::TrackerOn(true);
+        break;
+      default:
+        ERR_LOGGING("Bad ROCP_HSA_INTERCEPT env var value (" << intercept_env << ")");
+        return false;
+    }
   }
-  if (rocprofiler::LoadTool()) intercept_mode = true;
+
+  // Loading a tool lib and setting of intercept mode
+  intercept_mode = rocprofiler::LoadTool();
+
   // HSA intercepting
   if (intercept_mode) {
     rocprofiler::ProxyQueue::HsaIntercept(table);
@@ -556,6 +580,16 @@ PUBLIC_API hsa_status_t rocprofiler_query_info(
   API_METHOD_PREFIX
   EXC_RAISING(HSA_STATUS_ERROR, "Not implemented");
   API_METHOD_SUFFIX
+}
+
+// Creates a profiled queue. All dispatches on this queue will be profiled
+PUBLIC_API hsa_status_t rocprofiler_queue_create_profiled(
+    hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
+    void* data, uint32_t private_segment_size, uint32_t group_segment_size,
+    hsa_queue_t** queue)
+{
+  return rocprofiler::InterceptQueue::QueueCreateTracked(agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
 }
 
 }  // extern "C"

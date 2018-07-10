@@ -38,6 +38,8 @@ export ROCP_TOOL_LIB=libtool.so
 unset ROCP_PROXY_QUEUE
 # ROC profiler metrics config file
 export ROCP_METRICS=metrics.xml
+# ROC profiler kernels timing
+export ROCP_TIMESTAMP_ON=1
 # output directory for the tool library, for metrics results file 'results.txt'
 # and SQTT trace files 'thread_trace.se<n>.out'
 export ROCP_OUTPUT_DIR=./RESULTS
