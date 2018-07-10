@@ -44,6 +44,7 @@ export PATH=.:$PATH
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 export HSA_VEN_AMD_AQLPROFILE_LOG=1
 export ROCPROFILER_LOG=1
+unset ROCPROFILER_SESS
 
 # ROC Profiler environment
 # Loading of ROC Profiler by HSA runtime
@@ -317,12 +318,22 @@ elif [ "$input_type" = "txt" ] ; then
   echo "RPL: output dir '$RES_DIR'"
   $BIN_DIR/txt2xml.sh $INPUT_FILE $RES_DIR
   input_list=`/bin/ls $RES_DIR/input*.xml`
+  export ROCPROFILER_SESS=$RES_DIR
 else
   fatal "Bad input file type '$INPUT_FILE'"
 fi
 
+if [ -n "$csv_output" ] ; then
+  rm -f $csv_output
+fi
+
 for name in $input_list; do
   run $name $OUTPUT_DIR $APP_CMD
+  if [ -n "$ROCPROFILER_SESS" -a -e "$ROCPROFILER_SESS/error" ] ; then
+    echo "Error found, profiling aborted."
+    csv_output=""
+    break
+  fi
 done
 
 if [ -n "$csv_output" ] ; then

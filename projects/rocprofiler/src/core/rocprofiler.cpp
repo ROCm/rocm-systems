@@ -259,7 +259,8 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
   }
 
   // Loading a tool lib and setting of intercept mode
-  intercept_mode = rocprofiler::LoadTool();
+  const bool intercept_mode_on = rocprofiler::LoadTool();
+  if (intercept_mode_on) intercept_mode = true;
 
   // HSA intercepting
   if (intercept_mode) {
