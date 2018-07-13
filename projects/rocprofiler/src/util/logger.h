@@ -169,7 +169,7 @@ class Logger {
     if (error_ == false) {
       error_ = true;
       if (session_dir_.empty() == false) {
-          //fopen(std::string(session_dir_ + "error").c_str(), "w");
+        auto x = fopen(std::string(session_dir_ + "error").c_str(), "w"); (void)x;
       }
     }
   }
