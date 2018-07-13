@@ -168,7 +168,9 @@ class Logger {
     std::lock_guard<mutex_t> lck(mutex_);
     if (error_ == false) {
       error_ = true;
-      if (session_dir_.empty() == false) fopen(std::string(session_dir_ + "error").c_str(), "w");
+      if (session_dir_.empty() == false) {
+          //fopen(std::string(session_dir_ + "error").c_str(), "w");
+      }
     }
   }
 
