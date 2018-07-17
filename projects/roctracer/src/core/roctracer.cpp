@@ -169,7 +169,7 @@ class MemoryPool {
     MemoryPool* obj;
     const char* begin;
     const char* end;
-    std::atomic<bool> valid;
+    volatile std::atomic<bool> valid;
     void set(MemoryPool* obj_p, const char* begin_p, const char* end_p, bool valid_p) {
       obj = obj_p;
       begin = begin_p;
@@ -233,8 +233,6 @@ class MemoryPool {
     PTHREAD_CALL(pthread_mutex_unlock(&read_mutex_));
   }
 
-  uint32_t calc_buffer_index(const void* ptr) const { return ((uintptr_t)ptr - (uintptr_t)pool_begin_) >> buffer_size_shift_; }
-
   // pool allocator
   roctracer_allocator_t alloc_fun_;
   void* alloc_arg_;
@@ -275,6 +273,8 @@ class Timer {
     HSART_CALL(hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &timestamp));
     return timestamp_t((freq_t)timestamp * timestamp_factor_);
   }
+
+  freq_t timestamp_factor() const { return timestamp_factor_; }
 
   private:
   // Timestamp frequency factor
@@ -329,16 +329,21 @@ void ActivityAsyncCallback(
     void* record,
     void* arg)
 {
+  static Timer timer;
+
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
   roctracer_async_record_t* record_ptr = reinterpret_cast<roctracer_async_record_t*>(record);
   record_ptr->domain = ROCTRACER_DOMAIN_HCC_OPS;
+  record_ptr->begin_ns *= timer.timestamp_factor();
+  record_ptr->end_ns *= timer.timestamp_factor();
   pool->Write(*record_ptr);
 }
 
 util::Logger::mutex_t util::Logger::mutex_;
 util::Logger* util::Logger::instance_ = NULL;
 MemoryPool* memory_pool = NULL;
-std::mutex memory_pool_mutex;
+typedef std::recursive_mutex memory_pool_mutex_t;
+memory_pool_mutex_t memory_pool_mutex;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -425,7 +430,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_api_callback(
 
 // Return default pool and set new one if parameter pool is not NULL.
 PUBLIC_API roctracer_pool_t* roctracer_default_pool(roctracer_pool_t* pool) {
-  std::lock_guard<std::mutex> lock(roctracer::memory_pool_mutex);
+  std::lock_guard<roctracer::memory_pool_mutex_t> lock(roctracer::memory_pool_mutex);
   roctracer_pool_t* p = reinterpret_cast<roctracer_pool_t*>(roctracer::memory_pool);
   if (pool != NULL) roctracer::memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);
   //if (p == NULL) EXC_RAISING(ROCTRACER_STATUS_UNINIT, "default pool is not initialized");
@@ -438,7 +443,7 @@ PUBLIC_API roctracer_status_t roctracer_open_pool(
     roctracer_pool_t** pool)
 {
   API_METHOD_PREFIX
-  std::lock_guard<std::mutex> lock(roctracer::memory_pool_mutex);
+  std::lock_guard<roctracer::memory_pool_mutex_t> lock(roctracer::memory_pool_mutex);
   if ((pool == NULL) && (roctracer::memory_pool != NULL)) {
     EXC_RAISING(ROCTRACER_STATUS_ERROR, "default pool already set");
   }
@@ -452,7 +457,7 @@ PUBLIC_API roctracer_status_t roctracer_open_pool(
 // Close memory pool
 PUBLIC_API roctracer_status_t roctracer_close_pool(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
-  std::lock_guard<std::mutex> lock(roctracer::memory_pool_mutex);
+  std::lock_guard<roctracer::memory_pool_mutex_t> lock(roctracer::memory_pool_mutex);
   roctracer_pool_t* ptr = (pool == NULL) ? roctracer_default_pool() : pool;
   roctracer::MemoryPool* memory_pool = reinterpret_cast<roctracer::MemoryPool*>(ptr);
   delete(memory_pool);
