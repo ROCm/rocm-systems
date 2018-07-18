@@ -129,6 +129,15 @@ class InterceptQueue {
     InterceptQueue* obj = reinterpret_cast<InterceptQueue*>(data);
     Queue* proxy = obj->proxy_;
 
+    if (submit_callback_fun_) {
+      for (uint64_t j = 0; j < count; ++j) {
+        const void* packet = reinterpret_cast<const void*>(&packets_arr[j]);
+        rocprofiler_hsa_callback_data_t data{};
+        data.submit.packet = packet;
+        submit_callback_fun_(CB_ID_SUBMIT, &data, submit_callback_arg_);
+      }
+    }
+
     // Travers input packets
     for (uint64_t j = 0; j < count; ++j) {
       const packet_t* packet = &packets_arr[j];
@@ -246,6 +255,11 @@ class InterceptQueue {
   static inline void Start() { dispatch_callback_.store(callbacks_.dispatch, std::memory_order_release); }
   static inline void Stop() { dispatch_callback_.store(NULL, std::memory_order_relaxed); }
 
+  static void SetHsaSubmitCallback(rocprofiler_hsa_callback_fun_t fun, void* arg) {
+    submit_callback_fun_ = fun;
+    submit_callback_arg_ = arg;
+  }
+
   static void TrackerOn(bool on) { tracker_on_ = on; }
   static bool IsTrackerOn() { return tracker_on_; }
 
@@ -344,6 +358,9 @@ class InterceptQueue {
   static bool tracker_on_;
   static bool in_create_call_;
   static queue_id_t current_queue_id;
+
+  static rocprofiler_hsa_callback_fun_t submit_callback_fun_;
+  static void* submit_callback_arg_;
 
   hsa_queue_t* const queue_;
   ProxyQueue* const proxy_;

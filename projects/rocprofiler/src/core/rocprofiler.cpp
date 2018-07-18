@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include "core/context.h"
 #include "core/context_pool.h"
 #include "core/hsa_queue.h"
+#include "core/hsa_interceptor.h"
 #include "core/intercept_queue.h"
 #include "core/proxy_queue.h"
 #include "core/simple_proxy_queue.h"
@@ -84,6 +85,9 @@ decltype(hsa_queue_load_read_index_scacquire)* hsa_queue_load_read_index_scacqui
 decltype(hsa_amd_queue_intercept_create)* hsa_amd_queue_intercept_create_fn;
 decltype(hsa_amd_queue_intercept_register)* hsa_amd_queue_intercept_register_fn;
 
+decltype(hsa_memory_allocate)* hsa_memory_allocate_fn;
+decltype(hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate_fn;
+decltype(hsa_memory_copy)* hsa_memory_copy_fn;
 decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
 decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
 
@@ -180,6 +184,7 @@ uint32_t LoadTool() {
     settings.trace_local = TraceProfile::IsLocal() ? 1: 0;
     settings.timeout = util::HsaRsrcFactory::GetTimeoutNs();
     settings.timestamp_on = InterceptQueue::IsTrackerOn() ? 1 : 0;
+    settings.hsa_intercepting = 0;
 
     if (handler) handler();
     else if (handler_prop) handler_prop(&settings);
@@ -191,6 +196,7 @@ uint32_t LoadTool() {
     if (settings.intercept_mode != 0) intercept_mode = DISPATCH_INTERCEPT_MODE;
     if (settings.code_obj_tracking) intercept_mode |= CODE_OBJ_TRACKING_MODE;
     if (settings.memcopy_tracking) intercept_mode |= MEMCOPY_INTERCEPT_MODE;
+    HsaInterceptor::Enable(settings.hsa_intercepting != 0);
   }
 
   return intercept_mode;
@@ -456,6 +462,7 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
     rocprofiler::InterceptQueue::HsaIntercept(table);
   } else {
     rocprofiler::StandaloneIntercept();
+    rocprofiler::HsaInterceptor::HsaIntercept(table);
   }
 
   return true;
@@ -862,6 +869,15 @@ hsa_status_t rocprofiler_get_time(
   uint64_t* value_ns)
 {
     return rocprofiler::util::HsaRsrcFactory::Instance().GetTime(time_id, timestamp, value_ns);
+}
+
+// Set new callbacks. If a callback is NULL then it is disabled
+PUBLIC_API hsa_status_t rocprofiler_set_hsa_callbacks(const rocprofiler_hsa_callbacks_t callbacks, void* arg) {
+  API_METHOD_PREFIX
+  rocprofiler::InterceptQueue::SetHsaSubmitCallback(callbacks.submit, arg);
+  rocprofiler::HsaInterceptor::SetHsaAllocCallback(callbacks.alloc, arg);
+  rocprofiler::HsaInterceptor::SetHsaMemcopyCallback(callbacks.memcopy, arg);
+  API_METHOD_SUFFIX
 }
 
 }  // extern "C"

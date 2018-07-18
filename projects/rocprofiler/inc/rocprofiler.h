@@ -70,6 +70,7 @@ typedef struct {
   uint32_t trace_local;
   uint64_t timeout;
   uint32_t timestamp_on;
+  uint32_t hsa_intercepting;
 } rocprofiler_settings_t;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -459,6 +460,71 @@ hsa_status_t rocprofiler_pool_flush(
   rocprofiler_pool_t* pool);          // profiling pool handle
 
 ////////////////////////////////////////////////////////////////////////////////
+// HSA callbacks ID enumeration
+enum rocprofiler_hsa_cb_id_t {
+  ROCPROFILER_HSA_CB_ID_ALLOC = 0,
+  ROCPROFILER_HSA_CB_ID_ASSIGN = 0,
+  ROCPROFILER_HSA_CB_ID_MEMCOPY = 1,
+  ROCPROFILER_HSA_CB_ID_SUBMIT = 2
+};
+
+// HSA memory type enumeration
+enum rocprofiler_hsa_mtype_t {
+  ROCPROFILER_HSA_MTYPE_UNASSIGNED = 0,
+  ROCPROFILER_HSA_MTYPE_KERN_ARG = 1,
+  ROCPROFILER_HSA_MTYPE_SYSTEM = 2,
+  ROCPROFILER_HSA_MTYPE_CPU = 3
+  ROCPROFILER_HSA_MTYPE_GPU = 4
+};
+
+// HSA callback data type
+struct rocprofiler_hsa_callback_data_t {
+  union {
+    struct {
+      const void* addr;
+      size_t size;
+      hsa_segment_t sement;
+      hsa_global_flag_t global_flag;
+      hsa_device_type_t device_type;
+    } hsa_alloc;
+    struct {
+      const void* addr;
+      size_t size;
+      hsa_amd_segment_t sement;
+      hsa_amd_memory_pool_global_flag_t global_flag;
+      hsa_device_type_t device_type;
+    } amd_alloc;
+    struct {
+      const void* dst;
+      const void* src;
+      size_t size;
+    } memcopy;
+    struct {
+      const void* packet;
+    } submit;
+  };
+};
+
+// HSA callback function type
+typedef hsa_status_t (*rocprofiler_hsa_callback_fun_t)(
+  rocprofiler_hsa_callback_id_t id, // callback id
+  const rocprofiler_hsa_callback_data_t* data, // [in] callback data
+  void* arg); // [in/out] user passed data
+
+// HSA callbacks structure
+struct rocprofiler_hsa_callbacks_t {
+  rocprofiler_hsa_callback_fun_t alloc; // memory allocate callback
+  rocprofiler_hsa_callback_fun_t memcopy; // memory copy callback
+  rocprofiler_hsa_callback_fun_t submit; // packet submit callback
+};
+
+// Set callbacks. If the callback is NULL then it is disabled.
+// If callback returns a value that is not HSA_STATUS_SUCCESS the  callback
+// will be unregistered.
+hsa_status_t rocprofiler_set_hsa_callbacks(
+  const rocprofiler_hsa_callbacks_t callbacks, // HSA callback function
+  void* arg); // callback user data
+
 #ifdef __cplusplus
 }  // extern "C" block
 #endif  // __cplusplus
