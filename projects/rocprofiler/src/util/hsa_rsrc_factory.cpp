@@ -44,6 +44,9 @@ SOFTWARE.
 #include <string>
 #include <vector>
 
+#include "util/exception.h"
+#include "util/logger.h"
+
 namespace rocprofiler {
 namespace util {
 
@@ -110,11 +113,13 @@ hsa_status_t FindKernArgPool(hsa_amd_memory_pool_t pool, void* data) {
 // Constructor of the class
 HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize_hsa) {
   hsa_status_t status;
+
   // Initialize the Hsa Runtime
   if (initialize_hsa_) {
     status = hsa_init();
     CHECK_STATUS("Error in hsa_init", status);
   }
+
   // Discover the set of Gpu devices available on the platform
   status = hsa_iterate_agents(GetHsaAgentsCallback, this);
   CHECK_STATUS("Error Calling hsa_iterate_agents", status);
@@ -132,10 +137,19 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
   loader_api_ = {0};
   status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_LOADER, 1, 0, &loader_api_);
   CHECK_STATUS("loader API table query failed", status);
+
+  // Instantiate HSA timer
+  timer_ = new HsaTimer;
+  CHECK_STATUS("HSA timer allocation failed",
+    (timer_ == NULL) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS);
+
+  // System timeout
+  timeout_ = (timeout_ns_ == HsaTimer::TIMESTAMP_MAX) ? timeout_ns_ : timer_->ns_to_sysclock(timeout_ns_);
 }
 
 // Destructor of the class
 HsaRsrcFactory::~HsaRsrcFactory() {
+  delete timer_;
   for (auto p : cpu_list_) delete p;
   for (auto p : gpu_list_) delete p;
   if (initialize_hsa_) {
@@ -403,22 +417,38 @@ uint8_t* HsaRsrcFactory::AllocateCmdMemory(const AgentInfo* agent_info, size_t s
   return ptr;
 }
 
+// Wait signal
+void HsaRsrcFactory::SignalWait(const hsa_signal_t& signal) const {
+  while (1) {
+    const hsa_signal_value_t signal_value =
+      hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, timeout_, HSA_WAIT_STATE_BLOCKED);
+    if (signal_value == 0) {
+      break;
+    } else {
+      if (signal_value == 1) WARN_LOGGING("signal waiting...");
+      else EXC_RAISING(HSA_STATUS_ERROR, "hsa_signal_wait_scacquire (" << signal_value << ")");
+    }
+  }
+}
+
+// Wait signal with signal value restore
+void HsaRsrcFactory::SignalWaitRestore(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const {
+  SignalWait(signal);
+  hsa_signal_store_relaxed(const_cast<hsa_signal_t&>(signal), signal_value);
+}
+
 // Copy data from GPU to host memory
 bool HsaRsrcFactory::Memcpy(const hsa_agent_t& agent, void* dst, const void* src, size_t size) {
   hsa_status_t status = HSA_STATUS_ERROR;
   if (!cpu_agents_.empty()) {
     hsa_signal_t s = {};
     status = hsa_signal_create(1, 0, NULL, &s);
-    if (status == HSA_STATUS_SUCCESS) {
-      status = hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, NULL, s);
-      if (status == HSA_STATUS_SUCCESS) {
-        if (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
-                                      HSA_WAIT_STATE_BLOCKED) != 0) {
-          status = HSA_STATUS_ERROR;
-        }
-      }
-      status = hsa_signal_destroy(s);
-    }
+    CHECK_STATUS("hsa_signal_create()", status);
+    status = hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, NULL, s);
+    CHECK_STATUS("hsa_amd_memory_async_copy()", status);
+    SignalWait(s);
+    status = hsa_signal_destroy(s);
+    CHECK_STATUS("hsa_signal_destroy()", status);
   }
   return (status == HSA_STATUS_SUCCESS);
 }
@@ -561,6 +591,7 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t s
 
 HsaRsrcFactory* HsaRsrcFactory::instance_ = NULL;
 HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;
+HsaRsrcFactory::timestamp_t HsaRsrcFactory::timeout_ns_ = HsaTimer::TIMESTAMP_MAX;
 
 }  // namespace util
 }  // namespace rocprofiler

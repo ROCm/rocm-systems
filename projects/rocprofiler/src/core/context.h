@@ -29,6 +29,9 @@ SOFTWARE.
 
 #include <hsa.h>
 #include <hsa_ext_amd.h>
+#include <unistd.h> // usleep
+#include <atomic>
+#include <list>
 #include <map>
 #include <mutex>
 #include <vector>
@@ -49,27 +52,7 @@ class Context;
 inline unsigned align_size(unsigned size, unsigned alignment) {
   return ((size + alignment - 1) & ~(alignment - 1));
 }
-#if 0
-// Block descriptor
-struct block_des_t {
-  uint32_t id;
-  uint32_t index;
-};
 
-// block_des_t less-then functor
-struct lt_block_des {
-  bool operator()(const block_des_t& a1, const block_des_t& a2) const {
-    return (a1.id < a2.id) || ((a1.id == a2.id) && (a1.index < a2.index));
-  }
-};
-
-// Block status
-struct block_status_t {
-  uint32_t max_counters;
-  uint32_t counter_index;
-  uint32_t group_index;
-};
-#endif
 // Metrics arguments
 template <class Map> class MetricArgs : public xml::args_cache_t {
  public:
@@ -97,6 +80,9 @@ template <class Map> class MetricArgs : public xml::args_cache_t {
 // Profiling group
 class Group {
  public:
+  typedef uint32_t refs_t;
+  typedef std::atomic<refs_t> atomic_refs_t;
+
   Group(const util::AgentInfo* agent_info, Context* context, const uint32_t& index)
       : pmc_profile_(agent_info),
         sqtt_profile_(agent_info),
@@ -146,10 +132,10 @@ class Group {
   Context* GetContext() { return context_; }
   uint32_t GetIndex() const { return index_; }
 
-  void ResetRefs() { refs_ = n_profiles_; }
-  uint32_t DecrRefs() {
-    return (refs_ > 0) ? --refs_ : 0;
-  }
+  atomic_refs_t* AtomicRefsCount() { return reinterpret_cast<atomic_refs_t*>(&refs_); }
+  void ResetRefsCount() { AtomicRefsCount()->store(n_profiles_, std::memory_order_release); }
+  void IncrRefsCount() { AtomicRefsCount()->fetch_add(1, std::memory_order_acq_rel); }
+  uint32_t FetchDecrRefsCount() { return AtomicRefsCount()->fetch_sub(1, std::memory_order_acq_rel); }
 
  private:
   PmcProfile pmc_profile_;
@@ -159,7 +145,7 @@ class Group {
   pkt_vector_t stop_vector_;
   pkt_vector_t read_vector_;
   uint32_t n_profiles_;
-  uint32_t refs_;
+  refs_t refs_;
   Context* const context_;
   const uint32_t index_;
 };
@@ -167,7 +153,6 @@ class Group {
 // Profiling context
 class Context {
  public:
-  typedef std::mutex mutex_t;
   typedef std::map<std::string, rocprofiler_feature_t*> info_map_t;
 
   Context(const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info,
@@ -180,6 +165,8 @@ class Context {
         handler_(handler),
         handler_arg_(handler_arg)
   {
+    if (info_count == 0) return;
+
     metrics_ = MetricsDict::Create(agent_info);
     if (metrics_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "MetricsDict create failed");
     if (Initialize(info, info_count) == false) {
@@ -192,7 +179,7 @@ class Context {
 
     if (handler != NULL) {
       for (unsigned group_index = 0; group_index < set_.size(); ++group_index) {
-        set_[group_index].ResetRefs();
+        set_[group_index].ResetRefsCount();
         const profile_vector_t profile_vector = GetProfiles(group_index);
         for (auto& tuple : profile_vector) {
           // Handler for stop packet completion
@@ -307,11 +294,11 @@ class Context {
     }
   }
 
-  void Reset(const uint32_t& group_index) { set_[group_index].ResetRefs(); }
+  void Reset(const uint32_t& group_index) { set_[group_index].ResetRefsCount(); }
 
   uint32_t GetGroupCount() const { return set_.size(); }
 
-  rocprofiler_group_t GetGroupInfo(Group* g) {
+  inline rocprofiler_group_t GetGroupInfo(Group* g) {
     rocprofiler::info_vector_t& info_vector = g->GetInfoVector();
     rocprofiler_group_t group = {};
     group.index = g->GetIndex();
@@ -320,8 +307,14 @@ class Context {
     group.feature_count = info_vector.size();
     return group;
   }
-  rocprofiler_group_t GetGroupInfo(const uint32_t& index) {
-    return GetGroupInfo(&set_[index]);
+  inline rocprofiler_group_t GetGroupInfo(const uint32_t& index) {
+    rocprofiler_group_t group = {};
+    if (set_.empty()) {
+      group.context = reinterpret_cast<rocprofiler_t*>(this);
+    } else {
+      group = GetGroupInfo(&set_[index]);
+    }
+    return group;
   }
 
   const pkt_vector_t& StartPackets(const uint32_t& group_index) const {
@@ -368,14 +361,7 @@ class Context {
     const profile_vector_t profile_vector = GetProfiles(group_index);
     for (auto& tuple : profile_vector) {
       // Wait for stop packet to complete
-      const uint64_t timeout = timeout_;
-      bool complete = false;
-      while (!complete) {
-        const hsa_signal_value_t signal_value = hsa_signal_wait_scacquire(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, timeout,
-                                  HSA_WAIT_STATE_BLOCKED);
-        complete = (signal_value < 1);
-        if (!complete) WARN_LOGGING("timeout");
-      }
+      hsa_rsrc_->SignalWaitRestore(tuple.completion_signal, 1);
       for (rocprofiler_feature_t* rinfo : *(tuple.info_vector)) rinfo->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
       callback_data_t callback_data{tuple.profile, tuple.info_vector, tuple.info_vector->size(), NULL};
       const hsa_status_t status =
@@ -411,8 +397,19 @@ class Context {
     }
   }
 
-  static void SetTimeout(uint64_t timeout) { timeout_ = timeout; }
-  static uint64_t GetTimeout() { return timeout_; }
+  static bool Handler(hsa_signal_value_t value, void* arg) {
+    Group* group = reinterpret_cast<Group*>(arg);
+    Context* context = group->GetContext();
+    auto r = group->FetchDecrRefsCount();
+    if (r == 1) {
+      const rocprofiler_group_t group_info = context->GetGroupInfo(group);
+      context->handler_(group_info, context->handler_arg_);
+    }
+    return false;
+  }
+
+  Group* GetGroup(const uint32_t& index) { return &set_[index]; }
+  rocprofiler_handler_t GetHandler(void** arg) const { *arg = handler_arg_; return handler_; }
 
  private:
   // Getting profling packets
@@ -423,18 +420,6 @@ class Context {
     }
     set_[index].GetProfiles(vec);
     return vec;
-  }
-
-  static bool Handler(hsa_signal_value_t value, void* arg) {
-    Group* group = reinterpret_cast<Group*>(arg);
-    Context* context = group->GetContext();
-    context->mutex_.lock();
-    uint32_t r = group->DecrRefs();
-    context->mutex_.unlock();
-    if (r == 0) {
-      return context->handler_(context->GetGroupInfo(group), context->handler_arg_);
-    }
-    return false;
   }
 
   static hsa_status_t DataCallback(hsa_ven_amd_aqlprofile_info_type_t ainfo_type,
@@ -526,9 +511,6 @@ class Context {
     return info;
   }
 
-  // Profiling data waiting timeout
-  static uint64_t timeout_;
-
   // GPU handel
   const hsa_agent_t agent_;
   const util::AgentInfo* agent_info_;
@@ -551,7 +533,6 @@ class Context {
   // Context completion handler
   rocprofiler_handler_t handler_;
   void* handler_arg_;
-  mutex_t mutex_;
 };
 
 }  // namespace rocprofiler

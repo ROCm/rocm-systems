@@ -154,7 +154,7 @@ bool LoadTool() {
     settings.intercept_mode = (intercept_mode) ? 1 : 0;
     settings.sqtt_size = SqttProfile::GetSize();
     settings.sqtt_local = SqttProfile::IsLocal() ? 1: 0;
-    settings.timeout = Context::GetTimeout();
+    settings.timeout = util::HsaRsrcFactory::GetTimeoutNs();
     settings.timestamp_on = InterceptQueue::IsTrackerOn() ? 1 : 0;
 
     if (handler) handler();
@@ -163,8 +163,7 @@ bool LoadTool() {
     intercept_mode = (settings.intercept_mode != 0);
     SqttProfile::SetSize(settings.sqtt_size);
     SqttProfile::SetLocal(settings.sqtt_local != 0);
-    Context::SetTimeout(settings.timeout);
-    InterceptQueue::SetTimeout(settings.timeout);
+    util::HsaRsrcFactory::SetTimeoutNs(settings.timeout);
     InterceptQueue::TrackerOn(settings.timestamp_on != 0);
   }
 
@@ -190,8 +189,8 @@ CONSTRUCTOR_API void constructor() {
 }
 
 DESTRUCTOR_API void destructor() {
-  util::HsaRsrcFactory::Destroy();
   rocprofiler::MetricsDict::Destroy();
+  util::HsaRsrcFactory::Destroy();
   util::Logger::Destroy();
 }
 
@@ -213,10 +212,12 @@ hsa_status_t GetExcStatus(const std::exception& e) {
 }
 
 rocprofiler_properties_t rocprofiler_properties;
-uint64_t Context::timeout_ = UINT64_MAX;
+#if DEFERRED_HANDLERS
+Context::deferred_handler_list_t* Context::deferred_handler_list_ = NULL;
+Context::recur_mutex_t Context::mutex_static_;
+#endif
 uint32_t SqttProfile::output_buffer_size_ = 0x2000000;  // 32M
 bool SqttProfile::output_buffer_local_ = true;
-Tracker::mutex_t Tracker::mutex_;
 util::Logger::mutex_t util::Logger::mutex_;
 util::Logger* util::Logger::instance_ = NULL;
 }

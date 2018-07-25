@@ -50,6 +50,7 @@ class InterceptQueue {
   typedef std::recursive_mutex mutex_t;
   typedef std::map<uint64_t, InterceptQueue*> obj_map_t;
   typedef hsa_status_t (*queue_callback_t)(hsa_queue_t*, void* data);
+  typedef void (*queue_event_callback_t)(hsa_status_t status, hsa_queue_t *queue, void *arg);
 
   static void HsaIntercept(HsaApiTable* table);
 
@@ -65,12 +66,12 @@ class InterceptQueue {
     if (in_constr_call_) EXC_ABORT(status, "recursive InterceptQueueCreate()");
     in_constr_call_ = true;
 
-    ProxyQueue* proxy = ProxyQueue::Create(agent, size, type, callback, data, private_segment_size,
+    ProxyQueue* proxy = ProxyQueue::Create(agent, size, type, queue_event_callback, data, private_segment_size,
                                            group_segment_size, queue, &status);
     if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "ProxyQueue::Create()");
 
     if (tracker_on || tracker_on_) {
-      if (tracker_ == NULL) tracker_ = new Tracker(timeout_);
+      if (tracker_ == NULL) tracker_ = new Tracker;
       status = hsa_amd_profiling_set_profiler_enabled(*queue, true);
       if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_set_profiler_enabled()");
     }
@@ -79,6 +80,7 @@ class InterceptQueue {
     InterceptQueue* obj = new InterceptQueue(agent, *queue, proxy);
     (*obj_map_)[(uint64_t)(*queue)] = obj;
     status = proxy->SetInterceptCB(OnSubmitCB, obj);
+    obj->queue_event_callback_ = callback;
 
     in_constr_call_ = false;
     return status;
@@ -132,11 +134,10 @@ class InterceptQueue {
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
 
         // Adding kernel timing tracker
-        const rocprofiler_dispatch_record_t* record = NULL;
+        Tracker::entry_t* tracker_entry = NULL;
         if (tracker_ != NULL) {
-          const auto* entry = tracker_->Add(obj->agent_info_->dev_id, dispatch_packet->completion_signal);
-          const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = entry->signal;
-          record = entry->record;
+          tracker_entry = tracker_->Alloc(obj->agent_info_->dev_id, dispatch_packet->completion_signal);
+          const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = tracker_entry->signal;
         }
 
         // Prepareing dispatch callback data
@@ -147,27 +148,44 @@ class InterceptQueue {
                                             user_que_idx,
                                             dispatch_packet,
                                             kernel_name,
-                                            record};
+                                            (tracker_entry) ? tracker_entry->record : NULL};
 
         // Calling dispatch callback
         rocprofiler_group_t group = {};
         hsa_status_t status = dispatch_callback_(&data, callback_data_, &group);
         free(const_cast<char*>(kernel_name));
         // Injecting profiling start/stop packets
-        if ((status == HSA_STATUS_SUCCESS) && (group.context != NULL)) {
+        if ((status != HSA_STATUS_SUCCESS) || (group.context == NULL)) {
+          if (tracker_entry != NULL) tracker_->Delete(tracker_entry);
+        } else {
           Context* context = reinterpret_cast<Context*>(group.context);
-          const pkt_vector_t& start_vector = context->StartPackets(group.index);
-          const pkt_vector_t& stop_vector = context->StopPackets(group.index);
 
-          pkt_vector_t packets = start_vector;
-          packets.insert(packets.end(), *packet);
-          packets.insert(packets.end(), stop_vector.begin(), stop_vector.end());
-          if (writer != NULL) {
-            writer(&packets[0], packets.size());
+          if (group.feature_count != 0) {
+            if (tracker_entry != NULL) {
+              Group* context_group = context->GetGroup(group.index);
+              context_group->IncrRefsCount();
+              tracker_->Enable(tracker_entry, Context::Handler, reinterpret_cast<void*>(context_group));
+            }
+  
+            const pkt_vector_t& start_vector = context->StartPackets(group.index);
+            const pkt_vector_t& stop_vector = context->StopPackets(group.index);
+            pkt_vector_t packets = start_vector;
+            packets.insert(packets.end(), *packet);
+            packets.insert(packets.end(), stop_vector.begin(), stop_vector.end());
+            if (writer != NULL) {
+              writer(&packets[0], packets.size());
+            } else {
+              proxy->Submit(&packets[0], packets.size());
+            }
+            to_submit = false;
           } else {
-            proxy->Submit(&packets[0], packets.size());
+            if (tracker_entry != NULL) {
+              void* context_handler_arg = NULL;
+              rocprofiler_handler_t context_handler_fun = context->GetHandler(&context_handler_arg);
+              tracker_->Enable(tracker_entry, context_handler_fun, context_handler_arg);
+              rocprofiler_close(context);
+            }
           }
-          to_submit = false;
         }
       }
 
@@ -189,11 +207,16 @@ class InterceptQueue {
     destroy_callback_ = destroy_callback;
   }
 
-  static void SetTimeout(uint64_t timeout) { timeout_ = timeout; }
   static void TrackerOn(bool on) { tracker_on_ = on; }
   static bool IsTrackerOn() { return tracker_on_; }
 
  private:
+  static void queue_event_callback(hsa_status_t status, hsa_queue_t *queue, void *arg) {
+    if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "queue error handling is not supported");
+    InterceptQueue* obj = GetObj(queue);
+    if (obj->queue_event_callback_) obj->queue_event_callback_(status, obj->queue_, arg);
+  }
+
   static hsa_packet_type_t GetHeaderType(const packet_t* packet) {
     const packet_word_t* header = reinterpret_cast<const packet_word_t*>(packet);
     return static_cast<hsa_packet_type_t>((*header >> HSA_PACKET_HEADER_TYPE) & header_type_mask);
@@ -258,8 +281,12 @@ class InterceptQueue {
     proxy_(proxy)
   {
     agent_info_ = util::HsaRsrcFactory::Instance().GetAgentInfo(agent);
+    queue_event_callback_ = NULL;
   }
-  ~InterceptQueue() { ProxyQueue::Destroy(proxy_); }
+
+  ~InterceptQueue() {
+    ProxyQueue::Destroy(proxy_);
+  }
 
   static mutex_t mutex_;
   static const packet_word_t header_type_mask = (1ul << HSA_PACKET_HEADER_WIDTH_TYPE) - 1;
@@ -268,7 +295,6 @@ class InterceptQueue {
   static void* callback_data_;
   static obj_map_t* obj_map_;
   static const char* kernel_none_;
-  static uint64_t timeout_;
   static Tracker* tracker_;
   static bool tracker_on_;
   static bool in_constr_call_;
@@ -276,6 +302,7 @@ class InterceptQueue {
   hsa_queue_t* const queue_;
   ProxyQueue* const proxy_;
   const util::AgentInfo* agent_info_;
+  queue_event_callback_t queue_event_callback_;
 };
 
 }  // namespace rocprofiler

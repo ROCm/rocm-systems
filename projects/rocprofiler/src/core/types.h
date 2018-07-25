@@ -34,6 +34,7 @@ typedef hsa_ven_amd_aqlprofile_parameter_t parameter_t;
 typedef hsa_ven_amd_aqlprofile_profile_t profile_t;
 typedef hsa_ext_amd_aql_pm4_packet_t packet_t;
 typedef uint32_t packet_word_t;
+typedef uint64_t timestamp_t;
 }  // namespace rocprofiler
 
 #endif  // SRC_CORE_TYPES_H_

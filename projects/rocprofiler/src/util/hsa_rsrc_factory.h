@@ -118,9 +118,42 @@ struct AgentInfo {
   uint32_t shader_arrays_per_se;
 };
 
+// HSA timer class
+// Provides current HSA timestampa and system-clock/ns conversion API
+class HsaTimer {
+  public:
+  typedef uint64_t timestamp_t;
+  static const timestamp_t TIMESTAMP_MAX = UINT64_MAX;
+  typedef long double freq_t;
+
+  HsaTimer() {
+    timestamp_t sysclock_hz = 0;
+    hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
+    CHECK_STATUS("hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY)", status);
+    sysclock_factor_ = (freq_t)1000000000 / (freq_t)sysclock_hz;
+  }
+
+  // Methids for system-clock/ns conversion
+  timestamp_t sysclock_to_ns(const timestamp_t& sysclock) const { return timestamp_t((freq_t)sysclock * sysclock_factor_); }
+  timestamp_t ns_to_sysclock(const timestamp_t& time) const { return timestamp_t((freq_t)time / sysclock_factor_); }
+
+  // Return timestamp in 'ns'
+  timestamp_t timestamp_ns() const {
+    timestamp_t sysclock;
+    hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
+    CHECK_STATUS("hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP)", status);
+    return sysclock_to_ns(sysclock);
+  }
+
+  private:
+  // Timestamp frequency factor
+  freq_t sysclock_factor_;
+};
+
 class HsaRsrcFactory {
  public:
   typedef std::recursive_mutex mutex_t;
+  typedef HsaTimer::timestamp_t timestamp_t;
 
   static HsaRsrcFactory* Create(bool initialize_hsa = true) {
     std::lock_guard<mutex_t> lck(mutex_);
@@ -206,6 +239,12 @@ class HsaRsrcFactory {
   // @return uint8_t* Pointer to buffer, null if allocation fails.
   uint8_t* AllocateCmdMemory(const AgentInfo* agent_info, size_t size);
 
+  // Wait signal
+  void SignalWait(const hsa_signal_t& signal) const;
+
+  // Wait signal with signal value restore
+  void SignalWaitRestore(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const;
+
   // Copy data from GPU to host memory
   bool Memcpy(const hsa_agent_t& agent, void* dst, const void* src, size_t size);
   bool Memcpy(const AgentInfo* agent_info, void* dst, const void* src, size_t size);
@@ -236,6 +275,18 @@ class HsaRsrcFactory {
 
   // Return Loader API table
   const hsa_ven_amd_loader_1_00_pfn_t* LoaderApi() const { return &loader_api_; }
+
+  // Methods for system-clock/ns conversion and timestamp in 'ns'
+  timestamp_t SysclockToNs(const timestamp_t& sysclock) const { return timer_->sysclock_to_ns(sysclock); }
+  timestamp_t NsToSysclock(const timestamp_t& time) const { return timer_->ns_to_sysclock(time); }
+  timestamp_t TimestampNs() const { return timer_->timestamp_ns(); }
+  timestamp_t GetSysTimeout() const { return timeout_; }
+  static timestamp_t GetTimeoutNs() { return timeout_ns_; }
+  static void SetTimeoutNs(const timestamp_t& time) {
+    std::lock_guard<mutex_t> lck(mutex_);
+    timeout_ns_ = time;
+    if (instance_ != NULL) instance_->timeout_ = instance_->timer_->ns_to_sysclock(time);
+  }
 
  private:
   // System agents iterating callback
@@ -282,6 +333,14 @@ class HsaRsrcFactory {
 
   // Loader API table
   hsa_ven_amd_loader_1_00_pfn_t loader_api_;
+
+  // System timeout, ns
+  static timestamp_t timeout_ns_;
+  // System timeout, sysclock
+  timestamp_t timeout_;
+
+  // HSA timer
+  HsaTimer* timer_;
 };
 
 }  // namespace util

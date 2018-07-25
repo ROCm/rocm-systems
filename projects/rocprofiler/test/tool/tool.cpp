@@ -39,11 +39,14 @@ SOFTWARE.
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <atomic>
+#include <chrono>
 #include <iostream>
 #include <list>
 #include <map>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "inc/rocprofiler.h"
@@ -70,7 +73,8 @@ struct callbacks_data_t {
 
 // Context stored entry type
 struct context_entry_t {
-  uint32_t valid;
+  bool valid;
+  bool active;
   uint32_t index;
   hsa_agent_t agent;
   rocprofiler_group_t group;
@@ -95,8 +99,6 @@ callbacks_data_t* callbacks_data = NULL;
 // Stored contexts array
 typedef std::map<uint32_t, context_entry_t> context_array_t;
 context_array_t* context_array = NULL;
-typedef std::list<context_entry_t*> wait_list_t;
-wait_list_t* wait_list = NULL;
 // Contexts collected count
 volatile uint32_t context_count = 0;
 volatile uint32_t context_collected = 0;
@@ -171,9 +173,11 @@ std::string filtr_kernel_name(const std::string name) {
     }
     ++rit;
   }
-  while (((*rit == ' ') || (*rit == '	')) && (rit != rend)) rit++;
+//  while (((*rit == ' ') || (*rit == '	')) && (rit != rend)) rit++;
+  while (rit != rend) if ((*rit == ' ') || (*rit == '	')) rit++; else break;
   auto rbeg = rit;
-  while ((*rit != ' ') && (*rit != ':') && (rit != rend)) rit++;
+//  while ((*rit != ' ') && (*rit != ':') && (rit != rend)) rit++;
+  while (rit != rend) if ((*rit != ' ') && (*rit != ':')) rit++; else break;
   const uint32_t pos = rend - rit;
   const uint32_t length = rit - rbeg;
   return name.substr(pos, length);
@@ -384,11 +388,12 @@ void output_group(const context_entry_t* entry, const char* label) {
   }
 }
 
-// Dump stored context profiling output data
-bool dump_context(context_entry_t* entry) {
+// Dump stored context entry
+bool dump_context_entry(context_entry_t* entry) {
   hsa_status_t status = HSA_STATUS_ERROR;
 
-  if (entry->valid == 0) return true;
+  volatile std::atomic<bool>* valid = reinterpret_cast<std::atomic<bool>*>(&entry->valid);
+  while (valid->load() == false) sched_yield();
 
   const rocprofiler_dispatch_record_t* record = entry->data.record;
   if (record) {
@@ -438,65 +443,48 @@ bool dump_context(context_entry_t* entry) {
     rocprofiler_close(group.context);
   }
 
-  entry->valid = 0;
   return true;
 }
 
-// Dump and clean a given context entry
-static inline bool dump_context_entry(context_entry_t* entry) {
-  const bool ret = dump_context(entry);
-  if (ret) dealloc_context_entry(entry);
-  return ret;
-}
-
-// Dump waiting entries
-static inline void dump_wait_list() {
-  if (pthread_mutex_lock(&mutex) != 0) {
-    perror("pthread_mutex_lock");
-    abort();
-  }
-
-  auto it = wait_list->begin();
-  auto end = wait_list->end();
-  while (it != end) {
-    auto cur = it++;
-    if (dump_context_entry(*cur)) {
-      wait_list->erase(cur);
+// Wait for and dump all stored contexts for a given queue if not NULL
+void dump_context_array(hsa_queue_t* queue) {
+  bool done = false;
+  while (done == false) {
+    done = true;
+    if (pthread_mutex_lock(&mutex) != 0) {
+      perror("pthread_mutex_lock");
+      abort();
     }
-  }
-
-  if (pthread_mutex_unlock(&mutex) != 0) {
-    perror("pthread_mutex_unlock");
-    abort();
-  }
-}
-
-// Dump all stored contexts profiling output data
-void dump_context_array() {
-  if (pthread_mutex_lock(&mutex) != 0) {
-    perror("pthread_mutex_lock");
-    abort();
-  }
-
-  if (context_array) {
-    if (!wait_list->empty()) dump_wait_list();
-
-    auto it = context_array->begin();
-    auto end = context_array->end();
-    while (it != end) {
-      auto cur = it++;
-      dump_context(&(cur->second));
+  
+    if (context_array) {
+      auto it = context_array->begin();
+      auto end = context_array->end();
+      while (it != end) {
+        auto cur = it++;
+        context_entry_t* entry = &(cur->second);
+        volatile std::atomic<bool>* valid = reinterpret_cast<std::atomic<bool>*>(&entry->valid);
+        while (valid->load() == false) sched_yield();
+        if ((queue == NULL) || (entry->data.queue == queue)) {
+          if (entry->active == true) {
+            if (dump_context_entry(&(cur->second)) == false) done = false;
+            else entry->active = false;
+          }
+        }
+      }
+  
+      if (pthread_mutex_unlock(&mutex) != 0) {
+        perror("pthread_mutex_unlock");
+        abort();
+      }
+      if (done == false) sched_yield();
     }
-  }
-
-  if (pthread_mutex_unlock(&mutex) != 0) {
-    perror("pthread_mutex_unlock");
-    abort();
   }
 }
 
 // Profiling completion handler
-bool handler(rocprofiler_group_t group, void* arg) {
+// Dump and delete the context entry
+// Return true if the context was dumped successfully
+bool context_handler(rocprofiler_group_t group, void* arg) {
   context_entry_t* entry = reinterpret_cast<context_entry_t*>(arg);
 
   if (pthread_mutex_lock(&mutex) != 0) {
@@ -504,11 +492,15 @@ bool handler(rocprofiler_group_t group, void* arg) {
     abort();
   }
 
-  if (!wait_list->empty()) dump_wait_list();
-
-  if (!dump_context_entry(entry)) {
-    wait_list->push_back(entry);
+  bool ret = true;
+  if (entry->active == true) {
+    ret = dump_context_entry(entry);
+    if (ret == false) {
+      fprintf(stderr, "tool error: context is not complete\n");
+      abort();
+    }
   }
+  if (ret) dealloc_context_entry(entry);
 
   if (trace_on) {
     fprintf(stdout, "tool::handler: context_array %d tid %u\n", (int)(context_array->size()), GetTid());
@@ -579,7 +571,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   context_entry_t* entry = alloc_context_entry();
   // context properties
   rocprofiler_properties_t properties{};
-  properties.handler = (result_prefix != NULL) ? handler : NULL;
+  properties.handler = (result_prefix != NULL) ? context_handler : NULL;
   properties.handler_arg = (void*)entry;
 
   rocprofiler_feature_t* features = tool_data->features;
@@ -600,22 +592,20 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
     feature_count = next_offset - set_offset;
   }
 
-  if (feature_count > 0) {
-    // Open profiling context
-    status = rocprofiler_open(callback_data->agent, features, feature_count,
-                              &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
-    check_status(status);
+  // Open profiling context
+  status = rocprofiler_open(callback_data->agent, features, feature_count,
+                            &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
+  check_status(status);
 
-    // Check that we have only one profiling group
-    uint32_t group_count = 0;
-    status = rocprofiler_group_count(context, &group_count);
-    check_status(status);
-    assert(group_count == 1);
-    // Get group[0]
-    const uint32_t group_index = 0;
-    status = rocprofiler_get_group(context, group_index, group);
-    check_status(status);
-  }
+  // Check that we have only one profiling group
+  uint32_t group_count = 0;
+  status = rocprofiler_group_count(context, &group_count);
+  check_status(status);
+  assert(group_count == 1);
+  // Get group[0]
+  const uint32_t group_index = 0;
+  status = rocprofiler_get_group(context, group_index, group);
+  check_status(status);
 
   // Fill profiling context entry
   entry->agent = callback_data->agent;
@@ -625,7 +615,8 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   entry->data = *callback_data;
   entry->data.kernel_name = strdup(callback_data->kernel_name);
   entry->file_handle = tool_data->file_handle;
-  entry->valid = 1;
+  entry->active = true;
+  reinterpret_cast<std::atomic<bool>*>(&entry->valid)->store(true);
 
   if (trace_on) {
     fprintf(stdout, "tool::dispatch: context_array %d tid %u\n", (int)(context_array->size()), GetTid());
@@ -637,7 +628,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
 
 hsa_status_t destroy_callback(hsa_queue_t* queue, void*) {
   if (result_file_opened == false) printf("\nROCProfiler results:\n");
-  dump_context_array();
+  dump_context_array(queue);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -969,7 +960,6 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
 
   // Context array aloocation
   context_array = new context_array_t;
-  wait_list = new wait_list_t;
 
   // Adding dispatch observer
   rocprofiler_queue_callbacks_t callbacks_ptrs{0};
@@ -1020,21 +1010,13 @@ extern "C" PUBLIC_API void OnUnloadTool() {
   rocprofiler_remove_queue_callbacks();
 
   // Dump stored profiling output data
-  printf("\nROCPRofiler: %u contexts collected", context_collected);
-  if (result_file_opened) printf(", output directory %s", result_prefix);
-  printf("\n"); fflush(stdout);
-  dump_context_array();
-  if (wait_list) {
-    if (!wait_list->empty()) {
-      printf("\nWaiting for pending kernels ..."); fflush(stdout);
-      while (wait_list->size() != 0) {
-        usleep(1000);
-        dump_wait_list();
-      }
-      printf(".done\n"); fflush(stdout);
-    }
+  printf("\nROCPRofiler: %u contexts collected", context_collected); fflush(stdout);
+  dump_context_array(NULL);
+  if (result_file_opened) {
+    fclose(result_file_handle);
+    printf(", output directory %s", result_prefix);
   }
-  if (result_file_opened) fclose(result_file_handle);
+  printf("\n"); fflush(stdout);
 
   // Cleanup
   if (callbacks_data != NULL) {
@@ -1052,8 +1034,6 @@ extern "C" PUBLIC_API void OnUnloadTool() {
   range_vec = NULL;
   delete context_array;
   context_array = NULL;
-  delete wait_list;
-  wait_list = NULL;
 }
 
 extern "C" DESTRUCTOR_API void destructor() {
