@@ -173,10 +173,8 @@ std::string filtr_kernel_name(const std::string name) {
     }
     ++rit;
   }
-//  while (((*rit == ' ') || (*rit == '	')) && (rit != rend)) rit++;
   while (rit != rend) if ((*rit == ' ') || (*rit == '	')) rit++; else break;
   auto rbeg = rit;
-//  while ((*rit != ' ') && (*rit != ':') && (rit != rend)) rit++;
   while (rit != rend) if ((*rit != ' ') && (*rit != ':')) rit++; else break;
   const uint32_t pos = rend - rit;
   const uint32_t length = rit - rbeg;
