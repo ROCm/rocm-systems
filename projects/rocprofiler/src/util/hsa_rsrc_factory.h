@@ -45,21 +45,23 @@ SOFTWARE.
 #define HSA_QUEUE_ALIGN_BYTES 64
 #define HSA_PACKET_ALIGN_BYTES 64
 
-#define CHECK_STATUS(msg, status)                                                                  \
-  if (status != HSA_STATUS_SUCCESS) {                                                              \
+#define CHECK_STATUS(msg, status) do {                                                             \
+  if ((status) != HSA_STATUS_SUCCESS) {                                                            \
     const char* emsg = 0;                                                                          \
     hsa_status_string(status, &emsg);                                                              \
     printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                      \
     exit(1);                                                                                       \
-  }
+  }                                                                                                \
+} while (0)
 
-#define CHECK_ITER_STATUS(msg, status)                                                             \
-  if (status != HSA_STATUS_INFO_BREAK) {                                                           \
+#define CHECK_ITER_STATUS(msg, status) do {                                                        \
+  if ((status) != HSA_STATUS_INFO_BREAK) {                                                         \
     const char* emsg = 0;                                                                          \
     hsa_status_string(status, &emsg);                                                              \
     printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                      \
     exit(1);                                                                                       \
-  }
+  }                                                                                                \
+} while (0)
 
 namespace rocprofiler {
 namespace util {

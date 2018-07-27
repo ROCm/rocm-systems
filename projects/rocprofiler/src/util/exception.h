@@ -32,27 +32,27 @@ SOFTWARE.
 #include <string>
 
 #define EXC_ABORT(error, stream)                                                                   \
-  {                                                                                                \
+  do {                                                                                             \
     std::ostringstream oss;                                                                        \
     oss << __FUNCTION__ << "(), " << stream;                                                       \
-    std::cout << oss.str() << std::endl;                                                           \
+    std::cout << "error(" << error << ") \"" << oss.str() << "\"" << std::endl;                    \
     abort();                                                                                       \
-  }
+  } while (0)
 
 #define EXC_RAISING(error, stream)                                                                 \
-  {                                                                                                \
+  do {                                                                                             \
     std::ostringstream oss;                                                                        \
     oss << __FUNCTION__ << "(), " << stream;                                                       \
     throw rocprofiler::util::exception(error, oss.str());                                          \
-  }
+  } while (0)
 
 #define AQL_EXC_RAISING(error, stream)                                                             \
-  {                                                                                                \
+  do {                                                                                             \
     const char* error_string = NULL;                                                               \
     const rocprofiler::pfn_t* api = rocprofiler::util::HsaRsrcFactory::Instance().AqlProfileApi(); \
     api->hsa_ven_amd_aqlprofile_error_string(&error_string);                                       \
     EXC_RAISING(error, stream << ", " << error_string);                                            \
-  }
+  } while (0)
 
 namespace rocprofiler {
 namespace util {
