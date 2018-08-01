@@ -57,6 +57,8 @@ export ROCP_HSA_INTERCEPT=1
 unset ROCP_PROXY_QUEUE
 # ROC Profiler metrics definition
 export ROCP_METRICS=$PKG_DIR/lib/metrics.xml
+# Disable AQL-profile read API
+export AQLPROFILE_READ_API=0
 # ROC Profiler package path
 export ROCP_PACKAGE_DIR=$PKG_DIR
 
@@ -129,7 +131,7 @@ usage() {
   echo "  --basenames <on|off> - to turn on/off truncating of the kernel full function names till the base ones [off]"
   echo "  --timestamp <on|off> - to turn on/off the kernel disoatches timestamps, dispatch/begin/end/complete [off]"
   echo "  --ctx-limit <max number> - maximum number of outstanding contexts [0 - unlimited]"
-  echo "  --heartbeat <rate sec> - to turn on/off the kernel disoatches timestamps, dispatch/begin/end/complete [0 - disabled]"
+  echo "  --heartbeat <rate sec> - to print progress heartbeats [0 - disabled]"
   echo "  --sqtt-size <byte size> - to set SQTT buffer size, aggregate for all SE [0x2000000]"
   echo "      Can be set in KB (1024B) or MB (1048576) units, examples 20K or 20M respectively."
   echo "  --sqtt-local <on|off> - to allocate SQTT buffer in local GPU memory [on]"
