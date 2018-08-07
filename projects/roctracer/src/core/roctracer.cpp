@@ -1,4 +1,6 @@
 #include "inc/roctracer.h"
+#include "inc/roctracer_hcc.h"
+//#include "inc/roctracer_hip.h"
 
 #include <atomic>
 #include <hip/hip_runtime.h>
@@ -6,6 +8,7 @@
 #include <string.h>
 #include <pthread.h>
 
+#include "inc/roctracer/hsa_rt_utils.hpp"
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
 #include "util/logger.h"
@@ -20,16 +23,6 @@
     if (err != 0) {                                                                                \
       errno = err;                                                                                 \
       perror(#call);                                                                               \
-      abort();                                                                                     \
-    }                                                                                              \
-  } while (0)
-
-#define HSART_CALL(call)                                                                           \
-  do {                                                                                             \
-    hsa_status_t status = call;                                                                    \
-    if (status != HSA_STATUS_SUCCESS) {                                                            \
-      std::cerr << "HSA-rt call '" << #call << "' error(" << std::hex << status << ")"             \
-        << std::dec << std::endl << std::flush;                                                    \
       abort();                                                                                     \
     }                                                                                              \
   } while (0)
@@ -60,10 +53,6 @@
   }                                                                                                \
   (void)err;                                                                                       \
   return X;
-
-// HCC API declaration
-extern "C" void HSAOp_set_activity_record(const uint64_t& record);
-extern "C" const char* HSAOp_get_name(const uint32_t& id);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Internal library methods
@@ -256,31 +245,6 @@ class MemoryPool {
   pthread_cond_t read_cond_;
 };
 
-class Timer {
-  public:
-  typedef uint64_t timestamp_t;
-  typedef long double freq_t;
-  
-  Timer() {
-    timestamp_t timestamp_hz = 0;
-    HSART_CALL(hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &timestamp_hz));
-    timestamp_factor_ = (freq_t)1000000000 / (freq_t)timestamp_hz;
-  }
-
-  // Return timestamp in 'ns'
-  timestamp_t timestamp_ns() {
-    timestamp_t timestamp;
-    HSART_CALL(hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &timestamp));
-    return timestamp_t((freq_t)timestamp * timestamp_factor_);
-  }
-
-  freq_t timestamp_factor() const { return timestamp_factor_; }
-
-  private:
-  // Timestamp frequency factor
-  freq_t timestamp_factor_;
-};
-
 CONSTRUCTOR_API void constructor() {
   util::Logger::Create();
 }
@@ -290,52 +254,51 @@ DESTRUCTOR_API void destructor() {
   util::Logger::Destroy();
 }
 
-roctracer_record_t* ActivityCallback(
+roctracer_record_t* SyncActivityCallback(
     uint32_t activity_kind,
     roctracer_record_t* record,
     const void* callback_data,
     void* arg)
 {
-  static Timer timer;
+  static hsa_rt_utils::Timer timer;
 
-  const hip_cb_data_t* data = reinterpret_cast<const hip_cb_data_t*>(callback_data);
+  const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
   if (pool == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback pool is NULL");
-  if (data->phase == ROCTRACER_API_PHASE_ENTER) {
-    record->domain = ROCTRACER_DOMAIN_HIP_API;
+  if (data->phase == ACTIVITY_API_PHASE_ENTER) {
+    record->domain = ACTIVITY_DOMAIN_HIP_API;
     record->activity_kind = activity_kind;
     record->begin_ns = timer.timestamp_ns();
     // Correlation ID generating
     uint64_t correlation_id = data->correlation_id;
     if (correlation_id == 0) {
       correlation_id = GlobalCounter::Increment();
-      const_cast<hip_cb_data_t*>(data)->correlation_id = correlation_id;
+      const_cast<hip_api_data_t*>(data)->correlation_id = correlation_id;
     }
     record->correlation_id = correlation_id;
     // Passing record to HCC
-    HSAOp_set_activity_record(correlation_id);
+    Kalmar::CLAMP::SetActivityRecord(correlation_id);
     return record;
   } else {
     record->end_ns = timer.timestamp_ns();
+    Kalmar::CLAMP::GetActivityCoord(&(record->device_id), &(record->stream_id));
     pool->Write(*record);
     // Clearing record in HCC
-    HSAOp_set_activity_record(0);
+    Kalmar::CLAMP::SetActivityRecord(0);
     return NULL;
   }
 }
 
-void ActivityAsyncCallback(
+void AsyncActivityCallback(
     uint32_t op_id,
     void* record,
     void* arg)
 {
-  static Timer timer;
+  static hsa_rt_utils::Timer timer;
 
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
-  roctracer_async_record_t* record_ptr = reinterpret_cast<roctracer_async_record_t*>(record);
-  record_ptr->domain = ROCTRACER_DOMAIN_HCC_OPS;
-  record_ptr->begin_ns *= timer.timestamp_factor();
-  record_ptr->end_ns *= timer.timestamp_factor();
+  roctracer_record_t* record_ptr = reinterpret_cast<roctracer_record_t*>(record);
+  record_ptr->domain = ACTIVITY_DOMAIN_HCC_OPS;
   pool->Write(*record_ptr);
 }
 
@@ -360,24 +323,17 @@ PUBLIC_API const char* roctracer_error_string() {
   return strdup(roctracer::util::Logger::LastMessage().c_str());
 }
 
-// Validates tracing domains revisions consistency
-PUBLIC_API roctracer_status_t roctracer_validate_domains() {
-  API_METHOD_PREFIX
-  HIPAPI_CALL(hipValidateActivityRecord());
-  API_METHOD_SUFFIX
-}
-
 // Return ID string by given domain and activity/API ID
 // NULL returned on the error and the library errno is set
 PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_t& id) {
   API_METHOD_PREFIX
   switch (domain) {
-    case ROCTRACER_DOMAIN_HIP_API: {
-      return hipApiName(id);
+    case ACTIVITY_DOMAIN_HCC_OPS: {
+      return Kalmar::CLAMP::GetCmdName(id);
       break;
     }
-    case ROCTRACER_DOMAIN_HCC_OPS: {
-      return HSAOp_get_name(id);
+    case ACTIVITY_DOMAIN_HIP_API: {
+      return hipApiName(id);
       break;
     }
     default:
@@ -390,15 +346,16 @@ PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_
 PUBLIC_API roctracer_status_t roctracer_enable_api_callback(
     roctracer_domain_t domain,
     uint32_t cid,
-    roctracer_api_callback_t callback,
+    roctracer_rtapi_callback_t callback,
     void* user_data)
 {
   API_METHOD_PREFIX
   switch (domain) {
-    case ROCTRACER_DOMAIN_ANY:
-      if (cid != HIP_API_ID_ANY) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and cid != HIP_API_ID_ANY");
-    case ROCTRACER_DOMAIN_HIP_API: {
-      hipError_t hip_err = hipRegisterApiCallback(cid, callback, user_data);
+    case ACTIVITY_DOMAIN_ANY:
+      if (cid != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and cid != 0");
+      cid = HIP_API_ID_ANY;
+    case ACTIVITY_DOMAIN_HIP_API: {
+      hipError_t hip_err = hipRegisterApiCallback(cid, (void*)callback, user_data);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterApiCallback error(" << hip_err << ")");
       break;
     }
@@ -415,9 +372,10 @@ PUBLIC_API roctracer_status_t roctracer_disable_api_callback(
 {
   API_METHOD_PREFIX
   switch (domain) {
-    case ROCTRACER_DOMAIN_ANY:
-      if (cid != HIP_API_ID_ANY) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and cid != HIP_API_ID_ANY");
-    case ROCTRACER_DOMAIN_HIP_API: {
+    case ACTIVITY_DOMAIN_ANY:
+      if (cid != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and cid != 0");
+      cid = HIP_API_ID_ANY;
+    case ACTIVITY_DOMAIN_HIP_API: {
       hipError_t hip_err = hipRemoveApiCallback(cid);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveApiCallback error(" << hip_err << ")");
       break;
@@ -468,16 +426,24 @@ PUBLIC_API roctracer_status_t roctracer_close_pool(roctracer_pool_t* pool) {
 // Enable activity records logging
 PUBLIC_API roctracer_status_t roctracer_enable_api_activity(
     roctracer_domain_t domain,
-    uint32_t activity_kind,
+    uint32_t activity_id,
     roctracer_pool_t* pool)
 {
   API_METHOD_PREFIX
   if (pool == NULL) pool = roctracer_default_pool();
   switch (domain) {
-    case ROCTRACER_DOMAIN_ANY:
-      if (activity_kind != HIP_API_ID_ANY) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and activity_kind != HIP_API_ID_ANY");
-    case ROCTRACER_DOMAIN_HIP_API: {
-      const hipError_t hip_err = hipRegisterActivityCallback(activity_kind, roctracer::ActivityCallback, roctracer::ActivityAsyncCallback, pool);
+    case ACTIVITY_DOMAIN_ANY:
+      if (activity_id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and activity_id != 0");
+      roctracer_enable_api_activity(ACTIVITY_DOMAIN_HCC_OPS, hc::HSA_OP_ID_ANY, pool);
+      roctracer_enable_api_activity(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY, pool);
+      break;
+    case ACTIVITY_DOMAIN_HCC_OPS: {
+      const bool err = Kalmar::CLAMP::SetActivityCallback(activity_id, (void*)roctracer::AsyncActivityCallback, (void*)pool);
+      if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "Kalmar::CLAMP::SetActivityCallback error");
+      break;
+    }
+    case ACTIVITY_DOMAIN_HIP_API: {
+      const hipError_t hip_err = hipRegisterActivityCallback(activity_id, (void*)roctracer::SyncActivityCallback, (void*)pool);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterActivityCallback error(" << hip_err << ")");
       break;
     }
@@ -490,14 +456,22 @@ PUBLIC_API roctracer_status_t roctracer_enable_api_activity(
 // Disable activity records logging
 PUBLIC_API roctracer_status_t roctracer_disable_api_activity(
     roctracer_domain_t domain,
-    uint32_t activity_kind)
+    uint32_t activity_id)
 {
   API_METHOD_PREFIX
   switch (domain) {
-    case ROCTRACER_DOMAIN_ANY:
-      if (activity_kind != HIP_API_ID_ANY) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and activity_kind != HIP_API_ID_ANY");
-    case ROCTRACER_DOMAIN_HIP_API: {
-      const hipError_t hip_err = hipRemoveActivityCallback(activity_kind);
+    case ACTIVITY_DOMAIN_ANY:
+      if (activity_id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY and activity_id != 0");
+      roctracer_disable_api_activity(ACTIVITY_DOMAIN_HCC_OPS, hc::HSA_OP_ID_ANY);
+      roctracer_disable_api_activity(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY);
+      break;
+    case ACTIVITY_DOMAIN_HCC_OPS: {
+      const bool err = Kalmar::CLAMP::SetActivityCallback(activity_id, NULL, NULL);
+      if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "Kalmar::CLAMP::SetActivityCallback(NULL) error");
+      break;
+    }
+    case ACTIVITY_DOMAIN_HIP_API: {
+      const hipError_t hip_err = hipRemoveActivityCallback(activity_id);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveActivityCallback error(" << hip_err << ")");
       break;
     }

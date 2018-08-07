@@ -40,6 +40,8 @@ list ( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
 include ( utils )
 ## Set build environment
 include ( env )
+## Set test target
+add_custom_target( mytest COMMAND make -C "${CMAKE_CURRENT_SOURCE_DIR}/test/MatrixTranspose" )
 
 ## Setup the package version.
 get_version ( "1.0.0" )

@@ -56,8 +56,8 @@ void matrixTransposeCPUReference(float* output, float* input, const unsigned int
 }
 
 int iterations = ITERATIONS;
-void init_tracing();
-void finish_tracing();
+void start_tracing();
+void stop_tracing();
 
 int main() {
     float* Matrix;
@@ -75,8 +75,8 @@ int main() {
     int i;
     int errors;
 
-    init_tracing();
     while (iterations-- > 0) {
+        start_tracing();
 
         Matrix = (float*)malloc(NUM * sizeof(float));
         TransposeMatrix = (float*)malloc(NUM * sizeof(float));
@@ -128,8 +128,8 @@ int main() {
         free(TransposeMatrix);
         free(cpuTransposeMatrix);
 
+        stop_tracing();
     }
-    finish_tracing();
 
     return errors;
 }
@@ -138,7 +138,8 @@ int main() {
 // HIP Callbacks/Activity tracing
 //
 #if 1
-#include <inc/roctracer.h>
+#include <inc/roctracer_hip.h>
+#include <inc/roctracer_hcc.h>
 
 // Macro to check ROC-tracer calls status
 #define ROCTRACER_CALL(call)                                                                       \
@@ -158,13 +159,13 @@ void hip_api_callback(
     void* arg)
 {
   (void)arg;
-  const hip_cb_data_t* data = reinterpret_cast<const hip_cb_data_t*>(callback_data);
+  const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
   fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
-    roctracer_id_string(ROCTRACER_DOMAIN_HIP_API, cid),
+    roctracer_id_string(ACTIVITY_DOMAIN_HIP_API, cid),
     cid,
     data->correlation_id,
-    (data->phase == ROCTRACER_API_PHASE_ENTER) ? "on-enter" : "on-exit");
-  if (data->phase == ROCTRACER_API_PHASE_ENTER) {
+    (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
+  if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     switch (cid) {
       case HIP_API_ID_hipMemcpy:
         fprintf(stdout, "dst(%p) src(%p) size(0x%x) kind(%u)",
@@ -211,46 +212,46 @@ void activity_callback(const char* begin, const char* end, void* arg) {
   fprintf(stdout, "\tActivity records:\n"); fflush(stdout);
   while (record < end_record) {
     const char * name = roctracer_id_string(record->domain, record->activity_kind);
-    fprintf(stdout, "\t%s op(%u) id(%u)\tcorrelation_id(%lu) time_ns(%lu:%lu)",
+    fprintf(stdout, "\t%s op(%u) id(%u)\tcorrelation_id(%lu) time_ns(%lu:%lu)  device_id(%d) stream_id(%lu)",
       name,
       record->op_id,
       record->activity_kind,
       record->correlation_id,
       record->begin_ns,
-      record->end_ns
+      record->end_ns,
+      record->device_id,
+      record->stream_id
     );
-    if (record->op_id != 0) {
-      const roctracer_async_record_t* async_record = reinterpret_cast<const roctracer_async_record_t*>(record);
-      fprintf(stdout, " device_id(%d) stream_id(%lu)", async_record->device_id, async_record->stream_id);
-      if (record->op_id == 2) fprintf(stdout, " bytes(0x%zx)", async_record->bytes);
-    }
+    if (record->op_id == hc::HSA_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
     fprintf(stdout, "\n");
     fflush(stdout);
     ROCTRACER_CALL(roctracer_next_record(record, &record));
   }
 }
 
-// Initialize function
-void init_tracing() {
-  // Check tracer domains consitency
-  ROCTRACER_CALL(roctracer_validate_domains());
-  // Enable HIP API callbacks
-  ROCTRACER_CALL(roctracer_enable_api_callback(ROCTRACER_DOMAIN_ANY, HIP_API_ID_ANY, hip_api_callback, NULL));
-  // Enable HIP activity tracing
+// Start tracing routine
+void start_tracing() {
+  std::cout << "# START #############################" << std::endl << std::flush;
+  // Allocating tracing pool
   roctracer_properties_t properties{};
   properties.buffer_size = 12;
   properties.buffer_callback_fun = activity_callback;
   ROCTRACER_CALL(roctracer_open_pool(&properties));
-  ROCTRACER_CALL(roctracer_enable_api_activity(ROCTRACER_DOMAIN_ANY, HIP_API_ID_ANY));
+  // Enable HIP API callbacks
+  ROCTRACER_CALL(roctracer_enable_api_callback(ACTIVITY_DOMAIN_ANY, 0, hip_api_callback, NULL));
+  // Enable HIP activity tracing
+  ROCTRACER_CALL(roctracer_enable_api_activity(ACTIVITY_DOMAIN_ANY, 0));
 }
 
-void finish_tracing() {
-  ROCTRACER_CALL(roctracer_disable_api_callback(ROCTRACER_DOMAIN_ANY, HIP_API_ID_ANY));
-  ROCTRACER_CALL(roctracer_disable_api_activity(ROCTRACER_DOMAIN_ANY, HIP_API_ID_ANY));
+// Stop tracing routine
+void stop_tracing() {
+  ROCTRACER_CALL(roctracer_disable_api_callback(ACTIVITY_DOMAIN_ANY, 0));
+  ROCTRACER_CALL(roctracer_disable_api_activity(ACTIVITY_DOMAIN_ANY, 0));
   ROCTRACER_CALL(roctracer_close_pool());
+  std::cout << "# STOP  #############################" << std::endl << std::flush;
 }
 #else
-void init_tracing() {}
-void finish_tracing() {}
+void start_tracing() {}
+void stop_tracing() {}
 #endif
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

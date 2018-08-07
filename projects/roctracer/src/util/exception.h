@@ -6,24 +6,29 @@
 #include <string>
 
 #define EXC_ABORT(error, stream)                                                                   \
-  {                                                                                                \
+  do {                                                                                             \
     std::ostringstream oss;                                                                        \
     oss << __FUNCTION__ << "(), " << stream;                                                       \
     std::cout << oss.str() << std::endl;                                                           \
     abort();                                                                                       \
-  }
+  } while (0)
 
 #define EXC_RAISING(error, stream)                                                                 \
-  {                                                                                                \
+  do {                                                                                             \
     std::ostringstream oss;                                                                        \
     oss << __FUNCTION__ << "(), " << stream;                                                       \
     throw roctracer::util::exception(error, oss.str());                                            \
-  }
+  } while (0)
+
+#define HCC_EXC_RAISING(error, stream)                                                             \
+  do {                                                                                             \
+    EXC_RAISING(error, "HCC error: " << stream);                                                   \
+  } while(0)
 
 #define HIP_EXC_RAISING(error, stream)                                                             \
-  {                                                                                                \
-    EXC_RAISING(error, "HIP error: " << stream);                                            \
-  }
+  do {                                                                                             \
+    EXC_RAISING(error, "HIP error: " << stream);                                                   \
+  } while(0)
 
 namespace roctracer {
 namespace util {

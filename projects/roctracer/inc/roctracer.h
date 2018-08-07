@@ -63,9 +63,9 @@
 #define INC_ROCTRACER_H_
 
 #include <stdint.h>
+#include <stddef.h>
 
-#include <hip/hip_runtime.h>
-#include <hip/hip_cbapi.h>
+#include "inc/roctracer/prof_protocol.h"
 
 #define ROCTRACER_VERSION_MAJOR 1
 #define ROCTRACER_VERSION_MINOR 0
@@ -89,6 +89,7 @@ typedef enum {
   ROCTRACER_STATUS_BAD_DOMAIN = 4,
   ROCTRACER_STATUS_BAD_PARAMETER = 5,
   ROCTRACER_STATUS_HIP_API_ERR = 6,
+  ROCTRACER_STATUS_HCC_OPS_ERR = 7,
 } roctracer_status_t;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -98,22 +99,8 @@ const char* roctracer_error_string();
 ////////////////////////////////////////////////////////////////////////////////
 // Traced runtime API domains
 
-// Traced API domains
-typedef enum {
-  ROCTRACER_DOMAIN_ANY = 0,                                             // Any domain
-  ROCTRACER_DOMAIN_HIP_API = 1,                                         // HIP domain
-  ROCTRACER_DOMAIN_HCC_OPS = 2,                                         // HCC domain
-  ROCTRACER_DOMAIN_NUMBER
-} roctracer_domain_t;
-
-// Traced calls ID enumeration
-typedef hip_cb_id_t roctracer_hip_api_cid_t;
-
-// Correlation ID type
-typedef uint64_t roctracer_correletion_id_t;
-
-// Validates tracing domains revisions consistency
-roctracer_status_t roctracer_validate_domains();
+// Activity domain type
+typedef activity_domain_t roctracer_domain_t;
 
 // Return ID string by given domain and activity/API ID
 // NULL returned on the error and the library errno is set
@@ -129,26 +116,18 @@ const char* roctracer_id_string(
 // called on different phases, on enter, on exit, on kernel completion.
 // Methods return non-zero on error and library errno is set.
 
-// API callback phase
-typedef enum {
-  ROCTRACER_API_PHASE_ENTER = 0,
-  ROCTRACER_API_PHASE_EXIT = 1,
-  ROCTRACER_API_PHASE_COMPLETE = 2,
-} roctracer_feature_kind_t;
-
-// API calback data
-typedef hip_cb_fun_t roctracer_api_callback_t;
+typedef activity_rtapi_callback_t roctracer_rtapi_callback_t;
 
 // Enable runtime API callbacks
 roctracer_status_t roctracer_enable_api_callback(
-    roctracer_domain_t domain,                                          // runtime API domain
+    activity_domain_t domain,                                          // runtime API domain
     uint32_t cid,                                                       // API call ID
-    roctracer_api_callback_t callback,                                  // callback function pointer
+    activity_rtapi_callback_t callback,                                  // callback function pointer
     void* arg);                                                         // [in/out] callback arg
 
 // Disable runtime API callbacks
 roctracer_status_t roctracer_disable_api_callback(
-    roctracer_domain_t domain,                                          // runtime API domain
+    activity_domain_t domain,                                          // runtime API domain
     uint32_t cid);                                                      // API call ID
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -160,21 +139,15 @@ roctracer_status_t roctracer_disable_api_callback(
 // calls and the kernel submits.
 // Methods return non zero on error and library errno is set.
 
-// Roctracer pool type
-typedef void roctracer_pool_t;
-
-// Activity record
-typedef hip_act_record_t roctracer_record_t;
-typedef hip_ops_record_t roctracer_async_record_t;
+// Activity record type
+typedef activity_record_t roctracer_record_t;
 
 // Return next record
 static inline int roctracer_next_record(
-    const roctracer_record_t* record,                                   // [in] record ptr
-    const roctracer_record_t** next)                                    // [out] next record ptr
+    const activity_record_t* record,                                   // [in] record ptr
+    const activity_record_t** next)                                    // [out] next record ptr
 {
-  *next = (record->op_id != 0) ?
-    reinterpret_cast<const roctracer_async_record_t*>(record) + 1 :
-    record + 1;
+  *next = record + 1;
   return ROCTRACER_STATUS_SUCCESS;
 }
 
@@ -200,6 +173,9 @@ typedef struct {
     void* buffer_callback_arg;                                          // tracer record callback arg
 } roctracer_properties_t;
 
+// Tracer memory pool type
+typedef void roctracer_pool_t;
+
 // Create tracer memory pool
 // The first invocation sets the default pool
 roctracer_status_t roctracer_open_pool(
@@ -219,13 +195,13 @@ roctracer_pool_t* roctracer_default_pool(
 
 // Enable activity records logging
 roctracer_status_t roctracer_enable_api_activity(
-    roctracer_domain_t domain,                                          // runtime API domain
+    activity_domain_t domain,                                          // runtime API domain
     uint32_t activity_kind,                                             // activity kind
     roctracer_pool_t* pool = NULL);                                     // memory pool, NULL is a default one
 
 // Disable activity records logging
 roctracer_status_t roctracer_disable_api_activity(
-    roctracer_domain_t domain,                                          // runtime API domain
+    activity_domain_t domain,                                          // runtime API domain
     uint32_t activity_kind);                                            // activity kind
 
 // Flush available activity records
