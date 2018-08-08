@@ -14,7 +14,7 @@ The library source tree:
 ## Environment example
 ```
   export HIP_PATH=/opt/rocm/hip
-  export HCC_HOME=/opt/rocm/hcc
+  export HCC_PATH=/opt/rocm/hcc
   export CMAKE_PREFIX_PATH=/opt/rocm/lib:/opt/rocm/include/hsa
 ```
 
@@ -27,7 +27,11 @@ The library source tree:
 
 ## To rebuild and run test
 ```
-  export ITERATIONS=<iterations number [100]>
+ - Set iterations number, 100 by default
+   export ITERATIONS=<iterations number>
+
+ - Set HCC_HOME env var to use custom HCC build
+
   cd <your path>/roctracer/test/MatrixTranspose
   make
 ```
