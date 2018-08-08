@@ -32,6 +32,10 @@ The library source tree:
 
  - Set HCC_HOME env var to use custom HCC build
 
+  <your path>/roctracer/build$ make mytest
+
+  or
+
   cd <your path>/roctracer/test/MatrixTranspose
   make
 ```
