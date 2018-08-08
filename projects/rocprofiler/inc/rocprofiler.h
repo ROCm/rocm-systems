@@ -41,8 +41,9 @@ THE SOFTWARE.
 #ifndef INC_ROCPROFILER_H_
 #define INC_ROCPROFILER_H_
 
-#include <hsa.h>
 #include <amd_hsa_kernel_code.h>
+#include <hsa.h>
+#include <hsa_ext_amd.h>
 #include <hsa_ven_amd_aqlprofile.h>
 #include <stdint.h>
 
@@ -460,21 +461,14 @@ hsa_status_t rocprofiler_pool_flush(
   rocprofiler_pool_t* pool);          // profiling pool handle
 
 ////////////////////////////////////////////////////////////////////////////////
+// HSA intercepting API
+
 // HSA callbacks ID enumeration
 enum rocprofiler_hsa_cb_id_t {
-  ROCPROFILER_HSA_CB_ID_ALLOC = 0,
-  ROCPROFILER_HSA_CB_ID_ASSIGN = 0,
-  ROCPROFILER_HSA_CB_ID_MEMCOPY = 1,
-  ROCPROFILER_HSA_CB_ID_SUBMIT = 2
-};
-
-// HSA memory type enumeration
-enum rocprofiler_hsa_mtype_t {
-  ROCPROFILER_HSA_MTYPE_UNASSIGNED = 0,
-  ROCPROFILER_HSA_MTYPE_KERN_ARG = 1,
-  ROCPROFILER_HSA_MTYPE_SYSTEM = 2,
-  ROCPROFILER_HSA_MTYPE_CPU = 3
-  ROCPROFILER_HSA_MTYPE_GPU = 4
+  ROCPROFILER_HSA_CB_ID_ALLOCATE = 0,
+  ROCPROFILER_HSA_CB_ID_DEVICE = 1,
+  ROCPROFILER_HSA_CB_ID_MEMCOPY = 2,
+  ROCPROFILER_HSA_CB_ID_SUBMIT = 3
 };
 
 // HSA callback data type
@@ -483,17 +477,14 @@ struct rocprofiler_hsa_callback_data_t {
     struct {
       const void* addr;
       size_t size;
-      hsa_segment_t sement;
-      hsa_global_flag_t global_flag;
-      hsa_device_type_t device_type;
-    } hsa_alloc;
-    struct {
-      const void* addr;
-      size_t size;
-      hsa_amd_segment_t sement;
+      hsa_amd_segment_t segment;
       hsa_amd_memory_pool_global_flag_t global_flag;
-      hsa_device_type_t device_type;
-    } amd_alloc;
+    } allocate;
+    struct {
+      hsa_device_type_t type;
+      uint32_t id;
+      const void* mem;
+    } device;
     struct {
       const void* dst;
       const void* src;
@@ -501,19 +492,21 @@ struct rocprofiler_hsa_callback_data_t {
     } memcopy;
     struct {
       const void* packet;
+      const amd_kernel_code_t* kernel_code;
     } submit;
   };
 };
 
 // HSA callback function type
 typedef hsa_status_t (*rocprofiler_hsa_callback_fun_t)(
-  rocprofiler_hsa_callback_id_t id, // callback id
+  rocprofiler_hsa_cb_id_t id, // callback id
   const rocprofiler_hsa_callback_data_t* data, // [in] callback data
   void* arg); // [in/out] user passed data
 
 // HSA callbacks structure
 struct rocprofiler_hsa_callbacks_t {
-  rocprofiler_hsa_callback_fun_t alloc; // memory allocate callback
+  rocprofiler_hsa_callback_fun_t allocate; // memory allocate callback
+  rocprofiler_hsa_callback_fun_t device; // agent assign callback
   rocprofiler_hsa_callback_fun_t memcopy; // memory copy callback
   rocprofiler_hsa_callback_fun_t submit; // packet submit callback
 };

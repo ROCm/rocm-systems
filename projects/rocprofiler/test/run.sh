@@ -52,18 +52,22 @@ eval_test() {
   test_number=$((test_number + 1))
 }
 
-# enable tools load failure reporting
-export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and oher libraries
 export LD_LIBRARY_PATH=$PWD
+
+# enable tools load failure reporting
+export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # enable error messages logging to '/tmp/rocprofiler_log.txt'
 export ROCPROFILER_LOG=1
-# ROC profiler metrics config file
+# enable error messages logging to '/tmp/aql_profile_log.txt'
+export HSA_VEN_AMD_AQLPROFILE_LOG=1
+# test trace
+export ROC_TEST_TRACE=1
+
+# Disabple profiler own proxy queue
 unset ROCP_PROXY_QUEUE
 # ROC profiler metrics config file
 export ROCP_METRICS=metrics.xml
-# test trace
-export ROC_TEST_TRACE=1
 
 ## C test
 eval_test "C test" ./test/c_test
@@ -92,6 +96,9 @@ export ROCP_TIMESTAMP_ON=1
 # output directory for the tool library, for metrics results file 'results.txt'
 # and SQTT trace files 'thread_trace.se<n>.out'
 export ROCP_OUTPUT_DIR=./RESULTS
+
+# enable HSA intercepting
+export ROCP_HSA_INTERC=1
 
 if [ ! -e $ROCP_TOOL_LIB ] ; then
   export ROCP_TOOL_LIB=test/libtool.so

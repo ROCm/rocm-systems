@@ -131,10 +131,14 @@ class InterceptQueue {
 
     if (submit_callback_fun_) {
       for (uint64_t j = 0; j < count; ++j) {
-        const void* packet = reinterpret_cast<const void*>(&packets_arr[j]);
+        const packet_t* packet = &packets_arr[j];
+        const hsa_kernel_dispatch_packet_t* dispatch_packet =
+            reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
         rocprofiler_hsa_callback_data_t data{};
-        data.submit.packet = packet;
-        submit_callback_fun_(CB_ID_SUBMIT, &data, submit_callback_arg_);
+        data.submit.packet = (void*)packet;
+        data.submit.kernel_code =
+          (GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) ? GetKernelCode(dispatch_packet) : NULL;
+        submit_callback_fun_(ROCPROFILER_HSA_CB_ID_SUBMIT, &data, submit_callback_arg_);
       }
     }
 
@@ -255,7 +259,8 @@ class InterceptQueue {
   static inline void Start() { dispatch_callback_.store(callbacks_.dispatch, std::memory_order_release); }
   static inline void Stop() { dispatch_callback_.store(NULL, std::memory_order_relaxed); }
 
-  static void SetHsaSubmitCallback(rocprofiler_hsa_callback_fun_t fun, void* arg) {
+  static void SetSubmitCallback(rocprofiler_hsa_callback_fun_t fun, void* arg) {
+    std::lock_guard<mutex_t> lck(mutex_);
     submit_callback_fun_ = fun;
     submit_callback_arg_ = arg;
   }

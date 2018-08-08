@@ -39,4 +39,7 @@ bool InterceptQueue::tracker_on_ = false;
 bool InterceptQueue::in_create_call_ = false;
 InterceptQueue::queue_id_t InterceptQueue::current_queue_id = 0;
 
+rocprofiler_hsa_callback_fun_t InterceptQueue::submit_callback_fun_ = NULL;
+void* InterceptQueue::submit_callback_arg_ = NULL;
+
 }  // namespace rocprofiler

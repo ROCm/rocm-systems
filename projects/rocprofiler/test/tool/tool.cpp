@@ -826,6 +826,37 @@ static inline void check_env_var(const char* var_name, uint64_t& val) {
   if (str != NULL ) val = atoll(str);
 }
 
+// HSA intercepting routines
+
+// HSA unified callback function
+hsa_status_t hsa_unified_callback(
+  rocprofiler_hsa_cb_id_t id,
+  const rocprofiler_hsa_callback_data_t* data,
+  void* arg)
+{
+  printf("hsa_unified_callback(%d, %p, %p\n", (int)id, data, arg);
+
+  if (id == ROCPROFILER_HSA_CB_ID_SUBMIT) {
+    if (data->submit.kernel_code != NULL) {
+      printf("  submit:\n");
+      printf("    kernel_code_entry_byte_offset %lx\n", data->submit.kernel_code->kernel_code_entry_byte_offset);
+      printf("    kernel_code_prefetch_byte_offset %lx\n", data->submit.kernel_code->kernel_code_prefetch_byte_offset);
+      printf("    kernel_code_prefetch_byte_size %lx\n", data->submit.kernel_code->kernel_code_prefetch_byte_size);
+    }
+  }
+
+  fflush(stdout);
+  return HSA_STATUS_SUCCESS;
+}
+
+// HSA callbacks structure
+rocprofiler_hsa_callbacks_t hsa_callbacks {
+  hsa_unified_callback,
+  hsa_unified_callback,
+  hsa_unified_callback,
+  hsa_unified_callback
+};
+
 // Tool constructor
 extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
 {
@@ -908,6 +939,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   check_env_var("ROCP_OBJ_TRACKING", settings->code_obj_tracking);
   // Set memcopies tracking
   check_env_var("ROCP_MCOPY_TRACKING", settings->memcopy_tracking);
+  // Set HSA intercepting
+  check_env_var("ROCP_HSA_INTERC", settings->hsa_intercepting);
 
   is_trace_local = settings->trace_local;
 

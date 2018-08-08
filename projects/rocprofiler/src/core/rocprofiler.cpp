@@ -86,8 +86,10 @@ decltype(hsa_amd_queue_intercept_create)* hsa_amd_queue_intercept_create_fn;
 decltype(hsa_amd_queue_intercept_register)* hsa_amd_queue_intercept_register_fn;
 
 decltype(hsa_memory_allocate)* hsa_memory_allocate_fn;
-decltype(hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate_fn;
+decltype(hsa_memory_assign_agent)* hsa_memory_assign_agent_fn;
 decltype(hsa_memory_copy)* hsa_memory_copy_fn;
+decltype(hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate_fn;
+decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access_fn;
 decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
 decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
 
@@ -154,6 +156,7 @@ enum {
 uint32_t LoadTool() {
   uint32_t intercept_mode = 0;
   const char* tool_lib = getenv("ROCP_TOOL_LIB");
+  fprintf(stderr, "ROCProfiler: load tool library \"%s\"\n", tool_lib); fflush(stderr);
 
   if (tool_lib) {
     intercept_mode = DISPATCH_INTERCEPT_MODE;
@@ -409,6 +412,7 @@ extern "C" {
 // HSA-runtime tool on-load method
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
+  fprintf(stderr, "rocprof OnLoad\n"); fflush(stderr);
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
   bool intercept_mode = false;
@@ -872,12 +876,23 @@ hsa_status_t rocprofiler_get_time(
 }
 
 // Set new callbacks. If a callback is NULL then it is disabled
+}  // extern "C"
+
+// HSA API callbacks routines
+
+// Static fields
+bool rocprofiler::HsaInterceptor::enable_ = false;
+rocprofiler_hsa_callbacks_t rocprofiler::HsaInterceptor::callbacks_{};
+rocprofiler::HsaInterceptor::arg_t rocprofiler::HsaInterceptor::arg_{};
+rocprofiler::HsaInterceptor::mutex_t rocprofiler::HsaInterceptor::mutex_;
+
+extern "C" {
+// Set HSA callbacks. If a callback is NULL then it is disabled
 PUBLIC_API hsa_status_t rocprofiler_set_hsa_callbacks(const rocprofiler_hsa_callbacks_t callbacks, void* arg) {
   API_METHOD_PREFIX
-  rocprofiler::InterceptQueue::SetHsaSubmitCallback(callbacks.submit, arg);
-  rocprofiler::HsaInterceptor::SetHsaAllocCallback(callbacks.alloc, arg);
-  rocprofiler::HsaInterceptor::SetHsaMemcopyCallback(callbacks.memcopy, arg);
+  rocprofiler::HsaInterceptor::SetCallbacks(callbacks, arg);
+  rocprofiler::InterceptQueue::SetSubmitCallback(callbacks.submit, arg);
   API_METHOD_SUFFIX
 }
-
 }  // extern "C"
+
