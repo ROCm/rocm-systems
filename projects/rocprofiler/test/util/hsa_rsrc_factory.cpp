@@ -1,26 +1,26 @@
-/******************************************************************************
-MIT License
+/**********************************************************************
+Copyright ©2013 Advanced Micro Devices, Inc. All rights reserved.
 
-Copyright (c) 2018 ROCm Core Technology
+Redistribution and use in source and binary forms, with or without modification, are permitted
+provided that the following conditions are met:
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+<95>    Redistributions of source code must retain the above copyright notice, this list of
+conditions and the following disclaimer.
+<95>    Redistributions in binary form must reproduce the above copyright notice, this list of
+conditions and the following disclaimer in the documentation and/or
+ other materials provided with the distribution.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*******************************************************************************/
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+ DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+********************************************************************/
 
 #include "util/hsa_rsrc_factory.h"
 
@@ -107,14 +107,21 @@ hsa_status_t FindKernArgPool(hsa_amd_memory_pool_t pool, void* data) {
 // Constructor of the class
 HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize_hsa) {
   hsa_status_t status;
+
+  cpu_pool_ = NULL;
+  kern_arg_pool_ = NULL;
+
   // Initialize the Hsa Runtime
   if (initialize_hsa_) {
     status = hsa_init();
     CHECK_STATUS("Error in hsa_init", status);
   }
+
   // Discover the set of Gpu devices available on the platform
   status = hsa_iterate_agents(GetHsaAgentsCallback, this);
   CHECK_STATUS("Error Calling hsa_iterate_agents", status);
+  if (cpu_pool_ == NULL) CHECK_STATUS("CPU memory pool is not found", HSA_STATUS_ERROR);
+  if (kern_arg_pool_ == NULL) CHECK_STATUS("Kern-arg memory pool is not found", HSA_STATUS_ERROR);
 
   // Get AqlProfile API table
   aqlprofile_api_ = {0};
@@ -129,10 +136,19 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
   loader_api_ = {0};
   status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_LOADER, 1, 0, &loader_api_);
   CHECK_STATUS("loader API table query failed", status);
+
+  // Instantiate HSA timer
+  timer_ = new HsaTimer;
+  CHECK_STATUS("HSA timer allocation failed",
+    (timer_ == NULL) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS);
+
+  // System timeout
+  timeout_ = (timeout_ns_ == HsaTimer::TIMESTAMP_MAX) ? timeout_ns_ : timer_->ns_to_sysclock(timeout_ns_);
 }
 
 // Destructor of the class
 HsaRsrcFactory::~HsaRsrcFactory() {
+  delete timer_;
   for (auto p : cpu_list_) delete p;
   for (auto p : gpu_list_) delete p;
   if (initialize_hsa_) {
@@ -192,9 +208,9 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     agent_info->dev_index = cpu_list_.size();
 
     status = hsa_amd_agent_iterate_memory_pools(agent, FindStandardPool, &agent_info->cpu_pool);
-    CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(cpu pool)", status);
+    if ((status == HSA_STATUS_INFO_BREAK) && (cpu_pool_ == NULL)) cpu_pool_ = &agent_info->cpu_pool;
     status = hsa_amd_agent_iterate_memory_pools(agent, FindKernArgPool, &agent_info->kern_arg_pool);
-    CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(kern arg pool)", status);
+    if ((status == HSA_STATUS_INFO_BREAK) && (kern_arg_pool_ == NULL)) kern_arg_pool_ = &agent_info->kern_arg_pool;
     agent_info->gpu_pool = {};
 
     cpu_list_.push_back(agent_info);
@@ -356,7 +372,7 @@ uint8_t* HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size
   uint8_t* buffer = NULL;
   if (!cpu_agents_.empty()) {
     size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-    status = hsa_amd_memory_pool_allocate(cpu_list_[0]->kern_arg_pool, size, 0, reinterpret_cast<void**>(&buffer));
+    status = hsa_amd_memory_pool_allocate(*kern_arg_pool_, size, 0, reinterpret_cast<void**>(&buffer));
     // Both the CPU and GPU can access the kernel arguments
     if (status == HSA_STATUS_SUCCESS) {
       hsa_agent_t ag_list[1] = {agent_info->dev_id};
@@ -376,7 +392,7 @@ uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t s
   uint8_t* buffer = NULL;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   if (!cpu_agents_.empty()) {
-    status = hsa_amd_memory_pool_allocate(cpu_list_[0]->cpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
+    status = hsa_amd_memory_pool_allocate(*cpu_pool_, size, 0, reinterpret_cast<void**>(&buffer));
     // Both the CPU and GPU can access the memory
     if (status == HSA_STATUS_SUCCESS) {
       hsa_agent_t ag_list[1] = {agent_info->dev_id};
@@ -400,22 +416,37 @@ uint8_t* HsaRsrcFactory::AllocateCmdMemory(const AgentInfo* agent_info, size_t s
   return ptr;
 }
 
+// Wait signal
+void HsaRsrcFactory::SignalWait(const hsa_signal_t& signal) const {
+  while (1) {
+    const hsa_signal_value_t signal_value =
+      hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, timeout_, HSA_WAIT_STATE_BLOCKED);
+    if (signal_value == 0) {
+      break;
+    } else {
+      CHECK_STATUS("hsa_signal_wait_scacquire()", HSA_STATUS_ERROR);
+    }
+  }
+}
+
+// Wait signal with signal value restore
+void HsaRsrcFactory::SignalWaitRestore(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const {
+  SignalWait(signal);
+  hsa_signal_store_relaxed(const_cast<hsa_signal_t&>(signal), signal_value);
+}
+
 // Copy data from GPU to host memory
 bool HsaRsrcFactory::Memcpy(const hsa_agent_t& agent, void* dst, const void* src, size_t size) {
   hsa_status_t status = HSA_STATUS_ERROR;
   if (!cpu_agents_.empty()) {
     hsa_signal_t s = {};
     status = hsa_signal_create(1, 0, NULL, &s);
-    if (status == HSA_STATUS_SUCCESS) {
-      status = hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, NULL, s);
-      if (status == HSA_STATUS_SUCCESS) {
-        if (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
-                                      HSA_WAIT_STATE_BLOCKED) != 0) {
-          status = HSA_STATUS_ERROR;
-        }
-      }
-      status = hsa_signal_destroy(s);
-    }
+    CHECK_STATUS("hsa_signal_create()", status);
+    status = hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, NULL, s);
+    CHECK_STATUS("hsa_amd_memory_async_copy()", status);
+    SignalWait(s);
+    status = hsa_signal_destroy(s);
+    CHECK_STATUS("hsa_signal_destroy()", status);
   }
   return (status == HSA_STATUS_SUCCESS);
 }
@@ -558,3 +589,4 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t s
 
 HsaRsrcFactory* HsaRsrcFactory::instance_ = NULL;
 HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;
+HsaRsrcFactory::timestamp_t HsaRsrcFactory::timeout_ns_ = HsaTimer::TIMESTAMP_MAX;
