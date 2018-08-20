@@ -118,15 +118,12 @@ get_filename_component ( HSA_RUNTIME_LIB_PATH ${HSA_RUNTIME_LIB} DIRECTORY )
 find_library ( HSA_KMT_LIB "libhsakmt.so" )
 get_filename_component ( HSA_KMT_LIB_PATH ${HSA_KMT_LIB} DIRECTORY )
 
-set ( API_PATH ${HSA_RUNTIME_INC_PATH} )
-
 ## Basic Tool Chain Information
-message ( "----------------NBIT: ${NBIT}" )
-message ( "-----------BuildType: ${CMAKE_BUILD_TYPE}" )
+message ( "----------------NBit: ${NBIT}" )
+message ( "----------Build-Type: ${CMAKE_BUILD_TYPE}" )
 message ( "------------Compiler: ${CMAKE_CXX_COMPILER}" )
 message ( "----Compiler-Version: ${CMAKE_CXX_COMPILER_VERSION}" )
 message ( "-----HSA-Runtime-Inc: ${HSA_RUNTIME_INC_PATH}" )
 message ( "-----HSA-Runtime-Lib: ${HSA_RUNTIME_LIB_PATH}" )
-message ( "------------API-path: ${API_PATH}" )
-message ( "-----CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}" )
+message ( "-----------CXX-Flags: ${CMAKE_CXX_FLAGS}" )
 message ( "---CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}" )

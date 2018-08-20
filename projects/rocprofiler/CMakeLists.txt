@@ -74,23 +74,28 @@ endif ()
 add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 
 ## Install information
-install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${ROCPROFILER_NAME}/lib )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h DESTINATION ${ROCPROFILER_NAME}/include )
+#if ( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
+#message ( "CMAKE default prefix: ${CMAKE_INSTALL_PREFIX}" )
+#endif ()
+set ( CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}/${ROCPROFILER_NAME}" )
+message ( "---------Install-Dir: ${CMAKE_INSTALL_PREFIX}" )
+install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION lib )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h DESTINATION include )
 # rpl_run.sh tblextr.py txt2xml.sh
 install ( FILES
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/rpl_run.sh
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2xml.sh
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/tblextr.py
-          DESTINATION ${ROCPROFILER_NAME}/bin
+          DESTINATION bin
           PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )
 # gfx_metrics.xml metrics.xml
 install ( FILES
           ${CMAKE_CURRENT_SOURCE_DIR}/test/tool/metrics.xml
           ${CMAKE_CURRENT_SOURCE_DIR}/test/tool/gfx_metrics.xml
-          DESTINATION ${ROCPROFILER_NAME}/lib )
+          DESTINATION lib )
 # libtool.so
-install ( FILES ${PROJECT_BINARY_DIR}/test/libtool.so DESTINATION ${ROCPROFILER_NAME}/tool )
-install ( FILES ${PROJECT_BINARY_DIR}/test/ctrl DESTINATION ${ROCPROFILER_NAME}/tool
+install ( FILES ${PROJECT_BINARY_DIR}/test/libtool.so DESTINATION tool )
+install ( FILES ${PROJECT_BINARY_DIR}/test/ctrl DESTINATION tool
           PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )
 
 ## Packaging directives
@@ -105,7 +110,6 @@ set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" )
 
 ## Debian package specific variables
 set ( CPACK_DEBIAN_PACKAGE_DEPENDS "hsa-rocr-dev" )
-set ( CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/RadeonOpenCompute/HSA-RocProfiler" )
 set ( CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst;${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm" )
 
 ## RPM package specific variables
