@@ -210,10 +210,6 @@ hsa_status_t GetExcStatus(const std::exception& e) {
 }
 
 rocprofiler_properties_t rocprofiler_properties;
-#if DEFERRED_HANDLERS
-Context::deferred_handler_list_t* Context::deferred_handler_list_ = NULL;
-Context::recur_mutex_t Context::mutex_static_;
-#endif
 uint32_t SqttProfile::output_buffer_size_ = 0x2000000;  // 32M
 bool SqttProfile::output_buffer_local_ = true;
 util::Logger::mutex_t util::Logger::mutex_;

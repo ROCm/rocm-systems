@@ -47,15 +47,14 @@
 </gfx9>
 
 <global>
-  # GPUBusy, percentage
-  # The percentage of time GPU was busy.
+  # GPUBusy         The percentage of time GPU was busy.
   <metric
     name="GPUBusy"
     descr="The percentage of time GPU was busy."
     expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT
   ></metric>
 
-  # Wavefronts      Total wavefronts.,
+  # Wavefronts      Total wavefronts.
   <metric
     name="Wavefronts"
     descr="Total wavefronts."
