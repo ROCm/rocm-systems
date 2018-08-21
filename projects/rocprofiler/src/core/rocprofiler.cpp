@@ -89,9 +89,11 @@ decltype(hsa_memory_allocate)* hsa_memory_allocate_fn;
 decltype(hsa_memory_assign_agent)* hsa_memory_assign_agent_fn;
 decltype(hsa_memory_copy)* hsa_memory_copy_fn;
 decltype(hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate_fn;
+decltype(hsa_amd_memory_pool_free)* hsa_amd_memory_pool_free_fn;
 decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access_fn;
 decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
 decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
+decltype(hsa_executable_freeze)* hsa_executable_freeze_fn;
 
 ::HsaApiTable* kHsaApiTable;
 
@@ -884,6 +886,7 @@ hsa_status_t rocprofiler_get_time(
 bool rocprofiler::HsaInterceptor::enable_ = false;
 rocprofiler_hsa_callbacks_t rocprofiler::HsaInterceptor::callbacks_{};
 rocprofiler::HsaInterceptor::arg_t rocprofiler::HsaInterceptor::arg_{};
+hsa_ven_amd_loader_1_01_pfn_t rocprofiler::HsaInterceptor::LoaderApiTable{};
 rocprofiler::HsaInterceptor::mutex_t rocprofiler::HsaInterceptor::mutex_;
 
 extern "C" {

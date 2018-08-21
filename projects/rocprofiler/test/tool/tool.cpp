@@ -834,15 +834,34 @@ hsa_status_t hsa_unified_callback(
   const rocprofiler_hsa_callback_data_t* data,
   void* arg)
 {
-  printf("hsa_unified_callback(%d, %p, %p\n", (int)id, data, arg);
+  printf("hsa_unified_callback(%d, %p, %p):\n", (int)id, data, arg);
 
-  if (id == ROCPROFILER_HSA_CB_ID_SUBMIT) {
-    if (data->submit.kernel_code != NULL) {
-      printf("  submit:\n");
-      printf("    kernel_code_entry_byte_offset %lx\n", data->submit.kernel_code->kernel_code_entry_byte_offset);
-      printf("    kernel_code_prefetch_byte_offset %lx\n", data->submit.kernel_code->kernel_code_prefetch_byte_offset);
-      printf("    kernel_code_prefetch_byte_size %lx\n", data->submit.kernel_code->kernel_code_prefetch_byte_size);
-    }
+  switch (id) {
+    case ROCPROFILER_HSA_CB_ID_ALLOCATE:
+      printf("  alloc ptr = %p\n", data->allocate.ptr);
+      printf("  alloc size = %zu\n", data->allocate.size);
+      printf("  segment type = 0x%x\n", data->allocate.segment);
+      printf("  global flag = 0x%x\n", data->allocate.global_flag);
+      break;
+    case ROCPROFILER_HSA_CB_ID_DEVICE:
+      printf("  device type = 0x%x\n", data->device.type);
+      printf("  device id = %u\n", data->device.id);
+      printf("  assigned ptr = %p\n", data->device.ptr);
+      break;
+    case ROCPROFILER_HSA_CB_ID_MEMCOPY:
+      printf("  memcopy dst = %p\n", data->memcopy.dst);
+      printf("  memcopy src = %p\n", data->memcopy.src);
+      printf("  memcopy size = %zu\n", data->memcopy.size);
+      break;
+    case ROCPROFILER_HSA_CB_ID_SUBMIT:
+      printf("  packet %p\n", data->submit.packet);
+      if (data->submit.kernel_name != NULL) {
+        printf("  submit kernel \"%s\"\n", data->submit.kernel_name);
+      }
+      break;
+    default:
+      printf("Unknown callback id(%u)\n", id);
+      abort();
   }
 
   fflush(stdout);

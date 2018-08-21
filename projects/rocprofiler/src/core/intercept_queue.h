@@ -136,8 +136,8 @@ class InterceptQueue {
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
         rocprofiler_hsa_callback_data_t data{};
         data.submit.packet = (void*)packet;
-        data.submit.kernel_code =
-          (GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) ? GetKernelCode(dispatch_packet) : NULL;
+        data.submit.kernel_name =
+          (GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) ? GetKernelName(dispatch_packet) : NULL;
         submit_callback_fun_(ROCPROFILER_HSA_CB_ID_SUBMIT, &data, submit_callback_arg_);
       }
     }

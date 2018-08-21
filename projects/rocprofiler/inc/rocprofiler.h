@@ -465,34 +465,34 @@ hsa_status_t rocprofiler_pool_flush(
 
 // HSA callbacks ID enumeration
 enum rocprofiler_hsa_cb_id_t {
-  ROCPROFILER_HSA_CB_ID_ALLOCATE = 0,
-  ROCPROFILER_HSA_CB_ID_DEVICE = 1,
-  ROCPROFILER_HSA_CB_ID_MEMCOPY = 2,
-  ROCPROFILER_HSA_CB_ID_SUBMIT = 3
+  ROCPROFILER_HSA_CB_ID_ALLOCATE = 0, // Memory allocate callback
+  ROCPROFILER_HSA_CB_ID_DEVICE = 1,   // Device assign callback
+  ROCPROFILER_HSA_CB_ID_MEMCOPY = 2,  // Memcopy callback
+  ROCPROFILER_HSA_CB_ID_SUBMIT = 3    // Packet submit callback
 };
 
 // HSA callback data type
 struct rocprofiler_hsa_callback_data_t {
   union {
     struct {
-      const void* addr;
-      size_t size;
-      hsa_amd_segment_t segment;
-      hsa_amd_memory_pool_global_flag_t global_flag;
+      const void* ptr;                                // allocated area ptr
+      size_t size;                                    // allocated area size, zero size means 'free' callback
+      hsa_amd_segment_t segment;                      // allocated area's memory segment type
+      hsa_amd_memory_pool_global_flag_t global_flag;  // allocated area's memory global flag
     } allocate;
     struct {
-      hsa_device_type_t type;
-      uint32_t id;
-      const void* mem;
+      hsa_device_type_t type;                         // type of assigned device
+      uint32_t id;                                    // id of assigned device
+      const void* ptr;                                // ptr the device is assigned to
     } device;
     struct {
-      const void* dst;
-      const void* src;
-      size_t size;
+      const void* dst;                                // memcopy dst ptr
+      const void* src;                                // memcopy src ptr
+      size_t size;                                    // memcopy size bytes
     } memcopy;
     struct {
-      const void* packet;
-      const amd_kernel_code_t* kernel_code;
+      const void* packet;                             // submitted to GPU packet
+      const char* kernel_name;                        // kernel name, not NULL if dispatch
     } submit;
   };
 };

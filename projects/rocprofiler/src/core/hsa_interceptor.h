@@ -27,6 +27,7 @@ SOFTWARE.
 
 #include <hsa.h>
 #include <hsa_ext_amd.h>
+#include <hsa_ven_amd_loader.h>
 
 #include <atomic>
 #include <mutex>
@@ -55,15 +56,17 @@ SOFTWARE.
   do { __callback(__id, &data, __arg); } while (0)
 
 #define ISSUE_HSA_CALLBACK(ID) \
-  IS_HSA_CALLBACK(ID) { DO_HSA_CALLBACK; }
+  do { IS_HSA_CALLBACK(ID) { DO_HSA_CALLBACK; } } while(0)
 
 namespace rocprofiler {
 extern decltype(hsa_memory_allocate)* hsa_memory_allocate_fn;
 extern decltype(hsa_memory_assign_agent)* hsa_memory_assign_agent_fn;
 extern decltype(hsa_memory_copy)* hsa_memory_copy_fn;
 extern decltype(hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate_fn;
+extern decltype(hsa_amd_memory_pool_free)* hsa_amd_memory_pool_free_fn;
 extern decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access_fn;
 extern decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
+extern decltype(hsa_executable_freeze)* hsa_executable_freeze_fn;
 
 class HsaInterceptor {
  public:
@@ -73,25 +76,34 @@ class HsaInterceptor {
   static void Enable(const bool& enable) { enable_ = enable; }
 
   static void HsaIntercept(HsaApiTable* table) {
-    fprintf(stderr, "HsaInterceptor ...\n");
     if (enable_) {
-      fprintf(stderr, "HsaInterceptor enabled\n");
-      // saving original API functions
+      // Fetching AMD Loader HSA extension API
+      HSA_RT(hsa_system_get_major_extension_table(
+        HSA_EXTENSION_AMD_LOADER,
+        1,
+        sizeof(hsa_ven_amd_loader_1_01_pfn_t),
+        &LoaderApiTable));
+
+      // Saving original API functions
       hsa_memory_allocate_fn = table->core_->hsa_memory_allocate_fn;
       hsa_memory_assign_agent_fn = table->core_->hsa_memory_assign_agent_fn;
       hsa_memory_copy_fn = table->core_->hsa_memory_copy_fn;
       hsa_amd_memory_pool_allocate_fn = table->amd_ext_->hsa_amd_memory_pool_allocate_fn;
+      hsa_amd_memory_pool_free_fn = table->amd_ext_->hsa_amd_memory_pool_free_fn;
       hsa_amd_agents_allow_access_fn = table->amd_ext_->hsa_amd_agents_allow_access_fn;
       hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
-      // intercepting API
+      hsa_executable_freeze_fn = table->core_->hsa_executable_freeze_fn;
+
+      // Intercepting HSA API
       table->core_->hsa_memory_allocate_fn = MemoryAllocate;
       table->core_->hsa_memory_assign_agent_fn = MemoryAssignAgent;
       table->core_->hsa_memory_copy_fn = MemoryCopy;
       table->amd_ext_->hsa_amd_memory_pool_allocate_fn = MemoryPoolAllocate;
+      table->amd_ext_->hsa_amd_memory_pool_free_fn = MemoryPoolFree;
       table->amd_ext_->hsa_amd_agents_allow_access_fn = AgentsAllowAccess;
       table->amd_ext_->hsa_amd_memory_async_copy_fn = MemoryAsyncCopy;
+      table->core_->hsa_executable_freeze_fn = ExecutableFreeze;
     }
-    fprintf(stderr, "HsaInterceptor done\n");
   }
 
   static void SetCallbacks(rocprofiler_hsa_callbacks_t callbacks, void* arg) {
@@ -110,7 +122,7 @@ class HsaInterceptor {
     HSA_RT(hsa_memory_allocate_fn(region, size, ptr));
     IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE) {
       rocprofiler_hsa_callback_data_t data{};
-      data.allocate.addr = *ptr;
+      data.allocate.ptr = *ptr;
       data.allocate.size = size;
 
       HSA_RT(hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &data.allocate.segment));
@@ -131,7 +143,7 @@ class HsaInterceptor {
     HSA_RT(hsa_memory_assign_agent_fn(ptr, agent, access));
     IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_DEVICE) {
       rocprofiler_hsa_callback_data_t data{};
-      data.device.mem = ptr;
+      data.device.ptr = ptr;
 
       HSA_RT(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &data.device.type));
 
@@ -150,7 +162,7 @@ class HsaInterceptor {
       hsa_agent_t agent = *agent_p;
       rocprofiler_hsa_callback_data_t data{};
       data.device.id = util::HsaRsrcFactory::Instance().GetAgentInfo(agent)->dev_index;
-      data.device.mem = ptr;
+      data.device.ptr = ptr;
 
       HSA_RT(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &data.device.type));
 
@@ -176,7 +188,7 @@ class HsaInterceptor {
   // Callback function to get available in the system agents
   struct agent_callback_data_t {
     hsa_amd_memory_pool_t pool;
-    void* addr;
+    void* ptr;
   };
   static hsa_status_t AgentCallback(hsa_agent_t agent, void* data) {
     agent_callback_data_t* callback_data = reinterpret_cast<agent_callback_data_t*>(data);
@@ -184,7 +196,7 @@ class HsaInterceptor {
     hsa_amd_memory_pool_access_t value;
     HSA_RT(hsa_amd_agent_memory_pool_get_info(agent, callback_data->pool, attribute, &value));
     if (value == HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT) {
-      DeviceCallback(1, &agent, callback_data->addr);
+      DeviceCallback(1, &agent, callback_data->ptr);
     }
     return HSA_STATUS_SUCCESS;
   }
@@ -197,25 +209,37 @@ class HsaInterceptor {
   {
     hsa_status_t status = HSA_STATUS_SUCCESS;
     HSA_RT(hsa_amd_memory_pool_allocate_fn(pool, size, flags, ptr));
-    IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE) {
-      rocprofiler_hsa_callback_data_t data{};
-      data.allocate.addr = *ptr;
-      data.allocate.size = size;
-
-      HSA_RT(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &data.allocate.segment));
-      HSA_RT(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &data.allocate.global_flag));
-#if 0
-      HSA_RT(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL, &data.allocate.global_mem));
-#endif
-
-      DO_HSA_CALLBACK;
-
-      IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_DEVICE) {
-        // Scan the pool assigned devices
-        agent_callback_data_t callback_data{pool, *ptr};
-        hsa_iterate_agents(AgentCallback, &callback_data);
+    if (size != 0) {
+      IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE) {
+        rocprofiler_hsa_callback_data_t data{};
+        data.allocate.ptr = *ptr;
+        data.allocate.size = size;
+  
+        HSA_RT(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &data.allocate.segment));
+        HSA_RT(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &data.allocate.global_flag));
+  
+        DO_HSA_CALLBACK;
+  
+        IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_DEVICE) {
+          // Scan the pool assigned devices
+          agent_callback_data_t callback_data{pool, *ptr};
+          hsa_iterate_agents(AgentCallback, &callback_data);
+        }
       }
     }
+    return status;
+  }
+  static hsa_status_t MemoryPoolFree(
+    void* ptr)
+  {
+    hsa_status_t status = HSA_STATUS_SUCCESS;
+    IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE) {
+      rocprofiler_hsa_callback_data_t data{};
+      data.allocate.ptr = ptr;
+      data.allocate.size = 0;
+      DO_HSA_CALLBACK;
+    }
+    HSA_RT(hsa_amd_memory_pool_free_fn(ptr));
     return status;
   }
 
@@ -257,7 +281,68 @@ class HsaInterceptor {
     return status;
   }
 
+  static hsa_status_t CodeObjectCallback(
+    hsa_executable_t executable,
+    hsa_loaded_code_object_t loaded_code_object,
+    void *)
+  {
+    rocprofiler_hsa_callback_data_t data{};
+
+    HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
+      loaded_code_object,
+      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE,
+      &data.allocate.ptr));
+
+    HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
+      loaded_code_object,
+      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE,
+      &data.allocate.size));
+
+    // Local GPU memory
+    // GLOBAL; FLAGS: COARSE GRAINED
+    data.allocate.segment = HSA_AMD_SEGMENT_GLOBAL;
+    data.allocate.global_flag = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+
+    ISSUE_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE);
+
+    IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_DEVICE) {
+      hsa_amd_pointer_info_t pointer_info{};
+      uint32_t num_agents = 0;
+      hsa_agent_t* agents = NULL;
+      pointer_info.size = sizeof(hsa_amd_pointer_info_t);
+      HSA_RT(hsa_amd_pointer_info(
+        const_cast<void*>(data.allocate.ptr),
+        &pointer_info,
+        malloc,
+        &num_agents,
+        &agents));
+  
+      DeviceCallback(num_agents, agents, data.allocate.ptr);
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  static hsa_status_t ExecutableFreeze(
+    hsa_executable_t executable,
+    const char *options)
+  {
+    hsa_status_t status = HSA_STATUS_SUCCESS;
+
+    HSA_RT(hsa_executable_freeze_fn(executable, options));
+
+    IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE) {
+      LoaderApiTable.hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
+        executable,
+        CodeObjectCallback,
+        NULL);
+    }
+
+    return status;
+  }
+
   static bool enable_;
+  static hsa_ven_amd_loader_1_01_pfn_t LoaderApiTable;
   static rocprofiler_hsa_callbacks_t callbacks_;
   static arg_t arg_;
   static mutex_t mutex_;
