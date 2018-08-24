@@ -144,6 +144,13 @@ void check_status(hsa_status_t status) {
   }
 }
 
+// Print profiling results output break if terminal output is enabled
+void results_output_break() {
+  const bool is_terminal_output = (result_file_opened == false);
+  if (is_terminal_output) printf("\nROCprofiler results:\n");
+}
+
+// Filtering kernel name
 std::string filtr_kernel_name(const std::string name) {
   auto rit = name.rbegin();
   auto rend = name.rend();
@@ -179,6 +186,7 @@ std::string filtr_kernel_name(const std::string name) {
   return name.substr(pos, length);
 }
 
+// Inflight submits monitoring thread
 void* monitor_thr_fun(void*) {
   while (context_array != NULL) {
     sleep(CTX_OUTSTANDING_MON);
@@ -198,6 +206,7 @@ void* monitor_thr_fun(void*) {
   return NULL;
 }
 
+// Increment profiling context counter value
 uint32_t next_context_count() {
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
@@ -423,12 +432,14 @@ bool dump_context_entry(context_entry_t* entry) {
 
   rocprofiler_group_t& group = entry->group;
   if (group.context != NULL) {
-    status = rocprofiler_group_get_data(&group);
-    check_status(status);
-    if (verbose == 1) output_group(entry, "group0-data");
+    if (entry->feature_count > 0) {
+      status = rocprofiler_group_get_data(&group);
+      check_status(status);
+      if (verbose == 1) output_group(entry, "group0-data");
 
-    status = rocprofiler_get_metrics(group.context);
-    check_status(status);
+      status = rocprofiler_get_metrics(group.context);
+      check_status(status);
+    }
     std::ostringstream oss;
     oss << index << "__" << filtr_kernel_name(entry->data.kernel_name);
     output_results(entry, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
@@ -623,7 +634,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
 }
 
 hsa_status_t destroy_callback(hsa_queue_t* queue, void*) {
-  if (result_file_opened == false) printf("\nROCProfiler results:\n");
+  results_output_break();
   dump_context_array(queue);
   return HSA_STATUS_SUCCESS;
 }
@@ -1006,13 +1017,20 @@ extern "C" PUBLIC_API void OnUnloadTool() {
   rocprofiler_remove_queue_callbacks();
 
   // Dump stored profiling output data
-  printf("\nROCPRofiler: %u contexts collected", context_collected); fflush(stdout);
-  dump_context_array(NULL);
+  fflush(stdout);
   if (result_file_opened) {
+    printf("\nROCPRofiler: %u contexts collected", context_collected); fflush(stdout);
+    dump_context_array(NULL);
     fclose(result_file_handle);
-    printf(", output directory %s", result_prefix);
+    printf(", output directory %s\n", result_prefix);
+  } else {
+    if (context_collected != context_count) {
+      results_output_break();
+      dump_context_array(NULL);
+    }
+    printf("\nROCPRofiler: %u contexts collected\n", context_collected);
   }
-  printf("\n"); fflush(stdout);
+  fflush(stdout);
 
   // Cleanup
   if (callbacks_data != NULL) {

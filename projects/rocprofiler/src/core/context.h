@@ -160,13 +160,18 @@ class Context {
         queue_(queue),
         hsa_rsrc_(&util::HsaRsrcFactory::Instance()),
         api_(hsa_rsrc_->AqlProfileApi()),
+        metrics_(NULL),
         handler_(handler),
         handler_arg_(handler_arg)
   {
-    if (info_count == 0) return;
+    if (info_count == 0) {
+      set_.push_back(Group(agent_info_, this, 0));
+      return;
+    }
 
     metrics_ = MetricsDict::Create(agent_info);
     if (metrics_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "MetricsDict create failed");
+
     if (Initialize(info, info_count) == false) {
       fprintf(stdout, "\nInput metrics out of HW limit. Proposed metrics group set:\n"); fflush(stdout);
       MetricsGroupSet(agent_info, info, info_count).Print(stdout);

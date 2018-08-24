@@ -181,7 +181,6 @@ class InterceptQueue {
               void* context_handler_arg = NULL;
               rocprofiler_handler_t context_handler_fun = context->GetHandler(&context_handler_arg);
               tracker_->Enable(tracker_entry, context_handler_fun, context_handler_arg);
-              rocprofiler_close(context);
             }
           }
         }
