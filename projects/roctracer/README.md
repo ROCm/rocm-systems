@@ -44,6 +44,6 @@ The library source tree:
   cd <your path>/roctracer/test/MatrixTranspose
   make
 
- Set test iterations number, 100 by default
+ set test iterations number, 100 by default
   export ITERATIONS=<iterations number>
 ```
