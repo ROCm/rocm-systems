@@ -1,15 +1,26 @@
 # ROC-tracer
+```
+ROC-tracer library, Runtimes Generic Callback/Activity APIs.
+The goal of the implementation is to provide a generic independent from
+specific runtime profiler to trace API and asyncronous activity.
 
-ROC tracer library. Callback/Activity APIs
+The API provides functionality for registering the runtimes API callbacks and
+asyncronous activity records pool support.
+```
 
 The library source tree:
- - doc  - Documentation
  - inc/roctracer.h - Library public API
  - src  - Library sources
    - core - Library API sources
    - util - Library utils sources
  - test - test suit
    - MatrixTranspose - test based on HIP MatrixTranspose sample
+
+## Documentation
+```
+ - API description: inc/roctracer.h
+ - Code exaple: test/MatrixTranspose/MatrixTranspose.cpp
+```
 
 ## To build and run test
 ```
