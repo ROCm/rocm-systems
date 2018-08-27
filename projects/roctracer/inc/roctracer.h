@@ -22,20 +22,14 @@ THE SOFTWARE.
 
 ////////////////////////////////////////////////////////////////////////////////
 //
-// ROC Profiler API
+// ROC Tracer API
 //
-// The goal of the implementation is to provide a HW specific low-level
-// performance analysis interface for profiling of GPU compute applications.
-// The profiling includes HW performance counters (PMC) with complex
-// performance metrics and thread traces (SQTT). The profiling is supported
-// by the SQTT, PMC and Callback APIs.
+// ROC-tracer library, Runtimes Generic Callback/Activity APIs.
+// The goal of the implementation is to provide a generic independent from
+// specific runtime profiler to trace API and asyncronous activity.
 //
-// The library can be used by a tool library loaded by HSA runtime or by
-// higher level HW independent performance analysis API like PAPI.
-//
-// The library is written on C and will be based on AQLprofile AMD specific
-// HSA extension. The library implementation requires HSA API intercepting and
-// a profiling queue supporting a submit callback interface.
+// The API provides functionality for registering the runtimes API callbacks and
+// asyncronous activity records pool support.
 //
 ////////////////////////////////////////////////////////////////////////////////
 
