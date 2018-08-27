@@ -47,9 +47,9 @@ typedef uint64_t activity_correlation_id_t;
 // Activity record type
 struct activity_record_t {
     uint32_t domain;                               // activity domain id
-    uint32_t op_id;                                // operation id, dispatch/copy/barrier
-    uint32_t activity_kind;                        // activity kind
-    activity_correlation_id_t correlation_id;     // activity correlation ID
+    uint32_t kind;                                 // activity kind
+    uint32_t activity_id;                          // activity id
+    activity_correlation_id_t correlation_id;      // activity correlation ID
     uint64_t begin_ns;                             // host begin timestamp
     uint64_t end_ns;                               // host end timestamp
     int device_id;                                 // device id
