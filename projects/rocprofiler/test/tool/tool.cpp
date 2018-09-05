@@ -842,6 +842,7 @@ hsa_status_t hsa_unified_callback(
       printf("  alloc size = %zu\n", data->allocate.size);
       printf("  segment type = 0x%x\n", data->allocate.segment);
       printf("  global flag = 0x%x\n", data->allocate.global_flag);
+      printf("  is_code = %x\n", data->allocate.is_code);
       break;
     case ROCPROFILER_HSA_CB_ID_DEVICE:
       printf("  device type = 0x%x\n", data->device.type);

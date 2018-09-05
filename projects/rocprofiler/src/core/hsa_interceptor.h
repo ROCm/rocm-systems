@@ -67,6 +67,7 @@ extern decltype(hsa_amd_memory_pool_free)* hsa_amd_memory_pool_free_fn;
 extern decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access_fn;
 extern decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
 extern decltype(hsa_executable_freeze)* hsa_executable_freeze_fn;
+extern decltype(hsa_executable_destroy)* hsa_executable_destroy_fn;
 
 class HsaInterceptor {
  public:
@@ -93,6 +94,7 @@ class HsaInterceptor {
       hsa_amd_agents_allow_access_fn = table->amd_ext_->hsa_amd_agents_allow_access_fn;
       hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
       hsa_executable_freeze_fn = table->core_->hsa_executable_freeze_fn;
+      hsa_executable_destroy_fn = table->core_->hsa_executable_destroy_fn;
 
       // Intercepting HSA API
       table->core_->hsa_memory_allocate_fn = MemoryAllocate;
@@ -103,6 +105,7 @@ class HsaInterceptor {
       table->amd_ext_->hsa_amd_agents_allow_access_fn = AgentsAllowAccess;
       table->amd_ext_->hsa_amd_memory_async_copy_fn = MemoryAsyncCopy;
       table->core_->hsa_executable_freeze_fn = ExecutableFreeze;
+      table->core_->hsa_executable_destroy_fn = ExecutableDestroy;
     }
   }
 
@@ -284,8 +287,9 @@ class HsaInterceptor {
   static hsa_status_t CodeObjectCallback(
     hsa_executable_t executable,
     hsa_loaded_code_object_t loaded_code_object,
-    void *)
+    void* arg)
   {
+    const int free_flag = reinterpret_cast<long>(arg);
     rocprofiler_hsa_callback_data_t data{};
 
     HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
@@ -293,31 +297,38 @@ class HsaInterceptor {
       HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE,
       &data.allocate.ptr));
 
-    HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
-      loaded_code_object,
-      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE,
-      &data.allocate.size));
+    if (free_flag == 0) {
+      HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
+        loaded_code_object,
+        HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE,
+        &data.allocate.size));
+    } else {
+      data.allocate.size = 0;
+    }
 
     // Local GPU memory
     // GLOBAL; FLAGS: COARSE GRAINED
     data.allocate.segment = HSA_AMD_SEGMENT_GLOBAL;
     data.allocate.global_flag = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+    data.allocate.is_code = 1;
 
     ISSUE_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE);
 
-    IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_DEVICE) {
-      hsa_amd_pointer_info_t pointer_info{};
-      uint32_t num_agents = 0;
-      hsa_agent_t* agents = NULL;
-      pointer_info.size = sizeof(hsa_amd_pointer_info_t);
-      HSA_RT(hsa_amd_pointer_info(
-        const_cast<void*>(data.allocate.ptr),
-        &pointer_info,
-        malloc,
-        &num_agents,
-        &agents));
+    if (free_flag == 0) {
+      IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_DEVICE) {
+        hsa_amd_pointer_info_t pointer_info{};
+        uint32_t num_agents = 0;
+        hsa_agent_t* agents = NULL;
+        pointer_info.size = sizeof(hsa_amd_pointer_info_t);
+        HSA_RT(hsa_amd_pointer_info(
+          const_cast<void*>(data.allocate.ptr),
+          &pointer_info,
+          malloc,
+          &num_agents,
+          &agents));
   
-      DeviceCallback(num_agents, agents, data.allocate.ptr);
+        DeviceCallback(num_agents, agents, data.allocate.ptr);
+      }
     }
 
     return HSA_STATUS_SUCCESS;
@@ -335,8 +346,25 @@ class HsaInterceptor {
       LoaderApiTable.hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
         executable,
         CodeObjectCallback,
-        NULL);
+        reinterpret_cast<void*>(0));
     }
+
+    return status;
+  }
+
+  static hsa_status_t ExecutableDestroy(
+    hsa_executable_t executable)
+  {
+    hsa_status_t status = HSA_STATUS_SUCCESS;
+
+    IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE) {
+      LoaderApiTable.hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
+        executable,
+        CodeObjectCallback,
+        reinterpret_cast<void*>(1));
+    }
+
+    HSA_RT(hsa_executable_destroy_fn(executable));
 
     return status;
   }

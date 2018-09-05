@@ -479,6 +479,7 @@ struct rocprofiler_hsa_callback_data_t {
       size_t size;                                    // allocated area size, zero size means 'free' callback
       hsa_amd_segment_t segment;                      // allocated area's memory segment type
       hsa_amd_memory_pool_global_flag_t global_flag;  // allocated area's memory global flag
+      int is_code;                                    // equal to 1 if code is allocated
     } allocate;
     struct {
       hsa_device_type_t type;                         // type of assigned device

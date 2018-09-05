@@ -94,6 +94,7 @@ decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access_fn;
 decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
 decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
 decltype(hsa_executable_freeze)* hsa_executable_freeze_fn;
+decltype(hsa_executable_destroy)* hsa_executable_destroy_fn;
 
 ::HsaApiTable* kHsaApiTable;
 
