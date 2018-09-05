@@ -1,3 +1,5 @@
+#!/bin/bash
+
 ################################################################################
 # Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
 #
@@ -20,7 +22,6 @@
 # THE SOFTWARE.
 ################################################################################
 
-#!/bin/bash
 timestamp=`date +%y%m%d_%H%M%S`
 
 if [ $# = 0 ] ; then
@@ -41,7 +42,7 @@ gpu_index=""
 parse() {
   scan="$1"
   index=0
-  while read -r line ; do
+  while read -r line || [[ -n "$line" ]] ; do
     line=`echo $line | sed "s/\s*#.*$//"`
     if [ -z "$line" ] ; then
       continue

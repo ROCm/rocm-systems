@@ -1,3 +1,5 @@
+#!/bin/sh
+
 ################################################################################
 # Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
 #
@@ -19,7 +21,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 ################################################################################
-#!/bin/sh
 
 test_bin_dflt=./test/ctrl
 

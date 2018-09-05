@@ -1,3 +1,5 @@
+#!/bin/sh
+
 ################################################################################
 # Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
 #
@@ -20,7 +22,6 @@
 # THE SOFTWARE.
 ################################################################################
 
-#!/bin/sh
 time_stamp=`date +%y%m%d_%H%M%S`
 BIN_DIR=`dirname $0`
 BIN_DIR=`cd $BIN_DIR; pwd`

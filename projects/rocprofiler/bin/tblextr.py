@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 ################################################################################
 # Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
 #
@@ -20,7 +22,6 @@
 # THE SOFTWARE.
 ################################################################################
 
-#!/usr/bin/python
 import os, sys, re
 
 # Parsing results in the format:
@@ -114,7 +115,7 @@ if (len(sys.argv) < 3): fatal("Usage: " + sys.argv[0] + " <output CSV file> <inp
 
 outfile = sys.argv[1]
 infiles = sys.argv[2:]
-for f in infiles :
+for f in infiles:
   parse_res(f)
 ret = print_tbl(outfile)
 sys.exit(ret)
