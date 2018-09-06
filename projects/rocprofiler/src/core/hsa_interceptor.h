@@ -50,10 +50,14 @@ SOFTWARE.
     (ID == ROCPROFILER_HSA_CB_ID_DEVICE) ? callbacks_.device: \
     (ID == ROCPROFILER_HSA_CB_ID_MEMCOPY) ? callbacks_.memcopy: \
                                             callbacks_.submit; \
-  if (__callback != NULL)
+  if ((__callback != NULL) && (recursion_ == false))
 
 #define DO_HSA_CALLBACK \
-  do { __callback(__id, &data, __arg); } while (0)
+  do { \
+    recursion_ = true; \
+    __callback(__id, &data, __arg); \
+    recursion_ = false; \
+  } while (0)
 
 #define ISSUE_HSA_CALLBACK(ID) \
   do { IS_HSA_CALLBACK(ID) { DO_HSA_CALLBACK; } } while(0)
@@ -370,6 +374,7 @@ class HsaInterceptor {
   }
 
   static bool enable_;
+  static thread_local bool recursion_;
   static hsa_ven_amd_loader_1_01_pfn_t LoaderApiTable;
   static rocprofiler_hsa_callbacks_t callbacks_;
   static arg_t arg_;

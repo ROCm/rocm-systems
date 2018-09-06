@@ -885,6 +885,7 @@ hsa_status_t rocprofiler_get_time(
 
 // Static fields
 bool rocprofiler::HsaInterceptor::enable_ = false;
+thread_local bool rocprofiler::HsaInterceptor::recursion_ = false;;
 rocprofiler_hsa_callbacks_t rocprofiler::HsaInterceptor::callbacks_{};
 rocprofiler::HsaInterceptor::arg_t rocprofiler::HsaInterceptor::arg_{};
 hsa_ven_amd_loader_1_01_pfn_t rocprofiler::HsaInterceptor::LoaderApiTable{};
