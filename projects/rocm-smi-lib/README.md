@@ -2,6 +2,8 @@
 
 C++ Library interface for ROCm-SMI to allow you to monitor/trace GPU system atributes 
 
+For developer Familer with NVML here is our key to understand our API 
+
 | NVML API	| Type |	Sub-type	| Rocm-smi equivalent API  |
 |-------------------|--------|---------------|-----------------------------------|
 | **Power State**  | | | |	
