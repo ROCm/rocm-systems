@@ -56,6 +56,26 @@ enum MonitorTypes {
   kMonTemp,     // Temperature in millidegrees
   kMonFanSpeed,
   kMonMaxFanSpeed,
+  kMonFanRPMs,
+  kMonFanCntrlEnable,
+  kMonPowerCap,
+  kMonPowerCapMax,
+  kMonPowerCapMin,
+  kMonTempMax,
+  kMonTempMin,
+  kMonTempMaxHyst,
+  kMonTempMinHyst,
+  kMonTempCritical,
+  kMonTempCriticalHyst,
+  kMonTempEmergency,
+  kMonTempEmergencyHyst,
+  kMonTempCritMin,
+  kMonTempCritMinHyst,
+  kMonTempOffset,
+  kMonTempLowest,
+  kMonTempHighest,
+
+  kMonInvalid = 0xFFFFFFFF,
 };
 
 
@@ -64,12 +84,11 @@ class Monitor {
     explicit Monitor(std::string path);
     ~Monitor(void);
     const std::string path(void) const {return path_;}
-    int readMonitor(MonitorTypes type, uint32_t *val);
-    int readMonitor(MonitorTypes type, std::string *val);
-
+    int readMonitor(MonitorTypes type, uint32_t sensor_ind, std::string *val);
+    int writeMonitor(MonitorTypes type, uint32_t sensor_ind, std::string val);
  private:
+    std::string MakeMonitorPath(MonitorTypes type, int32_t sensor_id);
     std::string path_;
-    int readMonitorStr(MonitorTypes type, std::string *retStr);
 };
 
 }  // namespace smi

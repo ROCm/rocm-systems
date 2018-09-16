@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2018, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,60 +42,54 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
-#define ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
-#include <string>
-#include <memory>
-#include <utility>
-#include <cstdint>
-#include <vector>
+#include <assert.h>
+#include <errno.h>
 
-#include "rocm_smi/rocm_smi_monitor.h"
-#include "rocm_smi/rocm_smi_power_mon.h"
+#include <fstream>
+#include <string>
+#include <cstdint>
+#include <iostream>
+#include <sstream>
 
 namespace amd {
 namespace smi {
 
-enum DevInfoTypes {
-  kDevPerfLevel,
-  kDevOverDriveLevel,
-  kDevDevID,
-  kDevGPUMClk,
-  kDevGPUSClk,
-  kDevPowerProfileMode
-};
+int WriteSysfsStr(std::string path, std::string val) {
+  std::ofstream fs;
+  int ret = 0;
 
-class Device {
- public:
-    explicit Device(std::string path);
-    ~Device(void);
+  fs.open(path);
+  if (!fs.is_open()) {
+    ret = errno;
+    errno = 0;
+    return ret;
+  }
 
-    void set_monitor(std::shared_ptr<Monitor> m) {monitor_ = m;}
-    std::string path(void) const {return path_;}
-    const std::shared_ptr<Monitor>& monitor() {return monitor_;}
-    const std::shared_ptr<PowerMon>& power_monitor() {return power_monitor_;}
-    void set_power_monitor(std::shared_ptr<PowerMon> pm) {power_monitor_ = pm;}
+  fs << val;
+  fs.close();
+  return ret;
+}
 
-    int readDevInfo(DevInfoTypes type, uint32_t *val);
-    int readDevInfo(DevInfoTypes type, std::string *val);
-    int readDevInfo(DevInfoTypes type, std::vector<std::string> *retVec);
-    int writeDevInfo(DevInfoTypes type, uint64_t val);
-    int writeDevInfo(DevInfoTypes type, std::string val);
-    uint32_t index(void) const {return index_;}
-    void set_index(uint32_t index) {index_ = index;}
+int ReadSysfsStr(std::string path, std::string *retStr) {
+  std::stringstream ss;
+  int ret = 0;
 
- private:
-    std::shared_ptr<Monitor> monitor_;
-    std::shared_ptr<PowerMon> power_monitor_;
-    std::string path_;
-    uint32_t index_;
-    int readDevInfoStr(DevInfoTypes type, std::string *retStr);
-    int readDevInfoMultiLineStr(DevInfoTypes type,
-                                            std::vector<std::string> *retVec);
-    int writeDevInfoStr(DevInfoTypes type, std::string valStr);
-};
+  assert(retStr != nullptr);
+
+  std::ifstream fs;
+  fs.open(path);
+
+  if (!fs.is_open()) {
+    ret = errno;
+    errno = 0;
+    return ret;
+  }
+  ss << fs.rdbuf();
+  fs.close();
+
+  *retStr = ss.str();
+  return ret;
+}
 
 }  // namespace smi
 }  // namespace amd
-
-#endif  // ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_

@@ -50,9 +50,11 @@
 #include <cstdint>
 #include <map>
 #include <iostream>
+#include <algorithm>
 
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_monitor.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 namespace amd {
 namespace smi {
@@ -63,16 +65,53 @@ struct MonitorNameEntry {
 };
 
 
-static const char *kMonTempFName = "temp1_input";
-static const char *kMonFanSpeedFName = "pwm1";
-static const char *kMonMaxFanSpeedFName = "pwm1_max";
+static const char *kMonTempFName = "temp#_input";
+static const char *kMonFanSpeedFName = "pwm#";
+static const char *kMonMaxFanSpeedFName = "pwm#_max";
+static const char *kMonFanRPMsName = "fan#_input";
+static const char *kMonFanControlEnableName = "pwm#_enable";
 static const char *kMonNameFName = "name";
+static const char *kMonPowerCapName = "power#_cap";
+static const char *kMonPowerCapMaxName = "power#_cap_max";
+static const char *kMonPowerCapMinName = "power#_cap_min";
+
+static const char *kMonTempMaxName = "temp#_max";
+static const char *kMonTempMinName = "temp#_min";
+static const char *kMonTempMaxHystName = "temp#_max_hyst";
+static const char *kMonTempMinHystName = "temp#_min_hyst";
+static const char *kMonTempCriticalName = "temp#_crit";
+static const char *kMonTempCriticalHystName = "temp#_crit_hyst";
+static const char *kMonTempEmergencyName = "temp#_emergency";
+static const char *kMonTempEmergencyHystName = "temp#_emergency_hyst";
+static const char *kMonTempCritMinName = "temp#_lcrit";
+static const char *kMonTempCritMinHystName = "temp#_lcrit_hyst";
+static const char *kMonTempOffsetName = "temp#_offset";
+static const char *kMonTempLowestName = "temp#_lowest";
+static const char *kMonTempHighestName = "temp#_highest";
 
 static const std::map<MonitorTypes, const char *> kMonitorNameMap = {
     {kMonName, kMonNameFName},
     {kMonTemp, kMonTempFName},
     {kMonFanSpeed, kMonFanSpeedFName},
-    {kMonMaxFanSpeed, kMonMaxFanSpeedFName}
+    {kMonFanCntrlEnable, kMonFanControlEnableName},
+    {kMonMaxFanSpeed, kMonMaxFanSpeedFName},
+    {kMonFanRPMs, kMonFanRPMsName},
+    {kMonPowerCap, kMonPowerCapName},
+    {kMonPowerCapMax, kMonPowerCapMaxName},
+    {kMonPowerCapMin, kMonPowerCapMinName},
+    {kMonTempMax, kMonTempMaxName},
+    {kMonTempMin, kMonTempMinName},
+    {kMonTempMaxHyst, kMonTempMaxHystName},
+    {kMonTempMinHyst, kMonTempMinHystName},
+    {kMonTempCritical, kMonTempCriticalName},
+    {kMonTempCriticalHyst, kMonTempCriticalHystName},
+    {kMonTempEmergency, kMonTempEmergencyName},
+    {kMonTempEmergencyHyst, kMonTempEmergencyHystName},
+    {kMonTempCritMin, kMonTempCritMinName},
+    {kMonTempCritMinHyst, kMonTempCritMinHystName},
+    {kMonTempOffset, kMonTempOffsetName},
+    {kMonTempLowest, kMonTempLowestName},
+    {kMonTempHighest, kMonTempHighestName},
 };
 
 Monitor::Monitor(std::string path) : path_(path) {
@@ -80,55 +119,34 @@ Monitor::Monitor(std::string path) : path_(path) {
 Monitor::~Monitor(void) {
 }
 
-int Monitor::readMonitorStr(MonitorTypes type, std::string *retStr) {
-  auto tempPath = path_;
+std::string
+Monitor::MakeMonitorPath(MonitorTypes type, int32_t sensor_id) {
+  std::string tempPath = path_;
+  std::string fn = kMonitorNameMap.at(type);
 
-  assert(retStr != nullptr);
+  std::replace(fn.begin(), fn.end(), '#', static_cast<char>('0' + sensor_id));
 
   tempPath += "/";
-  tempPath += kMonitorNameMap.at(type);
+  tempPath += fn;
 
-  std::ifstream fs;
-  fs.open(tempPath);
-
-  if (!fs.is_open()) {
-      return -1;
-  }
-  fs >> *retStr;
-  fs.close();
-
-  return 0;
+  return tempPath;
 }
 
-int Monitor::readMonitor(MonitorTypes type, uint32_t *val) {
-  assert(val != nullptr);
-
-  std::string tempStr;
-
-  switch (type)  {
-    case kMonTemp:     // Temperature in millidegrees
-    case kMonFanSpeed:
-    case kMonMaxFanSpeed:
-      if (readMonitorStr(type, &tempStr)) {
-        return -1;
-      }
-      *val = std::stoi(tempStr);
-      return 0;
-
-    default:
-      return -1;
-  }
+int Monitor::writeMonitor(MonitorTypes type, uint32_t sensor_id,
+                                                            std::string val) {
+  std::string sysfs_path = MakeMonitorPath(type, sensor_id);
+  return WriteSysfsStr(sysfs_path, val);
 }
 
 // This string version should work for all valid monitor types
-int Monitor::readMonitor(MonitorTypes type, std::string *val) {
+int Monitor::readMonitor(MonitorTypes type, uint32_t sensor_id,
+                                                           std::string *val) {
   assert(val != nullptr);
 
-  if (readMonitorStr(type, val)) {
-    return -1;
-  }
+  std::string temp_str;
+  std::string sysfs_path = MakeMonitorPath(type, sensor_id);
 
-  return 0;
+  return ReadSysfsStr(sysfs_path, val);
 }
 
 
