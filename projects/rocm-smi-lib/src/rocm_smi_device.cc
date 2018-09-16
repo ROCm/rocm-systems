@@ -43,7 +43,7 @@
 
 #include <assert.h>
 #include <sys/stat.h>
-
+#include <stdint.h>
 #include <string>
 #include <map>
 #include <fstream>
@@ -54,6 +54,7 @@
 
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
+#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace smi {
@@ -63,6 +64,12 @@ static const char *kDevDevIDFName = "device";
 static const char *kDevOverDriveLevelFName = "pp_sclk_od";
 static const char *kDevGPUSClkFName = "pp_dpm_sclk";
 static const char *kDevGPUMClkFName = "pp_dpm_mclk";
+static const char *kDevPowerProfileModeName = "pp_power_profile_mode";
+static const char *kDevPerfLevelAutoStr = "auto";
+static const char *kDevPerfLevelLowStr = "low";
+static const char *kDevPerfLevelHighStr = "high";
+static const char *kDevPerfLevelManualStr = "manual";
+static const char *kDevPerfLevelUnknownStr = "unknown";
 
 static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevPerfLevel, kDevPerfLevelFName},
@@ -70,12 +77,25 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevDevID, kDevDevIDFName},
     {kDevGPUMClk, kDevGPUMClkFName},
     {kDevGPUSClk, kDevGPUSClkFName},
+    {kDevPowerProfileMode, kDevPowerProfileModeName},
+};
+
+static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
+    {RSMI_DEV_PERF_LEVEL_AUTO, kDevPerfLevelAutoStr},
+    {RSMI_DEV_PERF_LEVEL_LOW, kDevPerfLevelLowStr},
+    {RSMI_DEV_PERF_LEVEL_HIGH, kDevPerfLevelHighStr},
+    {RSMI_DEV_PERF_LEVEL_MANUAL, kDevPerfLevelManualStr},
+    {RSMI_DEV_PERF_LEVEL_UNKNOWN, kDevPerfLevelUnknownStr},
 };
 
 static bool isRegularFile(std::string fname) {
   struct stat file_stat;
   stat(fname.c_str(), &file_stat);
   return S_ISREG(file_stat.st_mode);
+}
+
+#define RET_IF_NONZERO(X) { \
+  if (X) return X; \
 }
 
 Device::Device(std::string p) : path_(p) {
@@ -94,16 +114,82 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   tempPath += "/device/";
   tempPath += kDevAttribNameMap.at(type);
 
+  if (!isRegularFile(tempPath)) {
+    return EISDIR;
+  }
+
   std::ifstream fs;
   fs.open(tempPath);
 
-  if (!fs.is_open() || !isRegularFile(tempPath)) {
-      return -1;
+  if (!fs.is_open()) {
+      return errno;
   }
+
   fs >> *retStr;
   fs.close();
 
   return 0;
+}
+
+int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
+  auto tempPath = path_;
+  tempPath += "/device/";
+  tempPath += kDevAttribNameMap.at(type);
+
+  std::ofstream fs;
+  fs.open(tempPath);
+
+  if (!isRegularFile(tempPath)) {
+    return EISDIR;
+  }
+
+  if (!fs.is_open()) {
+      return errno;
+  }
+
+  fs << valStr;
+  fs.close();
+
+  return 0;
+}
+
+int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
+  switch (type) {
+    // The caller is responsible for making sure "val" is within a valid range
+    case kDevOverDriveLevel:  // integer between 0 and 20
+    case kDevPowerProfileMode:
+      return writeDevInfoStr(type, std::to_string(val));
+      break;
+
+    case kDevPerfLevel:  // string: "auto", "low", "high", "manual"
+      return writeDevInfoStr(type,
+                                 kDevPerfLvlMap.at((rsmi_dev_perf_level)val));
+      break;
+
+    case kDevGPUMClk:  // integer (index within num-freq range)
+    case kDevGPUSClk:  // integer (index within num-freq range)
+    case kDevDevID:  // string (read-only)
+    default:
+      break;
+  }
+
+  return -1;
+}
+
+int Device::writeDevInfo(DevInfoTypes type, std::string val) {
+  switch (type) {
+    case kDevGPUMClk:
+    case kDevGPUSClk:
+      return writeDevInfoStr(type, val);
+
+    case kDevOverDriveLevel:
+    case kDevPerfLevel:
+    case kDevDevID:
+    default:
+      break;
+  }
+
+  return -1;
 }
 
 int Device::readDevInfoMultiLineStr(DevInfoTypes type,
@@ -121,7 +207,7 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
 
 
   if (!isRegularFile(tempPath)) {
-    return -1;
+    return EISDIR;
   }
 
   while (std::getline(fs, line)) {
@@ -134,19 +220,18 @@ int Device::readDevInfo(DevInfoTypes type, uint32_t *val) {
   assert(val != nullptr);
 
   std::string tempStr;
+  int ret;
 
   switch (type) {
     case kDevDevID:
-      if (readDevInfoStr(type, &tempStr)) {
-        return -1;
-      }
+      ret = readDevInfoStr(type, &tempStr);
+      RET_IF_NONZERO(ret);
       *val = std::stoi(tempStr, 0, 16);
       break;
 
     case kDevOverDriveLevel:
-      if (readDevInfoStr(type, &tempStr)) {
-        return -1;
-      }
+      ret = readDevInfoStr(type, &tempStr);
+      RET_IF_NONZERO(ret);
       *val = std::stoi(tempStr, 0);
       break;
 
@@ -162,9 +247,8 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
   switch (type) {
     case kDevGPUMClk:
     case kDevGPUSClk:
-      if (readDevInfoMultiLineStr(type, val)) {
-        return -1;
-      }
+    case kDevPowerProfileMode:
+      return readDevInfoMultiLineStr(type, val);
       break;
 
     default:
@@ -181,9 +265,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevPerfLevel:
     case kDevOverDriveLevel:
     case kDevDevID:
-      if (readDevInfoStr(type, val)) {
-        return -1;
-      }
+      return readDevInfoStr(type, val);
       break;
 
     default:
@@ -192,5 +274,6 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
   return 0;
 }
 
+#undef RET_IF_NONZERO
 }  // namespace smi
 }  // namespace amd

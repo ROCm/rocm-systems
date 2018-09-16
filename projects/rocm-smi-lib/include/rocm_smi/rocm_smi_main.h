@@ -50,31 +50,45 @@
 #include <functional>
 #include <set>
 #include <string>
+#include <cstdint>
 
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_monitor.h"
+#include "rocm_smi/rocm_smi_power_mon.h"
 
 namespace amd {
 namespace smi {
 
 class RocmSMI {
  public:
-    RocmSMI(void);
+    RocmSMI(void);  // direct use of this constructor is deprecated; use
+                    // getInstance()
+
     ~RocmSMI(void);
 
+    static RocmSMI& getInstance(void);
+    static std::vector<std::shared_ptr<amd::smi::Device>>&
+                                  monitor_devices() {return s_monitor_devices;}
     uint32_t DiscoverDevices(void);
+    uint32_t DiscoverAMDPowerMonitors(bool force_update = false);
 
     // Will execute "func" for every Device object known about, or until func
     // returns true;
     void IterateSMIDevices(
           std::function<bool(std::shared_ptr<Device>&, void *)> func, void *);
+
  private:
+    // temporarily make public RocmSMI(void);  // force use getInstance()
+
     std::vector<std::shared_ptr<Device>> devices_;
     std::vector<std::shared_ptr<Monitor>> monitors_;
+    std::vector<std::shared_ptr<PowerMon>> power_mons_;
+
     std::set<std::string> amd_monitor_types_;
     void AddToDeviceList(std::string dev_name);
-
     uint32_t DiscoverAMDMonitors(void);
+
+    static std::vector<std::shared_ptr<amd::smi::Device>> s_monitor_devices;
 };
 
 }  // namespace smi

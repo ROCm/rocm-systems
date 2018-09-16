@@ -42,60 +42,111 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
-#define ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
-#include <string>
-#include <memory>
-#include <utility>
-#include <cstdint>
-#include <vector>
 
+#include <assert.h>
+
+#include <fstream>
+#include <string>
+#include <cstdint>
+#include <map>
+#include <iostream>
+#include <sstream>
+
+#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_monitor.h"
-#include "rocm_smi/rocm_smi_power_mon.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 namespace amd {
 namespace smi {
 
-enum DevInfoTypes {
-  kDevPerfLevel,
-  kDevOverDriveLevel,
-  kDevDevID,
-  kDevGPUMClk,
-  kDevGPUSClk,
-  kDevPowerProfileMode
+
+static const char *kPowerMonPMName = "amdgpu_pm_info";
+
+// Using this map in case we add other files from dri directory to parse.
+static const std::map<PowerMonTypes, const char *> kMonitorNameMap = {
+    {kPowerMaxGPUPower, kPowerMonPMName},
+    {kPowerAveGPUPower, kPowerMonPMName},
 };
 
-class Device {
- public:
-    explicit Device(std::string path);
-    ~Device(void);
+PowerMon::PowerMon(std::string path) : path_(path) {
+}
+PowerMon::~PowerMon(void) {
+}
 
-    void set_monitor(std::shared_ptr<Monitor> m) {monitor_ = m;}
-    std::string path(void) const {return path_;}
-    const std::shared_ptr<Monitor>& monitor() {return monitor_;}
-    const std::shared_ptr<PowerMon>& power_monitor() {return power_monitor_;}
-    void set_power_monitor(std::shared_ptr<PowerMon> pm) {power_monitor_ = pm;}
+static int parse_power_str(std::string s, PowerMonTypes type, uint64_t *val) {
+  std::stringstream ss(s);
+  std::string ln;
+  std::string search_str;
 
-    int readDevInfo(DevInfoTypes type, uint32_t *val);
-    int readDevInfo(DevInfoTypes type, std::string *val);
-    int readDevInfo(DevInfoTypes type, std::vector<std::string> *retVec);
-    int writeDevInfo(DevInfoTypes type, uint64_t val);
-    int writeDevInfo(DevInfoTypes type, std::string val);
-    uint32_t index(void) const {return index_;}
-    void set_index(uint32_t index) {index_ = index;}
+  assert(val != nullptr);
 
- private:
-    std::shared_ptr<Monitor> monitor_;
-    std::shared_ptr<PowerMon> power_monitor_;
-    std::string path_;
-    uint32_t index_;
-    int readDevInfoStr(DevInfoTypes type, std::string *retStr);
-    int readDevInfoMultiLineStr(DevInfoTypes type,
-                                            std::vector<std::string> *retVec);
-    int writeDevInfoStr(DevInfoTypes type, std::string valStr);
-};
+  switch (type) {
+    case kPowerMaxGPUPower:
+      search_str = "(max GPU)";
+      break;
+
+    case kPowerAveGPUPower:
+      search_str = "(average GPU)";
+      break;
+
+    default:
+      assert(!"Invalid search Power type requested");
+      return EINVAL;
+  }
+
+  bool found = false;
+  while (std::getline(ss, ln)) {
+    if (ln.rfind(search_str) != std::string::npos) {
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    return EPERM;
+  }
+
+  ss.clear();
+  std::stringstream l_ss;
+
+  l_ss << ln;
+
+  double num_units;
+  std::string sz;
+
+  switch (type) {
+    case kPowerMaxGPUPower:
+    case kPowerAveGPUPower:
+      l_ss >> num_units;
+      l_ss >> sz;
+      assert(sz == "W");  // We only expect Watts at this time
+      *val = num_units * 1000;  // Convert Watts to milliwatts
+      break;
+
+    default:
+      assert(!"Invalid search Power type requested");
+      return EINVAL;
+  }
+  ss.clear();
+  return 0;
+}
+
+int PowerMon::readPowerValue(PowerMonTypes type, uint64_t *power) {
+  auto tempPath = path_;
+  std::string fstr;
+
+  assert(power != nullptr);
+
+  tempPath += "/";
+  tempPath += kMonitorNameMap.at(type);
+  int ret = ReadSysfsStr(tempPath, &fstr);
+
+  if (ret) {
+    return ret;
+  }
+
+  return parse_power_str(fstr, type, power);
+}
 
 }  // namespace smi
 }  // namespace amd
-
-#endif  // ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
