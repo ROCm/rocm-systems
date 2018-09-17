@@ -82,7 +82,7 @@ usage() {
   echo "Metrics definition: $PKG_DIR/lib/metrics.xml"
   echo ""
   echo "Usage:"
-  echo "  rpl_run.sh [-h] [--list-basic] [--list-derived] [-i <input .txt/.xml file>] [-o <output CSV file>] <app command line>"
+  echo "  $bin_name [-h] [--list-basic] [--list-derived] [-i <input .txt/.xml file>] [-o <output CSV file>] <app command line>"
   echo ""
   echo "Options:"
   echo "  -h - this help"

@@ -73,6 +73,10 @@ endif ()
 ## Build tests
 add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 
+## Create symlinks for packaging and install
+add_custom_target ( rocprof-link ALL
+                    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink rpl_run.sh rocprof-link )
 ## Install information
 #if ( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
 #message ( "CMAKE default prefix: ${CMAKE_INSTALL_PREFIX}" )
@@ -88,6 +92,10 @@ install ( FILES
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/tblextr.py
           DESTINATION bin
           PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )
+install ( FILES ${PROJECT_BINARY_DIR}/rocprof-link
+          DESTINATION bin
+          PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+          RENAME rocprof )
 # gfx_metrics.xml metrics.xml
 install ( FILES
           ${CMAKE_CURRENT_SOURCE_DIR}/test/tool/metrics.xml
