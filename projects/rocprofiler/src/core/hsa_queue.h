@@ -32,15 +32,6 @@ namespace rocprofiler {
 
 class HsaQueue : public Queue {
  public:
-  typedef void (HsaQueue::*submit_fptr_t)(const packet_t* packet);
-  enum {
-    LEGACY_SLOT_SIZE_W = HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE / sizeof(packet_word_t),
-    LEGACY_SLOT_SIZE_P = HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE / sizeof(packet_t)
-  };
-  struct slot_pm4_t {
-    packet_word_t words[LEGACY_SLOT_SIZE_W];
-  };
-
   HsaQueue(const util::AgentInfo* agent_info, hsa_queue_t* queue) : queue_(queue) {}
 
   void Submit(const packet_t* packet) {

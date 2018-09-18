@@ -224,10 +224,9 @@ typedef struct {
 
 // Profiling callback type
 typedef hsa_status_t (*rocprofiler_callback_t)(
-    const rocprofiler_callback_data_t* callback_data,  // [in] callback data union, data depends on
-                                                       // the callback API id
+    const rocprofiler_callback_data_t* callback_data,  // [in] callback data
     void* user_data,                                   // [in/out] user data passed to the callback
-    rocprofiler_group_t* group);                       // [out] profiling group
+    rocprofiler_group_t* group);                       // [out] returned profiling group
 
 // Queue callbacks
 typedef struct {

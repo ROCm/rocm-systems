@@ -56,6 +56,16 @@ THE SOFTWARE.
 // Internal library methods
 //
 namespace rocprofiler {
+hsa_status_t CreateQueuePro(
+    hsa_agent_t agent,
+    uint32_t size,
+    hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t status, hsa_queue_t *source, void *data),
+    void *data,
+    uint32_t private_segment_size,
+    uint32_t group_segment_size,
+    hsa_queue_t **queue);
+
 decltype(hsa_queue_create)* hsa_queue_create_fn;
 decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
 
@@ -113,6 +123,11 @@ void RestoreHsaApi() {
 
   table->amd_ext_->hsa_amd_queue_intercept_create_fn = hsa_amd_queue_intercept_create_fn;
   table->amd_ext_->hsa_amd_queue_intercept_register_fn = hsa_amd_queue_intercept_register_fn;
+}
+
+void StandaloneIntercept() {
+  ::HsaApiTable* table = kHsaApiTable;
+  table->core_->hsa_queue_create_fn = rocprofiler::CreateQueuePro;
 }
 
 typedef void (*tool_handler_t)();
@@ -195,9 +210,7 @@ DESTRUCTOR_API void destructor() {
 const MetricsDict* GetMetrics(const hsa_agent_t& agent) {
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
   const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
-  if (agent_info == NULL) {
-    EXC_RAISING(HSA_STATUS_ERROR, "agent is not found");
-  }
+  if (agent_info == NULL) EXC_RAISING(HSA_STATUS_ERROR, "agent is not found");
   const MetricsDict* metrics = MetricsDict::Create(agent_info);
   if (metrics == NULL) EXC_RAISING(HSA_STATUS_ERROR, "MetricsDict create failed");
   return metrics;
@@ -207,6 +220,94 @@ hsa_status_t GetExcStatus(const std::exception& e) {
   const util::exception* rocprofiler_exc_ptr = dynamic_cast<const util::exception*>(&e);
   return (rocprofiler_exc_ptr) ? static_cast<hsa_status_t>(rocprofiler_exc_ptr->status())
                                : HSA_STATUS_ERROR;
+}
+
+
+inline size_t CreateEnableCmd(const hsa_agent_t& agent, packet_t* command, const size_t& slot_count) {
+  rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
+  const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
+  const bool is_legacy = (strncmp(agent_info->name, "gfx8", 4) == 0);
+  const size_t packet_count = (is_legacy) ? Profile::LEGACY_SLOT_SIZE_PKT : 1;
+
+  if (packet_count > slot_count) EXC_RAISING(HSA_STATUS_ERROR, "packet_count > slot_count");
+
+  // AQLprofile object
+  hsa_ven_amd_aqlprofile_profile_t profile{};
+  profile.agent = agent_info->dev_id;
+  // Query for cmd buffer size
+  hsa_status_t status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
+    &profile, HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD, NULL);
+  if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "get_info(ENABLE_CMD).size exc");
+  if (profile.command_buffer.size == 0) EXC_RAISING(status, "get_info(ENABLE_CMD).size == 0");
+  // Allocate cmd buffer
+  const size_t aligment_mask = 0x100 - 1;
+  profile.command_buffer.ptr =
+    hsa_rsrc->AllocateSysMemory(agent_info, profile.command_buffer.size);
+  if ((reinterpret_cast<uintptr_t>(profile.command_buffer.ptr) & aligment_mask) != 0) {
+    EXC_RAISING(status, "profile.command_buffer.ptr bad alignment");
+  }
+
+  // Generating cmd packet
+  if (is_legacy) {
+    packet_t packet{};
+
+    // Query for cmd buffer data
+    status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
+      &profile, HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD, &packet);
+    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "get_info(ENABLE_CMD).data exc");
+
+    // Check for legacy GFXIP
+    status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_legacy_get_pm4(&packet, command);
+    if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+  } else {
+    // Query for cmd buffer data
+    status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
+      &profile, HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD, command);
+    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "get_info(ENABLE_CMD).data exc");
+  }
+
+  // Return cmd packet data size
+  return (packet_count * sizeof(packet_t));
+}
+
+hsa_status_t CreateQueuePro(
+    hsa_agent_t agent,
+    uint32_t size,
+    hsa_queue_type32_t type,
+    void (*callback)(hsa_status_t status, hsa_queue_t *source, void *data),
+    void *data,
+    uint32_t private_segment_size,
+    uint32_t group_segment_size,
+    hsa_queue_t **queue)
+{
+  static packet_t enable_cmd_packet[Profile::LEGACY_SLOT_SIZE_PKT];
+  static size_t enable_cmd_size = 0;
+  static std::mutex enable_cmd_mutex;
+
+  // Create HSA queue
+  hsa_status_t status = hsa_queue_create_fn(
+    agent,
+    size,
+    type,
+    callback,
+    data,
+    private_segment_size,
+    group_segment_size,
+    queue);
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  // Create 'Enable' cmd packet
+  if (enable_cmd_size == 0) {
+    std::lock_guard<std::mutex> lck(enable_cmd_mutex);
+    if (enable_cmd_size == 0) {
+      enable_cmd_size = CreateEnableCmd(agent, enable_cmd_packet, Profile::LEGACY_SLOT_SIZE_PKT);
+    }
+  }
+
+  // Enable counters for the queue
+  rocprofiler::util::HsaRsrcFactory::Instance().Submit(*queue, enable_cmd_packet, enable_cmd_size);
+
+  return HSA_STATUS_SUCCESS;
 }
 
 rocprofiler_properties_t rocprofiler_properties;
@@ -261,7 +362,10 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
   if (intercept_mode) {
     rocprofiler::ProxyQueue::HsaIntercept(table);
     rocprofiler::InterceptQueue::HsaIntercept(table);
+  } else {
+    rocprofiler::StandaloneIntercept();
   }
+
   return true;
 }
 

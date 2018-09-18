@@ -35,19 +35,35 @@ endif ()
 ## Util sources
 file( GLOB UTIL_SRC "${TEST_DIR}/util/*.cpp" )
 
+## Standalone test sources
+set ( STEXE_NAME "standalone_test" )
+set ( STST_SRC
+  ${TEST_DIR}/app/standalone_test.cpp
+  ${TEST_DIR}/ctrl/test_hsa.cpp
+)
+
 ## Test control sources
 set ( CTRL_SRC
   ${TEST_DIR}/app/test.cpp
   ${TEST_DIR}/ctrl/test_hsa.cpp
 )
 
-## Test kernel sources
+## Dummy kernel
+set ( DUMMY_NAME dummy_kernel )
+execute_process ( COMMAND sh -xc "cp ${TEST_DIR}/${DUMMY_NAME}/*.hsaco ${PROJECT_BINARY_DIR}" )
+
+## Test kernel
 set ( TEST_NAME simple_convolution )
 set ( KERN_SRC ${TEST_DIR}/${TEST_NAME}/${TEST_NAME}.cpp )
 execute_process ( COMMAND sh -xc "cp ${TEST_DIR}/${TEST_NAME}/*.hsaco ${PROJECT_BINARY_DIR}" )
 
-## Building test executable
-add_executable ( ${EXE_NAME} ${KERN_SRC} ${CTRL_SRC} ${UTIL_SRC} )
+## Building standalone test executable
+add_executable ( ${STEXE_NAME} ${STST_SRC} ${UTIL_SRC} ${KERN_SRC} )
+target_include_directories ( ${STEXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )
+target_link_libraries( ${STEXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt )
+
+## Building ctrl test executable
+add_executable ( ${EXE_NAME} ${CTRL_SRC} ${UTIL_SRC} ${KERN_SRC} )
 target_include_directories ( ${EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )
 target_link_libraries( ${EXE_NAME} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt )
 execute_process ( COMMAND sh -xc "cp ${TEST_DIR}/run.sh ${PROJECT_BINARY_DIR}" )

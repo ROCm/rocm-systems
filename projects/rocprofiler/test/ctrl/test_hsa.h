@@ -35,6 +35,7 @@ class TestHsa : public TestAql {
   static HsaRsrcFactory* HsaInstantiate(const uint32_t agent_ind = agent_id_);
   static void HsaShutdown();
   static void SetQueue(hsa_queue_t* queue) { hsa_queue_ = queue; }
+  static hsa_agent_t HsaAgent() { return agent_info_->dev_id; }
   static uint32_t HsaAgentId() { return agent_id_; }
 
   // Constructor

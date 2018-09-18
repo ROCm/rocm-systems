@@ -71,7 +71,7 @@ void TestHsa::HsaShutdown() {
   if (hsa_rsrc_) hsa_rsrc_->Destroy();
 }
 
-bool TestHsa::Initialize(int arg_cnt, char** arg_list) {
+bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
   std::clog << "TestHsa::Initialize :" << std::endl;
 
   // Instantiate a Timer object
@@ -119,6 +119,8 @@ bool TestHsa::Setup() {
   mem_map_t& mem_map = test_->GetMemMap();
   for (mem_it_t it = mem_map.begin(); it != mem_map.end(); ++it) {
     mem_descr_t& des = it->second;
+    if (des.size == 0) continue;
+
     switch (des.id) {
       case TestKernel::LOCAL_DES_ID:
         des.ptr = hsa_rsrc_->AllocateLocalMemory(agent_info_, des.size);
@@ -244,6 +246,8 @@ bool TestHsa::VerifyResults() {
   void* output = NULL;
   const uint32_t size = test_->GetOutputSize();
   bool suc = false;
+
+  if (size == 0) return true;
 
   // Copy local kernel output buffers from local memory into host memory
   if (test_->IsOutputLocal()) {

@@ -154,6 +154,7 @@ class HsaTimer {
 
 class HsaRsrcFactory {
  public:
+  static const size_t CMD_SLOT_SIZE_B = 0x40;
   typedef std::recursive_mutex mutex_t;
   typedef HsaTimer::timestamp_t timestamp_t;
 

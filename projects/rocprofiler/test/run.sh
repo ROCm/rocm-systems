@@ -22,21 +22,21 @@
 # THE SOFTWARE.
 ################################################################################
 
-test_bin_dflt=./test/ctrl
-
 # paths to ROC profiler and oher libraries
 export LD_LIBRARY_PATH=$PWD
-# enable error messages logging to '/tmp/rocprofiler_log.txt'
-export ROCPROFILER_LOG=1
-
 # ROC profiler library loaded by HSA runtime
 export HSA_TOOLS_LIB=librocprofiler64.so
-# tool library loaded by ROC profiler
-export ROCP_TOOL_LIB=libtool.so
+# enable error messages logging to '/tmp/rocprofiler_log.txt'
+export ROCPROFILER_LOG=1
 # ROC profiler metrics config file
 unset ROCP_PROXY_QUEUE
 # ROC profiler metrics config file
 export ROCP_METRICS=metrics.xml
+
+eval ./test/standalone_test
+
+# tool library loaded by ROC profiler
+export ROCP_TOOL_LIB=libtool.so
 # ROC profiler kernels timing
 export ROCP_TIMESTAMP_ON=1
 # output directory for the tool library, for metrics results file 'results.txt'
@@ -47,21 +47,15 @@ if [ ! -e $ROCP_TOOL_LIB ] ; then
   export ROCP_TOOL_LIB=test/libtool.so
 fi
 
-if [ -n "$1" ] ; then
-  tbin="$*"
-else
-  tbin=$test_bin_dflt
-fi
-
 export ROCP_KITER=100
 export ROCP_DITER=100
 export ROCP_INPUT=input.xml
-eval $tbin
+eval ./test/ctrl
 
-#export ROCP_KITER=1
-#export ROCP_DITER=4
-#export ROCP_INPUT=input1.xml
-#eval $tbin
+export ROCP_KITER=1
+export ROCP_DITER=4
+export ROCP_INPUT=input1.xml
+eval ./test/ctrl
 
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
