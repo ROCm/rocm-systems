@@ -195,7 +195,7 @@ class MetricsDict {
   }
 
   static hsa_ven_amd_aqlprofile_id_query_t Translate(const util::AgentInfo* agent_info, const std::string& block_name) {
-    hsa_ven_amd_aqlprofile_profile_t profile;
+    hsa_ven_amd_aqlprofile_profile_t profile{};
     profile.agent = agent_info->dev_id;
     hsa_ven_amd_aqlprofile_id_query_t query = {block_name.c_str(), 0, 0};
     hsa_status_t status =

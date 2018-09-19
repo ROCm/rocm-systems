@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include "ctrl/test_hsa.h"
 #include "util/test_assert.h"
 
-template <class Kernel, class Test> bool RunKernel(int argc, char* argv[], int count = 1) {
+template <class Kernel, class Test> bool RunKernel(int argc = 0, char* argv[] = NULL, int count = 1) {
   bool ret_val = false;
 
   // Create test kernel object

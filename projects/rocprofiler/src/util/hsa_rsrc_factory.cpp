@@ -550,7 +550,7 @@ bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
 }
 
 uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet) {
-  const uint32_t slot_size_b = 0x40;
+  const uint32_t slot_size_b = CMD_SLOT_SIZE_B;
 
   // adevance command queue
   const uint64_t write_idx = hsa_queue_load_write_index_relaxed(queue);
@@ -578,7 +578,7 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet) {
 }
 
 uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes) {
-  const uint32_t slot_size_b = 0x40;
+  const uint32_t slot_size_b = CMD_SLOT_SIZE_B;
   if ((size_bytes & (slot_size_b - 1)) != 0) {
     fprintf(stderr, "HsaRsrcFactory::Submit: Bad packet size %zx\n", size_bytes);
     abort();
