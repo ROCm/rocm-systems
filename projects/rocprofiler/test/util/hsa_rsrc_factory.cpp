@@ -128,13 +128,13 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
 #ifdef ROCP_LD_AQLPROFILE
   status = LoadAqlProfileLib(&aqlprofile_api_);
 #else
-  status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_AQLPROFILE, 1, 0, &aqlprofile_api_);
+  status = hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_AQLPROFILE, hsa_ven_amd_aqlprofile_VERSION_MAJOR, sizeof(aqlprofile_api_), &aqlprofile_api_);
 #endif
   CHECK_STATUS("aqlprofile API table load failed", status);
 
   // Get Loader API table
   loader_api_ = {0};
-  status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_LOADER, 1, 0, &loader_api_);
+  status = hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(loader_api_), &loader_api_);
   CHECK_STATUS("loader API table query failed", status);
 
   // Instantiate HSA timer
@@ -520,6 +520,7 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
 
 // Print the various fields of Hsa Gpu Agents
 bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
+  std::cout << std::flush;
   std::clog << header << " :" << std::endl;
 
   const AgentInfo* agent_info;
@@ -543,7 +544,7 @@ bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
 }
 
 uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet) {
-  const uint32_t slot_size_b = 0x40;
+  const uint32_t slot_size_b = CMD_SLOT_SIZE_B;
 
   // adevance command queue
   const uint64_t write_idx = hsa_queue_load_write_index_relaxed(queue);
@@ -571,7 +572,7 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet) {
 }
 
 uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes) {
-  const uint32_t slot_size_b = 0x40;
+  const uint32_t slot_size_b = CMD_SLOT_SIZE_B;
   if ((size_bytes & (slot_size_b - 1)) != 0) {
     fprintf(stderr, "HsaRsrcFactory::Submit: Bad packet size %zx\n", size_bytes);
     abort();
