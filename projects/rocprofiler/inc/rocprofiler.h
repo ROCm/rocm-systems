@@ -484,6 +484,7 @@ struct rocprofiler_hsa_callback_data_t {
     struct {
       hsa_device_type_t type;                         // type of assigned device
       uint32_t id;                                    // id of assigned device
+      hsa_agent_t agent;                              // device HSA agent handle
       const void* ptr;                                // ptr the device is assigned to
     } device;
     struct {

@@ -169,6 +169,7 @@ class HsaInterceptor {
       hsa_agent_t agent = *agent_p;
       rocprofiler_hsa_callback_data_t data{};
       data.device.id = util::HsaRsrcFactory::Instance().GetAgentInfo(agent)->dev_index;
+      data.device.agent = agent;
       data.device.ptr = ptr;
 
       HSA_RT(hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &data.device.type));

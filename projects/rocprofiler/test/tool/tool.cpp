@@ -847,6 +847,7 @@ hsa_status_t hsa_unified_callback(
     case ROCPROFILER_HSA_CB_ID_DEVICE:
       printf("  device type = 0x%x\n", data->device.type);
       printf("  device id = %u\n", data->device.id);
+      printf("  device agent = 0x%lx\n", data->device.agent.handle);
       printf("  assigned ptr = %p\n", data->device.ptr);
       break;
     case ROCPROFILER_HSA_CB_ID_MEMCOPY:
