@@ -154,7 +154,10 @@ class InterceptQueue {
         free(const_cast<char*>(kernel_name));
         // Injecting profiling start/stop packets
         if ((status != HSA_STATUS_SUCCESS) || (group.context == NULL)) {
-          if (tracker_entry != NULL) tracker_->Delete(tracker_entry);
+          if (tracker_entry != NULL) {
+            const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = tracker_entry->orig;
+            tracker_->Delete(tracker_entry);
+          }
         } else {
           Context* context = reinterpret_cast<Context*>(group.context);
 
