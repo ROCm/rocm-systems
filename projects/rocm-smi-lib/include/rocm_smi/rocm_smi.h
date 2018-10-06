@@ -184,7 +184,7 @@ typedef uint64_t rsmi_bit_field;
 /**
  * @brief Number of possible power profiles that a system could support
  */
-#define RSMI_MAX_NUM_POWER_PROFILES sizeof(rsmi_bit_field)
+#define RSMI_MAX_NUM_POWER_PROFILES (sizeof(rsmi_bit_field) * 8)
 
 /**
  * @brief This structure contains information about which power profiles are
