@@ -29,6 +29,9 @@ THE SOFTWARE.
 template <class Kernel, class Test> bool RunKernel(int argc = 0, char* argv[] = NULL, int count = 1) {
   bool ret_val = false;
 
+  if (getenv("ROC_TEST_TRACE") == NULL) std::clog.rdbuf(NULL);
+
+
   // Create test kernel object
   Kernel test_kernel;
   TestAql* test_aql = new TestHsa(&test_kernel);

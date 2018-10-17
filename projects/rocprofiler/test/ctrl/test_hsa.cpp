@@ -50,15 +50,6 @@ HsaRsrcFactory* TestHsa::HsaInstantiate(const uint32_t agent_ind) {
       return NULL;
     }
     std::clog << "> Using agent[" << agent_ind << "] : " << agent_info_->name << std::endl;
-
-    // Create an instance of Aql Queue
-    if (hsa_queue_ == NULL) {
-      uint32_t num_pkts = 128;
-      if (hsa_rsrc_->CreateQueue(agent_info_, num_pkts, &hsa_queue_) == false) {
-        hsa_queue_ = NULL;
-        TEST_ASSERT(false);
-      }
-    }
   }
   return hsa_rsrc_;
 }
@@ -73,6 +64,15 @@ void TestHsa::HsaShutdown() {
 
 bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
   std::clog << "TestHsa::Initialize :" << std::endl;
+
+  // Create an instance of Aql Queue
+  if (hsa_queue_ == NULL) {
+    uint32_t num_pkts = 128;
+    if (hsa_rsrc_->CreateQueue(agent_info_, num_pkts, &hsa_queue_) == false) {
+      hsa_queue_ = NULL;
+      TEST_ASSERT(false);
+    }
+  }
 
   // Instantiate a Timer object
   setup_timer_idx_ = hsa_timer_.CreateTimer();
@@ -222,7 +222,7 @@ bool TestHsa::Run() {
   // Submit AQL packet to the queue
   const uint64_t que_idx = hsa_rsrc_->Submit(hsa_queue_, &aql);
 
-  std::clog << "> Waiting on kernel dispatch signal, que_idx=" << que_idx << std::endl;
+  std::clog << "> Waiting on kernel dispatch signal, que_idx=" << que_idx << std::endl << std::flush;
 
   // Wait on the dispatch signal until the kernel is finished.
   // Update wait condition to HSA_WAIT_STATE_ACTIVE for Polling
@@ -283,5 +283,7 @@ void TestHsa::PrintTime() {
 bool TestHsa::Cleanup() {
   hsa_executable_destroy(hsa_exec_);
   hsa_signal_destroy(hsa_signal_);
+  hsa_queue_destroy(hsa_queue_);
+  hsa_queue_ = NULL;
   return true;
 }

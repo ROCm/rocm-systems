@@ -37,5 +37,6 @@ const char* InterceptQueue::kernel_none_ = "";
 Tracker* InterceptQueue::tracker_ = NULL;
 bool InterceptQueue::tracker_on_ = false;
 bool InterceptQueue::in_constr_call_ = false;
+InterceptQueue::queue_id_t InterceptQueue::current_queue_id = 0;
 
 }  // namespace rocprofiler

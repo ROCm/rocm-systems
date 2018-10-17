@@ -46,7 +46,7 @@ THE SOFTWARE.
 #include <hsa_ven_amd_aqlprofile.h>
 #include <stdint.h>
 
-#define ROCPROFILER_VERSION_MAJOR 3
+#define ROCPROFILER_VERSION_MAJOR 4
 #define ROCPROFILER_VERSION_MINOR 0
 
 #ifdef __cplusplus
@@ -217,8 +217,11 @@ typedef struct {
   uint32_t agent_index;                                // GPU index
   const hsa_queue_t* queue;                            // HSA queue
   uint64_t queue_index;                                // Index in the queue
+  uint32_t queue_id;                                   // Queue id
   const hsa_kernel_dispatch_packet_t* packet;          // HSA dispatch packet
   const char* kernel_name;                             // Kernel name
+  uint64_t kernel_object;                              // Kernel object pointer
+  int64_t thread_id;                                   // Thread id
   const rocprofiler_dispatch_record_t* record;         // Dispatch record
 } rocprofiler_callback_data_t;
 

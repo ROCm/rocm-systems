@@ -32,8 +32,16 @@ export ROCPROFILER_LOG=1
 unset ROCP_PROXY_QUEUE
 # ROC profiler metrics config file
 export ROCP_METRICS=metrics.xml
+# test trace
+export ROC_TEST_TRACE=1
 
+# tool library loaded by ROC profiler
+export ROCP_TOOL_LIB=./test/libintercept_test.so
+../bin/run_tool.sh ./test/ctrl
+
+unset ROCP_TOOL_LIB
 eval ./test/standalone_test
+
 
 # tool library loaded by ROC profiler
 export ROCP_TOOL_LIB=libtool.so
@@ -47,14 +55,14 @@ if [ ! -e $ROCP_TOOL_LIB ] ; then
   export ROCP_TOOL_LIB=test/libtool.so
 fi
 
-export ROCP_KITER=100
-export ROCP_DITER=100
-export ROCP_INPUT=input.xml
-eval ./test/ctrl
-
 export ROCP_KITER=1
 export ROCP_DITER=4
 export ROCP_INPUT=input1.xml
+eval ./test/ctrl
+
+export ROCP_KITER=100
+export ROCP_DITER=100
+export ROCP_INPUT=input.xml
 eval ./test/ctrl
 
 #valgrind --leak-check=full $tbin

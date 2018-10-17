@@ -417,7 +417,8 @@ bool dump_context_entry(context_entry_t* entry) {
     index,
     entry->data.queue_index,
     nik_name.c_str());
-  if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
+  if (record) fprintf(file_handle, ", gpu-id(%u), time(%lu,%lu,%lu,%lu)",
+    HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index,
     record->dispatch,
     record->begin,
     record->end,
