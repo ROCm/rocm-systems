@@ -48,6 +48,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <stdlib.h>
 
 #include <string>
 #include <cstdint>
@@ -138,6 +139,8 @@ std::vector<std::shared_ptr<amd::smi::Device>> RocmSMI::s_monitor_devices;
 RocmSMI::RocmSMI(void) {
   auto i = 0;
 
+  GetEnvVariables();
+
   while (std::string(kAMDMonitorTypes[i]) != "") {
       amd_monitor_types_.insert(kAMDMonitorTypes[i]);
       ++i;
@@ -165,6 +168,20 @@ RocmSMI& RocmSMI::getInstance(void) {
   return singleton;
 }
 
+static int GetEnvVarInteger(const char *ev_str) {
+  ev_str = getenv(ev_str);
+
+  if (ev_str) {
+    return atoi(ev_str);
+  }
+  return 0;
+}
+
+// Get and store env. variables in this method
+void RocmSMI::GetEnvVariables(void) {
+  env_vars_.debug_output_bitfield = GetEnvVarInteger("RSMI_DEBUG_BITFIELD");
+}
+
 void
 RocmSMI::AddToDeviceList(std::string dev_name) {
   auto ret = 0;
@@ -173,7 +190,7 @@ RocmSMI::AddToDeviceList(std::string dev_name) {
   dev_path += "/";
   dev_path += dev_name;
 
-  auto dev = std::shared_ptr<Device>(new Device(dev_path));
+  auto dev = std::shared_ptr<Device>(new Device(dev_path, &env_vars_));
 
   auto m = monitors_.begin();
 
@@ -214,6 +231,8 @@ uint32_t RocmSMI::DiscoverDevices(void) {
   }
 
   auto drm_dir = opendir(kPathDRMRoot);
+  assert(drm_dir != nullptr);
+
   auto dentry = readdir(drm_dir);
 
   while (dentry != nullptr) {
@@ -261,7 +280,8 @@ uint32_t RocmSMI::DiscoverAMDMonitors(void) {
       fs.close();
 
       if (amd_monitor_types_.find(mon_type) != amd_monitor_types_.end()) {
-        monitors_.push_back(std::shared_ptr<Monitor>(new Monitor(mon_name)));
+        monitors_.push_back(std::shared_ptr<Monitor>(
+                                          new Monitor(mon_name, &env_vars_)));
       }
     }
     dentry = readdir(mon_dir);
@@ -311,7 +331,7 @@ uint32_t RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
 
     if (FileExists(tmp.c_str())) {
       std::shared_ptr<PowerMon> mon =
-                            std::shared_ptr<PowerMon>(new PowerMon(mon_name));
+                std::shared_ptr<PowerMon>(new PowerMon(mon_name, &env_vars_));
       power_mons_.push_back(mon);
       mon->set_dev_index(GetDeviceIndex(dentry->d_name));
     }

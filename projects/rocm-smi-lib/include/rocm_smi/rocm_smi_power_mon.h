@@ -48,6 +48,8 @@
 #include <string>
 #include <cstdint>
 
+#include "rocm_smi/rocm_smi_common.h"
+
 namespace amd {
 namespace smi {
 
@@ -59,7 +61,7 @@ enum PowerMonTypes {
 
 class PowerMon {
  public:
-    explicit PowerMon(std::string path);
+    explicit PowerMon(std::string path, RocmSMI_env_vars const *e);
     ~PowerMon(void);
     const std::string path(void) const {return path_;}
 
@@ -68,8 +70,9 @@ class PowerMon {
     int readPowerValue(PowerMonTypes type, uint64_t *power);
 
  private:
-    uint32_t dev_index_;
     std::string path_;
+    const RocmSMI_env_vars *env_;
+    uint32_t dev_index_;
 };
 
 }  // namespace smi
