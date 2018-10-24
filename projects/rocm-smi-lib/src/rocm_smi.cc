@@ -441,6 +441,12 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
 
   for (uint32_t i = 0; i < f->num_supported; ++i) {
     f->frequency[i] = freq_string_to_int(val_vec[i], &current);
+
+    // Our assumption is that frequencies are read in from lowest to highest.
+    // Check that that is true.
+    if (i > 0) {
+      assert(f->frequency[i-1] <= f->frequency[i]);
+    }
     if (current) {
       // Should only be 1 current frequency
       assert(f->current == RSMI_MAX_NUM_FREQUENCIES + 1);
@@ -511,8 +517,6 @@ static rsmi_status_t set_power_profile(uint32_t dv_ind,
   rsmi_status_t ret;
   rsmi_power_profile_status avail_profiles = {0, RSMI_PWR_PROF_PRST_INVALID, 0};
 
-  // TODO(cf): test if it is valid to OR profiles; if not the following is
-  // not necessary:
   // Determine if the provided profile is valid
   if (!is_power_of_2(profile)) {
     return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;

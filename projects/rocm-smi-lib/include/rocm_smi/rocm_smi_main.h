@@ -55,6 +55,7 @@
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_power_mon.h"
+#include "rocm_smi/rocm_smi_common.h"
 
 namespace amd {
 namespace smi {
@@ -78,17 +79,17 @@ class RocmSMI {
           std::function<bool(std::shared_ptr<Device>&, void *)> func, void *);
 
  private:
-    // temporarily make public RocmSMI(void);  // force use getInstance()
-
     std::vector<std::shared_ptr<Device>> devices_;
     std::vector<std::shared_ptr<Monitor>> monitors_;
     std::vector<std::shared_ptr<PowerMon>> power_mons_;
 
     std::set<std::string> amd_monitor_types_;
     void AddToDeviceList(std::string dev_name);
+    void GetEnvVariables(void);
     uint32_t DiscoverAMDMonitors(void);
 
     static std::vector<std::shared_ptr<amd::smi::Device>> s_monitor_devices;
+    RocmSMI_env_vars env_vars_;
 };
 
 }  // namespace smi

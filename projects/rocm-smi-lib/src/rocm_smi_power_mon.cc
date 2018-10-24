@@ -55,6 +55,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi/rocm_smi_common.h"
 
 namespace amd {
 namespace smi {
@@ -68,7 +69,8 @@ static const std::map<PowerMonTypes, const char *> kMonitorNameMap = {
     {kPowerAveGPUPower, kPowerMonPMName},
 };
 
-PowerMon::PowerMon(std::string path) : path_(path) {
+PowerMon::PowerMon(std::string path, RocmSMI_env_vars const *e) :
+                                                        path_(path), env_(e) {
 }
 PowerMon::~PowerMon(void) {
 }
@@ -139,6 +141,8 @@ int PowerMon::readPowerValue(PowerMonTypes type, uint64_t *power) {
 
   tempPath += "/";
   tempPath += kMonitorNameMap.at(type);
+
+  DBG_FILE_ERROR(tempPath)
   int ret = ReadSysfsStr(tempPath, &fstr);
 
   if (ret) {

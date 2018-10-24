@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2018, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,59 +42,64 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
-#define ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
+#ifndef ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_BASE_H_
+#define ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_BASE_H_
 
 #include <string>
-#include <cstdint>
 
-#include "rocm_smi/rocm_smi_common.h"
-
-namespace amd {
-namespace smi {
-
-enum MonitorTypes {
-  kMonName,
-  kMonTemp,     // Temperature in millidegrees
-  kMonFanSpeed,
-  kMonMaxFanSpeed,
-  kMonFanRPMs,
-  kMonFanCntrlEnable,
-  kMonPowerCap,
-  kMonPowerCapMax,
-  kMonPowerCapMin,
-  kMonTempMax,
-  kMonTempMin,
-  kMonTempMaxHyst,
-  kMonTempMinHyst,
-  kMonTempCritical,
-  kMonTempCriticalHyst,
-  kMonTempEmergency,
-  kMonTempEmergencyHyst,
-  kMonTempCritMin,
-  kMonTempCritMinHyst,
-  kMonTempOffset,
-  kMonTempLowest,
-  kMonTempHighest,
-
-  kMonInvalid = 0xFFFFFFFF,
-};
-
-
-class Monitor {
+class TestBase {
  public:
-    explicit Monitor(std::string path, RocmSMI_env_vars const *e);
-    ~Monitor(void);
-    const std::string path(void) const {return path_;}
-    int readMonitor(MonitorTypes type, uint32_t sensor_ind, std::string *val);
-    int writeMonitor(MonitorTypes type, uint32_t sensor_ind, std::string val);
+  TestBase(void);
+
+  virtual ~TestBase(void);
+
+  enum VerboseLevel {VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS};
+
+  // @Brief: Before run the core measure codes, do something to set up
+  // i.e. init runtime, prepare packet...
+  virtual void SetUp(void);
+
+  // @Brief: Core measurement codes executing here
+  virtual void Run(void);
+
+  // @Brief: Do something clean up
+  virtual void Close(void);
+
+  // @Brief: Display the results
+  virtual void DisplayResults(void) const;
+
+  // @Brief: Display information about the test
+  virtual void DisplayTestInfo(void);
+
+  const std::string & description(void) const {return description_;}
+
+  void set_description(std::string d);
+
+  void set_num_iteration(int num) {
+    num_iteration_ = num;
+  }
+  uint32_t num_iteration(void) const {
+    return num_iteration_;
+  }
+  void set_title(std::string name) {
+    title_ = name;
+  }
+  std::string title(void) const {
+    return title_;
+  }
+
+  void set_verbosity(uint32_t v) {
+    verbosity_ = v;
+  }
+  uint32_t verbosity(void) const {
+    return verbosity_;
+  }
+
  private:
-    std::string MakeMonitorPath(MonitorTypes type, int32_t sensor_id);
-    std::string path_;
-    const RocmSMI_env_vars *env_;
+  uint64_t num_iteration_;   ///< Number of times to execute test
+  std::string description_;
+  std::string title_;   ///< Displayed title of test
+  uint32_t verbosity_;   ///< How much additional output to produce
 };
 
-}  // namespace smi
-}  // namespace amd
-
-#endif  // ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
+#endif  // ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_BASE_H_

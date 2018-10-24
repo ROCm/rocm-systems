@@ -52,6 +52,7 @@
 
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_power_mon.h"
+#include "rocm_smi/rocm_smi_common.h"
 
 namespace amd {
 namespace smi {
@@ -67,7 +68,7 @@ enum DevInfoTypes {
 
 class Device {
  public:
-    explicit Device(std::string path);
+    explicit Device(std::string path, RocmSMI_env_vars const *e);
     ~Device(void);
 
     void set_monitor(std::shared_ptr<Monitor> m) {monitor_ = m;}
@@ -89,6 +90,7 @@ class Device {
     std::shared_ptr<PowerMon> power_monitor_;
     std::string path_;
     uint32_t index_;
+    const RocmSMI_env_vars *env_;
     int readDevInfoStr(DevInfoTypes type, std::string *retStr);
     int readDevInfoMultiLineStr(DevInfoTypes type,
                                             std::vector<std::string> *retVec);

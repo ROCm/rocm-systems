@@ -29,7 +29,6 @@
 cmake_minimum_required(VERSION 3.5.0)
 
 set(ROCM_SMI "rocm_smi")
-set(RSMI_PACKAGE "rsmi")
 set(ROCM_SMI_COMPONENT "lib${ROCM_SMI}")
 set(ROCM_SMI_TARGET "${ROCM_SMI}64")
 
@@ -78,6 +77,7 @@ set(LIB_VERSION_STRING
 set(BUILD_VERSION_STRING
         "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 
+set(CPACK_PACKAGE_FILE_NAME "rocm_smi_lib64-${LIB_VERSION_STRING}")
 ## Verbose output.
 set(CMAKE_VERBOSE_MAKEFILE on)
 
@@ -109,6 +109,7 @@ set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_main.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_monitor.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_power_mon.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_utils.h")
+set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_common.h")
 
 
 # rocm_smi_device.h 
@@ -149,7 +150,6 @@ install(TARGETS ${ROCM_SMI_TARGET}
 install(FILES ${SOURCE_DIR}/include/rocm_smi/rocm_smi.h DESTINATION rocm_smi/include/rocm_smi)
 
 ## Add the packaging directives for the runtime library.
-set(CPACK_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
 
 # TODO set(CPACK_DEBIAN_PACKAGE_HOMEPAGE <GITHUB URL> )
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
