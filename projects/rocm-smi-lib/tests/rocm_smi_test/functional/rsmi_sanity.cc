@@ -48,9 +48,10 @@
 #include <string>
 #include <algorithm>
 #include <vector>
+#include <map>
 
 #include "rocm_smi/rocm_smi.h"
-#include "functional/rsmi_sanity.h"
+#include "rocm_smi_test/functional/rsmi_sanity.h"
 #include "gtest/gtest.h"
 
 static const uint32_t kNumBufferElements = 256;
@@ -86,7 +87,7 @@ static uint32_t gVerbosity = 3;
     } \
 }
 
-#define ALT_ASSERT_EQ(A,B) { \
+#define ALT_ASSERT_EQ(A, B) { \
     if ((A) != (B)) { \
       std::cout << "ASSERT failure: Expected " << #A << " == " << #B << \
         ", but got " << #A << " = " << (A) << ", and " << #B << " = " << \
@@ -334,6 +335,21 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
   return ret;
 }
 
+static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlNameMap = {
+    {RSMI_DEV_PERF_LEVEL_AUTO, "RSMI_DEV_PERF_LEVEL_AUTO"},
+    {RSMI_DEV_PERF_LEVEL_LOW, "RSMI_DEV_PERF_LEVEL_LOW"},
+    {RSMI_DEV_PERF_LEVEL_HIGH, "RSMI_DEV_PERF_LEVEL_HIGH"},
+    {RSMI_DEV_PERF_LEVEL_MANUAL, "RSMI_DEV_PERF_LEVEL_MANUAL"},
+    {RSMI_DEV_PERF_LEVEL_STABLE_STD, "RSMI_DEV_PERF_LEVEL_STABLE_STD"},
+    {RSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK,
+                                       "RSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK"},
+    {RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK,
+                                       "RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK"},
+    {RSMI_DEV_PERF_LEVEL_STABLE_PEAK, "RSMI_DEV_PERF_LEVEL_STABLE_PEAK"},
+
+    {RSMI_DEV_PERF_LEVEL_UNKNOWN, "RSMI_DEV_PERF_LEVEL_UNKNOWN"},
+};
+
 static rsmi_status_t test_set_perf_level(uint32_t dv_ind) {
   rsmi_status_t ret;
 
@@ -345,30 +361,41 @@ static rsmi_status_t test_set_perf_level(uint32_t dv_ind) {
   CHK_ERR_RET(ret)
 
   IF_VERB(STANDARD) {
-    std::cout << "\t**Original Perf Level:" << (uint32_t)orig_pfl << std::endl;
+    std::cout << "\t**Original Perf Level:" <<
+                                 kDevPerfLvlNameMap.at(orig_pfl) << std::endl;
   }
 
-  pfl = (rsmi_dev_perf_level)((orig_pfl + 1) % (RSMI_DEV_PERF_LEVEL_LAST + 1));
+  uint32_t pfl_i = static_cast<uint32_t>(RSMI_DEV_PERF_LEVEL_FIRST);
+  for (; pfl_i <=  static_cast<uint32_t>(RSMI_DEV_PERF_LEVEL_LAST); pfl_i++) {
+    if (pfl_i == static_cast<uint32_t>(orig_pfl)) {
+      continue;
+    }
 
-  IF_VERB(STANDARD) {
-    std::cout << "Set Performance Level to " << (uint32_t)pfl << " ..." <<
-                                                                   std::endl;
+    IF_VERB(STANDARD) {
+      std::cout << "Set Performance Level to " <<
+          kDevPerfLvlNameMap.at(static_cast<rsmi_dev_perf_level>(pfl_i)) <<
+                                                          " ..." << std::endl;
+    }
+    ret = rsmi_dev_perf_level_set(dv_ind,
+                                     static_cast<rsmi_dev_perf_level>(pfl_i));
+    CHK_ERR_RET(ret)
+    ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
+    CHK_ERR_RET(ret)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**New Perf Level:" << kDevPerfLvlNameMap.at(pfl) <<
+                                                                    std::endl;
+    }
   }
-  ret = rsmi_dev_perf_level_set(dv_ind, pfl);
-  CHK_ERR_RET(ret)
-  ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
-  CHK_ERR_RET(ret)
-  IF_VERB(STANDARD) {
-    std::cout << "\t**New Perf Level:" << (uint32_t)pfl << std::endl;
-    std::cout << "Reset Perf level to " << orig_pfl << " ..." << std::endl;
-  }
+  std::cout << "Reset Perf level to " << kDevPerfLvlNameMap.at(orig_pfl) <<
+                                                          " ..." << std::endl;
   ret = rsmi_dev_perf_level_set(dv_ind, orig_pfl);
   CHK_ERR_RET(ret)
   ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
   CHK_ERR_RET(ret)
 
   IF_VERB(STANDARD) {
-    std::cout << "\t**New Perf Level:" << (uint32_t)pfl << std::endl;
+    std::cout << "\t**New Perf Level:" << kDevPerfLvlNameMap.at(pfl) <<
+                                                                    std::endl;
   }
   return ret;
 }
@@ -553,14 +580,20 @@ void TestSanity::Run(void) {
       print_temp_metric(RSMI_TEMP_CURRENT, "Current Temp.");
       print_temp_metric(RSMI_TEMP_MAX, "Temperature max value");
       print_temp_metric(RSMI_TEMP_MIN, "Temperature min value");
-      print_temp_metric(RSMI_TEMP_MAX_HYST, "Temperature hysteresis value for max limit");
-      print_temp_metric(RSMI_TEMP_MIN_HYST, "Temperature hysteresis value for min limit");
+      print_temp_metric(RSMI_TEMP_MAX_HYST,
+                                "Temperature hysteresis value for max limit");
+      print_temp_metric(RSMI_TEMP_MIN_HYST,
+                                "Temperature hysteresis value for min limit");
       print_temp_metric(RSMI_TEMP_CRITICAL, "Temperature critical max value");
-      print_temp_metric(RSMI_TEMP_CRITICAL_HYST, "Temperature hysteresis value for critical limit");
-      print_temp_metric(RSMI_TEMP_EMERGENCY, "Temperature emergency max value");
-      print_temp_metric(RSMI_TEMP_EMERGENCY_HYST, "Temperature hysteresis value for emergency limit");
+      print_temp_metric(RSMI_TEMP_CRITICAL_HYST,
+                           "Temperature hysteresis value for critical limit");
+      print_temp_metric(RSMI_TEMP_EMERGENCY,
+                                           "Temperature emergency max value");
+      print_temp_metric(RSMI_TEMP_EMERGENCY_HYST,
+                          "Temperature hysteresis value for emergency limit");
       print_temp_metric(RSMI_TEMP_CRIT_MIN, "Temperature critical min value");
-      print_temp_metric(RSMI_TEMP_CRIT_MIN_HYST, "Temperature hysteresis value for critical min value");
+      print_temp_metric(RSMI_TEMP_CRIT_MIN_HYST,
+                       "Temperature hysteresis value for critical min value");
       print_temp_metric(RSMI_TEMP_OFFSET, "Temperature offset");
       print_temp_metric(RSMI_TEMP_LOWEST, "Historical minimum temperature");
       print_temp_metric(RSMI_TEMP_HIGHEST, "Historical maximum temperature");

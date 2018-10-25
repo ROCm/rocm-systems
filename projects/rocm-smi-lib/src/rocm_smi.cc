@@ -364,17 +364,8 @@ rsmi_dev_perf_level_get(uint32_t dv_ind, rsmi_dev_perf_level *perf) {
     return ret;
   }
 
-  if (val_str == "auto") {
-    *perf = RSMI_DEV_PERF_LEVEL_AUTO;
-  } else if (val_str == "low") {
-    *perf = RSMI_DEV_PERF_LEVEL_LOW;
-  } else if (val_str == "high") {
-    *perf = RSMI_DEV_PERF_LEVEL_HIGH;
-  } else if (val_str == "manual") {
-    *perf = RSMI_DEV_PERF_LEVEL_MANUAL;
-  } else {
-    *perf = RSMI_DEV_PERF_LEVEL_UNKNOWN;
-  }
+  *perf = amd::smi::Device::perfLvlStrToEnum(val_str);
+
   return ret;
   CATCH
 }

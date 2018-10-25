@@ -42,8 +42,8 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_BASE_H_
-#define ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_BASE_H_
+#ifndef TESTS_ROCM_SMI_TEST_TEST_BASE_H_
+#define TESTS_ROCM_SMI_TEST_TEST_BASE_H_
 
 #include <string>
 
@@ -102,4 +102,4 @@ class TestBase {
   uint32_t verbosity_;   ///< How much additional output to produce
 };
 
-#endif  // ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_BASE_H_
+#endif  // TESTS_ROCM_SMI_TEST_TEST_BASE_H_

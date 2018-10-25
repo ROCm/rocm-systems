@@ -198,7 +198,6 @@ aux_source_directory(${RSMITST_ROOT} rsmitstSources)
 # Header file include path
 
 include_directories(${RSMI_INC_DIR})
-include_directories(${RSMITST_ROOT})
 include_directories(${RSMITST_ROOT}/..)
 include_directories(${RSMITST_ROOT}/gtest/include)
 

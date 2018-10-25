@@ -42,8 +42,8 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
-#define ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
+#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
+#define INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
 #include <string>
 #include <memory>
 #include <utility>
@@ -53,6 +53,7 @@
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_power_mon.h"
 #include "rocm_smi/rocm_smi_common.h"
+#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace smi {
@@ -84,6 +85,7 @@ class Device {
     int writeDevInfo(DevInfoTypes type, std::string val);
     uint32_t index(void) const {return index_;}
     void set_index(uint32_t index) {index_ = index;}
+    static rsmi_dev_perf_level perfLvlStrToEnum(std::string s);
 
  private:
     std::shared_ptr<Monitor> monitor_;
@@ -100,4 +102,4 @@ class Device {
 }  // namespace smi
 }  // namespace amd
 
-#endif  // ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
+#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_

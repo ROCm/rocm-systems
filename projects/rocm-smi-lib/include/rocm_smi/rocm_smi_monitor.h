@@ -42,8 +42,8 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
-#define ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
+#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
+#define INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
 
 #include <string>
 #include <cstdint>
@@ -97,4 +97,4 @@ class Monitor {
 }  // namespace smi
 }  // namespace amd
 
-#endif  // ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
+#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
