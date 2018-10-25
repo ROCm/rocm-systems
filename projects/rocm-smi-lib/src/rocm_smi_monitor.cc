@@ -114,7 +114,8 @@ static const std::map<MonitorTypes, const char *> kMonitorNameMap = {
     {kMonTempHighest, kMonTempHighestName},
 };
 
-Monitor::Monitor(std::string path) : path_(path) {
+Monitor::Monitor(std::string path, RocmSMI_env_vars const *e) :
+                                                        path_(path), env_(e) {
 }
 Monitor::~Monitor(void) {
 }
@@ -135,6 +136,8 @@ Monitor::MakeMonitorPath(MonitorTypes type, int32_t sensor_id) {
 int Monitor::writeMonitor(MonitorTypes type, uint32_t sensor_id,
                                                             std::string val) {
   std::string sysfs_path = MakeMonitorPath(type, sensor_id);
+
+  DBG_FILE_ERROR(sysfs_path)
   return WriteSysfsStr(sysfs_path, val);
 }
 
@@ -146,6 +149,7 @@ int Monitor::readMonitor(MonitorTypes type, uint32_t sensor_id,
   std::string temp_str;
   std::string sysfs_path = MakeMonitorPath(type, sensor_id);
 
+  DBG_FILE_ERROR(sysfs_path)
   return ReadSysfsStr(sysfs_path, val);
 }
 

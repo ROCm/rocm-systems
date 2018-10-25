@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2018, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,59 +42,25 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
-#define ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
 
-#include <string>
-#include <cstdint>
+#ifndef ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+#define ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
 
-#include "rocm_smi/rocm_smi_common.h"
-
-namespace amd {
-namespace smi {
-
-enum MonitorTypes {
-  kMonName,
-  kMonTemp,     // Temperature in millidegrees
-  kMonFanSpeed,
-  kMonMaxFanSpeed,
-  kMonFanRPMs,
-  kMonFanCntrlEnable,
-  kMonPowerCap,
-  kMonPowerCapMax,
-  kMonPowerCapMin,
-  kMonTempMax,
-  kMonTempMin,
-  kMonTempMaxHyst,
-  kMonTempMinHyst,
-  kMonTempCritical,
-  kMonTempCriticalHyst,
-  kMonTempEmergency,
-  kMonTempEmergencyHyst,
-  kMonTempCritMin,
-  kMonTempCritMinHyst,
-  kMonTempOffset,
-  kMonTempLowest,
-  kMonTempHighest,
-
-  kMonInvalid = 0xFFFFFFFF,
+#include <memory>
+#include <vector>
+#if ENABLE_SMI
+#include "rocm_smi/rocm_smi.h"
+#endif
+struct RSMITstGlobals {
+  uint32_t verbosity;
+  uint32_t monitor_verbosity;
+  uint32_t num_iterations;
 };
 
+uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list);
 
-class Monitor {
- public:
-    explicit Monitor(std::string path, RocmSMI_env_vars const *e);
-    ~Monitor(void);
-    const std::string path(void) const {return path_;}
-    int readMonitor(MonitorTypes type, uint32_t sensor_ind, std::string *val);
-    int writeMonitor(MonitorTypes type, uint32_t sensor_ind, std::string val);
- private:
-    std::string MakeMonitorPath(MonitorTypes type, int32_t sensor_id);
-    std::string path_;
-    const RocmSMI_env_vars *env_;
-};
+#if ENABLE_SMI
+void DumpMonitorInfo(const TestBase *test);
+#endif
 
-}  // namespace smi
-}  // namespace amd
-
-#endif  // ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
+#endif  // ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_COMMON_H_

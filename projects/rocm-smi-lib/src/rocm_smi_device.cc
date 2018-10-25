@@ -98,7 +98,7 @@ static bool isRegularFile(std::string fname) {
   if (X) return X; \
 }
 
-Device::Device(std::string p) : path_(p) {
+Device::Device(std::string p, RocmSMI_env_vars const *e) : path_(p), env_(e) {
   monitor_ = nullptr;
 }
 
@@ -114,6 +114,7 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   tempPath += "/device/";
   tempPath += kDevAttribNameMap.at(type);
 
+  DBG_FILE_ERROR(tempPath);
   if (!isRegularFile(tempPath)) {
     return EISDIR;
   }
@@ -121,6 +122,7 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   std::ifstream fs;
   fs.open(tempPath);
 
+  DBG_FILE_ERROR(tempPath);
   if (!fs.is_open()) {
       return errno;
   }
@@ -139,12 +141,14 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
   std::ofstream fs;
   fs.open(tempPath);
 
+  DBG_FILE_ERROR(tempPath);
   if (!isRegularFile(tempPath)) {
     return EISDIR;
   }
 
+  DBG_FILE_ERROR(tempPath);
   if (!fs.is_open()) {
-      return errno;
+    return errno;
   }
 
   fs << valStr;
@@ -206,6 +210,7 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
   std::stringstream buffer;
 
 
+  DBG_FILE_ERROR(tempPath);
   if (!isRegularFile(tempPath)) {
     return EISDIR;
   }

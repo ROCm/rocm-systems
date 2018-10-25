@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2018, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,59 +42,32 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
-#define ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
+#ifndef ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_FUNCTIONAL_RSMI_SANITY_H_
+#define ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_FUNCTIONAL_RSMI_SANITY_H_
 
-#include <string>
-#include <cstdint>
+#include "rocm_smi_test/test_base.h"
 
-#include "rocm_smi/rocm_smi_common.h"
-
-namespace amd {
-namespace smi {
-
-enum MonitorTypes {
-  kMonName,
-  kMonTemp,     // Temperature in millidegrees
-  kMonFanSpeed,
-  kMonMaxFanSpeed,
-  kMonFanRPMs,
-  kMonFanCntrlEnable,
-  kMonPowerCap,
-  kMonPowerCapMax,
-  kMonPowerCapMin,
-  kMonTempMax,
-  kMonTempMin,
-  kMonTempMaxHyst,
-  kMonTempMinHyst,
-  kMonTempCritical,
-  kMonTempCriticalHyst,
-  kMonTempEmergency,
-  kMonTempEmergencyHyst,
-  kMonTempCritMin,
-  kMonTempCritMinHyst,
-  kMonTempOffset,
-  kMonTempLowest,
-  kMonTempHighest,
-
-  kMonInvalid = 0xFFFFFFFF,
-};
-
-
-class Monitor {
+class TestSanity : public TestBase {
  public:
-    explicit Monitor(std::string path, RocmSMI_env_vars const *e);
-    ~Monitor(void);
-    const std::string path(void) const {return path_;}
-    int readMonitor(MonitorTypes type, uint32_t sensor_ind, std::string *val);
-    int writeMonitor(MonitorTypes type, uint32_t sensor_ind, std::string val);
- private:
-    std::string MakeMonitorPath(MonitorTypes type, int32_t sensor_id);
-    std::string path_;
-    const RocmSMI_env_vars *env_;
+    TestSanity();
+
+  // @Brief: Destructor for test case of TestExample
+  virtual ~TestSanity();
+
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
+
+  // @Brief: Core measurement execution
+  virtual void Run();
+
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
+
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
 };
 
-}  // namespace smi
-}  // namespace amd
-
-#endif  // ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
+#endif  // ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_FUNCTIONAL_RSMI_SANITY_H_

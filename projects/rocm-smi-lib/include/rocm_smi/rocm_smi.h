@@ -192,13 +192,19 @@ typedef uint64_t rsmi_bit_field;
  * currently active.
  */
 typedef struct {
-    //!< Which profiles are supported by this system
+    /**
+    * Which profiles are supported by this system
+    */
     rsmi_bit_field available_profiles;
 
-    //!< Which power profile is currently active
+    /**
+    * Which power profile is currently active
+    */
     rsmi_power_profile_preset_masks current;
 
-    //!< How many power profiles are available
+    /**
+    * How many power profiles are available
+    */
     uint32_t num_profiles;
 } rsmi_power_profile_status;
 
@@ -448,10 +454,6 @@ rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
  *
  *  @details Given a device index @p dv_ind, a 0-based sensor index
  *
- *  @param sensor_ind, a metric @p metric and a pointer to an int64_t
- *  @p temperature, this function will write the temperature value for that
- *  metric in millidegrees Celcius to the int64_t pointed to by @p temperature.
- *
  *  @param[in] dv_ind a device index
  *
  *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
@@ -505,30 +507,26 @@ rsmi_status_t rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind,
                                                               int64_t *speed);
 
 /**
- * @brief Set the fan speed for the specfied device with the provided speed,
- * in RPMs.
+ * @brief Get the fan speed for the specfied device in RPMs.
  *
- * @details Given a device index @p dv_ind and a integer value indicating
- * speed @p speed, this function will attempt to set the fan speed to @p speed.
- * An error will be returned if the specified speed is outside the allowable
- * range for the device. The maximum value is RSMI_MAX_FAN_SPEED and the
- * minimum is 0.
+ * @details Given a device index @p dv_ind 
+ * this function will get the fan speed.
  *
  * @param[in] dv_ind a device index
  *
- *  @details Given a device index @p dv_ind and a pointer to a uint32_t
- *  @p speed, this function will write the current fan speed (a value
- *  between 0 and 255) to the uint32_t pointed to by @p speed
+ * @details Given a device index @p dv_ind and a pointer to a uint32_t
+ * @p speed, this function will write the current fan speed (a value
+ * between 0 and 255) to the uint32_t pointed to by @p speed
  *
- *  @param[in] dv_ind a device index
+ * @param[in] dv_ind a device index
  *
- *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- *  If a device has more than one sensor, it could be greater than 0.
+ * @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
+ * If a device has more than one sensor, it could be greater than 0.
  *
- *  @param[inout] speed a pointer to uint32_t to which the speed will be
- *  written
+ * @param[inout] speed a pointer to uint32_t to which the speed will be
+ * written
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ * @retval RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind,
