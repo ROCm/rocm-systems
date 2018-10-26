@@ -42,8 +42,8 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_H_
-#define ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_H_
+#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_H_
+#define INCLUDE_ROCM_SMI_ROCM_SMI_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -94,14 +94,21 @@ typedef enum {
   RSMI_DEV_PERF_LEVEL_AUTO = 0,       //!< Performance level is "auto"
   RSMI_DEV_PERF_LEVEL_FIRST = RSMI_DEV_PERF_LEVEL_AUTO,
 
-  RSMI_DEV_PERF_LEVEL_LOW,            //!< Keep PowerPlay levels "low",
-                                      //!< regardless of workload
-  RSMI_DEV_PERF_LEVEL_HIGH,           //!< Keep PowerPlay levels "high",
-                                      //!< regardless of workload
-  RSMI_DEV_PERF_LEVEL_MANUAL,         //!< Only use values defined by manually
-                                      //!< setting the RSMI_CLK_TYPE_SYS speed
+  RSMI_DEV_PERF_LEVEL_LOW,              //!< Keep PowerPlay levels "low",
+                                        //!< regardless of workload
+  RSMI_DEV_PERF_LEVEL_HIGH,             //!< Keep PowerPlay levels "high",
+                                        //!< regardless of workload
+  RSMI_DEV_PERF_LEVEL_MANUAL,           //!< Only use values defined by manually
+                                        //!< setting the RSMI_CLK_TYPE_SYS speed
+  RSMI_DEV_PERF_LEVEL_STABLE_STD,       //!< Stable power state with profiling
+                                        //!< clocks
+  RSMI_DEV_PERF_LEVEL_STABLE_PEAK,      //!< Stable power state with peak clocks
+  RSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK,  //!< Stable power state with minimum
+                                        //!< memory clock
+  RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK,  //!< Stable power state with minimum
+                                        //!< system clock
 
-  RSMI_DEV_PERF_LEVEL_LAST = RSMI_DEV_PERF_LEVEL_MANUAL,
+  RSMI_DEV_PERF_LEVEL_LAST = RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK,
 
   RSMI_DEV_PERF_LEVEL_UNKNOWN = 0x100   //!< Unknown performance level
 } rsmi_dev_perf_level;
@@ -762,4 +769,4 @@ rsmi_status_string(rsmi_status_t status, const char **status_string);
 #ifdef __cplusplus
 }
 #endif  // __cplusplus
-#endif  // ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_H_
+#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_H_

@@ -69,6 +69,10 @@ static const char *kDevPerfLevelAutoStr = "auto";
 static const char *kDevPerfLevelLowStr = "low";
 static const char *kDevPerfLevelHighStr = "high";
 static const char *kDevPerfLevelManualStr = "manual";
+static const char *kDevPerfLevelStandardStr = "profile_standard";
+static const char *kDevPerfLevelMinMClkStr = "profile_min_mclk";
+static const char *kDevPerfLevelMinSClkStr = "profile_min_sclk";
+static const char *kDevPerfLevelPeakStr = "profile_peak";
 static const char *kDevPerfLevelUnknownStr = "unknown";
 
 static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
@@ -85,6 +89,11 @@ static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
     {RSMI_DEV_PERF_LEVEL_LOW, kDevPerfLevelLowStr},
     {RSMI_DEV_PERF_LEVEL_HIGH, kDevPerfLevelHighStr},
     {RSMI_DEV_PERF_LEVEL_MANUAL, kDevPerfLevelManualStr},
+    {RSMI_DEV_PERF_LEVEL_STABLE_STD, kDevPerfLevelStandardStr},
+    {RSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK, kDevPerfLevelMinMClkStr},
+    {RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK, kDevPerfLevelMinSClkStr},
+    {RSMI_DEV_PERF_LEVEL_STABLE_PEAK, kDevPerfLevelPeakStr},
+
     {RSMI_DEV_PERF_LEVEL_UNKNOWN, kDevPerfLevelUnknownStr},
 };
 
@@ -157,6 +166,18 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
   return 0;
 }
 
+rsmi_dev_perf_level Device::perfLvlStrToEnum(std::string s) {
+  rsmi_dev_perf_level pl;
+
+  for (pl = RSMI_DEV_PERF_LEVEL_FIRST; pl <= RSMI_DEV_PERF_LEVEL_LAST; ) {
+    if (s == kDevPerfLvlMap.at(pl)) {
+      return pl;
+    }
+    pl = static_cast<rsmi_dev_perf_level>(static_cast<uint32_t>(pl) + 1);
+  }
+  return RSMI_DEV_PERF_LEVEL_UNKNOWN;
+}
+
 int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
   switch (type) {
     // The caller is responsible for making sure "val" is within a valid range
@@ -165,7 +186,7 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
       return writeDevInfoStr(type, std::to_string(val));
       break;
 
-    case kDevPerfLevel:  // string: "auto", "low", "high", "manual"
+    case kDevPerfLevel:  // string: "auto", "low", "high", "manual", ...
       return writeDevInfoStr(type,
                                  kDevPerfLvlMap.at((rsmi_dev_perf_level)val));
       break;

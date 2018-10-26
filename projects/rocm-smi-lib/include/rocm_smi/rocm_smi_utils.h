@@ -42,8 +42,8 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
-#define ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
+#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
+#define INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
 
 #include <string>
 #include <cstdint>
@@ -68,4 +68,4 @@ int WriteSysfsStr(std::string path, std::string val);
 }  // namespace smi
 }  // namespace amd
 
-#endif  // ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
+#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_

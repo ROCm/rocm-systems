@@ -42,8 +42,8 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_POWER_MON_H_
-#define ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_POWER_MON_H_
+#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_POWER_MON_H_
+#define INCLUDE_ROCM_SMI_ROCM_SMI_POWER_MON_H_
 
 #include <string>
 #include <cstdint>
@@ -78,4 +78,4 @@ class PowerMon {
 }  // namespace smi
 }  // namespace amd
 
-#endif  // ROCM_SMI_LIB_INCLUDE_ROCM_SMI_ROCM_SMI_POWER_MON_H_
+#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_POWER_MON_H_

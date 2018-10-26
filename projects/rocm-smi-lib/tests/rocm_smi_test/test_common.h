@@ -43,8 +43,8 @@
  *
  */
 
-#ifndef ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
-#define ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+#ifndef TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+#define TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
 
 #include <memory>
 #include <vector>
@@ -63,4 +63,4 @@ uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list);
 void DumpMonitorInfo(const TestBase *test);
 #endif
 
-#endif  // ROCM_SMI_LIB_TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+#endif  // TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
