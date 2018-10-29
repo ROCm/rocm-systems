@@ -55,7 +55,6 @@ namespace smi {
 
 enum PowerMonTypes {
   kPowerMaxGPUPower,
-  kPowerAveGPUPower,
 };
 
 

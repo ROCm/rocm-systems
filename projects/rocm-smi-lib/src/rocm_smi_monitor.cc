@@ -74,7 +74,7 @@ static const char *kMonNameFName = "name";
 static const char *kMonPowerCapName = "power#_cap";
 static const char *kMonPowerCapMaxName = "power#_cap_max";
 static const char *kMonPowerCapMinName = "power#_cap_min";
-
+static const char *kMonPowerAveName = "power#_average";
 static const char *kMonTempMaxName = "temp#_max";
 static const char *kMonTempMinName = "temp#_min";
 static const char *kMonTempMaxHystName = "temp#_max_hyst";
@@ -99,6 +99,7 @@ static const std::map<MonitorTypes, const char *> kMonitorNameMap = {
     {kMonPowerCap, kMonPowerCapName},
     {kMonPowerCapMax, kMonPowerCapMaxName},
     {kMonPowerCapMin, kMonPowerCapMinName},
+    {kMonPowerAve, kMonPowerAveName},
     {kMonTempMax, kMonTempMaxName},
     {kMonTempMin, kMonTempMinName},
     {kMonTempMaxHyst, kMonTempMaxHystName},

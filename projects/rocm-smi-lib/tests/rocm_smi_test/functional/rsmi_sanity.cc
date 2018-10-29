@@ -641,8 +641,8 @@ void TestSanity::Run(void) {
         std::cout << "\t**Power Cap Range: " << val2_ui64 << " to " <<
                                                  val_ui64 << " uW" << std::endl;
       }
-#if 0    // Same as above (disable for now)
-      err = rsmi_dev_power_ave_get(i, &val_ui64);
+
+      err = rsmi_dev_power_ave_get(i, 0, &val_ui64);
       IF_VERB(STANDARD) {
         std::cout << "\t**Averge Power Usage: ";
         CHK_RSMI_PERM_ERR(err)
@@ -651,7 +651,6 @@ void TestSanity::Run(void) {
         }
         std::cout << "\t=======" << std::endl;
       }
-#endif
     }
     IF_VERB(STANDARD) {
       std::cout << "***** Testing write api's" << std::endl;

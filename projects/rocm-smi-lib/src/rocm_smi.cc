@@ -851,11 +851,10 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
   if (power == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
-  (void)sensor_ind;   // Not used yet
-  // ++sensor_ind;  // power sysfs files have 1-based indices
+  ++sensor_ind;  // power sysfs files have 1-based indices
 
   rsmi_status_t ret;
-  ret = get_power_mon_value(amd::smi::kPowerAveGPUPower, dv_ind, power);
+  ret = get_dev_mon_value(amd::smi::kMonPowerAve, dv_ind, sensor_ind, power);
 
   return ret;
   CATCH

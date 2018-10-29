@@ -446,7 +446,7 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
  *  @param[in] dv_ind a device index
  *
  *  @param[inout] name a pointer to a caller provided char buffer to which the
- *  speed will be written
+ *  name will be written
  *
  *  @param[in] len the length of the caller provided buffer @p name.
  *
@@ -588,7 +588,7 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind,
  *
  *  @details Given a device index @p dv_ind and a pointer to a uint64_t
  *  @p power, this function will write the current average power consumption to
- *  the uint64_t in milliwatts pointed to by @p power. This function requires
+ *  the uint64_t in microwatts pointed to by @p power. This function requires
  *  root privilege.
  *
  *  @param[in] dv_ind a device index
