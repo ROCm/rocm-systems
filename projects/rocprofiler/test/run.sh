@@ -60,8 +60,10 @@ export ROCP_DITER=4
 export ROCP_INPUT=input1.xml
 eval ./test/ctrl
 
-export ROCP_KITER=100
-export ROCP_DITER=100
+export ROCP_KITER=50
+export ROCP_DITER=50
+export ROCP_AGENTS=1
+export ROCP_THRS=1
 export ROCP_INPUT=input.xml
 eval ./test/ctrl
 

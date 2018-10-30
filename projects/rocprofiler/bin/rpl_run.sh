@@ -276,15 +276,16 @@ if [ "$ARG_CK" = "-" ] ; then
 fi
 
 if [ -z "$INPUT_FILE" ] ; then
-  fatal "Need input file"
+  input_base="results"
+  input_type="none"
+else
+  input_base=`echo "$INPUT_FILE" | sed "s/^\(.*\)\.\([^\.]*\)$/\1/"`
+  input_type=`echo "$INPUT_FILE" | sed "s/^\(.*\)\.\([^\.]*\)$/\2/"`
+  if [ -z "${input_base}" -o -z "${input_type}" ] ; then
+    fatal "Bad input file '$INPUT_FILE'"
+  fi
+  input_base=`basename $input_base`
 fi
-
-input_base=`echo "$INPUT_FILE" | sed "s/^\(.*\)\.\([^\.]*\)$/\1/"`
-input_type=`echo "$INPUT_FILE" | sed "s/^\(.*\)\.\([^\.]*\)$/\2/"`
-if [ -z "${input_base}" -o -z "${input_type}" ] ; then
-  fatal "Bad input file '$INPUT_FILE'"
-fi
-input_base=`basename $input_base`
 
 if [ "$OUTPUT_DIR" = "--" ] ; then
   fatal "Bad output dir '$OUTPUT_DIR'"
@@ -309,7 +310,7 @@ input_list=""
 RES_DIR=""
 if [ "$input_type" = "xml" ] ; then
   input_list=$INPUT_FILE
-elif [ "$input_type" = "txt" ] ; then
+elif [ "$input_type" = "txt" -o "$input_type" = "none" ] ; then
   OUTPUT_DIR="-"
   RES_DIR=$DATA_PATH/$DATA_DIR
   if [ -e $RES_DIR ] ; then
@@ -317,7 +318,11 @@ elif [ "$input_type" = "txt" ] ; then
   fi
   mkdir -p $RES_DIR
   echo "RPL: output dir '$RES_DIR'"
-  $BIN_DIR/txt2xml.sh $INPUT_FILE $RES_DIR
+  if [ "$input_type" = "txt" ] ; then
+    $BIN_DIR/txt2xml.sh $INPUT_FILE $RES_DIR
+  else
+    echo "<metric></metric>" > $RES_DIR/input.xml
+  fi
   input_list=`/bin/ls $RES_DIR/input*.xml`
   export ROCPROFILER_SESS=$RES_DIR
 else

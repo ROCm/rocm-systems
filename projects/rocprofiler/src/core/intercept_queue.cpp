@@ -30,13 +30,14 @@ void InterceptQueue::HsaIntercept(HsaApiTable* table) {
 
 InterceptQueue::mutex_t InterceptQueue::mutex_;
 rocprofiler_callback_t InterceptQueue::dispatch_callback_ = NULL;
+InterceptQueue::queue_callback_t InterceptQueue::create_callback_ = NULL;
 InterceptQueue::queue_callback_t InterceptQueue::destroy_callback_ = NULL;
 void* InterceptQueue::callback_data_ = NULL;
 InterceptQueue::obj_map_t* InterceptQueue::obj_map_ = NULL;
 const char* InterceptQueue::kernel_none_ = "";
 Tracker* InterceptQueue::tracker_ = NULL;
 bool InterceptQueue::tracker_on_ = false;
-bool InterceptQueue::in_constr_call_ = false;
+bool InterceptQueue::in_create_call_ = false;
 InterceptQueue::queue_id_t InterceptQueue::current_queue_id = 0;
 
 }  // namespace rocprofiler

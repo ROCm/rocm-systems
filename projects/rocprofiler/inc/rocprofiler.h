@@ -46,7 +46,7 @@ THE SOFTWARE.
 #include <hsa_ven_amd_aqlprofile.h>
 #include <stdint.h>
 
-#define ROCPROFILER_VERSION_MAJOR 4
+#define ROCPROFILER_VERSION_MAJOR 5
 #define ROCPROFILER_VERSION_MINOR 0
 
 #ifdef __cplusplus
@@ -234,6 +234,7 @@ typedef hsa_status_t (*rocprofiler_callback_t)(
 // Queue callbacks
 typedef struct {
     rocprofiler_callback_t dispatch;                          // dispatch callback
+    hsa_status_t (*create)(hsa_queue_t* queue, void* data);   // create callback
     hsa_status_t (*destroy)(hsa_queue_t* queue, void* data);  // destroy callback
 } rocprofiler_queue_callbacks_t;
 

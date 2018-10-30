@@ -523,14 +523,14 @@ PUBLIC_API hsa_status_t rocprofiler_get_metrics(const rocprofiler_t* handle) {
 // Set/remove queue callbacks
 PUBLIC_API hsa_status_t rocprofiler_set_queue_callbacks(rocprofiler_queue_callbacks_t callbacks, void* data) {
   API_METHOD_PREFIX
-  rocprofiler::InterceptQueue::SetCallbacks(callbacks.dispatch, callbacks.destroy, data);
+  rocprofiler::InterceptQueue::SetCallbacks(callbacks.dispatch, callbacks.create, callbacks.destroy, data);
   API_METHOD_SUFFIX
 }
 
 // Remove queue callbacks
 PUBLIC_API hsa_status_t rocprofiler_remove_queue_callbacks() {
   API_METHOD_PREFIX
-  rocprofiler::InterceptQueue::SetCallbacks(NULL, NULL, NULL);
+  rocprofiler::InterceptQueue::SetCallbacks(NULL, NULL, NULL, NULL);
   API_METHOD_SUFFIX
 }
 

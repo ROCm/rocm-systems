@@ -32,24 +32,27 @@ THE SOFTWARE.
 class TestHsa : public TestAql {
  public:
   // Instantiate HSA resources
-  static HsaRsrcFactory* HsaInstantiate(const uint32_t agent_ind = agent_id_);
+  static HsaRsrcFactory* HsaInstantiate();
   static void HsaShutdown();
-  static void SetQueue(hsa_queue_t* queue) { hsa_queue_ = queue; }
-  static hsa_agent_t HsaAgent() { return agent_info_->dev_id; }
-  static uint32_t HsaAgentId() { return agent_id_; }
 
   // Constructor
   explicit TestHsa(TestKernel* test) : test_(test), name_(test->Name()) {
     total_time_taken_ = 0;
     setup_time_taken_ = 0;
     dispatch_time_taken_ = 0;
+    agent_info_ = NULL;
+    hsa_queue_ = NULL;
+    my_queue_ = false;
     hsa_exec_ = {};
   }
 
   // Get methods for Agent Info, HAS queue, HSA Resourcse Manager
-  const AgentInfo* GetAgentInfo() { return agent_info_; }
-  hsa_queue_t* GetQueue() { return hsa_queue_; }
   HsaRsrcFactory* GetRsrcFactory() { return hsa_rsrc_; }
+  hsa_agent_t HsaAgent() { return agent_info_->dev_id; }
+  const AgentInfo* GetAgentInfo() { return agent_info_; }
+  void SetAgentInfo(const AgentInfo* agent_info) { agent_info_ = agent_info; }
+  hsa_queue_t* GetQueue() { return hsa_queue_; }
+  void SetQueue(hsa_queue_t* queue) { hsa_queue_ = queue; }
 
   // Initialize application environment including setting
   // up of various configuration parameters based on
@@ -106,14 +109,12 @@ class TestHsa : public TestAql {
   // Instance of Hsa Resources Factory
   static HsaRsrcFactory* hsa_rsrc_;
 
-  // GPU id
-  static uint32_t agent_id_;
-
   // Handle to an Hsa Gpu Agent
-  static const AgentInfo* agent_info_;
+  const AgentInfo* agent_info_;
 
   // Handle to an Hsa Queue
-  static hsa_queue_t* hsa_queue_;
+  hsa_queue_t* hsa_queue_;
+  bool my_queue_;
 
   // Test kernel name
   std::string name_;

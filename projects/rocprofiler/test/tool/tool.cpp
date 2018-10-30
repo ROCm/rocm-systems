@@ -1020,10 +1020,10 @@ extern "C" PUBLIC_API void OnUnloadTool() {
   // Dump stored profiling output data
   fflush(stdout);
   if (result_file_opened) {
-    printf("\nROCPRofiler: %u contexts collected", context_collected); fflush(stdout);
+    printf("\nROCPRofiler:"); fflush(stdout);
     dump_context_array(NULL);
     fclose(result_file_handle);
-    printf(", output directory %s\n", result_prefix);
+    printf(" %u contexts collected, output directory %s\n", context_collected, result_prefix);
   } else {
     if (context_collected != context_count) {
       results_output_break();

@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include "ctrl/test_hsa.h"
 #include "util/test_assert.h"
 
-template <class Kernel, class Test> bool RunKernel(int argc = 0, char* argv[] = NULL, int count = 1) {
+template <class Kernel, class Test> bool RunKernel(int argc = 0, char* argv[] = NULL, const AgentInfo* agent_info = NULL, hsa_queue_t* queue = NULL, int count = 1) {
   bool ret_val = false;
 
   if (getenv("ROC_TEST_TRACE") == NULL) std::clog.rdbuf(NULL);
@@ -34,8 +34,12 @@ template <class Kernel, class Test> bool RunKernel(int argc = 0, char* argv[] = 
 
   // Create test kernel object
   Kernel test_kernel;
-  TestAql* test_aql = new TestHsa(&test_kernel);
-  test_aql = new Test(test_aql);
+
+  TestHsa* test_hsa = new TestHsa(&test_kernel);
+  test_hsa->SetAgentInfo(agent_info);
+  test_hsa->SetQueue(queue);
+
+  TestAql* test_aql = new Test(test_hsa);
   TEST_ASSERT(test_aql != NULL);
   if (test_aql == NULL) return 1;
 

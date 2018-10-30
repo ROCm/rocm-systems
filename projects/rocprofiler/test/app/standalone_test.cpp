@@ -145,8 +145,7 @@ int main() {
   TEST_STATUS(status == HSA_STATUS_SUCCESS);
 
   // Test initialization
-  TestHsa::SetQueue(prof_queue);
-  TestHsa::HsaInstantiate(0);
+  TestHsa::HsaInstantiate();
 
   // Dispatching profiled kernel n-times to collect all counter groups data
   const unsigned group_n = 0;
@@ -157,9 +156,9 @@ int main() {
   for (unsigned ind = 0; ind < 3; ++ind) {
 #if 1
     const unsigned queue_ind = ind % queue_count;
-    TestHsa::SetQueue(queue[queue_ind]);
-    // ret_val = RunKernel<DummyKernel, TestAql>();
-    ret_val = RunKernel<SimpleConvolution, TestAql>();
+    hsa_queue_t* prof_queue = queue[queue_ind];
+    //ret_val = RunKernel<DummyKernel, TestAql>(0, NULL, NULL, prof_queue);
+    ret_val = RunKernel<SimpleConvolution, TestAql>(0, NULL, NULL, prof_queue);
     std::cout << "run kernel, queue " << queue_ind << std::endl;
 #else
     sleep(3);

@@ -63,8 +63,8 @@ class InterceptQueue {
     std::lock_guard<mutex_t> lck(mutex_);
     hsa_status_t status = HSA_STATUS_ERROR;
 
-    if (in_constr_call_) EXC_ABORT(status, "recursive InterceptQueueCreate()");
-    in_constr_call_ = true;
+    if (in_create_call_) EXC_ABORT(status, "recursive InterceptQueueCreate()");
+    in_create_call_ = true;
 
     ProxyQueue* proxy = ProxyQueue::Create(agent, size, type, queue_event_callback, data, private_segment_size,
                                            group_segment_size, queue, &status);
@@ -84,7 +84,11 @@ class InterceptQueue {
     obj->queue_id = current_queue_id;
     ++current_queue_id;
 
-    in_constr_call_ = false;
+    if (create_callback_ != NULL) {
+      status = create_callback_(*queue, callback_data_);
+    }
+
+    in_create_call_ = false;
     return status;
   }
 
@@ -208,10 +212,15 @@ class InterceptQueue {
     }
   }
 
-  static void SetCallbacks(rocprofiler_callback_t dispatch_callback, queue_callback_t destroy_callback, void* data) {
+  static void SetCallbacks(rocprofiler_callback_t dispatch_callback,
+                           queue_callback_t create_callback,
+                           queue_callback_t destroy_callback,
+                           void* data)
+  {
     std::lock_guard<mutex_t> lck(mutex_);
     callback_data_ = data;
     dispatch_callback_ = dispatch_callback;
+    create_callback_ = create_callback;
     destroy_callback_ = destroy_callback;
   }
 
@@ -303,13 +312,14 @@ class InterceptQueue {
   static mutex_t mutex_;
   static const packet_word_t header_type_mask = (1ul << HSA_PACKET_HEADER_WIDTH_TYPE) - 1;
   static rocprofiler_callback_t dispatch_callback_;
+  static queue_callback_t create_callback_;
   static queue_callback_t destroy_callback_;
   static void* callback_data_;
   static obj_map_t* obj_map_;
   static const char* kernel_none_;
   static Tracker* tracker_;
   static bool tracker_on_;
-  static bool in_constr_call_;
+  static bool in_create_call_;
   static queue_id_t current_queue_id;
 
   hsa_queue_t* const queue_;

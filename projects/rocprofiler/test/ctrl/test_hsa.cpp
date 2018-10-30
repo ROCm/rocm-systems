@@ -29,58 +29,52 @@ THE SOFTWARE.
 #include "util/hsa_rsrc_factory.h"
 
 HsaRsrcFactory* TestHsa::hsa_rsrc_ = NULL;
-const AgentInfo* TestHsa::agent_info_ = NULL;
-hsa_queue_t* TestHsa::hsa_queue_ = NULL;
-uint32_t TestHsa::agent_id_ = 0;
 
-HsaRsrcFactory* TestHsa::HsaInstantiate(const uint32_t agent_ind) {
+HsaRsrcFactory* TestHsa::HsaInstantiate() {
   // Instantiate an instance of Hsa Resources Factory
   if (hsa_rsrc_ == NULL) {
-    agent_id_ = agent_ind;
-
     hsa_rsrc_ = HsaRsrcFactory::Create();
-
     // Print properties of the agents
     hsa_rsrc_->PrintGpuAgents("> GPU agents");
-
-    // Create an instance of Gpu agent
-    if (!hsa_rsrc_->GetGpuAgentInfo(agent_ind, &agent_info_)) {
-      agent_info_ = NULL;
-      std::cerr << "> error: agent[" << agent_ind << "] is not found" << std::endl;
-      return NULL;
-    }
-    std::clog << "> Using agent[" << agent_ind << "] : " << agent_info_->name << std::endl;
   }
   return hsa_rsrc_;
 }
 
 void TestHsa::HsaShutdown() {
-  if (hsa_queue_ != NULL) {
-    hsa_queue_destroy(hsa_queue_);
-    hsa_queue_ = NULL;
-  }
   if (hsa_rsrc_) hsa_rsrc_->Destroy();
 }
 
 bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
   std::clog << "TestHsa::Initialize :" << std::endl;
 
-  // Create an instance of Aql Queue
-  if (hsa_queue_ == NULL) {
-    uint32_t num_pkts = 128;
-    if (hsa_rsrc_->CreateQueue(agent_info_, num_pkts, &hsa_queue_) == false) {
-      hsa_queue_ = NULL;
-      TEST_ASSERT(false);
-    }
-  }
-
   // Instantiate a Timer object
   setup_timer_idx_ = hsa_timer_.CreateTimer();
   dispatch_timer_idx_ = hsa_timer_.CreateTimer();
 
-  if (HsaInstantiate(agent_id_) == NULL) {
+  if (hsa_rsrc_ == NULL) {
     TEST_ASSERT(false);
     return false;
+  }
+
+  // Create an instance of Gpu agent
+  if (agent_info_ == NULL) {
+    const uint32_t agent_id = 0;
+    if (!hsa_rsrc_->GetGpuAgentInfo(agent_id, &agent_info_)) {
+      agent_info_ = NULL;
+      std::cerr << "> error: agent[" << agent_id << "] is not found" << std::endl;
+      return NULL;
+    }
+  }
+  std::clog << "> Using agent[" << agent_info_->dev_index << "] : " << agent_info_->name << std::endl;
+
+  // Create an instance of Aql Queue
+  if (hsa_queue_ == NULL) {
+    const uint32_t num_pkts = 128;
+    if (hsa_rsrc_->CreateQueue(agent_info_, num_pkts, &hsa_queue_) == false) {
+      hsa_queue_ = NULL;
+      TEST_ASSERT(false);
+    }
+    my_queue_ = true;
   }
 
   // Obtain handle of signal
@@ -283,7 +277,8 @@ void TestHsa::PrintTime() {
 bool TestHsa::Cleanup() {
   hsa_executable_destroy(hsa_exec_);
   hsa_signal_destroy(hsa_signal_);
-  hsa_queue_destroy(hsa_queue_);
+  if (my_queue_) hsa_queue_destroy(hsa_queue_);
   hsa_queue_ = NULL;
+  agent_info_ = NULL;
   return true;
 }
