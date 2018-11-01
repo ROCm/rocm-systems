@@ -1,49 +1,39 @@
 #include "gfx_metrics.xml"
 
 <gfx8>
-  # average for 16 instances
-  <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) ></metric>
-  <metric name="TA_BUSY_max" expr=max(TA_TA_BUSY,16) ></metric>
-  <metric name="TA_BUSY_min" expr=min(TA_TA_BUSY,16) ></metric>
-  # sum for 16 instances
-  <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=sum(TA_FLAT_READ_WAVEFRONTS,16) ></metric>
-  <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum" expr=sum(TA_FLAT_WRITE_WAVEFRONTS,16) ></metric>
-  <metric name="TCC_HIT_sum" expr=sum(TCC_HIT,16) ></metric>
-  <metric name="TCC_MISS_sum" expr=sum(TCC_MISS,16) ></metric>
-  <metric name="TCC_MC_RDREQ_sum" expr=sum(TCC_MC_RDREQ,16) ></metric>
-  <metric name="TCC_MC_WRREQ_sum" expr=sum(TCC_MC_WRREQ,16) ></metric>
-  <metric name="TCC_WRREQ_STALL_max" expr=max(TCC_MC_WRREQ_STALL,16) ></metric>
+  <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_max" expr=max(TA_TA_BUSY,16) descr="TA block is busy. Max over TA instances."></metric>
+  <metric name="TA_BUSY_min" expr=min(TA_TA_BUSY,16) descr="TA block is busy. Min over TA instances."></metric>
 
-  # FETCH_SIZE, kilobytes
-  # The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
-  <metric name="FETCH_SIZE" expr=(TCC_MC_RDREQ_sum*32)/1024 ></metric>
-  # WRITE_SIZE, kilobytes
-  # The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
-  <metric name="WRITE_SIZE" expr=(TCC_MC_WRREQ_sum*32)/1024 ></metric>
+  <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=sum(TA_FLAT_READ_WAVEFRONTS,16) descr="Number of flat opcode reads processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum" expr=sum(TA_FLAT_WRITE_WAVEFRONTS,16) descr="Number of flat opcode writes processed by the TA. Sum over TA instances."></metric>
+  <metric name="TCC_HIT_sum" expr=sum(TCC_HIT,16) descr="Number of cache hits. Sum over TCC instances."></metric>
+  <metric name="TCC_MISS_sum" expr=sum(TCC_MISS,16) descr="Number of cache misses. Sum over TCC instances."></metric>
+  <metric name="TCC_MC_RDREQ_sum" expr=sum(TCC_MC_RDREQ,16) descr="Number of 32-byte reads. Sum over TCC instaces."></metric>
+  <metric name="TCC_MC_WRREQ_sum" expr=sum(TCC_MC_WRREQ,16) descr="Number of 32-byte transactions going over the TC_MC_wrreq interface. Sum over TCC instaces."></metric>
+  <metric name="TCC_WRREQ_STALL_max" expr=max(TCC_MC_WRREQ_STALL,16) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+
+  <metric name="FETCH_SIZE" expr=(TCC_MC_RDREQ_sum*32)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_SIZE" expr=(TCC_MC_WRREQ_sum*32)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
 </gfx8>
 
 <gfx9>
-  # average for 16 instances
-  <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) ></metric>
-  <metric name="TA_BUSY_max" expr=max(TA_TA_BUSY,16) ></metric>
-  <metric name="TA_BUSY_min" expr=min(TA_TA_BUSY,16) ></metric>
-  # sum for 16 instances
-  <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=sum(TA_FLAT_READ_WAVEFRONTS,16) ></metric>
-  <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum" expr=sum(TA_FLAT_WRITE_WAVEFRONTS,16) ></metric>
-  <metric name="TCC_HIT_sum" expr=sum(TCC_HIT,16) ></metric>
-  <metric name="TCC_MISS_sum" expr=sum(TCC_MISS,16) ></metric>
-  <metric name="TCC_EA_RDREQ_32B_sum" expr=sum(TCC_EA_RDREQ_32B,16) ></metric>
-  <metric name="TCC_EA_RDREQ_sum" expr=sum(TCC_EA_RDREQ,16) ></metric>
-  <metric name="TCC_EA_WRREQ_sum" expr=sum(TCC_EA_WRREQ,16) ></metric>
-  <metric name="TCC_EA_WRREQ_64B_sum" expr=sum(TCC_EA_WRREQ_64B,16) ></metric>
-  <metric name="TCC_WRREQ_STALL_max" expr=max(TCC_EA_WRREQ_STALL,16) ></metric>
+  <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_max" expr=max(TA_TA_BUSY,16) descr="TA block is busy. Max over TA instances."></metric>
+  <metric name="TA_BUSY_min" expr=min(TA_TA_BUSY,16) descr="TA block is busy. Min over TA instances."></metric>
 
-  # FETCH_SIZE, kilobytes
-  # The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
-  <metric name="FETCH_SIZE" expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024 ></metric>
-  # WRITE_SIZE, kilobytes
-  # The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
-  <metric name="WRITE_SIZE" expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 ></metric>
+  <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=sum(TA_FLAT_READ_WAVEFRONTS,16) descr="Number of flat opcode reads processed by the TA. Sum over TA instances."></metric>
+  <metric name="TA_FLAT_WRITE_WAVEFRONTS_sum" expr=sum(TA_FLAT_WRITE_WAVEFRONTS,16) descr="Number of flat opcode writes processed by the TA. Sum over TA instances."></metric>
+  <metric name="TCC_HIT_sum" expr=sum(TCC_HIT,16) descr="Number of cache hits. Sum over TCC instances."></metric>
+  <metric name="TCC_MISS_sum" expr=sum(TCC_MISS,16) descr="Number of cache misses. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_32B_sum" expr=sum(TCC_EA_RDREQ_32B,16) descr="Number of 32-byte TCC/EA read requests. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_RDREQ_sum" expr=sum(TCC_EA_RDREQ,16) descr="Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_sum" expr=sum(TCC_EA_WRREQ,16) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_EA_WRREQ_64B_sum" expr=sum(TCC_EA_WRREQ_64B,16) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+  <metric name="TCC_WRREQ_STALL_max" expr=max(TCC_EA_WRREQ_STALL,16) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+
+  <metric name="FETCH_SIZE" expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_SIZE" expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
 </gfx9>
 
 <global>

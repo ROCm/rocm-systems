@@ -346,6 +346,8 @@ if [ -n "$csv_output" ] ; then
   python $BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST
   if [ "$?" -eq 0 ] ; then
     echo "RPL: '$csv_output' is generated"
+  else
+    echo "Data extracting error: $OUTPUT_LIST'"
   fi
 fi
 
