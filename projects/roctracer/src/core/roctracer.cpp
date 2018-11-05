@@ -347,11 +347,11 @@ PUBLIC_API const char* roctracer_error_string() {
 
 // Return ID string by given domain and activity/API ID
 // NULL returned on the error and the library errno is set
-PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_t& id) {
+PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_t& id, const uint32_t& kind) {
   API_METHOD_PREFIX
   switch (domain) {
     case ACTIVITY_DOMAIN_HCC_OPS: {
-      return Kalmar::CLAMP::GetCmdName(id);
+      return Kalmar::CLAMP::GetCmdName(kind);
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
@@ -365,9 +365,8 @@ PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_
 }
 
 // Enable runtime API callbacks
-PUBLIC_API roctracer_status_t roctracer_enable_api_callback(
+PUBLIC_API roctracer_status_t roctracer_enable_callback(
     roctracer_domain_t domain,
-    uint32_t kind,
     uint32_t id,
     roctracer_rtapi_callback_t callback,
     void* user_data)
@@ -378,7 +377,6 @@ PUBLIC_API roctracer_status_t roctracer_enable_api_callback(
       if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
       id = HIP_API_ID_ANY;
     case ACTIVITY_DOMAIN_HIP_API: {
-      if (kind != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_HIP_API: kind != 0, not supported");
       hipError_t hip_err = hipRegisterApiCallback(id, (void*)callback, user_data);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterApiCallback error(" << hip_err << ")");
       break;
@@ -390,9 +388,8 @@ PUBLIC_API roctracer_status_t roctracer_enable_api_callback(
 }
 
 // Enable runtime API callbacks
-PUBLIC_API roctracer_status_t roctracer_disable_api_callback(
+PUBLIC_API roctracer_status_t roctracer_disable_callback(
     roctracer_domain_t domain,
-    uint32_t kind,
     uint32_t id)
 {
   API_METHOD_PREFIX
@@ -401,7 +398,6 @@ PUBLIC_API roctracer_status_t roctracer_disable_api_callback(
       if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
       id = HIP_API_ID_ANY;
     case ACTIVITY_DOMAIN_HIP_API: {
-      if (kind != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_HIP_API: kind != 0, not supported");
       hipError_t hip_err = hipRemoveApiCallback(id);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveApiCallback error(" << hip_err << ")");
       break;
@@ -450,9 +446,8 @@ PUBLIC_API roctracer_status_t roctracer_close_pool(roctracer_pool_t* pool) {
 }
 
 // Enable activity records logging
-PUBLIC_API roctracer_status_t roctracer_enable_api_activity(
+PUBLIC_API roctracer_status_t roctracer_enable_activity(
     roctracer_domain_t domain,
-    uint32_t kind,
     uint32_t id,
     roctracer_pool_t* pool)
 {
@@ -460,19 +455,16 @@ PUBLIC_API roctracer_status_t roctracer_enable_api_activity(
   if (pool == NULL) pool = roctracer_default_pool();
   switch (domain) {
     case ACTIVITY_DOMAIN_ANY:
-      if (kind != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: kind != 0");
       if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
-      roctracer_enable_api_activity(ACTIVITY_DOMAIN_HCC_OPS, hc::HSA_OP_ID_ANY, 0, pool);
-      roctracer_enable_api_activity(ACTIVITY_DOMAIN_HIP_API, 0, HIP_API_ID_ANY, pool);
+      roctracer_enable_activity(ACTIVITY_DOMAIN_HCC_OPS, hc::HSA_OP_ID_ANY, pool);
+      roctracer_enable_activity(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY, pool);
       break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
-      if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_HCC_OPS: id != 0, not supported");
-      const bool err = Kalmar::CLAMP::SetActivityCallback(kind, (void*)roctracer::AsyncActivityCallback, (void*)pool);
+      const bool err = Kalmar::CLAMP::SetActivityCallback(id, (void*)roctracer::AsyncActivityCallback, (void*)pool);
       if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "Kalmar::CLAMP::SetActivityCallback error");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-      if (kind != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_HIP_API: kind != 0, not supported");
       const hipError_t hip_err = hipRegisterActivityCallback(id, (void*)roctracer::SyncActivityCallback, (void*)pool);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterActivityCallback error(" << hip_err << ")");
       break;
@@ -484,27 +476,23 @@ PUBLIC_API roctracer_status_t roctracer_enable_api_activity(
 }
 
 // Disable activity records logging
-PUBLIC_API roctracer_status_t roctracer_disable_api_activity(
+PUBLIC_API roctracer_status_t roctracer_disable_activity(
     roctracer_domain_t domain,
-    uint32_t kind,
     uint32_t id)
 {
   API_METHOD_PREFIX
   switch (domain) {
     case ACTIVITY_DOMAIN_ANY:
-      if (kind != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: kind != 0");
       if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
-      roctracer_disable_api_activity(ACTIVITY_DOMAIN_HCC_OPS, hc::HSA_OP_ID_ANY, 0);
-      roctracer_disable_api_activity(ACTIVITY_DOMAIN_HIP_API, 0, HIP_API_ID_ANY);
+      roctracer_disable_activity(ACTIVITY_DOMAIN_HCC_OPS, hc::HSA_OP_ID_ANY);
+      roctracer_disable_activity(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY);
       break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
-      if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_HCC_OPS: id != 0, not supported");
-      const bool err = Kalmar::CLAMP::SetActivityCallback(kind, NULL, NULL);
+      const bool err = Kalmar::CLAMP::SetActivityCallback(id, NULL, NULL);
       if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "Kalmar::CLAMP::SetActivityCallback(NULL) error");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-      if (kind != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_HIP_API: kind != 0, not supported");
       const hipError_t hip_err = hipRemoveActivityCallback(id);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveActivityCallback error(" << hip_err << ")");
       break;
@@ -516,7 +504,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_api_activity(
 }
 
 // Flush available activity records
-PUBLIC_API roctracer_status_t roctracer_flush_api_activity(roctracer_pool_t* pool) {
+PUBLIC_API roctracer_status_t roctracer_flush_activity(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   if (pool == NULL) pool = roctracer_default_pool();
   roctracer::MemoryPool* memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);

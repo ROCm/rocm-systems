@@ -161,7 +161,7 @@ void hip_api_callback(
   (void)arg;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
   fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
-    roctracer_id_string(ACTIVITY_DOMAIN_HIP_API, cid),
+    roctracer_id_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
     cid,
     data->correlation_id,
     (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
@@ -211,7 +211,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
   const roctracer_record_t* end_record = reinterpret_cast<const roctracer_record_t*>(end);
   fprintf(stdout, "\tActivity records:\n"); fflush(stdout);
   while (record < end_record) {
-    const char * name = roctracer_id_string(record->domain, record->activity_id);
+    const char * name = roctracer_id_string(record->domain, record->activity_id, record->kind);
     fprintf(stdout, "\t%s\tcorrelation_id(%lu) time_ns(%lu:%lu) device_id(%d) stream_id(%lu)",
       name,
       record->correlation_id,
@@ -220,7 +220,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
       record->device_id,
       record->stream_id
     );
-    if (record->kind == hc::HSA_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
+    if (record->activity_id == hc::HSA_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
     fprintf(stdout, "\n");
     fflush(stdout);
     ROCTRACER_CALL(roctracer_next_record(record, &record));
@@ -236,15 +236,15 @@ void start_tracing() {
   properties.buffer_callback_fun = activity_callback;
   ROCTRACER_CALL(roctracer_open_pool(&properties));
   // Enable HIP API callbacks
-  ROCTRACER_CALL(roctracer_enable_api_callback(ACTIVITY_DOMAIN_ANY, 0, 0, hip_api_callback, NULL));
+  ROCTRACER_CALL(roctracer_enable_callback(ACTIVITY_DOMAIN_ANY, 0, hip_api_callback, NULL));
   // Enable HIP activity tracing
-  ROCTRACER_CALL(roctracer_enable_api_activity(ACTIVITY_DOMAIN_ANY, 0, 0));
+  ROCTRACER_CALL(roctracer_enable_activity(ACTIVITY_DOMAIN_ANY, 0));
 }
 
 // Stop tracing routine
 void stop_tracing() {
-  ROCTRACER_CALL(roctracer_disable_api_callback(ACTIVITY_DOMAIN_ANY, 0, 0));
-  ROCTRACER_CALL(roctracer_disable_api_activity(ACTIVITY_DOMAIN_ANY, 0, 0));
+  ROCTRACER_CALL(roctracer_disable_callback(ACTIVITY_DOMAIN_ANY, 0));
+  ROCTRACER_CALL(roctracer_disable_activity(ACTIVITY_DOMAIN_ANY, 0));
   ROCTRACER_CALL(roctracer_close_pool());
   std::cout << "# STOP  #############################" << std::endl << std::flush;
 }
