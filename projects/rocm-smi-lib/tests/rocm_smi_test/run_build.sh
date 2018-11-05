@@ -3,7 +3,7 @@
 
 
 # these are required:
-ROCM_DIR=/home/cfreehil/git/compute/out/ubuntu-16.04/16.04
+ROCM_DIR=/home/cfreehil/github/rocm_smi_lib/build
 #ROCM_DIR=/opt/rocm
 
 mkdir -p build

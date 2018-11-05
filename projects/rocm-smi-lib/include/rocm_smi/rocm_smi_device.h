@@ -86,6 +86,9 @@ class Device {
     uint32_t index(void) const {return index_;}
     void set_index(uint32_t index) {index_ = index;}
     static rsmi_dev_perf_level perfLvlStrToEnum(std::string s);
+    uint64_t bdfid(void) const {return bdfid_;}
+    void set_bdfid(uint64_t val) {bdfid_ = val;}
+    uint64_t get_bdfid(void) const {return bdfid_;}
 
  private:
     std::shared_ptr<Monitor> monitor_;
@@ -97,6 +100,7 @@ class Device {
     int readDevInfoMultiLineStr(DevInfoTypes type,
                                             std::vector<std::string> *retVec);
     int writeDevInfoStr(DevInfoTypes type, std::string valStr);
+    uint64_t bdfid_;
 };
 
 }  // namespace smi

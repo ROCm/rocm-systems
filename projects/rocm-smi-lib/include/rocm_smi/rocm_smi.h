@@ -84,6 +84,9 @@ typedef enum {
   RSMI_STATUS_INTERNAL_EXCEPTION,        //!< An internal exception was caught
   RSMI_STATUS_INPUT_OUT_OF_BOUNDS,       //!< The provided input is out of
                                          //!< allowable or safe range
+  RSMI_INITIALIZATION_ERROR,             //!< An error occurred when rsmi
+                                         //!< initializing internal data
+                                         //!< structures
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
 
@@ -272,12 +275,34 @@ rsmi_status_t rsmi_shut_down(void);
 rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
 
 /**
+ *  @brief Get the unique PCI device identifier associated for a device
+ *
+ *  @details Give a device index @p dev_ind and a pointer to a uint64_t @p
+ *  bdfid, this function will write the Bus/Device/Function PCI identifier
+ *  (BDFID) associated with device @p dev_ind to the value pointed to by
+ *  @bdfid.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] bdfid a pointer to uint64_t to which the device bdfid value
+ *  will be written
+ *
+ *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+
+ */
+rsmi_status_t rsmi_dev_pci_id_get(uint32_t dev_ind, uint64_t *bdfid);
+
+/**
  *  @brief Get the device id associated with the device with provided device
  *  index.
  *
  *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p id,
  *  this function will write the device id value to the uint64_t pointed to by
- *  @p id
+ *  @p id. This ID is an identification of the type of device, so calling this
+ *  function for different devices will give the same value if they are kind
+ *  of device. Consequently, this function should not be used to distinguish
+ *  one device from another. rsmi_dev_pci_id_get() should be used to get a
+ *  unique identifier.
  *
  *  @param[in] dv_ind a device index
  *

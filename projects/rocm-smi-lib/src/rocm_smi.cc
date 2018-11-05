@@ -58,6 +58,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi/rocm_smi_exception.h"
 
 static const uint32_t kMaxOverdriveLevel = 20;
 
@@ -67,6 +68,10 @@ static rsmi_status_t handleException() {
   } catch (const std::bad_alloc& e) {
     debug_print("RSMI exception: BadAlloc\n");
     return RSMI_STATUS_OUT_OF_RESOURCES;
+  } catch (const amd::smi::rsmi_exception& e) {
+    debug_print("Exception caught: %s.\n", e.what());
+    return e.error_code();
+    return RSMI_STATUS_INTERNAL_EXCEPTION;
   } catch (const std::exception& e) {
     debug_print("Unhandled exception: %s\n", e.what());
     assert(false && "Unhandled exception.");
@@ -332,6 +337,20 @@ rsmi_num_monitor_devices(uint32_t *num_devices) {
   amd::smi::RocmSMI smi = amd::smi::RocmSMI::getInstance();
 
   *num_devices = smi.monitor_devices().size();
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
+  TRY
+
+  if (bdfid == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  GET_DEV_FROM_INDX
+
+  *bdfid = dev->get_bdfid();
   return RSMI_STATUS_SUCCESS;
   CATCH
 }

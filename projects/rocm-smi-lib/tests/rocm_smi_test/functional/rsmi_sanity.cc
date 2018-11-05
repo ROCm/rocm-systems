@@ -556,6 +556,13 @@ void TestSanity::Run(void) {
         std::cout << "\t**Monitor name: " << name << std::endl;
       }
 
+      err = rsmi_dev_pci_id_get(i, &val_ui64);
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "\t**PCI ID (BDFID): 0x" << std::hex << val_ui64;
+        std::cout << " (" << std::dec << val_ui64 << ")" << std::endl;
+      }
+
       auto print_temp_metric = [&](rsmi_temperature_metric met,
                                                           std::string label) {
         err = rsmi_dev_temp_metric_get(i, 0, met, &val_i64);

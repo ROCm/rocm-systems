@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2018, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,57 +42,31 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_MAIN_H_
-#define INCLUDE_ROCM_SMI_ROCM_SMI_MAIN_H_
 
-#include <vector>
-#include <memory>
-#include <functional>
-#include <set>
+#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
+#define INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
+
+#include <exception>
 #include <string>
-#include <cstdint>
-
-#include "rocm_smi/rocm_smi_device.h"
-#include "rocm_smi/rocm_smi_monitor.h"
-#include "rocm_smi/rocm_smi_power_mon.h"
-#include "rocm_smi/rocm_smi_common.h"
 
 namespace amd {
 namespace smi {
 
-class RocmSMI {
+/// @brief Exception type which carries an error code to return to the user.
+class rsmi_exception : public std::exception {
  public:
-    RocmSMI(void);  // direct use of this constructor is deprecated; use
-                    // getInstance()
-
-    ~RocmSMI(void);
-
-    static RocmSMI& getInstance(void);
-    static std::vector<std::shared_ptr<amd::smi::Device>>&
-                                  monitor_devices() {return s_monitor_devices;}
-    uint32_t DiscoverDevices(void);
-    uint32_t DiscoverAMDPowerMonitors(bool force_update = false);
-
-    // Will execute "func" for every Device object known about, or until func
-    // returns non-zero;
-    uint32_t IterateSMIDevices(
-      std::function<uint32_t(std::shared_ptr<Device>&, void *)> func, void *);
+  rsmi_exception(rsmi_status_t error, const char* description) :
+                                            err_(error), desc_(description) {}
+  rsmi_status_t error_code() const noexcept { return err_; }
+  const char* what() const noexcept override { return desc_.c_str(); }
 
  private:
-    std::vector<std::shared_ptr<Device>> devices_;
-    std::vector<std::shared_ptr<Monitor>> monitors_;
-    std::vector<std::shared_ptr<PowerMon>> power_mons_;
-
-    std::set<std::string> amd_monitor_types_;
-    void AddToDeviceList(std::string dev_name);
-    void GetEnvVariables(void);
-    uint32_t DiscoverAMDMonitors(void);
-
-    static std::vector<std::shared_ptr<amd::smi::Device>> s_monitor_devices;
-    RocmSMI_env_vars env_vars_;
+  rsmi_status_t err_;
+  std::string desc_;
 };
 
 }  // namespace smi
 }  // namespace amd
 
-#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_MAIN_H_
+#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
+
