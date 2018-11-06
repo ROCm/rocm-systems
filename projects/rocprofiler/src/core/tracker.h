@@ -49,6 +49,7 @@ class Tracker {
   typedef sig_list_t::iterator sig_list_it_t;
 
   struct entry_t {
+    std::atomic<bool> valid;
     Tracker* tracker;
     sig_list_t::iterator it;
     hsa_agent_t agent;
@@ -100,7 +101,7 @@ class Tracker {
 
     // Adding antry to the list
     mutex_.lock();
-    entry->it = sig_list_.insert(sig_list_.begin(), entry);
+    entry->it = sig_list_.insert(sig_list_.end(), entry);
     mutex_.unlock();
 
     return entry;
@@ -142,7 +143,7 @@ class Tracker {
   void Erase(const sig_list_it_t& it) { Delete(*it); }
 
   // Entry completion
-  void Complete(entry_t* entry) {
+  inline void Complete(entry_t* entry) {
     record_t* record = entry->record;
 
     // Debug trace
@@ -160,6 +161,7 @@ class Tracker {
     record->begin = hsa_rsrc_->SysclockToNs(dispatch_time.start);
     record->end = hsa_rsrc_->SysclockToNs(dispatch_time.end);
     record->complete = hsa_rsrc_->TimestampNs();
+    entry->valid.store(true, std::memory_order_release);
 
     // Original intercepted signal completion
     hsa_signal_t orig = entry->orig;
@@ -174,16 +176,7 @@ class Tracker {
     }
   }
 
-  // Handler for packet completion
-  static bool Handler(hsa_signal_value_t, void* arg) {
-    // Acquire entry
-    entry_t* entry = reinterpret_cast<entry_t*>(arg);
-    volatile std::atomic<void*>* ptr = &entry->handler;
-    while (ptr->load(std::memory_order_acquire) == NULL) sched_yield();
-
-    // Complete entry
-    entry->tracker->Complete(entry);
-
+  inline static void HandleEntry(entry_t* entry) {
     // Call entry handler
     void* handler = static_cast<void*>(entry->handler);
     if (entry->context_active) {
@@ -192,9 +185,42 @@ class Tracker {
       rocprofiler_group_t group{};
       reinterpret_cast<rocprofiler_handler_t>(handler)(group, entry->arg);
     }
-
     // Delete tracker entry
     entry->tracker->Delete(entry);
+  }
+
+  // Handler for packet completion
+  static bool Handler(hsa_signal_value_t, void* arg) {
+    // Acquire entry
+    entry_t* entry = reinterpret_cast<entry_t*>(arg);
+    volatile std::atomic<void*>* ptr = &entry->handler;
+    while (ptr->load(std::memory_order_acquire) == NULL) sched_yield();
+
+    // Complete entry
+    Tracker* tracker = entry->tracker;
+    tracker->Complete(entry);
+
+    if (ordering_enabled_ == false) {
+      HandleEntry(entry);
+    } else {
+      // Acquire last entry
+      entry_t* back = tracker->sig_list_.back();
+      volatile std::atomic<void*>* ptr = &back->handler;
+      while (ptr->load(std::memory_order_acquire) == NULL) sched_yield();
+
+      tracker->handler_mutex_.lock();
+      sig_list_it_t it = tracker->sig_list_.begin();
+      sig_list_it_t end = back->it;
+      while (it != end) {
+        entry = *(it++);
+        if (entry->valid.load(std::memory_order_acquire)) {
+          HandleEntry(entry);
+        } else {
+          break;
+        }
+      }
+      tracker->handler_mutex_.unlock();
+    }
 
     return false;
   }
@@ -203,10 +229,13 @@ class Tracker {
   sig_list_t sig_list_;
   // Inter-thread synchronization
   mutex_t mutex_;
+  mutex_t handler_mutex_;
   // Outstanding dispatches
   std::atomic<uint64_t> outstanding_;
   // HSA resources factory
   util::HsaRsrcFactory* hsa_rsrc_;
+  // Handling ordering enabled
+  static const bool ordering_enabled_ = true;
   // Enable tracing
   static const bool trace_on_ = false;
 };

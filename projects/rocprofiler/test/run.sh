@@ -42,7 +42,6 @@ export ROCP_TOOL_LIB=./test/libintercept_test.so
 unset ROCP_TOOL_LIB
 eval ./test/standalone_test
 
-
 # tool library loaded by ROC profiler
 export ROCP_TOOL_LIB=libtool.so
 # ROC profiler kernels timing
