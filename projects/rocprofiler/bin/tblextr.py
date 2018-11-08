@@ -45,7 +45,7 @@ def parse_res(infile):
   if not os.path.isfile(infile): fatal("Error: input file '" + infile + "' not found")
   inp = open(infile, 'r')
 
-  beg_pattern = re.compile("^dispatch\[(\d*)\], queue_index\(\d*\), kernel_name\(\"([^\"]*)\"\)")
+  beg_pattern = re.compile("^dispatch\[(\d*)\],.* kernel-name\(\"([^\"]*)\"\)")
   ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
   var_pattern = re.compile("^\s*([^\s]*)\s+\((\d*)\)")
 
@@ -55,7 +55,7 @@ def parse_res(infile):
 
     m = var_pattern.match(record)
     if m:
-      if not dispatch_number in var_table: fatal("Error: dispatch number not unique '" + str(dispatch_number) + "'")
+      if not dispatch_number in var_table: fatal("Error: dispatch number not found '" + str(dispatch_number) + "'")
       var = m.group(1)
       val = m.group(2)
       var_table[dispatch_number][m.group(1)] = m.group(2)

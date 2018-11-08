@@ -413,12 +413,13 @@ bool dump_context_entry(context_entry_t* entry) {
   FILE* file_handle = entry->file_handle;
   const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
 
-  fprintf(file_handle, "dispatch[%u], queue_index(%lu), kernel_name(\"%s\")",
+  fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), kernel-name(\"%s\")",
     index,
+    HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index,
+    entry->data.queue_id,
     entry->data.queue_index,
     nik_name.c_str());
-  if (record) fprintf(file_handle, ", gpu-id(%u), time(%lu,%lu,%lu,%lu)",
-    HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index,
+  if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
     record->dispatch,
     record->begin,
     record->end,
