@@ -76,11 +76,12 @@ if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
 endif ()
 
 message ( "---------Install-Dir: ${CMAKE_INSTALL_PREFIX}/${ROCTRACER_NAME}" )
+set ( CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} )
 install ( TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION ${ROCTRACER_NAME}/lib )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer.h DESTINATION ${ROCTRACER_NAME}/include )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hip.h DESTINATION ${ROCTRACER_NAME}/include )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hcc.h DESTINATION ${ROCTRACER_NAME}/include )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer/prof_protocol.h DESTINATION ${ROCTRACER_NAME}/include )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer/prof_protocol.h DESTINATION ${ROCTRACER_NAME}/include/roctracer )
 
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" )
