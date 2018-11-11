@@ -69,3 +69,35 @@ include ( ${LIB_DIR}/CMakeLists.txt )
 ## Set the VERSION and SOVERSION values
 set_property ( TARGET ${TARGET_NAME} PROPERTY VERSION "${LIB_VERSION_STRING}" )
 set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${BUILD_VERSION_MAJOR}" )
+
+## If the library is a release, strip the target library
+if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
+  add_custom_command ( TARGET ${ROCTRACER_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *.so )
+endif ()
+
+message ( "---------Install-Dir: ${CMAKE_INSTALL_PREFIX}/${ROCTRACER_NAME}" )
+install ( TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION ${ROCTRACER_NAME}/lib )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer.h DESTINATION ${ROCTRACER_NAME}/include )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hip.h DESTINATION ${ROCTRACER_NAME}/include )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hcc.h DESTINATION ${ROCTRACER_NAME}/include )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer/prof_protocol.h DESTINATION ${ROCTRACER_NAME}/include )
+
+## Packaging directives
+set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" )
+set ( CPACK_PACKAGE_NAME "${ROCTRACER_NAME}-dev" )
+set ( CPACK_PACKAGE_VENDOR "AMD" )
+set ( CPACK_PACKAGE_VERSION_MAJOR ${BUILD_VERSION_MAJOR} )
+set ( CPACK_PACKAGE_VERSION_MINOR ${BUILD_VERSION_MINOR} )
+set ( CPACK_PACKAGE_VERSION_PATCH ${BUILD_VERSION_PATCH} )
+set ( CPACK_PACKAGE_CONTACT "Advanced Micro Devices Inc." )
+set ( CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD ROCTRACER library" )
+set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" )
+
+## Debian package specific variables
+set ( CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst;${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm" )
+
+## RPM package specific variables
+set ( CPACK_RPM_PRE_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_post" )
+set ( CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_postun" )
+
+include ( CPack )
