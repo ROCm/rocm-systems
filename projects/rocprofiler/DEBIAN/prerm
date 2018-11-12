@@ -3,7 +3,7 @@
 set -e
 
 rm_ldconfig() {
-    rm -f /etc/ld.so.conf.d/libhsa-rocprofiler64.conf && ldconfig
+    rm -f /etc/ld.so.conf.d/librocprofiler64.conf && ldconfig
 }
 
 case "$1" in
