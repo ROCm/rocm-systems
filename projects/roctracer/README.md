@@ -48,7 +48,7 @@ The library source tree:
   ln -s HIP/build HIP/lib
   
  - Build ROCtracer
-  cd <your path>/roctracer && mkdir build && cd build && cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm .. && make -j <nproc>
+  cd <your path>/roctracer && mkdir build && cd build && cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm -DLOCAL_BUILD=1 .. && make -j <nproc>
 
  - To run test
   make mytest
