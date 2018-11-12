@@ -103,24 +103,6 @@ TEST(rsmitst, RSMISanityTest) {
 
   RunGenericTest(&tst);
 }
-#if 0
-
-TEST(rocrtstFunc, IPC) {
-  IPCTest ipc;
-  RunGenericTest(&ipc);
-}
-
-TEST(rocrtstFunc, MemoryAccessTests) {
-  MemoryAccessTest mt;
-  RunCustomTestProlog(&mt);
-  mt.CPUAccessToGPUMemoryTest();
-  mt.GPUAccessToCPUMemoryTest();
-  RunCustomTestEpilog(&mt);
-}
-
-
-
-#endif
 
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
@@ -130,7 +112,7 @@ int main(int argc, char** argv) {
   // Set some default values
   settings.verbosity = 1;
   settings.monitor_verbosity = 1;
-  settings.num_iterations = 5;
+  settings.num_iterations = 1;
 
 
   if (ProcessCmdline(&settings, argc, argv)) {

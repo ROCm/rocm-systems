@@ -102,7 +102,8 @@ static rsmi_status_t errno_to_rsmi_status(uint32_t err) {
     case 0:      return RSMI_STATUS_SUCCESS;
     case EACCES: return RSMI_STATUS_PERMISSION;
     case EPERM:  return RSMI_STATUS_NOT_SUPPORTED;
-    case ENOENT: return RSMI_STATUS_FILE_ERROR;
+    case ENOENT:
+    case EISDIR: return RSMI_STATUS_FILE_ERROR;
     default:     return RSMI_STATUS_UNKNOWN_ERROR;
   }
 }
@@ -1024,5 +1025,24 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
       return RSMI_STATUS_UNKNOWN_ERROR;
   }
   return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
+  TRY
+  std::string val_str;
+   rsmi_status_t ret = get_dev_value_str(amd::smi::kDevUsage, dv_ind,
+                                                                     &val_str);
+   if (ret != RSMI_STATUS_SUCCESS) {
+     return ret;
+   }
+
+   errno = 0;
+   *busy_percent = strtoul(val_str.c_str(), nullptr, 10);
+   assert(errno == 0);
+
+   return RSMI_STATUS_SUCCESS;
+
   CATCH
 }

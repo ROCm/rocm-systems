@@ -549,6 +549,23 @@ void TestSanity::Run(void) {
         std::cout << f.num_supported << std::endl;
         print_frequencies(&f);
       }
+      err = rsmi_dev_busy_percent_get(i, &val_ui32);
+      if (err != RSMI_STATUS_SUCCESS) {
+        if (err == RSMI_STATUS_FILE_ERROR) {
+          IF_VERB(STANDARD) {
+            std::cout << "\t**GPU Busy Percent: Not supported on this machine"
+                                                                  << std::endl;
+          }
+        } else {
+          CHK_ERR_ASRT(err)
+        }
+      } else {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**GPU Busy Percent (Percent Idle):" << std::dec <<
+                       val_ui32 << " (" << 100 - val_ui32 << ")" << std::endl;
+        }
+      }
+
       char name[20];
       err = rsmi_dev_name_get(i, name, 20);
       CHK_ERR_ASRT(err)

@@ -277,10 +277,10 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
 /**
  *  @brief Get the unique PCI device identifier associated for a device
  *
- *  @details Give a device index @p dev_ind and a pointer to a uint64_t @p
+ *  @details Give a device index @p dv_ind and a pointer to a uint64_t @p
  *  bdfid, this function will write the Bus/Device/Function PCI identifier
- *  (BDFID) associated with device @p dev_ind to the value pointed to by
- *  @bdfid.
+ *  (BDFID) associated with device @p dv_ind to the value pointed to by
+ *  @p bdfid.
  *
  *  @param[in] dv_ind a device index
  *
@@ -290,7 +290,7 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
  *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
 
  */
-rsmi_status_t rsmi_dev_pci_id_get(uint32_t dev_ind, uint64_t *bdfid);
+rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
 
 /**
  *  @brief Get the device id associated with the device with provided device
@@ -739,8 +739,8 @@ rsmi_dev_power_max_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
  *
  * @param[in] dv_ind a device index
  *
- *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- *  If a device has more than one sensor, it could be greater than 0.
+ * @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
+ * If a device has more than one sensor, it could be greater than 0.
  *
  * @param[inout] status a pointer to rsmi_power_profile_status that will be
  * populated by a call to this function
@@ -769,7 +769,7 @@ rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
  * @param[in] profile a rsmi_power_profile_preset_masks that hold the mask
  * of the desired new power profile
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ * @retval RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
@@ -786,11 +786,31 @@ rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t sensor_ind,
  * @param[inout] status_string A pointer to a const char * which will be made
  * to point to a description of the provided error code
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call
+ * @retval RSMI_STATUS_SUCCESS is returned upon successful call
  *
  */
 rsmi_status_t
 rsmi_status_string(rsmi_status_t status, const char **status_string);
+
+/**
+ * @brief Get percentage of time device is busy doing any processing
+ *
+ * @details Given a device index @p dv_ind, this function returns the
+ * percentage of time that the specified device is busy. The device is
+ * considered busy if any one or more of its sub-blocks are working, and idle
+ * if none of the sub-blocks are working.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[inout] busy_percent a pointer to the uint32_t to which the busy
+ * percent will be written
+ *
+ * @retval RSMI_STATUS_SUCCESS is returned upon successful call
+ *
+ */
+rsmi_status_t
+rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
+
 #ifdef __cplusplus
 }
 #endif  // __cplusplus
