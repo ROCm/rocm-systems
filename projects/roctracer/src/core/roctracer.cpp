@@ -277,7 +277,7 @@ DESTRUCTOR_API void destructor() {
 }
 
 roctracer_record_t* SyncActivityCallback(
-    uint32_t activity_kind,
+    uint32_t activity_id,
     roctracer_record_t* record,
     const void* callback_data,
     void* arg)
@@ -289,7 +289,7 @@ roctracer_record_t* SyncActivityCallback(
   if (pool == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback pool is NULL");
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     record->domain = ACTIVITY_DOMAIN_HIP_API;
-    record->kind = activity_kind;
+    record->activity_id = activity_id;
     record->begin_ns = timer.timestamp_ns();
     // Correlation ID generating
     uint64_t correlation_id = data->correlation_id;
