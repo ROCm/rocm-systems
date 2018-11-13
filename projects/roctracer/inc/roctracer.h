@@ -39,7 +39,7 @@ THE SOFTWARE.
 #include <stdint.h>
 #include <stddef.h>
 
-#include "inc/roctracer/prof_protocol.h"
+#include "ext/prof_protocol.h"
 
 #define ROCTRACER_VERSION_MAJOR 1
 #define ROCTRACER_VERSION_MINOR 0

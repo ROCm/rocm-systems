@@ -45,7 +45,7 @@ class Timer {
   public:
   typedef uint64_t timestamp_t;
   typedef long double freq_t;
-  
+
   Timer() {
     timestamp_t timestamp_hz = 0;
     HSART_CALL(hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &timestamp_hz));

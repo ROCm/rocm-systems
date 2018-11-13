@@ -43,6 +43,13 @@ if ( DEFINED ENV{CMAKE_DEBUG_TRACE} )
   add_definitions ( -DDEBUG_TRACE=1 )
 endif()
 
+## Enable HIP/HCC local build
+if ( DEFINED LOCAL_BUILD )
+  add_definitions ( -DLOCAL_BUILD=${LOCAL_BUILD} )
+else()
+  add_definitions ( -DLOCAL_BUILD=1 )
+endif()
+
 ## Enable direct loading of AQL-profile HSA extension
 if ( DEFINED ENV{CMAKE_LD_AQLPROFILE} )
   add_definitions ( -DROCP_LD_AQLPROFILE=1 )

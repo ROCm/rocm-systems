@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #include "inc/roctracer.h"
 #include "inc/roctracer_hcc.h"
-//#include "inc/roctracer_hip.h"
+#include "inc/roctracer_hip.h"
 
 #include <atomic>
 #include <hip/hip_runtime.h>
@@ -30,7 +30,7 @@ THE SOFTWARE.
 #include <string.h>
 #include <pthread.h>
 
-#include "inc/roctracer/hsa_rt_utils.hpp"
+#include "ext/hsa_rt_utils.hpp"
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
 #include "util/logger.h"

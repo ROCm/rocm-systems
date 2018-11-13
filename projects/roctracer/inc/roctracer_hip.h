@@ -23,6 +23,7 @@ THE SOFTWARE.
 #ifndef INC_ROCTRACER_HIP_H_
 #define INC_ROCTRACER_HIP_H_
 
+#include <hip/hip_runtime.h>
 #include <hip/hcc_detail/hip_prof_str.h>
 
 #include "roctracer.h"

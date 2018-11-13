@@ -71,17 +71,28 @@ set_property ( TARGET ${TARGET_NAME} PROPERTY VERSION "${LIB_VERSION_STRING}" )
 set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${BUILD_VERSION_MAJOR}" )
 
 ## If the library is a release, strip the target library
-if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
-  add_custom_command ( TARGET ${ROCTRACER_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *.so )
-endif ()
+#if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
+#  add_custom_command ( TARGET ${ROCTRACER_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *.so )
+#endif ()
 
-message ( "---------Install-Dir: ${CMAKE_INSTALL_PREFIX}/${ROCTRACER_NAME}" )
+## Install and packaging
+set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX}/${ROCTRACER_NAME} )
 set ( CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} )
-install ( TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION ${ROCTRACER_NAME}/lib )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer.h DESTINATION ${ROCTRACER_NAME}/include )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hip.h DESTINATION ${ROCTRACER_NAME}/include )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hcc.h DESTINATION ${ROCTRACER_NAME}/include )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer/prof_protocol.h DESTINATION ${ROCTRACER_NAME}/include/roctracer )
+message ( "---------Install-Dir: ${CMAKE_INSTALL_PREFIX}" )
+
+add_custom_target ( inc-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCTRACER_NAME}/include inc-link )
+add_custom_target ( so-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCTRACER_NAME}/lib/${ROCTRACER_LIBRARY}.so so-link )
+
+## Install information
+install ( TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION lib )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer.h DESTINATION include )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hip.h DESTINATION include )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hcc.h DESTINATION include )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/ext/prof_protocol.h DESTINATION include/ext )
+install ( FILES ${PROJECT_BINARY_DIR}/inc-link DESTINATION ../include RENAME ${ROCTRACER_NAME} )
+install ( FILES ${PROJECT_BINARY_DIR}/so-link DESTINATION ../lib RENAME ${ROCTRACER_LIBRARY}.so )
 
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" )
