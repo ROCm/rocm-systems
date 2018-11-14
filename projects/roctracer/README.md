@@ -55,7 +55,6 @@ The library source tree:
   
  - To install
   make install
-
  or
   make package && dpkg -i *.deb
 ```
