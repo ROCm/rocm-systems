@@ -28,8 +28,8 @@ The library source tree:
 
  - CLone roctracer and custom branches of HIP/HCC:
   git clone -b amd-master https://github.com/ROCmSoftwarePlatform/roctracer.git
-  git clone -b roctracer-hip-frontend-180826 https://github.com/eshcherb/HIP.git
-  git clone --recursive -b roctracer-hip-frontend-180823 https://github.com/eshcherb/hcc.git
+  git clone -b roctracer-hip-frontend-181113 https://github.com/eshcherb/HIP.git
+  git clone --recursive -b roctracer-hip-frontend-181113 https://github.com/eshcherb/hcc.git
 
  - Set environment:
   export HIP_PATH=<your path>/HIP
@@ -38,12 +38,12 @@ The library source tree:
 
  - Build HCC:
   cd <your path>/hcc && mkdir build && cd build
-  cmake -DUSE_PROF_API=1 -DPROF_API_HEADER_PATH=<your path>/roctracer/inc/roctracer ..
+  cmake -DUSE_PROF_API=1 -DPROF_API_HEADER_PATH=<your path>/roctracer/inc/ext ..
   make -j <nproc>
   
  - Build HIP:
   cd <your path>/HIP && mkdir build && cd build
-  cmake -DUSE_PROF_API=1 -DPROF_API_HEADER_PATH=<your path>/roctracer/inc/roctracer ..
+  cmake -DUSE_PROF_API=1 -DPROF_API_HEADER_PATH=<your path>/roctracer/inc/ext ..
   make -j <nproc>
   ln -s HIP/build HIP/lib
   
@@ -51,12 +51,11 @@ The library source tree:
   cd <your path>/roctracer && mkdir build && cd build && cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm .. && make -j <nproc>
 
  - To run test
-  make mytest
- 
- or
-  cd <your path>/roctracer/test/MatrixTranspose
-  make
+  make mytest 
+  
+ - To install
+  make install
 
- set test iterations number, 100 by default
-  export ITERATIONS=<iterations number>
+ or
+  make package && dpkg -i *.deb
 ```
