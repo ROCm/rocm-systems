@@ -37,15 +37,13 @@ The library source tree:
   export CMAKE_PREFIX_PATH=/opt/rocm/lib:/opt/rocm/include/hsa
 
  - Build HCC:
-  cd <your path>/hcc && mkdir build && cd build
-  cmake -DUSE_PROF_API=1 -DPROF_API_HEADER_PATH=<your path>/roctracer/inc/ext ..
-  make -j <nproc>
+  cd <your path>/hcc && mkdir build && cd build &&
+  cmake -DUSE_PROF_API=1 -DPROF_API_HEADER_PATH=<your path>/roctracer/inc/ext .. && make -j <nproc>
   
  - Build HIP:
-  cd <your path>/HIP && mkdir build && cd build
-  cmake -DUSE_PROF_API=1 -DPROF_API_HEADER_PATH=<your path>/roctracer/inc/ext ..
-  make -j <nproc>
-  ln -s HIP/build HIP/lib
+  cd <your path>/HIP && mkdir build && cd build &&
+  cmake -DUSE_PROF_API=1 -DPROF_API_HEADER_PATH=<your path>/roctracer/inc/ext .. && make -j <nproc>
+  ln -s <your path>/HIP/build <your path>/HIP/lib
   
  - Build ROCtracer
   cd <your path>/roctracer && mkdir build && cd build && cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm .. && make -j <nproc>
