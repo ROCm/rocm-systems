@@ -312,18 +312,18 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth *bandwidth);
 
 /**
  *  @brief Control the set of allowed PCIe bandwidths that can be used.
- *  
+ *
  *  @details Given a device index @p dv_ind and a 64 bit bitmask @p bw_bitmask,
  *  this function will limit the set of allowable bandwidths. If a bit in @p
  *  bw_bitmask has a value of 1, then the frequency (as ordered in an
  *  rsmi_frequencies returned by rsmi_dev_get_gpu_clk_freq()) corresponding
  *  to that bit index will be allowed.
- *  
+ *
  *  This function will change the performance level to
  *  ::RSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
  *  band_widths. Caller will need to set to ::RSMI_DEV_PERF_LEVEL_AUTO in order
  *  to get back to default state.
- *  
+ *
  *  All bits with indices greater than or equal to
  *  rsmi_pcie_bandwidth.transfer_rate.num_supported will be ignored.
  *
@@ -630,7 +630,7 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind,
  *  @brief Get the max. fan speed of the device with provided device index.
  *
  *  @details Given a device index @p dv_ind and a pointer to a uint32_t
- *  @p max_speed, this function will write the maxirsmi_dev_power_profile_semum fan speed possible to
+ *  @p max_speed, this function will write the maximum fan speed possible to
  *  the uint32_t pointed to by @p max_speed
  *
  *  @param[in] dv_ind a device index
