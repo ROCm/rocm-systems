@@ -64,6 +64,7 @@ enum DevInfoTypes {
   kDevDevID,
   kDevGPUMClk,
   kDevGPUSClk,
+  kDevPCIEBW,
   kDevPowerProfileMode,
   kDevUsage,
 };

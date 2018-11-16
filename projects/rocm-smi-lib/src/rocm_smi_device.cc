@@ -64,6 +64,7 @@ static const char *kDevDevIDFName = "device";
 static const char *kDevOverDriveLevelFName = "pp_sclk_od";
 static const char *kDevGPUSClkFName = "pp_dpm_sclk";
 static const char *kDevGPUMClkFName = "pp_dpm_mclk";
+static const char *kDevGPUPCIEClkFname = "pp_dpm_pcie";
 static const char *kDevPowerProfileModeFName = "pp_power_profile_mode";
 static const char *kDevUsageFName = "gpu_busy_percent";
 
@@ -83,6 +84,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevDevID, kDevDevIDFName},
     {kDevGPUMClk, kDevGPUMClkFName},
     {kDevGPUSClk, kDevGPUSClkFName},
+    {kDevPCIEBW, kDevGPUPCIEClkFname},
     {kDevPowerProfileMode, kDevPowerProfileModeFName},
     {kDevUsage, kDevUsageFName},
 };
@@ -195,6 +197,7 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
 
     case kDevGPUMClk:  // integer (index within num-freq range)
     case kDevGPUSClk:  // integer (index within num-freq range)
+    case kDevPCIEBW:  // integer (index within num-freq range)
     case kDevDevID:  // string (read-only)
     default:
       break;
@@ -207,6 +210,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
   switch (type) {
     case kDevGPUMClk:
     case kDevGPUSClk:
+    case kDevPCIEBW:
       return writeDevInfoStr(type, val);
 
     case kDevOverDriveLevel:
@@ -276,6 +280,7 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
   switch (type) {
     case kDevGPUMClk:
     case kDevGPUSClk:
+    case kDevPCIEBW:
     case kDevPowerProfileMode:
       return readDevInfoMultiLineStr(type, val);
       break;

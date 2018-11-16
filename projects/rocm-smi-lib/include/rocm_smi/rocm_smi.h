@@ -124,7 +124,6 @@ typedef enum {
   RSMI_CLK_TYPE_FIRST = RSMI_CLK_TYPE_SYS,
 
   RSMI_CLK_TYPE_MEM,                  //!< Memory clock
-
   RSMI_CLK_TYPE_LAST = RSMI_CLK_TYPE_MEM
 } rsmi_clk_type;
 
@@ -239,6 +238,24 @@ typedef struct {
     uint64_t frequency[RSMI_MAX_NUM_FREQUENCIES];
 } rsmi_frequencies;
 
+/**
+ * @brief This structure holds information about the possible PCIe
+ * bandwidths. Specifically, the possible transfer rates and their
+ * associated numbers of lanes are stored here.
+ */
+typedef struct {
+    /**
+     * Transfer rates (T/s) that are possible
+     */
+    rsmi_frequencies transfer_rate;
+
+    /**
+     * List of lanes for corresponding transfer rate.
+     * Only the first num_supported bandwidths are valid.
+     */
+    uint32_t lanes[RSMI_MAX_NUM_FREQUENCIES];
+} rsmi_pcie_bandwidth;
+
 
 /**
  *  @brief Initialize Rocm SMI.
@@ -273,6 +290,51 @@ rsmi_status_t rsmi_shut_down(void);
  *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
  */
 rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
+
+/**
+ *  @brief Get the list of possible pci bandwidths that are available.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a to an
+ *  rsmi_pcie_bandwidth structure @p bandwidth, this function will fill in
+ *  @p bandwidth with the possible T/s values and associated number of lanes,
+ *  and indication of the current selection.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] bandwidth a pointer to a caller provided rsmi_pcie_bandwidth
+ *  structure to which the frequency information will be written
+ *
+ *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth *bandwidth);
+
+/**
+ *  @brief Control the set of allowed PCIe bandwidths that can be used.
+ *  
+ *  @details Given a device index @p dv_ind and a 64 bit bitmask @p bw_bitmask,
+ *  this function will limit the set of allowable bandwidths. If a bit in @p
+ *  bw_bitmask has a value of 1, then the frequency (as ordered in an
+ *  rsmi_frequencies returned by rsmi_dev_get_gpu_clk_freq()) corresponding
+ *  to that bit index will be allowed.
+ *  
+ *  This function will change the performance level to
+ *  ::RSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
+ *  band_widths. Caller will need to set to ::RSMI_DEV_PERF_LEVEL_AUTO in order
+ *  to get back to default state.
+ *  
+ *  All bits with indices greater than or equal to
+ *  rsmi_pcie_bandwidth.transfer_rate.num_supported will be ignored.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] bw_bitmask A bitmask indicating the indices of the
+ *  bandwidths that are to be enabled (1) and disabled (0). Only the lowest
+ *  rsmi_pcie_bandwidth.transfer_rate.num_supported bits of this mask are
+ *  relevant.
+ */
+rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
 
 /**
  *  @brief Get the unique PCI device identifier associated for a device
@@ -436,7 +498,7 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
  * specified clock.
  *
  * @details Given a device index @p dv_ind, a clock type @p clk_type, and a
- * 32 bit bitmask @p freq_bitmask, this function will limit the set of
+ * 64 bit bitmask @p freq_bitmask, this function will limit the set of
  * allowable frequencies. If a bit in @p freq_bitmask has a value of 1, then
  * the frequency (as ordered in an rsmi_frequencies returned by
  * rsmi_dev_get_gpu_clk_freq()) corresponding to that bit index will be

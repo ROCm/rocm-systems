@@ -108,15 +108,17 @@ static rsmi_status_t errno_to_rsmi_status(uint32_t err) {
   }
 }
 /**
- * Parse a string of the form "<int index>:  <int freq><freq. unit string> <|*>"
+ * Parse a string of the form:
+ *        "<int index>:  <int freq><freq. unit string> <|*>"
  */
-static uint32_t freq_string_to_int(std::string freq_line, bool *is_curr) {
+static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
+                                     bool *is_curr, uint32_t lanes[], int i) {
   assert(is_curr != nullptr);
 
-  std::istringstream fs(freq_line);
+  std::istringstream fs(freq_lines[i]);
 
   uint32_t ind;
-  uint32_t freq;
+  float freq;
   std::string junk;
   std::string units_str;
   std::string star_str;
@@ -128,7 +130,7 @@ static uint32_t freq_string_to_int(std::string freq_line, bool *is_curr) {
   fs >> star_str;
 
   if (is_curr != nullptr) {
-    if (freq_line.find("*") != std::string::npos) {
+    if (freq_lines[i].find("*") != std::string::npos) {
       *is_curr = true;
     } else {
       *is_curr = false;
@@ -136,18 +138,33 @@ static uint32_t freq_string_to_int(std::string freq_line, bool *is_curr) {
   }
   uint32_t multiplier = 0;
 
-  if (units_str == "Mhz") {
-    multiplier = 1000000;
-  } else if (units_str == "Ghz") {
-    multiplier = 1000000000;
-  } else if (units_str == "Khz") {
-    multiplier = 1000;
-  } else if (units_str == "Hz") {
-    multiplier = 1;
-  } else {
-    assert(!"Unexpected units for frequency");
+  switch (units_str[0]) {
+    case 'G':   // GT or GHz
+      multiplier = 1000000000;
+      break;
+
+    case 'M':   // MT or MHz
+      multiplier = 1000000;
+      break;
+
+    case 'K':   // KT or KHz
+      multiplier = 1000;
+      break;
+
+    case 'T':   // Transactions
+    case 'H':   // Hertz
+      multiplier = 1;
+      break;
+    default:
+      assert(!"Unexpected units for frequency");
   }
 
+  if (star_str[0] == 'x') {
+    assert(lanes != nullptr && "Lanes are provided but null lanes pointer");
+    if (lanes) {
+      lanes[i] = std::stoi(star_str.substr(1), nullptr);
+    }
+  }
   return freq*multiplier;
 }
 
@@ -431,7 +448,7 @@ rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level perf_level) {
 }
 
 static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
-                                       uint32_t dv_ind, rsmi_frequencies *f) {
+            uint32_t dv_ind, rsmi_frequencies *f, uint32_t *lanes = nullptr) {
   TRY
   std::vector<std::string> val_vec;
   rsmi_status_t ret;
@@ -451,7 +468,7 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
   f->current = RSMI_MAX_NUM_FREQUENCIES + 1;  // init to an invalid value
 
   for (uint32_t i = 0; i < f->num_supported; ++i) {
-    f->frequency[i] = freq_string_to_int(val_vec[i], &current);
+    f->frequency[i] = freq_string_to_int(val_vec, &current, lanes, i);
 
     // Our assumption is that frequencies are read in from lowest to highest.
     // Check that that is true.
@@ -663,6 +680,60 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
 
   name[std::min(len - 1, ln)] = '\0';
   return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth *b) {
+  TRY
+  assert(b != nullptr);
+
+  if (b == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  return get_frequencies(amd::smi::kDevPCIEBW, dv_ind,
+                                        &b->transfer_rate, b->lanes);
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
+  rsmi_status_t ret;
+  rsmi_pcie_bandwidth bws;
+
+  TRY
+  ret = rsmi_dev_pci_bandwidth_get(dv_ind, &bws);
+
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  assert(bws.transfer_rate.num_supported <= RSMI_MAX_NUM_FREQUENCIES);
+
+  amd::smi::RocmSMI smi = amd::smi::RocmSMI::getInstance();
+
+  // Above call to rsmi_dev_pci_bandwidth_get() should have emitted an error
+  // if assert below is not true
+  assert(dv_ind < smi.monitor_devices().size());
+
+  std::string freq_enable_str =
+         bitfield_to_freq_string(bw_bitmask, bws.transfer_rate.num_supported);
+
+  std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind];
+  assert(dev != nullptr);
+
+  ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  uint32_t ret_i;
+  ret_i = dev->writeDevInfo(amd::smi::kDevPCIEBW, freq_enable_str);
+
+  return errno_to_rsmi_status(ret_i);
+
   CATCH
 }
 
@@ -1032,17 +1103,17 @@ rsmi_status_t
 rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
   TRY
   std::string val_str;
-   rsmi_status_t ret = get_dev_value_str(amd::smi::kDevUsage, dv_ind,
-                                                                     &val_str);
-   if (ret != RSMI_STATUS_SUCCESS) {
-     return ret;
-   }
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevUsage, dv_ind,
+                                                                    &val_str);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
 
-   errno = 0;
-   *busy_percent = strtoul(val_str.c_str(), nullptr, 10);
-   assert(errno == 0);
+  errno = 0;
+  *busy_percent = strtoul(val_str.c_str(), nullptr, 10);
+  assert(errno == 0);
 
-   return RSMI_STATUS_SUCCESS;
+  return RSMI_STATUS_SUCCESS;
 
   CATCH
 }
