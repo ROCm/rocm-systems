@@ -451,10 +451,66 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
   return RSMI_STATUS_SUCCESS;
 }
 
-static void print_frequencies(rsmi_frequencies *f) {
+static rsmi_status_t test_set_pci_bw(uint32_t dv_ind) {
+  rsmi_status_t ret;
+  rsmi_pcie_bandwidth bw;
+  uint32_t freq_bitmask;
+
+  print_test_header("PCIe Bandwidth Control", dv_ind);
+
+  ret = rsmi_dev_pci_bandwidth_get(dv_ind, &bw);
+  CHK_ERR_RET(ret)
+
+  IF_VERB(STANDARD) {
+    std::cout << "Initial PCIe is " << bw.transfer_rate.current << std::endl;
+  }
+
+  // First set the bitmask to all supported bandwidths
+  freq_bitmask = ~(~0 << bw.transfer_rate.num_supported);
+
+  // Then, set the bitmask to all bandwidths besides the initial BW
+  freq_bitmask ^= (1 << bw.transfer_rate.current);
+
+  std::string freq_bm_str =
+             std::bitset<RSMI_MAX_NUM_FREQUENCIES>(freq_bitmask).to_string();
+
+  freq_bm_str.erase(0, std::min(freq_bm_str.find_first_not_of('0'),
+                                                     freq_bm_str.size()-1));
+
+  IF_VERB(STANDARD) {
+  std::cout << "Setting bandwidth mask to " << "0b" << freq_bm_str <<
+                                                          " ..." << std::endl;
+  }
+  ret = rsmi_dev_pci_bandwidth_set(dv_ind, freq_bitmask);
+  CHK_ERR_RET(ret)
+
+  ret = rsmi_dev_pci_bandwidth_get(dv_ind, &bw);
+  CHK_ERR_RET(ret)
+
+  IF_VERB(STANDARD) {
+    std::cout << "Bandwidth is now index " << bw.transfer_rate.current <<
+                                                                    std::endl;
+    std::cout << "Resetting mask to all bandwidths." << std::endl;
+  }
+  ret = rsmi_dev_pci_bandwidth_set(dv_ind, 0xFFFFFFFF);
+  CHK_ERR_RET(ret)
+
+  ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
+  CHK_ERR_RET(ret)
+
+  return RSMI_STATUS_SUCCESS;
+}
+
+static void print_frequencies(rsmi_frequencies *f, uint32_t *l=nullptr) {
   assert(f != nullptr);
   for (uint32_t j = 0; j < f->num_supported; ++j) {
     std::cout << "\t**  " << j << ": " << f->frequency[j];
+    if (l != nullptr) {
+      std::cout << "T/s; x" << l[j];
+    } else {
+      std::cout << "Hz";
+    }
+
     if (j == f->current) {
       std::cout << " *";
     }
@@ -500,6 +556,7 @@ void TestSanity::Run(void) {
   uint32_t val_ui32;
   rsmi_dev_perf_level pfl;
   rsmi_frequencies f;
+  rsmi_pcie_bandwidth b;
 
   uint32_t num_monitor_devs = 0;
 
@@ -542,6 +599,14 @@ void TestSanity::Run(void) {
         std::cout << f.num_supported << std::endl;
         print_frequencies(&f);
       }
+      err = rsmi_dev_pci_bandwidth_get(i, &b);
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Supported PCIe bandwidths: ";
+        std::cout << b.transfer_rate.num_supported << std::endl;
+        print_frequencies(&b.transfer_rate, b.lanes);
+      }
+
       err = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_SYS, &f);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
@@ -549,6 +614,23 @@ void TestSanity::Run(void) {
         std::cout << f.num_supported << std::endl;
         print_frequencies(&f);
       }
+      err = rsmi_dev_busy_percent_get(i, &val_ui32);
+      if (err != RSMI_STATUS_SUCCESS) {
+        if (err == RSMI_STATUS_FILE_ERROR) {
+          IF_VERB(STANDARD) {
+            std::cout << "\t**GPU Busy Percent: Not supported on this machine"
+                                                                  << std::endl;
+          }
+        } else {
+          CHK_ERR_ASRT(err)
+        }
+      } else {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**GPU Busy Percent (Percent Idle):" << std::dec <<
+                       val_ui32 << " (" << 100 - val_ui32 << ")" << std::endl;
+        }
+      }
+
       char name[20];
       err = rsmi_dev_name_get(i, name, 20);
       CHK_ERR_ASRT(err)
@@ -670,6 +752,9 @@ void TestSanity::Run(void) {
       CHK_RSMI_PERM_ERR(err)
 
       err = test_set_freq(i);
+      CHK_RSMI_PERM_ERR(err)
+
+      err = test_set_pci_bw(i);
       CHK_RSMI_PERM_ERR(err)
 
       err = test_set_fan_speed(i);

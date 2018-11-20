@@ -64,7 +64,9 @@ enum DevInfoTypes {
   kDevDevID,
   kDevGPUMClk,
   kDevGPUSClk,
-  kDevPowerProfileMode
+  kDevPCIEBW,
+  kDevPowerProfileMode,
+  kDevUsage,
 };
 
 class Device {
@@ -78,7 +80,10 @@ class Device {
     const std::shared_ptr<PowerMon>& power_monitor() {return power_monitor_;}
     void set_power_monitor(std::shared_ptr<PowerMon> pm) {power_monitor_ = pm;}
 
+#if 0  // This is not being used right now.
     int readDevInfo(DevInfoTypes type, uint32_t *val);
+#endif
+
     int readDevInfo(DevInfoTypes type, std::string *val);
     int readDevInfo(DevInfoTypes type, std::vector<std::string> *retVec);
     int writeDevInfo(DevInfoTypes type, uint64_t val);
