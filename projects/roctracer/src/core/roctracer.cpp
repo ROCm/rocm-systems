@@ -29,6 +29,8 @@ THE SOFTWARE.
 #include <mutex>
 #include <string.h>
 #include <pthread.h>
+#include <unistd.h>
+#include <sys/syscall.h>
 
 #include "ext/hsa_rt_utils.hpp"
 #include "util/exception.h"
@@ -276,7 +278,7 @@ DESTRUCTOR_API void destructor() {
   util::Logger::Destroy();
 }
 
-roctracer_record_t* SyncActivityCallback(
+roctracer_record_t* HIP_SyncActivityCallback(
     uint32_t activity_id,
     roctracer_record_t* record,
     const void* callback_data,
@@ -303,7 +305,8 @@ roctracer_record_t* SyncActivityCallback(
     return record;
   } else {
     record->end_ns = timer.timestamp_ns();
-    Kalmar::CLAMP::GetActivityCoord(&(record->device_id), &(record->stream_id));
+    record->process_id = syscall(__NR_getpid);
+    record->thread_id = syscall(__NR_gettid);
     pool->Write(*record);
     // Clearing record in HCC
     Kalmar::CLAMP::SetActivityRecord(0);
@@ -311,7 +314,7 @@ roctracer_record_t* SyncActivityCallback(
   }
 }
 
-void AsyncActivityCallback(
+void HCC_AsyncActivityCallback(
     uint32_t op_id,
     void* record,
     void* arg)
@@ -460,12 +463,12 @@ PUBLIC_API roctracer_status_t roctracer_enable_activity(
       roctracer_enable_activity(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY, pool);
       break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
-      const bool err = Kalmar::CLAMP::SetActivityCallback(id, (void*)roctracer::AsyncActivityCallback, (void*)pool);
+      const bool err = Kalmar::CLAMP::SetActivityCallback(id, (void*)roctracer::HCC_AsyncActivityCallback, (void*)pool);
       if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "Kalmar::CLAMP::SetActivityCallback error");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-      const hipError_t hip_err = hipRegisterActivityCallback(id, (void*)roctracer::SyncActivityCallback, (void*)pool);
+      const hipError_t hip_err = hipRegisterActivityCallback(id, (void*)roctracer::HIP_SyncActivityCallback, (void*)pool);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterActivityCallback error(" << hip_err << ")");
       break;
     }

@@ -20,8 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#ifndef INC_ROCTRACER_PROF_PROTOCOL_H_
-#define INC_ROCTRACER_PROF_PROTOCOL_H_
+#ifndef INC_EXT_PROF_PROTOCOL_H_
+#define INC_EXT_PROF_PROTOCOL_H_
 
 // Traced API domains
 typedef enum {
@@ -52,8 +52,16 @@ struct activity_record_t {
     activity_correlation_id_t correlation_id;      // activity correlation ID
     uint64_t begin_ns;                             // host begin timestamp
     uint64_t end_ns;                               // host end timestamp
-    int device_id;                                 // device id
-    uint64_t stream_id;                            // stream id
+    union {
+      struct {
+        int device_id;                             // device id
+        uint64_t queue_id;                         // queue id
+      };
+      struct {
+        uint32_t process_id;                       // device id
+        uint32_t thread_id;                        // thread id
+      };
+    };
     size_t bytes;                                  // data size bytes
 };
 
@@ -62,4 +70,4 @@ typedef activity_record_t* (*activity_sync_callback_t)(uint32_t cid, activity_re
 // Activity async calback type
 typedef void (*activity_async_callback_t)(uint32_t op, void* record, void* arg);
 
-#endif  // INC_ROCTRACER_PROF_PROTOCOL_H_
+#endif  // INC_EXT_PROF_PROTOCOL_H_

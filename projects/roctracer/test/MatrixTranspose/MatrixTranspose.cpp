@@ -212,14 +212,26 @@ void activity_callback(const char* begin, const char* end, void* arg) {
   fprintf(stdout, "\tActivity records:\n"); fflush(stdout);
   while (record < end_record) {
     const char * name = roctracer_id_string(record->domain, record->activity_id, record->kind);
-    fprintf(stdout, "\t%s\tcorrelation_id(%lu) time_ns(%lu:%lu) device_id(%d) stream_id(%lu)",
+    fprintf(stdout, "\t%s\tcorrelation_id(%lu) time_ns(%lu:%lu)",
       name,
       record->correlation_id,
       record->begin_ns,
-      record->end_ns,
-      record->device_id,
-      record->stream_id
+      record->end_ns
     );
+    if (record->domain == ACTIVITY_DOMAIN_HIP_API) {
+      fprintf(stdout, " process_id(%u) thread_id(%u)",
+        record->process_id,
+        record->thread_id
+      );
+    } else if (record->domain == ACTIVITY_DOMAIN_HCC_OPS) {
+      fprintf(stdout, " device_id(%d) queue_id(%lu)",
+        record->device_id,
+        record->queue_id
+      );
+    } else {
+      fprintf(stderr, "Bad domain %d\n", record->domain);
+      abort();
+    }
     if (record->activity_id == hc::HSA_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
     fprintf(stdout, "\n");
     fflush(stdout);
