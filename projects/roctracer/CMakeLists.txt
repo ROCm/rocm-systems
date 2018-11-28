@@ -41,7 +41,9 @@ include ( utils )
 ## Set build environment
 include ( env )
 ## Set test target
-add_custom_target( mytest COMMAND make -C "${CMAKE_CURRENT_SOURCE_DIR}/test/MatrixTranspose" )
+add_custom_target( mytest
+                   COMMAND make -C "${CMAKE_CURRENT_SOURCE_DIR}/test/MatrixTranspose"
+                   COMMAND ${PROJECT_BINARY_DIR}/run.sh)
 
 ## Setup the package version.
 get_version ( "1.0.0" )
@@ -61,7 +63,7 @@ set ( BUILD_VERSION_STRING "${BUILD_VERSION_MAJOR}.${BUILD_VERSION_MINOR}.${BUIL
 set ( TARGET_NAME "${ROCTRACER_TARGET}" )
 set ( ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" )
 set ( LIB_DIR "${ROOT_DIR}/src" )
-#set ( TEST_DIR "${ROOT_DIR}/test" )
+set ( TEST_DIR "${ROOT_DIR}/test" )
 
 ## Build library
 include ( ${LIB_DIR}/CMakeLists.txt )
@@ -74,6 +76,9 @@ set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${BUILD_VERSION_MAJOR}"
 #if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
 #  add_custom_command ( TARGET ${ROCTRACER_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *.so )
 #endif ()
+
+## Build tests
+add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 
 ## Install and packaging
 set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX}/${ROCTRACER_NAME} )

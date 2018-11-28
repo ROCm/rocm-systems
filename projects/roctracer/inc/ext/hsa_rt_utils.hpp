@@ -27,6 +27,7 @@ THE SOFTWARE.
 
 #include <cstdint>
 #include <cstddef>
+#include <iostream>
 
 #define HSART_CALL(call)                                                                           \
   do {                                                                                             \
@@ -45,10 +46,13 @@ class Timer {
   public:
   typedef uint64_t timestamp_t;
   typedef long double freq_t;
+  typedef decltype(hsa_system_get_info)* hsa_system_get_info_fn_t;
 
-  Timer() {
+  // Initialization
+  inline void init(const hsa_system_get_info_fn_t& get_info_fn) {
+    hsa_system_get_info_fn = get_info_fn;
     timestamp_t timestamp_hz = 0;
-    HSART_CALL(hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &timestamp_hz));
+    HSART_CALL(get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &timestamp_hz));
     timestamp_rate_ = (freq_t)1000000000 / (freq_t)timestamp_hz;
   }
 
@@ -66,8 +70,23 @@ class Timer {
     HSART_CALL(hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &timestamp));
     return timestamp_to_ns(timestamp);
   }
+  timestamp_t timestamp_fn_ns() const {
+    timestamp_t timestamp;
+    HSART_CALL(hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP, &timestamp));
+    return timestamp_to_ns(timestamp);
+  }
+
+  Timer() {
+    init(hsa_system_get_info);
+  }
+
+  Timer(hsa_system_get_info_fn_t f) {
+    init(f);
+  }
 
   private:
+  // hsa_system_get_info function
+  hsa_system_get_info_fn_t hsa_system_get_info_fn;
   // Timestamp rate
   freq_t timestamp_rate_;
 };

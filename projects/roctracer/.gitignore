@@ -1,0 +1,9 @@
+.*
+!.gitignore
+*.o
+*.exe
+*.swp
+*.Po
+b
+build
+test/hsa

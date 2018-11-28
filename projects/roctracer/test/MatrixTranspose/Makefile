@@ -3,7 +3,7 @@ LIB_PATH  = $(ROOT_PATH)/build
 LIB_NAME  = roctracer64
 ROC_LIBS  = -L$(LIB_PATH) -l$(LIB_NAME)
 
-EXECUTABLE = ./MatrixTranspose
+EXECUTABLE = ./MatrixTranspose.exe
 SOURCES    = MatrixTranspose.cpp
 OBJECTS    = $(SOURCES:.cpp=.o)
 

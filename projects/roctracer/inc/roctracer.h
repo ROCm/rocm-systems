@@ -71,7 +71,7 @@ typedef enum {
 const char* roctracer_error_string();
 
 ////////////////////////////////////////////////////////////////////////////////
-// Traced runtime API domains
+// Traced runtime domains
 
 // Activity domain type
 typedef activity_domain_t roctracer_domain_t;
@@ -83,6 +83,11 @@ const char* roctracer_id_string(
   const uint32_t& id,                                     // activity ID
   const uint32_t& kind);                                  // activity kind
 
+// Set properties
+roctracer_status_t roctracer_set_properties(
+    roctracer_domain_t domain,                            // tracing domain
+    void* propertes);                                     // tracing properties
+
 ////////////////////////////////////////////////////////////////////////////////
 // Callback API
 //
@@ -91,18 +96,19 @@ const char* roctracer_id_string(
 // called on different phases, on enter, on exit, on kernel completion.
 // Methods return non-zero on error and library errno is set.
 
+// Runtime API callback type
 typedef activity_rtapi_callback_t roctracer_rtapi_callback_t;
 
 // Enable runtime API callbacks
 roctracer_status_t roctracer_enable_callback(
-    activity_domain_t domain,                             // runtime API domain
+    activity_domain_t domain,                             // tracing domain
     uint32_t id,                                          // API call ID
     activity_rtapi_callback_t callback,                   // callback function pointer
     void* arg);                                           // [in/out] callback arg
 
 // Disable runtime API callbacks
 roctracer_status_t roctracer_disable_callback(
-    activity_domain_t domain,                             // runtime API domain
+    activity_domain_t domain,                             // tracing domain
     uint32_t id);                                         // API call ID
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -170,13 +176,13 @@ roctracer_pool_t* roctracer_default_pool(
 
 // Enable activity records logging
 roctracer_status_t roctracer_enable_activity(
-    activity_domain_t domain,                             // runtime API domain
+    activity_domain_t domain,                             // tracing domain
     uint32_t id,                                          // activity ID
     roctracer_pool_t* pool = NULL);                       // memory pool, NULL is a default one
 
 // Disable activity records logging
 roctracer_status_t roctracer_disable_activity(
-    activity_domain_t domain,                             // runtime API domain
+    activity_domain_t domain,                             // tracing domain
     uint32_t id);                                         // activity ID
 
 // Flush available activity records

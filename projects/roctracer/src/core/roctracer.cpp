@@ -24,6 +24,9 @@ THE SOFTWARE.
 #include "inc/roctracer_hcc.h"
 #include "inc/roctracer_hip.h"
 
+#define PROF_API_IMPL 1
+#include "inc/roctracer_hsa.h"
+
 #include <atomic>
 #include <hip/hip_runtime.h>
 #include <mutex>
@@ -332,6 +335,17 @@ util::Logger* util::Logger::instance_ = NULL;
 MemoryPool* memory_pool = NULL;
 typedef std::recursive_mutex memory_pool_mutex_t;
 memory_pool_mutex_t memory_pool_mutex;
+
+namespace hsa_support {
+// callbacks table
+cb_table_t cb_table;
+// Table of function pointers to HSA Core Runtime
+CoreApiTable CoreApiTable_saved{};
+// Table of function pointers to AMD extensions
+AmdExtTable AmdExtTable_saved{};
+// Table of function pointers to HSA Image Extension
+ImageExtTable ImageExtTable_saved{};
+}
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -353,6 +367,10 @@ PUBLIC_API const char* roctracer_error_string() {
 PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_t& id, const uint32_t& kind) {
   API_METHOD_PREFIX
   switch (domain) {
+    case ACTIVITY_DOMAIN_HSA_API: {
+      return roctracer::hsa_support::GetApiName(id);
+      break;
+    }
     case ACTIVITY_DOMAIN_HCC_OPS: {
       return Kalmar::CLAMP::GetCmdName(kind);
       break;
@@ -376,9 +394,22 @@ PUBLIC_API roctracer_status_t roctracer_enable_callback(
 {
   API_METHOD_PREFIX
   switch (domain) {
-    case ACTIVITY_DOMAIN_ANY:
-      if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
-      id = HIP_API_ID_ANY;
+    case ACTIVITY_DOMAIN_ANY: {
+      if (id != 0) EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
+      roctracer_enable_callback(ACTIVITY_DOMAIN_HSA_API, HSA_API_ID_ANY, callback, user_data);
+      roctracer_enable_callback(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY, callback, user_data);
+      break;
+    }
+    case ACTIVITY_DOMAIN_HSA_API: {
+      if (id == HSA_API_ID_ANY) {
+        for (uint32_t i = 0; i < HSA_API_ID_NUMBER; i++) {
+          roctracer::hsa_support::cb_table.set(i, callback, user_data);
+        }
+      } else {
+        roctracer::hsa_support::cb_table.set(id, callback, user_data);
+      }
+      break;
+    }
     case ACTIVITY_DOMAIN_HIP_API: {
       hipError_t hip_err = hipRegisterApiCallback(id, (void*)callback, user_data);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterApiCallback error(" << hip_err << ")");
@@ -513,6 +544,36 @@ PUBLIC_API roctracer_status_t roctracer_flush_activity(roctracer_pool_t* pool) {
   roctracer::MemoryPool* memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);
   memory_pool->Flush();
   API_METHOD_SUFFIX
+}
+
+// Set properties
+PUBLIC_API roctracer_status_t roctracer_set_properties(
+    roctracer_domain_t domain,
+    void* propertes)
+{
+  API_METHOD_PREFIX
+  switch (domain) {
+    case ACTIVITY_DOMAIN_HSA_API: {
+      HsaApiTable* table = reinterpret_cast<HsaApiTable*>(propertes);
+      roctracer::hsa_support::intercept_CoreApiTable(table->core_);
+      roctracer::hsa_support::intercept_AmdExtTable(table->amd_ext_);
+      roctracer::hsa_support::intercept_ImageExtTable(table->image_ext_);
+      break;
+    }
+    case ACTIVITY_DOMAIN_HCC_OPS:
+    case ACTIVITY_DOMAIN_HIP_API:
+      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "properties are not supported, domain ID(" << domain << ")");
+    default:
+      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+  }
+  API_METHOD_SUFFIX
+}
+
+// HSA-runtime tool on-load method
+PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
+                       const char* const* failed_tool_names) {
+  roctracer_set_properties(ACTIVITY_DOMAIN_HSA_API, (void*)table);
+  return true;
 }
 
 }  // extern "C"

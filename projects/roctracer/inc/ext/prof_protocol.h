@@ -26,9 +26,10 @@ THE SOFTWARE.
 // Traced API domains
 typedef enum {
   ACTIVITY_DOMAIN_ANY = 0,                        // Any domain
-  ACTIVITY_DOMAIN_HIP_API = 1,                    // HIP domain
+  ACTIVITY_DOMAIN_HSA_API = 1,                    // HSA domain
   ACTIVITY_DOMAIN_HCC_OPS = 2,                    // HCC domain
-  ACTIVITY_DOMAIN_NUMBER = 3
+  ACTIVITY_DOMAIN_HIP_API = 3,                    // HIP domain
+  ACTIVITY_DOMAIN_NUMBER = 4
 } activity_domain_t;
 
 // API calback type
