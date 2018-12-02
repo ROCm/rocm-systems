@@ -22,6 +22,8 @@
 # THE SOFTWARE.
 ################################################################################
 
+# enable tools load failure reporting
+export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and oher libraries
 export LD_LIBRARY_PATH=$PWD
 # ROC profiler library loaded by HSA runtime

@@ -77,11 +77,6 @@ add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 add_custom_target ( rocprof-link ALL
                     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
                     COMMAND ${CMAKE_COMMAND} -E create_symlink rpl_run.sh rocprof-link )
-## Install information
-#if ( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
-#message ( "CMAKE default prefix: ${CMAKE_INSTALL_PREFIX}" )
-#endif ()
-set ( CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} )
 set ( CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}/${ROCPROFILER_NAME}" )
 message ( "---------Install-Dir: ${CMAKE_INSTALL_PREFIX}" )
 install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION lib )
