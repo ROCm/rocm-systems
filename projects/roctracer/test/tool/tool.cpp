@@ -20,7 +20,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <sstream>
+#include <string>
+
 #include <stdio.h>
+
 #include <inc/roctracer_hsa.h>
 #include <inc/ext/hsa_rt_utils.hpp>
 
@@ -45,8 +49,12 @@ void hsa_api_callback(
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     begin_timestamp = timer.timestamp_fn_ns();
   } else {
-    timestamp_t duration_ns = (cid == HSA_API_ID_hsa_shut_down) ? 0 : timer.timestamp_fn_ns() - begin_timestamp;
-    fprintf(stdout, "%s,%luns\n", roctracer_id_string(domain, cid, 0), duration_ns);
+    const timestamp_t end_timestamp = (cid == HSA_API_ID_hsa_shut_down) ? begin_timestamp : timer.timestamp_fn_ns();
+//    const timestamp_t duration_ns = end_timestamp - begin_timestamp;
+//    fprintf(stdout, "%s,%luns\n", roctracer_id_string(domain, cid, 0), duration_ns);
+    std::ostringstream os;
+    os << '(' << begin_timestamp << ":" << end_timestamp << ") " << hsa_api_data_pair_t(cid, *data);
+    fprintf(stdout, "%s\n", os.str().c_str());
   }
 }
 

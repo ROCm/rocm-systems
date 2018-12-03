@@ -156,7 +156,7 @@ class API_DeclParser:
 
   # parse method args
   def get_args(self, record):
-    struct = { 'ret': '', 'args': '', 'astr': {}, 'alst': []}
+    struct = {'ret': '', 'args': '', 'astr': {}, 'alst': [], 'tlst': []}
     record = re.sub(r'^\s+', r'', record)
     record = re.sub(r'\s*(\*+)\s*', r'\1 ', record)
     rind = NextBlock(0, record)
@@ -191,6 +191,7 @@ class API_DeclParser:
       item = args[pos:end]
       struct['astr'][name] = item
       struct['alst'].append(name)
+      struct['tlst'].append(item)
       if args[end] != ',':
         self.fatal("no comma '" + args + "'")
       pos = end + 1
@@ -222,8 +223,7 @@ class API_DeclParser:
 
       if active == 1:
         if self.is_end(record):
-          args = self.get_args(record)
-          self.data[call] = args
+          self.data[call] = self.get_args(record)
           active = 0
           found = 0
 
@@ -242,6 +242,7 @@ class API_DescrParser:
     self.content = ''
     self.api_names = []
     self.api_calls = {}
+    self.api_rettypes = set()
     self.api_id = {}
 
     api_data = {}
@@ -267,11 +268,16 @@ class API_DescrParser:
       API_DeclParser(hsa_dir + header, api_list, api_data)
 
       for call in api_list:
-        # Not-supported functions
-        if not call in api_data: ns_calls.append(call)
-        # API ID map
-        self.api_id[call] = 'HSA_API_ID_' + call
+        if not call in api_data:
+          # Not-supported functions
+          ns_calls.append(call)
+        else:
+          # API ID map
+          self.api_id[call] = 'HSA_API_ID_' + call
+          # Return types
+          self.api_rettypes.add(api_data[call]['ret'])
 
+    self.api_rettypes.discard('void')
     self.api_data = api_data
     self.ns_calls = ns_calls
 
@@ -303,6 +309,8 @@ class API_DescrParser:
     self.add_section('API get_name function', '    ', self.gen_get_name)
     self.content += '\n};};\n'
     self.content += '#endif // PROF_API_IMPL\n'
+
+    self.add_section('API output stream', '    ', self.gen_out_stream)
     self.content += '\n'
 
     self.content += '#endif // ' + out_macro
@@ -344,6 +352,10 @@ class API_DescrParser:
       self.content += '  uint64_t correlation_id;\n'
       self.content += '  uint32_t phase;\n'
       self.content += '  union {\n'
+      for ret_type in self.api_rettypes:
+        self.content += '    ' + ret_type + ' ' + ret_type + '_retval;\n'
+      self.content += '  };\n'
+      self.content += '  union {\n'
       return
     if call != '-':
       self.content +=   '    struct {\n'
@@ -365,7 +377,7 @@ class API_DescrParser:
       ret_type = struct['ret']
       self.content += 'static ' + ret_type + ' ' + call + '_callback(' + struct['args'] + ') {\n'
       self.content += '  hsa_api_data_t api_data{};\n'
-      for var in struct['astr']:
+      for var in struct['alst']:
         self.content += '  api_data.args.' + call + '.' + var + ' = ' + var + ';\n'
       self.content += '  activity_rtapi_callback_t api_callback_fun = NULL;\n'
       self.content += '  void* api_callback_arg = NULL;\n'
@@ -375,6 +387,8 @@ class API_DescrParser:
       if ret_type != 'void':
         self.content += '  ' + ret_type + ' ret ='
       self.content += '  ' + name + '_saved.' + call + '_fn(' + ', '.join(struct['alst']) + ');\n'
+      if ret_type != 'void':
+        self.content += '  api_data.' + ret_type + '_retval = ret;\n'
       self.content += '  api_data.phase = 1;\n'
       self.content += '  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_HSA_API, ' + call_id + ', &api_data, api_callback_arg);\n'
       if ret_type != 'void':
@@ -400,9 +414,56 @@ class API_DescrParser:
     if call != '-':
       self.content += '    case ' + self.api_id[call] + ': return "' + call + '";\n'
     else:
-      self.content += '  };\n'
+      self.content += '  }\n'
       self.content += '  return "unknown";\n'
-      self.content += '};\n'
+      self.content += '}\n'
+
+  # generate stream operator
+  def gen_out_stream(self, n, name, call, struct):
+    if n == -1:
+      self.content += 'typedef std::pair<uint32_t, hsa_api_data_t> hsa_api_data_pair_t;\n'
+      self.content += 'inline std::ostream& operator<< (std::ostream& out, const hsa_api_data_pair_t& data_pair) {\n'
+      self.content += '  const uint32_t cid = data_pair.first;\n'
+      self.content += '  const hsa_api_data_t& api_data = data_pair.second;\n'
+      self.content += '  switch(cid) {\n'
+      return
+    if call != '-':
+      self.content += '    case ' + self.api_id[call] + ': {\n'
+      self.content += '      out << "' + call + '(";\n'
+      arg_list = struct['alst']
+      if len(arg_list) != 0:
+        for ind in range(len(arg_list)):
+          arg_var = arg_list[ind]
+          arg_val = 'api_data.args.' + call + '.' + arg_var
+          self.content += '      typedef decltype(' + arg_val + ') arg_val_type_t' + str(ind) + ';\n'
+          self.content += '      roctracer::hsa_support::output_streamer<arg_val_type_t' + str(ind) + '>::put(out, ' + arg_val + ')'
+          '''
+          arg_item = struct['tlst'][ind]
+          if re.search(r'\(\* ', arg_item): arg_pref = ''
+          elif re.search(r'void\* ', arg_item): arg_pref = ''
+          elif re.search(r'\*\* ', arg_item): arg_pref = '**'
+          elif re.search(r'\* ', arg_item): arg_pref = '*'
+          else: arg_pref = ''
+          if arg_pref != '':
+            self.content += '      if (' + arg_val + ') out << ' + arg_pref + '(' + arg_val + '); else out << ' + arg_val
+          else:
+            self.content += '      out << ' + arg_val
+          '''
+          if ind < len(arg_list) - 1: self.content += ' << ", ";\n'
+          else: self.content += ';\n'
+      if struct['ret'] != 'void':
+        self.content += '      out << ") = " << api_data.' + struct['ret'] + '_retval;\n'
+      else:
+        self.content += '      out << ") = void";\n'
+      self.content += '      break;\n'
+      self.content += '    }\n'
+    else:
+      self.content += '    default:\n'
+      self.content += '      out << "ERROR: unknown API";\n'
+      self.content += '      abort();\n'
+      self.content += '  }\n'
+      self.content += '  return out;\n'
+      self.content += '}\n'
 
 #############################################################
 # main

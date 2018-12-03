@@ -32,7 +32,7 @@ execute_process ( COMMAND sh -xc "if [ -e ${TEST_DIR}/hsa ] ; then cd ${TEST_DIR
 file( GLOB UTIL_SRC "${TEST_HSA}/util/*.cpp" )
 
 ## Build test library
-set ( TEST_LIB "tool" )
+set ( TEST_LIB "tracer_tool" )
 set ( TEST_LIB_SRC ${TEST_DIR}/tool/tool.cpp ${UTIL_SRC} )
 add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
 target_include_directories ( ${TEST_LIB} PRIVATE ${TEST_HSA} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )

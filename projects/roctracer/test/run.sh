@@ -43,7 +43,7 @@ export ROCP_THRS=1
 # paths to ROC profiler and oher libraries
 export LD_LIBRARY_PATH=$PWD
 # ROC profiler library loaded by HSA runtime
-export HSA_TOOLS_LIB="test/libtool.so libroctracer64.so"
+export HSA_TOOLS_LIB="test/tracer_libtool.so libroctracer64.so"
 export LD_PRELOAD="libroctracer64.so"
 
 eval ./test/hsa/ctrl
