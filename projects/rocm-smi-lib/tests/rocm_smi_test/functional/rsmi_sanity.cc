@@ -501,7 +501,7 @@ static rsmi_status_t test_set_pci_bw(uint32_t dv_ind) {
   return RSMI_STATUS_SUCCESS;
 }
 
-static void print_frequencies(rsmi_frequencies *f, uint32_t *l=nullptr) {
+static void print_frequencies(rsmi_frequencies *f, uint32_t *l = nullptr) {
   assert(f != nullptr);
   for (uint32_t j = 0; j < f->num_supported; ++j) {
     std::cout << "\t**  " << j << ": " << f->frequency[j];
@@ -557,8 +557,19 @@ void TestSanity::Run(void) {
   rsmi_dev_perf_level pfl;
   rsmi_frequencies f;
   rsmi_pcie_bandwidth b;
-
+  rsmi_version ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
   uint32_t num_monitor_devs = 0;
+
+  err = rsmi_version_get(&ver);
+  CHK_ERR_ASRT(err)
+
+  ASSERT_TRUE(ver.major != 0xFFFFFFFF && ver.minor != 0xFFFFFFFF &&
+                             ver.patch != 0xFFFFFFFF && ver.build != nullptr);
+
+  IF_VERB(STANDARD) {
+    std::cout << "\t**RocM SMI Library version: " << ver.major << "." <<
+       ver.minor << "." << ver.patch << " (" << ver.build << ")" << std::endl;
+  }
 
   for (uint32_t i = 0; i < num_iteration(); i++) {
     IF_VERB(PROGRESS) {

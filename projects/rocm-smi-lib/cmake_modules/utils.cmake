@@ -85,15 +85,14 @@ endfunction ()
 ## using versioning tags and git describe.
 ## Passes back a packaging version string
 ## and a library version string.
-function ( get_version DEFAULT_VERSION_STRING )
+function(get_version DEFAULT_VERSION_STRING VERSION_PREFIX)
 
     parse_version ( ${DEFAULT_VERSION_STRING} )
 
     find_program ( GIT NAMES git )
 
     if ( GIT )
-
-        execute_process ( COMMAND git describe --dirty --long --match [0-9]*
+        execute_process ( COMMAND git describe --dirty --long --match ${VERSION_PREFIX}-[0-9.]*
                           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                           OUTPUT_VARIABLE GIT_TAG_STRING
                           OUTPUT_STRIP_TRAILING_WHITESPACE
