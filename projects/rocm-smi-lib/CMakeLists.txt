@@ -28,37 +28,54 @@
 #
 cmake_minimum_required(VERSION 3.5.0)
 
-set(ROCM_SMI "rocm_smi")
-set(ROCM_SMI_COMPONENT "lib${ROCM_SMI}")
-set(ROCM_SMI_TARGET "${ROCM_SMI}64")
-
-project(${ROCM_SMI_TARGET})
-
 ## Set default module path if not already set
 if(NOT DEFINED CMAKE_MODULE_PATH)
     set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/")
 endif()
-
 ## Include common cmake modules
 include(utils)
 
-## Setup the package version.
-get_version ("1.0.0")
+set(ROCM_SMI "rocm_smi")
+set(ROCM_SMI_COMPONENT "lib${ROCM_SMI}")
+set(ROCM_SMI_TARGET "${ROCM_SMI}64")
+
+# The following default version values should be updated as appropriate for
+# ABI breaks (update MAJOR and MINOR), and ABI/API additions (update MINOR).
+# Until ABI stabilizes VERSION_MAJOR will be 0. This should be over-ridden
+# by git tags (through "git describe") when they are present.
+set(ROCM_SMI_LIB_VERSION_MAJOR 0)
+set(ROCM_SMI_LIB_VERSION_MINOR 1)
+
+################# Determine the library version #########################
+## Setup the package version based on git tags.
+set(LIB_SO_VERSION_STR
+              "${ROCM_SMI_LIB_VERSION_MAJOR}.${ROCM_SMI_LIB_VERSION_MINOR}.0")
+get_version(${LIB_SO_VERSION_STR} "rsmi")
+
+# VERSION_* variables should be set by get_version
+set(LIB_SO_VERSION_STR ${VERSION_STRING})
+set(${ROCM_SMI}_VERSION_MAJOR "${VERSION_MAJOR}")
+set(${ROCM_SMI}_VERSION_MINOR "${VERSION_MINOR}")
+set(${ROCM_SMI}_VERSION_PATCH "${VERSION_PATCH}")
+set(${ROCM_SMI}_VERSION_BUILD "${VERSION_BUILD}")
+
+# Debian package specific variables
+# Set a default value for the package version
+set(VERSION_STRING "1.0.0")
+get_version(${VERSION_STRING} "roc")
+
+# VERSION_* variables should be set by get_version
+set(BUILD_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
+
+project(${ROCM_SMI_TARGET})
+
+# Create a configure file to get version info from within library
+configure_file(
+  "${PROJECT_SOURCE_DIR}/src/${ROCM_SMI_TARGET}Config.in"
+  "${PROJECT_SOURCE_DIR}/include/rocm_smi/${ROCM_SMI_TARGET}Config.h")
 
 if (NOT DEFINED CPACK_PACKAGE_VENDOR)
     set(CPACK_PACKAGE_VENDOR "AMD")
-endif()
-
-if (NOT DEFINED CPACK_PACKAGE_VERSION_MAJOR)
-    set(CPACK_PACKAGE_VERSION_MAJOR "1")
-endif()
-
-if (NOT DEFINED CPACK_PACKAGE_VERSION_MINOR)
-    set(CPACK_PACKAGE_VERSION_MINOR "0")
-endif()
-
-if (NOT DEFINED CPACK_PACKAGE_VERSION_PATCH)
-    set(CPACK_PACKAGE_VERSION_PATCH "0")
 endif()
 
 if (NOT DEFINED CPACK_PACKAGE_CONTACT)
@@ -70,14 +87,7 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
                  "ROCm System Management Interface library")
 endif()
 
-set(LIB_VERSION_STRING
-        "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
-# Debian package specific variables
-
-set(BUILD_VERSION_STRING
-        "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_PATCH}")
-
-set(CPACK_PACKAGE_FILE_NAME "rocm_smi_lib64-${LIB_VERSION_STRING}")
+set(CPACK_PACKAGE_FILE_NAME "rocm_smi_lib64-${BUILD_VERSION_STRING}")
 ## Verbose output.
 set(CMAKE_VERBOSE_MAKEFILE on)
 
@@ -112,10 +122,6 @@ set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_utils.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_common.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_exception.h")
 
-
-# rocm_smi_device.h 
-#      rocm_smi.h rocm_smi_main.h rocm_smi_monitor.h")
-
 set(SMI_EXAMPLE_EXE "rocm_smi_ex")
 
 add_executable(${SMI_EXAMPLE_EXE} "example/rocm_smi_example.cc")
@@ -123,10 +129,10 @@ target_link_libraries(${SMI_EXAMPLE_EXE} ${ROCM_SMI_TARGET})
 add_library(${ROCM_SMI_TARGET} SHARED ${SMI_SRC_LIST} ${SMI_INC_LIST})
 
 ## Set the VERSION and SOVERSION values
-set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY VERSION "${LIB_VERSION_STRING}")
 set_property(TARGET ${ROCM_SMI_TARGET}
-             PROPERTY SOVERSION "${CPACK_PACKAGE_VERSION_MAJOR}")
-
+                             PROPERTY VERSION "${LIB_SO_VERSION_STR}")
+set_property(TARGET ${ROCM_SMI_TARGET}
+             PROPERTY SOVERSION "${ROCM_SMI_LIB_VERSION_MAJOR}")
 
 ## If the library is a release, strip the target library
 if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
@@ -148,7 +154,8 @@ set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 ## Add the install directives for the runtime library.
 install(TARGETS ${ROCM_SMI_TARGET}
           LIBRARY DESTINATION ${ROCM_SMI}/lib COMPONENT ${ROCM_SMI_COMPONENT})
-install(FILES ${SOURCE_DIR}/include/rocm_smi/rocm_smi.h DESTINATION rocm_smi/include/rocm_smi)
+install(FILES ${SOURCE_DIR}/include/rocm_smi/rocm_smi.h
+                                        DESTINATION rocm_smi/include/rocm_smi)
 
 ## Add the packaging directives for the runtime library.
 
@@ -176,5 +183,4 @@ if (DOXYGEN_FOUND)
 else()
   message("Doxygen is not found. Will not generate documents.")
 endif(DOXYGEN_FOUND)
-
 

@@ -59,6 +59,7 @@
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
+#include "rocm_smi/rocm_smi64Config.h"
 
 static const uint32_t kMaxOverdriveLevel = 20;
 
@@ -1112,6 +1113,23 @@ rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
   errno = 0;
   *busy_percent = strtoul(val_str.c_str(), nullptr, 10);
   assert(errno == 0);
+
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_version_get(rsmi_version *version) {
+  TRY
+
+  if (version == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  version->major = rocm_smi_VERSION_MAJOR;
+  version->minor = rocm_smi_VERSION_MINOR;
+  version->patch = rocm_smi_VERSION_PATCH;
+  version->build = rocm_smi_VERSION_BUILD;
 
   return RSMI_STATUS_SUCCESS;
 

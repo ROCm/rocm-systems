@@ -256,6 +256,15 @@ typedef struct {
     uint32_t lanes[RSMI_MAX_NUM_FREQUENCIES];
 } rsmi_pcie_bandwidth;
 
+/**
+ * @brief This structure holds version information.
+ */
+typedef struct {
+    uint32_t major;     //!< Major version
+    uint32_t minor;     //!< Minor version
+    uint32_t patch;     //!< Patch, build  or stepping version
+    const char *build;  //!< Build string
+} rsmi_version;
 
 /**
  *  @brief Initialize Rocm SMI.
@@ -266,7 +275,7 @@ typedef struct {
  *  @param[in] init_flags Bit flags that tell SMI how to initialze. Not
  *  currently used.
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
 rsmi_status_t rsmi_init(uint64_t init_flags);
 
@@ -287,7 +296,7 @@ rsmi_status_t rsmi_shut_down(void);
  *  successful call, the value num_devices will contain the number of monitor
  *  devices.
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
 rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
 
@@ -304,26 +313,45 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
  *  @param[inout] bandwidth a pointer to a caller provided rsmi_pcie_bandwidth
  *  structure to which the frequency information will be written
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
 rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth *bandwidth);
 
 /**
+ * @brief Get percentage of time device is busy doing any processing
+ *
+ * @details Given a device index @p dv_ind, this function returns the
+ * percentage of time that the specified device is busy. The device is
+ * considered busy if any one or more of its sub-blocks are working, and idle
+ * if none of the sub-blocks are working.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[inout] busy_percent a pointer to the uint32_t to which the busy
+ * percent will be written
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
+ *
+ */
+rsmi_status_t
+rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
+
+/**
  *  @brief Control the set of allowed PCIe bandwidths that can be used.
- *  
+ *
  *  @details Given a device index @p dv_ind and a 64 bit bitmask @p bw_bitmask,
  *  this function will limit the set of allowable bandwidths. If a bit in @p
  *  bw_bitmask has a value of 1, then the frequency (as ordered in an
- *  rsmi_frequencies returned by rsmi_dev_get_gpu_clk_freq()) corresponding
+ *  ::rsmi_frequencies returned by rsmi_dev_get_gpu_clk_freq()) corresponding
  *  to that bit index will be allowed.
- *  
+ *
  *  This function will change the performance level to
  *  ::RSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
  *  band_widths. Caller will need to set to ::RSMI_DEV_PERF_LEVEL_AUTO in order
  *  to get back to default state.
- *  
+ *
  *  All bits with indices greater than or equal to
  *  rsmi_pcie_bandwidth.transfer_rate.num_supported will be ignored.
  *
@@ -349,7 +377,7 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
  *  @param[inout] bdfid a pointer to uint64_t to which the device bdfid value
  *  will be written
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
 
  */
 rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
@@ -371,7 +399,7 @@ rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
  *  @param[inout] id a pointer to uint64_t to which the device id will be
  *  written
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint64_t *id);
@@ -382,15 +410,15 @@ rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint64_t *id);
  *  device index.
  *
  *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p
- *  perf, this function will write the rsmi_dev_perf_level to the uint32_t
+ *  perf, this function will write the ::rsmi_dev_perf_level to the uint32_t
  *  pointed to by @p perf
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] perf a pointer to rsmi_dev_perf_level to which the
+ *  @param[inout] perf a pointer to ::rsmi_dev_perf_level to which the
  *  performance level will be written
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t rsmi_dev_perf_level_get(uint32_t dv_ind,
@@ -408,7 +436,7 @@ rsmi_status_t rsmi_dev_perf_level_get(uint32_t dv_ind,
  *
  *  @param[in] perf_lvl the value to which the performance level should be set
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
@@ -427,7 +455,7 @@ rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level perf_lvl);
  *  @param[inout] od a pointer to uint32_t to which the overdrive percentage
  *  will be written
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od);
@@ -466,7 +494,7 @@ rsmi_status_t rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od);
  *
  *  @param[in] od the value to which the overdrive level should be set
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od);
@@ -476,7 +504,7 @@ rsmi_status_t rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od);
  *  specified clock type.
  *
  *  @details Given a device index @p dv_ind, a clock type @p clk_type, and a
- *  pointer to a to an rsmi_frequencies structure @p f, this function will
+ *  pointer to a to an ::rsmi_frequencies structure @p f, this function will
  *  fill in @p f with the possible clock speeds, and indication of the current
  *  clock speed selection.
  *
@@ -484,10 +512,10 @@ rsmi_status_t rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od);
  *
  *  @param[in] clk_type the type of clock for which the frequency is desired
  *
- *  @param[inout] f a pointer to a caller provided rsmi_frequencies structure
+ *  @param[inout] f a pointer to a caller provided ::rsmi_frequencies structure
  *  to which the frequency information will be written
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
@@ -500,7 +528,7 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
  * @details Given a device index @p dv_ind, a clock type @p clk_type, and a
  * 64 bit bitmask @p freq_bitmask, this function will limit the set of
  * allowable frequencies. If a bit in @p freq_bitmask has a value of 1, then
- * the frequency (as ordered in an rsmi_frequencies returned by
+ * the frequency (as ordered in an ::rsmi_frequencies returned by
  * rsmi_dev_get_gpu_clk_freq()) corresponding to that bit index will be
  * allowed.
  *
@@ -510,7 +538,7 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
  * to get back to default state.
  *
  * All bits with indices greater than or equal to
- * rsmi_frequencies::num_supported will be ignored.
+ * ::rsmi_frequencies::num_supported will be ignored.
  *
  *  @param[in] dv_ind a device index
  *
@@ -519,7 +547,7 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
  *
  *  @param[in] freq_bitmask A bitmask indicating the indices of the
  *  frequencies that are to be enabled (1) and disabled (0). Only the lowest
- *  rsmi_frequencies.num_supported bits of this mask are relevant.
+ *  ::rsmi_frequencies.num_supported bits of this mask are relevant.
  */
 rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
                                rsmi_clk_type clk_type, uint64_t freq_bitmask);
@@ -537,7 +565,7 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
  *
  *  @param[in] len the length of the caller provided buffer @p name.
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
@@ -559,7 +587,7 @@ rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
  *  @param[inout] temperature a pointer to int64_t to which the temperature
  *  will be written, in millidegrees Celcius.
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
@@ -574,7 +602,7 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
  * @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
  * If a device has more than one sensor, it could be greater than 0.
  *
- * @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
 rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind);
 
@@ -594,7 +622,7 @@ rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind);
  *  @param[inout] speed a pointer to uint32_t to which the speed will be
  *  written
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind,
@@ -620,7 +648,7 @@ rsmi_status_t rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind,
  * @param[inout] speed a pointer to uint32_t to which the speed will be
  * written
  *
- * @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind,
@@ -630,7 +658,7 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind,
  *  @brief Get the max. fan speed of the device with provided device index.
  *
  *  @details Given a device index @p dv_ind and a pointer to a uint32_t
- *  @p max_speed, this function will write the maxirsmi_dev_power_profile_semum fan speed possible to
+ *  @p max_speed, this function will write the maximum fan speed possible to
  *  the uint32_t pointed to by @p max_speed
  *
  *  @param[in] dv_ind a device index
@@ -641,7 +669,7 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind,
  *  @param[inout] max_speed a pointer to uint32_t to which the maximum speed
  *  will be written
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
@@ -663,7 +691,7 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
  *
  * @param[in] speed the speed to which the function will attempt to set the fan
  *
- * @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
 rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind,
                                                               uint64_t speed);
@@ -686,7 +714,7 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind,
  *  @param[inout] power a pointer to uint64_t to which the average power
  *  consumption will be written
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
@@ -708,7 +736,7 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
  *  @param[inout] cap a pointer to a uint64_t that indicates the power cap,
  *  in microwatts
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
@@ -731,7 +759,7 @@ rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap);
  *  @param[inout] min a pointer to a uint64_t that indicates the minimum
  *  possible power cap, in microwatts
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
@@ -753,7 +781,7 @@ rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind,
  *  @param[inout] cap a uint64_t that indicates the desired power cap, in
  *  microwatts
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
@@ -776,7 +804,7 @@ rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
  *  @param[inout] power a pointer to uint64_t to which the maximum power
  *  consumption will be written
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
@@ -807,7 +835,7 @@ rsmi_dev_power_max_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
  * @param[inout] status a pointer to rsmi_power_profile_status that will be
  * populated by a call to this function
  *
- *  @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
@@ -831,7 +859,7 @@ rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
  * @param[in] profile a rsmi_power_profile_preset_masks that hold the mask
  * of the desired new power profile
  *
- * @retval RSMI_STATUS_SUCCESS is returned upon successful call.
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
@@ -848,30 +876,27 @@ rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t sensor_ind,
  * @param[inout] status_string A pointer to a const char * which will be made
  * to point to a description of the provided error code
  *
- * @retval RSMI_STATUS_SUCCESS is returned upon successful call
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
  *
  */
 rsmi_status_t
 rsmi_status_string(rsmi_status_t status, const char **status_string);
 
 /**
- * @brief Get percentage of time device is busy doing any processing
- *
- * @details Given a device index @p dv_ind, this function returns the
- * percentage of time that the specified device is busy. The device is
- * considered busy if any one or more of its sub-blocks are working, and idle
- * if none of the sub-blocks are working.
- *
- * @param[in] dv_ind a device index
- *
- * @param[inout] busy_percent a pointer to the uint32_t to which the busy
- * percent will be written
- *
- * @retval RSMI_STATUS_SUCCESS is returned upon successful call
- *
+ * @brief Get the build version information for the currently running build of
+ * RSMI.
+ * 
+ * @details  Get the major, minor, patch and build string for RSMI build
+ * currently in use through @p version
+ * 
+ * @paramp[inout] version A pointer to an ::rsmi_version structure that will
+ * be updated with the version information upon return.
+ * 
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
+ * 
  */
 rsmi_status_t
-rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
+rsmi_version_get(rsmi_version *version);
 
 #ifdef __cplusplus
 }
