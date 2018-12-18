@@ -135,7 +135,7 @@ class HsaTimer {
     sysclock_factor_ = (freq_t)1000000000 / (freq_t)sysclock_hz;
   }
 
-  // Methids for system-clock/ns conversion
+  // Methods for system-clock/ns conversion
   timestamp_t sysclock_to_ns(const timestamp_t& sysclock) const {
     return timestamp_t((freq_t)sysclock * sysclock_factor_);
   }

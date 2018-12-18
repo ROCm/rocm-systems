@@ -29,7 +29,7 @@
   <metric name="TCC_MC_WRREQ" block=TCC event=26 descr="Number of 32-byte transactions going over the TC_MC_wrreq interface. Atomics may travel over the same interface and are generally classified as write requests."></metric>
   <metric name="TCC_MC_WRREQ_STALL" block=TCC event=28 descr="Number of cycles a write request was stalled."></metric>
 
-  <metric name="TCP_TA_DATA_STALL_CYCLES" block=TCP event=3 descr="TCP stalls TA data interface. Now Windowed."></metric>
+  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES" block=TCP event=3 descr="TCP stalls TA data interface. Now Windowed."></metric>
 </gfx8>
 
 <gfx9>
@@ -65,5 +65,5 @@
   <metric name="TCC_EA_RDREQ" block=TCC event=41 descr="Number of TCC/EA read requests (either 32-byte or 64-byte)"></metric>
   <metric name="TCC_EA_RDREQ_32B" block=TCC event=42 descr="Number of 32-byte TCC/EA read requests"></metric>
 
-  <metric name="TCP_TA_DATA_STALL_CYCLES" block=TCP event=6 descr="TCP stalls TA data interface. Now Windowed."></metric>
+  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES" block=TCP event=6 descr="TCP stalls TA data interface. Now Windowed."></metric>
 </gfx9>

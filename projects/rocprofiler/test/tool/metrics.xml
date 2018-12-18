@@ -167,7 +167,7 @@
   <metric
     name="MemUnitStalled"
     descr="The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad)."
-    expr=100*max(TCP_TA_DATA_STALL_CYCLES,16)/GRBM_GUI_ACTIVE/SE_NUM
+    expr=100*max(TCP_TCP_TA_DATA_STALL_CYCLES,16)/GRBM_GUI_ACTIVE/SE_NUM
   ></metric>
 
   # WriteUnitStalled The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad).
@@ -177,7 +177,7 @@
     expr=100*TCC_WRREQ_STALL_max/GRBM_GUI_ACTIVE
   ></metric>
 
-  # The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad).
+  # ALUStalledByLDS The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad).
   <metric
     name="ALUStalledByLDS"
     descr="The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad)."
