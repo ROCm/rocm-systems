@@ -611,13 +611,17 @@ void TestSanity::Run(void) {
         print_frequencies(&f);
       }
       err = rsmi_dev_pci_bandwidth_get(i, &b);
-      CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Supported PCIe bandwidths: ";
-        std::cout << b.transfer_rate.num_supported << std::endl;
-        print_frequencies(&b.transfer_rate, b.lanes);
+      if (err == RSMI_STATUS_NOT_YET_IMPLEMENTED) {
+        std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine"
+                                                              << std::endl;
+      } else {
+          CHK_ERR_ASRT(err)
+          IF_VERB(STANDARD) {
+            std::cout << "\t**Supported PCIe bandwidths: ";
+            std::cout << b.transfer_rate.num_supported << std::endl;
+            print_frequencies(&b.transfer_rate, b.lanes);
+          }
       }
-
       err = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_SYS, &f);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
@@ -766,8 +770,12 @@ void TestSanity::Run(void) {
       CHK_RSMI_PERM_ERR(err)
 
       err = test_set_pci_bw(i);
-      CHK_RSMI_PERM_ERR(err)
-
+      if (err == RSMI_STATUS_NOT_YET_IMPLEMENTED) {
+        std::cout << "\t**Set PCIE Bandwidth: Not supported on this machine"
+                                                              << std::endl;
+      } else {
+        CHK_RSMI_PERM_ERR(err)
+      }
       err = test_set_fan_speed(i);
       CHK_RSMI_PERM_ERR(err)
 
