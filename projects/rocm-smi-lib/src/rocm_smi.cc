@@ -464,6 +464,10 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
   }
   assert(val_vec.size() <= RSMI_MAX_NUM_FREQUENCIES);
 
+  if (val_vec.size() == 0) {
+    return RSMI_STATUS_NOT_YET_IMPLEMENTED;
+  }
+
   f->num_supported = val_vec.size();
   bool current = false;
   f->current = RSMI_MAX_NUM_FREQUENCIES + 1;  // init to an invalid value
@@ -1090,6 +1094,16 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
 
     case RSMI_STATUS_INPUT_OUT_OF_BOUNDS:
       *status_string = "The provided input is out of allowable or safe range";
+      break;
+
+    case RSMI_STATUS_INIT_ERROR:
+      *status_string = "An error occurred during initialization, during "
+       "monitor discovery or when when initializing internal data structures";
+      break;
+
+    case RSMI_STATUS_NOT_YET_IMPLEMENTED:
+      *status_string = "The called function has not been implemented in this "
+        "system for this device type";
       break;
 
     default:
