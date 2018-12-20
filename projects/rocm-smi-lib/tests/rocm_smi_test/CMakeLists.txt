@@ -71,7 +71,7 @@ if (${IS64BIT} EQUAL 0)
 else()
   if(NOT EXISTS ${RSMI_LIB_DIR}/librocm_smi64.so)
     message("ERROR: Define RSMI_LIB_DIR pointing to RSMI library is not set")
-    message(" missing: ${RSMI_LIB_DIR}/librocm_smi.so")
+    message(" missing: ${RSMI_LIB_DIR}/librocm_smi64.so")
     return()
   endif()
 endif()
@@ -203,8 +203,6 @@ include_directories(${RSMITST_ROOT}/gtest/include)
 
 # Build rules
 add_executable(${RSMITST} ${rsmitstSources} ${functionalSources})
-
-#target_link_libraries(${ROCRTST} ${ROCRTST_LIBS} c stdc++ dl pthread rt numa hwloc)
 
 target_link_libraries(${RSMITST} ${RSMITST_LIBS} c stdc++ pthread)
 

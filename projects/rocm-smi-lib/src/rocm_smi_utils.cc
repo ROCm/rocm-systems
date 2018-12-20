@@ -50,6 +50,7 @@
 #include <cstdint>
 #include <iostream>
 #include <sstream>
+#include <algorithm>
 
 namespace amd {
 namespace smi {
@@ -88,6 +89,9 @@ int ReadSysfsStr(std::string path, std::string *retStr) {
   fs.close();
 
   *retStr = ss.str();
+
+  retStr->erase(std::remove(retStr->begin(), retStr->end(), '\n'),
+                                                               retStr->end());
   return ret;
 }
 

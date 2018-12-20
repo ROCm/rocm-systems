@@ -43,81 +43,30 @@
  *
  */
 
+#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
+#define INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
+
+#include <exception>
 #include <string>
-#include <vector>
-#include <memory>
 
-#include "rocm_smi/rocm_smi.h"
-#include "gtest/gtest.h"
-#include "rocm_smi_test/test_common.h"
-#include "rocm_smi_test/test_base.h"
-#include "functional/rsmi_sanity.h"
+namespace amd {
+namespace smi {
 
-static RSMITstGlobals *sRSMIGlvalues = nullptr;
+/// @brief Exception type which carries an error code to return to the user.
+class rsmi_exception : public std::exception {
+ public:
+  rsmi_exception(rsmi_status_t error, const char* description) :
+                                            err_(error), desc_(description) {}
+  rsmi_status_t error_code() const noexcept { return err_; }
+  const char* what() const noexcept override { return desc_.c_str(); }
 
-static void SetFlags(TestBase *test) {
-  assert(sRSMIGlvalues != nullptr);
+ private:
+  rsmi_status_t err_;
+  std::string desc_;
+};
 
-  test->set_num_iteration(sRSMIGlvalues->num_iterations);
-  test->set_verbosity(sRSMIGlvalues->verbosity);
-}
+}  // namespace smi
+}  // namespace amd
 
+#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
 
-static void RunCustomTestProlog(TestBase *test) {
-  SetFlags(test);
-
-  test->DisplayTestInfo();
-  test->SetUp();
-  test->Run();
-  return;
-}
-static void RunCustomTestEpilog(TestBase *test) {
-  test->DisplayResults();
-  test->Close();
-  return;
-}
-
-// If the test case one big test, you should use RunGenericTest()
-// to run the test case. OTOH, if the test case consists of multiple
-// functions to be run as separate tests, follow this pattern:
-//   * RunCustomTestProlog(test)  // Run() should contain minimal code
-//   * <insert call to actual test function within test case>
-//   * RunCustomTestEpilog(test)
-static void RunGenericTest(TestBase *test) {
-  RunCustomTestProlog(test);
-  RunCustomTestEpilog(test);
-  return;
-}
-
-// TEST ENTRY TEMPLATE:
-// TEST(rocrtst, Perf_<test name>) {
-//  <Test Implementation class> <test_obj>;
-//
-//  // Copy and modify implementation of RunGenericTest() if you need to deviate
-//  // from the standard pattern implemented there.
-//  RunGenericTest(&<test_obj>);
-// }
-
-TEST(rsmitst, RSMISanityTest) {
-  TestSanity tst;
-
-  RunGenericTest(&tst);
-}
-
-int main(int argc, char** argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-
-  RSMITstGlobals settings;
-
-  // Set some default values
-  settings.verbosity = 1;
-  settings.monitor_verbosity = 1;
-  settings.num_iterations = 1;
-
-
-  if (ProcessCmdline(&settings, argc, argv)) {
-    return 1;
-  }
-  sRSMIGlvalues = &settings;
-  return RUN_ALL_TESTS();
-}

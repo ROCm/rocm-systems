@@ -58,6 +58,8 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi/rocm_smi_exception.h"
+#include "rocm_smi/rocm_smi64Config.h"
 
 static const uint32_t kMaxOverdriveLevel = 20;
 
@@ -67,6 +69,10 @@ static rsmi_status_t handleException() {
   } catch (const std::bad_alloc& e) {
     debug_print("RSMI exception: BadAlloc\n");
     return RSMI_STATUS_OUT_OF_RESOURCES;
+  } catch (const amd::smi::rsmi_exception& e) {
+    debug_print("Exception caught: %s.\n", e.what());
+    return e.error_code();
+    return RSMI_STATUS_INTERNAL_EXCEPTION;
   } catch (const std::exception& e) {
     debug_print("Unhandled exception: %s\n", e.what());
     assert(false && "Unhandled exception.");
@@ -97,20 +103,23 @@ static rsmi_status_t errno_to_rsmi_status(uint32_t err) {
     case 0:      return RSMI_STATUS_SUCCESS;
     case EACCES: return RSMI_STATUS_PERMISSION;
     case EPERM:  return RSMI_STATUS_NOT_SUPPORTED;
-    case ENOENT: return RSMI_STATUS_FILE_ERROR;
+    case ENOENT:
+    case EISDIR: return RSMI_STATUS_FILE_ERROR;
     default:     return RSMI_STATUS_UNKNOWN_ERROR;
   }
 }
 /**
- * Parse a string of the form "<int index>:  <int freq><freq. unit string> <|*>"
+ * Parse a string of the form:
+ *        "<int index>:  <int freq><freq. unit string> <|*>"
  */
-static uint32_t freq_string_to_int(std::string freq_line, bool *is_curr) {
+static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
+                                     bool *is_curr, uint32_t lanes[], int i) {
   assert(is_curr != nullptr);
 
-  std::istringstream fs(freq_line);
+  std::istringstream fs(freq_lines[i]);
 
   uint32_t ind;
-  uint32_t freq;
+  float freq;
   std::string junk;
   std::string units_str;
   std::string star_str;
@@ -122,7 +131,7 @@ static uint32_t freq_string_to_int(std::string freq_line, bool *is_curr) {
   fs >> star_str;
 
   if (is_curr != nullptr) {
-    if (freq_line.find("*") != std::string::npos) {
+    if (freq_lines[i].find("*") != std::string::npos) {
       *is_curr = true;
     } else {
       *is_curr = false;
@@ -130,18 +139,33 @@ static uint32_t freq_string_to_int(std::string freq_line, bool *is_curr) {
   }
   uint32_t multiplier = 0;
 
-  if (units_str == "Mhz") {
-    multiplier = 1000000;
-  } else if (units_str == "Ghz") {
-    multiplier = 1000000000;
-  } else if (units_str == "Khz") {
-    multiplier = 1000;
-  } else if (units_str == "Hz") {
-    multiplier = 1;
-  } else {
-    assert(!"Unexpected units for frequency");
+  switch (units_str[0]) {
+    case 'G':   // GT or GHz
+      multiplier = 1000000000;
+      break;
+
+    case 'M':   // MT or MHz
+      multiplier = 1000000;
+      break;
+
+    case 'K':   // KT or KHz
+      multiplier = 1000;
+      break;
+
+    case 'T':   // Transactions
+    case 'H':   // Hertz
+      multiplier = 1;
+      break;
+    default:
+      assert(!"Unexpected units for frequency");
   }
 
+  if (star_str[0] == 'x') {
+    assert(lanes != nullptr && "Lanes are provided but null lanes pointer");
+    if (lanes) {
+      lanes[i] = std::stoi(star_str.substr(1), nullptr);
+    }
+  }
   return freq*multiplier;
 }
 
@@ -337,6 +361,20 @@ rsmi_num_monitor_devices(uint32_t *num_devices) {
 }
 
 rsmi_status_t
+rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
+  TRY
+
+  if (bdfid == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  GET_DEV_FROM_INDX
+
+  *bdfid = dev->get_bdfid();
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
 rsmi_dev_id_get(uint32_t dv_ind, uint64_t *id) {
   TRY
   std::string val_str;
@@ -411,7 +449,7 @@ rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level perf_level) {
 }
 
 static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
-                                       uint32_t dv_ind, rsmi_frequencies *f) {
+            uint32_t dv_ind, rsmi_frequencies *f, uint32_t *lanes = nullptr) {
   TRY
   std::vector<std::string> val_vec;
   rsmi_status_t ret;
@@ -426,12 +464,16 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
   }
   assert(val_vec.size() <= RSMI_MAX_NUM_FREQUENCIES);
 
+  if (val_vec.size() == 0) {
+    return RSMI_STATUS_NOT_YET_IMPLEMENTED;
+  }
+
   f->num_supported = val_vec.size();
   bool current = false;
   f->current = RSMI_MAX_NUM_FREQUENCIES + 1;  // init to an invalid value
 
   for (uint32_t i = 0; i < f->num_supported; ++i) {
-    f->frequency[i] = freq_string_to_int(val_vec[i], &current);
+    f->frequency[i] = freq_string_to_int(val_vec, &current, lanes, i);
 
     // Our assumption is that frequencies are read in from lowest to highest.
     // Check that that is true.
@@ -647,6 +689,60 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
 }
 
 rsmi_status_t
+rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth *b) {
+  TRY
+  assert(b != nullptr);
+
+  if (b == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  return get_frequencies(amd::smi::kDevPCIEBW, dv_ind,
+                                        &b->transfer_rate, b->lanes);
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
+  rsmi_status_t ret;
+  rsmi_pcie_bandwidth bws;
+
+  TRY
+  ret = rsmi_dev_pci_bandwidth_get(dv_ind, &bws);
+
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  assert(bws.transfer_rate.num_supported <= RSMI_MAX_NUM_FREQUENCIES);
+
+  amd::smi::RocmSMI smi = amd::smi::RocmSMI::getInstance();
+
+  // Above call to rsmi_dev_pci_bandwidth_get() should have emitted an error
+  // if assert below is not true
+  assert(dv_ind < smi.monitor_devices().size());
+
+  std::string freq_enable_str =
+         bitfield_to_freq_string(bw_bitmask, bws.transfer_rate.num_supported);
+
+  std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind];
+  assert(dev != nullptr);
+
+  ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  uint32_t ret_i;
+  ret_i = dev->writeDevInfo(amd::smi::kDevPCIEBW, freq_enable_str);
+
+  return errno_to_rsmi_status(ret_i);
+
+  CATCH
+}
+
+rsmi_status_t
 rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
                        rsmi_temperature_metric metric, int64_t *temperature) {
   TRY
@@ -851,11 +947,10 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
   if (power == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
-  (void)sensor_ind;   // Not used yet
-  // ++sensor_ind;  // power sysfs files have 1-based indices
+  ++sensor_ind;  // power sysfs files have 1-based indices
 
   rsmi_status_t ret;
-  ret = get_power_mon_value(amd::smi::kPowerAveGPUPower, dv_ind, power);
+  ret = get_dev_mon_value(amd::smi::kMonPowerAve, dv_ind, sensor_ind, power);
 
   return ret;
   CATCH
@@ -1001,10 +1096,56 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
       *status_string = "The provided input is out of allowable or safe range";
       break;
 
+    case RSMI_STATUS_INIT_ERROR:
+      *status_string = "An error occurred during initialization, during "
+       "monitor discovery or when when initializing internal data structures";
+      break;
+
+    case RSMI_STATUS_NOT_YET_IMPLEMENTED:
+      *status_string = "The called function has not been implemented in this "
+        "system for this device type";
+      break;
+
     default:
       *status_string = "An unknown error occurred";
       return RSMI_STATUS_UNKNOWN_ERROR;
   }
   return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
+  TRY
+  std::string val_str;
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevUsage, dv_ind,
+                                                                    &val_str);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  errno = 0;
+  *busy_percent = strtoul(val_str.c_str(), nullptr, 10);
+  assert(errno == 0);
+
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_version_get(rsmi_version *version) {
+  TRY
+
+  if (version == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  version->major = rocm_smi_VERSION_MAJOR;
+  version->minor = rocm_smi_VERSION_MINOR;
+  version->patch = rocm_smi_VERSION_PATCH;
+  version->build = rocm_smi_VERSION_BUILD;
+
+  return RSMI_STATUS_SUCCESS;
+
   CATCH
 }

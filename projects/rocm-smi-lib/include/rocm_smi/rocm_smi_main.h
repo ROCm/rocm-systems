@@ -74,9 +74,9 @@ class RocmSMI {
     uint32_t DiscoverAMDPowerMonitors(bool force_update = false);
 
     // Will execute "func" for every Device object known about, or until func
-    // returns true;
-    void IterateSMIDevices(
-          std::function<bool(std::shared_ptr<Device>&, void *)> func, void *);
+    // returns non-zero;
+    uint32_t IterateSMIDevices(
+      std::function<uint32_t(std::shared_ptr<Device>&, void *)> func, void *);
 
  private:
     std::vector<std::shared_ptr<Device>> devices_;

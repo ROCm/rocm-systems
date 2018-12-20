@@ -63,6 +63,7 @@ enum MonitorTypes {
   kMonPowerCap,
   kMonPowerCapMax,
   kMonPowerCapMin,
+  kMonPowerAve,
   kMonTempMax,
   kMonTempMin,
   kMonTempMaxHyst,

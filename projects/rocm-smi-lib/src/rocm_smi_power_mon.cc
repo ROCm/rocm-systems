@@ -66,7 +66,6 @@ static const char *kPowerMonPMName = "amdgpu_pm_info";
 // Using this map in case we add other files from dri directory to parse.
 static const std::map<PowerMonTypes, const char *> kMonitorNameMap = {
     {kPowerMaxGPUPower, kPowerMonPMName},
-    {kPowerAveGPUPower, kPowerMonPMName},
 };
 
 PowerMon::PowerMon(std::string path, RocmSMI_env_vars const *e) :
@@ -85,10 +84,6 @@ static int parse_power_str(std::string s, PowerMonTypes type, uint64_t *val) {
   switch (type) {
     case kPowerMaxGPUPower:
       search_str = "(max GPU)";
-      break;
-
-    case kPowerAveGPUPower:
-      search_str = "(average GPU)";
       break;
 
     default:
@@ -118,7 +113,6 @@ static int parse_power_str(std::string s, PowerMonTypes type, uint64_t *val) {
 
   switch (type) {
     case kPowerMaxGPUPower:
-    case kPowerAveGPUPower:
       l_ss >> num_units;
       l_ss >> sz;
       assert(sz == "W");  // We only expect Watts at this time

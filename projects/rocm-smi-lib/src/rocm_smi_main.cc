@@ -62,6 +62,7 @@
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
+#include "rocm_smi/rocm_smi_exception.h"
 
 static const char *kPathDRMRoot = "/sys/class/drm";
 static const char *kPathHWMonRoot = "/sys/class/hwmon";
@@ -118,10 +119,104 @@ static int SameDevice(const std::string fileA, const std::string fileB) {
   return SameFile(fileA + "/device", fileB + "/device");
 }
 
+//  Determine if provided string is a bdfid pci path directory of the form
+//  XXXX:XX:XX.X,
+//  domain:bus:device.function
+//
+//  where X is a hex integer (lower case is expected)
+static bool is_bdfid_path_str(const std::string in_name, uint64_t *bdfid) {
+  char *p = nullptr;
+  char *name_start;
+  char name[13] = {'\0'};
+  uint32_t tmp;
+
+  assert(bdfid != nullptr);
+
+  if (in_name.size() != 12) {
+    return false;
+  }
+
+  tmp = in_name.copy(name, 12);
+  assert(tmp == 12);
+
+  // BDFID = ((<BUS> & 0x1f) << 8) | ((device& 0x1f) <<3 ) | (function & 0x7).
+  *bdfid = 0;
+  name_start = name;
+  p = name_start;
+
+  // Match this: XXXX:xx:xx.x
+  tmp = std::strtoul(p, &p, 16);
+  if (*p != ':' || p - name_start != 4) {
+    return false;
+  }
+  // We are ignoring the domain part for now as KFD is not encoding it yet
+
+  // Match this: xxxx:XX:xx.x
+  p++;
+  tmp = std::strtoul(p, &p, 16);
+  if (*p != ':' || p - name_start != 7) {
+    return false;
+  }
+  *bdfid |= tmp << 8;
+
+  // Match this: xxxx:xx:XX.x
+  p++;
+  tmp = std::strtoul(p, &p, 16);
+  if (*p != '.' || p - name_start != 10) {
+    return false;
+  }
+  *bdfid |= tmp << 3;
+
+  // Match this: xxxx:xx:xx.X
+  p++;
+  tmp = std::strtoul(p, &p, 16);
+  if (*p != '\0' || p - name_start != 12) {
+    return false;
+  }
+  *bdfid |= tmp;
+
+  return true;
+}
+
+static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
+  assert(bdfid != nullptr);
+  char tpath[256];
+  ssize_t ret;
+
+  ret = readlink(path.c_str(), tpath, 256);
+
+  assert(ret > 0);
+  assert(ret < 256);
+
+  if (ret <= 0 || ret >= 256) {
+    return -1;
+  }
+
+  // We are looking for the last element in the path that has the form
+  //  XXXX:XX:XX.X, where X is a hex integer (lower case is expected)
+  std::size_t slash_i, end_i;
+  std::string tmp;
+
+  std::string tpath_str(tpath);
+
+  end_i = tpath_str.size() - 1;
+  while (end_i > 0) {
+    slash_i = tpath_str.find_last_of('/', end_i);
+    tmp = tpath_str.substr(slash_i + 1, end_i - slash_i);
+
+    if (is_bdfid_path_str(tmp, bdfid)) {
+      return 0;
+    }
+    end_i = slash_i - 1;
+  }
+
+  return 1;
+}
 // Call-back function to append to a vector of Devices
-static bool GetMonitorDevices(const std::shared_ptr<amd::smi::Device> &d,
+static uint32_t GetMonitorDevices(const std::shared_ptr<amd::smi::Device> &d,
                                                                     void *p) {
   std::string val_str;
+  uint64_t bdfid;
 
   assert(p != nullptr);
 
@@ -129,15 +224,21 @@ static bool GetMonitorDevices(const std::shared_ptr<amd::smi::Device> &d,
     reinterpret_cast<std::vector<std::shared_ptr<amd::smi::Device>> *>(p);
 
   if (d->monitor() != nullptr) {
+    // Calculate BDFID and set for this device
+    if (ConstructBDFID(d->path(), &bdfid) != 0) {
+      return -1;
+    }
+    d->set_bdfid(bdfid);
     device_list->push_back(d);
   }
-  return false;
+  return 0;
 }
 
 std::vector<std::shared_ptr<amd::smi::Device>> RocmSMI::s_monitor_devices;
 
 RocmSMI::RocmSMI(void) {
   auto i = 0;
+  uint32_t ret;
 
   GetEnvVariables();
 
@@ -152,8 +253,13 @@ RocmSMI::RocmSMI(void) {
 
   // IterateSMIDevices will iterate through all the known devices and apply
   // the provided call-back to each device found.
-  IterateSMIDevices(GetMonitorDevices,
+  ret = IterateSMIDevices(GetMonitorDevices,
                                   reinterpret_cast<void *>(&s_monitor_devices));
+
+  if (ret != 0) {
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+                                      "Failed to initialize rocm_smi library.");
+  }
 }
 
 RocmSMI::~RocmSMI() {
@@ -356,20 +462,23 @@ uint32_t RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
   return 0;
 }
 
-void RocmSMI::IterateSMIDevices(
-        std::function<bool(std::shared_ptr<Device>&, void *)> func, void *p) {
+uint32_t RocmSMI::IterateSMIDevices(
+     std::function<uint32_t(std::shared_ptr<Device>&, void *)> func, void *p) {
   if (func == nullptr) {
-    return;
+    return -1;
   }
 
   auto d = devices_.begin();
+  uint32_t ret;
 
   while (d != devices_.end()) {
-    if (func(*d, p)) {
-      return;
+    ret = func(*d, p);
+    if (ret != 0) {
+      return ret;
     }
     ++d;
   }
+  return 0;
 }
 
 }  // namespace smi

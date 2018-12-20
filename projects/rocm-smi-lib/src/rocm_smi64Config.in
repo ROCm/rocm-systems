@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -43,81 +43,14 @@
  *
  */
 
-#include <string>
-#include <vector>
-#include <memory>
+#ifndef INCLUDE_ROCM_SMI_ROCM_SMI64CONFIG_H_
+#define INCLUDE_ROCM_SMI_ROCM_SMI64CONFIG_H_
 
-#include "rocm_smi/rocm_smi.h"
-#include "gtest/gtest.h"
-#include "rocm_smi_test/test_common.h"
-#include "rocm_smi_test/test_base.h"
-#include "functional/rsmi_sanity.h"
+// This file is generated on build.
 
-static RSMITstGlobals *sRSMIGlvalues = nullptr;
+#define rocm_smi_VERSION_MAJOR @rocm_smi_VERSION_MAJOR@
+#define rocm_smi_VERSION_MINOR @rocm_smi_VERSION_MINOR@
+#define rocm_smi_VERSION_PATCH @rocm_smi_VERSION_PATCH@
+#define rocm_smi_VERSION_BUILD "@rocm_smi_VERSION_BUILD@"
 
-static void SetFlags(TestBase *test) {
-  assert(sRSMIGlvalues != nullptr);
-
-  test->set_num_iteration(sRSMIGlvalues->num_iterations);
-  test->set_verbosity(sRSMIGlvalues->verbosity);
-}
-
-
-static void RunCustomTestProlog(TestBase *test) {
-  SetFlags(test);
-
-  test->DisplayTestInfo();
-  test->SetUp();
-  test->Run();
-  return;
-}
-static void RunCustomTestEpilog(TestBase *test) {
-  test->DisplayResults();
-  test->Close();
-  return;
-}
-
-// If the test case one big test, you should use RunGenericTest()
-// to run the test case. OTOH, if the test case consists of multiple
-// functions to be run as separate tests, follow this pattern:
-//   * RunCustomTestProlog(test)  // Run() should contain minimal code
-//   * <insert call to actual test function within test case>
-//   * RunCustomTestEpilog(test)
-static void RunGenericTest(TestBase *test) {
-  RunCustomTestProlog(test);
-  RunCustomTestEpilog(test);
-  return;
-}
-
-// TEST ENTRY TEMPLATE:
-// TEST(rocrtst, Perf_<test name>) {
-//  <Test Implementation class> <test_obj>;
-//
-//  // Copy and modify implementation of RunGenericTest() if you need to deviate
-//  // from the standard pattern implemented there.
-//  RunGenericTest(&<test_obj>);
-// }
-
-TEST(rsmitst, RSMISanityTest) {
-  TestSanity tst;
-
-  RunGenericTest(&tst);
-}
-
-int main(int argc, char** argv) {
-  ::testing::InitGoogleTest(&argc, argv);
-
-  RSMITstGlobals settings;
-
-  // Set some default values
-  settings.verbosity = 1;
-  settings.monitor_verbosity = 1;
-  settings.num_iterations = 1;
-
-
-  if (ProcessCmdline(&settings, argc, argv)) {
-    return 1;
-  }
-  sRSMIGlvalues = &settings;
-  return RUN_ALL_TESTS();
-}
+#endif  // INCLUDE_ROCM_SMI_ROCM_SMI64CONFIG_H_

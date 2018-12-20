@@ -64,7 +64,10 @@ static const char *kDevDevIDFName = "device";
 static const char *kDevOverDriveLevelFName = "pp_sclk_od";
 static const char *kDevGPUSClkFName = "pp_dpm_sclk";
 static const char *kDevGPUMClkFName = "pp_dpm_mclk";
-static const char *kDevPowerProfileModeName = "pp_power_profile_mode";
+static const char *kDevGPUPCIEClkFname = "pp_dpm_pcie";
+static const char *kDevPowerProfileModeFName = "pp_power_profile_mode";
+static const char *kDevUsageFName = "gpu_busy_percent";
+
 static const char *kDevPerfLevelAutoStr = "auto";
 static const char *kDevPerfLevelLowStr = "low";
 static const char *kDevPerfLevelHighStr = "high";
@@ -81,7 +84,9 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevDevID, kDevDevIDFName},
     {kDevGPUMClk, kDevGPUMClkFName},
     {kDevGPUSClk, kDevGPUSClkFName},
-    {kDevPowerProfileMode, kDevPowerProfileModeName},
+    {kDevPCIEBW, kDevGPUPCIEClkFname},
+    {kDevPowerProfileMode, kDevPowerProfileModeFName},
+    {kDevUsage, kDevUsageFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -114,7 +119,6 @@ Device::Device(std::string p, RocmSMI_env_vars const *e) : path_(p), env_(e) {
 Device:: ~Device() {
 }
 
-// TODO(cfreehil): cache values that are constant
 int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   auto tempPath = path_;
 
@@ -193,6 +197,7 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
 
     case kDevGPUMClk:  // integer (index within num-freq range)
     case kDevGPUSClk:  // integer (index within num-freq range)
+    case kDevPCIEBW:  // integer (index within num-freq range)
     case kDevDevID:  // string (read-only)
     default:
       break;
@@ -205,6 +210,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
   switch (type) {
     case kDevGPUMClk:
     case kDevGPUSClk:
+    case kDevPCIEBW:
       return writeDevInfoStr(type, val);
 
     case kDevOverDriveLevel:
@@ -242,12 +248,12 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
   return 0;
 }
 
+#if 0
 int Device::readDevInfo(DevInfoTypes type, uint32_t *val) {
   assert(val != nullptr);
 
   std::string tempStr;
   int ret;
-
   switch (type) {
     case kDevDevID:
       ret = readDevInfoStr(type, &tempStr);
@@ -255,6 +261,7 @@ int Device::readDevInfo(DevInfoTypes type, uint32_t *val) {
       *val = std::stoi(tempStr, 0, 16);
       break;
 
+    case kDevUsage:
     case kDevOverDriveLevel:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
@@ -266,13 +273,14 @@ int Device::readDevInfo(DevInfoTypes type, uint32_t *val) {
   }
   return 0;
 }
-
+#endif
 int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
   assert(val != nullptr);
 
   switch (type) {
     case kDevGPUMClk:
     case kDevGPUSClk:
+    case kDevPCIEBW:
     case kDevPowerProfileMode:
       return readDevInfoMultiLineStr(type, val);
       break;
@@ -289,6 +297,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
 
   switch (type) {
     case kDevPerfLevel:
+    case kDevUsage:
     case kDevOverDriveLevel:
     case kDevDevID:
       return readDevInfoStr(type, val);
