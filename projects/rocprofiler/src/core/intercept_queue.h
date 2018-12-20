@@ -110,7 +110,7 @@ class InterceptQueue {
 
   static hsa_status_t QueueDestroy(hsa_queue_t* queue) {
     std::lock_guard<mutex_t> lck(mutex_);
-    hsa_status_t status = HSA_STATUS_ERROR;
+    hsa_status_t status = HSA_STATUS_SUCCESS;
 
     if (destroy_callback_ != NULL) {
       status = destroy_callback_(queue, callback_data_);
