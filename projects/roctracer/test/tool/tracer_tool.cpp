@@ -26,15 +26,27 @@ THE SOFTWARE.
 #include <stdio.h>
 
 #include <inc/roctracer_hsa.h>
+#include <inc/roctracer_hip.h>
 #include <inc/ext/hsa_rt_utils.hpp>
 
 #define PUBLIC_API __attribute__((visibility("default")))
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
 
+// Macro to check ROC-tracer calls status
+#define ROCTRACER_CALL(call)                                                                       \
+  do {                                                                                             \
+    int err = call;                                                                                \
+    if (err != 0) {                                                                                \
+      std::cerr << roctracer_error_string() << std::endl << std::flush;                            \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
+
 typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
 hsa_rt_utils::Timer timer(NULL);
-thread_local timestamp_t begin_timestamp = 0;
+thread_local timestamp_t hsa_begin_timestamp = 0;
+thread_local timestamp_t hip_begin_timestamp = 0;
 
 // HSA API callback function
 void hsa_api_callback(
@@ -48,12 +60,54 @@ void hsa_api_callback(
   const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
 
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    begin_timestamp = timer.timestamp_fn_ns();
+    hsa_begin_timestamp = timer.timestamp_fn_ns();
   } else {
-    const timestamp_t end_timestamp = (cid == HSA_API_ID_hsa_shut_down) ? begin_timestamp : timer.timestamp_fn_ns();
+    const timestamp_t end_timestamp = (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp : timer.timestamp_fn_ns();
     std::ostringstream os;
-    os << '(' << begin_timestamp << ":" << end_timestamp << ") " << hsa_api_data_pair_t(cid, *data);
+    os << '(' << hsa_begin_timestamp << ":" << end_timestamp << ") " << hsa_api_data_pair_t(cid, *data);
     fprintf(stdout, "%s\n", os.str().c_str());
+  }
+}
+
+void hip_api_callback(
+    uint32_t domain,
+    uint32_t cid,
+    const void* callback_data,
+    void* arg)
+{
+  (void)arg;
+  const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
+  if (data->phase == ACTIVITY_API_PHASE_ENTER) {
+    hsa_begin_timestamp = timer.timestamp_fn_ns();
+  } else {
+    const timestamp_t end_timestamp = timer.timestamp_fn_ns();
+    fprintf(stdout, "(%lu:%lu) %s(", hsa_begin_timestamp, end_timestamp, roctracer_id_string(ACTIVITY_DOMAIN_HIP_API, cid, 0));
+    switch (cid) {
+      case HIP_API_ID_hipMemcpy:
+        fprintf(stdout, "dst(%p) src(%p) size(0x%x) kind(%u)",
+          data->args.hipMemcpy.dst,
+          data->args.hipMemcpy.src,
+          (uint32_t)(data->args.hipMemcpy.sizeBytes),
+          (uint32_t)(data->args.hipMemcpy.kind));
+        break;
+      case HIP_API_ID_hipMalloc:
+        fprintf(stdout, "ptr(0x%p) size(0x%x)",
+          *(data->args.hipMalloc.ptr),
+          (uint32_t)(data->args.hipMalloc.size));
+        break;
+      case HIP_API_ID_hipFree:
+        fprintf(stdout, "ptr(%p)",
+          data->args.hipFree.ptr);
+        break;
+      case HIP_API_ID_hipModuleLaunchKernel:
+        fprintf(stdout, "kernel(\"%s\") stream(%p)",
+          hipKernelNameRef(data->args.hipModuleLaunchKernel.f),
+          data->args.hipModuleLaunchKernel.stream);
+        break;
+      default:
+        break;
+    }
+    fprintf(stdout, ")\n"); fflush(stdout);
   }
 }
 
@@ -62,7 +116,17 @@ extern "C" {
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
   timer.init(table->core_->hsa_system_get_info_fn);
-  roctracer_enable_callback(ACTIVITY_DOMAIN_HSA_API, HSA_API_ID_ANY, hsa_api_callback, NULL);
+  const char* trace_domain = getenv("ROCTRACER_DOMAIN");
+  const bool trace_hsa = (trace_domain == NULL) || (strncmp(trace_domain, "hsa", 3) == 0);
+  const bool trace_hip = (trace_domain == NULL) || (strncmp(trace_domain, "hip", 3) == 0);
+  // Enable HSA API callbacks
+  if (trace_hsa) {
+    ROCTRACER_CALL(roctracer_enable_callback(ACTIVITY_DOMAIN_HSA_API, HSA_API_ID_ANY, hsa_api_callback, NULL));
+  }
+  // Enable HIP API callbacks
+  if (trace_hip) {
+    ROCTRACER_CALL(roctracer_enable_callback(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY, hip_api_callback, NULL));
+  }
   return true;
 }
 }

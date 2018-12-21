@@ -38,15 +38,14 @@ export ROCP_AGENTS=1
 # each thread creates a queue pre GPU agent
 export ROCP_THRS=1
 
-#eval ./test_hsa/ctrl
-
 # paths to ROC profiler and oher libraries
 export LD_LIBRARY_PATH=$PWD
 # ROC profiler library loaded by HSA runtime
 export HSA_TOOLS_LIB="test/libtracer_tool.so libroctracer64.so"
 export LD_PRELOAD="$HSA_TOOLS_LIB"
 
-eval ./test/hsa/ctrl
+export ROCTRACER_DOMAIN="hsa"
+HCC_PROFILE=1 LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose
 
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin

@@ -1,32 +1,36 @@
-ROOT_PATH = ../..
-LIB_PATH  = $(ROOT_PATH)/build
-LIB_NAME  = roctracer64
-ROC_LIBS  = -L$(LIB_PATH) -l$(LIB_NAME)
+HIP_PATH?= $(wildcard /opt/rocm/hip)
+ifeq (,$(HIP_PATH))
+	HIP_PATH=../../..
+endif
 
-EXECUTABLE = ./MatrixTranspose.exe
-SOURCES    = MatrixTranspose.cpp
-OBJECTS    = $(SOURCES:.cpp=.o)
+HIPCC=$(HIP_PATH)/bin/hipcc
 
-ITERATIONS ?= 100
+TARGET=hcc
 
-HIP_PATH ?= /opt/rocm/hip
-HIPCC     = $(HIP_PATH)/bin/hipcc
+SOURCES = MatrixTranspose.cpp
+OBJECTS = $(SOURCES:.cpp=.o)
 
+EXECUTABLE=./MatrixTranspose
+
+.PHONY: test
+
+
+all: $(EXECUTABLE) test
+
+CXXFLAGS =-g
 CXX=$(HIPCC)
-CXXFLAGS =-g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc -DLOCAL_BUILD=1 -DITERATIONS=$(ITERATIONS)
 
-export LD_LIBRARY_PATH=$(LIB_PATH)
-
-all: clean $(EXECUTABLE) test
 
 $(EXECUTABLE): $(OBJECTS)
-	$(HIPCC) $(OBJECTS) -o $@ $(HCC_LIBS) $(ROC_LIBS)
+	$(HIPCC) $(OBJECTS) -o $@
+
 
 test: $(EXECUTABLE)
-	HCC_PROFILE=1 LD_PRELOAD=$(HCC_HOME)/lib/libmcwamp_hsa.so $(EXECUTABLE)
+	LD_PRELOAD=$(HCC_HOME)/lib/libmcwamp_hsa.so $(EXECUTABLE)
+
 
 clean:
 	rm -f $(EXECUTABLE)
 	rm -f $(OBJECTS)
+	rm -f $(HIP_PATH)/src/*.o
 
-.PHONY: all test clean

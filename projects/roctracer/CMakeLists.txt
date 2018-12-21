@@ -43,7 +43,7 @@ include ( env )
 ## Set test target
 add_custom_target( mytest
                    COMMAND make -C "${CMAKE_CURRENT_SOURCE_DIR}/test/MatrixTranspose"
-                   COMMAND ${PROJECT_BINARY_DIR}/run.sh)
+                   COMMAND sh -xc "cp ${CMAKE_CURRENT_SOURCE_DIR}/test/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test" )
 
 ## Setup the package version.
 get_version ( "1.0.0" )
