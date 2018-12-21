@@ -52,8 +52,12 @@ class Timer {
   inline void init(const hsa_system_get_info_fn_t& get_info_fn) {
     hsa_system_get_info_fn = get_info_fn;
     timestamp_t timestamp_hz = 0;
-    HSART_CALL(get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &timestamp_hz));
-    timestamp_rate_ = (freq_t)1000000000 / (freq_t)timestamp_hz;
+    if (get_info_fn == NULL) {
+      timestamp_rate_ = 0;
+    } else {
+      HSART_CALL(get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &timestamp_hz));
+      timestamp_rate_ = (freq_t)1000000000 / (freq_t)timestamp_hz;
+    }
   }
 
   // Returns HSA runtime timestamp rate

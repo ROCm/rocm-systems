@@ -21,20 +21,21 @@ THE SOFTWARE.
 */
 
 #include "inc/roctracer.h"
+#ifdef HCC_ENABLED
 #include "inc/roctracer_hcc.h"
+#endif
 #include "inc/roctracer_hip.h"
-
 #define PROF_API_IMPL 1
 #include "inc/roctracer_hsa.h"
 
 #include <atomic>
-#include <hip/hip_runtime.h>
 #include <mutex>
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/syscall.h>
 
+#include "core/loader.h"
 #include "ext/hsa_rt_utils.hpp"
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
@@ -303,16 +304,20 @@ roctracer_record_t* HIP_SyncActivityCallback(
       const_cast<hip_api_data_t*>(data)->correlation_id = correlation_id;
     }
     record->correlation_id = correlation_id;
+#ifdef HCC_ENABLED
     // Passing record to HCC
     Kalmar::CLAMP::SetActivityRecord(correlation_id);
+#endif
     return record;
   } else {
     record->end_ns = timer.timestamp_ns();
     record->process_id = syscall(__NR_getpid);
     record->thread_id = syscall(__NR_gettid);
     pool->Write(*record);
+#ifdef HCC_ENABLED
     // Clearing record in HCC
     Kalmar::CLAMP::SetActivityRecord(0);
+#endif
     return NULL;
   }
 }
@@ -335,6 +340,9 @@ util::Logger* util::Logger::instance_ = NULL;
 MemoryPool* memory_pool = NULL;
 typedef std::recursive_mutex memory_pool_mutex_t;
 memory_pool_mutex_t memory_pool_mutex;
+
+HipLoader* HipLoader::instance_;
+HipLoader::mutex_t HipLoader::mutex_;
 
 namespace hsa_support {
 // callbacks table
@@ -372,7 +380,9 @@ PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_
       break;
     }
     case ACTIVITY_DOMAIN_HCC_OPS: {
+#ifdef HCC_ENABLED
       return Kalmar::CLAMP::GetCmdName(kind);
+#endif
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
@@ -411,7 +421,7 @@ PUBLIC_API roctracer_status_t roctracer_enable_callback(
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-      hipError_t hip_err = hipRegisterApiCallback(id, (void*)callback, user_data);
+      hipError_t hip_err = roctracer::HipLoader::Instance().hipRegisterApiCallback(id, (void*)callback, user_data);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterApiCallback error(" << hip_err << ")");
       break;
     }
@@ -432,7 +442,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_callback(
       if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
       id = HIP_API_ID_ANY;
     case ACTIVITY_DOMAIN_HIP_API: {
-      hipError_t hip_err = hipRemoveApiCallback(id);
+      hipError_t hip_err = roctracer::HipLoader::Instance().hipRemoveApiCallback(id);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveApiCallback error(" << hip_err << ")");
       break;
     }
@@ -490,16 +500,20 @@ PUBLIC_API roctracer_status_t roctracer_enable_activity(
   switch (domain) {
     case ACTIVITY_DOMAIN_ANY:
       if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
+#ifdef HCC_ENABLED
       roctracer_enable_activity(ACTIVITY_DOMAIN_HCC_OPS, hc::HSA_OP_ID_ANY, pool);
+#endif
       roctracer_enable_activity(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY, pool);
       break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
+#ifdef HCC_ENABLED
       const bool err = Kalmar::CLAMP::SetActivityCallback(id, (void*)roctracer::HCC_AsyncActivityCallback, (void*)pool);
       if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "Kalmar::CLAMP::SetActivityCallback error");
+#endif
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-      const hipError_t hip_err = hipRegisterActivityCallback(id, (void*)roctracer::HIP_SyncActivityCallback, (void*)pool);
+      const hipError_t hip_err = roctracer::HipLoader::Instance().hipRegisterActivityCallback(id, (void*)roctracer::HIP_SyncActivityCallback, (void*)pool);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterActivityCallback error(" << hip_err << ")");
       break;
     }
@@ -518,16 +532,20 @@ PUBLIC_API roctracer_status_t roctracer_disable_activity(
   switch (domain) {
     case ACTIVITY_DOMAIN_ANY:
       if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
+#ifdef HCC_ENABLED
       roctracer_disable_activity(ACTIVITY_DOMAIN_HCC_OPS, hc::HSA_OP_ID_ANY);
+#endif
       roctracer_disable_activity(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY);
       break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
+#ifdef HCC_ENABLED
       const bool err = Kalmar::CLAMP::SetActivityCallback(id, NULL, NULL);
       if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "Kalmar::CLAMP::SetActivityCallback(NULL) error");
+#endif
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-      const hipError_t hip_err = hipRemoveActivityCallback(id);
+      const hipError_t hip_err = roctracer::HipLoader::Instance().hipRemoveActivityCallback(id);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveActivityCallback error(" << hip_err << ")");
       break;
     }

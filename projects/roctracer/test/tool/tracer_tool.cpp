@@ -33,7 +33,7 @@ THE SOFTWARE.
 #define DESTRUCTOR_API __attribute__((destructor))
 
 typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
-hsa_rt_utils::Timer timer;
+hsa_rt_utils::Timer timer(NULL);
 thread_local timestamp_t begin_timestamp = 0;
 
 // HSA API callback function
@@ -46,12 +46,11 @@ void hsa_api_callback(
   (void)arg;
 
   const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
+
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     begin_timestamp = timer.timestamp_fn_ns();
   } else {
     const timestamp_t end_timestamp = (cid == HSA_API_ID_hsa_shut_down) ? begin_timestamp : timer.timestamp_fn_ns();
-//    const timestamp_t duration_ns = end_timestamp - begin_timestamp;
-//    fprintf(stdout, "%s,%luns\n", roctracer_id_string(domain, cid, 0), duration_ns);
     std::ostringstream os;
     os << '(' << begin_timestamp << ":" << end_timestamp << ") " << hsa_api_data_pair_t(cid, *data);
     fprintf(stdout, "%s\n", os.str().c_str());

@@ -72,17 +72,16 @@ include ( ${LIB_DIR}/CMakeLists.txt )
 set_property ( TARGET ${TARGET_NAME} PROPERTY VERSION "${LIB_VERSION_STRING}" )
 set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${BUILD_VERSION_MAJOR}" )
 
-## If the library is a release, strip the target library
-#if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
-#  add_custom_command ( TARGET ${ROCTRACER_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *.so )
-#endif ()
+# If the library is a release, strip the target library
+if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
+  add_custom_command ( TARGET ${ROCTRACER_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *.so )
+endif ()
 
 ## Build tests
 add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 
 ## Install and packaging
 set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX}/${ROCTRACER_NAME} )
-set ( CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} )
 message ( "---------Install-Dir: ${CMAKE_INSTALL_PREFIX}" )
 
 add_custom_target ( inc-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
