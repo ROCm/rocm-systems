@@ -45,7 +45,8 @@ export HSA_TOOLS_LIB="test/libtracer_tool.so libroctracer64.so"
 export LD_PRELOAD="$HSA_TOOLS_LIB"
 
 export ROCTRACER_DOMAIN="hsa"
-HCC_PROFILE=1 LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose
+eval ./test/hsa/ctrl
+#HCC_PROFILE=1 LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose
 
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
