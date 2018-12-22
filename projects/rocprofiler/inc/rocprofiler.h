@@ -43,6 +43,7 @@ THE SOFTWARE.
 #define INC_ROCPROFILER_H_
 
 #include <hsa.h>
+#include <amd_hsa_kernel_code.h>
 #include <hsa_ven_amd_aqlprofile.h>
 #include <stdint.h>
 
@@ -221,6 +222,7 @@ typedef struct {
   const hsa_kernel_dispatch_packet_t* packet;          // HSA dispatch packet
   const char* kernel_name;                             // Kernel name
   uint64_t kernel_object;                              // Kernel object pointer
+  const amd_kernel_code_t* kernel_code;                // Kernel code pointer
   int64_t thread_id;                                   // Thread id
   const rocprofiler_dispatch_record_t* record;         // Dispatch record
 } rocprofiler_callback_data_t;

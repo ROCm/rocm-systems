@@ -147,7 +147,8 @@ class InterceptQueue {
         }
 
         // Prepareing dispatch callback data
-        uint64_t kernel_symbol = GetKernelSymbol(dispatch_packet);
+        const amd_kernel_code_t* kernel_code = GetKernelCode(dispatch_packet);
+        const uint64_t kernel_symbol = kernel_code->runtime_loader_kernel_symbol;
         const char* kernel_name = GetKernelName(kernel_symbol);
         rocprofiler_callback_data_t data = {obj->agent_info_->dev_id,
                                             obj->agent_info_->dev_index,
@@ -157,6 +158,7 @@ class InterceptQueue {
                                             dispatch_packet,
                                             kernel_name,
                                             kernel_symbol,
+                                            kernel_code,
                                             syscall(__NR_gettid),
                                             (tracker_entry) ? tracker_entry->record : NULL};
 
@@ -239,7 +241,7 @@ class InterceptQueue {
     return static_cast<hsa_packet_type_t>((*header >> HSA_PACKET_HEADER_TYPE) & header_type_mask);
   }
 
-  static uint64_t GetKernelSymbol(const hsa_kernel_dispatch_packet_t* dispatch_packet) {
+  static const amd_kernel_code_t* GetKernelCode(const hsa_kernel_dispatch_packet_t* dispatch_packet) {
     const amd_kernel_code_t* kernel_code = NULL;
     hsa_status_t status =
         util::HsaRsrcFactory::Instance().LoaderApi()->hsa_ven_amd_loader_query_host_address(
@@ -248,7 +250,7 @@ class InterceptQueue {
     if (HSA_STATUS_SUCCESS != status) {
       kernel_code = reinterpret_cast<amd_kernel_code_t*>(dispatch_packet->kernel_object);
     }
-    return kernel_code->runtime_loader_kernel_symbol;
+    return kernel_code;
   }
 
   static const char* GetKernelName(const uint64_t kernel_symbol) {

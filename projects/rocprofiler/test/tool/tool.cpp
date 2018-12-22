@@ -69,6 +69,17 @@ struct callbacks_data_t {
   std::vector<uint32_t>* range;
 };
 
+// kernel properties structure
+struct kernel_properties_t {
+  uint32_t grid_size;
+  uint32_t workgroup_size;
+  uint32_t lds_size;
+  uint32_t scratch_size;
+  uint32_t vgpr_count;
+  uint32_t sgpr_count;
+  uint32_t fbarrier_count;
+};
+
 // Context stored entry type
 struct context_entry_t {
   bool valid;
@@ -79,6 +90,7 @@ struct context_entry_t {
   rocprofiler_feature_t* features;
   unsigned feature_count;
   rocprofiler_callback_data_t data;
+  kernel_properties_t kernel_properties;
   FILE* file_handle;
 };
 
@@ -413,11 +425,19 @@ bool dump_context_entry(context_entry_t* entry) {
   FILE* file_handle = entry->file_handle;
   const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
 
-  fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), kernel-name(\"%s\")",
+  fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), tid(%lu), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), kernel-name(\"%s\")",
     index,
     HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index,
     entry->data.queue_id,
     entry->data.queue_index,
+    entry->data.thread_id,
+    entry->kernel_properties.grid_size,
+    entry->kernel_properties.workgroup_size,
+    entry->kernel_properties.lds_size,
+    entry->kernel_properties.scratch_size,
+    entry->kernel_properties.vgpr_count,
+    entry->kernel_properties.sgpr_count,
+    entry->kernel_properties.fbarrier_count,
     nik_name.c_str());
   if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
     record->dispatch,
@@ -563,6 +583,8 @@ bool check_filter(const rocprofiler_callback_data_t* callback_data, const callba
 hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
                                rocprofiler_group_t* group) {
   // Passed tool data
+  const hsa_kernel_dispatch_packet_t* packet = callback_data->packet;
+  const amd_kernel_code_t* kernel_code = callback_data->kernel_code;
   callbacks_data_t* tool_data = reinterpret_cast<callbacks_data_t*>(user_data);
   // HSA status
   hsa_status_t status = HSA_STATUS_ERROR;
@@ -578,6 +600,20 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   rocprofiler_t* context = NULL;
   // Context entry
   context_entry_t* entry = alloc_context_entry();
+  // kernel properties
+  kernel_properties_t* kernel_properties_ptr = &(entry->kernel_properties);
+  uint64_t grid_size = packet->grid_size_x * packet->grid_size_y * packet->grid_size_z;
+  if (grid_size > UINT32_MAX) abort();
+  kernel_properties_ptr->grid_size = (uint32_t)grid_size;
+  uint64_t workgroup_size = packet->workgroup_size_x * packet->workgroup_size_y * packet->workgroup_size_z;
+  if (workgroup_size > UINT32_MAX) abort();
+  kernel_properties_ptr->workgroup_size = (uint32_t)workgroup_size;
+  kernel_properties_ptr->lds_size = packet->group_segment_size;
+  kernel_properties_ptr->scratch_size = packet->private_segment_size;
+  kernel_properties_ptr->vgpr_count = kernel_code->reserved_vgpr_count;
+  kernel_properties_ptr->sgpr_count = kernel_code->reserved_sgpr_count;
+  kernel_properties_ptr->fbarrier_count = kernel_code->workgroup_fbarrier_count;
+
   // context properties
   rocprofiler_properties_t properties{};
   properties.handler = (result_prefix != NULL) ? context_handler : NULL;
