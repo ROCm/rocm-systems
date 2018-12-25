@@ -1,18 +1,20 @@
 #!/bin/bash
+COMPONENT="roctracer"
+ROCM_PATH="/opt/rocm"
 
 fatal() {
   echo "$1"
   exit 1
 }
 
-if [ -z "$BUILD_DIR" ] ; then fatal "env var BUILD_DIR is not defined"; fi
-if [ -z "$HIP_PATH" ] ; then fatal "env var HIP_PATH is not defined"; fi
-if [ -z "$HCC_HOME" ] ; then fatal "env var HCC_HOME is not defined"; fi
 if [ -z "$ROCTRACER_ROOT" ]; then fatal "env var ROCTRACER_ROOT is not defined"; fi
-if [ -z "$BUILD_TYPE" ] ; then fatal "env var BUILD_TYPE is not defined"; fi
-if [ -z "$PACKAGE_ROOT" ] ; then fatal "env var PACKAGE_ROOT is not defined"; fi
-if [ -z "$PACKAGE_PREFIX" ] ; then fatal "env var PACKAGE_PREFIX is not defined"; fi
-if [ -z "$ROCM_RPATH" ] ; then fatal "env var ROCM_RPATH is not defined"; fi
+
+if [ -z "$BUILD_DIR" ] ; then export BUILD_DIR=$PWD; fi
+if [ -z "$HIP_PATH" ] ; then export HIP_PATH="$ROCM_PATH/hip"; fi
+if [ -z "$HCC_HOME" ] ; then export HCC_HOME="$ROCM_PATH/hcc"; fi
+if [ -z "$BUILD_TYPE" ] ; then export BUILD_TYPR="release"; fi
+if [ -z "$PACKAGE_ROOT" ] ; then export PACKAGE_ROOT=$ROCM_PATH; fi
+if [ -z "$PACKAGE_PREFIX" ] ; then export PACKAGE_PREFIX="$ROCM_PATH/$COMPONENT"; fi
 
 MAKE_OPTS="-j 8 -C $BUILD_DIR"
 
