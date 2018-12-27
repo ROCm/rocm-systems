@@ -7,8 +7,7 @@ fatal() {
   exit 1
 }
 
-if [ -z "$ROCTRACER_ROOT" ]; then fatal "env var ROCTRACER_ROOT is not defined"; fi
-
+if [ -z "$ROCTRACER_ROOT" ]; then export ROCTRACER_ROOT=$PWD; fi
 if [ -z "$BUILD_DIR" ] ; then export BUILD_DIR=$PWD; fi
 if [ -z "$HIP_PATH" ] ; then export HIP_PATH="$ROCM_PATH/hip"; fi
 if [ -z "$HCC_HOME" ] ; then export HCC_HOME="$ROCM_PATH/hcc"; fi
