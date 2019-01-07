@@ -147,7 +147,7 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
   std::istringstream fs(freq_lines[i]);
 
   uint32_t ind;
-  uint64_t freq;
+  long double freq;
   std::string junk;
   std::string units_str;
   std::string star_str;
@@ -183,8 +183,8 @@ static void freq_volt_string_to_point(std::string in_line,
   assert(pt != nullptr);
 
   uint32_t ind;
-  float freq;
-  float volts;
+  long double freq;
+  long double volts;
   std::string junk;
   std::string freq_units_str;
   std::string volts_units_str;
@@ -633,6 +633,8 @@ static const uint32_t kOD_OD_RANGE_label_array_index =
                                          kOD_VDDC_CURVE_label_array_index + 4;
 static const uint32_t kOD_VDDC_CURVE_start_index =
                                            kOD_OD_RANGE_label_array_index + 3;
+static const uint32_t kOD_VDDC_CURVE_num_lines =
+                                               kOD_VDDC_CURVE_start_index + 4;
 
 static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
                                                   rsmi_od_volt_freq_data *p) {
@@ -645,6 +647,12 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   ret = get_dev_value_vec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
+  }
+
+  // This is a work-around to handle systems where kDevPowerODVoltage is not
+  // fully supported yet.
+  if (val_vec.size() < 2) {
+    return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
   assert(val_vec[kOD_SCLK_label_array_index] == "OD_SCLK:");
@@ -721,6 +729,12 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
   ret = get_dev_value_vec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
+  }
+
+  // This is a work-around to handle systems where kDevPowerODVoltage is not
+  // fully supported yet.
+  if (val_vec.size() < 2) {
+    return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
   uint32_t val_vec_size = val_vec.size();

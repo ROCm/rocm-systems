@@ -63,7 +63,8 @@ static uint32_t gVerbosity = 3;
     std::cout << "RSMI call returned " << (RET); \
     rsmi_status_string((RET), &err_str); \
     std::cout << " (" << err_str << ")" << std::endl; \
-    std::cout << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+    std::cout << " at " << __FILE__ << ":" << std::dec << __LINE__ << \
+                                                                  std::endl; \
   } \
 }
 
@@ -92,7 +93,8 @@ static uint32_t gVerbosity = 3;
       std::cout << "ASSERT failure: Expected " << #A << " == " << #B << \
         ", but got " << #A << " = " << (A) << ", and " << #B << " = " << \
                                                            (B) << std::endl; \
-      std::cout << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+      std::cout << " at " << __FILE__ << ":" << std::dec << \
+                                                      __LINE__ << std::endl; \
       return RSMI_STATUS_UNKNOWN_ERROR; \
     } \
 }
@@ -648,26 +650,27 @@ void TestSanity::Run(void) {
       }
 
       err = rsmi_dev_od_volt_info_get(i, &odv);
-      CHK_ERR_ASRT(err)
+      DISPLAY_RSMI_ERR(err)
 
-      std::cout << "\t**Frequency-voltage curve data:" << std::endl;
-      print_rsmi_od_volt_freq_data(&odv);
+      if (err == RSMI_STATUS_SUCCESS) {
+        std::cout << "\t**Frequency-voltage curve data:" << std::endl;
+        print_rsmi_od_volt_freq_data(&odv);
 
-      rsmi_freq_volt_region *regions;
-      uint32_t num_regions;
-      regions = new rsmi_freq_volt_region[odv.num_regions];
-      ASSERT_TRUE(regions != nullptr);
+        rsmi_freq_volt_region *regions;
+        uint32_t num_regions;
+        regions = new rsmi_freq_volt_region[odv.num_regions];
+        ASSERT_TRUE(regions != nullptr);
 
-      num_regions = odv.num_regions;
-      err = rsmi_dev_od_volt_curve_regions_get(i, &num_regions, regions);
-      CHK_ERR_ASRT(err)
-      ASSERT_TRUE(num_regions == odv.num_regions);
+        num_regions = odv.num_regions;
+        err = rsmi_dev_od_volt_curve_regions_get(i, &num_regions, regions);
+        CHK_ERR_ASRT(err)
+        ASSERT_TRUE(num_regions == odv.num_regions);
 
-      std::cout << "\t**Frequency-voltage curve regions:" << std::endl;
-      print_rsmi_od_volt_freq_regions(num_regions, regions);
+        std::cout << "\t**Frequency-voltage curve regions:" << std::endl;
+        print_rsmi_od_volt_freq_regions(num_regions, regions);
 
-      delete []regions;
-
+        delete []regions;
+      }
 
       err = rsmi_dev_perf_level_get(i, &pfl);
       CHK_ERR_ASRT(err)

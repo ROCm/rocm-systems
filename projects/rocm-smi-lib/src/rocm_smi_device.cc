@@ -250,6 +250,9 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
     retVec->push_back(line);
   }
 
+  if (retVec->size() == 0) {
+    return EPERM;
+  }
   // Remove any *trailing* empty (whitespace) lines
   while (retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
     retVec->pop_back();
