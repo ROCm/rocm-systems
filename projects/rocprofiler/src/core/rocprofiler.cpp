@@ -83,6 +83,9 @@ decltype(hsa_queue_load_read_index_scacquire)* hsa_queue_load_read_index_scacqui
 decltype(hsa_amd_queue_intercept_create)* hsa_amd_queue_intercept_create_fn;
 decltype(hsa_amd_queue_intercept_register)* hsa_amd_queue_intercept_register_fn;
 
+decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
+decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
+
 ::HsaApiTable* kHsaApiTable;
 
 void SaveHsaApi(::HsaApiTable* table) {
@@ -136,12 +139,16 @@ void * tool_handle = NULL;
 
 // Load profiling tool library
 // Return true if intercepting mode is enabled
-bool LoadTool() {
-  bool intercept_mode = false;
+enum {
+  DISPATCH_INTERCEPT_MODE = 0x1,
+  MEMCOPY_INTERCEPT_MODE = 0x2
+};
+uint32_t LoadTool() {
+  uint32_t intercept_mode = 0;
   const char* tool_lib = getenv("ROCP_TOOL_LIB");
 
   if (tool_lib) {
-    intercept_mode = true;
+    intercept_mode = DISPATCH_INTERCEPT_MODE;
 
     tool_handle = dlopen(tool_lib, RTLD_NOW);
     if (tool_handle == NULL) {
@@ -164,7 +171,7 @@ bool LoadTool() {
     }
 
     rocprofiler_settings_t settings{};
-    settings.intercept_mode = (intercept_mode) ? 1 : 0;
+    settings.intercept_mode = (intercept_mode != 0) ? 1 : 0;
     settings.sqtt_size = SqttProfile::GetSize();
     settings.sqtt_local = SqttProfile::IsLocal() ? 1: 0;
     settings.timeout = util::HsaRsrcFactory::GetTimeoutNs();
@@ -173,11 +180,12 @@ bool LoadTool() {
     if (handler) handler();
     else if (handler_prop) handler_prop(&settings);
 
-    intercept_mode = (settings.intercept_mode != 0);
     SqttProfile::SetSize(settings.sqtt_size);
     SqttProfile::SetLocal(settings.sqtt_local != 0);
     util::HsaRsrcFactory::SetTimeoutNs(settings.timeout);
     InterceptQueue::TrackerOn(settings.timestamp_on != 0);
+    if (settings.intercept_mode != 0) intercept_mode = DISPATCH_INTERCEPT_MODE;
+    if (settings.memcopy_tracking) intercept_mode |= MEMCOPY_INTERCEPT_MODE;
   }
 
   return intercept_mode;
@@ -310,9 +318,56 @@ hsa_status_t CreateQueuePro(
   return HSA_STATUS_SUCCESS;
 }
 
+bool async_copy_handler(hsa_signal_value_t value, void* arg) {
+  Tracker::entry_t* entry = reinterpret_cast<Tracker::entry_t*>(arg);
+  printf("%lu: async-copy time(%lu,%lu)\n", entry->index, entry->record->begin, entry->record->end);
+  return false;
+}
+
+hsa_status_t hsa_amd_memory_async_copy_interceptor(
+    void* dst, hsa_agent_t dst_agent, const void* src,
+    hsa_agent_t src_agent, size_t size, uint32_t num_dep_signals,
+    const hsa_signal_t* dep_signals, hsa_signal_t completion_signal)
+{
+  Tracker* tracker = &Tracker::Instance();
+  Tracker::entry_t* tracker_entry = tracker->Alloc(hsa_agent_t{}, completion_signal);
+  hsa_status_t status = hsa_amd_memory_async_copy_fn(dst, dst_agent, src,
+                                                     src_agent, size, num_dep_signals,
+                                                     dep_signals, tracker_entry->signal);
+  if (status == HSA_STATUS_SUCCESS) {
+    tracker->EnableMemcopy(tracker_entry, async_copy_handler, reinterpret_cast<void*>(tracker_entry));
+  } else {
+    tracker->Delete(tracker_entry);
+  }
+  return status;
+}
+
+hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
+    const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
+    const hsa_dim3_t* src_offset, const hsa_dim3_t* range, hsa_agent_t copy_agent,
+    hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal)
+{
+  Tracker* tracker = &Tracker::Instance();
+  Tracker::entry_t* tracker_entry = tracker->Alloc(hsa_agent_t{}, completion_signal);
+  hsa_status_t status = hsa_amd_memory_async_copy_rect_fn(dst, dst_offset, src,
+                                                          src_offset, range, copy_agent,
+                                                          dir, num_dep_signals, dep_signals,
+                                                          tracker_entry->signal);
+  if (status == HSA_STATUS_SUCCESS) {
+    tracker->EnableMemcopy(tracker_entry, async_copy_handler, reinterpret_cast<void*>(tracker_entry));
+  } else {
+    tracker->Delete(tracker_entry);
+  }
+  return status;
+}
+
 rocprofiler_properties_t rocprofiler_properties;
 uint32_t SqttProfile::output_buffer_size_ = 0x2000000;  // 32M
 bool SqttProfile::output_buffer_local_ = true;
+Tracker* Tracker::instance_ = NULL;
+Tracker::mutex_t Tracker::glob_mutex_;
+Tracker::counter_t Tracker::counter_ = 0;
 util::Logger::mutex_t util::Logger::mutex_;
 util::Logger* util::Logger::instance_ = NULL;
 }
@@ -355,8 +410,16 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
   }
 
   // Loading a tool lib and setting of intercept mode
-  const bool intercept_mode_on = rocprofiler::LoadTool();
-  if (intercept_mode_on) intercept_mode = true;
+  const uint32_t intercept_mode_mask = rocprofiler::LoadTool();
+  if (intercept_mode_mask & rocprofiler::DISPATCH_INTERCEPT_MODE) intercept_mode = true;
+  if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
+    hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
+    if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_async_copy_enable");
+    rocprofiler::hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
+    rocprofiler::hsa_amd_memory_async_copy_rect_fn = table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
+    table->amd_ext_->hsa_amd_memory_async_copy_fn = rocprofiler::hsa_amd_memory_async_copy_interceptor;
+    table->amd_ext_->hsa_amd_memory_async_copy_rect_fn = rocprofiler::hsa_amd_memory_async_copy_rect_interceptor;
+  }
 
   // HSA intercepting
   if (intercept_mode) {
@@ -371,6 +434,7 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
 
 // HSA-runtime tool on-unload method
 PUBLIC_API void OnUnload() {
+  rocprofiler::Tracker::Destroy();
   rocprofiler::UnloadTool();
   rocprofiler::RestoreHsaApi();
 }

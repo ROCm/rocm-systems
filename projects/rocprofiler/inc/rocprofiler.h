@@ -65,6 +65,7 @@ uint32_t rocprofiler_version_minor();
 
 typedef struct {
   uint32_t intercept_mode;
+  uint32_t memcopy_tracking;
   uint32_t sqtt_size;
   uint32_t sqtt_local;
   uint64_t timeout;

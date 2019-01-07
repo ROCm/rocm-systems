@@ -56,16 +56,19 @@ if [ ! -e $ROCP_TOOL_LIB ] ; then
   export ROCP_TOOL_LIB=test/libtool.so
 fi
 
-export ROCP_KITER=1
-export ROCP_DITER=4
-export ROCP_INPUT=input1.xml
-eval ./test/ctrl
-
 export ROCP_KITER=50
 export ROCP_DITER=50
 export ROCP_AGENTS=1
 export ROCP_THRS=1
 export ROCP_INPUT=input.xml
+eval ./test/ctrl
+
+# Memcopies tracking
+export ROCP_MCOPY_TRACKING=1
+
+export ROCP_KITER=1
+export ROCP_DITER=4
+export ROCP_INPUT=input1.xml
 eval ./test/ctrl
 
 #valgrind --leak-check=full $tbin

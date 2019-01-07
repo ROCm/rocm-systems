@@ -47,8 +47,10 @@ class Tracker {
   struct entry_t;
   typedef std::list<entry_t*> sig_list_t;
   typedef sig_list_t::iterator sig_list_it_t;
+  typedef uint64_t counter_t;
 
   struct entry_t {
+    counter_t index;
     std::atomic<bool> valid;
     Tracker* tracker;
     sig_list_t::iterator it;
@@ -58,22 +60,25 @@ class Tracker {
     record_t* record;
     std::atomic<void*> handler;
     void* arg;
-    bool context_active;
+    bool is_context;
+    bool is_memcopy;
   };
 
-  Tracker() :
-    outstanding_(0),
-    hsa_rsrc_(&(util::HsaRsrcFactory::Instance()))
-  {}
+  static Tracker* Create() {
+    std::lock_guard<mutex_t> lck(glob_mutex_);
+    if (instance_ == NULL) instance_ = new Tracker;
+    return instance_;
+  }
 
-  ~Tracker() {
-    auto it = sig_list_.begin();
-    auto end = sig_list_.end();
-    while (it != end) {
-      auto cur = it++;
-      hsa_rsrc_->SignalWait((*cur)->signal);
-      Erase(cur);
-    }
+  static Tracker& Instance() {
+    if (instance_ == NULL) instance_ = Create();
+    return *instance_;
+  }
+
+  static void Destroy() {
+    std::lock_guard<mutex_t> lck(glob_mutex_);
+    if (instance_ != NULL) delete instance_;
+    instance_ = NULL;
   }
 
   // Add tracker entry
@@ -102,6 +107,7 @@ class Tracker {
     // Adding antry to the list
     mutex_.lock();
     entry->it = sig_list_.insert(sig_list_.end(), entry);
+    entry->index = counter_++;
     mutex_.unlock();
 
     return entry;
@@ -130,20 +136,39 @@ class Tracker {
     }
   }
 
-  void Enable(entry_t* entry, hsa_amd_signal_handler handler, void* arg) {
-    entry->context_active = true;
+  void EnableContext(entry_t* entry, hsa_amd_signal_handler handler, void* arg) {
+    entry->is_context = true;
     Enable(entry, reinterpret_cast<void*>(handler), arg);
   }
-  void Enable(entry_t* entry, rocprofiler_handler_t handler, void* arg) {
+  void EnableDispatch(entry_t* entry, rocprofiler_handler_t handler, void* arg) {
+    Enable(entry, reinterpret_cast<void*>(handler), arg);
+  }
+  void EnableMemcopy(entry_t* entry, hsa_amd_signal_handler handler, void* arg) {
+    entry->is_memcopy = true;
     Enable(entry, reinterpret_cast<void*>(handler), arg);
   }
 
   private:
+  Tracker() :
+    outstanding_(0),
+    hsa_rsrc_(&(util::HsaRsrcFactory::Instance()))
+  {}
+
+  ~Tracker() {
+    auto it = sig_list_.begin();
+    auto end = sig_list_.end();
+    while (it != end) {
+      auto cur = it++;
+      hsa_rsrc_->SignalWait((*cur)->signal);
+      Erase(cur);
+    }
+  }
+
   // Delete an entry by iterator
   void Erase(const sig_list_it_t& it) { Delete(*it); }
 
   // Entry completion
-  inline void Complete(entry_t* entry) {
+  inline void Complete(hsa_signal_value_t signal_value, entry_t* entry) {
     record_t* record = entry->record;
 
     // Debug trace
@@ -154,12 +179,20 @@ class Tracker {
     }
 
     // Query begin/end and complete timestamps
-    hsa_amd_profiling_dispatch_time_t dispatch_time{};
-    hsa_status_t status = hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
-    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_dispatch_time");
+    if (entry->is_memcopy) {
+      hsa_amd_profiling_async_copy_time_t async_copy_time{};
+      hsa_status_t status = hsa_amd_profiling_get_async_copy_time(entry->signal, &async_copy_time);
+      if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_async_copy_time");
+      record->begin = hsa_rsrc_->SysclockToNs(async_copy_time.start);
+      record->end = hsa_rsrc_->SysclockToNs(async_copy_time.end);
+    } else {
+      hsa_amd_profiling_dispatch_time_t dispatch_time{};
+      hsa_status_t status = hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
+      if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_dispatch_time");
+      record->begin = hsa_rsrc_->SysclockToNs(dispatch_time.start);
+      record->end = hsa_rsrc_->SysclockToNs(dispatch_time.end);
+    }
 
-    record->begin = hsa_rsrc_->SysclockToNs(dispatch_time.start);
-    record->end = hsa_rsrc_->SysclockToNs(dispatch_time.end);
     record->complete = hsa_rsrc_->TimestampNs();
     entry->valid.store(true, std::memory_order_release);
 
@@ -171,16 +204,17 @@ class Tracker {
       orig_signal_ptr->start_ts = prof_signal_ptr->start_ts;
       orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
 
-      const hsa_signal_value_t value = hsa_signal_load_relaxed(orig);
-      hsa_signal_store_screlease(orig, value - 1);
+      const hsa_signal_value_t new_value = hsa_signal_load_relaxed(orig) - 1;
+      if (signal_value != new_value) EXC_ABORT(HSA_STATUS_ERROR, "Tracker::Complete bad signal value");
+      hsa_signal_store_screlease(orig, signal_value);
     }
   }
 
-  inline static void HandleEntry(entry_t* entry) {
+  inline static void HandleEntry(hsa_signal_value_t signal_value, entry_t* entry) {
     // Call entry handler
     void* handler = static_cast<void*>(entry->handler);
-    if (entry->context_active) {
-      reinterpret_cast<hsa_amd_signal_handler>(handler)(0, entry->arg);
+    if (entry->is_context || entry->is_memcopy) {
+      reinterpret_cast<hsa_amd_signal_handler>(handler)(signal_value, entry->arg);
     } else {
       rocprofiler_group_t group{};
       reinterpret_cast<rocprofiler_handler_t>(handler)(group, entry->arg);
@@ -190,7 +224,7 @@ class Tracker {
   }
 
   // Handler for packet completion
-  static bool Handler(hsa_signal_value_t, void* arg) {
+  static bool Handler(hsa_signal_value_t signal_value, void* arg) {
     // Acquire entry
     entry_t* entry = reinterpret_cast<entry_t*>(arg);
     volatile std::atomic<void*>* ptr = &entry->handler;
@@ -198,10 +232,10 @@ class Tracker {
 
     // Complete entry
     Tracker* tracker = entry->tracker;
-    tracker->Complete(entry);
+    tracker->Complete(signal_value, entry);
 
     if (ordering_enabled_ == false) {
-      HandleEntry(entry);
+      HandleEntry(signal_value, entry);
     } else {
       // Acquire last entry
       entry_t* back = tracker->sig_list_.back();
@@ -214,7 +248,7 @@ class Tracker {
       while (it != end) {
         entry = *(it++);
         if (entry->valid.load(std::memory_order_acquire)) {
-          HandleEntry(entry);
+          HandleEntry(signal_value, entry);
         } else {
           break;
         }
@@ -224,6 +258,11 @@ class Tracker {
 
     return false;
   }
+
+  // instance
+  static Tracker* instance_;
+  static mutex_t glob_mutex_;
+  static counter_t counter_;
 
   // Tracked signals list
   sig_list_t sig_list_;
@@ -235,7 +274,7 @@ class Tracker {
   // HSA resources factory
   util::HsaRsrcFactory* hsa_rsrc_;
   // Handling ordering enabled
-  static const bool ordering_enabled_ = true;
+  static const bool ordering_enabled_ = false;
   // Enable tracing
   static const bool trace_on_ = false;
 };

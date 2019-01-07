@@ -71,7 +71,7 @@ class InterceptQueue {
     if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "ProxyQueue::Create()");
 
     if (tracker_on || tracker_on_) {
-      if (tracker_ == NULL) tracker_ = new Tracker;
+      if (tracker_ == NULL) tracker_ = &Tracker::Instance();
       status = hsa_amd_profiling_set_profiler_enabled(*queue, true);
       if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_set_profiler_enabled()");
     }
@@ -179,7 +179,7 @@ class InterceptQueue {
             if (tracker_entry != NULL) {
               Group* context_group = context->GetGroup(group.index);
               context_group->IncrRefsCount();
-              tracker_->Enable(tracker_entry, Context::Handler, reinterpret_cast<void*>(context_group));
+              tracker_->EnableContext(tracker_entry, Context::Handler, reinterpret_cast<void*>(context_group));
             }
 
             const pkt_vector_t& start_vector = context->StartPackets(group.index);
@@ -197,7 +197,7 @@ class InterceptQueue {
             if (tracker_entry != NULL) {
               void* context_handler_arg = NULL;
               rocprofiler_handler_t context_handler_fun = context->GetHandler(&context_handler_arg);
-              tracker_->Enable(tracker_entry, context_handler_fun, context_handler_arg);
+              tracker_->EnableDispatch(tracker_entry, context_handler_fun, context_handler_arg);
             }
           }
         }

@@ -818,6 +818,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
       }
       it = opts.find("sqtt-local");
       if (it != opts.end()) { settings->sqtt_local = (it->second == "on"); }
+      it = opts.find("memcopies");
+      if (it != opts.end()) { settings->memcopy_tracking = (it->second == "on"); }
     }
   }
   // Enable verbose mode
@@ -835,6 +837,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   check_env_var("ROCP_SQTT_SIZE", settings->sqtt_size);
   // Set SQTT local buffer
   check_env_var("ROCP_SQTT_LOCAL", settings->sqtt_local);
+  // Set memcopies tracking
+  check_env_var("ROCP_MCOPY_TRACKING", settings->memcopy_tracking);
 
   is_sqtt_local = settings->sqtt_local;
 
