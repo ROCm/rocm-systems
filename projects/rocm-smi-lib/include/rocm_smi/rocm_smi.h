@@ -54,14 +54,27 @@ extern "C" {
  *  Main header file for the ROCm SMI library.
  *  All required function, structure, enum, etc. definitions should be defined
  *  in this file.
+ *  
+ *  @unstable The rocm_smi library api is new, and therefore subject to change
+ *  either at the ABI or API level. Once committed, every effort will be made
+ *  to not break backward compatibility, but it may not be achieveable in some
+ *  cases. Instead of marking every function prototype as "unstable", we are
+ *  instead saying the API is unstable (i.e., changes are possible) while the
+ *  major version remains 0. This means that if the API/ABI changes, we will
+ *  not increment the major version to 1. Once the ABI stabilizes, we will
+ *  increment the major version to 1, and thereafter increment it on all ABI
+ *  breaks. 
  */
 
 //! Guaranteed maximum possible number of supported frequencies
 #define RSMI_MAX_NUM_FREQUENCIES 32
 
-//! Maximum possible value for fan speed. Should be used as the denominator when
-//! determining fan speed percentage.
+//! Maximum possible value for fan speed. Should be used as the denominator
+//! when determining fan speed percentage.
 #define RSMI_MAX_FAN_SPEED 255
+
+//! The number of points that make up a voltage-frequency curve definition
+#define RSMI_NUM_VOLTAGE_CURVE_POINTS 3
 
 /**
  * @brief Error codes retured by rocm_smi_lib functions
@@ -270,6 +283,57 @@ typedef struct {
     uint32_t patch;     //!< Patch, build  or stepping version
     const char *build;  //!< Build string
 } rsmi_version;
+
+/**
+ * @brief This structure represents a range (e.g., frequencies or voltages).
+ */
+typedef struct {
+    uint64_t lower_bound;      //!< Lower bound of range
+    uint64_t upper_bound;      //!< Upper bound of range
+} rsmi_range;
+
+/**
+ * @brief This structure represents a point on the frequency-voltage plane.
+ */
+typedef struct {
+    uint64_t frequency;      //!< Frequency coordinate (in Hz)
+    uint64_t voltage;        //!< Voltage coordinate (in mV)
+} rsmi_od_vddc_point;
+
+/**
+ * @brief This structure holds 2 ::rsmi_od_vddc_point's, representing the
+ * diagonal corners of a rectangular region in freq-voltage space.
+ */
+typedef struct {
+    rsmi_od_vddc_point min_corner;  //!< The "lower-left" corner of rectangle
+    rsmi_od_vddc_point max_corner;  //!< The "upper-right" corner of rectangle
+} rsmi_freq_volt_region;
+
+/**
+ * @brief This structure holds the frequency-voltage values for a device.
+ */
+typedef struct {
+  rsmi_range curr_sclk_range;          //!< The current SCLK frequency range
+  rsmi_range curr_mclk_range;          //!< The current MCLK frequency range;
+                                       //!< (upper bound only)
+  rsmi_range sclk_freq_limits;         //!< The range possible of SCLK values
+  rsmi_range mclk_freq_limits;         //!< The range possible of MCLK values
+
+  /**
+   * @brief The current voltage curve
+   */
+  rsmi_od_vddc_point curve[RSMI_NUM_VOLTAGE_CURVE_POINTS];
+  uint32_t num_regions;                //!< The number of voltage curve regions
+} rsmi_od_volt_freq_data;
+
+/**
+ * @brief This values of this enum are used as frequency identifiers.
+ */
+typedef enum {
+  RSMI_FREQ_IND_MIN = 0,  //!< Index used for the minimum frequency value
+  RSMI_FREQ_IND_MAX = 1,  //!< Index used for the maximum frequency value
+  RSMI_FREQ_IND_INVALID = 0xFFFFFFFF  //!< An invalid frequency index
+} rsmi_freq_ind;
 
 /**
  *  @brief Initialize Rocm SMI.
@@ -701,6 +765,66 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
 rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind,
                                                               uint64_t speed);
 
+/**
+ * @brief This function retrieves the voltage/frequency curve information
+ *
+ * @details Given a device index @p dv_ind and a pointer to a
+ * ::rsmi_od_volt_freq_data structure @p odv, this function will populate @p
+ * odv. See ::rsmi_od_volt_freq_data for more details.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[in] odv a pointer to an ::rsmi_od_volt_freq_data structure 
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind,
+                                                 rsmi_od_volt_freq_data *odv);
+
+/**
+ * @brief 
+ *
+ * @details 
+ *
+ * @param[in] dv_ind a device index
+ *
+ *
+ * @param[in] 
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t rsmi_dev_od_volt_set(uint32_t dv_ind, rsmi_clk_type clk,
+                                                             rsmi_freq_ind i);
+
+/**
+ * @brief This function will retrieve the current valid regions in the 
+ * frequency/voltage space.
+ *
+ * @details Given a device index @p dv_ind, a pointer to an unsigned integer
+ * @p num_regions and a buffer of ::rsmi_freq_volt_region structures, @p
+ * buffer, this function will populate @p buffer with the current
+ * frequency-volt space regions. The caller should assign @p buffer to memory
+ * that can be written to by this function. The caller should also
+ * indicate the number of ::rsmi_freq_volt_region structures that can safely
+ * be written to @p buffer in @p num_regions.
+ * 
+ * The number of regions to expect this function provide (@p num_regions) can
+ * be obtained by calling ::rsmi_dev_od_volt_info_get().
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[inout] num_regions As input, this is the number of
+ * ::rsmi_freq_volt_region structures that can be written to @p buffer. As
+ * output, this is the number of ::rsmi_freq_volt_region structures that were
+ * actually written.
+ * 
+ * @param[inout] buffer a caller provided buffer to which
+ * ::rsmi_freq_volt_region structures will be written
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
+                        uint32_t *num_regions, rsmi_freq_volt_region *buffer);
 
 /**
  *  @brief Get the average power consumption of the device with provided
@@ -894,7 +1018,7 @@ rsmi_status_string(rsmi_status_t status, const char **status_string);
  * @details  Get the major, minor, patch and build string for RSMI build
  * currently in use through @p version
  * 
- * @paramp[inout] version A pointer to an ::rsmi_version structure that will
+ * @param[inout] version A pointer to an ::rsmi_version structure that will
  * be updated with the version information upon return.
  * 
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call

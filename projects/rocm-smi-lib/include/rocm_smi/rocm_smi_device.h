@@ -67,6 +67,7 @@ enum DevInfoTypes {
   kDevPCIEBW,
   kDevPowerProfileMode,
   kDevUsage,
+  kDevPowerODVoltage,
 };
 
 class Device {

@@ -66,6 +66,7 @@ static const char *kDevGPUSClkFName = "pp_dpm_sclk";
 static const char *kDevGPUMClkFName = "pp_dpm_mclk";
 static const char *kDevGPUPCIEClkFname = "pp_dpm_pcie";
 static const char *kDevPowerProfileModeFName = "pp_power_profile_mode";
+static const char *kDevPowerODVoltageFName = "pp_od_clk_voltage";
 static const char *kDevUsageFName = "gpu_busy_percent";
 
 static const char *kDevPerfLevelAutoStr = "auto";
@@ -87,6 +88,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevPCIEBW, kDevGPUPCIEClkFname},
     {kDevPowerProfileMode, kDevPowerProfileModeFName},
     {kDevUsage, kDevUsageFName},
+    {kDevPowerODVoltage, kDevPowerODVoltageFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -230,12 +232,14 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
 
   assert(retVec != nullptr);
 
+  if (env_->path_DRM_root_override && type == env_->enum_override) {
+    tempPath = env_->path_DRM_root_override;
+  }
   tempPath += "/device/";
   tempPath += kDevAttribNameMap.at(type);
 
   std::ifstream fs(tempPath);
   std::stringstream buffer;
-
 
   DBG_FILE_ERROR(tempPath);
   if (!isRegularFile(tempPath)) {
@@ -244,6 +248,11 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
 
   while (std::getline(fs, line)) {
     retVec->push_back(line);
+  }
+
+  // Remove any *trailing* empty (whitespace) lines
+  while (retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
+    retVec->pop_back();
   }
   return 0;
 }
@@ -282,6 +291,7 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
     case kDevGPUSClk:
     case kDevPCIEBW:
     case kDevPowerProfileMode:
+    case kDevPowerODVoltage:
       return readDevInfoMultiLineStr(type, val);
       break;
 
