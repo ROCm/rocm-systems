@@ -782,21 +782,6 @@ rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind,
                                                  rsmi_od_volt_freq_data *odv);
 
 /**
- * @brief 
- *
- * @details 
- *
- * @param[in] dv_ind a device index
- *
- *
- * @param[in] 
- *
- * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- */
-rsmi_status_t rsmi_dev_od_volt_set(uint32_t dv_ind, rsmi_clk_type clk,
-                                                             rsmi_freq_ind i);
-
-/**
  * @brief This function will retrieve the current valid regions in the 
  * frequency/voltage space.
  *
