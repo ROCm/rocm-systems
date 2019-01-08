@@ -39,7 +39,7 @@ typedef void (*activity_rtapi_callback_t)(uint32_t domain, uint32_t cid, const v
 typedef enum {
   ACTIVITY_API_PHASE_ENTER = 0,
   ACTIVITY_API_PHASE_EXIT = 1
-} r_feature_kind_t;
+};
 
 // Trace record types
 // Correlation id
