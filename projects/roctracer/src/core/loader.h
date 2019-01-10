@@ -8,6 +8,8 @@ namespace roctracer {
 
 class Loader {
   public:
+  typedef std::mutex mutex_t;
+
   Loader(const char* lib_name) {
     handle_ = dlopen(lib_name, RTLD_LAZY|RTLD_NODELETE);
     if (handle_ == NULL) {
@@ -23,19 +25,20 @@ class Loader {
   template <class fun_t>
   fun_t* GetFun(const char* fun_name) { return (fun_t*) dlsym(handle_, fun_name); }
 
+  protected:
+  static mutex_t mutex_;
+
   private:
   void* handle_;
 };
 
 class HipLoader : protected Loader {
   public:
-  typedef std::mutex mutex_t;
-
-  typedef decltype(hipRegisterApiCallback) hipRegisterApiCallback_t;
-  typedef decltype(hipRemoveApiCallback) hipRemoveApiCallback_t;
-  typedef decltype(hipRegisterActivityCallback) hipRegisterActivityCallback_t;
-  typedef decltype(hipRemoveActivityCallback) hipRemoveActivityCallback_t;
-  typedef decltype(hipKernelNameRef) hipKernelNameRef_t;
+  typedef decltype(hipRegisterApiCallback) RegisterApiCallback_t;
+  typedef decltype(hipRemoveApiCallback) RemoveApiCallback_t;
+  typedef decltype(hipRegisterActivityCallback) RegisterActivityCallback_t;
+  typedef decltype(hipRemoveActivityCallback) RemoveActivityCallback_t;
+  typedef decltype(hipKernelNameRef) KernelNameRef_t;
 
   static HipLoader& Instance() {
     std::lock_guard<mutex_t> lck(mutex_);
@@ -46,35 +49,30 @@ class HipLoader : protected Loader {
   }
 
   HipLoader() : Loader("libhip_hcc.so") {
-    hipRegisterApiCallback = GetFun<hipRegisterApiCallback_t>("hipRegisterApiCallback");
-    hipRemoveApiCallback = GetFun<hipRemoveApiCallback_t>("hipRemoveApiCallback");
-    hipRegisterActivityCallback = GetFun<hipRegisterActivityCallback_t>("hipRegisterActivityCallback");
-    hipRemoveActivityCallback = GetFun<hipRemoveActivityCallback_t>("hipRemoveActivityCallback");
-    hipKernelNameRef = GetFun<hipKernelNameRef_t>("hipKernelNameRef");
+    RegisterApiCallback = GetFun<RegisterApiCallback_t>("hipRegisterApiCallback");
+    RemoveApiCallback = GetFun<RemoveApiCallback_t>("hipRemoveApiCallback");
+    RegisterActivityCallback = GetFun<RegisterActivityCallback_t>("hipRegisterActivityCallback");
+    RemoveActivityCallback = GetFun<RemoveActivityCallback_t>("hipRemoveActivityCallback");
+    KernelNameRef = GetFun<KernelNameRef_t>("hipKernelNameRef");
   }
 
-  hipRegisterApiCallback_t* hipRegisterApiCallback;
-  hipRemoveApiCallback_t* hipRemoveApiCallback;
-  hipRegisterActivityCallback_t* hipRegisterActivityCallback;
-  hipRemoveActivityCallback_t* hipRemoveActivityCallback;
-  hipKernelNameRef_t* hipKernelNameRef;
+  RegisterApiCallback_t* RegisterApiCallback;
+  RemoveApiCallback_t* RemoveApiCallback;
+  RegisterActivityCallback_t* RegisterActivityCallback;
+  RemoveActivityCallback_t* RemoveActivityCallback;
+  KernelNameRef_t* KernelNameRef;
 
   private:
   static HipLoader* instance_;
-  static mutex_t mutex_;
 };
 
-} // namespace roctracer
-
-#if 0
-namespace roctracer {
 class HccLoader : protected Loader {
   public:
   typedef std::mutex mutex_t;
 
-  typedef decltype(Kalmar::CLAMP::SetActivityCallback) hccSetActivityCallback_t;
-  typedef decltype(Kalmar::CLAMP::SetActivityIdCallback) hccSetActivityIdCallback_t;
-  typedef decltype(Kalmar::CLAMP::GetCmdName) hccGetCmdName_t;
+  typedef decltype(Kalmar::CLAMP::SetActivityCallback) SetActivityCallback_t;
+  typedef decltype(Kalmar::CLAMP::SetActivityIdCallback) SetActivityIdCallback_t;
+  typedef decltype(Kalmar::CLAMP::GetCmdName) GetCmdName_t;
 
   static HccLoader& Instance() {
     std::lock_guard<mutex_t> lck(mutex_);
@@ -85,26 +83,28 @@ class HccLoader : protected Loader {
   }
 
   HccLoader() : Loader("libmcwamp.so") {
+    // Kalmar::CLAMP::SetActivityCallback
     // _ZN6Kalmar5CLAMP19SetActivityCallbackEjPvS1_
-    hccSetActivityCallback = GetFun<hccSetActivityCallback_t>("Kalmar::CLAMP::SetActivityCallback");
+    SetActivityCallback = GetFun<SetActivityCallback_t>("_ZN6Kalmar5CLAMP19SetActivityCallbackEjPvS1_");
+    // Kalmar::CLAMP::SetActivityIdCallback
     // _ZN6Kalmar5CLAMP21SetActivityIdCallbackEPv
-    hccSetActivityIdCallback = GetFun<hccSetActivityIdCallback_t>("Kalmar::CLAMP::SetActivityIdCallback");
+    SetActivityIdCallback = GetFun<SetActivityIdCallback_t>("_ZN6Kalmar5CLAMP21SetActivityIdCallbackEPv");
+    // Kalmar::CLAMP::GetCmdName
     // _ZN6Kalmar5CLAMP10GetCmdNameEj
-    hccGetCmdName = GetFun<hccGetCmdName_t>("Kalmar::CLAMP::GetCmdName");
-
-    printf("HccLoader hccSetActivityCallback %p\n", hccSetActivityCallback);
+    GetCmdName = GetFun<GetCmdName_t>("_ZN6Kalmar5CLAMP10GetCmdNameEj");
   }
 
-  hccSetActivityCallback_t* hccSetActivityCallback;
-  hccSetActivityIdCallback_t* hccSetActivityIdCallback;
-  hccGetCmdName_t* hccGetCmdName;
+  SetActivityCallback_t* SetActivityCallback;
+  SetActivityIdCallback_t* SetActivityIdCallback;
+  GetCmdName_t* GetCmdName;
 
   private:
   static HccLoader* instance_;
-  static mutex_t mutex_;
 };
+
 } // namespace roctracer
 
+#if 0
 namespace Kalmar {
 namespace CLAMP {
 extern bool SetActivityCallback(unsigned, void*, void*) __attribute__((weak_import));
