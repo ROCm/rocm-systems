@@ -23,7 +23,11 @@
 cmake_minimum_required ( VERSION 2.8.12 )
 set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
 
-# test run script
+## HIP test
+execute_process( COMMAND make -C "${TEST_DIR}/MatrixTranspose" )
+execute_process( COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test" )
+
+## test run script
 set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
 
 ## Util sources
@@ -33,16 +37,16 @@ file( GLOB UTIL_SRC "${TEST_HSA}/util/*.cpp" )
 set ( TEST_LIB "tracer_tool" )
 set ( TEST_LIB_SRC ${TEST_DIR}/tool/tracer_tool.cpp ${UTIL_SRC} )
 add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
-target_include_directories ( ${TEST_LIB} PRIVATE ${TEST_HSA} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${HIP_INC_DIR} )
+target_include_directories ( ${TEST_LIB} PRIVATE ${TEST_HSA} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${HIP_INC_DIR} ${HCC_INC_DIR} )
 target_link_libraries ( ${TEST_LIB} ${ROCTRACER_TARGET} ${HSA_RUNTIME_LIB} c stdc++ dl pthread rt )
 
-# HSA test
+## HSA test
 set ( TEST_HSA "${TEST_DIR}/hsa/test" )
 execute_process ( COMMAND sh -xc "if [ ! -e ${TEST_DIR}/hsa ] ; then git clone https://github.com/ROCmSoftwarePlatform/hsa-class.git ${TEST_DIR}/hsa; fi" )
 execute_process ( COMMAND sh -xc "if [ -e ${TEST_DIR}/hsa ] ; then cd ${TEST_DIR}/hsa && git checkout 3e7a87f; fi" )
 set ( TEST_DIR ${TEST_HSA} )
 add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test/hsa )
 
-# copying run script
+## copying run script
 execute_process ( COMMAND sh -xc "cp ${RUN_SCRIPT} ${PROJECT_BINARY_DIR}" )
 

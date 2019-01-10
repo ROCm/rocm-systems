@@ -44,7 +44,6 @@ export LD_LIBRARY_PATH=$PWD
 export HSA_TOOLS_LIB="test/libtracer_tool.so libroctracer64.so"
 export LD_PRELOAD="$HSA_TOOLS_LIB"
 
-export ROCTRACER_DOMAIN="hsa"
 #eval ./test/hsa/ctrl
 HCC_PROFILE=1 LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose
 

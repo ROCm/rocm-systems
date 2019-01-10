@@ -23,6 +23,8 @@ THE SOFTWARE.
 #ifndef INC_EXT_PROF_PROTOCOL_H_
 #define INC_EXT_PROF_PROTOCOL_H_
 
+#define HCC_ENABLED 1
+
 // Traced API domains
 typedef enum {
   ACTIVITY_DOMAIN_ANY = 0,                        // Any domain

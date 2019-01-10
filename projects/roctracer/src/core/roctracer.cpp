@@ -282,6 +282,26 @@ DESTRUCTOR_API void destructor() {
   util::Logger::Destroy();
 }
 
+// Correlation id storage
+static thread_local activity_correlation_id_t correlation_id_tls = 0;
+typedef std::map<activity_correlation_id_t, activity_correlation_id_t> correlation_id_map_t;
+typedef std::mutex correlation_id_mutex_t;
+correlation_id_map_t* correlation_id_map = NULL;
+correlation_id_mutex_t correlation_id_mutex;
+
+static inline void CorrelationIdRegistr(const activity_correlation_id_t& correlation_id) {
+  std::lock_guard<correlation_id_mutex_t> lck(correlation_id_mutex);
+  if (correlation_id_map == NULL) correlation_id_map = new correlation_id_map_t;
+  const auto ret = correlation_id_map->insert({correlation_id, correlation_id_tls});
+  if (ret.second == false) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id is not unique(" << correlation_id << ")");
+}
+
+static inline activity_correlation_id_t CorrelationIdLookup(const activity_correlation_id_t& correlation_id) {
+  auto it = correlation_id_map->find(correlation_id);
+  if (it == correlation_id_map->end()) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id lookup failed(" << correlation_id << ")");
+  return it->second;
+}
+
 roctracer_record_t* HIP_SyncActivityCallback(
     uint32_t activity_id,
     roctracer_record_t* record,
@@ -305,8 +325,8 @@ roctracer_record_t* HIP_SyncActivityCallback(
     }
     record->correlation_id = correlation_id;
 #ifdef HCC_ENABLED
-    // Passing record to HCC
-    Kalmar::CLAMP::SetActivityRecord(correlation_id);
+    // Passing correlatin ID
+    correlation_id_tls = correlation_id;
 #endif
     return record;
   } else {
@@ -315,23 +335,24 @@ roctracer_record_t* HIP_SyncActivityCallback(
     record->thread_id = syscall(__NR_gettid);
     pool->Write(*record);
 #ifdef HCC_ENABLED
-    // Clearing record in HCC
-    Kalmar::CLAMP::SetActivityRecord(0);
+    // Clearing correlatin ID
+    correlation_id_tls = 0;
 #endif
     return NULL;
   }
 }
 
-void HCC_AsyncActivityCallback(
-    uint32_t op_id,
-    void* record,
-    void* arg)
-{
+void HCC_ActivityIdCallback(activity_correlation_id_t correlation_id) {
+  CorrelationIdRegistr(correlation_id);
+}
+
+void HCC_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
   static hsa_rt_utils::Timer timer;
 
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
   roctracer_record_t* record_ptr = reinterpret_cast<roctracer_record_t*>(record);
   record_ptr->domain = ACTIVITY_DOMAIN_HCC_OPS;
+  record_ptr->correlation_id = CorrelationIdLookup(record_ptr->correlation_id);
   pool->Write(*record_ptr);
 }
 
@@ -382,6 +403,7 @@ PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_
     case ACTIVITY_DOMAIN_HCC_OPS: {
 #ifdef HCC_ENABLED
       return Kalmar::CLAMP::GetCmdName(kind);
+//      return roctracer::HccLoader::Instance().hccGetCmdName(kind);
 #endif
       break;
     }
@@ -507,8 +529,11 @@ PUBLIC_API roctracer_status_t roctracer_enable_activity(
       break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
 #ifdef HCC_ENABLED
+      Kalmar::CLAMP::SetActivityIdCallback((void*)roctracer::HCC_ActivityIdCallback);
       const bool err = Kalmar::CLAMP::SetActivityCallback(id, (void*)roctracer::HCC_AsyncActivityCallback, (void*)pool);
-      if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "Kalmar::CLAMP::SetActivityCallback error");
+//      roctracer::HccLoader::Instance().hccSetActivityIdCallback((void*)roctracer::HCC_ActivityIdCallback);
+//      const bool err = roctracer::HccLoader::Instance().hccSetActivityCallback(id, (void*)roctracer::HCC_AsyncActivityCallback, (void*)pool);
+      if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::SetActivityCallback error");
 #endif
       break;
     }
@@ -540,6 +565,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_activity(
     case ACTIVITY_DOMAIN_HCC_OPS: {
 #ifdef HCC_ENABLED
       const bool err = Kalmar::CLAMP::SetActivityCallback(id, NULL, NULL);
+//      const bool err = roctracer::HccLoader::Instance().hccSetActivityCallback(id, NULL, NULL);
       if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "Kalmar::CLAMP::SetActivityCallback(NULL) error");
 #endif
       break;
