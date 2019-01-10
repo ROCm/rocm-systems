@@ -1,1 +1,2 @@
-echo -e "/opt/rocm/lib\n/opt/rocm/lib64" > /etc/ld.so.conf.d/x86_64-librocm_smi_lib.conf && ldconfig
+echo -e "/opt/rocm/rocm_smi/lib\n/opt/rocm/rocm_smi/lib64" > /etc/ld.so.conf.d/x86_64-librocm_smi_lib.conf && ldconfig
+
