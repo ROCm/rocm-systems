@@ -108,18 +108,46 @@ static rsmi_status_t errno_to_rsmi_status(uint32_t err) {
     default:     return RSMI_STATUS_UNKNOWN_ERROR;
   }
 }
+
+static uint64_t get_multiplier_from_str(char units_char) {
+  uint32_t multiplier = 0;
+
+  switch (units_char) {
+    case 'G':   // GT or GHz
+      multiplier = 1000000000;
+      break;
+
+    case 'M':   // MT or MHz
+      multiplier = 1000000;
+      break;
+
+    case 'K':   // KT or KHz
+    case 'V':   // default unit for voltage is mV
+      multiplier = 1000;
+      break;
+
+    case 'T':   // Transactions
+    case 'H':   // Hertz
+    case 'm':   // mV (we will make mV the default unit for voltage)
+      multiplier = 1;
+      break;
+
+    default:
+      assert(!"Unexpected units for frequency");
+  }
+  return multiplier;
+}
+
 /**
  * Parse a string of the form:
  *        "<int index>:  <int freq><freq. unit string> <|*>"
  */
 static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
                                      bool *is_curr, uint32_t lanes[], int i) {
-  assert(is_curr != nullptr);
-
   std::istringstream fs(freq_lines[i]);
 
   uint32_t ind;
-  float freq;
+  long double freq;
   std::string junk;
   std::string units_str;
   std::string star_str;
@@ -137,28 +165,7 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
       *is_curr = false;
     }
   }
-  uint32_t multiplier = 0;
-
-  switch (units_str[0]) {
-    case 'G':   // GT or GHz
-      multiplier = 1000000000;
-      break;
-
-    case 'M':   // MT or MHz
-      multiplier = 1000000;
-      break;
-
-    case 'K':   // KT or KHz
-      multiplier = 1000;
-      break;
-
-    case 'T':   // Transactions
-    case 'H':   // Hertz
-      multiplier = 1;
-      break;
-    default:
-      assert(!"Unexpected units for frequency");
-  }
+  uint32_t multiplier = get_multiplier_from_str(units_str[0]);
 
   if (star_str[0] == 'x') {
     assert(lanes != nullptr && "Lanes are provided but null lanes pointer");
@@ -167,6 +174,63 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
     }
   }
   return freq*multiplier;
+}
+
+static void freq_volt_string_to_point(std::string in_line,
+                                                     rsmi_od_vddc_point *pt) {
+  std::istringstream fs_vlt(in_line);
+
+  assert(pt != nullptr);
+
+  uint32_t ind;
+  long double freq;
+  long double volts;
+  std::string junk;
+  std::string freq_units_str;
+  std::string volts_units_str;
+
+  fs_vlt >> ind;
+  fs_vlt >> junk;  // colon
+  fs_vlt >> freq;
+  fs_vlt >> freq_units_str;
+  fs_vlt >> volts;
+  fs_vlt >> volts_units_str;
+
+  uint32_t multiplier = get_multiplier_from_str(freq_units_str[0]);
+
+  pt->frequency = freq*multiplier;
+
+  multiplier = get_multiplier_from_str(volts_units_str[0]);
+  pt->voltage = volts*multiplier;
+
+  return;
+}
+
+static void od_value_pair_str_to_range(std::string in_line, rsmi_range *rg) {
+  std::istringstream fs_rng(in_line);
+
+  assert(rg != nullptr);
+
+  std::string clk;
+  uint64_t lo;
+  uint64_t hi;
+  std::string lo_units_str;
+  std::string hi_units_str;
+
+  fs_rng >> clk;  // This is clk + colon; e.g., "SCLK:"
+  fs_rng >> lo;
+  fs_rng >> lo_units_str;
+  fs_rng >> hi;
+  fs_rng >> hi_units_str;
+
+  uint32_t multiplier = get_multiplier_from_str(lo_units_str[0]);
+
+  rg->lower_bound = lo*multiplier;
+
+  multiplier = get_multiplier_from_str(hi_units_str[0]);
+  rg->upper_bound = hi*multiplier;
+
+  return;
 }
 
 
@@ -536,6 +600,153 @@ static rsmi_status_t get_power_profiles(uint32_t dv_ind,
   }
 
   assert(p->current != RSMI_PWR_PROF_PRST_INVALID);
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+/* We expect the format of the the pp_od_clk_voltage file to look like this:
+OD_SCLK:
+0:        872Mhz
+1:       1837Mhz
+OD_MCLK:
+1:       1000Mhz
+OD_VDDC_CURVE:
+0:        872Mhz        736mV
+1:       1354Mhz        860mV
+2:       1837Mhz       1186mV
+OD_RANGE:
+SCLK:     872Mhz       1900Mhz
+MCLK:     168Mhz       1200Mhz
+VDDC_CURVE_SCLK[0]:     872Mhz       1900Mhz
+VDDC_CURVE_VOLT[0]:     737mV        1137mV
+VDDC_CURVE_SCLK[1]:     872Mhz       1900Mhz
+VDDC_CURVE_VOLT[1]:     737mV        1137mV
+VDDC_CURVE_SCLK[2]:     872Mhz       1900Mhz
+VDDC_CURVE_VOLT[2]:     737mV        1137mV
+*/
+static const uint32_t kOD_SCLK_label_array_index = 0;
+static const uint32_t kOD_MCLK_label_array_index =
+                                               kOD_SCLK_label_array_index + 3;
+static const uint32_t kOD_VDDC_CURVE_label_array_index =
+                                               kOD_MCLK_label_array_index + 2;
+static const uint32_t kOD_OD_RANGE_label_array_index =
+                                         kOD_VDDC_CURVE_label_array_index + 4;
+static const uint32_t kOD_VDDC_CURVE_start_index =
+                                           kOD_OD_RANGE_label_array_index + 3;
+static const uint32_t kOD_VDDC_CURVE_num_lines =
+                                               kOD_VDDC_CURVE_start_index + 4;
+
+static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
+                                                  rsmi_od_volt_freq_data *p) {
+  TRY
+  std::vector<std::string> val_vec;
+  rsmi_status_t ret;
+
+  assert(p != nullptr);
+
+  ret = get_dev_value_vec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  // This is a work-around to handle systems where kDevPowerODVoltage is not
+  // fully supported yet.
+  if (val_vec.size() < 2) {
+    return RSMI_STATUS_NOT_YET_IMPLEMENTED;
+  }
+
+  assert(val_vec[kOD_SCLK_label_array_index] == "OD_SCLK:");
+
+  p->curr_sclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
+                                     nullptr, kOD_SCLK_label_array_index + 1);
+  p->curr_sclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
+                                     nullptr, kOD_SCLK_label_array_index + 2);
+
+  assert(val_vec[kOD_MCLK_label_array_index] == "OD_MCLK:");
+  p->curr_mclk_range.lower_bound = 0;
+
+  p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
+                                     nullptr, kOD_MCLK_label_array_index + 1);
+
+  assert(val_vec[kOD_VDDC_CURVE_label_array_index] == "OD_VDDC_CURVE:");
+  freq_volt_string_to_point(val_vec[kOD_VDDC_CURVE_label_array_index + 1],
+                                                             &(p->curve[0]));
+  freq_volt_string_to_point(val_vec[kOD_VDDC_CURVE_label_array_index + 2],
+                                                             &(p->curve[1]));
+  freq_volt_string_to_point(val_vec[kOD_VDDC_CURVE_label_array_index + 3],
+                                                            &(p->curve[2]));
+
+  assert(val_vec[kOD_OD_RANGE_label_array_index] == "OD_RANGE:");
+  od_value_pair_str_to_range(val_vec[kOD_OD_RANGE_label_array_index + 1],
+                                                      &(p->sclk_freq_limits));
+  od_value_pair_str_to_range(val_vec[kOD_OD_RANGE_label_array_index + 2],
+                                                      &(p->mclk_freq_limits));
+
+  assert((val_vec.size() - kOD_VDDC_CURVE_start_index)%2 == 0);
+  p->num_regions = (val_vec.size() - kOD_VDDC_CURVE_start_index) / 2;
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+static void get_vc_region(uint32_t start_ind,
+                std::vector<std::string> *val_vec, rsmi_freq_volt_region *p) {
+  assert(p != nullptr);
+  assert(val_vec != nullptr);
+  // There must be at least 1 region to read in
+  assert(val_vec->size() >= kOD_OD_RANGE_label_array_index + 2);
+  assert((*val_vec)[kOD_OD_RANGE_label_array_index] == "OD_RANGE:");
+
+  rsmi_range rg;
+  od_value_pair_str_to_range((*val_vec)[start_ind], &rg);
+  p->min_corner.frequency = rg.lower_bound;
+  p->max_corner.frequency = rg.upper_bound;
+
+  od_value_pair_str_to_range((*val_vec)[start_ind + 1], &rg);
+  p->min_corner.voltage = rg.lower_bound;
+  p->max_corner.voltage = rg.upper_bound;
+  return;
+}
+
+/*
+ * num_regions [inout] on calling, the number of regions requested to be read
+ * in. At completion, the number of regions actually read in
+ * 
+ * p [inout] point to pre-allocated memory where function will write region
+ * values. Caller must make sure there is enough space for at least
+ * *num_regions regions. On 
+ */
+static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
+                            uint32_t *num_regions, rsmi_freq_volt_region *p) {
+  TRY
+  std::vector<std::string> val_vec;
+  rsmi_status_t ret;
+
+  assert(num_regions != nullptr);
+  assert(*num_regions > 0);
+  assert(p != nullptr);
+
+  ret = get_dev_value_vec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  // This is a work-around to handle systems where kDevPowerODVoltage is not
+  // fully supported yet.
+  if (val_vec.size() < 2) {
+    return RSMI_STATUS_NOT_YET_IMPLEMENTED;
+  }
+
+  uint32_t val_vec_size = val_vec.size();
+  assert((val_vec_size - kOD_VDDC_CURVE_start_index) > 0);
+  assert((val_vec_size - kOD_VDDC_CURVE_start_index)%2 == 0);
+  *num_regions = std::min((val_vec_size - kOD_VDDC_CURVE_start_index) / 2,
+                                                                *num_regions);
+
+  for (uint32_t i=0; i < *num_regions; ++i) {
+    get_vc_region(kOD_VDDC_CURVE_start_index + i, &val_vec, p + i);
+  }
+
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -918,6 +1129,26 @@ rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   ret = get_dev_mon_value(amd::smi::kMonMaxFanSpeed, dv_ind, sensor_ind,
                                       reinterpret_cast<int64_t *>(max_speed));
 
+  return ret;
+  CATCH
+}
+rsmi_status_t
+rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data *odv) {
+  TRY
+  rsmi_status_t ret = get_od_clk_volt_info(dv_ind, odv);
+
+  return ret;
+  CATCH
+}
+rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
+                       uint32_t *num_regions, rsmi_freq_volt_region *buffer) {
+  TRY
+
+  if (buffer == nullptr || num_regions == nullptr || *num_regions == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  rsmi_status_t ret = get_od_clk_volt_curve_regions(dv_ind, num_regions,
+                                                                      buffer);
   return ret;
   CATCH
 }

@@ -44,7 +44,7 @@ set(ROCM_SMI_TARGET "${ROCM_SMI}64")
 # Until ABI stabilizes VERSION_MAJOR will be 0. This should be over-ridden
 # by git tags (through "git describe") when they are present.
 set(ROCM_SMI_LIB_VERSION_MAJOR 0)
-set(ROCM_SMI_LIB_VERSION_MINOR 1)
+set(ROCM_SMI_LIB_VERSION_MINOR 2)
 
 ################# Determine the library version #########################
 ## Setup the package version based on git tags.

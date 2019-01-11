@@ -58,6 +58,10 @@
 struct RocmSMI_env_vars {
     // Store env. variables here
     uint32_t debug_output_bitfield;
+    uint32_t enum_override;
+    const char *path_DRM_root_override;
+    const char *path_HWMon_root_override;
+    const char *path_power_root_override;
 };
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_COMMON_H_
