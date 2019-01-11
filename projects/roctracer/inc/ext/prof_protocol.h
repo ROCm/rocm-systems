@@ -36,6 +36,8 @@ typedef enum {
 
 // API calback type
 typedef void (*activity_rtapi_callback_t)(uint32_t domain, uint32_t cid, const void* data, void* arg);
+typedef uint32_t activity_kind_t;
+typedef uint32_t activity_op_t;
 
 // API callback phase
 typedef enum {
@@ -50,9 +52,9 @@ typedef uint64_t activity_correlation_id_t;
 // Activity record type
 struct activity_record_t {
     uint32_t domain;                               // activity domain id
-    uint32_t kind;                                 // activity kind
-    uint32_t activity_id;                          // activity id
-    activity_correlation_id_t correlation_id;      // activity correlation ID
+    activity_kind_t kind;                          // activity kind
+    activity_op_t activity_id;                     // activity op
+    activity_correlation_id_t correlation_id;      // activity ID
     uint64_t begin_ns;                             // host begin timestamp
     uint64_t end_ns;                               // host end timestamp
     union {
