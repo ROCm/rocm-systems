@@ -24,10 +24,8 @@ THE SOFTWARE.
 #define INC_ROCTRACER_HCC_H_
 
 #if (LOCAL_BUILD == 1)
-#include <hc_hsa_op_id.h>
 #include <hc_prof_runtime.h>
 #else
-#include <hcc/hc_hsa_op_id.h>
 #include <hcc/hc_prof_runtime.h>
 #endif
 

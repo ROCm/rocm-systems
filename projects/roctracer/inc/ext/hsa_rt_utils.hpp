@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <cstdint>
 #include <cstddef>
 #include <iostream>
+#include <mutex>
 
 #define HSART_CALL(call)                                                                           \
   do {                                                                                             \
@@ -80,12 +81,9 @@ class Timer {
     return timestamp_to_ns(timestamp);
   }
 
-  Timer() {
-    init(hsa_system_get_info);
-  }
-
-  Timer(hsa_system_get_info_fn_t f) {
-    init(f);
+  Timer(hsa_system_get_info_fn_t f = NULL) {
+    if (f != NULL) init(f);
+    else init(hsa_system_get_info);
   }
 
   private:
@@ -93,6 +91,27 @@ class Timer {
   hsa_system_get_info_fn_t hsa_system_get_info_fn;
   // Timestamp rate
   freq_t timestamp_rate_;
+};
+
+class TimerFactory {
+  public:
+  typedef std::mutex mutex_t;
+
+  static Timer* Create(Timer::hsa_system_get_info_fn_t f = NULL) {
+    if (instance_ == NULL) {
+      std::lock_guard<mutex_t> lck(mutex_);
+      if (instance_ == NULL) instance_ = new Timer(f);
+    }
+    return instance_;
+  }
+
+  static Timer& Instance() {
+    return *instance_;
+  }
+
+  private:
+  static Timer* instance_;
+  static mutex_t mutex_;
 };
 
 }  // namespace hsa_rt_utils

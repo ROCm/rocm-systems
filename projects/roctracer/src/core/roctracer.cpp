@@ -21,9 +21,7 @@ THE SOFTWARE.
 */
 
 #include "inc/roctracer.h"
-#ifdef HCC_ENABLED
 #include "inc/roctracer_hcc.h"
-#endif
 #include "inc/roctracer_hip.h"
 #define PROF_API_IMPL 1
 #include "inc/roctracer_hsa.h"
@@ -303,7 +301,7 @@ static inline activity_correlation_id_t CorrelationIdLookup(const activity_corre
 }
 
 roctracer_record_t* HIP_SyncActivityCallback(
-    uint32_t activity_id,
+    uint32_t op_id,
     roctracer_record_t* record,
     const void* callback_data,
     void* arg)
@@ -315,7 +313,7 @@ roctracer_record_t* HIP_SyncActivityCallback(
   if (pool == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback pool is NULL");
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     record->domain = ACTIVITY_DOMAIN_HIP_API;
-    record->activity_id = activity_id;
+    record->op = op_id;
     record->begin_ns = timer.timestamp_ns();
     // Correlation ID generating
     uint64_t correlation_id = data->correlation_id;
@@ -324,20 +322,16 @@ roctracer_record_t* HIP_SyncActivityCallback(
       const_cast<hip_api_data_t*>(data)->correlation_id = correlation_id;
     }
     record->correlation_id = correlation_id;
-#ifdef HCC_ENABLED
     // Passing correlatin ID
     correlation_id_tls = correlation_id;
-#endif
     return record;
   } else {
     record->end_ns = timer.timestamp_ns();
     record->process_id = syscall(__NR_getpid);
     record->thread_id = syscall(__NR_gettid);
     pool->Write(*record);
-#ifdef HCC_ENABLED
     // Clearing correlatin ID
     correlation_id_tls = 0;
-#endif
     return NULL;
   }
 }
@@ -394,7 +388,7 @@ PUBLIC_API const char* roctracer_error_string() {
 
 // Return ID string by given domain and activity/API ID
 // NULL returned on the error and the library errno is set
-PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_t& id, const uint32_t& kind) {
+PUBLIC_API const char* roctracer_op_string(const uint32_t& domain, const uint32_t& id, const uint32_t& kind) {
   API_METHOD_PREFIX
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_API: {
@@ -402,9 +396,7 @@ PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_
       break;
     }
     case ACTIVITY_DOMAIN_HCC_OPS: {
-#ifdef HCC_ENABLED
       return roctracer::HccLoader::Instance().GetCmdName(kind);
-#endif
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
@@ -417,59 +409,118 @@ PUBLIC_API const char* roctracer_id_string(const uint32_t& domain, const uint32_
   API_METHOD_CATCH(NULL)
 }
 
+static inline uint32_t get_op_num(const uint32_t& domain) {
+  switch (domain) {
+    case ACTIVITY_DOMAIN_HCC_OPS: return hc::HSA_OP_ID_NUMBER;
+    case ACTIVITY_DOMAIN_HIP_API: return HIP_API_ID_NUMBER;
+    case ACTIVITY_DOMAIN_HSA_API: return HSA_API_ID_NUMBER;
+    default:
+      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+  }
+  return 0;
+}
+
 // Enable runtime API callbacks
-PUBLIC_API roctracer_status_t roctracer_enable_callback(
-    roctracer_domain_t domain,
-    uint32_t id,
+static void roctracer_enable_callback_impl(
+    uint32_t domain,
+    uint32_t op,
     roctracer_rtapi_callback_t callback,
     void* user_data)
 {
-  API_METHOD_PREFIX
   switch (domain) {
-    case ACTIVITY_DOMAIN_ANY: {
-      if (id != 0) EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
-      roctracer_enable_callback(ACTIVITY_DOMAIN_HSA_API, HSA_API_ID_ANY, callback, user_data);
-      roctracer_enable_callback(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY, callback, user_data);
-      break;
-    }
     case ACTIVITY_DOMAIN_HSA_API: {
-      if (id == HSA_API_ID_ANY) {
-        for (uint32_t i = 0; i < HSA_API_ID_NUMBER; i++) {
-          roctracer::hsa_support::cb_table.set(i, callback, user_data);
-        }
-      } else {
-        roctracer::hsa_support::cb_table.set(id, callback, user_data);
-      }
+      roctracer::hsa_support::cb_table.set(op, callback, user_data);
       break;
     }
+    case ACTIVITY_DOMAIN_HCC_OPS: break;
     case ACTIVITY_DOMAIN_HIP_API: {
-      hipError_t hip_err = roctracer::HipLoader::Instance().RegisterApiCallback(id, (void*)callback, user_data);
+      hipError_t hip_err = roctracer::HipLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterApiCallback error(" << hip_err << ")");
       break;
     }
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }
+}
+
+PUBLIC_API roctracer_status_t roctracer_enable_op_callback(
+    roctracer_domain_t domain,
+    uint32_t op,
+    roctracer_rtapi_callback_t callback,
+    void* user_data)
+{
+  API_METHOD_PREFIX
+  roctracer_enable_callback_impl(domain, op, callback, user_data);
   API_METHOD_SUFFIX
 }
 
-// Enable runtime API callbacks
-PUBLIC_API roctracer_status_t roctracer_disable_callback(
+PUBLIC_API roctracer_status_t roctracer_enable_domain_callback(
     roctracer_domain_t domain,
-    uint32_t id)
+    roctracer_rtapi_callback_t callback,
+    void* user_data)
 {
   API_METHOD_PREFIX
+  const uint32_t op_num = get_op_num(domain);
+  for (uint32_t op = 0; op < op_num; op++) roctracer_enable_callback_impl(domain, op, callback, user_data);
+  API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_enable_callback(
+    roctracer_rtapi_callback_t callback,
+    void* user_data)
+{
+  API_METHOD_PREFIX
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; domain++) {
+    const uint32_t op_num = get_op_num(domain);
+    for (uint32_t op = 0; op < op_num; op++) roctracer_enable_callback_impl(domain, op, callback, user_data);
+  }
+  API_METHOD_SUFFIX
+}
+
+// Disable runtime API callbacks
+static void roctracer_disable_callback_impl(
+    uint32_t domain,
+    uint32_t op)
+{
   switch (domain) {
-    case ACTIVITY_DOMAIN_ANY:
-      if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
-      id = HIP_API_ID_ANY;
+    case ACTIVITY_DOMAIN_HSA_API: {
+      break;
+    }
+    case ACTIVITY_DOMAIN_HCC_OPS: break;
     case ACTIVITY_DOMAIN_HIP_API: {
-      hipError_t hip_err = roctracer::HipLoader::Instance().RemoveApiCallback(id);
+      hipError_t hip_err = roctracer::HipLoader::Instance().RemoveApiCallback(op);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveApiCallback error(" << hip_err << ")");
       break;
     }
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+  }
+}
+
+PUBLIC_API roctracer_status_t roctracer_disable_op_callback(
+    roctracer_domain_t domain,
+    uint32_t op)
+{
+  API_METHOD_PREFIX
+  roctracer_disable_callback_impl(domain, op);
+  API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_disable_domain_callback(
+    roctracer_domain_t domain)
+{
+  API_METHOD_PREFIX
+  const uint32_t op_num = get_op_num(domain);
+  for (uint32_t op = 0; op < op_num; op++) roctracer_disable_callback_impl(domain, op);
+  API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_disable_callback()
+{
+  API_METHOD_PREFIX
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; domain++) {
+    const uint32_t op_num = get_op_num(domain);
+    for (uint32_t op = 0; op < op_num; op++) roctracer_disable_callback_impl(domain, op);
   }
   API_METHOD_SUFFIX
 }
@@ -512,68 +563,107 @@ PUBLIC_API roctracer_status_t roctracer_close_pool(roctracer_pool_t* pool) {
 }
 
 // Enable activity records logging
-PUBLIC_API roctracer_status_t roctracer_enable_activity(
-    roctracer_domain_t domain,
-    uint32_t id,
+static void roctracer_enable_activity_impl(
+    uint32_t domain,
+    uint32_t op,
     roctracer_pool_t* pool)
 {
-  API_METHOD_PREFIX
   if (pool == NULL) pool = roctracer_default_pool();
   switch (domain) {
-    case ACTIVITY_DOMAIN_ANY:
-      if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
-#ifdef HCC_ENABLED
-      roctracer_enable_activity(ACTIVITY_DOMAIN_HCC_OPS, hc::HSA_OP_ID_ANY, pool);
-#endif
-      roctracer_enable_activity(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY, pool);
-      break;
+    case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
-#ifdef HCC_ENABLED
       roctracer::HccLoader::Instance().SetActivityIdCallback((void*)roctracer::HCC_ActivityIdCallback);
-      const bool err = roctracer::HccLoader::Instance().SetActivityCallback(id, (void*)roctracer::HCC_AsyncActivityCallback, (void*)pool);
-      if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::SetActivityCallback error");
-#endif
+      const bool succ = roctracer::HccLoader::Instance().SetActivityCallback(op, (void*)roctracer::HCC_AsyncActivityCallback, (void*)pool);
+      if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::SetActivityCallback error");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-      const hipError_t hip_err = roctracer::HipLoader::Instance().RegisterActivityCallback(id, (void*)roctracer::HIP_SyncActivityCallback, (void*)pool);
+      const hipError_t hip_err = roctracer::HipLoader::Instance().RegisterActivityCallback(op, (void*)roctracer::HIP_SyncActivityCallback, (void*)pool);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterActivityCallback error(" << hip_err << ")");
       break;
     }
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }
+}
+
+PUBLIC_API roctracer_status_t roctracer_enable_op_activity(
+    roctracer_domain_t domain,
+    uint32_t op,
+    roctracer_pool_t* pool)
+{
+  API_METHOD_PREFIX
+  roctracer_enable_activity_impl(domain, op, pool);
+  API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_enable_domain_activity(
+    roctracer_domain_t domain,
+    roctracer_pool_t* pool)
+{
+  API_METHOD_PREFIX
+  const uint32_t op_num = get_op_num(domain);
+  for (uint32_t op = 0; op < op_num; op++) roctracer_enable_activity_impl(domain, op, pool);
+  API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_enable_activity(
+    roctracer_pool_t* pool)
+{
+  API_METHOD_PREFIX
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; domain++) {
+    const uint32_t op_num = get_op_num(domain);
+    for (uint32_t op = 0; op < op_num; op++) roctracer_enable_activity_impl(domain, op, pool);
+  }
   API_METHOD_SUFFIX
 }
 
 // Disable activity records logging
-PUBLIC_API roctracer_status_t roctracer_disable_activity(
-    roctracer_domain_t domain,
-    uint32_t id)
+static void roctracer_disable_activity_impl(
+    uint32_t domain,
+    uint32_t op)
 {
-  API_METHOD_PREFIX
   switch (domain) {
-    case ACTIVITY_DOMAIN_ANY:
-      if (id != 0) HIP_EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "DOMAIN_ANY: id != 0");
-#ifdef HCC_ENABLED
-      roctracer_disable_activity(ACTIVITY_DOMAIN_HCC_OPS, hc::HSA_OP_ID_ANY);
-#endif
-      roctracer_disable_activity(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_ANY);
-      break;
+    case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
-#ifdef HCC_ENABLED
-      const bool err = roctracer::HccLoader::Instance().SetActivityCallback(id, NULL, NULL);
-      if (err == true) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::SetActivityCallback(NULL) error");
-#endif
+      const bool succ = roctracer::HccLoader::Instance().SetActivityCallback(op, NULL, NULL);
+      if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::SetActivityCallback(NULL) error domain(" << domain << ") op(" << op << ")");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-      const hipError_t hip_err = roctracer::HipLoader::Instance().RemoveActivityCallback(id);
+      const hipError_t hip_err = roctracer::HipLoader::Instance().RemoveActivityCallback(op);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveActivityCallback error(" << hip_err << ")");
       break;
     }
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+  }
+}
+
+PUBLIC_API roctracer_status_t roctracer_disable_op_activity(
+    roctracer_domain_t domain,
+    uint32_t op)
+{
+  API_METHOD_PREFIX
+  roctracer_disable_activity_impl(domain, op);
+  API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_disable_domain_activity(
+    roctracer_domain_t domain)
+{
+  API_METHOD_PREFIX
+  const uint32_t op_num = get_op_num(domain);
+  for (uint32_t op = 0; op < op_num; op++) roctracer_disable_activity_impl(domain, op);
+  API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_disable_activity()
+{
+  API_METHOD_PREFIX
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; domain++) {
+    const uint32_t op_num = get_op_num(domain);
+    for (uint32_t op = 0; op < op_num; op++) roctracer_disable_activity_impl(domain, op);
   }
   API_METHOD_SUFFIX
 }

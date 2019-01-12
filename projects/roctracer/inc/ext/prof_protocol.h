@@ -23,15 +23,12 @@ THE SOFTWARE.
 #ifndef INC_EXT_PROF_PROTOCOL_H_
 #define INC_EXT_PROF_PROTOCOL_H_
 
-#define HCC_ENABLED 1
-
 // Traced API domains
 typedef enum {
-  ACTIVITY_DOMAIN_ANY = 0,                        // Any domain
-  ACTIVITY_DOMAIN_HSA_API = 1,                    // HSA domain
-  ACTIVITY_DOMAIN_HCC_OPS = 2,                    // HCC domain
-  ACTIVITY_DOMAIN_HIP_API = 3,                    // HIP domain
-  ACTIVITY_DOMAIN_NUMBER = 4
+  ACTIVITY_DOMAIN_HSA_API = 0,                    // HSA domain
+  ACTIVITY_DOMAIN_HCC_OPS = 1,                    // HCC domain
+  ACTIVITY_DOMAIN_HIP_API = 2,                    // HIP domain
+  ACTIVITY_DOMAIN_NUMBER = 3
 } activity_domain_t;
 
 // API calback type
@@ -53,7 +50,7 @@ typedef uint64_t activity_correlation_id_t;
 struct activity_record_t {
     uint32_t domain;                               // activity domain id
     activity_kind_t kind;                          // activity kind
-    activity_op_t activity_id;                     // activity op
+    activity_op_t op;                              // activity op
     activity_correlation_id_t correlation_id;      // activity ID
     uint64_t begin_ns;                             // host begin timestamp
     uint64_t end_ns;                               // host end timestamp
