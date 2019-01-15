@@ -60,6 +60,7 @@ message ( "---------Install-Dir: ${CMAKE_INSTALL_PREFIX}" )
 
 ## Install information
 install ( FILES ${ROOT_DIR}/inc/ext/prof_protocol.h DESTINATION include/ext )
+install ( FILES ${ROOT_DIR}/inc/ext/hsa_rt_utils.hpp DESTINATION include/ext )
 
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" )
