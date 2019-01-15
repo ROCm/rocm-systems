@@ -6,6 +6,7 @@
 
 namespace roctracer {
 
+// Base runtime loader class
 class Loader {
   public:
   typedef std::mutex mutex_t;
@@ -32,6 +33,7 @@ class Loader {
   void* handle_;
 };
 
+// HIP runtime library loader class
 class HipLoader : protected Loader {
   public:
   typedef decltype(hipRegisterApiCallback) RegisterApiCallback_t;
@@ -66,13 +68,16 @@ class HipLoader : protected Loader {
   static HipLoader* instance_;
 };
 
+// HCC runtime library loader class
 class HccLoader : protected Loader {
   public:
   typedef std::mutex mutex_t;
 
-  typedef decltype(Kalmar::CLAMP::SetActivityCallback) SetActivityCallback_t;
-  typedef decltype(Kalmar::CLAMP::SetActivityIdCallback) SetActivityIdCallback_t;
+  typedef decltype(Kalmar::CLAMP::InitActivityCallback) InitActivityCallback_t;
+  typedef decltype(Kalmar::CLAMP::EnableActivityCallback) EnableActivityCallback_t;
   typedef decltype(Kalmar::CLAMP::GetCmdName) GetCmdName_t;
+
+  static HccLoader* GetRef() { return instance_; }
 
   static HccLoader& Instance() {
     std::lock_guard<mutex_t> lck(mutex_);
@@ -83,19 +88,16 @@ class HccLoader : protected Loader {
   }
 
   HccLoader() : Loader("libmcwamp.so") {
-    // Kalmar::CLAMP::SetActivityCallback
-    // _ZN6Kalmar5CLAMP19SetActivityCallbackEjPvS1_
-    SetActivityCallback = GetFun<SetActivityCallback_t>("_ZN6Kalmar5CLAMP19SetActivityCallbackEjPvS1_");
-    // Kalmar::CLAMP::SetActivityIdCallback
-    // _ZN6Kalmar5CLAMP21SetActivityIdCallbackEPv
-    SetActivityIdCallback = GetFun<SetActivityIdCallback_t>("_ZN6Kalmar5CLAMP21SetActivityIdCallbackEPv");
+    // Kalmar::CLAMP::InitActivityCallback
+    InitActivityCallback = GetFun<InitActivityCallback_t>("_ZN6Kalmar5CLAMP20InitActivityCallbackEPvS1_S1_");
+    // Kalmar::CLAMP::EnableActivityIdCallback
+    EnableActivityCallback = GetFun<EnableActivityCallback_t>("_ZN6Kalmar5CLAMP22EnableActivityCallbackEjb");
     // Kalmar::CLAMP::GetCmdName
-    // _ZN6Kalmar5CLAMP10GetCmdNameEj
     GetCmdName = GetFun<GetCmdName_t>("_ZN6Kalmar5CLAMP10GetCmdNameEj");
   }
 
-  SetActivityCallback_t* SetActivityCallback;
-  SetActivityIdCallback_t* SetActivityIdCallback;
+  InitActivityCallback_t* InitActivityCallback;
+  EnableActivityCallback_t* EnableActivityCallback;
   GetCmdName_t* GetCmdName;
 
   private:
@@ -104,25 +106,4 @@ class HccLoader : protected Loader {
 
 } // namespace roctracer
 
-#if 0
-namespace Kalmar {
-namespace CLAMP {
-extern bool SetActivityCallback(unsigned, void*, void*) __attribute__((weak_import));
-extern void SetActivityIdCallback(void*) __attribute__((weak_import));
-extern const char* GetCmdName(unsigned) __attribute__((weak_impot));
-}}
-
-namespace roctracer {
-bool HccSetActivityCallback(unsigned op, void* fun, void* arg) {
-  printf("HccSetActivityCallback(%p)\n", Kalmar::CLAMP::SetActivityCallback);
-  return (Kalmar::CLAMP::SetActivityCallback != NULL) ? Kalmar::CLAMP::SetActivityCallback(op, fun, arg) : true;
-}
-void HccSetActivityIdCallback(void* fun) {
-  if (Kalmar::CLAMP::SetActivityIdCallback != NULL) Kalmar::CLAMP::SetActivityIdCallback(fun);
-}
-const char* HccGetCmdName(unsigned op) {
-  if (Kalmar::CLAMP::GetCmdName != NULL) Kalmar::CLAMP::GetCmdName(op);
-}
-} // namespace roctracer
-#endif
 #endif // SRC_CORE_LOADER_H_

@@ -56,6 +56,7 @@ void matrixTransposeCPUReference(float* output, float* input, const unsigned int
 }
 
 int iterations = ITERATIONS;
+void init_tracing();
 void start_tracing();
 void stop_tracing();
 
@@ -74,6 +75,8 @@ int main() {
 
     int i;
     int errors;
+
+    init_tracing();
 
     while (iterations-- > 0) {
         start_tracing();
@@ -151,8 +154,8 @@ int main() {
     }                                                                                              \
   } while (0)
 
-// HIP API callback function
-void hip_api_callback(
+// Runtime API callback function
+void api_callback(
     uint32_t domain,
     uint32_t cid,
     const void* callback_data,
@@ -239,16 +242,21 @@ void activity_callback(const char* begin, const char* end, void* arg) {
   }
 }
 
-// Start tracing routine
-void start_tracing() {
+// Init tracing routine
+void init_tracing() {
   std::cout << "# START #############################" << std::endl << std::flush;
   // Allocating tracing pool
   roctracer_properties_t properties{};
   properties.buffer_size = 12;
   properties.buffer_callback_fun = activity_callback;
   ROCTRACER_CALL(roctracer_open_pool(&properties));
+}
+
+// Start tracing routine
+void start_tracing() {
+  std::cout << "# START #############################" << std::endl << std::flush;
   // Enable HIP API callbacks
-  ROCTRACER_CALL(roctracer_enable_callback(hip_api_callback, NULL));
+  ROCTRACER_CALL(roctracer_enable_callback(api_callback, NULL));
   // Enable HIP activity tracing
   ROCTRACER_CALL(roctracer_enable_activity());
 }
@@ -257,7 +265,7 @@ void start_tracing() {
 void stop_tracing() {
   ROCTRACER_CALL(roctracer_disable_callback());
   ROCTRACER_CALL(roctracer_disable_activity());
-  ROCTRACER_CALL(roctracer_close_pool());
+  ROCTRACER_CALL(roctracer_flush_activity());
   std::cout << "# STOP  #############################" << std::endl << std::flush;
 }
 #else

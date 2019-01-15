@@ -530,7 +530,6 @@ PUBLIC_API roctracer_pool_t* roctracer_default_pool(roctracer_pool_t* pool) {
   std::lock_guard<roctracer::memory_pool_mutex_t> lock(roctracer::memory_pool_mutex);
   roctracer_pool_t* p = reinterpret_cast<roctracer_pool_t*>(roctracer::memory_pool);
   if (pool != NULL) roctracer::memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);
-  //if (p == NULL) EXC_RAISING(ROCTRACER_STATUS_UNINIT, "default pool is not initialized");
   return p;
 }
 
@@ -572,9 +571,13 @@ static void roctracer_enable_activity_impl(
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
-      roctracer::HccLoader::Instance().SetActivityIdCallback((void*)roctracer::HCC_ActivityIdCallback);
-      const bool succ = roctracer::HccLoader::Instance().SetActivityCallback(op, (void*)roctracer::HCC_AsyncActivityCallback, (void*)pool);
-      if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::SetActivityCallback error");
+      if (roctracer::HccLoader::GetRef() == NULL) {
+        roctracer::HccLoader::Instance().InitActivityCallback((void*)roctracer::HCC_ActivityIdCallback,
+                                                              (void*)roctracer::HCC_AsyncActivityCallback,
+                                                              (void*)pool);
+      }
+      const bool succ = roctracer::HccLoader::Instance().EnableActivityCallback(op, true);
+      if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::EnableActivityCallback error");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
@@ -626,8 +629,8 @@ static void roctracer_disable_activity_impl(
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
-      const bool succ = roctracer::HccLoader::Instance().SetActivityCallback(op, NULL, NULL);
-      if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::SetActivityCallback(NULL) error domain(" << domain << ") op(" << op << ")");
+      const bool succ = roctracer::HccLoader::Instance().EnableActivityCallback(op, false);
+      if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::EnableActivityCallback(NULL) error domain(" << domain << ") op(" << op << ")");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
