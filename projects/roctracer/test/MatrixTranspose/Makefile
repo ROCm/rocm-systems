@@ -1,25 +1,15 @@
-HIP_PATH?= $(wildcard /opt/rocm/hip)
-ifeq (,$(HIP_PATH))
-	HIP_PATH=../../..
-endif
-
-HIPCC=$(HIP_PATH)/bin/hipcc
-
-TARGET=hcc
+HCC_HOME? = /opt/rocm/hcc
+HIP_PATH? = /opt/rocm/hip
 
 SOURCES = MatrixTranspose.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
-
 EXECUTABLE=./MatrixTranspose
 
-.PHONY: test
-
-
-all: $(EXECUTABLE) test
-
+HIPCC=$(HIP_PATH)/bin/hipcc
 CXXFLAGS =-g
 CXX=$(HIPCC)
 
+all: $(EXECUTABLE)
 
 $(EXECUTABLE): $(OBJECTS)
 	$(HIPCC) $(OBJECTS) -o $@
@@ -34,3 +24,4 @@ clean:
 	rm -f $(OBJECTS)
 	rm -f $(HIP_PATH)/src/*.o
 
+.PHONY: all test clean

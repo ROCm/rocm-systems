@@ -9,15 +9,16 @@ OBJECTS    = $(SOURCES:.cpp=.o)
 
 ITERATIONS ?= 100
 
-HIP_PATH ?= /opt/rocm/hip
-HIPCC     = $(HIP_PATH)/bin/hipcc
+HCC_HOME  ?= /opt/rocm/hcc
+HIP_PATH  ?= /opt/rocm/hip
 
-CXX=$(HIPCC)
-CXXFLAGS =-g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc -DLOCAL_BUILD=1 -DITERATIONS=$(ITERATIONS)
+HIPCC     = $(HIP_PATH)/bin/hipcc
+CXX       = $(HIPCC)
+CXXFLAGS  = -g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc -DLOCAL_BUILD=1 -DITERATIONS=$(ITERATIONS)
 
 export LD_LIBRARY_PATH=$(LIB_PATH)
 
-all: clean $(EXECUTABLE) test
+all: clean $(EXECUTABLE)
 
 $(EXECUTABLE): $(OBJECTS)
 	$(HIPCC) $(OBJECTS) -o $@ $(HCC_LIBS) $(ROC_LIBS)

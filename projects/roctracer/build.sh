@@ -30,6 +30,7 @@ cmake \
 popd
 
 make $MAKE_OPTS
+make mytest
 make package
 
 exit 0

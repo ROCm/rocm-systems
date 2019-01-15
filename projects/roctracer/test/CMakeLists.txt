@@ -23,12 +23,16 @@
 cmake_minimum_required ( VERSION 2.8.12 )
 set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
 
-## HIP test
-execute_process( COMMAND make -C "${TEST_DIR}/MatrixTranspose" )
-execute_process( COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test" )
-
 ## test run script
 set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
+
+## build HIP tests
+add_custom_target( mytest
+  COMMAND make -C "${TEST_DIR}/MatrixTranspose"
+  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test"
+  COMMAND make -C "${TEST_DIR}/MatrixTranspose_test"
+  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_test"
+)
 
 ## Util sources
 file( GLOB UTIL_SRC "${TEST_HSA}/util/*.cpp" )
@@ -49,4 +53,3 @@ add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test/hsa )
 
 ## copying run script
 execute_process ( COMMAND sh -xc "cp ${RUN_SCRIPT} ${PROJECT_BINARY_DIR}" )
-

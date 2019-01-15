@@ -27,11 +27,11 @@ export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and oher libraries
 export LD_LIBRARY_PATH=$PWD
 
-#make -C ../test/MatrixTranspose_test
+# rocTrecer is used explicitely by test
+HCC_PROFILE=1 LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose_test
 
-# ROC profiler library loaded by HSA runtime
+# rocTracer/tool is loaded by HSA runtime
 export HSA_TOOLS_LIB="test/libtracer_tool.so libroctracer64.so"
-
 HCC_PROFILE=1 LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose
 
 # test trace
