@@ -91,6 +91,7 @@ install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer.h DESTINATION include 
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hip.h DESTINATION include )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hcc.h DESTINATION include )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/ext/prof_protocol.h DESTINATION include/ext )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/ext/hsa_rt_utils.hpp DESTINATION include/ext )
 install ( FILES ${PROJECT_BINARY_DIR}/inc-link DESTINATION ../include RENAME ${ROCTRACER_NAME} )
 install ( FILES ${PROJECT_BINARY_DIR}/so-link DESTINATION ../lib RENAME ${ROCTRACER_LIBRARY}.so )
 
