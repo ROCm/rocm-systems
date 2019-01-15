@@ -24,9 +24,18 @@
 
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
+# paths to ROC profiler and oher libraries
+export LD_LIBRARY_PATH=$PWD
+
+#make -C ../test/MatrixTranspose_test
+
+# ROC profiler library loaded by HSA runtime
+export HSA_TOOLS_LIB="test/libtracer_tool.so libroctracer64.so"
+
+HCC_PROFILE=1 LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose
+
 # test trace
 export ROC_TEST_TRACE=1
-
 # kernels loading iterations
 export ROCP_KITER=1
 # kernels dispatching iterations per kernel load
@@ -38,14 +47,8 @@ export ROCP_AGENTS=1
 # each thread creates a queue pre GPU agent
 export ROCP_THRS=1
 
-# paths to ROC profiler and oher libraries
-export LD_LIBRARY_PATH=$PWD
-# ROC profiler library loaded by HSA runtime
-export HSA_TOOLS_LIB="test/libtracer_tool.so libroctracer64.so"
-export LD_PRELOAD="$HSA_TOOLS_LIB"
-
+#export LD_PRELOAD="$HSA_TOOLS_LIB"
 #eval ./test/hsa/ctrl
-HCC_PROFILE=1 LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose
 
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
