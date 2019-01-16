@@ -24,7 +24,7 @@ $(EXECUTABLE): $(OBJECTS)
 	$(HIPCC) $(OBJECTS) -o $@ $(HCC_LIBS) $(ROC_LIBS)
 
 test: $(EXECUTABLE)
-	HCC_PROFILE=1 LD_PRELOAD=$(HCC_HOME)/lib/libmcwamp_hsa.so $(EXECUTABLE)
+	LD_PRELOAD=$(HCC_HOME)/lib/libmcwamp_hsa.so $(EXECUTABLE)
 
 clean:
 	rm -f $(EXECUTABLE)

@@ -23,7 +23,7 @@ THE SOFTWARE.
 #ifndef INC_ROCTRACER_HCC_H_
 #define INC_ROCTRACER_HCC_H_
 
-#if (LOCAL_BUILD == 1)
+#if LOCAL_BUILD
 #include <hc_prof_runtime.h>
 #else
 #include <hcc/hc_prof_runtime.h>
