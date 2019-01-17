@@ -128,6 +128,7 @@ std::vector<std::string>* kernel_string_vec = NULL;
 //  DIspatch number range filter
 std::vector<uint32_t>* range_vec = NULL;
 // Otstanding dispatches parameters
+static uint32_t CTX_OUTSTANDING_WAIT = 1;
 static uint32_t CTX_OUTSTANDING_MAX = 0;
 static uint32_t CTX_OUTSTANDING_MON = 0;
 // to truncate kernel names
@@ -801,6 +802,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
       if (it != opts.end()) { to_truncate_names = (it->second == "on") ? 1 : 0; }
       it = opts.find("timestamp");
       if (it != opts.end()) { settings->timestamp_on = (it->second == "on") ? 1 : 0; }
+      it = opts.find("ctx-wait");
+      if (it != opts.end()) { CTX_OUTSTANDING_WAIT = atol(it->second.c_str()); }
       it = opts.find("ctx-limit");
       if (it != opts.end()) { CTX_OUTSTANDING_MAX = atol(it->second.c_str()); }
       it = opts.find("heartbeat");
@@ -827,6 +830,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   // Enable kernel names truncating
   check_env_var("ROCP_TRUNCATE_NAMES", to_truncate_names);
   // Set outstanding dispatches parameter
+  check_env_var("ROCP_OUTSTANDING_WAIT", CTX_OUTSTANDING_WAIT);
   check_env_var("ROCP_OUTSTANDING_MAX", CTX_OUTSTANDING_MAX);
   check_env_var("ROCP_OUTSTANDING_MON", CTX_OUTSTANDING_MON);
   // Enable timestamping
@@ -1062,13 +1066,13 @@ extern "C" PUBLIC_API void OnUnloadTool() {
   fflush(stdout);
   if (result_file_opened) {
     printf("\nROCPRofiler:"); fflush(stdout);
-    dump_context_array(NULL);
+    if (CTX_OUTSTANDING_WAIT == 1) dump_context_array(NULL);
     fclose(result_file_handle);
     printf(" %u contexts collected, output directory %s\n", context_collected, result_prefix);
   } else {
     if (context_collected != context_count) {
       results_output_break();
-      dump_context_array(NULL);
+      if (CTX_OUTSTANDING_WAIT == 1) dump_context_array(NULL);
     }
     printf("\nROCPRofiler: %u contexts collected\n", context_collected);
   }

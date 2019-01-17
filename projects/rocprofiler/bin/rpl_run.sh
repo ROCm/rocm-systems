@@ -241,6 +241,12 @@ while [ 1 ] ; do
     else
       export ROCP_TIMESTAMP_ON=0
     fi
+  elif [ "$1" = "--ctx-wait" ] ; then
+    if [ "$2" = "on" ] ; then
+      export ROCP_OUTSTANDING_WAIT=1
+    else
+      export ROCP_OUTSTANDING_WAIT=0
+    fi
   elif [ "$1" = "--ctx-limit" ] ; then
     export ROCP_OUTSTANDING_MAX="$2"
   elif [ "$1" = "--heartbeat" ] ; then
