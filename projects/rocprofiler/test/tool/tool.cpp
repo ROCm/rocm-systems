@@ -500,13 +500,13 @@ void dump_context_array(hsa_queue_t* queue) {
           }
         }
       }
-
-      if (pthread_mutex_unlock(&mutex) != 0) {
-        perror("pthread_mutex_unlock");
-        abort();
-      }
-      if (done == false) sched_yield();
     }
+
+    if (pthread_mutex_unlock(&mutex) != 0) {
+      perror("pthread_mutex_unlock");
+      abort();
+    }
+    if (done == false) sched_yield();
   }
 }
 
