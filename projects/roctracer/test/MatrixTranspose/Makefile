@@ -1,22 +1,32 @@
-HCC_HOME? = /opt/rocm/hcc
-HIP_PATH? = /opt/rocm/hip
+HIP_PATH?= $(wildcard /opt/rocm/hip)
+ifeq (,$(HIP_PATH))
+	HIP_PATH=../../..
+endif
+
+HIPCC=$(HIP_PATH)/bin/hipcc
+
+TARGET=hcc
 
 SOURCES = MatrixTranspose.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
+
 EXECUTABLE=./MatrixTranspose
 
-HIPCC=$(HIP_PATH)/bin/hipcc
+.PHONY: test
+
+
+all: $(EXECUTABLE) test
+
 CXXFLAGS =-g
 CXX=$(HIPCC)
 
-all: $(EXECUTABLE)
 
 $(EXECUTABLE): $(OBJECTS)
 	$(HIPCC) $(OBJECTS) -o $@
 
 
 test: $(EXECUTABLE)
-	LD_PRELOAD=$(HCC_HOME)/lib/libmcwamp_hsa.so $(EXECUTABLE)
+	$(EXECUTABLE)
 
 
 clean:
@@ -24,4 +34,3 @@ clean:
 	rm -f $(OBJECTS)
 	rm -f $(HIP_PATH)/src/*.o
 
-.PHONY: all test clean
