@@ -26,14 +26,34 @@
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and oher libraries
 export LD_LIBRARY_PATH=$PWD
+# test check routin
+test_status=0
+eval_test() {
+  label=$1
+  cmdline=$2
+  echo "$label: \"$cmdline\""
+  eval "$cmdline"
+  if [ $? != 0 ] ; then
+    echo "$label: FAILED"
+    test_status=$(($test_status + 1))
+  else
+    echo "$label: PASSED"
+  fi
+}
 
+# Standalone test
 # rocTrecer is used explicitely by test
-LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose_test
+eval_test "standalone HIP test" "LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose_test"
 
+# Tool test
 # rocTracer/tool is loaded by HSA runtime
 export HSA_TOOLS_LIB="test/libtracer_tool.so libroctracer64.so"
-LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose
 
+# HIP test
+eval_test "tool HIP test" "LD_PRELOAD='$HCC_HOME/lib/libmcwamp_hsa.so $HSA_TOOLS_LIB' ./test/MatrixTranspose"
+
+# HSA test
+export ROCTRACER_DOMAIN="hsa"
 # test trace
 export ROC_TEST_TRACE=1
 # kernels loading iterations
@@ -47,11 +67,11 @@ export ROCP_AGENTS=1
 # each thread creates a queue pre GPU agent
 export ROCP_THRS=1
 
-#export LD_PRELOAD="$HSA_TOOLS_LIB"
-#eval ./test/hsa/ctrl
+eval_test "tool HSA test" "LD_PRELOAD='$HSA_TOOLS_LIB' ./test/hsa/ctrl"
 
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
 #ms_print massif.out.<N>
 
-exit 0
+if [ $test_status != 0 ] ; then echo "$test_status tests failed"; fi
+exit $test_status
