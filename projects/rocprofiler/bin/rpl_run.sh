@@ -128,6 +128,7 @@ usage() {
   echo ""
   echo "  --basenames <on|off> - to turn on/off truncating of the kernel full function names till the base ones [off]"
   echo "  --timestamp <on|off> - to turn on/off the kernel disoatches timestamps, dispatch/begin/end/complete [off]"
+  echo "  --ctx-wait <on|off> - to wait for outstanding contexts on profiler exit [on]"
   echo "  --ctx-limit <max number> - maximum number of outstanding contexts [0 - unlimited]"
   echo "  --heartbeat <rate sec> - to print progress heartbeats [0 - disabled]"
   echo "  --sqtt-size <byte size> - to set SQTT buffer size, aggregate for all SE [0x2000000]"
