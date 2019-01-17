@@ -34,7 +34,7 @@ THE SOFTWARE.
   do {                                                                                             \
     hsa_status_t status = call;                                                                    \
     if (status != HSA_STATUS_SUCCESS) {                                                            \
-      std::cerr << "HSA-rt call '" << #call << "' error(" << std::hex << status << ")"             \
+      std::cerr << "1HSA-rt call '" << #call << "' error(" << std::hex << status << ")"             \
         << std::dec << std::endl << std::flush;                                                    \
       abort();                                                                                     \
     }                                                                                              \

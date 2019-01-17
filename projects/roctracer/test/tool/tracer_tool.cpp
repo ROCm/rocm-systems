@@ -45,9 +45,11 @@ THE SOFTWARE.
   } while (0)
 
 typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
-hsa_rt_utils::Timer timer(NULL);
+hsa_rt_utils::Timer* timer = NULL;
 thread_local timestamp_t hsa_begin_timestamp = 0;
 thread_local timestamp_t hip_begin_timestamp = 0;
+bool trace_hsa = false;
+bool trace_hip = false;
 
 // HSA API callback function
 void hsa_api_callback(
@@ -57,13 +59,12 @@ void hsa_api_callback(
     void* arg)
 {
   (void)arg;
-
   const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
 
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    hsa_begin_timestamp = timer.timestamp_fn_ns();
+    hsa_begin_timestamp = timer->timestamp_fn_ns();
   } else {
-    const timestamp_t end_timestamp = (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp : timer.timestamp_fn_ns();
+    const timestamp_t end_timestamp = (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp : timer->timestamp_fn_ns();
     std::ostringstream os;
     os << '(' << hsa_begin_timestamp << ":" << end_timestamp << ") " << hsa_api_data_pair_t(cid, *data);
     fprintf(stdout, "%s\n", os.str().c_str());
@@ -78,10 +79,11 @@ void hip_api_callback(
 {
   (void)arg;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
+
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    hsa_begin_timestamp = timer.timestamp_fn_ns();
+    hsa_begin_timestamp = timer->timestamp_fn_ns();
   } else {
-    const timestamp_t end_timestamp = timer.timestamp_fn_ns();
+    const timestamp_t end_timestamp = timer->timestamp_fn_ns();
     fprintf(stdout, "(%lu:%lu) %s(", hsa_begin_timestamp, end_timestamp, roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0));
     switch (cid) {
       case HIP_API_ID_hipMemcpy:
@@ -117,6 +119,7 @@ void hip_api_callback(
 void activity_callback(const char* begin, const char* end, void* arg) {
   const roctracer_record_t* record = reinterpret_cast<const roctracer_record_t*>(begin);
   const roctracer_record_t* end_record = reinterpret_cast<const roctracer_record_t*>(end);
+
   fprintf(stdout, "\tActivity records:\n"); fflush(stdout);
   while (record < end_record) {
     const char * name = roctracer_op_string(record->domain, record->op, record->kind);
@@ -151,10 +154,11 @@ extern "C" {
 // HSA-runtime tool on-load method
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
-  timer.init(table->core_->hsa_system_get_info_fn);
+  timer = new hsa_rt_utils::Timer(table->core_->hsa_system_get_info_fn);
+
   const char* trace_domain = getenv("ROCTRACER_DOMAIN");
-  const bool trace_hsa = (trace_domain == NULL) || (strncmp(trace_domain, "hsa", 3) == 0);
-  const bool trace_hip = (trace_domain == NULL) || (strncmp(trace_domain, "hip", 3) == 0);
+  trace_hsa = (trace_domain == NULL) || (strncmp(trace_domain, "hsa", 3) == 0);
+  trace_hip = (trace_domain == NULL) || (strncmp(trace_domain, "hip", 3) == 0);
 
   // Enable HSA API callbacks
   if (trace_hsa) {
@@ -178,8 +182,9 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
 
 // HSA-runtime tool on-unload method
 PUBLIC_API void OnUnload() {
-  ROCTRACER_CALL(roctracer_disable_callback());
-  ROCTRACER_CALL(roctracer_disable_activity());
+  if (trace_hsa) ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
+  if (trace_hip) ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
+  if (trace_hip) ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HCC_OPS));
   ROCTRACER_CALL(roctracer_close_pool());
 }
 
