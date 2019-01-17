@@ -35,6 +35,12 @@ BIN_DIR=$PKG_DIR/bin
 # PATH to custom HSA and OpenCl runtimes
 HSA_PATH=$PKG_DIR/lib/hsa
 
+# HSA runtime trace
+HSA_TRACE=0
+
+# Generate stats
+GEN_STATS=0
+
 export LD_LIBRARY_PATH=$PKG_DIR/lib:$PKG_DIR/tool:$HSA_PATH
 export PATH=.:$PATH
 
@@ -135,6 +141,8 @@ usage() {
   echo "      Can be set in KB (1024B) or MB (1048576) units, examples 20K or 20M respectively."
   echo "  --sqtt-local <on|off> - to allocate SQTT buffer in local GPU memory [on]"
   echo ""
+  echo "  --rt-trace <hsa> - to trace HSA API"
+  echo ""
   echo "Configuration file:"
   echo "  You can set your parameters defaults preferences in the configuration file 'rpl_rc.xml'. The search path sequence: .:${HOME}:<package path>"
   echo "  First the configuration file is looking in the current directory, then in your home, and then in the package directory."
@@ -184,12 +192,18 @@ run() {
     mkdir -p "$ROCP_OUTPUT_DIR"
   fi
 
+  if [ "$HSA_TRACE" = 1 ] ; then
+    export HSA_TOOLS_LIB="libtracer_tool.so libroctracer64.so $HSA_TOOLS_LIB"
+    export ROCTRACER_DOMAIN="hsa"
+  fi
+
+  redirection_cmd=""
   if [ -n "$ROCP_OUTPUT_DIR" ] ; then
     OUTPUT_LIST="$OUTPUT_LIST $ROCP_OUTPUT_DIR/results.txt"
-    eval "$APP_CMD 2>&1 | tee $ROCP_OUTPUT_DIR/log.txt"
-  else
-    eval "$APP_CMD"
+    redirection_cmd="2>&1 | tee $ROCP_OUTPUT_DIR/log.txt"
   fi
+
+  eval "LD_PRELOAD='$HSA_TOOLS_LIB' $APP_CMD $redirection_cmd"
 }
 
 # main
@@ -266,9 +280,16 @@ while [ 1 ] ; do
     else
       export ROCP_SQTT_LOCAL=0
     fi
+  elif [ "$1" = "--rt-trace" ] ; then
+    if [ "$2" = "hsa" ] ; then
+      HSA_TRACE=1
+    fi
   elif [ "$1" = "--verbose" ] ; then
     ARG_VAL=0
     export ROCP_VERBOSE_MODE=1
+  elif [ "$1" = "-s" ] ; then
+    ARG_VAL=0
+    GEN_STATS=1
   else
     break
   fi
@@ -349,7 +370,12 @@ for name in $input_list; do
 done
 
 if [ -n "$csv_output" ] ; then
-  python $BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST
+  if [ "$GEN_STATS" = "1" ] ; then
+    db_output=$(echo $csv_output | sed "s/\.csv/.db/")
+    python $BIN_DIR/tblextr.py $db_output $OUTPUT_LIST
+  else
+    python $BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST
+  fi
   if [ "$?" -eq 0 ] ; then
     echo "RPL: '$csv_output' is generated"
   else
