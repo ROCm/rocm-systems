@@ -150,9 +150,8 @@ void activity_callback(const char* begin, const char* end, void* arg) {
   }
 }
 
-extern "C" {
 // HSA-runtime tool on-load method
-PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
+extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
   timer = new hsa_rt_utils::Timer(table->core_->hsa_system_get_info_fn);
 
@@ -181,11 +180,9 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
 }
 
 // HSA-runtime tool on-unload method
-PUBLIC_API void OnUnload() {
+extern "C" PUBLIC_API void OnUnload() {
   if (trace_hsa) ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
   if (trace_hip) ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
   if (trace_hip) ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HCC_OPS));
   ROCTRACER_CALL(roctracer_close_pool());
-}
-
 }
