@@ -78,6 +78,7 @@ struct kernel_properties_t {
   uint32_t vgpr_count;
   uint32_t sgpr_count;
   uint32_t fbarrier_count;
+  hsa_signal_t signal;
 };
 
 // Context stored entry type
@@ -112,7 +113,7 @@ context_array_t* context_array = NULL;
 // Contexts collected count
 volatile uint32_t context_count = 0;
 volatile uint32_t context_collected = 0;
-// Profiling results output file name
+// Profiling results output dir
 const char* result_prefix = NULL;
 // Global results file handle
 FILE* result_file_handle = NULL;
@@ -426,7 +427,7 @@ bool dump_context_entry(context_entry_t* entry) {
   FILE* file_handle = entry->file_handle;
   const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
 
-  fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), tid(%lu), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), kernel-name(\"%s\")",
+  fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), tid(%lu), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), sig(0x%lx), kernel-name(\"%s\")",
     index,
     HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index,
     entry->data.queue_id,
@@ -439,6 +440,7 @@ bool dump_context_entry(context_entry_t* entry) {
     entry->kernel_properties.vgpr_count,
     entry->kernel_properties.sgpr_count,
     entry->kernel_properties.fbarrier_count,
+    entry->kernel_properties.signal.handle,
     nik_name.c_str());
   if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
     record->dispatch,
@@ -614,6 +616,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   kernel_properties_ptr->vgpr_count = kernel_code->reserved_vgpr_count;
   kernel_properties_ptr->sgpr_count = kernel_code->reserved_sgpr_count;
   kernel_properties_ptr->fbarrier_count = kernel_code->workgroup_fbarrier_count;
+  kernel_properties_ptr->signal = packet->completion_signal;
 
   // context properties
   rocprofiler_properties_t properties{};
@@ -697,7 +700,7 @@ static hsa_status_t info_callback(const rocprofiler_info_data_t info, void * arg
   return HSA_STATUS_SUCCESS;
 }
 
-std::string normalize_token(const std::string token, bool not_empty, std::string label) {
+std::string normalize_token(const std::string& token, bool not_empty, const std::string& label) {
   const std::string space_chars_set = " \t";
   const size_t first_pos = token.find_first_not_of(space_chars_set);
   size_t norm_len = 0;
@@ -713,23 +716,17 @@ std::string normalize_token(const std::string token, bool not_empty, std::string
   }
   if (((first_pos != std::string::npos) && (norm_len == 0)) ||
       ((first_pos == std::string::npos) && not_empty)) {
-    fatal(label + ": " + error_str);
+    fatal("normalize_token error, " + label + ": '" + token + "'," + error_str);
   }
   return (norm_len != 0) ? token.substr(first_pos, norm_len) : std::string("");
 }
 
-int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field, const std::string& delim, std::vector<std::string>* vec, const char* label = NULL) {
+int get_xml_array(const xml::Xml::level_t* node, const std::string& field, const std::string& delim, std::vector<std::string>* vec, const char* label = NULL) {
   int parse_iter = 0;
-  auto nodes = xml->GetNodes(tag);
-  auto rit = nodes.rbegin();
-  auto rend = nodes.rend();
-  while (rit != rend) {
-    auto& opts = (*rit)->opts;
-    if (opts.find(field) != opts.end()) break;
-    ++rit;
-  }
-  if (rit != rend) {
-    const std::string array_string = (*rit)->opts[field];
+  const auto& opts = node->opts;
+  auto it = opts.find(field);
+  if (it != opts.end()) {
+    const std::string array_string = it->second;
     if (label != NULL) printf("%s%s = %s\n", label, field.c_str(), array_string.c_str());
     size_t pos1 = 0;
     const size_t string_len = array_string.length();
@@ -738,14 +735,30 @@ int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& fiel
       const bool found = (pos2 != std::string::npos);
       const size_t token_len = (pos2 != std::string::npos) ? pos2 - pos1 : string_len - pos1;
       const std::string token = array_string.substr(pos1, token_len);
-      const std::string norm_str = normalize_token(token, found, "Tokens array parsing error, file '" + xml->GetName() + "', " + tag + "::" + field);
+      const std::string norm_str = normalize_token(token, found, "get_xml_array");
       if (norm_str.length() != 0) vec->push_back(norm_str);
       if (!found) break;
       pos1 = pos2 + 1;
       ++parse_iter;
     }
   }
+  return parse_iter;
+}
 
+int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field, const std::string& delim, std::vector<std::string>* vec, const char* label = NULL) {
+  int parse_iter = 0;
+  const auto nodes = xml->GetNodes(tag);
+  auto rit = nodes.rbegin();
+  const auto rend = nodes.rend();
+  while (rit != rend) {
+    auto& opts = (*rit)->opts;
+    if (opts.find(field) != opts.end()) break;
+    ++rit;
+  }
+  if (rit != rend) {
+    parse_iter = get_xml_array(*rit, field, delim, vec, label);
+    //fatal("Tokens array parsing error, file '" + xml->GetName() + "', " + tag + "::" + field);
+  }
   return parse_iter;
 }
 
@@ -929,7 +942,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   }
 
   // Getting traces
-  auto traces_list = xml->GetNodes("top.trace");
+  const auto traces_list = xml->GetNodes("top.trace");
 
   const unsigned feature_count = metrics_vec.size() + traces_list.size();
   rocprofiler_feature_t* features = new rocprofiler_feature_t[feature_count];
@@ -945,22 +958,25 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   }
   if (metrics_vec.size()) printf("\n");
 
+  // Parsing traces
   printf("  %d traces\n", (int)traces_list.size());
+  uint32_t traces_found = 0;
   unsigned index = metrics_vec.size();
-  for (auto* entry : traces_list) {
-    auto params_list = xml->GetNodes("top.trace.parameters");
-    if (params_list.size() > 1) {
-      fatal("ROCProfiler: Single input 'parameters' section is supported");
-    }
-    std::string name = "";
+  for (const auto* entry : traces_list) {
+    auto it = entry->opts.find("name");
+    if (it == entry->opts.end()) fatal("ROCProfiler: trace name is missing");
+    const std::string& name = it->second;
+    if (name != "SQTT") continue;
+    traces_found++;
+
     bool to_copy_data = false;
     for (const auto& opt : entry->opts) {
-      if (opt.first == "name") name = opt.second;
+      if (opt.first == "name") continue;
       else if (opt.first == "copy") to_copy_data = (opt.second == "true");
       else fatal("ROCProfiler: Bad trace property '" + opt.first + "'");
     }
-    if (name == "") fatal("ROCProfiler: Bad trace properties, name is not specified");
-
+    
+    // Parsing parameters
     std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
     parameters_dict["TARGET_CU"] =
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET;
@@ -983,33 +999,42 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     features[index].name = strdup(name.c_str());
     features[index].data.result_bytes.copy = to_copy_data;
 
-    for (auto* params : params_list) {
-      const unsigned parameter_count = params->opts.size();
-      rocprofiler_parameter_t* parameters = new rocprofiler_parameter_t[parameter_count];
-      unsigned p_index = 0;
-      for (auto& v : params->opts) {
-        const std::string parameter_name = v.first;
-        if (parameters_dict.find(parameter_name) == parameters_dict.end()) {
-          fprintf(stderr, "ROCProfiler: unknown trace parameter '%s'\n", parameter_name.c_str());
-          abort();
-        }
-        const uint32_t value = strtol(v.second.c_str(), NULL, 0);
-        printf("\n      %s = 0x%x", parameter_name.c_str(), value);
-        parameters[p_index] = {};
-        parameters[p_index].parameter_name = parameters_dict[parameter_name];
-        parameters[p_index].value = value;
-        ++p_index;
-      }
+    uint32_t parameter_count = 0;
+    for (const auto* node : entry->nodes) {
+      auto& tag = node->tag;
+      auto& params = node->opts;
+      parameter_count = params.size();
 
-      features[index].parameters = parameters;
-      features[index].parameter_count = parameter_count;
+      if (tag != "parameters") fatal("ROCProfiler: trace node is not supported '" + tag + "'");
+
+      if (parameter_count != 0) {
+        rocprofiler_parameter_t* parameters = new rocprofiler_parameter_t[parameter_count];
+        unsigned p_index = 0;
+        for (const auto& v : params) {
+          const std::string parameter_name = v.first;
+          if (parameters_dict.find(parameter_name) == parameters_dict.end()) {
+            fatal("ROCProfiler: bad trace parameter '" + name + ":" + parameter_name + "'");
+          }
+          const uint32_t value = strtol(v.second.c_str(), NULL, 0);
+          printf("\n      %s = 0x%x", parameter_name.c_str(), value);
+          parameters[p_index] = {};
+          parameters[p_index].parameter_name = parameters_dict[parameter_name];
+          parameters[p_index].value = value;
+          ++p_index;
+        }
+
+        features[index].parameters = parameters;
+        features[index].parameter_count = parameter_count;
+      }
     }
-    if (params_list.empty() == false) printf("\n    ");
+
+    if (parameter_count != 0) printf("\n    ");
     printf(")\n");
     fflush(stdout);
     ++index;
   }
   fflush(stdout);
+  const uint32_t features_found = metrics_vec.size() + traces_found;
 
   // Context array aloocation
   context_array = new context_array_t;
@@ -1021,7 +1046,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
 
   callbacks_data = new callbacks_data_t{};
   callbacks_data->features = features;
-  callbacks_data->feature_count = feature_count;
+  callbacks_data->feature_count = features_found;
   callbacks_data->set = (metrics_set->empty()) ? NULL : metrics_set;
   callbacks_data->group_index = 0;
   callbacks_data->file_handle = result_file_handle;

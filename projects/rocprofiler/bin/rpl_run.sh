@@ -41,7 +41,7 @@ HSA_TRACE=0
 # Generate stats
 GEN_STATS=0
 
-export LD_LIBRARY_PATH=$PKG_DIR/lib:$PKG_DIR/tool:$HSA_PATH
+export LD_LIBRARY_PATH=$PKG_DIR/lib:$PKG_DIR/tool:$PKG_DIR/roctracer/lib:$PKG_DIR/roctracer/tool:$HSA_PATH
 export PATH=.:$PATH
 
 # enable error logging
@@ -141,7 +141,7 @@ usage() {
   echo "      Can be set in KB (1024B) or MB (1048576) units, examples 20K or 20M respectively."
   echo "  --sqtt-local <on|off> - to allocate SQTT buffer in local GPU memory [on]"
   echo ""
-  echo "  --rt-trace <hsa> - to trace HSA API"
+  echo "  --hsa-trace - to trace HSA API"
   echo ""
   echo "Configuration file:"
   echo "  You can set your parameters defaults preferences in the configuration file 'rpl_rc.xml'. The search path sequence: .:${HOME}:<package path>"
@@ -280,10 +280,9 @@ while [ 1 ] ; do
     else
       export ROCP_SQTT_LOCAL=0
     fi
-  elif [ "$1" = "--rt-trace" ] ; then
-    if [ "$2" = "hsa" ] ; then
-      HSA_TRACE=1
-    fi
+  elif [ "$1" = "--hsa-trace" ] ; then
+    ARG_VAL=0
+    HSA_TRACE=1
   elif [ "$1" = "--verbose" ] ; then
     ARG_VAL=0
     export ROCP_VERBOSE_MODE=1

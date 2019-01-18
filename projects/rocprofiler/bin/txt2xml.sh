@@ -66,11 +66,11 @@ parse() {
     else
       output=$outdir/input${index}.xml
       header="# $timestamp '$output' generated with '$0 $*'"
+      echo $header > $output
 
       if [ "$feature" == "pmc" ] ; then
         line=`echo "$line" | sed -e "s/ /,/g"`
         cat >> $output <<EOF
-$header
 <metric range="$range" kernel="$kernel" gpu_index="$gpu_index"></metric>
 <metric name=$line ></metric>
 EOF
@@ -78,9 +78,14 @@ EOF
 
       if [ "$feature" == "sqtt" ] ; then
         cat >> $output <<EOF
-$header
 <metric range="$range" kernel="$kernel" gpu_index="$gpu_index"></metric>
 <trace name="SQTT"><parameters $line ></parameters></trace>
+EOF
+      fi
+
+      if [ "$feature" == "hsa" ] ; then
+        cat >> $output <<EOF
+<trace name="HSA"><parameters api="$line"></parameters></trace>
 EOF
       fi
     fi
