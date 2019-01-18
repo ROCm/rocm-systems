@@ -307,6 +307,7 @@ class API_DescrParser:
     self.add_section('API callback functions', '', self.gen_callbacks)
     self.add_section('API intercepting code', '', self.gen_intercept)
     self.add_section('API get_name function', '    ', self.gen_get_name)
+    self.add_section('API get_code function', '  ', self.gen_get_code)
     self.content += '\n};};\n'
     self.content += '#endif // PROF_API_IMPL\n'
 
@@ -416,6 +417,17 @@ class API_DescrParser:
     else:
       self.content += '  }\n'
       self.content += '  return "unknown";\n'
+      self.content += '}\n'
+
+  # generate API code function
+  def gen_get_code(self, n, name, call, struct):
+    if n == -1:
+      self.content += 'static uint32_t GetApiCode(const char* str) {\n'
+      return
+    if call != '-':
+      self.content += '  if (strcmp("' + call + '", str) == 0) return ' + self.api_id[call] + ';\n'
+    else:
+      self.content += '  return HSA_API_ID_NUMBER;\n'
       self.content += '}\n'
 
   # generate stream operator

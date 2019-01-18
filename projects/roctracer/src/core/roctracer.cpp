@@ -386,13 +386,17 @@ PUBLIC_API const char* roctracer_error_string() {
   return strdup(roctracer::util::Logger::LastMessage().c_str());
 }
 
-// Return ID string by given domain and activity/API ID
+// Return Op string by given domain and activity/API codes
 // NULL returned on the error and the library errno is set
-PUBLIC_API const char* roctracer_op_string(const uint32_t& domain, const uint32_t& id, const uint32_t& kind) {
+PUBLIC_API const char* roctracer_op_string(
+    uint32_t domain,
+    uint32_t op,
+    uint32_t kind)
+{
   API_METHOD_PREFIX
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_API: {
-      return roctracer::hsa_support::GetApiName(id);
+      return roctracer::hsa_support::GetApiName(op);
       break;
     }
     case ACTIVITY_DOMAIN_HCC_OPS: {
@@ -400,13 +404,33 @@ PUBLIC_API const char* roctracer_op_string(const uint32_t& domain, const uint32_
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-      return hipApiName(id);
+      return hipApiName(op);
       break;
     }
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }
   API_METHOD_CATCH(NULL)
+}
+
+// Return Op code and kind by given string
+PUBLIC_API roctracer_status_t roctracer_op_code(
+    uint32_t domain,
+    const char* str,
+    uint32_t* op,
+    uint32_t* kind)
+{
+  API_METHOD_PREFIX
+  switch (domain) {
+    case ACTIVITY_DOMAIN_HSA_API: {
+      *op = roctracer::hsa_support::GetApiCode(str);
+      if (kind != NULL) *kind = 0;
+      break;
+    }
+    default:
+      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "limited domain ID(" << domain << ")");
+  }
+  API_METHOD_SUFFIX
 }
 
 static inline uint32_t get_op_num(const uint32_t& domain) {

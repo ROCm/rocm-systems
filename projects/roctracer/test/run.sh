@@ -69,6 +69,10 @@ export ROCP_THRS=1
 
 eval_test "tool HSA test" "LD_PRELOAD='$HSA_TOOLS_LIB' ./test/hsa/ctrl"
 
+echo "<trace name=\"HSA\"><parameters list=\"hsa_shut_down, hsa_amd_memory_pool_allocate\"></parameters></trace>" > input.xml
+export ROCP_INPUT=input.xml
+eval_test "tool HSA test input" "LD_PRELOAD='$HSA_TOOLS_LIB' ./test/hsa/ctrl"
+
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
 #ms_print massif.out.<N>

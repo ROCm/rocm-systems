@@ -94,6 +94,7 @@ install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/ext/prof_protocol.h DESTINATION 
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/ext/hsa_rt_utils.hpp DESTINATION include/ext )
 install ( FILES ${PROJECT_BINARY_DIR}/inc-link DESTINATION ../include RENAME ${ROCTRACER_NAME} )
 install ( FILES ${PROJECT_BINARY_DIR}/so-link DESTINATION ../lib RENAME ${ROCTRACER_LIBRARY}.so )
+install ( FILES ${PROJECT_BINARY_DIR}/test/libtracer_tool.so DESTINATION tool )
 
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" )

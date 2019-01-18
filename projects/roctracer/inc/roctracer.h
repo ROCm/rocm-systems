@@ -76,12 +76,19 @@ const char* roctracer_error_string();
 // Activity domain type
 typedef activity_domain_t roctracer_domain_t;
 
-// Return ID string by given domain and activity/API ID
+// Return Op string by given domain and Op codes
 // NULL returned on the error and the library errno is set
 const char* roctracer_op_string(
-  const uint32_t& domain,                                 // tracing domain
-  const uint32_t& op,                                     // activity op ID
-  const uint32_t& kind);                                  // activity kind
+  uint32_t domain,                                        // tracing domain
+  uint32_t op,                                            // activity op ID
+  uint32_t kind);                                         // activity kind
+
+// Return Op code and kind by given string
+roctracer_status_t roctracer_op_code(
+  uint32_t domain,                                        // tracing domain
+  const char* str,                                        // [in] op string
+  uint32_t* op,                                           // [out] op code
+  uint32_t* kind = NULL);                                 // [out] op kind code
 
 // Set properties
 roctracer_status_t roctracer_set_properties(
