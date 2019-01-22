@@ -1,24 +1,26 @@
-/*
-Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+/**********************************************************************
+Copyright ©2013 Advanced Micro Devices, Inc. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Redistribution and use in source and binary forms, with or without modification, are permitted
+provided that the following conditions are met:
 
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
+<95>    Redistributions of source code must retain the above copyright notice, this list of
+conditions and the following disclaimer.
+<95>    Redistributions in binary form must reproduce the above copyright notice, this list of
+conditions and the following disclaimer in the documentation and/or
+ other materials provided with the distribution.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+ DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+********************************************************************/
 
 #include "util/hsa_rsrc_factory.h"
 
@@ -31,6 +33,7 @@ THE SOFTWARE.
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -41,11 +44,9 @@ THE SOFTWARE.
 #include <string>
 #include <vector>
 
-#ifndef AQL_PROFILE_READ_API_ENABLE
-#define AQL_PROFILE_READ_API_ENABLE 0
-#endif
+#include "util/exception.h"
+#include "util/logger.h"
 
-namespace roctracer {
 namespace util {
 
 // Callback function to get available in the system agents
@@ -66,8 +67,7 @@ hsa_status_t HsaRsrcFactory::GetHsaAgentsCallback(hsa_agent_t agent, void* data)
 // returned. HSA_STATUS_SUCCESS is returned if no errors were encountered, but
 // no pool was found meeting the requirements. If an error is encountered, we
 // return that error.
-static hsa_status_t
-FindGlobalPool(hsa_amd_memory_pool_t pool, void* data, bool kern_arg) {
+static hsa_status_t FindGlobalPool(hsa_amd_memory_pool_t pool, void* data, bool kern_arg) {
   hsa_status_t err;
   hsa_amd_segment_t segment;
   uint32_t flag;
@@ -76,21 +76,18 @@ FindGlobalPool(hsa_amd_memory_pool_t pool, void* data, bool kern_arg) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT,
-                                     &segment);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
   CHECK_STATUS("hsa_amd_memory_pool_get_info", err);
   if (HSA_AMD_SEGMENT_GLOBAL != segment) {
     return HSA_STATUS_SUCCESS;
   }
 
-  err = hsa_amd_memory_pool_get_info(pool,
-                                HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag);
+  err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag);
   CHECK_STATUS("hsa_amd_memory_pool_get_info", err);
 
   uint32_t karg_st = flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
 
-  if ((karg_st == 0 && kern_arg) ||
-      (karg_st != 0 && !kern_arg)) {
+  if ((karg_st == 0 && kern_arg) || (karg_st != 0 && !kern_arg)) {
     return HSA_STATUS_SUCCESS;
   }
 
@@ -111,59 +108,52 @@ hsa_status_t FindStandardPool(hsa_amd_memory_pool_t pool, void* data) {
 hsa_status_t FindKernArgPool(hsa_amd_memory_pool_t pool, void* data) {
   return FindGlobalPool(pool, data, true);
 }
-#if 0
-// Callback function to find and bind kernarg region of an agent
-hsa_status_t HsaRsrcFactory::FindMemRegionsCallback(hsa_region_t region, void* data) {
-  hsa_region_global_flag_t flags;
-  hsa_region_segment_t segment_id;
 
-  hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment_id);
-  if (segment_id != HSA_REGION_SEGMENT_GLOBAL) {
-    return HSA_STATUS_SUCCESS;
-  }
-
-  AgentInfo* agent_info = (AgentInfo*)data;
-  hsa_region_get_info(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags);
-  if (flags & HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED) {
-    agent_info->coarse_region = region;
-  }
-
-  if (flags & HSA_REGION_GLOBAL_FLAG_KERNARG) {
-    agent_info->kernarg_region = region;
-  }
-
-  return HSA_STATUS_SUCCESS;
-}
-#endif
 // Constructor of the class
 HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize_hsa) {
   hsa_status_t status;
+
+  cpu_pool_ = NULL;
+  kern_arg_pool_ = NULL;
+
   // Initialize the Hsa Runtime
   if (initialize_hsa_) {
     status = hsa_init();
     CHECK_STATUS("Error in hsa_init", status);
   }
+
   // Discover the set of Gpu devices available on the platform
   status = hsa_iterate_agents(GetHsaAgentsCallback, this);
   CHECK_STATUS("Error Calling hsa_iterate_agents", status);
+  if (cpu_pool_ == NULL) CHECK_STATUS("CPU memory pool is not found", HSA_STATUS_ERROR);
+  if (kern_arg_pool_ == NULL) CHECK_STATUS("Kern-arg memory pool is not found", HSA_STATUS_ERROR);
 
   // Get AqlProfile API table
   aqlprofile_api_ = {0};
 #ifdef ROCP_LD_AQLPROFILE
   status = LoadAqlProfileLib(&aqlprofile_api_);
 #else
-  status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_AQLPROFILE, 1, 0, &aqlprofile_api_);
+  status = hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_AQLPROFILE, hsa_ven_amd_aqlprofile_VERSION_MAJOR, sizeof(aqlprofile_api_), &aqlprofile_api_);
 #endif
   CHECK_STATUS("aqlprofile API table load failed", status);
 
   // Get Loader API table
   loader_api_ = {0};
-  status = hsa_system_get_extension_table(HSA_EXTENSION_AMD_LOADER, 1, 0, &loader_api_);
+  status = hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(loader_api_), &loader_api_);
   CHECK_STATUS("loader API table query failed", status);
+
+  // Instantiate HSA timer
+  timer_ = new HsaTimer;
+  CHECK_STATUS("HSA timer allocation failed",
+    (timer_ == NULL) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS);
+
+  // System timeout
+  timeout_ = (timeout_ns_ == HsaTimer::TIMESTAMP_MAX) ? timeout_ns_ : timer_->ns_to_sysclock(timeout_ns_);
 }
 
 // Destructor of the class
 HsaRsrcFactory::~HsaRsrcFactory() {
+  delete timer_;
   for (auto p : cpu_list_) delete p;
   for (auto p : gpu_list_) delete p;
   if (initialize_hsa_) {
@@ -173,39 +163,35 @@ HsaRsrcFactory::~HsaRsrcFactory() {
 }
 
 hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
-    void* handle = dlopen(kAqlProfileLib, RTLD_NOW);
-    if (handle == NULL) {
-      fprintf(stderr, "Loading '%s' failed, %s\n", kAqlProfileLib, dlerror());
-      return HSA_STATUS_ERROR;
-    }
-    dlerror(); /* Clear any existing error */
+  void* handle = dlopen(kAqlProfileLib, RTLD_NOW);
+  if (handle == NULL) {
+    fprintf(stderr, "Loading '%s' failed, %s\n", kAqlProfileLib, dlerror());
+    return HSA_STATUS_ERROR;
+  }
+  dlerror(); /* Clear any existing error */
 
-    api->hsa_ven_amd_aqlprofile_error_string =
-      (decltype(::hsa_ven_amd_aqlprofile_error_string)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_error_string");
-    api->hsa_ven_amd_aqlprofile_validate_event =
-      (decltype(::hsa_ven_amd_aqlprofile_validate_event)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_validate_event");
-    api->hsa_ven_amd_aqlprofile_start =
-      (decltype(::hsa_ven_amd_aqlprofile_start)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_start");
-    api->hsa_ven_amd_aqlprofile_stop =
-      (decltype(::hsa_ven_amd_aqlprofile_stop)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_stop");
-#if AQL_PROFILE_READ_API_ENABLE
-    api->hsa_ven_amd_aqlprofile_read =
-      (decltype(::hsa_ven_amd_aqlprofile_read)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_read");
-#endif  // AQL_PROFILE_READ_API_ENABLE
-    api->hsa_ven_amd_aqlprofile_legacy_get_pm4 =
-      (decltype(::hsa_ven_amd_aqlprofile_legacy_get_pm4)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
-    api->hsa_ven_amd_aqlprofile_get_info =
-      (decltype(::hsa_ven_amd_aqlprofile_get_info)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_get_info");
-    api->hsa_ven_amd_aqlprofile_iterate_data =
-      (decltype(::hsa_ven_amd_aqlprofile_iterate_data)*)
-        dlsym(handle, "hsa_ven_amd_aqlprofile_iterate_data");
+  api->hsa_ven_amd_aqlprofile_error_string =
+      (decltype(::hsa_ven_amd_aqlprofile_error_string)*)dlsym(
+          handle, "hsa_ven_amd_aqlprofile_error_string");
+  api->hsa_ven_amd_aqlprofile_validate_event =
+      (decltype(::hsa_ven_amd_aqlprofile_validate_event)*)dlsym(
+          handle, "hsa_ven_amd_aqlprofile_validate_event");
+  api->hsa_ven_amd_aqlprofile_start =
+      (decltype(::hsa_ven_amd_aqlprofile_start)*)dlsym(handle, "hsa_ven_amd_aqlprofile_start");
+  api->hsa_ven_amd_aqlprofile_stop =
+      (decltype(::hsa_ven_amd_aqlprofile_stop)*)dlsym(handle, "hsa_ven_amd_aqlprofile_stop");
+#ifdef AQLPROF_NEW_API
+  api->hsa_ven_amd_aqlprofile_read =
+      (decltype(::hsa_ven_amd_aqlprofile_read)*)dlsym(handle, "hsa_ven_amd_aqlprofile_read");
+#endif
+  api->hsa_ven_amd_aqlprofile_legacy_get_pm4 =
+      (decltype(::hsa_ven_amd_aqlprofile_legacy_get_pm4)*)dlsym(
+          handle, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+  api->hsa_ven_amd_aqlprofile_get_info = (decltype(::hsa_ven_amd_aqlprofile_get_info)*)dlsym(
+      handle, "hsa_ven_amd_aqlprofile_get_info");
+  api->hsa_ven_amd_aqlprofile_iterate_data =
+      (decltype(::hsa_ven_amd_aqlprofile_iterate_data)*)dlsym(
+          handle, "hsa_ven_amd_aqlprofile_iterate_data");
 
   return HSA_STATUS_SUCCESS;
 }
@@ -227,9 +213,9 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     agent_info->dev_index = cpu_list_.size();
 
     status = hsa_amd_agent_iterate_memory_pools(agent, FindStandardPool, &agent_info->cpu_pool);
-    CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(cpu pool)", status);
+    if ((status == HSA_STATUS_INFO_BREAK) && (cpu_pool_ == NULL)) cpu_pool_ = &agent_info->cpu_pool;
     status = hsa_amd_agent_iterate_memory_pools(agent, FindKernArgPool, &agent_info->kern_arg_pool);
-    CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(kern arg pool)", status);
+    if ((status == HSA_STATUS_INFO_BREAK) && (kern_arg_pool_ == NULL)) kern_arg_pool_ = &agent_info->kern_arg_pool;
     agent_info->gpu_pool = {};
 
     cpu_list_.push_back(agent_info);
@@ -247,23 +233,22 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &agent_info->max_queue_size);
     hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE, &agent_info->profile);
     agent_info->is_apu = (agent_info->profile == HSA_PROFILE_FULL) ? true : false;
-    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &agent_info->cu_num);
-    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU), &agent_info->waves_per_cu);
-    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU), &agent_info->simds_per_cu);
-    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES), &agent_info->se_num);
-    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE), &agent_info->shader_arrays_per_se);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
+                       &agent_info->cu_num);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU),
+                       &agent_info->waves_per_cu);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU),
+                       &agent_info->simds_per_cu);
+    hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
+                       &agent_info->se_num);
+    hsa_agent_get_info(agent,
+                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE),
+                       &agent_info->shader_arrays_per_se);
 
     agent_info->cpu_pool = {};
     agent_info->kern_arg_pool = {};
     status = hsa_amd_agent_iterate_memory_pools(agent, FindStandardPool, &agent_info->gpu_pool);
     CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(gpu pool)", status);
-#if 0
-    // Initialize memory regions to zero
-    agent_info->kernarg_region.handle = 0;
-    agent_info->coarse_region.handle = 0;
-    // Find and Bind Memory regions of the Gpu agent
-    hsa_agent_iterate_regions(agent, FindMemRegionsCallback, agent_info);
-#endif
 
     // Set GPU index
     agent_info->dev_index = gpu_list_.size();
@@ -377,14 +362,8 @@ uint8_t* HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t
   hsa_status_t status = HSA_STATUS_ERROR;
   uint8_t* buffer = NULL;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-  status = hsa_amd_memory_pool_allocate(agent_info->gpu_pool, size, 0, (void**)&buffer);
-  // Only GPU can access the memory
-  if (status == HSA_STATUS_SUCCESS) {
-    hsa_agent_t agents_list[1] = {agent_info->dev_id};
-    status = hsa_amd_agents_allow_access(1, agents_list, NULL, buffer);
-  }
+  status = hsa_amd_memory_pool_allocate(agent_info->gpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
   uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
-  printf("AllocateLocalMemory %p\n", ptr);
   return ptr;
 }
 
@@ -398,16 +377,14 @@ uint8_t* HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size
   uint8_t* buffer = NULL;
   if (!cpu_agents_.empty()) {
     size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-    status = hsa_amd_memory_pool_allocate(cpu_list_[0]->kern_arg_pool, size, 0, (void**)&buffer);
+    status = hsa_amd_memory_pool_allocate(*kern_arg_pool_, size, 0, reinterpret_cast<void**>(&buffer));
     // Both the CPU and GPU can access the kernel arguments
     if (status == HSA_STATUS_SUCCESS) {
-      auto agents_vec = cpu_agents_;
-      agents_vec.push_back(agent_info->dev_id);
-      status = hsa_amd_agents_allow_access(agents_vec.size(), &agents_vec[0], NULL, buffer);
+      hsa_agent_t ag_list[1] = {agent_info->dev_id};
+      status = hsa_amd_agents_allow_access(1, ag_list, NULL, buffer);
     }
   }
   uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
-  printf("AllocateKernargMemory %p\n", ptr);
   return ptr;
 }
 
@@ -418,41 +395,76 @@ uint8_t* HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size
 uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t size) {
   hsa_status_t status = HSA_STATUS_ERROR;
   uint8_t* buffer = NULL;
+  size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   if (!cpu_agents_.empty()) {
-    size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-    status = hsa_amd_memory_pool_allocate(cpu_list_[0]->cpu_pool, size, 0, (void**)&buffer);
+    status = hsa_amd_memory_pool_allocate(*cpu_pool_, size, 0, reinterpret_cast<void**>(&buffer));
     // Both the CPU and GPU can access the memory
     if (status == HSA_STATUS_SUCCESS) {
-      auto agents_vec = cpu_agents_;
-      agents_vec.push_back(agent_info->dev_id);
-      status = hsa_amd_agents_allow_access(agents_vec.size(), &agents_vec[0], NULL, buffer);
+      hsa_agent_t ag_list[1] = {agent_info->dev_id};
+      status = hsa_amd_agents_allow_access(1, ag_list, NULL, buffer);
     }
   }
   uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
-  printf("AllocateSysMemory %p\n", ptr);
   return ptr;
 }
 
+// Allocate memory for command buffer.
+// @param agent_info Agent from whose memory region to allocate
+// @param size Size of memory in terms of bytes
+// @return uint8_t* Pointer to buffer, null if allocation fails.
+uint8_t* HsaRsrcFactory::AllocateCmdMemory(const AgentInfo* agent_info, size_t size) {
+  size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+  uint8_t* ptr = (agent_info->is_apu && CMD_MEMORY_MMAP)
+      ? reinterpret_cast<uint8_t*>(
+            mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED | MAP_ANONYMOUS, 0, 0))
+      : AllocateSysMemory(agent_info, size);
+  return ptr;
+}
+
+// Wait signal
+void HsaRsrcFactory::SignalWait(const hsa_signal_t& signal) const {
+  while (1) {
+    const hsa_signal_value_t signal_value =
+      hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, timeout_, HSA_WAIT_STATE_BLOCKED);
+    if (signal_value == 0) {
+      break;
+    } else {
+      if (signal_value == 1) { WARN_LOGGING("signal waiting..."); }
+      else { EXC_RAISING(HSA_STATUS_ERROR, "hsa_signal_wait_scacquire (" << signal_value << ")"); }
+    }
+  }
+}
+
+// Wait signal with signal value restore
+void HsaRsrcFactory::SignalWaitRestore(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const {
+  SignalWait(signal);
+  hsa_signal_store_relaxed(const_cast<hsa_signal_t&>(signal), signal_value);
+}
+
 // Copy data from GPU to host memory
-bool HsaRsrcFactory::CopyToHost(const hsa_agent_t& agent, void* dst, const void* src, size_t size) {
+bool HsaRsrcFactory::Memcpy(const hsa_agent_t& agent, void* dst, const void* src, size_t size) {
   hsa_status_t status = HSA_STATUS_ERROR;
   if (!cpu_agents_.empty()) {
     hsa_signal_t s = {};
-    hsa_status_t status = hsa_signal_create(1, 0, NULL, &s);
-    if (status == HSA_STATUS_SUCCESS) {
-      status = hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, NULL, s);
-      if (status == HSA_STATUS_SUCCESS) {
-        if (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0) {
-          status = HSA_STATUS_ERROR;
-        }
-      }
-      status = hsa_signal_destroy(s);
-    }
+    status = hsa_signal_create(1, 0, NULL, &s);
+    CHECK_STATUS("hsa_signal_create()", status);
+    status = hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, NULL, s);
+    CHECK_STATUS("hsa_amd_memory_async_copy()", status);
+    SignalWait(s);
+    status = hsa_signal_destroy(s);
+    CHECK_STATUS("hsa_signal_destroy()", status);
   }
   return (status == HSA_STATUS_SUCCESS);
 }
-bool HsaRsrcFactory::CopyToHost(const AgentInfo* agent_info, void* dst, const void* src, size_t size) {
-  return CopyToHost(agent_info->dev_id, dst, src, size);
+bool HsaRsrcFactory::Memcpy(const AgentInfo* agent_info, void* dst, const void* src, size_t size) {
+  return Memcpy(agent_info->dev_id, dst, src, size);
+}
+
+// Memory free method
+bool HsaRsrcFactory::FreeMemory(void* ptr) {
+  const hsa_status_t status = hsa_memory_free(ptr);
+  CHECK_STATUS("hsa_memory_free", status);
+  return (status == HSA_STATUS_SUCCESS);
 }
 
 // Loads an Assembled Brig file and Finalizes it into Device Isa
@@ -463,7 +475,8 @@ bool HsaRsrcFactory::CopyToHost(const AgentInfo* agent_info, void* dst, const vo
 // be used to submit for execution
 // @return bool true if successful, false otherwise
 bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path,
-                                      const char* kernel_name, hsa_executable_t* executable, hsa_executable_symbol_t* code_desc) {
+                                     const char* kernel_name, hsa_executable_t* executable,
+                                     hsa_executable_symbol_t* code_desc) {
   hsa_status_t status = HSA_STATUS_ERROR;
 
   // Build the code object filename
@@ -487,13 +500,13 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
   }
 
   // Create executable.
-  status = hsa_executable_create_alt(HSA_PROFILE_FULL,
-    HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, NULL, executable);
+  status = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+                                     NULL, executable);
   CHECK_STATUS("Error in creating executable object", status);
 
   // Load code object.
-  status = hsa_executable_load_agent_code_object(*executable, agent_info->dev_id,
-    code_obj_rdr, NULL, NULL);
+  status = hsa_executable_load_agent_code_object(*executable, agent_info->dev_id, code_obj_rdr,
+                                                 NULL, NULL);
   CHECK_STATUS("Error in loading executable object", status);
 
   // Freeze executable.
@@ -513,6 +526,7 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
 
 // Print the various fields of Hsa Gpu Agents
 bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
+  std::cout << std::flush;
   std::clog << header << " :" << std::endl;
 
   const AgentInfo* agent_info;
@@ -526,7 +540,6 @@ bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
     std::clog << ">> HSAIL profile : " << agent_info->profile << std::endl;
     std::clog << ">> Max Wave Size : " << agent_info->max_wave_size << std::endl;
     std::clog << ">> Max Queue Size : " << agent_info->max_queue_size << std::endl;
-//    std::clog << ">> Kernarg Region Id : " << agent_info->coarse_region.handle << std::endl;
     std::clog << ">> CU number : " << agent_info->cu_num << std::endl;
     std::clog << ">> Waves per CU : " << agent_info->waves_per_cu << std::endl;
     std::clog << ">> SIMDs per CU : " << agent_info->simds_per_cu << std::endl;
@@ -536,8 +549,8 @@ bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
   return true;
 }
 
-uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, void* packet) {
-  const uint32_t slot_size_b = 0x40;
+uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet) {
+  const uint32_t slot_size_b = CMD_SLOT_SIZE_B;
 
   // adevance command queue
   const uint64_t write_idx = hsa_queue_load_write_index_relaxed(queue);
@@ -547,14 +560,15 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, void* packet) {
   }
 
   uint32_t slot_idx = (uint32_t)(write_idx % queue->size);
-  uint32_t* queue_slot = (uint32_t*)((uintptr_t)(queue->base_address) + (slot_idx * slot_size_b));
-  uint32_t* slot_data = (uint32_t*)packet;
+  uint32_t* queue_slot = reinterpret_cast<uint32_t*>((uintptr_t)(queue->base_address) + (slot_idx * slot_size_b));
+  const uint32_t* slot_data = reinterpret_cast<const uint32_t*>(packet);
 
   // Copy buffered commands into the queue slot.
   // Overwrite the AQL invalid header (first dword) last.
   // This prevents the slot from being read until it's fully written.
   memcpy(&queue_slot[1], &slot_data[1], slot_size_b - sizeof(uint32_t));
-  std::atomic<uint32_t>* header_atomic_ptr = reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
+  std::atomic<uint32_t>* header_atomic_ptr =
+      reinterpret_cast<std::atomic<uint32_t>*>(&queue_slot[0]);
   header_atomic_ptr->store(slot_data[0], std::memory_order_release);
 
   // ringdoor bell
@@ -563,8 +577,25 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, void* packet) {
   return write_idx;
 }
 
+uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes) {
+  const uint32_t slot_size_b = CMD_SLOT_SIZE_B;
+  if ((size_bytes & (slot_size_b - 1)) != 0) {
+    fprintf(stderr, "HsaRsrcFactory::Submit: Bad packet size %zx\n", size_bytes);
+    abort();
+  }
+
+  const char* begin = reinterpret_cast<const char*>(packet);
+  const char* end = begin + size_bytes;
+  uint64_t write_idx = 0;
+  for (const char* ptr = begin; ptr < end; ptr += slot_size_b) {
+    write_idx = Submit(queue, ptr);
+  }
+
+  return write_idx;
+}
+
 HsaRsrcFactory* HsaRsrcFactory::instance_ = NULL;
 HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;
+HsaRsrcFactory::timestamp_t HsaRsrcFactory::timeout_ns_ = HsaTimer::TIMESTAMP_MAX;
 
 }  // namespace util
-}  // namespace roctracer

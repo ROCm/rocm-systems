@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include <sys/syscall.h>
 
 #include "core/loader.h"
+#include "proxy/tracker.h"
 #include "ext/hsa_rt_utils.hpp"
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
@@ -84,6 +85,21 @@ THE SOFTWARE.
 // Internal library methods
 //
 namespace roctracer {
+decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
+decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
+
+namespace hsa_support {
+// callbacks table
+cb_table_t cb_table;
+// activity enabled
+bool enabled = false;;
+// Table of function pointers to HSA Core Runtime
+CoreApiTable CoreApiTable_saved{};
+// Table of function pointers to AMD extensions
+AmdExtTable AmdExtTable_saved{};
+// Table of function pointers to HSA Image Extension
+ImageExtTable ImageExtTable_saved{};
+}
 
 roctracer_status_t GetExcStatus(const std::exception& e) {
   const util::exception* roctracer_exc_ptr = dynamic_cast<const util::exception*>(&e);
@@ -276,7 +292,7 @@ CONSTRUCTOR_API void constructor() {
 }
 
 DESTRUCTOR_API void destructor() {
-  util::HsaRsrcFactory::Destroy();
+  ::util::HsaRsrcFactory::Destroy();
   util::Logger::Destroy();
 }
 
@@ -350,6 +366,65 @@ void HCC_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
   pool->Write(*record_ptr);
 }
 
+bool hsa_async_copy_handler(hsa_signal_value_t value, void* arg) {
+  ::proxy::Tracker::entry_t* entry = reinterpret_cast<::proxy::Tracker::entry_t*>(arg);
+  printf("%lu:%lu async-copy%lu\n", entry->record->begin, entry->record->end, entry->index);
+  return false;
+}
+
+hsa_status_t hsa_amd_memory_async_copy_interceptor(
+    void* dst, hsa_agent_t dst_agent, const void* src,
+    hsa_agent_t src_agent, size_t size, uint32_t num_dep_signals,
+    const hsa_signal_t* dep_signals, hsa_signal_t completion_signal)
+{
+  hsa_status_t status = HSA_STATUS_SUCCESS;
+  if (hsa_support::enabled) {
+    ::proxy::Tracker* tracker = &::proxy::Tracker::Instance();
+    ::proxy::Tracker::entry_t* tracker_entry = tracker->Alloc(hsa_agent_t{}, completion_signal);
+    status = hsa_amd_memory_async_copy_fn(dst, dst_agent, src,
+                                          src_agent, size, num_dep_signals,
+                                          dep_signals, tracker_entry->signal);
+    if (status == HSA_STATUS_SUCCESS) {
+      tracker->EnableMemcopy(tracker_entry, hsa_async_copy_handler, reinterpret_cast<void*>(tracker_entry));
+    } else {
+      tracker->Delete(tracker_entry);
+    }
+  } else {
+    status = hsa_amd_memory_async_copy_fn(dst, dst_agent, src,
+                                          src_agent, size, num_dep_signals,
+                                          dep_signals, completion_signal);
+  }
+  return status;
+}
+
+hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
+    const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
+    const hsa_dim3_t* src_offset, const hsa_dim3_t* range, hsa_agent_t copy_agent,
+    hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal)
+{
+  hsa_status_t status = HSA_STATUS_SUCCESS;
+  if (hsa_support::enabled) {
+    ::proxy::Tracker* tracker = &::proxy::Tracker::Instance();
+    ::proxy::Tracker::entry_t* tracker_entry = tracker->Alloc(hsa_agent_t{}, completion_signal);
+    status = hsa_amd_memory_async_copy_rect_fn(dst, dst_offset, src,
+                                               src_offset, range, copy_agent,
+                                               dir, num_dep_signals, dep_signals,
+                                               tracker_entry->signal);
+    if (status == HSA_STATUS_SUCCESS) {
+      tracker->EnableMemcopy(tracker_entry, hsa_async_copy_handler, reinterpret_cast<void*>(tracker_entry));
+    } else {
+      tracker->Delete(tracker_entry);
+    }
+  } else {
+    status = hsa_amd_memory_async_copy_rect_fn(dst, dst_offset, src,
+                                               src_offset, range, copy_agent,
+                                               dir, num_dep_signals, dep_signals,
+                                               completion_signal);
+  }
+  return status;
+}
+
 util::Logger::mutex_t util::Logger::mutex_;
 util::Logger* util::Logger::instance_ = NULL;
 MemoryPool* memory_pool = NULL;
@@ -359,18 +434,11 @@ memory_pool_mutex_t memory_pool_mutex;
 Loader::mutex_t Loader::mutex_;
 HipLoader* HipLoader::instance_;
 HccLoader* HccLoader::instance_;
+}
 
-namespace hsa_support {
-// callbacks table
-cb_table_t cb_table;
-// Table of function pointers to HSA Core Runtime
-CoreApiTable CoreApiTable_saved{};
-// Table of function pointers to AMD extensions
-AmdExtTable AmdExtTable_saved{};
-// Table of function pointers to HSA Image Extension
-ImageExtTable ImageExtTable_saved{};
-}
-}
+proxy::Tracker* proxy::Tracker::instance_ = NULL;
+proxy::Tracker::mutex_t proxy::Tracker::glob_mutex_;
+proxy::Tracker::counter_t proxy::Tracker::counter_ = 0;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Public library methods
@@ -507,9 +575,7 @@ static void roctracer_disable_callback_impl(
     uint32_t op)
 {
   switch (domain) {
-    case ACTIVITY_DOMAIN_HSA_API: {
-      break;
-    }
+    case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: break;
     case ACTIVITY_DOMAIN_HIP_API: {
       hipError_t hip_err = roctracer::HipLoader::Instance().RemoveApiCallback(op);
@@ -593,7 +659,10 @@ static void roctracer_enable_activity_impl(
 {
   if (pool == NULL) pool = roctracer_default_pool();
   switch (domain) {
-    case ACTIVITY_DOMAIN_HSA_API: break;
+    case ACTIVITY_DOMAIN_HSA_API: {
+      roctracer::hsa_support::enabled = true;
+      break;
+    }
     case ACTIVITY_DOMAIN_HCC_OPS: {
       if (roctracer::HccLoader::GetRef() == NULL) {
         roctracer::HccLoader::Instance().InitActivityCallback((void*)roctracer::HCC_ActivityIdCallback,
@@ -651,7 +720,10 @@ static void roctracer_disable_activity_impl(
     uint32_t op)
 {
   switch (domain) {
-    case ACTIVITY_DOMAIN_HSA_API: break;
+    case ACTIVITY_DOMAIN_HSA_API: {
+      roctracer::hsa_support::enabled = false;
+      break;
+    }
     case ACTIVITY_DOMAIN_HCC_OPS: {
       const bool succ = roctracer::HccLoader::Instance().EnableActivityCallback(op, false);
       if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::EnableActivityCallback(NULL) error domain(" << domain << ") op(" << op << ")");
@@ -731,6 +803,14 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
   roctracer_set_properties(ACTIVITY_DOMAIN_HSA_API, (void*)table);
+
+  hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
+  if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_async_copy_enable");
+  roctracer::hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
+  roctracer::hsa_amd_memory_async_copy_rect_fn = table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
+  table->amd_ext_->hsa_amd_memory_async_copy_fn = roctracer::hsa_amd_memory_async_copy_interceptor;
+  table->amd_ext_->hsa_amd_memory_async_copy_rect_fn = roctracer::hsa_amd_memory_async_copy_rect_interceptor;
+
   return true;
 }
 
