@@ -23,7 +23,7 @@ THE SOFTWARE.
 #ifndef INC_ROCTRACER_HSA_RT_UTILS_HPP_
 #define INC_ROCTRACER_HSA_RT_UTILS_HPP_
 
-#include <hsa.h>
+#include <hsa/hsa.h>
 
 #include <cstdint>
 #include <cstddef>
