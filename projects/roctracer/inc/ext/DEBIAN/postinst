@@ -1,0 +1,24 @@
+#/bin/bash
+
+set -e
+
+do_pkgconfig() {
+   cat > /usr/lib/pkgconfig/roctracer-proto.pc << EOF
+prefix=/opt/rocm/roctracer/include/ext
+Name: roctracer-proto
+Version: 1.0.0
+Description: roctracer protocol
+EOF
+}
+
+case "$1" in
+   configure)
+       do_pkgconfig
+   ;;
+   abort-upgrade|abort-remove|abort-deconfigure)
+       echo "$1"
+   ;;
+   *)
+       exit 0
+   ;;
+esac

@@ -1,0 +1,1 @@
+rm -f /usr/lib/pkgconfig/roctracer-proto.pc
