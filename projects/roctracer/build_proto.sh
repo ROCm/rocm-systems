@@ -24,6 +24,7 @@ cmake \
     $ROCTRACER_ROOT/inc/ext
 popd
 
+make install
 make package
 
 exit 0

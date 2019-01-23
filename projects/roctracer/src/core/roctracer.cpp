@@ -28,6 +28,7 @@ THE SOFTWARE.
 
 #include <atomic>
 #include <mutex>
+#include <dirent.h>
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -87,6 +88,13 @@ THE SOFTWARE.
 namespace roctracer {
 decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
 decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
+
+// Profiling results output dir
+const char* result_prefix = NULL;
+// Global results file handle
+FILE* result_file_handle = NULL;
+// True if a result file is opened
+bool result_file_opened = false;
 
 namespace hsa_support {
 // callbacks table
@@ -368,7 +376,7 @@ void HCC_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
 
 bool hsa_async_copy_handler(hsa_signal_value_t value, void* arg) {
   ::proxy::Tracker::entry_t* entry = reinterpret_cast<::proxy::Tracker::entry_t*>(arg);
-  printf("%lu:%lu async-copy%lu\n", entry->record->begin, entry->record->end, entry->index);
+  fprintf(result_file_handle, "%lu:%lu async-copy%lu\n", entry->record->begin, entry->record->end, entry->index);
   return false;
 }
 
@@ -802,8 +810,33 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
 // HSA-runtime tool on-load method
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
+  // Output file
+  roctracer::result_prefix = getenv("ROCP_OUTPUT_DIR");
+  if (roctracer::result_prefix != NULL) {
+    DIR* dir = opendir(roctracer::result_prefix);
+    if (dir == NULL) {
+      std::ostringstream errmsg;
+      errmsg << "ROCTracer: Cannot open output directory '" << roctracer::result_prefix << "'";
+      perror(errmsg.str().c_str());
+      abort();
+    }
+    std::ostringstream oss;
+    oss << roctracer::result_prefix << "/trace_async_copy.txt";
+    roctracer::result_file_handle = fopen(oss.str().c_str(), "w");
+    if (roctracer::result_file_handle == NULL) {
+      std::ostringstream errmsg;
+      errmsg << "ROCTracer: fopen error, file '" << oss.str().c_str() << "'";
+      perror(errmsg.str().c_str());
+      abort();
+    }
+  } else roctracer::result_file_handle = stdout;
+
+  roctracer::result_file_opened = (roctracer::result_prefix != NULL) && (roctracer::result_file_handle != NULL);
+
+  // initialize HSA tracing
   roctracer_set_properties(ACTIVITY_DOMAIN_HSA_API, (void*)table);
 
+  // enabled HSA async-copy tracing
   hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
   if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_async_copy_enable");
   roctracer::hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
