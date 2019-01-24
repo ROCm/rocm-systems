@@ -63,7 +63,8 @@ static uint32_t gVerbosity = 3;
     std::cout << "RSMI call returned " << (RET); \
     rsmi_status_string((RET), &err_str); \
     std::cout << " (" << err_str << ")" << std::endl; \
-    std::cout << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+    std::cout << " at " << __FILE__ << ":" << std::dec << __LINE__ << \
+                                                                  std::endl; \
   } \
 }
 
@@ -92,7 +93,8 @@ static uint32_t gVerbosity = 3;
       std::cout << "ASSERT failure: Expected " << #A << " == " << #B << \
         ", but got " << #A << " = " << (A) << ", and " << #B << " = " << \
                                                            (B) << std::endl; \
-      std::cout << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
+      std::cout << " at " << __FILE__ << ":" << std::dec << \
+                                                      __LINE__ << std::endl; \
       return RSMI_STATUS_UNKNOWN_ERROR; \
     } \
 }
@@ -518,6 +520,59 @@ static void print_frequencies(rsmi_frequencies *f, uint32_t *l = nullptr) {
   }
 }
 
+static void pt_rng_mhz(std::string title, rsmi_range *r) {
+  assert(r != nullptr);
+
+  std::cout << title << std::endl;
+  std::cout << "\t\t** " << r->lower_bound/1000000 << " to " <<
+                                r->upper_bound/1000000 << " MHz" << std::endl;
+}
+
+static void print_pnt(rsmi_od_vddc_point *pt) {
+  std::cout << "\t\t** Frequency: " << pt->frequency/1000000 << "MHz" <<
+                                                                    std::endl;
+  std::cout << "\t\t** Voltage: " << pt->voltage << "mV" << std::endl;
+}
+static void pt_vddc_curve(rsmi_od_vddc_point *c) {
+  assert(c != nullptr);
+
+  for (uint32_t i = 0; i < RSMI_NUM_VOLTAGE_CURVE_POINTS; ++i) {
+    print_pnt(&c[i]);
+  }
+}
+
+static void print_rsmi_od_volt_freq_data(rsmi_od_volt_freq_data *odv) {
+  assert(odv != nullptr);
+
+  std::cout.setf(std::ios::dec, std::ios::basefield);
+  pt_rng_mhz("\t\tCurrent SCLK frequency range:", &odv->curr_sclk_range);
+  pt_rng_mhz("\t\tCurrent MCLK frequency range:", &odv->curr_mclk_range);
+  pt_rng_mhz("\t\tMin/Max Possible SCLK frequency range:",
+                                                      &odv->sclk_freq_limits);
+  pt_rng_mhz("\t\tMin/Max Possible MCLK frequency range:",
+                                                      &odv->mclk_freq_limits);
+
+  std::cout << "\t\tCurrent Freq/Volt. curve:" << std::endl;
+  pt_vddc_curve(odv->curve);
+
+  std::cout << "\tNumber of Freq./Volt. regions: " <<
+                                                odv->num_regions << std::endl;
+}
+
+static void print_odv_region(rsmi_freq_volt_region *region) {
+  std::cout << "\t\t\"lower-left\" corner:" << std::endl;
+  print_pnt(&region->min_corner);
+  std::cout << "\t\t\"upper-right\" corner:" << std::endl;
+  print_pnt(&region->max_corner);
+}
+static void print_rsmi_od_volt_freq_regions(uint32_t num_regions,
+                                             rsmi_freq_volt_region *regions) {
+  for (uint32_t i = 0; i < num_regions; ++i) {
+    std::cout << "\tRegion " << i << ":" << std::endl;
+    print_odv_region(&regions[i]);
+  }
+}
+
 TestSanity::TestSanity(void) :
     TestBase() {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
@@ -559,6 +614,7 @@ void TestSanity::Run(void) {
   rsmi_pcie_bandwidth b;
   rsmi_version ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
   uint32_t num_monitor_devs = 0;
+  rsmi_od_volt_freq_data odv;
 
   err = rsmi_version_get(&ver);
   CHK_ERR_ASRT(err)
@@ -592,6 +648,30 @@ void TestSanity::Run(void) {
       IF_VERB(STANDARD) {
         std::cout << "\t**Device ID: 0x" << std::hex << val_ui64 << std::endl;
       }
+
+      err = rsmi_dev_od_volt_info_get(i, &odv);
+      DISPLAY_RSMI_ERR(err)
+
+      if (err == RSMI_STATUS_SUCCESS) {
+        std::cout << "\t**Frequency-voltage curve data:" << std::endl;
+        print_rsmi_od_volt_freq_data(&odv);
+
+        rsmi_freq_volt_region *regions;
+        uint32_t num_regions;
+        regions = new rsmi_freq_volt_region[odv.num_regions];
+        ASSERT_TRUE(regions != nullptr);
+
+        num_regions = odv.num_regions;
+        err = rsmi_dev_od_volt_curve_regions_get(i, &num_regions, regions);
+        CHK_ERR_ASRT(err)
+        ASSERT_TRUE(num_regions == odv.num_regions);
+
+        std::cout << "\t**Frequency-voltage curve regions:" << std::endl;
+        print_rsmi_od_volt_freq_regions(num_regions, regions);
+
+        delete []regions;
+      }
+
       err = rsmi_dev_perf_level_get(i, &pfl);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
@@ -756,6 +836,7 @@ void TestSanity::Run(void) {
         std::cout << "\t=======" << std::endl;
       }
     }
+
     IF_VERB(STANDARD) {
       std::cout << "***** Testing write api's" << std::endl;
     }
