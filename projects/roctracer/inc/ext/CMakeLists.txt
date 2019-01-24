@@ -58,6 +58,8 @@ set ( BUILD_VERSION_STRING "${BUILD_VERSION_MAJOR}.${BUILD_VERSION_MINOR}.${BUIL
 set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX}/${ROCTRACER_NAME} )
 message ( "---------Install-Dir: ${CMAKE_INSTALL_PREFIX}" )
 
+add_custom_target( pkgconfig_install COMMAND sh -x "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_post" )
+
 ## Install information
 install ( FILES ${ROOT_DIR}/inc/ext/prof_protocol.h DESTINATION include/ext )
 install ( FILES ${ROOT_DIR}/inc/ext/hsa_rt_utils.hpp DESTINATION include/ext )
