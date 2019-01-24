@@ -662,7 +662,11 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   p->curr_sclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
                                      nullptr, kOD_SCLK_label_array_index + 2);
 
-  assert(val_vec[kOD_MCLK_label_array_index] == "OD_MCLK:");
+
+  // The condition below indicates old style format, which is not supported
+  if (val_vec[kOD_MCLK_label_array_index] != "OD_MCLK:") {
+    return RSMI_STATUS_NOT_YET_IMPLEMENTED;
+  }
   p->curr_mclk_range.lower_bound = 0;
 
   p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
