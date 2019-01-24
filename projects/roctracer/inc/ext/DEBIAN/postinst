@@ -3,6 +3,7 @@
 set -e
 
 do_pkgconfig() {
+   if [ ! -d /usr/lib/pkgconfig ] ; then mkdir -p /usr/lib/pkgconfig; fi
    cat > /usr/lib/pkgconfig/roctracer-proto.pc << EOF
 prefix=/opt/rocm/roctracer/include/ext
 Name: roctracer-proto
