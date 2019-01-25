@@ -1,6 +1,8 @@
 if [ ! -d /usr/lib/pkgconfig ] ; then mkdir -p /usr/lib/pkgconfig; fi
 cat > /usr/lib/pkgconfig/roctracer-proto.pc << EOF
-prefix=/opt/rocm/roctracer/include/ext
+prefix=/opt/rocm/roctracer
+includedir=${prefix}/include/ext
+
 Name: roctracer-proto
 Version: 1.0.0
 Description: roctracer protocol
