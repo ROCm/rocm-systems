@@ -650,7 +650,16 @@ void TestSanity::Run(void) {
       }
 
       err = rsmi_dev_od_volt_info_get(i, &odv);
-      DISPLAY_RSMI_ERR(err)
+      if (err == RSMI_STATUS_FILE_ERROR ||
+                                     err == RSMI_STATUS_NOT_YET_IMPLEMENTED) {
+        IF_VERB(STANDARD) {
+          std::cout <<
+              "\t**rsmi_dev_od_volt_info_get: Not supported on this machine"
+                                                                 << std::endl;
+        }
+      } else {
+        CHK_ERR_ASRT(err)
+      }
 
       if (err == RSMI_STATUS_SUCCESS) {
         std::cout << "\t**Frequency-voltage curve data:" << std::endl;
