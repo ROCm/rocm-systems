@@ -34,6 +34,10 @@ THE SOFTWARE.
 
 namespace roctracer {
 namespace hsa_support {
+enum {
+  HSA_OP_ID_async_copy = 0
+};
+
 template <int N>
 class CbTable {
   public:
@@ -68,8 +72,16 @@ class CbTable {
 extern CoreApiTable CoreApiTable_saved;
 extern AmdExtTable AmdExtTable_saved;
 extern ImageExtTable ImageExtTable_saved;
+
+struct ops_properties_t {
+  activity_async_callback_t async_copy_callback_fun;
+  void* async_copy_callback_arg;
 };
-};
+
+}; // namespace hsa_support
+
+typedef hsa_support::ops_properties_t hsa_ops_properties_t;
+}; // namespace roctracer
 
 inline std::ostream& operator<< (std::ostream& out, const hsa_callback_data_t& v) { out << "<callback_data>"; return out; }
 inline std::ostream& operator<< (std::ostream &out, const hsa_signal_t& v) { out << "<signal " << std::hex << "0x" << v.handle << ">" << std::dec; return out; }
