@@ -35,8 +35,9 @@ BIN_DIR=$PKG_DIR/bin
 # PATH to custom HSA and OpenCl runtimes
 HSA_PATH=$PKG_DIR/lib/hsa
 
-# HSA runtime trace
+# runtime API trace
 HSA_TRACE=0
+HIP_TRACE=0
 
 # Generate stats
 GEN_STATS=0
@@ -96,7 +97,7 @@ usage() {
   echo "  --list-derived - to print the list of derived metrics with formulas"
   echo ""
   echo "  -i <.txt|.xml file> - input file"
-  echo "      Input file .txt format, automatically rerun application for every pmc/sqtt line:"
+  echo "      Input file .txt format, automatically rerun application for every pmc line:"
   echo ""
   echo "        # Perf counters group 1"
   echo "        pmc : Wavefronts VALUInsts SALUInsts SFetchInsts FlatVMemInsts LDSInsts FlatLDSInsts GDSInsts VALUUtilization FetchSize"
@@ -137,24 +138,21 @@ usage() {
   echo "  --ctx-wait <on|off> - to wait for outstanding contexts on profiler exit [on]"
   echo "  --ctx-limit <max number> - maximum number of outstanding contexts [0 - unlimited]"
   echo "  --heartbeat <rate sec> - to print progress heartbeats [0 - disabled]"
-  echo "  --sqtt-size <byte size> - to set SQTT buffer size, aggregate for all SE [0x2000000]"
-  echo "      Can be set in KB (1024B) or MB (1048576) units, examples 20K or 20M respectively."
-  echo "  --sqtt-local <on|off> - to allocate SQTT buffer in local GPU memory [on]"
   echo ""
-  echo "  --hsa-trace - to trace HSA API"
+  echo "  --stats - generating stats and json trace output"
+  echo "  --hsa-trace - to trace HSA"
+  echo "  --hip-trace - to trace HIP"
   echo ""
   echo "Configuration file:"
   echo "  You can set your parameters defaults preferences in the configuration file 'rpl_rc.xml'. The search path sequence: .:${HOME}:<package path>"
   echo "  First the configuration file is looking in the current directory, then in your home, and then in the package directory."
-  echo "  Configurable options: 'basenames', 'timestamp', 'ctx-limit', 'heartbeat', 'sqtt-size', 'sqtt-local'."
+  echo "  Configurable options: 'basenames', 'timestamp', 'ctx-limit', 'heartbeat'."
   echo "  An example of 'rpl_rc.xml':"
   echo "    <defaults"
   echo "      basenames=off"
   echo "      timestamp=off"
   echo "      ctx-limit=0"
   echo "      heartbeat=0"
-  echo "      sqtt-size=0x20M"
-  echo "      sqtt-local=on"
   echo "    ></defaults>"
   echo ""
   exit 1
@@ -193,8 +191,8 @@ run() {
   fi
 
   if [ "$HSA_TRACE" = 1 ] ; then
-    export HSA_TOOLS_LIB="libtracer_tool.so libroctracer64.so $HSA_TOOLS_LIB"
     export ROCTRACER_DOMAIN="hsa"
+    export HSA_TOOLS_LIB="libtracer_tool.so libroctracer64.so $HSA_TOOLS_LIB"
   fi
 
   redirection_cmd=""
@@ -203,6 +201,7 @@ run() {
     redirection_cmd="2>&1 | tee $ROCP_OUTPUT_DIR/log.txt"
   fi
 
+  #unset ROCP_OUTPUT_DIR
   eval "LD_PRELOAD='$HSA_TOOLS_LIB' $APP_CMD $redirection_cmd"
 }
 
@@ -266,27 +265,16 @@ while [ 1 ] ; do
     export ROCP_OUTSTANDING_MAX="$2"
   elif [ "$1" = "--heartbeat" ] ; then
     export ROCP_OUTSTANDING_MON="$2"
-  elif [ "$1" = "--sqtt-size" ] ; then
-    size_m=`echo "$2" | sed -n "s/^\(.*\)M$/\1/p"`
-    size_k=`echo "$2" | sed -n "s/^\(.*\)K$/\1/p"`
-    if [ -n "$size_m" ] ; then size_b=$((size_m*1024*1024))
-    elif [ -n "$size_k" ] ; then size_b=$((size_k*1024))
-    else size_b=$2
-    fi
-    export ROCP_SQTT_SIZE=$size_b
-  elif [ "$1" = "--sqtt-local" ] ; then
-    if [ "$2" = "on" ] ; then
-      export ROCP_SQTT_LOCAL=1
-    else
-      export ROCP_SQTT_LOCAL=0
-    fi
   elif [ "$1" = "--hsa-trace" ] ; then
     ARG_VAL=0
     HSA_TRACE=1
+  elif [ "$1" = "--hip-trace" ] ; then
+    ARG_VAL=0
+    HIP_TRACE=1
   elif [ "$1" = "--verbose" ] ; then
     ARG_VAL=0
     export ROCP_VERBOSE_MODE=1
-  elif [ "$1" = "-s" ] ; then
+  elif [ "$1" = "--stats" ] ; then
     ARG_VAL=0
     GEN_STATS=1
   else
