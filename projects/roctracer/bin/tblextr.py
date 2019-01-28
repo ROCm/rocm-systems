@@ -36,6 +36,8 @@ COPY_PID = 0
 HSA_PID = 1
 GPU_BASE_PID = 2
 max_gpu_id = 0
+dep_from_list = []
+dep_to_dict = {}
 
 # global vars
 table_descr = [
@@ -158,13 +160,14 @@ hsa_table_descr = [
 ]
 def fill_hsa_db(table_name, db, indir):
   file_name = indir + '/' + 'hsa_api_trace.txt'
-  ptrn = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
+  ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
+  ptrn_ac = re.compile(r'hsa_amd_memory_async_copy')
 
   table_handle = db.add_table(table_name, hsa_table_descr)
   with open(file_name, mode='r') as fd:
     for line in fd.readlines():
       record = line[:-1]
-      m = ptrn.match(record)
+      m = ptrn_val.match(record)
       if m:
         rec_vals = []
         for ind in range(1,7):
@@ -173,6 +176,7 @@ def fill_hsa_db(table_name, db, indir):
           else:
             rec_vals.append(m.group(ind))
         db.insert_entry(table_handle, rec_vals)
+        if ptrn_ac.search(rec_vals[4]): dep_from_list.append(rec_vals[1])
 #############################################################
 
 # fill COPY DB
@@ -182,19 +186,24 @@ copy_table_descr = [
 ]
 def fill_copy_db(table_name, db, indir):
   file_name = indir + '/' + 'async_copy_trace.txt'
-  ptrn = re.compile(r'(\d+):(\d+) (.*)$')
+  ptrn_val = re.compile(r'(\d+):(\d+) (.*)$')
+  ptrn_id = re.compile(r'^async-copy(\d+)$')
 
   table_handle = db.add_table(table_name, copy_table_descr)
   with open(file_name, mode='r') as fd:
     for line in fd.readlines():
       record = line[:-1]
-      m = ptrn.match(record)
+      m = ptrn_val.match(record)
       if m:
         rec_vals = []
         for ind in range(1,4): rec_vals.append(m.group(ind))
         rec_vals.append(COPY_PID)
         rec_vals.append(0)
         db.insert_entry(table_handle, rec_vals)
+        m = ptrn_id.match(rec_vals[2])
+        if m: dep_to_dict[m.group(1)] = rec_vals[0]
+        else: fatal("async-copy bad name")
+      else: fatal("async-copy bad record")
 #############################################################
 # main
 if (len(sys.argv) < 3): fatal("Usage: " + sys.argv[0] + " <output CSV file> <input result files list>")
@@ -251,6 +260,8 @@ else:
 
   dform.post_process_data(db, 'COPY')
   dform.gen_api_json_trace(db, 'COPY', jsonfile)
+
+  db.flow_json(HSA_PID, dep_from_list, COPY_PID, dep_to_dict, jsonfile)
 
   db.close_json(jsonfile);
   db.close()

@@ -91,6 +91,7 @@ class SQLiteDB:
       raise Exception('wrong output file type: "' + file_name + '"' )
     with open(file_name, mode='w') as fd:
       fd.write('{ "traceEvents":[{}\n');
+
   def close_json(self, file_name):
     if not re.search(r'\.json$', file_name):
       raise Exception('wrong output file type: "' + file_name + '"' )
@@ -102,6 +103,16 @@ class SQLiteDB:
       raise Exception('wrong output file type: "' + file_name + '"' )
     with open(file_name, mode='a') as fd:
       fd.write(',{"args":{"name":"%s"},"ph":"M","pid":%s,"name":"process_name"}\n' %(label, pid));
+
+  def flow_json(self, from_pid, from_list, to_pid, to_dict, file_name):
+    if not re.search(r'\.json$', file_name):
+      raise Exception('wrong output file type: "' + file_name + '"' )
+    with open(file_name, mode='a') as fd:
+      for ind in range(len(from_list)):
+        from_ts = from_list[ind]
+        to_ts = to_dict[str(ind)]
+        fd.write(',{"ts":%s,"ph":"s","cat":"DataFlow","id":%s,"pid":%s,"tid":0,"name":"dep"}\n' % (from_ts, str(ind), str(from_pid)))
+        fd.write(',{"ts":%s,"ph":"t","cat":"DataFlow","id":%s,"pid":%s,"tid":0,"name":"dep"}\n' % (to_ts, str(ind), str(to_pid)))
 
   def dump_json(self, table_name, data_name, file_name):
     if not re.search(r'\.json$', file_name):
