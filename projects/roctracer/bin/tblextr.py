@@ -36,7 +36,7 @@ COPY_PID = 0
 HSA_PID = 1
 GPU_BASE_PID = 2
 max_gpu_id = 0
-START_NS = 0
+START_US = 0
 
 # dependencies dictionary
 dep_dict = {}
@@ -183,7 +183,7 @@ hsa_table_descr = [
   {'Index':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER'}
 ]
 def fill_hsa_db(table_name, db, indir):
-  global START_NS
+  global START_US
   file_name = indir + '/' + 'hsa_api_trace.txt'
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
   ptrn_ac = re.compile(r'hsa_amd_memory_async_copy')
@@ -196,8 +196,7 @@ def fill_hsa_db(table_name, db, indir):
     line = fd.readline()
     record = line[:-1]
     m = ptrn_val.match(record)
-    if m: START_NS = int(m.group(1))
-    START_NS = 0
+    if m: START_US = int(m.group(1)) / 1000
 
   record_id = 0
   table_handle = db.add_table(table_name, hsa_table_descr)
@@ -303,26 +302,26 @@ else:
   for ind in range(0, int(max_gpu_id) + 1): db.label_json(int(ind) + int(GPU_BASE_PID), "GPU" + str(ind), jsonfile)
 
   if 'BeginNs' in var_list:
-    dform.post_process_data(db, 'A', START_NS, csvfile)
+    dform.post_process_data(db, 'A', csvfile)
     dform.gen_table_bins(db, 'A', statfile, 'KernelName', 'DurationNs')
-    dform.gen_kernel_json_trace(db, 'A', GPU_BASE_PID, START_NS, jsonfile)
+    dform.gen_kernel_json_trace(db, 'A', GPU_BASE_PID, START_US, jsonfile)
   else:
     db.dump_csv('A', csvfile)
 
   statfile = re.sub(r'stats', r'hsa_stats', statfile)
-  dform.post_process_data(db, 'HSA', START_NS)
+  dform.post_process_data(db, 'HSA')
   dform.gen_table_bins(db, 'HSA', statfile, 'Name', 'DurationNs')
-  dform.gen_api_json_trace(db, 'HSA', START_NS, jsonfile)
+  dform.gen_api_json_trace(db, 'HSA', START_US, jsonfile)
 
-  dform.post_process_data(db, 'COPY', START_NS)
-  dform.gen_api_json_trace(db, 'COPY', START_NS, jsonfile)
+  dform.post_process_data(db, 'COPY')
+  dform.gen_api_json_trace(db, 'COPY', START_US, jsonfile)
 
   dep_id = 0
   for (to_pid, dep_str) in dep_dict.items():
     tid_list = dep_str['tid']
     from_us_list = dep_str['from']
     to_us_dict = dep_str['to']
-    db.flow_json(dep_id, HSA_PID, tid_list, from_us_list, to_pid, to_us_dict, (START_NS / 1000), jsonfile)
+    db.flow_json(dep_id, HSA_PID, tid_list, from_us_list, to_pid, to_us_dict, START_US, jsonfile)
     dep_id += len(tid_list)
 
   db.close_json(jsonfile);
