@@ -71,6 +71,12 @@ class SQLiteDB:
   def _get_raws(self, table_name):
     cursor = self.connection.execute('SELECT * FROM ' + table_name)
     return cursor.fetchall()
+  def _get_raw_by_id(self, table_name, req_id):
+    cursor = self.connection.execute('SELECT * FROM ' + table_name + ' WHERE "Index"=?', (req_id,))
+    raws = cursor.fetchall()
+    if len(raws) != 1:
+      raise Exception('Index is not unique, table "' + table_name + '"')
+    return list(raws[0])
 
   # dump CSV table
   def dump_csv(self, table_name, file_name):
@@ -78,12 +84,10 @@ class SQLiteDB:
       raise Exception('wrong output file type: "' + file_name + '"' )
 
     fields = self._get_fields(table_name)
-    stm = 'select ' + ','.join(fields) + ' from ' + table_name
-
     with open(file_name, mode='w') as fd:
       fd.write(','.join(fields) + '\n')
-      for values in self.connection.execute(stm):
-        fd.write(reduce(lambda a, b: str(a) + ',' + str(b), values) + '\n')
+      for raw in self._get_raws(table_name):
+        fd.write(reduce(lambda a, b: str(a) + ',' + str(b), raw) + '\n')
 
   # dump JSON trace
   def open_json(self, file_name):
@@ -104,15 +108,17 @@ class SQLiteDB:
     with open(file_name, mode='a') as fd:
       fd.write(',{"args":{"name":"%s"},"ph":"M","pid":%s,"name":"process_name"}\n' %(label, pid));
 
-  def flow_json(self, from_pid, from_list, to_pid, to_dict, file_name):
+  def flow_json(self, base_id, from_pid, from_tid, from_us_list, to_pid, to_us_dict, start_us, file_name):
     if not re.search(r'\.json$', file_name):
       raise Exception('wrong output file type: "' + file_name + '"' )
     with open(file_name, mode='a') as fd:
-      for ind in range(len(from_list)):
-        from_ts = from_list[ind]
-        to_ts = to_dict[str(ind)]
-        fd.write(',{"ts":%s,"ph":"s","cat":"DataFlow","id":%s,"pid":%s,"tid":0,"name":"dep"}\n' % (from_ts, str(ind), str(from_pid)))
-        fd.write(',{"ts":%s,"ph":"t","cat":"DataFlow","id":%s,"pid":%s,"tid":0,"name":"dep"}\n' % (to_ts, str(ind), str(to_pid)))
+      dep_id = base_id
+      for ind in range(len(from_tid)):
+        from_ts = from_us_list[ind] - start_us
+        to_ts = to_us_dict[ind] - start_us
+        fd.write(',{"ts":%d,"ph":"s","cat":"DataFlow","id":%d,"pid":%s,"tid":%d,"name":"dep"}\n' % (from_ts, dep_id, str(from_pid), from_tid[ind]))
+        fd.write(',{"ts":%d,"ph":"t","cat":"DataFlow","id":%d,"pid":%s,"tid":0,"name":"dep"}\n' % (to_ts, dep_id, str(to_pid)))
+        dep_id += 1
 
   def dump_json(self, table_name, data_name, file_name):
     if not re.search(r'\.json$', file_name):
@@ -124,20 +130,20 @@ class SQLiteDB:
     table_fields = self._get_fields(table_name)
     table_raws = self._get_raws(table_name)
     data_fields = self._get_fields(data_name)
-    data_raws = self._get_raws(data_name)
 
     with open(file_name, mode='a') as fd:
       for raw_index in range(len(table_raws)):
         values = list(table_raws[raw_index])
-        data = list(data_raws[raw_index])
-
         vals_list = []
+        raw_id = 0;
         for value_index in range(len(values)):
           label = table_fields[value_index]
           value = values[value_index]
           if name_ptrn.search(label): value = sub_ptrn.sub(r'', value)
-          vals_list.append('%s:"%s"' % (label, value))
+          if label == '"Index"': raw_id = value
+          else: vals_list.append('%s:"%s"' % (label, value))
 
+        data = self._get_raw_by_id(data_name, raw_id)
         args_list = []
         for value_index in range(len(data)):
           label = data_fields[value_index]
