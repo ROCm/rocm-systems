@@ -74,9 +74,13 @@ endif ()
 add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 
 ## Create symlinks for packaging and install
-add_custom_target ( rocprof-link ALL
-                    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink rpl_run.sh rocprof-link )
+add_custom_target ( rocprof-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCPROFILER_NAME}/bin/rpl_run.sh rocprof-link )
+add_custom_target ( inc-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCPROFILER_NAME}/include inc-link )
+add_custom_target ( so-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCPROFILER_NAME}/lib/${ROCPROFILER_LIBRARY}.so so-link )
+
 set ( CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}/${ROCPROFILER_NAME}" )
 message ( "---------Install-Dir: ${CMAKE_INSTALL_PREFIX}" )
 install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION lib )
@@ -86,10 +90,13 @@ install ( FILES
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/rpl_run.sh
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2xml.sh
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/tblextr.py
+          ${CMAKE_CURRENT_SOURCE_DIR}/bin/dform.py
+          ${CMAKE_CURRENT_SOURCE_DIR}/bin/sqlitedb.py
           DESTINATION bin
           PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )
-install ( FILES ${PROJECT_BINARY_DIR}/rocprof-link
-          DESTINATION bin
+install ( FILES ${PROJECT_BINARY_DIR}/inc-link DESTINATION ../include RENAME ${ROCPROFILER_NAME} )
+install ( FILES ${PROJECT_BINARY_DIR}/so-link DESTINATION ../lib RENAME ${ROCPROFILER_NAME}.so )
+install ( FILES ${PROJECT_BINARY_DIR}/rocprof-link DESTINATION ../bin
           PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
           RENAME rocprof )
 # gfx_metrics.xml metrics.xml

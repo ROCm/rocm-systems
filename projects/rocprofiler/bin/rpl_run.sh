@@ -23,17 +23,18 @@
 ################################################################################
 
 time_stamp=`date +%y%m%d_%H%M%S`
-BIN_DIR=`dirname $0`
-BIN_DIR=`cd $BIN_DIR; pwd`
+BIN_DIR=$(dirname $(realpath $0))
+PKG_DIR=$(dirname $BIN_DIR)
+ROOT_DIR=$(dirname $PKG_DIR)
 RUN_DIR=`pwd`
 TMP_DIR="/tmp"
 DATA_DIR="rpl_data_${time_stamp}_$$"
 
-PKG_DIR=`echo $BIN_DIR | sed "s/\/bin\/*//"`
-BIN_DIR=$PKG_DIR/bin
-
 # PATH to custom HSA and OpenCl runtimes
 HSA_PATH=$PKG_DIR/lib/hsa
+
+# roctracer path
+if [ -z "$ROCTRACER_PATH" ] ; then ROCTRACER_PATH=$ROOT_DIR/roctracer; fi
 
 # runtime API trace
 HSA_TRACE=0
@@ -42,7 +43,7 @@ HIP_TRACE=0
 # Generate stats
 GEN_STATS=0
 
-export LD_LIBRARY_PATH=$PKG_DIR/lib:$PKG_DIR/tool:$PKG_DIR/roctracer/lib:$PKG_DIR/roctracer/tool:$HSA_PATH
+export LD_LIBRARY_PATH=$PKG_DIR/lib:$PKG_DIR/tool:$ROCTRACER_PATH/lib:$ROCTRACER_PATH/tool:$HSA_PATH
 export PATH=.:$PATH
 
 # enable error logging

@@ -110,21 +110,20 @@ def parse_res(infile):
           var_table[dispatch_number]['BeginNs'] = m.group(2)
           var_table[dispatch_number]['EndNs'] = m.group(3)
           var_table[dispatch_number]['CompleteNs'] = m.group(4)
-        else: fatal('bad kernel record "' + record + '"')
 
-        gpu_pid = GPU_BASE_PID + int(gpu_id)
-        if not gpu_pid in dep_dict: dep_dict[gpu_pid] = {}
-        dep_str = dep_dict[gpu_pid]
-        if not 'tid' in dep_str: dep_str['tid'] = []
-        if not 'from' in dep_str: dep_str['from'] = []
-        if not 'to' in dep_str: dep_str['to'] = {}
-        to_id = len(dep_str['tid'])
-        from_us = int(m.group(1)) / 1000
-        to_us = int(m.group(2)) / 1000
-        dep_str['to'][to_id] = to_us
-        dep_str['from'].append(from_us)
-        dep_str['tid'].append(disp_tid)
-        kern_dep_list.append((disp_tid, m.group(1)))
+          gpu_pid = GPU_BASE_PID + int(gpu_id)
+          if not gpu_pid in dep_dict: dep_dict[gpu_pid] = {}
+          dep_str = dep_dict[gpu_pid]
+          if not 'tid' in dep_str: dep_str['tid'] = []
+          if not 'from' in dep_str: dep_str['from'] = []
+          if not 'to' in dep_str: dep_str['to'] = {}
+          to_id = len(dep_str['tid'])
+          from_us = int(m.group(1)) / 1000
+          to_us = int(m.group(2)) / 1000
+          dep_str['to'][to_id] = to_us
+          dep_str['from'].append(from_us)
+          dep_str['tid'].append(disp_tid)
+          kern_dep_list.append((disp_tid, m.group(1)))
 
   inp.close()
 #############################################################
