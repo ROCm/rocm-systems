@@ -124,7 +124,7 @@ def parse_res(infile):
         dep_str['to'][to_id] = to_us
         dep_str['from'].append(from_us)
         dep_str['tid'].append(disp_tid)
-        kern_dep_list.append((disp_tid, from_us))
+        kern_dep_list.append((disp_tid, m.group(1)))
 
   inp.close()
 #############################################################
@@ -183,7 +183,6 @@ hsa_table_descr = [
   {'Index':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER'}
 ]
 def fill_hsa_db(table_name, db, indir):
-  global START_US
   file_name = indir + '/' + 'hsa_api_trace.txt'
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
   ptrn_ac = re.compile(r'hsa_amd_memory_async_copy')
@@ -192,11 +191,13 @@ def fill_hsa_db(table_name, db, indir):
   dep_tid_list = []
   dep_from_us_list = []
 
+  global START_US
   with open(file_name, mode='r') as fd:
     line = fd.readline()
     record = line[:-1]
     m = ptrn_val.match(record)
     if m: START_US = int(m.group(1)) / 1000
+    START_US = 0
 
   record_id = 0
   table_handle = db.add_table(table_name, hsa_table_descr)
@@ -220,8 +221,8 @@ def fill_hsa_db(table_name, db, indir):
         record_id += 1
       else: fatal("hsa bad record")
 
-  for (tid, from_us) in kern_dep_list:
-    db.insert_entry(table_handle, [((from_us - 1) * 1000), from_us * 1000, HSA_PID, tid, 'hsa_dispatch', '', record_id])
+  for (tid, from_ns) in kern_dep_list:
+    db.insert_entry(table_handle, [from_ns, from_ns, HSA_PID, tid, 'hsa_dispatch', '', record_id])
     record_id += 1
 
   dep_dict[COPY_PID]['tid'] = dep_tid_list
