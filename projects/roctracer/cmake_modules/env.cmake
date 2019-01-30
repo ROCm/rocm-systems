@@ -89,19 +89,15 @@ elseif ( ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86" )
 endif ()
 
 ## Find hsa-runtime headers/lib
-find_file ( HSA_RUNTIME_INC "hsa.h" )
-find_file ( HSA_RUNTIME_HSA_INC "hsa/hsa.h" )
+find_file ( HSA_RUNTIME_INC "hsa/hsa.h" )
 find_library ( HSA_RUNTIME_LIB "libhsa-runtime${NBIT}.so" )
 get_filename_component ( HSA_RUNTIME_INC_PATH ${HSA_RUNTIME_INC} DIRECTORY )
-get_filename_component ( HSA_RUNTIME_HSA_INC_PATH ${HSA_RUNTIME_HSA_INC} DIRECTORY )
 get_filename_component ( HSA_RUNTIME_LIB_PATH ${HSA_RUNTIME_LIB} DIRECTORY )
 
 if ( "${HSA_RUNTIME_INC_PATH}" STREQUAL "" )
-  set ( HSA_RUNTIME_INC_PATH ${HSA_RUNTIME_HSA_INC_PATH} )
+  message ( FATAL_ERROR "HSA headers not found" )
 endif ()
-if ( NOT "${HSA_RUNTIME_HSA_INC_PATH}" STREQUAL "" )
-  set ( HSA_RUNTIME_HSA_INC_PATH ${HSA_RUNTIME_HSA_INC_PATH}/.. )
-endif ()
+set ( HSA_RUNTIME_HSA_INC_PATH ${HSA_RUNTIME_INC_PATH}/.. )
 
 find_library ( HSA_KMT_LIB "libhsakmt.so" )
 get_filename_component ( HSA_KMT_LIB_PATH ${HSA_KMT_LIB} DIRECTORY )

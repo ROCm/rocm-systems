@@ -7,6 +7,8 @@ fatal() {
   exit 1
 }
 
+umask 022
+
 if [ -z "$ROCTRACER_ROOT" ]; then ROCTRACER_ROOT=$PWD; fi
 if [ -z "$BUILD_DIR" ] ; then BUILD_DIR=$PWD; fi
 if [ -z "$HIP_PATH" ] ; then export HIP_PATH="$ROCM_PATH/hip"; fi
