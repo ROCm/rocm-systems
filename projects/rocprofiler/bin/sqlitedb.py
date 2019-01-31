@@ -1,10 +1,11 @@
-import csv, sqlite3, re
+import csv, sqlite3, re, sys
 
 # SQLite Database class
 class SQLiteDB:
   def __init__(self, file_name):
     self.connection = sqlite3.connect(file_name)
     self.tables = {}
+    self.json_arg_list_enabled = 0
 
   def __del__(self):
     self.connection.close()
@@ -71,6 +72,9 @@ class SQLiteDB:
   def _get_raws(self, table_name):
     cursor = self.connection.execute('SELECT * FROM ' + table_name)
     return cursor.fetchall()
+  def _get_raws_indexed(self, table_name):
+    cursor = self.connection.execute('SELECT * FROM ' + table_name + ' order by "Index" asc;')
+    return cursor.fetchall()
   def _get_raw_by_id(self, table_name, req_id):
     cursor = self.connection.execute('SELECT * FROM ' + table_name + ' WHERE "Index"=?', (req_id,))
     raws = cursor.fetchall()
@@ -128,30 +132,37 @@ class SQLiteDB:
     name_ptrn = re.compile(r'(name|Name)')
 
     table_fields = self._get_fields(table_name)
-    table_raws = self._get_raws(table_name)
+    table_raws = self._get_raws_indexed(table_name)
     data_fields = self._get_fields(data_name)
+    data_raws = self._get_raws_indexed(data_name)
 
     with open(file_name, mode='a') as fd:
-      for raw_index in range(len(table_raws)):
-        values = list(table_raws[raw_index])
+      table_raws_len = len(table_raws)
+      for raw_index in range(table_raws_len):
+        if (raw_index == table_raws_len - 1) or (raw_index % 1000 == 0):
+          sys.stdout.write( \
+            "\rdump json " + str(raw_index) + ":" + str(len(table_raws))  + " "*100 \
+          )
+
         vals_list = []
-        raw_id = 0;
+        values = list(table_raws[raw_index])
         for value_index in range(len(values)):
           label = table_fields[value_index]
           value = values[value_index]
           if name_ptrn.search(label): value = sub_ptrn.sub(r'', value)
-          if label == '"Index"': raw_id = value
-          else: vals_list.append('%s:"%s"' % (label, value))
+          if label != '"Index"': vals_list.append('%s:"%s"' % (label, value))
 
-        data = self._get_raw_by_id(data_name, raw_id)
         args_list = []
+        data = list(data_raws[raw_index])
         for value_index in range(len(data)):
           label = data_fields[value_index]
           value = data[value_index]
           if name_ptrn.search(label): value = sub_ptrn.sub(r'', value)
-          args_list.append('%s:"%s"' % (label, value))
+          if label != '"Index"': args_list.append('%s:"%s"' % (label, value))
 
         fd.write(',{"ph":"%s",%s,\n  "args":{\n    %s\n  }\n}\n' % ('X', ','.join(vals_list), ',\n    '.join(args_list)))
+
+    sys.stdout.write('\n')
 
   # execute query on DB
   def execute(self, cmd):
