@@ -95,9 +95,10 @@ get_filename_component ( HSA_RUNTIME_INC_PATH ${HSA_RUNTIME_INC} DIRECTORY )
 get_filename_component ( HSA_RUNTIME_LIB_PATH ${HSA_RUNTIME_LIB} DIRECTORY )
 
 if ( "${HSA_RUNTIME_INC_PATH}" STREQUAL "" )
-  message ( FATAL_ERROR "HSA headers not found" )
+  message ( WARNING "HSA headers not found" )
+else ()
+  set ( HSA_RUNTIME_HSA_INC_PATH ${HSA_RUNTIME_INC_PATH}/.. )
 endif ()
-set ( HSA_RUNTIME_HSA_INC_PATH ${HSA_RUNTIME_INC_PATH}/.. )
 
 find_library ( HSA_KMT_LIB "libhsakmt.so" )
 get_filename_component ( HSA_KMT_LIB_PATH ${HSA_KMT_LIB} DIRECTORY )
