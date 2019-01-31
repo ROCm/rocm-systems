@@ -110,21 +110,20 @@ def parse_res(infile):
           var_table[dispatch_number]['BeginNs'] = m.group(2)
           var_table[dispatch_number]['EndNs'] = m.group(3)
           var_table[dispatch_number]['CompleteNs'] = m.group(4)
-        else: fatal('bad kernel record "' + record + '"')
 
-        gpu_pid = GPU_BASE_PID + int(gpu_id)
-        if not gpu_pid in dep_dict: dep_dict[gpu_pid] = {}
-        dep_str = dep_dict[gpu_pid]
-        if not 'tid' in dep_str: dep_str['tid'] = []
-        if not 'from' in dep_str: dep_str['from'] = []
-        if not 'to' in dep_str: dep_str['to'] = {}
-        to_id = len(dep_str['tid'])
-        from_us = int(m.group(1)) / 1000
-        to_us = int(m.group(2)) / 1000
-        dep_str['to'][to_id] = to_us
-        dep_str['from'].append(from_us)
-        dep_str['tid'].append(disp_tid)
-        kern_dep_list.append((disp_tid, m.group(1)))
+          gpu_pid = GPU_BASE_PID + int(gpu_id)
+          if not gpu_pid in dep_dict: dep_dict[gpu_pid] = {}
+          dep_str = dep_dict[gpu_pid]
+          if not 'tid' in dep_str: dep_str['tid'] = []
+          if not 'from' in dep_str: dep_str['from'] = []
+          if not 'to' in dep_str: dep_str['to'] = {}
+          to_id = len(dep_str['tid'])
+          from_us = int(m.group(1)) / 1000
+          to_us = int(m.group(2)) / 1000
+          dep_str['to'][to_id] = to_us
+          dep_str['from'].append(from_us)
+          dep_str['tid'].append(disp_tid)
+          kern_dep_list.append((disp_tid, m.group(1)))
 
   inp.close()
 #############################################################
@@ -187,6 +186,8 @@ def fill_hsa_db(table_name, db, indir):
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
   ptrn_ac = re.compile(r'hsa_amd_memory_async_copy')
 
+  if not os.path.isfile(file_name): return 0
+
   if not COPY_PID in dep_dict: dep_dict[COPY_PID] = {}
   dep_tid_list = []
   dep_from_us_list = []
@@ -227,6 +228,8 @@ def fill_hsa_db(table_name, db, indir):
 
   dep_dict[COPY_PID]['tid'] = dep_tid_list
   dep_dict[COPY_PID]['from'] = dep_from_us_list
+
+  return 1
 #############################################################
 
 # fill COPY DB
@@ -267,7 +270,6 @@ if (len(sys.argv) < 3): fatal("Usage: " + sys.argv[0] + " <output CSV file> <inp
 outfile = sys.argv[1]
 infiles = sys.argv[2:]
 indir = re.sub(r'\/[^\/]*$', r'', infiles[0])
-print "indir: '" + indir + "'"
 
 dbfile = ''
 csvfile = ''
@@ -292,15 +294,19 @@ else:
 
   with open(dbfile, mode='w') as fd: fd.truncate()
   db = SQLiteDB(dbfile)
+  db.open_json(jsonfile);
 
-  fill_hsa_db('HSA', db, indir) 
-  fill_copy_db('COPY', db, indir) 
+  hsa_trace_found = fill_hsa_db('HSA', db, indir)
+  if hsa_trace_found:
+    fill_copy_db('COPY', db, indir)
   fill_kernel_db('A', db)
 
-  db.open_json(jsonfile);
-  db.label_json(HSA_PID, "CPU", jsonfile)
-  db.label_json(COPY_PID, "COPY", jsonfile)
-  for ind in range(0, int(max_gpu_id) + 1): db.label_json(int(ind) + int(GPU_BASE_PID), "GPU" + str(ind), jsonfile)
+  if hsa_trace_found:
+    db.label_json(HSA_PID, "CPU", jsonfile)
+    db.label_json(COPY_PID, "COPY", jsonfile)
+
+  for ind in range(0, int(max_gpu_id) + 1):
+    db.label_json(int(ind) + int(GPU_BASE_PID), "GPU" + str(ind), jsonfile)
 
   if 'BeginNs' in var_list:
     dform.post_process_data(db, 'A', csvfile)
@@ -309,13 +315,14 @@ else:
   else:
     db.dump_csv('A', csvfile)
 
-  statfile = re.sub(r'stats', r'hsa_stats', statfile)
-  dform.post_process_data(db, 'HSA')
-  dform.gen_table_bins(db, 'HSA', statfile, 'Name', 'DurationNs')
-  dform.gen_api_json_trace(db, 'HSA', START_US, jsonfile)
+  if hsa_trace_found:
+    statfile = re.sub(r'stats', r'hsa_stats', statfile)
+    dform.post_process_data(db, 'HSA')
+    dform.gen_table_bins(db, 'HSA', statfile, 'Name', 'DurationNs')
+    dform.gen_api_json_trace(db, 'HSA', START_US, jsonfile)
 
-  dform.post_process_data(db, 'COPY')
-  dform.gen_api_json_trace(db, 'COPY', START_US, jsonfile)
+    dform.post_process_data(db, 'COPY')
+    dform.gen_api_json_trace(db, 'COPY', START_US, jsonfile)
 
   dep_id = 0
   for (to_pid, dep_str) in dep_dict.items():
