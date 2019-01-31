@@ -404,7 +404,10 @@ class API_DescrParser:
       self.content += 'static void intercept_' + name + '(' + name + '* table) {\n'
       self.content += '  ' + name + '_saved = *table;\n'
     if call != '-':
-      self.content += '  table->' + call + '_fn = ' + call + '_callback;\n'
+      if call != 'hsa_shut_down':
+        self.content += '  table->' + call + '_fn = ' + call + '_callback;\n'
+      else:
+        self.content += '  { void* p = (void*)' + call + '_callback; (void)p; }\n'
 
   # generate API name function
   def gen_get_name(self, n, name, call, struct):
