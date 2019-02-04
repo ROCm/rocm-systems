@@ -135,7 +135,7 @@ void hip_api_callback(
           data->args.hipFree.ptr);
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
-        fprintf(hip_api_file_handle, "kernel(\"%s\") stream(%p)",
+        fprintf(hip_api_file_handle, "kernel(%s) stream(%p)",
           hipKernelNameRef(data->args.hipModuleLaunchKernel.f),
           data->args.hipModuleLaunchKernel.stream);
         break;
@@ -152,32 +152,17 @@ void hcc_activity_callback(const char* begin, const char* end, void* arg) {
   const roctracer_record_t* record = reinterpret_cast<const roctracer_record_t*>(begin);
   const roctracer_record_t* end_record = reinterpret_cast<const roctracer_record_t*>(end);
 
-  fprintf(hcc_activity_file_handle, "\tActivity records:\n"); fflush(hcc_activity_file_handle);
   while (record < end_record) {
-    const char * name = roctracer_op_string(record->domain, record->op, record->kind);
-    fprintf(hcc_activity_file_handle, "\t%s\tcorrelation_id(%lu) time_ns(%lu:%lu)",
-      name,
-      record->correlation_id,
-      record->begin_ns,
-      record->end_ns
-    );
-    if (record->domain == ACTIVITY_DOMAIN_HIP_API) {
-      fprintf(hcc_activity_file_handle, " process_id(%u) thread_id(%u)",
-        record->process_id,
-        record->thread_id
-      );
-    } else if (record->domain == ACTIVITY_DOMAIN_HCC_OPS) {
-      fprintf(hcc_activity_file_handle, " device_id(%d) queue_id(%lu)",
-        record->device_id,
-        record->queue_id
-      );
+    if (record->domain == ACTIVITY_DOMAIN_HCC_OPS) {
+      const char * name = roctracer_op_string(record->domain, record->op, record->kind);
+      fprintf(hcc_activity_file_handle, "%lu:%lu %d:%lu %s:%lu\n",
+        record->begin_ns, record->end_ns, record->device_id, record->queue_id, name, record->correlation_id);
     } else {
+#if 0
       fprintf(stderr, "Bad domain %d\n", record->domain);
       abort();
+#endif
     }
-    if (record->op == hc::HSA_OP_ID_COPY) fprintf(hcc_activity_file_handle, " bytes(0x%zx)", record->bytes);
-    fprintf(hcc_activity_file_handle, "\n");
-    fflush(hcc_activity_file_handle);
     ROCTRACER_CALL(roctracer_next_record(record, &record));
   }
 }
