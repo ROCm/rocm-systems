@@ -1,4 +1,5 @@
 #!/bin/bash -x
+SRC_DIR=`dirname $0`
 COMPONENT="roctracer"
 ROCM_PATH="/opt/rocm"
 
@@ -9,7 +10,7 @@ fatal() {
 
 umask 022
 
-if [ -z "$ROCTRACER_ROOT" ]; then ROCTRACER_ROOT=$PWD; fi
+if [ -z "$ROCTRACER_ROOT" ]; then ROCTRACER_ROOT=$SRC_DIR; fi
 if [ -z "$BUILD_DIR" ] ; then BUILD_DIR=$PWD; fi
 if [ -z "$HIP_PATH" ] ; then export HIP_PATH="$ROCM_PATH/hip"; fi
 if [ -z "$HCC_HOME" ] ; then export HCC_HOME="$ROCM_PATH/hcc"; fi
