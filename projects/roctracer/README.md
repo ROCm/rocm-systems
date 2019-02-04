@@ -26,15 +26,15 @@ The library source tree:
 ```
   cd <your path>
 
- - CLone roctracer and custom branches of HIP/HCC:
+ - CLone development branches of roctracer and HIP/HCC:
   git clone -b amd-master https://github.com/ROCmSoftwarePlatform/roctracer.git
-  git clone -b roctracer-hip-frontend-181113 https://github.com/eshcherb/HIP.git
-  git clone --recursive -b roctracer-hip-frontend-181113 https://github.com/eshcherb/hcc.git
+  git clone -b master https://github.com/eshcherb/HIP.git
+  git clone --recursive -b clang_tot_upgrade https://github.com/eshcherb/hcc.git
 
  - Set environment:
   export HIP_PATH=<your path>/HIP
   export HCC_HOME=<your path>/hcc/build
-  export CMAKE_PREFIX_PATH=/opt/rocm/lib:/opt/rocm/include/hsa
+  export CMAKE_PREFIX_PATH=/opt/rocm/lib
 
  - Build HCC:
   cd <your path>/hcc && mkdir build && cd build &&
@@ -48,8 +48,9 @@ The library source tree:
  - Build ROCtracer
   cd <your path>/roctracer && mkdir build && cd build && cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm .. && make -j <nproc>
 
- - To run test
-  make mytest 
+ - To build and run test
+  make mytest
+  run.sh
   
  - To install
   make install
