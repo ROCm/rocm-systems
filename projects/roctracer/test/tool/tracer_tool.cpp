@@ -329,7 +329,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     printf("    HIP-trace()\n");
     // Allocating tracing pool
     roctracer_properties_t properties{};
-    properties.buffer_size = 12;
+    properties.buffer_size = 0x1000;
     properties.buffer_callback_fun = hcc_activity_callback;
     ROCTRACER_CALL(roctracer_open_pool(&properties));
     ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));

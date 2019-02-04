@@ -152,8 +152,7 @@ class MemoryPool {
     }
 
     // Pool definition
-    buffer_size_shift_ = properties.buffer_size;
-    buffer_size_ = 1 << buffer_size_shift_;
+    buffer_size_ = properties.buffer_size;
     const size_t pool_size = 2 * buffer_size_;
     pool_begin_ = NULL;
     alloc_fun_(&pool_begin_, pool_size, alloc_arg_);
@@ -272,7 +271,6 @@ class MemoryPool {
   void* alloc_arg_;
 
   // Pool definition
-  size_t buffer_size_shift_;
   size_t buffer_size_;
   char* pool_begin_;
   char* pool_end_;

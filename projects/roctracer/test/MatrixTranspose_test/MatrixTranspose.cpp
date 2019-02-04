@@ -247,7 +247,7 @@ void init_tracing() {
   std::cout << "# START #############################" << std::endl << std::flush;
   // Allocating tracing pool
   roctracer_properties_t properties{};
-  properties.buffer_size = 12;
+  properties.buffer_size = 0x1000;
   properties.buffer_callback_fun = activity_callback;
   ROCTRACER_CALL(roctracer_open_pool(&properties));
 }
