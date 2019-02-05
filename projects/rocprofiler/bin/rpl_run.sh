@@ -142,6 +142,7 @@ usage() {
   echo ""
   echo "  --stats - generating kernel executino stats"
   echo "  --hsa-trace - to trace HSA, generates API execution stats and JSON file viewable in chrome tracing"
+  echo "  --hip-trace - to trace HIP, generates API execution stats and JSON file viewable in chrome tracing"
   echo ""
   echo "Configuration file:"
   echo "  You can set your parameters defaults preferences in the configuration file 'rpl_rc.xml'. The search path sequence: .:${HOME}:<package path>"
@@ -291,6 +292,10 @@ while [ 1 ] ; do
     export ROCP_TIMESTAMP_ON=1
     GEN_STATS=1
     HSA_TRACE=1
+  elif [ "$1" = "--hip-trace" ] ; then
+    ARG_VAL=0
+    GEN_STATS=1
+    HIP_TRACE=1
   elif [ "$1" = "--verbose" ] ; then
     ARG_VAL=0
     export ROCP_VERBOSE_MODE=1
