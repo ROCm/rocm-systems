@@ -19,7 +19,7 @@ The library source tree:
 ## Documentation
 ```
  - API description: inc/roctracer.h
- - Code exaple: test/MatrixTranspose/MatrixTranspose.cpp
+ - Code example: test/MatrixTranspose/MatrixTranspose.cpp
 ```
 
 ## To build and run test
