@@ -901,28 +901,6 @@ rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind,
 rsmi_status_t
 rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
 
-/**
- *  @brief Get the maximum power consumption of the device with provided
- *  device index.
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t
- *  @p power, this function will write the current maxium power consumption to
- *  the uint64_t in milliwatts pointed to by @p power. This function requires
- *  root privilege.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- *  If a device has more than one sensor, it could be greater than 0.
- *
- *  @param[inout] power a pointer to uint64_t to which the maximum power
- *  consumption will be written
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t
-rsmi_dev_power_max_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
 
 /**
  * @brief Get the list of available preset power profiles and an indication of

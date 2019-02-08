@@ -453,18 +453,6 @@ int main() {
     CHK_RSMI_RET(ret)
     std::cout << "\t**Current fan RPMs: " << val_i64 << std::endl;
 
-    ret = rsmi_dev_power_max_get(i, 0, &val_ui64);
-    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-      const char *s_str;
-      ret = rsmi_status_string(RSMI_STATUS_NOT_SUPPORTED, &s_str);
-      CHK_RSMI_RET(ret)
-      std::cout << "\t**rsmi_dev_power_max_get(): " << s_str << std::endl;
-    } else {
-      CHK_RSMI_PERM_RET(ret)
-      std::cout << "\t**Max Power Usage: ";
-      std::cout << static_cast<float>(val_ui64)/1000 << " W" << std::endl;
-    }
-
     ret = rsmi_dev_power_cap_get(i, 0, &val_ui64);
     CHK_RSMI_PERM_RET(ret)
     std::cout << "\t**Current Power Cap: " << val_ui64 << "uW" <<std::endl;
