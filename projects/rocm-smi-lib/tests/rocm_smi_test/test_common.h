@@ -55,6 +55,7 @@ struct RSMITstGlobals {
   uint32_t verbosity;
   uint32_t monitor_verbosity;
   uint32_t num_iterations;
+  bool dont_fail;
 };
 
 uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list);

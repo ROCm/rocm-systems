@@ -87,12 +87,17 @@ class TestBase {
   std::string title(void) const {
     return title_;
   }
-
   void set_verbosity(uint32_t v) {
     verbosity_ = v;
   }
   uint32_t verbosity(void) const {
     return verbosity_;
+  }
+  void set_dont_fail(bool f) {
+    dont_fail_ = f;
+  }
+  bool dont_fail(void) const {
+    return dont_fail_;
   }
 
  private:
@@ -100,6 +105,7 @@ class TestBase {
   std::string description_;
   std::string title_;   ///< Displayed title of test
   uint32_t verbosity_;   ///< How much additional output to produce
+  bool dont_fail_;       ///< Don't quit test on individual failure if true
 };
 
 #endif  // TESTS_ROCM_SMI_TEST_TEST_BASE_H_

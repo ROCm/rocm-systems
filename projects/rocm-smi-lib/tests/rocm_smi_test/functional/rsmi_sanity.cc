@@ -56,6 +56,7 @@
 
 static const uint32_t kNumBufferElements = 256;
 static uint32_t gVerbosity = 3;
+static bool gDontFail = false;
 
 #define DISPLAY_RSMI_ERR(RET) { \
   if (RET != RSMI_STATUS_SUCCESS) { \
@@ -77,7 +78,15 @@ static uint32_t gVerbosity = 3;
 
 #define CHK_ERR_ASRT(RET) { \
     DISPLAY_RSMI_ERR(RET) \
-    ASSERT_EQ((RET), RSMI_STATUS_SUCCESS); \
+    if (gDontFail && ((RET) != RSMI_STATUS_SUCCESS)) { \
+        std::cout << "========> TEST FAILURE."; \
+        DISPLAY_RSMI_ERR(RET); \
+        std::cout << \
+            "Abort is over-ridden due to dont_fail command line option." \
+                                                               << std::endl; \
+    } else { \
+      ASSERT_EQ(RSMI_STATUS_SUCCESS, (RET)); \
+    } \
 }
 
 #define CHK_RSMI_PERM_ERR(RET) { \
@@ -599,6 +608,7 @@ void TestSanity::SetUp(void) {
   TestBase::SetUp();
 
   gVerbosity = verbosity();
+  gDontFail = dont_fail();
   err = rsmi_init(0);
   ASSERT_EQ(err, RSMI_STATUS_SUCCESS);
 

@@ -60,6 +60,7 @@ static void SetFlags(TestBase *test) {
 
   test->set_num_iteration(sRSMIGlvalues->num_iterations);
   test->set_verbosity(sRSMIGlvalues->verbosity);
+  test->set_dont_fail(sRSMIGlvalues->dont_fail);
 }
 
 
@@ -113,7 +114,7 @@ int main(int argc, char** argv) {
   settings.verbosity = 1;
   settings.monitor_verbosity = 1;
   settings.num_iterations = 1;
-
+  settings.dont_fail = false;
 
   if (ProcessCmdline(&settings, argc, argv)) {
     return 1;

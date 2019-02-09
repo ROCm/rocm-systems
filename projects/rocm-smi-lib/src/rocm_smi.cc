@@ -551,7 +551,12 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
     }
   }
 
-  assert(f->current < f->num_supported);
+  // Some older drivers will not have the current frequency set
+  // assert(f->current < f->num_supported);
+  if (f->current >= f->num_supported) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
   return RSMI_STATUS_SUCCESS;
   CATCH
 }

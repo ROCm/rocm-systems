@@ -57,17 +57,21 @@ static const struct option long_options[] = {
   {"iterations", required_argument, nullptr, 'i'},
   {"verbose", required_argument, nullptr, 'v'},
   {"monitor_verbose", required_argument, nullptr, 'm'},
+  {"dont_fail", no_argument, nullptr, 'f'},
+  {"rsmitst_help", no_argument, nullptr, 'r'},
 
   {nullptr, 0, nullptr, 0}
 };
-static const char* short_options = "i:v:m:r";
+static const char* short_options = "i:v:m:fr";
 
 static void PrintHelp(void) {
   std::cout <<
-     "Optional RocRTst Arguments:\n"
+     "Optional rsmitst Arguments:\n"
+     "--dont_fail, -f if set, don't fail test when individual test fails; "
+         "default is to fail when an individual test fails\n"
      "--iterations, -i <number of iterations to execute>; override default, "
          "which varies for each test\n"
-     "--rocrtst_help, -r print this help message\n"
+     "--rsmitst_help, -r print this help message\n"
      "--verbosity, -v <verbosity level>\n"
      "  Verbosity levels:\n"
      "   0    -- minimal; just summary information\n"
@@ -112,6 +116,10 @@ uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list) {
       case 'r':
         PrintHelp();
         return 1;
+
+      case 'f':
+        test->dont_fail = true;
+        break;
 
       default:
         PrintHelp();
