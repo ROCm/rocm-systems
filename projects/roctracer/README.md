@@ -34,7 +34,7 @@ The library source tree:
  - Set environment:
   export HIP_PATH=<your path>/HIP
   export HCC_HOME=<your path>/hcc/build
-  export CMAKE_PREFIX_PATH=/opt/rocm/lib
+  export CMAKE_PREFIX_PATH=/opt/rocm
 
  - Build HCC:
   cd <your path>/hcc && mkdir build && cd build &&
