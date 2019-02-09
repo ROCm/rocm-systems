@@ -28,8 +28,8 @@ The library source tree:
 
  - CLone development branches of roctracer and HIP/HCC:
   git clone -b amd-master https://github.com/ROCmSoftwarePlatform/roctracer.git
-  git clone -b master https://github.com/ROCm-Developer-Tools/HIP
-  git clone --recursive -b clang_tot_upgrade https://github.com/RadeonOpenCompute/hcc
+  git clone -b master https://github.com/ROCm-Developer-Tools/HIP.git
+  git clone --recursive -b clang_tot_upgrade https://github.com/RadeonOpenCompute/hcc.git
 
  - Set environment:
   export HIP_PATH=<your path>/HIP
