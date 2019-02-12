@@ -69,8 +69,6 @@ static void PrintHelp(void) {
      "Optional rsmitst Arguments:\n"
      "--dont_fail, -f if set, don't fail test when individual test fails; "
          "default is to fail when an individual test fails\n"
-     "--iterations, -i <number of iterations to execute>; override default, "
-         "which varies for each test\n"
      "--rsmitst_help, -r print this help message\n"
      "--verbosity, -v <verbosity level>\n"
      "  Verbosity levels:\n"
@@ -78,13 +76,7 @@ static void PrintHelp(void) {
      "   1    -- intermediate; show intermediate values such as intermediate "
                   "perf. data\n"
      "   2    -- progress; show progress displays\n"
-     "   >= 3 -- more debug output\n"
-     "--monitor_verbosity, -m <monitor verbosity level>\n"
-     "  Monitor Verbosity levels:\n"
-     "   0    -- don't read or print out any GPU monitor information;\n"
-     "   1    -- print out all available monitor information before the first "
-                 "test and after each test\n"
-     "   >= 2 -- print out even more monitor information (test specific)\n";
+     "   >= 3 -- more debug output\n";
 }
 
 uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list) {
@@ -122,12 +114,15 @@ uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list) {
         break;
 
       default:
+        std::cout << "Unknown command line option: \"" << a <<
+                                               "\". Ignoring..." << std::endl;
         PrintHelp();
-        return 1;
+        return 0;
     }
   }
   return 0;
 }
+
 #if ENABLE_SMI
 void DumpMonitorInfo(const TestBase *test) {
   int ret = 0;

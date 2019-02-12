@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -43,53 +43,76 @@
  *
  */
 
-#ifndef TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
-#define TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+#include <stdint.h>
+#include <stddef.h>
 
-#include <memory>
-#include <vector>
-#if ENABLE_SMI
+#include <iostream>
+
+#include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#endif
+#include "rocm_smi_test/functional/fan_read.h"
+#include "rocm_smi_test/test_common.h"
 
-struct RSMITstGlobals {
-  uint32_t verbosity;
-  uint32_t monitor_verbosity;
-  uint32_t num_iterations;
-  bool dont_fail;
-};
-
-uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list);
-
-void PrintTestHeader(uint32_t dv_ind);
-
-#if ENABLE_SMI
-void DumpMonitorInfo(const TestBase *test);
-#endif
-
-#define DISPLAY_RSMI_ERR(RET) { \
-  if (RET != RSMI_STATUS_SUCCESS) { \
-    const char *err_str; \
-    std::cout << "\t===> ERROR: RSMI call returned " << (RET) << std::endl; \
-    rsmi_status_string((RET), &err_str); \
-    std::cout << "\t===> (" << err_str << ")" << std::endl; \
-    std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                  std::endl; \
-  } \
+TestFanRead::TestFanRead() : TestBase() {
+  set_title("RSMI Fan Read Test");
+  set_description("The Fan Read tests verifies that the fan monitors can be "
+                  "read properly.");
 }
 
-#define CHK_ERR_RET(RET) { \
-  DISPLAY_RSMI_ERR(RET) \
-  if ((RET) != RSMI_STATUS_SUCCESS) { \
-    return (RET); \
-  } \
-}
-#define CHK_RSMI_PERM_ERR(RET) { \
-    if (RET == RSMI_STATUS_PERMISSION) { \
-      std::cout << "This command requires root access." << std::endl; \
-    } else { \
-      DISPLAY_RSMI_ERR(RET) \
-    } \
+TestFanRead::~TestFanRead(void) {
 }
 
-#endif  // TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+void TestFanRead::SetUp(void) {
+  TestBase::SetUp();
+
+  return;
+}
+
+void TestFanRead::DisplayTestInfo(void) {
+  TestBase::DisplayTestInfo();
+}
+
+void TestFanRead::DisplayResults(void) const {
+  TestBase::DisplayResults();
+  return;
+}
+
+void TestFanRead::Close() {
+  // This will close handles opened within rsmitst utility calls and call
+  // rsmi_shut_down(), so it should be done after other hsa cleanup
+  TestBase::Close();
+}
+
+
+void TestFanRead::Run(void) {
+  uint64_t val_ui64;
+  rsmi_status_t err;
+  int64_t val_i64;
+
+  TestBase::Run();
+
+  for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
+    PrintDeviceHeader(i);
+
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Current Fan Speed: ";
+    }
+    err = rsmi_dev_fan_speed_get(i, 0, &val_i64);
+    CHK_ERR_ASRT(err)
+    err = rsmi_dev_fan_speed_max_get(i, 0, &val_ui64);
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << val_i64/static_cast<float>(val_ui64)*100;
+      std::cout << "% ("<< val_i64 << "/" << val_ui64 << ")" << std::endl;
+    }
+
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Current fan RPMs: ";
+    }
+    err = rsmi_dev_fan_rpms_get(i, 0, &val_i64);
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << val_i64 << std::endl;
+    }
+  }
+}

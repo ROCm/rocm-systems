@@ -49,6 +49,8 @@
 extern "C" {
 #endif  // __cplusplus
 
+#include <stdint.h>
+#include <stddef.h>
 
 /** \file rocm_smi.h
  *  Main header file for the ROCm SMI library.
@@ -196,8 +198,8 @@ typedef enum {
 
   //!< 3D Full Screen Power Profile
   RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK = 0x20,
-
-  RSMI_PWR_PROF_PRST_LAST = RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK,
+  RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT = 0x40,    //!< Default Boot Up Profile
+  RSMI_PWR_PROF_PRST_LAST = RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT,
 
   //!< Invalid power profile
   RSMI_PWR_PROF_PRST_INVALID = 0xFFFFFFFFFFFFFFFF
