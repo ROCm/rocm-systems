@@ -45,6 +45,7 @@
 
 #include <assert.h>
 
+#include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/test_base.h"
 #include "rocm_smi_test/test_common.h"
 #include "gtest/gtest.h"
@@ -78,12 +79,46 @@ static void MakeHeaderStr(const char *inStr, std::string *outStr) {
 
 void TestBase::SetUp(void) {
   std::string label;
+  rsmi_status_t err;
+
   MakeHeaderStr(kSetupLabel, &label);
   printf("\n\t%s\n", label.c_str());
+
+  err = rsmi_init(0);
+  ASSERT_EQ(err, RSMI_STATUS_SUCCESS);
+
+  err = rsmi_num_monitor_devices(&num_monitor_devs_);
+  ASSERT_EQ(err, RSMI_STATUS_SUCCESS);
+
+  if (num_monitor_devs_ == 0) {
+    std::cout << "No monitor devices found on this machine." << std::endl;
+    std::cout << "No ROCm SMI tests can be run." << std::endl;
+  }
 
   return;
 }
 
+void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
+  rsmi_status_t err;
+  uint64_t val_ui64;
+
+  IF_VERB(STANDARD) {
+    std::cout << "\t**Device index: " << dv_ind << std::endl;
+  }
+  err = rsmi_dev_id_get(dv_ind, &val_ui64);
+  CHK_ERR_ASRT(err)
+  IF_VERB(STANDARD) {
+    std::cout << "\t**Device ID: 0x" << std::hex << val_ui64 << std::endl;
+  }
+  std::cout << std::setbase(10);
+
+  char name[20];
+  err = rsmi_dev_name_get(dv_ind, name, 20);
+  CHK_ERR_ASRT(err)
+  IF_VERB(STANDARD) {
+    std::cout << "\t**Monitor name: " << name << std::endl;
+  }
+}
 void TestBase::Run(void) {
   std::string label;
   MakeHeaderStr(kRunLabel, &label);
@@ -94,6 +129,9 @@ void TestBase::Close(void) {
   std::string label;
   MakeHeaderStr(kCloseLabel, &label);
   printf("\n\t%s\n", label.c_str());
+
+  rsmi_status_t err = rsmi_shut_down();
+  ASSERT_EQ(err, RSMI_STATUS_SUCCESS);
 }
 
 void TestBase::DisplayResults(void) const {

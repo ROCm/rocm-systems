@@ -238,15 +238,15 @@ static void od_value_pair_str_to_range(std::string in_line, rsmi_range *rg) {
  * Parse a string of the form "<int index> <mode name string> <|*>"
  */
 static rsmi_power_profile_preset_masks
-power_prof_string_to_int(std::string pow_prof_line, bool *is_curr) {
+power_prof_string_to_int(std::string pow_prof_line, bool *is_curr,
+                                                          uint32_t *prof_ind) {
   std::istringstream fs(pow_prof_line);
-  uint32_t ind;
   std::string mode;
   size_t tmp;
 
   rsmi_power_profile_preset_masks ret = RSMI_PWR_PROF_PRST_INVALID;
 
-  fs >> ind;
+  fs >> *prof_ind;
   fs >> mode;
 
   while (1) {
@@ -266,6 +266,7 @@ power_prof_string_to_int(std::string pow_prof_line, bool *is_curr) {
   }
 
   const std::unordered_map<std::string, std::function<void()>> mode_map {
+    {"BOOTUP_DEFAULT",   [&](){ ret = RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT; }},
     {"3D_FULL_SCREEN",   [&](){ ret = RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK; }},
     {"POWER_SAVING",   [&](){ ret = RSMI_PWR_PROF_PRST_POWER_SAVING_MASK; }},
     {"VIDEO", [&](){ ret = RSMI_PWR_PROF_PRST_VIDEO_MASK; }},
@@ -551,7 +552,12 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
     }
   }
 
-  assert(f->current < f->num_supported);
+  // Some older drivers will not have the current frequency set
+  // assert(f->current < f->num_supported);
+  if (f->current >= f->num_supported) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -579,16 +585,17 @@ static rsmi_status_t get_power_profiles(uint32_t dv_ind,
   p->available_profiles = 0;
 
   rsmi_power_profile_preset_masks prof;
+  uint32_t prof_ind;
 
   for (uint32_t i = 1; i < val_vec.size(); ++i) {
-    prof = power_prof_string_to_int(val_vec[i], &current);
+    prof = power_prof_string_to_int(val_vec[i], &current, &prof_ind);
 
     if (prof == RSMI_PWR_PROF_PRST_INVALID) {
-      return RSMI_STATUS_NOT_SUPPORTED;
+      continue;
     }
 
     if (ind_map != nullptr) {
-      (*ind_map)[prof] = i-1;
+      (*ind_map)[prof] = prof_ind;
     }
 
     p->available_profiles |= prof;

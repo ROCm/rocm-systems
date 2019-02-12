@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -43,53 +43,76 @@
  *
  */
 
-#ifndef TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
-#define TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+#include <stdint.h>
+#include <stddef.h>
 
-#include <memory>
-#include <vector>
-#if ENABLE_SMI
+#include <iostream>
+#include <string>
+
+#include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#endif
+#include "rocm_smi_test/functional/power_read.h"
+#include "rocm_smi_test/test_common.h"
 
-struct RSMITstGlobals {
-  uint32_t verbosity;
-  uint32_t monitor_verbosity;
-  uint32_t num_iterations;
-  bool dont_fail;
-};
-
-uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list);
-
-void PrintTestHeader(uint32_t dv_ind);
-
-#if ENABLE_SMI
-void DumpMonitorInfo(const TestBase *test);
-#endif
-
-#define DISPLAY_RSMI_ERR(RET) { \
-  if (RET != RSMI_STATUS_SUCCESS) { \
-    const char *err_str; \
-    std::cout << "\t===> ERROR: RSMI call returned " << (RET) << std::endl; \
-    rsmi_status_string((RET), &err_str); \
-    std::cout << "\t===> (" << err_str << ")" << std::endl; \
-    std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                  std::endl; \
-  } \
+TestPowerRead::TestPowerRead() : TestBase() {
+  set_title("RSMI Power Read Test");
+  set_description("The Power Read tests verifies that "
+                                "power related values can be read properly.");
 }
 
-#define CHK_ERR_RET(RET) { \
-  DISPLAY_RSMI_ERR(RET) \
-  if ((RET) != RSMI_STATUS_SUCCESS) { \
-    return (RET); \
-  } \
-}
-#define CHK_RSMI_PERM_ERR(RET) { \
-    if (RET == RSMI_STATUS_PERMISSION) { \
-      std::cout << "This command requires root access." << std::endl; \
-    } else { \
-      DISPLAY_RSMI_ERR(RET) \
-    } \
+TestPowerRead::~TestPowerRead(void) {
 }
 
-#endif  // TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+void TestPowerRead::SetUp(void) {
+  TestBase::SetUp();
+
+  return;
+}
+
+void TestPowerRead::DisplayTestInfo(void) {
+  TestBase::DisplayTestInfo();
+}
+
+void TestPowerRead::DisplayResults(void) const {
+  TestBase::DisplayResults();
+  return;
+}
+
+void TestPowerRead::Close() {
+  // This will close handles opened within rsmitst utility calls and call
+  // rsmi_shut_down(), so it should be done after other hsa cleanup
+  TestBase::Close();
+}
+
+
+void TestPowerRead::Run(void) {
+  rsmi_status_t err;
+  uint64_t val_ui64, val2_ui64;
+
+  TestBase::Run();
+
+  for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
+    PrintDeviceHeader(i);
+
+    err = rsmi_dev_power_cap_get(i, 0, &val_ui64);
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Current Power Cap: " << val_ui64 << "uW" <<std::endl;
+    }
+    err = rsmi_dev_power_cap_range_get(i, 0, &val_ui64, &val2_ui64);
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Power Cap Range: " << val2_ui64 << " to " <<
+                                               val_ui64 << " uW" << std::endl;
+    }
+
+    err = rsmi_dev_power_ave_get(i, 0, &val_ui64);
+    IF_VERB(STANDARD) {
+      std::cout << "\t**Averge Power Usage: ";
+      CHK_RSMI_PERM_ERR(err)
+      if (err == RSMI_STATUS_SUCCESS) {
+        std::cout << static_cast<float>(val_ui64)/1000 << " W" << std::endl;
+      }
+    }
+  }
+}

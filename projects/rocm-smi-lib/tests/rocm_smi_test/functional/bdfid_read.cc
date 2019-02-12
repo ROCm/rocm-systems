@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -43,53 +43,62 @@
  *
  */
 
-#ifndef TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
-#define TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+#include <stdint.h>
+#include <stddef.h>
 
-#include <memory>
-#include <vector>
-#if ENABLE_SMI
+#include <iostream>
+#include <string>
+
+#include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#endif
+#include "rocm_smi_test/functional/bdfid_read.h"
+#include "rocm_smi_test/test_common.h"
 
-struct RSMITstGlobals {
-  uint32_t verbosity;
-  uint32_t monitor_verbosity;
-  uint32_t num_iterations;
-  bool dont_fail;
-};
-
-uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list);
-
-void PrintTestHeader(uint32_t dv_ind);
-
-#if ENABLE_SMI
-void DumpMonitorInfo(const TestBase *test);
-#endif
-
-#define DISPLAY_RSMI_ERR(RET) { \
-  if (RET != RSMI_STATUS_SUCCESS) { \
-    const char *err_str; \
-    std::cout << "\t===> ERROR: RSMI call returned " << (RET) << std::endl; \
-    rsmi_status_string((RET), &err_str); \
-    std::cout << "\t===> (" << err_str << ")" << std::endl; \
-    std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                  std::endl; \
-  } \
+TestBDFIDRead::TestBDFIDRead() : TestBase() {
+  set_title("RSMI BDFID Read Test");
+  set_description("The BDFID Read tests verifies that the BDFID "
+                   "value can be read properly.");
 }
 
-#define CHK_ERR_RET(RET) { \
-  DISPLAY_RSMI_ERR(RET) \
-  if ((RET) != RSMI_STATUS_SUCCESS) { \
-    return (RET); \
-  } \
-}
-#define CHK_RSMI_PERM_ERR(RET) { \
-    if (RET == RSMI_STATUS_PERMISSION) { \
-      std::cout << "This command requires root access." << std::endl; \
-    } else { \
-      DISPLAY_RSMI_ERR(RET) \
-    } \
+TestBDFIDRead::~TestBDFIDRead(void) {
 }
 
-#endif  // TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+void TestBDFIDRead::SetUp(void) {
+  TestBase::SetUp();
+
+  return;
+}
+
+void TestBDFIDRead::DisplayTestInfo(void) {
+  TestBase::DisplayTestInfo();
+}
+
+void TestBDFIDRead::DisplayResults(void) const {
+  TestBase::DisplayResults();
+  return;
+}
+
+void TestBDFIDRead::Close() {
+  // This will close handles opened within rsmitst utility calls and call
+  // rsmi_shut_down(), so it should be done after other hsa cleanup
+  TestBase::Close();
+}
+
+
+void TestBDFIDRead::Run(void) {
+  rsmi_status_t err;
+  uint64_t val_ui64;
+
+  TestBase::Run();
+
+  for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
+    PrintDeviceHeader(i);
+
+    err = rsmi_dev_pci_id_get(i, &val_ui64);
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**PCI ID (BDFID): 0x" << std::hex << val_ui64;
+      std::cout << " (" << std::dec << val_ui64 << ")" << std::endl;
+    }
+  }
+}

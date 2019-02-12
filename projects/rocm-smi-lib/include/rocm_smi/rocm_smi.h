@@ -49,6 +49,8 @@
 extern "C" {
 #endif  // __cplusplus
 
+#include <stdint.h>
+#include <stddef.h>
 
 /** \file rocm_smi.h
  *  Main header file for the ROCm SMI library.
@@ -196,8 +198,8 @@ typedef enum {
 
   //!< 3D Full Screen Power Profile
   RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK = 0x20,
-
-  RSMI_PWR_PROF_PRST_LAST = RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK,
+  RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT = 0x40,    //!< Default Boot Up Profile
+  RSMI_PWR_PROF_PRST_LAST = RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT,
 
   //!< Invalid power profile
   RSMI_PWR_PROF_PRST_INVALID = 0xFFFFFFFFFFFFFFFF
@@ -901,28 +903,6 @@ rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind,
 rsmi_status_t
 rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
 
-/**
- *  @brief Get the maximum power consumption of the device with provided
- *  device index.
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t
- *  @p power, this function will write the current maxium power consumption to
- *  the uint64_t in milliwatts pointed to by @p power. This function requires
- *  root privilege.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- *  If a device has more than one sensor, it could be greater than 0.
- *
- *  @param[inout] power a pointer to uint64_t to which the maximum power
- *  consumption will be written
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t
-rsmi_dev_power_max_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
 
 /**
  * @brief Get the list of available preset power profiles and an indication of

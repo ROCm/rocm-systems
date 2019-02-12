@@ -75,31 +75,56 @@ class TestBase {
 
   void set_description(std::string d);
 
-  void set_num_iteration(int num) {
-    num_iteration_ = num;
-  }
-  uint32_t num_iteration(void) const {
-    return num_iteration_;
-  }
   void set_title(std::string name) {
     title_ = name;
   }
   std::string title(void) const {
     return title_;
   }
-
   void set_verbosity(uint32_t v) {
     verbosity_ = v;
   }
   uint32_t verbosity(void) const {
     return verbosity_;
   }
+  void set_dont_fail(bool f) {
+    dont_fail_ = f;
+  }
+  bool dont_fail(void) const {
+    return dont_fail_;
+  }
+  void set_num_monitor_devs(uint32_t i) {
+    num_monitor_devs_ = i;
+  }
+  uint32_t num_monitor_devs(void) const {
+    return num_monitor_devs_;
+  }
+
+ protected:
+  void PrintDeviceHeader(uint32_t dv_ind);
 
  private:
-  uint64_t num_iteration_;   ///< Number of times to execute test
+  uint32_t num_monitor_devs_;  ///< Number of monitor devices found
   std::string description_;
   std::string title_;   ///< Displayed title of test
   uint32_t verbosity_;   ///< How much additional output to produce
+  bool dont_fail_;       ///< Don't quit test on individual failure if true
 };
+
+#define IF_VERB(VB) if (verbosity() && verbosity() >= (TestBase::VERBOSE_##VB))
+
+// Macros to be used within TestBase classes
+#define CHK_ERR_ASRT(RET) { \
+    if (dont_fail() && ((RET) != RSMI_STATUS_SUCCESS)) { \
+        std::cout << std::endl << "\t===> TEST FAILURE." << std::endl; \
+        DISPLAY_RSMI_ERR(RET); \
+        std::cout << \
+         "\t===> Abort is over-ridden due to dont_fail command line option." \
+                                                               << std::endl; \
+        return; \
+    } else { \
+      ASSERT_EQ(RSMI_STATUS_SUCCESS, (RET)); \
+    } \
+}
 
 #endif  // TESTS_ROCM_SMI_TEST_TEST_BASE_H_
