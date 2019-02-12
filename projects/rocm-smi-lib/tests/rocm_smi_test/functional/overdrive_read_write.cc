@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -43,53 +43,78 @@
  *
  */
 
-#ifndef TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
-#define TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+#include <stdint.h>
+#include <stddef.h>
 
-#include <memory>
-#include <vector>
-#if ENABLE_SMI
+#include <iostream>
+
+#include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#endif
+#include "rocm_smi_test/functional/overdrive_read_write.h"
+#include "rocm_smi_test/test_common.h"
 
-struct RSMITstGlobals {
-  uint32_t verbosity;
-  uint32_t monitor_verbosity;
-  uint32_t num_iterations;
-  bool dont_fail;
-};
-
-uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list);
-
-void PrintTestHeader(uint32_t dv_ind);
-
-#if ENABLE_SMI
-void DumpMonitorInfo(const TestBase *test);
-#endif
-
-#define DISPLAY_RSMI_ERR(RET) { \
-  if (RET != RSMI_STATUS_SUCCESS) { \
-    const char *err_str; \
-    std::cout << "\t===> ERROR: RSMI call returned " << (RET) << std::endl; \
-    rsmi_status_string((RET), &err_str); \
-    std::cout << "\t===> (" << err_str << ")" << std::endl; \
-    std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                  std::endl; \
-  } \
+TestOverdriveReadWrite::TestOverdriveReadWrite() : TestBase() {
+  set_title("RSMI Overdrive Read/Write Test");
+  set_description("The Fan Read tests verifies that the overdrive settings "
+                                      "can be read and controlled properly.");
 }
 
-#define CHK_ERR_RET(RET) { \
-  DISPLAY_RSMI_ERR(RET) \
-  if ((RET) != RSMI_STATUS_SUCCESS) { \
-    return (RET); \
-  } \
-}
-#define CHK_RSMI_PERM_ERR(RET) { \
-    if (RET == RSMI_STATUS_PERMISSION) { \
-      std::cout << "This command requires root access." << std::endl; \
-    } else { \
-      DISPLAY_RSMI_ERR(RET) \
-    } \
+TestOverdriveReadWrite::~TestOverdriveReadWrite(void) {
 }
 
-#endif  // TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+void TestOverdriveReadWrite::SetUp(void) {
+  TestBase::SetUp();
+
+  return;
+}
+
+void TestOverdriveReadWrite::DisplayTestInfo(void) {
+  TestBase::DisplayTestInfo();
+}
+
+void TestOverdriveReadWrite::DisplayResults(void) const {
+  TestBase::DisplayResults();
+  return;
+}
+
+void TestOverdriveReadWrite::Close() {
+  // This will close handles opened within rsmitst utility calls and call
+  // rsmi_shut_down(), so it should be done after other hsa cleanup
+  TestBase::Close();
+}
+
+
+void TestOverdriveReadWrite::Run(void) {
+  rsmi_status_t ret;
+  uint32_t val;
+
+  TestBase::Run();
+
+  for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    PrintDeviceHeader(dv_ind);
+
+    IF_VERB(STANDARD) {
+      std::cout << "Set Overdrive level to 0%..." << std::endl;
+    }
+    ret = rsmi_dev_overdrive_level_set(dv_ind, 0);
+    CHK_ERR_ASRT(ret)
+    IF_VERB(STANDARD) {
+      std::cout << "Set Overdrive level to 10%..." << std::endl;
+    }
+    ret = rsmi_dev_overdrive_level_set(dv_ind, 10);
+    CHK_ERR_ASRT(ret)
+    ret = rsmi_dev_overdrive_level_get(dv_ind, &val);
+    CHK_ERR_ASRT(ret)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**New OverDrive Level:" << val << std::endl;
+      std::cout << "Reset Overdrive level to 0%..." << std::endl;
+    }
+    ret = rsmi_dev_overdrive_level_set(dv_ind, 0);
+    CHK_ERR_ASRT(ret)
+    ret = rsmi_dev_overdrive_level_get(dv_ind, &val);
+    CHK_ERR_ASRT(ret)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**New OverDrive Level:" << val << std::endl;
+    }
+  }
+}

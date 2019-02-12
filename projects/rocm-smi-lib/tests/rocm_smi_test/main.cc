@@ -52,14 +52,30 @@
 #include "rocm_smi_test/test_common.h"
 #include "rocm_smi_test/test_base.h"
 #include "functional/rsmi_sanity.h"
+#include "functional/fan_read.h"
+#include "functional/fan_read_write.h"
+#include "functional/temp_read.h"
+#include "functional/volt_freq_curv_read.h"
+#include "functional/perf_level_read.h"
+#include "functional/overdrive_read.h"
+#include "functional/frequencies_read.h"
+#include "functional/bdfid_read.h"
+#include "functional/gpu_busy_read.h"
+#include "functional/power_read.h"
+#include "functional/overdrive_read_write.h"
+#include "functional/perf_level_read_write.h"
+#include "functional/frequencies_read_write.h"
+#include "functional/pci_bw_read_write.h"
+#include "functional/power_read_write.h"
+#include "functional/power_cap_read_write.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
 static void SetFlags(TestBase *test) {
   assert(sRSMIGlvalues != nullptr);
 
-  test->set_num_iteration(sRSMIGlvalues->num_iterations);
   test->set_verbosity(sRSMIGlvalues->verbosity);
+  test->set_dont_fail(sRSMIGlvalues->dont_fail);
 }
 
 
@@ -103,6 +119,71 @@ TEST(rsmitst, RSMISanityTest) {
 
   RunGenericTest(&tst);
 }
+TEST(rsmitstReadOnly, FanRead) {
+  TestFanRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadWrite, FanReadWrite) {
+  TestFanReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TempRead) {
+  TestTempRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestVoltCurvRead) {
+  TestVoltCurvRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestPerfLevelRead) {
+  TestPerfLevelRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadWrite, TestPerfLevelReadWrite) {
+  TestPerfLevelReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestOverdriveRead) {
+  TestOverdriveRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadWrite, TestOverdriveReadWrite) {
+  TestOverdriveReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestFrequenciesRead) {
+  TestFrequenciesRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadWrite, TestFrequenciesReadWrite) {
+  TestFrequenciesReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadWrite, TestPciBWReadWrite) {
+  TestPciBWReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestBDFIDRead) {
+  TestBDFIDRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestGPUBusyRead) {
+  TestGPUBusyRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestPowerRead) {
+  TestPowerRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadWrite, TestPowerReadWrite) {
+  TestPowerReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadWrite, TestPowerCapReadWrite) {
+  TestPowerCapReadWrite tst;
+  RunGenericTest(&tst);
+}
+
 
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
@@ -113,7 +194,7 @@ int main(int argc, char** argv) {
   settings.verbosity = 1;
   settings.monitor_verbosity = 1;
   settings.num_iterations = 1;
-
+  settings.dont_fail = false;
 
   if (ProcessCmdline(&settings, argc, argv)) {
     return 1;
