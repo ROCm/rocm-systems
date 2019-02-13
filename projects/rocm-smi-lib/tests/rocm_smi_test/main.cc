@@ -51,7 +51,6 @@
 #include "gtest/gtest.h"
 #include "rocm_smi_test/test_common.h"
 #include "rocm_smi_test/test_base.h"
-#include "functional/rsmi_sanity.h"
 #include "functional/fan_read.h"
 #include "functional/fan_read_write.h"
 #include "functional/temp_read.h"
@@ -68,6 +67,7 @@
 #include "functional/pci_bw_read_write.h"
 #include "functional/power_read_write.h"
 #include "functional/power_cap_read_write.h"
+#include "functional/version_read.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -113,10 +113,8 @@ static void RunGenericTest(TestBase *test) {
 //  // from the standard pattern implemented there.
 //  RunGenericTest(&<test_obj>);
 // }
-
-TEST(rsmitst, RSMISanityTest) {
-  TestSanity tst;
-
+TEST(rsmitstReadOnly, TestVersionRead) {
+  TestVersionRead tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadOnly, FanRead) {
