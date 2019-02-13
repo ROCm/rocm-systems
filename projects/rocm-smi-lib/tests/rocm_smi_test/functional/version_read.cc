@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,32 +42,61 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_RSMI_SANITY_H_
-#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_RSMI_SANITY_H_
 
-#include "rocm_smi_test/test_base.h"
+#include <stdint.h>
+#include <stddef.h>
 
-class TestSanity : public TestBase {
- public:
-    TestSanity();
+#include <iostream>
 
-  // @Brief: Destructor for test case of TestExample
-  virtual ~TestSanity();
+#include "gtest/gtest.h"
+#include "rocm_smi/rocm_smi.h"
+#include "rocm_smi_test/functional/version_read.h"
+#include "rocm_smi_test/test_common.h"
 
-  // @Brief: Setup the environment for measurement
-  virtual void SetUp();
+TestVersionRead::TestVersionRead() : TestBase() {
+  set_title("RSMI Version Read Test");
+  set_description("The Version Read tests verifies that the RSMI library "
+                                             "version can be read properly.");
+}
 
-  // @Brief: Core measurement execution
-  virtual void Run();
+TestVersionRead::~TestVersionRead(void) {
+}
 
-  // @Brief: Clean up and retrive the resource
-  virtual void Close();
+void TestVersionRead::SetUp(void) {
+  TestBase::SetUp();
 
-  // @Brief: Display  results
-  virtual void DisplayResults() const;
+  return;
+}
 
-  // @Brief: Display information about what this test does
-  virtual void DisplayTestInfo(void);
-};
+void TestVersionRead::DisplayTestInfo(void) {
+  TestBase::DisplayTestInfo();
+}
 
-#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_RSMI_SANITY_H_
+void TestVersionRead::DisplayResults(void) const {
+  TestBase::DisplayResults();
+  return;
+}
+
+void TestVersionRead::Close() {
+  // This will close handles opened within rsmitst utility calls and call
+  // rsmi_shut_down(), so it should be done after other hsa cleanup
+  TestBase::Close();
+}
+
+
+void TestVersionRead::Run(void) {
+  rsmi_status_t err;
+  rsmi_version ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
+
+  TestBase::Run();
+
+  err = rsmi_version_get(&ver);
+  CHK_ERR_ASRT(err)
+
+  ASSERT_TRUE(ver.major != 0xFFFFFFFF && ver.minor != 0xFFFFFFFF &&
+                             ver.patch != 0xFFFFFFFF && ver.build != nullptr);
+  IF_VERB(STANDARD) {
+    std::cout << "\t**RocM SMI Library version: " << ver.major << "." <<
+       ver.minor << "." << ver.patch << " (" << ver.build << ")" << std::endl;
+  }
+}

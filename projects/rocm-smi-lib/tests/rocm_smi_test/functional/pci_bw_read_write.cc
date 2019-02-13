@@ -99,6 +99,13 @@ void TestPciBWReadWrite::Run(void) {
     PrintDeviceHeader(dv_ind);
 
     ret = rsmi_dev_pci_bandwidth_get(dv_ind, &bw);
+
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "TEST FAILURE: Current PCIe bandwidth is not detected. "
+        "This is likely because it is not indicated in the pp_dpm_pcie sysfs "
+         "file. Aborting test." << std::endl;
+      return;
+    }
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
