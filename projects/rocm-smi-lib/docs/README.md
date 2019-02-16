@@ -64,7 +64,7 @@ int main() {
   ret = rsmi_num_monitor_devices(&num_devices);
  
   for (int i=0; i < num_devices; ++i) {
-    ret = rsmi_dev_id_get(i &dev_id);
+    ret = rsmi_dev_id_get(i, &dev_id);
     // dev_id holds the device ID of device i, upon a
     // successful call  
   }  
