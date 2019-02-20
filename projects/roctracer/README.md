@@ -8,13 +8,15 @@ The API provides functionality for registering the runtimes API callbacks and
 asyncronous activity records pool support.
 ```
 
-The library source tree:
+## The library source tree
+```
  - inc/roctracer.h - Library public API
  - src  - Library sources
    - core - Library API sources
    - util - Library utils sources
  - test - test suit
    - MatrixTranspose - test based on HIP MatrixTranspose sample
+```
 
 ## Documentation
 ```
