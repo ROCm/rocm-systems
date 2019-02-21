@@ -616,7 +616,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   kernel_properties_ptr->vgpr_count = kernel_code->reserved_vgpr_count;
   kernel_properties_ptr->sgpr_count = kernel_code->reserved_sgpr_count;
   kernel_properties_ptr->fbarrier_count = kernel_code->workgroup_fbarrier_count;
-  kernel_properties_ptr->signal = packet->completion_signal;
+  kernel_properties_ptr->signal = callback_data->completion_signal;
 
   // context properties
   rocprofiler_properties_t properties{};

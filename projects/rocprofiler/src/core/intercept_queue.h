@@ -138,6 +138,7 @@ class InterceptQueue {
       if ((GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) && (dispatch_callback_ != NULL)) {
         const hsa_kernel_dispatch_packet_t* dispatch_packet =
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
+        const hsa_signal_t completion_signal = dispatch_packet->completion_signal;
 
         // Adding kernel timing tracker
         Tracker::entry_t* tracker_entry = NULL;
@@ -155,6 +156,7 @@ class InterceptQueue {
                                             obj->queue_,
                                             user_que_idx,
                                             obj->queue_id,
+                                            completion_signal,
                                             dispatch_packet,
                                             kernel_name,
                                             kernel_symbol,

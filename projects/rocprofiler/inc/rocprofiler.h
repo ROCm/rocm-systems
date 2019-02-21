@@ -47,7 +47,7 @@ THE SOFTWARE.
 #include <hsa_ven_amd_aqlprofile.h>
 #include <stdint.h>
 
-#define ROCPROFILER_VERSION_MAJOR 6
+#define ROCPROFILER_VERSION_MAJOR 7
 #define ROCPROFILER_VERSION_MINOR 0
 
 #ifdef __cplusplus
@@ -220,6 +220,7 @@ typedef struct {
   const hsa_queue_t* queue;                            // HSA queue
   uint64_t queue_index;                                // Index in the queue
   uint32_t queue_id;                                   // Queue id
+  hsa_signal_t completion_signal;                      // Completion signal
   const hsa_kernel_dispatch_packet_t* packet;          // HSA dispatch packet
   const char* kernel_name;                             // Kernel name
   uint64_t kernel_object;                              // Kernel object pointer
