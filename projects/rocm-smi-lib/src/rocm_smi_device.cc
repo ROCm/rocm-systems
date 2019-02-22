@@ -126,10 +126,14 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
 
   assert(retStr != nullptr);
 
+  if (env_->path_DRM_root_override && type == env_->enum_override) {
+    tempPath = env_->path_DRM_root_override;
+  }
+
   tempPath += "/device/";
   tempPath += kDevAttribNameMap.at(type);
 
-  DBG_FILE_ERROR(tempPath);
+  DBG_FILE_ERROR(tempPath, (std::string *)nullptr);
   if (!isRegularFile(tempPath)) {
     return EISDIR;
   }
@@ -137,7 +141,6 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   std::ifstream fs;
   fs.open(tempPath);
 
-  DBG_FILE_ERROR(tempPath);
   if (!fs.is_open()) {
       return errno;
   }
@@ -150,23 +153,35 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
 
 int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
   auto tempPath = path_;
+
+  if (env_->path_DRM_root_override && type == env_->enum_override) {
+    tempPath = env_->path_DRM_root_override;
+  }
+
   tempPath += "/device/";
   tempPath += kDevAttribNameMap.at(type);
+
+  if (env_->path_DRM_root_override && type == env_->enum_override) {
+    tempPath += ".write";
+  }
 
   std::ofstream fs;
   fs.open(tempPath);
 
-  DBG_FILE_ERROR(tempPath);
+  DBG_FILE_ERROR(tempPath, &valStr);
   if (!isRegularFile(tempPath)) {
     return EISDIR;
   }
 
-  DBG_FILE_ERROR(tempPath);
   if (!fs.is_open()) {
     return errno;
   }
 
-  fs << valStr;
+  try {
+    fs << valStr;
+  } catch (...) {
+    std::cout << "Write to file threw exception" << std::endl;
+  }
   fs.close();
 
   return 0;
@@ -213,6 +228,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevGPUMClk:
     case kDevGPUSClk:
     case kDevPCIEBW:
+    case kDevPowerODVoltage:
       return writeDevInfoStr(type, val);
 
     case kDevOverDriveLevel:
@@ -241,7 +257,7 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
   std::ifstream fs(tempPath);
   std::stringstream buffer;
 
-  DBG_FILE_ERROR(tempPath);
+  DBG_FILE_ERROR(tempPath, (std::string *)nullptr);
   if (!isRegularFile(tempPath)) {
     return EISDIR;
   }

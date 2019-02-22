@@ -138,7 +138,7 @@ int Monitor::writeMonitor(MonitorTypes type, uint32_t sensor_id,
                                                             std::string val) {
   std::string sysfs_path = MakeMonitorPath(type, sensor_id);
 
-  DBG_FILE_ERROR(sysfs_path)
+  DBG_FILE_ERROR(sysfs_path, &val)
   return WriteSysfsStr(sysfs_path, val);
 }
 
@@ -150,7 +150,7 @@ int Monitor::readMonitor(MonitorTypes type, uint32_t sensor_id,
   std::string temp_str;
   std::string sysfs_path = MakeMonitorPath(type, sensor_id);
 
-  DBG_FILE_ERROR(sysfs_path)
+  DBG_FILE_ERROR(sysfs_path, (std::string *)nullptr)
   return ReadSysfsStr(sysfs_path, val);
 }
 

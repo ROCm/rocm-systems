@@ -136,7 +136,7 @@ int PowerMon::readPowerValue(PowerMonTypes type, uint64_t *power) {
   tempPath += "/";
   tempPath += kMonitorNameMap.at(type);
 
-  DBG_FILE_ERROR(tempPath)
+  DBG_FILE_ERROR(tempPath, (std::string *)nullptr)
   int ret = ReadSysfsStr(tempPath, &fstr);
 
   if (ret) {
