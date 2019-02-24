@@ -1370,6 +1370,26 @@ rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
 }
 
 rsmi_status_t
+rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {
+  if (vbios == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  TRY
+  GET_DEV_FROM_INDX
+  std::string val_str;
+  int ret = dev->readDevInfo(amd::smi::kDevVBiosVer, &val_str);
+
+  uint32_t ln = val_str.copy(vbios, len);
+
+  vbios[std::min(len - 1, ln)] = '\0';
+
+  return errno_to_rsmi_status(ret);
+
+  CATCH
+}
+
+rsmi_status_t
 rsmi_version_get(rsmi_version *version) {
   TRY
 

@@ -58,7 +58,7 @@
 #include "functional/perf_level_read.h"
 #include "functional/overdrive_read.h"
 #include "functional/frequencies_read.h"
-#include "functional/bdfid_read.h"
+#include "functional/sys_info_read.h"
 #include "functional/gpu_busy_read.h"
 #include "functional/power_read.h"
 #include "functional/overdrive_read_write.h"
@@ -161,8 +161,8 @@ TEST(rsmitstReadWrite, TestPciBWReadWrite) {
   TestPciBWReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST(rsmitstReadOnly, TestBDFIDRead) {
-  TestBDFIDRead tst;
+TEST(rsmitstReadOnly, TestSysInfoRead) {
+  TestSysInfoRead tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadOnly, TestGPUBusyRead) {

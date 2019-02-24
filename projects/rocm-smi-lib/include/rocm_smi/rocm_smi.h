@@ -993,6 +993,29 @@ rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
 rsmi_status_t
 rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t sensor_ind,
                                      rsmi_power_profile_preset_masks profile);
+
+/**
+ * @brief Get the VBIOS identifer string
+ *
+ * @details Given a device ID @p dv_ind, and a pointer to a char buffer,
+ * @p vbios, this function will write the VBIOS string (up to @p len
+ * characters) for device @p dv_ind to @p vbios. The caller must ensure that
+ * it is safe to write at least @p len characters to @p vbios.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[inout] vbios A pointer to a buffer of char's to which the VBIOS name
+ * will be written
+ *
+ * @param[in] len The number of char's pointed to by @p vbios which can safely
+ * be written to by this function.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len);
+
 /**
  * @brief Get a description of a provided RSMI error status
  *

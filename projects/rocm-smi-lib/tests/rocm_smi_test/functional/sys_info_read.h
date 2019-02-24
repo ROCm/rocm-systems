@@ -42,63 +42,32 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
+#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_SYS_INFO_READ_H_
+#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_SYS_INFO_READ_H_
 
-#include <stdint.h>
-#include <stddef.h>
+#include "rocm_smi_test/test_base.h"
 
-#include <iostream>
-#include <string>
+class TestSysInfoRead : public TestBase {
+ public:
+    TestSysInfoRead();
 
-#include "gtest/gtest.h"
-#include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/bdfid_read.h"
-#include "rocm_smi_test/test_common.h"
+  // @Brief: Destructor for test case of TestSysInfoRead
+  virtual ~TestSysInfoRead();
 
-TestBDFIDRead::TestBDFIDRead() : TestBase() {
-  set_title("RSMI BDFID Read Test");
-  set_description("The BDFID Read tests verifies that the BDFID "
-                   "value can be read properly.");
-}
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-TestBDFIDRead::~TestBDFIDRead(void) {
-}
+  // @Brief: Core measurement execution
+  virtual void Run();
 
-void TestBDFIDRead::SetUp(void) {
-  TestBase::SetUp();
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
 
-  return;
-}
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
 
-void TestBDFIDRead::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
+};
 
-void TestBDFIDRead::DisplayResults(void) const {
-  TestBase::DisplayResults();
-  return;
-}
-
-void TestBDFIDRead::Close() {
-  // This will close handles opened within rsmitst utility calls and call
-  // rsmi_shut_down(), so it should be done after other hsa cleanup
-  TestBase::Close();
-}
-
-
-void TestBDFIDRead::Run(void) {
-  rsmi_status_t err;
-  uint64_t val_ui64;
-
-  TestBase::Run();
-
-  for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
-    PrintDeviceHeader(i);
-
-    err = rsmi_dev_pci_id_get(i, &val_ui64);
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**PCI ID (BDFID): 0x" << std::hex << val_ui64;
-      std::cout << " (" << std::dec << val_ui64 << ")" << std::endl;
-    }
-  }
-}
+#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_SYS_INFO_READ_H_
