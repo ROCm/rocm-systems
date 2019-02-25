@@ -170,7 +170,7 @@ class MetricsDict {
   const_iterator_t End() const { return cache_.end(); }
 
   xml::Xml::nodes_t GetNodes(const std::string& scope) const {
-    return xml_->GetNodes("top." + scope + ".metric");
+    return (xml_ != NULL) ? xml_->GetNodes("top." + scope + ".metric") : xml::Xml::nodes_t();
   }
 
  private:

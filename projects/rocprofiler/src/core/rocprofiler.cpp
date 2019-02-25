@@ -476,8 +476,9 @@ PUBLIC_API hsa_status_t rocprofiler_open(hsa_agent_t agent, rocprofiler_feature_
     }
   }
 
-  *handle = new rocprofiler::Context(agent_info, queue, features, feature_count, properties->handler,
-                                     properties->handler_arg);
+  rocprofiler::Context** context_ret = reinterpret_cast<rocprofiler::Context**>(handle);
+  rocprofiler::Context::Create(context_ret, agent_info, queue, features, feature_count, properties->handler,
+                               properties->handler_arg);
   API_METHOD_SUFFIX
 }
 
@@ -485,7 +486,7 @@ PUBLIC_API hsa_status_t rocprofiler_open(hsa_agent_t agent, rocprofiler_feature_
 PUBLIC_API hsa_status_t rocprofiler_close(rocprofiler_t* handle) {
   API_METHOD_PREFIX
   rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
-  if (context) delete context;
+  if (context) rocprofiler::Context::Destroy(context);
   API_METHOD_SUFFIX
 }
 
