@@ -129,9 +129,10 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, bool write) {
 
   if (env_->path_DRM_root_override && type == env_->enum_override) {
     sysfs_path = env_->path_DRM_root_override;
-  }
-  if (write) {
-    sysfs_path += ".write";
+
+    if (write) {
+      sysfs_path += ".write";
+    }
   }
 
   sysfs_path += "/device/";
