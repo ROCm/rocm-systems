@@ -680,12 +680,11 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
                                      nullptr, kOD_MCLK_label_array_index + 1);
 
   assert(val_vec[kOD_VDDC_CURVE_label_array_index] == "OD_VDDC_CURVE:");
-  freq_volt_string_to_point(val_vec[kOD_VDDC_CURVE_label_array_index + 1],
-                                                             &(p->curve[0]));
-  freq_volt_string_to_point(val_vec[kOD_VDDC_CURVE_label_array_index + 2],
-                                                             &(p->curve[1]));
-  freq_volt_string_to_point(val_vec[kOD_VDDC_CURVE_label_array_index + 3],
-                                                            &(p->curve[2]));
+
+  uint32_t tmp = kOD_VDDC_CURVE_label_array_index + 1;
+  for (uint32_t i = 0; i < RSMI_NUM_VOLTAGE_CURVE_POINTS; ++i) {
+    freq_volt_string_to_point(val_vec[tmp + i], &(p->curve.vc_points[i]));
+  }
 
   assert(val_vec[kOD_OD_RANGE_label_array_index] == "OD_RANGE:");
   od_value_pair_str_to_range(val_vec[kOD_OD_RANGE_label_array_index + 1],
@@ -708,14 +707,8 @@ static void get_vc_region(uint32_t start_ind,
   assert(val_vec->size() >= kOD_OD_RANGE_label_array_index + 2);
   assert((*val_vec)[kOD_OD_RANGE_label_array_index] == "OD_RANGE:");
 
-  rsmi_range rg;
-  od_value_pair_str_to_range((*val_vec)[start_ind], &rg);
-  p->min_corner.frequency = rg.lower_bound;
-  p->max_corner.frequency = rg.upper_bound;
-
-  od_value_pair_str_to_range((*val_vec)[start_ind + 1], &rg);
-  p->min_corner.voltage = rg.lower_bound;
-  p->max_corner.voltage = rg.upper_bound;
+  od_value_pair_str_to_range((*val_vec)[start_ind], &p->freq_range);
+  od_value_pair_str_to_range((*val_vec)[start_ind + 1], &p->volt_range);
   return;
 }
 
@@ -734,7 +727,6 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
   rsmi_status_t ret;
 
   assert(num_regions != nullptr);
-  assert(*num_regions > 0);
   assert(p != nullptr);
 
   ret = get_dev_value_vec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
@@ -755,7 +747,7 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
                                                                 *num_regions);
 
   for (uint32_t i=0; i < *num_regions; ++i) {
-    get_vc_region(kOD_VDDC_CURVE_start_index + i, &val_vec, p + i);
+    get_vc_region(kOD_VDDC_CURVE_start_index + i*2, &val_vec, p + i);
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -1143,6 +1135,7 @@ rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   return ret;
   CATCH
 }
+
 rsmi_status_t
 rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data *odv) {
   TRY
@@ -1151,6 +1144,7 @@ rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data *odv) {
   return ret;
   CATCH
 }
+
 rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
                        uint32_t *num_regions, rsmi_freq_volt_region *buffer) {
   TRY
@@ -1371,6 +1365,26 @@ rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
   assert(errno == 0);
 
   return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {
+  if (vbios == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  TRY
+  GET_DEV_FROM_INDX
+  std::string val_str;
+  int ret = dev->readDevInfo(amd::smi::kDevVBiosVer, &val_str);
+
+  uint32_t ln = val_str.copy(vbios, len);
+
+  vbios[std::min(len - 1, ln)] = '\0';
+
+  return errno_to_rsmi_status(ret);
 
   CATCH
 }

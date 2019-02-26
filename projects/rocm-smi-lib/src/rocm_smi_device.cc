@@ -68,6 +68,7 @@ static const char *kDevGPUPCIEClkFname = "pp_dpm_pcie";
 static const char *kDevPowerProfileModeFName = "pp_power_profile_mode";
 static const char *kDevPowerODVoltageFName = "pp_od_clk_voltage";
 static const char *kDevUsageFName = "gpu_busy_percent";
+static const char *kDevVBiosVerFName = "vbios_version";
 
 static const char *kDevPerfLevelAutoStr = "auto";
 static const char *kDevPerfLevelLowStr = "low";
@@ -89,6 +90,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevPowerProfileMode, kDevPowerProfileModeFName},
     {kDevUsage, kDevUsageFName},
     {kDevPowerODVoltage, kDevPowerODVoltageFName},
+    {kDevVBiosVer, kDevVBiosVerFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -121,25 +123,44 @@ Device::Device(std::string p, RocmSMI_env_vars const *e) : path_(p), env_(e) {
 Device:: ~Device() {
 }
 
-int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
-  auto tempPath = path_;
+template <typename T>
+int Device::openSysfsFileStream(DevInfoTypes type, T *fs, bool write) {
+  auto sysfs_path = path_;
 
-  assert(retStr != nullptr);
+  if (env_->path_DRM_root_override && type == env_->enum_override) {
+    sysfs_path = env_->path_DRM_root_override;
 
-  tempPath += "/device/";
-  tempPath += kDevAttribNameMap.at(type);
+    if (write) {
+      sysfs_path += ".write";
+    }
+  }
 
-  DBG_FILE_ERROR(tempPath);
-  if (!isRegularFile(tempPath)) {
+  sysfs_path += "/device/";
+  sysfs_path += kDevAttribNameMap.at(type);
+
+  DBG_FILE_ERROR(sysfs_path, (std::string *)nullptr);
+  if (!isRegularFile(sysfs_path)) {
     return EISDIR;
   }
 
-  std::ifstream fs;
-  fs.open(tempPath);
+  fs->open(sysfs_path);
 
-  DBG_FILE_ERROR(tempPath);
-  if (!fs.is_open()) {
+  if (!fs->is_open()) {
       return errno;
+  }
+
+  return 0;
+}
+
+int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
+  std::ifstream fs;
+  int ret = 0;
+
+  assert(retStr != nullptr);
+
+  ret = openSysfsFileStream(type, &fs);
+  if (ret != 0) {
+    return ret;
   }
 
   fs >> *retStr;
@@ -150,23 +171,19 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
 
 int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
   auto tempPath = path_;
-  tempPath += "/device/";
-  tempPath += kDevAttribNameMap.at(type);
-
   std::ofstream fs;
-  fs.open(tempPath);
+  int ret;
 
-  DBG_FILE_ERROR(tempPath);
-  if (!isRegularFile(tempPath)) {
-    return EISDIR;
+  ret = openSysfsFileStream(type, &fs, true);
+  if (ret != 0) {
+    return ret;
   }
 
-  DBG_FILE_ERROR(tempPath);
-  if (!fs.is_open()) {
-    return errno;
+  try {
+    fs << valStr;
+  } catch (...) {
+    std::cout << "Write to file threw exception" << std::endl;
   }
-
-  fs << valStr;
   fs.close();
 
   return 0;
@@ -213,6 +230,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevGPUMClk:
     case kDevGPUSClk:
     case kDevPCIEBW:
+    case kDevPowerODVoltage:
       return writeDevInfoStr(type, val);
 
     case kDevOverDriveLevel:
@@ -229,21 +247,14 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
                                            std::vector<std::string> *retVec) {
   auto tempPath = path_;
   std::string line;
+  int ret;
+  std::ifstream fs;
 
   assert(retVec != nullptr);
 
-  if (env_->path_DRM_root_override && type == env_->enum_override) {
-    tempPath = env_->path_DRM_root_override;
-  }
-  tempPath += "/device/";
-  tempPath += kDevAttribNameMap.at(type);
-
-  std::ifstream fs(tempPath);
-  std::stringstream buffer;
-
-  DBG_FILE_ERROR(tempPath);
-  if (!isRegularFile(tempPath)) {
-    return EISDIR;
+  ret = openSysfsFileStream(type, &fs);
+  if (ret != 0) {
+    return ret;
   }
 
   while (std::getline(fs, line)) {
@@ -313,6 +324,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevUsage:
     case kDevOverDriveLevel:
     case kDevDevID:
+    case kDevVBiosVer:
       return readDevInfoStr(type, val);
       break;
 

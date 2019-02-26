@@ -84,7 +84,7 @@ void TestVoltCurvRead::Close() {
   TestBase::Close();
 }
 
-static void pt_rng_mhz(std::string title, rsmi_range *r) {
+static void pt_rng_Mhz(std::string title, rsmi_range *r) {
   assert(r != nullptr);
 
   std::cout << title << std::endl;
@@ -92,16 +92,24 @@ static void pt_rng_mhz(std::string title, rsmi_range *r) {
                                 r->upper_bound/1000000 << " MHz" << std::endl;
 }
 
+static void pt_rng_mV(std::string title, rsmi_range *r) {
+  assert(r != nullptr);
+
+  std::cout << title << std::endl;
+  std::cout << "\t\t** " << r->lower_bound << " to " << r->upper_bound <<
+                                                           " mV" << std::endl;
+}
+
 static void print_pnt(rsmi_od_vddc_point *pt) {
   std::cout << "\t\t** Frequency: " << pt->frequency/1000000 << "MHz" <<
                                                                     std::endl;
   std::cout << "\t\t** Voltage: " << pt->voltage << "mV" << std::endl;
 }
-static void pt_vddc_curve(rsmi_od_vddc_point *c) {
+static void pt_vddc_curve(rsmi_od_volt_curve *c) {
   assert(c != nullptr);
 
   for (uint32_t i = 0; i < RSMI_NUM_VOLTAGE_CURVE_POINTS; ++i) {
-    print_pnt(&c[i]);
+    print_pnt(&c->vc_points[i]);
   }
 }
 
@@ -109,26 +117,25 @@ static void print_rsmi_od_volt_freq_data(rsmi_od_volt_freq_data *odv) {
   assert(odv != nullptr);
 
   std::cout.setf(std::ios::dec, std::ios::basefield);
-  pt_rng_mhz("\t\tCurrent SCLK frequency range:", &odv->curr_sclk_range);
-  pt_rng_mhz("\t\tCurrent MCLK frequency range:", &odv->curr_mclk_range);
-  pt_rng_mhz("\t\tMin/Max Possible SCLK frequency range:",
+  pt_rng_Mhz("\t\tCurrent SCLK frequency range:", &odv->curr_sclk_range);
+  pt_rng_Mhz("\t\tCurrent MCLK frequency range:", &odv->curr_mclk_range);
+  pt_rng_Mhz("\t\tMin/Max Possible SCLK frequency range:",
                                                       &odv->sclk_freq_limits);
-  pt_rng_mhz("\t\tMin/Max Possible MCLK frequency range:",
+  pt_rng_Mhz("\t\tMin/Max Possible MCLK frequency range:",
                                                       &odv->mclk_freq_limits);
 
   std::cout << "\t\tCurrent Freq/Volt. curve:" << std::endl;
-  pt_vddc_curve(odv->curve);
+  pt_vddc_curve(&odv->curve);
 
   std::cout << "\tNumber of Freq./Volt. regions: " <<
                                                 odv->num_regions << std::endl;
 }
 
 static void print_odv_region(rsmi_freq_volt_region *region) {
-  std::cout << "\t\t\"lower-left\" corner:" << std::endl;
-  print_pnt(&region->min_corner);
-  std::cout << "\t\t\"upper-right\" corner:" << std::endl;
-  print_pnt(&region->max_corner);
+  pt_rng_Mhz("\t\tFrequency range:", &region->freq_range);
+  pt_rng_mV("\t\tVoltage range:", &region->volt_range);
 }
+
 static void print_rsmi_od_volt_freq_regions(uint32_t num_regions,
                                              rsmi_freq_volt_region *regions) {
   for (uint32_t i = 0; i < num_regions; ++i) {
