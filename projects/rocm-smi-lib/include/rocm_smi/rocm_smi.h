@@ -469,6 +469,32 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
 rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
 
 /**
+ *  @brief Get PCIe traffic information
+ *
+ *  @details Give a device index @p dv_ind and pointers to a uint64_t's, @p
+ *  sent, @p received and @p max_pkt_sz, this function will write the number
+ *  of bytes sent and received in 1 second to @p sent and @p received,
+ *  respectively. The maximum possible packet size will be written to
+ *  @max_pkt_size.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] sent a pointer to uint64_t to which the number of bytes sent
+ *  will be written in 1 second. If pointer is NULL, it will be ignored.
+ *
+ *  @param[inout] received a pointer to uint64_t to which the number of bytes
+ *  received will be written. If pointer is NULL, it will be ignored.
+ *
+ *  @param[inout] max_pkt_sz a pointer to uint64_t to which the maximum packet
+ *  size will be written. If pointer is NULL, it will be ignored.
+ *  
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+
+ */
+rsmi_status_t rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
+                                    uint64_t *received, uint64_t *max_pkt_sz);
+
+/**
  *  @brief Get the device id associated with the device with provided device
  *  index.
  *
