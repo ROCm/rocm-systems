@@ -42,17 +42,17 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_PCI_BW_READ_WRITE_H_
-#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_PCI_BW_READ_WRITE_H_
+#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_PCI_READ_WRITE_H_
+#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_PCI_READ_WRITE_H_
 
 #include "rocm_smi_test/test_base.h"
 
-class TestPciBWReadWrite : public TestBase {
+class TestPciReadWrite : public TestBase {
  public:
-    TestPciBWReadWrite();
+    TestPciReadWrite();
 
-  // @Brief: Destructor for test case of TestPciBWReadWrite
-  virtual ~TestPciBWReadWrite();
+  // @Brief: Destructor for test case of TestPciReadWrite
+  virtual ~TestPciReadWrite();
 
   // @Brief: Setup the environment for measurement
   virtual void SetUp();
@@ -70,4 +70,4 @@ class TestPciBWReadWrite : public TestBase {
   virtual void DisplayTestInfo(void);
 };
 
-#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_PCI_BW_READ_WRITE_H_
+#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_PCI_READ_WRITE_H_

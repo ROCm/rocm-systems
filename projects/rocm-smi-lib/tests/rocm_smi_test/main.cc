@@ -64,7 +64,7 @@
 #include "functional/overdrive_read_write.h"
 #include "functional/perf_level_read_write.h"
 #include "functional/frequencies_read_write.h"
-#include "functional/pci_bw_read_write.h"
+#include "functional/pci_read_write.h"
 #include "functional/power_read_write.h"
 #include "functional/power_cap_read_write.h"
 #include "functional/version_read.h"
@@ -157,8 +157,8 @@ TEST(rsmitstReadWrite, TestFrequenciesReadWrite) {
   TestFrequenciesReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST(rsmitstReadWrite, TestPciBWReadWrite) {
-  TestPciBWReadWrite tst;
+TEST(rsmitstReadWrite, TestPciReadWrite) {
+  TestPciReadWrite tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadOnly, TestSysInfoRead) {

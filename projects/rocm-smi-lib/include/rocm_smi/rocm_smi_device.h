@@ -64,11 +64,12 @@ enum DevInfoTypes {
   kDevDevID,
   kDevGPUMClk,
   kDevGPUSClk,
-  kDevPCIEBW,
+  kDevPCIEClk,
   kDevPowerProfileMode,
   kDevUsage,
   kDevPowerODVoltage,
   kDevVBiosVer,
+  kDevPCIEThruPut,
 };
 
 class Device {
@@ -85,7 +86,7 @@ class Device {
 #if 0  // This is not being used right now.
     int readDevInfo(DevInfoTypes type, uint32_t *val);
 #endif
-
+    int readDevInfoLine(DevInfoTypes type, std::string *line);
     int readDevInfo(DevInfoTypes type, std::string *val);
     int readDevInfo(DevInfoTypes type, std::vector<std::string> *retVec);
     int writeDevInfo(DevInfoTypes type, uint64_t val);

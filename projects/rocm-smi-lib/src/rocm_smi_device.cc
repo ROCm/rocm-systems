@@ -69,7 +69,7 @@ static const char *kDevPowerProfileModeFName = "pp_power_profile_mode";
 static const char *kDevPowerODVoltageFName = "pp_od_clk_voltage";
 static const char *kDevUsageFName = "gpu_busy_percent";
 static const char *kDevVBiosVerFName = "vbios_version";
-
+static const char *kDevPCIEThruPutFName = "pcie_bw";
 static const char *kDevPerfLevelAutoStr = "auto";
 static const char *kDevPerfLevelLowStr = "low";
 static const char *kDevPerfLevelHighStr = "high";
@@ -86,11 +86,12 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevDevID, kDevDevIDFName},
     {kDevGPUMClk, kDevGPUMClkFName},
     {kDevGPUSClk, kDevGPUSClkFName},
-    {kDevPCIEBW, kDevGPUPCIEClkFname},
+    {kDevPCIEClk, kDevGPUPCIEClkFname},
     {kDevPowerProfileMode, kDevPowerProfileModeFName},
     {kDevUsage, kDevUsageFName},
     {kDevPowerODVoltage, kDevPowerODVoltageFName},
     {kDevVBiosVer, kDevVBiosVerFName},
+    {kDevPCIEThruPut, kDevPCIEThruPutFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -216,7 +217,7 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
 
     case kDevGPUMClk:  // integer (index within num-freq range)
     case kDevGPUSClk:  // integer (index within num-freq range)
-    case kDevPCIEBW:  // integer (index within num-freq range)
+    case kDevPCIEClk:  // integer (index within num-freq range)
     case kDevDevID:  // string (read-only)
     default:
       break;
@@ -229,7 +230,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
   switch (type) {
     case kDevGPUMClk:
     case kDevGPUSClk:
-    case kDevPCIEBW:
+    case kDevPCIEClk:
     case kDevPowerODVoltage:
       return writeDevInfoStr(type, val);
 
@@ -243,9 +244,24 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
   return -1;
 }
 
+int Device::readDevInfoLine(DevInfoTypes type, std::string *line) {
+  int ret;
+  std::ifstream fs;
+
+  assert(line != nullptr);
+
+  ret = openSysfsFileStream(type, &fs);
+  if (ret != 0) {
+    return ret;
+  }
+
+  std::getline(fs, *line);
+
+  return 0;
+}
+
 int Device::readDevInfoMultiLineStr(DevInfoTypes type,
                                            std::vector<std::string> *retVec) {
-  auto tempPath = path_;
   std::string line;
   int ret;
   std::ifstream fs;
@@ -303,7 +319,7 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
   switch (type) {
     case kDevGPUMClk:
     case kDevGPUSClk:
-    case kDevPCIEBW:
+    case kDevPCIEClk:
     case kDevPowerProfileMode:
     case kDevPowerODVoltage:
       return readDevInfoMultiLineStr(type, val);
@@ -325,6 +341,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevOverDriveLevel:
     case kDevDevID:
     case kDevVBiosVer:
+    case kDevPCIEThruPut:
       return readDevInfoStr(type, val);
       break;
 
