@@ -59,6 +59,7 @@
 namespace amd {
 namespace smi {
 
+// Sysfs file names
 static const char *kDevPerfLevelFName = "power_dpm_force_performance_level";
 static const char *kDevDevIDFName = "device";
 static const char *kDevOverDriveLevelFName = "pp_sclk_od";
@@ -70,6 +71,11 @@ static const char *kDevPowerODVoltageFName = "pp_od_clk_voltage";
 static const char *kDevUsageFName = "gpu_busy_percent";
 static const char *kDevVBiosVerFName = "vbios_version";
 static const char *kDevPCIEThruPutFName = "pcie_bw";
+static const char *kDevErrCntSDMAFName = "ras/sdma_err_count";
+static const char *kDevErrCntUMCFName = "ras/umc_err_count";
+static const char *kDevErrCntGFXFName = "ras/gfx_err_count";
+
+// Strings that are found within sysfs files
 static const char *kDevPerfLevelAutoStr = "auto";
 static const char *kDevPerfLevelLowStr = "low";
 static const char *kDevPerfLevelHighStr = "high";
@@ -92,6 +98,9 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevPowerODVoltage, kDevPowerODVoltageFName},
     {kDevVBiosVer, kDevVBiosVerFName},
     {kDevPCIEThruPut, kDevPCIEThruPutFName},
+    {kDevErrCntSDMA, kDevErrCntSDMAFName},
+    {kDevErrCntUMC, kDevErrCntUMCFName},
+    {kDevErrCntGFX, kDevErrCntGFXFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -322,6 +331,9 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
     case kDevPCIEClk:
     case kDevPowerProfileMode:
     case kDevPowerODVoltage:
+    case kDevErrCntSDMA:
+    case kDevErrCntUMC:
+    case kDevErrCntGFX:
       return readDevInfoMultiLineStr(type, val);
       break;
 

@@ -1,7 +1,5 @@
 /*
  * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
@@ -433,6 +431,62 @@ rsmi_num_monitor_devices(uint32_t *num_devices) {
   CATCH
 }
 
+rsmi_status_t
+rsmi_dev_error_count_get(uint32_t dv_ind, rsmi_gpu_block block,
+                                                     rsmi_error_count_t *ec) {
+  std::vector<std::string> val_vec;
+  rsmi_status_t ret;
+
+  TRY
+  if (ec == nullptr || block > RSMI_GPU_BLOCK_LAST) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  amd::smi::DevInfoTypes type;
+  switch (block) {
+    case RSMI_GPU_BLOCK_UMC:
+      type = amd::smi::kDevErrCntUMC;
+      break;
+
+    case RSMI_GPU_BLOCK_SDMA:
+      type = amd::smi::kDevErrCntSDMA;
+      break;
+
+    case RSMI_GPU_BLOCK_GFX:
+      type = amd::smi::kDevErrCntGFX;
+      break;
+
+    default:
+      assert(!"Unsupported block provided to rsmi_dev_error_count_get()");
+      return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  ret = get_dev_value_vec(type, dv_ind, &val_vec);
+
+  if (ret == RSMI_STATUS_FILE_ERROR) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  assert(val_vec.size() == 2);
+
+  std::string junk;
+  std::istringstream fs1(val_vec[0]);
+
+  fs1 >> junk;
+  assert(junk == "ue:");
+  fs1 >> ec->uncorrectable_err;
+
+  std::istringstream fs2(val_vec[1]);
+
+  fs2 >> junk;
+  assert(junk == "ce:");
+  fs2 >> ec->correctable_err;
+
+  return ret;
+  CATCH
+}
 rsmi_status_t
 rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
   TRY
