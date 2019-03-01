@@ -207,6 +207,28 @@ typedef enum {
 } rsmi_power_profile_preset_masks;
 
 /**
+ * @brief This enum is used to identify different GPU blocks.
+ */
+typedef enum {
+  RSMI_GPU_BLOCK_FIRST = 0,
+
+  RSMI_GPU_BLOCK_UMC = RSMI_GPU_BLOCK_FIRST,
+  RSMI_GPU_BLOCK_SDMA,
+  RSMI_GPU_BLOCK_GFX,
+
+  RSMI_GPU_BLOCK_LAST = RSMI_GPU_BLOCK_GFX,
+} rsmi_gpu_block;
+
+/**
+ * @brief This values of this enum are used as frequency identifiers.
+ */
+typedef enum {
+  RSMI_FREQ_IND_MIN = 0,  //!< Index used for the minimum frequency value
+  RSMI_FREQ_IND_MAX = 1,  //!< Index used for the maximum frequency value
+  RSMI_FREQ_IND_INVALID = 0xFFFFFFFF  //!< An invalid frequency index
+} rsmi_freq_ind;
+
+/**
  * @brief Bitfield used in various RSMI calls
  */
 typedef uint64_t rsmi_bit_field;
@@ -342,13 +364,13 @@ typedef struct {
 } rsmi_od_volt_freq_data;
 
 /**
- * @brief This values of this enum are used as frequency identifiers.
+ * @brief This structure holds error counts.
  */
-typedef enum {
-  RSMI_FREQ_IND_MIN = 0,  //!< Index used for the minimum frequency value
-  RSMI_FREQ_IND_MAX = 1,  //!< Index used for the maximum frequency value
-  RSMI_FREQ_IND_INVALID = 0xFFFFFFFF  //!< An invalid frequency index
-} rsmi_freq_ind;
+typedef struct {
+    uint64_t correctable_err;            //!< Accumulated correctable errors
+    uint64_t uncorrectable_err;          //!< Accumulated uncorrectable errors
+} rsmi_error_count_t;
+
 
 /**
  *  @brief Initialize ROCm SMI.
@@ -487,9 +509,8 @@ rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
  *
  *  @param[inout] max_pkt_sz a pointer to uint64_t to which the maximum packet
  *  size will be written. If pointer is NULL, it will be ignored.
- *  
+ *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
-
  */
 rsmi_status_t rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
                                     uint64_t *received, uint64_t *max_pkt_sz);
@@ -687,6 +708,9 @@ rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
  *  specified temperature sensor on the specified device.
  *
  *  @details Given a device index @p dv_ind, a 0-based sensor index
+ *  @p sensor_ind, a ::rsmi_temperature_metric @p metric and a pointer to an
+ *  int64_t @p temperature, this function will write the value of the metric
+ *  indicated by @p metric to the memory location @p temperature.
  *
  *  @param[in] dv_ind a device index
  *
@@ -704,6 +728,27 @@ rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
  */
 rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
                         rsmi_temperature_metric metric, int64_t *temperature);
+
+/**
+ * @brief Retrieve the error counts for a GPU block
+ * 
+ * @details Given a device index @p dv_ind, an ::rsmi_gpu_block @p block and a
+ * pointer to an ::rsmi_error_count_t @p ec, this function will write the error
+ * count values for the GPU block indicated by @p block to memory pointed to by
+ * @p ec.
+ * 
+ * @param[in] dv_ind a device index
+ * 
+ * @param[in] block The block for which error counts should be retrieved
+ * 
+ * @param[inout] ec A pointer to an ::rsmi_error_count_t to which the error
+ * counts should be written
+ * 
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ * 
+ */
+rsmi_status_t rsmi_dev_error_count_get(uint32_t dv_ind,
+                                rsmi_gpu_block block, rsmi_error_count_t *ec);
 /**
  * @brief Reset the fan to automatic driver control
  *

@@ -49,9 +49,17 @@
 
 #include <iostream>
 #include <string>
+#include <map>
 
 #include "rocm_smi_test/test_base.h"
 #include "rocm_smi_test/test_common.h"
+#include "rocm_smi/rocm_smi.h"
+
+static const std::map<rsmi_gpu_block, const char *> kBlockNameMap = {
+    {RSMI_GPU_BLOCK_UMC, "UMC"},
+    {RSMI_GPU_BLOCK_SDMA, "SDMA"},
+    {RSMI_GPU_BLOCK_GFX, "GFX"},
+};
 
 static const struct option long_options[] = {
   {"iterations", required_argument, nullptr, 'i'},
@@ -122,6 +130,12 @@ uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list) {
   }
   return 0;
 }
+
+const char *GetBlockNameStr(rsmi_gpu_block id) {
+  return kBlockNameMap.at(id);
+}
+
+
 
 #if ENABLE_SMI
 void DumpMonitorInfo(const TestBase *test) {

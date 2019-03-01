@@ -70,6 +70,11 @@ enum DevInfoTypes {
   kDevPowerODVoltage,
   kDevVBiosVer,
   kDevPCIEThruPut,
+  kDevErrCntSDMA,
+  kDevErrCntUMC,
+  kDevErrCntGFX,
+  // Reserve spots for future ErrCnt blocks.
+  // Next, non-ErrCnt device enum should start at 100
 };
 
 class Device {
