@@ -1,7 +1,4 @@
 /*
- * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
@@ -53,50 +50,69 @@
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/pci_bw_read_write.h"
+#include "rocm_smi_test/functional/pci_read_write.h"
 #include "rocm_smi_test/test_common.h"
 
 
-TestPciBWReadWrite::TestPciBWReadWrite() : TestBase() {
+TestPciReadWrite::TestPciReadWrite() : TestBase() {
   set_title("RSMI PCIe Bandwidth Read/Write Test");
   set_description("The PCIe Bandwidth tests verify that the PCIe bandwidth "
                              "settings can be read and controlled properly.");
 }
 
-TestPciBWReadWrite::~TestPciBWReadWrite(void) {
+TestPciReadWrite::~TestPciReadWrite(void) {
 }
 
-void TestPciBWReadWrite::SetUp(void) {
+void TestPciReadWrite::SetUp(void) {
   TestBase::SetUp();
 
   return;
 }
 
-void TestPciBWReadWrite::DisplayTestInfo(void) {
+void TestPciReadWrite::DisplayTestInfo(void) {
   TestBase::DisplayTestInfo();
 }
 
-void TestPciBWReadWrite::DisplayResults(void) const {
+void TestPciReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
   return;
 }
 
-void TestPciBWReadWrite::Close() {
+void TestPciReadWrite::Close() {
   // This will close handles opened within rsmitst utility calls and call
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
 
 
-void TestPciBWReadWrite::Run(void) {
+void TestPciReadWrite::Run(void) {
   rsmi_status_t ret;
   rsmi_pcie_bandwidth bw;
   uint32_t freq_bitmask;
+  uint64_t sent, received, max_pkt_sz;
 
   TestBase::Run();
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
+
+    ret = rsmi_dev_pci_throughput_get(dv_ind, &sent, &received, &max_pkt_sz);
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "TEST FAILURE: Current PCIe throughput is not detected. "
+        "This is likely because it is not indicated in the pcie_bw sysfs "
+         "file. Aborting test." << std::endl;
+      return;
+    }
+    CHK_ERR_ASRT(ret)
+
+    IF_VERB(STANDARD) {
+      std::cout << "PCIe Throughput (1 sec.): " << std::endl;
+      std::cout << "\t\tSent: " << sent << " bytes" << std::endl;
+      std::cout << "\t\tReceived: " << received << " bytes" << std::endl;
+      std::cout << "\t\tMax Packet Size: " << max_pkt_sz << " bytes" <<
+                                                                    std::endl;
+      std::cout << std::endl;
+    }
 
     ret = rsmi_dev_pci_bandwidth_get(dv_ind, &bw);
 

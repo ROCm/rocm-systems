@@ -290,6 +290,14 @@ static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type,
   return errno_to_rsmi_status(ret);
 }
 
+static rsmi_status_t get_dev_value_line(amd::smi::DevInfoTypes type,
+                                      uint32_t dv_ind, std::string *val_str) {
+  GET_DEV_FROM_INDX
+  int ret = dev->readDevInfoLine(type, val_str);
+
+  return errno_to_rsmi_status(ret);
+}
+
 static rsmi_status_t set_dev_value(amd::smi::DevInfoTypes type,
                                               uint32_t dv_ind, uint64_t val) {
   GET_DEV_FROM_INDX
@@ -911,7 +919,7 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth *b) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  return get_frequencies(amd::smi::kDevPCIEBW, dv_ind,
+  return get_frequencies(amd::smi::kDevPCIEClk, dv_ind,
                                         &b->transfer_rate, b->lanes);
 
   CATCH
@@ -949,10 +957,39 @@ rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
   }
 
   uint32_t ret_i;
-  ret_i = dev->writeDevInfo(amd::smi::kDevPCIEBW, freq_enable_str);
+  ret_i = dev->writeDevInfo(amd::smi::kDevPCIEClk, freq_enable_str);
 
   return errno_to_rsmi_status(ret_i);
 
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
+                                   uint64_t *received, uint64_t *max_pkt_sz) {
+  TRY
+  rsmi_status_t ret;
+
+  std::string val_str;
+  ret = get_dev_value_line(amd::smi::kDevPCIEThruPut, dv_ind, &val_str);
+
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  std::istringstream fs_rng(val_str);
+
+  if (sent) {
+    fs_rng >> *sent;
+  }
+  if (received) {
+    fs_rng >> *received;
+  }
+  if (max_pkt_sz) {
+    fs_rng >> *max_pkt_sz;
+  }
+
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
