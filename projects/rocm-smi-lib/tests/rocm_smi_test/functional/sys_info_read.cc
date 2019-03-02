@@ -89,7 +89,7 @@ void TestSysInfoRead::Run(void) {
   rsmi_status_t err;
   uint64_t val_ui64;
   char buffer[80];
-  rsmi_version ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
+  rsmi_version_t ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
 
   TestBase::Run();
 

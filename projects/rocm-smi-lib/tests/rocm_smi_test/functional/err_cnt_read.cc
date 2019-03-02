@@ -93,17 +93,17 @@ void TestErrCntRead::Run(void) {
     PrintDeviceHeader(i);
 
     for (uint32_t b = RSMI_GPU_BLOCK_FIRST; b <= RSMI_GPU_BLOCK_LAST; ++b) {
-      err = rsmi_dev_error_count_get(i, static_cast<rsmi_gpu_block>(b), &ec);
+      err = rsmi_dev_error_count_get(i, static_cast<rsmi_gpu_block_t>(b), &ec);
   
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout << "\t**Error Count for " <<
-                      GetBlockNameStr(static_cast<rsmi_gpu_block>(b)) <<
+                      GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) <<
                                ": Not supported on this machine" << std::endl;
       } else {
           CHK_ERR_ASRT(err)
           IF_VERB(STANDARD) {
             std::cout << "\t**Error counts for " <<
-               GetBlockNameStr(static_cast<rsmi_gpu_block>(b)) << " block: "
+               GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) << " block: "
                                                                  << std::endl;
             std::cout << "\t\tCorrectable errors: " << ec.correctable_err
                                                                  << std::endl;

@@ -175,7 +175,7 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
 }
 
 static void freq_volt_string_to_point(std::string in_line,
-                                                     rsmi_od_vddc_point *pt) {
+                                                     rsmi_od_vddc_point_t *pt) {
   std::istringstream fs_vlt(in_line);
 
   assert(pt != nullptr);
@@ -204,7 +204,7 @@ static void freq_volt_string_to_point(std::string in_line,
   return;
 }
 
-static void od_value_pair_str_to_range(std::string in_line, rsmi_range *rg) {
+static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t *rg) {
   std::istringstream fs_rng(in_line);
 
   assert(rg != nullptr);
@@ -242,7 +242,7 @@ power_prof_string_to_int(std::string pow_prof_line, bool *is_curr,
   std::string mode;
   size_t tmp;
 
-  rsmi_power_profile_preset_masks ret = RSMI_PWR_PROF_PRST_INVALID;
+  rsmi_power_profile_preset_masks_t ret = RSMI_PWR_PROF_PRST_INVALID;
 
   fs >> *prof_ind;
   fs >> mode;
@@ -432,7 +432,7 @@ rsmi_num_monitor_devices(uint32_t *num_devices) {
 }
 
 rsmi_status_t
-rsmi_dev_error_count_get(uint32_t dv_ind, rsmi_gpu_block block,
+rsmi_dev_error_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
                                                      rsmi_error_count_t *ec) {
   std::vector<std::string> val_vec;
   rsmi_status_t ret;
@@ -520,7 +520,7 @@ rsmi_dev_id_get(uint32_t dv_ind, uint64_t *id) {
 }
 
 rsmi_status_t
-rsmi_dev_perf_level_get(uint32_t dv_ind, rsmi_dev_perf_level *perf) {
+rsmi_dev_perf_level_get(uint32_t dv_ind, rsmi_dev_perf_level_t *perf) {
   TRY
   std::string val_str;
   rsmi_status_t ret = get_dev_value_str(amd::smi::kDevPerfLevel, dv_ind,
@@ -565,7 +565,7 @@ rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od) {
 }
 
 rsmi_status_t
-rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level perf_level) {
+rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
   TRY
   if (perf_level > RSMI_DEV_PERF_LEVEL_LAST) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -576,7 +576,7 @@ rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level perf_level) {
 }
 
 static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
-            uint32_t dv_ind, rsmi_frequencies *f, uint32_t *lanes = nullptr) {
+            uint32_t dv_ind, rsmi_frequencies_t *f, uint32_t *lanes = nullptr) {
   TRY
   std::vector<std::string> val_vec;
   rsmi_status_t ret;
@@ -625,8 +625,8 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
 }
 
 static rsmi_status_t get_power_profiles(uint32_t dv_ind,
-                                        rsmi_power_profile_status *p,
-               std::map<rsmi_power_profile_preset_masks, uint32_t> *ind_map) {
+                                        rsmi_power_profile_status_t *p,
+               std::map<rsmi_power_profile_preset_masks_t, uint32_t> *ind_map) {
   TRY
   std::vector<std::string> val_vec;
   rsmi_status_t ret;
@@ -646,7 +646,7 @@ static rsmi_status_t get_power_profiles(uint32_t dv_ind,
   p->current = RSMI_PWR_PROF_PRST_INVALID;  // init to an invalid value
   p->available_profiles = 0;
 
-  rsmi_power_profile_preset_masks prof;
+  rsmi_power_profile_preset_masks_t prof;
   uint32_t prof_ind;
 
   for (uint32_t i = 1; i < val_vec.size(); ++i) {
@@ -706,7 +706,7 @@ static const uint32_t kOD_VDDC_CURVE_num_lines =
                                                kOD_VDDC_CURVE_start_index + 4;
 
 static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
-                                                  rsmi_od_volt_freq_data *p) {
+                                                  rsmi_od_volt_freq_data_t *p) {
   TRY
   std::vector<std::string> val_vec;
   rsmi_status_t ret;
@@ -762,7 +762,7 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
 }
 
 static void get_vc_region(uint32_t start_ind,
-                std::vector<std::string> *val_vec, rsmi_freq_volt_region *p) {
+                std::vector<std::string> *val_vec, rsmi_freq_volt_region_t *p) {
   assert(p != nullptr);
   assert(val_vec != nullptr);
   // There must be at least 1 region to read in
@@ -783,7 +783,7 @@ static void get_vc_region(uint32_t start_ind,
  * *num_regions regions. On 
  */
 static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
-                            uint32_t *num_regions, rsmi_freq_volt_region *p) {
+                            uint32_t *num_regions, rsmi_freq_volt_region_t *p) {
   TRY
   std::vector<std::string> val_vec;
   rsmi_status_t ret;
@@ -820,18 +820,19 @@ static bool is_power_of_2(uint64_t n) {
       return n && !(n & (n - 1));
 }
 static rsmi_status_t set_power_profile(uint32_t dv_ind,
-                                    rsmi_power_profile_preset_masks profile) {
+                                    rsmi_power_profile_preset_masks_t profile) {
   TRY
 
   rsmi_status_t ret;
-  rsmi_power_profile_status avail_profiles = {0, RSMI_PWR_PROF_PRST_INVALID, 0};
+  rsmi_power_profile_status_t avail_profiles =
+                                           {0, RSMI_PWR_PROF_PRST_INVALID, 0};
 
   // Determine if the provided profile is valid
   if (!is_power_of_2(profile)) {
     return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
   }
 
-  std::map<rsmi_power_profile_preset_masks, uint32_t> ind_map;
+  std::map<rsmi_power_profile_preset_masks_t, uint32_t> ind_map;
   ret = get_power_profiles(dv_ind, &avail_profiles, &ind_map);
 
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -858,8 +859,8 @@ static rsmi_status_t set_power_profile(uint32_t dv_ind,
 }
 
 rsmi_status_t
-rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type clk_type,
-                                                        rsmi_frequencies *f) {
+rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type_t clk_type,
+                                                        rsmi_frequencies_t *f) {
   TRY
   switch (clk_type) {
     case RSMI_CLK_TYPE_SYS:
@@ -890,9 +891,9 @@ static std::string bitfield_to_freq_string(uint64_t bitf,
 
 rsmi_status_t
 rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
-                              rsmi_clk_type clk_type, uint64_t freq_bitmask) {
+                              rsmi_clk_type_t clk_type, uint64_t freq_bitmask) {
   rsmi_status_t ret;
-  rsmi_frequencies freqs;
+  rsmi_frequencies_t freqs;
 
   TRY
   ret = rsmi_dev_gpu_clk_freq_get(dv_ind, clk_type, &freqs);
@@ -965,7 +966,7 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
 }
 
 rsmi_status_t
-rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth *b) {
+rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
   TRY
   assert(b != nullptr);
 
@@ -982,7 +983,7 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth *b) {
 rsmi_status_t
 rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
   rsmi_status_t ret;
-  rsmi_pcie_bandwidth bws;
+  rsmi_pcie_bandwidth_t bws;
 
   TRY
   ret = rsmi_dev_pci_bandwidth_get(dv_ind, &bws);
@@ -1049,7 +1050,7 @@ rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
 
 rsmi_status_t
 rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
-                       rsmi_temperature_metric metric, int64_t *temperature) {
+                       rsmi_temperature_metric_t metric, int64_t *temperature) {
   TRY
 
   if (temperature == nullptr) {
@@ -1228,7 +1229,7 @@ rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
 }
 
 rsmi_status_t
-rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data *odv) {
+rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data_t *odv) {
   TRY
   rsmi_status_t ret = get_od_clk_volt_info(dv_ind, odv);
 
@@ -1237,7 +1238,7 @@ rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data *odv) {
 }
 
 rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
-                       uint32_t *num_regions, rsmi_freq_volt_region *buffer) {
+                       uint32_t *num_regions, rsmi_freq_volt_region_t *buffer) {
   TRY
 
   if (buffer == nullptr || num_regions == nullptr || *num_regions == 0) {
@@ -1352,7 +1353,7 @@ rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap) {
 
 rsmi_status_t
 rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
-                                           rsmi_power_profile_status *status) {
+                                        rsmi_power_profile_status_t *status) {
   TRY
 
   ++sensor_ind;  // power sysfs files have 1-based indices
@@ -1364,7 +1365,7 @@ rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
 
 rsmi_status_t
 rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t sensor_ind,
-                                     rsmi_power_profile_preset_masks profile) {
+                                  rsmi_power_profile_preset_masks_t profile) {
   TRY
   ++sensor_ind;  // power sysfs files have 1-based indices
 
@@ -1481,7 +1482,7 @@ rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {
 }
 
 rsmi_status_t
-rsmi_version_get(rsmi_version *version) {
+rsmi_version_get(rsmi_version_t *version) {
   TRY
 
   if (version == nullptr) {

@@ -100,7 +100,7 @@ static void pt_rng_mV(std::string title, rsmi_range *r) {
                                                            " mV" << std::endl;
 }
 
-static void print_pnt(rsmi_od_vddc_point *pt) {
+static void print_pnt(rsmi_od_vddc_point_t *pt) {
   std::cout << "\t\t** Frequency: " << pt->frequency/1000000 << "MHz" <<
                                                                     std::endl;
   std::cout << "\t\t** Voltage: " << pt->voltage << "mV" << std::endl;
@@ -113,7 +113,7 @@ static void pt_vddc_curve(rsmi_od_volt_curve *c) {
   }
 }
 
-static void print_rsmi_od_volt_freq_data(rsmi_od_volt_freq_data *odv) {
+static void print_rsmi_od_volt_freq_data_t(rsmi_od_volt_freq_data_t *odv) {
   assert(odv != nullptr);
 
   std::cout.setf(std::ios::dec, std::ios::basefield);
@@ -131,13 +131,13 @@ static void print_rsmi_od_volt_freq_data(rsmi_od_volt_freq_data *odv) {
                                                 odv->num_regions << std::endl;
 }
 
-static void print_odv_region(rsmi_freq_volt_region *region) {
+static void print_odv_region(rsmi_freq_volt_region_t *region) {
   pt_rng_Mhz("\t\tFrequency range:", &region->freq_range);
   pt_rng_mV("\t\tVoltage range:", &region->volt_range);
 }
 
 static void print_rsmi_od_volt_freq_regions(uint32_t num_regions,
-                                             rsmi_freq_volt_region *regions) {
+                                             rsmi_freq_volt_region_t *regions) {
   for (uint32_t i = 0; i < num_regions; ++i) {
     std::cout << "\tRegion " << i << ":" << std::endl;
     print_odv_region(&regions[i]);
@@ -146,7 +146,7 @@ static void print_rsmi_od_volt_freq_regions(uint32_t num_regions,
 
 void TestVoltCurvRead::Run(void) {
   rsmi_status_t err;
-  rsmi_od_volt_freq_data odv;
+  rsmi_od_volt_freq_data_t odv;
 
   TestBase::Run();
 
@@ -167,11 +167,11 @@ void TestVoltCurvRead::Run(void) {
 
     if (err == RSMI_STATUS_SUCCESS) {
       std::cout << "\t**Frequency-voltage curve data:" << std::endl;
-      print_rsmi_od_volt_freq_data(&odv);
+      print_rsmi_od_volt_freq_data_t(&odv);
 
-      rsmi_freq_volt_region *regions;
+      rsmi_freq_volt_region_t *regions;
       uint32_t num_regions;
-      regions = new rsmi_freq_volt_region[odv.num_regions];
+      regions = new rsmi_freq_volt_region_t[odv.num_regions];
       ASSERT_TRUE(regions != nullptr);
 
       num_regions = odv.num_regions;

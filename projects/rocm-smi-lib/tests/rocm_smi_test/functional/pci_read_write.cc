@@ -87,7 +87,7 @@ void TestPciReadWrite::Close() {
 
 void TestPciReadWrite::Run(void) {
   rsmi_status_t ret;
-  rsmi_pcie_bandwidth bw;
+  rsmi_pcie_bandwidth_t bw;
   uint32_t freq_bitmask;
   uint64_t sent, received, max_pkt_sz;
 

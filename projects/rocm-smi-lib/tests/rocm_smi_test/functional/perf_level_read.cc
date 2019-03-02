@@ -87,7 +87,7 @@ void TestPerfLevelRead::Close() {
 
 void TestPerfLevelRead::Run(void) {
   rsmi_status_t err;
-  rsmi_dev_perf_level pfl;
+  rsmi_dev_perf_level_t pfl;
 
   TestBase::Run();
 

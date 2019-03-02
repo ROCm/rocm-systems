@@ -61,7 +61,7 @@ struct RSMITstGlobals {
 uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list);
 
 void PrintTestHeader(uint32_t dv_ind);
-const char *GetBlockNameStr(rsmi_gpu_block id);
+const char *GetBlockNameStr(rsmi_gpu_block_t id);
 
 #if ENABLE_SMI
 void DumpMonitorInfo(const TestBase *test);

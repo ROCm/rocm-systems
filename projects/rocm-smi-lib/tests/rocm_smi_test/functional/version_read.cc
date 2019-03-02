@@ -86,7 +86,7 @@ void TestVersionRead::Close() {
 
 void TestVersionRead::Run(void) {
   rsmi_status_t err;
-  rsmi_version ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
+  rsmi_version_t ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
 
   TestBase::Run();
 
