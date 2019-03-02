@@ -91,7 +91,7 @@ void TestFrequenciesReadWrite::Close() {
 
 void TestFrequenciesReadWrite::Run(void) {
   rsmi_status_t ret;
-  rsmi_frequencies f;
+  rsmi_frequencies_t f;
   uint32_t freq_bitmask;
   rsmi_clk_type rsmi_clk;
 

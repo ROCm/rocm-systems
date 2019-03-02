@@ -55,7 +55,7 @@
 #include "rocm_smi_test/test_common.h"
 #include "rocm_smi/rocm_smi.h"
 
-static const std::map<rsmi_gpu_block, const char *> kBlockNameMap = {
+static const std::map<rsmi_gpu_block_t, const char *> kBlockNameMap = {
     {RSMI_GPU_BLOCK_UMC, "UMC"},
     {RSMI_GPU_BLOCK_SDMA, "SDMA"},
     {RSMI_GPU_BLOCK_GFX, "GFX"},
@@ -131,7 +131,7 @@ uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list) {
   return 0;
 }
 
-const char *GetBlockNameStr(rsmi_gpu_block id) {
+const char *GetBlockNameStr(rsmi_gpu_block_t id) {
   return kBlockNameMap.at(id);
 }
 
