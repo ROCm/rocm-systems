@@ -22,6 +22,21 @@
 # THE SOFTWARE.
 ################################################################################
 
+# test check routin
+test_status=0
+eval_test() {
+  label=$1
+  cmdline=$2
+  echo "$label: \"$cmdline\""
+  eval "$cmdline"
+  if [ $? != 0 ] ; then
+    echo "$label: FAILED"
+    test_status=$(($test_status + 1))
+  else
+    echo "$label: PASSED"
+  fi
+}
+
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and oher libraries
@@ -37,12 +52,22 @@ export ROCP_METRICS=metrics.xml
 # test trace
 export ROC_TEST_TRACE=1
 
+## Intercepting usage model test
+
 # tool library loaded by ROC profiler
 export ROCP_TOOL_LIB=./test/libintercept_test.so
-../bin/run_tool.sh ./test/ctrl
+export ROCP_KITER=50
+export ROCP_DITER=50
+export ROCP_AGENTS=1
+export ROCP_THRS=1
+eval_test "Intercepting usage model test" "../bin/run_tool.sh ./test/ctrl"
+
+## Standalone sampling usage model test
 
 unset ROCP_TOOL_LIB
-eval ./test/standalone_test
+eval_test "Standalone sampling usage model test" ./test/standalone_test
+
+## Libtool test
 
 # tool library loaded by ROC profiler
 export ROCP_TOOL_LIB=libtool.so
@@ -61,7 +86,9 @@ export ROCP_DITER=50
 export ROCP_AGENTS=1
 export ROCP_THRS=1
 export ROCP_INPUT=input.xml
-eval ./test/ctrl
+eval_test "'rocprof' libtool test" ./test/ctrl
+
+## Libtool test, counter sets
 
 # Memcopies tracking
 export ROCP_MCOPY_TRACKING=1
@@ -69,10 +96,11 @@ export ROCP_MCOPY_TRACKING=1
 export ROCP_KITER=1
 export ROCP_DITER=4
 export ROCP_INPUT=input1.xml
-eval ./test/ctrl
+eval_test "libtool test, counter sets" ./test/ctrl
 
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
 #ms_print massif.out.<N>
 
-exit 0
+if [ $test_status != 0 ] ; then echo "$test_status tests failed"; fi
+exit $test_status

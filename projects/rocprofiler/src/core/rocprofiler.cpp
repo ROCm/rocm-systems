@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <vector>
 
 #include "core/context.h"
+#include "core/context_pool.h"
 #include "core/hsa_queue.h"
 #include "core/intercept_queue.h"
 #include "core/proxy_queue.h"
@@ -477,8 +478,8 @@ PUBLIC_API hsa_status_t rocprofiler_open(hsa_agent_t agent, rocprofiler_feature_
   }
 
   rocprofiler::Context** context_ret = reinterpret_cast<rocprofiler::Context**>(handle);
-  rocprofiler::Context::Create(context_ret, agent_info, queue, features, feature_count, properties->handler,
-                               properties->handler_arg);
+  *context_ret = rocprofiler::Context::Create(agent_info, queue, features, feature_count,
+                                              properties->handler, properties->handler_arg);
   API_METHOD_SUFFIX
 }
 
@@ -608,6 +609,64 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_trace_data(
   API_METHOD_SUFFIX
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Open profiling pool
+PUBLIC_API hsa_status_t rocprofiler_pool_open(hsa_agent_t agent,        // GPU handle
+                                   rocprofiler_feature_t* features,     // [in] profiling features array
+                                   uint32_t feature_count,              // profiling info count
+                                   rocprofiler_pool_t** pool,           // [out] context object
+                                   uint32_t mode,                       // profiling mode mask
+                                   rocprofiler_pool_properties_t* properties)  // pool properties
+{
+  API_METHOD_PREFIX
+  rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
+  const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
+  if (agent_info == NULL) {
+    EXC_RAISING(HSA_STATUS_ERROR, "agent is not found");
+  }
+
+  rocprofiler::ContextPool* obj = rocprofiler::ContextPool::Create(
+    properties->num_entries,
+    properties->payload_bytes,
+    agent_info,
+    features,
+    feature_count,
+    properties->handler,
+    properties->handler_arg
+  );
+  *pool = reinterpret_cast<rocprofiler_pool_t*>(obj);
+  API_METHOD_SUFFIX
+}
+
+// Close profiling pool
+PUBLIC_API hsa_status_t rocprofiler_pool_close(rocprofiler_pool_t* pool)  // profiling pool handle
+{
+  API_METHOD_PREFIX
+  rocprofiler::ContextPool* obj = reinterpret_cast<rocprofiler::ContextPool*>(pool);
+  rocprofiler::ContextPool::Destroy(obj);
+  API_METHOD_SUFFIX
+}
+
+// Fetch profiling pool entry
+PUBLIC_API hsa_status_t rocprofiler_pool_fetch(rocprofiler_pool_t* pool,  // profiling pool handle
+                                    rocprofiler_pool_entry_t* entry)      // [out] empty profling pool entry
+{
+  API_METHOD_PREFIX
+  rocprofiler::ContextPool* context_pool = reinterpret_cast<rocprofiler::ContextPool*>(pool);
+  context_pool->Fetch(entry);
+  API_METHOD_SUFFIX
+}
+
+// Fetch profiling pool entry
+PUBLIC_API hsa_status_t rocprofiler_pool_flush(rocprofiler_pool_t* pool)  // profiling pool handle
+{
+  API_METHOD_PREFIX
+  rocprofiler::ContextPool* context_pool = reinterpret_cast<rocprofiler::ContextPool*>(pool);
+  context_pool->Flush();
+  API_METHOD_SUFFIX
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Return the info for a given info kind
 PUBLIC_API hsa_status_t rocprofiler_get_info(
   const hsa_agent_t *agent,

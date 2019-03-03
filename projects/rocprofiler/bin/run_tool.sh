@@ -14,13 +14,13 @@ else
 test_app=$*
 
 # paths to ROC profiler and oher libraries
-export LD_LIBRARY_PATH=$PKG_DIR/lib:$PKG_DIR/tool:$HSA_PATH
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PKG_DIR/lib:$PKG_DIR/tool:$HSA_PATH
 export PATH=.:$PATH
 
 # ROC profiler library loaded by HSA runtime
 export HSA_TOOLS_LIB=librocprofiler64.so.1
 # tool library loaded by ROC profiler
-if [ -z $ROCP_TOOL_LIB ] ; then
+if [ -z "$ROCP_TOOL_LIB" ] ; then
   export ROCP_TOOL_LIB=libintercept_test.so
 fi
 # enable error messages
@@ -30,7 +30,9 @@ export ROCPROFILER_LOG=1
 # ROC profiler metrics config file
 unset ROCP_PROXY_QUEUE
 # ROC profiler metrics config file
-export ROCP_METRICS=$BIN_DIR/lib/metrics.xml
+if [ -z "$ROCP_METRICS" ] ; then
+  export ROCP_METRICS=$BIN_DIR/lib/metrics.xml
+fi
 
 LD_PRELOAD=$ROCP_TOOL_LIB $test_app
 fi

@@ -153,11 +153,20 @@ class Context {
  public:
   typedef std::map<std::string, rocprofiler_feature_t*> info_map_t;
 
-  static void Create(Context** context, const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info,
+  static void Create(Context* obj, const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info,
                      const uint32_t info_count, rocprofiler_handler_t handler, void* handler_arg)
   {
-    *context = NULL;
+    new (obj) Context(agent_info, queue, info, info_count, handler, handler_arg);
+    obj->Construct(agent_info, queue, info, info_count, handler, handler_arg);
+  }
+
+  static void Release(Context* obj) { obj->Destruct(); }
+
+  static Context* Create(const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info,
+                         const uint32_t info_count, rocprofiler_handler_t handler, void* handler_arg)
+  {
     Context* obj = new Context(agent_info, queue, info, info_count, handler, handler_arg);
+    if (obj == NULL) EXC_RAISING(HSA_STATUS_ERROR, "allocation error");
     try {
       obj->Construct(agent_info, queue, info, info_count, handler, handler_arg);
     } catch(...) {
@@ -165,7 +174,7 @@ class Context {
       obj = NULL;
       throw;
     }
-    *context = obj;
+    return obj;
   }
 
   static void Destroy(Context* obj) { if (obj != NULL) delete obj; }
@@ -300,7 +309,9 @@ class Context {
         handler_arg_(handler_arg)
   {}
 
-  ~Context() {
+  ~Context() { Destruct(); }
+
+  void Destruct() {
     for (const auto& v : info_map_) {
       const std::string& name = v.first;
       const rocprofiler_feature_t* info = v.second;
@@ -310,7 +321,6 @@ class Context {
       }
     }
   }
-
 
   void Construct(const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info,
                  const uint32_t info_count, rocprofiler_handler_t handler, void* handler_arg)
