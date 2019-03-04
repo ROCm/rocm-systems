@@ -85,16 +85,15 @@ void TestErrCntRead::Close() {
 void TestErrCntRead::Run(void) {
   rsmi_status_t err;
   rsmi_error_count_t ec;
-  
-  TestBase::Run();
 
+  TestBase::Run();
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
 
     for (uint32_t b = RSMI_GPU_BLOCK_FIRST; b <= RSMI_GPU_BLOCK_LAST; ++b) {
       err = rsmi_dev_error_count_get(i, static_cast<rsmi_gpu_block_t>(b), &ec);
-  
+
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout << "\t**Error Count for " <<
                       GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) <<
