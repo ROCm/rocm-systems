@@ -1,15 +1,16 @@
 #!/bin/sh
 BIN_DIR=`dirname $0`
-BIN_DIR=`cd $BIN_DIR; pwd`
-PKG_DIR=`echo $BIN_DIR | sed "s/\/bin\/*//"`
-BIN_DIR=$PKG_DIR/bin
+BIN_DIR=`realpath $BIN_DIR`
+PKG_DIR=${BIN_DIR%/bin}
 
 # PATH to custom HSA libs
 HSA_PATH=$PKG_DIR/lib/hsa
 
 if [ -z "$1" ] ; then
   echo "Usage: $0 <cmd line>"
-else
+  exit 1
+fi
+
 # profiler plugin library
 test_app=$*
 
@@ -31,8 +32,7 @@ export ROCPROFILER_LOG=1
 unset ROCP_PROXY_QUEUE
 # ROC profiler metrics config file
 if [ -z "$ROCP_METRICS" ] ; then
-  export ROCP_METRICS=$BIN_DIR/lib/metrics.xml
+  export ROCP_METRICS=$PKG_DIR/lib/metrics.xml
 fi
 
 LD_PRELOAD=$ROCP_TOOL_LIB $test_app
-fi
