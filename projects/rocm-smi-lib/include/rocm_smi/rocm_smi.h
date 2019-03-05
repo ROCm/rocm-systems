@@ -245,6 +245,7 @@ typedef enum {
 
   RSMI_MEM_TYPE_LAST = RSMI_MEM_TYPE_GTT
 } rsmi_memory_type_t;
+
 /**
  * @brief This values of this enum are used as frequency identifiers.
  */
@@ -751,6 +752,61 @@ rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t sensor_ind,
                                    rsmi_power_profile_preset_masks_t profile);
 /** @} */  // end of PowerCont
 /*****************************************************************************/
+
+
+
+/*****************************************************************************/
+/** @defgroup MemQuer Memory Queries
+ *  These functions provide information about memory systems.
+ *  @{
+ */
+
+/**
+ *  @brief Get the total amount of memory that exists
+ *
+ *  @details Given a device index @p dv_ind, a type of memory @p mem_type, and
+ *  a pointer to a uint64_t @p total, this function will write the total amount
+ *  of @p mem_type memory that exists to the location pointed to by @p total.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] mem_type The type of memory for which the total amount will be
+ *  found
+ *
+ *  @param[inout] total a pointer to uint64_t to which the total amount of
+ *  memory will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
+                                                             uint64_t *total);
+
+/**
+ *  @brief Get the current memory usage
+ *
+ *  @details Given a device index @p dv_ind, a type of memory @p mem_type, and
+ *  a pointer to a uint64_t @p usage, this function will write the amount of
+ *  @p mem_type memory that that is currently being used to the location
+ *  pointed to by @p total.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] mem_type The type of memory for which the amount being used will
+ *  be found
+ *
+ *  @param[inout] used a pointer to uint64_t to which the amount of memory
+ *  currently being used will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
+                                                              uint64_t *used);
+
+/** @} */  // end of MemQuer
 
 /** @defgroup PhysQuer Physcial State Queries
  *  These functions provide information about the physical characteristics of

@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -40,58 +40,32 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#include <assert.h>
-#include <errno.h>
+#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_MEM_UTIL_READ_H_
+#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_MEM_UTIL_READ_H_
 
-#include <fstream>
-#include <string>
-#include <cstdint>
-#include <iostream>
-#include <sstream>
-#include <algorithm>
+#include "rocm_smi_test/test_base.h"
 
-namespace amd {
-namespace smi {
+class TestMemUtilRead : public TestBase {
+ public:
+    TestMemUtilRead();
 
-int WriteSysfsStr(std::string path, std::string val) {
-  std::ofstream fs;
-  int ret = 0;
+  // @Brief: Destructor for test case of TestMemUtilRead
+  virtual ~TestMemUtilRead();
 
-  fs.open(path);
-  if (!fs.is_open()) {
-    ret = errno;
-    errno = 0;
-    return ret;
-  }
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-  fs << val;
-  fs.close();
-  return ret;
-}
+  // @Brief: Core measurement execution
+  virtual void Run();
 
-int ReadSysfsStr(std::string path, std::string *retStr) {
-  std::stringstream ss;
-  int ret = 0;
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
 
-  assert(retStr != nullptr);
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
 
-  std::ifstream fs;
-  fs.open(path);
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
+};
 
-  if (!fs.is_open()) {
-    ret = errno;
-    errno = 0;
-    return ret;
-  }
-  ss << fs.rdbuf();
-  fs.close();
-
-  *retStr = ss.str();
-
-  retStr->erase(std::remove(retStr->begin(), retStr->end(), '\n'),
-                                                               retStr->end());
-  return ret;
-}
-
-}  // namespace smi
-}  // namespace amd
+#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_MEM_UTIL_READ_H_

@@ -69,6 +69,7 @@
 #include "functional/power_cap_read_write.h"
 #include "functional/version_read.h"
 #include "functional/err_cnt_read.h"
+#include "functional/mem_util_read.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -184,6 +185,10 @@ TEST(rsmitstReadWrite, TestPowerCapReadWrite) {
 }
 TEST(rsmitstReadOnly, TestErrCntRead) {
   TestErrCntRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestMemUtilRead) {
+  TestMemUtilRead tst;
   RunGenericTest(&tst);
 }
 

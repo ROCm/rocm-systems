@@ -1,7 +1,5 @@
 /*
  * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
@@ -73,8 +71,12 @@ enum DevInfoTypes {
   kDevErrCntSDMA,
   kDevErrCntUMC,
   kDevErrCntGFX,
-  // Reserve spots for future ErrCnt blocks.
-  // Next, non-ErrCnt device enum should start at 100
+  kDevMemTotGTT,
+  kDevMemTotVisVRAM,
+  kDevMemTotVRAM,
+  kDevMemUsedGTT,
+  kDevMemUsedVisVRAM,
+  kDevMemUsedVRAM,
 };
 
 class Device {
@@ -88,9 +90,7 @@ class Device {
     const std::shared_ptr<PowerMon>& power_monitor() {return power_monitor_;}
     void set_power_monitor(std::shared_ptr<PowerMon> pm) {power_monitor_ = pm;}
 
-#if 0  // This is not being used right now.
-    int readDevInfo(DevInfoTypes type, uint32_t *val);
-#endif
+    int readDevInfo(DevInfoTypes type, uint64_t *val);
     int readDevInfoLine(DevInfoTypes type, std::string *line);
     int readDevInfo(DevInfoTypes type, std::string *val);
     int readDevInfo(DevInfoTypes type, std::vector<std::string> *retVec);
