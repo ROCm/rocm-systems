@@ -287,6 +287,13 @@ static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type,
 
   return errno_to_rsmi_status(ret);
 }
+static rsmi_status_t get_dev_value_int(amd::smi::DevInfoTypes type,
+                                         uint32_t dv_ind, uint64_t *val_int) {
+  GET_DEV_FROM_INDX
+  int ret = dev->readDevInfo(type, val_int);
+
+  return errno_to_rsmi_status(ret);
+}
 
 static rsmi_status_t get_dev_value_line(amd::smi::DevInfoTypes type,
                                       uint32_t dv_ind, std::string *val_str) {
@@ -1370,6 +1377,73 @@ rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t sensor_ind,
   ++sensor_ind;  // power sysfs files have 1-based indices
 
   rsmi_status_t ret = set_power_profile(dv_ind, profile);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
+                                                            uint64_t *total) {
+  TRY
+  rsmi_status_t ret;
+  amd::smi::DevInfoTypes mem_type_file;
+
+  if (total == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  switch (mem_type) {
+    case RSMI_MEM_TYPE_GTT:
+      mem_type_file = amd::smi::kDevMemTotGTT;
+      break;
+
+    case RSMI_MEM_TYPE_VIS_VRAM:
+      mem_type_file = amd::smi::kDevMemTotVisVRAM;
+      break;
+
+    case RSMI_MEM_TYPE_VRAM:
+      mem_type_file = amd::smi::kDevMemTotVRAM;
+      break;
+
+    default:
+      assert(!"Unexpected memory type");
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+  ret = get_dev_value_int(mem_type_file, dv_ind, total);
+
+  return ret;
+  CATCH
+}
+rsmi_status_t
+rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
+                                                              uint64_t *used) {
+  TRY
+  rsmi_status_t ret;
+  amd::smi::DevInfoTypes mem_type_file;
+
+  if (used == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  switch (mem_type) {
+    case RSMI_MEM_TYPE_GTT:
+      mem_type_file = amd::smi::kDevMemUsedGTT;
+      break;
+
+    case RSMI_MEM_TYPE_VIS_VRAM:
+      mem_type_file = amd::smi::kDevMemUsedVisVRAM;
+      break;
+
+    case RSMI_MEM_TYPE_VRAM:
+      mem_type_file = amd::smi::kDevMemUsedVRAM;
+      break;
+
+    default:
+      assert(!"Unexpected memory type");
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+  ret = get_dev_value_int(mem_type_file, dv_ind, used);
+
   return ret;
   CATCH
 }

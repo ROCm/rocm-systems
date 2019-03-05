@@ -45,70 +45,95 @@
 #include <stddef.h>
 
 #include <iostream>
+#include <string>
+#include <map>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/err_cnt_read.h"
+#include "rocm_smi_test/functional/mem_util_read.h"
 #include "rocm_smi_test/test_common.h"
 
-TestErrCntRead::TestErrCntRead() : TestBase() {
-  set_title("RSMI Error Count Read Test");
-  set_description("The Error Count Read tests verifies that error counts"
-                                                 " can be read properly.");
+TestMemUtilRead::TestMemUtilRead() : TestBase() {
+  set_title("Memory Utilization Read Test");
+  set_description("The Memory Utilization Read tests verifies that "
+                                  "memory utilization can be read properly.");
 }
 
-TestErrCntRead::~TestErrCntRead(void) {
+TestMemUtilRead::~TestMemUtilRead(void) {
 }
 
-void TestErrCntRead::SetUp(void) {
+void TestMemUtilRead::SetUp(void) {
   TestBase::SetUp();
 
   return;
 }
 
-void TestErrCntRead::DisplayTestInfo(void) {
+void TestMemUtilRead::DisplayTestInfo(void) {
   TestBase::DisplayTestInfo();
 }
 
-void TestErrCntRead::DisplayResults(void) const {
+void TestMemUtilRead::DisplayResults(void) const {
   TestBase::DisplayResults();
   return;
 }
 
-void TestErrCntRead::Close() {
+void TestMemUtilRead::Close() {
   // This will close handles opened within rsmitst utility calls and call
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
 
+static const std::map<rsmi_memory_type_t, const char *>
+   kDevMemoryTypeNameMap = {
+    {RSMI_MEM_TYPE_VRAM, "VRAM memory"},
+    {RSMI_MEM_TYPE_VIS_VRAM, "Visible VRAM memory"},
+    {RSMI_MEM_TYPE_GTT, "GTT memory"},
+};
 
-void TestErrCntRead::Run(void) {
+void TestMemUtilRead::Run(void) {
   rsmi_status_t err;
-  rsmi_error_count_t ec;
+  uint64_t total;
+  uint64_t usage;
 
   TestBase::Run();
+
+  auto err_chk = [&](const char *str) {
+    if (err != RSMI_STATUS_SUCCESS) {
+      if (err == RSMI_STATUS_FILE_ERROR) {
+        IF_VERB(STANDARD) {
+          std::cout << "\t** " << str << ": Not supported on this machine"
+                                                                << std::endl;
+        }
+      } else {
+        CHK_ERR_ASRT(err)
+      }
+    }
+  };
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
 
-    for (uint32_t b = RSMI_GPU_BLOCK_FIRST; b <= RSMI_GPU_BLOCK_LAST; ++b) {
-      err = rsmi_dev_error_count_get(i, static_cast<rsmi_gpu_block_t>(b), &ec);
+    for (uint32_t mem_type = RSMI_MEM_TYPE_FIRST;
+                                 mem_type <= RSMI_MEM_TYPE_LAST; ++mem_type) {
+      err = rsmi_dev_memory_total_get(i,
+                           static_cast<rsmi_memory_type_t>(mem_type), &total);
+      err_chk("rsmi_dev_memory_total_get()");
+      if (err != RSMI_STATUS_SUCCESS) {
+        return;
+      }
 
-      if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        std::cout << "\t**Error Count for " <<
-                      GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) <<
-                               ": Not supported on this machine" << std::endl;
-      } else {
-          CHK_ERR_ASRT(err)
-          IF_VERB(STANDARD) {
-            std::cout << "\t**Error counts for " <<
-               GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) << " block: "
-                                                                 << std::endl;
-            std::cout << "\t\tCorrectable errors: " << ec.correctable_err
-                                                                 << std::endl;
-            std::cout << "\t\tUncorrectable errors: " << ec.uncorrectable_err
-                                                                 << std::endl;
-          }
+      err = rsmi_dev_memory_usage_get(i,
+                           static_cast<rsmi_memory_type_t>(mem_type), &usage);
+      err_chk("rsmi_dev_memory_usage_get()");
+      if (err != RSMI_STATUS_SUCCESS) {
+        return;
+      }
+
+      IF_VERB(STANDARD) {
+        std::cout << "\t**" <<
+         kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type)) <<
+           " Utilization: " << (static_cast<float>(usage)*100)/total << "% ("<<
+                                    usage << "/" << total << ")" << std::endl;
       }
     }
   }
