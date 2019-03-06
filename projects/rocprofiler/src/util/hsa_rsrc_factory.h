@@ -26,6 +26,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #define SRC_UTIL_HSA_RSRC_FACTORY_H_
 
 #include <hsa.h>
+#include <hsa_api_trace.h>
 #include <hsa_ext_amd.h>
 #include <hsa_ext_finalize.h>
 #include <hsa_ven_amd_aqlprofile.h>
@@ -35,6 +36,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <stdlib.h>
 #include <string.h>
 
+#include <atomic>
 #include <iostream>
 #include <mutex>
 #include <map>
@@ -77,6 +79,7 @@ struct hsa_pfn_t {
   decltype(hsa_iterate_agents)* hsa_iterate_agents;
 
   decltype(hsa_queue_create)* hsa_queue_create;
+  decltype(hsa_queue_destroy)* hsa_queue_destroy;
   decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed;
   decltype(hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed;
   decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed;
@@ -201,17 +204,20 @@ class HsaRsrcFactory {
 
   static HsaRsrcFactory* Create(bool initialize_hsa = true) {
     std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ == NULL) {
-      instance_ = new HsaRsrcFactory(initialize_hsa);
+    HsaRsrcFactory* obj = instance_.load(std::memory_order_relaxed);
+    if (obj == NULL) {
+      obj = new HsaRsrcFactory(initialize_hsa);
+      instance_.store(obj, std::memory_order_release);
     }
-    return instance_;
+    return obj;
   }
 
   static HsaRsrcFactory& Instance() {
-    if (instance_ == NULL) instance_ = Create(false);
-    hsa_status_t status = (instance_ != NULL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+    HsaRsrcFactory* obj = instance_.load(std::memory_order_acquire);
+    if (obj == NULL) obj = Create(false);
+    hsa_status_t status = (obj != NULL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
     CHECK_STATUS("HsaRsrcFactory::Instance() failed", status);
-    return *instance_;
+    return *obj;
   }
 
   static void Destroy() {
@@ -314,7 +320,7 @@ class HsaRsrcFactory {
   static uint64_t Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes);
 
   // Initialize HSA API table
-  void static InitHsaApiTable();
+  void static InitHsaApiTable(HsaApiTable* table);
   static const hsa_pfn_t* HsaApi() { return &hsa_api_; }
 
   // Return AqlProfile API table
@@ -334,7 +340,7 @@ class HsaRsrcFactory {
   static void SetTimeoutNs(const timestamp_t& time) {
     std::lock_guard<mutex_t> lck(mutex_);
     timeout_ns_ = time;
-    if (instance_ != NULL) instance_->timeout_ = instance_->timer_->ns_to_sysclock(time);
+    if (instance_ != NULL) Instance().timeout_ = Instance().timer_->ns_to_sysclock(time);
   }
 
  private:
@@ -363,7 +369,7 @@ class HsaRsrcFactory {
   // HSA was initialized
   const bool initialize_hsa_;
 
-  static HsaRsrcFactory* instance_;
+  static std::atomic<HsaRsrcFactory*> instance_;
   static mutex_t mutex_;
 
   // Used to maintain a list of Hsa Gpu Agent Info

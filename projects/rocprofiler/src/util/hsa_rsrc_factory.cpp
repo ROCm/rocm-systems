@@ -117,7 +117,7 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
   cpu_pool_ = NULL;
   kern_arg_pool_ = NULL;
 
-  InitHsaApiTable();
+  InitHsaApiTable(NULL);
 
   // Initialize the Hsa Runtime
   if (initialize_hsa_) {
@@ -165,42 +165,86 @@ HsaRsrcFactory::~HsaRsrcFactory() {
   }
 }
 
-void HsaRsrcFactory::InitHsaApiTable() {
-  hsa_api_.hsa_init = hsa_init;
-  hsa_api_.hsa_shut_down = hsa_shut_down;
-  hsa_api_.hsa_agent_get_info = hsa_agent_get_info;
+void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
+  std::lock_guard<mutex_t> lck(mutex_);
 
-  hsa_api_.hsa_iterate_agents = hsa_iterate_agents;
+  if (hsa_api_.hsa_init == NULL) {
+    if (table != NULL) {
+      hsa_api_.hsa_init = table->core_->hsa_init_fn;
+      hsa_api_.hsa_shut_down = table->core_->hsa_shut_down_fn;
+      hsa_api_.hsa_agent_get_info = table->core_->hsa_agent_get_info_fn;
 
-  hsa_api_.hsa_queue_create = hsa_queue_create;
-  hsa_api_.hsa_queue_load_write_index_relaxed = hsa_queue_load_write_index_relaxed;
-  hsa_api_.hsa_queue_store_write_index_relaxed = hsa_queue_store_write_index_relaxed;
-  hsa_api_.hsa_queue_load_read_index_relaxed = hsa_queue_load_read_index_relaxed;
-  hsa_api_.hsa_signal_create = hsa_signal_create;
-  hsa_api_.hsa_signal_destroy = hsa_signal_destroy;
-  hsa_api_.hsa_signal_store_relaxed = hsa_signal_store_relaxed;
-  hsa_api_.hsa_signal_wait_scacquire = hsa_signal_wait_scacquire;
+      hsa_api_.hsa_iterate_agents = table->core_->hsa_iterate_agents_fn;
 
-  hsa_api_.hsa_amd_agent_iterate_memory_pools = hsa_amd_agent_iterate_memory_pools;
-  hsa_api_.hsa_amd_memory_pool_get_info = hsa_amd_memory_pool_get_info;
-  hsa_api_.hsa_amd_memory_pool_allocate = hsa_amd_memory_pool_allocate;
-  hsa_api_.hsa_amd_agents_allow_access = hsa_amd_agents_allow_access;
+      hsa_api_.hsa_queue_create = table->core_->hsa_queue_create_fn;
+      hsa_api_.hsa_queue_destroy = table->core_->hsa_queue_destroy_fn;
+      hsa_api_.hsa_queue_load_write_index_relaxed = table->core_->hsa_queue_load_write_index_relaxed_fn;
+      hsa_api_.hsa_queue_store_write_index_relaxed = table->core_->hsa_queue_store_write_index_relaxed_fn;
+      hsa_api_.hsa_queue_load_read_index_relaxed = table->core_->hsa_queue_load_read_index_relaxed_fn;
+      hsa_api_.hsa_signal_create = table->core_->hsa_signal_create_fn;
+      hsa_api_.hsa_signal_destroy = table->core_->hsa_signal_destroy_fn;
+      hsa_api_.hsa_signal_load_relaxed = table->core_->hsa_signal_load_relaxed_fn;
+      hsa_api_.hsa_signal_store_relaxed = table->core_->hsa_signal_store_relaxed_fn;
+      hsa_api_.hsa_signal_store_screlease = table->core_->hsa_signal_store_screlease_fn;
+      hsa_api_.hsa_signal_wait_scacquire = table->core_->hsa_signal_wait_scacquire_fn;
 
-  hsa_api_.hsa_amd_memory_async_copy = hsa_amd_memory_async_copy;
+      hsa_api_.hsa_system_get_major_extension_table = table->core_->hsa_system_get_major_extension_table_fn;
 
-  hsa_api_.hsa_system_get_major_extension_table = hsa_system_get_major_extension_table;
+      hsa_api_.hsa_code_object_reader_create_from_file = table->core_->hsa_code_object_reader_create_from_file_fn;
+      hsa_api_.hsa_executable_create_alt = table->core_->hsa_executable_create_alt_fn;
+      hsa_api_.hsa_executable_load_agent_code_object = table->core_->hsa_executable_load_agent_code_object_fn;
+      hsa_api_.hsa_executable_freeze = table->core_->hsa_executable_freeze_fn;
+      hsa_api_.hsa_executable_get_symbol = table->core_->hsa_executable_get_symbol_fn;
 
-  hsa_api_.hsa_code_object_reader_create_from_file = hsa_code_object_reader_create_from_file;
-  hsa_api_.hsa_executable_create_alt = hsa_executable_create_alt;
-  hsa_api_.hsa_executable_load_agent_code_object = hsa_executable_load_agent_code_object;
-  hsa_api_.hsa_executable_freeze = hsa_executable_freeze;
-  hsa_api_.hsa_executable_get_symbol = hsa_executable_get_symbol;
+      hsa_api_.hsa_amd_agent_iterate_memory_pools = table->amd_ext_->hsa_amd_agent_iterate_memory_pools_fn;
+      hsa_api_.hsa_amd_memory_pool_get_info = table->amd_ext_->hsa_amd_memory_pool_get_info_fn;
+      hsa_api_.hsa_amd_memory_pool_allocate = table->amd_ext_->hsa_amd_memory_pool_allocate_fn;
+      hsa_api_.hsa_amd_agents_allow_access = table->amd_ext_->hsa_amd_agents_allow_access_fn;
 
-  hsa_api_.hsa_amd_signal_async_handler = hsa_amd_signal_async_handler;
-  hsa_api_.hsa_amd_profiling_get_async_copy_time = hsa_amd_profiling_get_async_copy_time;
-  hsa_api_.hsa_amd_profiling_get_dispatch_time = hsa_amd_profiling_get_dispatch_time;
-  hsa_api_.hsa_signal_load_relaxed = hsa_signal_load_relaxed;
-  hsa_api_.hsa_signal_store_screlease = hsa_signal_store_screlease;
+      hsa_api_.hsa_amd_memory_async_copy = table->amd_ext_->hsa_amd_memory_async_copy_fn;
+
+      hsa_api_.hsa_amd_signal_async_handler = table->amd_ext_->hsa_amd_signal_async_handler_fn;
+      hsa_api_.hsa_amd_profiling_get_async_copy_time = table->amd_ext_->hsa_amd_profiling_get_async_copy_time_fn;
+      hsa_api_.hsa_amd_profiling_get_dispatch_time = table->amd_ext_->hsa_amd_profiling_get_dispatch_time_fn;
+    } else {
+      hsa_api_.hsa_init = hsa_init;
+      hsa_api_.hsa_shut_down = hsa_shut_down;
+      hsa_api_.hsa_agent_get_info = hsa_agent_get_info;
+
+      hsa_api_.hsa_iterate_agents = hsa_iterate_agents;
+
+      hsa_api_.hsa_queue_create = hsa_queue_create;
+      hsa_api_.hsa_queue_destroy = hsa_queue_destroy;
+      hsa_api_.hsa_queue_load_write_index_relaxed = hsa_queue_load_write_index_relaxed;
+      hsa_api_.hsa_queue_store_write_index_relaxed = hsa_queue_store_write_index_relaxed;
+      hsa_api_.hsa_queue_load_read_index_relaxed = hsa_queue_load_read_index_relaxed;
+      hsa_api_.hsa_signal_create = hsa_signal_create;
+      hsa_api_.hsa_signal_destroy = hsa_signal_destroy;
+      hsa_api_.hsa_signal_store_relaxed = hsa_signal_store_relaxed;
+      hsa_api_.hsa_signal_wait_scacquire = hsa_signal_wait_scacquire;
+
+      hsa_api_.hsa_amd_agent_iterate_memory_pools = hsa_amd_agent_iterate_memory_pools;
+      hsa_api_.hsa_amd_memory_pool_get_info = hsa_amd_memory_pool_get_info;
+      hsa_api_.hsa_amd_memory_pool_allocate = hsa_amd_memory_pool_allocate;
+      hsa_api_.hsa_amd_agents_allow_access = hsa_amd_agents_allow_access;
+
+      hsa_api_.hsa_amd_memory_async_copy = hsa_amd_memory_async_copy;
+
+      hsa_api_.hsa_system_get_major_extension_table = hsa_system_get_major_extension_table;
+
+      hsa_api_.hsa_code_object_reader_create_from_file = hsa_code_object_reader_create_from_file;
+      hsa_api_.hsa_executable_create_alt = hsa_executable_create_alt;
+      hsa_api_.hsa_executable_load_agent_code_object = hsa_executable_load_agent_code_object;
+      hsa_api_.hsa_executable_freeze = hsa_executable_freeze;
+      hsa_api_.hsa_executable_get_symbol = hsa_executable_get_symbol;
+
+      hsa_api_.hsa_amd_signal_async_handler = hsa_amd_signal_async_handler;
+      hsa_api_.hsa_amd_profiling_get_async_copy_time = hsa_amd_profiling_get_async_copy_time;
+      hsa_api_.hsa_amd_profiling_get_dispatch_time = hsa_amd_profiling_get_dispatch_time;
+      hsa_api_.hsa_signal_load_relaxed = hsa_signal_load_relaxed;
+      hsa_api_.hsa_signal_store_screlease = hsa_signal_store_screlease;
+    }
+  }
 }
 
 hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
@@ -635,7 +679,7 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t s
   return write_idx;
 }
 
-HsaRsrcFactory* HsaRsrcFactory::instance_ = NULL;
+std::atomic<HsaRsrcFactory*> HsaRsrcFactory::instance_{};
 HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;
 HsaRsrcFactory::timestamp_t HsaRsrcFactory::timeout_ns_ = HsaTimer::TIMESTAMP_MAX;
 hsa_pfn_t HsaRsrcFactory::hsa_api_{};

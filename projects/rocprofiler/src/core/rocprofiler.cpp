@@ -90,6 +90,8 @@ decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
 ::HsaApiTable* kHsaApiTable;
 
 void SaveHsaApi(::HsaApiTable* table) {
+  util::HsaRsrcFactory::InitHsaApiTable(table);
+
   kHsaApiTable = table;
   hsa_queue_create_fn = table->core_->hsa_queue_create_fn;
   hsa_queue_destroy_fn = table->core_->hsa_queue_destroy_fn;

@@ -88,6 +88,13 @@ export ROCP_THRS=1
 export ROCP_INPUT=input.xml
 eval_test "'rocprof' libtool test" ./test/ctrl
 
+export ROCP_KITER=10
+export ROCP_DITER=10
+export ROCP_AGENTS=1
+export ROCP_THRS=10
+export ROCP_INPUT=input1.xml
+eval_test "'rocprof' libtool test n-threads" ./test/ctrl
+
 ## Libtool test, counter sets
 
 # Memcopies tracking
@@ -95,7 +102,7 @@ export ROCP_MCOPY_TRACKING=1
 
 export ROCP_KITER=1
 export ROCP_DITER=4
-export ROCP_INPUT=input1.xml
+export ROCP_INPUT=input2.xml
 eval_test "libtool test, counter sets" ./test/ctrl
 
 #valgrind --leak-check=full $tbin
