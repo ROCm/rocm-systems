@@ -99,9 +99,9 @@ class Tracker {
     entry->record = record;
 
     // Creating a proxy signal
-    status = hsa_signal_create(1, 0, NULL, &(entry->signal));
+    status = hsa_api_.hsa_signal_create(1, 0, NULL, &(entry->signal));
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_signal_create");
-    status = hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
+    status = hsa_api_.hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
 
     // Adding antry to the list
@@ -115,7 +115,7 @@ class Tracker {
 
   // Delete tracker entry
   void Delete(entry_t* entry) {
-    hsa_signal_destroy(entry->signal);
+    hsa_api_.hsa_signal_destroy(entry->signal);
     mutex_.lock();
     sig_list_.erase(entry->it);
     mutex_.unlock();
@@ -151,7 +151,8 @@ class Tracker {
   private:
   Tracker() :
     outstanding_(0),
-    hsa_rsrc_(&(util::HsaRsrcFactory::Instance()))
+    hsa_rsrc_(&(util::HsaRsrcFactory::Instance())),
+    hsa_api_(*(hsa_rsrc_->HsaApi()))
   {}
 
   ~Tracker() {
@@ -181,13 +182,13 @@ class Tracker {
     // Query begin/end and complete timestamps
     if (entry->is_memcopy) {
       hsa_amd_profiling_async_copy_time_t async_copy_time{};
-      hsa_status_t status = hsa_amd_profiling_get_async_copy_time(entry->signal, &async_copy_time);
+      hsa_status_t status = hsa_api_.hsa_amd_profiling_get_async_copy_time(entry->signal, &async_copy_time);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_async_copy_time");
       record->begin = hsa_rsrc_->SysclockToNs(async_copy_time.start);
       record->end = hsa_rsrc_->SysclockToNs(async_copy_time.end);
     } else {
       hsa_amd_profiling_dispatch_time_t dispatch_time{};
-      hsa_status_t status = hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
+      hsa_status_t status = hsa_api_.hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_dispatch_time");
       record->begin = hsa_rsrc_->SysclockToNs(dispatch_time.start);
       record->end = hsa_rsrc_->SysclockToNs(dispatch_time.end);
@@ -204,9 +205,9 @@ class Tracker {
       orig_signal_ptr->start_ts = prof_signal_ptr->start_ts;
       orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
 
-      const hsa_signal_value_t new_value = hsa_signal_load_relaxed(orig) - 1;
+      const hsa_signal_value_t new_value = hsa_api_.hsa_signal_load_relaxed(orig) - 1;
       if (signal_value != new_value) EXC_ABORT(HSA_STATUS_ERROR, "Tracker::Complete bad signal value");
-      hsa_signal_store_screlease(orig, signal_value);
+      hsa_api_.hsa_signal_store_screlease(orig, signal_value);
     }
   }
 
@@ -273,6 +274,7 @@ class Tracker {
   std::atomic<uint64_t> outstanding_;
   // HSA resources factory
   util::HsaRsrcFactory* hsa_rsrc_;
+  const util::hsa_pfn_t& hsa_api_;
   // Handling ordering enabled
   static const bool ordering_enabled_ = false;
   // Enable tracing
