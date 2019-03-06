@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -40,30 +40,32 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
-#define INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
+#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_ERR_CNT_READ_H_
+#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_ERR_CNT_READ_H_
 
-#include <string>
-#include <cstdint>
+#include "rocm_smi_test/test_base.h"
 
-#ifdef NDEBUG
-#define debug_print(fmt, ...)               \
-  do {                                      \
-  } while (false)
-#else
-#define debug_print(fmt, ...)               \
-  do {                                      \
-    fprintf(stderr, fmt, ##__VA_ARGS__);    \
-  } while (false)
-#endif
+class TestErrCntRead : public TestBase {
+ public:
+    TestErrCntRead();
 
-namespace amd {
-namespace smi {
+  // @Brief: Destructor for test case of TestErrCntRead
+  virtual ~TestErrCntRead();
 
-int ReadSysfsStr(std::string path, std::string *retStr);
-int WriteSysfsStr(std::string path, std::string val);
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-}  // namespace smi
-}  // namespace amd
+  // @Brief: Core measurement execution
+  virtual void Run();
 
-#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
+
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
+};
+
+#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_ERR_CNT_READ_H_

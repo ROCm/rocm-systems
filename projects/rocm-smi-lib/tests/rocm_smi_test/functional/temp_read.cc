@@ -94,7 +94,7 @@ void TestTempRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
 
-    auto print_temp_metric = [&](rsmi_temperature_metric met,
+    auto print_temp_metric = [&](rsmi_temperature_metric_t met,
                                                         std::string label) {
       err = rsmi_dev_temp_metric_get(i, 0, met, &val_i64);
 

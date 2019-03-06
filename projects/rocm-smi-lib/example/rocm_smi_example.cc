@@ -80,7 +80,7 @@ static void print_test_header(const char *str, uint32_t dv_ind) {
 }
 
 static const char *
-power_profile_string(rsmi_power_profile_preset_masks profile) {
+power_profile_string(rsmi_power_profile_preset_masks_t profile) {
   switch (profile) {
     case RSMI_PWR_PROF_PRST_CUSTOM_MASK:
       return "CUSTOM";
@@ -100,7 +100,7 @@ power_profile_string(rsmi_power_profile_preset_masks profile) {
 }
 
 static const char *
-perf_level_string(rsmi_dev_perf_level perf_lvl) {
+perf_level_string(rsmi_dev_perf_level_t perf_lvl) {
   switch (perf_lvl) {
     case RSMI_DEV_PERF_LEVEL_AUTO:
       return "AUTO";
@@ -117,7 +117,7 @@ perf_level_string(rsmi_dev_perf_level perf_lvl) {
 
 static rsmi_status_t test_power_profile(uint32_t dv_ind) {
   rsmi_status_t ret;
-  rsmi_power_profile_status status;
+  rsmi_power_profile_status_t status;
 
   print_test_header("Power Profile", dv_ind);
 
@@ -130,7 +130,7 @@ static rsmi_status_t test_power_profile(uint32_t dv_ind) {
   while (tmp <= RSMI_PWR_PROF_PRST_LAST) {
     if ((tmp & status.available_profiles) == tmp) {
       std::cout << "\t" <<
-      power_profile_string((rsmi_power_profile_preset_masks)tmp) << std::endl;
+      power_profile_string((rsmi_power_profile_preset_masks_t)tmp) << std::endl;
     }
     tmp = tmp << 1;
   }
@@ -138,8 +138,8 @@ static rsmi_status_t test_power_profile(uint32_t dv_ind) {
                             power_profile_string(status.current) << std::endl;
 
   // Try setting the profile to a different power profile
-  rsmi_bit_field diff_profiles;
-  rsmi_power_profile_preset_masks new_prof;
+  rsmi_bit_field_t diff_profiles;
+  rsmi_power_profile_preset_masks_t new_prof;
   diff_profiles = status.available_profiles & (~status.current);
 
   if (diff_profiles & RSMI_PWR_PROF_PRST_COMPUTE_MASK) {
@@ -162,7 +162,7 @@ static rsmi_status_t test_power_profile(uint32_t dv_ind) {
   ret = rsmi_dev_power_profile_set(dv_ind, 0, new_prof);
   CHK_RSMI_RET(ret)
   std::cout << "Done." << std::endl;
-  rsmi_dev_perf_level pfl;
+  rsmi_dev_perf_level_t pfl;
   ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
   CHK_RSMI_RET(ret)
   std::cout << "Performance Level is now " <<
@@ -305,7 +305,7 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
 static rsmi_status_t test_set_perf_level(uint32_t dv_ind) {
   rsmi_status_t ret;
 
-  rsmi_dev_perf_level pfl, orig_pfl;
+  rsmi_dev_perf_level_t pfl, orig_pfl;
 
   print_test_header("Performance Level Control", dv_ind);
 
@@ -314,7 +314,8 @@ static rsmi_status_t test_set_perf_level(uint32_t dv_ind) {
   std::cout << "\t**Original Perf Level:" << perf_level_string(orig_pfl) <<
                                                                     std::endl;
 
-  pfl = (rsmi_dev_perf_level)((orig_pfl + 1) % (RSMI_DEV_PERF_LEVEL_LAST + 1));
+  pfl =
+     (rsmi_dev_perf_level_t)((orig_pfl + 1) % (RSMI_DEV_PERF_LEVEL_LAST + 1));
 
   std::cout << "Set Performance Level to " << (uint32_t)pfl << " ..." <<
                                                                    std::endl;
@@ -334,7 +335,7 @@ static rsmi_status_t test_set_perf_level(uint32_t dv_ind) {
 
 static rsmi_status_t test_set_freq(uint32_t dv_ind) {
   rsmi_status_t ret;
-  rsmi_frequencies f;
+  rsmi_frequencies_t f;
   uint32_t freq_bitmask;
   rsmi_clk_type rsmi_clk;
 
@@ -379,7 +380,7 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
   return RSMI_STATUS_SUCCESS;
 }
 
-static void print_frequencies(rsmi_frequencies *f) {
+static void print_frequencies(rsmi_frequencies_t *f) {
   assert(f != nullptr);
   for (uint32_t j = 0; j < f->num_supported; ++j) {
     std::cout << "\t**  " << j << ": " << f->frequency[j];
@@ -400,8 +401,8 @@ int main() {
   uint64_t val_ui64, val2_ui64;
   int64_t val_i64;
   uint32_t val_ui32;
-  rsmi_dev_perf_level pfl;
-  rsmi_frequencies f;
+  rsmi_dev_perf_level_t pfl;
+  rsmi_frequencies_t f;
   uint32_t num_monitor_devs = 0;
 
   rsmi_num_monitor_devices(&num_monitor_devs);

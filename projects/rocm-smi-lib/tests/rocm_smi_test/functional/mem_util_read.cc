@@ -1,7 +1,5 @@
 /*
  * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
@@ -48,57 +46,95 @@
 
 #include <iostream>
 #include <string>
+#include <map>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/perf_level_read.h"
+#include "rocm_smi_test/functional/mem_util_read.h"
 #include "rocm_smi_test/test_common.h"
 
-TestPerfLevelRead::TestPerfLevelRead() : TestBase() {
-  set_title("RSMI Performance Level Read Test");
-  set_description("The Performance Level Read tests verifies that the "
-                          "performance level monitors can be read properly.");
+TestMemUtilRead::TestMemUtilRead() : TestBase() {
+  set_title("Memory Utilization Read Test");
+  set_description("The Memory Utilization Read tests verifies that "
+                                  "memory utilization can be read properly.");
 }
 
-TestPerfLevelRead::~TestPerfLevelRead(void) {
+TestMemUtilRead::~TestMemUtilRead(void) {
 }
 
-void TestPerfLevelRead::SetUp(void) {
+void TestMemUtilRead::SetUp(void) {
   TestBase::SetUp();
 
   return;
 }
 
-void TestPerfLevelRead::DisplayTestInfo(void) {
+void TestMemUtilRead::DisplayTestInfo(void) {
   TestBase::DisplayTestInfo();
 }
 
-void TestPerfLevelRead::DisplayResults(void) const {
+void TestMemUtilRead::DisplayResults(void) const {
   TestBase::DisplayResults();
   return;
 }
 
-void TestPerfLevelRead::Close() {
+void TestMemUtilRead::Close() {
   // This will close handles opened within rsmitst utility calls and call
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
 
+static const std::map<rsmi_memory_type_t, const char *>
+   kDevMemoryTypeNameMap = {
+    {RSMI_MEM_TYPE_VRAM, "VRAM memory"},
+    {RSMI_MEM_TYPE_VIS_VRAM, "Visible VRAM memory"},
+    {RSMI_MEM_TYPE_GTT, "GTT memory"},
+};
 
-void TestPerfLevelRead::Run(void) {
+void TestMemUtilRead::Run(void) {
   rsmi_status_t err;
-  rsmi_dev_perf_level_t pfl;
+  uint64_t total;
+  uint64_t usage;
 
   TestBase::Run();
+
+  auto err_chk = [&](const char *str) {
+    if (err != RSMI_STATUS_SUCCESS) {
+      if (err == RSMI_STATUS_FILE_ERROR) {
+        IF_VERB(STANDARD) {
+          std::cout << "\t** " << str << ": Not supported on this machine"
+                                                                << std::endl;
+        }
+      } else {
+        CHK_ERR_ASRT(err)
+      }
+    }
+  };
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
 
-    err = rsmi_dev_perf_level_get(i, &pfl);
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Performance Level:" << std::dec << (uint32_t)pfl <<
-                                                                    std::endl;
+    for (uint32_t mem_type = RSMI_MEM_TYPE_FIRST;
+                                 mem_type <= RSMI_MEM_TYPE_LAST; ++mem_type) {
+      err = rsmi_dev_memory_total_get(i,
+                           static_cast<rsmi_memory_type_t>(mem_type), &total);
+      err_chk("rsmi_dev_memory_total_get()");
+      if (err != RSMI_STATUS_SUCCESS) {
+        return;
+      }
+
+      err = rsmi_dev_memory_usage_get(i,
+                           static_cast<rsmi_memory_type_t>(mem_type), &usage);
+      err_chk("rsmi_dev_memory_usage_get()");
+      if (err != RSMI_STATUS_SUCCESS) {
+        return;
+      }
+
+      IF_VERB(STANDARD) {
+        std::cout << "\t**" <<
+         kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type)) <<
+           " Utilization: " << (static_cast<float>(usage)*100)/total << "% ("<<
+                                    usage << "/" << total << ")" << std::endl;
+      }
     }
   }
 }

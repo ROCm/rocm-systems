@@ -88,7 +88,7 @@ void TestPowerReadWrite::Close() {
 }
 
 static const char *
-power_profile_string(rsmi_power_profile_preset_masks profile) {
+power_profile_string(rsmi_power_profile_preset_masks_t profile) {
   switch (profile) {
     case RSMI_PWR_PROF_PRST_CUSTOM_MASK:
       return "CUSTOM";
@@ -111,7 +111,7 @@ power_profile_string(rsmi_power_profile_preset_masks profile) {
 
 void TestPowerReadWrite::Run(void) {
   rsmi_status_t ret;
-  rsmi_power_profile_status status;
+  rsmi_power_profile_status_t status;
 
   TestBase::Run();
 
@@ -127,7 +127,7 @@ void TestPowerReadWrite::Run(void) {
       while (tmp <= RSMI_PWR_PROF_PRST_LAST) {
         if ((tmp & status.available_profiles) == tmp) {
           std::cout << "\t" <<
-              power_profile_string((rsmi_power_profile_preset_masks)tmp) <<
+              power_profile_string((rsmi_power_profile_preset_masks_t)tmp) <<
                                                                       std::endl;
         }
         tmp = tmp << 1;
@@ -136,11 +136,11 @@ void TestPowerReadWrite::Run(void) {
                               power_profile_string(status.current) << std::endl;
     }
 
-    rsmi_power_profile_preset_masks orig_profile = status.current;
+    rsmi_power_profile_preset_masks_t orig_profile = status.current;
 
     // Try setting the profile to a different power profile
-    rsmi_bit_field diff_profiles;
-    rsmi_power_profile_preset_masks new_prof;
+    rsmi_bit_field_t diff_profiles;
+    rsmi_power_profile_preset_masks_t new_prof;
     diff_profiles = status.available_profiles & (~status.current);
 
     if (diff_profiles & RSMI_PWR_PROF_PRST_COMPUTE_MASK) {
@@ -162,7 +162,7 @@ void TestPowerReadWrite::Run(void) {
     ret = rsmi_dev_power_profile_set(dv_ind, 0, new_prof);
     CHK_ERR_ASRT(ret)
 
-    rsmi_dev_perf_level pfl;
+    rsmi_dev_perf_level_t pfl;
     ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
     CHK_ERR_ASRT(ret)
     ASSERT_EQ(pfl, RSMI_DEV_PERF_LEVEL_MANUAL);

@@ -1,7 +1,5 @@
 /*
  * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
@@ -47,58 +45,71 @@
 #include <stddef.h>
 
 #include <iostream>
-#include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/perf_level_read.h"
+#include "rocm_smi_test/functional/err_cnt_read.h"
 #include "rocm_smi_test/test_common.h"
 
-TestPerfLevelRead::TestPerfLevelRead() : TestBase() {
-  set_title("RSMI Performance Level Read Test");
-  set_description("The Performance Level Read tests verifies that the "
-                          "performance level monitors can be read properly.");
+TestErrCntRead::TestErrCntRead() : TestBase() {
+  set_title("RSMI Error Count Read Test");
+  set_description("The Error Count Read tests verifies that error counts"
+                                                 " can be read properly.");
 }
 
-TestPerfLevelRead::~TestPerfLevelRead(void) {
+TestErrCntRead::~TestErrCntRead(void) {
 }
 
-void TestPerfLevelRead::SetUp(void) {
+void TestErrCntRead::SetUp(void) {
   TestBase::SetUp();
 
   return;
 }
 
-void TestPerfLevelRead::DisplayTestInfo(void) {
+void TestErrCntRead::DisplayTestInfo(void) {
   TestBase::DisplayTestInfo();
 }
 
-void TestPerfLevelRead::DisplayResults(void) const {
+void TestErrCntRead::DisplayResults(void) const {
   TestBase::DisplayResults();
   return;
 }
 
-void TestPerfLevelRead::Close() {
+void TestErrCntRead::Close() {
   // This will close handles opened within rsmitst utility calls and call
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
 
 
-void TestPerfLevelRead::Run(void) {
+void TestErrCntRead::Run(void) {
   rsmi_status_t err;
-  rsmi_dev_perf_level_t pfl;
+  rsmi_error_count_t ec;
 
   TestBase::Run();
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
 
-    err = rsmi_dev_perf_level_get(i, &pfl);
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Performance Level:" << std::dec << (uint32_t)pfl <<
-                                                                    std::endl;
+    for (uint32_t b = RSMI_GPU_BLOCK_FIRST; b <= RSMI_GPU_BLOCK_LAST; ++b) {
+      err = rsmi_dev_error_count_get(i, static_cast<rsmi_gpu_block_t>(b), &ec);
+
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+        std::cout << "\t**Error Count for " <<
+                      GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) <<
+                               ": Not supported on this machine" << std::endl;
+      } else {
+          CHK_ERR_ASRT(err)
+          IF_VERB(STANDARD) {
+            std::cout << "\t**Error counts for " <<
+               GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) << " block: "
+                                                                 << std::endl;
+            std::cout << "\t\tCorrectable errors: " << ec.correctable_err
+                                                                 << std::endl;
+            std::cout << "\t\tUncorrectable errors: " << ec.uncorrectable_err
+                                                                 << std::endl;
+          }
+      }
     }
   }
 }

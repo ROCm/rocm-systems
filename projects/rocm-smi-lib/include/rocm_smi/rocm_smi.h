@@ -135,8 +135,10 @@ typedef enum {
   RSMI_DEV_PERF_LEVEL_LAST = RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK,
 
   RSMI_DEV_PERF_LEVEL_UNKNOWN = 0x100   //!< Unknown performance level
-} rsmi_dev_perf_level;
-
+} rsmi_dev_perf_level_t;
+/// \cond Ignore in docs.
+typedef rsmi_dev_perf_level_t rsmi_dev_perf_level;
+/// \endcond
 /**
  * @brief Available clock types.
  */
@@ -146,7 +148,10 @@ typedef enum {
 
   RSMI_CLK_TYPE_MEM,                  //!< Memory clock
   RSMI_CLK_TYPE_LAST = RSMI_CLK_TYPE_MEM
-} rsmi_clk_type;
+} rsmi_clk_type_t;
+/// \cond Ignore in docs.
+typedef rsmi_clk_type_t rsmi_clk_type;
+/// \endcond
 
 /**
  * @brief Temperature Metrics.  This enum is used to identify various
@@ -182,11 +187,14 @@ typedef enum {
   RSMI_TEMP_HIGHEST,         //!< Historical maximum temperature.
 
   RSMI_TEMP_LAST = RSMI_TEMP_HIGHEST
-} rsmi_temperature_metric;
+} rsmi_temperature_metric_t;
+/// \cond Ignore in docs.
+typedef rsmi_temperature_metric_t rsmi_temperature_metric;
+/// \endcond
 
 /**
  * @brief Pre-set Profile Selections. These bitmasks can be AND'd with the
- * ::rsmi_power_profile_status.available_profiles returned from
+ * ::rsmi_power_profile_status_t.available_profiles returned from
  * ::rsmi_dev_power_profile_presets_get() to determine which power profiles
  * are supported by the system.
  */
@@ -204,17 +212,64 @@ typedef enum {
 
   //!< Invalid power profile
   RSMI_PWR_PROF_PRST_INVALID = 0xFFFFFFFFFFFFFFFF
-} rsmi_power_profile_preset_masks;
+} rsmi_power_profile_preset_masks_t;
+/// \cond Ignore in docs.
+typedef rsmi_power_profile_preset_masks_t rsmi_power_profile_preset_masks;
+/// \endcond
+
+/**
+ * @brief This enum is used to identify different GPU blocks.
+ */
+typedef enum {
+  RSMI_GPU_BLOCK_FIRST = 0,
+
+  RSMI_GPU_BLOCK_UMC = RSMI_GPU_BLOCK_FIRST,
+  RSMI_GPU_BLOCK_SDMA,
+  RSMI_GPU_BLOCK_GFX,
+
+  RSMI_GPU_BLOCK_LAST = RSMI_GPU_BLOCK_GFX
+} rsmi_gpu_block_t;
+/// \cond Ignore in docs.
+typedef rsmi_gpu_block_t rsmi_gpu_block;
+/// \endcond
+
+/**
+ * @brief Types of memory
+ */
+typedef enum {
+  RSMI_MEM_TYPE_FIRST = 0,
+
+  RSMI_MEM_TYPE_VRAM = RSMI_MEM_TYPE_FIRST,  //!< VRAM memory
+  RSMI_MEM_TYPE_VIS_VRAM,                    //!< VRAM memory that is visible
+  RSMI_MEM_TYPE_GTT,                         //!< GTT memory
+
+  RSMI_MEM_TYPE_LAST = RSMI_MEM_TYPE_GTT
+} rsmi_memory_type_t;
+
+/**
+ * @brief This values of this enum are used as frequency identifiers.
+ */
+typedef enum {
+  RSMI_FREQ_IND_MIN = 0,  //!< Index used for the minimum frequency value
+  RSMI_FREQ_IND_MAX = 1,  //!< Index used for the maximum frequency value
+  RSMI_FREQ_IND_INVALID = 0xFFFFFFFF  //!< An invalid frequency index
+} rsmi_freq_ind_t;
+/// \cond Ignore in docs.
+typedef rsmi_freq_ind_t rsmi_freq_ind;
+/// \endcond
 
 /**
  * @brief Bitfield used in various RSMI calls
  */
-typedef uint64_t rsmi_bit_field;
+typedef uint64_t rsmi_bit_field_t;
+/// \cond Ignore in docs.
+typedef rsmi_bit_field_t rsmi_bit_field;
+/// \endcond
 
 /**
  * @brief Number of possible power profiles that a system could support
  */
-#define RSMI_MAX_NUM_POWER_PROFILES (sizeof(rsmi_bit_field) * 8)
+#define RSMI_MAX_NUM_POWER_PROFILES (sizeof(rsmi_bit_field_t) * 8)
 
 /**
  * @brief This structure contains information about which power profiles are
@@ -225,18 +280,21 @@ typedef struct {
     /**
     * Which profiles are supported by this system
     */
-    rsmi_bit_field available_profiles;
+    rsmi_bit_field_t available_profiles;
 
     /**
     * Which power profile is currently active
     */
-    rsmi_power_profile_preset_masks current;
+    rsmi_power_profile_preset_masks_t current;
 
     /**
     * How many power profiles are available
     */
     uint32_t num_profiles;
-} rsmi_power_profile_status;
+} rsmi_power_profile_status_t;
+/// \cond Ignore in docs.
+typedef rsmi_power_profile_status_t rsmi_power_profile_status;
+/// \endcond
 
 /**
  * @brief This structure holds information about clock frequencies.
@@ -257,7 +315,10 @@ typedef struct {
      * Only the first num_supported frequencies are valid.
      */
     uint64_t frequency[RSMI_MAX_NUM_FREQUENCIES];
-} rsmi_frequencies;
+} rsmi_frequencies_t;
+/// \cond Ignore in docs.
+typedef rsmi_frequencies_t rsmi_frequencies;
+/// \endcond
 
 /**
  * @brief This structure holds information about the possible PCIe
@@ -268,14 +329,18 @@ typedef struct {
     /**
      * Transfer rates (T/s) that are possible
      */
-    rsmi_frequencies transfer_rate;
+    rsmi_frequencies_t transfer_rate;
 
     /**
      * List of lanes for corresponding transfer rate.
      * Only the first num_supported bandwidths are valid.
      */
     uint32_t lanes[RSMI_MAX_NUM_FREQUENCIES];
-} rsmi_pcie_bandwidth;
+} rsmi_pcie_bandwidth_t;
+
+/// \cond Ignore in docs.
+typedef rsmi_pcie_bandwidth_t rsmi_pcie_bandwidth;
+/// \endcond
 
 /**
  * @brief This structure holds version information.
@@ -285,15 +350,20 @@ typedef struct {
     uint32_t minor;     //!< Minor version
     uint32_t patch;     //!< Patch, build  or stepping version
     const char *build;  //!< Build string
-} rsmi_version;
-
+} rsmi_version_t;
+/// \cond Ignore in docs.
+typedef rsmi_version_t rsmi_version;
+/// \endcond
 /**
  * @brief This structure represents a range (e.g., frequencies or voltages).
  */
 typedef struct {
     uint64_t lower_bound;      //!< Lower bound of range
     uint64_t upper_bound;      //!< Upper bound of range
-} rsmi_range;
+} rsmi_range_t;
+/// \cond Ignore in docs.
+typedef rsmi_range_t rsmi_range;
+/// \endcond
 
 /**
  * @brief This structure represents a point on the frequency-voltage plane.
@@ -301,55 +371,72 @@ typedef struct {
 typedef struct {
     uint64_t frequency;      //!< Frequency coordinate (in Hz)
     uint64_t voltage;        //!< Voltage coordinate (in mV)
-} rsmi_od_vddc_point;
+} rsmi_od_vddc_point_t;
+/// \cond Ignore in docs.
+typedef rsmi_od_vddc_point_t rsmi_od_vddc_point;
+/// \endcond
 
 /**
- * @brief This structure holds 2 ::rsmi_range's, one for frequency and one for
+ * @brief This structure holds 2 ::rsmi_range_t's, one for frequency and one for
  * voltage. These 2 ranges indicate the range of possible values for the
- * corresponding ::rsmi_od_vddc_point.
+ * corresponding ::rsmi_od_vddc_point_t.
  */
 typedef struct {
-    rsmi_range freq_range;  //!< The frequency range for this VDDC Curve point
-    rsmi_range volt_range;  //!< The voltage range for this VDDC Curve point
-} rsmi_freq_volt_region;
+    rsmi_range_t freq_range;  //!< The frequency range for this VDDC Curve point
+    rsmi_range_t volt_range;  //!< The voltage range for this VDDC Curve point
+} rsmi_freq_volt_region_t;
+/// \cond Ignore in docs.
+typedef rsmi_freq_volt_region_t rsmi_freq_volt_region;
+/// \endcond
 
 /**
- * ::RSMI_NUM_VOLTAGE_CURVE_POINTS number of ::rsmi_od_vddc_point's
+ * ::RSMI_NUM_VOLTAGE_CURVE_POINTS number of ::rsmi_od_vddc_point_t's
  */
 typedef struct {
     /**
-     * Array of ::RSMI_NUM_VOLTAGE_CURVE_POINTS ::rsmi_od_vddc_point's that
+     * Array of ::RSMI_NUM_VOLTAGE_CURVE_POINTS ::rsmi_od_vddc_point_t's that
      * make up the voltage frequency curve points.
      */
-    rsmi_od_vddc_point vc_points[RSMI_NUM_VOLTAGE_CURVE_POINTS];
-} rsmi_od_volt_curve;
+    rsmi_od_vddc_point_t vc_points[RSMI_NUM_VOLTAGE_CURVE_POINTS];
+} rsmi_od_volt_curve_t;
+/// \cond Ignore in docs.
+typedef rsmi_od_volt_curve_t rsmi_od_volt_curve;
+/// \endcond
 
 /**
  * @brief This structure holds the frequency-voltage values for a device.
  */
 typedef struct {
-  rsmi_range curr_sclk_range;          //!< The current SCLK frequency range
-  rsmi_range curr_mclk_range;          //!< The current MCLK frequency range;
+  rsmi_range_t curr_sclk_range;          //!< The current SCLK frequency range
+  rsmi_range_t curr_mclk_range;          //!< The current MCLK frequency range;
                                        //!< (upper bound only)
-  rsmi_range sclk_freq_limits;         //!< The range possible of SCLK values
-  rsmi_range mclk_freq_limits;         //!< The range possible of MCLK values
+  rsmi_range_t sclk_freq_limits;         //!< The range possible of SCLK values
+  rsmi_range_t mclk_freq_limits;         //!< The range possible of MCLK values
 
   /**
    * @brief The current voltage curve
    */
-  rsmi_od_volt_curve curve;
+  rsmi_od_volt_curve_t curve;
   uint32_t num_regions;                //!< The number of voltage curve regions
-} rsmi_od_volt_freq_data;
+} rsmi_od_volt_freq_data_t;
+/// \cond Ignore in docs.
+typedef rsmi_od_volt_freq_data_t rsmi_od_volt_freq_data;
+/// \endcond
 
 /**
- * @brief This values of this enum are used as frequency identifiers.
+ * @brief This structure holds error counts.
  */
-typedef enum {
-  RSMI_FREQ_IND_MIN = 0,  //!< Index used for the minimum frequency value
-  RSMI_FREQ_IND_MAX = 1,  //!< Index used for the maximum frequency value
-  RSMI_FREQ_IND_INVALID = 0xFFFFFFFF  //!< An invalid frequency index
-} rsmi_freq_ind;
+typedef struct {
+    uint64_t correctable_err;            //!< Accumulated correctable errors
+    uint64_t uncorrectable_err;          //!< Accumulated uncorrectable errors
+} rsmi_error_count_t;
 
+/*****************************************************************************/
+/** @defgroup InitShutAdmin Initialization and Shutdown
+ *  These functions are used for initialization of ROCm SMI and clean up when
+ *  done.
+ *  @{
+ */
 /**
  *  @brief Initialize ROCm SMI.
  *
@@ -370,6 +457,13 @@ rsmi_status_t rsmi_init(uint64_t init_flags);
  */
 rsmi_status_t rsmi_shut_down(void);
 
+/** @} */  // end of InitShut
+
+/*****************************************************************************/
+/** @defgroup IDQuer Identifier Queries
+ *  These functions provide identification information.
+ *  @{
+ */
 /**
  *  @brief Get the number of devices that have monitor information.
  *
@@ -385,70 +479,72 @@ rsmi_status_t rsmi_shut_down(void);
 rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
 
 /**
+ *  @brief Get the device id associated with the device with provided device
+ *  index.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p id,
+ *  this function will write the device id value to the uint64_t pointed to by
+ *  @p id. This ID is an identification of the type of device, so calling this
+ *  function for different devices will give the same value if they are kind
+ *  of device. Consequently, this function should not be used to distinguish
+ *  one device from another. rsmi_dev_pci_id_get() should be used to get a
+ *  unique identifier.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] id a pointer to uint64_t to which the device id will be
+ *  written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint64_t *id);
+
+/**
+ *  @brief Get the name of a gpu device.
+ *
+ *  @details Given a device index @p dv_ind, a pointer to a caller provided
+ *  char buffer @p name, and a length of this buffer @p len, this function
+ *  will write the name of the device (up to @p len characters) buffer @p name.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] name a pointer to a caller provided char buffer to which the
+ *  name will be written
+ *
+ *  @param[in] len the length of the caller provided buffer @p name.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
+
+/** @} */  // end of IDQuer
+
+/*****************************************************************************/
+/** @defgroup PCIeQuer PCIe Queries
+ *  These functions provide information about PCIe.
+ *  @{
+ */
+/**
  *  @brief Get the list of possible PCIe bandwidths that are available.
  *
  *  @details Given a device index @p dv_ind and a pointer to a to an
- *  ::rsmi_pcie_bandwidth structure @p bandwidth, this function will fill in
+ *  ::rsmi_pcie_bandwidth_t structure @p bandwidth, this function will fill in
  *  @p bandwidth with the possible T/s values and associated number of lanes,
  *  and indication of the current selection.
  *
  *  @param[in] dv_ind a device index
  *
  *  @param[inout] bandwidth a pointer to a caller provided
- *  ::rsmi_pcie_bandwidth structure to which the frequency information will be
+ *  ::rsmi_pcie_bandwidth_t structure to which the frequency information will be
  *  written
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
-rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth *bandwidth);
-
-/**
- * @brief Get percentage of time device is busy doing any processing
- *
- * @details Given a device index @p dv_ind, this function returns the
- * percentage of time that the specified device is busy. The device is
- * considered busy if any one or more of its sub-blocks are working, and idle
- * if none of the sub-blocks are working.
- *
- * @param[in] dv_ind a device index
- *
- * @param[inout] busy_percent a pointer to the uint32_t to which the busy
- * percent will be written
- *
- * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
- *
- */
-rsmi_status_t
-rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
-
-/**
- *  @brief Control the set of allowed PCIe bandwidths that can be used.
- *
- *  @details Given a device index @p dv_ind and a 64 bit bitmask @p bw_bitmask,
- *  this function will limit the set of allowable bandwidths. If a bit in @p
- *  bw_bitmask has a value of 1, then the frequency (as ordered in an
- *  ::rsmi_frequencies returned by ::rsmi_dev_gpu_clk_freq_get()) corresponding
- *  to that bit index will be allowed.
- *
- *  This function will change the performance level to
- *  ::RSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
- *  band_widths. Caller will need to set to ::RSMI_DEV_PERF_LEVEL_AUTO in order
- *  to get back to default state.
- *
- *  All bits with indices greater than or equal to the value of the
- *  ::rsmi_frequencies::num_supported field of ::rsmi_pcie_bandwidth will be
- *  ignored.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[in] bw_bitmask A bitmask indicating the indices of the
- *  bandwidths that are to be enabled (1) and disabled (0). Only the lowest
- *  ::rsmi_frequencies::num_supported (of ::rsmi_pcie_bandwidth) bits of
- *  this mask are relevant.
- */
-rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
+rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
 
 /**
  *  @brief Get the unique PCI device identifier associated for a device
@@ -475,7 +571,7 @@ rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
  *  sent, @p received and @p max_pkt_sz, this function will write the number
  *  of bytes sent and received in 1 second to @p sent and @p received,
  *  respectively. The maximum possible packet size will be written to
- *  @max_pkt_size.
+ *  @p max_pkt_sz.
  *
  *  @param[in] dv_ind a device index
  *
@@ -487,237 +583,236 @@ rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
  *
  *  @param[inout] max_pkt_sz a pointer to uint64_t to which the maximum packet
  *  size will be written. If pointer is NULL, it will be ignored.
- *  
+ *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
-
  */
 rsmi_status_t rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
                                     uint64_t *received, uint64_t *max_pkt_sz);
 
+/** @} */  // end of PCIeQuer
+/*****************************************************************************/
+/** @defgroup PCIeCont PCIe Control
+ *  These functions provide some control over PCIe.
+ *  @{
+ */
+
 /**
- *  @brief Get the device id associated with the device with provided device
- *  index.
+ *  @brief Control the set of allowed PCIe bandwidths that can be used.
  *
- *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p id,
- *  this function will write the device id value to the uint64_t pointed to by
- *  @p id. This ID is an identification of the type of device, so calling this
- *  function for different devices will give the same value if they are kind
- *  of device. Consequently, this function should not be used to distinguish
- *  one device from another. rsmi_dev_pci_id_get() should be used to get a
- *  unique identifier.
+ *  @details Given a device index @p dv_ind and a 64 bit bitmask @p bw_bitmask,
+ *  this function will limit the set of allowable bandwidths. If a bit in @p
+ *  bw_bitmask has a value of 1, then the frequency (as ordered in an
+ *  ::rsmi_frequencies_t returned by ::rsmi_dev_gpu_clk_freq_get()) corresponding
+ *  to that bit index will be allowed.
+ *
+ *  This function will change the performance level to
+ *  ::RSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
+ *  band_widths. Caller will need to set to ::RSMI_DEV_PERF_LEVEL_AUTO in order
+ *  to get back to default state.
+ *
+ *  All bits with indices greater than or equal to the value of the
+ *  ::rsmi_frequencies_t::num_supported field of ::rsmi_pcie_bandwidth_t will be
+ *  ignored.
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] id a pointer to uint64_t to which the device id will be
- *  written
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
+ *  @param[in] bw_bitmask A bitmask indicating the indices of the
+ *  bandwidths that are to be enabled (1) and disabled (0). Only the lowest
+ *  ::rsmi_frequencies_t::num_supported (of ::rsmi_pcie_bandwidth_t) bits of
+ *  this mask are relevant.
  */
-rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint64_t *id);
+rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
 
+/** @} */  // end of PCIeCont
 
+/*****************************************************************************/
+/** @defgroup PowerQuer Power Queries
+ *  These functions provide information about power usage.
+ *  @{
+ */
 /**
- *  @brief Get the performance level of the device with provided
+ *  @brief Get the average power consumption of the device with provided
  *  device index.
  *
- *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p
- *  perf, this function will write the ::rsmi_dev_perf_level to the uint32_t
- *  pointed to by @p perf
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] perf a pointer to ::rsmi_dev_perf_level to which the
- *  performance level will be written
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t rsmi_dev_perf_level_get(uint32_t dv_ind,
-                                                   rsmi_dev_perf_level *perf);
-
-/**
- *  @brief Set the PowerPlay performance level associated with the device with
- *  provided device index with the provided value.
- *
- *  @details Given a device index @p dv_ind and an ::rsmi_dev_perf_level @p
- *  perf_level, this function will set the PowerPlay performance level for the
- *  device to the value @p perf_lvl.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[in] perf_lvl the value to which the performance level should be set
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t
-rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level perf_lvl);
-
-/**
- *  @brief Get the overdrive percent associated with the device with provided
- *  device index.
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p od,
- *  this function will write the overdrive percentage to the uint32_t pointed
- *  to by @p od
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] od a pointer to uint32_t to which the overdrive percentage
- *  will be written
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od);
-
-
-/**
- *  @brief Set the overdrive percent associated with the device with provided
- *  device index with the provided value. See details for WARNING.
- *
- *  @details Given a device index @p dv_ind and an overdrive level @p od,
- *  this function will set the overdrive level for the device to the value
- *  @p od. The overdrive level is an integer value between 0 and 20, inclusive,
- *  which represents the overdrive percentage; e.g., a value of 5 specifies
- *  an overclocking of 5%.
- *
- *  The overdrive level is specific to the gpu system clock.
- *
- *  The overdrive level is the percentage above the maximum Performance Level
- *  to which overclocking will be limited. The overclocking percentage does
- *  not apply to clock speeds other than the maximum. This percentage is
- *  limited to 20%.
- *
- *   ******WARNING******
- *  Operating your AMD GPU outside of official AMD specifications or outside of
- *  factory settings, including but not limited to the conducting of
- *  overclocking (including use of this overclocking software, even if such
- *  software has been directly or indirectly provided by AMD or otherwise
- *  affiliated in any way with AMD), may cause damage to your AMD GPU, system
- *  components and/or result in system failure, as well as cause other problems.
- *  DAMAGES CAUSED BY USE OF YOUR AMD GPU OUTSIDE OF OFFICIAL AMD SPECIFICATIONS
- *  OR OUTSIDE OF FACTORY SETTINGS ARE NOT COVERED UNDER ANY AMD PRODUCT
- *  WARRANTY AND MAY NOT BE COVERED BY YOUR BOARD OR SYSTEM MANUFACTURER'S
- *  WARRANTY. Please use this utility with caution.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[in] od the value to which the overdrive level should be set
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od);
-
-/**
- *  @brief Get the list of possible system clock speeds of device for a
- *  specified clock type.
- *
- *  @details Given a device index @p dv_ind, a clock type @p clk_type, and a
- *  pointer to a to an ::rsmi_frequencies structure @p f, this function will
- *  fill in @p f with the possible clock speeds, and indication of the current
- *  clock speed selection.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[in] clk_type the type of clock for which the frequency is desired
- *
- *  @param[inout] f a pointer to a caller provided ::rsmi_frequencies structure
- *  to which the frequency information will be written
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
-                                 rsmi_clk_type clk_type, rsmi_frequencies *f);
-
-/**
- * @brief Control the set of allowed frequencies that can be used for the
- * specified clock.
- *
- * @details Given a device index @p dv_ind, a clock type @p clk_type, and a
- * 64 bit bitmask @p freq_bitmask, this function will limit the set of
- * allowable frequencies. If a bit in @p freq_bitmask has a value of 1, then
- * the frequency (as ordered in an ::rsmi_frequencies returned by
- * rsmi_dev_gpu_clk_freq_get()) corresponding to that bit index will be
- * allowed.
- *
- * This function will change the performance level to
- * ::RSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
- * frequencies. Caller will need to set to ::RSMI_DEV_PERF_LEVEL_AUTO in order
- * to get back to default state.
- *
- * All bits with indices greater than or equal to
- * ::rsmi_frequencies::num_supported will be ignored.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[in] clk_type the type of clock for which the set of frequencies
- *  will be modified
- *
- *  @param[in] freq_bitmask A bitmask indicating the indices of the
- *  frequencies that are to be enabled (1) and disabled (0). Only the lowest
- *  ::rsmi_frequencies.num_supported bits of this mask are relevant.
- */
-rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
-                               rsmi_clk_type clk_type, uint64_t freq_bitmask);
-/**
- *  @brief Get the name of a gpu device.
- *
- *  @details Given a device index @p dv_ind, a pointer to a caller provided
- *  char buffer @p name, and a length of this buffer @p len, this function
- *  will write the name of the device (up to @p len characters) buffer @p name.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] name a pointer to a caller provided char buffer to which the
- *  name will be written
- *
- *  @param[in] len the length of the caller provided buffer @p name.
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
-
-/**
- *  @brief Get the temperature metric value for the specified metric, from the
- *  specified temperature sensor on the specified device.
- *
- *  @details Given a device index @p dv_ind, a 0-based sensor index
+ *  @details Given a device index @p dv_ind and a pointer to a uint64_t
+ *  @p power, this function will write the current average power consumption to
+ *  the uint64_t in microwatts pointed to by @p power. This function requires
+ *  root privilege.
  *
  *  @param[in] dv_ind a device index
  *
  *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
  *  If a device has more than one sensor, it could be greater than 0.
  *
- *  @param[in] metric enum indicated which temperature value should be
- *  retrieved
- *
- *  @param[inout] temperature a pointer to int64_t to which the temperature
- *  will be written, in millidegrees Celcius.
+ *  @param[inout] power a pointer to uint64_t to which the average power
+ *  consumption will be written
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
-                        rsmi_temperature_metric metric, int64_t *temperature);
+rsmi_status_t
+rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
+
 /**
- * @brief Reset the fan to automatic driver control
+ *  @brief Get the cap on power which, when reached, causes the system to take
+ *  action to reduce power.
  *
- * @details This function returns control of the fan to the system
+ *  @details When power use rises above the value @p power, the system will
+ *  take action to reduce power use. The power level returned through
+ *  @p power will be in microWatts.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
+ *  If a device has more than one sensor, it could be greater than 0.
+ *
+ *  @param[inout] cap a pointer to a uint64_t that indicates the power cap,
+ *  in microwatts
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap);
+
+/**
+ *  @brief Get the range of valid values for the power cap
+ *
+ *  @details This function will return the maximum possible valid power cap
+ *  @p max and the minimum possible valid power cap @p min
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
+ *  If a device has more than one sensor, it could be greater than 0.
+ *
+ *  @param[inout] max a pointer to a uint64_t that indicates the maximum
+ *  possible power cap, in microwatts
+ *
+ *  @param[inout] min a pointer to a uint64_t that indicates the minimum
+ *  possible power cap, in microwatts
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind,
+                                                uint64_t *max, uint64_t *min);
+
+/** @} */  // end of PowerQuer
+
+/*****************************************************************************/
+/** @defgroup PowerCont Power Control
+ *  These functions provide ways to control power usage.
+ *  @{
+ */
+/**
+ *  @brief Set the power cap value
+ *
+ *  @details This function will set the power cap to the provided value @p cap.
+ *  @p cap must be between the minimum and maximum power cap values set by the
+ *  system, which can be obtained from ::rsmi_dev_power_cap_range_get.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
+ *  If a device has more than one sensor, it could be greater than 0.
+ *
+ *  @param[inout] cap a uint64_t that indicates the desired power cap, in
+ *  microwatts
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
+
+/**
+ * @brief Set the power profile
+ *
+ * @details Given a device index @p dv_ind, a sensor index sensor_ind, and a
+ * @p profile, this function will attempt to set the current profile to the
+ * provided profile. The provided profile must be one of the currently
+ * supported profiles, as indicated by a call to
+ * ::rsmi_dev_power_profile_presets_get()
  *
  * @param[in] dv_ind a device index
  *
  * @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
  * If a device has more than one sensor, it could be greater than 0.
  *
+ * @param[in] profile a ::rsmi_power_profile_preset_masks_t that hold the mask
+ * of the desired new power profile
+ *
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
  */
-rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind);
+rsmi_status_t
+rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t sensor_ind,
+                                   rsmi_power_profile_preset_masks_t profile);
+/** @} */  // end of PowerCont
+/*****************************************************************************/
 
+
+
+/*****************************************************************************/
+/** @defgroup MemQuer Memory Queries
+ *  These functions provide information about memory systems.
+ *  @{
+ */
+
+/**
+ *  @brief Get the total amount of memory that exists
+ *
+ *  @details Given a device index @p dv_ind, a type of memory @p mem_type, and
+ *  a pointer to a uint64_t @p total, this function will write the total amount
+ *  of @p mem_type memory that exists to the location pointed to by @p total.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] mem_type The type of memory for which the total amount will be
+ *  found
+ *
+ *  @param[inout] total a pointer to uint64_t to which the total amount of
+ *  memory will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
+                                                             uint64_t *total);
+
+/**
+ *  @brief Get the current memory usage
+ *
+ *  @details Given a device index @p dv_ind, a type of memory @p mem_type, and
+ *  a pointer to a uint64_t @p usage, this function will write the amount of
+ *  @p mem_type memory that that is currently being used to the location
+ *  pointed to by @p total.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] mem_type The type of memory for which the amount being used will
+ *  be found
+ *
+ *  @param[inout] used a pointer to uint64_t to which the amount of memory
+ *  currently being used will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
+                                                              uint64_t *used);
+
+/** @} */  // end of MemQuer
+
+/** @defgroup PhysQuer Physcial State Queries
+ *  These functions provide information about the physical characteristics of
+ *  the device.
+ *  @{
+ */
 /**
  *  @brief Get the fan speed in RPMs of the device with the specified device
  *  index and 0-based sensor index.
@@ -788,6 +883,52 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
                                     uint32_t sensor_ind, uint64_t *max_speed);
 
 /**
+ *  @brief Get the temperature metric value for the specified metric, from the
+ *  specified temperature sensor on the specified device.
+ *
+ *  @details Given a device index @p dv_ind, a 0-based sensor index
+ *  @p sensor_ind, a ::rsmi_temperature_metric_t @p metric and a pointer to an
+ *  int64_t @p temperature, this function will write the value of the metric
+ *  indicated by @p metric to the memory location @p temperature.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
+ *  If a device has more than one sensor, it could be greater than 0.
+ *
+ *  @param[in] metric enum indicated which temperature value should be
+ *  retrieved
+ *
+ *  @param[inout] temperature a pointer to int64_t to which the temperature
+ *  will be written, in millidegrees Celcius.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
+                      rsmi_temperature_metric_t metric, int64_t *temperature);
+/** @} */  // end of PhysQuer
+
+/*****************************************************************************/
+/** @defgroup PhysCont Physcial State Control
+ *  These functions provide control over the physical state of a device.
+ *  @{
+ */
+/**
+ * @brief Reset the fan to automatic driver control
+ *
+ * @details This function returns control of the fan to the system
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
+ * If a device has more than one sensor, it could be greater than 0.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind);
+
+/**
  * @brief Set the fan speed for the specified device with the provided speed,
  * in RPMs.
  *
@@ -808,51 +949,118 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
 rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind,
                                                               uint64_t speed);
 
+/** @} */  // end of PhysCont
+/*****************************************************************************/
+/** @defgroup PerfQuer Clock, Power and Performance Queries
+ *  These functions provide information about clock frequencies and
+ *  performance.
+ *  @{
+ */
+
+/**
+ * @brief Get percentage of time device is busy doing any processing
+ *
+ * @details Given a device index @p dv_ind, this function returns the
+ * percentage of time that the specified device is busy. The device is
+ * considered busy if any one or more of its sub-blocks are working, and idle
+ * if none of the sub-blocks are working.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[inout] busy_percent a pointer to the uint32_t to which the busy
+ * percent will be written
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
+ *
+ */
+rsmi_status_t
+rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
+
+/**
+ *  @brief Get the performance level of the device with provided
+ *  device index.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p
+ *  perf, this function will write the ::rsmi_dev_perf_level_t to the uint32_t
+ *  pointed to by @p perf
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] perf a pointer to ::rsmi_dev_perf_level_t to which the
+ *  performance level will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_perf_level_get(uint32_t dv_ind,
+                                                 rsmi_dev_perf_level_t *perf);
+
+/**
+ *  @brief Get the overdrive percent associated with the device with provided
+ *  device index.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p od,
+ *  this function will write the overdrive percentage to the uint32_t pointed
+ *  to by @p od
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] od a pointer to uint32_t to which the overdrive percentage
+ *  will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od);
+
+/**
+ *  @brief Get the list of possible system clock speeds of device for a
+ *  specified clock type.
+ *
+ *  @details Given a device index @p dv_ind, a clock type @p clk_type, and a
+ *  pointer to a to an ::rsmi_frequencies_t structure @p f, this function will
+ *  fill in @p f with the possible clock speeds, and indication of the current
+ *  clock speed selection.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] clk_type the type of clock for which the frequency is desired
+ *
+ *  @param[inout] f a pointer to a caller provided ::rsmi_frequencies_t structure
+ *  to which the frequency information will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
+                             rsmi_clk_type_t clk_type, rsmi_frequencies_t *f);
+
 /**
  * @brief This function retrieves the voltage/frequency curve information
  *
  * @details Given a device index @p dv_ind and a pointer to a
- * ::rsmi_od_volt_freq_data structure @p odv, this function will populate @p
- * odv. See ::rsmi_od_volt_freq_data for more details.
+ * ::rsmi_od_volt_freq_data_t structure @p odv, this function will populate @p
+ * odv. See ::rsmi_od_volt_freq_data_t for more details.
  *
  * @param[in] dv_ind a device index
  *
- * @param[in] odv a pointer to an ::rsmi_od_volt_freq_data structure 
+ * @param[in] odv a pointer to an ::rsmi_od_volt_freq_data_t structure 
  *
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
 rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind,
-                                                 rsmi_od_volt_freq_data *odv);
-
-/**
- * @brief Set the frequency limits for the specified clock
- *
- * @details Given a device index @p dv_ind, a clock type (::rsmi_clk_type)
- * @p clk, and a pointer to a ::rsmi_range @p range containing the desired
- * upper and lower frequency limits, this function will attempt to set the
- * frequency limits to those specified in @p range.
- *
- * @param[in] dv_ind a device index
- *
- * @param[in] clk The clock type for which the limits should be imposed.
- *
- * @param[in] range A pointer to the ::rsmi_range containing the desired limits
- *
- * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- */
-rsmi_status_t rsmi_dev_od_freq_range_set(uint32_t dv_ind, rsmi_clk_type clk,
-                                                           rsmi_range *range);
+                                               rsmi_od_volt_freq_data_t *odv);
 
 /**
  * @brief This function will retrieve the current valid regions in the 
  * frequency/voltage space.
  *
  * @details Given a device index @p dv_ind, a pointer to an unsigned integer
- * @p num_regions and a buffer of ::rsmi_freq_volt_region structures, @p
+ * @p num_regions and a buffer of ::rsmi_freq_volt_region_t structures, @p
  * buffer, this function will populate @p buffer with the current
  * frequency-volt space regions. The caller should assign @p buffer to memory
  * that can be written to by this function. The caller should also
- * indicate the number of ::rsmi_freq_volt_region structures that can safely
+ * indicate the number of ::rsmi_freq_volt_region_t structures that can safely
  * be written to @p buffer in @p num_regions.
  * 
  * The number of regions to expect this function provide (@p num_regions) can
@@ -861,132 +1069,41 @@ rsmi_status_t rsmi_dev_od_freq_range_set(uint32_t dv_ind, rsmi_clk_type clk,
  * @param[in] dv_ind a device index
  *
  * @param[inout] num_regions As input, this is the number of
- * ::rsmi_freq_volt_region structures that can be written to @p buffer. As
- * output, this is the number of ::rsmi_freq_volt_region structures that were
+ * ::rsmi_freq_volt_region_t structures that can be written to @p buffer. As
+ * output, this is the number of ::rsmi_freq_volt_region_t structures that were
  * actually written.
  * 
  * @param[inout] buffer a caller provided buffer to which
- * ::rsmi_freq_volt_region structures will be written
+ * ::rsmi_freq_volt_region_t structures will be written
  *
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
 rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
-                        uint32_t *num_regions, rsmi_freq_volt_region *buffer);
-
-/**
- *  @brief Get the average power consumption of the device with provided
- *  device index.
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t
- *  @p power, this function will write the current average power consumption to
- *  the uint64_t in microwatts pointed to by @p power. This function requires
- *  root privilege.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- *  If a device has more than one sensor, it could be greater than 0.
- *
- *  @param[inout] power a pointer to uint64_t to which the average power
- *  consumption will be written
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t
-rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
-
-/**
- *  @brief Get the cap on power which, when reached, causes the system to take
- *  action to reduce power.
- *
- *  @details When power use rises above the value @p power, the system will
- *  take action to reduce power use. The power level returned through
- *  @p power will be in microWatts.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- *  If a device has more than one sensor, it could be greater than 0.
- *
- *  @param[inout] cap a pointer to a uint64_t that indicates the power cap,
- *  in microwatts
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t
-rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap);
-
-/**
- *  @brief Get the range of valid values for the power cap
- *
- *  @details This function will return the maximum possible valid power cap
- *  @p max and the minimum possible valid power cap @p min
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- *  If a device has more than one sensor, it could be greater than 0.
- *
- *  @param[inout] max a pointer to a uint64_t that indicates the maximum
- *  possible power cap, in microwatts
- *
- *  @param[inout] min a pointer to a uint64_t that indicates the minimum
- *  possible power cap, in microwatts
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t
-rsmi_dev_power_cap_range_get(uint32_t dv_ind, uint32_t sensor_ind,
-                                                uint64_t *max, uint64_t *min);
-
-/**
- *  @brief Set the power cap value
- *
- *  @details This function will set the power cap to the provided value @p cap.
- *  @p cap must be between the minimum and maximum power cap values set by the
- *  system, which can be obtained from ::rsmi_dev_power_cap_range_get.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- *  If a device has more than one sensor, it could be greater than 0.
- *
- *  @param[inout] cap a uint64_t that indicates the desired power cap, in
- *  microwatts
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *
- */
-rsmi_status_t
-rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
-
+                      uint32_t *num_regions, rsmi_freq_volt_region_t *buffer);
 
 /**
  * @brief Get the list of available preset power profiles and an indication of
  * which profile is currently active.
  *
  * @details Given a device index @p dv_ind and a pointer to a
- * ::rsmi_power_profile_status @p status, this function will set the bits of
- * the ::rsmi_power_profile_status.available_profiles bit field of @p status to
+ * ::rsmi_power_profile_status_t @p status, this function will set the bits of
+ * the ::rsmi_power_profile_status_t.available_profiles bit field of @p status to
  * 1 if the profile corresponding to the respective
- * ::rsmi_power_profile_preset_masks profiles are enabled. For example, if both
+ * ::rsmi_power_profile_preset_masks_t profiles are enabled. For example, if both
  * the VIDEO and VR power profiles are available selections, then
  * ::RSMI_PWR_PROF_PRST_VIDEO_MASK AND'ed with
- * ::rsmi_power_profile_status.available_profiles will be non-zero as will
+ * ::rsmi_power_profile_status_t.available_profiles will be non-zero as will
  * ::RSMI_PWR_PROF_PRST_VR_MASK AND'ed with
- * ::rsmi_power_profile_status.available_profiles. Additionally,
- * ::rsmi_power_profile_status.current will be set to the
- * ::rsmi_power_profile_preset_masks of the profile that is currently active.
+ * ::rsmi_power_profile_status_t.available_profiles. Additionally,
+ * ::rsmi_power_profile_status_t.current will be set to the
+ * ::rsmi_power_profile_preset_masks_t of the profile that is currently active.
  *
  * @param[in] dv_ind a device index
  *
  * @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
  * If a device has more than one sensor, it could be greater than 0.
  *
- * @param[inout] status a pointer to ::rsmi_power_profile_status that will be
+ * @param[inout] status a pointer to ::rsmi_power_profile_status_t that will be
  * populated by a call to this function
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
@@ -994,31 +1111,145 @@ rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
  */
 rsmi_status_t
 rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
-                                           rsmi_power_profile_status *status);
+                                         rsmi_power_profile_status_t *status);
 
+/** @} */  // end of PerfQuer
+/*****************************************************************************/
+
+/** @defgroup PerfCont Clock, Power and Performance Control
+ *  These functions provide control over clock frequencies, power and
+ *  performance.
+ *  @{
+ */
 /**
- * @brief Set the power profile
+ *  @brief Set the PowerPlay performance level associated with the device with
+ *  provided device index with the provided value.
  *
- * @details Given a device index @p dv_ind, a sensor index sensor_ind, and a
- * @p profile, this function will attempt to set the current profile to the
- * provided profile. The provided profile must be one of the currently
- * supported profiles, as indicated by a call to
- * ::rsmi_dev_power_profile_presets_get()
+ *  @details Given a device index @p dv_ind and an ::rsmi_dev_perf_level_t @p
+ *  perf_level, this function will set the PowerPlay performance level for the
+ *  device to the value @p perf_lvl.
  *
- * @param[in] dv_ind a device index
+ *  @param[in] dv_ind a device index
  *
- * @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- * If a device has more than one sensor, it could be greater than 0.
+ *  @param[in] perf_lvl the value to which the performance level should be set
  *
- * @param[in] profile a ::rsmi_power_profile_preset_masks that hold the mask
- * of the desired new power profile
- *
- * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
 rsmi_status_t
-rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t sensor_ind,
-                                     rsmi_power_profile_preset_masks profile);
+rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
+
+/**
+ *  @brief Set the overdrive percent associated with the device with provided
+ *  device index with the provided value. See details for WARNING.
+ *
+ *  @details Given a device index @p dv_ind and an overdrive level @p od,
+ *  this function will set the overdrive level for the device to the value
+ *  @p od. The overdrive level is an integer value between 0 and 20, inclusive,
+ *  which represents the overdrive percentage; e.g., a value of 5 specifies
+ *  an overclocking of 5%.
+ *
+ *  The overdrive level is specific to the gpu system clock.
+ *
+ *  The overdrive level is the percentage above the maximum Performance Level
+ *  to which overclocking will be limited. The overclocking percentage does
+ *  not apply to clock speeds other than the maximum. This percentage is
+ *  limited to 20%.
+ *
+ *   ******WARNING******
+ *  Operating your AMD GPU outside of official AMD specifications or outside of
+ *  factory settings, including but not limited to the conducting of
+ *  overclocking (including use of this overclocking software, even if such
+ *  software has been directly or indirectly provided by AMD or otherwise
+ *  affiliated in any way with AMD), may cause damage to your AMD GPU, system
+ *  components and/or result in system failure, as well as cause other problems.
+ *  DAMAGES CAUSED BY USE OF YOUR AMD GPU OUTSIDE OF OFFICIAL AMD SPECIFICATIONS
+ *  OR OUTSIDE OF FACTORY SETTINGS ARE NOT COVERED UNDER ANY AMD PRODUCT
+ *  WARRANTY AND MAY NOT BE COVERED BY YOUR BOARD OR SYSTEM MANUFACTURER'S
+ *  WARRANTY. Please use this utility with caution.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] od the value to which the overdrive level should be set
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od);
+
+/**
+ * @brief Control the set of allowed frequencies that can be used for the
+ * specified clock.
+ *
+ * @details Given a device index @p dv_ind, a clock type @p clk_type, and a
+ * 64 bit bitmask @p freq_bitmask, this function will limit the set of
+ * allowable frequencies. If a bit in @p freq_bitmask has a value of 1, then
+ * the frequency (as ordered in an ::rsmi_frequencies_t returned by
+ * rsmi_dev_gpu_clk_freq_get()) corresponding to that bit index will be
+ * allowed.
+ *
+ * This function will change the performance level to
+ * ::RSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
+ * frequencies. Caller will need to set to ::RSMI_DEV_PERF_LEVEL_AUTO in order
+ * to get back to default state.
+ *
+ * All bits with indices greater than or equal to
+ * ::rsmi_frequencies_t::num_supported will be ignored.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] clk_type the type of clock for which the set of frequencies
+ *  will be modified
+ *
+ *  @param[in] freq_bitmask A bitmask indicating the indices of the
+ *  frequencies that are to be enabled (1) and disabled (0). Only the lowest
+ *  ::rsmi_frequencies_t.num_supported bits of this mask are relevant.
+ */
+rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
+                             rsmi_clk_type_t clk_type, uint64_t freq_bitmask);
+
+/**
+ * @brief Set the frequency limits for the specified clock
+ *
+ * @details Given a device index @p dv_ind, a clock type (::rsmi_clk_type_t)
+ * @p clk, and a pointer to a ::rsmi_range_t @p range containing the desired
+ * upper and lower frequency limits, this function will attempt to set the
+ * frequency limits to those specified in @p range.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[in] clk The clock type for which the limits should be imposed.
+ *
+ * @param[in] range A pointer to the ::rsmi_range_t containing the desired limits
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t rsmi_dev_od_freq_range_set(uint32_t dv_ind, rsmi_clk_type_t clk,
+                                                           rsmi_range_t *range);
+
+/** @} */  // end of PerfCont
+
+/*****************************************************************************/
+/** @defgroup VersQuer Version Queries
+ *  These functions provide version information about various subsystems.
+ *  @{
+ */
+
+/**
+ * @brief Get the build version information for the currently running build of
+ * RSMI.
+ * 
+ * @details  Get the major, minor, patch and build string for RSMI build
+ * currently in use through @p version
+ * 
+ * @param[inout] version A pointer to an ::rsmi_version_t structure that will
+ * be updated with the version information upon return.
+ * 
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
+ * 
+ */
+rsmi_status_t
+rsmi_version_get(rsmi_version_t *version);
 
 /**
  * @brief Get the VBIOS identifer string
@@ -1042,6 +1273,36 @@ rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t sensor_ind,
 rsmi_status_t
 rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len);
 
+/** @} */  // end of VersQuer
+
+/*****************************************************************************/
+/** @defgroup ErrQuer Error Queries
+ *  These functions provide error information about RSMI calls as well as
+ *  device errors.
+ *  @{
+ */
+
+/**
+ * @brief Retrieve the error counts for a GPU block
+ * 
+ * @details Given a device index @p dv_ind, an ::rsmi_gpu_block_t @p block and a
+ * pointer to an ::rsmi_error_count_t @p ec, this function will write the error
+ * count values for the GPU block indicated by @p block to memory pointed to by
+ * @p ec.
+ * 
+ * @param[in] dv_ind a device index
+ * 
+ * @param[in] block The block for which error counts should be retrieved
+ * 
+ * @param[inout] ec A pointer to an ::rsmi_error_count_t to which the error
+ * counts should be written
+ * 
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ * 
+ */
+rsmi_status_t rsmi_dev_error_count_get(uint32_t dv_ind,
+                              rsmi_gpu_block_t block, rsmi_error_count_t *ec);
+
 /**
  * @brief Get a description of a provided RSMI error status
  *
@@ -1059,21 +1320,7 @@ rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len);
 rsmi_status_t
 rsmi_status_string(rsmi_status_t status, const char **status_string);
 
-/**
- * @brief Get the build version information for the currently running build of
- * RSMI.
- * 
- * @details  Get the major, minor, patch and build string for RSMI build
- * currently in use through @p version
- * 
- * @param[inout] version A pointer to an ::rsmi_version structure that will
- * be updated with the version information upon return.
- * 
- * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
- * 
- */
-rsmi_status_t
-rsmi_version_get(rsmi_version *version);
+/** @} */  // end of ErrQuer
 
 #ifdef __cplusplus
 }

@@ -85,7 +85,7 @@ void TestFrequenciesRead::Close() {
 }
 
 
-static void print_frequencies(rsmi_frequencies *f, uint32_t *l = nullptr) {
+static void print_frequencies(rsmi_frequencies_t *f, uint32_t *l = nullptr) {
   assert(f != nullptr);
   for (uint32_t j = 0; j < f->num_supported; ++j) {
     std::cout << "\t**  " << j << ": " << f->frequency[j];
@@ -104,8 +104,8 @@ static void print_frequencies(rsmi_frequencies *f, uint32_t *l = nullptr) {
 
 void TestFrequenciesRead::Run(void) {
   rsmi_status_t err;
-  rsmi_frequencies f;
-  rsmi_pcie_bandwidth b;
+  rsmi_frequencies_t f;
+  rsmi_pcie_bandwidth_t b;
 
   TestBase::Run();
 

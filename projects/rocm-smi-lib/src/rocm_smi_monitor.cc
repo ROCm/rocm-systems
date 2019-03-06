@@ -1,7 +1,5 @@
 /*
  * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *

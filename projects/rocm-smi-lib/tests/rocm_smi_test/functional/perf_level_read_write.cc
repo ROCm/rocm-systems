@@ -54,7 +54,8 @@
 #include "rocm_smi_test/functional/perf_level_read_write.h"
 #include "rocm_smi_test/test_common.h"
 
-static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlNameMap = {
+static const std::map<rsmi_dev_perf_level_t, const char *>
+   kDevPerfLvlNameMap = {
     {RSMI_DEV_PERF_LEVEL_AUTO, "RSMI_DEV_PERF_LEVEL_AUTO"},
     {RSMI_DEV_PERF_LEVEL_LOW, "RSMI_DEV_PERF_LEVEL_LOW"},
     {RSMI_DEV_PERF_LEVEL_HIGH, "RSMI_DEV_PERF_LEVEL_HIGH"},
@@ -102,7 +103,7 @@ void TestPerfLevelReadWrite::Close() {
 
 void TestPerfLevelReadWrite::Run(void) {
   rsmi_status_t ret;
-  rsmi_dev_perf_level pfl, orig_pfl;
+  rsmi_dev_perf_level_t pfl, orig_pfl;
 
   TestBase::Run();
 
@@ -125,11 +126,11 @@ void TestPerfLevelReadWrite::Run(void) {
 
       IF_VERB(STANDARD) {
         std::cout << "Set Performance Level to " <<
-            kDevPerfLvlNameMap.at(static_cast<rsmi_dev_perf_level>(pfl_i)) <<
+            kDevPerfLvlNameMap.at(static_cast<rsmi_dev_perf_level_t>(pfl_i)) <<
                                                             " ..." << std::endl;
       }
       ret = rsmi_dev_perf_level_set(dv_ind,
-                                       static_cast<rsmi_dev_perf_level>(pfl_i));
+                                     static_cast<rsmi_dev_perf_level_t>(pfl_i));
       CHK_ERR_ASRT(ret)
       ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
       CHK_ERR_ASRT(ret)

@@ -1,4 +1,4 @@
-/*   ROC Runtime Conformance Release License
+/*
  * =============================================================================
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
@@ -59,6 +59,7 @@
 namespace amd {
 namespace smi {
 
+// Sysfs file names
 static const char *kDevPerfLevelFName = "power_dpm_force_performance_level";
 static const char *kDevDevIDFName = "device";
 static const char *kDevOverDriveLevelFName = "pp_sclk_od";
@@ -70,6 +71,17 @@ static const char *kDevPowerODVoltageFName = "pp_od_clk_voltage";
 static const char *kDevUsageFName = "gpu_busy_percent";
 static const char *kDevVBiosVerFName = "vbios_version";
 static const char *kDevPCIEThruPutFName = "pcie_bw";
+static const char *kDevErrCntSDMAFName = "ras/sdma_err_count";
+static const char *kDevErrCntUMCFName = "ras/umc_err_count";
+static const char *kDevErrCntGFXFName = "ras/gfx_err_count";
+static const char *kDevMemTotGTTFName = "mem_info_gtt_total";
+static const char *kDevMemTotVisVRAMFName = "mem_info_vis_vram_total";
+static const char *kDevMemTotVRAMFName = "mem_info_vram_total";
+static const char *kDevMemUsedGTTFName = "mem_info_gtt_used";
+static const char *kDevMemUsedVisVRAMFName = "mem_info_vis_vram_used";
+static const char *kDevMemUsedVRAMFName = "mem_info_vram_used";
+
+// Strings that are found within sysfs files
 static const char *kDevPerfLevelAutoStr = "auto";
 static const char *kDevPerfLevelLowStr = "low";
 static const char *kDevPerfLevelHighStr = "high";
@@ -92,6 +104,15 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevPowerODVoltage, kDevPowerODVoltageFName},
     {kDevVBiosVer, kDevVBiosVerFName},
     {kDevPCIEThruPut, kDevPCIEThruPutFName},
+    {kDevErrCntSDMA, kDevErrCntSDMAFName},
+    {kDevErrCntUMC, kDevErrCntUMCFName},
+    {kDevErrCntGFX, kDevErrCntGFXFName},
+    {kDevMemTotGTT, kDevMemTotGTTFName},
+    {kDevMemTotVisVRAM, kDevMemTotVisVRAMFName},
+    {kDevMemTotVRAM, kDevMemTotVRAMFName},
+    {kDevMemUsedGTT, kDevMemUsedGTTFName},
+    {kDevMemUsedVisVRAM, kDevMemUsedVisVRAMFName},
+    {kDevMemUsedVRAM, kDevMemUsedVRAMFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -287,8 +308,7 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
   return 0;
 }
 
-#if 0
-int Device::readDevInfo(DevInfoTypes type, uint32_t *val) {
+int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
   assert(val != nullptr);
 
   std::string tempStr;
@@ -302,9 +322,15 @@ int Device::readDevInfo(DevInfoTypes type, uint32_t *val) {
 
     case kDevUsage:
     case kDevOverDriveLevel:
+    case kDevMemTotGTT:
+    case kDevMemTotVisVRAM:
+    case kDevMemTotVRAM:
+    case kDevMemUsedGTT:
+    case kDevMemUsedVisVRAM:
+    case kDevMemUsedVRAM:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
-      *val = std::stoi(tempStr, 0);
+      *val = std::stoul(tempStr, 0);
       break;
 
     default:
@@ -312,7 +338,7 @@ int Device::readDevInfo(DevInfoTypes type, uint32_t *val) {
   }
   return 0;
 }
-#endif
+
 int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
   assert(val != nullptr);
 
@@ -322,6 +348,9 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
     case kDevPCIEClk:
     case kDevPowerProfileMode:
     case kDevPowerODVoltage:
+    case kDevErrCntSDMA:
+    case kDevErrCntUMC:
+    case kDevErrCntGFX:
       return readDevInfoMultiLineStr(type, val);
       break;
 
