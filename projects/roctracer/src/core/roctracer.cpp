@@ -441,8 +441,8 @@ typedef std::recursive_mutex memory_pool_mutex_t;
 memory_pool_mutex_t memory_pool_mutex;
 
 Loader::mutex_t Loader::mutex_;
-HipLoader* HipLoader::instance_;
-HccLoader* HccLoader::instance_;
+std::atomic<HipLoader*> HipLoader::instance_{};
+std::atomic<HccLoader*> HccLoader::instance_{};
 }
 
 proxy::Tracker* proxy::Tracker::instance_ = NULL;

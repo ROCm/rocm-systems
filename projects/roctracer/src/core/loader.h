@@ -43,9 +43,13 @@ class HipLoader : protected Loader {
   typedef decltype(hipKernelNameRef) KernelNameRef_t;
 
   static HipLoader& Instance() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ == NULL) {
-      instance_ = new HipLoader();
+    HipLoader* obj = instance_.load(std::memory_order_acquire);
+    if (obj == NULL) {
+      std::lock_guard<mutex_t> lck(mutex_);
+      if (instance_.load(std::memory_order_relaxed) == NULL) {
+        obj = new HipLoader();
+        instance_.store(obj, std::memory_order_release);
+      }
     }
     return *instance_;
   }
@@ -65,7 +69,7 @@ class HipLoader : protected Loader {
   KernelNameRef_t* KernelNameRef;
 
   private:
-  static HipLoader* instance_;
+  static std::atomic<HipLoader*> instance_;
 };
 
 // HCC runtime library loader class
@@ -80,11 +84,15 @@ class HccLoader : protected Loader {
   static HccLoader* GetRef() { return instance_; }
 
   static HccLoader& Instance() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ == NULL) {
-      instance_ = new HccLoader();
+    HccLoader* obj = instance_.load(std::memory_order_acquire);
+    if (obj == NULL) {
+      std::lock_guard<mutex_t> lck(mutex_);
+      if (instance_.load(std::memory_order_relaxed) == NULL) {
+        obj = new HccLoader();
+        instance_.store(obj, std::memory_order_release);
+      }
     }
-    return *instance_;
+    return *obj;
   }
 
   HccLoader() : Loader("libmcwamp.so") {
@@ -101,7 +109,7 @@ class HccLoader : protected Loader {
   GetCmdName_t* GetCmdName;
 
   private:
-  static HccLoader* instance_;
+  static std::atomic<HccLoader*> instance_;
 };
 
 } // namespace roctracer
