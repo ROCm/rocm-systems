@@ -294,6 +294,7 @@ while [ 1 ] ; do
     HSA_TRACE=1
   elif [ "$1" = "--hip-trace" ] ; then
     ARG_VAL=0
+    export ROCP_TIMESTAMP_ON=1
     GEN_STATS=1
     HIP_TRACE=1
   elif [ "$1" = "--verbose" ] ; then

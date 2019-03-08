@@ -308,7 +308,9 @@ def fill_ops_db(table_name, db, indir):
         db.insert_entry(table_handle, rec_vals)
         filtr[corr_id] = 1
 
-        if not gpu_pid in dep_dict: dep_dict[gpu_pid] = {}
+        if not gpu_pid in dep_dict:
+          dep_dict[gpu_pid] = {}
+          dep_dict[gpu_pid]['to'] = {}
         dep_dict[gpu_pid]['to'][corr_id] = int(rec_vals[0]) / 1000
         dep_dict[gpu_pid]['bsp'] = OPS_PID
       else: fatal("async-copy bad record")
