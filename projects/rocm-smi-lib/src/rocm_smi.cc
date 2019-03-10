@@ -57,6 +57,8 @@
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
+#include "rocm_smi/rocm_smi_dev_names.h"
+
 #include "rocm_smi/rocm_smi64Config.h"
 
 static const uint32_t kMaxOverdriveLevel = 20;
@@ -403,8 +405,6 @@ static rsmi_status_t get_dev_value_vec(amd::smi::DevInfoTypes type,
   return errno_to_rsmi_status(ret);
 }
 
-// A call to rsmi_init is not technically necessary at this time, but may be
-// in the future.
 rsmi_status_t
 rsmi_init(uint64_t init_flags) {
   TRY
@@ -959,15 +959,31 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
 
   std::string val_str;
   rsmi_status_t ret;
+  uint64_t id;
 
-  ret = get_dev_mon_value_str(amd::smi::kMonName, dv_ind, -1, &val_str);
+  ret = rsmi_dev_id_get(dv_ind, &id);
+
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
+  }
+
+  val_str = get_dev_id_name_map(id);
+
+  if (val_str.size() == 0) {
+    ret = get_dev_mon_value_str(amd::smi::kMonName, dv_ind, -1, &val_str);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      return ret;
+    }
   }
 
   size_t ln = val_str.copy(name, len);
 
   name[std::min(len - 1, ln)] = '\0';
+
+  if (len < val_str.size()) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+
   return RSMI_STATUS_SUCCESS;
   CATCH
 }

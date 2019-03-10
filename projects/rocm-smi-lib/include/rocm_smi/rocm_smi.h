@@ -1,7 +1,5 @@
 /*
  * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
@@ -108,6 +106,10 @@ typedef enum {
                                          //!< yet been implemented in the
                                          //!< current system for the current
                                          //!< devices
+  RSMI_STATUS_NOT_FOUND,                 //!< An item was searched for but not
+                                         //!< found
+  RSMI_STATUS_INSUFFICIENT_SIZE,         //!< Not enough resources were
+                                         //!< for the operation
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
 
@@ -515,6 +517,9 @@ rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint64_t *id);
  *  @param[in] len the length of the caller provided buffer @p name.
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire name. In this case, only @len bytes will
+ *  be written.
  *
  */
 rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
@@ -808,7 +813,7 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
 
 /** @} */  // end of MemQuer
 
-/** @defgroup PhysQuer Physcial State Queries
+/** @defgroup PhysQuer Physical State Queries
  *  These functions provide information about the physical characteristics of
  *  the device.
  *  @{

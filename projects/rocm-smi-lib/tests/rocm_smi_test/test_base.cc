@@ -112,11 +112,11 @@ void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
   }
   std::cout << std::setbase(10);
 
-  char name[20];
-  err = rsmi_dev_name_get(dv_ind, name, 20);
+  char name[128];
+  err = rsmi_dev_name_get(dv_ind, name, 128);
   CHK_ERR_ASRT(err)
   IF_VERB(STANDARD) {
-    std::cout << "\t**Monitor name: " << name << std::endl;
+    std::cout << "\t**Device name: " << name << std::endl;
   }
 }
 void TestBase::Run(void) {
