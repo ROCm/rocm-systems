@@ -52,7 +52,6 @@
 #include <unordered_map>
 #include <map>
 #include <fstream>
-
 #include <iostream>
 
 #include "rocm_smi/rocm_smi.h"
