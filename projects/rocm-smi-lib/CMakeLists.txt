@@ -113,7 +113,6 @@ set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_monitor.cc")
 set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi.cc")
 set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_power_mon.cc")
 set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_utils.cc")
-set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_dev_names.cc")
 
 set(SMI_INC_LIST "${INC_DIR}/rocm_smi_device.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_main.h")
@@ -122,7 +121,6 @@ set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_power_mon.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_utils.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_common.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_exception.h")
-set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_dev_names.h")
 
 set(SMI_EXAMPLE_EXE "rocm_smi_ex")
 

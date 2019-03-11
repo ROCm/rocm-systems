@@ -51,13 +51,14 @@
 #include <cstdint>
 #include <unordered_map>
 #include <map>
+#include <fstream>
+#include <iostream>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
-#include "rocm_smi/rocm_smi_dev_names.h"
 
 #include "rocm_smi/rocm_smi64Config.h"
 
@@ -949,7 +950,56 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
 
   CATCH
 }
+static std::vector<std::string> pci_name_files = {
+  "/usr/share/misc/pci.ids",
+  "/usr/share/hwdata/pci.ids",
+  "/usr/share/pci.ids",
+  "/var/lib/pciutils/pci.ids"
+};
 
+// Parse pci.ids files. Comment lines have # in first column. Otherwise,
+// Syntax:
+// vendor  vendor_name
+//       device  device_name                             <-- single tab
+//               subvendor subdevice  subsystem_name     <-- two tabs
+static std::string get_dev_name_from_id(uint64_t id) {
+  std::string ln;
+  std::string token1;
+  std::string description;
+
+  for (auto fl : pci_name_files) {
+    std::ifstream id_file_strm(fl);
+
+    while (std::getline(id_file_strm, ln)) {
+      std::istringstream ln_str(ln);
+      // parse line
+      if (ln_str.peek() == '#') {
+        continue;
+      }
+
+      if (ln[0] == '\t') {
+        if (ln[1] == '\t') {
+          if (ln[2] == '\t') {
+            // This is a subvendor line
+          }
+        } else {  // ln[1] != '\t'
+          // This is a device line
+          ln_str >> token1;
+          if (std::stoul(token1, nullptr, 16) == id) {
+            int64_t pos = ln_str.tellg();
+
+            pos = ln.find_first_not_of("\t ", pos);
+            description = ln.substr(pos);
+            return description;
+          }
+        }
+      } else {  // ln[0] != '\t'
+        // This is a vendor line
+      }
+    }
+  }
+  return description;
+}
 rsmi_status_t
 rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
   TRY
@@ -967,7 +1017,7 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
     return ret;
   }
 
-  val_str = get_dev_id_name_map(id);
+  val_str = get_dev_name_from_id(id);
 
   if (val_str.size() == 0) {
     ret = get_dev_mon_value_str(amd::smi::kMonName, dv_ind, -1, &val_str);
