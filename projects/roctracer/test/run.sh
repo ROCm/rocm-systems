@@ -28,6 +28,7 @@ export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 export LD_LIBRARY_PATH=$PWD
 # test check routin
 test_status=0
+test_number=0
 eval_test() {
   label=$1
   cmdline=$2
@@ -39,6 +40,7 @@ eval_test() {
   else
     echo "$label: PASSED"
   fi
+  test_number=$(($test_number + 1))
 }
 
 # Standalone test
@@ -77,5 +79,5 @@ eval_test "tool HSA test input" "LD_PRELOAD='$HSA_TOOLS_LIB' ./test/hsa/ctrl"
 #valgrind --tool=massif $tbin
 #ms_print massif.out.<N>
 
-if [ $test_status != 0 ] ; then echo "$test_status tests failed"; fi
+echo "$test_number tests total / $test_status tests failed"
 exit $test_status
