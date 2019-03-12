@@ -51,12 +51,15 @@
 #include <cstdint>
 #include <unordered_map>
 #include <map>
+#include <fstream>
+#include <iostream>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
+
 #include "rocm_smi/rocm_smi64Config.h"
 
 static const uint32_t kMaxOverdriveLevel = 20;
@@ -403,8 +406,6 @@ static rsmi_status_t get_dev_value_vec(amd::smi::DevInfoTypes type,
   return errno_to_rsmi_status(ret);
 }
 
-// A call to rsmi_init is not technically necessary at this time, but may be
-// in the future.
 rsmi_status_t
 rsmi_init(uint64_t init_flags) {
   TRY
@@ -949,7 +950,56 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
 
   CATCH
 }
+static std::vector<std::string> pci_name_files = {
+  "/usr/share/misc/pci.ids",
+  "/usr/share/hwdata/pci.ids",
+  "/usr/share/pci.ids",
+  "/var/lib/pciutils/pci.ids"
+};
 
+// Parse pci.ids files. Comment lines have # in first column. Otherwise,
+// Syntax:
+// vendor  vendor_name
+//       device  device_name                             <-- single tab
+//               subvendor subdevice  subsystem_name     <-- two tabs
+static std::string get_dev_name_from_id(uint64_t id) {
+  std::string ln;
+  std::string token1;
+  std::string description;
+
+  for (auto fl : pci_name_files) {
+    std::ifstream id_file_strm(fl);
+
+    while (std::getline(id_file_strm, ln)) {
+      std::istringstream ln_str(ln);
+      // parse line
+      if (ln_str.peek() == '#') {
+        continue;
+      }
+
+      if (ln[0] == '\t') {
+        if (ln[1] == '\t') {
+          if (ln[2] == '\t') {
+            // This is a subvendor line
+          }
+        } else {  // ln[1] != '\t'
+          // This is a device line
+          ln_str >> token1;
+          if (std::stoul(token1, nullptr, 16) == id) {
+            int64_t pos = ln_str.tellg();
+
+            pos = ln.find_first_not_of("\t ", pos);
+            description = ln.substr(pos);
+            return description;
+          }
+        }
+      } else {  // ln[0] != '\t'
+        // This is a vendor line
+      }
+    }
+  }
+  return description;
+}
 rsmi_status_t
 rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
   TRY
@@ -959,15 +1009,31 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
 
   std::string val_str;
   rsmi_status_t ret;
+  uint64_t id;
 
-  ret = get_dev_mon_value_str(amd::smi::kMonName, dv_ind, -1, &val_str);
+  ret = rsmi_dev_id_get(dv_ind, &id);
+
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
+  }
+
+  val_str = get_dev_name_from_id(id);
+
+  if (val_str.size() == 0) {
+    ret = get_dev_mon_value_str(amd::smi::kMonName, dv_ind, -1, &val_str);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      return ret;
+    }
   }
 
   size_t ln = val_str.copy(name, len);
 
   name[std::min(len - 1, ln)] = '\0';
+
+  if (len < val_str.size()) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
