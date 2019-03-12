@@ -975,7 +975,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
       else if (opt.first == "copy") to_copy_data = (opt.second == "true");
       else fatal("ROCProfiler: Bad trace property '" + opt.first + "'");
     }
-    
+
     // Parsing parameters
     std::map<std::string, hsa_ven_amd_aqlprofile_parameter_name_t> parameters_dict;
     parameters_dict["TARGET_CU"] =
