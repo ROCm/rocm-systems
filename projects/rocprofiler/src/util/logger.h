@@ -76,8 +76,16 @@ class Logger {
 
   static Logger* Create() {
     std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ == NULL) instance_ = new Logger();
-    return instance_;
+    Logger* obj = instance_.load(std::memory_order_relaxed);
+    if (obj == NULL) {
+      obj = new Logger();
+      if (obj == NULL) {
+        std::cerr << "ROCProfiler: log object creation failed" << std::endl << std::flush;
+        abort();
+      }
+      instance_.store(obj, std::memory_order_release);
+    }
+    return obj;
   }
 
   static void Destroy() {
@@ -87,8 +95,9 @@ class Logger {
   }
 
   static Logger& Instance() {
-    Create();
-    return *instance_;
+    Logger* obj = instance_.load(std::memory_order_acquire);
+    if (obj == NULL) obj = Create();
+    return *obj;
   }
 
  private:
@@ -179,10 +188,10 @@ class Logger {
   bool messaging_;
   bool error_;
   std::string session_dir_;
+  std::map<uint32_t, std::string> message_;
 
   static mutex_t mutex_;
-  static Logger* instance_;
-  std::map<uint32_t, std::string> message_;
+  static std::atomic<Logger*> instance_;
 };
 
 }  // namespace util

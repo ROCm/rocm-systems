@@ -368,11 +368,11 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
 rocprofiler_properties_t rocprofiler_properties;
 uint32_t SqttProfile::output_buffer_size_ = 0x2000000;  // 32M
 bool SqttProfile::output_buffer_local_ = true;
-Tracker* Tracker::instance_ = NULL;
+std::atomic<Tracker*> Tracker::instance_{};
 Tracker::mutex_t Tracker::glob_mutex_;
 Tracker::counter_t Tracker::counter_ = 0;
 util::Logger::mutex_t util::Logger::mutex_;
-util::Logger* util::Logger::instance_ = NULL;
+std::atomic<util::Logger*> util::Logger::instance_{};
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

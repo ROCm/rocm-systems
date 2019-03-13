@@ -24,6 +24,7 @@
 
 # test check routin
 test_status=0
+test_number=0
 eval_test() {
   label=$1
   cmdline=$2
@@ -35,6 +36,7 @@ eval_test() {
   else
     echo "$label: PASSED"
   fi
+  test_number=$(($test_number + 1))
 }
 
 # enable tools load failure reporting
@@ -109,5 +111,5 @@ eval_test "libtool test, counter sets" ./test/ctrl
 #valgrind --tool=massif $tbin
 #ms_print massif.out.<N>
 
-if [ $test_status != 0 ] ; then echo "$test_status tests failed"; fi
+echo "$test_number tests total / $test_status tests failed"
 exit $test_status
