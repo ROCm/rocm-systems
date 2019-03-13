@@ -75,8 +75,16 @@ class Logger {
 
   static Logger* Create() {
     std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ == NULL) instance_ = new Logger();
-    return instance_;
+    Logger* obj = instance_.load(std::memory_order_relaxed);
+    if (obj == NULL) {
+      obj = new Logger();
+      if (obj == NULL) {
+        std::cerr << "ROCTracer: log object creation failed" << std::endl << std::flush;
+        abort();
+      }
+      instance_.store(obj, std::memory_order_release);
+    }
+    return obj;
   }
 
   static void Destroy() {
@@ -86,8 +94,9 @@ class Logger {
   }
 
   static Logger& Instance() {
-    Create();
-    return *instance_;
+    Logger* obj = instance_.load(std::memory_order_acquire);
+    if (obj == NULL) obj = Create();
+    return *obj;
   }
 
  private:
@@ -152,7 +161,7 @@ class Logger {
   bool messaging_;
 
   static mutex_t mutex_;
-  static Logger* instance_;
+  static std::atomic<Logger*> instance_;
   std::map<uint32_t, std::string> message_;
 };
 
@@ -160,32 +169,32 @@ class Logger {
 }  // namespace roctracer
 
 #define ERR_LOGGING(stream)                                                                        \
-  {                                                                                                \
+  do {                                                                                                \
     roctracer::util::Logger::Instance() << "error: " << roctracer::util::Logger::begm          \
                                           << stream << roctracer::util::Logger::endl;            \
-  }
+  } while(0)
 
 #define INFO_LOGGING(stream)                                                                       \
-  {                                                                                                \
+  do {                                                                                                \
     roctracer::util::Logger::Instance() << "info: " << roctracer::util::Logger::begm << stream \
                                           << roctracer::util::Logger::endl;                      \
-  }
+  } while(0)
 
 #define WARN_LOGGING(stream)                                                                       \
-  {                                                                                                \
+  do {                                                                                                \
     std::cerr << "ROCProfiler: " << stream << std::endl;                                                              \
     roctracer::util::Logger::Instance() << "warning: " << roctracer::util::Logger::begm << stream \
                                           << roctracer::util::Logger::endl;                      \
-  }
+  } while(0)
 
 #ifdef DEBUG
 #define DBG_LOGGING(stream)                                                                        \
-  {                                                                                                \
+  do {                                                                                                \
     roctracer::util::Logger::Instance() << roctracer::util::Logger::begm << "debug: \""        \
                                           << stream << "\"" < < < <                                \
         " in " << __FUNCTION__ << " at " << __FILE__ << " line " << __LINE__                       \
                << roctracer::util::Logger::endl;                                                 \
-  }
+  } while(0)
 #endif
 
 #endif  // SRC_UTIL_LOGGER_H_

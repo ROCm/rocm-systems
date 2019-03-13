@@ -71,13 +71,19 @@ class Tracker {
 
   static Tracker* Create() {
     std::lock_guard<mutex_t> lck(glob_mutex_);
-    if (instance_ == NULL) instance_ = new Tracker;
-    return instance_;
+    Tracker* obj = instance_.load(std::memory_order_relaxed);
+    if (obj == NULL) {
+      obj = new Tracker;
+      if (obj == NULL) EXC_ABORT(HSA_STATUS_ERROR, "Tracker creation failed");
+      instance_.store(obj, std::memory_order_release);
+    }
+    return obj;
   }
 
   static Tracker& Instance() {
-    if (instance_ == NULL) instance_ = Create();
-    return *instance_;
+    Tracker* obj = instance_.load(std::memory_order_acquire);
+    if (obj == NULL) obj = Create();
+    return *obj;
   }
 
   static void Destroy() {
@@ -257,7 +263,7 @@ class Tracker {
   }
 
   // instance
-  static Tracker* instance_;
+  static std::atomic<Tracker*> instance_;
   static mutex_t glob_mutex_;
   static counter_t counter_;
 

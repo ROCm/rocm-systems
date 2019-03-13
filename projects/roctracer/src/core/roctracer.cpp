@@ -435,7 +435,7 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
 }
 
 util::Logger::mutex_t util::Logger::mutex_;
-util::Logger* util::Logger::instance_ = NULL;
+std::atomic<util::Logger*> util::Logger::instance_{};
 MemoryPool* memory_pool = NULL;
 typedef std::recursive_mutex memory_pool_mutex_t;
 memory_pool_mutex_t memory_pool_mutex;
@@ -445,7 +445,7 @@ std::atomic<HipLoader*> HipLoader::instance_{};
 std::atomic<HccLoader*> HccLoader::instance_{};
 }
 
-proxy::Tracker* proxy::Tracker::instance_ = NULL;
+std::atomic<proxy::Tracker*> proxy::Tracker::instance_{};
 proxy::Tracker::mutex_t proxy::Tracker::glob_mutex_;
 proxy::Tracker::counter_t proxy::Tracker::counter_ = 0;
 

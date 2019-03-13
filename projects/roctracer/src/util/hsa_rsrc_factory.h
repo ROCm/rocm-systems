@@ -26,6 +26,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #define SRC_UTIL_HSA_RSRC_FACTORY_H_
 
 #include <hsa.h>
+#include <hsa_api_trace.h>
 #include <hsa_ext_amd.h>
 #include <hsa_ext_finalize.h>
 #include <hsa_ven_amd_aqlprofile.h>
@@ -35,6 +36,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <stdlib.h>
 #include <string.h>
 
+#include <atomic>
 #include <iostream>
 #include <mutex>
 #include <map>
@@ -67,6 +69,44 @@ namespace util {
 static const size_t MEM_PAGE_BYTES = 0x1000;
 static const size_t MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
 typedef decltype(hsa_agent_t::handle) hsa_agent_handle_t;
+
+struct hsa_pfn_t {
+  decltype(hsa_init)* hsa_init;
+  decltype(hsa_shut_down)* hsa_shut_down;
+  decltype(hsa_agent_get_info)* hsa_agent_get_info;
+
+  decltype(hsa_iterate_agents)* hsa_iterate_agents;
+
+  decltype(hsa_queue_create)* hsa_queue_create;
+  decltype(hsa_queue_destroy)* hsa_queue_destroy;
+  decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed;
+  decltype(hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed;
+  decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed;
+  decltype(hsa_signal_create)* hsa_signal_create;
+  decltype(hsa_signal_destroy)* hsa_signal_destroy;
+  decltype(hsa_signal_store_relaxed)* hsa_signal_store_relaxed;
+  decltype(hsa_signal_wait_scacquire)* hsa_signal_wait_scacquire;
+
+  decltype(hsa_amd_agent_iterate_memory_pools)* hsa_amd_agent_iterate_memory_pools;
+  decltype(hsa_amd_memory_pool_get_info)* hsa_amd_memory_pool_get_info;
+  decltype(hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate;
+  decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access;
+  decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy;
+
+  decltype(hsa_system_get_major_extension_table)* hsa_system_get_major_extension_table;
+
+  decltype(hsa_code_object_reader_create_from_file)* hsa_code_object_reader_create_from_file;
+  decltype(hsa_executable_create_alt)* hsa_executable_create_alt;
+  decltype(hsa_executable_load_agent_code_object)* hsa_executable_load_agent_code_object;
+  decltype(hsa_executable_freeze)* hsa_executable_freeze;
+  decltype(hsa_executable_get_symbol)* hsa_executable_get_symbol;
+
+  decltype(hsa_amd_signal_async_handler)* hsa_amd_signal_async_handler;
+  decltype(hsa_amd_profiling_get_async_copy_time)* hsa_amd_profiling_get_async_copy_time;
+  decltype(hsa_amd_profiling_get_dispatch_time)* hsa_amd_profiling_get_dispatch_time;
+  decltype(hsa_signal_load_relaxed)* hsa_signal_load_relaxed;
+  decltype(hsa_signal_store_screlease)* hsa_signal_store_screlease;
+};
 
 // Encapsulates information about a Hsa Agent such as its
 // handle, name, max queue size, max wavefront size, etc.
@@ -163,17 +203,20 @@ class HsaRsrcFactory {
 
   static HsaRsrcFactory* Create(bool initialize_hsa = true) {
     std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ == NULL) {
-      instance_ = new HsaRsrcFactory(initialize_hsa);
+    HsaRsrcFactory* obj = instance_.load(std::memory_order_relaxed);
+    if (obj == NULL) {
+      obj = new HsaRsrcFactory(initialize_hsa);
+      instance_.store(obj, std::memory_order_release);
     }
-    return instance_;
+    return obj;
   }
 
   static HsaRsrcFactory& Instance() {
-    if (instance_ == NULL) instance_ = Create(false);
-    hsa_status_t status = (instance_ != NULL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+    HsaRsrcFactory* obj = instance_.load(std::memory_order_acquire);
+    if (obj == NULL) obj = Create(false);
+    hsa_status_t status = (obj != NULL) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
     CHECK_STATUS("HsaRsrcFactory::Instance() failed", status);
-    return *instance_;
+    return *obj;
   }
 
   static void Destroy() {
@@ -275,6 +318,10 @@ class HsaRsrcFactory {
   static uint64_t Submit(hsa_queue_t* queue, const void* packet);
   static uint64_t Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes);
 
+  // Initialize HSA API table
+  void static InitHsaApiTable(HsaApiTable* table);
+  static const hsa_pfn_t* HsaApi() { return &hsa_api_; }
+
   // Return AqlProfile API table
   typedef hsa_ven_amd_aqlprofile_pfn_t aqlprofile_pfn_t;
   const aqlprofile_pfn_t* AqlProfileApi() const { return &aqlprofile_api_; }
@@ -292,7 +339,7 @@ class HsaRsrcFactory {
   static void SetTimeoutNs(const timestamp_t& time) {
     std::lock_guard<mutex_t> lck(mutex_);
     timeout_ns_ = time;
-    if (instance_ != NULL) instance_->timeout_ = instance_->timer_->ns_to_sysclock(time);
+    if (instance_ != NULL) Instance().timeout_ = Instance().timer_->ns_to_sysclock(time);
   }
 
  private:
@@ -321,7 +368,7 @@ class HsaRsrcFactory {
   // HSA was initialized
   const bool initialize_hsa_;
 
-  static HsaRsrcFactory* instance_;
+  static std::atomic<HsaRsrcFactory*> instance_;
   static mutex_t mutex_;
 
   // Used to maintain a list of Hsa Gpu Agent Info
@@ -334,6 +381,9 @@ class HsaRsrcFactory {
 
   // System agents map
   std::map<hsa_agent_handle_t, const AgentInfo*> agent_map_;
+
+  // HSA runtime API table
+  static hsa_pfn_t hsa_api_;
 
   // AqlProfile API table
   aqlprofile_pfn_t aqlprofile_api_;
