@@ -15,59 +15,45 @@ def filtr_api_args(args_str):
   args_str = re.sub(r'(enum|struct) ', '', args_str);
   return args_str
 
+# Normalizing types
+def norm_api_types(type_str):
+  type_str = re.sub(r'uint32_t', r'unsigned int', type_str)
+  type_str = re.sub(r'^unsigned$', r'unsigned int', type_str)
+  return type_str
+
 # Creating a list of arguments [(type, name), ...]
 def list_api_args(args_str):
+  args_str = filtr_api_args(args_str)
   args_list = []
-  for arg_pair in args_str.split(','):
-    arg_pair = re.sub(r'\s+=\s+\S+$','', arg_pair);
-    m = re.match("^(.*)\s(\S+)$", arg_pair);
-    if m:
-      arg_type = m.group(1)
-      arg_name = m.group(2)
-#      m = re.match("^(.*_t)\s(.*)$", arg_type)
-#      if m:
-#        arg_type = m.group(1)
-#        arg_name = m.group(2)
-      args_list.append((arg_type, arg_name))
+  if args_str != '':
+    for arg_pair in args_str.split(','):
+      if arg_pair == 'void': continue
+      arg_pair = re.sub(r'\s*=\s*\S+$','', arg_pair);
+      m = re.match("^(.*)\s(\S+)$", arg_pair);
+      if m:
+        arg_type = norm_api_types(m.group(1))
+        arg_name = m.group(2)
+        args_list.append((arg_type, arg_name))
+      else:
+        print "Bad args: args_str: '" + args_str + "' arg_pair: '" + arg_pair + "'"
+        sys.exit(1)
   return args_list;
 
 # Creating arguments string "type0, type1, ..."
 def filtr_api_types(args_str):
-  args_str = filtr_api_args(args_str)
   args_list = list_api_args(args_str)
   types_str = ''
   for arg_tuple in args_list:
     types_str += arg_tuple[0] + ', '
   return types_str
 
-# Normalizing types
-def norm_api_types(types_str):
-  types_str = re.sub(r'uint32_t,', r'unsigned int,', types_str)
-  types_str = re.sub(r'unsigned,', r'unsigned int,', types_str)
-  return types_str
-
 # Creating options list [name0, name1, ...]
 def filtr_api_opts(args_str):
-  args_str = filtr_api_args(args_str)
   args_list = list_api_args(args_str)
   opts_list = []
   for arg_tuple in args_list:
     opts_list.append(arg_tuple[1])
   return opts_list
-
-# Filling API map with API call name and args
-def fill_api_map(out, api_name, args_str):
-  args_str = filtr_api_args(args_str)
-  out[api_name + '.a'] = args_str
-  out[api_name] = list_api_args(args_str)
-
-#def patch_args(api_opts, eta_opts, content):
-#  api_opts_list = api_opts.split(',');
-#  eta_opts_list = eta_opts.split(',');
-#  length = len(api_opts_list)
-#  for index in range(0, length):
-#    content = re.sub(' ' + api_opts_list[index], ' ' + eta_opts_list[index], content)
-#  return content
 #############################################################
 # Parsing API header
 # hipError_t hipSetupArgument(const void* arg, size_t size, size_t offset);
@@ -75,10 +61,15 @@ def parse_api(inp_file, out):
   beg_pattern = re.compile("^hipError_t");
   api_pattern = re.compile("^hipError_t\s+([^\(]+)\(([^\)]*)\)");
   end_pattern = re.compile("Texture");
+  hidden_pattern = re.compile(r'__attribute__\(\(visibility\("hidden"\)\)\)')
+  nms_open_pattern = re.compile(r'namespace hip_impl {')
+  nms_close_pattern = re.compile(r'}')
 
   inp = open(inp_file, 'r')
 
   found = 0
+  hidden = 0
+  nms_level = 0;
   record = ""
   line_num = -1 
 
@@ -90,7 +81,7 @@ def parse_api(inp_file, out):
       print "Error: bad record \"" + record + "\"\nfile '" + inp_file + ", line (" + str(line_num) + ")"
       break;
 
-    if beg_pattern.match(record): found = 1
+    if beg_pattern.match(record) and (hidden == 0) and (nms_level == 0): found = 1
 
     if found != 0:
       record = re.sub("\s__dparm\([^\)]*\)", '', record);
@@ -98,8 +89,18 @@ def parse_api(inp_file, out):
       if m:
         found = 0
         if end_pattern.search(record): break
-        out[m.group(1)] = filtr_api_args(m.group(2))
+        out[m.group(1)] = m.group(2)
       else: continue
+
+    hidden = 0
+    if hidden_pattern.match(line): hidden = 1
+#    print "> " + str(hidden) + ": " + line
+
+    if nms_open_pattern.match(line): nms_level += 1
+    if (nms_level > 0) and nms_close_pattern.match(line): nms_level -= 1
+    if nms_level < 0:
+      print "Error: nms level < 0"
+      sys.exit(1)
 
     record = ""
 
@@ -162,21 +163,27 @@ def patch_content(inp_file, api_map, out):
         api_name = m.group(2);
         # Checking if API name is in the API map
         if api_name in api_map:
+          #print "> " + api_name
           # Getting API arguments
           api_args = m.group(3)
           # Getting etalon arguments from the API map
           eta_args = api_map[api_name]
+          if eta_args == '':
+            eta_args = api_args
+            api_map[api_name] = eta_args
           # Normalizing API arguments
           api_types = filtr_api_types(api_args)
+          #print "> " + api_name, ": '" + api_args + "' : '" + api_types + "'"
           # Normalizing etalon arguments
           eta_types = filtr_api_types(eta_args)
+          #print "> " + api_name + ": '" + eta_args + "' : '" + eta_types + "'"
           # Comparing API and etalon arguments
           # Normalizing types if not matching
           api_types_n = api_types
           eta_types_n = eta_types
-          if api_types != eta_types:
-            api_types_n = norm_api_types(api_types)
-            eta_types_n = norm_api_types(eta_types)
+          #if api_types != eta_types:
+          #  api_types_n = norm_api_types(api_types)
+          #  eta_types_n = norm_api_types(eta_types)
           # Comparing API and etalon arguments
           if api_types_n == eta_types_n:
             # API is already found
@@ -185,7 +192,7 @@ def patch_content(inp_file, api_map, out):
               sys.exit(1)
             # Set valid public API found flag
             api_valid = 1
-            # Set output API map with API arguments
+            # Set output API map with API arguments list
             out[api_name] = filtr_api_opts(api_args)
           else:
             # Warning about mismatched API, possible non public overloaded version
@@ -214,23 +221,13 @@ def patch_content(inp_file, api_map, out):
         # Expect INIT macro for valid public API
         if api_valid == 1:
           api_valid = 0
-          print "\tAPI init missing \"" + api_name + "\", record \"" + record + "\"\n\tfile '" + inp_file + "', line (" + str(line_num) + ")"
           if api_name in out:
             del out[api_name]
+            del api_map[api_name]
+            out['.' + api_name] = 1
           else:
             print "Error: API is not in out \"" + api_name + "\", record \"" + record + "\"\nfile '" + inp_file + "', line (" + str(line_num) + ")"
             sys.exit(1)
-
-#   # Valid API found action
-#   if api_valid == 1:
-#     m = target_pattern.match(line)
-#     if m:
-#       api_valid = 0
-#       if not re.search("_CB_API\(", line):
-#         print (api_name);
-#         api_label = api_name
-#         if m.group(3) != "": api_label += ', '
-#         line = m.group(1) + '_CB' + m.group(2) + api_label + m.group(3) + ");\n"
 
     if found != 1: record = ""
     content += line
@@ -273,7 +270,9 @@ if not os.path.isfile(api_hfile):
   sys.exit(1)
 
 # API declaration map
-api_map = {}
+api_map = {
+  'hipHccModuleLaunchKernel': ''
+}
 # API options map
 opts_map = {}
 # Private API list
@@ -289,17 +288,26 @@ if len(sys.argv) == 3:
   src_patt = "\.cpp$"
   patch_src(api_map, src_path, src_patt, opts_map)
 
-# Converting api map to map of lists
-for name in api_map.keys():
-  args_str = api_map[name];
+# Checking for non-conformant APIs
+for name in opts_map.keys():
+  m = re.match(r'\.(\S*)', name)
+  if m:
+    print "Init missing: " + m.group(1)
+    del opts_map[name]
 
+# Converting api map to map of lists
 # Printing not found APIs
+not_found = 0
 if len(opts_map) != 0:
   for name in api_map.keys():
     args_str = api_map[name];
     api_map[name] = list_api_args(args_str)
     if not name in opts_map:
       print "Not found: " + name
+      not_found += 1
+if not_found != 0:
+  print "Error:", not_found, "API calls not found"
+  sys.exit(1)
 #############################################################
 
 f = open(HEADER, 'w')
@@ -375,7 +383,7 @@ for name, args in api_map.items():
   if name in opts_map:
     opts_list = opts_map[name]
     if len(args) != len(opts_list):
-      print ("Error: \"" + name + "\" API args and opts mismatch, args: ", args, ", opts: ", opts_list)
+      print "Error: \"" + name + "\" API args and opts mismatch, args: ", args, ", opts: ", opts_list
     for ind in range(0, len(args)):
       arg_tuple = args[ind]
       arg_type = arg_tuple[0]
@@ -407,100 +415,6 @@ f.write('  };\n')
 f.write('  return strdup(oss.str().c_str());\n')
 f.write('};\n')
 f.write('#endif\n')
-
-# # Generating the activity record type
-# f.write('\
-# \n\
-# // HIP API activity record type\n\
-# // Base record type\n\
-# struct hip_act_record_t {\n\
-#   uint32_t domain;                                                    // activity domain id\n\
-#   uint32_t op_id;                                                     // operation id, dispatch/copy/barrier\n\
-#   uint32_t activity_kind;                                             // activity kind\n\
-#   uint64_t correlation_id;                                            // activity correlation ID\n\
-#   uint64_t begin_ns;                                                  // host begin timestamp, nano-seconds\n\
-#   uint64_t end_ns;                                                    // host end timestamp, nano-seconds\n\
-# };\n\
-# // Async record type\n\
-# struct hip_async_record_t : hip_act_record_t {\n\
-#   int device_id;\n\
-#   uint64_t stream_id;\n\
-# };\n\
-# // Dispatch record type\n\
-# struct hip_dispatch_record_t : hip_async_record_t {};\n\
-# // Barrier record type\n\
-# struct hip_barrier_record_t : hip_async_record_t {};\n\
-# // Memcpy record type\n\
-# struct hip_copy_record_t : hip_async_record_t {\n\
-#   size_t bytes;\n\
-# };\n\
-# // Generic async operation record\n\
-# typedef hip_copy_record_t hip_ops_record_t;\n\
-# ')
-
-# # Generating the callbacks table
-# f.write('\n// HIP API callbacks table\n')
-# f.write('\
-# struct hip_cb_table_t {\n\
-#   struct { hip_cb_fun_t act; hip_cb_fun_t fun; void* arg; } arr[HIP_API_ID_NUMBER];\n\
-# };\n\
-# #define HIP_CALLBACKS_TABLE hip_cb_table_t HIP_API_callbacks_table{};\n\
-# ')
-# f.write('\
-# inline bool HIP_SET_ACTIVITY(uint32_t id, hip_cb_fun_t fun, void* arg = NULL) {\n\
-#   (void)arg;\n\
-#   extern hip_cb_table_t HIP_API_callbacks_table;\n\
-#   if (id < HIP_API_ID_NUMBER) {\n\
-#     HIP_API_callbacks_table.arr[id].act = fun;\n\
-#     return true;\n\
-#   }\n\
-#   return false;\n\
-# }\n')
-# f.write('\
-# inline bool HIP_SET_CALLBACK(uint32_t id, hip_cb_fun_t fun, void* arg) {\n\
-#   extern hip_cb_table_t HIP_API_callbacks_table; \n\
-#   if (id < HIP_API_ID_NUMBER) {\n\
-#     HIP_API_callbacks_table.arr[id].fun = fun;\n\
-#     HIP_API_callbacks_table.arr[id].arg = arg;\n\
-#     return true;\n\
-#   }\n\
-#   return false;\n\
-# }\n')
-# 
-# # Generating the callback spawning class
-# f.write('\n// HIP API callbacks spawning class macro\n\
-# #define CB_SPAWNER_OBJECT(cb_id) \\\n\
-#   class api_callbacks_spawner_t { \\\n\
-#    public: \\\n\
-#     api_callbacks_spawner_t(hip_cb_data_t& cb_data) : cb_data_(cb_data) { \\\n\
-#       hip_cb_id_t id = HIP_API_ID_##cb_id; \\\n\
-#       cb_data_.id = id; \\\n\
-#       cb_data_.correlation_id = UINT_MAX; \\\n\
-#       cb_data_.name = #cb_id; \\\n\
-#       extern const hip_cb_table_t* getApiCallbackTabel(); \\\n\
-#       const hip_cb_table_t* cb_table = getApiCallbackTabel(); \\\n\
-#       cb_act_ = cb_table->arr[id].act; \\\n\
-#       cb_fun_ = cb_table->arr[id].fun; \\\n\
-#       cb_arg_ = cb_table->arr[id].arg; \\\n\
-#       cb_data_.on_enter = true; \\\n\
-#       if (cb_act_ != NULL) cb_act_(&cb_data_, NULL); \\\n\
-#       if (cb_fun_ != NULL) cb_fun_(&cb_data_, cb_arg_); \\\n\
-#     } \\\n\
-#     ~api_callbacks_spawner_t() { \\\n\
-#       cb_data_.on_enter = false; \\\n\
-#       if (cb_act_ != NULL) cb_act_(&cb_data_, NULL); \\\n\
-#       if (cb_fun_ != NULL) cb_fun_(&cb_data_, cb_arg_); \\\n\
-#     } \\\n\
-#    private: \\\n\
-#     hip_cb_data_t& cb_data_; \\\n\
-#     hip_cb_fun_t cb_act_; \\\n\
-#     hip_cb_fun_t cb_fun_; \\\n\
-#     void* cb_arg_; \\\n\
-#   }; \\\n\
-#   hip_cb_data_t cb_data{}; \\\n\
-#   INIT_CB_ARGS_DATA(cb_id, cb_data); \\\n\
-#   api_callbacks_spawner_t api_callbacks_spawner(cb_data); \n\
-# ')
 
 f.write('#endif  // _HIP_PROF_STR_H\n');
 
