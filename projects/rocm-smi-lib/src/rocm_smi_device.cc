@@ -62,6 +62,9 @@ namespace smi {
 // Sysfs file names
 static const char *kDevPerfLevelFName = "power_dpm_force_performance_level";
 static const char *kDevDevIDFName = "device";
+static const char *kDevVendorIDFName = "vendor";
+static const char *kDevSubSysDevIDFName = "subsystem_device";
+static const char *kDevSubSysVendorIDFName = "subsystem_vendor";
 static const char *kDevOverDriveLevelFName = "pp_sclk_od";
 static const char *kDevGPUSClkFName = "pp_dpm_sclk";
 static const char *kDevGPUMClkFName = "pp_dpm_mclk";
@@ -96,6 +99,9 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevPerfLevel, kDevPerfLevelFName},
     {kDevOverDriveLevel, kDevOverDriveLevelFName},
     {kDevDevID, kDevDevIDFName},
+    {kDevVendorID, kDevVendorIDFName},
+    {kDevSubSysDevID, kDevSubSysDevIDFName},
+    {kDevSubSysVendorID, kDevSubSysVendorIDFName},
     {kDevGPUMClk, kDevGPUMClkFName},
     {kDevGPUSClk, kDevGPUSClkFName},
     {kDevPCIEClk, kDevGPUPCIEClkFname},
@@ -236,10 +242,6 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
                                  kDevPerfLvlMap.at((rsmi_dev_perf_level)val));
       break;
 
-    case kDevGPUMClk:  // integer (index within num-freq range)
-    case kDevGPUSClk:  // integer (index within num-freq range)
-    case kDevPCIEClk:  // integer (index within num-freq range)
-    case kDevDevID:  // string (read-only)
     default:
       break;
   }
@@ -255,9 +257,6 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevPowerODVoltage:
       return writeDevInfoStr(type, val);
 
-    case kDevOverDriveLevel:
-    case kDevPerfLevel:
-    case kDevDevID:
     default:
       break;
   }
@@ -315,6 +314,9 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
   int ret;
   switch (type) {
     case kDevDevID:
+    case kDevSubSysDevID:
+    case kDevSubSysVendorID:
+    case kDevVendorID:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       *val = std::stoi(tempStr, 0, 16);
@@ -369,6 +371,9 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevUsage:
     case kDevOverDriveLevel:
     case kDevDevID:
+    case kDevSubSysDevID:
+    case kDevSubSysVendorID:
+    case kDevVendorID:
     case kDevVBiosVer:
     case kDevPCIEThruPut:
       return readDevInfoStr(type, val);
