@@ -70,6 +70,7 @@
 #include "functional/version_read.h"
 #include "functional/err_cnt_read.h"
 #include "functional/mem_util_read.h"
+#include "functional/id_info_read.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -189,6 +190,10 @@ TEST(rsmitstReadOnly, TestErrCntRead) {
 }
 TEST(rsmitstReadOnly, TestMemUtilRead) {
   TestMemUtilRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestIdInfoRead) {
+  TestIdInfoRead tst;
   RunGenericTest(&tst);
 }
 

@@ -46,6 +46,10 @@ In order to verify the build and capability of ROCm SMI on your system and to se
 ##### ```$ cmake -DROCM_DIR=<location of ROCM SMI library .so> <ROCm SMI source root>/tests/rocm_smi_test```
 To run the test, execute the program `rsmitst` that is built from the steps above. Make sure ROCm SMI library is in your library search path when executing the test program.
 
+# Usage Basics
+## Device Indices
+Many of the functions in the library take a "device index". The device index is a number greater than or equal to 0, and less than the number of devices detected, as determined by `rsmi_num_monitor_devices()`. The index is used to distinguish the detected devices from one another. It is important to note that a device may end up with a different index after a reboot, so an index should not be relied upon to be constant over reboots.
+
 # Hello ROCm SMI
 The only required ROCm-SMI call for any program that wants to use ROCm-SMI is the `rsmi_init()` call. This call initializes some internal data structures that will be used by subsequent ROCm-SMI calls. 
 
