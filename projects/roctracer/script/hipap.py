@@ -58,8 +58,8 @@ def filtr_api_opts(args_str):
 # Parsing API header
 # hipError_t hipSetupArgument(const void* arg, size_t size, size_t offset);
 def parse_api(inp_file, out):
-  beg_pattern = re.compile("^hipError_t");
-  api_pattern = re.compile("^hipError_t\s+([^\(]+)\(([^\)]*)\)");
+  beg_pattern = re.compile("^(hipError_t|const char\s*\*)\s+[^\(]+\(");
+  api_pattern = re.compile("^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)");
   end_pattern = re.compile("Texture");
   hidden_pattern = re.compile(r'__attribute__\(\(visibility\("hidden"\)\)\)')
   nms_open_pattern = re.compile(r'namespace hip_impl {')
@@ -89,12 +89,11 @@ def parse_api(inp_file, out):
       if m:
         found = 0
         if end_pattern.search(record): break
-        out[m.group(1)] = m.group(2)
+        out[m.group(2)] = m.group(3)
       else: continue
 
     hidden = 0
     if hidden_pattern.match(line): hidden = 1
-#    print "> " + str(hidden) + ": " + line
 
     if nms_open_pattern.match(line): nms_level += 1
     if (nms_level > 0) and nms_close_pattern.match(line): nms_level -= 1
@@ -114,7 +113,7 @@ def parse_api(inp_file, out):
 # out - output map  [<api name>] => <api args>
 def patch_content(inp_file, api_map, out):
   # API definition begin pattern
-  beg_pattern = re.compile("^(hipError_t|const char\s*\*\s+[_\w]+\()");
+  beg_pattern = re.compile("^(hipError_t|const char\s*\*)\s+[^\(]+\(");
   # API definition complete pattern
   api_pattern = re.compile("^(hipError_t|const char\s*\*)\s+([^\(]+)\(([^\)]*)\)\s*{");
   # API init macro pattern
@@ -163,7 +162,6 @@ def patch_content(inp_file, api_map, out):
         api_name = m.group(2);
         # Checking if API name is in the API map
         if api_name in api_map:
-          #print "> " + api_name
           # Getting API arguments
           api_args = m.group(3)
           # Getting etalon arguments from the API map
@@ -173,10 +171,8 @@ def patch_content(inp_file, api_map, out):
             api_map[api_name] = eta_args
           # Normalizing API arguments
           api_types = filtr_api_types(api_args)
-          #print "> " + api_name, ": '" + api_args + "' : '" + api_types + "'"
           # Normalizing etalon arguments
           eta_types = filtr_api_types(eta_args)
-          #print "> " + api_name + ": '" + eta_args + "' : '" + eta_types + "'"
           # Comparing API and etalon arguments
           # Normalizing types if not matching
           api_types_n = api_types
@@ -210,12 +206,20 @@ def patch_content(inp_file, api_map, out):
           print (api_name);
         else:
           # Registering dummy API for non public API if the name in INIT is not NONE
-          dummy_name = m.group(1)
-          if (not dummy_name in api_map) and (dummy_name != 'NONE'):
-            if dummy_name in out:
-              print "Error: API reinit \"" + api_name + "\", record \"" + record + "\"\nfile '" + inp_file + "', line (" + str(line_num) + ")"
+          init_name = m.group(1)
+          # Ignore if it is initialized as NONE
+          if init_name != 'NONE':
+            # Check if init name matching API name
+            if init_name != api_name:
+              print "Init name mismatch:", init_name, "<>", api_name
               sys.exit(1)
-            out[dummy_name] = []
+            # If init name is not in public API map then it is private API
+            # else it was not identified and will be checked on finish
+            if not init_name in api_map:
+              if init_name in out:
+                print "Error: API reinit \"" + api_name + "\", record \"" + record + "\"\nfile '" + inp_file + "', line (" + str(line_num) + ")"
+                sys.exit(1)
+              out[init_name] = []
       elif re.search('}', line):
         found = 0
         # Expect INIT macro for valid public API
@@ -244,7 +248,7 @@ def patch_src(api_map, src_path, src_patt, out):
   pattern = re.compile(src_patt)
   src_path = re.sub(r'\s', '', src_path)
   for src_dir in src_path.split(':'):
-    print "Patching " + src_dir + " for '" + src_patt + "'"
+    print "Parsing " + src_dir + " for '" + src_patt + "'"
     for root, dirs, files in os.walk(src_dir):
       for fnm in files:
         if pattern.search(fnm):
@@ -386,10 +390,10 @@ for name, args in api_map.items():
       print "Error: \"" + name + "\" API args and opts mismatch, args: ", args, ", opts: ", opts_list
     for ind in range(0, len(args)):
       arg_tuple = args[ind]
-      arg_type = arg_tuple[0]
+#      arg_type = arg_tuple[0]
       fld_name = arg_tuple[1]
       arg_name = opts_list[ind]
-      f.write('  cb_data.args.' + name + '.' + fld_name + ' = (' + arg_type + ')' + arg_name + '; \\\n')
+      f.write('  cb_data.args.' + name + '.' + fld_name + ' = ' + arg_name + '; \\\n')
   f.write('};\n')
 f.write('#define INIT_CB_ARGS_DATA(cb_id, cb_data) INIT_##cb_id##_CB_ARGS_DATA(cb_data)\n')
 
