@@ -136,7 +136,8 @@ static bool is_bdfid_path_str(const std::string in_name, uint64_t *bdfid) {
   tmp = in_name.copy(name, 12);
   assert(tmp == 12);
 
-  // BDFID = ((<BUS> & 0x1f) << 8) | ((device& 0x1f) <<3 ) | (function & 0x7).
+  // BDFID = ((<DOMAIN> & 0xffff) << 13) | ((<BUS> & 0x1f) << 8) |
+            //                        ((device& 0x1f) <<3 ) | (function & 0x7)
   *bdfid = 0;
   name_start = name;
   p = name_start;
@@ -146,10 +147,10 @@ static bool is_bdfid_path_str(const std::string in_name, uint64_t *bdfid) {
   if (*p != ':' || p - name_start != 4) {
     return false;
   }
-  // We are ignoring the domain part for now as KFD is not encoding it yet
+  *bdfid |= tmp << 13;
 
   // Match this: xxxx:XX:xx.x
-  p++;
+  p++;  // Skip past ':'
   tmp = std::strtoul(p, &p, 16);
   if (*p != ':' || p - name_start != 7) {
     return false;
@@ -157,7 +158,7 @@ static bool is_bdfid_path_str(const std::string in_name, uint64_t *bdfid) {
   *bdfid |= tmp << 8;
 
   // Match this: xxxx:xx:XX.x
-  p++;
+  p++;  // Skip past ':'
   tmp = std::strtoul(p, &p, 16);
   if (*p != '.' || p - name_start != 10) {
     return false;
@@ -165,7 +166,7 @@ static bool is_bdfid_path_str(const std::string in_name, uint64_t *bdfid) {
   *bdfid |= tmp << 3;
 
   // Match this: xxxx:xx:xx.X
-  p++;
+  p++;  // Skip past '.'
   tmp = std::strtoul(p, &p, 16);
   if (*p != '\0' || p - name_start != 12) {
     return false;

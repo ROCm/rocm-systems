@@ -100,24 +100,40 @@ void TestBase::SetUp(void) {
 
 void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
   rsmi_status_t err;
-  uint64_t val_ui64;
+  uint16_t val_ui16;
 
   IF_VERB(STANDARD) {
     std::cout << "\t**Device index: " << dv_ind << std::endl;
   }
-  err = rsmi_dev_id_get(dv_ind, &val_ui64);
+  err = rsmi_dev_id_get(dv_ind, &val_ui16);
   CHK_ERR_ASRT(err)
   IF_VERB(STANDARD) {
-    std::cout << "\t**Device ID: 0x" << std::hex << val_ui64 << std::endl;
+    std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
   }
-  std::cout << std::setbase(10);
-
   char name[128];
   err = rsmi_dev_name_get(dv_ind, name, 128);
   CHK_ERR_ASRT(err)
   IF_VERB(STANDARD) {
     std::cout << "\t**Device name: " << name << std::endl;
   }
+  err = rsmi_dev_vendor_id_get(dv_ind, &val_ui16);
+  CHK_ERR_ASRT(err)
+  IF_VERB(STANDARD) {
+    std::cout << "\t**Device Vendor ID: 0x" << std::hex << val_ui16 <<
+                                                                     std::endl;
+  }
+  err = rsmi_dev_subsystem_id_get(dv_ind, &val_ui16);
+  CHK_ERR_ASRT(err)
+  IF_VERB(STANDARD) {
+    std::cout << "\t**Subsystem ID: 0x" << std::hex << val_ui16 << std::endl;
+  }
+  err = rsmi_dev_subsystem_vendor_id_get(dv_ind, &val_ui16);
+  CHK_ERR_ASRT(err)
+  IF_VERB(STANDARD) {
+    std::cout << "\t**Subsystem Vendor ID: 0x" << std::hex << val_ui16 <<
+                                                                     std::endl;
+  }
+  std::cout << std::setbase(10);
 }
 void TestBase::Run(void) {
   std::string label;

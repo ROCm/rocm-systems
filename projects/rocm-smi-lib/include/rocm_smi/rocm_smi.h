@@ -500,14 +500,33 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint64_t *id);
+rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id);
 
 /**
- *  @brief Get the name of a gpu device.
+ *  @brief Get the device vendor id associated with the device with provided
+ *  device index.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p id,
+ *  this function will write the device vendor id value to the uint64_t pointed
+ *  to by @p id.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] id a pointer to uint64_t to which the device vendor id will
+ *  be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id);
+
+/**
+ *  @brief Get the name string of a gpu device.
  *
  *  @details Given a device index @p dv_ind, a pointer to a caller provided
  *  char buffer @p name, and a length of this buffer @p len, this function
- *  will write the name of the device (up to @p len characters) buffer @p name.
+ *  will write the name of the device (up to @p len characters) to the buffer
+ *  @p name.
  *
  *  @param[in] dv_ind a device index
  *
@@ -518,11 +537,94 @@ rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint64_t *id);
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
- *  large enough to hold the entire name. In this case, only @len bytes will
+ *  large enough to hold the entire name. In this case, only @p len bytes will
  *  be written.
  *
  */
 rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
+
+/**
+ *  @brief Get the name string for a give vendor ID
+ *
+ *  @details Given vendor ID @p id, a pointer to a caller provided char buffer
+ *  @p name, and a length of this buffer @p len, this function will write the
+ *  name of the vendor (up to @p len characters) buffer @p name. The @p id may
+ *  be a device vendor or subsystem vendor ID.
+ *
+ *  @param[in] id a vendor ID
+ *
+ *  @param[inout] name a pointer to a caller provided char buffer to which the
+ *  name will be written
+ *
+ *  @param[in] len the length of the caller provided buffer @p name.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire name. In this case, only @p len bytes will
+ *  be written.
+ *
+ */
+rsmi_status_t rsmi_dev_vendor_name_get(uint32_t id, char *name, size_t len);
+
+/**
+ *  @brief Get the subsystem device id associated with the device with
+ *  provided device index.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p id,
+ *  this function will write the subsystem device id value to the uint64_t
+ *  pointed to by @p id.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] id a pointer to uint64_t to which the subsystem device id
+ *  will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t *id);
+
+/**
+ *  @brief Get the name string for the device subsytem
+ *
+ *  @details Given a device index @p dv_ind, a pointer to a caller provided
+ *  char buffer @p name, and a length of this buffer @p len, this function
+ *  will write the name of the device subsystem (up to @p len characters)
+ *  to the buffer @p name.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] name a pointer to a caller provided char buffer to which the
+ *  name will be written
+ *
+ *  @param[in] len the length of the caller provided buffer @p name.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire name. In this case, only @p len bytes will
+ *  be written.
+ *
+ */
+rsmi_status_t
+rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len);
+
+/**
+ *  @brief Get the device subsystem vendor id associated with the device with
+ *  provided device index.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p id,
+ *  this function will write the device subsystem vendor id value to the
+ *  uint64_t pointed to by @p id.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] id a pointer to uint64_t to which the device subsystem vendor
+ *  id will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_subsystem_vendor_id_get(uint32_t dv_ind, uint16_t *id);
 
 /** @} */  // end of IDQuer
 
@@ -915,7 +1017,7 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
 /** @} */  // end of PhysQuer
 
 /*****************************************************************************/
-/** @defgroup PhysCont Physcial State Control
+/** @defgroup PhysCont Physical State Control
  *  These functions provide control over the physical state of a device.
  *  @{
  */

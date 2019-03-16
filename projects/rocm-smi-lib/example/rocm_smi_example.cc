@@ -401,13 +401,14 @@ int main() {
   uint64_t val_ui64, val2_ui64;
   int64_t val_i64;
   uint32_t val_ui32;
+  uint16_t val_ui16;
   rsmi_dev_perf_level_t pfl;
   rsmi_frequencies_t f;
   uint32_t num_monitor_devs = 0;
 
   rsmi_num_monitor_devices(&num_monitor_devs);
   for (uint32_t i = 0; i< num_monitor_devs; ++i) {
-    ret = rsmi_dev_id_get(i, &val_ui64);
+    ret = rsmi_dev_id_get(i, &val_ui16);
     CHK_RSMI_RET(ret)
     std::cout << "\t**Device ID: 0x" << std::hex << val_ui64 << std::endl;
 

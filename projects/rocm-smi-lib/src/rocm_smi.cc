@@ -387,17 +387,6 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
   return errno_to_rsmi_status(ret);
 }
 
-static rsmi_status_t get_dev_mon_value_str(amd::smi::MonitorTypes type,
-                 uint32_t dv_ind, int32_t sensor_ind, std::string *val_str) {
-  GET_DEV_FROM_INDX
-
-  assert(dev->monitor() != nullptr);
-
-  int ret = dev->monitor()->readMonitor(type, sensor_ind, val_str);
-  return errno_to_rsmi_status(ret);
-}
-
-
 static rsmi_status_t get_dev_value_vec(amd::smi::DevInfoTypes type,
                          uint32_t dv_ind, std::vector<std::string> *val_vec) {
   GET_DEV_FROM_INDX
@@ -509,11 +498,11 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
   CATCH
 }
 
-rsmi_status_t
-rsmi_dev_id_get(uint32_t dv_ind, uint64_t *id) {
+static rsmi_status_t
+get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_t *id) {
   TRY
   std::string val_str;
-  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevDevID, dv_ind, &val_str);
+  rsmi_status_t ret = get_dev_value_str(typ, dv_ind, &val_str);
 
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
@@ -525,6 +514,26 @@ rsmi_dev_id_get(uint32_t dv_ind, uint64_t *id) {
 
   return RSMI_STATUS_SUCCESS;
   CATCH
+}
+
+rsmi_status_t
+rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
+  return get_id(dv_ind, amd::smi::kDevDevID, id);
+}
+
+rsmi_status_t
+rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t *id) {
+  return get_id(dv_ind, amd::smi::kDevSubSysDevID, id);
+}
+
+rsmi_status_t
+rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
+  return get_id(dv_ind, amd::smi::kDevVendorID, id);
+}
+
+rsmi_status_t
+rsmi_dev_subsystem_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
+  return get_id(dv_ind, amd::smi::kDevSubSysVendorID, id);
 }
 
 rsmi_status_t
@@ -957,15 +966,74 @@ static std::vector<std::string> pci_name_files = {
   "/var/lib/pciutils/pci.ids"
 };
 
+
+enum eNameStrType {
+  NAME_STR_VENDOR = 0,
+  NAME_STR_DEVICE,
+  NAME_STR_SUBSYS
+};
+
+static std::string
+get_id_name_str_from_line(uint64_t id, std::string ln,
+                                                 std::istringstream *ln_str) {
+  std::string token1;
+  std::string ret_str;
+
+  assert(ln_str != nullptr);
+
+  *ln_str >> token1;
+  if (std::stoul(token1, nullptr, 16) == id) {
+    int64_t pos = ln_str->tellg();
+
+    pos = ln.find_first_not_of("\t ", pos);
+    ret_str = ln.substr(pos);
+  }
+  return ret_str;
+}
+
 // Parse pci.ids files. Comment lines have # in first column. Otherwise,
 // Syntax:
 // vendor  vendor_name
 //       device  device_name                             <-- single tab
 //               subvendor subdevice  subsystem_name     <-- two tabs
-static std::string get_dev_name_from_id(uint64_t id) {
+static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
+                                               size_t len, eNameStrType typ) {
   std::string ln;
   std::string token1;
-  std::string description;
+  rsmi_status_t ret;
+  uint16_t device_id;
+  uint16_t vendor_id;
+  uint16_t subsys_vend_id;
+  uint16_t subsys_id;
+  bool found_device_vendor = false;
+  std::string val_str;
+
+  assert(name != nullptr);
+  assert(len > 0);
+
+  name[0] = '\0';
+
+  ret = rsmi_dev_vendor_id_get(dv_ind, &vendor_id);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  if (typ != NAME_STR_VENDOR) {
+    ret = rsmi_dev_id_get(dv_ind, &device_id);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      return ret;
+    }
+    if (typ != NAME_STR_DEVICE) {
+      ret = rsmi_dev_subsystem_vendor_id_get(dv_ind, &subsys_vend_id);
+      if (ret != RSMI_STATUS_SUCCESS) {
+        return ret;
+      }
+      ret = rsmi_dev_subsystem_id_get(dv_ind, &subsys_id);
+      if (ret != RSMI_STATUS_SUCCESS) {
+        return ret;
+      }
+    }
+  }
 
   for (auto fl : pci_name_files) {
     std::ifstream id_file_strm(fl);
@@ -973,70 +1041,119 @@ static std::string get_dev_name_from_id(uint64_t id) {
     while (std::getline(id_file_strm, ln)) {
       std::istringstream ln_str(ln);
       // parse line
-      if (ln_str.peek() == '#') {
+      if (ln[0] == '#' || ln.size() == 0) {
         continue;
       }
 
       if (ln[0] == '\t') {
-        if (ln[1] == '\t') {
-          if (ln[2] == '\t') {
-            // This is a subvendor line
-          }
-        } else {  // ln[1] != '\t'
-          // This is a device line
-          ln_str >> token1;
-          if (std::stoul(token1, nullptr, 16) == id) {
-            int64_t pos = ln_str.tellg();
+        if (found_device_vendor) {
+          if (ln[1] == '\t') {
+            // This is a subsystem line
+            if (typ == NAME_STR_SUBSYS) {
+              val_str = get_id_name_str_from_line(subsys_vend_id, ln, &ln_str);
 
-            pos = ln.find_first_not_of("\t ", pos);
-            description = ln.substr(pos);
-            return description;
+              if (val_str.size() > 0) {
+                // We've chopped the subsys_vend ID, now we need to get the
+                // subsys description
+                val_str = get_id_name_str_from_line(subsys_id, ln, &ln_str);
+
+                if (val_str.size() > 0) {
+                  break;
+                } else {
+                  val_str.clear();
+                }
+              }
+            }
+          } else if (typ == NAME_STR_DEVICE) {  // ln[1] != '\t'
+            // This is a device line
+            val_str = get_id_name_str_from_line(device_id, ln, &ln_str);
+
+            if (val_str.size() > 0) {
+              break;
+            }
           }
         }
-      } else {  // ln[0] != '\t'
-        // This is a vendor line
+      } else {  // ln[0] != '\t'; Vendor line
+        if (found_device_vendor) {
+          // We already found the vendor but didn't find the device or
+          // subsystem we were looking for, so bail out.
+          val_str.clear();
+          return RSMI_STATUS_NOT_FOUND;
+        }
+
+        val_str = get_id_name_str_from_line(vendor_id, ln, &ln_str);
+
+        if (val_str.size() > 0) {
+          if (typ == NAME_STR_VENDOR) {
+            break;
+          } else {
+            val_str.clear();
+            found_device_vendor = true;
+          }
+        }
       }
     }
-  }
-  return description;
-}
-rsmi_status_t
-rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
-  TRY
-  if (name == nullptr || len == 0) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  std::string val_str;
-  rsmi_status_t ret;
-  uint64_t id;
-
-  ret = rsmi_dev_id_get(dv_ind, &id);
-
-  if (ret != RSMI_STATUS_SUCCESS) {
-    return ret;
-  }
-
-  val_str = get_dev_name_from_id(id);
-
-  if (val_str.size() == 0) {
-    ret = get_dev_mon_value_str(amd::smi::kMonName, dv_ind, -1, &val_str);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      return ret;
+    if (val_str.size() > 0) {
+      break;
     }
   }
 
-  size_t ln = val_str.copy(name, len);
+  size_t ct = val_str.copy(name, len);
 
-  name[std::min(len - 1, ln)] = '\0';
+  name[std::min(len - 1, ct)] = '\0';
 
   if (len < val_str.size()) {
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
 
   return RSMI_STATUS_SUCCESS;
+}
+rsmi_status_t
+rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
+  rsmi_status_t ret;
+
+  TRY
+  if (name == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_DEVICE);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
+
+rsmi_status_t
+rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len) {
+  rsmi_status_t ret;
+
+  TRY
+  if (name == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_SUBSYS);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name, size_t len) {
+  rsmi_status_t ret;
+
+  TRY
+  if (name == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_VENDOR);
+  return ret;
+  CATCH
+}
+
 
 rsmi_status_t
 rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
