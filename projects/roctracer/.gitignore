@@ -6,4 +6,7 @@
 *.Po
 b
 build
+inc/hsa_prof_str.h
 test/hsa
+test/MatrixTranspose/MatrixTranspose
+test/MatrixTranspose_test/MatrixTranspose
