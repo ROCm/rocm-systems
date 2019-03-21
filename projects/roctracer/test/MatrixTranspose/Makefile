@@ -15,7 +15,7 @@ EXECUTABLE=./MatrixTranspose
 .PHONY: test
 
 
-all: $(EXECUTABLE) test
+all: clean $(EXECUTABLE) test
 
 CXXFLAGS =-g
 CXX=$(HIPCC)
