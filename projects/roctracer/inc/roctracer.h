@@ -76,7 +76,7 @@ const char* roctracer_error_string();
 // Activity domain type
 typedef activity_domain_t roctracer_domain_t;
 
-// Return Op string by given domain and Op codes
+// Return Op string by given domain and Op code
 // NULL returned on the error and the library errno is set
 const char* roctracer_op_string(
   uint32_t domain,                                        // tracing domain
