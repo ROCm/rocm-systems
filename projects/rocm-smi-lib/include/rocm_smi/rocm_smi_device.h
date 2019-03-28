@@ -65,6 +65,9 @@ enum DevInfoTypes {
   kDevSubSysVendorID,
   kDevGPUMClk,
   kDevGPUSClk,
+  kDevDCEFClk,
+  kDevFClk,
+  kDevSOCClk,
   kDevPCIEClk,
   kDevPowerProfileMode,
   kDevUsage,
@@ -113,7 +116,7 @@ class Device {
     uint32_t index_;
     const RocmSMI_env_vars *env_;
     template <typename T> int openSysfsFileStream(DevInfoTypes type, T *fs,
-                                                          bool write = false);
+                                                   const char *str = nullptr);
 
     int readDevInfoStr(DevInfoTypes type, std::string *retStr);
     int readDevInfoMultiLineStr(DevInfoTypes type,

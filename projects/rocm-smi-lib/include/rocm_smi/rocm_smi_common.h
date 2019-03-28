@@ -50,10 +50,11 @@
     std::cout << "*****" << __FUNCTION__ << std::endl; \
     std::cout << "*****Opening file: " << (FN) << std::endl; \
     if ((WR_STR) != nullptr) { \
-       std::cout << "***** for writing. Writing: \"" << *(WR_STR) << "\""; \
+       std::cout << "***** for writing. Writing: \"" << (WR_STR) << "\""; \
     } else { std::cout << "***** for reading.";} \
     std::cout << std::endl; \
-    std::cout << " at " << __FILE__ << ":" << __LINE__ << std::endl;\
+    std::cout << " at " << __FILE__ << ":" << std::dec << __LINE__ << \
+                                                                   std::endl;\
   }
 
 // Add different debug filters here, as powers of 2; e.g, 1, 2, 4, 8, ...

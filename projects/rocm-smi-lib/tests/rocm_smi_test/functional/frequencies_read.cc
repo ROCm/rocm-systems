@@ -109,18 +109,33 @@ void TestFrequenciesRead::Run(void) {
 
   TestBase::Run();
 
+
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
+    auto freq_output = [&](rsmi_clk_type_t t, const char *name) {
+      err = rsmi_dev_gpu_clk_freq_get(i, t, &f);
+      if (err == RSMI_STATUS_NOT_SUPPORTED || err == RSMI_STATUS_FILE_ERROR) {
+        std::cout << "\t**Get " << name << ": Not supported on this machine"
+                                                                   << std::endl;
+      } else {
+          CHK_ERR_ASRT(err)
+          IF_VERB(STANDARD) {
+            std::cout << "\t**Supported " << name << " clock frequencies: ";
+            std::cout << f.num_supported << std::endl;
+            print_frequencies(&f);
+          }
+      }
+    };
+
     PrintDeviceHeader(i);
 
-    err = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_MEM, &f);
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Supported GPU Memory clock frequencies: ";
-      std::cout << f.num_supported << std::endl;
-      print_frequencies(&f);
-    }
+    freq_output(RSMI_CLK_TYPE_MEM, "Supported GPU Memory");
+    freq_output(RSMI_CLK_TYPE_SYS, "Supported GPU");
+    freq_output(RSMI_CLK_TYPE_DF, "Data Fabric Clock");
+    freq_output(RSMI_CLK_TYPE_DCEF, "Display Controller Engine Clock");
+    freq_output(RSMI_CLK_TYPE_SOC, "SOC Clock");
+
     err = rsmi_dev_pci_bandwidth_get(i, &b);
-    if (err == RSMI_STATUS_NOT_YET_IMPLEMENTED) {
+    if (err == RSMI_STATUS_NOT_SUPPORTED || err == RSMI_STATUS_FILE_ERROR) {
       std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine"
                                                             << std::endl;
     } else {
@@ -130,13 +145,6 @@ void TestFrequenciesRead::Run(void) {
           std::cout << b.transfer_rate.num_supported << std::endl;
           print_frequencies(&b.transfer_rate, b.lanes);
         }
-    }
-    err = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_SYS, &f);
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t**Supported GPU clock frequencies: ";
-      std::cout << f.num_supported << std::endl;
-      print_frequencies(&f);
     }
   }
 }
