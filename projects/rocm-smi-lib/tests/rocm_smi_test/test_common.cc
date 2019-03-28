@@ -135,7 +135,18 @@ const char *GetBlockNameStr(rsmi_gpu_block_t id) {
   return kBlockNameMap.at(id);
 }
 
-
+const char *FreqEnumToStr(rsmi_clk_type rsmi_clk) {
+  static_assert(RSMI_CLK_TYPE_LAST == RSMI_CLK_TYPE_MEM,
+                                       "FreqEnumToStr() needs to be updated");
+  switch (rsmi_clk) {
+    case RSMI_CLK_TYPE_SYS:  return "System clock";
+    case RSMI_CLK_TYPE_DF:   return "Data Fabric clock";
+    case RSMI_CLK_TYPE_DCEF: return "Display Controller Engine clock";
+    case RSMI_CLK_TYPE_SOC:  return "SOC clock";
+    case RSMI_CLK_TYPE_MEM:  return "Memory clock";
+    default: return "Invalid Clock ID";
+  }
+}
 
 #if ENABLE_SMI
 void DumpMonitorInfo(const TestBase *test) {

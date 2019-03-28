@@ -68,6 +68,9 @@ static const char *kDevSubSysVendorIDFName = "subsystem_vendor";
 static const char *kDevOverDriveLevelFName = "pp_sclk_od";
 static const char *kDevGPUSClkFName = "pp_dpm_sclk";
 static const char *kDevGPUMClkFName = "pp_dpm_mclk";
+static const char *kDevDCEFClkFName = "pp_dpm_dcefclk";
+static const char *kDevFClkFName = "pp_dpm_fclk";
+static const char *kDevSOCClkFName = "pp_dpm_socclk";
 static const char *kDevGPUPCIEClkFname = "pp_dpm_pcie";
 static const char *kDevPowerProfileModeFName = "pp_power_profile_mode";
 static const char *kDevPowerODVoltageFName = "pp_od_clk_voltage";
@@ -104,6 +107,9 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevSubSysVendorID, kDevSubSysVendorIDFName},
     {kDevGPUMClk, kDevGPUMClkFName},
     {kDevGPUSClk, kDevGPUSClkFName},
+    {kDevDCEFClk, kDevDCEFClkFName},
+    {kDevFClk, kDevFClkFName},
+    {kDevSOCClk, kDevSOCClkFName},
     {kDevPCIEClk, kDevGPUPCIEClkFname},
     {kDevPowerProfileMode, kDevPowerProfileModeFName},
     {kDevUsage, kDevUsageFName},
@@ -152,13 +158,13 @@ Device:: ~Device() {
 }
 
 template <typename T>
-int Device::openSysfsFileStream(DevInfoTypes type, T *fs, bool write) {
+int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   auto sysfs_path = path_;
 
   if (env_->path_DRM_root_override && type == env_->enum_override) {
     sysfs_path = env_->path_DRM_root_override;
 
-    if (write) {
+    if (str) {
       sysfs_path += ".write";
     }
   }
@@ -166,7 +172,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, bool write) {
   sysfs_path += "/device/";
   sysfs_path += kDevAttribNameMap.at(type);
 
-  DBG_FILE_ERROR(sysfs_path, (std::string *)nullptr);
+  DBG_FILE_ERROR(sysfs_path, str);
   if (!isRegularFile(sysfs_path)) {
     return EISDIR;
   }
@@ -202,7 +208,7 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
   std::ofstream fs;
   int ret;
 
-  ret = openSysfsFileStream(type, &fs, true);
+  ret = openSysfsFileStream(type, &fs, valStr.c_str());
   if (ret != 0) {
     return ret;
   }
@@ -252,9 +258,12 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
 int Device::writeDevInfo(DevInfoTypes type, std::string val) {
   switch (type) {
     case kDevGPUMClk:
+    case kDevDCEFClk:
+    case kDevFClk:
     case kDevGPUSClk:
     case kDevPCIEClk:
     case kDevPowerODVoltage:
+    case kDevSOCClk:
       return writeDevInfoStr(type, val);
 
     default:
@@ -347,7 +356,10 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
   switch (type) {
     case kDevGPUMClk:
     case kDevGPUSClk:
+    case kDevDCEFClk:
+    case kDevFClk:
     case kDevPCIEClk:
+    case kDevSOCClk:
     case kDevPowerProfileMode:
     case kDevPowerODVoltage:
     case kDevErrCntSDMA:

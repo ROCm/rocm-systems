@@ -879,16 +879,30 @@ rsmi_status_t
 rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type_t clk_type,
                                                         rsmi_frequencies_t *f) {
   TRY
+  amd::smi::DevInfoTypes dev_type;
+
   switch (clk_type) {
     case RSMI_CLK_TYPE_SYS:
-      return get_frequencies(amd::smi::kDevGPUSClk, dv_ind, f);
+      dev_type = amd::smi::kDevGPUSClk;
       break;
     case RSMI_CLK_TYPE_MEM:
-      return get_frequencies(amd::smi::kDevGPUMClk, dv_ind, f);
+      dev_type = amd::smi::kDevGPUMClk;
+      break;
+    case RSMI_CLK_TYPE_DF:
+      dev_type = amd::smi::kDevFClk;
+      break;
+    case RSMI_CLK_TYPE_DCEF:
+      dev_type = amd::smi::kDevDCEFClk;
+      break;
+    case RSMI_CLK_TYPE_SOC:
+      dev_type = amd::smi::kDevSOCClk;
       break;
     default:
       return RSMI_STATUS_INVALID_ARGS;
   }
+
+  return get_frequencies(dev_type, dv_ind, f);
+
   CATCH
 }
 
@@ -940,22 +954,30 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   }
 
   int ret_i;
+  amd::smi::DevInfoTypes dev_type;
+
   switch (clk_type) {
     case RSMI_CLK_TYPE_SYS:
-      ret_i = dev->writeDevInfo(amd::smi::kDevGPUSClk, freq_enable_str);
-      return errno_to_rsmi_status(ret_i);
+      dev_type = amd::smi::kDevGPUSClk;
       break;
-
     case RSMI_CLK_TYPE_MEM:
-      ret_i = dev->writeDevInfo(amd::smi::kDevGPUMClk, freq_enable_str);
-      return errno_to_rsmi_status(ret_i);
+      dev_type = amd::smi::kDevGPUMClk;
       break;
-
+    case RSMI_CLK_TYPE_DF:
+      dev_type = amd::smi::kDevFClk;
+      break;
+    case RSMI_CLK_TYPE_SOC:
+      dev_type = amd::smi::kDevSOCClk;
+      break;
+    case RSMI_CLK_TYPE_DCEF:
+      dev_type = amd::smi::kDevDCEFClk;
+      break;
     default:
       return RSMI_STATUS_INVALID_ARGS;
   }
 
-  return RSMI_STATUS_SUCCESS;
+  ret_i = dev->writeDevInfo(dev_type, freq_enable_str);
+  return errno_to_rsmi_status(ret_i);
 
   CATCH
 }
@@ -1689,6 +1711,20 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
     case RSMI_STATUS_NOT_YET_IMPLEMENTED:
       *status_string = "The called function has not been implemented in this "
         "system for this device type";
+      break;
+
+    case RSMI_STATUS_NOT_FOUND:
+      *status_string = "An item required to complete the call was not found";
+      break;
+
+    case RSMI_STATUS_INSUFFICIENT_SIZE:
+      *status_string = "Not enough resources were available to fully execute"
+                             " the call";
+      break;
+
+    case RSMI_STATUS_UNKNOWN_ERROR:
+      *status_string = "An unknown error prevented the call from completing"
+                          " successfully";
       break;
 
     default:
