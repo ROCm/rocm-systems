@@ -309,7 +309,7 @@ struct trace_data_arg_t {
   hsa_agent_t agent;
 };
 
-// Trace data callback for getting trace data from GPU local mamory
+// Trace data callback for getting trace data from GPU local memory
 hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
                            hsa_ven_amd_aqlprofile_info_data_t* info_data, void* data) {
   hsa_status_t status = HSA_STATUS_SUCCESS;

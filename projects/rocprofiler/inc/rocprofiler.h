@@ -387,8 +387,10 @@ hsa_status_t rocprofiler_queue_create_profiled(
 // Profiling pool
 //
 // Support for profiling contexts pool
+// The API provide capability to create a contexts pool for a given agent and a set of features,
+// to fetch/relase a context entry, to register a callback for the contexts completion.
 
-// Profiling pool
+// Profiling pool handle
 typedef void rocprofiler_pool_t;
 
 // Profiling pool entry
@@ -409,22 +411,36 @@ typedef struct {
 } rocprofiler_pool_properties_t;
 
 // Open profiling pool
-hsa_status_t rocprofiler_pool_open(hsa_agent_t agent,                   // GPU handle
-                                   rocprofiler_feature_t* features,     // [in] profiling features array
-                                   uint32_t feature_count,              // profiling info count
-                                   rocprofiler_pool_t** pool,           // [out] context object
-                                   uint32_t mode,                       // profiling mode mask
-                                   rocprofiler_pool_properties_t*);     // pool properties
+hsa_status_t rocprofiler_pool_open(
+  hsa_agent_t agent,                   // GPU handle
+  rocprofiler_feature_t* features,     // [in] profiling features array
+  uint32_t feature_count,              // profiling info count
+  rocprofiler_pool_t** pool,           // [out] context object
+  uint32_t mode,                       // profiling mode mask
+  rocprofiler_pool_properties_t*);     // pool properties
 
 // Close profiling pool
-hsa_status_t rocprofiler_pool_close(rocprofiler_pool_t* pool);          // profiling pool handle
+hsa_status_t rocprofiler_pool_close(
+  rocprofiler_pool_t* pool);          // profiling pool handle
 
 // Fetch profiling pool entry
-hsa_status_t rocprofiler_pool_fetch(rocprofiler_pool_t* pool,           // profiling pool handle
-                                    rocprofiler_pool_entry_t* entry);   // [out] empty profling pool entry
+hsa_status_t rocprofiler_pool_fetch(
+  rocprofiler_pool_t* pool,           // profiling pool handle
+  rocprofiler_pool_entry_t* entry);   // [out] empty profiling pool entry
 
-// Flush profiling pool
-hsa_status_t rocprofiler_pool_flush(rocprofiler_pool_t* pool);          // profiling pool handle
+// Release profiling pool entry
+hsa_status_t rocprofiler_pool_release(
+  rocprofiler_pool_entry_t* entry);   // released profiling pool entry
+
+// Iterate fetched profiling pool entries
+hsa_status_t rocprofiler_pool_iterate(
+  rocprofiler_pool_t* pool,           // profiling pool handle
+  hsa_status_t (*callback)(rocprofiler_pool_entry_t* entry, void* data), // callback
+  void *data); // [in/out] data passed to callback
+
+// Flush completed entries in profiling pool
+hsa_status_t rocprofiler_pool_flush(
+  rocprofiler_pool_t* pool);          // profiling pool handle
 
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef __cplusplus
