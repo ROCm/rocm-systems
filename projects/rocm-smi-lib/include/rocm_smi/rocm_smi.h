@@ -85,7 +85,7 @@ typedef enum {
   RSMI_STATUS_INVALID_ARGS,              //!< Passed in arguments are not valid
   RSMI_STATUS_NOT_SUPPORTED,             //!< The requested information or
                                          //!< action is not available for the
-                                         //!< given input
+                                         //!< given input, on the given system
   RSMI_STATUS_FILE_ERROR,                //!< Problem accessing a file. This
                                          //!< may because the operation is not
                                          //!< supported by the Linux kernel
@@ -147,9 +147,16 @@ typedef rsmi_dev_perf_level_t rsmi_dev_perf_level;
 typedef enum {
   RSMI_CLK_TYPE_SYS = 0x0,            //!< System clock
   RSMI_CLK_TYPE_FIRST = RSMI_CLK_TYPE_SYS,
-
+  RSMI_CLK_TYPE_DF,                   //!< Data Fabric clock (for ASICs
+                                      //!< running on a separate clock)
+  RSMI_CLK_TYPE_DCEF,                 //!< Display Controller Engine clock
+  RSMI_CLK_TYPE_SOC,                  //!< SOC clock
   RSMI_CLK_TYPE_MEM,                  //!< Memory clock
-  RSMI_CLK_TYPE_LAST = RSMI_CLK_TYPE_MEM
+
+  // Add new clocks to the end (not in the middle) and update
+  // RSMI_CLK_TYPE_LAST
+  RSMI_CLK_TYPE_LAST = RSMI_CLK_TYPE_MEM,
+  RSMI_CLK_INVALID = 0xFFFFFFFF
 } rsmi_clk_type_t;
 /// \cond Ignore in docs.
 typedef rsmi_clk_type_t rsmi_clk_type;
