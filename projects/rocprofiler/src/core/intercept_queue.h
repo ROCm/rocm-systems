@@ -72,7 +72,7 @@ class InterceptQueue {
 
     if (tracker_on || tracker_on_) {
       if (tracker_ == NULL) tracker_ = &Tracker::Instance();
-      status = hsa_amd_profiling_set_profiler_enabled(*queue, true);
+      status = rocprofiler::util::HsaRsrcFactory::HsaApi()->hsa_amd_profiling_set_profiler_enabled(*queue, true);
       if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_set_profiler_enabled()");
     }
 
