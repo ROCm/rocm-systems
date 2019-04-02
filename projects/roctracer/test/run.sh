@@ -71,7 +71,7 @@ export ROCP_THRS=1
 
 eval_test "tool HSA test" "LD_PRELOAD='$HSA_TOOLS_LIB' ./test/hsa/ctrl"
 
-echo "<trace name=\"HSA\"><parameters list=\"hsa_shut_down, hsa_amd_memory_pool_allocate\"></parameters></trace>" > input.xml
+echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > input.xml
 export ROCP_INPUT=input.xml
 eval_test "tool HSA test input" "LD_PRELOAD='$HSA_TOOLS_LIB' ./test/hsa/ctrl"
 
