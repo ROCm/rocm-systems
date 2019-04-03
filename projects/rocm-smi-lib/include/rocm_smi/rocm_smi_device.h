@@ -77,6 +77,7 @@ enum DevInfoTypes {
   kDevErrCntSDMA,
   kDevErrCntUMC,
   kDevErrCntGFX,
+  kDevErrCntFeatures,
   kDevMemTotGTT,
   kDevMemTotVisVRAM,
   kDevMemTotVRAM,

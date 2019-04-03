@@ -85,14 +85,44 @@ void TestErrCntRead::Close() {
 void TestErrCntRead::Run(void) {
   rsmi_status_t err;
   rsmi_error_count_t ec;
+  uint64_t enabled_mask;
+  rsmi_ras_err_state_t err_state;
 
   TestBase::Run();
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
 
-    for (uint32_t b = RSMI_GPU_BLOCK_FIRST; b <= RSMI_GPU_BLOCK_LAST; ++b) {
-      err = rsmi_dev_error_count_get(i, static_cast<rsmi_gpu_block_t>(b), &ec);
+    err = rsmi_dev_ecc_enabled_get(i, &enabled_mask);
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout <<
+          "\t**Error Count Enabled Mask for is not supported on this machine"
+                                                                 << std::endl;
+    } else {
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "Block Error Mask: 0x" << std::hex << enabled_mask <<
+                                                                      std::endl;
+      }
+    }
+    for (uint32_t b = RSMI_GPU_BLOCK_FIRST;
+                                          b <= RSMI_GPU_BLOCK_LAST; b = b*2) {
+      err = rsmi_dev_ecc_status_get(i, static_cast<rsmi_gpu_block_t>(b),
+                                                                  &err_state);
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+        std::cout << "\t**Error Count Status for " <<
+                      GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) <<
+                               ": Not supported on this machine" << std::endl;
+      } else {
+          CHK_ERR_ASRT(err)
+          IF_VERB(STANDARD) {
+            std::cout << "\t**Error count status for " <<
+              GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) <<
+                     " block: " << GetErrStateNameStr(err_state) << std::endl;
+          }
+      }
+
+      err = rsmi_dev_ecc_count_get(i, static_cast<rsmi_gpu_block_t>(b), &ec);
 
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout << "\t**Error Count for " <<
