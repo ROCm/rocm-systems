@@ -233,12 +233,11 @@ hsa_status_t GetExcStatus(const std::exception& e) {
                                : HSA_STATUS_ERROR;
 }
 
-
-inline size_t CreateEnableCmd(const hsa_agent_t& agent, packet_t* command, const size_t& slot_count) {
-  rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
-  const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
+inline size_t CreateEnableCmd(const rocprofiler::util::AgentInfo* agent_info, packet_t* command, const size_t& slot_count) {
   const bool is_legacy = (strncmp(agent_info->name, "gfx8", 4) == 0);
   const size_t packet_count = (is_legacy) ? Profile::LEGACY_SLOT_SIZE_PKT : 1;
+
+  rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
 
   if (packet_count > slot_count) EXC_RAISING(HSA_STATUS_ERROR, "packet_count > slot_count");
 
@@ -291,9 +290,13 @@ hsa_status_t CreateQueuePro(
     uint32_t group_segment_size,
     hsa_queue_t **queue)
 {
-  static packet_t enable_cmd_packet[Profile::LEGACY_SLOT_SIZE_PKT];
-  static size_t enable_cmd_size = 0;
-  static std::mutex enable_cmd_mutex;
+  typedef std::pair<packet_t[Profile::LEGACY_SLOT_SIZE_PKT], uint32_t> cmd_entry_t;
+  typedef std::vector<cmd_entry_t> cmd_vec_t;
+  static cmd_vec_t cmd_vec;
+  static uint32_t cmd_mask = 0;
+  static std::mutex cmd_mutex;
+
+  rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
 
   // Create HSA queue
   hsa_status_t status = hsa_queue_create_fn(
@@ -308,15 +311,30 @@ hsa_status_t CreateQueuePro(
   if (status != HSA_STATUS_SUCCESS) return status;
 
   // Create 'Enable' cmd packet
-  if (enable_cmd_size == 0) {
-    std::lock_guard<std::mutex> lck(enable_cmd_mutex);
-    if (enable_cmd_size == 0) {
-      enable_cmd_size = CreateEnableCmd(agent, enable_cmd_packet, Profile::LEGACY_SLOT_SIZE_PKT);
+  const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
+  const uint32_t dev_index = 1 << agent_info->dev_index;
+  const uint32_t dev_mask = 1 << dev_index;
+  if ((cmd_mask & dev_mask) == 0) {
+    std::lock_guard<std::mutex> lck(cmd_mutex);
+
+    if ((cmd_mask & dev_mask) == 0) {
+      cmd_mask |= dev_mask;
+      // Allocating cmd vector
+      uint32_t mask = 1;
+      while (1) {
+        const uint32_t max = 1 << cmd_vec.size();
+        if (mask >= max) cmd_vec.push_back({});
+        if (((mask & dev_mask) != 0) || (mask == 0)) break;
+        mask <<= 1;
+      }
+      if (mask == 0) EXC_RAISING(status, "bad device index (" << dev_index << ")");
+      // Creating cmd packets
+      cmd_vec[dev_index].second = CreateEnableCmd(agent_info, cmd_vec[dev_index].first, Profile::LEGACY_SLOT_SIZE_PKT);
     }
   }
-
+  
   // Enable counters for the queue
-  rocprofiler::util::HsaRsrcFactory::Instance().Submit(*queue, enable_cmd_packet, enable_cmd_size);
+  rocprofiler::util::HsaRsrcFactory::Instance().Submit(*queue, cmd_vec[dev_index].first, cmd_vec[dev_index].second);
 
   return HSA_STATUS_SUCCESS;
 }
