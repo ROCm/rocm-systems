@@ -60,6 +60,18 @@ static const std::map<rsmi_gpu_block_t, const char *> kBlockNameMap = {
     {RSMI_GPU_BLOCK_SDMA, "SDMA"},
     {RSMI_GPU_BLOCK_GFX, "GFX"},
 };
+static_assert(RSMI_GPU_BLOCK_LAST == RSMI_GPU_BLOCK_GFX,
+                                         "kBlockNameMap needs to be updated");
+
+static const std::map<rsmi_ras_err_state_t, const char *> kErrStateNameMap = {
+    {RSMI_RAS_ERR_STATE_NONE,    "None"},
+    {RSMI_RAS_ERR_STATE_PARITY,  "Error Unknown"},
+    {RSMI_RAS_ERR_STATE_SING_C,  "Single, Correctable"},
+    {RSMI_RAS_ERR_STATE_MULT_UC, "Multiple, Uncorrectable"},
+    {RSMI_RAS_ERR_STATE_POISON,  "Poison"},
+};
+static_assert(RSMI_RAS_ERR_STATE_LAST == RSMI_RAS_ERR_STATE_POISON,
+                                      "kErrStateNameMap needs to be updated");
 
 static const struct option long_options[] = {
   {"iterations", required_argument, nullptr, 'i'},
@@ -133,6 +145,9 @@ uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list) {
 
 const char *GetBlockNameStr(rsmi_gpu_block_t id) {
   return kBlockNameMap.at(id);
+}
+const char *GetErrStateNameStr(rsmi_ras_err_state_t st) {
+  return kErrStateNameMap.at(st);
 }
 
 const char *FreqEnumToStr(rsmi_clk_type rsmi_clk) {

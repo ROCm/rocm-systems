@@ -57,14 +57,14 @@ extern "C" {
  *  Main header file for the ROCm SMI library.
  *  All required function, structure, enum, etc. definitions should be defined
  *  in this file.
- *  
+ *
  *  @brief The rocm_smi library api is new, and therefore subject to change
  *  either at the ABI or API level. Instead of marking every function prototype as "unstable", we are
  *  instead saying the API is unstable (i.e., changes are possible) while the
  *  major version remains 0. This means that if the API/ABI changes, we will
  *  not increment the major version to 1. Once the ABI stabilizes, we will
  *  increment the major version to 1, and thereafter increment it on all ABI
- *  breaks. 
+ *  breaks.
  */
 
 //! Guaranteed maximum possible number of supported frequencies
@@ -230,17 +230,38 @@ typedef rsmi_power_profile_preset_masks_t rsmi_power_profile_preset_masks;
  * @brief This enum is used to identify different GPU blocks.
  */
 typedef enum {
-  RSMI_GPU_BLOCK_FIRST = 0,
+  RSMI_GPU_BLOCK_INVALID =   0x0000000000000000,  //!< Used to indicate an
+                                                  //!< invalid block
+  RSMI_GPU_BLOCK_FIRST =     0x0000000000000001,
 
-  RSMI_GPU_BLOCK_UMC = RSMI_GPU_BLOCK_FIRST,
-  RSMI_GPU_BLOCK_SDMA,
-  RSMI_GPU_BLOCK_GFX,
+  RSMI_GPU_BLOCK_UMC = RSMI_GPU_BLOCK_FIRST,      //!< UMC block
+  RSMI_GPU_BLOCK_SDMA =      0x0000000000000002,  //!< SDMA block
+  RSMI_GPU_BLOCK_GFX =       0x0000000000000004,  //!< GFX block
 
-  RSMI_GPU_BLOCK_LAST = RSMI_GPU_BLOCK_GFX
+  // New enum elements will be added as support is added for other blocks
+
+  RSMI_GPU_BLOCK_LAST = RSMI_GPU_BLOCK_GFX,       //!< The highest bit position
+                                                  //!< for supported blocks
+  RSMI_GPU_BLOCK_RESERVED =  0x8000000000000000
 } rsmi_gpu_block_t;
 /// \cond Ignore in docs.
 typedef rsmi_gpu_block_t rsmi_gpu_block;
 /// \endcond
+
+/**
+ * @brief The current ECC state
+ */
+typedef enum {
+  RSMI_RAS_ERR_STATE_NONE = 0,   //!< No current errors
+  RSMI_RAS_ERR_STATE_PARITY,     //!< ECC errors present, but type unknown
+  RSMI_RAS_ERR_STATE_SING_C,     //!< Single correctable error
+  RSMI_RAS_ERR_STATE_MULT_UC,    //!< Multiple uncorrectable errors
+  RSMI_RAS_ERR_STATE_POISON,     //!< Firmware detected error and isolated
+                                 //!< page. Treat as uncorrectable.
+
+  RSMI_RAS_ERR_STATE_LAST = RSMI_RAS_ERR_STATE_POISON,
+  RSMI_RAS_ERR_STATE_INVALID = 0xFFFFFFFF
+} rsmi_ras_err_state_t;
 
 /**
  * @brief Types of memory
@@ -952,7 +973,7 @@ rsmi_status_t rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind,
 /**
  * @brief Get the fan speed for the specified device in RPMs.
  *
- * @details Given a device index @p dv_ind 
+ * @details Given a device index @p dv_ind
  * this function will get the fan speed.
  *
  * @param[in] dv_ind a device index
@@ -1158,7 +1179,7 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
  *
  * @param[in] dv_ind a device index
  *
- * @param[in] odv a pointer to an ::rsmi_od_volt_freq_data_t structure 
+ * @param[in] odv a pointer to an ::rsmi_od_volt_freq_data_t structure
  *
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
@@ -1166,7 +1187,7 @@ rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind,
                                                rsmi_od_volt_freq_data_t *odv);
 
 /**
- * @brief This function will retrieve the current valid regions in the 
+ * @brief This function will retrieve the current valid regions in the
  * frequency/voltage space.
  *
  * @details Given a device index @p dv_ind, a pointer to an unsigned integer
@@ -1176,7 +1197,7 @@ rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind,
  * that can be written to by this function. The caller should also
  * indicate the number of ::rsmi_freq_volt_region_t structures that can safely
  * be written to @p buffer in @p num_regions.
- * 
+ *
  * The number of regions to expect this function provide (@p num_regions) can
  * be obtained by calling ::rsmi_dev_od_volt_info_get().
  *
@@ -1186,7 +1207,7 @@ rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind,
  * ::rsmi_freq_volt_region_t structures that can be written to @p buffer. As
  * output, this is the number of ::rsmi_freq_volt_region_t structures that were
  * actually written.
- * 
+ *
  * @param[inout] buffer a caller provided buffer to which
  * ::rsmi_freq_volt_region_t structures will be written
  *
@@ -1352,15 +1373,15 @@ rsmi_status_t rsmi_dev_od_freq_range_set(uint32_t dv_ind, rsmi_clk_type_t clk,
 /**
  * @brief Get the build version information for the currently running build of
  * RSMI.
- * 
+ *
  * @details  Get the major, minor, patch and build string for RSMI build
  * currently in use through @p version
- * 
+ *
  * @param[inout] version A pointer to an ::rsmi_version_t structure that will
  * be updated with the version information upon return.
- * 
+ *
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
- * 
+ *
  */
 rsmi_status_t
 rsmi_version_get(rsmi_version_t *version);
@@ -1398,25 +1419,66 @@ rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len);
 
 /**
  * @brief Retrieve the error counts for a GPU block
- * 
+ *
  * @details Given a device index @p dv_ind, an ::rsmi_gpu_block_t @p block and a
  * pointer to an ::rsmi_error_count_t @p ec, this function will write the error
  * count values for the GPU block indicated by @p block to memory pointed to by
  * @p ec.
- * 
+ *
  * @param[in] dv_ind a device index
- * 
+ *
  * @param[in] block The block for which error counts should be retrieved
- * 
+ *
  * @param[inout] ec A pointer to an ::rsmi_error_count_t to which the error
  * counts should be written
- * 
+ *
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- * 
+ *
  */
-rsmi_status_t rsmi_dev_error_count_get(uint32_t dv_ind,
+rsmi_status_t rsmi_dev_ecc_count_get(uint32_t dv_ind,
                               rsmi_gpu_block_t block, rsmi_error_count_t *ec);
 
+/**
+ * @brief Retrieve the enabled ECC bit-mask
+ *
+ * @details Given a device index @p dv_ind, and a pointer to a uint64_t @p
+ * enabled_mask, this function will write a bit_mask to memory pointed to by
+ * @p enabled_mask. Upon a successful call, the bitmask can then be AND'd with
+ * elements of the ::rsmi_gpu_block_t ennumeration to determine if the
+ * corresponding block has ECC enabled. Note that the bits above
+ * ::RSMI_GPU_BLOCK_LAST correspond to blocks that do not yet have ECC support.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[inout] enabled_mask A pointer to a uint64_t to which the enabled
+ * mask will be written
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
+                                                      uint64_t *enabled_mask);
+
+/**
+ * @brief Retrieve the ECC status for a GPU block
+ *
+ * @details Given a device index @p dv_ind, an ::rsmi_gpu_block_t @p block and
+ * a pointer to an ::rsmi_ras_err_state_t @p state, this function will write
+ * the current state for the GPU block indicated by @p block to memory pointed
+ * to by @p state.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[in] block The block for which error counts should be retrieved
+ *
+ * @param[inout] state A pointer to an ::rsmi_ras_err_state_t to which the
+ * ECC state should be written
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
+                                                  rsmi_ras_err_state_t *state);
 /**
  * @brief Get a description of a provided RSMI error status
  *
