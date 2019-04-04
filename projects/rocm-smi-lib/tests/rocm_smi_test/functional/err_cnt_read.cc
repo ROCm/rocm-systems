@@ -116,7 +116,7 @@ void TestErrCntRead::Run(void) {
       } else {
           CHK_ERR_ASRT(err)
           IF_VERB(STANDARD) {
-            std::cout << "\t**Error count status for " <<
+            std::cout << "\t**Error Count status for " <<
               GetBlockNameStr(static_cast<rsmi_gpu_block_t>(b)) <<
                      " block: " << GetErrStateNameStr(err_state) << std::endl;
           }

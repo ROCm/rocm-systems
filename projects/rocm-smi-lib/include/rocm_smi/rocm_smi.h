@@ -253,6 +253,7 @@ typedef rsmi_gpu_block_t rsmi_gpu_block;
  */
 typedef enum {
   RSMI_RAS_ERR_STATE_NONE = 0,   //!< No current errors
+  RSMI_RAS_ERR_STATE_DISABLED,   //!< ECC is disabled
   RSMI_RAS_ERR_STATE_PARITY,     //!< ECC errors present, but type unknown
   RSMI_RAS_ERR_STATE_SING_C,     //!< Single correctable error
   RSMI_RAS_ERR_STATE_MULT_UC,    //!< Multiple uncorrectable errors

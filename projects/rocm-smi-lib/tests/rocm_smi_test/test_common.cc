@@ -63,12 +63,32 @@ static const std::map<rsmi_gpu_block_t, const char *> kBlockNameMap = {
 static_assert(RSMI_GPU_BLOCK_LAST == RSMI_GPU_BLOCK_GFX,
                                          "kBlockNameMap needs to be updated");
 
+static const char * kRasErrStateStrings[] = {
+    "None",                          // RSMI_RAS_ERR_STATE_NONE
+    "Disabled",                      // RSMI_RAS_ERR_STATE_DISABLED
+    "Error Unknown",                 // RSMI_RAS_ERR_STATE_PARITY
+    "Single, Correctable",           // RSMI_RAS_ERR_STATE_SING_C
+    "Multiple, Uncorrectable",       // RSMI_RAS_ERR_STATE_MULT_UC
+    "Poison"                         // RSMI_RAS_ERR_STATE_POISON
+};
+static_assert(
+ sizeof(kRasErrStateStrings)/sizeof(char *) == (RSMI_RAS_ERR_STATE_LAST + 1),
+                                      "kErrStateNameMap needs to be updated");
+
+
 static const std::map<rsmi_ras_err_state_t, const char *> kErrStateNameMap = {
-    {RSMI_RAS_ERR_STATE_NONE,    "None"},
-    {RSMI_RAS_ERR_STATE_PARITY,  "Error Unknown"},
-    {RSMI_RAS_ERR_STATE_SING_C,  "Single, Correctable"},
-    {RSMI_RAS_ERR_STATE_MULT_UC, "Multiple, Uncorrectable"},
-    {RSMI_RAS_ERR_STATE_POISON,  "Poison"},
+    {RSMI_RAS_ERR_STATE_NONE,
+                            kRasErrStateStrings[RSMI_RAS_ERR_STATE_NONE]},
+    {RSMI_RAS_ERR_STATE_DISABLED,
+                            kRasErrStateStrings[RSMI_RAS_ERR_STATE_DISABLED]},
+    {RSMI_RAS_ERR_STATE_PARITY,
+                            kRasErrStateStrings[RSMI_RAS_ERR_STATE_PARITY]},
+    {RSMI_RAS_ERR_STATE_SING_C,
+                            kRasErrStateStrings[RSMI_RAS_ERR_STATE_SING_C]},
+    {RSMI_RAS_ERR_STATE_MULT_UC,
+                            kRasErrStateStrings[RSMI_RAS_ERR_STATE_MULT_UC]},
+    {RSMI_RAS_ERR_STATE_POISON,
+                            kRasErrStateStrings[RSMI_RAS_ERR_STATE_POISON]},
 };
 static_assert(RSMI_RAS_ERR_STATE_LAST == RSMI_RAS_ERR_STATE_POISON,
                                       "kErrStateNameMap needs to be updated");
