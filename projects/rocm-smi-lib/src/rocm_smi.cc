@@ -485,6 +485,7 @@ static_assert(RSMI_GPU_BLOCK_LAST == RSMI_GPU_BLOCK_GFX,
 
 static const std::map<std::string, rsmi_ras_err_state_t> kRocmSMIStateMap = {
     {"none", RSMI_RAS_ERR_STATE_NONE},
+    {"disabled", RSMI_RAS_ERR_STATE_DISABLED},
     {"parity", RSMI_RAS_ERR_STATE_PARITY},
     {"single_correctable", RSMI_RAS_ERR_STATE_SING_C},
     {"multi_uncorrectable", RSMI_RAS_ERR_STATE_MULT_UC},
