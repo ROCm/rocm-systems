@@ -332,7 +332,7 @@ hsa_status_t CreateQueuePro(
       cmd_vec[dev_index].second = CreateEnableCmd(agent_info, cmd_vec[dev_index].first, Profile::LEGACY_SLOT_SIZE_PKT);
     }
   }
-  
+
   // Enable counters for the queue
   rocprofiler::util::HsaRsrcFactory::Instance().Submit(*queue, cmd_vec[dev_index].first, cmd_vec[dev_index].second);
 
@@ -749,6 +749,7 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_info(
           info.metric.name = strdup(name.c_str());
           info.metric.description = strdup(descr.c_str());
           info.metric.expr = expr.empty() ? NULL : strdup(expr.c_str());
+          info.metric.instances = 1;
 
           if (expr.empty()) {
             // Getting the block name
