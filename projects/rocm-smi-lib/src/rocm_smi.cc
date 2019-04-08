@@ -394,6 +394,9 @@ static rsmi_status_t get_dev_value_vec(amd::smi::DevInfoTypes type,
   int ret = dev->readDevInfo(type, val_vec);
   return errno_to_rsmi_status(ret);
 }
+static bool is_power_of_2(uint64_t n) {
+      return n && !(n & (n - 1));
+}
 
 rsmi_status_t
 rsmi_init(uint64_t init_flags) {
@@ -428,8 +431,117 @@ rsmi_num_monitor_devices(uint32_t *num_devices) {
   CATCH
 }
 
+rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
+                                                    uint64_t *enabled_mask) {
+  TRY
+  rsmi_status_t ret;
+
+  if (enabled_mask == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  std::vector<std::string> val_vec;
+
+  ret = get_dev_value_vec(amd::smi::kDevErrCntFeatures, dv_ind, &val_vec);
+
+  if (ret == RSMI_STATUS_FILE_ERROR) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  std::string junk;
+  std::istringstream fs1(val_vec[0]);
+  std::string mask_str;
+
+  fs1 >> junk;
+  assert(junk == "feature");
+  fs1 >> junk;
+  assert(junk == "mask:");
+  fs1 >> mask_str;
+
+  errno = 0;
+  *enabled_mask = strtoul(mask_str.c_str(), nullptr, 16);
+  assert(errno == 0);
+
+  return errno_to_rsmi_status(errno);
+
+  CATCH
+}
+
+
+static const char *kRSMIGpuBlkUMCFName = "umc";
+static const char *kRSMIGpuBlkSDMAFName = "sdma";
+static const char *kRSMIGpuBlkGFXFName = "gfx";
+
+static const std::map<rsmi_gpu_block_t, const char *> kRocmSMIBlockMap = {
+  {RSMI_GPU_BLOCK_UMC,  kRSMIGpuBlkUMCFName},
+  {RSMI_GPU_BLOCK_SDMA, kRSMIGpuBlkSDMAFName},
+  {RSMI_GPU_BLOCK_GFX,  kRSMIGpuBlkGFXFName},
+};
+static_assert(RSMI_GPU_BLOCK_LAST == RSMI_GPU_BLOCK_GFX,
+                 "rsmi_gpu_block_t and/or above name map need to be updated"
+                                                     " and then this assert");
+
+static const std::map<std::string, rsmi_ras_err_state_t> kRocmSMIStateMap = {
+    {"none", RSMI_RAS_ERR_STATE_NONE},
+    {"disabled", RSMI_RAS_ERR_STATE_DISABLED},
+    {"parity", RSMI_RAS_ERR_STATE_PARITY},
+    {"single_correctable", RSMI_RAS_ERR_STATE_SING_C},
+    {"multi_uncorrectable", RSMI_RAS_ERR_STATE_MULT_UC},
+    {"poison", RSMI_RAS_ERR_STATE_POISON},
+};
+static_assert(RSMI_RAS_ERR_STATE_LAST == RSMI_RAS_ERR_STATE_POISON,
+                 "rsmi_gpu_block_t and/or above name map need to be updated"
+                                                     " and then this assert");
+
+rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
+                                                 rsmi_ras_err_state_t *state) {
+  TRY
+  if (state == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  if (!is_power_of_2(block)) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  rsmi_status_t ret;
+  std::vector<std::string> val_vec;
+
+  ret = get_dev_value_vec(amd::smi::kDevErrCntFeatures, dv_ind, &val_vec);
+
+  if (ret == RSMI_STATUS_FILE_ERROR) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  std::string blk_line;
+  std::string search_str = kRocmSMIBlockMap.at(block);
+  std::string state_str;
+
+  search_str += ":";
+
+  for (uint32_t i = 1; i < val_vec.size(); ++i) {  // Skip features line
+    std::istringstream fs1(val_vec[i]);
+
+    fs1 >> blk_line;
+
+    if (blk_line == search_str) {
+      fs1 >> state_str;
+      assert(kRocmSMIStateMap.count(state_str));
+      *state = kRocmSMIStateMap.at(state_str);
+      return RSMI_STATUS_SUCCESS;
+    }
+  }
+  assert(!"Block was not found");
+  *state = RSMI_RAS_ERR_STATE_INVALID;
+  return RSMI_STATUS_NOT_FOUND;
+  CATCH
+}
+
 rsmi_status_t
-rsmi_dev_error_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
+rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
                                                      rsmi_error_count_t *ec) {
   std::vector<std::string> val_vec;
   rsmi_status_t ret;
@@ -454,7 +566,6 @@ rsmi_dev_error_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
       break;
 
     default:
-      assert(!"Unsupported block provided to rsmi_dev_error_count_get()");
       return RSMI_STATUS_NOT_SUPPORTED;
   }
   ret = get_dev_value_vec(type, dv_ind, &val_vec);
@@ -512,7 +623,7 @@ get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_t *id) {
   *id = strtoul(val_str.c_str(), nullptr, 16);
   assert(errno == 0);
 
-  return RSMI_STATUS_SUCCESS;
+  return errno_to_rsmi_status(errno);
   CATCH
 }
 
@@ -831,10 +942,6 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
 
   return RSMI_STATUS_SUCCESS;
   CATCH
-}
-
-static bool is_power_of_2(uint64_t n) {
-      return n && !(n & (n - 1));
 }
 static rsmi_status_t set_power_profile(uint32_t dv_ind,
                                     rsmi_power_profile_preset_masks_t profile) {

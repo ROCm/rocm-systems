@@ -80,6 +80,7 @@ static const char *kDevPCIEThruPutFName = "pcie_bw";
 static const char *kDevErrCntSDMAFName = "ras/sdma_err_count";
 static const char *kDevErrCntUMCFName = "ras/umc_err_count";
 static const char *kDevErrCntGFXFName = "ras/gfx_err_count";
+static const char *kDevErrCntFeaturesFName = "ras/features";
 static const char *kDevMemTotGTTFName = "mem_info_gtt_total";
 static const char *kDevMemTotVisVRAMFName = "mem_info_vis_vram_total";
 static const char *kDevMemTotVRAMFName = "mem_info_vram_total";
@@ -119,6 +120,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevErrCntSDMA, kDevErrCntSDMAFName},
     {kDevErrCntUMC, kDevErrCntUMCFName},
     {kDevErrCntGFX, kDevErrCntGFXFName},
+    {kDevErrCntFeatures, kDevErrCntFeaturesFName},
     {kDevMemTotGTT, kDevMemTotGTTFName},
     {kDevMemTotVisVRAM, kDevMemTotVisVRAMFName},
     {kDevMemTotVRAM, kDevMemTotVRAMFName},
@@ -365,6 +367,7 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
     case kDevErrCntSDMA:
     case kDevErrCntUMC:
     case kDevErrCntGFX:
+    case kDevErrCntFeatures:
       return readDevInfoMultiLineStr(type, val);
       break;
 
