@@ -111,7 +111,7 @@ void TestPowerRead::Run(void) {
       std::cout << "\t**Averge Power Usage: ";
       CHK_RSMI_PERM_ERR(err)
       if (err == RSMI_STATUS_SUCCESS) {
-        std::cout << static_cast<float>(val_ui64)/1000 << " W" << std::endl;
+        std::cout << static_cast<float>(val_ui64)/1000 << " mW" << std::endl;
       }
     }
   }
