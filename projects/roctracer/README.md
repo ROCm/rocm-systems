@@ -30,7 +30,7 @@ asyncronous activity records pool support.
 
   cd <your path>
 
- - CLone development branches of roctracer and HIP/HCC:
+ - CLone development branch of roctracer:
   git clone -b amd-master https://github.com/ROCmSoftwarePlatform/roctracer.git
 
  - Set environment:
