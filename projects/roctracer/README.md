@@ -26,6 +26,8 @@ asyncronous activity records pool support.
 
 ## To build and run test
 ```
+ - ROCm-2.3 or higher is required
+
   cd <your path>
 
  - CLone development branches of roctracer and HIP/HCC:
