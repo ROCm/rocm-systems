@@ -71,41 +71,41 @@ static const size_t MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
 typedef decltype(hsa_agent_t::handle) hsa_agent_handle_t;
 
 struct hsa_pfn_t {
-  decltype(hsa_init)* hsa_init;
-  decltype(hsa_shut_down)* hsa_shut_down;
-  decltype(hsa_agent_get_info)* hsa_agent_get_info;
+  decltype(::hsa_init)* hsa_init;
+  decltype(::hsa_shut_down)* hsa_shut_down;
+  decltype(::hsa_agent_get_info)* hsa_agent_get_info;
 
-  decltype(hsa_iterate_agents)* hsa_iterate_agents;
+  decltype(::hsa_iterate_agents)* hsa_iterate_agents;
 
-  decltype(hsa_queue_create)* hsa_queue_create;
-  decltype(hsa_queue_destroy)* hsa_queue_destroy;
-  decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed;
-  decltype(hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed;
-  decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed;
-  decltype(hsa_signal_create)* hsa_signal_create;
-  decltype(hsa_signal_destroy)* hsa_signal_destroy;
-  decltype(hsa_signal_store_relaxed)* hsa_signal_store_relaxed;
-  decltype(hsa_signal_wait_scacquire)* hsa_signal_wait_scacquire;
+  decltype(::hsa_queue_create)* hsa_queue_create;
+  decltype(::hsa_queue_destroy)* hsa_queue_destroy;
+  decltype(::hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed;
+  decltype(::hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed;
+  decltype(::hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed;
+  decltype(::hsa_signal_create)* hsa_signal_create;
+  decltype(::hsa_signal_destroy)* hsa_signal_destroy;
+  decltype(::hsa_signal_store_relaxed)* hsa_signal_store_relaxed;
+  decltype(::hsa_signal_wait_scacquire)* hsa_signal_wait_scacquire;
 
-  decltype(hsa_amd_agent_iterate_memory_pools)* hsa_amd_agent_iterate_memory_pools;
-  decltype(hsa_amd_memory_pool_get_info)* hsa_amd_memory_pool_get_info;
-  decltype(hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate;
-  decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access;
-  decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy;
+  decltype(::hsa_amd_agent_iterate_memory_pools)* hsa_amd_agent_iterate_memory_pools;
+  decltype(::hsa_amd_memory_pool_get_info)* hsa_amd_memory_pool_get_info;
+  decltype(::hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate;
+  decltype(::hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access;
+  decltype(::hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy;
 
-  decltype(hsa_system_get_major_extension_table)* hsa_system_get_major_extension_table;
+  decltype(::hsa_system_get_major_extension_table)* hsa_system_get_major_extension_table;
 
-  decltype(hsa_code_object_reader_create_from_file)* hsa_code_object_reader_create_from_file;
-  decltype(hsa_executable_create_alt)* hsa_executable_create_alt;
-  decltype(hsa_executable_load_agent_code_object)* hsa_executable_load_agent_code_object;
-  decltype(hsa_executable_freeze)* hsa_executable_freeze;
-  decltype(hsa_executable_get_symbol)* hsa_executable_get_symbol;
+  decltype(::hsa_code_object_reader_create_from_file)* hsa_code_object_reader_create_from_file;
+  decltype(::hsa_executable_create_alt)* hsa_executable_create_alt;
+  decltype(::hsa_executable_load_agent_code_object)* hsa_executable_load_agent_code_object;
+  decltype(::hsa_executable_freeze)* hsa_executable_freeze;
+  decltype(::hsa_executable_get_symbol)* hsa_executable_get_symbol;
 
-  decltype(hsa_amd_signal_async_handler)* hsa_amd_signal_async_handler;
-  decltype(hsa_amd_profiling_get_async_copy_time)* hsa_amd_profiling_get_async_copy_time;
-  decltype(hsa_amd_profiling_get_dispatch_time)* hsa_amd_profiling_get_dispatch_time;
-  decltype(hsa_signal_load_relaxed)* hsa_signal_load_relaxed;
-  decltype(hsa_signal_store_screlease)* hsa_signal_store_screlease;
+  decltype(::hsa_amd_signal_async_handler)* hsa_amd_signal_async_handler;
+  decltype(::hsa_amd_profiling_get_async_copy_time)* hsa_amd_profiling_get_async_copy_time;
+  decltype(::hsa_amd_profiling_get_dispatch_time)* hsa_amd_profiling_get_dispatch_time;
+  decltype(::hsa_signal_load_relaxed)* hsa_signal_load_relaxed;
+  decltype(::hsa_signal_store_screlease)* hsa_signal_store_screlease;
 };
 
 // Encapsulates information about a Hsa Agent such as its
