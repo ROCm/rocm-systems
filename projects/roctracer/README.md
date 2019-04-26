@@ -34,8 +34,8 @@ asyncronous activity records pool support.
   git clone -b amd-master https://github.com/ROCmSoftwarePlatform/roctracer.git
 
  - Set environment:
-  export HIP_PATH=/opt/rocm/HIP
-  export HCC_HOME=/opt/rocm/hcc/build
+  export HIP_PATH=/opt/rocm/hip
+  export HCC_HOME=/opt/rocm/hcc
   export CMAKE_PREFIX_PATH=/opt/rocm
 
  - Build ROCtracer
