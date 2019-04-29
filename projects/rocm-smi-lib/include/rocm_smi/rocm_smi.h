@@ -144,6 +144,18 @@ typedef rsmi_dev_perf_level_t rsmi_dev_perf_level;
 /**
  * @brief Available clock types.
  */
+
+/**
+ * @brief Software components
+ */
+typedef enum {
+  RSMI_SW_COMP_FIRST = 0x0,
+
+  RSMI_SW_COMP_DRIVER = RSMI_SW_COMP_FIRST,    //!< Driver
+
+  RSMI_SW_COMP_LAST = RSMI_SW_COMP_DRIVER
+} rsmi_sw_component_t;
+
 typedef enum {
   RSMI_CLK_TYPE_SYS = 0x0,            //!< System clock
   RSMI_CLK_TYPE_FIRST = RSMI_CLK_TYPE_SYS,
@@ -174,22 +186,29 @@ typedef enum {
   RSMI_TEMP_MAX,             //!< Temperature max value.
   RSMI_TEMP_MIN,             //!< Temperature min value.
   RSMI_TEMP_MAX_HYST,        //!< Temperature hysteresis value for max limit.
+                             //!< (This is an absolute temperature, not a
+                             //!< delta).
   RSMI_TEMP_MIN_HYST,        //!< Temperature hysteresis value for min limit.
+                             //!< (This is an absolute temperature,
+                             //!<  not a delta).
   RSMI_TEMP_CRITICAL,        //!< Temperature critical max value, typically
                              //!<  greater than corresponding temp_max values.
   RSMI_TEMP_CRITICAL_HYST,   //!< Temperature hysteresis value for critical
-                             //!<  limit.
+                             //!<  limit. (This is an absolute temperature,
+                             //!<  not a delta).
   RSMI_TEMP_EMERGENCY,       //!< Temperature emergency max value, for chips
                              //!<  supporting more than two upper temperature
                              //!<  limits. Must be equal or greater than
                              //!<  corresponding temp_crit values.
   RSMI_TEMP_EMERGENCY_HYST,  //!< Temperature hysteresis value for emergency
-                             //!<  limit.
+                             //!<  limit. (This is an absolute temperature,
+                             //!<  not a delta).
   RSMI_TEMP_CRIT_MIN,        //!< Temperature critical min value, typically
                              //!<  lower than corresponding temperature
                              //!<  minimum values.
   RSMI_TEMP_CRIT_MIN_HYST,   //!< Temperature hysteresis value for critical
-                             //!<  minimum limit.
+                             //!< minimum limit. (This is an absolute
+                             //!< temperature, not a delta).
   RSMI_TEMP_OFFSET,          //!< Temperature offset which is added to the
                              //!  temperature reading by the chip.
   RSMI_TEMP_LOWEST,          //!< Historical minimum temperature.
@@ -440,7 +459,7 @@ typedef rsmi_od_volt_curve_t rsmi_od_volt_curve;
 typedef struct {
   rsmi_range_t curr_sclk_range;          //!< The current SCLK frequency range
   rsmi_range_t curr_mclk_range;          //!< The current MCLK frequency range;
-                                       //!< (upper bound only)
+                                         //!< (upper bound only)
   rsmi_range_t sclk_freq_limits;         //!< The range possible of SCLK values
   rsmi_range_t mclk_freq_limits;         //!< The range possible of MCLK values
 
@@ -1386,6 +1405,30 @@ rsmi_status_t rsmi_dev_od_freq_range_set(uint32_t dv_ind, rsmi_clk_type_t clk,
  */
 rsmi_status_t
 rsmi_version_get(rsmi_version_t *version);
+
+/**
+ * @brief Get the driver version string for the current system.
+ *
+ * @details Given a software component @p component, a pointer to a char
+ * buffer, @p ver_str, this function will write the driver version string
+ * (up to @p len characters) for the current system to @p ver_str. The caller
+ * must ensure that it is safe to write at least @p len characters to @p
+ * ver_str.
+ *
+ * @param[in] component The component for which the version string is being
+ * requested
+ *
+ * @param[inout] ver_str A pointer to a buffer of char's to which the VBIOS
+ * name will be written
+ *
+ * @param[in] len The number of char's pointed to by @p ver_str which can
+ * safely be written to by this function.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t
+rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
+                                                                uint32_t len);
 
 /**
  * @brief Get the VBIOS identifer string

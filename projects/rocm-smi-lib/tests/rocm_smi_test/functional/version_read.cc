@@ -47,6 +47,7 @@
 #include <stddef.h>
 
 #include <iostream>
+#include <map>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
@@ -83,6 +84,12 @@ void TestVersionRead::Close() {
   TestBase::Close();
 }
 
+static const uint32_t kVerMaxStrLen = 80;
+
+static const std::map<uint32_t, const char *>
+  kComponentNameMap = {
+      {RSMI_SW_COMP_DRIVER, "Driver Version"},
+};
 
 void TestVersionRead::Run(void) {
   rsmi_status_t err;
@@ -98,5 +105,18 @@ void TestVersionRead::Run(void) {
   IF_VERB(STANDARD) {
     std::cout << "\t**RocM SMI Library version: " << ver.major << "." <<
        ver.minor << "." << ver.patch << " (" << ver.build << ")" << std::endl;
+  }
+
+  char ver_str[kVerMaxStrLen];
+
+  for (uint32_t cmp = RSMI_SW_COMP_FIRST; cmp <= RSMI_SW_COMP_LAST; ++cmp) {
+    err = rsmi_version_str_get(static_cast<rsmi_sw_component_t>(cmp),
+                                                      ver_str, kVerMaxStrLen);
+    CHK_ERR_ASRT(err)
+
+    IF_VERB(STANDARD) {
+      std::cout << "\t**" << kComponentNameMap.at(cmp) << ": " <<
+                                                         ver_str << std::endl;
+    }
   }
 }

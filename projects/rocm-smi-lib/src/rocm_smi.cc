@@ -43,6 +43,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <sys/utsname.h>
 
 #include <sstream>
 #include <algorithm>
@@ -1231,7 +1232,7 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
 
   name[std::min(len - 1, ct)] = '\0';
 
-  if (len < val_str.size()) {
+  if (len < (val_str.size() + 1)) {
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
 
@@ -1872,11 +1873,18 @@ rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {
   std::string val_str;
   int ret = dev->readDevInfo(amd::smi::kDevVBiosVer, &val_str);
 
+  if (ret != 0) {
+    return errno_to_rsmi_status(ret);
+  }
+
   uint32_t ln = val_str.copy(vbios, len);
 
   vbios[std::min(len - 1, ln)] = '\0';
 
-  return errno_to_rsmi_status(ret);
+  if (len < (val_str.size() + 1)) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  return RSMI_STATUS_SUCCESS;
 
   CATCH
 }
@@ -1893,6 +1901,56 @@ rsmi_version_get(rsmi_version_t *version) {
   version->patch = rocm_smi_VERSION_PATCH;
   version->build = rocm_smi_VERSION_BUILD;
 
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+static const char *kROCmDriverVersionPath = "/sys/module/amdgpu/version";
+
+rsmi_status_t
+rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
+                                                               uint32_t len) {
+  if (ver_str == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  TRY
+
+  int err;
+  std::string val_str;
+  std::string ver_path;
+
+  switch (component) {
+    case RSMI_SW_COMP_DRIVER:
+      ver_path = kROCmDriverVersionPath;
+      break;
+
+    default:
+      assert(!"Unexpected component type provided");
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  err = amd::smi::ReadSysfsStr(ver_path, &val_str);
+
+  if (err != 0) {
+    struct utsname buf;
+    err = uname(&buf);
+
+    if (err != 0) {
+      return errno_to_rsmi_status(err);
+    }
+
+    val_str = buf.release;
+  }
+
+  uint32_t ln = val_str.copy(ver_str, len);
+
+  ver_str[std::min(len - 1, ln)] = '\0';
+
+  if (len < (val_str.size() + 1)) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
   return RSMI_STATUS_SUCCESS;
 
   CATCH
