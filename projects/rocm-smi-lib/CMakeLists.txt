@@ -106,13 +106,15 @@ endif ()
 set(SRC_DIR "src")
 set(INC_DIR "include/rocm_smi")
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include
+                     ${CMAKE_CURRENT_SOURCE_DIR}/src/shared_mutex)
 set(SMI_SRC_LIST "${SRC_DIR}/rocm_smi_device.cc")
 set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_main.cc")
 set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_monitor.cc")
 set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi.cc")
 set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_power_mon.cc")
 set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_utils.cc")
+set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/shared_mutex/shared_mutex.c")
 
 set(SMI_INC_LIST "${INC_DIR}/rocm_smi_device.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_main.h")
@@ -121,12 +123,14 @@ set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_power_mon.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_utils.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_common.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_exception.h")
+set(SMI_INC_LIST ${SMI_INC_LIST} "${SRC_DIR}/shared_mutex/shared_mutex.h")
 
 set(SMI_EXAMPLE_EXE "rocm_smi_ex")
 
 add_executable(${SMI_EXAMPLE_EXE} "example/rocm_smi_example.cc")
 target_link_libraries(${SMI_EXAMPLE_EXE} ${ROCM_SMI_TARGET})
 add_library(${ROCM_SMI_TARGET} SHARED ${SMI_SRC_LIST} ${SMI_INC_LIST})
+target_link_libraries(${ROCM_SMI_TARGET} pthread rt)
 
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${ROCM_SMI_TARGET}

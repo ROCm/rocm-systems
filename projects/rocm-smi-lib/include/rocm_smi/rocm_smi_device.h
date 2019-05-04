@@ -42,6 +42,9 @@
  */
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_
+
+#include <pthread.h>
+
 #include <string>
 #include <memory>
 #include <utility>
@@ -52,6 +55,9 @@
 #include "rocm_smi/rocm_smi_power_mon.h"
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
+extern "C" {
+#include "shared_mutex.h"
+};
 
 namespace amd {
 namespace smi {
@@ -109,11 +115,12 @@ class Device {
     uint64_t bdfid(void) const {return bdfid_;}
     void set_bdfid(uint64_t val) {bdfid_ = val;}
     uint64_t get_bdfid(void) const {return bdfid_;}
-
+    pthread_mutex_t *mutex(void) {return mutex_.ptr;}
  private:
     std::shared_ptr<Monitor> monitor_;
     std::shared_ptr<PowerMon> power_monitor_;
     std::string path_;
+    shared_mutex_t mutex_;
     uint32_t index_;
     const RocmSMI_env_vars *env_;
     template <typename T> int openSysfsFileStream(DevInfoTypes type, T *fs,
