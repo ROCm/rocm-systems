@@ -41,6 +41,10 @@
  *
  */
 
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/types.h>
+
 #include <assert.h>
 #include <sys/stat.h>
 #include <stdint.h>
@@ -55,6 +59,11 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_exception.h"
+
+extern "C" {
+#include "shared_mutex.h"  // NOLINT
+};
 
 namespace amd {
 namespace smi {
@@ -154,9 +163,26 @@ static bool isRegularFile(std::string fname) {
 
 Device::Device(std::string p, RocmSMI_env_vars const *e) : path_(p), env_(e) {
   monitor_ = nullptr;
+
+  // Get the device name
+  size_t i = path_.rfind('/', path_.length());
+  std::string dev = path_.substr(i + 1, path_.length() - i);
+
+  std::string m_name("/rocm_smi_");
+  m_name += dev;
+  m_name += '_';
+  m_name += std::to_string(geteuid());
+
+  mutex_ = shared_mutex_init(m_name.c_str(), 0777);
+
+  if (mutex_.ptr == nullptr) {
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+                                       "Failed to create shared mem. mutex.");
+  }
 }
 
 Device:: ~Device() {
+  shared_mutex_close(mutex_);
 }
 
 template <typename T>
