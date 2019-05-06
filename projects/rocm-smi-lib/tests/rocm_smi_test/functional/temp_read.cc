@@ -99,7 +99,7 @@ void TestTempRead::Run(void) {
       err = rsmi_dev_temp_metric_get(i, 0, met, &val_i64);
 
       if (err != RSMI_STATUS_SUCCESS) {
-        if (err == RSMI_STATUS_FILE_ERROR) {
+        if (err == RSMI_STATUS_NOT_SUPPORTED) {
           IF_VERB(STANDARD) {
             std::cout << "\t**" << label << ": " <<
                                "Not supported on this machine" << std::endl;

@@ -41,6 +41,10 @@
  *
  */
 
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/types.h>
+
 #include <assert.h>
 #include <sys/stat.h>
 #include <stdint.h>
@@ -55,6 +59,11 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_exception.h"
+
+extern "C" {
+#include "shared_mutex.h"  // NOLINT
+};
 
 namespace amd {
 namespace smi {
@@ -87,6 +96,7 @@ static const char *kDevMemTotVRAMFName = "mem_info_vram_total";
 static const char *kDevMemUsedGTTFName = "mem_info_gtt_used";
 static const char *kDevMemUsedVisVRAMFName = "mem_info_vis_vram_used";
 static const char *kDevMemUsedVRAMFName = "mem_info_vram_used";
+static const char *kDevPCIEReplayCountFName = "pcie_replay_count";
 
 // Strings that are found within sysfs files
 static const char *kDevPerfLevelAutoStr = "auto";
@@ -127,6 +137,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevMemUsedGTT, kDevMemUsedGTTFName},
     {kDevMemUsedVisVRAM, kDevMemUsedVisVRAMFName},
     {kDevMemUsedVRAM, kDevMemUsedVRAMFName},
+    {kDevPCIEReplayCount, kDevPCIEReplayCountFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -154,9 +165,26 @@ static bool isRegularFile(std::string fname) {
 
 Device::Device(std::string p, RocmSMI_env_vars const *e) : path_(p), env_(e) {
   monitor_ = nullptr;
+
+  // Get the device name
+  size_t i = path_.rfind('/', path_.length());
+  std::string dev = path_.substr(i + 1, path_.length() - i);
+
+  std::string m_name("/rocm_smi_");
+  m_name += dev;
+  m_name += '_';
+  m_name += std::to_string(geteuid());
+
+  mutex_ = shared_mutex_init(m_name.c_str(), 0777);
+
+  if (mutex_.ptr == nullptr) {
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+                                       "Failed to create shared mem. mutex.");
+  }
 }
 
 Device:: ~Device() {
+  shared_mutex_close(mutex_);
 }
 
 template <typename T>
@@ -176,7 +204,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
 
   DBG_FILE_ERROR(sysfs_path, str);
   if (!isRegularFile(sysfs_path)) {
-    return EISDIR;
+    return ENOENT;
   }
 
   fs->open(sysfs_path);
@@ -341,6 +369,7 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevMemUsedGTT:
     case kDevMemUsedVisVRAM:
     case kDevMemUsedVRAM:
+    case kDevPCIEReplayCount:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       *val = std::stoul(tempStr, 0);
