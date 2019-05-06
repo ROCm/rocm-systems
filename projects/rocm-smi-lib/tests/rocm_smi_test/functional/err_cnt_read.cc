@@ -96,7 +96,7 @@ void TestErrCntRead::Run(void) {
     err = rsmi_dev_ecc_enabled_get(i, &enabled_mask);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
       std::cout <<
-          "\t**Error Count Enabled Mask for is not supported on this machine"
+          "\t**Error Count Enabled Mask get is not supported on this machine"
                                                                  << std::endl;
     } else {
       CHK_ERR_ASRT(err)

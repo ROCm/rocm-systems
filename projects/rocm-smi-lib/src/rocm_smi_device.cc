@@ -96,6 +96,7 @@ static const char *kDevMemTotVRAMFName = "mem_info_vram_total";
 static const char *kDevMemUsedGTTFName = "mem_info_gtt_used";
 static const char *kDevMemUsedVisVRAMFName = "mem_info_vis_vram_used";
 static const char *kDevMemUsedVRAMFName = "mem_info_vram_used";
+static const char *kDevPCIEReplayCountFName = "pcie_replay_count";
 
 // Strings that are found within sysfs files
 static const char *kDevPerfLevelAutoStr = "auto";
@@ -136,6 +137,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevMemUsedGTT, kDevMemUsedGTTFName},
     {kDevMemUsedVisVRAM, kDevMemUsedVisVRAMFName},
     {kDevMemUsedVRAM, kDevMemUsedVRAMFName},
+    {kDevPCIEReplayCount, kDevPCIEReplayCountFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -202,7 +204,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
 
   DBG_FILE_ERROR(sysfs_path, str);
   if (!isRegularFile(sysfs_path)) {
-    return EISDIR;
+    return ENOENT;
   }
 
   fs->open(sysfs_path);
@@ -367,6 +369,7 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevMemUsedGTT:
     case kDevMemUsedVisVRAM:
     case kDevMemUsedVRAM:
+    case kDevPCIEReplayCount:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       *val = std::stoul(tempStr, 0);

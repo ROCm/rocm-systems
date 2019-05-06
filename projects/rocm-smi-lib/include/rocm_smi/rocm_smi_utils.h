@@ -66,23 +66,23 @@ int ReadSysfsStr(std::string path, std::string *retStr);
 int WriteSysfsStr(std::string path, std::string val);
 
 struct pthread_wrap {
-    public:
-        pthread_wrap(pthread_mutex_t &p_mut) : mutex_(p_mut) {}
+ public:
+        explicit pthread_wrap(pthread_mutex_t &p_mut) : mutex_(p_mut) {}
 
         void Acquire() { pthread_mutex_lock(&mutex_);   }
         void Release() { pthread_mutex_unlock(&mutex_); }
-    private:
+ private:
         pthread_mutex_t& mutex_;
 };
 struct ScopedPthread {
-     ScopedPthread(pthread_wrap& mutex) : pthrd_ref_(mutex) {
+     explicit ScopedPthread(pthread_wrap& mutex) : pthrd_ref_(mutex) {
        pthrd_ref_.Acquire();
-     };
+     }
 
      ~ScopedPthread() {
        pthrd_ref_.Release();
      }
-   private:
+ private:
      ScopedPthread(const ScopedPthread&);
 
      pthread_wrap& pthrd_ref_;

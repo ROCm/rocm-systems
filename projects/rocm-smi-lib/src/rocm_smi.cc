@@ -120,8 +120,8 @@ static rsmi_status_t errno_to_rsmi_status(uint32_t err) {
   switch (err) {
     case 0:      return RSMI_STATUS_SUCCESS;
     case EACCES: return RSMI_STATUS_PERMISSION;
-    case EPERM:  return RSMI_STATUS_NOT_SUPPORTED;
-    case ENOENT:
+    case EPERM:
+    case ENOENT: return RSMI_STATUS_NOT_SUPPORTED;
     case EISDIR: return RSMI_STATUS_FILE_ERROR;
     default:     return RSMI_STATUS_UNKNOWN_ERROR;
   }
@@ -2041,6 +2041,19 @@ rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
   return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t *counter) {
+  TRY
+
+  DEVICE_MUTEX
+  rsmi_status_t ret;
+
+  ret = get_dev_value_int(amd::smi::kDevPCIEReplayCount, dv_ind, counter);
+  return ret;
 
   CATCH
 }
