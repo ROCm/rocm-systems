@@ -1,3 +1,6 @@
+// NOLINT(legal/copyright)
+// See LICENSE file
+
 #ifndef SRC_SHARED_MUTEX_SHARED_MUTEX_H_
 #define SRC_SHARED_MUTEX_SHARED_MUTEX_H_
 

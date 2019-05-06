@@ -89,12 +89,25 @@ void TestPciReadWrite::Run(void) {
   rsmi_status_t ret;
   rsmi_pcie_bandwidth_t bw;
   uint32_t freq_bitmask;
-  uint64_t sent, received, max_pkt_sz;
+  uint64_t sent, received, max_pkt_sz, u64int;
 
   TestBase::Run();
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
+
+    ret = rsmi_dev_pci_replay_counter_get(dv_ind, &u64int);
+
+     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+        std::cout <<
+            "\t**rsmi_dev_pci_replay_counter_get() is not supported"
+            " on this machine" << std::endl;
+      } else {
+        CHK_ERR_ASRT(ret)
+        IF_VERB(STANDARD) {
+          std::cout << "\tPCIe Replay Counter: " << u64int << std::endl;
+        }
+      }
 
     ret = rsmi_dev_pci_throughput_get(dv_ind, &sent, &received, &max_pkt_sz);
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
@@ -106,7 +119,7 @@ void TestPciReadWrite::Run(void) {
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
-      std::cout << "PCIe Throughput (1 sec.): " << std::endl;
+      std::cout << "\tPCIe Throughput (1 sec.): " << std::endl;
       std::cout << "\t\tSent: " << sent << " bytes" << std::endl;
       std::cout << "\t\tReceived: " << received << " bytes" << std::endl;
       std::cout << "\t\tMax Packet Size: " << max_pkt_sz << " bytes" <<
@@ -125,7 +138,8 @@ void TestPciReadWrite::Run(void) {
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
-      std::cout << "Initial PCIe is " << bw.transfer_rate.current << std::endl;
+      std::cout << "\tInitial PCIe is " << bw.transfer_rate.current <<
+                                                                    std::endl;
     }
 
     // First set the bitmask to all supported bandwidths
@@ -141,7 +155,7 @@ void TestPciReadWrite::Run(void) {
                                                        freq_bm_str.size()-1));
 
     IF_VERB(STANDARD) {
-    std::cout << "Setting bandwidth mask to " << "0b" << freq_bm_str <<
+    std::cout << "\tSetting bandwidth mask to " << "0b" << freq_bm_str <<
                                                             " ..." << std::endl;
     }
     ret = rsmi_dev_pci_bandwidth_set(dv_ind, freq_bitmask);
@@ -151,9 +165,9 @@ void TestPciReadWrite::Run(void) {
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
-      std::cout << "Bandwidth is now index " << bw.transfer_rate.current <<
+      std::cout << "\tBandwidth is now index " << bw.transfer_rate.current <<
                                                                       std::endl;
-      std::cout << "Resetting mask to all bandwidths." << std::endl;
+      std::cout << "\tResetting mask to all bandwidths." << std::endl;
     }
     ret = rsmi_dev_pci_bandwidth_set(dv_ind, 0xFFFFFFFF);
     CHK_ERR_ASRT(ret)

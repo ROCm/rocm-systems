@@ -8,6 +8,7 @@
 #include <stdio.h> // perror
 #include <stdlib.h> // malloc, free
 #include <string.h> // strcpy
+#include <time.h>  // clock_gettime
 
 shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
   shared_mutex_t mutex = {NULL, 0, NULL, 0};
@@ -51,7 +52,17 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
     return mutex;
   }
 
-  if (mutex.created == 0 && ((shared_mutex_t *)addr)->ptr == NULL) {
+  pthread_mutex_t *mutex_ptr =  (pthread_mutex_t *)addr;
+
+  // Make sure the mutex wasn't left in a locked state. If we can't
+  // acquire it in 3 sec., re-do everything.
+  struct timespec expireTime;
+  clock_gettime(CLOCK_REALTIME, &expireTime);
+  expireTime.tv_sec += 3;
+
+  int ret = pthread_mutex_timedlock(mutex_ptr, &expireTime);
+  
+  if (ret || (mutex.created == 0 && ((shared_mutex_t *)addr)->ptr == NULL)) {
     // Something is out of sync. Unlink shm and start over.
     if (shm_unlink(name)) {
       mutex.shm_fd = 0;
@@ -60,9 +71,12 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
     free(mutex.name);
 
     return shared_mutex_init(name, mode);
+  } else {
+    if (pthread_mutex_unlock(mutex_ptr)) {
+      perror("pthread_mutex_unlock");
+    }
   }
 
-  pthread_mutex_t *mutex_ptr =  (pthread_mutex_t *)addr;
 
   if (mutex.created) {
     pthread_mutexattr_t attr;

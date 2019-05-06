@@ -56,7 +56,7 @@
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
 extern "C" {
-#include "shared_mutex.h"
+#include "shared_mutex.h"   // NOLINT
 };
 
 namespace amd {
@@ -90,6 +90,7 @@ enum DevInfoTypes {
   kDevMemUsedGTT,
   kDevMemUsedVisVRAM,
   kDevMemUsedVRAM,
+  kDevPCIEReplayCount,
 };
 
 class Device {
@@ -116,6 +117,7 @@ class Device {
     void set_bdfid(uint64_t val) {bdfid_ = val;}
     uint64_t get_bdfid(void) const {return bdfid_;}
     pthread_mutex_t *mutex(void) {return mutex_.ptr;}
+
  private:
     std::shared_ptr<Monitor> monitor_;
     std::shared_ptr<PowerMon> power_monitor_;
