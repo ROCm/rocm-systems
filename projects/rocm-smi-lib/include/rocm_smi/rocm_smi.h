@@ -123,6 +123,20 @@ typedef enum {
 } rsmi_init_flags_t;
 
 /**
+ * @brief Initialization flags
+ * 
+ * Initialization flags may be OR'd together and passed to ::rsmi_init().
+ */
+typedef enum {
+  RSMI_INIT_FLAG_ALL_GPUS      = 0x1,    //!< Attempt to add all GPUs found
+                                         //!< (including non-AMD) to the list
+                                         //!< of devices from which SMI
+                                         //!< information can be retrieved. By
+                                         //!< default, only AMD devices are
+                                         //!<  ennumerated by RSMI.
+} rsmi_init_flags_t;
+
+/**
  * @brief PowerPlay performance levels
  */
 typedef enum {
@@ -165,6 +179,9 @@ typedef enum {
   RSMI_SW_COMP_LAST = RSMI_SW_COMP_DRIVER
 } rsmi_sw_component_t;
 
+/**
+ * Clock types
+ */
 typedef enum {
   RSMI_CLK_TYPE_SYS = 0x0,            //!< System clock
   RSMI_CLK_TYPE_FIRST = RSMI_CLK_TYPE_SYS,
