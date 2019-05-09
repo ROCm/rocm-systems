@@ -47,7 +47,7 @@
 extern "C" {
 #include <cstdint>
 #else
-#include <stdinit.h>
+#include <stdint.h>
 #endif  // __cplusplus
 
 #include <stdint.h>
@@ -112,6 +112,15 @@ typedef enum {
                                          //!< for the operation
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
+
+typedef enum {
+  RSMI_INIT_FLAG_ALL_GPUS      = 0x1,    //!< Attempt to add all GPUs found
+                                         //!< (including non-AMD) to the list
+                                         //!< of devices from which SMI
+                                         //!< information can be retrieved. By
+                                         //!< default, only AMD devices are
+                                         //!<  ennumerated by RSMI.
+} rsmi_init_flags_t;
 
 /**
  * @brief PowerPlay performance levels
@@ -493,8 +502,9 @@ typedef struct {
  *  @details When called, this initializes internal data structures,
  *  including those corresponding to sources of information that SMI provides.
  *
- *  @param[in] init_flags Bit flags that tell SMI how to initialze. Not
- *  currently used.
+ *  @param[in] init_flags Bit flags that tell SMI how to initialze. Values of
+ *  ::rsmi_init_flags_t may be OR'd together and passed through @p init_flags
+ *  to modify how RSMI initializes.
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */

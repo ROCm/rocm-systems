@@ -62,12 +62,13 @@ namespace smi {
 
 class RocmSMI {
  public:
-    RocmSMI(void);  // direct use of this constructor is deprecated; use
-                    // getInstance()
-
+    RocmSMI(uint64_t flags);
     ~RocmSMI(void);
 
-    static RocmSMI& getInstance(void);
+    static RocmSMI& getInstance(uint64_t flags = 0);
+    void Initialize(uint64_t flags);
+    void Cleanup(void);
+
     static std::vector<std::shared_ptr<amd::smi::Device>>&
                                   monitor_devices() {return s_monitor_devices;}
     uint32_t DiscoverDevices(void);
@@ -77,6 +78,9 @@ class RocmSMI {
     // returns non-zero;
     uint32_t IterateSMIDevices(
       std::function<uint32_t(std::shared_ptr<Device>&, void *)> func, void *);
+
+    void set_init_options(uint64_t options) {init_options_ = options;}
+    uint64_t init_options() const {return init_options_;}
 
  private:
     std::vector<std::shared_ptr<Device>> devices_;
@@ -90,6 +94,7 @@ class RocmSMI {
 
     static std::vector<std::shared_ptr<amd::smi::Device>> s_monitor_devices;
     RocmSMI_env_vars env_vars_;
+    uint64_t init_options_;
 };
 
 }  // namespace smi

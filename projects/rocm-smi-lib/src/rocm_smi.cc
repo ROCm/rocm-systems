@@ -94,7 +94,7 @@ static rsmi_status_t handleException() {
 #define TRY try {
 #define CATCH } catch (...) {return handleException();}
 #define GET_DEV_FROM_INDX  \
-    amd::smi::RocmSMI smi = amd::smi::RocmSMI::getInstance(); \
+    amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
     if (dv_ind >= smi.monitor_devices().size()) { \
       return RSMI_STATUS_INVALID_ARGS; \
     } \
@@ -106,7 +106,8 @@ static rsmi_status_t handleException() {
     amd::smi::ScopedPthread _lock(_pw);
 
 static pthread_mutex_t *get_mutex(uint32_t dv_ind) {
-  amd::smi::RocmSMI smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+
   if (dv_ind >= smi.monitor_devices().size()) {
     return nullptr;
   }
@@ -382,7 +383,7 @@ static rsmi_status_t set_dev_mon_value(amd::smi::MonitorTypes type,
 
 static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
                                       uint32_t dv_ind, uint64_t *val) {
-  amd::smi::RocmSMI smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
   if (dv_ind >= smi.monitor_devices().size() || val == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -416,11 +417,12 @@ static bool is_power_of_2(uint64_t n) {
 }
 
 rsmi_status_t
-rsmi_init(uint64_t init_flags) {
+rsmi_init(uint64_t flags) {
   TRY
-  (void)init_flags;  // unused for now; for future use
 
-  amd::smi::RocmSMI smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  smi.Initialize(flags);
+
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -430,6 +432,11 @@ rsmi_init(uint64_t init_flags) {
 rsmi_status_t
 rsmi_shut_down(void) {
   TRY
+
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+
+  smi.Cleanup();
+
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -441,7 +448,7 @@ rsmi_num_monitor_devices(uint32_t *num_devices) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  amd::smi::RocmSMI smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
   *num_devices = smi.monitor_devices().size();
   return RSMI_STATUS_SUCCESS;
@@ -1086,7 +1093,7 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
 
   assert(freqs.num_supported <= RSMI_MAX_NUM_FREQUENCIES);
 
-  amd::smi::RocmSMI smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
   // Above call to rsmi_dev_get_gpu_clk_freq should have emitted an error if
   // assert below is not true
@@ -1366,7 +1373,7 @@ rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
 
   assert(bws.transfer_rate.num_supported <= RSMI_MAX_NUM_FREQUENCIES);
 
-  amd::smi::RocmSMI smi = amd::smi::RocmSMI::getInstance();
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
   // Above call to rsmi_dev_pci_bandwidth_get() should have emitted an error
   // if assert below is not true

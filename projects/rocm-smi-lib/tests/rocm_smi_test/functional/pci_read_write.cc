@@ -138,7 +138,7 @@ void TestPciReadWrite::Run(void) {
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
-      std::cout << "\tInitial PCIe is " << bw.transfer_rate.current <<
+      std::cout << "\tInitial PCIe BW index is " << bw.transfer_rate.current <<
                                                                     std::endl;
     }
 

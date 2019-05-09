@@ -99,6 +99,12 @@ class TestBase {
   uint32_t num_monitor_devs(void) const {
     return num_monitor_devs_;
   }
+  void set_init_options(uint64_t x) {
+    init_options_ = x;
+  }
+  uint64_t init_options(void) const {
+    return init_options_;
+  }
 
  protected:
   void PrintDeviceHeader(uint32_t dv_ind);
@@ -109,6 +115,7 @@ class TestBase {
   std::string title_;   ///< Displayed title of test
   uint32_t verbosity_;   ///< How much additional output to produce
   bool dont_fail_;       ///< Don't quit test on individual failure if true
+  uint64_t init_options_; ///< rsmi initialization options
 };
 
 #define IF_VERB(VB) if (verbosity() && verbosity() >= (TestBase::VERBOSE_##VB))
