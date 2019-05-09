@@ -123,34 +123,6 @@ typedef enum {
 } rsmi_init_flags_t;
 
 /**
- * @brief Initialization flags
- * 
- * Initialization flags may be OR'd together and passed to ::rsmi_init().
- */
-typedef enum {
-  RSMI_INIT_FLAG_ALL_GPUS      = 0x1,    //!< Attempt to add all GPUs found
-                                         //!< (including non-AMD) to the list
-                                         //!< of devices from which SMI
-                                         //!< information can be retrieved. By
-                                         //!< default, only AMD devices are
-                                         //!<  ennumerated by RSMI.
-} rsmi_init_flags_t;
-
-/**
- * @brief Initialization flags
- * 
- * Initialization flags may be OR'd together and passed to ::rsmi_init().
- */
-typedef enum {
-  RSMI_INIT_FLAG_ALL_GPUS      = 0x1,    //!< Attempt to add all GPUs found
-                                         //!< (including non-AMD) to the list
-                                         //!< of devices from which SMI
-                                         //!< information can be retrieved. By
-                                         //!< default, only AMD devices are
-                                         //!<  ennumerated by RSMI.
-} rsmi_init_flags_t;
-
-/**
  * @brief PowerPlay performance levels
  */
 typedef enum {
