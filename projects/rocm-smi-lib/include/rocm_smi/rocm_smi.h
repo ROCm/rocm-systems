@@ -113,15 +113,6 @@ typedef enum {
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
 
-typedef enum {
-  RSMI_INIT_FLAG_ALL_GPUS      = 0x1,    //!< Attempt to add all GPUs found
-                                         //!< (including non-AMD) to the list
-                                         //!< of devices from which SMI
-                                         //!< information can be retrieved. By
-                                         //!< default, only AMD devices are
-                                         //!<  ennumerated by RSMI.
-} rsmi_init_flags_t;
-
 /**
  * @brief Initialization flags
  * 
