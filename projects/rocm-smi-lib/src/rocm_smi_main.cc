@@ -234,9 +234,12 @@ static uint32_t GetMonitorDevices(const std::shared_ptr<amd::smi::Device> &d,
 
 std::vector<std::shared_ptr<amd::smi::Device>> RocmSMI::s_monitor_devices;
 
-RocmSMI::RocmSMI(void) {
+void
+RocmSMI::Initialize(uint64_t flags) {
   auto i = 0;
   uint32_t ret;
+
+  init_options_ = flags;
 
   GetEnvVariables();
 
@@ -260,15 +263,23 @@ RocmSMI::RocmSMI(void) {
   }
 }
 
-RocmSMI::~RocmSMI() {
+void
+RocmSMI::Cleanup() {
+  s_monitor_devices.clear();
   devices_.clear();
   monitors_.clear();
 }
 
-RocmSMI& RocmSMI::getInstance(void) {
+RocmSMI::RocmSMI(uint64_t flags) : init_options_(flags) {
+}
+
+RocmSMI::~RocmSMI() {
+}
+
+RocmSMI& RocmSMI::getInstance(uint64_t flags) {
   // Assume c++11 or greater. static objects will be created by only 1 thread
   // and creation will be thread-safe.
-  static RocmSMI singleton;
+  static RocmSMI singleton(flags);
   return singleton;
 }
 
@@ -324,6 +335,33 @@ RocmSMI::AddToDeviceList(std::string dev_name) {
   return;
 }
 
+static const uint32_t kAmdGpuId=0x1002;
+
+static bool isAMDGPU(std::string dev_path) {
+
+  std::string vend_path = dev_path + "/device/vendor";
+  if (!FileExists(vend_path.c_str())) {
+    return false;
+  }
+
+  std::ifstream fs;
+  fs.open(vend_path);
+
+  if (!fs.is_open()) {
+      return errno;
+  }
+
+  uint32_t vendor_id;
+
+  fs >> std::hex >> vendor_id;
+
+  fs.close();
+
+  if (vendor_id == kAmdGpuId) {
+    return true;
+  }
+  return false;
+}
 
 uint32_t RocmSMI::DiscoverDevices(void) {
   auto ret = 0;
@@ -346,7 +384,14 @@ uint32_t RocmSMI::DiscoverDevices(void) {
   while (dentry != nullptr) {
     if (memcmp(dentry->d_name, kDeviceNamePrefix, strlen(kDeviceNamePrefix))
                                                                        == 0) {
-      AddToDeviceList(dentry->d_name);
+      std::string vend_str_path = kPathDRMRoot;
+      vend_str_path += "/";
+      vend_str_path += dentry->d_name;
+
+      if (isAMDGPU(vend_str_path) ||
+          (init_options_ & RSMI_INIT_FLAG_ALL_GPUS)) {
+        AddToDeviceList(dentry->d_name);
+      }
     }
     dentry = readdir(drm_dir);
   }

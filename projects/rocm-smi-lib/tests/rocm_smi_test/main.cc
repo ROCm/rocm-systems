@@ -46,6 +46,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <iostream>
 
 #include "rocm_smi/rocm_smi.h"
 #include "gtest/gtest.h"
@@ -79,6 +80,7 @@ static void SetFlags(TestBase *test) {
 
   test->set_verbosity(sRSMIGlvalues->verbosity);
   test->set_dont_fail(sRSMIGlvalues->dont_fail);
+  test->set_init_options(sRSMIGlvalues->init_options);
 }
 
 
@@ -207,10 +209,30 @@ int main(int argc, char** argv) {
   settings.monitor_verbosity = 1;
   settings.num_iterations = 1;
   settings.dont_fail = false;
+  settings.init_options = 0;
 
   if (ProcessCmdline(&settings, argc, argv)) {
     return 1;
   }
+
+  int ret = 0;
   sRSMIGlvalues = &settings;
+  ret = RUN_ALL_TESTS();
+
+  if (ret) {
+    return ret;
+  }
+
+  settings.init_options = RSMI_INIT_FLAG_ALL_GPUS;
+
+  std::cout << "****************************************" << std::endl;
+  std::cout << "****************************************" << std::endl;
+  std::cout << "****************************************" << std::endl;
+  std::cout << "Re-running tests with init options: " << std::hex <<
+                                    settings.init_options << std::endl;
+  std::cout << "****************************************" << std::endl;
+  std::cout << "****************************************" << std::endl;
+  std::cout << "****************************************" << std::endl;
+  settings.init_options = RSMI_INIT_FLAG_ALL_GPUS;
   return RUN_ALL_TESTS();
 }
