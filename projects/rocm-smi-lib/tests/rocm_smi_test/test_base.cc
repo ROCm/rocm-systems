@@ -84,7 +84,7 @@ void TestBase::SetUp(void) {
   MakeHeaderStr(kSetupLabel, &label);
   printf("\n\t%s\n", label.c_str());
 
-  err = rsmi_init(0);
+  err = rsmi_init(init_options());
   ASSERT_EQ(err, RSMI_STATUS_SUCCESS);
 
   err = rsmi_num_monitor_devices(&num_monitor_devs_);

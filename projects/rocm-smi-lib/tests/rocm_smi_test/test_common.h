@@ -55,6 +55,7 @@ struct RSMITstGlobals {
   uint32_t verbosity;
   uint32_t monitor_verbosity;
   uint32_t num_iterations;
+  uint64_t init_options;
   bool dont_fail;
 };
 
