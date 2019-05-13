@@ -50,7 +50,6 @@ extern "C" {
 #include <stdint.h>
 #endif  // __cplusplus
 
-#include <stdint.h>
 #include <stddef.h>
 
 /** \file rocm_smi.h
@@ -112,6 +111,12 @@ typedef enum {
                                          //!< for the operation
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
+
+/**
+ * @brief Initialization flags
+ *
+ * Initialization flags may be OR'd together and passed to ::rsmi_init().
+ */
 
 typedef enum {
   RSMI_INIT_FLAG_ALL_GPUS      = 0x1,    //!< Attempt to add all GPUs found
