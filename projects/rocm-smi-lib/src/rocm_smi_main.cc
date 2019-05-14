@@ -348,7 +348,7 @@ static bool isAMDGPU(std::string dev_path) {
   fs.open(vend_path);
 
   if (!fs.is_open()) {
-      return errno;
+      return false;
   }
 
   uint32_t vendor_id;
