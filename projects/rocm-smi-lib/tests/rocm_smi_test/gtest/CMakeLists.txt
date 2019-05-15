@@ -1,31 +1,23 @@
-#
-# Source files for Google Test Framework
-#
-set (gtFrwkSrcs src/gtest.cpp)
-set (gtFrwkSrcs ${gtFrwkSrcs} src/gtest-port.cpp)
-set (gtFrwkSrcs	${gtFrwkSrcs} src/gtest-printers.cpp)
-set (gtFrwkSrcs	${gtFrwkSrcs} src/gtest-filepath.cpp)
-set (gtFrwkSrcs	${gtFrwkSrcs} src/gtest-test-part.cpp)
-set (gtFrwkSrcs	${gtFrwkSrcs} src/gtest-typed-test.cpp)
-set (gtFrwkSrcs	${gtFrwkSrcs} src/gtest-death-test.cpp)
-set (gtFrwkSrcs ${gtFrwkSrcs} src/gtest_main.cpp)
+cmake_minimum_required(VERSION 2.8.8)
 
-#
-# Header files include path(s).
-#
-include_directories(include)
-include_directories(include/gtest)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+if (POLICY CMP0048)
+  cmake_policy(SET CMP0048 NEW)
+endif (POLICY CMP0048)
 
-#
-# Build Google Test Framework as a Static Library object
-#
-add_library(${GOOGLE_TEST_FRWK_NAME} STATIC ${gtFrwkSrcs})
+project(googletest-distribution)
+set(GOOGLETEST_VERSION 1.9.0)
 
-#
-# Install build artifacts into one common location
-#
-INSTALL(TARGETS ${GOOGLE_TEST_FRWK_NAME}
-        ARCHIVE DESTINATION ${PROJECT_BINARY_DIR}/lib
-        LIBRARY DESTINATION ${PROJECT_BINARY_DIR}/lib
-        RUNTIME DESTINATION ${PROJECT_BINARY_DIR}/bin)
+enable_testing()
+
+include(CMakeDependentOption)
+include(GNUInstallDirs)
+
+#Note that googlemock target already builds googletest
+option(BUILD_GMOCK "Builds the googlemock subproject" ON)
+option(INSTALL_GTEST "Enable installation of googletest. (Projects embedding googletest may want to turn this OFF.)" ON)
+
+if(BUILD_GMOCK)
+  add_subdirectory( googlemock )
+else()
+  add_subdirectory( googletest )
+endif()

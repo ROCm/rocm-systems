@@ -163,7 +163,7 @@ set(RSMITST_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 # Set Name for Google Test Framework and build it as a
 # static library to be linked with user test programs
 #
-set(GOOGLE_TEST_FRWK_NAME "google-test-frwk${ONLY64STR}")
+set(GOOGLE_TEST_FRWK_NAME "gtest")
 add_subdirectory(${RSMITST_ROOT}/gtest "${PROJECT_BINARY_DIR}/gtest")
 set (RSMITST_LIBS ${RSMITST_LIBS} ${GOOGLE_TEST_FRWK_NAME})
 
