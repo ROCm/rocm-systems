@@ -62,7 +62,7 @@ namespace smi {
 
 class RocmSMI {
  public:
-    RocmSMI(uint64_t flags);
+    explicit RocmSMI(uint64_t flags);
     ~RocmSMI(void);
 
     static RocmSMI& getInstance(uint64_t flags = 0);
@@ -82,6 +82,8 @@ class RocmSMI {
     void set_init_options(uint64_t options) {init_options_ = options;}
     uint64_t init_options() const {return init_options_;}
 
+    uint32_t euid() const {return euid_;}
+
  private:
     std::vector<std::shared_ptr<Device>> devices_;
     std::vector<std::shared_ptr<Monitor>> monitors_;
@@ -95,6 +97,7 @@ class RocmSMI {
     static std::vector<std::shared_ptr<amd::smi::Device>> s_monitor_devices;
     RocmSMI_env_vars env_vars_;
     uint64_t init_options_;
+    uint32_t euid_;
 };
 
 }  // namespace smi
