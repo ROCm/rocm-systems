@@ -91,7 +91,8 @@ typedef enum {
                                          //!< version running on the executing
                                          //!< machine
   RSMI_STATUS_PERMISSION,                //!< Permission denied/EACCESS file
-                                         //!< error
+                                         //!< error. Many functions require
+                                         //!< root access to run.
   RSMI_STATUS_OUT_OF_RESOURCES,          //!< Unable to acquire memory or other
                                          //!< resource
   RSMI_STATUS_INTERNAL_EXCEPTION,        //!< An internal exception was caught

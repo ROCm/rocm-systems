@@ -101,6 +101,11 @@ static rsmi_status_t handleException() {
   std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind]; \
   assert(dev != nullptr);
 
+#define REQUIRE_ROOT_ACCESS \
+    if (amd::smi::RocmSMI::getInstance().euid()) { \
+      return RSMI_STATUS_PERMISSION; \
+    }
+
 #define DEVICE_MUTEX \
     amd::smi::pthread_wrap _pw(*get_mutex(dv_ind)); \
     amd::smi::ScopedPthread _lock(_pw);
@@ -729,6 +734,8 @@ rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
 rsmi_status_t
 rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od) {
   TRY
+  REQUIRE_ROOT_ACCESS
+
   if (od > kMaxOverdriveLevel) {
     return RSMI_STATUS_INVALID_ARGS;
   }
@@ -740,6 +747,8 @@ rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od) {
 rsmi_status_t
 rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
   TRY
+  REQUIRE_ROOT_ACCESS
+
   if (perf_level > RSMI_DEV_PERF_LEVEL_LAST) {
     return RSMI_STATUS_INVALID_ARGS;
   }
@@ -1082,7 +1091,7 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   rsmi_frequencies_t freqs;
 
   TRY
-
+  REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
 
   ret = rsmi_dev_gpu_clk_freq_get(dv_ind, clk_type, &freqs);
@@ -1363,7 +1372,7 @@ rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
   rsmi_pcie_bandwidth_t bws;
 
   TRY
-
+  REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
   ret = rsmi_dev_pci_bandwidth_get(dv_ind, &bws);
 
@@ -1569,6 +1578,7 @@ rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t speed) {
   rsmi_status_t ret;
   uint64_t max_speed;
 
+  REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
 
   ret = rsmi_dev_fan_speed_max_get(dv_ind, sensor_ind, &max_speed);
@@ -1735,6 +1745,7 @@ rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap) {
   rsmi_status_t ret;
   uint64_t min, max;
 
+  REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
 
   ret = rsmi_dev_power_cap_range_get(dv_ind, sensor_ind, &max, &min);
@@ -1774,6 +1785,8 @@ rsmi_status_t
 rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t sensor_ind,
                                   rsmi_power_profile_preset_masks_t profile) {
   TRY
+  REQUIRE_ROOT_ACCESS
+
   ++sensor_ind;  // power sysfs files have 1-based indices
 
   DEVICE_MUTEX
