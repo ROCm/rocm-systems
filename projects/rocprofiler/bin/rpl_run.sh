@@ -30,11 +30,11 @@ RUN_DIR=`pwd`
 TMP_DIR="/tmp"
 DATA_DIR="rpl_data_${time_stamp}_$$"
 
+RPL_PATH=$PKG_DIR/lib
+TLIB_PATH=$PKG_DIR/tool
+
 # PATH to custom HSA and OpenCl runtimes
 HSA_PATH=$PKG_DIR/lib/hsa
-
-# roctracer path
-if [ -z "$ROCTRACER_PATH" ] ; then ROCTRACER_PATH=$ROOT_DIR/roctracer; fi
 
 # runtime API trace
 HSA_TRACE=0
@@ -43,7 +43,7 @@ HIP_TRACE=0
 # Generate stats
 GEN_STATS=0
 
-export LD_LIBRARY_PATH=$PKG_DIR/lib:$PKG_DIR/tool:$ROCTRACER_PATH/lib:$ROCTRACER_PATH/tool:$HSA_PATH
+export LD_LIBRARY_PATH=$HSA_PATH:$LD_LIBRARY_PATH
 export PATH=.:$PATH
 
 # enable error logging
@@ -54,9 +54,9 @@ unset ROCPROFILER_SESS
 
 # ROC Profiler environment
 # Loading of ROC Profiler by HSA runtime
-export HSA_TOOLS_LIB=librocprofiler64.so
+export HSA_TOOLS_LIB=$RPL_PATH/librocprofiler64.so
 # Loading of the test tool by ROC Profiler
-export ROCP_TOOL_LIB=libtool.so
+export ROCP_TOOL_LIB=$TLIB_PATH/libtool.so
 # Enabling HSA dispatches intercepting by ROC PRofiler
 export ROCP_HSA_INTERCEPT=1
 # Disabling internal ROC Profiler proxy queue (simple version supported for testing purposes)
@@ -129,7 +129,7 @@ usage() {
   echo "        ></metric>"
   echo ""
   echo "  -o <output file> - output CSV file [<input file base>.csv]"
-  echo "  -d <data directory> - directory where profiler store profiling data including thread treaces [/tmp]"
+  echo "  -d <data directory> - directory where profiler store profiling data including traces [/tmp]"
   echo "      The data directory is renoving autonatically if the directory is matching the temporary one, which is the default."
   echo "  -t <temporary directory> - to change the temporary directory [/tmp]"
   echo "      By changing the temporary directory you can prevent removing the profiling data from /tmp or enable removing from not '/tmp' directory."
@@ -201,7 +201,6 @@ run() {
   fi
 
   API_TRACE=""
-  PRELOAD_LIBS=""
   if [ "$HSA_TRACE" = 1 ] ; then
     API_TRACE="hsa"
   fi
@@ -211,14 +210,11 @@ run() {
     else
       API_TRACE="all"
     fi
-    if [ -z "$HCC_HOME" ] ; then error "env var HCC_HOME is not defined"; fi
-    PRELOAD_LIBS="$PRELOAD_LIBS $HCC_HOME/lib/libmcwamp_hsa.so"
   fi
   if [ -n "$API_TRACE" ] ; then
     API_TRACE=$(echo $API_TRACE | sed 's/all//')
     if [ -n "$API_TRACE" ] ; then export ROCTRACER_DOMAIN=$API_TRACE; fi
-    export HSA_TOOLS_LIB="libtracer_tool.so libroctracer64.so $HSA_TOOLS_LIB"
-    PRELOAD_LIBS="$PRELOAD_LIBS $HSA_TOOLS_LIB"
+    export HSA_TOOLS_LIB="$RPL_PATH/libroctracer64.so $TLIB_PATH/libtracer_tool.so $HSA_TOOLS_LIB"
   fi
 
   redirection_cmd=""
@@ -228,7 +224,7 @@ run() {
   fi
 
   #unset ROCP_OUTPUT_DIR
-  CMD_LINE="LD_PRELOAD='$PRELOAD_LIBS' $APP_CMD $redirection_cmd"
+  CMD_LINE="$APP_CMD $redirection_cmd"
   eval "$CMD_LINE"
 }
 

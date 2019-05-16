@@ -56,6 +56,13 @@ var_table = {}
 def fatal(msg):
   sys.stderr.write(sys.argv[0] + ": " + msg + "\n");
   sys.exit(1)
+
+dbglog_count = 0
+def dbglog(msg):
+  global dbglog_count
+  dbglog_count += 1
+  sys.stderr.write(sys.argv[0] + ": " + msg + "\n");
+  fatal("error")
 #############################################################
 
 # parse results method
@@ -224,7 +231,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           dep_tid_list.append(int(rec_vals[3]))
           dep_id_list.append(record_id) 
         record_id += 1
-      else: fatal("hsa bad record")
+      else: fatal(api_name + " bad record: '" + record + "'")
 
   for (tid, from_ns) in dep_list:
     db.insert_entry(table_handle, [from_ns, from_ns, api_pid, tid, 'hsa_dispatch', '', record_id])
@@ -267,7 +274,7 @@ def fill_copy_db(table_name, db, indir):
         else: fatal("bad async-copy entry")
         rec_vals.append(m.group(1))
         db.insert_entry(table_handle, rec_vals)
-      else: fatal("async-copy bad record")
+      else: fatal("async-copy bad record: '" + record + "'")
 
   dep_dict[COPY_PID]['to'] = dep_to_us_dict
 #############################################################
@@ -313,7 +320,7 @@ def fill_ops_db(table_name, db, indir):
           dep_dict[gpu_pid]['to'] = {}
         dep_dict[gpu_pid]['to'][corr_id] = int(rec_vals[0]) / 1000
         dep_dict[gpu_pid]['bsp'] = OPS_PID
-      else: fatal("async-copy bad record")
+      else: fatal("hcc ops bad record: '" + record + "'")
 
   return filtr
 #############################################################
