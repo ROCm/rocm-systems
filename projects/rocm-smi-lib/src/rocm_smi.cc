@@ -1180,6 +1180,27 @@ get_id_name_str_from_line(uint64_t id, std::string ln,
   return ret_str;
 }
 
+static rsmi_status_t get_backup_name(uint16_t id, char *name,
+                                               size_t len, eNameStrType typ) {
+  std::string name_str;
+
+  name_str += "0x";
+
+  std::stringstream strm;
+  strm << std::hex << id;
+  name_str += strm.str();
+
+  name[0] = '\0';
+  size_t ct = name_str.copy(name, len);
+
+  name[std::min(len - 1, ct)] = '\0';
+
+  if (len < (name_str.size() + 1)) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  return RSMI_STATUS_SUCCESS;
+}
+
 // Parse pci.ids files. Comment lines have # in first column. Otherwise,
 // Syntax:
 // vendor  vendor_name
@@ -1264,10 +1285,13 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
         }
       } else {  // ln[0] != '\t'; Vendor line
         if (found_device_vendor) {
+          assert(typ != NAME_STR_VENDOR);
           // We already found the vendor but didn't find the device or
           // subsystem we were looking for, so bail out.
           val_str.clear();
-          return RSMI_STATUS_NOT_FOUND;
+
+          return get_backup_name(typ == NAME_STR_DEVICE ?
+                                       device_id : subsys_id, name, len, typ);
         }
 
         val_str = get_id_name_str_from_line(vendor_id, ln, &ln_str);
@@ -1287,6 +1311,12 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
     }
   }
 
+  if (val_str.size() == 0) {
+    // We should have already returned if we were looking for
+    // device or subdivce
+    assert(typ == NAME_STR_VENDOR);
+    return get_backup_name(vendor_id, name, len, typ);
+  }
   size_t ct = val_str.copy(name, len);
 
   name[std::min(len - 1, ct)] = '\0';
@@ -1309,11 +1339,8 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
   DEVICE_MUTEX
 
   ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_DEVICE);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    return ret;
-  }
 
-  return RSMI_STATUS_SUCCESS;
+  return ret;
   CATCH
 }
 
@@ -2068,7 +2095,6 @@ rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
 rsmi_status_t
 rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t *counter) {
   TRY
-
   DEVICE_MUTEX
   rsmi_status_t ret;
 
@@ -2077,3 +2103,4 @@ rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t *counter) {
 
   CATCH
 }
+
