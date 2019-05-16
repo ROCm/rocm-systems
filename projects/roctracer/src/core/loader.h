@@ -1,8 +1,14 @@
 #ifndef SRC_CORE_LOADER_H_
 #define SRC_CORE_LOADER_H_
 
+#include <atomic>
 #include <mutex>
 #include <dlfcn.h>
+
+#define LOADER_INSTANTIATE() \
+  std::atomic<roctracer::HipLoader*> roctracer::HipLoader::instance_{}; \
+  std::atomic<roctracer::HccLoader*> roctracer::HccLoader::instance_{}; \
+  roctracer::Loader::mutex_t roctracer::Loader::mutex_;
 
 namespace roctracer {
 
@@ -95,13 +101,13 @@ class HccLoader : protected Loader {
     return *obj;
   }
 
-  HccLoader() : Loader("libmcwamp.so") {
+  HccLoader() : Loader("libmcwamp_hsa.so") {
     // Kalmar::CLAMP::InitActivityCallback
-    InitActivityCallback = GetFun<InitActivityCallback_t>("_ZN6Kalmar5CLAMP20InitActivityCallbackEPvS1_S1_");
+    InitActivityCallback = GetFun<InitActivityCallback_t>("InitActivityCallbackImpl");
     // Kalmar::CLAMP::EnableActivityIdCallback
-    EnableActivityCallback = GetFun<EnableActivityCallback_t>("_ZN6Kalmar5CLAMP22EnableActivityCallbackEjb");
+    EnableActivityCallback = GetFun<EnableActivityCallback_t>("EnableActivityCallbackImpl");
     // Kalmar::CLAMP::GetCmdName
-    GetCmdName = GetFun<GetCmdName_t>("_ZN6Kalmar5CLAMP10GetCmdNameEj");
+    GetCmdName = GetFun<GetCmdName_t>("GetCmdNameImpl");
   }
 
   InitActivityCallback_t* InitActivityCallback;

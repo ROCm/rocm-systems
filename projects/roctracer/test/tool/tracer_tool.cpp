@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include <inc/roctracer_hip.h>
 #include <inc/roctracer_hcc.h>
 #include <inc/ext/hsa_rt_utils.hpp>
+#include <src/core/loader.h>
 #include <util/xml.h>
 
 #define PUBLIC_API __attribute__((visibility("default")))
@@ -53,6 +54,8 @@ thread_local timestamp_t hsa_begin_timestamp = 0;
 thread_local timestamp_t hip_begin_timestamp = 0;
 bool trace_hsa = false;
 bool trace_hip = false;
+
+LOADER_INSTANTIATE();
 
 // Global output file handle
 FILE* hsa_api_file_handle = NULL;
@@ -116,33 +119,40 @@ void hip_api_callback(
     hsa_begin_timestamp = timer->timestamp_fn_ns();
   } else {
     const timestamp_t end_timestamp = timer->timestamp_fn_ns();
-    fprintf(hip_api_file_handle, "%lu:%lu %u:%u %s(", hsa_begin_timestamp, end_timestamp, GetPid(), GetTid(), roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0));
+    std::ostringstream oss;                                                                        \
+    oss << std::dec <<
+      hsa_begin_timestamp << ":" << end_timestamp << " " << GetPid() << ":" << GetTid() << " " << roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0);                                                       \
+
     switch (cid) {
       case HIP_API_ID_hipMemcpy:
-        fprintf(hip_api_file_handle, "dst(%p) src(%p) size(0x%x) kind(%u)",
+        fprintf(hip_api_file_handle, "%s(dst(%p) src(%p) size(0x%x) kind(%u))",
+          oss.str().c_str(),
           data->args.hipMemcpy.dst,
           data->args.hipMemcpy.src,
           (uint32_t)(data->args.hipMemcpy.sizeBytes),
           (uint32_t)(data->args.hipMemcpy.kind));
         break;
       case HIP_API_ID_hipMalloc:
-        fprintf(hip_api_file_handle, "ptr(0x%p) size(0x%x)",
+        fprintf(hip_api_file_handle, "%s(ptr(0x%p) size(0x%x))",
+          oss.str().c_str(),
           *(data->args.hipMalloc.ptr),
           (uint32_t)(data->args.hipMalloc.size));
         break;
       case HIP_API_ID_hipFree:
-        fprintf(hip_api_file_handle, "ptr(%p)",
+        fprintf(hip_api_file_handle, "%s(ptr(%p))",
+          oss.str().c_str(),
           data->args.hipFree.ptr);
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
-        fprintf(hip_api_file_handle, "kernel(%s) stream(%p)",
-          hipKernelNameRef(data->args.hipModuleLaunchKernel.f),
+        fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))",
+          oss.str().c_str(),
+          roctracer::HipLoader::Instance().KernelNameRef(data->args.hipModuleLaunchKernel.f),
           data->args.hipModuleLaunchKernel.stream);
         break;
       default:
         break;
     }
-    fprintf(hip_api_file_handle, ")\n"); fflush(hip_api_file_handle);
+    fflush(hip_api_file_handle);
   }
 }
 
@@ -305,7 +315,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
       NULL};
     roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
 
-    printf("    HSA-trace(");
+    fprintf(stdout, "    HSA-trace("); fflush(stdout);
     if (hsa_api_vec.size() != 0) {
       for (unsigned i = 0; i < hsa_api_vec.size(); ++i) {
         uint32_t cid = HSA_API_ID_NUMBER;
@@ -326,7 +336,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     hip_api_file_handle = open_output_file(output_prefix, "hip_api_trace.txt");
     hcc_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
 
-    printf("    HIP-trace()\n");
+    fprintf(stdout, "    HIP-trace()\n"); fflush(stdout);
     // Allocating tracing pool
     roctracer_properties_t properties{};
     properties.buffer_size = 0x1000;

@@ -439,11 +439,9 @@ std::atomic<util::Logger*> util::Logger::instance_{};
 MemoryPool* memory_pool = NULL;
 typedef std::recursive_mutex memory_pool_mutex_t;
 memory_pool_mutex_t memory_pool_mutex;
-
-Loader::mutex_t Loader::mutex_;
-std::atomic<HipLoader*> HipLoader::instance_{};
-std::atomic<HccLoader*> HccLoader::instance_{};
 }
+
+LOADER_INSTANTIATE();
 
 std::atomic<proxy::Tracker*> proxy::Tracker::instance_{};
 proxy::Tracker::mutex_t proxy::Tracker::glob_mutex_;

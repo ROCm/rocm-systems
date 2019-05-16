@@ -45,14 +45,14 @@ eval_test() {
 
 # Standalone test
 # rocTrecer is used explicitely by test
-eval_test "standalone HIP test" "LD_PRELOAD=$HCC_HOME/lib/libmcwamp_hsa.so ./test/MatrixTranspose_test"
+eval_test "standalone HIP test" ./test/MatrixTranspose_test
 
 # Tool test
 # rocTracer/tool is loaded by HSA runtime
-export HSA_TOOLS_LIB="test/libtracer_tool.so libroctracer64.so"
+export HSA_TOOLS_LIB="libroctracer64.so test/libtracer_tool.so"
 
 # HIP test
-eval_test "tool HIP test" "LD_PRELOAD='$HCC_HOME/lib/libmcwamp_hsa.so $HSA_TOOLS_LIB' ./test/MatrixTranspose"
+eval_test "tool HIP test" ./test/MatrixTranspose
 
 # HSA test
 export ROCTRACER_DOMAIN="hsa"
@@ -69,11 +69,11 @@ export ROCP_AGENTS=1
 # each thread creates a queue pre GPU agent
 export ROCP_THRS=1
 
-eval_test "tool HSA test" "LD_PRELOAD='$HSA_TOOLS_LIB' ./test/hsa/ctrl"
+eval_test "tool HSA test" ./test/hsa/ctrl
 
 echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > input.xml
 export ROCP_INPUT=input.xml
-eval_test "tool HSA test input" "LD_PRELOAD='$HSA_TOOLS_LIB' ./test/hsa/ctrl"
+eval_test "tool HSA test input" ./test/hsa/ctrl
 
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
