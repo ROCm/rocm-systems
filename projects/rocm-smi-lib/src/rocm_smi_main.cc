@@ -241,6 +241,8 @@ RocmSMI::Initialize(uint64_t flags) {
 
   init_options_ = flags;
 
+  euid_ = geteuid();
+
   GetEnvVariables();
 
   while (std::string(kAMDMonitorTypes[i]) != "") {
@@ -335,10 +337,9 @@ RocmSMI::AddToDeviceList(std::string dev_name) {
   return;
 }
 
-static const uint32_t kAmdGpuId=0x1002;
+static const uint32_t kAmdGpuId = 0x1002;
 
 static bool isAMDGPU(std::string dev_path) {
-
   std::string vend_path = dev_path + "/device/vendor";
   if (!FileExists(vend_path.c_str())) {
     return false;

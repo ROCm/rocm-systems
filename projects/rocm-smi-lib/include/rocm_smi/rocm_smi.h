@@ -91,7 +91,8 @@ typedef enum {
                                          //!< version running on the executing
                                          //!< machine
   RSMI_STATUS_PERMISSION,                //!< Permission denied/EACCESS file
-                                         //!< error
+                                         //!< error. Many functions require
+                                         //!< root access to run.
   RSMI_STATUS_OUT_OF_RESOURCES,          //!< Unable to acquire memory or other
                                          //!< resource
   RSMI_STATUS_INTERNAL_EXCEPTION,        //!< An internal exception was caught
@@ -594,6 +595,12 @@ rsmi_status_t rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id);
  *  will write the name of the device (up to @p len characters) to the buffer
  *  @p name.
  *
+ *  If the integer ID associated with the device is not found in one of the
+ *  system files containing device name information (e.g.
+ *  /usr/share/misc/pci.ids), then this function will return the hex device ID
+ *  as a string. Updating the system name files can be accompplished with
+ *  "sudo update-pciids".
+ *
  *  @param[in] dv_ind a device index
  *
  *  @param[inout] name a pointer to a caller provided char buffer to which the
@@ -616,6 +623,12 @@ rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
  *  @p name, and a length of this buffer @p len, this function will write the
  *  name of the vendor (up to @p len characters) buffer @p name. The @p id may
  *  be a device vendor or subsystem vendor ID.
+ *
+ *  If the integer ID associated with the vendor is not found in one of the
+ *  system files containing device name information (e.g.
+ *  /usr/share/misc/pci.ids), then this function will return the hex vendor ID
+ *  as a string. Updating the system name files can be accompplished with
+ *  "sudo update-pciids".
  *
  *  @param[in] id a vendor ID
  *
@@ -657,6 +670,12 @@ rsmi_status_t rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t *id);
  *  char buffer @p name, and a length of this buffer @p len, this function
  *  will write the name of the device subsystem (up to @p len characters)
  *  to the buffer @p name.
+ *
+ *  If the integer ID associated with the sub-system is not found in one of the
+ *  system files containing device name information (e.g.
+ *  /usr/share/misc/pci.ids), then this function will return the hex sub-system
+ *  ID as a string. Updating the system name files can be accompplished with
+ *  "sudo update-pciids".
  *
  *  @param[in] dv_ind a device index
  *
