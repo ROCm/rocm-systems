@@ -1180,8 +1180,7 @@ get_id_name_str_from_line(uint64_t id, std::string ln,
   return ret_str;
 }
 
-static rsmi_status_t get_backup_name(uint16_t id, char *name,
-                                               size_t len, eNameStrType typ) {
+static rsmi_status_t get_backup_name(uint16_t id, char *name, size_t len) {
   std::string name_str;
 
   name_str += "0x";
@@ -1291,7 +1290,7 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
           val_str.clear();
 
           return get_backup_name(typ == NAME_STR_DEVICE ?
-                                       device_id : subsys_id, name, len, typ);
+                                            device_id : subsys_id, name, len);
         }
 
         val_str = get_id_name_str_from_line(vendor_id, ln, &ln_str);
@@ -1315,7 +1314,7 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
     // We should have already returned if we were looking for
     // device or subdivce
     assert(typ == NAME_STR_VENDOR);
-    return get_backup_name(vendor_id, name, len, typ);
+    return get_backup_name(vendor_id, name, len);
   }
   size_t ct = val_str.copy(name, len);
 
@@ -1467,7 +1466,7 @@ rsmi_dev_pci_throughput_get(uint32_t dv_ind, uint64_t *sent,
 }
 
 rsmi_status_t
-rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
+rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
                        rsmi_temperature_metric_t metric, int64_t *temperature) {
   TRY
 
@@ -1477,14 +1476,6 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
 
   rsmi_status_t ret;
   amd::smi::MonitorTypes mon_type;
-
-
-  // Make any adjustments to sensor_ind here, if index is not a 0 based. For
-  // rocm_smi we are using a 0-based index. However, most of the Linux sysfs
-  // monitor files are 1-based, so we will increment by 1 and make adjustments
-  // for exceptions later.
-  // See https://www.kernel.org/doc/Documentation/hwmon/sysfs-interface
-  ++sensor_ind;
 
   switch (metric) {
     case RSMI_TEMP_CURRENT:
@@ -1535,7 +1526,19 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
 
   DEVICE_MUTEX
 
-  ret = get_dev_mon_value(mon_type, dv_ind, sensor_ind, temperature);
+  GET_DEV_FROM_INDX
+
+  assert(dev->monitor() != nullptr);
+  std::shared_ptr<amd::smi::Monitor> m = dev->monitor();
+
+  uint32_t err  = m->setSensorLabelMap();
+  if (err) {
+     return errno_to_rsmi_status(err);
+  }
+
+  uint32_t sensor_index =
+         m->getSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
+  ret = get_dev_mon_value(mon_type, dv_ind, sensor_index, temperature);
 
   return ret;
   CATCH

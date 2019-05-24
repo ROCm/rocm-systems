@@ -239,6 +239,21 @@ typedef rsmi_temperature_metric_t rsmi_temperature_metric;
 /// \endcond
 
 /**
+ * @brief This ennumeration is used to indicate from which part of the device a
+ * temperature reading should be obtained.
+ */
+typedef enum {
+  RSMI_TEMP_TYPE_FIRST = 0,
+
+  RSMI_TEMP_TYPE_EDGE = RSMI_TEMP_TYPE_FIRST,  //!< Edge GPU temperature
+  RSMI_TEMP_TYPE_JUNCTION,                     //!< Junction/hotspot
+                                               //!< temperature
+  RSMI_TEMP_TYPE_MEMORY,                       //!< VRAM temperature
+
+  RSMI_TEMP_TYPE_LAST = RSMI_TEMP_TYPE_MEMORY
+} rsmi_temperature_type_t;
+
+/**
  * @brief Pre-set Profile Selections. These bitmasks can be AND'd with the
  * ::rsmi_power_profile_status_t.available_profiles returned from
  * ::rsmi_dev_power_profile_presets_get() to determine which power profiles
@@ -1096,15 +1111,15 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
  *  @brief Get the temperature metric value for the specified metric, from the
  *  specified temperature sensor on the specified device.
  *
- *  @details Given a device index @p dv_ind, a 0-based sensor index
- *  @p sensor_ind, a ::rsmi_temperature_metric_t @p metric and a pointer to an
- *  int64_t @p temperature, this function will write the value of the metric
- *  indicated by @p metric to the memory location @p temperature.
+ *  @details Given a device index @p dv_ind, a sensor type @p sensor_type, a
+ *  ::rsmi_temperature_metric_t @p metric and a pointer to an int64_t @p
+ *  temperature, this function will write the value of the metric indicated by
+ *  @p metric and @p sensor_type to the memory location @p temperature.
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- *  If a device has more than one sensor, it could be greater than 0.
+ *  @param[in] sensor_type part of device from which temperature should be
+ *  obtained. This should come from the enum ::rsmi_temperature_type_t
  *
  *  @param[in] metric enum indicated which temperature value should be
  *  retrieved
@@ -1115,7 +1130,7 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_ind,
+rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
                       rsmi_temperature_metric_t metric, int64_t *temperature);
 /** @} */  // end of PhysQuer
 

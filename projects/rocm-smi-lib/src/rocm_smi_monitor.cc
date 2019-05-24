@@ -86,6 +86,18 @@ static const char *kMonTempCritMinHystName = "temp#_lcrit_hyst";
 static const char *kMonTempOffsetName = "temp#_offset";
 static const char *kMonTempLowestName = "temp#_lowest";
 static const char *kMonTempHighestName = "temp#_highest";
+static const char *kMonTempLabelName = "temp#_label";
+
+static const char *kTempSensorTypeMemoryName = "mem";
+static const char *kTempSensorTypeJunctionName = "junction";
+static const char *kTempSensorTypeEdgeName = "edge";
+
+static const std::map<std::string, rsmi_temperature_type_t>
+                                                        kTempSensorNameMap = {
+    {kTempSensorTypeMemoryName, RSMI_TEMP_TYPE_MEMORY},
+    {kTempSensorTypeJunctionName, RSMI_TEMP_TYPE_JUNCTION},
+    {kTempSensorTypeEdgeName, RSMI_TEMP_TYPE_EDGE},
+};
 
 static const std::map<MonitorTypes, const char *> kMonitorNameMap = {
     {kMonName, kMonNameFName},
@@ -111,6 +123,7 @@ static const std::map<MonitorTypes, const char *> kMonitorNameMap = {
     {kMonTempOffset, kMonTempOffsetName},
     {kMonTempLowest, kMonTempLowestName},
     {kMonTempHighest, kMonTempHighestName},
+    {kMonTempLabel, kMonTempLabelName},
 };
 
 Monitor::Monitor(std::string path, RocmSMI_env_vars const *e) :
@@ -150,6 +163,39 @@ int Monitor::readMonitor(MonitorTypes type, uint32_t sensor_id,
 
   DBG_FILE_ERROR(sysfs_path, (std::string *)nullptr)
   return ReadSysfsStr(sysfs_path, val);
+}
+
+uint32_t
+Monitor::setSensorLabelMap(void) {
+  std::string type_str;
+  int ret;
+
+  if (temp_type_index_map_.size() > 0) {
+    return 0;  // We've already filled in the map
+  }
+  auto add_temp_sensor_entry = [&](uint32_t file_index) {
+    ret = readMonitor(kMonTempLabel, file_index, &type_str);
+    if (ret) {
+      return ret;
+    }
+
+    rsmi_temperature_type_t t_type = kTempSensorNameMap.at(type_str);
+    temp_type_index_map_.insert({t_type, file_index});
+    return 0;
+  };
+
+  for (uint32_t i = 1; i <= 3; ++i) {
+    ret = add_temp_sensor_entry(i);
+    if (ret) {
+      return ret;
+    }
+  }
+  return 0;
+}
+
+uint32_t
+Monitor::getSensorIndex(rsmi_temperature_type_t type) {
+  return temp_type_index_map_.at(type);
 }
 
 
