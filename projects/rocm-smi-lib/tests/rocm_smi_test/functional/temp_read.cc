@@ -48,12 +48,19 @@
 
 #include <iostream>
 #include <string>
+#include <map>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/functional/temp_read.h"
 #include "rocm_smi_test/test_common.h"
 
+
+static const std::map<uint32_t, std::string> kTempSensorNameMap = {
+    {RSMI_TEMP_TYPE_MEMORY, "Memory"},
+    {RSMI_TEMP_TYPE_JUNCTION, "Junction"},
+    {RSMI_TEMP_TYPE_EDGE, "Edge"},
+};
 TestTempRead::TestTempRead() : TestBase() {
   set_title("RSMI Temp Read Test");
   set_description("The Temperature Read tests verifies that the temperature "
@@ -91,12 +98,14 @@ void TestTempRead::Run(void) {
 
   TestBase::Run();
 
+  uint32_t type;
+
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
 
     auto print_temp_metric = [&](rsmi_temperature_metric_t met,
                                                         std::string label) {
-      err = rsmi_dev_temp_metric_get(i, 0, met, &val_i64);
+      err = rsmi_dev_temp_metric_get(i, type, met, &val_i64);
 
       if (err != RSMI_STATUS_SUCCESS) {
         if (err == RSMI_STATUS_NOT_SUPPORTED) {
@@ -115,25 +124,31 @@ void TestTempRead::Run(void) {
                                                            "C" << std::endl;
       }
     };
-    print_temp_metric(RSMI_TEMP_CURRENT, "Current Temp.");
-    print_temp_metric(RSMI_TEMP_MAX, "Temperature max value");
-    print_temp_metric(RSMI_TEMP_MIN, "Temperature min value");
-    print_temp_metric(RSMI_TEMP_MAX_HYST,
-                              "Temperature hysteresis value for max limit");
-    print_temp_metric(RSMI_TEMP_MIN_HYST,
-                              "Temperature hysteresis value for min limit");
-    print_temp_metric(RSMI_TEMP_CRITICAL, "Temperature critical max value");
-    print_temp_metric(RSMI_TEMP_CRITICAL_HYST,
-                         "Temperature hysteresis value for critical limit");
-    print_temp_metric(RSMI_TEMP_EMERGENCY,
-                                         "Temperature emergency max value");
-    print_temp_metric(RSMI_TEMP_EMERGENCY_HYST,
-                        "Temperature hysteresis value for emergency limit");
-    print_temp_metric(RSMI_TEMP_CRIT_MIN, "Temperature critical min value");
-    print_temp_metric(RSMI_TEMP_CRIT_MIN_HYST,
-                     "Temperature hysteresis value for critical min value");
-    print_temp_metric(RSMI_TEMP_OFFSET, "Temperature offset");
-    print_temp_metric(RSMI_TEMP_LOWEST, "Historical minimum temperature");
-    print_temp_metric(RSMI_TEMP_HIGHEST, "Historical maximum temperature");
+    for (type = RSMI_TEMP_TYPE_FIRST; type <= RSMI_TEMP_TYPE_LAST; ++type) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t** **********" << kTempSensorNameMap.at(type) <<
+                                      " Temperatures **********" << std::endl;
+      }
+      print_temp_metric(RSMI_TEMP_CURRENT, "Current Temp.");
+      print_temp_metric(RSMI_TEMP_MAX, "Temperature max value");
+      print_temp_metric(RSMI_TEMP_MIN, "Temperature min value");
+      print_temp_metric(RSMI_TEMP_MAX_HYST,
+                                "Temperature hysteresis value for max limit");
+      print_temp_metric(RSMI_TEMP_MIN_HYST,
+                                "Temperature hysteresis value for min limit");
+      print_temp_metric(RSMI_TEMP_CRITICAL, "Temperature critical max value");
+      print_temp_metric(RSMI_TEMP_CRITICAL_HYST,
+                           "Temperature hysteresis value for critical limit");
+      print_temp_metric(RSMI_TEMP_EMERGENCY,
+                                           "Temperature emergency max value");
+      print_temp_metric(RSMI_TEMP_EMERGENCY_HYST,
+                          "Temperature hysteresis value for emergency limit");
+      print_temp_metric(RSMI_TEMP_CRIT_MIN, "Temperature critical min value");
+      print_temp_metric(RSMI_TEMP_CRIT_MIN_HYST,
+                       "Temperature hysteresis value for critical min value");
+      print_temp_metric(RSMI_TEMP_OFFSET, "Temperature offset");
+      print_temp_metric(RSMI_TEMP_LOWEST, "Historical minimum temperature");
+      print_temp_metric(RSMI_TEMP_HIGHEST, "Historical maximum temperature");
+    }
   }
 }

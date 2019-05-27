@@ -47,8 +47,10 @@
 
 #include <string>
 #include <cstdint>
+#include <map>
 
 #include "rocm_smi/rocm_smi_common.h"
+#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace smi {
@@ -77,6 +79,7 @@ enum MonitorTypes {
   kMonTempOffset,
   kMonTempLowest,
   kMonTempHighest,
+  kMonTempLabel,
 
   kMonInvalid = 0xFFFFFFFF,
 };
@@ -89,10 +92,14 @@ class Monitor {
     const std::string path(void) const {return path_;}
     int readMonitor(MonitorTypes type, uint32_t sensor_ind, std::string *val);
     int writeMonitor(MonitorTypes type, uint32_t sensor_ind, std::string val);
+    uint32_t setSensorLabelMap(void);
+    uint32_t getSensorIndex(rsmi_temperature_type_t type);
+
  private:
     std::string MakeMonitorPath(MonitorTypes type, int32_t sensor_id);
     std::string path_;
     const RocmSMI_env_vars *env_;
+    std::map<rsmi_temperature_type_t, uint32_t> temp_type_index_map_;
 };
 
 }  // namespace smi
