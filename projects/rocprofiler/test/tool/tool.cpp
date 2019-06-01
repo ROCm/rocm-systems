@@ -134,8 +134,10 @@ static uint32_t CTX_OUTSTANDING_MAX = 0;
 static uint32_t CTX_OUTSTANDING_MON = 0;
 // to truncate kernel names
 uint32_t to_truncate_names = 0;
-// local SQTT buffer
-bool is_sqtt_local = true;
+// local trace buffer
+bool is_trace_local = true;
+// SPM trace enabled
+bool is_spm_trace = false;
 
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
@@ -281,7 +283,7 @@ void dealloc_context_entry(context_entry_t* entry) {
 // Dump trace data to file
 void dump_sqtt_trace(const char* label, const uint32_t chunk, const void* data, const uint32_t& size) {
   if (result_prefix != NULL) {
-    // Open SQTT file
+    // Open file
     std::ostringstream oss;
     oss << result_prefix << "/thread_trace_" << label << "_se" << chunk << ".out";
     FILE* file = fopen(oss.str().c_str(), "w");
@@ -298,8 +300,33 @@ void dump_sqtt_trace(const char* label, const uint32_t chunk, const void* data, 
       fprintf(file, "%04x\n", ptr[i]);
     }
 
-    // Close SQTT file
+    // Close file
     fclose(file);
+  }
+}
+
+// Dump trace data to file
+void dump_spm_trace(const char* label, const void* data, const uint32_t& size) {
+  if (result_prefix != NULL) {
+    // Open trace file
+    std::ostringstream oss;
+    oss << result_prefix << "/spm_trace_" << label << ".out";
+    const int fd = open(oss.str().c_str(), O_CREAT|O_WRONLY|O_TRUNC, 0666);
+    if (fd == -1) {
+      std::ostringstream errmsg;
+      errmsg << "open error, file '" << oss.str().c_str() << "'";
+      perror(errmsg.str().c_str());
+      abort();
+    }
+    // write trace binary data
+    if (write(fd, data, size) == -1) {
+      std::ostringstream errmsg;
+      errmsg << "write error, file '" << oss.str().c_str() << "'";
+      perror(errmsg.str().c_str());
+      abort();
+    }
+    // Close file
+    close(fd);
   }
 }
 
@@ -314,23 +341,43 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
                            hsa_ven_amd_aqlprofile_info_data_t* info_data, void* data) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   trace_data_arg_t* arg = reinterpret_cast<trace_data_arg_t*>(data);
-  if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
-    const void* data_ptr = info_data->sqtt_data.ptr;
-    const uint32_t data_size = info_data->sqtt_data.size;
-    fprintf(arg->file, "    SE(%u) size(%u)\n", info_data->sample_id, data_size);
+  if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA) {
+    if (is_spm_trace) {
+      if (info_data->sample_id != 0) {
+        fatal("Only one SPM sample expected");
+      }
+      const void* data_ptr = info_data->trace_data.ptr;
+      const uint32_t data_size = info_data->trace_data.size;
+      fprintf(arg->file, "    size(%u)\n", data_size);
 
-    if (is_sqtt_local) {
+      if (is_trace_local == false) fatal("SPM trace supports only local trace allocation");
       HsaRsrcFactory* hsa_rsrc = &HsaRsrcFactory::Instance();
       const AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(arg->agent);
       const uint32_t mem_size = data_size;
       void* buffer = hsa_rsrc->AllocateSysMemory(agent_info, mem_size);
       if(!hsa_rsrc->Memcpy(agent_info, buffer, data_ptr, mem_size)) {
-        fatal("SQTT data memcopy to host failed");
+        fatal("Trace data memcopy to host failed");
       }
-      dump_sqtt_trace(arg->label, info_data->sample_id, buffer, data_size);
+      dump_spm_trace(arg->label, buffer, data_size);
       HsaRsrcFactory::FreeMemory(buffer);
     } else {
-      dump_sqtt_trace(arg->label, info_data->sample_id, data_ptr, data_size);
+      const void* data_ptr = info_data->trace_data.ptr;
+      const uint32_t data_size = info_data->trace_data.size;
+      fprintf(arg->file, "    SE(%u) size(%u)\n", info_data->sample_id, data_size);
+  
+      if (is_trace_local) {
+        HsaRsrcFactory* hsa_rsrc = &HsaRsrcFactory::Instance();
+        const AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(arg->agent);
+        const uint32_t mem_size = data_size;
+        void* buffer = hsa_rsrc->AllocateSysMemory(agent_info, mem_size);
+        if(!hsa_rsrc->Memcpy(agent_info, buffer, data_ptr, mem_size)) {
+          fatal("Trace data memcopy to host failed");
+        }
+        dump_sqtt_trace(arg->label, info_data->sample_id, buffer, data_size);
+        HsaRsrcFactory::FreeMemory(buffer);
+      } else {
+        dump_sqtt_trace(arg->label, info_data->sample_id, data_ptr, data_size);
+      }
     }
   } else
     status = HSA_STATUS_ERROR;
@@ -367,12 +414,12 @@ void output_results(const context_entry_t* entry, const char* label) {
           for (unsigned i = 0; i < p->data.result_bytes.instance_count; ++i) {
             const uint32_t chunk_size = *reinterpret_cast<const uint32_t*>(ptr);
             const char* chunk_data = ptr + sizeof(uint32_t);
-            if (chunk_data >= end) fatal("SQTT data is out of the result buffer size");
+            if (chunk_data >= end) fatal("Trace data is out of the result buffer size");
 
             dump_sqtt_trace(label, i, chunk_data, chunk_size);
             const uint32_t off = align_size(chunk_size, sizeof(uint32_t));
             ptr = chunk_data + off;
-            if (chunk_data >= end) fatal("SQTT data ptr is out of the result buffer size");
+            if (chunk_data >= end) fatal("Trace data ptr is out of the result buffer size");
             size += chunk_size;
           }
           fprintf(file, "size(%lu)\n", size);
@@ -821,19 +868,19 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
       if (it != opts.end()) { CTX_OUTSTANDING_MAX = atol(it->second.c_str()); }
       it = opts.find("heartbeat");
       if (it != opts.end()) { CTX_OUTSTANDING_MON = atol(it->second.c_str()); }
-      it = opts.find("sqtt-size");
+      it = opts.find("trace-size");
       if (it != opts.end()) {
-        std::string str = normalize_token(it->second, true, "option sqtt-size");
+        std::string str = normalize_token(it->second, true, "option trace-size");
         uint32_t multiplier = 1;
         switch (str.back()) {
           case 'K': multiplier = 1024; break;
           case 'M': multiplier = 1024 * 1024; break;
         }
         if (multiplier != 1) str = str.substr(0, str.length() - 1);
-        settings->sqtt_size = strtoull(str.c_str(), NULL, 0) * multiplier;
+        settings->trace_size = strtoull(str.c_str(), NULL, 0) * multiplier;
       }
-      it = opts.find("sqtt-local");
-      if (it != opts.end()) { settings->sqtt_local = (it->second == "on"); }
+      it = opts.find("trace-local");
+      if (it != opts.end()) { settings->trace_local = (it->second == "on"); }
       it = opts.find("memcopies");
       if (it != opts.end()) { settings->memcopy_tracking = (it->second == "on"); }
     }
@@ -850,14 +897,14 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   check_env_var("ROCP_TIMESTAMP_ON", settings->timestamp_on);
   // Set data timeout
   check_env_var("ROCP_DATA_TIMEOUT", settings->timeout);
-  // Set SQTT size
-  check_env_var("ROCP_SQTT_SIZE", settings->sqtt_size);
-  // Set SQTT local buffer
-  check_env_var("ROCP_SQTT_LOCAL", settings->sqtt_local);
+  // Set trace size
+  check_env_var("ROCP_TRACE_SIZE", settings->trace_size);
+  // Set trace local buffer
+  check_env_var("ROCP_TRACE_LOCAL", settings->trace_local);
   // Set memcopies tracking
   check_env_var("ROCP_MCOPY_TRACKING", settings->memcopy_tracking);
 
-  is_sqtt_local = settings->sqtt_local;
+  is_trace_local = settings->trace_local;
 
   // Printing out info
   char* info_symb = getenv("ROCP_INFO");
@@ -943,6 +990,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
 
   // Getting traces
   const auto traces_list = xml->GetNodes("top.trace");
+  if (traces_list.size() > 1) fatal("ROCProfiler: only one trace supported at a time");
 
   const unsigned feature_count = metrics_vec.size() + traces_list.size();
   rocprofiler_feature_t* features = new rocprofiler_feature_t[feature_count];
@@ -966,7 +1014,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     auto it = entry->opts.find("name");
     if (it == entry->opts.end()) fatal("ROCProfiler: trace name is missing");
     const std::string& name = it->second;
-    if (name != "SQTT") continue;
+    if (name == "SPM") is_spm_trace = true;
+
     traces_found++;
 
     bool to_copy_data = false;
@@ -988,15 +1037,14 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK;
     parameters_dict["TOKEN_MASK2"] =
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2;
-#ifdef AQLPROF_NEW_API
     parameters_dict["SE_MASK"] =
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK;
-#endif
+    parameters_dict["SAMPLE_RATE"] =
+        HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SAMPLE_RATE;
 
     printf("    %s (", name.c_str());
     features[index] = {};
     features[index].kind = ROCPROFILER_FEATURE_KIND_TRACE;
-    features[index].name = strdup(name.c_str());
     features[index].data.result_bytes.copy = to_copy_data;
 
     uint32_t parameter_count = 0;
@@ -1035,6 +1083,12 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   }
   fflush(stdout);
   const uint32_t features_found = metrics_vec.size() + traces_found;
+
+  if (is_spm_trace) {
+    for (uint32_t index = 0; index < features_found; index++) {
+      features[index].kind = ROCPROFILER_FEATURE_KIND_TRACE;
+    }
+  }
 
   // Context array aloocation
   context_array = new context_array_t;

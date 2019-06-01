@@ -1,0 +1,11 @@
+# List of metrics
+<metric
+  name=SQ_WAVES,SQ_INSTS_SMEM,SQ_INSTS_VALU
+></metric>
+
+# SPM trace with parameters
+<trace name="SPM">
+  <parameters
+    SAMPLE_RATE=256
+  ></parameters>
+</trace>

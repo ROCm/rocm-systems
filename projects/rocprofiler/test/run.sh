@@ -22,21 +22,31 @@
 # THE SOFTWARE.
 ################################################################################
 
+test_filter=-1
+if [ -n "$1" ] ; then
+  test_filter=$1
+fi
+
 # test check routin
 test_status=0
 test_number=0
+xeval_test() {
+  test_number=$test_number
+}
 eval_test() {
   label=$1
   cmdline=$2
-  echo "$label: \"$cmdline\""
-  eval "$cmdline"
-  if [ $? != 0 ] ; then
-    echo "$label: FAILED"
-    test_status=$(($test_status + 1))
-  else
-    echo "$label: PASSED"
+  if [ $test_filter = -1  -o $test_filter = $test_number ] ; then
+    echo "$label: \"$cmdline\""
+    eval "$cmdline"
+    if [ $? != 0 ] ; then
+      echo "$label: FAILED"
+      test_status=$(($test_status + 1))
+    else
+      echo "$label: PASSED"
+    fi
   fi
-  test_number=$(($test_number + 1))
+  test_number=$((test_number + 1))
 }
 
 # enable tools load failure reporting
@@ -96,6 +106,15 @@ export ROCP_AGENTS=1
 export ROCP_THRS=10
 export ROCP_INPUT=input1.xml
 eval_test "'rocprof' libtool test n-threads" ./test/ctrl
+
+## SPM test
+
+export ROCP_KITER=1
+export ROCP_DITER=1
+export ROCP_AGENTS=1
+export ROCP_THRS=1
+export ROCP_INPUT=spm_input.xml
+xeval_test "libtool test, SPM trace test" ./test/ctrl
 
 ## Libtool test, counter sets
 

@@ -175,16 +175,16 @@ uint32_t LoadTool() {
 
     rocprofiler_settings_t settings{};
     settings.intercept_mode = (intercept_mode != 0) ? 1 : 0;
-    settings.sqtt_size = SqttProfile::GetSize();
-    settings.sqtt_local = SqttProfile::IsLocal() ? 1: 0;
+    settings.trace_size = TraceProfile::GetSize();
+    settings.trace_local = TraceProfile::IsLocal() ? 1: 0;
     settings.timeout = util::HsaRsrcFactory::GetTimeoutNs();
     settings.timestamp_on = InterceptQueue::IsTrackerOn() ? 1 : 0;
 
     if (handler) handler();
     else if (handler_prop) handler_prop(&settings);
 
-    SqttProfile::SetSize(settings.sqtt_size);
-    SqttProfile::SetLocal(settings.sqtt_local != 0);
+    TraceProfile::SetSize(settings.trace_size);
+    TraceProfile::SetLocal(settings.trace_local != 0);
     util::HsaRsrcFactory::SetTimeoutNs(settings.timeout);
     InterceptQueue::TrackerOn(settings.timestamp_on != 0);
     if (settings.intercept_mode != 0) intercept_mode = DISPATCH_INTERCEPT_MODE;
@@ -384,8 +384,8 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
 }
 
 rocprofiler_properties_t rocprofiler_properties;
-uint32_t SqttProfile::output_buffer_size_ = 0x2000000;  // 32M
-bool SqttProfile::output_buffer_local_ = true;
+uint32_t TraceProfile::output_buffer_size_ = 0x2000000;  // 32M
+bool TraceProfile::output_buffer_local_ = true;
 std::atomic<Tracker*> Tracker::instance_{};
 Tracker::mutex_t Tracker::glob_mutex_;
 Tracker::counter_t Tracker::counter_ = 0;

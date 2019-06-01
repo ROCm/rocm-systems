@@ -236,19 +236,22 @@ class PmcProfile : public Profile {
   }
 };
 
-class SqttProfile : public Profile {
+class TraceProfile : public Profile {
  public:
   static inline void SetSize(const uint32_t& size) { output_buffer_size_ = size; }
   static inline uint32_t GetSize() { return output_buffer_size_; }
   static inline void SetLocal(const bool& b) { output_buffer_local_ = b; }
   static inline bool IsLocal() { return output_buffer_local_; }
 
-  SqttProfile(const util::AgentInfo* agent_info) : Profile(agent_info) {
-    profile_.type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_SQTT;
+  TraceProfile(const util::AgentInfo* agent_info) : Profile(agent_info) {
+    profile_.type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE;
   }
 
   void Insert(const profile_info_t& info) {
     Profile::Insert(info);
+    if (info.event != NULL) {
+      Config<event_t>(&profile_).Insert(*(info.event));
+    }
     for (unsigned j = 0; j < info.parameter_count; ++j) {
       Config<parameter_t>(&profile_).Insert(info.parameters[j]);
     }

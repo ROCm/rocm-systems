@@ -27,8 +27,7 @@ THE SOFTWARE.
 // The goal of the implementation is to provide a HW specific low-level
 // performance analysis interface for profiling of GPU compute applications.
 // The profiling includes HW performance counters (PMC) with complex
-// performance metrics and thread traces (SQTT). The profiling is supported
-// by the SQTT, PMC and Callback APIs.
+// performance metrics and traces: SQTT, SPM.
 //
 // The library can be used by a tool library loaded by HSA runtime or by
 // higher level HW independent performance analysis API like PAPI.
@@ -66,8 +65,8 @@ uint32_t rocprofiler_version_minor();
 typedef struct {
   uint32_t intercept_mode;
   uint32_t memcopy_tracking;
-  uint32_t sqtt_size;
-  uint32_t sqtt_local;
+  uint32_t trace_size;
+  uint32_t trace_local;
   uint64_t timeout;
   uint32_t timestamp_on;
 } rocprofiler_settings_t;

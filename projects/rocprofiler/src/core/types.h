@@ -23,6 +23,8 @@ THE SOFTWARE.
 #ifndef SRC_CORE_TYPES_H_
 #define SRC_CORE_TYPES_H_
 
+#include <iostream>
+
 #include <hsa_ven_amd_aqlprofile.h>
 
 namespace rocprofiler {
@@ -33,6 +35,16 @@ typedef hsa_ven_amd_aqlprofile_profile_t profile_t;
 typedef hsa_ext_amd_aql_pm4_packet_t packet_t;
 typedef uint32_t packet_word_t;
 typedef uint64_t timestamp_t;
+
+inline std::ostream& operator<< (std::ostream& out, const event_t& event) {
+  out << "[block_name(" << event.block_name << "). block_index(" << event.block_index << "). counter_id(" << event.counter_id << ")]";
+  return out;
+}
+inline std::ostream& operator<< (std::ostream& out, const parameter_t& parameter) {
+  out << "[parameter_name(" << parameter.parameter_name << "). value(" << parameter.value << ")]";
+  return out;
+}
+
 }  // namespace rocprofiler
 
 #endif  // SRC_CORE_TYPES_H_

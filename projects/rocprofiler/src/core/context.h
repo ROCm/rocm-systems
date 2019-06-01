@@ -83,7 +83,7 @@ class Group {
 
   Group(const util::AgentInfo* agent_info, Context* context, const uint32_t& index)
       : pmc_profile_(agent_info),
-        sqtt_profile_(agent_info),
+        trace_profile_(agent_info),
         n_profiles_(0),
         refs_(1),
         context_(context),
@@ -97,7 +97,7 @@ class Group {
         pmc_profile_.Insert(info);
         break;
       case ROCPROFILER_FEATURE_KIND_TRACE:
-        sqtt_profile_.Insert(info);
+        trace_profile_.Insert(info);
         break;
       default:
         EXC_RAISING(HSA_STATUS_ERROR, "bad rocprofiler feature kind (" << kind << ")");
@@ -107,21 +107,21 @@ class Group {
   hsa_status_t Finalize() {
     hsa_status_t status = pmc_profile_.Finalize(start_vector_, stop_vector_, read_vector_);
     if (status == HSA_STATUS_SUCCESS) {
-      status = sqtt_profile_.Finalize(start_vector_, stop_vector_, read_vector_);
+      status = trace_profile_.Finalize(start_vector_, stop_vector_, read_vector_);
     }
     if (status == HSA_STATUS_SUCCESS) {
       if (!pmc_profile_.Empty()) ++n_profiles_;
-      if (!sqtt_profile_.Empty()) ++n_profiles_;
+      if (!trace_profile_.Empty()) ++n_profiles_;
     }
     return status;
   }
 
   void GetProfiles(profile_vector_t& vec) {
     pmc_profile_.GetProfiles(vec);
-    sqtt_profile_.GetProfiles(vec);
+    trace_profile_.GetProfiles(vec);
   }
 
-  void GetTraceProfiles(profile_vector_t& vec) { sqtt_profile_.GetProfiles(vec); }
+  void GetTraceProfiles(profile_vector_t& vec) { trace_profile_.GetProfiles(vec); }
 
   info_vector_t& GetInfoVector() { return info_vector_; }
   const pkt_vector_t& GetStartVector() const { return start_vector_; }
@@ -137,7 +137,7 @@ class Group {
 
  private:
   PmcProfile pmc_profile_;
-  SqttProfile sqtt_profile_;
+  TraceProfile trace_profile_;
   info_vector_t info_vector_;
   pkt_vector_t start_vector_;
   pkt_vector_t stop_vector_;
@@ -361,9 +361,9 @@ class Context {
       rocprofiler_feature_t* info = &info_array[i];
       const rocprofiler_feature_kind_t kind = info->kind;
       const char* name = info->name;
-      if (!name) EXC_RAISING(HSA_STATUS_ERROR, "input feature name is NULL");
-      info_map_[name] = info;
       if (kind == ROCPROFILER_FEATURE_KIND_METRIC) {
+        if (name == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metric name is NULL");
+        info_map_[name] = info;
         auto ret = metrics_map_.insert({name, NULL});
         if (!ret.second)
           EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name
@@ -435,7 +435,19 @@ class Context {
           set_[group_index].Insert(profile_info_t{event, NULL, 0, info});
         }
       } else if (kind == ROCPROFILER_FEATURE_KIND_TRACE) {  // Processing traces features
-        set_[0].Insert(profile_info_t{NULL, info->parameters, info->parameter_count, info});
+        if (name != NULL) {
+          const Metric* metric = metrics_->Get(name);
+          if (metric == NULL)
+            EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
+          counters_vec_t counters_vec = metric->GetCounters();
+          if (counters_vec.size() != 1)
+            EXC_RAISING(HSA_STATUS_ERROR, "trace bad metric '" << name << "' is not base counter");
+          const counter_t* counter = counters_vec[0];
+          const event_t* event = &(counter->event);
+          set_[0].Insert(profile_info_t{event, NULL, 0, info});
+        } else {
+          set_[0].Insert(profile_info_t{NULL, info->parameters, info->parameter_count, info});
+        }
       } else {
         EXC_RAISING(HSA_STATUS_ERROR, "bad rocprofiler feature kind (" << kind << ")");
       }
@@ -484,15 +496,15 @@ class Context {
         if (ainfo_data->sample_id == 0) rinfo->data.result_int64 = 0;
         rinfo->data.result_int64 += ainfo_data->pmc_data.result;
         rinfo->data.kind = ROCPROFILER_DATA_KIND_INT64;
-      } else if (ainfo_type == HSA_VEN_AMD_AQLPROFILE_INFO_SQTT_DATA) {
+      } else if (ainfo_type == HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA) {
         if (rinfo->data.result_bytes.copy) {
-          const bool sqtt_local = SqttProfile::IsLocal();
+          const bool trace_local = TraceProfile::IsLocal();
           util::HsaRsrcFactory* hsa_rsrc = &util::HsaRsrcFactory::Instance();
           if (sample_id == 0) {
               const uint32_t output_buffer_size = profile->output_buffer.size;
               const uint32_t output_buffer_size64 = profile->output_buffer.size / sizeof(uint64_t);
               const util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(profile->agent);
-              void* ptr = (sqtt_local) ? hsa_rsrc->AllocateSysMemory(agent_info, output_buffer_size) :
+              void* ptr = (trace_local) ? hsa_rsrc->AllocateSysMemory(agent_info, output_buffer_size) :
                                          calloc(output_buffer_size64, sizeof(uint64_t));
               rinfo->data.result_bytes.size = output_buffer_size;
               rinfo->data.result_bytes.ptr = ptr;
@@ -500,19 +512,19 @@ class Context {
           }
           char* result_bytes_ptr = reinterpret_cast<char*>(rinfo->data.result_bytes.ptr);
           const char* end = result_bytes_ptr + rinfo->data.result_bytes.size;
-          const char* src = reinterpret_cast<char*>(ainfo_data->sqtt_data.ptr);
-          uint32_t size = ainfo_data->sqtt_data.size;
+          const char* src = reinterpret_cast<char*>(ainfo_data->trace_data.ptr);
+          uint32_t size = ainfo_data->trace_data.size;
           char* ptr = callback_data->ptr;
           uint32_t* header = reinterpret_cast<uint32_t*>(ptr);
           char* dest = ptr + sizeof(*header);
 
           if ((dest + size) >= end) {
             if (dest < end) size = end - dest;
-            else EXC_RAISING(HSA_STATUS_ERROR, "SQTT data out of output buffer");
+            else EXC_RAISING(HSA_STATUS_ERROR, "Trace data out of output buffer");
           }
 
           bool suc = true;
-          if (sqtt_local) {
+          if (trace_local) {
             suc = hsa_rsrc->Memcpy(profile->agent, dest, src, size);
           } else {
             memcpy(dest, src, size);
