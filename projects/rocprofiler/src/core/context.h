@@ -435,7 +435,9 @@ class Context {
           set_[group_index].Insert(profile_info_t{event, NULL, 0, info});
         }
       } else if (kind == ROCPROFILER_FEATURE_KIND_TRACE) {  // Processing traces features
-        if (name != NULL) {
+        if (info->parameters != NULL) {
+          set_[0].Insert(profile_info_t{NULL, info->parameters, info->parameter_count, info});
+        } else {
           const Metric* metric = metrics_->Get(name);
           if (metric == NULL)
             EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
@@ -445,8 +447,6 @@ class Context {
           const counter_t* counter = counters_vec[0];
           const event_t* event = &(counter->event);
           set_[0].Insert(profile_info_t{event, NULL, 0, info});
-        } else {
-          set_[0].Insert(profile_info_t{NULL, info->parameters, info->parameter_count, info});
         }
       } else {
         EXC_RAISING(HSA_STATUS_ERROR, "bad rocprofiler feature kind (" << kind << ")");

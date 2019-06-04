@@ -435,6 +435,7 @@ void output_results(const context_entry_t* entry, const char* label) {
         break;
       }
       default:
+        if (is_spm_trace) continue;
         fprintf(stderr, "RPL-tool: undefined data kind(%u)\n", p->data.kind);
         abort();
     }
@@ -1046,6 +1047,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     features[index] = {};
     features[index].kind = ROCPROFILER_FEATURE_KIND_TRACE;
     features[index].data.result_bytes.copy = to_copy_data;
+    features[index].name = strdup(name.c_str());
 
     uint32_t parameter_count = 0;
     for (const auto* node : entry->nodes) {

@@ -109,12 +109,12 @@ eval_test "'rocprof' libtool test n-threads" ./test/ctrl
 
 ## SPM test
 
-export ROCP_KITER=1
-export ROCP_DITER=1
+export ROCP_KITER=3
+export ROCP_DITER=3
 export ROCP_AGENTS=1
 export ROCP_THRS=1
 export ROCP_INPUT=spm_input.xml
-xeval_test "libtool test, SPM trace test" ./test/ctrl
+eval_test "libtool test, SPM trace test" ./test/ctrl
 
 ## Libtool test, counter sets
 

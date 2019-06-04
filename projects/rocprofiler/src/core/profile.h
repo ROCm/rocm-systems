@@ -248,12 +248,15 @@ class TraceProfile : public Profile {
   }
 
   void Insert(const profile_info_t& info) {
-    Profile::Insert(info);
-    if (info.event != NULL) {
+    if (info.parameters != NULL) {
+      Profile::Insert(info);
+      for (unsigned j = 0; j < info.parameter_count; ++j) {
+        Config<parameter_t>(&profile_).Insert(info.parameters[j]);
+      }
+    } else if (info.event != NULL) {
       Config<event_t>(&profile_).Insert(*(info.event));
-    }
-    for (unsigned j = 0; j < info.parameter_count; ++j) {
-      Config<parameter_t>(&profile_).Insert(info.parameters[j]);
+    } else {
+      EXC_ABORT(HSA_STATUS_ERROR, "invalid trace info inserted");
     }
   }
 
