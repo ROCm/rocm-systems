@@ -139,7 +139,6 @@ bool is_trace_local = true;
 // SPM trace enabled
 bool is_spm_trace = false;
 
-static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
 // Error handler

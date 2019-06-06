@@ -62,7 +62,7 @@ bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
     if (!hsa_rsrc_->GetGpuAgentInfo(agent_id, &agent_info_)) {
       agent_info_ = NULL;
       std::cerr << "> error: agent[" << agent_id << "] is not found" << std::endl;
-      return NULL;
+      return false;
     }
   }
   std::clog << "> Using agent[" << agent_info_->dev_index << "] : " << agent_info_->name << std::endl;
