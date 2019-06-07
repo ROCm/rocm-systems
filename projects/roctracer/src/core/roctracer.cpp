@@ -530,7 +530,7 @@ static void roctracer_enable_callback_impl(
   switch (domain) {
 #if 0
     case ACTIVITY_DOMAIN_KFD_API: {
-      bool succ = roctracer::HipLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
+      const bool succ = roctracer::KfdLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
       if (succ == false) EXC_RAISING(ROCTRACER_STATUS_ERROR, "KFD RegisterApiCallback error");
       break;
     }
@@ -591,6 +591,13 @@ static void roctracer_disable_callback_impl(
     uint32_t op)
 {
   switch (domain) {
+#if 0
+    case ACTIVITY_DOMAIN_KFD_API: {
+      const bool succ = roctracer::KfdLoader::Instance().RemoveApiCallback(op);
+      if (succ == false) EXC_RAISING(ROCTRACER_STATUS_ERROR, "KFD RemoveApiCallback error");
+      break;
+    }
+#endif
     case ACTIVITY_DOMAIN_HSA_OPS: break;
     case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: break;

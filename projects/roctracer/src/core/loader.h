@@ -121,8 +121,8 @@ class HccLoader : protected Loader {
 // KFD runtime library loader class
 class KfdLoader : protected Loader {
   public:
-  typedef void (*RegisterApiCallback_t)(roctracer_rtapi_callback_t);
-  typedef void (*RemoveApiCallback_t)();
+  typedef bool (RegisterApiCallback_t)(uint32_t op, void* callback, void* arg);
+  typedef bool (RemoveApiCallback_t)(uint32_t op);
 
   static KfdLoader& Instance() {
     KfdLoader* obj = instance_.load(std::memory_order_acquire);
