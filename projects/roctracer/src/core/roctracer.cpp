@@ -528,6 +528,13 @@ static void roctracer_enable_callback_impl(
     void* user_data)
 {
   switch (domain) {
+#if 0
+    case ACTIVITY_DOMAIN_KFD_API: {
+      bool succ = roctracer::HipLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
+      if (succ == false) EXC_RAISING(ROCTRACER_STATUS_ERROR, "KFD RegisterApiCallback error");
+      break;
+    }
+#endif
     case ACTIVITY_DOMAIN_HSA_OPS: break;
     case ACTIVITY_DOMAIN_HSA_API: {
       roctracer::hsa_support::cb_table.set(op, callback, user_data);

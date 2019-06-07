@@ -118,6 +118,36 @@ class HccLoader : protected Loader {
   static std::atomic<HccLoader*> instance_;
 };
 
+// KFD runtime library loader class
+class KfdLoader : protected Loader {
+  public:
+  typedef void (*RegisterApiCallback_t)(roctracer_rtapi_callback_t);
+  typedef void (*RemoveApiCallback_t)();
+
+  static KfdLoader& Instance() {
+    KfdLoader* obj = instance_.load(std::memory_order_acquire);
+    if (obj == NULL) {
+      std::lock_guard<mutex_t> lck(mutex_);
+      if (instance_.load(std::memory_order_relaxed) == NULL) {
+        obj = new KfdLoader();
+        instance_.store(obj, std::memory_order_release);
+      }
+    }
+    return *instance_;
+  }
+
+  KfdLoader() : Loader("libkfd_wrapper.so") {
+    RegisterApiCallback = GetFun<RegisterApiCallback_t>("RegisterApiCallback");
+    RemoveApiCallback = GetFun<RemoveApiCallback_t>("RemoveApiCallback");
+  }
+
+  RegisterApiCallback_t* RegisterApiCallback;
+  RemoveApiCallback_t* RemoveApiCallback;
+
+  private:
+  static std::atomic<KfdLoader*> instance_;
+};
+
 } // namespace roctracer
 
 #endif // SRC_CORE_LOADER_H_
