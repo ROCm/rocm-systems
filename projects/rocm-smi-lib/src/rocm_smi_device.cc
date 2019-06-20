@@ -97,6 +97,7 @@ static const char *kDevMemUsedGTTFName = "mem_info_gtt_used";
 static const char *kDevMemUsedVisVRAMFName = "mem_info_vis_vram_used";
 static const char *kDevMemUsedVRAMFName = "mem_info_vram_used";
 static const char *kDevPCIEReplayCountFName = "pcie_replay_count";
+static const char *kDevUniqueIdFName = "unique_id";
 
 // Strings that are found within sysfs files
 static const char *kDevPerfLevelAutoStr = "auto";
@@ -138,6 +139,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevMemUsedVisVRAM, kDevMemUsedVisVRAMFName},
     {kDevMemUsedVRAM, kDevMemUsedVRAMFName},
     {kDevPCIEReplayCount, kDevPCIEReplayCountFName},
+    {kDevUniqueId, kDevUniqueIdFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -373,6 +375,11 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       *val = std::stoul(tempStr, 0);
+      break;
+    case kDevUniqueId:
+      ret = readDevInfoStr(type, &tempStr);
+      RET_IF_NONZERO(ret);
+      *val = std::stoul(tempStr, 0, 16);
       break;
 
     default:
