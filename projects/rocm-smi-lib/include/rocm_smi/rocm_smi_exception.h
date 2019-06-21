@@ -55,7 +55,7 @@ namespace smi {
 /// @brief Exception type which carries an error code to return to the user.
 class rsmi_exception : public std::exception {
  public:
-  rsmi_exception(rsmi_status_t error, const char* description) :
+  rsmi_exception(rsmi_status_t error, const std::string description) :
                                             err_(error), desc_(description) {}
   rsmi_status_t error_code() const noexcept { return err_; }
   const char* what() const noexcept override { return desc_.c_str(); }
