@@ -325,11 +325,12 @@ def fill_ops_db(table_name, db, indir):
   return filtr
 #############################################################
 # main
-if (len(sys.argv) < 3): fatal("Usage: " + sys.argv[0] + " <output CSV file> <input result files list>")
+if (len(sys.argv) < 2): fatal("Usage: " + sys.argv[0] + " <output CSV file> <input result files list>")
 
 outfile = sys.argv[1]
 infiles = sys.argv[2:]
 indir = re.sub(r'\/[^\/]*$', r'', infiles[0])
+inext = re.sub(r'^[^\.]*', r'', infiles[0])
 
 dbfile = ''
 csvfile = ''
@@ -342,9 +343,10 @@ elif re.search(r'\.db$', outfile):
 else:
   fatal("Bad output file '" + outfile + "'")
 
-for f in infiles: parse_res(f)
-if len(var_table) == 0: sys.exit(1)
-merge_table()
+if inext == '.txt':
+  for f in infiles: parse_res(f)
+  if len(var_table) == 0: sys.exit(1)
+  merge_table()
 
 if dbfile == '':
   dump_csv(csvfile)
@@ -379,26 +381,27 @@ else:
     for ind in range(0, int(max_gpu_id) + 1):
       db.label_json(int(ind) + int(GPU_BASE_PID), "GPU" + str(ind), jsonfile)
 
-  dform.post_process_data(db, 'A', csvfile)
-  dform.gen_table_bins(db, 'A', statfile, 'KernelName', 'DurationNs')
-  if hsa_trace_found and 'BeginNs' in var_list:
-    dform.gen_kernel_json_trace(db, 'A', GPU_BASE_PID, START_US, jsonfile)
+  if len(var_table) != 0:
+    dform.post_process_data(db, 'A', csvfile)
+    dform.gen_table_bins(db, 'A', statfile, 'KernelName', 'DurationNs')
+    if hsa_trace_found and 'BeginNs' in var_list:
+      dform.gen_kernel_json_trace(db, 'A', GPU_BASE_PID, START_US, jsonfile)
 
-  if hsa_trace_found:
-    statfile = re.sub(r'stats', r'hsa_stats', statfile)
-    dform.post_process_data(db, 'HSA')
-    dform.gen_table_bins(db, 'HSA', statfile, 'Name', 'DurationNs')
-    dform.gen_api_json_trace(db, 'HSA', START_US, jsonfile)
-  
-    dform.post_process_data(db, 'COPY')
-    dform.gen_api_json_trace(db, 'COPY', START_US, jsonfile)
+    if hsa_trace_found:
+      statfile = re.sub(r'stats', r'hsa_stats', statfile)
+      dform.post_process_data(db, 'HSA')
+      dform.gen_table_bins(db, 'HSA', statfile, 'Name', 'DurationNs')
+      dform.gen_api_json_trace(db, 'HSA', START_US, jsonfile)
+
+      dform.post_process_data(db, 'COPY')
+      dform.gen_api_json_trace(db, 'COPY', START_US, jsonfile)
 
   if hip_trace_found:
     statfile = re.sub(r'stats', r'hip_stats', statfile)
     dform.post_process_data(db, 'HIP')
     dform.gen_table_bins(db, 'HIP', statfile, 'Name', 'DurationNs')
     dform.gen_api_json_trace(db, 'HIP', START_US, jsonfile)
-  
+
     dform.post_process_data(db, 'OPS')
     dform.gen_ops_json_trace(db, 'OPS', GPU_BASE_PID, START_US, jsonfile)
 

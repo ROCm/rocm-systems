@@ -198,6 +198,8 @@ run() {
       fi
     fi
     mkdir -p "$ROCP_OUTPUT_DIR"
+
+    OUTPUT_LIST="$OUTPUT_LIST $ROCP_OUTPUT_DIR/results.txt"
   fi
 
   API_TRACE=""
@@ -214,12 +216,16 @@ run() {
   if [ -n "$API_TRACE" ] ; then
     API_TRACE=$(echo $API_TRACE | sed 's/all//')
     if [ -n "$API_TRACE" ] ; then export ROCTRACER_DOMAIN=$API_TRACE; fi
-    export HSA_TOOLS_LIB="$RPL_PATH/libroctracer64.so $TLIB_PATH/libtracer_tool.so $HSA_TOOLS_LIB"
+    if [ "$API_TRACE" = "hip" ] ; then
+      export HSA_TOOLS_LIB="$RPL_PATH/libroctracer64.so $TLIB_PATH/libtracer_tool.so"
+      OUTPUT_LIST="$ROCP_OUTPUT_DIR/"
+    else
+      export HSA_TOOLS_LIB="$RPL_PATH/libroctracer64.so $TLIB_PATH/libtracer_tool.so $HSA_TOOLS_LIB"
+    fi
   fi
 
   redirection_cmd=""
   if [ -n "$ROCP_OUTPUT_DIR" ] ; then
-    OUTPUT_LIST="$OUTPUT_LIST $ROCP_OUTPUT_DIR/results.txt"
     redirection_cmd="2>&1 | tee $ROCP_OUTPUT_DIR/log.txt"
   fi
 

@@ -121,12 +121,13 @@ class SQLiteDB:
       for ind in range(len(from_tid)):
         if (len(corr_id_list) != 0): corr_id = corr_id_list[ind]
         else: corr_id = ind
-        from_ts = from_us_list[ind] - start_us
-        to_ts = to_us_dict[corr_id] - start_us
-        if from_ts > to_ts: from_ts = to_ts
-        fd.write(',{"ts":%d,"ph":"s","cat":"DataFlow","id":%d,"pid":%s,"tid":%s,"name":"dep"}\n' % (from_ts, dep_id, str(from_pid), from_tid[ind]))
-        fd.write(',{"ts":%d,"ph":"t","cat":"DataFlow","id":%d,"pid":%s,"tid":0,"name":"dep"}\n' % (to_ts, dep_id, str(to_pid)))
-        dep_id += 1
+        if corr_id in to_us_dict:
+          from_ts = from_us_list[ind] - start_us
+          to_ts = to_us_dict[corr_id] - start_us
+          if from_ts > to_ts: from_ts = to_ts
+          fd.write(',{"ts":%d,"ph":"s","cat":"DataFlow","id":%d,"pid":%s,"tid":%s,"name":"dep"}\n' % (from_ts, dep_id, str(from_pid), from_tid[ind]))
+          fd.write(',{"ts":%d,"ph":"t","cat":"DataFlow","id":%d,"pid":%s,"tid":0,"name":"dep"}\n' % (to_ts, dep_id, str(to_pid)))
+          dep_id += 1
 
   def dump_json(self, table_name, data_name, file_name):
     if not re.search(r'\.json$', file_name):

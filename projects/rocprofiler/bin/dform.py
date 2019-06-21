@@ -25,7 +25,7 @@ def gen_api_json_trace(db, table, start_us, outfile):
   db.execute('DROP VIEW B')
 
 def gen_ops_json_trace(db, table, base_pid, start_us, outfile):
-  db.execute('create view B as select "Index", Name as name, ("gpu-id" + %d) as pid, tid, (BeginNs/1000 - %d) as ts, (DurationNs/1000) as dur from %s order by ts asc;' % (base_pid, start_us, table));
+  db.execute('create view B as select "Index", Name as name, ("dev-id" + %d) as pid, tid, (BeginNs/1000 - %d) as ts, (DurationNs/1000) as dur from %s order by ts asc;' % (base_pid, start_us, table));
   db.dump_json('B', table, outfile)
   db.execute('DROP VIEW B')
 
