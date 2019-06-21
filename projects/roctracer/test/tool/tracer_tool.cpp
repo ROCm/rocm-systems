@@ -125,7 +125,7 @@ void hip_api_callback(
 
     switch (cid) {
       case HIP_API_ID_hipMemcpy:
-        fprintf(hip_api_file_handle, "%s(dst(%p) src(%p) size(0x%x) kind(%u))",
+        fprintf(hip_api_file_handle, "%s(dst(%p) src(%p) size(0x%x) kind(%u))\n",
           oss.str().c_str(),
           data->args.hipMemcpy.dst,
           data->args.hipMemcpy.src,
@@ -133,23 +133,24 @@ void hip_api_callback(
           (uint32_t)(data->args.hipMemcpy.kind));
         break;
       case HIP_API_ID_hipMalloc:
-        fprintf(hip_api_file_handle, "%s(ptr(0x%p) size(0x%x))",
+        fprintf(hip_api_file_handle, "%s(ptr(0x%p) size(0x%x))\n",
           oss.str().c_str(),
           *(data->args.hipMalloc.ptr),
           (uint32_t)(data->args.hipMalloc.size));
         break;
       case HIP_API_ID_hipFree:
-        fprintf(hip_api_file_handle, "%s(ptr(%p))",
+        fprintf(hip_api_file_handle, "%s(ptr(%p))\n",
           oss.str().c_str(),
           data->args.hipFree.ptr);
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
-        fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))",
+        fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n",
           oss.str().c_str(),
           roctracer::HipLoader::Instance().KernelNameRef(data->args.hipModuleLaunchKernel.f),
           data->args.hipModuleLaunchKernel.stream);
         break;
       default:
+        fprintf(hip_api_file_handle, "%s()\n", oss.str().c_str());
         break;
     }
     fflush(hip_api_file_handle);
