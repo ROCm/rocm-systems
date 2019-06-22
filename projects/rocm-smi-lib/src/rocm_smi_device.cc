@@ -97,7 +97,6 @@ static const char *kDevMemUsedGTTFName = "mem_info_gtt_used";
 static const char *kDevMemUsedVisVRAMFName = "mem_info_vis_vram_used";
 static const char *kDevMemUsedVRAMFName = "mem_info_vram_used";
 static const char *kDevPCIEReplayCountFName = "pcie_replay_count";
-static const char *kDevDFCountersAvailableFName = "df_cntr_avail";
 
 // Strings that are found within sysfs files
 static const char *kDevPerfLevelAutoStr = "auto";
@@ -139,7 +138,6 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevMemUsedVisVRAM, kDevMemUsedVisVRAMFName},
     {kDevMemUsedVRAM, kDevMemUsedVRAMFName},
     {kDevPCIEReplayCount, kDevPCIEReplayCountFName},
-    {kDevDFCountersAvailable, kDevDFCountersAvailableFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -155,18 +153,10 @@ static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
     {RSMI_DEV_PERF_LEVEL_UNKNOWN, kDevPerfLevelUnknownStr},
 };
 
-static int isRegularFile(std::string fname, bool *is_reg) {
+static bool isRegularFile(std::string fname) {
   struct stat file_stat;
-  int ret;
-
-  assert(is_reg != nullptr);
-
-  ret = stat(fname.c_str(), &file_stat);
-  if (ret) {
-    return errno;
-  }
-  *is_reg = S_ISREG(file_stat.st_mode);
-  return 0;
+  stat(fname.c_str(), &file_stat);
+  return S_ISREG(file_stat.st_mode);
 }
 
 #define RET_IF_NONZERO(X) { \
@@ -213,14 +203,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   sysfs_path += kDevAttribNameMap.at(type);
 
   DBG_FILE_ERROR(sysfs_path, str);
-  bool reg_file;
-
-  int ret = isRegularFile(sysfs_path, &reg_file);
-
-  if (ret != 0) {
-    return ret;
-  }
-  if (!reg_file) {
+  if (!isRegularFile(sysfs_path)) {
     return ENOENT;
   }
 
@@ -387,7 +370,6 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevMemUsedVisVRAM:
     case kDevMemUsedVRAM:
     case kDevPCIEReplayCount:
-    case kDevDFCountersAvailable:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       *val = std::stoul(tempStr, 0);

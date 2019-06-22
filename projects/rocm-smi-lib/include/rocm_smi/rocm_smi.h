@@ -109,11 +109,7 @@ typedef enum {
   RSMI_STATUS_NOT_FOUND,                 //!< An item was searched for but not
                                          //!< found
   RSMI_STATUS_INSUFFICIENT_SIZE,         //!< Not enough resources were
-                                         //!< available for the operation
-  RSMI_STATUS_INTERRUPT,                 //!< An interrupt occurred during
-                                         //!< execution of function
-  RSMI_STATUS_UNEXPECTED_SIZE,           //!< An unexpected amount of data
-                                         //!< was read
+                                         //!< for the operation
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
 
@@ -174,74 +170,6 @@ typedef enum {
 
   RSMI_SW_COMP_LAST = RSMI_SW_COMP_DRIVER
 } rsmi_sw_component_t;
-
-/**
- * Event counter types
- */
-
-/**
- * @brief Handle to performance event counter
- */
-typedef uintptr_t rsmi_event_handle_t;
-
-/**
- * Event Groups
- *
- * @brief Enum denoting an event group. The value of the enum is the
- * base value for all the event enums in the group.
- */
-typedef enum {
-  RSMI_EVNT_GRP_XGMI = 0,         //!< Data Fabric (XGMI) related events
-
-  RSMI_EVNT_GRP_INVALID = 0xFFFFFFFF
-} rsmi_event_group_t;
-
-/**
- * Event types
- * @brief Event type enum. Events belonging to a particular event group
- * ::rsmi_event_group_t should begin ennumerating at the ::rsmi_event_group_t
- * value for that group.
- */
-typedef enum {
-  RSMI_EVNT_FIRST = RSMI_EVNT_GRP_XGMI,
-
-  RSMI_EVNT_XGMI_FIRST = RSMI_EVNT_GRP_XGMI,
-  RSMI_EVNT_XGMI_0_NOP_TX = RSMI_EVNT_XGMI_FIRST,  //!< NOPs sent to neighbor 0
-  RSMI_EVNT_XGMI_0_REQUEST_TX,                    //!< Outgoing requests to
-                                                  //!< neighbor 0
-  RSMI_EVNT_XGMI_0_RESPONSE_TX,                   //!< Outgoing responses to
-                                                  //!< neighbor 0
-  RSMI_EVNT_XGMI_0_BEATS_TX,                      //!< Data beats sent to
-                                                  //!< neighbor 0
-  RSMI_EVNT_XGMI_1_NOP_TX,                        //!< NOPs sent to neighbor 1
-  RSMI_EVNT_XGMI_1_REQUEST_TX,                        //!< Outgoing requests to
-                                                  //!< neighbor 1
-  RSMI_EVNT_XGMI_1_RESPONSE_TX,                   //!< Outgoing responses to
-                                                  //!< neighbor 1
-  RSMI_EVNT_XGMI_1_BEATS_TX,                      //!< Data beats sent to
-                                                  //!< neighbor 1
-
-  RSMI_EVNT_XGMI_LAST = RSMI_EVNT_XGMI_1_BEATS_TX,
-
-  RSMI_EVNT_LAST = RSMI_EVNT_XGMI_LAST
-} rsmi_event_type_t;
-
-/**
- * Event counter commands
- */
-typedef enum {
-  RSMI_CNTR_CMD_START = 0,  //!< Start the counter
-  RSMI_CNTR_CMD_STOP,       //!< Stop the counter
-} rsmi_counter_command_t;
-
-/**
- * Counter value
- */
-typedef struct {
-  uint64_t value;            //!< Counter value
-  uint64_t time_enabled;     //!< Time that the counter was enabled
-  uint64_t time_running;     //!< Time that che counter was running
-} rsmi_counter_value_t;
 
 /**
  * Clock types
@@ -932,8 +860,9 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
  *  device index.
  *
  *  @details Given a device index @p dv_ind and a pointer to a uint64_t
- *  @p power, this function will write the current average power consumption
- *  (in microwatts) to the uint64_t pointed to by @p power.
+ *  @p power, this function will write the current average power consumption to
+ *  the uint64_t in microwatts pointed to by @p power. This function requires
+ *  root privilege.
  *
  *  @param[in] dv_ind a device index
  *
@@ -1132,13 +1061,16 @@ rsmi_status_t rsmi_dev_fan_rpms_get(uint32_t dv_ind, uint32_t sensor_ind,
                                                               int64_t *speed);
 
 /**
- * @brief Get the fan speed for the specified device as a value relative to
- * ::RSMI_MAX_FAN_SPEED
+ * @brief Get the fan speed for the specified device in RPMs.
+ *
+ * @details Given a device index @p dv_ind
+ * this function will get the fan speed.
+ *
+ * @param[in] dv_ind a device index
  *
  * @details Given a device index @p dv_ind and a pointer to a uint32_t
  * @p speed, this function will write the current fan speed (a value
- * between 0 and the maximum fan speed, ::RSMI_MAX_FAN_SPEED) to the uint32_t
- * pointed to by @p speed
+ * between 0 and 255) to the uint32_t pointed to by @p speed
  *
  * @param[in] dv_ind a device index
  *
@@ -1679,134 +1611,6 @@ rsmi_status_t
 rsmi_status_string(rsmi_status_t status, const char **status_string);
 
 /** @} */  // end of ErrQuer
-
-/*****************************************************************************/
-/** @defgroup PerfCntr Performance Counter Functions
- *  These functions are used to configure, query and control performance
- *  counting.
- *  @{
- */
-
-/**
- * @brief Tell if an event group is supported by a given device
- *
- * @details Given a device index @p dv_ind and an event group specifier @p
- * group, tell if @p group type events are supported by the device associated
- * with @p dv_ind
- *
- * @param[in] dv_ind device index of device being queried
- *
- * @param[in] group ::rsmi_event_group_t identifier of group for which support
- * is being queried
- *
- * @retval
- * ::RSMI_STATUS_SUCCESS if the device associatee with @p dv_ind
- * support counting events of the type indicated by @p group.
- *
- * ::RSMI_STATUS_NOT_SUPPORTED If the device does not support event group @p
- * group
- *
- */
-rsmi_status_t
-rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group_t group);
-
-/**
- * @brief Create a performance counter object
- *
- * @details Create a performance counter object of type @p type for the device
- * with a device index of @p dv_ind, and write a handle to the object to the
- * memory location pointed to by @p evnt_handle. @p evnt_handle can be used
- * with other performance event operations. The handle should be deallocated
- * with ::rsmi_dev_counter_destroy() when no longer needed.
- *
- * @param[in] dv_ind a device index
- *
- * @param[in] type the type of performance event to create
- *
- * @param[inout] evnt_handle A pointer to a ::rsmi_event_handle_t which will be
- * associated with a newly allocated counter
- *
- * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
- *
- */
-rsmi_status_t
-rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
-                                            rsmi_event_handle_t *evnt_handle);
-
-/**
- * @brief Deallocate a performance counter object
- *
- * @details Deallocate the performance counter object with the provided
- * ::rsmi_event_handle_t @p evnt_handle
- *
- * @param[in] evnt_handle handle to event object to be deallocated
- *
- * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
- *
- */
-rsmi_status_t
-rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle);
-
-/**
- * @brief Issue performance counter control commands
- *
- * @details Issue a command @p cmd on the event counter associated with the
- * provided handle @p evt_handle.
- *
- * @param[in] evt_handle an event handle
- *
- * @param[in] cmd The event counter command to be issued
- *
- * @param[inout] cmd_args Currently not used. Should be set to NULL.
- *
- * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
- *
- */
-rsmi_status_t
-rsmi_counter_control(rsmi_event_handle_t evt_handle,
-                                  rsmi_counter_command_t cmd, void *cmd_args);
-
-/**
- * @brief Read the current value of a performance counter
- *
- * @details Read the current counter value of the counter associated with the
- * provided handle @p evt_handle and write the value to the location pointed
- * to by @p value.
- *
- * @param[in] evt_handle an event handle
- *
- * @param[inout] value pointer to memory of size of ::rsmi_counter_value_t to
- * which the counter value will be written
- *
- * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
- *
- */
-rsmi_status_t
-rsmi_counter_read(rsmi_event_handle_t evt_handle,
-                                                 rsmi_counter_value_t *value);
-
-/**
- * @brief Get the number of currently available counters
- *
- * @details Given a device index @p dv_ind, a performance event group @p grp,
- * and a pointer to a uint32_t @p available, this function will write the
- * number of @p grp type counters that are available on the device with index
- * @p dv_ind to the memory that @p available points to.
- *
- * @param[in] dv_ind a device index
- *
- * @param[in] grp an event device group
- *
- * @param[inout] available A pointer to a uint32_t to which the number of
- * available counters will be written
- *
- * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
- *
- */
-rsmi_status_t
-rsmi_counter_available_counters_get(uint32_t dv_ind,
-                                 rsmi_event_group_t grp, uint32_t *available);
-/** @} */  // end of PerfCntr
 
 #ifdef __cplusplus
 }

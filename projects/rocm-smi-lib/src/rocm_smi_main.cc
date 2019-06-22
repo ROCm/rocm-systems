@@ -58,7 +58,6 @@
 #include <cerrno>
 
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_exception.h"
 
@@ -333,7 +332,6 @@ RocmSMI::AddToDeviceList(std::string dev_name) {
   uint32_t d_index = GetDeviceIndex(d_name);
   dev->set_index(d_index);
 
-  GetSupportedEventGroups(d_index, dev->supported_event_groups());
   devices_.push_back(dev);
 
   return;
