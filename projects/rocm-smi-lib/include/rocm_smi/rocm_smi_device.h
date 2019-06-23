@@ -50,11 +50,13 @@
 #include <utility>
 #include <cstdint>
 #include <vector>
+#include <unordered_set>
 
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_power_mon.h"
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_counters.h"
 extern "C" {
 #include "shared_mutex.h"   // NOLINT
 };
@@ -92,6 +94,7 @@ enum DevInfoTypes {
   kDevMemUsedVRAM,
   kDevPCIEReplayCount,
   kDevUniqueId,
+  kDevDFCountersAvailable,
 };
 
 class Device {
@@ -118,6 +121,8 @@ class Device {
     void set_bdfid(uint64_t val) {bdfid_ = val;}
     uint64_t get_bdfid(void) const {return bdfid_;}
     pthread_mutex_t *mutex(void) {return mutex_.ptr;}
+    evt::dev_evt_grp_set_t* supported_event_groups(void) {
+                                             return &supported_event_groups_;}
 
  private:
     std::shared_ptr<Monitor> monitor_;
@@ -134,6 +139,8 @@ class Device {
                                             std::vector<std::string> *retVec);
     int writeDevInfoStr(DevInfoTypes type, std::string valStr);
     uint64_t bdfid_;
+    std::unordered_set<rsmi_event_group_t,
+                       evt::RSMIEventGrpHashFunction> supported_event_groups_;
 };
 
 }  // namespace smi

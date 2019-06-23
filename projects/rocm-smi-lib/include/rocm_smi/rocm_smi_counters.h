@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,31 +42,83 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
+#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_COUNTERS_H_
+#define INCLUDE_ROCM_SMI_ROCM_SMI_COUNTERS_H_
 
-#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
-#define INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
+#include <linux/perf_event.h>
 
-#include <exception>
+#include <cstdint>
+#include <vector>
+#include <unordered_set>
 #include <string>
+
+#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace smi {
+namespace evt {
 
-/// @brief Exception type which carries an error code to return to the user.
-class rsmi_exception : public std::exception {
+class RSMIEventGrpHashFunction {
  public:
-  rsmi_exception(rsmi_status_t error, const std::string description) :
-                                            err_(error), desc_(description) {}
-  rsmi_status_t error_code() const noexcept { return err_; }
-  const char* what() const noexcept override { return desc_.c_str(); }
-
- private:
-  rsmi_status_t err_;
-  std::string desc_;
+    size_t operator()(const rsmi_event_group_t& grp) const {
+      return static_cast<size_t>(grp);
+    }
 };
 
+typedef std::unordered_set<rsmi_event_group_t, RSMIEventGrpHashFunction>
+                                                            dev_evt_grp_set_t;
+void
+GetSupportedEventGroups(uint32_t dev_ind, dev_evt_grp_set_t*supported_grps);
+
+struct evnt_info_t {
+    uint8_t start_bit;
+    uint8_t field_size;
+    uint32_t value;
+};
+
+struct perf_read_format_t {
+    union {
+        struct {
+            uint64_t value;
+            uint64_t enabled_time;
+            uint64_t run_time;
+        };
+        uint64_t values[3];
+    };
+};
+
+class Event {
+ public:
+    explicit Event(rsmi_event_type_t event, uint32_t dev_ind);
+    ~Event(void);
+
+    uint32_t openPerfHandle();
+    uint32_t startCounter(void);
+    uint32_t stopCounter(void);
+    uint32_t getValue(rsmi_counter_value_t *val);
+    uint32_t dev_file_ind(void) const {return dev_file_ind_;}
+    uint32_t dev_ind(void) const {return dev_ind_;}
+
+ private:
+    // perf_event_attr fields
+    std::vector<evnt_info_t> event_info_;
+
+    std::string evt_path_root_;
+
+    rsmi_event_type_t event_type_;
+    uint32_t dev_file_ind_;
+    uint32_t dev_ind_;
+    int32_t fd_;
+    perf_event_attr attr_;
+
+    uint32_t get_event_file_info(void);
+    uint32_t get_event_type(uint32_t *ev_type);
+};
+
+
+}  // namespace evt
 }  // namespace smi
 }  // namespace amd
 
-#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
+#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_COUNTERS_H_
 

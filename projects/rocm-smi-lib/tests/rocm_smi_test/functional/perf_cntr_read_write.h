@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,31 +42,57 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
+#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_PERF_CNTR_READ_WRITE_H_
+#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_PERF_CNTR_READ_WRITE_H_
 
-#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
-#define INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
-
-#include <exception>
 #include <string>
 
-namespace amd {
-namespace smi {
+#include "rocm_smi_test/test_base.h"
 
-/// @brief Exception type which carries an error code to return to the user.
-class rsmi_exception : public std::exception {
+class TestPerfCntrReadWrite : public TestBase {
  public:
-  rsmi_exception(rsmi_status_t error, const std::string description) :
-                                            err_(error), desc_(description) {}
-  rsmi_status_t error_code() const noexcept { return err_; }
-  const char* what() const noexcept override { return desc_.c_str(); }
+    TestPerfCntrReadWrite();
+
+  // @Brief: Destructor for test case of TestPerfCntrReadWrite
+  virtual ~TestPerfCntrReadWrite();
+
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
+
+  // @Brief: Core measurement execution
+  virtual void Run();
+
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
+
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
 
  private:
-  rsmi_status_t err_;
-  std::string desc_;
+  void testEventsIndividually(uint32_t dv_ind);
+  void testEventsSimultaneously(uint32_t dv_ind);
 };
 
-}  // namespace smi
-}  // namespace amd
+class PerfCntrEvtGrp {
+ public:
+    explicit PerfCntrEvtGrp(rsmi_event_group_t grp,
+                             uint32_t first, uint32_t last, std::string name);
+    ~PerfCntrEvtGrp();
 
-#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
+    rsmi_event_group_t group(void) const { return grp_;}
+    uint32_t first_evt(void) const {return first_evt_;}
+    uint32_t last_evt(void) const {return last_evt_;}
+    uint32_t num_events(void) const {return num_events_;}
+    std::string name(void) const { return name_;}
+ private:
+    rsmi_event_group_t grp_;
+    uint32_t first_evt_;
+    uint32_t last_evt_;
+    uint32_t num_events_;
+    std::string name_;
+};
 
+#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_PERF_CNTR_READ_WRITE_H_

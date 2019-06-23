@@ -72,6 +72,7 @@
 #include "functional/err_cnt_read.h"
 #include "functional/mem_util_read.h"
 #include "functional/id_info_read.h"
+#include "rocm_smi_test/functional/perf_cntr_read_write.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -198,7 +199,10 @@ TEST(rsmitstReadOnly, TestIdInfoRead) {
   TestIdInfoRead tst;
   RunGenericTest(&tst);
 }
-
+TEST(rsmitstreadWrite,TestPerfCntrReadWrite) {
+  TestPerfCntrReadWrite tst;
+  RunGenericTest(&tst);
+}
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
 

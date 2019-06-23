@@ -61,6 +61,7 @@
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
+#include "rocm_smi/rocm_smi_counters.h"
 
 #include "rocm_smi/rocm_smi64Config.h"
 
@@ -93,11 +94,15 @@ static rsmi_status_t handleException() {
 
 #define TRY try {
 #define CATCH } catch (...) {return handleException();}
-#define GET_DEV_FROM_INDX  \
+
+#define CHECK_DV_IND_RANGE \
     amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
     if (dv_ind >= smi.monitor_devices().size()) { \
       return RSMI_STATUS_INVALID_ARGS; \
     } \
+
+#define GET_DEV_FROM_INDX  \
+  CHECK_DV_IND_RANGE \
   std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind]; \
   assert(dev != nullptr);
 
@@ -128,7 +133,10 @@ static rsmi_status_t errno_to_rsmi_status(uint32_t err) {
     case EACCES: return RSMI_STATUS_PERMISSION;
     case EPERM:
     case ENOENT: return RSMI_STATUS_NOT_SUPPORTED;
+    case EBADF:
     case EISDIR: return RSMI_STATUS_FILE_ERROR;
+    case EINTR:  return RSMI_STATUS_INTERRUPT;
+    case EIO:    return RSMI_STATUS_UNEXPECTED_SIZE;
     default:     return RSMI_STATUS_UNKNOWN_ERROR;
   }
 }
@@ -1970,6 +1978,10 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
                           " successfully";
       break;
 
+    case RSMI_STATUS_INTERRUPT:
+      *status_string = "An interrupt occurred while executing the function";
+      break;
+
     default:
       *status_string = "An unknown error occurred";
       return RSMI_STATUS_UNKNOWN_ERROR;
@@ -2118,3 +2130,153 @@ rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
 
   CATCH
 }
+rsmi_status_t
+rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
+                                           rsmi_event_handle_t *evnt_handle) {
+  TRY
+  DEVICE_MUTEX
+  REQUIRE_ROOT_ACCESS
+  CHECK_DV_IND_RANGE
+
+  if (evnt_handle == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  if (type < RSMI_EVNT_FIRST || type > RSMI_EVNT_LAST) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  *evnt_handle = reinterpret_cast<uintptr_t>(
+                                      new amd::smi::evt::Event(type, dv_ind));
+
+  if (evnt_handle == nullptr) {
+    return RSMI_STATUS_OUT_OF_RESOURCES;
+  }
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
+  TRY
+
+  if (evnt_handle == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  amd::smi::evt::Event *evt =
+                        reinterpret_cast<amd::smi::evt::Event *>(evnt_handle);
+  uint32_t dv_ind = evt->dev_ind();
+  DEVICE_MUTEX
+  REQUIRE_ROOT_ACCESS
+
+  delete evt;
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_counter_control(rsmi_event_handle_t evt_handle,
+                                 rsmi_counter_command_t cmd, void *cmd_args) {
+  TRY
+
+  amd::smi::evt::Event *evt =
+                         reinterpret_cast<amd::smi::evt::Event *>(evt_handle);
+  amd::smi::pthread_wrap _pw(*get_mutex(evt->dev_ind()));
+  amd::smi::ScopedPthread _lock(_pw);
+
+  REQUIRE_ROOT_ACCESS
+
+  uint32_t ret;
+
+  // This is for future command args. This would work in conjunction with a
+  // new function to set perf attributes.
+  (void) cmd_args;
+
+  if (evt_handle == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  switch (cmd) {
+    case RSMI_CNTR_CMD_START:
+      ret = evt->startCounter();
+      break;
+
+    case RSMI_CNTR_CMD_STOP:
+      ret = evt->stopCounter();
+      break;
+
+    default:
+      assert(!"Unexpected perf counter command");
+  }
+  return errno_to_rsmi_status(ret);
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_counter_read(rsmi_event_handle_t evt_handle,
+                                                rsmi_counter_value_t *value) {
+  TRY
+
+  if (value == nullptr || evt_handle == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  amd::smi::evt::Event *evt =
+                         reinterpret_cast<amd::smi::evt::Event *>(evt_handle);
+
+  uint32_t dv_ind = evt->dev_ind();
+  DEVICE_MUTEX
+  REQUIRE_ROOT_ACCESS
+
+  uint32_t ret;
+
+  ret = evt->getValue(value);
+
+  return errno_to_rsmi_status(ret);
+  CATCH
+}
+
+rsmi_status_t
+rsmi_counter_available_counters_get(uint32_t dv_ind,
+                                rsmi_event_group_t grp, uint32_t *available) {
+  rsmi_status_t ret;
+
+  TRY
+  if (available == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  DEVICE_MUTEX
+  uint64_t val;
+
+  switch (grp) {
+    case RSMI_EVNT_GRP_XGMI:
+      ret = get_dev_value_int(amd::smi::kDevDFCountersAvailable, dv_ind, &val);
+      assert(val < UINT32_MAX);
+      *available = static_cast<uint32_t>(val);
+      break;
+
+    default:
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group_t group) {
+  TRY
+  DEVICE_MUTEX
+  GET_DEV_FROM_INDX
+
+  amd::smi::evt::dev_evt_grp_set_t *grp = dev->supported_event_groups();
+
+  if (grp->find(group) == grp->end()) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  } else {
+    return RSMI_STATUS_SUCCESS;
+  }
+  CATCH
+}
+
