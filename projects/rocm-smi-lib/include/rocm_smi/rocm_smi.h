@@ -726,6 +726,22 @@ rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len);
  */
 rsmi_status_t rsmi_dev_subsystem_vendor_id_get(uint32_t dv_ind, uint16_t *id);
 
+/**
+ *  @brief Get Unique ID
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint64_t @p
+ *  id, this function will write the unique ID of the GPU pointed to @p
+ *  id.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] id a pointer to uint64_t to which the unique ID of the GPU
+ *  is written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *id);
+
 /** @} */  // end of IDQuer
 
 /*****************************************************************************/

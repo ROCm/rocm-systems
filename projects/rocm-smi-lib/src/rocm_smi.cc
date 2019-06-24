@@ -2107,3 +2107,14 @@ rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t *counter) {
   CATCH
 }
 
+rsmi_status_t
+rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
+  TRY
+  DEVICE_MUTEX
+  rsmi_status_t ret;
+
+  ret = get_dev_value_int(amd::smi::kDevUniqueId, dv_ind, unique_id);
+  return ret;
+
+  CATCH
+}

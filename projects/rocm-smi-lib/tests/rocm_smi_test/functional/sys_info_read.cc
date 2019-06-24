@@ -120,6 +120,19 @@ void TestSysInfoRead::Run(void) {
       std::cout << " (" << std::dec << val_ui64 << ")" << std::endl;
     }
 
+    err = rsmi_dev_unique_id_get(i, &val_ui64);
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+        std::cout <<
+            "\t**rsmi_dev_unique_id() is not supported"
+            " on this machine" << std::endl;
+    } else {
+        CHK_ERR_ASRT(err)
+        IF_VERB(STANDARD) {
+            std::cout << "\t**GPU Unique ID : " << std::hex << val_ui64 <<
+            std::endl;
+        }
+    }
+
     err = rsmi_version_get(&ver);
     CHK_ERR_ASRT(err)
 

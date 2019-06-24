@@ -91,6 +91,7 @@ enum DevInfoTypes {
   kDevMemUsedVisVRAM,
   kDevMemUsedVRAM,
   kDevPCIEReplayCount,
+  kDevUniqueId,
 };
 
 class Device {
