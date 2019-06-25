@@ -95,6 +95,7 @@ enum DevInfoTypes {
   kDevPCIEReplayCount,
   kDevUniqueId,
   kDevDFCountersAvailable,
+  kDevMemBusyPercent,
 };
 
 class Device {

@@ -1905,6 +1905,25 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
 }
 
 rsmi_status_t
+rsmi_dev_memory_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
+  TRY
+  rsmi_status_t ret;
+
+  if (busy_percent == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  uint64_t tmp_util = 0;
+
+  DEVICE_MUTEX
+  ret = get_dev_value_int(amd::smi::kDevMemBusyPercent, dv_ind, &tmp_util);
+
+  *busy_percent = static_cast<uint32_t>(tmp_util);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
 rsmi_status_string(rsmi_status_t status, const char **status_string) {
   TRY
   if (status_string == nullptr) {

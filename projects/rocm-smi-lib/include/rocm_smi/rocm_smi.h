@@ -1118,6 +1118,24 @@ rsmi_status_t
 rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
                                                               uint64_t *used);
 
+/**
+ * @brief Get percentage of time any device memory is being used
+ *
+ * @details Given a device index @p dv_ind, this function returns the
+ * percentage of time that any device memory is being used for the specified
+ * device.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[inout] busy_percent a pointer to the uint32_t to which the busy
+ * percent will be written
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
+ *
+ */
+rsmi_status_t
+rsmi_dev_memory_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
+
 /** @} */  // end of MemQuer
 
 /** @defgroup PhysQuer Physical State Queries

@@ -56,7 +56,7 @@
 TestMemUtilRead::TestMemUtilRead() : TestBase() {
   set_title("Memory Utilization Read Test");
   set_description("The Memory Utilization Read tests verifies that "
-                                  "memory utilization can be read properly.");
+           "memory busy percent, size and amount used can be read properly.");
 }
 
 TestMemUtilRead::~TestMemUtilRead(void) {
@@ -94,6 +94,7 @@ void TestMemUtilRead::Run(void) {
   rsmi_status_t err;
   uint64_t total;
   uint64_t usage;
+  uint32_t mem_busy_percent;
 
   TestBase::Run();
 
@@ -113,6 +114,17 @@ void TestMemUtilRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
 
+#if 0
+    err = rsmi_dev_memory_busy_percent_get(i, &mem_busy_percent);
+    err_chk("rsmi_dev_memory_busy_percent_get()");
+    if (err != RSMI_STATUS_SUCCESS) {
+      return;
+    }
+    IF_VERB(STANDARD) {
+      std::cout << "\t**" << "GPU Memory Busy %: " << mem_busy_percent <<
+                                                                    std::endl;
+    }
+#endif
     for (uint32_t mem_type = RSMI_MEM_TYPE_FIRST;
                                  mem_type <= RSMI_MEM_TYPE_LAST; ++mem_type) {
       err = rsmi_dev_memory_total_get(i,
@@ -132,8 +144,8 @@ void TestMemUtilRead::Run(void) {
       IF_VERB(STANDARD) {
         std::cout << "\t**" <<
          kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type)) <<
-           " Utilization: " << (static_cast<float>(usage)*100)/total << "% ("<<
-                                    usage << "/" << total << ")" << std::endl;
+          " Calculated Utilization: " << (static_cast<float>(usage)*100)/total
+                          << "% ("<< usage << "/" << total << ")" << std::endl;
       }
     }
   }

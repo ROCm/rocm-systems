@@ -199,7 +199,7 @@ TEST(rsmitstReadOnly, TestIdInfoRead) {
   TestIdInfoRead tst;
   RunGenericTest(&tst);
 }
-TEST(rsmitstreadWrite,TestPerfCntrReadWrite) {
+TEST(rsmitstreadWrite, TestPerfCntrReadWrite) {
   TestPerfCntrReadWrite tst;
   RunGenericTest(&tst);
 }

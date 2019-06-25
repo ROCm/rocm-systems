@@ -72,8 +72,8 @@ static const char * kRasErrStateStrings[] = {
     "Poison"                         // RSMI_RAS_ERR_STATE_POISON
 };
 static_assert(
- sizeof(kRasErrStateStrings)/sizeof(char *) == (RSMI_RAS_ERR_STATE_LAST + 1),
-                                      "kErrStateNameMap needs to be updated");
+  sizeof(kRasErrStateStrings)/sizeof(char *) == (RSMI_RAS_ERR_STATE_LAST + 1),
+                                       "kErrStateNameMap needs to be updated");
 
 
 static const std::map<rsmi_ras_err_state_t, const char *> kErrStateNameMap = {

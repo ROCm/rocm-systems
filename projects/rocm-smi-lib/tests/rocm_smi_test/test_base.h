@@ -115,7 +115,7 @@ class TestBase {
   std::string title_;   ///< Displayed title of test
   uint32_t verbosity_;   ///< How much additional output to produce
   bool dont_fail_;       ///< Don't quit test on individual failure if true
-  uint64_t init_options_; ///< rsmi initialization options
+  uint64_t init_options_;  ///< rsmi initialization options
 };
 
 #define IF_VERB(VB) if (verbosity() && verbosity() >= (TestBase::VERBOSE_##VB))
