@@ -4,6 +4,9 @@
 set ( TARGET_LIB "${TARGET_NAME}" )
 set ( LIB_SRC
   ${LIB_DIR}/core/roctracer.cpp
+  ${LIB_DIR}/proxy/proxy_queue.cpp
+  ${LIB_DIR}/proxy/simple_proxy_queue.cpp
+  ${LIB_DIR}/proxy/intercept_queue.cpp
   ${LIB_DIR}/util/hsa_rsrc_factory.cpp
 )
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )

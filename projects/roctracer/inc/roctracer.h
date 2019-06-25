@@ -90,11 +90,6 @@ roctracer_status_t roctracer_op_code(
   uint32_t* op,                                           // [out] op code
   uint32_t* kind = NULL);                                 // [out] op kind code
 
-// Set properties
-roctracer_status_t roctracer_set_properties(
-    roctracer_domain_t domain,                            // tracing domain
-    void* propertes);                                     // tracing properties
-
 ////////////////////////////////////////////////////////////////////////////////
 // Callback API
 //
@@ -213,6 +208,21 @@ roctracer_status_t roctracer_disable_activity();
 // Flush available activity records
 roctracer_status_t roctracer_flush_activity(
     roctracer_pool_t* pool = NULL);                       // memory pool, NULL is a default one
+
+// Load/Un;oad methods
+// Set properties
+roctracer_status_t roctracer_set_properties(
+    roctracer_domain_t domain,                            // tracing domain
+    void* propertes);                                     // tracing properties
+
+struct HsaApiTable;
+bool roctracer_load(
+    HsaApiTable* table,
+    uint64_t runtime_version,
+    uint64_t failed_tool_count,
+    const char* const* failed_tool_names);
+
+void roctracer_unload();
 
 #ifdef __cplusplus
 }  // extern "C" block
