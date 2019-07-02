@@ -41,8 +41,8 @@ class TraceBuffer {
 
   TraceBuffer(uint32_t size) {
     size_ = size;
-    data_ = new Entry[size_];;
-    memset(data_, 0, size_ * sizeof(Entry));
+    data_ = (Entry*) calloc(size, sizeof(Entry));
+    memset(data_, 0, size * sizeof(Entry));
     read_pointer_ = data_;
   }
 

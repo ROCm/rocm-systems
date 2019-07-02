@@ -49,7 +49,8 @@ eval_test "standalone HIP test" ./test/MatrixTranspose_test
 
 # Tool test
 # rocTracer/tool is loaded by HSA runtime
-export HSA_TOOLS_LIB="libroctracer64.so test/libtracer_tool.so"
+export HSA_TOOLS_LIB="test/libtracer_tool.so"
+export ROCTRACER_DOMAIN="hip"
 
 # HIP test
 eval_test "tool HIP test" ./test/MatrixTranspose
