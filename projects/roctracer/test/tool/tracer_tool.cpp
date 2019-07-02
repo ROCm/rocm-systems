@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <sstream>
 #include <string>
 
+#include <cxxabi.h>  /* names denangle */
 #include <dirent.h>
 #include <stdio.h>
 #include <sys/syscall.h>   /* For SYS_xxx definitions */
@@ -77,6 +78,14 @@ void fatal(const std::string msg) {
   fprintf(stderr, "%s\n\n", msg.c_str());
   fflush(stderr);
   abort();
+}
+
+// C++ names demangle
+static inline const char* cxx_demangle(const char* symbol) {
+  size_t funcnamesize;
+  int status;
+  const char* ret = abi::__cxa_demangle(symbol, NULL, &funcnamesize, &status);
+  return (ret != 0) ? ret : strdup(symbol);
 }
 
 struct api_trace_entry_t {
@@ -170,9 +179,10 @@ void hip_api_callback(
           data->args.hipFree.ptr);
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
+      case HIP_API_ID_hipHccModuleLaunchKernel:
         fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n",
           oss.str().c_str(),
-          roctracer::HipLoader::Instance().KernelNameRef(data->args.hipModuleLaunchKernel.f),
+          cxx_demangle(roctracer::HipLoader::Instance().KernelNameRef(data->args.hipModuleLaunchKernel.f)),
           data->args.hipModuleLaunchKernel.stream);
         break;
       default:
