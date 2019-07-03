@@ -39,7 +39,6 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#include <sys/stat.h>
 #include <dirent.h>
 #include <assert.h>
 #include <string.h>
@@ -61,6 +60,7 @@
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_exception.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 static const char *kPathDRMRoot = "/sys/class/drm";
 static const char *kPathHWMonRoot = "/sys/class/hwmon";
@@ -73,10 +73,6 @@ static const char *kAMDMonitorTypes[] = {"radeon", "amdgpu", ""};
 namespace amd {
 namespace smi {
 
-static bool FileExists(char const *filename) {
-  struct stat buf;
-  return (stat(filename, &buf) == 0);
-}
 
 static uint32_t GetDeviceIndex(const std::string s) {
   std::string t = s;
@@ -84,33 +80,6 @@ static uint32_t GetDeviceIndex(const std::string s) {
   t.erase(0, tmp+1);
 
   return stoi(t);
-}
-
-// Return 0 if same file, 1 if not, and -1 for error
-static int SameFile(const std::string fileA, const std::string fileB) {
-  struct stat aStat;
-  struct stat bStat;
-  int ret;
-
-  ret = stat(fileA.c_str(), &aStat);
-  if (ret) {
-      return -1;
-  }
-
-  ret = stat(fileB.c_str(), &bStat);
-  if (ret) {
-      return -1;
-  }
-
-  if (aStat.st_dev != bStat.st_dev) {
-      return 1;
-  }
-
-  if (aStat.st_ino != bStat.st_ino) {
-      return 1;
-  }
-
-  return 0;
 }
 
 static int SameDevice(const std::string fileA, const std::string fileB) {

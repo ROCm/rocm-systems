@@ -94,7 +94,6 @@ void TestMemUtilRead::Run(void) {
   rsmi_status_t err;
   uint64_t total;
   uint64_t usage;
-  uint32_t mem_busy_percent;
 
   TestBase::Run();
 

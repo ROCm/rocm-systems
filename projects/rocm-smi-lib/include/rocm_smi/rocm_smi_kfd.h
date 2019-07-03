@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -40,105 +40,21 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#include <assert.h>
-#include <errno.h>
-#include <sys/stat.h>
+#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
+#define INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
 
-#include <fstream>
-#include <string>
-#include <cstdint>
-#include <iostream>
-#include <sstream>
-#include <algorithm>
+#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace smi {
 
-// Return 0 if same file, 1 if not, and -1 for error
-int SameFile(const std::string fileA, const std::string fileB) {
-  struct stat aStat;
-  struct stat bStat;
-  int ret;
-
-  ret = stat(fileA.c_str(), &aStat);
-  if (ret) {
-      return -1;
-  }
-
-  ret = stat(fileB.c_str(), &bStat);
-  if (ret) {
-      return -1;
-  }
-
-  if (aStat.st_dev != bStat.st_dev) {
-      return 1;
-  }
-
-  if (aStat.st_ino != bStat.st_ino) {
-      return 1;
-  }
-
-  return 0;
-}
-
-bool FileExists(char const *filename) {
-  struct stat buf;
-  return (stat(filename, &buf) == 0);
-}
-
-int isRegularFile(std::string fname, bool *is_reg) {
-  struct stat file_stat;
-  int ret;
-
-  assert(is_reg != nullptr);
-
-  ret = stat(fname.c_str(), &file_stat);
-  if (ret) {
-    return errno;
-  }
-  *is_reg = S_ISREG(file_stat.st_mode);
-  return 0;
-}
-
-int WriteSysfsStr(std::string path, std::string val) {
-  std::ofstream fs;
-  int ret = 0;
-
-  fs.open(path);
-  if (!fs.is_open()) {
-    ret = errno;
-    errno = 0;
-    return ret;
-  }
-
-  fs << val;
-  fs.close();
-  return ret;
-}
-
-int ReadSysfsStr(std::string path, std::string *retStr) {
-  std::stringstream ss;
-  int ret = 0;
-
-  assert(retStr != nullptr);
-
-  std::ifstream fs;
-  fs.open(path);
-
-  if (!fs.is_open()) {
-    ret = errno;
-    errno = 0;
-    return ret;
-  }
-  ss << fs.rdbuf();
-  fs.close();
-
-  *retStr = ss.str();
-
-  retStr->erase(std::remove(retStr->begin(), retStr->end(), '\n'),
-                                                               retStr->end());
-  return ret;
-}
+int
+GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
+                                                   uint32_t *num_procs_found);
+int
+GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc);
 
 }  // namespace smi
 }  // namespace amd
+
+#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_

@@ -62,6 +62,7 @@
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_counters.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 
 #include "rocm_smi/rocm_smi64Config.h"
 
@@ -130,6 +131,7 @@ static pthread_mutex_t *get_mutex(uint32_t dv_ind) {
 static rsmi_status_t errno_to_rsmi_status(uint32_t err) {
   switch (err) {
     case 0:      return RSMI_STATUS_SUCCESS;
+    case ESRCH:  return RSMI_STATUS_NOT_FOUND;
     case EACCES: return RSMI_STATUS_PERMISSION;
     case EPERM:
     case ENOENT: return RSMI_STATUS_NOT_SUPPORTED;
@@ -2299,3 +2301,51 @@ rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group_t group) {
   CATCH
 }
 
+rsmi_status_t
+rsmi_compute_process_info_get(rsmi_process_info_t *procs,
+                                                        uint32_t *num_items) {
+  TRY
+
+  if (num_items == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  uint32_t procs_found = 0;
+
+  int err = amd::smi:: GetProcessInfo(procs, *num_items, &procs_found);
+
+  if (err) {
+    return errno_to_rsmi_status(err);
+  }
+
+  if (procs && *num_items < procs_found) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  if (procs == nullptr || *num_items > procs_found) {
+    *num_items = procs_found;
+  }
+
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_compute_process_info_by_pid_get(uint32_t pid,
+                                                  rsmi_process_info_t *proc) {
+  TRY
+
+  if (proc == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  int err = amd::smi::GetProcessInfoForPID(pid, proc);
+
+  if (err) {
+    return errno_to_rsmi_status(err);
+  }
+
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}

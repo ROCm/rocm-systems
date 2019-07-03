@@ -62,6 +62,10 @@
 namespace amd {
 namespace smi {
 
+int SameFile(const std::string fileA, const std::string fileB);
+bool FileExists(char const *filename);
+int isRegularFile(std::string fname, bool *is_reg);
+
 int ReadSysfsStr(std::string path, std::string *retStr);
 int WriteSysfsStr(std::string path, std::string val);
 

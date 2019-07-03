@@ -586,6 +586,14 @@ typedef struct {
     uint64_t uncorrectable_err;          //!< Accumulated uncorrectable errors
 } rsmi_error_count_t;
 
+/**
+ * @brief This structure contains information specific to a process.
+ */
+typedef struct {
+    uint32_t process_id;  //!< Process ID
+    uint32_t pasid;    //!< PASID
+} rsmi_process_info_t;
+
 /*****************************************************************************/
 /** @defgroup InitShutAdmin Initialization and Shutdown
  *  These functions are used for initialization of ROCm SMI and clean up when
@@ -1842,6 +1850,70 @@ rsmi_status_t
 rsmi_counter_available_counters_get(uint32_t dv_ind,
                                  rsmi_event_group_t grp, uint32_t *available);
 /** @} */  // end of PerfCntr
+
+/*****************************************************************************/
+/** @defgroup SysInfo System Information Functions
+ *  These functions are used to configure, query and control performance
+ *  counting.
+ *  @{
+ */
+
+/**
+ * @brief Get process information about processes currently using GPU
+ *
+ * @details Given a non-NULL pointer to an array @p procs of
+ * ::rsmi_process_info_t's, of length *@p num_items, this function will write
+ * up to *@p num_items instances of ::rsmi_process_info_t to the memory pointed
+ * to by @p procs. These instances contain information about each process
+ * utilizing a GPU. If @p procs is not NULL, @p num_items will be updated with
+ * the number of processes actually written. If @p procs is NULL, @p num_items
+ * will be updated with the number of processes for which there is current
+ * process information. Calling this function with @p procs being NULL is a way
+ * to determine how much memory should be allocated for when @p procs is not
+ * NULL.
+ *
+ * @param[inout] procs a pointer to memory provided by the caller to which
+ * process information will be written. This may be NULL in which case only @p
+ * num_items will be updated with the number of processes found.
+ *
+ * @param[inout] num_items A pointer to a uint32_t, which on input, should
+ * contain the amount of memory in ::rsmi_process_info_t's which have been
+ * provided by the @p procs argument. On output, if @p procs is non-NULL, this
+ * will be updated with the number ::rsmi_process_info_t structs actually
+ * written. If @p procs is NULL, this argument will be updated with the number
+ * processes for which there is information.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
+ *
+ * ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if there were more
+ * processes for which information was available, but not enough space was
+ * provided as indicated by @p procs and @p num_items, on input.
+ */
+rsmi_status_t
+rsmi_compute_process_info_get(rsmi_process_info_t *procs, uint32_t *num_items);
+
+/**
+ * @brief Get process information about a specific process
+ *
+ * @details Given a pointer to an ::rsmi_process_info_t @p proc and a process id
+ * @p pid, this function will write the process information for @p pid, if
+ * available, to the memory pointed to by @p proc.
+ *
+ * @param[in] pid The process ID for which process information is being requested
+ *
+ * @param[inout] proc a pointer to a ::rsmi_process_info_t to which
+ * process information for @p pid will be written if it is found.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
+ *
+ * ::RSMI_STATUS_NOT_FOUND is returned if there was no process information
+ * found for the provided @p pid
+ *
+ */
+rsmi_status_t
+rsmi_compute_process_info_by_pid_get(uint32_t pid, rsmi_process_info_t *proc);
+
+/** @} */  // end of SysInfo
 
 #ifdef __cplusplus
 }

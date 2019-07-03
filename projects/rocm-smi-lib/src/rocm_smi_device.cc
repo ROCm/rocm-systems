@@ -60,6 +60,7 @@
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 extern "C" {
 #include "shared_mutex.h"  // NOLINT
@@ -158,20 +159,6 @@ static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
 
     {RSMI_DEV_PERF_LEVEL_UNKNOWN, kDevPerfLevelUnknownStr},
 };
-
-static int isRegularFile(std::string fname, bool *is_reg) {
-  struct stat file_stat;
-  int ret;
-
-  assert(is_reg != nullptr);
-
-  ret = stat(fname.c_str(), &file_stat);
-  if (ret) {
-    return errno;
-  }
-  *is_reg = S_ISREG(file_stat.st_mode);
-  return 0;
-}
 
 #define RET_IF_NONZERO(X) { \
   if (X) return X; \
