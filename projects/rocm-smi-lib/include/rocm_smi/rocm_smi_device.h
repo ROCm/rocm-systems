@@ -139,6 +139,8 @@ class Device {
     int writeDevInfo(DevInfoTypes type, std::string val);
     uint32_t index(void) const {return index_;}
     void set_index(uint32_t index) {index_ = index;}
+    uint32_t drm_render_minor(void) const {return drm_render_minor_;}
+    void set_drm_render_minor(uint32_t minor) {drm_render_minor_ = minor;}
     static rsmi_dev_perf_level perfLvlStrToEnum(std::string s);
     uint64_t bdfid(void) const {return bdfid_;}
     void set_bdfid(uint64_t val) {bdfid_ = val;}
@@ -153,6 +155,7 @@ class Device {
     std::string path_;
     shared_mutex_t mutex_;
     uint32_t index_;
+    uint32_t drm_render_minor_;
     const RocmSMI_env_vars *env_;
     template <typename T> int openSysfsFileStream(DevInfoTypes type, T *fs,
                                                    const char *str = nullptr);

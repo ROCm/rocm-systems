@@ -1425,6 +1425,19 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
 
   return RSMI_STATUS_SUCCESS;
 }
+
+static rsmi_status_t
+get_dev_drm_render_minor(uint32_t dv_ind, uint32_t *minor) {
+
+  GET_DEV_FROM_INDX
+
+  *minor = dev->drm_render_minor();
+  if (*minor)
+    return RSMI_STATUS_SUCCESS;
+
+  return RSMI_STATUS_INIT_ERROR;
+}
+
 rsmi_status_t
 rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
   rsmi_status_t ret;
@@ -1454,6 +1467,20 @@ rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len) {
   DEVICE_MUTEX
 
   ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_SUBSYS);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_drm_render_minor_get(uint32_t dv_ind, uint32_t *minor) {
+  rsmi_status_t ret;
+
+  TRY
+  if (minor == nullptr)
+    return RSMI_STATUS_INVALID_ARGS;
+
+  DEVICE_MUTEX
+  ret = get_dev_drm_render_minor(dv_ind, minor);
   return ret;
   CATCH
 }

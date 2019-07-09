@@ -831,6 +831,25 @@ rsmi_status_t
 rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len);
 
 /**
+ *  @brief Get the drm minor number associated with this device
+ *
+ *  @details Given a device index @p dv_ind, find its render device file
+ *  /dev/dri/renderDN where N corresponds to its minor number.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] minor a pointer to a uint32_t into which minor number will
+ *  be copied
+ *
+ *  @retval :: RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval :: RSMI_STATUS_INIT_ERROR if failed to get minor number during
+ *  initialization.
+ *
+ */
+rsmi_status_t
+rsmi_dev_drm_render_minor_get(uint32_t dv_ind, uint32_t *minor);
+
+/**
  *  @brief Get the device subsystem vendor id associated with the device with
  *  provided device index.
  *
