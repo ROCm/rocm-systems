@@ -402,7 +402,7 @@ typedef enum {
 } rsmi_memory_type_t;
 
 /**
- * @brief This values of this enum are used as frequency identifiers.
+ * @brief The values of this enum are used as frequency identifiers.
  */
 typedef enum {
   RSMI_FREQ_IND_MIN = 0,  //!< Index used for the minimum frequency value
@@ -412,6 +412,15 @@ typedef enum {
 /// \cond Ignore in docs.
 typedef rsmi_freq_ind_t rsmi_freq_ind;
 /// \endcond
+
+/**
+ * @brief XGMI Status
+ */
+typedef enum {
+  RSMI_XGMI_STATUS_NO_ERRORS = 0,
+  RSMI_XGMI_STATUS_ERROR,
+  RSMI_XGMI_STATUS_MULTIPLE_ERRORS,
+} rsmi_xgmi_status_t;
 
 /**
  * @brief Bitfield used in various RSMI calls
@@ -1912,6 +1921,48 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs, uint32_t *num_items);
  */
 rsmi_status_t
 rsmi_compute_process_info_by_pid_get(uint32_t pid, rsmi_process_info_t *proc);
+
+/** @} */  // end of SysInfo
+
+/*****************************************************************************/
+/** @defgroup XGMIInfo XGMI Functions
+ *  These functions are used to configure, query and control XGMI.
+ *  @{
+ */
+
+/**
+ * @brief Retrieve the XGMI error status for a device
+ *
+ * @details Given a device index @p dv_ind, and a pointer to an
+ * ::rsmi_xgmi_status_t @p status, this function will write the current XGMI
+ * error state ::rsmi_xgmi_status_t for the device @p dv_ind to the memory
+ * pointed to by @p status.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[inout] status A pointer to an ::rsmi_xgmi_status_t to which the
+ * XGMI error state should be written
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status);
+
+/**
+ * @brief Reset the XGMI error status for a device
+ *
+ * @details Given a device index @p dv_ind, this function will reset the
+ * current XGMI error state ::rsmi_xgmi_status_t for the device @p dv_ind to
+ * rsmi_xgmi_status_t::RSMI_XGMI_STATUS_NO_ERRORS
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_xgmi_error_reset(uint32_t dv_ind);
 
 /** @} */  // end of SysInfo
 

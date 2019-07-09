@@ -96,6 +96,7 @@ enum DevInfoTypes {
   kDevUniqueId,
   kDevDFCountersAvailable,
   kDevMemBusyPercent,
+  kDevXGMIError,
 };
 
 class Device {

@@ -2146,6 +2146,10 @@ rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
   DEVICE_MUTEX
   rsmi_status_t ret;
 
+  if (unique_id == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   ret = get_dev_value_int(amd::smi::kDevUniqueId, dv_ind, unique_id);
   return ret;
 
@@ -2343,6 +2347,65 @@ rsmi_compute_process_info_by_pid_get(uint32_t pid,
 
   if (err) {
     return errno_to_rsmi_status(err);
+  }
+
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status) {
+  TRY
+  DEVICE_MUTEX
+
+  if (status == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  rsmi_status_t ret;
+  uint64_t status_code;
+
+  ret = get_dev_value_int(amd::smi::kDevXGMIError, dv_ind, &status_code);
+
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  switch (status_code) {
+    case 0:
+      *status = RSMI_XGMI_STATUS_NO_ERRORS;
+      break;
+
+    case 1:
+      *status = RSMI_XGMI_STATUS_ERROR;
+      break;
+
+    case 2:
+      *status = RSMI_XGMI_STATUS_MULTIPLE_ERRORS;
+      break;
+
+    default:
+      assert(!"Unexpected XGMI error status read");
+      return RSMI_STATUS_UNKNOWN_ERROR;
+  }
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_xgmi_error_reset(uint32_t dv_ind) {
+  TRY
+  DEVICE_MUTEX
+
+  rsmi_status_t ret;
+  uint64_t status_code;
+
+  ret = get_dev_value_int(amd::smi::kDevXGMIError, dv_ind, &status_code);
+
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
   }
 
   return RSMI_STATUS_SUCCESS;
