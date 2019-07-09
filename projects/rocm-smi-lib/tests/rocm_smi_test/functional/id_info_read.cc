@@ -88,6 +88,7 @@ void TestIdInfoRead::Run(void) {
   rsmi_status_t err;
   uint16_t id;
   uint64_t val_ui64;
+  uint32_t drm_render_minor;
 
   char buffer[kBufferLen];
 
@@ -124,6 +125,14 @@ void TestIdInfoRead::Run(void) {
     } else {
       IF_VERB(STANDARD) {
         std::cout << "\t**Vendor ID: 0x" << std::hex << id << std::endl;
+      }
+    }
+    err = rsmi_dev_drm_render_minor_get(i, &drm_render_minor);
+    if (err != RSMI_STATUS_SUCCESS) {
+        CHK_ERR_ASRT(err)
+    } else {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**DRM Render Minor: " << drm_render_minor << std::endl;
       }
     }
     err = rsmi_dev_vendor_name_get(i, buffer, kBufferLen);
