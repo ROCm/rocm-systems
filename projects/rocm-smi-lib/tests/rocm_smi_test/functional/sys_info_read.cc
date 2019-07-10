@@ -53,6 +53,7 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/functional/sys_info_read.h"
 #include "rocm_smi_test/test_common.h"
+#include "rocm_smi_test/test_utils.h"
 
 TestSysInfoRead::TestSysInfoRead() : TestBase() {
   set_title("RSMI System Info Read Test");
@@ -141,6 +142,21 @@ void TestSysInfoRead::Run(void) {
     IF_VERB(STANDARD) {
       std::cout << "\t**RocM SMI Library version: " << ver.major << "." <<
          ver.minor << "." << ver.patch << " (" << ver.build << ")" << std::endl;
+    }
+
+    std::cout << std::setbase(10);
+    for (int x = RSMI_FW_BLOCK_FIRST; x <= RSMI_FW_BLOCK_LAST; ++x) {
+      rsmi_fw_block_t block = static_cast<rsmi_fw_block_t>(x);
+      err = rsmi_dev_firmware_version_get(i, block, &val_ui64);
+      if (err) {
+        std::cout << "\t**No FW block " << NameFromFWEnum(block) <<
+                                     " available on this system" << std::endl;
+        continue;
+      }
+      IF_VERB(STANDARD) {
+        std::cout << "\t**FW VERSION for " << NameFromFWEnum(block) <<
+                                                ": " << val_ui64 << std::endl;
+      }
     }
   }
 }

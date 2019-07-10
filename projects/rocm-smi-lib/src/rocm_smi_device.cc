@@ -114,6 +114,30 @@ static const char *kDevPerfLevelMinSClkStr = "profile_min_sclk";
 static const char *kDevPerfLevelPeakStr = "profile_peak";
 static const char *kDevPerfLevelUnknownStr = "unknown";
 
+// Firmware version files
+static const char *kDevFwVersionAsdFName = "fw_version/asd_fw_version";
+static const char *kDevFwVersionCeFName = "fw_version/ce_fw_version";
+static const char *kDevFwVersionDmcuFName = "fw_version/dmcu_fw_version";
+static const char *kDevFwVersionMcFName = "fw_version/mc_fw_version";
+static const char *kDevFwVersionMeFName = "fw_version/me_fw_version";
+static const char *kDevFwVersionMecFName = "fw_version/mec_fw_version";
+static const char *kDevFwVersionMec2FName = "fw_version/mec2_fw_version";
+static const char *kDevFwVersionPfpFName = "fw_version/pfp_fw_version";
+static const char *kDevFwVersionRlcFName = "fw_version/rlc_fw_version";
+static const char *kDevFwVersionRlcSrlcFName = "fw_version/rlc_srlc_fw_version";
+static const char *kDevFwVersionRlcSrlgFName = "fw_version/rlc_srlg_fw_version";
+static const char *kDevFwVersionRlcSrlsFName = "fw_version/rlc_srls_fw_version";
+static const char *kDevFwVersionSdmaFName = "fw_version/sdma_fw_version";
+static const char *kDevFwVersionSdma2FName = "fw_version/sdma2_fw_version";
+static const char *kDevFwVersionSmcFName = "fw_version/smc_fw_version";
+static const char *kDevFwVersionSosFName = "fw_version/sos_fw_version";
+static const char *kDevFwVersionTaRasFName = "fw_version/ta_ras_fw_version";
+static const char *kDevFwVersionTaXgmiFName = "fw_version/ta_xgmi_fw_version";
+static const char *kDevFwVersionUvdFName = "fw_version/uvd_fw_version";
+static const char *kDevFwVersionVceFName = "fw_version/vce_fw_version";
+static const char *kDevFwVersionVcnFName = "fw_version/vcn_fw_version";
+
+
 static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevPerfLevel, kDevPerfLevelFName},
     {kDevOverDriveLevel, kDevOverDriveLevelFName},
@@ -147,6 +171,27 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevUniqueId, kDevUniqueIdFName},
     {kDevDFCountersAvailable, kDevDFCountersAvailableFName},
     {kDevXGMIError, kDevXGMIErrorFName},
+    {kDevFwVersionAsd, kDevFwVersionAsdFName},
+    {kDevFwVersionCe, kDevFwVersionCeFName},
+    {kDevFwVersionDmcu, kDevFwVersionDmcuFName},
+    {kDevFwVersionMc, kDevFwVersionMcFName},
+    {kDevFwVersionMe, kDevFwVersionMeFName},
+    {kDevFwVersionMec, kDevFwVersionMecFName},
+    {kDevFwVersionMec2, kDevFwVersionMec2FName},
+    {kDevFwVersionPfp, kDevFwVersionPfpFName},
+    {kDevFwVersionRlc, kDevFwVersionRlcFName},
+    {kDevFwVersionRlcSrlc, kDevFwVersionRlcSrlcFName},
+    {kDevFwVersionRlcSrlg, kDevFwVersionRlcSrlgFName},
+    {kDevFwVersionRlcSrls, kDevFwVersionRlcSrlsFName},
+    {kDevFwVersionSdma, kDevFwVersionSdmaFName},
+    {kDevFwVersionSdma2, kDevFwVersionSdma2FName},
+    {kDevFwVersionSmc, kDevFwVersionSmcFName},
+    {kDevFwVersionSos, kDevFwVersionSosFName},
+    {kDevFwVersionTaRas, kDevFwVersionTaRasFName},
+    {kDevFwVersionTaXgmi, kDevFwVersionTaXgmiFName},
+    {kDevFwVersionUvd, kDevFwVersionUvdFName},
+    {kDevFwVersionVce, kDevFwVersionVceFName},
+    {kDevFwVersionVcn, kDevFwVersionVcnFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -387,7 +432,29 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
       RET_IF_NONZERO(ret);
       *val = std::stoul(tempStr, 0);
       break;
+
     case kDevUniqueId:
+    case kDevFwVersionAsd:
+    case kDevFwVersionCe:
+    case kDevFwVersionDmcu:
+    case kDevFwVersionMc:
+    case kDevFwVersionMe:
+    case kDevFwVersionMec:
+    case kDevFwVersionMec2:
+    case kDevFwVersionPfp:
+    case kDevFwVersionRlc:
+    case kDevFwVersionRlcSrlc:
+    case kDevFwVersionRlcSrlg:
+    case kDevFwVersionRlcSrls:
+    case kDevFwVersionSdma:
+    case kDevFwVersionSdma2:
+    case kDevFwVersionSmc:
+    case kDevFwVersionSos:
+    case kDevFwVersionTaRas:
+    case kDevFwVersionTaXgmi:
+    case kDevFwVersionUvd:
+    case kDevFwVersionVce:
+    case kDevFwVersionVcn:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       *val = std::stoul(tempStr, 0, 16);

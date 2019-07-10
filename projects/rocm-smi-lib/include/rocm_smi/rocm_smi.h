@@ -413,6 +413,39 @@ typedef enum {
 typedef rsmi_freq_ind_t rsmi_freq_ind;
 /// \endcond
 
+
+/**
+ * @brief The values of this enum are used to identify the various firmware
+ * blocks.
+ */
+typedef enum {
+  RSMI_FW_BLOCK_FIRST = 0,
+
+  RSMI_FW_BLOCK_ASD = RSMI_FW_BLOCK_FIRST,
+  RSMI_FW_BLOCK_CE,
+  RSMI_FW_BLOCK_DMCU,
+  RSMI_FW_BLOCK_MC,
+  RSMI_FW_BLOCK_ME,
+  RSMI_FW_BLOCK_MEC,
+  RSMI_FW_BLOCK_MEC2,
+  RSMI_FW_BLOCK_PFP,
+  RSMI_FW_BLOCK_RLC,
+  RSMI_FW_BLOCK_RLC_SRLC,
+  RSMI_FW_BLOCK_RLC_SRLG,
+  RSMI_FW_BLOCK_RLC_SRLS,
+  RSMI_FW_BLOCK_SDMA,
+  RSMI_FW_BLOCK_SDMA2,
+  RSMI_FW_BLOCK_SMC,
+  RSMI_FW_BLOCK_SOS,
+  RSMI_FW_BLOCK_TA_RAS,
+  RSMI_FW_BLOCK_TA_XGMI,
+  RSMI_FW_BLOCK_UVD,
+  RSMI_FW_BLOCK_VCE,
+  RSMI_FW_BLOCK_VCN,
+
+  RSMI_FW_BLOCK_LAST = RSMI_FW_BLOCK_VCN
+} rsmi_fw_block_t;
+
 /**
  * @brief XGMI Status
  */
@@ -1641,6 +1674,27 @@ rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
  */
 rsmi_status_t
 rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len);
+
+/**
+ * @brief Get the firmware versions for a device
+ *
+ * @details Given a device ID @p dv_ind, and a pointer to a uint64_t,
+ * @p fw_version, this function will write the FW Versions as a string (up to @p len
+ * characters) for device @p dv_ind to @p vbios. The caller must ensure that
+ * it is safe to write at least @p len characters to @p vbios.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[in] block The firmware block for which the version is being requested
+ *
+ * @param[inout] fw_version The version for the firmware block
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
+                                                        uint64_t *fw_version);
 
 /** @} */  // end of VersQuer
 

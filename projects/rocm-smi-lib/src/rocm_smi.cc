@@ -1080,6 +1080,95 @@ rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type_t clk_type,
   CATCH
 }
 
+rsmi_status_t
+rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
+                                                       uint64_t *fw_version) {
+  rsmi_status_t ret;
+
+  if (fw_version == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  TRY
+  GET_DEV_FROM_INDX
+
+  std::string val_str;
+  amd::smi::DevInfoTypes dev_type;
+
+  switch (block) {
+    case RSMI_FW_BLOCK_ASD:
+      dev_type = amd::smi::kDevFwVersionAsd;
+      break;
+    case RSMI_FW_BLOCK_CE:
+      dev_type = amd::smi::kDevFwVersionCe;
+      break;
+    case RSMI_FW_BLOCK_DMCU:
+      dev_type = amd::smi::kDevFwVersionDmcu;
+      break;
+    case RSMI_FW_BLOCK_MC:
+      dev_type = amd::smi::kDevFwVersionMc;
+      break;
+    case RSMI_FW_BLOCK_ME:
+      dev_type = amd::smi::kDevFwVersionMe;
+      break;
+    case RSMI_FW_BLOCK_MEC:
+      dev_type = amd::smi::kDevFwVersionMec;
+      break;
+    case RSMI_FW_BLOCK_MEC2:
+      dev_type = amd::smi::kDevFwVersionMec2;
+      break;
+    case RSMI_FW_BLOCK_PFP:
+      dev_type = amd::smi::kDevFwVersionPfp;
+      break;
+    case RSMI_FW_BLOCK_RLC:
+      dev_type = amd::smi::kDevFwVersionRlc;
+      break;
+    case RSMI_FW_BLOCK_RLC_SRLC:
+      dev_type = amd::smi::kDevFwVersionRlcSrlc;
+      break;
+    case RSMI_FW_BLOCK_RLC_SRLG:
+      dev_type = amd::smi::kDevFwVersionRlcSrlg;
+      break;
+    case RSMI_FW_BLOCK_RLC_SRLS:
+      dev_type = amd::smi::kDevFwVersionRlcSrls;
+      break;
+    case RSMI_FW_BLOCK_SDMA:
+      dev_type = amd::smi::kDevFwVersionSdma;
+      break;
+    case RSMI_FW_BLOCK_SDMA2:
+      dev_type = amd::smi::kDevFwVersionSdma2;
+      break;
+    case RSMI_FW_BLOCK_SMC:
+      dev_type = amd::smi::kDevFwVersionSmc;
+      break;
+    case RSMI_FW_BLOCK_SOS:
+      dev_type = amd::smi::kDevFwVersionSos;
+      break;
+    case RSMI_FW_BLOCK_TA_RAS:
+      dev_type = amd::smi::kDevFwVersionTaRas;
+      break;
+    case RSMI_FW_BLOCK_TA_XGMI:
+      dev_type = amd::smi::kDevFwVersionTaXgmi;
+      break;
+    case RSMI_FW_BLOCK_UVD:
+      dev_type = amd::smi::kDevFwVersionUvd;
+      break;
+    case RSMI_FW_BLOCK_VCE:
+      dev_type = amd::smi::kDevFwVersionVce;
+      break;
+    case RSMI_FW_BLOCK_VCN:
+      dev_type = amd::smi::kDevFwVersionVcn;
+      break;
+  }
+  ret = get_dev_value_int(dev_type, dv_ind, fw_version);
+  if (ret != 0) {
+    return errno_to_rsmi_status(ret);
+  }
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
 static std::string bitfield_to_freq_string(uint64_t bitf,
                                                      uint32_t num_supported) {
   std::string bf_str("");
