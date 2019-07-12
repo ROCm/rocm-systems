@@ -68,7 +68,7 @@ def dbglog(msg):
 # parse results method
 def parse_res(infile):
   global max_gpu_id
-  if not os.path.isfile(infile): fatal("Error: input file '" + infile + "' not found")
+  if not os.path.isfile(infile): return # fatal("Error: input file '" + infile + "' not found")
   inp = open(infile, 'r')
 
   beg_pattern = re.compile("^dispatch\[(\d*)\], (.*) kernel-name\(\"([^\"]*)\"\)")
@@ -345,8 +345,7 @@ else:
 
 if inext == '.txt':
   for f in infiles: parse_res(f)
-  if len(var_table) == 0: sys.exit(1)
-  merge_table()
+  if len(var_table) != 0: merge_table()
 
 if dbfile == '':
   dump_csv(csvfile)
@@ -387,14 +386,14 @@ else:
     if hsa_trace_found and 'BeginNs' in var_list:
       dform.gen_kernel_json_trace(db, 'A', GPU_BASE_PID, START_US, jsonfile)
 
-    if hsa_trace_found:
-      statfile = re.sub(r'stats', r'hsa_stats', statfile)
-      dform.post_process_data(db, 'HSA')
-      dform.gen_table_bins(db, 'HSA', statfile, 'Name', 'DurationNs')
-      dform.gen_api_json_trace(db, 'HSA', START_US, jsonfile)
+  if hsa_trace_found:
+    statfile = re.sub(r'stats', r'hsa_stats', statfile)
+    dform.post_process_data(db, 'HSA')
+    dform.gen_table_bins(db, 'HSA', statfile, 'Name', 'DurationNs')
+    dform.gen_api_json_trace(db, 'HSA', START_US, jsonfile)
 
-      dform.post_process_data(db, 'COPY')
-      dform.gen_api_json_trace(db, 'COPY', START_US, jsonfile)
+    dform.post_process_data(db, 'COPY')
+    dform.gen_api_json_trace(db, 'COPY', START_US, jsonfile)
 
   if hip_trace_found:
     statfile = re.sub(r'stats', r'hip_stats', statfile)
