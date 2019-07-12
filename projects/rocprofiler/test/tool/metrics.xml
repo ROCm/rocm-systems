@@ -32,6 +32,7 @@
   <metric name="TCC_EA_WRREQ_64B_sum" expr=sum(TCC_EA_WRREQ_64B,16) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
   <metric name="TCC_WRREQ_STALL_max" expr=max(TCC_EA_WRREQ_STALL,16) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
 
+  <metric name="TCC_MC_WRREQ_sum" expr=TCC_EA_WRREQ_64B_sum*2+(TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum) descr="Number of 32-byte effective writes. Sum over TCC instaces."></metric>
   <metric name="FETCH_SIZE" expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
   <metric name="WRITE_SIZE" expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
 </gfx9>
@@ -135,6 +136,13 @@
     name="SALUBusy"
     descr="The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad) to 100% (optimal)."
     expr=100*SQ_INST_CYCLES_SALU*4/SIMD_NUM/GRBM_GUI_ACTIVE
+  ></metric>
+
+  # Mem32Bwrites    The number of effective 32B write transactions into memory
+  <metric
+    name="Mem32Bwrites"
+    descr=""
+    expr=TCC_MC_WRREQ_sum
   ></metric>
 
   # FetchSize       The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account.
