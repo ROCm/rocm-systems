@@ -99,7 +99,9 @@ struct hsa_api_trace_entry_t {
   hsa_api_data_t data;
 };
 
-roctracer::TraceBuffer<hsa_api_trace_entry_t> hsa_api_trace_buffer(0x200000);
+void hsa_api_flush_cb(hsa_api_trace_entry_t* entry);
+roctracer::TraceBuffer<hsa_api_trace_entry_t>::flush_prm_t hsa_flush_prm[1] = {{0, hsa_api_flush_cb}};
+roctracer::TraceBuffer<hsa_api_trace_entry_t> hsa_api_trace_buffer(0x200000, hsa_flush_prm, 1);
 
 // HSA API callback function
 void hsa_api_callback(
@@ -153,7 +155,9 @@ struct hip_api_trace_entry_t {
   const char* name;
 };
 
-roctracer::TraceBuffer<hip_api_trace_entry_t> hip_api_trace_buffer(0x200000);
+void hip_api_flush_cb(hip_api_trace_entry_t* entry);
+roctracer::TraceBuffer<hip_api_trace_entry_t>::flush_prm_t hip_flush_prm[1] = {{0, hip_api_flush_cb}};
+roctracer::TraceBuffer<hip_api_trace_entry_t> hip_api_trace_buffer(0x200000, hip_flush_prm, 1);
 
 void hip_api_callback(
     uint32_t domain,
@@ -425,20 +429,20 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
   return roctracer_load(table, runtime_version, failed_tool_count, failed_tool_names);
 }
 
-// HSA-runtime tool on-unload method
-extern "C" PUBLIC_API void OnUnload() {
+// tool unload method
+void tool_unload(bool destruct) {
   static bool is_unloaded = false;
   if (is_unloaded) {
     return;
   }
   is_unloaded = true;
-  roctracer_unload();
+  roctracer_unload(destruct);
 
   if (trace_hsa) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
     ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
 
-    hsa_api_trace_buffer.Flush(0, hsa_api_flush_cb);
+    if (destruct == false) hsa_api_trace_buffer.Flush();
 
     fclose(hsa_api_file_handle);
     fclose(hsa_async_copy_file_handle);
@@ -450,12 +454,15 @@ extern "C" PUBLIC_API void OnUnload() {
     ROCTRACER_CALL(roctracer_flush_activity());
     ROCTRACER_CALL(roctracer_close_pool());
 
-    hip_api_trace_buffer.Flush(0, hip_api_flush_cb);
+    if (destruct == false) hip_api_trace_buffer.Flush();
 
     fclose(hip_api_file_handle);
     fclose(hcc_activity_file_handle);
   }
 }
 
+// HSA-runtime on-unload method
+extern "C" PUBLIC_API void OnUnload() { tool_unload(false); }
+
 extern "C" CONSTRUCTOR_API void constructor() {}
-extern "C" DESTRUCTOR_API void destructor() { OnUnload(); }
+extern "C" DESTRUCTOR_API void destructor() { tool_unload(true); }

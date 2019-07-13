@@ -222,7 +222,7 @@ bool roctracer_load(
     uint64_t failed_tool_count,
     const char* const* failed_tool_names);
 
-void roctracer_unload();
+void roctracer_unload(bool destruct);
 
 #ifdef __cplusplus
 }  // extern "C" block

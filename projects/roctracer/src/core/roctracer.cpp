@@ -161,7 +161,13 @@ namespace roctracer {
 decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
 decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
 
-TraceBuffer<trace_entry_t> trace_buffer(0x200000);
+void hsa_async_copy_handler(::proxy::Tracker::entry_t* entry);
+void hsa_kernel_handler(::proxy::Tracker::entry_t* entry);
+TraceBuffer<trace_entry_t>::flush_prm_t trace_buffer_prm[] = {
+  {roctracer::COPY_ENTRY_TYPE, hsa_async_copy_handler},
+  {roctracer::KERNEL_ENTRY_TYPE, hsa_kernel_handler}
+};
+TraceBuffer<trace_entry_t> trace_buffer(0x200000, trace_buffer_prm, 2);
 
 namespace hsa_support {
 // callbacks table
@@ -975,13 +981,12 @@ PUBLIC_API bool roctracer_load(HsaApiTable* table, uint64_t runtime_version, uin
   return true;
 }
 
-PUBLIC_API void roctracer_unload() {
+PUBLIC_API void roctracer_unload(bool destruct) {
   static bool is_unloaded = false;
   if (is_unloaded) return;
   is_unloaded = true;
 
-  roctracer::trace_buffer.Flush(roctracer::COPY_ENTRY_TYPE, roctracer::hsa_async_copy_handler);
-  roctracer::trace_buffer.Flush(roctracer::KERNEL_ENTRY_TYPE, roctracer::hsa_kernel_handler);
+  if (destruct == false) roctracer::trace_buffer.Flush();
   if ((roctracer::hsa_support::output_prefix != NULL) && (roctracer::kernel_file_handle != NULL)) fclose(roctracer::kernel_file_handle);
 }
 
@@ -989,14 +994,14 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
                        const char* const* failed_tool_names) {
   return roctracer_load(table, runtime_version, failed_tool_count, failed_tool_names);
 }
-PUBLIC_API void OnUnload() { roctracer_unload(); }
+PUBLIC_API void OnUnload() { roctracer_unload(false); }
 
 CONSTRUCTOR_API void constructor() {
   roctracer::util::Logger::Create();
 }
 
 DESTRUCTOR_API void destructor() {
-  roctracer_unload();
+  roctracer_unload(true);
   util::HsaRsrcFactory::Destroy();
   roctracer::util::Logger::Destroy();
 }
