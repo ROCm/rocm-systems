@@ -36,6 +36,15 @@ TLIB_PATH=$PKG_DIR/tool
 # PATH to custom HSA and OpenCl runtimes
 HSA_PATH=$PKG_DIR/lib/hsa
 
+# Default HIP path
+if [ -z "$HIP_PATH" ] ; then
+  export HIP_PATH=/opt/rocm/hip
+fi
+# Default HCC path
+if [ -z "$HCC_HOME" ] ; then
+  export HCC_HOME=/opt/rocm/hcc
+fi
+
 # runtime API trace
 HSA_TRACE=0
 HIP_TRACE=0
