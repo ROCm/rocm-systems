@@ -196,7 +196,7 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
   std::ostringstream oss;                                                                        \
 
   oss << std::dec <<
-    begin_timestamp << ":" << end_timestamp << " " << entry->pid << ":" << entry->tid << " " << roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0);                                                       \
+    begin_timestamp << ":" << end_timestamp << " " << entry->pid << ":" << entry->tid << " " << roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0);
 
   switch (cid) {
     case HIP_API_ID_hipMemcpy:
@@ -244,6 +244,7 @@ void hcc_activity_callback(const char* begin, const char* end, void* arg) {
     if (record->domain == ACTIVITY_DOMAIN_HCC_OPS) {
       fprintf(hcc_activity_file_handle, "%lu:%lu %d:%lu %s:%lu\n",
         record->begin_ns, record->end_ns, record->device_id, record->queue_id, name, record->correlation_id);
+      fflush(hcc_activity_file_handle);
     } else {
 #if 0
       fprintf(hip_api_file_handle, "%lu:%lu %u:%u %s()\n",

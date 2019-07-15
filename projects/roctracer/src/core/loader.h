@@ -47,6 +47,7 @@ class HipLoader : protected Loader {
   typedef decltype(hipRegisterActivityCallback) RegisterActivityCallback_t;
   typedef decltype(hipRemoveActivityCallback) RemoveActivityCallback_t;
   typedef decltype(hipKernelNameRef) KernelNameRef_t;
+  typedef decltype(hipApiName) ApiName_t;
 
   static HipLoader& Instance() {
     HipLoader* obj = instance_.load(std::memory_order_acquire);
@@ -66,6 +67,7 @@ class HipLoader : protected Loader {
     RegisterActivityCallback = GetFun<RegisterActivityCallback_t>("hipRegisterActivityCallback");
     RemoveActivityCallback = GetFun<RemoveActivityCallback_t>("hipRemoveActivityCallback");
     KernelNameRef = GetFun<KernelNameRef_t>("hipKernelNameRef");
+    ApiName = GetFun<ApiName_t>("hipApiName");
   }
 
   RegisterApiCallback_t* RegisterApiCallback;
@@ -73,6 +75,7 @@ class HipLoader : protected Loader {
   RegisterActivityCallback_t* RegisterActivityCallback;
   RemoveActivityCallback_t* RemoveActivityCallback;
   KernelNameRef_t* KernelNameRef;
+  ApiName_t* ApiName;
 
   private:
   static std::atomic<HipLoader*> instance_;

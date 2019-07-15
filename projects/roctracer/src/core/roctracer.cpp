@@ -598,7 +598,7 @@ PUBLIC_API const char* roctracer_op_string(
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-      return hipApiName(op);
+      return roctracer::HipLoader::Instance().ApiName(op);
       break;
     }
     default:
