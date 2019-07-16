@@ -36,6 +36,8 @@
   <metric name="WRITE_SIZE" expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
 </gfx9>
 
+<gfx906 base="gfx9"></gfx906>
+
 <global>
   # GPUBusy         The percentage of time GPU was busy.
   <metric

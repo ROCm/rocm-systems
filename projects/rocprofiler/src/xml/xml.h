@@ -49,6 +49,7 @@ class Xml {
     std::string tag;
     nodes_t nodes;
     opts_t opts;
+    const level_t* copy;
   };
   typedef std::vector<level_t*> nodes_vec_t;
   typedef std::map<std::string, nodes_vec_t> map_t;
@@ -239,7 +240,7 @@ class Xml {
 
     if (error) {
       fprintf(stderr, "XML PreProcess failed, line '%s'\n", buf);
-      exit(1);
+      abort();
     }
 
     lseek(fd_, 0, SEEK_SET);
@@ -252,9 +253,9 @@ class Xml {
       token_t token = (remainder.size()) ? remainder : NextToken();
       remainder.clear();
 
-      //      token_t token1 = token;
-      //      token1.push_back('\0');
-      //      std::cout << "> " << &token1[0] << std::endl;
+      // token_t token1 = token;
+      // token1.push_back('\0');
+      // std::cout << ">>> " << &token1[0] << std::endl;
 
       // End of file
       if (token.size() == 0) break;
@@ -312,14 +313,18 @@ class Xml {
               if (token[j] == '=') break;
             if (j == token.size()) BadFormat(token);
             token[j] = '\0';
-            const char* key = &token[0];
-            const char* value = &token[j + 1];
-            AddOption(key, value);
+            const std::string key = &token[0];
+            const std::string value = &token[j + 1];
+            if (key == "base") {
+              Inherit(value);
+            } else {
+              AddOption(key, value);
+            }
           }
           break;
         default:
           std::cout << "XML parser error: wrong state: " << state_ << std::endl;
-          exit(1);
+          abort();
       }
     }
   }
@@ -406,11 +411,11 @@ class Xml {
     token.push_back('\0');
     std::cout << "Error: " << file_name_ << ", line " << file_line_ << ", bad XML token '"
               << &token[0] << "'" << std::endl;
-    exit(1);
+    abort();
   }
 
   void AddLevel(const std::string& tag) {
-    level_t* level = new level_t;
+    level_t* level = new level_t{};
     level->tag = tag;
     if (level_) {
       level_->nodes.push_back(level);
@@ -418,11 +423,7 @@ class Xml {
     }
     level_ = level;
 
-    std::string global_tag;
-    for (level_t* level : stack_) {
-      global_tag += level->tag + ".";
-    }
-    global_tag += tag;
+    std::string global_tag = GlobalTag(tag);
     (*map_)[global_tag].push_back(level_);
   }
 
@@ -431,7 +432,52 @@ class Xml {
     stack_.pop_back();
   }
 
+  void Copy(const level_t* from, level_t* to) {
+    level_t* level = to;
+    if (level == NULL) {
+      AddLevel(from->tag);
+      level = level_;
+      level->copy = from;
+    }
+    level->opts = from->opts;
+
+    for (auto node : from->nodes) {
+      bool found = false;
+      const std::string global_tag = GlobalTag(level->tag) + "." + node->tag;
+      for (auto item : (*map_)[global_tag]) {
+        if (node == item->copy) {
+          found = true;
+          break;
+        }
+      }
+      if (found == false) Copy(node, NULL);
+    }
+
+    if (to == NULL) UpLevel();
+  }
+
+  void Inherit(const std::string& tag) {
+    std::string global_tag = GlobalTag(tag);
+    auto it = map_->find(global_tag);
+    if (it == map_->end()) {
+      fprintf(stderr, "Node \"%s\": Base not found \"%s\"\n", level_->tag.c_str(), tag.c_str());
+      abort();
+    }
+    for (auto node : it->second) {
+      Copy(node, level_);
+    }
+  }
+
   std::string CurrentLevel() const { return level_->tag; }
+
+  std::string GlobalTag(const std::string& tag) const {
+    std::string global_tag;
+    for (level_t* level : stack_) {
+      global_tag += level->tag + ".";
+    }
+    global_tag += tag;
+    return global_tag;
+  }
 
   void AddOption(const std::string& key, const std::string& value) { level_->opts[key] = value; }
 
