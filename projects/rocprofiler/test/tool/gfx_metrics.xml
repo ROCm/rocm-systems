@@ -67,3 +67,12 @@
 
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES" block=TCP event=6 descr="TCP stalls TA data interface. Now Windowed."></metric>
 </gfx9>
+
+<gfx906 base="gfx9">
+  # EA1
+  <metric name="TCC_EA1_WRREQ" block=TCC event=256 descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Atomics may travel over the same interface and are generally classified as write requests. This does not include probe commands."></metric>
+  <metric name="TCC_EA1_WRREQ_64B" block=TCC event=257 descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface."></metric>
+  <metric name="TCC_EA1_WRREQ_STALL" block=TCC event=260 descr="Number of cycles a write request was stalled."></metric>
+  <metric name="TCC_EA1_RDREQ" block=TCC event=267 descr="Number of TCC/EA read requests (either 32-byte or 64-byte)"></metric>
+  <metric name="TCC_EA1_RDREQ_32B" block=TCC event=268 descr="Number of 32-byte TCC/EA read requests"></metric>
+</gfx906>
