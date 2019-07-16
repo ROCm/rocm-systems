@@ -184,7 +184,11 @@ class MetricsDict {
       xml_->AddConst("top.const.metric", "SIMD_NUM", agent_info->simds_per_cu * agent_info->cu_num);
       xml_->AddConst("top.const.metric", "SE_NUM", agent_info->se_num);
       ImportMetrics(agent_info, "const");
-      ImportMetrics(agent_info, agent_info->gfxip);
+      if (std::string("gfx906") == agent_info->name) {
+        ImportMetrics(agent_info, agent_info->name);
+      } else {
+        ImportMetrics(agent_info, agent_info->gfxip);
+      }
       ImportMetrics(agent_info, "global");
     }
   }
