@@ -167,7 +167,7 @@ TraceBuffer<trace_entry_t>::flush_prm_t trace_buffer_prm[] = {
   {roctracer::COPY_ENTRY_TYPE, hsa_async_copy_handler},
   {roctracer::KERNEL_ENTRY_TYPE, hsa_kernel_handler}
 };
-TraceBuffer<trace_entry_t> trace_buffer(0x200000, trace_buffer_prm, 2);
+TraceBuffer<trace_entry_t> trace_buffer("HSA GPU", 0x200000, trace_buffer_prm, 2);
 
 namespace hsa_support {
 // callbacks table

@@ -61,7 +61,8 @@ class TraceBuffer {
     callback_t fun;
   };
 
-  TraceBuffer(uint32_t size, flush_prm_t* flush_prm_arr, uint32_t flush_prm_count) {
+  TraceBuffer(const char* name, uint32_t size, flush_prm_t* flush_prm_arr, uint32_t flush_prm_count) {
+    (void) name;
     size_ = size;
     data_ = allocate_fun();
     next_ = NULL;
