@@ -14,6 +14,8 @@ against expected values (self-checking);
 fail.
 
 #### Source tree ####
+- run.sh                        top-level script to start all tests
+- Makefile                      top-level makefile
 - run_scripts/
     - global.cfg:               settings and global codes used by .sh files
     - test_cache_miss.sh:       test TCP/TCC miss rates
@@ -22,6 +24,7 @@ fail.
     - cache_pmc.txt:            counters used for cache tests
 - benches/
     - test_cache/:              benchmark used for cached-related tests
+    - Makefile:                 makefile to compile benchmarks
 
 
 #### How to run ####
@@ -29,6 +32,9 @@ fail.
  $cd test/memory_validation/
 
 2) run tests
+ to start all tests
+ $run.sh
+ or, to separtely run each
  $run_scripts/test_cache_miss.sh [TCP/TCC/TCP TCC]
  $run_scripts/test_fetchwrite_size.sh
 
