@@ -54,7 +54,8 @@ typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
 hsa_rt_utils::Timer* timer = NULL;
 thread_local timestamp_t hsa_begin_timestamp = 0;
 thread_local timestamp_t hip_begin_timestamp = 0;
-bool trace_hsa = false;
+bool trace_hsa_api = false;
+bool trace_hsa_activity = false;
 bool trace_hip = false;
 
 LOADER_INSTANTIATE();
@@ -338,8 +339,19 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
 
   // API traces switches
   const char* trace_domain = getenv("ROCTRACER_DOMAIN");
-  trace_hsa = (trace_domain == NULL) || (strncmp(trace_domain, "hsa", 3) == 0);
-  trace_hip = (trace_domain == NULL) || (strncmp(trace_domain, "hip", 3) == 0);
+  if (trace_domain != NULL) {
+    if (strncmp(trace_domain, "hsa", 3) == 0) {
+      trace_hsa_api = true;
+      trace_hsa_activity = true;
+    }
+    if (strncmp(trace_domain, "hip", 3) == 0) {
+      trace_hip = true;
+    }
+    if (strncmp(trace_domain, "sys", 3) == 0) {
+      trace_hsa_api = true;
+      trace_hip = true;
+    }
+  }
 
   // Output file
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
@@ -381,12 +393,16 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
 
       if (name == "HSA") {
         found = true;
-        trace_hsa |= true;
+        trace_hsa_api = true;
         hsa_api_vec = api_vec;
+      }
+      if (name == "GPU") {
+        found = true;
+        trace_hsa_activity = true;
       }
       if (name == "HIP") {
         found = true;
-        trace_hip |= true;
+        trace_hip = true;
       }
     }
 
@@ -395,18 +411,11 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
   printf("\n");
 
   // Enable HSA API callbacks
-  if (trace_hsa) {
+  if (trace_hsa_api) {
     hsa_api_file_handle = open_output_file(output_prefix, "hsa_api_trace.txt");
-    hsa_async_copy_file_handle = open_output_file(output_prefix, "async_copy_trace.txt");
 
     // initialize HSA tracing
     roctracer_set_properties(ACTIVITY_DOMAIN_HSA_API, (void*)table);
-    roctracer::hsa_ops_properties_t ops_properties{
-      table,
-      reinterpret_cast<activity_async_callback_t>(hsa_activity_callback),
-      NULL,
-      output_prefix};
-    roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
 
     fprintf(stdout, "    HSA-trace("); fflush(stdout);
     if (hsa_api_vec.size() != 0) {
@@ -420,8 +429,22 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     } else {
       ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, NULL));
     }
-    ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
     printf(")\n");
+  }
+
+  if (trace_hsa_activity) {
+    hsa_async_copy_file_handle = open_output_file(output_prefix, "async_copy_trace.txt");
+
+    // initialize HSA tracing
+    roctracer::hsa_ops_properties_t ops_properties{
+      table,
+      reinterpret_cast<activity_async_callback_t>(hsa_activity_callback),
+      NULL,
+      output_prefix};
+    roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
+
+    fprintf(stdout, "    HSA-activity-trace()\n"); fflush(stdout);
+    ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
   }
 
   // Enable HIP API callbacks/activity
@@ -452,13 +475,16 @@ void tool_unload(bool destruct) {
   is_unloaded = true;
   roctracer_unload(destruct);
 
-  if (trace_hsa) {
+  if (trace_hsa_api) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
-    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
 
     if (destruct == false) hsa_api_trace_buffer.Flush();
 
     fclose(hsa_api_file_handle);
+  }
+  if (trace_hsa_activity) {
+    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
+
     fclose(hsa_async_copy_file_handle);
   }
   if (trace_hip) {
