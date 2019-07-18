@@ -47,6 +47,7 @@ fi
 
 # runtime API trace
 HSA_TRACE=0
+SYS_TRACE=0
 HIP_TRACE=0
 
 # Generate stats
@@ -151,6 +152,7 @@ usage() {
   echo ""
   echo "  --stats - generating kernel execution stats, file <output name>.stats.csv"
   echo "  --hsa-trace - to trace HSA, generates API execution stats and JSON file chrome-tracing compatible"
+  echo "  --sys-trace - to trace HIP/HSA APIs and GPU activity, generates stats and JSON trace chrome-tracing compatible"
   echo "  --hip-trace - to trace HIP, generates API execution stats and JSON file chrome-tracing compatible"
   echo "    Generated files: <output name>.hsa_stats.txt <output name>.json"
   echo "    Traced API list can be set by input .txt or .xml files."
@@ -215,6 +217,9 @@ run() {
   if [ "$HSA_TRACE" = 1 ] ; then
     API_TRACE="hsa"
   fi
+  if [ "$SYS_TRACE" = 1 ] ; then
+    API_TRACE="sys"
+  fi
   if [ "$HIP_TRACE" = 1 ] ; then
     if [ -z "$API_TRACE" ] ; then
       API_TRACE="hip";
@@ -225,12 +230,10 @@ run() {
   if [ -n "$API_TRACE" ] ; then
     API_TRACE=$(echo $API_TRACE | sed 's/all//')
     if [ -n "$API_TRACE" ] ; then export ROCTRACER_DOMAIN=$API_TRACE; fi
-    if [ "$API_TRACE" = "hip" ] ; then
-      export HSA_TOOLS_LIB="$RPL_PATH/libroctracer64.so $TLIB_PATH/libtracer_tool.so"
+    if [ "$API_TRACE" = "hip" -o "$API_TRACE" = "sys" ] ; then
       OUTPUT_LIST="$ROCP_OUTPUT_DIR/"
-    else
-      export HSA_TOOLS_LIB="$RPL_PATH/libroctracer64.so $TLIB_PATH/libtracer_tool.so $HSA_TOOLS_LIB"
     fi
+    export HSA_TOOLS_LIB="$TLIB_PATH/libtracer_tool.so"
   fi
 
   redirection_cmd=""
@@ -312,6 +315,11 @@ while [ 1 ] ; do
     export ROCP_TIMESTAMP_ON=1
     GEN_STATS=1
     HSA_TRACE=1
+  elif [ "$1" = "--sys-trace" ] ; then
+    ARG_VAL=0
+    export ROCP_TIMESTAMP_ON=1
+    GEN_STATS=1
+    SYS_TRACE=1
   elif [ "$1" = "--hip-trace" ] ; then
     ARG_VAL=0
     export ROCP_TIMESTAMP_ON=1

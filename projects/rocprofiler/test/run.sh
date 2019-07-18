@@ -22,6 +22,7 @@
 # THE SOFTWARE.
 ################################################################################
 
+# test filter input
 test_filter=-1
 if [ -n "$1" ] ; then
   test_filter=$1
