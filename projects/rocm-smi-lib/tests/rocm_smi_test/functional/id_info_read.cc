@@ -195,5 +195,17 @@ void TestIdInfoRead::Run(void) {
       std::cout << "\t**PCI ID (BDFID): 0x" << std::hex << val_ui64;
       std::cout << " (" << std::dec << val_ui64 << ")" << std::endl;
     }
+
+    err = rsmi_dev_serial_number_get(i, buffer, kBufferLen);
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout <<
+        "\t**Serial Number string not supported on this system." << std::endl;
+    } else if (err != RSMI_STATUS_SUCCESS) {
+        CHK_ERR_ASRT(err)
+    } else {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Device Serial Number:" << buffer << std::endl;
+      }
+    }
   }
 }

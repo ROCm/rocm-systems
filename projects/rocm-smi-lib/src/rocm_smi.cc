@@ -1428,7 +1428,6 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
 
 static rsmi_status_t
 get_dev_drm_render_minor(uint32_t dv_ind, uint32_t *minor) {
-
   GET_DEV_FROM_INDX
 
   *minor = dev->drm_render_minor();
@@ -2235,6 +2234,34 @@ rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
   uint32_t ln = val_str.copy(ver_str, len);
 
   ver_str[std::min(len - 1, ln)] = '\0';
+
+  if (len < (val_str.size() + 1)) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_serial_number_get(uint32_t dv_ind,
+                                             char *serial_num, uint32_t len) {
+  if (serial_num == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  TRY
+
+  std::string val_str;
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevSerialNumber,
+                                                            dv_ind, &val_str);
+
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  uint32_t ln = val_str.copy(serial_num, len);
+
+  serial_num[std::min(len - 1, ln)] = '\0';
 
   if (len < (val_str.size() + 1)) {
     return RSMI_STATUS_INSUFFICIENT_SIZE;

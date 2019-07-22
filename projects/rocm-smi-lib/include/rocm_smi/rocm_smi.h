@@ -783,6 +783,29 @@ rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
 rsmi_status_t rsmi_dev_vendor_name_get(uint32_t id, char *name, size_t len);
 
 /**
+ * @brief Get the serial number string for a device
+ *
+ * @details Given a device index @p dv_ind, a pointer to a buffer of chars
+ * @p serial_num, and the length of the provided buffer @p len, this function
+ * will write the serial number string (up to @p len characters) to the buffer
+ * pointed to by @p serial_num.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] serial_num a pointer to caller-provided memory to which the
+ *  serial number will be written
+ *
+ *  @param[in] len the length of the caller provided buffer @p serial_num.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire name. In this case, only @p len bytes will
+ *  be written.
+ *
+ */
+rsmi_status_t rsmi_dev_serial_number_get(uint32_t dv_ind,
+                                              char *serial_num, uint32_t len);
+/**
  *  @brief Get the subsystem device id associated with the device with
  *  provided device index.
  *

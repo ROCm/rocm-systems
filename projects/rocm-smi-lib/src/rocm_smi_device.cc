@@ -102,6 +102,7 @@ static const char *kDevUniqueIdFName = "unique_id";
 static const char *kDevDFCountersAvailableFName = "df_cntr_avail";
 static const char *kDevMemBusyPercentFName = "mem_busy_percent";
 static const char *kDevXGMIErrorFName = "xgmi_error";
+static const char *kDevSerialNumberFName = "serial_number";
 
 // Strings that are found within sysfs files
 static const char *kDevPerfLevelAutoStr = "auto";
@@ -192,6 +193,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevFwVersionUvd, kDevFwVersionUvdFName},
     {kDevFwVersionVce, kDevFwVersionVceFName},
     {kDevFwVersionVcn, kDevFwVersionVcnFName},
+    {kDevSerialNumber, kDevSerialNumberFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -505,6 +507,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevVendorID:
     case kDevVBiosVer:
     case kDevPCIEThruPut:
+    case kDevSerialNumber:
       return readDevInfoStr(type, val);
       break;
 
