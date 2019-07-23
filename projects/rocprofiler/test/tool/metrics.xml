@@ -17,7 +17,7 @@
   <metric name="WRITE_SIZE" expr=(TCC_MC_WRREQ_sum*32)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
 </gfx8>
 
-<gfx9>
+<gfx9_base>
   <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=max(TA_TA_BUSY,16) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min" expr=min(TA_TA_BUSY,16) descr="TA block is busy. Min over TA instances."></metric>
@@ -31,13 +31,29 @@
   <metric name="TCC_EA_WRREQ_sum" expr=sum(TCC_EA_WRREQ,16) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
   <metric name="TCC_EA_WRREQ_64B_sum" expr=sum(TCC_EA_WRREQ_64B,16) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
   <metric name="TCC_WRREQ_STALL_max" expr=max(TCC_EA_WRREQ_STALL,16) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+</gfx9_base>
 
+<gfx9 base="gfx9_base">
   <metric name="TCC_MC_WRREQ_sum" expr=TCC_EA_WRREQ_64B_sum*2+(TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum) descr="Number of 32-byte effective writes. Sum over TCC instaces."></metric>
   <metric name="FETCH_SIZE" expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
   <metric name="WRITE_SIZE" expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
 </gfx9>
 
-<gfx906 base="gfx9"></gfx906>
+<gfx906 base="gfx9_base">
+  # EA1
+  <metric name="TCC_EA1_RDREQ_32B_sum" expr=sum(TCC_EA1_RDREQ_32B,16) descr="Number of 32-byte TCC/EA read requests. Sum over TCC EA1s."></metric>
+  <metric name="TCC_EA1_RDREQ_sum" expr=sum(TCC_EA1_RDREQ,16) descr="Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over TCC EA1s."></metric>
+  <metric name="TCC_EA1_WRREQ_sum" expr=sum(TCC_EA1_WRREQ,16) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Sum over TCC EA1s."></metric>
+  <metric name="TCC_EA1_WRREQ_64B_sum" expr=sum(TCC_EA1_WRREQ_64B,16) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC EA1s."></metric>
+  <metric name="TCC_WRREQ1_STALL_max" expr=max(TCC_EA1_WRREQ_STALL,16) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
+  <metric name="RDATA1_SIZE" expr=(TCC_EA1_RDREQ_32B_sum*32+(TCC_EA1_RDREQ_sum-TCC_EA1_RDREQ_32B_sum)*64) descr="The total kilobytes fetched from the video memory. This is measured on EA1s."></metric>
+  <metric name="WDATA1_SIZE" expr=((TCC_EA1_WRREQ_sum-TCC_EA1_WRREQ_64B_sum)*32+TCC_EA1_WRREQ_64B_sum*64) descr="The total kilobytes written to the video memory. This is measured on EA1s."></metric>
+
+  # both EA0 and EA1 should be included
+  <metric name="TCC_MC_WRREQ_sum" expr=(TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)+(TCC_EA1_WRREQ_sum-TCC_EA1_WRREQ_64B_sum)+(TCC_EA_WRREQ_64B_sum+TCC_EA1_WRREQ_64B_sum)*2 descr="Number of 32-byte effective writes. Sum over TCC instaces."></metric>
+  <metric name="FETCH_SIZE" expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64+RDATA1_SIZE)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_SIZE" expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64+WDATA1_SIZE)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+</gfx906>
 
 <global>
   # GPUBusy         The percentage of time GPU was busy.
