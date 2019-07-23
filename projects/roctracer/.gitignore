@@ -7,6 +7,8 @@
 b
 build
 inc/hsa_prof_str.h
+inc/kfd_prof_str.h
+src/kfd/kfd_wrapper.cpp
 test/hsa
 test/MatrixTranspose/MatrixTranspose
 test/MatrixTranspose_test/MatrixTranspose
