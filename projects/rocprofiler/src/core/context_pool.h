@@ -73,7 +73,28 @@ class ContextPool {
   void Flush() {
     check_completed();
   }
+#if 0
+  template <class F>
+  F for_each(const F& f_p) {
+    F f = f_p;
+    while (sync_flag_.test_and_set(std::memory_order_acquire) != false) {
+      std::this_thread::yield();
+    }
 
+    index_t read_index = read_index_.load(std::memory_order_relaxed);
+    const index_t write_index = write_index_.load(std::memory_order_relaxed);
+    while(read_index < write_index) {
+      rocprofiler_pool_entry_t pool_entry{};
+      entry_t* entry = GetPoolEntry(read_index, &pool_entry);
+      const bool completed = entry->completed.load(std::memory_order_acquire);
+      if (completed == false) {
+        f(entry->context, entry->payload);
+      }
+    }
+
+    return f;
+  }
+#endif
   private:
   static unsigned aligned64(const unsigned& size) { return (size + 0x3f) & ~0x3fu; }
 

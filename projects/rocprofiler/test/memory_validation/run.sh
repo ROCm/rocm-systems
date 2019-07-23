@@ -1,4 +1,5 @@
 #!/bin/bash
+BDIR=`dirname $0`
 
 ###############################################################################
 # Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
@@ -24,7 +25,7 @@
 
 # test TCP/TCC miss
 # to test separately, append TCP or TCC as argument
-run_scripts/test_cache_miss.sh
+$BDIR/run_scripts/test_cache_miss.sh
 
 # test data fetch/write size to memory
-run_scripts/test_fetchwrite_size.sh
+$BDIR/run_scripts/test_fetchwrite_size.sh

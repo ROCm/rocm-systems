@@ -107,7 +107,7 @@ function one_run
         done
 
         rstdiff=1        # check result (0: pass/no-difference, 1: fail)
-        totTccReqs=$(( $hitTccReqs + $missTccReqs ))
+        totTccReqs=$((hitTccReqs + missTccReqs))
 
         #-- use kernel 'cache_test_RO' to validate read miss rate
         if [[ $kern == cache_test_RO ]]; then
