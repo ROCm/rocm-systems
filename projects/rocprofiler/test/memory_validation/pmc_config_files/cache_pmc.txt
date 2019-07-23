@@ -1,6 +1,4 @@
 pmc : FlatVMemInsts SFetchInsts
 pmc : TCC_HIT_sum TCC_MISS_sum
-pmc : TCC_EA_RDREQ_sum TCC_EA_WRREQ_sum
-pmc : TCC_EA_RDREQ_32B_sum TCC_EA_WRREQ_64B_sum
 pmc : FetchSize
 pmc : WriteSize Mem32Bwrites
