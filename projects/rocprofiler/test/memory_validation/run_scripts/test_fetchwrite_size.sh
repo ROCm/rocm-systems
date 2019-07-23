@@ -45,21 +45,25 @@ function one_run
     local M=$3
     local level=$4
     rst_sym="N${N}_s${s}_M${M}k"
-    rst_file="${rst_sym}.csv"
-    #echo "$N: $s -- $OUT_DIR/$rst_file"
+    rst_file=$OUT_DIR/"${rst_sym}.csv"
+    #echo "$N: $s -- $rst_file"
     printf "\n Traverse %5s-int array in %5s-int stride with %4s accesses" \
             $N $s "${M}K"
     ${ROCP_PATH}rocprof -i ${BASE_DIR}/../pmc_config_files/cache_pmc.txt -o \
-      ${BASE_DIR}/../$OUT_DIR/$rst_file $PATH_CACHE_BENCH/cache $s $N $M \
+      ${BASE_DIR}/../$rst_file $PATH_CACHE_BENCH/cache $s $N $M \
       >> $log_file
-    colIds=$(getColIds $OUT_DIR/$rst_file)
 
-    sed -i 's/(.*)/(args)/g' $OUT_DIR/$rst_file
+    # check the profiling result
+    checkProfRun $rst_file $log_file
+
+    colIds=$(getColIds $rst_file)
+
+    sed -i 's/(.*)/(args)/g' $rst_file
 
     for kern in $kerns
     do
         mc32wrs=0; fetchsize=0; writesize=0
-        values=`grep $kern $OUT_DIR/$rst_file | sed 's/,/ /g'`
+        values=`grep $kern $rst_file | sed 's/,/ /g'`
         for colIdStr in $colIds
         do
           colId=`echo $colIdStr | cut -f1 -d'|'`
