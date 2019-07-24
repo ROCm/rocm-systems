@@ -21,7 +21,6 @@ set ( KFD_LIB_SRC
 add_library ( ${KFD_LIB} SHARED ${KFD_LIB_SRC} )
 target_include_directories ( ${KFD_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} )
 target_link_libraries( ${KFD_LIB} PRIVATE c stdc++ )
-#execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/kfdap.py ${ROOT_DIR} ${HSA_KMT_INC_PATH}" )
 add_custom_command (
   OUTPUT "${ROOT_DIR}/src/kfd/kfd_wrapper.cpp"
   COMMAND sh -xc "${ROOT_DIR}/script/kfdap.py ${ROOT_DIR} ${HSA_KMT_INC_PATH}"
