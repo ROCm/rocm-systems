@@ -148,6 +148,7 @@ void hsa_activity_callback(
 struct hip_api_trace_entry_t {
   uint32_t valid;
   uint32_t type;
+  uint32_t domain;
   uint32_t cid;
   timestamp_t begin;
   timestamp_t end;
@@ -179,6 +180,7 @@ void hip_api_callback(
     entry->valid = roctracer::TRACE_ENTRY_COMPL;
     entry->type = 0;
     entry->cid = cid;
+    entry->domain = domain;
     entry->begin = hip_begin_timestamp;
     entry->end = end_timestamp;
     entry->pid = GetPid();
@@ -202,46 +204,76 @@ void hip_api_callback(
   }
 }
 
+void mark_api_callback(
+    uint32_t domain,
+    uint32_t cid,
+    const void* callback_data,
+    void* arg)
+{
+  (void)arg;
+  const char* name = reinterpret_cast<const char*>(callback_data);
+
+  const timestamp_t timestamp = timer->timestamp_fn_ns();
+  hip_api_trace_entry_t* entry = hip_api_trace_buffer.GetEntry();
+  entry->valid = roctracer::TRACE_ENTRY_COMPL;
+  entry->type = 0;
+  entry->cid = 0;
+  entry->domain = domain;
+  entry->begin = timestamp;
+  entry->end = timestamp + 1;
+  entry->pid = GetPid();
+  entry->tid = GetTid();
+  entry->data = {};
+  entry->name = name;
+  entry->ptr = NULL;
+}
+
 void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
+  const uint32_t domain = entry->domain;
   const uint32_t cid = entry->cid;
   const hip_api_data_t* data = &(entry->data);
   const timestamp_t begin_timestamp = entry->begin;
   const timestamp_t end_timestamp = entry->end;
   std::ostringstream oss;                                                                        \
 
+  const char* str = (domain < ACTIVITY_DOMAIN_NUMBER) ? roctracer_op_string(domain, cid, 0) : strdup("MARK");
   oss << std::dec <<
-    begin_timestamp << ":" << end_timestamp << " " << entry->pid << ":" << entry->tid << " " << roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0);
+    begin_timestamp << ":" << end_timestamp << " " << entry->pid << ":" << entry->tid << " " << str;
 
-  switch (cid) {
-    case HIP_API_ID_hipMemcpy:
-      fprintf(hip_api_file_handle, "%s(dst(%p) src(%p) size(0x%x) kind(%u))\n",
-        oss.str().c_str(),
-        data->args.hipMemcpy.dst,
-        data->args.hipMemcpy.src,
-        (uint32_t)(data->args.hipMemcpy.sizeBytes),
-        (uint32_t)(data->args.hipMemcpy.kind));
-      break;
-    case HIP_API_ID_hipMalloc:
-      fprintf(hip_api_file_handle, "%s(ptr(%p) size(0x%x))\n",
-        oss.str().c_str(),
-        entry->ptr,
-        (uint32_t)(data->args.hipMalloc.size));
-      break;
-    case HIP_API_ID_hipFree:
-      fprintf(hip_api_file_handle, "%s(ptr(%p))\n",
-        oss.str().c_str(),
-        data->args.hipFree.ptr);
-      break;
-    case HIP_API_ID_hipModuleLaunchKernel:
-    case HIP_API_ID_hipExtModuleLaunchKernel:
-    case HIP_API_ID_hipHccModuleLaunchKernel:
-      fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n",
-        oss.str().c_str(),
-        cxx_demangle(entry->name),
-        data->args.hipModuleLaunchKernel.stream);
-      break;
-    default:
-      fprintf(hip_api_file_handle, "%s()\n", oss.str().c_str());
+  if (domain == ACTIVITY_DOMAIN_HIP_API) {
+    switch (cid) {
+      case HIP_API_ID_hipMemcpy:
+        fprintf(hip_api_file_handle, "%s(dst(%p) src(%p) size(0x%x) kind(%u))\n",
+          oss.str().c_str(),
+          data->args.hipMemcpy.dst,
+          data->args.hipMemcpy.src,
+          (uint32_t)(data->args.hipMemcpy.sizeBytes),
+          (uint32_t)(data->args.hipMemcpy.kind));
+        break;
+      case HIP_API_ID_hipMalloc:
+        fprintf(hip_api_file_handle, "%s(ptr(%p) size(0x%x))\n",
+          oss.str().c_str(),
+          entry->ptr,
+          (uint32_t)(data->args.hipMalloc.size));
+        break;
+      case HIP_API_ID_hipFree:
+        fprintf(hip_api_file_handle, "%s(ptr(%p))\n",
+          oss.str().c_str(),
+          data->args.hipFree.ptr);
+        break;
+      case HIP_API_ID_hipModuleLaunchKernel:
+      case HIP_API_ID_hipExtModuleLaunchKernel:
+      case HIP_API_ID_hipHccModuleLaunchKernel:
+        fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n",
+          oss.str().c_str(),
+          cxx_demangle(entry->name),
+          data->args.hipModuleLaunchKernel.stream);
+        break;
+      default:
+        fprintf(hip_api_file_handle, "%s()\n", oss.str().c_str());
+    }
+  } else {
+    fprintf(hip_api_file_handle, "%s(\"%s\")\n", oss.str().c_str(), entry->name);
   }
 
   fflush(hip_api_file_handle);
@@ -461,6 +493,8 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
     ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
     ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
+
+    roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, (void*)mark_api_callback);
   }
 
   return roctracer_load(table, runtime_version, failed_tool_count, failed_tool_names);

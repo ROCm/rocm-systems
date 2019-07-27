@@ -209,6 +209,9 @@ roctracer_status_t roctracer_disable_activity();
 roctracer_status_t roctracer_flush_activity(
     roctracer_pool_t* pool = NULL);                       // memory pool, NULL is a default one
 
+// Mark API
+void roctracer_mark(const char* str);
+
 // Load/Un;oad methods
 // Set properties
 roctracer_status_t roctracer_set_properties(

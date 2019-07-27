@@ -89,6 +89,12 @@ THE SOFTWARE.
   return X;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+// Mark callback
+//
+typedef void (mark_api_callback_t)(uint32_t domain, uint32_t cid, const void* callback_data, void* arg);
+mark_api_callback_t* mark_api_callback_ptr = NULL;
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 // Internal library methods
 //
 namespace rocprofiler {
@@ -923,6 +929,11 @@ PUBLIC_API roctracer_status_t roctracer_flush_activity(roctracer_pool_t* pool) {
   API_METHOD_SUFFIX
 }
 
+// Mark API
+PUBLIC_API void roctracer_mark(const char* str) {
+  if (mark_api_callback_ptr) mark_api_callback_ptr(ACTIVITY_DOMAIN_NUMBER, 0, str, NULL);
+}
+
 // Set properties
 PUBLIC_API roctracer_status_t roctracer_set_properties(
     roctracer_domain_t domain,
@@ -964,7 +975,7 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
     }
     case ACTIVITY_DOMAIN_HCC_OPS:
     case ACTIVITY_DOMAIN_HIP_API:
-      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "properties are not supported, domain ID(" << domain << ")");
+      mark_api_callback_ptr = reinterpret_cast<mark_api_callback_t*>(properties);
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }
