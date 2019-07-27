@@ -26,15 +26,14 @@ time_stamp=`date +%y%m%d_%H%M%S`
 BIN_DIR=$(dirname $(realpath $0))
 PKG_DIR=$(dirname $BIN_DIR)
 ROOT_DIR=$(dirname $PKG_DIR)
+TT_DIR=$ROOT_DIR/roctracer
 RUN_DIR=`pwd`
 TMP_DIR="/tmp"
 DATA_DIR="rpl_data_${time_stamp}_$$"
 
 RPL_PATH=$PKG_DIR/lib
 TLIB_PATH=$PKG_DIR/tool
-
-# PATH to custom HSA and OpenCl runtimes
-HSA_PATH=$PKG_DIR/lib/hsa
+TTLIB_PATH=$TT_DIR/tool
 
 # Default HIP path
 if [ -z "$HIP_PATH" ] ; then
@@ -53,7 +52,6 @@ HIP_TRACE=0
 # Generate stats
 GEN_STATS=0
 
-export LD_LIBRARY_PATH=$HSA_PATH:$LD_LIBRARY_PATH
 export PATH=.:$PATH
 
 # enable error logging
@@ -233,7 +231,7 @@ run() {
     if [ "$API_TRACE" = "hip" -o "$API_TRACE" = "sys" ] ; then
       OUTPUT_LIST="$ROCP_OUTPUT_DIR/"
     fi
-    export HSA_TOOLS_LIB="$TLIB_PATH/libtracer_tool.so"
+    export HSA_TOOLS_LIB="$TTLIB_PATH/libtracer_tool.so"
   fi
 
   redirection_cmd=""
