@@ -186,6 +186,8 @@ class MetricsDict {
       ImportMetrics(agent_info, "const");
       if (std::string("gfx906") == agent_info->name) {
         ImportMetrics(agent_info, agent_info->name);
+      } else if (std::string("gfx908") == agent_info->name) {
+        ImportMetrics(agent_info, agent_info->name);
       } else {
         ImportMetrics(agent_info, agent_info->gfxip);
       }
