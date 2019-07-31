@@ -153,7 +153,7 @@ class KfdLoader : protected Loader {
   static std::atomic<KfdLoader*> instance_;
 };
 
-// KFD runtime library loader class
+// rocTX runtime library loader class
 class RocTxLoader : protected Loader {
   public:
   typedef bool (RegisterApiCallback_t)(uint32_t op, void* callback, void* arg);
