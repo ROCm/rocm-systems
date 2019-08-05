@@ -273,7 +273,7 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
         fprintf(hip_api_file_handle, "%s()\n", oss.str().c_str());
     }
   } else {
-    fprintf(hip_api_file_handle, "%s(\"%s\")\n", oss.str().c_str(), entry->name);
+    fprintf(hip_api_file_handle, "%s(name(%s))\n", oss.str().c_str(), entry->name);
   }
 
   fflush(hip_api_file_handle);
