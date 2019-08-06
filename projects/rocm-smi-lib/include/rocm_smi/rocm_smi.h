@@ -464,6 +464,27 @@ typedef rsmi_bit_field_t rsmi_bit_field;
 /// \endcond
 
 /**
+ * @brief Reserved Memory Page States
+ */
+typedef enum {
+  RSMI_MEM_PAGE_STATUS_RESERVED = 0,  //!< Reserved. This gpu page is reserved
+                                      //!<  and not available for use
+  RSMI_MEM_PAGE_STATUS_PENDING,       //!< Pending. This gpu page is marked
+                                      //!<  as bad and will be marked reserved
+                                      //!<  at the next window.
+  RSMI_MEM_PAGE_STATUS_UNRESERVABLE   //!< Unable to reserve this page
+} rsmi_memory_page_status_t;
+
+/**
+ * @brief Reserved Memory Page Record
+ */
+typedef struct {
+  uint64_t page_address;                  //!< Start address of page
+  uint64_t page_size;                     //!< Page size
+  rsmi_memory_page_status_t status;       //!< Page "reserved" status
+} rsmi_retired_page_record_t;
+
+/**
  * @brief Number of possible power profiles that a system could support
  */
 #define RSMI_MAX_NUM_POWER_PROFILES (sizeof(rsmi_bit_field_t) * 8)
@@ -1228,6 +1249,38 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
 rsmi_status_t
 rsmi_dev_memory_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
 
+/**
+ * @brief Get information about reserved ("retired") memory pages
+ *
+ * @details Given a device index @p dv_ind, this function returns retired page
+ * information @p records corresponding to the device with the provided device
+ * index @p dv_ind. The number of retired page records is returned through @p
+ * num_pages. @p records may be NULL on input. In this case, the number of
+ * records available for retrieval will be returned through @p num_pages.
+ *
+ * @param[in] dv_ind a device index
+ *
+ * @param[inout] num_pages a pointer to a uint32. As input, the value passed
+ * through this parameter is the number of ::rsmi_retired_page_record_t's that
+ * may be safely written to the memory pointed to by @p records. This is the
+ * limit on how many records will be written to @p records. On return, @p
+ * num_pages will contain the number of records written to @p records, or the
+ * number of records that could have been written if enough memory had been
+ * provided.
+ *
+ * @param[inout] records A pointer to a block of memory to which the
+ * ::rsmi_retired_page_record_t values will be written. This value may be NULL.
+ * In this case, this function can be used to query how many records are
+ * available to read.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ * ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if more records were available
+ * than allowed by the provided, allocated memory.
+ */
+rsmi_status_t
+rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
+                                         rsmi_retired_page_record_t *records);
 /** @} */  // end of MemQuer
 
 /** @defgroup PhysQuer Physical State Queries

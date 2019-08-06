@@ -2478,6 +2478,78 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs,
 }
 
 rsmi_status_t
+rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
+                                          rsmi_retired_page_record_t *records) {
+  TRY
+
+  rsmi_status_t ret;
+
+  if (num_pages == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::vector<std::string> val_vec;
+
+  ret = get_dev_value_vec(amd::smi::kDevMemPageBad, dv_ind, &val_vec);
+
+  if (ret == RSMI_STATUS_FILE_ERROR) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  if (records == nullptr || *num_pages > val_vec.size()) {
+    *num_pages = val_vec.size();
+  }
+  if (records == nullptr) {
+    return RSMI_STATUS_SUCCESS;
+  }
+
+  // Fill in records
+  char status_code;
+  rsmi_memory_page_status_t tmp_stat;
+  std::string junk;
+
+  for (uint32_t i = 0; i < *num_pages; ++i) {
+    std::istringstream fs1(val_vec[i]);
+
+    fs1 >> std::hex >> records[i].page_address;
+    fs1 >> junk;
+    assert(junk == ":");
+    fs1 >> std::hex >> records[i].page_size;
+    fs1 >> junk;
+    assert(junk == ":");
+    fs1 >> status_code;
+
+    switch (status_code) {
+      case 'P':
+        tmp_stat = RSMI_MEM_PAGE_STATUS_PENDING;
+        break;
+
+      case 'F':
+        tmp_stat = RSMI_MEM_PAGE_STATUS_UNRESERVABLE;
+        break;
+
+      case 'R':
+        tmp_stat = RSMI_MEM_PAGE_STATUS_RESERVED;
+        break;
+      default:
+        assert(!"Unexpected retired memory page status code read");
+        return RSMI_STATUS_UNKNOWN_ERROR;
+    }
+    records[i].status = tmp_stat;
+  }
+  if (*num_pages < val_vec.size()) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
 rsmi_compute_process_info_by_pid_get(uint32_t pid,
                                                   rsmi_process_info_t *proc) {
   TRY

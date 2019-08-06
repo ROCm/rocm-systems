@@ -91,6 +91,7 @@ static const char *kDevErrCntSDMAFName = "ras/sdma_err_count";
 static const char *kDevErrCntUMCFName = "ras/umc_err_count";
 static const char *kDevErrCntGFXFName = "ras/gfx_err_count";
 static const char *kDevErrCntFeaturesFName = "ras/features";
+static const char *kDevMemPageBadFName = "ras/gpu_vram_bad_pages";
 static const char *kDevMemTotGTTFName = "mem_info_gtt_total";
 static const char *kDevMemTotVisVRAMFName = "mem_info_vis_vram_total";
 static const char *kDevMemTotVRAMFName = "mem_info_vram_total";
@@ -194,6 +195,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevFwVersionVce, kDevFwVersionVceFName},
     {kDevFwVersionVcn, kDevFwVersionVcnFName},
     {kDevSerialNumber, kDevSerialNumberFName},
+    {kDevMemPageBad, kDevMemPageBadFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -394,7 +396,7 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
   }
 
   if (retVec->size() == 0) {
-    return EPERM;
+    return 0;
   }
   // Remove any *trailing* empty (whitespace) lines
   while (retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
@@ -484,6 +486,7 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
     case kDevErrCntUMC:
     case kDevErrCntGFX:
     case kDevErrCntFeatures:
+    case kDevMemPageBad:
       return readDevInfoMultiLineStr(type, val);
       break;
 

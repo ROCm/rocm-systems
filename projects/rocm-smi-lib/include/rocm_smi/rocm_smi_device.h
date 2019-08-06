@@ -119,6 +119,7 @@ enum DevInfoTypes {
   kDevFwVersionVce,
   kDevFwVersionVcn,
   kDevSerialNumber,
+  kDevMemPageBad,
 };
 
 class Device {
