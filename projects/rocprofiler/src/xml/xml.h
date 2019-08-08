@@ -216,14 +216,11 @@ class Xml {
 
       if (strncmp(buf, "#include \"", 10) == 0) {
         for (ind = 0; (ind < size) && (buf[ind] != '\n'); ++ind) {}
-        if (ind == size) {
-          fprintf(stderr, "XML PreProcess failed, line size limit %zu\n", kBufSize);
-          error = true;
-          break;
+        if (ind < size) {
+          buf[ind] = '\0';
+          size = ind;
+          lseek(fd_, pos + ind + 1, SEEK_SET);
         }
-        buf[ind] = '\0';
-        size = ind;
-        lseek(fd_, pos + ind + 1, SEEK_SET);
 
         for (ind = 10; (ind < size) && (buf[ind] != '"'); ++ind) {}
         if (ind == size) {
@@ -291,6 +288,8 @@ class Xml {
             if (node_begin) {
               AddLevel(tag);
             } else {
+              Inherit(GetOption("base"));
+
               if (strncmp(CurrentLevel().c_str(), tag, strlen(tag)) != 0) {
                 token.back() = '>';
                 BadFormat(token);
@@ -315,11 +314,7 @@ class Xml {
             token[j] = '\0';
             const std::string key = &token[0];
             const std::string value = &token[j + 1];
-            if (key == "base") {
-              Inherit(value);
-            } else {
-              AddOption(key, value);
-            }
+            AddOption(key, value);
           }
           break;
         default:
@@ -435,10 +430,17 @@ class Xml {
   void Copy(const level_t* from, level_t* to) {
     level_t* level = to;
     if (level == NULL) {
+      const std::string name = GetOption("name", from);
+      if (name.size() != 0) {
+        for (auto node : level_->nodes) {
+          if (name ==  GetOption("name", node)) return;
+        }
+      }
+
       AddLevel(from->tag);
       level = level_;
-      level->copy = from;
     }
+    level->copy = from;
     level->opts = from->opts;
 
     for (auto node : from->nodes) {
@@ -457,14 +459,16 @@ class Xml {
   }
 
   void Inherit(const std::string& tag) {
-    std::string global_tag = GlobalTag(tag);
-    auto it = map_->find(global_tag);
-    if (it == map_->end()) {
-      fprintf(stderr, "Node \"%s\": Base not found \"%s\"\n", level_->tag.c_str(), tag.c_str());
-      abort();
-    }
-    for (auto node : it->second) {
-      Copy(node, level_);
+    if (!tag.empty()) {
+      const std::string global_tag = GlobalTag(tag);
+      auto it = map_->find(global_tag);
+      if (it == map_->end()) {
+        fprintf(stderr, "Node \"%s\": Base not found \"%s\"\n", level_->tag.c_str(), tag.c_str());
+        abort();
+      }
+      for (auto node : it->second) {
+        Copy(node, level_);
+      }
     }
   }
 
@@ -479,7 +483,14 @@ class Xml {
     return global_tag;
   }
 
-  void AddOption(const std::string& key, const std::string& value) { level_->opts[key] = value; }
+  void AddOption(const std::string& key, const std::string& value) {
+    level_->opts[key] = value;
+  }
+  std::string GetOption(const std::string& key, const level_t* level = NULL) {
+    level = (level != NULL) ? level : level_;
+    auto it = level->opts.find(key);
+    return (it != level->opts.end()) ? it->second : "";
+  }
 
   const std::string file_name_;
   unsigned file_line_;
