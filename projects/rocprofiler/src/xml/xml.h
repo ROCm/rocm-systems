@@ -430,13 +430,6 @@ class Xml {
   void Copy(const level_t* from, level_t* to) {
     level_t* level = to;
     if (level == NULL) {
-      const std::string name = GetOption("name", from);
-      if (name.size() != 0) {
-        for (auto node : level_->nodes) {
-          if (name ==  GetOption("name", node)) return;
-        }
-      }
-
       AddLevel(from->tag);
       level = level_;
     }
@@ -445,9 +438,10 @@ class Xml {
 
     for (auto node : from->nodes) {
       bool found = false;
+      const std::string name = GetOption("name", node);
       const std::string global_tag = GlobalTag(level->tag) + "." + node->tag;
       for (auto item : (*map_)[global_tag]) {
-        if (node == item->copy) {
+        if ((name == GetOption("name", item)) || (node == item->copy)) {
           found = true;
           break;
         }
