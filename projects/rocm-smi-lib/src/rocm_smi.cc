@@ -532,8 +532,10 @@ static const std::map<std::string, rsmi_ras_err_state_t> kRocmSMIStateMap = {
     {"single_correctable", RSMI_RAS_ERR_STATE_SING_C},
     {"multi_uncorrectable", RSMI_RAS_ERR_STATE_MULT_UC},
     {"poison", RSMI_RAS_ERR_STATE_POISON},
+    {"off", RSMI_RAS_ERR_STATE_DISABLED},
+    {"on", RSMI_RAS_ERR_STATE_ENABLED},
 };
-static_assert(RSMI_RAS_ERR_STATE_LAST == RSMI_RAS_ERR_STATE_POISON,
+static_assert(RSMI_RAS_ERR_STATE_LAST == RSMI_RAS_ERR_STATE_ENABLED,
                  "rsmi_gpu_block_t and/or above name map need to be updated"
                                                      " and then this assert");
 
@@ -562,6 +564,7 @@ rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
 
   std::string blk_line;
   std::string search_str = kRocmSMIBlockMap.at(block);
+  std::string sysfs_junk = " ras feature mask:";
   std::string state_str;
 
   search_str += ":";
@@ -570,8 +573,9 @@ rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
     std::istringstream fs1(val_vec[i]);
 
     fs1 >> blk_line;
-
-    if (blk_line == search_str) {
+    if (blk_line == search_str || blk_line == kRocmSMIBlockMap.at(block)) {
+      if (blk_line.back() != ':')
+        fs1.ignore(sysfs_junk.length(), ':');
       fs1 >> state_str;
       assert(kRocmSMIStateMap.count(state_str));
       *state = kRocmSMIStateMap.at(state_str);

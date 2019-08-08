@@ -70,6 +70,8 @@ static const char * kRasErrStateStrings[] = {
     "Single, Correctable",           // RSMI_RAS_ERR_STATE_SING_C
     "Multiple, Uncorrectable",       // RSMI_RAS_ERR_STATE_MULT_UC
     "Poison"                         // RSMI_RAS_ERR_STATE_POISON
+    "off",                           // RSMI_RAS_ERR_STATE_DISABLED
+    "on",                            // RSMI_RAS_ERR_STATE_ENABLED
 };
 static_assert(
   sizeof(kRasErrStateStrings)/sizeof(char *) == (RSMI_RAS_ERR_STATE_LAST + 1),
@@ -89,8 +91,10 @@ static const std::map<rsmi_ras_err_state_t, const char *> kErrStateNameMap = {
                             kRasErrStateStrings[RSMI_RAS_ERR_STATE_MULT_UC]},
     {RSMI_RAS_ERR_STATE_POISON,
                             kRasErrStateStrings[RSMI_RAS_ERR_STATE_POISON]},
+    {RSMI_RAS_ERR_STATE_ENABLED,
+                            kRasErrStateStrings[RSMI_RAS_ERR_STATE_ENABLED]},
 };
-static_assert(RSMI_RAS_ERR_STATE_LAST == RSMI_RAS_ERR_STATE_POISON,
+static_assert(RSMI_RAS_ERR_STATE_LAST == RSMI_RAS_ERR_STATE_ENABLED,
                                       "kErrStateNameMap needs to be updated");
 
 static const struct option long_options[] = {

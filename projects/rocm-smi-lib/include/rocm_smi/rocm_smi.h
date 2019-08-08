@@ -383,8 +383,9 @@ typedef enum {
   RSMI_RAS_ERR_STATE_MULT_UC,    //!< Multiple uncorrectable errors
   RSMI_RAS_ERR_STATE_POISON,     //!< Firmware detected error and isolated
                                  //!< page. Treat as uncorrectable.
+  RSMI_RAS_ERR_STATE_ENABLED,    //!< ECC is enabled
 
-  RSMI_RAS_ERR_STATE_LAST = RSMI_RAS_ERR_STATE_POISON,
+  RSMI_RAS_ERR_STATE_LAST = RSMI_RAS_ERR_STATE_ENABLED,
   RSMI_RAS_ERR_STATE_INVALID = 0xFFFFFFFF
 } rsmi_ras_err_state_t;
 
