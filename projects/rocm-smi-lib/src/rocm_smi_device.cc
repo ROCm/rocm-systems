@@ -415,6 +415,7 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevSubSysDevID:
     case kDevSubSysVendorID:
     case kDevVendorID:
+    case kDevErrCntFeatures:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       *val = std::stoi(tempStr, 0, 16);
@@ -485,7 +486,6 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
     case kDevErrCntSDMA:
     case kDevErrCntUMC:
     case kDevErrCntGFX:
-    case kDevErrCntFeatures:
     case kDevMemPageBad:
       return readDevInfoMultiLineStr(type, val);
       break;

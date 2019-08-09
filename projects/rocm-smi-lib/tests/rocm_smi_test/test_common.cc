@@ -59,8 +59,19 @@ static const std::map<rsmi_gpu_block_t, const char *> kBlockNameMap = {
     {RSMI_GPU_BLOCK_UMC, "UMC"},
     {RSMI_GPU_BLOCK_SDMA, "SDMA"},
     {RSMI_GPU_BLOCK_GFX, "GFX"},
+    {RSMI_GPU_BLOCK_MMHUB, "MMHUB"},
+    {RSMI_GPU_BLOCK_ATHUB, "ATHUB"},
+    {RSMI_GPU_BLOCK_PCIE_BIF, "PCIE_BIF"},
+    {RSMI_GPU_BLOCK_HDP, "HDP"},
+    {RSMI_GPU_BLOCK_XGMI_WAFL, "XGMI_WAFL"},
+    {RSMI_GPU_BLOCK_DF, "DF"},
+    {RSMI_GPU_BLOCK_SMN, "SMN"},
+    {RSMI_GPU_BLOCK_SEM, "SEM"},
+    {RSMI_GPU_BLOCK_MP0, "MP0"},
+    {RSMI_GPU_BLOCK_MP1, "MP1"},
+    {RSMI_GPU_BLOCK_FUSE, "FUSE"},
 };
-static_assert(RSMI_GPU_BLOCK_LAST == RSMI_GPU_BLOCK_GFX,
+static_assert(RSMI_GPU_BLOCK_LAST == RSMI_GPU_BLOCK_FUSE,
                                          "kBlockNameMap needs to be updated");
 
 static const char * kRasErrStateStrings[] = {
@@ -70,8 +81,8 @@ static const char * kRasErrStateStrings[] = {
     "Single, Correctable",           // RSMI_RAS_ERR_STATE_SING_C
     "Multiple, Uncorrectable",       // RSMI_RAS_ERR_STATE_MULT_UC
     "Poison"                         // RSMI_RAS_ERR_STATE_POISON
-    "off",                           // RSMI_RAS_ERR_STATE_DISABLED
-    "on",                            // RSMI_RAS_ERR_STATE_ENABLED
+    "Off",                           // RSMI_RAS_ERR_STATE_DISABLED
+    "On",                            // RSMI_RAS_ERR_STATE_ENABLED
 };
 static_assert(
   sizeof(kRasErrStateStrings)/sizeof(char *) == (RSMI_RAS_ERR_STATE_LAST + 1),

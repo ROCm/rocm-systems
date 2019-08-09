@@ -471,20 +471,19 @@ rsmi_num_monitor_devices(uint32_t *num_devices) {
 }
 
 rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
-                                                    uint64_t *enabled_mask) {
+                                                    uint64_t *enabled_blks) {
   TRY
-  rsmi_status_t ret;
-
-  if (enabled_mask == nullptr) {
+  if (enabled_blks == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+  rsmi_status_t ret;
+  std::string feature_line;
+  std::string tmp_str;
+
 
   DEVICE_MUTEX
 
-  std::vector<std::string> val_vec;
-
-  ret = get_dev_value_vec(amd::smi::kDevErrCntFeatures, dv_ind, &val_vec);
-
+  ret = get_dev_value_line(amd::smi::kDevErrCntFeatures, dv_ind, &feature_line);
   if (ret == RSMI_STATUS_FILE_ERROR) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
@@ -492,38 +491,21 @@ rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
     return ret;
   }
 
-  std::string junk;
-  std::istringstream fs1(val_vec[0]);
-  std::string mask_str;
+  std::istringstream fs1(feature_line);
 
-  fs1 >> junk;
-  assert(junk == "feature");
-  fs1 >> junk;
-  assert(junk == "mask:");
-  fs1 >> mask_str;
+  fs1 >> tmp_str;  // ignore
+  assert(tmp_str == "feature");
+  fs1 >> tmp_str;  // ignore
+  assert(tmp_str == "mask:");
+  fs1 >> tmp_str;
 
   errno = 0;
-  *enabled_mask = strtoul(mask_str.c_str(), nullptr, 16);
+  *enabled_blks = strtoul(tmp_str.c_str(), nullptr, 16);
   assert(errno == 0);
 
   return errno_to_rsmi_status(errno);
-
   CATCH
 }
-
-
-static const char *kRSMIGpuBlkUMCFName = "umc";
-static const char *kRSMIGpuBlkSDMAFName = "sdma";
-static const char *kRSMIGpuBlkGFXFName = "gfx";
-
-static const std::map<rsmi_gpu_block_t, const char *> kRocmSMIBlockMap = {
-  {RSMI_GPU_BLOCK_UMC,  kRSMIGpuBlkUMCFName},
-  {RSMI_GPU_BLOCK_SDMA, kRSMIGpuBlkSDMAFName},
-  {RSMI_GPU_BLOCK_GFX,  kRSMIGpuBlkGFXFName},
-};
-static_assert(RSMI_GPU_BLOCK_LAST == RSMI_GPU_BLOCK_GFX,
-                 "rsmi_gpu_block_t and/or above name map need to be updated"
-                                                     " and then this assert");
 
 static const std::map<std::string, rsmi_ras_err_state_t> kRocmSMIStateMap = {
     {"none", RSMI_RAS_ERR_STATE_NONE},
@@ -549,11 +531,11 @@ rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
     return RSMI_STATUS_INVALID_ARGS;
   }
   rsmi_status_t ret;
-  std::vector<std::string> val_vec;
+  uint64_t features_mask;
 
   DEVICE_MUTEX
 
-  ret = get_dev_value_vec(amd::smi::kDevErrCntFeatures, dv_ind, &val_vec);
+  ret = rsmi_dev_ecc_enabled_get(dv_ind, &features_mask);
 
   if (ret == RSMI_STATUS_FILE_ERROR) {
     return RSMI_STATUS_NOT_SUPPORTED;
@@ -562,29 +544,10 @@ rsmi_status_t rsmi_dev_ecc_status_get(uint32_t dv_ind, rsmi_gpu_block_t block,
     return ret;
   }
 
-  std::string blk_line;
-  std::string search_str = kRocmSMIBlockMap.at(block);
-  std::string sysfs_junk = " ras feature mask:";
-  std::string state_str;
+  *state = (features_mask & block) ?
+                     RSMI_RAS_ERR_STATE_ENABLED : RSMI_RAS_ERR_STATE_DISABLED;
 
-  search_str += ":";
-
-  for (uint32_t i = 1; i < val_vec.size(); ++i) {  // Skip features line
-    std::istringstream fs1(val_vec[i]);
-
-    fs1 >> blk_line;
-    if (blk_line == search_str || blk_line == kRocmSMIBlockMap.at(block)) {
-      if (blk_line.back() != ':')
-        fs1.ignore(sysfs_junk.length(), ':');
-      fs1 >> state_str;
-      assert(kRocmSMIStateMap.count(state_str));
-      *state = kRocmSMIStateMap.at(state_str);
-      return RSMI_STATUS_SUCCESS;
-    }
-  }
-  assert(!"Block was not found");
-  *state = RSMI_RAS_ERR_STATE_INVALID;
-  return RSMI_STATUS_NOT_FOUND;
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
