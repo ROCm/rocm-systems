@@ -4,6 +4,7 @@
 #include <list>
 #include <mutex>
 #include <pthread.h>
+#include <string.h>
 
 #define PTHREAD_CALL(call)                                                                         \
   do {                                                                                             \
@@ -61,8 +62,10 @@ class TraceBuffer {
     callback_t fun;
   };
 
-  TraceBuffer(const char* name, uint32_t size, flush_prm_t* flush_prm_arr, uint32_t flush_prm_count) {
-    (void) name;
+  TraceBuffer(const char* name, uint32_t size, flush_prm_t* flush_prm_arr, uint32_t flush_prm_count) :
+    is_flushed_(ATOMIC_FLAG_INIT)
+  {
+    name_ = strdup(name);
     size_ = size;
     data_ = allocate_fun();
     next_ = NULL;
@@ -72,7 +75,6 @@ class TraceBuffer {
 
     flush_prm_arr_ = flush_prm_arr;
     flush_prm_count_ = flush_prm_count;
-    is_flushed_ = false;
 
     PTHREAD_CALL(pthread_mutex_init(&work_mutex_, NULL));
     PTHREAD_CALL(pthread_cond_init(&work_cond_, NULL));
@@ -85,7 +87,7 @@ class TraceBuffer {
     PTHREAD_CALL(pthread_join(work_thread_, &res));
     if (res != PTHREAD_CANCELED) abort_run("~TraceBuffer: consumer thread wasn't stopped correctly");
 
-    if (is_flushed_ == false) flush_buf();
+    Flush();
   }
 
 
@@ -96,28 +98,28 @@ class TraceBuffer {
   }
 
   void Flush() {
-    PTHREAD_CALL(pthread_mutex_lock(&work_mutex_));
     flush_buf();
-    PTHREAD_CALL(pthread_mutex_unlock(&work_mutex_));
   }
 
   private:
   void flush_buf() {
-    is_flushed_ = true;
-    for (flush_prm_t* prm = flush_prm_arr_; prm < flush_prm_arr_ + flush_prm_count_; prm++) {
-      uint32_t type = prm->type;
-      callback_t fun = prm->fun;
-      pointer_t pointer = 0;
-      for (Entry* ptr : buf_list_) {
-        Entry* end = ptr + size_;
-        while ((ptr < end) && (pointer < read_pointer_)) {
-          if (ptr->type == type) {
-            if (ptr->valid == TRACE_ENTRY_COMPL) {
-              fun(ptr);
+    const bool is_flushed = atomic_flag_test_and_set_explicit(&is_flushed_, std::memory_order_acquire);
+    if (is_flushed == false) {
+      for (flush_prm_t* prm = flush_prm_arr_; prm < flush_prm_arr_ + flush_prm_count_; prm++) {
+        uint32_t type = prm->type;
+        callback_t fun = prm->fun;
+        pointer_t pointer = 0;
+        for (Entry* ptr : buf_list_) {
+          Entry* end = ptr + size_;
+          while ((ptr < end) && (pointer < read_pointer_)) {
+            if (ptr->type == type) {
+              if (ptr->valid == TRACE_ENTRY_COMPL) {
+                fun(ptr);
+              }
             }
+            ptr++;
+            pointer++;
           }
-          ptr++;
-          pointer++;
         }
       }
     }
@@ -164,6 +166,7 @@ class TraceBuffer {
     abort();
   }
 
+  const char* name_;
   uint32_t size_;
   Entry* data_;
   Entry* next_;
@@ -173,7 +176,7 @@ class TraceBuffer {
 
   flush_prm_t* flush_prm_arr_;
   uint32_t flush_prm_count_;
-  bool is_flushed_;
+  volatile std::atomic_flag is_flushed_;
 
   pthread_t work_thread_;
   pthread_mutex_t work_mutex_;

@@ -60,6 +60,12 @@ class Tracker {
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
   }
 
+  // Delete tracker entry
+  inline static void Disable(entry_t* entry) {
+    hsa_signal_destroy(entry->signal);
+    entry->valid.store(roctracer::TRACE_ENTRY_INV, std::memory_order_release);
+  }
+
   private:
   // Entry completion
   inline static void Complete(hsa_signal_value_t signal_value, entry_t* entry) {
