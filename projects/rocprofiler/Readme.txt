@@ -27,7 +27,7 @@ $ cd .../rocprofiler
 $ mkdir build
 $ cd build
 
-$ export CMAKE_PREFIX_PATH=/home/evgeny/git/compute/out/ubuntu-16.04/16.04
+$ export CMAKE_PREFIX_PATH=/opt/rocm/include/hsa:/opt/rocm
 $ cmake ..
 $ make
 
