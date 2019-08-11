@@ -132,23 +132,23 @@ struct output_streamer<uint64_t> {
 
 template<>
 struct output_streamer<bool*> {
-  inline static std::ostream& put(std::ostream& out, bool* v) { out << std::hex << "<bool " << "0x" << *v << std::dec << ">"; return out; }
+  inline static std::ostream& put(std::ostream& out, bool* v) { out << std::hex << "<bool " << "0x" << v << std::dec << ">"; return out; }
 };
 template<>
 struct output_streamer<uint8_t*> {
-  inline static std::ostream& put(std::ostream& out, uint8_t* v) { out << std::hex << "<uint8_t " << "0x" << *v << std::dec << ">"; return out; }
+  inline static std::ostream& put(std::ostream& out, uint8_t* v) { out << std::hex << "<uint8_t " << "0x" << v << std::dec << ">"; return out; }
 };
 template<>
 struct output_streamer<uint16_t*> {
-  inline static std::ostream& put(std::ostream& out, uint16_t* v) { out << std::hex << "<uint16_t " << "0x" << *v << std::dec << ">"; return out; }
+  inline static std::ostream& put(std::ostream& out, uint16_t* v) { out << std::hex << "<uint16_t " << "0x" << v << std::dec << ">"; return out; }
 };
 template<>
 struct output_streamer<uint32_t*> {
-  inline static std::ostream& put(std::ostream& out, uint32_t* v) { out << std::hex << "<uint32_t " << "0x" << *v << std::dec << ">"; return out; }
+  inline static std::ostream& put(std::ostream& out, uint32_t* v) { out << std::hex << "<uint32_t " << "0x" << v << std::dec << ">"; return out; }
 };
 template<>
 struct output_streamer<uint64_t*> {
-  inline static std::ostream& put(std::ostream& out, uint64_t* v) { out << std::hex << "<uint64_t " << "0x" << *v << std::dec << ">"; return out; }
+  inline static std::ostream& put(std::ostream& out, uint64_t* v) { out << std::hex << "<uint64_t " << "0x" << v << std::dec << ">"; return out; }
 };
 
 template<>

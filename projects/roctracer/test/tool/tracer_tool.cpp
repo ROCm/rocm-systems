@@ -50,6 +50,8 @@ THE SOFTWARE.
     }                                                                                              \
   } while (0)
 
+#define onload_debug false
+
 typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
 hsa_rt_utils::Timer* timer = NULL;
 thread_local timestamp_t hsa_begin_timestamp = 0;
@@ -367,7 +369,7 @@ FILE* open_output_file(const char* prefix, const char* name) {
 // HSA-runtime tool on-load method
 extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
-//  printf("TOOL OnLoad\n"); fflush(stdout);
+  if (onload_debug) printf("TOOL OnLoad\n"); fflush(stdout);
   timer = new hsa_rt_utils::Timer(table->core_->hsa_system_get_info_fn);
 
   // API traces switches
@@ -498,13 +500,13 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, (void*)mark_api_callback);
   }
 
-//  printf("TOOL OnLoad end\n"); fflush(stdout);
+  if (onload_debug) printf("TOOL OnLoad end\n"); fflush(stdout);
   return roctracer_load(table, runtime_version, failed_tool_count, failed_tool_names);
 }
 
 // tool unload method
 void tool_unload(bool destruct) {
-//  printf("TOOL tool_unload\n"); fflush(stdout);
+  if (onload_debug) printf("TOOL tool_unload\n"); fflush(stdout);
   static bool is_unloaded = false;
   if (is_unloaded) {
     return;
@@ -515,7 +517,7 @@ void tool_unload(bool destruct) {
   if (trace_hsa_api) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
 
-    if (destruct == false) hsa_api_trace_buffer.Flush();
+    // if (destruct == false) hsa_api_trace_buffer.Flush();
 
     fclose(hsa_api_file_handle);
   }
@@ -531,26 +533,26 @@ void tool_unload(bool destruct) {
     ROCTRACER_CALL(roctracer_flush_activity());
     ROCTRACER_CALL(roctracer_close_pool());
 
-    if (destruct == false) hip_api_trace_buffer.Flush();
+    // if (destruct == false) hip_api_trace_buffer.Flush();
 
     if (hip_api_file_handle != stdout) fclose(hip_api_file_handle);
     if (hcc_activity_file_handle != stdout) fclose(hcc_activity_file_handle);
   }
-//  printf("TOOL tool_unload end\n"); fflush(stdout);
+  if (onload_debug) printf("TOOL tool_unload end\n"); fflush(stdout);
 }
 
 // HSA-runtime on-unload method
 extern "C" PUBLIC_API void OnUnload() {
-//  printf("TOOL OnUnload\n"); fflush(stdout);
+  if (onload_debug) printf("TOOL OnUnload\n"); fflush(stdout);
   tool_unload(false);
-//  printf("TOOL OnUnload end\n"); fflush(stdout);
+  if (onload_debug) printf("TOOL OnUnload end\n"); fflush(stdout);
 }
 
 extern "C" CONSTRUCTOR_API void constructor() {
-//  printf("TOOL constructor ...end\n"); fflush(stdout);
+  if (onload_debug) printf("TOOL constructor ...end\n"); fflush(stdout);
 }
 extern "C" DESTRUCTOR_API void destructor() {
-//  printf("TOOL destructor\n"); fflush(stdout);
+  if (onload_debug) printf("TOOL destructor\n"); fflush(stdout);
   tool_unload(true);
-//  printf("TOOL destructor end\n"); fflush(stdout);
+  if (onload_debug) printf("TOOL destructor end\n"); fflush(stdout);
 }

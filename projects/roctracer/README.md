@@ -39,6 +39,7 @@ asyncronous activity records pool support.
   export CMAKE_PREFIX_PATH=/opt/rocm
 
  - Build ROCtracer
+  export CMAKE_BUILD_TYPE=<debug|release> # release by default
   cd <your path>/roctracer && mkdir build && cd build && cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm .. && make -j <nproc>
 
  - To build and run test

@@ -49,6 +49,7 @@ class Tracker {
     // Creating a new tracker entry
     entry->type = type;
     entry->agent = agent;
+    entry->dev_index = 0; //hsa_rsrc->GetAgentInfo(agent)->dev_index;
     entry->orig = signal;
     entry->dispatch = hsa_rsrc->TimestampNs();
     entry->valid.store(roctracer::TRACE_ENTRY_INIT, std::memory_order_release);
@@ -83,6 +84,7 @@ class Tracker {
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_dispatch_time");
       entry->begin = hsa_rsrc->SysclockToNs(dispatch_time.start);
       entry->end = hsa_rsrc->SysclockToNs(dispatch_time.end);
+      entry->dev_index = (hsa_rsrc->GetAgentInfo(entry->agent))->dev_index;
     }
 
     entry->complete = hsa_rsrc->TimestampNs();

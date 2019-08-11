@@ -5,6 +5,7 @@
 #include <mutex>
 #include <pthread.h>
 #include <string.h>
+#include <unistd.h>
 
 #define PTHREAD_CALL(call)                                                                         \
   do {                                                                                             \
@@ -37,6 +38,7 @@ struct trace_entry_t {
   uint64_t end;                                        // kernel end timestamp, ns
   uint64_t complete;
   hsa_agent_t agent;
+  uint32_t dev_index;
   hsa_signal_t orig;
   hsa_signal_t signal;
   union {
@@ -56,6 +58,7 @@ class TraceBuffer {
   typedef void (*callback_t)(Entry*);
   typedef TraceBuffer<Entry> Obj;
   typedef uint64_t pointer_t;
+  typedef std::mutex mutex_t;
 
   struct flush_prm_t {
     uint32_t type;
@@ -87,17 +90,19 @@ class TraceBuffer {
     PTHREAD_CALL(pthread_join(work_thread_, &res));
     if (res != PTHREAD_CANCELED) abort_run("~TraceBuffer: consumer thread wasn't stopped correctly");
 
-    Flush();
+    flush_buf();
   }
 
 
   Entry* GetEntry() {
     const pointer_t pointer = read_pointer_.fetch_add(1);
     if (pointer >= end_pointer_) wrap_buffer(pointer);
-    return data_ + pointer;
+    if (pointer >= end_pointer_) abort_run("pointer >= end_pointer_ after buffer wrap");
+    return data_ + (pointer + size_ - end_pointer_);
   }
 
   void Flush() {
+    std::lock_guard<mutex_t> lck(mutex_);
     flush_buf();
   }
 
@@ -148,6 +153,7 @@ class TraceBuffer {
   }
 
   void wrap_buffer(const pointer_t pointer) {
+    std::lock_guard<mutex_t> lck(mutex_);
     PTHREAD_CALL(pthread_mutex_lock(&work_mutex_));
     if (pointer >= end_pointer_) {
       data_ = next_;
@@ -170,8 +176,8 @@ class TraceBuffer {
   uint32_t size_;
   Entry* data_;
   Entry* next_;
-  std::atomic<pointer_t> read_pointer_;
-  pointer_t end_pointer_;
+  volatile std::atomic<pointer_t> read_pointer_;
+  volatile std::atomic<pointer_t> end_pointer_;
   std::list<Entry*> buf_list_;
 
   flush_prm_t* flush_prm_arr_;
@@ -181,6 +187,8 @@ class TraceBuffer {
   pthread_t work_thread_;
   pthread_mutex_t work_mutex_;
   pthread_cond_t work_cond_;
+
+  mutex_t mutex_;
 };
 }  // namespace roctracer
 
