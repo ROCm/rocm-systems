@@ -73,10 +73,6 @@ function( parse_version VERSION_STRING )
         set ( TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${PATCH}" )
     endif ()
 
-    if ( DEFINED VERSION_BUILD )
-        set ( VERSION_BUILD "${VERSION_BUILD}" PARENT_SCOPE )
-    endif ()
-
     set ( VERSION_STRING "${TEMP_VERSION_STRING}" PARENT_SCOPE )
 
 endfunction ()
@@ -85,7 +81,7 @@ endfunction ()
 ## using versioning tags and git describe.
 ## Passes back a packaging version string
 ## and a library version string.
-function(get_version DEFAULT_VERSION_STRING VERSION_PREFIX)
+function(get_current_version DEFAULT_VERSION_STRING VERSION_PREFIX)
 
     parse_version ( ${DEFAULT_VERSION_STRING} )
 
@@ -109,7 +105,28 @@ function(get_version DEFAULT_VERSION_STRING VERSION_PREFIX)
     set( VERSION_STRING "${VERSION_STRING}" PARENT_SCOPE )
     set( VERSION_MAJOR  "${VERSION_MAJOR}" PARENT_SCOPE )
     set( VERSION_MINOR  "${VERSION_MINOR}" PARENT_SCOPE )
-    set( VERSION_PATCH  "${VERSION_PATCH}" PARENT_SCOPE )
-    set( VERSION_BUILD  "${VERSION_BUILD}" PARENT_SCOPE )
 
+endfunction()
+function(num_change_since_prev_pkg VERSION_PREFIX)
+
+    find_program(get_commits NAMES version_util.sh
+                 PATHS ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
+    if (get_commits)
+       execute_process( COMMAND ${get_commits} -c ${VERSION_PREFIX}
+                          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                          OUTPUT_VARIABLE NUM_COMMITS
+                          OUTPUT_STRIP_TRAILING_WHITESPACE
+                          RESULT_VARIABLE RESULT )
+
+        set(NUM_COMMITS "${NUM_COMMITS}" PARENT_SCOPE )
+
+        if ( ${RESULT} EQUAL 0 )
+          message("${NUM_COMMITS} were found since previous release")
+        else()
+          message("Unable to determine number of commits since previous release")
+        endif()
+    else()
+        message("WARNING: Didn't find version_util.sh")
+        set(NUM_COMMITS "unknown" PARENT_SCOPE )
+    endif()
 endfunction()

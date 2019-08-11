@@ -18,29 +18,32 @@ set(ROCM_SMI_TARGET "${ROCM_SMI}64")
 # ABI breaks (update MAJOR and MINOR), and ABI/API additions (update MINOR).
 # Until ABI stabilizes VERSION_MAJOR will be 0. This should be over-ridden
 # by git tags (through "git describe") when they are present.
-set(ROCM_SMI_LIB_VERSION_MAJOR 0)
-set(ROCM_SMI_LIB_VERSION_MINOR 2)
+set(PKG_VERSION_MAJOR 1)
+set(PKG_VERSION_MINOR 0)
+set(PKG_VERSION_PATCH 0)
+set(PKG_VERSION_NUM_COMMIT 0)
 
 ################# Determine the library version #########################
 ## Setup the package version based on git tags.
-set(LIB_SO_VERSION_STR
-              "${ROCM_SMI_LIB_VERSION_MAJOR}.${ROCM_SMI_LIB_VERSION_MINOR}.0")
-get_version(${LIB_SO_VERSION_STR} "rsmi")
+set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
 
-# VERSION_* variables should be set by get_version
-set(LIB_SO_VERSION_STR ${VERSION_STRING})
-set(${ROCM_SMI}_VERSION_MAJOR "${VERSION_MAJOR}")
-set(${ROCM_SMI}_VERSION_MINOR "${VERSION_MINOR}")
-set(${ROCM_SMI}_VERSION_PATCH "${VERSION_PATCH}")
-set(${ROCM_SMI}_VERSION_BUILD "${VERSION_BUILD}")
+get_current_version("1.0.0" ${PKG_VERSION_GIT_TAG_PREFIX})
+num_change_since_prev_pkg(${PKG_VERSION_GIT_TAG_PREFIX})
+# VERSION_* variables should be set by get_current_version
+set(PKG_VERSION_STR "${VERSION_STRING}.${NUM_COMMITS}")
+message("Package version: ${PKG_VERSION_STR}")
 
 # Debian package specific variables
 # Set a default value for the package version
-set(VERSION_STRING "1.0.0")
-get_version(${VERSION_STRING} "roc")
+get_current_version("1.0.0.0" "rsmi_so_ver")
 
-# VERSION_* variables should be set by get_version
-set(BUILD_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
+# VERSION_* variables should be set by get_current_version
+set(SO_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}")
+set(${ROCM_SMI}_VERSION_MAJOR "${VERSION_MAJOR}")
+set(${ROCM_SMI}_VERSION_MINOR "${VERSION_MINOR}")
+set(${ROCM_SMI}_VERSION_PATCH "0")
+set(${ROCM_SMI}_VERSION_BUILD "0")
+message("SOVERSION: ${SO_VERSION_STRING}")
 
 project(${ROCM_SMI_TARGET})
 
@@ -62,7 +65,7 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
                  "ROCm System Management Interface library")
 endif()
 
-set(CPACK_PACKAGE_FILE_NAME "rocm_smi_lib64-${BUILD_VERSION_STRING}")
+set(CPACK_PACKAGE_FILE_NAME "rocm_smi_lib64-${PKG_VERSION_STR}")
 ## Verbose output.
 set(CMAKE_VERBOSE_MAKEFILE on)
 
@@ -111,11 +114,12 @@ target_link_libraries(${SMI_EXAMPLE_EXE} ${ROCM_SMI_TARGET})
 add_library(${ROCM_SMI_TARGET} SHARED ${SMI_SRC_LIST} ${SMI_INC_LIST})
 target_link_libraries(${ROCM_SMI_TARGET} pthread rt)
 
+
 ## Set the VERSION and SOVERSION values
-set_property(TARGET ${ROCM_SMI_TARGET}
-                             PROPERTY VERSION "${LIB_SO_VERSION_STR}")
-set_property(TARGET ${ROCM_SMI_TARGET}
-             PROPERTY SOVERSION "${ROCM_SMI_LIB_VERSION_MAJOR}")
+set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY
+             SOVERSION "${VERSION_MAJOR}")
+set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY
+             VERSION "${SO_VERSION_STRING}")
 
 ## If the library is a release, strip the target library
 if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
