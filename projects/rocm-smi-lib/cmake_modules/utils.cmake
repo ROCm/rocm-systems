@@ -81,11 +81,8 @@ endfunction ()
 ## using versioning tags and git describe.
 ## Passes back a packaging version string
 ## and a library version string.
-function(get_current_version DEFAULT_VERSION_STRING VERSION_PREFIX)
-
+function(get_version_from_tag DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
     parse_version ( ${DEFAULT_VERSION_STRING} )
-
-    find_program ( GIT NAMES git )
 
     if ( GIT )
         execute_process ( COMMAND git describe --tags --dirty --long --match ${VERSION_PREFIX}-[0-9.]*
@@ -93,11 +90,8 @@ function(get_current_version DEFAULT_VERSION_STRING VERSION_PREFIX)
                           OUTPUT_VARIABLE GIT_TAG_STRING
                           OUTPUT_STRIP_TRAILING_WHITESPACE
                           RESULT_VARIABLE RESULT )
-
         if ( ${RESULT} EQUAL 0 )
-
             parse_version ( ${GIT_TAG_STRING} )
-
         endif ()
 
     endif ()
@@ -105,10 +99,9 @@ function(get_current_version DEFAULT_VERSION_STRING VERSION_PREFIX)
     set( VERSION_STRING "${VERSION_STRING}" PARENT_SCOPE )
     set( VERSION_MAJOR  "${VERSION_MAJOR}" PARENT_SCOPE )
     set( VERSION_MINOR  "${VERSION_MINOR}" PARENT_SCOPE )
-
 endfunction()
-function(num_change_since_prev_pkg VERSION_PREFIX)
 
+function(num_change_since_prev_pkg VERSION_PREFIX)
     find_program(get_commits NAMES version_util.sh
                  PATHS ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
     if (get_commits)
@@ -129,4 +122,49 @@ function(num_change_since_prev_pkg VERSION_PREFIX)
         message("WARNING: Didn't find version_util.sh")
         set(NUM_COMMITS "unknown" PARENT_SCOPE )
     endif()
+endfunction()
+
+function(get_package_version_number DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
+    get_version_from_tag(${DEFAULT_VERSION_STRING} ${VERSION_PREFIX} GIT)
+    num_change_since_prev_pkg(${VERSION_PREFIX})
+
+    set(PKG_VERSION_STR "${VERSION_STRING}.${NUM_COMMITS}")
+    if(DEFINED ENV{JOB_NAME})
+        set(VERSION_JOB $ENV{JOB_NAME})
+    else()
+        set(VERSION_JOB "local_build")
+    endif()
+
+    set(PKG_VERSION_STR "${PKG_VERSION_STR}-${VERSION_JOB}")
+
+    if(DEFINED ENV{BUILD_NUMBER})
+        set(VERSION_BUILD_NUMBER $ENV{BUILD_NUMBER})
+    else()
+        set(VERSION_BUILD_NUMBER "0")
+    endif()
+
+    set(PKG_VERSION_STR "${PKG_VERSION_STR}-${VERSION_BUILD_NUMBER}")
+
+    if (GIT)
+        execute_process(COMMAND git rev-parse --short HEAD
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                        OUTPUT_VARIABLE VERSION_HASH
+                        OUTPUT_STRIP_TRAILING_WHITESPACE
+                        RESULT_VARIABLE RESULT )
+        if( ${RESULT} EQUAL 0 )
+            # Check for dirty workspace.
+            execute_process(COMMAND git diff --quiet
+                            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                            RESULT_VARIABLE RESULT )
+            if(${RESULT} EQUAL 1)
+                set(VERSION_HASH "${VERSION_HASH}-dirty")
+            endif()
+        else()
+            set( VERSION_HASH "unknown" )
+        endif()
+    else()
+        set( VERSION_HASH "unknown" )
+    endif()
+    set(PKG_VERSION_STR "${PKG_VERSION_STR}-${VERSION_HASH}")
+    set(PKG_VERSION_STR ${PKG_VERSION_STR} PARENT_SCOPE)
 endfunction()
