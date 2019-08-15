@@ -129,21 +129,13 @@ function(get_package_version_number DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
     num_change_since_prev_pkg(${VERSION_PREFIX})
 
     set(PKG_VERSION_STR "${VERSION_STRING}.${NUM_COMMITS}")
-    if(DEFINED ENV{JOB_NAME})
-        set(VERSION_JOB $ENV{JOB_NAME})
+    if (DEFINED ENV{ROCM_BUILD_ID})
+        set(VERSION_ID $ENV{ROCM_BUILD_ID})
     else()
-        set(VERSION_JOB "local_build")
+        set(VERSION_ID "local_build-0")
     endif()
 
-    set(PKG_VERSION_STR "${PKG_VERSION_STR}-${VERSION_JOB}")
-
-    if(DEFINED ENV{BUILD_NUMBER})
-        set(VERSION_BUILD_NUMBER $ENV{BUILD_NUMBER})
-    else()
-        set(VERSION_BUILD_NUMBER "0")
-    endif()
-
-    set(PKG_VERSION_STR "${PKG_VERSION_STR}-${VERSION_BUILD_NUMBER}")
+    set(PKG_VERSION_STR "${PKG_VERSION_STR}.${VERSION_ID}")
 
     if (GIT)
         execute_process(COMMAND git rev-parse --short HEAD

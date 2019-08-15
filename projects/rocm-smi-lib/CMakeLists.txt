@@ -47,6 +47,16 @@ set(${ROCM_SMI}_VERSION_PATCH "0")
 set(${ROCM_SMI}_VERSION_BUILD "0")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
+## Define default variable and variables for the optional build target
+##  rocm_smi_lib-dev
+set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
+                              CACHE STRING "Location of rocm_smi source code.")
+set(CMAKE_INSTALL_PREFIX "/opt/rocm"
+                                CACHE STRING "Default installation directory.")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm"
+                                      CACHE STRING "Default packaging prefix.")
+set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
+
 project(${ROCM_SMI_TARGET})
 
 # Create a configure file to get version info from within library
@@ -129,16 +139,6 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
           TARGET ${ROCM_SMI_TARGET}
           POST_BUILD COMMAND ${CMAKE_STRIP} lib${ROCM_SMI_TARGET}.so)
 endif ()
-
-## Define default variable and variables for the optional build target
-##  rocm_smi_lib-dev
-set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
-                              CACHE STRING "Location of rocm_smi source code.")
-set(CMAKE_INSTALL_PREFIX "/opt/rocm"
-                                CACHE STRING "Default installation directory.")
-set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm"
-                                      CACHE STRING "Default packaging prefix.")
-set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${ROCM_SMI_TARGET}
