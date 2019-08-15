@@ -26,8 +26,8 @@ After the the ROCm SMI library git repository has been cloned to a local Linux m
 ##### ```$ cd build```
 ##### ```$ cmake <location of root of ROCm SMI library CMakeLists.txt>```
 ##### ```$ make```
-##### ```# Install library file and header; default location is /opt/rocm
-##### ```$ make install
+##### ```# Install library file and header; default location is /opt/rocm```
+##### ```$ make install```
 The built library will appear in the `build` folder.
 
 #### Building the Documentation
