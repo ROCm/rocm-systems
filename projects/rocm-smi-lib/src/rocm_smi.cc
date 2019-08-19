@@ -45,6 +45,7 @@
 #include <errno.h>
 #include <sys/utsname.h>
 #include <pthread.h>
+#include <string.h>
 
 #include <sstream>
 #include <algorithm>
@@ -1419,6 +1420,44 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
 
   return ret;
   CATCH
+}
+
+rsmi_status_t
+rsmi_dev_brand_get(uint32_t dv_ind, char *brand, size_t len) {
+  GET_DEV_FROM_INDX
+  // Return 'invalid args' if arguments are invalid
+  if (brand == nullptr || len == 0){
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  std::map<std::string, std::string> brand_names =
+  {
+    {"D05121", "mi25"},
+    {"D05131", "mi25"},
+    {"D05133", "mi25"},
+    {"D05151", "mi25"},
+    {"D16304", "mi50"},
+    {"D16302", "mi60"}
+  };
+  std::map<std::string, std::string>::iterator it;
+  std::string vbios_value;
+  std::string sku_value;
+  // Retrieve vbios and store in vbios_value string
+  int ret = dev->readDevInfo(amd::smi::kDevVBiosVer, &vbios_value);
+  if (ret != 0) {
+    return errno_to_rsmi_status(ret);
+  }
+  if (vbios_value.length() == 16) {
+    sku_value = vbios_value.substr(4,6);
+    // Find the brand name using sku_value
+    it = brand_names.find(sku_value);
+    if (it != brand_names.end()) {
+      strcpy(brand, it->second.c_str());
+      return RSMI_STATUS_SUCCESS;
+    }
+  }
+  // If there is no SKU match, return marketing name instead
+  rsmi_dev_name_get(dv_ind, brand, len);
+  return RSMI_STATUS_SUCCESS;
 }
 
 rsmi_status_t

@@ -119,6 +119,14 @@ void TestIdInfoRead::Run(void) {
         std::cout << "\t**Device Marketing name: " << buffer << std::endl;
       }
     }
+    err = rsmi_dev_brand_get(i, buffer, kBufferLen);
+    if(err != RSMI_STATUS_SUCCESS) {
+      CHK_ERR_ASRT(err)
+    } else {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Device Brand name: " << buffer << std::endl;
+      }
+    }
     err = rsmi_dev_vendor_id_get(i, &id);
     if (err != RSMI_STATUS_SUCCESS) {
         CHK_ERR_ASRT(err)

@@ -785,6 +785,30 @@ rsmi_status_t rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id);
 rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
 
 /**
+ *  @brief Get the brand string of a gpu device.
+ *
+ *  @details Given a device index @p dv_ind, a pointer to a caller provided
+ *  char buffer @p brand, and a length of this buffer @p len, this function
+ *  will write the brand of the device (up to @p len characters) to the buffer
+ *  @p brand.
+ *
+ *  If the sku associated with the device is not found as one of the values
+ *  contained within rsmi_dev_brand_get, then this function will return the
+ *  device marketing name as a string instead of the brand name.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] brand a pointer to a caller provided char buffer to which the
+ *  brand will be written
+ *
+ *  @param[in] len the length of the caller provided buffer @p brand.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_brand_get(uint32_t dv_ind, char *brand, size_t len);
+
+/**
  *  @brief Get the name string for a give vendor ID
  *
  *  @details Given vendor ID @p id, a pointer to a caller provided char buffer
