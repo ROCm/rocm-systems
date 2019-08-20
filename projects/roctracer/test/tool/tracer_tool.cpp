@@ -50,7 +50,9 @@ THE SOFTWARE.
     }                                                                                              \
   } while (0)
 
+#ifndef onload_debug
 #define onload_debug false
+#endif
 
 typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
 hsa_rt_utils::Timer* timer = NULL;
@@ -366,6 +368,10 @@ FILE* open_output_file(const char* prefix, const char* name) {
   return file_handle;
 }
 
+void close_output_file(FILE* file_handle) {
+  if ((file_handle != NULL) && (file_handle != stdout)) fclose(file_handle);
+}
+
 // HSA-runtime tool on-load method
 extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
@@ -506,25 +512,24 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
 
 // tool unload method
 void tool_unload(bool destruct) {
-  if (onload_debug) printf("TOOL tool_unload\n"); fflush(stdout);
   static bool is_unloaded = false;
-  if (is_unloaded) {
-    return;
-  }
+
+  if (onload_debug) printf("TOOL tool_unload (%d, %d)\n", (int)destruct, (int)is_unloaded); fflush(stdout);
+  if (destruct == false) return;
+  if (is_unloaded == true) return;
   is_unloaded = true;
   roctracer_unload(destruct);
 
   if (trace_hsa_api) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
 
-    // if (destruct == false) hsa_api_trace_buffer.Flush();
-
-    fclose(hsa_api_file_handle);
+    hsa_api_trace_buffer.Flush();
+    close_output_file(hsa_api_file_handle);
   }
   if (trace_hsa_activity) {
     ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
 
-    fclose(hsa_async_copy_file_handle);
+    close_output_file(hsa_async_copy_file_handle);
   }
   if (trace_hip) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
@@ -533,10 +538,9 @@ void tool_unload(bool destruct) {
     ROCTRACER_CALL(roctracer_flush_activity());
     ROCTRACER_CALL(roctracer_close_pool());
 
-    // if (destruct == false) hip_api_trace_buffer.Flush();
-
-    if (hip_api_file_handle != stdout) fclose(hip_api_file_handle);
-    if (hcc_activity_file_handle != stdout) fclose(hcc_activity_file_handle);
+    hip_api_trace_buffer.Flush();
+    close_output_file(hip_api_file_handle);
+    close_output_file(hcc_activity_file_handle);
   }
   if (onload_debug) printf("TOOL tool_unload end\n"); fflush(stdout);
 }

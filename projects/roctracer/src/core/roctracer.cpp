@@ -88,7 +88,9 @@ THE SOFTWARE.
   (void)err;                                                                                       \
   return X;
 
+#ifndef onload_debug
 #define onload_debug false
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Mark callback
@@ -462,6 +464,10 @@ FILE* open_output_file(const char* prefix, const char* name) {
     }
   } else file_handle = stdout;
   return file_handle;
+}
+
+void close_output_file(FILE* file_handle) {
+  if ((file_handle != NULL) && (file_handle != stdout)) fclose(file_handle);
 }
 
 FILE* kernel_file_handle = NULL;
@@ -998,14 +1004,16 @@ PUBLIC_API bool roctracer_load(HsaApiTable* table, uint64_t runtime_version, uin
 }
 
 PUBLIC_API void roctracer_unload(bool destruct) {
-  if (onload_debug) printf("LIB roctracer_unload (%d)\n", (int)destruct); fflush(stdout);
   static bool is_unloaded = false;
-  if (is_unloaded) return;
+
+  if (onload_debug) printf("LIB roctracer_unload (%d, %d)\n", (int)destruct, (int)is_unloaded); fflush(stdout);
+  if (destruct == false) return;
+  if (is_unloaded == true) return;
   is_unloaded = true;
 
-  //if (destruct == false) roctracer::trace_buffer.Flush();
-  if ((roctracer::hsa_support::output_prefix != NULL) && (roctracer::kernel_file_handle != NULL)) fclose(roctracer::kernel_file_handle);
-  if (onload_debug) printf("LIB roctracer_unload (%d) end\n", (int)destruct); fflush(stdout);
+  roctracer::trace_buffer.Flush();
+  roctracer::close_output_file(roctracer::kernel_file_handle);
+  if (onload_debug) printf("LIB roctracer_unload end\n"); fflush(stdout);
 }
 
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,

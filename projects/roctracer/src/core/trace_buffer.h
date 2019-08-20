@@ -90,7 +90,7 @@ class TraceBuffer {
     PTHREAD_CALL(pthread_join(work_thread_, &res));
     if (res != PTHREAD_CANCELED) abort_run("~TraceBuffer: consumer thread wasn't stopped correctly");
 
-    flush_buf();
+    Flush();
   }
 
 
@@ -102,13 +102,14 @@ class TraceBuffer {
   }
 
   void Flush() {
-    std::lock_guard<mutex_t> lck(mutex_);
     flush_buf();
   }
 
   private:
   void flush_buf() {
+    std::lock_guard<mutex_t> lck(mutex_);
     const bool is_flushed = atomic_flag_test_and_set_explicit(&is_flushed_, std::memory_order_acquire);
+
     if (is_flushed == false) {
       for (flush_prm_t* prm = flush_prm_arr_; prm < flush_prm_arr_ + flush_prm_count_; prm++) {
         uint32_t type = prm->type;
@@ -131,7 +132,7 @@ class TraceBuffer {
   }
 
   inline Entry* allocate_fun() {
-    Entry* ptr = (Entry*) calloc(size_, sizeof(Entry));
+    Entry* ptr = (Entry*) malloc(size_ * sizeof(Entry));
     if (ptr == NULL) abort_run("TraceBuffer::allocate_fun: calloc failed");
     //memset(ptr, 0, size_ * sizeof(Entry));
     return ptr;

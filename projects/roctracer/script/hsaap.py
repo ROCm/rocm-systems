@@ -379,8 +379,9 @@ class API_DescrParser:
       self.content += 'static ' + ret_type + ' ' + call + '_callback(' + struct['args'] + ') {\n'
       self.content += '  hsa_api_data_t api_data{};\n'
       for var in struct['alst']:
-        if (call == 'hsa_isa_from_name') and (var == 'name'):
-          self.content += '  api_data.args.' + call + '.' + var + ' = ' + 'strdup(' + var + ')' + ';\n'
+        item = struct['astr'][var];
+        if re.search(r'char\* ', item):
+          self.content += '  api_data.args.' + call + '.' + var + ' = ' + '(' + var + ' != NULL) ? strdup(' + var + ')' + ' : NULL;\n'
         else:
           self.content += '  api_data.args.' + call + '.' + var + ' = ' + var + ';\n'
       self.content += '  activity_rtapi_callback_t api_callback_fun = NULL;\n'
