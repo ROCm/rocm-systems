@@ -940,7 +940,10 @@ PUBLIC_API roctracer_status_t roctracer_flush_activity(roctracer_pool_t* pool) {
 
 // Mark API
 PUBLIC_API void roctracer_mark(const char* str) {
-  if (mark_api_callback_ptr) mark_api_callback_ptr(ACTIVITY_DOMAIN_NUMBER, 0, str, NULL);
+    if (mark_api_callback_ptr) {
+        mark_api_callback_ptr(ACTIVITY_DOMAIN_NUMBER, 0, str, NULL);
+        roctracer::GlobalCounter::Increment(); // account for user-defined markers when tracking correlation id
+    }
 }
 
 // Set properties
