@@ -244,6 +244,19 @@ run() {
   eval "$CMD_LINE"
 }
 
+merge_output() {
+  output_dir=$(echo "$1" | sed "s/\/[^\/]*$//")
+  for file_name in `ls $output_dir` ; do
+    output_name=$(echo $file_name | sed -n "/\.txt$/ s/^[0-9]*_//p")
+    if [ -n "$output_name" ] ; then
+      trace_file=$output_dir/$file_name
+      output_file=$output_dir/$output_name
+      touch $output_file
+      cat $trace_file >> $output_file
+    fi
+  done
+}
+
 # main
 echo "RPL: on '$time_stamp' from '$PKG_DIR' in '$RUN_DIR'"
 # Parsing arguments
@@ -408,6 +421,7 @@ done
 if [ -n "$csv_output" ] ; then
   if [ "$GEN_STATS" = "1" ] ; then
     db_output=$(echo $csv_output | sed "s/\.csv/.db/")
+    merge_output $OUTPUT_LIST
     python $BIN_DIR/tblextr.py $db_output $OUTPUT_LIST
   else
     python $BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST
