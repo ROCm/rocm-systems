@@ -92,6 +92,9 @@ THE SOFTWARE.
 #define onload_debug false
 #endif
 
+static inline uint32_t GetPid() { return syscall(__NR_getpid); }
+static inline uint32_t GetTid() { return syscall(__NR_gettid); }
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Mark callback
 //
@@ -454,7 +457,7 @@ FILE* open_output_file(const char* prefix, const char* name) {
   FILE* file_handle = NULL;
   if (prefix != NULL) {
     std::ostringstream oss;
-    oss << prefix << "/" << name;
+    oss << prefix << "/" << GetPid() << "_" << name;
     file_handle = fopen(oss.str().c_str(), "w");
     if (file_handle == NULL) {
       std::ostringstream errmsg;

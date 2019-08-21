@@ -136,7 +136,7 @@ void hsa_api_callback(
 void hsa_api_flush_cb(hsa_api_trace_entry_t* entry) {
   std::ostringstream os;
   os << entry->begin << ":" << entry->end << " " << entry->pid << ":" << entry->tid << " " << hsa_api_data_pair_t(entry->cid, entry->data);
-  fprintf(hsa_api_file_handle, "%s\n", os.str().c_str());
+  fprintf(hsa_api_file_handle, "%s\n", os.str().c_str()); fflush(hsa_api_file_handle);
 }
 
 void hsa_activity_callback(
@@ -145,7 +145,7 @@ void hsa_activity_callback(
   void* arg)
 {
   static uint64_t index = 0;
-  fprintf(hsa_async_copy_file_handle, "%lu:%lu async-copy%lu\n", record->begin_ns, record->end_ns, index);
+  fprintf(hsa_async_copy_file_handle, "%lu:%lu async-copy%lu\n", record->begin_ns, record->end_ns, index); fflush(hsa_async_copy_file_handle);
   index++;
 }
 
@@ -356,7 +356,7 @@ FILE* open_output_file(const char* prefix, const char* name) {
   FILE* file_handle = NULL;
   if (prefix != NULL) {
     std::ostringstream oss;
-    oss << prefix << "/" << name;
+    oss << prefix << "/" << GetPid() << "_" << name;
     file_handle = fopen(oss.str().c_str(), "w");
     if (file_handle == NULL) {
       std::ostringstream errmsg;
@@ -409,7 +409,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
   // API trace vector
   std::vector<std::string> hsa_api_vec;
 
-  printf("ROCTracer: "); fflush(stdout);
+  printf("ROCTracer (pid=%d): ", (int)GetPid()); fflush(stdout);
   // XML input
   const char* xml_name = getenv("ROCP_INPUT");
   if (xml_name != NULL) {
