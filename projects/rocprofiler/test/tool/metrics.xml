@@ -185,9 +185,9 @@
     expr=WRITE_SIZE
   ></metric>
 
-  # Mem32Bwrites    The total number of effective 32B write transactions to the memory
+  # MemWrites32B    The total number of effective 32B write transactions to the memory
   <metric
-    name="Mem32Bwrites"
+    name="MemWrites32B"
     descr="The total number of effective 32B write transactions to the memory"
     expr=WRITE_REQ_32B
   ></metric>

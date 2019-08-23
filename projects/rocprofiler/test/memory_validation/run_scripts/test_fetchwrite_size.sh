@@ -28,7 +28,7 @@ initialize
 
 Ns_M="8192 131072|512"
 
-headers="Mem32Bwrites FetchSize WriteSize"
+headers="MemWrites32B FetchSize WriteSize"
 
 # set up outputs
 OUT_DIR="outs"; [ -d $OUT_DIR ] && rm -rf $OUT_DIR; mkdir $OUT_DIR
@@ -71,7 +71,7 @@ function one_run
           colVal=`echo $values | cut -f$colId -d' '`
 
           if [[ $kern == cache_test_RO || $kern == cache_test_WO ]]; then
-            if [[ $colStr == Mem32Bwrites ]]; then mc32wrs=$colVal
+            if [[ $colStr == MemWrites32B ]]; then mc32wrs=$colVal
             elif [[ $colStr == FetchSize ]]; then fetchsize=$colVal
             elif [[ $colStr == WriteSize ]]; then writesize=$colVal; fi
           fi
