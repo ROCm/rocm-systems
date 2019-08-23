@@ -1000,53 +1000,53 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
 // HSA-runtime tool on-load method
 PUBLIC_API bool roctracer_load(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
-  if (onload_debug) printf("LIB roctracer_load\n"); fflush(stdout);
+  if (onload_debug) { printf("LIB roctracer_load\n"); fflush(stdout); }
   static bool is_loaded = false;
   if (is_loaded) return true;
   is_loaded = true;
 
-  if (onload_debug) printf("LIB roctracer_load end\n"); fflush(stdout);
+  if (onload_debug) { printf("LIB roctracer_load end\n"); fflush(stdout); }
   return true;
 }
 
 PUBLIC_API void roctracer_unload(bool destruct) {
   static bool is_unloaded = false;
 
-  if (onload_debug) printf("LIB roctracer_unload (%d, %d)\n", (int)destruct, (int)is_unloaded); fflush(stdout);
+  if (onload_debug) { printf("LIB roctracer_unload (%d, %d)\n", (int)destruct, (int)is_unloaded); fflush(stdout); }
   if (destruct == false) return;
   if (is_unloaded == true) return;
   is_unloaded = true;
 
   roctracer::trace_buffer.Flush();
   roctracer::close_output_file(roctracer::kernel_file_handle);
-  if (onload_debug) printf("LIB roctracer_unload end\n"); fflush(stdout);
+  if (onload_debug) { printf("LIB roctracer_unload end\n"); fflush(stdout); }
 }
 
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
-  if (onload_debug) printf("LIB OnLoad\n"); fflush(stdout);
+  if (onload_debug) { printf("LIB OnLoad\n"); fflush(stdout); }
   const bool ret = roctracer_load(table, runtime_version, failed_tool_count, failed_tool_names);
-  if (onload_debug) printf("LIB OnLoad end\n"); fflush(stdout);
+  if (onload_debug) { printf("LIB OnLoad end\n"); fflush(stdout); }
   return ret;
 }
 PUBLIC_API void OnUnload() {
-  if (onload_debug) printf("LIB OnUnload\n"); fflush(stdout);
+  if (onload_debug) { printf("LIB OnUnload\n"); fflush(stdout); }
   roctracer_unload(false);
-  if (onload_debug) printf("LIB OnUnload end\n"); fflush(stdout);
+  if (onload_debug) { printf("LIB OnUnload end\n"); fflush(stdout); }
 }
 
 CONSTRUCTOR_API void constructor() {
-  if (onload_debug) printf("LIB constructor\n"); fflush(stdout);
+  if (onload_debug) { printf("LIB constructor\n"); fflush(stdout); }
   roctracer::util::Logger::Create();
-  if (onload_debug) printf("LIB constructor end\n"); fflush(stdout);
+  if (onload_debug) { printf("LIB constructor end\n"); fflush(stdout); }
 }
 
 DESTRUCTOR_API void destructor() {
-  if (onload_debug) printf("LIB destructor\n"); fflush(stdout);
+  if (onload_debug) { printf("LIB destructor\n"); fflush(stdout); }
   roctracer_unload(true);
   util::HsaRsrcFactory::Destroy();
   roctracer::util::Logger::Destroy();
-  if (onload_debug) printf("LIB destructor end\n"); fflush(stdout);
+  if (onload_debug) { printf("LIB destructor end\n"); fflush(stdout); }
 }
 
 }  // extern "C"
