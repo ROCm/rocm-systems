@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
 
   TestHsa::HsaInstantiate();
 
-  std::thread t[thrs];
+  std::vector<std::thread> t(thrs);
   for (int n = 0; n < thrs; ++n) {
     t[n] = std::thread(thread_fun, kiter, diter, agents_number);
   }

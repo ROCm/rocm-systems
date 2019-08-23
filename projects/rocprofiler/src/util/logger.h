@@ -90,7 +90,7 @@ class Logger {
 
   static void Destroy() {
     std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ != NULL) delete instance_;
+    if (instance_ != NULL) delete instance_.load();
     instance_ = NULL;
   }
 
