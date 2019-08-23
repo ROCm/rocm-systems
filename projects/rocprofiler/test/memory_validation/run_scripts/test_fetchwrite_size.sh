@@ -80,7 +80,7 @@ function one_run
         rstdiff=1        # check result (0: pass/no-difference, 1: fail)
 
         line=$b_tcp; if (( $s > $b_tcp)); then line=$s; fi
-        coldmisses=`echo "scale=0; $N/$line" | bc`
+        coldmisses=$(awk -v n=$N -v l=$line 'BEGIN{printf("%.0f", n/l)}')
         #-- use kernel 'cache_test_RO' to validate fetch size
         if [[ $kern == cache_test_RO ]]; then
           # program-level expectation: coldmisses*cacheline_size
