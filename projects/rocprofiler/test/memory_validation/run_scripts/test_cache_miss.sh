@@ -80,7 +80,7 @@ function one_run
                 $N $s "${M}K"
     ${ROCP_PATH}rocprof -i ${BASE_DIR}/../pmc_config_files/cache_pmc.txt -o \
       ${BASE_DIR}/../$rst_file $PATH_CACHE_BENCH/cache $s $N $M \
-      >> $log_file
+      >> $log_file 2>&1
 
     # check the profiling result
     checkProfRun $rst_file $log_file
