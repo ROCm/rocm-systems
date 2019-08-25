@@ -81,6 +81,7 @@ fatal() {
   echo "$0: Error: $1"
   echo ""
   usage
+  exit 1
 }
 
 error() {
@@ -409,11 +410,13 @@ if [ -n "$csv_output" ] ; then
   rm -f $csv_output
 fi
 
+RET=0
 for name in $input_list; do
   run $name $OUTPUT_DIR $APP_CMD
   if [ -n "$ROCPROFILER_SESS" -a -e "$ROCPROFILER_SESS/error" ] ; then
     echo "Error found, profiling aborted."
     csv_output=""
+    RET=1
     break
   fi
 done
@@ -439,4 +442,4 @@ if [ "$DATA_PATH" = "$TMP_DIR" ] ; then
   fi
 fi
 
-exit 0
+exit $RET

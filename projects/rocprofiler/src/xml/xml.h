@@ -43,7 +43,10 @@ class Xml {
   typedef std::vector<char> token_t;
 
   struct level_t;
-  typedef std::vector<level_t*> nodes_t;
+  typedef std::vector<level_t*> node_vect_t;
+  typedef std::list<level_t*> node_list_t;
+
+  typedef node_vect_t nodes_t;
   typedef std::map<std::string, std::string> opts_t;
   struct level_t {
     std::string tag;
@@ -143,6 +146,7 @@ class Xml {
 
   struct print_func {
     bool fun(const std::string& global_tag, level_t* node) {
+      std::cout << global_tag << ":" << std::endl;
       for (auto& opt : node->opts) {
         std::cout << global_tag << "." << opt.first << " = " << opt.second << std::endl;
       }

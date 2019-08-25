@@ -77,7 +77,7 @@
   <metric name="TCC_EA1_RDREQ_32B" block=TCC event=268 descr="Number of 32-byte TCC/EA read requests"></metric>
 </gfx906>
 
-<gfx908>
+<gfx908 base="gfx9">
   <metric name="SQ_INSTS_VMEM_WR" block=SQ event=28 descr="Number of VMEM write instructions issued (including FLAT). (per-simd, emulated)"></metric>
   <metric name="SQ_INSTS_VMEM_RD" block=SQ event=29 descr="Number of VMEM read instructions issued (including FLAT). (per-simd, emulated)"></metric>
   <metric name="SQ_INSTS_SALU" block=SQ event=31 descr="Number of SALU instructions issued. (per-simd, emulated)"></metric>

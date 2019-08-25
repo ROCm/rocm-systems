@@ -30,12 +30,14 @@ THE SOFTWARE.
 #include <fstream>
 #include <iostream>
 #include <thread>
+#include <list>
 #include <map>
 #include <vector>
 
 #include "core/types.h"
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
+#include "util/logger.h"
 #include "xml/expr.h"
 #include "xml/xml.h"
 
@@ -212,9 +214,16 @@ class MetricsDict {
   }
 
   void ImportMetrics(const util::AgentInfo* agent_info, const std::string& scope) {
-    auto metrics_list = xml_->GetNodes("top." + scope + ".metric");
+    auto arr = xml_->GetNodes("top." + scope + ".metric");
+    xml::Xml::node_list_t metrics_list(arr.begin(), arr.end());
+    uint32_t metrics_number = metrics_list.size();
+    bool do_lookup = true;
     if (!metrics_list.empty()) {
-      for (auto node : metrics_list) {
+      uint32_t it_number = metrics_number;
+      auto it = metrics_list.begin();
+      auto end = metrics_list.end();
+      while (it != end) {
+        auto node = *it;
         const std::string name = node->opts["name"];
         const std::string expr_str = node->opts["expr"];
         std::string descr = node->opts["descr"];
@@ -244,20 +253,41 @@ class MetricsDict {
             AddMetric(name, alias, counter);
           }
         } else {
-          xml::Expr* expr_obj = new xml::Expr(expr_str, new ExprCache(&cache_));
-#if 0
-          std::cout << "# " << descr << std::endl;
-          std::cout << name << "=" << expr_obj->String() << "\n" << std::endl;
-#endif
-          counters_vec_t counters_vec;
-          for (const std::string var : expr_obj->GetVars()) {
-            auto it = cache_.find(var);
-            if (it == cache_.end())
-              EXC_RAISING(HSA_STATUS_ERROR, "Bad metric '" << name << "', var '" << var
-                                                           << "' is not found");
-            it->second->GetCounters(counters_vec);
+          xml::Expr* expr_obj = NULL;
+          try {
+            expr_obj = new xml::Expr(expr_str, new ExprCache(&cache_));
+          } catch(const xml::exception_t& exc) {
+              if (do_lookup) metrics_list.push_back(node);
+              else throw(exc);
           }
-          AddMetric(name, counters_vec, expr_obj);
+          if (expr_obj) {
+#if 0
+            std::cout << "# " << descr << std::endl;
+            std::cout << name << "=" << expr_obj->String() << "\n" << std::endl;
+#endif
+            counters_vec_t counters_vec;
+            for (const std::string var : expr_obj->GetVars()) {
+              auto it = cache_.find(var);
+              if (it == cache_.end()) {
+                EXC_RAISING(HSA_STATUS_ERROR, "Bad metric '" << name << "', var '" << var << "' is not found");
+              }
+              it->second->GetCounters(counters_vec);
+            }
+            AddMetric(name, counters_vec, expr_obj);
+          }
+        }
+
+        auto cur = it++;
+        metrics_list.erase(cur);
+        if (--it_number == 0) {
+          it_number = metrics_list.size();
+          if (it_number < metrics_number) {
+            metrics_number = it_number;
+          } else if (it_number == metrics_number) {
+            do_lookup = false;
+          } else {
+            EXC_RAISING(HSA_STATUS_ERROR, "Internal error");
+          }
         }
       }
     }
