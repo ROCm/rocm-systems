@@ -328,7 +328,7 @@ typedef enum {
 /**
  * @brief Pre-set Profile Selections. These bitmasks can be AND'd with the
  * ::rsmi_power_profile_status_t.available_profiles returned from
- * ::rsmi_dev_power_profile_presets_get() to determine which power profiles
+ * ::rsmi_dev_power_profile_presets_get to determine which power profiles
  * are supported by the system.
  */
 typedef enum {
@@ -995,6 +995,19 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
  *  bdfid, this function will write the Bus/Device/Function PCI identifier
  *  (BDFID) associated with device @p dv_ind to the value pointed to by
  *  @p bdfid.
+ *
+ *  The format of @p bdfid will be as follows:
+ *
+ *      BDFID = ((DOMAIN & 0xffffffff) << 32) | ((BUS & 0xff) << 8) |
+ *                                   ((DEVICE & 0x1f) <<3 ) | (FUNCTION & 0x7)
+ *
+ *  | Name     | Field   |
+ *  ---------- | ------- |
+ *  | Domain   | [64:32] |
+ *  | Reserved | [31:16] |
+ *  | Bus      | [15: 8] |
+ *  | Device   | [ 7: 3] |
+ *  | Function | [ 2: 0] |
  *
  *  @param[in] dv_ind a device index
  *
@@ -1851,9 +1864,9 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
  *
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
- * ::RSMI_NOT_SUPPORTED will be returned if either ECC is not enabled for the
- * specified block @p block, or if there is no kernel support for ECC for
- * that block.
+ * ::RSMI_STATUS_NOT_SUPPORTED will be returned if either ECC is not enabled
+ * for the specified block @p block, or if there is no kernel support for ECC
+ * for that block.
  *
  */
 rsmi_status_t rsmi_dev_ecc_count_get(uint32_t dv_ind,

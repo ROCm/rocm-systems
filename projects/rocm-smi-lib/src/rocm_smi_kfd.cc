@@ -62,13 +62,57 @@ namespace amd {
 namespace smi {
 
 static const char *kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
-
+static const char *kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
 // Sysfs file names
 static const char *kKFDPasidFName = "pasid";
 
 static bool is_number(const std::string &s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
+
+int ReadKFDDeviceProperties(uint32_t dev_id,
+                                           std::vector<std::string> *retVec) {
+  std::string line;
+  int ret;
+  std::ifstream fs;
+  std::string properties_path = kKFDNodesPathRoot;
+  bool reg_file;
+
+  assert(retVec != nullptr);
+
+  properties_path += '/';
+  properties_path += std::to_string(dev_id);
+  properties_path += "/properties";
+
+  ret = isRegularFile(properties_path, &reg_file);
+
+  if (ret != 0) {
+    return ret;
+  }
+  if (!reg_file) {
+    return ENOENT;
+  }
+
+  fs.open(properties_path);
+
+  if (!fs.is_open()) {
+      return errno;
+  }
+
+  while (std::getline(fs, line)) {
+    retVec->push_back(line);
+  }
+
+  if (retVec->size() == 0) {
+    return 0;
+  }
+  // Remove any *trailing* empty (whitespace) lines
+  while (retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
+    retVec->pop_back();
+  }
+  return 0;
+}
+
 
 int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
                                                   uint32_t *num_procs_found) {

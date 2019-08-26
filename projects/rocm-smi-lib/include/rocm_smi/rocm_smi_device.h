@@ -51,6 +51,7 @@
 #include <cstdint>
 #include <vector>
 #include <unordered_set>
+#include <map>
 
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_power_mon.h"
@@ -63,6 +64,38 @@ extern "C" {
 
 namespace amd {
 namespace smi {
+
+enum DevKFDNodePropTypes {
+  kDevKFDNodePropCachesCnt,
+  kDevKFDNodePropIoLinksCnt,
+  kDevKFDNodePropCPUCoreIdBase,
+  kDevKFDNodePropSimdIdBase,
+  kDevKFDNodePropMaxWavePerSimd,
+  kDevKFDNodePropLdsSz,
+  kDevKFDNodePropGdsSz,
+  kDevKFDNodePropNumGWS,
+  kDevKFDNodePropWaveFrontSize,
+  kDevKFDNodePropArrCnt,
+  kDevKFDNodePropSimdArrPerEng,
+  kDevKFDNodePropCuPerSimdArr,
+  kDevKFDNodePropSimdPerCU,
+  kDevKFDNodePropMaxSlotsScratchCu,
+  kDevKFDNodePropVendorId,
+  kDevKFDNodePropDeviceId,
+  kDevKFDNodePropLocationId,
+  kDevKFDNodePropDrmRenderMinor,
+  kDevKFDNodePropHiveId,
+  kDevKFDNodePropNumSdmaEngines,
+  kDevKFDNodePropNumSdmaXgmiEngs,
+  kDevKFDNodePropMaxEngClkFComp,
+  kDevKFDNodePropLocMemSz,
+  kDevKFDNodePropFwVer,
+  kDevKFDNodePropCapability,
+  kDevKFDNodePropDbgProp,
+  kDevKFDNodePropSdmaFwVer,
+  kDevKFDNodePropMaxEngClkCComp,
+  kDevKFDNodePropDomain,
+};
 
 enum DevInfoTypes {
   kDevPerfLevel,
@@ -139,6 +172,9 @@ class Device {
     int readDevInfo(DevInfoTypes type, std::vector<std::string> *retVec);
     int writeDevInfo(DevInfoTypes type, uint64_t val);
     int writeDevInfo(DevInfoTypes type, std::string val);
+    int populateKFDNodeProperties(bool force_update = false);
+    int getKFDNodeProperty(DevKFDNodePropTypes prop, uint64_t *val);
+
     uint32_t index(void) const {return index_;}
     void set_index(uint32_t index) {index_ = index;}
     uint32_t drm_render_minor(void) const {return drm_render_minor_;}
@@ -146,7 +182,6 @@ class Device {
     static rsmi_dev_perf_level perfLvlStrToEnum(std::string s);
     uint64_t bdfid(void) const {return bdfid_;}
     void set_bdfid(uint64_t val) {bdfid_ = val;}
-    uint64_t get_bdfid(void) const {return bdfid_;}
     pthread_mutex_t *mutex(void) {return mutex_.ptr;}
     evt::dev_evt_grp_set_t* supported_event_groups(void) {
                                              return &supported_event_groups_;}
@@ -169,6 +204,7 @@ class Device {
     uint64_t bdfid_;
     std::unordered_set<rsmi_event_group_t,
                        evt::RSMIEventGrpHashFunction> supported_event_groups_;
+    std::map<std::string, uint64_t> kfdNodePropMap_;
 };
 
 }  // namespace smi

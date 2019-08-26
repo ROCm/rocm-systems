@@ -61,6 +61,7 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 
 extern "C" {
 #include "shared_mutex.h"  // NOLINT
@@ -139,7 +140,71 @@ static const char *kDevFwVersionUvdFName = "fw_version/uvd_fw_version";
 static const char *kDevFwVersionVceFName = "fw_version/vce_fw_version";
 static const char *kDevFwVersionVcnFName = "fw_version/vcn_fw_version";
 
+static const char *kDevKFDNodePropCachesCntSName = "caches_count";
+static const char *kDevKFDNodePropIoLinksCntSName = "io_links_count";
+static const char *kDevKFDNodePropCPUCoreIdBaseSName = "cpu_core_id_base";
+static const char *kDevKFDNodePropSimdIdBaseSName = "simd_id_base";
+static const char *kDevKFDNodePropMaxWavePerSimdSName = "max_waves_per_simd";
+static const char *kDevKFDNodePropLdsSzSName = "lds_size_in_kb";
+static const char *kDevKFDNodePropGdsSzSName = "gds_size_in_kb";
+static const char *kDevKFDNodePropNumGWSSName = "num_gws";
+static const char *kDevKFDNodePropWaveFrontSizeSName = "wave_front_size";
+static const char *kDevKFDNodePropArrCntSName = "array_count";
+static const char *kDevKFDNodePropSimdArrPerEngSName = "simd_arrays_per_engine";
+static const char *kDevKFDNodePropCuPerSimdArrSName = "cu_per_simd_array";
+static const char *kDevKFDNodePropSimdPerCUSName = "simd_per_cu";
+static const char *kDevKFDNodePropMaxSlotsScratchCuSName =
+                                                       "max_slots_scratch_cu";
+static const char *kDevKFDNodePropVendorIdSName = "vendor_id";
+static const char *kDevKFDNodePropDeviceIdSName = "device_id";
+static const char *kDevKFDNodePropLocationIdSName = "location_id";
+static const char *kDevKFDNodePropDrmRenderMinorSName = "drm_render_minor";
+static const char *kDevKFDNodePropHiveIdSName = "hive_id";
+static const char *kDevKFDNodePropNumSdmaEnginesSName = "num_sdma_engines";
+static const char *kDevKFDNodePropNumSdmaXgmiEngsSName =
+                                                      "num_sdma_xgmi_engines";
+static const char *kDevKFDNodePropMaxEngClkFCompSName =
+                                                    "max_engine_clk_fcompute";
+static const char *kDevKFDNodePropLocMemSzSName = "local_mem_size";
+static const char *kDevKFDNodePropFwVerSName = "fw_version";
+static const char *kDevKFDNodePropCapabilitySName = "capability";
+static const char *kDevKFDNodePropDbgPropSName = "debug_prop";
+static const char *kDevKFDNodePropSdmaFwVerSName = "sdma_fw_version";
+static const char *kDevKFDNodePropMaxEngClkCCompSName =
+                                                    "max_engine_clk_ccompute";
+static const char *kDevKFDNodePropDomainSName = "domain";
 
+static const std::map<DevKFDNodePropTypes, const char *> kDevKFDPropNameMap = {
+    {kDevKFDNodePropCachesCnt, kDevKFDNodePropCachesCntSName},
+    {kDevKFDNodePropIoLinksCnt, kDevKFDNodePropIoLinksCntSName},
+    {kDevKFDNodePropCPUCoreIdBase, kDevKFDNodePropCPUCoreIdBaseSName},
+    {kDevKFDNodePropSimdIdBase, kDevKFDNodePropSimdIdBaseSName},
+    {kDevKFDNodePropMaxWavePerSimd, kDevKFDNodePropMaxWavePerSimdSName},
+    {kDevKFDNodePropLdsSz, kDevKFDNodePropLdsSzSName},
+    {kDevKFDNodePropGdsSz, kDevKFDNodePropGdsSzSName},
+    {kDevKFDNodePropNumGWS, kDevKFDNodePropNumGWSSName},
+    {kDevKFDNodePropWaveFrontSize, kDevKFDNodePropWaveFrontSizeSName},
+    {kDevKFDNodePropArrCnt, kDevKFDNodePropArrCntSName},
+    {kDevKFDNodePropSimdArrPerEng, kDevKFDNodePropSimdArrPerEngSName},
+    {kDevKFDNodePropCuPerSimdArr, kDevKFDNodePropCuPerSimdArrSName},
+    {kDevKFDNodePropSimdPerCU, kDevKFDNodePropSimdPerCUSName},
+    {kDevKFDNodePropMaxSlotsScratchCu, kDevKFDNodePropMaxSlotsScratchCuSName},
+    {kDevKFDNodePropVendorId, kDevKFDNodePropVendorIdSName},
+    {kDevKFDNodePropDeviceId, kDevKFDNodePropDeviceIdSName},
+    {kDevKFDNodePropLocationId, kDevKFDNodePropLocationIdSName},
+    {kDevKFDNodePropDrmRenderMinor, kDevKFDNodePropDrmRenderMinorSName},
+    {kDevKFDNodePropHiveId, kDevKFDNodePropHiveIdSName},
+    {kDevKFDNodePropNumSdmaEngines, kDevKFDNodePropNumSdmaEnginesSName},
+    {kDevKFDNodePropNumSdmaXgmiEngs, kDevKFDNodePropNumSdmaXgmiEngsSName},
+    {kDevKFDNodePropMaxEngClkFComp, kDevKFDNodePropMaxEngClkFCompSName},
+    {kDevKFDNodePropLocMemSz, kDevKFDNodePropLocMemSzSName},
+    {kDevKFDNodePropFwVer, kDevKFDNodePropFwVerSName},
+    {kDevKFDNodePropCapability, kDevKFDNodePropCapabilitySName},
+    {kDevKFDNodePropDbgProp, kDevKFDNodePropDbgPropSName},
+    {kDevKFDNodePropSdmaFwVer, kDevKFDNodePropSdmaFwVerSName},
+    {kDevKFDNodePropMaxEngClkCComp, kDevKFDNodePropMaxEngClkCCompSName},
+    {kDevKFDNodePropDomain, kDevKFDNodePropDomainSName},
+};
 static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevPerfLevel, kDevPerfLevelFName},
     {kDevOverDriveLevel, kDevOverDriveLevelFName},
@@ -517,6 +582,53 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     default:
       return -1;
   }
+  return 0;
+}
+
+int Device::populateKFDNodeProperties(bool force_update) {
+  int ret;
+
+  std::vector<std::string> propVec;
+
+  if (kfdNodePropMap_.size() > 0 && !force_update) {
+    return 0;
+  }
+
+  ret = ReadKFDDeviceProperties(index_, &propVec);
+
+  if (ret) {
+    return ret;
+  }
+
+  std::string key_str;
+  // std::string val_str;
+  uint64_t val_int;  // Assume all properties are unsigned integers for now
+  std::istringstream fs;
+
+  for (uint32_t i = 0; i < propVec.size(); ++i) {
+    fs.str(propVec[i]);
+    fs >> key_str;
+    fs >> val_int;
+
+    kfdNodePropMap_[key_str] = val_int;
+
+    fs.str("");
+    fs.clear();
+  }
+
+  return 0;
+}
+
+int Device::getKFDNodeProperty(DevKFDNodePropTypes prop, uint64_t *val) {
+  assert(val != nullptr);
+  assert(kDevKFDPropNameMap.find(prop) != kDevKFDPropNameMap.end());
+
+  const char *prop_name = kDevKFDPropNameMap.at(prop);
+  if (kfdNodePropMap_.find(prop_name) == kfdNodePropMap_.end()) {
+    return EINVAL;
+  }
+
+  *val = kfdNodePropMap_.at(prop_name);
   return 0;
 }
 

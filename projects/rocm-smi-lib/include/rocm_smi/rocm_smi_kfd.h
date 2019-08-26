@@ -43,6 +43,9 @@
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
 
+#include <string>
+#include <vector>
+
 #include "rocm_smi/rocm_smi.h"
 
 namespace amd {
@@ -53,6 +56,9 @@ GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
                                                    uint32_t *num_procs_found);
 int
 GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc);
+
+int
+ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string> *retVec);
 
 }  // namespace smi
 }  // namespace amd

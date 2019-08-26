@@ -621,7 +621,35 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
 
   DEVICE_MUTEX
 
-  *bdfid = dev->get_bdfid();
+  *bdfid = dev->bdfid();
+
+  int32_t ret = dev->populateKFDNodeProperties();
+
+  if (ret) {
+    return errno_to_rsmi_status(errno);
+  }
+
+  uint64_t domain = 0;
+
+  ret = dev->getKFDNodeProperty(amd::smi::kDevKFDNodePropDomain, &domain);
+
+  if (ret == EINVAL) {
+    // "domain" is not found in properties file; just go with the 16 bit
+    // domain already found
+    return RSMI_STATUS_SUCCESS;
+  }
+
+  // Replace the 16 bit domain originally set like this:
+  // BDFID = ((<DOMAIN> & 0xffff) << 32) | ((<BUS> & 0xff) << 8) |
+  //                        ((device& 0x1f) <<3 ) | (function & 0x7)
+  // with this:
+  // BDFID = ((<DOMAIN> & 0xffffffff) << 32) | ((<BUS> & 0xff) << 8) |
+  //                        ((device& 0x1f) <<3 ) | (function & 0x7)
+
+  assert((domain & 0xFFFFFFFF00000000) == 0);
+  (*bdfid) &= 0xFFFF;  // Clear out the old 16 bit domain
+  *bdfid |= (domain & 0xFFFFFFFF) << 32;
+
   return RSMI_STATUS_SUCCESS;
   CATCH
 }

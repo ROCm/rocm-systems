@@ -73,7 +73,6 @@ static const char *kAMDMonitorTypes[] = {"radeon", "amdgpu", ""};
 namespace amd {
 namespace smi {
 
-
 static uint32_t GetDeviceIndex(const std::string s) {
   std::string t = s;
   size_t tmp = t.find_last_not_of("0123456789");
@@ -123,12 +122,13 @@ static int SameDevice(const std::string fileA, const std::string fileB) {
 //  XXXX:XX:XX.X,
 //  domain:bus:device.function
 //
-//  where X is a hex integer (lower case is expected)
-static bool is_bdfid_path_str(const std::string in_name, uint64_t *bdfid) {
+//  where X is a hex integer (lower case is expected). If so, write the value
+//  to bdfid
+static bool bdfid_from_path(const std::string in_name, uint64_t *bdfid) {
   char *p = nullptr;
   char *name_start;
   char name[13] = {'\0'};
-  uint32_t tmp;
+  uint64_t tmp;
 
   assert(bdfid != nullptr);
 
@@ -139,7 +139,7 @@ static bool is_bdfid_path_str(const std::string in_name, uint64_t *bdfid) {
   tmp = in_name.copy(name, 12);
   assert(tmp == 12);
 
-  // BDFID = ((<DOMAIN> & 0xffff) << 13) | ((<BUS> & 0x1f) << 8) |
+  // BDFID = ((<DOMAIN> & 0xffff) << 32) | ((<BUS> & 0xff) << 8) |
             //                        ((device& 0x1f) <<3 ) | (function & 0x7)
   *bdfid = 0;
   name_start = name;
@@ -150,7 +150,7 @@ static bool is_bdfid_path_str(const std::string in_name, uint64_t *bdfid) {
   if (*p != ':' || p - name_start != 4) {
     return false;
   }
-  *bdfid |= tmp << 13;
+  *bdfid |= tmp << 32;
 
   // Match this: xxxx:XX:xx.x
   p++;  // Skip past ':'
@@ -205,7 +205,7 @@ static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
     slash_i = tpath_str.find_last_of('/', end_i);
     tmp = tpath_str.substr(slash_i + 1, end_i - slash_i);
 
-    if (is_bdfid_path_str(tmp, bdfid)) {
+    if (bdfid_from_path(tmp, bdfid)) {
       return 0;
     }
     end_i = slash_i - 1;
@@ -335,7 +335,6 @@ RocmSMI::AddToDeviceList(std::string dev_name) {
   uint32_t d_index = GetDeviceIndex(d_name);
   dev->set_drm_render_minor(GetDrmRenderMinor(dev_path));
   dev->set_index(d_index);
-
   GetSupportedEventGroups(d_index, dev->supported_event_groups());
   devices_.push_back(dev);
 
