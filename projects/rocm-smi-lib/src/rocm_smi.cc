@@ -1423,14 +1423,13 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
 }
 
 rsmi_status_t
-rsmi_dev_brand_get(uint32_t dv_ind, char *brand, size_t len) {
+rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len) {
   GET_DEV_FROM_INDX
   // Return 'invalid args' if arguments are invalid
-  if (brand == nullptr || len == 0){
+  if (brand == nullptr || len == 0) {
     return RSMI_STATUS_INVALID_ARGS;
   }
-  std::map<std::string, std::string> brand_names =
-  {
+  std::map<std::string, std::string> brand_names = {
     {"D05121", "mi25"},
     {"D05131", "mi25"},
     {"D05133", "mi25"},
@@ -1447,11 +1446,17 @@ rsmi_dev_brand_get(uint32_t dv_ind, char *brand, size_t len) {
     return errno_to_rsmi_status(ret);
   }
   if (vbios_value.length() == 16) {
-    sku_value = vbios_value.substr(4,6);
+    sku_value = vbios_value.substr(4, 6);
     // Find the brand name using sku_value
     it = brand_names.find(sku_value);
     if (it != brand_names.end()) {
-      strcpy(brand, it->second.c_str());
+      uint32_t ln = it->second.copy(brand, len);
+      brand[std::min(len - 1, ln)] = '\0';
+
+      if (len < (it->second.size() + 1)) {
+        return RSMI_STATUS_INSUFFICIENT_SIZE;
+      }
+
       return RSMI_STATUS_SUCCESS;
     }
   }

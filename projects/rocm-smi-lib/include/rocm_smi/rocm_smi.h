@@ -806,7 +806,7 @@ rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t rsmi_dev_brand_get(uint32_t dv_ind, char *brand, size_t len);
+rsmi_status_t rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len);
 
 /**
  *  @brief Get the name string for a give vendor ID
