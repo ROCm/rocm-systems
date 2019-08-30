@@ -23,13 +23,16 @@ THE SOFTWARE.
 #ifndef INC_EXT_PROF_PROTOCOL_H_
 #define INC_EXT_PROF_PROTOCOL_H_
 
+#include <stdlib.h>
+
 // Traced API domains
 typedef enum {
-  ACTIVITY_DOMAIN_HSA_API = 0,                    // HSA domain
+  ACTIVITY_DOMAIN_HSA_API = 0,                    // HSA API domain
   ACTIVITY_DOMAIN_HSA_OPS = 1,                    // HSA async activity domain
   ACTIVITY_DOMAIN_HCC_OPS = 2,                    // HCC async activity domain
-  ACTIVITY_DOMAIN_HIP_API = 3,                    // HIP domain
-  ACTIVITY_DOMAIN_NUMBER = 4
+  ACTIVITY_DOMAIN_HIP_API = 3,                    // HIP API domain
+  ACTIVITY_DOMAIN_ROCTX   = 4,                    // ROCTX domain
+  ACTIVITY_DOMAIN_NUMBER
 } activity_domain_t;
 
 // API calback type

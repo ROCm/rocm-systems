@@ -64,6 +64,7 @@ typedef enum {
   ROCTRACER_STATUS_BAD_PARAMETER = 5,
   ROCTRACER_STATUS_HIP_API_ERR = 6,
   ROCTRACER_STATUS_HCC_OPS_ERR = 7,
+  ROCTRACER_STATUS_ROCTX_ERR = 8,
 } roctracer_status_t;
 
 ////////////////////////////////////////////////////////////////////////////////

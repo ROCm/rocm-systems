@@ -29,44 +29,13 @@ THE SOFTWARE.
 #include <hsa_api_trace.h>
 #include <hsa_ext_amd.h>
 
-#include "ext/prof_protocol.h"
+#include "cb_table.h"
 #include "roctracer.h"
 
 namespace roctracer {
 namespace hsa_support {
 enum {
   HSA_OP_ID_async_copy = 0
-};
-
-template <int N>
-class CbTable {
-  public:
-  typedef std::mutex mutex_t;
-
-  CbTable() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    for (int i = 0; i < N; i++) {
-      callback_[i] = NULL;
-      arg_[i] = NULL;
-    }
-  }
-
-  void set(uint32_t id, activity_rtapi_callback_t callback, void* arg) {
-    std::lock_guard<mutex_t> lck(mutex_);
-    callback_[id] = callback;
-    arg_[id] = arg;
-  }
-
-  void get(uint32_t id, activity_rtapi_callback_t* callback, void** arg) {
-    std::lock_guard<mutex_t> lck(mutex_);
-    *callback = callback_[id];
-    *arg = arg_[id];
-  }
-
-  private:
-  activity_rtapi_callback_t callback_[N];
-  void* arg_[N];
-  mutex_t mutex_;
 };
 
 extern CoreApiTable CoreApiTable_saved;

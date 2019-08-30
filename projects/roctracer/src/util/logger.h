@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include <stdarg.h>
 #include <stdlib.h>
 
+#include <atomic>
 #include <string>
 #include <iostream>
 #include <sstream>

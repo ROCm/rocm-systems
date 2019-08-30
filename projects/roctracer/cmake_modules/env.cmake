@@ -65,8 +65,16 @@ if ( NOT DEFINED CMAKE_PREFIX_PATH AND DEFINED ENV{CMAKE_PREFIX_PATH} )
   set ( CMAKE_PREFIX_PATH $ENV{CMAKE_PREFIX_PATH} )
 endif()
 
-set ( HCC_INC_DIR "$ENV{HCC_HOME}/include" )
-set ( HIP_INC_DIR "$ENV{HIP_PATH}/include" )
+set ( HCC_HOME "/opt/rocm/hcc" )
+set ( HIP_PATH "/opt/rocm/hip" )
+if ( DEFINED ENV{HCC_HOME} )
+  set ( HCC_HOME ENV{HCC_HOME} )
+endif()
+if ( DEFINED ENV{HIP_PATH} )
+  set ( HIP_PATH ENV{HIP_PATH} )
+endif()
+set ( HCC_INC_DIR "${HCC_HOME}/include" )
+set ( HIP_INC_DIR "${HIP_PATH}/include" )
 
 ## Extend Compiler flags based on build type
 string ( TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE )
