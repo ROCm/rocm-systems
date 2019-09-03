@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,68 +42,32 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
-#define INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
+#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_API_SUPPORT_READ_H_
+#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_API_SUPPORT_READ_H_
 
-#include <string>
-#include <cstdint>
-#include <map>
+#include "rocm_smi_test/test_base.h"
 
-#include "rocm_smi/rocm_smi_common.h"
-#include "rocm_smi/rocm_smi.h"
-
-namespace amd {
-namespace smi {
-
-enum MonitorTypes {
-  kMonName,
-  kMonTemp,     // Temperature in millidegrees
-  kMonFanSpeed,
-  kMonMaxFanSpeed,
-  kMonFanRPMs,
-  kMonFanCntrlEnable,
-  kMonPowerCap,
-  kMonPowerCapMax,
-  kMonPowerCapMin,
-  kMonPowerAve,
-  kMonTempMax,
-  kMonTempMin,
-  kMonTempMaxHyst,
-  kMonTempMinHyst,
-  kMonTempCritical,
-  kMonTempCriticalHyst,
-  kMonTempEmergency,
-  kMonTempEmergencyHyst,
-  kMonTempCritMin,
-  kMonTempCritMinHyst,
-  kMonTempOffset,
-  kMonTempLowest,
-  kMonTempHighest,
-  kMonTempLabel,
-
-  kMonInvalid = 0xFFFFFFFF,
-};
-
-
-class Monitor {
+class TestAPISupportRead : public TestBase {
  public:
-    explicit Monitor(std::string path, RocmSMI_env_vars const *e);
-    ~Monitor(void);
-    const std::string path(void) const {return path_;}
-    int readMonitor(MonitorTypes type, uint32_t sensor_ind, std::string *val);
-    int writeMonitor(MonitorTypes type, uint32_t sensor_ind, std::string val);
-    uint32_t setSensorLabelMap(void);
-    uint32_t getSensorIndex(rsmi_temperature_type_t type);
-    void fillSupportedFuncs(SupportedFuncMap *supported_funcs);
+    TestAPISupportRead();
 
- private:
-    std::string MakeMonitorPath(MonitorTypes type, int32_t sensor_id);
-    std::string path_;
-    const RocmSMI_env_vars *env_;
-    std::map<rsmi_temperature_type_t, uint32_t> temp_type_index_map_;
+  // @Brief: Destructor for test case of TestAPISupportRead
+  virtual ~TestAPISupportRead();
+
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
+
+  // @Brief: Core measurement execution
+  virtual void Run();
+
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
+
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
 };
 
-}  // namespace smi
-}  // namespace amd
-
-#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_MONITOR_H_
+#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_API_SUPPORT_READ_H_

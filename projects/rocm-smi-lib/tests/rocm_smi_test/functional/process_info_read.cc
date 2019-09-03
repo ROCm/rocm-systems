@@ -100,7 +100,7 @@ void TestProcInfoRead::Run(void) {
 
   err = rsmi_compute_process_info_get(nullptr, &num_proc_found);
   if (err != RSMI_STATUS_SUCCESS) {
-    if (err == RSMI_STATUS_FILE_ERROR) {
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t**Process info. read: Not supported on this machine"
                                                                  << std::endl;

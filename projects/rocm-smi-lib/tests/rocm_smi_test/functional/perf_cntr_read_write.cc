@@ -118,8 +118,8 @@ TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
   std::cout << "****************************" << std::endl;
 
   for (PerfCntrEvtGrp grp : s_event_groups) {
-    if (rsmi_dev_counter_group_supported(dv_ind, grp.group())
-                                               == RSMI_STATUS_NOT_SUPPORTED) {
+    ret = rsmi_dev_counter_group_supported(dv_ind, grp.group());
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
       continue;
     }
 
@@ -202,12 +202,14 @@ TestPerfCntrReadWrite::testEventsSimultaneously(uint32_t dv_ind) {
   std::cout << "****************************" << std::endl;
 
   for (PerfCntrEvtGrp grp : s_event_groups) {
-    if (rsmi_dev_counter_group_supported(dv_ind, grp.group())
-                                               == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\tEvent Group" << grp.name() <<
+
+    ret = rsmi_dev_counter_group_supported(dv_ind, grp.group());
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\tEvent Group " << grp.name() <<
                                   " is not supported. Skipping." << std::endl;
       continue;
     }
+
     IF_VERB(STANDARD) {
       std::cout << "Testing Event Group " << grp.name() << std::endl;
     }

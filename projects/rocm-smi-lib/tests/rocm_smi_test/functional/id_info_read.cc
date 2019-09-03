@@ -120,7 +120,7 @@ void TestIdInfoRead::Run(void) {
       }
     }
     err = rsmi_dev_brand_get(i, buffer, kBufferLen);
-    if(err != RSMI_STATUS_SUCCESS) {
+    if (err != RSMI_STATUS_SUCCESS) {
       CHK_ERR_ASRT(err)
     } else {
       IF_VERB(STANDARD) {

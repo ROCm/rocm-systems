@@ -42,6 +42,7 @@
  */
 
 #include <assert.h>
+#include <dirent.h>
 
 #include <fstream>
 #include <string>
@@ -49,6 +50,8 @@
 #include <map>
 #include <iostream>
 #include <algorithm>
+#include <regex>  // NOLINT
+#include <vector>
 
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_monitor.h"
@@ -126,7 +129,100 @@ static const std::map<MonitorTypes, const char *> kMonitorNameMap = {
     {kMonTempLabel, kMonTempLabelName},
 };
 
-Monitor::Monitor(std::string path, RocmSMI_env_vars const *e) :
+static  std::map<MonitorTypes, uint64_t> kMonInfoVarTypeToRSMIVariant = {
+    // rsmi_temperature_metric_t
+    {kMonTemp, RSMI_TEMP_CURRENT},
+    {kMonTempMax, RSMI_TEMP_MAX},
+    {kMonTempMin, RSMI_TEMP_MIN},
+    {kMonTempMaxHyst, RSMI_TEMP_MAX_HYST},
+    {kMonTempMinHyst, RSMI_TEMP_MIN_HYST},
+    {kMonTempCritical, RSMI_TEMP_CRITICAL},
+    {kMonTempCriticalHyst, RSMI_TEMP_CRITICAL_HYST},
+    {kMonTempEmergency, RSMI_TEMP_EMERGENCY},
+    {kMonTempEmergencyHyst, RSMI_TEMP_EMERGENCY_HYST},
+    {kMonTempCritMin, RSMI_TEMP_CRIT_MIN},
+    {kMonTempCritMinHyst, RSMI_TEMP_CRIT_MIN_HYST},
+    {kMonTempOffset, RSMI_TEMP_OFFSET},
+    {kMonTempLowest, RSMI_TEMP_LOWEST},
+    {kMonTempHighest, RSMI_TEMP_HIGHEST},
+    {kMonInvalid, RSMI_DEFAULT_VARIANT},
+};
+
+typedef struct {
+    std::vector<const char *> mandatory_depends;
+    std::vector<MonitorTypes> variants;
+} monitor_depends_t;
+
+static const std::map<const char *, monitor_depends_t> kMonFuncDependsMap = {
+  {"rsmi_dev_power_ave_get",        { .mandatory_depends = {kMonPowerAveName},
+                                      .variants = {kMonInvalid},
+                                    }
+  },
+  {"rsmi_dev_power_cap_get",        { .mandatory_depends = {kMonPowerCapName},
+                                      .variants = {kMonInvalid},
+                                    }
+  },
+  {"rsmi_dev_power_cap_range_get",  { .mandatory_depends =
+                                                        {kMonPowerCapMaxName,
+                                                         kMonPowerCapMinName},
+                                      .variants = {kMonInvalid},
+                                    }
+  },
+  {"rsmi_dev_power_cap_set",        { .mandatory_depends =
+                                                         {kMonPowerCapMaxName,
+                                                          kMonPowerCapMinName,
+                                                          kMonPowerCapName},
+                                      .variants = {kMonInvalid},
+                                    }
+  },
+
+  {"rsmi_dev_fan_rpms_get",         { .mandatory_depends = {kMonFanRPMsName},
+                                      .variants = {kMonInvalid},
+                                    }
+  },
+  {"rsmi_dev_fan_speed_get",        { .mandatory_depends = {kMonFanSpeedFName},
+                                      .variants = {kMonInvalid},
+                                    }
+  },
+  {"rsmi_dev_fan_speed_max_get",    { .mandatory_depends =
+                                                       {kMonMaxFanSpeedFName},
+                                      .variants = {kMonInvalid},
+                                    }
+  },
+  {"rsmi_dev_temp_metric_get",      { .mandatory_depends =
+                                                          {kMonTempLabelName},
+                                      .variants = {kMonTemp,
+                                                   kMonTempMax,
+                                                   kMonTempMin,
+                                                   kMonTempMaxHyst,
+                                                   kMonTempMinHyst,
+                                                   kMonTempCritical,
+                                                   kMonTempCriticalHyst,
+                                                   kMonTempEmergency,
+                                                   kMonTempEmergencyHyst,
+                                                   kMonTempCritMin,
+                                                   kMonTempCritMinHyst,
+                                                   kMonTempOffset,
+                                                   kMonTempLowest,
+                                                   kMonTempHighest,
+                                        },
+                                    }
+  },
+  {"rsmi_dev_fan_reset",            { .mandatory_depends =
+                                                   {kMonFanControlEnableName},
+                                      .variants = {kMonInvalid},
+                                    }
+  },
+  {"rsmi_dev_fan_speed_set",        { .mandatory_depends =
+                                                    {kMonMaxFanSpeedFName,
+                                                     kMonFanControlEnableName,
+                                                     kMonFanSpeedFName},
+                                      .variants = {kMonInvalid},
+                                    }
+  },
+};
+
+  Monitor::Monitor(std::string path, RocmSMI_env_vars const *e) :
                                                         path_(path), env_(e) {
 }
 Monitor::~Monitor(void) {
@@ -193,11 +289,149 @@ Monitor::setSensorLabelMap(void) {
   return 0;
 }
 
+static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
+                                              std::vector<uint64_t> *sensors) {
+  auto hwmon_dir = opendir(dir_path.c_str());
+  assert(hwmon_dir != nullptr);
+  assert(sensors != nullptr);
+
+  sensors->clear();
+
+  std::string::size_type pos = fn_reg_ex.find('#');
+
+  if (pos == std::string::npos) {
+    return -1;
+  }
+  fn_reg_ex.erase(pos, 1);
+  fn_reg_ex.insert(pos, "([0-9]+)");
+  fn_reg_ex = "\\b" + fn_reg_ex + "\\b";
+
+  auto dentry = readdir(hwmon_dir);
+  std::smatch match;
+  int64_t mon_val;
+
+  char *endptr;
+  std::regex re(fn_reg_ex);
+  std::string fn;
+
+  while (dentry != nullptr) {
+    fn = dentry->d_name;
+    if (std::regex_search(fn, match, re)) {
+      assert(match.size() == 2);  // 1 for whole match + 1 for sub-match
+      errno = 0;
+      mon_val = strtol(match.str(1).c_str(), &endptr, 10);
+      assert(errno == 0);
+      assert(*endptr == '\0');
+      if (errno) {
+        return -2;
+      }
+      sensors->push_back(mon_val);
+    }
+    dentry = readdir(hwmon_dir);
+  }
+  return 0;
+}
+
 uint32_t
 Monitor::getSensorIndex(rsmi_temperature_type_t type) {
   return temp_type_index_map_.at(type);
 }
 
+static std::vector<uint64_t> get_intersection(std::vector<uint64_t> *v1,
+                                                   std::vector<uint64_t> *v2) {
+  assert(v1 != nullptr);
+  assert(v2 != nullptr);
+  std::vector<uint64_t> intersect;
+
+  std::sort(v1->begin(), v1->end());
+  std::sort(v2->begin(), v2->end());
+
+  std::set_intersection(v1->begin(), v1->end(), v2->begin(), v2->end(),
+                                               std::back_inserter(intersect));
+  return intersect;
+}
+
+void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
+  std::map<const char *, monitor_depends_t>::const_iterator it =
+                                                   kMonFuncDependsMap.begin();
+  std::string mon_root = path_;
+  bool mand_depends_met;
+  std::shared_ptr<VariantMap> supported_variants;
+  std::vector<uint64_t> sensors_i;
+  std::vector<uint64_t> intersect;
+  int ret;
+
+  assert(supported_funcs != nullptr);
+
+  while (it != kMonFuncDependsMap.end()) {
+    // First, see if all the mandatory dependencies are there
+    std::vector<const char *>::const_iterator dep =
+                                         it->second.mandatory_depends.begin();
+
+    mand_depends_met = true;
+
+    // Initialize "intersect". A monitor is considered supported if all of its
+    // dependency monitors with the same sensor index are present. So we
+    // initialize "intersect" with the set of sensors that exist for the first
+    // mandatory monitor, and take intersection of that with the subsequent
+    // dependency monitors. The main assumption here is that
+    // variant_<sensor_i>'s sensor-based dependencies have the same index i;
+    // in other words, variant_i is not dependent on a sensor j, j != i
+    do {
+      ret = get_supported_sensors(mon_root + "/", *dep, &intersect);
+      if (ret == -1) {
+        // In this case, the dependency is not sensor-specific, so just
+        // see if the file exists.
+        std::string dep_path = mon_root + "/" + *dep;
+        if (!FileExists(dep_path.c_str())) {
+          mand_depends_met = false;
+          break;
+        }
+      }
+      dep++;
+    } while (dep != it->second.mandatory_depends.end());
+
+    if (!mand_depends_met) {
+      it++;
+      continue;
+    }
+
+    // "intersect" holds the set of sensors for the mandatory dependencies
+    // that exist.
+
+    std::vector<MonitorTypes>::const_iterator var =
+                                                  it->second.variants.begin();
+    supported_variants = std::make_shared<VariantMap>();
+
+    std::vector<uint64_t> supported_monitors;
+
+    for (; var != it->second.variants.end(); var++) {
+      if (*var != kMonInvalid) {
+        ret = get_supported_sensors(mon_root + "/",
+                                        kMonitorNameMap.at(*var), &sensors_i);
+
+        if (ret == 0) {
+          supported_monitors = get_intersection(&sensors_i, &intersect);
+        }
+      } else {
+        supported_monitors = intersect;
+      }
+      if (supported_monitors.size() > 0) {
+        (*supported_variants)[kMonInfoVarTypeToRSMIVariant.at(*var)] =
+                             std::make_shared<SubVariant>(supported_monitors);
+      }
+    }
+
+    if (it->second.variants.size() == 0) {
+      (*supported_funcs)[it->first] = nullptr;
+      supported_variants = nullptr;  // Invoke destructor
+    } else if ((*supported_variants).size() > 0) {
+      (*supported_funcs)[it->first] = supported_variants;
+    }
+
+    it++;
+  }
+}
 
 }  // namespace smi
 }  // namespace amd

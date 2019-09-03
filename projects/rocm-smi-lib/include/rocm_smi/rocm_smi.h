@@ -114,6 +114,9 @@ typedef enum {
                                          //!< execution of function
   RSMI_STATUS_UNEXPECTED_SIZE,           //!< An unexpected amount of data
                                          //!< was read
+  RSMI_STATUS_NO_DATA,                   //!< No data was found for a given
+                                         //!< input
+
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
 
@@ -667,6 +670,43 @@ typedef struct {
     uint32_t pasid;    //!< PASID
 } rsmi_process_info_t;
 
+
+/**
+ * @brief Opaque handle to function-support object
+ */
+typedef struct rsmi_func_id_iter_handle * rsmi_func_id_iter_handle_t;
+
+//! Place-holder "variant" for functions that have don't have any variants,
+//! but do have monitors or sensors.
+#define RSMI_DEFAULT_VARIANT 0xFFFFFFFFFFFFFFFF
+
+/**
+ * @brief This union holds the value of an ::rsmi_func_id_iter_handle_t. The
+ * value may be a function name, or an ennumerated variant value of types
+ * such as ::rsmi_memory_type_t, ::rsmi_temperature_metric_t, etc.
+ */
+typedef union id {
+        uint64_t id;           //!< uint64_t representation of value
+        const char *name;      //!< name string (applicable to functions only)
+        union {
+            //!< Used for ::rsmi_memory_type_t variants
+            rsmi_memory_type_t memory_type;
+            //!< Used for ::rsmi_temperature_metric_t variants
+            rsmi_temperature_metric_t temp_metric;
+            //!< Used for ::rsmi_event_type_t variants
+            rsmi_event_type_t evnt_type;
+            //!< Used for ::rsmi_event_group_t variants
+            rsmi_event_group_t evnt_group;
+            //!< Used for ::rsmi_clk_type_t variants
+            rsmi_clk_type_t clk_type;
+            //!< Used for ::rsmi_fw_block_t variants
+            rsmi_fw_block_t fw_block;
+            //!< Used for ::rsmi_gpu_block_t variants
+            rsmi_gpu_block_t gpu_block_type;
+        };
+} rsmi_func_id_value_t;
+
+
 /*****************************************************************************/
 /** @defgroup InitShutAdmin Initialization and Shutdown
  *  These functions are used for initialization of ROCm SMI and clean up when
@@ -811,10 +851,10 @@ rsmi_status_t rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len);
 /**
  *  @brief Get the name string for a give vendor ID
  *
- *  @details Given vendor ID @p id, a pointer to a caller provided char buffer
- *  @p name, and a length of this buffer @p len, this function will write the
- *  name of the vendor (up to @p len characters) buffer @p name. The @p id may
- *  be a device vendor or subsystem vendor ID.
+ *  @details Given a device index @p dv_ind, a pointer to a caller provided
+ *  char buffer @p name, and a length of this buffer @p len, this function will
+ *  write the name of the vendor (up to @p len characters) buffer @p name. The
+ *  @p id may be a device vendor or subsystem vendor ID.
  *
  *  If the integer ID associated with the vendor is not found in one of the
  *  system files containing device name information (e.g.
@@ -822,7 +862,7 @@ rsmi_status_t rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len);
  *  as a string. Updating the system name files can be accompplished with
  *  "sudo update-pciids".
  *
- *  @param[in] id a vendor ID
+ *  @param[in] dv_ind a device index
  *
  *  @param[inout] name a pointer to a caller provided char buffer to which the
  *  name will be written
@@ -835,7 +875,8 @@ rsmi_status_t rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len);
  *  be written.
  *
  */
-rsmi_status_t rsmi_dev_vendor_name_get(uint32_t id, char *name, size_t len);
+rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name,
+                                                                  size_t len);
 
 /**
  * @brief Get the serial number string for a device
@@ -1202,16 +1243,14 @@ rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
 /**
  * @brief Set the power profile
  *
- * @details Given a device index @p dv_ind, a sensor index sensor_ind, and a
- * @p profile, this function will attempt to set the current profile to the
- * provided profile. The provided profile must be one of the currently
- * supported profiles, as indicated by a call to
- * ::rsmi_dev_power_profile_presets_get()
+ * @details Given a device index @p dv_ind and a @p profile, this function will
+ * attempt to set the current profile to the provided profile. The provided
+ * profile must be one of the currently supported profiles, as indicated by a
+ * call to ::rsmi_dev_power_profile_presets_get()
  *
  * @param[in] dv_ind a device index
  *
- * @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
- * If a device has more than one sensor, it could be greater than 0.
+ * @param[in] reserved Not currently used. Set to 0.
  *
  * @param[in] profile a ::rsmi_power_profile_preset_masks_t that hold the mask
  * of the desired new power profile
@@ -1220,7 +1259,7 @@ rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap);
  *
  */
 rsmi_status_t
-rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t sensor_ind,
+rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t reserved,
                                    rsmi_power_profile_preset_masks_t profile);
 /** @} */  // end of PowerCont
 /*****************************************************************************/
@@ -1728,25 +1767,6 @@ rsmi_status_t rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od);
 rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
                              rsmi_clk_type_t clk_type, uint64_t freq_bitmask);
 
-/**
- * @brief Set the frequency limits for the specified clock
- *
- * @details Given a device index @p dv_ind, a clock type (::rsmi_clk_type_t)
- * @p clk, and a pointer to a ::rsmi_range_t @p range containing the desired
- * upper and lower frequency limits, this function will attempt to set the
- * frequency limits to those specified in @p range.
- *
- * @param[in] dv_ind a device index
- *
- * @param[in] clk The clock type for which the limits should be imposed.
- *
- * @param[in] range A pointer to the ::rsmi_range_t containing the desired limits
- *
- * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- */
-rsmi_status_t rsmi_dev_od_freq_range_set(uint32_t dv_ind, rsmi_clk_type_t clk,
-                                                           rsmi_range_t *range);
-
 /** @} */  // end of PerfCont
 
 /*****************************************************************************/
@@ -1958,7 +1978,7 @@ rsmi_status_string(rsmi_status_t status, const char **status_string);
  * ::RSMI_STATUS_SUCCESS if the device associatee with @p dv_ind
  * support counting events of the type indicated by @p group.
  *
- * ::RSMI_STATUS_NOT_SUPPORTED If the device does not support event group @p
+ * ::RSMI_STATUS_NOT_FOUND If the device does not support event group @p
  * group
  *
  */
@@ -2125,6 +2145,7 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs, uint32_t *num_items);
 rsmi_status_t
 rsmi_compute_process_info_by_pid_get(uint32_t pid, rsmi_process_info_t *proc);
 
+
 /** @} */  // end of SysInfo
 
 /*****************************************************************************/
@@ -2168,6 +2189,225 @@ rsmi_status_t
 rsmi_dev_xgmi_error_reset(uint32_t dv_ind);
 
 /** @} */  // end of SysInfo
+
+
+/*****************************************************************************/
+/** @defgroup APISupport Supported Functions
+ *  API function support varies by both GPU type and the version of the
+ *  installed ROCm stack.  The functions described in this section can be used
+ *  to determine, up front, which functions are supported for a given device
+ *  on a system. If such "up front" knowledge of support for a function is not
+ *  needed, alternatively, one can call a device related function and check the
+ *  return code.
+ *
+ *  Some functions have several variations ("variants") where some variants are
+ *  supported and others are not. For example, on a given device,
+ *  ::rsmi_dev_temp_metric_get may support some types of temperature metrics
+ *  (e.g., ::RSMI_TEMP_CRITICAL_HYST), but not others
+ *  (e.g., ::RSMI_TEMP_EMERGENCY).
+ *
+ *  In addition to a top level of variant support for a function, a function
+ *  may have varying support for monitors/sensors. These are considered
+ *  "sub-variants" in functions described in this section. Continuing the
+ *  ::rsmi_dev_temp_metric_get example, if variant
+ *  ::RSMI_TEMP_CRITICAL_HYST is supported, perhaps
+ *  only the sub-variant sensors ::RSMI_TEMP_TYPE_EDGE
+ *  and ::RSMI_TEMP_TYPE_EDGE are supported, but not
+ *  ::RSMI_TEMP_TYPE_MEMORY.
+ *
+ *  In cases where a function takes in a sensor id parameter but does not have
+ *  any "top level" variants, the functions in this section will indicate a
+ *  default "variant", ::RSMI_DEFAULT_VARIANT, for the top level variant, and
+ *  the various monitor support will be sub-variants of this.
+ *
+ *  The functions in this section use the "iterator" concept to list which
+ *  functions are supported; to list which variants of the supported functions
+ *  are supported; and finally which monitors/sensors are supported for a
+ *  variant.
+ *
+ *  Here is example code that prints out all supported functions, their
+ *  supported variants and sub-variants. Please see the related descriptions
+ *  functions and RSMI types.
+ *  \latexonly
+ *  \pagebreak
+ *  \endlatexonly
+ *  \code{.cpp}
+ *     rsmi_func_id_iter_handle_t iter_handle, var_iter, sub_var_iter;
+ *     rsmi_func_id_value_t value;
+ *     rsmi_status_t err;
+ *
+ *     for (uint32_t i = 0; i < <number of devices>; ++i) {
+ *      std::cout << "Supported RSMI Functions:" << std::endl;
+ *      std::cout << "\tVariants (Monitors)" << std::endl;
+ *
+ *      err = rsmi_dev_supported_func_iterator_open(i, &iter_handle);
+ *
+ *      while (1) {
+ *        err = rsmi_func_iter_value_get(iter_handle, &value);
+ *        std::cout << "Function Name: " << value.name << std::endl;
+ *
+ *        err = rsmi_dev_supported_variant_iterator_open(iter_handle, &var_iter);
+ *        if (err != RSMI_STATUS_NO_DATA) {
+ *          std::cout << "\tVariants/Monitors: ";
+ *          while (1) {
+ *            err = rsmi_func_iter_value_get(var_iter, &value);
+ *            if (value.id == RSMI_DEFAULT_VARIANT) {
+ *              std::cout << "Default Variant ";
+ *            } else {
+ *              std::cout << value.id;
+ *            }
+ *            std::cout << " (";
+ *
+ *            err =
+ *              rsmi_dev_supported_variant_iterator_open(var_iter, &sub_var_iter);
+ *            if (err != RSMI_STATUS_NO_DATA) {
+ *
+ *              while (1) {
+ *                err = rsmi_func_iter_value_get(sub_var_iter, &value);
+ *                std::cout << value.id << ", ";
+ *
+ *                err = rsmi_func_iter_next(sub_var_iter);
+ *
+ *                if (err == RSMI_STATUS_NO_DATA) {
+ *                  break;
+ *                }
+ *              }
+ *              err = rsmi_dev_supported_func_iterator_close(&sub_var_iter);
+ *            }
+ *
+ *            std::cout << "), ";
+ *
+ *            err = rsmi_func_iter_next(var_iter);
+ *
+ *            if (err == RSMI_STATUS_NO_DATA) {
+ *              break;
+ *            }
+ *          }
+ *          std::cout << std::endl;
+ *
+ *          err = rsmi_dev_supported_func_iterator_close(&var_iter);
+ *        }
+ *
+ *        err = rsmi_func_iter_next(iter_handle);
+ *
+ *        if (err == RSMI_STATUS_NO_DATA) {
+ *          break;
+ *        }
+ *      }
+ *      err = rsmi_dev_supported_func_iterator_close(&iter_handle);
+ *    }
+ * \endcode
+ *
+ *  @{
+ */
+
+
+/**
+ * @brief Get a function name iterator of supported RSMI functions for a device
+ *
+ * @details Given a device index @p dv_ind, this function will write a function
+ * iterator handle to the caller-provided memory pointed to by @p handle. This
+ * handle can be used to iterate through all the supported functions.
+ *
+ * @param[in] dv_ind a device index of device for which support information is
+ * requested
+ *
+ * @param[inout] handle A pointer to caller-provided memory to which the
+ * function iterator will be written.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_supported_func_iterator_open(uint32_t dv_ind,
+                                          rsmi_func_id_iter_handle_t *handle);
+
+/**
+ * @brief Get a variant iterator for a given handle
+ *
+ * @details Given a ::rsmi_func_id_iter_handle_t @p obj_h, this function will
+ * write a function iterator handle to the caller-provided memory pointed to
+ * by @p var_iter. This handle can be used to iterate through all the supported
+ * variants of the provided handle. @p obj_h may be a handle to a function
+ * object, as provided by a call to ::rsmi_dev_supported_func_iterator_open, or
+ * it may be a variant itself (from a call to
+ * ::rsmi_dev_supported_variant_iterator_open), it which case @p var_iter will
+ * be an iterator of the sub-variants of @p obj_h (e.g., monitors).
+ *
+ * This call allocates a small amount of memory to @p var_iter. To free this memory
+ * ::rsmi_dev_supported_func_iterator_close should be called on the returned
+ * iterator handle @p var_iter when it is no longer needed.
+ *
+ * @param[in] obj_h an iterator handle for which the variants are being requested
+ *
+ * @param[inout] var_iter A pointer to caller-provided memory to which the
+ * sub-variant iterator will be written.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_supported_variant_iterator_open(rsmi_func_id_iter_handle_t obj_h,
+                                        rsmi_func_id_iter_handle_t *var_iter);
+
+/**
+ * @brief Advance a function identifer iterator
+ *
+ * @details Given a function id iterator handle (::rsmi_func_id_iter_handle_t)
+ * @p handle, this function will increment the iterator to point to the next
+ * identifier. After a successful call to this function, obtaining the value
+ * of the iterator @p handle will provide the value of the next item in the
+ * list of functions/variants.
+ *
+ * If there are no more items in the list, ::RSMI_STATUS_NO_DATA is returned.
+ *
+ * @param[in] handle A pointer to an iterator handle to be incremented
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ * @retval ::RSMI_STATUS_NO_DATA is returned when list of identifiers has been
+ * exhausted
+ *
+ */
+rsmi_status_t
+rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle);
+
+/**
+ * @brief Close a variant iterator handle
+ *
+ * @details Given a pointer to an ::rsmi_func_id_iter_handle_t @p handle, this
+ * function will free the resources being used by the handle
+ *
+ * @param[in] handle A pointer to an iterator handle to be closed
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_dev_supported_func_iterator_close(rsmi_func_id_iter_handle_t *handle);
+
+/**
+ * @brief Get the value associated with a function/variant iterator
+ *
+ * @details Given an ::rsmi_func_id_iter_handle_t @p handle, this function
+ * will write the identifier of the function/variant to the user provided
+ * memory pointed to by @p value.
+ *
+ * @p value may point to a function name, a variant id, or a monitor/sensor
+ * index, depending on what kind of iterator @p handle is
+ *
+ * @param[in] handle An iterator for which the value is being requested
+ *
+ * @param[inout] value A pointer to an ::rsmi_func_id_value_t provided by the
+ * caller to which this function will write the value assocaited with @p handle
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t
+rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
+                                                 rsmi_func_id_value_t *value);
+
+/** @} */  // end of APISupport
 
 #ifdef __cplusplus
 }

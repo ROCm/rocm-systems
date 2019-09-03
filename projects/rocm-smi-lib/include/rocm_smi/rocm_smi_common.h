@@ -45,6 +45,11 @@
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_COMMON_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_COMMON_H_
 
+#include <memory>
+#include <map>
+#include <vector>
+#include <string>
+
 #define DBG_FILE_ERROR(FN, WR_STR) \
   if (env_->debug_output_bitfield & RSMI_DEBUG_SYSFS_FILE_PATHS) { \
     std::cout << "*****" << __FUNCTION__ << std::endl; \
@@ -59,6 +64,12 @@
 
 // Add different debug filters here, as powers of 2; e.g, 1, 2, 4, 8, ...
 #define RSMI_DEBUG_SYSFS_FILE_PATHS 1
+
+struct rsmi_func_id_iter_handle {
+    uintptr_t func_id_iter;
+    uintptr_t container_ptr;
+    uint32_t id_type;
+};
 
 struct RocmSMI_env_vars {
     // Bitfield that is AND'd with various RSMI_DEBUG_* bits to determine
@@ -81,5 +92,15 @@ struct RocmSMI_env_vars {
     // Env. var. RSMI_DEBUG_PP_ROOT_OVERRIDE
     const char *path_power_root_override;
 };
+
+// Support information data structures
+typedef std::vector<uint64_t> SubVariant;
+typedef SubVariant::const_iterator SubVariantIt;
+
+typedef std::map<uint64_t, std::shared_ptr<SubVariant>> VariantMap;
+typedef VariantMap::const_iterator VariantMapIt;
+
+typedef std::map<std::string, std::shared_ptr<VariantMap>> SupportedFuncMap;
+typedef SupportedFuncMap::const_iterator SupportedFuncMapIt;
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_COMMON_H_

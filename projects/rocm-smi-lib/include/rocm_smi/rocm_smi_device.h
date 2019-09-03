@@ -155,6 +155,11 @@ enum DevInfoTypes {
   kDevMemPageBad,
 };
 
+typedef struct {
+    std::vector<const char *> mandatory_depends;
+    std::vector<DevInfoTypes> variants;
+} dev_depends_t;
+
 class Device {
  public:
     explicit Device(std::string path, RocmSMI_env_vars const *e);
@@ -185,6 +190,9 @@ class Device {
     pthread_mutex_t *mutex(void) {return mutex_.ptr;}
     evt::dev_evt_grp_set_t* supported_event_groups(void) {
                                              return &supported_event_groups_;}
+    SupportedFuncMap *supported_funcs(void) {return &supported_funcs_;}
+    void fillSupportedFuncs(void);
+    void DumpSupportedFunctions(void);
 
  private:
     std::shared_ptr<Monitor> monitor_;
@@ -205,6 +213,7 @@ class Device {
     std::unordered_set<rsmi_event_group_t,
                        evt::RSMIEventGrpHashFunction> supported_event_groups_;
     std::map<std::string, uint64_t> kfdNodePropMap_;
+    SupportedFuncMap supported_funcs_;
 };
 
 }  // namespace smi

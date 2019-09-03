@@ -76,6 +76,7 @@
 #include "functional/process_info_read.h"
 #include "functional/xgmi_read_write.h"
 #include "functional/mem_page_info_read.h"
+#include "functional/api_support_read.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -216,6 +217,10 @@ TEST(rsmitstReadWrite, TestXGMIReadWrite) {
 }
 TEST(rsmitstReadOnly, TestMemPageInfoRead) {
   TestMemPageInfoRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestAPISupportRead) {
+  TestAPISupportRead tst;
   RunGenericTest(&tst);
 }
 
