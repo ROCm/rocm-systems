@@ -14,8 +14,20 @@ class BaseLoader : public T {
   typedef std::mutex mutex_t;
   typedef BaseLoader<T> loader_t;
 
+  bool Enabled() const { return (handle_ != NULL); }
+
   template <class fun_t>
-  fun_t* GetFun(const char* fun_name) { return (fun_t*) dlsym(handle_, fun_name); }
+  fun_t* GetFun(const char* fun_name) {
+    if (handle_ == NULL) return NULL;
+
+    fun_t *f = (fun_t*) dlsym(handle_, fun_name);
+    if (f == NULL) {
+      fprintf(stderr, "roctracer: symbol lookup '%s' failed: \"%s\"\n", fun_name, dlerror());
+      abort();
+    }
+    dlerror();
+    return f;
+  }
 
   static inline loader_t& Instance(const bool& preload = false) {
     loader_t* obj = instance_.load(std::memory_order_acquire);
@@ -35,10 +47,11 @@ class BaseLoader : public T {
   BaseLoader(bool preload) {
     const int flags = (preload) ? RTLD_LAZY : RTLD_LAZY|RTLD_NOLOAD;
     handle_ = dlopen(lib_name_, flags);
-    if (handle_ == NULL) {
+    if ((handle_ == NULL) && (strong_ld_check_)) {
       fprintf(stderr, "roctracer: Loading '%s' failed, preload(%d), %s\n", lib_name_, (int)preload, dlerror());
       abort();
     }
+    dlerror();
 
     T::init(this);
   }
@@ -50,6 +63,7 @@ class BaseLoader : public T {
   static mutex_t mutex_;
   static const char* lib_name_;
   static std::atomic<loader_t*> instance_;
+  static const bool strong_ld_check_;
   void* handle_;
 };
 
@@ -153,9 +167,11 @@ typedef BaseLoader<RocTxApi> RocTxLoader;
 #define LOADER_INSTANTIATE() \
   template<class T> typename roctracer::BaseLoader<T>::mutex_t roctracer::BaseLoader<T>::mutex_; \
   template<class T> std::atomic<roctracer::BaseLoader<T>*> roctracer::BaseLoader<T>::instance_{}; \
+  template<class T> const bool roctracer::BaseLoader<T>::strong_ld_check_ = false;
   template<> const char* roctracer::HipLoader::lib_name_ = "libhip_hcc.so"; \
   template<> const char* roctracer::HccLoader::lib_name_ = "libmcwamp_hsa.so"; \
   template<> const char* roctracer::KfdLoader::lib_name_ = "libkfdwrapper64.so"; \
-  template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so";
+  template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so"; \
+  template<> const bool roctracer::RocTxLoader::strong_ld_check_ = false;
 
 #endif // SRC_CORE_LOADER_H_

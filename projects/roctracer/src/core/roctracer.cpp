@@ -686,8 +686,10 @@ static void roctracer_enable_callback_impl(
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
-      const bool suc = roctracer::RocTxLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
-      if (suc == false) EXC_RAISING(ROCTRACER_STATUS_ROCTX_ERR, "roctxRegisterApiCallback(" << op << ") failed");
+      if (roctracer::RocTxLoader::Instance().Enabled()) {
+        const bool suc = roctracer::RocTxLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
+        if (suc == false) EXC_RAISING(ROCTRACER_STATUS_ROCTX_ERR, "roctxRegisterApiCallback(" << op << ") failed");
+      }
       break;
     }
     default:
@@ -751,8 +753,10 @@ static void roctracer_disable_callback_impl(
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
-      const bool suc = roctracer::RocTxLoader::Instance().RemoveApiCallback(op);
-      if (suc == false) EXC_RAISING(ROCTRACER_STATUS_ROCTX_ERR, "roctxRemoveApiCallback(" << op << ") failed");
+      if (roctracer::RocTxLoader::Instance().Enabled()) {
+        const bool suc = roctracer::RocTxLoader::Instance().RemoveApiCallback(op);
+        if (suc == false) EXC_RAISING(ROCTRACER_STATUS_ROCTX_ERR, "roctxRemoveApiCallback(" << op << ") failed");
+      }
       break;
     }
     default:
