@@ -102,13 +102,10 @@ int main() {
     
         roctxMarkA("before hipLaunchKernel");
         roctxRangePushA("hipLaunchKernel");
-        //roctxRangePushA("before hipLaunchKernel");
-        // roctxRangePushA("before hipLaunchKernel");
         // Lauching kernel from host
         hipLaunchKernel(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
                         dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
                         gpuMatrix, WIDTH);
-        //roctxRangePop();
         roctxMarkA("after hipLaunchKernel");
     
         // Memory transfer from device to host
