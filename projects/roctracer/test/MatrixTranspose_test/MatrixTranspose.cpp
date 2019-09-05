@@ -28,6 +28,9 @@ THE SOFTWARE.
 // hip header file
 #include <hip/hip_runtime.h>
 
+// roctx header file
+#include <inc/roctx.h>
+
 #ifndef ITERATIONS
 # define ITERATIONS 100
 #endif
@@ -104,20 +107,30 @@ int main() {
 
         // Memory transfer from host to device
         hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
-    
+
         // correlation reagion33
         roctracer_activity_push_external_correlation_id(33);
+
+        roctxMarkA("before hipLaunchKernel");
+        roctxRangePushA("hipLaunchKernel");
 
         // Lauching kernel from host
         hipLaunchKernel(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
                         dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
                         gpuMatrix, WIDTH);
-    
+
+        roctxMarkA("after hipLaunchKernel");
+
         // correlation reagion end
         roctracer_activity_pop_external_correlation_id(NULL);
 
         // Memory transfer from device to host
+        roctxRangePushA("hipMemcpy");
+
         hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
+
+        roctxRangePop(); // for "hipMemcpy"
+        roctxRangePop(); // for "hipLaunchKernel"
     
         // correlation reagion end
         roctracer_activity_pop_external_correlation_id();
@@ -165,6 +178,7 @@ int main() {
 #if 1
 #include <inc/roctracer_hip.h>
 #include <inc/roctracer_hcc.h>
+#include <inc/roctracer_roctx.h>
 
 // Macro to check ROC-tracer calls status
 #define ROCTRACER_CALL(call)                                                                       \
@@ -184,6 +198,13 @@ void api_callback(
     void* arg)
 {
   (void)arg;
+
+  if (domain == ACTIVITY_DOMAIN_ROCTX) {
+    const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
+    fprintf(stdout, "ROCTX: \"%s\"\n", data->args.message);
+    return;
+  }
+
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
   fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
     roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
