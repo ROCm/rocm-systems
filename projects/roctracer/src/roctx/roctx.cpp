@@ -62,7 +62,7 @@ THE SOFTWARE.
   (void)err;                                                                                       \
   return X;
 
-std::stack<std::string> message_stack;
+static thread_local std::stack<std::string> message_stack;
 
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
@@ -117,7 +117,6 @@ PUBLIC_API void roctxMarkA(const char* message) {
 
 PUBLIC_API int roctxRangePushA(const char* message) {
   API_METHOD_PREFIX
-  //EXC_ABORT(ROCTX_STATUS_ERROR, "method is not implemented");
   roctx_api_data_t api_data{};
   api_data.args.roctxRangePushA.message = strdup(message);
   activity_rtapi_callback_t api_callback_fun = NULL;
@@ -125,12 +124,12 @@ PUBLIC_API int roctxRangePushA(const char* message) {
   roctx::cb_table.get(ROCTX_API_ID_roctxRangePushA, &api_callback_fun, &api_callback_arg);
   if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePushA, &api_data, api_callback_arg);
   message_stack.push(strdup(message));
-  API_METHOD_SUFFIX
+  API_METHOD_CATCH(-1);
+  return 0;
 }
 
 PUBLIC_API int roctxRangePop() {
   API_METHOD_PREFIX
-  //EXC_ABORT(ROCTX_STATUS_ERROR, "method is not implemented");
   roctx_api_data_t api_data{};
   activity_rtapi_callback_t api_callback_fun = NULL;
   void* api_callback_arg = NULL;
@@ -141,7 +140,8 @@ PUBLIC_API int roctxRangePop() {
   } else {
       message_stack.pop();
   }
-  API_METHOD_SUFFIX
+  API_METHOD_CATCH(-1)
+  return 0;
 }
 
 }  // extern "C"
