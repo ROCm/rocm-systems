@@ -125,7 +125,7 @@ PUBLIC_API int roctxRangePushA(const char* message) {
   if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePushA, &api_data, api_callback_arg);
   message_stack.push(strdup(message));
   API_METHOD_CATCH(-1);
-  return 0;
+  return message_stack.size();
 }
 
 PUBLIC_API int roctxRangePop() {
@@ -141,7 +141,7 @@ PUBLIC_API int roctxRangePop() {
       message_stack.pop();
   }
   API_METHOD_CATCH(-1)
-  return 0;
+  return message_stack.size();
 }
 
 }  // extern "C"
