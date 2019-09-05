@@ -240,7 +240,7 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
   const timestamp_t end_timestamp = entry->end;
   std::ostringstream oss;                                                                        \
 
-  const char* str = (domain < ACTIVITY_DOMAIN_NUMBER) ? roctracer_op_string(domain, cid, 0) : strdup("MARK");
+  const char* str = (domain == ACTIVITY_DOMAIN_EXT_API) ? roctracer_op_string(domain, cid, 0) : strdup("MARK");
   oss << std::dec <<
     begin_timestamp << ":" << end_timestamp << " " << entry->pid << ":" << entry->tid << " " << str;
 

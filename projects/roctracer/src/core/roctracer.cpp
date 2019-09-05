@@ -29,6 +29,7 @@ THE SOFTWARE.
 
 #include <atomic>
 #include <mutex>
+#include <stack>
 #include <dirent.h>
 #include <string.h>
 #include <pthread.h>
@@ -390,6 +391,8 @@ typedef std::mutex correlation_id_mutex_t;
 correlation_id_map_t* correlation_id_map = NULL;
 correlation_id_mutex_t correlation_id_mutex;
 
+static thread_local std::stack<activity_correlation_id_t> external_id_stack;
+
 static inline void CorrelationIdRegistr(const activity_correlation_id_t& correlation_id) {
   std::lock_guard<correlation_id_mutex_t> lck(correlation_id_mutex);
   if (correlation_id_map == NULL) correlation_id_map = new correlation_id_map_t;
@@ -432,6 +435,16 @@ roctracer_record_t* HIP_SyncActivityCallback(
     record->end_ns = timer.timestamp_ns();
     record->process_id = syscall(__NR_getpid);
     record->thread_id = syscall(__NR_gettid);
+
+    if (external_id_stack.empty() == false) {
+      roctracer_record_t ext_record{};
+      ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
+      ext_record.op = ACTIVITY_EXT_OP_EXTERN_ID;
+      ext_record.correlation_id = record->correlation_id;
+      ext_record.external_id = external_id_stack.top();
+      pool->Write(ext_record);
+    }
+
     pool->Write(*record);
     // Clearing correlatin ID
     correlation_id_tls = 0;
@@ -581,7 +594,7 @@ std::atomic<util::Logger*> util::Logger::instance_{};
 MemoryPool* memory_pool = NULL;
 typedef std::recursive_mutex memory_pool_mutex_t;
 memory_pool_mutex_t memory_pool_mutex;
-}
+}  // namespace roctracer
 
 LOADER_INSTANTIATE();
 
@@ -652,6 +665,7 @@ static inline uint32_t get_op_num(const uint32_t& domain) {
     case ACTIVITY_DOMAIN_HSA_API: return HSA_API_ID_NUMBER;
     case ACTIVITY_DOMAIN_HCC_OPS: return hc::HSA_OP_ID_NUMBER;
     case ACTIVITY_DOMAIN_HIP_API: return HIP_API_ID_NUMBER;
+    case ACTIVITY_DOMAIN_EXT_API: return 0;
     case ACTIVITY_DOMAIN_ROCTX: return ROCTX_API_ID_NUMBER;
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
@@ -959,10 +973,37 @@ PUBLIC_API roctracer_status_t roctracer_flush_activity(roctracer_pool_t* pool) {
   API_METHOD_SUFFIX
 }
 
+// Notifies that the calling thread is entering an external API region.
+// Push an external correlation id for the calling thread.
+PUBLIC_API roctracer_status_t roctracer_activity_push_external_correlation_id(activity_correlation_id_t id) {
+  API_METHOD_PREFIX
+  roctracer::external_id_stack.push(id);
+  API_METHOD_SUFFIX
+}
+
+// Notifies that the calling thread is leaving an external API region.
+// Pop an external correlation id for the calling thread.
+// 'lastId' returns the last external correlation
+PUBLIC_API roctracer_status_t roctracer_activity_pop_external_correlation_id(activity_correlation_id_t* last_id) {
+  API_METHOD_PREFIX
+  if (last_id != NULL) *last_id = 0;
+
+  if (roctracer::external_id_stack.empty() != true) {
+    if (last_id != NULL) *last_id = roctracer::external_id_stack.top();
+    roctracer::external_id_stack.pop();
+  } else {
+#if 0
+    EXC_RAISING(ROCTRACER_STATUS_ERROR, "not matching external range pop");
+#endif
+    return ROCTRACER_STATUS_ERROR;
+  }
+  API_METHOD_SUFFIX
+}
+
 // Mark API
 PUBLIC_API void roctracer_mark(const char* str) {
     if (mark_api_callback_ptr) {
-        mark_api_callback_ptr(ACTIVITY_DOMAIN_NUMBER, 0, str, NULL);
+        mark_api_callback_ptr(ACTIVITY_DOMAIN_NUMBER, ACTIVITY_EXT_OP_MARK, str, NULL);
         roctracer::GlobalCounter::Increment(); // account for user-defined markers when tracking correlation id
     }
 }

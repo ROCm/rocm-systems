@@ -22,6 +22,9 @@ THE SOFTWARE.
 
 #include <iostream>
 
+// roctracer extension API
+#include <inc/roctracer_ext.h>
+
 // hip header file
 #include <hip/hip_runtime.h>
 
@@ -97,22 +100,40 @@ int main() {
         hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
         hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
     
+        // correlation reagion32
+        roctracer_activity_push_external_correlation_id(31);
+        // correlation reagion32
+        roctracer_activity_push_external_correlation_id(32);
+
         // Memory transfer from host to device
         hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
-    
+
+        // correlation reagion33
+        roctracer_activity_push_external_correlation_id(33);
+
         roctxMarkA("before hipLaunchKernel");
         roctxRangePushA("hipLaunchKernel");
+
         // Lauching kernel from host
         hipLaunchKernel(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
                         dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
                         gpuMatrix, WIDTH);
+
         roctxMarkA("after hipLaunchKernel");
-    
+
+        // correlation reagion end
+        roctracer_activity_pop_external_correlation_id(NULL);
+
         // Memory transfer from device to host
         roctxRangePushA("hipMemcpy");
+
         hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
+
         roctxRangePop(); // for "hipMemcpy"
         roctxRangePop(); // for "hipLaunchKernel"
+    
+        // correlation reagion end
+        roctracer_activity_pop_external_correlation_id();
 
         // CPU MatrixTranspose computation
         matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);
@@ -135,6 +156,11 @@ int main() {
         hipFree(gpuMatrix);
         hipFree(gpuTransposeMatrix);
     
+        // correlation reagion end
+        roctracer_activity_pop_external_correlation_id();
+        // correlation reagion end
+        roctracer_activity_pop_external_correlation_id();
+
         // free the resources on host side
         free(Matrix);
         free(TransposeMatrix);
@@ -248,11 +274,15 @@ void activity_callback(const char* begin, const char* end, void* arg) {
         record->device_id,
         record->queue_id
       );
+      if (record->op == hc::HSA_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
+    } else if (record->domain == ACTIVITY_DOMAIN_EXT_API) {
+      fprintf(stdout, " external_id(%lu)",
+        record->external_id
+      );
     } else {
       fprintf(stderr, "Bad domain %d\n", record->domain);
       abort();
     }
-    if (record->op == hc::HSA_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
     fprintf(stdout, "\n");
     fflush(stdout);
     ROCTRACER_CALL(roctracer_next_record(record, &record));
