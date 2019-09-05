@@ -31,9 +31,16 @@ typedef enum {
   ACTIVITY_DOMAIN_HSA_OPS = 1,                    // HSA async activity domain
   ACTIVITY_DOMAIN_HCC_OPS = 2,                    // HCC async activity domain
   ACTIVITY_DOMAIN_HIP_API = 3,                    // HIP API domain
-  ACTIVITY_DOMAIN_ROCTX   = 4,                    // ROCTX domain
+  ACTIVITY_DOMAIN_EXT_API = 4,                    // External ID domain
+  ACTIVITY_DOMAIN_ROCTX   = 5,                    // ROCTX domain
   ACTIVITY_DOMAIN_NUMBER
 } activity_domain_t;
+
+// Extension API opcodes
+typedef enum {
+  ACTIVITY_EXT_OP_MARK = 0,
+  ACTIVITY_EXT_OP_EXTERN_ID = 1
+} activity_ext_op_t;
 
 // API calback type
 typedef void (*activity_rtapi_callback_t)(uint32_t domain, uint32_t cid, const void* data, void* arg);
@@ -66,6 +73,9 @@ struct activity_record_t {
       struct {
         uint32_t process_id;                       // device id
         uint32_t thread_id;                        // thread id
+      };
+      struct {
+        activity_correlation_id_t external_id;     // external correlatino id
       };
     };
     size_t bytes;                                  // data size bytes

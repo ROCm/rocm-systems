@@ -90,11 +90,24 @@ install ( TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION lib )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer.h DESTINATION include )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hip.h DESTINATION include )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hcc.h DESTINATION include )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_ext.h DESTINATION include )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/ext/prof_protocol.h DESTINATION include/ext )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/ext/hsa_rt_utils.hpp DESTINATION include/ext )
 install ( FILES ${PROJECT_BINARY_DIR}/inc-link DESTINATION ../include RENAME ${ROCTRACER_NAME} )
 install ( FILES ${PROJECT_BINARY_DIR}/so-link DESTINATION ../lib RENAME ${ROCTRACER_LIBRARY}.so )
 install ( FILES ${PROJECT_BINARY_DIR}/test/libtracer_tool.so DESTINATION tool )
+
+## rocTX
+set ( ROCTX_TARGET "roctx64" )
+set ( ROCTX_LIBRARY "lib${ROCTX_TARGET}" )
+
+add_custom_target ( so-roctx-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCTRACER_NAME}/lib/${ROCTX_LIBRARY}.so so-roctx-link )
+
+install ( TARGETS "roctx64" LIBRARY DESTINATION lib )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctx.h DESTINATION include )
+install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_roctx.h DESTINATION include )
+install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-link DESTINATION ../lib RENAME ${ROCTX_LIBRARY}.so )
 
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" )
