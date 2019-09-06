@@ -42,6 +42,7 @@ class BaseLoader : public T {
   }
 
   static loader_t* GetRef() { return instance_; }
+  static void SetLibName(const char *name) { lib_name_ = name; }
 
   private:
   BaseLoader(bool preload) {

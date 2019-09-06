@@ -1048,8 +1048,11 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
       break;
     }
     case ACTIVITY_DOMAIN_HCC_OPS:
-    case ACTIVITY_DOMAIN_HIP_API:
+    case ACTIVITY_DOMAIN_HIP_API: {
+      const char* hip_backend_lib_name = getenv("HIP_BACKEND_LIB");
+      if (hip_backend_lib_name != NULL) roctracer::HccLoader::Instance().SetLibName(hip_backend_lib_name);
       mark_api_callback_ptr = reinterpret_cast<mark_api_callback_t*>(properties);
+    }
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }
