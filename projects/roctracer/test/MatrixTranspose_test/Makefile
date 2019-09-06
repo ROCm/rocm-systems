@@ -1,7 +1,6 @@
 ROOT_PATH = ../..
 LIB_PATH  = $(ROOT_PATH)/build
-LIB_NAME  = roctracer64
-ROC_LIBS  = -L$(LIB_PATH) -l$(LIB_NAME)
+ROC_LIBS  = -L$(LIB_PATH) -lroctracer64 -lroctx64
 
 EXECUTABLE = ./MatrixTranspose
 SOURCES    = MatrixTranspose.cpp
