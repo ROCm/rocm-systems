@@ -141,7 +141,7 @@ PUBLIC_API int roctxRangePop() {
       message_stack.pop();
   }
   API_METHOD_CATCH(-1)
-  return message_stack.size()-1;
+  return message_stack.size();
 }
 
 }  // extern "C"
