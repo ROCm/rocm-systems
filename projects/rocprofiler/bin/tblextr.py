@@ -332,7 +332,8 @@ if (len(sys.argv) < 2): fatal("Usage: " + sys.argv[0] + " <output CSV file> <inp
 outfile = sys.argv[1]
 infiles = sys.argv[2:]
 indir = re.sub(r'\/[^\/]*$', r'', infiles[0])
-inext = re.sub(r'^[^\.]*', r'', infiles[0])
+inext = re.sub(r'\s+$', r'', infiles[0])
+inext = re.sub(r'^.*(\.[^\.]+)$', r'\1', inext)
 
 dbfile = ''
 csvfile = ''
