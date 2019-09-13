@@ -24,16 +24,10 @@ $ export CMAKE_DEBUG_TRACE=1 # 1 to enable debug tracing
 To build with the current installed ROCM:
 
 $ cd .../rocprofiler
+$ export CMAKE_PREFIX_PATH=/opt/rocm/include/hsa:/opt/rocm
 $ mkdir build
 $ cd build
-
-$ export CMAKE_PREFIX_PATH=/opt/rocm/include/hsa:/opt/rocm
 $ cmake ..
-$ make
-
-or
-
-$ cmake -DCMAKE_PREFIX_PATH=/opt/rocm ..
 $ make
 
 To run the test:
