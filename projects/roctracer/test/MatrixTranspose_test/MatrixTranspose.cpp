@@ -111,21 +111,21 @@ int main() {
         // correlation reagion33
         roctracer_activity_push_external_correlation_id(33);
 
-        roctxMarkA("before hipLaunchKernel");
-        roctxRangePushA("hipLaunchKernel");
+        roctxMark("before hipLaunchKernel");
+        roctxRangePush("hipLaunchKernel");
 
         // Lauching kernel from host
         hipLaunchKernel(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
                         dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
                         gpuMatrix, WIDTH);
 
-        roctxMarkA("after hipLaunchKernel");
+        roctxMark("after hipLaunchKernel");
 
         // correlation reagion end
         roctracer_activity_pop_external_correlation_id(NULL);
 
         // Memory transfer from device to host
-        roctxRangePushA("hipMemcpy");
+        roctxRangePush("hipMemcpy");
 
         hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
 

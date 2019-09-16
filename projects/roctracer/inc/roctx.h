@@ -56,7 +56,7 @@ const char* roctracer_error_string();
 
 // A marker created by given ASCII massage
 void roctxMarkA(const char* message);
-void roctxMark(const char* message) { return roctxMarkA(message); }
+#define roctxMark(message) roctxMarkA(message)
 
 ////////////////////////////////////////////////////////////////////////////////
 // Ranges annotating API
@@ -64,7 +64,7 @@ void roctxMark(const char* message) { return roctxMarkA(message); }
 // Returns the 0 based level of a nested range being started by given message associated to this range.
 // A negative value is returned on the error.
 int roctxRangePushA(const char* message);
-int roctxRangePush(const char* message) { return roctxRangePushA(message); }
+#define roctxRangePush(message) roctxRangePushA(message)
 
 // Marks the end of a nested range.
 // A negative value is returned on the error.
