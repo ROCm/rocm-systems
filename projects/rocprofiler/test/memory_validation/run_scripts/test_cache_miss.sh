@@ -168,11 +168,11 @@ function one_run
             tccrdmissrate=$(awk -v mr=$missTccRds -v rd=$totTccRds \
                             'BEGIN{printf("%f", mr/rd)}')
 
-            coldmisses=`echo "scale=0; $N/$line" | bc`
+            coldmisses=$(awk -v n=$N -v l=$line 'BEGIN{printf("%.0f", n/l)}')
 
             expectedMissTccRds=$coldmisses
-            if (( $(echo "$tccrdmissrate > 0.98" | bc -l) )) \
-                    && (( $(echo "$tcprdmissrate > 0.98" | bc -l) )); then
+            if (( $(awk 'BEGIN {print "'$tccrdmissrate'" > 0.98}') )) \
+                && (( $(awk 'BEGIN {print "'$tcprdmissrate'" > 0.98}') )); then
                 expectedMissTccRds=$totTcpRds
                 printf "\n\tTCC-READ  : expected=%6s±%s, profiled=%6s, " \
                     $expectedMissTccRds ".5%" $missTccRds
@@ -183,9 +183,9 @@ function one_run
 
             # absolute difference between profiled and expected
             diff=$(( $missTccRds - $coldmisses ))
-            if (( $(echo "$diff < 0" | bc -l) )); then
-                diff=`echo "$diff*-1" | bc -l`; fi
-            if (( $(echo "$tccrdmissrate > 0.98" | bc -l) )); then
+            if (( $(awk 'BEGIN {print "'$diff'" < 0}') )); then
+                diff=$(awk -v d=$diff 'BEGIN{printf("%f", d*-1)}'); fi
+            if (( $(awk 'BEGIN {print "'$tccrdmissrate'" > 0.98}') )); then
               printf "test [${GREEN}PASS${NC}]"
             elif (( $diff < $REQ_DIFF )); then
               printf "test [${GREEN}PASS${NC}]"
@@ -217,10 +217,10 @@ function one_run
             tccwrmissrate=$(awk -v mw=$missTccWrs -v wr=$totTccWrs \
                             'BEGIN{printf("%f", mw/wr)}')
 
-            coldmisses=`echo "scale=0; $N/$line" | bc`
+            coldmisses=$(awk -v n=$N -v l=$line 'BEGIN{printf("%.0f", n/l)}')
 
             expectedMissTccWrs=$coldmisses
-            if (( $(echo "$tccwrmissrate > 0.98" | bc -l) )); then
+            if (( $(awk 'BEGIN {print "'$tccwrmissrate'" > 0.98}') )); then
                 expectedMissTccWrs=$totTcpWrs;
                 printf "\n\tTCC-WRITE : expected=%6s±%s, profiled=%6s, " \
                         $expectedMissTccWrs ".5%" $missTccWrs
@@ -231,7 +231,7 @@ function one_run
             if (($missTccWrs - $coldmisses < $REQ_DIFF)) \
                     && (($missTccWrs - $coldmisses < $REQ_DIFF)); then
               printf "test [${GREEN}PASS${NC}]"
-            elif (( $(echo "$tccwrmissrate > 0.98" | bc -l) )); then
+            elif (( $(awk 'BEGIN {print "'$tccwrmissrate'" > 0.98}') )); then
               printf "test [${GREEN}PASS${NC}]"
             else printf "test [${RED}FAIL${NC}]"; fi
           fi
