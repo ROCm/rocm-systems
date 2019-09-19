@@ -40,7 +40,12 @@ message("Package version: ${PKG_VERSION_STR}")
 get_version_from_tag("1.0.0.0" ${SO_VERSION_GIT_TAG_PREFIX} GIT)
 
 # VERSION_* variables should be set by get_version_from_tag
-set(SO_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}")
+if ( ${ROCM_PATCH_VERSION} )
+    set ( VERSION_PATCH ${ROCM_PATCH_VERSION})
+    set(SO_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
+else()
+    set(SO_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}")
+endif ()
 set(${ROCM_SMI}_VERSION_MAJOR "${VERSION_MAJOR}")
 set(${ROCM_SMI}_VERSION_MINOR "${VERSION_MINOR}")
 set(${ROCM_SMI}_VERSION_PATCH "0")
