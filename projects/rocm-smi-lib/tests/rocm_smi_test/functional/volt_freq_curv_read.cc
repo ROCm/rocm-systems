@@ -154,15 +154,20 @@ void TestVoltCurvRead::Run(void) {
     PrintDeviceHeader(i);
 
     err = rsmi_dev_od_volt_info_get(i, &odv);
-    if (err == RSMI_STATUS_FILE_ERROR ||
-                                   err == RSMI_STATUS_NOT_SUPPORTED) {
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout <<
             "\t**rsmi_dev_od_volt_info_get: Not supported on this machine"
                                                                << std::endl;
       }
+      // Verify api support checking functionality is working
+      err = rsmi_dev_od_volt_info_get(i, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
       CHK_ERR_ASRT(err)
+      // Verify api support checking functionality is working
+      err = rsmi_dev_od_volt_info_get(i, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     }
 
     if (err == RSMI_STATUS_SUCCESS) {

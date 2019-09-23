@@ -106,8 +106,7 @@ void TestFrequenciesReadWrite::Run(void) {
 
       auto freq_read = [&]() -> bool {
         ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
-        if (ret == RSMI_STATUS_NOT_SUPPORTED ||
-                                              ret == RSMI_STATUS_FILE_ERROR) {
+        if (ret == RSMI_STATUS_NOT_SUPPORTED) {
           std::cout << "\t**Set " << FreqEnumToStr(rsmi_clk) <<
                                ": Not supported on this machine" << std::endl;
           return false;

@@ -113,6 +113,9 @@ void TestPowerRead::Run(void) {
       if (err == RSMI_STATUS_SUCCESS) {
         std::cout << static_cast<float>(val_ui64)/1000 << " mW" << std::endl;
       }
+      // Verify api support checking functionality is working
+      err = rsmi_dev_power_ave_get(i, 0, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
   }
 }

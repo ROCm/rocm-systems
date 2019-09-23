@@ -105,7 +105,14 @@ void TestSysInfoRead::Run(void) {
           std::cout << "\t**VBIOS read: Not supported on this machine"
                                                                 << std::endl;
         }
+        // Verify api support checking functionality is working
+        err = rsmi_dev_vbios_version_get(i, nullptr, 80);
+        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
       } else {
+        // Verify api support checking functionality is working
+        err = rsmi_dev_vbios_version_get(i, nullptr, 80);
+        ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+
         CHK_ERR_ASRT(err)
       }
     } else {
@@ -120,18 +127,27 @@ void TestSysInfoRead::Run(void) {
       std::cout << "\t**PCI ID (BDFID): 0x" << std::hex << val_ui64;
       std::cout << " (" << std::dec << val_ui64 << ")" << std::endl;
     }
+    // Verify api support checking functionality is working
+    err = rsmi_dev_pci_id_get(i, nullptr);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
     err = rsmi_dev_unique_id_get(i, &val_ui64);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout <<
             "\t**rsmi_dev_unique_id() is not supported"
             " on this machine" << std::endl;
+        // Verify api support checking functionality is working
+        err = rsmi_dev_unique_id_get(i, nullptr);
+        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
             std::cout << "\t**GPU Unique ID : " << std::hex << val_ui64 <<
             std::endl;
         }
+        // Verify api support checking functionality is working
+        err = rsmi_dev_unique_id_get(i, nullptr);
+        ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
 
     err = rsmi_version_get(&ver);
@@ -148,15 +164,23 @@ void TestSysInfoRead::Run(void) {
     for (int x = RSMI_FW_BLOCK_FIRST; x <= RSMI_FW_BLOCK_LAST; ++x) {
       rsmi_fw_block_t block = static_cast<rsmi_fw_block_t>(x);
       err = rsmi_dev_firmware_version_get(i, block, &val_ui64);
-      if (err) {
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout << "\t**No FW block " << NameFromFWEnum(block) <<
                                      " available on this system" << std::endl;
+
+        // Verify api support checking functionality is working
+        err = rsmi_dev_firmware_version_get(i, block, nullptr);
+        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
         continue;
       }
+      CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
         std::cout << "\t**FW VERSION for " << NameFromFWEnum(block) <<
                                                 ": " << val_ui64 << std::endl;
       }
+      // Verify api support checking functionality is working
+      err = rsmi_dev_firmware_version_get(i, block, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
   }
 }

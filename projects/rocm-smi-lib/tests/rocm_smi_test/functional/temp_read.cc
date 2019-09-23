@@ -112,12 +112,19 @@ void TestTempRead::Run(void) {
           IF_VERB(STANDARD) {
             std::cout << "\t**" << label << ": " <<
                                "Not supported on this machine" << std::endl;
+
+            // Verify api support checking functionality is working
+            err = rsmi_dev_temp_metric_get(i, type, met, nullptr);
+            ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
             return;
           }
         } else {
           CHK_ERR_ASRT(err)
         }
       }
+      // Verify api support checking functionality is working
+      err = rsmi_dev_temp_metric_get(i, type, met, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
       IF_VERB(STANDARD) {
         std::cout << "\t**" << label << ": " << val_i64/1000 <<

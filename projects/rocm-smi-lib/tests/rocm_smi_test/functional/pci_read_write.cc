@@ -102,11 +102,18 @@ void TestPciReadWrite::Run(void) {
         std::cout <<
             "\t**rsmi_dev_pci_replay_counter_get() is not supported"
             " on this machine" << std::endl;
+
+        // Verify api support checking functionality is working
+        ret = rsmi_dev_pci_replay_counter_get(dv_ind, nullptr);
+        ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
       } else {
         CHK_ERR_ASRT(ret)
         IF_VERB(STANDARD) {
           std::cout << "\tPCIe Replay Counter: " << u64int << std::endl;
         }
+        // Verify api support checking functionality is working
+        ret = rsmi_dev_pci_replay_counter_get(dv_ind, nullptr);
+        ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
       }
 
     ret = rsmi_dev_pci_throughput_get(dv_ind, &sent, &received, &max_pkt_sz);
@@ -114,6 +121,9 @@ void TestPciReadWrite::Run(void) {
       std::cout << "TEST FAILURE: Current PCIe throughput is not detected. "
         "This is likely because it is not indicated in the pcie_bw sysfs "
          "file. Aborting test." << std::endl;
+
+      // We don't need to verify api support checking functionality is working
+      // as the user may choose to have any of the input parameters as 0.
       return;
     }
     CHK_ERR_ASRT(ret)
@@ -133,6 +143,10 @@ void TestPciReadWrite::Run(void) {
       std::cout << "TEST FAILURE: Current PCIe bandwidth is not detected. "
         "This is likely because it is not indicated in the pp_dpm_pcie sysfs "
          "file. Aborting test." << std::endl;
+      // Verify api support checking functionality is working
+      ret = rsmi_dev_pci_bandwidth_get(dv_ind, nullptr);
+      ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
+
       return;
     }
     CHK_ERR_ASRT(ret)
@@ -141,6 +155,9 @@ void TestPciReadWrite::Run(void) {
       std::cout << "\tInitial PCIe BW index is " << bw.transfer_rate.current <<
                                                                     std::endl;
     }
+    // Verify api support checking functionality is working
+    ret = rsmi_dev_pci_bandwidth_get(dv_ind, nullptr);
+    ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
 
     // First set the bitmask to all supported bandwidths
     freq_bitmask = ~(~0 << bw.transfer_rate.num_supported);

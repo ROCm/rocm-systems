@@ -98,9 +98,15 @@ void TestPowerCapReadWrite::Run(void) {
 
     ret = rsmi_dev_power_cap_range_get(dv_ind, 0, &max, &min);
     CHK_ERR_ASRT(ret)
+    // Verify api support checking functionality is working
+    ret = rsmi_dev_power_cap_range_get(dv_ind, 0, nullptr, nullptr);
+    ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
 
     ret = rsmi_dev_power_cap_get(dv_ind, 0, &orig);
     CHK_ERR_ASRT(ret)
+    // Verify api support checking functionality is working
+    ret = rsmi_dev_power_cap_get(dv_ind, 0, nullptr);
+    ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
 
     new_cap = (max + min)/2;
 

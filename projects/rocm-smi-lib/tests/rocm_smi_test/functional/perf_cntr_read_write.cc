@@ -139,6 +139,13 @@ TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
                            static_cast<rsmi_event_type_t>(evnt), &evt_handle);
       CHK_ERR_ASRT(ret)
 
+      // Note that rsmi_dev_counter_create() should never return
+      // RSMI_STATUS_NOT_SUPPORTED. It will return RSMI_STATUS_OUT_OF_RESOURCES
+      // if it is unable to create a counter.
+      ret = rsmi_dev_counter_create(dv_ind,
+                           static_cast<rsmi_event_type_t>(evnt), nullptr);
+      ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
+
       IF_VERB(STANDARD) {
         std::cout << "\t\tStart Counting..." << std::endl;
       }
@@ -202,7 +209,6 @@ TestPerfCntrReadWrite::testEventsSimultaneously(uint32_t dv_ind) {
   std::cout << "****************************" << std::endl;
 
   for (PerfCntrEvtGrp grp : s_event_groups) {
-
     ret = rsmi_dev_counter_group_supported(dv_ind, grp.group());
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
       std::cout << "\tEvent Group " << grp.name() <<

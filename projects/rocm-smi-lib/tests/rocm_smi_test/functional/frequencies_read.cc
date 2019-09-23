@@ -113,15 +113,21 @@ void TestFrequenciesRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     auto freq_output = [&](rsmi_clk_type_t t, const char *name) {
       err = rsmi_dev_gpu_clk_freq_get(i, t, &f);
-      if (err == RSMI_STATUS_NOT_SUPPORTED || err == RSMI_STATUS_FILE_ERROR) {
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout << "\t**Get " << name << ": Not supported on this machine"
                                                                    << std::endl;
+        // Verify api support checking functionality is working
+        err = rsmi_dev_gpu_clk_freq_get(i, t, nullptr);
+        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
       } else {
           CHK_ERR_ASRT(err)
           IF_VERB(STANDARD) {
             std::cout << "\t**Supported " << name << " clock frequencies: ";
             std::cout << f.num_supported << std::endl;
             print_frequencies(&f);
+            // Verify api support checking functionality is working
+            err = rsmi_dev_gpu_clk_freq_get(i, t, nullptr);
+            ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
           }
       }
     };
@@ -135,15 +141,21 @@ void TestFrequenciesRead::Run(void) {
     freq_output(RSMI_CLK_TYPE_SOC, "SOC Clock");
 
     err = rsmi_dev_pci_bandwidth_get(i, &b);
-    if (err == RSMI_STATUS_NOT_SUPPORTED || err == RSMI_STATUS_FILE_ERROR) {
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
       std::cout << "\t**Get PCIE Bandwidth: Not supported on this machine"
                                                             << std::endl;
+      // Verify api support checking functionality is working
+      err = rsmi_dev_pci_bandwidth_get(i, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
         CHK_ERR_ASRT(err)
         IF_VERB(STANDARD) {
           std::cout << "\t**Supported PCIe bandwidths: ";
           std::cout << b.transfer_rate.num_supported << std::endl;
           print_frequencies(&b.transfer_rate, b.lanes);
+          // Verify api support checking functionality is working
+          err = rsmi_dev_pci_bandwidth_get(i, nullptr);
+          ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
         }
     }
   }

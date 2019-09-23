@@ -100,5 +100,8 @@ void TestPerfLevelRead::Run(void) {
       std::cout << "\t**Performance Level:" << std::dec << (uint32_t)pfl <<
                                                                     std::endl;
     }
+    // Verify api support checking functionality is working
+    err = rsmi_dev_perf_level_get(i, nullptr);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
   }
 }

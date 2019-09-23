@@ -56,6 +56,7 @@
 #include <sstream>
 #include <vector>
 #include <memory>
+#include <algorithm>
 
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -911,6 +912,65 @@ void Device::fillSupportedFuncs(void) {
   }
   monitor()->fillSupportedFuncs(&supported_funcs_);
   // DumpSupportedFunctions();
+}
+
+bool Device::DeviceAPISupported(std::string name, uint64_t variant,
+                                                       uint64_t sub_variant) {
+  SupportedFuncMapIt func_it;
+  VariantMapIt var_it;
+  SubVariantIt sub_var_it;
+
+  fillSupportedFuncs();
+  func_it = supported_funcs_.find(name);
+
+  if (func_it == supported_funcs_.end()) {
+    return false;
+  }
+
+  if (variant != RSMI_DEFAULT_VARIANT) {
+    // if variant is != RSMI_DEFAULT_VARIANT, we should not have a nullptr
+    assert(func_it->second != nullptr);
+    var_it = func_it->second->find(variant);
+
+    if (var_it == func_it->second->end()) {
+      return false;
+    }
+
+    if (sub_variant == RSMI_DEFAULT_VARIANT) {
+      return true;
+    } else {  // sub_variant != RSMI_DEFAULT_VARIANT
+      // if variant is != RSMI_DEFAULT_VARIANT, we should not have a nullptr
+      assert(var_it->second != nullptr);
+
+      sub_var_it = std::find(var_it->second->begin(),
+                                          var_it->second->end(), sub_variant);
+      if (sub_var_it == var_it->second->end()) {
+        return false;
+      } else {
+        return true;
+      }
+    }
+  } else {  // variant == RSMI_DEFAULT_VARIANT
+    if (func_it->second != nullptr) {
+      var_it = func_it->second->find(variant);
+    }
+    if (sub_variant == RSMI_DEFAULT_VARIANT) {
+      return true;
+    } else {  // sub_variant != RSMI_DEFAULT_VARIANT
+      if (func_it->second == nullptr) {
+        return false;
+      }
+      sub_var_it = std::find(var_it->second->begin(),
+                                          var_it->second->end(), sub_variant);
+      if (sub_var_it == var_it->second->end()) {
+        return false;
+      } else {
+        return true;
+      }
+    }
+  }
+  assert(!"We should not reach here");
+  return false;
 }
 
 #undef RET_IF_NONZERO

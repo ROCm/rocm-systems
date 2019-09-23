@@ -121,6 +121,10 @@ void TestPowerReadWrite::Run(void) {
     ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
     CHK_ERR_ASRT(ret)
 
+    // Verify api support checking functionality is working
+    ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, nullptr);
+    ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
+
     IF_VERB(STANDARD) {
       std::cout << "The available power profiles are:" << std::endl;
       uint64_t tmp = 1;

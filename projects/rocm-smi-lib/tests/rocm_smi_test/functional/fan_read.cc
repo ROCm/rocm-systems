@@ -99,12 +99,20 @@ void TestFanRead::Run(void) {
     }
     err = rsmi_dev_fan_speed_get(i, 0, &val_i64);
     CHK_ERR_ASRT(err)
+
+    // Verify api support checking functionality is working
+    err = rsmi_dev_fan_speed_get(i, 0, nullptr);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+
     err = rsmi_dev_fan_speed_max_get(i, 0, &val_ui64);
     CHK_ERR_ASRT(err)
     IF_VERB(STANDARD) {
       std::cout << val_i64/static_cast<float>(val_ui64)*100;
       std::cout << "% ("<< val_i64 << "/" << val_ui64 << ")" << std::endl;
     }
+    // Verify api support checking functionality is working
+    err = rsmi_dev_fan_speed_max_get(i, 0, nullptr);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
     IF_VERB(STANDARD) {
       std::cout << "\t**Current fan RPMs: ";
@@ -114,5 +122,9 @@ void TestFanRead::Run(void) {
     IF_VERB(STANDARD) {
       std::cout << val_i64 << std::endl;
     }
+
+    // Verify api support checking functionality is working
+    err = rsmi_dev_fan_rpms_get(i, 0, nullptr);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
   }
 }

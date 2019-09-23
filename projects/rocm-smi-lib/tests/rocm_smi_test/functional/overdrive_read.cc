@@ -98,6 +98,9 @@ void TestOverdriveRead::Run(void) {
     CHK_ERR_ASRT(err)
     IF_VERB(STANDARD) {
     std::cout << "\t**OverDrive Level:" << val_ui32 << std::endl;
+    // Verify api support checking functionality is working
+    err = rsmi_dev_overdrive_level_get(i, nullptr);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
   }
 }

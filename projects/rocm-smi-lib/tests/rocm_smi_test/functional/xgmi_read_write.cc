@@ -95,22 +95,25 @@ void TestXGMIReadWrite::Run(void) {
 
     err = rsmi_dev_xgmi_error_status(dv_ind, &err_stat);
 
-    if (err != RSMI_STATUS_SUCCESS) {
-      if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        IF_VERB(STANDARD) {
-          std::cout << "\t**XGMI Error Status: Not supported on this machine"
-                                                                 << std::endl;
-          return;
-        }
-      } else {
-        CHK_ERR_ASRT(err)
-      }
-    } else {
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout << "\t**XGMI Error Status: " <<
-                                 static_cast<uint32_t>(err_stat) << std::endl;
+        std::cout << "\t**XGMI Error Status: Not supported on this machine"
+                                                               << std::endl;
       }
+      // Verify api support checking functionality is working
+      err = rsmi_dev_xgmi_error_status(dv_ind, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+
+      continue;
     }
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**XGMI Error Status: " <<
+                               static_cast<uint32_t>(err_stat) << std::endl;
+    }
+    // Verify api support checking functionality is working
+    err = rsmi_dev_xgmi_error_status(dv_ind, nullptr);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
     // TODO(cfree) We need to find a way to generate xgmi errors so this
     // test won't be meaningless

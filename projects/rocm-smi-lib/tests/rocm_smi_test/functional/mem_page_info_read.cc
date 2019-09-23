@@ -98,6 +98,11 @@ void TestMemPageInfoRead::Run(void) {
       std::cout <<
           "\t**Memory page information is not supported for this device"
                                                                  << std::endl;
+
+      // Verify api support checking functionality is working
+      err = rsmi_dev_memory_reserved_pages_get(i, nullptr, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+
       continue;
     } else {
       CHK_ERR_ASRT(err)
@@ -105,6 +110,9 @@ void TestMemPageInfoRead::Run(void) {
         std::cout << "\tNumber of memory page records: " << num_pages <<
                                                                     std::endl;
       }
+      // Verify api support checking functionality is working
+      err = rsmi_dev_memory_reserved_pages_get(i, nullptr, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
 
     if (num_pages > 0) {
