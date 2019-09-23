@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015-2016 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2015-present Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -44,8 +44,7 @@ THE SOFTWARE.
 #define THREADS_PER_BLOCK_Z 1
 
 // Device (Kernel) function, it must be void
-// hipLaunchParm provides the execution configuration
-__global__ void matrixTranspose(hipLaunchParm lp, float* out, float* in, const int width) {
+__global__ void matrixTranspose(float* out, float* in, const int width) {
     int x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
     int y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
@@ -85,88 +84,88 @@ int main() {
     init_tracing();
 
     while (iterations-- > 0) {
-        start_tracing();
+    start_tracing();
 
-        Matrix = (float*)malloc(NUM * sizeof(float));
-        TransposeMatrix = (float*)malloc(NUM * sizeof(float));
-        cpuTransposeMatrix = (float*)malloc(NUM * sizeof(float));
-    
-        // initialize the input data
-        for (i = 0; i < NUM; i++) {
-            Matrix[i] = (float)i * 10.0f;
+    Matrix = (float*)malloc(NUM * sizeof(float));
+    TransposeMatrix = (float*)malloc(NUM * sizeof(float));
+    cpuTransposeMatrix = (float*)malloc(NUM * sizeof(float));
+
+    // initialize the input data
+    for (i = 0; i < NUM; i++) {
+        Matrix[i] = (float)i * 10.0f;
+    }
+
+    // allocate the memory on the device side
+    hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
+    hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
+
+    // correlation reagion32
+    roctracer_activity_push_external_correlation_id(31);
+    // correlation reagion32
+    roctracer_activity_push_external_correlation_id(32);
+
+    // Memory transfer from host to device
+    hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
+
+    // correlation reagion33
+    roctracer_activity_push_external_correlation_id(33);
+
+    roctxMark("before hipLaunchKernel");
+    roctxRangePush("hipLaunchKernel");
+
+    // Lauching kernel from host
+    hipLaunchKernelGGL(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
+                    dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
+                    gpuMatrix, WIDTH);
+
+    roctxMark("after hipLaunchKernel");
+
+    // correlation reagion end
+    roctracer_activity_pop_external_correlation_id(NULL);
+
+    // Memory transfer from device to host
+    roctxRangePush("hipMemcpy");
+
+    hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
+
+    roctxRangePop(); // for "hipMemcpy"
+    roctxRangePop(); // for "hipLaunchKernel"
+
+    // correlation reagion end
+    roctracer_activity_pop_external_correlation_id();
+
+    // CPU MatrixTranspose computation
+    matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);
+
+    // verify the results
+    errors = 0;
+    double eps = 1.0E-6;
+    for (i = 0; i < NUM; i++) {
+        if (std::abs(TransposeMatrix[i] - cpuTransposeMatrix[i]) > eps) {
+            errors++;
         }
-    
-        // allocate the memory on the device side
-        hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
-        hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
-    
-        // correlation reagion32
-        roctracer_activity_push_external_correlation_id(31);
-        // correlation reagion32
-        roctracer_activity_push_external_correlation_id(32);
+    }
+    if (errors != 0) {
+        printf("FAILED: %d errors\n", errors);
+    } else {
+        printf("PASSED!\n");
+    }
 
-        // Memory transfer from host to device
-        hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
+    // free the resources on device side
+    hipFree(gpuMatrix);
+    hipFree(gpuTransposeMatrix);
 
-        // correlation reagion33
-        roctracer_activity_push_external_correlation_id(33);
+    // correlation reagion end
+    roctracer_activity_pop_external_correlation_id();
+    // correlation reagion end
+    roctracer_activity_pop_external_correlation_id();
 
-        roctxMark("before hipLaunchKernel");
-        roctxRangePush("hipLaunchKernel");
+    // free the resources on host side
+    free(Matrix);
+    free(TransposeMatrix);
+    free(cpuTransposeMatrix);
 
-        // Lauching kernel from host
-        hipLaunchKernel(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
-                        dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
-                        gpuMatrix, WIDTH);
-
-        roctxMark("after hipLaunchKernel");
-
-        // correlation reagion end
-        roctracer_activity_pop_external_correlation_id(NULL);
-
-        // Memory transfer from device to host
-        roctxRangePush("hipMemcpy");
-
-        hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
-
-        roctxRangePop(); // for "hipMemcpy"
-        roctxRangePop(); // for "hipLaunchKernel"
-    
-        // correlation reagion end
-        roctracer_activity_pop_external_correlation_id();
-
-        // CPU MatrixTranspose computation
-        matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);
-    
-        // verify the results
-        errors = 0;
-        double eps = 1.0E-6;
-        for (i = 0; i < NUM; i++) {
-            if (std::abs(TransposeMatrix[i] - cpuTransposeMatrix[i]) > eps) {
-                errors++;
-            }
-        }
-        if (errors != 0) {
-            printf("FAILED: %d errors\n", errors);
-        } else {
-            printf("PASSED!\n");
-        }
-    
-        // free the resources on device side
-        hipFree(gpuMatrix);
-        hipFree(gpuTransposeMatrix);
-    
-        // correlation reagion end
-        roctracer_activity_pop_external_correlation_id();
-        // correlation reagion end
-        roctracer_activity_pop_external_correlation_id();
-
-        // free the resources on host side
-        free(Matrix);
-        free(TransposeMatrix);
-        free(cpuTransposeMatrix);
-
-        stop_tracing();
+    stop_tracing();
     }
 
     return errors;
