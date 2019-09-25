@@ -1,15 +1,15 @@
 ROOT_PATH = ../..
 LIB_PATH  = $(ROOT_PATH)/build
 ROC_LIBS  = -L$(LIB_PATH) -lroctracer64 -lroctx64
-
+export LD_LIBRARY_PATH=$(LIB_PATH)
 ITERATIONS ?= 100
 
-HCC_HOME  ?= /opt/rocm/hcc
-HIP_PATH  ?= /opt/rocm/hip
+HIP_PATH?= $(wildcard /opt/rocm/hip)
+ifeq (,$(HIP_PATH))
+	HIP_PATH=../../..
+endif
 
 HIPCC=$(HIP_PATH)/bin/hipcc
-CXX       = $(HIPCC)
-CXXFLAGS  = -g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc -DLOCAL_BUILD=1 -DITERATIONS=$(ITERATIONS)
 
 TARGET=hcc
 
@@ -18,13 +18,13 @@ OBJECTS = $(SOURCES:.cpp=.o)
 
 EXECUTABLE=./MatrixTranspose
 
-export LD_LIBRARY_PATH=$(LIB_PATH)
-
 .PHONY: test
 
 
-all: $(EXECUTABLE) test
+all: clean $(EXECUTABLE)
 
+CXXFLAGS =-g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc -DLOCAL_BUILD=1 -DITERATIONS=$(ITERATIONS)
+CXX=$(HIPCC)
 
 $(EXECUTABLE): $(OBJECTS)
 	$(HIPCC) $(OBJECTS) -o $@ $(ROC_LIBS)

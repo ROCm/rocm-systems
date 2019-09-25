@@ -1003,7 +1003,7 @@ PUBLIC_API roctracer_status_t roctracer_activity_pop_external_correlation_id(act
 // Mark API
 PUBLIC_API void roctracer_mark(const char* str) {
     if (mark_api_callback_ptr) {
-        mark_api_callback_ptr(ACTIVITY_DOMAIN_NUMBER, ACTIVITY_EXT_OP_MARK, str, NULL);
+        mark_api_callback_ptr(ACTIVITY_DOMAIN_EXT_API, ACTIVITY_EXT_OP_MARK, str, NULL);
         roctracer::GlobalCounter::Increment(); // account for user-defined markers when tracking correlation id
     }
 }
