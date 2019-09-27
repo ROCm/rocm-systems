@@ -31,8 +31,9 @@ typedef enum {
   ACTIVITY_DOMAIN_HSA_OPS = 1,                    // HSA async activity domain
   ACTIVITY_DOMAIN_HCC_OPS = 2,                    // HCC async activity domain
   ACTIVITY_DOMAIN_HIP_API = 3,                    // HIP API domain
-  ACTIVITY_DOMAIN_EXT_API = 4,                    // External ID domain
-  ACTIVITY_DOMAIN_ROCTX   = 5,                    // ROCTX domain
+  ACTIVITY_DOMAIN_KFD_API = 4,                    // KFD API domain
+  ACTIVITY_DOMAIN_EXT_API = 5,                    // External ID domain
+  ACTIVITY_DOMAIN_ROCTX   = 6,                    // ROCTX domain
   ACTIVITY_DOMAIN_NUMBER
 } activity_domain_t;
 

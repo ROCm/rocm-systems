@@ -44,7 +44,7 @@ file( GLOB UTIL_SRC "${HSA_TEST_DIR}/util/*.cpp" )
 set ( TEST_LIB "tracer_tool" )
 set ( TEST_LIB_SRC ${TEST_DIR}/tool/tracer_tool.cpp ${UTIL_SRC} )
 add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
-target_include_directories ( ${TEST_LIB} PRIVATE ${HSA_TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HIP_INC_DIR} ${HCC_INC_DIR} )
+target_include_directories ( ${TEST_LIB} PRIVATE ${HSA_TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HIP_INC_DIR} ${HCC_INC_DIR} ${HSA_KMT_INC_PATH} )
 target_link_libraries ( ${TEST_LIB} ${ROCTRACER_TARGET} ${HSA_RUNTIME_LIB} c stdc++ dl pthread rt )
 
 ## Build HSA test

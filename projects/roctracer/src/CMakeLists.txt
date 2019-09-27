@@ -10,7 +10,7 @@ set ( LIB_SRC
   ${LIB_DIR}/util/hsa_rsrc_factory.cpp
 )
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
-target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HIP_INC_DIR} ${HCC_INC_DIR} )
+target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HIP_INC_DIR} ${HCC_INC_DIR} ${HSA_KMT_INC_PATH} )
 target_link_libraries( ${TARGET_LIB} PRIVATE ${HSA_RUNTIME_LIB} c stdc++ )
 execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/hsaap.py ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH}" )
 
@@ -19,7 +19,7 @@ set ( KFD_LIB_SRC
   ${LIB_DIR}/kfd/kfd_wrapper.cpp
 )
 add_library ( ${KFD_LIB} SHARED ${KFD_LIB_SRC} )
-target_include_directories ( ${KFD_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} )
+target_include_directories ( ${KFD_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HSA_KMT_INC_PATH} )
 target_link_libraries( ${KFD_LIB} PRIVATE c stdc++ )
 execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/kfdap.py ${ROOT_DIR} ${HSA_KMT_INC_PATH}" )
 
