@@ -297,7 +297,9 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
           data->args.hipModuleLaunchKernel.stream);
         break;
       default:
+#if 0
         fprintf(hip_api_file_handle, "%s()\n", oss.str().c_str());
+#endif
     }
   } else {
     fprintf(hip_api_file_handle, "%s(%s)\n", oss.str().c_str(), entry->name);
