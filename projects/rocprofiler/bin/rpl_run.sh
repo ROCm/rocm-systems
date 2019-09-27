@@ -171,6 +171,7 @@ usage() {
   echo "      The data directory is renoving autonatically if the directory is matching the temporary one, which is the default."
   echo "  -t <temporary directory> - to change the temporary directory [/tmp]"
   echo "      By changing the temporary directory you can prevent removing the profiling data from /tmp or enable removing from not '/tmp' directory."
+  echo "  -m <metric file> - file defining custom metrics to use in-place of defaults."
   echo ""
   echo "  --basenames <on|off> - to turn on/off truncating of the kernel full function names till the base ones [off]"
   echo "  --timestamp <on|off> - to turn on/off the kernel disoatches timestamps, dispatch/begin/end/complete [off]"
@@ -320,6 +321,9 @@ while [ 1 ] ; do
     if [ "$OUTPUT_DIR" = "-" ] ; then
       DATA_PATH=$TMP_DIR
     fi
+  elif [ "$1" = "-m" ] ; then
+    unset ROCP_METRICS
+    export ROCP_METRICS="$2"
   elif [ "$1" = "--list-basic" ] ; then
     export ROCP_INFO=b
     eval "$PKG_DIR/tool/ctrl"

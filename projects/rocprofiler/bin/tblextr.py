@@ -360,7 +360,7 @@ else:
   db = SQLiteDB(dbfile)
 
   hsa_trace_found = fill_api_db('HSA', db, indir, 'hsa', HSA_PID, COPY_PID, kern_dep_list, {}, 0)
-  hsa_activity_found = fill_copy_db('COPY', db, indir) 
+  hsa_activity_found = fill_copy_db('COPY', db, indir)
 
   ops_filtr = fill_ops_db('OPS', db, indir)
   hip_trace_found = fill_api_db('HIP', db, indir, 'hip', HIP_PID, OPS_PID, [], ops_filtr, 1)
