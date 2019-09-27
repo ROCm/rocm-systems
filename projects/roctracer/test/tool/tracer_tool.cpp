@@ -297,9 +297,7 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
           data->args.hipModuleLaunchKernel.stream);
         break;
       default:
-#if 0
         fprintf(hip_api_file_handle, "%s()\n", oss.str().c_str());
-#endif
     }
   } else {
     fprintf(hip_api_file_handle, "%s(%s)\n", oss.str().c_str(), entry->name);
@@ -321,8 +319,10 @@ void hcc_activity_callback(const char* begin, const char* end, void* arg) {
         record->begin_ns, record->end_ns, record->device_id, record->queue_id, name, record->correlation_id);
       fflush(hcc_activity_file_handle);
     } else {
+#if 0
       fprintf(hip_api_file_handle, "%lu:%lu %u:%u %s()\n",
         record->begin_ns, record->end_ns, record->process_id, record->thread_id, name);
+#endif
     }
     ROCTRACER_CALL(roctracer_next_record(record, &record));
   }
