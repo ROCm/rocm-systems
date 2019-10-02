@@ -1,6 +1,7 @@
 #ifndef SRC_CORE_TRACE_BUFFER_H_
 #define SRC_CORE_TRACE_BUFFER_H_
 
+#include <atomic>
 #include <list>
 #include <mutex>
 #include <pthread.h>
@@ -66,7 +67,7 @@ class TraceBuffer {
   };
 
   TraceBuffer(const char* name, uint32_t size, flush_prm_t* flush_prm_arr, uint32_t flush_prm_count) :
-    is_flushed_(ATOMIC_FLAG_INIT)
+    is_flushed_(false)
   {
     name_ = strdup(name);
     size_ = size;
@@ -108,7 +109,7 @@ class TraceBuffer {
   private:
   void flush_buf() {
     std::lock_guard<mutex_t> lck(mutex_);
-    const bool is_flushed = atomic_flag_test_and_set_explicit(&is_flushed_, std::memory_order_acquire);
+    const bool is_flushed = is_flushed_.exchange(true, std::memory_order_acquire);
 
     if (is_flushed == false) {
       for (flush_prm_t* prm = flush_prm_arr_; prm < flush_prm_arr_ + flush_prm_count_; prm++) {
@@ -183,7 +184,7 @@ class TraceBuffer {
 
   flush_prm_t* flush_prm_arr_;
   uint32_t flush_prm_count_;
-  volatile std::atomic_flag is_flushed_;
+  volatile std::atomic<bool> is_flushed_;
 
   pthread_t work_thread_;
   pthread_mutex_t work_mutex_;
