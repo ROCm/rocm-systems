@@ -31,6 +31,10 @@ THE SOFTWARE.
 // roctx header file
 #include <inc/roctx.h>
 
+// kfd header file
+#include <inc/roctracer_kfd.h>
+#include <inc/kfd_prof_str.h>
+
 #ifndef ITERATIONS
 # define ITERATIONS 100
 #endif
@@ -203,6 +207,15 @@ void api_callback(
     fprintf(stdout, "ROCTX: \"%s\"\n", data->args.message);
     return;
   }
+  if (domain == ACTIVITY_DOMAIN_KFD_API) {
+    const kfd_api_data_t* data = reinterpret_cast<const kfd_api_data_t*>(callback_data);
+    fprintf(stdout, "KFD: <%s id(%u)\tcorrelation_id(%lu) %s> \n",
+        roctracer_op_string(ACTIVITY_DOMAIN_KFD_API, cid, 0),
+        cid,
+        data->correlation_id,
+        (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
+    return;
+  }
 
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
   fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
@@ -263,7 +276,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
       record->begin_ns,
       record->end_ns
     );
-    if (record->domain == ACTIVITY_DOMAIN_HIP_API) {
+    if (record->domain == ACTIVITY_DOMAIN_HIP_API or record->domain == ACTIVITY_DOMAIN_KFD_API) {
       fprintf(stdout, " process_id(%u) thread_id(%u)",
         record->process_id,
         record->thread_id
