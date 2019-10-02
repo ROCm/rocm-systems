@@ -129,31 +129,40 @@ template<>
 struct output_streamer<HsaNodeProperties&> {
   inline static std::ostream& put(std::ostream& out, HsaNodeProperties& v)
 {
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.NumCPUCores);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.NumFComputeCores);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.NumMemoryBanks);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.NumCaches);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.NumIOLinks);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.CComputeIdLo);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.FComputeIdLo);
-    roctracer::kfd_support::output_streamer<HSA_CAPABILITY&>::put(out,v.Capability);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.MaxWavesPerSIMD);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.LDSSizeInKB);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.GDSSizeInKB);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.WaveFrontSize);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.NumShaderBanks);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.NumArrays);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.NumCUPerArray);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.NumSIMDPerCU);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.MaxSlotsScratchCU);
-    roctracer::kfd_support::output_streamer<HSA_ENGINE_ID>::put(out,v.EngineId);
-    roctracer::kfd_support::output_streamer<uint16_t>::put(out,v.VendorId);
-    roctracer::kfd_support::output_streamer<uint16_t>::put(out,v.DeviceId);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.LocationId);
-    roctracer::kfd_support::output_streamer<uint64_t>::put(out,v.LocalMemSize);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.MaxEngineClockMhzFCompute);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.MaxEngineClockMhzCCompute);
-    roctracer::kfd_support::output_streamer<uint16_t>::put(out,v.MarketingName[HSA_PUBLIC_NAME_SIZE]);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumCPUCores);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumFComputeCores);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumMemoryBanks);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumCaches);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumIOLinks);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.CComputeIdLo);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.FComputeIdLo);
+    roctracer::kfd_support::output_streamer<::HSA_CAPABILITY>::put(out,v.Capability);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.MaxWavesPerSIMD);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.LDSSizeInKB);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.GDSSizeInKB);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.WaveFrontSize);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumShaderBanks);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumArrays);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumCUPerArray);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumSIMDPerCU);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.MaxSlotsScratchCU);
+    roctracer::kfd_support::output_streamer<::HSA_ENGINE_ID>::put(out,v.EngineId);
+    roctracer::kfd_support::output_streamer<HSAuint16>::put(out,v.VendorId);
+    roctracer::kfd_support::output_streamer<HSAuint16>::put(out,v.DeviceId);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.LocationId);
+    roctracer::kfd_support::output_streamer<HSAuint64>::put(out,v.LocalMemSize);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.MaxEngineClockMhzFCompute);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.MaxEngineClockMhzCCompute);
+    roctracer::kfd_support::output_streamer<HSAint32>::put(out,v.DrmRenderMinor);
+    roctracer::kfd_support::output_streamer<HSAuint16[64]>::put(out,v.MarketingName);
+    roctracer::kfd_support::output_streamer<HSAuint8[64]>::put(out,v.AMDName);
+    roctracer::kfd_support::output_streamer<::HSA_ENGINE_VERSION>::put(out,v.uCodeEngineVersions);
+    roctracer::kfd_support::output_streamer<::HSA_DEBUG_PROPERTIES>::put(out,v.DebugProperties);
+    roctracer::kfd_support::output_streamer<HSAuint64>::put(out,v.HiveID);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumSdmaEngines);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumSdmaXgmiEngines);
+    roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumGws);
+    roctracer::kfd_support::output_streamer<HSAuint8[32]>::put(out,v.Reserved);
     return out;
 }
 };
@@ -208,7 +217,7 @@ struct output_streamer<HsaCacheProperties&> {
     roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.CacheAssociativity);
     roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.CacheLatency);
     roctracer::kfd_support::output_streamer<HsaCacheType>::put(out,v.CacheType);
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.SiblingMap[HSA_CPU_SIBLINGS]);
+    roctracer::kfd_support::output_streamer<uint32_t[256]>::put(out,v.SiblingMap);
     return out;
 }
 };
@@ -216,7 +225,7 @@ template<>
 struct output_streamer<HsaCComputeProperties&> {
   inline static std::ostream& put(std::ostream& out, HsaCComputeProperties& v)
 {
-    roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.SiblingMap[HSA_CPU_SIBLINGS]);
+    roctracer::kfd_support::output_streamer<uint32_t[256]>::put(out,v.SiblingMap);
     return out;
 }
 };
@@ -429,7 +438,7 @@ struct output_streamer<HSA_UUID&> {
     roctracer::kfd_support::output_streamer<uint32_t>::put(out,v.Data1);
     roctracer::kfd_support::output_streamer<uint16_t>::put(out,v.Data2);
     roctracer::kfd_support::output_streamer<uint16_t>::put(out,v.Data3);
-    roctracer::kfd_support::output_streamer<uint8_t>::put(out,v.Data4[8]);
+    roctracer::kfd_support::output_streamer<uint8_t[8]>::put(out,v.Data4);
     return out;
 }
 };
