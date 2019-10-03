@@ -372,10 +372,11 @@ class API_DescrParser:
       self.content_h += 'struct kfd_api_data_t {\n'
       self.content_h += '  uint64_t correlation_id;\n'
       self.content_h += '  uint32_t phase;\n'
-      self.content_h += '  union {\n'
-      for ret_type in self.api_rettypes:
-        self.content_h += '    ' + ret_type + ' ' + ret_type + '_retval;\n'
-      self.content_h += '  };\n'
+      if len(self.api_rettypes) != 0:
+        self.content_h += '  union {\n'
+        for ret_type in self.api_rettypes:
+          self.content_h += '    ' + ret_type + ' ' + ret_type + '_retval;\n'
+        self.content_h += '  };\n'
       self.content_h += '  union {\n'
       return
     if call != '-':
