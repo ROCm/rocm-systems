@@ -171,11 +171,20 @@ class MetricsDict {
   const_iterator_t Begin() const { return cache_.begin(); }
   const_iterator_t End() const { return cache_.end(); }
 
+  std::string GetAgentName() const { return agent_name_; }
+
+  xml::Xml::nodes_t GetNodes() const {
+    auto nodes_vec = GetNodes(agent_name_);
+    auto global_vec = GetNodes("global");
+    nodes_vec.insert(nodes_vec.end(), global_vec.begin(), global_vec.end());
+    return nodes_vec;
+  }
+
+ private:
   xml::Xml::nodes_t GetNodes(const std::string& scope) const {
     return (xml_ != NULL) ? xml_->GetNodes("top." + scope + ".metric") : xml::Xml::nodes_t();
   }
 
- private:
   MetricsDict(const util::AgentInfo* agent_info) : xml_(NULL), agent_info_(agent_info) {
     const char* xml_name = getenv("ROCP_METRICS");
     if (xml_name != NULL) {
@@ -186,11 +195,13 @@ class MetricsDict {
       xml_->AddConst("top.const.metric", "SIMD_NUM", agent_info->simds_per_cu * agent_info->cu_num);
       xml_->AddConst("top.const.metric", "SE_NUM", agent_info->se_num);
       ImportMetrics(agent_info, "const");
+      agent_name_ = agent_info->name;
       if (std::string("gfx906") == agent_info->name) {
         ImportMetrics(agent_info, agent_info->name);
       } else if (std::string("gfx908") == agent_info->name) {
         ImportMetrics(agent_info, agent_info->name);
       } else {
+        agent_name_ = agent_info->gfxip;
         ImportMetrics(agent_info, agent_info->gfxip);
       }
       ImportMetrics(agent_info, "global");
@@ -327,6 +338,7 @@ class MetricsDict {
 
   xml::Xml* xml_;
   const util::AgentInfo* agent_info_;
+  std::string agent_name_;
   cache_t cache_;
 
   static map_t* map_;

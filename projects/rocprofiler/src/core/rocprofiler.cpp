@@ -738,9 +738,7 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_info(
       case ROCPROFILER_INFO_KIND_METRIC:
       {
         const rocprofiler::MetricsDict* dict = rocprofiler::GetMetrics(agent_info->dev_id);
-        auto nodes_vec = dict->GetNodes(agent_info->gfxip);
-        auto global_vec = dict->GetNodes("global");
-        nodes_vec.insert(nodes_vec.end(), global_vec.begin(), global_vec.end());
+        auto nodes_vec = dict->GetNodes();
 
         for (auto* node : nodes_vec) {
           const std::string& name = node->opts["name"];
