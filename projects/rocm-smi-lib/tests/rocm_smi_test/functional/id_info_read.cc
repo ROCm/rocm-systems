@@ -127,6 +127,17 @@ void TestIdInfoRead::Run(void) {
         std::cout << "\t**Device Brand name: " << buffer << std::endl;
       }
     }
+    err = rsmi_dev_vram_vendor_get(i, buffer, kBufferLen);
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout <<
+        "\t**Vram Vendor string not supported on this system." << std::endl;
+    } else if (err != RSMI_STATUS_SUCCESS) {
+      CHK_ERR_ASRT(err)
+    } else {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Device Vram Vendor name: " << buffer << std::endl;
+      }
+    }
     err = rsmi_dev_vendor_id_get(i, &id);
     if (err != RSMI_STATUS_SUCCESS) {
         CHK_ERR_ASRT(err)

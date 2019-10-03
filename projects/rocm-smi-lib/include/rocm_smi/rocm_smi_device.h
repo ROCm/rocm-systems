@@ -125,6 +125,7 @@ enum DevInfoTypes {
   kDevMemUsedGTT,
   kDevMemUsedVisVRAM,
   kDevMemUsedVRAM,
+  kDevVramVendor,
   kDevPCIEReplayCount,
   kDevUniqueId,
   kDevDFCountersAvailable,

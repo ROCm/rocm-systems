@@ -879,6 +879,31 @@ rsmi_status_t rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name,
                                                                   size_t len);
 
 /**
+ *  @brief Get the vram vendor string of a gpu device.
+ *
+ *  @details Given a device index @p dv_ind, a pointer to a caller provided
+ *  char buffer @p brand, and a length of this buffer @p len, this function
+ *  will write the vram vendor of the device (up to @p len characters) to the
+ *  buffer @p brand.
+ *
+ *  If the vram vendor for the device is not found as one of the values
+ *  contained within rsmi_dev_vram_vendor_get, then this function will return
+ *  the string 'unknown' instead of the vram vendor.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] brand a pointer to a caller provided char buffer to which the
+ *  vram vendor will be written
+ *
+ *  @param[in] len the length of the caller provided buffer @p brand.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_vram_vendor_get(uint32_t dv_ind, char *brand,
+                                                                uint32_t len);
+
+/**
  * @brief Get the serial number string for a device
  *
  * @details Given a device index @p dv_ind, a pointer to a buffer of chars

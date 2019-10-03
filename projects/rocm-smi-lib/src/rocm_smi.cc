@@ -1495,6 +1495,35 @@ rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len) {
 }
 
 rsmi_status_t
+rsmi_dev_vram_vendor_get(uint32_t dv_ind, char *brand, uint32_t len) {
+  if (brand == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  TRY
+  GET_DEV_FROM_INDX
+  std::string val_str;
+
+  DEVICE_MUTEX
+  int ret = dev->readDevInfo(amd::smi::kDevVramVendor, &val_str);
+
+  if (ret != 0) {
+    return errno_to_rsmi_status(ret);
+  }
+
+  uint32_t ln = val_str.copy(brand, len);
+
+  brand[std::min(len - 1, ln)] = '\0';
+
+  if (len < (val_str.size() + 1)) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
 rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len) {
   rsmi_status_t ret;
 

@@ -100,6 +100,7 @@ static const char *kDevMemTotVRAMFName = "mem_info_vram_total";
 static const char *kDevMemUsedGTTFName = "mem_info_gtt_used";
 static const char *kDevMemUsedVisVRAMFName = "mem_info_vis_vram_used";
 static const char *kDevMemUsedVRAMFName = "mem_info_vram_used";
+static const char *kDevVramVendorFName = "mem_info_vram_vendor";
 static const char *kDevPCIEReplayCountFName = "pcie_replay_count";
 static const char *kDevUniqueIdFName = "unique_id";
 static const char *kDevDFCountersAvailableFName = "df_cntr_avail";
@@ -236,6 +237,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevMemUsedGTT, kDevMemUsedGTTFName},
     {kDevMemUsedVisVRAM, kDevMemUsedVisVRAMFName},
     {kDevMemUsedVRAM, kDevMemUsedVRAMFName},
+    {kDevVramVendor, kDevVramVendorFName},
     {kDevPCIEReplayCount, kDevPCIEReplayCountFName},
     {kDevUniqueId, kDevUniqueIdFName},
     {kDevDFCountersAvailable, kDevDFCountersAvailableFName},
@@ -328,6 +330,7 @@ static  std::map<DevInfoTypes, uint8_t> kDevInfoVarTypeToRSMIVariant = {
 
 static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
     // Functions with only mandatory dependencies
+  {"rsmi_dev_vram_vendor_get",           {{kDevVramVendorFName}, {}}},
   {"rsmi_dev_id_get",                    {{kDevDevIDFName}, {}}},
   {"rsmi_dev_vendor_id_get",             {{kDevVendorIDFName}, {}}},
 
@@ -747,6 +750,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevSubSysDevID:
     case kDevSubSysVendorID:
     case kDevVendorID:
+    case kDevVramVendor:
     case kDevVBiosVer:
     case kDevPCIEThruPut:
     case kDevSerialNumber:
