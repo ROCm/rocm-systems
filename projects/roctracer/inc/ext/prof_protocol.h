@@ -83,7 +83,7 @@ struct activity_record_t {
 };
 
 // Activity sync calback type
-typedef activity_record_t* (*activity_sync_callback_t)(uint32_t cid, activity_record_t* record, const void* data, void* arg);
+typedef void* (*activity_sync_callback_t)(uint32_t cid, activity_record_t* record, const void* data, void* arg);
 // Activity async calback type
 typedef void (*activity_id_callback_t)(activity_correlation_id_t id);
 typedef void (*activity_async_callback_t)(uint32_t op, void* record, void* arg);

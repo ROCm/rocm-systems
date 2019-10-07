@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include <mutex>
 #include <stack>
 #include <dirent.h>
+#include <stack>
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -385,6 +386,20 @@ class MemoryPool {
   pthread_cond_t read_cond_;
 };
 
+// Records storage
+struct roctracer_api_data_t {
+  union {
+    hip_api_data_t hip;
+  };
+  roctracer_api_data_t() {};
+};
+struct record_pair_t {
+  roctracer_record_t record;
+  roctracer_api_data_t data;
+  record_pair_t() {};
+};
+static thread_local std::stack<record_pair_t> record_pair_stack;
+
 // Correlation id storage
 static thread_local activity_correlation_id_t correlation_id_tls = 0;
 typedef std::map<activity_correlation_id_t, activity_correlation_id_t> correlation_id_map_t;
@@ -407,7 +422,7 @@ static inline activity_correlation_id_t CorrelationIdLookup(const activity_corre
   return it->second;
 }
 
-roctracer_record_t* HIP_SyncActivityCallback(
+void* HIP_SyncActivityCallback(
     uint32_t op_id,
     roctracer_record_t* record,
     const void* callback_data,
@@ -416,12 +431,31 @@ roctracer_record_t* HIP_SyncActivityCallback(
   static hsa_rt_utils::Timer timer;
 
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
+  hip_api_data_t* data_ptr = const_cast<hip_api_data_t*>(data);
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
-  if (pool == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback pool is NULL");
-  if (data->phase == ACTIVITY_API_PHASE_ENTER) {
+
+  int phase = ACTIVITY_API_PHASE_ENTER;
+  if (data != NULL) {
+    phase = data->phase;
+  } else if (pool != NULL) {
+    phase = ACTIVITY_API_PHASE_EXIT; 
+  }
+
+  if (phase == ACTIVITY_API_PHASE_ENTER) {
+    if ((data == NULL) && (pool != NULL)) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback enter: pool is not NULL");
+    // Allocating a record if NULL passed
+    if (record == NULL) {
+      record_pair_stack.push({});
+      auto& top = record_pair_stack.top();
+      record = &(top.record);
+      data_ptr = &(top.data.hip);
+    }
+
+    // Filing record info
     record->domain = ACTIVITY_DOMAIN_HIP_API;
     record->op = op_id;
     record->begin_ns = timer.timestamp_ns();
+
     // Correlation ID generating
     uint64_t correlation_id = data->correlation_id;
     if (correlation_id == 0) {
@@ -429,10 +463,23 @@ roctracer_record_t* HIP_SyncActivityCallback(
       const_cast<hip_api_data_t*>(data)->correlation_id = correlation_id;
     }
     record->correlation_id = correlation_id;
+
     // Passing correlatin ID
     correlation_id_tls = correlation_id;
-    return record;
+
+    return data_ptr; 
   } else {
+    if (pool == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback exit: pool is NULL");
+
+    // Getting record of stacked
+    if (!record_pair_stack.empty()) {
+      auto& top  = record_pair_stack.top();
+      record = &(top.record);
+      data = &(top.data.hip);
+      record_pair_stack.pop();
+    }
+
+    // Filing record info
     record->end_ns = timer.timestamp_ns();
     record->process_id = syscall(__NR_getpid);
     record->thread_id = syscall(__NR_gettid);
@@ -446,9 +493,12 @@ roctracer_record_t* HIP_SyncActivityCallback(
       pool->Write(ext_record);
     }
 
+    // Writing record to the buffer
     pool->Write(*record);
+
     // Clearing correlatin ID
     correlation_id_tls = 0;
+
     return NULL;
   }
 }
