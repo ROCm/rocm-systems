@@ -136,7 +136,7 @@ struct output_streamer<HsaNodeProperties&> {
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumIOLinks);
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.CComputeIdLo);
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.FComputeIdLo);
-    roctracer::kfd_support::output_streamer<::HSA_CAPABILITY>::put(out,v.Capability);
+    roctracer::kfd_support::output_streamer<HSA_CAPABILITY>::put(out,v.Capability);
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.MaxWavesPerSIMD);
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.LDSSizeInKB);
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.GDSSizeInKB);
@@ -146,7 +146,7 @@ struct output_streamer<HsaNodeProperties&> {
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumCUPerArray);
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumSIMDPerCU);
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.MaxSlotsScratchCU);
-    roctracer::kfd_support::output_streamer<::HSA_ENGINE_ID>::put(out,v.EngineId);
+    roctracer::kfd_support::output_streamer<HSA_ENGINE_ID>::put(out,v.EngineId);
     roctracer::kfd_support::output_streamer<HSAuint16>::put(out,v.VendorId);
     roctracer::kfd_support::output_streamer<HSAuint16>::put(out,v.DeviceId);
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.LocationId);
@@ -156,8 +156,8 @@ struct output_streamer<HsaNodeProperties&> {
     roctracer::kfd_support::output_streamer<HSAint32>::put(out,v.DrmRenderMinor);
     roctracer::kfd_support::output_streamer<HSAuint16[64]>::put(out,v.MarketingName);
     roctracer::kfd_support::output_streamer<HSAuint8[64]>::put(out,v.AMDName);
-    roctracer::kfd_support::output_streamer<::HSA_ENGINE_VERSION>::put(out,v.uCodeEngineVersions);
-    roctracer::kfd_support::output_streamer<::HSA_DEBUG_PROPERTIES>::put(out,v.DebugProperties);
+    roctracer::kfd_support::output_streamer<HSA_ENGINE_VERSION>::put(out,v.uCodeEngineVersions);
+    roctracer::kfd_support::output_streamer<HSA_DEBUG_PROPERTIES>::put(out,v.DebugProperties);
     roctracer::kfd_support::output_streamer<HSAuint64>::put(out,v.HiveID);
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumSdmaEngines);
     roctracer::kfd_support::output_streamer<HSAuint32>::put(out,v.NumSdmaXgmiEngines);
