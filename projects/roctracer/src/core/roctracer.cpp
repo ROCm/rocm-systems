@@ -38,6 +38,7 @@ THE SOFTWARE.
 #include <unistd.h>
 #include <sys/syscall.h>
 
+#include "core/journal.h"
 #include "core/loader.h"
 #include "core/trace_buffer.h"
 #include "proxy/tracker.h"
@@ -178,11 +179,52 @@ namespace roctracer {
 decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
 decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
 
+typedef decltype(roctracer_enable_op_callback)* roctracer_enable_op_callback_t;
+typedef decltype(roctracer_disable_op_callback)* roctracer_disable_op_callback_t;
+typedef decltype(roctracer_enable_op_activity)* roctracer_enable_op_activity_t;
+typedef decltype(roctracer_disable_op_activity)* roctracer_disable_op_activity_t;
+
+struct cb_journal_data_t {
+  roctracer_rtapi_callback_t callback;
+  void* user_data;
+};
+typedef Journal<cb_journal_data_t> CbJournal;
+CbJournal* cb_journal;
+
+struct act_journal_data_t {
+  roctracer_pool_t* pool;
+};
+typedef Journal<act_journal_data_t> ActJournal;
+ActJournal* act_journal;
+
+template <class T, class F>
+struct journal_functor_t {
+  typedef typename T::record_t record_t;
+  F f_;
+  journal_functor_t(F f) : f_(f) {}
+  bool fun(const record_t& record) {
+    f_((activity_domain_t)record.domain, record.op);
+    return true;
+  }
+};
+typedef journal_functor_t<CbJournal, roctracer_enable_op_callback_t> cb_en_functor_t;
+typedef journal_functor_t<CbJournal, roctracer_disable_op_callback_t> cb_dis_functor_t;
+typedef journal_functor_t<ActJournal, roctracer_enable_op_activity_t> act_en_functor_t;
+typedef journal_functor_t<ActJournal, roctracer_disable_op_activity_t> act_dis_functor_t;
+template<> bool cb_en_functor_t::fun(const cb_en_functor_t::record_t& record) {
+  f_((activity_domain_t)record.domain, record.op, record.data.callback, record.data.user_data);
+  return true;
+}
+template<> bool act_en_functor_t::fun(const act_en_functor_t::record_t& record) {
+  f_((activity_domain_t)record.domain, record.op, record.data.pool);
+  return true;
+}
+
 void hsa_async_copy_handler(::proxy::Tracker::entry_t* entry);
 void hsa_kernel_handler(::proxy::Tracker::entry_t* entry);
 TraceBuffer<trace_entry_t>::flush_prm_t trace_buffer_prm[] = {
-  {roctracer::COPY_ENTRY_TYPE, hsa_async_copy_handler},
-  {roctracer::KERNEL_ENTRY_TYPE, hsa_kernel_handler}
+  {COPY_ENTRY_TYPE, hsa_async_copy_handler},
+  {KERNEL_ENTRY_TYPE, hsa_kernel_handler}
 };
 TraceBuffer<trace_entry_t> trace_buffer("HSA GPU", 0x200000, trace_buffer_prm, 2);
 
@@ -735,8 +777,8 @@ static inline uint32_t get_op_num(const uint32_t& domain) {
 }
 
 // Enable runtime API callbacks
-static void roctracer_enable_callback_impl(
-    uint32_t domain,
+static roctracer_status_t roctracer_enable_callback_fun(
+    roctracer_domain_t domain,
     uint32_t op,
     roctracer_rtapi_callback_t callback,
     void* user_data)
@@ -768,6 +810,17 @@ static void roctracer_enable_callback_impl(
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }
+  return ROCTRACER_STATUS_SUCCESS;
+}
+
+static void roctracer_enable_callback_impl(
+    uint32_t domain,
+    uint32_t op,
+    roctracer_rtapi_callback_t callback,
+    void* user_data)
+{
+    roctracer::cb_journal->registr({domain, op, {callback, user_data}});
+    roctracer_enable_callback_fun((roctracer_domain_t)domain, op, callback, user_data);
 }
 
 PUBLIC_API roctracer_status_t roctracer_enable_op_callback(
@@ -805,8 +858,8 @@ PUBLIC_API roctracer_status_t roctracer_enable_callback(
 }
 
 // Disable runtime API callbacks
-static void roctracer_disable_callback_impl(
-    uint32_t domain,
+static roctracer_status_t roctracer_disable_callback_fun(
+    roctracer_domain_t domain,
     uint32_t op)
 {
   switch (domain) {
@@ -833,6 +886,15 @@ static void roctracer_disable_callback_impl(
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }
+  return ROCTRACER_STATUS_SUCCESS;
+}
+
+static void roctracer_disable_callback_impl(
+    uint32_t domain,
+    uint32_t op)
+{
+    roctracer::cb_journal->remove({domain, op, {}});
+    roctracer_disable_callback_fun((roctracer_domain_t)domain, op);
 }
 
 PUBLIC_API roctracer_status_t roctracer_disable_op_callback(
@@ -900,8 +962,8 @@ PUBLIC_API roctracer_status_t roctracer_close_pool(roctracer_pool_t* pool) {
 }
 
 // Enable activity records logging
-static void roctracer_enable_activity_impl(
-    uint32_t domain,
+static roctracer_status_t roctracer_enable_activity_fun(
+    roctracer_domain_t domain,
     uint32_t op,
     roctracer_pool_t* pool)
 {
@@ -933,6 +995,16 @@ static void roctracer_enable_activity_impl(
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }
+  return ROCTRACER_STATUS_SUCCESS;
+}
+
+static void roctracer_enable_activity_impl(
+    uint32_t domain,
+    uint32_t op,
+    roctracer_pool_t* pool)
+{
+    roctracer::act_journal->registr({domain, op, {pool}});
+    roctracer_enable_activity_fun((roctracer_domain_t)domain, op, pool);
 }
 
 PUBLIC_API roctracer_status_t roctracer_enable_op_activity(
@@ -967,8 +1039,8 @@ PUBLIC_API roctracer_status_t roctracer_enable_activity(
 }
 
 // Disable activity records logging
-static void roctracer_disable_activity_impl(
-    uint32_t domain,
+static roctracer_status_t roctracer_disable_activity_fun(
+    roctracer_domain_t domain,
     uint32_t op)
 {
   switch (domain) {
@@ -993,6 +1065,15 @@ static void roctracer_disable_activity_impl(
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }
+  return ROCTRACER_STATUS_SUCCESS;
+}
+
+static void roctracer_disable_activity_impl(
+    uint32_t domain,
+    uint32_t op)
+{
+    roctracer::act_journal->remove({domain, op, {}});
+    roctracer_disable_activity_fun((roctracer_domain_t)domain, op);
 }
 
 PUBLIC_API roctracer_status_t roctracer_disable_op_activity(
@@ -1061,10 +1142,22 @@ PUBLIC_API roctracer_status_t roctracer_activity_pop_external_correlation_id(act
 
 // Mark API
 PUBLIC_API void roctracer_mark(const char* str) {
-    if (mark_api_callback_ptr) {
-        mark_api_callback_ptr(ACTIVITY_DOMAIN_EXT_API, ACTIVITY_EXT_OP_MARK, str, NULL);
-        roctracer::GlobalCounter::Increment(); // account for user-defined markers when tracking correlation id
-    }
+  if (mark_api_callback_ptr) {
+    mark_api_callback_ptr(ACTIVITY_DOMAIN_EXT_API, ACTIVITY_EXT_OP_MARK, str, NULL);
+    roctracer::GlobalCounter::Increment(); // account for user-defined markers when tracking correlation id
+  }
+}
+
+// Start API
+PUBLIC_API void roctracer_start() {
+  roctracer::cb_journal->foreach(roctracer::cb_en_functor_t(roctracer_enable_callback_fun));
+  roctracer::act_journal->foreach(roctracer::act_en_functor_t(roctracer_enable_activity_fun));
+}
+
+// Stop API
+PUBLIC_API void roctracer_stop() {
+  roctracer::cb_journal->foreach(roctracer::cb_dis_functor_t(roctracer_disable_callback_fun));
+  roctracer::act_journal->foreach(roctracer::act_dis_functor_t(roctracer_disable_activity_fun));
 }
 
 // Set properties
@@ -1163,6 +1256,8 @@ PUBLIC_API void OnUnload() {
 CONSTRUCTOR_API void constructor() {
   if (onload_debug) { printf("LIB constructor\n"); fflush(stdout); }
   roctracer::util::Logger::Create();
+  if (roctracer::cb_journal == NULL) roctracer::cb_journal = new roctracer::CbJournal;
+  if (roctracer::act_journal == NULL) roctracer::act_journal = new roctracer::ActJournal;
   if (onload_debug) { printf("LIB constructor end\n"); fflush(stdout); }
 }
 

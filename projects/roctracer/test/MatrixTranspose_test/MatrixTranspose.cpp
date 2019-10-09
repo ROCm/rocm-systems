@@ -164,9 +164,9 @@ int main() {
     free(Matrix);
     free(TransposeMatrix);
     free(cpuTransposeMatrix);
+    }
 
     stop_tracing();
-    }
 
     return errors;
 }
@@ -290,21 +290,24 @@ void activity_callback(const char* begin, const char* end, void* arg) {
 
 // Init tracing routine
 void init_tracing() {
-  std::cout << "# START #############################" << std::endl << std::flush;
+  std::cout << "# INIT #############################" << std::endl << std::flush;
   // Allocating tracing pool
   roctracer_properties_t properties{};
   properties.buffer_size = 0x1000;
   properties.buffer_callback_fun = activity_callback;
   ROCTRACER_CALL(roctracer_open_pool(&properties));
-}
-
-// Start tracing routine
-void start_tracing() {
-  std::cout << "# START #############################" << std::endl << std::flush;
   // Enable HIP API callbacks
   ROCTRACER_CALL(roctracer_enable_callback(api_callback, NULL));
   // Enable HIP activity tracing
   ROCTRACER_CALL(roctracer_enable_activity());
+}
+
+// Start tracing routine
+void start_tracing() {
+  std::cout << "# START (" << iterations << ") #############################" << std::endl << std::flush;
+  // Start
+  if ((iterations & 1) == 1) roctracer_start();
+  else roctracer_stop();
 }
 
 // Stop tracing routine

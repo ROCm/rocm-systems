@@ -39,8 +39,16 @@ extern "C" {
 #endif  // __cplusplus
 
 ////////////////////////////////////////////////////////////////////////////////
+// Application annotatin API
+
 // Mark API
 void roctracer_mark(const char* str);
+
+// Tracing start API
+void roctracer_start();
+
+// Tracing stop API
+void roctracer_stop();
 
 ////////////////////////////////////////////////////////////////////////////////
 // External correlation id API
