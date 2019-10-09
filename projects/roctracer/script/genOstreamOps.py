@@ -98,7 +98,7 @@ FOOTER = \
 
 rx_dict = {
     'struct_name': re.compile(r'typedef (?P<struct_name>.*)\n'),
-    'field_type': re.compile(r'\s+name\[raw_type\]=(?P<field_type>.*)\n'),
+    'field_type': re.compile(r'\s+name\[type\]=(?P<field_type>.*)\n'),
     'field_name': re.compile(r'\s+name\[name\]=(?P<field_name>.*)\n'),
     'array_size_val': re.compile(r'\s+name\[array_size\]=(?P<array_size_val>.*)\n'),
 }
@@ -151,7 +151,7 @@ def parse_file(infilepath,outfilepath):
                 tmp_str=tmp_str.replace(field_type,field_type+"["+array_size_val+"]")
                 f.write(tmp_str+"\n")
                 tmp_str=""
-            if flag==1 and key == 'field_name':
+            if flag==1 and key == 'field_name' and "union" not in field_type:
                 if tmp_str!="":
                     f.write(tmp_str+"\n")
                 tmp_str=""
