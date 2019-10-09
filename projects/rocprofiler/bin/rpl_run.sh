@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 ################################################################################
 # Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
@@ -90,6 +90,35 @@ error() {
   exit 1
 }
 
+error_message=""
+errck() {
+  if [ -n "$error_message" ]; then
+    fatal "$1 : $error_message"
+  fi
+}
+
+parse_time_val() {
+  local time_maxumim_us=$((0xffffffff))
+  local __resultvar=$1
+  eval "local val=$"$__resultvar
+  val_m=`echo $val | sed -n "s/^\([0-9]*\)m$/\1/p"`
+  val_s=`echo $val | sed -n "s/^\([0-9]*\)s$/\1/p"`
+  val_ms=`echo $val | sed -n "s/^\([0-9]*\)ms$/\1/p"`
+  val_us=`echo $val | sed -n "s/^\([0-9]*\)us$/\1/p"`
+  if [ -n "$val_m" ] ; then val_us=$((val_m*60000000))
+  elif [ -n "$val_s" ] ; then val_us=$((val_s*1000000))
+  elif [ -n "$val_ms" ] ; then val_us=$((val_ms*1000))
+  fi
+
+  if [ -z "$val_us" ] ; then
+    error_message="invalid time value format ($val)"
+  elif [ "$val_us" -gt "$time_maxumim_us" ] ; then
+    error_message="time value exceeds maximum supported ($val > ${time_maxumim_us}us)"
+  else
+    eval $__resultvar="'$val_us'"
+  fi
+}
+
 # usage method
 usage() {
   bin_name=`basename $0`
@@ -162,6 +191,9 @@ usage() {
   echo "        <parameters list=\"hsa_queue_create, hsa_amd_memory_pool_allocate\">"
   echo "        </parameters>"
   echo "      </trace>"
+  echo ""
+  echo "  --trace-period <dealy:rate:length> - to enable trace with initial delay, with periodic rate and length"
+  echo "    Supported time formats: <number(m|s|ms|us)>"
   echo ""
   echo "Configuration file:"
   echo "  You can set your parameters defaults preferences in the configuration file 'rpl_rc.xml'. The search path sequence: .:${HOME}:<package path>"
@@ -337,6 +369,22 @@ while [ 1 ] ; do
     export ROCP_TIMESTAMP_ON=1
     GEN_STATS=1
     HIP_TRACE=1
+  elif [ "$1" = "--trace-period" ] ; then
+    period_expr="^\([^:]*\):\([^:]*\):\([^:]*\)$"
+    period_ck=`echo "$2" | sed -n "s/"${period_expr}"/ok/p"`
+    if [ -z "$period_ck" ] ; then
+      fatal "Wrong option '$ARG_IN $2'"
+    fi
+    period_delay=`echo "$2" | sed -n "s/"${period_expr}"/\1/p"`
+    period_rate=`echo "$2" | sed -n "s/"${period_expr}"/\2/p"`
+    period_len=`echo "$2" | sed -n "s/"${period_expr}"/\3/p"`
+    parse_time_val period_delay
+    errck "Option '$ARG_IN', delay value"
+    parse_time_val period_rate
+    errck "Option '$ARG_IN', rate value"
+    parse_time_val period_len
+    errck "Option '$ARG_IN', length value"
+    export ROCP_CTRL_RATE="$period_delay:$period_rate:$period_len"
   elif [ "$1" = "--verbose" ] ; then
     ARG_VAL=0
     export ROCP_VERBOSE_MODE=1
