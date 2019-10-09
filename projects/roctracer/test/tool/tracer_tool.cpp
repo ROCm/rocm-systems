@@ -612,7 +612,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     control_len_us = ctrl_len;
     control_delay_us = ctrl_delay;
 
-    fprintf(stdout, "ROCTracer: Trace control delay(%uus) rate(%uus), len(%uus)\n", ctrl_delay, ctrl_rate, ctrl_len); fflush(stdout);
+    fprintf(stdout, "ROCTracer: trace control delay(%uus), rate(%uus), len(%uus)\n", ctrl_delay, ctrl_rate, ctrl_len); fflush(stdout);
 
     roctracer_stop();
 
