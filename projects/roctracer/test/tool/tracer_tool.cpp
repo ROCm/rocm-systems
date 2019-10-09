@@ -25,9 +25,14 @@ THE SOFTWARE.
 
 #include <cxxabi.h>  /* names denangle */
 #include <dirent.h>
+#include <pthread.h>
 #include <stdio.h>
-#include <sys/syscall.h>   /* For SYS_xxx definitions */
+#include <string.h>
+#include <sys/syscall.h>  /* SYS_xxx definitions */
+#include <sys/types.h>
+#include <unistd.h>  /* usleep */
 
+#include <inc/roctracer_ext.h>
 #include <inc/roctracer_hsa.h>
 #include <inc/roctracer_hip.h>
 #include <inc/roctracer_hcc.h>
@@ -90,30 +95,43 @@ void fatal(const std::string msg) {
   abort();
 }
 
-// KFD API callback function
-void kfd_api_callback(
-    uint32_t domain,
-    uint32_t cid,
-    const void* callback_data,
-    void* arg)
-{
-  (void)arg;
-  const kfd_api_data_t* data = reinterpret_cast<const kfd_api_data_t*>(callback_data);
-  if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    kfd_begin_timestamp = timer->timestamp_fn_ns();
-  } else {
-    const timestamp_t end_timestamp = timer->timestamp_fn_ns();
-    std::ostringstream os;
-    os << kfd_begin_timestamp << ":" << end_timestamp << " " << GetPid() << ":" << GetTid() << " " << kfd_api_data_pair_t(cid, *data);
-    fprintf(kfd_api_file_handle, "%s\n", os.str().c_str());
-  }
-}
 // C++ symbol demangle
 static inline const char* cxx_demangle(const char* symbol) {
   size_t funcnamesize;
   int status;
   const char* ret = (symbol != NULL) ? abi::__cxa_demangle(symbol, NULL, &funcnamesize, &status) : symbol;
   return (ret != NULL) ? ret : symbol;
+}
+
+// Tracing control thread
+uint32_t control_delay_us = 0;
+uint32_t control_len_us = 0;
+uint32_t control_dist_us = 0;
+void* control_thr_fun(void*) {
+  const uint32_t delay_sec = control_delay_us / 1000000;
+  const uint32_t delay_us = control_delay_us % 1000000;
+  const uint32_t len_sec = control_len_us / 1000000;
+  const uint32_t len_us = control_len_us % 1000000;
+  const uint32_t dist_sec = control_dist_us / 1000000;
+  const uint32_t dist_us = control_dist_us % 1000000;
+  bool start = true;
+
+  sleep(delay_sec);
+  usleep(delay_us);
+
+  while (1) {
+    if (start) {
+      start = false;
+      roctracer_start();
+      sleep(len_sec);
+      usleep(len_us);
+    } else {
+      start = true;
+      roctracer_stop();
+      sleep(dist_sec);
+      usleep(dist_us);
+    }
+  }
 }
 
 struct hsa_api_trace_entry_t {
@@ -328,6 +346,25 @@ void hcc_activity_callback(const char* begin, const char* end, void* arg) {
   }
 }
 
+// KFD API callback function
+void kfd_api_callback(
+    uint32_t domain,
+    uint32_t cid,
+    const void* callback_data,
+    void* arg)
+{
+  (void)arg;
+  const kfd_api_data_t* data = reinterpret_cast<const kfd_api_data_t*>(callback_data);
+  if (data->phase == ACTIVITY_API_PHASE_ENTER) {
+    kfd_begin_timestamp = timer->timestamp_fn_ns();
+  } else {
+    const timestamp_t end_timestamp = timer->timestamp_fn_ns();
+    std::ostringstream os;
+    os << kfd_begin_timestamp << ":" << end_timestamp << " " << GetPid() << ":" << GetTid() << " " << kfd_api_data_pair_t(cid, *data);
+    fprintf(kfd_api_file_handle, "%s\n", os.str().c_str());
+  }
+}
+
 // Input parser
 std::string normalize_token(const std::string& token, bool not_empty, const std::string& label) {
   const std::string space_chars_set = " \t";
@@ -436,6 +473,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
   std::vector<std::string> kfd_api_vec;
 
   printf("ROCTracer (pid=%d): ", (int)GetPid()); fflush(stdout);
+
   // XML input
   const char* xml_name = getenv("ROCP_INPUT");
   if (xml_name != NULL) {
@@ -554,6 +592,35 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
 
     roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, (void*)mark_api_callback);
+  }
+
+  const char* ctrl_str = getenv("ROCP_CTRL_RATE");
+  if (ctrl_str != NULL) {
+    uint32_t ctrl_delay = 0;
+    uint32_t ctrl_rate = 0;
+    uint32_t ctrl_len = 0;
+    int ret = sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_rate, &ctrl_len);
+    if (ret != 3) {
+      fprintf(stderr, "ROCTracer: control rate value invalid 'delay:rate:length': '%s'\n", ctrl_str);
+      abort();
+    }
+    if (ctrl_len > ctrl_rate) {
+      fprintf(stderr, "ROCTracer: control length value (%u) > rate value (%u)\n", ctrl_len, ctrl_rate);
+      abort();
+    }
+    control_dist_us = ctrl_rate - ctrl_len;
+    control_len_us = ctrl_len;
+    control_delay_us = ctrl_delay;
+
+    fprintf(stdout, "ROCTracer: Trace control delay(%uus) rate(%uus), len(%uus)\n", ctrl_delay, ctrl_rate, ctrl_len); fflush(stdout);
+
+    roctracer_stop();
+
+    pthread_t thread;
+    pthread_attr_t attr;
+    int err = pthread_attr_init(&attr);
+    if (err) { errno = err; perror("pthread_attr_init"); abort(); }
+    err = pthread_create(&thread, &attr, control_thr_fun, NULL);
   }
 
   if (onload_debug) { printf("TOOL OnLoad end\n"); fflush(stdout); }

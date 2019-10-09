@@ -82,6 +82,10 @@ int main() {
     hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
     hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
 
+    uint32_t iterations = 100;
+    while (iterations-- > 0) {
+    std::cout << "## Iteration (" << iterations << ") #################" << std::endl;
+
     // Memory transfer from host to device
     hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
 
@@ -110,6 +114,8 @@ int main() {
         printf("FAILED: %d errors\n", errors);
     } else {
         printf("PASSED!\n");
+    }
+
     }
 
     // free the resources on device side
