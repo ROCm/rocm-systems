@@ -36,7 +36,8 @@ COPY_PID = 0
 OPS_PID = 1
 HSA_PID = 2
 HIP_PID = 3
-GPU_BASE_PID = 4
+EXT_PID = 4
+GPU_BASE_PID = 5
 max_gpu_id = -1
 START_US = 0
 
@@ -186,10 +187,66 @@ def fill_kernel_db(table_name, db):
     db.insert_entry(table_handle, val_list)
 #############################################################
 
-# fill HSA DB
-hsa_table_descr = [
+# Fill Ext DB
+ext_table_descr = [
+  ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'Index'],
+  {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'Index':'INTEGER'}
+]
+def fill_ext_db(table_name, db, indir, trace_name, api_pid):
+  file_name = indir + '/' + trace_name + '_trace.txt'
+  ptrn_val = re.compile(r'(\d+) (\d+):(\d+) (\d+):(.*)$')
+
+  if not os.path.isfile(file_name): return 0
+
+  range_stack = {}
+
+  record_id = 0
+  table_handle = db.add_table(table_name, ext_table_descr)
+  with open(file_name, mode='r') as fd:
+    for line in fd.readlines():
+      record = line[:-1]
+      m = ptrn_val.match(record)
+      if m:
+        tms = int(m.group(1))
+        pid = m.group(2)
+        tid = m.group(3)
+        cid = int(m.group(4))
+        msg = m.group(5)
+
+        rec_vals = []
+
+        if cid != 2:
+          rec_vals.append(tms)
+          rec_vals.append(tms + 1)
+          rec_vals.append(api_pid)
+          rec_vals.append(tid)
+          rec_vals.append(msg)
+          rec_vals.append(record_id)
+
+        if cid == 1:
+          if not pid in range_stack: range_stack[pid] = {}
+          pid_stack = range_stack[pid]
+          if not tid in pid_stack: pid_stack[tid] = []
+          rec_stack = pid_stack[tid]
+          rec_stack.append(rec_vals)
+          continue
+
+        if cid == 2:
+          pid_stack = range_stack[pid]
+          rec_stack = pid_stack[tid]
+          rec_vals = rec_stack.pop()
+          rec_vals[1] = tms
+
+        db.insert_entry(table_handle, rec_vals)
+        record_id += 1
+
+  return 1
+#############################################################
+
+# Fill API DB
+api_table_descr = [
   ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'args', 'Index'],
-  {'Index':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER'}
+  {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'Index':'INTEGER'}
 ]
 def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep_filtr, expl_id):
   file_name = indir + '/' + api_name + '_api_trace.txt'
@@ -211,14 +268,15 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
     START_US = 0
 
   record_id = 0
-  table_handle = db.add_table(table_name, hsa_table_descr)
+  table_handle = db.add_table(table_name, api_table_descr)
   with open(file_name, mode='r') as fd:
     for line in fd.readlines():
       record = line[:-1]
       m = ptrn_val.match(record)
       if m:
         rec_vals = []
-        for ind in range(1,7):
+        rec_len = len(api_table_descr[0])
+        for ind in range(1,rec_len):
           rec_vals.append(m.group(ind))
         rec_vals[2] = api_pid
         rec_vals.append(record_id)
@@ -359,6 +417,8 @@ else:
   with open(dbfile, mode='w') as fd: fd.truncate()
   db = SQLiteDB(dbfile)
 
+  ext_trace_found = fill_ext_db('rocTX', db, indir, 'roctx', EXT_PID)
+
   hsa_trace_found = fill_api_db('HSA', db, indir, 'hsa', HSA_PID, COPY_PID, kern_dep_list, {}, 0)
   hsa_activity_found = fill_copy_db('COPY', db, indir)
 
@@ -367,9 +427,12 @@ else:
 
   fill_kernel_db('A', db)
 
-  any_trace_found = hsa_trace_found | hip_trace_found
+  any_trace_found = ext_trace_found | hsa_trace_found | hip_trace_found
   if any_trace_found:
     db.open_json(jsonfile)
+
+  if ext_trace_found:
+    db.label_json(EXT_PID, "Markers and Ranges", jsonfile)
 
   if hsa_trace_found:
     db.label_json(HSA_PID, "CPU HSA API", jsonfile)
@@ -382,6 +445,9 @@ else:
   if any_trace_found and max_gpu_id >= 0:
     for ind in range(0, int(max_gpu_id) + 1):
       db.label_json(int(ind) + int(GPU_BASE_PID), "GPU" + str(ind), jsonfile)
+
+  if ext_trace_found:
+    dform.gen_ext_json_trace(db, 'rocTX', START_US, jsonfile)
 
   if len(var_table) != 0:
     dform.post_process_data(db, 'A', csvfile)
