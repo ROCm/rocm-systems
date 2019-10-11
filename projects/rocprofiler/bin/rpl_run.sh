@@ -173,7 +173,7 @@ usage() {
   echo "        </parameters>"
   echo "      </trace>"
   echo ""
-  echo "  --trace-period <dealy:rate:length> - to enable trace with initial delay, with periodic rate and length"
+  echo "  --trace-period <dealy:length:rate> - to enable trace with initial delay, with periodic sample length and rate"
   echo "    Supported time formats: <number(m|s|ms|us)>"
   echo ""
   echo "Configuration file:"
@@ -381,18 +381,18 @@ while [ 1 ] ; do
     period_expr="^\([^:]*\):\([^:]*\):\([^:]*\)$"
     period_ck=`echo "$2" | sed -n "s/"${period_expr}"/ok/p"`
     if [ -z "$period_ck" ] ; then
-      fatal "Wrong option '$ARG_IN $2'"
+      fatal "Wrong option '$1 $2'"
     fi
     period_delay=`echo "$2" | sed -n "s/"${period_expr}"/\1/p"`
-    period_rate=`echo "$2" | sed -n "s/"${period_expr}"/\2/p"`
-    period_len=`echo "$2" | sed -n "s/"${period_expr}"/\3/p"`
+    period_len=`echo "$2" | sed -n "s/"${period_expr}"/\2/p"`
+    period_rate=`echo "$2" | sed -n "s/"${period_expr}"/\3/p"`
     convert_time_val period_delay
     errck "Option '$ARG_IN', delay value"
-    convert_time_val period_rate
-    errck "Option '$ARG_IN', rate value"
     convert_time_val period_len
     errck "Option '$ARG_IN', length value"
-    export ROCP_CTRL_RATE="$period_delay:$period_rate:$period_len"
+    convert_time_val period_rate
+    errck "Option '$ARG_IN', rate value"
+    export ROCP_CTRL_RATE="$period_delay:$period_len:$period_rate"
   elif [ "$1" = "--verbose" ] ; then
     ARG_VAL=0
     export ROCP_VERBOSE_MODE=1
