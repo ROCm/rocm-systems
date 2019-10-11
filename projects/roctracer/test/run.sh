@@ -68,7 +68,8 @@ export ROCTRACER_DOMAIN="hip"
 
 # HIP test
 eval_test "tool HIP test" ./test/MatrixTranspose
-eval_test "tool HIP period test" "ROCP_CTRL_RATE=10:1000000:100000 ./test/MatrixTranspose"
+# with trace sampling control <delay:length:rate>
+eval_test "tool HIP period test" "ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose"
 
 # HSA test
 export ROCTRACER_DOMAIN="hsa"

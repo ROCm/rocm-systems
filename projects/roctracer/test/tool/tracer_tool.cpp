@@ -655,11 +655,11 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
   const char* ctrl_str = getenv("ROCP_CTRL_RATE");
   if (ctrl_str != NULL) {
     uint32_t ctrl_delay = 0;
-    uint32_t ctrl_rate = 0;
     uint32_t ctrl_len = 0;
-    int ret = sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_rate, &ctrl_len);
+    uint32_t ctrl_rate = 0;
+    int ret = sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate);
     if (ret != 3) {
-      fprintf(stderr, "ROCTracer: control rate value invalid 'delay:rate:length': '%s'\n", ctrl_str);
+      fprintf(stderr, "ROCTracer: control rate value invalid 'delay:length:rate': '%s'\n", ctrl_str);
       abort();
     }
     if (ctrl_len > ctrl_rate) {
@@ -670,7 +670,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     control_len_us = ctrl_len;
     control_delay_us = ctrl_delay;
 
-    fprintf(stdout, "ROCTracer: trace control delay(%uus), rate(%uus), len(%uus)\n", ctrl_delay, ctrl_rate, ctrl_len); fflush(stdout);
+    fprintf(stdout, "ROCTracer: trace control: delay(%uus), length(%uus), rate(%uus)\n", ctrl_delay, ctrl_len, ctrl_rate); fflush(stdout);
 
     roctracer_stop();
 
