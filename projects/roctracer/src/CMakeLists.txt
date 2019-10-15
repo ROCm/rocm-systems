@@ -12,16 +12,21 @@ set ( LIB_SRC
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
 target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HIP_INC_DIR} ${HCC_INC_DIR} ${HSA_KMT_INC_PATH} )
 target_link_libraries( ${TARGET_LIB} PRIVATE ${HSA_RUNTIME_LIB} c stdc++ )
+
+# Generating HSA tracing primitives
 execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/hsaap.py ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH}" )
 
-set ( KFD_LIB "kfdwrapper64" )
-set ( KFD_LIB_SRC
-  ${LIB_DIR}/kfd/kfd_wrapper.cpp
-)
-add_library ( ${KFD_LIB} SHARED ${KFD_LIB_SRC} )
-target_include_directories ( ${KFD_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HSA_KMT_INC_PATH} )
-target_link_libraries( ${KFD_LIB} PRIVATE c stdc++ )
-execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/kfdap.py ${ROOT_DIR} ${HSA_KMT_INC_PATH}" )
+# Generating KFD/Thunk tracing primitives
+if ( DEFINED KFD_WRAPPER )
+  set ( KFD_LIB "kfdwrapper64" )
+  set ( KFD_LIB_SRC
+    ${LIB_DIR}/kfd/kfd_wrapper.cpp
+  )
+  add_library ( ${KFD_LIB} SHARED ${KFD_LIB_SRC} )
+  target_include_directories ( ${KFD_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HSA_KMT_INC_PATH} )
+  target_link_libraries( ${KFD_LIB} PRIVATE c stdc++ )
+  execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/kfdap.py ${ROOT_DIR} ${HSA_KMT_INC_PATH}" )
+endif()
 
 set ( ROCTX_LIB "roctx64" )
 set ( ROCTX_LIB_SRC

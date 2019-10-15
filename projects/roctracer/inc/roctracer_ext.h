@@ -41,9 +41,6 @@ extern "C" {
 ////////////////////////////////////////////////////////////////////////////////
 // Application annotatin API
 
-// Mark API
-void roctracer_mark(const char* str);
-
 // Tracing start API
 void roctracer_start();
 

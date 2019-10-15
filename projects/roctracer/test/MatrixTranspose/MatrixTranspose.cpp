@@ -36,6 +36,10 @@ THE SOFTWARE.
 #define THREADS_PER_BLOCK_Y 4
 #define THREADS_PER_BLOCK_Z 1
 
+// Mark API
+extern "C"
+void roctracer_mark(const char* str);
+
 // Device (Kernel) function, it must be void
 __global__ void matrixTranspose(float* out, float* in, const int width) {
     int x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
