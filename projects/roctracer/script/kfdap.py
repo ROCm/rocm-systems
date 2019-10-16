@@ -114,22 +114,26 @@ class API_TableParser:
     record = "";
     cumulate = 0;
     self.full_fct = {}
+    rettype = ""
+    prev_line = ""
     for line in self.inp.readlines():
       line = self.norm_line(line)
       line = self.fix_comment_line(line)
 
       if cumulate == 1: record += " " + line; 
       else: record = line;
-      if self.is_start(line): cumulate = 1; continue;
+      if self.is_start(line): rettype = prev_line.strip(); cumulate = 1; prev_line = line; continue;
       if self.is_end(line): record = self.remove_ret_line(record); cumulate = 0; active = 1;
-      else: continue;
+      else: prev_line = line; continue;
       if active != 0:
         m = self.is_entry(record)
         if m:
-          mycall_full = "void "  + m.group(1) + ' (' + m.group(2) + ')'
+          mycall_full = rettype  + " " + m.group(1) + ' (' + m.group(2) + ')'
           mycall = m.group(1)
           self.full_fct[mycall] = mycall_full
           self.array.append(mycall) 
+          rettype = "";
+      prev_line = line
 
 #############################################################
 # API declaration parser clas
@@ -262,7 +266,6 @@ class API_DescrParser:
         # Return types
         self.api_rettypes.add(api_data[call]['ret'])
 
-    self.api_rettypes.discard('void')
     self.api_data = api_data
     self.ns_calls = ns_calls
 
@@ -375,7 +378,8 @@ class API_DescrParser:
       if len(self.api_rettypes) != 0:
         self.content_h += '  union {\n'
         for ret_type in self.api_rettypes:
-          self.content_h += '    ' + ret_type + ' ' + ret_type + '_retval;\n'
+          if ret_type != 'void':
+            self.content_h += '    ' + ret_type + ' ' + ret_type + '_retval;\n'
         self.content_h += '  };\n'
       self.content_h += '  union {\n'
       return
@@ -522,13 +526,13 @@ class API_DescrParser:
       self.content_cpp += '}\n\n';
 
     if call != '-':
-      self.content_cpp += 'PUBLIC_API HSAKMT_STATUS ' + call + '(' + struct['args'] + ') { roctracer::kfd_support::' + call + '_callback('
+      self.content_cpp += 'PUBLIC_API ' + struct['ret'] + " " + call + '(' + struct['args'] + ') { return roctracer::kfd_support::' + call + '_callback('
       for i in range(0,len(struct['alst'])):
         if i == (len(struct['alst'])-1):
-          self.content_cpp += struct['alst'][i].replace("[]","") 
+          self.content_cpp += struct['alst'][i].replace("[]","")
         else:
           self.content_cpp += struct['alst'][i].replace("[]","") + ', '
-      self.content_cpp +=  '); return HSAKMT_STATUS_SUCCESS;} \n'
+      self.content_cpp +=  ');} \n'
 
 #############################################################
 # main
