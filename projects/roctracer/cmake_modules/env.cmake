@@ -43,6 +43,11 @@ if ( DEFINED ENV{CMAKE_DEBUG_TRACE} )
   add_definitions ( -DDEBUG_TRACE=1 )
 endif()
 
+## Enable KFD wrapper
+if ( DEFINED KFD_WRAPPER )
+  add_definitions ( -DKFD_WRAPPER=1 )
+endif()
+
 ## Enable HIP/HCC local build
 if ( DEFINED LOCAL_BUILD )
   add_definitions ( -DLOCAL_BUILD=${LOCAL_BUILD} )
