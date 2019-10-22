@@ -321,8 +321,10 @@ void hip_api_callback(
         entry->ptr = *(data->args.hipMalloc.ptr);
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
+#if !HIP_VDI
       case HIP_API_ID_hipExtModuleLaunchKernel:
       case HIP_API_ID_hipHccModuleLaunchKernel:
+#endif
         const hipFunction_t f = data->args.hipModuleLaunchKernel.f;
         if (f != NULL) {
           entry->name = strdup(roctracer::HipLoader::Instance().KernelNameRef(f));
@@ -389,8 +391,10 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
           data->args.hipFree.ptr);
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
+#if !HIP_VDI
       case HIP_API_ID_hipExtModuleLaunchKernel:
       case HIP_API_ID_hipHccModuleLaunchKernel:
+#endif
         fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n",
           oss.str().c_str(),
           cxx_demangle(entry->name),

@@ -18,6 +18,7 @@ if [ -z "$BUILD_TYPE" ] ; then BUILD_TYPE="release"; fi
 if [ -z "$PACKAGE_ROOT" ] ; then PACKAGE_ROOT=$ROCM_PATH; fi
 if [ -z "$PACKAGE_PREFIX" ] ; then PACKAGE_PREFIX="$ROCM_PATH/$COMPONENT"; fi
 if [ -z "$PREFIX_PATH" ] ; then PREFIX_PATH=$PACKAGE_ROOT; fi
+if [ -n "$HIP_VDI" ] ; then HIP_VDI_OPT="-DHIP_VDI=1"; fi
 
 ROCTRACER_ROOT=$(cd $ROCTRACER_ROOT && echo $PWD)
 MAKE_OPTS="-j 8 -C $BUILD_DIR"
@@ -32,6 +33,7 @@ cmake \
     -DCMAKE_INSTALL_PREFIX=$PACKAGE_ROOT \
     -DCPACK_PACKAGING_INSTALL_PREFIX=$PACKAGE_PREFIX \
     -DCPACK_GENERATOR="DEB;RPM" \
+    $HIP_VDI_OPT \
     $ROCTRACER_ROOT
 make
 make mytest
