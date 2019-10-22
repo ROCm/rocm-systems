@@ -556,7 +556,7 @@ PUBLIC_API const char* roctracer_op_string(
       break;
     }
     case ACTIVITY_DOMAIN_HCC_OPS: {
-      return roctracer::HccLoader::Instance().GetCmdName(kind);
+      return roctracer::HccLoader::Instance().GetOpName(kind);
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
@@ -606,7 +606,7 @@ static inline uint32_t get_op_num(const uint32_t& domain) {
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: return 1;
     case ACTIVITY_DOMAIN_HSA_API: return HSA_API_ID_NUMBER;
-    case ACTIVITY_DOMAIN_HCC_OPS: return hc::HSA_OP_ID_NUMBER;
+    case ACTIVITY_DOMAIN_HCC_OPS: return HIP_OP_ID_NUMBER;
     case ACTIVITY_DOMAIN_HIP_API: return HIP_API_ID_NUMBER;
 #ifdef KFD_WRAPPER
     case ACTIVITY_DOMAIN_KFD_API: return KFD_API_ID_NUMBER;

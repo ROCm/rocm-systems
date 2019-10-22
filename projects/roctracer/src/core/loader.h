@@ -99,26 +99,26 @@ class HipApi {
 };
 
 // HCC runtime library loader class
+#include "inc/roctracer_hcc.h"
 class HccApi {
   public:
   typedef BaseLoader<HccApi> Loader;
 
-  typedef decltype(Kalmar::CLAMP::InitActivityCallback) InitActivityCallback_t;
-  typedef decltype(Kalmar::CLAMP::EnableActivityCallback) EnableActivityCallback_t;
-  typedef decltype(Kalmar::CLAMP::GetCmdName) GetCmdName_t;
-
-  InitActivityCallback_t* InitActivityCallback;
-  EnableActivityCallback_t* EnableActivityCallback;
-  GetCmdName_t* GetCmdName;
+  hipInitAsyncActivityCallback_t* InitActivityCallback;
+  hipEnableAsyncActivityCallback_t* EnableActivityCallback;
+  hipGetOpName_t* GetOpName;
 
   protected:
   void init(Loader* loader) {
-    // Kalmar::CLAMP::InitActivityCallback
-    InitActivityCallback = loader->GetFun<InitActivityCallback_t>("InitActivityCallbackImpl");
-    // Kalmar::CLAMP::EnableActivityIdCallback
-    EnableActivityCallback = loader->GetFun<EnableActivityCallback_t>("EnableActivityCallbackImpl");
-    // Kalmar::CLAMP::GetCmdName
-    GetCmdName = loader->GetFun<GetCmdName_t>("GetCmdNameImpl");
+#if HIP_VDI
+    InitActivityCallback = loader->GetFun<hipInitAsyncActivityCallback_t>("InitActivityCallback");
+    EnableActivityCallback = loader->GetFun<hipEnableAsyncActivityCallback_t>("EnableActivityCallback");
+    GetOpName = loader->GetFun<hipGetOpName_t>("GetCmdName");
+#else
+    InitActivityCallback = loader->GetFun<hipInitAsyncActivityCallback_t>("InitActivityCallbackImpl");
+    EnableActivityCallback = loader->GetFun<hipEnableAsyncActivityCallback_t>("EnableActivityCallbackImpl");
+    GetOpName = loader->GetFun<hipGetOpName_t>("GetCmdNameImpl");
+#endif
   }
 };
 

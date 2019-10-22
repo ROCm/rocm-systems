@@ -32,7 +32,7 @@ THE SOFTWARE.
 #include <inc/roctx.h>
 
 #ifndef ITERATIONS
-# define ITERATIONS 100
+# define ITERATIONS 101
 #endif
 #define WIDTH 1024
 
@@ -273,7 +273,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
         record->device_id,
         record->queue_id
       );
-      if (record->op == hc::HSA_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
+      if (record->op == HIP_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
     } else if (record->domain == ACTIVITY_DOMAIN_EXT_API) {
       fprintf(stdout, " external_id(%lu)",
         record->external_id
