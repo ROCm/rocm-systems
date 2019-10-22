@@ -77,6 +77,14 @@ bool RegisterApiCallback(uint32_t op, void* callback, void* arg);
 // Remove ROCTX callback for given opertaion id
 bool RemoveApiCallback(uint32_t op);
 
+// Iterate range stack to support tracing start/stop
+typedef struct {
+  const char* message;
+  uint32_t tid;
+} roctx_range_data_t;
+typedef void (*roctx_range_iterate_cb_t)(const roctx_range_data_t* data, void* arg);
+void RangeStackIterate(roctx_range_iterate_cb_t callback, void* arg);
+
 #ifdef __cplusplus
 }  // extern "C" block
 #endif  // __cplusplus

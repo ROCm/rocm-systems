@@ -141,20 +141,24 @@ class KfdApi {
 };
 
 // rocTX runtime library loader class
+#include "inc/roctracer_roctx.h"
 class RocTxApi {
   public:
   typedef BaseLoader<RocTxApi> Loader;
 
-  typedef bool (RegisterApiCallback_t)(uint32_t op, void* callback, void* arg);
-  typedef bool (RemoveApiCallback_t)(uint32_t op);
+  typedef decltype(RegisterApiCallback) RegisterApiCallback_t;
+  typedef decltype(RemoveApiCallback) RemoveApiCallback_t;
+  typedef decltype(RangeStackIterate) RangeStackIterate_t;
 
   RegisterApiCallback_t* RegisterApiCallback;
   RemoveApiCallback_t* RemoveApiCallback;
+  RangeStackIterate_t* RangeStackIterate;
 
   protected:
   void init(Loader* loader) {
     RegisterApiCallback = loader->GetFun<RegisterApiCallback_t>("RegisterApiCallback");
     RemoveApiCallback = loader->GetFun<RemoveApiCallback_t>("RemoveApiCallback");
+    RangeStackIterate = loader->GetFun<RangeStackIterate_t>("RangeStackIterate");
   }
 };
 

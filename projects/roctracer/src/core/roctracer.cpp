@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "inc/roctracer.h"
 #include "inc/roctracer_hcc.h"
 #include "inc/roctracer_hip.h"
+#include "inc/roctracer_ext.h"
 #include "inc/roctracer_roctx.h"
 #define PROF_API_IMPL 1
 #include "inc/roctracer_hsa.h"
@@ -30,18 +31,19 @@ THE SOFTWARE.
 #include "inc/roctracer_kfd.h"
 #endif
 
+#include <dirent.h>
+#include <pthread.h>
+#include <string.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
 #include <atomic>
 #include <mutex>
 #include <stack>
-#include <dirent.h>
-#include <stack>
-#include <string.h>
-#include <pthread.h>
-#include <unistd.h>
-#include <sys/syscall.h>
 
 #include "core/journal.h"
 #include "core/loader.h"
+#include "core/memory_pool.h"
 #include "core/trace_buffer.h"
 #include "proxy/tracker.h"
 #include "ext/hsa_rt_utils.hpp"
@@ -57,16 +59,6 @@ THE SOFTWARE.
 #define PUBLIC_API __attribute__((visibility("default")))
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
-
-#define PTHREAD_CALL(call)                                                                         \
-  do {                                                                                             \
-    int err = call;                                                                                \
-    if (err != 0) {                                                                                \
-      errno = err;                                                                                 \
-      perror(#call);                                                                               \
-      abort();                                                                                     \
-    }                                                                                              \
-  } while (0)
 
 #define HIPAPI_CALL(call)                                                                          \
   do {                                                                                             \
@@ -244,7 +236,12 @@ CoreApiTable CoreApiTable_saved{};
 AmdExtTable AmdExtTable_saved{};
 // Table of function pointers to HSA Image Extension
 ImageExtTable ImageExtTable_saved{};
-}
+}  // namespace hsa_support
+
+namespace ext_support {
+roctracer_start_cb_t roctracer_start_cb = NULL;
+roctracer_stop_cb_t roctracer_stop_cb = NULL;
+}  // namespace ext_suppoprt
 
 roctracer_status_t GetExcStatus(const std::exception& e) {
   const util::exception* roctracer_exc_ptr = dynamic_cast<const util::exception*>(&e);
@@ -267,168 +264,6 @@ class GlobalCounter {
 };
 GlobalCounter::mutex_t GlobalCounter::mutex_;
 GlobalCounter::counter_t GlobalCounter::counter_ = 0;
-
-class MemoryPool {
-  public:
-  typedef std::mutex mutex_t;
-
-  static void allocator_default(char** ptr, size_t size, void* arg) {
-    (void)arg;
-    if (*ptr == NULL) {
-      *ptr = reinterpret_cast<char*>(malloc(size));
-    } else if (size != 0) {
-      *ptr = reinterpret_cast<char*>(realloc(ptr, size));
-    } else {
-      free(*ptr); 
-      *ptr = NULL;
-    }
-  }
-
-  MemoryPool(const roctracer_properties_t& properties) { 
-    // Assigning pool allocator
-    alloc_fun_ = allocator_default;
-    alloc_arg_ = NULL;
-    if (properties.alloc_fun != NULL) {
-      alloc_fun_ = properties.alloc_fun;
-      alloc_arg_ = properties.alloc_arg;
-    }
-
-    // Pool definition
-    buffer_size_ = properties.buffer_size;
-    const size_t pool_size = 2 * buffer_size_;
-    pool_begin_ = NULL;
-    alloc_fun_(&pool_begin_, pool_size, alloc_arg_);
-    if (pool_begin_ == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "pool allocator failed");
-    pool_end_ = pool_begin_ + pool_size;
-    buffer_begin_ = pool_begin_;
-    buffer_end_ = buffer_begin_ + buffer_size_;
-    write_ptr_ = buffer_begin_;
-
-    // Consuming read thread
-    read_callback_fun_ = properties.buffer_callback_fun;
-    read_callback_arg_ = properties.buffer_callback_arg;
-    consumer_arg_.set(this, NULL, NULL, true);
-    PTHREAD_CALL(pthread_mutex_init(&read_mutex_, NULL));
-    PTHREAD_CALL(pthread_cond_init(&read_cond_, NULL));
-    PTHREAD_CALL(pthread_create(&consumer_thread_, NULL, reader_fun, &consumer_arg_));
-  }
-
-  ~MemoryPool() {
-    Flush();
-    PTHREAD_CALL(pthread_cancel(consumer_thread_));
-    void *res;
-    PTHREAD_CALL(pthread_join(consumer_thread_, &res));
-    if (res != PTHREAD_CANCELED) EXC_ABORT(ROCTRACER_STATUS_ERROR, "consumer thread wasn't stopped correctly");
-    allocator_default(&pool_begin_, 0, alloc_arg_);
-  }
-
-  template <typename Record>
-  void Write(const Record& record) {
-    std::lock_guard<mutex_t> lock(write_mutex_);
-    getRecord<Record>(record);
-  }
-
-  void Flush() {
-    std::lock_guard<mutex_t> lock(write_mutex_);
-    if (write_ptr_ > buffer_begin_) {
-      spawn_reader(buffer_begin_, write_ptr_);
-      sync_reader(&consumer_arg_);
-      buffer_begin_ = (buffer_end_ == pool_end_) ? pool_begin_ : buffer_end_;
-      buffer_end_ = buffer_begin_ + buffer_size_;
-      write_ptr_ = buffer_begin_;
-    }
-  }
-
-  private:
-  struct consumer_arg_t {
-    MemoryPool* obj;
-    const char* begin;
-    const char* end;
-    volatile std::atomic<bool> valid;
-    void set(MemoryPool* obj_p, const char* begin_p, const char* end_p, bool valid_p) {
-      obj = obj_p;
-      begin = begin_p;
-      end = end_p;
-      valid.store(valid_p);
-    }
-  };
-
-  template <typename Record>
-  Record* getRecord(const Record& init) {
-    char* next = write_ptr_ + sizeof(Record);
-    if (next > buffer_end_) {
-      if (write_ptr_ == buffer_begin_) EXC_ABORT(ROCTRACER_STATUS_ERROR, "buffer size(" << buffer_size_ << ") is less then the record(" << sizeof(Record) << ")");
-      spawn_reader(buffer_begin_, write_ptr_);
-      buffer_begin_ = (buffer_end_ == pool_end_) ? pool_begin_ : buffer_end_;
-      buffer_end_ = buffer_begin_ + buffer_size_;
-      write_ptr_ = buffer_begin_;
-      next = write_ptr_ + sizeof(Record);
-    }
-
-    Record* ptr = reinterpret_cast<Record*>(write_ptr_);
-    write_ptr_ = next;
-
-    *ptr = init;
-    return ptr;
-  }
-
-  static void reset_reader(consumer_arg_t* arg) {
-    arg->valid.store(false);
-  }
-
-  static void sync_reader(const consumer_arg_t* arg) {
-    while(arg->valid.load() == true) PTHREAD_CALL(pthread_yield());
-  }
-
-  static void* reader_fun(void* consumer_arg) {
-    consumer_arg_t* arg = reinterpret_cast<consumer_arg_t*>(consumer_arg);
-    roctracer::MemoryPool* obj = arg->obj;
-
-    reset_reader(arg);
-
-    while (1) {
-      PTHREAD_CALL(pthread_mutex_lock(&(obj->read_mutex_)));
-      while (arg->valid.load() == false) {
-        PTHREAD_CALL(pthread_cond_wait(&(obj->read_cond_), &(obj->read_mutex_)));
-      }
-
-      obj->read_callback_fun_(arg->begin, arg->end, obj->read_callback_arg_);
-      reset_reader(arg);
-      PTHREAD_CALL(pthread_mutex_unlock(&(obj->read_mutex_)));
-    }
-
-    return NULL;
-  }
-
-  void spawn_reader(const char* data_begin, const char* data_end) {
-    sync_reader(&consumer_arg_);
-    PTHREAD_CALL(pthread_mutex_lock(&read_mutex_));
-    consumer_arg_.set(this, data_begin, data_end, true);
-    PTHREAD_CALL(pthread_cond_signal(&read_cond_));
-    PTHREAD_CALL(pthread_mutex_unlock(&read_mutex_));
-  }
-
-  // pool allocator
-  roctracer_allocator_t alloc_fun_;
-  void* alloc_arg_;
-
-  // Pool definition
-  size_t buffer_size_;
-  char* pool_begin_;
-  char* pool_end_;
-  char* buffer_begin_;
-  char* buffer_end_;
-  char* write_ptr_;
-  mutex_t write_mutex_;
-
-  // Consuming read thread
-  roctracer_buffer_callback_t read_callback_fun_;
-  void* read_callback_arg_;
-  consumer_arg_t consumer_arg_;
-  pthread_t consumer_thread_;
-  pthread_mutex_t read_mutex_;
-  pthread_cond_t read_cond_;
-};
 
 // Records storage
 struct roctracer_api_data_t {
@@ -1162,6 +997,7 @@ PUBLIC_API void roctracer_mark(const char* str) {
 
 // Start API
 PUBLIC_API void roctracer_start() {
+  if (roctracer::ext_support::roctracer_start_cb) roctracer::ext_support::roctracer_start_cb();
   roctracer::cb_journal->foreach(roctracer::cb_en_functor_t(roctracer_enable_callback_fun));
   roctracer::act_journal->foreach(roctracer::act_en_functor_t(roctracer_enable_activity_fun));
 }
@@ -1170,6 +1006,7 @@ PUBLIC_API void roctracer_start() {
 PUBLIC_API void roctracer_stop() {
   roctracer::cb_journal->foreach(roctracer::cb_dis_functor_t(roctracer_disable_callback_fun));
   roctracer::act_journal->foreach(roctracer::act_dis_functor_t(roctracer_disable_activity_fun));
+  if (roctracer::ext_support::roctracer_stop_cb) roctracer::ext_support::roctracer_stop_cb();
 }
 
 // Set properties
@@ -1222,6 +1059,13 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
       const char* hip_backend_lib_name = getenv("HIP_BACKEND_LIB");
       if (hip_backend_lib_name != NULL) roctracer::HccLoader::Instance().SetLibName(hip_backend_lib_name);
       mark_api_callback_ptr = reinterpret_cast<mark_api_callback_t*>(properties);
+      break;
+    }
+    case ACTIVITY_DOMAIN_EXT_API: {
+      roctracer_ext_properties_t* ops_properties = reinterpret_cast<roctracer_ext_properties_t*>(properties);
+      roctracer::ext_support::roctracer_start_cb = ops_properties->start_cb;
+      roctracer::ext_support::roctracer_stop_cb = ops_properties->stop_cb;
+      break;
     }
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");

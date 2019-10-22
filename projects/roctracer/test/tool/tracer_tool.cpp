@@ -158,7 +158,24 @@ roctracer::TraceBuffer<roctx_trace_entry_t>::flush_prm_t roctx_flush_prm[1] = {{
 roctracer::TraceBuffer<roctx_trace_entry_t> roctx_trace_buffer("rocTX API", 0x200000, roctx_flush_prm, 1);
 
 // rocTX callback function
-void roctx_callback(
+static inline void roctx_callback_fun(
+    uint32_t domain,
+    uint32_t cid,
+    uint32_t tid,
+    const char* message)
+{
+  const timestamp_t timestamp = timer->timestamp_fn_ns();
+  roctx_trace_entry_t* entry = roctx_trace_buffer.GetEntry();
+  entry->valid = roctracer::TRACE_ENTRY_COMPL;
+  entry->type = 0;
+  entry->cid = cid;
+  entry->timestamp = timestamp;
+  entry->pid = GetPid();
+  entry->tid = tid;
+  entry->message = (message != NULL) ? strdup(message) : NULL;
+}
+
+void roctx_api_callback(
     uint32_t domain,
     uint32_t cid,
     const void* callback_data,
@@ -166,16 +183,23 @@ void roctx_callback(
 {
   (void)arg;
   const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
-  const timestamp_t timestamp = timer->timestamp_fn_ns();
-  roctx_trace_entry_t* entry = roctx_trace_buffer.GetEntry();
-  const char* message = data->args.message;
-  entry->valid = roctracer::TRACE_ENTRY_COMPL;
-  entry->type = 0;
-  entry->cid = cid;
-  entry->timestamp = timestamp;
-  entry->pid = GetPid();
-  entry->tid = GetTid();
-  entry->message = (message != NULL) ? strdup(message) : NULL;
+  roctx_callback_fun(domain, cid, GetTid(), data->args.message);
+}
+
+// Start/Stop callbacks
+void roctx_range_stack_callback(const roctx_range_data_t* data, void* arg) {
+  const bool* is_stop_ptr = (bool*)arg;
+  const uint32_t cid = (*is_stop_ptr == true) ? ROCTX_API_ID_roctxRangePop : ROCTX_API_ID_roctxRangePushA;
+  const char* message = (*is_stop_ptr == true) ? NULL : data->message;
+  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, cid, data->tid, message);
+}
+void stop_callback() {
+  bool is_stop = true;
+  roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_stack_callback, (void*)&is_stop);
+}
+void start_callback() {
+  bool is_stop = false;
+  roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_stack_callback, (void*)&is_stop);
 }
 
 void roctx_flush_cb(roctx_trace_entry_t* entry) {
@@ -597,8 +621,15 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
   if (trace_roctx) {
     roctx_file_handle = open_output_file(output_prefix, "roctx_trace.txt");
 
+    // initialize HSA tracing
+    roctracer_ext_properties_t properties {
+      start_callback,
+      stop_callback
+    };
+    roctracer_set_properties(ACTIVITY_DOMAIN_EXT_API, &properties);
+
     fprintf(stdout, "    rocTX-trace()\n"); fflush(stdout);
-    ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, roctx_callback, NULL));
+    ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, roctx_api_callback, NULL));
   }
 
   // Enable HSA API callbacks/activity
@@ -627,11 +658,12 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     hsa_async_copy_file_handle = open_output_file(output_prefix, "async_copy_trace.txt");
 
     // initialize HSA tracing
-    roctracer::hsa_ops_properties_t ops_properties{
+    roctracer::hsa_ops_properties_t ops_properties {
       table,
       reinterpret_cast<activity_async_callback_t>(hsa_activity_callback),
       NULL,
-      output_prefix};
+      output_prefix
+    };
     roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
 
     fprintf(stdout, "    HSA-activity-trace()\n"); fflush(stdout);
