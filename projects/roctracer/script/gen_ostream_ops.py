@@ -158,7 +158,7 @@ def parse_file(infilepath,outfilepath):
                 field_name = match.group('field_name')
                 if field_name == "":
                     field_name="noname"
-                if (field_name!="noname" and field_type!="notype") or args['debug'] :
+                if (field_name!="noname" and field_type!="notype" and not re.search("void",field_type)) or args['debug'] :
                     tmp_str="    roctracer::kfd_support::output_streamer<"+field_type+">::put(out,v."+field_name+")"+";";
                     tmp_str=tmp_str.replace('<::', '<')
                     #f.write(tmp_str+"\n")
@@ -203,4 +203,5 @@ args = vars(parser.parse_args())
 if __name__ == '__main__':
     gen_cppheader_lut(args['in'])
     parse_file("/tmp/cppheader_lut.txt",args['out'])
+
 
