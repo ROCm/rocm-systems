@@ -553,17 +553,9 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     }
 
     // HSA/HIP domains enabling
-    if (std::string(trace_domain).find("hsa-api") != std::string::npos) {
+    if (std::string(trace_domain).find("hsa") != std::string::npos) {
       trace_hsa_api = true;
-    }
-    if (std::string(trace_domain).find("hsa-act") != std::string::npos) {
       trace_hsa_activity = true;
-    }
-    if ((trace_hsa_activity == false) && (trace_hsa_api == false)) {
-      if (std::string(trace_domain).find("hsa") != std::string::npos) {
-        trace_hsa_api = true;
-        trace_hsa_activity = true;
-      }
     }
     if (std::string(trace_domain).find("hip") != std::string::npos) {
       trace_hip_api = true;

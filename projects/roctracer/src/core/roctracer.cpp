@@ -1026,11 +1026,13 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
       roctracer::hsa_support::async_copy_callback_arg = ops_properties->async_copy_callback_arg;
       roctracer::hsa_support::output_prefix = ops_properties->output_prefix;
 
+#if 0
       // HSA dispatches intercepting
       rocprofiler::SaveHsaApi(table);
       rocprofiler::ProxyQueue::InitFactory();
       rocprofiler::ProxyQueue::HsaIntercept(table);
       rocprofiler::InterceptQueue::HsaIntercept(table);
+#endif
 
       // HSA async-copy tracing
       hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
