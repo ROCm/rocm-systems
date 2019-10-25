@@ -115,7 +115,7 @@ usage() {
   echo "  --list-derived - to print the list of derived metrics with formulas"
   echo ""
   echo "  -i <.txt|.xml file> - input file"
-  echo "      Input file .txt format, automatically rerun application for every pmc line:"
+  echo "      Input file .txt format, automatically rerun application for every profiling features line:"
   echo ""
   echo "        # Perf counters group 1"
   echo "        pmc : Wavefronts VALUInsts SALUInsts SFetchInsts FlatVMemInsts LDSInsts FlatLDSInsts GDSInsts VALUUtilization FetchSize"
@@ -221,16 +221,12 @@ run() {
       fi
     fi
     mkdir -p "$ROCP_OUTPUT_DIR"
-
     OUTPUT_LIST="$OUTPUT_LIST $ROCP_OUTPUT_DIR/results.txt"
   fi
 
   API_TRACE=""
   if [ "$ROCTX_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":roctx"
-  fi
-  if [ "$HSA_TRACE" = 1 ] ; then
-    API_TRACE=${API_TRACE}":hsa"
   fi
   if [ "$HIP_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":hip"
@@ -239,11 +235,12 @@ run() {
     API_TRACE=${API_TRACE}":sys"
   fi
 
-  if [ -n "$API_TRACE" ] ; then
+  if [ "$HSA_TRACE" = 1 ] ; then
+    export ROCTRACER_DOMAIN=$API_TRACE":hsa"
+    export HSA_TOOLS_LIB="$HSA_TOOLS_LIB $TTLIB_PATH/libtracer_tool.so"
+  elif [ -n "$API_TRACE" ] ; then
     export ROCTRACER_DOMAIN=$API_TRACE
-    if [ "$HSA_TRACE" = 0 ] ; then
-      OUTPUT_LIST="$ROCP_OUTPUT_DIR/"
-    fi
+    OUTPUT_LIST="$ROCP_OUTPUT_DIR/"
     export HSA_TOOLS_LIB="$TTLIB_PATH/libtracer_tool.so"
   fi
 
@@ -492,9 +489,7 @@ if [ -n "$csv_output" ] ; then
   else
     python $BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST
   fi
-  if [ "$?" -eq 0 ] ; then
-    echo "RPL: '$csv_output' is generated"
-  else
+  if [ "$?" -ne 0 ] ; then
     echo "Data extracting error: $OUTPUT_LIST'"
   fi
 fi

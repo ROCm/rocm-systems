@@ -6,7 +6,7 @@ class SQLiteDB:
   def __init__(self, file_name):
     self.connection = sqlite3.connect(file_name)
     self.tables = {}
-    self.json_arg_list_enabled = 0
+    self.section_index = 0
 
   def __del__(self):
     self.connection.close()
@@ -111,7 +111,8 @@ class SQLiteDB:
     if not re.search(r'\.json$', file_name):
       raise Exception('wrong output file type: "' + file_name + '"' )
     with open(file_name, mode='a') as fd:
-      fd.write(',{"args":{"name":"%s"},"ph":"M","pid":%s,"name":"process_name"}\n' %(label, pid));
+      fd.write(',{"args":{"name":"%s %s"},"ph":"M","pid":%s,"name":"process_name"}\n' %(self.section_index, label, pid));
+    self.section_index += 1
 
   def flow_json(self, base_id, from_pid, from_tid, from_us_list, to_pid, to_us_dict, corr_id_list, start_us, file_name):
     if not re.search(r'\.json$', file_name):
@@ -137,9 +138,9 @@ class SQLiteDB:
     name_ptrn = re.compile(r'(name|Name)')
 
     table_fields = self._get_fields(table_name)
-    table_raws = self._get_raws_indexed(table_name)
+    table_raws = self._get_raws(table_name)
     data_fields = self._get_fields(data_name)
-    data_raws = self._get_raws_indexed(data_name)
+    data_raws = self._get_raws(data_name)
 
     with open(file_name, mode='a') as fd:
       table_raws_len = len(table_raws)

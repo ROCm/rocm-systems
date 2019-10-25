@@ -32,11 +32,11 @@ import dform
 #  SQ_WAVES (4096)
 #  SQ_INSTS_VMEM_RD (36864)
 
-COPY_PID = 0
-OPS_PID = 1
-HSA_PID = 2
-HIP_PID = 3
-EXT_PID = 4
+EXT_PID = 0
+COPY_PID = 1
+HIP_PID = 2
+HSA_PID = 3
+OPS_PID = 4
 GPU_BASE_PID = 5
 max_gpu_id = -1
 START_US = 0
@@ -166,6 +166,8 @@ def dump_csv(file_name):
       if ind != dispatch_number: fatal("Dispatch #" + ind + " index mismatch (" + dispatch_number + ")\n")
       val_list = [entry[var] for var in var_list]
       fd.write(','.join(val_list) + '\n');
+
+  print("File '" + file_name + "' is generating")
 #############################################################
 
 # fill kernels DB
@@ -337,6 +339,8 @@ def fill_copy_db(table_name, db, indir):
       else: fatal("async-copy bad record: '" + record + "'")
 
   dep_dict[COPY_PID]['to'] = dep_to_us_dict
+
+  return 1
 #############################################################
 
 # fill HCC ops DB
@@ -434,13 +438,13 @@ else:
   if ext_trace_found:
     db.label_json(EXT_PID, "Markers and Ranges", jsonfile)
 
+  if hip_trace_found:
+    db.label_json(HIP_PID, "CPU HIP API", jsonfile)
+
   if hsa_trace_found:
     db.label_json(HSA_PID, "CPU HSA API", jsonfile)
   if hsa_activity_found:
     db.label_json(COPY_PID, "COPY", jsonfile)
-
-  if hip_trace_found:
-    db.label_json(HIP_PID, "CPU HIP API", jsonfile)
 
   if any_trace_found and max_gpu_id >= 0:
     for ind in range(0, int(max_gpu_id) + 1):

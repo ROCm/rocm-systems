@@ -64,29 +64,32 @@ parse() {
         gpu_index=$line
       fi
     else
-      output=$outdir/input${index}.xml
-      header="# $timestamp '$output' generated with '$0 $*'"
-      echo $header > $output
+      found=$(echo $feature | sed -n "/^\(pmc\|sqtt\|hsa\)$/ p")
+      if [ -n "$found" ] ; then
+        output=$outdir/input${index}.xml
+        header="# $timestamp '$output' generated with '$0 $*'"
+        echo $header > $output
 
-      if [ "$feature" == "pmc" ] ; then
-        line=`echo "$line" | sed -e "s/ /,/g"`
-        cat >> $output <<EOF
+        if [ "$feature" == "pmc" ] ; then
+          line=`echo "$line" | sed -e "s/ /,/g"`
+          cat >> $output <<EOF
 <metric range="$range" kernel="$kernel" gpu_index="$gpu_index"></metric>
 <metric name=$line ></metric>
 EOF
-      fi
+        fi
 
-      if [ "$feature" == "sqtt" ] ; then
-        cat >> $output <<EOF
+        if [ "$feature" == "sqtt" ] ; then
+          cat >> $output <<EOF
 <metric range="$range" kernel="$kernel" gpu_index="$gpu_index"></metric>
 <trace name="SQTT"><parameters $line ></parameters></trace>
 EOF
-      fi
+        fi
 
-      if [ "$feature" == "hsa" ] ; then
-        cat >> $output <<EOF
+        if [ "$feature" == "hsa" ] ; then
+          cat >> $output <<EOF
 <trace name="HSA"><parameters api="$line"></parameters></trace>
 EOF
+        fi
       fi
     fi
 

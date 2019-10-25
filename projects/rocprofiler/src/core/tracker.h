@@ -105,9 +105,10 @@ class Tracker {
     entry->record = record;
 
     // Creating a proxy signal
-    status = hsa_api_.hsa_signal_create(1, 0, NULL, &(entry->signal));
+    const hsa_signal_value_t signal_value = hsa_api_.hsa_signal_load_relaxed(orig);
+    status = hsa_api_.hsa_signal_create(signal_value, 0, NULL, &(entry->signal));
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_signal_create");
-    status = hsa_api_.hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
+    status = hsa_api_.hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, signal_value, Handler, entry);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
 
     // Adding antry to the list
@@ -210,9 +211,6 @@ class Tracker {
       amd_signal_t* prof_signal_ptr = reinterpret_cast<amd_signal_t*>(entry->signal.handle);
       orig_signal_ptr->start_ts = prof_signal_ptr->start_ts;
       orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
-
-      const hsa_signal_value_t new_value = hsa_api_.hsa_signal_load_relaxed(orig) - 1;
-      if (signal_value != new_value) EXC_ABORT(HSA_STATUS_ERROR, "Tracker::Complete bad signal value");
       hsa_api_.hsa_signal_store_screlease(orig, signal_value);
     }
   }
