@@ -71,7 +71,8 @@ thread_local timestamp_t kfd_begin_timestamp = 0;
 bool trace_roctx = false;
 bool trace_hsa_api = false;
 bool trace_hsa_activity = false;
-bool trace_hip = false;
+bool trace_hip_api = false;
+bool trace_hip_activity = false;
 bool trace_kfd = false;
 
 LOADER_INSTANTIATE();
@@ -531,28 +532,6 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
   if (onload_debug) { printf("TOOL OnLoad\n"); fflush(stdout); }
   timer = new hsa_rt_utils::Timer(table->core_->hsa_system_get_info_fn);
 
-  // API traces switches
-  const char* trace_domain = getenv("ROCTRACER_DOMAIN");
-  if (trace_domain != NULL) {
-    if (std::string(trace_domain).find("roctx") != std::string::npos) {
-      trace_roctx = true;
-    }
-    if (std::string(trace_domain).find("hsa") != std::string::npos) {
-      trace_hsa_api = true;
-      trace_hsa_activity = true;
-    }
-    if (std::string(trace_domain).find("hip") != std::string::npos) {
-      trace_hip = true;
-    }
-    if (std::string(trace_domain).find("sys") != std::string::npos) {
-      trace_hsa_api = true;
-      trace_hip = true;
-    }
-    if (std::string(trace_domain).find("kfd") != std::string::npos) {
-      trace_kfd = true;
-    }
-  }
-
   // Output file
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
   if (output_prefix != NULL) {
@@ -562,6 +541,43 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
       errmsg << "ROCTracer: Cannot open output directory '" << output_prefix << "'";
       perror(errmsg.str().c_str());
       abort();
+    }
+  }
+
+  // API traces switches
+  const char* trace_domain = getenv("ROCTRACER_DOMAIN");
+  if (trace_domain != NULL) {
+    // ROCTX domain
+    if (std::string(trace_domain).find("roctx") != std::string::npos) {
+      trace_roctx = true;
+    }
+
+    // HSA/HIP domains enabling
+    if (std::string(trace_domain).find("hsa-api") != std::string::npos) {
+      trace_hsa_api = true;
+    }
+    if (std::string(trace_domain).find("hsa-act") != std::string::npos) {
+      trace_hsa_activity = true;
+    }
+    if ((trace_hsa_activity == false) && (trace_hsa_api == false)) {
+      if (std::string(trace_domain).find("hsa") != std::string::npos) {
+        trace_hsa_api = true;
+        trace_hsa_activity = true;
+      }
+    }
+    if (std::string(trace_domain).find("hip") != std::string::npos) {
+      trace_hip_api = true;
+      trace_hip_activity = true;
+    }
+    if (std::string(trace_domain).find("sys") != std::string::npos) {
+      trace_hsa_api = true;
+      trace_hip_api = true;
+      trace_hip_activity = true;
+    }
+
+    // KFD domain enabling
+    if (std::string(trace_domain).find("kfd") != std::string::npos) {
+      trace_kfd = true;
     }
   }
 
@@ -608,7 +624,8 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
       }
       if (name == "HIP") {
         found = true;
-        trace_hip = true;
+        trace_hip_api = true;
+        trace_hip_activity = true;
       }
       if (name == "KFD") {
         found = true;
@@ -620,6 +637,9 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     if (found) printf("input from \"%s\"", xml_name);
   }
   printf("\n");
+
+  // Disable HIP activity if HSA activity was set
+  if (trace_hsa_activity == true) trace_hip_activity = false;
 
   // Enable rpcTX callbacks
   if (trace_roctx) {
@@ -658,6 +678,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     printf(")\n");
   }
 
+  // Enable HSA GPU activity
   if (trace_hsa_activity) {
     hsa_async_copy_file_handle = open_output_file(output_prefix, "async_copy_trace.txt");
 
@@ -675,7 +696,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
   }
 
   // Enable HIP API callbacks/activity
-  if (trace_hip) {
+  if (trace_hip_api || trace_hip_activity) {
     hip_api_file_handle = open_output_file(output_prefix, "hip_api_trace.txt");
     hcc_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
 
@@ -687,9 +708,13 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     properties.buffer_size = 0x80000;
     properties.buffer_callback_fun = hcc_activity_callback;
     ROCTRACER_CALL(roctracer_open_pool(&properties));
-    ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
-    ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
-    ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
+    if (trace_hip_api) {
+      ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
+      ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
+    }
+    if (trace_hip_activity) {
+      ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
+    }
   }
 
   const char* ctrl_str = getenv("ROCP_CTRL_RATE");
@@ -775,7 +800,7 @@ void tool_unload(bool destruct) {
 
     close_output_file(hsa_async_copy_file_handle);
   }
-  if (trace_hip) {
+  if (trace_hip_api || trace_hip_activity) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
     ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
     ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
