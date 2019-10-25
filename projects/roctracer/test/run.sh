@@ -25,12 +25,18 @@
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and oher libraries
-export LD_LIBRARY_PATH=$PWD
+export LD_LIBRARY_PATH=$PWD:/opt/rocm/hip/lib
 
 # test filter input
 test_filter=-1
 if [ -n "$1" ] ; then
   test_filter=$1
+fi
+
+# debugger
+debugger=""
+if [ -n "$2" ] ; then
+  debugger=$2
 fi
 
 # test check routin
@@ -46,7 +52,7 @@ eval_test() {
   if [ $test_filter = -1  -o $test_filter = $test_number ] ; then
     echo "$label: \"$cmdline\""
     test_runnum=$((test_runnum + 1))
-    eval "$cmdline"
+    eval "$debugger $cmdline"
     if [ $? != 0 ] ; then
       echo "$label: FAILED"
       test_status=$(($test_status + 1))

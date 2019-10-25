@@ -291,6 +291,8 @@ void activity_callback(const char* begin, const char* end, void* arg) {
 // Init tracing routine
 void init_tracing() {
   std::cout << "# INIT #############################" << std::endl << std::flush;
+  // roctracer properties
+  roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, NULL);
   // Allocating tracing pool
   roctracer_properties_t properties{};
   properties.buffer_size = 0x1000;
@@ -320,6 +322,7 @@ void stop_tracing() {
   std::cout << "# STOP  #############################" << std::endl << std::flush;
 }
 #else
+void init_tracing() {}
 void start_tracing() {}
 void stop_tracing() {}
 #endif

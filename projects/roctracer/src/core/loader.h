@@ -172,11 +172,10 @@ typedef BaseLoader<RocTxApi> RocTxLoader;
 #define LOADER_INSTANTIATE() \
   template<class T> typename roctracer::BaseLoader<T>::mutex_t roctracer::BaseLoader<T>::mutex_; \
   template<class T> std::atomic<roctracer::BaseLoader<T>*> roctracer::BaseLoader<T>::instance_{}; \
-  template<class T> const bool roctracer::BaseLoader<T>::strong_ld_check_ = false;
+  template<class T> const bool roctracer::BaseLoader<T>::strong_ld_check_ = true; \
   template<> const char* roctracer::HipLoader::lib_name_ = "libhip_hcc.so"; \
   template<> const char* roctracer::HccLoader::lib_name_ = "libmcwamp_hsa.so"; \
   template<> const char* roctracer::KfdLoader::lib_name_ = "libkfdwrapper64.so"; \
-  template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so"; \
-  template<> const bool roctracer::RocTxLoader::strong_ld_check_ = false;
+  template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so";
 
 #endif // SRC_CORE_LOADER_H_

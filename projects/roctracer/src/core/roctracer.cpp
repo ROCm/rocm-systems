@@ -324,10 +324,12 @@ void* HIP_SyncActivityCallback(
     if ((data == NULL) && (pool != NULL)) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback enter: pool is not NULL");
     // Allocating a record if NULL passed
     if (record == NULL) {
+      if (data != NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback enter: record is NULL");
       record_pair_stack.push({});
       auto& top = record_pair_stack.top();
       record = &(top.record);
       data_ptr = &(top.data.hip);
+      data = data_ptr;
     }
 
     // Filing record info

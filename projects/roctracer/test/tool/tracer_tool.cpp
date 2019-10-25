@@ -680,6 +680,8 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     hcc_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
 
     fprintf(stdout, "    HIP-trace()\n"); fflush(stdout);
+    // roctracer properties
+    roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, (void*)mark_api_callback);
     // Allocating tracing pool
     roctracer_properties_t properties{};
     properties.buffer_size = 0x80000;
@@ -688,8 +690,6 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
     ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
     ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
-
-    roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, (void*)mark_api_callback);
   }
 
   const char* ctrl_str = getenv("ROCP_CTRL_RATE");
