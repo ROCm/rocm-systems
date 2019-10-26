@@ -110,7 +110,7 @@ install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_roctx.h DESTINATION in
 install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-link DESTINATION ../lib RENAME ${ROCTX_LIBRARY}.so )
 
 ## kfdwrapper
-install ( TARGETS "kfdwrapper64" LIBRARY DESTINATION lib )
+#install ( TARGETS "kfdwrapper64" LIBRARY DESTINATION lib )
 
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" )
