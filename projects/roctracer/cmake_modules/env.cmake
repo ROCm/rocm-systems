@@ -43,7 +43,7 @@ if ( DEFINED ENV{CMAKE_DEBUG_TRACE} )
   add_definitions ( -DDEBUG_TRACE=1 )
 endif()
 
-## Enable KFD wrapper
+## Enable HIP_VDI mode
 if ( DEFINED HIP_VDI )
   add_definitions ( -DHIP_VDI=${HIP_VDI} )
 else()
