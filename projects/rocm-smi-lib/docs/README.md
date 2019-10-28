@@ -22,12 +22,12 @@ In order to build the latest documentation, the following are required:
 The source code for ROCm SMI is available on [Github](https://github.com/RadeonOpenCompute/rocm_smi_lib).
 
 After the ROCm SMI library git repository has been cloned to a local Linux machine, building the library is achieved by following the typical CMake build sequence. Specifically,
-##### ```$ mk -p build```
+##### ```$ mkdir -p build```
 ##### ```$ cd build```
 ##### ```$ cmake <location of root of ROCm SMI library CMakeLists.txt>```
 ##### ```$ make```
 ##### ```# Install library file and header; default location is /opt/rocm```
-##### ```$ make install```
+##### ```$ sudo make install```
 The built library will appear in the `build` folder.
 
 #### Building the Documentation
@@ -41,11 +41,10 @@ The reference manual, `refman.pdf` will be in the `latex` directory upon a succe
 In order to verify the build and capability of ROCm SMI on your system and to see an example of how ROCm SMI can be used, you may build and run the tests that are available in the repo. To build the tests, follow these steps:
 
 ##### ```# Set environment variables used in CMakeLists.txt file```
-##### ```$ ROCM_DIR=<location of ROCm SMI library>```
-
+##### ```$ ROCM_DIR=<parent dir. to lib/ and inc/, containing RSMI library and header>```
 ##### ```$ mkdir <location for test build>```
 ##### ```$ cd <location for test build>```
-##### ```$ cmake -DROCM_DIR=<location of ROCM SMI library .so> <ROCm SMI source root>/tests/rocm_smi_test```
+##### ```$ cmake -DROCM_DIR=$ROCM_DIR <ROCm SMI source root>/tests/rocm_smi_test```
 ##### ```$ make
 
 To run the test, execute the program `rsmitst` that is built from the steps above.
