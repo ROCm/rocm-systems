@@ -496,6 +496,8 @@ struct rocprofiler_hsa_callback_data_t {
       const void* packet;                             // submitted to GPU packet
       const char* kernel_name;                        // kernel name, not NULL if dispatch
       hsa_queue_t* queue;                             // HSA queue the kernel was submitted to
+      uint32_t device_type;                           // type of device the packed is submitted to
+      uint32_t device_id;                             // id of device the packed is submitted to
     } submit;
   };
 };

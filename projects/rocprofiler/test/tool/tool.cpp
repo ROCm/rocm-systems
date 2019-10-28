@@ -859,6 +859,8 @@ hsa_status_t hsa_unified_callback(
       printf("  packet %p\n", data->submit.packet);
       if (data->submit.kernel_name != NULL) {
         printf("  submit kernel \"%s\"\n", data->submit.kernel_name);
+        printf("  device type = %u\n", data->submit.device_type);
+        printf("  device id = %u\n", data->submit.device_id);
       }
       break;
     default:

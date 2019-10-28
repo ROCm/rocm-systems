@@ -139,6 +139,8 @@ class InterceptQueue {
         data.submit.kernel_name =
           (GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) ? GetKernelName(dispatch_packet) : NULL;
         data.submit.queue = obj->queue_;
+        data.submit.device_type = obj->agent_info_->dev_type;
+        data.submit.device_id = obj->agent_info_->dev_index;
         submit_callback_fun_(ROCPROFILER_HSA_CB_ID_SUBMIT, &data, submit_callback_arg_);
       }
     }
