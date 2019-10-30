@@ -28,18 +28,6 @@ LICENSE = \
 '*/\n'
 
 HEADER = \
-'#ifndef INC_ROCTRACER_KFD_H_\n' + \
-'#define INC_ROCTRACER_KFD_H_\n' + \
-'#include <iostream>\n' + \
-'#include <mutex>\n' + \
-'\n' + \
-'#include <hsa.h>\n' + \
-'\n' + \
-'#include "roctracer.h"\n' + \
-'#include "hsakmt.h"\n' + \
-'\n' + \
-'namespace roctracer {\n' + \
-'namespace kfd_support {\n' + \
 'template <typename T>\n' + \
 'struct output_streamer {\n' + \
 '  inline static std::ostream& put(std::ostream& out, const T& v) { return out; }\n' + \
@@ -87,18 +75,10 @@ HEADER = \
 '};\n' + \
 '\n'
 
-FOOTER = \
-'// end ostream ops for KFD\n' + \
-'};};\n' + \
-'\n' + \
-'#include <inc/kfd_prof_str.h>\n' + \
-'\n' + \
-'#endif // INC_ROCTRACER_KFD_H_\n' + \
-' \n'
-
 rx_dict = {
     'struct_name': re.compile(r'typedef (?P<struct_name>.*)\n'),
     'field_type': re.compile(r'\s+name\[type\]=(?P<field_type>.*)\n'),
+    'field_rawtype': re.compile(r'\s+name\[raw_type\]=(?P<field_rawtype>.*)\n'),
     'field_name': re.compile(r'\s+name\[name\]=(?P<field_name>.*)\n'),
     'array_size_val': re.compile(r'\s+name\[array_size\]=(?P<array_size_val>.*)\n'),
 }
@@ -112,13 +92,23 @@ def _parse_line(line):
     return None, None
 
 def parse_file(infilepath,outfilepath):
-    f= open(outfilepath,"w+")
+    f = open(outfilepath,"w+")
     f.write("// automatically generated\n")
     f.write(LICENSE)
-    f.write("/////////////////////////////////////////////////////////////////////////////")
     f.write("\n")
+    HEADER_S = \
+      '#ifndef INC_KFD_OSTREAM_OPS_H_\n' + \
+      '#define INC_KFD_OSTREAM_OPS_H_\n' + \
+      '#include <iostream>\n' + \
+      '\n' + \
+      '#include "roctracer.h"\n' + \
+      '#include "hsakmt.h"\n'
+    f.write(HEADER_S)
+    f.write('\n')
+    f.write('namespace roctracer {\n') 
+    f.write('namespace kfd_support {\n')
+    f.write('// begin ostream ops for KFD \n')
     f.write(HEADER)
-    f.write("// begin ostream ops for KFD\n")
 
     with open(infilepath, 'r') as file_object:
         line = file_object.readline()
@@ -127,6 +117,9 @@ def parse_file(infilepath,outfilepath):
         while line:
             key, match = _parse_line(line)
             if key == 'struct_name':
+                field_name=""
+                field_type=""
+                field_rawtype=""
                 if tmp_str!="":
                     f.write(tmp_str+"\n")
                     tmp_str=""
@@ -146,6 +139,10 @@ def parse_file(infilepath,outfilepath):
                 field_type = match.group('field_type')
                 if field_type == "":
                     field_type="notype"
+            if flag==1 and key == 'field_rawtype':
+                field_rawtype = match.group('field_rawtype')
+                if field_rawtype == "":
+                    field_rawtype="notype"
             if flag==1 and key == 'array_size_val':
                 array_size_val = match.group('array_size_val')
                 tmp_str=tmp_str.replace(field_type,field_type+"["+array_size_val+"]")
@@ -158,10 +155,11 @@ def parse_file(infilepath,outfilepath):
                 field_name = match.group('field_name')
                 if field_name == "":
                     field_name="noname"
+                if field_name!="" and field_type=="":
+                    field_type=field_rawtype
                 if (field_name!="noname" and field_type!="notype" and not re.search("void",field_type)) or args['debug'] :
-                    tmp_str="    roctracer::kfd_support::output_streamer<"+field_type+">::put(out,v."+field_name+")"+";";
+		    tmp_str="    roctracer::kfd_support::output_streamer<"+field_type+">::put(out,v."+field_name+")"+";";
                     tmp_str=tmp_str.replace('<::', '<')
-                    #f.write(tmp_str+"\n")
             line = file_object.readline()
     if tmp_str!="":
         f.write(tmp_str+"\n")
@@ -170,9 +168,19 @@ def parse_file(infilepath,outfilepath):
         f.write("    return out;\n")
         f.write("}\n")
         f.write("};\n")
+    FOOTER = \
+    '// end ostream ops for KFD \n' 
+    FOOTER += '};};\n' + \
+       '\n' + \
+       '#endif // INC_KFD_OSTREAM_OPS_H_\n' + \
+       ' \n'
+    FOOTER2 = '\n\n' + \
+        '#endif // INC_BASIC_OSTREAM_OPS_H_\n' + \
+        ' \n'
     f.write(FOOTER)
     f.close()
     print ("File "+outfilepath+" has been generated.")
+
     return 
 
 def gen_cppheader_lut(infilepath):
@@ -182,26 +190,24 @@ def gen_cppheader_lut(infilepath):
         print(e)
         sys.exit(1)
 
-    f= open("/tmp/cppheader_lut.txt","w+")
+    f= open("cppheader_lut.txt","w+")
     for c in cppHeader.classes:
         f.write("typedef %s\n"%(c))
         for l in range(len(cppHeader.classes[c]["properties"]["public"])):
             for key in cppHeader.classes[c]["properties"]["public"][l].keys():
                 f.write("	name[%s]=%s\n"%(key,cppHeader.classes[c]["properties"]["public"][l][key]))
     f.close()
-    #print ("File /tmp/cppheader_lut.txt has been generated.")
     return
-
 
 parser = argparse.ArgumentParser(description='genOstreamOps.py: generates ostream operators for all typedefs in provided input file.')
 parser.add_argument('-debug','--debug', help='Debug option for features not supported by CppHeaderParser', action='store_true')
 requiredNamed=parser.add_argument_group('Required arguments')
 requiredNamed.add_argument('-in','--in', help='Header file to be parsed', required=True)
 requiredNamed.add_argument('-out','--out', help='Output file with ostream operators', required=True)
+
 args = vars(parser.parse_args())
 
 if __name__ == '__main__':
     gen_cppheader_lut(args['in'])
-    parse_file("/tmp/cppheader_lut.txt",args['out'])
-
+    parse_file("cppheader_lut.txt",args['out'])
 
