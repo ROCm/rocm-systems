@@ -30,7 +30,7 @@ THE SOFTWARE.
 #include "roctracer.h"
 #include "hsakmt.h"
 #include "inc/kfd_ostream_ops.h"
-#include <inc/kfd_prof_str.h>
+#include "inc/kfd_prof_str.h"
 
 #endif // INC_ROCTRACER_KFD_H_
  
