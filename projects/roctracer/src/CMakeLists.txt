@@ -18,7 +18,7 @@ set ( KFD_LIB "kfdwrapper64" )
 set ( KFD_LIB_SRC
   ${LIB_DIR}/kfd/kfd_wrapper.cpp
 )
-execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/genOstreamOps.py -in ${HSA_KMT_INC_PATH}/hsakmttypes.h -out ${ROOT_DIR}/inc/roctracer_kfd.h" )
+execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/gen_ostream_ops.py -in ${HSA_KMT_INC_PATH}/hsakmttypes.h -out ${ROOT_DIR}/inc/kfd_ostream_ops.h" )
 add_library ( ${KFD_LIB} SHARED ${KFD_LIB_SRC} )
 target_include_directories ( ${KFD_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HSA_KMT_INC_PATH} )
 target_link_libraries( ${KFD_LIB} PRIVATE c stdc++ )
