@@ -25,8 +25,6 @@ THE SOFTWARE.
 #define INC_ROCTRACER_KFD_H_
 #include <iostream>
 
-//#include <hsa.h>
-
 #include "roctracer.h"
 #include "hsakmt.h"
 #include "inc/kfd_ostream_ops.h"
