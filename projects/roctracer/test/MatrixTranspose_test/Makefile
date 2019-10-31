@@ -1,7 +1,7 @@
 ROOT_PATH = ../..
 LIB_PATH  = $(ROOT_PATH)/build
 ROC_LIBS  = -L$(LIB_PATH) -lroctracer64 -lroctx64
-HSA_KMT_INC_PATH = /opt/rocm/include
+HSA_KMT_INC_PATH ?= /opt/rocm/include
 export LD_LIBRARY_PATH=$(LIB_PATH)
 ITERATIONS ?= 100
 
