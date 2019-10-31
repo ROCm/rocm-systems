@@ -33,7 +33,6 @@ THE SOFTWARE.
 
 // kfd header file
 #include <inc/roctracer_kfd.h>
-#include <inc/kfd_prof_str.h>
 
 #ifndef ITERATIONS
 # define ITERATIONS 100
