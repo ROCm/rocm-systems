@@ -89,6 +89,7 @@ void TestFanReadWrite::Run(void) {
   int64_t orig_speed;
   int64_t new_speed;
   int64_t cur_speed;
+  uint64_t max_speed;
 
   TestBase::Run();
 
@@ -107,7 +108,17 @@ void TestFanReadWrite::Run(void) {
       return;
     }
 
+    ret = rsmi_dev_fan_speed_max_get(dv_ind, 0, &max_speed);
+    CHK_ERR_ASRT(ret)
+
     new_speed = 1.1 * orig_speed;
+
+    if (new_speed > static_cast<int64_t>(max_speed)) {
+      std::cout <<
+      "***System fan speed value is close to max. Will not adjust upward." <<
+                                                                     std::endl;
+      continue;
+    }
 
     IF_VERB(STANDARD) {
       std::cout << "Setting fan speed to " << new_speed << std::endl;

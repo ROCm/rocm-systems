@@ -2636,6 +2636,12 @@ rsmi_dev_xgmi_error_reset(uint32_t dv_ind);
  * iterator handle to the caller-provided memory pointed to by @p handle. This
  * handle can be used to iterate through all the supported functions.
  *
+ * Note that although this function takes in @p dv_ind as an argument,
+ * ::rsmi_dev_supported_func_iterator_open itself will not be among the
+ * functions listed as supported. This is because
+ * ::rsmi_dev_supported_func_iterator_open does not depend on hardware or
+ * driver support and should always be supported.
+ *
  * @param[in] dv_ind a device index of device for which support information is
  * requested
  *

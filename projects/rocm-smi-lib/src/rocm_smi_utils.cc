@@ -140,5 +140,17 @@ int ReadSysfsStr(std::string path, std::string *retStr) {
   return ret;
 }
 
+bool IsInteger(const std::string & n_str)
+{
+   if(n_str.empty() || ((!isdigit(n_str[0])) && (n_str[0] != '-')
+                                                      && (n_str[0] != '+'))) {
+     return false;
+   }
+
+   char * tmp;
+   strtol(n_str.c_str(), &tmp, 10);
+
+   return (*tmp == 0);
+}
 }  // namespace smi
 }  // namespace amd
