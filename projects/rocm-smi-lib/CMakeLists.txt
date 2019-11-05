@@ -77,7 +77,11 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
                  "ROCm System Management Interface library")
 endif()
 
-set(CPACK_PACKAGE_FILE_NAME "rocm_smi_lib64-${PKG_VERSION_STR}")
+if (NOT ROCM_SMI_PACKAGE)
+   set(ROCM_SMI_PACKAGE rocm_smi_lib64)
+endif()
+
+set(CPACK_PACKAGE_FILE_NAME "${ROCM_SMI_PACKAGE}-${PKG_VERSION_STR}")
 ## Verbose output.
 set(CMAKE_VERBOSE_MAKEFILE on)
 

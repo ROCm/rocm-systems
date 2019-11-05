@@ -132,7 +132,7 @@ function(get_package_version_number DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
     if (DEFINED ENV{ROCM_BUILD_ID})
         set(VERSION_ID $ENV{ROCM_BUILD_ID})
     else()
-        set(VERSION_ID "local_build-0")
+        set(VERSION_ID "local-build-0")
     endif()
 
     set(PKG_VERSION_STR "${PKG_VERSION_STR}.${VERSION_ID}")
