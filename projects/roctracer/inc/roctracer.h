@@ -137,7 +137,7 @@ roctracer_status_t roctracer_disable_callback();
 typedef activity_record_t roctracer_record_t;
 
 // Return next record
-static inline int roctracer_next_record(
+static inline roctracer_status_t roctracer_next_record(
     const activity_record_t* record,                      // [in] record ptr
     const activity_record_t** next)                       // [out] next record ptr
 {
