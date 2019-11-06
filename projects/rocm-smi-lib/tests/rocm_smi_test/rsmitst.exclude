@@ -35,5 +35,6 @@ $BLACKLIST_ALL_ASICS\
 FILTER[arcturus]=\
 $BLACKLIST_ALL_ASICS\
 "rsmitstReadOnly.TestFrequenciesRead:"\
+"rsmitstReadWrite.TestFrequenciesReadWrite:"\
 "rsmitstReadOnly.TestProcInfoRead"
 
