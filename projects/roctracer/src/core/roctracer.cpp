@@ -313,22 +313,23 @@ void* HIP_SyncActivityCallback(
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
 
   int phase = ACTIVITY_API_PHASE_ENTER;
-  if (data != NULL) {
+  if (record != NULL) {
+    if (data == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback: data is NULL");
     phase = data->phase;
   } else if (pool != NULL) {
     phase = ACTIVITY_API_PHASE_EXIT; 
   }
 
   if (phase == ACTIVITY_API_PHASE_ENTER) {
-    if ((data == NULL) && (pool != NULL)) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback enter: pool is not NULL");
     // Allocating a record if NULL passed
     if (record == NULL) {
       if (data != NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback enter: record is NULL");
       record_pair_stack.push({});
       auto& top = record_pair_stack.top();
       record = &(top.record);
-      data_ptr = &(top.data.hip);
-      data = data_ptr;
+      data = &(top.data.hip);
+      data_ptr = const_cast<hip_api_data_t*>(data);
+      data_ptr->phase = phase;
     }
 
     // Filing record info
@@ -340,7 +341,7 @@ void* HIP_SyncActivityCallback(
     uint64_t correlation_id = data->correlation_id;
     if (correlation_id == 0) {
       correlation_id = GlobalCounter::Increment();
-      const_cast<hip_api_data_t*>(data)->correlation_id = correlation_id;
+      data_ptr->correlation_id = correlation_id;
     }
     record->correlation_id = correlation_id;
 
@@ -352,11 +353,10 @@ void* HIP_SyncActivityCallback(
     if (pool == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback exit: pool is NULL");
 
     // Getting record of stacked
-    if (!record_pair_stack.empty()) {
+    if (record == NULL) {
+      if (record_pair_stack.empty())  EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback exit: record stack is empty");
       auto& top  = record_pair_stack.top();
       record = &(top.record);
-      data = &(top.data.hip);
-      record_pair_stack.pop();
     }
 
     // Filing record info
@@ -375,6 +375,9 @@ void* HIP_SyncActivityCallback(
 
     // Writing record to the buffer
     pool->Write(*record);
+
+    // popping the record entry
+    if (!record_pair_stack.empty()) record_pair_stack.pop();
 
     // Clearing correlatin ID
     correlation_id_tls = 0;
