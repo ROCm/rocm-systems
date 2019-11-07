@@ -408,6 +408,12 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
     return errno_to_rsmi_status(ret);
   }
 
+  if (!amd::smi::IsInteger(val_str)) {
+    std::cerr << "Expected integer value, but got \"" << val_str << "\"" <<
+                                                                    std::endl;
+  }
+  assert(amd::smi::IsInteger(val_str));
+
   *val = std::stoul(val_str);
 
   return RSMI_STATUS_SUCCESS;

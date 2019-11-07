@@ -69,6 +69,8 @@ int isRegularFile(std::string fname, bool *is_reg);
 int ReadSysfsStr(std::string path, std::string *retStr);
 int WriteSysfsStr(std::string path, std::string val);
 
+bool IsInteger(const std::string & n_str);
+
 struct pthread_wrap {
  public:
         explicit pthread_wrap(pthread_mutex_t &p_mut) : mutex_(p_mut) {}
