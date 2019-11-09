@@ -658,10 +658,10 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   uint64_t workgroup_size = packet->workgroup_size_x * packet->workgroup_size_y * packet->workgroup_size_z;
   if (workgroup_size > UINT32_MAX) abort();
   kernel_properties_ptr->workgroup_size = (uint32_t)workgroup_size;
-  kernel_properties_ptr->lds_size = packet->group_segment_size;
+  kernel_properties_ptr->lds_size = AMD_HSA_BITS_GET(kernel_code->compute_pgm_rsrc2, AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE); // packet->group_segment_size;
   kernel_properties_ptr->scratch_size = packet->private_segment_size;
-  kernel_properties_ptr->vgpr_count = kernel_code->reserved_vgpr_count;
-  kernel_properties_ptr->sgpr_count = kernel_code->reserved_sgpr_count;
+  kernel_properties_ptr->vgpr_count = AMD_HSA_BITS_GET(kernel_code->compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT);
+  kernel_properties_ptr->sgpr_count = AMD_HSA_BITS_GET(kernel_code->compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT);
   kernel_properties_ptr->fbarrier_count = kernel_code->workgroup_fbarrier_count;
   kernel_properties_ptr->signal = callback_data->completion_signal;
 
