@@ -50,11 +50,6 @@ else()
   set ( HIP_VDI 0 )
 endif()
 
-## Enable KFD wrapper
-if ( DEFINED KFD_WRAPPER )
-  add_definitions ( -DKFD_WRAPPER=${KFD_WRAPPER} )
-endif()
-
 ## Enable HIP/HCC local build
 if ( DEFINED LOCAL_BUILD )
   add_definitions ( -DLOCAL_BUILD=${LOCAL_BUILD} )
@@ -136,6 +131,5 @@ message ( "-------------HCC-Inc: ${HCC_INC_DIR}" )
 message ( "-------------HIP-Inc: ${HIP_INC_DIR}" )
 message ( "-------------KFD-Inc: ${HSA_KMT_INC_PATH}" )
 message ( "-------------HIP-VDI: ${HIP_VDI}" )
-message ( "---------KFD_WRAPPER: ${KFD_WRAPPER}" )
 message ( "-----CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}" )
 message ( "---CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}" )

@@ -37,9 +37,7 @@ THE SOFTWARE.
 #include <inc/roctracer_hsa.h>
 #include <inc/roctracer_hip.h>
 #include <inc/roctracer_hcc.h>
-#ifdef KFD_WRAPPER
 #include <inc/roctracer_kfd.h>
-#endif
 #include <inc/ext/hsa_rt_utils.hpp>
 #include <src/core/loader.h>
 #include <src/core/trace_buffer.h>
@@ -437,7 +435,6 @@ void hcc_activity_callback(const char* begin, const char* end, void* arg) {
 // KFD API tracing
 
 // KFD API callback function
-#ifdef KFD_WRAPPER
 void kfd_api_callback(
     uint32_t domain,
     uint32_t cid,
@@ -455,7 +452,6 @@ void kfd_api_callback(
     fprintf(kfd_api_file_handle, "%s\n", os.str().c_str());
   }
 }
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -738,7 +734,6 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     err = pthread_create(&thread, &attr, control_thr_fun, NULL);
   }
 
-#ifdef KFD_WRAPPER
   // Enable KFD API callbacks/activity
   if (trace_kfd) {
     kfd_api_file_handle = open_output_file(output_prefix, "kfd_api_trace.txt");
@@ -759,7 +754,6 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     }
     printf(")\n");
   }
-#endif
 
   if (onload_debug) { printf("TOOL OnLoad end\n"); fflush(stdout); }
   return roctracer_load(table, runtime_version, failed_tool_count, failed_tool_names);

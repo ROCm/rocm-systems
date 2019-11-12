@@ -32,9 +32,7 @@ THE SOFTWARE.
 #include <inc/roctx.h>
 
 // kfd header file
-#ifdef KFD_WRAPPER
 #include <inc/roctracer_kfd.h>
-#endif
 
 #ifndef ITERATIONS
 # define ITERATIONS 101
@@ -208,7 +206,6 @@ void api_callback(
     fprintf(stdout, "ROCTX: \"%s\"\n", data->args.message);
     return;
   }
-#ifdef KFD_WRAPPER
   if (domain == ACTIVITY_DOMAIN_KFD_API) {
     const kfd_api_data_t* data = reinterpret_cast<const kfd_api_data_t*>(callback_data);
     fprintf(stdout, "KFD: <%s id(%u)\tcorrelation_id(%lu) %s> \n",
@@ -218,7 +215,6 @@ void api_callback(
         (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
     return;
   }
-#endif
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
   fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
     roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
