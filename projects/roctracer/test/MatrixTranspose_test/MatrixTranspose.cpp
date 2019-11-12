@@ -35,7 +35,7 @@ THE SOFTWARE.
 #include <inc/roctracer_kfd.h>
 
 #ifndef ITERATIONS
-# define ITERATIONS 100
+# define ITERATIONS 101
 #endif
 #define WIDTH 1024
 
@@ -167,9 +167,9 @@ int main() {
     free(Matrix);
     free(TransposeMatrix);
     free(cpuTransposeMatrix);
+    }
 
     stop_tracing();
-    }
 
     return errors;
 }
@@ -285,7 +285,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
         record->device_id,
         record->queue_id
       );
-      if (record->op == hc::HSA_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
+      if (record->op == HIP_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
     } else if (record->domain == ACTIVITY_DOMAIN_EXT_API) {
       fprintf(stdout, " external_id(%lu)",
         record->external_id
@@ -302,31 +302,39 @@ void activity_callback(const char* begin, const char* end, void* arg) {
 
 // Init tracing routine
 void init_tracing() {
-  std::cout << "# START #############################" << std::endl << std::flush;
+  std::cout << "# INIT #############################" << std::endl << std::flush;
+  // roctracer properties
+  roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, NULL);
   // Allocating tracing pool
   roctracer_properties_t properties{};
   properties.buffer_size = 0x1000;
   properties.buffer_callback_fun = activity_callback;
   ROCTRACER_CALL(roctracer_open_pool(&properties));
+  // Enable HIP API callbacks
+  ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, api_callback, NULL));
+  // Enable HIP activity tracing
+  ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
+  ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
 }
 
 // Start tracing routine
 void start_tracing() {
-  std::cout << "# START #############################" << std::endl << std::flush;
-  // Enable HIP API callbacks
-  ROCTRACER_CALL(roctracer_enable_callback(api_callback, NULL));
-  // Enable HIP activity tracing
-  ROCTRACER_CALL(roctracer_enable_activity());
+  std::cout << "# START (" << iterations << ") #############################" << std::endl << std::flush;
+  // Start
+  if ((iterations & 1) == 1) roctracer_start();
+  else roctracer_stop();
 }
 
 // Stop tracing routine
 void stop_tracing() {
-  ROCTRACER_CALL(roctracer_disable_callback());
-  ROCTRACER_CALL(roctracer_disable_activity());
+  ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
+  ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
+  ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
   ROCTRACER_CALL(roctracer_flush_activity());
   std::cout << "# STOP  #############################" << std::endl << std::flush;
 }
 #else
+void init_tracing() {}
 void start_tracing() {}
 void stop_tracing() {}
 #endif

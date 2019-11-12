@@ -36,6 +36,10 @@ THE SOFTWARE.
 #define THREADS_PER_BLOCK_Y 4
 #define THREADS_PER_BLOCK_Z 1
 
+// Mark API
+extern "C"
+void roctracer_mark(const char* str);
+
 // Device (Kernel) function, it must be void
 __global__ void matrixTranspose(float* out, float* in, const int width) {
     int x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
@@ -82,6 +86,10 @@ int main() {
     hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
     hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
 
+    uint32_t iterations = 100;
+    while (iterations-- > 0) {
+    std::cout << "## Iteration (" << iterations << ") #################" << std::endl;
+
     // Memory transfer from host to device
     hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
 
@@ -110,6 +118,8 @@ int main() {
         printf("FAILED: %d errors\n", errors);
     } else {
         printf("PASSED!\n");
+    }
+
     }
 
     // free the resources on device side

@@ -31,6 +31,7 @@ typedef enum {
   ACTIVITY_DOMAIN_HSA_OPS = 1,                    // HSA async activity domain
   ACTIVITY_DOMAIN_HCC_OPS = 2,                    // HCC async activity domain
   ACTIVITY_DOMAIN_HIP_API = 3,                    // HIP API domain
+  ACTIVITY_DOMAIN_HIP_VDI = ACTIVITY_DOMAIN_HCC_OPS, // HIP VDI domain
   ACTIVITY_DOMAIN_KFD_API = 4,                    // KFD API domain
   ACTIVITY_DOMAIN_EXT_API = 5,                    // External ID domain
   ACTIVITY_DOMAIN_ROCTX   = 6,                    // ROCTX domain
@@ -83,7 +84,7 @@ struct activity_record_t {
 };
 
 // Activity sync calback type
-typedef activity_record_t* (*activity_sync_callback_t)(uint32_t cid, activity_record_t* record, const void* data, void* arg);
+typedef void* (*activity_sync_callback_t)(uint32_t cid, activity_record_t* record, const void* data, void* arg);
 // Activity async calback type
 typedef void (*activity_id_callback_t)(activity_correlation_id_t id);
 typedef void (*activity_async_callback_t)(uint32_t op, void* record, void* arg);

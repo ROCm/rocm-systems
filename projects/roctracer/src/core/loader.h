@@ -29,12 +29,12 @@ class BaseLoader : public T {
     return f;
   }
 
-  static inline loader_t& Instance(const bool& preload = false) {
+  static inline loader_t& Instance() {
     loader_t* obj = instance_.load(std::memory_order_acquire);
     if (obj == NULL) {
       std::lock_guard<mutex_t> lck(mutex_);
       if (instance_.load(std::memory_order_relaxed) == NULL) {
-        obj = new loader_t(preload);
+        obj = new loader_t();
         instance_.store(obj, std::memory_order_release);
       }
     }
@@ -45,11 +45,11 @@ class BaseLoader : public T {
   static void SetLibName(const char *name) { lib_name_ = name; }
 
   private:
-  BaseLoader(bool preload) {
-    const int flags = (preload) ? RTLD_LAZY : RTLD_LAZY|RTLD_NOLOAD;
+  BaseLoader() {
+    const int flags = RTLD_LAZY;
     handle_ = dlopen(lib_name_, flags);
-    if ((handle_ == NULL) && (strong_ld_check_)) {
-      fprintf(stderr, "roctracer: Loading '%s' failed, preload(%d), %s\n", lib_name_, (int)preload, dlerror());
+    if (handle_ == NULL) {
+      fprintf(stderr, "roctracer: Loading '%s' failed, %s\n", lib_name_, dlerror());
       abort();
     }
     dlerror();
@@ -64,7 +64,6 @@ class BaseLoader : public T {
   static mutex_t mutex_;
   static const char* lib_name_;
   static std::atomic<loader_t*> instance_;
-  static const bool strong_ld_check_;
   void* handle_;
 };
 
@@ -99,26 +98,26 @@ class HipApi {
 };
 
 // HCC runtime library loader class
+#include "inc/roctracer_hcc.h"
 class HccApi {
   public:
   typedef BaseLoader<HccApi> Loader;
 
-  typedef decltype(Kalmar::CLAMP::InitActivityCallback) InitActivityCallback_t;
-  typedef decltype(Kalmar::CLAMP::EnableActivityCallback) EnableActivityCallback_t;
-  typedef decltype(Kalmar::CLAMP::GetCmdName) GetCmdName_t;
-
-  InitActivityCallback_t* InitActivityCallback;
-  EnableActivityCallback_t* EnableActivityCallback;
-  GetCmdName_t* GetCmdName;
+  hipInitAsyncActivityCallback_t* InitActivityCallback;
+  hipEnableAsyncActivityCallback_t* EnableActivityCallback;
+  hipGetOpName_t* GetOpName;
 
   protected:
   void init(Loader* loader) {
-    // Kalmar::CLAMP::InitActivityCallback
-    InitActivityCallback = loader->GetFun<InitActivityCallback_t>("InitActivityCallbackImpl");
-    // Kalmar::CLAMP::EnableActivityIdCallback
-    EnableActivityCallback = loader->GetFun<EnableActivityCallback_t>("EnableActivityCallbackImpl");
-    // Kalmar::CLAMP::GetCmdName
-    GetCmdName = loader->GetFun<GetCmdName_t>("GetCmdNameImpl");
+#if HIP_VDI
+    InitActivityCallback = loader->GetFun<hipInitAsyncActivityCallback_t>("InitActivityCallback");
+    EnableActivityCallback = loader->GetFun<hipEnableAsyncActivityCallback_t>("EnableActivityCallback");
+    GetOpName = loader->GetFun<hipGetOpName_t>("GetCmdName");
+#else
+    InitActivityCallback = loader->GetFun<hipInitAsyncActivityCallback_t>("InitActivityCallbackImpl");
+    EnableActivityCallback = loader->GetFun<hipEnableAsyncActivityCallback_t>("EnableActivityCallbackImpl");
+    GetOpName = loader->GetFun<hipGetOpName_t>("GetCmdNameImpl");
+#endif
   }
 };
 
@@ -141,20 +140,24 @@ class KfdApi {
 };
 
 // rocTX runtime library loader class
+#include "inc/roctracer_roctx.h"
 class RocTxApi {
   public:
   typedef BaseLoader<RocTxApi> Loader;
 
-  typedef bool (RegisterApiCallback_t)(uint32_t op, void* callback, void* arg);
-  typedef bool (RemoveApiCallback_t)(uint32_t op);
+  typedef decltype(RegisterApiCallback) RegisterApiCallback_t;
+  typedef decltype(RemoveApiCallback) RemoveApiCallback_t;
+  typedef decltype(RangeStackIterate) RangeStackIterate_t;
 
   RegisterApiCallback_t* RegisterApiCallback;
   RemoveApiCallback_t* RemoveApiCallback;
+  RangeStackIterate_t* RangeStackIterate;
 
   protected:
   void init(Loader* loader) {
     RegisterApiCallback = loader->GetFun<RegisterApiCallback_t>("RegisterApiCallback");
     RemoveApiCallback = loader->GetFun<RemoveApiCallback_t>("RemoveApiCallback");
+    RangeStackIterate = loader->GetFun<RangeStackIterate_t>("RangeStackIterate");
   }
 };
 
@@ -168,11 +171,9 @@ typedef BaseLoader<RocTxApi> RocTxLoader;
 #define LOADER_INSTANTIATE() \
   template<class T> typename roctracer::BaseLoader<T>::mutex_t roctracer::BaseLoader<T>::mutex_; \
   template<class T> std::atomic<roctracer::BaseLoader<T>*> roctracer::BaseLoader<T>::instance_{}; \
-  template<class T> const bool roctracer::BaseLoader<T>::strong_ld_check_ = false;
   template<> const char* roctracer::HipLoader::lib_name_ = "libhip_hcc.so"; \
   template<> const char* roctracer::HccLoader::lib_name_ = "libmcwamp_hsa.so"; \
   template<> const char* roctracer::KfdLoader::lib_name_ = "libkfdwrapper64.so"; \
-  template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so"; \
-  template<> const bool roctracer::RocTxLoader::strong_ld_check_ = false;
+  template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so";
 
 #endif // SRC_CORE_LOADER_H_

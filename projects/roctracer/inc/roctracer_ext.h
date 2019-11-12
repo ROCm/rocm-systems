@@ -34,13 +34,25 @@ THE SOFTWARE.
 
 #include "roctracer.h"
 
+typedef void (*roctracer_start_cb_t)();
+typedef void (*roctracer_stop_cb_t)();
+typedef struct {
+  roctracer_start_cb_t start_cb;
+  roctracer_stop_cb_t stop_cb;
+} roctracer_ext_properties_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
 
 ////////////////////////////////////////////////////////////////////////////////
-// Mark API
-void roctracer_mark(const char* str);
+// Application annotatin API
+
+// Tracing start API
+void roctracer_start();
+
+// Tracing stop API
+void roctracer_stop();
 
 ////////////////////////////////////////////////////////////////////////////////
 // External correlation id API

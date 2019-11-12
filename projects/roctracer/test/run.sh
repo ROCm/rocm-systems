@@ -33,6 +33,12 @@ if [ -n "$1" ] ; then
   test_filter=$1
 fi
 
+# debugger
+debugger=""
+if [ -n "$2" ] ; then
+  debugger=$2
+fi
+
 # test check routin
 test_status=0
 test_runnum=0
@@ -46,7 +52,7 @@ eval_test() {
   if [ $test_filter = -1  -o $test_filter = $test_number ] ; then
     echo "$label: \"$cmdline\""
     test_runnum=$((test_runnum + 1))
-    eval "$cmdline"
+    eval "$debugger $cmdline"
     if [ $? != 0 ] ; then
       echo "$label: FAILED"
       test_status=$(($test_status + 1))
@@ -59,7 +65,7 @@ eval_test() {
 
 # Standalone test
 # rocTrecer is used explicitely by test
-eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test"
+eval_test "standalone HIP test" "./test/MatrixTranspose_test"
 
 # Tool test
 # rocTracer/tool is loaded by HSA runtime
@@ -68,6 +74,8 @@ export ROCTRACER_DOMAIN="hip"
 
 # HIP test
 eval_test "tool HIP test" ./test/MatrixTranspose
+# with trace sampling control <delay:length:rate>
+eval_test "tool HIP period test" "ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose"
 
 # HSA test
 export ROCTRACER_DOMAIN="hsa"
