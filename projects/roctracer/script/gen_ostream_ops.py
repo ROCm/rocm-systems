@@ -75,7 +75,7 @@ HEADER = \
 '};\n' + \
 '\n'
 
-structs_done={}
+structs_done = {}
 def process_struct(f,c,cppHeader,nname):
 
     if c not in cppHeader.classes:
@@ -83,42 +83,42 @@ def process_struct(f,c,cppHeader,nname):
     if c in structs_done:
         return
 
-    structs_done[c]=1;
+    structs_done[c] = 1;
     for l in range(len(cppHeader.classes[c]["properties"]["public"])):
-        key='name'
-        name=""
+        key = 'name'
+        name = ""
         if key in cppHeader.classes[c]["properties"]["public"][l]:
            name = cppHeader.classes[c]["properties"]["public"][l][key]
-        key2='type'
-        mtype=""
+        key2 = 'type'
+        mtype = ""
         if key2 in cppHeader.classes[c]["properties"]["public"][l]:
             mtype = cppHeader.classes[c]["properties"]["public"][l][key2]
-        key3='array_size'
-        array_size=""
+        key3 = 'array_size'
+        array_size = ""
         if key3 in cppHeader.classes[c]["properties"]["public"][l]:
-            array_size=cppHeader.classes[c]["properties"]["public"][l][key3]
-        key4='property_of_class'
-        prop=""
+            array_size = cppHeader.classes[c]["properties"]["public"][l][key3]
+        key4 = 'property_of_class'
+        prop = ""
         if  key4 in cppHeader.classes[c]["properties"]["public"][l]:
-            prop=cppHeader.classes[c]["properties"]["public"][l][key4]
+            prop = cppHeader.classes[c]["properties"]["public"][l][key4]
 
-        if mtype!="" and "union" not in mtype:
+        if mtype != "" and "union" not in mtype:
             if array_size == "":
-                str="   roctracer::kfd_support::output_streamer<"+mtype+">::put(out,v."+name+");\n"
+                str = "   roctracer::kfd_support::output_streamer<"+mtype+">::put(out,v."+name+");\n"
             else:
-                str="   roctracer::kfd_support::output_streamer<"+mtype+"["+array_size+"]>::put(out,v."+name+");\n"
+                str = "   roctracer::kfd_support::output_streamer<"+mtype+"["+array_size+"]>::put(out,v."+name+");\n"
 
-            if nname!="" and nname not in str:
+            if nname != "" and nname not in str:
                 #print("injecting ",nname, "in ", str)
-                str=str.replace("v.","v."+nname+".")
+                str = str.replace("v.","v."+nname+".")
             if "void" not in mtype:
                 f.write(str)
         else:
-            nc=prop+"::"
+            nc = prop+"::"
             process_struct(f,nc,cppHeader,name)
-            nc=prop+"::"+mtype+" "
+            nc = prop+"::"+mtype+" "
             process_struct(f,nc,cppHeader,name)
-            nc=c+"::"
+            nc = c+"::"
             process_struct(f,nc,cppHeader,name)
 
 
@@ -129,7 +129,7 @@ def gen_cppheader(infilepath,outfilepath):
         print(e)
         sys.exit(1)
 
-    f= open(outfilepath,"w+")
+    f = open(outfilepath,"w+")
     f.write("// automatically generated\n")
     f.write(LICENSE)
     f.write("\n")
@@ -173,7 +173,7 @@ def gen_cppheader(infilepath,outfilepath):
     return
 
 parser = argparse.ArgumentParser(description='genOstreamOps.py: generates ostream operators for all typedefs in provided input file.')
-requiredNamed=parser.add_argument_group('Required arguments')
+requiredNamed = parser.add_argument_group('Required arguments')
 requiredNamed.add_argument('-in','--in', help='Header file to be parsed', required=True)
 requiredNamed.add_argument('-out','--out', help='Output file with ostream operators', required=True)
 
