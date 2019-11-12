@@ -33,7 +33,7 @@ set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
 add_custom_target( mytest
   COMMAND make -C "${TEST_DIR}/MatrixTranspose"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test"
-  COMMAND HIP_VDI=${HIP_VDI} KFD_WRAPPER=${KFD_WRAPPER} make -C "${TEST_DIR}/MatrixTranspose_test"
+  COMMAND HIP_VDI=${HIP_VDI} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_test"
 )
 
