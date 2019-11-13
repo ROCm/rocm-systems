@@ -314,6 +314,8 @@ void init_tracing() {
   // Enable HIP activity tracing
   ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
   ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
+  // Enable KFD API tracing
+  ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_KFD_API));
 }
 
 // Start tracing routine
@@ -329,6 +331,7 @@ void stop_tracing() {
   ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
   ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
   ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
+  ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_KFD_API));
   ROCTRACER_CALL(roctracer_flush_activity());
   std::cout << "# STOP  #############################" << std::endl << std::flush;
 }

@@ -46,7 +46,7 @@ class BaseLoader : public T {
 
   private:
   BaseLoader() {
-    const int flags = RTLD_LAZY;
+    const int flags = RTLD_LAZY|RTLD_NOLOAD;
     handle_ = dlopen(lib_name_, flags);
     if (handle_ == NULL) {
       fprintf(stderr, "roctracer: Loading '%s' failed, %s\n", lib_name_, dlerror());
