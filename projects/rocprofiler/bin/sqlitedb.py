@@ -83,6 +83,9 @@ class SQLiteDB:
       raise Exception('Index is not unique, table "' + table_name + '"')
     return list(raws[0])
 
+  def table_get_raws(self, table_name):
+    return self._get_raws(table_name)
+
   # dump CSV table
   def dump_csv(self, table_name, file_name):
     if not re.search(r'\.csv$', file_name):

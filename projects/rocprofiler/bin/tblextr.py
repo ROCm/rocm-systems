@@ -41,6 +41,8 @@ GPU_BASE_PID = 5
 max_gpu_id = -1
 START_US = 0
 
+hsa_activity_found = 0
+
 # dependencies dictionary
 dep_dict = {}
 kern_dep_list = []
@@ -251,6 +253,12 @@ api_table_descr = [
   {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'Index':'INTEGER'}
 ]
 def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep_filtr, expl_id):
+  global hsa_activity_found
+  copy_raws = []
+  if (hsa_activity_found): copy_raws = db.table_get_raws('COPY')
+  copy_csv = ''
+  copy_index = 0
+
   file_name = indir + '/' + api_name + '_api_trace.txt'
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
   ptrn_ac = re.compile(r'hsa_amd_memory_async_copy')
@@ -290,6 +298,16 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           dep_from_us_list.append(from_us)
           dep_tid_list.append(int(rec_vals[3]))
           dep_id_list.append(record_id) 
+
+          if len(copy_raws) != 0:
+            copy_data = list(copy_raws[copy_index])
+            args_str = rec_vals[5]
+            args_str = re.sub(r'\(', r'', args_str)
+            args_str = re.sub(r'\).*$', r'', args_str)
+            copy_line = str(copy_data[0]) + ', ' + str(copy_data[1]) + ', ' + rec_vals[4] + ', ' + args_str
+            copy_csv += str(copy_index) + ', ' + copy_line + '\n'
+            copy_index += 1
+
         record_id += 1
       else: fatal(api_name + " bad record: '" + record + "'")
 
@@ -302,6 +320,12 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   dep_dict[dep_pid]['tid'] = dep_tid_list
   dep_dict[dep_pid]['from'] = dep_from_us_list
   if expl_id: dep_dict[dep_pid]['id'] = dep_id_list
+
+  if copy_csv != '':
+    file_name = os.environ['PWD'] + '/results_mcopy.csv'
+    with open(file_name, mode='w') as fd:
+      print("File '" + file_name + "' is generating")
+      fd.write(copy_csv)
 
   return 1
 #############################################################
@@ -423,8 +447,8 @@ else:
 
   ext_trace_found = fill_ext_db('rocTX', db, indir, 'roctx', EXT_PID)
 
-  hsa_trace_found = fill_api_db('HSA', db, indir, 'hsa', HSA_PID, COPY_PID, kern_dep_list, {}, 0)
   hsa_activity_found = fill_copy_db('COPY', db, indir)
+  hsa_trace_found = fill_api_db('HSA', db, indir, 'hsa', HSA_PID, COPY_PID, kern_dep_list, {}, 0)
 
   ops_filtr = fill_ops_db('OPS', db, indir)
   hip_trace_found = fill_api_db('HIP', db, indir, 'hip', HIP_PID, OPS_PID, [], ops_filtr, 1)
