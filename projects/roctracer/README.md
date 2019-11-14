@@ -29,7 +29,7 @@ asyncronous activity records pool support.
  - ROCm-2.3 or higher is required
  - Python2.7 is required.
   The required modules: CppHeaderParser, argparse.
-  To instaLL:
+  To install:
   sudo pip install CppHeaderParser argparse
 
  - CLone development branch of roctracer:
