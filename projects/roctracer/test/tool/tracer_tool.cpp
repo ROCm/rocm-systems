@@ -268,6 +268,9 @@ void hsa_activity_callback(
   index++;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// HIP API tracing
+
 struct hip_api_trace_entry_t {
   uint32_t valid;
   uint32_t type;
@@ -281,9 +284,6 @@ struct hip_api_trace_entry_t {
   const char* name;
   void* ptr;
 };
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////
-// HIP API tracing
 
 void hip_api_flush_cb(hip_api_trace_entry_t* entry);
 roctracer::TraceBuffer<hip_api_trace_entry_t>::flush_prm_t hip_flush_prm[1] = {{0, hip_api_flush_cb}};
