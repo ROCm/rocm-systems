@@ -105,7 +105,7 @@ class Tracker {
     entry->record = record;
 
     // Creating a proxy signal
-    const hsa_signal_value_t signal_value = hsa_api_.hsa_signal_load_relaxed(orig);
+    const hsa_signal_value_t signal_value = (orig.handle) ? hsa_api_.hsa_signal_load_relaxed(orig) : 1;
     status = hsa_api_.hsa_signal_create(signal_value, 0, NULL, &(entry->signal));
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_signal_create");
     status = hsa_api_.hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, signal_value, Handler, entry);
