@@ -249,18 +249,16 @@ class GlobalCounter {
   public:
   typedef std::mutex mutex_t;
   typedef uint64_t counter_t;
+  typedef std::atomic<counter_t> atomic_counter_t;
 
-  static counter_t Increment() {
-    std::lock_guard<mutex_t> lock(mutex_);
-    return ++counter_;
-  }
+  static counter_t Increment() { return counter_.fetch_add(1, std::memory_order_relaxed); }
 
   private:
   static mutex_t mutex_;
-  static counter_t counter_;
+  static atomic_counter_t counter_;
 };
 GlobalCounter::mutex_t GlobalCounter::mutex_;
-GlobalCounter::counter_t GlobalCounter::counter_ = 0;
+GlobalCounter::atomic_counter_t GlobalCounter::counter_{1};
 
 // Records storage
 struct roctracer_api_data_t {
@@ -282,6 +280,7 @@ typedef std::map<activity_correlation_id_t, activity_correlation_id_t> correlati
 typedef std::mutex correlation_id_mutex_t;
 correlation_id_map_t* correlation_id_map = NULL;
 correlation_id_mutex_t correlation_id_mutex;
+bool correlation_id_wait = false;
 
 static thread_local std::stack<activity_correlation_id_t> external_id_stack;
 
@@ -294,6 +293,7 @@ static inline void CorrelationIdRegistr(const activity_correlation_id_t& correla
 
 static inline activity_correlation_id_t CorrelationIdLookup(const activity_correlation_id_t& correlation_id) {
   auto it = correlation_id_map->find(correlation_id);
+  if (correlation_id_wait) while (it == correlation_id_map->end()) it = correlation_id_map->find(correlation_id);
   if (it == correlation_id_map->end()) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id lookup failed(" << correlation_id << ")");
   return it->second;
 }
@@ -817,6 +817,10 @@ static roctracer_status_t roctracer_enable_activity_fun(
     case ACTIVITY_DOMAIN_KFD_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
       if (roctracer::HccLoader::GetRef() == NULL) {
+        if (getenv("ROCP_HCC_CORRID_WAIT") != NULL) {
+          roctracer::correlation_id_wait = true;
+          fprintf(stdout, "roctracer: HCC correlation ID wait enabled\n"); fflush(stdout);
+        }
         roctracer::HccLoader::Instance().InitActivityCallback((void*)roctracer::HCC_ActivityIdCallback,
                                                               (void*)roctracer::HCC_AsyncActivityCallback,
                                                               (void*)pool);
