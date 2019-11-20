@@ -144,7 +144,8 @@ void * tool_handle = NULL;
 // Return true if intercepting mode is enabled
 enum {
   DISPATCH_INTERCEPT_MODE = 0x1,
-  MEMCOPY_INTERCEPT_MODE = 0x2
+  CODE_OBJ_TRACKING_MODE = 0x2,
+  MEMCOPY_INTERCEPT_MODE = 0x4,
 };
 uint32_t LoadTool() {
   uint32_t intercept_mode = 0;
@@ -188,6 +189,7 @@ uint32_t LoadTool() {
     util::HsaRsrcFactory::SetTimeoutNs(settings.timeout);
     InterceptQueue::TrackerOn(settings.timestamp_on != 0);
     if (settings.intercept_mode != 0) intercept_mode = DISPATCH_INTERCEPT_MODE;
+    if (settings.code_obj_tracking) intercept_mode |= CODE_OBJ_TRACKING_MODE;
     if (settings.memcopy_tracking) intercept_mode |= MEMCOPY_INTERCEPT_MODE;
   }
 
@@ -432,7 +434,13 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
 
   // Loading a tool lib and setting of intercept mode
   const uint32_t intercept_mode_mask = rocprofiler::LoadTool();
-  if (intercept_mode_mask & rocprofiler::DISPATCH_INTERCEPT_MODE) intercept_mode = true;
+  if (intercept_mode_mask & rocprofiler::DISPATCH_INTERCEPT_MODE) {
+    intercept_mode = true;
+  }
+  if (intercept_mode_mask & rocprofiler::CODE_OBJ_TRACKING_MODE) {
+    if (intercept_mode == false) EXC_RAISING(HSA_STATUS_ERROR, "code objects tracking without intercept mode enabled");
+    rocprofiler::util::HsaRsrcFactory::EnableExecutableTracking(table);
+  }
   if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
     hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
     if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_async_copy_enable");

@@ -73,7 +73,7 @@ void dump_context_entry(context_entry_t* entry) {
   const rocprofiler_dispatch_record_t* record = entry->data.record;
 
   fflush(stdout);
-  fprintf(stdout, "kernel symbol(0x%lx) name(\"%s\")", entry->data.kernel_object, kernel_name.c_str());
+  fprintf(stdout, "kernel-object(0x%lx) name(\"%s\")", entry->data.kernel_object, kernel_name.c_str());
   if (record) fprintf(stdout, ", gpu-id(%u), time(%lu,%lu,%lu,%lu)",
     HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index,
     record->dispatch,

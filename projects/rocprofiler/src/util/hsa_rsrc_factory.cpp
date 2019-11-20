@@ -193,6 +193,8 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
       hsa_api_.hsa_executable_load_agent_code_object = table->core_->hsa_executable_load_agent_code_object_fn;
       hsa_api_.hsa_executable_freeze = table->core_->hsa_executable_freeze_fn;
       hsa_api_.hsa_executable_get_symbol = table->core_->hsa_executable_get_symbol_fn;
+      hsa_api_.hsa_executable_symbol_get_info = table->core_->hsa_executable_symbol_get_info_fn;
+      hsa_api_.hsa_executable_iterate_symbols = table->core_->hsa_executable_iterate_symbols_fn;
 
       hsa_api_.hsa_system_get_info = table->core_->hsa_system_get_info_fn;
       hsa_api_.hsa_system_get_major_extension_table = table->core_->hsa_system_get_major_extension_table_fn;
@@ -231,6 +233,8 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
       hsa_api_.hsa_executable_load_agent_code_object = hsa_executable_load_agent_code_object;
       hsa_api_.hsa_executable_freeze = hsa_executable_freeze;
       hsa_api_.hsa_executable_get_symbol = hsa_executable_get_symbol;
+      hsa_api_.hsa_executable_symbol_get_info = hsa_executable_symbol_get_info;
+      hsa_api_.hsa_executable_iterate_symbols = hsa_executable_iterate_symbols;
 
       hsa_api_.hsa_system_get_info = hsa_system_get_info;
       hsa_api_.hsa_system_get_major_extension_table = hsa_system_get_major_extension_table;
@@ -681,10 +685,60 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t s
   return write_idx;
 }
 
+const char* HsaRsrcFactory::GetKernelName(uint64_t addr) {
+  std::lock_guard<mutex_t> lck(mutex_);
+  const auto it = symbols_map_->find(addr);
+  if (it == symbols_map_->end()) {
+    fprintf(stderr, "HsaRsrcFactory::kernel addr (0x%lx) is not found\n", addr);
+    abort();
+  }
+  return strdup(it->second);
+}
+
+void HsaRsrcFactory::EnableExecutableTracking(HsaApiTable* table) {
+  std::lock_guard<mutex_t> lck(mutex_);
+  executable_tracking_on_ = true;
+  table->core_->hsa_executable_freeze_fn = hsa_executable_freeze_interceptor;
+}
+
+hsa_status_t HsaRsrcFactory::executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol, void *data) {
+  hsa_symbol_kind_t value = (hsa_symbol_kind_t)0;
+  hsa_status_t status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &value);
+  CHECK_STATUS("Error in getting symbol info", status);
+  if (value == HSA_SYMBOL_KIND_KERNEL) {
+    uint64_t addr = 0;
+    uint32_t len = 0;
+    status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &addr);
+    CHECK_STATUS("Error in getting kernel object", status);
+    status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &len);
+    CHECK_STATUS("Error in getting name len", status);
+    char *name = new char[len + 1];
+    status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name);
+    CHECK_STATUS("Error in getting kernel name", status);
+    name[len] = 0;
+    auto ret = symbols_map_->insert({addr, name});
+    if (ret.second == false) {
+      delete[] ret.first->second;
+      ret.first->second = name;
+    }
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HsaRsrcFactory::hsa_executable_freeze_interceptor(hsa_executable_t executable, const char *options) {
+  std::lock_guard<mutex_t> lck(mutex_);
+  if (symbols_map_ == NULL) symbols_map_ = new symbols_map_t;
+  hsa_status_t status = hsa_api_.hsa_executable_iterate_symbols(executable, executable_symbols_cb, NULL);
+  CHECK_STATUS("Error in iterating executable symbols", status);
+  return hsa_api_.hsa_executable_freeze(executable, options);;
+}
+
 std::atomic<HsaRsrcFactory*> HsaRsrcFactory::instance_{};
 HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;
 HsaRsrcFactory::timestamp_t HsaRsrcFactory::timeout_ns_ = HsaTimer::TIMESTAMP_MAX;
 hsa_pfn_t HsaRsrcFactory::hsa_api_{};
+bool HsaRsrcFactory::executable_tracking_on_ = false;
+HsaRsrcFactory::symbols_map_t* HsaRsrcFactory::symbols_map_ = NULL;
 
 }  // namespace util
 }  // namespace rocprofiler

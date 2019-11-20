@@ -64,6 +64,7 @@ uint32_t rocprofiler_version_minor();
 
 typedef struct {
   uint32_t intercept_mode;
+  uint32_t code_obj_tracking;
   uint32_t memcopy_tracking;
   uint32_t trace_size;
   uint32_t trace_local;
@@ -222,7 +223,7 @@ typedef struct {
   hsa_signal_t completion_signal;                      // Completion signal
   const hsa_kernel_dispatch_packet_t* packet;          // HSA dispatch packet
   const char* kernel_name;                             // Kernel name
-  uint64_t kernel_object;                              // Kernel object pointer
+  uint64_t kernel_object;                              // Kernel object address
   const amd_kernel_code_t* kernel_code;                // Kernel code pointer
   int64_t thread_id;                                   // Thread id
   const rocprofiler_dispatch_record_t* record;         // Dispatch record

@@ -881,6 +881,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
       }
       it = opts.find("trace-local");
       if (it != opts.end()) { settings->trace_local = (it->second == "on"); }
+      it = opts.find("obj-tracking");
+      if (it != opts.end()) { settings->code_obj_tracking = (it->second == "on"); }
       it = opts.find("memcopies");
       if (it != opts.end()) { settings->memcopy_tracking = (it->second == "on"); }
     }
@@ -901,6 +903,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   check_env_var("ROCP_TRACE_SIZE", settings->trace_size);
   // Set trace local buffer
   check_env_var("ROCP_TRACE_LOCAL", settings->trace_local);
+  // Set code objects tracking
+  check_env_var("ROCP_OBJ_TRACKING", settings->code_obj_tracking);
   // Set memcopies tracking
   check_env_var("ROCP_MCOPY_TRACKING", settings->memcopy_tracking);
 

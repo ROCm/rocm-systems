@@ -179,6 +179,7 @@ usage() {
   echo ""
   echo "  --trace-period <dealy:length:rate> - to enable trace with initial delay, with periodic sample length and rate"
   echo "    Supported time formats: <number(m|s|ms|us)>"
+  echo "  --obj-tracking <on|off> - to turn on/off kernels code objects tracking [off]"
   echo ""
   echo "Configuration file:"
   echo "  You can set your parameters defaults preferences in the configuration file 'rpl_rc.xml'. The search path sequence: .:${HOME}:<package path>"
@@ -394,6 +395,10 @@ while [ 1 ] ; do
     convert_time_val period_rate
     errck "Option '$ARG_IN', rate value"
     export ROCP_CTRL_RATE="$period_delay:$period_len:$period_rate"
+  elif [ "$1" = "--obj-tracking" ] ; then
+    if [ "$2" = "on" ] ; then
+      export ROCP_OBJ_TRACKING=1
+    fi
   elif [ "$1" = "--verbose" ] ; then
     ARG_VAL=0
     export ROCP_VERBOSE_MODE=1

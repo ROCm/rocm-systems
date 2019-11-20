@@ -94,3 +94,6 @@ add_custom_target( mbench
   COMMAND sh -xc "cp -r ${TEST_DIR}/memory_validation ${PROJECT_BINARY_DIR}/test/."
   COMMAND make -C "${PROJECT_BINARY_DIR}/test/memory_validation"
 )
+
+## Copy OCL test
+execute_process ( COMMAND sh -xc "cp -r ${TEST_DIR}/ocl ${PROJECT_BINARY_DIR}/test" )

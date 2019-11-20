@@ -148,9 +148,20 @@ class InterceptQueue {
         }
 
         // Prepareing dispatch callback data
-        const amd_kernel_code_t* kernel_code = GetKernelCode(dispatch_packet);
-        const uint64_t kernel_symbol = kernel_code->runtime_loader_kernel_symbol;
-        const char* kernel_name = GetKernelName(kernel_symbol);
+        uint64_t kernel_object = dispatch_packet->kernel_object;
+        const amd_kernel_code_t* kernel_code = GetKernelCode(kernel_object);
+
+        const uint16_t kernel_object_flag = *((uint64_t*)kernel_code + 1);
+        if (kernel_object_flag == 0) {
+          if (!util::HsaRsrcFactory::IsExecutableTracking()) {
+            fprintf(stderr, "Error: V3 code object detected - code objects tracking should be enabled\n");
+            abort();
+          }
+        }
+        const char* kernel_name = (util::HsaRsrcFactory::IsExecutableTracking()) ?
+          util::HsaRsrcFactory::GetKernelName(kernel_object) :
+          GetKernelName(kernel_code->runtime_loader_kernel_symbol);
+
         rocprofiler_callback_data_t data = {obj->agent_info_->dev_id,
                                             obj->agent_info_->dev_index,
                                             obj->queue_,
@@ -159,7 +170,7 @@ class InterceptQueue {
                                             completion_signal,
                                             dispatch_packet,
                                             kernel_name,
-                                            kernel_symbol,
+                                            kernel_object,
                                             kernel_code,
                                             syscall(__NR_gettid),
                                             (tracker_entry) ? tracker_entry->record : NULL};
@@ -243,14 +254,14 @@ class InterceptQueue {
     return static_cast<hsa_packet_type_t>((*header >> HSA_PACKET_HEADER_TYPE) & header_type_mask);
   }
 
-  static const amd_kernel_code_t* GetKernelCode(const hsa_kernel_dispatch_packet_t* dispatch_packet) {
+  static const amd_kernel_code_t* GetKernelCode(uint64_t kernel_object) {
     const amd_kernel_code_t* kernel_code = NULL;
     hsa_status_t status =
         util::HsaRsrcFactory::Instance().LoaderApi()->hsa_ven_amd_loader_query_host_address(
-            reinterpret_cast<const void*>(dispatch_packet->kernel_object),
+            reinterpret_cast<const void*>(kernel_object),
             reinterpret_cast<const void**>(&kernel_code));
     if (HSA_STATUS_SUCCESS != status) {
-      kernel_code = reinterpret_cast<amd_kernel_code_t*>(dispatch_packet->kernel_object);
+      kernel_code = reinterpret_cast<amd_kernel_code_t*>(kernel_object);
     }
     return kernel_code;
   }
