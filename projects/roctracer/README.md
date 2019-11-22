@@ -71,7 +71,7 @@ rocTracer API:
   - the .so library: /opt/rocm/lib/libroctracer64.so
 
 rocTX API:
-  To use the rocTX API you need the API header and to link your application with rictx .so librray:
+  To use the rocTX API you need the API header and to link your application with roctx .so librray:
   - the API header: /opt/rocm/roctracer/include/roctx.h
   - the .so library: /opt/rocm/lib/libroctx64.so
  
