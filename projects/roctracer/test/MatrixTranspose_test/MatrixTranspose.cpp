@@ -203,12 +203,12 @@ void api_callback(
 
   if (domain == ACTIVITY_DOMAIN_ROCTX) {
     const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
-    fprintf(stdout, "ROCTX: \"%s\"\n", data->args.message);
+    fprintf(stdout, "<rocTX \"%s\">\n", data->args.message);
     return;
   }
   if (domain == ACTIVITY_DOMAIN_KFD_API) {
     const kfd_api_data_t* data = reinterpret_cast<const kfd_api_data_t*>(callback_data);
-    fprintf(stdout, "KFD: <%s id(%u)\tcorrelation_id(%lu) %s> \n",
+    fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> \n",
         roctracer_op_string(ACTIVITY_DOMAIN_KFD_API, cid, 0),
         cid,
         data->correlation_id,
@@ -315,6 +315,7 @@ void init_tracing() {
   ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
   ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
   // Enable KFD API tracing
+  ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_KFD_API, api_callback, NULL));
   ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_KFD_API));
 }
 

@@ -65,7 +65,7 @@ eval_test() {
 
 # Standalone test
 # rocTrecer is used explicitely by test
-eval_test "standalone HIP test" "./test/MatrixTranspose_test"
+eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test"
 
 # Tool test
 # rocTracer/tool is loaded by HSA runtime
