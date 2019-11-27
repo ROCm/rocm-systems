@@ -162,6 +162,11 @@ struct AgentInfo {
 
   // Number of Shader Arrays Per Shader Engines in Gpu
   uint32_t shader_arrays_per_se;
+
+  // SGPR/VGPR block sizes
+  uint32_t sgpr_block_dflt;
+  uint32_t sgpr_block_size;
+  uint32_t vgpr_block_size;
 };
 
 // HSA timer class

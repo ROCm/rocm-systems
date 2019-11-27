@@ -473,19 +473,20 @@ bool dump_context_entry(context_entry_t* entry) {
   const uint32_t index = entry->index;
   FILE* file_handle = entry->file_handle;
   const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
+  const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(entry->agent);
 
   fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), tid(%lu), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), sig(0x%lx), kernel-name(\"%s\")",
     index,
-    HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index,
+    agent_info->dev_index,
     entry->data.queue_id,
     entry->data.queue_index,
     entry->data.thread_id,
     entry->kernel_properties.grid_size,
     entry->kernel_properties.workgroup_size,
-    entry->kernel_properties.lds_size,
+    (entry->kernel_properties.lds_size * (128 * 4)),
     entry->kernel_properties.scratch_size,
-    entry->kernel_properties.vgpr_count,
-    entry->kernel_properties.sgpr_count,
+    (entry->kernel_properties.vgpr_count + 1) * agent_info->vgpr_block_size,
+    (entry->kernel_properties.sgpr_count + agent_info->sgpr_block_dflt) * agent_info->sgpr_block_size,
     entry->kernel_properties.fbarrier_count,
     entry->kernel_properties.signal.handle,
     nik_name.c_str());

@@ -73,7 +73,6 @@ struct hsa_pfn_t {
   decltype(hsa_init)* hsa_init;
   decltype(hsa_shut_down)* hsa_shut_down;
   decltype(hsa_agent_get_info)* hsa_agent_get_info;
-
   decltype(hsa_iterate_agents)* hsa_iterate_agents;
 
   decltype(hsa_queue_create)* hsa_queue_create;
@@ -81,10 +80,24 @@ struct hsa_pfn_t {
   decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed;
   decltype(hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed;
   decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed;
+
   decltype(hsa_signal_create)* hsa_signal_create;
   decltype(hsa_signal_destroy)* hsa_signal_destroy;
+  decltype(hsa_signal_load_relaxed)* hsa_signal_load_relaxed;
   decltype(hsa_signal_store_relaxed)* hsa_signal_store_relaxed;
   decltype(hsa_signal_wait_scacquire)* hsa_signal_wait_scacquire;
+  decltype(hsa_signal_store_screlease)* hsa_signal_store_screlease;
+
+  decltype(hsa_code_object_reader_create_from_file)* hsa_code_object_reader_create_from_file;
+  decltype(hsa_executable_create_alt)* hsa_executable_create_alt;
+  decltype(hsa_executable_load_agent_code_object)* hsa_executable_load_agent_code_object;
+  decltype(hsa_executable_freeze)* hsa_executable_freeze;
+  decltype(hsa_executable_get_symbol)* hsa_executable_get_symbol;
+  decltype(hsa_executable_symbol_get_info)* hsa_executable_symbol_get_info;
+  decltype(hsa_executable_iterate_symbols)* hsa_executable_iterate_symbols;
+
+  decltype(hsa_system_get_info)* hsa_system_get_info;
+  decltype(hsa_system_get_major_extension_table)* hsa_system_get_major_extension_table;
 
   decltype(hsa_amd_agent_iterate_memory_pools)* hsa_amd_agent_iterate_memory_pools;
   decltype(hsa_amd_memory_pool_get_info)* hsa_amd_memory_pool_get_info;
@@ -92,19 +105,10 @@ struct hsa_pfn_t {
   decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access;
   decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy;
 
-  decltype(hsa_system_get_major_extension_table)* hsa_system_get_major_extension_table;
-
-  decltype(hsa_code_object_reader_create_from_file)* hsa_code_object_reader_create_from_file;
-  decltype(hsa_executable_create_alt)* hsa_executable_create_alt;
-  decltype(hsa_executable_load_agent_code_object)* hsa_executable_load_agent_code_object;
-  decltype(hsa_executable_freeze)* hsa_executable_freeze;
-  decltype(hsa_executable_get_symbol)* hsa_executable_get_symbol;
-
   decltype(hsa_amd_signal_async_handler)* hsa_amd_signal_async_handler;
+  decltype(hsa_amd_profiling_set_profiler_enabled)* hsa_amd_profiling_set_profiler_enabled;
   decltype(hsa_amd_profiling_get_async_copy_time)* hsa_amd_profiling_get_async_copy_time;
   decltype(hsa_amd_profiling_get_dispatch_time)* hsa_amd_profiling_get_dispatch_time;
-  decltype(hsa_signal_load_relaxed)* hsa_signal_load_relaxed;
-  decltype(hsa_signal_store_screlease)* hsa_signal_store_screlease;
 };
 
 // Encapsulates information about a Hsa Agent such as its
@@ -156,6 +160,11 @@ struct AgentInfo {
 
   // Number of Shader Arrays Per Shader Engines in Gpu
   uint32_t shader_arrays_per_se;
+
+  // SGPR/VGPR block sizes
+  uint32_t sgpr_block_dflt;
+  uint32_t sgpr_block_size;
+  uint32_t vgpr_block_size;
 };
 
 // HSA timer class
@@ -166,9 +175,9 @@ class HsaTimer {
   static const timestamp_t TIMESTAMP_MAX = UINT64_MAX;
   typedef long double freq_t;
 
-  HsaTimer() {
+  HsaTimer(const hsa_pfn_t* hsa_api) : hsa_api_(hsa_api) {
     timestamp_t sysclock_hz = 0;
-    hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
+    hsa_status_t status = hsa_api_->hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
     CHECK_STATUS("hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY)", status);
     sysclock_factor_ = (freq_t)1000000000 / (freq_t)sysclock_hz;
   }
@@ -184,7 +193,7 @@ class HsaTimer {
   // Return timestamp in 'ns'
   timestamp_t timestamp_ns() const {
     timestamp_t sysclock;
-    hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
+    hsa_status_t status = hsa_api_->hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
     CHECK_STATUS("hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP)", status);
     return sysclock_to_ns(sysclock);
   }
@@ -192,6 +201,8 @@ class HsaTimer {
  private:
   // Timestamp frequency factor
   freq_t sysclock_factor_;
+  // HSA API table
+  const hsa_pfn_t* const hsa_api_;
 };
 
 class HsaRsrcFactory {
@@ -317,6 +328,11 @@ class HsaRsrcFactory {
   static uint64_t Submit(hsa_queue_t* queue, const void* packet);
   static uint64_t Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes);
 
+  // Enable executables loading tracking
+  static bool IsExecutableTracking() { return executable_tracking_on_; }
+  static void EnableExecutableTracking(HsaApiTable* table);
+  static const char* GetKernelName(uint64_t addr);
+
   // Initialize HSA API table
   void static InitHsaApiTable(HsaApiTable* table);
   static const hsa_pfn_t* HsaApi() { return &hsa_api_; }
@@ -380,6 +396,13 @@ class HsaRsrcFactory {
 
   // System agents map
   std::map<hsa_agent_handle_t, const AgentInfo*> agent_map_;
+
+  // Executables loading tracking
+  typedef std::map<uint64_t, const char*> symbols_map_t;
+  static symbols_map_t* symbols_map_;
+  static bool executable_tracking_on_;
+  static hsa_status_t hsa_executable_freeze_interceptor(hsa_executable_t executable, const char *options);
+  static hsa_status_t executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol, void *data);
 
   // HSA runtime API table
   static hsa_pfn_t hsa_api_;

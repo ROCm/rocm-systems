@@ -140,7 +140,7 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
   CHECK_STATUS("loader API table query failed", status);
 
   // Instantiate HSA timer
-  timer_ = new HsaTimer;
+  timer_ = new HsaTimer(&hsa_api_);
   CHECK_STATUS("HSA timer allocation failed",
     (timer_ == NULL) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS);
 
@@ -167,7 +167,6 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
       hsa_api_.hsa_init = table->core_->hsa_init_fn;
       hsa_api_.hsa_shut_down = table->core_->hsa_shut_down_fn;
       hsa_api_.hsa_agent_get_info = table->core_->hsa_agent_get_info_fn;
-
       hsa_api_.hsa_iterate_agents = table->core_->hsa_iterate_agents_fn;
 
       hsa_api_.hsa_queue_create = table->core_->hsa_queue_create_fn;
@@ -175,36 +174,39 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
       hsa_api_.hsa_queue_load_write_index_relaxed = table->core_->hsa_queue_load_write_index_relaxed_fn;
       hsa_api_.hsa_queue_store_write_index_relaxed = table->core_->hsa_queue_store_write_index_relaxed_fn;
       hsa_api_.hsa_queue_load_read_index_relaxed = table->core_->hsa_queue_load_read_index_relaxed_fn;
+
       hsa_api_.hsa_signal_create = table->core_->hsa_signal_create_fn;
       hsa_api_.hsa_signal_destroy = table->core_->hsa_signal_destroy_fn;
       hsa_api_.hsa_signal_load_relaxed = table->core_->hsa_signal_load_relaxed_fn;
       hsa_api_.hsa_signal_store_relaxed = table->core_->hsa_signal_store_relaxed_fn;
-      hsa_api_.hsa_signal_store_screlease = table->core_->hsa_signal_store_screlease_fn;
       hsa_api_.hsa_signal_wait_scacquire = table->core_->hsa_signal_wait_scacquire_fn;
-
-      hsa_api_.hsa_system_get_major_extension_table = table->core_->hsa_system_get_major_extension_table_fn;
+      hsa_api_.hsa_signal_store_screlease = table->core_->hsa_signal_store_screlease_fn;
 
       hsa_api_.hsa_code_object_reader_create_from_file = table->core_->hsa_code_object_reader_create_from_file_fn;
       hsa_api_.hsa_executable_create_alt = table->core_->hsa_executable_create_alt_fn;
       hsa_api_.hsa_executable_load_agent_code_object = table->core_->hsa_executable_load_agent_code_object_fn;
       hsa_api_.hsa_executable_freeze = table->core_->hsa_executable_freeze_fn;
       hsa_api_.hsa_executable_get_symbol = table->core_->hsa_executable_get_symbol_fn;
+      hsa_api_.hsa_executable_symbol_get_info = table->core_->hsa_executable_symbol_get_info_fn;
+      hsa_api_.hsa_executable_iterate_symbols = table->core_->hsa_executable_iterate_symbols_fn;
+
+      hsa_api_.hsa_system_get_info = table->core_->hsa_system_get_info_fn;
+      hsa_api_.hsa_system_get_major_extension_table = table->core_->hsa_system_get_major_extension_table_fn;
 
       hsa_api_.hsa_amd_agent_iterate_memory_pools = table->amd_ext_->hsa_amd_agent_iterate_memory_pools_fn;
       hsa_api_.hsa_amd_memory_pool_get_info = table->amd_ext_->hsa_amd_memory_pool_get_info_fn;
       hsa_api_.hsa_amd_memory_pool_allocate = table->amd_ext_->hsa_amd_memory_pool_allocate_fn;
       hsa_api_.hsa_amd_agents_allow_access = table->amd_ext_->hsa_amd_agents_allow_access_fn;
-
       hsa_api_.hsa_amd_memory_async_copy = table->amd_ext_->hsa_amd_memory_async_copy_fn;
 
       hsa_api_.hsa_amd_signal_async_handler = table->amd_ext_->hsa_amd_signal_async_handler_fn;
+      hsa_api_.hsa_amd_profiling_set_profiler_enabled = table->amd_ext_->hsa_amd_profiling_set_profiler_enabled_fn;
       hsa_api_.hsa_amd_profiling_get_async_copy_time = table->amd_ext_->hsa_amd_profiling_get_async_copy_time_fn;
       hsa_api_.hsa_amd_profiling_get_dispatch_time = table->amd_ext_->hsa_amd_profiling_get_dispatch_time_fn;
     } else {
       hsa_api_.hsa_init = hsa_init;
       hsa_api_.hsa_shut_down = hsa_shut_down;
       hsa_api_.hsa_agent_get_info = hsa_agent_get_info;
-
       hsa_api_.hsa_iterate_agents = hsa_iterate_agents;
 
       hsa_api_.hsa_queue_create = hsa_queue_create;
@@ -212,31 +214,35 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
       hsa_api_.hsa_queue_load_write_index_relaxed = hsa_queue_load_write_index_relaxed;
       hsa_api_.hsa_queue_store_write_index_relaxed = hsa_queue_store_write_index_relaxed;
       hsa_api_.hsa_queue_load_read_index_relaxed = hsa_queue_load_read_index_relaxed;
+
       hsa_api_.hsa_signal_create = hsa_signal_create;
       hsa_api_.hsa_signal_destroy = hsa_signal_destroy;
+      hsa_api_.hsa_signal_load_relaxed = hsa_signal_load_relaxed;
       hsa_api_.hsa_signal_store_relaxed = hsa_signal_store_relaxed;
       hsa_api_.hsa_signal_wait_scacquire = hsa_signal_wait_scacquire;
-
-      hsa_api_.hsa_amd_agent_iterate_memory_pools = hsa_amd_agent_iterate_memory_pools;
-      hsa_api_.hsa_amd_memory_pool_get_info = hsa_amd_memory_pool_get_info;
-      hsa_api_.hsa_amd_memory_pool_allocate = hsa_amd_memory_pool_allocate;
-      hsa_api_.hsa_amd_agents_allow_access = hsa_amd_agents_allow_access;
-
-      hsa_api_.hsa_amd_memory_async_copy = hsa_amd_memory_async_copy;
-
-      hsa_api_.hsa_system_get_major_extension_table = hsa_system_get_major_extension_table;
+      hsa_api_.hsa_signal_store_screlease = hsa_signal_store_screlease;
 
       hsa_api_.hsa_code_object_reader_create_from_file = hsa_code_object_reader_create_from_file;
       hsa_api_.hsa_executable_create_alt = hsa_executable_create_alt;
       hsa_api_.hsa_executable_load_agent_code_object = hsa_executable_load_agent_code_object;
       hsa_api_.hsa_executable_freeze = hsa_executable_freeze;
       hsa_api_.hsa_executable_get_symbol = hsa_executable_get_symbol;
+      hsa_api_.hsa_executable_symbol_get_info = hsa_executable_symbol_get_info;
+      hsa_api_.hsa_executable_iterate_symbols = hsa_executable_iterate_symbols;
+
+      hsa_api_.hsa_system_get_info = hsa_system_get_info;
+      hsa_api_.hsa_system_get_major_extension_table = hsa_system_get_major_extension_table;
+
+      hsa_api_.hsa_amd_agent_iterate_memory_pools = hsa_amd_agent_iterate_memory_pools;
+      hsa_api_.hsa_amd_memory_pool_get_info = hsa_amd_memory_pool_get_info;
+      hsa_api_.hsa_amd_memory_pool_allocate = hsa_amd_memory_pool_allocate;
+      hsa_api_.hsa_amd_agents_allow_access = hsa_amd_agents_allow_access;
+      hsa_api_.hsa_amd_memory_async_copy = hsa_amd_memory_async_copy;
 
       hsa_api_.hsa_amd_signal_async_handler = hsa_amd_signal_async_handler;
+      hsa_api_.hsa_amd_profiling_set_profiler_enabled = hsa_amd_profiling_set_profiler_enabled;
       hsa_api_.hsa_amd_profiling_get_async_copy_time = hsa_amd_profiling_get_async_copy_time;
       hsa_api_.hsa_amd_profiling_get_dispatch_time = hsa_amd_profiling_get_dispatch_time;
-      hsa_api_.hsa_signal_load_relaxed = hsa_signal_load_relaxed;
-      hsa_api_.hsa_signal_store_screlease = hsa_signal_store_screlease;
     }
   }
 }
@@ -328,6 +334,11 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     agent_info->kern_arg_pool = {};
     status = hsa_api_.hsa_amd_agent_iterate_memory_pools(agent, FindStandardPool, &agent_info->gpu_pool);
     CHECK_ITER_STATUS("hsa_amd_agent_iterate_memory_pools(gpu pool)", status);
+
+    // GFX8 and GFX9 SGPR/VGPR block sizes
+    agent_info->sgpr_block_dflt = (strcmp(agent_info->gfxip, "gfx8") == 0) ? 1 : 2;
+    agent_info->sgpr_block_size = 8;
+    agent_info->vgpr_block_size = 4;
 
     // Set GPU index
     agent_info->dev_index = gpu_list_.size();
@@ -672,7 +683,57 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t s
   return write_idx;
 }
 
+const char* HsaRsrcFactory::GetKernelName(uint64_t addr) {
+  std::lock_guard<mutex_t> lck(mutex_);
+  const auto it = symbols_map_->find(addr);
+  if (it == symbols_map_->end()) {
+    fprintf(stderr, "HsaRsrcFactory::kernel addr (0x%lx) is not found\n", addr);
+    abort();
+  }
+  return strdup(it->second);
+}
+
+void HsaRsrcFactory::EnableExecutableTracking(HsaApiTable* table) {
+  std::lock_guard<mutex_t> lck(mutex_);
+  executable_tracking_on_ = true;
+  table->core_->hsa_executable_freeze_fn = hsa_executable_freeze_interceptor;
+}
+
+hsa_status_t HsaRsrcFactory::executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol, void *data) {
+  hsa_symbol_kind_t value = (hsa_symbol_kind_t)0;
+  hsa_status_t status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &value);
+  CHECK_STATUS("Error in getting symbol info", status);
+  if (value == HSA_SYMBOL_KIND_KERNEL) {
+    uint64_t addr = 0;
+    uint32_t len = 0;
+    status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &addr);
+    CHECK_STATUS("Error in getting kernel object", status);
+    status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &len);
+    CHECK_STATUS("Error in getting name len", status);
+    char *name = new char[len + 1];
+    status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name);
+    CHECK_STATUS("Error in getting kernel name", status);
+    name[len] = 0;
+    auto ret = symbols_map_->insert({addr, name});
+    if (ret.second == false) {
+      delete[] ret.first->second;
+      ret.first->second = name;
+    }
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t HsaRsrcFactory::hsa_executable_freeze_interceptor(hsa_executable_t executable, const char *options) {
+  std::lock_guard<mutex_t> lck(mutex_);
+  if (symbols_map_ == NULL) symbols_map_ = new symbols_map_t;
+  hsa_status_t status = hsa_api_.hsa_executable_iterate_symbols(executable, executable_symbols_cb, NULL);
+  CHECK_STATUS("Error in iterating executable symbols", status);
+  return hsa_api_.hsa_executable_freeze(executable, options);;
+}
+
 std::atomic<HsaRsrcFactory*> HsaRsrcFactory::instance_{};
 HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;
 HsaRsrcFactory::timestamp_t HsaRsrcFactory::timeout_ns_ = HsaTimer::TIMESTAMP_MAX;
 hsa_pfn_t HsaRsrcFactory::hsa_api_{};
+bool HsaRsrcFactory::executable_tracking_on_ = false;
+HsaRsrcFactory::symbols_map_t* HsaRsrcFactory::symbols_map_ = NULL;
