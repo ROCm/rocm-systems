@@ -110,9 +110,9 @@ class HccApi {
   protected:
   void init(Loader* loader) {
 #if HIP_VDI
-    InitActivityCallback = loader->GetFun<hipInitAsyncActivityCallback_t>("InitActivityCallback");
-    EnableActivityCallback = loader->GetFun<hipEnableAsyncActivityCallback_t>("EnableActivityCallback");
-    GetOpName = loader->GetFun<hipGetOpName_t>("GetCmdName");
+    InitActivityCallback = loader->GetFun<hipInitAsyncActivityCallback_t>("hipInitActivityCallback");
+    EnableActivityCallback = loader->GetFun<hipEnableAsyncActivityCallback_t>("hipEnableActivityCallback");
+    GetOpName = loader->GetFun<hipGetOpName_t>("hipGetCmdName");
 #else
     InitActivityCallback = loader->GetFun<hipInitAsyncActivityCallback_t>("InitActivityCallbackImpl");
     EnableActivityCallback = loader->GetFun<hipEnableAsyncActivityCallback_t>("EnableActivityCallbackImpl");

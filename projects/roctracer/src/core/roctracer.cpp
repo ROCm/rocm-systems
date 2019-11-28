@@ -711,8 +711,10 @@ static roctracer_status_t roctracer_disable_callback_fun(
     case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: break;
     case ACTIVITY_DOMAIN_HIP_API: {
+#if !HIP_VDI
       hipError_t hip_err = roctracer::HipLoader::Instance().RemoveApiCallback(op);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveApiCallback error(" << hip_err << ")");
+#endif
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
@@ -900,8 +902,10 @@ static roctracer_status_t roctracer_disable_activity_fun(
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
+#if !HIP_VDI
       const hipError_t hip_err = roctracer::HipLoader::Instance().RemoveActivityCallback(op);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveActivityCallback error(" << hip_err << ")");
+#endif
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: break;
@@ -1052,7 +1056,7 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
     }
     case ACTIVITY_DOMAIN_HCC_OPS:
     case ACTIVITY_DOMAIN_HIP_API: {
-#ifdef HIP_VDI
+#if HIP_VDI
       const char* hip_lib_name = "libamdhip64.so";
       roctracer::HccLoader::SetLibName(hip_lib_name);
       roctracer::HipLoader::SetLibName(hip_lib_name);
