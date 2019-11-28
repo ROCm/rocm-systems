@@ -1060,6 +1060,7 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
       const char* hip_lib_name = "libamdhip64.so";
       roctracer::HccLoader::SetLibName(hip_lib_name);
       roctracer::HipLoader::SetLibName(hip_lib_name);
+      roctracer::correlation_id_wait = true;
 #endif
       mark_api_callback_ptr = reinterpret_cast<mark_api_callback_t*>(properties);
       break;
