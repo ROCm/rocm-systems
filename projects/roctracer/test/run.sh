@@ -70,12 +70,15 @@ eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTran
 # Tool test
 # rocTracer/tool is loaded by HSA runtime
 export HSA_TOOLS_LIB="test/libtracer_tool.so"
-export ROCTRACER_DOMAIN="hip"
 
-# HIP test
-eval_test "tool HIP test" ./test/MatrixTranspose
-# with trace sampling control <delay:length:rate>
-eval_test "tool HIP period test" "ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose"
+# SYS test
+export ROCTRACER_DOMAIN="sys:roctx"
+eval_test "tool SYS test" ./test/MatrixTranspose
+export ROCTRACER_DOMAIN="sys:hsa:roctx"
+eval_test "tool SYS/HSA test" ./test/MatrixTranspose
+# Tracing control <delay:length:rate>
+export ROCTRACER_DOMAIN="hip"
+eval_test "tool period test" "ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose"
 
 # HSA test
 export ROCTRACER_DOMAIN="hsa"
