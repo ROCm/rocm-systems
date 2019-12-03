@@ -46,6 +46,7 @@ fi
 
 # runtime API trace
 ROCTX_TRACE=0
+KFD_TRACE=0
 HSA_TRACE=0
 SYS_TRACE=0
 HIP_TRACE=0
@@ -164,6 +165,7 @@ usage() {
   echo ""
   echo "  --stats - generating kernel execution stats, file <output name>.stats.csv"
   echo "  --roctx-trace - to enable rocTX trace"
+  echo "  --kfd-trace - to trace KFD, generates API execution stats and JSON file chrome-tracing compatible"
   echo "  --hsa-trace - to trace HSA, generates API execution stats and JSON file chrome-tracing compatible"
   echo "  --sys-trace - to trace HIP/HSA APIs and GPU activity, generates stats and JSON trace chrome-tracing compatible"
   echo "  --hip-trace - to trace HIP, generates API execution stats and JSON file chrome-tracing compatible"
@@ -233,6 +235,10 @@ run() {
   if [ "$ROCTX_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":roctx"
   fi
+  if [ "$KFD_TRACE" = 1 ] ; then
+    API_TRACE=${API_TRACE}":kfd"
+    export LD_PRELOAD="libkfdwrapper64.so libhsakmt.so.1"
+  fi
   if [ "$HIP_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":hip"
   fi
@@ -256,6 +262,8 @@ run() {
 
   CMD_LINE="$APP_CMD $redirection_cmd"
   eval "$CMD_LINE"
+
+  unset LD_PRELOAD
 }
 
 merge_output() {
@@ -364,6 +372,11 @@ while [ 1 ] ; do
   elif [ "$1" = "--roctx-trace" ] ; then
     ARG_VAL=0
     ROCTX_TRACE=1
+  elif [ "$1" = "--kfd-trace" ] ; then
+    ARG_VAL=0
+    export ROCP_TIMESTAMP_ON=1
+    GEN_STATS=1
+    KFD_TRACE=1
   elif [ "$1" = "--hsa-trace" ] ; then
     ARG_VAL=0
     export ROCP_TIMESTAMP_ON=1
