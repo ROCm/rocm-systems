@@ -406,8 +406,7 @@ class API_DescrParser:
       call_id = self.api_id[call];
       ret_type = struct['ret']
       self.content_h += ret_type + ' ' + call + '_callback(' + struct['args'] + ') {\n'  # 'static '  + 
-      if call == 'hsaKmtOpenKFD':
-        self.content_h += '  if (' + name + '_table == NULL) intercept_KFDApiTable();\n'
+      self.content_h += '  if (' + name + '_table == NULL) intercept_KFDApiTable();\n'
       self.content_h += '  kfd_api_data_t api_data{};\n'
       for var in struct['alst']:
         self.content_h += '  api_data.args.' + call + '.' + var.replace("[]","") + ' = ' + var.replace("[]","") + ';\n'
@@ -525,7 +524,7 @@ class API_DescrParser:
       self.content_cpp += '    return true;\n';
       self.content_cpp += '}\n\n';
 
-    if call != '-':
+    if call != '-' and call != 'hsaKmtCloseKFD' and call != 'hsaKmtOpenKFD':
       self.content_cpp += 'PUBLIC_API ' + struct['ret'] + " " + call + '(' + struct['args'] + ') { return roctracer::kfd_support::' + call + '_callback('
       for i in range(0,len(struct['alst'])):
         if i == (len(struct['alst'])-1):

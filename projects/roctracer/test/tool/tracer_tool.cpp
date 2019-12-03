@@ -435,6 +435,7 @@ void hcc_activity_callback(const char* begin, const char* end, void* arg) {
 // KFD API tracing
 
 // KFD API callback function
+static thread_local bool in_kfd_api_callback = false;
 void kfd_api_callback(
     uint32_t domain,
     uint32_t cid,
@@ -442,6 +443,8 @@ void kfd_api_callback(
     void* arg)
 {
   (void)arg;
+  if (in_kfd_api_callback) return;
+  in_kfd_api_callback = true;
   const kfd_api_data_t* data = reinterpret_cast<const kfd_api_data_t*>(callback_data);
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     kfd_begin_timestamp = timer->timestamp_fn_ns();
@@ -451,6 +454,7 @@ void kfd_api_callback(
     os << kfd_begin_timestamp << ":" << end_timestamp << " " << GetPid() << ":" << GetTid() << " " << kfd_api_data_pair_t(cid, *data);
     fprintf(kfd_api_file_handle, "%s\n", os.str().c_str());
   }
+  in_kfd_api_callback = false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
