@@ -57,9 +57,12 @@ THE SOFTWARE.
     }                                                                                              \
   } while (0)
 
-#ifndef onload_debug
-#define onload_debug false
-#endif
+#define ONLOAD_TRACE(str) \
+  if (getenv("ROCP_ONLOAD_TRACE")) do { \
+    std::cout << "PID(" << GetPid() << "): TOOL::" << __FUNCTION__ << " " << str << std::endl << std::flush; \
+  } while(0);
+#define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
+#define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
 
 typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
 hsa_rt_utils::Timer* timer = NULL;
@@ -529,7 +532,7 @@ void close_output_file(FILE* file_handle) {
 // HSA-runtime tool on-load method
 extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
-  if (onload_debug) { printf("TOOL OnLoad\n"); fflush(stdout); }
+  ONLOAD_TRACE_BEG();
   timer = new hsa_rt_utils::Timer(table->core_->hsa_system_get_info_fn);
 
   // Output file
@@ -759,15 +762,15 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     printf(")\n");
   }
 
-  if (onload_debug) { printf("TOOL OnLoad end\n"); fflush(stdout); }
+  ONLOAD_TRACE_END();
   return roctracer_load(table, runtime_version, failed_tool_count, failed_tool_names);
 }
 
 // tool unload method
 void tool_unload(bool destruct) {
   static bool is_unloaded = false;
+  ONLOAD_TRACE("begin (" << destruct <<", " << is_unloaded << ")");
 
-  if (onload_debug) { printf("TOOL tool_unload (%d, %d)\n", (int)destruct, (int)is_unloaded); fflush(stdout); }
   if (destruct == false) return;
   if (is_unloaded == true) return;
   is_unloaded = true;
@@ -806,21 +809,21 @@ void tool_unload(bool destruct) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_KFD_API));
     fclose(kfd_api_file_handle);
   }
-  if (onload_debug) { printf("TOOL tool_unload end\n"); fflush(stdout); }
+  ONLOAD_TRACE_END();
 }
 
 // HSA-runtime on-unload method
 extern "C" PUBLIC_API void OnUnload() {
-  if (onload_debug) { printf("TOOL OnUnload\n"); fflush(stdout); }
+  ONLOAD_TRACE_BEG();
   tool_unload(false);
-  if (onload_debug) { printf("TOOL OnUnload end\n"); fflush(stdout); }
+  ONLOAD_TRACE_END();
 }
 
 extern "C" CONSTRUCTOR_API void constructor() {
-  if (onload_debug) { printf("TOOL constructor ...end\n"); fflush(stdout); }
+  ONLOAD_TRACE("")
 }
 extern "C" DESTRUCTOR_API void destructor() {
-  if (onload_debug) { printf("TOOL destructor\n"); fflush(stdout); }
+  ONLOAD_TRACE_BEG();
   tool_unload(true);
-  if (onload_debug) { printf("TOOL destructor end\n"); fflush(stdout); }
+  ONLOAD_TRACE_END();
 }
