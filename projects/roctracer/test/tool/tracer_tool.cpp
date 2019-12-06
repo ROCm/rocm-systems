@@ -59,7 +59,7 @@ THE SOFTWARE.
 
 #define ONLOAD_TRACE(str) \
   if (getenv("ROCP_ONLOAD_TRACE")) do { \
-    std::cout << "PID(" << GetPid() << "): TOOL::" << __FUNCTION__ << " " << str << std::endl << std::flush; \
+    std::cout << "PID(" << GetPid() << "): TRACER_TOOL::" << __FUNCTION__ << " " << str << std::endl << std::flush; \
   } while(0);
 #define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
 #define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
