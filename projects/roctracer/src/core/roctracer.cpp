@@ -284,7 +284,7 @@ typedef std::map<activity_correlation_id_t, activity_correlation_id_t> correlati
 typedef std::mutex correlation_id_mutex_t;
 correlation_id_map_t* correlation_id_map = NULL;
 correlation_id_mutex_t correlation_id_mutex;
-bool correlation_id_wait = false;
+bool correlation_id_wait = true;
 
 static thread_local std::stack<activity_correlation_id_t> external_id_stack;
 
@@ -827,6 +827,10 @@ static roctracer_status_t roctracer_enable_activity_fun(
           roctracer::correlation_id_wait = true;
           fprintf(stdout, "roctracer: HCC correlation ID wait enabled\n"); fflush(stdout);
         }
+        if (getenv("ROCP_HCC_CORRID_NOWAIT") != NULL) {
+          roctracer::correlation_id_wait = false;
+          fprintf(stdout, "roctracer: HCC correlation ID wait disabled\n"); fflush(stdout);
+        }
         roctracer::HccLoader::Instance().InitActivityCallback((void*)roctracer::HCC_ActivityIdCallback,
                                                               (void*)roctracer::HCC_AsyncActivityCallback,
                                                               (void*)pool);
@@ -1064,7 +1068,6 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
       const char* hip_lib_name = "libamdhip64.so";
       roctracer::HccLoader::SetLibName(hip_lib_name);
       roctracer::HipLoader::SetLibName(hip_lib_name);
-      roctracer::correlation_id_wait = true;
 #endif
       mark_api_callback_ptr = reinterpret_cast<mark_api_callback_t*>(properties);
       break;
