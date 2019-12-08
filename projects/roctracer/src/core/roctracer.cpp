@@ -332,6 +332,7 @@ void* HIP_SyncActivityCallback(
       data = &(top.data.hip);
       data_ptr = const_cast<hip_api_data_t*>(data);
       data_ptr->phase = phase;
+      data_ptr->correlation_id = 0;
     }
 
     // Filing record info
