@@ -716,10 +716,8 @@ static roctracer_status_t roctracer_disable_callback_fun(
     case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: break;
     case ACTIVITY_DOMAIN_HIP_API: {
-#if !HIP_VDI
       hipError_t hip_err = roctracer::HipLoader::Instance().RemoveApiCallback(op);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveApiCallback error(" << hip_err << ")");
-#endif
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
@@ -911,10 +909,8 @@ static roctracer_status_t roctracer_disable_activity_fun(
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-#if !HIP_VDI
       const hipError_t hip_err = roctracer::HipLoader::Instance().RemoveActivityCallback(op);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveActivityCallback error(" << hip_err << ")");
-#endif
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: break;
