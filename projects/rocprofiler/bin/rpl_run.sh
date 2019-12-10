@@ -241,6 +241,7 @@ run() {
   fi
   if [ "$HIP_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":hip"
+    export LD_PRELOAD=libmcwamp_hsa.so
   fi
   if [ "$SYS_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":sys"
