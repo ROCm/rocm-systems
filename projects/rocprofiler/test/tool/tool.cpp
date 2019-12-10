@@ -1019,6 +1019,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     auto it = entry->opts.find("name");
     if (it == entry->opts.end()) fatal("ROCProfiler: trace name is missing");
     const std::string& name = it->second;
+    if ((name != "SQTT") && (name != "SPM")) break;
     if (name == "SPM") is_spm_trace = true;
 
     traces_found++;
