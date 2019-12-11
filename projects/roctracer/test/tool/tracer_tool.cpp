@@ -717,11 +717,9 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     uint32_t ctrl_delay = 0;
     uint32_t ctrl_len = 0;
     uint32_t ctrl_rate = 0;
-    int ret = sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate);
-    if (ret != 3) {
-      fprintf(stderr, "ROCTracer: control rate value invalid 'delay:length:rate': '%s'\n", ctrl_str);
-      abort();
-    }
+
+    sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate);
+
     if (ctrl_len > ctrl_rate) {
       fprintf(stderr, "ROCTracer: control length value (%u) > rate value (%u)\n", ctrl_len, ctrl_rate);
       abort();
@@ -730,15 +728,18 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     control_len_us = ctrl_len;
     control_delay_us = ctrl_delay;
 
-    fprintf(stdout, "ROCTracer: trace control: delay(%uus), length(%uus), rate(%uus)\n", ctrl_delay, ctrl_len, ctrl_rate); fflush(stdout);
-
     roctracer_stop();
 
-    pthread_t thread;
-    pthread_attr_t attr;
-    int err = pthread_attr_init(&attr);
-    if (err) { errno = err; perror("pthread_attr_init"); abort(); }
-    err = pthread_create(&thread, &attr, control_thr_fun, NULL);
+    if (ctrl_delay != UINT32_MAX) {
+      fprintf(stdout, "ROCTracer: trace control: delay(%uus), length(%uus), rate(%uus)\n", ctrl_delay, ctrl_len, ctrl_rate); fflush(stdout);
+      pthread_t thread;
+      pthread_attr_t attr;
+      int err = pthread_attr_init(&attr);
+      if (err) { errno = err; perror("pthread_attr_init"); abort(); }
+      err = pthread_create(&thread, &attr, control_thr_fun, NULL);
+    } else {
+      fprintf(stdout, "ROCTracer: trace start disabled\n"); fflush(stdout);
+    }
   }
 
   // Enable KFD API callbacks/activity
