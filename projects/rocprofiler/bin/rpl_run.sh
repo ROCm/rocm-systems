@@ -233,16 +233,17 @@ run() {
   fi
 
   API_TRACE=""
+  LD_PRELOAD=""
   if [ "$ROCTX_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":roctx"
   fi
   if [ "$KFD_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":kfd"
-    export LD_PRELOAD="libkfdwrapper64.so libhsakmt.so.1"
+    export LD_PRELOAD="libkfdwrapper64.so libhsakmt.so.1 $LD_PRELOAD"
   fi
   if [ "$HIP_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":hip"
-    export LD_PRELOAD=libmcwamp_hsa.so
+    export LD_PRELOAD="libmcwamp_hsa.so $LD_PRELOAD"
   fi
   if [ "$SYS_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":sys"
