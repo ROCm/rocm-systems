@@ -46,7 +46,7 @@ class BaseLoader : public T {
 
   private:
   BaseLoader() {
-    const int flags = RTLD_LAZY|RTLD_NOLOAD;
+    const int flags = (to_load_ == true) ? RTLD_LAZY : RTLD_LAZY|RTLD_NOLOAD;
     handle_ = dlopen(lib_name_, flags);
     if (handle_ == NULL) {
       fprintf(stderr, "roctracer: Loading '%s' failed, %s\n", lib_name_, dlerror());
@@ -60,6 +60,8 @@ class BaseLoader : public T {
   ~BaseLoader() {
     if (handle_ != NULL) dlclose(handle_);
   }
+
+  static bool to_load_;
 
   static mutex_t mutex_;
   static const char* lib_name_;
@@ -171,9 +173,11 @@ typedef BaseLoader<RocTxApi> RocTxLoader;
 #define LOADER_INSTANTIATE() \
   template<class T> typename roctracer::BaseLoader<T>::mutex_t roctracer::BaseLoader<T>::mutex_; \
   template<class T> std::atomic<roctracer::BaseLoader<T>*> roctracer::BaseLoader<T>::instance_{}; \
+  template<class T> bool roctracer::BaseLoader<T>::to_load_ = false; \
   template<> const char* roctracer::HipLoader::lib_name_ = "libhip_hcc.so"; \
-  template<> const char* roctracer::HccLoader::lib_name_ = "libmcwamp_hsa.so"; \
+  template<> const char* roctracer::HccLoader::lib_name_ = "libmcwamp.so"; \
   template<> const char* roctracer::KfdLoader::lib_name_ = "libkfdwrapper64.so"; \
-  template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so";
+  template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so"; \
+  template<> bool roctracer::RocTxLoader::to_load_ = true;
 
 #endif // SRC_CORE_LOADER_H_
