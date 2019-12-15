@@ -1,0 +1,85 @@
+
+// Copyright (c) 2019 - present Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+syntax = "proto3";
+
+// option java_multiple_files = true;
+// option java_package = "io.grpc.examples.helloworld";
+// option java_outer_classname = "HelloWorldProto";
+// option objc_class_prefix = "HLW";
+
+package rdc;
+ 
+// rsmi_num_monitor_devices()
+message GetNumDevicesRequest {
+}
+message GetNumDevicesResponse {
+    uint64 val = 1;
+    uint64 ret_val = 2;
+}
+
+/* GetNumDevices */
+message VerifyConnectionRequest {
+    string name = 1;
+}
+message VerifyConnectionResponse {
+    string message = 1;
+}
+
+/* GetTemperature */
+message GetTemperatureRequest {
+    uint32 dv_ind = 1;
+    uint32 sensor_type = 2;
+    enum TemperatureMetric {
+        RSMI_TEMP_CURRENT = 0;
+        RSMI_TEMP_MAX = 1;
+        RSMI_TEMP_MIN = 2;
+        RSMI_TEMP_MAX_HYST = 3;
+        RSMI_TEMP_MIN_HYST = 4;
+        RSMI_TEMP_CRITICAL = 5;
+        RSMI_TEMP_CRITICAL_HYST = 6;
+        RSMI_TEMP_EMERGENCY = 7;
+        RSMI_TEMP_EMERGENCY_HYST = 8;
+        RSMI_TEMP_CRIT_MIN = 9;
+        RSMI_TEMP_CRIT_MIN_HYST = 10;
+        RSMI_TEMP_OFFSET = 11;
+        RSMI_TEMP_LOWEST = 12;
+        RSMI_TEMP_HIGHEST = 13;
+    }
+    TemperatureMetric metric = 3;
+}
+message GetTemperatureResponse {
+    int64 temperature = 1;
+    uint64 ret_val = 2;
+}
+
+// The greeting service definition.
+service Rsmi {
+    // RDC admin services
+    rpc VerifyConnection (VerifyConnectionRequest) returns (VerifyConnectionResponse) {}
+
+    // RSMI ID services
+    rpc GetNumDevices (GetNumDevicesRequest) returns(GetNumDevicesResponse) {}
+
+    // RSMI Physical Queries
+    rpc GetTemperature(GetTemperatureRequest) returns(GetTemperatureResponse) {}
+}
+
