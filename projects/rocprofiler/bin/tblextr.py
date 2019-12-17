@@ -446,6 +446,10 @@ else:
   statfile = re.sub(r'\.csv$', '.stats.csv', csvfile)
   jsonfile = re.sub(r'\.csv$', '.json', csvfile)
 
+  hsa_statfile = re.sub(r'\.stats\.csv$', r'.hsa_stats.csv', statfile)
+  hip_statfile = re.sub(r'\.stats\.csv$', r'.hip_stats.csv', statfile)
+  kfd_statfile = re.sub(r'\.stats\.csv$', r'.kfd_stats.csv', statfile)
+
   with open(dbfile, mode='w') as fd: fd.truncate()
   db = SQLiteDB(dbfile)
 
@@ -494,9 +498,8 @@ else:
       dform.gen_kernel_json_trace(db, 'A', GPU_BASE_PID, START_US, jsonfile)
 
   if hsa_trace_found:
-    statfile = re.sub(r'stats', r'hsa_stats', statfile)
     dform.post_process_data(db, 'HSA')
-    dform.gen_table_bins(db, 'HSA', statfile, 'Name', 'DurationNs')
+    dform.gen_table_bins(db, 'HSA', hsa_statfile, 'Name', 'DurationNs')
     dform.gen_api_json_trace(db, 'HSA', START_US, jsonfile)
 
   if hsa_activity_found:
@@ -504,18 +507,16 @@ else:
     dform.gen_api_json_trace(db, 'COPY', START_US, jsonfile)
 
   if hip_trace_found:
-    statfile = re.sub(r'stats', r'hip_stats', statfile)
     dform.post_process_data(db, 'HIP')
-    dform.gen_table_bins(db, 'HIP', statfile, 'Name', 'DurationNs')
+    dform.gen_table_bins(db, 'HIP', hip_statfile, 'Name', 'DurationNs')
     dform.gen_api_json_trace(db, 'HIP', START_US, jsonfile)
 
     dform.post_process_data(db, 'OPS')
     dform.gen_ops_json_trace(db, 'OPS', GPU_BASE_PID, START_US, jsonfile)
 
   if kfd_trace_found:
-    statfile = re.sub(r'stats', r'kfd_stats', statfile)
     dform.post_process_data(db, 'KFD')
-    dform.gen_table_bins(db, 'KFD', statfile, 'Name', 'DurationNs')
+    dform.gen_table_bins(db, 'KFD', kfd_statfile, 'Name', 'DurationNs')
     dform.gen_api_json_trace(db, 'KFD', START_US, jsonfile)
 
   if any_trace_found:
