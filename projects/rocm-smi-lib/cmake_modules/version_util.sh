@@ -23,7 +23,11 @@ commits_since_last_tag() {
   CURR_CMT_NUM=`git rev-list --count $CURRENT_TAG`
 
   # Commits since prevous tag:
-  let NUM_COMMITS="${CURR_CMT_NUM}-${PREV_CMT_NUM}"
+  if [[ -z $PREV_CMT_NUM || -z $CURR_CMT_NUM ]]; then
+    let NUM_COMMITS="0"
+  else
+    let NUM_COMMITS="${CURR_CMT_NUM}-${PREV_CMT_NUM}"
+  fi
   echo $NUM_COMMITS
 }
 

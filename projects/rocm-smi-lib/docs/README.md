@@ -21,7 +21,7 @@ In order to build the latest documentation, the following are required:
 
 The source code for ROCm SMI is available on [Github](https://github.com/RadeonOpenCompute/rocm_smi_lib).
 
-After the the ROCm SMI library git repository has been cloned to a local Linux machine, building the library is achieved by following the typical CMake build sequence. Specifically,
+After the ROCm SMI library git repository has been cloned to a local Linux machine, building the library is achieved by following the typical CMake build sequence. Specifically,
 ##### ```$ mk -p build```
 ##### ```$ cd build```
 ##### ```$ cmake <location of root of ROCm SMI library CMakeLists.txt>```
