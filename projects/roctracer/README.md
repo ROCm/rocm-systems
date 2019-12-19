@@ -45,9 +45,10 @@ Includes basic API: roctxMark, roctxRangePush, roctxRangePop.
   git clone -b amd-master https://github.com/ROCm-Developer-Tools/roctracer
 
  - Set environment:
+  export CMAKE_PREFIX_PATH=/opt/rocm
+ - To use custom HIP/HCC versions:
   export HIP_PATH=/opt/rocm/hip
   export HCC_HOME=/opt/rocm/hcc
-  export CMAKE_PREFIX_PATH=/opt/rocm
 
  - Build ROCtracer
   export CMAKE_BUILD_TYPE=<debug|release> # release by default
