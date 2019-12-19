@@ -50,15 +50,15 @@ Includes basic API: roctxMark, roctxRangePush, roctxRangePop.
   export HIP_PATH=/opt/rocm/hip
   export HCC_HOME=/opt/rocm/hcc
 
- - Build ROCtracer
+ - To build roctracer library:
   export CMAKE_BUILD_TYPE=<debug|release> # release by default
   cd <your path>/roctracer && mkdir build && cd build && cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm .. && make -j <nproc>
 
- - To build and run test
+ - To build and run test:
   make mytest
   run.sh
   
- - To install
+ - To install:
   make install
  or
   make package && dpkg -i *.deb
