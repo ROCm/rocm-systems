@@ -106,7 +106,6 @@ add_custom_target ( so-roctx-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 
 install ( TARGETS "roctx64" LIBRARY DESTINATION lib )
 install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctx.h DESTINATION include )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_roctx.h DESTINATION include )
 install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-link DESTINATION ../lib RENAME ${ROCTX_LIBRARY}.so )
 
 ## KFD wrapper
