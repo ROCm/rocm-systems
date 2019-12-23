@@ -21,50 +21,48 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <assert.h>
-#include <grpcpp/grpcpp.h>
+#ifndef CLIENT_INCLUDE_RDC_RDC_CLIENT_MAIN_H_
+#define CLIENT_INCLUDE_RDC_RDC_CLIENT_MAIN_H_
 
 #include <string>
+#include <memory>
 
 #include "rdc.grpc.pb.h"  // NOLINT
-#include "rdc/rdc_main.h"
 #include "rdc/rdc_client.h"
 
 namespace amd {
 namespace rdc {
 
-RDCChannel::RDCChannel(std::string server_ip, std::string server_port,
-            bool secure) : server_ip_(server_ip), server_port_(server_port),
-                                                    secure_channel_(secure) {}
+class RDCChannel {
+ public:
+  explicit RDCChannel(std::string server_ip, std::string server_port,
+                                                         bool secure_channel);
+  ~RDCChannel();
 
-RDCChannel::~RDCChannel() {
-}
+  rdc_status_t Initialize(void);
 
-rdc_status_t
-RDCChannel::Initialize(void) {
-  assert(!server_port_.empty());
-  assert(!server_ip_.empty());
+  // Getters and Setters
 
-  std::string addr_str = server_ip() + ":";
-  addr_str += server_port();
+  // Don't have setter for server ip and ports; we don't want to change those
+  // after construction
+  std::string server_ip(void) const {return server_ip_;}
+  std::string server_port(void) const {return server_port_;}
+  bool secure_channel(void) const {return secure_channel_;}
+  std::shared_ptr<::rdc::Rsmi::Stub> rsmi_stub(void) const {return rsmi_stub_;}
+  std::shared_ptr<::rdc::RdcAdmin::Stub> rdc_admin_stub(void) const {
+                                                      return rdc_admin_stub_;}
+  std::shared_ptr<grpc::Channel> const channel(void) {return channel_;}
 
-  std::shared_ptr<grpc::Channel> channel;
-
-  if (secure_channel_) {
-    // Not yet supported
-    return RDC_STATUS_GRPC_UNIMPLEMENTED;
-  } else {
-    channel = ::grpc::CreateChannel(addr_str,
-                                          grpc::InsecureChannelCredentials());
-  }
-
-  stub_ = ::rdc::Rsmi::NewStub(channel);
-
-  if (stub_ == nullptr) {
-    return RDC_STATUS_GRPC_RESOURCE_EXHAUSTED;
-  }
-  return RDC_STATUS_SUCCESS;
-}
+ private:
+  std::string server_ip_;
+  std::string server_port_;
+  bool secure_channel_;
+  std::shared_ptr<::rdc::Rsmi::Stub> rsmi_stub_;
+  std::shared_ptr<::rdc::RdcAdmin::Stub> rdc_admin_stub_;
+  std::shared_ptr<grpc::Channel> channel_;
+};
 
 }  // namespace rdc
 }  // namespace amd
+
+#endif  // CLIENT_INCLUDE_RDC_RDC_CLIENT_MAIN_H_

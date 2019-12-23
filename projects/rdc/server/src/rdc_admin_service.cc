@@ -1,3 +1,4 @@
+
 /*
 Copyright (c) 2019 - present Advanced Micro Devices, Inc. All rights reserved.
 
@@ -19,37 +20,30 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef SERVER_INCLUDE_RDC_RDC_MAIN_H_
-#define SERVER_INCLUDE_RDC_RDC_MAIN_H_
-
+#include <assert.h>
 #include <grpcpp/grpcpp.h>
+#include <unistd.h>
 
-#include <string>
+#include <iostream>
+#include <sstream>
 #include <memory>
+#include <string>
+#include <csignal>
 
-#include "rdc/rdc_rsmi_service.h"
+#include "rdc.grpc.pb.h"  // NOLINT
+#include "rdc/rdc_admin_service.h"
 
-class RDCServer {
- public:
-    RDCServer();
-    ~RDCServer();
+RDCAdminServiceImpl::RDCAdminServiceImpl() {
+}
 
-    void Initialize();
+RDCAdminServiceImpl::~RDCAdminServiceImpl() {
+}
+::grpc::Status
+RDCAdminServiceImpl::VerifyConnection(::grpc::ServerContext* context,
+                            const rdc::VerifyConnectionRequest* request,
+                              rdc::VerifyConnectionResponse* reply) {
+  (void)context;  // Quiet warning for now
 
-    void Run(void);
-
-    bool start_rsmi_service(void) const {return start_rsmi_service_;}
-    void set_start_rsmi_service(bool s) {start_rsmi_service_ = s;}
-
-    void ShutDown(void);
-
- private:
-    void HandleSignal(int sig);
-    std::string server_address_;
-    bool start_rsmi_service_;
-    std::unique_ptr<::grpc::Server> server_;
-
-    RsmiServiceImpl *rsmi_service_;
-};
-
-#endif  // SERVER_INCLUDE_RDC_RDC_MAIN_H_
+  reply->set_echo_magic_num(request->magic_num());
+  return ::grpc::Status::OK;
+}

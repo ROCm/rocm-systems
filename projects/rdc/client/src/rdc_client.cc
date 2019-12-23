@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2019 - present Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2019 - Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,10 +22,11 @@ THE SOFTWARE.
 
 #include <grpcpp/grpcpp.h>
 
+#include <time.h>
 #include <unistd.h>
 #include <iostream>
 
-#include "rdc/rdc_main.h"
+#include "rdc/rdc_client_main.h"
 #include "rdc/rdc_client.h"
 #include "common/rdc_utils.h"
 #include "rdc/rdc_exception.h"
@@ -113,6 +114,45 @@ rdc_channel_create(rdc_channel_t *channel, const char *ip,
 
   CATCH
 }
+rdc_status_t
+rdc_channel_state_get(rdc_channel_t channel, bool try_to_connect,
+                                             grpc_connectivity_state *state) {
+  TRY
+  CHK_PTR_ARG(state)
+  UINTPTR_TO_RDC_CHAN(channel)
+
+  *state = ch->channel()->GetState(try_to_connect);
+  return RDC_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rdc_status_t
+rdc_channel_connection_verify(rdc_channel_t channel) {
+  TRY
+  UINTPTR_TO_RDC_CHAN(channel)
+
+  ::rdc::VerifyConnectionResponse resp;
+  ::rdc::VerifyConnectionRequest req;
+  ::grpc::ClientContext context;
+  unsigned int seed = time(NULL);
+
+  req.set_magic_num(static_cast<uint64_t>(rand_r(&seed)));
+  ::grpc::Status status =
+                 ch->rdc_admin_stub()->VerifyConnection(&context, req, &resp);
+
+  if (!status.ok()) {
+    return amd::rdc::GrpcErrorToRdcError(status.error_code());
+  }
+
+  if (resp.echo_magic_num() != req.magic_num()) {
+    return RDC_STATUS_GRPC_DATA_LOSS;
+  }
+
+  return RDC_STATUS_SUCCESS;
+
+  CATCH
+}
 
 rdc_status_t
 rdc_channel_destroy(rdc_channel_t channel) {
@@ -135,7 +175,8 @@ rdc_num_gpus_get(rdc_channel_t channel, uint64_t *num_gpu) {
   ::rdc::GetNumDevicesResponse resp;
   ::rdc::GetNumDevicesRequest empty;
   ::grpc::ClientContext context;
-  ::grpc::Status status = ch->stub()->GetNumDevices(&context, empty, &resp);
+  ::grpc::Status status =
+                       ch->rsmi_stub()->GetNumDevices(&context, empty, &resp);
 
   if (!status.ok()) {
     return amd::rdc::GrpcErrorToRdcError(status.error_code());
@@ -171,7 +212,8 @@ rdc_dev_temp_metric_get(rdc_channel_t channel, uint32_t dv_ind,
   in_args.set_dv_ind(dv_ind);
   in_args.set_sensor_type(sensor_type);
 
-  ::grpc::Status status = ch->stub()->GetTemperature(&context, in_args, &resp);
+  ::grpc::Status status =
+                    ch->rsmi_stub()->GetTemperature(&context, in_args, &resp);
 
   if (!status.ok()) {
     return ::amd::rdc::GrpcErrorToRdcError(status.error_code());

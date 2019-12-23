@@ -1,4 +1,3 @@
-
 /*
 Copyright (c) 2019 - present Advanced Micro Devices, Inc. All rights reserved.
 
@@ -20,23 +19,21 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#ifndef SERVER_INCLUDE_RDC_RDC_ADMIN_SERVICE_H_
+#define SERVER_INCLUDE_RDC_RDC_ADMIN_SERVICE_H_
 
-#include "rdc/rdc_client.h"
 #include "rdc.grpc.pb.h"  // NOLINT
+#include "rocm_smi/rocm_smi.h"
+#include "rdc/rdc_admin_service.h"
 
-#include "common/rdc_utils.h"
+class RDCAdminServiceImpl final : public ::rdc::RdcAdmin::Service {
+ public:
+    RDCAdminServiceImpl();
+    ~RDCAdminServiceImpl();
+    ::grpc::Status VerifyConnection(::grpc::ServerContext* context,
+                                const rdc::VerifyConnectionRequest* request,
+                              rdc::VerifyConnectionResponse* reply) override;
+ private:
+};
 
-namespace amd {
-namespace rdc {
-
-rdc_status_t GrpcErrorToRdcError(grpc::StatusCode grpc_err) {
-  uint32_t grpc_err_int = static_cast<uint32_t>(grpc_err);
-  uint32_t rdc_grpc_base_int =
-              static_cast<uint32_t>(RDC_STATUS_GRPC_ERR_FIRST);
-  uint32_t rdc_err_int = grpc_err_int + rdc_grpc_base_int;
-
-  return static_cast<rdc_status_t>(rdc_err_int);
-}
-
-}  // namespace rdc
-}  // namespace amd
+#endif  // SERVER_INCLUDE_RDC_RDC_ADMIN_SERVICE_H_

@@ -25,8 +25,8 @@ cmake_minimum_required(VERSION 3.5.0)
 
 # ROCM_DIR should be passed in via command line; these will be used
 # in sub-projects
-set(RSMI_INC_DIR ${ROCM_DIR}/include)
-set(RSMI_LIB_DIR ${ROCM_DIR}/lib)
+set(RSMI_INC_DIR ${ROCM_DIR}/rocm_smi/include)
+set(RSMI_LIB_DIR ${ROCM_DIR}/rocm_smi/lib)
 
 ## Set default module path
 if(NOT DEFINED CMAKE_MODULE_PATH)

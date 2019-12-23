@@ -1,4 +1,3 @@
-
 /*
 Copyright (c) 2019 - present Advanced Micro Devices, Inc. All rights reserved.
 
@@ -20,43 +19,45 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#ifndef SERVER_INCLUDE_RDC_RDC_SERVER_MAIN_H_
+#define SERVER_INCLUDE_RDC_RDC_SERVER_MAIN_H_
 
-#ifndef CLIENT_INCLUDE_RDC_RDC_MAIN_H_
-#define CLIENT_INCLUDE_RDC_RDC_MAIN_H_
+#include <grpcpp/grpcpp.h>
 
 #include <string>
 #include <memory>
 
-#include "rdc.grpc.pb.h"  // NOLINT
-#include "rdc/rdc_client.h"
+#include "rdc/rdc_rsmi_service.h"
+#include "rdc/rdc_admin_service.h"
 
-namespace amd {
-namespace rdc {
-
-class RDCChannel {
+class RDCServer {
  public:
-  explicit RDCChannel(std::string server_ip, std::string server_port,
-                                                         bool secure_channel);
-  ~RDCChannel();
+    RDCServer();
+    ~RDCServer();
 
-  rdc_status_t Initialize(void);
+    void Initialize();
 
-  // Getters and Setters
+    void Run(void);
 
-  // Don't have setter for server ip and ports; we don't want to change those
-  // after construction
-  std::string server_ip(void) const {return server_ip_;}
-  std::string server_port(void) const {return server_port_;}
-  bool secure_channel(void) const {return secure_channel_;}
-  std::shared_ptr<::rdc::Rsmi::Stub> stub(void) const {return stub_;}
+    bool start_rsmi_service(void) const {return start_rsmi_service_;}
+    void set_start_rsmi_service(bool s) {start_rsmi_service_ = s;}
+
+    bool start_rdc_admin_service(void) const {return start_rdc_admin_service_;}
+    void set_start_rdc_admin_service(bool s) {start_rdc_admin_service_ = s;}
+
+    void ShutDown(void);
+
  private:
-  std::string server_ip_;
-  std::string server_port_;
-  bool secure_channel_;
-  std::shared_ptr<::rdc::Rsmi::Stub> stub_;
+    void HandleSignal(int sig);
+    std::string server_address_;
+    std::unique_ptr<::grpc::Server> server_;
+
+    bool start_rsmi_service_;
+    RsmiServiceImpl *rsmi_service_;
+
+    bool start_rdc_admin_service_;
+    RDCAdminServiceImpl *rdc_admin_service_;
 };
 
-}  // namespace rdc
-}  // namespace amd
+#endif  // SERVER_INCLUDE_RDC_RDC_SERVER_MAIN_H_
 
-#endif  // CLIENT_INCLUDE_RDC_RDC_MAIN_H_

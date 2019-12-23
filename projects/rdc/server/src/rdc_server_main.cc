@@ -36,7 +36,7 @@ THE SOFTWARE.
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rocm_smi/rocm_smi.h"
-#include "rdc/rdc_main.h"
+#include "rdc/rdc_server_main.h"
 #include "rdc/rdc_rsmi_service.h"
 
 static bool sShutDownServer = false;
@@ -46,7 +46,7 @@ static const char *kRDCDHomeDir = "/";
 static const char *kDaemonLockFile = "/var/run/rdcd.lock";
 
 RDCServer::RDCServer() : server_address_("0.0.0.0:50051"),
-                                                      rsmi_service_(nullptr) {
+                         rsmi_service_(nullptr), rdc_admin_service_(nullptr) {
 }
 
 RDCServer::~RDCServer() {
@@ -66,6 +66,10 @@ RDCServer::Run() {
 
   // Register services as the instances through which we'll communicate with
   // clients. These are synchronous services.
+  if (start_rdc_admin_service()) {
+    rdc_admin_service_ = new RDCAdminServiceImpl();
+    builder.RegisterService(rdc_admin_service_);
+  }
 
   if (start_rsmi_service()) {
     rsmi_service_ = new RsmiServiceImpl();
@@ -124,6 +128,11 @@ RDCServer::ShutDown(void) {
   if (rsmi_service_) {
     delete rsmi_service_;
     rsmi_service_ = nullptr;
+  }
+
+  if (rdc_admin_service_) {
+    delete rdc_admin_service_;
+    rdc_admin_service_ = nullptr;
   }
 }
 
@@ -268,6 +277,8 @@ int main(int argc, char** argv) {
 
   // TODO(cfreehil): Eventually, set these by reading a config file
   rdc_server.set_start_rsmi_service(true);
+  rdc_server.set_start_rdc_admin_service(true);
+
   // rdc_server.set_secure_communications(false);
   // rdc_server.set_address("0.0.0.0:50051")
 

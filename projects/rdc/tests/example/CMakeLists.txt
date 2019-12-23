@@ -41,9 +41,6 @@ endif ()
 
 # Required Defines first:
 
-set(RSMI_INC_DIR ${ROCM_DIR}/include)
-set(RSMI_LIB_DIR ${ROCM_DIR}/lib)
-
 message("")
 message("Build Configuration:")
 message("-----------BuildType: " ${CMAKE_BUILD_TYPE})
@@ -53,7 +50,6 @@ message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
 message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-message("--------RSMI Lib Dir: " ${RSMI_LIB_DIR})
 message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
 message("")
 
@@ -66,8 +62,6 @@ include(utils)
 ## Verbose output.
 set(CMAKE_VERBOSE_MAKEFILE on)
 
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../client/include"
-                     "${PROTOB_OUT_DIR}" "${RSMI_INC_DIR}")
 set(EXAMPLE_SRC_LIST "${SRC_DIR}/rdc_client_test.cc")
 
 message("EXAMPLE_SRC_LIST=${EXAMPLE_SRC_LIST}")
@@ -77,6 +71,11 @@ set(CLIENT_LIB_INC_LIST "${INC_DIR}/rdc_client.h")
 set(TEST_CLIENT_EXE "rdc_test_client")
 
 add_executable(${TEST_CLIENT_EXE} "${EXAMPLE_SRC_LIST}")
+
+target_include_directories(${TEST_CLIENT_EXE} PRIVATE
+                            "${CMAKE_CURRENT_SOURCE_DIR}/../../client/include"
+                            "${RSMI_INC_DIR}")
+
 target_link_libraries(${TEST_CLIENT_EXE} rdc_client)
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

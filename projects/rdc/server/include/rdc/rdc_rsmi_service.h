@@ -33,10 +33,6 @@ class RsmiServiceImpl final : public ::rdc::Rsmi::Service {
 
     rsmi_status_t Initialize(uint64_t rsmi_init_flags = 0);
 
-    ::grpc::Status VerifyConnection(::grpc::ServerContext* context,
-                                const rdc::VerifyConnectionRequest* request,
-                              rdc::VerifyConnectionResponse* reply) override;
-
     ::grpc::Status
     GetNumDevices(::grpc::ServerContext* context,
                                    const ::rdc::GetNumDevicesRequest* request,

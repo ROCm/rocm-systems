@@ -61,15 +61,6 @@ RsmiServiceImpl::Initialize(uint64_t rsmi_init_flags) {
   }
   return rsmi_ret;
 }
-::grpc::Status
-RsmiServiceImpl::VerifyConnection(::grpc::ServerContext* context,
-                            const rdc::VerifyConnectionRequest* request,
-                              rdc::VerifyConnectionResponse* reply) {
-  (void)context;  // Quiet warning for now
-  std::string prefix("Hello ");
-  reply->set_message(prefix + request->name());
-  return ::grpc::Status::OK;
-}
 
 ::grpc::Status
 RsmiServiceImpl::GetNumDevices(::grpc::ServerContext* context,

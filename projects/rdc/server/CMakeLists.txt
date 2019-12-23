@@ -71,7 +71,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include
                      "${PROTOB_OUT_DIR}" "${RSMI_INC_DIR}")
 
 set(SERVER_SRC_LIST "${SRC_DIR}/rdc_rsmi_service.cc")
-set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${SRC_DIR}/rdc_main.cc")
+set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${SRC_DIR}/rdc_admin_service.cc")
+set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${SRC_DIR}/rdc_server_main.cc")
 set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${PROTOBUF_GENERATED_SRCS}")
 message("SERVER_SRC_LIST=${SERVER_SRC_LIST}")
 

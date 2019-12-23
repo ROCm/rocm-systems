@@ -31,7 +31,10 @@ THE SOFTWARE.
 
 #define CHK_RET_STATUS(RET) \
   if ((RET) != RDC_STATUS_SUCCESS) { \
-    std::cout << "rdc call returned error: " << (RET) <<  std::endl; \
+    const char *err_msg_str; \
+    (void)rdc_status_string((RET), &err_msg_str); \
+    std::cout << "rdc call returned error: " << (RET) << ":\"" << \
+                                           err_msg_str << "\"" << std::endl; \
   }
 
 #define CHK_RET_STATUS_CONT(RET) \
@@ -41,11 +44,8 @@ THE SOFTWARE.
   }
 
 int main(int argc, char** argv) {
-  (void)argc;  // ignore for now
-  (void)argv;  // ignore for now
-
   rdc_status_t ret;
-  rdc_channel_t server;
+  rdc_channel_t server_ch;
   uint64_t num_gpu;
   int64_t temperature;
   std::string serv_host("localhost");
@@ -61,27 +61,39 @@ int main(int argc, char** argv) {
   std::cout << "Attempting to create channel to " << serv_host << ":" <<
                                                        serv_port << std::endl;
 
-  ret = rdc_channel_create(&server, serv_host.c_str(), serv_port.c_str(),
+  ret = rdc_channel_create(&server_ch, serv_host.c_str(), serv_port.c_str(),
                                                                        false);
   CHK_RET_STATUS(ret)
   std::cout << "Successfully created channel" << std::endl;
 
-  std::cout << "Getting number of gpus at server..." << std::endl;
-  ret = rdc_num_gpus_get(server, &num_gpu);
+  grpc_connectivity_state ch_state;
+  ret = rdc_channel_state_get(server_ch, true, &ch_state);
   CHK_RET_STATUS(ret)
-  std::cout << "Number of GPUs at server is " << num_gpu << std::endl;
+  std::cout << "Current channel state is " << ch_state << std::endl;
+
+  std::cout << "Verifying connection to server..." << std::endl;
+  ret = rdc_channel_connection_verify(server_ch);
+  CHK_RET_STATUS(ret)
+  if (ret == RDC_STATUS_SUCCESS) {
+    std::cout << "Verified connection to server." << std::endl;
+  }
+  std::cout << "Getting number of gpus at server..." << std::endl;
+  ret = rdc_num_gpus_get(server_ch, &num_gpu);
+  CHK_RET_STATUS(ret)
+  std::cout << "Number of GPUs at server is " << server_ch <<
+                                                         num_gpu << std::endl;
 
   for (uint32_t dv_ind = 0; dv_ind < num_gpu; ++dv_ind) {
     std::cout << "Info for Device " << dv_ind << ":" << std::endl;
     std::cout << "\tGetting temperature..." << std::endl;
-    ret = rdc_dev_temp_metric_get(server, dv_ind, RSMI_TEMP_TYPE_JUNCTION,
+    ret = rdc_dev_temp_metric_get(server_ch, dv_ind, RSMI_TEMP_TYPE_JUNCTION,
                                              RSMI_TEMP_CURRENT, &temperature);
     CHK_RET_STATUS_CONT(ret)
     std::cout << "\t GPU " << dv_ind << " has a temperature of " <<
                                                      temperature << std::endl;
   }
 
-  ret = rdc_channel_destroy(server);
+  ret = rdc_channel_destroy(server_ch);
   CHK_RET_STATUS(ret)
   std::cout << "Successfully destroyed channel to " << serv_host << ":" <<
                                                        serv_port << std::endl;

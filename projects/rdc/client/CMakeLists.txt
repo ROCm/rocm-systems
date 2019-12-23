@@ -67,7 +67,7 @@ set(CLIENT_LIB "rdc_client")
 set(RDC "rdc")
 set(CLIENT_LIB_COMPONENT "lib${CLIENT_LIB}")
 set(SRC_DIR "${PROJECT_SOURCE_DIR}/client/src")
-set(INC_DIR "${PROJECT_SOURCE_DIR}/client/include/rdc")
+set(RDC_CLIENT_INC_DIR "${PROJECT_SOURCE_DIR}/client/include/rdc")
 
 ################# Determine the library version #########################
 ## Setup the SO version based on git tags.
@@ -119,27 +119,30 @@ set(CMAKE_VERBOSE_MAKEFILE on)
 file(GLOB PROTOBUF_GENERATED_INCLUDES "${PROTOB_OUT_DIR}/*.h")
 file(GLOB PROTOBUF_GENERATED_SRCS "${PROTOB_OUT_DIR}/*.cc")
 
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/include"
-                     "${PROJECT_SOURCE_DIR}"
-                     "${PROTOB_OUT_DIR}" "${RSMI_INC_DIR}")
 set(CLIENT_LIB_SRC_LIST "${SRC_DIR}/rdc_client.cc")
-set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST}  "${SRC_DIR}/rdc_main.cc")
+set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST}  "${SRC_DIR}/rdc_client_main.cc")
 set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST} "${PROTOBUF_GENERATED_SRCS}")
 set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST}
                            "${PROJECT_SOURCE_DIR}/common/rdc_utils.cc")
 message("CLIENT_LIB_SRC_LIST=${CLIENT_LIB_SRC_LIST}")
 
-set(CLIENT_LIB_INC_LIST "${INC_DIR}/rdc_client.h")
-set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST} "${INC_DIR}/rdc_exception.h")
-set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST} "${INC_DIR}/rdc_main.h")
+set(CLIENT_LIB_INC_LIST "${RDC_CLIENT_INC_DIR}/rdc_client.h")
 set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST}
-                           "${PROJECT_SOURCE_DIR}/common/rdc_utils.h")
+                                      "${RDC_CLIENT_INC_DIR}/rdc_exception.h")
+set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST}
+                                    "${RDC_CLIENT_INC_DIR}/rdc_client_main.h")
+set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST}
+                                   "${PROJECT_SOURCE_DIR}/common/rdc_utils.h")
 
 add_library(${CLIENT_LIB} SHARED ${CLIENT_LIB_SRC_LIST} ${CLIENT_LIB_INC_LIST})
 target_link_libraries(${CLIENT_LIB} pthread rt grpc grpc++ grpc++_reflection
                                                                   dl protobuf)
-target_include_directories(${CLIENT_LIB} PUBLIC ${INC_DIR})
-
+target_include_directories(${CLIENT_LIB} PRIVATE
+                                         "${PROJECT_SOURCE_DIR}"
+                                         "${PROJECT_SOURCE_DIR}/include"
+                                         "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                                         "${PROTOB_OUT_DIR}"
+                                         "${RSMI_INC_DIR}")
 # TODO: set the properties for the library once we have one
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${CLIENT_LIB} PROPERTY

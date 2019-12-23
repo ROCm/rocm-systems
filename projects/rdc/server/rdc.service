@@ -7,7 +7,7 @@ Description=Radeon Data Center Daemon (rdcd)
 After=network.target
 
 # Add any services that must be started before rdcd here
-#After= 
+#After=
 
 # Add any non-service units required by rdcd here
 #Requires=

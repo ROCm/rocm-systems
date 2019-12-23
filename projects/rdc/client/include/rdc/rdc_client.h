@@ -24,6 +24,8 @@ THE SOFTWARE.
 #ifndef CLIENT_INCLUDE_RDC_RDC_CLIENT_H_
 #define CLIENT_INCLUDE_RDC_RDC_CLIENT_H_
 
+#include <grpcpp/grpcpp.h>
+
 #include <memory>
 #include <string>
 #include "rocm_smi/rocm_smi.h"
@@ -193,6 +195,64 @@ typedef uintptr_t rdc_channel_t;
 #define RDC_DEFAULT_SERVER_IP "localhost"
 
 /*****************************************************************************/
+/** @defgroup RDCAdmin RDC Administration Functions
+ *  These administrative functions are used to monitor and control, for
+ *  example RDC connectivity.
+ *  @{
+ */
+
+/**
+ * @brief Check the connection status of a channel
+ *
+ * @details Given an ::rdc_channel_t @p channel and a boolean @p
+ * try_to_connect, this function will return the grpc_connectivity_state for
+ * that channel
+ *
+ * @p channel[in] The channel for which the status will be given
+ *
+ * @param[in] try_to_connect If the channel is currently IDLE, if the argument
+ * is true, transition to CONNECTING.
+ *
+ * @param[inout] state A pointer to caller provided memory to which an
+ * the grpc_connectivity_state will be written. grpc_connectivity_state has
+ * the following possible values:
+ * GRPC_CHANNEL_IDLE               channel is idle
+ * GRPC_CHANNEL_CONNECTING         channel is connecting
+ * GRPC_CHANNEL_READY              channel is ready for work
+ * GRPC_CHANNEL_TRANSIENT_FAILURE  channel has seen a failure but expects to
+ * recover
+ * GRPC_CHANNEL_SHUTDOWN           channel has seen a failure that it cannot
+ * recover from
+ *
+ * @retval ::RDC_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rdc_status_t
+rdc_channel_state_get(rdc_channel_t channel, bool try_to_connect,
+                                              grpc_connectivity_state *state);
+
+
+/**
+ * @brief Verify a channel's connection to the server
+ *
+ * @details Given an ::rdc_channel_t @p channel, this function will send a
+ * random number to the server associated with @p channel. The server will send
+ * the number back. Upon receiving the returned message from the server, the
+ * number sent to the server is compared to the number received from the
+ * server. If the 2 numbers are the same, the connection is verified.
+ * Otherwise, an appropriate error code is returned.
+ *
+ * @p channel[in] The channel for which the connection will be verified
+ *
+ * @retval ::RDC_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rdc_status_t
+rdc_channel_connection_verify(rdc_channel_t channel);
+
+/** @} */  // end of RDCAdmin
+
+/*****************************************************************************/
 /** @defgroup InitShutAdmin Initialization and Shutdown
  *  These functions are used for initialization of RDC and clean up when
  *  done.
@@ -216,7 +276,7 @@ typedef uintptr_t rdc_channel_t;
  *
  * @param[in] port A pointer to string containing the port on which the
  * RDC server is listening
- * 
+ *
  * @param[in] secure A bool indicating whether SSL should be used for
  * communications (not currently supported)
  *
