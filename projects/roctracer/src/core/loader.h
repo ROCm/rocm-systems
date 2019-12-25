@@ -48,7 +48,7 @@ class BaseLoader : public T {
   BaseLoader() {
     const int flags = (to_load_ == true) ? RTLD_LAZY : RTLD_LAZY|RTLD_NOLOAD;
     handle_ = dlopen(lib_name_, flags);
-    if (handle_ == NULL) {
+    if ((to_check_ == true) && (handle_ == NULL)) {
       fprintf(stderr, "roctracer: Loading '%s' failed, %s\n", lib_name_, dlerror());
       abort();
     }
@@ -62,6 +62,7 @@ class BaseLoader : public T {
   }
 
   static bool to_load_;
+  static bool to_check_;
 
   static mutex_t mutex_;
   static const char* lib_name_;
@@ -174,8 +175,11 @@ typedef BaseLoader<RocTxApi> RocTxLoader;
   template<class T> typename roctracer::BaseLoader<T>::mutex_t roctracer::BaseLoader<T>::mutex_; \
   template<class T> std::atomic<roctracer::BaseLoader<T>*> roctracer::BaseLoader<T>::instance_{}; \
   template<class T> bool roctracer::BaseLoader<T>::to_load_ = false; \
+  template<class T> bool roctracer::BaseLoader<T>::to_check_ = true; \
   template<> const char* roctracer::HipLoader::lib_name_ = "libhip_hcc.so"; \
+  template<> bool roctracer::HipLoader::to_check_ = false; \
   template<> const char* roctracer::HccLoader::lib_name_ = "libmcwamp.so"; \
+  template<> bool roctracer::HccLoader::to_check_ = false; \
   template<> const char* roctracer::KfdLoader::lib_name_ = "libkfdwrapper64.so"; \
   template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so"; \
   template<> bool roctracer::RocTxLoader::to_load_ = true;
