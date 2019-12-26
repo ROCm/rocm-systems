@@ -1119,6 +1119,12 @@ PUBLIC_API void roctracer_unload(bool destruct) {
   ONLOAD_TRACE_END();
 }
 
+PUBLIC_API roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp) {
+  API_METHOD_PREFIX
+  *timestamp = util::HsaRsrcFactory::Instance().TimestampNs();
+  API_METHOD_SUFFIX
+}
+
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();

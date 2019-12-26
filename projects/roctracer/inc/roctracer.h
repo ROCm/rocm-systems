@@ -225,6 +225,10 @@ bool roctracer_load(
 
 void roctracer_unload(bool destruct);
 
+// Get system timestamp.
+roctracer_status_t roctracer_get_timestamp(
+    uint64_t* timestamp);
+
 #ifdef __cplusplus
 }  // extern "C" block
 #endif  // __cplusplus
