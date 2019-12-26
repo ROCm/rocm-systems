@@ -176,7 +176,7 @@ decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
 
 typedef decltype(roctracer_enable_op_callback)* roctracer_enable_op_callback_t;
 typedef decltype(roctracer_disable_op_callback)* roctracer_disable_op_callback_t;
-typedef decltype(roctracer_enable_op_activity)* roctracer_enable_op_activity_t;
+typedef decltype(roctracer_enable_op_activity_expl)* roctracer_enable_op_activity_t;
 typedef decltype(roctracer_disable_op_activity)* roctracer_disable_op_activity_t;
 
 struct cb_journal_data_t {
@@ -774,7 +774,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_callback()
 }
 
 // Return default pool and set new one if parameter pool is not NULL.
-PUBLIC_API roctracer_pool_t* roctracer_default_pool(roctracer_pool_t* pool) {
+PUBLIC_API roctracer_pool_t* roctracer_default_pool_expl(roctracer_pool_t* pool) {
   std::lock_guard<roctracer::memory_pool_mutex_t> lock(roctracer::memory_pool_mutex);
   roctracer_pool_t* p = reinterpret_cast<roctracer_pool_t*>(roctracer::memory_pool);
   if (pool != NULL) roctracer::memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);
@@ -782,7 +782,7 @@ PUBLIC_API roctracer_pool_t* roctracer_default_pool(roctracer_pool_t* pool) {
 }
 
 // Open memory pool
-PUBLIC_API roctracer_status_t roctracer_open_pool(
+PUBLIC_API roctracer_status_t roctracer_open_pool_expl(
     const roctracer_properties_t* properties,
     roctracer_pool_t** pool)
 {
@@ -799,7 +799,7 @@ PUBLIC_API roctracer_status_t roctracer_open_pool(
 }
 
 // Close memory pool
-PUBLIC_API roctracer_status_t roctracer_close_pool(roctracer_pool_t* pool) {
+PUBLIC_API roctracer_status_t roctracer_close_pool_expl(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   std::lock_guard<roctracer::memory_pool_mutex_t> lock(roctracer::memory_pool_mutex);
   roctracer_pool_t* ptr = (pool == NULL) ? roctracer_default_pool() : pool;
@@ -868,7 +868,7 @@ static void roctracer_enable_activity_impl(
     roctracer_enable_activity_fun((roctracer_domain_t)domain, op, pool);
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_op_activity(
+PUBLIC_API roctracer_status_t roctracer_enable_op_activity_expl(
     roctracer_domain_t domain,
     uint32_t op,
     roctracer_pool_t* pool)
@@ -878,7 +878,7 @@ PUBLIC_API roctracer_status_t roctracer_enable_op_activity(
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_domain_activity(
+PUBLIC_API roctracer_status_t roctracer_enable_domain_activity_expl(
     roctracer_domain_t domain,
     roctracer_pool_t* pool)
 {
@@ -888,7 +888,7 @@ PUBLIC_API roctracer_status_t roctracer_enable_domain_activity(
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_activity(
+PUBLIC_API roctracer_status_t roctracer_enable_activity_expl(
     roctracer_pool_t* pool)
 {
   API_METHOD_PREFIX
@@ -970,7 +970,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_activity()
 }
 
 // Flush available activity records
-PUBLIC_API roctracer_status_t roctracer_flush_activity(roctracer_pool_t* pool) {
+PUBLIC_API roctracer_status_t roctracer_flush_activity_expl(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   if (pool == NULL) pool = roctracer_default_pool();
   roctracer::MemoryPool* memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);

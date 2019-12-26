@@ -20,32 +20,39 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <iostream>
+#include <stdio.h>
 
-// roctracer extension API
-#include <inc/roctracer_ext.h>
-
-// hip header file
-#include <hip/hip_runtime.h>
+#ifdef __cplusplus
+#include <cstdlib>
+using namespace std;
+#else
+#include <stdlib.h>
+#endif
 
 // roctx header file
 #include <inc/roctx.h>
+// roctracer extension API
+#include <inc/roctracer_ext.h>
 
-// kfd header file
-#include <inc/roctracer_kfd.h>
+#if HIP_TEST
+// hip header file
+#include <hip/hip_runtime.h>
+// Macro to call HIP API
+#define HIP_CALL(call) do { call; } while(0)
+#else
+#define HIP_CALL(call) do {} while(0)
+#endif
 
 #ifndef ITERATIONS
 # define ITERATIONS 101
 #endif
 #define WIDTH 1024
-
-
 #define NUM (WIDTH * WIDTH)
-
 #define THREADS_PER_BLOCK_X 4
 #define THREADS_PER_BLOCK_Y 4
 #define THREADS_PER_BLOCK_Z 1
 
+#if HIP_TEST
 // Device (Kernel) function, it must be void
 __global__ void matrixTranspose(float* out, float* in, const int width) {
     int x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
@@ -53,6 +60,7 @@ __global__ void matrixTranspose(float* out, float* in, const int width) {
 
     out[y * width + x] = in[x * width + y];
 }
+#endif
 
 // CPU implementation of matrix transpose
 void matrixTransposeCPUReference(float* output, float* input, const unsigned int width) {
@@ -76,10 +84,12 @@ int main() {
     float* gpuMatrix;
     float* gpuTransposeMatrix;
 
+#if HIP_TEST
     hipDeviceProp_t devProp;
-    hipGetDeviceProperties(&devProp, 0);
+    HIP_CALL(hipGetDeviceProperties(&devProp, 0));
 
-    std::cout << "Device name " << devProp.name << std::endl;
+    printf("Device name %s\n", devProp.name);
+#endif
 
     int i;
     int errors;
@@ -99,8 +109,8 @@ int main() {
     }
 
     // allocate the memory on the device side
-    hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
-    hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
+    HIP_CALL(hipMalloc((void**)&gpuMatrix, NUM * sizeof(float)));
+    HIP_CALL(hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float)));
 
     // correlation reagion32
     roctracer_activity_push_external_correlation_id(31);
@@ -108,7 +118,7 @@ int main() {
     roctracer_activity_push_external_correlation_id(32);
 
     // Memory transfer from host to device
-    hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
+    HIP_CALL(hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice));
 
     // correlation reagion33
     roctracer_activity_push_external_correlation_id(33);
@@ -117,9 +127,9 @@ int main() {
     roctxRangePush("hipLaunchKernel");
 
     // Lauching kernel from host
-    hipLaunchKernelGGL(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
-                    dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
-                    gpuMatrix, WIDTH);
+    HIP_CALL(hipLaunchKernelGGL(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
+                                dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
+                                gpuMatrix, WIDTH));
 
     roctxMark("after hipLaunchKernel");
 
@@ -129,39 +139,40 @@ int main() {
     // Memory transfer from device to host
     roctxRangePush("hipMemcpy");
 
-    hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
+    HIP_CALL(hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost));
 
     roctxRangePop(); // for "hipMemcpy"
     roctxRangePop(); // for "hipLaunchKernel"
 
     // correlation reagion end
-    roctracer_activity_pop_external_correlation_id();
+    roctracer_activity_pop_external_correlation_id(NULL);
 
     // CPU MatrixTranspose computation
-    matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);
+    HIP_CALL(matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH));
 
     // verify the results
     errors = 0;
     double eps = 1.0E-6;
     for (i = 0; i < NUM; i++) {
-        if (std::abs(TransposeMatrix[i] - cpuTransposeMatrix[i]) > eps) {
+        if (abs(TransposeMatrix[i] - cpuTransposeMatrix[i]) > eps) {
             errors++;
         }
     }
-    if (errors != 0) {
+    if ((HIP_TEST != 0) && (errors != 0)) {
         printf("FAILED: %d errors\n", errors);
     } else {
+        errors = 0;
         printf("PASSED!\n");
     }
 
     // free the resources on device side
-    hipFree(gpuMatrix);
-    hipFree(gpuTransposeMatrix);
+    HIP_CALL(hipFree(gpuMatrix));
+    HIP_CALL(hipFree(gpuTransposeMatrix));
 
     // correlation reagion end
-    roctracer_activity_pop_external_correlation_id();
+    roctracer_activity_pop_external_correlation_id(NULL);
     // correlation reagion end
-    roctracer_activity_pop_external_correlation_id();
+    roctracer_activity_pop_external_correlation_id(NULL);
 
     // free the resources on host side
     free(Matrix);
@@ -180,6 +191,7 @@ int main() {
 #if 1
 #include <inc/roctracer_hip.h>
 #include <inc/roctracer_hcc.h>
+#include <inc/roctracer_kfd.h>
 #include <inc/roctracer_roctx.h>
 
 // Macro to check ROC-tracer calls status
@@ -187,7 +199,7 @@ int main() {
   do {                                                                                             \
     int err = call;                                                                                \
     if (err != 0) {                                                                                \
-      std::cerr << roctracer_error_string() << std::endl << std::flush;                            \
+      fprintf(stderr, "%s\n", roctracer_error_string());                                                    \
       abort();                                                                                     \
     }                                                                                              \
   } while (0)
@@ -202,12 +214,12 @@ void api_callback(
   (void)arg;
 
   if (domain == ACTIVITY_DOMAIN_ROCTX) {
-    const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
+    const roctx_api_data_t* data = (const roctx_api_data_t*)(callback_data);
     fprintf(stdout, "<rocTX \"%s\">\n", data->args.message);
     return;
   }
   if (domain == ACTIVITY_DOMAIN_KFD_API) {
-    const kfd_api_data_t* data = reinterpret_cast<const kfd_api_data_t*>(callback_data);
+    const kfd_api_data_t* data = (const kfd_api_data_t*)(callback_data);
     fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> \n",
         roctracer_op_string(ACTIVITY_DOMAIN_KFD_API, cid, 0),
         cid,
@@ -215,7 +227,7 @@ void api_callback(
         (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
     return;
   }
-  const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
+  const hip_api_data_t* data = (const hip_api_data_t*)(callback_data);
   fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
     roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
     cid,
@@ -263,8 +275,8 @@ void api_callback(
 // Activity tracing callback
 //   hipMalloc id(3) correlation_id(1): begin_ns(1525888652762640464) end_ns(1525888652762877067)
 void activity_callback(const char* begin, const char* end, void* arg) {
-  const roctracer_record_t* record = reinterpret_cast<const roctracer_record_t*>(begin);
-  const roctracer_record_t* end_record = reinterpret_cast<const roctracer_record_t*>(end);
+  const roctracer_record_t* record = (const roctracer_record_t*)(begin);
+  const roctracer_record_t* end_record = (const roctracer_record_t*)(end);
   fprintf(stdout, "\tActivity records:\n"); fflush(stdout);
   while (record < end_record) {
     const char * name = roctracer_op_string(record->domain, record->op, record->kind);
@@ -274,7 +286,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
       record->begin_ns,
       record->end_ns
     );
-    if (record->domain == ACTIVITY_DOMAIN_HIP_API or record->domain == ACTIVITY_DOMAIN_KFD_API) {
+    if ((record->domain == ACTIVITY_DOMAIN_HIP_API) || (record->domain == ACTIVITY_DOMAIN_KFD_API)) {
       fprintf(stdout, " process_id(%u) thread_id(%u)",
         record->process_id,
         record->thread_id
@@ -301,11 +313,12 @@ void activity_callback(const char* begin, const char* end, void* arg) {
 
 // Init tracing routine
 void init_tracing() {
-  std::cout << "# INIT #############################" << std::endl << std::flush;
+  printf("# INIT #############################\n");
   // roctracer properties
   roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, NULL);
   // Allocating tracing pool
-  roctracer_properties_t properties{};
+  roctracer_properties_t properties;
+  memset(&properties, 0, sizeof(roctracer_properties_t));
   properties.buffer_size = 0x1000;
   properties.buffer_callback_fun = activity_callback;
   ROCTRACER_CALL(roctracer_open_pool(&properties));
@@ -323,7 +336,7 @@ void init_tracing() {
 
 // Start tracing routine
 void start_tracing() {
-  std::cout << "# START (" << iterations << ") #############################" << std::endl << std::flush;
+  printf("# START (%d) #############################\n", iterations);
   // Start
   if ((iterations & 1) == 1) roctracer_start();
   else roctracer_stop();
@@ -336,7 +349,7 @@ void stop_tracing() {
   ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
   ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_KFD_API));
   ROCTRACER_CALL(roctracer_flush_activity());
-  std::cout << "# STOP  #############################" << std::endl << std::flush;
+  printf("# STOP  #############################\n");
 }
 #else
 void init_tracing() {}

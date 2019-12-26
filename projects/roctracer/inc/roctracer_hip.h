@@ -33,7 +33,7 @@ extern "C" {
 #endif  // __cplusplus
 
 // Traced calls ID enumeration
-typedef hip_api_id_t roctracer_hip_api_cid_t;
+typedef enum hip_api_id_t roctracer_hip_api_cid_t;
 
 #ifdef __cplusplus
 }  // extern "C" block

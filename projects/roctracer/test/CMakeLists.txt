@@ -35,6 +35,8 @@ add_custom_target( mytest
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test"
   COMMAND HIP_VDI=${HIP_VDI} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_test"
+  COMMAND C_TEST=1 HIP_VDI=${HIP_VDI} make -C "${TEST_DIR}/MatrixTranspose_test"
+  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose_ctest ${PROJECT_BINARY_DIR}/test/MatrixTranspose_ctest"
 )
 
 ## Util sources
