@@ -76,7 +76,7 @@ HEADER = \
 '\n'
 
 structs_done = {}
-def process_struct(f,c,cppHeader,nname):
+def process_struct(f,c,cppHeader,nname,apiname):
 
     if c not in cppHeader.classes:
         return
@@ -104,9 +104,9 @@ def process_struct(f,c,cppHeader,nname):
 
         if mtype != "" and "union" not in mtype:
             if array_size == "":
-                str = "   roctracer::kfd_support::output_streamer<"+mtype+">::put(out,v."+name+");\n"
+                str = "   roctracer::" + apiname.lower() + "_support::output_streamer<"+mtype+">::put(out,v."+name+");\n"
             else:
-                str = "   roctracer::kfd_support::output_streamer<"+mtype+"["+array_size+"]>::put(out,v."+name+");\n"
+                str = "   roctracer::" + apiname.lower() + "_support::output_streamer<"+mtype+"["+array_size+"]>::put(out,v."+name+");\n"
 
             if nname != "" and nname not in str:
                 #print("injecting ",nname, "in ", str)
@@ -115,11 +115,11 @@ def process_struct(f,c,cppHeader,nname):
                 f.write(str)
         else:
             nc = prop+"::"
-            process_struct(f,nc,cppHeader,name)
+            process_struct(f,nc,cppHeader,name,apiname)
             nc = prop+"::"+mtype+" "
-            process_struct(f,nc,cppHeader,name)
+            process_struct(f,nc,cppHeader,name,apiname)
             nc = c+"::"
-            process_struct(f,nc,cppHeader,name)
+            process_struct(f,nc,cppHeader,name,apiname)
 
 
 def gen_cppheader(infilepath,outfilepath):
@@ -128,41 +128,53 @@ def gen_cppheader(infilepath,outfilepath):
     except CppHeaderParser.CppParseError as e:
         print(e)
         sys.exit(1)
-
+    mpath = os.path.dirname(outfilepath)
+    if mpath == "":
+       mpath = os.getcwd()
+    apiname = outfilepath.replace(mpath+"/","")
+    apiname = apiname.replace("_ostream_ops.h","")
+    apiname = apiname.upper()
     f = open(outfilepath,"w+")
+    f2 = open(mpath + "/basic_ostream_ops.h","w+")
     f.write("// automatically generated\n")
-    f.write(LICENSE)
-    f.write("\n")
+    f2.write("// automatically generated\n")
+    f.write(LICENSE + '\n')
+    f2.write(LICENSE + '\n')
     HEADER_S = \
-      '#ifndef INC_KFD_OSTREAM_OPS_H_\n' + \
-      '#define INC_KFD_OSTREAM_OPS_H_\n' + \
+      '#ifndef INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
+      '#define INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
       '#include <iostream>\n' + \
       '\n' + \
-      '#include "roctracer.h"\n' + \
-      '#include "hsakmt.h"\n'
+      '#include "roctracer.h"\n'
+    if apiname == "KFD":
+      HEADER_S += '#include "hsakmt.h"\n'
+    if apiname == "HSA":
+      HEADER_S += '#include <hsa.h>\n#include <hsa_api_trace.h>\n#include <hsa_ext_amd.h>\n #include "cb_table.h"\n'
     f.write(HEADER_S)
     f.write('\n')
     f.write('namespace roctracer {\n')
-    f.write('namespace kfd_support {\n')
-    f.write('// begin ostream ops for KFD \n')
-    f.write(HEADER)
+    f.write('namespace ' + apiname.lower() + '_support {\n')
+    f.write('// begin ostream ops for '+ apiname + ' \n')
+    f.write('#include "basic_ostream_ops.h"' + '\n')
+    f2.write(HEADER)
     for c in cppHeader.classes:
         if "union" in c:
             continue
-        f.write("\ntemplate<>\n")
-        f.write("struct output_streamer<"+c+"&> {\n")
-        f.write("  inline static std::ostream& put(std::ostream& out, "+c+"& v)\n")
-        f.write("{\n")
-        process_struct(f,c,cppHeader,"")
-        f.write("    return out;\n")
-        f.write("}\n")
-        f.write("};\n")
+        if len(cppHeader.classes[c]["properties"]["public"])!=0:
+            f.write("\ntemplate<>\n")
+            f.write("struct output_streamer<"+c+"&> {\n")
+            f.write("  inline static std::ostream& put(std::ostream& out, "+c+"& v)\n")
+            f.write("{\n")
+            process_struct(f,c,cppHeader,"",apiname)
+            f.write("   return out;\n")
+            f.write("}\n")
+            f.write("};\n")
 
     FOOTER = \
-    '// end ostream ops for KFD \n'
+    '// end ostream ops for '+ apiname + ' \n'
     FOOTER += '};};\n' + \
        '\n' + \
-       '#endif // INC_KFD_OSTREAM_OPS_H_\n' + \
+       '#endif // INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
        ' \n'
     FOOTER2 = '\n\n' + \
         '#endif // INC_BASIC_OSTREAM_OPS_H_\n' + \
@@ -170,6 +182,10 @@ def gen_cppheader(infilepath,outfilepath):
     f.write(FOOTER)
 
     f.close()
+    f2.close()
+    print('File ' + outfilepath + ' generated')
+    print('File ' + mpath + '/basic_ostream_ops.h generated')
+
     return
 
 parser = argparse.ArgumentParser(description='genOstreamOps.py: generates ostream operators for all typedefs in provided input file.')
