@@ -56,8 +56,6 @@ eval_test() {
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and oher libraries
 export LD_LIBRARY_PATH=$PWD
-# ROC profiler library loaded by HSA runtime
-export HSA_TOOLS_LIB=librocprofiler64.so
 # enable error messages logging to '/tmp/rocprofiler_log.txt'
 export ROCPROFILER_LOG=1
 # ROC profiler metrics config file
@@ -67,8 +65,17 @@ export ROCP_METRICS=metrics.xml
 # test trace
 export ROC_TEST_TRACE=1
 
-## Intercepting usage model test
+## C test
+eval_test "C test" ./test/c_test
 
+## Standalone sampling usage model test
+unset HSA_TOOLS_LIB
+unset ROCP_TOOL_LIB
+eval_test "Standalone sampling usage model test" ./test/standalone_test
+
+## Intercepting usage model test
+# ROC profiler library loaded by HSA runtime
+export HSA_TOOLS_LIB=librocprofiler64.so
 # tool library loaded by ROC profiler
 export ROCP_TOOL_LIB=./test/libintercept_test.so
 export ROCP_KITER=50
@@ -77,13 +84,7 @@ export ROCP_AGENTS=1
 export ROCP_THRS=3
 eval_test "Intercepting usage model test" "../bin/run_tool.sh ./test/ctrl"
 
-## Standalone sampling usage model test
-
-unset ROCP_TOOL_LIB
-eval_test "Standalone sampling usage model test" ./test/standalone_test
-
 ## Libtool test
-
 # tool library loaded by ROC profiler
 export ROCP_TOOL_LIB=libtool.so
 # ROC profiler kernels timing
@@ -111,7 +112,6 @@ export ROCP_INPUT=input1.xml
 eval_test "'rocprof' libtool test n-threads" ./test/ctrl
 
 ## SPM test
-
 export ROCP_KITER=3
 export ROCP_DITER=3
 export ROCP_AGENTS=1
@@ -120,7 +120,6 @@ export ROCP_INPUT=spm_input.xml
 eval_test "libtool test, SPM trace test" ./test/ctrl
 
 ## Libtool test, counter sets
-
 # Memcopies tracking
 export ROCP_MCOPY_TRACKING=1
 
@@ -130,7 +129,6 @@ export ROCP_INPUT=input2.xml
 eval_test "libtool test, counter sets" ./test/ctrl
 
 ## OpenCL test
-
 export ROCP_OBJ_TRACKING=1
 export ROCP_INPUT=input1.xml
 eval_test "libtool test, OpenCL sample" ./test/ocl/SimpleConvolution
