@@ -84,20 +84,32 @@ int main() {
     float* gpuMatrix;
     float* gpuTransposeMatrix;
 
-#if HIP_TEST
-    hipDeviceProp_t devProp;
-    HIP_CALL(hipGetDeviceProperties(&devProp, 0));
-
-    printf("Device name %s\n", devProp.name);
-#endif
-
     int i;
     int errors;
 
     init_tracing();
 
+#if HIP_TEST
+    int gpuCount = 1;
+#if MGPU_TEST
+    hipGetDeviceCount(&gpuCount);
+    printf("Number of GPUs: %d\n", gpuCount);
+#endif
+    iterations *= gpuCount;
+#endif
+
     while (iterations-- > 0) {
     start_tracing();
+
+#if HIP_TEST
+    // set GPU
+    const int devIndex = iterations % gpuCount;
+    hipSetDevice(devIndex);
+
+    hipDeviceProp_t devProp;
+    HIP_CALL(hipGetDeviceProperties(&devProp, 0));
+    printf("Device %d name: %s\n", devIndex, devProp.name);
+#endif
 
     Matrix = (float*)malloc(NUM * sizeof(float));
     TransposeMatrix = (float*)malloc(NUM * sizeof(float));

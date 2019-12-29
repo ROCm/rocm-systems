@@ -67,6 +67,7 @@ eval_test() {
 # rocTrecer is used explicitely by test
 eval_test "standalone C test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest"
 eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test"
+eval_test "standalone HIP MGPU test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_mgpu"
 
 # Tool test
 # rocTracer/tool is loaded by HSA runtime

@@ -11,24 +11,24 @@ ifeq (,$(HIP_PATH))
 endif
 
 HIPCC=$(HIP_PATH)/bin/hipcc
-
 TARGET=hcc
 
-
-
+EXECUTABLE=./MatrixTranspose
+OBJECTS = MatrixTranspose.o
 FLAGS =-g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc -I${HSA_KMT_INC_PATH} -DLOCAL_BUILD=1 -DHIP_VDI=${HIP_VDI} -DITERATIONS=$(ITERATIONS)
+
 ifeq ($(C_TEST), 1)
 	COMP=gcc
 	SOURCES = MatrixTranspose.c
 	FLAGS += -DHIP_TEST=0 -D__HIP_PLATFORM_HCC__=1 -I/opt/rocm/hcc/include
-	EXECUTABLE=./MatrixTranspose_ctest
 else
 	COMP=$(HIPCC)
-	FLAGS += -DHIP_TEST=1
 	SOURCES = MatrixTranspose.cpp
-	EXECUTABLE=./MatrixTranspose
+	FLAGS += -DHIP_TEST=1
 endif
-OBJECTS = MatrixTranspose.o
+ifeq ($(MGPU_TEST), 1)
+	FLAGS += -DMGPU_TEST=1
+endif
 
 .PHONY: test
 
