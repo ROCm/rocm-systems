@@ -245,6 +245,10 @@ roctracer_status_t roctracer_flush_activity()
     return roctracer_flush_activity_expl(NULL);
 }
 
+// Get system timestamp
+roctracer_status_t roctracer_get_timestamp(
+    uint64_t* timestamp);                                 // [out] return timestamp
+
 // Load/Unload methods
 // Set properties
 roctracer_status_t roctracer_set_properties(
@@ -259,10 +263,6 @@ bool roctracer_load(
     const char* const* failed_tool_names);
 
 void roctracer_unload(bool destruct);
-
-// Get system timestamp.
-roctracer_status_t roctracer_get_timestamp(
-    uint64_t* timestamp);
 
 #ifdef __cplusplus
 }  // extern "C" block
