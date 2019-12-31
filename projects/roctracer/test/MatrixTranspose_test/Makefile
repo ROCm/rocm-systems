@@ -1,7 +1,7 @@
 ROOT_PATH = ../..
 LIB_PATH  = $(ROOT_PATH)/build
 ROC_LIBS  = -Wl,--rpath,${LIB_PATH} $(LIB_PATH)/libroctracer64.so $(LIB_PATH)/libroctx64.so
-HSA_KMT_INC_PATH ?= /opt/rocm/include
+ROCM_INC_PATH ?= /opt/rocm/include
 HIP_VDI ?= 0
 ITERATIONS ?= 100
 
@@ -15,7 +15,7 @@ TARGET=hcc
 
 EXECUTABLE=./MatrixTranspose
 OBJECTS = MatrixTranspose.o
-FLAGS =-g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc -I${HSA_KMT_INC_PATH} -DLOCAL_BUILD=1 -DHIP_VDI=${HIP_VDI} -DITERATIONS=$(ITERATIONS)
+FLAGS =-g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc -I${ROCM_INC_PATH}/hsa -I${ROCM_INC_PATH} -DLOCAL_BUILD=1 -DHIP_VDI=${HIP_VDI} -DITERATIONS=$(ITERATIONS) -DAMD_INTERNAL_BUILD=1
 
 ifeq ($(C_TEST), 1)
 	COMP=gcc

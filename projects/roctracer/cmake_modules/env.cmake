@@ -118,6 +118,7 @@ endif ()
 find_library ( HSA_KMT_LIB "libhsakmt.so" )
 get_filename_component ( HSA_KMT_LIB_PATH ${HSA_KMT_LIB} DIRECTORY )
 set ( HSA_KMT_INC_PATH "${HSA_KMT_LIB_PATH}/../include" )
+set ( ROCM_INC_PATH ${HSA_KMT_INC_PATH} )
 
 ## Basic Tool Chain Information
 message ( "----------------NBIT: ${NBIT}" )

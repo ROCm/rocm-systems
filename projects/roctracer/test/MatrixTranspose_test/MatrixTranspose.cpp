@@ -203,6 +203,7 @@ int main() {
 #if 1
 #include <inc/roctracer_hip.h>
 #include <inc/roctracer_hcc.h>
+#include <inc/roctracer_hsa.h>
 #include <inc/roctracer_kfd.h>
 #include <inc/roctracer_roctx.h>
 
