@@ -113,19 +113,15 @@ Activity API:
 •	roctracer_close_pool[_expl] – close records pool
 •	roctracer_default_pool[_expl] – get/set default pool
 •	roctracer_properties_t – tracer properties
-•	roctracer_enable_op_activity[_expl] – enable activity records
-                                              logging
-•	roctracer_enable_domain_activity[_expl] – enable activity records
-                                                  logging
+•	roctracer_enable_op_activity[_expl] – enable activity records logging
+•	roctracer_enable_domain_activity[_expl] – enable activity records logging
 •	roctracer_enable_activity[_expl] – enable activity records logging
 •	roctracer_disable_op_activity – disable activity records logging
-•	roctracer_disable_domain_activity – disable activity records
-                                            logging
+•	roctracer_disable_domain_activity – disable activity records logging
 •	roctracer_disable_activity – disable activity records logging
 •	roctracer_flush_activity[_expl] – disable activity records logging
 •	roctracer_next_record – return next record
-•	roctracer_get_timestamp – return correlated GPU/CPU system
-                                  timestamp
+•	roctracer_get_timestamp – return correlated GPU/CPU system timestamp
 ```
 ### 3.2. Tracing Domains
 ```
@@ -145,10 +141,9 @@ typedef enum {
 } activity_domain_t;
 
 Return name by given domain and Op code:
-const char* roctracer_op_string(  // NULL returned on error and error number 
-                                  // is set
-   uint32_t domain,		    // tracing domain
-   uint32_t op,	                // activity op code
+const char* roctracer_op_string(  // NULL returned on error and error number is set
+   uint32_t domain,		  // tracing domain
+   uint32_t op,	                  // activity op code
    uint32_t kind);                // activity kind
 Return Op code and kind by given string:
 roctracer_status_t roctracer_op_code(
@@ -172,9 +167,9 @@ typedef enum {
 Runtime API callback type:
 typedef void  (*roctracer_rtapi_callback_t)(
    uint32_t domain,   // runtime API domain
-   uint32_t cid,	    // API call ID
+   uint32_t cid,      // API call ID
    const void* data,  // [in] callback data with correlation id and the call
-		          // arguments
+		      // arguments
    void* arg);        // [in/out] user passed data
 
 Enable runtime API callbacks:
