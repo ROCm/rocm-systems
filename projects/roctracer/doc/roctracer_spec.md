@@ -10,6 +10,7 @@ for tracing of runtime calls and asynchronous activity, like GPU kernel
 dispatches and memory moves. The tracing includes callback API for
 runtime API tracing and activity API for asynchronous activity records
 logging.
+
 Depending on particular runtime intercepting mechanism, the rocTracer
 library can be dynamically linked, dynamically loaded by the runtime as
 a plugin or some API wrapper can be loaded using LD_PRELOAD.
@@ -26,9 +27,11 @@ The library supports method for getting the error number and error string
 of the last failed library API call. It allows to check the conformance
 of used library API header and the library binary, the version macros and
 API methods can be used.
+
 Returning the error and error string methods:
 •	roctracer_status_t – error code enumeration
 •	roctracer_error_string – method for returning the error string
+
 Library version:
 •	ROCTRACER_VERSION_MAJOR – API major version macro
 •	ROCTRACER_VERSION_MINOR – API minor version macro
@@ -37,7 +40,7 @@ Library version:
 ```
 ### 2.2. Error codes and error string methods
 ```
-Error code enumeration
+Error code enumeration:
 typedef enum {
    ROCTRACER_STATUS_SUCCESS = 0,
    ROCTRACER_STATUS_ERROR = 1,
