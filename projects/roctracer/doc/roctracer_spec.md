@@ -57,6 +57,7 @@ const char* roctracer_error_string();
 ```
 The library provides major and minor versions. Major version is for
 incompatible API changes and minor version for bug fixes.
+
 API version macros defined in the library API header ‘roctracer.h’:
 ROCTRACER_VERSION_MAJOR
 ROCTRACER_VERSION_MINOR
@@ -78,6 +79,7 @@ be associated with the respective API calls using the correlation ID.
 Activity API can be used to enable collecting of the records with
 timestamping data for API calls and asynchronous activity like the
 kernel submits, memory copies and barriers
+
 Tracing domains:
 •	roctracer_domain_t – runtime API domains, HIP, HSA, etc…
 •	roctracer_op_string – Return Op string by given domain and
@@ -126,6 +128,7 @@ Activity API:
 ```
 Various tracing domains are supported. Each domain is assigned with
 a domain ID. The domains include HSA, HIP, and HCC runtime levels. 
+
 Traced API domains:
 typedef enum {
    ACTIVITY_DOMAIN_HSA_API = 0,         // HSA API domain
@@ -415,6 +418,7 @@ int main() {
 ```
 This shows a MatrixTranspose HIP sample with enabled tracing of
 all HIP API and all GPU asynchronous activity.
+
 /*
 Copyright (c) 2015-2016 Advanced Micro Devices, Inc. All rights reserved.
 
