@@ -843,13 +843,13 @@ PUBLIC_API hsa_status_t rocprofiler_queue_create_profiled(
   return rocprofiler::InterceptQueue::QueueCreateTracked(agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
 }
 
-// Return time for a given time ID and profiling timetsamp value
+// Return time value for a given time ID and profiling timestamp
 hsa_status_t rocprofiler_get_time(
   rocprofiler_time_id_t time_id,
-  uint64_t value,
-  uint64_t* time)
+  uint64_t timestamp,
+  uint64_t* value_ns)
 {
-    return rocprofiler::util::HsaRsrcFactory::Instance().GetTime(time_id, value, time);
+    return rocprofiler::util::HsaRsrcFactory::Instance().GetTime(time_id, timestamp, value_ns);
 }
 
 }  // extern "C"
