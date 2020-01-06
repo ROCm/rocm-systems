@@ -13,6 +13,7 @@ Includes basic API: roctxMark, roctxRangePush, roctxRangePop.
 
 ## The library source tree
 ```
+ - doc - documentation
  - inc/roctracer.h - rocTacer library public API header
  - inc/roctx.h - rocTX library puiblic API header
  - src  - Library sources
@@ -25,12 +26,11 @@ Includes basic API: roctxMark, roctxRangePush, roctxRangePop.
 
 ## Documentation
 ```
- - API description/headers: 
-   - inc/roctracer.h
-   - inc/roctx.h
+ - API description: 
+   - ['roctracer' profiling C API specification](doc/roctracer_spec.md)
  - Code examples:
-   - test/MatrixTranspose_test/MatrixTranspose.cpp
-   - test/MatrixTranspose/MatrixTranspose.cpp
+   - [test/MatrixTranspose_test/MatrixTranspose.cpp](test/MatrixTranspose_test/MatrixTranspose.cpp)
+   - [test/MatrixTranspose/MatrixTranspose.cpp](test/MatrixTranspose/MatrixTranspose.cpp)
 ```
 
 ## To build and run test
