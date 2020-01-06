@@ -126,6 +126,7 @@ endforeach()
 add_subdirectory("server")
 add_subdirectory("client")
 add_subdirectory("tests/example")
+add_subdirectory("tests/rdc_tests")
 
 # TODO set(CPACK_DEBIAN_PACKAGE_HOMEPAGE <GITHUB URL> )
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA

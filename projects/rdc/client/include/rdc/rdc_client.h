@@ -272,10 +272,12 @@ rdc_channel_connection_verify(rdc_channel_t channel);
  * @p channel[inout] A pointer to caller provided memory to which an
  * ::rdc_channel_t will be written
  *
- * @param[in] ip A pointer to a string containing the address of the server
+ * @param[in] ip A pointer to a string containing the address of the server.
+ * If nullptr is passed for this parameter, RDC_DEFAULT_SERVER_IP will be used.
  *
  * @param[in] port A pointer to string containing the port on which the
- * RDC server is listening
+ * RDC server is listening. If nullptr is passed for this parameter,
+ * RDC_DEFAULT_SERVER_PORT will be used.
  *
  * @param[in] secure A bool indicating whether SSL should be used for
  * communications (not currently supported)

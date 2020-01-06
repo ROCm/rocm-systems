@@ -192,7 +192,8 @@ MakeDaemon() {
   // the complement of the permissions we want files to have.
   umask(027);
 
-  // To Do; Make this optional based on CL option.
+  // To Do; Make this optional based on CL option. By default, don't do this.
+  // Instead rely on serviced to make it a daemon.
 #if 0
   pid_t pid;
   // We want to dissassociate with calling process, so fork, and let
