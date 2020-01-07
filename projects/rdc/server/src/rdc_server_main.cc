@@ -67,12 +67,12 @@ RDCServer::Run() {
   // Register services as the instances through which we'll communicate with
   // clients. These are synchronous services.
   if (start_rdc_admin_service()) {
-    rdc_admin_service_ = new RDCAdminServiceImpl();
+    rdc_admin_service_ = new amd::rdc::RDCAdminServiceImpl();
     builder.RegisterService(rdc_admin_service_);
   }
 
   if (start_rsmi_service()) {
-    rsmi_service_ = new RsmiServiceImpl();
+    rsmi_service_ = new amd::rdc::RsmiServiceImpl();
     builder.RegisterService(rsmi_service_);
 
     // TODO(cfreehil): pass flags from cnfg file

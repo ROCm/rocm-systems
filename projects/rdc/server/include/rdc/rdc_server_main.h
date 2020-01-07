@@ -53,10 +53,10 @@ class RDCServer {
     std::unique_ptr<::grpc::Server> server_;
 
     bool start_rsmi_service_;
-    RsmiServiceImpl *rsmi_service_;
+    amd::rdc::RsmiServiceImpl *rsmi_service_;
 
     bool start_rdc_admin_service_;
-    RDCAdminServiceImpl *rdc_admin_service_;
+    amd::rdc::RDCAdminServiceImpl *rdc_admin_service_;
 };
 
 #endif  // SERVER_INCLUDE_RDC_RDC_SERVER_MAIN_H_

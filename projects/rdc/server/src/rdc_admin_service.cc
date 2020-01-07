@@ -33,6 +33,9 @@ THE SOFTWARE.
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc_admin_service.h"
 
+namespace amd {
+namespace rdc {
+
 RDCAdminServiceImpl::RDCAdminServiceImpl() {
 }
 
@@ -40,10 +43,13 @@ RDCAdminServiceImpl::~RDCAdminServiceImpl() {
 }
 ::grpc::Status
 RDCAdminServiceImpl::VerifyConnection(::grpc::ServerContext* context,
-                            const rdc::VerifyConnectionRequest* request,
-                              rdc::VerifyConnectionResponse* reply) {
+                            const ::rdc::VerifyConnectionRequest* request,
+                              ::rdc::VerifyConnectionResponse* reply) {
   (void)context;  // Quiet warning for now
 
   reply->set_echo_magic_num(request->magic_num());
   return ::grpc::Status::OK;
 }
+
+}  // rdc
+}  // amd

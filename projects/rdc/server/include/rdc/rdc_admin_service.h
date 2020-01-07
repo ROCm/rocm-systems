@@ -26,14 +26,20 @@ THE SOFTWARE.
 #include "rocm_smi/rocm_smi.h"
 #include "rdc/rdc_admin_service.h"
 
+namespace amd {
+namespace rdc {
+
 class RDCAdminServiceImpl final : public ::rdc::RdcAdmin::Service {
  public:
     RDCAdminServiceImpl();
     ~RDCAdminServiceImpl();
     ::grpc::Status VerifyConnection(::grpc::ServerContext* context,
-                                const rdc::VerifyConnectionRequest* request,
-                              rdc::VerifyConnectionResponse* reply) override;
+                                const ::rdc::VerifyConnectionRequest* request,
+                              ::rdc::VerifyConnectionResponse* reply) override;
  private:
 };
+
+} // namespace rdc
+} // namespace amd
 
 #endif  // SERVER_INCLUDE_RDC_RDC_ADMIN_SERVICE_H_

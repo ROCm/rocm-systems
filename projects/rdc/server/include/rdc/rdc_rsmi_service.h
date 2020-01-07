@@ -26,6 +26,9 @@ THE SOFTWARE.
 #include "rocm_smi/rocm_smi.h"
 #include "rdc/rdc_rsmi_service.h"
 
+namespace amd {
+namespace rdc {
+
 class RsmiServiceImpl final : public ::rdc::Rsmi::Service {
  public:
     RsmiServiceImpl();
@@ -46,5 +49,8 @@ class RsmiServiceImpl final : public ::rdc::Rsmi::Service {
  private:
     bool rsmi_initialized_;
 };
+
+}  // rdc
+}  // amd
 
 #endif  // SERVER_INCLUDE_RDC_RDC_RSMI_SERVICE_H_

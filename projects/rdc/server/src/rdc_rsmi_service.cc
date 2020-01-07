@@ -32,6 +32,9 @@ THE SOFTWARE.
 #include "rocm_smi/rocm_smi.h"
 #include "rdc/rdc_rsmi_service.h"
 
+namespace amd {
+namespace rdc {
+
 RsmiServiceImpl::RsmiServiceImpl():rsmi_initialized_(false) {
 }
 
@@ -127,3 +130,6 @@ void RunServer() {
   }
   server->Wait();
 }
+
+}  // namespace rdc
+}  // namespace amd
