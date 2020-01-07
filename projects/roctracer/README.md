@@ -33,7 +33,7 @@ Includes basic API: roctxMark, roctxRangePush, roctxRangePop.
 
 ## To build and run test
 ```
- - ROCm-2.3 or higher is required
+ - ROCm is required
  - Python2.7 is required.
   The required modules: CppHeaderParser, argparse.
   To install:
