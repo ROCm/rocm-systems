@@ -1,4 +1,5 @@
 #!/bin/sh
+
 BIN_DIR=`dirname $0`
 BIN_DIR=`realpath $BIN_DIR`
 PKG_DIR=${BIN_DIR%/bin}

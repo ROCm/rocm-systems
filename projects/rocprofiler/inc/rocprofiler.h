@@ -27,7 +27,7 @@ THE SOFTWARE.
 // The goal of the implementation is to provide a HW specific low-level
 // performance analysis interface for profiling of GPU compute applications.
 // The profiling includes HW performance counters (PMC) with complex
-// performance metrics and traces: SQTT, SPM.
+// performance metrics and traces.
 //
 // The library can be used by a tool library loaded by HSA runtime or by
 // higher level HW independent performance analysis API like PAPI.
