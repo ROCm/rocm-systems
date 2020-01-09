@@ -20,7 +20,7 @@ FLAGS =-g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc -I${ROCM_INC_PATH}/hsa -I${ROCM_INC_
 ifeq ($(C_TEST), 1)
 	COMP=gcc
 	SOURCES = MatrixTranspose.c
-	FLAGS += -DHIP_TEST=0 -D__HIP_PLATFORM_HCC__=1 -I/opt/rocm/hcc/include
+	FLAGS += -DHIP_TEST=0 -D__HIP_PLATFORM_HCC__=1 -I${ROCM_INC_PATH}/hcc
 else
 	COMP=$(HIPCC)
 	SOURCES = MatrixTranspose.cpp

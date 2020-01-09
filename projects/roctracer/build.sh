@@ -21,7 +21,6 @@ if [ -z "$PREFIX_PATH" ] ; then PREFIX_PATH=$PACKAGE_ROOT; fi
 if [ -n "$HIP_VDI" ] ; then HIP_VDI_OPT="-DHIP_VDI=1"; fi
 
 ROCTRACER_ROOT=$(cd $ROCTRACER_ROOT && echo $PWD)
-MAKE_OPTS="-j 8 -C $BUILD_DIR"
 
 mkdir -p $BUILD_DIR
 pushd $BUILD_DIR
