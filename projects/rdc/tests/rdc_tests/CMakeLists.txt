@@ -44,9 +44,10 @@ endif()
 
 # Required Defines first:
 
-set(RDC_INC_DIR ${ROCM_DIR}/rdc/include)
-set(RDC_LIB_DIR ${ROCM_DIR}/rdc/lib)
+set(RDC_INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../client/include)
+set(RDC_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../rdc/lib)
 set(RSMI_INC_DIR ${ROCM_DIR}/rocm_smi/include)
+
 
 #
 # Determine RDC Header files are present

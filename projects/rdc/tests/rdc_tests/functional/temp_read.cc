@@ -37,7 +37,7 @@ static const std::map<uint32_t, std::string> kTempSensorNameMap = {
     {RSMI_TEMP_TYPE_EDGE, "Edge"},
 };
 TestTempRead::TestTempRead() : TestBase() {
-  set_title("RSMI Temp Read Test");
+  set_title("RDC Temp Read Test");
   set_description("The Temperature Read tests verifies that the temperature "
                    "monitors can be read properly.");
 }
@@ -61,8 +61,6 @@ void TestTempRead::DisplayResults(void) const {
 }
 
 void TestTempRead::Close() {
-  // This will close handles opened within rsmitst utility calls and call
-  // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
 

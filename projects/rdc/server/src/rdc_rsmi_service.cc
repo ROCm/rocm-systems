@@ -74,6 +74,7 @@ RsmiServiceImpl::GetNumDevices(::grpc::ServerContext* context,
 
   (void)context;  // Quiet warning for now;
   (void)request;
+  assert(reply != nullptr);
 
   rsmi_status_t ret = rsmi_num_monitor_devices(&num_devices);
 
@@ -92,6 +93,7 @@ RsmiServiceImpl::GetTemperature(::grpc::ServerContext* context,
        const ::rdc::GetTemperatureRequest* request,
                          ::rdc::GetTemperatureResponse* response) {
   (void)context;  // Quiet warning for now;
+  assert(response != nullptr);
 
   int64_t temperature;
   rsmi_status_t ret = rsmi_dev_temp_metric_get(request->dv_ind(),
@@ -99,6 +101,54 @@ RsmiServiceImpl::GetTemperature(::grpc::ServerContext* context,
                                                               &temperature);
 
   response->set_temperature(temperature);
+  response->set_ret_val(ret);
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status
+RsmiServiceImpl::GetFanRpms(::grpc::ServerContext* context,
+       const ::rdc::GetFanRpmsRequest* request,
+                         ::rdc::GetFanRpmsResponse* response) {
+  (void)context;  // Quiet warning for now;
+  assert(response != nullptr);
+
+  int64_t rpms;
+  rsmi_status_t ret = rsmi_dev_fan_rpms_get(request->dv_ind(),
+      request->sensor_ind(), &rpms);
+
+  response->set_rpms(rpms);
+  response->set_ret_val(ret);
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status
+RsmiServiceImpl::GetFanSpeed(::grpc::ServerContext* context,
+       const ::rdc::GetFanSpeedRequest* request,
+                         ::rdc::GetFanSpeedResponse* response) {
+  (void)context;  // Quiet warning for now;
+  assert(response != nullptr);
+
+  int64_t speed;
+  rsmi_status_t ret = rsmi_dev_fan_speed_get(request->dv_ind(),
+      request->sensor_ind(), &speed);
+
+  response->set_speed(speed);
+  response->set_ret_val(ret);
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status
+RsmiServiceImpl::GetFanSpeedMax(::grpc::ServerContext* context,
+       const ::rdc::GetFanSpeedMaxRequest* request,
+                         ::rdc::GetFanSpeedMaxResponse* response) {
+  (void)context;  // Quiet warning for now;
+  assert(response != nullptr);
+
+  uint64_t max_speed;
+  rsmi_status_t ret = rsmi_dev_fan_speed_max_get(request->dv_ind(),
+      request->sensor_ind(), &max_speed);
+
+  response->set_max_speed(max_speed);
   response->set_ret_val(ret);
   return ::grpc::Status::OK;
 }

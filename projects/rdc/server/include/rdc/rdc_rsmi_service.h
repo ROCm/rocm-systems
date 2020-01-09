@@ -46,11 +46,26 @@ class RsmiServiceImpl final : public ::rdc::Rsmi::Service {
            const ::rdc::GetTemperatureRequest* request,
                              ::rdc::GetTemperatureResponse* response) override;
 
+    ::grpc::Status
+    GetFanRpms(::grpc::ServerContext* context,
+           const ::rdc::GetFanRpmsRequest* request,
+                                 ::rdc::GetFanRpmsResponse* response) override;
+
+    ::grpc::Status
+    GetFanSpeed(::grpc::ServerContext* context,
+           const ::rdc::GetFanSpeedRequest* request,
+                                ::rdc::GetFanSpeedResponse* response) override;
+
+    ::grpc::Status
+    GetFanSpeedMax(::grpc::ServerContext* context,
+           const ::rdc::GetFanSpeedMaxRequest* request,
+                             ::rdc::GetFanSpeedMaxResponse* response) override;
+
  private:
     bool rsmi_initialized_;
 };
 
-}  // rdc
-}  // amd
+}  // namespace rdc
+}  // namespace amd
 
 #endif  // SERVER_INCLUDE_RDC_RDC_RSMI_SERVICE_H_

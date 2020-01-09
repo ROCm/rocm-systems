@@ -225,6 +225,86 @@ rdc_dev_temp_metric_get(rdc_channel_t channel, uint32_t dv_ind,
   CATCH
 }
 
+rdc_status_t
+rdc_dev_fan_rpms_get(rdc_channel_t channel, uint32_t dv_ind,
+                                        uint32_t sensor_ind, int64_t *rpms) {
+  TRY
+  CHK_PTR_ARG(rpms)
+  UINTPTR_TO_RDC_CHAN(channel)
+
+  ::rdc::GetFanRpmsResponse resp;
+  ::rdc::GetFanRpmsRequest in_args;
+  ::grpc::ClientContext context;
+
+  in_args.set_dv_ind(dv_ind);
+  in_args.set_sensor_ind(sensor_ind);
+
+  ::grpc::Status status =
+                    ch->rsmi_stub()->GetFanRpms(&context, in_args, &resp);
+
+  if (!status.ok()) {
+    return ::amd::rdc::GrpcErrorToRdcError(status.error_code());
+  }
+
+  *rpms = resp.rpms();
+
+  return static_cast<rdc_status_t>(resp.ret_val());
+  CATCH
+}
+
+rdc_status_t
+rdc_dev_fan_speed_get(rdc_channel_t channel, uint32_t dv_ind,
+                                        uint32_t sensor_ind, int64_t *speed) {
+  TRY
+  CHK_PTR_ARG(speed)
+  UINTPTR_TO_RDC_CHAN(channel)
+
+  ::rdc::GetFanSpeedResponse resp;
+  ::rdc::GetFanSpeedRequest in_args;
+  ::grpc::ClientContext context;
+
+  in_args.set_dv_ind(dv_ind);
+  in_args.set_sensor_ind(sensor_ind);
+
+  ::grpc::Status status =
+                    ch->rsmi_stub()->GetFanSpeed(&context, in_args, &resp);
+
+  if (!status.ok()) {
+    return ::amd::rdc::GrpcErrorToRdcError(status.error_code());
+  }
+
+  *speed = resp.speed();
+
+  return static_cast<rdc_status_t>(resp.ret_val());
+  CATCH
+}
+
+rdc_status_t
+rdc_dev_fan_speed_max_get(rdc_channel_t channel, uint32_t dv_ind,
+                                   uint32_t sensor_ind, uint64_t *max_speed) {
+  TRY
+  CHK_PTR_ARG(max_speed)
+  UINTPTR_TO_RDC_CHAN(channel)
+
+  ::rdc::GetFanSpeedMaxResponse resp;
+  ::rdc::GetFanSpeedMaxRequest in_args;
+  ::grpc::ClientContext context;
+
+  in_args.set_dv_ind(dv_ind);
+  in_args.set_sensor_ind(sensor_ind);
+
+  ::grpc::Status status =
+                    ch->rsmi_stub()->GetFanSpeedMax(&context, in_args, &resp);
+
+  if (!status.ok()) {
+    return ::amd::rdc::GrpcErrorToRdcError(status.error_code());
+  }
+
+  *max_speed = resp.max_speed();
+
+  return static_cast<rdc_status_t>(resp.ret_val());
+  CATCH
+}
 
 rdc_status_t
 rdc_status_string(rdc_status_t status, const char **status_string) {

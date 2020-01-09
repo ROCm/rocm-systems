@@ -344,6 +344,30 @@ rdc_status_t
 rdc_dev_temp_metric_get(rdc_channel_t channel, uint32_t dv_ind,
                       uint32_t sensor_type, rsmi_temperature_metric_t metric,
                                                          int64_t *temperature);
+
+/**
+ * @brief Remote call to rsmi_dev_fan_rpms_get()
+ *
+ */
+rdc_status_t
+rdc_dev_fan_rpms_get(rdc_channel_t channel, uint32_t dv_ind,
+                                        uint32_t sensor_ind, int64_t *rpms);
+
+/**
+ * @brief Remote call to rsmi_dev_fan_speed_get()
+ *
+ */
+rdc_status_t
+rdc_dev_fan_speed_get(rdc_channel_t channel, uint32_t dv_ind,
+                                        uint32_t sensor_ind, int64_t *speed);
+
+/**
+ * @brief Remote call to rsmi_dev_fan_speed_max_get()
+ *
+ */
+rdc_status_t
+rdc_dev_fan_speed_max_get(rdc_channel_t channel, uint32_t dv_ind,
+                                    uint32_t sensor_ind, uint64_t *max_speed);
 /** @} */  // end of PhysQuer
 
 /**

@@ -36,6 +36,7 @@ THE SOFTWARE.
 
 #include "functional/id_info_read.h"
 #include "functional/temp_read.h"
+#include "functional/fan_read.h"
 
 static RDCTstGlobals *sRDCGlvalues = nullptr;
 
@@ -91,6 +92,11 @@ TEST(rdctstReadOnly, TestTempRead) {
   TestTempRead tst;
   RunGenericTest(&tst);
 }
+TEST(rdctstReadOnly, FanRead) {
+  TestFanRead tst;
+  RunGenericTest(&tst);
+}
+
 
 static int getPIDFromName(std::string name) {
     int pid = -1;

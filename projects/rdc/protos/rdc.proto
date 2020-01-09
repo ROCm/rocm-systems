@@ -37,9 +37,12 @@ service Rsmi {
 
     // RSMI Physical Queries
     rpc GetTemperature(GetTemperatureRequest) returns(GetTemperatureResponse){}
+    rpc GetFanRpms(GetFanRpmsRequest) returns(GetFanRpmsResponse){}
+    rpc GetFanSpeed(GetFanSpeedRequest) returns(GetFanSpeedResponse){}
+    rpc GetFanSpeedMax(GetFanSpeedMaxRequest) returns(GetFanSpeedMaxResponse){}
 }
 
-// rsmi_num_monitor_devices()
+/* rsmi_num_monitor_devices() */
 message GetNumDevicesRequest {
 }
 message GetNumDevicesResponse {
@@ -48,6 +51,7 @@ message GetNumDevicesResponse {
 }
 
 /* GetTemperature */
+/* rsmi_dev_temp_metric_get() */
 message GetTemperatureRequest {
     uint32 dv_ind = 1;
     uint32 sensor_type = 2;
@@ -71,6 +75,38 @@ message GetTemperatureRequest {
 }
 message GetTemperatureResponse {
     int64 temperature = 1;
+    uint64 ret_val = 2;
+}
+
+/* GetFanRpms */
+/* rsmi_dev_fan_rpms_get() */
+message GetFanRpmsRequest {
+    uint32 dv_ind = 1;
+    uint32 sensor_ind = 2;
+}
+message GetFanRpmsResponse {
+    int64 rpms = 1;
+    uint64 ret_val = 2;
+}
+/* GetFanSpeed */
+/* rsmi_dev_fan_speed_get() */
+message GetFanSpeedRequest {
+    uint32 dv_ind = 1;
+    uint32 sensor_ind = 2;
+}
+message GetFanSpeedResponse {
+    int64 speed = 1;
+    uint64 ret_val = 2;
+}
+
+/* GetFanSpeedMax */
+/* rsmi_dev_fan_speed_max_get() */
+message GetFanSpeedMaxRequest {
+    uint32 dv_ind = 1;
+    uint32 sensor_ind = 2;
+}
+message GetFanSpeedMaxResponse {
+    uint64 max_speed = 1;
     uint64 ret_val = 2;
 }
 
