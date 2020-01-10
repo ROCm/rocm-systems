@@ -380,6 +380,7 @@ while [ 1 ] ; do
     GEN_STATS=1
   elif [ "$1" = "--roctx-trace" ] ; then
     ARG_VAL=0
+    GEN_STATS=1
     ROCTX_TRACE=1
   elif [ "$1" = "--kfd-trace" ] ; then
     ARG_VAL=0
