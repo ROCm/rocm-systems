@@ -1,8 +1,8 @@
 # ROC Tracer Library Specification
 ```
-The rocTracer API is agnostic to specific runtime and may trace
+- The rocTracer API is agnostic to specific runtime and may trace
 the runtime API calls and asynchronous GPU activity.
-Also, application code annotation rocTX API is provided.
+- The rocTX API is provided for application code annotation.
 ```
 ## 1. High level overview
 ```
@@ -728,7 +728,7 @@ void stop_tracing() {
 }
 /////////////////////////////////////////////////////////////////////////////
 ```
-'rocTX' application code annotation
+## 5. rocTX application code annotation
 ```
 Basic API: markers and nested ranges.
 // A marker created by given ASCII massage
