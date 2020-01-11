@@ -1,4 +1,4 @@
-# ROC Tracer Library Specification
+# ROC Tracer / ROC-TX Libraries Specification
 ```
 - The rocTracer API is agnostic to specific runtime and may trace
 the runtime API calls and asynchronous GPU activity.
