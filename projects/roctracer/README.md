@@ -39,7 +39,7 @@ rocTX API:
 
 ## Documentation
  - API description: 
-   - ['roctracer' profiling C API specification](doc/roctracer_spec.md)
+   - ['roctracer' / 'rocTX' profiling C API specification](doc/roctracer_spec.md)
  - Code examples:
    - [test/MatrixTranspose_test/MatrixTranspose.cpp](test/MatrixTranspose_test/MatrixTranspose.cpp)
    - [test/MatrixTranspose/MatrixTranspose.cpp](test/MatrixTranspose/MatrixTranspose.cpp)
