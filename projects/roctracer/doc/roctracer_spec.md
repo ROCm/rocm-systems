@@ -728,3 +728,18 @@ void stop_tracing() {
 }
 /////////////////////////////////////////////////////////////////////////////
 ```
+'rocTX' application code annotation
+```
+Basic API: markers and nested ranges.
+// A marker created by given ASCII massage
+void roctxMark(const char* message);
+
+// Returns the 0 based level of a nested range being started by given message associated to this range.
+// A negative value is returned on the error.
+int roctxRangePush(const char* message);
+
+// Marks the end of a nested range.
+// Returns the 0 based level the range.
+// A negative value is returned on the error.
+int roctxRangePop();
+```
