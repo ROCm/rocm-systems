@@ -1,7 +1,8 @@
-# ROC Profiler Library Specification
+# ROC Tracer Library Specification
 ```
 The rocTracer API is agnostic to specific runtime and may trace
 the runtime API calls and asynchronous GPU activity.
+Also, application code annotation rocTX API is provided.
 ```
 ## 1. High level overview
 ```
@@ -19,6 +20,10 @@ The library has a C API.
 The rocTracer library is an API that intercepts runtime API calls and
 traces asynchronous activity. The activity tracing results are recorded
 in a ring buffer.
+
+The rocTX contains application code instrumentation API to support high
+level correlation of runtime API/activity events. The API includes mark
+and nested ranges.
 ```
 ## 2. General API
 ### 2.1. Description
@@ -122,6 +127,17 @@ Activity API:
 •	roctracer_flush_activity[_expl] – disable activity records logging
 •	roctracer_next_record – return next record
 •	roctracer_get_timestamp – return correlated GPU/CPU system timestamp
+
+External correlation ID API:
+•	roctracer_activity_push_external_correlation_id - push an external
+                                                          correlation id for the calling thread
+•	roctracer_activity_pop_external_correlation_id - pop an external
+                                                         correlation id for the calling thread
+
+Tracing control API:
+•	roctracer_start – tracing start
+•	roctracer_stop – tracer stop
+
 ```
 ### 3.2. Tracing Domains
 ```
@@ -337,6 +353,35 @@ roctracer_status_t roctracer_flush_activity_expl(
 Return correlated GPU/CPU system timestamp:
 roctracer_status_t roctracer_get_timestamp(
     uint64_t* timestamp);            // [out] return timestamp
+```
+External correlation ID API
+```
+The API provides activity records to associate rocTracer correlation IDs with
+IDs provided by external APIs. The external ID records are identified by
+ACTIVITY_DOMAIN_EXT_API domain value.
+Using the ‘push’ method an external ID is pushed to a per CPU thread stack and
+the ‘pop’ method can be used to remove the last pushed ID.
+An external ID record is inserted before any generated rocTracer activity record
+if the same CPU external ID stack is non-empty.
+
+Notifies that the calling thread is entering an external API region.
+Push an external correlation id for the calling thread.
+roctracer_status_t roctracer_activity_push_external_correlation_id(
+    activity_correlation_id_t id);        // external correlation id
+
+Notifies that the calling thread is leaving an external API region.
+Pop an external correlation id for the calling thread.
+roctracer_status_t roctracer_activity_pop_external_correlation_id( 
+    activity_correlation_id_t* last_id);  // returns the last external correlation id
+                                          // if not NULL
+```
+Tracing control API
+```
+Tracing start:
+void roctracer_start();
+
+Tracing stop:
+void roctracer_stop();
 ```
 ## 4. rocTracer Usage Code Examples
 ### 4.1. HIP API and HCC ops, GPU Activity Tracing
