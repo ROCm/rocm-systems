@@ -730,7 +730,7 @@ void stop_tracing() {
 ```
 ## 5. rocTX application code annotation API
 ```
-Basic API: markers and nested ranges.
+Basic annotation API: markers and nested ranges.
 // A marker created by given ASCII massage
 void roctxMark(const char* message);
 
