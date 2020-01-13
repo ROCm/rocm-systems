@@ -46,7 +46,7 @@ extern "C" {
 #endif  // __cplusplus
 
 ////////////////////////////////////////////////////////////////////////////////
-// Application annotatin API
+// Application annotation API
 
 // Tracing start API
 void roctracer_start();

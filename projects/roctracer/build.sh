@@ -2,7 +2,7 @@
 SRC_DIR=`dirname $0`
 COMPONENT="roctracer"
 ROCM_PATH="${ROCM_PATH:=/opt/rocm}"
-LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib:/opt/rocm/lib64"
+LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,$ROCM_PATH/lib:$ROCM_PATH/lib64"
 
 fatal() {
   echo "$1"
@@ -20,7 +20,7 @@ if [ -z "$PACKAGE_ROOT" ] ; then PACKAGE_ROOT=$ROCM_PATH; fi
 if [ -z "$PACKAGE_PREFIX" ] ; then PACKAGE_PREFIX="$ROCM_PATH/$COMPONENT"; fi
 if [ -z "$PREFIX_PATH" ] ; then PREFIX_PATH=$PACKAGE_ROOT; fi
 if [ -n "$HIP_VDI" ] ; then HIP_VDI_OPT="-DHIP_VDI=1"; fi
-if ! [ -z ${ROCM_RPATH+x} ] ; then LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,${ROCM_RPATH}"; fi
+if [ -n "$ROCM_RPATH" ] ; then LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,${ROCM_RPATH}"; fi
 
 ROCTRACER_ROOT=$(cd $ROCTRACER_ROOT && echo $PWD)
 
