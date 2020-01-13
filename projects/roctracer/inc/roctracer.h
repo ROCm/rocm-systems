@@ -179,7 +179,7 @@ roctracer_status_t roctracer_open_pool_expl(
     const roctracer_properties_t* properties,             // tracer pool properties
     roctracer_pool_t** pool);                             // [out] returns tracer pool if not NULL,
                                                           // otherwise sets the default one if it is not set yet
-roctracer_status_t roctracer_open_pool(
+static inline roctracer_status_t roctracer_open_pool(
     const roctracer_properties_t* properties)             // tracer pool properties
 {
     return roctracer_open_pool_expl(properties, NULL);
@@ -189,7 +189,7 @@ roctracer_status_t roctracer_open_pool(
 // Close tracer memory pool
 roctracer_status_t roctracer_close_pool_expl(
     roctracer_pool_t* pool);                              // [in] memory pool, NULL is a default one
-roctracer_status_t roctracer_close_pool()
+static inline roctracer_status_t roctracer_close_pool()
 {
     return roctracer_close_pool_expl(NULL);
 }
@@ -198,7 +198,7 @@ roctracer_status_t roctracer_close_pool()
 // Set new default pool if the argument is not NULL
 roctracer_pool_t* roctracer_default_pool_expl(
     roctracer_pool_t* pool);                              // [in] new default pool if not NULL
-roctracer_pool_t* roctracer_default_pool()
+static inline roctracer_pool_t* roctracer_default_pool()
 {
     return roctracer_default_pool_expl(NULL);
 }
@@ -208,7 +208,7 @@ roctracer_status_t roctracer_enable_op_activity_expl(
     activity_domain_t domain,                             // tracing domain
     uint32_t op,                                          // activity op ID
     roctracer_pool_t* pool);                              // memory pool, NULL is a default one
-roctracer_status_t roctracer_enable_op_activity(
+static inline roctracer_status_t roctracer_enable_op_activity(
     activity_domain_t domain,                             // tracing domain
     uint32_t op)                                          // activity op ID
 {
@@ -217,14 +217,14 @@ roctracer_status_t roctracer_enable_op_activity(
 roctracer_status_t roctracer_enable_domain_activity_expl(
     activity_domain_t domain,                             // tracing domain
     roctracer_pool_t* pool);                              // memory pool, NULL is a default one
-roctracer_status_t roctracer_enable_domain_activity(
+static inline roctracer_status_t roctracer_enable_domain_activity(
     activity_domain_t domain)                             // tracing domain
 {
     return roctracer_enable_domain_activity_expl(domain, NULL);
 }
 roctracer_status_t roctracer_enable_activity_expl(
     roctracer_pool_t* pool);                       // memory pool, NULL is a default one
-roctracer_status_t roctracer_enable_activity()
+static inline roctracer_status_t roctracer_enable_activity()
 {
     return roctracer_enable_activity_expl(NULL);
 }
@@ -240,7 +240,7 @@ roctracer_status_t roctracer_disable_activity();
 // Flush available activity records
 roctracer_status_t roctracer_flush_activity_expl(
     roctracer_pool_t* pool);                              // memory pool, NULL is a default one
-roctracer_status_t roctracer_flush_activity()
+static inline roctracer_status_t roctracer_flush_activity()
 {
     return roctracer_flush_activity_expl(NULL);
 }
