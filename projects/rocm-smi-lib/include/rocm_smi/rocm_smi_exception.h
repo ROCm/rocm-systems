@@ -49,6 +49,14 @@
 #include <exception>
 #include <string>
 
+#include "rocm_smi/rocm_smi.h"
+
+#define THROW_IF_NULLPTR_DEREF(PTR) \
+  assert((PTR) != nullptr); \
+  if ((PTR) == nullptr) { \
+    throw amd::smi::rsmi_exception(RSMI_STATUS_INVALID_ARGS, __FUNCTION__); \
+  }
+
 namespace amd {
 namespace smi {
 

@@ -461,6 +461,10 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
 Device::Device(std::string p, RocmSMI_env_vars const *e) : path_(p), env_(e) {
   monitor_ = nullptr;
 
+#ifdef NDEBUG
+    env_ = nullptr;
+#endif
+
   // Get the device name
   size_t i = path_.rfind('/', path_.length());
   std::string dev = path_.substr(i + 1, path_.length() - i);
@@ -486,6 +490,7 @@ template <typename T>
 int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   auto sysfs_path = path_;
 
+#ifdef DEBUG
   if (env_->path_DRM_root_override && type == env_->enum_override) {
     sysfs_path = env_->path_DRM_root_override;
 
@@ -493,6 +498,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
       sysfs_path += ".write";
     }
   }
+#endif
 
   sysfs_path += "/device/";
   sysfs_path += kDevAttribNameMap.at(type);
@@ -545,11 +551,8 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
     return ret;
   }
 
-  try {
-    fs << valStr;
-  } catch (...) {
-    std::cout << "Write to file threw exception" << std::endl;
-  }
+  // We'll catch any exceptions in rocm_smi.cc code.
+  fs << valStr;
   fs.close();
 
   return 0;
@@ -581,7 +584,7 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
       break;
 
     default:
-      break;
+      return EINVAL;
   }
 
   return -1;
@@ -599,7 +602,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
       return writeDevInfoStr(type, val);
 
     default:
-      break;
+      return EINVAL;
   }
 
   return -1;
@@ -709,7 +712,7 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
       break;
 
     default:
-      return -1;
+      return EINVAL;
   }
   return 0;
 }
@@ -734,7 +737,7 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
       break;
 
     default:
-      return -1;
+      return EINVAL;
   }
 
   return 0;
@@ -759,7 +762,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
       break;
 
     default:
-      return -1;
+      return EINVAL;
   }
   return 0;
 }

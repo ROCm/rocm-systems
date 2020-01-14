@@ -54,6 +54,7 @@
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_common.h"
+#include "rocm_smi/rocm_smi_exception.h"
 
 namespace amd {
 namespace smi {
@@ -114,7 +115,16 @@ static int parse_power_str(std::string s, PowerMonTypes type, uint64_t *val) {
       l_ss >> num_units;
       l_ss >> sz;
       assert(sz == "W");  // We only expect Watts at this time
-      *val = num_units * 1000;  // Convert Watts to milliwatts
+      if (sz != "W") {
+        throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA,
+                                                                __FUNCTION__);
+      }
+
+      if (num_units > static_cast<long double>(0xFFFFFFFFFFFFFFFF)/1000) {
+        throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA,
+                                                                __FUNCTION__);
+      }
+      *val = static_cast<uint64_t>(num_units * 1000);  // Convert W to mW
       break;
 
     default:

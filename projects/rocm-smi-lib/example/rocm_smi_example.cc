@@ -56,16 +56,16 @@
 #define CHK_RSMI_RET(RET) { \
   if (RET != RSMI_STATUS_SUCCESS) { \
     const char *err_str; \
-    std::cout << "RSMI call returned " << RET \
+    std::cout << "RSMI call returned " << (RET) \
       << " at line " << __LINE__ << std::endl; \
-      rsmi_status_string(RET, &err_str); \
+      rsmi_status_string((RET), &err_str); \
       std::cout << err_str << std::endl; \
     return RET; \
   } \
 }
 
 #define CHK_RSMI_PERM_RET(RET) { \
-    if (RET == RSMI_STATUS_PERMISSION) { \
+    if ((RET) == RSMI_STATUS_PERMISSION) { \
       std::cout << "This command requires root access." << std::endl; \
     } else { \
       CHK_RSMI_RET(RET) \
@@ -257,7 +257,7 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
   rsmi_status_t ret;
   int64_t orig_speed;
   int64_t new_speed;
-  int64_t cur_speed;
+  int64_t cur_spd;
 
   print_test_header("Fan Speed Control", dv_ind);
 
@@ -270,7 +270,7 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
     return RSMI_STATUS_SUCCESS;
   }
 
-  new_speed = 1.1 * orig_speed;
+  new_speed = static_cast<uint64_t>(1.1 * static_cast<double>(orig_speed));
 
   std::cout << "Setting fan speed to " << new_speed << std::endl;
 
@@ -279,13 +279,16 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
 
   sleep(4);
 
-  ret = rsmi_dev_fan_speed_get(dv_ind, 0, &cur_speed);
+  ret = rsmi_dev_fan_speed_get(dv_ind, 0, &cur_spd);
   CHK_RSMI_RET(ret)
 
-  std::cout << "New fan speed: " << cur_speed << std::endl;
+  std::cout << "New fan speed: " << cur_spd << std::endl;
 
-  assert((cur_speed > 0.95 * new_speed && cur_speed < 1.1 * new_speed) ||
-      (cur_speed > 0.95 * RSMI_MAX_FAN_SPEED));
+  assert(
+      (cur_spd > static_cast<int64_t>(0.95 * static_cast<double>(new_speed)) &&
+       cur_spd < static_cast<int64_t>(1.1 * static_cast<double>(new_speed))) ||
+       (cur_spd >
+       static_cast<int64_t>(0.95 * static_cast<double>(RSMI_MAX_FAN_SPEED))));
 
   std::cout << "Resetting fan control to auto..." << std::endl;
 
@@ -294,10 +297,10 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
 
   sleep(3);
 
-  ret = rsmi_dev_fan_speed_get(dv_ind, 0, &cur_speed);
+  ret = rsmi_dev_fan_speed_get(dv_ind, 0, &cur_spd);
   CHK_RSMI_RET(ret)
 
-  std::cout << "End fan speed: " << cur_speed << std::endl;
+  std::cout << "End fan speed: " << cur_spd << std::endl;
 
   return ret;
 }
@@ -448,7 +451,7 @@ int main() {
     ret = rsmi_dev_fan_speed_max_get(i, 0, &val_ui64);
     CHK_RSMI_RET(ret)
     std::cout << "\t**Current Fan Speed: ";
-    std::cout << val_i64/static_cast<float>(val_ui64)*100;
+    std::cout << val_i64/val_ui64*100;
     std::cout << "% ("<< val_i64 << "/" << val_ui64 << ")" << std::endl;
 
     ret = rsmi_dev_fan_rpms_get(i, 0, &val_i64);

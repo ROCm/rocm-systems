@@ -86,8 +86,25 @@ set(CPACK_PACKAGE_FILE_NAME "${ROCM_SMI_PACKAGE}-${PKG_VERSION_STR}")
 set(CMAKE_VERBOSE_MAKEFILE on)
 
 ## Compiler flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti -m64")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2 -std=c++11 ")
+set(CMAKE_CXX_FLAGS
+ "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti -m64 -msse -msse2 -std=c++11 ")
+# Security options
+set(CMAKE_CXX_FLAGS
+ "${CMAKE_CXX_FLAGS} -Wconversion -Wcast-align ")
+set(CMAKE_CXX_FLAGS
+ "${CMAKE_CXX_FLAGS} -Wformat=2 -fno-common -Wstrict-overflow -Wtrampolines ")
+ # Intentionally leave out -Wsign-promo. It causes spurious warnings.
+set(CMAKE_CXX_FLAGS
+ "${CMAKE_CXX_FLAGS}  -Woverloaded-virtual -Wreorder ")
+
+## Security breach mitigation flags
+set(CMAKE_CXX_FLAGS
+ "${CMAKE_CXX_FLAGS} -DFORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align")
+set(CMAKE_CXX_FLAGS
+ "${CMAKE_CXX_FLAGS} -Wl,-z,noexecstack -Wl,-znoexecheap -Wl,-z,relro ")
+set(CMAKE_CXX_FLAGS
+ "${CMAKE_CXX_FLAGS} -Wl,-z,now -fPIE")
+
 # Use this instead of above for 32 bit
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
 

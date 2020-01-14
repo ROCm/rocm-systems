@@ -116,7 +116,8 @@ typedef enum {
                                          //!< was read
   RSMI_STATUS_NO_DATA,                   //!< No data was found for a given
                                          //!< input
-
+  RSMI_STATUS_UNEXPECTED_DATA,           //!< The data read or provided to
+                                         //!< function is not what was expected
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
 
@@ -867,7 +868,7 @@ rsmi_status_t rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len);
  *  provided arguments.
  *
  *  @param[in] len the length of the caller provided buffer @p brand.
-
+ *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
@@ -901,7 +902,7 @@ rsmi_status_t rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len);
  *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
-
+ *
  *  @param[in] len the length of the caller provided buffer @p name.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful

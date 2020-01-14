@@ -196,8 +196,15 @@ parse_field_config(std::string fstr, evnt_info_t *val) {
   assert(jnk == '-');
   ss >> end_bit;
 
-  val->start_bit = start_bit;
-  val->field_size = end_bit - start_bit + 1;
+  if (start_bit > end_bit ||
+      start_bit > 0xFF ||
+      end_bit > 0xFF ||
+      ((end_bit - start_bit + 1) > 0xFF)) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_SIZE, __FUNCTION__);
+  }
+
+  val->start_bit = static_cast<uint8_t>(start_bit);
+  val->field_size = static_cast<uint8_t>(end_bit - start_bit + 1);
 }
 
 static uint32_t
@@ -313,12 +320,14 @@ amd::smi::evt::Event::openPerfHandle(void) {
   attr_.disabled = 1;
   attr_.inherit = 1;
 
-  fd_ = syscall(__NR_perf_event_open, &attr_,
+  int64_t p_ret = syscall(__NR_perf_event_open, &attr_,
                            -1, 0, -1, PERF_FLAG_FD_NO_GROUP);
 
-  if (fd_ < 0) {
+  if (p_ret < 0) {
     return errno;
   }
+
+  fd_ = static_cast<int>(p_ret);
   return 0;
 }
 
@@ -359,9 +368,9 @@ amd::smi::evt::Event::stopCounter(void) {
   return 0;
 }
 
-static ssize_t
+static long
 readn(int fd, void *buf, size_t n) {
-  size_t left = n;
+  ssize_t left = n;
   ssize_t bytes;
 
   while (left) {
@@ -388,7 +397,7 @@ amd::smi::evt::Event::getValue(rsmi_counter_value_t *val) {
   perf_read_format_t pvalue;
   ret = readn(fd_, &pvalue, sizeof(perf_read_format_t));
   if (ret < 0) {
-    return -ret;
+    return static_cast<uint32_t>(-ret);
   }
 
   if (ret != sizeof(perf_read_format_t)) {

@@ -79,7 +79,6 @@ static rsmi_status_t handleException() {
   } catch (const amd::smi::rsmi_exception& e) {
     debug_print("Exception caught: %s.\n", e.what());
     return e.error_code();
-    return RSMI_STATUS_INTERNAL_EXCEPTION;
   } catch (const std::exception& e) {
     debug_print("Unhandled exception: %s\n", e.what());
     assert(false && "Unhandled exception.");
@@ -135,7 +134,7 @@ static rsmi_status_t handleException() {
 
 #define CHK_SUPPORT(RT_PTR, VR, SUB_VR)  \
     GET_DEV_FROM_INDX \
-    CHK_API_SUPPORT_ONLY(RT_PTR, VR, SUB_VR)
+    CHK_API_SUPPORT_ONLY((RT_PTR), (VR), (SUB_VR))
 
 #define CHK_SUPPORT_NAME_ONLY(RT_PTR) \
     CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT) \
@@ -198,6 +197,7 @@ static uint64_t get_multiplier_from_str(char units_char) {
 
     default:
       assert(!"Unexpected units for frequency");
+      throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
   }
   return multiplier;
 }
@@ -211,7 +211,7 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
   std::istringstream fs(freq_lines[i]);
 
   uint32_t ind;
-  long double freq;
+  float freq;
   std::string junk;
   std::string units_str;
   std::string star_str;
@@ -222,6 +222,10 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
   fs >> units_str;
   fs >> star_str;
 
+  if (freq < 0) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_SIZE, __FUNCTION__);
+  }
+
   if (is_curr != nullptr) {
     if (freq_lines[i].find("*") != std::string::npos) {
       *is_curr = true;
@@ -229,7 +233,7 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
       *is_curr = false;
     }
   }
-  uint32_t multiplier = get_multiplier_from_str(units_str[0]);
+  long double multiplier = get_multiplier_from_str(units_str[0]);
 
   if (star_str[0] == 'x') {
     assert(lanes != nullptr && "Lanes are provided but null lanes pointer");
@@ -237,7 +241,7 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
       lanes[i] = std::stoi(star_str.substr(1), nullptr);
     }
   }
-  return freq*multiplier;
+  return static_cast<uint64_t>(freq*multiplier);
 }
 
 static void freq_volt_string_to_point(std::string in_line,
@@ -245,10 +249,11 @@ static void freq_volt_string_to_point(std::string in_line,
   std::istringstream fs_vlt(in_line);
 
   assert(pt != nullptr);
+  THROW_IF_NULLPTR_DEREF(pt)
 
   uint32_t ind;
-  long double freq;
-  long double volts;
+  float freq;
+  float volts;
   std::string junk;
   std::string freq_units_str;
   std::string volts_units_str;
@@ -260,12 +265,16 @@ static void freq_volt_string_to_point(std::string in_line,
   fs_vlt >> volts;
   fs_vlt >> volts_units_str;
 
-  uint32_t multiplier = get_multiplier_from_str(freq_units_str[0]);
+  if (freq < 0) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_SIZE, __FUNCTION__);
+  }
 
-  pt->frequency = freq*multiplier;
+  long double multiplier = get_multiplier_from_str(freq_units_str[0]);
+
+  pt->frequency = static_cast<uint64_t>(freq*multiplier);
 
   multiplier = get_multiplier_from_str(volts_units_str[0]);
-  pt->voltage = volts*multiplier;
+  pt->voltage = static_cast<uint64_t>(volts*multiplier);
 
   return;
 }
@@ -274,10 +283,11 @@ static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t *rg) {
   std::istringstream fs_rng(in_line);
 
   assert(rg != nullptr);
+  THROW_IF_NULLPTR_DEREF(rg)
 
   std::string clk;
-  uint64_t lo;
-  uint64_t hi;
+  float lo;
+  float hi;
   std::string lo_units_str;
   std::string hi_units_str;
 
@@ -287,16 +297,15 @@ static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t *rg) {
   fs_rng >> hi;
   fs_rng >> hi_units_str;
 
-  uint32_t multiplier = get_multiplier_from_str(lo_units_str[0]);
+  long double multiplier = get_multiplier_from_str(lo_units_str[0]);
 
-  rg->lower_bound = lo*multiplier;
+  rg->lower_bound = static_cast<uint64_t>(lo*multiplier);
 
   multiplier = get_multiplier_from_str(hi_units_str[0]);
-  rg->upper_bound = hi*multiplier;
+  rg->upper_bound = static_cast<uint64_t>(hi*multiplier);
 
   return;
 }
-
 
 /**
  * Parse a string of the form "<int index> <mode name string> <|*>"
@@ -307,6 +316,8 @@ power_prof_string_to_int(std::string pow_prof_line, bool *is_curr,
   std::istringstream fs(pow_prof_line);
   std::string mode;
   size_t tmp;
+
+  THROW_IF_NULLPTR_DEREF(prof_ind)
 
   rsmi_power_profile_preset_masks_t ret = RSMI_PWR_PROF_PRST_INVALID;
 
@@ -348,6 +359,10 @@ power_prof_string_to_int(std::string pow_prof_line, bool *is_curr,
 
 static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type,
                                       uint32_t dv_ind, std::string *val_str) {
+  assert(val_str != nullptr);
+  if (val_str == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   GET_DEV_FROM_INDX
   int ret = dev->readDevInfo(type, val_str);
 
@@ -355,6 +370,10 @@ static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type,
 }
 static rsmi_status_t get_dev_value_int(amd::smi::DevInfoTypes type,
                                          uint32_t dv_ind, uint64_t *val_int) {
+  assert(val_int != nullptr);
+  if (val_int == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   GET_DEV_FROM_INDX
   int ret = dev->readDevInfo(type, val_int);
 
@@ -363,6 +382,10 @@ static rsmi_status_t get_dev_value_int(amd::smi::DevInfoTypes type,
 
 static rsmi_status_t get_dev_value_line(amd::smi::DevInfoTypes type,
                                       uint32_t dv_ind, std::string *val_str) {
+  assert(val_str != nullptr);
+  if (val_str == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   GET_DEV_FROM_INDX
   int ret = dev->readDevInfoLine(type, val_str);
 
@@ -379,6 +402,10 @@ static rsmi_status_t set_dev_value(amd::smi::DevInfoTypes type,
 
 static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
                          uint32_t dv_ind, uint32_t sensor_ind, int64_t *val) {
+  assert(val != nullptr);
+  if (val == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   GET_DEV_FROM_INDX
 
   assert(dev->monitor() != nullptr);
@@ -397,8 +424,12 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
 
 static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
                         uint32_t dv_ind, uint32_t sensor_ind, uint64_t *val) {
-  GET_DEV_FROM_INDX
+  assert(val != nullptr);
+  if (val == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
+  GET_DEV_FROM_INDX
   assert(dev->monitor() != nullptr);
 
   std::string val_str;
@@ -456,6 +487,10 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
 
 static rsmi_status_t get_dev_value_vec(amd::smi::DevInfoTypes type,
                          uint32_t dv_ind, std::vector<std::string> *val_vec) {
+  assert(val_vec != nullptr);
+  if (val_vec == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   GET_DEV_FROM_INDX
 
   int ret = dev->readDevInfo(type, val_vec);
@@ -493,13 +528,14 @@ rsmi_shut_down(void) {
 rsmi_status_t
 rsmi_num_monitor_devices(uint32_t *num_devices) {
   TRY
+  assert(num_devices != nullptr);
   if (num_devices == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
-  *num_devices = smi.monitor_devices().size();
+  *num_devices = static_cast<uint32_t>(smi.monitor_devices().size());
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -682,6 +718,12 @@ static rsmi_status_t
 get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_t *id) {
   TRY
   std::string val_str;
+  int64_t val_u64;
+
+  assert(id != nullptr);
+  if (id == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   DEVICE_MUTEX
 
@@ -692,10 +734,17 @@ get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_t *id) {
   }
 
   errno = 0;
-  *id = strtoul(val_str.c_str(), nullptr, 16);
+  val_u64 = strtoul(val_str.c_str(), nullptr, 16);
   assert(errno == 0);
+  if (errno != 0) {
+    return errno_to_rsmi_status(errno);
+  }
+  if (val_u64 > 0xFFFF) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
+  *id = static_cast<uint16_t>(val_u64);
 
-  return errno_to_rsmi_status(errno);
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
@@ -761,7 +810,13 @@ rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
   }
 
   errno = 0;
-  *od = strtoul(val_str.c_str(), nullptr, 10);
+  int64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+
+  if (val_ul > 0xFFFFFFFF) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
+
+  *od = static_cast<uint32_t>(val_ul);
   assert(errno == 0);
 
   return RSMI_STATUS_SUCCESS;
@@ -815,7 +870,7 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
-  f->num_supported = val_vec.size();
+  f->num_supported = static_cast<uint32_t>(val_vec.size());
   bool current = false;
   f->current = RSMI_MAX_NUM_FREQUENCIES + 1;  // init to an invalid value
 
@@ -860,8 +915,11 @@ static rsmi_status_t get_power_profiles(uint32_t dv_ind,
     return ret;
   }
   assert(val_vec.size() <= RSMI_MAX_NUM_POWER_PROFILES);
-
-  p->num_profiles = val_vec.size() - 1;  // -1 for the header line
+  if (val_vec.size() > RSMI_MAX_NUM_POWER_PROFILES + 1 || val_vec.size() < 1) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
+  // -1 for the header line, below
+  p->num_profiles = static_cast<uint32_t>(val_vec.size() - 1);
   bool current = false;
   p->current = RSMI_PWR_PROF_PRST_INVALID;  // init to an invalid value
   p->available_profiles = 0;
@@ -932,6 +990,9 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   rsmi_status_t ret;
 
   assert(p != nullptr);
+  if (p == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   ret = get_dev_value_vec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -945,6 +1006,9 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   }
 
   assert(val_vec[kOD_SCLK_label_array_index] == "OD_SCLK:");
+  if (val_vec[kOD_SCLK_label_array_index] != "OD_SCLK:") {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
 
   p->curr_sclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
                                      nullptr, kOD_SCLK_label_array_index + 1);
@@ -962,6 +1026,9 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
                                      nullptr, kOD_MCLK_label_array_index + 1);
 
   assert(val_vec[kOD_VDDC_CURVE_label_array_index] == "OD_VDDC_CURVE:");
+  if (val_vec[kOD_VDDC_CURVE_label_array_index] != "OD_VDDC_CURVE:") {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
 
   uint32_t tmp = kOD_VDDC_CURVE_label_array_index + 1;
   for (uint32_t i = 0; i < RSMI_NUM_VOLTAGE_CURVE_POINTS; ++i) {
@@ -969,13 +1036,22 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   }
 
   assert(val_vec[kOD_OD_RANGE_label_array_index] == "OD_RANGE:");
+  if (val_vec[kOD_OD_RANGE_label_array_index] != "OD_RANGE:") {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
   od_value_pair_str_to_range(val_vec[kOD_OD_RANGE_label_array_index + 1],
                                                       &(p->sclk_freq_limits));
   od_value_pair_str_to_range(val_vec[kOD_OD_RANGE_label_array_index + 2],
                                                       &(p->mclk_freq_limits));
 
   assert((val_vec.size() - kOD_VDDC_CURVE_start_index)%2 == 0);
-  p->num_regions = (val_vec.size() - kOD_VDDC_CURVE_start_index) / 2;
+  if ((val_vec.size() - kOD_VDDC_CURVE_start_index)%2 != 0) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
+
+  p->num_regions =
+     static_cast<uint32_t>((val_vec.size() - kOD_VDDC_CURVE_start_index) / 2);
 
   return RSMI_STATUS_SUCCESS;
   CATCH
@@ -985,10 +1061,16 @@ static void get_vc_region(uint32_t start_ind,
                 std::vector<std::string> *val_vec, rsmi_freq_volt_region_t *p) {
   assert(p != nullptr);
   assert(val_vec != nullptr);
+  THROW_IF_NULLPTR_DEREF(p)
+  THROW_IF_NULLPTR_DEREF(val_vec)
+
   // There must be at least 1 region to read in
   assert(val_vec->size() >= kOD_OD_RANGE_label_array_index + 2);
   assert((*val_vec)[kOD_OD_RANGE_label_array_index] == "OD_RANGE:");
-
+  if ((val_vec->size() < kOD_OD_RANGE_label_array_index + 2)  ||
+      ((*val_vec)[kOD_OD_RANGE_label_array_index] != "OD_RANGE:") ) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
+  }
   od_value_pair_str_to_range((*val_vec)[start_ind], &p->freq_range);
   od_value_pair_str_to_range((*val_vec)[start_ind + 1], &p->volt_range);
   return;
@@ -997,10 +1079,10 @@ static void get_vc_region(uint32_t start_ind,
 /*
  * num_regions [inout] on calling, the number of regions requested to be read
  * in. At completion, the number of regions actually read in
- * 
+ *
  * p [inout] point to pre-allocated memory where function will write region
  * values. Caller must make sure there is enough space for at least
- * *num_regions regions. On 
+ * *num_regions regions.
  */
 static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
                             uint32_t *num_regions, rsmi_freq_volt_region_t *p) {
@@ -1010,6 +1092,8 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
 
   assert(num_regions != nullptr);
   assert(p != nullptr);
+  THROW_IF_NULLPTR_DEREF(p)
+  THROW_IF_NULLPTR_DEREF(num_regions)
 
   ret = get_dev_value_vec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -1022,9 +1106,15 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
-  uint32_t val_vec_size = val_vec.size();
+  uint32_t val_vec_size = static_cast<uint32_t>(val_vec.size());
   assert((val_vec_size - kOD_VDDC_CURVE_start_index) > 0);
   assert((val_vec_size - kOD_VDDC_CURVE_start_index)%2 == 0);
+
+  if (((val_vec_size - kOD_VDDC_CURVE_start_index) <= 0)  ||
+      (((val_vec_size - kOD_VDDC_CURVE_start_index)%2 != 0))) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_SIZE, __FUNCTION__);
+  }
+
   *num_regions = std::min((val_vec_size - kOD_VDDC_CURVE_start_index) / 2,
                                                                 *num_regions);
 
@@ -1184,7 +1274,10 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
     case RSMI_FW_BLOCK_VCN:
       dev_type = amd::smi::kDevFwVersionVcn;
       break;
+    default:
+      return RSMI_STATUS_INVALID_ARGS;
   }
+
   ret = get_dev_value_int(dev_type, dv_ind, fw_version);
   if (ret != 0) {
     return errno_to_rsmi_status(ret);
@@ -1198,6 +1291,10 @@ static std::string bitfield_to_freq_string(uint64_t bitf,
                                                      uint32_t num_supported) {
   std::string bf_str("");
   std::bitset<RSMI_MAX_NUM_FREQUENCIES> bs(bitf);
+
+  if (num_supported > RSMI_MAX_NUM_FREQUENCIES) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_INVALID_ARGS, __FUNCTION__);
+  }
 
   for (uint32_t i = 0; i < num_supported; ++i) {
     if (bs[i]) {
@@ -1218,6 +1315,10 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
 
+  if (clk_type > RSMI_CLK_TYPE_LAST) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   ret = rsmi_dev_gpu_clk_freq_get(dv_ind, clk_type, &freqs);
 
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -1225,6 +1326,9 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   }
 
   assert(freqs.num_supported <= RSMI_MAX_NUM_FREQUENCIES);
+  if (freqs.num_supported > RSMI_MAX_NUM_FREQUENCIES) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
 
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
@@ -1293,6 +1397,7 @@ get_id_name_str_from_line(uint64_t id, std::string ln,
   std::string ret_str;
 
   assert(ln_str != nullptr);
+  THROW_IF_NULLPTR_DEREF(ln_str)
 
   *ln_str >> token1;
   if (std::stoul(token1, nullptr, 16) == id) {
@@ -1306,6 +1411,11 @@ get_id_name_str_from_line(uint64_t id, std::string ln,
 
 static rsmi_status_t get_backup_name(uint16_t id, char *name, size_t len) {
   std::string name_str;
+
+  assert(name != nullptr);
+  if (name == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   name_str += "0x";
 
@@ -1343,6 +1453,10 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
 
   assert(name != nullptr);
   assert(len > 0);
+
+  if (name == nullptr || len == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
 
   name[0] = '\0';
 
@@ -1455,6 +1569,11 @@ static rsmi_status_t
 get_dev_drm_render_minor(uint32_t dv_ind, uint32_t *minor) {
   GET_DEV_FROM_INDX
 
+  assert(minor != nullptr);
+  if (minor == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   *minor = dev->drm_render_minor();
   if (*minor)
     return RSMI_STATUS_SUCCESS;
@@ -1508,7 +1627,7 @@ rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len) {
     // Find the brand name using sku_value
     it = brand_names.find(sku_value);
     if (it != brand_names.end()) {
-      uint32_t ln = it->second.copy(brand, len);
+      uint32_t ln = static_cast<uint32_t>(it->second.copy(brand, len));
       brand[std::min(len - 1, ln)] = '\0';
 
       if (len < (it->second.size() + 1)) {
@@ -1539,7 +1658,7 @@ rsmi_dev_vram_vendor_get(uint32_t dv_ind, char *brand, uint32_t len) {
     return errno_to_rsmi_status(ret);
   }
 
-  uint32_t ln = val_str.copy(brand, len);
+  uint32_t ln = static_cast<uint32_t>(val_str.copy(brand, len));
 
   brand[std::min(len - 1, ln)] = '\0';
 
@@ -1589,6 +1708,7 @@ rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name, size_t len) {
   TRY
   CHK_SUPPORT_NAME_ONLY(name)
 
+  assert(len > 0);
   if (len == 0) {
     return RSMI_STATUS_INVALID_ARGS;
   }
@@ -1757,6 +1877,8 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
      return errno_to_rsmi_status(err);
   }
 
+  // getSensorIndex will throw an out of range exception if sensor_type is not
+  // found
   uint32_t sensor_index =
          m->getSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
 
@@ -2100,9 +2222,6 @@ rsmi_dev_memory_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
   TRY
   rsmi_status_t ret;
 
-  if (busy_percent == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
   CHK_SUPPORT_NAME_ONLY(busy_percent)
 
   uint64_t tmp_util = 0;
@@ -2110,6 +2229,9 @@ rsmi_dev_memory_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
   DEVICE_MUTEX
   ret = get_dev_value_int(amd::smi::kDevMemBusyPercent, dv_ind, &tmp_util);
 
+  if (tmp_util > 100) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
   *busy_percent = static_cast<uint32_t>(tmp_util);
   return ret;
   CATCH
@@ -2216,7 +2338,11 @@ rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
   }
 
   errno = 0;
-  *busy_percent = strtoul(val_str.c_str(), nullptr, 10);
+  *busy_percent = static_cast<uint32_t>(strtoul(val_str.c_str(), nullptr, 10));
+
+  if (*busy_percent > 100) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
   assert(errno == 0);
 
   return RSMI_STATUS_SUCCESS;
@@ -2242,7 +2368,7 @@ rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {
     return errno_to_rsmi_status(ret);
   }
 
-  uint32_t ln = val_str.copy(vbios, len);
+  uint32_t ln = static_cast<uint32_t>(val_str.copy(vbios, len));
 
   vbios[std::min(len - 1, ln)] = '\0';
 
@@ -2309,7 +2435,7 @@ rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
     val_str = buf.release;
   }
 
-  uint32_t ln = val_str.copy(ver_str, len);
+  uint32_t ln = static_cast<uint32_t>(val_str.copy(ver_str, len));
 
   ver_str[std::min(len - 1, ln)] = '\0';
 
@@ -2338,7 +2464,7 @@ rsmi_status_t rsmi_dev_serial_number_get(uint32_t dv_ind,
     return ret;
   }
 
-  uint32_t ln = val_str.copy(serial_num, len);
+  uint32_t ln = static_cast<uint32_t>(val_str.copy(serial_num, len));
 
   serial_num[std::min(len - 1, ln)] = '\0';
 
@@ -2420,7 +2546,7 @@ rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
 
 rsmi_status_t
 rsmi_counter_control(rsmi_event_handle_t evt_handle,
-                                 rsmi_counter_command_t cmd, void *cmd_args) {
+                                 rsmi_counter_command_t cmd, void *) {
   TRY
 
   amd::smi::evt::Event *evt =
@@ -2430,11 +2556,7 @@ rsmi_counter_control(rsmi_event_handle_t evt_handle,
 
   REQUIRE_ROOT_ACCESS
 
-  uint32_t ret;
-
-  // This is for future command args. This would work in conjunction with a
-  // new function to set perf attributes.
-  (void) cmd_args;
+  uint32_t ret = 0;
 
   if (evt_handle == 0) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -2451,6 +2573,7 @@ rsmi_counter_control(rsmi_event_handle_t evt_handle,
 
     default:
       assert(!"Unexpected perf counter command");
+      return RSMI_STATUS_INVALID_ARGS;
   }
   return errno_to_rsmi_status(ret);
 
@@ -2570,7 +2693,7 @@ rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
   }
 
   if (records == nullptr || *num_pages > val_vec.size()) {
-    *num_pages = val_vec.size();
+    *num_pages = static_cast<uint32_t>(val_vec.size());
   }
   if (records == nullptr) {
     return RSMI_STATUS_SUCCESS;

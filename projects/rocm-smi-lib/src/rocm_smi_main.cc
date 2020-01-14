@@ -89,7 +89,7 @@ static uint32_t  GetDrmRenderMinor(const std::string s) {
   std::string drm_path = s;
   int drm_minor = 0;
   const std::string render_file_prefix = "renderD";
-  const uint32_t prefix_size = render_file_prefix.size();
+  const uint64_t prefix_size = render_file_prefix.size();
   drm_path += "/device/drm";
 
   auto drm_dir = opendir(drm_path.c_str());
@@ -289,21 +289,34 @@ RocmSMI& RocmSMI::getInstance(uint64_t flags) {
 }
 
 static int GetEnvVarInteger(const char *ev_str) {
+#ifdef NDEBUG
+  (void)ev_str;
+#else
   ev_str = getenv(ev_str);
 
   if (ev_str) {
     return atoi(ev_str);
   }
+#endif
   return 0;
 }
 
 // Get and store env. variables in this method
 void RocmSMI::GetEnvVariables(void) {
+#ifdef NDEBUG
+  (void)GetEnvVarInteger(nullptr);  // This is to quiet release build warning.
+  env_vars_.debug_output_bitfield = 0;
+  env_vars_.path_DRM_root_override = nullptr;
+  env_vars_.path_HWMon_root_override = nullptr;
+  env_vars_.path_power_root_override = nullptr;
+  env_vars_.enum_override = 0;
+#else
   env_vars_.debug_output_bitfield = GetEnvVarInteger("RSMI_DEBUG_BITFIELD");
   env_vars_.path_DRM_root_override   = getenv("RSMI_DEBUG_DRM_ROOT_OVERRIDE");
   env_vars_.path_HWMon_root_override = getenv("RSMI_DEBUG_HWMON_ROOT_OVERRIDE");
   env_vars_.path_power_root_override = getenv("RSMI_DEBUG_PP_ROOT_OVERRIDE");
   env_vars_.enum_override = GetEnvVarInteger("RSMI_DEBUG_ENUM_OVERRIDE");
+#endif
 }
 
 void
