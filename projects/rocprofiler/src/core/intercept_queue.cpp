@@ -29,10 +29,9 @@ void InterceptQueue::HsaIntercept(HsaApiTable* table) {
 }
 
 InterceptQueue::mutex_t InterceptQueue::mutex_;
-rocprofiler_callback_t InterceptQueue::dispatch_callback_ = NULL;
-InterceptQueue::queue_callback_t InterceptQueue::create_callback_ = NULL;
-InterceptQueue::queue_callback_t InterceptQueue::destroy_callback_ = NULL;
+rocprofiler_queue_callbacks_t InterceptQueue::callbacks_ = {};
 void* InterceptQueue::callback_data_ = NULL;
+std::atomic<rocprofiler_callback_t> InterceptQueue::dispatch_callback_{NULL};
 InterceptQueue::obj_map_t* InterceptQueue::obj_map_ = NULL;
 const char* InterceptQueue::kernel_none_ = "";
 Tracker* InterceptQueue::tracker_ = NULL;

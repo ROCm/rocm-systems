@@ -262,6 +262,10 @@ hsa_status_t rocprofiler_set_queue_callbacks(
 // Remove queue callbacks
 hsa_status_t rocprofiler_remove_queue_callbacks();
 
+// Start/stop queue callbacks
+hsa_status_t rocprofiler_start_queue_callbacks();
+hsa_status_t rocprofiler_stop_queue_callbacks();
+
 ////////////////////////////////////////////////////////////////////////////////
 // Start/stop profiling
 //

@@ -84,8 +84,8 @@ class InterceptQueue {
     obj->queue_id = current_queue_id;
     ++current_queue_id;
 
-    if (create_callback_ != NULL) {
-      status = create_callback_(*queue, callback_data_);
+    if (callbacks_.create != NULL) {
+      status = callbacks_.create(*queue, callback_data_);
     }
 
     in_create_call_ = false;
@@ -112,8 +112,8 @@ class InterceptQueue {
     std::lock_guard<mutex_t> lck(mutex_);
     hsa_status_t status = HSA_STATUS_SUCCESS;
 
-    if (destroy_callback_ != NULL) {
-      status = destroy_callback_(queue, callback_data_);
+    if (callbacks_.destroy != NULL) {
+      status = callbacks_.destroy(queue, callback_data_);
     }
 
     if (status == HSA_STATUS_SUCCESS) {
@@ -135,7 +135,8 @@ class InterceptQueue {
       bool to_submit = true;
 
       // Checking for dispatch packet type
-      if ((GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) && (dispatch_callback_ != NULL)) {
+      if ((GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) &&
+          (dispatch_callback_.load(std::memory_order_acquire) != NULL)) {
         const hsa_kernel_dispatch_packet_t* dispatch_packet =
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
         const hsa_signal_t completion_signal = dispatch_packet->completion_signal;
@@ -154,8 +155,7 @@ class InterceptQueue {
         const uint16_t kernel_object_flag = *((uint64_t*)kernel_code + 1);
         if (kernel_object_flag == 0) {
           if (!util::HsaRsrcFactory::IsExecutableTracking()) {
-            fprintf(stderr, "Error: V3 code object detected - code objects tracking should be enabled\n");
-            abort();
+            EXC_ABORT(HSA_STATUS_ERROR, "Error: V3 code object detected - code objects tracking should be enabled\n");
           }
         }
         const char* kernel_name = (util::HsaRsrcFactory::IsExecutableTracking()) ?
@@ -227,17 +227,24 @@ class InterceptQueue {
     }
   }
 
-  static void SetCallbacks(rocprofiler_callback_t dispatch_callback,
-                           queue_callback_t create_callback,
-                           queue_callback_t destroy_callback,
-                           void* data)
-  {
+  static void SetCallbacks(rocprofiler_queue_callbacks_t callbacks, void* data) {
     std::lock_guard<mutex_t> lck(mutex_);
+    if (callback_data_ != NULL) {
+      EXC_ABORT(HSA_STATUS_ERROR, "reassigning queue callbacks - not supported");
+    }
+    callbacks_ = callbacks;
     callback_data_ = data;
-    dispatch_callback_ = dispatch_callback;
-    create_callback_ = create_callback;
-    destroy_callback_ = destroy_callback;
+    Start();
   }
+
+  static void RemoveCallbacks() {
+    std::lock_guard<mutex_t> lck(mutex_);
+    callbacks_ = {};
+    Stop();
+  }
+
+  static inline void Start() { dispatch_callback_.store(callbacks_.dispatch, std::memory_order_release); }
+  static inline void Stop() { dispatch_callback_.store(NULL, std::memory_order_relaxed); }
 
   static void TrackerOn(bool on) { tracker_on_ = on; }
   static bool IsTrackerOn() { return tracker_on_; }
@@ -324,12 +331,13 @@ class InterceptQueue {
     ProxyQueue::Destroy(proxy_);
   }
 
-  static mutex_t mutex_;
   static const packet_word_t header_type_mask = (1ul << HSA_PACKET_HEADER_WIDTH_TYPE) - 1;
-  static rocprofiler_callback_t dispatch_callback_;
-  static queue_callback_t create_callback_;
-  static queue_callback_t destroy_callback_;
+
+  static mutex_t mutex_;
+  static rocprofiler_queue_callbacks_t callbacks_;
   static void* callback_data_;
+  static std::atomic<rocprofiler_callback_t> dispatch_callback_;
+
   static obj_map_t* obj_map_;
   static const char* kernel_none_;
   static Tracker* tracker_;
