@@ -48,8 +48,7 @@ rocTX API:
 ```
  - ROCm is required
  
- - Python2.7 is required.
-  The required modules: CppHeaderParser, argparse.
+ - Python modules requirement: CppHeaderParser, argparse.
   To install:
   sudo pip install CppHeaderParser argparse
 
