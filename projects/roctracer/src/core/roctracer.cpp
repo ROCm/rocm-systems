@@ -526,11 +526,25 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
   return status;
 }
 
+// Logger routines and primitives
 util::Logger::mutex_t util::Logger::mutex_;
 std::atomic<util::Logger*> util::Logger::instance_{};
+
+// Memory pool routines and primitives
 MemoryPool* memory_pool = NULL;
 typedef std::recursive_mutex memory_pool_mutex_t;
 memory_pool_mutex_t memory_pool_mutex;
+
+// Stop sttaus routines and primitives
+unsigned stop_status_value = 0;
+typedef std::mutex stop_status_mutex_t;
+stop_status_mutex_t stop_status_mutex;
+unsigned set_stopped(unsigned val) {
+  std::lock_guard<stop_status_mutex_t> lock(stop_status_mutex);
+  const unsigned ret = (stop_status_value ^ val);
+  stop_status_value = val;
+  return ret;
+}
 }  // namespace roctracer
 
 LOADER_INSTANTIATE();
@@ -1015,16 +1029,20 @@ PUBLIC_API void roctracer_mark(const char* str) {
 
 // Start API
 PUBLIC_API void roctracer_start() {
-  if (roctracer::ext_support::roctracer_start_cb) roctracer::ext_support::roctracer_start_cb();
-  roctracer::cb_journal->foreach(roctracer::cb_en_functor_t(roctracer_enable_callback_fun));
-  roctracer::act_journal->foreach(roctracer::act_en_functor_t(roctracer_enable_activity_fun));
+  if (roctracer::set_stopped(0)) {
+    if (roctracer::ext_support::roctracer_start_cb) roctracer::ext_support::roctracer_start_cb();
+    roctracer::cb_journal->foreach(roctracer::cb_en_functor_t(roctracer_enable_callback_fun));
+    roctracer::act_journal->foreach(roctracer::act_en_functor_t(roctracer_enable_activity_fun));
+  }
 }
 
 // Stop API
 PUBLIC_API void roctracer_stop() {
-  roctracer::cb_journal->foreach(roctracer::cb_dis_functor_t(roctracer_disable_callback_fun));
-  roctracer::act_journal->foreach(roctracer::act_dis_functor_t(roctracer_disable_activity_fun));
-  if (roctracer::ext_support::roctracer_stop_cb) roctracer::ext_support::roctracer_stop_cb();
+  if (roctracer::set_stopped(1)) {
+    roctracer::cb_journal->foreach(roctracer::cb_dis_functor_t(roctracer_disable_callback_fun));
+    roctracer::act_journal->foreach(roctracer::act_dis_functor_t(roctracer_disable_activity_fun));
+    if (roctracer::ext_support::roctracer_stop_cb) roctracer::ext_support::roctracer_stop_cb();
+  }
 }
 
 // Set properties
