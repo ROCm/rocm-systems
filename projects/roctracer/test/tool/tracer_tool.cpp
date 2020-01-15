@@ -188,22 +188,17 @@ void roctx_api_callback(
   roctx_callback_fun(domain, cid, GetTid(), data->args.message);
 }
 
-// Start/Stop callbacks
-void roctx_range_stack_callback(const roctx_range_data_t* data, void* arg) {
-  const bool* is_stop_ptr = (bool*)arg;
-  const uint32_t cid = (*is_stop_ptr == true) ? ROCTX_API_ID_roctxRangePop : ROCTX_API_ID_roctxRangePushA;
-  const char* message = (*is_stop_ptr == true) ? NULL : data->message;
-  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, cid, data->tid, message);
+// rocTX Start/Stop callbacks
+void roctx_range_start_callback(const roctx_range_data_t* data, void* arg) {
+  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePushA, data->tid, data->message);
 }
-void stop_callback() {
-  bool is_stop = true;
-  roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_stack_callback, (void*)&is_stop);
+void roctx_range_stop_callback(const roctx_range_data_t* data, void* arg) {
+  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePop, data->tid, NULL);
 }
-void start_callback() {
-  bool is_stop = false;
-  roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_stack_callback, (void*)&is_stop);
-}
+void start_callback() { roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_start_callback, NULL); }
+void stop_callback() { roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_stop_callback, NULL); }
 
+// rocTX buffer flush function
 void roctx_flush_cb(roctx_trace_entry_t* entry) {
   std::ostringstream os;
   os << entry->timestamp << " " << entry->pid << ":" << entry->tid << " " << entry->cid;
