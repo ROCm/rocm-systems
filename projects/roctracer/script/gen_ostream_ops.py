@@ -122,7 +122,7 @@ def process_struct(f,c,cppHeader,nname,apiname):
             process_struct(f,nc,cppHeader,name,apiname)
 
 
-def gen_cppheader(infilepath,outfilepath):
+def gen_cppheader(infilepath, includes, outfilepath):
     try:
         cppHeader = CppHeaderParser.CppHeader(infilepath)
     except CppHeaderParser.CppParseError as e:
@@ -146,10 +146,8 @@ def gen_cppheader(infilepath,outfilepath):
       '#include <iostream>\n' + \
       '\n' + \
       '#include "roctracer.h"\n'
-    if apiname == "KFD":
-      HEADER_S += '#include "hsakmt.h"\n'
-    if apiname == "HSA":
-      HEADER_S += '#include <hsa.h>\n#include <hsa_api_trace.h>\n#include <hsa_ext_amd.h>\n #include "cb_table.h"\n'
+    for w in includes.split(','):
+      HEADER_S += '#include "' + w + '"\n'
     f.write(HEADER_S)
     f.write('\n')
     f.write('namespace roctracer {\n')
@@ -180,7 +178,6 @@ def gen_cppheader(infilepath,outfilepath):
         '#endif // INC_BASIC_OSTREAM_OPS_H_\n' + \
         ' \n'
     f.write(FOOTER)
-
     f.close()
     f2.close()
     print('File ' + outfilepath + ' generated')
@@ -191,10 +188,11 @@ def gen_cppheader(infilepath,outfilepath):
 parser = argparse.ArgumentParser(description='genOstreamOps.py: generates ostream operators for all typedefs in provided input file.')
 requiredNamed = parser.add_argument_group('Required arguments')
 requiredNamed.add_argument('-in','--in', help='Header file to be parsed', required=True)
+requiredNamed.add_argument('-includes','--inc', help='Comma separated list of include file names', required=True)
 requiredNamed.add_argument('-out','--out', help='Output file with ostream operators', required=True)
 
 args = vars(parser.parse_args())
 
 if __name__ == '__main__':
-    gen_cppheader(args['in'],args['out'])
+    gen_cppheader(args['in'],args['inc'],args['out'])
 
