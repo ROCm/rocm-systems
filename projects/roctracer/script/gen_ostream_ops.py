@@ -187,12 +187,11 @@ def gen_cppheader(infilepath, includes, outfilepath):
 
 parser = argparse.ArgumentParser(description='genOstreamOps.py: generates ostream operators for all typedefs in provided input file.')
 requiredNamed = parser.add_argument_group('Required arguments')
-requiredNamed.add_argument('-in','--in', help='Header file to be parsed', required=True)
-requiredNamed.add_argument('-includes','--inc', help='Comma separated list of include file names', required=True)
-requiredNamed.add_argument('-out','--out', help='Output file with ostream operators', required=True)
+requiredNamed.add_argument('-in', metavar='file', help='Header file to be parsed', required=True)
+requiredNamed.add_argument('-includes', metavar='list', help='Comma separated list of include file names', required=True)
+requiredNamed.add_argument('-out', metavar='file', help='Output file with ostream operators', required=True)
 
 args = vars(parser.parse_args())
 
 if __name__ == '__main__':
-    gen_cppheader(args['in'],args['inc'],args['out'])
-
+    gen_cppheader(args['in'],args['includes'],args['out'])
