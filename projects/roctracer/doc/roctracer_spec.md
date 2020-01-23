@@ -1,5 +1,8 @@
 # ROC Tracer / ROC-TX Libraries Specification
 ```
+ROC Tracer API version 2
+ROCTX API version 1
+
 - The rocTracer API is agnostic to specific runtime and may trace
 the runtime API calls and asynchronous GPU activity.
 - The rocTX API is provided for application code annotation.
