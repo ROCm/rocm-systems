@@ -89,7 +89,9 @@ hsa_status_t rocprofiler_error_string(
 // Profiling feature kind
 typedef enum {
   ROCPROFILER_FEATURE_KIND_METRIC = 0,
-  ROCPROFILER_FEATURE_KIND_TRACE = 1
+  ROCPROFILER_FEATURE_KIND_TRACE = 1,
+  ROCPROFILER_FEATURE_KIND_SPM_MOD = 2,
+  ROCPROFILER_FEATURE_KIND_PCSMP_MOD = 4
 } rocprofiler_feature_kind_t;
 
 // Profiling feture parameter
@@ -200,6 +202,10 @@ hsa_status_t rocprofiler_close(rocprofiler_t* context);  // [in] profiling conte
 // Context reset before reusing
 hsa_status_t rocprofiler_reset(rocprofiler_t* context,  // [in] profiling context
                                uint32_t group_index);   // group index
+
+// Return context agent
+hsa_status_t rocprofiler_get_agent(rocprofiler_t* context,        // [in] profiling context
+                                   hsa_agent_t* agent);           // [out] GPU handle
 
 // Supported time value ID
 typedef enum {

@@ -139,6 +139,7 @@ bool is_trace_local = true;
 // SPM trace enabled
 bool is_spm_trace = false;
 
+static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
 // Error handler
@@ -909,7 +910,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   }
   if (rcfile != NULL) {
     // Getting defaults
-    printf("ROCProfiler: rc-file '%s'\n", rcpath.c_str());
+    printf("ROCProfiler pid(%u): rc-file '%s'\n", GetPid(), rcpath.c_str());
     auto defaults_list = rcfile->GetNodes("top.defaults");
     for (auto* entry : defaults_list) {
       const auto& opts = entry->opts;

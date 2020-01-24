@@ -76,8 +76,9 @@ if (NOT USE_PROF_API)
 endif()
 
 # Protocol header lookup
+set(PROF_API_HEADER_NAME prof_protocol.h)
 if(USE_PROF_API EQUAL 1)
-    find_path(PROF_API_HEADER_DIR prof_protocol.h
+    find_path(PROF_API_HEADER_DIR ${PROF_API_HEADER_NAME}
         HINTS
             ${PROF_API_HEADER_PATH}
         PATHS
@@ -86,11 +87,11 @@ if(USE_PROF_API EQUAL 1)
             include/ext
     )
     if(NOT PROF_API_HEADER_DIR)
-        MESSAGE(ERROR "Profiling API header not found. Tracer integration disabled. Use -DPROF_API_HEADER_PATH=<path to prof_protocol.h header>")
+        MESSAGE(ERROR ": Profiling API header not found. Tracer integration disabled. Use -DPROF_API_HEADER_PATH=<path to ${PROF_API_HEADER_NAME} header>")
     else()
         add_definitions(-DUSE_PROF_API=1)
         include_directories(${PROF_API_HEADER_DIR})
-        MESSAGE(STATUS "Profiling API: ${PROF_API_HEADER_DIR}")
+        MESSAGE(STATUS "Profiling API: ${PROF_API_HEADER_DIR}/${PROF_API_HEADER_NAME}")
     endif()
 endif()
 

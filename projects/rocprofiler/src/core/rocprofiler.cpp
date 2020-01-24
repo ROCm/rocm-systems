@@ -25,6 +25,8 @@ THE SOFTWARE.
 #include <hsa.h>
 #include <hsa_api_trace.h>
 #include <string.h>
+
+#include <sstream>
 #include <vector>
 
 #include "core/context.h"
@@ -169,7 +171,9 @@ enum {
 uint32_t LoadTool() {
   uint32_t intercept_mode = 0;
   const char* tool_lib = getenv("ROCP_TOOL_LIB");
-  ONLOAD_TRACE("load tool library(" << tool_lib << ")");
+  std::ostringstream oss;
+  if (tool_lib) oss << "load tool library(" << tool_lib << ")";
+  ONLOAD_TRACE(oss.str());
 
   if (tool_lib) {
     intercept_mode = DISPATCH_INTERCEPT_MODE;
@@ -552,6 +556,14 @@ PUBLIC_API hsa_status_t rocprofiler_reset(rocprofiler_t* handle, uint32_t group_
   API_METHOD_PREFIX
   rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
   context->Reset(group_index);
+  API_METHOD_SUFFIX
+}
+
+// Return context agent
+PUBLIC_API hsa_status_t rocprofiler_get_agent(rocprofiler_t* handle, hsa_agent_t* agent) {
+  API_METHOD_PREFIX
+  rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
+  *agent = context->GetAgent();
   API_METHOD_SUFFIX
 }
 

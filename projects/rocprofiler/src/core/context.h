@@ -276,6 +276,7 @@ class Context {
     profile_vector_t profile_vector;
     set_[0].GetTraceProfiles(profile_vector);
     for (auto& tuple : profile_vector) {
+      if (pcsmp_mode_) const_cast<profile_t*>(tuple.profile)->event_count = UINT32_MAX;
       const hsa_status_t status =
           api_->hsa_ven_amd_aqlprofile_iterate_data(tuple.profile, callback, data);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "context iterate data failed");
@@ -293,6 +294,7 @@ class Context {
     return false;
   }
 
+  hsa_agent_t GetAgent() const { return agent_; }
   Group* GetGroup(const uint32_t& index) { return &set_[index]; }
   rocprofiler_handler_t GetHandler(void** arg) const { *arg = handler_arg_; return handler_; }
 
@@ -306,7 +308,8 @@ class Context {
         api_(hsa_rsrc_->AqlProfileApi()),
         metrics_(NULL),
         handler_(handler),
-        handler_arg_(handler_arg)
+        handler_arg_(handler_arg),
+        pcsmp_mode_(false)
   {}
 
   ~Context() { Destruct(); }
@@ -434,10 +437,13 @@ class Context {
           const uint32_t group_index = block_status.group_index;
           set_[group_index].Insert(profile_info_t{event, NULL, 0, info});
         }
-      } else if (kind == ROCPROFILER_FEATURE_KIND_TRACE) {  // Processing traces features
-        if (info->parameters != NULL) {
-          set_[0].Insert(profile_info_t{NULL, info->parameters, info->parameter_count, info});
-        } else {
+      } else if (kind & ROCPROFILER_FEATURE_KIND_TRACE) {  // Processing traces features
+        info->kind = ROCPROFILER_FEATURE_KIND_TRACE;
+
+        const event_t* event = NULL;
+        if (kind & ROCPROFILER_FEATURE_KIND_PCSMP_MOD) { // PC sampling
+          pcsmp_mode_ = true;
+        } else if (kind & ROCPROFILER_FEATURE_KIND_SPM_MOD) { // SPM trace
           const Metric* metric = metrics_->Get(name);
           if (metric == NULL)
             EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
@@ -445,9 +451,9 @@ class Context {
           if (counters_vec.size() != 1)
             EXC_RAISING(HSA_STATUS_ERROR, "trace bad metric '" << name << "' is not base counter");
           const counter_t* counter = counters_vec[0];
-          const event_t* event = &(counter->event);
-          set_[0].Insert(profile_info_t{event, NULL, 0, info});
+          event = &(counter->event);
         }
+        set_[0].Insert(profile_info_t{event, info->parameters, info->parameter_count, info});
       } else {
         EXC_RAISING(HSA_STATUS_ERROR, "bad rocprofiler feature kind (" << kind << ")");
       }
@@ -584,6 +590,9 @@ class Context {
   // Context completion handler
   rocprofiler_handler_t handler_;
   void* handler_arg_;
+
+  // PC sampling mode
+  bool pcsmp_mode_;
 };
 
 }  // namespace rocprofiler
