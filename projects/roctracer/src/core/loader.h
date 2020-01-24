@@ -70,6 +70,33 @@ class BaseLoader : public T {
   void* handle_;
 };
 
+// 'rocprofiler' library loader class
+class RocpApi {
+  public:
+  typedef BaseLoader<RocpApi> Loader;
+
+  typedef bool (RegisterCallback_t)(uint32_t op, void* callback, void* arg);
+  typedef bool (OperateCallback_t)(uint32_t op);
+  typedef bool (InitCallback_t)(void* callback, void* arg);
+  typedef bool (EnableCallback_t)(uint32_t op, bool enable);
+  typedef const char* (NameCallback_t)(uint32_t op);
+
+  RegisterCallback_t* RegisterApiCallback;
+  OperateCallback_t* RemoveApiCallback;
+  InitCallback_t* InitActivityCallback;
+  EnableCallback_t* EnableActivityCallback;
+  NameCallback_t* GetOpName;
+
+  protected:
+  void init(Loader* loader) {
+    RegisterApiCallback = loader->GetFun<RegisterCallback_t>("RegisterApiCallback");
+    RemoveApiCallback = loader->GetFun<OperateCallback_t>("RemoveApiCallback");
+    InitActivityCallback = loader->GetFun<InitCallback_t>("InitActivityCallback");
+    EnableActivityCallback = loader->GetFun<EnableCallback_t>("EnableActivityCallback");
+    GetOpName = loader->GetFun<NameCallback_t>("GetOpName");
+  }
+};
+
 // HIP runtime library loader class
 class HipApi {
   public:
@@ -164,6 +191,7 @@ class RocTxApi {
   }
 };
 
+typedef BaseLoader<RocpApi> RocpLoader;
 typedef BaseLoader<HipApi> HipLoader;
 typedef BaseLoader<HccApi> HccLoader;
 typedef BaseLoader<KfdApi> KfdLoader;
@@ -176,6 +204,8 @@ typedef BaseLoader<RocTxApi> RocTxLoader;
   template<class T> std::atomic<roctracer::BaseLoader<T>*> roctracer::BaseLoader<T>::instance_{}; \
   template<class T> bool roctracer::BaseLoader<T>::to_load_ = false; \
   template<class T> bool roctracer::BaseLoader<T>::to_check_ = true; \
+  template<> const char* roctracer::RocpLoader::lib_name_ = "librocprofiler64.so"; \
+  template<> bool roctracer::RocpLoader::to_load_ = true; \
   template<> const char* roctracer::HipLoader::lib_name_ = "libhip_hcc.so"; \
   template<> bool roctracer::HipLoader::to_check_ = false; \
   template<> const char* roctracer::HccLoader::lib_name_ = "libmcwamp.so"; \

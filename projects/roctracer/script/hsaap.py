@@ -342,8 +342,8 @@ class API_DescrParser:
       self.content += '  ' + self.api_id[call] + ' = ' + str(n) + ',\n'
     else:
       self.content += '\n'
-      self.content += '  HSA_API_ID_NUMBER = ' + str(n) + ',\n'
-      self.content += '  HSA_API_ID_ANY = ' + str(n + 1) + ',\n'
+      self.content += '  HSA_API_ID_DISPATCH = ' + str(n) + ',\n'
+      self.content += '  HSA_API_ID_NUMBER = ' + str(n + 1) + ',\n'
       self.content += '};\n'
     
   # generate API args structure

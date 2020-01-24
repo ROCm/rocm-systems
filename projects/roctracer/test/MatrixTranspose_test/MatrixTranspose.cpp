@@ -310,6 +310,12 @@ void activity_callback(const char* begin, const char* end, void* arg) {
         record->queue_id
       );
       if (record->op == HIP_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
+    } else if (record->domain == ACTIVITY_DOMAIN_HSA_OPS) {
+      fprintf(stdout, " se(%u) cycle(%lu) pc(%lx)",
+        record->ps_sample.se,
+        record->ps_sample.cycle,
+        record->ps_sample.pc
+      );
     } else if (record->domain == ACTIVITY_DOMAIN_EXT_API) {
       fprintf(stdout, " external_id(%lu)",
         record->external_id
@@ -340,6 +346,8 @@ void init_tracing() {
   // Enable HIP activity tracing
   ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
   ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
+  // Enable PC sampling
+  ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_PCSAMPLE));
   // Enable KFD API tracing
   ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_KFD_API, api_callback, NULL));
   ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_KFD_API));

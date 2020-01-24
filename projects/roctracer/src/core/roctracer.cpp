@@ -394,8 +394,6 @@ void HCC_ActivityIdCallback(activity_correlation_id_t correlation_id) {
 }
 
 void HCC_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
-  static hsa_rt_utils::Timer timer;
-
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
   roctracer_record_t* record_ptr = reinterpret_cast<roctracer_record_t*>(record);
   record_ptr->domain = ACTIVITY_DOMAIN_HCC_OPS;
@@ -526,6 +524,13 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
   return status;
 }
 
+void HSA_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
+  MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
+  roctracer_record_t* record_ptr = reinterpret_cast<roctracer_record_t*>(record);
+  record_ptr->domain = ACTIVITY_DOMAIN_HSA_OPS;
+  pool->Write(*record_ptr);
+}
+
 // Logger routines and primitives
 util::Logger::mutex_t util::Logger::mutex_;
 std::atomic<util::Logger*> util::Logger::instance_{};
@@ -573,22 +578,16 @@ PUBLIC_API const char* roctracer_op_string(
 {
   API_METHOD_PREFIX
   switch (domain) {
-    case ACTIVITY_DOMAIN_HSA_API: {
+    case ACTIVITY_DOMAIN_HSA_API:
       return roctracer::hsa_support::GetApiName(op);
-      break;
-    }
-    case ACTIVITY_DOMAIN_HCC_OPS: {
+    case ACTIVITY_DOMAIN_HSA_OPS:
+      return roctracer::RocpLoader::Instance().GetOpName(op);
+    case ACTIVITY_DOMAIN_HCC_OPS:
       return roctracer::HccLoader::Instance().GetOpName(kind);
-      break;
-    }
-    case ACTIVITY_DOMAIN_HIP_API: {
+    case ACTIVITY_DOMAIN_HIP_API:
       return roctracer::HipLoader::Instance().ApiName(op);
-      break;
-    }
-    case ACTIVITY_DOMAIN_KFD_API: {
+    case ACTIVITY_DOMAIN_KFD_API:
       return roctracer::kfd_support::GetApiName(op);
-      break;
-    }
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }
@@ -622,7 +621,7 @@ PUBLIC_API roctracer_status_t roctracer_op_code(
 
 static inline uint32_t get_op_num(const uint32_t& domain) {
   switch (domain) {
-    case ACTIVITY_DOMAIN_HSA_OPS: return 1;
+    case ACTIVITY_DOMAIN_HSA_OPS: return HSA_OP_ID_NUMBER;
     case ACTIVITY_DOMAIN_HSA_API: return HSA_API_ID_NUMBER;
     case ACTIVITY_DOMAIN_HCC_OPS: return HIP_OP_ID_NUMBER;
     case ACTIVITY_DOMAIN_HIP_API: return HIP_API_ID_NUMBER;
@@ -645,11 +644,16 @@ static roctracer_status_t roctracer_enable_callback_fun(
   switch (domain) {
     case ACTIVITY_DOMAIN_KFD_API: {
       const bool succ = roctracer::KfdLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
-      if (succ == false) EXC_RAISING(ROCTRACER_STATUS_ERROR, "KFD RegisterApiCallback error");
+      if (succ == false) EXC_RAISING(ROCTRACER_STATUS_ERROR, "KFD RegisterApiCallback error(" << op << ") failed");
       break;
     }
     case ACTIVITY_DOMAIN_HSA_OPS: break;
     case ACTIVITY_DOMAIN_HSA_API: {
+      if (op == HSA_API_ID_DISPATCH) {
+        const bool succ = roctracer::RocpLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
+        if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::EnableActivityCallback error(" << op << ") failed");
+        break;
+      }
       roctracer::hsa_support::cb_table.set(op, callback, user_data);
       break;
     }
@@ -658,13 +662,13 @@ static roctracer_status_t roctracer_enable_callback_fun(
       if (roctracer::HipLoader::Instance().Enabled() == false) break;
 
       hipError_t hip_err = roctracer::HipLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
-      if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterApiCallback(" << op << ") error(" << hip_err << ")");
+      if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIP::RegisterApiCallback(" << op << ") error(" << hip_err << ")");
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
       if (roctracer::RocTxLoader::Instance().Enabled()) {
         const bool suc = roctracer::RocTxLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
-        if (suc == false) EXC_RAISING(ROCTRACER_STATUS_ROCTX_ERR, "roctxRegisterApiCallback(" << op << ") failed");
+        if (suc == false) EXC_RAISING(ROCTRACER_STATUS_ROCTX_ERR, "ROCTX::RegisterApiCallback(" << op << ") failed");
       }
       break;
     }
@@ -730,19 +734,26 @@ static roctracer_status_t roctracer_disable_callback_fun(
       break;
     }
     case ACTIVITY_DOMAIN_HSA_OPS: break;
-    case ACTIVITY_DOMAIN_HSA_API: break;
+    case ACTIVITY_DOMAIN_HSA_API: {
+      if (op == HSA_API_ID_DISPATCH) {
+        const bool succ = roctracer::RocpLoader::Instance().RemoveApiCallback(op);
+        if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::RemoveActivityCallback error(" << op << ") failed");
+        break;
+      }
+      break;
+    }
     case ACTIVITY_DOMAIN_HCC_OPS: break;
     case ACTIVITY_DOMAIN_HIP_API: {
       if (roctracer::HipLoader::Instance().Enabled() == false) break;
 
       hipError_t hip_err = roctracer::HipLoader::Instance().RemoveApiCallback(op);
-      if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveApiCallback error(" << hip_err << ")");
+      if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIP::RemoveApiCallback(" << op << "), error(" << hip_err << ")");
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
       if (roctracer::RocTxLoader::Instance().Enabled()) {
         const bool suc = roctracer::RocTxLoader::Instance().RemoveApiCallback(op);
-        if (suc == false) EXC_RAISING(ROCTRACER_STATUS_ROCTX_ERR, "roctxRemoveApiCallback(" << op << ") failed");
+        if (suc == false) EXC_RAISING(ROCTRACER_STATUS_ROCTX_ERR, "ROCTX::RemoveApiCallback(" << op << ") failed");
       }
       break;
     }
@@ -833,8 +844,17 @@ static roctracer_status_t roctracer_enable_activity_fun(
   if (pool == NULL) pool = roctracer_default_pool();
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
-      roctracer::hsa_support::async_copy_callback_enabled = true;
-      rocprofiler::InterceptQueue::Enable(true);
+      if (op == HSA_OP_ID_DISPATCH) {
+        const bool init_phase = (roctracer::RocpLoader::GetRef() == NULL);
+        if (init_phase == true) {
+          roctracer::RocpLoader::Instance().InitActivityCallback((void*)roctracer::HSA_AsyncActivityCallback,
+                                                                 (void*)pool);
+        }
+        const bool succ = roctracer::RocpLoader::Instance().EnableActivityCallback(op, true);
+        if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::EnableActivityCallback error");
+      } else if (op == HSA_OP_ID_COPY) {
+        roctracer::hsa_support::async_copy_callback_enabled = true;
+      }
       break;
     }
     case ACTIVITY_DOMAIN_HSA_API: break;
@@ -921,8 +941,12 @@ static roctracer_status_t roctracer_disable_activity_fun(
 {
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
-      roctracer::hsa_support::async_copy_callback_enabled = false;
-      rocprofiler::InterceptQueue::Enable(false);
+      if (op == HSA_OP_ID_DISPATCH) {
+        const bool succ = roctracer::RocpLoader::Instance().EnableActivityCallback(op, false);
+        if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::EnableActivityCallback(false) error, op(" << op << ")");
+      } else if (op == HSA_OP_ID_COPY) {
+        roctracer::hsa_support::async_copy_callback_enabled = true;
+      }
       break;
     }
     case ACTIVITY_DOMAIN_HSA_API: break;
@@ -931,14 +955,14 @@ static roctracer_status_t roctracer_disable_activity_fun(
       if (roctracer::HccLoader::Instance().Enabled() == false) break;
 
       const bool succ = roctracer::HccLoader::Instance().EnableActivityCallback(op, false);
-      if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::EnableActivityCallback(NULL) error domain(" << domain << ") op(" << op << ")");
+      if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::EnableActivityCallback(NULL) error, op(" << op << ")");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
       if (roctracer::HipLoader::Instance().Enabled() == false) break;
 
       const hipError_t hip_err = roctracer::HipLoader::Instance().RemoveActivityCallback(op);
-      if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveActivityCallback error(" << hip_err << ")");
+      if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIP::RemoveActivityCallback op(" << op << "), error(" << hip_err << ")");
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: break;

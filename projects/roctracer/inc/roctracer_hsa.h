@@ -28,6 +28,15 @@ THE SOFTWARE.
 
 #include "roctracer.h"
 
+// HSA OP ID enumeration
+enum hsa_op_id_t {
+  HSA_OP_ID_DISPATCH = 0,
+  HSA_OP_ID_COPY = 1,
+  HSA_OP_ID_BARRIER = 2,
+  HSA_OP_ID_PCSAMPLE = 3,
+  HSA_OP_ID_NUMBER = 4
+};
+
 #ifdef __cplusplus
 #include <iostream>
 #include <hsa_api_trace.h>
