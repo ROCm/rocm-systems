@@ -35,6 +35,10 @@ RPL_PATH=$PKG_DIR/lib
 TLIB_PATH=$PKG_DIR/tool
 TTLIB_PATH=$TT_DIR/tool
 
+if [ -z "$ROCP_PYTHON_VERSION" ] ; then
+  ROCP_PYTHON_VERSION=python
+fi
+
 # Default HIP path
 if [ -z "$HIP_PATH" ] ; then
   export HIP_PATH=/opt/rocm/hip
@@ -529,9 +533,9 @@ if [ -n "$csv_output" ] ; then
   if [ "$GEN_STATS" = "1" ] ; then
     db_output=$(echo $csv_output | sed "s/\.csv/.db/")
     merge_output $OUTPUT_LIST
-    python $BIN_DIR/tblextr.py $db_output $OUTPUT_LIST
+    $ROCP_PYTHON_VERSION $BIN_DIR/tblextr.py $db_output $OUTPUT_LIST
   else
-    python $BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST
+    $ROCP_PYTHON_VERSION $BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST
   fi
   if [ "$?" -ne 0 ] ; then
     echo "Data extracting error: $OUTPUT_LIST'"
