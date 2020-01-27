@@ -250,19 +250,13 @@ roctracer_status_t roctracer_get_timestamp(
     uint64_t* timestamp);                                 // [out] return timestamp
 
 // Load/Unload methods
+bool roctracer_load();
+void roctracer_unload();
+
 // Set properties
 roctracer_status_t roctracer_set_properties(
     roctracer_domain_t domain,                            // tracing domain
     void* propertes);                                     // tracing properties
-
-typedef struct HsaApiTable HsaApiTable;
-bool roctracer_load(
-    HsaApiTable* table,
-    uint64_t runtime_version,
-    uint64_t failed_tool_count,
-    const char* const* failed_tool_names);
-
-void roctracer_unload(bool destruct);
 
 #ifdef __cplusplus
 }  // extern "C" block

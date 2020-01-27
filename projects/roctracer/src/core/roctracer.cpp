@@ -548,6 +548,7 @@ unsigned set_stopped(unsigned val) {
 }  // namespace roctracer
 
 LOADER_INSTANTIATE();
+TRACE_BUFFER_INSTANTIATE();
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Public library methods
@@ -989,6 +990,7 @@ PUBLIC_API roctracer_status_t roctracer_flush_activity_expl(roctracer_pool_t* po
   if (pool == NULL) pool = roctracer_default_pool();
   roctracer::MemoryPool* memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);
   memory_pool->Flush();
+  roctracer::TraceBufferBase::FlushAll();
   API_METHOD_SUFFIX
 }
 
@@ -1045,6 +1047,12 @@ PUBLIC_API void roctracer_stop() {
   }
 }
 
+PUBLIC_API roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp) {
+  API_METHOD_PREFIX
+  *timestamp = util::HsaRsrcFactory::Instance().TimestampNs();
+  API_METHOD_SUFFIX
+}
+
 // Set properties
 PUBLIC_API roctracer_status_t roctracer_set_properties(
     roctracer_domain_t domain,
@@ -1053,6 +1061,8 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
   API_METHOD_PREFIX
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
+      roctracer::trace_buffer.StartWorkerThread();
+
       // HSA OPS properties
       roctracer::hsa_ops_properties_t* ops_properties = reinterpret_cast<roctracer::hsa_ops_properties_t*>(properties);
       HsaApiTable* table = reinterpret_cast<HsaApiTable*>(ops_properties->table);
@@ -1112,11 +1122,10 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
   API_METHOD_SUFFIX
 }
 
-// HSA-runtime tool on-load method
-PUBLIC_API bool roctracer_load(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-                       const char* const* failed_tool_names) {
-  ONLOAD_TRACE_BEG();
+PUBLIC_API bool roctracer_load() {
   static bool is_loaded = false;
+  ONLOAD_TRACE("begin, loaded(" << is_loaded << ")");
+
   if (is_loaded) return true;
   is_loaded = true;
 
@@ -1124,11 +1133,10 @@ PUBLIC_API bool roctracer_load(HsaApiTable* table, uint64_t runtime_version, uin
   return true;
 }
 
-PUBLIC_API void roctracer_unload(bool destruct) {
+PUBLIC_API void roctracer_unload() {
   static bool is_unloaded = false;
-  ONLOAD_TRACE("begin (" << destruct << ", " << is_unloaded << ")");
+  ONLOAD_TRACE("begin, unloaded(" << is_unloaded << ")");
 
-  if (destruct == false) return;
   if (is_unloaded == true) return;
   is_unloaded = true;
 
@@ -1137,23 +1145,16 @@ PUBLIC_API void roctracer_unload(bool destruct) {
   ONLOAD_TRACE_END();
 }
 
-PUBLIC_API roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp) {
-  API_METHOD_PREFIX
-  *timestamp = util::HsaRsrcFactory::Instance().TimestampNs();
-  API_METHOD_SUFFIX
-}
-
+// HSA-runtime tool on-load/unload methods
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
-  const bool ret = roctracer_load(table, runtime_version, failed_tool_count, failed_tool_names);
+  const bool ret = roctracer_load();
   ONLOAD_TRACE_END();
   return ret;
 }
 PUBLIC_API void OnUnload() {
-  ONLOAD_TRACE_BEG();
-  roctracer_unload(false);
-  ONLOAD_TRACE_END();
+  ONLOAD_TRACE("done");
 }
 
 CONSTRUCTOR_API void constructor() {
@@ -1166,7 +1167,7 @@ CONSTRUCTOR_API void constructor() {
 
 DESTRUCTOR_API void destructor() {
   ONLOAD_TRACE_BEG();
-  roctracer_unload(true);
+  roctracer_unload();
   util::HsaRsrcFactory::Destroy();
   roctracer::util::Logger::Destroy();
   ONLOAD_TRACE_END();

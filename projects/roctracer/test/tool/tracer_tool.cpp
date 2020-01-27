@@ -77,6 +77,7 @@ bool trace_hip_activity = false;
 bool trace_kfd = false;
 
 LOADER_INSTANTIATE();
+TRACE_BUFFER_INSTANTIATE();
 
 // Global output file handle
 FILE* roctx_file_handle = NULL;
@@ -524,9 +525,55 @@ void close_output_file(FILE* file_handle) {
   if ((file_handle != NULL) && (file_handle != stdout)) fclose(file_handle);
 }
 
+// tool unload method
+void tool_unload() {
+  static bool is_unloaded = false;
+  ONLOAD_TRACE("begin, unloaded(" << is_unloaded << ")");
+
+  if (is_unloaded == true) return;
+  is_unloaded = true;
+
+  roctracer_unload();
+
+  if (trace_roctx) {
+    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
+
+    roctx_trace_buffer.Flush();
+    close_output_file(roctx_file_handle);
+  }
+  if (trace_hsa_api) {
+    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
+
+    hsa_api_trace_buffer.Flush();
+    close_output_file(hsa_api_file_handle);
+  }
+  if (trace_hsa_activity) {
+    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
+
+    close_output_file(hsa_async_copy_file_handle);
+  }
+  if (trace_hip_api || trace_hip_activity) {
+    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
+    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
+    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
+    ROCTRACER_CALL(roctracer_flush_activity());
+    ROCTRACER_CALL(roctracer_close_pool());
+
+    hip_api_trace_buffer.Flush();
+    close_output_file(hip_api_file_handle);
+    close_output_file(hcc_activity_file_handle);
+  }
+
+  if (trace_kfd) {
+    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_KFD_API));
+    fclose(kfd_api_file_handle);
+  }
+  ONLOAD_TRACE_END();
+}
+
 // HSA-runtime tool on-load method
 extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-                       const char* const* failed_tool_names) {
+                                  const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
   timer = new hsa_rt_utils::Timer(table->core_->hsa_system_get_info_fn);
 
@@ -758,61 +805,15 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     printf(")\n");
   }
 
+  roctracer::TraceBufferBase::StartWorkerThreadAll();
+  const bool ret = roctracer_load();
   ONLOAD_TRACE_END();
-  return roctracer_load(table, runtime_version, failed_tool_count, failed_tool_names);
-}
-
-// tool unload method
-void tool_unload(bool destruct) {
-  static bool is_unloaded = false;
-  ONLOAD_TRACE("begin (" << destruct <<", " << is_unloaded << ")");
-
-  if (destruct == false) return;
-  if (is_unloaded == true) return;
-  is_unloaded = true;
-  roctracer_unload(destruct);
-
-  if (trace_roctx) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
-
-    roctx_trace_buffer.Flush();
-    close_output_file(roctx_file_handle);
-  }
-  if (trace_hsa_api) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
-
-    hsa_api_trace_buffer.Flush();
-    close_output_file(hsa_api_file_handle);
-  }
-  if (trace_hsa_activity) {
-    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
-
-    close_output_file(hsa_async_copy_file_handle);
-  }
-  if (trace_hip_api || trace_hip_activity) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
-    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
-    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
-    ROCTRACER_CALL(roctracer_flush_activity());
-    ROCTRACER_CALL(roctracer_close_pool());
-
-    hip_api_trace_buffer.Flush();
-    close_output_file(hip_api_file_handle);
-    close_output_file(hcc_activity_file_handle);
-  }
-
-  if (trace_kfd) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_KFD_API));
-    fclose(kfd_api_file_handle);
-  }
-  ONLOAD_TRACE_END();
+  return ret;
 }
 
 // HSA-runtime on-unload method
 extern "C" PUBLIC_API void OnUnload() {
-  ONLOAD_TRACE_BEG();
-  tool_unload(false);
-  ONLOAD_TRACE_END();
+  ONLOAD_TRACE("");
 }
 
 extern "C" CONSTRUCTOR_API void constructor() {
@@ -820,6 +821,6 @@ extern "C" CONSTRUCTOR_API void constructor() {
 }
 extern "C" DESTRUCTOR_API void destructor() {
   ONLOAD_TRACE_BEG();
-  tool_unload(true);
+  tool_unload();
   ONLOAD_TRACE_END();
 }
