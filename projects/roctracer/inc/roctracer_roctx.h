@@ -33,8 +33,6 @@ THE SOFTWARE.
 #ifndef INC_ROCTRACER_ROCTX_H_
 #define INC_ROCTRACER_ROCTX_H_
 
-#include "cb_table.h"
-
 // ROC-TX API ID enumeration
 enum roctx_api_id_t {
   ROCTX_API_ID_roctxMarkA = 0,
@@ -45,7 +43,7 @@ enum roctx_api_id_t {
 };
 
 // ROCTX callbacks data type
-struct roctx_api_data_t {
+typedef struct roctx_api_data_s {
   union {
     const char* message;
     struct {
@@ -58,14 +56,15 @@ struct roctx_api_data_t {
       const char* message;
     } roctxRangePop;
   } args;
-};
+} roctx_api_data_t;
 
+#ifdef __cplusplus
+#include "cb_table.h"
 namespace roctx {
-
 // ROCTX callbacks table type
 typedef roctracer::CbTable<ROCTX_API_ID_NUMBER> cb_table_t;
-
 }  // namespace roctx
+#endif
 
 #ifdef __cplusplus
 extern "C" {

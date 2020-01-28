@@ -37,9 +37,7 @@ THE SOFTWARE.
 #include <inc/roctracer_hsa.h>
 #include <inc/roctracer_hip.h>
 #include <inc/roctracer_hcc.h>
-#ifdef KFD_WRAPPER
 #include <inc/roctracer_kfd.h>
-#endif
 #include <inc/ext/hsa_rt_utils.hpp>
 #include <src/core/loader.h>
 #include <src/core/trace_buffer.h>
@@ -59,9 +57,12 @@ THE SOFTWARE.
     }                                                                                              \
   } while (0)
 
-#ifndef onload_debug
-#define onload_debug false
-#endif
+#define ONLOAD_TRACE(str) \
+  if (getenv("ROCP_ONLOAD_TRACE")) do { \
+    std::cout << "PID(" << GetPid() << "): TRACER_TOOL::" << __FUNCTION__ << " " << str << std::endl << std::flush; \
+  } while(0);
+#define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
+#define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
 
 typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
 hsa_rt_utils::Timer* timer = NULL;
@@ -76,6 +77,7 @@ bool trace_hip_activity = false;
 bool trace_kfd = false;
 
 LOADER_INSTANTIATE();
+TRACE_BUFFER_INSTANTIATE();
 
 // Global output file handle
 FILE* roctx_file_handle = NULL;
@@ -121,23 +123,37 @@ void* control_thr_fun(void*) {
   const uint32_t len_us = control_len_us % 1000000;
   const uint32_t dist_sec = control_dist_us / 1000000;
   const uint32_t dist_us = control_dist_us % 1000000;
-  bool start = true;
+  bool to_start = true;
 
   sleep(delay_sec);
   usleep(delay_us);
 
   while (1) {
-    if (start) {
-      start = false;
+    if (to_start) {
+      to_start = false;
       roctracer_start();
       sleep(len_sec);
       usleep(len_us);
     } else {
-      start = true;
+      to_start = true;
       roctracer_stop();
       sleep(dist_sec);
       usleep(dist_us);
     }
+  }
+}
+
+// Flushing control thread
+uint32_t control_flush_us = 0;
+void* flush_thr_fun(void*) {
+  const uint32_t dist_sec = control_flush_us / 1000000;
+  const uint32_t dist_us = control_flush_us % 1000000;
+
+  while (1) {
+    sleep(dist_sec);
+    usleep(dist_us);
+    roctracer_flush_activity();
+    roctracer::TraceBufferBase::FlushAll();
   }
 }
 
@@ -187,22 +203,17 @@ void roctx_api_callback(
   roctx_callback_fun(domain, cid, GetTid(), data->args.message);
 }
 
-// Start/Stop callbacks
-void roctx_range_stack_callback(const roctx_range_data_t* data, void* arg) {
-  const bool* is_stop_ptr = (bool*)arg;
-  const uint32_t cid = (*is_stop_ptr == true) ? ROCTX_API_ID_roctxRangePop : ROCTX_API_ID_roctxRangePushA;
-  const char* message = (*is_stop_ptr == true) ? NULL : data->message;
-  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, cid, data->tid, message);
+// rocTX Start/Stop callbacks
+void roctx_range_start_callback(const roctx_range_data_t* data, void* arg) {
+  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePushA, data->tid, data->message);
 }
-void stop_callback() {
-  bool is_stop = true;
-  roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_stack_callback, (void*)&is_stop);
+void roctx_range_stop_callback(const roctx_range_data_t* data, void* arg) {
+  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePop, data->tid, NULL);
 }
-void start_callback() {
-  bool is_stop = false;
-  roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_stack_callback, (void*)&is_stop);
-}
+void start_callback() { roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_start_callback, NULL); }
+void stop_callback() { roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_stop_callback, NULL); }
 
+// rocTX buffer flush function
 void roctx_flush_cb(roctx_trace_entry_t* entry) {
   std::ostringstream os;
   os << entry->timestamp << " " << entry->pid << ":" << entry->tid << " " << entry->cid;
@@ -270,6 +281,9 @@ void hsa_activity_callback(
   index++;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// HIP API tracing
+
 struct hip_api_trace_entry_t {
   uint32_t valid;
   uint32_t type;
@@ -283,9 +297,6 @@ struct hip_api_trace_entry_t {
   const char* name;
   void* ptr;
 };
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////
-// HIP API tracing
 
 void hip_api_flush_cb(hip_api_trace_entry_t* entry);
 roctracer::TraceBuffer<hip_api_trace_entry_t>::flush_prm_t hip_flush_prm[1] = {{0, hip_api_flush_cb}};
@@ -437,7 +448,7 @@ void hcc_activity_callback(const char* begin, const char* end, void* arg) {
 // KFD API tracing
 
 // KFD API callback function
-#ifdef KFD_WRAPPER
+static thread_local bool in_kfd_api_callback = false;
 void kfd_api_callback(
     uint32_t domain,
     uint32_t cid,
@@ -445,6 +456,8 @@ void kfd_api_callback(
     void* arg)
 {
   (void)arg;
+  if (in_kfd_api_callback) return;
+  in_kfd_api_callback = true;
   const kfd_api_data_t* data = reinterpret_cast<const kfd_api_data_t*>(callback_data);
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     kfd_begin_timestamp = timer->timestamp_fn_ns();
@@ -454,8 +467,8 @@ void kfd_api_callback(
     os << kfd_begin_timestamp << ":" << end_timestamp << " " << GetPid() << ":" << GetTid() << " " << kfd_api_data_pair_t(cid, *data);
     fprintf(kfd_api_file_handle, "%s\n", os.str().c_str());
   }
+  in_kfd_api_callback = false;
 }
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -526,10 +539,56 @@ void close_output_file(FILE* file_handle) {
   if ((file_handle != NULL) && (file_handle != stdout)) fclose(file_handle);
 }
 
+// tool unload method
+void tool_unload() {
+  static bool is_unloaded = false;
+  ONLOAD_TRACE("begin, unloaded(" << is_unloaded << ")");
+
+  if (is_unloaded == true) return;
+  is_unloaded = true;
+
+  roctracer_unload();
+
+  if (trace_roctx) {
+    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
+
+    roctx_trace_buffer.Flush();
+    close_output_file(roctx_file_handle);
+  }
+  if (trace_hsa_api) {
+    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
+
+    hsa_api_trace_buffer.Flush();
+    close_output_file(hsa_api_file_handle);
+  }
+  if (trace_hsa_activity) {
+    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
+
+    close_output_file(hsa_async_copy_file_handle);
+  }
+  if (trace_hip_api || trace_hip_activity) {
+    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
+    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
+    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
+    ROCTRACER_CALL(roctracer_flush_activity());
+    ROCTRACER_CALL(roctracer_close_pool());
+
+    hip_api_trace_buffer.Flush();
+    close_output_file(hip_api_file_handle);
+    close_output_file(hcc_activity_file_handle);
+  }
+
+  if (trace_kfd) {
+    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_KFD_API));
+    fclose(kfd_api_file_handle);
+  }
+  ONLOAD_TRACE_END();
+}
+
 // HSA-runtime tool on-load method
 extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-                       const char* const* failed_tool_names) {
-  if (onload_debug) { printf("TOOL OnLoad\n"); fflush(stdout); }
+                                  const char* const* failed_tool_names) {
+  ONLOAD_TRACE_BEG();
   timer = new hsa_rt_utils::Timer(table->core_->hsa_system_get_info_fn);
 
   // Output file
@@ -660,7 +719,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
       for (unsigned i = 0; i < hsa_api_vec.size(); ++i) {
         uint32_t cid = HSA_API_ID_NUMBER;
         const char* api = hsa_api_vec[i].c_str();
-        ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api, &cid));
+        ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api, &cid, NULL));
         ROCTRACER_CALL(roctracer_enable_op_callback(ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, NULL));
         printf(" %s", api);
       }
@@ -714,11 +773,9 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     uint32_t ctrl_delay = 0;
     uint32_t ctrl_len = 0;
     uint32_t ctrl_rate = 0;
-    int ret = sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate);
-    if (ret != 3) {
-      fprintf(stderr, "ROCTracer: control rate value invalid 'delay:length:rate': '%s'\n", ctrl_str);
-      abort();
-    }
+
+    sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate);
+
     if (ctrl_len > ctrl_rate) {
       fprintf(stderr, "ROCTracer: control length value (%u) > rate value (%u)\n", ctrl_len, ctrl_rate);
       abort();
@@ -727,18 +784,36 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     control_len_us = ctrl_len;
     control_delay_us = ctrl_delay;
 
-    fprintf(stdout, "ROCTracer: trace control: delay(%uus), length(%uus), rate(%uus)\n", ctrl_delay, ctrl_len, ctrl_rate); fflush(stdout);
-
     roctracer_stop();
 
+    if (ctrl_delay != UINT32_MAX) {
+      fprintf(stdout, "ROCTracer: trace control: delay(%uus), length(%uus), rate(%uus)\n", ctrl_delay, ctrl_len, ctrl_rate); fflush(stdout);
+      pthread_t thread;
+      pthread_attr_t attr;
+      int err = pthread_attr_init(&attr);
+      if (err) { errno = err; perror("pthread_attr_init"); abort(); }
+      err = pthread_create(&thread, &attr, control_thr_fun, NULL);
+    } else {
+      fprintf(stdout, "ROCTracer: trace start disabled\n"); fflush(stdout);
+    }
+  }
+
+  const char* flush_str = getenv("ROCP_FLUSH_RATE");
+  if (flush_str != NULL) {
+    sscanf(flush_str, "%d", &control_flush_us);
+    if (control_flush_us == 0) {
+      fprintf(stderr, "ROCTracer: control flush rate bad value\n");
+      abort();
+    }
+
+    fprintf(stdout, "ROCTracer: trace control flush rate(%uus)\n", control_flush_us); fflush(stdout);
     pthread_t thread;
     pthread_attr_t attr;
     int err = pthread_attr_init(&attr);
     if (err) { errno = err; perror("pthread_attr_init"); abort(); }
-    err = pthread_create(&thread, &attr, control_thr_fun, NULL);
+    err = pthread_create(&thread, &attr, flush_thr_fun, NULL);
   }
 
-#ifdef KFD_WRAPPER
   // Enable KFD API callbacks/activity
   if (trace_kfd) {
     kfd_api_file_handle = open_output_file(output_prefix, "kfd_api_trace.txt");
@@ -750,7 +825,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
       for (unsigned i = 0; i < kfd_api_vec.size(); ++i) {
         uint32_t cid = KFD_API_ID_NUMBER;
         const char* api = kfd_api_vec[i].c_str();
-        ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_KFD_API, api, &cid));
+        ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_KFD_API, api, &cid, NULL));
         ROCTRACER_CALL(roctracer_enable_op_callback(ACTIVITY_DOMAIN_KFD_API, cid, kfd_api_callback, NULL));
         printf(" %s", api);
       }
@@ -759,70 +834,23 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     }
     printf(")\n");
   }
-#endif
 
-  if (onload_debug) { printf("TOOL OnLoad end\n"); fflush(stdout); }
-  return roctracer_load(table, runtime_version, failed_tool_count, failed_tool_names);
-}
-
-// tool unload method
-void tool_unload(bool destruct) {
-  static bool is_unloaded = false;
-
-  if (onload_debug) { printf("TOOL tool_unload (%d, %d)\n", (int)destruct, (int)is_unloaded); fflush(stdout); }
-  if (destruct == false) return;
-  if (is_unloaded == true) return;
-  is_unloaded = true;
-  roctracer_unload(destruct);
-
-  if (trace_roctx) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
-
-    roctx_trace_buffer.Flush();
-    close_output_file(roctx_file_handle);
-  }
-  if (trace_hsa_api) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
-
-    hsa_api_trace_buffer.Flush();
-    close_output_file(hsa_api_file_handle);
-  }
-  if (trace_hsa_activity) {
-    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
-
-    close_output_file(hsa_async_copy_file_handle);
-  }
-  if (trace_hip_api || trace_hip_activity) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
-    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
-    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
-    ROCTRACER_CALL(roctracer_flush_activity());
-    ROCTRACER_CALL(roctracer_close_pool());
-
-    hip_api_trace_buffer.Flush();
-    close_output_file(hip_api_file_handle);
-    close_output_file(hcc_activity_file_handle);
-  }
-
-  if (trace_kfd) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_KFD_API));
-    fclose(kfd_api_file_handle);
-  }
-  if (onload_debug) { printf("TOOL tool_unload end\n"); fflush(stdout); }
+  roctracer::TraceBufferBase::StartWorkerThreadAll();
+  const bool ret = roctracer_load();
+  ONLOAD_TRACE_END();
+  return ret;
 }
 
 // HSA-runtime on-unload method
 extern "C" PUBLIC_API void OnUnload() {
-  if (onload_debug) { printf("TOOL OnUnload\n"); fflush(stdout); }
-  tool_unload(false);
-  if (onload_debug) { printf("TOOL OnUnload end\n"); fflush(stdout); }
+  ONLOAD_TRACE("");
 }
 
 extern "C" CONSTRUCTOR_API void constructor() {
-  if (onload_debug) { printf("TOOL constructor ...end\n"); fflush(stdout); }
+  ONLOAD_TRACE("")
 }
 extern "C" DESTRUCTOR_API void destructor() {
-  if (onload_debug) { printf("TOOL destructor\n"); fflush(stdout); }
-  tool_unload(true);
-  if (onload_debug) { printf("TOOL destructor end\n"); fflush(stdout); }
+  ONLOAD_TRACE_BEG();
+  tool_unload();
+  ONLOAD_TRACE_END();
 }

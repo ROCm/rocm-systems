@@ -23,8 +23,10 @@ THE SOFTWARE.
 #include <iostream>
 
 // hip header file
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
 #include "roctracer_ext.h"
+// roctx header file
+#include <inc/roctx.h>
 
 
 #define WIDTH 1024
@@ -94,14 +96,22 @@ int main() {
     hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
 
     roctracer_mark("before HIP LaunchKernel");
+    roctxMark("before hipLaunchKernel");
+    roctxRangePush("hipLaunchKernel");
     // Lauching kernel from host
     hipLaunchKernelGGL(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
                     dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
                     gpuMatrix, WIDTH);
     roctracer_mark("after HIP LaunchKernel");
+    roctxMark("after hipLaunchKernel");
 
     // Memory transfer from device to host
+    roctxRangePush("hipMemcpy");
+
     hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
+
+    roctxRangePop(); // for "hipMemcpy"
+    roctxRangePop(); // for "hipLaunchKernel"
 
     // CPU MatrixTranspose computation
     matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);

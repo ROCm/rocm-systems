@@ -29,9 +29,10 @@ THE SOFTWARE.
 typedef enum {
   ACTIVITY_DOMAIN_HSA_API = 0,                    // HSA API domain
   ACTIVITY_DOMAIN_HSA_OPS = 1,                    // HSA async activity domain
-  ACTIVITY_DOMAIN_HCC_OPS = 2,                    // HCC async activity domain
+  ACTIVITY_DOMAIN_HIP_OPS = 2,                    // HIP async activity domain
+  ACTIVITY_DOMAIN_HCC_OPS = ACTIVITY_DOMAIN_HIP_OPS, // HCC async activity domain
+  ACTIVITY_DOMAIN_HIP_VDI = ACTIVITY_DOMAIN_HIP_OPS, // HIP VDI async activity domain
   ACTIVITY_DOMAIN_HIP_API = 3,                    // HIP API domain
-  ACTIVITY_DOMAIN_HIP_VDI = ACTIVITY_DOMAIN_HCC_OPS, // HIP VDI domain
   ACTIVITY_DOMAIN_KFD_API = 4,                    // KFD API domain
   ACTIVITY_DOMAIN_EXT_API = 5,                    // External ID domain
   ACTIVITY_DOMAIN_ROCTX   = 6,                    // ROCTX domain
@@ -60,7 +61,7 @@ typedef enum {
 typedef uint64_t activity_correlation_id_t;
 
 // Activity record type
-struct activity_record_t {
+typedef struct activity_record_s {
     uint32_t domain;                               // activity domain id
     activity_kind_t kind;                          // activity kind
     activity_op_t op;                              // activity op
@@ -81,7 +82,7 @@ struct activity_record_t {
       };
     };
     size_t bytes;                                  // data size bytes
-};
+} activity_record_t;
 
 // Activity sync calback type
 typedef void* (*activity_sync_callback_t)(uint32_t cid, activity_record_t* record, const void* data, void* arg);

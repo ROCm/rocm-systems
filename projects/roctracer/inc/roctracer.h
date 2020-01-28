@@ -38,10 +38,13 @@ THE SOFTWARE.
 
 #include <stdint.h>
 #include <stddef.h>
+#ifndef __cplusplus
+#include <stdbool.h>
+#endif
 
 #include "ext/prof_protocol.h"
 
-#define ROCTRACER_VERSION_MAJOR 1
+#define ROCTRACER_VERSION_MAJOR 2
 #define ROCTRACER_VERSION_MINOR 0
 
 #ifdef __cplusplus
@@ -89,7 +92,7 @@ roctracer_status_t roctracer_op_code(
   uint32_t domain,                                        // tracing domain
   const char* str,                                        // [in] op string
   uint32_t* op,                                           // [out] op code
-  uint32_t* kind = NULL);                                 // [out] op kind code
+  uint32_t* kind);                                        // [out] op kind code if not NULL
 
 ////////////////////////////////////////////////////////////////////////////////
 // Callback API
@@ -137,7 +140,7 @@ roctracer_status_t roctracer_disable_callback();
 typedef activity_record_t roctracer_record_t;
 
 // Return next record
-static inline int roctracer_next_record(
+static inline roctracer_status_t roctracer_next_record(
     const activity_record_t* record,                      // [in] record ptr
     const activity_record_t** next)                       // [out] next record ptr
 {
@@ -172,31 +175,59 @@ typedef void roctracer_pool_t;
 
 // Create tracer memory pool
 // The first invocation sets the default pool
-roctracer_status_t roctracer_open_pool(
+roctracer_status_t roctracer_open_pool_expl(
     const roctracer_properties_t* properties,             // tracer pool properties
-    roctracer_pool_t** pool = NULL);                      // [out] returns tracer pool if not NULL,
+    roctracer_pool_t** pool);                             // [out] returns tracer pool if not NULL,
                                                           // otherwise sets the default one if it is not set yet
+static inline roctracer_status_t roctracer_open_pool(
+    const roctracer_properties_t* properties)             // tracer pool properties
+{
+    return roctracer_open_pool_expl(properties, NULL);
+}
                                                           // otherwise the error is generated
 
 // Close tracer memory pool
-roctracer_status_t roctracer_close_pool(
-    roctracer_pool_t* pool = NULL);                       // [in] memory pool, NULL is a default one
+roctracer_status_t roctracer_close_pool_expl(
+    roctracer_pool_t* pool);                              // [in] memory pool, NULL is a default one
+static inline roctracer_status_t roctracer_close_pool()
+{
+    return roctracer_close_pool_expl(NULL);
+}
 
 // Return current default pool
 // Set new default pool if the argument is not NULL
-roctracer_pool_t* roctracer_default_pool(
-    roctracer_pool_t* pool = NULL);                       // [in] new default pool if not NULL
+roctracer_pool_t* roctracer_default_pool_expl(
+    roctracer_pool_t* pool);                              // [in] new default pool if not NULL
+static inline roctracer_pool_t* roctracer_default_pool()
+{
+    return roctracer_default_pool_expl(NULL);
+}
 
 // Enable activity records logging
-roctracer_status_t roctracer_enable_op_activity(
+roctracer_status_t roctracer_enable_op_activity_expl(
     activity_domain_t domain,                             // tracing domain
     uint32_t op,                                          // activity op ID
-    roctracer_pool_t* pool = NULL);                       // memory pool, NULL is a default one
-roctracer_status_t roctracer_enable_domain_activity(
+    roctracer_pool_t* pool);                              // memory pool, NULL is a default one
+static inline roctracer_status_t roctracer_enable_op_activity(
     activity_domain_t domain,                             // tracing domain
-    roctracer_pool_t* pool = NULL);                       // memory pool, NULL is a default one
-roctracer_status_t roctracer_enable_activity(
-    roctracer_pool_t* pool = NULL);                       // memory pool, NULL is a default one
+    uint32_t op)                                          // activity op ID
+{
+    return roctracer_enable_op_activity_expl(domain, op, NULL);
+}
+roctracer_status_t roctracer_enable_domain_activity_expl(
+    activity_domain_t domain,                             // tracing domain
+    roctracer_pool_t* pool);                              // memory pool, NULL is a default one
+static inline roctracer_status_t roctracer_enable_domain_activity(
+    activity_domain_t domain)                             // tracing domain
+{
+    return roctracer_enable_domain_activity_expl(domain, NULL);
+}
+roctracer_status_t roctracer_enable_activity_expl(
+    roctracer_pool_t* pool);                       // memory pool, NULL is a default one
+static inline roctracer_status_t roctracer_enable_activity()
+{
+    return roctracer_enable_activity_expl(NULL);
+}
 
 // Disable activity records logging
 roctracer_status_t roctracer_disable_op_activity(
@@ -207,23 +238,25 @@ roctracer_status_t roctracer_disable_domain_activity(
 roctracer_status_t roctracer_disable_activity();
 
 // Flush available activity records
-roctracer_status_t roctracer_flush_activity(
-    roctracer_pool_t* pool = NULL);                       // memory pool, NULL is a default one
+roctracer_status_t roctracer_flush_activity_expl(
+    roctracer_pool_t* pool);                              // memory pool, NULL is a default one
+static inline roctracer_status_t roctracer_flush_activity()
+{
+    return roctracer_flush_activity_expl(NULL);
+}
+
+// Get system timestamp
+roctracer_status_t roctracer_get_timestamp(
+    uint64_t* timestamp);                                 // [out] return timestamp
 
 // Load/Unload methods
+bool roctracer_load();
+void roctracer_unload();
+
 // Set properties
 roctracer_status_t roctracer_set_properties(
     roctracer_domain_t domain,                            // tracing domain
     void* propertes);                                     // tracing properties
-
-struct HsaApiTable;
-bool roctracer_load(
-    HsaApiTable* table,
-    uint64_t runtime_version,
-    uint64_t failed_tool_count,
-    const char* const* failed_tool_names);
-
-void roctracer_unload(bool destruct);
 
 #ifdef __cplusplus
 }  // extern "C" block

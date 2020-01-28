@@ -2,11 +2,22 @@
 #define SRC_CORE_TRACE_BUFFER_H_
 
 #include <atomic>
+#include <iostream>
 #include <list>
 #include <mutex>
+#include <sstream>
+
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
+
+#define FATAL(stream)                                                                              \
+  do {                                                                                             \
+    std::ostringstream oss;                                                                        \
+    oss << __FUNCTION__ << "(), " << stream;                                                       \
+    std::cout << oss.str() << std::endl;                                                           \
+    abort();                                                                                       \
+  } while (0)
 
 #define PTHREAD_CALL(call)                                                                         \
   do {                                                                                             \
@@ -53,8 +64,55 @@ struct trace_entry_t {
   };
 };
 
+template <class T>
+struct push_element_fun {
+  T* const elem_;
+  void fun(T* node) { if (node->next_elem_ == NULL) node->next_elem_ = elem_; }
+  push_element_fun(T* elem) : elem_(elem) {}
+};
+
+template <class T>
+struct call_element_fun {
+  void (T::*fptr_)();
+  void fun(T* node) { (node->*fptr_)(); }
+  call_element_fun(void (T::*f)()) : fptr_(f) {}
+};
+
+struct TraceBufferBase {
+  typedef std::mutex mutex_t;
+
+  virtual void StartWorkerThread() = 0;
+  virtual void Flush() = 0;
+
+  static void StartWorkerThreadAll() { foreach(call_element_fun<TraceBufferBase>(&TraceBufferBase::StartWorkerThread)); }
+  static void FlushAll() { foreach(call_element_fun<TraceBufferBase>(&TraceBufferBase::Flush)); }
+
+  static void Push(TraceBufferBase* elem) {
+    if (head_elem_ == NULL) head_elem_ = elem;
+    else foreach(push_element_fun<TraceBufferBase>(elem));
+  }
+
+  TraceBufferBase() : next_elem_(NULL) {}
+
+  template<class F>
+  static void foreach(const F& f_in) {
+    std::lock_guard<mutex_t> lck(mutex_);
+    F f = f_in;
+    TraceBufferBase* p = head_elem_;
+    while (p != NULL) {
+      TraceBufferBase* next = p->next_elem_;
+      f.fun(p);
+      p = next;
+    }
+  }
+
+  TraceBufferBase* next_elem_;
+  static TraceBufferBase* head_elem_;
+  static mutex_t mutex_;
+};
+
 template <typename Entry>
-class TraceBuffer {
+class TraceBuffer : protected TraceBufferBase {
   public:
   typedef void (*callback_t)(Entry*);
   typedef TraceBuffer<Entry> Obj;
@@ -67,7 +125,8 @@ class TraceBuffer {
   };
 
   TraceBuffer(const char* name, uint32_t size, flush_prm_t* flush_prm_arr, uint32_t flush_prm_count) :
-    is_flushed_(false)
+    is_flushed_(false),
+    work_thread_started_(false)
   {
     name_ = strdup(name);
     size_ = size;
@@ -80,31 +139,43 @@ class TraceBuffer {
     flush_prm_arr_ = flush_prm_arr;
     flush_prm_count_ = flush_prm_count;
 
-    PTHREAD_CALL(pthread_mutex_init(&work_mutex_, NULL));
-    PTHREAD_CALL(pthread_cond_init(&work_cond_, NULL));
-    PTHREAD_CALL(pthread_create(&work_thread_, NULL, allocate_worker, this));
+    TraceBufferBase::Push(this);
   }
 
   ~TraceBuffer() {
-    PTHREAD_CALL(pthread_cancel(work_thread_));
-    void *res;
-    PTHREAD_CALL(pthread_join(work_thread_, &res));
-    if (res != PTHREAD_CANCELED) abort_run("~TraceBuffer: consumer thread wasn't stopped correctly");
-
+    StopWorkerThread();
     Flush();
   }
 
+  void StartWorkerThread() {
+    std::lock_guard<mutex_t> lck(mutex_);
+    if (work_thread_started_ == false) {
+      PTHREAD_CALL(pthread_mutex_init(&work_mutex_, NULL));
+      PTHREAD_CALL(pthread_cond_init(&work_cond_, NULL));
+      PTHREAD_CALL(pthread_create(&work_thread_, NULL, allocate_worker, this));
+      work_thread_started_ = true;
+    }
+  }
+
+  void StopWorkerThread() {
+    std::lock_guard<mutex_t> lck(mutex_);
+    if (work_thread_started_ == true) {
+      PTHREAD_CALL(pthread_cancel(work_thread_));
+      void *res;
+      PTHREAD_CALL(pthread_join(work_thread_, &res));
+      if (res != PTHREAD_CANCELED) FATAL("consumer thread wasn't stopped correctly");
+      work_thread_started_ = false;
+    }
+  }
 
   Entry* GetEntry() {
     const pointer_t pointer = read_pointer_.fetch_add(1);
     if (pointer >= end_pointer_) wrap_buffer(pointer);
-    if (pointer >= end_pointer_) abort_run("pointer >= end_pointer_ after buffer wrap");
+    if (pointer >= end_pointer_) FATAL("pointer >= end_pointer_ after buffer wrap");
     return data_ + (pointer + size_ - end_pointer_);
   }
 
-  void Flush() {
-    flush_buf();
-  }
+  void Flush() { flush_buf(); }
 
   private:
   void flush_buf() {
@@ -134,7 +205,7 @@ class TraceBuffer {
 
   inline Entry* allocate_fun() {
     Entry* ptr = (Entry*) malloc(size_ * sizeof(Entry));
-    if (ptr == NULL) abort_run("TraceBuffer::allocate_fun: calloc failed");
+    if (ptr == NULL) FATAL("malloc failed");
     //memset(ptr, 0, size_ * sizeof(Entry));
     return ptr;
   }
@@ -156,22 +227,18 @@ class TraceBuffer {
 
   void wrap_buffer(const pointer_t pointer) {
     std::lock_guard<mutex_t> lck(mutex_);
+    if (work_thread_started_ == false) FATAL("worker thread is not started");
+
     PTHREAD_CALL(pthread_mutex_lock(&work_mutex_));
     if (pointer >= end_pointer_) {
       data_ = next_;
       next_ = NULL;
       PTHREAD_CALL(pthread_cond_signal(&work_cond_));
       end_pointer_ += size_;
-      if (end_pointer_ == 0) abort_run("TraceBuffer::wrap_buffer: pointer overflow");
+      if (end_pointer_ == 0) FATAL("pointer overflow");
       buf_list_.push_back(data_);
     }
     PTHREAD_CALL(pthread_mutex_unlock(&work_mutex_));
-  }
-
-  void abort_run(const char* str) {
-    fprintf(stderr, "%s\n", str);
-    fflush(stderr);
-    abort();
   }
 
   const char* name_;
@@ -189,9 +256,14 @@ class TraceBuffer {
   pthread_t work_thread_;
   pthread_mutex_t work_mutex_;
   pthread_cond_t work_cond_;
+  bool work_thread_started_;
 
   mutex_t mutex_;
 };
 }  // namespace roctracer
+
+#define TRACE_BUFFER_INSTANTIATE() \
+  roctracer::TraceBufferBase* roctracer::TraceBufferBase::head_elem_ = NULL; \
+  roctracer::TraceBufferBase::mutex_t roctracer::TraceBufferBase::mutex_;
 
 #endif  // SRC_CORE_TRACE_BUFFER_H_

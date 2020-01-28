@@ -284,7 +284,6 @@ class API_DescrParser:
     self.content_h += '#include <string.h>\n'
     self.content_h += '#include \"roctracer_kfd.h\"\n'
     self.content_h += '#include \"hsakmt.h\"\n'
-    self.content_h += '#include \"cb_table.h\"\n'
 
     self.content_h += '#define PUBLIC_API __attribute__((visibility(\"default\")))\n'
 
@@ -293,6 +292,7 @@ class API_DescrParser:
 
     self.content_h += '\n'
     self.content_h += '#if PROF_API_IMPL\n'
+    self.content_h += '#include \"cb_table.h\"\n'
     self.content_h += 'namespace roctracer {\n'
     self.content_h += 'namespace kfd_support {\n'
 
@@ -372,7 +372,7 @@ class API_DescrParser:
   # generate API args structure
   def gen_arg_struct(self, n, name, call, struct):
     if n == -1:
-      self.content_h += 'struct kfd_api_data_t {\n'
+      self.content_h += 'typedef struct kfd_api_data_s {\n'
       self.content_h += '  uint64_t correlation_id;\n'
       self.content_h += '  uint32_t phase;\n'
       if len(self.api_rettypes) != 0:
@@ -394,7 +394,7 @@ class API_DescrParser:
       self.content_h += '    } ' +  call + ';\n'
     else:
       self.content_h += '  } args;\n'
-      self.content_h += '};\n'
+      self.content_h += '} kfd_api_data_t;\n'
     
   # generate API callbacks
   def gen_callbacks(self, n, name, call, struct):
@@ -406,8 +406,7 @@ class API_DescrParser:
       call_id = self.api_id[call];
       ret_type = struct['ret']
       self.content_h += ret_type + ' ' + call + '_callback(' + struct['args'] + ') {\n'  # 'static '  + 
-      if call == 'hsaKmtOpenKFD':
-        self.content_h += '  if (' + name + '_table == NULL) intercept_KFDApiTable();\n'
+      self.content_h += '  if (' + name + '_table == NULL) intercept_KFDApiTable();\n'
       self.content_h += '  kfd_api_data_t api_data{};\n'
       for var in struct['alst']:
         self.content_h += '  api_data.args.' + call + '.' + var.replace("[]","") + ' = ' + var.replace("[]","") + ';\n'
@@ -477,6 +476,7 @@ class API_DescrParser:
   # generate stream operator
   def gen_out_stream(self, n, name, call, struct):
     if n == -1:
+      self.content_h += '#ifdef __cplusplus\n'
       self.content_h += 'typedef std::pair<uint32_t, kfd_api_data_t> kfd_api_data_pair_t;\n'
       self.content_h += 'inline std::ostream& operator<< (std::ostream& out, const kfd_api_data_pair_t& data_pair) {\n'
       self.content_h += '  const uint32_t cid = data_pair.first;\n'
@@ -510,6 +510,7 @@ class API_DescrParser:
       self.content_h += '  }\n'
       self.content_h += '  return out;\n'
       self.content_h += '}\n'  
+      self.content_h += '#endif\n'
       self.content_cpp += 'inline std::ostream& operator<< (std::ostream& out, const HsaMemFlags& v) { out << "HsaMemFlags"; return out; }\n' 
 
   # generate PUBLIC_API for all API fcts 
@@ -525,7 +526,7 @@ class API_DescrParser:
       self.content_cpp += '    return true;\n';
       self.content_cpp += '}\n\n';
 
-    if call != '-':
+    if call != '-' and call != 'hsaKmtCloseKFD' and call != 'hsaKmtOpenKFD':
       self.content_cpp += 'PUBLIC_API ' + struct['ret'] + " " + call + '(' + struct['args'] + ') { return roctracer::kfd_support::' + call + '_callback('
       for i in range(0,len(struct['alst'])):
         if i == (len(struct['alst'])-1):

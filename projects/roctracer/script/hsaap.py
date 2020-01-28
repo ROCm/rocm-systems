@@ -440,6 +440,7 @@ class API_DescrParser:
   # generate stream operator
   def gen_out_stream(self, n, name, call, struct):
     if n == -1:
+      self.content += '#ifdef __cplusplus\n'
       self.content += 'typedef std::pair<uint32_t, hsa_api_data_t> hsa_api_data_pair_t;\n'
       self.content += 'inline std::ostream& operator<< (std::ostream& out, const hsa_api_data_pair_t& data_pair) {\n'
       self.content += '  const uint32_t cid = data_pair.first;\n'
@@ -483,6 +484,7 @@ class API_DescrParser:
       self.content += '  }\n'
       self.content += '  return out;\n'
       self.content += '}\n'
+      self.content += '#endif\n'
 
 #############################################################
 # main

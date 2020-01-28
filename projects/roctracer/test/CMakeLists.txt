@@ -30,11 +30,16 @@ set ( HSA_TEST_DIR "${TEST_DIR}/hsa/test" )
 set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
 
 ## build HIP tests
+set ( TEST_CFLAGS HIP_VDI=${HIP_VDI} ROCM_INC_PATH=${ROCM_INC_PATH} )
 add_custom_target( mytest
   COMMAND make -C "${TEST_DIR}/MatrixTranspose"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test"
-  COMMAND HIP_VDI=${HIP_VDI} KFD_WRAPPER=${KFD_WRAPPER} make -C "${TEST_DIR}/MatrixTranspose_test"
+  COMMAND ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_test"
+  COMMAND MGPU_TEST=1 ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
+  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_mgpu"
+  COMMAND C_TEST=1 ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
+  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_ctest"
 )
 
 ## Util sources
@@ -49,7 +54,7 @@ target_link_libraries ( ${TEST_LIB} ${ROCTRACER_TARGET} ${HSA_RUNTIME_LIB} c std
 
 ## Build HSA test
 execute_process ( COMMAND sh -xc "if [ ! -e ${TEST_DIR}/hsa ] ; then git clone https://github.com/ROCmSoftwarePlatform/hsa-class.git ${TEST_DIR}/hsa; fi" )
-execute_process ( COMMAND sh -xc "if [ -e ${TEST_DIR}/hsa ] ; then cd ${TEST_DIR}/hsa && git fetch origin && git checkout 7defb6d; fi" )
+execute_process ( COMMAND sh -xc "if [ -e ${TEST_DIR}/hsa ] ; then cd ${TEST_DIR}/hsa && git fetch origin && git checkout a3aabb5; fi" )
 set ( TEST_DIR ${HSA_TEST_DIR} )
 add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test/hsa )
 

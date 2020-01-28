@@ -27,9 +27,7 @@ THE SOFTWARE.
 #include "inc/roctracer_roctx.h"
 #define PROF_API_IMPL 1
 #include "inc/roctracer_hsa.h"
-#ifdef KFD_WRAPPER
 #include "inc/roctracer_kfd.h"
-#endif
 
 #include <dirent.h>
 #include <pthread.h>
@@ -87,9 +85,13 @@ THE SOFTWARE.
   (void)err;                                                                                       \
   return X;
 
-#ifndef onload_debug
-#define onload_debug false
-#endif
+#define ONLOAD_TRACE(str) \
+  if (getenv("ROCP_ONLOAD_TRACE")) do { \
+    std::cout << "PID(" << GetPid() << "): TRACER_LIB::" << __FUNCTION__ << " " << str << std::endl << std::flush; \
+  } while(0);
+#define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
+#define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
+
 
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 
@@ -174,7 +176,7 @@ decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
 
 typedef decltype(roctracer_enable_op_callback)* roctracer_enable_op_callback_t;
 typedef decltype(roctracer_disable_op_callback)* roctracer_disable_op_callback_t;
-typedef decltype(roctracer_enable_op_activity)* roctracer_enable_op_activity_t;
+typedef decltype(roctracer_enable_op_activity_expl)* roctracer_enable_op_activity_t;
 typedef decltype(roctracer_disable_op_activity)* roctracer_disable_op_activity_t;
 
 struct cb_journal_data_t {
@@ -251,18 +253,16 @@ class GlobalCounter {
   public:
   typedef std::mutex mutex_t;
   typedef uint64_t counter_t;
+  typedef std::atomic<counter_t> atomic_counter_t;
 
-  static counter_t Increment() {
-    std::lock_guard<mutex_t> lock(mutex_);
-    return ++counter_;
-  }
+  static counter_t Increment() { return counter_.fetch_add(1, std::memory_order_relaxed); }
 
   private:
   static mutex_t mutex_;
-  static counter_t counter_;
+  static atomic_counter_t counter_;
 };
 GlobalCounter::mutex_t GlobalCounter::mutex_;
-GlobalCounter::counter_t GlobalCounter::counter_ = 0;
+GlobalCounter::atomic_counter_t GlobalCounter::counter_{1};
 
 // Records storage
 struct roctracer_api_data_t {
@@ -284,6 +284,7 @@ typedef std::map<activity_correlation_id_t, activity_correlation_id_t> correlati
 typedef std::mutex correlation_id_mutex_t;
 correlation_id_map_t* correlation_id_map = NULL;
 correlation_id_mutex_t correlation_id_mutex;
+bool correlation_id_wait = true;
 
 static thread_local std::stack<activity_correlation_id_t> external_id_stack;
 
@@ -296,6 +297,7 @@ static inline void CorrelationIdRegistr(const activity_correlation_id_t& correla
 
 static inline activity_correlation_id_t CorrelationIdLookup(const activity_correlation_id_t& correlation_id) {
   auto it = correlation_id_map->find(correlation_id);
+  if (correlation_id_wait) while (it == correlation_id_map->end()) it = correlation_id_map->find(correlation_id);
   if (it == correlation_id_map->end()) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id lookup failed(" << correlation_id << ")");
   return it->second;
 }
@@ -330,6 +332,7 @@ void* HIP_SyncActivityCallback(
       data = &(top.data.hip);
       data_ptr = const_cast<hip_api_data_t*>(data);
       data_ptr->phase = phase;
+      data_ptr->correlation_id = 0;
     }
 
     // Filing record info
@@ -523,14 +526,29 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
   return status;
 }
 
+// Logger routines and primitives
 util::Logger::mutex_t util::Logger::mutex_;
 std::atomic<util::Logger*> util::Logger::instance_{};
+
+// Memory pool routines and primitives
 MemoryPool* memory_pool = NULL;
 typedef std::recursive_mutex memory_pool_mutex_t;
 memory_pool_mutex_t memory_pool_mutex;
+
+// Stop sttaus routines and primitives
+unsigned stop_status_value = 0;
+typedef std::mutex stop_status_mutex_t;
+stop_status_mutex_t stop_status_mutex;
+unsigned set_stopped(unsigned val) {
+  std::lock_guard<stop_status_mutex_t> lock(stop_status_mutex);
+  const unsigned ret = (stop_status_value ^ val);
+  stop_status_value = val;
+  return ret;
+}
 }  // namespace roctracer
 
 LOADER_INSTANTIATE();
+TRACE_BUFFER_INSTANTIATE();
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Public library methods
@@ -567,12 +585,10 @@ PUBLIC_API const char* roctracer_op_string(
       return roctracer::HipLoader::Instance().ApiName(op);
       break;
     }
-#if KFD_WRAPPER
     case ACTIVITY_DOMAIN_KFD_API: {
       return roctracer::kfd_support::GetApiName(op);
       break;
     }
-#endif
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }
@@ -593,13 +609,11 @@ PUBLIC_API roctracer_status_t roctracer_op_code(
       if (kind != NULL) *kind = 0;
       break;
     }
-#ifdef KFD_WRAPPER
     case ACTIVITY_DOMAIN_KFD_API: {
       *op = roctracer::kfd_support::GetApiCode(str);
       if (kind != NULL) *kind = 0;
       break;
     }
-#endif
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "limited domain ID(" << domain << ")");
   }
@@ -612,9 +626,7 @@ static inline uint32_t get_op_num(const uint32_t& domain) {
     case ACTIVITY_DOMAIN_HSA_API: return HSA_API_ID_NUMBER;
     case ACTIVITY_DOMAIN_HCC_OPS: return HIP_OP_ID_NUMBER;
     case ACTIVITY_DOMAIN_HIP_API: return HIP_API_ID_NUMBER;
-#ifdef KFD_WRAPPER
     case ACTIVITY_DOMAIN_KFD_API: return KFD_API_ID_NUMBER;
-#endif
     case ACTIVITY_DOMAIN_EXT_API: return 0;
     case ACTIVITY_DOMAIN_ROCTX: return ROCTX_API_ID_NUMBER;
     default:
@@ -631,13 +643,11 @@ static roctracer_status_t roctracer_enable_callback_fun(
     void* user_data)
 {
   switch (domain) {
-#ifdef KFD_WRAPPER
     case ACTIVITY_DOMAIN_KFD_API: {
       const bool succ = roctracer::KfdLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
       if (succ == false) EXC_RAISING(ROCTRACER_STATUS_ERROR, "KFD RegisterApiCallback error");
       break;
     }
-#endif
     case ACTIVITY_DOMAIN_HSA_OPS: break;
     case ACTIVITY_DOMAIN_HSA_API: {
       roctracer::hsa_support::cb_table.set(op, callback, user_data);
@@ -645,6 +655,8 @@ static roctracer_status_t roctracer_enable_callback_fun(
     }
     case ACTIVITY_DOMAIN_HCC_OPS: break;
     case ACTIVITY_DOMAIN_HIP_API: {
+      if (roctracer::HipLoader::Instance().Enabled() == false) break;
+
       hipError_t hip_err = roctracer::HipLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterApiCallback(" << op << ") error(" << hip_err << ")");
       break;
@@ -712,17 +724,17 @@ static roctracer_status_t roctracer_disable_callback_fun(
     uint32_t op)
 {
   switch (domain) {
-#ifdef KFD_WRAPPER
     case ACTIVITY_DOMAIN_KFD_API: {
       const bool succ = roctracer::KfdLoader::Instance().RemoveApiCallback(op);
       if (succ == false) EXC_RAISING(ROCTRACER_STATUS_ERROR, "KFD RemoveApiCallback error");
       break;
     }
-#endif
     case ACTIVITY_DOMAIN_HSA_OPS: break;
     case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: break;
     case ACTIVITY_DOMAIN_HIP_API: {
+      if (roctracer::HipLoader::Instance().Enabled() == false) break;
+
       hipError_t hip_err = roctracer::HipLoader::Instance().RemoveApiCallback(op);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveApiCallback error(" << hip_err << ")");
       break;
@@ -777,7 +789,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_callback()
 }
 
 // Return default pool and set new one if parameter pool is not NULL.
-PUBLIC_API roctracer_pool_t* roctracer_default_pool(roctracer_pool_t* pool) {
+PUBLIC_API roctracer_pool_t* roctracer_default_pool_expl(roctracer_pool_t* pool) {
   std::lock_guard<roctracer::memory_pool_mutex_t> lock(roctracer::memory_pool_mutex);
   roctracer_pool_t* p = reinterpret_cast<roctracer_pool_t*>(roctracer::memory_pool);
   if (pool != NULL) roctracer::memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);
@@ -785,7 +797,7 @@ PUBLIC_API roctracer_pool_t* roctracer_default_pool(roctracer_pool_t* pool) {
 }
 
 // Open memory pool
-PUBLIC_API roctracer_status_t roctracer_open_pool(
+PUBLIC_API roctracer_status_t roctracer_open_pool_expl(
     const roctracer_properties_t* properties,
     roctracer_pool_t** pool)
 {
@@ -802,7 +814,7 @@ PUBLIC_API roctracer_status_t roctracer_open_pool(
 }
 
 // Close memory pool
-PUBLIC_API roctracer_status_t roctracer_close_pool(roctracer_pool_t* pool) {
+PUBLIC_API roctracer_status_t roctracer_close_pool_expl(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   std::lock_guard<roctracer::memory_pool_mutex_t> lock(roctracer::memory_pool_mutex);
   roctracer_pool_t* ptr = (pool == NULL) ? roctracer_default_pool() : pool;
@@ -828,7 +840,18 @@ static roctracer_status_t roctracer_enable_activity_fun(
     case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_KFD_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
-      if (roctracer::HccLoader::GetRef() == NULL) {
+      const bool init_phase = (roctracer::HccLoader::GetRef() == NULL);
+      if (roctracer::HccLoader::Instance().Enabled() == false) break;
+
+      if (init_phase == true) {
+        if (getenv("ROCP_HCC_CORRID_WAIT") != NULL) {
+          roctracer::correlation_id_wait = true;
+          fprintf(stdout, "roctracer: HCC correlation ID wait enabled\n"); fflush(stdout);
+        }
+        if (getenv("ROCP_HCC_CORRID_NOWAIT") != NULL) {
+          roctracer::correlation_id_wait = false;
+          fprintf(stdout, "roctracer: HCC correlation ID wait disabled\n"); fflush(stdout);
+        }
         roctracer::HccLoader::Instance().InitActivityCallback((void*)roctracer::HCC_ActivityIdCallback,
                                                               (void*)roctracer::HCC_AsyncActivityCallback,
                                                               (void*)pool);
@@ -838,6 +861,8 @@ static roctracer_status_t roctracer_enable_activity_fun(
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
+      if (roctracer::HipLoader::Instance().Enabled() == false) break;
+
       const hipError_t hip_err = roctracer::HipLoader::Instance().RegisterActivityCallback(op, (void*)roctracer::HIP_SyncActivityCallback, (void*)pool);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterActivityCallback error(" << hip_err << ")");
       break;
@@ -858,7 +883,7 @@ static void roctracer_enable_activity_impl(
     roctracer_enable_activity_fun((roctracer_domain_t)domain, op, pool);
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_op_activity(
+PUBLIC_API roctracer_status_t roctracer_enable_op_activity_expl(
     roctracer_domain_t domain,
     uint32_t op,
     roctracer_pool_t* pool)
@@ -868,7 +893,7 @@ PUBLIC_API roctracer_status_t roctracer_enable_op_activity(
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_domain_activity(
+PUBLIC_API roctracer_status_t roctracer_enable_domain_activity_expl(
     roctracer_domain_t domain,
     roctracer_pool_t* pool)
 {
@@ -878,7 +903,7 @@ PUBLIC_API roctracer_status_t roctracer_enable_domain_activity(
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_activity(
+PUBLIC_API roctracer_status_t roctracer_enable_activity_expl(
     roctracer_pool_t* pool)
 {
   API_METHOD_PREFIX
@@ -903,11 +928,15 @@ static roctracer_status_t roctracer_disable_activity_fun(
     case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_KFD_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
+      if (roctracer::HccLoader::Instance().Enabled() == false) break;
+
       const bool succ = roctracer::HccLoader::Instance().EnableActivityCallback(op, false);
       if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HCC_OPS_ERR, "HCC::EnableActivityCallback(NULL) error domain(" << domain << ") op(" << op << ")");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
+      if (roctracer::HipLoader::Instance().Enabled() == false) break;
+
       const hipError_t hip_err = roctracer::HipLoader::Instance().RemoveActivityCallback(op);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRemoveActivityCallback error(" << hip_err << ")");
       break;
@@ -956,11 +985,12 @@ PUBLIC_API roctracer_status_t roctracer_disable_activity()
 }
 
 // Flush available activity records
-PUBLIC_API roctracer_status_t roctracer_flush_activity(roctracer_pool_t* pool) {
+PUBLIC_API roctracer_status_t roctracer_flush_activity_expl(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   if (pool == NULL) pool = roctracer_default_pool();
   roctracer::MemoryPool* memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);
   memory_pool->Flush();
+  roctracer::TraceBufferBase::FlushAll();
   API_METHOD_SUFFIX
 }
 
@@ -1001,16 +1031,26 @@ PUBLIC_API void roctracer_mark(const char* str) {
 
 // Start API
 PUBLIC_API void roctracer_start() {
-  if (roctracer::ext_support::roctracer_start_cb) roctracer::ext_support::roctracer_start_cb();
-  roctracer::cb_journal->foreach(roctracer::cb_en_functor_t(roctracer_enable_callback_fun));
-  roctracer::act_journal->foreach(roctracer::act_en_functor_t(roctracer_enable_activity_fun));
+  if (roctracer::set_stopped(0)) {
+    if (roctracer::ext_support::roctracer_start_cb) roctracer::ext_support::roctracer_start_cb();
+    roctracer::cb_journal->foreach(roctracer::cb_en_functor_t(roctracer_enable_callback_fun));
+    roctracer::act_journal->foreach(roctracer::act_en_functor_t(roctracer_enable_activity_fun));
+  }
 }
 
 // Stop API
 PUBLIC_API void roctracer_stop() {
-  roctracer::cb_journal->foreach(roctracer::cb_dis_functor_t(roctracer_disable_callback_fun));
-  roctracer::act_journal->foreach(roctracer::act_dis_functor_t(roctracer_disable_activity_fun));
-  if (roctracer::ext_support::roctracer_stop_cb) roctracer::ext_support::roctracer_stop_cb();
+  if (roctracer::set_stopped(1)) {
+    roctracer::cb_journal->foreach(roctracer::cb_dis_functor_t(roctracer_disable_callback_fun));
+    roctracer::act_journal->foreach(roctracer::act_dis_functor_t(roctracer_disable_activity_fun));
+    if (roctracer::ext_support::roctracer_stop_cb) roctracer::ext_support::roctracer_stop_cb();
+  }
+}
+
+PUBLIC_API roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp) {
+  API_METHOD_PREFIX
+  *timestamp = util::HsaRsrcFactory::Instance().TimestampNs();
+  API_METHOD_SUFFIX
 }
 
 // Set properties
@@ -1021,6 +1061,8 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
   API_METHOD_PREFIX
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
+      roctracer::trace_buffer.StartWorkerThread();
+
       // HSA OPS properties
       roctracer::hsa_ops_properties_t* ops_properties = reinterpret_cast<roctracer::hsa_ops_properties_t*>(properties);
       HsaApiTable* table = reinterpret_cast<HsaApiTable*>(ops_properties->table);
@@ -1046,12 +1088,10 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
 
       break;
     }
-#ifdef KFD_WRAPPER
     case ACTIVITY_DOMAIN_KFD_API: {
       roctracer::kfd_support::intercept_KFDApiTable();
       break;
     }
-#endif
     case ACTIVITY_DOMAIN_HSA_API: {
       // HSA API properties
       HsaApiTable* table = reinterpret_cast<HsaApiTable*>(properties);
@@ -1062,7 +1102,7 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
     }
     case ACTIVITY_DOMAIN_HCC_OPS:
     case ACTIVITY_DOMAIN_HIP_API: {
-#ifdef HIP_VDI
+#if HIP_VDI
       const char* hip_lib_name = "libamdhip64.so";
       roctracer::HccLoader::SetLibName(hip_lib_name);
       roctracer::HipLoader::SetLibName(hip_lib_name);
@@ -1082,58 +1122,55 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
   API_METHOD_SUFFIX
 }
 
-// HSA-runtime tool on-load method
-PUBLIC_API bool roctracer_load(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-                       const char* const* failed_tool_names) {
-  if (onload_debug) { printf("LIB roctracer_load\n"); fflush(stdout); }
+PUBLIC_API bool roctracer_load() {
   static bool is_loaded = false;
+  ONLOAD_TRACE("begin, loaded(" << is_loaded << ")");
+
   if (is_loaded) return true;
   is_loaded = true;
 
-  if (onload_debug) { printf("LIB roctracer_load end\n"); fflush(stdout); }
+  ONLOAD_TRACE_END();
   return true;
 }
 
-PUBLIC_API void roctracer_unload(bool destruct) {
+PUBLIC_API void roctracer_unload() {
   static bool is_unloaded = false;
+  ONLOAD_TRACE("begin, unloaded(" << is_unloaded << ")");
 
-  if (onload_debug) { printf("LIB roctracer_unload (%d, %d)\n", (int)destruct, (int)is_unloaded); fflush(stdout); }
-  if (destruct == false) return;
   if (is_unloaded == true) return;
   is_unloaded = true;
 
   roctracer::trace_buffer.Flush();
   roctracer::close_output_file(roctracer::kernel_file_handle);
-  if (onload_debug) { printf("LIB roctracer_unload end\n"); fflush(stdout); }
+  ONLOAD_TRACE_END();
 }
 
+// HSA-runtime tool on-load/unload methods
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
-  if (onload_debug) { printf("LIB OnLoad\n"); fflush(stdout); }
-  const bool ret = roctracer_load(table, runtime_version, failed_tool_count, failed_tool_names);
-  if (onload_debug) { printf("LIB OnLoad end\n"); fflush(stdout); }
+  ONLOAD_TRACE_BEG();
+  const bool ret = roctracer_load();
+  ONLOAD_TRACE_END();
   return ret;
 }
 PUBLIC_API void OnUnload() {
-  if (onload_debug) { printf("LIB OnUnload\n"); fflush(stdout); }
-  roctracer_unload(false);
-  if (onload_debug) { printf("LIB OnUnload end\n"); fflush(stdout); }
+  ONLOAD_TRACE("done");
 }
 
 CONSTRUCTOR_API void constructor() {
-  if (onload_debug) { printf("LIB constructor\n"); fflush(stdout); }
+  ONLOAD_TRACE_BEG();
   roctracer::util::Logger::Create();
   if (roctracer::cb_journal == NULL) roctracer::cb_journal = new roctracer::CbJournal;
   if (roctracer::act_journal == NULL) roctracer::act_journal = new roctracer::ActJournal;
-  if (onload_debug) { printf("LIB constructor end\n"); fflush(stdout); }
+  ONLOAD_TRACE_END();
 }
 
 DESTRUCTOR_API void destructor() {
-  if (onload_debug) { printf("LIB destructor\n"); fflush(stdout); }
-  roctracer_unload(true);
+  ONLOAD_TRACE_BEG();
+  roctracer_unload();
   util::HsaRsrcFactory::Destroy();
   roctracer::util::Logger::Destroy();
-  if (onload_debug) { printf("LIB destructor end\n"); fflush(stdout); }
+  ONLOAD_TRACE_END();
 }
 
 }  // extern "C"
