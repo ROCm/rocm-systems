@@ -166,12 +166,16 @@ usage() {
   echo "  --ctx-wait <on|off> - to wait for outstanding contexts on profiler exit [on]"
   echo "  --ctx-limit <max number> - maximum number of outstanding contexts [0 - unlimited]"
   echo "  --heartbeat <rate sec> - to print progress heartbeats [0 - disabled]"
+  echo "  --obj-tracking <on|off> - to turn on/off kernels code objects tracking [off]"
+  echo "    To support V3 code object"
   echo ""
   echo "  --stats - generating kernel execution stats, file <output name>.stats.csv"
+  echo ""
+  echo "  --roctx-trace - to enable rocTX application code annotation trace, \"Markers and Ranges\" JSON trace section."
   echo "  --sys-trace - to trace HIP/HSA APIs and GPU activity, generates stats and JSON trace chrome-tracing compatible"
   echo "  --hip-trace - to trace HIP, generates API execution stats and JSON file chrome-tracing compatible"
   echo "  --hsa-trace - to trace HSA, generates API execution stats and JSON file chrome-tracing compatible"
-  echo "  --kfd-trace - to trace KFD, generates API execution stats and JSON file chrome-tracing compatible"
+  echo "  --kfd-trace - to trace KFD, generates KFD Thunk API execution stats and JSON file chrome-tracing compatible"
   echo "    Generated files: <output name>.<domain>_stats.txt <output name>.json"
   echo "    Traced API list can be set by input .txt or .xml files."
   echo "    Input .txt:"
@@ -185,14 +189,8 @@ usage() {
   echo "  --trace-start <on|off> - to enable tracing on start [on]"
   echo "  --trace-period <dealy:length:rate> - to enable trace with initial delay, with periodic sample length and rate"
   echo "    Supported time formats: <number(m|s|ms|us)>"
-  echo ""
-  echo "  --roctx-trace - to enable rocTX applicatin code annotation trace; should be use in addition to the trace options above."
-  echo "    Will show the application code annotation with rocTX events: roctxMark, roctxRangePush, roctxRangePop in JSON trace"
-  echo "    \"Markers and Ranges\" section."
-  echo "    Application code needs to be explicitely instrumented using rocTX events APIs."
-  echo "    See roctracer documentation on rocTX API details."
-  echo ""
-  echo "  --obj-tracking <on|off> - to turn on/off kernels code objects tracking [off]"
+  echo "  --flush-rate <rate> - to enable trace flush rate (time period)"
+  echo "    Supported time formats: <number(m|s|ms|us)>"
   echo ""
   echo "Configuration file:"
   echo "  You can set your parameters defaults preferences in the configuration file 'rpl_rc.xml'. The search path sequence: .:${HOME}:<package path>"
@@ -426,6 +424,11 @@ while [ 1 ] ; do
     convert_time_val period_rate
     errck "Option '$ARG_IN', rate value"
     export ROCP_CTRL_RATE="$period_delay:$period_len:$period_rate"
+  elif [ "$1" = "--flush-rate" ] ; then
+    period_rate=$2
+    convert_time_val period_rate
+    errck "Option '$ARG_IN', rate value"
+    export ROCP_FLUSH_RATE="$period_rate"
   elif [ "$1" = "--obj-tracking" ] ; then
     if [ "$2" = "on" ] ; then
       export ROCP_OBJ_TRACKING=1
