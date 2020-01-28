@@ -13,7 +13,13 @@ After=network.target
 #Requires=
 
 [Service]
+User=rdc
+Group=rdc
+
 Type=simple
+
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_DAC_OVERRIDE
 
 # If we need to start anything before rdcd, use this
 # ExecStartPre=
@@ -32,6 +38,9 @@ ExecStop=/bin/kill -15 $MAINPID
 #ExecReload=
 #ExecStartPost=
 #ExecStopPost=
+
+# StandardOutput=journal
+# StandardError=inherit
 
 [Install]
 WantedBy= multi-user.target

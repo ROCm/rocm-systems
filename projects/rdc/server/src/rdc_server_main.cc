@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/capability.h>
 
 #include <iostream>
 #include <memory>
@@ -38,6 +39,7 @@ THE SOFTWARE.
 #include "rocm_smi/rocm_smi.h"
 #include "rdc/rdc_server_main.h"
 #include "rdc/rdc_rsmi_service.h"
+#include "rdc/rdc_server_utils.h"
 
 static bool sShutDownServer = false;
 static bool sRestartServer = false;
@@ -88,13 +90,13 @@ RDCServer::Run() {
   // std::unique_ptr<::grpc::Server> server(builder.BuildAndStart());
   server_ = builder.BuildAndStart();
 
-  std::cerr <<  "Server listening on " << server_address_.c_str() << std::endl;
+  std::cout <<  "Server listening on " << server_address_.c_str() << std::endl;
 
   server_->Wait();
 }
 
 static void HandleSignal(int sig) {
-  std::cerr <<  "Caught signal " << sig << std::endl;
+  std::cout <<  "Caught signal " << sig << std::endl;
 
   // For most signals, we will want to exit, so make that the default case
   // Handle the other signals specifically.
@@ -142,13 +144,13 @@ static void * ProcessSignalLoop(void *server_ptr) {
 
   while (1) {
     if (sShutDownServer) {
-      std::cerr <<  "Shutting down RDC Server." << std::endl;
+      std::cout <<  "Shutting down RDC Server." << std::endl;
       server->ShutDown();
       // We will need to add shutdown of any completion queues
       // here, when/if we add them
       break;
     } else if (sRestartServer) {
-      std::cerr <<  "Re-starting RDC Server." << std::endl;
+      std::cout <<  "Re-starting RDC Server." << std::endl;
       // We will need to add shutdown of any completion queues
       // here, when/if we add them
       server->ShutDown();
@@ -184,7 +186,7 @@ static void ExitIfAlreadyRunning(void) {
 
 static void
 MakeDaemon() {
-  int fd0, fd1, fd2;
+  int fd0;
   struct rlimit max_files;
 
   // RSMI, for one thing, will need to be able to read/write files
@@ -230,21 +232,15 @@ MakeDaemon() {
   if (max_files.rlim_max > 1024) {
     max_files.rlim_max = 1024;
   }
-  for (uint32_t i = 0; i < max_files.rlim_max; i++) {
+  close(0);  // close stdin; leave stdout and stderr open
+  for (uint32_t i = 3; i < max_files.rlim_max; i++) {
     close(i);
   }
 
-  // Direct stdin, stdout, stdout to /dev/null.
-
+  // Direct stdin to /dev/null.
   fd0 = open("/dev/null", O_RDWR);
-  fd1 = dup(0);
-  fd2 = dup(0);
-
-  // Set up log file
-  // openlog(kDaemonName, LOG_CONS|LOG_PID, LOG_DAEMON);
-  if (fd0 != 0 || fd1 != 1 || fd2 != 2) {
-      std::cerr << "unexpected fildes: " << fd0 << " " << fd1 <<
-                                                     " " << fd2 << std::endl;
+  if (fd0 != 0) {
+      std::cerr << "unexpected fildes: " << fd0 << std::endl;
       exit(1);
   }
 
@@ -255,6 +251,7 @@ MakeDaemon() {
 
 int main(int argc, char** argv) {
   RDCServer rdc_server;
+  int err;
 
   (void)argc;   // Ignore for now
   (void)argv;
@@ -262,6 +259,49 @@ int main(int argc, char** argv) {
   MakeDaemon();
 
   rdc_server.Initialize();
+
+  bool cap_enabled;
+
+  err = GetCapability(CAP_DAC_OVERRIDE, CAP_EFFECTIVE, &cap_enabled);
+  if (err) {
+    std::cerr << "Failed to get capability" << std::endl;
+    return 1;
+  }
+  if (!cap_enabled) {
+    std::cerr <<
+      "Expected CAP_DAC_OVERRIDE CAP_EFFECTIVE to be enabled, but it not." <<
+                                                                    std::endl;
+    return 1;
+  }
+
+  err = GetCapability(CAP_DAC_OVERRIDE, CAP_PERMITTED, &cap_enabled);
+  if (err) {
+    std::cerr << "Failed to get capability" << std::endl;
+    return 1;
+  }
+  if (!cap_enabled) {
+    std::cerr <<
+      "Expected CAP_DAC_OVERRIDE CAP_PERMITTED to be enabled, but it not." <<
+                                                                     std::endl;
+    return 1;
+  }
+
+  // Don't allow rwx access to all files to ever be inheritable. We may need
+  // relax this restriction if some new feature requires it.
+  err = ModifyCapability(CAP_DAC_OVERRIDE, CAP_INHERITABLE, false);
+  if (err) {
+    std::cerr << "Failed to disable CAP_DAC_OVERRIDE, CAP_INHERITABLE" <<
+                                                                    std::endl;
+    return 1;
+  }
+
+  // By default, disable CAP_DAC_OVERRIDE. Turn on, when needed.
+  err = ModifyCapability(CAP_DAC_OVERRIDE, CAP_EFFECTIVE, false);
+  if (err) {
+    std::cerr << "Failed to disable CAP_DAC_OVERRIDE, CAP_EFFECTIVE" <<
+                                                                    std::endl;
+    return 1;
+  }
 
   // Create a thread to handle signals to shutdown gracefully
   pthread_t sig_listen_thread;
@@ -272,7 +312,6 @@ int main(int argc, char** argv) {
     std::cerr <<
     "Failed to create ProcessSignalLoop. pthread_create() returned " <<
                                                                       thr_ret;
-
     return 1;
   }
 
@@ -280,13 +319,10 @@ int main(int argc, char** argv) {
   rdc_server.set_start_rsmi_service(true);
   rdc_server.set_start_rdc_admin_service(true);
 
-  // rdc_server.set_secure_communications(false);
-  // rdc_server.set_address("0.0.0.0:50051")
-
   rdc_server.Run();
 
   if (sShutDownServer) {
-    std::cerr <<  "RDC server successfully shut down." << std::endl;
+    std::cout <<  "RDC server successfully shut down." << std::endl;
     return 0;
   } else {
     std::cerr << "RDC server failed to start." << std::endl;

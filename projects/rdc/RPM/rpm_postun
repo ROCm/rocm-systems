@@ -1,3 +1,3 @@
 if [ $1 -eq 0 ]; then
-    rm -f /etc/ld.so.conf.d/x86_64-librocm_smi_lib.conf && ldconfig
+    rm -f /etc/ld.so.conf.d/x86_64-librdc_client.conf && ldconfig
 fi

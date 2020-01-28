@@ -28,6 +28,14 @@ cmake_minimum_required(VERSION 3.5.0)
 set(RSMI_INC_DIR ${ROCM_DIR}/rocm_smi/include)
 set(RSMI_LIB_DIR ${ROCM_DIR}/rocm_smi/lib)
 
+if (NOT DEFINED RDC_CLIENT_ROOT_PATH)
+    set(RDC_CLIENT_ROOT_PATH "/opt/rocm/")
+endif()
+
+if (NOT DEFINED RDC_SERVER_ROOT_PATH)
+    set(RDC_SERVER_ROOT_PATH "/")
+endif()
+
 ## Set default module path
 if(NOT DEFINED CMAKE_MODULE_PATH)
     set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/")
@@ -36,7 +44,6 @@ endif()
 include(utils)
 
 set(RDC "rdc")
-set(RDC_TARGET "${RDC}64")
 
 ################# Determine the library version #########################
 ## Setup the package version based on git tags.
@@ -64,12 +71,12 @@ set(CPACK_PACKAGING_INSTALL_PREFIX "/"
                                      CACHE STRING "Default packaging prefix.")
 set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 
-project(${RDC_TARGET})
+project(${RDC})
 
 # Create a configure file to get version info from within library
 configure_file(
-  "${PROJECT_SOURCE_DIR}/src/${RDC_TARGET}Config.in"
-  "${PROJECT_SOURCE_DIR}/include/rdc/${RDC_TARGET}Config.h")
+  "${PROJECT_SOURCE_DIR}/src/${RDC}64Config.in"
+  "${PROJECT_SOURCE_DIR}/include/rdc/${RDC}64Config.h")
 
 if (NOT DEFINED CPACK_PACKAGE_VENDOR)
     set(CPACK_PACKAGE_VENDOR "AMD")
@@ -115,7 +122,7 @@ foreach(file ${PROTOB_DEF_SRC_FILES})
 
     execute_process(COMMAND
             protoc --proto_path=${PROTOB_SRC_DIR} --grpc_out=${PROTOB_OUT_DIR}
-            --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file} 
+            --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
             OUTPUT_VARIABLE PROTOB_OUT_VAR)
@@ -123,25 +130,46 @@ foreach(file ${PROTOB_DEF_SRC_FILES})
 
 endforeach()
 
+# define all the install component labels to install
+set(SERVER_CTRL_COMPONENT "server_ctrl")
+set(SERVER_BIN_COMPONENT "server_bin")
+set(CLIENT_LIB_COMPONENT "client_lib")
+set(CLIENT_HEADER_COMPONENT "client_header")
+set(GTEST_COMPONENT "rdc_gtest")
+set(EXAMPLE_COMPONENT "rdc_example")
+
 add_subdirectory("server")
 add_subdirectory("client")
-add_subdirectory("tests/example")
-add_subdirectory("tests/rdc_tests")
+
+# Turn on cmake "component install"
+set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+set(CPACK_COMPONENTS_ALL ${SERVER_CTRL_COMPONENT}
+   ${SERVER_BIN_COMPONENT} ${CLIENT_LIB_COMPONENT} ${CLIENT_HEADER_COMPONENT})
+
+
+configure_file(
+  "${PROJECT_SOURCE_DIR}/src/DEBIAN_postinst.in"
+  "${PROJECT_SOURCE_DIR}/DEBIAN/postinst")
+configure_file(
+  "${PROJECT_SOURCE_DIR}/src/RPM_rpm_post.in"
+  "${PROJECT_SOURCE_DIR}/RPM/rpm_post")
+
+
 
 # TODO set(CPACK_DEBIAN_PACKAGE_HOMEPAGE <GITHUB URL> )
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst;
-                                    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm")
-set (CPACK_DEBIAN_PACKAGE_NAME  ${RDC_PACKAGE})
-set (CPACK_DEBIAN_PACKAGE_VERSION ${PKG_VERSION_STR})
+                    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm")
+set(CPACK_DEBIAN_PACKAGE_NAME  ${RDC_PACKAGE})
+set(CPACK_DEBIAN_PACKAGE_VERSION ${PKG_VERSION_STR})
 
 # RPM package specific variables
 set(CPACK_RPM_PRE_INSTALL_SCRIPT_FILE
-                                   "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_post")
+                   "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_post")
 set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE
-                                 "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_postun")
-set (CPACK_RPM_PACKAGE_NAME  ${RDC_PACKAGE})
-set (CPACK_RPM_PACKAGE_VERSION ${PKG_VERSION_STR})
+                 "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_postun")
+set(CPACK_RPM_PACKAGE_NAME  ${RDC_PACKAGE})
+set(CPACK_RPM_PACKAGE_VERSION ${PKG_VERSION_STR})
 
 # Generate Doxygen documentation
 find_package(Doxygen)
@@ -158,3 +186,4 @@ endif(DOXYGEN_FOUND)
 
 ## Add the packaging directives
 include (CPack)
+

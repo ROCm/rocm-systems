@@ -88,10 +88,10 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 ##  RDC_lib-dev
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
                    CACHE STRING "Location of RDC client library source code.")
-# set(CMAKE_INSTALL_PREFIX "/opt/rocm"
-#                                CACHE STRING "Default installation directory.")
-# set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm"
-#                                      CACHE STRING "Default packaging prefix.")
+set(CMAKE_INSTALL_PREFIX ${RDC_CLIENT_ROOT_PATH}
+                                CACHE STRING "Default installation directory.")
+set(CPACK_PACKAGING_INSTALL_PREFIX ${RDC_CLIENT_ROOT_PATH}
+                                      CACHE STRING "Default packaging prefix.")
 set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 
 if (NOT DEFINED CPACK_PACKAGE_VENDOR)
@@ -159,9 +159,11 @@ endif ()
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${CLIENT_LIB}
-          LIBRARY DESTINATION opt/rocm/rdc/lib COMPONENT ${CLIENT_LIB_COMPONENT})
+             LIBRARY DESTINATION ${RDC_CLIENT_ROOT_PATH}${RDC}/lib
+                                            COMPONENT ${CLIENT_LIB_COMPONENT})
 install(FILES ${SOURCE_DIR}/client/include/rdc/rdc_client.h
-                                        DESTINATION opt/rocm/rdc/include/rdc)
+                      DESTINATION ${RDC_CLIENT_ROOT_PATH}${RDC}/include/rdc
+                                         COMPONENT ${CLIENT_HEADER_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Client Lib                      ")

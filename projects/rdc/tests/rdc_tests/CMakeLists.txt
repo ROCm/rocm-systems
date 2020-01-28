@@ -25,10 +25,7 @@ cmake_minimum_required(VERSION 3.5.0)
 #   3) Run "cmake .."
 #   4) Run "make"
 #
-
-#
 # Currently support for Windows platform is not present
-#
 
 #############################
 # COMMON AREA
@@ -45,7 +42,7 @@ endif()
 # Required Defines first:
 
 set(RDC_INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../client/include)
-set(RDC_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../rdc/lib)
+set(RDC_LIB_DIR ${RDC_BUILD_DIR}/client)
 set(RSMI_INC_DIR ${ROCM_DIR}/rocm_smi/include)
 
 
@@ -123,7 +120,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra")
 if(ISDEBUG)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0")
 endif()
-MESSAGE("ISDEBUG STEP:Done")
 
 set(RDCTST_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -137,8 +133,8 @@ set(GOOGLE_TEST_FRWK_NAME "gtest")
 add_subdirectory(${RDCTST_ROOT}/gtest "${PROJECT_BINARY_DIR}/gtest")
 set (RDCTST_LIBS ${RDCTST_LIBS} ${GOOGLE_TEST_FRWK_NAME})
 
-#
-#
+set(RDCTST_LIBS ${RDCTST_LIBS} ${GOOGLE_TEST_FRWK_NAME})
+
 # Other source directories
 aux_source_directory(${RDCTST_ROOT}/functional functionalSources)
 
@@ -146,7 +142,7 @@ aux_source_directory(${RDCTST_ROOT}/functional functionalSources)
 # Specify the directory containing various libraries of ROCR
 # to be linked against for building ROC Perf applications
 #
-LINK_DIRECTORIES(${RDC_LIB_DIR})
+link_directories(${RDC_LIB_DIR})
 #
 # Source files for building rocrtst
 #
@@ -156,16 +152,10 @@ aux_source_directory(${RDCTST_ROOT} rdctstSources)
 add_executable(${RDCTST} ${rdctstSources} ${functionalSources})
 
 # Header file include path
-target_include_directories(${RDCTST} PRIVATE ${RDC_INC_DIR} 
+target_include_directories(${RDCTST} PRIVATE ${RDC_INC_DIR}
                                      PRIVATE ${RSMI_INC_DIR}
                                      PRIVATE ${RDCTST_ROOT}/..
                                      PRIVATE ${RDCTST_ROOT}/gtest/include)
 
-
 target_link_libraries(${RDCTST} ${RDCTST_LIBS} c stdc++ pthread)
-
-install(TARGETS ${RDCTST}
-        ARCHIVE DESTINATION ${PROJECT_BINARY_DIR}/lib
-        LIBRARY DESTINATION ${PROJECT_BINARY_DIR}/lib
-        RUNTIME DESTINATION ${PROJECT_BINARY_DIR}/bin)
 

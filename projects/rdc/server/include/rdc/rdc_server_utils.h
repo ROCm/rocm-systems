@@ -1,6 +1,5 @@
-
 /*
-Copyright (c) 2019 - present Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2020 - present Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,36 +19,12 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#include <assert.h>
-#include <grpcpp/grpcpp.h>
-#include <unistd.h>
+#ifndef SERVER_INCLUDE_RDC_RDC_SERVER_UTILS_H_
+#define SERVER_INCLUDE_RDC_RDC_SERVER_UTILS_H_
 
-#include <iostream>
-#include <sstream>
-#include <memory>
-#include <string>
-#include <csignal>
+#include <sys/capability.h>
 
-#include "rdc.grpc.pb.h"  // NOLINT
-#include "rdc/rdc_admin_service.h"
+int GetCapability(cap_value_t cap, cap_flag_t cap_type, bool *enabled);
+int ModifyCapability(cap_value_t cap, cap_flag_t cap_type, bool enable);
 
-namespace amd {
-namespace rdc {
-
-RDCAdminServiceImpl::RDCAdminServiceImpl() {
-}
-
-RDCAdminServiceImpl::~RDCAdminServiceImpl() {
-}
-::grpc::Status
-RDCAdminServiceImpl::VerifyConnection(::grpc::ServerContext* context,
-                            const ::rdc::VerifyConnectionRequest* request,
-                              ::rdc::VerifyConnectionResponse* reply) {
-  (void)context;  // Quiet warning for now
-
-  reply->set_echo_magic_num(request->magic_num());
-  return ::grpc::Status::OK;
-}
-
-}  // namespace rdc
-}  // namespace amd
+#endif  // SERVER_INCLUDE_RDC_RDC_SERVER_UTILS_H_

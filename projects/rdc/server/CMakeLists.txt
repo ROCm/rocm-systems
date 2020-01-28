@@ -73,6 +73,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include
 set(SERVER_SRC_LIST "${SRC_DIR}/rdc_rsmi_service.cc")
 set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${SRC_DIR}/rdc_admin_service.cc")
 set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${SRC_DIR}/rdc_server_main.cc")
+set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${SRC_DIR}/rdc_server_utils.cc")
 set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${PROTOBUF_GENERATED_SRCS}")
 message("SERVER_SRC_LIST=${SERVER_SRC_LIST}")
 
@@ -85,14 +86,17 @@ add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
 # target_include_directories(${SERVER_DAEMON_EXE} PUBLIC ${RSMI_INC_DIR})
 
 target_link_libraries(${SERVER_DAEMON_EXE} pthread rt grpc grpc++
-                                     grpc++_reflection dl protobuf rocm_smi64)
+                                 cap grpc++_reflection dl protobuf rocm_smi64)
 
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${SERVER_DAEMON_EXE}
-          PERMISSIONS OWNER_EXECUTE OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
-                                                            DESTINATION usr/sbin)
+        PERMISSIONS OWNER_EXECUTE OWNER_READ OWNER_WRITE GROUP_READ
+        GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+        DESTINATION ${RDC_SERVER_ROOT_PATH}usr/sbin
+                                            COMPONENT ${SERVER_BIN_COMPONENT})
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_FILE_NAME}
-                                              DESTINATION lib/systemd/system)
+               DESTINATION ${RDC_SERVER_ROOT_PATH}lib/systemd/system
+                                           COMPONENT ${SERVER_CTRL_COMPONENT})
 
-message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
-message("                    Finished Cmake Server                                 ")
-message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("                    Finished Cmake Server                          ")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

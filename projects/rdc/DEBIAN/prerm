@@ -3,7 +3,7 @@
 set -e
 
 rm_ldconfig() {
-    rm -f /etc/ld.so.conf.d/x86_64-librocm_smi_lib.conf && ldconfig
+    rm -f /etc/ld.so.conf.d/x86_64-librdc_client.conf && ldconfig
 }
 
 case "$1" in
