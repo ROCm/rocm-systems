@@ -159,6 +159,9 @@ int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
         return err;
       }
       assert(is_number(tmp) && "Unexpected value in pasid file");
+      if (!is_number(tmp)) {
+        return EINVAL;
+      }
       procs[*num_procs_found].pasid = std::stoi(tmp);
     }
     ++(*num_procs_found);
@@ -196,6 +199,10 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc) {
     return err;
   }
   assert(is_number(tmp) && "Unexpected value in pasid file");
+
+  if (!is_number(tmp)) {
+    return EINVAL;
+  }
   proc->pasid = std::stoi(tmp);
 
   return 0;

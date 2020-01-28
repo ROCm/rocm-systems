@@ -207,7 +207,14 @@ static uint64_t get_multiplier_from_str(char units_char) {
  *        "<int index>:  <int freq><freq. unit string> <|*>"
  */
 static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
-                                     bool *is_curr, uint32_t lanes[], int i) {
+                                bool *is_curr, uint32_t lanes[], uint32_t i) {
+
+  assert(i < freq_lines.size());
+  if (i >= freq_lines.size()) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_INPUT_OUT_OF_BOUNDS,
+                                                                __FUNCTION__);
+  }
+
   std::istringstream fs(freq_lines[i]);
 
   uint32_t ind;
@@ -238,6 +245,10 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
   if (star_str[0] == 'x') {
     assert(lanes != nullptr && "Lanes are provided but null lanes pointer");
     if (lanes) {
+      if (star_str.substr(1) == "") {
+        throw amd::smi::rsmi_exception(RSMI_STATUS_NO_DATA, __FUNCTION__);
+      }
+
       lanes[i] = std::stoi(star_str.substr(1), nullptr);
     }
   }
@@ -417,6 +428,9 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
     return errno_to_rsmi_status(ret);
   }
 
+  if (val_str == "") {
+    return RSMI_STATUS_NO_DATA;
+  }
   *val = std::stoi(val_str);
 
   return RSMI_STATUS_SUCCESS;
@@ -444,6 +458,10 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
                                                                     std::endl;
   }
   assert(amd::smi::IsInteger(val_str));
+
+  if (val_str == "") {
+    return RSMI_STATUS_NO_DATA;
+  }
 
   *val = std::stoul(val_str);
 
@@ -1400,6 +1418,11 @@ get_id_name_str_from_line(uint64_t id, std::string ln,
   THROW_IF_NULLPTR_DEREF(ln_str)
 
   *ln_str >> token1;
+
+  if (token1 == "") {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_NO_DATA, __FUNCTION__);
+  }
+
   if (std::stoul(token1, nullptr, 16) == id) {
     int64_t pos = ln_str->tellg();
 

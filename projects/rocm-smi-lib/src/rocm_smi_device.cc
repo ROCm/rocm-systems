@@ -664,6 +664,10 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevErrCntFeatures:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
+
+      if (tempStr == "") {
+        return EINVAL;
+      }
       *val = std::stoi(tempStr, 0, 16);
       break;
 
@@ -681,6 +685,9 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevXGMIError:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
+      if (tempStr == "") {
+        return EINVAL;
+      }
       *val = std::stoul(tempStr, 0);
       break;
 
@@ -708,6 +715,9 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevFwVersionVcn:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
+      if (tempStr == "") {
+        return EINVAL;
+      }
       *val = std::stoul(tempStr, 0, 16);
       break;
 
