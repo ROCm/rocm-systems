@@ -123,23 +123,37 @@ void* control_thr_fun(void*) {
   const uint32_t len_us = control_len_us % 1000000;
   const uint32_t dist_sec = control_dist_us / 1000000;
   const uint32_t dist_us = control_dist_us % 1000000;
-  bool start = true;
+  bool to_start = true;
 
   sleep(delay_sec);
   usleep(delay_us);
 
   while (1) {
-    if (start) {
-      start = false;
+    if (to_start) {
+      to_start = false;
       roctracer_start();
       sleep(len_sec);
       usleep(len_us);
     } else {
-      start = true;
+      to_start = true;
       roctracer_stop();
       sleep(dist_sec);
       usleep(dist_us);
     }
+  }
+}
+
+// Flushing control thread
+uint32_t control_flush_us = 0;
+void* flush_thr_fun(void*) {
+  const uint32_t dist_sec = control_flush_us / 1000000;
+  const uint32_t dist_us = control_flush_us % 1000000;
+
+  while (1) {
+    sleep(dist_sec);
+    usleep(dist_us);
+    roctracer_flush_activity();
+    roctracer::TraceBufferBase::FlushAll();
   }
 }
 
@@ -782,6 +796,22 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     } else {
       fprintf(stdout, "ROCTracer: trace start disabled\n"); fflush(stdout);
     }
+  }
+
+  const char* flush_str = getenv("ROCP_FLUSH_RATE");
+  if (flush_str != NULL) {
+    sscanf(flush_str, "%d", &control_flush_us);
+    if (control_flush_us == 0) {
+      fprintf(stderr, "ROCTracer: control flush rate bad value\n");
+      abort();
+    }
+
+    fprintf(stdout, "ROCTracer: trace control flush rate(%uus)\n", control_flush_us); fflush(stdout);
+    pthread_t thread;
+    pthread_attr_t attr;
+    int err = pthread_attr_init(&attr);
+    if (err) { errno = err; perror("pthread_attr_init"); abort(); }
+    err = pthread_create(&thread, &attr, flush_thr_fun, NULL);
   }
 
   // Enable KFD API callbacks/activity
