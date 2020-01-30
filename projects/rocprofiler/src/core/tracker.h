@@ -167,7 +167,12 @@ class Tracker {
     auto end = sig_list_.end();
     while (it != end) {
       auto cur = it++;
-      hsa_rsrc_->SignalWait((*cur)->signal);
+// The wait should be optiona as there possible some inter kernel dependencies and it possible to wait for
+// the kernels will never be lunched as the application was finished by some reason.
+#if 0
+      // FIXME: currently the signal value for tracking signals are taken from original application signal
+      hsa_rsrc_->SignalWait((*cur)->signal, 1);
+#endif
       Erase(cur);
     }
   }

@@ -44,9 +44,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <string>
 #include <vector>
 
-#include "util/exception.h"
-#include "util/logger.h"
-
 namespace rocprofiler {
 namespace util {
 
@@ -523,22 +520,25 @@ uint8_t* HsaRsrcFactory::AllocateCmdMemory(const AgentInfo* agent_info, size_t s
 }
 
 // Wait signal
-void HsaRsrcFactory::SignalWait(const hsa_signal_t& signal) const {
+hsa_signal_value_t HsaRsrcFactory::SignalWait(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const {
+  const hsa_signal_value_t exp_value = signal_value - 1;
+  hsa_signal_value_t ret_value = signal_value;
   while (1) {
-    const hsa_signal_value_t signal_value =
-      hsa_api_.hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, timeout_, HSA_WAIT_STATE_BLOCKED);
-    if (signal_value == 0) {
-      break;
-    } else {
-      if (signal_value == 1) WARN_LOGGING("signal waiting...");
-      else EXC_RAISING(HSA_STATUS_ERROR, "hsa_signal_wait_scacquire (" << signal_value << ")");
+    ret_value =
+      hsa_api_.hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, signal_value, timeout_, HSA_WAIT_STATE_BLOCKED);
+    if (ret_value == exp_value) break;
+    if (ret_value != signal_value) {
+      std::cerr << "Error: HsaRsrcFactory::SignalWait: signal_value(" << signal_value
+                << "), ret_value(" << ret_value << ")" << std::endl << std::flush;
+      abort();
     }
   }
+  return ret_value;
 }
 
 // Wait signal with signal value restore
 void HsaRsrcFactory::SignalWaitRestore(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const {
-  SignalWait(signal);
+  SignalWait(signal, signal_value);
   hsa_api_.hsa_signal_store_relaxed(const_cast<hsa_signal_t&>(signal), signal_value);
 }
 
@@ -551,7 +551,7 @@ bool HsaRsrcFactory::Memcpy(const hsa_agent_t& agent, void* dst, const void* src
     CHECK_STATUS("hsa_signal_create()", status);
     status = hsa_api_.hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, NULL, s);
     CHECK_STATUS("hsa_amd_memory_async_copy()", status);
-    SignalWait(s);
+    SignalWait(s, 1);
     status = hsa_api_.hsa_signal_destroy(s);
     CHECK_STATUS("hsa_signal_destroy()", status);
   }

@@ -361,7 +361,7 @@ class HsaRsrcFactory {
   uint8_t* AllocateCmdMemory(const AgentInfo* agent_info, size_t size);
 
   // Wait signal
-  void SignalWait(const hsa_signal_t& signal) const;
+  hsa_signal_value_t SignalWait(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const;
 
   // Wait signal with signal value restore
   void SignalWaitRestore(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const;
