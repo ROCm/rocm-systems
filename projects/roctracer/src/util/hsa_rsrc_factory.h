@@ -199,7 +199,7 @@ class HsaTimer {
   }
 
   // Method for timespec/ns conversion
-  timestamp_t timespec_to_ns(const timespec& time) const {
+  static timestamp_t timespec_to_ns(const timespec& time) {
     return ((timestamp_t)time.tv_sec * 1000000000) + time.tv_nsec;
   }
 
@@ -212,7 +212,7 @@ class HsaTimer {
   }
 
   // Return time in 'ns'
-  timestamp_t clocktime_ns(clockid_t clock_id) const {
+  static timestamp_t clocktime_ns(clockid_t clock_id) {
     timespec time;
     clock_gettime(clock_id, &time);
     return timespec_to_ns(time);
@@ -221,7 +221,7 @@ class HsaTimer {
   // Return pair of correlated values of profiling timestamp and time with
   // correlation error for a given time ID and number of iterations
   void correlated_pair_ns(time_id_t time_id, uint32_t iters,
-                          timestamp_t* timestamp_v, timestamp_t* time_v, timestamp_t* error_v) {
+                          timestamp_t* timestamp_v, timestamp_t* time_v, timestamp_t* error_v) const {
     clockid_t clock_id = 0;
     switch (clock_id) {
       case TIME_ID_CLOCK_REALTIME:
@@ -427,9 +427,15 @@ class HsaRsrcFactory {
     time_error_[time_id] = error_v;
   }
 
-  hsa_status_t GetTime(uint32_t time_id, uint64_t value, uint64_t* time) {
+  hsa_status_t GetTime(uint32_t time_id, timestamp_t value, uint64_t* time) {
     if (time_id >= HsaTimer::TIME_ID_NUMBER) return HSA_STATUS_ERROR;
     *time = value + time_shift_[time_id];
+    return HSA_STATUS_SUCCESS;
+  }
+
+  hsa_status_t GetTimestamp(uint32_t time_id, uint64_t value, timestamp_t* timestamp) {
+    if (time_id >= HsaTimer::TIME_ID_NUMBER) return HSA_STATUS_ERROR;
+    *timestamp = value - time_shift_[time_id];
     return HSA_STATUS_SUCCESS;
   }
 

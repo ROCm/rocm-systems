@@ -43,6 +43,8 @@ THE SOFTWARE.
 #include <src/core/trace_buffer.h>
 #include <util/xml.h>
 
+#include "util/hsa_rsrc_factory.h"
+
 #define PUBLIC_API __attribute__((visibility("default")))
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
@@ -164,7 +166,7 @@ struct roctx_trace_entry_t {
   uint32_t valid;
   uint32_t type;
   uint32_t cid;
-  timestamp_t timestamp;
+  timestamp_t time;
   uint32_t pid;
   uint32_t tid;
   const char* message;
@@ -181,12 +183,11 @@ static inline void roctx_callback_fun(
     uint32_t tid,
     const char* message)
 {
-  const timestamp_t timestamp = timer->timestamp_fn_ns();
   roctx_trace_entry_t* entry = roctx_trace_buffer.GetEntry();
   entry->valid = roctracer::TRACE_ENTRY_COMPL;
   entry->type = 0;
   entry->cid = cid;
-  entry->timestamp = timestamp;
+  entry->time = HsaTimer::clocktime_ns(HsaTimer::TIME_ID_CLOCK_MONOTONIC);
   entry->pid = GetPid();
   entry->tid = tid;
   entry->message = (message != NULL) ? strdup(message) : NULL;
@@ -215,8 +216,10 @@ void stop_callback() { roctracer::RocTxLoader::Instance().RangeStackIterate(roct
 
 // rocTX buffer flush function
 void roctx_flush_cb(roctx_trace_entry_t* entry) {
+  timestamp_t timestamp = 0;
+  HsaRsrcFactory::Instance().GetTimestamp(HsaTimer::TIME_ID_CLOCK_MONOTONIC, entry->time, &timestamp);
   std::ostringstream os;
-  os << entry->timestamp << " " << entry->pid << ":" << entry->tid << " " << entry->cid;
+  os << timestamp << " " << entry->pid << ":" << entry->tid << " " << entry->cid;
   if (entry->message != NULL) os << ":\"" << entry->message << "\"";
   else os << ":\"\"";
   fprintf(roctx_file_handle, "%s\n", os.str().c_str()); fflush(roctx_file_handle);
