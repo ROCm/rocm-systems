@@ -160,5 +160,4 @@ Time taken in Total by SimpleConvolution : 0.000647949
 1822787199096536:1822787199113536 116451:116459 hsa_executable_destroy(<executable>) = 0
 1822787199114426:1822787199116066 116451:116459 hsa_signal_destroy(<signal 0x7fa7a2d2cc80>) = 0
 1822787199118006:1822787200339674 116451:116459 hsa_queue_destroy(<queue 0x7fa7a2ce1000>) = 0
-tool HSA test: PASSED
-8 tests total / 1 tests run / 0 tests failed
+
