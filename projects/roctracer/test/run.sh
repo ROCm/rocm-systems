@@ -72,6 +72,7 @@ eval_test() {
         "0") echo "$label: PASSED"
         ;;
         "1") 
+          echo "../script/parse_trace.py -in $rtrace  -cn"
           cnt_r=`../script/parse_trace.py -in $rtrace  -cn`
           cnt=`../script/parse_trace.py -in $trace  -cn`
           if [ "$cnt_r" = "$cnt" ] ; then
@@ -82,16 +83,13 @@ eval_test() {
           fi
         ;;
         "2")
+          echo "../script/parse_trace.py -in $rtrace  -or"
           cnt_r=`../script/parse_trace.py -in $rtrace  -or`
           cnt=`../script/parse_trace.py -in $trace  -or`
           if [ "$cnt_r" = "$cnt" ] ; then
             echo "$label: PASSED (trace compare, events order)"
           else
             echo "$label: FAILED (trace compare, events order)"
-            echo "===cnt_r==="
-            echo $cnt_r
-            echo "===cnt==="
-            echo $cnt
             test_status=$(($test_status + 1))
           fi
        ;; 
@@ -103,9 +101,9 @@ eval_test() {
 
 # Standalone test
 # rocTrecer is used explicitely by test
-eval_test "standalone C test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest" "MatrixTranspose_ctest_trace"
-eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test" "MatrixTranspose_test_trace"
-eval_test "standalone HIP MGPU test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_mgpu" "MatrixTranspose_mgpu_trace"
+eval_test "standalone C test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest" "test/MatrixTranspose_ctest_trace"
+eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test" "test/MatrixTranspose_test_trace"
+eval_test "standalone HIP MGPU test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_mgpu" "test/MatrixTranspose_mgpu_trace"
 
 # Tool test
 # rocTracer/tool is loaded by HSA runtime
@@ -113,12 +111,12 @@ export HSA_TOOLS_LIB="test/libtracer_tool.so"
 
 # SYS test
 export ROCTRACER_DOMAIN="sys:roctx"
-eval_test "tool SYS test" ./test/MatrixTranspose "MatrixTranspose_sys_trace"
+eval_test "tool SYS test" ./test/MatrixTranspose "test/MatrixTranspose_sys_trace"
 export ROCTRACER_DOMAIN="sys:hsa:roctx"
-eval_test "tool SYS/HSA test" ./test/MatrixTranspose "MatrixTranspose_sys_hsa_trace"
+eval_test "tool SYS/HSA test" ./test/MatrixTranspose "test/MatrixTranspose_sys_hsa_trace"
 # Tracing control <delay:length:rate>
 export ROCTRACER_DOMAIN="hip"
-eval_test "tool period test" "ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose" "MatrixTranspose_hip_trace"
+eval_test "tool period test" "ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose" "test/MatrixTranspose_hip_trace"
 
 # HSA test
 export ROCTRACER_DOMAIN="hsa"
@@ -135,11 +133,11 @@ export ROCP_AGENTS=1
 # each thread creates a queue pre GPU agent
 export ROCP_THRS=1
 
-eval_test "tool HSA test" ./test/hsa/ctrl "ctrl_hsa_trace"
+eval_test "tool HSA test" ./test/hsa/ctrl "test/ctrl_hsa_trace"
 
 echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > input.xml
 export ROCP_INPUT=input.xml
-eval_test "tool HSA test input" ./test/hsa/ctrl "ctrl_hsa_input_trace"
+eval_test "tool HSA test input" ./test/hsa/ctrl "test/ctrl_hsa_input_trace"
 
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
