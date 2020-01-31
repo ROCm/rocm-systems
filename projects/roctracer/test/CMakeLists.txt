@@ -47,8 +47,8 @@ add_custom_target( mytest
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose_sys_trace.txt ${PROJECT_BINARY_DIR}/test/"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose_sys_hsa_trace.txt ${PROJECT_BINARY_DIR}/test/"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose_hip_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/hsa/test/ctrl/ctrl_hsa_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/hsa/test/ctrl/ctrl_hsa_input_trace.txt ${PROJECT_BINARY_DIR}/test/"
+  COMMAND sh -xc "cp ${TEST_DIR}/ctrl_hsa_trace.txt ${PROJECT_BINARY_DIR}/test/"
+  COMMAND sh -xc "cp ${TEST_DIR}/ctrl_hsa_input_trace.txt ${PROJECT_BINARY_DIR}/test/"
 )
 
 ## Util sources
