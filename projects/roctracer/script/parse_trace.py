@@ -9,10 +9,12 @@ events_order = []
 def parse_trace(tracefile,cnt,order):
   with open(tracefile) as f: 
     for line in f: 
-      event_pattern = re.compile(r'<(\w+)\s+id\(\d+\)\s+.*')
+      event_pattern = re.compile(r'<(\w+)\s+id\(\d+\)\s+.*|\d+:\d+\s+\d+:\d+\s+(\w+).*')
       m = event_pattern.match(line)
       if m:
         event = m.group(1)
+        if not event:
+          event = m.group(2)
         if cnt:
           if event in events_count:
             events_count[event] = events_count[event] + 1
