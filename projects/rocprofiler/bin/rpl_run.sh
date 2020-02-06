@@ -248,7 +248,7 @@ run() {
   fi
   if [ "$KFD_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":kfd"
-    export LD_PRELOAD="libkfdwrapper64.so libhsakmt.so.1 $LD_PRELOAD"
+    export LD_PRELOAD="$TT_DIR/lib/libkfdwrapper64.so libhsakmt.so.1 $LD_PRELOAD"
   fi
   if [ "$HIP_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":hip"
