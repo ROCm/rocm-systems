@@ -92,7 +92,17 @@ eval_test() {
             echo "$label: FAILED (trace compare, events order)"
             test_status=$(($test_status + 1))
           fi
-       ;; 
+        ;; 
+        "3")
+         echo "Comparing $trace $rtrace :"
+         eval "diff --brief $trace $rtrace"
+         if [ $? != 0 ] ; then
+           echo "$label: FAILED (trace compare, files differ)"
+           test_status=$(($test_status + 1))
+         else
+           echo "$label: PASSED (trace compare, files are the same)"
+         fi
+        ;;
       esac
     fi
   fi
