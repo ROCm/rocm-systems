@@ -1,15 +1,15 @@
 # Copyright (c) 2019 - present Advanced Micro Devices, Inc. All rights reserved.
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
@@ -107,7 +107,7 @@ set(PROTOB_CMD "protoc")
 
 foreach(file ${PROTOB_DEF_SRC_FILES})
     execute_process(COMMAND
-     protoc --proto_path=${PROTOB_SRC_DIR} --cpp_out=${PROTOB_OUT_DIR} ${file} 
+     protoc --proto_path=${PROTOB_SRC_DIR} --cpp_out=${PROTOB_OUT_DIR} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
             OUTPUT_VARIABLE PROTOB_OUT_VAR)
@@ -135,16 +135,20 @@ set(SERVER_CTRL_COMPONENT "server_ctrl")
 set(SERVER_BIN_COMPONENT "server_bin")
 set(CLIENT_LIB_COMPONENT "client_lib")
 set(CLIENT_HEADER_COMPONENT "client_header")
+set(RDC_LIB_COMPONENT "rdc_lib")
 set(GTEST_COMPONENT "rdc_gtest")
 set(EXAMPLE_COMPONENT "rdc_example")
 
 add_subdirectory("server")
 add_subdirectory("client")
+add_subdirectory("rdc_libs")
+add_subdirectory("example")
 
 # Turn on cmake "component install"
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 set(CPACK_COMPONENTS_ALL ${SERVER_CTRL_COMPONENT}
-   ${SERVER_BIN_COMPONENT} ${CLIENT_LIB_COMPONENT} ${CLIENT_HEADER_COMPONENT})
+   ${SERVER_BIN_COMPONENT} ${CLIENT_LIB_COMPONENT} ${CLIENT_HEADER_COMPONENT}
+   ${RDC_LIB_COMPONENT})
 
 
 configure_file(
