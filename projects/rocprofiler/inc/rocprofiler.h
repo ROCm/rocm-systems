@@ -464,15 +464,15 @@ hsa_status_t rocprofiler_pool_flush(
 // HSA intercepting API
 
 // HSA callbacks ID enumeration
-enum rocprofiler_hsa_cb_id_t {
+typedef enum {
   ROCPROFILER_HSA_CB_ID_ALLOCATE = 0, // Memory allocate callback
   ROCPROFILER_HSA_CB_ID_DEVICE = 1,   // Device assign callback
   ROCPROFILER_HSA_CB_ID_MEMCOPY = 2,  // Memcopy callback
   ROCPROFILER_HSA_CB_ID_SUBMIT = 3    // Packet submit callback
-};
+} rocprofiler_hsa_cb_id_t;
 
 // HSA callback data type
-struct rocprofiler_hsa_callback_data_t {
+typedef struct {
   union {
     struct {
       const void* ptr;                                // allocated area ptr
@@ -500,7 +500,7 @@ struct rocprofiler_hsa_callback_data_t {
       uint32_t device_id;                             // id of device the packed is submitted to
     } submit;
   };
-};
+} rocprofiler_hsa_callback_data_t;
 
 // HSA callback function type
 typedef hsa_status_t (*rocprofiler_hsa_callback_fun_t)(
@@ -509,12 +509,12 @@ typedef hsa_status_t (*rocprofiler_hsa_callback_fun_t)(
   void* arg); // [in/out] user passed data
 
 // HSA callbacks structure
-struct rocprofiler_hsa_callbacks_t {
+typedef struct {
   rocprofiler_hsa_callback_fun_t allocate; // memory allocate callback
   rocprofiler_hsa_callback_fun_t device; // agent assign callback
   rocprofiler_hsa_callback_fun_t memcopy; // memory copy callback
   rocprofiler_hsa_callback_fun_t submit; // packet submit callback
-};
+} rocprofiler_hsa_callbacks_t;
 
 // Set callbacks. If the callback is NULL then it is disabled.
 // If callback returns a value that is not HSA_STATUS_SUCCESS the  callback

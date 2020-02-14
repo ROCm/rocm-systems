@@ -54,6 +54,15 @@ THE SOFTWARE.
   }                                                                                                \
   return status;
 
+#define ONLOAD_TRACE(str) \
+  if (getenv("ROCP_ONLOAD_TRACE")) do { \
+    std::cout << "PID(" << GetPid() << "): PROF_LIB::" << __FUNCTION__ << " " << str << std::endl << std::flush; \
+  } while(0);
+#define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
+#define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
+
+static inline uint32_t GetPid() { return syscall(__NR_getpid); }
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Internal library methods
 //
@@ -155,11 +164,12 @@ enum {
   DISPATCH_INTERCEPT_MODE = 0x1,
   CODE_OBJ_TRACKING_MODE = 0x2,
   MEMCOPY_INTERCEPT_MODE = 0x4,
+  HSA_INTERCEPT_MODE = 0x8,
 };
 uint32_t LoadTool() {
   uint32_t intercept_mode = 0;
   const char* tool_lib = getenv("ROCP_TOOL_LIB");
-  fprintf(stderr, "ROCProfiler: load tool library \"%s\"\n", tool_lib); fflush(stderr);
+  ONLOAD_TRACE("load tool library(" << tool_lib << ")");
 
   if (tool_lib) {
     intercept_mode = DISPATCH_INTERCEPT_MODE;
@@ -190,7 +200,6 @@ uint32_t LoadTool() {
     settings.trace_local = TraceProfile::IsLocal() ? 1: 0;
     settings.timeout = util::HsaRsrcFactory::GetTimeoutNs();
     settings.timestamp_on = InterceptQueue::IsTrackerOn() ? 1 : 0;
-    settings.hsa_intercepting = 0;
 
     if (handler) handler();
     else if (handler_prop) handler_prop(&settings);
@@ -202,7 +211,7 @@ uint32_t LoadTool() {
     if (settings.intercept_mode != 0) intercept_mode = DISPATCH_INTERCEPT_MODE;
     if (settings.code_obj_tracking) intercept_mode |= CODE_OBJ_TRACKING_MODE;
     if (settings.memcopy_tracking) intercept_mode |= MEMCOPY_INTERCEPT_MODE;
-    HsaInterceptor::Enable(settings.hsa_intercepting != 0);
+    if (settings.hsa_intercepting) intercept_mode |= HSA_INTERCEPT_MODE;
   }
 
   return intercept_mode;
@@ -415,7 +424,6 @@ extern "C" {
 // HSA-runtime tool on-load method
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
-  fprintf(stderr, "rocprof OnLoad\n"); fflush(stderr);
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
   bool intercept_mode = false;
@@ -462,6 +470,13 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
     table->amd_ext_->hsa_amd_memory_async_copy_fn = rocprofiler::hsa_amd_memory_async_copy_interceptor;
     table->amd_ext_->hsa_amd_memory_async_copy_rect_fn = rocprofiler::hsa_amd_memory_async_copy_rect_interceptor;
   }
+  if (intercept_mode_mask & rocprofiler::HSA_INTERCEPT_MODE) {
+    if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
+      EXC_ABORT(HSA_STATUS_ERROR, "HSA_INTERCEPT and MEMCOPY_INTERCEPT conflict");
+    }
+    rocprofiler::HsaInterceptor::Enable(true);
+    rocprofiler::HsaInterceptor::HsaIntercept(table);
+  }
 
   // HSA intercepting
   if (intercept_mode) {
@@ -469,7 +484,6 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
     rocprofiler::InterceptQueue::HsaIntercept(table);
   } else {
     rocprofiler::StandaloneIntercept();
-    rocprofiler::HsaInterceptor::HsaIntercept(table);
   }
 
   return true;

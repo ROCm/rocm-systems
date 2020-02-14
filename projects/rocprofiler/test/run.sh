@@ -97,9 +97,6 @@ export ROCP_TIMESTAMP_ON=1
 # and SQTT trace files 'thread_trace.se<n>.out'
 export ROCP_OUTPUT_DIR=./RESULTS
 
-# enable HSA intercepting
-export ROCP_HSA_INTERC=1
-
 if [ ! -e $ROCP_TOOL_LIB ] ; then
   export ROCP_TOOL_LIB=test/libtool.so
 fi
@@ -138,6 +135,20 @@ eval_test "libtool test, counter sets" ./test/ctrl
 ## OpenCL test
 export ROCP_OBJ_TRACKING=1
 export ROCP_INPUT=input1.xml
+eval_test "libtool test, OpenCL sample" ./test/ocl/SimpleConvolution
+
+# Memcopies tracking
+unset ROCP_MCOPY_TRACKING
+# enable HSA intercepting
+export ROCP_HSA_INTERC=1
+
+export ROCP_KITER=10
+export ROCP_DITER=10
+export ROCP_INPUT=input1.xml
+eval_test "libtool test, counter sets" ./test/ctrl
+
+## OpenCL test
+export ROCP_OBJ_TRACKING=1
 eval_test "libtool test, OpenCL sample" ./test/ocl/SimpleConvolution
 
 #valgrind --leak-check=full $tbin

@@ -134,10 +134,16 @@ class InterceptQueue {
         const packet_t* packet = &packets_arr[j];
         const hsa_kernel_dispatch_packet_t* dispatch_packet =
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
+
+        uint64_t kernel_object = dispatch_packet->kernel_object;
+        const amd_kernel_code_t* kernel_code = GetKernelCode(kernel_object);
+        const char* kernel_name = (GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) ?
+          QueryKernelName(kernel_object, kernel_code) : NULL;
+
+        // Prepareing submit callback data
         rocprofiler_hsa_callback_data_t data{};
         data.submit.packet = (void*)packet;
-        data.submit.kernel_name =
-          (GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) ? GetKernelName(dispatch_packet) : NULL;
+        data.submit.kernel_name = kernel_name;
         data.submit.queue = obj->queue_;
         data.submit.device_type = obj->agent_info_->dev_type;
         data.submit.device_id = obj->agent_info_->dev_index;
@@ -167,16 +173,7 @@ class InterceptQueue {
         // Prepareing dispatch callback data
         uint64_t kernel_object = dispatch_packet->kernel_object;
         const amd_kernel_code_t* kernel_code = GetKernelCode(kernel_object);
-
-        const uint16_t kernel_object_flag = *((uint64_t*)kernel_code + 1);
-        if (kernel_object_flag == 0) {
-          if (!util::HsaRsrcFactory::IsExecutableTracking()) {
-            EXC_ABORT(HSA_STATUS_ERROR, "Error: V3 code object detected - code objects tracking should be enabled\n");
-          }
-        }
-        const char* kernel_name = (util::HsaRsrcFactory::IsExecutableTracking()) ?
-          util::HsaRsrcFactory::GetKernelName(kernel_object) :
-          GetKernelName(kernel_code->runtime_loader_kernel_symbol);
+        const char* kernel_name = QueryKernelName(kernel_object, kernel_code);
 
         rocprofiler_callback_data_t data = {obj->agent_info_->dev_id,
                                             obj->agent_info_->dev_index,
@@ -312,6 +309,20 @@ class InterceptQueue {
     if (funcname == NULL) funcname = strdup(kernel_none_);
 
     return funcname;
+  }
+
+  static const char* QueryKernelName(uint64_t kernel_object, const amd_kernel_code_t* kernel_code) {
+    const uint16_t kernel_object_flag = *((uint64_t*)kernel_code + 1);
+    if (kernel_object_flag == 0) {
+      if (!util::HsaRsrcFactory::IsExecutableTracking()) {
+        EXC_ABORT(HSA_STATUS_ERROR, "Error: V3 code object detected - code objects tracking should be enabled\n");
+      }
+    }
+    const char* kernel_name = (util::HsaRsrcFactory::IsExecutableTracking()) ?
+      util::HsaRsrcFactory::GetKernelName(kernel_object) :
+      GetKernelName(kernel_code->runtime_loader_kernel_symbol);
+
+    return kernel_name;
   }
 
   // method to get an intercept queue object

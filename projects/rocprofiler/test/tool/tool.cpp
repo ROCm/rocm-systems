@@ -964,6 +964,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   check_env_var("ROCP_MCOPY_TRACKING", settings->memcopy_tracking);
   // Set HSA intercepting
   check_env_var("ROCP_HSA_INTERC", settings->hsa_intercepting);
+  if (settings->hsa_intercepting) rocprofiler_set_hsa_callbacks(hsa_callbacks, (void*)14);
 
   is_trace_local = settings->trace_local;
 
