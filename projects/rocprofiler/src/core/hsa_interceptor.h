@@ -124,7 +124,6 @@ class HsaInterceptor {
     size_t size,
     void** ptr)
   {
-    EXC_ABORT(HSA_STATUS_ERROR, "Deprecated API");
     hsa_status_t status = HSA_STATUS_SUCCESS;
     HSA_RT(hsa_memory_allocate_fn(region, size, ptr));
     IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE) {
@@ -145,7 +144,6 @@ class HsaInterceptor {
     hsa_agent_t agent,
     hsa_access_permission_t access)
   {
-    EXC_ABORT(HSA_STATUS_ERROR, "Deprecated API");
     hsa_status_t status = HSA_STATUS_SUCCESS;
     HSA_RT(hsa_memory_assign_agent_fn(ptr, agent, access));
     IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_DEVICE) {
