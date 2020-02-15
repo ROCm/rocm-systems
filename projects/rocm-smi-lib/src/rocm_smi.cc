@@ -455,9 +455,12 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
     return errno_to_rsmi_status(ret);
   }
 
-  if (val_str == "") {
-    return RSMI_STATUS_NO_DATA;
+  if (!amd::smi::IsInteger(val_str)) {
+    std::cerr << "Expected integer value from monitor,"
+                                " but got \"" << val_str << "\"" << std::endl;
+    return RSMI_STATUS_UNEXPECTED_DATA;
   }
+
   *val = std::stoi(val_str);
 
   return RSMI_STATUS_SUCCESS;
@@ -481,13 +484,9 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
   }
 
   if (!amd::smi::IsInteger(val_str)) {
-    std::cerr << "Expected integer value, but got \"" << val_str << "\"" <<
-                                                                    std::endl;
-  }
-  assert(amd::smi::IsInteger(val_str));
-
-  if (val_str == "") {
-    return RSMI_STATUS_NO_DATA;
+    std::cerr << "Expected integer value from monitor,"
+                                " but got \"" << val_str << "\"" << std::endl;
+    return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   *val = std::stoul(val_str);
