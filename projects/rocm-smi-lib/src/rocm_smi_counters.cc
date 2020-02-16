@@ -368,7 +368,7 @@ amd::smi::evt::Event::stopCounter(void) {
   return 0;
 }
 
-static long
+static ssize_t
 readn(int fd, void *buf, size_t n) {
   ssize_t left = n;
   ssize_t bytes;

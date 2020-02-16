@@ -96,7 +96,8 @@ void TestIdInfoRead::Run(void) {
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     IF_VERB(STANDARD) {
-      std::cout << "\t**Device index: " << id << std::endl;
+      std::cout << "\t*************************" << std::endl;
+      std::cout << "\t**Device index: " << i << std::endl;
     }
 
     // Get the device ID, name, vendor ID and vendor name for the device

@@ -2301,7 +2301,7 @@ rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group_t group);
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[in] type the type of performance event to create
+ *  @param[in] type the ::rsmi_event_type_t of performance event to create
  *
  *  @param[inout] evnt_handle A pointer to a ::rsmi_event_handle_t which will be
  *  associated with a newly allocated counter
@@ -2448,24 +2448,64 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs, uint32_t *num_items);
 /**
  *  @brief Get process information about a specific process
  *
- *  @details Given a pointer to an ::rsmi_process_info_t @p proc and a process id
+ *  @details Given a pointer to an ::rsmi_process_info_t @p proc and a process
+ *  id
  *  @p pid, this function will write the process information for @p pid, if
  *  available, to the memory pointed to by @p proc.
  *
- *  @param[in] pid The process ID for which process information is being requested
+ *  @param[in] pid The process ID for which process information is being
+ *  requested
  *
  *  @param[inout] proc a pointer to a ::rsmi_process_info_t to which
  *  process information for @p pid will be written if it is found.
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
- *  @retval ::RSMI_STATUS_NOT_FOUND is returned if there was no process information
+ *  @retval ::RSMI_STATUS_NOT_FOUND is returned if there was no process
+ *  information
  *  found for the provided @p pid
  *
  */
 rsmi_status_t
 rsmi_compute_process_info_by_pid_get(uint32_t pid, rsmi_process_info_t *proc);
 
+/**
+ *  @brief Get the device indices currently being used by a process
+ *
+ *  @details Given a process id @p pid, a non-NULL pointer to an array of
+ *  uint32_t's @p dv_indices of length *@p num_devices, this function will
+ *  write up to @p num_devices device indices to the memory pointed to by
+ *  @p dv_indices. If @p dv_indices is not NULL, @p num_devices will be
+ *  updated with the number of gpu's currently being used by process @p pid.
+ *  If @p dv_indices is NULL, @p dv_indices will be updated with the number of
+ *  gpus currently being used by @p pid. Calling this function with @p
+ *  dv_indices being NULL is a way to determine how much memory is required
+ *  for when @p dv_indices is not NULL.
+ *
+ *  @param[in] pid The process id of the process for which the number of gpus
+ *  currently being used is requested
+ *
+ *  @param[inout] dv_indices a pointer to memory provided by the caller to
+ *  which indices of devices currently being used by the process will be
+ *  written. This may be NULL in which case only @p num_devices will be
+ *  updated with the number of devices being used.
+ *
+ *  @param[inout] num_devices A pointer to a uint32_t, which on input, should
+ *  contain the amount of memory in uint32_t's which have been provided by the
+ *  @p dv_indices argument. On output, if @p dv_indices is non-NULL, this will
+ *  be updated with the number uint32_t's actually written. If @p dv_indices is
+ *  NULL, this argument will be updated with the number devices being used.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if there were more
+ *  gpu indices that could have been written, but not enough space was
+ *  provided as indicated by @p dv_indices and @p num_devices, on input.
+ *
+ */
+rsmi_status_t
+rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
+                                                       uint32_t *num_devices);
 
 /** @} */  // end of SysInfo
 

@@ -51,7 +51,10 @@
 #include <set>
 #include <string>
 #include <cstdint>
+#include <unordered_map>
+#include <map>
 
+#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_power_mon.h"
@@ -71,7 +74,7 @@ class RocmSMI {
 
     static std::vector<std::shared_ptr<amd::smi::Device>>&
                                   monitor_devices() {return s_monitor_devices;}
-    uint32_t DiscoverDevices(void);
+    uint32_t DiscoverAmdgpuDevices(void);
     uint32_t DiscoverAMDPowerMonitors(bool force_update = false);
 
     // Will execute "func" for every Device object known about, or until func
@@ -84,17 +87,21 @@ class RocmSMI {
 
     uint32_t euid() const {return euid_;}
 
+    std::map<uint64_t, std::shared_ptr<KFDNode>> & kfd_node_map(void) {
+      return kfd_node_map_;}
+
  private:
     std::vector<std::shared_ptr<Device>> devices_;
+    std::map<uint64_t, std::shared_ptr<KFDNode>> kfd_node_map_;
     std::vector<std::shared_ptr<Monitor>> monitors_;
     std::vector<std::shared_ptr<PowerMon>> power_mons_;
-
     std::set<std::string> amd_monitor_types_;
     void AddToDeviceList(std::string dev_name);
     void GetEnvVariables(void);
     uint32_t DiscoverAMDMonitors(void);
 
     static std::vector<std::shared_ptr<amd::smi::Device>> s_monitor_devices;
+
     RocmSMI_env_vars env_vars_;
     uint64_t init_options_;
     uint32_t euid_;

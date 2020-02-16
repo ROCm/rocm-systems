@@ -303,6 +303,7 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
   std::string::size_type pos = fn_reg_ex.find('#');
 
   if (pos == std::string::npos) {
+    closedir(hwmon_dir);
     return -1;
   }
   fn_reg_ex.erase(pos, 1);
@@ -326,11 +327,15 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
       assert(errno == 0);
       assert(*endptr == '\0');
       if (errno) {
+        closedir(hwmon_dir);
         return -2;
       }
       sensors->push_back(mon_val);
     }
     dentry = readdir(hwmon_dir);
+  }
+  if (closedir(hwmon_dir)) {
+    return errno;
   }
   return 0;
 }

@@ -53,6 +53,7 @@
 #include <bitset>
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 #include <map>
 #include <fstream>
 #include <iostream>
@@ -107,6 +108,16 @@ static rsmi_status_t handleException() {
   CHECK_DV_IND_RANGE \
   std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind]; \
   assert(dev != nullptr);
+
+
+#define GET_DEV_AND_KFDNODE_FROM_INDX \
+  GET_DEV_FROM_INDX \
+  std::shared_ptr<amd::smi::KFDNode> kfd_node; \
+  if (smi.kfd_node_map().find(dev->kfd_gpu_id()) == \
+                                                 smi.kfd_node_map().end()) { \
+    return RSMI_INITIALIZATION_ERROR; \
+  } \
+  kfd_node = smi.kfd_node_map()[dev->kfd_gpu_id()];
 
 #define REQUIRE_ROOT_ACCESS \
     if (amd::smi::RocmSMI::getInstance().euid()) { \
@@ -168,6 +179,7 @@ static rsmi_status_t errno_to_rsmi_status(uint32_t err) {
     case EISDIR: return RSMI_STATUS_FILE_ERROR;
     case EINTR:  return RSMI_STATUS_INTERRUPT;
     case EIO:    return RSMI_STATUS_UNEXPECTED_SIZE;
+    case ENXIO:  return RSMI_STATUS_UNEXPECTED_DATA;
     default:     return RSMI_STATUS_UNKNOWN_ERROR;
   }
 }
@@ -208,7 +220,6 @@ static uint64_t get_multiplier_from_str(char units_char) {
  */
 static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
                                 bool *is_curr, uint32_t lanes[], uint32_t i) {
-
   assert(i < freq_lines.size());
   if (i >= freq_lines.size()) {
     throw amd::smi::rsmi_exception(RSMI_STATUS_INPUT_OUT_OF_BOUNDS,
@@ -696,26 +707,15 @@ rsmi_status_t
 rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
   TRY
 
-  CHK_SUPPORT_NAME_ONLY(bdfid)
+  GET_DEV_AND_KFDNODE_FROM_INDX
+  CHK_API_SUPPORT_ONLY(bdfid, RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
   DEVICE_MUTEX
 
   *bdfid = dev->bdfid();
 
-  int32_t ret = dev->populateKFDNodeProperties();
-
-  if (ret) {
-    return errno_to_rsmi_status(errno);
-  }
-
   uint64_t domain = 0;
 
-  ret = dev->getKFDNodeProperty(amd::smi::kDevKFDNodePropDomain, &domain);
-
-  if (ret == EINVAL) {
-    // "domain" is not found in properties file; just go with the 16 bit
-    // domain already found
-    return RSMI_STATUS_SUCCESS;
-  }
+  kfd_node->get_property_value("domain", &domain);
 
   // Replace the 16 bit domain originally set like this:
   // BDFID = ((<DOMAIN> & 0xffff) << 32) | ((<BUS> & 0xff) << 8) |
@@ -2329,13 +2329,28 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
                              " the call";
       break;
 
+    case RSMI_STATUS_INTERRUPT:
+      *status_string = "An interrupt occurred while executing the function";
+      break;
+
+    case RSMI_STATUS_UNEXPECTED_SIZE:
+      *status_string = "Data (usually from reading a file) was out of"
+                                              " range from what was expected";
+      break;
+
+    case RSMI_STATUS_NO_DATA:
+      *status_string = "No data was found (usually from reading a file) "
+                                                    "where data was expected";
+      break;
+
+    case RSMI_STATUS_UNEXPECTED_DATA:
+      *status_string = "Data (usually from reading a file) was not of the "
+                                                     "type that was expected";
+      break;
+
     case RSMI_STATUS_UNKNOWN_ERROR:
       *status_string = "An unknown error prevented the call from completing"
                           " successfully";
-      break;
-
-    case RSMI_STATUS_INTERRUPT:
-      *status_string = "An interrupt occurred while executing the function";
       break;
 
     default:
@@ -2689,6 +2704,49 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs,
   }
   if (procs == nullptr || *num_items > procs_found) {
     *num_items = procs_found;
+  }
+
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
+                                                      uint32_t *num_devices) {
+  TRY
+
+  if (num_devices == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::unordered_set<uint64_t> gpu_set;
+  int err = amd::smi::GetProcessGPUs(pid, &gpu_set);
+
+  if (err) {
+    return errno_to_rsmi_status(err);
+  }
+
+  uint32_t i = 0;
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+
+  if (dv_indices != nullptr) {
+    for (auto it = gpu_set.begin(); i < *num_devices && it != gpu_set.end();
+                                                                  ++it, ++i) {
+      uint64_t gpu_id_val = (*it);
+      dv_indices[i] = smi.kfd_node_map()[gpu_id_val]->amdgpu_dev_index();
+    }
+  }
+
+  if (dv_indices && *num_devices < gpu_set.size()) {
+    // In this case, *num_devices should already hold the number of items
+    // written to dv_devices. We just have to let the caller know there's more.
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+
+  *num_devices = static_cast<uint32_t>(gpu_set.size());
+  if (gpu_set.size() > smi.monitor_devices().size()) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
   }
 
   return RSMI_STATUS_SUCCESS;

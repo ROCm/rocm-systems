@@ -178,11 +178,9 @@ class Device {
     int readDevInfo(DevInfoTypes type, std::vector<std::string> *retVec);
     int writeDevInfo(DevInfoTypes type, uint64_t val);
     int writeDevInfo(DevInfoTypes type, std::string val);
-    int populateKFDNodeProperties(bool force_update = false);
-    int getKFDNodeProperty(DevKFDNodePropTypes prop, uint64_t *val);
 
-    uint32_t index(void) const {return index_;}
-    void set_index(uint32_t index) {index_ = index;}
+    uint32_t index(void) const {return card_indx_;}
+    void set_card_index(uint32_t index) {card_indx_ = index;}
     uint32_t drm_render_minor(void) const {return drm_render_minor_;}
     void set_drm_render_minor(uint32_t minor) {drm_render_minor_ = minor;}
     static rsmi_dev_perf_level perfLvlStrToEnum(std::string s);
@@ -192,6 +190,8 @@ class Device {
     evt::dev_evt_grp_set_t* supported_event_groups(void) {
                                              return &supported_event_groups_;}
     SupportedFuncMap *supported_funcs(void) {return &supported_funcs_;}
+    uint64_t kfd_gpu_id(void) const {return kfd_gpu_id_;}
+    void set_kfd_gpu_id(uint64_t id) {kfd_gpu_id_ = id;}
     void fillSupportedFuncs(void);
     void DumpSupportedFunctions(void);
     bool DeviceAPISupported(std::string name, uint64_t variant,
@@ -202,20 +202,20 @@ class Device {
     std::shared_ptr<PowerMon> power_monitor_;
     std::string path_;
     shared_mutex_t mutex_;
-    uint32_t index_;
+    uint32_t card_indx_;  // This index corresponds to the drm index (ie, card#)
     uint32_t drm_render_minor_;
     const RocmSMI_env_vars *env_;
     template <typename T> int openSysfsFileStream(DevInfoTypes type, T *fs,
                                                    const char *str = nullptr);
-
     int readDevInfoStr(DevInfoTypes type, std::string *retStr);
     int readDevInfoMultiLineStr(DevInfoTypes type,
                                             std::vector<std::string> *retVec);
     int writeDevInfoStr(DevInfoTypes type, std::string valStr);
     uint64_t bdfid_;
+    uint64_t kfd_gpu_id_;
     std::unordered_set<rsmi_event_group_t,
                        evt::RSMIEventGrpHashFunction> supported_event_groups_;
-    std::map<std::string, uint64_t> kfdNodePropMap_;
+    // std::map<std::string, uint64_t> kfdNodePropMap_;
     SupportedFuncMap supported_funcs_;
 };
 

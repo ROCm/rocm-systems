@@ -98,6 +98,10 @@ void TestProcInfoRead::Run(void) {
 
   TestBase::Run();
 
+  uint32_t num_devices;
+  err = rsmi_num_monitor_devices(&num_devices);
+  CHK_ERR_ASRT(err)
+
   err = rsmi_compute_process_info_get(nullptr, &num_proc_found);
   if (err != RSMI_STATUS_SUCCESS) {
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
@@ -119,6 +123,7 @@ void TestProcInfoRead::Run(void) {
   if (num_proc_found == 0) {
     return;
   }
+
   procs = new rsmi_process_info_t[num_proc_found];
 
   val_ui32 = num_proc_found;
@@ -150,8 +155,32 @@ void TestProcInfoRead::Run(void) {
   // Reset to the number we actually read
   num_proc_found = val_ui32;
   if (num_proc_found) {
-    rsmi_process_info_t proc_info;
+    // Allocate the max we expect to get
+    uint32_t *dev_inds = new uint32_t[num_devices];
+    uint32_t amt_allocd = num_devices;
 
+    for (uint32_t j = 0; j < num_proc_found; j++) {
+      err = rsmi_compute_process_gpus_get(procs[j].process_id, dev_inds,
+                                                                 &amt_allocd);
+      CHK_ERR_ASRT(err)
+      ASSERT_LE(amt_allocd, num_devices);
+
+      std::cout << "\t**Process " << procs[j].process_id <<
+                                           " is using devices with indices: ";
+      uint32_t i;
+      if (amt_allocd > 0) {
+        for (i = 0; i < amt_allocd - 1; ++i) {
+          std::cout << dev_inds[i] << ", ";
+        }
+        std::cout << dev_inds[i] << std::endl;
+      }
+      // Reset amt_allocd back to the amount acutally allocated
+      amt_allocd = num_devices;
+    }
+
+    delete []dev_inds;
+
+    rsmi_process_info_t proc_info;
     err = rsmi_compute_process_info_by_pid_get(procs[0].process_id,
                                                                   &proc_info);
     if (err == RSMI_STATUS_NOT_FOUND) {

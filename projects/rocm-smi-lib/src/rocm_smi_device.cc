@@ -777,53 +777,6 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
   return 0;
 }
 
-int Device::populateKFDNodeProperties(bool force_update) {
-  int ret;
-
-  std::vector<std::string> propVec;
-
-  if (kfdNodePropMap_.size() > 0 && !force_update) {
-    return 0;
-  }
-
-  ret = ReadKFDDeviceProperties(index_, &propVec);
-
-  if (ret) {
-    return ret;
-  }
-
-  std::string key_str;
-  // std::string val_str;
-  uint64_t val_int;  // Assume all properties are unsigned integers for now
-  std::istringstream fs;
-
-  for (uint32_t i = 0; i < propVec.size(); ++i) {
-    fs.str(propVec[i]);
-    fs >> key_str;
-    fs >> val_int;
-
-    kfdNodePropMap_[key_str] = val_int;
-
-    fs.str("");
-    fs.clear();
-  }
-
-  return 0;
-}
-
-int Device::getKFDNodeProperty(DevKFDNodePropTypes prop, uint64_t *val) {
-  assert(val != nullptr);
-  assert(kDevKFDPropNameMap.find(prop) != kDevKFDPropNameMap.end());
-
-  const char *prop_name = kDevKFDPropNameMap.at(prop);
-  if (kfdNodePropMap_.find(prop_name) == kfdNodePropMap_.end()) {
-    return EINVAL;
-  }
-
-  *val = kfdNodePropMap_.at(prop_name);
-  return 0;
-}
-
 void Device::DumpSupportedFunctions(void) {
   SupportedFuncMapIt func_iter = supported_funcs_.begin();
 
