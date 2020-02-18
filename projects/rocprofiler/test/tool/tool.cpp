@@ -483,7 +483,7 @@ bool dump_context_entry(context_entry_t* entry) {
     entry->data.thread_id,
     entry->kernel_properties.grid_size,
     entry->kernel_properties.workgroup_size,
-    (entry->kernel_properties.lds_size * (128 * 4)),
+    entry->kernel_properties.lds_size * AgentInfo::lds_block_size,
     entry->kernel_properties.scratch_size,
     (entry->kernel_properties.vgpr_count + 1) * agent_info->vgpr_block_size,
     (entry->kernel_properties.sgpr_count + agent_info->sgpr_block_dflt) * agent_info->sgpr_block_size,
