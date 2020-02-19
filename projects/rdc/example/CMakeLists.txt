@@ -76,6 +76,16 @@ add_executable(${JOBSTATS_EXAMPLE_EXE} "${JOBSTATS_EXAMPLE_SRC_LIST}")
 
 target_link_libraries(${JOBSTATS_EXAMPLE_EXE} pthread dl rdc_bootstrap)
 
+set(FIELDVALUE_EXAMPLE_SRC_LIST "${SRC_DIR}/field_value_example.cc")
+message("FIELDVALUE_EXAMPLE_SRC_LIST=${FIELDVALUE_EXAMPLE_SRC_LIST}")
+set(FIELDVALUE_EXAMPLE_EXE "fieldvalue")
+
+link_directories(${LIB_BOOSTRAP_DIR})
+
+add_executable(${FIELDVALUE_EXAMPLE_EXE} "${FIELDVALUE_EXAMPLE_SRC_LIST}")
+
+target_link_libraries(${FIELDVALUE_EXAMPLE_EXE} pthread dl rdc_bootstrap)
+
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Example                          ")

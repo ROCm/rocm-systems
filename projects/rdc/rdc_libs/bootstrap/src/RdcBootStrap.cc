@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <dlfcn.h>
+#include <string.h>
+#include <map>
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcHandler.h"
 #include "rdc_lib/rdc_common.h"
@@ -117,19 +119,6 @@ rdc_status_t rdc_stop_embedded(rdc_handle_t p_rdc_handle) {
         return RDC_ST_OK;
 }
 
-
-rdc_status_t rdc_watch_job_fields(rdc_handle_t p_rdc_handle,
-        rdc_gpu_group_t group_id,  uint64_t update_freq, double  max_keep_age,
-        uint32_t max_keep_samples) {
-        if (!p_rdc_handle) {
-                return RDC_ST_INVALID_HANDLER;
-        }
-
-        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
-              rdc_watch_job_fields(group_id, update_freq,
-                                max_keep_age, max_keep_samples);
-}
-
 rdc_status_t rdc_update_all_fields(rdc_handle_t p_rdc_handle,
         uint32_t wait_for_update) {
         if (!p_rdc_handle) {
@@ -151,13 +140,15 @@ rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, char  job_id[64] ,
 }
 
 rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle,
-                rdc_gpu_group_t groupId, char  job_id[64] ) {
+                rdc_gpu_group_t groupId, char  job_id[64], uint64_t update_freq,
+                double  max_keep_age, uint32_t  max_keep_samples ) {
         if (!p_rdc_handle) {
                 return RDC_ST_INVALID_HANDLER;
         }
 
         return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
-                rdc_job_start_stats(groupId, job_id);
+                rdc_job_start_stats(groupId, job_id, update_freq,
+                                max_keep_age, max_keep_samples);
 }
 
 
@@ -191,6 +182,124 @@ rdc_status_t rdc_group_gpu_add(rdc_handle_t p_rdc_handle,
                 rdc_group_gpu_add(groupId, gpuIndex);
 }
 
+rdc_status_t rdc_get_all_devices(rdc_handle_t p_rdc_handle,
+            uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count) {
+        if (!p_rdc_handle || !count) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+                rdc_get_all_devices(gpu_index_list, count);
+}
+
+rdc_status_t rdc_get_device_attributes(rdc_handle_t p_rdc_handle,
+            uint32_t gpu_index, rdc_device_attributes_t* p_rdc_attr) {
+        if (!p_rdc_handle || !p_rdc_attr) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+                rdc_get_device_attributes(gpu_index, p_rdc_attr);
+}
+
+rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle,
+            uint32_t num_field_ids, uint32_t* field_ids,
+            const char* field_group_name, rdc_field_grp_t* rdc_field_group_id) {
+        if (!p_rdc_handle || !field_ids ||
+                !field_group_name || !rdc_field_group_id) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+                rdc_group_field_create(num_field_ids, field_ids,
+                field_group_name, rdc_field_group_id);
+}
+
+rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle,
+            rdc_field_grp_t rdc_field_group_id,
+            rdc_field_group_info_t* field_group_info) {
+        if (!p_rdc_handle) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+                rdc_group_field_get_info(rdc_field_group_id, field_group_info);
+}
+
+rdc_status_t rdc_group_gpu_get_info(rdc_handle_t p_rdc_handle,
+        rdc_gpu_group_t p_rdc_group_id, rdc_group_info_t* p_rdc_group_info) {
+        if (!p_rdc_handle || !p_rdc_group_info) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+                rdc_group_gpu_get_info(p_rdc_group_id, p_rdc_group_info);
+}
+
+rdc_status_t rdc_watch_fields(rdc_handle_t p_rdc_handle,
+        rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id,
+        uint64_t update_freq, double max_keep_age, uint32_t max_keep_samples) {
+        if (!p_rdc_handle) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+              rdc_watch_fields(group_id, field_group_id, update_freq,
+              max_keep_age, max_keep_samples);
+}
+
+rdc_status_t rdc_get_latest_value_for_field(rdc_handle_t p_rdc_handle,
+        uint32_t gpu_index, uint32_t field, rdc_field_value* value) {
+        if (!p_rdc_handle || !value) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+                rdc_get_latest_value_for_field(gpu_index, field, value);
+}
+
+rdc_status_t rdc_get_field_value_since(rdc_handle_t p_rdc_handle,
+        uint32_t gpu_index, uint32_t field, uint64_t since_time_stamp,
+        uint64_t *next_since_time_stamp, rdc_field_value* value) {
+        if (!p_rdc_handle || !next_since_time_stamp || !value) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+                rdc_get_field_value_since(gpu_index, field, since_time_stamp,
+                next_since_time_stamp, value);
+}
+
+rdc_status_t rdc_unwatch_fields(rdc_handle_t p_rdc_handle,
+        rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id) {
+        if (!p_rdc_handle) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+              rdc_unwatch_fields(group_id, field_group_id);
+}
+
+rdc_status_t rdc_group_gpu_destroy(rdc_handle_t p_rdc_handle,
+        rdc_gpu_group_t p_rdc_group_id) {
+        if (!p_rdc_handle) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+              rdc_group_gpu_destroy(p_rdc_group_id);
+}
+
+rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle,
+        rdc_field_grp_t rdc_field_group_id) {
+        if (!p_rdc_handle) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+              rdc_group_field_destroy(rdc_field_group_id);
+}
+
 const char* rdc_status_string(rdc_status_t result) {
     switch (result) {
         case RDC_ST_OK:
@@ -201,8 +310,44 @@ const char* rdc_status_string(rdc_status_t result) {
                 return "Fail to load module";
         case RDC_ST_INVALID_HANDLER:
                 return "Invalid handler";
+        case RDC_ST_NOT_FOUND:
+                return "Cannot find the value";
+        case RDC_ST_BAD_PARAMETER:
+                return "Invalid parameters";
+        case RDC_ST_MSI_ERROR:
+                return "SMI error";
+        case RDC_ST_MAX_LIMIT:
+                return "The max limit reached";
         default:
                 return "Unknown";
     }
 }
 
+const char* field_id_string(uint32_t field_id) {
+       const std::map<uint16_t, const char*> id_name = {
+        {RDC_FI_GPU_MEMORY_USAGE, "GPU_MEMORY_USAGE"},
+        {RDC_FI_GPU_MEMORY_TOTAL, "GPU_MEMORY_TOTAL"},
+        {RDC_FI_POWER_USAGE, "POWER_USAGE"},
+        {RDC_FI_GPU_SM_CLOCK, "GPU_SM_CLOCK"},
+        {RDC_FI_GPU_UTIL, "GPU_UTIL"},
+        {RDC_FI_GPU_TEMP, "GPU_TEMP"},
+        {RDC_FI_GPU_COUNT, "GPU_COUNT"},
+        {RDC_FI_DEV_NAME, "DEV_NAME"}
+      };
+
+      auto search = id_name.find(field_id);
+      if (search == id_name.end()) {
+          return "UNKNOWN_FIELD";
+      }
+
+      return search->second;
+}
+
+char *strncpy_with_null(char *dest, const char *src, size_t n) {
+     if (n == 0) {
+        return dest;
+     }
+     strncpy(dest, src, n - 1);
+     dest[n - 1]= '\0';
+     return dest;
+}

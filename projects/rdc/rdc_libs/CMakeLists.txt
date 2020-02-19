@@ -137,8 +137,15 @@ set_property(TARGET ${BOOTSTRAP_LIB} PROPERTY
 # librdc.so set up
 set(RDC_LIB "rdc")
 set(RDC_LIB_COMPONENT "lib${RDC_LIB}")
-set(RDC_LIB_SRC_LIST "${SRC_DIR}/rdc/src/RdcEmbeddedHandler.cc")
-set(RDC_LIB_INC_LIST "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcEmbeddedHandler.h")
+set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcEmbeddedHandler.cc")
+set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcMetricFetcherImpl.cc")
+set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcGroupSettingsImpl.cc")
+
+set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcEmbeddedHandler.h")
+set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcMetricFetcher.h")
+set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcMetricFetcherImpl.h")
+set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcGroupSettings.h")
+set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcGroupSettingsImpl.h")
 message("RDC_LIB_INC_LIST=${RDC_LIB_INC_LIST}")
 
 link_directories(${RSMI_LIB_DIR})

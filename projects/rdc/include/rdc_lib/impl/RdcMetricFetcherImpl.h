@@ -19,33 +19,21 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#ifndef RDC_LIB_IMPL_RDCMETRICFETCHERIMPL_H_
+#define RDC_LIB_IMPL_RDCMETRICFETCHERIMPL_H_
 
-#ifndef RDC_LIB_RDC_COMMON_H_
-#define RDC_LIB_RDC_COMMON_H_
-#include <iostream>
+#include "rdc_lib/RdcMetricFetcher.h"
 
+namespace amd {
+namespace rdc {
 
-#ifdef DEBUG
-#define LOG_DEBUG(message) std::cout << message << std::endl
-#else
-#define LOG_DEBUG(message)
-#endif
+class RdcMetricFetcherImpl: public RdcMetricFetcher {
+ public:
+    rdc_status_t fetch_smi_field(uint32_t gpu_index,
+        uint32_t field_id, rdc_field_value* value) override;
+};
 
-/**
- *  @brief The strncpy but with null terminated
- *
- *  @details It will copy at most n-1 bytes from src to dst, and
- *  always adds a null terminator following the bytes copied to dst.
- *
- *  @param[out] dest The destination string to copy
- *
- *  @param[in] src The source string to be copied
- *
- *  @param[in] n At most n-1 bytes will be copied
- *
- *  @retval Return a pointer to the destination string.
- */
-char *strncpy_with_null(char *dest, const char *src, size_t n);
+}  // namespace rdc
+}  // namespace amd
 
-
-#endif  // RDC_LIB_RDC_COMMON_H_
+#endif  // RDC_LIB_IMPL_RDCMETRICFETCHERIMPL_H_

@@ -94,15 +94,8 @@ int main(int, char **) {
     // (2) start the recording. Set the sample frequency to once per second, the
     // max keep age to one hour and the maximum number of samples to
     // keep to unlimited.
-    result = rdc_watch_job_fields(rdc_handle, group_id, 1000000, 3600, 0);
-    if (result != RDC_ST_OK) {
-        std::cout << "Error watch job fileds. Return: "
-            << rdc_status_string(result);
-        goto cleanup;
-    }
-
-    // (3) Start a Slurm job on this group
-    result = rdc_job_start_stats(rdc_handle, group_id, job_id);
+    result = rdc_job_start_stats(rdc_handle, group_id,
+        job_id, 1000000, 3600, 0);
     if (result != RDC_ST_OK) {
         std::cout << "Error start job stats. Return: "
             << rdc_status_string(result);
@@ -126,7 +119,7 @@ int main(int, char **) {
         usleep(5000000);  // sleep 5 seconds before fetch the stats
     }
 
-    // (4) stop the Slurm job, which will stop the watch
+    // (3) stop the Slurm job, which will stop the watch
     // We do not have to stop the job to get stats. The rdc_job_get_stats can be
     // called at any time before stop
     result = rdc_job_stop_stats(rdc_handle, job_id);
@@ -136,7 +129,7 @@ int main(int, char **) {
         goto cleanup;
     }
 
-    // (5) Get the stats
+    // (4) Get the stats
     rdc_job_info_t job_info;
     result = rdc_job_get_stats(rdc_handle, job_id, &job_info);
 
@@ -178,7 +171,7 @@ int main(int, char **) {
         std::cout << "No data for job stats found." << std::endl;
     }
 
-    // Cleanup consists of shutting down DCGM.
+    // Cleanup consists of shutting down RDC.
     cleanup:
     std::cout << "Cleaning up.\n";
     if (standalone)
