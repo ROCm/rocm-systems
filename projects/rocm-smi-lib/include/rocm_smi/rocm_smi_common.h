@@ -51,7 +51,7 @@
 #include <string>
 
 #define DBG_FILE_ERROR(FN, WR_STR) \
-  if (env_->debug_output_bitfield & RSMI_DEBUG_SYSFS_FILE_PATHS) { \
+  if (env_ && env_->debug_output_bitfield & RSMI_DEBUG_SYSFS_FILE_PATHS) { \
     std::cout << "*****" << __FUNCTION__ << std::endl; \
     std::cout << "*****Opening file: " << (FN) << std::endl; \
     if ((WR_STR) != nullptr) { \
