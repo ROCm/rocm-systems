@@ -295,20 +295,15 @@ class InterceptQueue {
   static const char* GetKernelName(const uint64_t kernel_symbol) {
     amd_runtime_loader_debug_info_t* dbg_info =
         reinterpret_cast<amd_runtime_loader_debug_info_t*>(kernel_symbol);
-    const char* kernel_name = (dbg_info != NULL) ? dbg_info->kernel_name : NULL;
+    return (dbg_info != NULL) ? dbg_info->kernel_name : NULL;
+  }
 
-    // Kernel name is mangled name
-    // apply __cxa_demangle() to demangle it
-    const char* funcname = NULL;
-    if (kernel_name != NULL) {
-      size_t funcnamesize = 0;
-      int status;
-      const char* ret = abi::__cxa_demangle(kernel_name, NULL, &funcnamesize, &status);
-      funcname = (ret != 0) ? ret : strdup(kernel_name);
-    }
-    if (funcname == NULL) funcname = strdup(kernel_none_);
-
-    return funcname;
+  // Demangle C++ symbol name
+  static const char* cpp_demangle(const char* symname) {
+    size_t size = 0;
+    int status;
+    const char* ret = abi::__cxa_demangle(symname, NULL, &size, &status);
+    return (ret != 0) ? ret : strdup(symname);
   }
 
   static const char* QueryKernelName(uint64_t kernel_object, const amd_kernel_code_t* kernel_code) {
@@ -318,11 +313,10 @@ class InterceptQueue {
         EXC_ABORT(HSA_STATUS_ERROR, "Error: V3 code object detected - code objects tracking should be enabled\n");
       }
     }
-    const char* kernel_name = (util::HsaRsrcFactory::IsExecutableTracking()) ?
-      util::HsaRsrcFactory::GetKernelName(kernel_object) :
+    const char* kernel_symname = (util::HsaRsrcFactory::IsExecutableTracking()) ?
+      util::HsaRsrcFactory::GetKernelNameRef(kernel_object) :
       GetKernelName(kernel_code->runtime_loader_kernel_symbol);
-
-    return kernel_name;
+    return cpp_demangle(kernel_symname);
   }
 
   // method to get an intercept queue object

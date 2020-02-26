@@ -69,6 +69,9 @@ class SQLiteDB:
     cursor.execute('ALTER TABLE %s ADD COLUMN "%s" %s' % (table_name, data_label, data_type))
     cursor.execute('UPDATE %s SET %s = (%s);' % (table_name, data_label, data_expr))
 
+  def change_rec_name(self, table_name, rec_id, rec_name):
+    self.connection.execute('UPDATE ' + table_name + ' SET Name = ? WHERE "Index" = ?', (rec_name, rec_id))
+
   # populate DB table entry
   def insert_entry(self, table, val_list):
     (cursor, stm) = table
@@ -98,8 +101,8 @@ class SQLiteDB:
   def _get_raws_indexed(self, table_name):
     cursor = self.connection.execute('SELECT * FROM ' + table_name + ' order by "Index" asc;')
     return cursor.fetchall()
-  def _get_raw_by_id(self, table_name, req_id):
-    cursor = self.connection.execute('SELECT * FROM ' + table_name + ' WHERE "Index"=?', (req_id,))
+  def _get_raw_by_id(self, table_name, rec_id):
+    cursor = self.connection.execute('SELECT * FROM ' + table_name + ' WHERE "Index"=?', (rec_id,))
     raws = cursor.fetchall()
     if len(raws) != 1:
       raise Exception('Index is not unique, table "' + table_name + '"')

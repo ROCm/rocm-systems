@@ -394,7 +394,7 @@ class HsaRsrcFactory {
   // Enable executables loading tracking
   static bool IsExecutableTracking() { return executable_tracking_on_; }
   static void EnableExecutableTracking(HsaApiTable* table);
-  static const char* GetKernelName(uint64_t addr);
+  static const char* GetKernelNameRef(uint64_t addr);
 
   // Initialize HSA API table
   void static InitHsaApiTable(HsaApiTable* table);
