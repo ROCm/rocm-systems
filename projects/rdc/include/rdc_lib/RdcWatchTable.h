@@ -19,10 +19,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_RDCMETRICFETCHER_H_
-#define RDC_LIB_RDCMETRICFETCHER_H_
+#ifndef RDC_LIB_RDCWATCHTABLE_H_
+#define RDC_LIB_RDCWATCHTABLE_H_
 
 #include <memory>
+#include <vector>
 #include "rdc_lib/rdc_common.h"
 #include "rdc/rdc.h"
 
@@ -30,17 +31,28 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-class  RdcMetricFetcher {
+class RdcWatchTable {
  public:
-    virtual rdc_status_t fetch_smi_field(uint32_t gpu_index,
-                 uint32_t field_id, rdc_field_value* value) = 0;
-    virtual bool is_field_valid(uint32_t field_id) const = 0;
-    virtual ~RdcMetricFetcher() {}
+    virtual rdc_status_t rdc_update_all_fields() = 0;
+
+    virtual rdc_status_t rdc_job_start_stats(rdc_gpu_group_t group_id,
+                char  job_id[64]) = 0;
+    virtual rdc_status_t rdc_watch_job_fields(rdc_gpu_group_t group_id,
+                uint64_t update_freq, double  max_keep_age,
+                uint32_t max_keep_samples) = 0;
+
+    virtual rdc_status_t rdc_watch_fields(rdc_gpu_group_t group_id,
+                rdc_field_grp_t field_group_id, uint64_t update_freq,
+                double  max_keep_age, uint32_t max_keep_samples) = 0;
+    virtual rdc_status_t rdc_unwatch_fields(rdc_gpu_group_t group_id,
+                rdc_field_grp_t field_group_id) = 0;
+
+    virtual ~RdcWatchTable() {}
 };
 
-typedef std::shared_ptr<RdcMetricFetcher> RdcMetricFetcherPtr;
+typedef std::shared_ptr<RdcWatchTable> RdcWatchTablePtr;
 
 }  // namespace rdc
 }  // namespace amd
 
-#endif  // RDC_LIB_RDCMETRICFETCHER_H_
+#endif  // RDC_LIB_RDCWATCHTABLE_H_

@@ -19,28 +19,41 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_RDCMETRICFETCHER_H_
-#define RDC_LIB_RDCMETRICFETCHER_H_
+#ifndef RDC_LIB_RDCCACHEMANAGER_H_
+#define RDC_LIB_RDCCACHEMANAGER_H_
 
 #include <memory>
+#include <utility>
+#include <vector>
+#include <map>
 #include "rdc_lib/rdc_common.h"
 #include "rdc/rdc.h"
-
 
 namespace amd {
 namespace rdc {
 
-class  RdcMetricFetcher {
+class RdcCacheManager {
  public:
-    virtual rdc_status_t fetch_smi_field(uint32_t gpu_index,
-                 uint32_t field_id, rdc_field_value* value) = 0;
-    virtual bool is_field_valid(uint32_t field_id) const = 0;
-    virtual ~RdcMetricFetcher() {}
+    virtual rdc_status_t rdc_get_latest_value_for_field(uint32_t gpu_index,
+                uint32_t field, rdc_field_value* value) = 0;
+    virtual rdc_status_t rdc_get_field_value_since(uint32_t gpu_index,
+                uint32_t field, uint64_t since_time_stamp,
+                uint64_t *next_since_time_stamp, rdc_field_value* value) = 0;
+    virtual rdc_status_t rdc_update_cache(uint32_t gpu_index,
+                const rdc_field_value& value) = 0;
+    virtual rdc_status_t evict_cache(uint32_t gpu_index, uint32_t field_id,
+                uint64_t max_keep_samples, double  max_keep_age) = 0;
+    virtual uint32_t  get_cache_size() = 0;
+
+    virtual ~RdcCacheManager() {}
 };
 
-typedef std::shared_ptr<RdcMetricFetcher> RdcMetricFetcherPtr;
+typedef std::shared_ptr<RdcCacheManager> RdcCacheManagerPtr;
+
+//<! The key to identify the field with <gpu_id, field_id>
+typedef std::pair<uint32_t, uint32_t> RdcFieldKey;
 
 }  // namespace rdc
 }  // namespace amd
 
-#endif  // RDC_LIB_RDCMETRICFETCHER_H_
+#endif  // RDC_LIB_RDCCACHEMANAGER_H_

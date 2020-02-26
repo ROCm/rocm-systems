@@ -25,6 +25,9 @@ THE SOFTWARE.
 #include "rdc_lib/RdcHandler.h"
 #include "rdc_lib/RdcGroupSettings.h"
 #include "rdc_lib/RdcMetricFetcher.h"
+#include "rdc_lib/RdcCacheManager.h"
+#include "rdc_lib/RdcMetricsUpdater.h"
+#include "rdc_lib/RdcWatchTable.h"
 
 namespace amd {
 namespace rdc {
@@ -80,10 +83,14 @@ class RdcEmbeddedHandler: public RdcHandler {
     rdc_status_t rdc_update_all_fields(uint32_t wait_for_update) override;
 
     explicit RdcEmbeddedHandler(rdc_operation_mode_t op_mode);
+    ~RdcEmbeddedHandler();
 
  private:
     RdcGroupSettingsPtr group_settings_;
+    RdcCacheManagerPtr cache_mgr_;
     RdcMetricFetcherPtr metric_fetcher_;
+    RdcWatchTablePtr watch_table_;
+    RdcMetricsUpdaterPtr metrics_updater_;
 };
 
 }  // namespace rdc

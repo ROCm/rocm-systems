@@ -61,7 +61,6 @@ class RdcGroupSettingsImpl: public RdcGroupSettings {
     uint32_t cur_filed_group_id_ = 0;
     std::mutex group_mutex_;
     std::mutex field_group_mutex_;
-
 };
 
 }  // namespace rdc

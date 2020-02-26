@@ -19,28 +19,24 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_RDCMETRICFETCHER_H_
-#define RDC_LIB_RDCMETRICFETCHER_H_
+#ifndef RDC_LIB_RDCMETRICSUPDATER_H_
+#define  RDC_LIB_RDCMETRICSUPDATER_H_
 
 #include <memory>
-#include "rdc_lib/rdc_common.h"
-#include "rdc/rdc.h"
-
 
 namespace amd {
 namespace rdc {
 
-class  RdcMetricFetcher {
+class RdcMetricsUpdater {
  public:
-    virtual rdc_status_t fetch_smi_field(uint32_t gpu_index,
-                 uint32_t field_id, rdc_field_value* value) = 0;
-    virtual bool is_field_valid(uint32_t field_id) const = 0;
-    virtual ~RdcMetricFetcher() {}
+     virtual void start() = 0;
+     virtual void stop() = 0;
 };
 
-typedef std::shared_ptr<RdcMetricFetcher> RdcMetricFetcherPtr;
+typedef std::shared_ptr<RdcMetricsUpdater> RdcMetricsUpdaterPtr;
 
 }  // namespace rdc
 }  // namespace amd
 
-#endif  // RDC_LIB_RDCMETRICFETCHER_H_
+
+#endif  // RDC_LIB_RDCMETRICSUPDATER_H_

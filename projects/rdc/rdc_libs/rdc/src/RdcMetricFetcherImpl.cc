@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <sys/time.h>
 #include <string.h>
 #include <chrono>
+#include <algorithm>
 #include <vector>
 #include "rdc_lib/rdc_common.h"
 #include "rocm_smi/rocm_smi.h"
@@ -30,12 +31,26 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
+bool RdcMetricFetcherImpl::is_field_valid(uint32_t field_id) const {
+     const std::vector<uint32_t> all_fields = {RDC_FI_GPU_MEMORY_USAGE,
+     RDC_FI_GPU_MEMORY_TOTAL, RDC_FI_GPU_COUNT, RDC_FI_POWER_USAGE,
+     RDC_FI_GPU_SM_CLOCK, RDC_FI_GPU_UTIL, RDC_FI_DEV_NAME};
+
+     return std::find(all_fields.begin(), all_fields.end(), field_id)
+               != all_fields.end();
+
+}
+
 rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
          uint32_t field_id, rdc_field_value* value) {
     if (!value) {
          return RDC_ST_BAD_PARAMETER;
     }
     uint64_t i64 = 0;
+
+    if (!is_field_valid(field_id)) {
+         return RDC_ST_NOT_SUPPORTED;
+    }
 
     struct timeval  tv;
     gettimeofday(&tv, NULL);

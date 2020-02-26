@@ -318,6 +318,8 @@ const char* rdc_status_string(rdc_status_t result) {
                 return "SMI error";
         case RDC_ST_MAX_LIMIT:
                 return "The max limit reached";
+        case RDC_ST_CONFLICT:
+                return "Conflict with current state";
         default:
                 return "Unknown";
     }

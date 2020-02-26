@@ -23,6 +23,9 @@ THE SOFTWARE.
 #include <string.h>
 #include "rdc_lib/impl/RdcMetricFetcherImpl.h"
 #include "rdc_lib/impl/RdcGroupSettingsImpl.h"
+#include "rdc_lib/impl/RdcMetricsUpdaterImpl.h"
+#include "rdc_lib/impl/RdcCacheManagerImpl.h"
+#include "rdc_lib/impl/RdcWatchTableImpl.h"
 #include "rdc_lib/rdc_common.h"
 #include "rocm_smi/rocm_smi.h"
 
@@ -49,12 +52,24 @@ amd::rdc::RdcHandler *make_handler(rdc_operation_mode_t op_mode) {
 namespace amd {
 namespace rdc {
 
+// TODO(bill_liu): make it configurable
+const uint32_t METIC_UPDATE_FREQUENCY = 100;  // 100ms by default
 
-RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode) :
+RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode):
     group_settings_(new RdcGroupSettingsImpl())
-    , metric_fetcher_(new RdcMetricFetcherImpl()) {
-    // TODO(bill_liu): implement the operation mode
-    (void)(mode);
+    , cache_mgr_(new RdcCacheManagerImpl())
+    , metric_fetcher_(new RdcMetricFetcherImpl())
+    , watch_table_(new RdcWatchTableImpl(group_settings_,
+                cache_mgr_, metric_fetcher_))
+    , metrics_updater_(new RdcMetricsUpdaterImpl(watch_table_,
+                        METIC_UPDATE_FREQUENCY)) {
+    if (mode == RDC_OPERATION_MODE_AUTO) {
+        metrics_updater_->start();
+    }
+}
+
+RdcEmbeddedHandler::~RdcEmbeddedHandler() {
+     metrics_updater_->stop();
 }
 
 // JOB API
@@ -122,7 +137,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_get_device_attributes(uint32_t gpu_index,
 }
 
 
-    // Group API
+// Group API
 rdc_status_t RdcEmbeddedHandler::rdc_group_gpu_create(rdc_group_type_t type,
                 const char* group_name,
                 rdc_gpu_group_t* p_rdc_group_id) {
@@ -144,6 +159,18 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_field_create(uint32_t num_field_ids,
     if (!field_group_name || !rdc_field_group_id || !field_ids) {
         return RDC_ST_BAD_PARAMETER;
     }
+
+    // Check the field is valid or not
+    if (num_field_ids <= RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
+        for (uint32_t i = 0; i < num_field_ids; i++) {
+            if (!metric_fetcher_->is_field_valid(field_ids[i])) {
+                return RDC_ST_NOT_SUPPORTED;
+            }
+        }
+    } else {
+        return RDC_ST_MAX_LIMIT;
+    }
+
     return group_settings_->rdc_group_field_create(
         num_field_ids, field_ids, field_group_name, rdc_field_group_id);
 }
@@ -183,56 +210,45 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_field_destroy(
 rdc_status_t RdcEmbeddedHandler::rdc_watch_fields(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id, uint64_t update_freq,
         double max_keep_age, uint32_t max_keep_samples) {
-    // TODO(bill_liu): implement
-    (void)(group_id);
-    (void)(field_group_id);
-    (void)(update_freq);
-    (void)(max_keep_age);
-    (void)(max_keep_samples);
-    return RDC_ST_OK;
+    return watch_table_->rdc_watch_fields(group_id, field_group_id,
+                update_freq, max_keep_age, max_keep_samples);
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_get_latest_value_for_field(
     uint32_t gpu_index, uint32_t field, rdc_field_value* value) {
-    // TODO(bill_liu): implement
     if (!value) {
         return RDC_ST_BAD_PARAMETER;
     }
-    (void)(gpu_index);
-    (void)(field);
-    return RDC_ST_NOT_FOUND;
+    if (!metric_fetcher_->is_field_valid(field)) {
+        return RDC_ST_NOT_SUPPORTED;
+    }
+    return cache_mgr_->rdc_get_latest_value_for_field(gpu_index, field, value);
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_get_field_value_since(uint32_t gpu_index,
         uint32_t field, uint64_t since_time_stamp,
         uint64_t *next_since_time_stamp, rdc_field_value* value) {
-    // TODO(bill_liu): implement
     if (!next_since_time_stamp || !value) {
         return RDC_ST_BAD_PARAMETER;
     }
-    (void)(since_time_stamp);
-    (void)(gpu_index);
-    (void)(field);
-    (void)(value);
-
-    return RDC_ST_NOT_FOUND;
+    if (!metric_fetcher_->is_field_valid(field)) {
+        return RDC_ST_NOT_SUPPORTED;
+    }
+    return cache_mgr_->rdc_get_field_value_since(gpu_index, field,
+                since_time_stamp, next_since_time_stamp, value);
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_unwatch_fields(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id) {
-    // TODO(bill_liu): implement
-    (void)(group_id);
-    (void)(field_group_id);
-    return RDC_ST_OK;
+    return watch_table_->rdc_unwatch_fields(group_id, field_group_id);
 }
-
 
 // Control API
 rdc_status_t RdcEmbeddedHandler::rdc_update_all_fields(
     uint32_t wait_for_update) {
-    // TODO(bill_liu): implement
+    // TODO(bill_liu): implement the case wait_for_update==0
     (void)(wait_for_update);
-    return RDC_ST_OK;
+    return watch_table_->rdc_update_all_fields();
 }
 
 }  // namespace rdc

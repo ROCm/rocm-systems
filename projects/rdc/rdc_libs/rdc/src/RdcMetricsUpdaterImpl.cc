@@ -19,28 +19,39 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_RDCMETRICFETCHER_H_
-#define RDC_LIB_RDCMETRICFETCHER_H_
-
-#include <memory>
+#include "rdc_lib/impl/RdcMetricsUpdaterImpl.h"
+#include <sys/time.h>
+#include <ctime>
+#include <chrono>
 #include "rdc_lib/rdc_common.h"
-#include "rdc/rdc.h"
-
 
 namespace amd {
 namespace rdc {
 
-class  RdcMetricFetcher {
- public:
-    virtual rdc_status_t fetch_smi_field(uint32_t gpu_index,
-                 uint32_t field_id, rdc_field_value* value) = 0;
-    virtual bool is_field_valid(uint32_t field_id) const = 0;
-    virtual ~RdcMetricFetcher() {}
-};
+RdcMetricsUpdaterImpl::RdcMetricsUpdaterImpl(
+            const RdcWatchTablePtr& watch_table,
+            const uint32_t check_frequency):
+            watch_table_(watch_table)
+            , started_(false)
+            , _check_frequency(check_frequency) {
+}
 
-typedef std::shared_ptr<RdcMetricFetcher> RdcMetricFetcherPtr;
+void RdcMetricsUpdaterImpl::start() {
+    if (started_) {
+        return;
+    }
+    started_ = true;
+    updater_ = std::async(std::launch::async, [this](){
+        while (started_) {
+            watch_table_->rdc_update_all_fields();
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+    });
+}
+
+void RdcMetricsUpdaterImpl::stop() {
+    started_ = false;
+}
 
 }  // namespace rdc
 }  // namespace amd
-
-#endif  // RDC_LIB_RDCMETRICFETCHER_H_

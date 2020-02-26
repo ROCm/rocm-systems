@@ -19,28 +19,31 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_RDCMETRICFETCHER_H_
-#define RDC_LIB_RDCMETRICFETCHER_H_
+#ifndef RDC_LIB_IMPL_RDCMETRICSUPDATERIMPL_H_
+#define RDC_LIB_IMPL_RDCMETRICSUPDATERIMPL_H_
 
+#include <future>
 #include <memory>
-#include "rdc_lib/rdc_common.h"
-#include "rdc/rdc.h"
-
+#include "rdc_lib/RdcMetricsUpdater.h"
+#include "rdc_lib/RdcWatchTable.h"
 
 namespace amd {
 namespace rdc {
 
-class  RdcMetricFetcher {
+class RdcMetricsUpdaterImpl: public RdcMetricsUpdater {
  public:
-    virtual rdc_status_t fetch_smi_field(uint32_t gpu_index,
-                 uint32_t field_id, rdc_field_value* value) = 0;
-    virtual bool is_field_valid(uint32_t field_id) const = 0;
-    virtual ~RdcMetricFetcher() {}
+     void start() override;
+     void stop() override;
+     explicit RdcMetricsUpdaterImpl(const RdcWatchTablePtr& watch_table,
+                const uint32_t check_frequency);
+ private:
+     RdcWatchTablePtr watch_table_;
+     std::atomic<bool> started_;
+     std::future<void> updater_;  // keep the future of updater
+     const uint32_t _check_frequency;  // Check frequency in milliseconds
 };
-
-typedef std::shared_ptr<RdcMetricFetcher> RdcMetricFetcherPtr;
 
 }  // namespace rdc
 }  // namespace amd
 
-#endif  // RDC_LIB_RDCMETRICFETCHER_H_
+#endif  // RDC_LIB_IMPL_RDCMETRICSUPDATERIMPL_H_

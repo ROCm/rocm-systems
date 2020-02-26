@@ -31,6 +31,7 @@ class RdcMetricFetcherImpl: public RdcMetricFetcher {
  public:
     rdc_status_t fetch_smi_field(uint32_t gpu_index,
         uint32_t field_id, rdc_field_value* value) override;
+    bool is_field_valid(uint32_t field_id) const override;
 };
 
 }  // namespace rdc

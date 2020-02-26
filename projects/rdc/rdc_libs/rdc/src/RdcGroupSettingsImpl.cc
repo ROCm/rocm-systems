@@ -30,8 +30,7 @@ RdcGroupSettingsImpl::RdcGroupSettingsImpl() {
 }
 
 rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_create(rdc_group_type_t type,
-                  const char* group_name, rdc_gpu_group_t* p_rdc_group_id)
-{
+                  const char* group_name, rdc_gpu_group_t* p_rdc_group_id) {
     // TODO(bill_liu): handle type to create default group for all GPUs
     if (type == RDC_GROUP_DEFAULT) {
         return RDC_ST_NOT_SUPPORTED;
