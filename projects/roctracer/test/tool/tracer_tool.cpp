@@ -97,12 +97,12 @@ static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
 // Error handler
 void fatal(const std::string msg) {
-  fflush(roctx_file_handle);
-  fflush(hsa_api_file_handle);
-  fflush(hsa_async_copy_file_handle);
-  fflush(hip_api_file_handle);
-  fflush(hcc_activity_file_handle);
-  fflush(kfd_api_file_handle);
+  if (roctx_file_handle) fflush(roctx_file_handle);
+  if (hsa_api_file_handle) fflush(hsa_api_file_handle);
+  if (hsa_async_copy_file_handle) fflush(hsa_async_copy_file_handle);
+  if (hip_api_file_handle) fflush(hip_api_file_handle);
+  if (hcc_activity_file_handle) fflush(hcc_activity_file_handle);
+  if (kfd_api_file_handle) fflush(kfd_api_file_handle);
   fflush(stdout);
   fprintf(stderr, "%s\n\n", msg.c_str());
   fflush(stderr);
@@ -589,8 +589,8 @@ void tool_unload() {
     ROCTRACER_CALL(roctracer_close_pool());
 
     hip_api_trace_buffer.Flush();
-    close_output_file(hip_api_file_handle);
-    close_output_file(hcc_activity_file_handle);
+    if (hip_api_file_handle) close_output_file(hip_api_file_handle);
+    if (hcc_activity_file_handle) close_output_file(hcc_activity_file_handle);
   }
 
   if (trace_kfd) {
@@ -843,8 +843,6 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
 
   // Enable HIP API callbacks/activity
   if (trace_hip_api || trace_hip_activity) {
-    hip_api_file_handle = open_output_file(output_prefix, "hip_api_trace.txt");
-    hcc_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
 
     fprintf(stdout, "    HIP-trace()\n"); fflush(stdout);
     // roctracer properties
@@ -855,10 +853,12 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     properties.buffer_callback_fun = hcc_activity_callback;
     ROCTRACER_CALL(roctracer_open_pool(&properties));
     if (trace_hip_api) {
+      hip_api_file_handle = open_output_file(output_prefix, "hip_api_trace.txt");
       ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
       ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
     }
     if (trace_hip_activity) {
+      hcc_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
       ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
     }
   }
