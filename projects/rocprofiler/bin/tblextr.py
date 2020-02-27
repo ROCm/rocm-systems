@@ -403,7 +403,6 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
   ptrn_id = re.compile(r'^([^:]+):(\d+)$')
   ptrn_mcopy = re.compile(r'(Memcpy|Copy|Fill)')
   ptrn_barrier = re.compile(r'Marker')
-  is_barrier = 0
 
   if not os.path.isfile(file_name): return {}
 
@@ -439,7 +438,6 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
 
           if ptrn_barrier.search(name):
             name = '"<barrier packet>"'
-            is_barrier = 1
 
         # insert DB record
         rec_vals[4] = name                       # Name
@@ -452,11 +450,10 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         filtr[corr_id] = 1
 
         # filling a dependency
-        if is_barrier == 0:
-          if not pid in dep_dict: dep_dict[pid] = {}
-          if not 'to' in dep_dict[pid]: dep_dict[pid]['to'] = {}
-          dep_dict[pid]['to'][corr_id] = int(rec_vals[0]) / 1000
-          dep_dict[pid]['bsp'] = OPS_PID
+        if not pid in dep_dict: dep_dict[pid] = {}
+        if not 'to' in dep_dict[pid]: dep_dict[pid]['to'] = {}
+        dep_dict[pid]['to'][corr_id] = int(rec_vals[0]) / 1000
+        dep_dict[pid]['bsp'] = OPS_PID
 
       else:
         fatal("hcc ops bad record: '" + record + "'")

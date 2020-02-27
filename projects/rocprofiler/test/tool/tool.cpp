@@ -483,7 +483,7 @@ bool dump_context_entry(context_entry_t* entry) {
     entry->data.thread_id,
     entry->kernel_properties.grid_size,
     entry->kernel_properties.workgroup_size,
-    entry->kernel_properties.lds_size * AgentInfo::lds_block_size,
+    (entry->kernel_properties.lds_size + (AgentInfo::lds_block_size - 1)) & ~(AgentInfo::lds_block_size - 1),
     entry->kernel_properties.scratch_size,
     (entry->kernel_properties.vgpr_count + 1) * agent_info->vgpr_block_size,
     (entry->kernel_properties.sgpr_count + agent_info->sgpr_block_dflt) * agent_info->sgpr_block_size,
@@ -659,7 +659,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   uint64_t workgroup_size = packet->workgroup_size_x * packet->workgroup_size_y * packet->workgroup_size_z;
   if (workgroup_size > UINT32_MAX) abort();
   kernel_properties_ptr->workgroup_size = (uint32_t)workgroup_size;
-  kernel_properties_ptr->lds_size = AMD_HSA_BITS_GET(kernel_code->compute_pgm_rsrc2, AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE); // packet->group_segment_size;
+  kernel_properties_ptr->lds_size = packet->group_segment_size;
   kernel_properties_ptr->scratch_size = packet->private_segment_size;
   kernel_properties_ptr->vgpr_count = AMD_HSA_BITS_GET(kernel_code->compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT);
   kernel_properties_ptr->sgpr_count = AMD_HSA_BITS_GET(kernel_code->compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT);
