@@ -28,6 +28,7 @@ THE SOFTWARE.
 
 #include "rdc/rdc_client_main.h"
 #include "rdc/rdc_client.h"
+#include "rdc/rdc_client_utils.h"
 #include "common/rdc_utils.h"
 #include "rdc/rdc_exception.h"
 #include "rdc.grpc.pb.h"  // NOLINT
@@ -550,6 +551,11 @@ rdc_status_string(rdc_status_t status, const char **status_string) {
     case RDC_STATUS_UNKNOWN_ERROR:
       *status_string =
         "RDC_STATUS_UNKNOWN_ERROR An unknown RDC error occurred.";
+      break;
+
+    case RDC_STATUS_CLIENT_ERR_SSL:
+      *status_string =
+          "An error occurred when executing SSL authentication operations.";
       break;
 
     default:

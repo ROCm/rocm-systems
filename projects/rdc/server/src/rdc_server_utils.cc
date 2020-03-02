@@ -24,6 +24,9 @@ THE SOFTWARE.
 #include <errno.h>
 #include <assert.h>
 
+namespace amd {
+namespace rdc {
+
 int GetCapability(cap_value_t cap, cap_flag_t cap_type, bool *enabled) {
   cap_t caps;
 
@@ -40,7 +43,6 @@ int GetCapability(cap_value_t cap, cap_flag_t cap_type, bool *enabled) {
   }
 
   cap_flag_value_t val;
-
   if (cap_get_flag(caps, cap, cap_type, &val) == -1) {
     int ret = errno;
     cap_free(caps);
@@ -87,3 +89,6 @@ int ModifyCapability(cap_value_t cap, cap_flag_t cap_type, bool enable) {
   }
   return 0;
 }
+
+}  // namespace rdc
+}  // namespace amd

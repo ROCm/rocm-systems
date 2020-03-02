@@ -114,7 +114,7 @@ TestBase::AllocateRDCChannel(void) {
   err = rdc_channel_create(&c,
       monitor_server_ip() == "" ? nullptr : monitor_server_ip().c_str(),
       monitor_server_port() == "" ? nullptr : monitor_server_port().c_str(),
-                                                                        false);
+                                                                    secure());
 
   if (err != RDC_STATUS_SUCCESS) {
     std::cout << "rdc_channel_create() failed" << std::endl;

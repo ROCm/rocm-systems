@@ -182,6 +182,11 @@ typedef enum {
   /// Unrecoverable data loss or corruption.
   RDC_STATUS_GRPC_DATA_LOSS,
 
+  RDC_STATUS_CLIENT_ERR_FIRST = 2000,
+
+  /// SSL authentication error occurred.
+  RDC_STATUS_CLIENT_ERR_SSL = RDC_STATUS_CLIENT_ERR_FIRST,
+
   RDC_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rdc_status_t;
 

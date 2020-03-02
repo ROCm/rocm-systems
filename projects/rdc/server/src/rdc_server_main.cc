@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/capability.h>
+#include <getopt.h>
 
 #include <iostream>
 #include <memory>
@@ -41,6 +42,17 @@ THE SOFTWARE.
 #include "rdc/rdc_rsmi_service.h"
 #include "rdc/rdc_api_service.h"
 #include "rdc/rdc_server_utils.h"
+#include "common/rdc_utils.h"
+
+// TODO(cfreehil):
+// The following need to be made configurable (e.g., from YAML):
+//  * location of ssl keys and certificates
+//  * which method of authentication to use (with root CA or not)
+//  * wether server accepts only unauthenticated connections or only
+//    authenticated
+//  * rsmi_init flags
+//  * which RDC grpc services to start
+//  * port on which to listen
 
 static bool sShutDownServer = false;
 static bool sRestartServer = false;
@@ -48,24 +60,143 @@ static const char *kDaemonName = "rdcd";
 static const char *kRDCDHomeDir = "/";
 static const char *kDaemonLockFile = "/var/run/rdcd.lock";
 
-RDCServer::RDCServer() : server_address_("0.0.0.0:50051"),
-                         rsmi_service_(nullptr), rdc_admin_service_(nullptr) {
+// Pinned certificates
+static const char * kDefaultRDCServerCertPinPath =
+                                             "/etc/rdc/server/rdc_server.crt";
+static const char * kDefaultRDCServerKeyPinPath =
+                                     "/etc/rdc/server/private/rdc_server.key";
+static const char * kDefaultRDCClientCertPinPath =
+                                             "/etc/rdc/client/rdc_client.crt";
+
+// PKI certificates
+static const char * kDefaultRDCServerCertKeyPkiPath =
+                                "/etc/rdc/server/private/rdc_server_cert.key";
+static const char * kDefaultRDCServerCertPemPkiPath =
+                                  "/etc/rdc/server/certs/rdc_server_cert.pem";
+static const char * kDefaultRDCClientCACertPemPkiPath =
+                                       "/etc/rdc/client/certs/rdc_cacert.pem";
+
+static const char *kDefaultListenPort = "50051";
+
+RDCServer::RDCServer() : server_address_("0.0.0.0:"),
+    secure_creds_(false), rsmi_service_(nullptr), rdc_admin_service_(nullptr) {
 }
 
 RDCServer::~RDCServer() {
 }
 
+
+// TODO(cfreehil): resolve here command line options with
+// (future) config file options
 void
-RDCServer::Initialize() {
+RDCServer::Initialize(RdcdCmdLineOpts *cl) {
+  cmd_line_ = cl;
+  server_address_ += cmd_line_->listen_port;
+  secure_creds_ = !cmd_line_->no_authentication;
+  use_pinned_certs_ = cmd_line_->use_pinned_certs;
+  log_debug_ = cmd_line_->log_dbg;
 }
 
-// TODO(cfreehil): read server config from YAML file. Config can include things
-// like server address, Secure/Insecure creds, rsmi_init flags, etc.
+static int ConstructSSLOptsPin(grpc::SslServerCredentialsOptions *ssl_opts) {
+  assert(ssl_opts != nullptr);
+  if (ssl_opts == nullptr) {
+    return -EINVAL;
+  }
+
+  // Ensure the required paths exists before going forward
+  if (!amd::rdc::FileExists(kDefaultRDCServerKeyPinPath) ||
+      !amd::rdc::FileExists(kDefaultRDCServerCertPinPath) ||
+      !amd::rdc::FileExists(kDefaultRDCClientCertPinPath)) {
+    return -ENOENT;
+  }
+
+  std::string ser_key;
+  std::string ser_crt;
+  std::string cli_crt;
+  int ret;
+  ret = amd::rdc::ReadFile(kDefaultRDCServerKeyPinPath, &ser_key);
+  if (ret) {
+    return ret;
+  }
+  ret = amd::rdc::ReadFile(kDefaultRDCServerCertPinPath, &ser_crt);
+  if (ret) {
+    return ret;
+  }
+  ret = amd::rdc::ReadFile(kDefaultRDCClientCertPinPath, &cli_crt);
+  if (ret) {
+    return ret;
+  }
+
+  grpc::SslServerCredentialsOptions::PemKeyCertPair pkcp = {ser_key, ser_crt};
+  ssl_opts->client_certificate_request =
+                 GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
+  ssl_opts->pem_root_certs = cli_crt;
+  ssl_opts->pem_key_cert_pairs.push_back(pkcp);
+  return 0;
+}
+
+static int ConstructSSLOptsPKI(grpc::SslServerCredentialsOptions *ssl_opts) {
+  assert(ssl_opts != nullptr);
+  if (ssl_opts == nullptr) {
+    return -EINVAL;
+  }
+
+  // Ensure the required paths exists before going forward
+  if (!amd::rdc::FileExists(kDefaultRDCServerCertKeyPkiPath) ||
+      !amd::rdc::FileExists(kDefaultRDCServerCertPemPkiPath) ||
+      !amd::rdc::FileExists(kDefaultRDCClientCACertPemPkiPath)) {
+    return -ENOENT;
+  }
+
+  std::string ser_key;
+  std::string ser_crt;
+  std::string cli_crt;
+  int ret;
+  ret = amd::rdc::ReadFile(kDefaultRDCServerCertKeyPkiPath, &ser_key);
+  if (ret) {
+    return ret;
+  }
+  ret = amd::rdc::ReadFile(kDefaultRDCServerCertPemPkiPath, &ser_crt);
+  if (ret) {
+    return ret;
+  }
+  ret = amd::rdc::ReadFile(kDefaultRDCClientCACertPemPkiPath, &cli_crt);
+  if (ret) {
+    return ret;
+  }
+
+  grpc::SslServerCredentialsOptions::PemKeyCertPair pkcp = {ser_key, ser_crt};
+  ssl_opts->client_certificate_request =
+                 GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
+  ssl_opts->pem_root_certs = cli_crt;
+  ssl_opts->pem_key_cert_pairs.push_back(pkcp);
+  return 0;
+}
+
 void
 RDCServer::Run() {
   ::grpc::ServerBuilder builder;
-  // Listen on the given address without any authentication mechanism.
-  builder.AddListeningPort(server_address_, grpc::InsecureServerCredentials());
+  int ret;
+  if (secure_creds_) {
+    grpc::SslServerCredentialsOptions ssl_opts{};
+
+    if (use_pinned_certs_) {
+      ret = ConstructSSLOptsPin(&ssl_opts);
+    } else {
+      ret = ConstructSSLOptsPKI(&ssl_opts);
+    }
+
+    if (ret) {
+      std::cerr << "Failed to process OpenSSL keys and certificates. Errno: "
+                                                         << -ret << std::endl;
+      return;
+    }
+    builder.AddListeningPort(server_address_,
+                                        grpc::SslServerCredentials(ssl_opts));
+  } else {
+    builder.AddListeningPort(server_address_,
+                                           grpc::InsecureServerCredentials());
+  }
 
   // Register services as the instances through which we'll communicate with
   // clients. These are synchronous services.
@@ -78,11 +209,10 @@ RDCServer::Run() {
     rsmi_service_ = new amd::rdc::RsmiServiceImpl();
     builder.RegisterService(rsmi_service_);
 
-    // TODO(cfreehil): pass flags from cnfg file
     rsmi_status_t ret = rsmi_service_->Initialize(0);
 
     if (ret != RSMI_STATUS_SUCCESS) {
-      std::cerr << "Failed to start RSMI service" << std::endl;
+      std::cerr << "Failed to start RSMI service. ret = " << ret << std::endl;
       return;
     }
   }
@@ -104,8 +234,10 @@ RDCServer::Run() {
   // std::unique_ptr<::grpc::Server> server(builder.BuildAndStart());
   server_ = builder.BuildAndStart();
 
-  std::cout <<  "Server listening on " << server_address_.c_str() << std::endl;
-
+  std::cout << "Server listening on " << server_address_.c_str() << std::endl;
+  std::cout << "Accepting " <<
+     (secure_creds_ ? "Authenticated" : "Unauthenticated") <<
+                                            " connections only." << std::endl;
   server_->Wait();
 }
 
@@ -263,20 +395,118 @@ MakeDaemon() {
   InitializeSignalHandling();
 }
 
+// Group arguments by type, in this order:
+//  * required_argument
+//  * optional_argument
+//  * no_argument
+static const struct option long_options[] = {
+  {"port", required_argument, nullptr, 'p'},
+  // Any options with optionals args would go here; e.g.,
+  // {"start_rdcd", optional_argument, nullptr, 'd'},
+  {"unauth_comm", no_argument, nullptr, 'u'},
+  {"pinned_cert", no_argument, nullptr, 'i'},
+  {"debug", no_argument, nullptr, 'd'},
+  {"help", no_argument, nullptr, 'h'},
+
+  {nullptr, 0, nullptr, 0}
+};
+static const char* short_options = "p:uidh";
+
+static void PrintHelp(void) {
+  std::cout <<
+     "Optional rdctst Arguments:\n"
+     "--port, -p <port> specify port on which to listen; "
+         "default is to listen on port 50051\n"
+     "--unauth_comm, -u don't do authentication with communications"
+       " with client. When this flag is not specified, by default, "
+                                                 "PKI authentication is used\n"
+     "--pinned_cert, -i used \"pinned\" certificates instead of PKI "
+                                  "authentication. This is for test purposes.\n"
+     "--debug, -d output debug messages\n"
+     "--help, -h print this message\n";
+}
+
+uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts,
+                                               int arg_cnt, char** arg_list) {
+  int a;
+  int ind = -1;
+
+  assert(cmdl_opts != nullptr);
+
+  while (true) {
+    a = getopt_long(arg_cnt, arg_list, short_options, long_options, &ind);
+
+    if (a == -1) {
+      break;
+    }
+
+    switch (a) {
+      case 'p':
+        if (!amd::rdc::IsNumber(optarg)) {
+          std::cerr << "\"" << optarg <<
+                                "\" is not a valid port number." << std::endl;
+          return -1;
+        }
+        cmdl_opts->listen_port = optarg;
+        break;
+
+      case 'u':
+        cmdl_opts->no_authentication = true;
+        break;
+
+      case 'i':
+        cmdl_opts->use_pinned_certs = true;
+        break;
+
+      case 'd':
+        cmdl_opts->log_dbg = true;
+        break;
+
+      case 'h':
+        PrintHelp();
+        exit(0);
+
+      default:
+        std::cout << "Unknown command line option: \"" << a <<
+                                               "\". Ignoring..." << std::endl;
+        PrintHelp();
+        return 0;
+    }
+  }
+
+  // Check for incompatibilities
+  if (cmdl_opts->use_pinned_certs && cmdl_opts->no_authentication) {
+    std::cerr << "--pinned_cert and --unauth_comm are incompatible options."
+                                                                  << std::endl;
+    return -1;
+  }
+  return 0;
+}
+
+static void init_cmd_line_opts(RdcdCmdLineOpts *opts) {
+  assert(opts != nullptr);
+  opts->listen_port = kDefaultListenPort;
+  opts->no_authentication = false;
+  opts->use_pinned_certs = false;
+  opts->log_dbg = false;
+}
+
 int main(int argc, char** argv) {
   RDCServer rdc_server;
+  RdcdCmdLineOpts cmd_line_opts;
   int err;
 
-  (void)argc;   // Ignore for now
-  (void)argv;
+  init_cmd_line_opts(&cmd_line_opts);
+  ProcessCmdline(&cmd_line_opts, argc, argv);
 
   MakeDaemon();
 
-  rdc_server.Initialize();
+  rdc_server.Initialize(&cmd_line_opts);
 
   bool cap_enabled;
 
-  err = GetCapability(CAP_DAC_OVERRIDE, CAP_EFFECTIVE, &cap_enabled);
+  err =
+     ::amd::rdc::GetCapability(CAP_DAC_OVERRIDE, CAP_EFFECTIVE, &cap_enabled);
   if (err) {
     std::cerr << "Failed to get capability" << std::endl;
     return 1;
@@ -288,7 +518,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  err = GetCapability(CAP_DAC_OVERRIDE, CAP_PERMITTED, &cap_enabled);
+  err = amd::rdc::GetCapability(CAP_DAC_OVERRIDE, CAP_PERMITTED, &cap_enabled);
   if (err) {
     std::cerr << "Failed to get capability" << std::endl;
     return 1;
@@ -302,7 +532,7 @@ int main(int argc, char** argv) {
 
   // Don't allow rwx access to all files to ever be inheritable. We may need
   // relax this restriction if some new feature requires it.
-  err = ModifyCapability(CAP_DAC_OVERRIDE, CAP_INHERITABLE, false);
+  err = amd::rdc::ModifyCapability(CAP_DAC_OVERRIDE, CAP_INHERITABLE, false);
   if (err) {
     std::cerr << "Failed to disable CAP_DAC_OVERRIDE, CAP_INHERITABLE" <<
                                                                     std::endl;
@@ -310,7 +540,7 @@ int main(int argc, char** argv) {
   }
 
   // By default, disable CAP_DAC_OVERRIDE. Turn on, when needed.
-  err = ModifyCapability(CAP_DAC_OVERRIDE, CAP_EFFECTIVE, false);
+  err = amd::rdc::ModifyCapability(CAP_DAC_OVERRIDE, CAP_EFFECTIVE, false);
   if (err) {
     std::cerr << "Failed to disable CAP_DAC_OVERRIDE, CAP_EFFECTIVE" <<
                                                                     std::endl;
@@ -330,7 +560,7 @@ int main(int argc, char** argv) {
   }
 
   // TODO(cfreehil): Eventually, set these by reading a config file
-  rdc_server.set_start_rsmi_service(false);
+  rdc_server.set_start_rsmi_service(true);
   rdc_server.set_start_rdc_admin_service(true);
   rdc_server.set_start_api_service(true);
 

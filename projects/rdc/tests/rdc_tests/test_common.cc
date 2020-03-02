@@ -106,11 +106,12 @@ static const struct option long_options[] = {
   {"remote_server_port", required_argument, nullptr, 'p'},
   {"start_rdcd", optional_argument, nullptr, 'd'},
   {"dont_fail", no_argument, nullptr, 'f'},
+  {"unauth_comm", no_argument, nullptr, 'u'},
   {"rdctst_help", no_argument, nullptr, 'r'},
 
   {nullptr, 0, nullptr, 0}
 };
-static const char* short_options = "i:v:m:s:p:d:fr";
+static const char* short_options = "i:v:m:s:p:d:fur";
 
 static void PrintHelp(void) {
   std::cout <<
@@ -130,7 +131,9 @@ static void PrintHelp(void) {
      "--remote_server_ip <ip address>; connect to already running "
                                                       "rdcd on specified IP\n"
      "--remote_server_port <remote port>; connect to already running "
-                                         "rdcd on specified IP at this port\n";
+                                         "rdcd on specified IP at this port\n"
+     "--unauth_comm; don't use TSL/SSL authentication; "
+                                            "default is with authentication\n";
 }
 
 uint32_t ProcessCmdline(RDCTstGlobals* test, int arg_cnt, char** arg_list) {
@@ -181,6 +184,10 @@ uint32_t ProcessCmdline(RDCTstGlobals* test, int arg_cnt, char** arg_list) {
 
       case 'f':
         test->dont_fail = true;
+        break;
+
+      case 'u':
+        test->secure = false;
         break;
 
       default:

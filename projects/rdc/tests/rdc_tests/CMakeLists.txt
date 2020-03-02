@@ -124,7 +124,7 @@ endif()
 set(RDCTST_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 
 set(RDCTST "rdctst")
-set(RDCTST_LIBS "rdc_client")
+set(RDCTST_LIBS "rdc_client_smi")
 
 # Set Name for Google Test Framework and build it as a
 # static library to be linked with user test programs

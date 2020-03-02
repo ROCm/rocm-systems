@@ -24,7 +24,12 @@ THE SOFTWARE.
 
 #include <sys/capability.h>
 
+namespace amd {
+namespace rdc {
+
 int GetCapability(cap_value_t cap, cap_flag_t cap_type, bool *enabled);
 int ModifyCapability(cap_value_t cap, cap_flag_t cap_type, bool enable);
+}  // namespace rdc
+}  // namespace amd
 
 #endif  // SERVER_INCLUDE_RDC_RDC_SERVER_UTILS_H_

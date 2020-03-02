@@ -59,3 +59,70 @@ To run the test, execute the program `rsmitst` that is built from the steps abov
 
 # Hello RDC
 
+
+### Authentication
+RDC supports encrypted communications between clients and servers. The communication can be configured to be authenticated or not authenticated. 
+
+##### Unauthenticated Communications
+By default, authentication is enabled. To disable authentication, when starting the server use the "--unauth_comm" flag (or "-u" for short). On the client side, when calling rdc_channel_create(), the "secure" argument should be set to false.
+
+##### Public Key Infrastructure (PKI) Authentication
+ A number of SSL keys and certificates must be generated and installed on the clients and servers for authentication to work properly. By default, the RDC server will look under /etc/rdc for the following keys and certificates:
+
+- Servers
+ ```sh
+ $ sudo tree /etc/rdc
+/etc/rdc
+└── server
+    ├── certs
+    │   ├── rdc_cacert.pem
+    │   └── rdc_server_cert.pem
+    └── private
+        └── rdc_server_cert.key
+ ```
+
+- Clients
+ ```sh
+ $ sudo tree /etc/rdc
+/etc/rdc
+└── client
+    ├── certs
+    │   ├── rdc_cacert.pem
+    │   └── rdc_client_cert.pem
+    └── private
+        └── rdc_client_cert.key
+
+ ```
+Machines that are both clients and servers will have both directory structures.
+
+RDC users would normally generate their own keys and certificates. However, there are scripts that will generate self-signed certficates in RDC source tree, under the "authentication" directory. The scripts call the openssl command to generate the required keys and certificates. The openssl command will query the caller for different identifying information. The calls to openssl will refer to the openssl.cnf file for configuration information. Included in this file is a section where default responses to the openssl questions can  be specified. Look for the comment line
+```sh
+# < ** REPLACE VALUES IN THIS SECTION WITH APPROPRIATE VALUES FOR YOUR ORG. **>
+```
+to find this section. It is helpful to modify this section with values appropriate for your organization if this script will be called many times.
+
+Additionally, the alt_names section needs to be updated for your environment (instead of the dummy values that there initially).
+
+To generate the keys and certficates using these scripts, make the following calls:
+
+```sh
+$ 01gen_root_cert.sh
+# provide answers to posed questions
+$ 02gen_ssl_artifacts.sh
+# provide answers to posed questions
+```
+At this point, the keys and certficates will be in the newly created "CA/artifacts" directory. This directory should be deleted if you need to rerun the scripts.
+
+To install the scripts cd into the artifacts directory and run the install.sh script as root, specifying the install location. By default, RDC will expect this to be in /etc/rdc:
+```sh
+$ cd CA/artifacts
+$ sudo install_<client|server>.sh /etc/rdc
+```
+These files should be copied to and and installed on all client and server machines that are expected to communicate with one another.
+
+##### Current Limitations
+There are a few limitations on the authentication capabilities. These limitations are temporary and will be eliminated when the server has a configuration file where user preferences can be specified.
+* The client and server are hard-coded to look for openssl certificate and key files in /etc/rdc.
+
+
+

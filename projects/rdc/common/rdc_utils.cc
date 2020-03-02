@@ -20,22 +20,59 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#include <sys/stat.h>
 
-#include "rdc/rdc_client.h"
-#include "rdc.grpc.pb.h"  // NOLINT
+#include <string>
+#include <fstream>
+#include <sstream>
 
 #include "common/rdc_utils.h"
 
 namespace amd {
 namespace rdc {
 
-rdc_status_t GrpcErrorToRdcError(grpc::StatusCode grpc_err) {
-  uint32_t grpc_err_int = static_cast<uint32_t>(grpc_err);
-  uint32_t rdc_grpc_base_int =
-              static_cast<uint32_t>(RDC_STATUS_GRPC_ERR_FIRST);
-  uint32_t rdc_err_int = grpc_err_int + rdc_grpc_base_int;
+bool FileExists(char const *filename) {
+  struct stat buf;
+  return (stat(filename, &buf) == 0);
+}
 
-  return static_cast<rdc_status_t>(rdc_err_int);
+int ReadFile(std::string path, std::string *retStr, bool chop_newline) {
+  std::stringstream ss;
+  int ret = 0;
+
+  assert(retStr != nullptr);
+
+  std::ifstream fs;
+  fs.open(path);
+
+  if (!fs.is_open()) {
+    ret = errno;
+    errno = 0;
+    return ret;
+  }
+  ss << fs.rdbuf();
+  fs.close();
+
+  *retStr = ss.str();
+
+  if (chop_newline) {
+    retStr->erase(std::remove(retStr->begin(), retStr->end(), '\n'),
+                                                               retStr->end());
+  }
+  return ret;
+}
+
+int ReadFile(const char *path, std::string *retStr, bool chop_newline) {
+  assert(path != nullptr);
+  assert(retStr != nullptr);
+
+  std::string file_path(path);
+
+  return amd::rdc::ReadFile(file_path, retStr, chop_newline);
+}
+
+bool IsNumber(const std::string &s) {
+  return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
 }  // namespace rdc

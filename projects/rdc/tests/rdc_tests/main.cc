@@ -48,6 +48,7 @@ static void SetFlags(TestBase *test) {
   test->set_init_options(sRDCGlvalues->init_options);
   test->set_monitor_server_ip(sRDCGlvalues->monitor_server_ip);
   test->set_monitor_server_port(sRDCGlvalues->monitor_server_port);
+  test->set_secure(sRDCGlvalues->secure);
 }
 
 static void RunCustomTestProlog(TestBase *test) {
@@ -201,6 +202,7 @@ int main(int argc, char** argv) {
   settings.rdcd_path = "";
   settings.monitor_server_ip = "";
   settings.monitor_server_port = "";
+  settings.secure = true;
 
   if (ProcessCmdline(&settings, argc, argv)) {
     return 1;

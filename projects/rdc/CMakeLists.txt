@@ -73,6 +73,8 @@ set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 
 project(${RDC})
 
+set(RDC_SRC_ROOT "${PROJECT_SOURCE_DIR}")
+
 # Create a configure file to get version info from within library
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/${RDC}64Config.in"

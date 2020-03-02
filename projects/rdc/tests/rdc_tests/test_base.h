@@ -101,7 +101,12 @@ class TestBase {
   std::string monitor_server_port(void) const {
     return monitor_server_port_;
   }
-
+  void set_secure(bool sec) {
+    secure_ = sec;
+  }
+  bool secure(void) const {
+    return secure_;
+  }
 
  protected:
   void PrintDeviceHeader(uint32_t dv_ind);
@@ -117,6 +122,7 @@ class TestBase {
   std::string monitor_server_ip_;
   std::string monitor_server_port_;
   rdc_channel_t rdc_channel_;
+  bool secure_;  // Use authenticated comms. (SSL/TSL)
 };
 
 #define IF_VERB(VB) if (verbosity() && verbosity() >= (TestBase::VERBOSE_##VB))

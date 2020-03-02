@@ -121,6 +121,7 @@ file(GLOB PROTOBUF_GENERATED_SRCS "${PROTOB_OUT_DIR}/*.cc")
 
 set(CLIENT_LIB_SRC_LIST "${SRC_DIR}/rdc_client.cc")
 set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST}  "${SRC_DIR}/rdc_client_main.cc")
+set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST}  "${SRC_DIR}/rdc_client_utils.cc")
 set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST} "${PROTOBUF_GENERATED_SRCS}")
 set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST}
                            "${PROJECT_SOURCE_DIR}/common/rdc_utils.cc")

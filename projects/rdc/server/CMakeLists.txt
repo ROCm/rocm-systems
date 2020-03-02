@@ -69,7 +69,7 @@ file(GLOB PROTOBUF_GENERATED_SRCS "${PROTOB_OUT_DIR}/*.cc")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include
                     "${PROJECT_SOURCE_DIR}/include"
-                     "${PROTOB_OUT_DIR}" "${RSMI_INC_DIR}")
+                "${PROTOB_OUT_DIR}" "${RSMI_INC_DIR}" "${RDC_SRC_ROOT}")
 
 set(SERVER_SRC_LIST "${SRC_DIR}/rdc_rsmi_service.cc")
 set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${SRC_DIR}/rdc_admin_service.cc")
@@ -77,6 +77,7 @@ set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${SRC_DIR}/rdc_api_service.cc")
 set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${SRC_DIR}/rdc_server_main.cc")
 set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${SRC_DIR}/rdc_server_utils.cc")
 set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${PROTOBUF_GENERATED_SRCS}")
+set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${RDC_SRC_ROOT}/common/rdc_utils.cc")
 message("SERVER_SRC_LIST=${SERVER_SRC_LIST}")
 
 set(SERVER_DAEMON_EXE "rdcd")

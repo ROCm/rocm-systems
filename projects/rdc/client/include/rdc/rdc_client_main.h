@@ -24,6 +24,8 @@ THE SOFTWARE.
 #ifndef CLIENT_INCLUDE_RDC_RDC_CLIENT_MAIN_H_
 #define CLIENT_INCLUDE_RDC_RDC_CLIENT_MAIN_H_
 
+#include <grpcpp/grpcpp.h>
+
 #include <string>
 #include <memory>
 
@@ -60,6 +62,7 @@ class RDCChannel {
   std::shared_ptr<::rdc::Rsmi::Stub> rsmi_stub_;
   std::shared_ptr<::rdc::RdcAdmin::Stub> rdc_admin_stub_;
   std::shared_ptr<grpc::Channel> channel_;
+  std::shared_ptr<grpc::ChannelCredentials> channel_creds_;
 };
 
 }  // namespace rdc

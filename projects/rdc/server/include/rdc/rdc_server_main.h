@@ -31,14 +31,22 @@ THE SOFTWARE.
 #include "rdc/rdc_admin_service.h"
 #include "rdc/rdc_api_service.h"
 
+typedef struct {
+  std::string listen_port;
+  bool no_authentication;
+  bool use_pinned_certs;
+  bool log_dbg;
+} RdcdCmdLineOpts;
+
 class RDCServer {
  public:
     RDCServer();
     ~RDCServer();
 
-    void Initialize();
+    void Initialize(RdcdCmdLineOpts *cl);
 
     void Run(void);
+    void ShutDown(void);
 
     bool start_rsmi_service(void) const {return start_rsmi_service_;}
     void set_start_rsmi_service(bool s) {start_rsmi_service_ = s;}
@@ -49,15 +57,19 @@ class RDCServer {
     bool start_api_service(void) const {return start_api_service_;}
     void set_start_api_service(bool s) {start_api_service_ = s;}
 
-    void ShutDown(void);
+    bool secure_creds(void) const {return secure_creds_;}
+    void set_secure_creds(bool s) {secure_creds_ = s;}
 
  private:
     void HandleSignal(int sig);
     std::string server_address_;
     std::unique_ptr<::grpc::Server> server_;
-
+    bool secure_creds_;
+    bool use_pinned_certs_;
+    bool log_debug_;
     bool start_rsmi_service_;
     amd::rdc::RsmiServiceImpl *rsmi_service_;
+    RdcdCmdLineOpts *cmd_line_;
 
     bool start_rdc_admin_service_;
     amd::rdc::RDCAdminServiceImpl *rdc_admin_service_;

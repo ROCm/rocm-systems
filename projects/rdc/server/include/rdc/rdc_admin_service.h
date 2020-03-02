@@ -39,7 +39,7 @@ class RDCAdminServiceImpl final : public ::rdc::RdcAdmin::Service {
  private:
 };
 
-} // namespace rdc
-} // namespace amd
+}  // namespace rdc
+}  // namespace amd
 
 #endif  // SERVER_INCLUDE_RDC_RDC_ADMIN_SERVICE_H_
