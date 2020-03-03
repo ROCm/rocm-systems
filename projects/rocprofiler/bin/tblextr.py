@@ -512,6 +512,9 @@ else:
   fill_kernel_db('A', db)
 
   any_trace_found = ext_trace_found | kfd_trace_found | hsa_trace_found | hip_trace_found
+  copy_trace_found = 0
+  if hsa_activity_found or len(ops_filtr): copy_trace_found = 1
+
   if any_trace_found:
     db.open_json(jsonfile)
 
@@ -547,9 +550,10 @@ else:
     dform.gen_table_bins(db, 'HSA', hsa_statfile, 'Name', 'DurationNs')
     dform.gen_api_json_trace(db, 'HSA', START_US, jsonfile)
 
-  dform.post_process_data(db, 'COPY')
-  dform.gen_table_bins(db, 'COPY', copy_statfile, 'Name', 'DurationNs')
-  dform.gen_api_json_trace(db, 'COPY', START_US, jsonfile)
+  if copy_trace_found:
+    dform.post_process_data(db, 'COPY')
+    dform.gen_table_bins(db, 'COPY', copy_statfile, 'Name', 'DurationNs')
+    dform.gen_api_json_trace(db, 'COPY', START_US, jsonfile)
 
   if hip_trace_found:
     dform.post_process_data(db, 'HIP')
