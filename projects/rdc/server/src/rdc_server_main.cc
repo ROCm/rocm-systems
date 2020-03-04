@@ -39,6 +39,7 @@ THE SOFTWARE.
 #include "rocm_smi/rocm_smi.h"
 #include "rdc/rdc_server_main.h"
 #include "rdc/rdc_rsmi_service.h"
+#include "rdc/rdc_api_service.h"
 #include "rdc/rdc_server_utils.h"
 
 static bool sShutDownServer = false;
@@ -82,6 +83,19 @@ RDCServer::Run() {
 
     if (ret != RSMI_STATUS_SUCCESS) {
       std::cerr << "Failed to start RSMI service" << std::endl;
+      return;
+    }
+  }
+
+  if (start_api_service()) {
+    api_service_ = new amd::rdc::RdcAPIServiceImpl();
+    builder.RegisterService(api_service_);
+
+    // TODO(bill_liu): pass flags from cnfg file
+    rdc_status_t ret = api_service_->Initialize(0);
+
+    if (ret != RDC_ST_OK) {
+      std::cerr << "Failed to start API service" << std::endl;
       return;
     }
   }
@@ -316,8 +330,9 @@ int main(int argc, char** argv) {
   }
 
   // TODO(cfreehil): Eventually, set these by reading a config file
-  rdc_server.set_start_rsmi_service(true);
+  rdc_server.set_start_rsmi_service(false);
   rdc_server.set_start_rdc_admin_service(true);
+  rdc_server.set_start_api_service(true);
 
   rdc_server.Run();
 

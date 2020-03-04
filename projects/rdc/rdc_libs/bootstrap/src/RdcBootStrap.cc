@@ -320,6 +320,8 @@ const char* rdc_status_string(rdc_status_t result) {
                 return "The max limit reached";
         case RDC_ST_CONFLICT:
                 return "Conflict with current state";
+        case RDC_ST_CLIENT_ERROR:
+                return "RDC Client error";
         default:
                 return "Unknown";
     }

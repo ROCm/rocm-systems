@@ -127,3 +127,235 @@ message VerifyConnectionResponse {
     uint64 echo_magic_num = 1;
 }
 
+/****************************************************************************/
+/********************************** RdcAPI Service ************************/
+/****************************************************************************/
+
+service RdcAPI {
+  // Discovery API
+  // rdc_status_t rdc_get_all_devices(uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count)
+  rpc GetAllDevices(Empty) returns (GetAllDevicesResponse) {}
+  // rdc_status_t rdc_get_device_attributes(uint32_t gpu_index, rdc_device_attributes_t* p_rdc_attr)
+  rpc GetDeviceAttributes(GetDeviceAttributesRequest) returns (GetDeviceAttributesResponse) {}
+
+  // Group API
+  // rdc_status_t rdc_group_gpu_create(rdc_group_type_t type,
+  //               const char* group_name, rdc_gpu_group_t* p_rdc_group_id)
+  rpc CreateGpuGroup(CreateGpuGroupRequest) returns (CreateGpuGroupResponse) {}
+
+  // rdc_status_t rdc_group_gpu_add(rdc_gpu_group_t groupId,
+  //             uint32_t gpu_index)
+  rpc AddToGpuGroup(AddToGpuGroupRequest) returns (AddToGpuGroupResponse) {}
+
+  // rdc_status_t rdc_group_field_create(uint32_t num_field_ids,
+  //      uint32_t* field_ids, const char* field_group_name,
+  //     rdc_field_grp_t* rdc_field_group_id)
+  rpc CreateFieldGroup(CreateFieldGroupRequest) returns (CreateFieldGroupResponse) {}
+
+  // rdc_status_t rdc_group_field_get_info(
+  //     rdc_field_grp_t rdc_field_group_id,
+  //     rdc_field_group_info_t* field_group_info)
+  rpc GetFieldGroupInfo(GetFieldGroupInfoRequest) returns (GetFieldGroupInfoResponse) {}
+
+  // rdc_status_t rdc_group_gpu_get_info(
+  //     rdc_gpu_group_t p_rdc_group_id, rdc_group_info_t* p_rdc_group_info)
+  rpc GetGpuGroupInfo(GetGpuGroupInfoRequest) returns (GetGpuGroupInfoResponse) {}
+
+  // rdc_status_t rdc_group_gpu_destroy(
+  //     rdc_gpu_group_t p_rdc_group_id)
+  rpc DestroyGpuGroup(DestroyGpuGroupRequest) returns (DestroyGpuGroupResponse) {}
+
+  // rdc_status_t rdc_group_field_destroy(
+  //     rdc_field_grp_t rdc_field_group_id)
+  rpc DestroyFieldGroup(DestroyFieldGroupRequest) returns (DestroyFieldGroupResponse) {}
+
+  // Field API
+  // rdc_status_t rdc_watch_fields(rdc_gpu_group_t group_id,
+  //     rdc_field_grp_t field_group_id, uint64_t update_freq,
+  //     double max_keep_age, uint32_t max_keep_samples)
+  rpc WatchFields(WatchFieldsRequest) returns (WatchFieldsResponse) {}
+
+  // rdc_status_t rdc_get_latest_value_for_field(uint32_t gpu_index,
+  //     uint32_t field, rdc_field_value* value)
+  rpc GetLatestFieldValue(GetLatestFieldValueRequest) returns (GetLatestFieldValueResponse) {}
+
+  // rdc_status_t rdc_get_field_value_since(uint32_t gpu_index,
+  //     uint32_t field, uint64_t since_time_stamp,
+  //     uint64_t *next_since_time_stamp, rdc_field_value* value)
+  rpc GetFieldSince(GetFieldSinceRequest) returns (GetFieldSinceResponse) {}
+
+  // rdc_status_t rdc_unwatch_fields(rdc_gpu_group_t group_id,
+  //     rdc_field_grp_t field_group_id)
+  rpc UnWatchFields(UnWatchFieldsRequest) returns (UnWatchFieldsResponse) {}
+
+  // rdc_status_t rdc_update_all_fields(uint32_t wait_for_update)
+  rpc UpdateAllFields(UpdateAllFieldsRequest) returns (UpdateAllFieldsResponse) {}
+}
+
+message Empty {
+}
+
+message GetAllDevicesResponse {
+  uint32 status = 1;
+  repeated uint32 gpus = 2;
+}
+
+message GetDeviceAttributesRequest {
+  uint32 gpu_index = 1;
+}
+
+message DeviceAttributes {
+  string device_name = 1;
+}
+
+message GetDeviceAttributesResponse {
+  uint32 status = 1;
+  DeviceAttributes attributes = 2;
+}
+
+message CreateGpuGroupRequest {
+  enum GpuGroupType {
+    RDC_GROUP_DEFAULT = 0;
+    RDC_GROUP_EMPTY = 1;
+  }
+  GpuGroupType type = 1;
+  string group_name = 2;
+}
+
+message CreateGpuGroupResponse {
+  uint32 status = 1;
+  uint32 group_id = 2;
+}
+
+message AddToGpuGroupRequest {
+  uint32 group_id = 1;
+  uint32 gpu_index = 2;
+}
+
+message AddToGpuGroupResponse {
+  uint32 status = 1;
+}
+message CreateFieldGroupRequest {
+  repeated uint32 field_ids = 1;
+  string filed_group_name = 2;
+}
+
+message CreateFieldGroupResponse {
+  uint32 status = 1;
+  uint32 field_group_id = 2;
+}
+
+message GetFieldGroupInfoRequest {
+  uint32 field_group_id = 1;
+}
+
+message GetFieldGroupInfoResponse {
+  uint32 status = 1;
+  string filed_group_name = 2;
+  repeated uint32 field_ids = 3;
+}
+
+message GetGpuGroupInfoRequest {
+  uint32 group_id = 1;
+}
+
+message GetGpuGroupInfoResponse {
+  uint32 status = 1;
+  string group_name = 2;
+  repeated uint32 entity_ids = 3;
+}
+
+message DestroyGpuGroupRequest {
+  uint32 group_id = 1;
+}
+
+message DestroyGpuGroupResponse {
+  uint32 status = 1;
+}
+
+message DestroyFieldGroupRequest {
+  uint32 field_group_id = 1;
+}
+
+message DestroyFieldGroupResponse {
+  uint32 status = 1;
+}
+
+message WatchFieldsRequest {
+  uint32 group_id = 1;
+  uint32 field_group_id = 2;
+  uint64 update_freq = 3;
+  double max_keep_age = 4;
+  uint32 max_keep_samples = 5;
+}
+
+message WatchFieldsResponse {
+  uint32 status = 1;
+}
+
+message GetLatestFieldValueRequest {
+  uint32 gpu_index = 1;
+  uint32 field_id = 2;
+}
+
+message GetLatestFieldValueResponse {
+  uint32 status = 1;
+  uint32 field_id = 2;
+  uint32 rdc_status = 3;
+  uint64 ts = 4;
+  enum FieldType {
+    INTEGER = 0;
+     DOUBLE = 1;
+     STRING = 2;
+     BLOB = 3;
+  };
+  FieldType type = 5;
+  oneof value {
+    uint64 l_int = 6;
+    double dbl = 7;
+    string str = 8;
+  }
+}
+
+message GetFieldSinceRequest {
+  uint32 gpu_index = 1;
+  uint32 field_id = 2;
+  uint64 since_time_stamp = 3;
+}
+
+message GetFieldSinceResponse {
+  uint32 status = 1;
+  uint64 next_since_time_stamp = 2;
+  uint32 field_id = 3;
+  uint32 rdc_status = 4;
+  uint64 ts = 5;
+  enum FieldType {
+    INTEGER = 0;
+     DOUBLE = 1;
+     STRING = 2;
+     BLOB = 3;
+  };
+  FieldType type = 6;
+  oneof value {
+    uint64 l_int = 7;
+    double dbl = 8;
+    string str = 9;
+  }
+}
+
+message UnWatchFieldsRequest {
+  uint32 group_id = 1;
+  uint32 field_group_id = 2;
+}
+
+message UnWatchFieldsResponse {
+  uint32 status = 1;
+}
+
+message UpdateAllFieldsRequest {
+  uint32 wait_for_update = 1;
+}
+
+message UpdateAllFieldsResponse {
+  uint32 status = 1;
+}

@@ -29,6 +29,7 @@ THE SOFTWARE.
 
 #include "rdc/rdc_rsmi_service.h"
 #include "rdc/rdc_admin_service.h"
+#include "rdc/rdc_api_service.h"
 
 class RDCServer {
  public:
@@ -45,6 +46,9 @@ class RDCServer {
     bool start_rdc_admin_service(void) const {return start_rdc_admin_service_;}
     void set_start_rdc_admin_service(bool s) {start_rdc_admin_service_ = s;}
 
+    bool start_api_service(void) const {return start_api_service_;}
+    void set_start_api_service(bool s) {start_api_service_ = s;}
+
     void ShutDown(void);
 
  private:
@@ -57,6 +61,9 @@ class RDCServer {
 
     bool start_rdc_admin_service_;
     amd::rdc::RDCAdminServiceImpl *rdc_admin_service_;
+
+    bool start_api_service_;
+    amd::rdc::RdcAPIServiceImpl *api_service_;
 };
 
 #endif  // SERVER_INCLUDE_RDC_RDC_SERVER_MAIN_H_

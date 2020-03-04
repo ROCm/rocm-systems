@@ -143,6 +143,7 @@ add_subdirectory("server")
 add_subdirectory("client")
 add_subdirectory("rdc_libs")
 add_subdirectory("example")
+add_subdirectory("rdci")
 
 # Turn on cmake "component install"
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)

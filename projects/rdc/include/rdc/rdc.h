@@ -51,6 +51,7 @@ typedef enum {
      RDC_ST_BAD_PARAMETER,      //!< A parameter is invalid
      RDC_ST_NOT_FOUND,          //!< Cannot find the value
      RDC_ST_CONFLICT,           //!< Conflict with current state
+     RDC_ST_CLIENT_ERROR,       //!< The RDC client error
      RDC_ST_MAX_LIMIT               //!< Max limit recording for the object
 } rdc_status_t;
 
