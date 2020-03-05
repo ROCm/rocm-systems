@@ -70,6 +70,30 @@ set ( ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" )
 set ( LIB_DIR "${ROOT_DIR}/src" )
 set ( TEST_DIR "${ROOT_DIR}/test" )
 
+## Enable tracing API
+if (NOT USE_PROF_API)
+  set(USE_PROF_API 1)
+endif()
+
+# Protocol header lookup
+if(USE_PROF_API EQUAL 1)
+    find_path(PROF_API_HEADER_DIR prof_protocol.h
+        HINTS
+            ${PROF_API_HEADER_PATH}
+        PATHS
+            /opt/rocm/roctracer
+        PATH_SUFFIXES
+            include/ext
+    )
+    if(NOT PROF_API_HEADER_DIR)
+        MESSAGE(ERROR "Profiling API header not found. Tracer integration disabled. Use -DPROF_API_HEADER_PATH=<path to prof_protocol.h header>")
+    else()
+        add_definitions(-DUSE_PROF_API=1)
+        include_directories(${PROF_API_HEADER_DIR})
+        MESSAGE(STATUS "Profiling API: ${PROF_API_HEADER_DIR}")
+    endif()
+endif()
+
 ## Build library
 include ( ${LIB_DIR}/CMakeLists.txt )
 

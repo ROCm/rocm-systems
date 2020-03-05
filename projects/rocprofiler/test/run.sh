@@ -116,12 +116,14 @@ export ROCP_INPUT=input1.xml
 eval_test "'rocprof' libtool test n-threads" ./test/ctrl
 
 ## SPM test
-export ROCP_KITER=3
-export ROCP_DITER=3
-export ROCP_AGENTS=1
-export ROCP_THRS=1
-export ROCP_INPUT=spm_input.xml
-eval_test "libtool test, SPM trace test" ./test/ctrl
+# export ROCP_KITER=3
+# export ROCP_DITER=3
+# export ROCP_AGENTS=1
+# export ROCP_THRS=1
+# export ROCP_INPUT=spm_input.xml
+# export ROCP_SPM=1
+# eval_test "libtool test, SPM trace test" ./test/ctrl
+# unset ROCP_SPM
 
 ## Libtool test, counter sets
 # Memcopies tracking

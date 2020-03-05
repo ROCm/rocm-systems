@@ -82,7 +82,7 @@ int main() {
   rocprofiler_properties_t properties;
 
   // Profiling feature objects
-  const unsigned feature_count = 9;
+  const unsigned feature_count = 6;
   rocprofiler_feature_t feature[feature_count];
   // PMC events
   memset(feature, 0, sizeof(feature));
@@ -98,12 +98,12 @@ int main() {
   feature[4].name = "SQ_INSTS_VALU";
   feature[5].kind = ROCPROFILER_FEATURE_KIND_METRIC;
   feature[5].name = "VALUInsts";
-  feature[6].kind = ROCPROFILER_FEATURE_KIND_METRIC;
-  feature[6].name = "TCC_HIT_sum";
-  feature[7].kind = ROCPROFILER_FEATURE_KIND_METRIC;
-  feature[7].name = "TCC_MISS_sum";
-  feature[8].kind = ROCPROFILER_FEATURE_KIND_METRIC;
-  feature[8].name = "WRITE_SIZE";
+//  feature[6].kind = ROCPROFILER_FEATURE_KIND_METRIC;
+//  feature[6].name = "TCC_HIT_sum";
+//  feature[7].kind = ROCPROFILER_FEATURE_KIND_METRIC;
+//  feature[7].name = "TCC_MISS_sum";
+//  feature[8].kind = ROCPROFILER_FEATURE_KIND_METRIC;
+//  feature[8].name = "WRITE_SIZE";
 //  feature[8].kind = ROCPROFILER_FEATURE_KIND_METRIC;
 //  feature[8].name = "TCC_EA_WRREQ_sum";
 //  feature[9].kind = ROCPROFILER_FEATURE_KIND_METRIC;
