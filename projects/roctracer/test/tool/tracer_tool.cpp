@@ -77,6 +77,7 @@ bool trace_hsa_activity = false;
 bool trace_hip_api = false;
 bool trace_hip_activity = false;
 bool trace_kfd = false;
+bool trace_pcs = false;
 // API trace vector
 std::vector<std::string> hsa_api_vec;
 std::vector<std::string> kfd_api_vec;
@@ -91,18 +92,25 @@ FILE* hsa_async_copy_file_handle = NULL;
 FILE* hip_api_file_handle = NULL;
 FILE* hcc_activity_file_handle = NULL;
 FILE* kfd_api_file_handle = NULL;
+FILE* pc_sample_file_handle = NULL;
+
+void close_output_file(FILE* file_handle);
+void close_file_handles() {
+  if (roctx_file_handle) close_output_file(roctx_file_handle);
+  if (hsa_api_file_handle) close_output_file(hsa_api_file_handle);
+  if (hsa_async_copy_file_handle) close_output_file(hsa_async_copy_file_handle);
+  if (hip_api_file_handle) close_output_file(hip_api_file_handle);
+  if (hcc_activity_file_handle) close_output_file(hcc_activity_file_handle);
+  if (kfd_api_file_handle) close_output_file(kfd_api_file_handle);
+  if (pc_sample_file_handle) close_output_file(pc_sample_file_handle);
+}
 
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
 // Error handler
 void fatal(const std::string msg) {
-  if (roctx_file_handle) fflush(roctx_file_handle);
-  if (hsa_api_file_handle) fflush(hsa_api_file_handle);
-  if (hsa_async_copy_file_handle) fflush(hsa_async_copy_file_handle);
-  if (hip_api_file_handle) fflush(hip_api_file_handle);
-  if (hcc_activity_file_handle) fflush(hcc_activity_file_handle);
-  if (kfd_api_file_handle) fflush(kfd_api_file_handle);
+  close_file_handles();
   fflush(stdout);
   fprintf(stderr, "%s\n\n", msg.c_str());
   fflush(stderr);
@@ -439,21 +447,27 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
 
 // Activity tracing callback
 //   hipMalloc id(3) correlation_id(1): begin_ns(1525888652762640464) end_ns(1525888652762877067)
-void hcc_activity_callback(const char* begin, const char* end, void* arg) {
+void pool_activity_callback(const char* begin, const char* end, void* arg) {
   const roctracer_record_t* record = reinterpret_cast<const roctracer_record_t*>(begin);
   const roctracer_record_t* end_record = reinterpret_cast<const roctracer_record_t*>(end);
 
   while (record < end_record) {
     const char * name = roctracer_op_string(record->domain, record->op, record->kind);
-    if (record->domain == ACTIVITY_DOMAIN_HCC_OPS) {
-      fprintf(hcc_activity_file_handle, "%lu:%lu %d:%lu %s:%lu\n",
-        record->begin_ns, record->end_ns, record->device_id, record->queue_id, name, record->correlation_id);
-      fflush(hcc_activity_file_handle);
-    } else {
-#if 0
-      fprintf(hip_api_file_handle, "%lu:%lu %u:%u %s()\n",
-        record->begin_ns, record->end_ns, record->process_id, record->thread_id, name);
-#endif
+    switch(record->domain) {
+      case ACTIVITY_DOMAIN_HCC_OPS:
+        fprintf(hcc_activity_file_handle, "%lu:%lu %d:%lu %s:%lu\n",
+          record->begin_ns, record->end_ns,
+          record->device_id, record->queue_id,
+          name, record->correlation_id);
+        fflush(hcc_activity_file_handle);
+        break;
+      case ACTIVITY_DOMAIN_HSA_OPS:
+        if (record->op == HSA_OP_ID_PCSAMPLE) {
+          fprintf(pc_sample_file_handle, "%u %lu 0x%lx %s\n",
+            record->pc_sample.se, record->pc_sample.cycle, record->pc_sample.pc, name);
+          fflush(pc_sample_file_handle);
+        }
+        break;
     }
     ROCTRACER_CALL(roctracer_next_record(record, &record));
   }
@@ -551,7 +565,28 @@ FILE* open_output_file(const char* prefix, const char* name) {
 }
 
 void close_output_file(FILE* file_handle) {
-  if ((file_handle != NULL) && (file_handle != stdout)) fclose(file_handle);
+  if (file_handle != NULL) {
+    fflush(file_handle);
+    if (file_handle != stdout) fclose(file_handle);
+  }
+}
+
+// Allocating tracing pool
+void open_tracing_pool() {
+  if (roctracer_default_pool() == NULL) {
+    roctracer_properties_t properties{};
+    properties.buffer_size = 0x80000;
+    properties.buffer_callback_fun = pool_activity_callback;
+    ROCTRACER_CALL(roctracer_open_pool(&properties));
+  }
+}
+
+// Flush tracing pool
+void close_tracing_pool() {
+  if (roctracer_default_pool() != NULL) {
+    ROCTRACER_CALL(roctracer_flush_activity());
+    ROCTRACER_CALL(roctracer_close_pool());
+  }
 }
 
 // tool unload method
@@ -566,37 +601,26 @@ void tool_unload() {
 
   if (trace_roctx) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
-
-    roctx_trace_buffer.Flush();
-    close_output_file(roctx_file_handle);
   }
   if (trace_hsa_api) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
-
-    hsa_api_trace_buffer.Flush();
-    close_output_file(hsa_api_file_handle);
   }
-  if (trace_hsa_activity) {
+  if (trace_hsa_activity || trace_pcs) {
     ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
-
-    close_output_file(hsa_async_copy_file_handle);
   }
   if (trace_hip_api || trace_hip_activity) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
     ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
     ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
-    ROCTRACER_CALL(roctracer_flush_activity());
-    ROCTRACER_CALL(roctracer_close_pool());
-
-    hip_api_trace_buffer.Flush();
-    if (hip_api_file_handle) close_output_file(hip_api_file_handle);
-    if (hcc_activity_file_handle) close_output_file(hcc_activity_file_handle);
   }
-
   if (trace_kfd) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_KFD_API));
-    fclose(kfd_api_file_handle);
   }
+
+  // Flush tracing pool
+  close_tracing_pool();
+  roctracer::TraceBufferBase::FlushAll();
+  close_file_handles();
 
   ONLOAD_TRACE_END();
 }
@@ -647,6 +671,11 @@ void tool_load() {
     // KFD domain enabling
     if (std::string(trace_domain).find("kfd") != std::string::npos) {
       trace_kfd = true;
+    }
+
+    // PC sampling enabling
+    if (std::string(trace_domain).find("pcs") != std::string::npos) {
+      trace_pcs = true;
     }
   }
 
@@ -843,15 +872,12 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
 
   // Enable HIP API callbacks/activity
   if (trace_hip_api || trace_hip_activity) {
-
     fprintf(stdout, "    HIP-trace()\n"); fflush(stdout);
     // roctracer properties
     roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, (void*)mark_api_callback);
     // Allocating tracing pool
-    roctracer_properties_t properties{};
-    properties.buffer_size = 0x80000;
-    properties.buffer_callback_fun = hcc_activity_callback;
-    ROCTRACER_CALL(roctracer_open_pool(&properties));
+    open_tracing_pool();
+    // Enable tracing
     if (trace_hip_api) {
       hip_api_file_handle = open_output_file(output_prefix, "hip_api_trace.txt");
       ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
@@ -861,6 +887,14 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
       hcc_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
       ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
     }
+  }
+
+  // Enable PC sampling
+  if (trace_pcs) {
+    fprintf(stdout, "    PCS-trace()\n"); fflush(stdout);
+    open_tracing_pool();
+    pc_sample_file_handle = open_output_file(output_prefix, "pc_sample_trace.txt");
+    ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_PCSAMPLE));
   }
 
   ONLOAD_TRACE_END();

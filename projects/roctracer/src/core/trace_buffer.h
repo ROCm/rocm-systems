@@ -184,8 +184,12 @@ class TraceBuffer : protected TraceBufferBase {
 
     if (is_flushed == false) {
       for (flush_prm_t* prm = flush_prm_arr_; prm < flush_prm_arr_ + flush_prm_count_; prm++) {
+        // Flushed entries type
         uint32_t type = prm->type;
+        // Flushing function
         callback_t fun = prm->fun;
+        if (fun == NULL) FATAL("flush function is not set");
+
         pointer_t pointer = 0;
         for (Entry* ptr : buf_list_) {
           Entry* end = ptr + size_;

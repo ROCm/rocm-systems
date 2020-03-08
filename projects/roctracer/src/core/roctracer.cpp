@@ -844,7 +844,9 @@ static roctracer_status_t roctracer_enable_activity_fun(
   if (pool == NULL) pool = roctracer_default_pool();
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
-      if (op == HSA_OP_ID_DISPATCH) {
+      if (op == HSA_OP_ID_COPY) {
+        roctracer::hsa_support::async_copy_callback_enabled = true;
+      } else {
         const bool init_phase = (roctracer::RocpLoader::GetRef() == NULL);
         if (init_phase == true) {
           roctracer::RocpLoader::Instance().InitActivityCallback((void*)roctracer::HSA_AsyncActivityCallback,
@@ -852,8 +854,6 @@ static roctracer_status_t roctracer_enable_activity_fun(
         }
         const bool succ = roctracer::RocpLoader::Instance().EnableActivityCallback(op, true);
         if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::EnableActivityCallback error");
-      } else if (op == HSA_OP_ID_COPY) {
-        roctracer::hsa_support::async_copy_callback_enabled = true;
       }
       break;
     }
@@ -941,11 +941,11 @@ static roctracer_status_t roctracer_disable_activity_fun(
 {
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
-      if (op == HSA_OP_ID_DISPATCH) {
+      if (op == HSA_OP_ID_COPY) {
+        roctracer::hsa_support::async_copy_callback_enabled = true;
+      } else {
         const bool succ = roctracer::RocpLoader::Instance().EnableActivityCallback(op, false);
         if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::EnableActivityCallback(false) error, op(" << op << ")");
-      } else if (op == HSA_OP_ID_COPY) {
-        roctracer::hsa_support::async_copy_callback_enabled = true;
       }
       break;
     }
@@ -976,8 +976,8 @@ static void roctracer_disable_activity_impl(
     uint32_t domain,
     uint32_t op)
 {
-    roctracer::act_journal->remove({domain, op, {}});
-    roctracer_disable_activity_fun((roctracer_domain_t)domain, op);
+  roctracer::act_journal->remove({domain, op, {}});
+  roctracer_disable_activity_fun((roctracer_domain_t)domain, op);
 }
 
 PUBLIC_API roctracer_status_t roctracer_disable_op_activity(

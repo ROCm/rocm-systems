@@ -84,7 +84,7 @@ typedef struct activity_record_s {
         uint32_t se;                               // sampled SE
         uint64_t cycle;                            // sample cycle
         uint64_t pc;                               // sample PC
-      } ps_sample;
+      } pc_sample;
     };
     size_t bytes;                                  // data size bytes
 } activity_record_t;
