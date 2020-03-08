@@ -65,9 +65,18 @@ typedef struct activity_record_s {
     uint32_t domain;                               // activity domain id
     activity_kind_t kind;                          // activity kind
     activity_op_t op;                              // activity op
-    activity_correlation_id_t correlation_id;      // activity ID
-    uint64_t begin_ns;                             // host begin timestamp
-    uint64_t end_ns;                               // host end timestamp
+    union {
+      struct {
+        activity_correlation_id_t correlation_id;  // activity ID
+        uint64_t begin_ns;                         // host begin timestamp
+        uint64_t end_ns;                           // host end timestamp
+      };
+      struct {
+        uint32_t se;                               // sampled SE
+        uint64_t cycle;                            // sample cycle
+        uint64_t pc;                               // sample PC
+      } pc_sample;
+    };
     union {
       struct {
         int device_id;                             // device id
@@ -80,11 +89,6 @@ typedef struct activity_record_s {
       struct {
         activity_correlation_id_t external_id;     // external correlatino id
       };
-      struct {
-        uint32_t se;                               // sampled SE
-        uint64_t cycle;                            // sample cycle
-        uint64_t pc;                               // sample PC
-      } pc_sample;
     };
     size_t bytes;                                  // data size bytes
 } activity_record_t;
