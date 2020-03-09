@@ -47,6 +47,7 @@ rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status,
     if (rdc_status != RDC_ST_OK) {
         return static_cast<rdc_status_t>(rdc_status);
     }
+    return RDC_ST_OK;
 }
 
 // JOB RdcAPI
