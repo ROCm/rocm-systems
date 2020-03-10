@@ -34,14 +34,6 @@ if [ -n "$1" ] ; then
 fi
 
 # traces comparison
-trace_level=0
-# 0 is no trace comparison
-# 1 is events count comparison
-# 2 is events order comparison 
-if [ -n "$2" ] ; then
-  trace_level=$2
-fi
-
 # debugger
 debugger=""
 if [ -n "$3" ] ; then
@@ -55,6 +47,8 @@ test_number=0
 xeval_test() {
   test_number=$test_number
 }
+
+trace_level = 0
 eval_test() {
   label=$1
   cmdline=$2
@@ -111,8 +105,27 @@ eval_test() {
 
 # Standalone test
 # rocTrecer is used explicitely by test
+eval_trlevel() {
+  testname=$1
+  if grep -q MatrixTranspose_ctest_trace tests_trcmp_0.txt; then
+    trace_level=0
+  fi
+  if grep -q MatrixTranspose_ctest_trace tests_trcmp_1.txt; then
+    trace_level=1
+  fi
+  if grep -q MatrixTranspose_ctest_trace tests_trcmp_2.txt; then
+    trace_level=2
+  fi
+  if grep -q MatrixTranspose_ctest_trace tests_trcmp_3.txt; then
+    trace_level=3
+  fi
+}
+
+eval_trlevel "MatrixTranspose_ctest_trace"
 eval_test "standalone C test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest" "test/MatrixTranspose_ctest_trace"
+eval_trlevel "MatrixTranspose_test_trace"
 eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test" "test/MatrixTranspose_test_trace"
+eval_trlevel "MatrixTranspose_mgpu_trace"
 eval_test "standalone HIP MGPU test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_mgpu" "test/MatrixTranspose_mgpu_trace"
 
 # Tool test
@@ -121,11 +134,14 @@ export HSA_TOOLS_LIB="test/libtracer_tool.so"
 
 # SYS test
 export ROCTRACER_DOMAIN="sys:roctx"
+eval_trlevel "MatrixTranspose_sys_trace"
 eval_test "tool SYS test" ./test/MatrixTranspose "test/MatrixTranspose_sys_trace"
 export ROCTRACER_DOMAIN="sys:hsa:roctx"
+eval_trlevel "MatrixTranspose_sys_hsa_trace"
 eval_test "tool SYS/HSA test" ./test/MatrixTranspose "test/MatrixTranspose_sys_hsa_trace"
 # Tracing control <delay:length:rate>
 export ROCTRACER_DOMAIN="hip"
+eval_trlevel "MatrixTranspose_hip_trace"
 eval_test "tool period test" "ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose" "test/MatrixTranspose_hip_trace"
 
 # HSA test
@@ -143,10 +159,12 @@ export ROCP_AGENTS=1
 # each thread creates a queue pre GPU agent
 export ROCP_THRS=1
 
+eval_trlevel "ctrl_hsa_trace"
 eval_test "tool HSA test" ./test/hsa/ctrl "test/ctrl_hsa_trace"
 
 echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > input.xml
 export ROCP_INPUT=input.xml
+eval_trlevel "ctrl_hsa_input_trace"
 eval_test "tool HSA test input" ./test/hsa/ctrl "test/ctrl_hsa_input_trace"
 
 #valgrind --leak-check=full $tbin
