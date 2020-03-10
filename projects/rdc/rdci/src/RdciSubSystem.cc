@@ -20,14 +20,19 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include "RdciSubSystem.h"
-#include "RdcException.h"
+#include "rdc_lib/RdcException.h"
+#include "common/rdc_utils.h"
 
 namespace amd {
 namespace rdc {
 
 RdciSubSystem::RdciSubSystem():
     rdc_handle_(nullptr)
-    , ip_port_("localhost:50051") {  // default host
+    , ip_port_("localhost:50051")  // default host
+    , use_auth_(true)
+    , root_ca_("/etc/rdc/client/certs/rdc_cacert.pem")
+    , client_cert_("/etc/rdc/client/certs/rdc_client_cert.pem")
+    , client_key_("/etc/rdc/client/private/rdc_client_cert.key") {
      rdc_status_t status = rdc_init(0);
      if (status != RDC_ST_OK) {
          throw RdcException(status, "RDC initialize fail");
@@ -35,12 +40,79 @@ RdciSubSystem::RdciSubSystem():
 }
 
 void RdciSubSystem::connect() {
-    rdc_status_t status = rdc_connect(ip_port_.c_str(), &rdc_handle_);
+    rdc_status_t status;
+
+    if (use_auth_) {
+        std::string ca_pem;
+        std::string client_cert_pem;
+        std::string client_key_pem;
+
+        if (!FileExists(root_ca_.c_str())) {
+            std::cout << "In order to use the SSL mutual authentication, the "
+                << "root CA must be copied to " << root_ca_ << std::endl;
+                throw RdcException(RDC_ST_BAD_PARAMETER, "root CA not found");
+        }
+        int ret = ReadFile(root_ca_, &ca_pem);
+        if (ret) {
+            throw RdcException(RDC_ST_BAD_PARAMETER,
+            std::string("Fail to read root CA at") + root_ca_);
+        }
+        if (!FileExists(client_cert_.c_str())) {
+            std::cout << "In order to use the SSL mutual authentication, the "
+                << "client certificate must be copied to "
+                << client_cert_ << std::endl;
+                throw RdcException(RDC_ST_BAD_PARAMETER,
+                    "client cert not found");
+        }
+        ret = ReadFile(client_cert_, &client_cert_pem);
+        if (ret) {
+            throw RdcException(RDC_ST_BAD_PARAMETER,
+            std::string("Fail to read client certificate at") + client_cert_);
+        }
+        if (!FileExists(client_key_.c_str())) {
+            std::cout << "In order to use the SSL mutual authentication, the "
+                << "client private key must be copied to "
+                << client_key_ << std::endl;
+                throw RdcException(RDC_ST_BAD_PARAMETER,
+                    "client key not found");
+        }
+        ret = ReadFile(client_key_, &client_key_pem);
+        if (ret) {
+            throw RdcException(RDC_ST_BAD_PARAMETER,
+               std::string("Fail to read client key at ") + client_key_);
+        }
+
+        status = rdc_connect(ip_port_.c_str(), &rdc_handle_,
+           ca_pem.c_str(), client_cert_pem.c_str(), client_key_pem.c_str());
+    } else {  // Not use the SSL mutual authentication
+        status = rdc_connect(ip_port_.c_str(), &rdc_handle_,
+            nullptr, nullptr, nullptr);
+    }
+
     if (status != RDC_ST_OK) {
-        throw RdcException(status, "Fail to setup the connection");
+        throw RdcException(status,
+    "Fail to setup the connection. Please check all libraries in right folder");
     }
 }
 
+void RdciSubSystem::show_common_usage() const {
+    std::cout << "  --host       <IP/FQDN>:port    Connects to "
+            << "specified IP or fully-qualified domain name.\n";
+    std::cout << "                                 The port "
+            << "must be specified.\n";
+    std::cout << "                                 Default: localhost:50051\n";
+    std::cout << "  -u  --unauth                   Do not use the SSL mutual"
+            << " authentication to encrypt the communication\n"
+            << "                                 Default: SSL mutual will be"
+            << " used. You must copy the root CA to "
+            << root_ca_ << "\n"
+            << "                                 Client certificate to "
+            << client_cert_ << "\n"
+            << "                                 Client key to "
+            << client_key_ << "\n";
+    std::cout << "  -h  --help                     Displays usage "
+              << "information and exits.\n";
+}
 
 RdciSubSystem::~RdciSubSystem() {
     if (rdc_handle_) {
@@ -50,7 +122,6 @@ RdciSubSystem::~RdciSubSystem() {
 
     rdc_shutdown();
 }
-
 
 }  // namespace rdc
 }  // namespace amd

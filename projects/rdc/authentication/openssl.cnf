@@ -23,6 +23,7 @@ nameopt			= default_ca
 certopt			= default_ca
 policy			= policy_match
 unique_subject		= no
+copy_extensions = copyall
 
 [ policy_match ]
 countryName		= match
@@ -77,6 +78,7 @@ authorityKeyIdentifier	= keyid:always,issuer:always
 [ v3_req ]
 basicConstraints	= CA:FALSE
 subjectKeyIdentifier	= hash
+subjectAltName = @alt_names
 
 [ req_ext ]
 subjectAltName = @alt_names
@@ -84,5 +86,5 @@ subjectAltName = @alt_names
 [alt_names]
 # < ** MODIFY BELOW TO YOUR NEEDS. WILDCARDS ARE ACCEPTED. **>
 DNS.1   = localhost
-DNS.2   = another-website.dev
+DNS.2   = *.amd.com
 

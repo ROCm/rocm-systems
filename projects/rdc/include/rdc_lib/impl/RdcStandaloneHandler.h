@@ -79,7 +79,8 @@ class RdcStandaloneHandler: public RdcHandler {
     // Control RdcAPI
     rdc_status_t rdc_update_all_fields(uint32_t wait_for_update) override;
 
-    explicit RdcStandaloneHandler(const char* ip_and_port);
+    explicit RdcStandaloneHandler(const char* ip_and_port,
+     const char* root_ca, const char* client_cert, const char* client_key);
 
  private:
     // Helper function to handle the error
@@ -92,7 +93,8 @@ class RdcStandaloneHandler: public RdcHandler {
 }  // namespace amd
 
 extern "C" {
-    amd::rdc::RdcHandler *make_handler(const char* ip_port);
+    amd::rdc::RdcHandler *make_handler(const char* ip_port,
+    const char* root_ca, const char* client_cert, const char* client_key);
 }
 
 #endif  // RDC_LIB_IMPL_RDCSTANDALONEHANDLER_H_

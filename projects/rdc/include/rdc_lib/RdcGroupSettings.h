@@ -31,8 +31,8 @@ namespace rdc {
 
 class RdcGroupSettings {
  public:
-    virtual rdc_status_t rdc_group_gpu_create(rdc_group_type_t type,
-        const char* group_name, rdc_gpu_group_t* p_rdc_group_id) = 0;
+    virtual rdc_status_t rdc_group_gpu_create(const char* group_name,
+        rdc_gpu_group_t* p_rdc_group_id) = 0;
     virtual rdc_status_t rdc_group_gpu_destroy(
         rdc_gpu_group_t p_rdc_group_id) = 0;
     virtual rdc_status_t rdc_group_gpu_add(

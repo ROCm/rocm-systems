@@ -29,15 +29,11 @@ namespace rdc {
 RdcGroupSettingsImpl::RdcGroupSettingsImpl() {
 }
 
-rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_create(rdc_group_type_t type,
+rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_create(
                   const char* group_name, rdc_gpu_group_t* p_rdc_group_id) {
-    // TODO(bill_liu): handle type to create default group for all GPUs
-    if (type == RDC_GROUP_DEFAULT) {
-        return RDC_ST_NOT_SUPPORTED;
-    }
-
     rdc_group_info_t ginfo;
     strncpy_with_null(ginfo.group_name, group_name, RDC_MAX_STR_LENGTH);
+    ginfo.count = 0;
 
     std::lock_guard<std::mutex> guard(group_mutex_);
     gpu_group_.emplace(cur_group_id_, ginfo);
@@ -72,6 +68,8 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(
         } else {
             return RDC_ST_MAX_LIMIT;
         }
+    } else {
+        return RDC_ST_NOT_FOUND;
     }
 
     return RDC_ST_OK;

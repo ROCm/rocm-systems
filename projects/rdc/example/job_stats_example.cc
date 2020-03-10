@@ -58,7 +58,8 @@ int main(int, char **) {
     }
 
     if (standalone) {  // standalone
-        result = rdc_connect(hostIpAddress, &rdc_handle);
+        result = rdc_connect(hostIpAddress, &rdc_handle,
+            nullptr, nullptr, nullptr);
         if ( result != RDC_ST_OK ) {
             std::cout << "Error connecting to remote rdcd. Return: "
                 << rdc_status_string(result) << std::endl;

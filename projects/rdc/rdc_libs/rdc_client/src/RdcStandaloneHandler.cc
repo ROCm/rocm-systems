@@ -23,18 +23,31 @@ THE SOFTWARE.
 #include <grpcpp/grpcpp.h>
 #include "rdc.grpc.pb.h" // NOLINT
 
-
-amd::rdc::RdcHandler *make_handler(const char* ip_and_port) {
-    return new amd::rdc::RdcStandaloneHandler(ip_and_port);
+amd::rdc::RdcHandler *make_handler(const char* ip_and_port,
+        const char* root_ca, const char* client_cert, const char* client_key) {
+    return new amd::rdc::RdcStandaloneHandler(ip_and_port,
+        root_ca, client_cert, client_key);
 }
 
 namespace amd {
 namespace rdc {
 
-RdcStandaloneHandler::RdcStandaloneHandler(const char* ip_and_port):
-     stub_(::rdc::RdcAPI::NewStub(grpc::CreateChannel(ip_and_port,
-     grpc::InsecureChannelCredentials()))) {
-}
+RdcStandaloneHandler::RdcStandaloneHandler(const char* ip_and_port,
+    const char* root_ca, const char* client_cert, const char* client_key) {
+        std::shared_ptr<grpc::ChannelCredentials> cred(nullptr);
+        if (root_ca == nullptr || client_cert == nullptr
+         || client_key == nullptr) {
+             cred = grpc::InsecureChannelCredentials();
+         } else {
+             grpc::SslCredentialsOptions sslOpts{};
+             sslOpts.pem_root_certs = root_ca;
+             sslOpts.pem_private_key = client_key;
+             sslOpts.pem_cert_chain = client_cert;
+             cred = grpc::SslCredentials(sslOpts);
+         }
+        stub_ = ::rdc::RdcAPI::NewStub(grpc::CreateChannel(ip_and_port, cred));
+    }
+
 
 rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status,
         uint32_t rdc_status) {
@@ -44,10 +57,7 @@ rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status,
         return RDC_ST_CLIENT_ERROR;
     }
 
-    if (rdc_status != RDC_ST_OK) {
-        return static_cast<rdc_status_t>(rdc_status);
-    }
-    return RDC_ST_OK;
+    return static_cast<rdc_status_t>(rdc_status);
 }
 
 // JOB RdcAPI

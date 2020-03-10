@@ -41,8 +41,11 @@ rdc_status_t rdc_shutdown() {
 }
 
 rdc_status_t rdc_connect(const char* ipAddress,
-                rdc_handle_t* p_rdc_handle ) {
-        amd::rdc::RdcHandler* (*func_make_handler)(const char*);
+                rdc_handle_t* p_rdc_handle,
+                const char* root_ca, const char* client_cert,
+                const char* client_key ) {
+        amd::rdc::RdcHandler* (*func_make_handler)(const char*,
+        const char*, const char*, const char*);
 
         if (!ipAddress || !p_rdc_handle) {
                 return RDC_ST_FAIL_LOAD_MODULE;
@@ -63,7 +66,8 @@ rdc_status_t rdc_connect(const char* ipAddress,
         }
 
         *p_rdc_handle = static_cast<rdc_handle_t>
-                (func_make_handler(ipAddress));
+                (func_make_handler(ipAddress,
+                                root_ca, client_cert, client_key));
         return RDC_ST_OK;
 }
 

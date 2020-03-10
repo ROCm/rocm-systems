@@ -64,11 +64,13 @@ set(SRC_DIR "${PROJECT_SOURCE_DIR}/rdci/src")
 set(INC_DIR "${PROJECT_SOURCE_DIR}/rdci/include")
 set(LIB_BOOSTRAP_DIR "${PROJECT_BINARY_DIR}/rdc_libs")
 
-include_directories(${INC_DIR} ${PROJECT_SOURCE_DIR}/include)
+include_directories(${INC_DIR} ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR})
 
 set(RDCI_SRC_LIST "${SRC_DIR}/rdci.cc")
-set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciDisCoverySubSystem.cc")
+set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciDiscoverySubSystem.cc")
 set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciSubSystem.cc")
+set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${PROJECT_SOURCE_DIR}/common/rdc_utils.cc")
 message("RDCI_SRC_LIST=${RDCI_SRC_LIST}")
 set(RDCI_EXE "rdci")
 

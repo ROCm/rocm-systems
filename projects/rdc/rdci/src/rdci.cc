@@ -24,7 +24,7 @@ THE SOFTWARE.
 #include <string>
 #include "rdc_lib/rdc_common.h"
 #include "rdc/rdc.h"
-#include "RdcException.h"
+#include "rdc_lib/RdcException.h"
 #include "RdciDiscoverySubSystem.h"
 
 

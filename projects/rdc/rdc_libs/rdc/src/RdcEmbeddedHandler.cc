@@ -27,13 +27,22 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcCacheManagerImpl.h"
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
 #include "rdc_lib/rdc_common.h"
+#include "rdc_lib/RdcException.h"
 #include "rocm_smi/rocm_smi.h"
 
 namespace {
 // call the rsmi_init when load library
 // and rsmi_shutdown when unload the library.
 class rsmi_initializer {
-         rsmi_initializer() { rsmi_init(0);}
+         rsmi_initializer() {
+             // Make sure rsmi will not be initialized multiple times
+             rsmi_shut_down();
+             rsmi_status_t rsmi_ret = rsmi_init(0);
+             if (rsmi_ret != RSMI_STATUS_SUCCESS) {
+                 throw amd::rdc::RdcException(
+                     RDC_ST_FAIL_LOAD_MODULE, "RSMI initialize fail");
+             }
+         }
          ~rsmi_initializer() { rsmi_shut_down();}
  public:
          static rsmi_initializer& getInstance() {
@@ -144,12 +153,50 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_gpu_create(rdc_group_type_t type,
     if (!group_name || !p_rdc_group_id) {
         return RDC_ST_BAD_PARAMETER;
     }
-    return group_settings_->
-        rdc_group_gpu_create(type, group_name, p_rdc_group_id);
+
+    rdc_status_t status = group_settings_->
+        rdc_group_gpu_create(group_name, p_rdc_group_id);
+
+    if (status != RDC_ST_OK || type == RDC_GROUP_EMPTY) {
+        return status;
+    }
+
+    // Add All GPUs to the group
+    uint32_t count = 0;
+    uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
+    status = rdc_get_all_devices(
+        gpu_index_list, &count);
+    if (status != RDC_ST_OK) {
+        return status;
+    }
+    for (uint32_t i=0; i < count; i++) {
+        status = rdc_group_gpu_add(*p_rdc_group_id, gpu_index_list[i]);
+    }
+
+    return status;
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_group_gpu_add(rdc_gpu_group_t group_id,
                 uint32_t gpu_index) {
+    uint32_t count = 0;
+    uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
+    rdc_status_t status = rdc_get_all_devices(
+        gpu_index_list, &count);
+    if (status != RDC_ST_OK) {
+        return status;
+    }
+    bool is_gpu_exist = false;
+    for (uint32_t i=0; i < count; i++) {
+        if (gpu_index_list[i] == gpu_index) {
+            is_gpu_exist = true;
+            break;
+        }
+    }
+
+    if (!is_gpu_exist) {
+        return RDC_ST_NOT_FOUND;
+    }
+
     return group_settings_->rdc_group_gpu_add(group_id, gpu_index);
 }
 

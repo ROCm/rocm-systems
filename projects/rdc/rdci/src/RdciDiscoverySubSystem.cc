@@ -23,14 +23,14 @@ THE SOFTWARE.
 #include <unistd.h>
 #include "rdc_lib/rdc_common.h"
 #include "rdc/rdc.h"
-#include "RdcException.h"
+#include "rdc_lib/RdcException.h"
 #include "RdciDiscoverySubSystem.h"
 
 
 namespace amd {
 namespace rdc {
 
-RdciDiscoverySubSystem::RdciDiscoverySubSystem() :show_help_(false) {
+RdciDiscoverySubSystem::RdciDiscoverySubSystem() : show_help_(false) {
 }
 
 void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char ** argv) {
@@ -38,13 +38,14 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char ** argv) {
     const struct option long_options[] = {
         {"host",    required_argument, nullptr, HOST_OPTIONS },
         {"help", optional_argument, nullptr, 'h' },
+        {"unauth", optional_argument, nullptr, 'u' },
         { nullptr,  0 , nullptr, 0 }
     };
 
     int option_index = 0;
     int opt = 0;
 
-    while ((opt = getopt_long(argc, argv, "h",
+    while ((opt = getopt_long(argc, argv, "hu",
                 long_options, &option_index)) != -1) {
         switch (opt) {
             case HOST_OPTIONS:
@@ -53,27 +54,25 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char ** argv) {
             case 'h':
                  show_help_ = true;
                  return;
+            case 'u':
+                 use_auth_ = false;
+                 break;
             default:
                 show_help();
                 throw RdcException(RDC_ST_BAD_PARAMETER,
                         "Unknown command line options");
         }
     }
+
 }
 
 void RdciDiscoverySubSystem::show_help() const {
     std::cout << " discovery -- Used to discover and identify GPUs "
         << "and their attributes.\n\n";
     std::cout << "Usage\n";
-    std::cout << "    rdci discovery [--host <IP/FQDN>:port]\n";
+    std::cout << "    rdci discovery [--host <IP/FQDN>:port] [-u]\n";
     std::cout << "\nFlags:\n";
-    std::cout << "  --host       <IP/FQDN>:port    Connects to "
-            << "specified IP or fully-qualified domain name.\n";
-    std::cout << "                                 The port "
-            << "must be specified.\n";
-    std::cout << "                                 Default: localhost:50051\n";
-    std::cout << "  -h  --help                     Displays usage "
-              << "information and exits.\n";
+    show_common_usage();
 }
 
 

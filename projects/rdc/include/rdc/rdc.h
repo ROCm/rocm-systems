@@ -309,12 +309,21 @@ rdc_status_t rdc_stop_embedded(rdc_handle_t p_rdc_handle);
 /**
  *  @brief Connect to rdcd daemon
  *
- *  @details This method is used to connect to a remote stand-alone rdcd daemon.
- *  This function is not thread safe.
+ *  @details This method is used to connect to a remote stand-alone
+ *  rdcd daemon. This function is not thread safe.
  *
  *  @param[in] ipAndPort The IP and port of the remote rdcd. The ipAndPort
  *  can be specified in this x.x.x.x:yyyy format, where x.x.x.x is the
  *  IP address and yyyy is the port.
+ *
+ *  @param [in] root_ca The root CA stored in the string in pem format. Set it
+ *  as nullptr if the communication is not encrypted.
+ *
+ *  @param [in] client_cert The client certificate stored in the string in pem
+ *  format. Set it as nullptr if the communication is not encrypted.
+ *
+ *  @param [in] root_ca The client key stored in the string in pem format.
+ *  Set it as nullptr if the communication is not encrypted.
  *
  *  @param[inout] p_rdc_handle Caller provided pointer to rdc_handle_t. Upon
  *  successful call, the value will contain the handler
@@ -322,7 +331,8 @@ rdc_status_t rdc_stop_embedded(rdc_handle_t p_rdc_handle);
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_connect(const char *ipAndPort, rdc_handle_t* p_rdc_handle);
+rdc_status_t rdc_connect(const char *ipAndPort, rdc_handle_t* p_rdc_handle,
+        const char* root_ca, const char* client_cert, const char* client_key);
 
 /**
  *  @brief Disconnect from rdcd daemon.

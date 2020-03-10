@@ -44,7 +44,8 @@ void RdcMetricsUpdaterImpl::start() {
     updater_ = std::async(std::launch::async, [this](){
         while (started_) {
             watch_table_->rdc_update_all_fields();
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            std::this_thread::sleep_for(
+                    std::chrono::microseconds(_check_frequency));
         }
     });
 }

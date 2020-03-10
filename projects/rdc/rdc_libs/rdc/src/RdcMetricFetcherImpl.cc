@@ -34,11 +34,10 @@ namespace rdc {
 bool RdcMetricFetcherImpl::is_field_valid(uint32_t field_id) const {
      const std::vector<uint32_t> all_fields = {RDC_FI_GPU_MEMORY_USAGE,
      RDC_FI_GPU_MEMORY_TOTAL, RDC_FI_GPU_COUNT, RDC_FI_POWER_USAGE,
-     RDC_FI_GPU_SM_CLOCK, RDC_FI_GPU_UTIL, RDC_FI_DEV_NAME};
+     RDC_FI_GPU_SM_CLOCK, RDC_FI_GPU_UTIL, RDC_FI_DEV_NAME, RDC_FI_GPU_TEMP};
 
      return std::find(all_fields.begin(), all_fields.end(), field_id)
                != all_fields.end();
-
 }
 
 rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
@@ -112,6 +111,15 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
             value->status = rsmi_dev_name_get(gpu_index,
                value->value.str, RDC_MAX_STR_LENGTH);
             value->type = STRING;
+            break;
+        case RDC_FI_GPU_TEMP:
+            int64_t val_i64;
+            value->status = rsmi_dev_temp_metric_get(gpu_index,
+                    0, RSMI_TEMP_CURRENT, &val_i64);
+            value->type = INTEGER;
+            if (value->status == RSMI_STATUS_SUCCESS) {
+                  value->value.l_int = val_i64;
+            }
             break;
         default:
             break;

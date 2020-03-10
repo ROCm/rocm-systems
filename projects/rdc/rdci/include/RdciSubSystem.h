@@ -39,8 +39,14 @@ class RdciSubSystem {
      virtual void process() = 0;
      virtual ~RdciSubSystem();
  protected:
+     void show_common_usage() const;
      rdc_handle_t rdc_handle_;
      std::string ip_port_;
+
+     bool use_auth_;
+     std::string root_ca_;
+     std::string client_cert_;
+     std::string client_key_;
 };
 
 typedef std::shared_ptr<RdciSubSystem> RdciSubSystemPtr;
