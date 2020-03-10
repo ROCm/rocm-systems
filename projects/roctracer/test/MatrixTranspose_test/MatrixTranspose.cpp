@@ -312,9 +312,9 @@ void activity_callback(const char* begin, const char* end, void* arg) {
       if (record->op == HIP_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
     } else if (record->domain == ACTIVITY_DOMAIN_HSA_OPS) {
       fprintf(stdout, " se(%u) cycle(%lu) pc(%lx)",
-        record->ps_sample.se,
-        record->ps_sample.cycle,
-        record->ps_sample.pc
+        record->pc_sample.se,
+        record->pc_sample.cycle,
+        record->pc_sample.pc
       );
     } else if (record->domain == ACTIVITY_DOMAIN_EXT_API) {
       fprintf(stdout, " external_id(%lu)",
@@ -350,7 +350,6 @@ void init_tracing() {
   ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_PCSAMPLE));
   // Enable KFD API tracing
   ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_KFD_API, api_callback, NULL));
-  ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_KFD_API));
   // Enable rocTX
   ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, api_callback, NULL));
 }
@@ -368,7 +367,9 @@ void stop_tracing() {
   ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
   ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
   ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
-  ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_KFD_API));
+  ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
+  ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_KFD_API));
+  ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
   ROCTRACER_CALL(roctracer_flush_activity());
   printf("# STOP  #############################\n");
 }

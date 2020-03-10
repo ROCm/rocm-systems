@@ -21,11 +21,10 @@ class BaseLoader : public T {
     if (handle_ == NULL) return NULL;
 
     fun_t *f = (fun_t*) dlsym(handle_, fun_name);
-    if (f == NULL) {
+    if ((to_check_symb_ == true) && (f == NULL)) {
       fprintf(stderr, "roctracer: symbol lookup '%s' failed: \"%s\"\n", fun_name, dlerror());
       abort();
     }
-    dlerror();
     return f;
   }
 
@@ -48,11 +47,10 @@ class BaseLoader : public T {
   BaseLoader() {
     const int flags = (to_load_ == true) ? RTLD_LAZY : RTLD_LAZY|RTLD_NOLOAD;
     handle_ = dlopen(lib_name_, flags);
-    if ((to_check_ == true) && (handle_ == NULL)) {
+    if ((to_check_open_ == true) && (handle_ == NULL)) {
       fprintf(stderr, "roctracer: Loading '%s' failed, %s\n", lib_name_, dlerror());
       abort();
     }
-    dlerror();
 
     T::init(this);
   }
@@ -62,7 +60,8 @@ class BaseLoader : public T {
   }
 
   static bool to_load_;
-  static bool to_check_;
+  static bool to_check_open_;
+  static bool to_check_symb_;
 
   static mutex_t mutex_;
   static const char* lib_name_;
@@ -203,13 +202,15 @@ typedef BaseLoader<RocTxApi> RocTxLoader;
   template<class T> typename roctracer::BaseLoader<T>::mutex_t roctracer::BaseLoader<T>::mutex_; \
   template<class T> std::atomic<roctracer::BaseLoader<T>*> roctracer::BaseLoader<T>::instance_{}; \
   template<class T> bool roctracer::BaseLoader<T>::to_load_ = false; \
-  template<class T> bool roctracer::BaseLoader<T>::to_check_ = true; \
+  template<class T> bool roctracer::BaseLoader<T>::to_check_open_ = true; \
+  template<class T> bool roctracer::BaseLoader<T>::to_check_symb_ = true; \
   template<> const char* roctracer::RocpLoader::lib_name_ = "librocprofiler64.so"; \
-  template<> bool roctracer::RocpLoader::to_load_ = true; \
+  template<> bool roctracer::RocpLoader::to_check_open_ = false; \
+  template<> bool roctracer::RocpLoader::to_check_symb_ = false; \
   template<> const char* roctracer::HipLoader::lib_name_ = "libhip_hcc.so"; \
-  template<> bool roctracer::HipLoader::to_check_ = false; \
+  template<> bool roctracer::HipLoader::to_check_open_ = false; \
   template<> const char* roctracer::HccLoader::lib_name_ = "libmcwamp.so"; \
-  template<> bool roctracer::HccLoader::to_check_ = false; \
+  template<> bool roctracer::HccLoader::to_check_open_ = false; \
   template<> const char* roctracer::KfdLoader::lib_name_ = "libkfdwrapper64.so"; \
   template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so"; \
   template<> bool roctracer::RocTxLoader::to_load_ = true;
