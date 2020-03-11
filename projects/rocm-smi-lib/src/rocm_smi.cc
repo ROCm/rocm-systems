@@ -81,16 +81,13 @@ static rsmi_status_t handleException() {
     debug_print("Exception caught: %s.\n", e.what());
     return e.error_code();
   } catch (const std::exception& e) {
-    debug_print("Unhandled exception: %s\n", e.what());
-    assert(false && "Unhandled exception.");
+    debug_print("Exception caught: %s\n", e.what());
     return RSMI_STATUS_INTERNAL_EXCEPTION;
   } catch (const std::nested_exception& e) {
-    debug_print("Callback threw, forwarding.\n");
-    e.rethrow_nested();
+    debug_print("Callback threw.\n");
     return RSMI_STATUS_INTERNAL_EXCEPTION;
   } catch (...) {
-    assert(false && "Unhandled exception.");
-    abort();
+    debug_print("Unknown exception caught.\n");
     return RSMI_STATUS_INTERNAL_EXCEPTION;
   }
 }
