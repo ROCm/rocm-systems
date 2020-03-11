@@ -205,8 +205,6 @@ typedef BaseLoader<RocTxApi> RocTxLoader;
   template<class T> bool roctracer::BaseLoader<T>::to_check_open_ = true; \
   template<class T> bool roctracer::BaseLoader<T>::to_check_symb_ = true; \
   template<> const char* roctracer::RocpLoader::lib_name_ = "librocprofiler64.so"; \
-  template<> bool roctracer::RocpLoader::to_check_open_ = false; \
-  template<> bool roctracer::RocpLoader::to_check_symb_ = false; \
   template<> const char* roctracer::HipLoader::lib_name_ = "libhip_hcc.so"; \
   template<> bool roctracer::HipLoader::to_check_open_ = false; \
   template<> const char* roctracer::HccLoader::lib_name_ = "libmcwamp.so"; \

@@ -853,13 +853,9 @@ static roctracer_status_t roctracer_enable_activity_fun(
         roctracer::hsa_support::async_copy_callback_enabled = true;
       } else {
         const bool init_phase = (roctracer::RocpLoader::GetRef() == NULL);
-        if (roctracer::RocpLoader::Instance().InitActivityCallback == NULL) break;
         if (init_phase == true) {
           roctracer::RocpLoader::Instance().InitActivityCallback((void*)roctracer::HSA_AsyncActivityCallback,
                                                                  (void*)pool);
-        }
-        if (roctracer::RocpLoader::Instance().EnableActivityCallback == NULL) {
-          EXC_RAISING(ROCTRACER_STATUS_ERROR, "EnableActivityCallback not found");
         }
         const bool succ = roctracer::RocpLoader::Instance().EnableActivityCallback(op, true);
         if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::EnableActivityCallback error");
@@ -953,10 +949,7 @@ static roctracer_status_t roctracer_disable_activity_fun(
       if (op == HSA_OP_ID_COPY) {
         roctracer::hsa_support::async_copy_callback_enabled = true;
       } else {
-        if (roctracer::RocpLoader::Instance().InitActivityCallback == NULL) break;
-        if (roctracer::RocpLoader::Instance().EnableActivityCallback == NULL) {
-          EXC_RAISING(ROCTRACER_STATUS_ERROR, "EnableActivityCallback not found");
-        }
+        if (roctracer::RocpLoader::GetRef() == NULL) break;
         const bool succ = roctracer::RocpLoader::Instance().EnableActivityCallback(op, false);
         if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::EnableActivityCallback(false) error, op(" << op << ")");
       }

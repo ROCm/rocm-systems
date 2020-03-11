@@ -867,7 +867,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
 
     fprintf(stdout, "    HSA-activity-trace()\n"); fflush(stdout);
-    ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
+    ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
   }
 
   // Enable HIP API callbacks/activity
