@@ -108,6 +108,7 @@ class TestBase {
 
  protected:
   void PrintDeviceHeader(uint32_t dv_ind);
+  bool setup_failed_;   ///< Record that setup failed to return ierr in Run
 
  private:
   uint32_t num_monitor_devs_;  ///< Number of monitor devices found

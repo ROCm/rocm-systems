@@ -89,6 +89,10 @@ void TestAPISupportRead::Run(void) {
   rsmi_status_t err;
 
   TestBase::Run();
+  if (setup_failed_) {
+    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    return;
+  }
 
   rsmi_func_id_iter_handle_t iter_handle, var_iter, sub_var_iter;
   rsmi_func_id_value_t value;

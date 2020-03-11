@@ -60,7 +60,7 @@ static const char kCloseLabel[] = "TEST CLEAN UP";
 static const char kResultsLabel[] = "TEST RESULTS";
 
 
-TestBase::TestBase() : description_("") {
+TestBase::TestBase() : setup_failed_(false), description_("") {
 }
 TestBase::~TestBase() {
 }
@@ -85,9 +85,15 @@ void TestBase::SetUp(void) {
   printf("\n\t%s\n", label.c_str());
 
   err = rsmi_init(init_options());
+  if (err != RSMI_STATUS_SUCCESS) {
+    setup_failed_ = true;
+  }
   ASSERT_EQ(err, RSMI_STATUS_SUCCESS);
 
   err = rsmi_num_monitor_devices(&num_monitor_devs_);
+  if (err != RSMI_STATUS_SUCCESS) {
+    setup_failed_ = true;
+  }
   ASSERT_EQ(err, RSMI_STATUS_SUCCESS);
 
   if (num_monitor_devs_ == 0) {
@@ -139,6 +145,7 @@ void TestBase::Run(void) {
   std::string label;
   MakeHeaderStr(kRunLabel, &label);
   printf("\n\t%s\n", label.c_str());
+  ASSERT_TRUE(!setup_failed_);
 }
 
 void TestBase::Close(void) {

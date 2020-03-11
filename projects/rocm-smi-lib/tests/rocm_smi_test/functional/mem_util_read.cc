@@ -96,6 +96,10 @@ void TestMemUtilRead::Run(void) {
   uint64_t usage;
 
   TestBase::Run();
+  if (setup_failed_) {
+    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    return;
+  }
 
   auto err_chk = [&](const char *str) {
     if (err != RSMI_STATUS_SUCCESS) {

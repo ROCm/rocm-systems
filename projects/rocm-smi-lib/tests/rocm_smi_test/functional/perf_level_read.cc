@@ -90,6 +90,10 @@ void TestPerfLevelRead::Run(void) {
   rsmi_dev_perf_level_t pfl;
 
   TestBase::Run();
+  if (setup_failed_) {
+    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    return;
+  }
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);

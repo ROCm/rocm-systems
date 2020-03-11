@@ -97,6 +97,10 @@ void TestProcInfoRead::Run(void) {
   rsmi_process_info_t *procs = nullptr;
 
   TestBase::Run();
+  if (setup_failed_) {
+    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    return;
+  }
 
   uint32_t num_devices;
   err = rsmi_num_monitor_devices(&num_devices);

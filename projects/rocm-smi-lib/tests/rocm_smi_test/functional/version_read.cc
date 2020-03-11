@@ -96,6 +96,10 @@ void TestVersionRead::Run(void) {
   rsmi_version_t ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
 
   TestBase::Run();
+  if (setup_failed_) {
+    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    return;
+  }
 
   err = rsmi_version_get(&ver);
   CHK_ERR_ASRT(err)

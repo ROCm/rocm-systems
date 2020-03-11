@@ -108,7 +108,10 @@ void TestFrequenciesRead::Run(void) {
   rsmi_pcie_bandwidth_t b;
 
   TestBase::Run();
-
+  if (setup_failed_) {
+    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    return;
+  }
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     auto freq_output = [&](rsmi_clk_type_t t, const char *name) {
