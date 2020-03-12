@@ -56,6 +56,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi/rocm_smi_exception.h"
 
 namespace amd {
 namespace smi {
@@ -385,9 +386,30 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
     // dependency monitors. The main assumption here is that
     // variant_<sensor_i>'s sensor-based dependencies have the same index i;
     // in other words, variant_i is not dependent on a sensor j, j != i
-    do {
-      ret = get_supported_sensors(mon_root + "/", *dep, &intersect);
-      if (ret == -1) {
+
+    // Initialize intersect with the available monitors for the first
+    // mandatory dependency.
+    ret = get_supported_sensors(mon_root + "/", *dep, &intersect);
+    std::string dep_path;
+    if (ret == -1) {
+      // In this case, the dependency is not sensor-specific, so just
+      // see if the file exists.
+      dep_path = mon_root + "/" + *dep;
+      if (!FileExists(dep_path.c_str())) {
+        mand_depends_met = false;
+      }
+    } else if (ret == -2) {
+      throw amd::smi::rsmi_exception(RSMI_STATUS_INTERNAL_EXCEPTION,
+                        "Failed to parse monitor file name: " + dep_path);
+    }
+    dep++;
+
+    while (mand_depends_met && dep != it->second.mandatory_depends.end()) {
+      ret = get_supported_sensors(mon_root + "/", *dep, &sensors_i);
+
+      if (ret == 0) {
+        intersect = get_intersection(&sensors_i, &intersect);
+      } else if (ret == -1) {
         // In this case, the dependency is not sensor-specific, so just
         // see if the file exists.
         std::string dep_path = mon_root + "/" + *dep;
@@ -395,9 +417,13 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
           mand_depends_met = false;
           break;
         }
+      } else if (ret == -2) {
+        throw amd::smi::rsmi_exception(RSMI_STATUS_INTERNAL_EXCEPTION,
+                          "Failed to parse monitor file name: " + dep_path);
       }
+
       dep++;
-    } while (dep != it->second.mandatory_depends.end());
+    }
 
     if (!mand_depends_met) {
       it++;

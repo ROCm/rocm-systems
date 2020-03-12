@@ -3071,7 +3071,13 @@ rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
 
     case SUBVARIANT_ITER:
       sub_var_itr = reinterpret_cast<SubVariantIt *>(handle->func_id_iter);
-      value->id = *(*sub_var_itr);
+
+      // The sub-variant refers to monitors types. We store those as the exist
+      // in the file name. For example, for temp2_crit, 2 is stored (crit is the
+      // variant). These are 1-based values. But the RSMI user expects a 0-based
+      // value, so we will convert it to RSMI-space by subracting 1:
+      assert(*(*sub_var_itr) > 0);
+      value->id = *(*sub_var_itr) - 1;
       break;
 
     default:
