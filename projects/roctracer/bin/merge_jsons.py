@@ -27,41 +27,62 @@ import argparse
 
 shift = 100
 
-def parse_json(jsonfile, fo):
+def parse_json(jsonfile, fo, index,lastjson):
   if not re.search(r'\.json$', jsonfile):
     raise Exception('wrong input file type: "' + jsonfile + '"' )
-
+  metadata=''
   with open(jsonfile) as fp:
     for line in fp:
-      ms = re.match(r'^{ "traceEvents":\[{}\n|^\]}\n',line)
+      ms = re.match(r'^{ "traceEvents":\[{}\n|^\]}\n|^\],\n',line)
       if ms:
+        continue
+      md = re.match(r'.*otherData.*',line)
+      if md:
+        metadata = ' '  
+        continue
+      if metadata != '':
+        minfo = re.match(r'(.*)"(.*)":(.*)',line)
+        if minfo:
+          if lastjson == 0:
+            metadata = metadata + minfo.group(1) + '"' + minfo.group(2) + '(' + os.path.splitext(jsonfile)[0] + ')":' + minfo.group(3) + ',\n'
+          else:
+            metadata = metadata + minfo.group(1) + '"' + minfo.group(2) + '(' + os.path.splitext(jsonfile)[0] + ')":' + minfo.group(3) + '\n'
         continue
       mo = re.match(r'(.*"pid"\s*:\s*)(\d+)(.*)',line)
       mp = re.match(r'(.*)"name"\s*:\s*"([\w,\s]+)"(.*)"pid"\s*:\s*(\d+)(.*)',line)
       mp2 = re.match(r'(.*"pid"\s*:\s*")(\d+)(".*)',line)
       if mp:
-        laneName = mp.group(2) + ' from ' + jsonfile
+        laneName = mp.group(2) + '(' + os.path.splitext(jsonfile)[0] + ')'
         mpid = int(str(mp.group(4)))
-        mpid = mpid + shift
+        mpid = mpid + (index+1)*shift
         fo.write(mp.group(1) + '"name":"' + laneName + '"' + mp.group(3) + '"pid":' + str(mpid) + mp.group(5) + '\n') 
       elif mo:
         mpid = int(str(mo.group(2)))
-        mpid = mpid + shift
+        mpid = mpid + (index+1)*shift
         fo.write(mo.group(1) + str(mpid) + mo.group(3) + '\n')
       elif mp2:
         mpid = int(str(mp2.group(2)))
-        mpid = mpid + shift
+        mpid = mpid + (index+1)*shift
         fo.write(mp2.group(1) + str(mpid) + mp2.group(3) + '\n')
       else:
         fo.write(line)
+  return metadata
 
 def merge_jsons(jsons,outfile):
   ljsons = jsons.split(',')
   fo = open(outfile, mode='w')
   fo.write('{ "traceEvents":[{}\n')
+  metadata = ''
+  res=''
   for i in range(0, len(ljsons)):
-    parse_json(ljsons[i],fo)
-  fo.write(']}\n')
+    if i == len(ljsons)-1:
+      res=res+parse_json(ljsons[i],fo,i,1)
+    else:
+      res=res+parse_json(ljsons[i],fo,i,0)
+  fo.write('],\n')
+  fo.write('  "otherData": {\n')
+  fo.write(res)
+  fo.write('  }\n}\n')
   fo.close()
 
 parser = argparse.ArgumentParser(description='merge_jsons.py: merges list of jsons into one json file.')
