@@ -190,7 +190,7 @@ class InterceptQueue {
 
         // Calling dispatch callback
         rocprofiler_group_t group = {};
-        hsa_status_t status = dispatch_callback_(&data, callback_data_, &group);
+        hsa_status_t status = (dispatch_callback_.load())(&data, callback_data_, &group);
         free(const_cast<char*>(kernel_name));
         // Injecting profiling start/stop packets
         if ((status != HSA_STATUS_SUCCESS) || (group.context == NULL)) {
