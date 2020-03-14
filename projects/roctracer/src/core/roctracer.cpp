@@ -686,8 +686,8 @@ static void roctracer_enable_callback_impl(
     roctracer_rtapi_callback_t callback,
     void* user_data)
 {
-    roctracer::cb_journal->registr({domain, op, {callback, user_data}});
-    roctracer_enable_callback_fun((roctracer_domain_t)domain, op, callback, user_data);
+  roctracer::cb_journal->registr({domain, op, {callback, user_data}});
+  roctracer_enable_callback_fun((roctracer_domain_t)domain, op, callback, user_data);
 }
 
 PUBLIC_API roctracer_status_t roctracer_enable_op_callback(
@@ -1152,46 +1152,45 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
   API_METHOD_SUFFIX
 }
 
+static bool is_loaded = false;
+
 PUBLIC_API bool roctracer_load() {
-  static bool is_loaded = false;
   ONLOAD_TRACE("begin, loaded(" << is_loaded << ")");
 
-  if (is_loaded) return true;
+  if (is_loaded == true) return true;
   is_loaded = true;
+
+  if (roctracer::cb_journal == NULL) roctracer::cb_journal = new roctracer::CbJournal;
+  if (roctracer::act_journal == NULL) roctracer::act_journal = new roctracer::ActJournal;
 
   ONLOAD_TRACE_END();
   return true;
 }
 
 PUBLIC_API void roctracer_unload() {
-  static bool is_unloaded = false;
-  ONLOAD_TRACE("begin, unloaded(" << is_unloaded << ")");
+  ONLOAD_TRACE("begin, loaded(" << is_loaded << ")");
 
-  if (is_unloaded == true) return;
-  is_unloaded = true;
+  if (is_loaded == false) return;
+  is_loaded = false;
+
+  if (roctracer::cb_journal != NULL) {
+    delete roctracer::cb_journal;
+    roctracer::cb_journal = NULL;
+  }
+  if (roctracer::act_journal != NULL) {
+    delete roctracer::act_journal;
+    roctracer::act_journal = NULL;
+  }
 
   roctracer::trace_buffer.Flush();
   roctracer::close_output_file(roctracer::kernel_file_handle);
   ONLOAD_TRACE_END();
 }
 
-// HSA-runtime tool on-load/unload methods
-PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-                       const char* const* failed_tool_names) {
-  ONLOAD_TRACE_BEG();
-  const bool ret = roctracer_load();
-  ONLOAD_TRACE_END();
-  return ret;
-}
-PUBLIC_API void OnUnload() {
-  ONLOAD_TRACE("done");
-}
-
 CONSTRUCTOR_API void constructor() {
   ONLOAD_TRACE_BEG();
   roctracer::util::Logger::Create();
-  if (roctracer::cb_journal == NULL) roctracer::cb_journal = new roctracer::CbJournal;
-  if (roctracer::act_journal == NULL) roctracer::act_journal = new roctracer::ActJournal;
+  roctracer_load();
   ONLOAD_TRACE_END();
 }
 

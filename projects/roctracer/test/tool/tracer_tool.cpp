@@ -585,19 +585,18 @@ void open_tracing_pool() {
 void close_tracing_pool() {
   if (roctracer_default_pool() != NULL) {
     ROCTRACER_CALL(roctracer_flush_activity());
-    ROCTRACER_CALL(roctracer_close_pool());
   }
 }
 
+// tool library is loaded
+static bool is_loaded = false;
+
 // tool unload method
 void tool_unload() {
-  static bool is_unloaded = false;
-  ONLOAD_TRACE("begin, unloaded(" << is_unloaded << ")");
+  ONLOAD_TRACE("begin, loaded(" << is_loaded << ")");
 
-  if (is_unloaded == true) return;
-  is_unloaded = true;
-
-  roctracer_unload();
+  if (is_loaded == false) return;
+  is_loaded = false;
 
   if (trace_roctx) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
@@ -627,11 +626,12 @@ void tool_unload() {
 
 // tool load method
 void tool_load() {
-  static bool is_loaded = false;
   ONLOAD_TRACE("begin, loaded(" << is_loaded << ")");
 
   if (is_loaded == true) return;
   is_loaded = true;
+
+  roctracer::TraceBufferBase::StartWorkerThreadAll();
 
   // Output file
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
@@ -816,9 +816,6 @@ void tool_load() {
     }
     printf(")\n");
   }
-
-  roctracer::TraceBufferBase::StartWorkerThreadAll();
-  roctracer_load();
 
   ONLOAD_TRACE_END();
 }

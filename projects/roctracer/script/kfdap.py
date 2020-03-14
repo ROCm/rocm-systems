@@ -1,4 +1,5 @@
 #!/usr/bin/python
+from __future__ import print_function
 import os, sys, re
 
 OUT_H = 'inc/kfd_prof_str.h' 
@@ -33,7 +34,7 @@ LICENSE = \
 #############################################################
 # Error handler
 def fatal(module, msg):
-  print >>sys.stderr, module + ' Error: "' + msg + '"'
+  print (module + ' Error: "' + msg + '"', file = sys.stderr)
   sys.exit(1)
 
 # Get next text block
@@ -539,7 +540,7 @@ class API_DescrParser:
 # main
 # Usage
 if len(sys.argv) != 3:
-  print >>sys.stderr, "Usage:", sys.argv[0], " <rocTracer root> <KFD include path>"
+  print ("Usage:", sys.argv[0], " <rocTracer root> <KFD include path>", file = sys.stderr)
   sys.exit(1)
 else:
   ROOT = sys.argv[1] + '/'
@@ -548,13 +549,13 @@ else:
 descr = API_DescrParser(OUT_H, KFD_DIR, API_HEADERS_H, LICENSE)
 
 out_file = ROOT + OUT_H
-print 'Generating "' + out_file + '"'
+print ('Generating "' + out_file + '"')
 f = open(out_file, 'w')
 f.write(descr.content_h[:-1])
 f.close()
 
 out_file = ROOT + OUT_CPP
-print 'Generating "' + out_file + '"'
+print ('Generating "' + out_file + '"')
 f = open(out_file, 'w')
 f.write(descr.content_cpp[:-1])
 f.close()

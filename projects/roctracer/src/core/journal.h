@@ -47,7 +47,7 @@ class Journal {
   }
 
   ~Journal() {
-    for (auto& val : map_) delete val.second;
+    for (auto& val : *map_) delete val.second;
     delete map_;
   }
 
