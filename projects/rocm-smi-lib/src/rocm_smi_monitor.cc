@@ -275,12 +275,19 @@ Monitor::setSensorLabelMap(void) {
   }
   auto add_temp_sensor_entry = [&](uint32_t file_index) {
     ret = readMonitor(kMonTempLabel, file_index, &type_str);
-    if (ret) {
-      return ret;
-    }
-
     rsmi_temperature_type_t t_type = kTempSensorNameMap.at(type_str);
-    temp_type_index_map_.insert({t_type, file_index});
+
+    // If readMonitor fails, there is no label file for the file_index.
+    // In that case, map the type to file index 0, which is not supported
+    // and will fail appropriately later when we check for support.
+    if (ret) {
+      temp_type_index_map_.insert({t_type, 0});
+      index_temp_type_map_.insert({file_index, RSMI_TEMP_TYPE_INVALID});
+    } else {
+      temp_type_index_map_.insert({t_type, file_index});
+      index_temp_type_map_.insert({file_index, t_type});
+    }
+    index_temp_type_map_.insert({file_index, t_type});
     return 0;
   };
 
@@ -342,8 +349,13 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
 }
 
 uint32_t
-Monitor::getSensorIndex(rsmi_temperature_type_t type) {
+Monitor::getTempSensorIndex(rsmi_temperature_type_t type) {
   return temp_type_index_map_.at(type);
+}
+
+rsmi_temperature_type_t
+Monitor::getTempSensorEnum(uint64_t ind) {
+  return index_temp_type_map_.at(ind);
 }
 
 static std::vector<uint64_t> get_intersection(std::vector<uint64_t> *v1,
@@ -360,6 +372,25 @@ static std::vector<uint64_t> get_intersection(std::vector<uint64_t> *v1,
   return intersect;
 }
 
+// Use this enum to encode the monitor type into the monitor ID.
+// We can later use this to convert to rsmi-api sensor types; for exampple,
+// rsmi_temperature_type_t, which is what the caller will expect. Add
+// new types as needed.
+
+typedef enum {
+  eDefaultMonitor = 0,
+  eTempMonitor,
+} monitor_types;
+
+static monitor_types getFuncType(std::string f_name) {
+  monitor_types ret = eDefaultMonitor;
+
+  if (f_name.compare("rsmi_dev_temp_metric_get") == 0) {
+    ret = eTempMonitor;
+  }
+  return ret;
+}
+
 void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
   std::map<const char *, monitor_depends_t>::const_iterator it =
                                                    kMonFuncDependsMap.begin();
@@ -369,6 +400,7 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
   std::vector<uint64_t> sensors_i;
   std::vector<uint64_t> intersect;
   int ret;
+  monitor_types m_type;
 
   assert(supported_funcs != nullptr);
 
@@ -377,6 +409,7 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
     std::vector<const char *>::const_iterator dep =
                                          it->second.mandatory_depends.begin();
 
+    m_type = getFuncType(it->first);
     mand_depends_met = true;
 
     // Initialize "intersect". A monitor is considered supported if all of its
@@ -451,7 +484,21 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
         supported_monitors = intersect;
       }
       if (supported_monitors.size() > 0) {
-        (*supported_variants)[kMonInfoVarTypeToRSMIVariant.at(*var)] =
+        for (uint32_t i = 0; i < supported_monitors.size(); ++i) {
+          assert(supported_monitors[i] > 0);
+
+          if (m_type == eDefaultMonitor) {
+            supported_monitors[i] |=
+                    (supported_monitors[i] - 1) << MONITOR_TYPE_BIT_POSITION;
+          } else if (m_type == eTempMonitor) {
+            supported_monitors[i] |=
+                 static_cast<uint64_t>(getTempSensorEnum(supported_monitors[i]))
+                                                << MONITOR_TYPE_BIT_POSITION;
+          } else {
+            assert(!"Unexpected monitor type");
+          }
+        }
+      (*supported_variants)[kMonInfoVarTypeToRSMIVariant.at(*var)] =
                              std::make_shared<SubVariant>(supported_monitors);
       }
     }

@@ -93,7 +93,8 @@ class Monitor {
     int readMonitor(MonitorTypes type, uint32_t sensor_ind, std::string *val);
     int writeMonitor(MonitorTypes type, uint32_t sensor_ind, std::string val);
     uint32_t setSensorLabelMap(void);
-    uint32_t getSensorIndex(rsmi_temperature_type_t type);
+    uint32_t getTempSensorIndex(rsmi_temperature_type_t type);
+    rsmi_temperature_type_t getTempSensorEnum(uint64_t ind);
     void fillSupportedFuncs(SupportedFuncMap *supported_funcs);
 
  private:
@@ -101,6 +102,15 @@ class Monitor {
     std::string path_;
     const RocmSMI_env_vars *env_;
     std::map<rsmi_temperature_type_t, uint32_t> temp_type_index_map_;
+
+    // This map uses a 64b index instead of 32b (unlike temp_type_index_map_)
+    // for flexibility and simplicity. Currently, some parts of the
+    // implementation store both the RSMI api index and the file index into a
+    // single value. 32 bits is enough to store both, but we are using 64
+    // bits for simpler integration with existing implementation, which uses
+    // a 64b value. Also, if we need to encode anything else, 64b will give
+    // us more room to do so, without excessive changes.
+    std::map<uint64_t, rsmi_temperature_type_t> index_temp_type_map_;
 };
 
 }  // namespace smi

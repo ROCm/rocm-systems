@@ -93,6 +93,10 @@ struct RocmSMI_env_vars {
     const char *path_power_root_override;
 };
 
+// Use this bit offset to store the label-mapped file index
+#define MONITOR_TYPE_BIT_POSITION 16
+#define MONITOR_IND_BIT_MASK ((1 << MONITOR_TYPE_BIT_POSITION) - 1)
+
 // Support information data structures
 typedef std::vector<uint64_t> SubVariant;
 typedef SubVariant::const_iterator SubVariantIt;

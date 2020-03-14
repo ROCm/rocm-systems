@@ -1892,15 +1892,10 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   assert(dev->monitor() != nullptr);
   std::shared_ptr<amd::smi::Monitor> m = dev->monitor();
 
-  uint32_t err  = m->setSensorLabelMap();
-  if (err) {
-     return errno_to_rsmi_status(err);
-  }
-
-  // getSensorIndex will throw an out of range exception if sensor_type is not
-  // found
+  // getTempSensorIndex will throw an out of range exception if sensor_type is
+  // not found
   uint32_t sensor_index =
-         m->getSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
+     m->getTempSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
 
   CHK_API_SUPPORT_ONLY(temperature, metric, sensor_index)
 
@@ -3072,12 +3067,9 @@ rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
     case SUBVARIANT_ITER:
       sub_var_itr = reinterpret_cast<SubVariantIt *>(handle->func_id_iter);
 
-      // The sub-variant refers to monitors types. We store those as the exist
-      // in the file name. For example, for temp2_crit, 2 is stored (crit is the
-      // variant). These are 1-based values. But the RSMI user expects a 0-based
-      // value, so we will convert it to RSMI-space by subracting 1:
-      assert(*(*sub_var_itr) > 0);
-      value->id = *(*sub_var_itr) - 1;
+      // The hwmon file index that is appropriate for the rsmi user is stored
+      // at bit position MONITOR_TYPE_BIT_POSITION.
+      value->id = *(*sub_var_itr) >> MONITOR_TYPE_BIT_POSITION;
       break;
 
     default:

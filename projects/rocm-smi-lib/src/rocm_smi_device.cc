@@ -880,6 +880,19 @@ void Device::fillSupportedFuncs(void) {
   // DumpSupportedFunctions();
 }
 
+static bool subvariant_match(const std::shared_ptr<SubVariant> *sv,
+                                                             uint64_t sub_v) {
+  assert(sv != nullptr);
+
+  SubVariantIt it = (*sv)->begin();
+  for (; it != (*sv)->end(); it++) {
+    if ((*it & MONITOR_IND_BIT_MASK) == sub_v) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool Device::DeviceAPISupported(std::string name, uint64_t variant,
                                                        uint64_t sub_variant) {
   SupportedFuncMapIt func_it;
@@ -908,13 +921,7 @@ bool Device::DeviceAPISupported(std::string name, uint64_t variant,
       // if variant is != RSMI_DEFAULT_VARIANT, we should not have a nullptr
       assert(var_it->second != nullptr);
 
-      sub_var_it = std::find(var_it->second->begin(),
-                                          var_it->second->end(), sub_variant);
-      if (sub_var_it == var_it->second->end()) {
-        return false;
-      } else {
-        return true;
-      }
+      return subvariant_match(&(var_it->second), sub_variant);
     }
   } else {  // variant == RSMI_DEFAULT_VARIANT
     if (func_it->second != nullptr) {
@@ -926,13 +933,7 @@ bool Device::DeviceAPISupported(std::string name, uint64_t variant,
       if (func_it->second == nullptr) {
         return false;
       }
-      sub_var_it = std::find(var_it->second->begin(),
-                                          var_it->second->end(), sub_variant);
-      if (sub_var_it == var_it->second->end()) {
-        return false;
-      } else {
-        return true;
-      }
+      return subvariant_match(&(var_it->second), sub_variant);
     }
   }
   assert(!"We should not reach here");

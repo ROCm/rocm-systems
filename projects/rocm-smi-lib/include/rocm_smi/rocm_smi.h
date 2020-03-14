@@ -326,7 +326,8 @@ typedef enum {
                                                //!< temperature
   RSMI_TEMP_TYPE_MEMORY,                       //!< VRAM temperature
 
-  RSMI_TEMP_TYPE_LAST = RSMI_TEMP_TYPE_MEMORY
+  RSMI_TEMP_TYPE_LAST = RSMI_TEMP_TYPE_MEMORY,
+  RSMI_TEMP_TYPE_INVALID = 0xFFFFFFFF          //!< Invalid type
 } rsmi_temperature_type_t;
 
 /**

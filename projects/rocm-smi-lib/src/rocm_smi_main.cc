@@ -481,8 +481,10 @@ uint32_t RocmSMI::DiscoverAMDMonitors(void) {
       fs.close();
 
       if (amd_monitor_types_.find(mon_type) != amd_monitor_types_.end()) {
-        monitors_.push_back(std::shared_ptr<Monitor>(
-                                          new Monitor(mon_name, &env_vars_)));
+        std::shared_ptr<Monitor> m =
+                  std::shared_ptr<Monitor>(new Monitor(mon_name, &env_vars_));
+        m->setSensorLabelMap();
+        monitors_.push_back(m);
       }
     }
     dentry = readdir(mon_dir);
