@@ -41,14 +41,8 @@ add_custom_target( mytest
   COMMAND C_TEST=1 ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_ctest"
 # copy traces
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose_test_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose_ctest_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose_mgpu_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose_sys_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose_sys_hsa_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose_hip_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/ctrl_hsa_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/ctrl_hsa_input_trace.txt ${PROJECT_BINARY_DIR}/test/"
+  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose*/*_trace.txt ${PROJECT_BINARY_DIR}/test/"
+  COMMAND sh -xc "cp ${TEST_DIR}/*_trace.txt ${PROJECT_BINARY_DIR}/test/"
 )
 
 ## Util sources
