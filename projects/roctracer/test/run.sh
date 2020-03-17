@@ -33,7 +33,6 @@ if [ -n "$1" ] ; then
   test_filter=$1
 fi
 
-# traces comparison
 # debugger
 debugger=""
 if [ -n "$3" ] ; then
@@ -48,11 +47,9 @@ xeval_test() {
   test_number=$test_number
 }
 
-trace_level = 0
 eval_test() {
   label=$1
   cmdline=$2
-  trace="${3}.txt"
   rtrace="${3}_r.txt"
   if [ $test_filter = -1  -o $test_filter = $test_number ] ; then
     echo "$label: \"$cmdline\""
@@ -62,42 +59,8 @@ eval_test() {
       echo "$label: FAILED"
       test_status=$(($test_status + 1))
     else
-      case "$trace_level" in
-        "0") echo "$label: PASSED"
-        ;;
-        "1") 
-          echo "../script/parse_trace.py -in $rtrace  -cn"
-          cnt_r=`../script/parse_trace.py -in $rtrace  -cn`
-          cnt=`../script/parse_trace.py -in $trace  -cn`
-          if [ "$cnt_r" = "$cnt" ] ; then
-            echo "$label: PASSED (trace compare, events count)"
-          else
-            echo "$label: FAILED (trace compare, events count)"
-            test_status=$(($test_status + 1))
-          fi
-        ;;
-        "2")
-          echo "../script/parse_trace.py -in $rtrace  -or"
-          cnt_r=`../script/parse_trace.py -in $rtrace  -or`
-          cnt=`../script/parse_trace.py -in $trace  -or`
-          if [ "$cnt_r" = "$cnt" ] ; then
-            echo "$label: PASSED (trace compare, events order)"
-          else
-            echo "$label: FAILED (trace compare, events order)"
-            test_status=$(($test_status + 1))
-          fi
-        ;; 
-        "3")
-         echo "Comparing $trace $rtrace :"
-         eval "diff --brief $trace $rtrace"
-         if [ $? != 0 ] ; then
-           echo "$label: FAILED (trace compare, files differ)"
-           test_status=$(($test_status + 1))
-         else
-           echo "$label: PASSED (trace compare, files are the same)"
-         fi
-        ;;
-      esac
+      echo "Comparing traces: ../script/check_trace.sh $3"
+      eval "../script/check_trace.sh $3 $label"
     fi
   fi
   test_number=$((test_number + 1))
@@ -105,27 +68,8 @@ eval_test() {
 
 # Standalone test
 # rocTrecer is used explicitely by test
-eval_trlevel() {
-  testname=$1
-  if grep -q MatrixTranspose_ctest_trace tests_trcmp_0.txt; then
-    trace_level=0
-  fi
-  if grep -q MatrixTranspose_ctest_trace tests_trcmp_1.txt; then
-    trace_level=1
-  fi
-  if grep -q MatrixTranspose_ctest_trace tests_trcmp_2.txt; then
-    trace_level=2
-  fi
-  if grep -q MatrixTranspose_ctest_trace tests_trcmp_3.txt; then
-    trace_level=3
-  fi
-}
-
-eval_trlevel "MatrixTranspose_ctest_trace"
 eval_test "standalone C test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest" "test/MatrixTranspose_ctest_trace"
-eval_trlevel "MatrixTranspose_test_trace"
 eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test" "test/MatrixTranspose_test_trace"
-eval_trlevel "MatrixTranspose_mgpu_trace"
 eval_test "standalone HIP MGPU test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_mgpu" "test/MatrixTranspose_mgpu_trace"
 
 # Tool test
@@ -134,14 +78,11 @@ export HSA_TOOLS_LIB="test/libtracer_tool.so"
 
 # SYS test
 export ROCTRACER_DOMAIN="sys:roctx"
-eval_trlevel "MatrixTranspose_sys_trace"
 eval_test "tool SYS test" ./test/MatrixTranspose "test/MatrixTranspose_sys_trace"
 export ROCTRACER_DOMAIN="sys:hsa:roctx"
-eval_trlevel "MatrixTranspose_sys_hsa_trace"
 eval_test "tool SYS/HSA test" ./test/MatrixTranspose "test/MatrixTranspose_sys_hsa_trace"
 # Tracing control <delay:length:rate>
 export ROCTRACER_DOMAIN="hip"
-eval_trlevel "MatrixTranspose_hip_trace"
 eval_test "tool period test" "ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose" "test/MatrixTranspose_hip_trace"
 
 # HSA test
@@ -159,12 +100,10 @@ export ROCP_AGENTS=1
 # each thread creates a queue pre GPU agent
 export ROCP_THRS=1
 
-eval_trlevel "ctrl_hsa_trace"
 eval_test "tool HSA test" ./test/hsa/ctrl "test/ctrl_hsa_trace"
 
 echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > input.xml
 export ROCP_INPUT=input.xml
-eval_trlevel "ctrl_hsa_input_trace"
 eval_test "tool HSA test input" ./test/hsa/ctrl "test/ctrl_hsa_input_trace"
 
 #valgrind --leak-check=full $tbin
