@@ -38,19 +38,32 @@ def parse_json(jsonfile, fo, index,lastjson):
         continue
       md = re.match(r'.*otherData.*',line)
       if md:
+        # collect metadata in variable 'metadata'
         metadata = ' '  
         continue
       if metadata != '':
         minfo = re.match(r'(.*)"(.*)":(.*)',line)
+        # minfo catch pattern like: "version": "my app V1.0" 
         if minfo:
+          # test for last json to see if ',' needed at the end of metadata
           if lastjson == 0:
             metadata = metadata + minfo.group(1) + '"' + minfo.group(2) + '(' + os.path.splitext(jsonfile)[0] + ')":' + minfo.group(3) + ',\n'
           else:
             metadata = metadata + minfo.group(1) + '"' + minfo.group(2) + '(' + os.path.splitext(jsonfile)[0] + ')":' + minfo.group(3) + '\n'
         continue
       mo = re.match(r'(.*"pid"\s*:\s*)(\d+)(.*)',line)
+      # mo catch pattern like: ,{"ts":4258451581657,"ph":"s","cat":"DataFlow","id":0,"pid":2,"tid":83583,"name":"dep"}
+      # grp2 is pid number that needs shifting, grp1 is what comes before pid number and grp3 is what comes after
       mp = re.match(r'(.*)"name"\s*:\s*"([\w,\s]+)"(.*)"pid"\s*:\s*(\d+)(.*)',line)
+      # mp catch pattern like: ,{"args":{"name":"0 CPU HIP API"},"ph":"M","pid":2,"name":"process_name"} 
+      # Grp 1.	0-10	,{"args":{
+      # Grp 2.	18-31	0 CPU HIP API
+      # Grp 3.	32-43	},"ph":"M",
+      # Grp 4.	49-50	2
+      # Grp 5.	50-73	,"name":"process_name"}
       mp2 = re.match(r'(.*"pid"\s*:\s*")(\d+)(".*)',line)
+      # mo2 catch pattern like:     "pid":"3",
+      # where grp2 is the pid number to shift
       if mp:
         laneName = mp.group(2) + '(' + os.path.splitext(jsonfile)[0] + ')'
         mpid = int(str(mp.group(4)))
@@ -74,12 +87,14 @@ def merge_jsons(jsons,outfile):
   fo.write('{ "traceEvents":[{}\n')
   metadata = ''
   res=''
+  # res will contain all metadata for all jsons files provided as input
   for i in range(0, len(ljsons)):
     if i == len(ljsons)-1:
       res=res+parse_json(ljsons[i],fo,i,1)
     else:
       res=res+parse_json(ljsons[i],fo,i,0)
   fo.write('],\n')
+  # write metadata at the end of output json file
   fo.write('  "otherData": {\n')
   fo.write(res)
   fo.write('  }\n}\n')
