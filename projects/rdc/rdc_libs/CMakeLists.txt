@@ -39,6 +39,7 @@ else ()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
 endif ()
 
+set(RDC_LIB_ROOT_PATH "${RDC_SERVER_ROOT_PATH}opt/rocm/")
 
 # Required Defines first:
 
@@ -223,10 +224,10 @@ endif ()
 ## Add the install directives for the runtime library.
 install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB}
              LIBRARY DESTINATION ${RDC_LIB_ROOT_PATH}${RDC}/lib
-                                            COMPONENT ${RDC_LIB_COMPONENT})
+                                            COMPONENT ${RDCCLIENT_LIB_COMPONENT})
 install(FILES ${SOURCE_DIR}/include/rdc/rdc.h
                       DESTINATION ${RDC_LIB_ROOT_PATH}${RDC}/include/rdc
-                                         COMPONENT ${LIB_HEADER_COMPONENT})
+                                         COMPONENT ${RDC_HEADER_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake RDC Lib                      ")
