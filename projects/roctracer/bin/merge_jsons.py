@@ -27,10 +27,10 @@ import argparse
 
 shift = 100
 
-def parse_json(jsonfile, fo, index,lastjson):
+def parse_json(jsonfile, fo, index, lastjson):
   if not re.search(r'\.json$', jsonfile):
     raise Exception('wrong input file type: "' + jsonfile + '"' )
-  metadata=''
+  metadata = ''
   with open(jsonfile) as fp:
     for line in fp:
       ms = re.match(r'^{ "traceEvents":\[{}\n|^\]}\n|^\],\n',line)
@@ -45,11 +45,9 @@ def parse_json(jsonfile, fo, index,lastjson):
         minfo = re.match(r'(.*)"(.*)":(.*)',line)
         # minfo catch pattern like: "version": "my app V1.0" 
         if minfo:
-          # test for last json to see if ',' needed at the end of metadata
-          if lastjson == 0:
-            metadata = metadata + minfo.group(1) + '"' + minfo.group(2) + '(' + os.path.splitext(jsonfile)[0] + ')":' + minfo.group(3) + ',\n'
-          else:
-            metadata = metadata + minfo.group(1) + '"' + minfo.group(2) + '(' + os.path.splitext(jsonfile)[0] + ')":' + minfo.group(3) + '\n'
+          metadata = metadata + minfo.group(1) + '"' + minfo.group(2) + '(' + os.path.splitext(jsonfile)[0] + ')":' + minfo.group(3) + '\n'
+        else:
+          metadata = metadata + line 
         continue
       mo = re.match(r'(.*"pid"\s*:\s*)(\d+)(.*)',line)
       # mo catch pattern like: ,{"ts":4258451581657,"ph":"s","cat":"DataFlow","id":0,"pid":2,"tid":83583,"name":"dep"}
@@ -67,18 +65,25 @@ def parse_json(jsonfile, fo, index,lastjson):
       if mp:
         laneName = mp.group(2) + '(' + os.path.splitext(jsonfile)[0] + ')'
         mpid = int(str(mp.group(4)))
-        mpid = mpid + (index+1)*shift
+        mpid = mpid + index*shift
         fo.write(mp.group(1) + '"name":"' + laneName + '"' + mp.group(3) + '"pid":' + str(mpid) + mp.group(5) + '\n') 
       elif mo:
         mpid = int(str(mo.group(2)))
-        mpid = mpid + (index+1)*shift
+        mpid = mpid + index*shift
         fo.write(mo.group(1) + str(mpid) + mo.group(3) + '\n')
       elif mp2:
         mpid = int(str(mp2.group(2)))
-        mpid = mpid + (index+1)*shift
+        mpid = mpid + index*shift
         fo.write(mp2.group(1) + str(mpid) + mp2.group(3) + '\n')
       else:
         fo.write(line)
+
+  metadata = metadata[:metadata.rfind('\n')]
+  metadata = metadata[:metadata.rfind('\n')]
+  if lastjson == 0:
+    metadata = metadata + ',\n'
+  else:
+    metadata = metadata + '\n'
   return metadata
 
 def merge_jsons(jsons,outfile):
