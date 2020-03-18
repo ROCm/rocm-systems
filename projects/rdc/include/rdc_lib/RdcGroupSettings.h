@@ -40,6 +40,9 @@ class RdcGroupSettings {
     virtual rdc_status_t rdc_group_gpu_get_info(
         rdc_gpu_group_t p_rdc_group_id,
         rdc_group_info_t* p_rdc_group_info)  = 0;
+    virtual rdc_status_t rdc_group_get_all_ids(
+        rdc_gpu_group_t group_id_list[], uint32_t* count) = 0;
+
 
     virtual rdc_status_t rdc_group_field_create(uint32_t num_field_ids,
         uint32_t* field_ids, const char* field_group_name,
@@ -49,6 +52,8 @@ class RdcGroupSettings {
     virtual rdc_status_t rdc_group_field_get_info(
         rdc_field_grp_t rdc_field_group_id,
         rdc_field_group_info_t* field_group_info) = 0;
+    virtual rdc_status_t rdc_group_field_get_all_ids(
+        rdc_field_grp_t field_group_id_list[], uint32_t* count) = 0;
 
     virtual ~RdcGroupSettings() {}
 };

@@ -39,13 +39,15 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char ** argv) {
         {"host",    required_argument, nullptr, HOST_OPTIONS },
         {"help", optional_argument, nullptr, 'h' },
         {"unauth", optional_argument, nullptr, 'u' },
+        {"list", optional_argument, nullptr, 'l' },
         { nullptr,  0 , nullptr, 0 }
     };
 
     int option_index = 0;
     int opt = 0;
+    bool is_list = false;
 
-    while ((opt = getopt_long(argc, argv, "hu",
+    while ((opt = getopt_long(argc, argv, "hlu",
                 long_options, &option_index)) != -1) {
         switch (opt) {
             case HOST_OPTIONS:
@@ -57,6 +59,9 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char ** argv) {
             case 'u':
                  use_auth_ = false;
                  break;
+            case 'l':
+                 is_list = true;
+                 break;
             default:
                 show_help();
                 throw RdcException(RDC_ST_BAD_PARAMETER,
@@ -64,15 +69,22 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char ** argv) {
         }
     }
 
+    if (!is_list) {
+        show_help();
+        throw RdcException(RDC_ST_BAD_PARAMETER,
+                "Need to specify operations");
+    }
 }
 
 void RdciDiscoverySubSystem::show_help() const {
     std::cout << " discovery -- Used to discover and identify GPUs "
         << "and their attributes.\n\n";
     std::cout << "Usage\n";
-    std::cout << "    rdci discovery [--host <IP/FQDN>:port] [-u]\n";
+    std::cout << "    rdci discovery [--host <IP/FQDN>:port] [-u] -l\n";
     std::cout << "\nFlags:\n";
     show_common_usage();
+    std::cout << "  -l  --list                     list GPU discovered"
+              <<" on the system\n";
 }
 
 
@@ -83,7 +95,7 @@ void RdciDiscoverySubSystem::process() {
 
     uint32_t  gpu_index_list[RDC_MAX_NUM_DEVICES];
     uint32_t count = 0;
-    rdc_status_t result =  rdc_get_all_devices(rdc_handle_,
+    rdc_status_t result =  rdc_device_get_all(rdc_handle_,
             gpu_index_list, &count);
     if (result != RDC_ST_OK) {
          throw RdcException(result, "Fail to get device information");
@@ -99,7 +111,7 @@ void RdciDiscoverySubSystem::process() {
     std::cout << "GPU Index\t Device Information\n";
     for (uint32_t i = 0; i < count; i++) {
         rdc_device_attributes_t attribute;
-        result = rdc_get_device_attributes(rdc_handle_,
+        result = rdc_device_get_attributes(rdc_handle_,
                 gpu_index_list[i], &attribute);
         if (result != RDC_ST_OK) {
             return;

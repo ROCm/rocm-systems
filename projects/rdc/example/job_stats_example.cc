@@ -104,11 +104,11 @@ int main(int, char **) {
     }
 
     // For standalone mode, the daemon will update and cache the samples
-    // In manual mode, we must call rdc_update_all_fields periodically to
+    // In manual mode, we must call rdc_field_update_all periodically to
     // take samples.
     if (!standalone) {  // embedded manual mode
         for (int i=5; i > 0 ; i--) {  // As an example, we will take 5 samples
-            result = rdc_update_all_fields(rdc_handle, 0);
+            result = rdc_field_update_all(rdc_handle, 0);
         if (result != RDC_ST_OK) {
             std::cout << "Error update all fields. Return: "
                 << rdc_status_string(result);

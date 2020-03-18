@@ -44,9 +44,9 @@ typedef std::map<RdcFieldKey, std::vector<RdcCacheEntry>> RdcCacheSamples;
 
 class RdcCacheManagerImpl: public RdcCacheManager {
  public:
-    rdc_status_t rdc_get_latest_value_for_field(uint32_t gpu_index,
+    rdc_status_t rdc_field_get_latest_value(uint32_t gpu_index,
                 uint32_t field, rdc_field_value* value) override;
-    rdc_status_t rdc_get_field_value_since(uint32_t gpu_index, uint32_t field,
+    rdc_status_t rdc_field_get_value_since(uint32_t gpu_index, uint32_t field,
                 uint64_t since_time_stamp, uint64_t *next_since_time_stamp,
                 rdc_field_value* value) override;
     rdc_status_t rdc_update_cache(uint32_t gpu_index,

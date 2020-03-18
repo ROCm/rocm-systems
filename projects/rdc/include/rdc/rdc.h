@@ -59,7 +59,7 @@ typedef enum {
  * @brief rdc operation mode
  * rdc can run in auto mode where background threads will collect metrics.
  * When run in manual mode, the user needs to periodically call
- * rdc_update_all_fields for data collection.
+ * rdc_field_update_all for data collection.
  */
 typedef enum {
     RDC_OPERATION_MODE_AUTO   = 0,
@@ -109,6 +109,15 @@ typedef enum {
  */
 #define RDC_MAX_FIELD_IDS_PER_FIELD_GROUP 128
 
+/**
+ * @brief The max number of groups
+ */
+#define RDC_MAX_NUM_GROUPS      64
+
+/**
+ * @brief The max number of the field groups
+ */
+#define RDC_MAX_NUM_FIELD_GROUPS 64
 
 /**
  * @biref The fields
@@ -279,12 +288,12 @@ rdc_status_t rdc_shutdown();
  *
  *  @details The RDC is loaded as library so that it does not require rdcd
  *  daemon. In this mode, the user has to periodically call
- *  rdc_update_all_fields() when op_mode is RDC_OPERATION_MODE_MANUAL, which
+ *  rdc_field_update_all() when op_mode is RDC_OPERATION_MODE_MANUAL, which
  *  tells RDC to collect the stats. This function is not thread safe.
  *
  *  @param[in] op_mode Operation modes. When RDC_OPERATION_MODE_AUTO, RDC schedules
  *  background task to collect the stats. When RDC_OPERATION_MODE_MANUAL, the user
- *  needs to call rdc_update_all_fields() periodically.
+ *  needs to call rdc_field_update_all() periodically.
  *
  *  @param[inout] p_rdc_handle Caller provided pointer to rdc_handle_t. Upon
  *  successful call, the value will contain the handler for following API calls.
@@ -351,7 +360,7 @@ rdc_status_t rdc_disconnect(rdc_handle_t p_rdc_handle);
  *
  *  @details This should be executed as part of job prologue. The summary
  *  job stats can be retrieved using rdc_job_get_stats().
- *  In RDC_OPERATION_MODE_MANUAL, user must call rdc_update_all_fields(1)
+ *  In RDC_OPERATION_MODE_MANUAL, user must call rdc_field_update_all(1)
  *  at least once, before call rdc_job_get_stats()
  *
  *  @param[in] p_rdc_handle The RDC handler.
@@ -419,7 +428,7 @@ rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_update_all_fields(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle,
                     uint32_t wait_for_update);
 
 /**
@@ -438,7 +447,7 @@ rdc_status_t rdc_update_all_fields(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_get_all_devices(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
             uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count);
 
 /**
@@ -455,7 +464,7 @@ rdc_status_t rdc_get_all_devices(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_get_device_attributes(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle,
             uint32_t gpu_index, rdc_device_attributes_t* p_rdc_attr);
 
 /**
@@ -519,6 +528,23 @@ rdc_status_t rdc_group_gpu_get_info(rdc_handle_t p_rdc_handle,
             rdc_gpu_group_t p_rdc_group_id, rdc_group_info_t* p_rdc_group_info);
 
 /**
+ *  @brief Used to get information about all GPU groups in the system.
+ *
+ *  @details Get the list of GPU group ids in the system.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[out] group_id_list Array reference to fill GPU group
+ *  ids in the system.
+ *
+ *  @param[out] count Number of GPU group returned in group_id_list.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle,
+            rdc_gpu_group_t group_id_list[], uint32_t* count);
+
+/**
  *  @brief Destroy GPU group represented by p_rdc_group_id
  *
  *  @details Delete the logic group represented by p_rdc_group_id
@@ -577,6 +603,23 @@ rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle,
             rdc_field_group_info_t* field_group_info);
 
 /**
+ *  @brief Used to get information about all field groups in the system.
+ *
+ *  @details Get the list of field group ids in the system.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[out] field_group_id_list Array reference to fill field group
+ *  ids in the system.
+ *
+ *  @param[out] count Number of field group returned in field_group_id_list.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_group_field_get_all_ids(rdc_handle_t p_rdc_handle,
+            rdc_field_grp_t field_group_id_list[], uint32_t* count);
+
+/**
  *  @brief Destroy field group represented by rdc_field_group_id
  *
  *  @details Delete the logic group represented by rdc_field_group_id
@@ -596,7 +639,7 @@ rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle,
  *
  *  @details Note that the first update of the field will not occur
  *  until the next field update cycle. To force a field update cycle,
- *  user must call rdc_update_all_fields(1)
+ *  user must call rdc_field_update_all(1)
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -612,14 +655,14 @@ rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_watch_fields(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_field_watch(rdc_handle_t p_rdc_handle,
         rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id,
         uint64_t update_freq, double max_keep_age, uint32_t max_keep_samples);
 
 /**
  *  @brief Request a latest cached field of a GPU
  *
- *  @details Note that the field can be cached after called rdc_watch_fields
+ *  @details Note that the field can be cached after called rdc_field_watch
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -631,13 +674,13 @@ rdc_status_t rdc_watch_fields(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_get_latest_value_for_field(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle,
         uint32_t gpu_index, uint32_t field, rdc_field_value* value);
 
 /**
  *  @brief Request a history cached field of a GPU
  *
- *  @details Note that the field can be cached after called rdc_watch_fields
+ *  @details Note that the field can be cached after called rdc_field_watch
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -655,7 +698,7 @@ rdc_status_t rdc_get_latest_value_for_field(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_get_field_value_since(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_field_get_value_since(rdc_handle_t p_rdc_handle,
         uint32_t gpu_index, uint32_t field, uint64_t since_time_stamp,
         uint64_t *next_since_time_stamp, rdc_field_value* value);
 
@@ -672,7 +715,7 @@ rdc_status_t rdc_get_field_value_since(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_unwatch_fields(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle,
         rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id);
 
 /**

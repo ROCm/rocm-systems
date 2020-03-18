@@ -28,7 +28,7 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-rdc_status_t RdcCacheManagerImpl::rdc_get_field_value_since(
+rdc_status_t RdcCacheManagerImpl::rdc_field_get_value_since(
     uint32_t gpu_index, uint32_t field_id, uint64_t since_time_stamp,
     uint64_t *next_since_time_stamp, rdc_field_value* value) {
     if (!next_since_time_stamp || !value) {
@@ -104,7 +104,7 @@ rdc_status_t RdcCacheManagerImpl::evict_cache(uint32_t gpu_index,
     return RDC_ST_OK;
 }
 
-rdc_status_t RdcCacheManagerImpl::rdc_get_latest_value_for_field(
+rdc_status_t RdcCacheManagerImpl::rdc_field_get_latest_value(
     uint32_t gpu_index, uint32_t field_id, rdc_field_value* value) {
     if (!value) {
         return RDC_ST_BAD_PARAMETER;

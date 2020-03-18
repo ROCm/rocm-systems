@@ -25,7 +25,7 @@ THE SOFTWARE.
 
 #include <memory>
 #include <map>
-#include <mutex>
+#include <mutex> // NOLINT
 #include <string>
 #include "rdc_lib/RdcGroupSettings.h"
 
@@ -42,6 +42,8 @@ class RdcGroupSettingsImpl: public RdcGroupSettings {
         uint32_t gpu_index) override;
       rdc_status_t rdc_group_gpu_get_info(rdc_gpu_group_t p_rdc_group_id,
         rdc_group_info_t* p_rdc_group_info)  override;
+      rdc_status_t rdc_group_get_all_ids(
+        rdc_gpu_group_t group_id_list[], uint32_t* count) override;
 
       rdc_status_t rdc_group_field_create(uint32_t num_field_ids,
         uint32_t* field_ids, const char* field_group_name,
@@ -51,6 +53,8 @@ class RdcGroupSettingsImpl: public RdcGroupSettings {
       rdc_status_t rdc_group_field_get_info(
         rdc_field_grp_t rdc_field_group_id,
         rdc_field_group_info_t* field_group_info) override;
+      rdc_status_t rdc_group_field_get_all_ids(
+        rdc_field_grp_t field_group_id_list[], uint32_t* count) override;
 
       RdcGroupSettingsImpl();
 

@@ -36,6 +36,9 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_create(
     ginfo.count = 0;
 
     std::lock_guard<std::mutex> guard(group_mutex_);
+    if (gpu_group_.size() >= RDC_MAX_NUM_GROUPS) {
+        return RDC_ST_MAX_LIMIT;
+    }
     gpu_group_.emplace(cur_group_id_, ginfo);
     *p_rdc_group_id = cur_group_id_;
     cur_group_id_++;
@@ -94,6 +97,26 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_get_info(
     return RDC_ST_OK;
 }
 
+rdc_status_t RdcGroupSettingsImpl::rdc_group_get_all_ids(
+        rdc_gpu_group_t group_id_list[], uint32_t* count) {
+    if (!count) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+
+    *count = 0;
+    std::lock_guard<std::mutex> guard(group_mutex_);
+    auto ite = gpu_group_.begin();
+    for (; ite != gpu_group_.end(); ite++) {
+        if (*count >= RDC_MAX_NUM_GROUPS) {
+            return RDC_ST_MAX_LIMIT;
+        }
+        group_id_list[*count] = ite->first;
+        (*count)++;
+    }
+
+    return RDC_ST_OK;
+}
+
 rdc_status_t RdcGroupSettingsImpl::rdc_group_field_create(
     uint32_t num_field_ids, uint32_t* field_ids,
     const char* field_group_name, rdc_field_grp_t* rdc_field_group_id) {
@@ -110,6 +133,9 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_create(
     }
 
     std::lock_guard<std::mutex> guard(field_group_mutex_);
+    if (field_group_.size() >= RDC_MAX_NUM_FIELD_GROUPS) {
+        return RDC_ST_MAX_LIMIT;
+    }
     field_group_.emplace(cur_filed_group_id_, finfo);
     *rdc_field_group_id = cur_filed_group_id_;
     cur_filed_group_id_++;
@@ -141,6 +167,26 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_get_info(
     } else {
         return RDC_ST_NOT_FOUND;
     }
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcGroupSettingsImpl::rdc_group_field_get_all_ids(
+        rdc_field_grp_t field_group_id_list[], uint32_t* count) {
+    if (!count) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+
+    *count = 0;
+    std::lock_guard<std::mutex> guard(field_group_mutex_);
+    auto ite = field_group_.begin();
+    for (; ite != field_group_.end(); ite++) {
+        if (*count >= RDC_MAX_NUM_FIELD_GROUPS) {
+            return RDC_ST_MAX_LIMIT;
+        }
+        field_group_id_list[*count] = ite->first;
+        (*count)++;
+    }
+
     return RDC_ST_OK;
 }
 

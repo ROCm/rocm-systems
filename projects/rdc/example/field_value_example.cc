@@ -82,7 +82,7 @@ int main(int, char **) {
     // Now we can use the same API for both standalone and embedded
     // Get the list of devices in the system
     uint32_t  gpu_index_list[RDC_MAX_NUM_DEVICES];
-    result =  rdc_get_all_devices(rdc_handle, gpu_index_list, &count);
+    result =  rdc_device_get_all(rdc_handle, gpu_index_list, &count);
     if (result != RDC_ST_OK) {
         std::cout << "Error to find devices on the system. Return: "
             << rdc_status_string(result);
@@ -116,7 +116,7 @@ int main(int, char **) {
             goto cleanup;
         }
         rdc_device_attributes_t attribute;
-        result = rdc_get_device_attributes(rdc_handle,
+        result = rdc_device_get_attributes(rdc_handle,
                     gpu_index_list[i], &attribute);
         if (result != RDC_ST_OK) {
             std::cout << "Error get GPU attribute. Return: "
@@ -146,7 +146,7 @@ int main(int, char **) {
 
     // Let the RDC to watch the fields and groups. The fields will be updated
     // once per second, the max keep age is 1 minutes and only keep 10 samples.
-    result = rdc_watch_fields(rdc_handle, group_id,
+    result = rdc_field_watch(rdc_handle, group_id,
                     field_group_id, 1000000, 60, 10);
     if (result != RDC_ST_OK) {
         std::cout << "Error watch group fields. Return: "
@@ -159,7 +159,7 @@ int main(int, char **) {
 
     // Since we are running the RDC_OPERATION_MODE_AUTO mode, the rdc_update_
     // all_fields() will be called periodically at background. If running as
-    // RDC_OPERATION_MODE_MANUAL mode, we must call rdc_update_all_fields()
+    // RDC_OPERATION_MODE_MANUAL mode, we must call rdc_field_update_all()
     // periodically to take samples.
     usleep(5000000);  // sleep 5 seconds before fetch the stats
 
@@ -188,7 +188,7 @@ int main(int, char **) {
     for (uint32_t gindex = 0; gindex < group_info.count; gindex++) {
         for (uint32_t findex = 0; findex < field_info.count; findex++) {
             rdc_field_value value;
-            result = rdc_get_latest_value_for_field(rdc_handle,
+            result = rdc_field_get_latest_value(rdc_handle,
         group_info.entity_ids[gindex], field_info.field_ids[findex], &value);
             if (result == RDC_ST_NOT_FOUND) {
                 continue;
@@ -207,7 +207,7 @@ int main(int, char **) {
     }
 
     // Stop watching the field group
-    result = rdc_unwatch_fields(rdc_handle, group_id, field_group_id);
+    result = rdc_field_unwatch(rdc_handle, group_id, field_group_id);
     if (result != RDC_ST_OK) {
         std::cout << "Error stop watch fields. Return: "
             << rdc_status_string(result);
@@ -227,7 +227,7 @@ int main(int, char **) {
             since_timestamp = start_timestamp;
             while (true) {
                 rdc_field_value value;
-                result = rdc_get_field_value_since(rdc_handle,
+                result = rdc_field_get_value_since(rdc_handle,
                 group_info.entity_ids[gindex] , field_info.field_ids[findex],
                 since_timestamp, &next_timestamp,  &value);
                 if (result == RDC_ST_NOT_FOUND) {

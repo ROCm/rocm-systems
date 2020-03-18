@@ -190,6 +190,12 @@ service RdcAPI {
 
   // rdc_status_t rdc_update_all_fields(uint32_t wait_for_update)
   rpc UpdateAllFields(UpdateAllFieldsRequest) returns (UpdateAllFieldsResponse) {}
+
+  // rdc_status_t rdc_group_get_all_ids(rdc_gpu_group_t group_id_list[], uint32_t* count)
+  rpc GetGroupAllIds(Empty) returns (GetGroupAllIdsResponse) {}
+
+  // rdc_status_t rdc_group_field_all_ids(rdc_field_grp_t field_group_id_list[], uint32_t* count)
+  rpc GetFieldGroupAllIds(Empty) returns (GetFieldGroupAllIdsResponse) {}
 }
 
 message Empty {
@@ -235,9 +241,10 @@ message AddToGpuGroupRequest {
 message AddToGpuGroupResponse {
   uint32 status = 1;
 }
+
 message CreateFieldGroupRequest {
   repeated uint32 field_ids = 1;
-  string filed_group_name = 2;
+  string field_group_name = 2;
 }
 
 message CreateFieldGroupResponse {
@@ -358,4 +365,15 @@ message UpdateAllFieldsRequest {
 
 message UpdateAllFieldsResponse {
   uint32 status = 1;
+}
+
+message GetGroupAllIdsResponse {
+  uint32 status = 1;
+  repeated uint32 group_ids = 2;
+}
+
+
+message GetFieldGroupAllIdsResponse {
+  uint32 status = 1;
+  repeated uint32 field_group_ids = 2;
 }

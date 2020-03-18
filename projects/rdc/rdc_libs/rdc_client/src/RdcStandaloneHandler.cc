@@ -90,7 +90,7 @@ rdc_status_t RdcStandaloneHandler::rdc_job_stop_stats(char  job_id[64] ) {
 
 
 // Discovery RdcAPI
-rdc_status_t RdcStandaloneHandler::rdc_get_all_devices(
+rdc_status_t RdcStandaloneHandler::rdc_device_get_all(
         uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count)  {
     if (!count) {
         return RDC_ST_BAD_PARAMETER;
@@ -115,7 +115,7 @@ rdc_status_t RdcStandaloneHandler::rdc_get_all_devices(
     return RDC_ST_OK;
 }
 
-rdc_status_t RdcStandaloneHandler::rdc_get_device_attributes(uint32_t gpu_index,
+rdc_status_t RdcStandaloneHandler::rdc_device_get_attributes(uint32_t gpu_index,
         rdc_device_attributes_t* p_rdc_attr) {
     if (!p_rdc_attr) {
         return RDC_ST_BAD_PARAMETER;
@@ -142,118 +142,319 @@ rdc_status_t RdcStandaloneHandler::rdc_get_device_attributes(uint32_t gpu_index,
 rdc_status_t RdcStandaloneHandler::rdc_group_gpu_create(rdc_group_type_t type,
                 const char* group_name,
                 rdc_gpu_group_t* p_rdc_group_id) {
-    // TODO(bill_liu): implement
-    (void)(type);
-    (void)(group_name);
-    (void)(p_rdc_group_id);
+    if (!group_name || !p_rdc_group_id) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+
+    ::rdc::CreateGpuGroupRequest request;
+    ::rdc::CreateGpuGroupResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_type(
+        static_cast<::rdc::CreateGpuGroupRequest_GpuGroupType>(type));
+    request.set_group_name(group_name);
+    ::grpc::Status status = stub_->
+        CreateGpuGroup(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+    if (err_status != RDC_ST_OK) return err_status;
+
+    *p_rdc_group_id = reply.group_id();
+
     return RDC_ST_OK;
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_group_gpu_add(rdc_gpu_group_t group_id,
                 uint32_t gpu_index) {
-    // TODO(bill_liu): implement
-    (void)(group_id);
-    (void)(gpu_index);
-    return RDC_ST_OK;
+    ::rdc::AddToGpuGroupRequest request;
+    ::rdc::AddToGpuGroupResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_group_id(group_id);
+    request.set_gpu_index(gpu_index);
+    ::grpc::Status status = stub_->
+        AddToGpuGroup(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+
+    return err_status;
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_group_field_create(
     uint32_t num_field_ids, uint32_t* field_ids,
     const char* field_group_name, rdc_field_grp_t* rdc_field_group_id) {
-    // TODO(bill_liu): implement
-    (void)(num_field_ids);
-    (void)(field_ids);
-    (void)(field_group_name);
-    (void)(rdc_field_group_id);
+    if (!field_ids || !field_group_name || !rdc_field_group_id) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+
+    ::rdc::CreateFieldGroupRequest request;
+    ::rdc::CreateFieldGroupResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_field_group_name(field_group_name);
+    for (uint32_t i = 0; i < num_field_ids; i++){
+         request.add_field_ids(field_ids[i]);
+    }
+
+    ::grpc::Status status = stub_->
+        CreateFieldGroup(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+    if (err_status != RDC_ST_OK) return err_status;
+    *rdc_field_group_id = reply.field_group_id();
+
     return RDC_ST_OK;
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_group_field_get_info(
         rdc_field_grp_t rdc_field_group_id,
         rdc_field_group_info_t* field_group_info) {
-    // TODO(bill_liu): implement
-    (void)(rdc_field_group_id);
-    (void)(field_group_info);
+    if (!field_group_info) {
+         return RDC_ST_BAD_PARAMETER;
+    }
+
+    ::rdc::GetFieldGroupInfoRequest request;
+    ::rdc::GetFieldGroupInfoResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_field_group_id(rdc_field_group_id);
+    ::grpc::Status status = stub_->
+        GetFieldGroupInfo(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+    if (err_status != RDC_ST_OK) return err_status;
+
+    if (reply.field_ids_size() > RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
+        return RDC_ST_MAX_LIMIT;
+    }
+
+    field_group_info->count = reply.field_ids_size();
+    strncpy_with_null(field_group_info->group_name,
+                reply.filed_group_name().c_str(), RDC_MAX_STR_LENGTH);
+    for (int i = 0; i < reply.field_ids_size(); i++) {
+        field_group_info->field_ids[i] = reply.field_ids(i);
+    }
+
     return RDC_ST_OK;
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_group_gpu_get_info(
         rdc_gpu_group_t p_rdc_group_id,
         rdc_group_info_t* p_rdc_group_info) {
-    // TODO(bill_liu): implement
-    (void)(p_rdc_group_id);
-    (void)(p_rdc_group_info);
+    if (!p_rdc_group_info) {
+         return RDC_ST_BAD_PARAMETER;
+    }
+
+    ::rdc::GetGpuGroupInfoRequest request;
+    ::rdc::GetGpuGroupInfoResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_group_id(p_rdc_group_id);
+    ::grpc::Status status = stub_->
+        GetGpuGroupInfo(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+    if (err_status != RDC_ST_OK) return err_status;
+
+    if (reply.entity_ids_size() > RDC_GROUP_MAX_ENTITIES) {
+        return RDC_ST_MAX_LIMIT;
+    }
+
+    p_rdc_group_info->count = reply.entity_ids_size();
+    strncpy_with_null(p_rdc_group_info->group_name,
+                reply.group_name().c_str(), RDC_MAX_STR_LENGTH);
+    for (int i = 0; i < reply.entity_ids_size(); i++) {
+        p_rdc_group_info->entity_ids[i] = reply.entity_ids(i);
+    }
+
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_group_get_all_ids(
+    rdc_gpu_group_t group_id_list[], uint32_t* count) {
+    if (!count) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+    ::rdc::Empty request;
+    ::rdc::GetGroupAllIdsResponse reply;
+    ::grpc::ClientContext context;
+
+    ::grpc::Status status = stub_->
+        GetGroupAllIds(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+    if (err_status != RDC_ST_OK) return err_status;
+
+    *count = reply.group_ids_size();
+    if (*count >= RDC_MAX_NUM_GROUPS) {
+            return RDC_ST_MAX_LIMIT;
+    }
+    for (uint32_t i =0 ; i < *count; i++) {
+        group_id_list[i] = reply.group_ids(i);
+    }
+
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_group_field_get_all_ids(
+    rdc_field_grp_t field_group_id_list[], uint32_t* count) {
+    if (!count) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+
+    ::rdc::Empty request;
+    ::rdc::GetFieldGroupAllIdsResponse reply;
+    ::grpc::ClientContext context;
+
+    ::grpc::Status status = stub_->
+        GetFieldGroupAllIds(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+    if (err_status != RDC_ST_OK) return err_status;
+
+    *count = reply.field_group_ids_size();
+    if (*count >= RDC_MAX_NUM_FIELD_GROUPS) {
+            return RDC_ST_MAX_LIMIT;
+    }
+    for (uint32_t i =0 ; i < *count; i++) {
+        field_group_id_list[i] = reply.field_group_ids(i);
+    }
+
     return RDC_ST_OK;
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_group_gpu_destroy(
         rdc_gpu_group_t p_rdc_group_id) {
-    // TODO(bill_liu): implement
-    (void)(p_rdc_group_id);
-    return RDC_ST_OK;
+    ::rdc::DestroyGpuGroupRequest request;
+    ::rdc::DestroyGpuGroupResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_group_id(p_rdc_group_id);
+    ::grpc::Status status = stub_->
+        DestroyGpuGroup(&context, request, &reply);
+    return error_handle(status, reply.status());
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_group_field_destroy(
         rdc_field_grp_t rdc_field_group_id) {
-    // TODO(bill_liu): implement
-    (void)(rdc_field_group_id);
-    return RDC_ST_OK;
+    ::rdc::DestroyFieldGroupRequest request;
+    ::rdc::DestroyFieldGroupResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_field_group_id(rdc_field_group_id);
+    ::grpc::Status status = stub_->
+        DestroyFieldGroup(&context, request, &reply);
+    return error_handle(status, reply.status());
 }
 
 // Field RdcAPI
-rdc_status_t RdcStandaloneHandler::rdc_watch_fields(rdc_gpu_group_t group_id,
+rdc_status_t RdcStandaloneHandler::rdc_field_watch(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id, uint64_t update_freq,
         double max_keep_age, uint32_t max_keep_samples) {
-    // TODO(bill_liu): implement
-    (void)(group_id);
-    (void)(field_group_id);
-    (void)(update_freq);
-    (void)(max_keep_age);
-    (void)(max_keep_samples);
-    return RDC_ST_OK;
+    ::rdc::WatchFieldsRequest request;
+    ::rdc::WatchFieldsResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_group_id(group_id);
+    request.set_field_group_id(field_group_id);
+    request.set_update_freq(update_freq);
+    request.set_max_keep_age(max_keep_age);
+    request.set_max_keep_samples(max_keep_samples);
+    ::grpc::Status status = stub_->
+        WatchFields(&context, request, &reply);
+
+    return error_handle(status, reply.status());
 }
 
-rdc_status_t RdcStandaloneHandler::rdc_get_latest_value_for_field(
+rdc_status_t RdcStandaloneHandler::rdc_field_get_latest_value(
     uint32_t gpu_index, uint32_t field, rdc_field_value* value) {
-    // TODO(bill_liu): implement
     if (!value) {
         return RDC_ST_BAD_PARAMETER;
     }
-    (void)(gpu_index);
-    (void)(field);
-    return RDC_ST_NOT_FOUND;
+
+    ::rdc::GetLatestFieldValueRequest request;
+    ::rdc::GetLatestFieldValueResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_gpu_index(gpu_index);
+    request.set_field_id(field);
+    ::grpc::Status status = stub_->
+        GetLatestFieldValue(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+    if (err_status != RDC_ST_OK) return err_status;
+
+    value->field_id = reply.field_id();
+    value->status = reply.rdc_status();
+    value->ts = reply.ts();
+    value->type = static_cast<rdc_field_type_t>(reply.type());
+    if (value->type == INTEGER) {
+        value->value.l_int = reply.l_int();
+    } else if (value->type == DOUBLE) {
+        value->value.dbl = reply.dbl();
+    } else if (value->type == STRING || value->type == BLOB) {
+        strncpy_with_null(value->value.str,
+            reply.str().c_str(), RDC_MAX_STR_LENGTH);
+    }
+
+    return RDC_ST_OK;
 }
 
-rdc_status_t RdcStandaloneHandler::rdc_get_field_value_since(uint32_t gpu_index,
+rdc_status_t RdcStandaloneHandler::rdc_field_get_value_since(uint32_t gpu_index,
         uint32_t field, uint64_t since_time_stamp,
         uint64_t *next_since_time_stamp, rdc_field_value* value) {
-    // TODO(bill_liu): implement
     if (!next_since_time_stamp || !value) {
         return RDC_ST_BAD_PARAMETER;
     }
-    (void)(since_time_stamp);
-    (void)(gpu_index);
-    (void)(field);
-    (void)(value);
 
-    return RDC_ST_NOT_FOUND;
+    ::rdc::GetFieldSinceRequest request;
+    ::rdc::GetFieldSinceResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_gpu_index(gpu_index);
+    request.set_field_id(field);
+    request.set_since_time_stamp(since_time_stamp);
+    ::grpc::Status status = stub_->
+        GetFieldSince(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+    if (err_status != RDC_ST_OK) return err_status;
+
+    value->field_id = reply.field_id();
+    value->status = reply.rdc_status();
+    value->ts = reply.ts();
+    value->type = static_cast<rdc_field_type_t>(reply.type());
+    if (value->type == INTEGER) {
+        value->value.l_int = reply.l_int();
+    } else if (value->type == DOUBLE) {
+        value->value.dbl = reply.dbl();
+    } else if (value->type == STRING || value->type == BLOB) {
+        strncpy_with_null(value->value.str,
+            reply.str().c_str(), RDC_MAX_STR_LENGTH);
+    }
+    *next_since_time_stamp = reply.next_since_time_stamp();
+
+    return RDC_ST_OK;
 }
 
-rdc_status_t RdcStandaloneHandler::rdc_unwatch_fields(rdc_gpu_group_t group_id,
+rdc_status_t RdcStandaloneHandler::rdc_field_unwatch(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id) {
-    // TODO(bill_liu): implement
-    (void)(group_id);
-    (void)(field_group_id);
-    return RDC_ST_OK;
+    ::rdc::UnWatchFieldsRequest request;
+    ::rdc::UnWatchFieldsResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_group_id(group_id);
+    request.set_field_group_id(field_group_id);
+    ::grpc::Status status = stub_->
+        UnWatchFields(&context, request, &reply);
+
+    return error_handle(status, reply.status());
 }
 
 
 // Control RdcAPI
-rdc_status_t RdcStandaloneHandler::rdc_update_all_fields(
+rdc_status_t RdcStandaloneHandler::rdc_field_update_all(
     uint32_t wait_for_update) {
-    // TODO(bill_liu): implement
-    (void)(wait_for_update);
-    return RDC_ST_OK;
+    ::rdc::UpdateAllFieldsRequest request;
+    ::rdc::UpdateAllFieldsResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_wait_for_update(wait_for_update);
+    ::grpc::Status status = stub_->
+        UpdateAllFields(&context, request, &reply);
+
+    return error_handle(status, reply.status());
 }
 
 

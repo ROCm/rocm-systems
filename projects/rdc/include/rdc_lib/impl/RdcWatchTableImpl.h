@@ -54,14 +54,14 @@ class RdcWatchTableImpl : public RdcWatchTable {
                     uint64_t update_freq, double  max_keep_age,
                     uint32_t  max_keep_samples)  override;
 
-    rdc_status_t rdc_watch_fields(rdc_gpu_group_t group_id,
+    rdc_status_t rdc_field_watch(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id, uint64_t update_freq,
         double  max_keep_age, uint32_t max_keep_samples) override;
 
-    //!< rdc_unwatch_fields() will not remove the entry from watch_table.
+    //!< rdc_field_unwatch() will not remove the entry from watch_table.
     //!< The unwatched entry is still kept until the max_keep_age of the entry
     //!< is reached, which will be handled in the clean_up() function.
-    rdc_status_t rdc_unwatch_fields(rdc_gpu_group_t group_id,
+    rdc_status_t rdc_field_unwatch(rdc_gpu_group_t group_id,
                 rdc_field_grp_t field_group_id) override;
 
     //!< When the RDC is running as RDC_OPERATION_MODE_MANUAL, the user will
@@ -71,7 +71,7 @@ class RdcWatchTableImpl : public RdcWatchTable {
     //!< This function may be called very frequently, and the cache cleanup
     //!< is expensive. Internally, this function will throttle the cleanup to
     //!< once per second.
-    rdc_status_t rdc_update_all_fields() override;
+    rdc_status_t rdc_field_update_all() override;
 
     RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings,
         const RdcCacheManagerPtr& cache_mgr,
@@ -97,7 +97,7 @@ class RdcWatchTableImpl : public RdcWatchTable {
     std::map<RdcFieldKey, FieldSettings> watch_table_;
 
     //!< The settings for each field can be deduced from watch_table. But every
-    //!< rdc_update_all_fields() call needs to deduce them. To improve the
+    //!< rdc_field_update_all() call needs to deduce them. To improve the
     //!< performance, the fields_to_watch_ is used to track the field settings.
     //!< Those settings will only be updated when watching or unwatching.
     std::map<RdcFieldKey, FieldSettings> fields_to_watch_;

@@ -33,7 +33,7 @@ namespace rdc {
 
 class RdcWatchTable {
  public:
-    virtual rdc_status_t rdc_update_all_fields() = 0;
+    virtual rdc_status_t rdc_field_update_all() = 0;
 
     virtual rdc_status_t rdc_job_start_stats(rdc_gpu_group_t group_id,
                 char  job_id[64]) = 0;
@@ -41,10 +41,10 @@ class RdcWatchTable {
                 uint64_t update_freq, double  max_keep_age,
                 uint32_t max_keep_samples) = 0;
 
-    virtual rdc_status_t rdc_watch_fields(rdc_gpu_group_t group_id,
+    virtual rdc_status_t rdc_field_watch(rdc_gpu_group_t group_id,
                 rdc_field_grp_t field_group_id, uint64_t update_freq,
                 double  max_keep_age, uint32_t max_keep_samples) = 0;
-    virtual rdc_status_t rdc_unwatch_fields(rdc_gpu_group_t group_id,
+    virtual rdc_status_t rdc_field_unwatch(rdc_gpu_group_t group_id,
                 rdc_field_grp_t field_group_id) = 0;
 
     virtual ~RdcWatchTable() {}

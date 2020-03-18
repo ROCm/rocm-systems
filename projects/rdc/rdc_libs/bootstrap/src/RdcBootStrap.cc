@@ -123,14 +123,14 @@ rdc_status_t rdc_stop_embedded(rdc_handle_t p_rdc_handle) {
         return RDC_ST_OK;
 }
 
-rdc_status_t rdc_update_all_fields(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle,
         uint32_t wait_for_update) {
         if (!p_rdc_handle) {
                 return RDC_ST_INVALID_HANDLER;
         }
 
         return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
-                rdc_update_all_fields(wait_for_update);
+                rdc_field_update_all(wait_for_update);
 }
 
 rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, char  job_id[64] ,
@@ -186,24 +186,24 @@ rdc_status_t rdc_group_gpu_add(rdc_handle_t p_rdc_handle,
                 rdc_group_gpu_add(groupId, gpuIndex);
 }
 
-rdc_status_t rdc_get_all_devices(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
             uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count) {
         if (!p_rdc_handle || !count) {
                 return RDC_ST_INVALID_HANDLER;
         }
 
         return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
-                rdc_get_all_devices(gpu_index_list, count);
+                rdc_device_get_all(gpu_index_list, count);
 }
 
-rdc_status_t rdc_get_device_attributes(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle,
             uint32_t gpu_index, rdc_device_attributes_t* p_rdc_attr) {
         if (!p_rdc_handle || !p_rdc_attr) {
                 return RDC_ST_INVALID_HANDLER;
         }
 
         return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
-                rdc_get_device_attributes(gpu_index, p_rdc_attr);
+                rdc_device_get_attributes(gpu_index, p_rdc_attr);
 }
 
 rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle,
@@ -240,7 +240,27 @@ rdc_status_t rdc_group_gpu_get_info(rdc_handle_t p_rdc_handle,
                 rdc_group_gpu_get_info(p_rdc_group_id, p_rdc_group_info);
 }
 
-rdc_status_t rdc_watch_fields(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle,
+            rdc_gpu_group_t group_id_list[], uint32_t* count) {
+        if (!p_rdc_handle || !count) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+              rdc_group_get_all_ids(group_id_list, count);
+}
+
+rdc_status_t rdc_group_field_get_all_ids(rdc_handle_t p_rdc_handle,
+        rdc_field_grp_t field_group_id_list[], uint32_t* count) {
+        if (!p_rdc_handle || !count) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+              rdc_group_field_get_all_ids(field_group_id_list, count);
+}
+
+rdc_status_t rdc_field_watch(rdc_handle_t p_rdc_handle,
         rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id,
         uint64_t update_freq, double max_keep_age, uint32_t max_keep_samples) {
         if (!p_rdc_handle) {
@@ -248,21 +268,21 @@ rdc_status_t rdc_watch_fields(rdc_handle_t p_rdc_handle,
         }
 
         return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
-              rdc_watch_fields(group_id, field_group_id, update_freq,
+              rdc_field_watch(group_id, field_group_id, update_freq,
               max_keep_age, max_keep_samples);
 }
 
-rdc_status_t rdc_get_latest_value_for_field(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle,
         uint32_t gpu_index, uint32_t field, rdc_field_value* value) {
         if (!p_rdc_handle || !value) {
                 return RDC_ST_INVALID_HANDLER;
         }
 
         return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
-                rdc_get_latest_value_for_field(gpu_index, field, value);
+                rdc_field_get_latest_value(gpu_index, field, value);
 }
 
-rdc_status_t rdc_get_field_value_since(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_field_get_value_since(rdc_handle_t p_rdc_handle,
         uint32_t gpu_index, uint32_t field, uint64_t since_time_stamp,
         uint64_t *next_since_time_stamp, rdc_field_value* value) {
         if (!p_rdc_handle || !next_since_time_stamp || !value) {
@@ -270,18 +290,18 @@ rdc_status_t rdc_get_field_value_since(rdc_handle_t p_rdc_handle,
         }
 
         return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
-                rdc_get_field_value_since(gpu_index, field, since_time_stamp,
+                rdc_field_get_value_since(gpu_index, field, since_time_stamp,
                 next_since_time_stamp, value);
 }
 
-rdc_status_t rdc_unwatch_fields(rdc_handle_t p_rdc_handle,
+rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle,
         rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id) {
         if (!p_rdc_handle) {
                 return RDC_ST_INVALID_HANDLER;
         }
 
         return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
-              rdc_unwatch_fields(group_id, field_group_id);
+              rdc_field_unwatch(group_id, field_group_id);
 }
 
 rdc_status_t rdc_group_gpu_destroy(rdc_handle_t p_rdc_handle,

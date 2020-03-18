@@ -83,7 +83,7 @@ rdc_status_t RdcWatchTableImpl::get_fields_from_group(rdc_gpu_group_t group_id,
 }
 
 
-rdc_status_t RdcWatchTableImpl::rdc_watch_fields(rdc_gpu_group_t group_id,
+rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id, uint64_t update_freq,
         double  max_keep_age, uint32_t max_keep_samples) {
     std::lock_guard<std::mutex> guard(watch_mutex_);
@@ -209,7 +209,7 @@ rdc_status_t RdcWatchTableImpl::update_field_in_table_when_unwatch(
     return RDC_ST_OK;
 }
 
-rdc_status_t RdcWatchTableImpl::rdc_unwatch_fields(
+rdc_status_t RdcWatchTableImpl::rdc_field_unwatch(
         rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id) {
     struct timeval  tv;
     gettimeofday(&tv, NULL);
@@ -229,7 +229,7 @@ rdc_status_t RdcWatchTableImpl::rdc_unwatch_fields(
 }
 
 
-rdc_status_t RdcWatchTableImpl::rdc_update_all_fields() {
+rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
     uint32_t items_fetched = 0;
     rdc_status_t result;
 
