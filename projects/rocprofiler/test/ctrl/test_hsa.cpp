@@ -82,14 +82,7 @@ bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
 
   // Obtain the code object file name
   std::string agentName(agent_info_->name);
-  if (agentName.compare(0, 4, "gfx8") == 0) {
-    brig_path_obj_.append("gfx8");
-  } else if (agentName.compare(0, 4, "gfx9") == 0) {
-    brig_path_obj_.append("gfx9");
-  } else {
-    TEST_ASSERT(false);
-    return false;
-  }
+  brig_path_obj_.append(agentName);
   brig_path_obj_.append("_" + name_ + ".hsaco");
 
   return true;

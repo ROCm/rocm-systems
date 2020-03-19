@@ -61,12 +61,15 @@ set ( CTRL_SRC
 
 ## Dummy kernel
 set ( DUMMY_NAME dummy_kernel )
-execute_process ( COMMAND sh -xc "${TEST_DIR}/../bin/build_kernel.sh ${TEST_DIR}/${DUMMY_NAME}/${DUMMY_NAME} ${PROJECT_BINARY_DIR}" )
-
 ## Test kernel
 set ( TEST_NAME simple_convolution )
 set ( KERN_SRC ${TEST_DIR}/${TEST_NAME}/${TEST_NAME}.cpp )
-execute_process ( COMMAND sh -xc "${TEST_DIR}/../bin/build_kernel.sh ${TEST_DIR}/${TEST_NAME}/${TEST_NAME} ${PROJECT_BINARY_DIR}" )
+
+## Building test kernels
+add_custom_target( mytest
+  COMMAND sh -xc "${TEST_DIR}/../bin/build_kernel.sh ${TEST_DIR}/${DUMMY_NAME}/${DUMMY_NAME} ${PROJECT_BINARY_DIR} '${ROCM_ROOT_DIR}' '${GPU_TARGETS}'"
+  COMMAND sh -xc "${TEST_DIR}/../bin/build_kernel.sh ${TEST_DIR}/${TEST_NAME}/${TEST_NAME} ${PROJECT_BINARY_DIR} '${ROCM_ROOT_DIR}' '${GPU_TARGETS}'"
+)
 
 ## Building standalone test executable
 add_executable ( ${STEXE_NAME} ${STTST_SRC} ${UTIL_SRC} ${KERN_SRC} )
