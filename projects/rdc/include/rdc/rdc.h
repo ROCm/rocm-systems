@@ -20,8 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#ifndef RDC_RDC_H_
-#define RDC_RDC_H_
+#ifndef INCLUDE_RDC_RDC_H_
+#define INCLUDE_RDC_RDC_H_
 
 #include <cstdint>
 
@@ -740,4 +740,4 @@ const char* rdc_status_string(rdc_status_t status);
  */
 const char* field_id_string(uint32_t field_id);
 
-#endif  // RDC_RDC_H_
+#endif  // INCLUDE_RDC_RDC_H_

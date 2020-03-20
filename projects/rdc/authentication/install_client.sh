@@ -11,5 +11,7 @@ if [ $# -lt 1 ]; then
 fi
 
 INSTALL_DIR=$1
+mkdir -p $INSTALL_DIR
 cp -R client $INSTALL_DIR
+chown -R rdc:rdc $INSTALL_DIR/client
 

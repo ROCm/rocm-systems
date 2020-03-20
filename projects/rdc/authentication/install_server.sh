@@ -11,8 +11,11 @@ if [ $# -lt 1 ]; then
 fi
 
 INSTALL_DIR=$1
+mkdir -p $INSTALL_DIR
 cp -R server $INSTALL_DIR
 mkdir -p $INSTALL_DIR/client/certs
 cp client/certs/rdc_cacert.pem $INSTALL_DIR/client/certs
 chmod 700 $INSTALL_DIR/server/private
+chown -R rdc:rdc $INSTALL_DIR/server
+chown -R rdc:rdc $INSTALL_DIR/client
 

@@ -3,10 +3,6 @@
 
 TODO: Add general description of RDC, link to github site 
 
-# Important note about Versioning and Backward Compatibility
-RDC library is currently under development, and therefore subject to change either at the ABI or API level. The intention is to keep the API as stable as possible even while in development, but in some cases we may need to break backwards compatibility in order to ensure future stability and usability. Following [Semantic Versioning](https://semver.org/) rules, while the ROCm SMI library is in high state of change, the major version will remain 0, and backward compatibility is not ensured.
-
-Once new development has leveled off, the major version will become greater than 0, and backward compatibility will be enforced between major versions.
 
 # Building RDC
 
@@ -55,10 +51,8 @@ TODO: THE REMAINDER NEEDS TO BE TAILORED FOR RDC
 
 To run the test, execute the program `rsmitst` that is built from the steps above.
 
-# Usage Basics
 
-# Hello RDC
-
+###Installation
 
 ### Authentication
 RDC supports encrypted communications between clients and servers. The communication can be configured to be authenticated or not authenticated. 
@@ -113,7 +107,8 @@ $ 02gen_ssl_artifacts.sh
 ```
 At this point, the keys and certficates will be in the newly created "CA/artifacts" directory. This directory should be deleted if you need to rerun the scripts.
 
-To install the scripts cd into the artifacts directory and run the install.sh script as root, specifying the install location. By default, RDC will expect this to be in /etc/rdc:
+To install the keys and certificates, cd into the artifacts directory and run the install.sh script as root, specifying the install location. By default, RDC will expect this to be in /etc/rdc:
+
 ```sh
 $ cd CA/artifacts
 $ sudo install_<client|server>.sh /etc/rdc
@@ -124,5 +119,55 @@ These files should be copied to and and installed on all client and server machi
 There are a few limitations on the authentication capabilities. These limitations are temporary and will be eliminated when the server has a configuration file where user preferences can be specified.
 * The client and server are hard-coded to look for openssl certificate and key files in /etc/rdc.
 
+# Starting RDC Server Daemon (RDCD)
+In order for an RDC client application to monitor and/or control a remote system, the RDC server daemon, rdcd, must be running on the remote system. rdcd can be configured to run with full capabilities, or with monitoring-only capabilities. "Full capabilities" includes the abilty to set some system functions exposed by the RDC APIs and tools. Changing a system's configuration involves writing to system files. When rdcd is configured to run with full capabilities, it has the ability to write to these system files. Alternatively, rdcd can be run with control functionality disabled. In this case, rdcd does not have the ability to write to the control-related system files. Calls to RDC APIs (or tools that invoke these APIs) will result in a permission-related failure when configured for limited functionality. This reduced mode can be used to prevent someone from inadvertantly or maliciously putting a system into an unwanted state.
 
+Which configuration is used depends on how rdcd is started, and certain settings in the rdc.service systemd configuration file.
+
+###Starting rdcd with systemctl
+rdcd can be started by using the systemctl command.
+
+#####Starting rdcd with systemctl
+When starting rdcd using systemctl, like this:
+
+```sh
+$ systemctl start rdc
+```
+systemctl will read /lib/systemd/system/rdc.service, which is installed with rdc. This file has 2 lines that control what capabilities with which rdcd will run. If left uncommented, rdcd will run with full capabilities, as shown below:
+
+```sh
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_DAC_OVERRIDE
+```
+
+When these lines are commented with `#`, rdcd will run with monitor-only capabilty.
+
+
+###Starting rdcd Directly
+rdcd can also be started by directly invoking rdcd from the command line, like this:
+
+```sh
+# Start as user rdc
+$ sudo -u rdc rdcd
+```
+
+```sh
+# Start as root
+$ sudo rdcd
+```
+
+Note how rdcd must be started as user "rdc" or root. Other regular user accounts will not work. This is because rdcd will need access to private SSL keys and certificates, owned by rdc.
+
+When run from the command line, the rdc.service file mentioned in the previous section does not come into play. What determines the level of capability is the level of capability of the id under which rdcd is started. If rdcd is directly started as root, then rdcd will have monitor and control capability. If rdcd is directly started with a normal user account, then it will have monitor-only capability.
+
+
+
+###Other Notes about rdcd
+* Only 1 instance of rdcd should be running at a time.
+* rdcd runs under the "rdc" user id
+
+
+###Running with Monitor-Only Capability ("Limited Capability")
+
+# Hello RDC
 

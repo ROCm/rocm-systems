@@ -30,7 +30,7 @@ THE SOFTWARE.
 #include <sys/stat.h>
 #include <sys/capability.h>
 #include <getopt.h>
-
+#include <pwd.h>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -58,7 +58,8 @@ static bool sShutDownServer = false;
 static bool sRestartServer = false;
 static const char *kDaemonName = "rdcd";
 static const char *kRDCDHomeDir = "/";
-static const char *kDaemonLockFile = "/var/run/rdcd.lock";
+static const char *kDaemonLockFileRoot = "/var/run/rdcd.lock";
+static const char *kDaemonLockFile = "/tmp/rdcd.lock";
 
 // Pinned certificates
 static const char * kDefaultRDCServerCertPinPath =
@@ -77,6 +78,7 @@ static const char * kDefaultRDCClientCACertPemPkiPath =
                                        "/etc/rdc/client/certs/rdc_cacert.pem";
 
 static const char *kDefaultListenPort = "50051";
+static const uint32_t kRSMIUMask = 027;
 
 RDCServer::RDCServer() : server_address_("0.0.0.0:"),
     secure_creds_(false), rsmi_service_(nullptr), rdc_admin_service_(nullptr) {
@@ -269,6 +271,61 @@ static void InitializeSignalHandling(void) {
   signal(SIGTERM, HandleSignal);
 }
 
+static int
+FileOwner(const char *fn, std::string *owner) {
+  struct stat info;
+  int ret;
+
+  assert(owner);
+  if (owner == nullptr) {
+    return EINVAL;
+  }
+  ret = stat(fn, &info);
+  if (ret) {
+    perror("Failed to stat lock file");
+    return errno;
+  }
+  struct passwd pw;
+  struct passwd *result;
+  char buf[20];
+
+  ret = getpwuid_r(info.st_uid, &pw, buf, 20, &result);
+  if (ret == 0) {
+    *owner = buf;
+  } else {
+    return ret;
+    perror("Failed to determine owner of file");
+  }
+  return 0;
+}
+
+static int UserID(const char *un, uid_t *uid) {
+  int ret;
+  struct passwd pw;
+  struct passwd *result;
+  char *buf;
+  int bufsize;
+
+  assert(uid != nullptr);
+
+  bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
+  if (bufsize == -1) {
+    bufsize = 16384;
+  }
+  buf = new char[bufsize];
+
+  ret = getpwnam_r(un, &pw, buf, bufsize, &result);
+  delete []buf;
+
+  if (ret == 0) {
+    *uid = pw.pw_uid;
+  } else {
+    perror("Failed to determine user id for given name");
+    return 1;
+  }
+  return 0;
+}
+
 void
 RDCServer::ShutDown(void) {
   server_->Shutdown();
@@ -310,35 +367,106 @@ static void * ProcessSignalLoop(void *server_ptr) {
   pthread_exit(0);
 }
 
-static void ExitIfAlreadyRunning(void) {
-  int single_proc_fh;
-  ssize_t fsz;
+static bool FileIsLocked(std::string fn) {
+  struct flock fl;
+  int fh;
+  int ret;
 
-  single_proc_fh = open(kDaemonLockFile, O_RDWR|O_CREAT, 0640);
-  if (single_proc_fh < 0) {
-    std::cerr << "Failed to open file lock:" << kDaemonLockFile << std::endl;
+  auto close_fh = [&]() {
+    ret = close(fh);
+    if (ret) {
+      perror(fn.c_str());
+    }
+  };
+
+  (void)memset(&fl, 0, sizeof(struct flock));
+  errno = 0;
+  fh = open(fn.c_str(), O_RDONLY);
+  if (fh == -1 && errno == ENOENT) {
+    // In this case, there was no previous lock.
+    close_fh();
+    return false;
+  }
+
+  ret = fcntl(fh, F_GETLK, &fl);
+  if (ret) {
+    perror("Failed to get file-lock status. Is rdcd already running?");
     exit(1);
   }
 
-  if (lockf(single_proc_fh, F_TLOCK, 0) < 0) {
+  if (fl.l_type == F_UNLCK) {
+    close_fh();
+    return false;
+  }
+
+  close_fh();
+  return true;
+}
+
+static void ExitIfAlreadyRunning(bool is_root) {
+  const char *lock_fn;
+  int lock_fh;
+  std::string lf_user(kDaemonLockFile);
+  std::string lf_root(kDaemonLockFileRoot);
+  ssize_t fsz;
+
+  auto chk_if_locked = [&](std::string lock_file) {
+    bool is_locked = FileIsLocked(lock_file);
+
+    if (is_locked) {
+      std::cerr << "File " << lock_file <<
+                            " is locked. Is rdcd already running?" << std::endl;
+      exit(1);
+    }
+  };
+
+  chk_if_locked(lf_root);
+  chk_if_locked(lf_user);
+
+  if (is_root) {
+    lock_fn = kDaemonLockFileRoot;
+  } else {
+    lock_fn = kDaemonLockFile;
+  }
+  // Temporarily adjust file-mask to create file with right permissions
+  umask(023);
+  lock_fh = open(lock_fn, O_RDWR|O_CREAT, 0644);
+
+  if (lock_fh < 0) {
+    std::string user;
+    int ret = FileOwner(lock_fn, &user);
+    if (ret) {
+      perror("Failed to determine owner of lock file.");
+      exit(ret);
+    }
+    std::cerr << "Failed to open file lock:" << lock_fn << " owned by user: "
+        << user << ". If starting rdcd as a different user, delete this "
+                                                "lock-file first." << std::endl;
+    // asserting below since this should have been prevented in main()
+    assert(!"Unexpected user invoking rdcd");
+    exit(1);
+  }
+
+  if (lockf(lock_fh, F_TLOCK, 0) < 0) {
     std::cerr << "Daemon already running. Exiting this instance." << std::endl;
     exit(0);
   }
+  umask(kRSMIUMask);
 
   std::string pid_str = std::to_string(getpid());
-  fsz = write(single_proc_fh, pid_str.c_str(), pid_str.size());
+  fsz = write(lock_fh, pid_str.c_str(), pid_str.size());
   assert(static_cast<unsigned int>(fsz) == pid_str.size());
 }
 
 static void
-MakeDaemon() {
+MakeDaemon(bool is_root) {
   int fd0;
   struct rlimit max_files;
 
   // RSMI, for one thing, will need to be able to read/write files
   // Note that umask turns *off* permission for a given bit, so you we want
   // the complement of the permissions we want files to have.
-  umask(027);
+  umask(kRSMIUMask);
 
   // To Do; Make this optional based on CL option. By default, don't do this.
   // Instead rely on serviced to make it a daemon.
@@ -390,7 +518,7 @@ MakeDaemon() {
       exit(1);
   }
 
-  ExitIfAlreadyRunning();
+  ExitIfAlreadyRunning(is_root);
 
   InitializeSignalHandling();
 }
@@ -419,9 +547,9 @@ static void PrintHelp(void) {
          "default is to listen on port 50051\n"
      "--unauth_comm, -u don't do authentication with communications"
        " with client. When this flag is not specified, by default, "
-                                                 "PKI authentication is used\n"
+                                                "PKI authentication is used\n"
      "--pinned_cert, -i used \"pinned\" certificates instead of PKI "
-                                  "authentication. This is for test purposes.\n"
+                                "authentication. This is for test purposes.\n"
      "--debug, -d output debug messages\n"
      "--help, -h print this message\n";
 }
@@ -495,11 +623,27 @@ int main(int argc, char** argv) {
   RDCServer rdc_server;
   RdcdCmdLineOpts cmd_line_opts;
   int err;
+  uid_t rdc_uid;
+  uid_t caller_id = geteuid();
+
+  bool is_root = (caller_id == 0);
+
+  if (!is_root) {
+    // Ensure user is calling as "rdc"
+    err = UserID("rdc", &rdc_uid);
+    if (err != 0) {
+      return 1;
+    }
+    if (rdc_uid != caller_id) {
+      std::cerr << "Only user \"rdc\" or root can start rdcd." << std::endl;
+      exit(1);
+    }
+  }
 
   init_cmd_line_opts(&cmd_line_opts);
   ProcessCmdline(&cmd_line_opts, argc, argv);
 
-  MakeDaemon();
+  MakeDaemon(is_root);
 
   rdc_server.Initialize(&cmd_line_opts);
 
@@ -511,23 +655,23 @@ int main(int argc, char** argv) {
     std::cerr << "Failed to get capability" << std::endl;
     return 1;
   }
-  if (!cap_enabled) {
-    std::cerr <<
-      "Expected CAP_DAC_OVERRIDE CAP_EFFECTIVE to be enabled, but it not." <<
-                                                                    std::endl;
-    return 1;
-  }
 
-  err = amd::rdc::GetCapability(CAP_DAC_OVERRIDE, CAP_PERMITTED, &cap_enabled);
-  if (err) {
-    std::cerr << "Failed to get capability" << std::endl;
-    return 1;
+  if (cap_enabled) {
+    err =
+       amd::rdc::GetCapability(CAP_DAC_OVERRIDE, CAP_PERMITTED, &cap_enabled);
+    if (err) {
+      std::cerr << "Failed to get capability" << std::endl;
+      return 1;
+    }
+    if (!cap_enabled) {
+      std::cerr <<
+                 "CAP_DAC_OVERRIDE CAP_PERMITTED is not enabled" << std::endl;
+    }
+  } else {
+    std::cerr << "CAP_DAC_OVERRIDE CAP_EFFECTIVE is not enabled." << std::endl;
   }
   if (!cap_enabled) {
-    std::cerr <<
-      "Expected CAP_DAC_OVERRIDE CAP_PERMITTED to be enabled, but it not." <<
-                                                                     std::endl;
-    return 1;
+    std::cerr << "rdcd functionality is limited to read-only" << std::endl;
   }
 
   // Don't allow rwx access to all files to ever be inheritable. We may need
