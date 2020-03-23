@@ -59,8 +59,14 @@ eval_test() {
       echo "$label: FAILED"
       test_status=$(($test_status + 1))
     else
-      echo "Comparing traces: ../script/check_trace.sh $3"
-      eval "../script/check_trace.sh $3 $label"
+      echo "Comparing traces: ../script/check_trace.py -in $3"
+      eval "../script/check_trace.py -in $3"
+      if [ $? != 0 ] ; then
+        echo "$label: FAILED trace comparison"
+        test_status=$(($test_status + 1))
+      else
+        echo "$label: PASSED trace comparison"
+      fi
     fi
   fi
   test_number=$((test_number + 1))
