@@ -27,7 +27,7 @@ import argparse
 events_count = {}
 events_order = {} 
 trace2level = {}
-trace2level_filename = 'tests_trace_cmp_levels.txt'
+trace2level_filename = 'test/tests_trace_cmp_levels.txt'
 
 def parse_trace_levels(filename):
     f = open(filename)
