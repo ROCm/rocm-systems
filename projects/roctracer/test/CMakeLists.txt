@@ -43,6 +43,7 @@ add_custom_target( mytest
 # copy traces
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose*/*_trace.txt ${PROJECT_BINARY_DIR}/test/"
   COMMAND sh -xc "cp ${TEST_DIR}/*_trace.txt ${PROJECT_BINARY_DIR}/test/"
+  COMMAND sh -xc "cp ${TEST_DIR}/tests_trace_cmp_levels.txt ${PROJECT_BINARY_DIR}/test/"
 )
 
 ## Util sources
