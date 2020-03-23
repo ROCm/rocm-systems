@@ -80,39 +80,55 @@ set_property ( TARGET ${TARGET_NAME} PROPERTY VERSION "${LIB_VERSION_STRING}" )
 set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
 
 # If the library is a release, strip the target library
-if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
-  add_custom_command ( TARGET ${ROCTRACER_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *.so )
-endif ()
+#if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
+#  add_custom_command ( TARGET ${ROCTRACER_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *.so )
+#endif ()
 
 ## Build tests
 add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 
-## Install and packaging
-set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX}/${ROCTRACER_NAME} )
-message ( "---------Install-Dir: ${CMAKE_INSTALL_PREFIX}" )
+## pbulic headers
+set ( PUBLIC_HEADERS
+  roctracer.h
+  roctracer_hip.h
+  roctracer_hcc.h
+  roctracer_ext.h
+  ext/prof_protocol.h
+  ext/hsa_rt_utils.hpp
+  roctx.h
+)
 
-add_custom_target ( inc-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCTRACER_NAME}/include inc-link )
+## Installation and packaging
+set ( DEST_NAME ${ROCPROFILER_NAME} )
+if ( DEFINED CPACK_PACKAGING_INSTALL_PREFIX )
+  get_filename_component ( DEST_NAME ${CPACK_PACKAGING_INSTALL_PREFIX} NAME )
+  get_filename_component ( DEST_DIR ${CPACK_PACKAGING_INSTALL_PREFIX} DIRECTORY )
+  set ( CPACK_PACKAGING_INSTALL_PREFIX ${DEST_DIR} )
+endif ()
+message ( "-----------Dest-name: ${DEST_NAME}" )
+message ( "------Install-prefix: ${CMAKE_INSTALL_PREFIX}" )
+message ( "-----------CPACK-dir: ${CPACK_PACKAGING_INSTALL_PREFIX}" )
+
+#add_custom_target ( inc-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+#                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/include inc-link )
 add_custom_target ( so-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCTRACER_NAME}/lib/${ROCTRACER_LIBRARY}.so so-link )
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTRACER_LIBRARY}.so so-link )
 add_custom_target ( so-major-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCTRACER_NAME}/lib/${ROCTRACER_LIBRARY}.so.${LIB_VERSION_MAJOR} so-major-link )
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTRACER_LIBRARY}.so.${LIB_VERSION_MAJOR} so-major-link )
 add_custom_target ( so-patch-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCTRACER_NAME}/lib/${ROCTRACER_LIBRARY}.so.${LIB_VERSION_STRING} so-patch-link )
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTRACER_LIBRARY}.so.${LIB_VERSION_STRING} so-patch-link )
 
 ## Install information
-install ( TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION lib )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer.h DESTINATION include )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hip.h DESTINATION include )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_hcc.h DESTINATION include )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_ext.h DESTINATION include )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/ext/prof_protocol.h DESTINATION include/ext )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/ext/hsa_rt_utils.hpp DESTINATION include/ext )
-install ( FILES ${PROJECT_BINARY_DIR}/inc-link DESTINATION ../include RENAME ${ROCTRACER_NAME} )
-install ( FILES ${PROJECT_BINARY_DIR}/so-link DESTINATION ../lib RENAME ${ROCTRACER_LIBRARY}.so )
-install ( FILES ${PROJECT_BINARY_DIR}/so-major-link DESTINATION ../lib RENAME ${ROCTRACER_LIBRARY}.so.${LIB_VERSION_MAJOR} )
-install ( FILES ${PROJECT_BINARY_DIR}/so-patch-link DESTINATION ../lib RENAME ${ROCTRACER_LIBRARY}.so.${LIB_VERSION_STRING} )
-install ( FILES ${PROJECT_BINARY_DIR}/test/libtracer_tool.so DESTINATION tool )
+install ( TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION ${DEST_NAME}/lib )
+foreach ( header ${PUBLIC_HEADERS} )
+  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/${header} DESTINATION ${DEST_NAME}/include )
+  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/${header} DESTINATION include/${DEST_NAME} )
+endforeach ()
+#install ( FILES ${PROJECT_BINARY_DIR}/inc-link DESTINATION include RENAME ${DEST_NAME} )
+install ( FILES ${PROJECT_BINARY_DIR}/so-link DESTINATION lib RENAME ${ROCTRACER_LIBRARY}.so )
+install ( FILES ${PROJECT_BINARY_DIR}/so-major-link DESTINATION lib RENAME ${ROCTRACER_LIBRARY}.so.${LIB_VERSION_MAJOR} )
+install ( FILES ${PROJECT_BINARY_DIR}/so-patch-link DESTINATION lib RENAME ${ROCTRACER_LIBRARY}.so.${LIB_VERSION_STRING} )
+install ( FILES ${PROJECT_BINARY_DIR}/test/libtracer_tool.so DESTINATION ${DEST_NAME}/tool )
 
 ## rocTX
 set ( ROCTX_TARGET "roctx64" )
@@ -123,20 +139,19 @@ set_property ( TARGET ${ROCTX_TARGET} PROPERTY VERSION "${LIB_VERSION_STRING}" )
 set_property ( TARGET ${ROCTX_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
 
 add_custom_target ( so-roctx-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCTRACER_NAME}/lib/${ROCTX_LIBRARY}.so so-roctx-link )
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTX_LIBRARY}.so so-roctx-link )
 add_custom_target ( so-roctx-major-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCTRACER_NAME}/lib/${ROCTX_LIBRARY}.so.${LIB_VERSION_MAJOR} so-roctx-major-link )
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTX_LIBRARY}.so.${LIB_VERSION_MAJOR} so-roctx-major-link )
 add_custom_target ( so-roctx-patch-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${ROCTRACER_NAME}/lib/${ROCTX_LIBRARY}.so.${LIB_VERSION_STRING} so-roctx-patch-link )
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTX_LIBRARY}.so.${LIB_VERSION_STRING} so-roctx-patch-link )
 
-install ( TARGETS "roctx64" LIBRARY DESTINATION lib )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctx.h DESTINATION include )
-install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-link DESTINATION ../lib RENAME ${ROCTX_LIBRARY}.so )
-install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-major-link DESTINATION ../lib RENAME ${ROCTX_LIBRARY}.so.${LIB_VERSION_MAJOR} )
-install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-patch-link DESTINATION ../lib RENAME ${ROCTX_LIBRARY}.so.${LIB_VERSION_STRING} )
+install ( TARGETS "roctx64" LIBRARY DESTINATION ${DEST_NAME}/lib )
+install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-link DESTINATION lib RENAME ${ROCTX_LIBRARY}.so )
+install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-major-link DESTINATION lib RENAME ${ROCTX_LIBRARY}.so.${LIB_VERSION_MAJOR} )
+install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-patch-link DESTINATION lib RENAME ${ROCTX_LIBRARY}.so.${LIB_VERSION_STRING} )
 
 ## KFD wrapper
-install ( TARGETS "kfdwrapper64" LIBRARY DESTINATION lib )
+install ( TARGETS "kfdwrapper64" LIBRARY DESTINATION ${DEST_NAME}/lib )
 
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" )
