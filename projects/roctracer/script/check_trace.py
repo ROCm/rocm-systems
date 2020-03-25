@@ -20,7 +20,7 @@
 #OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 #THE SOFTWARE.
 
-import os, re
+import sys, os, re
 import filecmp
 import argparse
 
@@ -40,13 +40,14 @@ def parse_trace_levels(filename):
 # check trace againt golden reference and returns 0 for match, 1 for mismatch 
 def check_trace_status(tracename):
   trace2level = parse_trace_levels(trace2level_filename)
+  
   trace = tracename + '.txt'
   rtrace = tracename + '_r.txt'
   if os.path.basename(tracename) in trace2level:
     trace_level = trace2level[os.path.basename(tracename)]
-    print 'Trace comparison for ' + os.path.basename(tracename) + ' is at level ' + str(trace_level) + '\n'
+    print 'Trace comparison for ' + os.path.basename(tracename) + ' is at level ' + str(trace_level) 
   else:
-    print 'Trace ' + os.path.basename(tracename) + ' not found in ' + trace2level_filename + ', defaulting to level 0\n'
+    print 'Trace ' + os.path.basename(tracename) + ' not found in ' + trace2level_filename + ', defaulting to level 0'
     return 0
   
   if trace_level == 1:
@@ -64,18 +65,25 @@ def check_trace_status(tracename):
     else:
       return 1
   elif trace_level == 3:
-   if filecmp.cmp(trace,rtrace):
-     return 0
-   else:
-     return 1
+    if filecmp.cmp(trace,rtrace):
+      return 0
+    else:
+      return 1
 
 #Parses roctracer trace file for regression purpose 
 #and generates events count per event (when cnt is on) or events order per tid (when order is on) 
 def gen_events_info(tracefile, metric):
+  events_count = {}
+  events_order = {}
   res=''
   with open(tracefile) as f: 
     for line in f: 
-      event_pattern = re.compile(r'<(\w+)\s+id\(\d+\)\s+.*tid\((\d+)\)>')
+      event_pattern_s = re.compile(r'# START \((\d+)\) #############################')
+      ms = event_pattern_s.match(line)
+      if ms:
+        start_id = ms.group(1)
+        continue
+      event_pattern = re.compile(r'.*<(\w+)\s+id\(\d+\)\s+.*tid\((\d+)\)>')
       # event_pattern extracts event(grp1) and tid (grp2) from a line like this:
       # <hsaKmtGetVersion id(2) correlation_id(0) on-enter pid(26224) tid(26224)>
       m = event_pattern.match(line)
@@ -89,12 +97,20 @@ def gen_events_info(tracefile, metric):
       if m2:
         event = m2.group(2)
         tid = m2.group(1)
-      if metric == 'cnt' and (m or m2):
+      event_pattern3 = re.compile(r'<rocTX "(.*)">')
+      # event_pattern2 extracts rocTX event like:
+      # <rocTX "before hipLaunchKernel">
+      # <rocTX "hipLaunchKernel">
+      m3 = event_pattern3.match(line)
+      if m3:
+        event = m3.group(1)
+        tid = start_id
+      if metric == 'cnt' and (m or m2 or m3):
         if event in events_count:
           events_count[event] = events_count[event] + 1
         else:
           events_count[event] = 1
-      if metric == 'or' and (m or m2):
+      if metric == 'or' and (m or m2 or m3):
         if tid in events_order.keys():
           events_order[tid].append(event)
         else:
@@ -104,9 +120,9 @@ def gen_events_info(tracefile, metric):
       res = res + event + " : count " + str(count) + '\n'
   if metric == 'or':
     for tid in sorted (events_order.keys()) :
+      #res = res + 'Events for tid ' + tid + ' are:\n' + str(events_order[tid]) + '\n'
       res = res + str(events_order[tid]) 
-
-return res
+  return res
 
 
 parser = argparse.ArgumentParser(description='check_trace.py: check a trace aainst golden ref. Returns 0 for success, 1 for failure')
@@ -115,5 +131,5 @@ requiredNamed.add_argument('-in', metavar='file', help='Name of trace to be chec
 args = vars(parser.parse_args())
 
 if __name__ == '__main__':
-    check_trace_status(args['in'])
+    sys.exit(check_trace_status(args['in']))
 
