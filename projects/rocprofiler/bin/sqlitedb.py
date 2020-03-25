@@ -22,6 +22,7 @@
 
 import csv, sqlite3, re, sys
 from functools import reduce
+from txt2params import gen_params
 
 # SQLite Database class
 class SQLiteDB:
@@ -133,13 +134,13 @@ class SQLiteDB:
     if not re.search(r'\.json$', file_name):
       raise Exception('wrong output file type: "' + file_name + '"' )
     with open(file_name, mode='a') as fd:
-      fd.write(']}\n');
+      fd.write('}')
 
   def label_json(self, pid, label, file_name):
     if not re.search(r'\.json$', file_name):
       raise Exception('wrong output file type: "' + file_name + '"' )
     with open(file_name, mode='a') as fd:
-      fd.write(',{"args":{"name":"%s %s"},"ph":"M","pid":%s,"name":"process_name"}\n' %(self.section_index, label, pid));
+      fd.write(',{"args":{"name":"%s"},"ph":"M","pid":%s,"name":"process_name","sort_index":%d}\n' %(label, pid, self.section_index))
     self.section_index += 1
 
   def flow_json(self, base_id, from_pid, from_tid, from_us_list, to_pid, to_us_dict, corr_id_list, start_us, file_name):
@@ -157,6 +158,18 @@ class SQLiteDB:
           fd.write(',{"ts":%d,"ph":"s","cat":"DataFlow","id":%d,"pid":%s,"tid":%s,"name":"dep"}\n' % (from_ts, dep_id, str(from_pid), from_tid[ind]))
           fd.write(',{"ts":%d,"ph":"t","cat":"DataFlow","id":%d,"pid":%s,"tid":0,"name":"dep"}\n' % (to_ts, dep_id, str(to_pid)))
           dep_id += 1
+
+  def metadata_json(self, jsonfile, sysinfo_file):
+    params = gen_params(sysinfo_file);
+    with open(jsonfile, mode='a') as fd:
+      fd.write('],\n')
+      fd.write('"otherData": {\n')
+      cnt = 0
+      for key in params:
+        if cnt != 0: fd.write(',\n')
+        fd.write('    "' + key + '": "' + params[key] + '"')
+        cnt = cnt + 1
+      fd.write('\n  }\n')
 
   def dump_json(self, table_name, data_name, file_name):
     if not re.search(r'\.json$', file_name):

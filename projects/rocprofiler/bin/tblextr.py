@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 ################################################################################
 
-import os, sys, re
+import os, sys, re, subprocess
 from sqlitedb import SQLiteDB
 import dform
 
@@ -63,10 +63,26 @@ def dbglog(msg):
   fatal("error")
 #############################################################
 
+# Dumping sysinfo
+sysinfo_begin = 1
+def metadata_gen(sysinfo_file, sysinfo_cmd):
+  global sysinfo_begin
+  if not re.search(r'\.txt$', sysinfo_file):
+    raise Exception('wrong output file type: "' + sysinfo_file + '"' )
+  if sysinfo_begin == 1:
+    sysinfo_begin = 0
+    with open(sysinfo_file, mode='w') as fd: fd.write('')
+  with open(sysinfo_file, mode='a') as fd: fd.write('CMD: ' + sysinfo_cmd + '\n')
+  status = subprocess.call(sysinfo_cmd + ' >> ' + sysinfo_file,
+                           stderr=subprocess.STDOUT,
+                           shell=True)
+  if status != 0:
+    raise Exception('Could not run command: "' + sysinfo_cmd + '"')
+
 # parse results method
 def parse_res(infile):
   global max_gpu_id
-  if not os.path.isfile(infile): return # fatal("Error: input file '" + infile + "' not found")
+  if not os.path.isfile(infile): return
   inp = open(infile, 'r')
 
   beg_pattern = re.compile("^dispatch\[(\d*)\], (.*) kernel-name\(\"([^\"]*)\"\)")
@@ -231,9 +247,9 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
           continue
 
         if cid == 2:
-          if not pid in range_stack: fatal("ROCTX range begin missed, pid(" + pid + ")");
+          if not pid in range_stack: fatal("ROCTX range begin not found, pid(" + pid + ")");
           pid_stack = range_stack[pid]
-          if not tid in pid_stack: fatal("ROCTX range begin missed, tid(" + tid + ")");
+          if not tid in pid_stack: fatal("ROCTX range begin not found, tid(" + tid + ")");
           rec_stack = pid_stack[tid]
           rec_vals = rec_stack.pop()
           rec_vals[1] = tms
@@ -495,6 +511,8 @@ else:
   kfd_statfile = re.sub(r'\.stats\.csv$', r'.kfd_stats.csv', statfile)
   ops_statfile = statfile
   copy_statfile = re.sub(r'\.stats\.csv$', r'.copy_stats.csv', statfile)
+  sysinfo_file = re.sub(r'\.stats\.csv$', r'.sysinfo.txt', statfile)
+  metadata_gen(sysinfo_file, '/opt/rocm/bin/rocminfo')
 
   with open(dbfile, mode='w') as fd: fd.truncate()
   db = SQLiteDB(dbfile)
@@ -565,6 +583,8 @@ else:
     dform.gen_table_bins(db, 'OPS', ops_statfile, 'Name', 'DurationNs')
     dform.gen_ops_json_trace(db, 'OPS', GPU_BASE_PID, START_US, jsonfile)
 
+    metadata_gen(sysinfo_file, '/opt/rocm/bin/hipcc --version')
+
   if kfd_trace_found:
     dform.post_process_data(db, 'KFD')
     dform.gen_table_bins(db, 'KFD', kfd_statfile, 'Name', 'DurationNs')
@@ -595,6 +615,7 @@ else:
       dep_id += len(tid_list)
 
   if any_trace_found:
+    db.metadata_json(jsonfile, sysinfo_file)
     db.close_json(jsonfile);
   db.close()
 
