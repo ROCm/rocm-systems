@@ -1,8 +1,8 @@
 ctrl_hsa_input_trace 0
 ctrl_hsa_trace 1
-MatrixTranspose_ctest_trace 2
-MatrixTranspose_hip_trace 3
-MatrixTranspose_mgpu_trace 2
-MatrixTranspose_sys_hsa_trace 3
+MatrixTranspose_ctest_trace 3
+MatrixTranspose_hip_trace 1
+MatrixTranspose_mgpu_trace 1
+MatrixTranspose_sys_hsa_trace 2
 MatrixTranspose_sys_trace 1
-MatrixTranspose_test_trace 2
+MatrixTranspose_test_trace 1
