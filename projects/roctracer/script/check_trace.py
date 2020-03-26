@@ -25,7 +25,7 @@ import filecmp
 import argparse
 
 events_count = {}
-events_order = {} 
+events_order = {}
 trace2level = {}
 trace2level_filename = 'test/tests_trace_cmp_levels.txt'
 
@@ -37,19 +37,19 @@ def parse_trace_levels(filename):
         trace2level[item[0]] = eval(item[1])
     return trace2level
 
-# check trace againt golden reference and returns 0 for match, 1 for mismatch 
+# check trace againt golden reference and returns 0 for match, 1 for mismatch
 def check_trace_status(tracename):
   trace2level = parse_trace_levels(trace2level_filename)
-  
+
   trace = tracename + '.txt'
   rtrace = tracename + '_r.txt'
   if os.path.basename(tracename) in trace2level:
     trace_level = trace2level[os.path.basename(tracename)]
-    print 'Trace comparison for ' + os.path.basename(tracename) + ' is at level ' + str(trace_level) 
+    print 'Trace comparison for ' + os.path.basename(tracename) + ' is at level ' + str(trace_level)
   else:
     print 'Trace ' + os.path.basename(tracename) + ' not found in ' + trace2level_filename + ', defaulting to level 0'
     return 0
-  
+
   if trace_level == 1:
     cnt_r = gen_events_info(rtrace,'cnt')
     cnt = gen_events_info(trace,'cnt')
@@ -70,14 +70,14 @@ def check_trace_status(tracename):
     else:
       return 1
 
-#Parses roctracer trace file for regression purpose 
-#and generates events count per event (when cnt is on) or events order per tid (when order is on) 
+#Parses roctracer trace file for regression purpose
+#and generates events count per event (when cnt is on) or events order per tid (when order is on)
 def gen_events_info(tracefile, metric):
   events_count = {}
   events_order = {}
   res=''
-  with open(tracefile) as f: 
-    for line in f: 
+  with open(tracefile) as f:
+    for line in f:
       event_pattern_s = re.compile(r'# START \((\d+)\) #############################')
       ms = event_pattern_s.match(line)
       if ms:
@@ -121,7 +121,7 @@ def gen_events_info(tracefile, metric):
   if metric == 'or':
     for tid in sorted (events_order.keys()) :
       #res = res + 'Events for tid ' + tid + ' are:\n' + str(events_order[tid]) + '\n'
-      res = res + str(events_order[tid]) 
+      res = res + str(events_order[tid])
   return res
 
 
