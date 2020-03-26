@@ -240,12 +240,11 @@ void api_callback(
   }
   if (domain == ACTIVITY_DOMAIN_KFD_API) {
     const kfd_api_data_t* data = (const kfd_api_data_t*)(callback_data);
-    fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> \n",
+    fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s>\n",
         roctracer_op_string(ACTIVITY_DOMAIN_KFD_API, cid, 0),
         cid,
         data->correlation_id,
-        (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit",
-        );
+        (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
     return;
   }
   const hip_api_data_t* data = (const hip_api_data_t*)(callback_data);
