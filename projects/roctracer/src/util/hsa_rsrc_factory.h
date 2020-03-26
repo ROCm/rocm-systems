@@ -35,6 +35,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <atomic>
 #include <iostream>
@@ -94,6 +95,8 @@ struct hsa_pfn_t {
   decltype(hsa_executable_load_agent_code_object)* hsa_executable_load_agent_code_object;
   decltype(hsa_executable_freeze)* hsa_executable_freeze;
   decltype(hsa_executable_get_symbol)* hsa_executable_get_symbol;
+  decltype(hsa_executable_symbol_get_info)* hsa_executable_symbol_get_info;
+  decltype(hsa_executable_iterate_symbols)* hsa_executable_iterate_symbols;
 
   decltype(hsa_system_get_info)* hsa_system_get_info;
   decltype(hsa_system_get_major_extension_table)* hsa_system_get_major_extension_table;
@@ -159,6 +162,11 @@ struct AgentInfo {
 
   // Number of Shader Arrays Per Shader Engines in Gpu
   uint32_t shader_arrays_per_se;
+
+  // SGPR/VGPR block sizes
+  uint32_t sgpr_block_dflt;
+  uint32_t sgpr_block_size;
+  uint32_t vgpr_block_size;
 };
 
 // HSA timer class
@@ -168,6 +176,12 @@ class HsaTimer {
   typedef uint64_t timestamp_t;
   static const timestamp_t TIMESTAMP_MAX = UINT64_MAX;
   typedef long double freq_t;
+
+  enum time_id_t {
+    TIME_ID_CLOCK_REALTIME = 0,
+    TIME_ID_CLOCK_MONOTONIC = 1,
+    TIME_ID_NUMBER
+  };
 
   HsaTimer(const hsa_pfn_t* hsa_api) : hsa_api_(hsa_api) {
     timestamp_t sysclock_hz = 0;
@@ -184,12 +198,65 @@ class HsaTimer {
     return timestamp_t((freq_t)time / sysclock_factor_);
   }
 
+  // Method for timespec/ns conversion
+  static timestamp_t timespec_to_ns(const timespec& time) {
+    return ((timestamp_t)time.tv_sec * 1000000000) + time.tv_nsec;
+  }
+
   // Return timestamp in 'ns'
   timestamp_t timestamp_ns() const {
     timestamp_t sysclock;
     hsa_status_t status = hsa_api_->hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
     CHECK_STATUS("hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP)", status);
     return sysclock_to_ns(sysclock);
+  }
+
+  // Return time in 'ns'
+  static timestamp_t clocktime_ns(clockid_t clock_id) {
+    timespec time;
+    clock_gettime(clock_id, &time);
+    return timespec_to_ns(time);
+  }
+
+  // Return pair of correlated values of profiling timestamp and time with
+  // correlation error for a given time ID and number of iterations
+  void correlated_pair_ns(time_id_t time_id, uint32_t iters,
+                          timestamp_t* timestamp_v, timestamp_t* time_v, timestamp_t* error_v) const {
+    clockid_t clock_id = 0;
+    switch (clock_id) {
+      case TIME_ID_CLOCK_REALTIME:
+        clock_id = CLOCK_REALTIME;
+        break;
+      case TIME_ID_CLOCK_MONOTONIC:
+        clock_id = CLOCK_MONOTONIC;
+        break;
+      default:
+        CHECK_STATUS("internal error: invalid time_id", HSA_STATUS_ERROR);
+    }
+
+    std::vector<timestamp_t> ts_vec(iters);
+    std::vector<timespec> tm_vec(iters);
+    const uint32_t steps = iters - 1;
+
+    for (uint32_t i = 0; i < iters; ++i) {
+      hsa_api_->hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP, &ts_vec[i]);
+      clock_gettime(clock_id, &tm_vec[i]);
+    }
+
+    const timestamp_t ts_base = sysclock_to_ns(ts_vec.front());
+    const timestamp_t tm_base = timespec_to_ns(tm_vec.front());
+    const timestamp_t error = (ts_vec.back() - ts_vec.front()) / (2 * steps);
+
+    timestamp_t ts_accum = 0;
+    timestamp_t tm_accum = 0;
+    for (uint32_t i = 0; i < iters; ++i) {
+      ts_accum += (ts_vec[i] - ts_base);
+      tm_accum += (timespec_to_ns(tm_vec[i]) - tm_base);
+    }
+
+    *timestamp_v = (ts_accum / iters) + ts_base + error;
+    *time_v = (tm_accum / iters) + tm_base;
+    *error_v = error;
   }
 
  private:
@@ -293,7 +360,7 @@ class HsaRsrcFactory {
   uint8_t* AllocateCmdMemory(const AgentInfo* agent_info, size_t size);
 
   // Wait signal
-  void SignalWait(const hsa_signal_t& signal) const;
+  hsa_signal_value_t SignalWait(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const;
 
   // Wait signal with signal value restore
   void SignalWaitRestore(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const;
@@ -322,6 +389,11 @@ class HsaRsrcFactory {
   static uint64_t Submit(hsa_queue_t* queue, const void* packet);
   static uint64_t Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes);
 
+  // Enable executables loading tracking
+  static bool IsExecutableTracking() { return executable_tracking_on_; }
+  static void EnableExecutableTracking(HsaApiTable* table);
+  static const char* GetKernelName(uint64_t addr);
+
   // Initialize HSA API table
   void static InitHsaApiTable(HsaApiTable* table);
   static const hsa_pfn_t* HsaApi() { return &hsa_api_; }
@@ -344,6 +416,27 @@ class HsaRsrcFactory {
     std::lock_guard<mutex_t> lck(mutex_);
     timeout_ns_ = time;
     if (instance_ != NULL) Instance().timeout_ = Instance().timer_->ns_to_sysclock(time);
+  }
+
+  void CorrelateTime(HsaTimer::time_id_t time_id, uint32_t iters) {
+    timestamp_t timestamp_v = 0;
+    timestamp_t time_v = 0;
+    timestamp_t error_v = 0;
+    timer_->correlated_pair_ns(time_id, iters, &timestamp_v, &time_v, &error_v);
+    time_shift_[time_id] = time_v - timestamp_v;
+    time_error_[time_id] = error_v;
+  }
+
+  hsa_status_t GetTime(uint32_t time_id, timestamp_t value, uint64_t* time) {
+    if (time_id >= HsaTimer::TIME_ID_NUMBER) return HSA_STATUS_ERROR;
+    *time = value + time_shift_[time_id];
+    return HSA_STATUS_SUCCESS;
+  }
+
+  hsa_status_t GetTimestamp(uint32_t time_id, uint64_t value, timestamp_t* timestamp) {
+    if (time_id >= HsaTimer::TIME_ID_NUMBER) return HSA_STATUS_ERROR;
+    *timestamp = value - time_shift_[time_id];
+    return HSA_STATUS_SUCCESS;
   }
 
  private:
@@ -386,6 +479,13 @@ class HsaRsrcFactory {
   // System agents map
   std::map<hsa_agent_handle_t, const AgentInfo*> agent_map_;
 
+  // Executables loading tracking
+  typedef std::map<uint64_t, const char*> symbols_map_t;
+  static symbols_map_t* symbols_map_;
+  static bool executable_tracking_on_;
+  static hsa_status_t hsa_executable_freeze_interceptor(hsa_executable_t executable, const char *options);
+  static hsa_status_t executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol, void *data);
+
   // HSA runtime API table
   static hsa_pfn_t hsa_api_;
 
@@ -402,6 +502,10 @@ class HsaRsrcFactory {
 
   // HSA timer
   HsaTimer* timer_;
+
+  // Time shift array to support time conversion
+  timestamp_t time_shift_[HsaTimer::TIME_ID_NUMBER];
+  timestamp_t time_error_[HsaTimer::TIME_ID_NUMBER];
 
   // CPU/kern-arg memory pools
   hsa_amd_memory_pool_t *cpu_pool_;

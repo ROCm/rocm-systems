@@ -23,26 +23,22 @@ THE SOFTWARE.
 #ifndef INC_ROCTRACER_HCC_H_
 #define INC_ROCTRACER_HCC_H_
 
-#if HIP_VDI
-#define HIP_OP_ID_NUMBER 3
-#define HIP_OP_ID_COPY 1
+enum {
+    HIP_OP_ID_DISPATCH = 0,
+    HIP_OP_ID_COPY = 1,
+    HIP_OP_ID_BARRIER = 2,
+    HIP_OP_ID_NUMBER = 3
+};
+
+#ifdef __cplusplus
 extern "C" {
+#endif
 typedef void (hipInitAsyncActivityCallback_t)(void* id_callback, void* op_callback, void* arg);
 typedef bool (hipEnableAsyncActivityCallback_t)(unsigned op, bool enable);
 typedef const char* (hipGetOpName_t)(unsigned op);
+#ifdef __cplusplus
 }
-#else  // !HIP_VDI
-#if LOCAL_BUILD
-#include <hc_prof_runtime.h>
-#else
-#include <hcc/hc_prof_runtime.h>
 #endif
-#define HIP_OP_ID_NUMBER hc::HSA_OP_ID_NUMBER
-#define HIP_OP_ID_COPY hc::HSA_OP_ID_COPY
-typedef decltype(Kalmar::CLAMP::InitActivityCallback) hipInitAsyncActivityCallback_t;
-typedef decltype(Kalmar::CLAMP::EnableActivityCallback) hipEnableAsyncActivityCallback_t;
-typedef decltype(Kalmar::CLAMP::GetCmdName) hipGetOpName_t;
-#endif  // !HIP_VDI
 
 #include "roctracer.h"
 

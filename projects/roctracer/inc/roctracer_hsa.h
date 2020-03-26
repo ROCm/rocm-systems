@@ -22,15 +22,24 @@ THE SOFTWARE.
 
 #ifndef INC_ROCTRACER_HSA_H_
 #define INC_ROCTRACER_HSA_H_
-#include <iostream>
-#include <mutex>
 
 #include <hsa.h>
-#include <hsa_api_trace.h>
 #include <hsa_ext_amd.h>
 
-#include "cb_table.h"
 #include "roctracer.h"
+
+// HSA OP ID enumeration
+enum hsa_op_id_t {
+  HSA_OP_ID_DISPATCH = 0,
+  HSA_OP_ID_COPY = 1,
+  HSA_OP_ID_BARRIER = 2,
+  HSA_OP_ID_PCSAMPLE = 3,
+  HSA_OP_ID_NUMBER = 4
+};
+
+#ifdef __cplusplus
+#include <iostream>
+#include <hsa_api_trace.h>
 
 namespace roctracer {
 namespace hsa_support {
@@ -129,6 +138,10 @@ struct output_streamer<hsa_queue_t**> {
   inline static std::ostream& put(std::ostream& out, hsa_queue_t** v) { out << "<queue " << *v << ">"; return out; }
 };
 };};
+#else // !__cplusplus
+typedef void* hsa_amd_queue_intercept_handler;
+typedef void* hsa_amd_runtime_queue_notifier;
+#endif //! __cplusplus
 
 #include "inc/hsa_prof_str.h"
 #endif // INC_ROCTRACER_HSA_H_

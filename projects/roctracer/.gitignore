@@ -8,6 +8,8 @@ b
 build
 inc/hsa_prof_str.h
 inc/kfd_prof_str.h
+inc/basic_ostream_ops.h
+inc/kfd_ostream_ops.h
 test/hsa
 test/MatrixTranspose/MatrixTranspose
 test/MatrixTranspose_test/MatrixTranspose

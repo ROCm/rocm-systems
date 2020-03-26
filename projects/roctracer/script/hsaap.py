@@ -1,4 +1,5 @@
 #!/usr/bin/python
+from __future__ import print_function
 import os, sys, re
 
 OUT='inc/hsa_prof_str.h'
@@ -36,7 +37,7 @@ LICENSE = \
 #############################################################
 # Error handler
 def fatal(module, msg):
-  print >>sys.stderr, module + ' Error: "' + msg + '"'
+  print (module + ' Error: "' + msg + '"', file = sys.stderr)
   sys.exit(1)
 
 # Get next text block
@@ -342,8 +343,8 @@ class API_DescrParser:
       self.content += '  ' + self.api_id[call] + ' = ' + str(n) + ',\n'
     else:
       self.content += '\n'
-      self.content += '  HSA_API_ID_NUMBER = ' + str(n) + ',\n'
-      self.content += '  HSA_API_ID_ANY = ' + str(n + 1) + ',\n'
+      self.content += '  HSA_API_ID_DISPATCH = ' + str(n) + ',\n'
+      self.content += '  HSA_API_ID_NUMBER = ' + str(n + 1) + ',\n'
       self.content += '};\n'
     
   # generate API args structure
@@ -440,6 +441,7 @@ class API_DescrParser:
   # generate stream operator
   def gen_out_stream(self, n, name, call, struct):
     if n == -1:
+      self.content += '#ifdef __cplusplus\n'
       self.content += 'typedef std::pair<uint32_t, hsa_api_data_t> hsa_api_data_pair_t;\n'
       self.content += 'inline std::ostream& operator<< (std::ostream& out, const hsa_api_data_pair_t& data_pair) {\n'
       self.content += '  const uint32_t cid = data_pair.first;\n'
@@ -483,12 +485,13 @@ class API_DescrParser:
       self.content += '  }\n'
       self.content += '  return out;\n'
       self.content += '}\n'
+      self.content += '#endif\n'
 
 #############################################################
 # main
 # Usage
 if len(sys.argv) != 3:
-  print >>sys.stderr, "Usage:", sys.argv[0], " <rocTracer root> <HSA runtime include path>"
+  print ("Usage:", sys.argv[0], " <rocTracer root> <HSA runtime include path>", file=sys.stderr)
   sys.exit(1)
 else:
   ROOT = sys.argv[1] + '/'
@@ -497,7 +500,7 @@ else:
 descr = API_DescrParser(OUT, HSA_DIR, API_TABLES_H, API_HEADERS_H, LICENSE)
 
 out_file = ROOT + OUT
-print 'Generating "' + out_file + '"'
+print ('Generating "' + out_file + '"')
 f = open(out_file, 'w')
 f.write(descr.content[:-1])
 f.close()
