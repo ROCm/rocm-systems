@@ -40,6 +40,10 @@ add_custom_target( mytest
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_mgpu"
   COMMAND C_TEST=1 ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_ctest"
+# copy traces
+  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose*/*_trace.txt ${PROJECT_BINARY_DIR}/test/"
+  COMMAND sh -xc "cp ${TEST_DIR}/*_trace.txt ${PROJECT_BINARY_DIR}/test/"
+  COMMAND sh -xc "cp ${TEST_DIR}/tests_trace_cmp_levels.txt ${PROJECT_BINARY_DIR}/test/"
 )
 
 ## Util sources
