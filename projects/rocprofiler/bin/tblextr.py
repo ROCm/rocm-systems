@@ -338,11 +338,13 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
         # kernel name extraction
         if record_id in dep_filtr:
-          kernel_name = rec_vals[rec_len - 2]
-          (kernel_name, n_subs) = ptrn1_kernel.subn('', kernel_name, count=1);
+          record_args = rec_vals[rec_len - 2]
+          # extract kernel name
+          (kernel_name, n_subs) = ptrn1_kernel.subn('', record_args, count=1);
           if n_subs != 0:
             (kernel_name, n_subs) = ptrn2_kernel.subn(')', kernel_name, count=1)
             if n_subs != 0: db.change_rec_name('OPS', record_id, '"' + kernel_name + '"')
+          # TODO extract stream-id and db-change thread-is
 
         record_id += 1
       else: fatal(api_name + " bad record: '" + record + "'")
