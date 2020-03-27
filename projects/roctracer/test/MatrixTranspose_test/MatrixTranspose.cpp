@@ -20,7 +20,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef __cplusplus
 #include <cstdlib>
@@ -33,6 +35,28 @@ using namespace std;
 #include <inc/roctx.h>
 // roctracer extension API
 #include <inc/roctracer_ext.h>
+
+const size_t msg_size = 512;
+char* msg_buf = NULL;
+char* message = NULL;
+void SPRINT(const char* fmt, ...) {
+  if (msg_buf == NULL) {
+    msg_buf = (char*) calloc(msg_size, 1);
+    message = msg_buf;
+  }
+
+  va_list args;
+  va_start(args, fmt);
+  message += vsnprintf(message, msg_size - (message - msg_buf), fmt, args);
+  va_end(args);
+}
+void SFLUSH() {
+  if (msg_buf == NULL) abort();
+  message = msg_buf;
+  msg_buf[msg_size - 1] = 0;
+  fprintf(stdout, "%s", msg_buf);
+  fflush(stdout);
+}
 
 #if HIP_TEST
 // hip header file
@@ -248,7 +272,7 @@ void api_callback(
     return;
   }
   const hip_api_data_t* data = (const hip_api_data_t*)(callback_data);
-  fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
+  SPRINT("<%s id(%u)\tcorrelation_id(%lu) %s> ",
     roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
     cid,
     data->correlation_id,
@@ -256,39 +280,22 @@ void api_callback(
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     switch (cid) {
       case HIP_API_ID_hipMemcpy:
-        fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s>\n dst(%p) src(%p) size(0x%x) kind(%u)\n",
-          roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
-          cid,
-          data->correlation_id,
-          "on-enter",
+        SPRINT("dst(%p) src(%p) size(0x%x) kind(%u)",
           data->args.hipMemcpy.dst,
           data->args.hipMemcpy.src,
           (uint32_t)(data->args.hipMemcpy.sizeBytes),
           (uint32_t)(data->args.hipMemcpy.kind));
         break;
       case HIP_API_ID_hipMalloc:
-        fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s>\n ptr(%p) size(0x%x)\n",
-          roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
-          cid,
-          data->correlation_id,
-          "on-enter",
+        SPRINT("ptr(%p) size(0x%x)",
           data->args.hipMalloc.ptr,
           (uint32_t)(data->args.hipMalloc.size));
         break;
       case HIP_API_ID_hipFree:
-        fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s>\n ptr(%p)\n",
-          roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
-          cid,
-          data->correlation_id,
-          "on-enter",
-          data->args.hipFree.ptr);
+        SPRINT("ptr(%p)", data->args.hipFree.ptr);
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
-        fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s>\n kernel(\"%s\") stream(%p)\n",
-          roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
-          cid,
-          data->correlation_id,
-          "on-enter",
+        SPRINT("kernel(\"%s\") stream(%p)",
           hipKernelNameRef(data->args.hipModuleLaunchKernel.f),
           data->args.hipModuleLaunchKernel.stream);
         break;
@@ -298,60 +305,52 @@ void api_callback(
   } else {
     switch (cid) {
       case HIP_API_ID_hipMalloc:
-        fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s>\n *ptr(0x%p)\n",
-          roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
-          cid,
-          data->correlation_id,
-          "on-exit",
-          *(data->args.hipMalloc.ptr));
+        SPRINT("*ptr(0x%p)", *(data->args.hipMalloc.ptr));
         break;
       default:
         break;
     }
   }
-  //fprintf(stdout, "\n"); 
-  fflush(stdout);
+  SPRINT("\n");
+  SFLUSH();
 }
 // Activity tracing callback
 //   hipMalloc id(3) correlation_id(1): begin_ns(1525888652762640464) end_ns(1525888652762877067)
 void activity_callback(const char* begin, const char* end, void* arg) {
   const roctracer_record_t* record = (const roctracer_record_t*)(begin);
   const roctracer_record_t* end_record = (const roctracer_record_t*)(end);
-  fprintf(stdout, "\tActivity records:\n"); fflush(stdout);
+
+  SPRINT("\tActivity records:\n");
   while (record < end_record) {
     const char * name = roctracer_op_string(record->domain, record->op, record->kind);
-    fprintf(stdout, "\t%s\tcorrelation_id(%lu) time_ns(%lu:%lu)",
+    SPRINT("\t%s\tcorrelation_id(%lu) time_ns(%lu:%lu)",
       name,
       record->correlation_id,
       record->begin_ns,
-      record->end_ns
-    );
+      record->end_ns);
     if ((record->domain == ACTIVITY_DOMAIN_HIP_API) || (record->domain == ACTIVITY_DOMAIN_KFD_API)) {
-      fprintf(stdout, " process_id(%u) thread_id(%u)",
+      SPRINT(" process_id(%u) thread_id(%u)",
         record->process_id,
-        record->thread_id
-      );
+        record->thread_id);
     } else if (record->domain == ACTIVITY_DOMAIN_HCC_OPS) {
-      fprintf(stdout, " device_id(%d) queue_id(%lu)\n",
+      SPRINT(" device_id(%d) queue_id(%lu)",
         record->device_id,
-        record->queue_id
-      );
-      if (record->op == HIP_OP_ID_COPY) fprintf(stdout, " bytes(0x%zx)", record->bytes);
+        record->queue_id);
+      if (record->op == HIP_OP_ID_COPY) SPRINT(" bytes(0x%zx)", record->bytes);
     } else if (record->domain == ACTIVITY_DOMAIN_HSA_OPS) {
-      fprintf(stdout, " se(%u) cycle(%lu) pc(%lx)",
+      SPRINT(" se(%u) cycle(%lu) pc(%lx)",
         record->pc_sample.se,
         record->pc_sample.cycle,
-        record->pc_sample.pc
-      );
+        record->pc_sample.pc);
     } else if (record->domain == ACTIVITY_DOMAIN_EXT_API) {
-      fprintf(stdout, " external_id(%lu)\n",
-        record->external_id
-      );
+      SPRINT(" external_id(%lu)", record->external_id);
     } else {
       fprintf(stderr, "Bad domain %d\n\n", record->domain);
       abort();
     }
-    fflush(stdout);
+    SPRINT("\n");
+    SFLUSH();
+
     ROCTRACER_CALL(roctracer_next_record(record, &record));
   }
 }

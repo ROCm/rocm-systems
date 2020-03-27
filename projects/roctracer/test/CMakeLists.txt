@@ -25,6 +25,7 @@ set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
 
 ## Path to HSA test
 set ( HSA_TEST_DIR "${TEST_DIR}/hsa/test" )
+set ( HSA_REV "5c90a68" )
 
 ## test run script
 set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
@@ -41,9 +42,8 @@ add_custom_target( mytest
   COMMAND C_TEST=1 ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_ctest"
 # copy traces
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose*/*_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/*_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/tests_trace_cmp_levels.txt ${PROJECT_BINARY_DIR}/test/"
+  COMMAND sh -xc "cp ${TEST_DIR}/golden_traces/*_trace.txt ${PROJECT_BINARY_DIR}/test/"
+  COMMAND sh -xc "cp ${TEST_DIR}/golden_traces/tests_trace_cmp_levels.txt ${PROJECT_BINARY_DIR}/test/"
 )
 
 ## Util sources
@@ -58,7 +58,7 @@ target_link_libraries ( ${TEST_LIB} ${ROCTRACER_TARGET} ${HSA_RUNTIME_LIB} c std
 
 ## Build HSA test
 execute_process ( COMMAND sh -xc "if [ ! -e ${TEST_DIR}/hsa ] ; then git clone https://github.com/ROCmSoftwarePlatform/hsa-class.git ${TEST_DIR}/hsa; fi" )
-execute_process ( COMMAND sh -xc "if [ -e ${TEST_DIR}/hsa ] ; then cd ${TEST_DIR}/hsa && git fetch origin && git checkout 777c308; fi" )
+execute_process ( COMMAND sh -xc "if [ -e ${TEST_DIR}/hsa ] ; then cd ${TEST_DIR}/hsa && git fetch origin && git checkout ${HSA_REV}; fi" )
 set ( TEST_DIR ${HSA_TEST_DIR} )
 add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test/hsa )
 

@@ -1,4 +1,3 @@
-standalone C test: "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest"
 # INIT #############################
 # START (99) #############################
 <rocTX "before hipLaunchKernel">

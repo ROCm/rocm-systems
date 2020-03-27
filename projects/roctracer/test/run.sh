@@ -33,16 +33,12 @@ if [ -n "$1" ] ; then
   test_filter=$1
 fi
 
-# debugger
-debugger=""
-if [ -n "$3" ] ; then
-  debugger=$3
-fi
-
 # test check routin
 test_status=0
 test_runnum=0
 test_number=0
+failed_tests="Failed tests:"
+
 xeval_test() {
   test_number=$test_number
 }
@@ -50,33 +46,36 @@ xeval_test() {
 eval_test() {
   label=$1
   cmdline=$2
-  rtrace="${3}_r.txt"
+  test_name=$3
+  test_trace=$test_name.txt
+
   if [ $test_filter = -1  -o $test_filter = $test_number ] ; then
-    echo "$label: \"$cmdline\""
+    echo "test $test_number: $test_name \"$label\""
+    echo "CMD: \"$cmdline\""
     test_runnum=$((test_runnum + 1))
-    eval "$debugger $cmdline" | tee $rtrace
-    if [ $? != 0 ] ; then
-      echo "$label: FAILED"
-      test_status=$(($test_status + 1))
+    eval "$cmdline" | tee $test_trace
+    is_failed=$?
+    if [ $is_failed = 0 ] ; then
+      python ../script/check_trace.py -in $test_name
+      is_failed=$?
+    fi
+    if [ $is_failed = 0 ] ; then
+      echo "$test_name: PASSED"
     else
-      echo "Comparing traces: ../script/check_trace.py -in $3"
-      eval "../script/check_trace.py -in $3"
-      if [ $? != 0 ] ; then
-        echo "$label: FAILED trace comparison"
-        test_status=$(($test_status + 1))
-      else
-        echo "$label: PASSED trace comparison"
-      fi
+      echo "$test_name: FAILED"
+      failed_tests="$failed_tests\n  $test_number: $test_name"
+      test_status=$(($test_status + 1))
     fi
   fi
+
   test_number=$((test_number + 1))
 }
 
 # Standalone test
 # rocTrecer is used explicitely by test
-eval_test "standalone C test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest" "test/MatrixTranspose_ctest_trace"
-eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test" "test/MatrixTranspose_test_trace"
-eval_test "standalone HIP MGPU test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_mgpu" "test/MatrixTranspose_mgpu_trace"
+eval_test "standalone C test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest" MatrixTranspose_ctest_trace
+eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test" MatrixTranspose_test_trace
+eval_test "standalone HIP MGPU test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_mgpu" MatrixTranspose_mgpu_trace
 
 # Tool test
 # rocTracer/tool is loaded by HSA runtime
@@ -84,13 +83,13 @@ export HSA_TOOLS_LIB="test/libtracer_tool.so"
 
 # SYS test
 export ROCTRACER_DOMAIN="sys:roctx"
-eval_test "tool SYS test" ./test/MatrixTranspose "test/MatrixTranspose_sys_trace"
+eval_test "tool SYS test" ./test/MatrixTranspose MatrixTranspose_sys_trace
 export ROCTRACER_DOMAIN="sys:hsa:roctx"
-eval_test "tool SYS/HSA test" ./test/MatrixTranspose "test/MatrixTranspose_sys_hsa_trace"
+eval_test "tool SYS/HSA test" ./test/MatrixTranspose MatrixTranspose_sys_hsa_trace
 # Tracing control <delay:length:rate>
 export ROCTRACER_DOMAIN="hip"
-eval_test "tool period test" "ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose" "test/MatrixTranspose_hip_trace"
-eval_test "tool flushing test" "ROCP_FLUSH_RATE=100000 ./test/MatrixTranspose" "test/MatrixTranspose_hip_trace_flush"
+eval_test "tool period test" "ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose" MatrixTranspose_hip_period_trace
+eval_test "tool flushing test" "ROCP_FLUSH_RATE=100000 ./test/MatrixTranspose" MatrixTranspose_hip_flush_trace
 
 # HSA test
 export ROCTRACER_DOMAIN="hsa"
@@ -107,15 +106,18 @@ export ROCP_AGENTS=1
 # each thread creates a queue pre GPU agent
 export ROCP_THRS=1
 
-eval_test "tool HSA test" ./test/hsa/ctrl "test/ctrl_hsa_trace"
+eval_test "tool HSA test" ./test/hsa/ctrl ctrl_hsa_trace
 
 echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > input.xml
 export ROCP_INPUT=input.xml
-eval_test "tool HSA test input" ./test/hsa/ctrl "test/ctrl_hsa_input_trace"
+eval_test "tool HSA test input" ./test/hsa/ctrl ctrl_hsa_input_trace
 
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
 #ms_print massif.out.<N>
 
 echo "$test_number tests total / $test_runnum tests run / $test_status tests failed"
+if [ $test_status != 0 ] ; then
+  echo $failed_tests
+fi
 exit $test_status

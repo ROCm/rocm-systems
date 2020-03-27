@@ -41,14 +41,14 @@ def parse_trace_levels(filename):
 def check_trace_status(tracename):
   trace2level = parse_trace_levels(trace2level_filename)
 
-  trace = tracename + '.txt'
-  rtrace = tracename + '_r.txt'
+  trace = 'test/' + tracename + '.txt'
+  rtrace = tracename + '.txt'
   if os.path.basename(tracename) in trace2level:
     trace_level = trace2level[os.path.basename(tracename)]
     print 'Trace comparison for ' + os.path.basename(tracename) + ' is at level ' + str(trace_level)
   else:
     print 'Trace ' + os.path.basename(tracename) + ' not found in ' + trace2level_filename + ', defaulting to level 0'
-    return 0
+    return 1
 
   if trace_level == 1:
     cnt_r = gen_events_info(rtrace,'cnt')
