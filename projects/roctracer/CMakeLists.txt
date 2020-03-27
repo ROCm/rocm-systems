@@ -99,7 +99,7 @@ set ( PUBLIC_HEADERS
 )
 
 ## Installation and packaging
-set ( DEST_NAME ${ROCPROFILER_NAME} )
+set ( DEST_NAME ${ROCTRACER_NAME} )
 if ( DEFINED CPACK_PACKAGING_INSTALL_PREFIX )
   get_filename_component ( DEST_NAME ${CPACK_PACKAGING_INSTALL_PREFIX} NAME )
   get_filename_component ( DEST_DIR ${CPACK_PACKAGING_INSTALL_PREFIX} DIRECTORY )
