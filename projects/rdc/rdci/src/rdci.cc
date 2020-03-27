@@ -26,6 +26,9 @@ THE SOFTWARE.
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
 #include "RdciDiscoverySubSystem.h"
+#include "RdciDmonSubSystem.h"
+#include "RdciFieldGroupSubSystem.h"
+#include "RdciGroupSubSystem.h"
 
 
 int main(int argc, char ** argv) {
@@ -43,6 +46,12 @@ int main(int argc, char ** argv) {
        amd::rdc::RdciSubSystemPtr subsystem;
        if (subsystem_name == "discovery") {
            subsystem.reset(new amd::rdc::RdciDiscoverySubSystem());
+       } else if (subsystem_name == "dmon") {
+           subsystem.reset(new amd::rdc::RdciDmonSubSystem());
+       } else if (subsystem_name == "group") {
+           subsystem.reset(new amd::rdc::RdciGroupSubSystem());
+       } else if (subsystem_name == "fieldgroup") {
+           subsystem.reset(new amd::rdc::RdciFieldGroupSubSystem());
        } else {
            std::cout << usage_help;
            exit(0);

@@ -19,43 +19,59 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDCI_INCLUDE_RDCISUBSYSTEM_H_
-#define RDCI_INCLUDE_RDCISUBSYSTEM_H_
-
-#include <memory>
-#include <string>
+#ifndef RDCI_INCLUDE_RDCIDMONSUBSYSTEM_H_
+#define RDCI_INCLUDE_RDCIDMONSUBSYSTEM_H_
+#include <signal.h>
+#include <map>
 #include <vector>
-#include "rdc_lib/rdc_common.h"
-#include "rdc/rdc.h"
+#include "RdciSubSystem.h"
+
 
 namespace amd {
 namespace rdc {
 
-class RdciSubSystem {
+class RdciDmonSubSystem: public RdciSubSystem {
  public:
-     RdciSubSystem();
-     virtual void parse_cmd_opts(int argc, char ** argv) = 0;
-     virtual void connect();
+     RdciDmonSubSystem();
+     ~RdciDmonSubSystem();
+     void parse_cmd_opts(int argc, char ** argv) override;
+     void process() override;
 
-     virtual void process() = 0;
-     virtual ~RdciSubSystem();
- protected:
-     std::vector<std::string> split_string(const std::string& s,
-            char delimiter) const;
-     void show_common_usage() const;
-     rdc_handle_t rdc_handle_;
-     std::string ip_port_;
+ private:
+     void show_help() const;
+     void show_field_usage() const;
+     void clean_up();
 
-     bool use_auth_;
-     std::string root_ca_;
-     std::string client_cert_;
-     std::string client_key_;
+     void create_temp_group();
+     void create_temp_field_group();
+
+     enum OPERATIONS {
+        DMON_UNKNOWN = 0,
+        DMON_HELP,
+        DMON_LIST_FIELDS,
+        DMON_MONITOR
+     } dmon_ops_;
+
+     enum OPTIONS {
+        OPTIONS_UNKNOWN = 0,
+        OPTIONS_COUNT,
+        OPTIONS_DELAY,
+        OPTIONS_FIELD_GROUP_ID,
+        OPTIONS_GROUP_ID
+     };
+
+     std::map<OPTIONS, uint32_t> options_;
+     std::vector<uint32_t> field_ids_;
+     std::vector<uint32_t> gpu_indexes_;
+     bool need_cleanup_;
+
+     static volatile sig_atomic_t is_terminating_;
+     static void set_terminating(int sig);
 };
 
-typedef std::shared_ptr<RdciSubSystem> RdciSubSystemPtr;
 
 }  // namespace rdc
 }  // namespace amd
 
 
-#endif  // RDCI_INCLUDE_RDCISUBSYSTEM_H_
+#endif  // RDCI_INCLUDE_RDCIDMONSUBSYSTEM_H_

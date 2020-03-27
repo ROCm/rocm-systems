@@ -19,43 +19,41 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDCI_INCLUDE_RDCISUBSYSTEM_H_
-#define RDCI_INCLUDE_RDCISUBSYSTEM_H_
+#ifndef RDCI_INCLUDE_RDCIFIELDGROUPSUBSYSTEM_H_
+#define RDCI_INCLUDE_RDCIFIELDGROUPSUBSYSTEM_H_
 
-#include <memory>
 #include <string>
-#include <vector>
-#include "rdc_lib/rdc_common.h"
-#include "rdc/rdc.h"
+#include "RdciSubSystem.h"
 
 namespace amd {
 namespace rdc {
 
-class RdciSubSystem {
+class RdciFieldGroupSubSystem: public RdciSubSystem {
  public:
-     RdciSubSystem();
-     virtual void parse_cmd_opts(int argc, char ** argv) = 0;
-     virtual void connect();
+     RdciFieldGroupSubSystem();
+     void parse_cmd_opts(int argc, char ** argv) override;
+     void process() override;
+ private:
+     void show_help() const;
 
-     virtual void process() = 0;
-     virtual ~RdciSubSystem();
- protected:
-     std::vector<std::string> split_string(const std::string& s,
-            char delimiter) const;
-     void show_common_usage() const;
-     rdc_handle_t rdc_handle_;
-     std::string ip_port_;
+     enum OPERATIONS {
+        FIELD_GROUP_UNKNOWN = 0,
+        FIELD_GROUP_HELP,
+        FIELD_GROUP_CREATE,
+        FIELD_GROUP_DELETE,
+        FIELD_GROUP_LIST,
+        FIELD_GROUP_INFO
+     } field_group_ops_;
 
-     bool use_auth_;
-     std::string root_ca_;
-     std::string client_cert_;
-     std::string client_key_;
+     bool is_group_set_;
+     uint32_t group_id_;
+     std::string group_name_;
+     std::string field_ids_;
 };
 
-typedef std::shared_ptr<RdciSubSystem> RdciSubSystemPtr;
 
 }  // namespace rdc
 }  // namespace amd
 
 
-#endif  // RDCI_INCLUDE_RDCISUBSYSTEM_H_
+#endif  // RDCI_INCLUDE_RDCIFIELDGROUPSUBSYSTEM_H_

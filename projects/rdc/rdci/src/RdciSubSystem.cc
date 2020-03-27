@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include "RdciSubSystem.h"
+#include <sstream>
 #include "rdc_lib/RdcException.h"
 #include "common/rdc_utils.h"
 
@@ -37,6 +38,17 @@ RdciSubSystem::RdciSubSystem():
      if (status != RDC_ST_OK) {
          throw RdcException(status, "RDC initialize fail");
      }
+}
+
+std::vector<std::string> RdciSubSystem::split_string(const std::string& s,
+            char delimiter) const {
+    std::vector<std::string> tokens;
+    std::string token;
+    std::istringstream tokenStream(s);
+    while (std::getline(tokenStream, token, delimiter)) {
+      tokens.push_back(token);
+    }
+    return tokens;
 }
 
 void RdciSubSystem::connect() {

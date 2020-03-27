@@ -2,15 +2,17 @@
 Radeon Data Center
 
 ## To run the rdcd and rdci from the build folder without authentication
+Note: Only if RDC not installed requires the LD_LIBRARY_PATH.
 ```
 sudo LD_LIBRARY_PATH=$PWD/rdc_libs/  ./server/rdcd -u
-LD_LIBRARY_PATH=$PWD/rdc_libs/  ./rdci/rdci discovery -u
+LD_LIBRARY_PATH=$PWD/rdc_libs/  ./rdci/rdci discovery -u -l
 ```
 
 ## To run the rdcd and rdci from the build folder with authentication
+Note: Only if RDC not installed requires the LD_LIBRARY_PATH.
 ```
 sudo LD_LIBRARY_PATH=$PWD/rdc_libs/  ./server/rdcd
-LD_LIBRARY_PATH=$PWD/rdc_libs/  ./rdci/rdci discovery
+LD_LIBRARY_PATH=$PWD/rdc_libs/  ./rdci/rdci discovery -l
 ```
 
 ## Troubleshooting
