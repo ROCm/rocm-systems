@@ -141,23 +141,23 @@ class InterceptQueue {
           const hsa_kernel_dispatch_packet_t* dispatch_packet =
               reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
 
+          const char* kernel_name = NULL;
           if (GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
             uint64_t kernel_object = dispatch_packet->kernel_object;
             const amd_kernel_code_t* kernel_code = GetKernelCode(kernel_object);
-            const char* kernel_name = (GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) ?
+            kernel_name = (GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) ?
               QueryKernelName(kernel_object, kernel_code) : NULL;
-
-            // Prepareing submit callback data
-            rocprofiler_hsa_callback_data_t data{};
-            data.submit.packet = (void*)packet;
-            data.submit.kernel_name = kernel_name;
-            data.submit.queue = obj->queue_;
-            data.submit.device_type = obj->agent_info_->dev_type;
-            data.submit.device_id = obj->agent_info_->dev_index;
-            callback_fun(ROCPROFILER_HSA_CB_ID_SUBMIT, &data, callback_arg);
-          } else {
-            callback_fun(ROCPROFILER_HSA_CB_ID_SUBMIT, NULL, callback_arg);
           }
+
+          // Prepareing submit callback data
+          rocprofiler_hsa_callback_data_t data{};
+          data.submit.packet = (void*)packet;
+          data.submit.kernel_name = kernel_name;
+          data.submit.queue = obj->queue_;
+          data.submit.device_type = obj->agent_info_->dev_type;
+          data.submit.device_id = obj->agent_info_->dev_index;
+
+          callback_fun(ROCPROFILER_HSA_CB_ID_SUBMIT, &data, callback_arg);
         }
       }
     }

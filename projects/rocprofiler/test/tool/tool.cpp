@@ -836,6 +836,7 @@ hsa_status_t hsa_unified_callback(
   void* arg)
 {
   printf("hsa_unified_callback(%d, %p, %p):\n", (int)id, data, arg);
+  if (data == NULL) abort();
 
   switch (id) {
     case ROCPROFILER_HSA_CB_ID_ALLOCATE:
