@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -x
 
 ################################################################################
 # Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
@@ -21,6 +21,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 ################################################################################
+
+# cd to build directory
+BIN_DIR=`dirname $0`
+cd $BIN_DIR
 
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
