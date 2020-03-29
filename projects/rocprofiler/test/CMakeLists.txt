@@ -103,4 +103,4 @@ add_custom_target( mbench
 )
 
 ## Copy OCL test
-execute_process ( COMMAND sh -xc "cp -r ${TEST_DIR}/ocl ${PROJECT_BINARY_DIR}/test" )
+execute_process ( COMMAND sh -xc "cp -r ${TEST_DIR}/ocl ${PROJECT_BINARY_DIR}/test/." )

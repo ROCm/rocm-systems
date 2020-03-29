@@ -113,13 +113,17 @@ add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 ## Installation and packaging
 set ( DEST_NAME ${ROCPROFILER_NAME} )
 if ( DEFINED CPACK_PACKAGING_INSTALL_PREFIX )
-  get_filename_component ( DEST_NAME ${CPACK_PACKAGING_INSTALL_PREFIX} NAME )
-  get_filename_component ( DEST_DIR ${CPACK_PACKAGING_INSTALL_PREFIX} DIRECTORY )
-  set ( CPACK_PACKAGING_INSTALL_PREFIX ${DEST_DIR} )
+  get_filename_component ( pkg_name ${CPACK_PACKAGING_INSTALL_PREFIX} NAME )
+  get_filename_component ( pkg_dir ${CPACK_PACKAGING_INSTALL_PREFIX} DIRECTORY )
+  if ( pkg_name STREQUAL ${DEST_NAME} )
+    set ( CPACK_PACKAGING_INSTALL_PREFIX ${pkg_dir} )
+  endif ()
+else ()
+  set ( CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} )
 endif ()
+message ( "CMake-install-prefix: ${CMAKE_INSTALL_PREFIX}" )
+message ( "CPack-install-prefix: ${CPACK_PACKAGING_INSTALL_PREFIX}" )
 message ( "-----------Dest-name: ${DEST_NAME}" )
-message ( "------Install-prefix: ${CMAKE_INSTALL_PREFIX}" )
-message ( "-----------CPACK-dir: ${CPACK_PACKAGING_INSTALL_PREFIX}" )
 
 ## Create symlinks for packaging and install
 add_custom_target ( rocprof-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
