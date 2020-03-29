@@ -28,7 +28,7 @@ cd $BIN_DIR
 
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
-# paths to ROC profiler and oher libraries
+# paths to ROC profiler and other libraries
 export LD_LIBRARY_PATH=$PWD
 
 # test filter input
@@ -67,7 +67,7 @@ eval_test() {
       echo "$test_name: PASSED"
     else
       echo "$test_name: FAILED"
-      failed_tests="$failed_tests\n  $test_number: $test_name"
+      failed_tests="$failed_tests\n  $test_number: $test_name - \"$label\""
       test_status=$(($test_status + 1))
     fi
   fi
