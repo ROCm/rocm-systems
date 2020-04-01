@@ -89,6 +89,7 @@ void TestSysInfoRead::Close() {
 void TestSysInfoRead::Run(void) {
   rsmi_status_t err;
   uint64_t val_ui64;
+  uint32_t val_ui32;
   char buffer[80];
   rsmi_version_t ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
 
@@ -133,6 +134,16 @@ void TestSysInfoRead::Run(void) {
     }
     // Verify api support checking functionality is working
     err = rsmi_dev_pci_id_get(i, nullptr);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+
+    err = rsmi_topo_numa_affinity_get(i, &val_ui32);
+    CHK_ERR_ASRT(err)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**NUMA NODE: 0x" << std::hex << val_ui32;
+      std::cout << " (" << std::dec << val_ui32 << ")" << std::endl;
+    }
+    // Verify api support checking functionality is working
+    err = rsmi_topo_numa_affinity_get(i, nullptr);
     ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
     err = rsmi_dev_unique_id_get(i, &val_ui64);

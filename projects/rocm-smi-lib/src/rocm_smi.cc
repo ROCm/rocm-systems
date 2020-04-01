@@ -729,6 +729,22 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
   CATCH
 }
 
+rsmi_status_t
+rsmi_topo_numa_affinity_get(uint32_t dv_ind, uint32_t *numa_node) {
+  TRY
+  rsmi_status_t ret;
+  uint64_t val = 0;
+
+  CHK_SUPPORT_NAME_ONLY(numa_node)
+
+  DEVICE_MUTEX
+  ret = get_dev_value_int(amd::smi::kDevNumaNode, dv_ind, &val);
+
+  *numa_node = static_cast<uint32_t>(val);
+  return ret;
+  CATCH
+}
+
 static rsmi_status_t
 get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_t *id) {
   TRY

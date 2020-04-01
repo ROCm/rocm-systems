@@ -1167,6 +1167,30 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
 rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
 
 /**
+ *  @brief Get the NUMA node associated with a device
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t @p
+ *  numa_node, this function will retrieve the NUMA node value associated
+ *  with device @p dv_ind and store the value at location pointed to by
+ *  @p numa_node.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] numa_node pointer to location where NUMA node value will
+ *  be written.
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_topo_numa_affinity_get(uint32_t dv_ind, uint32_t *numa_node);
+
+/**
  *  @brief Get PCIe traffic information
  *
  *  @details Give a device index @p dv_ind and pointers to a uint64_t's, @p

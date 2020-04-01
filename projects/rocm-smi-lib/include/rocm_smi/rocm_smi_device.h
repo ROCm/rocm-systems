@@ -154,6 +154,7 @@ enum DevInfoTypes {
   kDevFwVersionVcn,
   kDevSerialNumber,
   kDevMemPageBad,
+  kDevNumaNode
 };
 
 typedef struct {

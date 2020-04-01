@@ -108,6 +108,7 @@ static const char *kDevDFCountersAvailableFName = "df_cntr_avail";
 static const char *kDevMemBusyPercentFName = "mem_busy_percent";
 static const char *kDevXGMIErrorFName = "xgmi_error";
 static const char *kDevSerialNumberFName = "serial_number";
+static const char *kDevNumaNodeFName = "numa_node";
 
 // Firmware version files
 static const char *kDevFwVersionAsdFName = "fw_version/asd_fw_version";
@@ -266,6 +267,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevFwVersionVcn, kDevFwVersionVcnFName},
     {kDevSerialNumber, kDevSerialNumberFName},
     {kDevMemPageBad, kDevMemPageBadFName},
+    {kDevNumaNode, kDevNumaNodeFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -373,6 +375,7 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_xgmi_error_status",         {{kDevXGMIErrorFName}, {}}},
   {"rsmi_dev_xgmi_error_reset",          {{kDevXGMIErrorFName}, {}}},
   {"rsmi_dev_memory_reserved_pages_get", {{kDevMemPageBadFName}, {}}},
+  {"rsmi_topo_numa_affinity_get",        {{kDevNumaNodeFName}, {}}},
 
   // These functions with variants, but no sensors/units. (May or may not
   // have mandatory dependencies.)
@@ -683,6 +686,7 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevDFCountersAvailable:
     case kDevMemBusyPercent:
     case kDevXGMIError:
+    case kDevNumaNode:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       if (tempStr == "") {
