@@ -260,6 +260,14 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
   return 1
 #############################################################
 
+def extract_field(rec_args, field):
+  ptrn1_field = re.compile(r'^.*'+field+'\(');
+  ptrn2_field = re.compile(r'\)\) .*$');
+  (field_name, n_subs) = ptrn1_field.subn('', rec_args, count=1);
+  if n_subs != 0:
+    (field_name, n_subs) = ptrn2_field.subn(')', field_name, count=1)
+  return (field_name, n_subs)
+
 # Fill API DB
 api_table_descr = [
   ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'args', 'Index'],
@@ -336,15 +344,24 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
             copy_csv += str(copy_index) + ', ' + copy_line + '\n'
             copy_index += 1
 
-        # kernel name extraction
+        # kernel name extractiod
         if record_id in dep_filtr:
           record_args = rec_vals[rec_len - 2]
           # extract kernel name
-          (kernel_name, n_subs) = ptrn1_kernel.subn('', record_args, count=1);
+          #(kernel_name, n_subs) = ptrn1_kernel.subn('', record_args, count=1);
+          #if n_subs != 0:
+          #  (kernel_name, n_subs) = ptrn2_kernel.subn(')', kernel_name, count=1)
+          #  if n_subs != 0: db.change_rec_name('OPS', record_id, '"' + kernel_name + '"')
+          # TODO extract stream-id and db-change thread-id
+          (kernel_name, n_subs) = extract_field(record_args, 'kernel')
           if n_subs != 0:
-            (kernel_name, n_subs) = ptrn2_kernel.subn(')', kernel_name, count=1)
-            if n_subs != 0: db.change_rec_name('OPS', record_id, '"' + kernel_name + '"')
-          # TODO extract stream-id and db-change thread-is
+            db.change_rec_name('OPS', record_id, '"' + kernel_name + '"')
+          (stream_id, n_subs) = extract_field(record_args, 'stream')
+          if n_subs != 0:
+            if stream_id == 'nil' or stream_id == 'NIL':
+              db.change_rec_tid('OPS', record_id, 0)
+            else:
+              db.change_rec_tid('OPS', record_id, stream_id)
 
         record_id += 1
       else: fatal(api_name + " bad record: '" + record + "'")
