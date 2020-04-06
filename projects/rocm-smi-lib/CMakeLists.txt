@@ -132,7 +132,7 @@ set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_power_mon.cc")
 set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_utils.cc")
 set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_counters.cc")
 set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/rocm_smi_kfd.cc")
-set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/shared_mutex/shared_mutex.c")
+set(SMI_SRC_LIST ${SMI_SRC_LIST} "${SRC_DIR}/shared_mutex/shared_mutex.cc")
 
 set(SMI_INC_LIST "${INC_DIR}/rocm_smi_device.h")
 set(SMI_INC_LIST ${SMI_INC_LIST} "${INC_DIR}/rocm_smi_main.h")

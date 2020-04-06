@@ -58,9 +58,7 @@
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_counters.h"
-extern "C" {
-#include "shared_mutex.h"   // NOLINT
-};
+#include "shared_mutex.h"   //NOLINT
 
 namespace amd {
 namespace smi {

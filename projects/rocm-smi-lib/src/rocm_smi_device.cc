@@ -64,10 +64,7 @@
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
-
-extern "C" {
 #include "shared_mutex.h"  // NOLINT
-};
 
 namespace amd {
 namespace smi {
@@ -474,8 +471,6 @@ Device::Device(std::string p, RocmSMI_env_vars const *e) : path_(p), env_(e) {
 
   std::string m_name("/rocm_smi_");
   m_name += dev;
-  m_name += '_';
-  m_name += std::to_string(geteuid());
 
   mutex_ = shared_mutex_init(m_name.c_str(), 0777);
 
