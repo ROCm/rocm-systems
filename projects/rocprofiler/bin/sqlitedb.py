@@ -164,14 +164,17 @@ class SQLiteDB:
   def metadata_json(self, jsonfile, sysinfo_file):
     params = gen_params(sysinfo_file);
     with open(jsonfile, mode='a') as fd:
+      cnt = 0
       fd.write('],\n')
       fd.write('"otherData": {\n')
-      cnt = 0
-      for key in params:
-        if cnt != 0: fd.write(',\n')
-        fd.write('    "' + key + '": "' + params[key] + '"')
+      for nkey in sorted(params.keys()):
+        key = nkey[1]
         cnt = cnt + 1
-      fd.write('\n  }\n')
+        if cnt == len(params):
+          fd.write('    "' + key + '": "' + params[nkey] + '"\n')
+        else:
+          fd.write('    "' + key + '": "' + params[nkey] + '",\n')
+      fd.write('  }\n')
 
   def dump_json(self, table_name, data_name, file_name):
     if not re.search(r'\.json$', file_name):
