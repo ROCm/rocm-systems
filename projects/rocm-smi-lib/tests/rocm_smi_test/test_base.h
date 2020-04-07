@@ -57,7 +57,9 @@ class TestBase {
 
   // @Brief: Before run the core measure codes, do something to set up
   // i.e. init runtime, prepare packet...
-  virtual void SetUp(void);
+  // The init_flags option will override any flags set for the whole test
+  // suite
+  virtual void SetUp(uint64_t init_flags = 0);
 
   // @Brief: Core measurement codes executing here
   virtual void Run(void);
@@ -134,5 +136,8 @@ class TestBase {
       ASSERT_EQ(RSMI_STATUS_SUCCESS, (RET)); \
     } \
 }
+
+void MakeHeaderStr(const char *inStr, std::string *outStr);
+extern const char kSetupLabel[];
 
 #endif  // TESTS_ROCM_SMI_TEST_TEST_BASE_H_

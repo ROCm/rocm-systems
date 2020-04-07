@@ -118,9 +118,10 @@ typedef enum {
                                          //!< input
   RSMI_STATUS_UNEXPECTED_DATA,           //!< The data read or provided to
                                          //!< function is not what was expected
-  RSMI_STATUS_RESOURCE_BUSY,             //!< A function timed out trying to
-                                         //!< a resource. This could be a
-                                         //!< mutex time-out.
+  RSMI_STATUS_BUSY,                      //!< A resource or mutex could not be
+                                         //!< acquired because it is already
+                                         //!< being used
+
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
 
@@ -131,12 +132,13 @@ typedef enum {
  */
 
 typedef enum {
-  RSMI_INIT_FLAG_ALL_GPUS      = 0x1,    //!< Attempt to add all GPUs found
+  RSMI_INIT_FLAG_ALL_GPUS   = 0x1,       //!< Attempt to add all GPUs found
                                          //!< (including non-AMD) to the list
                                          //!< of devices from which SMI
                                          //!< information can be retrieved. By
                                          //!< default, only AMD devices are
                                          //!<  ennumerated by RSMI.
+  RSMI_INIT_FLAG_RESRV_TEST1 = 0x800000000000000,  //!< Reserved for test
 } rsmi_init_flags_t;
 
 /**

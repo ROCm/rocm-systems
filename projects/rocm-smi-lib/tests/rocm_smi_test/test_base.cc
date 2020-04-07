@@ -54,18 +54,19 @@ static const int kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";
 static const char kDescriptionLabel[] = "TEST DESCRIPTION";
 static const char kTitleLabel[] = "TEST NAME";
-static const char kSetupLabel[] = "TEST SETUP";
 static const char kRunLabel[] = "TEST EXECUTION";
 static const char kCloseLabel[] = "TEST CLEAN UP";
 static const char kResultsLabel[] = "TEST RESULTS";
 
+// This one is used outside this file
+const char kSetupLabel[] = "TEST SETUP";
 
 TestBase::TestBase() : setup_failed_(false), description_("") {
 }
 TestBase::~TestBase() {
 }
 
-static void MakeHeaderStr(const char *inStr, std::string *outStr) {
+void MakeHeaderStr(const char *inStr, std::string *outStr) {
   assert(outStr != nullptr);
   assert(inStr != nullptr);
 
@@ -77,14 +78,19 @@ static void MakeHeaderStr(const char *inStr, std::string *outStr) {
   *outStr += kLabelDelimiter;
 }
 
-void TestBase::SetUp(void) {
+void TestBase::SetUp(uint64_t init_flags) {
   std::string label;
   rsmi_status_t err;
 
   MakeHeaderStr(kSetupLabel, &label);
   printf("\n\t%s\n", label.c_str());
 
-  err = rsmi_init(init_options());
+  if (init_flags) {
+    err = rsmi_init(init_flags);
+  } else {
+    err = rsmi_init(init_options());
+  }
+
   if (err != RSMI_STATUS_SUCCESS) {
     setup_failed_ = true;
   }

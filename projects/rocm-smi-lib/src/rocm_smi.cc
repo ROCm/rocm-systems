@@ -46,6 +46,7 @@
 #include <sys/utsname.h>
 #include <pthread.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <sstream>
 #include <algorithm>
@@ -75,7 +76,6 @@ static rsmi_status_t handleException() {
   try {
     throw;
   } catch (const std::bad_alloc& e) {
-    debug_print("RSMI exception: BadAlloc\n");
     return RSMI_STATUS_OUT_OF_RESOURCES;
   } catch (const amd::smi::rsmi_exception& e) {
     debug_print("Exception caught: %s.\n", e.what());
@@ -123,7 +123,12 @@ static rsmi_status_t handleException() {
 
 #define DEVICE_MUTEX \
     amd::smi::pthread_wrap _pw(*get_mutex(dv_ind)); \
-    amd::smi::ScopedPthread _lock(_pw);
+    amd::smi::RocmSMI& smi_ = amd::smi::RocmSMI::getInstance(); \
+    bool blocking_ = !(smi_.init_options() && RSMI_INIT_FLAG_RESRV_TEST1); \
+    amd::smi::ScopedPthread _lock(_pw, blocking_); \
+    if (!blocking_ && _lock.mutex_not_acquired()) { \
+      return RSMI_STATUS_BUSY; \
+    }
 
 /* This group of macros is used to facilitate checking of support for rsmi_dev*
  * "getter" functions. When the return buffer is set to nullptr, the macro will
@@ -1638,10 +1643,13 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
 
 rsmi_status_t
 rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len) {
+  TRY
   CHK_SUPPORT_NAME_ONLY(brand)
   if (len == 0) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+  DEVICE_MUTEX
+
   std::map<std::string, std::string> brand_names = {
     {"D05121", "mi25"},
     {"D05131", "mi25"},
@@ -1676,6 +1684,7 @@ rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len) {
   // If there is no SKU match, return marketing name instead
   rsmi_dev_name_get(dv_ind, brand, len);
   return RSMI_STATUS_SUCCESS;
+  CATCH
 }
 
 rsmi_status_t
@@ -2501,6 +2510,7 @@ rsmi_status_t rsmi_dev_serial_number_get(uint32_t dv_ind,
   }
 
   TRY
+  DEVICE_MUTEX
 
   std::string val_str;
   rsmi_status_t ret = get_dev_value_str(amd::smi::kDevSerialNumber,
@@ -3145,4 +3155,24 @@ rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle) {
   return RSMI_STATUS_SUCCESS;
 
   CATCH
+}
+
+// UNDOCUMENTED FUNCTIONS
+// This functions are not declared in rocm_smi.h. They are either not fully
+// supported, or to be used for test purposes.
+
+// This function acquires a mutex and waits for a number of seconds
+rsmi_status_t
+rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds) {
+//  DEVICE_MUTEX
+  amd::smi::pthread_wrap _pw(*get_mutex(dv_ind));
+  amd::smi::RocmSMI& smi_ = amd::smi::RocmSMI::getInstance();
+  bool blocking_ = !(smi_.init_options() && RSMI_INIT_FLAG_RESRV_TEST1);
+  amd::smi::ScopedPthread _lock(_pw, blocking_);
+  if (!blocking_ && _lock.mutex_not_acquired()) {
+    return RSMI_STATUS_BUSY;
+  }
+
+  sleep(seconds);
+  return RSMI_STATUS_SUCCESS;
 }

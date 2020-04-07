@@ -1,4 +1,26 @@
-// NOLINT(legal/copyright)
+/*
+Modifications Copyright © 2019 – 2020 Advanced Micro Devices, Inc. All Rights
+Reserved.
+Copyright (c) 2018 Oleg Yamnikov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
 #include "shared_mutex.h"  // NOLINT(build/include)
 #include <errno.h>  // errno, ENOENT
 #include <fcntl.h>  // O_RDWR, O_CREATE
@@ -59,7 +81,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
   pthread_mutex_t *mutex_ptr =  reinterpret_cast<pthread_mutex_t *>(addr);
 
   // Make sure the mutex wasn't left in a locked state. If we can't
-  // acquire it in 3 sec., re-do everything.
+  // acquire it in 5 sec., re-do everything.
   struct timespec expireTime;
   clock_gettime(CLOCK_REALTIME, &expireTime);
   expireTime.tv_sec += 5;
@@ -75,7 +97,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
                                                                 " /dev/shm.");
     free(mutex.name);
 
-    throw amd::smi::rsmi_exception(RSMI_STATUS_RESOURCE_BUSY, __FUNCTION__);
+    throw amd::smi::rsmi_exception(RSMI_STATUS_BUSY, __FUNCTION__);
     return mutex;
   } else {
     if (pthread_mutex_unlock(mutex_ptr)) {

@@ -1,9 +1,11 @@
 /*
  * =============================================================================
+ *   ROC Runtime Conformance Release License
+ * =============================================================================
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2020, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -40,72 +42,36 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
-#define INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
+#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_
+#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_
 
-#include <pthread.h>
+#include "rocm_smi_test/test_base.h"
 
-#include <string>
-#include <cstdint>
-
-#ifdef NDEBUG
-#define debug_print(fmt, ...)               \
-  do {                                      \
-  } while (false)
-#else
-#define debug_print(fmt, ...)               \
-  do {                                      \
-    fprintf(stderr, fmt, ##__VA_ARGS__);    \
-  } while (false)
-#endif
-
-namespace amd {
-namespace smi {
-
-int SameFile(const std::string fileA, const std::string fileB);
-bool FileExists(char const *filename);
-int isRegularFile(std::string fname, bool *is_reg);
-
-int ReadSysfsStr(std::string path, std::string *retStr);
-int WriteSysfsStr(std::string path, std::string val);
-
-bool IsInteger(const std::string & n_str);
-
-struct pthread_wrap {
+class TestMutualExclusion : public TestBase {
  public:
-        explicit pthread_wrap(pthread_mutex_t &p_mut) : mutex_(p_mut) {}
+    TestMutualExclusion();
 
-        void Acquire() {pthread_mutex_lock(&mutex_);}
-        int AcquireNB() {return pthread_mutex_trylock(&mutex_);}
-        void Release() {pthread_mutex_unlock(&mutex_);}
- private:
-        pthread_mutex_t& mutex_;
-};
-struct ScopedPthread {
-     explicit ScopedPthread(pthread_wrap& mutex, bool blocking = true) : //NOLINT
-                               pthrd_ref_(mutex), mutex_not_acquired_(false) {
-       if (blocking) {
-         pthrd_ref_.Acquire();
-       } else {
-         int ret = pthrd_ref_.AcquireNB();
-         if (ret == EBUSY) {
-           mutex_not_acquired_ = true;
-         }
-       }
-     }
+  // @Brief: Destructor for test case of TestMutualExclusion
+  virtual ~TestMutualExclusion();
 
-     ~ScopedPthread() {
-       pthrd_ref_.Release();
-     }
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
 
-     bool mutex_not_acquired() {return mutex_not_acquired_;}
+  // @Brief: Core measurement execution
+  virtual void Run();
+
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
+
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
 
  private:
-     ScopedPthread(const ScopedPthread&);
-     pthread_wrap& pthrd_ref_;
-     bool mutex_not_acquired_;  // Use for AcquireNB (not for Aquire())
+  bool sleeper_process_;
+  int child_;
 };
-}  // namespace smi
-}  // namespace amd
 
-#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_UTILS_H_
+#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_MUTUAL_EXCLUSION_H_
