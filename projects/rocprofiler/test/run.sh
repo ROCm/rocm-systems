@@ -32,9 +32,12 @@ fi
 test_status=0
 test_runnum=0
 test_number=0
+failed_tests="Failed tests:"
+
 xeval_test() {
   test_number=$test_number
 }
+
 eval_test() {
   label=$1
   cmdline=$2
@@ -44,6 +47,7 @@ eval_test() {
     eval "$cmdline"
     if [ $? != 0 ] ; then
       echo "$label: FAILED"
+      failed_tests="$failed_tests\n  $test_number: \"$label\""
       test_status=$(($test_status + 1))
     else
       echo "$label: PASSED"
@@ -76,10 +80,16 @@ eval_test "C test" ./test/c_test
 unset HSA_TOOLS_LIB
 unset ROCP_TOOL_LIB
 eval_test "Standalone sampling usage model test" ./test/standalone_test
+# Standalone intercepting test
+# ROC profiler library loaded by HSA runtime
+export HSA_TOOLS_LIB=librocprofiler64.so.1
+export ROCP_HSA_INTERCEPT=2
+export ROCP_KITER=100
+export ROCP_DITER=10
+eval_test "Standalone intercepting test" ./test/stand_intercept_test
+unset ROCP_HSA_INTERCEPT
 
 ## Intercepting usage model test
-# ROC profiler library loaded by HSA runtime
-export HSA_TOOLS_LIB=librocprofiler64.so
 # tool library loaded by ROC profiler
 export ROCP_TOOL_LIB=./test/libintercept_test.so
 export ROCP_KITER=50
@@ -158,4 +168,7 @@ eval_test "libtool test, OpenCL sample" ./test/ocl/SimpleConvolution
 #ms_print massif.out.<N>
 
 echo "$test_number tests total / $test_runnum tests run / $test_status tests failed"
+if [ $test_status != 0 ] ; then
+  echo $failed_tests
+fi
 exit $test_status

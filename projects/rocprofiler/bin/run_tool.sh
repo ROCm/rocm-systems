@@ -22,7 +22,8 @@ export PATH=.:$PATH
 export HSA_TOOLS_LIB=librocprofiler64.so.1
 # tool library loaded by ROC profiler
 if [ -z "$ROCP_TOOL_LIB" ] ; then
-  export ROCP_TOOL_LIB=libintercept_test.so
+  echo "Tool library is not defined: ROCP_TOOL_LIB"
+  exit 1
 fi
 # enable error messages
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1

@@ -40,15 +40,22 @@ target_include_directories ( "c_test" PRIVATE ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH
 file( GLOB UTIL_SRC "${TEST_DIR}/util/*.cpp" )
 
 ## Standalone test sources
-set ( STEXE_NAME "standalone_test" )
-set ( STTST_SRC
+set ( ST_EXE_NAME "standalone_test" )
+set ( ST_TST_SRC
   ${TEST_DIR}/app/standalone_test.cpp
   ${TEST_DIR}/ctrl/test_hsa.cpp
 )
 
+## Standalone intercept test sources
+set ( STIN_EXE_NAME "stand_intercept_test" )
+set ( STIN_TST_SRC
+  ${TEST_DIR}/app/stand_intercept_test.cpp
+  ${TEST_DIR}/ctrl/test_hsa.cpp
+)
+
 ## Intercept test sources
-set ( INEXE_NAME "intercept_test" )
-set ( INTST_SRC
+set ( IN_EXE_NAME "intercept_test" )
+set ( IN_TST_SRC
   ${TEST_DIR}/app/intercept_test.cpp
   ${TEST_DIR}/ctrl/test_hsa.cpp
 )
@@ -72,14 +79,19 @@ add_custom_target( mytest
 )
 
 ## Building standalone test executable
-add_executable ( ${STEXE_NAME} ${STTST_SRC} ${UTIL_SRC} ${KERN_SRC} )
-target_include_directories ( ${STEXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )
-target_link_libraries ( ${STEXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt )
+add_executable ( ${ST_EXE_NAME} ${ST_TST_SRC} ${UTIL_SRC} ${KERN_SRC} )
+target_include_directories ( ${ST_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )
+target_link_libraries ( ${ST_EXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt )
+
+## Building standalone intercept test executable
+add_executable ( ${STIN_EXE_NAME} ${STIN_TST_SRC} ${UTIL_SRC} ${KERN_SRC} )
+target_include_directories ( ${STIN_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )
+target_link_libraries ( ${STIN_EXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt )
 
 ## Building intercept test executable
-add_library ( ${INEXE_NAME} SHARED ${INTST_SRC} ${UTIL_SRC} ${KERN_SRC} )
-target_include_directories ( ${INEXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )
-target_link_libraries ( ${INEXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt )
+add_library ( ${IN_EXE_NAME} SHARED ${IN_TST_SRC} ${UTIL_SRC} ${KERN_SRC} )
+target_include_directories ( ${IN_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )
+target_link_libraries ( ${IN_EXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt )
 
 ## Building ctrl test executable
 add_executable ( ${EXE_NAME} ${CTRL_SRC} ${UTIL_SRC} ${KERN_SRC} )

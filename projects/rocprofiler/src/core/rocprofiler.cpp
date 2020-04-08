@@ -669,12 +669,12 @@ PUBLIC_API hsa_status_t rocprofiler_remove_queue_callbacks() {
 }
 
 // Start/stop queue callbacks
-hsa_status_t rocprofiler_start_queue_callbacks() {
+PUBLIC_API hsa_status_t rocprofiler_start_queue_callbacks() {
   API_METHOD_PREFIX
   rocprofiler::InterceptQueue::Start();
   API_METHOD_SUFFIX
 }
-hsa_status_t rocprofiler_stop_queue_callbacks() {
+PUBLIC_API hsa_status_t rocprofiler_stop_queue_callbacks() {
   API_METHOD_PREFIX
   rocprofiler::InterceptQueue::Stop();
   API_METHOD_SUFFIX

@@ -151,11 +151,16 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
 }
 
 int main() {
-  bool ret_val = false;
+  bool ret_val = true;
   const char* kiter_s = getenv("ROCP_KITER");
   const char* diter_s = getenv("ROCP_DITER");
   const unsigned kiter = (kiter_s != NULL) ? atol(kiter_s) : 1;
   const unsigned diter = (diter_s != NULL) ? atol(diter_s) : 1;
+
+  // Adding dispatch observer
+  rocprofiler_queue_callbacks_t callbacks_ptrs{};
+  callbacks_ptrs.dispatch = dispatch_callback;
+  rocprofiler_set_queue_callbacks(callbacks_ptrs, NULL);
 
   // Instantiate HSA resources
   HsaRsrcFactory::Create();
@@ -168,19 +173,15 @@ int main() {
   hsa_queue_t* queue = NULL;
   if (HsaRsrcFactory::Instance().CreateQueue(agent_info, 128, &queue) == false) abort();
 
-  // Adding dispatch observer
-  rocprofiler_queue_callbacks_t callbacks_ptrs{};
-  callbacks_ptrs.dispatch = dispatch_callback;
-  rocprofiler_set_queue_callbacks(callbacks_ptrs, NULL);
-
   // Test initialization
-  TestHsa::SetQueue(queue);
-  TestHsa::HsaInstantiate(0);
+  TestHsa::HsaInstantiate();
 
   for (unsigned ind = 0; ind < kiter; ++ind) {
-    printf("Iterastion %u:\n", ind);
-    ret_val = RunKernel<DummyKernel, TestAql>(0, NULL, diter);
-    if (ret_val) ret_val = RunKernel<SimpleConvolution, TestAql>(0, NULL, diter);
+    printf("Iteration %u:\n", ind);
+    if ((ind & 1) == 0) rocprofiler_start_queue_callbacks();
+    else rocprofiler_stop_queue_callbacks();
+    ret_val = RunKernel<DummyKernel, TestAql>(0, NULL, agent_info, queue, diter);
+    if (ret_val) ret_val = RunKernel<SimpleConvolution, TestAql>(0, NULL, agent_info, queue, diter);
   }
 
   TestHsa::HsaShutdown();
