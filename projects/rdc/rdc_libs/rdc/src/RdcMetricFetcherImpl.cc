@@ -22,10 +22,11 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcMetricFetcherImpl.h"
 #include <sys/time.h>
 #include <string.h>
-#include <chrono>
+#include <chrono>  //NOLINT
 #include <algorithm>
 #include <vector>
 #include "rdc_lib/rdc_common.h"
+#include "rdc_lib/RdcLogger.h"
 #include "rocm_smi/rocm_smi.h"
 
 namespace amd {
@@ -48,6 +49,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
     uint64_t i64 = 0;
 
     if (!is_field_valid(field_id)) {
+         RDC_LOG(RDC_ERROR, "Fail to fetch field " << field_id
+              << " which is not supported");
          return RDC_ST_NOT_SUPPORTED;
     }
 
@@ -123,6 +126,27 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
             break;
         default:
             break;
+    }
+
+    gettimeofday(&tv, NULL);
+    int64_t latency = static_cast<uint64_t>(tv.tv_sec)*1000+tv.tv_usec/1000
+               - value->ts;
+    if (value->status != RSMI_STATUS_SUCCESS) {
+         RDC_LOG(RDC_ERROR, "Fail to fetch " << gpu_index << ":" <<
+              field_id_string(field_id) << " with rsmi error code "
+              << value->status <<", latency " << latency);
+    } else if (value->type == INTEGER) {
+         RDC_LOG(RDC_DEBUG, "Fetch " << gpu_index << ":" <<
+               field_id_string(field_id) << ":" << value->value.l_int
+               << ", latency " << latency);
+    } else if (value->type == DOUBLE) {
+         RDC_LOG(RDC_DEBUG, "Fetch " << gpu_index << ":" <<
+         field_id_string(field_id) << ":" << value->value.dbl
+         << ", latency " << latency);
+    } else if (value->type == STRING) {
+         RDC_LOG(RDC_DEBUG, "Fetch " << gpu_index << ":" <<
+         field_id_string(field_id) << ":" << value->value.str
+         << ", latency " << latency);
     }
 
     return value->status == RSMI_STATUS_SUCCESS ?  RDC_ST_OK : RDC_ST_MSI_ERROR;

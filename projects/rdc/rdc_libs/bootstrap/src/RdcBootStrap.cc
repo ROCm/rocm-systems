@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <map>
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcHandler.h"
+#include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
 
 static void* libHandler = nullptr;
@@ -96,7 +97,7 @@ rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode,
 
         if (!libHandler) {
                 error = dlerror();
-                LOG_DEBUG("Fail to open librdc.so: " << error);
+                RDC_LOG(RDC_ERROR, "Fail to open librdc.so: " << error);
                 return RDC_ST_FAIL_LOAD_MODULE;
         }
 
@@ -104,7 +105,8 @@ rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode,
                 dlsym(libHandler, "make_handler");
         if (!func_make_handler) {
                 error = dlerror();
-                LOG_DEBUG("Fail to find function make_handler:" << error);
+                RDC_LOG(RDC_ERROR,
+                "Fail to find function make_handler:" << error);
                 return RDC_ST_FAIL_LOAD_MODULE;
         }
 
@@ -144,15 +146,32 @@ rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, char  job_id[64] ,
 }
 
 rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle,
-                rdc_gpu_group_t groupId, char  job_id[64], uint64_t update_freq,
-                double  max_keep_age, uint32_t  max_keep_samples ) {
+                rdc_gpu_group_t groupId, char  job_id[64],
+                 uint64_t update_freq) {
         if (!p_rdc_handle) {
                 return RDC_ST_INVALID_HANDLER;
         }
 
         return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
-                rdc_job_start_stats(groupId, job_id, update_freq,
-                                max_keep_age, max_keep_samples);
+                rdc_job_start_stats(groupId, job_id, update_freq);
+}
+
+rdc_status_t rdc_job_remove(rdc_handle_t p_rdc_handle, char job_id[64]) {
+        if (!p_rdc_handle) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+                rdc_job_remove(job_id);
+}
+
+rdc_status_t rdc_job_remove_all(rdc_handle_t p_rdc_handle) {
+        if (!p_rdc_handle) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+                rdc_job_remove_all();
 }
 
 
@@ -344,6 +363,8 @@ const char* rdc_status_string(rdc_status_t result) {
                 return "The max limit reached";
         case RDC_ST_CONFLICT:
                 return "Conflict with current state";
+        case RDC_ST_ALREADY_EXIST:
+                return "The value already exists";
         case RDC_ST_CLIENT_ERROR:
                 return "RDC Client error";
         default:

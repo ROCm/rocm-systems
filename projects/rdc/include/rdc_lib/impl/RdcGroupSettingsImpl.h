@@ -61,8 +61,8 @@ class RdcGroupSettingsImpl: public RdcGroupSettings {
  private:
     std::map<rdc_gpu_group_t, rdc_group_info_t> gpu_group_;
     std::map<rdc_field_grp_t, rdc_field_group_info_t> field_group_;
-    uint32_t cur_group_id_ = 0;
-    uint32_t cur_filed_group_id_ = 0;
+    uint32_t cur_group_id_ = 1;
+    uint32_t cur_field_group_id_ = 0;
     std::mutex group_mutex_;
     std::mutex field_group_mutex_;
 };

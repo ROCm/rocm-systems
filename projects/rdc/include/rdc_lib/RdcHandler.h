@@ -33,12 +33,12 @@ class RdcHandler {
  public:
     // Job API
     virtual rdc_status_t rdc_job_start_stats(rdc_gpu_group_t groupId,
-                char  job_id[64], uint64_t update_freq, double  max_keep_age,
-            uint32_t  max_keep_samples) = 0;
-    virtual rdc_status_t rdc_job_get_stats(char  jobId[64],
+                char job_id[64], uint64_t update_freq) = 0;
+    virtual rdc_status_t rdc_job_get_stats(char jobId[64],
                 rdc_job_info_t* p_job_info)= 0;
-    virtual rdc_status_t rdc_job_stop_stats(char  job_id[64]) = 0;
-
+    virtual rdc_status_t rdc_job_stop_stats(char job_id[64]) = 0;
+    virtual rdc_status_t rdc_job_remove(char job_id[64]) = 0;
+    virtual rdc_status_t rdc_job_remove_all() = 0;
 
     // Discovery API
     virtual rdc_status_t rdc_device_get_all(

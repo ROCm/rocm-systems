@@ -24,12 +24,18 @@ THE SOFTWARE.
 #define RDC_LIB_RDC_COMMON_H_
 #include <iostream>
 
+#define RDC_ERROR  0
+#define RDC_INFO   1
+#define RDC_DEBUG  2
 
-#ifdef DEBUG
-#define LOG_DEBUG(message) std::cout << message << std::endl
-#else
-#define LOG_DEBUG(message)
-#endif
+#define RDC_LOG(debug_level, msg) do { \
+    auto& logger = amd::rdc::RdcLogger::getLogger(); \
+    if (logger.should_log((debug_level))) { \
+        logger.get_ostream() << \
+        logger.get_log_header((debug_level), __FILE__, __LINE__) << \
+        msg << std::endl; \
+    } \
+} while (0)
 
 /**
  *  @brief The strncpy but with null terminated

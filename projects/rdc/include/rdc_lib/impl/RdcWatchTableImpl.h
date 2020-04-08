@@ -22,11 +22,12 @@ THE SOFTWARE.
 #ifndef RDC_LIB_IMPL_RDCWATCHTABLEIMPL_H_
 #define RDC_LIB_IMPL_RDCWATCHTABLEIMPL_H_
 
+#include <string>
 #include <map>
 #include <vector>
 #include <utility>
 #include <memory>
-#include <mutex>
+#include <mutex>  // NOLINT
 #include <atomic>
 #include "rdc_lib/RdcWatchTable.h"
 #include "rdc_lib/RdcGroupSettings.h"
@@ -45,14 +46,18 @@ struct FieldSettings {
     uint64_t last_update_time;
 };
 
+struct JobWatchTableEntry {
+    uint32_t group_id;
+    std::vector<RdcFieldKey> fields;  //< store fields for faster query
+};
 
 class RdcWatchTableImpl : public RdcWatchTable {
  public:
     rdc_status_t rdc_job_start_stats(rdc_gpu_group_t group_id,
-                    char job_id[64]) override;
-    rdc_status_t rdc_watch_job_fields(rdc_gpu_group_t group_id,
-                    uint64_t update_freq, double  max_keep_age,
-                    uint32_t  max_keep_samples)  override;
+                    char job_id[64], uint64_t update_freq) override;
+    rdc_status_t rdc_job_stop_stats(char job_id[64]) override;
+    rdc_status_t rdc_job_remove(char job_id[64]) override;
+    rdc_status_t rdc_job_remove_all() override;
 
     rdc_status_t rdc_field_watch(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id, uint64_t update_freq,
@@ -84,10 +89,16 @@ class RdcWatchTableImpl : public RdcWatchTable {
     //!< Helper function to clean up the watch table and cache
     void clean_up();
 
+    //!< Helper function for debug information in watch table and cache
+    void debug_status();
+
     //!< Helper function to get the fields using the group and the field group.
     rdc_status_t get_fields_from_group(rdc_gpu_group_t group_id,
-         rdc_field_grp_t field_group_id, std::vector<RdcFieldKey> & fields);
+         rdc_field_grp_t field_group_id,
+         std::vector<RdcFieldKey> & fields); // NOLINT
 
+    bool is_job_watch_field(uint32_t gpu_index, uint32_t field_id,
+                std::string& job_id) const;  // NOLINT
 
     RdcGroupSettingsPtr group_settings_;
     RdcCacheManagerPtr cache_mgr_;
@@ -95,6 +106,10 @@ class RdcWatchTableImpl : public RdcWatchTable {
 
     //!< The watch table to store the watch settings.
     std::map<RdcFieldKey, FieldSettings> watch_table_;
+
+    //!< <job_id, gpu_group_id> pairs
+    std::map<std::string, JobWatchTableEntry> job_watch_table_;
+
 
     //!< The settings for each field can be deduced from watch_table. But every
     //!< rdc_field_update_all() call needs to deduce them. To improve the

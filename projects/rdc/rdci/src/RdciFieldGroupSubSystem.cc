@@ -40,6 +40,7 @@ void RdciFieldGroupSubSystem::parse_cmd_opts(int argc, char ** argv) {
     const struct option long_options[] = {
         {"host",    required_argument, nullptr, HOST_OPTIONS },
         {"help", optional_argument, nullptr, 'h' },
+        {"unauth", optional_argument, nullptr, 'u' },
         {"list", optional_argument, nullptr, 'l' },
         {"group", required_argument, nullptr, 'g'},
         {"create", required_argument, nullptr, 'c' },
@@ -52,7 +53,7 @@ void RdciFieldGroupSubSystem::parse_cmd_opts(int argc, char ** argv) {
     int option_index = 0;
     int opt = 0;
 
-    while ((opt = getopt_long(argc, argv, "hlif:c:g:d:",
+    while ((opt = getopt_long(argc, argv, "hluif:c:g:d:",
                 long_options, &option_index)) != -1) {
         switch (opt) {
             case HOST_OPTIONS:
@@ -61,6 +62,9 @@ void RdciFieldGroupSubSystem::parse_cmd_opts(int argc, char ** argv) {
             case 'h':
                 field_group_ops_ = FIELD_GROUP_HELP;
                 return;
+            case 'u':
+                 use_auth_ = false;
+                 break;
             case 'l':
                 field_group_ops_ = FIELD_GROUP_LIST;
                 break;

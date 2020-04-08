@@ -23,8 +23,10 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
 #include <sys/time.h>
 #include <ctime>
+#include <sstream>
 #include <algorithm>
 #include "rdc_lib/rdc_common.h"
+#include "rdc_lib/RdcLogger.h"
 
 namespace amd {
 namespace rdc {
@@ -39,23 +41,91 @@ RdcWatchTableImpl::RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings,
 }
 
 rdc_status_t  RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id,
-                char  job_id[64]) {
-    // TODO(bill_liu): implement
-    (void)(group_id);
-    (void)(job_id);
-    return RDC_ST_OK;
+                char  job_id[64], uint64_t update_freq) {
+    do {  //< lock guard for thread safe
+        std::lock_guard<std::mutex> guard(watch_mutex_);
+        if (job_watch_table_.find(job_id) != job_watch_table_.end()) {
+            return RDC_ST_ALREADY_EXIST;
+        }
+    } while (0);
+
+    std::vector<RdcFieldKey> fields_in_watch;
+    rdc_status_t result = get_fields_from_group(group_id,
+                JOB_FIELD_ID, fields_in_watch);
+    JobWatchTableEntry jentry {group_id, fields_in_watch};
+    job_watch_table_.insert({job_id, jentry});
+
+    result = rdc_field_watch(group_id, JOB_FIELD_ID, update_freq, 0, 0);
+    if (result != RDC_ST_OK) {
+        return result;
+    }
+
+    rdc_field_group_info_t finfo;
+    rdc_group_info_t ginfo;
+    result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
+    if (result != RDC_ST_OK) {
+        return result;
+    }
+    result = group_settings_->rdc_group_field_get_info(JOB_FIELD_ID, &finfo);
+    if (result != RDC_ST_OK) {
+        return result;
+    }
+
+    result = cache_mgr_->rdc_job_start_stats(job_id, ginfo, finfo);
+
+    return result;
 }
 
-rdc_status_t RdcWatchTableImpl::rdc_watch_job_fields(rdc_gpu_group_t group_id,
-                uint64_t update_freq, double  max_keep_age,
-                uint32_t max_keep_samples) {
-    // TODO(bill_liu): implement
-    (void)(group_id);
-    (void)(update_freq);
-    (void)(max_keep_age);
-    (void)(max_keep_samples);
-    return RDC_ST_OK;
+rdc_status_t RdcWatchTableImpl::rdc_job_stop_stats(char job_id[64]) {
+    uint32_t job_group_id;
+    do {  //< lock guard for thread safe
+        std::lock_guard<std::mutex> guard(watch_mutex_);
+        auto job = job_watch_table_.find(job_id);
+        if (job == job_watch_table_.end()) {
+            return RDC_ST_NOT_FOUND;
+        }
+        job_group_id = job->second.group_id;
+    } while (0);
+
+    rdc_status_t result = rdc_field_unwatch(job_group_id, JOB_FIELD_ID);
+    if (result != RDC_ST_OK) {
+        return result;
+    }
+
+    do {  //< lock guard for thread safe
+        std::lock_guard<std::mutex> guard(watch_mutex_);
+        job_watch_table_.erase(job_id);
+    } while (0);
+
+    result = cache_mgr_->rdc_job_stop_stats(job_id);
+
+    return result;
 }
+
+rdc_status_t RdcWatchTableImpl::rdc_job_remove(char job_id[64]) {
+    rdc_job_stop_stats(job_id);
+    return cache_mgr_->rdc_job_remove(job_id);
+}
+
+rdc_status_t RdcWatchTableImpl::rdc_job_remove_all() {
+    // Get all the job ids;
+    std::vector<std::string> v;
+    do {  //< lock guard for thread safe
+        std::lock_guard<std::mutex> guard(watch_mutex_);
+        for (auto ite = job_watch_table_.begin();
+            ite != job_watch_table_.end(); ite++) {
+            v.push_back(ite->first);
+        }
+    } while (0);
+
+    // Stop them
+    for (auto job = v.begin(); job != v.end(); job++) {
+        rdc_job_stop_stats(const_cast<char*>(job->c_str()));
+    }
+
+    return cache_mgr_->rdc_job_remove_all();
+}
+
 
 rdc_status_t RdcWatchTableImpl::get_fields_from_group(rdc_gpu_group_t group_id,
     rdc_field_grp_t field_group_id, std::vector<RdcFieldKey> & fields) {
@@ -228,6 +298,21 @@ rdc_status_t RdcWatchTableImpl::rdc_field_unwatch(
     return update_field_in_table_when_unwatch(ite->first);
 }
 
+bool RdcWatchTableImpl::is_job_watch_field(uint32_t gpu_index,
+        uint32_t field_id, std::string& job_id) const {
+    RdcFieldKey key{gpu_index, field_id};
+
+    for (auto ite = job_watch_table_.begin();
+                ite != job_watch_table_.end(); ite++) {
+        auto& fields = ite->second.fields;
+        if (std::find(fields.begin(), fields.end(), key) != fields.end()) {
+            job_id = ite->first;
+            return true;
+        }
+    }
+
+    return false;
+}
 
 rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
     uint32_t items_fetched = 0;
@@ -251,12 +336,18 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
         result = metric_fetcher_->fetch_smi_field(
                     fite->first.first, fite->first.second, &value);
         if (result != RDC_ST_OK) {
-           LOG_DEBUG("Fail to fetch the field: " << rdc_status_string(result));
            continue;
         }
 
         // Update the cache
         cache_mgr_->rdc_update_cache(fite->first.first, value);
+
+        // Update the job stats cache
+        std::string job_id;
+        if (is_job_watch_field(fite->first.first, fite->first.second, job_id)) {
+            cache_mgr_->rdc_update_job_stats(fite->first.first, job_id, value);
+        }
+
 
         // Update the last_upate_time
         gettimeofday(&tv, NULL);
@@ -302,6 +393,56 @@ void RdcWatchTableImpl::clean_up() {
         } else {
             ++wite;
         }
+    }
+
+    // Debug log every 30 seconds
+    if (now/1000%30 == 0) {
+        debug_status();
+    }
+}
+
+void RdcWatchTableImpl::debug_status() {
+    RDC_LOG(RDC_DEBUG, "fields_to_watch_:" << fields_to_watch_.size()
+            << " watch_table_:" << watch_table_.size()
+            << " job_watch_table_:" << job_watch_table_.size()
+            << " cache stats:" << cache_mgr_->get_cache_stats());
+
+    if (watch_table_.size() > 0) {
+        RDC_LOG(RDC_DEBUG, "watch table details:");
+    }
+    for (auto wite = watch_table_.begin(); wite != watch_table_.end(); wite++) {
+        RDC_LOG(RDC_DEBUG, wite->first.first << "," << wite->first.second
+            << ": age:" << wite->second.max_keep_age << ", samples:"
+            << wite->second.max_keep_samples << ", is_watching:"
+            << wite->second.is_watching << ", last_update_time:"
+            << wite->second.last_update_time <<", update_freq:"
+            << wite->second.update_freq);
+    }
+
+    if (job_watch_table_.size() > 0) {
+        RDC_LOG(RDC_DEBUG, "job watch table details: ");
+    }
+    for (auto jite = job_watch_table_.begin();
+            jite !=job_watch_table_.end(); jite++) {
+        std::stringstream strstream;
+        for (const auto& p : jite->second.fields) {
+            strstream << "<" << p.first << "," << p.second << "> ";
+        }
+        RDC_LOG(RDC_DEBUG, jite->first << ": " << jite->second.group_id
+                << " fields : "<< strstream.str());
+    }
+
+    if (fields_to_watch_.size() > 0) {
+        RDC_LOG(RDC_DEBUG, "fields to watch details:");
+    }
+    for (auto fite = fields_to_watch_.begin(); fite != fields_to_watch_.end();
+            fite++) {
+        RDC_LOG(RDC_DEBUG, fite->first.first << "," << fite->first.second
+            << ": age:" << fite->second.max_keep_age << ", samples:"
+            << fite->second.max_keep_samples << ", is_watching:"
+            << fite->second.is_watching << ", last_update_time:"
+            << fite->second.last_update_time <<", update_freq:"
+            << fite->second.update_freq);
     }
 }
 

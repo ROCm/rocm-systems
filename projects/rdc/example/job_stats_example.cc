@@ -92,11 +92,9 @@ int main(int, char **) {
         goto cleanup;
     }
 
-    // (2) start the recording. Set the sample frequency to once per second, the
-    // max keep age to one hour and the maximum number of samples to
-    // keep to unlimited.
+    // (2) start the recording. Set the sample frequency to once per second.
     result = rdc_job_start_stats(rdc_handle, group_id,
-        job_id, 1000000, 3600, 0);
+        job_id, 1000000);
     if (result != RDC_ST_OK) {
         std::cout << "Error start job stats. Return: "
             << rdc_status_string(result);

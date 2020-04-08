@@ -19,40 +19,41 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_RDCWATCHTABLE_H_
-#define RDC_LIB_RDCWATCHTABLE_H_
-
-#include <memory>
-#include <vector>
-#include "rdc_lib/rdc_common.h"
-#include "rdc/rdc.h"
-
+#ifndef RDC_LIB_RDCLOGGER_H_
+#define RDC_LIB_RDCLOGGER_H_
+#include <iostream>
+#include <string>
+#include <chrono>  // NOLINT
 
 namespace amd {
 namespace rdc {
-
-class RdcWatchTable {
+class RdcLogger {
  public:
-    virtual rdc_status_t rdc_field_update_all() = 0;
+     explicit RdcLogger(std::ostream& os);
 
-    virtual rdc_status_t rdc_job_start_stats(rdc_gpu_group_t group_id,
-                char job_id[64], uint64_t update_freq) = 0;
-    virtual rdc_status_t rdc_job_stop_stats(char job_id[64]) = 0;
-    virtual rdc_status_t rdc_job_remove(char job_id[64]) = 0;
-    virtual rdc_status_t rdc_job_remove_all() = 0;
+     static RdcLogger& getLogger() {
+         static RdcLogger logger(std::cout);
+         return logger;
+     }
 
-    virtual rdc_status_t rdc_field_watch(rdc_gpu_group_t group_id,
-                rdc_field_grp_t field_group_id, uint64_t update_freq,
-                double  max_keep_age, uint32_t max_keep_samples) = 0;
-    virtual rdc_status_t rdc_field_unwatch(rdc_gpu_group_t group_id,
-                rdc_field_grp_t field_group_id) = 0;
+     bool should_log(uint32_t severity) {
+         return log_level_ >= severity;
+     }
 
-    virtual ~RdcWatchTable() {}
+     std::ostream& get_ostream() {
+         return os_;
+     }
+
+     std::string get_log_header(uint32_t severity,
+            const char* file, int line);
+
+ private:
+     std::ostream& os_;
+     uint32_t log_level_;
 };
-
-typedef std::shared_ptr<RdcWatchTable> RdcWatchTablePtr;
 
 }  // namespace rdc
 }  // namespace amd
 
-#endif  // RDC_LIB_RDCWATCHTABLE_H_
+
+#endif  // RDC_LIB_RDCLOGGER_H_

@@ -62,19 +62,16 @@ rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status,
 
 // JOB RdcAPI
 rdc_status_t RdcStandaloneHandler::rdc_job_start_stats(rdc_gpu_group_t groupId,
-        char job_id[64], uint64_t update_freq, double  max_keep_age,
-        uint32_t  max_keep_samples) {
+        char job_id[64], uint64_t update_freq) {
     // TODO(bill_liu): implement
     (void)(groupId);
     (void)(job_id);
     (void)(update_freq);
-    (void)(max_keep_age);
-    (void)(max_keep_samples);
 
     return RDC_ST_OK;
 }
 
-rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(char  job_id[64],
+rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(char job_id[64],
            rdc_job_info_t* p_job_info) {
     // TODO(bill_liu): implement
     (void)(job_id);
@@ -82,9 +79,21 @@ rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(char  job_id[64],
     return RDC_ST_OK;
 }
 
-rdc_status_t RdcStandaloneHandler::rdc_job_stop_stats(char  job_id[64] ) {
+rdc_status_t RdcStandaloneHandler::rdc_job_stop_stats(char job_id[64]) {
     // TODO(bill_liu): implement
     (void)(job_id);
+    return RDC_ST_OK;
+}
+
+
+rdc_status_t RdcStandaloneHandler::rdc_job_remove(char job_id[64]) {
+    // TODO(bill_liu): implement
+    (void)(job_id);
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_job_remove_all() {
+    // TODO(bill_liu): implement
     return RDC_ST_OK;
 }
 

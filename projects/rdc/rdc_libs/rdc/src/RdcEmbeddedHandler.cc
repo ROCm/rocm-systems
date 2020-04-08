@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcCacheManagerImpl.h"
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
 #include "rdc_lib/rdc_common.h"
+#include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcException.h"
 #include "rocm_smi/rocm_smi.h"
 
@@ -73,6 +74,7 @@ RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode):
     , metrics_updater_(new RdcMetricsUpdaterImpl(watch_table_,
                         METIC_UPDATE_FREQUENCY)) {
     if (mode == RDC_OPERATION_MODE_AUTO) {
+        RDC_LOG(RDC_DEBUG, "Run RDC with RDC_OPERATION_MODE_AUTO");
         metrics_updater_->start();
     }
 }
@@ -83,32 +85,49 @@ RdcEmbeddedHandler::~RdcEmbeddedHandler() {
 
 // JOB API
 rdc_status_t RdcEmbeddedHandler::rdc_job_start_stats(rdc_gpu_group_t groupId,
-        char job_id[64], uint64_t update_freq, double  max_keep_age,
-        uint32_t  max_keep_samples) {
-    // TODO(bill_liu): implement
-    (void)(groupId);
-    (void)(job_id);
-    (void)(update_freq);
-    (void)(max_keep_age);
-    (void)(max_keep_samples);
-
-    return RDC_ST_OK;
+        char job_id[64], uint64_t update_freq) {
+    return  watch_table_->rdc_job_start_stats(groupId, job_id, update_freq);
 }
 
-rdc_status_t RdcEmbeddedHandler::rdc_job_get_stats(char  job_id[64],
+rdc_status_t RdcEmbeddedHandler::rdc_job_get_stats(char job_id[64],
            rdc_job_info_t* p_job_info) {
-    // TODO(bill_liu): implement
-    (void)(job_id);
-    (void)(p_job_info);
-    return RDC_ST_OK;
+    uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
+    uint32_t count = 0;
+    rdc_status_t status = rdc_device_get_all(
+        gpu_index_list, &count);
+    if (status != RDC_ST_OK) {
+        return status;
+    }
+
+    rdc_gpu_total_memory_t all_total_memory;
+
+    for (uint32_t i = 0; i < count ; i++) {
+        rdc_field_value total_memory;
+        status = metric_fetcher_->fetch_smi_field(gpu_index_list[i],
+                    RDC_FI_GPU_MEMORY_TOTAL, &total_memory);
+        if (status != RDC_ST_OK) {
+            RDC_LOG(RDC_ERROR, "Fail to get total memory of GPU "
+                        << gpu_index_list[i]);
+            return status;
+        }
+        all_total_memory.insert({gpu_index_list[i], total_memory.value.l_int});
+    }
+
+    return cache_mgr_->rdc_job_get_stats(job_id, all_total_memory, p_job_info);
 }
 
-rdc_status_t RdcEmbeddedHandler::rdc_job_stop_stats(char  job_id[64] ) {
-    // TODO(bill_liu): implement
-    (void)(job_id);
-    return RDC_ST_OK;
+rdc_status_t RdcEmbeddedHandler::rdc_job_stop_stats(char job_id[64]) {
+    return watch_table_->rdc_job_stop_stats(job_id);
 }
 
+rdc_status_t RdcEmbeddedHandler::rdc_job_remove(char job_id[64]) {
+    return watch_table_->rdc_job_remove(job_id);
+}
+
+
+rdc_status_t RdcEmbeddedHandler::rdc_job_remove_all() {
+    return watch_table_->rdc_job_remove_all();
+}
 
 // Discovery API
 rdc_status_t RdcEmbeddedHandler::rdc_device_get_all(
@@ -194,6 +213,8 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_gpu_add(rdc_gpu_group_t group_id,
     }
 
     if (!is_gpu_exist) {
+        RDC_LOG(RDC_INFO, "Fail to add GPU index " << gpu_index << " to group "
+            << group_id <<" as the GPU index is invalid.");
         return RDC_ST_NOT_FOUND;
     }
 
@@ -211,6 +232,9 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_field_create(uint32_t num_field_ids,
     if (num_field_ids <= RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
         for (uint32_t i = 0; i < num_field_ids; i++) {
             if (!metric_fetcher_->is_field_valid(field_ids[i])) {
+                RDC_LOG(RDC_INFO,
+                    "Fail to create field group with unknown field id "
+                    << field_ids[i]);
                 return RDC_ST_NOT_SUPPORTED;
             }
         }
@@ -285,6 +309,9 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_get_latest_value(
         return RDC_ST_BAD_PARAMETER;
     }
     if (!metric_fetcher_->is_field_valid(field)) {
+        RDC_LOG(RDC_INFO,
+                    "Fail to get latest value with unknown field id "
+                    << field);
         return RDC_ST_NOT_SUPPORTED;
     }
     return cache_mgr_->rdc_field_get_latest_value(gpu_index, field, value);
@@ -297,6 +324,9 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_get_value_since(uint32_t gpu_index,
         return RDC_ST_BAD_PARAMETER;
     }
     if (!metric_fetcher_->is_field_valid(field)) {
+        RDC_LOG(RDC_INFO,
+                "Fail to get value since with unknown field id "
+                << field);
         return RDC_ST_NOT_SUPPORTED;
     }
     return cache_mgr_->rdc_field_get_value_since(gpu_index, field,

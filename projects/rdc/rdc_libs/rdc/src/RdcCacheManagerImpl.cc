@@ -22,6 +22,8 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcCacheManagerImpl.h"
 #include <sys/time.h>
 #include <ctime>
+#include <sstream>
+#include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
 
 
@@ -127,15 +129,26 @@ rdc_status_t RdcCacheManagerImpl::rdc_field_get_latest_value(
     return RDC_ST_OK;
 }
 
-uint32_t RdcCacheManagerImpl::get_cache_size() {
-    uint32_t cache_size = 0;
+std::string RdcCacheManagerImpl::get_cache_stats() {
+    std::stringstream strstream;
     std::lock_guard<std::mutex> guard(cache_mutex_);
 
+    strstream << "Cache samples:";
     auto cache_samples_ite = cache_samples_.begin();
     for (; cache_samples_ite != cache_samples_.end(); cache_samples_ite++) {
-        cache_size+=cache_samples_ite->second.size();
+        strstream << "<" << cache_samples_ite->first.first << ","
+            << cache_samples_ite->first.second << ":"
+            << cache_samples_ite->second.size() << "> ";
     }
-    return cache_size;
+
+    strstream <<" Job caches:";
+    auto job_ite = cache_jobs_.begin();
+    for ( ; job_ite != cache_jobs_.end(); job_ite++ ) {
+        strstream << "<" << job_ite->first << ":"
+            << job_ite->second.gpu_stats.size() << "> ";
+    }
+
+    return strstream.str();
 }
 
 rdc_status_t RdcCacheManagerImpl::rdc_update_cache(uint32_t gpu_index,
@@ -158,6 +171,189 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_cache(uint32_t gpu_index,
     } else {
         cache_samples_ite->second.push_back(entry);
     }
+
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcCacheManagerImpl::rdc_job_remove(char job_id[64]) {
+    std::lock_guard<std::mutex> guard(cache_mutex_);
+    cache_jobs_.erase(job_id);
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcCacheManagerImpl::rdc_job_remove_all() {
+    std::lock_guard<std::mutex> guard(cache_mutex_);
+    cache_jobs_.clear();
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcCacheManagerImpl::rdc_update_job_stats(uint32_t gpu_index,
+    const std::string& job_id, const rdc_field_value& value) {
+    std::lock_guard<std::mutex> guard(cache_mutex_);
+    auto job_iter = cache_jobs_.find(job_id);
+    if (job_iter == cache_jobs_.end()) {
+        return RDC_ST_NOT_FOUND;
+    }
+
+    auto gpu_iter = job_iter->second.gpu_stats.find(gpu_index);
+    if (gpu_iter == job_iter->second.gpu_stats.end()) {
+        return RDC_ST_NOT_FOUND;
+    }
+
+    auto fsummary = gpu_iter->second.field_summaries.find(value.field_id);
+    if (fsummary == gpu_iter->second.field_summaries.end()) {
+        return RDC_ST_NOT_FOUND;
+    }
+    if (fsummary->second.count == 0) {  // first item
+        fsummary->second.count = 1;
+        fsummary->second.max_value = value.value.l_int;
+        fsummary->second.min_value =  value.value.l_int;
+        fsummary->second.total_value = value.value.l_int;
+        fsummary->second.last_time = value.ts;
+        if (value.field_id == RDC_FI_POWER_USAGE) {
+            gpu_iter->second.energy_last_time = value.ts;
+        }
+        return RDC_ST_OK;
+    }
+    if (value.field_id == RDC_FI_POWER_USAGE) {
+        uint64_t time_elapsed = value.ts - gpu_iter->second.energy_last_time;
+        // Stored in cache as microseconds and microwats
+        gpu_iter->second.energy_consumed +=
+            (time_elapsed * value.value.l_int)/(1000.0*1000000);
+    }
+    fsummary->second.max_value = std::max(fsummary->second.max_value,
+        static_cast<int64_t>(value.value.l_int));
+    fsummary->second.min_value = std::min(fsummary->second.min_value,
+        static_cast<int64_t>(value.value.l_int));
+    fsummary->second.total_value += value.value.l_int;
+    fsummary->second.last_time = value.ts;
+    fsummary->second.count++;
+
+    return RDC_ST_OK;
+}
+
+void RdcCacheManagerImpl::set_summary(const FieldSummaryStats & stats,
+    rdc_stats_summary_t & gpu, rdc_stats_summary_t& summary,
+    unsigned int adjuster) {
+    if (stats.count == 0) return;
+
+    gpu.max_value = stats.max_value / adjuster;
+    gpu.min_value = stats.min_value / adjuster;
+    gpu.average = stats.total_value / stats.count / adjuster;
+    summary.max_value = std::max(summary.max_value, gpu.max_value);
+    summary.min_value = std::min(summary.min_value, gpu.min_value);
+    //< save total for future average calculation.
+    summary.average += gpu.average;
+}
+
+rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(char jobId[64],
+        const rdc_gpu_total_memory_t& total_memory,
+        rdc_job_info_t* p_job_info) {
+    std::lock_guard<std::mutex> guard(cache_mutex_);
+    auto job_stats = cache_jobs_.find(jobId);
+
+    if (job_stats == cache_jobs_.end()) {
+        return RDC_ST_NOT_FOUND;
+    }
+
+    //< Init the summary info
+    RDC_LOG(RDC_DEBUG, "rdc_job_get_stats for job "  <<jobId);
+    auto& summary_info = p_job_info->summary;
+    summary_info.start_time = job_stats->second.start_time;
+    if (job_stats->second.end_time == 0) {
+        summary_info.end_time = time(nullptr);
+    } else {
+        summary_info.end_time = job_stats->second.end_time;
+    }
+    summary_info.energy_consumed = 0;
+    summary_info.max_gpu_memory_used = 0;
+    summary_info.power_usage = {0, std::numeric_limits<uint64_t>::max(), 0};
+    summary_info.gpu_clock = {0, std::numeric_limits<uint64_t>::max(), 0};
+    summary_info.gpu_utilization = {0, std::numeric_limits<uint64_t>::max(), 0};
+    summary_info.memory_utilization = {0,
+                    std::numeric_limits<uint64_t>::max(), 0};
+
+    p_job_info->num_gpus = job_stats->second.gpu_stats.size();
+
+    //< Populate information for each GPUs
+
+    auto gpus = job_stats->second.gpu_stats.begin();
+    for (; gpus != job_stats->second.gpu_stats.end(); gpus++) {
+        auto & gpu_info = p_job_info->gpus[gpus->first];
+        gpu_info.start_time = summary_info.start_time;
+        gpu_info.end_time = summary_info.end_time;
+        gpu_info.energy_consumed = gpus->second.energy_consumed;
+        summary_info.energy_consumed += gpu_info.energy_consumed;
+
+        auto ite = gpus->second.field_summaries.begin();
+        for (; ite != gpus->second.field_summaries.end(); ite++) {
+            if (ite->first == RDC_FI_POWER_USAGE) {
+                set_summary(ite->second,
+                    gpu_info.power_usage, summary_info.power_usage, 1000000);
+            } else if (ite->first == RDC_FI_GPU_MEMORY_USAGE) {
+                auto tmemory = total_memory.at(gpus->first);
+                set_summary(ite->second, gpu_info.memory_utilization,
+                    summary_info.memory_utilization, tmemory/100);
+                gpu_info.max_gpu_memory_used = ite->second.max_value;
+                summary_info.max_gpu_memory_used = std::max(
+                    summary_info.max_gpu_memory_used,
+                    gpu_info.max_gpu_memory_used);
+            } else if (ite->first == RDC_FI_GPU_SM_CLOCK) {
+                set_summary(ite->second, gpu_info.gpu_clock,
+                    summary_info.gpu_clock, 1000000);
+            } else if (ite->first == RDC_FI_GPU_UTIL) {
+                set_summary(ite->second, gpu_info.gpu_utilization,
+                    summary_info.gpu_utilization, 1);
+            }
+        }
+    }
+    // Get the average of the summary
+    summary_info.power_usage.average = summary_info.power_usage.average/
+                p_job_info->num_gpus;
+    summary_info.gpu_clock.average = summary_info.gpu_clock.average/
+                p_job_info->num_gpus;
+    summary_info.gpu_utilization.average = summary_info.gpu_utilization.average/
+                p_job_info->num_gpus;
+    summary_info.memory_utilization.average =
+                summary_info.memory_utilization.average/p_job_info->num_gpus;
+
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(char job_id[64],
+        const rdc_group_info_t& ginfo, const rdc_field_group_info_t& finfo) {
+     RdcJobStatsCacheEntry cacheEntry;
+     cacheEntry.start_time = std::time(nullptr);
+     cacheEntry.end_time = 0;
+     for (unsigned int i=0 ; i < ginfo.count; i++) {  // GPUs
+       GpuSummaryStats gstats;
+       gstats.energy_consumed = 0;
+       gstats.energy_last_time = 0;
+       for (unsigned int j = 0; j < finfo.count; j++) {  // init fields
+          FieldSummaryStats s;
+          s.count = 0;
+          s.max_value = s.min_value = s.total_value = 0;
+          gstats.field_summaries.insert({finfo.field_ids[j], s});
+       }
+
+       cacheEntry.gpu_stats.insert({ginfo.entity_ids[i], gstats});
+     }
+
+     std::lock_guard<std::mutex> guard(cache_mutex_);
+     cache_jobs_.insert({job_id, cacheEntry});
+     return RDC_ST_OK;
+}
+
+
+rdc_status_t RdcCacheManagerImpl::rdc_job_stop_stats(char job_id[64]) {
+    std::lock_guard<std::mutex> guard(cache_mutex_);
+    auto job_stats = cache_jobs_.find(job_id);
+
+    if (job_stats == cache_jobs_.end()) {
+        return RDC_ST_NOT_FOUND;
+    }
+
+    job_stats->second.end_time = std::time(nullptr);
 
     return RDC_ST_OK;
 }

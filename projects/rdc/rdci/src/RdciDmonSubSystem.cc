@@ -58,6 +58,7 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
     const struct option long_options[] = {
         {"host", required_argument, nullptr, HOST_OPTIONS },
         {"help", optional_argument, nullptr, 'h' },
+        {"unauth", optional_argument, nullptr, 'u' },
         {"list", optional_argument, nullptr, 'l' },
         {"field-group-id", required_argument, nullptr, 'f' },
         {"field-id", required_argument, nullptr, 'e' },
@@ -73,7 +74,7 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
     std::string gpu_indexes;
     std::string field_ids;
 
-    while ((opt = getopt_long(argc, argv, "hlf:g:c:d:e:i:",
+    while ((opt = getopt_long(argc, argv, "hluf:g:c:d:e:i:",
                 long_options, &option_index)) != -1) {
         switch (opt) {
             case HOST_OPTIONS:
@@ -82,9 +83,12 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
             case 'h':
                 dmon_ops_ = DMON_HELP;
                 return;
+            case 'u':
+                 use_auth_ = false;
+                 break;
             case 'l':
                 dmon_ops_ = DMON_LIST_FIELDS;
-                return;
+                break;
             case 'f':
                 if (!IsNumber(optarg)) {
                     show_help();
@@ -128,6 +132,10 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
                 throw RdcException(RDC_ST_BAD_PARAMETER,
                         "Unknown command line options");
         }
+    }
+
+    if (dmon_ops_ == DMON_LIST_FIELDS) {
+        return;
     }
 
     if (options_.find(OPTIONS_FIELD_GROUP_ID) == options_.end()) {

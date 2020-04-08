@@ -23,7 +23,8 @@ THE SOFTWARE.
 #define RDC_LIB_IMPL_RDCCACHEMANAGERIMPL_H_
 
 #include <memory>
-#include <mutex>
+#include <mutex>  // NOLINT(build/c++11)
+#include <string>
 #include <vector>
 #include <map>
 #include "rdc_lib/RdcCacheManager.h"
@@ -41,6 +42,29 @@ struct RdcCacheEntry {
 
 typedef std::map<RdcFieldKey, std::vector<RdcCacheEntry>> RdcCacheSamples;
 
+struct FieldSummaryStats {
+    int64_t max_value;
+    int64_t min_value;
+    int64_t total_value;
+    uint64_t last_time;
+    uint64_t count;
+};
+
+struct GpuSummaryStats {
+    uint64_t energy_consumed;
+    uint64_t energy_last_time;
+    std::map<uint32_t, FieldSummaryStats> field_summaries;
+};
+
+// Per job entry
+struct RdcJobStatsCacheEntry {
+    uint64_t start_time;
+    uint64_t end_time;
+    std::map<uint32_t, GpuSummaryStats> gpu_stats;
+};
+
+// <job_id, job_stats>
+typedef std::map<std::string, RdcJobStatsCacheEntry> RdcJobStatsCache;
 
 class RdcCacheManagerImpl: public RdcCacheManager {
  public:
@@ -53,10 +77,27 @@ class RdcCacheManagerImpl: public RdcCacheManager {
                 const rdc_field_value& value) override;
     rdc_status_t evict_cache(uint32_t gpu_index, uint32_t field_id,
                 uint64_t max_keep_samples, double  max_keep_age) override;
-    uint32_t get_cache_size()  override;
+    std::string  get_cache_stats()  override;
+
+    rdc_status_t rdc_job_get_stats(char  job_id[64],
+        const rdc_gpu_total_memory_t& total_memory,
+        rdc_job_info_t* p_job_info) override;
+    rdc_status_t rdc_job_start_stats(char job_id[64],
+        const rdc_group_info_t& group,
+        const rdc_field_group_info_t& finfo) override;
+    rdc_status_t rdc_job_stop_stats(char job_id[64]) override;
+    rdc_status_t rdc_update_job_stats(uint32_t gpu_index,
+        const std::string& job_id,
+        const rdc_field_value& value) override;
+    rdc_status_t rdc_job_remove(char job_id[64]) override;
+    rdc_status_t rdc_job_remove_all() override;
 
  private:
+    void set_summary(const FieldSummaryStats & stats,
+        rdc_stats_summary_t& gpu, rdc_stats_summary_t& summary, // NOLINT
+        unsigned int adjuster);
     RdcCacheSamples cache_samples_;
+    RdcJobStatsCache cache_jobs_;
     std::mutex cache_mutex_;
 };
 

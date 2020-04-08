@@ -59,7 +59,7 @@ class RdcGroupSettings {
 };
 
 typedef std::shared_ptr<RdcGroupSettings> RdcGroupSettingsPtr;
-
+const uint32_t JOB_FIELD_ID = 0;
 
 }  // namespace rdc
 }  // namespace amd

@@ -22,11 +22,20 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcGroupSettingsImpl.h"
 #include <ctime>
 #include "rdc_lib/rdc_common.h"
+#include "rdc_lib/RdcLogger.h"
 
 namespace amd {
 namespace rdc {
 
 RdcGroupSettingsImpl::RdcGroupSettingsImpl() {
+    // Add the default job stats fields
+    uint32_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE,
+        RDC_FI_POWER_USAGE, RDC_FI_GPU_SM_CLOCK, RDC_FI_GPU_UTIL};
+    char job_field_group[] = "JobStatsFields";
+    rdc_field_grp_t fgid = JOB_FIELD_ID;
+
+    rdc_group_field_create(sizeof(job_fields)/sizeof(uint32_t),
+                job_fields,  job_field_group, &fgid);
 }
 
 rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_create(
@@ -62,6 +71,8 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(
         // Check whether the index already exists
         for (uint32_t i=0; i < ite->second.count; i++) {
             if (ite->second.entity_ids[i] == gpu_index) {
+                RDC_LOG(RDC_INFO, "Fail to add " << gpu_index
+                <<" to GPU group " << groupId << " as it is already exists");
                 return RDC_ST_BAD_PARAMETER;
             }
         }
@@ -136,15 +147,19 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_create(
     if (field_group_.size() >= RDC_MAX_NUM_FIELD_GROUPS) {
         return RDC_ST_MAX_LIMIT;
     }
-    field_group_.emplace(cur_filed_group_id_, finfo);
-    *rdc_field_group_id = cur_filed_group_id_;
-    cur_filed_group_id_++;
+    field_group_.emplace(cur_field_group_id_, finfo);
+    *rdc_field_group_id = cur_field_group_id_;
+    cur_field_group_id_++;
 
     return RDC_ST_OK;
 }
 
 rdc_status_t RdcGroupSettingsImpl::rdc_group_field_destroy(
     rdc_field_grp_t rdc_field_group_id) {
+    if (rdc_field_group_id == JOB_FIELD_ID) {
+        RDC_LOG(RDC_INFO, "Cannot delete system JOB_FIELD_ID field group");
+        return RDC_ST_BAD_PARAMETER;
+    }
     std::lock_guard<std::mutex> guard(field_group_mutex_);
     field_group_.erase(rdc_field_group_id);
     return RDC_ST_OK;
@@ -183,6 +198,10 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_get_all_ids(
         if (*count >= RDC_MAX_NUM_FIELD_GROUPS) {
             return RDC_ST_MAX_LIMIT;
         }
+
+        // Skip system defined JOB_FIELD_ID
+        if (ite->first == JOB_FIELD_ID) continue;
+
         field_group_id_list[*count] = ite->first;
         (*count)++;
     }

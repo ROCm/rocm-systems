@@ -52,6 +52,7 @@ typedef enum {
      RDC_ST_NOT_FOUND,          //!< Cannot find the value
      RDC_ST_CONFLICT,           //!< Conflict with current state
      RDC_ST_CLIENT_ERROR,       //!< The RDC client error
+     RDC_ST_ALREADY_EXIST,      //!< The item already exists
      RDC_ST_MAX_LIMIT               //!< Max limit recording for the object
 } rdc_status_t;
 
@@ -371,15 +372,10 @@ rdc_status_t rdc_disconnect(rdc_handle_t p_rdc_handle);
  *
  *  @param[in] update_freq  How often to update this field in usec.
  *
- *  @param[in] max_keep_age How long to keep data for this field in seconds.
- *
- *  @param[in] max_keep_samples Maximum number of samples to keep. 0=no limit.
- *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle,
-    rdc_gpu_group_t group_id, char  job_id[64], uint64_t update_freq,
-            double  max_keep_age, uint32_t  max_keep_samples);
+    rdc_gpu_group_t group_id, char job_id[64], uint64_t update_freq);
 
 /**
  *  @brief Get the stats of the job using the job id.
@@ -414,6 +410,35 @@ rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, char  job_id[64],
  */
 rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle,
             char  job_id[64]);
+
+/**
+ *  @brief Request RDC to stop tracking the job given by job_id
+ *
+ *  @details After this call, you will no longer be able to call
+ *  rdc_job_get_stats() on this job_id. But you will be able to reuse
+ *  the job_id after this call.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] job_id The name of the job.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_job_remove(rdc_handle_t p_rdc_handle,
+            char  job_id[64]);
+
+/**
+ *  @brief Request RDC to stop tracking all the jobs
+ *
+ *  @details After this call, you will no longer be able to call
+ *  rdc_job_get_stats() on any job id. But you will be able to reuse
+ *  the any previous used job id after this call.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_job_remove_all(rdc_handle_t p_rdc_handle);
 
 /**
  *  @brief Request RDC to update all fields to be watched.
