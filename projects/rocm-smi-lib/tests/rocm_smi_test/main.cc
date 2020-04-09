@@ -249,7 +249,6 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  int ret = 0;
   sRSMIGlvalues = &settings;
   return RUN_ALL_TESTS();
 }
