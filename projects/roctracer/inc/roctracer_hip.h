@@ -24,6 +24,15 @@ THE SOFTWARE.
 #define INC_ROCTRACER_HIP_H_
 
 #include <hip/hip_runtime.h>
+
+namespace hip_hidden_namespace {
+#include <hip/hcc_detail/hip_prof_str.h>
+};  // namespace hip_hidden_namespace
+#if HIP_PROF_VER >= 1
+#define HIP_PROF_HIP_API_STRING 1
+#endif
+#undef HIP_PROF_VER
+#undef _HIP_PROF_STR_H
 #include <hip/hcc_detail/hip_prof_str.h>
 
 #include "roctracer.h"
