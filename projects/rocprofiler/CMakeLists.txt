@@ -141,6 +141,7 @@ install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h DESTINATION includ
 install ( FILES
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/rpl_run.sh
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2xml.sh
+          ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2params.py
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/tblextr.py
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/dform.py
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/sqlitedb.py
