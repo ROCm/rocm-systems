@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 #include <hip/hip_runtime.h>
 
+#if ROCP_WITH_HIP_API_STRING
 namespace hip_hidden_namespace {
 #include <hip/hcc_detail/hip_prof_str.h>
 };  // namespace hip_hidden_namespace
@@ -33,6 +34,7 @@ namespace hip_hidden_namespace {
 #endif
 #undef HIP_PROF_VER
 #undef _HIP_PROF_STR_H
+#endif  // ROCP_WITH_HIP_API_STRING
 #include <hip/hcc_detail/hip_prof_str.h>
 
 #include "roctracer.h"
