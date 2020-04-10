@@ -24,7 +24,7 @@ THE SOFTWARE.
 #define _SRC_CORE_PROXY_QUEUE_H
 
 #include <hsa.h>
-#include <hsa_api_trace.h>
+#include <string.h>
 #include <atomic>
 #include <map>
 #include <mutex>

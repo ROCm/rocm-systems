@@ -30,6 +30,7 @@ THE SOFTWARE.
 
 #include "core/proxy_queue.h"
 #include "util/exception.h"
+#include "util/hsa_rsrc_factory.h"
 
 namespace rocprofiler {
 extern decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
