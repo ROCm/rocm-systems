@@ -405,6 +405,10 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
     begin_timestamp << ":" << end_timestamp << " " << entry->pid << ":" << entry->tid << " " << str;
 
   if (domain == ACTIVITY_DOMAIN_HIP_API) {
+#if HIP_PROF_HIP_API_STRING
+    const char* str = hipApiString(cid, data);
+    fprintf(hip_api_file_handle, "%s\n", str);
+#else  // !HIP_PROF_HIP_API_STRING
     switch (cid) {
       case HIP_API_ID_hipMemcpy:
         fprintf(hip_api_file_handle, "%s(dst(%p) src(%p) size(0x%x) kind(%u))\n",
@@ -438,6 +442,7 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
       default:
         fprintf(hip_api_file_handle, "%s()\n", oss.str().c_str());
     }
+#endif  // !HIP_PROF_HIP_API_STRING
   } else {
     fprintf(hip_api_file_handle, "%s(name(%s))\n", oss.str().c_str(), entry->name);
   }

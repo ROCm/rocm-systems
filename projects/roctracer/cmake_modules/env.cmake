@@ -43,6 +43,11 @@ if ( DEFINED ENV{CMAKE_DEBUG_TRACE} )
   add_definitions ( -DDEBUG_TRACE=1 )
 endif()
 
+## HIP APIString() routine enableing
+if ( DEFINED HIP_PROF_HIP_API_STRING )
+  add_definitions ( -DHIP_PROF_HIP_API_STRING=1 )
+endif()
+
 ## Enable HIP_VDI mode
 if ( DEFINED HIP_VDI )
   add_definitions ( -DHIP_VDI=${HIP_VDI} )
