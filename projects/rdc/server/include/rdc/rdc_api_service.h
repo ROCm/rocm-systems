@@ -100,7 +100,29 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
                   ::rdc::UpdateAllFieldsResponse* reply) override;
 
 
+    ::grpc::Status StartJobStats(::grpc::ServerContext* context,
+                  const ::rdc::StartJobStatsRequest* request,
+                  ::rdc::StartJobStatsResponse* reply) override;
+
+    ::grpc::Status GetJobStats(::grpc::ServerContext* context,
+                  const ::rdc::GetJobStatsRequest* request,
+                  ::rdc::GetJobStatsResponse* reply) override;
+
+    ::grpc::Status StopJobStats(::grpc::ServerContext* context,
+                  const ::rdc::StopJobStatsRequest* request,
+                  ::rdc::StopJobStatsResponse* reply) override;
+
+    ::grpc::Status RemoveJob(::grpc::ServerContext* context,
+                  const ::rdc::RemoveJobRequest* request,
+                  ::rdc::RemoveJobResponse* reply) override;
+
+    ::grpc::Status RemoveAllJob(::grpc::ServerContext* context,
+                  const ::rdc::Empty* request,
+                  ::rdc::RemoveAllJobResponse* reply) override;
+
  private:
+    bool copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
+            ::rdc::GpuUsageInfo* target);
     rdc_handle_t rdc_handle_;
 };
 

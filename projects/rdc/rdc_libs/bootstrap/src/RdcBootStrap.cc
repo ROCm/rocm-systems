@@ -26,19 +26,17 @@ THE SOFTWARE.
 #include "rdc_lib/RdcHandler.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
+#include "rdc_lib/RdcLibraryLoader.h"
 
-static void* libHandler = nullptr;
+
+static amd::rdc::RdcLibraryLoader rdc_lib_loader;
 
 rdc_status_t rdc_init(uint64_t) {
        return RDC_ST_OK;
 }
 
 rdc_status_t rdc_shutdown() {
-        if (libHandler) {
-            dlclose(libHandler);
-            libHandler = nullptr;
-        }
-        return RDC_ST_OK;
+       return rdc_lib_loader.unload();
 }
 
 rdc_status_t rdc_connect(const char* ipAddress,
@@ -46,24 +44,17 @@ rdc_status_t rdc_connect(const char* ipAddress,
                 const char* root_ca, const char* client_cert,
                 const char* client_key ) {
         amd::rdc::RdcHandler* (*func_make_handler)(const char*,
-        const char*, const char*, const char*);
+        const char*, const char*, const char*) = nullptr;
 
         if (!ipAddress || !p_rdc_handle) {
                 return RDC_ST_FAIL_LOAD_MODULE;
         }
 
-        if (!libHandler) {
-             libHandler = dlopen("librdc_client.so", RTLD_LAZY);
-        }
-
-        if (!libHandler) {
-                return RDC_ST_FAIL_LOAD_MODULE;
-        }
-
-        *reinterpret_cast<void**>(&func_make_handler) =
-                dlsym(libHandler, "make_handler");
-        if (!func_make_handler) {
-                return RDC_ST_FAIL_LOAD_MODULE;
+        rdc_status_t status = rdc_lib_loader.load("librdc_client.so",
+                &func_make_handler);
+        if (status != RDC_ST_OK) {
+                *p_rdc_handle = nullptr;
+                return status;
         }
 
         *p_rdc_handle = static_cast<rdc_handle_t>
@@ -83,31 +74,17 @@ rdc_status_t rdc_disconnect(rdc_handle_t p_rdc_handle) {
 
 rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode,
                 rdc_handle_t* p_rdc_handle ) {
-        amd::rdc::RdcHandler* (*func_make_handler)(rdc_operation_mode_t);
-        char *error;
+        amd::rdc::RdcHandler* (*func_make_handler)(rdc_operation_mode_t)
+                                = nullptr;
         if (!p_rdc_handle) {
                 return RDC_ST_FAIL_LOAD_MODULE;
         }
 
-        dlerror();
-
-        if (!libHandler) {
-             libHandler = dlopen("librdc.so", RTLD_LAZY);
-        }
-
-        if (!libHandler) {
-                error = dlerror();
-                RDC_LOG(RDC_ERROR, "Fail to open librdc.so: " << error);
-                return RDC_ST_FAIL_LOAD_MODULE;
-        }
-
-        *reinterpret_cast<void**>(&func_make_handler) =
-                dlsym(libHandler, "make_handler");
-        if (!func_make_handler) {
-                error = dlerror();
-                RDC_LOG(RDC_ERROR,
-                "Fail to find function make_handler:" << error);
-                return RDC_ST_FAIL_LOAD_MODULE;
+        rdc_status_t status = rdc_lib_loader.load("librdc.so",
+                &func_make_handler);
+        if (status != RDC_ST_OK) {
+                *p_rdc_handle = nullptr;
+                return status;
         }
 
         *p_rdc_handle = static_cast<rdc_handle_t>

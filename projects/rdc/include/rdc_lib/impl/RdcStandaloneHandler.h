@@ -90,6 +90,11 @@ class RdcStandaloneHandler: public RdcHandler {
  private:
     // Helper function to handle the error
     rdc_status_t error_handle(::grpc::Status status, uint32_t rdc_status);
+
+    bool copy_gpu_usage_info(
+            const ::rdc::GpuUsageInfo& src,
+            rdc_gpu_usage_info_t* target);
+
     std::unique_ptr<::rdc::RdcAPI::Stub> stub_;
 };
 

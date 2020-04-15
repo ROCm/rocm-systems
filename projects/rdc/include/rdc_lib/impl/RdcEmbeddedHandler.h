@@ -22,6 +22,7 @@ THE SOFTWARE.
 #ifndef RDC_LIB_IMPL_RDCEMBEDDEDHANDLER_H_
 #define RDC_LIB_IMPL_RDCEMBEDDEDHANDLER_H_
 
+#include <future>  // NOLINT(build/c++11)
 #include "rdc_lib/RdcHandler.h"
 #include "rdc_lib/RdcGroupSettings.h"
 #include "rdc_lib/RdcMetricFetcher.h"
@@ -96,6 +97,7 @@ class RdcEmbeddedHandler: public RdcHandler {
     RdcMetricFetcherPtr metric_fetcher_;
     RdcWatchTablePtr watch_table_;
     RdcMetricsUpdaterPtr metrics_updater_;
+    std::future<void> updater_;
 };
 
 }  // namespace rdc

@@ -421,6 +421,140 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
 }
 
 
+::grpc::Status RdcAPIServiceImpl::StartJobStats(
+                  ::grpc::ServerContext* context,
+                  const ::rdc::StartJobStatsRequest* request,
+                  ::rdc::StartJobStatsResponse* reply) {
+    (void)(context);
+    if (!reply || !request) {
+      return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+    }
+    rdc_status_t result = rdc_job_start_stats(
+                rdc_handle_, request->group_id(),
+                const_cast<char*>(request->job_id().c_str()),
+                request->update_freq());
+    reply->set_status(result);
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::GetJobStats(
+                  ::grpc::ServerContext* context,
+                  const ::rdc::GetJobStatsRequest* request,
+                  ::rdc::GetJobStatsResponse* reply) {
+    (void)(context);
+    if (!reply || !request) {
+      return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+    }
+
+    rdc_job_info_t job_info;
+    rdc_status_t result = rdc_job_get_stats(
+                rdc_handle_,
+                const_cast<char*>(request->job_id().c_str()),
+                &job_info);
+
+    reply->set_num_gpus(job_info.num_gpus);
+    ::rdc::GpuUsageInfo* sinfo = reply->mutable_summary();
+    copy_gpu_usage_info(job_info.summary, sinfo);
+
+    for (uint32_t i = 0; i < job_info.num_gpus; i++) {
+       ::rdc::GpuUsageInfo* ginfo = reply->add_gpus();
+       copy_gpu_usage_info(job_info.gpus[i], ginfo);
+    }
+
+    reply->set_status(result);
+
+    return ::grpc::Status::OK;
+}
+
+bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
+            ::rdc::GpuUsageInfo* target) {
+    if (target == nullptr) {
+      return false;
+    }
+
+    target->set_gpu_id(src.gpu_id);
+    target->set_start_time(src.start_time);
+    target->set_end_time(src.end_time);
+    target->set_energy_consumed(src.energy_consumed);
+    target->set_max_gpu_memory_used(src.max_gpu_memory_used);
+
+    ::rdc::JobStatsSummary* stats = target->mutable_power_usage();
+    stats->set_max_value(src.power_usage.max_value);
+    stats->set_min_value(src.power_usage.min_value);
+    stats->set_average(src.power_usage.average);
+
+    stats = target->mutable_gpu_clock();
+    stats->set_max_value(src.gpu_clock.max_value);
+    stats->set_min_value(src.gpu_clock.min_value);
+    stats->set_average(src.gpu_clock.average);
+
+    stats = target->mutable_gpu_utilization();
+    stats->set_max_value(src.gpu_utilization.max_value);
+    stats->set_min_value(src.gpu_utilization.min_value);
+    stats->set_average(src.gpu_utilization.average);
+
+    stats = target->mutable_memory_utilization();
+    stats->set_max_value(src.memory_utilization.max_value);
+    stats->set_min_value(src.memory_utilization.min_value);
+    stats->set_average(src.memory_utilization.average);
+
+
+    return true;
+}
+
+
+::grpc::Status RdcAPIServiceImpl::StopJobStats(
+                  ::grpc::ServerContext* context,
+                  const ::rdc::StopJobStatsRequest* request,
+                  ::rdc::StopJobStatsResponse* reply) {
+    (void)(context);
+    if (!reply || !request) {
+      return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+    }
+
+    rdc_status_t result = rdc_job_stop_stats(
+                rdc_handle_,
+                const_cast<char*>(request->job_id().c_str()));
+    reply->set_status(result);
+
+    return ::grpc::Status::OK;
+}
+
+
+::grpc::Status RdcAPIServiceImpl::RemoveJob(
+                  ::grpc::ServerContext* context,
+                  const ::rdc::RemoveJobRequest* request,
+                  ::rdc::RemoveJobResponse* reply) {
+    (void)(context);
+    if (!reply || !request) {
+      return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+    }
+    rdc_status_t result = rdc_job_remove(
+                rdc_handle_,  const_cast<char*>(request->job_id().c_str()));
+    reply->set_status(result);
+
+    return ::grpc::Status::OK;
+}
+
+
+::grpc::Status RdcAPIServiceImpl::RemoveAllJob(
+                  ::grpc::ServerContext* context,
+                  const ::rdc::Empty* request,
+                  ::rdc::RemoveAllJobResponse* reply) {
+    (void)(context);
+    if (!reply || !request) {
+      return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+    }
+    rdc_status_t result = rdc_job_remove_all(rdc_handle_);
+    reply->set_status(result);
+
+
+    return ::grpc::Status::OK;
+}
+
+
+
 }  // namespace rdc
 }  // namespace amd
 

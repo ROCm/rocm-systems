@@ -341,9 +341,16 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_unwatch(rdc_gpu_group_t group_id,
 // Control API
 rdc_status_t RdcEmbeddedHandler::rdc_field_update_all(
     uint32_t wait_for_update) {
-    // TODO(bill_liu): implement the case wait_for_update==0
-    (void)(wait_for_update);
-    return watch_table_->rdc_field_update_all();
+    if (wait_for_update == 1) {
+        return watch_table_->rdc_field_update_all();
+    }
+
+    //  Async update the field and return immediately.
+    updater_ = std::async(std::launch::async, [this](){
+        watch_table_->rdc_field_update_all();
+    });
+
+    return RDC_ST_OK;
 }
 
 }  // namespace rdc

@@ -290,7 +290,7 @@ rdc_status_t rdc_shutdown();
  *  @details The RDC is loaded as library so that it does not require rdcd
  *  daemon. In this mode, the user has to periodically call
  *  rdc_field_update_all() when op_mode is RDC_OPERATION_MODE_MANUAL, which
- *  tells RDC to collect the stats. This function is not thread safe.
+ *  tells RDC to collect the stats.
  *
  *  @param[in] op_mode Operation modes. When RDC_OPERATION_MODE_AUTO, RDC schedules
  *  background task to collect the stats. When RDC_OPERATION_MODE_MANUAL, the user
@@ -308,7 +308,7 @@ rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode,
  *  @brief Stop embedded RDC agent.
  *
  *  @details Stop the embedded RDC agent, and p_rdc_handle becomes
- *  invalid after this call. This function is not thread safe.
+ *  invalid after this call.
  *
  *  @param[in] p_rdc_handle The RDC handler that come from
  *  rdc_start_embedded().
@@ -320,7 +320,7 @@ rdc_status_t rdc_stop_embedded(rdc_handle_t p_rdc_handle);
  *  @brief Connect to rdcd daemon
  *
  *  @details This method is used to connect to a remote stand-alone
- *  rdcd daemon. This function is not thread safe.
+ *  rdcd daemon.
  *
  *  @param[in] ipAndPort The IP and port of the remote rdcd. The ipAndPort
  *  can be specified in this x.x.x.x:yyyy format, where x.x.x.x is the
@@ -348,7 +348,7 @@ rdc_status_t rdc_connect(const char *ipAndPort, rdc_handle_t* p_rdc_handle,
  *  @brief Disconnect from rdcd daemon.
  *
  *  @details Disconnect from rdcd daemon, and p_rdc_handle becomes invalid
- *  after this call. This function is not thread safe.
+ *  after this call.
  *
  *  @param[in] p_rdc_handle The RDC handler that come from rdc_connect().
  *

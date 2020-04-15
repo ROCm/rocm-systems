@@ -63,40 +63,112 @@ rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status,
 // JOB RdcAPI
 rdc_status_t RdcStandaloneHandler::rdc_job_start_stats(rdc_gpu_group_t groupId,
         char job_id[64], uint64_t update_freq) {
-    // TODO(bill_liu): implement
-    (void)(groupId);
-    (void)(job_id);
-    (void)(update_freq);
+    ::rdc::StartJobStatsRequest request;
+    ::rdc::StartJobStatsResponse reply;
+    ::grpc::ClientContext context;
 
-    return RDC_ST_OK;
+    request.set_group_id(groupId);
+    request.set_job_id(job_id);
+    request.set_update_freq(update_freq);
+    ::grpc::Status status = stub_->StartJobStats(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+
+    return err_status;
 }
 
+bool RdcStandaloneHandler::copy_gpu_usage_info(
+            const ::rdc::GpuUsageInfo& src,
+            rdc_gpu_usage_info_t* target) {
+    if (target == nullptr) {
+        return false;
+    }
+
+    target->gpu_id = src.gpu_id();
+    target->start_time = src.start_time();
+    target->end_time = src.end_time();
+    target->energy_consumed = src.energy_consumed();
+    target->max_gpu_memory_used = src.max_gpu_memory_used();
+
+    const ::rdc::JobStatsSummary& pstats = src.power_usage();
+    target->power_usage.max_value = pstats.max_value();
+    target->power_usage.min_value = pstats.min_value();
+    target->power_usage.average = pstats.average();
+
+    const ::rdc::JobStatsSummary& cstats = src.gpu_clock();
+    target->gpu_clock.max_value = cstats.max_value();
+    target->gpu_clock.min_value = cstats.min_value();
+    target->gpu_clock.average = cstats.average();
+
+    const ::rdc::JobStatsSummary& ustats = src.gpu_utilization();
+    target->gpu_utilization.max_value = ustats.max_value();
+    target->gpu_utilization.min_value = ustats.min_value();
+    target->gpu_utilization.average = ustats.average();
+
+    const ::rdc::JobStatsSummary& mstats = src.memory_utilization();
+    target->memory_utilization.max_value = mstats.max_value();
+    target->memory_utilization.min_value = mstats.min_value();
+    target->memory_utilization.average = mstats.average();
+
+    return true;
+}
 rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(char job_id[64],
            rdc_job_info_t* p_job_info) {
-    // TODO(bill_liu): implement
-    (void)(job_id);
-    (void)(p_job_info);
+    if (!p_job_info) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+
+    ::rdc::GetJobStatsRequest request;
+    ::rdc::GetJobStatsResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_job_id(job_id);
+    ::grpc::Status status = stub_->GetJobStats(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+    if (err_status != RDC_ST_OK) return err_status;
+
+    p_job_info->num_gpus = reply.num_gpus();
+    copy_gpu_usage_info(reply.summary(), &(p_job_info->summary));
+    for (int i = 0; i < reply.gpus_size(); i++) {
+        copy_gpu_usage_info(reply.gpus(i), &(p_job_info->gpus[i]));
+    }
+
     return RDC_ST_OK;
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_job_stop_stats(char job_id[64]) {
-    // TODO(bill_liu): implement
-    (void)(job_id);
-    return RDC_ST_OK;
+    ::rdc::StopJobStatsRequest request;
+    ::rdc::StopJobStatsResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_job_id(job_id);
+    ::grpc::Status status = stub_->StopJobStats(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+
+    return err_status;
 }
 
-
 rdc_status_t RdcStandaloneHandler::rdc_job_remove(char job_id[64]) {
-    // TODO(bill_liu): implement
-    (void)(job_id);
-    return RDC_ST_OK;
+    ::rdc::RemoveJobRequest request;
+    ::rdc::RemoveJobResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_job_id(job_id);
+    ::grpc::Status status = stub_->RemoveJob(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+
+    return err_status;
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_job_remove_all() {
-    // TODO(bill_liu): implement
-    return RDC_ST_OK;
-}
+    ::rdc::Empty request;
+    ::rdc::RemoveAllJobResponse reply;
+    ::grpc::ClientContext context;
 
+    ::grpc::Status status = stub_->RemoveAllJob(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+
+    return err_status;
+}
 
 // Discovery RdcAPI
 rdc_status_t RdcStandaloneHandler::rdc_device_get_all(

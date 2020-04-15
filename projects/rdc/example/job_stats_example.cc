@@ -66,7 +66,7 @@ int main(int, char **) {
             goto cleanup;
         }
     } else {  // embedded
-        result = rdc_start_embedded(RDC_OPERATION_MODE_AUTO, &rdc_handle);
+        result = rdc_start_embedded(RDC_OPERATION_MODE_MANUAL, &rdc_handle);
         if (result != RDC_ST_OK) {
             std::cout << "Error starting embedded RDC engine. Return: "
                 << rdc_status_string(result) << std::endl;
