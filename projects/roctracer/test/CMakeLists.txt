@@ -25,7 +25,7 @@ set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
 
 ## Path to HSA test
 set ( HSA_TEST_DIR "${TEST_DIR}/hsa/test" )
-set ( HSA_REV "5c90a68" )
+set ( HSA_REV "2522691" )
 
 ## test run script
 set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
