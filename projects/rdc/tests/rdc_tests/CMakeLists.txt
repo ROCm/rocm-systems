@@ -142,7 +142,7 @@ aux_source_directory(${RDCTST_ROOT}/functional functionalSources)
 # Specify the directory containing various libraries of ROCR
 # to be linked against for building ROC Perf applications
 #
-link_directories(${RDC_LIB_DIR})
+link_directories(${RDC_LIB_DIR} "${GRPC_ROOT}/lib")
 #
 # Source files for building rocrtst
 #
@@ -154,6 +154,7 @@ add_executable(${RDCTST} ${rdctstSources} ${functionalSources})
 # Header file include path
 target_include_directories(${RDCTST} PRIVATE ${RDC_INC_DIR}
                                      PRIVATE ${RSMI_INC_DIR}
+                                     PRIVATE ${GRPC_ROOT}/include
                                      PRIVATE ${RDCTST_ROOT}/..
                                      PRIVATE ${RDCTST_ROOT}/gtest/include)
 

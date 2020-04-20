@@ -28,6 +28,9 @@ cmake_minimum_required(VERSION 3.5.0)
 set(RSMI_INC_DIR ${ROCM_DIR}/rocm_smi/include)
 set(RSMI_LIB_DIR ${ROCM_DIR}/rocm_smi/lib)
 
+if (NOT DEFINED GRPC_ROOT)
+    set(GRPC_ROOT "/usr/local")
+endif()
 if (NOT DEFINED RDC_CLIENT_ROOT_PATH)
     set(RDC_CLIENT_ROOT_PATH "/opt/rocm/")
 endif()
@@ -75,6 +78,11 @@ project(${RDC})
 
 set(RDC_SRC_ROOT "${PROJECT_SOURCE_DIR}")
 
+
+message("Build Configuration:")
+message("-----------GRPC ROOT: " ${GRPC_ROOT})
+message("-----------ROCM_DIR : " ${ROCM_DIR})
+
 # Create a configure file to get version info from within library
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/${RDC}64Config.in"
@@ -105,25 +113,28 @@ set(CMAKE_VERBOSE_MAKEFILE on)
 file(GLOB PROTOB_DEF_SRC_FILES "protos/*.proto")
 set(PROTOB_SRC_DIR "${PROJECT_SOURCE_DIR}/protos")
 set(PROTOB_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
-set(PROTOB_CMD "protoc")
+set(PROTOB_CMD "${GRPC_ROOT}/bin/protoc")
+set(GRPC_PLUGIN "${GRPC_ROOT}/bin/grpc_cpp_plugin")
+set(GRPC_LIB_DIR "${GRPC_ROOT}/lib")
 
+set(ENV{LD_LIBRARY_PATH} ${GRPC_LIB_DIR})
 foreach(file ${PROTOB_DEF_SRC_FILES})
     execute_process(COMMAND
-     protoc --proto_path=${PROTOB_SRC_DIR} --cpp_out=${PROTOB_OUT_DIR} ${file}
+     ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR} --cpp_out=${PROTOB_OUT_DIR} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
             OUTPUT_VARIABLE PROTOB_OUT_VAR)
     message("protoc command returned: ${PROTOB_RESULT}")
 
-    find_program (GRPC_PLUGIN NAMES grpc_cpp_plugin)
+#    find_program (GRPC_PLUGIN NAMES grpc_cpp_plugin)
     message("GRPC_PLUGIN=${GRPC_PLUGIN})")
     message("protoc cmd:")
-    message("  $ protoc --proto_path=${PROTOB_SRC_DIR}")
+    message("  $ ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}")
     message("    --grpc_out=${PROTOB_OUT_DIR}")
     message("....--plugin=\"${GRPC_PLUGIN}\" ${file}")
 
     execute_process(COMMAND
-            protoc --proto_path=${PROTOB_SRC_DIR} --grpc_out=${PROTOB_OUT_DIR}
+       ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR} --grpc_out=${PROTOB_OUT_DIR}
             --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT

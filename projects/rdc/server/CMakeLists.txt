@@ -38,6 +38,7 @@ message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("--------RSMI Lib Dir: " ${RSMI_LIB_DIR})
 message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
+message("-------GRPC Root Dir: " ${GRPC_ROOT})
 message("")
 
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
@@ -69,7 +70,10 @@ file(GLOB PROTOBUF_GENERATED_SRCS "${PROTOB_OUT_DIR}/*.cc")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include
                     "${PROJECT_SOURCE_DIR}/include"
-                "${PROTOB_OUT_DIR}" "${RSMI_INC_DIR}" "${RDC_SRC_ROOT}")
+                    "${GRPC_ROOT}/include"
+                    "${PROTOB_OUT_DIR}"
+                    "${RSMI_INC_DIR}"
+                    "${RDC_SRC_ROOT}")
 
 set(SERVER_SRC_LIST "${SRC_DIR}/rdc_rsmi_service.cc")
 set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${SRC_DIR}/rdc_admin_service.cc")
@@ -83,7 +87,7 @@ message("SERVER_SRC_LIST=${SERVER_SRC_LIST}")
 set(SERVER_DAEMON_EXE "rdcd")
 set(SERVICE_FILE_NAME "rdc.service")
 
-link_directories(${RSMI_LIB_DIR})
+link_directories(${RSMI_LIB_DIR} ${GRPC_ROOT}/lib)
 
 add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
 # target_include_directories(${SERVER_DAEMON_EXE} PUBLIC ${RSMI_INC_DIR})

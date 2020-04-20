@@ -163,7 +163,7 @@ set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcWat
 
 message("RDC_LIB_INC_LIST=${RDC_LIB_INC_LIST}")
 
-link_directories(${RSMI_LIB_DIR})
+link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib")
 add_library(${RDC_LIB} SHARED ${RDC_LIB_SRC_LIST} ${RDC_LIB_INC_LIST})
 target_link_libraries(${RDC_LIB} pthread rocm_smi64)
 target_include_directories(${RDC_LIB} PRIVATE
@@ -199,6 +199,7 @@ add_library(${RDCCLIENT_LIB} SHARED ${RDCCLIENT_LIB_SRC_LIST} ${RDCCLIENT_LIB_IN
 target_link_libraries(${RDCCLIENT_LIB} pthread rt grpc grpc++ grpc++_reflection
                                                                   dl protobuf)
 target_include_directories(${RDCCLIENT_LIB} PRIVATE
+                                         "${GRPC_ROOT}/include"
                                          "${PROJECT_SOURCE_DIR}"
                                          "${PROJECT_SOURCE_DIR}/include"
                                          "${PROTOB_OUT_DIR}"

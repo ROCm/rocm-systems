@@ -53,6 +53,7 @@ message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("--------RSMI Lib Dir: " ${RSMI_LIB_DIR})
 message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
+message("-------GRPC Root Dir: " ${GRPC_ROOT})
 message("")
 
 ## Set default module path if not already set
@@ -135,6 +136,7 @@ set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST}
 set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST}
                                    "${PROJECT_SOURCE_DIR}/common/rdc_utils.h")
 
+link_directories(${GRPC_ROOT}/lib)
 add_library(${CLIENT_LIB} SHARED ${CLIENT_LIB_SRC_LIST} ${CLIENT_LIB_INC_LIST})
 target_link_libraries(${CLIENT_LIB} pthread rt grpc grpc++ grpc++_reflection
                                                                   dl protobuf)
@@ -143,6 +145,7 @@ target_include_directories(${CLIENT_LIB} PRIVATE
                                          "${PROJECT_SOURCE_DIR}/include"
                                          "${CMAKE_CURRENT_SOURCE_DIR}/include"
                                          "${PROTOB_OUT_DIR}"
+                                         "${GRPC_ROOT}/include"
                                          "${RSMI_INC_DIR}")
 # TODO: set the properties for the library once we have one
 ## Set the VERSION and SOVERSION values

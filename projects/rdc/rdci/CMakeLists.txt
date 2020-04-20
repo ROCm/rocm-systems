@@ -38,6 +38,7 @@ message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("--------RSMI Lib Dir: " ${RSMI_LIB_DIR})
 message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
+message("-------GRPC ROOT Dir: " ${GRPC_ROOT})
 message("")
 
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
@@ -65,6 +66,7 @@ set(INC_DIR "${PROJECT_SOURCE_DIR}/rdci/include")
 set(LIB_BOOSTRAP_DIR "${PROJECT_BINARY_DIR}/rdc_libs")
 
 include_directories(${INC_DIR} ${PROJECT_SOURCE_DIR}/include
+        "${GRPC_ROOT}/include"
         ${PROJECT_SOURCE_DIR})
 
 set(RDCI_SRC_LIST "${SRC_DIR}/rdci.cc")
