@@ -85,6 +85,9 @@ eval_test "standalone HIP MGPU test" "LD_PRELOAD=libkfdwrapper64.so ./test/Matri
 # rocTracer/tool is loaded by HSA runtime
 export HSA_TOOLS_LIB="test/libtracer_tool.so"
 
+# KFD test
+export ROCTRACER_DOMAIN="kfd"
+eval_test "tool KFD test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose" MatrixTranspose_kfd_trace
 # SYS test
 export ROCTRACER_DOMAIN="sys:roctx"
 eval_test "tool SYS test" ./test/MatrixTranspose MatrixTranspose_sys_trace
