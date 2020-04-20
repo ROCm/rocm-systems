@@ -198,19 +198,25 @@ typedef BaseLoader<RocTxApi> RocTxLoader;
 
 } // namespace roctracer
 
-#define LOADER_INSTANTIATE() \
+#define LOADER_INSTANTIATE2(HIP_LIB, HCC_LIB) \
   template<class T> typename roctracer::BaseLoader<T>::mutex_t roctracer::BaseLoader<T>::mutex_; \
   template<class T> std::atomic<roctracer::BaseLoader<T>*> roctracer::BaseLoader<T>::instance_{}; \
   template<class T> bool roctracer::BaseLoader<T>::to_load_ = false; \
   template<class T> bool roctracer::BaseLoader<T>::to_check_open_ = true; \
   template<class T> bool roctracer::BaseLoader<T>::to_check_symb_ = true; \
   template<> const char* roctracer::RocpLoader::lib_name_ = "librocprofiler64.so"; \
-  template<> const char* roctracer::HipLoader::lib_name_ = "libhip_hcc.so"; \
+  template<> const char* roctracer::HipLoader::lib_name_ = HIP_LIB; \
   template<> bool roctracer::HipLoader::to_check_open_ = false; \
-  template<> const char* roctracer::HccLoader::lib_name_ = "libmcwamp.so"; \
+  template<> const char* roctracer::HccLoader::lib_name_ = HCC_LIB; \
   template<> bool roctracer::HccLoader::to_check_open_ = false; \
   template<> const char* roctracer::KfdLoader::lib_name_ = "libkfdwrapper64.so"; \
   template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so"; \
   template<> bool roctracer::RocTxLoader::to_load_ = true;
+
+#if HIP_VDI
+#define LOADER_INSTANTIATE() LOADER_INSTANTIATE2("libamdhip64.so", "libamdhip64.so");
+#else
+#define LOADER_INSTANTIATE() LOADER_INSTANTIATE2("libhip_hcc.so", "libmcwamp.so");
+#endif
 
 #endif // SRC_CORE_LOADER_H_
