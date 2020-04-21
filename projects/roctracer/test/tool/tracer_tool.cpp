@@ -406,7 +406,7 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
 
   if (domain == ACTIVITY_DOMAIN_HIP_API) {
 #if HIP_PROF_HIP_API_STRING
-    const char* str = hipApiString(cid, data);
+    const char* str = hipApiString((hip_api_id_t)cid, data);
     fprintf(hip_api_file_handle, "%s\n", str);
 #else  // !HIP_PROF_HIP_API_STRING
     switch (cid) {
@@ -918,3 +918,4 @@ extern "C" DESTRUCTOR_API void destructor() {
   tool_unload();
   ONLOAD_TRACE_END();
 }
+

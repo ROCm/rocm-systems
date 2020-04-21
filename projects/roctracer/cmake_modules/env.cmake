@@ -36,6 +36,7 @@ add_definitions ( -DLITTLEENDIAN_CPU=1 )
 add_definitions ( -DHSA_LARGE_MODEL= )
 add_definitions ( -DHSA_DEPRECATED= )
 add_definitions ( -D__HIP_PLATFORM_HCC__ )
+add_definitions ( -DHIP_PROF_HIP_API_STRING=1 )
 
 ## Linux Compiler options
 set ( CMAKE_CXX_FLAGS "-std=c++11")
@@ -63,11 +64,6 @@ endif()
 ## Enable debug trace
 if ( DEFINED ENV{CMAKE_DEBUG_TRACE} )
   add_definitions ( -DDEBUG_TRACE=1 )
-endif()
-
-## HIP APIString() routine enableing
-if ( DEFINED HIP_PROF_HIP_API_STRING )
-  add_definitions ( -DHIP_PROF_HIP_API_STRING=1 )
 endif()
 
 ## Enable HIP_VDI mode
