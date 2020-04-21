@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include "RdciDmonSubSystem.h"
 #include "RdciFieldGroupSubSystem.h"
 #include "RdciGroupSubSystem.h"
+#include "RdciStatsSubSystem.h"
 
 
 int main(int argc, char ** argv) {
@@ -52,6 +53,8 @@ int main(int argc, char ** argv) {
            subsystem.reset(new amd::rdc::RdciGroupSubSystem());
        } else if (subsystem_name == "fieldgroup") {
            subsystem.reset(new amd::rdc::RdciFieldGroupSubSystem());
+       } else if (subsystem_name == "stats") {
+           subsystem.reset(new amd::rdc::RdciStatsSubSystem());
        } else {
            std::cout << usage_help;
            exit(0);

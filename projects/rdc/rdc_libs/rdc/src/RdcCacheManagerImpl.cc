@@ -257,7 +257,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(char jobId[64],
     }
 
     //< Init the summary info
-    RDC_LOG(RDC_DEBUG, "rdc_job_get_stats for job "  <<jobId);
+    RDC_LOG(RDC_DEBUG, "rdc_job_get_stats for job "  << jobId);
     auto& summary_info = p_job_info->summary;
     summary_info.start_time = job_stats->second.start_time;
     if (job_stats->second.end_time == 0) {
@@ -340,6 +340,8 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(char job_id[64],
      }
 
      std::lock_guard<std::mutex> guard(cache_mutex_);
+     // Remove the old stats if it exists
+     cache_jobs_.erase(job_id);
      cache_jobs_.insert({job_id, cacheEntry});
      return RDC_ST_OK;
 }

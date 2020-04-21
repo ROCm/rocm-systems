@@ -52,8 +52,20 @@ rdc_status_t  RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id,
     std::vector<RdcFieldKey> fields_in_watch;
     rdc_status_t result = get_fields_from_group(group_id,
                 JOB_FIELD_ID, fields_in_watch);
+    if (result != RDC_ST_OK) {
+        return result;
+    }
+    if (fields_in_watch.size() == 0) {
+        RDC_LOG(RDC_ERROR, "Fail to start job " << job_id <<". The group "
+                << group_id << " must contain at least one GPU.");
+        return RDC_ST_NOT_FOUND;
+    }
+
     JobWatchTableEntry jentry {group_id, fields_in_watch};
-    job_watch_table_.insert({job_id, jentry});
+    do {  //< lock guard for thread safe
+        std::lock_guard<std::mutex> guard(watch_mutex_);
+        job_watch_table_.insert({job_id, jentry});
+    } while (0);
 
     result = rdc_field_watch(group_id, JOB_FIELD_ID, update_freq, 0, 0);
     if (result != RDC_ST_OK) {
@@ -62,10 +74,12 @@ rdc_status_t  RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id,
 
     rdc_field_group_info_t finfo;
     rdc_group_info_t ginfo;
-    result = group_settings_->rdc_group_gpu_get_info(group_id, &ginfo);
+    result = group_settings_->rdc_group_gpu_get_info(
+                    group_id, &ginfo);
     if (result != RDC_ST_OK) {
         return result;
     }
+
     result = group_settings_->rdc_group_field_get_info(JOB_FIELD_ID, &finfo);
     if (result != RDC_ST_OK) {
         return result;

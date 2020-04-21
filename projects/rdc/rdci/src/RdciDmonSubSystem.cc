@@ -309,12 +309,32 @@ void RdciDmonSubSystem::process() {
     result = rdc_group_gpu_get_info(rdc_handle_,
                 options_[OPTIONS_GROUP_ID], &group_info);
     if (result != RDC_ST_OK) {
-        throw RdcException(result, rdc_status_string(result));
+        std::string error_msg = rdc_status_string(result);
+        if (result == RDC_ST_NOT_FOUND) {
+            error_msg = "Cannot find the group " +
+                std::to_string(options_[OPTIONS_GROUP_ID]);
+        }
+        throw RdcException(result, error_msg.c_str());
+    }
+    if (group_info.count == 0) {
+         throw RdcException(RDC_ST_NOT_FOUND, "The gpu group " +
+            std::to_string(options_[OPTIONS_GROUP_ID])
+            + " must contain at least 1 GPU.");
     }
     result = rdc_group_field_get_info(rdc_handle_,
         options_[OPTIONS_FIELD_GROUP_ID], &field_info);
     if (result != RDC_ST_OK) {
-        throw RdcException(result, rdc_status_string(result));
+        std::string error_msg = rdc_status_string(result);
+        if (result == RDC_ST_NOT_FOUND) {
+            error_msg = "Cannot find the field group " +
+                std::to_string(options_[OPTIONS_FIELD_GROUP_ID]);
+        }
+        throw RdcException(result, error_msg.c_str());
+    }
+    if (field_info.count == 0) {
+         throw RdcException(RDC_ST_NOT_FOUND, "The field group " +
+            std::to_string(options_[OPTIONS_FIELD_GROUP_ID])
+            + " must contain at least 1 field.");
     }
 
     // keep extra 1 minute data
