@@ -96,7 +96,7 @@ export ROCP_KITER=50
 export ROCP_DITER=50
 export ROCP_AGENTS=1
 export ROCP_THRS=3
-eval_test "Intercepting usage model test" "../bin/run_tool.sh ./test/ctrl"
+eval_test "Intercepting usage model test" ./test/ctrl
 
 ## Libtool test
 # tool library loaded by ROC profiler
