@@ -5,11 +5,18 @@
 #include <mutex>
 #include <dlfcn.h>
 
+#define ONLD_TRACE(str) \
+  if (getenv("ROCP_ONLOAD_TRACE")) do { \
+    std::cout << "PID(" << GetPid() << "): TRACER_LOADER::" << __FUNCTION__ << " " << str << std::endl << std::flush; \
+  } while(0);
+
 namespace roctracer {
 
 // Base runtime loader class
 template <class T>
 class BaseLoader : public T {
+  static uint32_t GetPid() { return syscall(__NR_getpid); }
+
   public:
   typedef std::mutex mutex_t;
   typedef BaseLoader<T> loader_t;
@@ -47,6 +54,7 @@ class BaseLoader : public T {
   BaseLoader() {
     const int flags = (to_load_ == true) ? RTLD_LAZY : RTLD_LAZY|RTLD_NOLOAD;
     handle_ = dlopen(lib_name_, flags);
+    ONLD_TRACE("(" << lib_name_ << " = " << handle_ << ")");
     if ((to_check_open_ == true) && (handle_ == NULL)) {
       fprintf(stderr, "roctracer: Loading '%s' failed, %s\n", lib_name_, dlerror());
       abort();
