@@ -69,9 +69,9 @@ export HSA_VEN_AMD_AQLPROFILE_LOG=1
 export ROCPROFILER_LOG=1
 unset ROCPROFILER_SESS
 
-# ROC Profiler environment
-# Loading of ROC Profiler by HSA runtime
-export HSA_TOOLS_LIB=$RPL_PATH/librocprofiler64.so
+# Profiler environment
+# Loading of profiler library by HSA runtime
+MY_HSA_TOOLS_LIB="$RPL_PATH/librocprofiler64.so"
 # Loading of the test tool by ROC Profiler
 export ROCP_TOOL_LIB=$TLIB_PATH/libtool.so
 # Enabling HSA dispatches intercepting by ROC PRofiler
@@ -243,13 +243,13 @@ run() {
   fi
 
   API_TRACE=""
-  LD_PRELOAD=""
+  MY_LD_PRELOAD=""
   if [ "$ROCTX_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":roctx"
   fi
   if [ "$KFD_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":kfd"
-    export LD_PRELOAD="$TT_DIR/lib/libkfdwrapper64.so libhsakmt.so.1 $LD_PRELOAD"
+    MY_LD_PRELOAD="$TT_DIR/lib/libkfdwrapper64.so libhsakmt.so.1 $MY_LD_PRELOAD"
   fi
   if [ "$HIP_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":hip"
@@ -260,11 +260,11 @@ run() {
 
   if [ "$HSA_TRACE" = 1 ] ; then
     export ROCTRACER_DOMAIN=$API_TRACE":hsa"
-    export HSA_TOOLS_LIB="$HSA_TOOLS_LIB $TTLIB_PATH/libtracer_tool.so"
+    MY_HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB $TTLIB_PATH/libtracer_tool.so"
   elif [ -n "$API_TRACE" ] ; then
     export ROCTRACER_DOMAIN=$API_TRACE
     OUTPUT_LIST="$ROCP_OUTPUT_DIR/"
-    export HSA_TOOLS_LIB="$TTLIB_PATH/libtracer_tool.so"
+    MY_HSA_TOOLS_LIB="$TTLIB_PATH/libtracer_tool.so"
   fi
 
   redirection_cmd=""
@@ -272,10 +272,9 @@ run() {
     redirection_cmd="2>&1 | tee $ROCP_OUTPUT_DIR/log.txt"
   fi
 
+  # Running profiled application
   CMD_LINE="$APP_CMD $redirection_cmd"
-  eval "$CMD_LINE"
-
-  unset LD_PRELOAD
+  HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" LD_PRELOAD="$MY_LD_PRELOAD" eval "$CMD_LINE"
 }
 
 merge_output() {
