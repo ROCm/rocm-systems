@@ -36,7 +36,7 @@ TLIB_PATH=$PKG_DIR/tool
 TTLIB_PATH=$TT_DIR/tool
 
 if [ -z "$ROCP_PYTHON_VERSION" ] ; then
-  ROCP_PYTHON_VERSION=python
+  ROCP_PYTHON_VERSION=python3
 fi
 
 # Default HIP path
