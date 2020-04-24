@@ -282,7 +282,7 @@ run() {
     HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" LD_PRELOAD="$MY_LD_PRELOAD" eval "$APP_CMD"
     retval=$?
   fi
-  RET=$retval
+  return $retval
 }
 
 merge_output() {
@@ -532,6 +532,7 @@ fi
 RET=1
 for name in $input_list; do
   run $name $OUTPUT_DIR $APP_CMD
+  RET=$?
   if [ -n "$ROCPROFILER_SESS" -a -e "$ROCPROFILER_SESS/error" ] ; then
     error_string=`cat $ROCPROFILER_SESS/error`
     echo "Profiling error found: '$error_string'"
