@@ -267,14 +267,22 @@ run() {
     MY_HSA_TOOLS_LIB="$TTLIB_PATH/libtracer_tool.so"
   fi
 
-  redirection_cmd=""
+  retval=1
   if [ -n "$ROCP_OUTPUT_DIR" ] ; then
-    redirection_cmd="2>&1 | tee $ROCP_OUTPUT_DIR/log.txt"
+    log_file="$ROCP_OUTPUT_DIR/log.txt"
+    exit_file="$ROCP_OUTPUT_DIR/exit.txt"
+    {
+      HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" LD_PRELOAD="$MY_LD_PRELOAD" eval "$APP_CMD"
+      retval=$?
+      echo "exit($retval)" > $exit_file
+    } 2>&1 | tee "$log_file"
+    exitval=`cat "$exit_file" | sed -n "s/^.*exit(\([0-9]*\)).*$/\1/p"`
+    if [ -n "$exitval" ] ; then retval=$exitval; fi
+  else
+    HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" LD_PRELOAD="$MY_LD_PRELOAD" eval "$APP_CMD"
+    retval=$?
   fi
-
-  # Running profiled application
-  CMD_LINE="$APP_CMD $redirection_cmd"
-  HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" LD_PRELOAD="$MY_LD_PRELOAD" eval "$CMD_LINE"
+  RET=$retval
 }
 
 merge_output() {
@@ -521,11 +529,12 @@ if [ -n "$csv_output" ] ; then
   rm -f $csv_output
 fi
 
-RET=0
+RET=1
 for name in $input_list; do
   run $name $OUTPUT_DIR $APP_CMD
   if [ -n "$ROCPROFILER_SESS" -a -e "$ROCPROFILER_SESS/error" ] ; then
-    echo "Error found, profiling aborted."
+    error_string=`cat $ROCPROFILER_SESS/error`
+    echo "Profiling error found: '$error_string'"
     csv_output=""
     RET=1
     break
@@ -541,7 +550,8 @@ if [ -n "$csv_output" ] ; then
     $ROCP_PYTHON_VERSION $BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST
   fi
   if [ "$?" -ne 0 ] ; then
-    echo "Data extracting error: $OUTPUT_LIST'"
+    echo "Profiling data corrupted: '$OUTPUT_LIST'" | tee "$ROCPROFILER_SESS/error"
+    RET=1
   fi
 fi
 
