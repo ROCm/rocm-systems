@@ -83,8 +83,11 @@ eval_test "Standalone sampling usage model test" ./test/standalone_test
 # Standalone intercepting test
 # ROC profiler library loaded by HSA runtime
 export HSA_TOOLS_LIB=librocprofiler64.so.1
+# enable intercepting mode in rocprofiler
 export ROCP_HSA_INTERCEPT=2
+# test macro for kernel iterations number
 export ROCP_KITER=100
+# test macro for per-kernel dispatching number
 export ROCP_DITER=10
 eval_test "Standalone intercepting test" ./test/stand_intercept_test
 unset ROCP_HSA_INTERCEPT

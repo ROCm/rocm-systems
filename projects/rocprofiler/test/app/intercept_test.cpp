@@ -30,14 +30,8 @@ THE SOFTWARE.
 #include <sstream>
 #include <vector>
 
-#include "ctrl/run_kernel.h"
-#include "ctrl/test_aql.h"
-#include "ctrl/test_hsa.h"
 #include "inc/rocprofiler.h"
-#include "dummy_kernel/dummy_kernel.h"
-#include "simple_convolution/simple_convolution.h"
-#include "util/test_assert.h"
-#include "util/xml.h"
+#include "util/hsa_rsrc_factory.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
 #define CONSTRUCTOR_API __attribute__((constructor))
