@@ -429,7 +429,9 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
   uint32_t node_indx;
 
   auto kfd_node_dir = opendir(kKFDNodesPathRoot);
-  assert(kfd_node_dir != nullptr);
+  if (kfd_node_dir == nullptr) {
+    return errno;
+  }
 
   auto dentry = readdir(kfd_node_dir);
   while (dentry != nullptr) {
