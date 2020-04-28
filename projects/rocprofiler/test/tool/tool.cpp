@@ -56,6 +56,13 @@ THE SOFTWARE.
 #define DESTRUCTOR_API __attribute__((destructor))
 #define KERNEL_NAME_LEN_MAX 128
 
+#define ONLOAD_TRACE(str) \
+  if (getenv("ROCP_ONLOAD_TRACE")) do { \
+    std::cout << "PID(" << GetPid() << "): PROF_TOOL_LIB::" << __FUNCTION__ << " " << str << std::endl << std::flush; \
+  } while(0);
+#define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
+#define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
+
 // Disoatch callback data type
 struct callbacks_data_t {
   rocprofiler_feature_t* features;
@@ -885,6 +892,8 @@ rocprofiler_hsa_callbacks_t hsa_callbacks {
 // Tool constructor
 extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
 {
+  ONLOAD_TRACE_BEG();
+
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
     abort();
@@ -1189,10 +1198,14 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     if (err) { errno = err; perror("pthread_attr_init"); abort(); }
     err = pthread_create(&thread, &attr, monitor_thr_fun, NULL);
   }
+
+  ONLOAD_TRACE_END();
 }
 
 // Tool destructor
-extern "C" PUBLIC_API void OnUnloadTool() {
+void rocprofiler_unload(bool is_destr) {
+  ONLOAD_TRACE("begin loaded(" << is_loaded << ") destr(" << is_destr << ")");
+
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
     abort();
@@ -1203,6 +1216,8 @@ extern "C" PUBLIC_API void OnUnloadTool() {
     perror("pthread_mutex_unlock");
     abort();
   }
+
+  if (is_destr) CTX_OUTSTANDING_WAIT = 0;
 
   // Unregister dispatch callback
   rocprofiler_remove_queue_callbacks();
@@ -1237,10 +1252,20 @@ extern "C" PUBLIC_API void OnUnloadTool() {
   kernel_string_vec = NULL;
   delete range_vec;
   range_vec = NULL;
-  delete context_array;
+  if (!is_destr) delete context_array;
   context_array = NULL;
+
+  ONLOAD_TRACE_END();
+}
+
+extern "C" PUBLIC_API void OnUnloadTool() {
+  ONLOAD_TRACE("begin loaded(" << is_loaded << ")");
+  if (is_loaded == true) rocprofiler_unload(false);
+  ONLOAD_TRACE_END();
 }
 
 extern "C" DESTRUCTOR_API void destructor() {
-  if (is_loaded == true) OnUnloadTool();
+  ONLOAD_TRACE("begin loaded(" << is_loaded << ")");
+  if (is_loaded == true) rocprofiler_unload(true);
+  ONLOAD_TRACE_END();
 }

@@ -217,11 +217,13 @@ uint32_t LoadTool() {
     if (settings.hsa_intercepting) intercept_mode |= HSA_INTERCEPT_MODE;
   }
 
+  ONLOAD_TRACE("end intercept_mode(" << intercept_mode << ")");
   return intercept_mode;
 }
 
 // Unload profiling tool librray
 void UnloadTool() {
+  ONLOAD_TRACE("tool handle(" << tool_handle << ")");
   if (tool_handle) {
     tool_handler_t handler = reinterpret_cast<tool_handler_t>(dlsym(tool_handle, "OnUnloadTool"));
     if (handler == NULL) {
@@ -232,16 +234,21 @@ void UnloadTool() {
     handler();
     dlclose(tool_handle);
   }
+  ONLOAD_TRACE_END();
 }
 
 CONSTRUCTOR_API void constructor() {
+  ONLOAD_TRACE_BEG();
   util::Logger::Create();
+  ONLOAD_TRACE_END();
 }
 
 DESTRUCTOR_API void destructor() {
+  ONLOAD_TRACE_BEG();
   rocprofiler::MetricsDict::Destroy();
   util::HsaRsrcFactory::Destroy();
   util::Logger::Destroy();
+  ONLOAD_TRACE_END();
 }
 
 const MetricsDict* GetMetrics(const hsa_agent_t& agent) {
