@@ -72,7 +72,7 @@ def gen_params(txtfile):
       mi = re.search(r'^(\s+)\w+.*', line)
       md = re.search(':', line)
       if mi:
-        nbr_indent = len(mi.group(1)) / 2 #indentation cnt
+        nbr_indent = int(len(mi.group(1)) / 2) #indentation cnt
       else:
         if not md:
           tmp = re.sub(r"\s+", "", line)
@@ -80,7 +80,7 @@ def gen_params(txtfile):
             parent_field = tmp
 
       if nbr_indent < nbr_indent_prev:
-        go_back_parent=(nbr_indent_prev-nbr_indent)
+        go_back_parent = (nbr_indent_prev - nbr_indent)
         for i in range(go_back_parent): #decrease as many levels up as needed
           pos = parent_field.rfind('.')
           if pos != -1:
