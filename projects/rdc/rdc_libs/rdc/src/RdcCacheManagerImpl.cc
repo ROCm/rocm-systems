@@ -235,7 +235,11 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_job_stats(uint32_t gpu_index,
 void RdcCacheManagerImpl::set_summary(const FieldSummaryStats & stats,
     rdc_stats_summary_t & gpu, rdc_stats_summary_t& summary,
     unsigned int adjuster) {
-    if (stats.count == 0) return;
+    if (stats.count == 0) {
+        gpu.min_value = std::numeric_limits<uint64_t>::max();
+        gpu.max_value = gpu.average = 0;
+        return;
+    }
 
     gpu.max_value = stats.max_value / adjuster;
     gpu.min_value = stats.min_value / adjuster;
@@ -247,7 +251,7 @@ void RdcCacheManagerImpl::set_summary(const FieldSummaryStats & stats,
 }
 
 rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(char jobId[64],
-        const rdc_gpu_total_memory_t& total_memory,
+        const rdc_gpu_gauges_t& gpu_gauges,
         rdc_job_info_t* p_job_info) {
     std::lock_guard<std::mutex> guard(cache_mutex_);
     auto job_stats = cache_jobs_.find(jobId);
@@ -257,6 +261,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(char jobId[64],
     }
 
     //< Init the summary info
+    bool is_job_stopped = (job_stats->second.end_time != 0);
     RDC_LOG(RDC_DEBUG, "rdc_job_get_stats for job "  << jobId);
     auto& summary_info = p_job_info->summary;
     summary_info.start_time = job_stats->second.start_time;
@@ -267,7 +272,13 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(char jobId[64],
     }
     summary_info.energy_consumed = 0;
     summary_info.max_gpu_memory_used = 0;
+    summary_info.ecc_correct = 0;
+    summary_info.ecc_uncorrect = 0;
     summary_info.power_usage = {0, std::numeric_limits<uint64_t>::max(), 0};
+    summary_info.pcie_tx = {0, std::numeric_limits<uint64_t>::max(), 0};
+    summary_info.pcie_rx = {0, std::numeric_limits<uint64_t>::max(), 0};
+    summary_info.gpu_temperature = {0, std::numeric_limits<uint64_t>::max(), 0};
+    summary_info.memory_clock = {0, std::numeric_limits<uint64_t>::max(), 0};
     summary_info.gpu_clock = {0, std::numeric_limits<uint64_t>::max(), 0};
     summary_info.gpu_utilization = {0, std::numeric_limits<uint64_t>::max(), 0};
     summary_info.memory_utilization = {0,
@@ -285,13 +296,46 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(char jobId[64],
         gpu_info.energy_consumed = gpus->second.energy_consumed;
         summary_info.energy_consumed += gpu_info.energy_consumed;
 
+        if (is_job_stopped) {
+            gpu_info.ecc_correct = gpus->second.ecc_correct_init;
+            summary_info.ecc_correct += gpu_info.ecc_correct;
+        } else if (gpu_gauges.find({gpus->first,
+            RDC_FI_ECC_CORRECT_TOTAL}) != gpu_gauges.end()) {
+                gpu_info.ecc_correct = gpu_gauges.at({
+                    gpus->first, RDC_FI_ECC_CORRECT_TOTAL}) -
+                    gpus->second.ecc_correct_init;
+                summary_info.ecc_correct += gpu_info.ecc_correct;
+        } else {
+            gpu_info.ecc_correct = 0;
+        }
+
+        if (is_job_stopped) {
+            gpu_info.ecc_uncorrect = gpus->second.ecc_uncorrect_init;
+            summary_info.ecc_uncorrect += gpu_info.ecc_uncorrect;
+        } else if (gpu_gauges.find({gpus->first,
+            RDC_FI_ECC_UNCORRECT_TOTAL}) != gpu_gauges.end()) {
+                gpu_info.ecc_uncorrect = gpu_gauges.at({
+                    gpus->first, RDC_FI_ECC_UNCORRECT_TOTAL}) -
+                    gpus->second.ecc_uncorrect_init;
+                summary_info.ecc_uncorrect += gpu_info.ecc_uncorrect;
+        } else {
+            gpu_info.ecc_uncorrect = 0;
+        }
+
+        if (gpu_gauges.find({gpus->first,
+            RDC_FI_GPU_MEMORY_TOTAL}) == gpu_gauges.end()) {
+              RDC_LOG(RDC_ERROR, "Cannot find the total memory");
+              return RDC_ST_BAD_PARAMETER;
+        }
+        uint64_t tmemory = gpu_gauges.at({gpus->first,
+            RDC_FI_GPU_MEMORY_TOTAL});
+
         auto ite = gpus->second.field_summaries.begin();
         for (; ite != gpus->second.field_summaries.end(); ite++) {
             if (ite->first == RDC_FI_POWER_USAGE) {
                 set_summary(ite->second,
                     gpu_info.power_usage, summary_info.power_usage, 1000000);
             } else if (ite->first == RDC_FI_GPU_MEMORY_USAGE) {
-                auto tmemory = total_memory.at(gpus->first);
                 set_summary(ite->second, gpu_info.memory_utilization,
                     summary_info.memory_utilization, tmemory/100);
                 gpu_info.max_gpu_memory_used = ite->second.max_value;
@@ -304,6 +348,18 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(char jobId[64],
             } else if (ite->first == RDC_FI_GPU_UTIL) {
                 set_summary(ite->second, gpu_info.gpu_utilization,
                     summary_info.gpu_utilization, 1);
+            } else if (ite->first == RDC_FI_GPU_TEMP) {
+                set_summary(ite->second,
+                gpu_info.gpu_temperature, summary_info.gpu_temperature, 1000);
+            } else if (ite->first == RDC_FI_MEM_CLOCK) {
+                set_summary(ite->second,
+                    gpu_info.memory_clock, summary_info.memory_clock, 1000000);
+            } else if (ite->first == RDC_FI_PCIE_TX) {
+                set_summary(ite->second,
+                    gpu_info.pcie_tx, summary_info.pcie_tx, 1024*1024);
+            } else if (ite->first == RDC_FI_PCIE_RX) {
+                set_summary(ite->second,
+                    gpu_info.pcie_rx, summary_info.pcie_rx, 1024*1024);
             }
         }
     }
@@ -316,12 +372,21 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(char jobId[64],
                 p_job_info->num_gpus;
     summary_info.memory_utilization.average =
                 summary_info.memory_utilization.average/p_job_info->num_gpus;
+    summary_info.pcie_tx.average = summary_info.pcie_tx.average/
+                p_job_info->num_gpus;
+    summary_info.pcie_rx.average = summary_info.pcie_rx.average/
+                p_job_info->num_gpus;
+    summary_info.gpu_temperature.average = summary_info.gpu_temperature.average/
+                p_job_info->num_gpus;
+    summary_info.memory_clock.average = summary_info.memory_clock.average/
+                p_job_info->num_gpus;
 
     return RDC_ST_OK;
 }
 
 rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(char job_id[64],
-        const rdc_group_info_t& ginfo, const rdc_field_group_info_t& finfo) {
+        const rdc_group_info_t& ginfo, const rdc_field_group_info_t& finfo,
+        const rdc_gpu_gauges_t& gpu_gauges) {
      RdcJobStatsCacheEntry cacheEntry;
      cacheEntry.start_time = std::time(nullptr);
      cacheEntry.end_time = 0;
@@ -336,6 +401,20 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(char job_id[64],
           gstats.field_summaries.insert({finfo.field_ids[j], s});
        }
 
+       gstats.ecc_correct_init = 0;
+       if (gpu_gauges.find({ginfo.entity_ids[i], RDC_FI_ECC_CORRECT_TOTAL}) !=
+               gpu_gauges.end()) {
+           gstats.ecc_correct_init = gpu_gauges.at(
+                   {ginfo.entity_ids[i], RDC_FI_ECC_CORRECT_TOTAL});
+       }
+
+       gstats.ecc_uncorrect_init = 0;
+       if (gpu_gauges.find({ginfo.entity_ids[i], RDC_FI_ECC_UNCORRECT_TOTAL}) !=
+               gpu_gauges.end()) {
+           gstats.ecc_uncorrect_init = gpu_gauges.at(
+                   {ginfo.entity_ids[i], RDC_FI_ECC_UNCORRECT_TOTAL});
+       }
+
        cacheEntry.gpu_stats.insert({ginfo.entity_ids[i], gstats});
      }
 
@@ -347,7 +426,8 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(char job_id[64],
 }
 
 
-rdc_status_t RdcCacheManagerImpl::rdc_job_stop_stats(char job_id[64]) {
+rdc_status_t RdcCacheManagerImpl::rdc_job_stop_stats(char job_id[64],
+            const rdc_gpu_gauges_t& gpu_gauges) {
     std::lock_guard<std::mutex> guard(cache_mutex_);
     auto job_stats = cache_jobs_.find(job_id);
 
@@ -356,6 +436,24 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_stop_stats(char job_id[64]) {
     }
 
     job_stats->second.end_time = std::time(nullptr);
+
+    // update the ecc errors
+    auto gpus = job_stats->second.gpu_stats.begin();
+    for (; gpus != job_stats->second.gpu_stats.end(); gpus++) {
+        if (gpu_gauges.find({gpus->first,
+            RDC_FI_ECC_CORRECT_TOTAL}) != gpu_gauges.end()) {
+                gpus->second.ecc_correct_init = gpu_gauges.at({
+                    gpus->first, RDC_FI_ECC_CORRECT_TOTAL}) -
+                    gpus->second.ecc_correct_init;
+        }
+
+        if (gpu_gauges.find({gpus->first,
+            RDC_FI_ECC_UNCORRECT_TOTAL}) != gpu_gauges.end()) {
+                 gpus->second.ecc_uncorrect_init = gpu_gauges.at({
+                    gpus->first, RDC_FI_ECC_UNCORRECT_TOTAL}) -
+                    gpus->second.ecc_uncorrect_init;
+        }
+    }
 
     return RDC_ST_OK;
 }

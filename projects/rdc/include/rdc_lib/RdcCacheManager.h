@@ -32,7 +32,6 @@ THE SOFTWARE.
 
 namespace amd {
 namespace rdc {
-typedef std::map<uint32_t, uint64_t> rdc_gpu_total_memory_t;
 
 class RdcCacheManager {
  public:
@@ -48,12 +47,14 @@ class RdcCacheManager {
     virtual std::string  get_cache_stats() = 0;
 
     virtual rdc_status_t rdc_job_get_stats(char jobId[64],
-        const rdc_gpu_total_memory_t& total_memory,
+        const rdc_gpu_gauges_t& gpu_gauges,
         rdc_job_info_t* p_job_info) = 0;
     virtual rdc_status_t rdc_job_start_stats(char jobId[64],
         const rdc_group_info_t& group,
-        const rdc_field_group_info_t& finfo) = 0;
-    virtual rdc_status_t rdc_job_stop_stats(char job_id[64]) = 0;
+        const rdc_field_group_info_t& finfo,
+        const rdc_gpu_gauges_t& gpu_gauges) = 0;
+    virtual rdc_status_t rdc_job_stop_stats(char job_id[64],
+                const rdc_gpu_gauges_t& gpu_gauge) = 0;
     virtual rdc_status_t rdc_update_job_stats(uint32_t gpu_index,
         const std::string& job_id, const rdc_field_value& value) = 0;
     virtual rdc_status_t rdc_job_remove(char job_id[64]) = 0;
@@ -64,8 +65,6 @@ class RdcCacheManager {
 
 typedef std::shared_ptr<RdcCacheManager> RdcCacheManagerPtr;
 
-//<! The key to identify the field with <gpu_id, field_id>
-typedef std::pair<uint32_t, uint32_t> RdcFieldKey;
 
 }  // namespace rdc
 }  // namespace amd

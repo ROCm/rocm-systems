@@ -358,6 +358,12 @@ const char* field_id_string(uint32_t field_id) {
         {RDC_FI_GPU_UTIL, "GPU_UTIL"},
         {RDC_FI_GPU_TEMP, "GPU_TEMP"},
         {RDC_FI_GPU_COUNT, "GPU_COUNT"},
+        {RDC_FI_MEM_CLOCK, "MEM_CLOCK"},
+        {RDC_FI_PCIE_TX, "PCIE_TX"},
+        {RDC_FI_PCIE_RX, "PCIE_RX"},
+        {RDC_FI_ECC_CORRECT_TOTAL, "ECC_CORRECT"},
+        {RDC_FI_ECC_UNCORRECT_TOTAL, "ECC_UNCORRECT"},
+        {RDC_FI_MEMORY_TEMP, "MEMORY_TEMP"},
         {RDC_FI_DEV_NAME, "DEV_NAME"}
       };
 

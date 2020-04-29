@@ -86,38 +86,75 @@ RdcEmbeddedHandler::~RdcEmbeddedHandler() {
 // JOB API
 rdc_status_t RdcEmbeddedHandler::rdc_job_start_stats(rdc_gpu_group_t groupId,
         char job_id[64], uint64_t update_freq) {
-    return  watch_table_->rdc_job_start_stats(groupId, job_id, update_freq);
+    rdc_gpu_gauges_t gpu_gauges;
+    rdc_status_t status = get_gpu_gauges(&gpu_gauges);
+    if (status != RDC_ST_OK) return status;
+
+    return  watch_table_->rdc_job_start_stats(groupId, job_id, update_freq,
+                                gpu_gauges);
 }
 
-rdc_status_t RdcEmbeddedHandler::rdc_job_get_stats(char job_id[64],
-           rdc_job_info_t* p_job_info) {
+rdc_status_t RdcEmbeddedHandler::get_gpu_gauges(rdc_gpu_gauges_t* gpu_gauges) {
     uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
     uint32_t count = 0;
+
+    if (gpu_gauges == nullptr) {
+        return RDC_ST_BAD_PARAMETER;
+    }
     rdc_status_t status = rdc_device_get_all(
         gpu_index_list, &count);
     if (status != RDC_ST_OK) {
         return status;
     }
 
-    rdc_gpu_total_memory_t all_total_memory;
-
+    // Fetch total memory and current ecc errors
     for (uint32_t i = 0; i < count ; i++) {
-        rdc_field_value total_memory;
+        rdc_field_value value;
         status = metric_fetcher_->fetch_smi_field(gpu_index_list[i],
-                    RDC_FI_GPU_MEMORY_TOTAL, &total_memory);
+                    RDC_FI_GPU_MEMORY_TOTAL, &value);
         if (status != RDC_ST_OK) {
             RDC_LOG(RDC_ERROR, "Fail to get total memory of GPU "
                         << gpu_index_list[i]);
             return status;
         }
-        all_total_memory.insert({gpu_index_list[i], total_memory.value.l_int});
+        gpu_gauges->insert({{gpu_index_list[i], RDC_FI_GPU_MEMORY_TOTAL},
+                 value.value.l_int});
+
+        status = metric_fetcher_->fetch_smi_field(gpu_index_list[i],
+                    RDC_FI_ECC_CORRECT_TOTAL, &value);
+        if (status == RDC_ST_OK) {
+            gpu_gauges->insert({{gpu_index_list[i], RDC_FI_ECC_CORRECT_TOTAL},
+                    value.value.l_int});
+        }
+        status = metric_fetcher_->fetch_smi_field(gpu_index_list[i],
+                    RDC_FI_ECC_UNCORRECT_TOTAL, &value);
+        if (status == RDC_ST_OK) {
+            gpu_gauges->insert({{gpu_index_list[i], RDC_FI_ECC_UNCORRECT_TOTAL},
+                    value.value.l_int});
+        }
+    }
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_job_get_stats(char job_id[64],
+           rdc_job_info_t* p_job_info) {
+    if (p_job_info == nullptr) {
+        return RDC_ST_BAD_PARAMETER;
     }
 
-    return cache_mgr_->rdc_job_get_stats(job_id, all_total_memory, p_job_info);
+    rdc_gpu_gauges_t gpu_gauges;
+    rdc_status_t status = get_gpu_gauges(&gpu_gauges);
+    if (status != RDC_ST_OK) return status;
+
+    return cache_mgr_->rdc_job_get_stats(job_id, gpu_gauges, p_job_info);
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_job_stop_stats(char job_id[64]) {
-    return watch_table_->rdc_job_stop_stats(job_id);
+    rdc_gpu_gauges_t gpu_gauges;
+    rdc_status_t status = get_gpu_gauges(&gpu_gauges);
+    if (status != RDC_ST_OK) return status;
+
+    return watch_table_->rdc_job_stop_stats(job_id, gpu_gauges);
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_job_remove(char job_id[64]) {

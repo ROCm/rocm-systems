@@ -36,8 +36,10 @@ class RdcWatchTable {
     virtual rdc_status_t rdc_field_update_all() = 0;
 
     virtual rdc_status_t rdc_job_start_stats(rdc_gpu_group_t group_id,
-                char job_id[64], uint64_t update_freq) = 0;
-    virtual rdc_status_t rdc_job_stop_stats(char job_id[64]) = 0;
+                char job_id[64], uint64_t update_freq,
+                const rdc_gpu_gauges_t& gpu_gauge) = 0;
+    virtual rdc_status_t rdc_job_stop_stats(char job_id[64],
+                const rdc_gpu_gauges_t& gpu_gauge) = 0;
     virtual rdc_status_t rdc_job_remove(char job_id[64]) = 0;
     virtual rdc_status_t rdc_job_remove_all() = 0;
 

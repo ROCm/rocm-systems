@@ -145,14 +145,46 @@ typedef enum {
 #define RDC_FI_GPU_SM_CLOCK                 100
 
 /**
+ * Clock for the memory
+ */
+#define RDC_FI_MEM_CLOCK                101
+
+/**
+ * PCIe Tx utilization information
+ */
+#define RDC_FI_PCIE_TX    200
+
+/**
+ * PCIe Rx utilization information
+ */
+#define RDC_FI_PCIE_RX    201
+
+
+/**
  * GPU Utilization
  */
 #define RDC_FI_GPU_UTIL                     203
 
 /**
+ * Accumulated correctable ECC errors
+ */
+#define RDC_FI_ECC_CORRECT_TOTAL        312
+
+/**
+ * Accumulated uncorrectable ECC errors
+ */
+#define RDC_FI_ECC_UNCORRECT_TOTAL      313
+
+/**
+ * Memory temperature for the device
+ */
+#define RDC_FI_MEMORY_TEMP           140
+
+/**
  * Current temperature for the device
  */
 #define RDC_FI_GPU_TEMP                     150
+
 
 /**
  * GPU count in the system
@@ -209,9 +241,15 @@ typedef struct {
     uint64_t end_time;      //!< The time to stop the watching
 
     uint64_t energy_consumed;
+    uint64_t ecc_correct;
+    uint64_t ecc_uncorrect;
+    rdc_stats_summary_t pcie_tx;
+    rdc_stats_summary_t pcie_rx;
     rdc_stats_summary_t power_usage;
     rdc_stats_summary_t gpu_clock;
+    rdc_stats_summary_t memory_clock;
     rdc_stats_summary_t gpu_utilization;
+    rdc_stats_summary_t gpu_temperature;
 
     uint64_t max_gpu_memory_used;
     rdc_stats_summary_t memory_utilization;

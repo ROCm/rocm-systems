@@ -278,10 +278,19 @@ void RdciDmonSubSystem::create_temp_field_group() {
 void RdciDmonSubSystem::show_field_usage() const {
     std::cout << "Supported fields Ids:\n";
     std::cout << "100 RDC_FI_GPU_SM_CLOCK: Current GPU clock frequencies.\n";
+    std::cout << "101 RDC_FI_MEM_CLOCK: Current Memory clock frequencies.\n";
+    std::cout << "140 RDC_FI_MEMORY_TEMP: Memory "
+              << "temperature in millidegrees Celsius.\n";
     std::cout << "150 RDC_FI_GPU_TEMP: GPU "
-              << "temperature in millidegrees Celcius.\n";
+              << "temperature in millidegrees Celsius.\n";
     std::cout << "155 RDC_FI_POWER_USAGE: Power usage in microwatts.\n";
+    std::cout << "200 RDC_FI_PCIE_TX: PCIe Tx utilization in bytes/second.\n";
+    std::cout << "201 RDC_FI_PCIE_RX: PCIe Rx utilization in bytes/second.\n";
     std::cout << "203 RDC_FI_GPU_UTIL: GPU busy percentage.\n";
+    std::cout << "312 RDC_FI_ECC_CORRECT_TOTAL: Accumulated "
+              << "correctable ECC errors.\n";
+    std::cout << "313 RDC_FI_ECC_UNCORRECT_TOTAL: Accumulated "
+              << "uncorrectable ECC errors.\n";
     std::cout << "525 RDC_FI_GPU_MEMORY_USAGE: Memory usage of the GPU "
               << "instance in bytes.\n";
 }
@@ -361,7 +370,7 @@ void RdciDmonSubSystem::process() {
                     group_info.entity_ids[gindex],
                     field_info.field_ids[findex], &value);
                  if (result != RDC_ST_OK) {
-                     std::cout << std::left << std::setw(20) << "error";
+                     std::cout << std::left << std::setw(20) << "N/A";
                  } else {
                      if (value.type == INTEGER) {
                         std::cout << std::left << std::setw(20)

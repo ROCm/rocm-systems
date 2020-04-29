@@ -150,11 +150,11 @@ void RdciStatsSubSystem::show_job_stats(
         const rdc_gpu_usage_info_t& gpu_info) const {
     std::cout << "|------- Execution Stats ----------"
         << "+------------------------------------\n";
-    std::cout << "| Start Time *                     | "
+    std::cout << "| Start Time                       | "
         << gpu_info.start_time << "\n";
-    std::cout << "| End Time *                       | "
+    std::cout << "| End Time                         | "
         << gpu_info.end_time << "\n";
-    std::cout << "| Total Execution Time (sec) *     | "
+    std::cout << "| Total Execution Time (sec)       | "
         << (gpu_info.end_time-gpu_info.start_time) << "\n";
     std::cout << "+------- Performance Stats --------"
         << "+------------------------------------\n";
@@ -168,16 +168,36 @@ void RdciStatsSubSystem::show_job_stats(
         << gpu_info.gpu_clock.max_value << " Min: " <<
         gpu_info.gpu_clock.min_value << " Avg: "
         << gpu_info.gpu_clock.average << "\n";
+    std::cout << "| Memory Clock (MHz)               | "  << "Max: "
+        << gpu_info.memory_clock.max_value << " Min: " <<
+        gpu_info.memory_clock.min_value << " Avg: "
+        << gpu_info.memory_clock.average << "\n";
     std::cout << "| SM Utilization (%)               | "  << "Max: "
         << gpu_info.gpu_utilization.max_value <<" Min: " <<
         gpu_info.gpu_utilization.min_value << " Avg: " <<
         gpu_info.gpu_utilization.average << "\n";
-    std::cout << "| Max GPU Memory Used (bytes) *    | "  <<
+    std::cout << "| Max GPU Memory Used (bytes)      | "  <<
         gpu_info.max_gpu_memory_used << "\n";
     std::cout << "| Memory Utilization (%)           | "
         << "Max: " << gpu_info.memory_utilization.max_value
-            <<" Min: "<< gpu_info.memory_utilization.min_value
-            << " Avg: " << gpu_info.memory_utilization.average << "\n";
+        <<" Min: "<< gpu_info.memory_utilization.min_value
+        << " Avg: " << gpu_info.memory_utilization.average << "\n";
+    std::cout << "| GPU Temperature (Celsius)        | "
+        << "Max: " << gpu_info.gpu_temperature.max_value
+        <<" Min: "<< gpu_info.gpu_temperature.min_value
+        << " Avg: " << gpu_info.gpu_temperature.average << "\n";
+    std::cout << "| PCIe Rx Bandwidth (megabytes)    | "
+        << "Max: " << gpu_info.pcie_rx.max_value
+        <<" Min: "<< gpu_info.pcie_rx.min_value
+        << " Avg: " << gpu_info.pcie_rx.average << "\n";
+    std::cout << "| PCIe Tx Bandwidth (megabytes)    | "
+        << "Max: " << gpu_info.pcie_tx.max_value
+        <<" Min: "<< gpu_info.pcie_tx.min_value
+        << " Avg: " << gpu_info.pcie_tx.average << "\n";
+    std::cout << "| Correctable ECC Errors           | "
+        << gpu_info.ecc_correct << "\n";
+    std::cout << "| Uncorrectable ECC Errors         | "
+        << gpu_info.ecc_uncorrect << "\n";
     std::cout << "+----------------------------------"
         << "+------------------------------------\n";
 }

@@ -22,16 +22,55 @@ THE SOFTWARE.
 #ifndef RDC_LIB_IMPL_RDCMETRICFETCHERIMPL_H_
 #define RDC_LIB_IMPL_RDCMETRICFETCHERIMPL_H_
 
+#include <mutex>  // NOLINT(build/c++11)
+#include <future>  // NOLINT(build/c++11)
+#include <condition_variable>  // NOLINT(build/c++11)
+#include <map>
+#include <queue>
 #include "rdc_lib/RdcMetricFetcher.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
+
+//!< Some metrics, like PCIe throughput may take a second to retreive. The
+//!< MetricValue will cache those metrics for async retreive.
+struct MetricValue {
+    uint64_t cache_ttl;
+    uint64_t last_time;
+    rdc_field_value value;
+};
+
+
+//!< The data structure to store the async fetch task
+class RdcMetricFetcherImpl;
+struct MetricTask {
+    RdcFieldKey field;
+    std::function<void(RdcMetricFetcherImpl&, RdcFieldKey)> task;
+};
 
 class RdcMetricFetcherImpl: public RdcMetricFetcher {
  public:
     rdc_status_t fetch_smi_field(uint32_t gpu_index,
         uint32_t field_id, rdc_field_value* value) override;
     bool is_field_valid(uint32_t field_id) const override;
+    RdcMetricFetcherImpl();
+    ~RdcMetricFetcherImpl();
+ private:
+    uint64_t now();
+    void get_ecc_error(uint32_t gpu_index,
+        uint32_t field_id, rdc_field_value* value);
+    void async_get_pcie_throughput(uint32_t gpu_index,
+        uint32_t field_id, rdc_field_value* value);
+    void get_pcie_throughput(const RdcFieldKey& key);
+
+    //!< Async metric retreive
+    std::map<RdcFieldKey, MetricValue> async_metrics_;
+    std::queue<MetricTask> updated_tasks_;
+    std::mutex task_mutex_;
+    std::future<void> updater_;  // keep the future of updater
+    std::condition_variable cv_;
+    std::atomic<bool> task_started_;
 };
 
 }  // namespace rdc

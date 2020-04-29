@@ -23,6 +23,8 @@ THE SOFTWARE.
 #ifndef RDC_LIB_RDC_COMMON_H_
 #define RDC_LIB_RDC_COMMON_H_
 #include <iostream>
+#include <map>
+#include <utility>
 
 #define RDC_ERROR  0
 #define RDC_INFO   1
@@ -36,6 +38,12 @@ THE SOFTWARE.
         msg << std::endl; \
     } \
 } while (0)
+
+//<! The key to identify the field with <gpu_id, field_id>
+typedef std::pair<uint32_t, uint32_t> RdcFieldKey;
+
+//!< The gauge metrics do not require aggregations
+typedef std::map<RdcFieldKey, uint64_t> rdc_gpu_gauges_t;
 
 /**
  *  @brief The strncpy but with null terminated

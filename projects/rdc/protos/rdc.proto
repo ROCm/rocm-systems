@@ -427,6 +427,12 @@ message GpuUsageInfo {
   JobStatsSummary gpu_utilization = 7;
   uint64 max_gpu_memory_used = 8;
   JobStatsSummary memory_utilization = 9;
+  uint64 ecc_correct = 10;
+  uint64 ecc_uncorrect = 11;
+  JobStatsSummary pcie_tx = 12;
+  JobStatsSummary pcie_rx = 13;
+  JobStatsSummary memory_clock = 14;
+  JobStatsSummary gpu_temperature = 15;
 }
 message GetJobStatsResponse {
   uint32 status = 1;

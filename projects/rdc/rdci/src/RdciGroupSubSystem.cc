@@ -82,7 +82,10 @@ void RdciGroupSubSystem::parse_cmd_opts(int argc, char ** argv) {
                 group_name_ = optarg;
                 break;
             case 'a':
-                group_ops_ = GROUP_ADD_GPUS;
+                // Create may add GPUs as well.
+                if (group_ops_ != GROUP_CREATE) {
+                     group_ops_ = GROUP_ADD_GPUS;
+                }
                 gpu_ids_ = optarg;
                 break;
             case 'i':
@@ -116,7 +119,8 @@ void RdciGroupSubSystem::show_help() const {
     std::cout << " group -- Used to  create and maintain groups of GPUs.\n\n";
     std::cout << "Usage\n";
     std::cout << "    rdci group [--host <IP/FQDN>:port] [-u] -l\n";
-    std::cout << "    rdci group [--host <IP/FQDN>:port] [-u] -c <groupName>\n";
+    std::cout << "    rdci group [--host <IP/FQDN>:port] [-u] -c <groupName> "
+              << "[-a <entityId>]\n";
     std::cout << "    rdci group [--host <IP/FQDN>:port] [-u] -g <groupId> "
               << "[-a <entityId>]\n";
     std::cout << "    rdci group [--host <IP/FQDN>:port] [-u] "
@@ -157,6 +161,25 @@ void RdciGroupSubSystem::process() {
             rdc_gpu_group_t group_id;
             result = rdc_group_gpu_create(rdc_handle_, RDC_GROUP_EMPTY,
                             group_name_.c_str(), &group_id);
+            if (result != RDC_ST_OK) {
+                throw RdcException(result, "Fail to create group "
+                    + group_name_);
+            }
+
+            gpu_ids = split_string(gpu_ids_, ',');
+            for (uint32_t i = 0; i < gpu_ids.size(); i++) {
+                if (!IsNumber(gpu_ids[i])) {
+                    throw RdcException(RDC_ST_BAD_PARAMETER,
+                            "The GPU Id "+gpu_ids[i]+" needs to be a number");
+                }
+                result = rdc_group_gpu_add(rdc_handle_,
+                            group_id, std::stoi(gpu_ids[i]));
+                if (result != RDC_ST_OK) {
+                    throw RdcException(result, "Fail to add GPU "
+                        + gpu_ids[i] + " to the group");
+                }
+            }
+
             if (result == RDC_ST_OK) {
                 std::cout << "Successfully created group with a group ID "
                             << group_id << std::endl;
@@ -214,7 +237,7 @@ void RdciGroupSubSystem::process() {
             for (uint32_t i = 0; i < gpu_ids.size(); i++) {
                 if (!IsNumber(gpu_ids[i])) {
                     throw RdcException(RDC_ST_BAD_PARAMETER,
-                            "The GUP Id "+gpu_ids[i]+" needs to be a number");
+                            "The GPU Id "+gpu_ids[i]+" needs to be a number");
                 }
                 result = rdc_group_gpu_add(rdc_handle_,
                             group_id_, std::stoi(gpu_ids[i]));

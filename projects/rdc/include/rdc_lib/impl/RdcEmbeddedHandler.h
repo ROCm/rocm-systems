@@ -92,6 +92,7 @@ class RdcEmbeddedHandler: public RdcHandler {
     ~RdcEmbeddedHandler();
 
  private:
+    rdc_status_t get_gpu_gauges(rdc_gpu_gauges_t* gpu_gauges);
     RdcGroupSettingsPtr group_settings_;
     RdcCacheManagerPtr cache_mgr_;
     RdcMetricFetcherPtr metric_fetcher_;

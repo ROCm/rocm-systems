@@ -88,6 +88,8 @@ bool RdcStandaloneHandler::copy_gpu_usage_info(
     target->end_time = src.end_time();
     target->energy_consumed = src.energy_consumed();
     target->max_gpu_memory_used = src.max_gpu_memory_used();
+    target->ecc_correct = src.ecc_correct();
+    target->ecc_uncorrect = src.ecc_uncorrect();
 
     const ::rdc::JobStatsSummary& pstats = src.power_usage();
     target->power_usage.max_value = pstats.max_value();
@@ -108,6 +110,26 @@ bool RdcStandaloneHandler::copy_gpu_usage_info(
     target->memory_utilization.max_value = mstats.max_value();
     target->memory_utilization.min_value = mstats.min_value();
     target->memory_utilization.average = mstats.average();
+
+    const ::rdc::JobStatsSummary& txstats = src.pcie_tx();
+    target->pcie_tx.max_value = txstats.max_value();
+    target->pcie_tx.min_value = txstats.min_value();
+    target->pcie_tx.average = txstats.average();
+
+    const ::rdc::JobStatsSummary& rxstats = src.pcie_rx();
+    target->pcie_rx.max_value = rxstats.max_value();
+    target->pcie_rx.min_value = rxstats.min_value();
+    target->pcie_rx.average = rxstats.average();
+
+    const ::rdc::JobStatsSummary& mcstats = src.memory_clock();
+    target->memory_clock.max_value = mcstats.max_value();
+    target->memory_clock.min_value = mcstats.min_value();
+    target->memory_clock.average = mcstats.average();
+
+    const ::rdc::JobStatsSummary& gtstats = src.gpu_temperature();
+    target->gpu_temperature.max_value = gtstats.max_value();
+    target->gpu_temperature.min_value = gtstats.min_value();
+    target->gpu_temperature.average = gtstats.average();
 
     return true;
 }

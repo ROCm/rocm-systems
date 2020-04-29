@@ -41,7 +41,8 @@ RdcWatchTableImpl::RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings,
 }
 
 rdc_status_t  RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id,
-                char  job_id[64], uint64_t update_freq) {
+                char  job_id[64], uint64_t update_freq,
+                const rdc_gpu_gauges_t& gpu_gauges) {
     do {  //< lock guard for thread safe
         std::lock_guard<std::mutex> guard(watch_mutex_);
         if (job_watch_table_.find(job_id) != job_watch_table_.end()) {
@@ -67,10 +68,6 @@ rdc_status_t  RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id,
         job_watch_table_.insert({job_id, jentry});
     } while (0);
 
-    result = rdc_field_watch(group_id, JOB_FIELD_ID, update_freq, 0, 0);
-    if (result != RDC_ST_OK) {
-        return result;
-    }
 
     rdc_field_group_info_t finfo;
     rdc_group_info_t ginfo;
@@ -85,12 +82,18 @@ rdc_status_t  RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id,
         return result;
     }
 
-    result = cache_mgr_->rdc_job_start_stats(job_id, ginfo, finfo);
+    result = cache_mgr_->rdc_job_start_stats(job_id, ginfo, finfo, gpu_gauges);
+    if (result != RDC_ST_OK) {
+        return result;
+    }
 
+    // At last, when every thing sets up, starts to watch the fields.
+    result = rdc_field_watch(group_id, JOB_FIELD_ID, update_freq, 0, 0);
     return result;
 }
 
-rdc_status_t RdcWatchTableImpl::rdc_job_stop_stats(char job_id[64]) {
+rdc_status_t RdcWatchTableImpl::rdc_job_stop_stats(char job_id[64],
+                        const rdc_gpu_gauges_t& gpu_gauge) {
     uint32_t job_group_id;
     do {  //< lock guard for thread safe
         std::lock_guard<std::mutex> guard(watch_mutex_);
@@ -111,13 +114,14 @@ rdc_status_t RdcWatchTableImpl::rdc_job_stop_stats(char job_id[64]) {
         job_watch_table_.erase(job_id);
     } while (0);
 
-    result = cache_mgr_->rdc_job_stop_stats(job_id);
+    result = cache_mgr_->rdc_job_stop_stats(job_id, gpu_gauge);
 
     return result;
 }
 
 rdc_status_t RdcWatchTableImpl::rdc_job_remove(char job_id[64]) {
-    rdc_job_stop_stats(job_id);
+    rdc_gpu_gauges_t gpu_gauge;
+    rdc_job_stop_stats(job_id, gpu_gauge);
     return cache_mgr_->rdc_job_remove(job_id);
 }
 
@@ -134,7 +138,8 @@ rdc_status_t RdcWatchTableImpl::rdc_job_remove_all() {
 
     // Stop them
     for (auto job = v.begin(); job != v.end(); job++) {
-        rdc_job_stop_stats(const_cast<char*>(job->c_str()));
+        rdc_gpu_gauges_t gpu_gauge;
+        rdc_job_stop_stats(const_cast<char*>(job->c_str()), gpu_gauge);
     }
 
     return cache_mgr_->rdc_job_remove_all();
@@ -340,8 +345,9 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
     auto fite = fields_to_watch_.begin();
     for (; fite != fields_to_watch_.end(); fite++) {
         // Is this field need to be updated?
+        uint64_t track_freq = fite->second.update_freq/1000;
         if (!fite->second.is_watching ||
-            fite->second.last_update_time+fite->second.update_freq/1000 > now) {
+            fite->second.last_update_time+track_freq > now) {
            continue;
         }
 
@@ -350,6 +356,10 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
         result = metric_fetcher_->fetch_smi_field(
                     fite->first.first, fite->first.second, &value);
         if (result != RDC_ST_OK) {
+           // To prevent frequently retry when error, update the time
+           gettimeofday(&tv, NULL);
+           now = static_cast<uint64_t>(tv.tv_sec)*1000+tv.tv_usec/1000;
+           fite->second.last_update_time = now;
            continue;
         }
 

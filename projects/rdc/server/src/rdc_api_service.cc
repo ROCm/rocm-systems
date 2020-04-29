@@ -453,6 +453,11 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
                 const_cast<char*>(request->job_id().c_str()),
                 &job_info);
 
+    reply->set_status(result);
+    if (result != RDC_ST_OK) {
+      return ::grpc::Status::OK;
+    }
+
     reply->set_num_gpus(job_info.num_gpus);
     ::rdc::GpuUsageInfo* sinfo = reply->mutable_summary();
     copy_gpu_usage_info(job_info.summary, sinfo);
@@ -461,8 +466,6 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
        ::rdc::GpuUsageInfo* ginfo = reply->add_gpus();
        copy_gpu_usage_info(job_info.gpus[i], ginfo);
     }
-
-    reply->set_status(result);
 
     return ::grpc::Status::OK;
 }
@@ -478,6 +481,8 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     target->set_end_time(src.end_time);
     target->set_energy_consumed(src.energy_consumed);
     target->set_max_gpu_memory_used(src.max_gpu_memory_used);
+    target->set_ecc_correct(src.ecc_correct);
+    target->set_ecc_uncorrect(src.ecc_uncorrect);
 
     ::rdc::JobStatsSummary* stats = target->mutable_power_usage();
     stats->set_max_value(src.power_usage.max_value);
@@ -499,6 +504,25 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     stats->set_min_value(src.memory_utilization.min_value);
     stats->set_average(src.memory_utilization.average);
 
+    stats = target->mutable_pcie_tx();
+    stats->set_max_value(src.pcie_tx.max_value);
+    stats->set_min_value(src.pcie_tx.min_value);
+    stats->set_average(src.pcie_tx.average);
+
+    stats = target->mutable_pcie_rx();
+    stats->set_max_value(src.pcie_rx.max_value);
+    stats->set_min_value(src.pcie_rx.min_value);
+    stats->set_average(src.pcie_rx.average);
+
+    stats = target->mutable_memory_clock();
+    stats->set_max_value(src.memory_clock.max_value);
+    stats->set_min_value(src.memory_clock.min_value);
+    stats->set_average(src.memory_clock.average);
+
+    stats = target->mutable_gpu_temperature();
+    stats->set_max_value(src.gpu_temperature.max_value);
+    stats->set_min_value(src.gpu_temperature.min_value);
+    stats->set_average(src.gpu_temperature.average);
 
     return true;
 }
