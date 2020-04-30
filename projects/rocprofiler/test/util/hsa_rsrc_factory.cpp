@@ -146,8 +146,9 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
 
   // Time correlation
   const uint32_t corr_iters = 1000;
-  CorrelateTime(HsaTimer::TIME_ID_CLOCK_REALTIME, corr_iters);
-  CorrelateTime(HsaTimer::TIME_ID_CLOCK_MONOTONIC, corr_iters);
+  for (unsigned time_id = 0; time_id < HsaTimer::TIME_ID_NUMBER; time_id += 1) {
+    CorrelateTime((HsaTimer::time_id_t)time_id, corr_iters);
+  }
 
   // System timeout
   timeout_ = (timeout_ns_ == HsaTimer::TIMESTAMP_MAX) ? timeout_ns_ : timer_->ns_to_sysclock(timeout_ns_);
@@ -692,14 +693,14 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t s
   return write_idx;
 }
 
-const char* HsaRsrcFactory::GetKernelName(uint64_t addr) {
+const char* HsaRsrcFactory::GetKernelNameRef(uint64_t addr) {
   std::lock_guard<mutex_t> lck(mutex_);
   const auto it = symbols_map_->find(addr);
   if (it == symbols_map_->end()) {
     fprintf(stderr, "HsaRsrcFactory::kernel addr (0x%lx) is not found\n", addr);
     abort();
   }
-  return strdup(it->second);
+  return it->second;
 }
 
 void HsaRsrcFactory::EnableExecutableTracking(HsaApiTable* table) {

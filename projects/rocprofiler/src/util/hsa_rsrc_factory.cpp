@@ -149,8 +149,9 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
 
   // Time correlation
   const uint32_t corr_iters = 1000;
-  CorrelateTime(HsaTimer::TIME_ID_CLOCK_REALTIME, corr_iters);
-  CorrelateTime(HsaTimer::TIME_ID_CLOCK_MONOTONIC, corr_iters);
+  for (unsigned time_id = 0; time_id < HsaTimer::TIME_ID_NUMBER; time_id += 1) {
+    CorrelateTime((HsaTimer::time_id_t)time_id, corr_iters);
+  }
 
   // System timeout
   timeout_ = (timeout_ns_ == HsaTimer::TIMESTAMP_MAX) ? timeout_ns_ : timer_->ns_to_sysclock(timeout_ns_);

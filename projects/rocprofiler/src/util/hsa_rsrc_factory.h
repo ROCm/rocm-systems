@@ -183,7 +183,10 @@ class HsaTimer {
 
   enum time_id_t {
     TIME_ID_CLOCK_REALTIME = 0,
-    TIME_ID_CLOCK_MONOTONIC = 1,
+    TIME_ID_CLOCK_REALTIME_COARSE = 1,
+    TIME_ID_CLOCK_MONOTONIC = 2,
+    TIME_ID_CLOCK_MONOTONIC_COARSE = 3,
+    TIME_ID_CLOCK_MONOTONIC_RAW = 4,
     TIME_ID_NUMBER
   };
 
@@ -203,7 +206,7 @@ class HsaTimer {
   }
 
   // Method for timespec/ns conversion
-  timestamp_t timespec_to_ns(const timespec& time) const {
+  static timestamp_t timespec_to_ns(const timespec& time) {
     return ((timestamp_t)time.tv_sec * 1000000000) + time.tv_nsec;
   }
 
@@ -227,12 +230,21 @@ class HsaTimer {
   void correlated_pair_ns(time_id_t time_id, uint32_t iters,
                           timestamp_t* timestamp_v, timestamp_t* time_v, timestamp_t* error_v) {
     clockid_t clock_id = 0;
-    switch (clock_id) {
+    switch (time_id) {
       case TIME_ID_CLOCK_REALTIME:
         clock_id = CLOCK_REALTIME;
         break;
+      case TIME_ID_CLOCK_REALTIME_COARSE:
+        clock_id = CLOCK_REALTIME_COARSE;
+        break;
       case TIME_ID_CLOCK_MONOTONIC:
         clock_id = CLOCK_MONOTONIC;
+        break;
+      case TIME_ID_CLOCK_MONOTONIC_COARSE:
+        clock_id = CLOCK_MONOTONIC_COARSE;
+        break;
+      case TIME_ID_CLOCK_MONOTONIC_RAW:
+        clock_id = CLOCK_MONOTONIC_RAW;
         break;
       default:
         CHECK_STATUS("internal error: invalid time_id", HSA_STATUS_ERROR);
@@ -431,9 +443,14 @@ class HsaRsrcFactory {
     time_error_[time_id] = error_v;
   }
 
-  hsa_status_t GetTime(uint32_t time_id, uint64_t value, uint64_t* time) {
+  hsa_status_t GetTimeVal(uint32_t time_id, uint64_t time_stamp, uint64_t* time_value) {
     if (time_id >= HsaTimer::TIME_ID_NUMBER) return HSA_STATUS_ERROR;
-    *time = value + time_shift_[time_id];
+    *time_value = time_stamp + time_shift_[time_id];
+    return HSA_STATUS_SUCCESS;
+  }
+
+  hsa_status_t GetTimeErr(uint32_t time_id, uint64_t* err) {
+    *err = time_error_[time_id];
     return HSA_STATUS_SUCCESS;
   }
 

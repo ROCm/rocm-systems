@@ -210,14 +210,18 @@ hsa_status_t rocprofiler_get_agent(rocprofiler_t* context,        // [in] profil
 // Supported time value ID
 typedef enum {
   ROCPROFILER_TIME_ID_CLOCK_REALTIME = 0, // Linux realtime clock time
-  ROCPROFILER_TIME_ID_CLOCK_MONOTONIC = 1, // Linux monotonic clock time
+  ROCPROFILER_TIME_ID_CLOCK_REALTIME_COARSE = 1, // Linux realtime-coarse clock time
+  ROCPROFILER_TIME_ID_CLOCK_MONOTONIC = 2, // Linux monotonic clock time
+  ROCPROFILER_TIME_ID_CLOCK_MONOTONIC_COARSE = 3, // Linux monotonic-coarse clock time
+  ROCPROFILER_TIME_ID_CLOCK_MONOTONIC_RAW = 4, // Linux monotonic-raw clock time
 } rocprofiler_time_id_t;
 
 // Return time value for a given time ID and profiling timestamp
 hsa_status_t rocprofiler_get_time(
   rocprofiler_time_id_t time_id, // identifier of the particular time to convert the timesatmp
   uint64_t timestamp, // profiling timestamp
-  uint64_t* value_ns); // [out] returned time 'ns' value
+  uint64_t* value_ns, // [out] returned time 'ns' value, ignored if NULL
+  uint64_t* error_ns); // [out] returned time error 'ns' value, ignored if NULL
 
 ////////////////////////////////////////////////////////////////////////////////
 // Queue callbacks

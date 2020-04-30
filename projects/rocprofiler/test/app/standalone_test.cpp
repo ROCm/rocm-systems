@@ -31,8 +31,46 @@ THE SOFTWARE.
 #include "inc/rocprofiler.h"
 #include "dummy_kernel/dummy_kernel.h"
 #include "simple_convolution/simple_convolution.h"
+#include "util/hsa_rsrc_factory.h"
 #include "util/test_assert.h"
 
+// print time
+void print_sys_time(clockid_t clock_id, rocprofiler_time_id_t time_id) {
+  HsaTimer::timestamp_t value_ns = 0;
+  HsaTimer::timestamp_t error_ns = 0;
+  HsaTimer::timestamp_t timestamp = 0;
+
+  timespec tm_val;
+  clock_gettime(clock_id, &tm_val);
+  HsaTimer::timestamp_t tm_val_ns = HsaTimer::timespec_to_ns(tm_val);
+
+  timestamp = HsaRsrcFactory::Instance().TimestampNs();
+  hsa_status_t status = rocprofiler_get_time(time_id, timestamp, &value_ns, &error_ns);
+  TEST_STATUS(status == HSA_STATUS_SUCCESS);
+
+  HsaTimer::timestamp_t timestamp1 = timestamp;
+  HsaTimer::timestamp_t value_ns1 = value_ns;
+
+  printf("time-id(%d) ts_ns(%lu) orig_ns(%lu) time_ns(%lu) err_ns(%lu)\n", (int)time_id, timestamp, tm_val_ns, value_ns, error_ns);
+
+  sleep(1);
+
+  timestamp = HsaRsrcFactory::Instance().TimestampNs();
+  status = rocprofiler_get_time(time_id, timestamp, &value_ns, NULL);
+  TEST_STATUS(status == HSA_STATUS_SUCCESS);
+  status = rocprofiler_get_time(time_id, timestamp, NULL, &error_ns);
+  TEST_STATUS(status == HSA_STATUS_SUCCESS);
+  status = rocprofiler_get_time(time_id, timestamp, NULL, NULL);
+  TEST_STATUS(status == HSA_STATUS_SUCCESS);
+
+  HsaTimer::timestamp_t timestamp2 = timestamp;
+  HsaTimer::timestamp_t value_ns2 = value_ns;
+
+  printf("time-id(%d) ts_ns(%lu) orig_ns(%lu) time_ns(%lu) err_ns(%lu)\n", (int)time_id, timestamp, tm_val_ns, value_ns, error_ns);
+  printf("ts-diff(%lu) tm-diff(%lu)\n", timestamp2 - timestamp1, value_ns2 - value_ns1);
+}
+
+// print profiler features
 void print_features(rocprofiler_feature_t* feature, uint32_t feature_count) {
     for (rocprofiler_feature_t* p = feature; p < feature + feature_count; ++p) {
       std::cout << (p - feature) << ": " << p->name;
@@ -175,6 +213,10 @@ int main() {
   // Deleting profiling context will delete all allocated resources
   status = rocprofiler_close(context);
   TEST_STATUS(status == HSA_STATUS_SUCCESS);
+
+  print_sys_time(CLOCK_REALTIME, ROCPROFILER_TIME_ID_CLOCK_REALTIME);
+  sleep(1);
+  print_sys_time(CLOCK_MONOTONIC, ROCPROFILER_TIME_ID_CLOCK_MONOTONIC);
 
   return (ret_val) ? 0 : 1;
 }

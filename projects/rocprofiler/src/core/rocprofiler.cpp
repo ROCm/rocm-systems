@@ -843,7 +843,7 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_info(
             uint32_t block_counters;
             profile.events = &(counters_vec[0]->event);
             status = rocprofiler::util::HsaRsrcFactory::Instance().AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
-                &profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS, &block_counters);
+              &profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS, &block_counters);
             if (status != HSA_STATUS_SUCCESS) continue;
 
             info.metric.instances = query.instance_count;
@@ -898,24 +898,36 @@ PUBLIC_API hsa_status_t rocprofiler_queue_create_profiled(
     void* data, uint32_t private_segment_size, uint32_t group_segment_size,
     hsa_queue_t** queue)
 {
-  return rocprofiler::InterceptQueue::QueueCreateTracked(agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
+  API_METHOD_PREFIX
+  status = rocprofiler::InterceptQueue::QueueCreateTracked(
+    agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
+  API_METHOD_SUFFIX
 }
 
 // Return time value for a given time ID and profiling timestamp
-hsa_status_t rocprofiler_get_time(
+PUBLIC_API hsa_status_t rocprofiler_get_time(
   rocprofiler_time_id_t time_id,
   uint64_t timestamp,
-  uint64_t* value_ns)
+  uint64_t* value_ns,
+  uint64_t* error_ns)
 {
-    return rocprofiler::util::HsaRsrcFactory::Instance().GetTime(time_id, timestamp, value_ns);
+  API_METHOD_PREFIX
+  if (error_ns != NULL) {
+    *error_ns = 0;
+    status = rocprofiler::util::HsaRsrcFactory::Instance().GetTimeErr(time_id, error_ns);
+  }
+  if ((status == HSA_STATUS_SUCCESS) && (value_ns != NULL)) {
+    *value_ns = 0;
+    status = rocprofiler::util::HsaRsrcFactory::Instance().GetTimeVal(time_id, timestamp, value_ns);
+  }
+  API_METHOD_SUFFIX
 }
 
-// Set new callbacks. If a callback is NULL then it is disabled
 }  // extern "C"
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 // HSA API callbacks routines
-
-// Static fields
+//
 bool rocprofiler::HsaInterceptor::enable_ = false;
 thread_local bool rocprofiler::HsaInterceptor::recursion_ = false;;
 rocprofiler_hsa_callbacks_t rocprofiler::HsaInterceptor::callbacks_{};
@@ -923,13 +935,10 @@ rocprofiler::HsaInterceptor::arg_t rocprofiler::HsaInterceptor::arg_{};
 hsa_ven_amd_loader_1_01_pfn_t rocprofiler::HsaInterceptor::LoaderApiTable{};
 rocprofiler::HsaInterceptor::mutex_t rocprofiler::HsaInterceptor::mutex_;
 
-extern "C" {
 // Set HSA callbacks. If a callback is NULL then it is disabled
-PUBLIC_API hsa_status_t rocprofiler_set_hsa_callbacks(const rocprofiler_hsa_callbacks_t callbacks, void* arg) {
+extern "C" PUBLIC_API hsa_status_t rocprofiler_set_hsa_callbacks(const rocprofiler_hsa_callbacks_t callbacks, void* arg) {
   API_METHOD_PREFIX
   rocprofiler::HsaInterceptor::SetCallbacks(callbacks, arg);
   rocprofiler::InterceptQueue::SetSubmitCallback(callbacks.submit, arg);
   API_METHOD_SUFFIX
 }
-}  // extern "C"
-
