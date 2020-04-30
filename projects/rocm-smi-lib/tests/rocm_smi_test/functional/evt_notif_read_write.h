@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2019, Advanced Micro Devices, Inc.
+ * Copyright (c) 2020, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,15 +42,32 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
+#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_EVT_NOTIF_READ_WRITE_H_
+#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_EVT_NOTIF_READ_WRITE_H_
 
-#ifndef TESTS_ROCM_SMI_TEST_TEST_UTILS_H_
-#define TESTS_ROCM_SMI_TEST_TEST_UTILS_H_
+#include "rocm_smi_test/test_base.h"
 
-#include "rocm_smi/rocm_smi.h"
+class TestEvtNotifReadWrite : public TestBase {
+ public:
+    TestEvtNotifReadWrite();
 
-const char *
-NameFromFWEnum(rsmi_fw_block_t blk);
-const char *
-NameFromEvtNotifType(rsmi_evt_notification_type_t evt);
+  // @Brief: Destructor for test case of TestEvtNotifReadWrite
+  virtual ~TestEvtNotifReadWrite();
 
-#endif  // TESTS_ROCM_SMI_TEST_TEST_UTILS_H_
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
+
+  // @Brief: Core measurement execution
+  virtual void Run();
+
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
+
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
+};
+
+#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_EVT_NOTIF_READ_WRITE_H_

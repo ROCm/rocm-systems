@@ -78,6 +78,7 @@
 #include "functional/mem_page_info_read.h"
 #include "functional/api_support_read.h"
 #include "functional/mutual_exclusion.h"
+#include "functional/evt_notif_read_write.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -231,6 +232,10 @@ TEST(rsmitstReadOnly, TestMutualExclusion) {
   test.SetUp();
   test.Run();
   RunCustomTestEpilog(&test);
+}
+TEST(rsmitstReadWrite, TestEvtNotifReadWrite) {
+  TestEvtNotifReadWrite tst;
+  RunGenericTest(&tst);
 }
 
 int main(int argc, char** argv) {

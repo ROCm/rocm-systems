@@ -72,8 +72,15 @@ static const std::map<rsmi_fw_block_t, const char *> kDevFWNameMap = {
     {RSMI_FW_BLOCK_VCN, "vcn"},
 };
 
-
 const char *
 NameFromFWEnum(rsmi_fw_block_t blk) {
   return kDevFWNameMap.at(blk);
+}
+
+static const std::map<rsmi_evt_notification_type_t, const char *> kEvtNotifEvntNameMap = {
+    {RSMI_EVT_NOTIF_VMFAULT, "RSMI_EVT_NOTIF_VMFAULT"},
+};
+const char *
+NameFromEvtNotifType(rsmi_evt_notification_type_t evt) {
+  return kEvtNotifEvntNameMap.at(evt);
 }

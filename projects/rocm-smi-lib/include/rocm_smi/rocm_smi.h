@@ -52,6 +52,12 @@ extern "C" {
 
 #include <stddef.h>
 
+// In a file included from kfd_ioctl.h, is a variable called
+// c++ keyword "virtual"
+#define virtual virtual_tmp
+#include "rocm_smi/kfd_ioctl.h"
+#undef virtual
+
 /** \file rocm_smi.h
  *  Main header file for the ROCm SMI library.
  *  All required function, structure, enum, etc. definitions should be defined
@@ -251,6 +257,29 @@ typedef struct {
   uint64_t time_enabled;     //!< Time that the counter was enabled
   uint64_t time_running;     //!< Time that che counter was running
 } rsmi_counter_value_t;
+
+/*
+ * Event notification event types
+ * See <linux/kfd_ioctl.h>
+ */
+typedef enum {
+  RSMI_EVT_NOTIF_VMFAULT = KFD_SMI_EVENT_VMFAULT,  //!< VM page fault
+  RSMI_EVT_NOTIF_FIRST = RSMI_EVT_NOTIF_VMFAULT,
+
+  RSMI_EVT_NOTIF_LAST = RSMI_EVT_NOTIF_VMFAULT
+} rsmi_evt_notification_type_t;
+
+//! Maximum number of characters an event notification message will be
+#define MAX_EVENT_NOTIFICATION_MSG_SIZE 64
+
+/**
+ * Event notification data returned from event notification API
+ */
+typedef struct {
+    uint32_t dv_ind;        //!< Index of device that corresponds to the event
+    rsmi_evt_notification_type_t event;     //!< Event type
+    char message[MAX_EVENT_NOTIFICATION_MSG_SIZE];  // Event message
+} rsmi_evt_notification_data_t;
 
 /**
  * Clock types
@@ -2812,6 +2841,108 @@ rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
                                                  rsmi_func_id_value_t *value);
 
 /** @} */  // end of APISupport
+
+/**
+ * @brief Prepare to collect event notifications for a GPU
+ *
+ * @param dv_ind a device index corresponding to the device on which to
+ * listen for events
+ *
+ * @details This function prepares to collect events for the GPU with device
+ * ID @p dv_ind, by initializing any required system parameters. This call
+ * may open files which will remain open until ::rsmi_event_notification_stop()
+ * is called.
+ * 
+ * @param[in] unused The parameter is currently ignored
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t
+rsmi_event_notification_init(uint32_t dv_ind);
+
+/**
+ * @brief Specify which events to collect for a device
+ * 
+ * @details Given a device index @p dv_ind and a @p mask consisting of
+ * elements of ::rsmi_evt_notification_type_t OR'd together, this function
+ * will listen for the events specified in @p mask on the device
+ * corresponding to @p dv_ind.
+ *
+ * @param dv_ind a device index corresponding to the device on which to
+ * listen for events
+ *
+ * @param mask 0 or more elements of ::rsmi_evt_notification_type_t OR'd
+ * together that indicate which event types to listen for.
+ *
+ * @retval ::RSMI_INITIALIZATION_ERROR is returned if 
+ * ::rsmi_event_notification_init() has not been called before a call to this
+ * function
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
+ */
+rsmi_status_t
+rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask);
+
+/**
+ * @brief Collect event notifications, waiting a specified amount of time
+ *
+ * @details Given a time period @p timeout_ms in milliseconds and a caller-
+ * provided buffer of ::rsmi_evt_notification_data_t's @p data with a length
+ * (in ::rsmi_evt_notification_data_t's, also specified by the caller) in the
+ * memory location pointed to by @p num_elem, this function will collect
+ * ::rsmi_evt_notification_type_t events for up to @p timeout_ms milliseconds,
+ * and write up to *@p num_elem event items to @p data. Upon return @p num_elem
+ * is updated with the number of events that were actually written. If events
+ * are already present when this function is called, it will write the events
+ * to the buffer then poll for new events if there is still caller-provided
+ * buffer available to write any new events that would be found.
+ *
+ * This function requires prior calls to ::rsmi_event_notification_init() and
+ * ::rsmi_event_notification_mask_set(). This function polls for the
+ * occurrance of the events on the respective devices that were previously
+ * specified by ::rsmi_event_notification_mask_set().
+ *
+ * @param[inout] num_elem pointer to uint32_t, provided by the caller. On
+ * input, this value tells how many ::rsmi_evt_notification_data_t elements
+ * are being provided by the caller with @p data. On output, the location
+ * pointed to by @p num_elem will contain the number of items written to
+ * the provided buffer.
+ *
+ * @param[out] data pointer to a caller-provided memory buffer of size
+ * @p num_elem ::rsmi_evt_notification_data_t to which this function may safely
+ * write. If there are events found, up to @p num_elem event items will be
+ * written to @p data.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS The function ran successfully. The events
+ * that were found are written to @p data and @p num_elems is updated
+ * with the number of elements that were written.
+ *
+ * @retval ::RSMI_STATUS_NO_DATA No events were found to collect.
+ *
+ */
+rsmi_status_t
+rsmi_event_notification_get(int timout_ms,
+                     uint32_t *num_elem, rsmi_evt_notification_data_t *data);
+
+/*
+ * @brief Close any file handles and free any resources used by event
+ * notification for a GPU
+ *
+ * @details Any resources used by event notification for the GPU with
+ * device index @p dv_ind will be free with this
+ * function. This includes freeing any memory and closing file handles. This
+ * should be called for every call to ::rsmi_event_notification_init()
+ *
+ * @param[in] dv_ind The device index of the GPU for which event
+ * notification resources will be free
+ *
+ * @retval ::RSMI_STATUS_INVALID_ARGS resources for the given device have
+ * either already been freed, or were never allocated by
+ * ::rsmi_event_notification_init()
+ *
+ * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
+ */
+rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind);
 
 #ifdef __cplusplus
 }

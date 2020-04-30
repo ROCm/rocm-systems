@@ -266,7 +266,7 @@ RocmSMI::Initialize(uint64_t flags) {
 
   if (ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-               "Failed to initialize rocm_smi library (amdgpu node discovery.");
+            "Failed to initialize rocm_smi library (amdgpu node discovery).");
   }
 
   std::map<uint64_t, std::shared_ptr<KFDNode>> tmp_map;
@@ -299,12 +299,20 @@ RocmSMI::Initialize(uint64_t flags) {
 
 void
 RocmSMI::Cleanup() {
+  if (kfd_notif_evt_fh() >= 0) {
+    int ret = close(kfd_notif_evt_fh());
+    if (ret < 0) {
+      throw amd::smi::rsmi_exception(RSMI_STATUS_FILE_ERROR,
+                 "Failed to close kfd file handle on shutdown.");
+    }
+  }
   s_monitor_devices.clear();
   devices_.clear();
   monitors_.clear();
 }
 
-RocmSMI::RocmSMI(uint64_t flags) : init_options_(flags) {
+RocmSMI::RocmSMI(uint64_t flags) : init_options_(flags),
+                          kfd_notif_evt_fh_(-1), kfd_notif_evt_fh_refcnt_(0) {
 }
 
 RocmSMI::~RocmSMI() {

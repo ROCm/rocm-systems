@@ -47,6 +47,9 @@
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
+#include <poll.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
 
 #include <sstream>
 #include <algorithm>
@@ -72,6 +75,23 @@
 
 static const uint32_t kMaxOverdriveLevel = 20;
 
+static rsmi_status_t errno_to_rsmi_status(uint32_t err) {
+  switch (err) {
+    case 0:      return RSMI_STATUS_SUCCESS;
+    case ESRCH:  return RSMI_STATUS_NOT_FOUND;
+    case EACCES: return RSMI_STATUS_PERMISSION;
+    case EPERM:
+    case ENOENT: return RSMI_STATUS_NOT_SUPPORTED;
+    case EBADF:
+    case EISDIR: return RSMI_STATUS_FILE_ERROR;
+    case EINTR:  return RSMI_STATUS_INTERRUPT;
+    case EIO:    return RSMI_STATUS_UNEXPECTED_SIZE;
+    case ENXIO:  return RSMI_STATUS_UNEXPECTED_DATA;
+    case EBUSY:  return RSMI_STATUS_BUSY;
+    default:     return RSMI_STATUS_UNKNOWN_ERROR;
+  }
+}
+
 static rsmi_status_t handleException() {
   try {
     throw;
@@ -86,6 +106,8 @@ static rsmi_status_t handleException() {
   } catch (const std::nested_exception& e) {
     debug_print("Callback threw.\n");
     return RSMI_STATUS_INTERNAL_EXCEPTION;
+  } catch (int erno) {
+    return errno_to_rsmi_status(erno);
   } catch (...) {
     debug_print("Unknown exception caught.\n");
     return RSMI_STATUS_INTERNAL_EXCEPTION;
@@ -168,22 +190,6 @@ static pthread_mutex_t *get_mutex(uint32_t dv_ind) {
   assert(dev != nullptr);
 
   return dev->mutex();
-}
-
-static rsmi_status_t errno_to_rsmi_status(uint32_t err) {
-  switch (err) {
-    case 0:      return RSMI_STATUS_SUCCESS;
-    case ESRCH:  return RSMI_STATUS_NOT_FOUND;
-    case EACCES: return RSMI_STATUS_PERMISSION;
-    case EPERM:
-    case ENOENT: return RSMI_STATUS_NOT_SUPPORTED;
-    case EBADF:
-    case EISDIR: return RSMI_STATUS_FILE_ERROR;
-    case EINTR:  return RSMI_STATUS_INTERRUPT;
-    case EIO:    return RSMI_STATUS_UNEXPECTED_SIZE;
-    case ENXIO:  return RSMI_STATUS_UNEXPECTED_DATA;
-    default:     return RSMI_STATUS_UNKNOWN_ERROR;
-  }
 }
 
 static uint64_t get_multiplier_from_str(char units_char) {
@@ -3154,6 +3160,209 @@ rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle) {
 
   return RSMI_STATUS_SUCCESS;
 
+  CATCH
+}
+
+
+static bool check_evt_notif_support(int kfd_fd) {
+  struct kfd_ioctl_get_version_args args = {0, 0};
+
+  if (ioctl(kfd_fd, AMDKFD_IOC_GET_VERSION, &args) == -1) {
+    return RSMI_STATUS_INIT_ERROR;
+  }
+
+  if (args.major_version < 2 && args.minor_version < 3) {
+    return false;
+  }
+  return true;
+}
+
+static const char *kPathKFDIoctl = "/dev/kfd";
+
+rsmi_status_t
+rsmi_event_notification_init(uint32_t dv_ind) {
+  TRY
+  GET_DEV_FROM_INDX
+
+  std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
+  if (smi.kfd_notif_evt_fh() == -1) {
+    int kfd_fd = open(kPathKFDIoctl, O_RDWR | O_CLOEXEC);
+
+    if (kfd_fd <= 0) {
+      return RSMI_STATUS_FILE_ERROR;
+    }
+
+    if (!check_evt_notif_support(kfd_fd)) {
+      close(kfd_fd);
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    smi.set_kfd_notif_evt_fh(kfd_fd);
+  }
+  smi.kfd_notif_evt_fh_refcnt_inc();
+
+  struct kfd_ioctl_smi_events_args args;
+
+  assert(dev->kfd_gpu_id() <= UINT32_MAX);
+  args.gpuid = static_cast<uint32_t>(dev->kfd_gpu_id());
+
+  int ret = ioctl(smi.kfd_notif_evt_fh(), AMDKFD_IOC_SMI_EVENTS, &args);
+  if (ret < 0) {
+    return errno_to_rsmi_status(errno);
+  }
+  if (args.anon_fd < 1) {
+    return RSMI_STATUS_NO_DATA;
+  }
+
+  dev->set_evt_notif_anon_fd(args.anon_fd);
+  FILE *anon_file_ptr = fdopen(args.anon_fd, "r");
+  if (anon_file_ptr == nullptr) {
+    close(dev->evt_notif_anon_fd());
+    return errno_to_rsmi_status(errno);
+  }
+  dev->set_evt_notif_anon_file_ptr(anon_file_ptr);
+
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask) {
+  TRY
+  GET_DEV_FROM_INDX
+
+  if (dev->evt_notif_anon_fd() == -1) {
+    return RSMI_INITIALIZATION_ERROR;
+  }
+  ssize_t ret = write(dev->evt_notif_anon_fd(), &mask, sizeof(uint64_t));
+
+  if (ret == -1) {
+    return errno_to_rsmi_status(errno);
+  }
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_event_notification_get(int timeout_ms,
+                     uint32_t *num_elem, rsmi_evt_notification_data_t *data) {
+  TRY
+
+  if (num_elem == nullptr || data == nullptr || *num_elem == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  uint32_t buffer_size = *num_elem;
+  *num_elem = 0;
+
+  rsmi_evt_notification_data_t *data_item;
+
+  //  struct pollfd {
+  //      int   fd;         /* file descriptor */
+  //      short events;     /* requested events */
+  //      short revents;    /* returned events */
+  //  };
+  std::vector<struct pollfd> fds;
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  std::vector<uint32_t> fd_indx_to_dev_id;
+
+  for (uint32_t i = 0; i < smi.monitor_devices().size(); ++i) {
+    if (smi.monitor_devices()[i]->evt_notif_anon_fd() == -1) {
+      continue;
+    }
+    fds.push_back({smi.monitor_devices()[i]->evt_notif_anon_fd(),
+                                                     POLLIN | POLLRDNORM, 0});
+    fd_indx_to_dev_id.push_back(i);
+  }
+
+  auto fill_data_buffer = [&](bool did_poll) {
+    for (uint32_t i = 0; i < fds.size(); ++i) {
+      if (did_poll) {
+        if (!(fds[i].revents & (POLLIN | POLLRDNORM))) {
+          continue;
+        }
+      }
+
+      if (*num_elem >= buffer_size) {
+        return;
+      }
+
+      FILE *anon_fp =
+         smi.monitor_devices()[fd_indx_to_dev_id[i]]->evt_notif_anon_file_ptr();
+      data_item =
+           reinterpret_cast<rsmi_evt_notification_data_t *>(&data[*num_elem]);
+
+      uint64_t event;
+      while (fscanf(anon_fp, "%lx %63s\n", &event,
+                          reinterpret_cast<char *>(&data_item->message)) == 2) {
+        /* Output is in format as "event information\n"
+         * Both event are expressed in hex.
+         * information is a string
+         */
+        data_item->event = (rsmi_evt_notification_type_t)event;
+        data_item->dv_ind = fd_indx_to_dev_id[i];
+        ++(*num_elem);
+
+        if (*num_elem >= buffer_size) {
+          break;
+        }
+        data_item =
+             reinterpret_cast<rsmi_evt_notification_data_t *>(&data[*num_elem]);
+      }
+    }
+  };
+
+  // Collect any left-over events from a poll in a previous call to
+  // rsmi_event_notification_get()
+  fill_data_buffer(false);
+
+  if (*num_elem < buffer_size && errno != EAGAIN) {
+    return errno_to_rsmi_status(errno);
+  } else if (*num_elem >= buffer_size) {
+    return RSMI_STATUS_SUCCESS;
+  }
+
+  // We still have buffer left, see if there are any new events
+  int p_ret = poll(fds.data(), fds.size(), timeout_ms);
+  if (p_ret > 0) {
+    fill_data_buffer(true);
+  } else if (p_ret < 0) {
+    return errno_to_rsmi_status(errno);
+  }
+  if (*num_elem == 0) {
+    return RSMI_STATUS_NO_DATA;
+  }
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
+  TRY
+  GET_DEV_FROM_INDX
+  std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
+
+  if (dev->evt_notif_anon_fd() == -1) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+//  close(dev->evt_notif_anon_fd());
+  FILE *anon_fp = smi.monitor_devices()[dv_ind]->evt_notif_anon_file_ptr();
+  fclose(anon_fp);
+  assert(errno == 0 || errno == EAGAIN);
+  dev->set_evt_notif_anon_file_ptr(nullptr);
+  dev->set_evt_notif_anon_fd(-1);
+
+  if (!smi.kfd_notif_evt_fh_refcnt_dec()) {
+    int ret = close(smi.kfd_notif_evt_fh());
+    smi.set_kfd_notif_evt_fh(-1);
+    if (ret < 0) {
+      return errno_to_rsmi_status(errno);
+    }
+  }
+
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 

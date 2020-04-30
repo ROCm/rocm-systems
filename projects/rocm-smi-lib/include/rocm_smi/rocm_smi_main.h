@@ -53,6 +53,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <map>
+#include <mutex>  // NOLINT
 
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -90,6 +91,12 @@ class RocmSMI {
     std::map<uint64_t, std::shared_ptr<KFDNode>> & kfd_node_map(void) {
       return kfd_node_map_;}
 
+    int kfd_notif_evt_fh(void) const {return kfd_notif_evt_fh_;}
+    void set_kfd_notif_evt_fh(int fd) {kfd_notif_evt_fh_ = fd;}
+    std::mutex *kfd_notif_evt_fh_mutex(void) {return &kfd_notif_evt_fh_mutex_;}
+    int kfd_notif_evt_fh_refcnt_inc() {return ++kfd_notif_evt_fh_refcnt_;}
+    int kfd_notif_evt_fh_refcnt_dec() {return --kfd_notif_evt_fh_refcnt_;}
+
  private:
     std::vector<std::shared_ptr<Device>> devices_;
     std::map<uint64_t, std::shared_ptr<KFDNode>> kfd_node_map_;
@@ -105,6 +112,10 @@ class RocmSMI {
     RocmSMI_env_vars env_vars_;
     uint64_t init_options_;
     uint32_t euid_;
+
+    int kfd_notif_evt_fh_;
+    int kfd_notif_evt_fh_refcnt_;
+    std::mutex kfd_notif_evt_fh_mutex_;
 };
 
 }  // namespace smi

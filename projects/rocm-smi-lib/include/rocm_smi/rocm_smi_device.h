@@ -191,6 +191,11 @@ class Device {
     SupportedFuncMap *supported_funcs(void) {return &supported_funcs_;}
     uint64_t kfd_gpu_id(void) const {return kfd_gpu_id_;}
     void set_kfd_gpu_id(uint64_t id) {kfd_gpu_id_ = id;}
+
+    void set_evt_notif_anon_file_ptr(FILE *f) {evt_notif_anon_file_ptr_ = f;}
+    FILE *evt_notif_anon_file_ptr(void) const {return evt_notif_anon_file_ptr_;}
+    void set_evt_notif_anon_fd(int fd) {evt_notif_anon_fd_ = fd;}
+    int evt_notif_anon_fd(void) const {return evt_notif_anon_fd_;}
     void fillSupportedFuncs(void);
     void DumpSupportedFunctions(void);
     bool DeviceAPISupported(std::string name, uint64_t variant,
@@ -216,6 +221,9 @@ class Device {
                        evt::RSMIEventGrpHashFunction> supported_event_groups_;
     // std::map<std::string, uint64_t> kfdNodePropMap_;
     SupportedFuncMap supported_funcs_;
+
+    int evt_notif_anon_fd_;
+    FILE *evt_notif_anon_file_ptr_;
 };
 
 }  // namespace smi

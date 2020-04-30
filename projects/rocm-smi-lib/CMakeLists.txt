@@ -171,6 +171,8 @@ install(TARGETS ${ROCM_SMI_TARGET}
           LIBRARY DESTINATION ${ROCM_SMI}/lib COMPONENT ${ROCM_SMI_COMPONENT})
 install(FILES ${SOURCE_DIR}/include/rocm_smi/rocm_smi.h
                                         DESTINATION rocm_smi/include/rocm_smi)
+install(FILES ${SOURCE_DIR}/include/rocm_smi/kfd_ioctl.h
+                                        DESTINATION rocm_smi/include/rocm_smi)
 
 ## Add the packaging directives for the runtime library.
 
