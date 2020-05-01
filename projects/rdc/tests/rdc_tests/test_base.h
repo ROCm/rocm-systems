@@ -23,7 +23,7 @@ THE SOFTWARE.
 #define TESTS_RDC_TESTS_TEST_BASE_H_
 
 #include <string>
-#include "rdc/rdc_client.h"
+#include "rdc/rdc.h"
 
 class TestBase {
  public:
@@ -83,12 +83,7 @@ class TestBase {
   uint64_t init_options(void) const {
     return init_options_;
   }
-  void set_rdc_channel(rdc_channel_t c) {
-    rdc_channel_ = c;
-  }
-  rdc_channel_t rdc_channel(void) const {
-    return rdc_channel_;
-  }
+
   void set_monitor_server_ip(std::string ip) {
     monitor_server_ip_ = ip;
   }
@@ -107,10 +102,15 @@ class TestBase {
   bool secure(void) const {
     return secure_;
   }
+  bool set_mode(bool standalone) {
+    standalone_ = standalone;
+  }
+  rdc_handle_t rdc_handle;
 
  protected:
   void PrintDeviceHeader(uint32_t dv_ind);
   rdc_status_t AllocateRDCChannel(void);
+   bool standalone_;
 
  private:
   uint64_t num_monitor_devs_;  ///< Number of monitor devices found
@@ -121,8 +121,8 @@ class TestBase {
   uint64_t init_options_;  ///< rsmi initialization options
   std::string monitor_server_ip_;
   std::string monitor_server_port_;
-  rdc_channel_t rdc_channel_;
   bool secure_;  // Use authenticated comms. (SSL/TSL)
+
 };
 
 #define IF_VERB(VB) if (verbosity() && verbosity() >= (TestBase::VERBOSE_##VB))

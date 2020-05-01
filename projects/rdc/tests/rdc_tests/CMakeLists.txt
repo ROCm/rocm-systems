@@ -3,16 +3,17 @@
 #
 cmake_minimum_required(VERSION 3.5.0)
 
-# TODO We will probably also have to add a RDC_DIR to pick up the
-# header and library
-
 #   Required Defines on cmake command line
 #
 #   1) Set location of ROCm root to pick up RDC and RDC headers and RDC lib
 #
 #      ROCM_DIR="Root for ROCM install"
 #
-#   2) Set RDCTST_BLD_TYPE to either "Debug" or "Release".
+#   2) Set location of RDC root to pick up RDC and RDC headers and RDC lib
+#
+#      RDC_DIR="Root for RDC install"
+#
+#   3) Set RDCTST_BLD_TYPE to either "Debug" or "Release".
 #      If not set, the default value is "Debug" is bound.
 #
 #      RDCTST_BLD_TYPE=Debug or RDCTST_BLD_TYPE=Release
@@ -41,9 +42,10 @@ endif()
 
 # Required Defines first:
 
-set(RDC_INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../client/include)
-set(RDC_LIB_DIR ${RDC_BUILD_DIR}/client)
+set(RDC_INC_DIR ${RDC_DIR}/include)
+set(RDC_LIB_DIR ${RDC_DIR}/build/rdc_libs)
 set(RSMI_INC_DIR ${ROCM_DIR}/rocm_smi/include)
+set(RSMI_LIB_DIR ${ROCM_DIR}/rocm_smi/lib)
 
 
 #
@@ -78,6 +80,7 @@ message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
 message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("--------RDC Lib Dir: " ${RDC_LIB_DIR})
+message("--------RDC Inc Dir: " ${RDC_INC_DIR})
 message("")
 
 #
@@ -124,7 +127,7 @@ endif()
 set(RDCTST_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 
 set(RDCTST "rdctst")
-set(RDCTST_LIBS "rdc_client_smi")
+set(RDCTST_LIBS "rdc_bootstrap" )
 
 # Set Name for Google Test Framework and build it as a
 # static library to be linked with user test programs
@@ -142,7 +145,7 @@ aux_source_directory(${RDCTST_ROOT}/functional functionalSources)
 # Specify the directory containing various libraries of ROCR
 # to be linked against for building ROC Perf applications
 #
-link_directories(${RDC_LIB_DIR} "${GRPC_ROOT}/lib")
+link_directories(${RDC_LIB_DIR})
 #
 # Source files for building rocrtst
 #
@@ -154,7 +157,6 @@ add_executable(${RDCTST} ${rdctstSources} ${functionalSources})
 # Header file include path
 target_include_directories(${RDCTST} PRIVATE ${RDC_INC_DIR}
                                      PRIVATE ${RSMI_INC_DIR}
-                                     PRIVATE ${GRPC_ROOT}/include
                                      PRIVATE ${RDCTST_ROOT}/..
                                      PRIVATE ${RDCTST_ROOT}/gtest/include)
 

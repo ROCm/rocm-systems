@@ -39,6 +39,7 @@ struct RDCTstGlobals {
   uint64_t init_options;
   bool dont_fail;
   bool secure;
+  bool standalone;
 };
 
 uint32_t ProcessCmdline(RDCTstGlobals* test, int arg_cnt, char** arg_list);
@@ -46,7 +47,7 @@ uint32_t ProcessCmdline(RDCTstGlobals* test, int arg_cnt, char** arg_list);
 void PrintTestHeader(uint32_t dv_ind);
 const char *GetBlockNameStr(rsmi_gpu_block_t id);
 const char *GetErrStateNameStr(rsmi_ras_err_state_t st);
-const char *GetGRPCChanStateStr(grpc_connectivity_state st);
+//const char *GetGRPCChanStateStr(grpc_connectivity_state st);
 const char *FreqEnumToStr(rsmi_clk_type rsmi_clk);
 
 #if ENABLE_SMI

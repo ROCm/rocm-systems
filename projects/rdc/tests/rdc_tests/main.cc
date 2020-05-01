@@ -29,14 +29,16 @@ THE SOFTWARE.
 #include <fstream>
 
 #include "gtest/gtest.h"
-#include "rdc/rdc_client.h"
+#include "rdc/rdc.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rdc_tests/test_common.h"
 #include "rdc_tests/test_base.h"
 
-#include "functional/id_info_read.h"
-#include "functional/temp_read.h"
-#include "functional/fan_read.h"
+#include "functional/rdci_discovery.h"
+#include "functional/rdci_group.h"
+#include "functional/rdci_dmon.h"
+#include "functional/rdci_fieldgroup.h"
+#include "functional/rdci_stats.h"
 
 static RDCTstGlobals *sRDCGlvalues = nullptr;
 
@@ -49,6 +51,7 @@ static void SetFlags(TestBase *test) {
   test->set_monitor_server_ip(sRDCGlvalues->monitor_server_ip);
   test->set_monitor_server_port(sRDCGlvalues->monitor_server_port);
   test->set_secure(sRDCGlvalues->secure);
+  test->set_mode(sRDCGlvalues->standalone);
 }
 
 static void RunCustomTestProlog(TestBase *test) {
@@ -77,27 +80,30 @@ static void RunGenericTest(TestBase *test) {
   return;
 }
 
-// TEST ENTRY TEMPLATE:
-// TEST(rocrtst, Perf_<test name>) {
-//  <Test Implementation class> <test_obj>;
-//
-//  // Copy and modify implementation of RunGenericTest() if you need to deviate
-//  // from the standard pattern implemented there.
-//  RunGenericTest(&<test_obj>);
-// }
-TEST(rdctstReadOnly, TestIdInfoRead) {
-  TestIdInfoRead tst;
-  RunGenericTest(&tst);
-}
-TEST(rdctstReadOnly, TestTempRead) {
-  TestTempRead tst;
-  RunGenericTest(&tst);
-}
-TEST(rdctstReadOnly, FanRead) {
-  TestFanRead tst;
+TEST(rdctstReadOnly, TestRdciDiscovery) {
+  TestRdciDiscovery tst;
   RunGenericTest(&tst);
 }
 
+TEST(rdctstReadOnly, TestRdciGroup) {
+  TestRdciGroup tst;
+  RunGenericTest(&tst);
+}
+
+TEST(rdctstReadOnly, TestRdciDmon) {
+  TestRdciDmon tst;
+  RunGenericTest(&tst);
+}
+
+TEST(rdctstReadOnly, TestRdciFieldgroup) {
+  TestRdciFieldgroup tst;
+  RunGenericTest(&tst);
+}
+
+TEST(rdctstReadOnly, TestRdciStats) {
+  TestRdciStats tst;
+  RunGenericTest(&tst);
+}
 
 static int getPIDFromName(std::string name) {
     int pid = -1;
@@ -171,7 +177,7 @@ static int killRDCD(int pid = 0) {
 
 static int startRDCD(std::string *rdcd_path) {
   assert(rdcd_path != nullptr);
-  const char *rdcd_cl[128] = {rdcd_path->c_str(), NULL};
+  const char *rdcd_cl[128] = {rdcd_path->c_str(), "-u", NULL};
   int pid = fork();
 
   if (pid == 0) {
@@ -199,29 +205,45 @@ int main(int argc, char** argv) {
   settings.num_iterations = 1;
   settings.dont_fail = false;
   settings.init_options = 0;
-  settings.rdcd_path = "";
+  settings.rdcd_path = "../../../build/server/rdcd";
   settings.monitor_server_ip = "";
   settings.monitor_server_port = "";
-  settings.secure = true;
+  settings.secure = false;
+  settings.standalone = false;
 
   if (ProcessCmdline(&settings, argc, argv)) {
     return 1;
   }
 
-  if (settings.monitor_server_ip == "") {
-    if (settings.rdcd_path != "") {
-      if (killRDCD()) {
-        return -1;
-      }
+  // Select the embedded mode and standalone mode dynamically.
+    std::cout << "Start rdci in: \n";
+    std::cout << "0 - Embedded mode \n";
+    std::cout << "1 - Standalone mode \n";
+    while (!(std::cin >> settings.standalone)) {
+        std::cout << "Invalid input.\n";
+        std::cin.clear();
+        std::cin.ignore();
+    }
+    std::cout << std::endl;
+    std::cout << (settings.standalone?
+        "Standalone mode selected.\n":"Embedded mode selected.\n");
 
-      rdcd_pid = startRDCD(&settings.rdcd_path);
-      assert(rdcd_pid == getPIDFromName("rdcd"));
-    } else {
-      if (getPIDFromName("rdcd") == -1) {
-        std::cout <<
-         "rdcd is not running. Use -d (--start_rdcd) to have rdcd started."
+  if (settings.standalone){
+    if (settings.monitor_server_ip == "") {
+      if (settings.rdcd_path != "") {
+        if (killRDCD()) {
+          return -1;
+        }
+
+        rdcd_pid = startRDCD(&settings.rdcd_path);
+        assert(rdcd_pid == getPIDFromName("rdcd"));
+      } else {
+        if (getPIDFromName("rdcd") == -1) {
+          std::cout <<
+          "rdcd is not running. Use -d (--start_rdcd) to have rdcd started."
                                                   " Exiting test." << std::endl;
-        return 1;
+          return 1;
+        }
       }
     }
   }
@@ -243,9 +265,11 @@ int main(int argc, char** argv) {
   settings.init_options = RSMI_INIT_FLAG_ALL_GPUS;
   ret = RUN_ALL_TESTS();
 
-  if (rdcd_pid != -1) {
-    if (killRDCD(rdcd_pid)) {
-      return -1;
+  if (settings.standalone){
+    if (rdcd_pid != -1) {
+      if (killRDCD(rdcd_pid)) {
+        return -1;
+      }
     }
   }
   return ret;

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2019 - Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2020 - Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,17 +19,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef TESTS_RDC_TESTS_FUNCTIONAL_ID_INFO_READ_H_
-#define TESTS_RDC_TESTS_FUNCTIONAL_ID_INFO_READ_H_
+#ifndef TESTS_RDC_TESTS_FUNCTIONAL_RDCI_GROUP_H_
+#define TESTS_RDC_TESTS_FUNCTIONAL_RDCI_GROUP_H_
 
 #include "rdc_tests/test_base.h"
 
-class TestIdInfoRead : public TestBase {
+class TestRdciGroup : public TestBase {
  public:
-    TestIdInfoRead();
+    TestRdciGroup();
 
-  // @Brief: Destructor for test case of TestIdInfoRead
-  virtual ~TestIdInfoRead();
+  // @Brief: Destructor for test case of TestRdciGroup
+  virtual ~TestRdciGroup();
 
   // @Brief: Setup the environment for measurement
   virtual void SetUp();
@@ -47,4 +47,4 @@ class TestIdInfoRead : public TestBase {
   virtual void DisplayTestInfo(void);
 };
 
-#endif  // TESTS_RDC_TESTS_FUNCTIONAL_ID_INFO_READ_H_
+#endif  // TESTS_RDC_TESTS_FUNCTIONAL_RDCI_GROUP_H_

@@ -32,7 +32,7 @@ THE SOFTWARE.
 #include "rdc_tests/test_common.h"
 #include "rocm_smi/rocm_smi.h"
 
-static const std::map<grpc_connectivity_state, const char *> kGRPCChanState = {
+/*static const std::map<grpc_connectivity_state, const char *> kGRPCChanState = {
     {
       {GRPC_CHANNEL_IDLE, "GRPC_CHANNEL_IDLE: Channel is idle"},
       {GRPC_CHANNEL_CONNECTING,
@@ -44,7 +44,7 @@ static const std::map<grpc_connectivity_state, const char *> kGRPCChanState = {
                     "Channel has seen a failure that it cannot recover from"},
     },
 };
-
+*/
 static const std::map<rsmi_gpu_block_t, const char *> kBlockNameMap = {
     {RSMI_GPU_BLOCK_UMC, "UMC"},
     {RSMI_GPU_BLOCK_SDMA, "SDMA"},
@@ -206,9 +206,9 @@ const char *GetBlockNameStr(rsmi_gpu_block_t id) {
 const char *GetErrStateNameStr(rsmi_ras_err_state_t st) {
   return kErrStateNameMap.at(st);
 }
-const char *GetGRPCChanStateStr(grpc_connectivity_state st) {
+/*const char *GetGRPCChanStateStr(grpc_connectivity_state st) {
   return kGRPCChanState.at(st);
-}
+}*/
 
 const char *FreqEnumToStr(rsmi_clk_type rsmi_clk) {
   static_assert(RSMI_CLK_TYPE_LAST == RSMI_CLK_TYPE_MEM,

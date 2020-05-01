@@ -34,9 +34,11 @@ static const char kSetupLabel[] = "TEST SETUP";
 static const char kRunLabel[] = "TEST EXECUTION";
 static const char kCloseLabel[] = "TEST CLEAN UP";
 static const char kResultsLabel[] = "TEST RESULTS";
+rdc_status_t result;
 
-
-TestBase::TestBase() : description_(""), rdc_channel_(0) {
+/*TestBase::TestBase() : description_(""), rdc_channel_(0) {
+}*/
+TestBase::TestBase() : description_(""){
 }
 TestBase::~TestBase() {
 }
@@ -58,7 +60,6 @@ void TestBase::SetUp(void) {
 
   MakeHeaderStr(kSetupLabel, &label);
   printf("\n\t%s\n", label.c_str());
-
   return;
 }
 
@@ -67,100 +68,23 @@ void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
     std::cout << "\t**Device index: " << dv_ind << std::endl;
   }
 
-  // TODO(cfreehil): replace these sections with RDC equiv. as they are
-  // implemented
-//  err = rsmi_dev_id_get(dv_ind, &val_ui16);
-//  CHK_ERR_ASRT(err)
-//  IF_VERB(STANDARD) {
-//    std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
-//  }
-//  char name[128];
-//  err = rsmi_dev_name_get(dv_ind, name, 128);
-//  CHK_ERR_ASRT(err)
-//  IF_VERB(STANDARD) {
-//    std::cout << "\t**Device name: " << name << std::endl;
-//  }
-//  err = rsmi_dev_vendor_id_get(dv_ind, &val_ui16);
-//  CHK_ERR_ASRT(err)
-//  IF_VERB(STANDARD) {
-//    std::cout << "\t**Device Vendor ID: 0x" << std::hex << val_ui16 <<
-//                                                                     std::endl;
-//  }
-//  err = rsmi_dev_subsystem_id_get(dv_ind, &val_ui16);
-//  CHK_ERR_ASRT(err)
-//  IF_VERB(STANDARD) {
-//    std::cout << "\t**Subsystem ID: 0x" << std::hex << val_ui16 << std::endl;
-//  }
-//  err = rsmi_dev_subsystem_vendor_id_get(dv_ind, &val_ui16);
-//  CHK_ERR_ASRT(err)
-//  IF_VERB(STANDARD) {
-//    std::cout << "\t**Subsystem Vendor ID: 0x" << std::hex << val_ui16 <<
-//                                                                     std::endl;
-//  }
   std::cout << std::setbase(10);
 }
 
 rdc_status_t
 TestBase::AllocateRDCChannel(void) {
-  rdc_channel_t c;
-  rdc_status_t err;
 
   IF_VERB(STANDARD) {
-    std::cout << "\t**Creating channel to host..." << std::endl;
+    std::cout << "\t**Initializing RDC" << std::endl;
   }
+  rdc_status_t result = rdc_init(0);
+  if (result != RDC_ST_OK) {
+        std::cout << "Error initializing RDC.... " <<
+                rdc_status_string(result) << std::endl;
+        return result;
+    }
 
-  assert(rdc_channel() == 0);
-
-  err = rdc_channel_create(&c,
-      monitor_server_ip() == "" ? nullptr : monitor_server_ip().c_str(),
-      monitor_server_port() == "" ? nullptr : monitor_server_port().c_str(),
-                                                                    secure());
-
-  if (err != RDC_STATUS_SUCCESS) {
-    std::cout << "rdc_channel_create() failed" << std::endl;
-    return err;
-  }
-
-  grpc_connectivity_state grpc_state;
-
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Channel created. Getting channel state..." << std::endl;
-  }
-  err = rdc_channel_state_get(c, true, &grpc_state);
-  if (err != RDC_STATUS_SUCCESS) {
-    std::cout << "rdc_channel_state_get() failed" << std::endl;
-    return err;
-  }
-
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Channel state: \"" << GetGRPCChanStateStr(grpc_state) <<
-                                                             "\"" << std::endl;
-    std::cout << "\tVerifying channel connection..." << std::endl;
-  }
-
-  err = rdc_channel_connection_verify(c);
-  if (err != RDC_STATUS_SUCCESS) {
-    std::cout << "rdc_channel_connection_verify() failed" << std::endl;
-    return err;
-  }
-
-  IF_VERB(STANDARD) {
-    std::cout << "\tConnection verified!" << std::endl;
-  }
-  set_rdc_channel(c);
-
-  err = rdc_num_gpus_get(rdc_channel(), &num_monitor_devs_);
-  if (err != RDC_STATUS_SUCCESS) {
-    std::cout << "rdc_num_gpus_get() failed" << std::endl;
-    return err;
-  }
-
-  IF_VERB(STANDARD) {
-    std::cout << "\t" << num_monitor_devs() << " devices found on host" <<
-                                                                    std::endl;
-  }
-
-  return RDC_STATUS_SUCCESS;
+  return result;
 }
 
 void TestBase::Run(void) {
@@ -172,14 +96,10 @@ void TestBase::Run(void) {
 
 void TestBase::Close(void) {
   std::string label;
-  rdc_status_t err;
 
   MakeHeaderStr(kCloseLabel, &label);
   printf("\n\t%s\n", label.c_str());
 
-  err = rdc_channel_destroy(rdc_channel());
-  ASSERT_EQ(err, RDC_STATUS_SUCCESS);
-  set_rdc_channel(0);
 }
 
 void TestBase::DisplayResults(void) const {

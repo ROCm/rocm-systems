@@ -19,17 +19,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef TESTS_RDC_TESTS_FUNCTIONAL_FAN_READ_H_
-#define TESTS_RDC_TESTS_FUNCTIONAL_FAN_READ_H_
+#ifndef TESTS_RDC_TESTS_FUNCTIONAL_RDCI_STATS_H_
+#define TESTS_RDC_TESTS_FUNCTIONAL_RDCI_STATS_H_
 
 #include "rdc_tests/test_base.h"
 
-class TestFanRead : public TestBase {
+class TestRdciStats : public TestBase {
  public:
-    TestFanRead();
+    TestRdciStats();
 
-  // @Brief: Destructor for test case of TestFanRead
-  virtual ~TestFanRead();
+  // @Brief: Destructor for test case of TestRdciStats
+  virtual ~TestRdciStats();
 
   // @Brief: Setup the environment for measurement
   virtual void SetUp();
@@ -47,4 +47,4 @@ class TestFanRead : public TestBase {
   virtual void DisplayTestInfo(void);
 };
 
-#endif  // TESTS_RDC_TESTS_FUNCTIONAL_FAN_READ_H_
+#endif  // TESTS_RDC_TESTS_FUNCTIONAL_RDCI_STATS_H_
