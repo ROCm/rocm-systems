@@ -84,10 +84,6 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 ## Define default variable and variables for the optional build target
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
                    CACHE STRING "Location of RDC library source code.")
-set(CMAKE_INSTALL_PREFIX ${RDC_LIB_ROOT_PATH}
-                                CACHE STRING "Default installation directory.")
-set(CPACK_PACKAGING_INSTALL_PREFIX ${RDC_LIB_ROOT_PATH}
-                                      CACHE STRING "Default packaging prefix.")
 set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 
 if (NOT DEFINED CPACK_PACKAGE_VENDOR)
@@ -141,7 +137,7 @@ set_property(TARGET ${BOOTSTRAP_LIB} PROPERTY
 
 # librdc.so set up
 set(RDC_LIB "rdc")
-set(RDC_LIB_COMPONENT "lib${RDC_LIB}")
+#set(RDC_LIB_COMPONENT "lib${RDC_LIB}")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcEmbeddedHandler.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcMetricFetcherImpl.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcGroupSettingsImpl.cc")
@@ -228,11 +224,11 @@ endif ()
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB}
-             LIBRARY DESTINATION ${RDC_LIB_ROOT_PATH}${RDC}/lib
-                                            COMPONENT ${RDCCLIENT_LIB_COMPONENT})
+             LIBRARY DESTINATION ${RDC}/lib
+                                            COMPONENT ${CLIENT_COMPONENT})
 install(FILES ${SOURCE_DIR}/include/rdc/rdc.h
-                      DESTINATION ${RDC_LIB_ROOT_PATH}${RDC}/include/rdc
-                                         COMPONENT ${RDC_HEADER_COMPONENT})
+                      DESTINATION ${RDC}/include/rdc
+                                         COMPONENT ${CLIENT_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake RDC Lib                      ")

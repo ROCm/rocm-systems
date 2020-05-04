@@ -31,8 +31,13 @@ set(RSMI_LIB_DIR ${ROCM_DIR}/rocm_smi/lib)
 if (NOT DEFINED GRPC_ROOT)
     set(GRPC_ROOT "/usr/local")
 endif()
-if (NOT DEFINED RDC_CLIENT_ROOT_PATH)
-    set(RDC_CLIENT_ROOT_PATH "/opt/rocm/")
+if (NOT DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
+    set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm/"
+                              CACHE STRING "Default packaging prefix.")
+endif()
+if (NOT DEFINED CMAKE_INSTALL_PREFIX)
+set(CMAKE_INSTALL_PREFIX "/opt/rocm"
+                         CACHE STRING "Default installation directory.")
 endif()
 
 if (NOT DEFINED RDC_SERVER_ROOT_PATH)
@@ -68,16 +73,11 @@ set(${RDC}_VERSION_BUILD "0")
 ##  RDC_lib-dev
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
                               CACHE STRING "Location of RDC source code.")
-set(CMAKE_INSTALL_PREFIX "/"
-                               CACHE STRING "Default installation directory.")
-set(CPACK_PACKAGING_INSTALL_PREFIX "/"
-                                     CACHE STRING "Default packaging prefix.")
 set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 
 project(${RDC})
 
 set(RDC_SRC_ROOT "${PROJECT_SOURCE_DIR}")
-
 
 message("Build Configuration:")
 message("-----------GRPC ROOT: " ${GRPC_ROOT})
@@ -120,7 +120,8 @@ set(GRPC_LIB_DIR "${GRPC_ROOT}/lib")
 set(ENV{LD_LIBRARY_PATH} ${GRPC_LIB_DIR})
 foreach(file ${PROTOB_DEF_SRC_FILES})
     execute_process(COMMAND
-     ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR} --cpp_out=${PROTOB_OUT_DIR} ${file}
+            ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
+                                           --cpp_out=${PROTOB_OUT_DIR} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
             OUTPUT_VARIABLE PROTOB_OUT_VAR)
@@ -134,7 +135,8 @@ foreach(file ${PROTOB_DEF_SRC_FILES})
     message("....--plugin=\"${GRPC_PLUGIN}\" ${file}")
 
     execute_process(COMMAND
-       ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR} --grpc_out=${PROTOB_OUT_DIR}
+       ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
+                                                  --grpc_out=${PROTOB_OUT_DIR}
             --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
@@ -144,14 +146,8 @@ foreach(file ${PROTOB_DEF_SRC_FILES})
 endforeach()
 
 # define all the install component labels to install
-set(SERVER_CTRL_COMPONENT "server_ctrl")
-set(SERVER_BIN_COMPONENT "server_bin")
-set(CLIENT_LIB_COMPONENT "client_lib")
-set(CLIENT_HEADER_COMPONENT "client_header")
-set(RDC_LIB_COMPONENT "rdc_lib")
-set(RDC_HEADER_COMPONENT "rdc_header")
-set(GTEST_COMPONENT "rdc_gtest")
-set(EXAMPLE_COMPONENT "rdc_example")
+set(SERVER_COMPONENT "rdc-server")
+set(CLIENT_COMPONENT "rdc-client")
 
 add_subdirectory("server")
 add_subdirectory("client")
@@ -160,11 +156,9 @@ add_subdirectory("example")
 add_subdirectory("rdci")
 
 # Turn on cmake "component install"
-set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-set(CPACK_COMPONENTS_ALL ${SERVER_CTRL_COMPONENT}
-   ${SERVER_BIN_COMPONENT} ${CLIENT_LIB_COMPONENT} ${CLIENT_HEADER_COMPONENT}
-   ${RDC_LIB_COMPONENT} ${RDC_HEADER_COMPONENT})
-
+set(CPACK_DEB_COMPONENT_INSTALL 1)
+set(CPACK_RPM_COMPONENT_INSTALL 1)
+set(CPACK_COMPONENTS_ALL ${SERVER_COMPONENT} ${CLIENT_COMPONENT})
 
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/DEBIAN_postinst.in"
@@ -172,8 +166,6 @@ configure_file(
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/RPM_rpm_post.in"
   "${PROJECT_SOURCE_DIR}/RPM/rpm_post")
-
-
 
 # TODO set(CPACK_DEBIAN_PACKAGE_HOMEPAGE <GITHUB URL> )
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA

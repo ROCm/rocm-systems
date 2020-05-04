@@ -23,9 +23,9 @@
 #
 cmake_minimum_required(VERSION 3.5.0)
 
-message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
-message("                             Cmake Server                                 ")
-message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+message("                             Cmake Server                          ")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 
 message("")
 message("Build Configuration:")
@@ -43,11 +43,11 @@ message("")
 
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
                    CACHE STRING "Location of RDC client library source code.")
-# set(CMAKE_INSTALL_PREFIX "/"
-#                                CACHE STRING "Default installation directory.")
-# set(CPACK_PACKAGING_INSTALL_PREFIX "/"
-#                                      CACHE STRING "Default packaging prefix.")
-#
+set(CMAKE_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
+                                CACHE STRING "Default installation directory.")
+set(CPACK_PACKAGING_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
+                                     CACHE STRING "Default packaging prefix.")
+
 
 ## Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64")
@@ -93,16 +93,16 @@ add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
 # target_include_directories(${SERVER_DAEMON_EXE} PUBLIC ${RSMI_INC_DIR})
 
 target_link_libraries(${SERVER_DAEMON_EXE} pthread rt grpc grpc++
-                                 cap grpc++_reflection dl protobuf rocm_smi64 rdc_bootstrap)
+                   cap grpc++_reflection dl protobuf rocm_smi64 rdc_bootstrap)
 
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${SERVER_DAEMON_EXE}
         PERMISSIONS OWNER_EXECUTE OWNER_READ OWNER_WRITE GROUP_READ
         GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         DESTINATION ${RDC_SERVER_ROOT_PATH}usr/sbin
-                                            COMPONENT ${SERVER_BIN_COMPONENT})
+                                            COMPONENT ${SERVER_COMPONENT})
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_FILE_NAME}
                DESTINATION ${RDC_SERVER_ROOT_PATH}lib/systemd/system
-                                           COMPONENT ${SERVER_CTRL_COMPONENT})
+                                           COMPONENT ${SERVER_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Server                          ")

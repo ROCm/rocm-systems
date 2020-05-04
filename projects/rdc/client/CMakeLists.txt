@@ -66,7 +66,6 @@ include(utils)
 
 set(CLIENT_LIB "rdc_client_smi")
 set(RDC "rdc")
-set(CLIENT_LIB_COMPONENT "lib${CLIENT_LIB}")
 set(SRC_DIR "${PROJECT_SOURCE_DIR}/client/src")
 set(RDC_CLIENT_INC_DIR "${PROJECT_SOURCE_DIR}/client/include/rdc")
 
@@ -89,10 +88,6 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 ##  RDC_lib-dev
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
                    CACHE STRING "Location of RDC client library source code.")
-set(CMAKE_INSTALL_PREFIX ${RDC_CLIENT_ROOT_PATH}
-                                CACHE STRING "Default installation directory.")
-set(CPACK_PACKAGING_INSTALL_PREFIX ${RDC_CLIENT_ROOT_PATH}
-                                      CACHE STRING "Default packaging prefix.")
 set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 
 if (NOT DEFINED CPACK_PACKAGE_VENDOR)
@@ -163,11 +158,11 @@ endif ()
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${CLIENT_LIB}
-             LIBRARY DESTINATION ${RDC_CLIENT_ROOT_PATH}${RDC}/lib
-                                            COMPONENT ${CLIENT_LIB_COMPONENT})
+             LIBRARY DESTINATION ${RDC}/lib
+                                            COMPONENT ${CLIENT_COMPONENT})
 install(FILES ${SOURCE_DIR}/client/include/rdc/rdc_client.h
-                      DESTINATION ${RDC_CLIENT_ROOT_PATH}${RDC}/include/rdc
-                                         COMPONENT ${CLIENT_HEADER_COMPONENT})
+                                         DESTINATION ${RDC}/include/rdc
+                                                COMPONENT ${CLIENT_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Client Lib                      ")
