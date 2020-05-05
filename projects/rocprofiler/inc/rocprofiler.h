@@ -249,7 +249,7 @@ typedef struct {
   const char* kernel_name;                             // Kernel name
   uint64_t kernel_object;                              // Kernel object address
   const amd_kernel_code_t* kernel_code;                // Kernel code pointer
-  int64_t thread_id;                                   // Thread id
+  uint32_t thread_id;                                   // Thread id
   const rocprofiler_dispatch_record_t* record;         // Dispatch record
 } rocprofiler_callback_data_t;
 

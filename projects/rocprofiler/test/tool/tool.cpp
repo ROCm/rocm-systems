@@ -149,6 +149,8 @@ bool is_spm_trace = false;
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
+uint32_t my_pid = GetPid();
+
 // Error handler
 void fatal(const std::string msg) {
   fflush(stdout);
@@ -483,11 +485,12 @@ bool dump_context_entry(context_entry_t* entry) {
   const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
   const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(entry->agent);
 
-  fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), tid(%lu), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), sig(0x%lx), kernel-name(\"%s\")",
+  fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), pid(%u), tid(%u), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), sig(0x%lx), kernel-name(\"%s\")",
     index,
     agent_info->dev_index,
     entry->data.queue_id,
     entry->data.queue_index,
+    my_pid,
     entry->data.thread_id,
     entry->kernel_properties.grid_size,
     entry->kernel_properties.workgroup_size,
@@ -1004,7 +1007,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
       abort();
     }
     std::ostringstream oss;
-    oss << result_prefix << "/results.txt";
+    oss << result_prefix << "/" << GetPid() << "_results.txt";
     result_file_handle = fopen(oss.str().c_str(), "w");
     if (result_file_handle == NULL) {
       std::ostringstream errmsg;

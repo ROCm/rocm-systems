@@ -91,7 +91,7 @@ void dump_context_entry(context_entry_t* entry, rocprofiler_feature_t* features,
   const rocprofiler_dispatch_record_t* record = entry->data.record;
 
   fflush(stdout);
-  fprintf(stdout, "kernel symbol(0x%lx) name(\"%s\") tid(%ld) queue-id(%u) gpu-id(%u) ",
+  fprintf(stdout, "kernel symbol(0x%lx) name(\"%s\") tid(%u) queue-id(%u) gpu-id(%u) ",
     entry->data.kernel_object,
     kernel_name.c_str(),
     entry->data.thread_id,

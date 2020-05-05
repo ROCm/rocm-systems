@@ -99,7 +99,7 @@ def parse_res(infile):
       if not dispatch_number in var_table: fatal("Error: dispatch number not found '" + str(dispatch_number) + "'")
       var = m.group(1)
       val = m.group(2)
-      var_table[dispatch_number][m.group(1)] = m.group(2)
+      var_table[dispatch_number][var] = val
       if not var in var_list: var_list.append(var)
 
     m = beg_pattern.match(record)

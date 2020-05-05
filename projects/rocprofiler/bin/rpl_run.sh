@@ -543,9 +543,9 @@ for name in $input_list; do
 done
 
 if [ -n "$csv_output" ] ; then
+  merge_output $OUTPUT_LIST
   if [ "$GEN_STATS" = "1" ] ; then
     db_output=$(echo $csv_output | sed "s/\.csv/.db/")
-    merge_output $OUTPUT_LIST
     $ROCP_PYTHON_VERSION $BIN_DIR/tblextr.py $db_output $OUTPUT_LIST
   else
     $ROCP_PYTHON_VERSION $BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST

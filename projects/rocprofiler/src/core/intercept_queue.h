@@ -196,7 +196,7 @@ class InterceptQueue {
                                             kernel_name,
                                             kernel_object,
                                             kernel_code,
-                                            syscall(__NR_gettid),
+                                            (uint32_t)syscall(__NR_gettid),
                                             (tracker_entry) ? tracker_entry->record : NULL};
 
         // Calling dispatch callback
