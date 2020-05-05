@@ -39,6 +39,7 @@ THE SOFTWARE.
 #include <mutex>
 #include <stack>
 
+#include "core/hip_act_cb_tracker.h"
 #include "core/journal.h"
 #include "core/loader.h"
 #include "core/memory_pool.h"
@@ -300,6 +301,90 @@ static inline activity_correlation_id_t CorrelationIdLookup(const activity_corre
   if (correlation_id_wait) while (it == correlation_id_map->end()) it = correlation_id_map->find(correlation_id);
   if (it == correlation_id_map->end()) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id lookup failed(" << correlation_id << ")");
   return it->second;
+}
+
+typedef std::mutex hip_activity_mutex_t;
+hip_activity_mutex_t hip_activity_mutex;
+
+hip_act_cb_tracker_t* hip_act_cb_tracker = NULL;
+
+inline uint32_t HipApiActivityEnableCheck(uint32_t op) {
+  if (hip_act_cb_tracker == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "hip_act_cb_tracker is NULL");
+  const uint32_t mask = hip_act_cb_tracker->enable_check(op, API_CB_MASK);
+  const uint32_t ret  = (mask & ACT_CB_MASK);
+  return ret;
+}
+
+inline uint32_t HipApiActivityDisableCheck(uint32_t op) {
+  if (hip_act_cb_tracker == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "hip_act_cb_tracker is NULL");
+  const uint32_t mask = hip_act_cb_tracker->disable_check(op, API_CB_MASK);
+  const uint32_t ret  = (mask & ACT_CB_MASK);
+  return ret;
+}
+
+inline uint32_t HipActActivityEnableCheck(uint32_t op) {
+  if (hip_act_cb_tracker == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "hip_act_cb_tracker is NULL");
+  hip_act_cb_tracker->enable_check(op, ACT_CB_MASK);
+  return 0;
+}
+
+inline uint32_t HipActActivityDisableCheck(uint32_t op) {
+  if (hip_act_cb_tracker == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "hip_act_cb_tracker is NULL");
+  const uint32_t mask = hip_act_cb_tracker->disable_check(op, ACT_CB_MASK);
+  const uint32_t ret  = (mask & API_CB_MASK);
+  return ret;
+}
+
+void* HIP_SyncApiDataCallback(
+    uint32_t op_id,
+    roctracer_record_t* record,
+    const void* callback_data,
+    void* arg)
+{
+  const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
+  hip_api_data_t* data_ptr = const_cast<hip_api_data_t*>(data);
+  MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
+
+  int phase = ACTIVITY_API_PHASE_ENTER;
+  if (record != NULL) {
+    if (data == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback: data is NULL");
+    phase = data->phase;
+  } else if (pool != NULL) {
+    phase = ACTIVITY_API_PHASE_EXIT;
+  }
+
+  if (phase == ACTIVITY_API_PHASE_ENTER) {
+    // Allocating a record if NULL passed
+    if (record == NULL) {
+      if (data != NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback enter: record is NULL");
+      record_pair_stack.push({});
+      auto& top = record_pair_stack.top();
+      data = &(top.data.hip);
+      data_ptr = const_cast<hip_api_data_t*>(data);
+      data_ptr->phase = phase;
+      data_ptr->correlation_id = 0;
+    }
+
+    // Correlation ID generating
+    uint64_t correlation_id = data->correlation_id;
+    if (correlation_id == 0) {
+      correlation_id = GlobalCounter::Increment();
+      data_ptr->correlation_id = correlation_id;
+    }
+
+    // Passing correlatin ID
+    correlation_id_tls = correlation_id;
+
+    return data_ptr;
+  } else {
+    // popping the record entry
+    if (!record_pair_stack.empty()) record_pair_stack.pop();
+
+    // Clearing correlatin ID
+    correlation_id_tls = 0;
+
+    return NULL;
+  }
 }
 
 void* HIP_SyncActivityCallback(
@@ -662,9 +747,15 @@ static roctracer_status_t roctracer_enable_callback_fun(
     case ACTIVITY_DOMAIN_HCC_OPS: break;
     case ACTIVITY_DOMAIN_HIP_API: {
       if (roctracer::HipLoader::Instance().Enabled() == false) break;
+      std::lock_guard<roctracer::hip_activity_mutex_t> lock(roctracer::hip_activity_mutex);
 
       hipError_t hip_err = roctracer::HipLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIP::RegisterApiCallback(" << op << ") error(" << hip_err << ")");
+
+      if (roctracer::HipApiActivityEnableCheck(op) == 0) {
+        hip_err = roctracer::HipLoader::Instance().RegisterActivityCallback(op, (void*)roctracer::HIP_SyncApiDataCallback, (void*)1);
+        if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIPAPI: HIP::RegisterActivityCallback(" << op << ") error(" << hip_err << ")");
+      }
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
@@ -750,9 +841,15 @@ static roctracer_status_t roctracer_disable_callback_fun(
     case ACTIVITY_DOMAIN_HCC_OPS: break;
     case ACTIVITY_DOMAIN_HIP_API: {
       if (roctracer::HipLoader::Instance().Enabled() == false) break;
+      std::lock_guard<roctracer::hip_activity_mutex_t> lock(roctracer::hip_activity_mutex);
 
-      hipError_t hip_err = roctracer::HipLoader::Instance().RemoveApiCallback(op);
+      const hipError_t hip_err = roctracer::HipLoader::Instance().RemoveApiCallback(op);
       if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIP::RemoveApiCallback(" << op << "), error(" << hip_err << ")");
+
+      if (roctracer::HipApiActivityDisableCheck(op) == 0) {
+        const hipError_t hip_err = roctracer::HipLoader::Instance().RemoveActivityCallback(op);
+        if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIPAPI: HIP::RemoveActivityCallback op(" << op << "), error(" << hip_err << ")");
+      }
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
@@ -888,9 +985,12 @@ static roctracer_status_t roctracer_enable_activity_fun(
     }
     case ACTIVITY_DOMAIN_HIP_API: {
       if (roctracer::HipLoader::Instance().Enabled() == false) break;
+      std::lock_guard<roctracer::hip_activity_mutex_t> lock(roctracer::hip_activity_mutex);
 
-      const hipError_t hip_err = roctracer::HipLoader::Instance().RegisterActivityCallback(op, (void*)roctracer::HIP_SyncActivityCallback, (void*)pool);
-      if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "hipRegisterActivityCallback error(" << hip_err << ")");
+      if (roctracer::HipActActivityEnableCheck(op) == 0) {
+        const hipError_t hip_err = roctracer::HipLoader::Instance().RegisterActivityCallback(op, (void*)roctracer::HIP_SyncActivityCallback, (void*)pool);
+        if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIP::RegisterActivityCallback(" << op << " error(" << hip_err << ")");
+      }
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: break;
@@ -967,9 +1067,15 @@ static roctracer_status_t roctracer_disable_activity_fun(
     }
     case ACTIVITY_DOMAIN_HIP_API: {
       if (roctracer::HipLoader::Instance().Enabled() == false) break;
+      std::lock_guard<roctracer::hip_activity_mutex_t> lock(roctracer::hip_activity_mutex);
 
-      const hipError_t hip_err = roctracer::HipLoader::Instance().RemoveActivityCallback(op);
-      if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIP::RemoveActivityCallback op(" << op << "), error(" << hip_err << ")");
+      if (roctracer::HipActActivityDisableCheck(op) == 0) {
+        const hipError_t hip_err = roctracer::HipLoader::Instance().RemoveActivityCallback(op);
+        if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIP::RemoveActivityCallback op(" << op << "), error(" << hip_err << ")");
+      } else {
+        const hipError_t hip_err = roctracer::HipLoader::Instance().RegisterActivityCallback(op, (void*)roctracer::HIP_SyncApiDataCallback, (void*)1);
+        if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIPACT: HIP::RegisterActivityCallback(" << op << ") error(" << hip_err << ")");
+      }
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: break;
@@ -1134,6 +1240,7 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
     case ACTIVITY_DOMAIN_HCC_OPS:
     case ACTIVITY_DOMAIN_HIP_API: {
       mark_api_callback_ptr = reinterpret_cast<mark_api_callback_t*>(properties);
+      if (roctracer::hip_act_cb_tracker == NULL) roctracer::hip_act_cb_tracker = new roctracer::hip_act_cb_tracker_t;
       break;
     }
     case ACTIVITY_DOMAIN_EXT_API: {
