@@ -398,19 +398,26 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
   const hip_api_data_t* data = &(entry->data);
   const timestamp_t begin_timestamp = entry->begin;
   const timestamp_t end_timestamp = entry->end;
+  std::ostringstream rec_ss;
   std::ostringstream oss;
-  std::ostringstream oss2;
 
   const char* str = (domain != ACTIVITY_DOMAIN_EXT_API) ? roctracer_op_string(domain, cid, 0) : strdup("MARK");
-  oss << std::dec <<
-    begin_timestamp << ":" << end_timestamp << " " << entry->pid << ":" << entry->tid << " " << str;
-  oss2 << std::dec <<
-    begin_timestamp << ":" << end_timestamp << " " << entry->pid << ":" << entry->tid;
+  rec_ss << std::dec << begin_timestamp << ":" << end_timestamp << " " << entry->pid << ":" << entry->tid;
+  oss << std::dec << rec_ss.str() << " " << str;
 
   if (domain == ACTIVITY_DOMAIN_HIP_API) {
 #if HIP_PROF_HIP_API_STRING
     const char* str = hipApiString((hip_api_id_t)cid, data);
-    fprintf(hip_api_file_handle, "%s %s\n", oss2.str().c_str(), str);
+    rec_ss << " " << str;
+    if ((cid == HIP_API_ID_hipModuleLaunchKernel) 
+      || (cid == HIP_API_ID_hipExtModuleLaunchKernel)
+#if !HIP_VDI
+      || (cid == HIP_API_ID_hipHccModuleLaunchKernel)
+#endif
+    ) {
+        rec_ss << " kernel=" << cxx_demangle(entry->name);
+    }
+    fprintf(hip_api_file_handle, "%s\n", rec_ss.str().c_str());
 #else  // !HIP_PROF_HIP_API_STRING
     switch (cid) {
       case HIP_API_ID_hipMemcpy:
@@ -433,8 +440,8 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
           data->args.hipFree.ptr);
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
-#if !HIP_VDI
       case HIP_API_ID_hipExtModuleLaunchKernel:
+#if !HIP_VDI
       case HIP_API_ID_hipHccModuleLaunchKernel:
 #endif
         fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n",
