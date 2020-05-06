@@ -1,5 +1,6 @@
 MatrixTranspose_ctest_trace 3
 MatrixTranspose_test_trace 1
+MatrixTranspose_hipaact_test_trace 1
 MatrixTranspose_mgpu_trace 1
 MatrixTranspose_kfd_trace 0
 MatrixTranspose_sys_trace 0

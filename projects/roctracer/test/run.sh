@@ -79,6 +79,7 @@ eval_test() {
 # rocTrecer is used explicitely by test
 eval_test "standalone C test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest" MatrixTranspose_ctest_trace
 eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test" MatrixTranspose_test_trace
+eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_hipaact_test" MatrixTranspose_hipaact_test_trace
 eval_test "standalone HIP MGPU test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_mgpu" MatrixTranspose_mgpu_trace
 
 # Tool test

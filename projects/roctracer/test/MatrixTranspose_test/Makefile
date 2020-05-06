@@ -29,6 +29,9 @@ endif
 ifeq ($(MGPU_TEST), 1)
 	FLAGS += -DMGPU_TEST=1
 endif
+ifeq ($(HIP_API_ACTIVITY_ON), 1)
+        FLAGS += -DHIP_API_ACTIVITY_ON=1
+endif
 
 .PHONY: test
 
