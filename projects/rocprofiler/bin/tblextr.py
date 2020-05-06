@@ -292,9 +292,10 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   file_name = indir + '/' + api_name + '_api_trace.txt'
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
   ptrn_ac = re.compile(r'hsa_amd_memory_async_copy')
-  ptrn1_kernel = re.compile(r'^.*kernel\(');
-  ptrn2_kernel = re.compile(r'\)\) .*$');
-  ptrn_fixformat = re.compile(r'(\d+:\d+ \d+:\d+) (\w+)\s*(\(.*\))$');
+  ptrn1_kernel = re.compile(r'^.*kernel\(')
+  ptrn2_kernel = re.compile(r'\)\) .*$')
+  ptrn_fixformat = re.compile(r'(\d+:\d+ \d+:\d+ \w+)\( (.*)\)$')
+  ptrn_fixkernel = re.compile(r' kernel=(.*)$')
 
   if not os.path.isfile(file_name): return 0
 
@@ -302,24 +303,24 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   dep_from_us_list = []
   dep_id_list = []
 
-  global START_US
-  with open(file_name, mode='r') as fd:
-    line = fd.readline()
-    record = line[:-1]
-    m = ptrn_val.match(record)
-    if m: START_US = int(m.group(1)) / 1000
-    START_US = 0
-
   # parsing an input trace file and creating a DB table
   record_id = 0
   table_handle = db.add_table(table_name, api_table_descr)
   with open(file_name, mode='r') as fd:
     for line in fd.readlines():
       record = line[:-1]
+
+      kernel_arg = ''
+      m = ptrn_fixkernel.search(record)
+      if m:
+        kernel_arg = 'kernel(' + m.group(1) + ') '
+        record = ptrn_fixkernel.sub('', record)
+
       mfixformat = ptrn_fixformat.match(record)
       if mfixformat: #replace '=' in args with parentheses
-        reformated_str = mfixformat.group(3).replace('=','(').replace(',',')')+')'
-        record = mfixformat.group(1) + ' ' + mfixformat.group(2) + ' ' + reformated_str
+        reformated_args = kernel_arg + mfixformat.group(2).replace('=','(').replace(',',')')+')'
+        record = mfixformat.group(1) + '(' + reformated_args + ')'
+
       m = ptrn_val.match(record)
       if m:
         rec_vals = []
@@ -349,24 +350,18 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
             copy_csv += str(copy_index) + ', ' + copy_line + '\n'
             copy_index += 1
 
-        # kernel name extractiod
+        # patching activity properties: kernel name, stream-id
         if record_id in dep_filtr:
           record_args = rec_vals[rec_len - 2]
           # extract kernel name
-          #(kernel_name, n_subs) = ptrn1_kernel.subn('', record_args, count=1);
-          #if n_subs != 0:
-          #  (kernel_name, n_subs) = ptrn2_kernel.subn(')', kernel_name, count=1)
-          #  if n_subs != 0: db.change_rec_name('OPS', record_id, '"' + kernel_name + '"')
-          # TODO extract stream-id and db-change thread-id
           (kernel_name, n_subs) = extract_field(record_args, 'kernel')
           if n_subs != 0:
             db.change_rec_name('OPS', record_id, '"' + kernel_name + '"')
+          # extract stream-id
           (stream_id, n_subs) = extract_field(record_args, 'stream')
           if n_subs != 0:
-            if stream_id == 'nil' or stream_id == 'NIL':
-              db.change_rec_tid('OPS', record_id, 0)
-            else:
-              db.change_rec_tid('OPS', record_id, stream_id)
+            if stream_id == 'nil' or stream_id == 'NIL': stream_id = 0
+            db.change_rec_tid('OPS', record_id, stream_id)
 
         record_id += 1
       else: fatal(api_name + " bad record: '" + record + "'")
