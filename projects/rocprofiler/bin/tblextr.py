@@ -294,6 +294,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   ptrn_ac = re.compile(r'hsa_amd_memory_async_copy')
   ptrn1_kernel = re.compile(r'^.*kernel\(');
   ptrn2_kernel = re.compile(r'\)\) .*$');
+  ptrn_fixformat = re.compile(r'(\d+:\d+ \d+:\d+) (\w+)\s*(\(.*\))$');
 
   if not os.path.isfile(file_name): return 0
 
@@ -315,6 +316,10 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   with open(file_name, mode='r') as fd:
     for line in fd.readlines():
       record = line[:-1]
+      mfixformat = ptrn_fixformat.match(record)
+      if mfixformat: #replace '=' in args with parentheses
+        reformated_str = mfixformat.group(3).replace('=','(').replace(',',')')+')'
+        record = mfixformat.group(1) + ' ' + mfixformat.group(2) + ' ' + reformated_str
       m = ptrn_val.match(record)
       if m:
         rec_vals = []
