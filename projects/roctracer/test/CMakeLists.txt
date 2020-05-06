@@ -37,6 +37,8 @@ add_custom_target( mytest
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test"
   COMMAND ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_test"
+  COMMAND HIP_API_ACTIVITY_ON=1 ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
+  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_hipaact_test"
   COMMAND MGPU_TEST=1 ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_mgpu"
   COMMAND C_TEST=1 ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
