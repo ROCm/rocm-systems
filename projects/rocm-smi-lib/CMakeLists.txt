@@ -56,8 +56,10 @@ message("SOVERSION: ${SO_VERSION_STRING}")
 ##  rocm_smi_lib-dev
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
                               CACHE STRING "Location of rocm_smi source code.")
-set(CMAKE_INSTALL_PREFIX "/opt/rocm"
-                                CACHE STRING "Default installation directory.")
+if(NOT DEFINED CMAKE_INSTALL_PREFIX)
+    set(CMAKE_INSTALL_PREFIX "/opt/rocm"
+                              CACHE STRING "Default installation directory.")
+endif ()
 set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm"
                                       CACHE STRING "Default packaging prefix.")
 set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
