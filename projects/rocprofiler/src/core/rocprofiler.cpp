@@ -434,6 +434,7 @@ extern "C" {
 // HSA-runtime tool on-load method
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
+  ONLOAD_TRACE_BEG();
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
   bool intercept_mode = false;
@@ -496,14 +497,16 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
     rocprofiler::StandaloneIntercept();
   }
 
+  ONLOAD_TRACE_END();
   return true;
 }
 
 // HSA-runtime tool on-unload method
 PUBLIC_API void OnUnload() {
-  rocprofiler::Tracker::Destroy();
+  ONLOAD_TRACE_BEG();
   rocprofiler::UnloadTool();
   rocprofiler::RestoreHsaApi();
+  ONLOAD_TRACE_END();
 }
 
 // Returns library vesrion

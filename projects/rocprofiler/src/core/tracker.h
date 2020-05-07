@@ -138,7 +138,7 @@ class Tracker {
     // Debug trace
     if (trace_on_) {
       auto outstanding = outstanding_.fetch_add(1);
-      fprintf(stdout, "Tracker::Add: entry %p, record %p, outst %lu\n", entry, entry->record, outstanding);
+      fprintf(stdout, "Tracker::Enable: entry %p, record %p, outst %lu\n", entry, entry->record, outstanding);
       fflush(stdout);
     }
   }
@@ -163,6 +163,11 @@ class Tracker {
   {}
 
   ~Tracker() {
+    if (trace_on_) {
+      fprintf(stdout, "Tracker::DESTR: sig list %d, outst %lu\n", (int)(sig_list_.size()), outstanding_.load());
+      fflush(stdout);
+    }
+
     auto it = sig_list_.begin();
     auto end = sig_list_.end();
     while (it != end) {
@@ -187,7 +192,7 @@ class Tracker {
     // Debug trace
     if (trace_on_) {
       auto outstanding = outstanding_.fetch_sub(1);
-      fprintf(stdout, "Tracker::Handler: entry %p, record %p, outst %lu\n", entry, entry->record, outstanding);
+      fprintf(stdout, "Tracker::Complete: entry %p, record %p, outst %lu\n", entry, entry->record, outstanding);
       fflush(stdout);
     }
 

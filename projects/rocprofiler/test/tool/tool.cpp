@@ -1241,6 +1241,7 @@ void rocprofiler_unload(bool is_destr) {
   }
   fflush(stdout);
 
+#if 0
   // Cleanup
   if (callbacks_data != NULL) {
     delete[] callbacks_data->features;
@@ -1255,8 +1256,9 @@ void rocprofiler_unload(bool is_destr) {
   kernel_string_vec = NULL;
   delete range_vec;
   range_vec = NULL;
-  if (!is_destr) delete context_array;
+  delete context_array;
   context_array = NULL;
+#endif
 
   ONLOAD_TRACE_END();
 }
