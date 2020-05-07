@@ -52,11 +52,7 @@ extern "C" {
 
 #include <stddef.h>
 
-// In a file included from kfd_ioctl.h, is a variable called
-// c++ keyword "virtual"
-#define virtual virtual_tmp
 #include "rocm_smi/kfd_ioctl.h"
-#undef virtual
 
 /** \file rocm_smi.h
  *  Main header file for the ROCm SMI library.
