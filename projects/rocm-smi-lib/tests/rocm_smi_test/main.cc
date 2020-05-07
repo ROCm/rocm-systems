@@ -80,6 +80,7 @@
 #include "functional/mutual_exclusion.h"
 #include "functional/evt_notif_read_write.h"
 #include "functional/init_shutdown_refcount.h"
+#include "rocm_smi_test/functional/hw_topology_read.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -212,6 +213,10 @@ TEST(rsmitstReadWrite, TestPerfCntrReadWrite) {
 }
 TEST(rsmitstReadOnly, TestProcInfoRead) {
   TestProcInfoRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestHWTopologyRead) {
+  TestHWTopologyRead tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadWrite, TestXGMIReadWrite) {

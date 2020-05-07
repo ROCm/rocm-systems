@@ -70,6 +70,7 @@
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_counters.h"
 #include "rocm_smi/rocm_smi_kfd.h"
+#include "rocm_smi/rocm_smi_io_link.h"
 
 #include "rocm_smi/rocm_smi64Config.h"
 
@@ -1238,6 +1239,30 @@ static rsmi_status_t set_power_profile(uint32_t dv_ind,
                                                             ind_map[profile]);
 
   return ret;
+  CATCH
+}
+
+static rsmi_status_t topo_get_numa_node_number(uint32_t dv_ind,
+                     uint32_t *numa_node_number) {
+  TRY
+
+  GET_DEV_AND_KFDNODE_FROM_INDX
+
+  *numa_node_number = kfd_node->numa_node_number();
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+static rsmi_status_t topo_get_numa_node_weight(uint32_t dv_ind,
+                     uint64_t *weight) {
+  TRY
+
+  GET_DEV_AND_KFDNODE_FROM_INDX
+
+  *weight = kfd_node->numa_node_weight();
+
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
@@ -2961,6 +2986,158 @@ rsmi_dev_xgmi_error_reset(uint32_t dv_ind) {
   ret = get_dev_value_int(amd::smi::kDevXGMIError, dv_ind, &status_code);
   return ret;
 
+  CATCH
+}
+
+rsmi_status_t
+rsmi_topo_get_numa_node_number(uint32_t dv_ind, uint32_t *numa_node) {
+  TRY
+
+  return topo_get_numa_node_number(dv_ind, numa_node);
+  CATCH
+}
+
+rsmi_status_t
+rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                          uint64_t *weight) {
+  TRY
+
+  uint32_t dv_ind = dv_ind_src;
+  GET_DEV_AND_KFDNODE_FROM_INDX
+  DEVICE_MUTEX
+
+  if (weight == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  rsmi_status_t status;
+  uint32_t node_ind_dst;
+  uint32_t ret = smi.get_node_index(dv_ind_dst, &node_ind_dst);
+
+  if (!ret) {
+    amd::smi::IO_LINK_TYPE type;
+    ret = kfd_node->get_io_link_type(node_ind_dst, &type);
+    if (!ret) {
+      if (type == amd::smi::IOLINK_TYPE_XGMI) {
+        ret = kfd_node->get_io_link_weight(node_ind_dst, weight);
+        if (!ret)
+          status = RSMI_STATUS_SUCCESS;
+        else
+          status = RSMI_STATUS_INIT_ERROR;
+      } else {
+        assert(!"Unexpected IO Link type read");
+        status = RSMI_STATUS_NOT_SUPPORTED;
+      }
+    } else {
+      *weight = kfd_node->numa_node_weight();  // from src GPU to it's CPU node
+      uint64_t numa_weight_dst;
+      status = topo_get_numa_node_weight(dv_ind_dst, &numa_weight_dst);
+      // from dst GPU to it's CPU node
+      if (status == RSMI_STATUS_SUCCESS) {
+        *weight = *weight + numa_weight_dst;
+        uint32_t numa_number_src = kfd_node->numa_node_number();
+        uint32_t numa_number_dst;
+        status = topo_get_numa_node_number(dv_ind_dst, &numa_number_dst);
+        if (status == RSMI_STATUS_SUCCESS) {
+          if (numa_number_src != numa_number_dst) {
+            uint64_t io_link_weight;
+            ret = smi.get_io_link_weight(numa_number_src, numa_number_dst,
+                                         &io_link_weight);
+            if (!ret) {
+              *weight = *weight + io_link_weight;
+              // from src numa CPU node to dst numa CPU node
+            } else {
+              *weight = *weight + 10;
+              // More than one CPU hops, hard coded 10
+            }
+          }
+          status = RSMI_STATUS_SUCCESS;
+        } else {
+          assert(!"Error to read numa node number");
+          status = RSMI_STATUS_INIT_ERROR;
+        }
+      } else {
+        assert(!"Error to read numa node weight");
+        status = RSMI_STATUS_INIT_ERROR;
+      }
+    }
+  } else {
+    status = RSMI_STATUS_INVALID_ARGS;
+  }
+
+  return status;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                        uint64_t *hops, RSMI_IO_LINK_TYPE *type) {
+  TRY
+
+  uint32_t dv_ind = dv_ind_src;
+  GET_DEV_AND_KFDNODE_FROM_INDX
+
+  if (hops == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  if (type == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  rsmi_status_t status;
+  uint32_t node_ind_dst;
+  uint32_t ret = smi.get_node_index(dv_ind_dst, &node_ind_dst);
+
+  if (!ret) {
+    amd::smi::IO_LINK_TYPE io_link_type;
+    ret = kfd_node->get_io_link_type(node_ind_dst, &io_link_type);
+    if (!ret) {
+      if (io_link_type == amd::smi::IOLINK_TYPE_XGMI) {
+        *type = RSMI_IOLINK_TYPE_XGMI;
+        *hops = 1;
+        status = RSMI_STATUS_SUCCESS;
+      } else {
+        assert(!"Unexpected IO Link type read");
+        status = RSMI_STATUS_NOT_SUPPORTED;
+      }
+    } else {
+      uint32_t numa_number_dst;
+      status = topo_get_numa_node_number(dv_ind_dst, &numa_number_dst);
+      if (status == RSMI_STATUS_SUCCESS) {
+        uint32_t numa_number_src = kfd_node->numa_node_number();
+        if (numa_number_src == numa_number_dst) {
+          *hops = 2;  // same CPU node
+        } else {
+          uint64_t io_link_weight;
+          ret = smi.get_io_link_weight(numa_number_src, numa_number_dst,
+                                       &io_link_weight);
+          if (!ret)
+            *hops = 3;  // from src CPU node to dst CPU node
+          else
+            *hops = 4;  // More than one CPU hops, hard coded as 4
+        }
+
+        amd::smi::IO_LINK_TYPE numa_node_type = kfd_node->numa_node_type();
+        if (numa_node_type == amd::smi::IOLINK_TYPE_PCIEXPRESS) {
+          *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
+          status = RSMI_STATUS_SUCCESS;
+        } else if (numa_node_type == amd::smi::IOLINK_TYPE_XGMI) {
+          *type = RSMI_IOLINK_TYPE_XGMI;
+          status = RSMI_STATUS_SUCCESS;
+        } else {
+          status = RSMI_STATUS_INIT_ERROR;
+        }
+      } else {
+        assert(!"Error to get numa node number");
+        status = RSMI_STATUS_INIT_ERROR;
+      }
+    }
+  } else {
+    status = RSMI_STATUS_INVALID_ARGS;
+  }
+
+  return status;
   CATCH
 }
 

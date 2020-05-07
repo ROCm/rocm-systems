@@ -55,6 +55,7 @@
 #include <map>
 #include <mutex>  // NOLINT
 
+#include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_monitor.h"
@@ -106,6 +107,9 @@ class RocmSMI {
                                            return ++kfd_notif_evt_fh_refcnt_;}
     uint32_t kfd_notif_evt_fh_refcnt_dec(void) {
                                            return --kfd_notif_evt_fh_refcnt_;}
+    int get_io_link_weight(uint32_t node_from, uint32_t node_to,
+                           uint64_t *weight);
+    int get_node_index(uint32_t dv_ind, uint32_t *node_ind);
 
  private:
     std::vector<std::shared_ptr<Device>> devices_;
@@ -113,6 +117,9 @@ class RocmSMI {
     std::vector<std::shared_ptr<Monitor>> monitors_;
     std::vector<std::shared_ptr<PowerMon>> power_mons_;
     std::set<std::string> amd_monitor_types_;
+    std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<IOLink>>
+      io_link_map_;
+    std::map<uint32_t, uint32_t> dev_ind_to_node_ind_map_;
     void AddToDeviceList(std::string dev_name);
     void GetEnvVariables(void);
     uint32_t DiscoverAMDMonitors(void);

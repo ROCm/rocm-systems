@@ -523,6 +523,17 @@ typedef enum {
 } rsmi_memory_page_status_t;
 
 /**
+ * @brief Types for IO Link
+ */
+typedef enum _RSMI_IO_LINK_TYPE {
+  RSMI_IOLINK_TYPE_UNDEFINED      = 0,         //!< unknown type.
+  RSMI_IOLINK_TYPE_PCIEXPRESS     = 1,         //!< PCI Express
+  RSMI_IOLINK_TYPE_XGMI           = 2,         //!< XGMI
+  RSMI_IOLINK_TYPE_NUMIOLINKTYPES,             //!< Number of IO Link types
+  RSMI_IOLINK_TYPE_SIZE           = 0xFFFFFFFF //!< Max of IO Link types
+} RSMI_IO_LINK_TYPE;
+
+/**
  * @brief Reserved Memory Page Record
  */
 typedef struct {
@@ -2615,6 +2626,85 @@ rsmi_dev_xgmi_error_reset(uint32_t dv_ind);
 
 /** @} */  // end of SysInfo
 
+/*****************************************************************************/
+/** @defgroup HWTopo Hardware Topology Functions
+ *  These functions are used to query Hardware topology.
+ *  @{
+ */
+
+/**
+ *  @brief Retrieve the NUMA CPU node number for a device
+ *
+ *  @details Given a device index @p dv_ind, and a pointer to an
+ *  uint32_t @p numa_node, this function will write the
+ *  node number of NUMA CPU for the device @p dv_ind to the memory
+ *  pointed to by @p numa_node.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] numa_node A pointer to an uint32_t to which the
+ *  numa node number should be written.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t
+rsmi_topo_get_numa_node_number(uint32_t dv_ind, uint32_t *numa_node);
+
+/**
+ *  @brief Retrieve the weight for a connection between 2 GPUs
+ *
+ *  @details Given a source device index @p dv_ind_src and
+ *  a destination device index @p dv_ind_dst, and a pointer to an
+ *  uint64_t @p weight, this function will write the
+ *  weight for the connection between the device @p dv_ind_src
+ *  and @p dv_ind_dst to the memory pointed to by @p weight.
+ *
+ *  @param[in] dv_ind_src the source device index
+ *
+ *  @param[in] dv_ind_dst the destination device index
+ *
+ *  @param[inout] weight A pointer to an uint64_t to which the
+ *  weight for the connection should be written.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t
+rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                          uint64_t *weight);
+
+/**
+ *  @brief Retrieve the hops and the connection type between 2 GPUs
+ *
+ *  @details Given a source device index @p dv_ind_src and
+ *  a destination device index @p dv_ind_dst, and a pointer to an
+ *  uint64_t @p hops and a pointer to an RSMI_IO_LINK_TYPE @p type,
+ *  this function will write the number of hops and the connection type
+ *  between the device @p dv_ind_src and @p dv_ind_dst to the memory
+ *  pointed to by @p hops and @p type.
+ *
+ *  @param[in] dv_ind_src the source device index
+ *
+ *  @param[in] dv_ind_dst the destination device index
+ *
+ *  @param[inout] hops A pointer to an uint64_t to which the
+ *  hops for the connection should be written.
+ *
+ *  @param[inout] type A pointer to an ::RSMI_IO_LINK_TYPE to which the
+ *  type for the connection should be written.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t
+rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                        uint64_t *hops, RSMI_IO_LINK_TYPE *type);
+
+/** @} */  // end of HWTopo
 
 /*****************************************************************************/
 /** @defgroup APISupport Supported Functions

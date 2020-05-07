@@ -53,6 +53,7 @@
 #include <iostream>
 #include <sstream>
 
+#include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
@@ -531,12 +532,49 @@ KFDNode::Initialize(void) {
   if (ret) {return ret;}
 
   ret = ReadKFDGpuId(node_indx_, &gpu_id_);
-  if (ret) {return ret;}
+  if (ret || (gpu_id_ == 0)) {return ret;}
 
   ret = ReadKFDGpuName(node_indx_, &name_);
 
+  std::map<uint32_t, std::shared_ptr<IOLink>> io_link_map_tmp;
+  ret = DiscoverIOLinksPerNode(node_indx_, &io_link_map_tmp);
+  if (ret != 0) {
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+    "Failed to initialize rocm_smi library (IO Links discovery per node).");
+  }
+
+  std::map<uint32_t, std::shared_ptr<IOLink>>::iterator it;
+  uint32_t node_to;
+  uint64_t node_to_gpu_id;
+  std::shared_ptr<IOLink> link;
+  bool numa_node_found = false;
+  for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
+    io_link_map_[it->first] = it->second;
+    node_to = it->first;
+    link = it->second;
+    ret = ReadKFDGpuId(node_to, &node_to_gpu_id);
+    if (ret) {return ret;}
+    if (node_to_gpu_id == 0) {  //  CPU node
+      if (numa_node_found) {
+        if (numa_node_weight_ > link->weight()) {
+          numa_node_number_ = node_to;
+          numa_node_weight_ = link->weight();
+          numa_node_type_ = link->type();
+        }
+      } else {
+        numa_node_number_ = node_to;
+        numa_node_weight_ = link->weight();
+        numa_node_type_ = link->type();
+        numa_node_found = true;
+      }
+    } else {
+      io_link_type_[node_to] = link->type();
+      io_link_weight_[node_to] = link->weight();
+    }
+  }
   return ret;
 }
+
 int
 KFDNode::get_property_value(std::string property, uint64_t *value) {
   assert(value != nullptr);
@@ -547,6 +585,32 @@ KFDNode::get_property_value(std::string property, uint64_t *value) {
     return EINVAL;
   }
   *value = properties_[property];
+  return 0;
+}
+
+int
+KFDNode::get_io_link_type(uint32_t node_to, IO_LINK_TYPE *type) {
+  assert(type != nullptr);
+  if (type == nullptr) {
+    return EINVAL;
+  }
+  if (io_link_type_.find(node_to) == io_link_type_.end()) {
+    return EINVAL;
+  }
+  *type = io_link_type_[node_to];
+  return 0;
+}
+
+int
+KFDNode::get_io_link_weight(uint32_t node_to, uint64_t *weight) {
+  assert(weight != nullptr);
+  if (weight == nullptr) {
+    return EINVAL;
+  }
+  if (io_link_weight_.find(node_to) == io_link_weight_.end()) {
+    return EINVAL;
+  }
+  *weight = io_link_weight_[node_to];
   return 0;
 }
 

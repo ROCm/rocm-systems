@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2019, Advanced Micro Devices, Inc.
+ * Copyright (c) 2020, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -40,8 +40,8 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
-#define INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
+#ifndef INCLUDE_ROCM_SMI_ROCM_SMI_IO_LINK_H_
+#define INCLUDE_ROCM_SMI_ROCM_SMI_IO_LINK_H_
 
 #include <string>
 #include <vector>
@@ -50,62 +50,67 @@
 #include <map>
 
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_device.h"
-#include "rocm_smi/rocm_smi_io_link.h"
 
 namespace amd {
 namespace smi {
 
-class KFDNode {
+typedef enum _IO_LINK_TYPE {
+  IOLINK_TYPE_UNDEFINED      = 0,
+  IOLINK_TYPE_HYPERTRANSPORT = 1,
+  IOLINK_TYPE_PCIEXPRESS     = 2,
+  IOLINK_TYPE_AMBA           = 3,
+  IOLINK_TYPE_MIPI           = 4,
+  IOLINK_TYPE_QPI_1_1        = 5,
+  IOLINK_TYPE_RESERVED1      = 6,
+  IOLINK_TYPE_RESERVED2      = 7,
+  IOLINK_TYPE_RAPID_IO       = 8,
+  IOLINK_TYPE_INFINIBAND     = 9,
+  IOLINK_TYPE_RESERVED3      = 10,
+  IOLINK_TYPE_XGMI           = 11,
+  IOLINK_TYPE_XGOP           = 12,
+  IOLINK_TYPE_GZ             = 13,
+  IOLINK_TYPE_ETHERNET_RDMA  = 14,
+  IOLINK_TYPE_RDMA_OTHER     = 15,
+  IOLINK_TYPE_OTHER          = 16,
+  IOLINK_TYPE_NUMIOLINKTYPES,
+  IOLINK_TYPE_SIZE           = 0xFFFFFFFF
+} IO_LINK_TYPE;
+
+class IOLink {
  public:
-    explicit KFDNode(uint32_t node_ind) : node_indx_(node_ind) {}
-    ~KFDNode();
+    explicit IOLink(uint32_t node_indx, uint32_t link_indx) :
+                    node_indx_(node_indx), link_indx_(link_indx) {}
+    ~IOLink();
 
     int Initialize();
     int ReadProperties(void);
     int get_property_value(std::string property, uint64_t *value);
-    uint64_t gpu_id(void) const {return gpu_id_;}
-    std::string name(void) const {return name_;}
-    uint32_t node_index(void) const {return node_indx_;}
-    uint32_t numa_node_number(void) const {return numa_node_number_;}
-    uint64_t numa_node_weight(void) const {return numa_node_weight_;}
-    IO_LINK_TYPE numa_node_type(void) const {return numa_node_type_;}
-    int get_io_link_type(uint32_t node_to, IO_LINK_TYPE *type);
-    int get_io_link_weight(uint32_t node_to, uint64_t *weight);
-    std::shared_ptr<Device> amdgpu_device(void) const {return amdgpu_device_;}
-    uint32_t amdgpu_dev_index(void) const {return amdgpu_dev_index_;}
-    void set_amdgpu_dev_index(uint32_t val) {amdgpu_dev_index_ = val;}
+    uint32_t get_node_indx(void) const {return node_indx_;}
+    uint32_t get_link_indx(void) const {return link_indx_;}
+    IO_LINK_TYPE type(void) const {return type_;}
+    uint32_t node_from(void) const {return node_from_;}
+    uint32_t node_to(void) const {return node_to_;}
+    uint64_t weight(void) const {return weight_;}
 
  private:
     uint32_t node_indx_;
-    uint32_t amdgpu_dev_index_;
-    uint64_t gpu_id_;
-    std::string name_;
-    uint32_t numa_node_number_;
-    uint64_t numa_node_weight_;
-    IO_LINK_TYPE numa_node_type_;
-    std::map<uint32_t, IO_LINK_TYPE> io_link_type_;
-    std::map<uint32_t, uint64_t> io_link_weight_;
-    std::map<uint32_t, std::shared_ptr<IOLink>> io_link_map_;
+    uint32_t link_indx_;
+    IO_LINK_TYPE type_;
+    uint32_t node_from_;
+    uint32_t node_to_;
+    uint64_t weight_;
     std::map<std::string, uint64_t> properties_;
-    std::shared_ptr<Device> amdgpu_device_;
 };
 
 int
-DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes);
+DiscoverIOLinksPerNode(uint32_t node_indx, std::map<uint32_t,
+                       std::shared_ptr<IOLink>> *links);
 
 int
-GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
-                                                   uint32_t *num_procs_found);
-int
-GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc);
-
-int
-GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_count);
-int
-ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string> *retVec);
+DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
+                std::shared_ptr<IOLink>> *links);
 
 }  // namespace smi
 }  // namespace amd
 
-#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
+#endif  // INCLUDE_ROCM_SMI_ROCM_SMI_IO_LINK_H_
