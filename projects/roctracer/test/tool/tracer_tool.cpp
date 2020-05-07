@@ -325,6 +325,20 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry);
 roctracer::TraceBuffer<hip_api_trace_entry_t>::flush_prm_t hip_flush_prm[1] = {{0, hip_api_flush_cb}};
 roctracer::TraceBuffer<hip_api_trace_entry_t> hip_api_trace_buffer("HIP", 0x200000, hip_flush_prm, 1);
 
+static inline bool is_hip_kernel_launch_api(const uint32_t& cid) {
+  bool ret =
+#if HIP_VDI
+    (cid == HIP_API_ID_hipLaunchKernel) ||
+    (cid == HIP_API_ID_hipExtLaunchMultiKernelMultiDevice) ||
+    (cid == HIP_API_ID_hipLaunchCooperativeKernel) ||
+    (cid == HIP_API_ID_hipLaunchCooperativeKernelMultiDevice) ||
+#endif
+    (cid == HIP_API_ID_hipModuleLaunchKernel) ||
+    (cid == HIP_API_ID_hipExtModuleLaunchKernel) ||
+    (cid == HIP_API_ID_hipHccModuleLaunchKernel);
+  return ret;
+}
+
 void hip_api_callback(
     uint32_t domain,
     uint32_t cid,
@@ -351,19 +365,13 @@ void hip_api_callback(
     entry->name = NULL;
     entry->ptr = NULL;
 
-    switch (cid) {
-      case HIP_API_ID_hipMalloc:
-        entry->ptr = *(data->args.hipMalloc.ptr);
-        break;
-      case HIP_API_ID_hipModuleLaunchKernel:
-#if !HIP_VDI
-      case HIP_API_ID_hipExtModuleLaunchKernel:
-      case HIP_API_ID_hipHccModuleLaunchKernel:
-#endif
-        const hipFunction_t f = data->args.hipModuleLaunchKernel.f;
-        if (f != NULL) {
-          entry->name = strdup(roctracer::HipLoader::Instance().KernelNameRef(f));
-        }
+    if (cid == HIP_API_ID_hipMalloc) {
+      entry->ptr = *(data->args.hipMalloc.ptr);
+    } else if (is_hip_kernel_launch_api(cid)) {
+      const hipFunction_t f = data->args.hipModuleLaunchKernel.f;
+      if (f != NULL) {
+        entry->name = strdup(roctracer::HipLoader::Instance().KernelNameRef(f));
+      }
     }
   }
 }
@@ -409,13 +417,8 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
 #if HIP_PROF_HIP_API_STRING
     const char* str = hipApiString((hip_api_id_t)cid, data);
     rec_ss << " " << str;
-    if ((cid == HIP_API_ID_hipModuleLaunchKernel) 
-      || (cid == HIP_API_ID_hipExtModuleLaunchKernel)
-#if !HIP_VDI
-      || (cid == HIP_API_ID_hipHccModuleLaunchKernel)
-#endif
-    ) {
-        rec_ss << " kernel=" << cxx_demangle(entry->name);
+    if (is_hip_kernel_launch_api(cid)) {
+      if (entry->name) rec_ss << " kernel=" << cxx_demangle(entry->name);
     }
     fprintf(hip_api_file_handle, "%s\n", rec_ss.str().c_str());
 #else  // !HIP_PROF_HIP_API_STRING
