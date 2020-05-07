@@ -231,7 +231,7 @@ class TraceBuffer : protected TraceBufferBase {
 
   void wrap_buffer(const pointer_t pointer) {
     std::lock_guard<mutex_t> lck(mutex_);
-    if (work_thread_started_ == false) FATAL("worker thread is not started");
+    if (work_thread_started_ == false) StartWorkerThread();
 
     PTHREAD_CALL(pthread_mutex_lock(&work_mutex_));
     if (pointer >= end_pointer_) {

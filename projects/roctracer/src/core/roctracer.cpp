@@ -1198,8 +1198,6 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
   API_METHOD_PREFIX
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
-      roctracer::trace_buffer.StartWorkerThread();
-
       // HSA OPS properties
       roctracer::hsa_ops_properties_t* ops_properties = reinterpret_cast<roctracer::hsa_ops_properties_t*>(properties);
       HsaApiTable* table = reinterpret_cast<HsaApiTable*>(ops_properties->table);

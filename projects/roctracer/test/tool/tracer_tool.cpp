@@ -49,6 +49,17 @@ THE SOFTWARE.
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
 
+// Linux sys call
+#define PTHREAD_CALL(call)                                                                         \
+  do {                                                                                             \
+    int err = call;                                                                                \
+    if (err != 0) {                                                                                \
+      errno = err;                                                                                 \
+      perror(#call);                                                                               \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
+
 // Macro to check ROC-tracer calls status
 #define ROCTRACER_CALL(call)                                                                       \
   do {                                                                                             \
@@ -158,6 +169,10 @@ void* control_thr_fun(void*) {
 
 // Flushing control thread
 uint32_t control_flush_us = 0;
+pthread_t flush_thread;
+bool flush_thread_started = false;
+std::mutex flush_thread_mutex;;
+
 void* flush_thr_fun(void*) {
   const uint32_t dist_sec = control_flush_us / 1000000;
   const uint32_t dist_us = control_flush_us % 1000000;
@@ -165,9 +180,13 @@ void* flush_thr_fun(void*) {
   while (1) {
     sleep(dist_sec);
     usleep(dist_us);
-    roctracer_flush_activity();
+    std::lock_guard<std::mutex> lock(flush_thread_mutex);
+    if (!flush_thread_started) while(1) sleep(1);
+    ROCTRACER_CALL(roctracer_flush_activity());
     roctracer::TraceBufferBase::FlushAll();
   }
+
+  return NULL;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -616,6 +635,16 @@ void tool_unload() {
   if (is_loaded == false) return;
   is_loaded = false;
 
+  if (flush_thread_started) {
+    flush_thread_mutex.lock();
+    flush_thread_started = false;
+    flush_thread_mutex.unlock();
+    PTHREAD_CALL(pthread_cancel(flush_thread));
+    void *res;
+    PTHREAD_CALL(pthread_join(flush_thread, &res));
+    if (res != PTHREAD_CANCELED) FATAL("flush thread wasn't stopped correctly");
+  }
+
   if (trace_roctx) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
   }
@@ -648,8 +677,6 @@ void tool_load() {
 
   if (is_loaded == true) return;
   is_loaded = true;
-
-  roctracer::TraceBufferBase::StartWorkerThreadAll();
 
   // Output file
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
@@ -807,11 +834,12 @@ void tool_load() {
     }
 
     fprintf(stdout, "ROCTracer: trace control flush rate(%uus)\n", control_flush_us); fflush(stdout);
-    pthread_t thread;
     pthread_attr_t attr;
     int err = pthread_attr_init(&attr);
     if (err) { errno = err; perror("pthread_attr_init"); abort(); }
-    err = pthread_create(&thread, &attr, flush_thr_fun, NULL);
+    std::lock_guard<std::mutex> lock(flush_thread_mutex);
+    PTHREAD_CALL(pthread_create(&flush_thread, &attr, flush_thr_fun, NULL));
+    flush_thread_started = true;
   }
 
   // Enable KFD API callbacks/activity
