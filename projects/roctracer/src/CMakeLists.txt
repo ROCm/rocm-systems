@@ -23,7 +23,7 @@ set ( KFD_LIB_SRC
 )
 execute_process ( COMMAND sh -xc "${CMAKE_CXX_COMPILER} -E ${HSA_KMT_INC_PATH}/hsakmttypes.h > ${PROJECT_BINARY_DIR}/hsakmttypes_pp.h" )
 execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/gen_ostream_ops.py -in ${PROJECT_BINARY_DIR}/hsakmttypes_pp.h -out ${ROOT_DIR}/inc/kfd_ostream_ops.h" )
-execute_process ( COMMAND sh -xc "/usr/bin/gcc -D__HIP_PLATFORM_HCC__ -I${HIP_PATH}/include -I${CMAKE_PREFIX_PATH}/hsa/include -E ${HIP_PATH}/include/hip/hip_runtime_api.h > ${PROJECT_BINARY_DIR}/hip_runtime_api_pp.h" )
+execute_process ( COMMAND sh -xc "${CMAKE_C_COMPILER} -D__HIP_PLATFORM_HCC__ -I${HIP_PATH}/include -I${CMAKE_PREFIX_PATH}/hsa/include -E ${HIP_PATH}/include/hip/hip_runtime_api.h > ${PROJECT_BINARY_DIR}/hip_runtime_api_pp.h" )
 execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/gen_ostream_ops.py -in ${PROJECT_BINARY_DIR}/hip_runtime_api_pp.h -out ${ROOT_DIR}/inc/hip_ostream_ops.h" )
 add_library ( ${KFD_LIB} SHARED ${KFD_LIB_SRC} )
 target_include_directories ( ${KFD_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HSA_KMT_INC_PATH} )
