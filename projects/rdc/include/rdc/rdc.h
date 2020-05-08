@@ -23,6 +23,10 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_RDC_H_
 #define INCLUDE_RDC_RDC_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
 #include <cstdint>
 
 /** \file rdc_lib.h
@@ -802,5 +806,9 @@ const char* rdc_status_string(rdc_status_t status);
  *  @retval The string to describe the field.
  */
 const char* field_id_string(uint32_t field_id);
+
+#ifdef __cplusplus
+}
+#endif  // __cplusplus
 
 #endif  // INCLUDE_RDC_RDC_H_

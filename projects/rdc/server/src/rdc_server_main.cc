@@ -299,33 +299,6 @@ FileOwner(const char *fn, std::string *owner) {
   return 0;
 }
 
-static int UserID(const char *un, uid_t *uid) {
-  int ret;
-  struct passwd pw;
-  struct passwd *result;
-  char *buf;
-  int bufsize;
-
-  assert(uid != nullptr);
-
-  bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
-  if (bufsize == -1) {
-    bufsize = 16384;
-  }
-  buf = new char[bufsize];
-
-  ret = getpwnam_r(un, &pw, buf, bufsize, &result);
-  delete []buf;
-
-  if (ret == 0) {
-    *uid = pw.pw_uid;
-  } else {
-    perror("Failed to determine user id for given name");
-    return 1;
-  }
-  return 0;
-}
-
 void
 RDCServer::ShutDown(void) {
   server_->Shutdown();
@@ -623,25 +596,33 @@ int main(int argc, char** argv) {
   RDCServer rdc_server;
   RdcdCmdLineOpts cmd_line_opts;
   int err;
-  uid_t rdc_uid;
   uid_t caller_id = geteuid();
 
   bool is_root = (caller_id == 0);
 
-  if (!is_root) {
-    // Ensure user is calling as "rdc"
-    err = UserID("rdc", &rdc_uid);
-    if (err != 0) {
-      return 1;
-    }
-    if (rdc_uid != caller_id) {
-      std::cerr << "Only user \"rdc\" or root can start rdcd." << std::endl;
-      exit(1);
-    }
-  }
-
   init_cmd_line_opts(&cmd_line_opts);
   ProcessCmdline(&cmd_line_opts, argc, argv);
+
+  // Can read the certificates and private key when authentication.
+  if (!cmd_line_opts.no_authentication) {
+    if (cmd_line_opts.use_pinned_certs &&
+      (access(kDefaultRDCServerCertPinPath, R_OK) != 0 ||
+      access(kDefaultRDCServerKeyPinPath, R_OK) != 0 ||
+      access(kDefaultRDCClientCertPinPath, R_OK) != 0)) {
+        std::cerr << "The user needs read access to the pinned "
+          << "certificates and private key." << std::endl;
+          return 1;
+    }
+
+    if (!cmd_line_opts.use_pinned_certs &&
+      (access(kDefaultRDCServerCertKeyPkiPath, R_OK) != 0 ||
+      access(kDefaultRDCServerCertPemPkiPath, R_OK) != 0 ||
+      access(kDefaultRDCClientCACertPemPkiPath, R_OK) != 0)) {
+        std::cerr << "The user needs read access to the PKI "
+          << "certificates and private key." << std::endl;
+          return 1;
+    }
+  }
 
   MakeDaemon(is_root);
 
