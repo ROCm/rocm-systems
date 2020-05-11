@@ -105,6 +105,85 @@ struct ScopedPthread {
      pthread_wrap& pthrd_ref_;
      bool mutex_not_acquired_;  // Use for AcquireNB (not for Aquire())
 };
+
+
+#define PASTE2(x, y) x##y
+#define PASTE(x, y) PASTE2(x, y)
+
+#define __forceinline __inline__ __attribute__((always_inline))
+
+template <typename lambda>
+class ScopeGuard {
+ public:
+  explicit __forceinline ScopeGuard(const lambda& release)
+      : release_(release), dismiss_(false) {}
+
+  ScopeGuard(const ScopeGuard& rhs) {*this = rhs; }
+
+  __forceinline ~ScopeGuard() {
+    if (!dismiss_) release_();
+  }
+  __forceinline ScopeGuard& operator=(const ScopeGuard& rhs) {
+    dismiss_ = rhs.dismiss_;
+    release_ = rhs.release_;
+    rhs.dismiss_ = true;
+  }
+  __forceinline void Dismiss() { dismiss_ = true; }
+
+ private:
+  lambda release_;
+  bool dismiss_;
+};
+
+template <typename lambda>
+static __forceinline ScopeGuard<lambda> MakeScopeGuard(lambda rel) {
+  return ScopeGuard<lambda>(rel);
+}
+
+#define MAKE_SCOPE_GUARD_HELPER(lname, sname, ...) \
+  auto lname = __VA_ARGS__;                        \
+  amd::smi::ScopeGuard<decltype(lname)> sname(lname);
+#define MAKE_SCOPE_GUARD(...)                                   \
+  MAKE_SCOPE_GUARD_HELPER(PASTE(scopeGuardLambda, __COUNTER__), \
+                          PASTE(scopeGuard, __COUNTER__), __VA_ARGS__)
+#define MAKE_NAMED_SCOPE_GUARD(name, ...)                             \
+  MAKE_SCOPE_GUARD_HELPER(PASTE(scopeGuardLambda, __COUNTER__), name, \
+                          __VA_ARGS__)
+
+
+// A macro to disallow the copy and move constructor and operator= functions
+#define DISALLOW_COPY_AND_ASSIGN(TypeName)   \
+  TypeName(const TypeName&) = delete;        \
+  TypeName(TypeName&&) = delete;             \
+  void operator=(const TypeName&) = delete;  \
+  void operator=(TypeName&&) = delete;
+
+template <class LockType>
+class ScopedAcquire {
+ public:
+  /// @brief: When constructing, acquire the lock.
+  /// @param: lock(Input), pointer to an existing lock.
+  explicit ScopedAcquire(LockType* lock) : lock_(lock), doRelease(true) {
+                                                            lock_->Acquire();}
+
+  /// @brief: when destructing, release the lock.
+  ~ScopedAcquire() {
+    if (doRelease) lock_->Release();
+  }
+
+  /// @brief: Release the lock early.  Avoid using when possible.
+  void Release() {
+    lock_->Release();
+    doRelease = false;
+  }
+
+ private:
+  LockType* lock_;
+  bool doRelease;
+  /// @brief: Disable copiable and assignable ability.
+  DISALLOW_COPY_AND_ASSIGN(ScopedAcquire);
+};
+
 }  // namespace smi
 }  // namespace amd
 

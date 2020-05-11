@@ -165,20 +165,20 @@ static rsmi_status_t handleException() {
         return RSMI_STATUS_NOT_SUPPORTED; \
       }  \
       return RSMI_STATUS_INVALID_ARGS; \
-    } \
+    }
 
 #define CHK_SUPPORT(RT_PTR, VR, SUB_VR)  \
     GET_DEV_FROM_INDX \
     CHK_API_SUPPORT_ONLY((RT_PTR), (VR), (SUB_VR))
 
 #define CHK_SUPPORT_NAME_ONLY(RT_PTR) \
-    CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT) \
+    CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
 
 #define CHK_SUPPORT_VAR(RT_PTR, VR) \
-    CHK_SUPPORT((RT_PTR), (VR), RSMI_DEFAULT_VARIANT) \
+    CHK_SUPPORT((RT_PTR), (VR), RSMI_DEFAULT_VARIANT)
 
 #define CHK_SUPPORT_SUBVAR_ONLY(RT_PTR, SUB_VR) \
-    CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, (SUB_VR)) \
+    CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, (SUB_VR))
 
 static pthread_mutex_t *get_mutex(uint32_t dv_ind) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
@@ -540,9 +540,29 @@ static bool is_power_of_2(uint64_t n) {
 rsmi_status_t
 rsmi_init(uint64_t flags) {
   TRY
-
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-  smi.Initialize(flags);
+  std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());
+
+  if (smi.ref_count() == INT32_MAX) {
+    return RSMI_STATUS_REFCOUNT_OVERFLOW;
+  }
+
+  (void)smi.ref_count_inc();
+
+  // If smi.Initialize() throws, we should clean up and dec. ref_count_.
+  // Otherwise, if no issues, the Dismiss() will prevent the ref_count_
+  // decrement.
+  MAKE_NAMED_SCOPE_GUARD(refGuard, [&]() { (void)smi.ref_count_dec(); });
+
+  if (smi.ref_count() == 1) {
+    try {
+      smi.Initialize(flags);
+    } catch(...) {
+      smi.Cleanup();
+      throw;
+    }
+  }
+  refGuard.Dismiss();
 
   return RSMI_STATUS_SUCCESS;
   CATCH
@@ -555,9 +575,17 @@ rsmi_shut_down(void) {
   TRY
 
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());
 
-  smi.Cleanup();
+  if (smi.ref_count() == 0) {
+    return RSMI_STATUS_INIT_ERROR;
+  }
 
+  (void)smi.ref_count_dec();
+
+  if (smi.ref_count() == 0) {
+    smi.Cleanup();
+  }
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -2371,6 +2399,15 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
                                                      "type that was expected";
       break;
 
+    case RSMI_STATUS_BUSY:
+      *status_string = "A resource or mutex could not be acquired "
+                                           "because it is already being used";
+    break;
+
+    case RSMI_STATUS_REFCOUNT_OVERFLOW:
+      *status_string = "An internal reference counter exceeded INT32_MAX";
+      break;
+
     case RSMI_STATUS_UNKNOWN_ERROR:
       *status_string = "An unknown error prevented the call from completing"
                           " successfully";
@@ -3186,6 +3223,7 @@ rsmi_event_notification_init(uint32_t dv_ind) {
 
   std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
   if (smi.kfd_notif_evt_fh() == -1) {
+    assert(smi.kfd_notif_evt_fh_refcnt() == 0);
     int kfd_fd = open(kPathKFDIoctl, O_RDWR | O_CLOEXEC);
 
     if (kfd_fd <= 0) {
@@ -3199,8 +3237,7 @@ rsmi_event_notification_init(uint32_t dv_ind) {
 
     smi.set_kfd_notif_evt_fh(kfd_fd);
   }
-  smi.kfd_notif_evt_fh_refcnt_inc();
-
+  (void)smi.kfd_notif_evt_fh_refcnt_inc();
   struct kfd_ioctl_smi_events_args args;
 
   assert(dev->kfd_gpu_id() <= UINT32_MAX);
@@ -3354,7 +3391,7 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
   dev->set_evt_notif_anon_file_ptr(nullptr);
   dev->set_evt_notif_anon_fd(-1);
 
-  if (!smi.kfd_notif_evt_fh_refcnt_dec()) {
+  if (smi.kfd_notif_evt_fh_refcnt_dec() == 0) {
     int ret = close(smi.kfd_notif_evt_fh());
     smi.set_kfd_notif_evt_fh(-1);
     if (ret < 0) {
@@ -3384,4 +3421,18 @@ rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds) {
 
   sleep(seconds);
   return RSMI_STATUS_SUCCESS;
+}
+
+int32_t
+rsmi_test_refcount(uint64_t refcnt_type) {
+  (void)refcnt_type;
+
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());
+
+  if (smi.ref_count() == 0 && smi.monitor_devices().size() != 0) {
+    return -1;
+  }
+
+  return smi.ref_count();
 }
