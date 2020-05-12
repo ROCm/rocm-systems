@@ -35,7 +35,7 @@ namespace rdc {
 bool RdcMetricFetcherImpl::is_field_valid(uint32_t field_id) const {
      const std::vector<uint32_t> all_fields = {RDC_FI_GPU_MEMORY_USAGE,
      RDC_FI_GPU_MEMORY_TOTAL, RDC_FI_GPU_COUNT, RDC_FI_POWER_USAGE,
-     RDC_FI_GPU_SM_CLOCK, RDC_FI_GPU_UTIL, RDC_FI_DEV_NAME, RDC_FI_GPU_TEMP,
+     RDC_FI_GPU_CLOCK, RDC_FI_GPU_UTIL, RDC_FI_DEV_NAME, RDC_FI_GPU_TEMP,
      RDC_FI_MEM_CLOCK, RDC_FI_PCIE_TX, RDC_FI_PCIE_RX,
      RDC_FI_ECC_CORRECT_TOTAL, RDC_FI_ECC_UNCORRECT_TOTAL, RDC_FI_MEMORY_TEMP};
 
@@ -265,7 +265,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
                  value->value.l_int = static_cast<int64_t>(i64);
              }
              break;
-        case RDC_FI_GPU_SM_CLOCK:
+        case RDC_FI_GPU_CLOCK:
         case RDC_FI_MEM_CLOCK:
              rsmi_frequencies_t f;
              clk_type = RSMI_CLK_TYPE_SYS;

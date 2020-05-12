@@ -164,7 +164,7 @@ void RdciStatsSubSystem::show_job_stats(
         << gpu_info.power_usage.max_value<< " Min: "<<
         gpu_info.power_usage.min_value << " Avg: "
         << gpu_info.power_usage.average << "\n";
-    std::cout << "| SM Clock (MHz)                   | "  << "Max: "
+    std::cout << "| GPU Clock (MHz)                  | "  << "Max: "
         << gpu_info.gpu_clock.max_value << " Min: " <<
         gpu_info.gpu_clock.min_value << " Avg: "
         << gpu_info.gpu_clock.average << "\n";
@@ -172,7 +172,7 @@ void RdciStatsSubSystem::show_job_stats(
         << gpu_info.memory_clock.max_value << " Min: " <<
         gpu_info.memory_clock.min_value << " Avg: "
         << gpu_info.memory_clock.average << "\n";
-    std::cout << "| SM Utilization (%)               | "  << "Max: "
+    std::cout << "| GPU Utilization (%)              | "  << "Max: "
         << gpu_info.gpu_utilization.max_value <<" Min: " <<
         gpu_info.gpu_utilization.min_value << " Avg: " <<
         gpu_info.gpu_utilization.average << "\n";

@@ -354,7 +354,7 @@ const char* field_id_string(uint32_t field_id) {
         {RDC_FI_GPU_MEMORY_USAGE, "GPU_MEMORY_USAGE"},
         {RDC_FI_GPU_MEMORY_TOTAL, "GPU_MEMORY_TOTAL"},
         {RDC_FI_POWER_USAGE, "POWER_USAGE"},
-        {RDC_FI_GPU_SM_CLOCK, "GPU_SM_CLOCK"},
+        {RDC_FI_GPU_CLOCK, "GPU_CLOCK"},
         {RDC_FI_GPU_UTIL, "GPU_UTIL"},
         {RDC_FI_GPU_TEMP, "GPU_TEMP"},
         {RDC_FI_GPU_COUNT, "GPU_COUNT"},

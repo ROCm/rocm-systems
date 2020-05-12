@@ -277,7 +277,7 @@ void RdciDmonSubSystem::create_temp_field_group() {
 
 void RdciDmonSubSystem::show_field_usage() const {
     std::cout << "Supported fields Ids:\n";
-    std::cout << "100 RDC_FI_GPU_SM_CLOCK: Current GPU clock frequencies.\n";
+    std::cout << "100 RDC_FI_GPU_CLOCK: Current GPU clock frequencies.\n";
     std::cout << "101 RDC_FI_MEM_CLOCK: Current Memory clock frequencies.\n";
     std::cout << "140 RDC_FI_MEMORY_TEMP: Memory "
               << "temperature in millidegrees Celsius.\n";

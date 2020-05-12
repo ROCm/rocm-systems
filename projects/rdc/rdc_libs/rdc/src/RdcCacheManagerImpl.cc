@@ -342,7 +342,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(char jobId[64],
                 summary_info.max_gpu_memory_used = std::max(
                     summary_info.max_gpu_memory_used,
                     gpu_info.max_gpu_memory_used);
-            } else if (ite->first == RDC_FI_GPU_SM_CLOCK) {
+            } else if (ite->first == RDC_FI_GPU_CLOCK) {
                 set_summary(ite->second, gpu_info.gpu_clock,
                     summary_info.gpu_clock, 1000000);
             } else if (ite->first == RDC_FI_GPU_UTIL) {

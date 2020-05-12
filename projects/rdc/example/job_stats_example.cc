@@ -150,11 +150,11 @@ int main(int, char **) {
                 << "Max: " << job_info.summary.power_usage.max_value
                 << " Min: "<< job_info.summary.power_usage.min_value
                 << " Avg: "<< job_info.summary.power_usage.average << "\n";
-        std::cout << "| SM Clock (MHz)                   | "
+        std::cout << "| GPU Clock (MHz)                  | "
                 << "Max: " <<job_info.summary.gpu_clock.max_value
                 <<" Min: " << job_info.summary.gpu_clock.min_value
                 <<" Avg: "<< job_info.summary.gpu_clock.average << "\n";
-        std::cout << "| SM Utilization (%)               | "
+        std::cout << "| GPU Utilization (%)              | "
                 << "Max: " <<job_info.summary.gpu_utilization.max_value
                 <<" Min: "<< job_info.summary.gpu_utilization.min_value
                 <<" Avg: "<< job_info.summary.gpu_utilization.average << "\n";

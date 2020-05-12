@@ -144,9 +144,9 @@ typedef enum {
 #define RDC_FI_POWER_USAGE                  155
 
 /**
- * SM clock for the GPU
+ * The current clock for the GPU
  */
-#define RDC_FI_GPU_SM_CLOCK                 100
+#define RDC_FI_GPU_CLOCK                 100
 
 /**
  * Clock for the memory
