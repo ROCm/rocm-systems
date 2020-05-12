@@ -47,7 +47,7 @@ THE SOFTWARE.
 #include <hsa_ven_amd_aqlprofile.h>
 #include <stdint.h>
 
-#define ROCPROFILER_VERSION_MAJOR 7
+#define ROCPROFILER_VERSION_MAJOR 8
 #define ROCPROFILER_VERSION_MINOR 0
 
 #ifdef __cplusplus
