@@ -13,6 +13,7 @@ include(utils)
 set(ROCM_SMI "rocm_smi")
 set(ROCM_SMI_COMPONENT "lib${ROCM_SMI}")
 set(ROCM_SMI_TARGET "${ROCM_SMI}64")
+set(ROCM_SMI_LIB_NAME "lib${ROCM_SMI_TARGET}")
 
 # The following default version values should be updated as appropriate for
 # ABI breaks (update MAJOR and MINOR), and ABI/API additions (update MINOR).
@@ -167,6 +168,21 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
           TARGET ${ROCM_SMI_TARGET}
           POST_BUILD COMMAND ${CMAKE_STRIP} lib${ROCM_SMI_TARGET}.so)
 endif ()
+
+## Add symlinks from top level ROCm lib dir to rocm-smi lib so files
+add_custom_target ( so-link ALL WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink
+                          ../${ROCM_SMI}/lib/${ROCM_SMI_LIB_NAME}.so so-link )
+add_custom_target ( so-major-link ALL WORKING_DIRECTORY
+                  ${CMAKE_CURRENT_BINARY_DIR} COMMAND ${CMAKE_COMMAND}
+                  -E create_symlink
+                  ../${ROCM_SMI}/lib/${ROCM_SMI_LIB_NAME}.so.${VERSION_MAJOR}
+                                                               so-major-link )
+
+install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/so-link DESTINATION lib RENAME
+                                                     ${ROCM_SMI_LIB_NAME}.so )
+install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/so-major-link DESTINATION lib
+                             RENAME ${ROCM_SMI_LIB_NAME}.so.${VERSION_MAJOR} )
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${ROCM_SMI_TARGET}
