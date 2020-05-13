@@ -450,6 +450,15 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
           (uint32_t)(data->args.hipMemcpy.sizeBytes),
           (uint32_t)(data->args.hipMemcpy.kind));
         break;
+      case HIP_API_ID_hipMemcpyAsync:
+        fprintf(hip_api_file_handle, "%s(dst(%p) src(%p) size(0x%x) kind(%u) stream(%p))\n",
+          oss.str().c_str(),
+          data->args.hipMemcpyAsync.dst,
+          data->args.hipMemcpyAsync.src,
+          (uint32_t)(data->args.hipMemcpyAsync.sizeBytes),
+          (uint32_t)(data->args.hipMemcpyAsync.kind),
+          data->args.hipMemcpyAsync.stream);
+        break;
       case HIP_API_ID_hipMalloc:
         fprintf(hip_api_file_handle, "%s(ptr(%p) size(0x%x))\n",
           oss.str().c_str(),
@@ -462,15 +471,25 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
           data->args.hipFree.ptr);
         break;
       case HIP_API_ID_hipModuleLaunchKernel:
-      case HIP_API_ID_hipExtModuleLaunchKernel:
-#if !HIP_VDI
-      case HIP_API_ID_hipHccModuleLaunchKernel:
-#endif
         fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n",
           oss.str().c_str(),
           cxx_demangle(entry->name),
           data->args.hipModuleLaunchKernel.stream);
         break;
+      case HIP_API_ID_hipExtModuleLaunchKernel:
+        fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n",
+          oss.str().c_str(),
+          cxx_demangle(entry->name),
+          data->args.hipExtModuleLaunchKernel.hStream);
+        break;
+#if !HIP_VDI
+      case HIP_API_ID_hipHccModuleLaunchKernel:
+        fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n",
+          oss.str().c_str(),
+          cxx_demangle(entry->name),
+          data->args.hipHccModuleLaunchKernel.hStream);
+        break;
+#endif
       default:
         fprintf(hip_api_file_handle, "%s()\n", oss.str().c_str());
     }

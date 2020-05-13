@@ -36,7 +36,6 @@ add_definitions ( -DLITTLEENDIAN_CPU=1 )
 add_definitions ( -DHSA_LARGE_MODEL= )
 add_definitions ( -DHSA_DEPRECATED= )
 add_definitions ( -D__HIP_PLATFORM_HCC__ )
-add_definitions ( -DHIP_PROF_HIP_API_STRING=1 )
 
 ## Linux Compiler options
 set ( CMAKE_CXX_FLAGS "-std=c++11")
@@ -66,11 +65,20 @@ if ( DEFINED ENV{CMAKE_DEBUG_TRACE} )
   add_definitions ( -DDEBUG_TRACE=1 )
 endif()
 
+if ( NOT DEFINED HIP_API_STRING )
+  set ( HIP_API_STRING 0 )
+endif()
+add_definitions ( -DHIP_PROF_HIP_API_STRING=${HIP_API_STRING} )
+
 ## Enable HIP_VDI mode
-if ( DEFINED HIP_VDI )
-  add_definitions ( -DHIP_VDI=${HIP_VDI} )
-else()
+if ( NOT DEFINED HIP_VDI )
   set ( HIP_VDI 0 )
+endif()
+add_definitions ( -DHIP_VDI=${HIP_VDI} )
+if ( "${HIP_VDI}" STREQUAL "1" )
+  set ( HIP_DEFINES "-D__HIP_ROCclr__=1" )
+else()
+  set ( HIP_DEFINES "-D__HIP_PLATFORM_HCC__=1")
 endif()
 
 ## Enable HIP/HCC local build
