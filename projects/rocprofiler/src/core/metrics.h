@@ -277,7 +277,7 @@ class MetricsDict {
             std::cout << name << "=" << expr_obj->String() << "\n" << std::endl;
 #endif
             counters_vec_t counters_vec;
-            for (const std::string var : expr_obj->GetVars()) {
+            for (const std::string& var : expr_obj->GetVars()) {
               auto it = cache_.find(var);
               if (it == cache_.end()) {
                 EXC_RAISING(HSA_STATUS_ERROR, "Bad metric '" << name << "', var '" << var << "' is not found");

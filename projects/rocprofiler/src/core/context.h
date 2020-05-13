@@ -257,7 +257,7 @@ class Context {
 
   void GetMetricsData() const {
     const MetricArgs<info_map_t> args(info_map_);
-    for (const auto v : metrics_map_) {
+    for (const auto& v : metrics_map_) {
       const std::string& name = v.first;
       const Metric* metric = v.second;
       const xml::Expr* expr = metric->GetExpr();
