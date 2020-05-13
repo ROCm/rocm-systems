@@ -79,6 +79,7 @@
 #include "functional/api_support_read.h"
 #include "functional/mutual_exclusion.h"
 #include "functional/evt_notif_read_write.h"
+#include "functional/init_shutdown_refcount.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -226,16 +227,24 @@ TEST(rsmitstReadOnly, TestAPISupportRead) {
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadOnly, TestMutualExclusion) {
-  TestMutualExclusion test;
+  TestMutualExclusion tst;
 
-  test.DisplayTestInfo();
-  test.SetUp();
-  test.Run();
-  RunCustomTestEpilog(&test);
+  tst.DisplayTestInfo();
+  tst.SetUp();
+  tst.Run();
+  RunCustomTestEpilog(&tst);
 }
 TEST(rsmitstReadWrite, TestEvtNotifReadWrite) {
   TestEvtNotifReadWrite tst;
   RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestConcurrentInit) {
+  TestConcurrentInit tst;
+  tst.DisplayTestInfo();
+  //  tst.SetUp();   // Avoid extra rsmi_init
+  tst.Run();
+  // RunCustomTestEpilog(&tst);  // Avoid extra rsmi_shut_down
+  tst.DisplayResults();
 }
 
 int main(int argc, char** argv) {

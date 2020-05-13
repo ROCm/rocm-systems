@@ -244,6 +244,12 @@ RocmSMI::Initialize(uint64_t flags) {
   auto i = 0;
   uint32_t ret;
 
+  assert(ref_count_ == 1);
+  if (ref_count_ != 1) {
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+            "Unexpected: RocmSMI ref_count_ != 1");
+  }
+
   init_options_ = flags;
 
   euid_ = geteuid();
@@ -299,6 +305,10 @@ RocmSMI::Initialize(uint64_t flags) {
 
 void
 RocmSMI::Cleanup() {
+  s_monitor_devices.clear();
+  devices_.clear();
+  monitors_.clear();
+
   if (kfd_notif_evt_fh() >= 0) {
     int ret = close(kfd_notif_evt_fh());
     if (ret < 0) {
@@ -306,9 +316,6 @@ RocmSMI::Cleanup() {
                  "Failed to close kfd file handle on shutdown.");
     }
   }
-  s_monitor_devices.clear();
-  devices_.clear();
-  monitors_.clear();
 }
 
 RocmSMI::RocmSMI(uint64_t flags) : init_options_(flags),

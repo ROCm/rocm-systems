@@ -123,6 +123,8 @@ typedef enum {
   RSMI_STATUS_BUSY,                      //!< A resource or mutex could not be
                                          //!< acquired because it is already
                                          //!< being used
+  RSMI_STATUS_REFCOUNT_OVERFLOW,          //!< An internal reference counter
+                                         //!< exceeded INT32_MAX
 
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;

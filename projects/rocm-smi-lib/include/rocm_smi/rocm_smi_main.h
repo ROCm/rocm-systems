@@ -94,8 +94,18 @@ class RocmSMI {
     int kfd_notif_evt_fh(void) const {return kfd_notif_evt_fh_;}
     void set_kfd_notif_evt_fh(int fd) {kfd_notif_evt_fh_ = fd;}
     std::mutex *kfd_notif_evt_fh_mutex(void) {return &kfd_notif_evt_fh_mutex_;}
-    int kfd_notif_evt_fh_refcnt_inc() {return ++kfd_notif_evt_fh_refcnt_;}
-    int kfd_notif_evt_fh_refcnt_dec() {return --kfd_notif_evt_fh_refcnt_;}
+    std::mutex *bootstrap_mutex(void) {return &bootstrap_mutex_;}
+
+    uint32_t ref_count(void) const {return ref_count_;}
+    uint32_t ref_count_inc(void) {return ++ref_count_;}
+    uint32_t ref_count_dec(void) {return --ref_count_;}
+
+    uint32_t kfd_notif_evt_fh_refcnt(void) const {
+                                             return kfd_notif_evt_fh_refcnt_;}
+    uint32_t kfd_notif_evt_fh_refcnt_inc(void) {
+                                           return ++kfd_notif_evt_fh_refcnt_;}
+    uint32_t kfd_notif_evt_fh_refcnt_dec(void) {
+                                           return --kfd_notif_evt_fh_refcnt_;}
 
  private:
     std::vector<std::shared_ptr<Device>> devices_;
@@ -114,8 +124,12 @@ class RocmSMI {
     uint32_t euid_;
 
     int kfd_notif_evt_fh_;
-    int kfd_notif_evt_fh_refcnt_;
     std::mutex kfd_notif_evt_fh_mutex_;
+    uint32_t kfd_notif_evt_fh_refcnt_;  // Access to this should be protected
+                                        // by kfd_notif_evt_fh_mutex_
+    std::mutex bootstrap_mutex_;
+    uint32_t ref_count_;  // Access to this should be protected
+                          // by bootstrap_mutex_
 };
 
 }  // namespace smi
