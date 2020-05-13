@@ -22,7 +22,8 @@ if [ -z "$BUILD_TYPE" ] ; then BUILD_TYPE="release"; fi
 if [ -z "$PACKAGE_ROOT" ] ; then PACKAGE_ROOT=$ROCM_PATH; fi
 if [ -z "$PACKAGE_PREFIX" ] ; then PACKAGE_PREFIX="$ROCM_PATH/$COMPONENT"; fi
 if [ -z "$PREFIX_PATH" ] ; then PREFIX_PATH=$PACKAGE_ROOT; fi
-if [ -n "$HIP_VDI" ] ; then HIP_VDI_OPT="-DHIP_VDI=1"; fi
+if [ -z "$HIP_VDI" ] ; then HIP_VDI=0; fi
+if [ -z "$HIP_API_STRING" ] ; then HIP_API_STRING=1; fi
 if [ -n "$ROCM_RPATH" ] ; then LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,${ROCM_RPATH}"; fi
 
 ROCTRACER_ROOT=$(cd $ROCTRACER_ROOT && echo $PWD)
@@ -39,8 +40,10 @@ cmake \
     -DCPACK_PACKAGING_INSTALL_PREFIX=$PACKAGE_PREFIX \
     -DCPACK_GENERATOR="DEB;RPM" \
     -DCMAKE_SHARED_LINKER_FLAGS="$LD_RUNPATH_FLAG" \
-    $HIP_VDI_OPT \
+    -DHIP_VDI="$HIP_VDI" \
+    -DHIP_API_STRING="$HIP_API_STRING" \
     $ROCTRACER_ROOT
+
 make
 make mytest
 make package
