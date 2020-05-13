@@ -93,6 +93,12 @@ set(CPACK_PACKAGE_FILE_NAME "${ROCM_SMI_PACKAGE}-${PKG_VERSION_STR}")
 ## Verbose output.
 set(CMAKE_VERBOSE_MAKEFILE on)
 
+if (CMAKE_COMPILER_IS_GNUCC AND
+                         CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5.4.0)
+    message("Compiler version is " ${CMAKE_CXX_COMPILER_VERSION})
+    message(FATAL_ERROR "Require at least gcc-5.4.0")
+endif()
+
 ## Compiler flags
 set(CMAKE_CXX_FLAGS
  "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti -m64 -msse -msse2 -std=c++11 ")
