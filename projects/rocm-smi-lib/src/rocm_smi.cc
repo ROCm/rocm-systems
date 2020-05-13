@@ -161,10 +161,17 @@ static rsmi_status_t handleException() {
 // This macro assumes dev already available
 #define CHK_API_SUPPORT_ONLY(RT_PTR, VR, SUB_VR) \
     if ((RT_PTR) == nullptr) { \
-      if (!dev->DeviceAPISupported(__FUNCTION__, (VR), (SUB_VR))) { \
-        return RSMI_STATUS_NOT_SUPPORTED; \
-      }  \
-      return RSMI_STATUS_INVALID_ARGS; \
+      try { \
+        if (!dev->DeviceAPISupported(__FUNCTION__, (VR), (SUB_VR))) { \
+          return RSMI_STATUS_NOT_SUPPORTED; \
+        }  \
+        return RSMI_STATUS_INVALID_ARGS; \
+      } catch (const amd::smi::rsmi_exception& e) { \
+        debug_print( \
+             "Exception caught when checking if API is supported %s.\n", \
+                                                                  e.what()); \
+        return RSMI_STATUS_INVALID_ARGS; \
+      } \
     }
 
 #define CHK_SUPPORT(RT_PTR, VR, SUB_VR)  \

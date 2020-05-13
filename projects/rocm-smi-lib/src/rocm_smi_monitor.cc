@@ -323,27 +323,34 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
   int64_t mon_val;
 
   char *endptr;
-  std::regex re(fn_reg_ex);
-  std::string fn;
+  try {
+    std::regex re(fn_reg_ex);
+    std::string fn;
 
-  while (dentry != nullptr) {
-    fn = dentry->d_name;
-    if (std::regex_search(fn, match, re)) {
-      assert(match.size() == 2);  // 1 for whole match + 1 for sub-match
-      errno = 0;
-      mon_val = strtol(match.str(1).c_str(), &endptr, 10);
-      assert(errno == 0);
-      assert(*endptr == '\0');
-      if (errno) {
-        closedir(hwmon_dir);
-        return -2;
+    while (dentry != nullptr) {
+      fn = dentry->d_name;
+      if (std::regex_search(fn, match, re)) {
+        assert(match.size() == 2);  // 1 for whole match + 1 for sub-match
+        errno = 0;
+        mon_val = strtol(match.str(1).c_str(), &endptr, 10);
+        assert(errno == 0);
+        assert(*endptr == '\0');
+        if (errno) {
+          closedir(hwmon_dir);
+          return -2;
+        }
+        sensors->push_back(mon_val);
       }
-      sensors->push_back(mon_val);
+      dentry = readdir(hwmon_dir);
     }
-    dentry = readdir(hwmon_dir);
-  }
-  if (closedir(hwmon_dir)) {
-    return errno;
+    if (closedir(hwmon_dir)) {
+      return errno;
+    }
+  } catch (std::regex_error e) {
+    std::cout << "Regular expression error:" << std::endl;
+    std::cout << e.what() << std::endl;
+    std::cout << "Regex error code: " << e.code() << std::endl;
+    return -3;
   }
   return 0;
 }
@@ -431,7 +438,7 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
       if (!FileExists(dep_path.c_str())) {
         mand_depends_met = false;
       }
-    } else if (ret == -2) {
+    } else if (ret <= -2) {
       throw amd::smi::rsmi_exception(RSMI_STATUS_INTERNAL_EXCEPTION,
                         "Failed to parse monitor file name: " + dep_path);
     }
@@ -450,7 +457,7 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
           mand_depends_met = false;
           break;
         }
-      } else if (ret == -2) {
+      } else if (ret <= -2) {
         throw amd::smi::rsmi_exception(RSMI_STATUS_INTERNAL_EXCEPTION,
                           "Failed to parse monitor file name: " + dep_path);
       }
@@ -479,6 +486,9 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
 
         if (ret == 0) {
           supported_monitors = get_intersection(&sensors_i, &intersect);
+        } else if (ret <= -2) {
+          throw amd::smi::rsmi_exception(RSMI_STATUS_INTERNAL_EXCEPTION,
+                            "Failed to parse monitor file name: " + dep_path);
         }
       } else {
         supported_monitors = intersect;
