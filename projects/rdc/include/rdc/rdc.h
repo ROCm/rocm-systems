@@ -29,14 +29,14 @@ extern "C" {
 
 #include <cstdint>
 
-/** \file rdc_lib.h
+/** \file rdc.h
  *  Main header file for the ROCm RDC library.
  *  All required function, structure, enum, etc. definitions should be defined
  *  in this file.
  *
  *  @brief The rocm_rdc library api is new, and therefore subject to change
  *  either at the ABI or API level. Instead of marking every function prototype
- *  as "unstable", we areinstead saying the API is unstable (i.e., changes
+ *  as "unstable", we are instead saying the API is unstable (i.e., changes
  *  are possible) while the major version remains 0. This means that if the
  *  API/ABI changes, we will not increment the major version to 1. Once the
  *  ABI stabilizes, we will increment the major version to 1, and thereafter
@@ -47,17 +47,17 @@ extern "C" {
  * @brief Error codes returned by rocm_rdc_lib functions
  */
 typedef enum {
-     RDC_ST_OK                  = 0,
-     RDC_ST_NOT_SUPPORTED,           //!< Not supported feature
-     RDC_ST_MSI_ERROR,               //!< The MSI library error
-     RDC_ST_FAIL_LOAD_MODULE,        //!< Fail to load the library
-     RDC_ST_INVALID_HANDLER,         //!< Invalid handler
-     RDC_ST_BAD_PARAMETER,      //!< A parameter is invalid
-     RDC_ST_NOT_FOUND,          //!< Cannot find the value
-     RDC_ST_CONFLICT,           //!< Conflict with current state
-     RDC_ST_CLIENT_ERROR,       //!< The RDC client error
-     RDC_ST_ALREADY_EXIST,      //!< The item already exists
-     RDC_ST_MAX_LIMIT               //!< Max limit recording for the object
+     RDC_ST_OK                  = 0,  //!< Success
+     RDC_ST_NOT_SUPPORTED,            //!< Not supported feature
+     RDC_ST_MSI_ERROR,                //!< The MSI library error
+     RDC_ST_FAIL_LOAD_MODULE,         //!< Fail to load the library
+     RDC_ST_INVALID_HANDLER,          //!< Invalid handler
+     RDC_ST_BAD_PARAMETER,            //!< A parameter is invalid
+     RDC_ST_NOT_FOUND,                //!< Cannot find the value
+     RDC_ST_CONFLICT,                 //!< Conflict with current state
+     RDC_ST_CLIENT_ERROR,             //!< The RDC client error
+     RDC_ST_ALREADY_EXIST,            //!< The item already exists
+     RDC_ST_MAX_LIMIT                 //!< Max limit recording for the object
 } rdc_status_t;
 
 /**
@@ -90,8 +90,11 @@ typedef enum {
 } rdc_field_type_t;
 
 
+//! ID used to represent an invalid GPU
 #define GPU_ID_INVALID          -1
+//! Used to specify all GPUs
 #define RDC_GROUP_ALL_GPUS      -1000
+//! Used to specify all stats fields
 #define RDC_JOB_STATS_FIELDS    -1000
 
 /**
@@ -123,10 +126,6 @@ typedef enum {
  * @brief The max number of the field groups
  */
 #define RDC_MAX_NUM_FIELD_GROUPS 64
-
-/**
- * @biref The fields
- */
 
 /**
  * Memory usage of the GPU instance
@@ -204,9 +203,9 @@ typedef enum {
 /**
  * @brief handlers used in various rdc calls
  */
-typedef void *rdc_handle_t;
-typedef uint32_t rdc_gpu_group_t;
-typedef uint32_t rdc_field_grp_t;
+typedef void *rdc_handle_t;           //!< Handle used for an RDC session
+typedef uint32_t rdc_gpu_group_t;     //!< GPU Group ID type
+typedef uint32_t rdc_field_grp_t;     //!< Field group ID type
 
 /**
  * @brief Represents attributes corresponding to a device
@@ -231,9 +230,9 @@ typedef struct {
  * @brief The structure to store summary of data
  */
 typedef struct {
-    uint64_t max_value;
-    uint64_t min_value;
-    uint64_t average;
+    uint64_t max_value;   //!< Maximum value measured
+    uint64_t min_value;   //!< Minimum value measured
+    uint64_t average;     //!< Average value measured
 } rdc_stats_summary_t;
 
 /**
@@ -244,28 +243,29 @@ typedef struct {
     uint64_t start_time;    //!< The time to start the watching
     uint64_t end_time;      //!< The time to stop the watching
 
-    uint64_t energy_consumed;
-    uint64_t ecc_correct;
-    uint64_t ecc_uncorrect;
-    rdc_stats_summary_t pcie_tx;
-    rdc_stats_summary_t pcie_rx;
-    rdc_stats_summary_t power_usage;
-    rdc_stats_summary_t gpu_clock;
-    rdc_stats_summary_t memory_clock;
-    rdc_stats_summary_t gpu_utilization;
-    rdc_stats_summary_t gpu_temperature;
+    uint64_t energy_consumed;               //!< GPU Energy consumed
+    uint64_t ecc_correct;                   //!< Correctable errors
+    uint64_t ecc_uncorrect;                 //!< Uncorrtable errors
+    rdc_stats_summary_t pcie_tx;            //!< Bytes sent over PCIe stats
+    rdc_stats_summary_t pcie_rx;            //!< Bytes received over PCIe stats
+    rdc_stats_summary_t power_usage;        //!< GPU Power usage stats
+    rdc_stats_summary_t gpu_clock;          //!< GPU Clock speed stats
+    rdc_stats_summary_t memory_clock;       //!< Mem. Clock speed stats
+    rdc_stats_summary_t gpu_utilization;    //!< GPU Utilization stats
+    rdc_stats_summary_t gpu_temperature;    //!< GPU temperature stats
 
-    uint64_t max_gpu_memory_used;
-    rdc_stats_summary_t memory_utilization;
-} rdc_gpu_usage_info_t;
+    uint64_t max_gpu_memory_used;            //!< Maximum GPU memory used
+    rdc_stats_summary_t memory_utilization;  //!< Memory Utilization statistics
+} rdc_gpu_usage_info_t;       //!< GPU usage statistics
 
 /**
  * @brief The structure to hold the job stats
  */
 typedef struct {
-     uint32_t num_gpus;
-     rdc_gpu_usage_info_t summary;
-     rdc_gpu_usage_info_t gpus[16];
+     uint32_t num_gpus;              //!< Number of GPUs used by job
+     rdc_gpu_usage_info_t summary;   //!< Job usage summary statistics
+                                     //!< (overall)
+     rdc_gpu_usage_info_t gpus[16];  //!< Job usage summary staticstics by GPU
 } rdc_job_info_t;
 
 /**
@@ -274,13 +274,14 @@ typedef struct {
 typedef struct {
     uint32_t     field_id;      //!< The field id of the value
     int     status;             //!< RDC_ST_OK or error status
-    uint64_t ts;                 //!< Timestamp in usec since 1970
+    uint64_t ts;                //!< Timestamp in usec since 1970
     rdc_field_type_t type;      //!< The field type
     union {
         int64_t l_int;
         double  dbl;
         char str[RDC_MAX_STR_LENGTH];
-    } value;
+    } value;                     //!< Value of the field. Value type
+                                 //!< depends on the field type.
 } rdc_field_value;
 
 /**
@@ -368,18 +369,18 @@ rdc_status_t rdc_stop_embedded(rdc_handle_t p_rdc_handle);
  *  can be specified in this x.x.x.x:yyyy format, where x.x.x.x is the
  *  IP address and yyyy is the port.
  *
+ *  @param[inout] p_rdc_handle Caller provided pointer to rdc_handle_t. Upon
+ *  successful call, the value will contain the handler
+ *  for following API calls.
+ *
  *  @param [in] root_ca The root CA stored in the string in pem format. Set it
  *  as nullptr if the communication is not encrypted.
  *
  *  @param [in] client_cert The client certificate stored in the string in pem
  *  format. Set it as nullptr if the communication is not encrypted.
  *
- *  @param [in] root_ca The client key stored in the string in pem format.
+ *  @param [in] client_key The client key stored in the string in pem format.
  *  Set it as nullptr if the communication is not encrypted.
- *
- *  @param[inout] p_rdc_handle Caller provided pointer to rdc_handle_t. Upon
- *  successful call, the value will contain the handler
- *  for following API calls.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */

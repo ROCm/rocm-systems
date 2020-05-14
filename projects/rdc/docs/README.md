@@ -67,24 +67,24 @@ By default, authentication is enabled. To disable authentication, when starting 
  ```sh
  $ sudo tree /etc/rdc
 /etc/rdc
-└── server
-    ├── certs
-    │   ├── rdc_cacert.pem
-    │   └── rdc_server_cert.pem
-    └── private
-        └── rdc_server_cert.key
+|-- server
+    |-- certs
+    |   |-- rdc_cacert.pem
+    |   |-- rdc_server_cert.pem
+    |-- private
+        |-- rdc_server_cert.key
  ```
 
 - Clients
  ```sh
  $ sudo tree /etc/rdc
 /etc/rdc
-└── client
-    ├── certs
-    │   ├── rdc_cacert.pem
-    │   └── rdc_client_cert.pem
-    └── private
-        └── rdc_client_cert.key
+|-- client
+    |-- certs
+    |   |-- rdc_cacert.pem
+    |   |-- rdc_client_cert.pem
+    |-- private
+        |-- rdc_client_cert.key
 
  ```
 Machines that are both clients and servers will have both directory structures.

@@ -160,9 +160,9 @@ endif ()
 install(TARGETS ${CLIENT_LIB}
              LIBRARY DESTINATION ${RDC}/lib
                                             COMPONENT ${CLIENT_COMPONENT})
-install(FILES ${SOURCE_DIR}/client/include/rdc/rdc_client.h
-                                         DESTINATION ${RDC}/include/rdc
-                                                COMPONENT ${CLIENT_COMPONENT})
+# install(FILES ${SOURCE_DIR}/client/include/rdc/rdc_client.h
+#                                         DESTINATION ${RDC}/include/rdc
+#                                                COMPONENT ${CLIENT_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Client Lib                      ")
