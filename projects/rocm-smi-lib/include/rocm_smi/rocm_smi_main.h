@@ -73,8 +73,8 @@ class RocmSMI {
     void Initialize(uint64_t flags);
     void Cleanup(void);
 
-    static std::vector<std::shared_ptr<amd::smi::Device>>&
-                                  monitor_devices() {return s_monitor_devices;}
+    std::vector<std::shared_ptr<amd::smi::Device>>&
+                                  monitor_devices() {return monitor_devices_;}
     uint32_t DiscoverAmdgpuDevices(void);
     uint32_t DiscoverAMDPowerMonitors(bool force_update = false);
 
@@ -117,7 +117,7 @@ class RocmSMI {
     void GetEnvVariables(void);
     uint32_t DiscoverAMDMonitors(void);
 
-    static std::vector<std::shared_ptr<amd::smi::Device>> s_monitor_devices;
+    std::vector<std::shared_ptr<amd::smi::Device>> monitor_devices_;
 
     RocmSMI_env_vars env_vars_;
     uint64_t init_options_;

@@ -237,8 +237,6 @@ static uint32_t GetMonitorDevices(const std::shared_ptr<amd::smi::Device> &d,
   return 0;
 }
 
-std::vector<std::shared_ptr<amd::smi::Device>> RocmSMI::s_monitor_devices;
-
 void
 RocmSMI::Initialize(uint64_t flags) {
   auto i = 0;
@@ -268,7 +266,7 @@ RocmSMI::Initialize(uint64_t flags) {
   // IterateSMIDevices will iterate through all the known devices and apply
   // the provided call-back to each device found.
   ret = IterateSMIDevices(GetMonitorDevices,
-                                  reinterpret_cast<void *>(&s_monitor_devices));
+                                  reinterpret_cast<void *>(&monitor_devices_));
 
   if (ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
@@ -287,8 +285,8 @@ RocmSMI::Initialize(uint64_t flags) {
   // 1. construct kfd_node_map_ with gpu_id as key and *Device as value
   // 2. for each kfd node, write the corresponding dv_ind
   // 3. for each amdgpu device, write the corresponding gpu_id
-  for (uint32_t dv_ind = 0; dv_ind < s_monitor_devices.size(); ++dv_ind) {
-    dev = s_monitor_devices[dv_ind];
+  for (uint32_t dv_ind = 0; dv_ind < monitor_devices_.size(); ++dv_ind) {
+    dev = monitor_devices_[dv_ind];
     uint64_t bdfid = dev->bdfid();
     assert(tmp_map.find(bdfid) != tmp_map.end());
     if (tmp_map.find(bdfid) == tmp_map.end()) {
@@ -305,7 +303,7 @@ RocmSMI::Initialize(uint64_t flags) {
 
 void
 RocmSMI::Cleanup() {
-  s_monitor_devices.clear();
+  monitor_devices_.clear();
   devices_.clear();
   monitors_.clear();
 
