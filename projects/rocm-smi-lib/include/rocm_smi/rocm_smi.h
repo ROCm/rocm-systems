@@ -256,9 +256,8 @@ typedef struct {
   uint64_t time_running;     //!< Time that che counter was running
 } rsmi_counter_value_t;
 
-/*
+/**
  * Event notification event types
- * See <linux/kfd_ioctl.h>
  */
 typedef enum {
   RSMI_EVT_NOTIF_VMFAULT = KFD_SMI_EVENT_VMFAULT,  //!< VM page fault
@@ -276,7 +275,7 @@ typedef enum {
 typedef struct {
     uint32_t dv_ind;        //!< Index of device that corresponds to the event
     rsmi_evt_notification_type_t event;     //!< Event type
-    char message[MAX_EVENT_NOTIFICATION_MSG_SIZE];  // Event message
+    char message[MAX_EVENT_NOTIFICATION_MSG_SIZE];  //!< Event message
 } rsmi_evt_notification_data_t;
 
 /**
@@ -2933,15 +2932,13 @@ rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
 /**
  * @brief Prepare to collect event notifications for a GPU
  *
- * @param dv_ind a device index corresponding to the device on which to
- * listen for events
- *
  * @details This function prepares to collect events for the GPU with device
  * ID @p dv_ind, by initializing any required system parameters. This call
  * may open files which will remain open until ::rsmi_event_notification_stop()
  * is called.
- * 
- * @param[in] unused The parameter is currently ignored
+ *
+ * @param dv_ind a device index corresponding to the device on which to
+ * listen for events
  *
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
@@ -2950,7 +2947,7 @@ rsmi_event_notification_init(uint32_t dv_ind);
 
 /**
  * @brief Specify which events to collect for a device
- * 
+ *
  * @details Given a device index @p dv_ind and a @p mask consisting of
  * elements of ::rsmi_evt_notification_type_t OR'd together, this function
  * will listen for the events specified in @p mask on the device
@@ -2962,7 +2959,7 @@ rsmi_event_notification_init(uint32_t dv_ind);
  * @param mask 0 or more elements of ::rsmi_evt_notification_type_t OR'd
  * together that indicate which event types to listen for.
  *
- * @retval ::RSMI_INITIALIZATION_ERROR is returned if 
+ * @retval ::RSMI_STATUS_INIT_ERROR is returned if
  * ::rsmi_event_notification_init() has not been called before a call to this
  * function
  *
@@ -2990,6 +2987,9 @@ rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask);
  * occurrance of the events on the respective devices that were previously
  * specified by ::rsmi_event_notification_mask_set().
  *
+ * @param[in] timeout_ms number of milliseconds to wait for an event
+ * to occur
+ *
  * @param[inout] num_elem pointer to uint32_t, provided by the caller. On
  * input, this value tells how many ::rsmi_evt_notification_data_t elements
  * are being provided by the caller with @p data. On output, the location
@@ -3009,10 +3009,10 @@ rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask);
  *
  */
 rsmi_status_t
-rsmi_event_notification_get(int timout_ms,
+rsmi_event_notification_get(int timeout_ms,
                      uint32_t *num_elem, rsmi_evt_notification_data_t *data);
 
-/*
+/**
  * @brief Close any file handles and free any resources used by event
  * notification for a GPU
  *

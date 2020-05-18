@@ -200,6 +200,38 @@ install(FILES ${SOURCE_DIR}/include/rocm_smi/rocm_smi.h
 install(FILES ${SOURCE_DIR}/include/rocm_smi/kfd_ioctl.h
                                         DESTINATION rocm_smi/include/rocm_smi)
 
+# Generate Doxygen documentation
+find_package(Doxygen)
+find_package(LATEX COMPONENTS PDFLATEX)
+if (DOXYGEN_FOUND AND LATEX_FOUND)
+  set (RSMI_MANUAL_NAME "ROCm_SMI_Manual")
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/rsmi_doxygen.cfg
+                                   ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.tex
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/docs/rsmi_doxygen.cfg
+                "${INC_DIR}/rocm_smi.h"
+                ${CMAKE_CURRENT_SOURCE_DIR}/docs/README.md
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
+         COMMAND make  > /dev/null
+         COMMAND cp  ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
+                      ${CMAKE_CURRENT_SOURCE_DIR}/docs/${RSMI_MANUAL_NAME}.pdf
+         DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.tex
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/latex)
+
+  add_custom_target(docs DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf)
+
+  add_dependencies(${ROCM_SMI_TARGET} docs)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
+                         DESTINATION ${ROCM_SMI}/docs/${RSMI_MANUAL_NAME}.pdf)
+  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/docs/README.md
+                          DESTINATION ${ROCM_SMI}/docs/)
+else()
+  message("Doxygen or Latex is not found. Will not generate documents.")
+endif(DOXYGEN_FOUND AND LATEX_FOUND)
+
 ## Add the packaging directives for the runtime library.
 
 # TODO set(CPACK_DEBIAN_PACKAGE_HOMEPAGE <GITHUB URL> )
@@ -219,16 +251,4 @@ set (CPACK_RPM_PACKAGE_VERSION ${PKG_VERSION_STR})
 
 include (CPack)
 
-# Generate Doxygen documentation
-find_package(Doxygen)
-if (DOXYGEN_FOUND)
-  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/rsmi_doxygen.cfg
-                                   ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
-  add_custom_target(doc
-         ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
-         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                  COMMENT "Generating API documentation with Doxygen" VERBATIM)
-else()
-  message("Doxygen is not found. Will not generate documents.")
-endif(DOXYGEN_FOUND)
 
