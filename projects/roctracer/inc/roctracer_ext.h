@@ -32,7 +32,7 @@ THE SOFTWARE.
 #ifndef INC_ROCTRACER_EXT_H_
 #define INC_ROCTRACER_EXT_H_
 
-#include "roctracer.h"
+#include <roctracer.h>
 
 typedef void (*roctracer_start_cb_t)();
 typedef void (*roctracer_stop_cb_t)();

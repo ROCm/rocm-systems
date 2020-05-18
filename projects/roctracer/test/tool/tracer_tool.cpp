@@ -32,18 +32,18 @@ THE SOFTWARE.
 #include <sys/types.h>
 #include <unistd.h>  /* usleep */
 
-#include <inc/roctracer_ext.h>
-#include <inc/roctracer_roctx.h>
-#include <inc/roctracer_hsa.h>
-#include <inc/roctracer_hip.h>
-#include <inc/roctracer_hcc.h>
-#include <inc/roctracer_kfd.h>
-#include <inc/ext/hsa_rt_utils.hpp>
-#include <src/core/loader.h>
-#include <src/core/trace_buffer.h>
-#include <util/xml.h>
+#include <roctracer_ext.h>
+#include <roctracer_roctx.h>
+#include <roctracer_hsa.h>
+#include <roctracer_hip.h>
+#include <roctracer_hcc.h>
+#include <roctracer_kfd.h>
+#include <ext/hsa_rt_utils.hpp>
 
+#include "src/core/loader.h"
+#include "src/core/trace_buffer.h"
 #include "util/hsa_rsrc_factory.h"
+#include "util/xml.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
 #define CONSTRUCTOR_API __attribute__((constructor))

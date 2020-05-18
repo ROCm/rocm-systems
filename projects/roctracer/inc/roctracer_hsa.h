@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include <hsa.h>
 #include <hsa_ext_amd.h>
 
-#include "roctracer.h"
+#include <roctracer.h>
 
 // HSA OP ID enumeration
 enum hsa_op_id_t {
@@ -143,5 +143,5 @@ typedef void* hsa_amd_queue_intercept_handler;
 typedef void* hsa_amd_runtime_queue_notifier;
 #endif //! __cplusplus
 
-#include "inc/hsa_prof_str.h"
+#include <hsa_prof_str.h>
 #endif // INC_ROCTRACER_HSA_H_

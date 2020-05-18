@@ -23,7 +23,7 @@ THE SOFTWARE.
 #ifndef CB_TABLE_H_
 #define CB_TABLE_H_
 
-#include "ext/prof_protocol.h"
+#include <ext/prof_protocol.h>
 
 #include <mutex>
 

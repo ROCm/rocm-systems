@@ -42,7 +42,7 @@ THE SOFTWARE.
 #include <stdbool.h>
 #endif
 
-#include "ext/prof_protocol.h"
+#include <ext/prof_protocol.h>
 
 #define ROCTRACER_VERSION_MAJOR 3
 #define ROCTRACER_VERSION_MINOR 0

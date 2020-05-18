@@ -40,6 +40,6 @@ typedef const char* (hipGetOpName_t)(unsigned op);
 }
 #endif
 
-#include "roctracer.h"
+#include <roctracer.h>
 
 #endif  // INC_ROCTRACER_HCC_H_

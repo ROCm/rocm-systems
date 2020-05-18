@@ -32,9 +32,9 @@ using namespace std;
 #endif
 
 // roctx header file
-#include <inc/roctx.h>
+#include <roctx.h>
 // roctracer extension API
-#include <inc/roctracer_ext.h>
+#include <roctracer_ext.h>
 
 const size_t msg_size = 512;
 char* msg_buf = NULL;
@@ -225,11 +225,11 @@ int main() {
 // HIP Callbacks/Activity tracing
 //
 #if 1
-#include <inc/roctracer_hip.h>
-#include <inc/roctracer_hcc.h>
-#include <inc/roctracer_hsa.h>
-#include <inc/roctracer_kfd.h>
-#include <inc/roctracer_roctx.h>
+#include <roctracer_hip.h>
+#include <roctracer_hcc.h>
+#include <roctracer_hsa.h>
+#include <roctracer_kfd.h>
+#include <roctracer_roctx.h>
 
 #include <unistd.h> 
 #include <sys/syscall.h>   /* For SYS_xxx definitions */ 

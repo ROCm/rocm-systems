@@ -89,13 +89,22 @@ add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
 
 ## pbulic headers
 set ( PUBLIC_HEADERS
+  roctx.h
   roctracer.h
-  roctracer_hip.h
-  roctracer_hcc.h
   roctracer_ext.h
+  roctracer_hcc.h
+  roctracer_hip.h
+  roctracer_hsa.h
+  roctracer_kfd.h
+  roctracer_roctx.h
+  roctracer_cb_table.h
+  basic_ostream_ops.h
+  hip_ostream_ops.h
+  hsa_prof_str.h
+  kfd_ostream_ops.h
+  kfd_prof_str.h
   ext/prof_protocol.h
   ext/hsa_rt_utils.hpp
-  roctx.h
 )
 
 ## Installation and packaging

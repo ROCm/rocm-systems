@@ -283,8 +283,8 @@ class API_DescrParser:
 
     self.content_h += '#include <dlfcn.h>\n'
     self.content_h += '#include <string.h>\n'
-    self.content_h += '#include \"roctracer_kfd.h\"\n'
-    self.content_h += '#include \"hsakmt.h\"\n'
+    self.content_h += '#include <roctracer_kfd.h>\n'
+    self.content_h += '#include <hsakmt.h>\n'
 
     self.content_h += '#define PUBLIC_API __attribute__((visibility(\"default\")))\n'
 
@@ -293,7 +293,7 @@ class API_DescrParser:
 
     self.content_h += '\n'
     self.content_h += '#if PROF_API_IMPL\n'
-    self.content_h += '#include \"cb_table.h\"\n'
+    self.content_h += '#include <roctracer_cb_table.h>\n'
     self.content_h += 'namespace roctracer {\n'
     self.content_h += 'namespace kfd_support {\n'
 

@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 #include "roctracer_ext.h"
 // roctx header file
-#include <inc/roctx.h>
+#include <roctx.h>
 
 
 #define WIDTH 1024

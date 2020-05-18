@@ -59,7 +59,7 @@ typedef struct roctx_api_data_s {
 } roctx_api_data_t;
 
 #ifdef __cplusplus
-#include "cb_table.h"
+#include <roctracer_cb_table.h>
 namespace roctx {
 // ROCTX callbacks table type
 typedef roctracer::CbTable<ROCTX_API_ID_NUMBER> cb_table_t;

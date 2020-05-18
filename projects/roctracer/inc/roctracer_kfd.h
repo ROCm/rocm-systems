@@ -23,12 +23,12 @@ THE SOFTWARE.
 /////////////////////////////////////////////////////////////////////////////
 #ifndef INC_ROCTRACER_KFD_H_
 #define INC_ROCTRACER_KFD_H_
-#include "roctracer.h"
-#include "hsakmt.h"
+#include <roctracer.h>
+#include <hsakmt.h>
 #ifdef __cplusplus
-#include "inc/kfd_ostream_ops.h"
+#include <kfd_ostream_ops.h>
 #endif
-#include "inc/kfd_prof_str.h"
+#include <kfd_prof_str.h>
 
 #endif // INC_ROCTRACER_KFD_H_
  
