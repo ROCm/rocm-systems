@@ -25,23 +25,23 @@ set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
 
 ## Path to HSA test
 set ( HSA_TEST_DIR "${TEST_DIR}/hsa/test" )
-set ( HSA_REV "2522691" )
+set ( HSA_REV "48bd999" )
 
 ## test run script
 set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
 
 ## build HIP tests
-set ( TEST_CFLAGS HIP_VDI=${HIP_VDI} ROCM_INC_PATH=${ROCM_INC_PATH} )
+set ( TEST_ENV HIP_VDI=${HIP_VDI} ROCM_INC_PATH=${ROCM_INC_PATH} ROCM_PATH=${ROCM_ROOT_DIR} HIPCC_VERBOSE=3 )
 add_custom_target( mytest
   COMMAND make -C "${TEST_DIR}/MatrixTranspose"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test"
-  COMMAND ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
+  COMMAND ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_test"
-  COMMAND HIP_API_ACTIVITY_ON=1 ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
+  COMMAND HIP_API_ACTIVITY_ON=1 ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_hipaact_test"
-  COMMAND MGPU_TEST=1 ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
+  COMMAND MGPU_TEST=1 ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_mgpu"
-  COMMAND C_TEST=1 ${TEST_CFLAGS} make -C "${TEST_DIR}/MatrixTranspose_test"
+  COMMAND C_TEST=1 ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose_test"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_ctest"
 # copy traces
   COMMAND sh -xc "cp ${TEST_DIR}/golden_traces/*_trace.txt ${PROJECT_BINARY_DIR}/test/"

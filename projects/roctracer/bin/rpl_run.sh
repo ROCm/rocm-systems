@@ -30,9 +30,6 @@ RUN_DIR=`pwd`
 TMP_DIR="/tmp"
 DATA_DIR="rpl_data_${time_stamp}_$$"
 
-# PATH to custom HSA and OpenCl runtimes
-HSA_PATH=$PKG_DIR/lib/hsa
-
 # roctracer path
 if [ -z "$ROCTRACER_PATH" ] ; then ROCTRACER_PATH=$ROOT_DIR/roctracer; fi
 
@@ -43,7 +40,7 @@ HIP_TRACE=0
 # Generate stats
 GEN_STATS=0
 
-export LD_LIBRARY_PATH=$PKG_DIR/lib:$PKG_DIR/tool:$ROCTRACER_PATH/lib:$ROCTRACER_PATH/tool:$HSA_PATH
+export LD_LIBRARY_PATH=$PKG_DIR/lib:$PKG_DIR/lib/hsa:$PKG_DIR/tool:$ROCTRACER_PATH/lib:$ROCTRACER_PATH/tool
 export PATH=.:$PATH
 
 # enable error logging
