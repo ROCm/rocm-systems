@@ -28,6 +28,7 @@ $(EXECUTABLE): $(OBJECTS)
 	$(HIPCC) $(OBJECTS) -o $@ $(ROC_LIBS)
 
 test: $(EXECUTABLE)
+	env
 	$(EXECUTABLE)
 
 
