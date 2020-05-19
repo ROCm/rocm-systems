@@ -40,6 +40,34 @@ RdciSubSystem::RdciSubSystem():
      }
 }
 
+bool RdciSubSystem::get_field_id_from_name(
+        const std::string& name, uint32_t& value) const {
+    const std::map<std::string, uint32_t> field_name_to_id = {
+        {"RDC_FI_GPU_MEMORY_USAGE", 525},
+        {"RDC_FI_GPU_MEMORY_TOTAL", 580},
+        {"RDC_FI_POWER_USAGE", 155},
+        {"RDC_FI_GPU_CLOCK", 100},
+        {"RDC_FI_MEM_CLOCK", 101},
+        {"RDC_FI_PCIE_TX", 200},
+        {"RDC_FI_PCIE_RX", 201},
+        {"RDC_FI_GPU_UTIL", 203},
+        {"RDC_FI_ECC_CORRECT_TOTAL", 312},
+        {"RDC_FI_ECC_UNCORRECT_TOTAL", 313},
+        {"RDC_FI_MEMORY_TEMP", 140},
+        {"RDC_FI_GPU_TEMP", 150},
+        {"RDC_FI_GPU_COUNT", 4},
+        {"RDC_FI_DEV_NAME", 50}
+    };
+
+    auto id = field_name_to_id.find(name);
+    if (id == field_name_to_id.end()) {
+        return false;
+    }
+
+    value = id->second;
+    return true;
+}
+
 std::vector<std::string> RdciSubSystem::split_string(const std::string& s,
             char delimiter) const {
     std::vector<std::string> tokens;

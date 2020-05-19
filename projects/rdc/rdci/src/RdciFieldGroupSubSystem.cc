@@ -158,10 +158,13 @@ void RdciFieldGroupSubSystem::process() {
                uint32_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
                for (uint32_t i = 0; i < fields.size(); i++) {
                    if (!IsNumber(fields[i])) {
-                       throw RdcException(RDC_ST_BAD_PARAMETER,
-                            "The field Id "+fields[i]+" needs to be a number");
+                       if (!get_field_id_from_name(fields[i], field_ids[i])) {
+                         throw RdcException(RDC_ST_BAD_PARAMETER,
+                            "The field name "+fields[i]+" is not valid");
+                       }
+                   } else {
+                     field_ids[i] = std::stoi(fields[i]);
                    }
-                   field_ids[i] = std::stoi(fields[i]);
                }
                rdc_field_grp_t group_id;
                result = rdc_group_field_create(rdc_handle_, fields.size(),

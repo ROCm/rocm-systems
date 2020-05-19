@@ -147,10 +147,15 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
             std::vector<std::string> vec_ids = split_string(field_ids, ',');
             for (uint32_t i = 0; i < vec_ids.size(); i++) {
                 if (!IsNumber(vec_ids[i])) {
-                    throw RdcException(RDC_ST_BAD_PARAMETER, "The field Id "
-                            +vec_ids[i]+" needs to be a number");
+                    uint32_t field_id = 0;
+                    if (!get_field_id_from_name(vec_ids[i], field_id)) {
+                         throw RdcException(RDC_ST_BAD_PARAMETER,
+                            "The field name "+vec_ids[i]+" is not valid");
+                    }
+                    field_ids_.push_back(field_id);
+                } else {
+                    field_ids_.push_back(std::stoi(vec_ids[i]));
                 }
-                field_ids_.push_back(std::stoi(vec_ids[i]));
             }
         }
     }

@@ -120,10 +120,10 @@ void RdcMetricFetcherImpl::get_ecc_error(uint32_t gpu_index,
     }
 }
 
-void RdcMetricFetcherImpl::async_get_pcie_throughput(uint32_t gpu_index,
+bool RdcMetricFetcherImpl::async_get_pcie_throughput(uint32_t gpu_index,
         uint32_t field_id, rdc_field_value* value) {
     if (!value) {
-        return;
+        return false;
     }
 
     do {
@@ -136,7 +136,7 @@ void RdcMetricFetcherImpl::async_get_pcie_throughput(uint32_t gpu_index,
                 value->status = metric->second.value.status;
                 value->type = metric->second.value.type;
                 value->value = metric->second.value.value;
-                return;
+                return false;
             }
         }
 
@@ -150,6 +150,8 @@ void RdcMetricFetcherImpl::async_get_pcie_throughput(uint32_t gpu_index,
                         field_id_string(field_id) << " to cache.");
     } while (0);
     cv_.notify_all();
+
+    return true;
 }
 
 void RdcMetricFetcherImpl::get_pcie_throughput(const RdcFieldKey& key) {
@@ -221,6 +223,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
     uint64_t i64 = 0;
     rsmi_temperature_type_t sensor_type;
     rsmi_clk_type_t clk_type;
+    bool async_fetching = false;
 
     if (!is_field_valid(field_id)) {
          RDC_LOG(RDC_ERROR, "Fail to fetch field " << field_id
@@ -313,7 +316,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
             break;
          case RDC_FI_PCIE_TX:
          case RDC_FI_PCIE_RX:
-            async_get_pcie_throughput(gpu_index, field_id, value);
+            async_fetching = async_get_pcie_throughput(
+                            gpu_index, field_id, value);
             break;
         default:
             break;
@@ -321,9 +325,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
 
     int64_t latency = now()-value->ts;
     if (value->status != RSMI_STATUS_SUCCESS) {
-         RDC_LOG(RDC_ERROR, "Fail to fetch " << gpu_index << ":" <<
+        if (async_fetching) {  //!< Async fetching is not an error
+            RDC_LOG(RDC_DEBUG, "Async fetch " << field_id_string(field_id));
+        } else {
+            RDC_LOG(RDC_ERROR, "Fail to fetch " << gpu_index << ":" <<
               field_id_string(field_id) << " with rsmi error code "
               << value->status <<", latency " << latency);
+        }
     } else if (value->type == INTEGER) {
          RDC_LOG(RDC_DEBUG, "Fetch " << gpu_index << ":" <<
                field_id_string(field_id) << ":" << value->value.l_int

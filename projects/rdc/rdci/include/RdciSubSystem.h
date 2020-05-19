@@ -43,6 +43,8 @@ class RdciSubSystem {
      std::vector<std::string> split_string(const std::string& s,
             char delimiter) const;
      void show_common_usage() const;
+     bool get_field_id_from_name(const std::string& name,
+                uint32_t& value) const;  // NOLINT(runtime/references)
      rdc_handle_t rdc_handle_;
      std::string ip_port_;
 

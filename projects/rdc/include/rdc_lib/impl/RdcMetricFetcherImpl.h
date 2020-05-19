@@ -60,7 +60,9 @@ class RdcMetricFetcherImpl: public RdcMetricFetcher {
     uint64_t now();
     void get_ecc_error(uint32_t gpu_index,
         uint32_t field_id, rdc_field_value* value);
-    void async_get_pcie_throughput(uint32_t gpu_index,
+
+    //!< return true if starting async_get
+    bool async_get_pcie_throughput(uint32_t gpu_index,
         uint32_t field_id, rdc_field_value* value);
     void get_pcie_throughput(const RdcFieldKey& key);
 
