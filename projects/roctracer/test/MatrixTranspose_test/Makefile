@@ -1,11 +1,13 @@
-ROOT_PATH = ../..
-LIB_PATH  = $(ROOT_PATH)/build
-ROC_LIBS  = -Wl,--rpath,${LIB_PATH} $(LIB_PATH)/libroctracer64.so $(LIB_PATH)/libroctx64.so
-ROCM_INC_PATH ?= /opt/rocm/include
+ROOT_PATH ?= ../..
+LIB_PATH  ?= $(ROOT_PATH)/build
+ROCM_PATH ?= /opt/rocm
 HIP_VDI ?= 0
 ITERATIONS ?= 100
 
-HIP_PATH?= $(wildcard /opt/rocm/hip)
+ROC_LIBS  = -Wl,--rpath,${LIB_PATH} $(LIB_PATH)/libroctracer64.so $(LIB_PATH)/libroctx64.so
+ROCM_INC_PATH = $(ROCM_PATH)/include
+
+HIP_PATH ?= $(wildcard /opt/rocm/hip)
 ifeq (,$(HIP_PATH))
 	HIP_PATH=../../..
 endif
