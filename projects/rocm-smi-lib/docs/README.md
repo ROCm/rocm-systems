@@ -27,14 +27,13 @@ After the ROCm SMI library git repository has been cloned to a local Linux machi
 ##### ```$ cmake <location of root of ROCm SMI library CMakeLists.txt>```
 ##### ```$ make```
 ##### ```# Install library file and header; default location is /opt/rocm```
-##### ```$ sudo make install```
+##### ```$ make install```
 The built library will appear in the `build` folder.
 
-#### Building the Documentation
-The documentation PDF file can be built with the following steps (continued from the steps above):
-##### ```$ make doc```
-##### ```$ cd latex```
-##### ```$ make```
+To build the rpm and deb packages follow the above steps with:
+##### ```$ make package```
+
+#### Documentation
 The reference manual, `refman.pdf` will be in the `latex` directory upon a successful build.
 
 #### Building the Tests
@@ -45,7 +44,7 @@ In order to verify the build and capability of ROCm SMI on your system and to se
 ##### ```$ mkdir <location for test build>```
 ##### ```$ cd <location for test build>```
 ##### ```$ cmake -DROCM_DIR=$ROCM_DIR <ROCm SMI source root>/tests/rocm_smi_test```
-##### ```$ make
+##### ```$ make```
 
 To run the test, execute the program `rsmitst` that is built from the steps above.
 

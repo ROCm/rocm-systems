@@ -212,7 +212,6 @@ if (DOXYGEN_FOUND AND LATEX_FOUND)
         COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/docs/rsmi_doxygen.cfg
                 "${INC_DIR}/rocm_smi.h"
-                ${CMAKE_CURRENT_SOURCE_DIR}/docs/README.md
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
          COMMAND make  > /dev/null
