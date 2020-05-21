@@ -518,7 +518,7 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
         fflush(hcc_activity_file_handle);
         break;
       case ACTIVITY_DOMAIN_HSA_OPS:
-        if (record->op == HSA_OP_ID_PCSAMPLE) {
+        if (record->op == HSA_OP_ID_RESERVED1) {
           fprintf(pc_sample_file_handle, "%u %lu 0x%lx %s\n",
             record->pc_sample.se, record->pc_sample.cycle, record->pc_sample.pc, name);
           fflush(pc_sample_file_handle);
@@ -955,8 +955,8 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
   if (trace_pcs) {
     fprintf(stdout, "    PCS-trace()\n"); fflush(stdout);
     open_tracing_pool();
-    pc_sample_file_handle = open_output_file(output_prefix, "pc_sample_trace.txt");
-    ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_PCSAMPLE));
+    pc_sample_file_handle = open_output_file(output_prefix, "pcs_trace.txt");
+    ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_RESERVED1));
   }
 
   ONLOAD_TRACE_END();
