@@ -182,19 +182,6 @@ set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE
 set(CPACK_RPM_PACKAGE_NAME  ${RDC_PACKAGE})
 set(CPACK_RPM_PACKAGE_VERSION ${PKG_VERSION_STR})
 
-# Generate Doxygen documentation
-find_package(Doxygen)
-if (DOXYGEN_FOUND)
-  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/rdc_doxygen.cfg
-                                   ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
-  add_custom_target(doc
-         ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
-         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                  COMMENT "Generating API documentation with Doxygen" VERBATIM)
-else()
-  message("Doxygen is not found. Will not generate documents.")
-endif(DOXYGEN_FOUND)
-
 ## Add the packaging directives
 include (CPack)
 

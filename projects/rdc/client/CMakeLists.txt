@@ -164,6 +164,41 @@ install(TARGETS ${CLIENT_LIB}
 #                                         DESTINATION ${RDC}/include/rdc
 #                                                COMPONENT ${CLIENT_COMPONENT})
 
+# Generate Doxygen documentation for client api manual
+find_package(Doxygen)
+find_package(LATEX COMPONENTS PDFLATEX)
+if (DOXYGEN_FOUND AND LATEX_FOUND)
+  set (RDC_MANUAL_NAME "RDC_API_Manual")
+  message("Building ${RDC_MANUAL_NAME}.pdf")
+  configure_file(${PROJECT_SOURCE_DIR}/docs/rdc_doxygen.cfg
+                                   ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.tex
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+        DEPENDS ${PROJECT_SOURCE_DIR}/docs/rdc_doxygen.cfg
+                "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h"
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
+         COMMAND make  > /dev/null
+         COMMAND cp  ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
+                      ${PROJECT_SOURCE_DIR}/docs/${RDC_MANUAL_NAME}.pdf
+         DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.tex
+         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/latex)
+
+  add_custom_target(docs DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf)
+
+  add_dependencies(${CLIENT_LIB} docs)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
+                DESTINATION ${RDC}/docs/${RDC_MANUAL_NAME}.pdf
+                COMPONENT ${CLIENT_COMPONENT})
+  install(FILES ${PROJECT_SOURCE_DIR}/docs/README.md
+                          DESTINATION ${RDC}/docs/
+                          COMPONENT ${CLIENT_COMPONENT})
+else()
+  message("Doxygen or Latex is not found. Will not generate documents.")
+endif(DOXYGEN_FOUND AND LATEX_FOUND)
+
+
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Client Lib                      ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
