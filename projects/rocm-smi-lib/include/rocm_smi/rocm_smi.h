@@ -712,6 +712,7 @@ typedef struct {
 typedef struct {
     uint32_t process_id;  //!< Process ID
     uint32_t pasid;    //!< PASID
+    uint64_t vram_usage;  //!< VRAM usage
 } rsmi_process_info_t;
 
 

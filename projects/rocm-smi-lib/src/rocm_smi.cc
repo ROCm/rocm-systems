@@ -2924,7 +2924,17 @@ rsmi_compute_process_info_by_pid_get(uint32_t pid,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  int err = amd::smi::GetProcessInfoForPID(pid, proc);
+  std::unordered_set<uint64_t> gpu_set;
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  auto it = smi.kfd_node_map().begin();
+
+  while (it != smi.kfd_node_map().end()) {
+    uint64_t gpu_id = it->first;
+    gpu_set.insert(gpu_id);
+    it++;
+  }
+
+  int err = amd::smi::GetProcessInfoForPID(pid, proc, &gpu_set);
 
   if (err) {
     return errno_to_rsmi_status(err);

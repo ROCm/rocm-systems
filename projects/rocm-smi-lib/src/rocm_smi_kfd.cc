@@ -384,10 +384,13 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
   return 0;
 }
 
-int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc) {
+int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
+                         std::unordered_set<uint64_t> *gpu_set) {
   assert(proc != nullptr);
+  assert(gpu_set != nullptr);
   int err;
   std::string tmp;
+  std::unordered_set<uint64_t>::iterator itr;
 
   std::string proc_str_path = kKFDProcPathRoot;
   proc_str_path += "/";
@@ -412,6 +415,27 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc) {
     return EINVAL;
   }
   proc->pasid = std::stoi(tmp);
+
+  proc->vram_usage = 0;
+
+  for (itr = gpu_set->begin(); itr != gpu_set->end(); itr++) {
+    uint64_t gpu_id = (*itr);
+
+    std::string vram_str_path = proc_str_path;
+    vram_str_path += "/vram_";
+    vram_str_path += std::to_string(gpu_id);
+
+    err = ReadSysfsStr(vram_str_path, &tmp);
+    if (err) {
+      return err;
+    }
+
+    if (!is_number(tmp)) {
+      return EINVAL;
+    }
+
+    proc->vram_usage += std::stoi(tmp);
+  }
 
   return 0;
 }

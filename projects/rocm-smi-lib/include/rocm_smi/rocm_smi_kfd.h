@@ -98,7 +98,8 @@ int
 GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
                                                    uint32_t *num_procs_found);
 int
-GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc);
+GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
+                     std::unordered_set<uint64_t> *gpu_set);
 
 int
 GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_count);
