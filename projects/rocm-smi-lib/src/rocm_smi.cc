@@ -3401,7 +3401,7 @@ static bool check_evt_notif_support(int kfd_fd) {
     return RSMI_STATUS_INIT_ERROR;
   }
 
-  if (args.major_version < 2 && args.minor_version < 3) {
+  if (args.minor_version < 3) {
     return false;
   }
   return true;
