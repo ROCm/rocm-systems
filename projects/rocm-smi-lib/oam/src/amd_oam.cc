@@ -23,8 +23,12 @@
  */
 
 #include <assert.h>
-
+#include <dirent.h>
 #include <sstream>
+#include <cstring>
+#include <iostream>
+#include <regex>  // NOLINT
+#include <map>
 
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi_main.h"
@@ -38,52 +42,196 @@
 #include "oam/oam_mapi.h"
 #include "oam/amd_oam.h"
 
+static const std::map<int, const char *> err_map = {
+  { AMDOAM_STATUS_INVALID_ARGS, "Invalid arguments" },
+  { AMDOAM_STATUS_NOT_SUPPORTED, "Feature not supported" },
+  { AMDOAM_STATUS_FILE_ERROR, "Problem accessing a file" },
+  { AMDOAM_STATUS_PERMISSION, "Permission denied" },
+  { AMDOAM_STATUS_OUT_OF_RESOURCES, "Not enough memory or other resource" },
+  { AMDOAM_STATUS_INTERNAL_EXCEPTION, "An internal exception was caught" },
+  { AMDOAM_STATUS_INPUT_OUT_OF_BOUNDS,
+                  "The provided input is out of allowable or safe range" },
+  { AMDOAM_STATUS_INIT_ERROR, "AMDOAM is not initialized or init failed" },
+  { AMDOAM_STATUS_ERROR, "Generic error" },
+  { AMDOAM_STATUS_NOT_FOUND, "An item was searched for but not found" }
+};
+
 #define TRY try {
 #define CATCH } catch (...) {return handleRSMIException();}
 
+static bool rsmi_initialized;
 
-static int handleRSMIException() {
-  rsmi_status_t ret;
-  ret = amd::smi::handleException();
-
-  // TODO(x): convert RSMI return to OAM return
-  // For now, just return int equiv.
-  return static_cast<int>(ret);
+static int rsmi_status_to_amdoam_errorcode(rsmi_status_t status) {
+  if (status > RSMI_STATUS_INIT_ERROR)
+    return -AMDOAM_STATUS_ERROR;
+  else
+    return -status;
 }
 
-int amdoam_init(oam_mapi_version_t version) {
+static int handleRSMIException() {
+  rsmi_status_t ret = amd::smi::handleException();
+  return rsmi_status_to_amdoam_errorcode(ret);
+}
+
+int amdoam_get_error_description(int code, const char **description) {
+  if (description == nullptr)
+    return -AMDOAM_STATUS_INVALID_ARGS;
+
+  auto search = err_map.find(code);
+  if (search == err_map.end())
+    return -AMDOAM_STATUS_NOT_FOUND;
+
+  *description = search->second;
+  return AMDOAM_STATUS_SUCCESS;
+}
+
+int amdoam_init(void) {
   TRY
 
-  // TODO(x): handle version argument
-  (void)version;
+  rsmi_status_t status = rsmi_init(0);
 
-  rsmi_status_t ret = rsmi_init(0);
+  if (status != RSMI_STATUS_SUCCESS)
+    return rsmi_status_to_amdoam_errorcode(status);
 
-  return 0;
+  rsmi_initialized = true;
+  return AMDOAM_STATUS_SUCCESS;
+
   CATCH
 }
 
 int amdoam_free(void) {
-  rsmi_status_t ret = rsmi_shut_down();
+  rsmi_status_t status = rsmi_shut_down();
 
-  // TODO(x) convert rsmi return to oam return val
-  return static_cast<int>(ret);
+  if (status != RSMI_STATUS_SUCCESS)
+    return rsmi_status_to_amdoam_errorcode(status);
+
+  return AMDOAM_STATUS_SUCCESS;
 }
 
-
-int amdoam_discover_devices(int *device_count) {
-  uint32_t dv_cnt;
+int amdoam_discover_devices(uint32_t *device_count) {
+  rsmi_status_t status;
 
   if (device_count == nullptr) {
-    return -1;  // TODO(x): return appropriate OAM code
+    return -AMDOAM_STATUS_INVALID_ARGS;
   }
 
-  rsmi_status_t ret =  rsmi_num_monitor_devices(&dv_cnt);
+  status =  rsmi_num_monitor_devices(device_count);
+  if (status != RSMI_STATUS_SUCCESS)
+    return rsmi_status_to_amdoam_errorcode(status);
 
-  *device_count = static_cast<int>(dv_cnt);
+  return AMDOAM_STATUS_SUCCESS;
+}
 
-  // TODO(x) convert rsmi return to oam return val
-  return static_cast<int>(ret);
+int amdoam_get_pci_properties(uint32_t device_id, oam_pci_info_t *pci_info) {
+  uint64_t bdfid;
+
+  TRY
+  if (pci_info == nullptr) {
+    return -AMDOAM_STATUS_INVALID_ARGS;
+  }
+
+  rsmi_status_t status = rsmi_dev_pci_id_get(device_id, &bdfid);
+  if (status != RSMI_STATUS_SUCCESS)
+    return rsmi_status_to_amdoam_errorcode(status);
+
+  pci_info->domain = (uint16_t)(bdfid >> 32) & 0xffff;
+  pci_info->bus = (bdfid >> 8) & 0xff;
+  pci_info->device = (bdfid >> 3) & 0x1f;
+  pci_info->function = bdfid & 0x7;
+  CATCH
+
+  return  AMDOAM_STATUS_SUCCESS;
+}
+
+int amdoam_get_dev_properties(uint32_t num_devices,
+                              oam_dev_properties_t *devices) {
+  const size_t buf_size = 32;
+  char buf[buf_size] = "";
+  uint32_t dev_inx;
+  oam_dev_properties_t *dev = devices;
+
+TRY
+  if (devices == nullptr)
+    return -AMDOAM_STATUS_INVALID_ARGS;
+  if (!rsmi_initialized)
+    return -AMDOAM_STATUS_INIT_ERROR;
+
+  for (dev_inx = 0; dev_inx < num_devices; dev_inx++) {
+    dev->device_id = dev_inx;
+    /* If fails to get any following properties, it's not treated as a deal
+     * breaker. Variable not filled means that property is not available on
+     * this device or AMD doesn't support that property.
+     */
+    rsmi_dev_vendor_name_get(dev_inx, dev->device_vendor, DEVICE_VENDOR_LEN);
+    rsmi_dev_name_get(dev_inx, dev->device_name, DEVICE_NAME_LEN);
+    rsmi_dev_vbios_version_get(dev_inx, buf, buf_size);
+    if (std::strlen(buf) > 0) {
+      std::strncpy(dev->sku_name, &buf[4], 6);
+      std::strncpy(dev->board_name, buf, 12);
+    }
+    rsmi_dev_serial_number_get(dev_inx, dev->board_serial_number,
+                             BOARD_SERIAL_NUM_LEN);
+    ++dev;
+  }
+CATCH
+
+  return AMDOAM_STATUS_SUCCESS;
+}
+
+static int get_num_sensors(std::string hwmon_path, std::string fn_reg_ex,
+                           uint32_t *sensor_max) {
+  *sensor_max = 0;
+  fn_reg_ex = "\\b" + fn_reg_ex + "([0-9]+)([^ ]*)";
+  std::string fn;
+  std::smatch m;
+  uint32_t temp = 0;
+  std::regex re(fn_reg_ex);
+  auto hwmon_dir = opendir(hwmon_path.c_str());
+  if (hwmon_dir == nullptr)
+    return 0;
+  auto dentry = readdir(hwmon_dir);
+  while (dentry != nullptr) {
+    fn = dentry->d_name;
+    if (std::regex_search(fn, m, re)) {
+      std::string output = std::regex_replace(
+        fn,
+        std::regex("[^0-9]*([0-9]+).*"),
+        std::string("$1"));
+      temp = stoi(output);
+      if (temp > *sensor_max) {
+        *sensor_max = temp;
+      }
+    }
+    dentry = readdir(hwmon_dir);
+  }
+
+  if (closedir(hwmon_dir)) {
+    return -errno;
+  }
+  return 0;
+}
+
+int amdoam_get_sensors_count(uint32_t device_id,
+                             oam_sensor_count_t *sensor_count) {
+  uint32_t dv_ind = device_id;
+  uint32_t num_sensors = 0;
+
+  TRY
+  GET_DEV_FROM_INDX
+  std::string hwmon_path = dev->monitor()->path();
+  get_num_sensors(hwmon_path, "temp", &num_sensors);
+  sensor_count->num_temperature_sensors = num_sensors;
+  get_num_sensors(hwmon_path, "fan", &num_sensors);
+  sensor_count->num_fans = num_sensors;
+  get_num_sensors(hwmon_path, "in", &num_sensors);
+  sensor_count->num_voltage_sensors = (num_sensors+1);
+  get_num_sensors(hwmon_path, "power", &num_sensors);
+  sensor_count->num_power_sensors = num_sensors;
+  get_num_sensors(hwmon_path, "current", &num_sensors);
+  sensor_count->num_current_sensors = num_sensors;
+  CATCH
+
+  return AMDOAM_STATUS_SUCCESS;
 }
 
 // TODO(x): This function doesn't work for OAM. It's just a version
@@ -158,4 +306,3 @@ get_device_error_count(oam_dev_handle_t *handle,
   return ret;
   CATCH
 }
-

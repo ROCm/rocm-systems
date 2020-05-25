@@ -32,10 +32,34 @@ extern "C" {
 #include <stdint.h>
 #endif  // __cplusplus
 
-int amdoam_init(oam_mapi_version_t version);
+#include "oam/oam_mapi.h"
+
+typedef enum {
+  AMDOAM_STATUS_SUCCESS = 0x0,
+  /* copy RSMI errors */
+  AMDOAM_STATUS_INVALID_ARGS,
+  AMDOAM_STATUS_NOT_SUPPORTED,
+  AMDOAM_STATUS_FILE_ERROR,
+  AMDOAM_STATUS_PERMISSION,
+  AMDOAM_STATUS_OUT_OF_RESOURCES,
+  AMDOAM_STATUS_INTERNAL_EXCEPTION,
+  AMDOAM_STATUS_INPUT_OUT_OF_BOUNDS,
+  AMDOAM_STATUS_INIT_ERROR,
+  /* end of RSMI error code */
+  AMDOAM_STATUS_ERROR,  // Generic error return if not otherwise specified
+  AMDOAM_STATUS_NOT_FOUND,
+} amdoam_status_t;
+
+int amdoam_init(void);
 int amdoam_free(void);
 // int amdoam_get_mapi_version(oam_mapi_version_t *version);
-int amdoam_discover_devices(int *device_count);
+int amdoam_discover_devices(uint32_t *device_count);
+int amdoam_get_dev_properties(uint32_t dev_inx,
+                              oam_dev_properties_t *prop);
+int amdoam_get_pci_properties(uint32_t device_id, oam_pci_info_t *pci_info);
+int amdoam_get_sensors_count(uint32_t device_id,
+                             oam_sensor_count_t *sensor_count);
+int amdoam_get_error_description(int code, const char **description);
 
 #ifdef __cplusplus
 }
