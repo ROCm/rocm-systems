@@ -259,24 +259,24 @@ void api_callback(
 
   if (domain == ACTIVITY_DOMAIN_ROCTX) {
     const roctx_api_data_t* data = (const roctx_api_data_t*)(callback_data);
-    fprintf(stdout, "<%s pid(%d) tid(%d)>\n", data->args.message, GetPid(), GetTid());
+    fprintf(stdout, "<rocTX \"%s\">\n", data->args.message);
     return;
   }
   if (domain == ACTIVITY_DOMAIN_KFD_API) {
     const kfd_api_data_t* data = (const kfd_api_data_t*)(callback_data);
-    fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s pid(%d) tid(%d)>\n",
+    fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s>\n",
         roctracer_op_string(ACTIVITY_DOMAIN_KFD_API, cid, 0),
         cid,
         data->correlation_id,
-        (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit", GetPid(), GetTid());
+        (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
     return;
   }
   const hip_api_data_t* data = (const hip_api_data_t*)(callback_data);
-  SPRINT("<%s id(%u)\tcorrelation_id(%lu) %s pid(%d) tid(%d)> ",
+  SPRINT("<%s id(%u)\tcorrelation_id(%lu) %s> ",
     roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
     cid,
     data->correlation_id,
-    (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit", GetPid(), GetTid());
+    (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     switch (cid) {
       case HIP_API_ID_hipMemcpy:
@@ -408,5 +408,3 @@ void start_tracing() {}
 void stop_tracing() {}
 #endif
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-
