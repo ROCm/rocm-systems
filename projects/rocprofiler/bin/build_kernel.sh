@@ -22,7 +22,7 @@ if [ -z "$ROCM_DIR" ] ; then
 fi
 
 if [ -z "$TGT_LIST" ] ; then
-  TGT_LIST=$(/opt/rocm/bin/rocminfo | grep "amdgcn-amd-amdhsa--" | head -n 1 | sed -n "s/^.*amdgcn-amd-amdhsa--\(\w*\).*$/\1/p")
+  TGT_LIST=`$ROCM_DIR/bin/rocminfo | grep "amdgcn-amd-amdhsa--" | head -n 1 | sed -n "s/^.*amdgcn-amd-amdhsa--\(\w*\).*$/\1/p"`
 fi
 
 if [ -z "$TGT_LIST" ] ; then

@@ -39,15 +39,6 @@ if [ -z "$ROCP_PYTHON_VERSION" ] ; then
   ROCP_PYTHON_VERSION=python3
 fi
 
-# Default HIP path
-if [ -z "$HIP_PATH" ] ; then
-  export HIP_PATH=/opt/rocm/hip
-fi
-# Default HCC path
-if [ -z "$HCC_HOME" ] ; then
-  export HCC_HOME=/opt/rocm/hcc
-fi
-
 # runtime API trace
 ROCTX_TRACE=0
 KFD_TRACE=0
@@ -208,6 +199,10 @@ usage() {
   echo ""
   exit 1
 }
+
+# cgecking for availability of rocminfo utility
+`rocminfo >/dev/null 2>&1`
+if [ $? != 0 ]; then fatal "'rocminfo' utility is not found: please add ROCM bin path to PATH env var."; fi
 
 # profiling run method
 OUTPUT_LIST=""

@@ -531,7 +531,7 @@ else:
   ops_statfile = statfile
   copy_statfile = re.sub(r'\.stats\.csv$', r'.copy_stats.csv', statfile)
   sysinfo_file = re.sub(r'\.stats\.csv$', r'.sysinfo.txt', statfile)
-  metadata_gen(sysinfo_file, '/opt/rocm/bin/rocminfo')
+  metadata_gen(sysinfo_file, 'rocminfo')
 
   with open(dbfile, mode='w') as fd: fd.truncate()
   db = SQLiteDB(dbfile)
@@ -601,8 +601,6 @@ else:
     dform.post_process_data(db, 'OPS')
     dform.gen_table_bins(db, 'OPS', ops_statfile, 'Name', 'DurationNs')
     dform.gen_ops_json_trace(db, 'OPS', GPU_BASE_PID, START_US, jsonfile)
-
-    metadata_gen(sysinfo_file, '/opt/rocm/bin/hipcc --version')
 
   if kfd_trace_found:
     dform.post_process_data(db, 'KFD')
