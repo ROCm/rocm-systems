@@ -346,7 +346,7 @@ roctracer::TraceBuffer<hip_api_trace_entry_t> hip_api_trace_buffer("HIP", 0x2000
 
 static inline bool is_hip_kernel_launch_api(const uint32_t& cid) {
   bool ret =
-#if HIP_VDI
+#if 0 // HIP_VDI
     (cid == HIP_API_ID_hipLaunchKernel) ||
     (cid == HIP_API_ID_hipExtLaunchMultiKernelMultiDevice) ||
     (cid == HIP_API_ID_hipLaunchCooperativeKernel) ||

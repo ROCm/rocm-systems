@@ -85,7 +85,11 @@ header = \
 
 header_hip = \
 'template <typename T>\n' + \
-'  std::ostream& operator<<(std::ostream& out, const T& v) { using std::operator<<; out << v; return out; }\n' + \
+'  std::ostream& operator<<(std::ostream& out, const T& v) {\n' + \
+'     using std::operator<<;\n' + \
+'     static bool recursion = false;\n' + \
+'     if (recursion == false) { recursion = true; out << v; recursion = false; }\n' + \
+'     return out; }\n' + \
 'std::ostream& operator<<(std::ostream& out, void* v) { using std::operator<<; out << std::hex << v; return out; }\n' + \
 'std::ostream& operator<<(std::ostream& out, const void* v) { using std::operator<<; out << std::hex << v; return out; }\n' + \
 'std::ostream& operator<<(std::ostream& out, bool v) { using std::operator<<; out << std::hex << "<bool " << "0x" << v << std::dec << ">"; return out; }\n' + \
