@@ -155,6 +155,9 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
 
   // System timeout
   timeout_ = (timeout_ns_ == HsaTimer::TIMESTAMP_MAX) ? timeout_ns_ : timer_->ns_to_sysclock(timeout_ns_);
+
+  // To dump code objects
+  to_dump_code_obj_ = getenv("ROCP_DUMP_CODEOBJ");
 }
 
 // Destructor of the class
@@ -195,6 +198,7 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
       hsa_api_.hsa_executable_create_alt = table->core_->hsa_executable_create_alt_fn;
       hsa_api_.hsa_executable_load_agent_code_object = table->core_->hsa_executable_load_agent_code_object_fn;
       hsa_api_.hsa_executable_freeze = table->core_->hsa_executable_freeze_fn;
+      hsa_api_.hsa_executable_destroy = table->core_->hsa_executable_destroy_fn;
       hsa_api_.hsa_executable_get_symbol = table->core_->hsa_executable_get_symbol_fn;
       hsa_api_.hsa_executable_symbol_get_info = table->core_->hsa_executable_symbol_get_info_fn;
       hsa_api_.hsa_executable_iterate_symbols = table->core_->hsa_executable_iterate_symbols_fn;
@@ -235,6 +239,7 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
       hsa_api_.hsa_executable_create_alt = hsa_executable_create_alt;
       hsa_api_.hsa_executable_load_agent_code_object = hsa_executable_load_agent_code_object;
       hsa_api_.hsa_executable_freeze = hsa_executable_freeze;
+      hsa_api_.hsa_executable_destroy = hsa_executable_destroy;
       hsa_api_.hsa_executable_get_symbol = hsa_executable_get_symbol;
       hsa_api_.hsa_executable_symbol_get_info = hsa_executable_symbol_get_info;
       hsa_api_.hsa_executable_iterate_symbols = hsa_executable_iterate_symbols;
@@ -710,6 +715,7 @@ void HsaRsrcFactory::EnableExecutableTracking(HsaApiTable* table) {
   std::lock_guard<mutex_t> lck(mutex_);
   executable_tracking_on_ = true;
   table->core_->hsa_executable_freeze_fn = hsa_executable_freeze_interceptor;
+  table->core_->hsa_executable_destroy_fn = hsa_executable_destroy_interceptor;
 }
 
 hsa_status_t HsaRsrcFactory::executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol, void *data) {
@@ -727,10 +733,14 @@ hsa_status_t HsaRsrcFactory::executable_symbols_cb(hsa_executable_t exec, hsa_ex
     status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name);
     CHECK_STATUS("Error in getting kernel name", status);
     name[len] = 0;
-    auto ret = symbols_map_->insert({addr, name});
-    if (ret.second == false) {
-      delete[] ret.first->second;
-      ret.first->second = name;
+    if (data == NULL) {
+      auto ret = symbols_map_->insert({addr, name});
+      if (ret.second == false) {
+        delete[] ret.first->second;
+        ret.first->second = name;
+      }
+    } else {
+      symbols_map_->erase(addr);
     }
   }
   return HSA_STATUS_SUCCESS;
@@ -741,7 +751,16 @@ hsa_status_t HsaRsrcFactory::hsa_executable_freeze_interceptor(hsa_executable_t 
   if (symbols_map_ == NULL) symbols_map_ = new symbols_map_t;
   hsa_status_t status = hsa_api_.hsa_executable_iterate_symbols(executable, executable_symbols_cb, NULL);
   CHECK_STATUS("Error in iterating executable symbols", status);
-  return hsa_api_.hsa_executable_freeze(executable, options);;
+  return hsa_api_.hsa_executable_freeze(executable, options);
+}
+
+hsa_status_t HsaRsrcFactory::hsa_executable_destroy_interceptor(hsa_executable_t executable) {
+  std::lock_guard<mutex_t> lck(mutex_);
+  if (symbols_map_ != NULL) {
+    hsa_status_t status = hsa_api_.hsa_executable_iterate_symbols(executable, executable_symbols_cb, (void*)1);
+    CHECK_STATUS("Error in iterating executable symbols", status);
+  }
+  return hsa_api_.hsa_executable_destroy(executable);
 }
 
 std::atomic<HsaRsrcFactory*> HsaRsrcFactory::instance_{};
@@ -750,6 +769,7 @@ HsaRsrcFactory::timestamp_t HsaRsrcFactory::timeout_ns_ = HsaTimer::TIMESTAMP_MA
 hsa_pfn_t HsaRsrcFactory::hsa_api_{};
 bool HsaRsrcFactory::executable_tracking_on_ = false;
 HsaRsrcFactory::symbols_map_t* HsaRsrcFactory::symbols_map_ = NULL;
+void* HsaRsrcFactory::to_dump_code_obj_ = NULL;
 
 }  // namespace util
 }  // namespace rocprofiler

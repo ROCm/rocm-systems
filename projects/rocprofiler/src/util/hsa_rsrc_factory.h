@@ -97,6 +97,7 @@ struct hsa_pfn_t {
   decltype(hsa_executable_create_alt)* hsa_executable_create_alt;
   decltype(hsa_executable_load_agent_code_object)* hsa_executable_load_agent_code_object;
   decltype(hsa_executable_freeze)* hsa_executable_freeze;
+  decltype(hsa_executable_destroy)* hsa_executable_destroy;
   decltype(hsa_executable_get_symbol)* hsa_executable_get_symbol;
   decltype(hsa_executable_symbol_get_info)* hsa_executable_symbol_get_info;
   decltype(hsa_executable_iterate_symbols)* hsa_executable_iterate_symbols;
@@ -498,7 +499,9 @@ class HsaRsrcFactory {
   typedef std::map<uint64_t, const char*> symbols_map_t;
   static symbols_map_t* symbols_map_;
   static bool executable_tracking_on_;
+  static void* to_dump_code_obj_;
   static hsa_status_t hsa_executable_freeze_interceptor(hsa_executable_t executable, const char *options);
+  static hsa_status_t hsa_executable_destroy_interceptor(hsa_executable_t executable);
   static hsa_status_t executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol, void *data);
 
   // HSA runtime API table
