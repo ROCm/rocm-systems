@@ -294,8 +294,8 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   ptrn_ac = re.compile(r'hsa_amd_memory_async_copy')
   ptrn1_kernel = re.compile(r'^.*kernel\(')
   ptrn2_kernel = re.compile(r'\)\) .*$')
-  ptrn_fixformat = re.compile(r'(\d+:\d+ \d+:\d+ \w+)\( (.*)\)$')
-  ptrn_fixkernel = re.compile(r' kernel=(.*)$')
+  ptrn_fixformat = re.compile(r'(\d+:\d+ \d+:\d+ \w+)\(\s*(.*)\)$')
+  ptrn_fixkernel = re.compile(r'\s+kernel=(.*)$')
 
   if not os.path.isfile(file_name): return 0
 
@@ -351,17 +351,18 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
             copy_index += 1
 
         # patching activity properties: kernel name, stream-id
-        if record_id in dep_filtr:
+        corr_id = record_id
+        if corr_id in dep_filtr:
           record_args = rec_vals[rec_len - 2]
           # extract kernel name
           (kernel_name, n_subs) = extract_field(record_args, 'kernel')
           if n_subs != 0:
-            db.change_rec_name('OPS', record_id, '"' + kernel_name + '"')
+            db.change_rec_name('OPS', corr_id, '"' + kernel_name + '"')
           # extract stream-id
           (stream_id, n_subs) = extract_field(record_args, 'stream')
           if n_subs != 0:
             if stream_id == 'nil' or stream_id == 'NIL': stream_id = 0
-            db.change_rec_tid('OPS', record_id, stream_id)
+            db.change_rec_tid('OPS', corr_id, stream_id)
 
         record_id += 1
       else: fatal(api_name + " bad record: '" + record + "'")
