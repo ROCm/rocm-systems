@@ -347,11 +347,11 @@ roctracer::TraceBuffer<hip_api_trace_entry_t> hip_api_trace_buffer("HIP", 0x2000
 static inline bool is_hip_kernel_launch_api(const uint32_t& cid) {
   bool ret =
 #if 0 // HIP_VDI
-    (cid == HIP_API_ID_hipLaunchKernel) ||
     (cid == HIP_API_ID_hipExtLaunchMultiKernelMultiDevice) ||
     (cid == HIP_API_ID_hipLaunchCooperativeKernel) ||
     (cid == HIP_API_ID_hipLaunchCooperativeKernelMultiDevice) ||
 #endif
+    (cid == HIP_API_ID_hipLaunchKernel) ||
     (cid == HIP_API_ID_hipModuleLaunchKernel) ||
     (cid == HIP_API_ID_hipExtModuleLaunchKernel) ||
     (cid == HIP_API_ID_hipHccModuleLaunchKernel);
@@ -387,9 +387,13 @@ void hip_api_callback(
     if (cid == HIP_API_ID_hipMalloc) {
       entry->ptr = *(data->args.hipMalloc.ptr);
     } else if (is_hip_kernel_launch_api(cid)) {
-      const hipFunction_t f = data->args.hipModuleLaunchKernel.f;
-      if (f != NULL) {
-        entry->name = strdup(roctracer::HipLoader::Instance().KernelNameRef(f));
+      if (cid == HIP_API_ID_hipLaunchKernel) {
+        const void* f = data->args.hipLaunchKernel.function_address;
+        hipStream_t stream = data->args.hipLaunchKernel.stream;
+        if (f != NULL) entry->name = strdup(roctracer::HipLoader::Instance().KernelNameRefByPtr(f, stream));
+      } else {
+        const hipFunction_t f = data->args.hipModuleLaunchKernel.f;
+        if (f != NULL) entry->name = strdup(roctracer::HipLoader::Instance().KernelNameRef(f));
       }
     }
   }
