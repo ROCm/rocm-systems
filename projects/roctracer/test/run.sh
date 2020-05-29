@@ -60,7 +60,7 @@ eval_test() {
     eval "$cmdline" | tee $test_trace
     is_failed=$?
     if [ $is_failed = 0 ] ; then
-      python ../script/check_trace.py -in $test_name
+      python ./test/check_trace.py -in $test_name
       is_failed=$?
     fi
     if [ $is_failed = 0 ] ; then
@@ -79,7 +79,7 @@ eval_test() {
 # rocTrecer is used explicitely by test
 eval_test "standalone C test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest" MatrixTranspose_ctest_trace
 eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_test" MatrixTranspose_test_trace
-eval_test "standalone HIP test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_hipaact_test" MatrixTranspose_hipaact_test_trace
+eval_test "standalone HIP hipaact test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_hipaact_test" MatrixTranspose_hipaact_test_trace
 eval_test "standalone HIP MGPU test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_mgpu" MatrixTranspose_mgpu_trace
 
 # Tool test
