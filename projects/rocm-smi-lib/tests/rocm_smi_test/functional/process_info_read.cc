@@ -86,7 +86,7 @@ void TestProcInfoRead::Close() {
 
 static void dumpProcess(rsmi_process_info_t *p) {
   assert(p != nullptr);
-  std::cout << "ProcessID: " << p->process_id << " ";
+  std::cout << "\t** ProcessID: " << p->process_id << " ";
   std::cout << "PASID: " << p->pasid << " ";
   std::cout << std::endl;
 }
@@ -167,22 +167,23 @@ void TestProcInfoRead::Run(void) {
       err = rsmi_compute_process_gpus_get(procs[j].process_id, dev_inds,
                                                                  &amt_allocd);
       if (err == RSMI_STATUS_NOT_FOUND) {
-        std::cout << "\t**Process " << procs[j].process_id <<
+        std::cout << "\t** Process " << procs[j].process_id <<
                                                      " is no longer present.";
         continue;
       } else {
         CHK_ERR_ASRT(err);
         ASSERT_LE(amt_allocd, num_devices);
       }
-      std::cout << "\t**Process " << procs[j].process_id <<
+      std::cout << "\t** Process " << procs[j].process_id <<
                                            " is using devices with indices: ";
       uint32_t i;
       if (amt_allocd > 0) {
         for (i = 0; i < amt_allocd - 1; ++i) {
           std::cout << dev_inds[i] << ", ";
         }
-        std::cout << dev_inds[i] << std::endl;
+        std::cout << dev_inds[i];
       }
+      std::cout << std::endl;
       // Reset amt_allocd back to the amount acutally allocated
       amt_allocd = num_devices;
     }
@@ -190,18 +191,23 @@ void TestProcInfoRead::Run(void) {
     delete []dev_inds;
 
     rsmi_process_info_t proc_info;
-    err = rsmi_compute_process_info_by_pid_get(procs[0].process_id,
+    for (uint32_t j = 0; j < num_proc_found; j++) {
+      memset(&proc_info, 0x0, sizeof(rsmi_process_info_t));
+      err = rsmi_compute_process_info_by_pid_get(procs[j].process_id,
                                                                   &proc_info);
-    if (err == RSMI_STATUS_NOT_FOUND) {
-      std::cout <<
-       "\t** WARNING: rsmi_compute_process_info_get() found process " <<
-         procs[0].process_id << ", but subsequently, "
+      if (err == RSMI_STATUS_NOT_FOUND) {
+        std::cout <<
+         "\t** WARNING: rsmi_compute_process_info_get() found process " <<
+           procs[j].process_id << ", but subsequently, "
                        "rsmi_compute_process_info_by_pid_get() did not"
                                       " find this same process." << std::endl;
-    } else {
-      CHK_ERR_ASRT(err)
-      ASSERT_EQ(proc_info.process_id, procs[0].process_id);
-      ASSERT_EQ(proc_info.pasid, procs[0].pasid);
+      } else {
+        CHK_ERR_ASRT(err)
+        ASSERT_EQ(proc_info.process_id, procs[j].process_id);
+        ASSERT_EQ(proc_info.pasid, procs[j].pasid);
+        std::cout << "\t** Process ID: " << procs[j].process_id << " VRAM Usage: " <<
+                     proc_info.vram_usage << std::endl;
+      }
     }
   }
   if (num_proc_found > 1) {
