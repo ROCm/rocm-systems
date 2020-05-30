@@ -433,8 +433,8 @@ while [ 1 ] ; do
     errck "Option '$ARG_IN', rate value"
     export ROCP_FLUSH_RATE="$period_rate"
   elif [ "$1" = "--obj-tracking" ] ; then
-    if [ "$2" = "on" ] ; then
-      export ROCP_OBJ_TRACKING=1
+    if [ "$2" = "off" ] ; then
+      export ROCP_OBJ_TRACKING=0
     fi
   elif [ "$1" = "--verbose" ] ; then
     ARG_VAL=0

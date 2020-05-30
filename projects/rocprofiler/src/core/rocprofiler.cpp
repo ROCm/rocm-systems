@@ -203,6 +203,7 @@ uint32_t LoadTool() {
     settings.trace_local = TraceProfile::IsLocal() ? 1: 0;
     settings.timeout = util::HsaRsrcFactory::GetTimeoutNs();
     settings.timestamp_on = InterceptQueue::IsTrackerOn() ? 1 : 0;
+    settings.code_obj_tracking = 1;
 
     if (handler) handler();
     else if (handler_prop) handler_prop(&settings);
