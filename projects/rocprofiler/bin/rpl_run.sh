@@ -351,11 +351,11 @@ while [ 1 ] ; do
     export ROCP_METRICS="$2"
   elif [ "$1" = "--list-basic" ] ; then
     export ROCP_INFO=b
-    eval "$PKG_DIR/tool/ctrl"
+    HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" eval "$PKG_DIR/tool/ctrl"
     exit 1
   elif [ "$1" = "--list-derived" ] ; then
     export ROCP_INFO=d
-    eval "$PKG_DIR/tool/ctrl"
+    HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" eval "$PKG_DIR/tool/ctrl"
     exit 1
   elif [ "$1" = "--basenames" ] ; then
     if [ "$2" = "on" ] ; then
