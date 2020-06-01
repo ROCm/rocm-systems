@@ -29,7 +29,12 @@ cd $BIN_DIR
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and other libraries
-export LD_LIBRARY_PATH=$PWD
+if [ -n "$ROCTRACER_ROOT" ] ; then
+  export LD_LIBRARY_PATH=$PWD/../../build/roctracer
+else
+  export LD_LIBRARY_PATH=$PWD
+fi
+env
 
 # test filter input
 test_filter=-1
