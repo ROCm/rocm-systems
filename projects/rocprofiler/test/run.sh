@@ -148,9 +148,9 @@ export ROCP_INPUT=input2.xml
 eval_test "libtool test, counter sets" ./test/ctrl
 
 ## OpenCL test
-export ROCP_OBJ_TRACKING=1
-export ROCP_INPUT=input1.xml
-eval_test "libtool test, OpenCL sample" ./test/ocl/SimpleConvolution
+#export ROCP_OBJ_TRACKING=1
+#export ROCP_INPUT=input1.xml
+#eval_test "libtool test, OpenCL sample" ./test/ocl/SimpleConvolution
 
 # Memcopies tracking
 unset ROCP_MCOPY_TRACKING
@@ -163,8 +163,8 @@ export ROCP_INPUT=input1.xml
 eval_test "libtool test, counter sets" ./test/ctrl
 
 ## OpenCL test
-export ROCP_OBJ_TRACKING=1
-eval_test "libtool test, OpenCL sample" ./test/ocl/SimpleConvolution
+#export ROCP_OBJ_TRACKING=1
+#eval_test "libtool test, OpenCL sample" ./test/ocl/SimpleConvolution
 
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
