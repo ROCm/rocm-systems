@@ -115,6 +115,7 @@ class HipApi {
   typedef decltype(hipRemoveActivityCallback) RemoveActivityCallback_t;
   typedef decltype(hipKernelNameRef) KernelNameRef_t;
   typedef decltype(hipKernelNameRefByPtr) KernelNameRefByPtr_t;
+  typedef decltype(hipGetStreamDeviceId) GetStreamDeviceId_t;
   typedef decltype(hipApiName) ApiName_t;
 
   RegisterApiCallback_t* RegisterApiCallback;
@@ -123,6 +124,7 @@ class HipApi {
   RemoveActivityCallback_t* RemoveActivityCallback;
   KernelNameRef_t* KernelNameRef;
   KernelNameRefByPtr_t* KernelNameRefByPtr;
+  GetStreamDeviceId_t* GetStreamDeviceId;
   ApiName_t* ApiName;
 
   protected:
@@ -133,6 +135,7 @@ class HipApi {
     RemoveActivityCallback = loader->GetFun<RemoveActivityCallback_t>("hipRemoveActivityCallback");
     KernelNameRef = loader->GetFun<KernelNameRef_t>("hipKernelNameRef");
     KernelNameRefByPtr = loader->GetFun<KernelNameRefByPtr_t>("hipKernelNameRefByPtr");
+    GetStreamDeviceId =  loader->GetFun<GetStreamDeviceId_t>("hipGetStreamDeviceId");
     ApiName = loader->GetFun<ApiName_t>("hipApiName");
   }
 };
