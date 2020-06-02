@@ -974,12 +974,15 @@ extern "C" PUBLIC_API void OnUnload() {
 
 extern "C" CONSTRUCTOR_API void constructor() {
   ONLOAD_TRACE_BEG();
+  roctracer_load();
   tool_load();
   ONLOAD_TRACE_END();
 }
 extern "C" DESTRUCTOR_API void destructor() {
   ONLOAD_TRACE_BEG();
+  roctracer_flush_buf();
   tool_unload();
+  roctracer_unload();
   ONLOAD_TRACE_END();
 }
 

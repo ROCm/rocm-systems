@@ -253,6 +253,7 @@ roctracer_status_t roctracer_get_timestamp(
 // Load/Unload methods
 bool roctracer_load();
 void roctracer_unload();
+void roctracer_flush_buf();
 
 // Set properties
 roctracer_status_t roctracer_set_properties(

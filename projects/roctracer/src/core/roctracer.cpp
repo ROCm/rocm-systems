@@ -1283,8 +1283,13 @@ PUBLIC_API void roctracer_unload() {
     roctracer::act_journal = NULL;
   }
 
-  roctracer::trace_buffer.Flush();
   roctracer::close_output_file(roctracer::kernel_file_handle);
+  ONLOAD_TRACE_END();
+}
+
+PUBLIC_API void roctracer_flush_buf() {
+  ONLOAD_TRACE_BEG();
+  roctracer::trace_buffer.Flush();
   ONLOAD_TRACE_END();
 }
 
