@@ -48,6 +48,7 @@
 #include <unordered_set>
 #include <memory>
 #include <map>
+#include <utility>
 
 #include "rocm_smi/rocm_smi.h"
 

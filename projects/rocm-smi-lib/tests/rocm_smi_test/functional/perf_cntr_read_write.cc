@@ -107,11 +107,84 @@ void TestPerfCntrReadWrite::Close() {
 #define RSMI_EVNT_ENUM_LAST(GRP_NAME) RSMI_EVNT_##GRP_NAME##_LAST
 
 // Refactor this to handle different event groups once we have > 1 event group
-void
-TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
+
+void TestPerfCntrReadWrite::CountEvents(uint32_t dv_ind,
+       rsmi_event_type_t evnt, rsmi_counter_value_t *val, int32_t sleep_sec) {
   rsmi_event_handle_t evt_handle;
   rsmi_status_t ret;
+
+  ret = rsmi_dev_counter_create(dv_ind,
+                       static_cast<rsmi_event_type_t>(evnt), &evt_handle);
+  CHK_ERR_ASRT(ret)
+
+  // Note that rsmi_dev_counter_create() should never return
+  // RSMI_STATUS_NOT_SUPPORTED. It will return RSMI_STATUS_OUT_OF_RESOURCES
+  // if it is unable to create a counter.
+  ret = rsmi_dev_counter_create(dv_ind,
+                       static_cast<rsmi_event_type_t>(evnt), nullptr);
+  ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
+
+  ret = rsmi_counter_control(evt_handle, RSMI_CNTR_CMD_START, nullptr);
+  CHK_ERR_ASRT(ret)
+
+  sleep(sleep_sec);
+
+  ret = rsmi_counter_read(evt_handle, val);
+  CHK_ERR_ASRT(ret)
+
+  IF_VERB(STANDARD) {
+    std::cout << "\t\t\tValue: " << val->value << std::endl;
+    std::cout << "\t\t\tTime Enabled: " << val->time_enabled << std::endl;
+    std::cout << "\t\t\tTime Running: " << val->time_running << std::endl;
+    std::cout << "\t\t\tEvents/Second Running: " <<
+                             val->value/(float)val->time_running << std::endl;
+  }
+  ret = rsmi_dev_counter_destroy(evt_handle);
+  CHK_ERR_ASRT(ret)
+}
+
+static const uint64_t kGig = 1000000000;
+
+static const uint64_t kVg20Level1Bandwidth = 23;  // 23 GB/sec
+
+
+void
+TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
+  rsmi_status_t ret;
   rsmi_counter_value_t val;
+  uint64_t throughput;
+
+  auto utiliz = [&](rsmi_event_type_t evt, uint32_t chan) {
+    std::cout << "****************************" << std::endl;
+    std::cout << "Test XGMI Link Utilization (channel " <<
+                                                     chan << ")" << std::endl;
+    std::cout << "****************************" << std::endl;
+    std::cout << "Assumed Level 1 Bandwidth: " <<
+                                 kVg20Level1Bandwidth << "GB/sec" << std::endl;
+
+    uint32_t tmp_verbosity = verbosity();
+    set_verbosity(0);
+    for (int i = 0; i < 5; ++i) {
+      std::cout << "\t\tPass " << i << ":" << std::endl;
+
+      CountEvents(dv_ind, evt, &val, 1);
+      double coll_time_sec = static_cast<float>(val.time_running)/kGig;
+      throughput = (val.value * 32)/coll_time_sec;
+      std::cout << "\t\t\tCollected events for " << coll_time_sec <<
+                                                        " seconds" << std::endl;
+      std::cout << "\t\t\tEvents collected: " << val.value << std::endl;
+      std::cout << "\t\t\tXGMI throughput: " << throughput <<
+                                                   " bytes/second" << std::endl;
+      std::cout << "\t\t\tXGMI Channel Utilization: " <<
+                       100*throughput/ (float)(kVg20Level1Bandwidth*kGig) <<
+                                                               "%" << std::endl;
+      std::cout << "\t\t\t****" << std::endl;
+    }
+    set_verbosity(tmp_verbosity);
+  };
+
+  utiliz(RSMI_EVNT_XGMI_1_BEATS_TX, 1);
+  utiliz(RSMI_EVNT_XGMI_0_BEATS_TX, 0);
 
   std::cout << "****************************" << std::endl;
   std::cout << "Test each event individually" << std::endl;
@@ -131,71 +204,11 @@ TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
       IF_VERB(STANDARD) {
         std::cout << "\tTesting Event Type " << evnt << std::endl;
       }
-
-      IF_VERB(STANDARD) {
-        std::cout << "\t\tCreating event..." << std::endl;
-      }
-      ret = rsmi_dev_counter_create(dv_ind,
-                           static_cast<rsmi_event_type_t>(evnt), &evt_handle);
-      CHK_ERR_ASRT(ret)
-
-      // Note that rsmi_dev_counter_create() should never return
-      // RSMI_STATUS_NOT_SUPPORTED. It will return RSMI_STATUS_OUT_OF_RESOURCES
-      // if it is unable to create a counter.
-      ret = rsmi_dev_counter_create(dv_ind,
-                           static_cast<rsmi_event_type_t>(evnt), nullptr);
-      ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
-
-      IF_VERB(STANDARD) {
-        std::cout << "\t\tStart Counting..." << std::endl;
-      }
-      ret = rsmi_counter_control(evt_handle, RSMI_CNTR_CMD_START, nullptr);
-      CHK_ERR_ASRT(ret)
-
-      sleep(1);
-      IF_VERB(STANDARD) {
-        std::cout << "\t\tStop Counting..." << std::endl;
-      }
-      ret = rsmi_counter_control(evt_handle, RSMI_CNTR_CMD_STOP, nullptr);
-      CHK_ERR_ASRT(ret)
-
-      IF_VERB(STANDARD) {
-        std::cout << "\t\tRead Counter..." << std::endl;
-      }
-      ret = rsmi_counter_read(evt_handle, &val);
-      CHK_ERR_ASRT(ret)
-
-      IF_VERB(STANDARD) {
-        std::cout << "\t\tSuccessfully read value: " << std::endl;
-        std::cout << "\t\t\tValue: " << val.value << std::endl;
-        std::cout << "\t\t\tTime Enabled: " << val.time_enabled << std::endl;
-        std::cout << "\t\t\tTime Running: " << val.time_running << std::endl;
-      }
-      IF_VERB(STANDARD) {
-        std::cout << "\t\tRe-start Counting..." << std::endl;
-      }
-      ret = rsmi_counter_control(evt_handle, RSMI_CNTR_CMD_START, nullptr);
-      CHK_ERR_ASRT(ret)
-
-      IF_VERB(STANDARD) {
-        std::cout << "\t\tRead free-running Counter..." << std::endl;
-      }
-      ret = rsmi_counter_read(evt_handle, &val);
-      CHK_ERR_ASRT(ret)
-
-      IF_VERB(STANDARD) {
-        std::cout << "\t\tSuccessfully read value: " << std::endl;
-        std::cout << "\t\t\tValue: " << val.value << std::endl;
-        std::cout << "\t\t\tTime Enabled: " << val.time_enabled << std::endl;
-        std::cout << "\t\t\tTime Running: " << val.time_running << std::endl;
-      }
-      ret = rsmi_dev_counter_destroy(evt_handle);
-      CHK_ERR_ASRT(ret)
+      CountEvents(dv_ind, static_cast<rsmi_event_type_t>(evnt), &val);
     }
   }
 }
 
-// Refactor this to handle different event groups once we have > 1 event group
 void
 TestPerfCntrReadWrite::testEventsSimultaneously(uint32_t dv_ind) {
   rsmi_event_handle_t evt_handle[RSMI_EVNT_XGMI_LAST -
@@ -261,19 +274,10 @@ TestPerfCntrReadWrite::testEventsSimultaneously(uint32_t dv_ind) {
         ret = rsmi_counter_available_counters_get(dv_ind, grp.group(),
                                                                   &tmp_cntrs);
         CHK_ERR_ASRT(ret)
-        ASSERT_EQ(tmp_cntrs, (avail_counters - j -1));
+        ASSERT_EQ(tmp_cntrs, (avail_counters - j - 1));
       }
 
-      sleep(5);
-      IF_VERB(STANDARD) {
-        std::cout << "\tStop Counters..." << std::endl;
-      }
-      for (uint32_t j = 0; j < avail_counters; ++j) {
-        tmp = static_cast<rsmi_event_type_t>(evnt + j);
-        ret = rsmi_counter_control(evt_handle[tmp], RSMI_CNTR_CMD_STOP,
-                                                                     nullptr);
-        CHK_ERR_ASRT(ret)
-      }
+      sleep(1);
 
       IF_VERB(STANDARD) {
         std::cout << "\tRead Counters..." << std::endl;

@@ -244,7 +244,9 @@ typedef enum {
  */
 typedef enum {
   RSMI_CNTR_CMD_START = 0,  //!< Start the counter
-  RSMI_CNTR_CMD_STOP,       //!< Stop the counter
+  RSMI_CNTR_CMD_STOP,       //!< Stop the counter; note that this should not
+                            //!< be used before reading. It is for temporarily
+                            //!< disabling the counter.
 } rsmi_counter_command_t;
 
 /**
@@ -525,11 +527,11 @@ typedef enum {
  * @brief Types for IO Link
  */
 typedef enum _RSMI_IO_LINK_TYPE {
-  RSMI_IOLINK_TYPE_UNDEFINED      = 0,         //!< unknown type.
-  RSMI_IOLINK_TYPE_PCIEXPRESS     = 1,         //!< PCI Express
-  RSMI_IOLINK_TYPE_XGMI           = 2,         //!< XGMI
-  RSMI_IOLINK_TYPE_NUMIOLINKTYPES,             //!< Number of IO Link types
-  RSMI_IOLINK_TYPE_SIZE           = 0xFFFFFFFF //!< Max of IO Link types
+  RSMI_IOLINK_TYPE_UNDEFINED      = 0,          //!< unknown type.
+  RSMI_IOLINK_TYPE_PCIEXPRESS     = 1,          //!< PCI Express
+  RSMI_IOLINK_TYPE_XGMI           = 2,          //!< XGMI
+  RSMI_IOLINK_TYPE_NUMIOLINKTYPES,              //!< Number of IO Link types
+  RSMI_IOLINK_TYPE_SIZE           = 0xFFFFFFFF  //!< Max of IO Link types
 } RSMI_IO_LINK_TYPE;
 
 /**
@@ -2333,6 +2335,98 @@ rsmi_status_string(rsmi_status_t status, const char **status_string);
 /** @defgroup PerfCntr Performance Counter Functions
  *  These functions are used to configure, query and control performance
  *  counting.
+ *
+ *  These functions use the same mechanisms as the "perf" command line
+ *  utility. They share the same underlying resources and have some similarities
+ *  in how they are used. The events supported by this API should have
+ *  corresponding perf events that can be seen with "perf stat ...". The events
+ *  supported by perf can be seen with "perf list"
+ *
+ *  The types of events available and the ability to count those
+ *  events are dependent on which device is being targeted and if counters are
+ *  still available for that device, respectively.
+ *  ::rsmi_dev_counter_group_supported() can be used to see which event types
+ *  (::rsmi_event_group_t) are supported for a given device. Assuming a device
+ *  supports a given event type, we can then check to see if there are counters
+ *  available to count a specific event with
+ *  ::rsmi_counter_available_counters_get(). Counters may be occupied by other
+ *  perf based programs.
+ *
+ *  Once it is determined that events are supported and counters are available,
+ *  an event counter can be created/destroyed and controlled.
+ *
+ *  ::rsmi_dev_counter_create() allocates internal data structures that will be
+ *  used to used to control the event counter, and return a handle to this data
+ *  structure.
+ *
+ *  Once an event counter handle is obtained, the event counter can be
+ *  controlled (i.e., started, stopped,...) with ::rsmi_counter_control() by
+ *  passing ::rsmi_counter_command_t commands. ::RSMI_CNTR_CMD_START starts an
+ *  event counter and ::RSMI_CNTR_CMD_STOP stops a counter.
+ *  ::rsmi_counter_read() reads an event counter.
+ *
+ *  Once the counter is no longer needed, the resources it uses should be freed
+ *  by calling ::rsmi_dev_counter_destroy().
+ *
+ *
+ *  Important Notes about Counter Values
+ *  ====================================
+ *  - A running "absolute" counter is kept internally. For the discussion that
+ *  follows, we will call the internal counter value at time \a t \a
+ *  val<sub>t</sub>
+ *  - Issuing ::RSMI_CNTR_CMD_START or calling ::rsmi_counter_read(), causes
+ *  RSMI (in kernel) to internally record the current absolute counter value
+ *  - ::rsmi_counter_read() returns the number of events that have occurred
+ *  since the previously recorded value (ie, a relative value,
+ *  \a val<sub>t</sub> - val<sub>t-1</sub>) from the issuing of
+ *  ::RSMI_CNTR_CMD_START or calling ::rsmi_counter_read()
+ *
+ *  Example of event counting sequence:
+ *
+ *  \latexonly
+ *  \pagebreak
+ *  \endlatexonly
+ *  \code{.cpp}
+ *
+ *    rsmi_counter_value_t value;
+ *
+ *    // Determine if RSMI_EVNT_GRP_XGMI is supported for device dv_ind
+ *    ret = rsmi_dev_counter_group_supported(dv_ind, RSMI_EVNT_GRP_XGMI);
+ *
+ *    // See if there are counters available for device dv_ind for event
+ *    // RSMI_EVNT_GRP_XGMI
+ *
+ *    ret = rsmi_counter_available_counters_get(dv_ind,
+ *                                 RSMI_EVNT_GRP_XGMI, &counters_available);
+ *
+ *    // Assuming RSMI_EVNT_GRP_XGMI is supported and there is at least 1
+ *    // counter available for RSMI_EVNT_GRP_XGMI on device dv_ind, create
+ *    // an event object and get the handle (rsmi_event_handle_t).
+ *
+ *    ret = rsmi_dev_counter_create(dv_ind, RSMI_EVNT_GRP_XGMI, &evnt_handle);
+ *
+ *    // A program that generates the events of interest can be started
+ *    // immediately before or after starting the counters.
+ *    // Start counting:
+ *    ret = rsmi_counter_control(evnt_handle, RSMI_CNTR_CMD_START, NULL);
+ *
+ *    // Wait...
+ *
+ *    // Get the number of events since RSMI_CNTR_CMD_START was issued:
+ *    ret = rsmi_counter_read(rsmi_event_handle_t evt_handle, &value)
+ *
+ *    // Wait...
+ *
+ *    // Get the number of events since rsmi_counter_read() was last called:
+ *    ret = rsmi_counter_read(rsmi_event_handle_t evt_handle, &value)
+ *
+ *    // Stop counting.
+ *    ret = rsmi_counter_control(evnt_handle, RSMI_CNTR_CMD_STOP, NULL);
+ *
+ *    // Release all resources (e.g., counter and memory resources) associated
+ *    with evnt_handle.
+ *    ret = rsmi_dev_counter_destroy(evnt_handle);
+ *  \endcode
  *  @{
  */
 

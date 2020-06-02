@@ -72,6 +72,9 @@ class TestPerfCntrReadWrite : public TestBase {
   virtual void DisplayTestInfo(void);
 
  private:
+  void CountEvents(uint32_t dv_ind,
+       rsmi_event_type_t evnt, rsmi_counter_value_t *val,
+                                                   int32_t sleep_sec = 1);
   void testEventsIndividually(uint32_t dv_ind);
   void testEventsSimultaneously(uint32_t dv_ind);
 };

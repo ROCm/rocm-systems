@@ -315,6 +315,7 @@ amd::smi::evt::Event::openPerfHandle(void) {
 
   attr_.size = sizeof(struct perf_event_attr);
   attr_.config = get_perf_attr_config(&event_info_);
+  attr_.sample_type = PERF_SAMPLE_IDENTIFIER;
   attr_.read_format = PERF_FORMAT_TOTAL_TIME_ENABLED |
                           PERF_FORMAT_TOTAL_TIME_RUNNING;
   attr_.disabled = 1;

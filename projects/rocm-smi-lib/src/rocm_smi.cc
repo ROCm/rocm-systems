@@ -566,7 +566,7 @@ rsmi_init(uint64_t flags) {
       smi.Initialize(flags);
     } catch(...) {
       smi.Cleanup();
-      throw;
+      throw amd::smi::rsmi_exception(RSMI_STATUS_INIT_ERROR, __FUNCTION__);
     }
   }
   refGuard.Dismiss();
@@ -2663,14 +2663,17 @@ rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  uint32_t ret = 0;
   amd::smi::evt::Event *evt =
                         reinterpret_cast<amd::smi::evt::Event *>(evnt_handle);
   uint32_t dv_ind = evt->dev_ind();
   DEVICE_MUTEX
   REQUIRE_ROOT_ACCESS
 
+  ret = evt->stopCounter();
+
   delete evt;
-  return RSMI_STATUS_SUCCESS;
+  return errno_to_rsmi_status(ret);;
   CATCH
 }
 
@@ -2729,6 +2732,12 @@ rsmi_counter_read(rsmi_event_handle_t evt_handle,
   uint32_t ret;
 
   ret = evt->getValue(value);
+
+  // If value > 2^48, then an overflow has occurred. We need to discard this
+  // value and re-read:
+  if (ret == 0 && value->value > 0xFFFFFFFFFFFF) {
+    ret = evt->getValue(value);
+  }
 
   return errno_to_rsmi_status(ret);
   CATCH

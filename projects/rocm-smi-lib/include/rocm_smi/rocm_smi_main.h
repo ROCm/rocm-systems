@@ -54,6 +54,7 @@
 #include <unordered_map>
 #include <map>
 #include <mutex>  // NOLINT
+#include <utility>
 
 #include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi_kfd.h"
