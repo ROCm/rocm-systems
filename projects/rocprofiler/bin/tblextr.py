@@ -57,6 +57,13 @@ def get_stream_index(stream_id):
       stream_ind = stream_id_map[stream_id]
   return stream_ind
 
+# patching activity records
+def activity_record_patching(db, ops_table_name, kernel_found, kernel_name, stream_found, stream_ind, select_expr):
+  if kernel_found != 0:
+    db.change_rec_fld(ops_table_name, 'Name = "' + kernel_name + '"', select_expr)
+  if stream_found != 0:
+    db.change_rec_fld(ops_table_name, 'tid = ' + str(stream_ind), select_expr)
+
 # global vars
 table_descr = [
   ['Index', 'KernelName'],
@@ -317,6 +324,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   ptrn2_kernel = re.compile(r'\)\) .*$')
   ptrn_fixformat = re.compile(r'(\d+:\d+ \d+:\d+ \w+)\(\s*(.*)\)$')
   ptrn_fixkernel = re.compile(r'\s+kernel=(.*)$')
+  ptrn_multi_kernel = re.compile(r'(.*):(\d+)$')
 
   if not os.path.isfile(file_name): return 0
 
@@ -374,7 +382,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
             copy_csv += str(copy_index) + ', ' + copy_line + '\n'
             copy_index += 1
 
-        # extract stream-id
+        # extracting/converting stream-id
         (stream_id, stream_found) = get_field(record_args, 'stream')
         if stream_found != 0:
           stream_ind = get_stream_index(stream_id)
@@ -382,15 +390,28 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
 
         # patching activity properties: kernel name, stream-id
+        corr_id = record_id
         if (corr_id, proc_id) in dep_filtr:
+          ops_table_name = dep_filtr[(corr_id, proc_id)]
+
           select_expr = '"Index" = ' + str(corr_id) + ' AND "proc-id" = ' + proc_id
-          # extract kernel name
-          (kernel_name, kernel_found) = get_field(record_args, 'kernel')
-          if kernel_found != 0:
-            db.change_rec_fld('OPS', 'Name = "' + kernel_name + '"', select_expr)
-          if stream_found != 0:
-            rec_table_name = dep_filtr[(corr_id, proc_id)]
-            db.change_rec_fld(rec_table_name, 'tid = ' + str(stream_ind), select_expr)
+          record_args = rec_vals[rec_len - 2]
+
+          # extract kernel name string
+          (kernel_str, kernel_found) = get_field(record_args, 'kernel')
+          is_kernel_list = 1 if kernel_found != 0 and kernel_str[-1] == ';' else 0
+
+          if is_kernel_list != 0:
+            for kernel_item in kernel_str[:-1].split(';'):
+              m = ptrn_multi_kernel.match(kernel_item)
+              if m:
+                kernel_name = m.group(1)
+                dev_id = m.group(2)
+                select_expr += ' AND "dev-id" = ' + dev_id
+                activity_record_patching(db, ops_table_name, 1, kernel_name, stream_found, stream_ind, select_expr)
+              fatal('Bad multi-kernel format: "' + kernel_item + '" in "' + kernel_str + '"')
+          else:
+            activity_record_patching(db, ops_table_name, kernel_found, kernel_str, stream_found, stream_ind, select_expr)
 
         db.insert_entry(table_handle, rec_vals)
         record_id += 1
