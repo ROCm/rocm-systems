@@ -74,6 +74,8 @@ class SQLiteDB:
     self.connection.execute('UPDATE ' + table_name + ' SET Name = ? WHERE "Index" = ?', (rec_name, rec_id))
   def change_rec_tid(self, table_name, rec_id, tid):
     self.connection.execute('UPDATE ' + table_name + ' SET tid = ? WHERE "Index" = ?', (tid, rec_id))
+  def change_rec_fld(self, table_name, fld_expr, rec_pat):
+    self.connection.execute('UPDATE ' + table_name + ' SET ' + fld_expr + ' WHERE ' + rec_pat)
 
   # populate DB table entry
   def insert_entry(self, table, val_list):
