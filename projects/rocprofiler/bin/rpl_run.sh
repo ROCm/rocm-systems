@@ -200,8 +200,8 @@ usage() {
   exit 1
 }
 
-# cgecking for availability of rocminfo utility
-`rocminfo >/dev/null 2>&1`
+# checking for availability of rocminfo utility
+`which rocminfo >/dev/null 2>&1`
 if [ $? != 0 ]; then fatal "'rocminfo' utility is not found: please add ROCM bin path to PATH env var."; fi
 
 # profiling run method
