@@ -357,12 +357,12 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           # extract kernel name
           (kernel_name, n_subs) = extract_field(record_args, 'kernel')
           if n_subs != 0:
-            db.change_rec_name('OPS', corr_id, '"' + kernel_name + '"')
+            db.change_rec_fld('OPS', 'Name = "' + kernel_name + '"', '"Index" = ' + corr_id)
           # extract stream-id
           (stream_id, n_subs) = extract_field(record_args, 'stream')
           if n_subs != 0:
             if stream_id == 'nil' or stream_id == 'NIL': stream_id = 0
-            db.change_rec_tid('OPS', corr_id, stream_id)
+            db.change_rec_fld('OPS', 'tid = ' + stream_id, '"Index" = ' + corr_id)
 
         record_id += 1
       else: fatal(api_name + " bad record: '" + record + "'")
