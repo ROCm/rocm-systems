@@ -327,6 +327,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
         rec_len = len(api_table_descr[0])
         for ind in range(1,rec_len):
           rec_vals.append(m.group(ind))
+        proc_id = rec_vals[2]
         rec_vals[2] = api_pid
         rec_vals.append(record_id)
         db.insert_entry(table_handle, rec_vals)
@@ -352,17 +353,18 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
         # patching activity properties: kernel name, stream-id
         corr_id = record_id
-        if corr_id in dep_filtr:
+        if (corr_id, proc_id) in dep_filtr:
           record_args = rec_vals[rec_len - 2]
+          select_expr = '"Index" = ' + str(corr_id) + ' AND "proc-id" = ' + proc_id
           # extract kernel name
           (kernel_name, n_subs) = extract_field(record_args, 'kernel')
           if n_subs != 0:
-            db.change_rec_fld('OPS', 'Name = "' + kernel_name + '"', '"Index" = ' + corr_id)
+            db.change_rec_fld('OPS', 'Name = "' + kernel_name + '"', select_expr)
           # extract stream-id
           (stream_id, n_subs) = extract_field(record_args, 'stream')
           if n_subs != 0:
             if stream_id == 'nil' or stream_id == 'NIL': stream_id = 0
-            db.change_rec_fld('OPS', 'tid = ' + stream_id, '"Index" = ' + corr_id)
+            db.change_rec_fld('OPS', 'tid = ' + stream_id, select_expr)
 
         record_id += 1
       else: fatal(api_name + " bad record: '" + record + "'")
@@ -429,14 +431,14 @@ def fill_copy_db(table_name, db, indir):
 
 # fill HCC ops DB
 ops_table_descr = [
-  ['BeginNs', 'EndNs', 'dev-id', 'queue-id', 'Name', 'pid', 'tid', 'Index'],
-  {'Index':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'dev-id':'INTEGER', 'queue-id':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER'}
+  ['BeginNs', 'EndNs', 'dev-id', 'queue-id', 'Name', 'pid', 'tid', 'Index', 'proc-id'],
+  {'Index':'INTEGER', 'proc-id':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'dev-id':'INTEGER', 'queue-id':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER'}
 ]
 def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
   global max_gpu_id
   file_name = indir + '/' + 'hcc_ops_trace.txt'
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) (.*)$')
-  ptrn_id = re.compile(r'^([^:]+):(\d+)$')
+  ptrn_id = re.compile(r'^([^:]+):(\d+):(\d+)$')
   ptrn_mcopy = re.compile(r'(Memcpy|Copy|Fill)')
   ptrn_barrier = re.compile(r'Marker')
 
@@ -460,6 +462,7 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         if not m: fatal("bad hcc ops entry '" + record + "'")
         name = m.group(1)
         corr_id = int(m.group(2)) - 1
+        proc_id = m.group(3)
 
         # checking name for memcopy pattern
         if ptrn_mcopy.search(name):
@@ -480,10 +483,11 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         rec_vals.append(pid)                     # pid
         rec_vals.append(0)                       # tid
         rec_vals.append(corr_id)                 # Index
+        rec_vals.append(proc_id)                 # proc-id
         db.insert_entry(table_handle, rec_vals)
 
         # registering a dependency filtr
-        filtr[corr_id] = 1
+        filtr[(corr_id, proc_id)] = 1
 
         # filling a dependency
         if not pid in dep_dict: dep_dict[pid] = {}
