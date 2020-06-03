@@ -119,6 +119,8 @@ void close_file_handles() {
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
+static const uint32_t my_pid = GetPid();
+
 // Error handler
 void fatal(const std::string msg) {
   close_file_handles();
@@ -515,10 +517,10 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
     const char * name = roctracer_op_string(record->domain, record->op, record->kind);
     switch(record->domain) {
       case ACTIVITY_DOMAIN_HCC_OPS:
-        fprintf(hcc_activity_file_handle, "%lu:%lu %d:%lu %s:%lu\n",
+        fprintf(hcc_activity_file_handle, "%lu:%lu %d:%lu %s:%lu:%u\n",
           record->begin_ns, record->end_ns,
           record->device_id, record->queue_id,
-          name, record->correlation_id);
+          name, record->correlation_id, my_pid);
         fflush(hcc_activity_file_handle);
         break;
       case ACTIVITY_DOMAIN_HSA_OPS:
