@@ -155,14 +155,17 @@ void TestSysInfoRead::Run(void) {
         err = rsmi_dev_unique_id_get(i, nullptr);
         ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
     } else {
-        CHK_ERR_ASRT(err)
-        IF_VERB(STANDARD) {
-            std::cout << "\t**GPU Unique ID : " << std::hex << val_ui64 <<
-            std::endl;
+        if (err == RSMI_STATUS_SUCCESS) {
+            IF_VERB(STANDARD) {
+                std::cout << "\t**GPU Unique ID : " << std::hex << val_ui64 <<
+                std::endl;
+            }
+            // Verify api support checking functionality is working
+            err = rsmi_dev_unique_id_get(i, nullptr);
+            ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+        } else {
+            std::cout << "rsmi_dev_unique_id_get() failed with error " << err << std::endl;
         }
-        // Verify api support checking functionality is working
-        err = rsmi_dev_unique_id_get(i, nullptr);
-        ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
 
     err = rsmi_version_get(&ver);
