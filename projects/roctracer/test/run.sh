@@ -23,13 +23,14 @@
 ################################################################################
 
 # cd to build directory
+BIN_NAME=`basename $0`
 BIN_DIR=`dirname $0`
 cd $BIN_DIR
 
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and other libraries
-if [ -n "$ROCTRACER_ROOT" ] ; then
+if [ "$BIN_NAME" = "run_ci.sh" ] ; then
   export LD_LIBRARY_PATH=$PWD/../../build/roctracer
 else
   export LD_LIBRARY_PATH=$PWD

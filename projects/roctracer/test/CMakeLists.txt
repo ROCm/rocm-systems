@@ -66,5 +66,6 @@ add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test/hsa )
 
 ## copying run script
 execute_process ( COMMAND sh -xc "cp ${RUN_SCRIPT} ${PROJECT_BINARY_DIR}" )
+execute_process ( COMMAND sh -xc "ln -s run.sh ${PROJECT_BINARY_DIR}/run_ci.sh" )
 ## copying tests output check script
 execute_process ( COMMAND sh -xc "cp ${ROOT_DIR}/script/check_trace.py ${PROJECT_BINARY_DIR}/test/." )
