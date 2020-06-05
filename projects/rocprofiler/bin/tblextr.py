@@ -42,6 +42,21 @@ hsa_activity_found = 0
 dep_dict = {}
 kern_dep_list = []
 
+# stream ID map
+stream_counter = 0
+stream_id_map = {}
+def get_stream_index(stream_id):
+  global stream_counter
+  stream_ind = 0
+  if stream_id.lower() != 'nil':
+    if not stream_id in stream_id_map:
+      stream_counter += 1
+      stream_ind = stream_counter
+      stream_id_map[stream_id] = stream_ind
+    else:
+      stream_ind = stream_id_map[stream_id]
+  return stream_ind
+
 # global vars
 table_descr = [
   ['Index', 'KernelName'],
@@ -259,14 +274,20 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
 
   return 1
 #############################################################
+# arguments manipulation routines
+def get_field(args, field):
+  ptrn1_field = re.compile(r'^.*' + field + '\(');
+  ptrn2_field = re.compile(r'\) .*$');
+  ptrn3_field = re.compile(r'\)\)$');
+  (field_name, n) = ptrn1_field.subn('', args, count=1);
+  if n != 0:
+    (field_name, n) = ptrn2_field.subn('', field_name, count=1)
+    if n == 0:
+      (field_name, n) = ptrn3_field.subn('', field_name, count=1)
+  return (field_name, n)
 
-def extract_field(rec_args, field):
-  ptrn1_field = re.compile(r'^.*'+field+'\(');
-  ptrn2_field = re.compile(r'\)\) .*$');
-  (field_name, n_subs) = ptrn1_field.subn('', rec_args, count=1);
-  if n_subs != 0:
-    (field_name, n_subs) = ptrn2_field.subn(')', field_name, count=1)
-  return (field_name, n_subs)
+def set_field(args, field, val):
+  return re.subn(field + '\(\w+\)([ \)])', field + '(' + str(val) + ')\\1', args, count=1)
 
 # Fill API DB
 api_table_descr = [
@@ -329,17 +350,19 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           rec_vals.append(m.group(ind))
         proc_id = rec_vals[2]
         rec_vals[2] = api_pid
+        record_name = rec_vals[4]
+        record_args = rec_vals[5]
         rec_vals.append(record_id)
-        db.insert_entry(table_handle, rec_vals)
+        corr_id = record_id
 
         # dependencies filling
-        if ptrn_ac.search(rec_vals[4]) or record_id in dep_filtr:
+        if ptrn_ac.search(record_name) or (corr_id, proc_id) in dep_filtr:
           beg_ns = int(rec_vals[0])
           end_ns = int(rec_vals[1])
           from_us = (beg_ns / 1000) + ((end_ns - beg_ns) / 1000)
           dep_from_us_list.append(from_us)
           dep_tid_list.append(int(rec_vals[3]))
-          dep_id_list.append(record_id)
+          dep_id_list.append(corr_id)
 
           # memcopy data
           if len(copy_raws) != 0:
@@ -347,25 +370,29 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
             args_str = rec_vals[5]
             args_str = re.sub(r'\(', r'', args_str)
             args_str = re.sub(r'\).*$', r'', args_str)
-            copy_line = str(copy_data[0]) + ', ' + str(copy_data[1]) + ', ' + rec_vals[4] + ', ' + args_str
+            copy_line = str(copy_data[0]) + ', ' + str(copy_data[1]) + ', ' + record_name + ', ' + args_str
             copy_csv += str(copy_index) + ', ' + copy_line + '\n'
             copy_index += 1
 
+        # extract stream-id
+        (stream_id, stream_found) = get_field(record_args, 'stream')
+        if stream_found != 0:
+          stream_ind = get_stream_index(stream_id)
+          (rec_vals[5], found) = set_field(record_args, 'stream', stream_ind)
+          if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
+
         # patching activity properties: kernel name, stream-id
-        corr_id = record_id
         if (corr_id, proc_id) in dep_filtr:
-          record_args = rec_vals[rec_len - 2]
           select_expr = '"Index" = ' + str(corr_id) + ' AND "proc-id" = ' + proc_id
           # extract kernel name
-          (kernel_name, n_subs) = extract_field(record_args, 'kernel')
-          if n_subs != 0:
+          (kernel_name, kernel_found) = get_field(record_args, 'kernel')
+          if kernel_found != 0:
             db.change_rec_fld('OPS', 'Name = "' + kernel_name + '"', select_expr)
-          # extract stream-id
-          (stream_id, n_subs) = extract_field(record_args, 'stream')
-          if n_subs != 0:
-            if stream_id == 'nil' or stream_id == 'NIL': stream_id = 0
-            db.change_rec_fld('OPS', 'tid = ' + stream_id, select_expr)
+          if stream_found != 0:
+            rec_table_name = dep_filtr[(corr_id, proc_id)]
+            db.change_rec_fld(rec_table_name, 'tid = ' + str(stream_ind), select_expr)
 
+        db.insert_entry(table_handle, rec_vals)
         record_id += 1
       else: fatal(api_name + " bad record: '" + record + "'")
 
@@ -466,9 +493,11 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
 
         # checking name for memcopy pattern
         if ptrn_mcopy.search(name):
+          rec_table_name = mcopy_table_name
           table_handle = mcopy_table_handle
           pid = COPY_PID;
         else:
+          rec_table_name = kernel_table_name
           table_handle = kernel_table_handle
 
           gpu_id = int(rec_vals[2]);
@@ -487,7 +516,7 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         db.insert_entry(table_handle, rec_vals)
 
         # registering a dependency filtr
-        filtr[(corr_id, proc_id)] = 1
+        filtr[(corr_id, proc_id)] = rec_table_name
 
         # filling a dependency
         if not pid in dep_dict: dep_dict[pid] = {}
