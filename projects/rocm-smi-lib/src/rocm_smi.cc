@@ -1987,9 +1987,66 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   uint32_t sensor_index =
      m->getTempSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
 
+
   CHK_API_SUPPORT_ONLY(temperature, metric, sensor_index)
 
   ret = get_dev_mon_value(mon_type, dv_ind, sensor_index, temperature);
+
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
+                       rsmi_voltage_metric_t metric, int64_t *voltage) {
+  TRY
+
+  rsmi_status_t ret;
+  amd::smi::MonitorTypes mon_type;
+
+  switch (metric) {
+    case RSMI_VOLT_CURRENT:
+      mon_type = amd::smi::kMonVolt;
+      break;
+    case RSMI_VOLT_MIN:
+      mon_type = amd::smi::kMonVoltMin;
+      break;
+    case RSMI_VOLT_MIN_CRIT:
+      mon_type = amd::smi::kMonVoltMinCrit;
+      break;
+    case RSMI_VOLT_MAX:
+      mon_type = amd::smi::kMonVoltMax;
+      break;
+    case RSMI_VOLT_MAX_CRIT:
+      mon_type = amd::smi::kMonVoltMaxCrit;
+      break;
+    case RSMI_VOLT_AVERAGE:
+      mon_type = amd::smi::kMonVoltAverage;
+      break;
+    case RSMI_VOLT_LOWEST:
+      mon_type = amd::smi::kMonVoltLowest;
+      break;
+    case RSMI_VOLT_HIGHEST:
+      mon_type = amd::smi::kMonVoltHighest;
+      break;
+    default:
+      mon_type = amd::smi::kMonInvalid;
+  }
+
+  DEVICE_MUTEX
+
+  GET_DEV_FROM_INDX
+
+  assert(dev->monitor() != nullptr);
+  std::shared_ptr<amd::smi::Monitor> m = dev->monitor();
+
+  // getVoltSensorIndex will throw an out of range exception if sensor_type is
+  // not found
+  uint32_t sensor_index =
+     m->getVoltSensorIndex(sensor_type);
+  CHK_API_SUPPORT_ONLY(voltage, metric, sensor_index)
+
+  ret = get_dev_mon_value(mon_type, dv_ind, sensor_index, voltage);
 
   return ret;
   CATCH

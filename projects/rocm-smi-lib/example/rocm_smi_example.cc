@@ -445,6 +445,9 @@ int main() {
     CHK_RSMI_RET(ret)
     std::cout << "\t**Temperature: " << val_i64/1000 << "C" << std::endl;
 
+    ret = rsmi_dev_volt_metric_get(i, RSMI_VOLT_TYPE_VDDGFX, RSMI_VOLT_CURRENT, &val_i64);
+    CHK_RSMI_RET(ret)
+    std::cout << "\t**Voltage: " << val_i64 << "mV" << std::endl;
 
     ret = rsmi_dev_fan_speed_get(i, 0, &val_i64);
     CHK_RSMI_RET(ret)

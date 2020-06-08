@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -42,58 +42,32 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
+#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_VOLT_READ_H_
+#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_VOLT_READ_H_
 
-#ifndef TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
-#define TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+#include "rocm_smi_test/test_base.h"
 
-#include <memory>
-#include <vector>
+class TestVoltRead : public TestBase {
+ public:
+    TestVoltRead();
 
-#include "rocm_smi/rocm_smi.h"
+  // @Brief: Destructor for test case of TestVOltRead
+  virtual ~TestVoltRead();
 
-struct RSMITstGlobals {
-  uint32_t verbosity;
-  uint32_t monitor_verbosity;
-  uint32_t num_iterations;
-  uint64_t init_options;
-  bool dont_fail;
+  // @Brief: Setup the environment for measurement
+  virtual void SetUp();
+
+  // @Brief: Core measurement execution
+  virtual void Run();
+
+  // @Brief: Clean up and retrive the resource
+  virtual void Close();
+
+  // @Brief: Display  results
+  virtual void DisplayResults() const;
+
+  // @Brief: Display information about what this test does
+  virtual void DisplayTestInfo(void);
 };
 
-uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list);
-
-void PrintTestHeader(uint32_t dv_ind);
-const char *GetBlockNameStr(rsmi_gpu_block_t id);
-const char *GetErrStateNameStr(rsmi_ras_err_state_t st);
-const char *FreqEnumToStr(rsmi_clk_type rsmi_clk);
-const std::string GetVoltSensorNameStr(rsmi_voltage_type_t st);
-
-#if ENABLE_SMI
-void DumpMonitorInfo(const TestBase *test);
-#endif
-
-#define DISPLAY_RSMI_ERR(RET) { \
-  if (RET != RSMI_STATUS_SUCCESS) { \
-    const char *err_str; \
-    std::cout << "\t===> ERROR: RSMI call returned " << (RET) << std::endl; \
-    rsmi_status_string((RET), &err_str); \
-    std::cout << "\t===> (" << err_str << ")" << std::endl; \
-    std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                  std::endl; \
-  } \
-}
-
-#define CHK_ERR_RET(RET) { \
-  DISPLAY_RSMI_ERR(RET) \
-  if ((RET) != RSMI_STATUS_SUCCESS) { \
-    return (RET); \
-  } \
-}
-#define CHK_RSMI_PERM_ERR(RET) { \
-    if (RET == RSMI_STATUS_PERMISSION) { \
-      std::cout << "This command requires root access." << std::endl; \
-    } else { \
-      DISPLAY_RSMI_ERR(RET) \
-    } \
-}
-
-#endif  // TESTS_ROCM_SMI_TEST_TEST_COMMON_H_
+#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_VOLT_READ_H_

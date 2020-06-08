@@ -55,6 +55,7 @@
 #include "functional/fan_read.h"
 #include "functional/fan_read_write.h"
 #include "functional/temp_read.h"
+#include "functional/volt_read.h"
 #include "functional/volt_freq_curv_read.h"
 #include "functional/perf_level_read.h"
 #include "functional/overdrive_read.h"
@@ -141,6 +142,10 @@ TEST(rsmitstReadWrite, FanReadWrite) {
 }
 TEST(rsmitstReadOnly, TempRead) {
   TestTempRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, VoltRead) {
+  TestVoltRead tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadOnly, TestVoltCurvRead) {

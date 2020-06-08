@@ -119,6 +119,10 @@ static const struct option long_options[] = {
 };
 static const char* short_options = "i:v:m:fr";
 
+static const std::map<uint32_t, std::string> kVoltSensorNameMap = {
+    {RSMI_VOLT_TYPE_VDDGFX, "Vddgfx"},
+};
+
 static void PrintHelp(void) {
   std::cout <<
      "Optional rsmitst Arguments:\n"
@@ -184,7 +188,9 @@ const char *GetBlockNameStr(rsmi_gpu_block_t id) {
 const char *GetErrStateNameStr(rsmi_ras_err_state_t st) {
   return kErrStateNameMap.at(st);
 }
-
+const std::string GetVoltSensorNameStr(rsmi_voltage_type_t st) {
+  return kVoltSensorNameMap.at(st);
+}
 const char *FreqEnumToStr(rsmi_clk_type rsmi_clk) {
   static_assert(RSMI_CLK_TYPE_LAST == RSMI_CLK_TYPE_MEM,
                                        "FreqEnumToStr() needs to be updated");

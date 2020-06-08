@@ -364,6 +364,39 @@ typedef enum {
 } rsmi_temperature_type_t;
 
 /**
+ * @brief Voltage Metrics.  This enum is used to identify various
+ * Volatge metrics. Corresponding values will be in millivolt.
+ *
+ */
+typedef enum {
+  RSMI_VOLT_CURRENT = 0x0,               //!< Voltage current value.
+
+  RSMI_VOLT_FIRST = RSMI_VOLT_CURRENT,
+  RSMI_VOLT_MAX,                         //!< Voltage max value.
+  RSMI_VOLT_MIN_CRIT,                    //!< Voltage critical min value.
+  RSMI_VOLT_MIN,                         //!< Voltage min value.
+  RSMI_VOLT_MAX_CRIT,                    //!< Voltage critical max value.
+  RSMI_VOLT_AVERAGE,                     //!< Average voltage.
+  RSMI_VOLT_LOWEST,                      //!< Historical minimum voltage.
+  RSMI_VOLT_HIGHEST,                     //!< Historical maximum voltage.
+
+  RSMI_VOLT_LAST = RSMI_VOLT_HIGHEST
+} rsmi_voltage_metric_t;
+
+/**
+ * @brief This ennumeration is used to indicate which type of
+ * voltage reading should be obtained.
+ */
+typedef enum {
+  RSMI_VOLT_TYPE_FIRST = 0,
+
+  RSMI_VOLT_TYPE_VDDGFX = RSMI_VOLT_TYPE_FIRST,  //!< Vddgfx GPU
+                                                 //!< voltage
+  RSMI_VOLT_TYPE_LAST = RSMI_VOLT_TYPE_VDDGFX,
+  RSMI_VOLT_TYPE_INVALID = 0xFFFFFFFF            //!< Invalid type
+} rsmi_voltage_type_t;
+
+/**
  * @brief Pre-set Profile Selections. These bitmasks can be AND'd with the
  * ::rsmi_power_profile_status_t.available_profiles returned from
  * ::rsmi_dev_power_profile_presets_get to determine which power profiles
@@ -1734,6 +1767,40 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
  */
 rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
                       rsmi_temperature_metric_t metric, int64_t *temperature);
+/** @} */  // end of PhysQuer
+
+/**
+ *  @brief Get the voltage metric value for the specified metric, from the
+ *  specified voltage sensor on the specified device.
+ *
+ *  @details Given a device index @p dv_ind, a sensor type @p sensor_type, a
+ *  ::rsmi_voltage_metric_t @p metric and a pointer to an int64_t @p
+ *  voltage, this function will write the value of the metric indicated by
+ *  @p metric and @p sensor_type to the memory location @p voltage.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] sensor_type part of device from which voltage should be
+ *  obtained. This should come from the enum ::rsmi_voltage_type_t
+ *
+ *  @param[in] metric enum indicated which voltage value should be
+ *  retrieved
+ *
+ *  @param[inout] voltage a pointer to int64_t to which the voltage
+ *  will be written, in millivolts.
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
+                      rsmi_voltage_metric_t metric, int64_t *voltage);
 /** @} */  // end of PhysQuer
 
 /*****************************************************************************/

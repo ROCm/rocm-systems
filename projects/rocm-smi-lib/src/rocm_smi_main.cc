@@ -508,7 +508,8 @@ uint32_t RocmSMI::DiscoverAMDMonitors(void) {
       if (amd_monitor_types_.find(mon_type) != amd_monitor_types_.end()) {
         std::shared_ptr<Monitor> m =
                   std::shared_ptr<Monitor>(new Monitor(mon_name, &env_vars_));
-        m->setSensorLabelMap();
+        m->setTempSensorLabelMap();
+        m->setVoltSensorLabelMap();
         monitors_.push_back(m);
       }
     }
