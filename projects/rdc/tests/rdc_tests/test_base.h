@@ -77,13 +77,6 @@ class TestBase {
   uint32_t num_monitor_devs(void) const {
     return num_monitor_devs_;
   }
-  void set_init_options(uint64_t x) {
-    init_options_ = x;
-  }
-  uint64_t init_options(void) const {
-    return init_options_;
-  }
-
   void set_monitor_server_ip(std::string ip) {
     monitor_server_ip_ = ip;
   }
@@ -102,7 +95,7 @@ class TestBase {
   bool secure(void) const {
     return secure_;
   }
-  bool set_mode(bool standalone) {
+  void set_mode(bool standalone) {
     standalone_ = standalone;
   }
   rdc_handle_t rdc_handle;
@@ -118,7 +111,6 @@ class TestBase {
   std::string title_;   ///< Displayed title of test
   uint32_t verbosity_;   ///< How much additional output to produce
   bool dont_fail_;       ///< Don't quit test on individual failure if true
-  uint64_t init_options_;  ///< rsmi initialization options
   std::string monitor_server_ip_;
   std::string monitor_server_port_;
   bool secure_;  // Use authenticated comms. (SSL/TSL)

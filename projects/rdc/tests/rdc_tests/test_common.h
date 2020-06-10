@@ -36,10 +36,10 @@ struct RDCTstGlobals {
   std::string monitor_server_port;
   std::string monitor_server_ip;
   uint32_t num_iterations;
-  uint64_t init_options;
   bool dont_fail;
   bool secure;
   bool standalone;
+  bool batch_mode;
 };
 
 uint32_t ProcessCmdline(RDCTstGlobals* test, int arg_cnt, char** arg_list);

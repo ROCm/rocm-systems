@@ -47,7 +47,6 @@ static void SetFlags(TestBase *test) {
 
   test->set_verbosity(sRDCGlvalues->verbosity);
   test->set_dont_fail(sRDCGlvalues->dont_fail);
-  test->set_init_options(sRDCGlvalues->init_options);
   test->set_monitor_server_ip(sRDCGlvalues->monitor_server_ip);
   test->set_monitor_server_port(sRDCGlvalues->monitor_server_port);
   test->set_secure(sRDCGlvalues->secure);
@@ -175,13 +174,13 @@ static int killRDCD(int pid = 0) {
   return -1;
 }
 
-static int startRDCD(std::string *rdcd_path) {
+static int startRDCD(std::string *rdcd_path, char *envp[]) {
   assert(rdcd_path != nullptr);
   const char *rdcd_cl[128] = {rdcd_path->c_str(), "-u", NULL};
   int pid = fork();
 
   if (pid == 0) {
-    if (-1 == execve(rdcd_cl[0], (char **)rdcd_cl , NULL)) {  // NOLINT
+    if (-1 == execve(rdcd_cl[0], (char **)rdcd_cl , envp)) {  // NOLINT
       perror("child process failed to start rdcd");
       return -1;
     }
@@ -192,7 +191,7 @@ static int startRDCD(std::string *rdcd_path) {
 
   return pid;
 }
-int main(int argc, char** argv) {
+int main(int argc, char** argv, char* envp[]) {
   ::testing::InitGoogleTest(&argc, argv);
 
   RDCTstGlobals settings;
@@ -204,18 +203,19 @@ int main(int argc, char** argv) {
   settings.monitor_verbosity = 1;
   settings.num_iterations = 1;
   settings.dont_fail = false;
-  settings.init_options = 0;
-  settings.rdcd_path = "../../../build/server/rdcd";
+  settings.rdcd_path = "/usr/sbin/rdcd";
   settings.monitor_server_ip = "";
   settings.monitor_server_port = "";
   settings.secure = false;
   settings.standalone = false;
+  settings.batch_mode = false;
 
   if (ProcessCmdline(&settings, argc, argv)) {
     return 1;
   }
 
-  // Select the embedded mode and standalone mode dynamically.
+  if (!settings.batch_mode) {
+    // Select the embedded mode and standalone mode dynamically.
     std::cout << "Start rdci in: \n";
     std::cout << "0 - Embedded mode \n";
     std::cout << "1 - Standalone mode \n";
@@ -227,16 +227,48 @@ int main(int argc, char** argv) {
     std::cout << std::endl;
     std::cout << (settings.standalone?
         "Standalone mode selected.\n":"Embedded mode selected.\n");
+  }
+  sRDCGlvalues = &settings;
 
-  if (settings.standalone){
+  if (!settings.standalone || settings.batch_mode) {
+    if (settings.batch_mode) {
+      // The test needs to know to run Embedded if we are in batch mode
+      sRDCGlvalues->standalone = false;
+    }
+    std::cout << "****************************************" << std::endl;
+    std::cout << "****************************************" << std::endl;
+    std::cout << "****************************************" << std::endl;
+    std::cout << "Running tests in Embedded mode (no rdcd)" << std::endl;
+    std::cout << "****************************************" << std::endl;
+    std::cout << "****************************************" << std::endl;
+    std::cout << "****************************************" << std::endl;
+    ret = RUN_ALL_TESTS();
+  }
+
+  if (settings.standalone || settings.batch_mode) {
+    if (settings.batch_mode) {
+      settings.standalone = true;
+    }
+    std::cout << "*********************************************" << std::endl;
+    std::cout << "*********************************************" << std::endl;
+    std::cout << "*********************************************" << std::endl;
+    std::cout << "Running tests in Stand-alone mode (with rdcd)" << std::endl;
+    std::cout << "*********************************************" << std::endl;
+    std::cout << "*********************************************" << std::endl;
+    std::cout << "*********************************************" << std::endl;
+
     if (settings.monitor_server_ip == "") {
       if (settings.rdcd_path != "") {
         if (killRDCD()) {
           return -1;
         }
 
-        rdcd_pid = startRDCD(&settings.rdcd_path);
+        rdcd_pid = startRDCD(&settings.rdcd_path, envp);
         assert(rdcd_pid == getPIDFromName("rdcd"));
+        if (rdcd_pid != getPIDFromName("rdcd")) {
+          std::cout << "Failed to start rdcd. Exiting" << std::endl;
+          return -1;
+        }
       } else {
         if (getPIDFromName("rdcd") == -1) {
           std::cout <<
@@ -246,31 +278,16 @@ int main(int argc, char** argv) {
         }
       }
     }
-  }
-  sRDCGlvalues = &settings;
-  ret = RUN_ALL_TESTS();
-
-  if (ret) {
-    return ret;
-  }
-
-  std::cout << "****************************************" << std::endl;
-  std::cout << "****************************************" << std::endl;
-  std::cout << "****************************************" << std::endl;
-  std::cout << "Re-running tests with init options: " << std::hex <<
-                                    settings.init_options << std::endl;
-  std::cout << "****************************************" << std::endl;
-  std::cout << "****************************************" << std::endl;
-  std::cout << "****************************************" << std::endl;
-  settings.init_options = RSMI_INIT_FLAG_ALL_GPUS;
-  ret = RUN_ALL_TESTS();
-
-  if (settings.standalone){
+    ret = RUN_ALL_TESTS();
     if (rdcd_pid != -1) {
       if (killRDCD(rdcd_pid)) {
         return -1;
       }
     }
+    if (ret) {
+      return ret;
+    }
   }
+
   return ret;
 }

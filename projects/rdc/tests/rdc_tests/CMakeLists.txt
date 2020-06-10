@@ -42,11 +42,8 @@ endif()
 
 # Required Defines first:
 
-set(RDC_INC_DIR ${RDC_DIR}/include)
-set(RDC_LIB_DIR ${RDC_DIR}/build/rdc_libs)
-set(RSMI_INC_DIR ${ROCM_DIR}/rocm_smi/include)
-set(RSMI_LIB_DIR ${ROCM_DIR}/rocm_smi/lib)
-
+set(RDC_INC_DIR ${ROCM_DIR}/include)
+set(RDC_LIB_DIR ${ROCM_DIR}/rdc/lib)
 
 #
 # Determine RDC Header files are present
@@ -75,6 +72,7 @@ message("Build Configuration:")
 message("-----------BuildType: " ${BUILD_TYPE})
 message("------------Compiler: " ${CMAKE_CXX_COMPILER})
 message("-------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
+message("------------ROCM_DIR: " ${ROCM_DIR})
 message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
 message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
@@ -156,7 +154,6 @@ add_executable(${RDCTST} ${rdctstSources} ${functionalSources})
 
 # Header file include path
 target_include_directories(${RDCTST} PRIVATE ${RDC_INC_DIR}
-                                     PRIVATE ${RSMI_INC_DIR}
                                      PRIVATE ${RDCTST_ROOT}/..
                                      PRIVATE ${RDCTST_ROOT}/gtest/include)
 

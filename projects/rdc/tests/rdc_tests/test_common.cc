@@ -105,17 +105,19 @@ static const struct option long_options[] = {
   {"remote_server_ip", required_argument, nullptr, 's'},
   {"remote_server_port", required_argument, nullptr, 'p'},
   {"start_rdcd", optional_argument, nullptr, 'd'},
+  {"batch_mode", no_argument, nullptr, 'b'},
   {"dont_fail", no_argument, nullptr, 'f'},
   {"unauth_comm", no_argument, nullptr, 'u'},
   {"rdctst_help", no_argument, nullptr, 'r'},
 
   {nullptr, 0, nullptr, 0}
 };
-static const char* short_options = "i:v:m:s:p:d:fur";
+static const char* short_options = "i:v:m:s:p:d:bfur";
 
 static void PrintHelp(void) {
   std::cout <<
      "Optional rdctst Arguments:\n"
+     "--batch_mode, -b run in embedded mode with no interactive prompts\n"
      "--dont_fail, -f if set, don't fail test when individual test fails; "
          "default is to fail when an individual test fails\n"
      "--rdctst_help, -r print this help message\n"
@@ -136,10 +138,25 @@ static void PrintHelp(void) {
                                             "default is with authentication\n";
 }
 
+static bool CheckArgs(RDCTstGlobals *test) {
+  if (test->batch_mode) {
+    if (
+        (test->monitor_server_ip != "") ||
+        (test->monitor_server_port != "") ||
+        test->secure) {
+      std::cout << "--batch_mode option is incompatible with "
+              "--remote_server_ip, --remote_server_port and --unauth_comm" <<
+                                                                     std::endl;
+      return false;
+     }
+  }
+  return true;
+}
+
 uint32_t ProcessCmdline(RDCTstGlobals* test, int arg_cnt, char** arg_list) {
   int a;
   int ind = -1;
-
+  uint32_t arg_ind = 1;  // Skip the program name
   assert(test != nullptr);
 
   while (true) {
@@ -190,14 +207,24 @@ uint32_t ProcessCmdline(RDCTstGlobals* test, int arg_cnt, char** arg_list) {
         test->secure = false;
         break;
 
+      case 'b':
+        test->batch_mode = true;
+        test->standalone = false;
+        break;
+
       default:
-        std::cout << "Unknown command line option: \"" << a <<
-                                               "\". Ignoring..." << std::endl;
+        std::cout << "Unknown command line option: \"" <<
+                                       arg_list[arg_ind] << "\"" << std::endl;
         PrintHelp();
-        return 0;
+        return 1;
     }
+    ++arg_ind;
   }
-  return 0;
+
+  if (CheckArgs(test)) {
+    return 0;
+  }
+  return 1;
 }
 
 const char *GetBlockNameStr(rsmi_gpu_block_t id) {

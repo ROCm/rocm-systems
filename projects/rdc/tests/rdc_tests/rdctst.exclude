@@ -23,6 +23,10 @@ fi
 FILTER[vega10]=\
 $BLACKLIST_ALL_ASICS
 
+# Leave the remaining commands in this RDC version of a blacklist
+# as an example, until there are actual tests to blacklist.
+return 0
+
 # SWDEV-207510
 FILTER[vega20]=\
 $BLACKLIST_ALL_ASICS\
