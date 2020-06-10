@@ -289,6 +289,20 @@ void dealloc_context_entry(context_entry_t* entry) {
   }
 }
 
+// Global context map
+static std::mutex ctx_a_mutex;
+typedef std::map<hsa_agent_handle_t, context_entry_t*> ctx_a_map_t;
+ctx_a_map_t* ctx_a_map = NULL;
+context_entry_t* ck_ctx_entry(hsa_agent_t agent, bool& found) {
+  std::lock_guard<std::mutex> lock(ctx_a_mutex);
+  if (ctx_a_map == NULL) ctx_a_map = new ctx_a_map_t;
+  auto ret = ctx_a_map->insert({agent.handle, NULL});
+  found = !ret.second;
+  if (found) ctx_a_map->erase(agent.handle);
+  else ret.first->second = new context_entry_t{};
+  return ret.first->second;
+}
+
 // Dump trace data to file
 void dump_sqtt_trace(const char* label, const uint32_t chunk, const void* data, const uint32_t& size) {
   if (result_prefix != NULL) {
@@ -481,34 +495,35 @@ bool dump_context_entry(context_entry_t* entry) {
   ++context_collected;
 
   const uint32_t index = entry->index;
-  FILE* file_handle = entry->file_handle;
-  const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
-  const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(entry->agent);
-
-  fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), pid(%u), tid(%u), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), sig(0x%lx), kernel-name(\"%s\")",
-    index,
-    agent_info->dev_index,
-    entry->data.queue_id,
-    entry->data.queue_index,
-    my_pid,
-    entry->data.thread_id,
-    entry->kernel_properties.grid_size,
-    entry->kernel_properties.workgroup_size,
-    (entry->kernel_properties.lds_size + (AgentInfo::lds_block_size - 1)) & ~(AgentInfo::lds_block_size - 1),
-    entry->kernel_properties.scratch_size,
-    (entry->kernel_properties.vgpr_count + 1) * agent_info->vgpr_block_size,
-    (entry->kernel_properties.sgpr_count + agent_info->sgpr_block_dflt) * agent_info->sgpr_block_size,
-    entry->kernel_properties.fbarrier_count,
-    entry->kernel_properties.signal.handle,
-    nik_name.c_str());
-  if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
-    record->dispatch,
-    record->begin,
-    record->end,
-    record->complete);
-  fprintf(file_handle, "\n");
-  fflush(file_handle);
-
+  if (index != UINT32_MAX) {
+    FILE* file_handle = entry->file_handle;
+    const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
+    const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(entry->agent);
+  
+    fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), pid(%u), tid(%u), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), sig(0x%lx), kernel-name(\"%s\")",
+      index,
+      agent_info->dev_index,
+      entry->data.queue_id,
+      entry->data.queue_index,
+      my_pid,
+      entry->data.thread_id,
+      entry->kernel_properties.grid_size,
+      entry->kernel_properties.workgroup_size,
+      (entry->kernel_properties.lds_size + (AgentInfo::lds_block_size - 1)) & ~(AgentInfo::lds_block_size - 1),
+      entry->kernel_properties.scratch_size,
+      (entry->kernel_properties.vgpr_count + 1) * agent_info->vgpr_block_size,
+      (entry->kernel_properties.sgpr_count + agent_info->sgpr_block_dflt) * agent_info->sgpr_block_size,
+      entry->kernel_properties.fbarrier_count,
+      entry->kernel_properties.signal.handle,
+      nik_name.c_str());
+    if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
+      record->dispatch,
+      record->begin,
+      record->end,
+      record->complete);
+    fprintf(file_handle, "\n");
+    fflush(file_handle);
+  }
   if (record) {
     delete record;
     entry->data.record = NULL;
@@ -595,6 +610,37 @@ bool context_handler(rocprofiler_group_t group, void* arg) {
 
   if (trace_on) {
     fprintf(stdout, "tool::handler: context_array %d tid %u\n", (int)(context_array->size()), GetTid());
+    fflush(stdout);
+  }
+
+  if (pthread_mutex_unlock(&mutex) != 0) {
+    perror("pthread_mutex_unlock");
+    abort();
+  }
+
+  return false;
+}
+
+// Profiling completion handler for concurrent implementation
+// Dump the context entry
+// Return true if the context was dumped successfully
+bool context_handler_con(rocprofiler_group_t group, void* arg) {
+  context_entry_t* entry = reinterpret_cast<context_entry_t*>(arg);
+
+  if (pthread_mutex_lock(&mutex) != 0) {
+    perror("pthread_mutex_lock");
+    abort();
+  }
+
+  bool ret = true;
+  ret = dump_context_entry(entry);
+  if (ret == false) {
+    fprintf(stderr, "tool error: context is not complete\n");
+    abort();
+  }
+
+  if (trace_on) {
+    fprintf(stdout, "tool::handler_con: context_map %d tid %u\n", (int)(ctx_a_map->size()), GetTid());
     fflush(stdout);
   }
 
@@ -729,6 +775,75 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   if (trace_on) {
     fprintf(stdout, "tool::dispatch: context_array %d tid %u\n", (int)(context_array->size()), GetTid());
     fflush(stdout);
+  }
+
+  return status;
+}
+
+hsa_status_t dispatch_callback_con(const rocprofiler_callback_data_t* callback_data, void* user_data,
+                               rocprofiler_group_t* group) {
+  // Passed tool data
+  callbacks_data_t* tool_data = reinterpret_cast<callbacks_data_t*>(user_data);
+  // HSA status
+  hsa_status_t status = HSA_STATUS_ERROR;
+
+  // Checking dispatch condition
+  bool enabled = false;
+  if (tool_data->filter_on == 1) {
+    enabled = check_filter(callback_data, tool_data);
+    if (enabled == false) next_context_count();
+  }
+
+  // Checking context entry
+  bool found = false;
+  context_entry_t* entry = ck_ctx_entry(callback_data->agent, found);
+  if ((enabled == true) && (found == true)) return HSA_STATUS_SUCCESS;
+
+  if (found == false) {
+    *group = entry->group;
+  } else {
+    // Profiling context
+    rocprofiler_t* context = NULL;
+
+    // context properties
+    rocprofiler_properties_t properties{};
+    properties.handler = (result_prefix != NULL) ? context_handler_con : NULL;
+    properties.handler_arg = (void*)entry;
+  
+    rocprofiler_feature_t* features = tool_data->features;
+    unsigned feature_count = tool_data->feature_count;
+  
+    // Open profiling context
+    status = rocprofiler_open(callback_data->agent, features, feature_count,
+                              &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
+    check_status(status);
+  
+    // Check that we have only one profiling group
+    uint32_t group_count = 0;
+    status = rocprofiler_group_count(context, &group_count);
+    check_status(status);
+    assert(group_count == 1);
+    // Get group[0]
+    const uint32_t group_index = 0;
+    status = rocprofiler_get_group(context, group_index, group);
+    check_status(status);
+  
+    // Fill profiling context entry
+    entry->index = UINT32_MAX;
+    entry->agent = callback_data->agent;
+    entry->group = *group;
+    entry->features = features;
+    entry->feature_count = feature_count;
+    entry->data = *callback_data;
+    entry->data.kernel_name = strdup(callback_data->kernel_name);
+    entry->file_handle = tool_data->file_handle;
+    entry->active = true;
+    reinterpret_cast<std::atomic<bool>*>(&entry->valid)->store(true);
+  
+    if (trace_on) {
+      fprintf(stdout, "tool::dispatch_con: context_map %d tid %u\n", (int)(ctx_a_map->size()), GetTid());
+      fflush(stdout);
+    }
   }
 
   return status;
@@ -979,6 +1094,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   // Set HSA intercepting
   check_env_var("ROCP_HSA_INTERC", settings->hsa_intercepting);
   if (settings->hsa_intercepting) rocprofiler_set_hsa_callbacks(hsa_callbacks, (void*)14);
+  // Enable concurrent SQTT
+  check_env_var("ROCP_K_CONCURRENT", settings->k_concurrent);
 
   is_trace_local = settings->trace_local;
 
@@ -1118,6 +1235,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK;
     parameters_dict["SAMPLE_RATE"] =
         HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SAMPLE_RATE;
+    //parameters_dict["K_CON"] =
+    //    HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT;
 
     printf("    %s (", name.c_str());
     features[index] = {};
@@ -1133,6 +1252,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
 
       if (tag != "parameters") fatal("ROCProfiler: trace node is not supported '" + tag + "'");
 
+      if (settings->k_concurrent != 0) parameter_count += 1;
+
       if (parameter_count != 0) {
         rocprofiler_parameter_t* parameters = new rocprofiler_parameter_t[parameter_count];
         unsigned p_index = 0;
@@ -1147,6 +1268,12 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
           parameters[p_index].parameter_name = parameters_dict[parameter_name];
           parameters[p_index].value = value;
           ++p_index;
+        }
+
+        if (settings->k_concurrent != 0) {
+          parameters[parameter_count - 1] = {};
+          parameters[parameter_count - 1].parameter_name = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT;
+          parameters[parameter_count - 1].value = 1;
         }
 
         features[index].parameters = parameters;
@@ -1173,7 +1300,11 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
 
   // Adding dispatch observer
   rocprofiler_queue_callbacks_t callbacks_ptrs{0};
-  callbacks_ptrs.dispatch = dispatch_callback;
+  if (settings->k_concurrent != 0) {
+    callbacks_ptrs.dispatch = dispatch_callback_con;
+  } else {
+    callbacks_ptrs.dispatch = dispatch_callback;
+  }
   callbacks_ptrs.destroy = destroy_callback;
 
   callbacks_data = new callbacks_data_t{};

@@ -216,6 +216,7 @@ uint32_t LoadTool() {
     if (settings.code_obj_tracking) intercept_mode |= CODE_OBJ_TRACKING_MODE;
     if (settings.memcopy_tracking) intercept_mode |= MEMCOPY_INTERCEPT_MODE;
     if (settings.hsa_intercepting) intercept_mode |= HSA_INTERCEPT_MODE;
+    if (settings.k_concurrent) InterceptQueue::k_concurrent_ = true;
   }
 
   ONLOAD_TRACE("end intercept_mode(" << intercept_mode << ")");
