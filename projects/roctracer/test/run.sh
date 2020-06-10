@@ -31,7 +31,7 @@ cd $BIN_DIR
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and other libraries
 if [ "$BIN_NAME" = "run_ci.sh" ] ; then
-  export LD_LIBRARY_PATH=$PWD/../../build/roctracer
+  export LD_LIBRARY_PATH=/opt/rocm/roctracer/lib
 else
   export LD_LIBRARY_PATH=$PWD
 fi
