@@ -3,10 +3,7 @@
 set -e
 
 do_ldconfig() {
-    INSTALL_PATH=/opt/rocm/roctracer
-    if [ -e "${INSTALL_PATH}" ] ; then
-        echo /opt/rocm/roctracer/lib > /etc/ld.so.conf.d/libroctracer64.conf && ldconfig
-    fi
+   echo /opt/rocm/roctracer/lib > /etc/ld.so.conf.d/libroctracer64.conf && ldconfig
 }
 
 case "$1" in
