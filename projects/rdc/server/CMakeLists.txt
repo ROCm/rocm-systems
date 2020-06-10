@@ -43,11 +43,18 @@ message("")
 
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
                    CACHE STRING "Location of RDC client library source code.")
-set(CMAKE_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
+
+message("CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}")
+message("CPACK_PACKAGING_INSTALL_PREFIX=${CPACK_PACKAGING_INSTALL_PREFIX}")
+if (NOT DEFINED CMAKE_INSTALL_PREFIX)
+  set(CMAKE_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
                                 CACHE STRING "Default installation directory.")
+endif()
+
+if (NOT DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
 set(CPACK_PACKAGING_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
                                      CACHE STRING "Default packaging prefix.")
-
+endif()
 
 ## Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64")
@@ -57,9 +64,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2 -std=c++11 ")
 
 if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
-else ()
+else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
-endif ()
+endif()
 
 set(SRC_DIR "src")
 set(INC_DIR "include/${RDC}")
@@ -98,11 +105,11 @@ target_link_libraries(${SERVER_DAEMON_EXE} pthread rt grpc grpc++
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${SERVER_DAEMON_EXE}
         PERMISSIONS OWNER_EXECUTE OWNER_READ OWNER_WRITE GROUP_READ
         GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-        DESTINATION ${RDC_SERVER_ROOT_PATH}usr/sbin
-                                            COMPONENT ${SERVER_COMPONENT})
+        DESTINATION usr/sbin
+        COMPONENT ${SERVER_COMPONENT})
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_FILE_NAME}
-               DESTINATION ${RDC_SERVER_ROOT_PATH}lib/systemd/system
-                                           COMPONENT ${SERVER_COMPONENT})
+               DESTINATION lib/systemd/system
+               COMPONENT ${SERVER_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Server                          ")

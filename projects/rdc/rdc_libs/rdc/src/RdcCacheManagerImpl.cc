@@ -175,7 +175,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_cache(uint32_t gpu_index,
     return RDC_ST_OK;
 }
 
-rdc_status_t RdcCacheManagerImpl::rdc_job_remove(char job_id[64]) {
+rdc_status_t RdcCacheManagerImpl::rdc_job_remove(const char job_id[64]) {
     std::lock_guard<std::mutex> guard(cache_mutex_);
     cache_jobs_.erase(job_id);
     return RDC_ST_OK;
@@ -250,7 +250,7 @@ void RdcCacheManagerImpl::set_summary(const FieldSummaryStats & stats,
     summary.average += gpu.average;
 }
 
-rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(char jobId[64],
+rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
         const rdc_gpu_gauges_t& gpu_gauges,
         rdc_job_info_t* p_job_info) {
     std::lock_guard<std::mutex> guard(cache_mutex_);
@@ -384,7 +384,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(char jobId[64],
     return RDC_ST_OK;
 }
 
-rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(char job_id[64],
+rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(const char job_id[64],
         const rdc_group_info_t& ginfo, const rdc_field_group_info_t& finfo,
         const rdc_gpu_gauges_t& gpu_gauges) {
      RdcJobStatsCacheEntry cacheEntry;
@@ -426,7 +426,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(char job_id[64],
 }
 
 
-rdc_status_t RdcCacheManagerImpl::rdc_job_stop_stats(char job_id[64],
+rdc_status_t RdcCacheManagerImpl::rdc_job_stop_stats(const char job_id[64],
             const rdc_gpu_gauges_t& gpu_gauges) {
     std::lock_guard<std::mutex> guard(cache_mutex_);
     auto job_stats = cache_jobs_.find(job_id);

@@ -418,7 +418,7 @@ rdc_status_t rdc_disconnect(rdc_handle_t p_rdc_handle);
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle,
-    rdc_gpu_group_t group_id, char job_id[64], uint64_t update_freq);
+    rdc_gpu_group_t group_id, const char job_id[64], uint64_t update_freq);
 
 /**
  *  @brief Get the stats of the job using the job id.
@@ -435,8 +435,8 @@ rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, char  job_id[64],
-                rdc_job_info_t* p_job_info);
+rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle,
+                           const char job_id[64], rdc_job_info_t* p_job_info);
 
 /**
  *  @brief Request RDC to stop watching the stats of the job
@@ -452,7 +452,7 @@ rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, char  job_id[64],
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle,
-            char  job_id[64]);
+                                                       const char job_id[64]);
 
 /**
  *  @brief Request RDC to stop tracking the job given by job_id
@@ -467,8 +467,7 @@ rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_job_remove(rdc_handle_t p_rdc_handle,
-            char  job_id[64]);
+rdc_status_t rdc_job_remove(rdc_handle_t p_rdc_handle, const char job_id[64]);
 
 /**
  *  @brief Request RDC to stop tracking all the jobs

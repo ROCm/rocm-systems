@@ -85,7 +85,7 @@ RdcEmbeddedHandler::~RdcEmbeddedHandler() {
 
 // JOB API
 rdc_status_t RdcEmbeddedHandler::rdc_job_start_stats(rdc_gpu_group_t groupId,
-        char job_id[64], uint64_t update_freq) {
+        const char job_id[64], uint64_t update_freq) {
     rdc_gpu_gauges_t gpu_gauges;
     rdc_status_t status = get_gpu_gauges(&gpu_gauges);
     if (status != RDC_ST_OK) return status;
@@ -136,7 +136,7 @@ rdc_status_t RdcEmbeddedHandler::get_gpu_gauges(rdc_gpu_gauges_t* gpu_gauges) {
     return RDC_ST_OK;
 }
 
-rdc_status_t RdcEmbeddedHandler::rdc_job_get_stats(char job_id[64],
+rdc_status_t RdcEmbeddedHandler::rdc_job_get_stats(const char job_id[64],
            rdc_job_info_t* p_job_info) {
     if (p_job_info == nullptr) {
         return RDC_ST_BAD_PARAMETER;
@@ -149,7 +149,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_job_get_stats(char job_id[64],
     return cache_mgr_->rdc_job_get_stats(job_id, gpu_gauges, p_job_info);
 }
 
-rdc_status_t RdcEmbeddedHandler::rdc_job_stop_stats(char job_id[64]) {
+rdc_status_t RdcEmbeddedHandler::rdc_job_stop_stats(const char job_id[64]) {
     rdc_gpu_gauges_t gpu_gauges;
     rdc_status_t status = get_gpu_gauges(&gpu_gauges);
     if (status != RDC_ST_OK) return status;
@@ -157,7 +157,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_job_stop_stats(char job_id[64]) {
     return watch_table_->rdc_job_stop_stats(job_id, gpu_gauges);
 }
 
-rdc_status_t RdcEmbeddedHandler::rdc_job_remove(char job_id[64]) {
+rdc_status_t RdcEmbeddedHandler::rdc_job_remove(const char job_id[64]) {
     return watch_table_->rdc_job_remove(job_id);
 }
 

@@ -41,7 +41,7 @@ RdcWatchTableImpl::RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings,
 }
 
 rdc_status_t  RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id,
-                char  job_id[64], uint64_t update_freq,
+                const char  job_id[64], uint64_t update_freq,
                 const rdc_gpu_gauges_t& gpu_gauges) {
     do {  //< lock guard for thread safe
         std::lock_guard<std::mutex> guard(watch_mutex_);
@@ -92,7 +92,7 @@ rdc_status_t  RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id,
     return result;
 }
 
-rdc_status_t RdcWatchTableImpl::rdc_job_stop_stats(char job_id[64],
+rdc_status_t RdcWatchTableImpl::rdc_job_stop_stats(const char job_id[64],
                         const rdc_gpu_gauges_t& gpu_gauge) {
     uint32_t job_group_id;
     do {  //< lock guard for thread safe
@@ -119,7 +119,7 @@ rdc_status_t RdcWatchTableImpl::rdc_job_stop_stats(char job_id[64],
     return result;
 }
 
-rdc_status_t RdcWatchTableImpl::rdc_job_remove(char job_id[64]) {
+rdc_status_t RdcWatchTableImpl::rdc_job_remove(const char job_id[64]) {
     rdc_gpu_gauges_t gpu_gauge;
     rdc_job_stop_stats(job_id, gpu_gauge);
     return cache_mgr_->rdc_job_remove(job_id);

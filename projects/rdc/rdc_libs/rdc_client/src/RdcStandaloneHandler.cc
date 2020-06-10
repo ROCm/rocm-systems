@@ -61,8 +61,8 @@ rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status,
 }
 
 // JOB RdcAPI
-rdc_status_t RdcStandaloneHandler::rdc_job_start_stats(rdc_gpu_group_t groupId,
-        char job_id[64], uint64_t update_freq) {
+rdc_status_t RdcStandaloneHandler::rdc_job_start_stats(
+       rdc_gpu_group_t groupId, const char job_id[64], uint64_t update_freq) {
     ::rdc::StartJobStatsRequest request;
     ::rdc::StartJobStatsResponse reply;
     ::grpc::ClientContext context;
@@ -133,7 +133,7 @@ bool RdcStandaloneHandler::copy_gpu_usage_info(
 
     return true;
 }
-rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(char job_id[64],
+rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(const char job_id[64],
            rdc_job_info_t* p_job_info) {
     if (!p_job_info) {
         return RDC_ST_BAD_PARAMETER;
@@ -157,7 +157,7 @@ rdc_status_t RdcStandaloneHandler::rdc_job_get_stats(char job_id[64],
     return RDC_ST_OK;
 }
 
-rdc_status_t RdcStandaloneHandler::rdc_job_stop_stats(char job_id[64]) {
+rdc_status_t RdcStandaloneHandler::rdc_job_stop_stats(const char job_id[64]) {
     ::rdc::StopJobStatsRequest request;
     ::rdc::StopJobStatsResponse reply;
     ::grpc::ClientContext context;
@@ -169,7 +169,7 @@ rdc_status_t RdcStandaloneHandler::rdc_job_stop_stats(char job_id[64]) {
     return err_status;
 }
 
-rdc_status_t RdcStandaloneHandler::rdc_job_remove(char job_id[64]) {
+rdc_status_t RdcStandaloneHandler::rdc_job_remove(const char job_id[64]) {
     ::rdc::RemoveJobRequest request;
     ::rdc::RemoveJobResponse reply;
     ::grpc::ClientContext context;

@@ -112,8 +112,8 @@ rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle,
                 rdc_field_update_all(wait_for_update);
 }
 
-rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, char  job_id[64] ,
-                rdc_job_info_t* p_job_info) {
+rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle,
+                          const char job_id[64], rdc_job_info_t* p_job_info) {
         if (!p_rdc_handle) {
                 return RDC_ST_INVALID_HANDLER;
         }
@@ -123,7 +123,7 @@ rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, char  job_id[64] ,
 }
 
 rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle,
-                rdc_gpu_group_t groupId, char  job_id[64],
+                               rdc_gpu_group_t groupId, const char job_id[64],
                  uint64_t update_freq) {
         if (!p_rdc_handle) {
                 return RDC_ST_INVALID_HANDLER;
@@ -133,7 +133,7 @@ rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle,
                 rdc_job_start_stats(groupId, job_id, update_freq);
 }
 
-rdc_status_t rdc_job_remove(rdc_handle_t p_rdc_handle, char job_id[64]) {
+rdc_status_t rdc_job_remove(rdc_handle_t p_rdc_handle, const char job_id[64]) {
         if (!p_rdc_handle) {
                 return RDC_ST_INVALID_HANDLER;
         }
@@ -152,7 +152,8 @@ rdc_status_t rdc_job_remove_all(rdc_handle_t p_rdc_handle) {
 }
 
 
-rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle, char  job_id[64] ) {
+rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle,
+                                                     const char job_id[64] ) {
         if (!p_rdc_handle) {
                 return RDC_ST_INVALID_HANDLER;
         }

@@ -81,19 +81,19 @@ class RdcCacheManagerImpl: public RdcCacheManager {
                 uint64_t max_keep_samples, double  max_keep_age) override;
     std::string  get_cache_stats()  override;
 
-    rdc_status_t rdc_job_get_stats(char  job_id[64],
+    rdc_status_t rdc_job_get_stats(const char job_id[64],
         const rdc_gpu_gauges_t& gpu_gauges,
         rdc_job_info_t* p_job_info) override;
-    rdc_status_t rdc_job_start_stats(char job_id[64],
+    rdc_status_t rdc_job_start_stats(const char job_id[64],
         const rdc_group_info_t& group,
         const rdc_field_group_info_t& finfo,
         const rdc_gpu_gauges_t& gpu_gauges) override;
-    rdc_status_t rdc_job_stop_stats(char job_id[64],
+    rdc_status_t rdc_job_stop_stats(const char job_id[64],
                     const rdc_gpu_gauges_t& gpu_gauge) override;
     rdc_status_t rdc_update_job_stats(uint32_t gpu_index,
         const std::string& job_id,
         const rdc_field_value& value) override;
-    rdc_status_t rdc_job_remove(char job_id[64]) override;
+    rdc_status_t rdc_job_remove(const char job_id[64]) override;
     rdc_status_t rdc_job_remove_all() override;
 
  private:
