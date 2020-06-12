@@ -216,7 +216,7 @@ if (DOXYGEN_FOUND AND LATEX_FOUND)
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
          COMMAND make  > /dev/null
          COMMAND cp  ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
-                      ${CMAKE_CURRENT_SOURCE_DIR}/docs/${RSMI_MANUAL_NAME}.pdf
+                  ${CMAKE_CURRENT_SOURCE_DIR}/docs/${RSMI_MANUAL_NAME}_new.pdf
          DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.tex
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/latex)
 
