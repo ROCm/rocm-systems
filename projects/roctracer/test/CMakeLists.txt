@@ -20,8 +20,27 @@
 # THE SOFTWARE.
 ################################################################################
 
-cmake_minimum_required ( VERSION 2.8.12 )
+cmake_minimum_required ( VERSION 3.5.0 )
 set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
+
+if ( NOT DEFINED ROOT_DIR )
+  MESSAGE ( FATAL_ERROR "ROOT_DIR is not defined" )
+endif ()
+if ( NOT DEFINED INC_PATH )
+  set ( INC_PATH "${ROOT_DIR}/inc" )
+endif ()
+if ( NOT DEFINED LIB_PATH )
+  set ( LIB_PATH "${PROJECT_BINARY_DIR}" )
+endif ()
+if ( NOT DEFINED TEST_DIR )
+  set ( TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}" )
+  ## Adding default path cmake modules
+  list ( APPEND CMAKE_MODULE_PATH "${ROOT_DIR}/cmake_modules" )
+  ## Include common cmake modules
+  include ( utils )
+  ## Set build environment
+  include ( env )
+endif ()
 
 ## Path to HSA test
 set ( HSA_TEST_DIR "${TEST_DIR}/hsa/test" )
@@ -31,7 +50,7 @@ set ( HSA_REV "48bd999" )
 set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
 
 ## build HIP tests
-set ( TEST_ENV HIP_VDI=${HIP_VDI} ROCM_PATH=${ROCM_ROOT_DIR} HSA_PATH=${ROCM_ROOT_DIR}/hsa ROOT_PATH=${ROOT_DIR} LIB_PATH=${PROJECT_BINARY_DIR} HIPCC_VERBOSE=3 )
+set ( TEST_ENV HIP_VDI=${HIP_VDI} ROCM_PATH=${ROCM_ROOT_DIR} HSA_PATH=${ROCM_ROOT_DIR}/hsa INC_PATH=${INC_PATH} LIB_PATH=${LIB_PATH} HIPCC_VERBOSE=3 )
 add_custom_target( mytest
   COMMAND ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test"
@@ -51,12 +70,14 @@ add_custom_target( mytest
 ## Util sources
 file( GLOB UTIL_SRC "${HSA_TEST_DIR}/util/*.cpp" )
 
-## Build test library
-set ( TEST_LIB "tracer_tool" )
-set ( TEST_LIB_SRC ${TEST_DIR}/tool/tracer_tool.cpp ${UTIL_SRC} )
-add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
-target_include_directories ( ${TEST_LIB} PRIVATE ${HSA_TEST_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HIP_INC_DIR} ${HCC_INC_DIR} ${HSA_KMT_INC_PATH} )
-target_link_libraries ( ${TEST_LIB} ${ROCTRACER_TARGET} ${HSA_RUNTIME_LIB} c stdc++ dl pthread rt )
+if ( DEFINED ROCTRACER_TARGET )
+  ## Build test library
+  set ( TEST_LIB "tracer_tool" )
+  set ( TEST_LIB_SRC ${TEST_DIR}/tool/tracer_tool.cpp ${UTIL_SRC} )
+  add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
+  target_include_directories ( ${TEST_LIB} PRIVATE ${HSA_TEST_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HIP_INC_DIR} ${HCC_INC_DIR} ${HSA_KMT_INC_PATH} )
+  target_link_libraries ( ${TEST_LIB} ${ROCTRACER_TARGET} ${HSA_RUNTIME_LIB} c stdc++ dl pthread rt )
+endif ()
 
 ## Build HSA test
 execute_process ( COMMAND sh -xc "if [ ! -e ${TEST_DIR}/hsa ] ; then git clone https://github.com/ROCmSoftwarePlatform/hsa-class.git ${TEST_DIR}/hsa; fi" )

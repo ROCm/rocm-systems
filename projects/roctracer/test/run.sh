@@ -27,15 +27,31 @@ BIN_NAME=`basename $0`
 BIN_DIR=`dirname $0`
 cd $BIN_DIR
 
+IS_CI=0
+if [ "$BIN_NAME" = "run_ci.sh" ] ; then
+  IS_CI=1
+fi
+
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and other libraries
-if [ "$BIN_NAME" = "run_ci.sh" ] ; then
+export LD_LIBRARY_PATH=$PWD
+if [ $IS_CI = 1 ] ; then
   export LD_LIBRARY_PATH=/opt/rocm/roctracer/lib
-else
-  export LD_LIBRARY_PATH=$PWD
 fi
+if [ -n "$ROCTRACER_LIB_PATH" ] ; then
+  export LD_LIBRARY_PATH=$ROCTRACER_LIB_PATH
+fi
+if [ -z "$ROCTRACER_TOOL_PATH" ] ; then
+  ROCTRACER_TOOL_PATH="./test"
+fi
+
 env
+ls -lad /opt/*
+ls -lad /opt/rocm/*
+ls -lad /opt/rocm/roctracer/*
+ls -lad /opt/rocm/roctracer/*/*
+ls -lad /opt/rocm/roctracer/*/*/*
 
 # test filter input
 test_filter=-1
@@ -63,11 +79,16 @@ eval_test() {
     echo "test $test_number: $test_name \"$label\""
     echo "CMD: \"$cmdline\""
     test_runnum=$((test_runnum + 1))
-    eval "$cmdline" | tee $test_trace
+    eval "$cmdline" >$test_trace 2>&1
     is_failed=$?
-    if [ $is_failed = 0 ] ; then
-      python ./test/check_trace.py -in $test_name
-      is_failed=$?
+    cat $test_trace
+    if [ $IS_CI = 1 ] ; then
+      is_failed=0;
+    else
+      if [ $is_failed = 0 ] ; then
+        python ./test/check_trace.py -in $test_name
+        is_failed=$?
+      fi
     fi
     if [ $is_failed = 0 ] ; then
       echo "$test_name: PASSED"
@@ -90,7 +111,7 @@ eval_test "standalone HIP MGPU test" "LD_PRELOAD=libkfdwrapper64.so ./test/Matri
 
 # Tool test
 # rocTracer/tool is loaded by HSA runtime
-export HSA_TOOLS_LIB="test/libtracer_tool.so"
+export HSA_TOOLS_LIB="$ROCTRACER_TOOL_PATH/libtracer_tool.so"
 
 # KFD test
 export ROCTRACER_DOMAIN="kfd"

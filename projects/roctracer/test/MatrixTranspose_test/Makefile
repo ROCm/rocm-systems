@@ -1,4 +1,5 @@
 ROOT_PATH ?= ../..
+INC_PATH  ?= $(ROOT_PATH)/inc
 LIB_PATH  ?= $(ROOT_PATH)/build
 ROCM_PATH ?= /opt/rocm
 HIP_VDI ?= 0
@@ -16,7 +17,7 @@ TARGET=hcc
 
 EXECUTABLE=./MatrixTranspose
 OBJECTS = MatrixTranspose.o
-FLAGS =-g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc -I$(ROCM_PATH)/hsa/include/hsa -I$(ROCM_PATH)/hsa/include -I$(ROCM_PATH)/hip/include -I$(ROCM_PATH)/include -DLOCAL_BUILD=1 -DHIP_VDI=${HIP_VDI} -DITERATIONS=$(ITERATIONS) -DAMD_INTERNAL_BUILD=1
+FLAGS =-g -I$(INC_PATH) -I$(ROCM_PATH)/hsa/include/hsa -I$(ROCM_PATH)/hsa/include -I$(ROCM_PATH)/hip/include -I$(ROCM_PATH)/include -DLOCAL_BUILD=1 -DHIP_VDI=${HIP_VDI} -DITERATIONS=$(ITERATIONS) -DAMD_INTERNAL_BUILD=1
 
 ifeq ($(C_TEST), 1)
 	COMP=${CC}

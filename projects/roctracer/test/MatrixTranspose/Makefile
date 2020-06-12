@@ -1,4 +1,5 @@
 ROOT_PATH ?= ../..
+INC_PATH  ?= $(ROOT_PATH)/inc
 LIB_PATH  ?= $(ROOT_PATH)/build
 ROC_LIBS  = -Wl,--rpath,${LIB_PATH} $(LIB_PATH)/libroctracer64.so $(LIB_PATH)/libroctx64.so
 
@@ -21,7 +22,7 @@ EXECUTABLE=./MatrixTranspose
 
 all: clean $(EXECUTABLE)
 
-CXXFLAGS =-g -I$(ROOT_PATH) -I$(ROOT_PATH)/inc -DLOCAL_BUILD=1
+CXXFLAGS =-g -I$(INC_PATH) -DLOCAL_BUILD=1
 CXX=$(HIPCC)
 
 $(EXECUTABLE): $(OBJECTS)
