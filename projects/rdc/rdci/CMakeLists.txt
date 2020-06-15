@@ -32,6 +32,9 @@ message("Build Configuration:")
 message("-----------BuildType: " ${CMAKE_BUILD_TYPE})
 message("------------Compiler: " ${CMAKE_CXX_COMPILER})
 message("-------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
+message("------Install Prefix: " ${CMAKE_INSTALL_PREFIX})
+message("-Pkg.-Install Prefix: " ${CPACK_PACKAGING_INSTALL_PREFIX})
+message("-CMake inst. Bindir : " ${CMAKE_INSTALL_BINDIR})
 message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
 message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
@@ -87,6 +90,12 @@ add_executable(${RDCI_EXE} "${RDCI_SRC_LIST}")
 target_link_libraries(${RDCI_EXE} pthread dl rdc_bootstrap)
 
 
+## Add the install directives for the rdci executable
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${RDCI_EXE}
+        PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+                                                    WORLD_READ WORLD_EXECUTE
+        COMPONENT ${CLIENT_COMPONENT}
+        DESTINATION ${RDC}/bin)
 
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
