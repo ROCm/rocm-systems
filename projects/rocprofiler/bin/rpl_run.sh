@@ -281,15 +281,18 @@ run() {
 }
 
 merge_output() {
-  output_dir=$(echo "$1" | sed "s/\/[^\/]*$//")
-  for file_name in `ls $output_dir` ; do
-    output_name=$(echo $file_name | sed -n "/\.txt$/ s/^[0-9]*_//p")
-    if [ -n "$output_name" ] ; then
-      trace_file=$output_dir/$file_name
-      output_file=$output_dir/$output_name
-      touch $output_file
-      cat $trace_file >> $output_file
-    fi
+  while [ -n "$1" ] ; do
+    output_dir=$(echo "$1" | sed "s/\/[^\/]*$//")
+    for file_name in `ls $output_dir` ; do
+      output_name=$(echo $file_name | sed -n "/\.txt$/ s/^[0-9]*_//p")
+      if [ -n "$output_name" ] ; then
+        trace_file=$output_dir/$file_name
+        output_file=$output_dir/$output_name
+        touch $output_file
+        cat $trace_file >> $output_file
+      fi
+    done
+    shift
   done
 }
 
