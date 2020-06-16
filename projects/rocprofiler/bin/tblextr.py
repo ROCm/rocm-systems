@@ -385,8 +385,8 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
         # extracting/converting stream-id
         (stream_id, stream_found) = get_field(record_args, 'stream')
         if stream_found != 0:
-          stream_ind = get_stream_index(stream_id)
-          (rec_vals[5], found) = set_field(record_args, 'stream', stream_ind)
+          stream_id = get_stream_index(stream_id)
+          (rec_vals[5], found) = set_field(record_args, 'stream', stream_id)
           if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
 
         # patching activity properties: kernel name, stream-id
@@ -408,10 +408,10 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
                 kernel_name = m.group(1)
                 dev_id = m.group(2)
                 select_expr += ' AND "dev-id" = ' + dev_id
-                activity_record_patching(db, ops_table_name, 1, kernel_name, stream_found, stream_ind, select_expr)
+                activity_record_patching(db, ops_table_name, 1, kernel_name, stream_found, stream_id, select_expr)
               fatal('Bad multi-kernel format: "' + kernel_item + '" in "' + kernel_str + '"')
           else:
-            activity_record_patching(db, ops_table_name, kernel_found, kernel_str, stream_found, stream_ind, select_expr)
+            activity_record_patching(db, ops_table_name, kernel_found, kernel_str, stream_found, stream_id, select_expr)
 
         db.insert_entry(table_handle, rec_vals)
         record_id += 1
