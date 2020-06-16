@@ -66,24 +66,28 @@ TestBase::TestBase() : setup_failed_(false), description_("") {
 TestBase::~TestBase() {
 }
 
-void MakeHeaderStr(const char *inStr, std::string *outStr) {
+void TestBase::MakeHeaderStr(const char *inStr,
+                                   std::string *outStr) const {
   assert(outStr != nullptr);
   assert(inStr != nullptr);
-
   outStr->clear();
-  *outStr = kLabelDelimiter;
-  *outStr += " ";
-  *outStr += inStr;
-  *outStr += " ";
-  *outStr += kLabelDelimiter;
+  IF_VERB(STANDARD) {
+    *outStr = kLabelDelimiter;
+    *outStr += " ";
+    *outStr += inStr;
+    *outStr += " ";
+    *outStr += kLabelDelimiter;
+  }
 }
 
 void TestBase::SetUp(uint64_t init_flags) {
   std::string label;
   rsmi_status_t err;
 
-  MakeHeaderStr(kSetupLabel, &label);
-  printf("\n\t%s\n", label.c_str());
+  IF_VERB(STANDARD) {
+    MakeHeaderStr(kSetupLabel, &label);
+    printf("\n\t%s\n", label.c_str());
+  }
 
   if (init_flags) {
     err = rsmi_init(init_flags);
@@ -103,8 +107,10 @@ void TestBase::SetUp(uint64_t init_flags) {
   ASSERT_EQ(err, RSMI_STATUS_SUCCESS);
 
   if (num_monitor_devs_ == 0) {
-    std::cout << "No monitor devices found on this machine." << std::endl;
-    std::cout << "No ROCm SMI tests can be run." << std::endl;
+    IF_VERB(STANDARD) {
+      std::cout << "No monitor devices found on this machine." << std::endl;
+      std::cout << "No ROCm SMI tests can be run." << std::endl;
+    }
   }
 
   return;
@@ -149,37 +155,44 @@ void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
 }
 void TestBase::Run(void) {
   std::string label;
-  MakeHeaderStr(kRunLabel, &label);
-  printf("\n\t%s\n", label.c_str());
+  IF_VERB(STANDARD) {
+    MakeHeaderStr(kRunLabel, &label);
+    printf("\n\t%s\n", label.c_str());
+  }
   ASSERT_TRUE(!setup_failed_);
 }
 
 void TestBase::Close(void) {
   std::string label;
-  MakeHeaderStr(kCloseLabel, &label);
-  printf("\n\t%s\n", label.c_str());
-
+  IF_VERB(STANDARD) {
+    MakeHeaderStr(kCloseLabel, &label);
+    printf("\n\t%s\n", label.c_str());
+  }
   rsmi_status_t err = rsmi_shut_down();
   ASSERT_EQ(err, RSMI_STATUS_SUCCESS);
 }
 
 void TestBase::DisplayResults(void) const {
   std::string label;
-  MakeHeaderStr(kResultsLabel, &label);
-  printf("\n\t%s\n", label.c_str());
+  IF_VERB(STANDARD) {
+    MakeHeaderStr(kResultsLabel, &label);
+    printf("\n\t%s\n", label.c_str());
+  }
 }
 
 void TestBase::DisplayTestInfo(void) {
-  printf("#########################################"
+  IF_VERB(STANDARD) {
+    printf("#########################################"
                                   "######################################\n");
 
-  std::string label;
-  MakeHeaderStr(kTitleLabel, &label);
-  printf("\n\t%s\n%s\n", label.c_str(), title().c_str());
+    std::string label;
+    MakeHeaderStr(kTitleLabel, &label);
+    printf("\n\t%s\n%s\n", label.c_str(), title().c_str());
 
-  if (verbosity() >= VERBOSE_STANDARD) {
-    MakeHeaderStr(kDescriptionLabel, &label);
-    printf("\n\t%s\n%s\n", label.c_str(), description().c_str());
+    if (verbosity() >= VERBOSE_STANDARD) {
+      MakeHeaderStr(kDescriptionLabel, &label);
+      printf("\n\t%s\n%s\n", label.c_str(), description().c_str());
+    }
   }
 }
 

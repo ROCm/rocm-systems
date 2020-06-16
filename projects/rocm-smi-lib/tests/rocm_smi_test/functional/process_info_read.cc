@@ -205,8 +205,9 @@ void TestProcInfoRead::Run(void) {
         CHK_ERR_ASRT(err)
         ASSERT_EQ(proc_info.process_id, procs[j].process_id);
         ASSERT_EQ(proc_info.pasid, procs[j].pasid);
-        std::cout << "\t** Process ID: " << procs[j].process_id << " VRAM Usage: " <<
-                     proc_info.vram_usage << std::endl;
+        std::cout << "\t** Process ID: " <<
+            procs[j].process_id << " VRAM Usage: " <<
+                                           proc_info.vram_usage << std::endl;
       }
     }
   }

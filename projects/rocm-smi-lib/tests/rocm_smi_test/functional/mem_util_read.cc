@@ -114,41 +114,44 @@ void TestMemUtilRead::Run(void) {
     }
   };
 
-  for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
-    PrintDeviceHeader(i);
+  for (uint32_t x = 0; x < num_iterations(); ++x) {
+    for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
+      PrintDeviceHeader(i);
 
 #if 0
-    err = rsmi_dev_memory_busy_percent_get(i, &mem_busy_percent);
-    err_chk("rsmi_dev_memory_busy_percent_get()");
-    if (err != RSMI_STATUS_SUCCESS) {
-      return;
-    }
-    IF_VERB(STANDARD) {
-      std::cout << "\t**" << "GPU Memory Busy %: " << mem_busy_percent <<
-                                                                    std::endl;
-    }
-#endif
-    for (uint32_t mem_type = RSMI_MEM_TYPE_FIRST;
-                                 mem_type <= RSMI_MEM_TYPE_LAST; ++mem_type) {
-      err = rsmi_dev_memory_total_get(i,
-                           static_cast<rsmi_memory_type_t>(mem_type), &total);
-      err_chk("rsmi_dev_memory_total_get()");
+      err = rsmi_dev_memory_busy_percent_get(i, &mem_busy_percent);
+      err_chk("rsmi_dev_memory_busy_percent_get()");
       if (err != RSMI_STATUS_SUCCESS) {
         return;
       }
-
-      err = rsmi_dev_memory_usage_get(i,
-                           static_cast<rsmi_memory_type_t>(mem_type), &usage);
-      err_chk("rsmi_dev_memory_usage_get()");
-      if (err != RSMI_STATUS_SUCCESS) {
-        return;
-      }
-
       IF_VERB(STANDARD) {
-        std::cout << "\t**" <<
-         kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type)) <<
-          " Calculated Utilization: " << (static_cast<float>(usage)*100)/total
-                          << "% ("<< usage << "/" << total << ")" << std::endl;
+        std::cout << "\t**" << "GPU Memory Busy %: " << mem_busy_percent <<
+                                                                      std::endl;
+      }
+#endif
+      for (uint32_t mem_type = RSMI_MEM_TYPE_FIRST;
+                                   mem_type <= RSMI_MEM_TYPE_LAST; ++mem_type) {
+        err = rsmi_dev_memory_total_get(i,
+                             static_cast<rsmi_memory_type_t>(mem_type), &total);
+        err_chk("rsmi_dev_memory_total_get()");
+        if (err != RSMI_STATUS_SUCCESS) {
+          return;
+        }
+
+        err = rsmi_dev_memory_usage_get(i,
+                             static_cast<rsmi_memory_type_t>(mem_type), &usage);
+        err_chk("rsmi_dev_memory_usage_get()");
+        if (err != RSMI_STATUS_SUCCESS) {
+          return;
+        }
+
+        IF_VERB(STANDARD) {
+          std::cout << "\t**" <<
+           kDevMemoryTypeNameMap.at(static_cast<rsmi_memory_type_t>(mem_type))
+            << " Calculated Utilization: " <<
+              (static_cast<float>(usage)*100)/total << "% ("<< usage <<
+                                              "/" << total << ")" << std::endl;
+        }
       }
     }
   }

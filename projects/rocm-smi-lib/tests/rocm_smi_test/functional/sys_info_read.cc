@@ -164,7 +164,8 @@ void TestSysInfoRead::Run(void) {
             err = rsmi_dev_unique_id_get(i, nullptr);
             ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
         } else {
-            std::cout << "rsmi_dev_unique_id_get() failed with error " << err << std::endl;
+            std::cout << "rsmi_dev_unique_id_get() failed with error " <<
+                                                               err << std::endl;
         }
     }
 

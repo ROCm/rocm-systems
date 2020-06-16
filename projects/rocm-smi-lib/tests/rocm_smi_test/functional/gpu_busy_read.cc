@@ -95,23 +95,25 @@ void TestGPUBusyRead::Run(void) {
     return;
   }
 
-  for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
-    PrintDeviceHeader(i);
+  for (uint32_t x = 0; x < num_iterations(); ++x) {
+    for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
+      PrintDeviceHeader(i);
 
-    err = rsmi_dev_busy_percent_get(i, &val_ui32);
-    if (err != RSMI_STATUS_SUCCESS) {
-      if (err == RSMI_STATUS_FILE_ERROR) {
-        IF_VERB(STANDARD) {
-          std::cout << "\t**GPU Busy Percent: Not supported on this machine"
-                                                                << std::endl;
+      err = rsmi_dev_busy_percent_get(i, &val_ui32);
+      if (err != RSMI_STATUS_SUCCESS) {
+        if (err == RSMI_STATUS_FILE_ERROR) {
+          IF_VERB(STANDARD) {
+            std::cout << "\t**GPU Busy Percent: Not supported on this machine"
+                                                                 << std::endl;
+          }
+        } else {
+          CHK_ERR_ASRT(err)
         }
       } else {
-        CHK_ERR_ASRT(err)
-      }
-    } else {
-      IF_VERB(STANDARD) {
-        std::cout << "\t**GPU Busy Percent (Percent Idle):" << std::dec <<
-                     val_ui32 << " (" << 100 - val_ui32 << ")" << std::endl;
+        IF_VERB(STANDARD) {
+          std::cout << "\t**GPU Busy Percent (Percent Idle):" << std::dec <<
+                       val_ui32 << " (" << 100 - val_ui32 << ")" << std::endl;
+        }
       }
     }
   }

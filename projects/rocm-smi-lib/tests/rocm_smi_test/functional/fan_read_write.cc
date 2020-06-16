@@ -143,10 +143,12 @@ void TestFanReadWrite::Run(void) {
     // EXPECT_TRUE((cur_speed > 0.95 * new_speed &&
     //                cur_speed < 1.1 * new_speed) ||
     //                    cur_speed > 0.95 * RSMI_MAX_FAN_SPEED);
-    if (!((cur_speed > 0.95 * new_speed && cur_speed < 1.1 * new_speed) ||
+    IF_VERB(STANDARD) {
+      if (!((cur_speed > 0.95 * new_speed && cur_speed < 1.1 * new_speed) ||
                                 (cur_speed > 0.95 * RSMI_MAX_FAN_SPEED))) {
-      std::cout << "WARNING: Fan speed is not within the expected range!" <<
+        std::cout << "WARNING: Fan speed is not within the expected range!" <<
                                                                       std::endl;
+      }
     }
 
     IF_VERB(STANDARD) {

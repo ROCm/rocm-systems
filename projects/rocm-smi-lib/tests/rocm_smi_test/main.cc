@@ -91,20 +91,24 @@ static void SetFlags(TestBase *test) {
   test->set_verbosity(sRSMIGlvalues->verbosity);
   test->set_dont_fail(sRSMIGlvalues->dont_fail);
   test->set_init_options(sRSMIGlvalues->init_options);
+  test->set_num_iterations(sRSMIGlvalues->num_iterations);
 }
-
 
 static void RunCustomTestProlog(TestBase *test) {
   SetFlags(test);
 
-  test->DisplayTestInfo();
+  if (sRSMIGlvalues->verbosity >= TestBase::VERBOSE_STANDARD) {
+    test->DisplayTestInfo();
+  }
   test->SetUp();
   test->Run();
   return;
 }
-static void RunCustomTestEpilog(TestBase *test) {
-  test->DisplayResults();
-  test->Close();
+static void RunCustomTestEpilog(TestBase *tst) {
+  if (sRSMIGlvalues->verbosity >= TestBase::VERBOSE_STANDARD) {
+    tst->DisplayResults();
+  }
+  tst->Close();
   return;
 }
 
@@ -238,7 +242,7 @@ TEST(rsmitstReadOnly, TestAPISupportRead) {
 }
 TEST(rsmitstReadOnly, TestMutualExclusion) {
   TestMutualExclusion tst;
-
+  SetFlags(&tst);
   tst.DisplayTestInfo();
   tst.SetUp();
   tst.Run();
@@ -250,6 +254,7 @@ TEST(rsmitstReadWrite, TestEvtNotifReadWrite) {
 }
 TEST(rsmitstReadOnly, TestConcurrentInit) {
   TestConcurrentInit tst;
+  SetFlags(&tst);
   tst.DisplayTestInfo();
   //  tst.SetUp();   // Avoid extra rsmi_init
   tst.Run();

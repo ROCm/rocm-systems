@@ -76,8 +76,10 @@ void TestMutualExclusion::SetUp(void) {
   rsmi_status_t ret;
 
   //   TestBase::SetUp(RSMI_INIT_FLAG_RESRV_TEST1);
-  MakeHeaderStr(kSetupLabel, &label);
-  printf("\n\t%s\n", label.c_str());
+  IF_VERB(STANDARD) {
+    MakeHeaderStr(kSetupLabel, &label);
+    printf("\n\t%s\n", label.c_str());
+  }
 
   sleeper_process_ = false;
   child_ = 0;
@@ -104,11 +106,15 @@ void TestMutualExclusion::SetUp(void) {
 }
 
 void TestMutualExclusion::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
+  IF_VERB(STANDARD) {
+    TestBase::DisplayTestInfo();
+  }
 }
 
 void TestMutualExclusion::DisplayResults(void) const {
-  TestBase::DisplayResults();
+  IF_VERB(STANDARD) {
+    TestBase::DisplayResults();
+  }
   return;
 }
 
@@ -125,11 +131,15 @@ void TestMutualExclusion::Run(void) {
   rsmi_status_t ret;
 
   if (sleeper_process_) {
-    std::cout << "MUTEX_HOLDER process: started sleeping for 10 seconds..." <<
+    IF_VERB(STANDARD) {
+      std::cout << "MUTEX_HOLDER process: started sleeping for 10 seconds..." <<
                                                                      std::endl;
+    }
     ret = rsmi_test_sleep(0, 10);
     ASSERT_EQ(ret, RSMI_STATUS_SUCCESS);
-    std::cout << "MUTEX_HOLDER process: Sleep process woke up." << std::endl;
+    IF_VERB(STANDARD) {
+      std::cout << "MUTEX_HOLDER process: Sleep process woke up." << std::endl;
+    }
     pid_t cpid = wait(nullptr);
     ASSERT_EQ(cpid, child_);
   } else {
@@ -137,9 +147,11 @@ void TestMutualExclusion::Run(void) {
     // let the other process get started on rsmi_test_sleep().
     sleep(2);
     TestBase::Run();
-    std::cout << "TESTER process: verifing that all rsmi_dev_* functions "
+    IF_VERB(STANDARD) {
+      std::cout << "TESTER process: verifing that all rsmi_dev_* functions "
                     "return RSMI_STATUS_BUSY because MUTEX_HOLDER process "
                                                "holds the mutex" << std::endl;
+    }
     // Try all the device related rsmi calls. They should all fail with
     // RSMI_STATUS_BUSY
     // Set dummy values should to working, deterministic values.
@@ -217,8 +229,10 @@ void TestMutualExclusion::Run(void) {
     ret = rsmi_dev_ecc_status_get(0, RSMI_GPU_BLOCK_UMC, &dmy_ras_err_st);
     ASSERT_EQ(ret, RSMI_STATUS_BUSY);
 
-    std::cout << "TESTER process: Finished verifying that all "
+    IF_VERB(STANDARD) {
+      std::cout << "TESTER process: Finished verifying that all "
                 "rsmi_dev_* functions returned RSMI_STATUS_BUSY" << std::endl;
+    }
     exit(0);
   }
 }

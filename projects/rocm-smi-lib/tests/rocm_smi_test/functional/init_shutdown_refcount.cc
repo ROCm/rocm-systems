@@ -123,11 +123,16 @@ void TestConcurrentInit::SetUp(void) {
 // Compare required profile for this test case with what we're actually
 // running on
 void TestConcurrentInit::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
+  IF_VERB(STANDARD) {
+    TestBase::DisplayTestInfo();
+  }
+  return;
 }
 
 void TestConcurrentInit::DisplayResults(void) const {
-  TestBase::DisplayResults();
+  IF_VERB(STANDARD) {
+    TestBase::DisplayResults();
+  }
   return;
 }
 
@@ -141,7 +146,9 @@ void TestConcurrentInit::Close() {
 // running on
 void TestConcurrentInit::Run(void) {
   if (setup_failed_) {
-    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    IF_VERB(STANDARD) {
+      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    }
     return;
   }
 
@@ -150,7 +157,9 @@ void TestConcurrentInit::Run(void) {
   pthread_attr_init(&attr);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
-  std::cout << "Testing concurrent rsmi_init()..." << std::endl;
+  IF_VERB(STANDARD) {
+    std::cout << "Testing concurrent rsmi_init()..." << std::endl;
+  }
   for (int Id = 0; Id < NumOfThreads; ++Id) {
     int ThreadStatus = pthread_create(&ThreadId[Id], &attr,
                                                    RSMIInitFunction, nullptr);
@@ -176,9 +185,11 @@ void TestConcurrentInit::Run(void) {
   int32_t refcnt = rsmi_test_refcount(0);
   ASSERT_EQ(0, refcnt);
 
-  std::cout << "Concurrent rsmi_init() test passed." << std::endl << std::endl;
-  std::cout << "Testing concurrent rsmi_shut_down()..." << std::endl;
-
+  IF_VERB(STANDARD) {
+    std::cout << "Concurrent rsmi_init() test passed." <<
+                                                std::endl << std::endl;
+    std::cout << "Testing concurrent rsmi_shut_down()..." << std::endl;
+  }
   // Invoke hsa_shut_down and verify that all the hsa_init's were counted.
   // HSA should be exactly closed after NumOfThreads calls.
   for (int Id = 0; Id < NumOfThreads; ++Id) {
@@ -200,12 +211,12 @@ void TestConcurrentInit::Run(void) {
   refcnt = rsmi_test_refcount(0);
   ASSERT_EQ(0, refcnt);
 
-  std::cout << "Concurrent rsmi_shut_down() passed." << std::endl;
-
-  std::cout <<
+  IF_VERB(STANDARD) {
+    std::cout << "Concurrent rsmi_shut_down() passed." << std::endl;
+    std::cout <<
       "Testing concurrent rsmi_init() followed by rsmi_shut_down()..." <<
                                                                     std::endl;
-
+  }
   for (int Id = 0; Id < NumOfThreads; ++Id) {
     int ThreadStatus =
       pthread_create(&ThreadId[Id], &attr, RSMIInitShutDownFunction, nullptr);
@@ -220,7 +231,9 @@ void TestConcurrentInit::Run(void) {
   refcnt = rsmi_test_refcount(0);
   ASSERT_EQ(0, refcnt);
 
-  std::cout <<
+  IF_VERB(STANDARD) {
+    std::cout <<
       "Concurrent rsmi_init() followed by rsmi_shut_down() passed." <<
                                                                     std::endl;
+  }
 }

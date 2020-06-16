@@ -90,88 +90,99 @@ void TestAPISupportRead::Run(void) {
 
   TestBase::Run();
   if (setup_failed_) {
-    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    IF_VERB(STANDARD) {
+      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    }
     return;
   }
 
   rsmi_func_id_iter_handle_t iter_handle, var_iter, sub_var_iter;
   rsmi_func_id_value_t value;
 
-  for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
-    PrintDeviceHeader(i);
-
-    std::cout << "Supported RSMI Functions:" << std::endl;
-    std::cout << "\tVariants (Monitors)" << std::endl;
-
-    err = rsmi_dev_supported_func_iterator_open(i, &iter_handle);
-    CHK_ERR_ASRT(err)
-
-    while (1) {
-      err = rsmi_func_iter_value_get(iter_handle, &value);
+  for (uint32_t x = 0; x < num_iterations(); ++x) {
+    for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
+      IF_VERB(STANDARD) {
+        PrintDeviceHeader(i);
+        std::cout << "Supported RSMI Functions:" << std::endl;
+        std::cout << "\tVariants (Monitors)" << std::endl;
+      }
+      err = rsmi_dev_supported_func_iterator_open(i, &iter_handle);
       CHK_ERR_ASRT(err)
-      std::cout << "Function Name: " << value.name << std::endl;
 
-      err = rsmi_dev_supported_variant_iterator_open(iter_handle, &var_iter);
-      if (err != RSMI_STATUS_NO_DATA) {
+      while (1) {
+        err = rsmi_func_iter_value_get(iter_handle, &value);
         CHK_ERR_ASRT(err)
-        std::cout << "\tVariants/Monitors: ";
-        while (1) {
-          err = rsmi_func_iter_value_get(var_iter, &value);
+        IF_VERB(STANDARD) {
+          std::cout << "Function Name: " << value.name << std::endl;
+        }
+        err = rsmi_dev_supported_variant_iterator_open(iter_handle, &var_iter);
+        if (err != RSMI_STATUS_NO_DATA) {
           CHK_ERR_ASRT(err)
-          if (value.id == RSMI_DEFAULT_VARIANT) {
-            std::cout << "Default Variant ";
-          } else {
-            std::cout << value.id;
+          IF_VERB(STANDARD) {
+            std::cout << "\tVariants/Monitors: ";
           }
-          std::cout << " (";
-
-          err =
-            rsmi_dev_supported_variant_iterator_open(var_iter, &sub_var_iter);
-          if (err != RSMI_STATUS_NO_DATA) {
+          while (1) {
+            err = rsmi_func_iter_value_get(var_iter, &value);
             CHK_ERR_ASRT(err)
-
-            while (1) {
-              err = rsmi_func_iter_value_get(sub_var_iter, &value);
-              CHK_ERR_ASRT(err)
-              std::cout << value.id << ", ";
-
-              err = rsmi_func_iter_next(sub_var_iter);
-
-              if (err == RSMI_STATUS_NO_DATA) {
-                break;
+            IF_VERB(STANDARD) {
+              if (value.id == RSMI_DEFAULT_VARIANT) {
+                std::cout << "Default Variant ";
+              } else {
+                std::cout << value.id;
               }
+              std::cout << " (";
+            }
+            err =
+              rsmi_dev_supported_variant_iterator_open(var_iter, &sub_var_iter);
+            if (err != RSMI_STATUS_NO_DATA) {
+              CHK_ERR_ASRT(err)
+
+              while (1) {
+                err = rsmi_func_iter_value_get(sub_var_iter, &value);
+                CHK_ERR_ASRT(err)
+                IF_VERB(STANDARD) {
+                  std::cout << value.id << ", ";
+                }
+                err = rsmi_func_iter_next(sub_var_iter);
+
+                if (err == RSMI_STATUS_NO_DATA) {
+                  break;
+                }
+                CHK_ERR_ASRT(err)
+              }
+              err = rsmi_dev_supported_func_iterator_close(&sub_var_iter);
               CHK_ERR_ASRT(err)
             }
-            err = rsmi_dev_supported_func_iterator_close(&sub_var_iter);
+
+            IF_VERB(STANDARD) {
+              std::cout << "), ";
+            }
+            err = rsmi_func_iter_next(var_iter);
+
+            if (err == RSMI_STATUS_NO_DATA) {
+              break;
+            }
             CHK_ERR_ASRT(err)
           }
-
-          std::cout << "), ";
-
-          err = rsmi_func_iter_next(var_iter);
-
-          if (err == RSMI_STATUS_NO_DATA) {
-            break;
+          IF_VERB(STANDARD) {
+            std::cout << std::endl;
           }
+          err = rsmi_dev_supported_func_iterator_close(&var_iter);
           CHK_ERR_ASRT(err)
         }
-        std::cout << std::endl;
 
-        err = rsmi_dev_supported_func_iterator_close(&var_iter);
+        err = rsmi_func_iter_next(iter_handle);
+
+        if (err == RSMI_STATUS_NO_DATA) {
+          break;
+        }
         CHK_ERR_ASRT(err)
-      }
 
-      err = rsmi_func_iter_next(iter_handle);
-
-      if (err == RSMI_STATUS_NO_DATA) {
-        break;
+    //  err = rsmi_dev_supported_variant_iterator_open(iter_handle, &var_iter);
+    //
       }
+      err = rsmi_dev_supported_func_iterator_close(&iter_handle);
       CHK_ERR_ASRT(err)
-
-  //    err = rsmi_dev_supported_variant_iterator_open(iter_handle, &var_iter);
-  //
     }
-    err = rsmi_dev_supported_func_iterator_close(&iter_handle);
-    CHK_ERR_ASRT(err)
   }
 }

@@ -90,7 +90,9 @@ void TestXGMIReadWrite::Run(void) {
 
   TestBase::Run();
   if (setup_failed_) {
-    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    IF_VERB(STANDARD) {
+      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    }
     return;
   }
 

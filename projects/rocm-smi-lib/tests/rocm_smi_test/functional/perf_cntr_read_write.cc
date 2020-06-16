@@ -137,7 +137,7 @@ void TestPerfCntrReadWrite::CountEvents(uint32_t dv_ind,
     std::cout << "\t\t\tTime Enabled: " << val->time_enabled << std::endl;
     std::cout << "\t\t\tTime Running: " << val->time_running << std::endl;
     std::cout << "\t\t\tEvents/Second Running: " <<
-                             val->value/(float)val->time_running << std::endl;
+            val->value/static_cast<float>(val->time_running) << std::endl;
   }
   ret = rsmi_dev_counter_destroy(evt_handle);
   CHK_ERR_ASRT(ret)
@@ -155,13 +155,14 @@ TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
   uint64_t throughput;
 
   auto utiliz = [&](rsmi_event_type_t evt, uint32_t chan) {
-    std::cout << "****************************" << std::endl;
-    std::cout << "Test XGMI Link Utilization (channel " <<
+    IF_VERB(STANDARD) {
+      std::cout << "****************************" << std::endl;
+      std::cout << "Test XGMI Link Utilization (channel " <<
                                                      chan << ")" << std::endl;
-    std::cout << "****************************" << std::endl;
-    std::cout << "Assumed Level 1 Bandwidth: " <<
+      std::cout << "****************************" << std::endl;
+      std::cout << "Assumed Level 1 Bandwidth: " <<
                                  kVg20Level1Bandwidth << "GB/sec" << std::endl;
-
+    }
     uint32_t tmp_verbosity = verbosity();
     set_verbosity(0);
     for (int i = 0; i < 5; ++i) {
@@ -176,7 +177,7 @@ TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
       std::cout << "\t\t\tXGMI throughput: " << throughput <<
                                                    " bytes/second" << std::endl;
       std::cout << "\t\t\tXGMI Channel Utilization: " <<
-                       100*throughput/ (float)(kVg20Level1Bandwidth*kGig) <<
+               100*throughput/static_cast<float>(kVg20Level1Bandwidth*kGig) <<
                                                                "%" << std::endl;
       std::cout << "\t\t\t****" << std::endl;
     }
@@ -186,10 +187,11 @@ TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
   utiliz(RSMI_EVNT_XGMI_1_BEATS_TX, 1);
   utiliz(RSMI_EVNT_XGMI_0_BEATS_TX, 0);
 
-  std::cout << "****************************" << std::endl;
-  std::cout << "Test each event individually" << std::endl;
-  std::cout << "****************************" << std::endl;
-
+  IF_VERB(STANDARD) {
+    std::cout << "****************************" << std::endl;
+    std::cout << "Test each event individually" << std::endl;
+    std::cout << "****************************" << std::endl;
+  }
   for (PerfCntrEvtGrp grp : s_event_groups) {
     ret = rsmi_dev_counter_group_supported(dv_ind, grp.group());
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
@@ -217,15 +219,18 @@ TestPerfCntrReadWrite::testEventsSimultaneously(uint32_t dv_ind) {
   rsmi_counter_value_t val;
   uint32_t avail_counters;
 
-  std::cout << "****************************" << std::endl;
-  std::cout << "Test events simultaneously"   << std::endl;
-  std::cout << "****************************" << std::endl;
-
+  IF_VERB(STANDARD) {
+    std::cout << "****************************" << std::endl;
+    std::cout << "Test events simultaneously"   << std::endl;
+    std::cout << "****************************" << std::endl;
+  }
   for (PerfCntrEvtGrp grp : s_event_groups) {
     ret = rsmi_dev_counter_group_supported(dv_ind, grp.group());
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "\tEvent Group " << grp.name() <<
+      IF_VERB(STANDARD) {
+        std::cout << "\tEvent Group " << grp.name() <<
                                   " is not supported. Skipping." << std::endl;
+      }
       continue;
     }
 
@@ -235,8 +240,9 @@ TestPerfCntrReadWrite::testEventsSimultaneously(uint32_t dv_ind) {
 
     ret = rsmi_counter_available_counters_get(dv_ind, grp.group(),
                                                                &avail_counters);
-    std::cout << "Available Counters: " << avail_counters << std::endl;
-
+    IF_VERB(STANDARD) {
+      std::cout << "Available Counters: " << avail_counters << std::endl;
+    }
     CHK_ERR_ASRT(ret)
 
     uint32_t tmp;

@@ -97,7 +97,9 @@ void TestHWTopologyRead::Run(void) {
 
   TestBase::Run();
   if (setup_failed_) {
-    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    IF_VERB(STANDARD) {
+      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    }
     return;
   }
 
@@ -160,8 +162,10 @@ void TestHWTopologyRead::Run(void) {
 
             default:
               gpu_links[dv_ind_src][dv_ind_dst].type = "XXXX";
-              std::cout << "\t**Invalid IO LINK type. type=" << type <<
+              IF_VERB(STANDARD) {
+                std::cout << "\t**Invalid IO LINK type. type=" << type <<
                                                                     std::endl;
+              }
           }
         }
         err = rsmi_topo_get_link_weight(dv_ind_src, dv_ind_dst,
@@ -180,6 +184,10 @@ void TestHWTopologyRead::Run(void) {
         }
       }
     }
+  }
+
+  IF_NVERB(STANDARD) {
+    return;
   }
 
   std::cout << "**NUMA node number of GPUs**" << std::endl;

@@ -89,7 +89,10 @@ void TestEvtNotifReadWrite::Run(void) {
 
   TestBase::Run();
   if (setup_failed_) {
-    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+     IF_VERB(STANDARD) {
+        std::cout << "** SetUp Failed for this test. Skipping.**" <<
+                                                                    std::endl;
+     }
     return;
   }
 
@@ -104,9 +107,11 @@ void TestEvtNotifReadWrite::Run(void) {
   for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     ret = rsmi_event_notification_init(dv_ind);
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout <<
+      IF_VERB(STANDARD) {
+        std::cout <<
           "Event notification is not supported for this driver version." <<
                                                                     std::endl;
+      }
       return;
     }
     ASSERT_EQ(ret, RSMI_STATUS_SUCCESS);
@@ -121,18 +126,24 @@ void TestEvtNotifReadWrite::Run(void) {
   if (ret == RSMI_STATUS_SUCCESS || ret == RSMI_STATUS_INSUFFICIENT_SIZE) {
     EXPECT_LE(num_elem, 10) <<
             "Expected the number of elements found to be <= buffer size (10)";
-    for (uint32_t i = 0; i < num_elem; ++i) {
-      std::cout << "\tdv_ind=" << data[i].dv_ind <<
+    IF_VERB(STANDARD) {
+      for (uint32_t i = 0; i < num_elem; ++i) {
+        std::cout << "\tdv_ind=" << data[i].dv_ind <<
                    "  Type: " << NameFromEvtNotifType(data[i].event) <<
                    "  Mesg: " << data[i].message << std::endl;
+      }
     }
-    if (ret == RSMI_STATUS_INSUFFICIENT_SIZE) {
+    IF_VERB(STANDARD) {
+      if (ret == RSMI_STATUS_INSUFFICIENT_SIZE) {
         std::cout <<
         "\t\tBuffer size is 10, but more than 10 events are available." <<
                                                                     std::endl;
       }
+    }
   } else if (ret == RSMI_STATUS_NO_DATA) {
-    std::cout << "\tNo events were collected." << std::endl;
+    IF_VERB(STANDARD) {
+      std::cout << "\tNo events were collected." << std::endl;
+    }
   } else {
     // This should always fail. We want to print out the return code.
     EXPECT_EQ(ret, RSMI_STATUS_SUCCESS) <<

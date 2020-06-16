@@ -103,63 +103,64 @@ void TestTempRead::Run(void) {
   }
 
   uint32_t type;
+  for (uint32_t x = 0; x < num_iterations(); ++x) {
+    for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
+      PrintDeviceHeader(i);
 
-  for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
-    PrintDeviceHeader(i);
+      auto print_temp_metric = [&](rsmi_temperature_metric_t met,
+                                                          std::string label) {
+        err = rsmi_dev_temp_metric_get(i, type, met, &val_i64);
 
-    auto print_temp_metric = [&](rsmi_temperature_metric_t met,
-                                                        std::string label) {
-      err = rsmi_dev_temp_metric_get(i, type, met, &val_i64);
-
-      if (err != RSMI_STATUS_SUCCESS) {
-        if (err == RSMI_STATUS_NOT_SUPPORTED) {
-          IF_VERB(STANDARD) {
-            std::cout << "\t**" << label << ": " <<
-                               "Not supported on this machine" << std::endl;
+        if (err != RSMI_STATUS_SUCCESS) {
+          if (err == RSMI_STATUS_NOT_SUPPORTED) {
+            IF_VERB(STANDARD) {
+              std::cout << "\t**" << label << ": " <<
+                                 "Not supported on this machine" << std::endl;
+            }
 
             // Verify api support checking functionality is working
             err = rsmi_dev_temp_metric_get(i, type, met, nullptr);
             ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
             return;
+          } else {
+            CHK_ERR_ASRT(err)
           }
-        } else {
-          CHK_ERR_ASRT(err)
         }
-      }
-      // Verify api support checking functionality is working
-      err = rsmi_dev_temp_metric_get(i, type, met, nullptr);
-      ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+        // Verify api support checking functionality is working
+        err = rsmi_dev_temp_metric_get(i, type, met, nullptr);
+        ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
-      IF_VERB(STANDARD) {
-        std::cout << "\t**" << label << ": " << val_i64/1000 <<
-                                                           "C" << std::endl;
+        IF_VERB(STANDARD) {
+          std::cout << "\t**" << label << ": " << val_i64/1000 <<
+                                                             "C" << std::endl;
+        }
+      };
+      for (type = RSMI_TEMP_TYPE_FIRST; type <= RSMI_TEMP_TYPE_LAST; ++type) {
+        IF_VERB(STANDARD) {
+          std::cout << "\t** **********" << kTempSensorNameMap.at(type) <<
+                                        " Temperatures **********" << std::endl;
+        }
+        print_temp_metric(RSMI_TEMP_CURRENT, "Current Temp.");
+        print_temp_metric(RSMI_TEMP_MAX, "Temperature max value");
+        print_temp_metric(RSMI_TEMP_MIN, "Temperature min value");
+        print_temp_metric(RSMI_TEMP_MAX_HYST,
+                                  "Temperature hysteresis value for max limit");
+        print_temp_metric(RSMI_TEMP_MIN_HYST,
+                                  "Temperature hysteresis value for min limit");
+        print_temp_metric(RSMI_TEMP_CRITICAL, "Temperature critical max value");
+        print_temp_metric(RSMI_TEMP_CRITICAL_HYST,
+                             "Temperature hysteresis value for critical limit");
+        print_temp_metric(RSMI_TEMP_EMERGENCY,
+                                             "Temperature emergency max value");
+        print_temp_metric(RSMI_TEMP_EMERGENCY_HYST,
+                            "Temperature hysteresis value for emergency limit");
+        print_temp_metric(RSMI_TEMP_CRIT_MIN, "Temperature critical min value");
+        print_temp_metric(RSMI_TEMP_CRIT_MIN_HYST,
+                         "Temperature hysteresis value for critical min value");
+        print_temp_metric(RSMI_TEMP_OFFSET, "Temperature offset");
+        print_temp_metric(RSMI_TEMP_LOWEST, "Historical minimum temperature");
+        print_temp_metric(RSMI_TEMP_HIGHEST, "Historical maximum temperature");
       }
-    };
-    for (type = RSMI_TEMP_TYPE_FIRST; type <= RSMI_TEMP_TYPE_LAST; ++type) {
-      IF_VERB(STANDARD) {
-        std::cout << "\t** **********" << kTempSensorNameMap.at(type) <<
-                                      " Temperatures **********" << std::endl;
-      }
-      print_temp_metric(RSMI_TEMP_CURRENT, "Current Temp.");
-      print_temp_metric(RSMI_TEMP_MAX, "Temperature max value");
-      print_temp_metric(RSMI_TEMP_MIN, "Temperature min value");
-      print_temp_metric(RSMI_TEMP_MAX_HYST,
-                                "Temperature hysteresis value for max limit");
-      print_temp_metric(RSMI_TEMP_MIN_HYST,
-                                "Temperature hysteresis value for min limit");
-      print_temp_metric(RSMI_TEMP_CRITICAL, "Temperature critical max value");
-      print_temp_metric(RSMI_TEMP_CRITICAL_HYST,
-                           "Temperature hysteresis value for critical limit");
-      print_temp_metric(RSMI_TEMP_EMERGENCY,
-                                           "Temperature emergency max value");
-      print_temp_metric(RSMI_TEMP_EMERGENCY_HYST,
-                          "Temperature hysteresis value for emergency limit");
-      print_temp_metric(RSMI_TEMP_CRIT_MIN, "Temperature critical min value");
-      print_temp_metric(RSMI_TEMP_CRIT_MIN_HYST,
-                       "Temperature hysteresis value for critical min value");
-      print_temp_metric(RSMI_TEMP_OFFSET, "Temperature offset");
-      print_temp_metric(RSMI_TEMP_LOWEST, "Historical minimum temperature");
-      print_temp_metric(RSMI_TEMP_HIGHEST, "Historical maximum temperature");
     }
-  }
+  }  // x
 }

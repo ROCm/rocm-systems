@@ -107,7 +107,9 @@ void TestPerfLevelReadWrite::Run(void) {
 
   TestBase::Run();
   if (setup_failed_) {
-    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    IF_VERB(STANDARD) {
+      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    }
     return;
   }
 
@@ -143,8 +145,10 @@ void TestPerfLevelReadWrite::Run(void) {
                                                                       std::endl;
       }
     }
-    std::cout << "Reset Perf level to " << kDevPerfLvlNameMap.at(orig_pfl) <<
+    IF_VERB(STANDARD) {
+      std::cout << "Reset Perf level to " << kDevPerfLvlNameMap.at(orig_pfl) <<
                                                             " ..." << std::endl;
+    }
     ret = rsmi_dev_perf_level_set(dv_ind, orig_pfl);
     CHK_ERR_ASRT(ret)
     ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
