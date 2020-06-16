@@ -372,6 +372,9 @@ void hip_api_callback(
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     hip_begin_timestamp = timer->timestamp_fn_ns();
   } else {
+    // Post onit of HIP APU args
+    hipApiArgsInit((hip_api_id_t)cid, const_cast<hip_api_data_t*>(data));
+
     const timestamp_t end_timestamp = timer->timestamp_fn_ns();
     hip_api_trace_entry_t* entry = hip_api_trace_buffer.GetEntry();
     entry->valid = roctracer::TRACE_ENTRY_COMPL;
