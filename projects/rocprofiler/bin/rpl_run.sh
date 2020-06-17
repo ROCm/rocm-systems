@@ -202,7 +202,7 @@ usage() {
 
 # checking for availability of rocminfo utility
 `which rocminfo >/dev/null 2>&1`
-if [ $? != 0 ]; then fatal "'rocminfo' utility is not found: please add ROCM bin path to PATH env var."; fi
+if [ $? != 0 ]; then error "'rocminfo' utility is not found: please add ROCM bin path to PATH env var."; fi
 
 # profiling run method
 OUTPUT_LIST=""
