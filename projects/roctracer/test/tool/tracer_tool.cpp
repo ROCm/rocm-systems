@@ -97,6 +97,7 @@ LOADER_INSTANTIATE();
 TRACE_BUFFER_INSTANTIATE();
 
 // Global output file handle
+FILE* begin_ts_file_handle = NULL;
 FILE* roctx_file_handle = NULL;
 FILE* hsa_api_file_handle = NULL;
 FILE* hsa_async_copy_file_handle = NULL;
@@ -107,6 +108,7 @@ FILE* pc_sample_file_handle = NULL;
 
 void close_output_file(FILE* file_handle);
 void close_file_handles() {
+  if (begin_ts_file_handle) close_output_file(pc_sample_file_handle);
   if (roctx_file_handle) close_output_file(roctx_file_handle);
   if (hsa_api_file_handle) close_output_file(hsa_api_file_handle);
   if (hsa_async_copy_file_handle) close_output_file(hsa_async_copy_file_handle);
@@ -919,6 +921,11 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
   timer = new hsa_rt_utils::Timer(table->core_->hsa_system_get_info_fn);
 
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
+
+  // App begin timestamp begin_ts_file.txt
+  begin_ts_file_handle = open_output_file(output_prefix, "begin_ts_file.txt");
+  const timestamp_t app_start_time = timer->timestamp_fn_ns();
+  fprintf(begin_ts_file_handle, "%lu\n", app_start_time);
 
   // Enable HSA API callbacks/activity
   if (trace_hsa_api) {
