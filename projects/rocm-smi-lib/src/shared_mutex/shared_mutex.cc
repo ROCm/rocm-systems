@@ -91,6 +91,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
   if (ret || (mutex.created == 0 &&
                      reinterpret_cast<shared_mutex_t *>(addr)->ptr == NULL)) {
     // Something is out of sync.
+    fprintf(stderr, "pthread_mutex_timedlock() returned %d\n", ret);
     perror("Failed to initialize RSMI device mutex after 5 seconds. Previous "
      "execution may not have shutdown cleanly. To fix problem, stop all "
      "rocm_smi programs, and then delete the rocm_smi* shared memory files in"

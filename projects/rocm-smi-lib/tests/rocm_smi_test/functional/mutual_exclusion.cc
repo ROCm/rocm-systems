@@ -91,6 +91,9 @@ void TestMutualExclusion::SetUp(void) {
     // RSMI_INIT_FLAG_RESRV_TEST1 tells rsmi to fail immediately
     // if it can't get the mutex instead of waiting.
     ret = rsmi_init(RSMI_INIT_FLAG_RESRV_TEST1);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      setup_failed_ = true;
+    }
     ASSERT_EQ(ret, RSMI_STATUS_SUCCESS);
 
     sleep(2);  // Let both processes get through rsmi_init
@@ -98,10 +101,26 @@ void TestMutualExclusion::SetUp(void) {
     sleep(1);  // Let the sleeper process get through rsmi_init() before
               // this one goes, so it doesn't fail.
     ret = rsmi_init(RSMI_INIT_FLAG_RESRV_TEST1);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      setup_failed_ = true;
+    }
     ASSERT_EQ(ret, RSMI_STATUS_SUCCESS);
 
     sleep(2);  // Let both processes get through rsmi_init;
   }
+
+  ret = rsmi_num_monitor_devices(&num_monitor_devs_);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    setup_failed_ = true;
+  }
+  ASSERT_EQ(ret, RSMI_STATUS_SUCCESS);
+
+  if (num_monitor_devs_ == 0) {
+    std::cout << "No monitor devices found on this machine." << std::endl;
+    std::cout << "No ROCm SMI tests can be run." << std::endl;
+    setup_failed_ = true;
+  }
+
   return;
 }
 
@@ -129,6 +148,11 @@ rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds);
 
 void TestMutualExclusion::Run(void) {
   rsmi_status_t ret;
+
+  if (setup_failed_) {
+    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+    return;
+  }
 
   if (sleeper_process_) {
     IF_VERB(STANDARD) {
@@ -168,66 +192,74 @@ void TestMutualExclusion::Run(void) {
     rsmi_error_count_t dmy_err_cnt;
     rsmi_ras_err_state_t dmy_ras_err_st;
 
+    // This can be replaced with ASSERT_EQ() once env. stabilizes
+#define CHECK_RET(A, B) { \
+  if ((A) != (B)) { \
+    std::cout << "Expected return value of " << B << \
+                               " but got " << A << std::endl; \
+    std::cout << "at " << __FILE__ << ":" << __LINE__ << std::endl; \
+  } \
+}
     ret = rsmi_dev_id_get(0, &dmy_ui16);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_vendor_id_get(0, &dmy_ui16);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_name_get(0, dmy_str, 10);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_brand_get(0, dmy_str, 10);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_vendor_name_get(0, dmy_str, 10);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_vram_vendor_get(0, dmy_str, 10);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_serial_number_get(0, dmy_str, 10);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_subsystem_id_get(0, &dmy_ui16);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_subsystem_vendor_id_get(0, &dmy_ui16);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_unique_id_get(0, &dmy_ui64);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_pci_id_get(0, &dmy_ui64);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_pci_throughput_get(0, &dmy_ui64, &dmy_ui64, &dmy_ui64);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_pci_replay_counter_get(0, &dmy_ui64);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_pci_bandwidth_set(0, 0);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_fan_rpms_get(0, dmy_ui32, &dmy_i64);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_fan_speed_get(0, 0, &dmy_i64);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_fan_speed_max_get(0, 0, &dmy_ui64);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_temp_metric_get(0, dmy_ui32, RSMI_TEMP_CURRENT, &dmy_i64);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_fan_reset(0, 0);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_fan_speed_set(0, dmy_ui32, 0);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_perf_level_get(0, &dmy_perf_lvl);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_overdrive_level_get(0, &dmy_ui32);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_gpu_clk_freq_get(0, RSMI_CLK_TYPE_SYS, &dmy_freqs);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_od_volt_info_get(0, &dmy_od_volt);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_od_volt_curve_regions_get(0, &dmy_ui32, &dmy_vlt_reg);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_overdrive_level_set(dmy_i32, 0);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_gpu_clk_freq_set(0, RSMI_CLK_TYPE_SYS, 0);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_ecc_count_get(0, RSMI_GPU_BLOCK_UMC, &dmy_err_cnt);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_ecc_enabled_get(0, &dmy_ui64);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_ecc_status_get(0, RSMI_GPU_BLOCK_UMC, &dmy_ras_err_st);
-    ASSERT_EQ(ret, RSMI_STATUS_BUSY);
+    CHECK_RET(ret, RSMI_STATUS_BUSY);
 
     IF_VERB(STANDARD) {
       std::cout << "TESTER process: Finished verifying that all "

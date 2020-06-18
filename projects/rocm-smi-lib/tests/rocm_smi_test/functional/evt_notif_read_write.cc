@@ -88,6 +88,10 @@ void TestEvtNotifReadWrite::Run(void) {
   uint32_t dv_ind;
 
   TestBase::Run();
+  if (num_monitor_devs() == 0) {
+    return;
+  }
+
   if (setup_failed_) {
      IF_VERB(STANDARD) {
         std::cout << "** SetUp Failed for this test. Skipping.**" <<

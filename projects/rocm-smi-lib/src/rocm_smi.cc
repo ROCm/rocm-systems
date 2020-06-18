@@ -588,6 +588,20 @@ rsmi_shut_down(void) {
     return RSMI_STATUS_INIT_ERROR;
   }
 
+  // Release any device mutexes that are being held
+#if DEBUG
+  int ret = 0;
+#endif
+  for (int i = 0; i < smi.monitor_devices().size(); ++i) {
+#if DEBUG
+    ret = pthread_mutex_unlock(smi.monitor_devices()[i]->mutex());
+    std::cout << "pthread_mutex_unlock() returned " << ret <<
+                   " for device " << i << " in rsmi_shut_down()" << std::endl;
+#else
+    (void)pthread_mutex_unlock(smi.monitor_devices()[i]->mutex());
+#endif
+  }
+
   (void)smi.ref_count_dec();
 
   if (smi.ref_count() == 0) {
