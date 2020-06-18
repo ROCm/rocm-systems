@@ -87,6 +87,7 @@ void TestXGMIReadWrite::Close() {
 void TestXGMIReadWrite::Run(void) {
   rsmi_status_t err;
   rsmi_xgmi_status_t err_stat;
+  uint64_t hive_id;
 
   TestBase::Run();
   if (setup_failed_) {
@@ -98,6 +99,27 @@ void TestXGMIReadWrite::Run(void) {
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
+
+    err = rsmi_dev_xgmi_hive_id_get(dv_ind, &hive_id);
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+        std::cout <<
+            "\t**rsmi_dev_xgmi_hive_id_get() is not supported"
+            " on this machine" << std::endl;
+        // Verify api support checking functionality is working
+        err = rsmi_dev_xgmi_hive_id_get(dv_ind, nullptr);
+        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+
+        continue;
+    } else {
+        CHK_ERR_ASRT(err)
+        IF_VERB(STANDARD) {
+            std::cout << "\t**XGMI Hive ID : " << std::hex << hive_id <<
+            std::endl;
+        }
+        // Verify api support checking functionality is working
+        err = rsmi_dev_xgmi_hive_id_get(dv_ind, nullptr);
+        ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+    }
 
     err = rsmi_dev_xgmi_error_status(dv_ind, &err_stat);
 

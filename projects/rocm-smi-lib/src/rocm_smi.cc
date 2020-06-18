@@ -3065,6 +3065,22 @@ rsmi_dev_xgmi_error_reset(uint32_t dv_ind) {
 }
 
 rsmi_status_t
+rsmi_dev_xgmi_hive_id_get(uint32_t dv_ind, uint64_t *hive_id) {
+  TRY
+
+  if (hive_id == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  GET_DEV_AND_KFDNODE_FROM_INDX
+
+  *hive_id = kfd_node->xgmi_hive_id();
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
 rsmi_topo_get_numa_node_number(uint32_t dv_ind, uint32_t *numa_node) {
   TRY
 

@@ -2785,6 +2785,27 @@ rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status);
 rsmi_status_t
 rsmi_dev_xgmi_error_reset(uint32_t dv_ind);
 
+/**
+ *  @brief Retrieve the XGMI hive id for a device
+ *
+ *  @details Given a device index @p dv_ind, and a pointer to an
+ *  uint64_t @p hive_id, this function will write the current XGMI
+ *  hive id for the device @p dv_ind to the memory pointed to by @p hive_id.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] hive_id A pointer to an uint64_t to which the XGMI hive id
+ *  should be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t
+rsmi_dev_xgmi_hive_id_get(uint32_t dv_ind, uint64_t *hive_id);
+
 /** @} */  // end of SysInfo
 
 /*****************************************************************************/

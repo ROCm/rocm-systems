@@ -95,7 +95,7 @@ static const char *kKFDPasidFName = "pasid";
 static const char *kKFDNodePropLOCATION_IDStr =          "location_id";
 static const char *kKFDNodePropDOMAINStr =               "domain";
 // static const char *kKFDNodePropDRM_RENDER_MINORStr =   "drm_render_minor";
-// static const char *kKFDNodePropHIVE_IDStr =            "hive_id";
+static const char *kKFDNodePropHIVE_IDStr =            "hive_id";
 // static const char *kKFDNodePropNUM_SDMA_ENGINESStr =   "num_sdma_engines";
 // static const char *kKFDNodePropNUM_SDMA_XGMI_ENGINESStr =
 //                                                   "num_sdma_xgmi_engines";
@@ -559,6 +559,12 @@ KFDNode::Initialize(void) {
   if (ret || (gpu_id_ == 0)) {return ret;}
 
   ret = ReadKFDGpuName(node_indx_, &name_);
+
+  ret = get_property_value(kKFDNodePropHIVE_IDStr, &xgmi_hive_id_);
+  if (ret != 0) {
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+    "Failed to initialize rocm_smi library (get xgmi hive id).");
+  }
 
   std::map<uint32_t, std::shared_ptr<IOLink>> io_link_map_tmp;
   ret = DiscoverIOLinksPerNode(node_indx_, &io_link_map_tmp);
