@@ -562,6 +562,12 @@ inext = re.sub(r'^.*(\.[^\.]+)$', r'\1', inext)
 dbfile = ''
 csvfile = ''
 
+begin_ts_file = indir + '/begin_ts_file.txt'
+if os.path.isfile(file_name):
+  with open(begin_ts_file, mode='r') as fd:
+    START_US=int(fd.readline()) / 1000
+    print('Appilcation START-ts found (' + START_US + 'us)')
+
 if re.search(r'\.csv$', outfile):
   csvfile = outfile
 elif re.search(r'\.db$', outfile):
