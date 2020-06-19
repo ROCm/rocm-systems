@@ -85,23 +85,23 @@ header = \
 
 header_hip = \
 'template <typename T>\n' + \
-'  std::ostream& operator<<(std::ostream& out, const T& v) {\n' + \
+'  inline static std::ostream& operator<<(std::ostream& out, const T& v) {\n' + \
 '     using std::operator<<;\n' + \
 '     static bool recursion = false;\n' + \
 '     if (recursion == false) { recursion = true; out << v; recursion = false; }\n' + \
 '     return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, void* v) { using std::operator<<; out << std::hex << v; return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, const void* v) { using std::operator<<; out << std::hex << v; return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, bool v) { using std::operator<<; out << std::hex << "<bool " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, uint8_t v) { using std::operator<<; out << std::hex << "<uint8_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, uint16_t v) { using std::operator<<; out << std::hex << "<uint16_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, uint32_t v) { using std::operator<<; out << std::hex << "<uint32_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, uint64_t v) { using std::operator<<; out << std::hex << "<uint64_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, bool* v) {  using std::operator<<; out << std::hex << "<bool " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, uint8_t* v) { using std::operator<<; out << std::hex << "<uint8_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, uint16_t* v) { using std::operator<<; out << std::hex << "<uint16_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, uint32_t* v) { using std::operator<<; out << std::hex << "<uint32_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'std::ostream& operator<<(std::ostream& out, uint64_t* v) { using std::operator<<; out << std::hex << "<uint64_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, void* v) { using std::operator<<; out << std::hex << v; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, const void* v) { using std::operator<<; out << std::hex << v; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, bool v) { using std::operator<<; out << std::hex << "<bool " << "0x" << v << std::dec << ">"; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, uint8_t v) { using std::operator<<; out << std::hex << "<uint8_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, uint16_t v) { using std::operator<<; out << std::hex << "<uint16_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, uint32_t v) { using std::operator<<; out << std::hex << "<uint32_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, uint64_t v) { using std::operator<<; out << std::hex << "<uint64_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, bool* v) {  using std::operator<<; out << std::hex << "<bool " << "0x" << *v << std::dec << ">"; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, uint8_t* v) { using std::operator<<; out << std::hex << "<uint8_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, uint16_t* v) { using std::operator<<; out << std::hex << "<uint16_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, uint32_t* v) { using std::operator<<; out << std::hex << "<uint32_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
+'inline static std::ostream& operator<<(std::ostream& out, uint64_t* v) { using std::operator<<; out << std::hex << "<uint64_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
 '\n'
 
 structs_analyzed = {}
@@ -217,9 +217,9 @@ def gen_cppheader(infilepath, outfilepath):
             continue
         if len(cppHeader.classes[c]["properties"]["public"])!=0:
           if apiname.lower() == 'hip':
-            f.write("std::ostream& operator<<(std::ostream& out, " + c + "& v)\n")
+            f.write("inline static std::ostream& operator<<(std::ostream& out, " + c + "& v)\n")
             f.write("{\n")
-            global_ops_hip = global_ops_hip + "std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n" + "{\n" + "   roctracer::hip_support::operator<<(out, v);\n" + "   return out;\n" + "}\n\n"
+            global_ops_hip = global_ops_hip + "inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n" + "{\n" + "   roctracer::hip_support::operator<<(out, v);\n" + "   return out;\n" + "}\n\n"
             process_struct(f, c, cppHeader, "", apiname)
             f.write("   return out;\n")
             f.write("}\n")
