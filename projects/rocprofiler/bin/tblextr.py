@@ -563,7 +563,7 @@ dbfile = ''
 csvfile = ''
 
 begin_ts_file = indir + '/begin_ts_file.txt'
-if os.path.isfile(file_name):
+if os.path.isfile(begin_ts_file):
   with open(begin_ts_file, mode='r') as fd:
     START_US=int(fd.readline()) / 1000
     print('Appilcation START-ts found (' + START_US + 'us)')
