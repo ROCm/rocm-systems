@@ -76,129 +76,8 @@
 
 static const uint32_t kMaxOverdriveLevel = 20;
 
-static rsmi_status_t errno_to_rsmi_status(uint32_t err) {
-  switch (err) {
-    case 0:      return RSMI_STATUS_SUCCESS;
-    case ESRCH:  return RSMI_STATUS_NOT_FOUND;
-    case EACCES: return RSMI_STATUS_PERMISSION;
-    case EPERM:
-    case ENOENT: return RSMI_STATUS_NOT_SUPPORTED;
-    case EBADF:
-    case EISDIR: return RSMI_STATUS_FILE_ERROR;
-    case EINTR:  return RSMI_STATUS_INTERRUPT;
-    case EIO:    return RSMI_STATUS_UNEXPECTED_SIZE;
-    case ENXIO:  return RSMI_STATUS_UNEXPECTED_DATA;
-    case EBUSY:  return RSMI_STATUS_BUSY;
-    default:     return RSMI_STATUS_UNKNOWN_ERROR;
-  }
-}
-
-static rsmi_status_t handleException() {
-  try {
-    throw;
-  } catch (const std::bad_alloc& e) {
-    return RSMI_STATUS_OUT_OF_RESOURCES;
-  } catch (const amd::smi::rsmi_exception& e) {
-    debug_print("Exception caught: %s.\n", e.what());
-    return e.error_code();
-  } catch (const std::exception& e) {
-    debug_print("Exception caught: %s\n", e.what());
-    return RSMI_STATUS_INTERNAL_EXCEPTION;
-  } catch (const std::nested_exception& e) {
-    debug_print("Callback threw.\n");
-    return RSMI_STATUS_INTERNAL_EXCEPTION;
-  } catch (int erno) {
-    return errno_to_rsmi_status(erno);
-  } catch (...) {
-    debug_print("Unknown exception caught.\n");
-    return RSMI_STATUS_INTERNAL_EXCEPTION;
-  }
-}
-
 #define TRY try {
-#define CATCH } catch (...) {return handleException();}
-
-#define CHECK_DV_IND_RANGE \
-    amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
-    if (dv_ind >= smi.monitor_devices().size()) { \
-      return RSMI_STATUS_INVALID_ARGS; \
-    } \
-
-#define GET_DEV_FROM_INDX  \
-  CHECK_DV_IND_RANGE \
-  std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind]; \
-  assert(dev != nullptr);
-
-
-#define GET_DEV_AND_KFDNODE_FROM_INDX \
-  GET_DEV_FROM_INDX \
-  std::shared_ptr<amd::smi::KFDNode> kfd_node; \
-  if (smi.kfd_node_map().find(dev->kfd_gpu_id()) == \
-                                                 smi.kfd_node_map().end()) { \
-    return RSMI_INITIALIZATION_ERROR; \
-  } \
-  kfd_node = smi.kfd_node_map()[dev->kfd_gpu_id()];
-
-#define REQUIRE_ROOT_ACCESS \
-    if (amd::smi::RocmSMI::getInstance().euid()) { \
-      return RSMI_STATUS_PERMISSION; \
-    }
-
-#define DEVICE_MUTEX \
-    amd::smi::pthread_wrap _pw(*get_mutex(dv_ind)); \
-    amd::smi::RocmSMI& smi_ = amd::smi::RocmSMI::getInstance(); \
-    bool blocking_ = !(smi_.init_options() && RSMI_INIT_FLAG_RESRV_TEST1); \
-    amd::smi::ScopedPthread _lock(_pw, blocking_); \
-    if (!blocking_ && _lock.mutex_not_acquired()) { \
-      return RSMI_STATUS_BUSY; \
-    }
-
-/* This group of macros is used to facilitate checking of support for rsmi_dev*
- * "getter" functions. When the return buffer is set to nullptr, the macro will
- * check the previously gathered device support data to see if the function,
- * with possible variants (e.g., memory types, firware types,...) and
- * subvariants (e.g. monitors/sensors) are supported.
- */
-// This macro assumes dev already available
-#define CHK_API_SUPPORT_ONLY(RT_PTR, VR, SUB_VR) \
-    if ((RT_PTR) == nullptr) { \
-      try { \
-        if (!dev->DeviceAPISupported(__FUNCTION__, (VR), (SUB_VR))) { \
-          return RSMI_STATUS_NOT_SUPPORTED; \
-        }  \
-        return RSMI_STATUS_INVALID_ARGS; \
-      } catch (const amd::smi::rsmi_exception& e) { \
-        debug_print( \
-             "Exception caught when checking if API is supported %s.\n", \
-                                                                  e.what()); \
-        return RSMI_STATUS_INVALID_ARGS; \
-      } \
-    }
-
-#define CHK_SUPPORT(RT_PTR, VR, SUB_VR)  \
-    GET_DEV_FROM_INDX \
-    CHK_API_SUPPORT_ONLY((RT_PTR), (VR), (SUB_VR))
-
-#define CHK_SUPPORT_NAME_ONLY(RT_PTR) \
-    CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
-
-#define CHK_SUPPORT_VAR(RT_PTR, VR) \
-    CHK_SUPPORT((RT_PTR), (VR), RSMI_DEFAULT_VARIANT)
-
-#define CHK_SUPPORT_SUBVAR_ONLY(RT_PTR, SUB_VR) \
-    CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, (SUB_VR))
-
-static pthread_mutex_t *get_mutex(uint32_t dv_ind) {
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  if (dv_ind >= smi.monitor_devices().size()) {
-    return nullptr;
-  }
-  std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind];
-  assert(dev != nullptr);
-
-  return dev->mutex();
-}
+#define CATCH } catch (...) {return amd::smi::handleException();}
 
 static uint64_t get_multiplier_from_str(char units_char) {
   uint32_t multiplier = 0;
@@ -404,7 +283,7 @@ static rsmi_status_t get_dev_value_str(amd::smi::DevInfoTypes type,
   GET_DEV_FROM_INDX
   int ret = dev->readDevInfo(type, val_str);
 
-  return errno_to_rsmi_status(ret);
+  return amd::smi::ErrnoToRsmiStatus(ret);
 }
 static rsmi_status_t get_dev_value_int(amd::smi::DevInfoTypes type,
                                          uint32_t dv_ind, uint64_t *val_int) {
@@ -415,7 +294,7 @@ static rsmi_status_t get_dev_value_int(amd::smi::DevInfoTypes type,
   GET_DEV_FROM_INDX
   int ret = dev->readDevInfo(type, val_int);
 
-  return errno_to_rsmi_status(ret);
+  return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
 static rsmi_status_t get_dev_value_line(amd::smi::DevInfoTypes type,
@@ -427,7 +306,7 @@ static rsmi_status_t get_dev_value_line(amd::smi::DevInfoTypes type,
   GET_DEV_FROM_INDX
   int ret = dev->readDevInfoLine(type, val_str);
 
-  return errno_to_rsmi_status(ret);
+  return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
 static rsmi_status_t set_dev_value(amd::smi::DevInfoTypes type,
@@ -435,7 +314,7 @@ static rsmi_status_t set_dev_value(amd::smi::DevInfoTypes type,
   GET_DEV_FROM_INDX
 
   int ret = dev->writeDevInfo(type, val);
-  return errno_to_rsmi_status(ret);
+  return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
 static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
@@ -452,7 +331,7 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
 
   int ret = dev->monitor()->readMonitor(type, sensor_ind, &val_str);
   if (ret) {
-    return errno_to_rsmi_status(ret);
+    return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
   if (!amd::smi::IsInteger(val_str)) {
@@ -480,7 +359,7 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
 
   int ret = dev->monitor()->readMonitor(type, sensor_ind, &val_str);
   if (ret) {
-    return errno_to_rsmi_status(ret);
+    return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
   if (!amd::smi::IsInteger(val_str)) {
@@ -504,7 +383,7 @@ static rsmi_status_t set_dev_mon_value(amd::smi::MonitorTypes type,
   int ret = dev->monitor()->writeMonitor(type, sensor_ind,
                                                          std::to_string(val));
 
-  return errno_to_rsmi_status(ret);
+  return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
 static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
@@ -517,7 +396,7 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
 
   uint32_t ret = smi.DiscoverAMDPowerMonitors();
   if (ret != 0) {
-    return errno_to_rsmi_status(ret);
+    return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
   std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind];
@@ -526,20 +405,9 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
 
   ret = dev->power_monitor()->readPowerValue(type, val);
 
-  return errno_to_rsmi_status(ret);
+  return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
-static rsmi_status_t get_dev_value_vec(amd::smi::DevInfoTypes type,
-                         uint32_t dv_ind, std::vector<std::string> *val_vec) {
-  assert(val_vec != nullptr);
-  if (val_vec == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-  GET_DEV_FROM_INDX
-
-  int ret = dev->readDevInfo(type, val_vec);
-  return errno_to_rsmi_status(ret);
-}
 static bool is_power_of_2(uint64_t n) {
       return n && !(n & (n - 1));
 }
@@ -654,7 +522,7 @@ rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
   *enabled_blks = strtoul(tmp_str.c_str(), nullptr, 16);
   assert(errno == 0);
 
-  return errno_to_rsmi_status(errno);
+  return amd::smi::ErrnoToRsmiStatus(errno);
   CATCH
 }
 
@@ -732,7 +600,7 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
 
   DEVICE_MUTEX
 
-  ret = get_dev_value_vec(type, dv_ind, &val_vec);
+  ret = GetDevValueVec(type, dv_ind, &val_vec);
 
   if (ret == RSMI_STATUS_FILE_ERROR) {
     return RSMI_STATUS_NOT_SUPPORTED;
@@ -828,7 +696,7 @@ get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_t *id) {
   val_u64 = strtoul(val_str.c_str(), nullptr, 16);
   assert(errno == 0);
   if (errno != 0) {
-    return errno_to_rsmi_status(errno);
+    return amd::smi::ErrnoToRsmiStatus(errno);
   }
   if (val_u64 > 0xFFFF) {
     return RSMI_STATUS_UNEXPECTED_SIZE;
@@ -951,7 +819,7 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  ret = get_dev_value_vec(type, dv_ind, &val_vec);
+  ret = GetDevValueVec(type, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1001,7 +869,7 @@ static rsmi_status_t get_power_profiles(uint32_t dv_ind,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  ret = get_dev_value_vec(amd::smi::kDevPowerProfileMode, dv_ind, &val_vec);
+  ret = GetDevValueVec(amd::smi::kDevPowerProfileMode, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1085,7 +953,7 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  ret = get_dev_value_vec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
+  ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1186,7 +1054,7 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
   THROW_IF_NULLPTR_DEREF(p)
   THROW_IF_NULLPTR_DEREF(num_regions)
 
-  ret = get_dev_value_vec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
+  ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1395,7 +1263,7 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
 
   ret = get_dev_value_int(dev_type, dv_ind, fw_version);
   if (ret != 0) {
-    return errno_to_rsmi_status(ret);
+    return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -1487,7 +1355,7 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   }
 
   ret_i = dev->writeDevInfo(dev_type, freq_enable_str);
-  return errno_to_rsmi_status(ret_i);
+  return amd::smi::ErrnoToRsmiStatus(ret_i);
 
   CATCH
 }
@@ -1743,7 +1611,7 @@ rsmi_dev_brand_get(uint32_t dv_ind, char *brand, uint32_t len) {
   // Retrieve vbios and store in vbios_value string
   int ret = dev->readDevInfo(amd::smi::kDevVBiosVer, &vbios_value);
   if (ret != 0) {
-    return errno_to_rsmi_status(ret);
+    return amd::smi::ErrnoToRsmiStatus(ret);
   }
   if (vbios_value.length() == 16) {
     sku_value = vbios_value.substr(4, 6);
@@ -1779,7 +1647,7 @@ rsmi_dev_vram_vendor_get(uint32_t dv_ind, char *brand, uint32_t len) {
   int ret = dev->readDevInfo(amd::smi::kDevVramVendor, &val_str);
 
   if (ret != 0) {
-    return errno_to_rsmi_status(ret);
+    return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
   uint32_t ln = static_cast<uint32_t>(val_str.copy(brand, len));
@@ -1893,7 +1761,7 @@ rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
   uint32_t ret_i;
   ret_i = dev->writeDevInfo(amd::smi::kDevPCIEClk, freq_enable_str);
 
-  return errno_to_rsmi_status(ret_i);
+  return amd::smi::ErrnoToRsmiStatus(ret_i);
 
   CATCH
 }
@@ -2565,7 +2433,7 @@ rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {
   int ret = dev->readDevInfo(amd::smi::kDevVBiosVer, &val_str);
 
   if (ret != 0) {
-    return errno_to_rsmi_status(ret);
+    return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
   uint32_t ln = static_cast<uint32_t>(val_str.copy(vbios, len));
@@ -2629,7 +2497,7 @@ rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
     err = uname(&buf);
 
     if (err != 0) {
-      return errno_to_rsmi_status(err);
+      return amd::smi::ErrnoToRsmiStatus(err);
     }
 
     val_str = buf.release;
@@ -2744,7 +2612,7 @@ rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
   ret = evt->stopCounter();
 
   delete evt;
-  return errno_to_rsmi_status(ret);;
+  return amd::smi::ErrnoToRsmiStatus(ret);;
   CATCH
 }
 
@@ -2755,7 +2623,7 @@ rsmi_counter_control(rsmi_event_handle_t evt_handle,
 
   amd::smi::evt::Event *evt =
                          reinterpret_cast<amd::smi::evt::Event *>(evt_handle);
-  amd::smi::pthread_wrap _pw(*get_mutex(evt->dev_ind()));
+  amd::smi::pthread_wrap _pw(*amd::smi::GetMutex(evt->dev_ind()));
   amd::smi::ScopedPthread _lock(_pw);
 
   REQUIRE_ROOT_ACCESS
@@ -2779,7 +2647,7 @@ rsmi_counter_control(rsmi_event_handle_t evt_handle,
       assert(!"Unexpected perf counter command");
       return RSMI_STATUS_INVALID_ARGS;
   }
-  return errno_to_rsmi_status(ret);
+  return amd::smi::ErrnoToRsmiStatus(ret);
 
   CATCH
 }
@@ -2810,7 +2678,7 @@ rsmi_counter_read(rsmi_event_handle_t evt_handle,
     ret = evt->getValue(value);
   }
 
-  return errno_to_rsmi_status(ret);
+  return amd::smi::ErrnoToRsmiStatus(ret);
   CATCH
 }
 
@@ -2868,7 +2736,7 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs,
   int err = amd::smi::GetProcessInfo(procs, *num_items, &procs_found);
 
   if (err) {
-    return errno_to_rsmi_status(err);
+    return amd::smi::ErrnoToRsmiStatus(err);
   }
 
   if (procs && *num_items < procs_found) {
@@ -2896,7 +2764,7 @@ rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
   int err = amd::smi::GetProcessGPUs(pid, &gpu_set);
 
   if (err) {
-    return errno_to_rsmi_status(err);
+    return amd::smi::ErrnoToRsmiStatus(err);
   }
 
   uint32_t i = 0;
@@ -2936,7 +2804,7 @@ rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
 
   std::vector<std::string> val_vec;
 
-  ret = get_dev_value_vec(amd::smi::kDevMemPageBad, dv_ind, &val_vec);
+  ret = GetDevValueVec(amd::smi::kDevMemPageBad, dv_ind, &val_vec);
 
   if (ret == RSMI_STATUS_FILE_ERROR) {
     return RSMI_STATUS_NOT_SUPPORTED;
@@ -3017,7 +2885,7 @@ rsmi_compute_process_info_by_pid_get(uint32_t pid,
   int err = amd::smi::GetProcessInfoForPID(pid, proc, &gpu_set);
 
   if (err) {
-    return errno_to_rsmi_status(err);
+    return amd::smi::ErrnoToRsmiStatus(err);
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -3534,7 +3402,7 @@ rsmi_event_notification_init(uint32_t dv_ind) {
 
   int ret = ioctl(smi.kfd_notif_evt_fh(), AMDKFD_IOC_SMI_EVENTS, &args);
   if (ret < 0) {
-    return errno_to_rsmi_status(errno);
+    return amd::smi::ErrnoToRsmiStatus(errno);
   }
   if (args.anon_fd < 1) {
     return RSMI_STATUS_NO_DATA;
@@ -3544,7 +3412,7 @@ rsmi_event_notification_init(uint32_t dv_ind) {
   FILE *anon_file_ptr = fdopen(args.anon_fd, "r");
   if (anon_file_ptr == nullptr) {
     close(dev->evt_notif_anon_fd());
-    return errno_to_rsmi_status(errno);
+    return amd::smi::ErrnoToRsmiStatus(errno);
   }
   dev->set_evt_notif_anon_file_ptr(anon_file_ptr);
 
@@ -3564,7 +3432,7 @@ rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask) {
   ssize_t ret = write(dev->evt_notif_anon_fd(), &mask, sizeof(uint64_t));
 
   if (ret == -1) {
-    return errno_to_rsmi_status(errno);
+    return amd::smi::ErrnoToRsmiStatus(errno);
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -3645,7 +3513,7 @@ rsmi_event_notification_get(int timeout_ms,
   fill_data_buffer(false);
 
   if (*num_elem < buffer_size && errno != EAGAIN) {
-    return errno_to_rsmi_status(errno);
+    return amd::smi::ErrnoToRsmiStatus(errno);
   } else if (*num_elem >= buffer_size) {
     return RSMI_STATUS_SUCCESS;
   }
@@ -3655,7 +3523,7 @@ rsmi_event_notification_get(int timeout_ms,
   if (p_ret > 0) {
     fill_data_buffer(true);
   } else if (p_ret < 0) {
-    return errno_to_rsmi_status(errno);
+    return amd::smi::ErrnoToRsmiStatus(errno);
   }
   if (*num_elem == 0) {
     return RSMI_STATUS_NO_DATA;
@@ -3684,7 +3552,7 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
     int ret = close(smi.kfd_notif_evt_fh());
     smi.set_kfd_notif_evt_fh(-1);
     if (ret < 0) {
-      return errno_to_rsmi_status(errno);
+      return amd::smi::ErrnoToRsmiStatus(errno);
     }
   }
 
@@ -3700,7 +3568,7 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
 rsmi_status_t
 rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds) {
 //  DEVICE_MUTEX
-  amd::smi::pthread_wrap _pw(*get_mutex(dv_ind));
+  amd::smi::pthread_wrap _pw(*amd::smi::GetMutex(dv_ind));
   amd::smi::RocmSMI& smi_ = amd::smi::RocmSMI::getInstance();
   bool blocking_ = !(smi_.init_options() && RSMI_INIT_FLAG_RESRV_TEST1);
   amd::smi::ScopedPthread _lock(_pw, blocking_);

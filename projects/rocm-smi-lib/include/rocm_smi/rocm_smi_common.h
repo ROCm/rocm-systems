@@ -50,6 +50,76 @@
 #include <vector>
 #include <string>
 
+#define CHECK_DV_IND_RANGE \
+    amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
+    if (dv_ind >= smi.monitor_devices().size()) { \
+      return RSMI_STATUS_INVALID_ARGS; \
+    } \
+
+#define GET_DEV_FROM_INDX  \
+  CHECK_DV_IND_RANGE \
+  std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind]; \
+  assert(dev != nullptr);
+
+
+#define GET_DEV_AND_KFDNODE_FROM_INDX \
+  GET_DEV_FROM_INDX \
+  std::shared_ptr<amd::smi::KFDNode> kfd_node; \
+  if (smi.kfd_node_map().find(dev->kfd_gpu_id()) == \
+                                                 smi.kfd_node_map().end()) { \
+    return RSMI_INITIALIZATION_ERROR; \
+  } \
+  kfd_node = smi.kfd_node_map()[dev->kfd_gpu_id()];
+
+#define REQUIRE_ROOT_ACCESS \
+    if (amd::smi::RocmSMI::getInstance().euid()) { \
+      return RSMI_STATUS_PERMISSION; \
+    }
+
+#define DEVICE_MUTEX \
+    amd::smi::pthread_wrap _pw(*amd::smi::GetMutex(dv_ind)); \
+    amd::smi::RocmSMI& smi_ = amd::smi::RocmSMI::getInstance(); \
+    bool blocking_ = !(smi_.init_options() && RSMI_INIT_FLAG_RESRV_TEST1); \
+    amd::smi::ScopedPthread _lock(_pw, blocking_); \
+    if (!blocking_ && _lock.mutex_not_acquired()) { \
+      return RSMI_STATUS_BUSY; \
+    }
+
+/* This group of macros is used to facilitate checking of support for rsmi_dev*
+ * "getter" functions. When the return buffer is set to nullptr, the macro will
+ * check the previously gathered device support data to see if the function,
+ * with possible variants (e.g., memory types, firware types,...) and
+ * subvariants (e.g. monitors/sensors) are supported.
+ */
+// This macro assumes dev already available
+#define CHK_API_SUPPORT_ONLY(RT_PTR, VR, SUB_VR) \
+    if ((RT_PTR) == nullptr) { \
+      try { \
+        if (!dev->DeviceAPISupported(__FUNCTION__, (VR), (SUB_VR))) { \
+          return RSMI_STATUS_NOT_SUPPORTED; \
+        }  \
+        return RSMI_STATUS_INVALID_ARGS; \
+      } catch (const amd::smi::rsmi_exception& e) { \
+        debug_print( \
+             "Exception caught when checking if API is supported %s.\n", \
+                                                                  e.what()); \
+        return RSMI_STATUS_INVALID_ARGS; \
+      } \
+    }
+
+#define CHK_SUPPORT(RT_PTR, VR, SUB_VR)  \
+    GET_DEV_FROM_INDX \
+    CHK_API_SUPPORT_ONLY((RT_PTR), (VR), (SUB_VR))
+
+#define CHK_SUPPORT_NAME_ONLY(RT_PTR) \
+    CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT) \
+
+#define CHK_SUPPORT_VAR(RT_PTR, VR) \
+    CHK_SUPPORT((RT_PTR), (VR), RSMI_DEFAULT_VARIANT) \
+
+#define CHK_SUPPORT_SUBVAR_ONLY(RT_PTR, SUB_VR) \
+    CHK_SUPPORT((RT_PTR), RSMI_DEFAULT_VARIANT, (SUB_VR)) \
+
 #define DBG_FILE_ERROR(FN, WR_STR) \
   if (env_ && env_->debug_output_bitfield & RSMI_DEBUG_SYSFS_FILE_PATHS) { \
     std::cout << "*****" << __FUNCTION__ << std::endl; \

@@ -47,6 +47,9 @@
 
 #include <string>
 #include <cstdint>
+#include <vector>
+
+#include "rocm_smi/rocm_smi_device.h"
 
 #ifdef NDEBUG
 #define debug_print(fmt, ...)               \
@@ -62,6 +65,8 @@
 namespace amd {
 namespace smi {
 
+pthread_mutex_t *GetMutex(uint32_t dv_ind);
+
 int SameFile(const std::string fileA, const std::string fileB);
 bool FileExists(char const *filename);
 int isRegularFile(std::string fname, bool *is_reg);
@@ -70,6 +75,12 @@ int ReadSysfsStr(std::string path, std::string *retStr);
 int WriteSysfsStr(std::string path, std::string val);
 
 bool IsInteger(const std::string & n_str);
+
+rsmi_status_t handleException();
+rsmi_status_t
+GetDevValueVec(amd::smi::DevInfoTypes type,
+                         uint32_t dv_ind, std::vector<std::string> *val_vec);
+rsmi_status_t ErrnoToRsmiStatus(uint32_t err);
 
 struct pthread_wrap {
  public:
