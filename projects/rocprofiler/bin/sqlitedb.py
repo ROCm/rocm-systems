@@ -76,6 +76,11 @@ class SQLiteDB:
     self.connection.execute('UPDATE ' + table_name + ' SET tid = ? WHERE "Index" = ?', (tid, rec_id))
   def change_rec_fld(self, table_name, fld_expr, rec_pat):
     self.connection.execute('UPDATE ' + table_name + ' SET ' + fld_expr + ' WHERE ' + rec_pat)
+  def table_get_record(self, table_name, rec_pat):
+    cursor = self.connection.execute('SELECT * FROM ' + table_name + ' WHERE ' + rec_pat)
+    raws = cursor.fetchall()
+    if len(raws) != 1: raise Exception('Record (' + rec_pat + ') is not unique, table "' + table_name + '"')
+    return list(raws[0])
 
   # populate DB table entry
   def insert_entry(self, table, val_list):
@@ -109,8 +114,7 @@ class SQLiteDB:
   def _get_raw_by_id(self, table_name, rec_id):
     cursor = self.connection.execute('SELECT * FROM ' + table_name + ' WHERE "Index"=?', (rec_id,))
     raws = cursor.fetchall()
-    if len(raws) != 1:
-      raise Exception('Index is not unique, table "' + table_name + '"')
+    if len(raws) != 1: raise Exception('Index is not unique, table "' + table_name + '"')
     return list(raws[0])
 
   def table_get_raws(self, table_name):
