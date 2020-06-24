@@ -22,6 +22,7 @@
 
 import os, sys, re, subprocess
 from sqlitedb import SQLiteDB
+from mem_manager import MemManager
 import dform
 
 EXT_PID = 0
@@ -298,8 +299,8 @@ def set_field(args, field, val):
 
 # Fill API DB
 api_table_descr = [
-  ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'args', 'Index'],
-  {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'Index':'INTEGER'}
+  ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'args', 'Index', 'Data'],
+  {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'Index':'INTEGER', 'Data':'TEXT'}
 ]
 # Filling API records DB table
 # table_name - created DB table name
@@ -312,6 +313,7 @@ api_table_descr = [
 # dep_filtr - registered dependencies by record ID
 def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep_filtr, expl_id):
   global hsa_activity_found
+  global memory_manager
   copy_raws = []
   if (hsa_activity_found): copy_raws = db.table_get_raws('COPY')
   copy_csv = ''
@@ -353,11 +355,10 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
       m = ptrn_val.match(record)
       if m:
         rec_vals = []
-        rec_len = len(api_table_descr[0])
-        for ind in range(1,rec_len):
+        rec_len = len(api_table_descr[0]) - 1
+        for ind in range(1, rec_len):
           rec_vals.append(m.group(ind))
         proc_id = rec_vals[2]
-        rec_vals[2] = api_pid
         record_name = rec_vals[4]
         record_args = rec_vals[5]
         rec_vals.append(record_id)
@@ -409,9 +410,14 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
                 dev_id = m.group(2)
                 select_expr += ' AND "dev-id" = ' + dev_id
                 activity_record_patching(db, ops_table_name, 1, kernel_name, stream_found, stream_id, select_expr)
-              fatal('Bad multi-kernel format: "' + kernel_item + '" in "' + kernel_str + '"')
+              else:
+                fatal('Bad multi-kernel format: "' + kernel_item + '" in "' + kernel_str + '"')
           else:
             activity_record_patching(db, ops_table_name, kernel_found, kernel_str, stream_found, stream_id, select_expr)
+
+        rec_vals.append(memory_manager.register_api(rec_vals))
+
+        rec_vals[2] = api_pid
 
         db.insert_entry(table_handle, rec_vals)
         record_id += 1
@@ -419,7 +425,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
   # inserting of dispatch events correlated to the dependent dispatches
   for (tid, from_ns) in dep_list:
-    db.insert_entry(table_handle, [from_ns, from_ns, api_pid, tid, 'hsa_dispatch', '', record_id])
+    db.insert_entry(table_handle, [from_ns, from_ns, api_pid, tid, 'hsa_dispatch', '', record_id, ''])
     record_id += 1
 
   # registering dependencies informatino
@@ -479,8 +485,8 @@ def fill_copy_db(table_name, db, indir):
 
 # fill HCC ops DB
 ops_table_descr = [
-  ['BeginNs', 'EndNs', 'dev-id', 'queue-id', 'Name', 'pid', 'tid', 'Index', 'proc-id'],
-  {'Index':'INTEGER', 'proc-id':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'dev-id':'INTEGER', 'queue-id':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER'}
+  ['BeginNs', 'EndNs', 'dev-id', 'queue-id', 'Name', 'pid', 'tid', 'Index', 'proc-id', 'Data'],
+  {'Index':'INTEGER', 'proc-id':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'dev-id':'INTEGER', 'queue-id':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Data':'TEXT'}
 ]
 def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
   global max_gpu_id
@@ -534,6 +540,7 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         rec_vals.append(0)                       # tid
         rec_vals.append(corr_id)                 # Index
         rec_vals.append(proc_id)                 # proc-id
+        rec_vals.append('')                      # Data
         db.insert_entry(table_handle, rec_vals)
 
         # registering a dependency filtr
@@ -596,6 +603,7 @@ else:
 
   with open(dbfile, mode='w') as fd: fd.truncate()
   db = SQLiteDB(dbfile)
+  memory_manager = MemManager(db)
 
   ext_trace_found = fill_ext_db('rocTX', db, indir, 'roctx', EXT_PID)
 
@@ -695,6 +703,9 @@ else:
   if any_trace_found:
     db.metadata_json(jsonfile, sysinfo_file)
     db.close_json(jsonfile);
+
+  memory_manager.dump_data()
+
   db.close()
 
 sys.exit(0)
