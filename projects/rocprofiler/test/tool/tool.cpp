@@ -387,7 +387,7 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
       const void* data_ptr = info_data->trace_data.ptr;
       const uint32_t data_size = info_data->trace_data.size;
       fprintf(arg->file, "    SE(%u) size(%u)\n", info_data->sample_id, data_size);
-  
+
       if (is_trace_local) {
         HsaRsrcFactory* hsa_rsrc = &HsaRsrcFactory::Instance();
         const AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(arg->agent);
@@ -499,7 +499,7 @@ bool dump_context_entry(context_entry_t* entry) {
     FILE* file_handle = entry->file_handle;
     const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
     const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(entry->agent);
-  
+
     fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), pid(%u), tid(%u), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), sig(0x%lx), kernel-name(\"%s\")",
       index,
       agent_info->dev_index,
@@ -809,15 +809,15 @@ hsa_status_t dispatch_callback_con(const rocprofiler_callback_data_t* callback_d
     rocprofiler_properties_t properties{};
     properties.handler = (result_prefix != NULL) ? context_handler_con : NULL;
     properties.handler_arg = (void*)entry;
-  
+
     rocprofiler_feature_t* features = tool_data->features;
     unsigned feature_count = tool_data->feature_count;
-  
+
     // Open profiling context
     status = rocprofiler_open(callback_data->agent, features, feature_count,
                               &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
     check_status(status);
-  
+
     // Check that we have only one profiling group
     uint32_t group_count = 0;
     status = rocprofiler_group_count(context, &group_count);
@@ -827,7 +827,7 @@ hsa_status_t dispatch_callback_con(const rocprofiler_callback_data_t* callback_d
     const uint32_t group_index = 0;
     status = rocprofiler_get_group(context, group_index, group);
     check_status(status);
-  
+
     // Fill profiling context entry
     entry->index = UINT32_MAX;
     entry->agent = callback_data->agent;
@@ -839,7 +839,7 @@ hsa_status_t dispatch_callback_con(const rocprofiler_callback_data_t* callback_d
     entry->file_handle = tool_data->file_handle;
     entry->active = true;
     reinterpret_cast<std::atomic<bool>*>(&entry->valid)->store(true);
-  
+
     if (trace_on) {
       fprintf(stdout, "tool::dispatch_con: context_map %d tid %u\n", (int)(ctx_a_map->size()), GetTid());
       fflush(stdout);
