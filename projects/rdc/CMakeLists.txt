@@ -117,7 +117,7 @@ set(PROTOB_CMD "${GRPC_ROOT}/bin/protoc")
 set(GRPC_PLUGIN "${GRPC_ROOT}/bin/grpc_cpp_plugin")
 set(GRPC_LIB_DIR "${GRPC_ROOT}/lib")
 
-set(ENV{LD_LIBRARY_PATH} ${GRPC_LIB_DIR})
+set(ENV{LD_LIBRARY_PATH} ${GRPC_LIB_DIR}:${GRPC_LIB_DIR}64)
 foreach(file ${PROTOB_DEF_SRC_FILES})
     execute_process(COMMAND
             ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
