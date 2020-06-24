@@ -60,6 +60,8 @@ int amdoam_get_pci_properties(uint32_t device_id, oam_pci_info_t *pci_info);
 int amdoam_get_sensors_count(uint32_t device_id,
                              oam_sensor_count_t *sensor_count);
 int amdoam_get_error_description(int code, const char **description);
+int amdoam_get_sensors_info(uint32_t device_id, oam_sensor_type_t type,
+                uint32_t num_sensors, oam_sensor_info_t sensor_info[]);
 
 #ifdef __cplusplus
 }

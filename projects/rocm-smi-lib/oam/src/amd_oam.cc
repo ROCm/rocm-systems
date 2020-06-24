@@ -178,17 +178,16 @@ CATCH
   return AMDOAM_STATUS_SUCCESS;
 }
 
-static int get_num_sensors(std::string hwmon_path, std::string fn_reg_ex,
-                           uint32_t *sensor_max) {
-  *sensor_max = 0;
-  fn_reg_ex = "\\b" + fn_reg_ex + "([0-9]+)([^ ]*)";
+static int get_num_sensors(std::string hwmon_path, std::string fn_reg) {
+  uint32_t sensor_max = 0;
+  std::string fn_reg_ex = "\\b" + fn_reg + "([0-9]+)([^ ]*)";
   std::string fn;
   std::smatch m;
   uint32_t temp = 0;
+  std::string s1("in");
   std::regex re(fn_reg_ex);
   auto hwmon_dir = opendir(hwmon_path.c_str());
-  if (hwmon_dir == nullptr)
-    return 0;
+  assert(hwmon_dir != nullptr);
   auto dentry = readdir(hwmon_dir);
   while (dentry != nullptr) {
     fn = dentry->d_name;
@@ -198,37 +197,103 @@ static int get_num_sensors(std::string hwmon_path, std::string fn_reg_ex,
         std::regex("[^0-9]*([0-9]+).*"),
         std::string("$1"));
       temp = stoi(output);
-      if (temp > *sensor_max) {
-        *sensor_max = temp;
-      }
+
+      if (s1.compare(fn_reg) == 0)
+        ++temp;
+      if (temp > sensor_max)
+        sensor_max = temp;
     }
     dentry = readdir(hwmon_dir);
   }
 
-  if (closedir(hwmon_dir)) {
-    return -errno;
-  }
-  return 0;
+  closedir(hwmon_dir);
+  return sensor_max;
 }
+
 
 int amdoam_get_sensors_count(uint32_t device_id,
                              oam_sensor_count_t *sensor_count) {
   uint32_t dv_ind = device_id;
-  uint32_t num_sensors = 0;
 
   TRY
+  if (sensor_count == nullptr)
+    return -AMDOAM_STATUS_INVALID_ARGS;
   GET_DEV_FROM_INDX
+  assert(dev->monitor() != nullptr);
   std::string hwmon_path = dev->monitor()->path();
-  get_num_sensors(hwmon_path, "temp", &num_sensors);
-  sensor_count->num_temperature_sensors = num_sensors;
-  get_num_sensors(hwmon_path, "fan", &num_sensors);
-  sensor_count->num_fans = num_sensors;
-  get_num_sensors(hwmon_path, "in", &num_sensors);
-  sensor_count->num_voltage_sensors = (num_sensors+1);
-  get_num_sensors(hwmon_path, "power", &num_sensors);
-  sensor_count->num_power_sensors = num_sensors;
-  get_num_sensors(hwmon_path, "current", &num_sensors);
-  sensor_count->num_current_sensors = num_sensors;
+  sensor_count->num_temperature_sensors = get_num_sensors(hwmon_path, "temp");
+  sensor_count->num_fans = get_num_sensors(hwmon_path, "fan");
+  sensor_count->num_voltage_sensors = get_num_sensors(hwmon_path, "in");
+  sensor_count->num_power_sensors = get_num_sensors(hwmon_path, "power");
+  sensor_count->num_current_sensors = get_num_sensors(hwmon_path, "current");
+  CATCH
+
+  return AMDOAM_STATUS_SUCCESS;
+}
+
+int amdoam_get_sensors_info(uint32_t device_id, oam_sensor_type_t type,
+                 uint32_t num_sensors, oam_sensor_info_t sensor_info[]) {
+  uint32_t dv_ind = device_id;
+  std::string val_str;
+  uint32_t i;
+  rsmi_status_t status;
+
+  TRY
+  if ((sensor_info == nullptr) || (type >= OAM_SENSOR_TYPE_UNKNOWN))
+    return -AMDOAM_STATUS_INVALID_ARGS;
+  GET_DEV_FROM_INDX
+  assert(dev->monitor() != nullptr);
+  switch (type) {
+    case OAM_SENSOR_TYPE_POWER:
+      for (i = 0; i < num_sensors; i++) {
+        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
+                                 "POWER_SENSOR_%d", i+1);
+        sensor_info[i].sensor_type = type;
+        status = rsmi_dev_power_ave_get(device_id, i,
+                            reinterpret_cast<uint64_t*>(&sensor_info[i].value));
+        if (status != RSMI_STATUS_SUCCESS)
+          return rsmi_status_to_amdoam_errorcode(status);
+      }
+      break;
+
+    case OAM_SENSOR_TYPE_VOLTAGE:
+      for (i = 0; i < num_sensors; i++) {
+        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
+                                  "VOLTAGE_SENSOR_%d", i);
+        sensor_info[i].sensor_type = type;
+        status = rsmi_dev_volt_metric_get(device_id, RSMI_VOLT_TYPE_VDDGFX,
+                          RSMI_VOLT_CURRENT, &sensor_info[i].value);
+        if (status != RSMI_STATUS_SUCCESS)
+          return rsmi_status_to_amdoam_errorcode(status);
+      }
+      break;
+
+    case OAM_SENSOR_TYPE_TEMP:
+      for (i = 0; i < num_sensors; i++) {
+        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
+                                   "TEMP_SENSOR_%d", i+1);
+        sensor_info[i].sensor_type = type;
+        status = rsmi_dev_temp_metric_get(device_id, i, RSMI_TEMP_CURRENT,
+                                         &sensor_info[i].value);
+        if (status != RSMI_STATUS_SUCCESS)
+          return rsmi_status_to_amdoam_errorcode(status);
+      }
+      break;
+
+    case OAM_SENSOR_TYPE_FAN_SPEED:
+      for (i = 0; i < num_sensors; i++) {
+        snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
+                                   "FAN_SENSOR_%d", i+1);
+        sensor_info[i].sensor_type = type;
+        status = rsmi_dev_fan_speed_get(device_id, i, &sensor_info[i].value);
+        if (status != RSMI_STATUS_SUCCESS)
+          return rsmi_status_to_amdoam_errorcode(status);
+        }
+      break;
+
+    default:
+      return -AMDOAM_STATUS_NOT_SUPPORTED;
+  }
   CATCH
 
   return AMDOAM_STATUS_SUCCESS;

@@ -122,7 +122,7 @@ typedef enum oam_sensor_type {
 	OAM_SENSOR_TYPE_CURRENT,
 	OAM_SENSOR_TYPE_TEMP,
 	OAM_SENSOR_TYPE_FAN_SPEED,
-	OAM_SENSOR_TYPE_UNKNOWN = 0xFF
+	OAM_SENSOR_TYPE_UNKNOWN
 } oam_sensor_type_t;
 
 /**
@@ -221,15 +221,13 @@ typedef enum oam_dev_mode {
 /**
  * \struct  oam_sensor_info_t
  * \brief   Sensor information
- * \details Device handle obtained using open call
- *          The same handle is used by all the APIs which are used to perform
- *          specific operation on that device.
+ * \details Structure to store various info of sensors.
  */
 typedef struct oam_sensor_info {
 	char sensor_name[OAM_SENSOR_NAME_MAX];
 	oam_sensor_type_t sensor_type;
 	oam_sensor_scale_t scale;
-	int32_t value;
+	int64_t value;
 } oam_sensor_info_t;
 
 /**
@@ -496,7 +494,7 @@ typedef struct oam_ops {
 	/*!<
 	 * To read various sensor values for a given sensor type
 	 */
-	int (*get_sensors_info)(oam_dev_handle_t *handle,
+	int (*get_sensors_info)(uint32_t device_id,
 				oam_sensor_type_t type,
 				uint32_t num_sensors,
 				oam_sensor_info_t sensor_info[]);
