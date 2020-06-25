@@ -29,32 +29,21 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 
 message("")
 message("Build Configuration:")
-message("-----------BuildType: " ${CMAKE_BUILD_TYPE})
-message("------------Compiler: " ${CMAKE_CXX_COMPILER})
-message("-------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
-message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
-message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
-message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
-message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-message("--------RSMI Lib Dir: " ${RSMI_LIB_DIR})
-message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
-message("-------GRPC Root Dir: " ${GRPC_ROOT})
+message("-------------BuildType: " ${CMAKE_BUILD_TYPE})
+message("--------------Compiler: " ${CMAKE_CXX_COMPILER})
+message("---------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
+message("----------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
+message("----------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
+message("----------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
+message("----------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
+message("----------RSMI Lib Dir: " ${RSMI_LIB_DIR})
+message("----------RSMI Inc Dir: " ${RSMI_INC_DIR})
+message("---------GRPC Root Dir: " ${GRPC_ROOT})
+message("---Server Install Path: " ${RDC_SERVER_ROOT_PATH})
 message("")
 
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
                    CACHE STRING "Location of RDC client library source code.")
-
-message("CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}")
-message("CPACK_PACKAGING_INSTALL_PREFIX=${CPACK_PACKAGING_INSTALL_PREFIX}")
-if (NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
-                                CACHE STRING "Default installation directory.")
-endif()
-
-if (NOT DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
-set(CPACK_PACKAGING_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
-                                     CACHE STRING "Default packaging prefix.")
-endif()
 
 ## Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64")
@@ -94,7 +83,7 @@ message("SERVER_SRC_LIST=${SERVER_SRC_LIST}")
 set(SERVER_DAEMON_EXE "rdcd")
 set(SERVICE_FILE_NAME "rdc.service")
 
-link_directories(${RSMI_LIB_DIR} ${GRPC_ROOT}/lib)
+link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
 
 add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
 # target_include_directories(${SERVER_DAEMON_EXE} PUBLIC ${RSMI_INC_DIR})

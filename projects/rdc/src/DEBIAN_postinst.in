@@ -1,6 +1,6 @@
 #/bin/bash
 
-RDC_LIB_DIR=@RDC_CLIENT_ROOT_PATH@rdc/lib
+RDC_LIB_DIR=/opt/rocm/rdc/lib
 
 # This will return 0 if an id is created and non-zero if
 # it already exists

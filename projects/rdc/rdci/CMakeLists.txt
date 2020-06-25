@@ -95,7 +95,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${RDCI_EXE}
         PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
                                                     WORLD_READ WORLD_EXECUTE
         COMPONENT ${CLIENT_COMPONENT}
-        DESTINATION ${RDC}/bin)
+        DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/bin)
 
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

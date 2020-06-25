@@ -44,16 +44,17 @@ endif ()
 
 message("")
 message("Build Configuration:")
-message("-----------BuildType: " ${CMAKE_BUILD_TYPE})
-message("------------Compiler: " ${CMAKE_CXX_COMPILER})
-message("-------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
-message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
-message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
-message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
-message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-message("--------RSMI Lib Dir: " ${RSMI_LIB_DIR})
-message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
-message("-------GRPC Root Dir: " ${GRPC_ROOT})
+message("-------------BuildType: " ${CMAKE_BUILD_TYPE})
+message("--------------Compiler: " ${CMAKE_CXX_COMPILER})
+message("---------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
+message("----------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
+message("----------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
+message("----------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
+message("----------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
+message("----------RSMI Lib Dir: " ${RSMI_LIB_DIR})
+message("----------RSMI Inc Dir: " ${RSMI_INC_DIR})
+message("---------GRPC Root Dir: " ${GRPC_ROOT})
+message("-Client Install Prefix: " ${RDC_CLIENT_INSTALL_PREFIX})
 message("")
 
 ## Set default module path if not already set
@@ -131,7 +132,7 @@ set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST}
 set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST}
                                    "${PROJECT_SOURCE_DIR}/common/rdc_utils.h")
 
-link_directories(${GRPC_ROOT}/lib)
+link_directories("${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
 add_library(${CLIENT_LIB} SHARED ${CLIENT_LIB_SRC_LIST} ${CLIENT_LIB_INC_LIST})
 target_link_libraries(${CLIENT_LIB} pthread rt grpc grpc++ grpc++_reflection
                                                                   dl protobuf)
@@ -158,11 +159,11 @@ endif ()
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${CLIENT_LIB}
-             LIBRARY DESTINATION ${RDC}/lib
-                                            COMPONENT ${CLIENT_COMPONENT})
-# install(FILES ${SOURCE_DIR}/client/include/rdc/rdc_client.h
-#                                         DESTINATION ${RDC}/include/rdc
-#                                                COMPONENT ${CLIENT_COMPONENT})
+        LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
+               COMPONENT ${CLIENT_COMPONENT})
+install(DIRECTORY ${SOURCE_DIR}/authentication
+             DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}
+                                         COMPONENT ${CLIENT_COMPONENT})
 
 # Generate Doxygen documentation for client api manual
 find_package(Doxygen)
@@ -189,10 +190,10 @@ if (DOXYGEN_FOUND AND LATEX_FOUND)
 
   add_dependencies(${CLIENT_LIB} docs)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
-                DESTINATION ${RDC}/docs/${RDC_MANUAL_NAME}.pdf
+   DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/docs/${RDC_MANUAL_NAME}.pdf
                 COMPONENT ${CLIENT_COMPONENT})
   install(FILES ${PROJECT_SOURCE_DIR}/docs/README.md
-                          DESTINATION ${RDC}/docs/
+                       DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/docs/
                           COMPONENT ${CLIENT_COMPONENT})
 else()
   message("Doxygen or Latex is not found. Will not generate documents.")

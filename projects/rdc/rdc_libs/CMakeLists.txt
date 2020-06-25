@@ -39,7 +39,6 @@ else ()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
 endif ()
 
-set(RDC_LIB_ROOT_PATH "${RDC_SERVER_ROOT_PATH}opt/rocm/")
 
 # Required Defines first:
 
@@ -159,7 +158,7 @@ set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcWat
 
 message("RDC_LIB_INC_LIST=${RDC_LIB_INC_LIST}")
 
-link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib")
+link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
 add_library(${RDC_LIB} SHARED ${RDC_LIB_SRC_LIST} ${RDC_LIB_INC_LIST})
 target_link_libraries(${RDC_LIB} pthread rocm_smi64)
 target_include_directories(${RDC_LIB} PRIVATE
@@ -224,10 +223,10 @@ endif ()
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB}
-             LIBRARY DESTINATION ${RDC}/lib
+            LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
                                             COMPONENT ${CLIENT_COMPONENT})
 install(FILES ${SOURCE_DIR}/include/rdc/rdc.h
-                      DESTINATION ${RDC}/include/rdc
+             DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/include/rdc
                                          COMPONENT ${CLIENT_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

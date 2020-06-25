@@ -32,16 +32,19 @@ if (NOT DEFINED GRPC_ROOT)
     set(GRPC_ROOT "/usr/local")
 endif()
 if (NOT DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
-    set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm/"
+    set(CPACK_PACKAGING_INSTALL_PREFIX "/"
                               CACHE STRING "Default packaging prefix.")
 endif()
 if (NOT DEFINED CMAKE_INSTALL_PREFIX)
-set(CMAKE_INSTALL_PREFIX "/opt/rocm"
+set(CMAKE_INSTALL_PREFIX "/"
                          CACHE STRING "Default installation directory.")
 endif()
 
 if (NOT DEFINED RDC_SERVER_ROOT_PATH)
     set(RDC_SERVER_ROOT_PATH "/")
+endif()
+if (NOT DEFINED RDC_CLIENT_INSTALL_PREFIX)
+    set(RDC_CLIENT_INSTALL_PREFIX "opt/rocm")
 endif()
 
 ## Set default module path
@@ -105,7 +108,6 @@ if (NOT RDC_PACKAGE)
    set(RDC_PACKAGE ${RDC})
 endif()
 
-set(CPACK_PACKAGE_FILE_NAME "${RDC_PACKAGE}-${PKG_VERSION_STR}")
 ## Verbose output.
 set(CMAKE_VERBOSE_MAKEFILE on)
 
@@ -145,9 +147,23 @@ foreach(file ${PROTOB_DEF_SRC_FILES})
 
 endforeach()
 
+set(CMAKE_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
+                                CACHE STRING "Default installation directory.")
+
+set(CPACK_PACKAGING_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
+                                     CACHE STRING "Default packaging prefix.")
+
 # define all the install component labels to install
-set(SERVER_COMPONENT "rdc-server")
-set(CLIENT_COMPONENT "rdc-client")
+set(SERVER_COMPONENT "server")
+set(CLIENT_COMPONENT "client")
+set(CPACK_RPM_SERVER_FILE_NAME
+  "${RDC_PACKAGE}-${SERVER_COMPONENT}_${PKG_VERSION_STR}.x86_64.rpm")
+set(CPACK_DEBIAN_SERVER_FILE_NAME
+  "${RDC_PACKAGE}-${SERVER_COMPONENT}_${PKG_VERSION_STR}_amd64.deb")
+set(CPACK_RPM_CLIENT_FILE_NAME
+  "${RDC_PACKAGE}-${CLIENT_COMPONENT}_${PKG_VERSION_STR}.x86_64.rpm")
+set(CPACK_DEBIAN_CLIENT_FILE_NAME
+  "${RDC_PACKAGE}-${CLIENT_COMPONENT}_${PKG_VERSION_STR}_amd64.deb")
 
 add_subdirectory("server")
 add_subdirectory("client")
@@ -158,7 +174,6 @@ add_subdirectory("rdci")
 # Turn on cmake "component install"
 set(CPACK_DEB_COMPONENT_INSTALL 1)
 set(CPACK_RPM_COMPONENT_INSTALL 1)
-set(CPACK_COMPONENTS_ALL ${SERVER_COMPONENT} ${CLIENT_COMPONENT})
 
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/DEBIAN_postinst.in"
@@ -171,7 +186,6 @@ configure_file(
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst;
                     ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm")
-set(CPACK_DEBIAN_PACKAGE_NAME  ${RDC_PACKAGE})
 set(CPACK_DEBIAN_PACKAGE_VERSION ${PKG_VERSION_STR})
 
 # RPM package specific variables
@@ -179,7 +193,6 @@ set(CPACK_RPM_PRE_INSTALL_SCRIPT_FILE
                    "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_post")
 set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE
                  "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_postun")
-set(CPACK_RPM_PACKAGE_NAME  ${RDC_PACKAGE})
 set(CPACK_RPM_PACKAGE_VERSION ${PKG_VERSION_STR})
 
 ## Add the packaging directives
