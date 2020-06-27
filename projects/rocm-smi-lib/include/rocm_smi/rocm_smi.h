@@ -224,15 +224,29 @@ typedef enum {
                                                   //!< neighbor 0
   RSMI_EVNT_XGMI_0_RESPONSE_TX,                   //!< Outgoing responses to
                                                   //!< neighbor 0
-  RSMI_EVNT_XGMI_0_BEATS_TX,                      //!< Data beats sent to
-                                                  //!< neighbor 0
+  /**
+   * @brief
+   *
+   * Data beats sent to neighbor 0; Each beat represents 32 bytes.<br><br>
+   *
+   * XGMI throughput can be calculated by multiplying a BEATs event
+   * such as ::RSMI_EVNT_XGMI_0_BEATS_TX by 32 and dividing by
+   * the time for which event collection occurred,
+   * ::rsmi_counter_value_t.time_running (which is in nanoseconds). To get
+   * bytes per second, multiply this value by 10<sup>9</sup>.<br>
+   * <br>
+   * Throughput = BEATS/time_running * 10<sup>9</sup>  (bytes/second)<br>
+   */
+   // ie, Throughput = BEATS/time_running 10^9  bytes/sec
+  RSMI_EVNT_XGMI_0_BEATS_TX,
   RSMI_EVNT_XGMI_1_NOP_TX,                        //!< NOPs sent to neighbor 1
   RSMI_EVNT_XGMI_1_REQUEST_TX,                        //!< Outgoing requests to
                                                   //!< neighbor 1
   RSMI_EVNT_XGMI_1_RESPONSE_TX,                   //!< Outgoing responses to
                                                   //!< neighbor 1
   RSMI_EVNT_XGMI_1_BEATS_TX,                      //!< Data beats sent to
-                                                  //!< neighbor 1
+                                                  //!< neighbor 1; Each beat
+                                                  //!< represents 32 bytes
 
   RSMI_EVNT_XGMI_LAST = RSMI_EVNT_XGMI_1_BEATS_TX,
 
@@ -255,7 +269,9 @@ typedef enum {
 typedef struct {
   uint64_t value;            //!< Counter value
   uint64_t time_enabled;     //!< Time that the counter was enabled
-  uint64_t time_running;     //!< Time that che counter was running
+                             //!< (in nanoseconds)
+  uint64_t time_running;     //!< Time that the counter was running
+                             //!< (in nanoseconds)
 } rsmi_counter_value_t;
 
 /**
@@ -1555,7 +1571,7 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
  *  @details Given a device index @p dv_ind, a type of memory @p mem_type, and
  *  a pointer to a uint64_t @p usage, this function will write the amount of
  *  @p mem_type memory that that is currently being used to the location
- *  pointed to by @p total.
+ *  pointed to by @p used.
  *
  *  @param[in] dv_ind a device index
  *

@@ -3008,7 +3008,7 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
       }
     } else {
       *weight = kfd_node->numa_node_weight();  // from src GPU to it's CPU node
-      uint64_t numa_weight_dst;
+      uint64_t numa_weight_dst = 0;
       status = topo_get_numa_node_weight(dv_ind_dst, &numa_weight_dst);
       // from dst GPU to it's CPU node
       if (status == RSMI_STATUS_SUCCESS) {

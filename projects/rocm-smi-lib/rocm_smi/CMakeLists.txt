@@ -127,7 +127,7 @@ if (DOXYGEN_FOUND AND LATEX_FOUND)
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.tex
         COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/docs/amd_smi_doxygen.cfg
-                "${COMMON_SRC_ROOT}/include/rocm_smi/rocm_smi.h"
+                "${COMMON_INC_DIR}/rocm_smi.h"
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
          COMMAND make  > /dev/null
