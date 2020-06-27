@@ -323,7 +323,7 @@ void hsa_activity_callback(
   void* arg)
 {
   static uint64_t index = 0;
-  fprintf(hsa_async_copy_file_handle, "%lu:%lu async-copy%lu\n", record->begin_ns, record->end_ns, index); fflush(hsa_async_copy_file_handle);
+  fprintf(hsa_async_copy_file_handle, "%lu:%lu async-copy:%lu:%u\n", record->begin_ns, record->end_ns, index, my_pid); fflush(hsa_async_copy_file_handle);
   index++;
 }
 
