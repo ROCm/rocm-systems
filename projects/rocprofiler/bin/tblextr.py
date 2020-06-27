@@ -135,6 +135,7 @@ def parse_res(infile):
         }
 
         gpu_id = 0
+        disp_pid = 0
         disp_tid = 0
 
         kernel_properties = m.group(2)
@@ -148,7 +149,8 @@ def parse_res(infile):
             if var == 'gpu-id':
               gpu_id = int(val)
               if (gpu_id > max_gpu_id): max_gpu_id = gpu_id
-            if var == 'tid': disp_tid = val
+            if var == 'pid': disp_pid = int(val)
+            if var == 'tid': disp_tid = int(val)
           else: fatal('wrong kernel property "' + prop + '" in "'+ kernel_properties + '"')
         m = ts_pattern.search(record)
         if m:
@@ -157,20 +159,22 @@ def parse_res(infile):
           var_table[dispatch_number]['EndNs'] = m.group(3)
           var_table[dispatch_number]['CompleteNs'] = m.group(4)
 
-          gpu_pid = GPU_BASE_PID + int(gpu_id)
-          if not gpu_pid in dep_dict: dep_dict[gpu_pid] = {}
-          dep_str = dep_dict[gpu_pid]
-          if not 'tid' in dep_str: dep_str['tid'] = []
-          if not 'from' in dep_str: dep_str['from'] = []
-          if not 'to' in dep_str: dep_str['to'] = {}
-          to_id = len(dep_str['tid'])
-          from_us = int(m.group(1)) / 1000
+          ## filling dependenciws
+          from_ns = m.group(1)
+          from_us = int(from_ns) / 1000
           to_us = int(m.group(2)) / 1000
+
+          kern_dep_list.append((from_ns, disp_pid, disp_tid))
+
+          gpu_pid = GPU_BASE_PID + int(gpu_id)
+          if not disp_pid in dep_dict: dep_dict[disp_pid] = {}
+          dep_proc = dep_dict[disp_pid]
+          if not gpu_pid in dep_proc: dep_proc[gpu_pid] = { 'pid': HSA_PID, 'from': [], 'to': {}, 'id': [] }
+          dep_str = dep_proc[gpu_pid]
+          to_id = len(dep_str['from'])
+          dep_str['from'].append((from_us, disp_tid))
           dep_str['to'][to_id] = to_us
-          dep_str['from'].append(from_us)
-          dep_str['tid'].append(disp_tid)
-          dep_str['pid'] = HSA_PID
-          kern_dep_list.append((disp_tid, m.group(1)))
+          ##
 
   inp.close()
 #############################################################
@@ -335,7 +339,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   dep_id_list = []
 
   # parsing an input trace file and creating a DB table
-  record_id = 0
+  record_id_dict = {}
   table_handle = db.add_table(table_name, api_table_descr)
   with open(file_name, mode='r') as fd:
     for line in fd.readlines():
@@ -358,20 +362,32 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
         rec_len = len(api_table_descr[0]) - 1
         for ind in range(1, rec_len):
           rec_vals.append(m.group(ind))
-        proc_id = rec_vals[2]
+        proc_id = int(rec_vals[2])
+        thrd_id = int(rec_vals[3])
         record_name = rec_vals[4]
         record_args = rec_vals[5]
-        rec_vals.append(record_id)
-        corr_id = record_id
+
+        if not proc_id in record_id_dict: record_id_dict[proc_id] = 0
+        corr_id = record_id_dict[proc_id]
+        record_id_dict[proc_id] += 1
+        rec_vals.append(corr_id)
 
         # dependencies filling
         if ptrn_ac.search(record_name) or (corr_id, proc_id) in dep_filtr:
           beg_ns = int(rec_vals[0])
           end_ns = int(rec_vals[1])
           from_us = (beg_ns / 1000) + ((end_ns - beg_ns) / 1000)
-          dep_from_us_list.append(from_us)
-          dep_tid_list.append(int(rec_vals[3]))
-          dep_id_list.append(corr_id)
+
+          if not proc_id in dep_dict: dep_dict[proc_id] = {}
+          dep_proc = dep_dict[proc_id]
+          found = 1 if dep_pid in dep_proc else 0
+          if found == 0 and dep_pid == OPS_PID:
+              dep_proc[dep_pid] = { 'pid': api_pid, 'from': [], 'id': [] }
+              found = 1
+          if found == 1:
+            dep_str = dep_proc[dep_pid]
+            dep_str['from'].append((from_us, thrd_id))
+            if expl_id: dep_str['id'].append(corr_id)
 
           # memcopy data
           if len(copy_raws) != 0:
@@ -391,11 +407,10 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
 
         # patching activity properties: kernel name, stream-id
-        corr_id = record_id
         if (corr_id, proc_id) in dep_filtr:
           ops_table_name = dep_filtr[(corr_id, proc_id)]
 
-          select_expr = '"Index" = ' + str(corr_id) + ' AND "proc-id" = ' + proc_id
+          select_expr = '"Index" = ' + str(corr_id) + ' AND "proc-id" = ' + str(proc_id)
           record_args = rec_vals[rec_len - 2]
 
           # extract kernel name string
@@ -415,26 +430,20 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           else:
             activity_record_patching(db, ops_table_name, kernel_found, kernel_str, stream_found, stream_id, select_expr)
 
-        rec_vals.append(memory_manager.register_api(rec_vals))
+        mcopy_info = memory_manager.register_api(rec_vals) if len(dep_filtr) else ''
+        rec_vals.append(mcopy_info)
 
         rec_vals[2] = api_pid
 
         db.insert_entry(table_handle, rec_vals)
-        record_id += 1
       else: fatal(api_name + " bad record: '" + record + "'")
 
   # inserting of dispatch events correlated to the dependent dispatches
-  for (tid, from_ns) in dep_list:
-    db.insert_entry(table_handle, [from_ns, from_ns, api_pid, tid, 'hsa_dispatch', '', record_id, ''])
-    record_id += 1
-
-  # registering dependencies informatino
-  if dep_pid != NONE_PID:
-    if not dep_pid in dep_dict: dep_dict[dep_pid] = {}
-    dep_dict[dep_pid]['pid'] = api_pid
-    dep_dict[dep_pid]['tid'] = dep_tid_list
-    dep_dict[dep_pid]['from'] = dep_from_us_list
-    if expl_id: dep_dict[dep_pid]['id'] = dep_id_list
+  for (from_ns, proc_id, thrd_id) in dep_list:
+    if not proc_id in record_id_dict: record_id_dict[proc_id] = 0
+    corr_id = record_id_dict[proc_id]
+    record_id_dict[proc_id] += 1
+    db.insert_entry(table_handle, [from_ns, from_ns, api_pid, thrd_id, 'hsa_dispatch', '', corr_id, ''])
 
   # generating memcopy CSV
   if copy_csv != '':
@@ -448,18 +457,16 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
 # fill COPY DB
 copy_table_descr = [
-  ['BeginNs', 'EndNs', 'Name', 'pid', 'tid', 'Index'],
-  {'Index':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER'}
+  ['BeginNs', 'EndNs', 'Name', 'pid', 'tid', 'Index', 'proc-id'],
+  {'Index':'INTEGER', 'proc-id':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER'}
 ]
 def fill_copy_db(table_name, db, indir):
+  pid = COPY_PID
   file_name = indir + '/' + 'async_copy_trace.txt'
   ptrn_val = re.compile(r'(\d+):(\d+) (.*)$')
-  ptrn_id = re.compile(r'^async-copy(\d+)$')
+  ptrn_id = re.compile(r'^async-copy:(\d+):(\d+)$')
 
   if not os.path.isfile(file_name): return 0
-
-  if not COPY_PID in dep_dict: dep_dict[COPY_PID] = {}
-  dep_to_us_dict = {}
 
   table_handle = db.add_table(table_name, copy_table_descr)
   with open(file_name, mode='r') as fd:
@@ -471,14 +478,24 @@ def fill_copy_db(table_name, db, indir):
         for ind in range(1,4): rec_vals.append(m.group(ind))
         rec_vals.append(COPY_PID)
         rec_vals.append(0)
-        m = ptrn_id.match(rec_vals[2])
-        if m: dep_to_us_dict[int(m.group(1))] = int(rec_vals[0]) / 1000
-        else: fatal("bad async-copy entry")
-        rec_vals.append(m.group(1))
-        db.insert_entry(table_handle, rec_vals)
-      else: fatal("async-copy bad record: '" + record + "'")
 
-  dep_dict[COPY_PID]['to'] = dep_to_us_dict
+        m = ptrn_id.match(rec_vals[2])
+        if not m: fatal("bad async-copy entry '" + record + "'")
+        corr_id = int(m.group(1))
+        proc_id = int(m.group(2))
+        rec_vals.append(corr_id)
+        rec_vals.append(proc_id)
+
+        db.insert_entry(table_handle, rec_vals)
+
+        # filling dependencies
+        if not proc_id in dep_dict: dep_dict[proc_id] = {}
+        dep_proc = dep_dict[proc_id]
+        if not pid in dep_proc: dep_proc[pid] = { 'pid': HSA_PID, 'from': [], 'to': {}, 'id': [] }
+        dep_str = dep_proc[pid]
+        dep_str['to'][corr_id] = int(rec_vals[0]) / 1000
+
+      else: fatal("async-copy bad record: '" + record + "'")
 
   return 1
 #############################################################
@@ -500,7 +517,6 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
 
   filtr = {}
 
-  record_id = 0
   kernel_table_handle = db.add_table(kernel_table_name, ops_table_descr)
   mcopy_table_handle = db.add_table(mcopy_table_name, ops_table_descr)
   with open(file_name, mode='r') as fd:
@@ -516,7 +532,7 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         if not m: fatal("bad hcc ops entry '" + record + "'")
         name = m.group(1)
         corr_id = int(m.group(2)) - 1
-        proc_id = m.group(3)
+        proc_id = int(m.group(3))
 
         # checking name for memcopy pattern
         if ptrn_mcopy.search(name):
@@ -546,11 +562,12 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         # registering a dependency filtr
         filtr[(corr_id, proc_id)] = rec_table_name
 
-        # filling a dependency
-        if not pid in dep_dict: dep_dict[pid] = {}
-        if not 'to' in dep_dict[pid]: dep_dict[pid]['to'] = {}
-        dep_dict[pid]['to'][corr_id] = int(rec_vals[0]) / 1000
-        dep_dict[pid]['bsp'] = OPS_PID
+        # filling a dependencies
+        if not proc_id in dep_dict: dep_dict[proc_id] = {}
+        dep_proc = dep_dict[proc_id]
+        if not pid in dep_proc: dep_proc[pid] = { 'bsp': OPS_PID, 'to': {} }
+        dep_str = dep_proc[pid]
+        dep_str['to'][corr_id] = int(rec_vals[0]) / 1000
 
       else:
         fatal("hcc ops bad record: '" + record + "'")
@@ -681,28 +698,27 @@ else:
     dform.gen_api_json_trace(db, 'KFD', START_US, jsonfile)
 
   if any_trace_found:
-    for (to_pid, dep_str) in dep_dict.items():
-      if 'bsp' in dep_str:
-        bspid = dep_str['bsp']
-        base_str = dep_dict[bspid]
-        for v in ('pid', 'tid', 'from', 'id'):
-          dep_str[v] = base_str[v]
-        base_str['inv'] = 1
-
     dep_id = 0
-    for (to_pid, dep_str) in dep_dict.items():
-      if 'inv' in dep_str: continue
-      if not 'to' in dep_str: continue
+    for (proc_id, dep_proc) in dep_dict.items():
+      for (to_pid, dep_str) in dep_proc.items():
+        if 'bsp' in dep_str:
+          bspid = dep_str['bsp']
+          base_str = dep_proc[bspid]
+          for v in ('pid', 'from', 'id'):
+            dep_str[v] = base_str[v]
+          base_str['inv'] = 1
 
-      to_us_dict = dep_str['to']
-      from_us_list = dep_str['from']
-      from_pid = dep_str['pid']
-      tid_list = dep_str['tid']
-      corr_id_list = []
-      if 'id' in dep_str: corr_id_list = dep_str['id']
+      for (to_pid, dep_str) in dep_proc.items():
+        if 'inv' in dep_str: continue
+        if not 'to' in dep_str: continue
 
-      db.flow_json(dep_id, from_pid, tid_list, from_us_list, to_pid, to_us_dict, corr_id_list, START_US, jsonfile)
-      dep_id += len(tid_list)
+        from_pid = dep_str['pid']
+        from_us_list = dep_str['from']
+        to_us_dict = dep_str['to']
+        corr_id_list = dep_str['id']
+
+        db.flow_json(dep_id, from_pid, from_us_list, to_pid, to_us_dict, corr_id_list, START_US, jsonfile)
+        dep_id += len(from_us_list)
 
   if any_trace_found:
     db.metadata_json(jsonfile, sysinfo_file)

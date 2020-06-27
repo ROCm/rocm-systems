@@ -151,20 +151,21 @@ class SQLiteDB:
       fd.write(',{"args":{"name":"%s"},"ph":"M","pid":%s,"name":"process_name","sort_index":%d}\n' %(label, pid, self.section_index))
     self.section_index += 1
 
-  def flow_json(self, base_id, from_pid, from_tid, from_us_list, to_pid, to_us_dict, corr_id_list, start_us, file_name):
+  def flow_json(self, base_id, from_pid, from_us_list, to_pid, to_us_dict, corr_id_list, start_us, file_name):
     if not re.search(r'\.json$', file_name):
       raise Exception('wrong output file type: "' + file_name + '"' )
     with open(file_name, mode='a') as fd:
       dep_id = base_id
-      for ind in range(len(from_tid)):
-        if (len(corr_id_list) != 0): corr_id = corr_id_list[ind]
-        else: corr_id = ind
+      for ind in range(len(from_us_list)):
+        corr_id = corr_id_list[ind] if (len(corr_id_list) != 0) else ind
         if corr_id in to_us_dict:
-          from_ts = from_us_list[ind] - start_us
+          (from_ts, from_tid) = from_us_list[ind]
+          from_ts -= start_us
+          to_tid = 0
           to_ts = to_us_dict[corr_id] - start_us
           if from_ts > to_ts: from_ts = to_ts
-          fd.write(',{"ts":%d,"ph":"s","cat":"DataFlow","id":%d,"pid":%s,"tid":%s,"name":"dep"}\n' % (from_ts, dep_id, str(from_pid), from_tid[ind]))
-          fd.write(',{"ts":%d,"ph":"t","cat":"DataFlow","id":%d,"pid":%s,"tid":0,"name":"dep"}\n' % (to_ts, dep_id, str(to_pid)))
+          fd.write(',{"ts":%d,"ph":"s","cat":"DataFlow","id":%d,"pid":%d,"tid":%d,"name":"dep"}\n' % (from_ts, dep_id, from_pid, from_tid))
+          fd.write(',{"ts":%d,"ph":"t","cat":"DataFlow","id":%d,"pid":%d,"tid":%d,"name":"dep"}\n' % (to_ts, dep_id, to_pid, to_tid))
           dep_id += 1
 
   def metadata_json(self, jsonfile, sysinfo_file):

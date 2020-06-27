@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 ################################################################################
 
-import os, re
+import sys, os, re
 from sqlitedb import SQLiteDB
 
 pinned = ['hipMallocHost', 'hipHostMalloc', 'hipHostAlloc']
@@ -94,11 +94,14 @@ class MemManager:
 
   #get type of ptr
   def get_ptr_type(self, ptr):
-    ptr_type = ''
+    ptr_type = 'unknown'
     found = 0
-    for pt in self.allocations.keys():
-      (size, event) = self.allocations[pt]
-      if int(ptr,16) >= int(pt, 16) and int(ptr,16) <= int(pt, 16) + int(size, 16):
+    for base in self.allocations.keys():
+      (size, event) = self.allocations[base]
+      size = re.sub('\).*$', '', size)
+      size = '0x' + size
+      #print("ptr(" + str(ptr) + ") base(" + base + ") size='" + size + "'")
+      if int(ptr, 16) >= int(base, 16) and int(ptr, 16) < int(base, 16) + int(size, 16):
         found = 1
         break
     if not found:
@@ -107,8 +110,6 @@ class MemManager:
       ptr_type = 'pinned'
     elif event in ondevice:
       ptr_type = 'device'
-    else:
-      fatal('internal error: ptr(' + ptr + ') cannot be identified')
     return ptr_type
 
   # add memcpy to map
