@@ -159,9 +159,8 @@ class SQLiteDB:
       for ind in range(len(from_us_list)):
         corr_id = corr_id_list[ind] if (len(corr_id_list) != 0) else ind
         if corr_id in to_us_dict:
-          (from_ts, from_tid) = from_us_list[ind]
+          (from_ts, from_tid, to_tid) = from_us_list[ind]
           from_ts -= start_us
-          to_tid = 0
           to_ts = to_us_dict[corr_id] - start_us
           if from_ts > to_ts: from_ts = to_ts
           fd.write(',{"ts":%d,"ph":"s","cat":"DataFlow","id":%d,"pid":%d,"tid":%d,"name":"dep"}\n' % (from_ts, dep_id, from_pid, from_tid))

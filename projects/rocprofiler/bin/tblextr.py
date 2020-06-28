@@ -135,6 +135,7 @@ def parse_res(infile):
         }
 
         gpu_id = 0
+        queue_id = 0
         disp_pid = 0
         disp_tid = 0
 
@@ -149,6 +150,7 @@ def parse_res(infile):
             if var == 'gpu-id':
               gpu_id = int(val)
               if (gpu_id > max_gpu_id): max_gpu_id = gpu_id
+            if var == 'queue-id': queue_id = int(val)
             if var == 'pid': disp_pid = int(val)
             if var == 'tid': disp_tid = int(val)
           else: fatal('wrong kernel property "' + prop + '" in "'+ kernel_properties + '"')
@@ -172,7 +174,7 @@ def parse_res(infile):
           if not gpu_pid in dep_proc: dep_proc[gpu_pid] = { 'pid': HSA_PID, 'from': [], 'to': {}, 'id': [] }
           dep_str = dep_proc[gpu_pid]
           to_id = len(dep_str['from'])
-          dep_str['from'].append((from_us, disp_tid))
+          dep_str['from'].append((from_us, disp_tid, queue_id))
           dep_str['to'][to_id] = to_us
           ##
 
@@ -367,10 +369,19 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
         record_name = rec_vals[4]
         record_args = rec_vals[5]
 
+        # incrementing per-process record id/correlation id
         if not proc_id in record_id_dict: record_id_dict[proc_id] = 0
         corr_id = record_id_dict[proc_id]
         record_id_dict[proc_id] += 1
         rec_vals.append(corr_id)
+
+        # extracting/converting stream id
+        (stream_id, stream_found) = get_field(record_args, 'stream')
+        if stream_found != 0:
+          stream_id = get_stream_index(stream_id)
+          (rec_vals[5], found) = set_field(record_args, 'stream', stream_id)
+          if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
+        else: stream_id = 0
 
         # dependencies filling
         if ptrn_ac.search(record_name) or (corr_id, proc_id) in dep_filtr:
@@ -382,12 +393,12 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           dep_proc = dep_dict[proc_id]
           found = 1 if dep_pid in dep_proc else 0
           if found == 0 and dep_pid == OPS_PID:
-              dep_proc[dep_pid] = { 'pid': api_pid, 'from': [], 'id': [] }
-              found = 1
+            dep_proc[dep_pid] = { 'pid': api_pid, 'from': [], 'id': [] }
+            found = 1
           if found == 1:
             dep_str = dep_proc[dep_pid]
-            dep_str['from'].append((from_us, thrd_id))
-            if expl_id: dep_str['id'].append(corr_id)
+            dep_str['from'].append((from_us, thrd_id, stream_id))
+            if expl_id: dep_str['id'].append(corr_id))
 
           # memcopy data
           if len(copy_raws) != 0:
@@ -398,13 +409,6 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
             copy_line = str(copy_data[0]) + ', ' + str(copy_data[1]) + ', ' + record_name + ', ' + args_str
             copy_csv += str(copy_index) + ', ' + copy_line + '\n'
             copy_index += 1
-
-        # extracting/converting stream-id
-        (stream_id, stream_found) = get_field(record_args, 'stream')
-        if stream_found != 0:
-          stream_id = get_stream_index(stream_id)
-          (rec_vals[5], found) = set_field(record_args, 'stream', stream_id)
-          if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
 
         # patching activity properties: kernel name, stream-id
         if (corr_id, proc_id) in dep_filtr:

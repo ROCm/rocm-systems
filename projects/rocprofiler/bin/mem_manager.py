@@ -98,9 +98,6 @@ class MemManager:
     found = 0
     for base in self.allocations.keys():
       (size, event) = self.allocations[base]
-      size = re.sub('\).*$', '', size)
-      size = '0x' + size
-      #print("ptr(" + str(ptr) + ") base(" + base + ") size='" + size + "'")
       if int(ptr, 16) >= int(base, 16) and int(ptr, 16) < int(base, 16) + int(size, 16):
         found = 1
         break
@@ -110,6 +107,8 @@ class MemManager:
       ptr_type = 'pinned'
     elif event in ondevice:
       ptr_type = 'device'
+    else:
+      fatal('internal error: ptr(' + ptr + ') cannot be identified')
     return ptr_type
 
   # add memcpy to map
