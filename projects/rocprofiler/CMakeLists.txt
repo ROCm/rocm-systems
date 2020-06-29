@@ -144,6 +144,7 @@ install ( FILES
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2params.py
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/tblextr.py
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/dform.py
+          ${CMAKE_CURRENT_SOURCE_DIR}/bin/mem_manager.py
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/sqlitedb.py
           DESTINATION ${DEST_NAME}/bin
           PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )
