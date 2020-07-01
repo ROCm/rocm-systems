@@ -26,16 +26,21 @@ import argparse
 
 events_count = {}
 events_order = {}
+events_order_r = {}
 trace2info = {}
 trace2info_filename = 'test/tests_trace_cmp_levels.txt'
 
 # Parses trace comparison config file and stores the info in a dictionary
-def parse_trace_levels(trace_config_filename):
+def parse_trace_levels(trace_config_filename, check_trace_flag):
+    status = 0
     f = open(trace_config_filename)
     trace2info = {}
     for line in f:
-        if re.match('^# dummy',line):
-          return trace2info
+        if check_trace_flag == 0:
+          return (trace2info, status)
+        if (check_trace_flag == None) and re.match('^# dummy',line):
+          return (trace2info, status)
+        status = 1
         lis = line.split(' ')
         trace_name = lis[0]
         comp_level = lis[1]
@@ -70,16 +75,81 @@ def parse_trace_levels(trace_config_filename):
 
         trace2info[trace_name] = (comp_level,no_events_cnt,events2ignore,events2chkcnt,events2chkord,events2ch)
 
-    return trace2info
+    return (trace2info, status)
 
-# check trace againt golden reference and returns 0 for pass, 1 for fail 
-def check_trace_status(tracename, verbose):
-  trace2info = parse_trace_levels(trace2info_filename)
+# diff multi lines strings to show events differences
+def diff_strings(cnt_r, cnt, metric):
+  global events_order_r
+  global events_order
+
+  print ("\nDiffs (if any):\n")
+  if metric == 'cnt':
+    evt_ptrn = re.compile(r'(\w+).*$')
+    #cnt_ptrn = re.compile(r'(\w+): count (\d+)$')
+    for evt in cnt_r.split('\n'):
+      mevt_ptrn = evt_ptrn.match(evt)
+      #mcnt_ptrn = cnt_ptrn.match(evt)
+      if mevt_ptrn:
+        if not re.search(mevt_ptrn.group(1), cnt):
+          print ('+ ' + evt)
+        elif not re.search(evt, cnt):
+          print ('>D< ' + evt)
+
+    for evt in cnt.split('\n'):
+      mevt_ptrn = evt_ptrn.match(evt)
+      #mcnt_ptrn = cnt_ptrn.match(evt)
+      if mevt_ptrn:
+        if not re.search(mevt_ptrn.group(1), cnt_r):
+          print ('- ' + evt)
+  if metric == 'or':
+    cnt_tid_r = 0
+    for tid_r in sorted (events_order_r.keys()):
+      if len(events_order) == 0:
+        print ("+ " + str(events_order_r[tid_r]) + "\n\n")
+        continue
+      cnt_tid = 0
+      for tid in sorted (events_order.keys()):
+        if cnt_tid == cnt_tid_r:
+          if events_order_r[tid_r] != events_order[tid]:
+            #print (">D< " + str(events_order_r[tid_r]) + "\n")
+            #print (">D< " + str(events_order[tid]) + "\n\n")
+            diff_cnt_r = 0
+            found_diff_evt = 0
+            for evt in events_order_r[tid_r]:
+              diff_cnt = 0
+              for evt2 in events_order[tid]:
+                if diff_cnt == diff_cnt_r:
+                  if evt != evt2:
+                    print (">I< Difference starts at index: " + str(diff_cnt_r) + ", tid_r " + str(tid_r) + ", tid " + str(tid) + ", with evts " + evt + " and " + evt2 + "\n")
+                    found_diff_evt = 1
+                    break
+                diff_cnt += 1
+              diff_cnt_r += 1
+              if found_diff_evt: break
+            if len(events_order_r[tid_r]) != len(events_order[tid]) and found_diff_evt == 0:
+              print (">I< Difference starts at index: " + str(min(len(events_order_r[tid_r]), len(events_order[tid])))  + ", with missing evts\n")
+          break
+        cnt_tid += 1
+      cnt_tid_r += 1
+    if len(events_order_r) == 0:
+      for tid in sorted (events_order.keys()):
+        print ("- " + str(events_order[tid]) + "\n")
+
+# check trace againt golden reference and returns 0 for pass, 1 for fail
+def check_trace_status(tracename, verbose, check_trace_flag):
+  global events_order_r
+  global events_order
+
+  (trace2info, status) = parse_trace_levels(trace2info_filename, check_trace_flag)
 
   if len(trace2info) == 0:
-    if verbose:
+    if status == 1:
+      print ("Error: no trace comparison info found in config file " + trace2info_filename + "\n")
+      print('FAILED!')
+      return 1
+    if status == 0:
       print('PASSED!')
-    return 0
+      return 0
 
   trace = 'test/' + tracename + '.txt'
   rtrace = tracename + '.txt'
@@ -92,7 +162,8 @@ def check_trace_status(tracename, verbose):
     events2chkord = events2chkord.rstrip('\n')
     events2ch = events2ch.rstrip('\n')
   else:
-    print('Trace ' + os.path.basename(tracename) + ' not found in ' + trace2info_filename + ', defaulting to level 0 i.e. no trace comparison')
+    print('Trace ' + os.path.basename(tracename) + ' not found in ' + trace2info_filename)
+    print('FAILED!')
     return 1
 
   if no_events_cnt == '':
@@ -105,34 +176,47 @@ def check_trace_status(tracename, verbose):
     events2chkord = ''
 
   if trace_level == '--check-none':
-    if verbose:
-        print('PASSED!')
+    print('PASSED!')
     return 0
 
   if trace_level == '--check-diff':
     if filecmp.cmp(trace,rtrace):
-      if verbose:
-        print('PASSED!')
+      print('PASSED!')
       return 0
     else:
       print('FAILED!')
       os.system('/usr/bin/diff --brief ' + trace + ' ' + rtrace)
       return 1
 
+  metric = ''
+  if trace_level == '--check-count' or trace_level == '--check-events':
+    metric = 'cnt'
+  if trace_level == '--check-order':
+    metric = 'or'
+
   cnt_r = gen_events_info(rtrace,trace_level,no_events_cnt,events2ignore,events2chkcnt,events2chkord,verbose)
+  events_order_r = {}
+  for tid in sorted (events_order.keys()) :
+    events_order_r[tid] = events_order[tid]
   cnt = gen_events_info(trace,trace_level,no_events_cnt,events2ignore,events2chkcnt,events2chkord,verbose)
+  if verbose:
+      print '\n' + rtrace + ':\n'
+      print cnt_r
+      print '\n' + trace + ':\n'
+      print cnt
+      diff_strings(cnt_r, cnt, metric)
+
   if cnt_r == cnt:
-    if verbose:
-      print('PASSED!')
+    print('PASSED!')
     return 0
   else:
-    if verbose:
-      print('FAILED!')
+    print('FAILED!')
     return 1
 
 # Parses roctracer trace file for regression purpose
 # and generates events count per event (when cnt is on) or events order per tid (when order is on)
 def gen_events_info(tracefile, trace_level, no_events_cnt, events2ignore, events2chkcnt, events2chkord, verbose):
+  global events_order
   metric = ''
   if trace_level == '--check-count' or trace_level == '--check-events':
     metric = 'cnt'
@@ -150,18 +234,20 @@ def gen_events_info(tracefile, trace_level, no_events_cnt, events2ignore, events
   test_act_pattern = re.compile(r'\s*(\w+)\s+.*_id\((\d+)\)$')
   #'       hipSetDevice    correlation_id(1) time_ns(1548622357525055:1548622357542015) process_id(126283) thread_id(126283)'
   #'       hcCommandKernel correlation_id(6) time_ns(1548622661443020:1548622662666935) device_id(0) queue_id(0)'
-  test_api_cb_pattern = re.compile(r'<(\w+)\s+.*tid\((\d+)\)>')
+  test_api_cb_pattern = re.compile(r'.*<(\w+)\s+.*tid\((\d+)\)>')
   # <hsaKmtGetVersion id(2) correlation_id(0) on-enter pid(26224) tid(26224)>
   # below is roctx pattern
   # <hipLaunchKernel pid(123) tid(123)>
   tool_record = re.compile(r'\d+:\d+\s+\d+:(\d+)\s+(\w+)')
-  # tool_api_record 
+  # tool_api_record
   # 1822810364769411:1822810364771941 116477:116477 hsa_agent_get_info(<agent 0x8990e0>, 17, 0x7ffeac015fec) = 0
-  # tool_gpu_act_record 
+  # tool_gpu_act_record
   # 3632773658039902:3632773658046462 0:0 hcCommandMarker:273
 
   with open(tracefile) as f:
     for line in f:
+      if re.search("before", line) or re.search("after",line):#roctx before/after not real events
+        continue
       line=line.rstrip('\n')
       event = ''
       test_act_pattern_match = test_act_pattern.match(line)
@@ -206,17 +292,17 @@ def gen_events_info(tracefile, trace_level, no_events_cnt, events2ignore, events
   if metric == 'or':
     for tid in sorted (events_order.keys()) :
       res = res + str(events_order[tid])
-  if verbose:
-    print(res)
   return res
 
 parser = argparse.ArgumentParser(description='check_trace.py: check a trace aainst golden ref. Returns 0 for success, 1 for failure')
 requiredNamed = parser.add_argument_group('Required arguments')
 requiredNamed.add_argument('-in', metavar='file', help='Name of trace to be checked', required=True)
 requiredNamed.add_argument('-v', action='store_true', help='debug info', required=False)
+requiredNamed.add_argument('-ck', metavar='N', type=int, help='check trace 0|1', required=False)
+
 args = vars(parser.parse_args())
 
 if __name__ == '__main__':
-    sys.exit(check_trace_status(args['in'],args['v']))
+    sys.exit(check_trace_status(args['in'],args['v'],args['ck']))
 
 

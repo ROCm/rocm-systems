@@ -36,9 +36,15 @@ using namespace std;
 // roctracer extension API
 #include <roctracer_ext.h>
 
-const size_t msg_size = 512;
-char* msg_buf = NULL;
-char* message = NULL;
+#ifdef __cplusplus
+static thread_local const size_t msg_size = 512;
+static thread_local char* msg_buf = NULL;
+static thread_local char* message = NULL;
+#else
+static const size_t msg_size = 512;
+static char* msg_buf = NULL;
+static char* message = NULL;
+#endif
 void SPRINT(const char* fmt, ...) {
   if (msg_buf == NULL) {
     msg_buf = (char*) calloc(msg_size, 1);
@@ -259,24 +265,24 @@ void api_callback(
 
   if (domain == ACTIVITY_DOMAIN_ROCTX) {
     const roctx_api_data_t* data = (const roctx_api_data_t*)(callback_data);
-    fprintf(stdout, "<rocTX \"%s\">\n", data->args.message);
+    fprintf(stdout, "rocTX <\"%s pid(%d) tid(%d)\">\n", data->args.message, GetPid(), GetTid());
     return;
   }
   if (domain == ACTIVITY_DOMAIN_KFD_API) {
     const kfd_api_data_t* data = (const kfd_api_data_t*)(callback_data);
-    fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s>\n",
+    fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s pid(%d) tid(%d)>\n",
         roctracer_op_string(ACTIVITY_DOMAIN_KFD_API, cid, 0),
         cid,
         data->correlation_id,
-        (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
+        (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit", GetPid(), GetTid());
     return;
   }
   const hip_api_data_t* data = (const hip_api_data_t*)(callback_data);
-  SPRINT("<%s id(%u)\tcorrelation_id(%lu) %s> ",
+  SPRINT("<%s id(%u)\tcorrelation_id(%lu) %s pid(%d) tid(%d)> ",
     roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
     cid,
     data->correlation_id,
-    (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
+    (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit", GetPid(), GetTid());
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     switch (cid) {
       case HIP_API_ID_hipMemcpy:

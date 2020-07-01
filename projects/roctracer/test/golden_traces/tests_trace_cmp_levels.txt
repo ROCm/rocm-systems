@@ -1,11 +1,12 @@
 # dummy
-MatrixTranspose_ctest_trace --check-diff
+MatrixTranspose_ctest_trace --check-count .*
 MatrixTranspose_test_trace --check-count .* --ignore-count hsaKmt.*
+MatrixTranspose_hipaact_test_trace --check-count .* --ignore-count hsaKmt.*|hipMemcpy|__hipPushCallConfiguration|hipLaunchKernel|__hipPopCallConfiguration
 MatrixTranspose_mgpu_trace --check-count .* --ignore-count hsaKmt.*
 MatrixTranspose_sys_trace --check-count .* --ignore-count hsa_.*
 MatrixTranspose_sys_hsa_trace --check-count .* --ignore-count hsa_.*
 MatrixTranspose_hip_period_trace --check-events .* --ignore-event hipMalloc|hipFree
 MatrixTranspose_hip_flush_trace --check-order .*
 MatrixTranspose_kfd_trace --check-events .*
-ctrl_hsa_trace --check-count .*
-ctrl_hsa_input_trace --check-count .*
+ctrl_hsa_trace --check-event .*
+ctrl_hsa_input_trace --check-event .*

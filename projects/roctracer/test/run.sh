@@ -46,17 +46,15 @@ if [ -z "$ROCTRACER_TOOL_PATH" ] ; then
   ROCTRACER_TOOL_PATH="./test"
 fi
 
-env
-ls -lad /opt/*
-ls -lad /opt/rocm/*
-ls -lad /opt/rocm/roctracer/*
-ls -lad /opt/rocm/roctracer/*/*
-ls -lad /opt/rocm/roctracer/*/*/*
-
 # test filter input
 test_filter=-1
+check_trace_flag=1
 if [ -n "$1" ] ; then
   test_filter=$1
+  shift
+fi
+if [ "$2" = "-n" ] ; then
+  check_trace_flag=0
 fi
 
 # test check routin
@@ -86,8 +84,11 @@ eval_test() {
       is_failed=0;
     else
       if [ $is_failed = 0 ] ; then
-        python ./test/check_trace.py -in $test_name
+        python ./test/check_trace.py -in $test_name -ck $check_trace_flag
         is_failed=$?
+        if [ $is_failed != 0 ] ; then
+          python ./test/check_trace.py -v -in $test_name -ck $check_trace_flag
+        fi
       fi
     fi
     if [ $is_failed = 0 ] ; then
