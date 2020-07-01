@@ -156,14 +156,6 @@ set(CPACK_PACKAGING_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
 # define all the install component labels to install
 set(SERVER_COMPONENT "server")
 set(CLIENT_COMPONENT "client")
-set(CPACK_RPM_SERVER_FILE_NAME
-  "${RDC_PACKAGE}-${SERVER_COMPONENT}_${PKG_VERSION_STR}.x86_64.rpm")
-set(CPACK_DEBIAN_SERVER_FILE_NAME
-  "${RDC_PACKAGE}-${SERVER_COMPONENT}_${PKG_VERSION_STR}_amd64.deb")
-set(CPACK_RPM_CLIENT_FILE_NAME
-  "${RDC_PACKAGE}-${CLIENT_COMPONENT}_${PKG_VERSION_STR}.x86_64.rpm")
-set(CPACK_DEBIAN_CLIENT_FILE_NAME
-  "${RDC_PACKAGE}-${CLIENT_COMPONENT}_${PKG_VERSION_STR}_amd64.deb")
 
 add_subdirectory("server")
 add_subdirectory("client")
@@ -171,10 +163,10 @@ add_subdirectory("rdc_libs")
 add_subdirectory("example")
 add_subdirectory("rdci")
 
-# Turn on cmake "component install"
-set(CPACK_DEB_COMPONENT_INSTALL 1)
-set(CPACK_RPM_COMPONENT_INSTALL 1)
+set(CPACK_PACKAGE_FILE_NAME "${RDC_PACKAGE}_${PKG_VERSION_STR}")
 
+# This is used by configure_file for *_postinit.in
+set(RDC_CLIENT_ROOT_PATH "${RDC_SERVER_ROOT_PATH}/${RDC_CLIENT_INSTALL_PREFIX}")
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/DEBIAN_postinst.in"
   "${PROJECT_SOURCE_DIR}/DEBIAN/postinst")

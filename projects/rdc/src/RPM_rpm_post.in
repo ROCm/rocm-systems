@@ -1,6 +1,6 @@
 #!/bin/bash
 
-RDC_LIB_DIR=/opt/rocm/rdc/lib
+RDC_LIB_DIR=@RDC_CLIENT_ROOT_PATH@/rdc/lib
 do_create_rdc_user() {
     useradd -r -s /bin/nologin rdc
 }
