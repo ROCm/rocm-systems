@@ -163,7 +163,9 @@ add_subdirectory("rdc_libs")
 add_subdirectory("example")
 add_subdirectory("rdci")
 
-set(CPACK_PACKAGE_FILE_NAME "${RDC_PACKAGE}_${PKG_VERSION_STR}")
+set(CPACK_PACKAGE_NAME ${RDC_PACKAGE})
+set(CPACK_PACKAGE_VERSION ${PKG_VERSION_STR})
+set(CPACK_PROJECT_CONFIG_FILE ${CMAKE_SOURCE_DIR}/package.txt)
 
 # This is used by configure_file for *_postinit.in
 set(RDC_CLIENT_ROOT_PATH "${RDC_SERVER_ROOT_PATH}/${RDC_CLIENT_INSTALL_PREFIX}")
