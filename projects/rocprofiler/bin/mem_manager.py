@@ -24,7 +24,7 @@ import sys, os, re
 from sqlitedb import SQLiteDB
 
 pinned = ['hipMallocHost', 'hipHostMalloc', 'hipHostAlloc']
-ondevice = ['hipMallocPitch', 'hipMallocArray', 'hipMalloc3DArray']
+ondevice = ['hipMalloc', 'hipMallocPitch', 'hipMallocArray', 'hipMalloc3DArray']
 
 mm_table_descr = [
   ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'Direction', 'SrcType', 'DstType', 'Size', 'BW', 'Async'],
@@ -34,6 +34,8 @@ mm_table_descr = [
 def fatal(msg):
   sys.stderr.write(sys.argv[0] + ": " + msg + "\n");
   sys.exit(1)
+
+DELIM = ','
 
 # Mem copy manager class
 class MemManager:
@@ -52,16 +54,13 @@ class MemManager:
   def register_api(self, rec_vals):
     res = ''
     malloc_ptrn = re.compile(r'hip.*Malloc')
+    mcopy_ptrn = re.compile(r'hipMemcpy')
     record_name = rec_vals[4]
     record_args = rec_vals[5]
-    mallocm = malloc_ptrn.match(record_name)
-    if mallocm:
+    if malloc_ptrn.match(record_name):
       self.add_allocation(record_name, record_args)
-    else:
-      hip_ptrn_mcopy = re.compile(r'hipMemcpy')
-      memcpym = hip_ptrn_mcopy.match(record_name)
-      if memcpym:
-        res = self.add_memcpy(rec_vals)
+    elif mcopy_ptrn.match(record_name):
+      res = self.add_memcpy(rec_vals)
 
     return res
 
@@ -69,47 +68,47 @@ class MemManager:
   def add_allocation(self, event, args):
     choice = 0
     if event == "hipMallocPitch":
-      hipMalloc_ptrn = re.compile(r'\(ptr\((.*)\) width\((.*)\) height\((.*)\)\)')
+      malloc_args_ptrn = re.compile(r'\(ptr\((.*)\) width\((.*)\) height\((.*)\)\)')
       choice = 1
     elif event == "hipMallocArray":
-      hipMalloc_ptrn = re.compile(r'\(array\((.*)\) width\((.*)\) height\((.*)\)\)')
+      malloc_args_ptrn = re.compile(r'\(array\((.*)\) width\((.*)\) height\((.*)\)\)')
       choice = 1
     elif event == "hipMalloc3DArray":
-      hipMalloc_ptrn = re.compile(r'\(array\((.*)\) width\((.*)\) height\((.*)\) depth\((.*)\)\)')
+      malloc_args_ptrn = re.compile(r'\(array\((.*)\) width\((.*)\) height\((.*)\) depth\((.*)\)\)')
       choice = 2
     else:
-      hipMalloc_ptrn = re.compile(r'\(ptr\((.*)\) size\((.*)\)\)')
+      #(ptr(0x7f3407000000) size(800000000) flags(0))
+      malloc_args_ptrn = re.compile(r'\(ptr\((.*)\) size\((.*)\) .*\)')
       choice = 3
-    mhipMalloc = hipMalloc_ptrn.match(args)
-    if mhipMalloc:
-      ptr = mhipMalloc.group(1)
+    m = malloc_args_ptrn.match(args)
+    if m:
+      ptr = int(m.group(1), 16)
       if choice == 3:
-        size = mhipMalloc.group(2)
+        size = int(m.group(2))
       elif choice == 1:
-        size = mhipMalloc.group(2) * mhipMalloc.group(3)
+        size = int(m.group(2)) * int(m.group(3))
       else:
-        size = mhipMalloc.group(2) * mhipMalloc.group(3) * mhipMalloc.group(4)
-      self.allocations[ptr]=(size, event)
-    return
+        size = int(m.group(2)) * int(m.group(3)) * int(m.group(4))
+      self.allocations[ptr] = (size, event)
 
   #get type of ptr
   def get_ptr_type(self, ptr):
-    ptr_type = 'unknown'
+    addr = int(ptr, 16)
+    addr_type = 'unknown'
     found = 0
-    for base in self.allocations.keys():
-      (size, event) = self.allocations[base]
-      if int(ptr, 16) >= int(base, 16) and int(ptr, 16) < int(base, 16) + int(size, 16):
+    for base, (size, event) in self.allocations.items():
+      if addr >= base and addr < base + size:
         found = 1
         break
     if not found:
-      ptr_type = 'pageable'
+      addr_type = 'pageable'
     elif event in pinned:
-      ptr_type = 'pinned'
+      addr_type = 'pinned'
     elif event in ondevice:
-      ptr_type = 'device'
+      addr_type = 'device'
     else:
       fatal('internal error: ptr(' + ptr + ') cannot be identified')
-    return ptr_type
+    return addr_type
 
   # add memcpy to map
   def add_memcpy(self, recvals):
@@ -121,87 +120,97 @@ class MemManager:
     procid = recvals[2] # used to query async entries
     pid = recvals[2]
     tid = recvals[3]
-    separator = ','
 
     select_expr = '"Index" = ' + str(recordid) + ' AND "proc-id" = ' + str(procid)
-    async_copy_records = self.db.table_get_record('COPY', select_expr)  #List of async copy record fields
-    async_copy_start_time = async_copy_records[0]
-    async_copy_end_time = async_copy_records[1]
+    async_copy_recvals = self.db.table_get_record('COPY', select_expr)  #List of async copy record fields
+    async_copy_start_time = async_copy_recvals[0]
+    async_copy_end_time = async_copy_recvals[1]
+    async_copy_tid = async_copy_recvals[4]
 
-    #hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind)
+    # hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind)
     hipMemcpy_ptrn = re.compile(r'\(dst\((.*)\) src\((.*)\) sizeBytes\((\d+)\).*\)')
-    #hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
+    # hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
     #                   size_t height, hipMemcpyKind kind);
     hipMemcpy_ptrn2 = re.compile(r'\(dst\((.*)\) .* src\((.*)\) .* width\((\d+)\) height\((\d+)\).*\)')
-    #hipMemcpyToArray(hipArray* dst, size_t wOffset, size_t hOffset, const void* src,
+    # hipMemcpyToArray(hipArray* dst, size_t wOffset, size_t hOffset, const void* src,
     #                        size_t count, hipMemcpyKind kind);
     hipMemcpy_ptrn3 = re.compile(r'\(dst\((.*)\) .* src\((.*)\) count\((\d+)\).*\)')
-    mhip = hipMemcpy_ptrn.match(args)
-    mhip2 = hipMemcpy_ptrn2.match(args)
-    mhip3 = hipMemcpy_ptrn3.match(args)
+    # memcopy with kind argument
+    hipMemcpy_ptrn_kind = re.compile(r'.* kind\((\d+)\)\s*.*')
+    # aysnc memcopy
+    async_event_ptrn = re.compile(r'Async')
 
-    if mhip or mhip2 or mhip3:
-      size = 0
-      dstptr_type = 'unknown'
-      srcptr_type = 'unknown'
-      if mhip:
-        dstptr = mhip.group(1)
+    m_basic = hipMemcpy_ptrn.match(args)
+    m_2d = hipMemcpy_ptrn2.match(args)
+    m_array = hipMemcpy_ptrn3.match(args)
+
+    is_async = 1 if async_event_ptrn.search(event) else 0
+    if is_async: tid = async_copy_tid
+
+    copy_line = ''
+    size = 0
+    dstptr_type = 'unknown'
+    srcptr_type = 'unknown'
+    direction = 'unknown'
+    bandwidth = 0
+    duration = 0
+
+    switcher = {
+      '0': "HtoH",
+      '1': "HtoD",
+      '2': "DtoH",
+      '3': "DtoD",
+      '4': "auto",
+    }
+
+    if m_basic or m_2d or m_array:
+      if m_basic:
+        dstptr = m_basic.group(1)
         dstptr_type = self.get_ptr_type(dstptr)
-        srcptr = mhip.group(2)
+        srcptr = m_basic.group(2)
         srcptr_type = self.get_ptr_type(srcptr)
-        size = int(mhip.group(3), 16)
-      if mhip3:
-        dstptr = mhip3.group(1)
+        size = int(m_basic.group(3))
+      if m_array:
+        dstptr = m_array.group(1)
         dstptr_type = self.get_ptr_type(dstptr)
-        srcptr = mhip3.group(2)
+        srcptr = m_array.group(2)
         srcptr_type = self.get_ptr_type(srcptr)
-        size = int(mhip3.group(3), 16)
-      if mhip2:
-        dstptr = mhip2.group(1)
+        size = m_array.group(3)
+      if m_2d:
+        dstptr = m_2d.group(1)
         dstptr_type = self.get_ptr_type(dstptr)
-        srcptr = mhip2.group(2)
+        srcptr = m_2d.group(2)
         srcptr_type = self.get_ptr_type(srcptr)
-        size = int(mhip2.group(3)*mhip2.group(4), 16)
-      bandwidth = float(size) / (int(end_time) - int(start_time))
-      copy_line = str(start_time) + ',' + str(end_time) + ',' + pid + ',' + tid + ',' + event
-      hipMemcpy_ptrn_kind = re.compile(r'.* kind\((\d+)\)\s*.*')
-      mkind = hipMemcpy_ptrn_kind.match(args)
-      if mkind:
-        if mkind.group(1) == '0': copy_line += separator + "Direction=hipMemcpyHostToHost"
-        if mkind.group(1) == '1': copy_line += separator + "Direction=hipMemcpyHostToDevice"
-        if mkind.group(1) == '2': copy_line += separator + "Direction=hipMemcpyDeviceToHost"
-        if mkind.group(1) == '3': copy_line += separator + "Direction=hipMemcpyDeviceToDevice"
-        if mkind.group(1) == '4': copy_line += separator + "Direction=runtime copy-kind"
-      else:
-        copy_line += ", -"
-      copy_line += separator + 'SrcType=' + srcptr_type + separator + 'DstType=' + dstptr_type + separator + "Size=" + str(round(size*1e-6, 2)) + separator + "BW=" + str(round(bandwidth,2))
-      async_event_ptrn = re.compile(r'hipMemcpy.*Async')
-      masync = async_event_ptrn.match(event)
-      if masync:
-        copy_line += separator + 'Async=yes'
-      else:
-        copy_line += separator + 'Async=no'
+        size = m_2d.group(3)*m_2d.group(4)
+
+      duration = (int(end_time) - int(start_time)) if not is_async else (int(async_copy_end_time) - int(async_copy_start_time))
+      bandwidth = float(size) * 1000 / duration
+
+      m = hipMemcpy_ptrn_kind.match(args)
+      if m:
+        direction = switcher.get(m.group(1), "unknown") 
+
+      copy_line = str(start_time) + DELIM + str(end_time) + DELIM + pid + DELIM + tid + DELIM + event + DELIM + 'Direction=' + direction + DELIM + 'SrcType=' + srcptr_type + DELIM + 'DstType=' + dstptr_type + DELIM + "Size=" + str(size) + DELIM + "BW=" + str(round(bandwidth, 2)) + DELIM + 'Async=' + str(is_async)
 
     self.memcopies[recordid] = copy_line
     return copy_line;
 
   def dump_data(self):
-    # To create “MM” table in DB on the finish:
+    # To create “MM” table in DB on the finish
     table_name = "MM"
-    file_name = os.environ['PWD'] + '/results_memcopy_info.csv'
+    file_name = os.environ['PWD'] + '/results.memcopy_info.csv'
     print("File '" + file_name + "' is generating")
     table_handle = self.db.add_table(table_name, mm_table_descr)
 
     fld_ptrn = re.compile(r'(.*)=(.*)')
     for (key, record) in self.memcopies.items():
       rec_vals_array = []
-      for rec in record.split(','):
+      for rec in record.split(DELIM):
         fld_ptrnm = fld_ptrn.match(rec)
         if fld_ptrnm:
           rec_vals_array.append(fld_ptrnm.group(2))
         else:
           rec_vals_array.append(rec)
       self.db.insert_entry(table_handle, rec_vals_array)
-    # To dump the MM table as CSV by:
+    # To dump the MM table as CSV
     self.db.dump_csv(table_name, file_name)
-

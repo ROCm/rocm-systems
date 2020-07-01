@@ -434,8 +434,8 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           else:
             activity_record_patching(db, ops_table_name, kernel_found, kernel_str, stream_found, stream_id, select_expr)
 
-        mcopy_info = memory_manager.register_api(rec_vals) if len(dep_filtr) else ''
-        rec_vals.append(mcopy_info)
+        api_data = memory_manager.register_api(rec_vals) if len(dep_filtr) else ''
+        rec_vals.append(api_data)
 
         rec_vals[2] = api_pid
 
