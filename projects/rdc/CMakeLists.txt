@@ -92,11 +92,11 @@ configure_file(
   "${PROJECT_SOURCE_DIR}/include/rdc/${RDC}64Config.h")
 
 if (NOT DEFINED CPACK_PACKAGE_VENDOR)
-    set(CPACK_PACKAGE_VENDOR "AMD")
+    set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 endif()
 
 if (NOT DEFINED CPACK_PACKAGE_CONTACT)
-    set(CPACK_PACKAGE_CONTACT "Advanced Micro Devices Inc.")
+    set(CPACK_PACKAGE_CONTACT "Advanced Micro Devices, Inc.")
 endif()
 
 if (NOT DEFINED CPACK_PACKAGE_DESCRIPTION_SUMMARY)

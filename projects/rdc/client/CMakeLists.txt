@@ -92,11 +92,11 @@ set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
 set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 
 if (NOT DEFINED CPACK_PACKAGE_VENDOR)
-    set(CPACK_PACKAGE_VENDOR "AMD")
+    set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 endif()
 
 if (NOT DEFINED CPACK_PACKAGE_CONTACT)
-    set(CPACK_PACKAGE_CONTACT "Advanced Micro Devices Inc.")
+    set(CPACK_PACKAGE_CONTACT "Advanced Micro Devices, Inc.")
 endif()
 
 if (NOT DEFINED CPACK_PACKAGE_DESCRIPTION_SUMMARY)
