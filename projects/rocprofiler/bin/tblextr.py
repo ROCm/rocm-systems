@@ -398,7 +398,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           if found == 1:
             dep_str = dep_proc[dep_pid]
             dep_str['from'].append((from_us, thrd_id, stream_id))
-            if expl_id: dep_str['id'].append(corr_id))
+            if expl_id: dep_str['id'].append(corr_id)
 
           # memcopy data
           if len(copy_raws) != 0:
