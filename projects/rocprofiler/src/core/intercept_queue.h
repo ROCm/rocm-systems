@@ -92,6 +92,8 @@ class InterceptQueue {
     (*obj_map_)[(uint64_t)(*queue)] = obj;
     if (k_concurrent_) {
       status = proxy->SetInterceptCB(OnSubmitCB_SQTT, obj);
+    } else if (opt_mode_) {
+      status = proxy->SetInterceptCB(OnSubmitCB_opt, obj);
     } else {
       status = proxy->SetInterceptCB(OnSubmitCB, obj);
     }
@@ -136,6 +138,85 @@ class InterceptQueue {
     }
 
     return status;
+  }
+
+  static void OnSubmitCB_opt(const void* in_packets, uint64_t count, uint64_t user_que_idx, void* data,
+                         hsa_amd_queue_intercept_packet_writer writer) {
+    const packet_t* packets_arr = reinterpret_cast<const packet_t*>(in_packets);
+    InterceptQueue* obj = reinterpret_cast<InterceptQueue*>(data);
+    Queue* proxy = obj->proxy_;
+
+    // Travers input packets
+    for (uint64_t j = 0; j < count; ++j) {
+      const packet_t* packet = &packets_arr[j];
+      bool to_submit = true;
+
+      // Checking for dispatch packet type
+      if ((GetHeaderType(packet) == HSA_PACKET_TYPE_KERNEL_DISPATCH) &&
+          (dispatch_callback_.load(std::memory_order_acquire) != NULL)) {
+        const hsa_kernel_dispatch_packet_t* dispatch_packet =
+            reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
+        const hsa_signal_t completion_signal = dispatch_packet->completion_signal;
+#if 0
+        // Prepareing dispatch callback data
+        uint64_t kernel_object = dispatch_packet->kernel_object;
+        const amd_kernel_code_t* kernel_code = GetKernelCode(kernel_object);
+        const char* kernel_name = QueryKernelName(kernel_object, kernel_code);
+#endif
+        rocprofiler_callback_data_t data = {obj->agent_info_->dev_id,
+                                            obj->agent_info_->dev_index,
+                                            obj->queue_,
+                                            user_que_idx,
+                                            obj->queue_id,
+                                            completion_signal,
+                                            dispatch_packet,
+                                            NULL, // kernel_name
+                                            0, // kernel_object
+                                            NULL, // kernel_code
+                                            0, // (uint32_t)syscall(__NR_gettid),
+                                            NULL};
+
+        // Calling dispatch callback
+        rocprofiler_group_t group = {};
+        hsa_status_t status = (dispatch_callback_.load())(&data, callback_data_, &group);
+#if 0
+        free(const_cast<char*>(kernel_name));
+#endif
+        Context* context = reinterpret_cast<Context*>(group.context);
+        // Injecting profiling start/stop packets
+        if ((status == HSA_STATUS_SUCCESS) && (context != NULL)) {
+          if (group.feature_count != 0) {
+            if (tracker_ != NULL) {
+              const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = context->GetDispatchSignal();
+              Group* context_group = context->GetGroup(group.index);
+              Tracker::Enable_opt(context_group, completion_signal);
+              context_group->IncrRefsCount();
+            }
+
+            const pkt_vector_t& start_vector = context->StartPackets(group.index);
+            const pkt_vector_t& stop_vector = context->StopPackets(group.index);
+            pkt_vector_t packets = start_vector;
+            packets.insert(packets.end(), *packet);
+            packets.insert(packets.end(), stop_vector.begin(), stop_vector.end());
+            if (writer != NULL) {
+              writer(&packets[0], packets.size());
+            } else {
+              proxy->Submit(&packets[0], packets.size());
+            }
+            to_submit = false;
+          }
+        }
+      }
+
+      // Submitting the original packets if profiling was not enabled
+      if (to_submit) {
+        if (writer != NULL) {
+          writer(packet, 1);
+        } else {
+          proxy->Submit(packet, 1);
+        }
+      }
+    }
   }
 
   static void OnSubmitCB(const void* in_packets, uint64_t count, uint64_t user_que_idx, void* data,
@@ -400,6 +481,7 @@ class InterceptQueue {
   static bool IsTrackerOn() { return tracker_on_; }
 
   static bool k_concurrent_;
+  static bool opt_mode_;
 
  private:
   static void queue_event_callback(hsa_status_t status, hsa_queue_t *queue, void *arg) {

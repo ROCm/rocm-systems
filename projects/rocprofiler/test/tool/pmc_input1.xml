@@ -3,9 +3,9 @@
   # range format "3:9"
   range=""
   # list of gpu indexes "0,1,2,3"
-  gpu_index=""
+  gpu_index="0,1,2,3"
   # list of matched sub-strings "Simple1,Conv1,SimpleConvolution"
-  kernel=""
+  kernel="Simple1,Conv1,SimpleConvolution"
 ></metric>
 
 # List of metrics

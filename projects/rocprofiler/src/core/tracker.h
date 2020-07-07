@@ -155,6 +155,49 @@ class Tracker {
     Enable(entry, reinterpret_cast<void*>(handler), arg);
   }
 
+  // Enable tracking
+  static void Enable_opt(Group* group, const hsa_signal_t& orig_signal) {
+    Context* context = group->GetContext();
+    context->SetOrigSignal(orig_signal);
+    context->GetRecord()->dispatch = util::HsaRsrcFactory::Instance().TimestampNs();
+
+    // Creating a proxy signal
+    const hsa_signal_value_t signal_value = (orig_signal.handle) ?
+      util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_load_relaxed(orig_signal) : 1;
+    hsa_signal_t& dispatch_signal = context->GetDispatchSignal();
+    util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_store_screlease(dispatch_signal, signal_value);
+    hsa_status_t status =
+      util::HsaRsrcFactory::Instance().HsaApi()->hsa_amd_signal_async_handler(dispatch_signal, HSA_SIGNAL_CONDITION_LT, signal_value, Handler, group);
+    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
+  }
+
+  // Tracker handler
+  static bool Handler_opt(hsa_signal_value_t signal_value, void* arg) {
+    Group* group = reinterpret_cast<Group*>(arg);
+    Context* context = group->GetContext();
+    hsa_signal_t dispatch_signal = context->GetDispatchSignal();
+    record_t* record = context->GetRecord();
+    hsa_amd_profiling_dispatch_time_t dispatch_time{};
+    hsa_status_t status =
+      util::HsaRsrcFactory::Instance().HsaApi()->hsa_amd_profiling_get_dispatch_time(context->GetAgent(), dispatch_signal, &dispatch_time);
+    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_dispatch_time");
+    record->begin = util::HsaRsrcFactory::Instance().SysclockToNs(dispatch_time.start);
+    record->end = util::HsaRsrcFactory::Instance().SysclockToNs(dispatch_time.end);
+    record->complete = util::HsaRsrcFactory::Instance().TimestampNs();
+
+    // Original intercepted signal completion
+    const hsa_signal_t& orig_signal = context->GetOrigSignal();
+    if (orig_signal.handle) {
+      amd_signal_t* orig_signal_ptr = reinterpret_cast<amd_signal_t*>(orig_signal.handle);
+      amd_signal_t* prof_signal_ptr = reinterpret_cast<amd_signal_t*>(dispatch_signal.handle);
+      orig_signal_ptr->start_ts = prof_signal_ptr->start_ts;
+      orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
+      util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_store_screlease(orig_signal, signal_value);
+    }
+
+    Context::Handler(signal_value, arg);
+  }
+
   private:
   Tracker() :
     outstanding_(0),

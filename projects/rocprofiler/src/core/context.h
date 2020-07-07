@@ -183,7 +183,7 @@ class Context {
 
   uint32_t GetGroupCount() const { return set_.size(); }
 
-  inline rocprofiler_group_t GetGroupInfo(Group* g) {
+  inline rocprofiler_group_t GetGroupDescr(Group* g) {
     rocprofiler::info_vector_t& info_vector = g->GetInfoVector();
     rocprofiler_group_t group = {};
     group.index = g->GetIndex();
@@ -192,12 +192,12 @@ class Context {
     group.feature_count = info_vector.size();
     return group;
   }
-  inline rocprofiler_group_t GetGroupInfo(const uint32_t& index) {
+  inline rocprofiler_group_t GetGroupDescr(const uint32_t& index) {
     rocprofiler_group_t group = {};
     if (set_.empty()) {
       group.context = reinterpret_cast<rocprofiler_t*>(this);
     } else {
-      group = GetGroupInfo(&set_[index]);
+      group = GetGroupDescr(&set_[index]);
     }
     return group;
   }
@@ -288,8 +288,8 @@ class Context {
     Context* context = group->GetContext();
     auto r = group->FetchDecrRefsCount();
     if (r == 1) {
-      const rocprofiler_group_t group_info = context->GetGroupInfo(group);
-      context->handler_(group_info, context->handler_arg_);
+      const rocprofiler_group_t group_descr = context->GetGroupDescr(group);
+      context->handler_(group_descr, context->handler_arg_);
     }
     return false;
   }
@@ -297,6 +297,22 @@ class Context {
   hsa_agent_t GetAgent() const { return agent_; }
   Group* GetGroup(const uint32_t& index) { return &set_[index]; }
   rocprofiler_handler_t GetHandler(void** arg) const { *arg = handler_arg_; return handler_; }
+
+  void SetDispatchSignal(const hsa_signal_t &signal) {
+    dispatch_signal_ = signal;
+  }
+  hsa_signal_t& GetDispatchSignal() {
+    return dispatch_signal_;
+  }
+  void SetOrigSignal(const hsa_signal_t &signal) {
+    orig_signal_ = signal;
+  }
+  const hsa_signal_t& GetOrigSignal() const {
+    return orig_signal_;
+  }
+  rocprofiler_dispatch_record_t* GetRecord() {
+    return &record_;
+  }
 
  private:
   Context(const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info,
@@ -309,7 +325,10 @@ class Context {
         metrics_(NULL),
         handler_(handler),
         handler_arg_(handler_arg),
-        pcsmp_mode_(false)
+        pcsmp_mode_(false),
+        dispatch_signal_{},
+        orig_signal_{},
+        record_{}
   {}
 
   ~Context() { Destruct(); }
@@ -355,6 +374,9 @@ class Context {
         }
       }
     }
+
+    hsa_status_t status = hsa_signal_create(1, 0, NULL, &dispatch_signal_);
+    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "MetricsDict create failed");
   }
 
   // Initialize rocprofiler context
@@ -593,6 +615,11 @@ class Context {
 
   // PC sampling mode
   bool pcsmp_mode_;
+
+  // kernel packet dispatch copmletion signal
+  hsa_signal_t dispatch_signal_;
+  hsa_signal_t orig_signal_;
+  rocprofiler_dispatch_record_t record_;
 };
 
 }  // namespace rocprofiler

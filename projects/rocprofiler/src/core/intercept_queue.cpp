@@ -43,5 +43,6 @@ rocprofiler_hsa_callback_fun_t InterceptQueue::submit_callback_fun_ = NULL;
 void* InterceptQueue::submit_callback_arg_ = NULL;
 
 bool InterceptQueue::k_concurrent_ = false;
+bool InterceptQueue::opt_mode_ = false;
 
 }  // namespace rocprofiler

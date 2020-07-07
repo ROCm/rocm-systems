@@ -217,6 +217,7 @@ uint32_t LoadTool() {
     if (settings.memcopy_tracking) intercept_mode |= MEMCOPY_INTERCEPT_MODE;
     if (settings.hsa_intercepting) intercept_mode |= HSA_INTERCEPT_MODE;
     if (settings.k_concurrent) InterceptQueue::k_concurrent_ = true;
+    if (settings.opt_mode) InterceptQueue::opt_mode_ = true;
   }
 
   ONLOAD_TRACE("end intercept_mode(" << intercept_mode << ")");
@@ -537,8 +538,7 @@ PUBLIC_API hsa_status_t rocprofiler_open(hsa_agent_t agent, rocprofiler_feature_
   if (mode != 0) {
     if (mode & ROCPROFILER_MODE_STANDALONE) {
       if (mode & ROCPROFILER_MODE_CREATEQUEUE) {
-        if (hsa_rsrc->CreateQueue(agent_info, properties->queue_depth, &(properties->queue)) ==
-            false) {
+        if (hsa_rsrc->CreateQueue(agent_info, properties->queue_depth, &(properties->queue)) == false) {
           EXC_RAISING(HSA_STATUS_ERROR, "CreateQueue() failed");
         }
       }
@@ -592,7 +592,7 @@ PUBLIC_API hsa_status_t rocprofiler_get_group(rocprofiler_t* handle, uint32_t gr
                                               rocprofiler_group_t* group) {
   API_METHOD_PREFIX
   rocprofiler::Context* context = reinterpret_cast<rocprofiler::Context*>(handle);
-  *group = context->GetGroupInfo(group_index);
+  *group = context->GetGroupDescr(group_index);
   API_METHOD_SUFFIX
 }
 

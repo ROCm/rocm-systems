@@ -73,6 +73,7 @@ typedef struct {
   uint32_t timestamp_on;
   uint32_t hsa_intercepting;
   uint32_t k_concurrent;
+  uint32_t opt_mode;
 } rocprofiler_settings_t;
 
 ////////////////////////////////////////////////////////////////////////////////

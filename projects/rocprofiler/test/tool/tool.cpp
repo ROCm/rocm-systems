@@ -27,6 +27,7 @@ THE SOFTWARE.
 ///////////////////////////////////////////////////////////////////////////////
 
 #include <assert.h>
+#include <cxxabi.h>
 #include <dirent.h>
 #include <hsa.h>
 #include <pthread.h>
@@ -99,6 +100,7 @@ struct context_entry_t {
   unsigned feature_count;
   rocprofiler_callback_data_t data;
   kernel_properties_t kernel_properties;
+  uint64_t kernel_object;
   FILE* file_handle;
 };
 
@@ -169,6 +171,21 @@ void check_status(hsa_status_t status) {
   }
 }
 
+//////////////////////////////////////////////////////////////////////////////////////
+// Dispatch opt code /////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////
+// Context callback arg
+struct callbacks_arg_t {
+  rocprofiler_pool_t** pools;
+};
+
+// Handler callback arg
+struct handler_arg_t {
+  rocprofiler_feature_t* features;
+  unsigned feature_count;
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 // Print profiling results output break if terminal output is enabled
 void results_output_break() {
   const bool is_terminal_output = (result_file_opened == false);
@@ -589,7 +606,6 @@ void dump_context_array(hsa_queue_t* queue) {
 
 // Profiling completion handler
 // Dump and delete the context entry
-// Return true if the context was dumped successfully
 bool context_handler(rocprofiler_group_t group, void* arg) {
   context_entry_t* entry = reinterpret_cast<context_entry_t*>(arg);
 
@@ -617,6 +633,62 @@ bool context_handler(rocprofiler_group_t group, void* arg) {
     perror("pthread_mutex_unlock");
     abort();
   }
+
+  return false;
+}
+
+static const amd_kernel_code_t* GetKernelCode(uint64_t kernel_object) {
+  const amd_kernel_code_t* kernel_code = NULL;
+  hsa_status_t status =
+      HsaRsrcFactory::Instance().LoaderApi()->hsa_ven_amd_loader_query_host_address(
+          reinterpret_cast<const void*>(kernel_object),
+          reinterpret_cast<const void**>(&kernel_code));
+  if (HSA_STATUS_SUCCESS != status) {
+    kernel_code = reinterpret_cast<amd_kernel_code_t*>(kernel_object);
+  }
+  return kernel_code;
+}
+
+// Demangle C++ symbol name
+static const char* cpp_demangle(const char* symname) {
+  size_t size = 0;
+  int status;
+  const char* ret = abi::__cxa_demangle(symname, NULL, &size, &status);
+  return (ret != 0) ? ret : strdup(symname);
+}
+
+static const char* QueryKernelName(uint64_t kernel_object, const amd_kernel_code_t* kernel_code) {
+  const char* kernel_symname = HsaRsrcFactory::GetKernelNameRef(kernel_object);
+  return cpp_demangle(kernel_symname);
+}
+
+// Profiling completion handler
+// Dump context entry
+bool context_pool_handler(const rocprofiler_pool_entry_t* entry, void* arg) {
+  // Context entry
+  context_entry_t* ctx_entry = reinterpret_cast<context_entry_t*>(entry->payload);
+  handler_arg_t* handler_arg = reinterpret_cast<handler_arg_t*>(arg);
+  ctx_entry->features = handler_arg->features;
+  ctx_entry->feature_count = handler_arg->feature_count;
+  ctx_entry->file_handle = result_file_handle;
+
+  const uint64_t kernel_object = ctx_entry->kernel_object;
+  const amd_kernel_code_t* kernel_code = GetKernelCode(kernel_object);
+  ctx_entry->data.kernel_name = QueryKernelName(kernel_object, kernel_code);
+
+  if (pthread_mutex_lock(&mutex) != 0) {
+    perror("pthread_mutex_lock");
+    abort();
+  }
+
+  dump_context_entry(ctx_entry);
+
+  if (pthread_mutex_unlock(&mutex) != 0) {
+    perror("pthread_mutex_unlock");
+    abort();
+  }
+
+  free((void*)(ctx_entry->data.kernel_name));
 
   return false;
 }
@@ -687,29 +759,13 @@ bool check_filter(const rocprofiler_callback_data_t* callback_data, const callba
   return found;
 }
 
-// Kernel disoatch callback
-hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
-                               rocprofiler_group_t* group) {
-  // Passed tool data
+// Setting kernel properties
+void set_kernel_properties(const rocprofiler_callback_data_t* callback_data,
+                           kernel_properties_t* kernel_properties_ptr)
+{
   const hsa_kernel_dispatch_packet_t* packet = callback_data->packet;
   const amd_kernel_code_t* kernel_code = callback_data->kernel_code;
-  callbacks_data_t* tool_data = reinterpret_cast<callbacks_data_t*>(user_data);
-  // HSA status
-  hsa_status_t status = HSA_STATUS_ERROR;
 
-  // Checking dispatch condition
-  if (tool_data->filter_on == 1) {
-    if (check_filter(callback_data, tool_data) == false) {
-      next_context_count();
-      return HSA_STATUS_SUCCESS;
-    }
-  }
-  // Profiling context
-  rocprofiler_t* context = NULL;
-  // Context entry
-  context_entry_t* entry = alloc_context_entry();
-  // kernel properties
-  kernel_properties_t* kernel_properties_ptr = &(entry->kernel_properties);
   uint64_t grid_size = packet->grid_size_x * packet->grid_size_y * packet->grid_size_z;
   if (grid_size > UINT32_MAX) abort();
   kernel_properties_ptr->grid_size = (uint32_t)grid_size;
@@ -722,6 +778,28 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   kernel_properties_ptr->sgpr_count = AMD_HSA_BITS_GET(kernel_code->compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT);
   kernel_properties_ptr->fbarrier_count = kernel_code->workgroup_fbarrier_count;
   kernel_properties_ptr->signal = callback_data->completion_signal;
+}
+
+// Kernel disoatch callback
+hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
+                               rocprofiler_group_t* group) {
+  // Passed tool data
+  callbacks_data_t* tool_data = reinterpret_cast<callbacks_data_t*>(user_data);
+  // HSA status
+  hsa_status_t status = HSA_STATUS_ERROR;
+
+  // Checking dispatch condition
+  if (tool_data->filter_on == 1) {
+    if (check_filter(callback_data, tool_data) == false) {
+      next_context_count();
+      return HSA_STATUS_SUCCESS;
+    }
+  }
+  // Profiling context
+  // Context entry
+  context_entry_t* entry = alloc_context_entry();
+  // Setting kernel properties
+  set_kernel_properties(callback_data, &(entry->kernel_properties));
 
   // context properties
   rocprofiler_properties_t properties{};
@@ -747,6 +825,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   }
 
   // Open profiling context
+  rocprofiler_t* context = NULL;
   status = rocprofiler_open(callback_data->agent, features, feature_count,
                             &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
   check_status(status);
@@ -777,6 +856,36 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
     fflush(stdout);
   }
 
+  return status;
+}
+
+// Kernel disoatch callback
+hsa_status_t dispatch_callback_opt(const rocprofiler_callback_data_t* callback_data, void* user_data,
+                               rocprofiler_group_t* group) {
+  hsa_status_t status = HSA_STATUS_ERROR;
+  hsa_agent_t agent = callback_data->agent;
+  const unsigned gpu_id = HsaRsrcFactory::Instance().GetAgentInfo(agent)->dev_index;
+  callbacks_arg_t* callbacks_arg = reinterpret_cast<callbacks_arg_t*>(user_data);
+  rocprofiler_pool_t* pool = callbacks_arg->pools[gpu_id];
+  rocprofiler_pool_entry_t pool_entry{};
+  status = rocprofiler_pool_fetch(pool, &pool_entry);
+  check_status(status);
+  // Profiling context entry
+  rocprofiler_t* context = pool_entry.context;
+  context_entry_t* entry = reinterpret_cast<context_entry_t*>(pool_entry.payload);
+  // Setting kernel properties
+  set_kernel_properties(callback_data, &(entry->kernel_properties));
+  // Get group[0]
+  status = rocprofiler_get_group(context, 0, group);
+  check_status(status);
+
+  // Fill profiling context entry
+  entry->index = UINT32_MAX;
+  entry->agent = agent;
+  entry->group = *group;
+  entry->data = *callback_data;
+  entry->kernel_object = callback_data->packet->kernel_object;
+  reinterpret_cast<std::atomic<bool>*>(&entry->valid)->store(true);
   return status;
 }
 
@@ -1096,6 +1205,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   if (settings->hsa_intercepting) rocprofiler_set_hsa_callbacks(hsa_callbacks, (void*)14);
   // Enable concurrent SQTT
   check_env_var("ROCP_K_CONCURRENT", settings->k_concurrent);
+  // Enable optmized mode
+  check_env_var("ROCP_OPT_MODE", settings->opt_mode);
 
   is_trace_local = settings->trace_local;
 
@@ -1180,6 +1291,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   if ((range_vec->size() == 1) && (range_parse_iter == 0)) {
     range_vec->push_back(*(range_vec->begin()) + 1);
   }
+
+  const bool filter_disabled = (gpu_index_vec->empty() && kernel_string_vec->empty() && range_vec->empty());
 
   // Getting traces
   const auto traces_list = xml->GetNodes("top.trace");
@@ -1298,30 +1411,78 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   // Context array aloocation
   context_array = new context_array_t;
 
-  // Adding dispatch observer
-  rocprofiler_queue_callbacks_t callbacks_ptrs{0};
-  if (settings->k_concurrent != 0) {
-    callbacks_ptrs.dispatch = dispatch_callback_con;
+  bool opt_mode_cond = ((features_found != 0) &&
+                              (metrics_set->empty()) &&
+                              (traces_found == 0) &&
+                              (is_spm_trace == false) &&
+                              (filter_disabled == true));
+  if (settings->opt_mode == 0) opt_mode_cond = false;
+  if (!opt_mode_cond) settings->opt_mode = 0;
+  if (opt_mode_cond) {
+    // Handler arg
+    handler_arg_t* handler_arg = new handler_arg_t{};
+    handler_arg->features = features;
+    handler_arg->feature_count = feature_count;
+
+    // Context properties
+    rocprofiler_pool_properties_t properties{};
+    properties.num_entries = (CTX_OUTSTANDING_MAX != 0) ? CTX_OUTSTANDING_MAX : 1000;
+    properties.payload_bytes = sizeof(context_entry_t);
+    properties.handler = context_pool_handler;
+    properties.handler_arg = handler_arg;
+
+    // Available GPU agents
+    const unsigned gpu_count = HsaRsrcFactory::Instance().GetCountOfGpuAgents();
+    callbacks_arg_t* callbacks_arg = new callbacks_arg_t{};
+    callbacks_arg->pools = new rocprofiler_pool_t* [gpu_count];
+    for (unsigned gpu_id = 0; gpu_id < gpu_count; gpu_id++) {
+      // Getting GPU device info
+      const AgentInfo* agent_info = NULL;
+      if (HsaRsrcFactory::Instance().GetGpuAgentInfo(gpu_id, &agent_info) == false) {
+        fprintf(stderr, "GetGpuAgentInfo failed\n");
+        abort();
+      }
+
+      // Open profiling pool
+      rocprofiler_pool_t* pool = NULL;
+      hsa_status_t status = rocprofiler_pool_open(agent_info->dev_id, features, features_found,
+                                                  &pool, 0, &properties);
+      check_status(status);
+      callbacks_arg->pools[gpu_id] = pool;
+    }
+
+    // Adding dispatch observer
+    rocprofiler_queue_callbacks_t callbacks_ptrs{0};
+    callbacks_ptrs.dispatch = dispatch_callback_opt;
+    callbacks_ptrs.destroy = destroy_callback;
+
+    rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_arg);
   } else {
-    callbacks_ptrs.dispatch = dispatch_callback;
+    // Adding dispatch observer
+    rocprofiler_queue_callbacks_t callbacks_ptrs{0};
+    if (settings->k_concurrent != 0) {
+      callbacks_ptrs.dispatch = dispatch_callback_con;
+    } else {
+      callbacks_ptrs.dispatch = dispatch_callback;
+    }
+    callbacks_ptrs.destroy = destroy_callback;
+
+    callbacks_data = new callbacks_data_t{};
+    callbacks_data->features = features;
+    callbacks_data->feature_count = features_found;
+    callbacks_data->set = (metrics_set->empty()) ? NULL : metrics_set;
+    callbacks_data->group_index = 0;
+    callbacks_data->file_handle = result_file_handle;
+    callbacks_data->gpu_index = (gpu_index_vec->empty()) ? NULL : gpu_index_vec;
+    callbacks_data->kernel_string = (kernel_string_vec->empty()) ? NULL : kernel_string_vec;
+    callbacks_data->range = (range_vec->empty()) ? NULL : range_vec;;
+    callbacks_data->filter_on = (callbacks_data->gpu_index != NULL) ||
+                                (callbacks_data->kernel_string != NULL) ||
+                                (callbacks_data->range != NULL)
+                                ? 1 : 0;
+
+    rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_data);
   }
-  callbacks_ptrs.destroy = destroy_callback;
-
-  callbacks_data = new callbacks_data_t{};
-  callbacks_data->features = features;
-  callbacks_data->feature_count = features_found;
-  callbacks_data->set = (metrics_set->empty()) ? NULL : metrics_set;
-  callbacks_data->group_index = 0;
-  callbacks_data->file_handle = result_file_handle;
-  callbacks_data->gpu_index = (gpu_index_vec->empty()) ? NULL : gpu_index_vec;
-  callbacks_data->kernel_string = (kernel_string_vec->empty()) ? NULL : kernel_string_vec;
-  callbacks_data->range = (range_vec->empty()) ? NULL : range_vec;;
-  callbacks_data->filter_on = (callbacks_data->gpu_index != NULL) ||
-                              (callbacks_data->kernel_string != NULL) ||
-                              (callbacks_data->range != NULL)
-                              ? 1 : 0;
-
-  rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_data);
 
   xml::Xml::Destroy(xml);
 
