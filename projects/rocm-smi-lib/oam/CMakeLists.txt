@@ -70,7 +70,7 @@ set(OAM_EXAMPLE_EXE "oam_ex")
 add_executable(${OAM_EXAMPLE_EXE} "example/oam_example.c")
 target_include_directories(${OAM_EXAMPLE_EXE} PRIVATE ${OAM_INC_LIST})
 target_link_libraries(${OAM_EXAMPLE_EXE} ${OAM_TARGET})
-add_library(${OAM_TARGET} SHARED ${CMN_SRC_LIST} ${OAM_SRC_LIST}
+add_library(${OAM_TARGET} ${CMN_SRC_LIST} ${OAM_SRC_LIST}
                                               ${CMN_INC_LIST} ${OAM_INC_LIST})
 target_link_libraries(${OAM_TARGET} pthread rt)
 target_include_directories(${OAM_TARGET} PRIVATE
@@ -84,14 +84,18 @@ set_property(TARGET ${OAM_TARGET} PROPERTY
 
 ## If the library is a release, strip the target library
 if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    add_custom_command(
-          TARGET ${OAM_TARGET}
-          POST_BUILD COMMAND ${CMAKE_STRIP} lib${OAM_TARGET}.so)
+    if(${BUILD_SHARED_LIBS}) #striping only for .so
+        add_custom_command(
+             TARGET ${OAM_TARGET}
+             POST_BUILD COMMAND ${CMAKE_STRIP} lib${OAM_TARGET}.so)
+    endif()
 endif ()
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${OAM_TARGET}
-          LIBRARY DESTINATION ${OAM_NAME}/lib COMPONENT ${OAM_COMPONENT})
+          LIBRARY DESTINATION ${OAM_NAME}/lib
+          ARCHIVE DESTINATION ${OAM_NAME}/lib
+          COMPONENT ${OAM_COMPONENT})
 install(FILES ${COMMON_SRC_ROOT}/oam/include/oam/oam_mapi.h
               ${COMMON_SRC_ROOT}/oam/include/oam/amd_oam.h
                                         DESTINATION oam/include/oam)

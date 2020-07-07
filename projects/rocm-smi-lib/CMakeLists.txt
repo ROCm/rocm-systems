@@ -5,6 +5,8 @@ cmake_minimum_required(VERSION 3.5.0)
 
 set(AMD_SMI_LIBS_TARGET "amd_smi_libraries")
 
+set ( BUILD_SHARED_LIBS ON CACHE BOOL "Build shared library (.so) or not.")
+
 ## Set default module path if not already set
 if(NOT DEFINED CMAKE_MODULE_PATH)
     set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/")

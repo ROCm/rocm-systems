@@ -74,7 +74,7 @@ set(SMI_EXAMPLE_EXE "rocm_smi_ex")
 
 add_executable(${SMI_EXAMPLE_EXE} "example/rocm_smi_example.cc")
 target_link_libraries(${SMI_EXAMPLE_EXE} ${ROCM_SMI_TARGET})
-add_library(${ROCM_SMI_TARGET} SHARED ${CMN_SRC_LIST} ${SMI_SRC_LIST}
+add_library(${ROCM_SMI_TARGET}  ${CMN_SRC_LIST} ${SMI_SRC_LIST}
                                               ${CMN_INC_LIST} ${SMI_INC_LIST})
 target_link_libraries(${ROCM_SMI_TARGET} pthread rt)
 target_include_directories(${ROCM_SMI_TARGET} PRIVATE
@@ -88,29 +88,35 @@ set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY
 
 ## If the library is a release, strip the target library
 if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+  if(${BUILD_SHARED_LIBS}) #stripping only for .so
     add_custom_command(
           TARGET ${ROCM_SMI_TARGET}
           POST_BUILD COMMAND ${CMAKE_STRIP} lib${ROCM_SMI_TARGET}.so)
+  endif()
 endif ()
 
 ## Add symlinks from top level ROCm lib dir to rocm-smi lib so files
-add_custom_target ( so-link ALL WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+if(${BUILD_SHARED_LIBS})
+  add_custom_target ( so-link ALL WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                     COMMAND ${CMAKE_COMMAND} -E create_symlink
                           ../${ROCM_SMI}/lib/${ROCM_SMI_LIB_NAME}.so so-link )
-add_custom_target ( so-major-link ALL WORKING_DIRECTORY
+  add_custom_target ( so-major-link ALL WORKING_DIRECTORY
                   ${CMAKE_CURRENT_BINARY_DIR} COMMAND ${CMAKE_COMMAND}
                   -E create_symlink
                   ../${ROCM_SMI}/lib/${ROCM_SMI_LIB_NAME}.so.${VERSION_MAJOR}
                                                                so-major-link )
 
-install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/so-link DESTINATION lib RENAME
+  install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/so-link DESTINATION lib RENAME
                                                      ${ROCM_SMI_LIB_NAME}.so )
-install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/so-major-link DESTINATION lib
+  install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/so-major-link DESTINATION lib
                              RENAME ${ROCM_SMI_LIB_NAME}.so.${VERSION_MAJOR} )
-
+endif()
 ## Add the install directives for the runtime library.
 install(TARGETS ${ROCM_SMI_TARGET}
-          LIBRARY DESTINATION ${ROCM_SMI}/lib COMPONENT ${ROCM_SMI_COMPONENT})
+          LIBRARY DESTINATION ${ROCM_SMI}/lib
+          ARCHIVE DESTINATION ${ROCM_SMI}/lib
+          COMPONENT ${ROCM_SMI_COMPONENT})
+
 install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/rocm_smi.h
                                         DESTINATION rocm_smi/include/rocm_smi)
 install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/kfd_ioctl.h
