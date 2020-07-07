@@ -3370,7 +3370,7 @@ static bool check_evt_notif_support(int kfd_fd) {
   struct kfd_ioctl_get_version_args args = {0, 0};
 
   if (ioctl(kfd_fd, AMDKFD_IOC_GET_VERSION, &args) == -1) {
-    return RSMI_STATUS_INIT_ERROR;
+    return false;
   }
 
   if (args.minor_version < 3) {
@@ -3578,7 +3578,8 @@ rsmi_test_sleep(uint32_t dv_ind, uint32_t seconds) {
 //  DEVICE_MUTEX
   amd::smi::pthread_wrap _pw(*amd::smi::GetMutex(dv_ind));
   amd::smi::RocmSMI& smi_ = amd::smi::RocmSMI::getInstance();
-  bool blocking_ = !(smi_.init_options() && RSMI_INIT_FLAG_RESRV_TEST1);
+  bool blocking_ = !(smi_.init_options() &&
+                      static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1));
   amd::smi::ScopedPthread _lock(_pw, blocking_);
   if (!blocking_ && _lock.mutex_not_acquired()) {
     return RSMI_STATUS_BUSY;

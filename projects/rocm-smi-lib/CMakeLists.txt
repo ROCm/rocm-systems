@@ -51,7 +51,7 @@ set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm"
 set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 
 if (NOT DEFINED CPACK_PACKAGE_VENDOR)
-    set(CPACK_PACKAGE_VENDOR "AMD")
+    set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 endif()
 
 if (NOT DEFINED CPACK_PACKAGE_CONTACT)
@@ -63,11 +63,13 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
                  "AMD System Management libraries")
 endif()
 
-if (NOT AMD_SMI_PACKAGE)
-   set(AMD_SMI_PACKAGE rocm-smi-lib64)
+if (NOT ROCM_SMI_PACKAGE)
+   set(ROCM_SMI_PACKAGE rocm-smi-lib64)
 endif()
 
-set(CPACK_PACKAGE_FILE_NAME "${AMD_SMI_PACKAGE}-${PKG_VERSION_STR}")
+set(CPACK_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
+set(CPACK_PACKAGE_VERSION ${PKG_VERSION_STR})
+set(CPACK_PROJECT_CONFIG_FILE ${CMAKE_SOURCE_DIR}/package.txt)
 
 project(${AMD_SMI_LIBS_TARGET})
 
@@ -145,9 +147,6 @@ set(CMN_INC_LIST ${CMN_INC_LIST} "${SHR_MUTEX_DIR}/shared_mutex.h")
 add_subdirectory("rocm_smi")
 add_subdirectory("oam")
 
-# Generate Doxygen documentation
-find_package(Doxygen)
-find_package(LATEX COMPONENTS PDFLATEX)
 # install(TARGETS ${ROCM_SMI_TARGET}
 #           LIBRARY DESTINATION ${ROCM_SMI}/lib COMPONENT ${ROCM_SMI_COMPONENT})
 # install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/rocm_smi.h
@@ -159,7 +158,7 @@ find_package(LATEX COMPONENTS PDFLATEX)
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst;
                                     ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm")
-set (CPACK_DEBIAN_PACKAGE_NAME  ${AMD_SMI_PACKAGE})
+set (CPACK_DEBIAN_PACKAGE_NAME  ${ROCM_SMI_PACKAGE})
 set (CPACK_DEBIAN_PACKAGE_VERSION ${PKG_VERSION_STR})
 
 # RPM package specific variables
@@ -167,7 +166,7 @@ set(CPACK_RPM_PRE_INSTALL_SCRIPT_FILE
                                    "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_post")
 set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE
                                  "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_postun")
-set (CPACK_RPM_PACKAGE_NAME  ${AMD_SMI_PACKAGE})
+set (CPACK_RPM_PACKAGE_NAME  ${ROCM_SMI_PACKAGE})
 set (CPACK_RPM_PACKAGE_VERSION ${PKG_VERSION_STR})
 
 include (CPack)

@@ -103,7 +103,7 @@ endfunction()
 
 function(num_change_since_prev_pkg VERSION_PREFIX)
     find_program(get_commits NAMES version_util.sh
-                 PATHS ${COMMON_PROJ_ROOT}/cmake_modules)
+                 PATHS ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
     if (get_commits)
        execute_process( COMMAND ${get_commits} -c ${VERSION_PREFIX}
                           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}

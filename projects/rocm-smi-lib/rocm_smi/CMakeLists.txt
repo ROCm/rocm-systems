@@ -28,6 +28,9 @@ set(ROCM_SMI "rocm_smi")
 set(ROCM_SMI_COMPONENT "lib${ROCM_SMI}")
 set(ROCM_SMI_TARGET "${ROCM_SMI}64")
 
+## Include common cmake modules
+include(utils)
+
 ################# Determine the library version #########################
 set(SO_VERSION_GIT_TAG_PREFIX "rsmi_so_ver")
 
@@ -113,15 +116,18 @@ install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/rocm_smi.h
 install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/kfd_ioctl.h
                                         DESTINATION rocm_smi/include/rocm_smi)
 # Generate Doxygen documentation
+find_package(Doxygen)
+find_package(LATEX COMPONENTS PDFLATEX)
+
 if (DOXYGEN_FOUND AND LATEX_FOUND)
   set (RSMI_MANUAL_NAME "ROCm_SMI_Manual")
-  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/rsmi_doxygen.cfg
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/docs/amd_smi_doxygen.cfg
                                    ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.tex
         COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
-        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/docs/rsmi_doxygen.cfg
-                "${INC_DIR}/rocm_smi.h"
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/docs/amd_smi_doxygen.cfg
+                "${COMMON_SRC_ROOT}/include/rocm_smi/rocm_smi.h"
          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
          COMMAND make  > /dev/null
