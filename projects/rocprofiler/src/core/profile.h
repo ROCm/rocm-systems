@@ -119,7 +119,34 @@ class Profile {
 
   virtual void Insert(const profile_info_t& info) { info_vector_.push_back(info.rinfo); }
 
-  hsa_status_t Finalize(pkt_vector_t& start_vector, pkt_vector_t& stop_vector, pkt_vector_t& read_vector) {
+  void SetConcurrent(profile_t* profile) {
+    // Check whether conconcurrent has been set
+    for (const parameter_t* p = profile->parameters;
+            p < (profile->parameters + profile->parameter_count); ++p) {
+      // If yes, stop here
+      if (p->parameter_name == HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT) {
+        return;
+      }
+    }
+
+    // Otherwise, try to set
+    parameter_t* parameters = new parameter_t[profile->parameter_count+1];
+    for (unsigned i = 0; i < profile->parameter_count; ++i) {
+      parameters[i].parameter_name = profile->parameters[i].parameter_name;
+      parameters[i].value = profile->parameters[i].value;
+    }
+    if (profile->parameters) free(const_cast<parameter_t*>(profile->parameters));
+    parameters[profile->parameter_count].parameter_name =
+        HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT;
+    parameters[profile->parameter_count].value = 1;
+    profile->parameters = parameters;
+    profile->parameter_count += 1;
+  }
+
+  hsa_status_t Finalize(pkt_vector_t& start_vector, pkt_vector_t& stop_vector,
+          pkt_vector_t& read_vector, bool is_concurrent = false) {
+    if (is_concurrent) SetConcurrent(&profile_);
+
     hsa_status_t status = HSA_STATUS_SUCCESS;
 
     if (!info_vector_.empty()) {
@@ -127,11 +154,14 @@ class Profile {
       const pfn_t* api = rsrc->AqlProfileApi();
       packet_t start{};
       packet_t stop{};
-      packet_t read{};
+      packet_t read{};      // read at kernel start
+      packet_t read2{};     // read at kernel end
 
       // Check the profile buffer sizes
       status = api->hsa_ven_amd_aqlprofile_start(&profile_, NULL);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_start(NULL)");
+      // Double output buffer size if concurrent
+      if (is_concurrent) profile_.output_buffer.size *= 2;
       status = Allocate(rsrc);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "Allocate()");
 
@@ -144,21 +174,28 @@ class Profile {
 #ifdef AQLPROF_NEW_API
       if (profile_.type == HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC) {
         rd_status = api->hsa_ven_amd_aqlprofile_read(&profile_, &read);
+        if (is_concurrent){         // concurrent: one more read
+          if (rd_status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_read");
+          rd_status = api->hsa_ven_amd_aqlprofile_read(&profile_, &read2);
+        }
       }
 #if 0 // Read API returns error if disabled
       if (rd_status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_read");
 #endif
 #endif
 
-      // Set completion signal
+      // Set completion signal of start
       hsa_signal_t dummy_signal{};
       dummy_signal.handle = 0;
       start.completion_signal = dummy_signal;
+
+      // Set completion signal of read/stop
       hsa_signal_t post_signal;
       status = hsa_signal_create(1, 0, NULL, &post_signal);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
       stop.completion_signal = post_signal;
       read.completion_signal = post_signal;
+      read2.completion_signal = post_signal;
       completion_signal_ = post_signal;
 
       // Fill packet vectors
@@ -180,18 +217,24 @@ class Profile {
           AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
 
         if (rd_status == HSA_STATUS_SUCCESS) {
-          const uint32_t read_index = read_vector.size();
-          read_vector.insert(read_vector.end(), LEGACY_SLOT_SIZE_PKT, packet_t{});
-          status = api->hsa_ven_amd_aqlprofile_legacy_get_pm4(
-              &read, reinterpret_cast<void*>(&read_vector[read_index]));
-          if (status != HSA_STATUS_SUCCESS)
-            AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+          pkt_vector_t reads = {read};
+          if (is_concurrent) reads.push_back(read2);
+          for (auto rd : reads) {
+            const uint32_t read_index = read_vector.size();
+            read_vector.insert(read_vector.end(), LEGACY_SLOT_SIZE_PKT, packet_t{});
+            status = api->hsa_ven_amd_aqlprofile_legacy_get_pm4(
+                &rd, reinterpret_cast<void*>(&read_vector[read_index]));
+            if (status != HSA_STATUS_SUCCESS)
+              AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+          }
         }
       } else {
         start_vector.push_back(start);
         stop_vector.push_back(stop);
         if (rd_status == HSA_STATUS_SUCCESS) {
           read_vector.push_back(read);
+          if (is_concurrent)
+            read_vector.push_back(read2);
         }
       }
     }

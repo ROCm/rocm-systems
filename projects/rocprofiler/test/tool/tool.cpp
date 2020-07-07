@@ -1402,6 +1402,9 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   fflush(stdout);
   const uint32_t features_found = metrics_vec.size() + traces_found;
 
+  // set a value to indicate tracing mode
+  if (settings->k_concurrent != 0) settings->k_concurrent = (traces_found == 0) ? 1 : 2;
+
   if (is_spm_trace) {
     for (uint32_t index = 0; index < features_found; index++) {
       features[index].kind = ROCPROFILER_FEATURE_KIND_TRACE;

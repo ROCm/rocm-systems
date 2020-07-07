@@ -41,8 +41,16 @@ THE SOFTWARE.
 #include "util/hsa_rsrc_factory.h"
 
 namespace rocprofiler {
+enum {
+  K_CONC_OFF = 0,
+  K_CONC_PMC = 1,
+  K_CONC_TRACE = 2
+};
+
 extern decltype(hsa_queue_create)* hsa_queue_create_fn;
 extern decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
+
+void PmcStarter(Context* context);
 
 static std::mutex ctx_a_mutex;
 typedef std::map<Context*, bool> ctx_a_map_t;
@@ -90,8 +98,8 @@ class InterceptQueue {
     if (!obj_map_) obj_map_ = new obj_map_t;
     InterceptQueue* obj = new InterceptQueue(agent, *queue, proxy);
     (*obj_map_)[(uint64_t)(*queue)] = obj;
-    if (k_concurrent_) {
-      status = proxy->SetInterceptCB(OnSubmitCB_SQTT, obj);
+    if (k_concurrent_ == K_CONC_TRACE) {
+      status = proxy->SetInterceptCB(OnSubmitCB_ctrace, obj);
     } else if (opt_mode_) {
       status = proxy->SetInterceptCB(OnSubmitCB_opt, obj);
     } else {
@@ -317,9 +325,27 @@ class InterceptQueue {
 
             const pkt_vector_t& start_vector = context->StartPackets(group.index);
             const pkt_vector_t& stop_vector = context->StopPackets(group.index);
-            pkt_vector_t packets = start_vector;
-            packets.insert(packets.end(), *packet);
-            packets.insert(packets.end(), stop_vector.begin(), stop_vector.end());
+            const pkt_vector_t& read_vector = context->ReadPackets(group.index);
+            pkt_vector_t packets;
+
+            if (k_concurrent_ == K_CONC_OFF) {  // serial
+              packets = start_vector;
+              packets.insert(packets.end(), *packet);
+              packets.insert(packets.end(), stop_vector.begin(), stop_vector.end());
+            } else {                            // concurrent
+              // Atrt PMC once
+              std::call_once(once_flag_, PmcStarter, context);
+              // Reads at both kernel start and end
+              assert(read_vector.size() == 2 * start_vector.size());
+              auto mid = read_vector.begin() + read_vector.size()/2;
+              // Read at kernel start
+              packets.insert(packets.end(), read_vector.begin(), mid);
+              // Kernel dispatch packet
+              packets.insert(packets.end(), *packet);
+              // Read at kernel end
+              packets.insert(packets.end(), mid, read_vector.end());
+            }
+
             if (writer != NULL) {
               writer(&packets[0], packets.size());
             } else {
@@ -347,7 +373,7 @@ class InterceptQueue {
     }
   }
 
-  static void OnSubmitCB_SQTT(const void* in_packets, uint64_t count, uint64_t user_que_idx, void* data,
+  static void OnSubmitCB_ctrace(const void* in_packets, uint64_t count, uint64_t user_que_idx, void* data,
                          hsa_amd_queue_intercept_packet_writer writer) {
     const packet_t* packets_arr = reinterpret_cast<const packet_t*>(in_packets);
     InterceptQueue* obj = reinterpret_cast<InterceptQueue*>(data);
@@ -480,8 +506,8 @@ class InterceptQueue {
   static void TrackerOn(bool on) { tracker_on_ = on; }
   static bool IsTrackerOn() { return tracker_on_; }
 
-  static bool k_concurrent_;
   static bool opt_mode_;
+  static uint32_t k_concurrent_;
 
  private:
   static void queue_event_callback(hsa_status_t status, hsa_queue_t *queue, void *arg) {
@@ -595,6 +621,8 @@ class InterceptQueue {
   const util::AgentInfo* agent_info_;
   queue_event_callback_t queue_event_callback_;
   queue_id_t queue_id;
+
+  static std::once_flag once_flag_;
 };
 
 }  // namespace rocprofiler

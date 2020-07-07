@@ -104,10 +104,12 @@ class Group {
     }
   }
 
-  hsa_status_t Finalize() {
-    hsa_status_t status = pmc_profile_.Finalize(start_vector_, stop_vector_, read_vector_);
+  hsa_status_t Finalize(const bool is_concurrent = false) {
+    hsa_status_t status = pmc_profile_.Finalize(start_vector_, stop_vector_,
+            read_vector_, is_concurrent);
     if (status == HSA_STATUS_SUCCESS) {
-      status = trace_profile_.Finalize(start_vector_, stop_vector_, read_vector_);
+      status = trace_profile_.Finalize(start_vector_, stop_vector_,
+              read_vector_, is_concurrent);
     }
     if (status == HSA_STATUS_SUCCESS) {
       if (!pmc_profile_.Empty()) ++n_profiles_;
@@ -283,6 +285,30 @@ class Context {
     }
   }
 
+  /* Handle the completion of kernel-begin 'read' packet */
+  static bool HandlerRead(hsa_signal_value_t value, void* arg) {
+    Group* group = reinterpret_cast<Group*>(arg);
+    Context* context = group->GetContext();
+
+    // Handle the completion signal of read packet at kernel begin
+    const profile_vector_t profile_vector = context->GetProfiles(group->GetIndex());
+    for (auto& tuple : profile_vector) {
+      // Wait for read packet to complete
+      util::HsaRsrcFactory::Instance().SignalWaitRestore(tuple.completion_signal, 1);
+      const profile_t* profile = tuple.profile;
+      // Copy the counter values, read at kernel begin, to the right half of
+      // the buffer, so that the next kernel-end read can reuse the left half
+      char* data = reinterpret_cast<char*>(profile->output_buffer.ptr);
+      const uint32_t num = profile->output_buffer.size / 2;
+      for(uint32_t i = 0; i < num; ++i) {
+        data[i+num] = data[i];          // left --> right
+        data[i] = 0;                    // reset left
+      }
+    }
+
+    return false;
+  }
+
   static bool Handler(hsa_signal_value_t value, void* arg) {
     Group* group = reinterpret_cast<Group*>(arg);
     Context* context = group->GetContext();
@@ -313,6 +339,9 @@ class Context {
   rocprofiler_dispatch_record_t* GetRecord() {
     return &record_;
   }
+
+  // Concurrent profiling mode
+  static bool k_concurrent_;
 
  private:
   Context(const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info,
@@ -368,6 +397,11 @@ class Context {
         set_[group_index].ResetRefsCount();
         const profile_vector_t profile_vector = GetProfiles(group_index);
         for (auto& tuple : profile_vector) {
+          // Handler for read packet completion
+          if (k_concurrent_) {
+            hsa_amd_signal_async_handler(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, HandlerRead,
+                                       &set_[group_index]);
+          }
           // Handler for stop packet completion
           hsa_amd_signal_async_handler(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, Handler,
                                        &set_[group_index]);
@@ -486,7 +520,7 @@ class Context {
 
   void Finalize() {
     for (unsigned index = 0; index < set_.size(); ++index) {
-      const hsa_status_t status = set_[index].Finalize();
+      const hsa_status_t status = set_[index].Finalize(k_concurrent_);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "context finalize failed");
     }
   }
@@ -620,7 +654,11 @@ class Context {
   hsa_signal_t dispatch_signal_;
   hsa_signal_t orig_signal_;
   rocprofiler_dispatch_record_t record_;
+
 };
+
+#define CONTEXT_INSTANTIATE() \
+  bool rocprofiler::Context::k_concurrent_ = false;
 
 }  // namespace rocprofiler
 
