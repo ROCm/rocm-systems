@@ -125,8 +125,13 @@ void TestPerfCntrReadWrite::CountEvents(uint32_t dv_ind,
   ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
 
   ret = rsmi_counter_control(evt_handle, RSMI_CNTR_CMD_START, nullptr);
-  CHK_ERR_ASRT(ret)
-
+  if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+     std::cout << "rsmi_counter_control() returned "
+                                "RSMI_STATUS_NOT_SUPPORTED" << std::endl;
+     throw RSMI_STATUS_NOT_SUPPORTED;
+  } else {
+    CHK_ERR_ASRT(ret)
+  }
   sleep(sleep_sec);
 
   ret = rsmi_counter_read(evt_handle, val);
@@ -319,8 +324,22 @@ void TestPerfCntrReadWrite::Run(void) {
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
+    try {
+      testEventsIndividually(dv_ind);
+      testEventsSimultaneously(dv_ind);
+    } catch(rsmi_status_t r) {
+       switch (r) {
+         case RSMI_STATUS_NOT_SUPPORTED:
+           std::cout << "The performance counter event tried is not "
+                                     "supported for this device" << std::endl;
+           break;
 
-    testEventsIndividually(dv_ind);
-    testEventsSimultaneously(dv_ind);
+         default:
+           std::cout << "Unexpected exception caught with rsmi "
+                                         "return value of " << r << std::endl;
+       }
+    } catch(...) {
+      ASSERT_FALSE("Unexpected exception caught");
+    }
   }
 }
