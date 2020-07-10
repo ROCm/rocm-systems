@@ -1799,8 +1799,9 @@ rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
-                      rsmi_voltage_metric_t metric, int64_t *voltage);
+rsmi_status_t rsmi_dev_volt_metric_get(uint32_t dv_ind,
+                               rsmi_voltage_type_t sensor_type,
+                              rsmi_voltage_metric_t metric, int64_t *voltage);
 /** @} */  // end of PhysQuer
 
 /*****************************************************************************/

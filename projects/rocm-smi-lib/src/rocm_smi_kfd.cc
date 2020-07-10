@@ -154,6 +154,22 @@ static int OpenKFDNodeFile(uint32_t dev_id, std::string node_file,
   return 0;
 }
 
+bool KFDNodeSupported(uint32_t node_indx) {
+  std::ifstream fs;
+  bool ret = true;
+  int err;
+  err = OpenKFDNodeFile(node_indx, "properties", &fs);
+
+  if (err == ENOENT) {
+    return false;
+  }
+  if (fs.peek() == std::ifstream::traits_type::eof()) {
+    ret = false;
+  }
+  fs.close();
+  return ret;
+}
+
 int ReadKFDDeviceProperties(uint32_t kfd_node_id,
                                            std::vector<std::string> *retVec) {
   std::string line;
@@ -175,7 +191,7 @@ int ReadKFDDeviceProperties(uint32_t kfd_node_id,
 
   if (retVec->size() == 0) {
     fs.close();
-    return 0;
+    return ENOENT;
   }
   // Remove any *trailing* empty (whitespace) lines
   while (retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
@@ -471,6 +487,12 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
     }
 
     node_indx = std::stoi(dentry->d_name);
+
+    if (!KFDNodeSupported(node_indx)) {
+      dentry = readdir(kfd_node_dir);
+      continue;
+    }
+
     node = std::shared_ptr<KFDNode>(new KFDNode(node_indx));
 
     node->Initialize();

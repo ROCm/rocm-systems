@@ -132,8 +132,9 @@ void TestVoltRead::Run(void) {
     };
     for (uint32_t i = RSMI_VOLT_TYPE_FIRST; i <= RSMI_VOLT_TYPE_LAST; ++i) {
       IF_VERB(STANDARD) {
-        std::cout << "\t** **********" << GetVoltSensorNameStr(static_cast<rsmi_voltage_type_t>(i)) <<
-                                      " Voltage **********" << std::endl;
+        std::cout << "\t** **********" <<
+          GetVoltSensorNameStr(static_cast<rsmi_voltage_type_t>(i)) <<
+                                         " Voltage **********" << std::endl;
       }
       print_volt_metric(RSMI_VOLT_CURRENT, "Current Voltage");
       print_volt_metric(RSMI_VOLT_MAX, "Voltage max value");

@@ -293,6 +293,18 @@ RocmSMI::Initialize(uint64_t flags) {
 
   std::shared_ptr<amd::smi::Device> dev;
 
+  // Remove any drm nodes that don't have  a corresponding readable kfd node.
+  // kfd nodes will not be added if their properties file is not readable.
+  auto dev_iter = monitor_devices_.begin();
+  while (dev_iter != monitor_devices_.end()) {
+    uint64_t bdfid = (*dev_iter)->bdfid();
+    if (tmp_map.find(bdfid) == tmp_map.end()) {
+      dev_iter = monitor_devices_.erase(dev_iter);
+      continue;
+    }
+    dev_iter++;
+  }
+
   // 1. construct kfd_node_map_ with gpu_id as key and *Device as value
   // 2. for each kfd node, write the corresponding dv_ind
   // 3. for each amdgpu device, write the corresponding gpu_id

@@ -1545,9 +1545,6 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
   }
 
   if (val_str.size() == 0) {
-    // We should have already returned if we were looking for
-    // device or subdivce
-    assert(typ == NAME_STR_VENDOR);
     return get_backup_name(vendor_id, name, len);
   }
   size_t ct = val_str.copy(name, len);
