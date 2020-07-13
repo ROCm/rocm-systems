@@ -164,7 +164,7 @@ void TestPciReadWrite::Run(void) {
     ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
 
     // First set the bitmask to all supported bandwidths
-    freq_bitmask = ~(~0 << bw.transfer_rate.num_supported);
+    freq_bitmask = ~(~0u << bw.transfer_rate.num_supported);
 
     // Then, set the bitmask to all bandwidths besides the initial BW
     freq_bitmask ^= (1 << bw.transfer_rate.current);
