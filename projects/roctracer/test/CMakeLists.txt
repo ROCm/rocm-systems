@@ -44,7 +44,7 @@ endif ()
 
 ## Path to HSA test
 set ( HSA_TEST_DIR "${TEST_DIR}/hsa/test" )
-set ( HSA_REV "48bd999" )
+set ( HSA_REV "5b47aae" )
 
 ## test run script
 set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
