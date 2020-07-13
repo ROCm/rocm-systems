@@ -207,7 +207,10 @@ void TestProcInfoRead::Run(void) {
         ASSERT_EQ(proc_info.pasid, procs[j].pasid);
         std::cout << "\t** Process ID: " <<
             procs[j].process_id << " VRAM Usage: " <<
-                                           proc_info.vram_usage << std::endl;
+                                   proc_info.vram_usage <<
+                                   " SDMA Usage: " <<
+                                   proc_info.sdma_usage <<
+                                   std::endl;
       }
     }
   }

@@ -433,6 +433,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
   proc->pasid = std::stoi(tmp);
 
   proc->vram_usage = 0;
+  proc->sdma_usage = 0;
 
   for (itr = gpu_set->begin(); itr != gpu_set->end(); itr++) {
     uint64_t gpu_id = (*itr);
@@ -451,6 +452,21 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
     }
 
     proc->vram_usage += std::stoi(tmp);
+
+    std::string sdma_str_path = proc_str_path;
+    sdma_str_path += "/sdma_";
+    sdma_str_path += std::to_string(gpu_id);
+
+    err = ReadSysfsStr(sdma_str_path, &tmp);
+    if (err) {
+      return err;
+    }
+
+    if (!is_number(tmp)) {
+      return EINVAL;
+    }
+
+    proc->sdma_usage += std::stoi(tmp);
   }
 
   return 0;
