@@ -25,6 +25,8 @@ from sqlitedb import SQLiteDB
 from mem_manager import MemManager
 import dform
 
+mcopy_data_enabled = 1 if 'ROCP_MCOPY_DATA' in os.environ else 0
+
 EXT_PID = 0
 COPY_PID = 1
 HIP_PID = 2
@@ -434,7 +436,9 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           else:
             activity_record_patching(db, ops_table_name, kernel_found, kernel_str, stream_found, stream_id, select_expr)
 
-        api_data = memory_manager.register_api(rec_vals) if len(dep_filtr) else ''
+        api_data = ''
+        if mcopy_data_enabled:
+          api_data = memory_manager.register_api(rec_vals) if len(dep_filtr) else ''
         rec_vals.append(api_data)
 
         rec_vals[2] = api_pid
@@ -728,7 +732,8 @@ else:
     db.metadata_json(jsonfile, sysinfo_file)
     db.close_json(jsonfile);
 
-  memory_manager.dump_data()
+  if mcopy_data_enabled:
+    memory_manager.dump_data()
 
   db.close()
 
