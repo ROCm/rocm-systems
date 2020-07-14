@@ -46,6 +46,15 @@ struct FieldSummaryStats {
     int64_t max_value;
     int64_t min_value;
     int64_t total_value;
+
+    // Use Welford algorithm to calculate the standard deviations.
+    // https://en.wikipedia.org/wiki/Standard_deviation#Rapid_calculation_methods
+    // https://www.johndcook.com/blog/standard_deviation/
+    double old_m;
+    double old_s;
+    double new_m;
+    double new_s;
+
     uint64_t last_time;
     uint64_t count;
 };
@@ -100,6 +109,8 @@ class RdcCacheManagerImpl: public RdcCacheManager {
     void set_summary(const FieldSummaryStats & stats,
         rdc_stats_summary_t& gpu, rdc_stats_summary_t& summary, // NOLINT
         unsigned int adjuster);
+    void set_average_summary(
+        rdc_stats_summary_t& summary, uint32_t num_gpus);  // NOLINT
     RdcCacheSamples cache_samples_;
     RdcJobStatsCache cache_jobs_;
     std::mutex cache_mutex_;

@@ -39,7 +39,11 @@ class RdciSubSystem {
 
      virtual void process() = 0;
      virtual ~RdciSubSystem();
+
+     bool is_json_output() const;
+
  protected:
+     void set_json_output(bool is_json);
      std::vector<std::string> split_string(const std::string& s,
             char delimiter) const;
      void show_common_usage() const;
@@ -52,6 +56,9 @@ class RdciSubSystem {
      std::string root_ca_;
      std::string client_cert_;
      std::string client_key_;
+
+ private:
+     bool is_json_output_;
 };
 
 typedef std::shared_ptr<RdciSubSystem> RdciSubSystemPtr;

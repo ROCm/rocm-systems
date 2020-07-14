@@ -160,7 +160,7 @@ message("RDC_LIB_INC_LIST=${RDC_LIB_INC_LIST}")
 
 link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
 add_library(${RDC_LIB} SHARED ${RDC_LIB_SRC_LIST} ${RDC_LIB_INC_LIST})
-target_link_libraries(${RDC_LIB} pthread rocm_smi64)
+target_link_libraries(${RDC_LIB} ${BOOTSTRAP_LIB} pthread rocm_smi64)
 target_include_directories(${RDC_LIB} PRIVATE
                                          "${PROJECT_SOURCE_DIR}"
                                          "${PROJECT_SOURCE_DIR}/include"
@@ -191,7 +191,7 @@ set(RDCCLIENT_LIB_INC_LIST ${RDCCLIENT_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib
 message("RDCCLIENT_LIB_INC_LIST=${RDCCLIENT_LIB_INC_LIST}")
 
 add_library(${RDCCLIENT_LIB} SHARED ${RDCCLIENT_LIB_SRC_LIST} ${RDCCLIENT_LIB_INC_LIST})
-target_link_libraries(${RDCCLIENT_LIB} pthread rt grpc grpc++ grpc++_reflection
+target_link_libraries(${RDCCLIENT_LIB}  ${BOOTSTRAP_LIB} pthread rt grpc grpc++ grpc++_reflection
                                                                   dl protobuf)
 target_include_directories(${RDCCLIENT_LIB} PRIVATE
                                          "${GRPC_ROOT}/include"

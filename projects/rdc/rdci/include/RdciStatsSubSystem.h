@@ -39,6 +39,7 @@ class RdciStatsSubSystem: public RdciSubSystem {
  private:
      void show_help() const;
      void show_job_stats(const rdc_gpu_usage_info_t& gpu_info) const;
+     void show_job_stats_json(const rdc_gpu_usage_info_t& gpu_info) const;
 
      enum OPERATIONS {
         STATS_UNKNOWN = 0,

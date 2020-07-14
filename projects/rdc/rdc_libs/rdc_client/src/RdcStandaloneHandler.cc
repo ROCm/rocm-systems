@@ -95,41 +95,49 @@ bool RdcStandaloneHandler::copy_gpu_usage_info(
     target->power_usage.max_value = pstats.max_value();
     target->power_usage.min_value = pstats.min_value();
     target->power_usage.average = pstats.average();
+    target->power_usage.standard_deviation = pstats.standard_deviation();
 
     const ::rdc::JobStatsSummary& cstats = src.gpu_clock();
     target->gpu_clock.max_value = cstats.max_value();
     target->gpu_clock.min_value = cstats.min_value();
     target->gpu_clock.average = cstats.average();
+    target->gpu_clock.standard_deviation = cstats.standard_deviation();
 
     const ::rdc::JobStatsSummary& ustats = src.gpu_utilization();
     target->gpu_utilization.max_value = ustats.max_value();
     target->gpu_utilization.min_value = ustats.min_value();
     target->gpu_utilization.average = ustats.average();
+    target->gpu_utilization.standard_deviation = ustats.standard_deviation();
 
     const ::rdc::JobStatsSummary& mstats = src.memory_utilization();
     target->memory_utilization.max_value = mstats.max_value();
     target->memory_utilization.min_value = mstats.min_value();
     target->memory_utilization.average = mstats.average();
+    target->memory_utilization.standard_deviation = mstats.standard_deviation();
 
     const ::rdc::JobStatsSummary& txstats = src.pcie_tx();
     target->pcie_tx.max_value = txstats.max_value();
     target->pcie_tx.min_value = txstats.min_value();
     target->pcie_tx.average = txstats.average();
+    target->pcie_tx.standard_deviation = txstats.standard_deviation();
 
     const ::rdc::JobStatsSummary& rxstats = src.pcie_rx();
     target->pcie_rx.max_value = rxstats.max_value();
     target->pcie_rx.min_value = rxstats.min_value();
     target->pcie_rx.average = rxstats.average();
+    target->pcie_rx.standard_deviation = rxstats.standard_deviation();
 
     const ::rdc::JobStatsSummary& mcstats = src.memory_clock();
     target->memory_clock.max_value = mcstats.max_value();
     target->memory_clock.min_value = mcstats.min_value();
     target->memory_clock.average = mcstats.average();
+    target->memory_clock.standard_deviation = mcstats.standard_deviation();
 
     const ::rdc::JobStatsSummary& gtstats = src.gpu_temperature();
     target->gpu_temperature.max_value = gtstats.max_value();
     target->gpu_temperature.min_value = gtstats.min_value();
     target->gpu_temperature.average = gtstats.average();
+    target->gpu_temperature.standard_deviation = gtstats.standard_deviation();
 
     return true;
 }

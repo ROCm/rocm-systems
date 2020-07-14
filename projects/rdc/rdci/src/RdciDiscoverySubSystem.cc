@@ -35,11 +35,13 @@ RdciDiscoverySubSystem::RdciDiscoverySubSystem() : show_help_(false) {
 
 void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char ** argv) {
     const int HOST_OPTIONS = 1000;
+    const int JSON_OPTIONS = 1001;
     const struct option long_options[] = {
         {"host",    required_argument, nullptr, HOST_OPTIONS },
         {"help", optional_argument, nullptr, 'h' },
         {"unauth", optional_argument, nullptr, 'u' },
         {"list", optional_argument, nullptr, 'l' },
+        {"json",  optional_argument, nullptr, JSON_OPTIONS },
         { nullptr,  0 , nullptr, 0 }
     };
 
@@ -52,6 +54,9 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char ** argv) {
         switch (opt) {
             case HOST_OPTIONS:
                 ip_port_ = optarg;
+                break;
+            case JSON_OPTIONS:
+                set_json_output(true);
                 break;
             case 'h':
                  show_help_ = true;
@@ -77,12 +82,16 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char ** argv) {
 }
 
 void RdciDiscoverySubSystem::show_help() const {
+    if (is_json_output()) return;
     std::cout << " discovery -- Used to discover and identify GPUs "
         << "and their attributes.\n\n";
     std::cout << "Usage\n";
-    std::cout << "    rdci discovery [--host <IP/FQDN>:port] [-u] -l\n";
+    std::cout << "    rdci discovery [--host <IP/FQDN>:port] [--json]"
+            << " [-u] -l\n";
     std::cout << "\nFlags:\n";
     show_common_usage();
+    std::cout << "  --json                         "
+              << "Output using json.\n";
     std::cout << "  -l  --list                     list GPU discovered"
               <<" on the system\n";
 }
@@ -101,14 +110,22 @@ void RdciDiscoverySubSystem::process() {
          throw RdcException(result, "Fail to get device information");
     }
     if (count == 0) {
-        std::cout << "No GPUs find on the sytem\n";
+        if (is_json_output()) {
+            std::cout << "\"gpus\" : [], \"status\": \"ok\"";
+        } else {
+            std::cout << "No GPUs find on the system\n";
+        }
         return;
     }
 
-    std::cout << count << " GPUs found.\n";
-    std::cout << "------------------------------------------------"
-              << "-----------------\n";
-    std::cout << "GPU Index\t Device Information\n";
+    if (is_json_output()) {
+        std::cout << "\"gpus\" : [";
+    } else {
+        std::cout << count << " GPUs found.\n";
+        std::cout << "------------------------------------------------"
+                << "-----------------\n";
+        std::cout << "GPU Index\t Device Information\n";
+    }
     for (uint32_t i = 0; i < count; i++) {
         rdc_device_attributes_t attribute;
         result = rdc_device_get_attributes(rdc_handle_,
@@ -116,10 +133,22 @@ void RdciDiscoverySubSystem::process() {
         if (result != RDC_ST_OK) {
             return;
         }
-        std::cout << i << "\t\t" << attribute.device_name <<std::endl;
+        if (is_json_output()) {
+            std::cout << "{\"gpu_index\": \"" << i << "\", \"device_name\": \""
+                << attribute.device_name << "\"}";
+            if (i != count -1) {
+                std::cout << ",";
+            }
+        } else {
+            std::cout << i << "\t\t" << attribute.device_name <<std::endl;
+        }
     }
-    std::cout << "------------------------------------------------"
+    if (is_json_output()) {
+        std::cout << ']';
+    } else {
+        std::cout << "------------------------------------------------"
               << "-----------------\n";
+    }
 }
 
 

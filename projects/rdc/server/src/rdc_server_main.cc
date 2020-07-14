@@ -312,6 +312,12 @@ RDCServer::ShutDown(void) {
     delete rdc_admin_service_;
     rdc_admin_service_ = nullptr;
   }
+
+  if (api_service_) {
+    delete api_service_;
+    api_service_ = nullptr;
+  }
+
 }
 
 static void * ProcessSignalLoop(void *server_ptr) {

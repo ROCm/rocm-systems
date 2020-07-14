@@ -42,6 +42,7 @@ RdcGroupSettingsImpl::RdcGroupSettingsImpl() {
 
 rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_create(
                   const char* group_name, rdc_gpu_group_t* p_rdc_group_id) {
+    RDC_LOG(RDC_DEBUG, "Create group " << group_name);
     rdc_group_info_t ginfo;
     strncpy_with_null(ginfo.group_name, group_name, RDC_MAX_STR_LENGTH);
     ginfo.count = 0;
@@ -135,6 +136,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_create(
     uint32_t num_field_ids, uint32_t* field_ids,
     const char* field_group_name, rdc_field_grp_t* rdc_field_group_id) {
 
+    RDC_LOG(RDC_DEBUG, "Create field group " << field_group_name);
     rdc_field_group_info_t finfo;
     finfo.count = num_field_ids;
     strncpy_with_null(finfo.group_name, field_group_name, RDC_MAX_STR_LENGTH);

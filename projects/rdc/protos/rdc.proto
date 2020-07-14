@@ -414,7 +414,7 @@ message JobStatsSummary {
   uint64 max_value = 1;
   uint64 min_value = 2;
   uint64 average = 3;
-
+  double standard_deviation = 4;
 }
 
 message GpuUsageInfo {

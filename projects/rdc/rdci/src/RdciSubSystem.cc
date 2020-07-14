@@ -33,11 +33,16 @@ RdciSubSystem::RdciSubSystem():
     , use_auth_(true)
     , root_ca_("/etc/rdc/client/certs/rdc_cacert.pem")
     , client_cert_("/etc/rdc/client/certs/rdc_client_cert.pem")
-    , client_key_("/etc/rdc/client/private/rdc_client_cert.key") {
+    , client_key_("/etc/rdc/client/private/rdc_client_cert.key")
+    , is_json_output_(false) {
      rdc_status_t status = rdc_init(0);
      if (status != RDC_ST_OK) {
          throw RdcException(status, "RDC initialize fail");
      }
+}
+
+bool RdciSubSystem::is_json_output() const {
+    return is_json_output_;
 }
 
 bool RdciSubSystem::get_field_id_from_name(
@@ -154,6 +159,11 @@ void RdciSubSystem::show_common_usage() const {
               << "information and exits.\n";
 }
 
+void RdciSubSystem::set_json_output(bool is_json) {
+    is_json_output_ = is_json;
+    std::cout << "{";
+}
+
 RdciSubSystem::~RdciSubSystem() {
     if (rdc_handle_) {
        rdc_disconnect(rdc_handle_);
@@ -161,6 +171,10 @@ RdciSubSystem::~RdciSubSystem() {
     }
 
     rdc_shutdown();
+
+    if (is_json_output_) {
+        std::cout << "}" << std::endl;
+    }
 }
 
 }  // namespace rdc

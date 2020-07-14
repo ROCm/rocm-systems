@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcCacheManagerImpl.h"
 #include <sys/time.h>
+#include <cmath>
 #include <ctime>
 #include <sstream>
 #include "rdc_lib/RdcLogger.h"
@@ -213,6 +214,10 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_job_stats(uint32_t gpu_index,
         if (value.field_id == RDC_FI_POWER_USAGE) {
             gpu_iter->second.energy_last_time = value.ts;
         }
+
+        // https://www.johndcook.com/blog/standard_deviation/
+        fsummary->second.old_s = 0;
+        fsummary->second.old_m = fsummary->second.new_m = value.value.l_int;
         return RDC_ST_OK;
     }
     if (value.field_id == RDC_FI_POWER_USAGE) {
@@ -228,6 +233,15 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_job_stats(uint32_t gpu_index,
     fsummary->second.total_value += value.value.l_int;
     fsummary->second.last_time = value.ts;
     fsummary->second.count++;
+
+    // https://www.johndcook.com/blog/standard_deviation/
+    fsummary->second.new_m = fsummary->second.old_m +
+        (value.value.l_int - fsummary->second.old_m)/fsummary->second.count;
+    fsummary->second.new_s = fsummary->second.old_s +
+        (value.value.l_int - fsummary->second.old_m)*
+        (value.value.l_int - fsummary->second.new_m);
+    fsummary->second.old_m = fsummary->second.new_m;
+    fsummary->second.old_s = fsummary->second.new_s;
 
     return RDC_ST_OK;
 }
@@ -248,6 +262,11 @@ void RdcCacheManagerImpl::set_summary(const FieldSummaryStats & stats,
     summary.min_value = std::min(summary.min_value, gpu.min_value);
     //< save total for future average calculation.
     summary.average += gpu.average;
+
+    //< calculate the sample variance
+    gpu.standard_deviation = std::sqrt((stats.count > 1)
+                 ? stats.new_s/(stats.count - 1) : 0.0)/adjuster;
+    summary.standard_deviation += gpu.standard_deviation;
 }
 
 rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
@@ -274,15 +293,17 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
     summary_info.max_gpu_memory_used = 0;
     summary_info.ecc_correct = 0;
     summary_info.ecc_uncorrect = 0;
-    summary_info.power_usage = {0, std::numeric_limits<uint64_t>::max(), 0};
-    summary_info.pcie_tx = {0, std::numeric_limits<uint64_t>::max(), 0};
-    summary_info.pcie_rx = {0, std::numeric_limits<uint64_t>::max(), 0};
-    summary_info.gpu_temperature = {0, std::numeric_limits<uint64_t>::max(), 0};
-    summary_info.memory_clock = {0, std::numeric_limits<uint64_t>::max(), 0};
-    summary_info.gpu_clock = {0, std::numeric_limits<uint64_t>::max(), 0};
-    summary_info.gpu_utilization = {0, std::numeric_limits<uint64_t>::max(), 0};
+    summary_info.power_usage = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
+    summary_info.pcie_tx = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
+    summary_info.pcie_rx = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
+    summary_info.gpu_temperature =
+        {0, std::numeric_limits<uint64_t>::max(), 0, 0};
+    summary_info.memory_clock = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
+    summary_info.gpu_clock = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
+    summary_info.gpu_utilization =
+        {0, std::numeric_limits<uint64_t>::max(), 0, 0};
     summary_info.memory_utilization = {0,
-                    std::numeric_limits<uint64_t>::max(), 0};
+                    std::numeric_limits<uint64_t>::max(), 0, 0};
 
     p_job_info->num_gpus = job_stats->second.gpu_stats.size();
 
@@ -363,25 +384,23 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
             }
         }
     }
-    // Get the average of the summary
-    summary_info.power_usage.average = summary_info.power_usage.average/
-                p_job_info->num_gpus;
-    summary_info.gpu_clock.average = summary_info.gpu_clock.average/
-                p_job_info->num_gpus;
-    summary_info.gpu_utilization.average = summary_info.gpu_utilization.average/
-                p_job_info->num_gpus;
-    summary_info.memory_utilization.average =
-                summary_info.memory_utilization.average/p_job_info->num_gpus;
-    summary_info.pcie_tx.average = summary_info.pcie_tx.average/
-                p_job_info->num_gpus;
-    summary_info.pcie_rx.average = summary_info.pcie_rx.average/
-                p_job_info->num_gpus;
-    summary_info.gpu_temperature.average = summary_info.gpu_temperature.average/
-                p_job_info->num_gpus;
-    summary_info.memory_clock.average = summary_info.memory_clock.average/
-                p_job_info->num_gpus;
+    // Set the average of the summary
+    set_average_summary(summary_info.power_usage, p_job_info->num_gpus);
+    set_average_summary(summary_info.gpu_clock, p_job_info->num_gpus);
+    set_average_summary(summary_info.gpu_utilization, p_job_info->num_gpus);
+    set_average_summary(summary_info.memory_utilization, p_job_info->num_gpus);
+    set_average_summary(summary_info.pcie_tx, p_job_info->num_gpus);
+    set_average_summary(summary_info.pcie_rx, p_job_info->num_gpus);
+    set_average_summary(summary_info.gpu_temperature, p_job_info->num_gpus);
+    set_average_summary(summary_info.memory_clock, p_job_info->num_gpus);
 
     return RDC_ST_OK;
+}
+
+void RdcCacheManagerImpl::set_average_summary(
+        rdc_stats_summary_t& summary, uint32_t num_gpus) {
+    summary.average = summary.average/num_gpus;
+    summary.standard_deviation = summary.standard_deviation/num_gpus;
 }
 
 rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(const char job_id[64],

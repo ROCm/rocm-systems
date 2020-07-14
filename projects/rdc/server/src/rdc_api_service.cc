@@ -30,6 +30,8 @@ THE SOFTWARE.
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc_api_service.h"
 #include "rdc/rdc.h"
+#include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
@@ -488,41 +490,49 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     stats->set_max_value(src.power_usage.max_value);
     stats->set_min_value(src.power_usage.min_value);
     stats->set_average(src.power_usage.average);
+    stats->set_standard_deviation(src.power_usage.standard_deviation);
 
     stats = target->mutable_gpu_clock();
     stats->set_max_value(src.gpu_clock.max_value);
     stats->set_min_value(src.gpu_clock.min_value);
     stats->set_average(src.gpu_clock.average);
+    stats->set_standard_deviation(src.gpu_clock.standard_deviation);
 
     stats = target->mutable_gpu_utilization();
     stats->set_max_value(src.gpu_utilization.max_value);
     stats->set_min_value(src.gpu_utilization.min_value);
     stats->set_average(src.gpu_utilization.average);
+    stats->set_standard_deviation(src.gpu_utilization.standard_deviation);
 
     stats = target->mutable_memory_utilization();
     stats->set_max_value(src.memory_utilization.max_value);
     stats->set_min_value(src.memory_utilization.min_value);
     stats->set_average(src.memory_utilization.average);
+    stats->set_standard_deviation(src.memory_utilization.standard_deviation);
 
     stats = target->mutable_pcie_tx();
     stats->set_max_value(src.pcie_tx.max_value);
     stats->set_min_value(src.pcie_tx.min_value);
     stats->set_average(src.pcie_tx.average);
+    stats->set_standard_deviation(src.pcie_tx.standard_deviation);
 
     stats = target->mutable_pcie_rx();
     stats->set_max_value(src.pcie_rx.max_value);
     stats->set_min_value(src.pcie_rx.min_value);
     stats->set_average(src.pcie_rx.average);
+    stats->set_standard_deviation(src.pcie_rx.standard_deviation);
 
     stats = target->mutable_memory_clock();
     stats->set_max_value(src.memory_clock.max_value);
     stats->set_min_value(src.memory_clock.min_value);
     stats->set_average(src.memory_clock.average);
+    stats->set_standard_deviation(src.memory_clock.standard_deviation);
 
     stats = target->mutable_gpu_temperature();
     stats->set_max_value(src.gpu_temperature.max_value);
     stats->set_min_value(src.gpu_temperature.min_value);
     stats->set_average(src.gpu_temperature.average);
+    stats->set_standard_deviation(src.gpu_temperature.standard_deviation);
 
     return true;
 }

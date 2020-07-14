@@ -233,6 +233,7 @@ typedef struct {
     uint64_t max_value;   //!< Maximum value measured
     uint64_t min_value;   //!< Minimum value measured
     uint64_t average;     //!< Average value measured
+    double standard_deviation;   //!< The standard deviation
 } rdc_stats_summary_t;
 
 /**

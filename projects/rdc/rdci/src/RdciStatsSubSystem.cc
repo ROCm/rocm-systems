@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <getopt.h>
 #include <unistd.h>
 #include <signal.h>
+#include <ctime>
 #include <limits>
 #include <iomanip>
 #include "rdc_lib/rdc_common.h"
@@ -42,6 +43,7 @@ RdciStatsSubSystem::~RdciStatsSubSystem() {
 
 void RdciStatsSubSystem::parse_cmd_opts(int argc, char ** argv) {
     const int HOST_OPTIONS = 1000;
+    const int JSON_OPTIONS = 1001;
     const struct option long_options[] = {
         {"host", required_argument, nullptr, HOST_OPTIONS },
         {"help", optional_argument, nullptr, 'h' },
@@ -53,6 +55,7 @@ void RdciStatsSubSystem::parse_cmd_opts(int argc, char ** argv) {
         {"jremoveall", optional_argument, nullptr, 'a' },
         {"verbose", optional_argument, nullptr, 'v'},
         {"group", required_argument, nullptr, 'g'},
+        {"json",  optional_argument, nullptr, JSON_OPTIONS},
         { nullptr,  0 , nullptr, 0 }
     };
 
@@ -65,6 +68,9 @@ void RdciStatsSubSystem::parse_cmd_opts(int argc, char ** argv) {
         switch (opt) {
             case HOST_OPTIONS:
                 ip_port_ = optarg;
+                break;
+            case JSON_OPTIONS:
+                set_json_output(true);
                 break;
             case 'h':
                 stats_ops_ = STATS_HELP;
@@ -119,17 +125,22 @@ void RdciStatsSubSystem::parse_cmd_opts(int argc, char ** argv) {
 }
 
 void RdciStatsSubSystem::show_help() const {
+    if (is_json_output()) return;
     std::cout << " stats -- Used to view job statistics.\n\n";
     std::cout << "Usage\n";
-    std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] -s <jobId>"
-            << " -g <groupId>\n";
-    std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] -x <jobId>\n";
-    std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [-v] "
+    std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] "
+            << "-s <jobId> -g <groupId>\n";
+    std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] "
+            << "-x <jobId>\n";
+    std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] [-v] "
               << "-j <jobId>\n";
-    std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] -r <jobId>\n";
-    std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] -a\n";
+    std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] "
+              << "-r <jobId>\n";
+    std::cout << "    rdci stats [--host <IP/FQDN>:port] [-u] [--json] -a\n";
     std::cout << "\nFlags:\n";
     show_common_usage();
+    std::cout << "  --json                         "
+              << "Output using json.\n";
     std::cout << "  -s  --jstart                   Start recording "
               << "job statistics.\n";
     std::cout << "  -g  --group-id                 The GPU group to query "
@@ -146,14 +157,103 @@ void RdciStatsSubSystem::show_help() const {
               << "all job statistics.\n";
 }
 
+void RdciStatsSubSystem::show_job_stats_json(
+    const rdc_gpu_usage_info_t& gpu_info) const {
+    std::cout << "\"start_time\": " << gpu_info.start_time << ",";
+    std::cout << "\"end_time\": " << gpu_info.end_time << ",";
+    std::cout << "\"execution_time\": " <<
+            (gpu_info.end_time-gpu_info.start_time) << ",";
+    std::cout << "\"energy_consumed\": " << gpu_info.energy_consumed << ",";
+
+    std::cout << "\"power_usage_max\": "
+            << gpu_info.power_usage.max_value << ",";
+    std::cout << "\"power_usage_min\": "
+            << gpu_info.power_usage.min_value << ",";
+    std::cout << "\"power_usage_avg\": "
+            << gpu_info.power_usage.average << ",";
+    std::cout << "\"power_usage_stanard_deviation\": "
+            << gpu_info.power_usage.standard_deviation << ",";
+
+    std::cout << "\"gpu_clock_max\": "
+            << gpu_info.gpu_clock.max_value << ",";
+    std::cout << "\"gpu_clock_min\": "
+            << gpu_info.gpu_clock.min_value << ",";
+    std::cout << "\"gpu_clock_avg\": "
+            << gpu_info.gpu_clock.average << ",";
+    std::cout << "\"gpu_clock_stanard_deviation\": "
+            << gpu_info.gpu_clock.standard_deviation << ",";
+
+    std::cout << "\"memory_clock_max\": "
+            << gpu_info.memory_clock.max_value << ",";
+    std::cout << "\"memory_clock_min\": "
+            << gpu_info.memory_clock.min_value << ",";
+    std::cout << "\"memory_clock_avg\": "
+            << gpu_info.memory_clock.average << ",";
+    std::cout << "\"memory_clock_stanard_deviation\": "
+            << gpu_info.memory_clock.standard_deviation << ",";
+
+    std::cout << "\"gpu_utilization_max\": "
+            << gpu_info.gpu_utilization.max_value << ",";
+    std::cout << "\"gpu_utilization_min\": "
+            << gpu_info.gpu_utilization.min_value << ",";
+    std::cout << "\"gpu_utilization_avg\": "
+            << gpu_info.gpu_utilization.average << ",";
+    std::cout << "\"gpu_utilization_deviation\": "
+            << gpu_info.gpu_utilization.standard_deviation << ",";
+
+    std::cout << "\"max_gpu_memory_used\": "
+            << gpu_info.max_gpu_memory_used << ",";
+
+    std::cout << "\"memory_utilization_max\": "
+            << gpu_info.memory_utilization.max_value << ",";
+    std::cout << "\"memory_utilization_min\": "
+            << gpu_info.memory_utilization.min_value << ",";
+    std::cout << "\"memory_utilization_avg\": "
+            << gpu_info.memory_utilization.average << ",";
+    std::cout << "\"memory_utilization_stanard_deviation\": "
+            << gpu_info.memory_utilization.standard_deviation << ",";
+
+    std::cout << "\"gpu_temperature_max\": "
+            << gpu_info.gpu_temperature.max_value << ",";
+    std::cout << "\"gpu_temperature_min\": "
+            << gpu_info.gpu_temperature.min_value << ",";
+    std::cout << "\"gpu_temperature_avg\": "
+            << gpu_info.gpu_temperature.average << ",";
+    std::cout << "\"gpu_temperature_stanard_deviation\": "
+            << gpu_info.gpu_temperature.standard_deviation << ",";
+
+    std::cout << "\"pcie_rx_max\": "
+            << gpu_info.pcie_rx.max_value << ",";
+    std::cout << "\"pcie_rx_min\": "
+            << gpu_info.pcie_rx.min_value << ",";
+    std::cout << "\"pcie_rx_avg\": "
+            << gpu_info.pcie_rx.average << ",";
+    std::cout << "\"pcie_rx_stanard_deviation\": "
+            << gpu_info.pcie_rx.standard_deviation << ",";
+
+    std::cout << "\"pcie_tx_max\": "
+            << gpu_info.pcie_tx.max_value << ",";
+    std::cout << "\"pcie_tx_min\": "
+            << gpu_info.pcie_tx.min_value << ",";
+    std::cout << "\"pcie_tx_avg\": "
+            << gpu_info.pcie_tx.average << ",";
+    std::cout << "\"pcie_tx_stanard_deviation\": "
+            << gpu_info.pcie_tx.standard_deviation << ",";
+
+    std::cout << "\"ecc_correct\": " << gpu_info.ecc_correct << ",";
+    std::cout << "\"ecc_uncorrect\": " << gpu_info.ecc_uncorrect;
+}
+
 void RdciStatsSubSystem::show_job_stats(
         const rdc_gpu_usage_info_t& gpu_info) const {
     std::cout << "|------- Execution Stats ----------"
         << "+------------------------------------\n";
     std::cout << "| Start Time                       | "
-        << gpu_info.start_time << "\n";
+        << std::put_time(std::gmtime(reinterpret_cast<const time_t*>
+            (&gpu_info.start_time)), "%c %Z") << "\n";
     std::cout << "| End Time                         | "
-        << gpu_info.end_time << "\n";
+        << std::put_time(std::gmtime(reinterpret_cast<const time_t*>
+            (&gpu_info.end_time)), "%c %Z")  << "\n";
     std::cout << "| Total Execution Time (sec)       | "
         << (gpu_info.end_time-gpu_info.start_time) << "\n";
     std::cout << "+------- Performance Stats --------"
@@ -163,37 +263,53 @@ void RdciStatsSubSystem::show_job_stats(
     std::cout << "| Power Usage (Watts)              | "  << "Max: "
         << gpu_info.power_usage.max_value<< " Min: "<<
         gpu_info.power_usage.min_value << " Avg: "
-        << gpu_info.power_usage.average << "\n";
+        << gpu_info.power_usage.average << " SD: "
+        << std::fixed << std::setprecision(2)
+        << gpu_info.power_usage.standard_deviation << "\n";
     std::cout << "| GPU Clock (MHz)                  | "  << "Max: "
         << gpu_info.gpu_clock.max_value << " Min: " <<
         gpu_info.gpu_clock.min_value << " Avg: "
-        << gpu_info.gpu_clock.average << "\n";
+        << gpu_info.gpu_clock.average << " SD: "
+        << std::fixed << std::setprecision(2)
+        << gpu_info.gpu_clock.standard_deviation << "\n";
     std::cout << "| Memory Clock (MHz)               | "  << "Max: "
         << gpu_info.memory_clock.max_value << " Min: " <<
         gpu_info.memory_clock.min_value << " Avg: "
-        << gpu_info.memory_clock.average << "\n";
+        << gpu_info.memory_clock.average << " SD: "
+        << std::fixed << std::setprecision(2)
+        << gpu_info.memory_clock.standard_deviation << "\n";
     std::cout << "| GPU Utilization (%)              | "  << "Max: "
         << gpu_info.gpu_utilization.max_value <<" Min: " <<
         gpu_info.gpu_utilization.min_value << " Avg: " <<
-        gpu_info.gpu_utilization.average << "\n";
+        gpu_info.gpu_utilization.average << " SD: "
+        << std::fixed << std::setprecision(2)
+        << gpu_info.gpu_utilization.standard_deviation << "\n";
     std::cout << "| Max GPU Memory Used (bytes)      | "  <<
         gpu_info.max_gpu_memory_used << "\n";
     std::cout << "| Memory Utilization (%)           | "
         << "Max: " << gpu_info.memory_utilization.max_value
         <<" Min: "<< gpu_info.memory_utilization.min_value
-        << " Avg: " << gpu_info.memory_utilization.average << "\n";
+        << " Avg: " << gpu_info.memory_utilization.average << " SD: "
+        << std::fixed << std::setprecision(2)
+        << gpu_info.memory_utilization.standard_deviation << "\n";
     std::cout << "| GPU Temperature (Celsius)        | "
         << "Max: " << gpu_info.gpu_temperature.max_value
         <<" Min: "<< gpu_info.gpu_temperature.min_value
-        << " Avg: " << gpu_info.gpu_temperature.average << "\n";
+        << " Avg: " << gpu_info.gpu_temperature.average << " SD: "
+        << std::fixed << std::setprecision(2)
+        << gpu_info.gpu_temperature.standard_deviation << "\n";
     std::cout << "| PCIe Rx Bandwidth (megabytes)    | "
         << "Max: " << gpu_info.pcie_rx.max_value
         <<" Min: "<< gpu_info.pcie_rx.min_value
-        << " Avg: " << gpu_info.pcie_rx.average << "\n";
+        << " Avg: " << gpu_info.pcie_rx.average << " SD: "
+        << std::fixed << std::setprecision(2)
+        << gpu_info.pcie_rx.standard_deviation << "\n";
     std::cout << "| PCIe Tx Bandwidth (megabytes)    | "
         << "Max: " << gpu_info.pcie_tx.max_value
         <<" Min: "<< gpu_info.pcie_tx.min_value
-        << " Avg: " << gpu_info.pcie_tx.average << "\n";
+        << " Avg: " << gpu_info.pcie_tx.average << " SD: "
+        << std::fixed << std::setprecision(2)
+        << gpu_info.pcie_tx.standard_deviation << "\n";
     std::cout << "| Correctable ECC Errors           | "
         << gpu_info.ecc_correct << "\n";
     std::cout << "| Uncorrectable ECC Errors         | "
@@ -217,8 +333,13 @@ void RdciStatsSubSystem::process() {
         if (result != RDC_ST_OK) {
             throw RdcException(result, rdc_status_string(result));
         }
-        std::cout << "Successfully started recording job "
+        if (is_json_output()) {
+            std::cout << "\"job_id\": \"" << job_id_ << "\", \"group_id\": \""
+                      << group_id_  <<"\", \"status\": \"ok\"";
+        } else {
+            std::cout << "Successfully started recording job "
                 << job_id_ << " with a group ID " << group_id_ << std::endl;
+        }
         return;
     }
 
@@ -228,8 +349,13 @@ void RdciStatsSubSystem::process() {
         if (result != RDC_ST_OK) {
             throw RdcException(result, rdc_status_string(result));
         }
-        std::cout << "Successfully stopped recording job "
+        if (is_json_output()) {
+            std::cout << "\"job_id\": \"" << job_id_
+                    << "\", \"status\": \"ok\"";
+        } else {
+            std::cout << "Successfully stopped recording job "
                 << job_id_ << std::endl;
+        }
         return;
     }
 
@@ -241,14 +367,26 @@ void RdciStatsSubSystem::process() {
             throw RdcException(result, rdc_status_string(result));
         }
 
-        std::cout << "|         Summary \n";
-        show_job_stats(job_info.summary);
+        if (!is_json_output()) {
+            std::cout << "|         Summary \n";
+            show_job_stats(job_info.summary);
+        } else {
+            std::cout << "\"job_summary\" : {";
+            show_job_stats_json(job_info.summary);
+            std::cout << "}";
+        }
         if (is_verbose_ == false) {
             return;
         }
         for (uint32_t i = 0; i < job_info.num_gpus; i++) {
-            std::cout << "|         GPU " << i << "\n";
-            show_job_stats(job_info.gpus[i]);
+            if (!is_json_output()) {
+                std::cout << "|         GPU " << i << "\n";
+                show_job_stats(job_info.gpus[i]);
+            } else {
+                std:: cout << ", \"gpu_" << i << "\": {";
+                show_job_stats_json(job_info.gpus[i]);
+                std::cout << "}";
+            }
         }
         return;
     }
@@ -259,8 +397,13 @@ void RdciStatsSubSystem::process() {
         if (result != RDC_ST_OK) {
             throw RdcException(result, rdc_status_string(result));
         }
-        std::cout << "Successfully removed job "
+        if (is_json_output()) {
+            std::cout << "\"job_id\": \"" << job_id_
+                    << "\", \"status\": \"ok\"";
+        } else {
+            std::cout << "Successfully removed job "
                 << job_id_ << std::endl;
+        }
         return;
     }
 
@@ -269,7 +412,11 @@ void RdciStatsSubSystem::process() {
         if (result != RDC_ST_OK) {
             throw RdcException(result, rdc_status_string(result));
         }
-        std::cout << "Successfully removed all jobs\n";
+        if (is_json_output()) {
+            std::cout << "\"status\": \"ok\"";
+        } else {
+            std::cout << "Successfully removed all jobs\n";
+        }
         return;
     }
 }

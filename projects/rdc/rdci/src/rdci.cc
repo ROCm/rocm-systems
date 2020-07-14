@@ -42,9 +42,9 @@ int main(int argc, char ** argv) {
         exit(0);
     }
 
+    amd::rdc::RdciSubSystemPtr subsystem;
     try {
        std::string subsystem_name = argv[1];
-       amd::rdc::RdciSubSystemPtr subsystem;
        if (subsystem_name == "discovery") {
            subsystem.reset(new amd::rdc::RdciDiscoverySubSystem());
        } else if (subsystem_name == "dmon") {
@@ -66,11 +66,20 @@ int main(int argc, char ** argv) {
 
        subsystem->process();
     } catch (const amd::rdc::RdcException& e) {
-        std::cout << "rdci Error: " << e.what()  << std::endl;
+        if (subsystem && subsystem->is_json_output()) {
+            std::cout << "\"status\": \"error\", \"description\": \""
+                << e.what() << '"';
+        } else {
+            std::cout << "rdci Error: " << e.what()  << std::endl;
+        }
         return e.error_code();
     } catch (...) {
-        std::cout << "Unhandled exception." << std::endl;
-        return 1;
+        if (subsystem && subsystem->is_json_output()) {
+            std::cout << "\"status\": \"error\", \"description\": "
+                    << "\"Unhandled exception.\"";
+        } else {
+            std::cout << "Unhandled exception." << std::endl;
+        }        return 1;
     }
 
     return 0;

@@ -37,6 +37,7 @@ RdciFieldGroupSubSystem::RdciFieldGroupSubSystem():
 
 void RdciFieldGroupSubSystem::parse_cmd_opts(int argc, char ** argv) {
     const int HOST_OPTIONS = 1000;
+    const int JSON_OPTIONS = 1001;
     const struct option long_options[] = {
         {"host",    required_argument, nullptr, HOST_OPTIONS },
         {"help", optional_argument, nullptr, 'h' },
@@ -47,6 +48,7 @@ void RdciFieldGroupSubSystem::parse_cmd_opts(int argc, char ** argv) {
         {"fieldids", required_argument, nullptr, 'f'},
         {"info",  optional_argument, nullptr, 'i' },
         {"delete", required_argument, nullptr, 'd' },
+        {"json",  optional_argument, nullptr, JSON_OPTIONS },
         { nullptr,  0 , nullptr, 0 }
     };
 
@@ -58,6 +60,9 @@ void RdciFieldGroupSubSystem::parse_cmd_opts(int argc, char ** argv) {
         switch (opt) {
             case HOST_OPTIONS:
                 ip_port_ = optarg;
+                break;
+            case JSON_OPTIONS:
+                set_json_output(true);
                 break;
             case 'h':
                 field_group_ops_ = FIELD_GROUP_HELP;
@@ -112,18 +117,22 @@ void RdciFieldGroupSubSystem::parse_cmd_opts(int argc, char ** argv) {
 }
 
 void RdciFieldGroupSubSystem::show_help() const {
+    if (is_json_output()) return;
     std::cout << " fieldgroup -- Used to  create and maintain groups "
               << "of field Ids.\n\n";
     std::cout << "Usage\n";
-    std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [-u] -l\n";
-    std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [-u] "
-              << "-c <groupName> -f <filedIds>\n";
-    std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [-u] "
+    std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port]"
+              << " [--json] [-u] -l\n";
+    std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json]"
+              << " [-u] -c <groupName> -f <filedIds>\n";
+    std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json] [-u] "
               << "-g <groupId> -i\n";
-    std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [-u] "
+    std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json] [-u] "
             << "-d <groupId>\n";
     std::cout << "\nFlags:\n";
     show_common_usage();
+    std::cout << "  --json                         "
+              << "Output using json.\n";
     std::cout << "  -l  --list                     "
               << "List the field groups that currently exist for a host.\n";
     std::cout << "  -g  --group groupId            "
@@ -143,6 +152,7 @@ void RdciFieldGroupSubSystem::process() {
     rdc_status_t result = RDC_ST_OK;
     rdc_field_group_info_t group_info;
     uint32_t count = 0;
+    std::string json_group_ids = "\"field_groups\": [";
     switch (field_group_ops_) {
         case FIELD_GROUP_HELP:
             show_help();
@@ -170,9 +180,14 @@ void RdciFieldGroupSubSystem::process() {
                result = rdc_group_field_create(rdc_handle_, fields.size(),
                          &field_ids[0], group_name_.c_str(), &group_id);
                if (result == RDC_ST_OK) {
-                   std::cout << "Successfully created a field group"
-                    << " with a group ID " << group_id << std::endl;
-                   return;
+                   if (is_json_output()) {
+                       std::cout << "\"field_group_id\": \"" << group_id
+                        <<"\", \"status\": \"ok\"";
+                   } else {
+                       std::cout << "Successfully created a field group"
+                            << " with a group ID " << group_id << std::endl;
+                       return;
+                   }
                }
                break;
             }
@@ -184,8 +199,13 @@ void RdciFieldGroupSubSystem::process() {
             }
             result = rdc_group_field_destroy(rdc_handle_, group_id_);
             if (result == RDC_ST_OK) {
-                std::cout << "Successfully deleted the field group "
+                if (is_json_output()) {
+                    std::cout << "\"field_group_id\": \"" << group_id_
+                        <<"\", \"status\": \"ok\"";
+                } else {
+                    std::cout << "Successfully deleted the field group "
                         << group_id_  << std::endl;
+                }
                 return;
             }
             break;
@@ -195,8 +215,11 @@ void RdciFieldGroupSubSystem::process() {
                         rdc_handle_, group_id_list, &count);
             if ( result != RDC_ST_OK) break;
 
-            std::cout << count << " field group found.\n";
-            std::cout << "GroupID\t" << "GroupName\t" << "FieldIds\n";
+            if (!is_json_output()) {
+                std::cout << count << " field group found.\n";
+                std::cout << "GroupID\t" << "GroupName\t" << "FieldIds\n";
+            }
+
             for (uint32_t i = 0; i < count; i++) {
                 result = rdc_group_field_get_info(
                         rdc_handle_, group_id_list[i], &group_info);
@@ -206,15 +229,44 @@ void RdciFieldGroupSubSystem::process() {
                     std::to_string(group_id_list[i]));
                 }
 
-                std::cout << group_id_list[i] << "\t"
+                if (!is_json_output()) {
+                    std::cout << group_id_list[i] << "\t"
                         << group_info.group_name << "\t\t";
+                } else {
+                    json_group_ids += "{\"group_id\": \"";
+                    json_group_ids += std::to_string(group_id_list[i]);
+                    json_group_ids += "\", \"group_name\": \"";
+                    json_group_ids += group_info.group_name;
+                    json_group_ids += "\", \"field_ids\": [";
+                }
+
                 for (uint32_t j = 0; j < group_info.count; j++) {
-                    std::cout << group_info.field_ids[j];
+                    if (!is_json_output()) {
+                        std::cout << group_info.field_ids[j];
+                    } else {
+                        json_group_ids +=
+                            std::to_string(group_info.field_ids[j]);
+                    }
                     if ( j < group_info.count -1 ) {
-                        std::cout << ",";
+                        if (!is_json_output()) {
+                            std::cout << ",";
+                        } else {
+                            json_group_ids += ",";
+                        }
                     }
                 }
-                std::cout << std::endl;
+                if (!is_json_output()) {
+                    std::cout << std::endl;
+                } else {
+                    json_group_ids += "]}";
+                    if (i != count -1) {
+                        json_group_ids += ",";
+                    }
+                }
+            }
+            if (is_json_output()) {
+                json_group_ids += "], \"status\": \"ok\"";
+                std::cout << json_group_ids;
             }
             break;
         case FIELD_GROUP_INFO:
@@ -226,13 +278,29 @@ void RdciFieldGroupSubSystem::process() {
             result = rdc_group_field_get_info(
                     rdc_handle_, group_id_, &group_info);
             if (result == RDC_ST_OK) {
-                std::cout << "Group name: " << group_info.group_name
-                            << std::endl;
-                std::cout << "Field Ids: ";
-                for (uint32_t i = 0; i < group_info.count; i++) {
-                    std::cout << group_info.field_ids[i] << " ";
+                if (is_json_output()) {
+                    std::cout << "\"group_name\": \"" << group_info.group_name
+                        << "\", \"field_ids\": [";
+                } else {
+                    std::cout << "Group name: " << group_info.group_name
+                                << std::endl;
+                    std::cout << "Field Ids: ";
                 }
-                std::cout << std::endl;
+                for (uint32_t i = 0; i < group_info.count; i++) {
+                    if (is_json_output()) {
+                        std::cout << group_info.field_ids[i];
+                        if ( i != group_info.count-1 ) {
+                            std::cout << ",";
+                        }
+                    } else {
+                        std::cout << group_info.field_ids[i] << " ";
+                    }
+                }
+                if (is_json_output()) {
+                    std::cout << "], \"status\": \"ok\"";
+                } else {
+                    std::cout << std::endl;
+                }
                 return;
             }
             break;
