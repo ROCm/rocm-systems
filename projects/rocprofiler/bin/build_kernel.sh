@@ -40,8 +40,17 @@ else
   LIB_DIR=$LLVM_DIR/lib
 fi
 
-BC_DIR=$LIB_DIR/bitcode
-if [ ! -d "$BC_DIR" ] ; then BC_DIR=$LIB_DIR; fi
+# Determine whether using new or old device-libs layout
+if [ -e $LIB_DIR/bitcode/opencl.amdgcn.bc ]; then
+  BC_DIR=$LIB_DIR/bitcode
+elif [ -e $LIB_DIR/opencl.amdgcn.bc ]; then
+  BC_DIR=$LIB_DIR
+elif [ -e $ROCM_DIR/amdgcn/bitcode/opencl.bc ]; then
+  BC_DIR=$ROCM_DIR/amdgcn/bitcode
+else
+  echo "Error: Cannot find amdgcn bitcode directory"
+  exit 1
+fi
 
 CLANG_ROOT=$LLVM_DIR/lib/clang
 CLANG_DIR=`ls -d $CLANG_ROOT/* | head -n 1`
@@ -52,10 +61,14 @@ fi
 
 BIN_DIR=$LLVM_DIR/bin
 INC_DIR=$CLANG_DIR/include
-BITCODE_OPTS="\
-  -Xclang -mlink-bitcode-file -Xclang $BC_DIR/opencl.amdgcn.bc \
-  -Xclang -mlink-bitcode-file -Xclang $BC_DIR/ockl.amdgcn.bc \
-  -Xclang -mlink-bitcode-file -Xclang $BC_DIR/ocml.amdgcn.bc"
+if [ -e $BC_DIR/opencl.amdgcn.bc ]; then
+  BITCODE_OPTS="-nogpulib \
+    -Xclang -mlink-bitcode-file -Xclang $BC_DIR/opencl.amdgcn.bc \
+    -Xclang -mlink-bitcode-file -Xclang $BC_DIR/ockl.amdgcn.bc \
+    -Xclang -mlink-bitcode-file -Xclang $BC_DIR/ocml.amdgcn.bc"
+else
+  BITCODE_OPTS="--hip-device-lib-path=$BC_DIR"
+fi
 
 for GFXIP in $TGT_LIST ; do
   OBJ_PREF=$GFXIP
