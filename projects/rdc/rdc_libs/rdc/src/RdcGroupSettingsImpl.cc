@@ -61,7 +61,8 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_create(
 rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_destroy(
     rdc_gpu_group_t p_rdc_group_id) {
     std::lock_guard<std::mutex> guard(group_mutex_);
-    gpu_group_.erase(p_rdc_group_id);
+    if (!gpu_group_.erase(p_rdc_group_id))
+        return RDC_ST_NOT_FOUND;
     return RDC_ST_OK;
 }
 
@@ -163,7 +164,8 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_destroy(
         return RDC_ST_BAD_PARAMETER;
     }
     std::lock_guard<std::mutex> guard(field_group_mutex_);
-    field_group_.erase(rdc_field_group_id);
+    if (!field_group_.erase(rdc_field_group_id))
+        return RDC_ST_NOT_FOUND;
     return RDC_ST_OK;
 }
 
