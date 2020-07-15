@@ -292,7 +292,7 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
 #############################################################
 # arguments manipulation routines
 def get_field(args, field):
-  ptrn1_field = re.compile(r'^.*' + field + '\(');
+  ptrn1_field = re.compile(r'^.* ' + field + '\(');
   ptrn2_field = re.compile(r'\) .*$');
   ptrn3_field = re.compile(r'\)\)$');
   (field_name, n) = ptrn1_field.subn('', args, count=1);
@@ -358,7 +358,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
       mfixformat = ptrn_fixformat.match(record)
       if mfixformat: #replace '=' in args with parentheses
         reformated_args = kernel_arg + mfixformat.group(2).replace('=','(').replace(',',')')+')'
-        record = mfixformat.group(1) + '(' + reformated_args + ')'
+        record = mfixformat.group(1) + '( ' + reformated_args + ')'
 
       m = ptrn_val.match(record)
       if m:
