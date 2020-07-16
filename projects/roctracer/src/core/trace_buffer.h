@@ -117,7 +117,7 @@ class TraceBuffer : protected TraceBufferBase {
   typedef void (*callback_t)(Entry*);
   typedef TraceBuffer<Entry> Obj;
   typedef uint64_t pointer_t;
-  typedef std::mutex mutex_t;
+  typedef std::recursive_mutex mutex_t;
 
   struct flush_prm_t {
     uint32_t type;
@@ -131,10 +131,11 @@ class TraceBuffer : protected TraceBufferBase {
     name_ = strdup(name);
     size_ = size;
     data_ = allocate_fun();
-    next_ = NULL;
+    next_ = allocate_fun();
     read_pointer_ = 0;
     end_pointer_ = size;
     buf_list_.push_back(data_);
+    buf_list_.push_back(next_);
 
     flush_prm_arr_ = flush_prm_arr;
     flush_prm_count_ = flush_prm_count;
