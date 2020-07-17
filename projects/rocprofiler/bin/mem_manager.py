@@ -122,10 +122,6 @@ class MemManager:
     tid = recvals[3]
 
     select_expr = '"Index" = ' + str(recordid) + ' AND "proc-id" = ' + str(procid)
-    async_copy_recvals = self.db.table_get_record('COPY', select_expr)  #List of async copy record fields
-    async_copy_start_time = async_copy_recvals[0]
-    async_copy_end_time = async_copy_recvals[1]
-    async_copy_tid = async_copy_recvals[4]
 
     # hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind)
     hipMemcpy_ptrn = re.compile(r'\(dst\((.*)\) src\((.*)\) sizeBytes\((\d+)\).*\)')
@@ -145,7 +141,11 @@ class MemManager:
     m_array = hipMemcpy_ptrn3.match(args)
 
     is_async = 1 if async_event_ptrn.search(event) else 0
-    if is_async: tid = async_copy_tid
+    if is_async:
+      async_copy_recvals = self.db.table_get_record('COPY', select_expr)  #List of async copy record fields
+      async_copy_start_time = async_copy_recvals[0]
+      async_copy_end_time = async_copy_recvals[1]
+      tid = async_copy_recvals[4]
 
     copy_line = ''
     size = 0
