@@ -150,6 +150,20 @@ void RestoreHsaApi() {
   table->amd_ext_->hsa_amd_queue_intercept_register_fn = hsa_amd_queue_intercept_register_fn;
 }
 
+void PmcStarter(Context* context) {
+  hsa_agent_t agent = context->GetAgent();
+  // Create queue
+  hsa_queue_t* queue;
+  hsa_status_t status = rocprofiler::CreateQueuePro(agent, 1,
+    HSA_QUEUE_TYPE_MULTI, NULL, NULL, UINT32_MAX, UINT32_MAX, &queue);
+  if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "CreateQueuePro");
+  HsaQueue hsa_queue(NULL, queue);
+  context->Start(0, &hsa_queue);
+  context->Read(0, &hsa_queue);
+  context->GetData(0);
+  hsa_queue_destroy(queue);
+}
+
 void StandaloneIntercept() {
   ::HsaApiTable* table = kHsaApiTable;
   table->core_->hsa_queue_create_fn = rocprofiler::CreateQueuePro;
@@ -216,7 +230,10 @@ uint32_t LoadTool() {
     if (settings.code_obj_tracking) intercept_mode |= CODE_OBJ_TRACKING_MODE;
     if (settings.memcopy_tracking) intercept_mode |= MEMCOPY_INTERCEPT_MODE;
     if (settings.hsa_intercepting) intercept_mode |= HSA_INTERCEPT_MODE;
-    if (settings.k_concurrent) InterceptQueue::k_concurrent_ = true;
+    if (settings.k_concurrent) {
+      Context::k_concurrent_ = settings.k_concurrent;
+      InterceptQueue::k_concurrent_ = settings.k_concurrent;
+    }
     if (settings.opt_mode) InterceptQueue::opt_mode_ = true;
   }
 
@@ -428,6 +445,8 @@ Tracker::counter_t Tracker::counter_ = 0;
 util::Logger::mutex_t util::Logger::mutex_;
 std::atomic<util::Logger*> util::Logger::instance_{};
 }
+
+CONTEXT_INSTANTIATE();
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Public library methods
