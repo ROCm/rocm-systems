@@ -87,7 +87,12 @@ class Group {
         n_profiles_(0),
         refs_(1),
         context_(context),
-        index_(index) {}
+        index_(index),
+        barrier_signal_{},
+        dispatch_signal_{},
+        orig_signal_{},
+        record_{}
+        {}
 
   void Insert(const profile_info_t& info) {
     const rocprofiler_feature_kind_t kind = info.rinfo->kind;
@@ -132,6 +137,28 @@ class Group {
   Context* GetContext() { return context_; }
   uint32_t GetIndex() const { return index_; }
 
+  void SetBarrierSignal(const hsa_signal_t &signal) {
+    barrier_signal_ = signal;
+  }
+  hsa_signal_t& GetBarrierSignal() {
+    return barrier_signal_;
+  }
+  void SetDispatchSignal(const hsa_signal_t &signal) {
+    dispatch_signal_ = signal;
+  }
+  hsa_signal_t& GetDispatchSignal() {
+    return dispatch_signal_;
+  }
+  void SetOrigSignal(const hsa_signal_t &signal) {
+    orig_signal_ = signal;
+  }
+  const hsa_signal_t& GetOrigSignal() const {
+    return orig_signal_;
+  }
+  rocprofiler_dispatch_record_t* GetRecord() {
+    return &record_;
+  }
+
   atomic_refs_t* AtomicRefsCount() { return reinterpret_cast<atomic_refs_t*>(&refs_); }
   void ResetRefsCount() { AtomicRefsCount()->store(n_profiles_, std::memory_order_release); }
   void IncrRefsCount() { AtomicRefsCount()->fetch_add(1, std::memory_order_acq_rel); }
@@ -148,6 +175,12 @@ class Group {
   refs_t refs_;
   Context* const context_;
   const uint32_t index_;
+  // completion signal of after-dispatch barrier
+  hsa_signal_t barrier_signal_;
+  // completion signal kernel packet dispatch
+  hsa_signal_t dispatch_signal_;
+  hsa_signal_t orig_signal_;
+  rocprofiler_dispatch_record_t record_;
 };
 
 // Profiling context
@@ -244,11 +277,21 @@ class Context {
     char* ptr;
   };
 
+  void RestoreSignals(const profile_tuple_t& tuple) {
+    hsa_rsrc_->HsaApi()->hsa_signal_store_screlease(tuple.dispatch_signal, 1);
+    if (k_concurrent_) {
+      hsa_rsrc_->HsaApi()->hsa_signal_store_screlease(tuple.read_signal, 1);
+      hsa_rsrc_->HsaApi()->hsa_signal_store_screlease(tuple.barrier_signal, 1);
+    }
+  }
+
   void GetData(const uint32_t& group_index) {
     const profile_vector_t profile_vector = GetProfiles(group_index);
     for (auto& tuple : profile_vector) {
       // Wait for stop packet to complete
       hsa_rsrc_->SignalWaitRestore(tuple.completion_signal, 1);
+      // Restore other signals
+      RestoreSignals(tuple);
       for (rocprofiler_feature_t* rinfo : *(tuple.info_vector)) rinfo->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
       callback_data_t callback_data{tuple.profile, tuple.info_vector, tuple.info_vector->size(), NULL};
       const hsa_status_t status =
@@ -285,30 +328,6 @@ class Context {
     }
   }
 
-  /* Handle the completion of kernel-begin 'read' packet */
-  static bool HandlerRead(hsa_signal_value_t value, void* arg) {
-    Group* group = reinterpret_cast<Group*>(arg);
-    Context* context = group->GetContext();
-
-    // Handle the completion signal of read packet at kernel begin
-    const profile_vector_t profile_vector = context->GetProfiles(group->GetIndex());
-    for (auto& tuple : profile_vector) {
-      // Wait for read packet to complete
-      util::HsaRsrcFactory::Instance().SignalWaitRestore(tuple.completion_signal, 1);
-      const profile_t* profile = tuple.profile;
-      // Copy the counter values, read at kernel begin, to the right half of
-      // the buffer, so that the next kernel-end read can reuse the left half
-      char* data = reinterpret_cast<char*>(profile->output_buffer.ptr);
-      const uint32_t num = profile->output_buffer.size / 2;
-      for(uint32_t i = 0; i < num; ++i) {
-        data[i+num] = data[i];          // left --> right
-        data[i] = 0;                    // reset left
-      }
-    }
-
-    return false;
-  }
-
   static bool Handler(hsa_signal_value_t value, void* arg) {
     Group* group = reinterpret_cast<Group*>(arg);
     Context* context = group->GetContext();
@@ -324,24 +343,10 @@ class Context {
   Group* GetGroup(const uint32_t& index) { return &set_[index]; }
   rocprofiler_handler_t GetHandler(void** arg) const { *arg = handler_arg_; return handler_; }
 
-  void SetDispatchSignal(const hsa_signal_t &signal) {
-    dispatch_signal_ = signal;
-  }
-  hsa_signal_t& GetDispatchSignal() {
-    return dispatch_signal_;
-  }
-  void SetOrigSignal(const hsa_signal_t &signal) {
-    orig_signal_ = signal;
-  }
-  const hsa_signal_t& GetOrigSignal() const {
-    return orig_signal_;
-  }
-  rocprofiler_dispatch_record_t* GetRecord() {
-    return &record_;
-  }
-
   // Concurrent profiling mode
   static bool k_concurrent_;
+  // Packets to stop the profiling
+  static pkt_vector_t stop_packets_;
 
  private:
   Context(const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info,
@@ -354,16 +359,12 @@ class Context {
         metrics_(NULL),
         handler_(handler),
         handler_arg_(handler_arg),
-        pcsmp_mode_(false),
-        dispatch_signal_{},
-        orig_signal_{},
-        record_{}
+        pcsmp_mode_(false)
   {}
 
   ~Context() { Destruct(); }
 
   void Destruct() {
-    hsa_signal_destroy(dispatch_signal_);
     for (const auto& v : info_map_) {
       const std::string& name = v.first;
       const rocprofiler_feature_t* info = v.second;
@@ -398,20 +399,14 @@ class Context {
         set_[group_index].ResetRefsCount();
         const profile_vector_t profile_vector = GetProfiles(group_index);
         for (auto& tuple : profile_vector) {
-          // Handler for read packet completion
-          if (k_concurrent_) {
-            hsa_amd_signal_async_handler(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, HandlerRead,
-                                       &set_[group_index]);
-          }
+          set_[group_index].SetDispatchSignal(tuple.dispatch_signal);
+          set_[group_index].SetBarrierSignal(tuple.barrier_signal);
           // Handler for stop packet completion
           hsa_amd_signal_async_handler(tuple.completion_signal, HSA_SIGNAL_CONDITION_LT, 1, Handler,
                                        &set_[group_index]);
         }
       }
     }
-
-    hsa_status_t status = hsa_signal_create(1, 0, NULL, &dispatch_signal_);
-    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "MetricsDict create failed");
   }
 
   // Initialize rocprofiler context
@@ -650,16 +645,11 @@ class Context {
 
   // PC sampling mode
   bool pcsmp_mode_;
-
-  // kernel packet dispatch copmletion signal
-  hsa_signal_t dispatch_signal_;
-  hsa_signal_t orig_signal_;
-  rocprofiler_dispatch_record_t record_;
-
 };
 
 #define CONTEXT_INSTANTIATE() \
-  bool rocprofiler::Context::k_concurrent_ = false;
+  bool rocprofiler::Context::k_concurrent_ = false; \
+  std::vector<hsa_ext_amd_aql_pm4_packet_t> rocprofiler::Context::stop_packets_{};
 
 }  // namespace rocprofiler
 

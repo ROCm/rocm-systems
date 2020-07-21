@@ -45,6 +45,9 @@ struct profile_tuple_t {
   const profile_t* profile;
   info_vector_t* info_vector;
   hsa_signal_t completion_signal;
+  hsa_signal_t dispatch_signal;
+  hsa_signal_t barrier_signal;
+  hsa_signal_t read_signal;
 };
 typedef std::vector<profile_tuple_t> profile_vector_t;
 
@@ -102,6 +105,9 @@ class Profile {
     profile_ = {};
     profile_.agent = agent_info->dev_id;
     completion_signal_ = {};
+    dispatch_signal_ = {};
+    barrier_signal_ = {};
+    read_signal_ = {};
     is_legacy_ = (strncmp(agent_info->name, "gfx8", 4) == 0);
   }
 
@@ -113,6 +119,18 @@ class Profile {
     if (profile_.parameters) free(const_cast<parameter_t*>(profile_.parameters));
     if (completion_signal_.handle) {
       hsa_status_t status = hsa_signal_destroy(completion_signal_);
+      if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "signal_destroy " << std::hex << status);
+    }
+    if (dispatch_signal_.handle) {
+      hsa_status_t status = hsa_signal_destroy(dispatch_signal_);
+      if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "signal_destroy " << std::hex << status);
+    }
+    if (barrier_signal_.handle) {
+      hsa_status_t status = hsa_signal_destroy(barrier_signal_);
+      if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "signal_destroy " << std::hex << status);
+    }
+    if (read_signal_.handle) {
+      hsa_status_t status = hsa_signal_destroy(read_signal_);
       if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "signal_destroy " << std::hex << status);
     }
   }
@@ -141,6 +159,14 @@ class Profile {
     parameters[profile->parameter_count].value = 1;
     profile->parameters = parameters;
     profile->parameter_count += 1;
+  }
+
+  void BarrierPacket(packet_t* packet, const hsa_signal_t& prior_signal) {
+    hsa_barrier_and_packet_t* barrier =
+        reinterpret_cast<hsa_barrier_and_packet_t*>(packet);
+    barrier->header = HSA_PACKET_TYPE_BARRIER_AND;
+    if (prior_signal.handle) barrier->dep_signal[0] = prior_signal; // set packet dependency
+    else barrier->header |= 1 << HSA_PACKET_HEADER_BARRIER;         // set barrier bit
   }
 
   hsa_status_t Finalize(pkt_vector_t& start_vector, pkt_vector_t& stop_vector,
@@ -190,13 +216,32 @@ class Profile {
       start.completion_signal = dummy_signal;
 
       // Set completion signal of read/stop
-      hsa_signal_t post_signal;
-      status = hsa_signal_create(1, 0, NULL, &post_signal);
+      status = hsa_signal_create(1, 0, NULL, &completion_signal_);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
-      stop.completion_signal = post_signal;
-      read.completion_signal = post_signal;
-      read2.completion_signal = post_signal;
-      completion_signal_ = post_signal;
+      if (is_concurrent) {
+        status = hsa_signal_create(1, 0, NULL, &read_signal_);
+        if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
+        read.completion_signal = read_signal_;
+        read2.completion_signal = completion_signal_;
+      } else {
+        read.completion_signal = completion_signal_;
+      }
+      stop.completion_signal = completion_signal_;
+
+      status = hsa_signal_create(1, 0, NULL, &dispatch_signal_);
+      if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
+
+      // Create barrier packets: enforce start to be done first, and further make
+      // read and read2 finish before and after kernel dispatch, respectively
+      packet_t barrier_st, barrier_rd{}, barrier_rd2{};
+      if (is_concurrent) {
+        BarrierPacket(&barrier_st, start.completion_signal);
+        BarrierPacket(&barrier_rd, read.completion_signal);
+        BarrierPacket(&barrier_rd2, dispatch_signal_);
+        status = hsa_signal_create(1, 0, NULL, &(barrier_signal_));
+        if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
+        barrier_rd2.completion_signal = barrier_signal_;
+      }
 
       // Fill packet vectors
       if (is_legacy_) {
@@ -218,7 +263,11 @@ class Profile {
 
         if (rd_status == HSA_STATUS_SUCCESS) {
           pkt_vector_t reads = {read};
-          if (is_concurrent) reads.push_back(read2);
+          if (is_concurrent) {
+            reads.push_back(barrier_rd);
+            reads.push_back(barrier_rd2);
+            reads.push_back(read2);
+          }
           for (auto rd : reads) {
             const uint32_t read_index = read_vector.size();
             read_vector.insert(read_vector.end(), LEGACY_SLOT_SIZE_PKT, packet_t{});
@@ -230,11 +279,15 @@ class Profile {
         }
       } else {
         start_vector.push_back(start);
+        if (is_concurrent) start_vector.push_back(barrier_st);
         stop_vector.push_back(stop);
         if (rd_status == HSA_STATUS_SUCCESS) {
           read_vector.push_back(read);
-          if (is_concurrent)
+          if (is_concurrent) {
+            read_vector.push_back(barrier_rd);
+            read_vector.push_back(barrier_rd2);
             read_vector.push_back(read2);
+          }
         }
       }
     }
@@ -244,7 +297,8 @@ class Profile {
 
   void GetProfiles(profile_vector_t& vec) {
     if (!info_vector_.empty()) {
-      vec.push_back(profile_tuple_t{&profile_, &info_vector_, completion_signal_});
+      vec.push_back(profile_tuple_t{&profile_, &info_vector_, completion_signal_,
+              dispatch_signal_, barrier_signal_, read_signal_});
     }
   }
 
@@ -258,6 +312,9 @@ class Profile {
   profile_t profile_;
   info_vector_t info_vector_;
   hsa_signal_t completion_signal_;
+  hsa_signal_t dispatch_signal_;
+  hsa_signal_t barrier_signal_;
+  hsa_signal_t read_signal_;
 };
 
 class PmcProfile : public Profile {

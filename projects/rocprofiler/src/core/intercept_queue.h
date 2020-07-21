@@ -49,8 +49,6 @@ enum {
 extern decltype(hsa_queue_create)* hsa_queue_create_fn;
 extern decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
 
-void PmcStarter(Context* context);
-
 static std::mutex ctx_a_mutex;
 typedef std::map<Context*, bool> ctx_a_map_t;
 static ctx_a_map_t* ctx_a_map = NULL;
@@ -186,8 +184,8 @@ class InterceptQueue {
         if ((status == HSA_STATUS_SUCCESS) && (context != NULL)) {
           if (group.feature_count != 0) {
             if (tracker_ != NULL) {
-              const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = context->GetDispatchSignal();
               Group* context_group = context->GetGroup(group.index);
+              const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = context_group->GetDispatchSignal();
               Tracker::Enable_opt(context_group, completion_signal);
               context_group->IncrRefsCount();
             }
@@ -271,9 +269,11 @@ class InterceptQueue {
 
         // Adding kernel timing tracker
         Tracker::entry_t* tracker_entry = NULL;
+
+        const bool is_serial = (k_concurrent_ == K_CONC_OFF);
         if (tracker_ != NULL) {
-          tracker_entry = tracker_->Alloc(obj->agent_info_->dev_id, dispatch_packet->completion_signal);
-          const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = tracker_entry->signal;
+          tracker_entry = tracker_->Alloc(obj->agent_info_->dev_id, dispatch_packet->completion_signal, is_serial);
+          if (is_serial) const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = tracker_entry->signal;
         }
 
         // Prepareing dispatch callback data
@@ -297,43 +297,55 @@ class InterceptQueue {
         // Calling dispatch callback
         rocprofiler_group_t group = {};
         hsa_status_t status = (dispatch_callback_.load())(&data, callback_data_, &group);
-        // Injecting profiling start/stop packets
+        // Injecting profiling start/stop/read packets
         if ((status != HSA_STATUS_SUCCESS) || (group.context == NULL)) {
           if (tracker_entry != NULL) {
-            const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = tracker_entry->orig;
+            if (is_serial) const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = tracker_entry->orig;
             tracker_->Delete(tracker_entry);
           }
         } else {
           Context* context = reinterpret_cast<Context*>(group.context);
 
           if (group.feature_count != 0) {
-            if (tracker_entry != NULL) {
-              Group* context_group = context->GetGroup(group.index);
-              context_group->IncrRefsCount();
-              tracker_->EnableContext(tracker_entry, Context::Handler, reinterpret_cast<void*>(context_group));
-            }
-
             const pkt_vector_t& start_vector = context->StartPackets(group.index);
             const pkt_vector_t& stop_vector = context->StopPackets(group.index);
             const pkt_vector_t& read_vector = context->ReadPackets(group.index);
             pkt_vector_t packets;
 
-            if (k_concurrent_ == K_CONC_OFF) {  // serial
+            if (is_serial) {                    // serial
               packets = start_vector;
               packets.insert(packets.end(), *packet);
               packets.insert(packets.end(), stop_vector.begin(), stop_vector.end());
             } else {                            // concurrent
-              // Atrt PMC once
-              std::call_once(once_flag_, PmcStarter, context);
-              // Reads at both kernel start and end
-              assert(read_vector.size() == 2 * start_vector.size());
+              // Insert start packets once
+              auto inject_start = [&packets](const pkt_vector_t& starts) mutable {
+                packets = starts;
+              };
+              std::call_once(once_flag_, inject_start, start_vector);
+              // Reads at both kernel start and end (also with barriers)
+              assert(read_vector.size() >= 2 * start_vector.size());
               auto mid = read_vector.begin() + read_vector.size()/2;
               // Read at kernel start
               packets.insert(packets.end(), read_vector.begin(), mid);
               // Kernel dispatch packet
+              assert(tracker_entry != NULL);
+              // Bind dispatch and barrier signals with tracker entry
+              tracker_->SetHandler(tracker_entry, context->GetGroup(group.index));
+              const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = context->GetGroup(group.index)->GetDispatchSignal();
               packets.insert(packets.end(), *packet);
               // Read at kernel end
               packets.insert(packets.end(), mid, read_vector.end());
+
+              // Save the stop packets for eventual PmcStopper
+              if (Context::stop_packets_.empty()) {
+                Context::stop_packets_.insert(Context::stop_packets_.end(), stop_vector.begin(), stop_vector.end());
+              }
+            }
+
+            if (tracker_entry != NULL) {
+              Group* context_group = context->GetGroup(group.index);
+              context_group->IncrRefsCount();
+              tracker_->EnableContext(tracker_entry, Context::Handler, reinterpret_cast<void*>(context_group));
             }
 
             if (writer != NULL) {

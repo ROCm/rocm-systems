@@ -62,6 +62,7 @@ class Tracker {
     void* arg;
     bool is_context;
     bool is_memcopy;
+    bool is_proxy;
   };
 
   static Tracker* Create() {
@@ -88,7 +89,7 @@ class Tracker {
   }
 
   // Add tracker entry
-  entry_t* Alloc(const hsa_agent_t& agent, const hsa_signal_t& orig) {
+  entry_t* Alloc(const hsa_agent_t& agent, const hsa_signal_t& orig, bool proxy=true) {
     hsa_status_t status = HSA_STATUS_ERROR;
 
     // Creating a new tracker entry
@@ -105,11 +106,14 @@ class Tracker {
     entry->record = record;
 
     // Creating a proxy signal
-    const hsa_signal_value_t signal_value = (orig.handle) ? hsa_api_.hsa_signal_load_relaxed(orig) : 1;
-    status = hsa_api_.hsa_signal_create(signal_value, 0, NULL, &(entry->signal));
-    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_signal_create");
-    status = hsa_api_.hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, signal_value, Handler, entry);
-    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
+    if (proxy) {
+      entry->is_proxy = true;
+      const hsa_signal_value_t signal_value = (orig.handle) ? hsa_api_.hsa_signal_load_relaxed(orig) : 1;
+      status = hsa_api_.hsa_signal_create(signal_value, 0, NULL, &(entry->signal));
+      if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_signal_create");
+      status = hsa_api_.hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, signal_value, Handler, entry);
+      if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
+    }
 
     // Adding antry to the list
     mutex_.lock();
@@ -120,9 +124,17 @@ class Tracker {
     return entry;
   }
 
+  void SetHandler(entry_t* entry, Group* group) {
+    hsa_signal_t& dispatch_signal = group->GetDispatchSignal();
+    hsa_signal_t& handler_signal = group->GetBarrierSignal();
+    entry->signal = dispatch_signal;
+    hsa_status_t status = hsa_api_.hsa_amd_signal_async_handler(handler_signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
+    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
+  }
+
   // Delete tracker entry
   void Delete(entry_t* entry) {
-    hsa_api_.hsa_signal_destroy(entry->signal);
+    if (entry->is_proxy && entry->signal.handle) hsa_api_.hsa_signal_destroy(entry->signal);
     mutex_.lock();
     sig_list_.erase(entry->it);
     mutex_.unlock();
@@ -157,14 +169,13 @@ class Tracker {
 
   // Enable tracking
   static void Enable_opt(Group* group, const hsa_signal_t& orig_signal) {
-    Context* context = group->GetContext();
-    context->SetOrigSignal(orig_signal);
-    context->GetRecord()->dispatch = util::HsaRsrcFactory::Instance().TimestampNs();
+    group->SetOrigSignal(orig_signal);
+    group->GetRecord()->dispatch = util::HsaRsrcFactory::Instance().TimestampNs();
 
     // Creating a proxy signal
     const hsa_signal_value_t signal_value = (orig_signal.handle) ?
       util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_load_relaxed(orig_signal) : 1;
-    hsa_signal_t& dispatch_signal = context->GetDispatchSignal();
+    hsa_signal_t& dispatch_signal = group->GetDispatchSignal();
     util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_store_screlease(dispatch_signal, signal_value);
     hsa_status_t status =
       util::HsaRsrcFactory::Instance().HsaApi()->hsa_amd_signal_async_handler(dispatch_signal, HSA_SIGNAL_CONDITION_LT, signal_value, Handler_opt, group);
@@ -175,8 +186,8 @@ class Tracker {
   static bool Handler_opt(hsa_signal_value_t signal_value, void* arg) {
     Group* group = reinterpret_cast<Group*>(arg);
     Context* context = group->GetContext();
-    hsa_signal_t dispatch_signal = context->GetDispatchSignal();
-    record_t* record = context->GetRecord();
+    hsa_signal_t dispatch_signal = group->GetDispatchSignal();
+    record_t* record = group->GetRecord();
     hsa_amd_profiling_dispatch_time_t dispatch_time{};
     hsa_status_t status =
       util::HsaRsrcFactory::Instance().HsaApi()->hsa_amd_profiling_get_dispatch_time(context->GetAgent(), dispatch_signal, &dispatch_time);
@@ -186,7 +197,7 @@ class Tracker {
     record->complete = util::HsaRsrcFactory::Instance().TimestampNs();
 
     // Original intercepted signal completion
-    const hsa_signal_t& orig_signal = context->GetOrigSignal();
+    const hsa_signal_t& orig_signal = group->GetOrigSignal();
     if (orig_signal.handle) {
       amd_signal_t* orig_signal_ptr = reinterpret_cast<amd_signal_t*>(orig_signal.handle);
       amd_signal_t* prof_signal_ptr = reinterpret_cast<amd_signal_t*>(dispatch_signal.handle);
