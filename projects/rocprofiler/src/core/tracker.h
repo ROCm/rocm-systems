@@ -195,7 +195,7 @@ class Tracker {
       util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_store_screlease(orig_signal, signal_value);
     }
 
-    Context::Handler(signal_value, arg);
+    return Context::Handler(signal_value, arg);
   }
 
   private:
