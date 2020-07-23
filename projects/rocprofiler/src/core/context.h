@@ -363,6 +363,7 @@ class Context {
   ~Context() { Destruct(); }
 
   void Destruct() {
+    hsa_signal_destroy(dispatch_signal_);
     for (const auto& v : info_map_) {
       const std::string& name = v.first;
       const rocprofiler_feature_t* info = v.second;

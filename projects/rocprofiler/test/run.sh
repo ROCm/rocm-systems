@@ -128,6 +128,15 @@ export ROCP_THRS=10
 export ROCP_INPUT=pmc_input.xml
 eval_test "'rocprof' libtool PMC n-thread test" ./test/ctrl
 
+export ROCP_OPT_MODE=1
+export ROCP_KITER=20
+export ROCP_DITER=20
+export ROCP_AGENTS=1
+export ROCP_THRS=10
+export ROCP_INPUT=pmc_input.xml
+eval_test "'rocprof' libtool PMC n-thread opt test" ./test/ctrl
+unset ROCP_OPT_MODE
+
 export ROCP_KITER=20
 export ROCP_DITER=20
 export ROCP_AGENTS=1

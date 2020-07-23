@@ -36,6 +36,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <cassert>
@@ -626,6 +627,8 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
                                      &kernelSymbol);
   CHECK_STATUS("Error in looking up kernel symbol", status);
 
+  close(file_handle);
+
   // Update output parameter
   *code_desc = kernelSymbol;
   return true;
@@ -705,7 +708,7 @@ const char* HsaRsrcFactory::GetKernelNameRef(uint64_t addr) {
   std::lock_guard<mutex_t> lck(mutex_);
   const auto it = symbols_map_->find(addr);
   if (it == symbols_map_->end()) {
-    fprintf(stderr, "HsaRsrcFactory::kernel addr (0x%lx) is not found\n", addr);
+    fprintf(stderr, "HsaRsrcFactory::GetKernelNameRef: kernel addr (0x%lx) is not found\n", addr);
     abort();
   }
   return it->second;

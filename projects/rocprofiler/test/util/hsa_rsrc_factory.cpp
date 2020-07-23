@@ -24,6 +24,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "util/hsa_rsrc_factory.h"
 
+#include <cxxabi.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <hsa.h>
@@ -36,6 +37,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <cassert>
@@ -43,6 +45,14 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <iostream>
 #include <string>
 #include <vector>
+
+// Demangle C++ symbol name
+static const char* cpp_demangle(const char* symname) {
+  size_t size = 0;
+  int status;
+  const char* ret = abi::__cxa_demangle(symname, NULL, &size, &status);
+  return (ret != 0) ? ret : strdup(symname);
+}
 
 // Callback function to get available in the system agents
 hsa_status_t HsaRsrcFactory::GetHsaAgentsCallback(hsa_agent_t agent, void* data) {
@@ -192,6 +202,7 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
       hsa_api_.hsa_executable_create_alt = table->core_->hsa_executable_create_alt_fn;
       hsa_api_.hsa_executable_load_agent_code_object = table->core_->hsa_executable_load_agent_code_object_fn;
       hsa_api_.hsa_executable_freeze = table->core_->hsa_executable_freeze_fn;
+      hsa_api_.hsa_executable_destroy = table->core_->hsa_executable_destroy_fn;
       hsa_api_.hsa_executable_get_symbol = table->core_->hsa_executable_get_symbol_fn;
       hsa_api_.hsa_executable_symbol_get_info = table->core_->hsa_executable_symbol_get_info_fn;
       hsa_api_.hsa_executable_iterate_symbols = table->core_->hsa_executable_iterate_symbols_fn;
@@ -232,6 +243,7 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
       hsa_api_.hsa_executable_create_alt = hsa_executable_create_alt;
       hsa_api_.hsa_executable_load_agent_code_object = hsa_executable_load_agent_code_object;
       hsa_api_.hsa_executable_freeze = hsa_executable_freeze;
+      hsa_api_.hsa_executable_destroy = hsa_executable_destroy;
       hsa_api_.hsa_executable_get_symbol = hsa_executable_get_symbol;
       hsa_api_.hsa_executable_symbol_get_info = hsa_executable_symbol_get_info;
       hsa_api_.hsa_executable_iterate_symbols = hsa_executable_iterate_symbols;
@@ -618,6 +630,8 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
                                      &kernelSymbol);
   CHECK_STATUS("Error in looking up kernel symbol", status);
 
+  close(file_handle);
+
   // Update output parameter
   *code_desc = kernelSymbol;
   return true;
@@ -693,52 +707,57 @@ uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet, size_t s
   return write_idx;
 }
 
-const char* HsaRsrcFactory::GetKernelNameRef(uint64_t addr) {
-  std::lock_guard<mutex_t> lck(mutex_);
-  const auto it = symbols_map_->find(addr);
-  if (it == symbols_map_->end()) {
-    fprintf(stderr, "HsaRsrcFactory::kernel addr (0x%lx) is not found\n", addr);
-    abort();
-  }
-  return it->second;
-}
-
-void HsaRsrcFactory::EnableExecutableTracking(HsaApiTable* table) {
-  std::lock_guard<mutex_t> lck(mutex_);
-  executable_tracking_on_ = true;
-  table->core_->hsa_executable_freeze_fn = hsa_executable_freeze_interceptor;
-}
-
-hsa_status_t HsaRsrcFactory::executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol, void *data) {
+hsa_status_t HsaRsrcFactory::executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol, void *arg) {
   hsa_symbol_kind_t value = (hsa_symbol_kind_t)0;
   hsa_status_t status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &value);
   CHECK_STATUS("Error in getting symbol info", status);
+
   if (value == HSA_SYMBOL_KIND_KERNEL) {
     uint64_t addr = 0;
-    uint32_t len = 0;
     status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &addr);
     CHECK_STATUS("Error in getting kernel object", status);
-    status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &len);
-    CHECK_STATUS("Error in getting name len", status);
-    char *name = new char[len + 1];
-    status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name);
-    CHECK_STATUS("Error in getting kernel name", status);
-    name[len] = 0;
-    auto ret = symbols_map_->insert({addr, name});
-    if (ret.second == false) {
-      delete[] ret.first->second;
-      ret.first->second = name;
+
+    const int to_free = reinterpret_cast<long>(arg);
+    const char* name = NULL;
+    if (to_free == 0) {
+      uint32_t len = 0;
+      status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &len);
+      CHECK_STATUS("Error in getting name len", status);
+      char sym_name[len + 1];
+      status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, sym_name);
+      CHECK_STATUS("Error in getting kernel name", status);
+      sym_name[len] = 0;
+      name = cpp_demangle(sym_name);
     }
+
+    SetKernelNameRef(addr, name, to_free);
   }
+
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HsaRsrcFactory::hsa_executable_freeze_interceptor(hsa_executable_t executable, const char *options) {
   std::lock_guard<mutex_t> lck(mutex_);
   if (symbols_map_ == NULL) symbols_map_ = new symbols_map_t;
-  hsa_status_t status = hsa_api_.hsa_executable_iterate_symbols(executable, executable_symbols_cb, NULL);
+  hsa_status_t status = hsa_api_.hsa_executable_iterate_symbols(executable, executable_symbols_cb, (void*)0);
   CHECK_STATUS("Error in iterating executable symbols", status);
-  return hsa_api_.hsa_executable_freeze(executable, options);;
+  return hsa_api_.hsa_executable_freeze(executable, options);
+}
+
+hsa_status_t HsaRsrcFactory::hsa_executable_destroy_interceptor(hsa_executable_t executable) {
+  std::lock_guard<mutex_t> lck(mutex_);
+  if (symbols_map_ != NULL) {
+    hsa_status_t status = hsa_api_.hsa_executable_iterate_symbols(executable, executable_symbols_cb, (void*)1);
+    CHECK_STATUS("Error in iterating executable symbols", status);
+  }
+  return hsa_api_.hsa_executable_destroy(executable);
+}
+
+void HsaRsrcFactory::EnableExecutableTracking(HsaApiTable* table) {
+  std::lock_guard<mutex_t> lck(mutex_);
+  executable_tracking_on_ = true;
+  table->core_->hsa_executable_freeze_fn = hsa_executable_freeze_interceptor;
+  table->core_->hsa_executable_destroy_fn = hsa_executable_destroy_interceptor;
 }
 
 std::atomic<HsaRsrcFactory*> HsaRsrcFactory::instance_{};

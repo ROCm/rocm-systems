@@ -95,6 +95,7 @@ struct hsa_pfn_t {
   decltype(hsa_executable_create_alt)* hsa_executable_create_alt;
   decltype(hsa_executable_load_agent_code_object)* hsa_executable_load_agent_code_object;
   decltype(hsa_executable_freeze)* hsa_executable_freeze;
+  decltype(hsa_executable_destroy)* hsa_executable_destroy;
   decltype(hsa_executable_get_symbol)* hsa_executable_get_symbol;
   decltype(hsa_executable_symbol_get_info)* hsa_executable_symbol_get_info;
   decltype(hsa_executable_iterate_symbols)* hsa_executable_iterate_symbols;
@@ -286,6 +287,13 @@ class HsaRsrcFactory {
   typedef std::recursive_mutex mutex_t;
   typedef HsaTimer::timestamp_t timestamp_t;
 
+  // Executables loading tracking
+  struct symbols_map_data_t {
+    const char* name;
+    uint64_t refs_count;
+  };
+  typedef std::map<uint64_t, symbols_map_data_t> symbols_map_t;
+
   static HsaRsrcFactory* Create(bool initialize_hsa = true) {
     std::lock_guard<mutex_t> lck(mutex_);
     HsaRsrcFactory* obj = instance_.load(std::memory_order_relaxed);
@@ -406,7 +414,88 @@ class HsaRsrcFactory {
   // Enable executables loading tracking
   static bool IsExecutableTracking() { return executable_tracking_on_; }
   static void EnableExecutableTracking(HsaApiTable* table);
-  static const char* GetKernelNameRef(uint64_t addr);
+
+  typedef symbols_map_t::iterator symbols_map_it_t;
+
+  static inline const char* GetKernelNameRef(const uint64_t& addr) {
+    if (symbols_map_ == NULL) {
+      fprintf(stderr, "HsaRsrcFactory::GetKernelNameRef: kernel addr (0x%lx), error\n", addr);
+      abort();
+    }
+
+    std::lock_guard<mutex_t> lck(mutex_);
+
+    const auto it = symbols_map_->find(addr);
+    if (it == symbols_map_->end()) {
+      fprintf(stderr, "HsaRsrcFactory::GetKernelNameRef: kernel addr (0x%lx) is not found\n", addr);
+      abort();
+    }
+
+    return it->second.name;
+  }
+
+  static inline symbols_map_it_t AcquireKernelNameRef(const uint64_t& addr) {
+    if (symbols_map_ == NULL) {
+      fprintf(stderr, "HsaRsrcFactory::GetKernelNameRef: kernel addr (0x%lx), error\n", addr);
+      abort();
+    }
+
+    std::lock_guard<mutex_t> lck(mutex_);
+
+    const auto it = symbols_map_->find(addr);
+    if (it == symbols_map_->end()) {
+      fprintf(stderr, "HsaRsrcFactory::GetKernelNameRef: kernel addr (0x%lx) is not found\n", addr);
+      abort();
+    }
+
+    std::atomic<uint64_t>* atomic_ptr =
+      reinterpret_cast<std::atomic<uint64_t>*>(&(it->second.refs_count));
+    atomic_ptr->fetch_add(1, std::memory_order_relaxed);
+
+    return it;
+  }
+
+  static inline void ReleaseKernelNameRef(const symbols_map_it_t& it) {
+    std::atomic<uint64_t>* atomic_ptr =
+      reinterpret_cast<std::atomic<uint64_t>*>(&(it->second.refs_count));
+    atomic_ptr->fetch_sub(1, std::memory_order_relaxed);
+  }
+  
+  static inline void SetKernelNameRef(const uint64_t& addr, const char* name, const int& free) {
+    if (symbols_map_ == NULL) {
+      std::lock_guard<mutex_t> lck(mutex_);
+      if (symbols_map_ == NULL) symbols_map_ = new symbols_map_t;
+    }
+
+    auto it = symbols_map_->find(addr);
+    if (it != symbols_map_->end()) {
+      while (1) {
+        while(it->second.refs_count != 0) sched_yield();
+        mutex_.lock();
+        if (it->second.refs_count == 0) break;
+        mutex_.unlock();
+      }
+    }
+
+    if (it != symbols_map_->end()) {
+      delete[] it->second.name;
+      if (free == 1) {
+        symbols_map_->erase(it);
+      } else {
+        fprintf(stderr, "HsaRsrcFactory::SetKernelNameRef: to set kernel addr (0x%lx) conflict\n", addr);
+        abort();
+      }
+    } else {
+      if (free == 0) {
+        symbols_map_->insert({addr, symbols_map_data_t{name, 0}});
+      } else {
+        fprintf(stderr, "HsaRsrcFactory::SetKernelNameRef: to free kernel addr (0x%lx) not found\n", addr);
+        abort();
+      }
+    }
+
+    mutex_.unlock();
+  }
 
   // Initialize HSA API table
   void static InitHsaApiTable(HsaApiTable* table);
@@ -492,11 +581,10 @@ class HsaRsrcFactory {
   // System agents map
   std::map<hsa_agent_handle_t, const AgentInfo*> agent_map_;
 
-  // Executables loading tracking
-  typedef std::map<uint64_t, const char*> symbols_map_t;
   static symbols_map_t* symbols_map_;
   static bool executable_tracking_on_;
   static hsa_status_t hsa_executable_freeze_interceptor(hsa_executable_t executable, const char *options);
+  static hsa_status_t hsa_executable_destroy_interceptor(hsa_executable_t executable);
   static hsa_status_t executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol, void *data);
 
   // HSA runtime API table

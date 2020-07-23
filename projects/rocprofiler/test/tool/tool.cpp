@@ -100,7 +100,7 @@ struct context_entry_t {
   unsigned feature_count;
   rocprofiler_callback_data_t data;
   kernel_properties_t kernel_properties;
-  uint64_t kernel_object;
+  HsaRsrcFactory::symbols_map_it_t kernel_name_it;
   FILE* file_handle;
 };
 
@@ -503,7 +503,7 @@ void output_group(const context_entry_t* entry, const char* label) {
 }
 
 // Dump stored context entry
-bool dump_context_entry(context_entry_t* entry) {
+bool dump_context_entry(context_entry_t* entry, bool to_clean = true) {
   hsa_status_t status = HSA_STATUS_ERROR;
 
   volatile std::atomic<bool>* valid = reinterpret_cast<std::atomic<bool>*>(&entry->valid);
@@ -548,7 +548,7 @@ bool dump_context_entry(context_entry_t* entry) {
     fprintf(file_handle, "\n");
     fflush(file_handle);
   }
-  if (record) {
+  if (record && to_clean) {
     delete record;
     entry->data.record = NULL;
   }
@@ -566,11 +566,11 @@ bool dump_context_entry(context_entry_t* entry) {
     std::ostringstream oss;
     oss << index << "__" << filtr_kernel_name(entry->data.kernel_name);
     output_results(entry, oss.str().substr(0, KERNEL_NAME_LEN_MAX).c_str());
-    free(const_cast<char*>(entry->data.kernel_name));
+    if (to_clean) free(const_cast<char*>(entry->data.kernel_name));
 
     // Finishing cleanup
     // Deleting profiling context will delete all allocated resources
-    rocprofiler_close(group.context);
+    if (to_clean) rocprofiler_close(group.context);
   }
 
   return true;
@@ -644,31 +644,6 @@ bool context_handler(rocprofiler_group_t group, void* arg) {
   return false;
 }
 
-static const amd_kernel_code_t* GetKernelCode(uint64_t kernel_object) {
-  const amd_kernel_code_t* kernel_code = NULL;
-  hsa_status_t status =
-      HsaRsrcFactory::Instance().LoaderApi()->hsa_ven_amd_loader_query_host_address(
-          reinterpret_cast<const void*>(kernel_object),
-          reinterpret_cast<const void**>(&kernel_code));
-  if (HSA_STATUS_SUCCESS != status) {
-    kernel_code = reinterpret_cast<amd_kernel_code_t*>(kernel_object);
-  }
-  return kernel_code;
-}
-
-// Demangle C++ symbol name
-static const char* cpp_demangle(const char* symname) {
-  size_t size = 0;
-  int status;
-  const char* ret = abi::__cxa_demangle(symname, NULL, &size, &status);
-  return (ret != 0) ? ret : strdup(symname);
-}
-
-static const char* QueryKernelName(uint64_t kernel_object, const amd_kernel_code_t* kernel_code) {
-  const char* kernel_symname = HsaRsrcFactory::GetKernelNameRef(kernel_object);
-  return cpp_demangle(kernel_symname);
-}
-
 // Profiling completion handler
 // Dump context entry
 bool context_pool_handler(const rocprofiler_pool_entry_t* entry, void* arg) {
@@ -677,25 +652,22 @@ bool context_pool_handler(const rocprofiler_pool_entry_t* entry, void* arg) {
   handler_arg_t* handler_arg = reinterpret_cast<handler_arg_t*>(arg);
   ctx_entry->features = handler_arg->features;
   ctx_entry->feature_count = handler_arg->feature_count;
+  ctx_entry->data.kernel_name = ctx_entry->kernel_name_it->second.name;
   ctx_entry->file_handle = result_file_handle;
-
-  const uint64_t kernel_object = ctx_entry->kernel_object;
-  const amd_kernel_code_t* kernel_code = GetKernelCode(kernel_object);
-  ctx_entry->data.kernel_name = QueryKernelName(kernel_object, kernel_code);
 
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
     abort();
   }
 
-  dump_context_entry(ctx_entry);
+  dump_context_entry(ctx_entry, false);
 
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
     abort();
   }
 
-  free((void*)(ctx_entry->data.kernel_name));
+  HsaRsrcFactory::ReleaseKernelNameRef(ctx_entry->kernel_name_it);
 
   return false;
 }
@@ -766,12 +738,35 @@ bool check_filter(const rocprofiler_callback_data_t* callback_data, const callba
   return found;
 }
 
+static const amd_kernel_code_t* GetKernelCode(uint64_t kernel_object) {
+  const amd_kernel_code_t* kernel_code = NULL;
+  hsa_status_t status =
+      HsaRsrcFactory::Instance().LoaderApi()->hsa_ven_amd_loader_query_host_address(
+          reinterpret_cast<const void*>(kernel_object),
+          reinterpret_cast<const void**>(&kernel_code));
+  if (HSA_STATUS_SUCCESS != status) {
+    kernel_code = reinterpret_cast<amd_kernel_code_t*>(kernel_object);
+  }
+  return kernel_code;
+}
+
 // Setting kernel properties
 void set_kernel_properties(const rocprofiler_callback_data_t* callback_data,
-                           kernel_properties_t* kernel_properties_ptr)
+                           context_entry_t* entry)
 {
   const hsa_kernel_dispatch_packet_t* packet = callback_data->packet;
+  kernel_properties_t* kernel_properties_ptr = &(entry->kernel_properties);
   const amd_kernel_code_t* kernel_code = callback_data->kernel_code;
+
+  entry->data = *callback_data;
+
+  if (kernel_code == NULL) {
+    const uint64_t kernel_object = callback_data->packet->kernel_object;
+    kernel_code = GetKernelCode(kernel_object);
+    entry->kernel_name_it = HsaRsrcFactory::AcquireKernelNameRef(kernel_object);
+  } else {
+    entry->data.kernel_name = strdup(callback_data->kernel_name);
+  }
 
   uint64_t grid_size = packet->grid_size_x * packet->grid_size_y * packet->grid_size_z;
   if (grid_size > UINT32_MAX) abort();
@@ -806,7 +801,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   // Context entry
   context_entry_t* entry = alloc_context_entry();
   // Setting kernel properties
-  set_kernel_properties(callback_data, &(entry->kernel_properties));
+  set_kernel_properties(callback_data, entry);
 
   // context properties
   rocprofiler_properties_t properties{};
@@ -852,8 +847,6 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   entry->group = *group;
   entry->features = features;
   entry->feature_count = feature_count;
-  entry->data = *callback_data;
-  entry->data.kernel_name = strdup(callback_data->kernel_name);
   entry->file_handle = tool_data->file_handle;
   entry->active = true;
   reinterpret_cast<std::atomic<bool>*>(&entry->valid)->store(true);
@@ -881,7 +874,7 @@ hsa_status_t dispatch_callback_opt(const rocprofiler_callback_data_t* callback_d
   rocprofiler_t* context = pool_entry.context;
   context_entry_t* entry = reinterpret_cast<context_entry_t*>(pool_entry.payload);
   // Setting kernel properties
-  set_kernel_properties(callback_data, &(entry->kernel_properties));
+  set_kernel_properties(callback_data, entry);
   // Get group[0]
   status = rocprofiler_get_group(context, 0, group);
   check_status(status);
@@ -890,8 +883,7 @@ hsa_status_t dispatch_callback_opt(const rocprofiler_callback_data_t* callback_d
   entry->index = UINT32_MAX;
   entry->agent = agent;
   entry->group = *group;
-  entry->data = *callback_data;
-  entry->kernel_object = callback_data->packet->kernel_object;
+
   reinterpret_cast<std::atomic<bool>*>(&entry->valid)->store(true);
   return status;
 }
@@ -1120,8 +1112,18 @@ rocprofiler_hsa_callbacks_t hsa_callbacks {
   hsa_unified_callback,
   hsa_unified_callback,
   hsa_unified_callback,
-  hsa_unified_callback
+  hsa_unified_callback,
+  NULL
 };
+
+// HSA kernel symbol callback
+hsa_status_t hsa_ksymbol_cb(rocprofiler_hsa_cb_id_t id,
+                    const rocprofiler_hsa_callback_data_t* data,
+                    void* arg)
+{
+  HsaRsrcFactory::SetKernelNameRef(data->ksymbol.object, data->ksymbol.name, data->ksymbol.destroy);
+  return HSA_STATUS_SUCCESS;
+}
 
 // Tool constructor
 extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
@@ -1467,6 +1469,12 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     callbacks_ptrs.destroy = destroy_callback;
 
     rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_arg);
+
+    rocprofiler_hsa_callbacks_t cs{};
+    cs.ksymbol = hsa_ksymbol_cb;
+    rocprofiler_set_hsa_callbacks(cs, NULL);
+    settings->code_obj_tracking = 0;
+    settings->hsa_intercepting = 1;
   } else {
     // Adding dispatch observer
     rocprofiler_queue_callbacks_t callbacks_ptrs{0};

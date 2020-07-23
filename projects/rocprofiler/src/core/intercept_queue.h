@@ -24,7 +24,6 @@ THE SOFTWARE.
 #define _SRC_CORE_INTERCEPT_QUEUE_H
 
 #include <amd_hsa_kernel_code.h>
-#include <cxxabi.h>
 #include <dlfcn.h>
 #include <sys/syscall.h>
 
@@ -165,12 +164,7 @@ class InterceptQueue {
         const hsa_kernel_dispatch_packet_t* dispatch_packet =
             reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packet);
         const hsa_signal_t completion_signal = dispatch_packet->completion_signal;
-#if 0
-        // Prepareing dispatch callback data
-        uint64_t kernel_object = dispatch_packet->kernel_object;
-        const amd_kernel_code_t* kernel_code = GetKernelCode(kernel_object);
-        const char* kernel_name = QueryKernelName(kernel_object, kernel_code);
-#endif
+
         rocprofiler_callback_data_t data = {obj->agent_info_->dev_id,
                                             obj->agent_info_->dev_index,
                                             obj->queue_,
@@ -178,18 +172,15 @@ class InterceptQueue {
                                             obj->queue_id,
                                             completion_signal,
                                             dispatch_packet,
-                                            NULL, // kernel_name
-                                            0, // kernel_object
-                                            NULL, // kernel_code
+                                            NULL,  // kernel_name
+                                            0,  // kernel_object
+                                            NULL,  // kernel_code
                                             0, // (uint32_t)syscall(__NR_gettid),
-                                            NULL};
+                                            NULL};  // record
 
         // Calling dispatch callback
         rocprofiler_group_t group = {};
         hsa_status_t status = (dispatch_callback_.load())(&data, callback_data_, &group);
-#if 0
-        free(const_cast<char*>(kernel_name));
-#endif
         Context* context = reinterpret_cast<Context*>(group.context);
         // Injecting profiling start/stop packets
         if ((status == HSA_STATUS_SUCCESS) && (context != NULL)) {
@@ -306,7 +297,6 @@ class InterceptQueue {
         // Calling dispatch callback
         rocprofiler_group_t group = {};
         hsa_status_t status = (dispatch_callback_.load())(&data, callback_data_, &group);
-        free(const_cast<char*>(kernel_name));
         // Injecting profiling start/stop packets
         if ((status != HSA_STATUS_SUCCESS) || (group.context == NULL)) {
           if (tracker_entry != NULL) {
@@ -445,7 +435,6 @@ class InterceptQueue {
         // Calling dispatch callback
         rocprofiler_group_t group = {};
         hsa_status_t status = (dispatch_callback_.load())(&data, callback_data_, &group);
-        free(const_cast<char*>(kernel_name));
 
         // Injecting profiling start/stop packets
         if ((status == HSA_STATUS_SUCCESS) && (group.context != NULL)) {
@@ -539,14 +528,6 @@ class InterceptQueue {
     return (dbg_info != NULL) ? dbg_info->kernel_name : NULL;
   }
 
-  // Demangle C++ symbol name
-  static const char* cpp_demangle(const char* symname) {
-    size_t size = 0;
-    int status;
-    const char* ret = abi::__cxa_demangle(symname, NULL, &size, &status);
-    return (ret != 0) ? ret : strdup(symname);
-  }
-
   static const char* QueryKernelName(uint64_t kernel_object, const amd_kernel_code_t* kernel_code) {
     const uint16_t kernel_object_flag = *((uint64_t*)kernel_code + 1);
     if (kernel_object_flag == 0) {
@@ -557,7 +538,7 @@ class InterceptQueue {
     const char* kernel_symname = (util::HsaRsrcFactory::IsExecutableTracking()) ?
       util::HsaRsrcFactory::GetKernelNameRef(kernel_object) :
       GetKernelName(kernel_code->runtime_loader_kernel_symbol);
-    return cpp_demangle(kernel_symname);
+    return kernel_symname;
   }
 
   // method to get an intercept queue object

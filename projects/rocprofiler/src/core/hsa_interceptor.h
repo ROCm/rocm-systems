@@ -25,6 +25,7 @@ SOFTWARE.
 #ifndef _SRC_CORE_HSA_INTERCEPTOR_H
 #define _SRC_CORE_HSA_INTERCEPTOR_H
 
+#include <cxxabi.h>
 #include <hsa.h>
 #include <hsa_ext_amd.h>
 #include <hsa_ven_amd_loader.h>
@@ -49,7 +50,8 @@ SOFTWARE.
     (ID == ROCPROFILER_HSA_CB_ID_ALLOCATE) ? callbacks_.allocate: \
     (ID == ROCPROFILER_HSA_CB_ID_DEVICE) ? callbacks_.device: \
     (ID == ROCPROFILER_HSA_CB_ID_MEMCOPY) ? callbacks_.memcopy: \
-                                            callbacks_.submit; \
+    (ID == ROCPROFILER_HSA_CB_ID_SUBMIT) ? callbacks_.submit: \
+                                            callbacks_.ksymbol; \
   if ((__callback != NULL) && (recursion_ == false))
 
 #define DO_HSA_CALLBACK \
@@ -61,6 +63,14 @@ SOFTWARE.
 
 #define ISSUE_HSA_CALLBACK(ID) \
   do { IS_HSA_CALLBACK(ID) { DO_HSA_CALLBACK; } } while(0)
+
+// Demangle C++ symbol name
+static const char* cpp_demangle(const char* symname) {
+  size_t size = 0;
+  int status;
+  const char* ret = abi::__cxa_demangle(symname, NULL, &size, &status);
+  return (ret != 0) ? ret : strdup(symname);
+}
 
 namespace rocprofiler {
 extern decltype(hsa_memory_allocate)* hsa_memory_allocate_fn;
@@ -337,6 +347,39 @@ class HsaInterceptor {
     return HSA_STATUS_SUCCESS;
   }
 
+  static hsa_status_t KernelSymbolCallback(
+    hsa_executable_t executable,
+    hsa_executable_symbol_t symbol,
+    void *arg)
+  {
+    const int free_flag = reinterpret_cast<long>(arg);
+    hsa_symbol_kind_t kind = (hsa_symbol_kind_t)0;
+    HSA_RT(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &kind));
+
+    if (kind == HSA_SYMBOL_KIND_KERNEL) {
+      const char* name = NULL;
+      uint32_t len = 0;
+      uint64_t obj = 0;
+      HSA_RT(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &obj));
+      if (free_flag == 0) {
+        HSA_RT(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &len));
+        char sym_name[len + 1];
+        HSA_RT(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, sym_name));
+        name = cpp_demangle(sym_name);
+      }
+
+      rocprofiler_hsa_callback_data_t data{};
+      data.ksymbol.object = obj;
+      data.ksymbol.name = name;
+      data.ksymbol.name_length = len;
+      data.ksymbol.destroy = free_flag;
+
+      ISSUE_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_KSYMBOL);
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
   static hsa_status_t ExecutableFreeze(
     hsa_executable_t executable,
     const char *options)
@@ -352,6 +395,15 @@ class HsaInterceptor {
         reinterpret_cast<void*>(0));
     }
 
+    {
+      IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_KSYMBOL) {
+        HSA_RT(hsa_executable_iterate_symbols(
+          executable,
+          KernelSymbolCallback,
+          reinterpret_cast<void*>(0)));
+      }
+    }
+
     return status;
   }
 
@@ -365,6 +417,15 @@ class HsaInterceptor {
         executable,
         CodeObjectCallback,
         reinterpret_cast<void*>(1));
+    }
+
+    {
+      IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_KSYMBOL) {
+        HSA_RT(hsa_executable_iterate_symbols(
+          executable,
+          KernelSymbolCallback,
+          reinterpret_cast<void*>(1)));
+      }
     }
 
     HSA_RT(hsa_executable_destroy_fn(executable));

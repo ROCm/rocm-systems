@@ -167,7 +167,7 @@ class Tracker {
     hsa_signal_t& dispatch_signal = context->GetDispatchSignal();
     util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_store_screlease(dispatch_signal, signal_value);
     hsa_status_t status =
-      util::HsaRsrcFactory::Instance().HsaApi()->hsa_amd_signal_async_handler(dispatch_signal, HSA_SIGNAL_CONDITION_LT, signal_value, Handler, group);
+      util::HsaRsrcFactory::Instance().HsaApi()->hsa_amd_signal_async_handler(dispatch_signal, HSA_SIGNAL_CONDITION_LT, signal_value, Handler_opt, group);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
   }
 
