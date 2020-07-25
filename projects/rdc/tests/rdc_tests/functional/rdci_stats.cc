@@ -33,7 +33,8 @@ THE SOFTWARE.
 
 TestRdciStats::TestRdciStats() : TestBase() {
   set_title("\tRDC Stats Test");
-  set_description("\tThe Stats tests collects and verifies job statistics running on gpu groups.");
+  set_description("\tThe Stats tests collects and verifies job "
+                                         "statistics running on gpu groups.");
 }
 
 TestRdciStats::~TestRdciStats(void) {
@@ -57,18 +58,17 @@ void TestRdciStats::DisplayResults(void) const {
 
 void TestRdciStats::Close() {
   TestBase::Close();
-   rdc_status_t result;
-  if(standalone_){
+  rdc_status_t result;
+  if (standalone_) {
     IF_VERB(STANDARD) {
     std::cout << "\t**Disconnecting from host....\n" << std::endl;
-   }
+    }
     result = rdc_disconnect(rdc_handle);
     ASSERT_EQ(result, RDC_ST_OK);
-  }
-  else{
+  } else {
     IF_VERB(STANDARD) {
     std::cout << "\t**Stopping Embedded RDC Engine....\n" << std::endl;
-   }
+    }
     result = rdc_stop_embedded(rdc_handle);
     ASSERT_EQ(result, RDC_ST_OK);
   }
@@ -77,20 +77,18 @@ void TestRdciStats::Close() {
   ASSERT_EQ(result, RDC_ST_OK);
 }
 
-
 void TestRdciStats::Run(void) {
-
   TestBase::Run();
   rdc_status_t result;
-  if(standalone_){
+  if (standalone_) {
     IF_VERB(STANDARD) {
       std::cout << "\t**Connecting to host....\n" << std::endl;
     }
     char hostIpAddress[] = {"localhost:50051"};
-    result = rdc_connect(hostIpAddress, &rdc_handle, nullptr, nullptr, nullptr);
+    result = rdc_connect(hostIpAddress, &rdc_handle, nullptr,
+                                                            nullptr, nullptr);
     ASSERT_EQ(result, RDC_ST_OK);
-  }
-  else{
+  } else {
     IF_VERB(STANDARD) {
       std::cout << "\t**Starting embedded RDC engine....\n" << std::endl;
     }
@@ -100,7 +98,7 @@ void TestRdciStats::Run(void) {
 
   rdc_gpu_group_t group_id;
   result = rdc_group_gpu_create(rdc_handle, RDC_GROUP_EMPTY,
-                                "GRP_NAME", &group_id);
+                                                       "GRP_NAME", &group_id);
   ASSERT_EQ(result, RDC_ST_OK);
 
   result = rdc_group_gpu_add(rdc_handle, group_id, 0);
@@ -121,10 +119,9 @@ void TestRdciStats::Run(void) {
   rdc_job_info_t job_info;
   result = rdc_job_get_stats(rdc_handle, "0", &job_info);
   if (result == RDC_ST_NOT_SUPPORTED) {
-        std::cout <<
-            "\t** GPU Metric is not supported"
-            " on this machine" << std::endl;
-            return;
+    std::cout << "\t** GPU Metric is not supported"
+                                              " on this machine" << std::endl;
+    return;
   }
   ASSERT_EQ(result, RDC_ST_OK);
 
@@ -133,5 +130,4 @@ void TestRdciStats::Run(void) {
 
   result = rdc_job_remove_all(rdc_handle);
   ASSERT_EQ(result, RDC_ST_OK);
-
 }

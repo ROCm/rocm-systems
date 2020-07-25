@@ -19,8 +19,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_RDCGROUPSETTINGS_H_
-#define RDC_LIB_RDCGROUPSETTINGS_H_
+#ifndef INCLUDE_RDC_LIB_RDCGROUPSETTINGS_H_
+#define INCLUDE_RDC_LIB_RDCGROUPSETTINGS_H_
 
 #include <memory>
 #include "rdc_lib/rdc_common.h"
@@ -45,7 +45,7 @@ class RdcGroupSettings {
 
 
     virtual rdc_status_t rdc_group_field_create(uint32_t num_field_ids,
-        uint32_t* field_ids, const char* field_group_name,
+        rdc_field_t* field_ids, const char* field_group_name,
         rdc_field_grp_t* rdc_field_group_id) = 0;
     virtual rdc_status_t rdc_group_field_destroy(
         rdc_field_grp_t rdc_field_group_id) = 0;
@@ -64,4 +64,4 @@ const uint32_t JOB_FIELD_ID = 0;
 }  // namespace rdc
 }  // namespace amd
 
-#endif  // RDC_LIB_RDCGROUPSETTINGS_H_
+#endif  // INCLUDE_RDC_LIB_RDCGROUPSETTINGS_H_

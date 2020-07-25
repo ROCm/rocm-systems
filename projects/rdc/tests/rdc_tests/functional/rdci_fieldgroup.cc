@@ -30,10 +30,10 @@ THE SOFTWARE.
 #include "rdc_tests/test_common.h"
 #include "rdc/rdc.h"
 
-
 TestRdciFieldgroup::TestRdciFieldgroup() : TestBase() {
   set_title("\tRDC Fieldgroup Test");
-  set_description("\tThe Fieldgroup tests verifies the creation/deletion of fieldgroups.");
+  set_description(
+     "\tThe Fieldgroup tests verifies the creation/deletion of fieldgroups.");
 }
 
 TestRdciFieldgroup::~TestRdciFieldgroup(void) {
@@ -58,17 +58,16 @@ void TestRdciFieldgroup::DisplayResults(void) const {
 void TestRdciFieldgroup::Close() {
   TestBase::Close();
   rdc_status_t result;
-  if(standalone_){
+  if (standalone_) {
     IF_VERB(STANDARD) {
-    std::cout << "\t**Disconnecting from host....\n" << std::endl;
-   }
+      std::cout << "\t**Disconnecting from host....\n" << std::endl;
+    }
     result = rdc_disconnect(rdc_handle);
     ASSERT_EQ(result, RDC_ST_OK);
-  }
-  else{
+  } else {
     IF_VERB(STANDARD) {
-    std::cout << "\t**Stopping Embedded RDC Engine....\n" << std::endl;
-   }
+      std::cout << "\t**Stopping Embedded RDC Engine....\n" << std::endl;
+    }
     result = rdc_stop_embedded(rdc_handle);
     ASSERT_EQ(result, RDC_ST_OK);
   }
@@ -77,20 +76,17 @@ void TestRdciFieldgroup::Close() {
   ASSERT_EQ(result, RDC_ST_OK);
 }
 
-
 void TestRdciFieldgroup::Run(void) {
-
   TestBase::Run();
   rdc_status_t result;
-  if(standalone_){
+  if (standalone_) {
     IF_VERB(STANDARD) {
       std::cout << "\t**Connecting to host....\n" << std::endl;
     }
     char hostIpAddress[] = {"localhost:50051"};
     result = rdc_connect(hostIpAddress, &rdc_handle, nullptr, nullptr, nullptr);
     ASSERT_EQ(result, RDC_ST_OK);
-  }
-  else{
+  } else {
     IF_VERB(STANDARD) {
       std::cout << "\t**Starting embedded RDC engine....\n" << std::endl;
     }
@@ -99,25 +95,30 @@ void TestRdciFieldgroup::Run(void) {
   }
 
   rdc_field_grp_t field_group_id;
-  uint32_t field_ids[]= {150,155};
-  uint32_t invalid_field_ids[]= {10,20};
+  rdc_field_t field_ids[]= {RDC_FI_GPU_TEMP, RDC_FI_POWER_USAGE};
+  rdc_field_t invalid_field_ids[]= {RDC_FI_INVALID, RDC_FI_INVALID};
   uint32_t fsize = sizeof(field_ids)/sizeof(field_ids[0]);
   uint32_t count = 0;
   rdc_field_group_info_t group_info;
 
-  result = rdc_group_field_create(rdc_handle, fsize, &invalid_field_ids[0], "FIELD_GRP", &field_group_id);
+  result = rdc_group_field_create(rdc_handle, fsize, &invalid_field_ids[0],
+                                                "FIELD_GRP", &field_group_id);
   ASSERT_EQ(result, RDC_ST_NOT_SUPPORTED);
 
-  result = rdc_group_field_create(NULL, fsize, &field_ids[0], "FIELD_GRP", &field_group_id);
+  result = rdc_group_field_create(NULL, fsize, &field_ids[0],
+                                                "FIELD_GRP", &field_group_id);
   ASSERT_EQ(result, RDC_ST_INVALID_HANDLER);
 
-  result = rdc_group_field_create(rdc_handle, fsize, &field_ids[0], NULL, NULL);
+  result = rdc_group_field_create(rdc_handle, fsize, &field_ids[0],
+                                                                  NULL, NULL);
   ASSERT_EQ(result, RDC_ST_INVALID_HANDLER);
 
-  result = rdc_group_field_create(rdc_handle, (RDC_MAX_FIELD_IDS_PER_FIELD_GROUP+1), &field_ids[0], "FIELD_GRP", NULL);
+  result = rdc_group_field_create(rdc_handle,
+     (RDC_MAX_FIELD_IDS_PER_FIELD_GROUP+1), &field_ids[0], "FIELD_GRP", NULL);
   ASSERT_EQ(result, RDC_ST_INVALID_HANDLER);
 
-  result = rdc_group_field_create(rdc_handle, fsize, &field_ids[0], "FIELD_GRP", &field_group_id);
+  result = rdc_group_field_create(rdc_handle, fsize, &field_ids[0],
+                                                "FIELD_GRP", &field_group_id);
   ASSERT_EQ(result, RDC_ST_OK);
 
   rdc_field_grp_t group_id_list[RDC_MAX_NUM_FIELD_GROUPS];
@@ -134,7 +135,8 @@ void TestRdciFieldgroup::Run(void) {
       result = rdc_group_field_get_info(rdc_handle, group_id_list[i], 0);
       ASSERT_EQ(result, RDC_ST_BAD_PARAMETER);
 
-      result = rdc_group_field_get_info(rdc_handle, group_id_list[i], &group_info);
+      result = rdc_group_field_get_info(rdc_handle, group_id_list[i],
+                                                                 &group_info);
       ASSERT_EQ(result, RDC_ST_OK);
   }
 
@@ -143,5 +145,4 @@ void TestRdciFieldgroup::Run(void) {
 
   result = rdc_group_field_destroy(rdc_handle, field_group_id);
   ASSERT_EQ(result, RDC_ST_OK);
-
 }

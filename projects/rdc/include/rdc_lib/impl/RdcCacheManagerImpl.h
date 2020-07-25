@@ -19,8 +19,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_IMPL_RDCCACHEMANAGERIMPL_H_
-#define RDC_LIB_IMPL_RDCCACHEMANAGERIMPL_H_
+#ifndef INCLUDE_RDC_LIB_IMPL_RDCCACHEMANAGERIMPL_H_
+#define INCLUDE_RDC_LIB_IMPL_RDCCACHEMANAGERIMPL_H_
 
 #include <memory>
 #include <mutex>  // NOLINT(build/c++11)
@@ -80,13 +80,13 @@ typedef std::map<std::string, RdcJobStatsCacheEntry> RdcJobStatsCache;
 class RdcCacheManagerImpl: public RdcCacheManager {
  public:
     rdc_status_t rdc_field_get_latest_value(uint32_t gpu_index,
-                uint32_t field, rdc_field_value* value) override;
-    rdc_status_t rdc_field_get_value_since(uint32_t gpu_index, uint32_t field,
-                uint64_t since_time_stamp, uint64_t *next_since_time_stamp,
-                rdc_field_value* value) override;
+        rdc_field_t field, rdc_field_value* value) override;
+    rdc_status_t rdc_field_get_value_since(uint32_t gpu_index,
+        rdc_field_t field, uint64_t since_time_stamp,
+          uint64_t *next_since_time_stamp, rdc_field_value* value) override;
     rdc_status_t rdc_update_cache(uint32_t gpu_index,
                 const rdc_field_value& value) override;
-    rdc_status_t evict_cache(uint32_t gpu_index, uint32_t field_id,
+    rdc_status_t evict_cache(uint32_t gpu_index, rdc_field_t field_id,
                 uint64_t max_keep_samples, double  max_keep_age) override;
     std::string  get_cache_stats()  override;
 
@@ -120,4 +120,4 @@ class RdcCacheManagerImpl: public RdcCacheManager {
 }  // namespace amd
 
 
-#endif  // RDC_LIB_IMPL_RDCCACHEMANAGERIMPL_H_
+#endif  // INCLUDE_RDC_LIB_IMPL_RDCCACHEMANAGERIMPL_H_

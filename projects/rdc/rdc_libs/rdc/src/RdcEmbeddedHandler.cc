@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include "rdc_lib/rdc_common.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcException.h"
+#include "common/rdc_fields_supported.h"
 #include "rocm_smi/rocm_smi.h"
 
 namespace {
@@ -259,7 +260,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_gpu_add(rdc_gpu_group_t group_id,
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_group_field_create(uint32_t num_field_ids,
-        uint32_t* field_ids, const char* field_group_name,
+    rdc_field_t* field_ids, const char* field_group_name,
         rdc_field_grp_t* rdc_field_group_id) {
     if (!field_group_name || !rdc_field_group_id || !field_ids) {
         return RDC_ST_BAD_PARAMETER;
@@ -268,7 +269,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_field_create(uint32_t num_field_ids,
     // Check the field is valid or not
     if (num_field_ids <= RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
         for (uint32_t i = 0; i < num_field_ids; i++) {
-            if (!metric_fetcher_->is_field_valid(field_ids[i])) {
+            if (!is_field_valid(field_ids[i])) {
                 RDC_LOG(RDC_INFO,
                     "Fail to create field group with unknown field id "
                     << field_ids[i]);
@@ -341,11 +342,11 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_watch(rdc_gpu_group_t group_id,
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_field_get_latest_value(
-    uint32_t gpu_index, uint32_t field, rdc_field_value* value) {
+    uint32_t gpu_index, rdc_field_t field, rdc_field_value* value) {
     if (!value) {
         return RDC_ST_BAD_PARAMETER;
     }
-    if (!metric_fetcher_->is_field_valid(field)) {
+    if (!is_field_valid(field)) {
         RDC_LOG(RDC_INFO,
                     "Fail to get latest value with unknown field id "
                     << field);
@@ -355,12 +356,12 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_get_latest_value(
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_field_get_value_since(uint32_t gpu_index,
-        uint32_t field, uint64_t since_time_stamp,
+    rdc_field_t field, uint64_t since_time_stamp,
         uint64_t *next_since_time_stamp, rdc_field_value* value) {
     if (!next_since_time_stamp || !value) {
         return RDC_ST_BAD_PARAMETER;
     }
-    if (!metric_fetcher_->is_field_valid(field)) {
+    if (!is_field_valid(field)) {
         RDC_LOG(RDC_INFO,
                 "Fail to get value since with unknown field id "
                 << field);

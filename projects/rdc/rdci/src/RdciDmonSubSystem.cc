@@ -25,8 +25,13 @@ THE SOFTWARE.
 #include <signal.h>
 #include <limits>
 #include <iomanip>
+#include <unordered_map>
+#include <vector>
+#include <string>
+
 #include "rdc_lib/rdc_common.h"
 #include "common/rdc_utils.h"
+#include "common/rdc_fields_supported.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
 
@@ -147,14 +152,16 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
             std::vector<std::string> vec_ids = split_string(field_ids, ',');
             for (uint32_t i = 0; i < vec_ids.size(); i++) {
                 if (!IsNumber(vec_ids[i])) {
-                    uint32_t field_id = 0;
-                    if (!get_field_id_from_name(vec_ids[i], field_id)) {
+                    rdc_field_t field_id = RDC_FI_INVALID;
+                    if (!amd::rdc::get_field_id_from_name(vec_ids[i],
+                                                                 &field_id)) {
                          throw RdcException(RDC_ST_BAD_PARAMETER,
                             "The field name "+vec_ids[i]+" is not valid");
                     }
                     field_ids_.push_back(field_id);
                 } else {
-                    field_ids_.push_back(std::stoi(vec_ids[i]));
+                    field_ids_.push_back(static_cast<rdc_field_t>(
+                                                      std::stoi(vec_ids[i])));
                 }
             }
         }
@@ -265,7 +272,7 @@ void RdciDmonSubSystem::create_temp_field_group() {
 
     const std::string field_group_name("rdci-dmon-field-group");
     rdc_field_grp_t group_id;
-    uint32_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
+    rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
     for (uint32_t i = 0; i < field_ids_.size(); i++) {
         field_ids[i] = field_ids_[i];
     }
@@ -280,24 +287,22 @@ void RdciDmonSubSystem::create_temp_field_group() {
     options_.insert({OPTIONS_FIELD_GROUP_ID, group_id});
 }
 
+
 void RdciDmonSubSystem::show_field_usage() const {
-    std::cout << "Supported fields Ids:\n";
-    std::cout << "100 RDC_FI_GPU_CLOCK: Current GPU clock frequencies.\n";
-    std::cout << "101 RDC_FI_MEM_CLOCK: Current Memory clock frequencies.\n";
-    std::cout << "140 RDC_FI_MEMORY_TEMP: Memory "
-              << "temperature in millidegrees Celsius.\n";
-    std::cout << "150 RDC_FI_GPU_TEMP: GPU "
-              << "temperature in millidegrees Celsius.\n";
-    std::cout << "155 RDC_FI_POWER_USAGE: Power usage in microwatts.\n";
-    std::cout << "200 RDC_FI_PCIE_TX: PCIe Tx utilization in bytes/second.\n";
-    std::cout << "201 RDC_FI_PCIE_RX: PCIe Rx utilization in bytes/second.\n";
-    std::cout << "203 RDC_FI_GPU_UTIL: GPU busy percentage.\n";
-    std::cout << "312 RDC_FI_ECC_CORRECT_TOTAL: Accumulated "
-              << "correctable ECC errors.\n";
-    std::cout << "313 RDC_FI_ECC_UNCORRECT_TOTAL: Accumulated "
-              << "uncorrectable ECC errors.\n";
-    std::cout << "525 RDC_FI_GPU_MEMORY_USAGE: Memory usage of the GPU "
-              << "instance in bytes.\n";
+  std::cout << "Supported fields Ids:" << std::endl;
+
+  amd::rdc::fld_id2name_map_t &field_id_to_descript =
+                                 amd::rdc::get_field_id_description_from_id();
+  for (auto i = field_id_to_descript.begin();
+                                       i != field_id_to_descript.end(); i++) {
+    std::cout << i->first << " " << i->second.enum_name << " : " <<
+                                   i->second.description <<  "." << std::endl;
+  }
+  std::cout << std::endl;
+  std::cout << "* Note: The field ID number associated with a field ID can "
+                                                        "change" << std::endl;
+  std::cout << "  from release to release. Field name strings should be "
+                                              "used in scripts." << std::endl;
 }
 
 void RdciDmonSubSystem::process() {

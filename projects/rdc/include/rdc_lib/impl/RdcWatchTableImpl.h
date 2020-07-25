@@ -19,8 +19,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_IMPL_RDCWATCHTABLEIMPL_H_
-#define RDC_LIB_IMPL_RDCWATCHTABLEIMPL_H_
+#ifndef INCLUDE_RDC_LIB_IMPL_RDCWATCHTABLEIMPL_H_
+#define INCLUDE_RDC_LIB_IMPL_RDCWATCHTABLEIMPL_H_
 
 #include <string>
 #include <map>
@@ -86,7 +86,8 @@ class RdcWatchTableImpl : public RdcWatchTable {
 
  private:
     //!< Helper function to Update the fields_in_table when unwatch tables
-    rdc_status_t update_field_in_table_when_unwatch(const RdcFieldKey& entry);
+    rdc_status_t update_field_in_table_when_unwatch(
+                                               const RdcFieldGroupKey& entry);
 
     //!< Helper function to clean up the watch table and cache
     void clean_up();
@@ -99,15 +100,15 @@ class RdcWatchTableImpl : public RdcWatchTable {
          rdc_field_grp_t field_group_id,
          std::vector<RdcFieldKey> & fields); // NOLINT
 
-    bool is_job_watch_field(uint32_t gpu_index, uint32_t field_id,
-                std::string& job_id) const;  // NOLINT
+    bool is_job_watch_field(uint32_t gpu_index, rdc_field_t field_id,
+                                        std::string& job_id) const;  // NOLINT
 
     RdcGroupSettingsPtr group_settings_;
     RdcCacheManagerPtr cache_mgr_;
     RdcMetricFetcherPtr metric_fetcher_;
 
     //!< The watch table to store the watch settings.
-    std::map<RdcFieldKey, FieldSettings> watch_table_;
+    std::map<RdcFieldGroupKey, FieldSettings> watch_table_;
 
     //!< <job_id, gpu_group_id> pairs
     std::map<std::string, JobWatchTableEntry> job_watch_table_;
@@ -129,4 +130,4 @@ class RdcWatchTableImpl : public RdcWatchTable {
 }  // namespace amd
 
 
-#endif  // RDC_LIB_IMPL_RDCWATCHTABLEIMPL_H_
+#endif  // INCLUDE_RDC_LIB_IMPL_RDCWATCHTABLEIMPL_H_

@@ -245,9 +245,9 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     }
 
     rdc_field_grp_t field_group_id;
-    uint32_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
+    rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
     for (int i = 0; i < request->field_ids_size(); i++) {
-        field_ids[i] = request->field_ids(i);
+        field_ids[i] = static_cast<rdc_field_t>(request->field_ids(i));
     }
     rdc_status_t result = rdc_group_field_create(
             rdc_handle_, request->field_ids_size() , &field_ids[0],
@@ -331,8 +331,9 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     }
 
     rdc_field_value value;
-    rdc_status_t result = rdc_field_get_latest_value(
-                rdc_handle_, request->gpu_index(), request->field_id(), &value);
+    rdc_status_t result = rdc_field_get_latest_value(rdc_handle_,
+       request->gpu_index(), static_cast<rdc_field_t>(request->field_id()),
+                                                                      &value);
     reply->set_status(result);
     if (result != RDC_ST_OK) {
         return ::grpc::Status::OK;
@@ -365,9 +366,9 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
 
     rdc_field_value value;
     uint64_t next_timestamp;
-    rdc_status_t result = rdc_field_get_value_since(
-                rdc_handle_, request->gpu_index(), request->field_id(),
-                request->since_time_stamp(), &next_timestamp, &value);
+    rdc_status_t result = rdc_field_get_value_since(rdc_handle_,
+        request->gpu_index(), static_cast<rdc_field_t>(request->field_id()),
+                        request->since_time_stamp(), &next_timestamp, &value);
     reply->set_status(result);
     if (result != RDC_ST_OK) {
         return ::grpc::Status::OK;

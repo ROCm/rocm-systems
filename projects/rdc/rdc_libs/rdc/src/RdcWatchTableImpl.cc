@@ -176,7 +176,7 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id, uint64_t update_freq,
         double  max_keep_age, uint32_t max_keep_samples) {
     std::lock_guard<std::mutex> guard(watch_mutex_);
-    RdcFieldKey gkey({group_id, field_group_id});
+    RdcFieldGroupKey gkey({group_id, field_group_id});
     auto table_iter = watch_table_.find(gkey);
 
     // Already in the watch table
@@ -234,7 +234,7 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
 }
 
 rdc_status_t RdcWatchTableImpl::update_field_in_table_when_unwatch(
-                    const RdcFieldKey& entry) {
+                    const RdcFieldGroupKey& entry) {
     // Get individual fields for this unwatch
     std::vector<RdcFieldKey> fields;
     rdc_status_t result = get_fields_from_group(
@@ -306,7 +306,7 @@ rdc_status_t RdcWatchTableImpl::rdc_field_unwatch(
 
     std::lock_guard<std::mutex> guard(watch_mutex_);
     // Set is_watching = false
-    auto ite = watch_table_.find(RdcFieldKey({group_id, field_group_id}));
+    auto ite = watch_table_.find(RdcFieldGroupKey({group_id, field_group_id}));
     if (ite == watch_table_.end()) {
         return RDC_ST_NOT_FOUND;
     }
@@ -318,7 +318,7 @@ rdc_status_t RdcWatchTableImpl::rdc_field_unwatch(
 }
 
 bool RdcWatchTableImpl::is_job_watch_field(uint32_t gpu_index,
-        uint32_t field_id, std::string& job_id) const {
+        rdc_field_t field_id, std::string& job_id) const {
     RdcFieldKey key{gpu_index, field_id};
 
     for (auto ite = job_watch_table_.begin();

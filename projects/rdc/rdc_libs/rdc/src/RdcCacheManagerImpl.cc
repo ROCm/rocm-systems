@@ -32,7 +32,7 @@ namespace amd {
 namespace rdc {
 
 rdc_status_t RdcCacheManagerImpl::rdc_field_get_value_since(
-    uint32_t gpu_index, uint32_t field_id, uint64_t since_time_stamp,
+    uint32_t gpu_index, rdc_field_t field_id, uint64_t since_time_stamp,
     uint64_t *next_since_time_stamp, rdc_field_value* value) {
     if (!next_since_time_stamp || !value) {
         return RDC_ST_BAD_PARAMETER;
@@ -72,7 +72,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_field_get_value_since(
 
 
 rdc_status_t RdcCacheManagerImpl::evict_cache(uint32_t gpu_index,
-        uint32_t field_id, uint64_t max_keep_samples, double  max_keep_age) {
+    rdc_field_t field_id, uint64_t max_keep_samples, double  max_keep_age) {
     std::lock_guard<std::mutex> guard(cache_mutex_);
 
     RdcFieldKey field{gpu_index, field_id};
@@ -108,7 +108,7 @@ rdc_status_t RdcCacheManagerImpl::evict_cache(uint32_t gpu_index,
 }
 
 rdc_status_t RdcCacheManagerImpl::rdc_field_get_latest_value(
-    uint32_t gpu_index, uint32_t field_id, rdc_field_value* value) {
+    uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value) {
     if (!value) {
         return RDC_ST_BAD_PARAMETER;
     }

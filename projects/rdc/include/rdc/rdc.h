@@ -128,77 +128,46 @@ typedef enum {
 #define RDC_MAX_NUM_FIELD_GROUPS 64
 
 /**
- * Memory usage of the GPU instance
+ * These enums are used to specify a particular field to be retrieved.
  */
-#define RDC_FI_GPU_MEMORY_USAGE             525
+typedef enum {
+  RDC_FI_INVALID = 0,                //!< Invalid field value
+  //!< @brief Identifier fields
+  RDC_FI_GPU_COUNT = 1,              //!< GPU count in the system
+  RDC_FI_DEV_NAME,                   //!< Name of the device
 
-/**
- * Total memory of the GPU instance
- */
-#define RDC_FI_GPU_MEMORY_TOTAL             580
+  /*
+   * @brief Frequency related fields
+   */
+  RDC_FI_GPU_CLOCK = 100,           //!< The current clock for the GPU
+  RDC_FI_MEM_CLOCK,                 //!< Clock for the memory
 
-/**
- * Power usage for the device
- */
-#define RDC_FI_POWER_USAGE                  155
+  /*
+   * @brief Physical monitor fields
+   */
+  RDC_FI_MEMORY_TEMP = 200,          //!< Memory temperature for the device
+  RDC_FI_GPU_TEMP,                   //!< Current temperature for the device
+  RDC_FI_POWER_USAGE = 300,          //!< Power usage for the device
 
-/**
- * The current clock for the GPU
- */
-#define RDC_FI_GPU_CLOCK                 100
+  /*
+   * @brief PCIe related fields
+   */
+  RDC_FI_PCIE_TX = 400,              //!< PCIe Tx utilization information
+  RDC_FI_PCIE_RX,                    //!< PCIe Rx utilization information
 
-/**
- * Clock for the memory
- */
-#define RDC_FI_MEM_CLOCK                101
+  /*
+   * @brief GPU usage related fields
+   */
+  RDC_FI_GPU_UTIL = 500,             //!< GPU Utilization
+  RDC_FI_GPU_MEMORY_USAGE,           //!< Memory usage of the GPU instance
+  RDC_FI_GPU_MEMORY_TOTAL,           //!< Total memory of the GPU instance
 
-/**
- * PCIe Tx utilization information
- */
-#define RDC_FI_PCIE_TX    200
-
-/**
- * PCIe Rx utilization information
- */
-#define RDC_FI_PCIE_RX    201
-
-
-/**
- * GPU Utilization
- */
-#define RDC_FI_GPU_UTIL                     203
-
-/**
- * Accumulated correctable ECC errors
- */
-#define RDC_FI_ECC_CORRECT_TOTAL        312
-
-/**
- * Accumulated uncorrectable ECC errors
- */
-#define RDC_FI_ECC_UNCORRECT_TOTAL      313
-
-/**
- * Memory temperature for the device
- */
-#define RDC_FI_MEMORY_TEMP           140
-
-/**
- * Current temperature for the device
- */
-#define RDC_FI_GPU_TEMP                     150
-
-
-/**
- * GPU count in the system
- */
-#define RDC_FI_GPU_COUNT                    4
-
-/**
- * Name of the device
- */
-#define RDC_FI_DEV_NAME                     50
-
+  /**
+   * @brief ECC related fields
+   */
+  RDC_FI_ECC_CORRECT_TOTAL = 600,    //!< Accumulated correctable ECC errors
+  RDC_FI_ECC_UNCORRECT_TOTAL,        //!< Accumulated uncorrectable ECC errors
+} rdc_field_t;
 
 /**
  * @brief handlers used in various rdc calls
@@ -273,7 +242,7 @@ typedef struct {
  * @brief The structure to store the field value
  */
 typedef struct {
-    uint32_t     field_id;      //!< The field id of the value
+    rdc_field_t  field_id;      //!< The field id of the value
     int     status;             //!< RDC_ST_OK or error status
     uint64_t ts;                //!< Timestamp in usec since 1970
     rdc_field_type_t type;      //!< The field type
@@ -294,7 +263,7 @@ typedef struct {
     /**
      * The list of fields in the group
      */
-    uint32_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
+    rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
 } rdc_field_group_info_t;
 
 /**
@@ -647,7 +616,7 @@ rdc_status_t rdc_group_gpu_destroy(rdc_handle_t p_rdc_handle,
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle,
-            uint32_t num_field_ids, uint32_t* field_ids,
+            uint32_t num_field_ids, rdc_field_t* field_ids,
             const char* field_group_name, rdc_field_grp_t* rdc_field_group_id);
 
 /**
@@ -743,7 +712,7 @@ rdc_status_t rdc_field_watch(rdc_handle_t p_rdc_handle,
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle,
-        uint32_t gpu_index, uint32_t field, rdc_field_value* value);
+        uint32_t gpu_index, rdc_field_t field, rdc_field_value* value);
 
 /**
  *  @brief Request a history cached field of a GPU
@@ -767,7 +736,7 @@ rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle,
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_field_get_value_since(rdc_handle_t p_rdc_handle,
-        uint32_t gpu_index, uint32_t field, uint64_t since_time_stamp,
+        uint32_t gpu_index, rdc_field_t field, uint64_t since_time_stamp,
         uint64_t *next_since_time_stamp, rdc_field_value* value);
 
 /**
@@ -806,7 +775,7 @@ const char* rdc_status_string(rdc_status_t status);
  *
  *  @retval The string to describe the field.
  */
-const char* field_id_string(uint32_t field_id);
+const char* field_id_string(rdc_field_t field_id);
 
 #ifdef __cplusplus
 }

@@ -29,7 +29,7 @@ namespace rdc {
 
 RdcGroupSettingsImpl::RdcGroupSettingsImpl() {
     // Add the default job stats fields
-    uint32_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE,
+    rdc_field_t job_fields[] = {RDC_FI_GPU_MEMORY_USAGE,
         RDC_FI_POWER_USAGE, RDC_FI_GPU_CLOCK, RDC_FI_GPU_UTIL,
         RDC_FI_PCIE_TX, RDC_FI_PCIE_RX, RDC_FI_MEM_CLOCK,
         RDC_FI_GPU_TEMP};
@@ -37,7 +37,7 @@ RdcGroupSettingsImpl::RdcGroupSettingsImpl() {
     rdc_field_grp_t fgid = JOB_FIELD_ID;
 
     rdc_group_field_create(sizeof(job_fields)/sizeof(uint32_t),
-                job_fields,  job_field_group, &fgid);
+                job_fields, job_field_group, &fgid);
 }
 
 rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_create(
@@ -133,7 +133,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_get_all_ids(
 }
 
 rdc_status_t RdcGroupSettingsImpl::rdc_group_field_create(
-    uint32_t num_field_ids, uint32_t* field_ids,
+    uint32_t num_field_ids, rdc_field_t* field_ids,
     const char* field_group_name, rdc_field_grp_t* rdc_field_group_id) {
 
     RDC_LOG(RDC_DEBUG, "Create field group " << field_group_name);

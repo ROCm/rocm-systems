@@ -63,6 +63,7 @@ endif()
 
 set(SRC_DIR "${PROJECT_SOURCE_DIR}/rdc_libs")
 set(RDC_LIB_INC_DIR "${PROJECT_SOURCE_DIR}/include")
+set(COMMON_DIR "${PROJECT_SOURCE_DIR}/common")
 
 
 ################# Determine the library version #########################
@@ -112,12 +113,13 @@ set(BOOTSTRAP_LIB_COMPONENT "lib${BOOTSTRAP_LIB}")
 set(BOOTSTRAP_LIB_SRC_LIST "${SRC_DIR}/bootstrap/src/RdcBootStrap.cc")
 set(BOOTSTRAP_LIB_SRC_LIST ${BOOTSTRAP_LIB_SRC_LIST} "${SRC_DIR}/bootstrap/src/RdcLogger.cc")
 set(BOOTSTRAP_LIB_SRC_LIST ${BOOTSTRAP_LIB_SRC_LIST} "${SRC_DIR}/bootstrap/src/RdcLibraryLoader.cc")
+set(BOOTSTRAP_LIB_SRC_LIST ${BOOTSTRAP_LIB_SRC_LIST} "${COMMON_DIR}/rdc_fields_supported.cc")
 set(BOOTSTRAP_LIB_INC_LIST "${RDC_LIB_INC_DIR}/rdc/rdc.h")
 set(BOOTSTRAP_LIB_INC_LIST ${BOOTSTRAP_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/rdc_common.h")
 set(BOOTSTRAP_LIB_INC_LIST ${BOOTSTRAP_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcLogger.h")
 set(BOOTSTRAP_LIB_INC_LIST ${BOOTSTRAP_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcHandler.h")
 set(BOOTSTRAP_LIB_INC_LIST ${BOOTSTRAP_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcLibraryLoader.h")
-
+set(BOOTSTRAP_LIB_INC_LIST ${BOOTSTRAP_LIB_INC_LIST} "${COMMON_DIR}/rdc_fields_supported.h")
 message("BOOTSTRAP_LIB_INC_LIST=${BOOTSTRAP_LIB_INC_LIST}")
 
 add_library(${BOOTSTRAP_LIB} SHARED ${BOOTSTRAP_LIB_SRC_LIST} ${BOOTSTRAP_LIB_INC_LIST})
@@ -125,6 +127,7 @@ target_link_libraries(${BOOTSTRAP_LIB} pthread dl)
 target_include_directories(${BOOTSTRAP_LIB} PRIVATE
                                          "${PROJECT_SOURCE_DIR}"
                                          "${PROJECT_SOURCE_DIR}/include"
+                                         "${COMMON_DIR}"
                                          "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 # TODO: set the properties for the library once we have one
@@ -143,6 +146,7 @@ set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcGroupSettingsImp
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcCacheManagerImpl.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcMetricsUpdaterImpl.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcWatchTableImpl.cc")
+set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${COMMON_DIR}/rdc_fields_supported.cc")
 
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcEmbeddedHandler.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcMetricFetcher.h")
@@ -155,6 +159,7 @@ set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcMetricsU
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcMetricsUpdaterImpl.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcWatchTable.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcWatchTableImpl.h")
+set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${COMMON_DIR}/rdc_fields_supported.h")
 
 message("RDC_LIB_INC_LIST=${RDC_LIB_INC_LIST}")
 

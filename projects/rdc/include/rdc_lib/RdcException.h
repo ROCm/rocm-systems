@@ -20,8 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#ifndef RDCI_INCLUDE_RDCEXCEPTION_H_
-#define RDCI_INCLUDE_RDCEXCEPTION_H_
+#ifndef INCLUDE_RDC_LIB_RDCEXCEPTION_H_
+#define INCLUDE_RDC_LIB_RDCEXCEPTION_H_
 
 #include <exception>
 #include <string>
@@ -45,5 +45,5 @@ class RdcException : public std::exception {
 }  // namespace rdc
 }  // namespace amd
 
-#endif  // RDCI_INCLUDE_RDCEXCEPTION_H_
+#endif  // INCLUDE_RDC_LIB_RDCEXCEPTION_H_
 

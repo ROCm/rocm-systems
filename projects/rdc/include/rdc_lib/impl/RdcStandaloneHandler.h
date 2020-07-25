@@ -19,8 +19,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_IMPL_RDCSTANDALONEHANDLER_H_
-#define RDC_LIB_IMPL_RDCSTANDALONEHANDLER_H_
+#ifndef INCLUDE_RDC_LIB_IMPL_RDCSTANDALONEHANDLER_H_
+#define INCLUDE_RDC_LIB_IMPL_RDCSTANDALONEHANDLER_H_
 #include <grpcpp/grpcpp.h>
 #include <memory>
 #include "rdc.grpc.pb.h"  // NOLINT
@@ -53,7 +53,7 @@ class RdcStandaloneHandler: public RdcHandler {
     rdc_status_t rdc_group_gpu_add(rdc_gpu_group_t groupId,
                 uint32_t gpu_index) override;
     rdc_status_t rdc_group_field_create(uint32_t num_field_ids,
-        uint32_t* field_ids, const char* field_group_name,
+        rdc_field_t* field_ids, const char* field_group_name,
         rdc_field_grp_t* rdc_field_group_id) override;
     rdc_status_t rdc_group_field_get_info(
         rdc_field_grp_t rdc_field_group_id,
@@ -74,9 +74,9 @@ class RdcStandaloneHandler: public RdcHandler {
         rdc_field_grp_t field_group_id, uint64_t update_freq,
         double max_keep_age, uint32_t max_keep_samples) override;
     rdc_status_t rdc_field_get_latest_value(uint32_t gpu_index,
-        uint32_t field, rdc_field_value* value) override;
+        rdc_field_t field, rdc_field_value* value) override;
     rdc_status_t rdc_field_get_value_since(uint32_t gpu_index,
-        uint32_t field, uint64_t since_time_stamp,
+        rdc_field_t field, uint64_t since_time_stamp,
         uint64_t *next_since_time_stamp, rdc_field_value* value) override;
     rdc_status_t rdc_field_unwatch(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id) override;
@@ -107,4 +107,4 @@ extern "C" {
     const char* root_ca, const char* client_cert, const char* client_key);
 }
 
-#endif  // RDC_LIB_IMPL_RDCSTANDALONEHANDLER_H_
+#endif  // INCLUDE_RDC_LIB_IMPL_RDCSTANDALONEHANDLER_H_

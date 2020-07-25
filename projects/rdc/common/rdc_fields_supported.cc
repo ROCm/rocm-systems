@@ -19,31 +19,54 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef INCLUDE_RDC_LIB_IMPL_RDCMETRICSUPDATERIMPL_H_
-#define INCLUDE_RDC_LIB_IMPL_RDCMETRICSUPDATERIMPL_H_
+#include <assert.h>
 
-#include <future>  // NOLINT(build/c++11)
-#include <memory>
-#include "rdc_lib/RdcMetricsUpdater.h"
-#include "rdc_lib/RdcWatchTable.h"
+#include <algorithm>
 
+#include "common/rdc_fields_supported.h"
+#include "rdc/rdc.h"
 namespace amd {
 namespace rdc {
 
-class RdcMetricsUpdaterImpl: public RdcMetricsUpdater {
- public:
-     void start() override;
-     void stop() override;
-     explicit RdcMetricsUpdaterImpl(const RdcWatchTablePtr& watch_table,
-                const uint32_t check_frequency);
- private:
-     RdcWatchTablePtr watch_table_;
-     std::atomic<bool> started_;
-     std::future<void> updater_;  // keep the future of updater
-     const uint32_t _check_frequency;  // Check frequency in milliseconds
+#define FLD_DESC_ENT(ID, DESC, LABEL)  \
+          {static_cast<uint32_t>(ID), {#ID, (DESC), (LABEL)}},
+static const fld_id2name_map_t field_id_to_descript = {
+  #include "common/rdc_field_data.data"
 };
+#undef FLD_DESC_ENT
+
+#define FLD_DESC_ENT(ID, DESC, LABEL) {#ID, (ID)},
+static fld_name2id_map_t field_name_to_id = {
+  #include "common/rdc_field_data.data"  // NOLINT
+};
+#undef FLD_DESC_ENT
+
+
+
+amd::rdc::fld_id2name_map_t &
+get_field_id_description_from_id(void) {
+  return field_id_to_descript;
+}
+
+bool get_field_id_from_name(const std::string name, rdc_field_t *value) {
+    assert(value != nullptr);
+    auto id = field_name_to_id.find(name);
+    if (id == field_name_to_id.end()) {
+        return false;
+    }
+
+    *value = static_cast<rdc_field_t>(id->second);
+    return true;
+}
+
+bool is_field_valid(rdc_field_t field_id) {
+  if (field_id == RDC_FI_INVALID) {
+    return false;
+  }
+  return field_id_to_descript.find(static_cast<uint32_t>(field_id)) !=
+                                                field_id_to_descript.end();
+}
+
 
 }  // namespace rdc
 }  // namespace amd
-
-#endif  // INCLUDE_RDC_LIB_IMPL_RDCMETRICSUPDATERIMPL_H_

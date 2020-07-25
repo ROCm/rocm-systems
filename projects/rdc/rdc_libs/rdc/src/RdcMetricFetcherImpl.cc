@@ -26,22 +26,12 @@ THE SOFTWARE.
 #include <algorithm>
 #include <vector>
 #include "rdc_lib/rdc_common.h"
+#include "common/rdc_fields_supported.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace rdc {
-
-bool RdcMetricFetcherImpl::is_field_valid(uint32_t field_id) const {
-     const std::vector<uint32_t> all_fields = {RDC_FI_GPU_MEMORY_USAGE,
-     RDC_FI_GPU_MEMORY_TOTAL, RDC_FI_GPU_COUNT, RDC_FI_POWER_USAGE,
-     RDC_FI_GPU_CLOCK, RDC_FI_GPU_UTIL, RDC_FI_DEV_NAME, RDC_FI_GPU_TEMP,
-     RDC_FI_MEM_CLOCK, RDC_FI_PCIE_TX, RDC_FI_PCIE_RX,
-     RDC_FI_ECC_CORRECT_TOTAL, RDC_FI_ECC_UNCORRECT_TOTAL, RDC_FI_MEMORY_TEMP};
-
-     return std::find(all_fields.begin(), all_fields.end(), field_id)
-               != all_fields.end();
-}
 
 RdcMetricFetcherImpl::RdcMetricFetcherImpl() {
     task_started_ = true;
@@ -81,7 +71,7 @@ uint64_t RdcMetricFetcherImpl::now() {
 }
 
 void RdcMetricFetcherImpl::get_ecc_error(uint32_t gpu_index,
-                    uint32_t field_id, rdc_field_value* value) {
+                               rdc_field_t field_id, rdc_field_value* value) {
     rsmi_status_t err = RSMI_STATUS_SUCCESS;
     uint64_t correctable_err = 0;
     uint64_t uncorrectable_err = 0;
@@ -121,7 +111,7 @@ void RdcMetricFetcherImpl::get_ecc_error(uint32_t gpu_index,
 }
 
 bool RdcMetricFetcherImpl::async_get_pcie_throughput(uint32_t gpu_index,
-        uint32_t field_id, rdc_field_value* value) {
+    rdc_field_t field_id, rdc_field_value* value) {
     if (!value) {
         return false;
     }
@@ -216,7 +206,7 @@ void RdcMetricFetcherImpl::get_pcie_throughput(const RdcFieldKey& key) {
 }
 
 rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
-         uint32_t field_id, rdc_field_value* value) {
+    rdc_field_t field_id, rdc_field_value* value) {
     if (!value) {
          return RDC_ST_BAD_PARAMETER;
     }

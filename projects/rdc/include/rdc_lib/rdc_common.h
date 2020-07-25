@@ -20,11 +20,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#ifndef RDC_LIB_RDC_COMMON_H_
-#define RDC_LIB_RDC_COMMON_H_
+#ifndef INCLUDE_RDC_LIB_RDC_COMMON_H_
+#define INCLUDE_RDC_LIB_RDC_COMMON_H_
 #include <iostream>
 #include <map>
 #include <utility>
+
+#include "rdc/rdc.h"
 
 #define RDC_ERROR  0
 #define RDC_INFO   1
@@ -40,7 +42,10 @@ THE SOFTWARE.
 } while (0)
 
 //<! The key to identify the field with <gpu_id, field_id>
-typedef std::pair<uint32_t, uint32_t> RdcFieldKey;
+typedef std::pair<uint32_t, rdc_field_t> RdcFieldKey;
+
+//<! The key to identify the field with <gpu_id, field_group_id>
+typedef std::pair<uint32_t, uint32_t> RdcFieldGroupKey;
 
 //!< The gauge metrics do not require aggregations
 typedef std::map<RdcFieldKey, uint64_t> rdc_gpu_gauges_t;
@@ -62,4 +67,4 @@ typedef std::map<RdcFieldKey, uint64_t> rdc_gpu_gauges_t;
 char *strncpy_with_null(char *dest, const char *src, size_t n);
 
 
-#endif  // RDC_LIB_RDC_COMMON_H_
+#endif  // INCLUDE_RDC_LIB_RDC_COMMON_H_

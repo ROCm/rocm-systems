@@ -19,8 +19,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_IMPL_RDCMETRICFETCHERIMPL_H_
-#define RDC_LIB_IMPL_RDCMETRICFETCHERIMPL_H_
+#ifndef INCLUDE_RDC_LIB_IMPL_RDCMETRICFETCHERIMPL_H_
+#define INCLUDE_RDC_LIB_IMPL_RDCMETRICFETCHERIMPL_H_
 
 #include <mutex>  // NOLINT(build/c++11)
 #include <future>  // NOLINT(build/c++11)
@@ -52,18 +52,17 @@ struct MetricTask {
 class RdcMetricFetcherImpl: public RdcMetricFetcher {
  public:
     rdc_status_t fetch_smi_field(uint32_t gpu_index,
-        uint32_t field_id, rdc_field_value* value) override;
-    bool is_field_valid(uint32_t field_id) const override;
+        rdc_field_t field_id, rdc_field_value* value) override;
     RdcMetricFetcherImpl();
     ~RdcMetricFetcherImpl();
  private:
     uint64_t now();
     void get_ecc_error(uint32_t gpu_index,
-        uint32_t field_id, rdc_field_value* value);
+        rdc_field_t field_id, rdc_field_value* value);
 
     //!< return true if starting async_get
     bool async_get_pcie_throughput(uint32_t gpu_index,
-        uint32_t field_id, rdc_field_value* value);
+        rdc_field_t field_id, rdc_field_value* value);
     void get_pcie_throughput(const RdcFieldKey& key);
 
     //!< Async metric retreive
@@ -78,4 +77,4 @@ class RdcMetricFetcherImpl: public RdcMetricFetcher {
 }  // namespace rdc
 }  // namespace amd
 
-#endif  // RDC_LIB_IMPL_RDCMETRICFETCHERIMPL_H_
+#endif  // INCLUDE_RDC_LIB_IMPL_RDCMETRICFETCHERIMPL_H_

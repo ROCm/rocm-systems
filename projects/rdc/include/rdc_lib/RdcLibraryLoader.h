@@ -19,8 +19,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_LIB_RDCLIBRARYLOADER_H_
-#define RDC_LIB_RDCLIBRARYLOADER_H_
+#ifndef INCLUDE_RDC_LIB_RDCLIBRARYLOADER_H_
+#define INCLUDE_RDC_LIB_RDCLIBRARYLOADER_H_
 #include <dlfcn.h>
 #include <string.h>
 #include <map>
@@ -83,4 +83,4 @@ template<typename T> rdc_status_t RdcLibraryLoader::load(const char* filename,
 }  // namespace amd
 
 
-#endif  // RDC_LIB_RDCLIBRARYLOADER_H_
+#endif  // INCLUDE_RDC_LIB_RDCLIBRARYLOADER_H_

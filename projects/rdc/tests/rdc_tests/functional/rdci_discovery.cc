@@ -33,7 +33,8 @@ THE SOFTWARE.
 
 TestRdciDiscovery::TestRdciDiscovery() : TestBase() {
   set_title("\tRDC Discovery Test");
-  set_description("\tThe Discovery tests verifies that the GPUs are discovered and identified .");
+  set_description("\tThe Discovery tests verifies that the GPUs are "
+                                               "discovered and identified .");
 }
 
 TestRdciDiscovery::~TestRdciDiscovery(void) {
@@ -58,17 +59,16 @@ void TestRdciDiscovery::DisplayResults(void) const {
 void TestRdciDiscovery::Close() {
   TestBase::Close();
   rdc_status_t result;
-  if(standalone_){
+  if (standalone_) {
     IF_VERB(STANDARD) {
-    std::cout << "\t**Disconnecting from host....\n" << std::endl;
-   }
+      std::cout << "\t**Disconnecting from host....\n" << std::endl;
+    }
     result = rdc_disconnect(rdc_handle);
     ASSERT_EQ(result, RDC_ST_OK);
-  }
-  else{
+  } else {
     IF_VERB(STANDARD) {
     std::cout << "\t**Stopping Embedded RDC Engine....\n" << std::endl;
-   }
+    }
     result = rdc_stop_embedded(rdc_handle);
     ASSERT_EQ(result, RDC_ST_OK);
   }
@@ -77,20 +77,17 @@ void TestRdciDiscovery::Close() {
   ASSERT_EQ(result, RDC_ST_OK);
 }
 
-
 void TestRdciDiscovery::Run(void) {
-
   TestBase::Run();
   rdc_status_t result;
-  if(standalone_){
+  if (standalone_) {
     IF_VERB(STANDARD) {
       std::cout << "\t**Connecting to host....\n" << std::endl;
     }
     char hostIpAddress[] = {"localhost:50051"};
     result = rdc_connect(hostIpAddress, &rdc_handle, nullptr, nullptr, nullptr);
     ASSERT_EQ(result, RDC_ST_OK);
-  }
-  else{
+  } else {
     IF_VERB(STANDARD) {
       std::cout << "\t**Starting embedded RDC engine....\n" << std::endl;
     }
@@ -121,17 +118,17 @@ void TestRdciDiscovery::Run(void) {
 
   rdc_device_attributes_t attribute;
   for (uint32_t i = 0; i < count; i++) {
-
       result = rdc_device_get_attributes(0, gpu_index_list[i], &attribute);
       ASSERT_EQ(result, RDC_ST_INVALID_HANDLER);
 
       result = rdc_device_get_attributes(rdc_handle, gpu_index_list[i], 0);
       ASSERT_EQ(result, RDC_ST_INVALID_HANDLER);
 
-      result = rdc_device_get_attributes(rdc_handle,gpu_index_list[i], &attribute);
+      result = rdc_device_get_attributes(rdc_handle, gpu_index_list[i],
+                                                                  &attribute);
       ASSERT_EQ(result, RDC_ST_OK);
 
-      std::cout << "\tGPU ID "<< i << "  ||  " << attribute.device_name <<std::endl;
+      std::cout << "\tGPU ID "<< i << "  ||  " <<
+                                            attribute.device_name <<std::endl;
   }
-
 }

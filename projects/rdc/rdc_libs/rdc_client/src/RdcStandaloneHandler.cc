@@ -290,7 +290,7 @@ rdc_status_t RdcStandaloneHandler::rdc_group_gpu_add(rdc_gpu_group_t group_id,
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_group_field_create(
-    uint32_t num_field_ids, uint32_t* field_ids,
+    uint32_t num_field_ids, rdc_field_t* field_ids,
     const char* field_group_name, rdc_field_grp_t* rdc_field_group_id) {
     if (!field_ids || !field_group_name || !rdc_field_group_id) {
         return RDC_ST_BAD_PARAMETER;
@@ -339,7 +339,8 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_get_info(
     strncpy_with_null(field_group_info->group_name,
                 reply.filed_group_name().c_str(), RDC_MAX_STR_LENGTH);
     for (int i = 0; i < reply.field_ids_size(); i++) {
-        field_group_info->field_ids[i] = reply.field_ids(i);
+        field_group_info->field_ids[i] =
+                                 static_cast<rdc_field_t>(reply.field_ids(i));
     }
 
     return RDC_ST_OK;
@@ -471,7 +472,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_watch(rdc_gpu_group_t group_id,
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_field_get_latest_value(
-    uint32_t gpu_index, uint32_t field, rdc_field_value* value) {
+              uint32_t gpu_index, rdc_field_t field, rdc_field_value* value) {
     if (!value) {
         return RDC_ST_BAD_PARAMETER;
     }
@@ -487,7 +488,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_latest_value(
     rdc_status_t err_status = error_handle(status, reply.status());
     if (err_status != RDC_ST_OK) return err_status;
 
-    value->field_id = reply.field_id();
+    value->field_id = static_cast<rdc_field_t>(reply.field_id());
     value->status = reply.rdc_status();
     value->ts = reply.ts();
     value->type = static_cast<rdc_field_type_t>(reply.type());
@@ -504,7 +505,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_latest_value(
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_field_get_value_since(uint32_t gpu_index,
-        uint32_t field, uint64_t since_time_stamp,
+        rdc_field_t field, uint64_t since_time_stamp,
         uint64_t *next_since_time_stamp, rdc_field_value* value) {
     if (!next_since_time_stamp || !value) {
         return RDC_ST_BAD_PARAMETER;
@@ -522,7 +523,7 @@ rdc_status_t RdcStandaloneHandler::rdc_field_get_value_since(uint32_t gpu_index,
     rdc_status_t err_status = error_handle(status, reply.status());
     if (err_status != RDC_ST_OK) return err_status;
 
-    value->field_id = reply.field_id();
+    value->field_id = static_cast<rdc_field_t>(reply.field_id());
     value->status = reply.rdc_status();
     value->ts = reply.ts();
     value->type = static_cast<rdc_field_type_t>(reply.type());

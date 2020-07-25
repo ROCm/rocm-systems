@@ -22,6 +22,7 @@ THE SOFTWARE.
 #include <dlfcn.h>
 #include <string.h>
 #include <map>
+#include "common/rdc_fields_supported.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcHandler.h"
 #include "rdc_lib/RdcLogger.h"
@@ -204,7 +205,7 @@ rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle,
 }
 
 rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle,
-            uint32_t num_field_ids, uint32_t* field_ids,
+            uint32_t num_field_ids, rdc_field_t* field_ids,
             const char* field_group_name, rdc_field_grp_t* rdc_field_group_id) {
         if (!p_rdc_handle || !field_ids ||
                 !field_group_name || !rdc_field_group_id) {
@@ -270,7 +271,7 @@ rdc_status_t rdc_field_watch(rdc_handle_t p_rdc_handle,
 }
 
 rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle,
-        uint32_t gpu_index, uint32_t field, rdc_field_value* value) {
+        uint32_t gpu_index, rdc_field_t field, rdc_field_value* value) {
         if (!p_rdc_handle || !value) {
                 return RDC_ST_INVALID_HANDLER;
         }
@@ -280,7 +281,7 @@ rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle,
 }
 
 rdc_status_t rdc_field_get_value_since(rdc_handle_t p_rdc_handle,
-        uint32_t gpu_index, uint32_t field, uint64_t since_time_stamp,
+        uint32_t gpu_index, rdc_field_t field, uint64_t since_time_stamp,
         uint64_t *next_since_time_stamp, rdc_field_value* value) {
         if (!p_rdc_handle || !next_since_time_stamp || !value) {
                 return RDC_ST_INVALID_HANDLER;
@@ -350,30 +351,10 @@ const char* rdc_status_string(rdc_status_t result) {
     }
 }
 
-const char* field_id_string(uint32_t field_id) {
-       const std::map<uint16_t, const char*> id_name = {
-        {RDC_FI_GPU_MEMORY_USAGE, "GPU_MEMORY_USAGE"},
-        {RDC_FI_GPU_MEMORY_TOTAL, "GPU_MEMORY_TOTAL"},
-        {RDC_FI_POWER_USAGE, "POWER_USAGE"},
-        {RDC_FI_GPU_CLOCK, "GPU_CLOCK"},
-        {RDC_FI_GPU_UTIL, "GPU_UTIL"},
-        {RDC_FI_GPU_TEMP, "GPU_TEMP"},
-        {RDC_FI_GPU_COUNT, "GPU_COUNT"},
-        {RDC_FI_MEM_CLOCK, "MEM_CLOCK"},
-        {RDC_FI_PCIE_TX, "PCIE_TX"},
-        {RDC_FI_PCIE_RX, "PCIE_RX"},
-        {RDC_FI_ECC_CORRECT_TOTAL, "ECC_CORRECT"},
-        {RDC_FI_ECC_UNCORRECT_TOTAL, "ECC_UNCORRECT"},
-        {RDC_FI_MEMORY_TEMP, "MEMORY_TEMP"},
-        {RDC_FI_DEV_NAME, "DEV_NAME"}
-      };
-
-      auto search = id_name.find(field_id);
-      if (search == id_name.end()) {
-          return "UNKNOWN_FIELD";
-      }
-
-      return search->second;
+const char* field_id_string(rdc_field_t field_id) {
+  amd::rdc::fld_id2name_map_t &field_id_to_descript =
+                                 amd::rdc::get_field_id_description_from_id();
+  return field_id_to_descript.find(field_id)->second.label.c_str();
 }
 
 char *strncpy_with_null(char *dest, const char *src, size_t n) {

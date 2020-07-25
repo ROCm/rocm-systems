@@ -129,7 +129,7 @@ int main(int, char **) {
 
     // Create the field groups to monitor POWER and TEMP
     rdc_field_grp_t field_group_id;
-    uint32_t field_ids[2];
+    rdc_field_t field_ids[2];
     field_ids[0] = RDC_FI_GPU_MEMORY_USAGE;
     field_ids[1] = RDC_FI_POWER_USAGE;
     result = rdc_group_field_create(rdc_handle, 2,

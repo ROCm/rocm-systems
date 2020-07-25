@@ -19,59 +19,32 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDCI_INCLUDE_RDCIDMONSUBSYSTEM_H_
-#define RDCI_INCLUDE_RDCIDMONSUBSYSTEM_H_
-#include <signal.h>
-#include <map>
-#include <vector>
-#include "RdciSubSystem.h"
+#ifndef COMMON_RDC_FIELDS_SUPPORTED_H_
+#define COMMON_RDC_FIELDS_SUPPORTED_H_
 
+#include <string>
+#include <unordered_map>
+
+#include "rdc/rdc.h"
 
 namespace amd {
 namespace rdc {
 
-class RdciDmonSubSystem: public RdciSubSystem {
- public:
-     RdciDmonSubSystem();
-     ~RdciDmonSubSystem();
-     void parse_cmd_opts(int argc, char ** argv) override;
-     void process() override;
+typedef struct {
+    std::string enum_name;
+    std::string description;
+    std::string label;
+} field_id_descript;
 
- private:
-     void show_help() const;
-     void show_field_usage() const;
-     void clean_up();
+typedef const std::unordered_map<uint32_t, const field_id_descript>
+                                                       fld_id2name_map_t;
+typedef std::unordered_map<std::string, uint32_t> fld_name2id_map_t;
 
-     void create_temp_group();
-     void create_temp_field_group();
-
-     enum OPERATIONS {
-        DMON_UNKNOWN = 0,
-        DMON_HELP,
-        DMON_LIST_FIELDS,
-        DMON_MONITOR
-     } dmon_ops_;
-
-     enum OPTIONS {
-        OPTIONS_UNKNOWN = 0,
-        OPTIONS_COUNT,
-        OPTIONS_DELAY,
-        OPTIONS_FIELD_GROUP_ID,
-        OPTIONS_GROUP_ID
-     };
-
-     std::map<OPTIONS, uint32_t> options_;
-     std::vector<rdc_field_t> field_ids_;
-     std::vector<uint32_t> gpu_indexes_;
-     bool need_cleanup_;
-
-     static volatile sig_atomic_t is_terminating_;
-     static void set_terminating(int sig);
-};
-
+bool get_field_id_from_name(const std::string name, rdc_field_t *value);
+fld_id2name_map_t & get_field_id_description_from_id(void);  // NOLINT
+bool is_field_valid(rdc_field_t field_id);
 
 }  // namespace rdc
 }  // namespace amd
 
-
-#endif  // RDCI_INCLUDE_RDCIDMONSUBSYSTEM_H_
+#endif  // COMMON_RDC_FIELDS_SUPPORTED_H_

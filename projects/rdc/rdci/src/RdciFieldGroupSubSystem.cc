@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <unistd.h>
 #include "rdc_lib/rdc_common.h"
 #include "common/rdc_utils.h"
+#include "common/rdc_fields_supported.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
 
@@ -165,15 +166,16 @@ void RdciFieldGroupSubSystem::process() {
                     "Must specify the group name when create a field group");
                }
                std::vector<std::string> fields = split_string(field_ids_, ',');
-               uint32_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
+               rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
                for (uint32_t i = 0; i < fields.size(); i++) {
                    if (!IsNumber(fields[i])) {
-                       if (!get_field_id_from_name(fields[i], field_ids[i])) {
+                       if (!get_field_id_from_name(fields[i], &field_ids[i])) {
                          throw RdcException(RDC_ST_BAD_PARAMETER,
                             "The field name "+fields[i]+" is not valid");
                        }
                    } else {
-                     field_ids[i] = std::stoi(fields[i]);
+                     field_ids[i] =
+                               static_cast<rdc_field_t>(std::stoi(fields[i]));
                    }
                }
                rdc_field_grp_t group_id;

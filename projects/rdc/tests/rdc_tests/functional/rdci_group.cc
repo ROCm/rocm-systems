@@ -30,8 +30,6 @@ THE SOFTWARE.
 #include "rdc_tests/test_common.h"
 #include "rdc/rdc.h"
 
-
-
 TestRdciGroup::TestRdciGroup() : TestBase() {
   set_title("\tRDC Group Test");
   set_description("\tThe Group tests verifies creation/deletion of GPU groups");
@@ -59,39 +57,35 @@ void TestRdciGroup::DisplayResults(void) const {
 void TestRdciGroup::Close() {
   TestBase::Close();
   rdc_status_t result;
-  if(standalone_){
+  if (standalone_) {
     IF_VERB(STANDARD) {
-    std::cout << "\t**Disconnecting from host....\n" << std::endl;
-   }
+      std::cout << "\t**Disconnecting from host....\n" << std::endl;
+    }
     result = rdc_disconnect(rdc_handle);
     ASSERT_EQ(result, RDC_ST_OK);
-  }
-  else{
+  } else {
     IF_VERB(STANDARD) {
-    std::cout << "\t**Stopping Embedded RDC Engine....\n" << std::endl;
-   }
+     std::cout << "\t**Stopping Embedded RDC Engine....\n" << std::endl;
+    }
     result = rdc_stop_embedded(rdc_handle);
     ASSERT_EQ(result, RDC_ST_OK);
-  };
+  }
 
   result = rdc_shutdown();
   ASSERT_EQ(result, RDC_ST_OK);
 }
 
-
 void TestRdciGroup::Run(void) {
-
   TestBase::Run();
   rdc_status_t result;
-  if(standalone_){
+  if (standalone_) {
     IF_VERB(STANDARD) {
       std::cout << "\t**Connecting to host....\n" << std::endl;
     }
     char hostIpAddress[] = {"localhost:50051"};
     result = rdc_connect(hostIpAddress, &rdc_handle, nullptr, nullptr, nullptr);
     ASSERT_EQ(result, RDC_ST_OK);
-  }
-  else{
+  } else {
     IF_VERB(STANDARD) {
       std::cout << "\t**Starting embedded RDC engine....\n" << std::endl;
     }
@@ -103,31 +97,26 @@ void TestRdciGroup::Run(void) {
   uint32_t count = 0;
   rdc_group_info_t group_info;
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
-  result = rdc_group_gpu_create(0, RDC_GROUP_EMPTY,
-                                "GRP_NAME", &group_id);
+  result = rdc_group_gpu_create(0, RDC_GROUP_EMPTY, "GRP_NAME", &group_id);
   ASSERT_EQ(result, RDC_ST_INVALID_HANDLER);
 
-  result = rdc_group_gpu_create(rdc_handle, RDC_GROUP_EMPTY,
-                                NULL, &group_id);
+  result = rdc_group_gpu_create(rdc_handle, RDC_GROUP_EMPTY, NULL, &group_id);
+  ASSERT_EQ(result, RDC_ST_BAD_PARAMETER);
+
+  result = rdc_group_gpu_create(rdc_handle, RDC_GROUP_EMPTY, "GRP_NAME", NULL);
   ASSERT_EQ(result, RDC_ST_BAD_PARAMETER);
 
   result = rdc_group_gpu_create(rdc_handle, RDC_GROUP_EMPTY,
-                                "GRP_NAME", NULL);
-  ASSERT_EQ(result, RDC_ST_BAD_PARAMETER);
-
-  result = rdc_group_gpu_create(rdc_handle, RDC_GROUP_EMPTY,
-                                "GRP_NAME", &group_id);
+                                                        "GRP_NAME", &group_id);
   ASSERT_EQ(result, RDC_ST_OK);
 
-  result = rdc_group_gpu_add(rdc_handle,
-                          group_id, -1);
+  result = rdc_group_gpu_add(rdc_handle, group_id, -1);
   ASSERT_EQ(result, RDC_ST_NOT_FOUND);
 
   result = rdc_device_get_all(rdc_handle, gpu_index_list, &count);
   ASSERT_EQ(result, RDC_ST_OK);
   for (uint32_t i=0; i < count; i++) {
-      result = rdc_group_gpu_add(rdc_handle,
-                          group_id, gpu_index_list[i]);
+      result = rdc_group_gpu_add(rdc_handle, group_id, gpu_index_list[i]);
       ASSERT_EQ(result, RDC_ST_OK);
   }
 
@@ -161,6 +150,4 @@ void TestRdciGroup::Run(void) {
 
   result = rdc_group_gpu_destroy(rdc_handle, group_id);
   ASSERT_EQ(result, RDC_ST_OK);
-
-
 }
