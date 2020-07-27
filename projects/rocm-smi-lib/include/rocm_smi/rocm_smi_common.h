@@ -79,7 +79,7 @@
 #define DEVICE_MUTEX \
     amd::smi::pthread_wrap _pw(*amd::smi::GetMutex(dv_ind)); \
     amd::smi::RocmSMI& smi_ = amd::smi::RocmSMI::getInstance(); \
-    bool blocking_ = !(smi_.init_options() && \
+    bool blocking_ = !(smi_.init_options() & \
                           static_cast<uint64_t>(RSMI_INIT_FLAG_RESRV_TEST1)); \
     amd::smi::ScopedPthread _lock(_pw, blocking_); \
     if (!blocking_ && _lock.mutex_not_acquired()) { \

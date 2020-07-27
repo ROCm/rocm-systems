@@ -237,7 +237,7 @@ typedef enum {
    * <br>
    * Throughput = BEATS/time_running * 10<sup>9</sup>  (bytes/second)<br>
    */
-   // ie, Throughput = BEATS/time_running 10^9  bytes/sec
+  // ie, Throughput = BEATS/time_running 10^9  bytes/sec
   RSMI_EVNT_XGMI_0_BEATS_TX,
   RSMI_EVNT_XGMI_1_NOP_TX,                        //!< NOPs sent to neighbor 1
   RSMI_EVNT_XGMI_1_REQUEST_TX,                        //!< Outgoing requests to
