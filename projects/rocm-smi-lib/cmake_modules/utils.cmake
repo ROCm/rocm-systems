@@ -135,7 +135,7 @@ function(get_package_version_number DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
         set(VERSION_ID "local-build-0")
     endif()
 
-    set(PKG_VERSION_STR "${PKG_VERSION_STR}.${VERSION_ID}")
+    set(PKG_VERSION_STR "${PKG_VERSION_STR}-${VERSION_ID}")
 
     if (GIT)
         execute_process(COMMAND git rev-parse --short HEAD
