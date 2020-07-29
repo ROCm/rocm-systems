@@ -357,6 +357,14 @@ const char* field_id_string(rdc_field_t field_id) {
   return field_id_to_descript.find(field_id)->second.label.c_str();
 }
 
+rdc_field_t get_field_id_from_name(const char* name) {
+        rdc_field_t value;
+        if (amd::rdc::get_field_id_from_name(name, &value)) {
+                return value;
+        }
+        return RDC_FI_INVALID;
+}
+
 char *strncpy_with_null(char *dest, const char *src, size_t n) {
      if (n == 0) {
         return dest;

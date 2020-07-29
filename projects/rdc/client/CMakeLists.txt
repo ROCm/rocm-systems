@@ -164,6 +164,9 @@ install(TARGETS ${CLIENT_LIB}
 install(DIRECTORY ${SOURCE_DIR}/authentication
              DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}
                                          COMPONENT ${CLIENT_COMPONENT})
+install(DIRECTORY ${SOURCE_DIR}/python_binding
+             DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}
+                                         COMPONENT ${CLIENT_COMPONENT})
 
 # Generate Doxygen documentation for client api manual
 find_package(Doxygen)

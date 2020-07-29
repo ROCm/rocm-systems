@@ -777,6 +777,17 @@ const char* rdc_status_string(rdc_status_t status);
  */
 const char* field_id_string(rdc_field_t field_id);
 
+/**
+ *  @brief Get the field id from name
+ *
+ *  @details return the field id from field name.
+ *
+ *  @param[in] name The field name.
+ *
+ *  @retval return RDC_FI_INVALID if the field name is invalid.
+ */
+rdc_field_t get_field_id_from_name(const char* name);
+
 #ifdef __cplusplus
 }
 #endif  // __cplusplus
