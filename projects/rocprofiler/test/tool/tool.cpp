@@ -212,6 +212,14 @@ std::string filtr_kernel_name(const std::string name) {
           open_token = '>';
           close_token = '<';
           break;
+        case ']':
+          counter = 1;
+          open_token = ']';
+          close_token = '[';
+          break;
+        case ' ':
+          ++rit;
+          continue;
       }
       if (counter == 0) break;
     } else {
@@ -220,9 +228,8 @@ std::string filtr_kernel_name(const std::string name) {
     }
     ++rit;
   }
-  while (rit != rend) if ((*rit == ' ') || (*rit == '	')) rit++; else break;
   auto rbeg = rit;
-  while (rit != rend) if ((*rit != ' ') && (*rit != ':')) rit++; else break;
+  while ((rit != rend) && (*rit != ' ') && (*rit != ':')) rit++;
   const uint32_t pos = rend - rit;
   const uint32_t length = rit - rbeg;
   return name.substr(pos, length);
