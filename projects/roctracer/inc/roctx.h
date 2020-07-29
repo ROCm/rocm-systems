@@ -70,6 +70,16 @@ int roctxRangePushA(const char* message);
 // A negative value is returned on the error.
 int roctxRangePop();
 
+// ROCTX range id type
+typedef uint64_t roctx_range_id_t;
+
+// Starts a process range
+roctx_range_id_t roctxRangeStartA(const char* message);
+#define roctxRangeStart(message) roctxRangeStartA(message)
+
+// Stop a process range
+void roctxRangeStop(roctx_range_id_t id);
+
 #ifdef __cplusplus
 }  // extern "C" block
 #endif  // __cplusplus
