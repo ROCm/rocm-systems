@@ -27,61 +27,11 @@ LICENSE = \
 'THE SOFTWARE.\n' + \
 '*/\n'
 
-header = \
-'template <typename T>\n' + \
+
+header = 'template <typename T>\n' + \
 'struct output_streamer {\n' + \
 '  inline static std::ostream& put(std::ostream& out, const T& v) { return out; }\n' + \
-'};\n' + \
-'template<>\n' + \
-'struct output_streamer<void*> {\n' + \
-  'inline static std::ostream& put(std::ostream& out, void* v) { out << std::hex << v; return out; }\n' + \
-'};\n' + \
-'template<>\n' + \
-'struct output_streamer<const void*> {\n' + \
-  'inline static std::ostream& put(std::ostream& out, const void* v) { out << std::hex << v; return out; }\n' + \
-'};\n' + \
-'\ntemplate<>\n' + \
-'struct output_streamer<bool> {\n' + \
-'  inline static std::ostream& put(std::ostream& out, bool v) { out << std::hex << "<bool " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'};\n' + \
-'\ntemplate<>\n' + \
-'struct output_streamer<uint8_t> {\n' + \
-'  inline static std::ostream& put(std::ostream& out, uint8_t v) { out << std::hex << "<uint8_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'};\n' + \
-'\ntemplate<>\n' + \
-'struct output_streamer<uint16_t> {\n' + \
-'  inline static std::ostream& put(std::ostream& out, uint16_t v) { out << std::hex << "<uint16_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'};\n' + \
-'\ntemplate<>\n' + \
-'struct output_streamer<uint32_t> {\n' + \
-'  inline static std::ostream& put(std::ostream& out, uint32_t v) { out << std::hex << "<uint32_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'};\n' + \
-'\ntemplate<>\n' + \
-'struct output_streamer<uint64_t> {\n' + \
-'  inline static std::ostream& put(std::ostream& out, uint64_t v) { out << std::hex << "<uint64_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'};\n' + \
-'\n' + \
-'\ntemplate<>\n' + \
-'struct output_streamer<bool*> {\n' + \
-'  inline static std::ostream& put(std::ostream& out, bool* v) { out << std::hex << "<bool " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'};\n' + \
-'\ntemplate<>\n' + \
-'struct output_streamer<uint8_t*> {\n' + \
-'  inline static std::ostream& put(std::ostream& out, uint8_t* v) { out << std::hex << "<uint8_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'};\n' + \
-'\ntemplate<>\n' + \
-'struct output_streamer<uint16_t*> {\n' + \
-'  inline static std::ostream& put(std::ostream& out, uint16_t* v) { out << std::hex << "<uint16_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'};\n' + \
-'\ntemplate<>\n' + \
-'struct output_streamer<uint32_t*> {\n' + \
-'  inline static std::ostream& put(std::ostream& out, uint32_t* v) { out << std::hex << "<uint32_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'};\n' + \
-'\ntemplate<>\n' + \
-'struct output_streamer<uint64_t*> {\n' + \
-'  inline static std::ostream& put(std::ostream& out, uint64_t* v) { out << std::hex << "<uint64_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'};\n' + \
-'\n'
+'};\n\n'
 
 header_hip = \
 'template <typename T>\n' + \
@@ -89,20 +39,7 @@ header_hip = \
 '     using std::operator<<;\n' + \
 '     static bool recursion = false;\n' + \
 '     if (recursion == false) { recursion = true; out << v; recursion = false; }\n' + \
-'     return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, void* v) { using std::operator<<; out << std::hex << v; return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, const void* v) { using std::operator<<; out << std::hex << v; return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, bool v) { using std::operator<<; out << std::hex << "<bool " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, uint8_t v) { using std::operator<<; out << std::hex << "<uint8_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, uint16_t v) { using std::operator<<; out << std::hex << "<uint16_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, uint32_t v) { using std::operator<<; out << std::hex << "<uint32_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, uint64_t v) { using std::operator<<; out << std::hex << "<uint64_t " << "0x" << v << std::dec << ">"; return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, bool* v) {  using std::operator<<; out << std::hex << "<bool " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, uint8_t* v) { using std::operator<<; out << std::hex << "<uint8_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, uint16_t* v) { using std::operator<<; out << std::hex << "<uint16_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, uint32_t* v) { using std::operator<<; out << std::hex << "<uint32_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'inline static std::ostream& operator<<(std::ostream& out, uint64_t* v) { using std::operator<<; out << std::hex << "<uint64_t " << "0x" << *v << std::dec << ">"; return out; }\n' + \
-'\n'
+'     return out; }\n'
 
 structs_analyzed = {}
 global_ops_hip = ''
@@ -110,8 +47,8 @@ global_ops_hip = ''
 # process_struct traverses recursively all structs to extract all fields
 def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, apiname):
 # file_handle: handle for output file {api_name}_ostream_ops.h to be generated
-# cppHeader_struct: cppHeader struct being processed 
-# cppHeader: cppHeader object created by CppHeaderParser.CppHeader(...) 
+# cppHeader_struct: cppHeader struct being processed
+# cppHeader: cppHeader object created by CppHeaderParser.CppHeader(...)
 # parent_hier_name: parent hierarchical name used for nested structs/enums
 # apiname: for example hip, kfd.
 
@@ -149,8 +86,8 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
             prop = cppHeader.classes[cppHeader_struct]["properties"]["public"][l][key4]
 
         if "union" not in mtype:
-            if apiname.lower() == 'hip':
-              str = "   roctracer::hip_support::operator<<(out, v."+name+");\n"
+            if apiname.lower() == 'hip' or apiname.lower() == 'hsa':
+              str = "   roctracer::" + apiname.lower() + "_support::operator<<(out, v."+name+");\n"
             else:
               if array_size == "":
                 str = "   roctracer::" + apiname.lower() + "_support::output_streamer<"+mtype+">::put(out,v."+name+");\n"
@@ -167,11 +104,12 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
             next_cppHeader_struct = cppHeader_struct + "::"
             process_struct(file_handle, next_cppHeader_struct, cppHeader, name, apiname)
 
-#  Parses API header file and generates ostream ops files ostream_ops.h and basic_ostream_ops.h
+#  Parses API header file and generates ostream ops files ostream_ops.h
 def gen_cppheader(infilepath, outfilepath):
 # infilepath: API Header file to be parsed
 # outfilepath: Output file where ostream operators are written
     global_ops_hip = ''
+    global_ops_hsa = ''
     try:
         cppHeader = CppHeaderParser.CppHeader(infilepath)
     except CppHeaderParser.CppParseError as e:
@@ -184,11 +122,8 @@ def gen_cppheader(infilepath, outfilepath):
     apiname = apiname.replace("_ostream_ops.h","")
     apiname = apiname.upper()
     f = open(outfilepath,"w+")
-    f2 = open(mpath + "/basic_ostream_ops.h","w+")
     f.write("// automatically generated\n")
-    f2.write("// automatically generated\n")
     f.write(LICENSE + '\n')
-    f2.write(LICENSE + '\n')
     header_s = \
       '#ifndef INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
       '#define INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
@@ -200,26 +135,31 @@ def gen_cppheader(infilepath, outfilepath):
       header_s = header_s + '\n' + \
       '#include "hip/hip_runtime_api.h"\n' + \
       '#include "hip/hcc_detail/hip_vector_types.h"\n\n'
+
     f.write(header_s)
     f.write('\n')
     f.write('namespace roctracer {\n')
     f.write('namespace ' + apiname.lower() + '_support {\n')
     f.write('// begin ostream ops for '+ apiname + ' \n')
-    if apiname.lower() != 'hip':
-      f.write('#include "basic_ostream_ops.h"' + '\n')
-    else:
-      f.write("// HIP basic ostream ops\n")
+    if apiname.lower() == "hip" or apiname.lower() == "hsa":
+      f.write("// basic ostream ops\n")
       f.write(header_hip)
-      f.write("// End of HIP basic ostream ops\n\n")
-    f2.write(header)
+      f.write("// End of basic ostream ops\n\n")
+    else:
+      f.write(header)
+
     for c in cppHeader.classes:
         if "union" in c:
             continue
+        if  apiname.lower() == 'hsa':
+          if c == 'max_align_t' or c == '__fsid_t': #already defined for hip
+            continue
+        if  apiname.lower() == 'hip' and c == 'hipIpcEventHandle_t': #feature is TBD
+            continue
         if len(cppHeader.classes[c]["properties"]["public"])!=0:
-          if apiname.lower() == 'hip':
-            f.write("inline static std::ostream& operator<<(std::ostream& out, " + c + "& v)\n")
+          if apiname.lower() == 'hip' or apiname.lower() == 'hsa':
+            f.write("std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n")
             f.write("{\n")
-            global_ops_hip = global_ops_hip + "inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n" + "{\n" + "   roctracer::hip_support::operator<<(out, v);\n" + "   return out;\n" + "}\n\n"
             process_struct(f, c, cppHeader, "", apiname)
             f.write("   return out;\n")
             f.write("}\n")
@@ -232,21 +172,23 @@ def gen_cppheader(infilepath, outfilepath):
             f.write("   return out;\n")
             f.write("}\n")
             f.write("};\n")
+          if apiname.lower() == 'hip':
+            global_ops_hip += "inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n" + "{\n" + "   roctracer::hip_support::operator<<(out, v);\n" + "   return out;\n" + "}\n\n"
+          if apiname.lower() == 'hsa':
+            global_ops_hsa += "inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n" + "{\n" + "   roctracer::hsa_support::operator<<(out, v);\n" + "   return out;\n" + "}\n\n"
 
     footer = \
     '// end ostream ops for '+ apiname + ' \n'
     footer += '};};\n\n'
     f.write(footer)
     f.write(global_ops_hip)
-
+    f.write(global_ops_hsa)
     footer = '#endif //__cplusplus\n' + \
              '#endif // INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
              ' \n'
     f.write(footer)
     f.close()
-    f2.close()
     print('File ' + outfilepath + ' generated')
-    print('File ' + mpath + '/basic_ostream_ops.h generated')
 
     return
 

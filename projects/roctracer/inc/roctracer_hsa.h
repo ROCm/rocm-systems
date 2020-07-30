@@ -63,81 +63,26 @@ struct ops_properties_t {
 typedef hsa_support::ops_properties_t hsa_ops_properties_t;
 }; // namespace roctracer
 
-inline std::ostream& operator<< (std::ostream& out, const hsa_callback_data_t& v) { out << "<callback_data>"; return out; }
-inline std::ostream& operator<< (std::ostream &out, const hsa_signal_t& v) { out << "<signal " << std::hex << "0x" << v.handle << ">" << std::dec; return out; }
-inline std::ostream& operator<< (std::ostream &out, const hsa_signal_group_t& v) { out << "<signal_group>"; return out; }
-inline std::ostream& operator<< (std::ostream &out, const hsa_wavefront_t& v) { out << "<wavefront " << std::hex << "0x" << v.handle << ">" << std::dec; return out; }
-inline std::ostream& operator<< (std::ostream& out, const hsa_cache_t& v) { out << "<cache>"; return out; }
-inline std::ostream& operator<< (std::ostream &out, const hsa_region_t& v) { out << "<region " << std::hex << "0x" << v.handle << ">" << std::dec; return out; }
-inline std::ostream& operator<< (std::ostream& out, const hsa_amd_memory_pool_t& v) { out << "<amd_memory_pool>"; return out; }
-inline std::ostream& operator<< (std::ostream &out, const hsa_agent_t& v) { out << "<agent " << std::hex << "0x" << v.handle << ">" << std::dec; return out; }
-inline std::ostream& operator<< (std::ostream& out, const hsa_isa_t& v) { out << "<isa>"; return out; }
-inline std::ostream& operator<< (std::ostream& out, const hsa_code_symbol_t& v) { out << "<code_symbol>"; return out; }
-inline std::ostream& operator<< (std::ostream& out, const hsa_code_object_t& v) { out << "<code_object>"; return out; }
-inline std::ostream& operator<< (std::ostream& out, const hsa_code_object_reader_t& v) { out << "<code_object_reader>"; return out; }
-inline std::ostream& operator<< (std::ostream& out, const hsa_executable_symbol_t& v) { out << "<executable_symbol>"; return out; }
-inline std::ostream& operator<< (std::ostream& out, const hsa_executable_t& v) { out << "<executable>"; return out; }
-inline std::ostream& operator<< (std::ostream& out, const hsa_ext_image_t& v) { out << "<ext_image>"; return out; }
-inline std::ostream& operator<< (std::ostream& out, const hsa_ext_sampler_t& v) { out << "<ext_sampler>"; return out; }
+#include "hsa_ostream_ops.h"
 
-namespace roctracer {
-namespace hsa_support {
-template <typename T>
-struct output_streamer {
-  inline static std::ostream& put(std::ostream& out, const T& v) { out << v; return out; }
-};
+std::ostream& operator<<(std::ostream& out, const hsa_amd_memory_pool_t& v)
+{
+   roctracer::hsa_support::operator<<(out, v);
+   return out;
+}
 
-template<>
-struct output_streamer<bool> {
-  inline static std::ostream& put(std::ostream& out, bool v) { out << std::hex << "<bool " << "0x" << v << std::dec << ">"; return out; }
-};
-template<>
-struct output_streamer<uint8_t> {
-  inline static std::ostream& put(std::ostream& out, uint8_t v) { out << std::hex << "<uint8_t " << "0x" << v << std::dec << ">"; return out; }
-};
-template<>
-struct output_streamer<uint16_t> {
-  inline static std::ostream& put(std::ostream& out, uint16_t v) { out << std::hex << "<uint16_t " << "0x" << v << std::dec << ">"; return out; }
-};
-template<>
-struct output_streamer<uint32_t> {
-  inline static std::ostream& put(std::ostream& out, uint32_t v) { out << std::hex << "<uint32_t " << "0x" << v << std::dec << ">"; return out; }
-};
-template<>
-struct output_streamer<uint64_t> {
-  inline static std::ostream& put(std::ostream& out, uint64_t v) { out << std::hex << "<uint64_t " << "0x" << v << std::dec << ">"; return out; }
-};
+std::ostream& operator<<(std::ostream& out, const hsa_ext_image_t& v)
+{
+   roctracer::hsa_support::operator<<(out, v);
+   return out;
+}
 
-template<>
-struct output_streamer<bool*> {
-  inline static std::ostream& put(std::ostream& out, bool* v) { out << std::hex << "<bool " << "0x" << v << std::dec << ">"; return out; }
-};
-template<>
-struct output_streamer<uint8_t*> {
-  inline static std::ostream& put(std::ostream& out, uint8_t* v) { out << std::hex << "<uint8_t " << "0x" << v << std::dec << ">"; return out; }
-};
-template<>
-struct output_streamer<uint16_t*> {
-  inline static std::ostream& put(std::ostream& out, uint16_t* v) { out << std::hex << "<uint16_t " << "0x" << v << std::dec << ">"; return out; }
-};
-template<>
-struct output_streamer<uint32_t*> {
-  inline static std::ostream& put(std::ostream& out, uint32_t* v) { out << std::hex << "<uint32_t " << "0x" << v << std::dec << ">"; return out; }
-};
-template<>
-struct output_streamer<uint64_t*> {
-  inline static std::ostream& put(std::ostream& out, uint64_t* v) { out << std::hex << "<uint64_t " << "0x" << v << std::dec << ">"; return out; }
-};
+std::ostream& operator<<(std::ostream& out, const hsa_ext_sampler_t& v)
+{
+   roctracer::hsa_support::operator<<(out, v);
+   return out;
+}
 
-template<>
-struct output_streamer<hsa_queue_t*> {
-  inline static std::ostream& put(std::ostream& out, hsa_queue_t* v) { out << "<queue " << v << ">"; return out; }
-};
-template<>
-struct output_streamer<hsa_queue_t**> {
-  inline static std::ostream& put(std::ostream& out, hsa_queue_t** v) { out << "<queue " << *v << ">"; return out; }
-};
-};};
 #else // !__cplusplus
 typedef void* hsa_amd_queue_intercept_handler;
 typedef void* hsa_amd_runtime_queue_notifier;

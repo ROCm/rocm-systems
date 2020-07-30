@@ -456,8 +456,7 @@ class API_DescrParser:
         for ind in range(len(arg_list)):
           arg_var = arg_list[ind]
           arg_val = 'api_data.args.' + call + '.' + arg_var
-          self.content += '      typedef decltype(' + arg_val + ') arg_val_type_t' + str(ind) + ';\n'
-          self.content += '      roctracer::hsa_support::output_streamer<arg_val_type_t' + str(ind) + '>::put(out, ' + arg_val + ')'
+          self.content += '      out << ' + arg_val
           '''
           arg_item = struct['tlst'][ind]
           if re.search(r'\(\* ', arg_item): arg_pref = ''

@@ -98,7 +98,6 @@ set ( PUBLIC_HEADERS
   roctracer_kfd.h
   roctracer_roctx.h
   roctracer_cb_table.h
-  basic_ostream_ops.h
   hip_ostream_ops.h
   hsa_prof_str.h
   kfd_ostream_ops.h
