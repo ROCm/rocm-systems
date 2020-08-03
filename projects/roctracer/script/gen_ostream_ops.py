@@ -154,8 +154,8 @@ def gen_cppheader(infilepath, outfilepath):
         if  apiname.lower() == 'hsa':
           if c == 'max_align_t' or c == '__fsid_t': #already defined for hip
             continue
-        if  apiname.lower() == 'hip' and c == 'hipIpcEventHandle_t': #feature is TBD
-            continue
+        #if  apiname.lower() == 'hip' and c == 'hipIpcEventHandle_t': #feature is TBD
+        #    continue
         if len(cppHeader.classes[c]["properties"]["public"])!=0:
           if apiname.lower() == 'hip' or apiname.lower() == 'hsa':
             f.write("std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n")
