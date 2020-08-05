@@ -2486,9 +2486,12 @@ rsmi_status_string(rsmi_status_t status, const char **status_string);
  *
  *    // Assuming RSMI_EVNT_GRP_XGMI is supported and there is at least 1
  *    // counter available for RSMI_EVNT_GRP_XGMI on device dv_ind, create
- *    // an event object and get the handle (rsmi_event_handle_t).
+ *    // an event object for an event of group RSMI_EVNT_GRP_XGMI (e.g.,
+ *    // RSMI_EVNT_XGMI_0_BEATS_TX) and get the handle
+ *    // (rsmi_event_handle_t).
  *
- *    ret = rsmi_dev_counter_create(dv_ind, RSMI_EVNT_GRP_XGMI, &evnt_handle);
+ *    ret = rsmi_dev_counter_create(dv_ind, RSMI_EVNT_XGMI_0_BEATS_TX,
+ *                                                          &evnt_handle);
  *
  *    // A program that generates the events of interest can be started
  *    // immediately before or after starting the counters.
