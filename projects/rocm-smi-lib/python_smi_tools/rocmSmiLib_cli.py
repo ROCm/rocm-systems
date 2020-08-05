@@ -488,6 +488,18 @@ def printTableLog(column_headers, data_matrix, device=None, tableName=None, anch
             print('{:{anc}{width}}'.format(cell, anc=anchor, width=len(column_headers[index])), end=v_delim)
         printEmptyLine()
 
+def printTable(space, displayString, v_delim=" "):
+    """ Print out every line of a matrix table
+
+    @param space: The item's spacing to print
+    @param displayString: The item's value to print
+    @param v_delim: Boundary String delimiter for the print output
+    """
+    if space:
+        print(space %(displayString), end=v_delim)
+    else:
+        print(displayString, end =v_delim)
+
 
 def resetClocks(deviceList):
     """ Reset clocks to default
@@ -564,12 +576,12 @@ def resetXgmiErr(deviceList):
     @param deviceList: Reset XGMI error count for these devices
     """
     printLogSpacer('Reset XGMI Error Status ')
-    for device in deviceList: 
+    for device in deviceList:
         ret = rocmsmi.rsmi_dev_xgmi_error_reset(device)
         if rsmi_ret_ok(ret, device, 'reset xgmi'):
             printLog(device, 'Successfully reset XGMI Error count', None)
         else:
-            logging.error('GPU[%s]\t\t: Unable to reset XGMI error count', device) 
+            logging.error('GPU[%s]\t\t: Unable to reset XGMI error count', device)
     printLogSpacer()
 
 
@@ -1671,6 +1683,160 @@ def showXgmiErr(deviceList):
     printLogSpacer()
 
 
+def showWeightTopology(deviceList):
+    """ Display the HW Topology Information based on weights
+
+    This reads the HW Topology file and displays the matrix for the nodes
+
+    @param deviceList: Show HW Topology
+    """
+    weight = c_uint64()
+    gpu_links_weight = [[0 for x in range(len(deviceList))] for y in range(len(deviceList))]
+    printLogSpacer(' Weight between two GPUs ')
+    for srcdevice in deviceList:
+        for destdevice in deviceList:
+            if (srcdevice == destdevice):
+                gpu_links_weight[srcdevice][destdevice] = 0
+            ret = rocmsmi.rsmi_topo_get_link_weight(srcdevice, destdevice, byref(weight))
+            if rsmi_ret_ok(ret):
+                gpu_links_weight[srcdevice][destdevice] = weight
+            else:
+                printErrLog(srcdevice, 'Cannot read Link Weight: Not supported on this machine', None)
+    printTable(None, '      ')
+    for row in deviceList:
+        tmp = 'GPU%d' % row
+        printTable('%-12s', tmp)
+    printEmptyLine()
+    for gpu1 in deviceList:
+        tmp = 'GPU%d' % gpu1
+        printTable('%-6s', tmp)
+        for gpu2 in deviceList:
+            if (gpu1 == gpu2):
+                printTable('%-12s', '0')
+            else:
+                printTable('%-12s', gpu_links_weight[gpu1][gpu2].value)
+        printEmptyLine()
+
+
+def showHopsTopology(deviceList):
+    """ Display the HW Topology Information based on number of hops
+
+    This reads the HW Topology file and displays the matrix for the nodes
+
+    @param deviceList: Show HW Topology
+    """
+    hops = c_uint64()
+    linktype = c_char_p()
+    gpu_links_hops = [[0 for x in range(len(deviceList))] for y in range(len(deviceList))]
+    printLogSpacer(' Hops between two GPUs ')
+    for srcdevice in deviceList:
+        for destdevice in deviceList:
+            if (srcdevice == destdevice):
+                gpu_links_hops[srcdevice][destdevice] = '0'
+            ret = rocmsmi.rsmi_topo_get_link_type(srcdevice, destdevice, byref(hops), byref(linktype))
+            if rsmi_ret_ok(ret):
+                gpu_links_hops[srcdevice][destdevice] = hops
+            else:
+                printErrLog(srcdevice, 'Cannot read Link Hops: Not supported on this machine', None)
+    printTable(None, '      ')
+    for row in deviceList:
+        tmp = 'GPU%d' % row
+        printTable('%-12s', tmp)
+    printEmptyLine()
+    for gpu1 in deviceList:
+        tmp = 'GPU%d' % gpu1
+        printTable('%-6s', tmp)
+        for gpu2 in deviceList:
+            if (gpu1 == gpu2):
+                printTable('%-12s', '0')
+            else:
+                printTable('%-12s', gpu_links_hops[gpu1][gpu2].value)
+        printEmptyLine()
+
+
+def showTypeTopology(deviceList):
+    """ Display the HW Topology Information based on link type
+
+    This reads the HW Topology file and displays the matrix for the nodes
+
+    @param deviceList: Show HW Topology
+    """
+    hops = c_uint64()
+    linktype = c_uint64()
+    gpu_links_type = [[0 for x in range(len(deviceList))] for y in range(len(deviceList))]
+    printLogSpacer(' Link Type between two GPUs ')
+    for srcdevice in deviceList:
+        for destdevice in deviceList:
+            if (srcdevice == destdevice):
+                gpu_links_type[srcdevice][destdevice] = '0'
+            ret = rocmsmi.rsmi_topo_get_link_type(srcdevice, destdevice, byref(hops), byref(linktype))
+            if rsmi_ret_ok(ret):
+                if (linktype.value == 1):
+                    gpu_links_type[srcdevice][destdevice] = "PCIE"
+                elif (linktype.value == 2):
+                    gpu_links_type[srcdevice][destdevice] = "XGMI"
+                else:
+                    gpu_links_type[srcdevice][destdevice] = "XXXX"
+            else:
+                printErrLog(srcdevice, 'Cannot read Link Type: Not supported on this machine', None)
+    printTable(None, '      ')
+    for row in deviceList:
+        tmp = 'GPU%d' % row
+        printTable('%-12s', tmp)
+    printEmptyLine()
+    for gpu1 in deviceList:
+        tmp = 'GPU%d' % gpu1
+        printTable('%-6s', tmp)
+        for gpu2 in deviceList:
+            if (gpu1 == gpu2):
+                printTable('%-12s', '0')
+            else:
+                printTable('%-12s', gpu_links_type[gpu1][gpu2])
+        printEmptyLine()
+
+
+def showNumaTopology(deviceList):
+    """ Display the HW Topology Information for numa nodes
+
+    This reads the HW Topology file and display the matrix for the nodes
+
+    @param deviceList: Show HW Topology
+    """
+    printLogSpacer(' Numa Nodes ')
+    printTable('%-12s', "GPU")
+    printTable('%-12s', "Numa Node")
+    printTable('%-12s', "Numa Affinity", "\n")
+    numa_numbers = c_uint32()
+    for device in deviceList:
+        ret = rocmsmi.rsmi_topo_get_numa_node_number(device, byref(numa_numbers))
+        if rsmi_ret_ok(ret, device):
+            printTable('%-12s', device)
+            printTable('%-12s', numa_numbers.value)
+            ret = rocmsmi.rsmi_topo_numa_affinity_get(device, byref(numa_numbers))
+            if rsmi_ret_ok(ret):
+                printTable('%-12s', numa_numbers.value, "\n")
+            else:
+                printTable('%-12s', 'N/A', "\n")
+        else:
+            printErrLog(device, 'Cannot read Numa Node Number: Not supported on this machine', None)
+
+
+def showHwTopology(deviceList):
+    """ Display the HW Topology Information based on weight/hops/type
+
+    This reads the HW Topology file and displays the matrix for the nodes
+
+    @param deviceList: Show HW Topology
+    """
+    showWeightTopology(deviceList)
+    printEmptyLine()
+    showHopsTopology(deviceList)
+    printEmptyLine()
+    showTypeTopology(deviceList)
+    printEmptyLine()
+    showNumaTopology(deviceList)
+
+
 def checkAmdGpus(deviceList):
     """ Check if there are any AMD GPUs being queried,
     return False if there are none
@@ -1970,6 +2136,11 @@ if __name__ == '__main__':
                               nargs='*')
     groupDisplay.add_argument('--showvc', help='Show voltage curve', action='store_true')
     groupDisplay.add_argument('--showxgmierr', help='Show XGMI error information since last read', action='store_true')
+    groupDisplay.add_argument('--showtopo', help='Show hardware topology information', action='store_true')
+    groupDisplay.add_argument('--showtopoweight', help='Shows the relative weight between GPUs ', action='store_true')
+    groupDisplay.add_argument('--showtopohops', help='Shows the number of hops between GPUs ', action='store_true')
+    groupDisplay.add_argument('--showtopotype', help='Shows the link type between GPUs ', action='store_true')
+    groupDisplay.add_argument('--showtoponuma', help='Shows the numa nodes ', action='store_true')
 
     groupActionReset.add_argument('-r', '--resetclocks', help='Reset clocks and OverDrive to default',
                                   action='store_true')
@@ -2187,6 +2358,16 @@ if __name__ == '__main__':
         showProductName(deviceList)
     if args.showxgmierr:
         showXgmiErr(deviceList)
+    if args.showtopo:
+        showHwTopology(deviceList)
+    if args.showtopoweight:
+        showWeightTopology(deviceList)
+    if args.showtopohops:
+        showHopsTopology(deviceList)
+    if args.showtopotype:
+        showTypeTopology(deviceList)
+    if args.showtoponuma:
+        showNumaTopology(deviceList)
     if args.showpagesinfo:
         showRetiredPages(deviceList)
     if args.showretiredpages:
