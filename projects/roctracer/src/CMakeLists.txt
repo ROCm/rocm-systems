@@ -9,7 +9,7 @@ set ( LIB_SRC
   ${LIB_DIR}/proxy/intercept_queue.cpp
   ${LIB_DIR}/util/hsa_rsrc_factory.cpp
 )
-add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
+add_library ( ${TARGET_LIB} ${LIBRARY_TYPE} ${LIB_SRC} )
 target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HIP_INC_DIR} ${HCC_INC_DIR} ${HSA_KMT_INC_PATH} )
 target_link_libraries( ${TARGET_LIB} PRIVATE ${HSA_RUNTIME_LIB} c stdc++ )
 

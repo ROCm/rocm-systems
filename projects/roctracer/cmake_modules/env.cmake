@@ -65,6 +65,13 @@ if ( DEFINED ENV{CMAKE_DEBUG_TRACE} )
   add_definitions ( -DDEBUG_TRACE=1 )
 endif()
 
+if ( NOT DEFINED LIBRARY_TYPE )
+  set ( LIBRARY_TYPE SHARED )
+endif()
+if ( ${LIBRARY_TYPE} STREQUAL STATIC )
+  add_definitions ( -DSTATIC_BUILD=1 )
+endif()
+
 if ( NOT DEFINED HIP_API_STRING )
   set ( HIP_API_STRING 1 )
 endif()
@@ -169,6 +176,7 @@ message ( "-------------HIP-VDI: ${HIP_VDI}" )
 message ( "-----CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}" )
 message ( "---CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}" )
 message ( "---------GPU_TARGETS: ${GPU_TARGETS}" )
+message ( "--------LIBRARY_TYPE: ${LIBRARY_TYPE}" )
 
 ## Check the ROCm pathes
 if ( "${HSA_RUNTIME_INC_PATH}" STREQUAL "" )

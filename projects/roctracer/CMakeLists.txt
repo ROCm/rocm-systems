@@ -85,7 +85,9 @@ set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
 #endif ()
 
 ## Build tests
+if ( ${LIBRARY_TYPE} STREQUAL SHARED )
 add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
+endif()
 
 ## pbulic headers
 set ( PUBLIC_HEADERS
@@ -105,6 +107,8 @@ set ( PUBLIC_HEADERS
   ext/prof_protocol.h
   ext/hsa_rt_utils.hpp
 )
+
+if ( ${LIBRARY_TYPE} STREQUAL SHARED )
 
 ## Installation and packaging
 set ( DEST_NAME ${ROCTRACER_NAME} )
@@ -181,3 +185,5 @@ set ( CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_po
 set ( CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_postun" )
 
 include ( CPack )
+
+endif()
