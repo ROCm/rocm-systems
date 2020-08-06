@@ -135,7 +135,6 @@ class TraceBuffer : protected TraceBufferBase {
     read_pointer_ = 0;
     end_pointer_ = size;
     buf_list_.push_back(data_);
-    buf_list_.push_back(next_);
 
     flush_prm_arr_ = flush_prm_arr;
     flush_prm_count_ = flush_prm_count;
