@@ -147,7 +147,7 @@ if (DOXYGEN_FOUND AND LATEX_FOUND)
   add_dependencies(${ROCM_SMI_TARGET} docs)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
                          DESTINATION ${ROCM_SMI}/docs/${RSMI_MANUAL_NAME}.pdf)
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/docs/README.md
+  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../README.md
                           DESTINATION ${ROCM_SMI}/docs/)
 else()
   message("Doxygen or Latex is not found. Will not generate documents.")
