@@ -105,41 +105,30 @@ TEST(rdctstReadOnly, TestRdciStats) {
 }
 
 static int getPIDFromName(std::string name) {
-    int pid = -1;
+  int pid = -1;
 
-    DIR *dir_ptr = opendir("/proc");
-    if (dir_ptr != NULL) {
-        struct dirent *dentry;
-        while (pid < 0 && (dentry = readdir(dir_ptr))) {
-            int id = atoi(dentry->d_name);
-            if (id > 0) {
-                std::string cmdPath = std::string("/proc/") +
-                                                  dentry->d_name + "/cmdline";
-                std::ifstream cmdFile(cmdPath.c_str());
-                std::string cmdLine;
-                getline(cmdFile, cmdLine);
-                if (!cmdLine.empty()) {
-                    // Only first item is the program name; others are CL args
-                    size_t pos = cmdLine.find('\0');
-                    if (pos != std::string::npos) {
-                        cmdLine = cmdLine.substr(0, pos);
-                    }
-                    // Remove full path
-                    pos = cmdLine.rfind('/');
-                    if (pos != std::string::npos) {
-                        cmdLine = cmdLine.substr(pos + 1);
-                    }
-                    if (name == cmdLine) {
-                        pid = id;
-                    }
-                }
-            }
+  DIR *dir_ptr = opendir("/proc");
+  if (dir_ptr != NULL) {
+    struct dirent *dentry;
+    while (pid < 0 && (dentry = readdir(dir_ptr))) {
+      int id = atoi(dentry->d_name);
+      if (id > 0) {
+        std::string commPath = std::string("/proc/") +
+                                          dentry->d_name + "/comm";
+        std::ifstream cmdFile(commPath.c_str());
+        std::string cmdLine;
+        getline(cmdFile, cmdLine);
+        if (!cmdLine.empty()) {
+          if (name == cmdLine) {
+            pid = id;
+            break;
+          }
         }
+      }
     }
-
-    closedir(dir_ptr);
-
-    return pid;
+  }
+  closedir(dir_ptr);
+  return pid;
 }
 
 static int killRDCD(int pid = 0) {
@@ -159,6 +148,14 @@ static int killRDCD(int pid = 0) {
     return errno;
   }
 
+  int status;
+  int err = waitpid(pid, &status, WNOHANG);
+  if (err < 0) {
+    perror("waitpid() failed for rdcd.");
+    return errno;
+  } else if (err > 0) {
+    std::cout << "Killed rdcd process " << pid << std::endl;
+  }
   // Try several times; it may take some time for rdcd to clean up.
   for (int i = 0; i < 20; ++i) {
     sleep(1);
@@ -181,7 +178,7 @@ static int startRDCD(std::string *rdcd_path, char *envp[]) {
 
   if (pid == 0) {
     if (-1 == execve(rdcd_cl[0], (char **)rdcd_cl , envp)) {  // NOLINT
-      perror("child process failed to start rdcd");
+      perror("ERROR: Child process failed to start rdcd");
       return -1;
     }
   }
