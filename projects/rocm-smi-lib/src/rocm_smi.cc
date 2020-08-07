@@ -3595,8 +3595,8 @@ rsmi_event_notification_get(int timeout_ms,
       data_item =
            reinterpret_cast<rsmi_evt_notification_data_t *>(&data[*num_elem]);
 
-      uint64_t event;
-      while (fscanf(anon_fp, "%lx %63s\n", &event,
+      uint32_t event;
+      while (fscanf(anon_fp, "%x %63s\n", &event,
                           reinterpret_cast<char *>(&data_item->message)) == 2) {
         /* Output is in format as "event information\n"
          * Both event are expressed in hex.

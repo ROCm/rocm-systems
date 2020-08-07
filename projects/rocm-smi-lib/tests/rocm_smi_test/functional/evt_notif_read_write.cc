@@ -101,11 +101,11 @@ void TestEvtNotifReadWrite::Run(void) {
   }
 
   rsmi_evt_notification_type_t evt_type = RSMI_EVT_NOTIF_FIRST;
-  uint64_t mask = evt_type;
+  uint64_t mask = RSMI_EVENT_MASK_FROM_INDEX(evt_type);
   while (evt_type != RSMI_EVT_NOTIF_LAST) {
-    mask |= evt_type;
+    mask |= RSMI_EVENT_MASK_FROM_INDEX(evt_type);
     evt_type = static_cast<rsmi_evt_notification_type_t>(
-                                           static_cast<uint64_t>(evt_type)*2);
+                                           static_cast<uint32_t>(evt_type)+1);
   }
 
   for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
