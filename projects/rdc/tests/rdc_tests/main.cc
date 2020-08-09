@@ -158,17 +158,17 @@ static int killRDCD(int pid = 0) {
   }
   // Try several times; it may take some time for rdcd to clean up.
   for (int i = 0; i < 20; ++i) {
-    sleep(1);
+    sleep(0.01);
 
     pid = getPIDFromName("rdcd");
 
     if (pid == -1) {
       return 0;
     }
+    ret = kill(pid, SIGTERM);
   }
 
-  std::cout << "ERROR: Failed to kill existing rdcd instance." << std::endl;
-  return -1;
+  return 0;
 }
 
 static int startRDCD(std::string *rdcd_path, char *envp[]) {
@@ -178,7 +178,9 @@ static int startRDCD(std::string *rdcd_path, char *envp[]) {
 
   if (pid == 0) {
     if (-1 == execve(rdcd_cl[0], (char **)rdcd_cl , envp)) {  // NOLINT
-      perror("ERROR: Child process failed to start rdcd");
+      std::string err_msg = "ERROR: Child process failed to start ";
+      err_msg += *rdcd_path;
+      perror(err_msg.c_str());
       return -1;
     }
   }
