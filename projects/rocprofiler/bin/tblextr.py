@@ -323,6 +323,8 @@ def get_field(args, field):
 def set_field(args, field, val):
   return re.subn(field + '\(\w+\)([ \)])', field + '(' + str(val) + ')\\1', args, count=1)
 
+ops_patch_data = {}
+
 # Fill API DB
 api_table_descr = [
   ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'args', 'Index', 'Data'],
@@ -347,6 +349,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
   file_name = indir + '/' + api_name + '_api_trace.txt'
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
+  hip_mcopy_ptrn = re.compile(r'hipMemcpy')
   ptrn_ac = re.compile(r'hsa_amd_memory_async_copy')
   ptrn1_kernel = re.compile(r'^.*kernel\(')
   ptrn2_kernel = re.compile(r'\)\) .*$')
@@ -364,7 +367,16 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   record_id_dict = {}
   table_handle = db.add_table(table_name, api_table_descr)
   with open(file_name, mode='r') as fd:
-    for line in fd.readlines():
+    file_lines = fd.readlines()
+    total_lines = len(file_lines)
+    line_index = 0
+    for line in file_lines:
+      if (line_index == total_lines - 1) or (line_index % 100 == 0):
+        sys.stdout.write( \
+          "\rscan " + api_name + " API data " + str(line_index) + ":" + str(total_lines)  + " "*100 \
+        )
+      line_index += 1
+
       record = line[:-1]
 
       kernel_arg = ''
@@ -379,7 +391,8 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
         record = mfixformat.group(1) + '( ' + reformated_args + ')'
 
       m = ptrn_val.match(record)
-      if m:
+      if not m: fatal(api_name + " bad record: '" + record + "'")
+      else:
         rec_vals = []
         rec_len = len(api_table_descr[0]) - 1
         for ind in range(1, rec_len):
@@ -403,11 +416,17 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
         else: stream_id = 0
 
+        # extract kernel name string
+        (kernel_str, kernel_found) = get_field(record_args, 'kernel')
+
+        if stream_found != 0 or kernel_found != 0:
+          ops_patch_data[(corr_id, proc_id)] = (stream_id if stream_found else 0, kernel_str if kernel_found else '')
+
         # dependencies filling
-        if ptrn_ac.search(record_name) or (corr_id, proc_id) in dep_filtr:
+        if ptrn_ac.match(record_name) or hip_mcopy_ptrn.match(record_name):
           beg_ns = int(rec_vals[0])
           end_ns = int(rec_vals[1])
-          from_us = (beg_ns / 1000) + ((end_ns - beg_ns) / 1000)
+          from_us = end_ns / 1000
 
           if not proc_id in dep_dict: dep_dict[proc_id] = {}
           dep_proc = dep_dict[proc_id]
@@ -430,39 +449,31 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
             copy_csv += str(copy_index) + ', ' + copy_line + '\n'
             copy_index += 1
 
-        # patching activity properties: kernel name, stream-id
-        if (corr_id, proc_id) in dep_filtr:
-          ops_table_name = dep_filtr[(corr_id, proc_id)]
+        if False:
+          # patching activity properties: kernel name, stream-id
+          if (corr_id, proc_id) in dep_filtr:
+            ops_table_name = dep_filtr[(corr_id, proc_id)]
+            select_expr = '"Index" = ' + str(corr_id) + ' AND "proc-id" = ' + str(proc_id)
+            is_kernel_list = 1 if kernel_found != 0 and kernel_str[-1] == ';' else 0
+            if is_kernel_list != 0:
+              for kernel_item in kernel_str[:-1].split(';'):
+                m = ptrn_multi_kernel.match(kernel_item)
+                if m:
+                  kernel_name = m.group(1)
+                  dev_id = m.group(2)
+                  select_expr += ' AND "dev-id" = ' + dev_id
+                  activity_record_patching(db, ops_table_name, 1, kernel_name, stream_found, stream_id, select_expr)
+                else:
+                  fatal('Bad multi-kernel format: "' + kernel_item + '" in "' + kernel_str + '"')
+            else:
+              activity_record_patching(db, ops_table_name, kernel_found, kernel_str, stream_found, stream_id, select_expr)
 
-          select_expr = '"Index" = ' + str(corr_id) + ' AND "proc-id" = ' + str(proc_id)
-          record_args = rec_vals[rec_len - 2]
-
-          # extract kernel name string
-          (kernel_str, kernel_found) = get_field(record_args, 'kernel')
-          is_kernel_list = 1 if kernel_found != 0 and kernel_str[-1] == ';' else 0
-
-          if is_kernel_list != 0:
-            for kernel_item in kernel_str[:-1].split(';'):
-              m = ptrn_multi_kernel.match(kernel_item)
-              if m:
-                kernel_name = m.group(1)
-                dev_id = m.group(2)
-                select_expr += ' AND "dev-id" = ' + dev_id
-                activity_record_patching(db, ops_table_name, 1, kernel_name, stream_found, stream_id, select_expr)
-              else:
-                fatal('Bad multi-kernel format: "' + kernel_item + '" in "' + kernel_str + '"')
-          else:
-            activity_record_patching(db, ops_table_name, kernel_found, kernel_str, stream_found, stream_id, select_expr)
-
-        api_data = ''
-        if mcopy_data_enabled:
-          api_data = memory_manager.register_api(rec_vals) if len(dep_filtr) else ''
+        api_data = memory_manager.register_api(rec_vals) if mcopy_data_enabled and api_name == 'hip' else ''
         rec_vals.append(api_data)
 
         rec_vals[2] = api_pid
 
         db.insert_entry(table_handle, rec_vals)
-      else: fatal(api_name + " bad record: '" + record + "'")
 
   # inserting of dispatch events correlated to the dependent dispatches
   for (from_ns, proc_id, thrd_id) in dep_list:
@@ -546,7 +557,16 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
   kernel_table_handle = db.add_table(kernel_table_name, ops_table_descr)
   mcopy_table_handle = db.add_table(mcopy_table_name, ops_table_descr)
   with open(file_name, mode='r') as fd:
-    for line in fd.readlines():
+    file_lines = fd.readlines()
+    total_lines = len(file_lines)
+    line_index = 0
+    for line in file_lines:
+      if (line_index == total_lines - 1) or (line_index % 100 == 0):
+        sys.stdout.write( \
+          "\rscan ops data " + str(line_index) + ":" + str(total_lines)  + " "*100 \
+        )
+      line_index += 1
+
       record = line[:-1]
       m = ptrn_val.match(record)
       if m:
@@ -576,10 +596,17 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
           if ptrn_barrier.search(name):
             name = '"<barrier packet>"'
 
+        tid = 0
+        if (corr_id, proc_id) in ops_patch_data:
+          vals = ops_patch_data[(corr_id, proc_id)]
+          tid = vals[0]
+          name_patch = vals[1]
+          if name_patch != '': name = name_patch
+
         # insert DB record
         rec_vals[4] = name                       # Name
         rec_vals.append(pid)                     # pid
-        rec_vals.append(0)                       # tid
+        rec_vals.append(tid)                     # tid
         rec_vals.append(corr_id)                 # Index
         rec_vals.append(proc_id)                 # proc-id
         rec_vals.append('')                      # Data
@@ -659,8 +686,8 @@ else:
   hsa_activity_found = fill_copy_db('COPY', db, indir)
   hsa_trace_found = fill_api_db('HSA', db, indir, 'hsa', HSA_PID, COPY_PID, kern_dep_list, {}, 0)
 
+  hip_trace_found = fill_api_db('HIP', db, indir, 'hip', HIP_PID, OPS_PID, [], {}, 1)
   ops_filtr = fill_ops_db('OPS', 'COPY', db, indir)
-  hip_trace_found = fill_api_db('HIP', db, indir, 'hip', HIP_PID, OPS_PID, [], ops_filtr, 1)
 
   fill_kernel_db('A', db)
 
