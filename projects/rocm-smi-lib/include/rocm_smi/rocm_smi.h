@@ -280,8 +280,9 @@ typedef struct {
 typedef enum {
   RSMI_EVT_NOTIF_VMFAULT = KFD_SMI_EVENT_VMFAULT,  //!< VM page fault
   RSMI_EVT_NOTIF_FIRST = RSMI_EVT_NOTIF_VMFAULT,
+  RSMI_EVT_NOTIF_THERMAL_THROTTLE = KFD_SMI_EVENT_THERMAL_THROTTLE,
 
-  RSMI_EVT_NOTIF_LAST = RSMI_EVT_NOTIF_VMFAULT
+  RSMI_EVT_NOTIF_LAST = RSMI_EVT_NOTIF_THERMAL_THROTTLE
 } rsmi_evt_notification_type_t;
 
 /*
@@ -3228,8 +3229,8 @@ rsmi_event_notification_init(uint32_t dv_ind);
  * bit position starting from 1.
  * For example, if the mask field is 0x0000000000000003, which means first bit,
  * bit 1 (bit position start from 1) and bit 2 are set, which indicate interest
- * in receiving RSMI_EVT_NOTIF_VMFAULT (which has a value of 1) and the next
- * event in that list which has a value of 2.
+ * in receiving RSMI_EVT_NOTIF_VMFAULT (which has a value of 1) and
+ * RSMI_EVT_NOTIF_THERMAL_THROTTLE event (which has a value of 2).
  *
  * @retval ::RSMI_STATUS_INIT_ERROR is returned if
  * ::rsmi_event_notification_init() has not been called before a call to this

@@ -544,6 +544,7 @@ struct kfd_ioctl_import_dmabuf_args {
 enum kfd_smi_event {
   KFD_SMI_EVENT_NONE = 0, /* not used */
   KFD_SMI_EVENT_VMFAULT = 1, /* event start counting at 1 */
+  KFD_SMI_EVENT_THERMAL_THROTTLE = 2,
 };
 
 #define KFD_SMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) - 1))
