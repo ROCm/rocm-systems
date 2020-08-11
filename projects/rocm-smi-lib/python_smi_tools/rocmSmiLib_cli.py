@@ -1116,14 +1116,14 @@ def showGpusByPid(pidList):
             printLogSpacer()
             return
     for pid in pidList:
-        ret = rocmsmi.rsmi_compute_process_gpus_get(pid, None, byref(num_devices))
-        if rsmi_ret_ok(ret, 'PID ' + str(pid)):
+        ret = rocmsmi.rsmi_compute_process_gpus_get(int(pid), None, byref(num_devices))
+        if rsmi_ret_ok(ret, 'PID ' + pid):
 
             dv_indices = (c_uint32 * num_devices.value)()
-            ret = rocmsmi.rsmi_compute_process_gpus_get(pid, dv_indices, byref(num_devices))
+            ret = rocmsmi.rsmi_compute_process_gpus_get(int(pid), dv_indices, byref(num_devices))
 
             if rsmi_ret_ok(ret):
-                metricName = 'PID %s is using %s DRM device(s)' % (str(pid), str(num_devices.value))
+                metricName = 'PID %s is using %s DRM device(s)' % (pid, str(num_devices.value))
                 printListLog(metricName, list(dv_indices))
         else:
             print(None, 'Unable to get list of KFD PIDs. A kernel update may be needed', None)
@@ -1308,20 +1308,20 @@ def showPids():
     for pid in pidList:
         gpuNumber = 'UNKNOWN'
         vramUsage = 'UNKNOWN'
-        ret = rocmsmi.rsmi_compute_process_gpus_get(pid, None, byref(num_devices))
+        ret = rocmsmi.rsmi_compute_process_gpus_get(int(pid), None, byref(num_devices))
         if rsmi_ret_ok(ret):
             dv_indices = (c_uint32 * num_devices.value)()
-            ret = rocmsmi.rsmi_compute_process_gpus_get(pid, dv_indices, byref(num_devices))
+            ret = rocmsmi.rsmi_compute_process_gpus_get(int(pid), dv_indices, byref(num_devices))
             if rsmi_ret_ok(ret):
                 gpuNumber = str(num_devices.value)
             else:
                 logging.debug('Unable to fetch PID GPU information')
-        ret = rocmsmi.rsmi_compute_process_info_by_pid_get(pid, byref(proc))
+        ret = rocmsmi.rsmi_compute_process_info_by_pid_get(int(pid), byref(proc))
         if rsmi_ret_ok(ret):
             vramUsage = proc.vram_usage
         else:
             logging.debug('Unable to fetch PID VRAM information')
-        dataArray.append([str(pid), getName(pid), str(gpuNumber), str(vramUsage)])
+        dataArray.append([pid, getName(pid), str(gpuNumber), str(vramUsage)])
     printLog(None, 'KFD process information:', None)
     print2DArray(dataArray)
     printLogSpacer()
