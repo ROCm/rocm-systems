@@ -39,7 +39,7 @@ THE SOFTWARE.
 #include "util/hsa_rsrc_factory.h"
 #include "util/exception.h"
 
-namespace roctracer { extern TraceBuffer<trace_entry_t> trace_buffer; }
+namespace roctracer { extern TraceBuffer<trace_entry_t>* trace_buffer; }
 
 namespace rocprofiler {
 extern decltype(hsa_queue_create)* hsa_queue_create_fn;
@@ -160,7 +160,7 @@ class InterceptQueue {
         const char* kernel_name = GetKernelName(kernel_symbol);
 
         // Adding kernel timing tracker
-        ::proxy::Tracker::entry_t* entry = roctracer::trace_buffer.GetEntry();
+        ::proxy::Tracker::entry_t* entry = roctracer::trace_buffer->GetEntry();
         entry->kernel.tid = syscall(__NR_gettid);
         entry->kernel.name = kernel_name;
         ::proxy::Tracker::Enable(roctracer::KERNEL_ENTRY_TYPE, obj->agent_info_->dev_id, completion_signal, entry);

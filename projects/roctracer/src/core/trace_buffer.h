@@ -124,7 +124,7 @@ class TraceBuffer : protected TraceBufferBase {
     callback_t fun;
   };
 
-  TraceBuffer(const char* name, uint32_t size, flush_prm_t* flush_prm_arr, uint32_t flush_prm_count) :
+  TraceBuffer(const char* name, uint32_t size, const flush_prm_t* flush_prm_arr, uint32_t flush_prm_count, uint32_t prior = 0) :
     is_flushed_(false),
     work_thread_started_(false)
   {
@@ -139,12 +139,14 @@ class TraceBuffer : protected TraceBufferBase {
     flush_prm_arr_ = flush_prm_arr;
     flush_prm_count_ = flush_prm_count;
 
+    priority_ = prior;
+
     TraceBufferBase::Push(this);
   }
 
   ~TraceBuffer() {
     StopWorkerThread();
-    Flush();
+    FlushAll();
   }
 
   void StartWorkerThread() {
@@ -176,14 +178,24 @@ class TraceBuffer : protected TraceBufferBase {
   }
 
   void Flush() { flush_buf(); }
+  void Flush(const bool& b) {
+    DisableFlushing(!b);
+    flush_buf();
+  }
+  void DisableFlushing(const bool& b) { is_flushed_.exchange(b, std::memory_order_acquire); }
 
   private:
   void flush_buf() {
     std::lock_guard<mutex_t> lck(mutex_);
     const bool is_flushed = is_flushed_.exchange(true, std::memory_order_acquire);
 
+    if (priority_ != 0) {
+      priority_ -= 1;
+      return;
+    }
+
     if (is_flushed == false) {
-      for (flush_prm_t* prm = flush_prm_arr_; prm < flush_prm_arr_ + flush_prm_count_; prm++) {
+      for (const flush_prm_t* prm = flush_prm_arr_; prm < flush_prm_arr_ + flush_prm_count_; prm++) {
         // Flushed entries type
         uint32_t type = prm->type;
         // Flushing function
@@ -253,8 +265,9 @@ class TraceBuffer : protected TraceBufferBase {
   volatile std::atomic<pointer_t> end_pointer_;
   std::list<Entry*> buf_list_;
 
-  flush_prm_t* flush_prm_arr_;
+  const flush_prm_t* flush_prm_arr_;
   uint32_t flush_prm_count_;
+  uint32_t priority_;
   volatile std::atomic<bool> is_flushed_;
 
   pthread_t work_thread_;

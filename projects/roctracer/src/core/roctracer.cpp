@@ -218,11 +218,12 @@ template<> bool act_en_functor_t::fun(const act_en_functor_t::record_t& record) 
 
 void hsa_async_copy_handler(::proxy::Tracker::entry_t* entry);
 void hsa_kernel_handler(::proxy::Tracker::entry_t* entry);
-TraceBuffer<trace_entry_t>::flush_prm_t trace_buffer_prm[] = {
+constexpr TraceBuffer<trace_entry_t>::flush_prm_t trace_buffer_prm[] = {
   {COPY_ENTRY_TYPE, hsa_async_copy_handler},
   {KERNEL_ENTRY_TYPE, hsa_kernel_handler}
 };
-TraceBuffer<trace_entry_t> trace_buffer("HSA GPU", 0x200000, trace_buffer_prm, 2);
+TraceBuffer<trace_entry_t>* trace_buffer = NULL;
+//TraceBuffer<trace_entry_t> trace_buffer("HSA GPU", 0x200000, trace_buffer_prm, 2);
 
 namespace hsa_support {
 // callbacks table
@@ -567,7 +568,7 @@ hsa_status_t hsa_amd_memory_async_copy_interceptor(
 {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   if (hsa_support::async_copy_callback_enabled) {
-    trace_entry_t* entry = trace_buffer.GetEntry();
+    trace_entry_t* entry = trace_buffer->GetEntry();
     ::proxy::Tracker::Enable(COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
     status = hsa_amd_memory_async_copy_fn(dst, dst_agent, src,
                                           src_agent, size, num_dep_signals,
@@ -591,7 +592,7 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
 {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   if (hsa_support::async_copy_callback_enabled) {
-    trace_entry_t* entry = trace_buffer.GetEntry();
+    trace_entry_t* entry = trace_buffer->GetEntry();
     ::proxy::Tracker::Enable(COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
     status = hsa_amd_memory_async_copy_rect_fn(dst, dst_offset, src,
                                                src_offset, range, copy_agent,
@@ -1289,13 +1290,14 @@ PUBLIC_API void roctracer_unload() {
 
 PUBLIC_API void roctracer_flush_buf() {
   ONLOAD_TRACE_BEG();
-  roctracer::trace_buffer.Flush();
+  roctracer::trace_buffer->Flush();
   ONLOAD_TRACE_END();
 }
 
 CONSTRUCTOR_API void constructor() {
   ONLOAD_TRACE_BEG();
   roctracer::util::Logger::Create();
+  roctracer::trace_buffer = new roctracer::TraceBuffer<roctracer::trace_entry_t>("HSA GPU", 0x200000, roctracer::trace_buffer_prm, 2);
   roctracer_load();
   ONLOAD_TRACE_END();
 }
