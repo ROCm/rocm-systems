@@ -240,11 +240,13 @@ ext_table_descr = [
 ]
 def fill_ext_db(table_name, db, indir, trace_name, api_pid):
   file_name = indir + '/' + trace_name + '_trace.txt'
-  ptrn_val = re.compile(r'(\d+) (\d+):(\d+) (\d+):(.*)$')
+  # tms pid:tid cid:rid:'.....'
+  ptrn_val = re.compile(r'(\d+) (\d+):(\d+) (\d+):(\d+):(.*)$')
 
   if not os.path.isfile(file_name): return 0
 
   range_stack = {}
+  range_map = {}
 
   record_id = 0
   table_handle = db.add_table(table_name, ext_table_descr)
@@ -257,7 +259,8 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
         pid = m.group(2)
         tid = m.group(3)
         cid = int(m.group(4))
-        msg = m.group(5)
+        rid = int(m.group(5))
+        msg = m.group(6)
 
         rec_vals = []
 
@@ -284,6 +287,21 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
           rec_stack = pid_stack[tid]
           rec_vals = rec_stack.pop()
           rec_vals[1] = tms
+
+        # range start
+        if cid == 3:
+          range_map[rid] = (tms, msg)
+          continue
+
+        # range stop
+        if cid == 4:
+          if rid in range_map:
+            (tms, msg) = range_map[rid]    # querying start timestamp if rid exists
+            del range_map[rid]
+          else: fatal("range id(" + str(rid) + ") is not found")
+          rec_vals[0] = tms       # begin timestamp
+          rec_vals[3] = 0         # 0 lane for ranges
+          rec_vals[4] = msg       # range message
 
         db.insert_entry(table_handle, rec_vals)
         record_id += 1
