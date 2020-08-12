@@ -203,6 +203,7 @@ struct roctx_trace_entry_t {
   timestamp_t time;
   uint32_t pid;
   uint32_t tid;
+  roctx_range_id_t rid;
   const char* message;
 };
 
@@ -215,6 +216,7 @@ static inline void roctx_callback_fun(
     uint32_t domain,
     uint32_t cid,
     uint32_t tid,
+    roctx_range_id_t rid,
     const char* message)
 {
 #if ROCTX_CLOCK_TIME
@@ -229,6 +231,7 @@ static inline void roctx_callback_fun(
   entry->time = time;
   entry->pid = GetPid();
   entry->tid = tid;
+  entry->rid = rid;
   entry->message = (message != NULL) ? strdup(message) : NULL;
 }
 
@@ -240,15 +243,15 @@ void roctx_api_callback(
 {
   (void)arg;
   const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
-  roctx_callback_fun(domain, cid, GetTid(), data->args.message);
+  roctx_callback_fun(domain, cid, GetTid(), data->args.id, data->args.message);
 }
 
 // rocTX Start/Stop callbacks
 void roctx_range_start_callback(const roctx_range_data_t* data, void* arg) {
-  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePushA, data->tid, data->message);
+  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePushA, data->tid, 0, data->message);
 }
 void roctx_range_stop_callback(const roctx_range_data_t* data, void* arg) {
-  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePop, data->tid, NULL);
+  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePop, data->tid, 0, NULL);
 }
 void start_callback() { roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_start_callback, NULL); }
 void stop_callback() { roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_stop_callback, NULL); }
@@ -262,7 +265,7 @@ void roctx_flush_cb(roctx_trace_entry_t* entry) {
   const timestamp_t timestamp = entry->time;
 #endif
   std::ostringstream os;
-  os << timestamp << " " << entry->pid << ":" << entry->tid << " " << entry->cid;
+  os << timestamp << " " << entry->pid << ":" << entry->tid << " " << entry->cid << ":" << entry->rid;
   if (entry->message != NULL) os << ":\"" << entry->message << "\"";
   else os << ":\"\"";
   fprintf(roctx_file_handle, "%s\n", os.str().c_str()); fflush(roctx_file_handle);

@@ -97,6 +97,7 @@ int main() {
 
     roctracer_mark("before HIP LaunchKernel");
     roctxMark("before hipLaunchKernel");
+    int rangeId = roctxRangeStart("hipLaunchKernel range");
     roctxRangePush("hipLaunchKernel");
     // Lauching kernel from host
     hipLaunchKernelGGL(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
@@ -112,6 +113,7 @@ int main() {
 
     roctxRangePop(); // for "hipMemcpy"
     roctxRangePop(); // for "hipLaunchKernel"
+    roctxRangeStop(rangeId);
 
     // CPU MatrixTranspose computation
     matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);

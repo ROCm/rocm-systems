@@ -106,6 +106,7 @@ extern cb_table_t cb_table;
 // Logger instantiation
 roctracer::util::Logger::mutex_t roctracer::util::Logger::mutex_;
 std::atomic<roctracer::util::Logger*> roctracer::util::Logger::instance_{};
+std::atomic<int> roctx_range_counter(0);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Public library methods
@@ -163,6 +164,33 @@ PUBLIC_API int roctxRangePop() {
 
   return roctx::message_stack->size();
   API_METHOD_CATCH(-1)
+}
+
+PUBLIC_API roctx_range_id_t roctxRangeStartA(const char* message) {
+  API_METHOD_PREFIX
+  roctx_range_counter++;
+
+  roctx_api_data_t api_data{};
+  api_data.args.roctxRangeStartA.message = strdup(message);
+  api_data.args.roctxRangeStartA.id = roctx_range_counter;
+  activity_rtapi_callback_t api_callback_fun = NULL;
+  void* api_callback_arg = NULL;
+  roctx::cb_table.get(ROCTX_API_ID_roctxRangeStartA, &api_callback_fun, &api_callback_arg);
+  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangeStartA, &api_data, api_callback_arg);
+
+  return roctx_range_counter;
+  API_METHOD_CATCH(-1);
+}
+
+PUBLIC_API void roctxRangeStop(roctx_range_id_t rangeId) {
+  API_METHOD_PREFIX
+  roctx_api_data_t api_data{};
+  api_data.args.roctxRangeStop.id = rangeId;
+  activity_rtapi_callback_t api_callback_fun = NULL;
+  void* api_callback_arg = NULL;
+  roctx::cb_table.get(ROCTX_API_ID_roctxRangeStop, &api_callback_fun, &api_callback_arg);
+  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangeStop, &api_data, api_callback_arg);
+  API_METHOD_SUFFIX_NRET
 }
 
 PUBLIC_API void RangeStackIterate(roctx_range_iterate_cb_t callback, void* arg) {

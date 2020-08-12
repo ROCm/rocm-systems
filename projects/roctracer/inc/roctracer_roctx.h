@@ -32,12 +32,15 @@ THE SOFTWARE.
 
 #ifndef INC_ROCTRACER_ROCTX_H_
 #define INC_ROCTRACER_ROCTX_H_
+#include <roctx.h>
 
 // ROC-TX API ID enumeration
 enum roctx_api_id_t {
   ROCTX_API_ID_roctxMarkA = 0,
   ROCTX_API_ID_roctxRangePushA = 1,
   ROCTX_API_ID_roctxRangePop = 2,
+  ROCTX_API_ID_roctxRangeStartA = 3,
+  ROCTX_API_ID_roctxRangeStop = 4,
 
   ROCTX_API_ID_NUMBER,
 };
@@ -45,7 +48,10 @@ enum roctx_api_id_t {
 // ROCTX callbacks data type
 typedef struct roctx_api_data_s {
   union {
-    const char* message;
+    struct {
+     const char* message;
+     roctx_range_id_t id;
+    };
     struct {
       const char* message;
     } roctxMarkA;
@@ -55,6 +61,14 @@ typedef struct roctx_api_data_s {
     struct {
       const char* message;
     } roctxRangePop;
+    struct {
+      const char* message;
+      roctx_range_id_t id;
+    } roctxRangeStartA;
+    struct {
+      const char* message;
+      roctx_range_id_t id;
+    } roctxRangeStop;
   } args;
 } roctx_api_data_t;
 
