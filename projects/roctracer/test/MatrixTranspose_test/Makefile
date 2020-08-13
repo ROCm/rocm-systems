@@ -26,7 +26,7 @@ ifeq ($(C_TEST), 1)
 else
 	COMP=$(HIPCC)
 	SOURCES = MatrixTranspose.cpp
-	FLAGS += -DHIP_TEST=1
+	FLAGS += -DHIP_TEST=1 --rocm-path=$(ROCM_PATH)
 endif
 ifeq ($(MGPU_TEST), 1)
 	FLAGS += -DMGPU_TEST=1
