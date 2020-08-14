@@ -188,17 +188,15 @@ class MemManager:
 
       m = hipMemcpy_ptrn_kind.match(args)
       if m:
-        direction = switcher.get(m.group(1), "unknown") 
+        direction = switcher.get(m.group(1), "unknown")
 
       copy_line = str(start_time) + DELIM + str(end_time) + DELIM + pid + DELIM + tid + DELIM + event + DELIM + 'Direction=' + direction + DELIM + 'SrcType=' + srcptr_type + DELIM + 'DstType=' + dstptr_type + DELIM + "Size=" + str(size) + DELIM + "BW=" + str(round(bandwidth, 2)) + DELIM + 'Async=' + str(is_async)
 
     self.memcopies[recordid] = copy_line
     return copy_line;
 
-  def dump_data(self):
-    # To create “MM” table in DB on the finish
-    table_name = "MM"
-    file_name = os.environ['PWD'] + '/results.memcopy_info.csv'
+  def dump_data(self, table_name, file_name):
+    # To create memcopy info table in DB
     print("File '" + file_name + "' is generating")
     table_handle = self.db.add_table(table_name, mm_table_descr)
 
@@ -212,5 +210,6 @@ class MemManager:
         else:
           rec_vals_array.append(rec)
       self.db.insert_entry(table_handle, rec_vals_array)
-    # To dump the MM table as CSV
+
+    # To dump the memcopy info table as CSV
     self.db.dump_csv(table_name, file_name)

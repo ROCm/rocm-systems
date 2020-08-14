@@ -672,6 +672,7 @@ else:
   kfd_statfile = re.sub(r'\.stats\.csv$', r'.kfd_stats.csv', statfile)
   ops_statfile = statfile
   copy_statfile = re.sub(r'\.stats\.csv$', r'.copy_stats.csv', statfile)
+  memcopy_info_file = re.sub(r'\.stats\.csv$', r'.memcopy_info.csv', statfile)
   sysinfo_file = re.sub(r'\.stats\.csv$', r'.sysinfo.txt', statfile)
   metadata_gen(sysinfo_file, 'rocminfo')
 
@@ -778,7 +779,7 @@ else:
     db.close_json(jsonfile);
 
   if mcopy_data_enabled:
-    memory_manager.dump_data()
+    memory_manager.dump_data('MM', memcopy_info_file)
 
   db.close()
 
