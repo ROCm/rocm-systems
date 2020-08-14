@@ -44,7 +44,7 @@ THE SOFTWARE.
 
 #include <ext/prof_protocol.h>
 
-#define ROCTRACER_VERSION_MAJOR 3
+#define ROCTRACER_VERSION_MAJOR 4
 #define ROCTRACER_VERSION_MINOR 0
 
 #ifdef __cplusplus
