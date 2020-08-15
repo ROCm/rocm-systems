@@ -223,7 +223,6 @@ constexpr TraceBuffer<trace_entry_t>::flush_prm_t trace_buffer_prm[] = {
   {KERNEL_ENTRY_TYPE, hsa_kernel_handler}
 };
 TraceBuffer<trace_entry_t>* trace_buffer = NULL;
-//TraceBuffer<trace_entry_t> trace_buffer("HSA GPU", 0x200000, trace_buffer_prm, 2);
 
 namespace hsa_support {
 // callbacks table
@@ -1127,7 +1126,7 @@ PUBLIC_API roctracer_status_t roctracer_flush_activity_expl(roctracer_pool_t* po
   API_METHOD_PREFIX
   if (pool == NULL) pool = roctracer_default_pool();
   roctracer::MemoryPool* memory_pool = reinterpret_cast<roctracer::MemoryPool*>(pool);
-  memory_pool->Flush();
+  if (memory_pool != NULL) memory_pool->Flush();
   roctracer::TraceBufferBase::FlushAll();
   API_METHOD_SUFFIX
 }

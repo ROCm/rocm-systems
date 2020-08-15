@@ -36,15 +36,17 @@ enum {
   TRACE_ENTRY_COMPL = 2
 };
 
-enum {
-  API_ENTRY_TYPE,
-  COPY_ENTRY_TYPE,
-  KERNEL_ENTRY_TYPE
+enum entry_type_t {
+  DFLT_ENTRY_TYPE = 0,
+  API_ENTRY_TYPE = 1,
+  COPY_ENTRY_TYPE = 2,
+  KERNEL_ENTRY_TYPE = 3,
+  NUM_ENTRY_TYPE = 4
 };
 
 struct trace_entry_t {
   std::atomic<uint32_t> valid;
-  uint32_t type;
+  entry_type_t type;
   uint64_t dispatch;
   uint64_t begin;                                      // kernel begin timestamp, ns
   uint64_t end;                                        // kernel end timestamp, ns
@@ -67,14 +69,26 @@ struct trace_entry_t {
 template <class T>
 struct push_element_fun {
   T* const elem_;
-  void fun(T* node) { if (node->next_elem_ == NULL) node->next_elem_ = elem_; }
-  push_element_fun(T* elem) : elem_(elem) {}
+  T** prev_;
+  bool fun(T* node) {
+    if (node->priority_ > elem_->priority_) {
+      *prev_ = elem_;
+      elem_->next_elem_ = node;
+    } else if (node->next_elem_ == NULL) {
+      node->next_elem_ = elem_;
+    } else {
+      prev_ = &(node->next_elem_);
+      return false;
+    }
+    return true;
+  }
+  push_element_fun(T* elem, T** prev) : elem_(elem), prev_(prev) {}
 };
 
 template <class T>
 struct call_element_fun {
   void (T::*fptr_)();
-  void fun(T* node) { (node->*fptr_)(); }
+  bool fun(T* node) const { (node->*fptr_)(); return false; }
   call_element_fun(void (T::*f)()) : fptr_(f) {}
 };
 
@@ -89,10 +103,10 @@ struct TraceBufferBase {
 
   static void Push(TraceBufferBase* elem) {
     if (head_elem_ == NULL) head_elem_ = elem;
-    else foreach(push_element_fun<TraceBufferBase>(elem));
+    else foreach(push_element_fun<TraceBufferBase>(elem, &head_elem_));
   }
 
-  TraceBufferBase() : next_elem_(NULL) {}
+  TraceBufferBase(const uint32_t& prior) : priority_(prior), next_elem_(NULL) {}
 
   template<class F>
   static void foreach(const F& f_in) {
@@ -101,11 +115,12 @@ struct TraceBufferBase {
     TraceBufferBase* p = head_elem_;
     while (p != NULL) {
       TraceBufferBase* next = p->next_elem_;
-      f.fun(p);
+      if (f.fun(p) == true) break;
       p = next;
     }
   }
 
+  const uint32_t priority_;
   TraceBufferBase* next_elem_;
   static TraceBufferBase* head_elem_;
   static mutex_t mutex_;
@@ -118,35 +133,41 @@ class TraceBuffer : protected TraceBufferBase {
   typedef TraceBuffer<Entry> Obj;
   typedef uint64_t pointer_t;
   typedef std::recursive_mutex mutex_t;
+  typedef typename std::list<Entry*> buf_list_t;
+  typedef typename buf_list_t::iterator buf_list_it_t;
 
   struct flush_prm_t {
-    uint32_t type;
+    entry_type_t type;
     callback_t fun;
   };
 
   TraceBuffer(const char* name, uint32_t size, const flush_prm_t* flush_prm_arr, uint32_t flush_prm_count, uint32_t prior = 0) :
-    is_flushed_(false),
+    TraceBufferBase(prior),
+    size_(size),
     work_thread_started_(false)
   {
     name_ = strdup(name);
-    size_ = size;
     data_ = allocate_fun();
     next_ = allocate_fun();
     read_pointer_ = 0;
+    write_pointer_ = 0;
     end_pointer_ = size;
     buf_list_.push_back(data_);
 
-    flush_prm_arr_ = flush_prm_arr;
-    flush_prm_count_ = flush_prm_count;
-
-    priority_ = prior;
+    memset(f_array_, 0, sizeof(f_array_));
+    for (const flush_prm_t* prm = flush_prm_arr; prm < flush_prm_arr + flush_prm_count; prm++) {
+      const entry_type_t type = prm->type;
+      if (type >= NUM_ENTRY_TYPE) FATAL("out of f_array bounds (" << type << ")");
+      if (f_array_[type] != NULL) FATAL("handler function ptr redefinition (" << type << ")");
+      f_array_[type] = prm->fun;
+    }
 
     TraceBufferBase::Push(this);
   }
 
   ~TraceBuffer() {
     StopWorkerThread();
-    FlushAll();
+    Flush();
   }
 
   void StartWorkerThread() {
@@ -171,52 +192,52 @@ class TraceBuffer : protected TraceBufferBase {
   }
 
   Entry* GetEntry() {
-    const pointer_t pointer = read_pointer_.fetch_add(1);
+    const pointer_t pointer = write_pointer_.fetch_add(1);
     if (pointer >= end_pointer_) wrap_buffer(pointer);
     if (pointer >= end_pointer_) FATAL("pointer >= end_pointer_ after buffer wrap");
-    return data_ + (pointer + size_ - end_pointer_);
+    Entry* entry = data_ + (size_ + pointer - end_pointer_);
+    entry->valid = TRACE_ENTRY_INV;
+    entry->type = DFLT_ENTRY_TYPE;
+    return entry;
   }
 
   void Flush() { flush_buf(); }
-  void Flush(const bool& b) {
-    DisableFlushing(!b);
-    flush_buf();
-  }
-  void DisableFlushing(const bool& b) { is_flushed_.exchange(b, std::memory_order_acquire); }
 
   private:
   void flush_buf() {
     std::lock_guard<mutex_t> lck(mutex_);
-    const bool is_flushed = is_flushed_.exchange(true, std::memory_order_acquire);
 
-    if (priority_ != 0) {
-      priority_ -= 1;
-      return;
-    }
+    pointer_t pointer = read_pointer_;
+    pointer_t curr_pointer = write_pointer_.load(std::memory_order_relaxed);
+    buf_list_it_t it = buf_list_.begin();
+    buf_list_it_t end_it = buf_list_.end();
+    while(it != end_it) {
+      Entry* buf = *it;
+      Entry* ptr = buf + (pointer % size_);
+      Entry* end_ptr = buf + size_;
+      while ((ptr < end_ptr) && (pointer < curr_pointer)) {
+        if (ptr->valid != TRACE_ENTRY_COMPL) break;
 
-    if (is_flushed == false) {
-      for (const flush_prm_t* prm = flush_prm_arr_; prm < flush_prm_arr_ + flush_prm_count_; prm++) {
-        // Flushed entries type
-        uint32_t type = prm->type;
-        // Flushing function
-        callback_t fun = prm->fun;
-        if (fun == NULL) FATAL("flush function is not set");
+        entry_type_t type = ptr->type;
+        if (type >= NUM_ENTRY_TYPE) FATAL("out of f_array bounds (" << type << ")");
+        callback_t f_ptr = f_array_[type];
+        if (f_ptr == NULL) FATAL("f_ptr == NULL");
+        (*f_ptr)(ptr);
 
-        pointer_t pointer = 0;
-        for (Entry* ptr : buf_list_) {
-          Entry* end = ptr + size_;
-          while ((ptr < end) && (pointer < read_pointer_)) {
-            if (ptr->type == type) {
-              if (ptr->valid == TRACE_ENTRY_COMPL) {
-                fun(ptr);
-              }
-            }
-            ptr++;
-            pointer++;
-          }
-        }
+        ptr++;
+        pointer++;
       }
+
+      buf_list_it_t prev = it;
+      it++;
+      if (ptr == end_ptr) {
+        free_fun(*prev);
+        buf_list_.erase(prev);
+      }
+      if (pointer == curr_pointer) break;
     }
+
+    read_pointer_ = pointer;
   }
 
   inline Entry* allocate_fun() {
@@ -224,6 +245,10 @@ class TraceBuffer : protected TraceBufferBase {
     if (ptr == NULL) FATAL("malloc failed");
     //memset(ptr, 0, size_ * sizeof(Entry));
     return ptr;
+  }
+
+  inline void free_fun(void* ptr) {
+    free(ptr);
   }
 
   static void* allocate_worker(void* arg) {
@@ -258,17 +283,14 @@ class TraceBuffer : protected TraceBufferBase {
   }
 
   const char* name_;
-  uint32_t size_;
+  const uint32_t size_;
   Entry* data_;
   Entry* next_;
-  volatile std::atomic<pointer_t> read_pointer_;
+  pointer_t read_pointer_;
+  volatile std::atomic<pointer_t> write_pointer_;
   volatile std::atomic<pointer_t> end_pointer_;
-  std::list<Entry*> buf_list_;
-
-  const flush_prm_t* flush_prm_arr_;
-  uint32_t flush_prm_count_;
-  uint32_t priority_;
-  volatile std::atomic<bool> is_flushed_;
+  buf_list_t buf_list_;
+  callback_t f_array_[NUM_ENTRY_TYPE];
 
   pthread_t work_thread_;
   pthread_mutex_t work_mutex_;

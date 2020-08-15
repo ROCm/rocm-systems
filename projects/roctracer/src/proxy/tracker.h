@@ -40,9 +40,10 @@ class Tracker {
   public:
   typedef util::HsaRsrcFactory::timestamp_t timestamp_t;
   typedef roctracer::trace_entry_t entry_t;
+  typedef roctracer::entry_type_t entry_type_t;
 
   // Add tracker entry
-  inline static void Enable(uint32_t type, const hsa_agent_t& agent, const hsa_signal_t& signal, entry_t* entry) {
+  inline static void Enable(entry_type_t type, const hsa_agent_t& agent, const hsa_signal_t& signal, entry_t* entry) {
     hsa_status_t status = HSA_STATUS_ERROR;
     util::HsaRsrcFactory* hsa_rsrc = &(util::HsaRsrcFactory::Instance());
 
@@ -88,13 +89,16 @@ class Tracker {
     }
 
     entry->complete = hsa_rsrc->TimestampNs();
+    hsa_signal_t orig = entry->orig;
+    hsa_signal_t signal = entry->signal;
+
+    // Releasing completed entry
     entry->valid.store(roctracer::TRACE_ENTRY_COMPL, std::memory_order_release);
 
     // Original intercepted signal completion
-    hsa_signal_t orig = entry->orig;
     if (orig.handle) {
       amd_signal_t* orig_signal_ptr = reinterpret_cast<amd_signal_t*>(orig.handle);
-      amd_signal_t* prof_signal_ptr = reinterpret_cast<amd_signal_t*>(entry->signal.handle);
+      amd_signal_t* prof_signal_ptr = reinterpret_cast<amd_signal_t*>(signal.handle);
       orig_signal_ptr->start_ts = prof_signal_ptr->start_ts;
       orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
 
@@ -102,7 +106,7 @@ class Tracker {
       if (signal_value != new_value) EXC_ABORT(HSA_STATUS_ERROR, "Tracker::Complete bad signal value");
       hsa_signal_store_screlease(orig, signal_value);
     }
-    hsa_signal_destroy(entry->signal);
+    hsa_signal_destroy(signal);
   }
 
   // Handler for packet completion
@@ -113,7 +117,6 @@ class Tracker {
 
     // Complete entry
     Tracker::Complete(signal_value, entry);
-
     return false;
   }
 };

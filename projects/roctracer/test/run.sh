@@ -79,7 +79,9 @@ eval_test() {
     test_runnum=$((test_runnum + 1))
     eval "$cmdline" >$test_trace 2>&1
     is_failed=$?
-    cat $test_trace
+    if [ $is_failed != 0 ] ; then
+      cat $test_trace
+    fi
     if [ $IS_CI = 1 ] ; then
       is_failed=0;
     else
@@ -87,6 +89,7 @@ eval_test() {
         python ./test/check_trace.py -in $test_name -ck $check_trace_flag
         is_failed=$?
         if [ $is_failed != 0 ] ; then
+          echo "Trace checker error:"
           python ./test/check_trace.py -v -in $test_name -ck $check_trace_flag
         fi
       fi

@@ -176,6 +176,8 @@ void* control_thr_fun(void*) {
       usleep(dist_us);
     }
   }
+
+  return NULL;
 }
 
 // Flushing control thread
@@ -204,8 +206,8 @@ void* flush_thr_fun(void*) {
 // rocTX annotation tracing
 
 struct roctx_trace_entry_t {
-  uint32_t valid;
-  uint32_t type;
+  std::atomic<uint32_t> valid;
+  roctracer::entry_type_t type;
   uint32_t cid;
   timestamp_t time;
   uint32_t pid;
@@ -215,9 +217,8 @@ struct roctx_trace_entry_t {
 };
 
 void roctx_flush_cb(roctx_trace_entry_t* entry);
-constexpr roctracer::TraceBuffer<roctx_trace_entry_t>::flush_prm_t roctx_flush_prm[1] = {{0, roctx_flush_cb}};
+constexpr roctracer::TraceBuffer<roctx_trace_entry_t>::flush_prm_t roctx_flush_prm = {roctracer::DFLT_ENTRY_TYPE, roctx_flush_cb};
 roctracer::TraceBuffer<roctx_trace_entry_t>* roctx_trace_buffer = NULL;
-//roctracer::TraceBuffer<roctx_trace_entry_t> roctx_trace_buffer("rocTX API", 0x200000, roctx_flush_prm, 1);
 
 // rocTX callback function
 static inline void roctx_callback_fun(
@@ -233,14 +234,13 @@ static inline void roctx_callback_fun(
   const timestamp_t time = timer->timestamp_fn_ns();
 #endif
   roctx_trace_entry_t* entry = roctx_trace_buffer->GetEntry();
-  entry->valid = roctracer::TRACE_ENTRY_COMPL;
-  entry->type = 0;
   entry->cid = cid;
   entry->time = time;
   entry->pid = GetPid();
   entry->tid = tid;
   entry->rid = rid;
   entry->message = (message != NULL) ? strdup(message) : NULL;
+  entry->valid.store(roctracer::TRACE_ENTRY_COMPL, std::memory_order_release);
 }
 
 void roctx_api_callback(
@@ -283,8 +283,8 @@ void roctx_flush_cb(roctx_trace_entry_t* entry) {
 // HSA API tracing
 
 struct hsa_api_trace_entry_t {
-  uint32_t valid;
-  uint32_t type;
+  std::atomic<uint32_t> valid;
+  roctracer::entry_type_t type;
   uint32_t cid;
   timestamp_t begin;
   timestamp_t end;
@@ -294,9 +294,8 @@ struct hsa_api_trace_entry_t {
 };
 
 void hsa_api_flush_cb(hsa_api_trace_entry_t* entry);
-constexpr roctracer::TraceBuffer<hsa_api_trace_entry_t>::flush_prm_t hsa_flush_prm[1] = {{0, hsa_api_flush_cb}};
+constexpr roctracer::TraceBuffer<hsa_api_trace_entry_t>::flush_prm_t hsa_flush_prm = {roctracer::DFLT_ENTRY_TYPE, hsa_api_flush_cb};
 roctracer::TraceBuffer<hsa_api_trace_entry_t>* hsa_api_trace_buffer = NULL;
-//roctracer::TraceBuffer<hsa_api_trace_entry_t> hsa_api_trace_buffer("HSA API", 0x200000, hsa_flush_prm, 1);
 
 // HSA API callback function
 void hsa_api_callback(
@@ -312,14 +311,13 @@ void hsa_api_callback(
   } else {
     const timestamp_t end_timestamp = (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp : timer->timestamp_fn_ns();
     hsa_api_trace_entry_t* entry = hsa_api_trace_buffer->GetEntry();
-    entry->valid = roctracer::TRACE_ENTRY_COMPL;
-    entry->type = 0;
     entry->cid = cid;
     entry->begin = hsa_begin_timestamp;
     entry->end = end_timestamp;
     entry->pid = GetPid();
     entry->tid = GetTid();
     entry->data = *data;
+    entry->valid.store(roctracer::TRACE_ENTRY_COMPL, std::memory_order_release);
   }
 }
 
@@ -343,8 +341,8 @@ void hsa_activity_callback(
 // HIP API tracing
 
 struct hip_api_trace_entry_t {
-  uint32_t valid;
-  uint32_t type;
+  std::atomic<uint32_t> valid;
+  roctracer::entry_type_t type;
   uint32_t domain;
   uint32_t cid;
   timestamp_t begin;
@@ -357,9 +355,8 @@ struct hip_api_trace_entry_t {
 };
 
 void hip_api_flush_cb(hip_api_trace_entry_t* entry);
-constexpr roctracer::TraceBuffer<hip_api_trace_entry_t>::flush_prm_t hip_api_flush_prm[1] = {{0, hip_api_flush_cb}};
+constexpr roctracer::TraceBuffer<hip_api_trace_entry_t>::flush_prm_t hip_api_flush_prm = {roctracer::DFLT_ENTRY_TYPE, hip_api_flush_cb};
 roctracer::TraceBuffer<hip_api_trace_entry_t>* hip_api_trace_buffer = NULL;
-//roctracer::TraceBuffer<hip_api_trace_entry_t> hip_api_trace_buffer("HIP API", 0x200000, hip_api_flush_prm, 1);
 
 static inline bool is_hip_kernel_launch_api(const uint32_t& cid) {
   bool ret =
@@ -390,8 +387,6 @@ void hip_api_callback(
 
     const timestamp_t end_timestamp = timer->timestamp_fn_ns();
     hip_api_trace_entry_t* entry = hip_api_trace_buffer->GetEntry();
-    entry->valid = roctracer::TRACE_ENTRY_COMPL;
-    entry->type = 0;
     entry->cid = cid;
     entry->domain = domain;
     entry->begin = hip_begin_timestamp;
@@ -437,6 +432,8 @@ void hip_api_callback(
         }
       }
     }
+
+    entry->valid.store(roctracer::TRACE_ENTRY_COMPL, std::memory_order_release);
   }
 }
 
@@ -451,8 +448,6 @@ void mark_api_callback(
 
   const timestamp_t timestamp = timer->timestamp_fn_ns();
   hip_api_trace_entry_t* entry = hip_api_trace_buffer->GetEntry();
-  entry->valid = roctracer::TRACE_ENTRY_COMPL;
-  entry->type = 0;
   entry->cid = 0;
   entry->domain = domain;
   entry->begin = timestamp;
@@ -462,6 +457,7 @@ void mark_api_callback(
   entry->data = {};
   entry->name = strdup(name);
   entry->ptr = NULL;
+  entry->valid.store(roctracer::TRACE_ENTRY_COMPL, std::memory_order_release);
 }
 
 typedef std::map<uint64_t, const char*> hip_kernel_map_t;
@@ -567,17 +563,16 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
 // HSA API tracing
 
 struct hip_act_trace_entry_t {
-  uint32_t valid;
-  uint32_t type;
+  std::atomic<uint32_t> valid;
+  roctracer::entry_type_t type;
   uint32_t kind;
   timestamp_t dur;
   uint64_t correlation_id;
 };
 
 void hip_act_flush_cb(hip_act_trace_entry_t* entry);
-constexpr roctracer::TraceBuffer<hip_act_trace_entry_t>::flush_prm_t hip_act_flush_prm[1] = {{0, hip_act_flush_cb}};
+constexpr roctracer::TraceBuffer<hip_act_trace_entry_t>::flush_prm_t hip_act_flush_prm = {roctracer::DFLT_ENTRY_TYPE, hip_act_flush_cb};
 roctracer::TraceBuffer<hip_act_trace_entry_t>* hip_act_trace_buffer = NULL;
-//roctracer::TraceBuffer<hip_act_trace_entry_t> hip_act_trace_buffer("HIP ACT", 0x200000, hip_act_flush_prm, 1);
 
 // HIP ACT trace buffer flush callback
 void hip_act_flush_cb(hip_act_trace_entry_t* entry) {
@@ -616,11 +611,10 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
       case ACTIVITY_DOMAIN_HCC_OPS:
         if (hip_memcpy_stats != NULL) {
           hip_act_trace_entry_t* entry = hip_act_trace_buffer->GetEntry();
-          entry->valid = roctracer::TRACE_ENTRY_COMPL;
-          entry->type = 0;
           entry->kind = record->kind;
           entry->dur = record->end_ns - record->begin_ns;
           entry->correlation_id = record->correlation_id;
+          entry->valid.store(roctracer::TRACE_ENTRY_COMPL, std::memory_order_release);
         } else {
           fprintf(hcc_activity_file_handle, "%lu:%lu %d:%lu %s:%lu:%u\n",
             record->begin_ns, record->end_ns,
@@ -801,7 +795,6 @@ void tool_unload() {
   // Flush tracing pool
   close_tracing_pool();
   roctracer::TraceBufferBase::FlushAll();
-  hip_act_trace_buffer->Flush(true);
   close_file_handles();
 
   ONLOAD_TRACE_END();
@@ -1117,10 +1110,10 @@ extern "C" PUBLIC_API void OnUnload() {
 
 extern "C" CONSTRUCTOR_API void constructor() {
   ONLOAD_TRACE_BEG();
-  roctx_trace_buffer = new roctracer::TraceBuffer<roctx_trace_entry_t>("rocTX API", 0x200000, roctx_flush_prm, 1);
-  hip_api_trace_buffer = new roctracer::TraceBuffer<hip_api_trace_entry_t>("HIP API", 0x200000, hip_api_flush_prm, 1);
-  hip_act_trace_buffer = new roctracer::TraceBuffer<hip_act_trace_entry_t>("HIP ACT", 0x200000, hip_act_flush_prm, 1, 1);
-  hsa_api_trace_buffer = new roctracer::TraceBuffer<hsa_api_trace_entry_t>("HSA API", 0x200000, hsa_flush_prm, 1);
+  roctx_trace_buffer = new roctracer::TraceBuffer<roctx_trace_entry_t>("rocTX API", 0x200000, &roctx_flush_prm, 1);
+  hip_api_trace_buffer = new roctracer::TraceBuffer<hip_api_trace_entry_t>("HIP API", 0x200000, &hip_api_flush_prm, 1);
+  hip_act_trace_buffer = new roctracer::TraceBuffer<hip_act_trace_entry_t>("HIP ACT", 0x200000, &hip_act_flush_prm, 1, 1);
+  hsa_api_trace_buffer = new roctracer::TraceBuffer<hsa_api_trace_entry_t>("HSA API", 0x200000, &hsa_flush_prm, 1);
   roctracer_load();
   tool_load();
   ONLOAD_TRACE_END();
