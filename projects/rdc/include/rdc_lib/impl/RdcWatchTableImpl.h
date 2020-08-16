@@ -29,10 +29,12 @@ THE SOFTWARE.
 #include <memory>
 #include <mutex>  // NOLINT
 #include <atomic>
+#include <map>
 #include "rdc_lib/RdcWatchTable.h"
 #include "rdc_lib/RdcGroupSettings.h"
 #include "rdc_lib/RdcCacheManager.h"
 #include "rdc_lib/RdcMetricFetcher.h"
+#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace rdc {
@@ -50,6 +52,7 @@ struct JobWatchTableEntry {
     uint32_t group_id;
     std::vector<RdcFieldKey> fields;  //< store fields for faster query
 };
+
 
 class RdcWatchTableImpl : public RdcWatchTable {
  public:
@@ -103,6 +106,8 @@ class RdcWatchTableImpl : public RdcWatchTable {
     bool is_job_watch_field(uint32_t gpu_index, rdc_field_t field_id,
                                         std::string& job_id) const;  // NOLINT
 
+    rdc_status_t initialize_rsmi_handles(RdcFieldKey fk);
+
     RdcGroupSettingsPtr group_settings_;
     RdcCacheManagerPtr cache_mgr_;
     RdcMetricFetcherPtr metric_fetcher_;
@@ -122,7 +127,6 @@ class RdcWatchTableImpl : public RdcWatchTable {
 
     //!< The last clean up time
     std::atomic<uint64_t> last_cleanup_time_;
-
     std::mutex watch_mutex_;
 };
 

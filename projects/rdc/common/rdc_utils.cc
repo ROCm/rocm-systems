@@ -21,10 +21,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <sys/stat.h>
+#include <assert.h>
 
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 #include "common/rdc_utils.h"
 

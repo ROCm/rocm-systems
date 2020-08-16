@@ -49,6 +49,7 @@ class RdciDmonSubSystem: public RdciSubSystem {
         DMON_UNKNOWN = 0,
         DMON_HELP,
         DMON_LIST_FIELDS,
+        DMON_LIST_ALL_FIELDS,
         DMON_MONITOR
      } dmon_ops_;
 

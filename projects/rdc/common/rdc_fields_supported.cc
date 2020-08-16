@@ -28,14 +28,14 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-#define FLD_DESC_ENT(ID, DESC, LABEL)  \
-          {static_cast<uint32_t>(ID), {#ID, (DESC), (LABEL)}},
+#define FLD_DESC_ENT(ID, DESC, LABEL, DISPLAY)  \
+          {static_cast<uint32_t>(ID), {#ID, (DESC), (LABEL), (DISPLAY)}},
 static const fld_id2name_map_t field_id_to_descript = {
   #include "common/rdc_field_data.data"
 };
 #undef FLD_DESC_ENT
 
-#define FLD_DESC_ENT(ID, DESC, LABEL) {#ID, (ID)},
+#define FLD_DESC_ENT(ID, DESC, LABEL, DISPLAY) {#ID, (ID)},
 static fld_name2id_map_t field_name_to_id = {
   #include "common/rdc_field_data.data"  // NOLINT
 };

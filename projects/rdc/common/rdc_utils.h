@@ -24,8 +24,6 @@ THE SOFTWARE.
 #ifndef COMMON_RDC_UTILS_H_
 #define COMMON_RDC_UTILS_H_
 
-#include <grpcpp/grpcpp.h>
-
 #include <string>
 
 namespace amd {

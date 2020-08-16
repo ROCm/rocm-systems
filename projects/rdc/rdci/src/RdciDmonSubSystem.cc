@@ -60,15 +60,17 @@ void RdciDmonSubSystem::set_terminating(int sig) {
 
 void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
     const int HOST_OPTIONS = 1000;
+    const int LIST_ALL_FIELDS_OPT = 1001;
     const struct option long_options[] = {
-        {"host", required_argument, nullptr, HOST_OPTIONS },
-        {"help", optional_argument, nullptr, 'h' },
-        {"unauth", optional_argument, nullptr, 'u' },
-        {"list", optional_argument, nullptr, 'l' },
-        {"field-group-id", required_argument, nullptr, 'f' },
+        {"host", required_argument, nullptr, HOST_OPTIONS},
+        {"help", optional_argument, nullptr, 'h'},
+        {"unauth", optional_argument, nullptr, 'u'},
+        {"list", optional_argument, nullptr, 'l'},
+        {"list-all", optional_argument, nullptr, LIST_ALL_FIELDS_OPT},
+        {"field-group-id", required_argument, nullptr, 'f'},
         {"field-id", required_argument, nullptr, 'e' },
         {"gpu_index", required_argument, nullptr, 'i'},
-        {"group-id", required_argument, nullptr, 'g' },
+        {"group-id", required_argument, nullptr, 'g'},
         {"count", required_argument, nullptr, 'c'},
         {"delay", required_argument, nullptr, 'd'},
         { nullptr,  0 , nullptr, 0 }
@@ -132,6 +134,9 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
                 }
                 options_.insert({OPTIONS_DELAY, std::stoi(optarg)});
                 break;
+            case LIST_ALL_FIELDS_OPT:
+                dmon_ops_ = DMON_LIST_ALL_FIELDS;
+                break;
             default:
                 show_help();
                 throw RdcException(RDC_ST_BAD_PARAMETER,
@@ -139,7 +144,7 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
         }
     }
 
-    if (dmon_ops_ == DMON_LIST_FIELDS) {
+    if (dmon_ops_ == DMON_LIST_FIELDS || dmon_ops_ == DMON_LIST_ALL_FIELDS) {
         return;
     }
 
@@ -212,6 +217,11 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
 }
 
 void RdciDmonSubSystem::show_help() const {
+    // Try to keep total output line length to  <= 80 chars for better
+    // readability. For reference:
+    //            *********************** 60 Chars **************************
+    //            ************** 40 Chars ***************
+    //            ***** 20 Chars ****
     std::cout << " dmon -- Used to monitor GPUs and their stats.\n\n";
     std::cout << "Usage\n";
     std::cout << "    rdci dmon [--host <IP/FQDN>:port] [-u] -f <fieldGroupId>"
@@ -228,16 +238,26 @@ void RdciDmonSubSystem::show_help() const {
     std::cout << "  -g  --group-id                 The GPU group to query "
               << "on the specified host.\n";
     std::cout << "  -c  --count       count        Integer representing How"
-        << " many times to loop before exiting. [default = runs forever.]\n";
+              << " many times to loop\n"
+              << "                                 before exiting. [default "
+              << "= runs forever.]\n";
     std::cout << "  -e  --field-id    fieldIds     Comma-separated list "
-              << "of the field ids to monitor.\n";
+              << "of field ids to monitor.\n";
     std::cout << "  -i  --gpu_index   gpuIndexes   Comma-separated list "
-              << "of the GPU index to monitor.\n";
+              << "of GPU indexes to monitor.\n";
     std::cout << "  -d  --delay       delay        How often to query RDC "
-              << "in milli seconds. [default = 1000 msec, "
+              << "in milli seconds. \n"
+              << "                                 [default = 1000 msec, "
               << "Minimum value = 100 msec.]\n";
     std::cout << "  -l  --list                     List to look up the long "
-              << "names and descriptions of the field ids\n";
+              << "names and \n"
+              << "                                 descriptions of the field "
+              << "ids\n";
+    std::cout << "  --list-all                     Same as -l, except this "
+              << "lists all possible\n"
+              << "                                 fields, including "
+              << "those that are less \n"
+              << "                                 commonly used.\n";
 }
 
 void RdciDmonSubSystem::create_temp_group() {
@@ -295,8 +315,10 @@ void RdciDmonSubSystem::show_field_usage() const {
                                  amd::rdc::get_field_id_description_from_id();
   for (auto i = field_id_to_descript.begin();
                                        i != field_id_to_descript.end(); i++) {
-    std::cout << i->first << " " << i->second.enum_name << " : " <<
+    if (i->second.do_display || dmon_ops_ == DMON_LIST_ALL_FIELDS) {
+      std::cout << i->first << " " << i->second.enum_name << " : " <<
                                    i->second.description <<  "." << std::endl;
+    }
   }
   std::cout << std::endl;
   std::cout << "* Note: The field ID number associated with a field ID can "
@@ -312,7 +334,7 @@ void RdciDmonSubSystem::process() {
         return;
     }
 
-    if (dmon_ops_ == DMON_LIST_FIELDS) {
+    if (dmon_ops_ == DMON_LIST_FIELDS || dmon_ops_ == DMON_LIST_ALL_FIELDS) {
         show_field_usage();
         return;
     }

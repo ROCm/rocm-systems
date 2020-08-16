@@ -57,7 +57,16 @@ typedef enum {
      RDC_ST_CONFLICT,                 //!< Conflict with current state
      RDC_ST_CLIENT_ERROR,             //!< The RDC client error
      RDC_ST_ALREADY_EXIST,            //!< The item already exists
-     RDC_ST_MAX_LIMIT                 //!< Max limit recording for the object
+     RDC_ST_MAX_LIMIT,                //!< Max limit recording for the object
+     RDC_ST_INSUFF_RESOURCES,         //!< Not enough resources to complete
+                                      //!<  operation
+     RDC_ST_FILE_ERROR,               //!< Failed to access a file
+     RDC_ST_NO_DATA,                  //!< Data was requested,
+                                      //!<   but none was found
+     RDC_ST_PERM_ERROR,               //!< Insufficient permission to complete
+                                      //!<   operation
+
+     RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
 } rdc_status_t;
 
 /**
@@ -167,6 +176,45 @@ typedef enum {
    */
   RDC_FI_ECC_CORRECT_TOTAL = 600,    //!< Accumulated correctable ECC errors
   RDC_FI_ECC_UNCORRECT_TOTAL,        //!< Accumulated uncorrectable ECC errors
+
+  /*
+   * @brief Raw XGMI counter events
+   */
+  RDC_EVNT_XGMI_0_NOP_TX = 1000,     //!< NOPs sent to neighbor 0
+  RDC_EVNT_XGMI_0_REQ_TX,            //!< Outgoing requests to
+                                     //!< neighbor 0
+  RDC_EVNT_XGMI_0_RESP_TX,           //!< Outgoing responses to
+                                     //!< neighbor 0
+  /**
+   * @brief
+   *
+   * Data beats sent to neighbor 0; Each beat represents 32 bytes.<br><br>
+   *
+   * XGMI throughput can be calculated by multiplying a BEATs event
+   * such as ::RSMI_EVNT_XGMI_0_BEATS_TX by 32 and dividing by
+   * the time for which event collection occurred,
+   * ::rsmi_counter_value_t.time_running (which is in nanoseconds). To get
+   * bytes per second, multiply this value by 10<sup>9</sup>.<br>
+   * <br>
+   * Throughput = BEATS/time_running * 10<sup>9</sup>  (bytes/second)<br>
+   */
+  //  ie, Throughput = BEATS/time_running 10^9  bytes/sec
+  RDC_EVNT_XGMI_0_BEATS_TX,
+  RDC_EVNT_XGMI_1_NOP_TX,            //!< NOPs sent to neighbor 1
+  RDC_EVNT_XGMI_1_REQ_TX,            //!< Outgoing requests to
+                                     //!< neighbor 1
+  RDC_EVNT_XGMI_1_RESP_TX,           //!< Outgoing responses to
+                                     //!< neighbor 1
+  RDC_EVNT_XGMI_1_BEATS_TX,          //!< Data beats sent to
+                                     //!< neighbor 1; Each beat
+                                     //!< represnts 32 bytes
+
+  // "Composite" events. These events have additional processing beyond
+  // the value provided by the rocm_smi library.
+  RDC_EVNT_XGMI_0_THRPUT = 1500,     //!< Transmit throughput to XGMI
+                                     //!< neighbor 0 in byes/sec
+  RDC_EVNT_XGMI_1_THRPUT,            //!< Transmit throughput to XGMI
+                                     //!< neighbor 1 in byes/sec
 } rdc_field_t;
 
 /**

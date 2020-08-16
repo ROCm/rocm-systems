@@ -23,6 +23,7 @@ THE SOFTWARE.
 #define COMMON_RDC_FIELDS_SUPPORTED_H_
 
 #include <string>
+#include <map>
 #include <unordered_map>
 
 #include "rdc/rdc.h"
@@ -34,9 +35,10 @@ typedef struct {
     std::string enum_name;
     std::string description;
     std::string label;
+    bool do_display;
 } field_id_descript;
 
-typedef const std::unordered_map<uint32_t, const field_id_descript>
+typedef const std::map<uint32_t, const field_id_descript>
                                                        fld_id2name_map_t;
 typedef std::unordered_map<std::string, uint32_t> fld_name2id_map_t;
 

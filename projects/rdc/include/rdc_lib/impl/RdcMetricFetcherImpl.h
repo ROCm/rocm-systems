@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include <queue>
 #include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/rdc_common.h"
+#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace rdc {
@@ -41,6 +42,21 @@ struct MetricValue {
     rdc_field_value value;
 };
 
+// This union represents any RSMI handles require initialization and/or
+// shut down. There should only be one instance of this for each raw event
+// used. For example, if a field group includes a pseudo-event and the
+// underlying raw event, then only one FieldRSMIData should be created,
+// and it should be used by both events.
+struct FieldRSMIData {
+    union {
+        rsmi_event_handle_t evt_handle;
+    };
+    union {
+        rsmi_counter_value_t counter_val;
+    };
+    ~FieldRSMIData(){}
+    FieldRSMIData() : evt_handle(0), counter_val{0, 0, 0}{}
+};
 
 //!< The data structure to store the async fetch task
 class RdcMetricFetcherImpl;
@@ -55,7 +71,13 @@ class RdcMetricFetcherImpl: public RdcMetricFetcher {
         rdc_field_t field_id, rdc_field_value* value) override;
     RdcMetricFetcherImpl();
     ~RdcMetricFetcherImpl();
+
+    rdc_status_t acquire_rsmi_handle(RdcFieldKey fk) override;
+    rdc_status_t delete_rsmi_handle(RdcFieldKey fk) override;
+
  private:
+    std::shared_ptr<FieldRSMIData> get_rsmi_data(RdcFieldKey key);
+
     uint64_t now();
     void get_ecc_error(uint32_t gpu_index,
         rdc_field_t field_id, rdc_field_value* value);
@@ -67,12 +89,15 @@ class RdcMetricFetcherImpl: public RdcMetricFetcher {
 
     //!< Async metric retreive
     std::map<RdcFieldKey, MetricValue> async_metrics_;
+    std::map<RdcFieldKey, std::shared_ptr<FieldRSMIData>> rsmi_data_;
     std::queue<MetricTask> updated_tasks_;
     std::mutex task_mutex_;
     std::future<void> updater_;  // keep the future of updater
     std::condition_variable cv_;
     std::atomic<bool> task_started_;
 };
+
+rdc_status_t Rsmi2RdcError(rsmi_status_t rsmi);
 
 }  // namespace rdc
 }  // namespace amd

@@ -346,6 +346,16 @@ const char* rdc_status_string(rdc_status_t result) {
                 return "The value already exists";
         case RDC_ST_CLIENT_ERROR:
                 return "RDC Client error";
+        case RDC_ST_INSUFF_RESOURCES:
+                return "Not enough resources to complete operation";
+        case RDC_ST_FILE_ERROR:
+                return "Failed to access a file";
+        case RDC_ST_NO_DATA:
+                return "Data was requested, but none was found";
+        case RDC_ST_PERM_ERROR:
+                return "Insufficient permission to complete operation";
+        case RDC_ST_UNKNOWN_ERROR:
+                return "Unknown error";
         default:
                 return "Unknown";
     }

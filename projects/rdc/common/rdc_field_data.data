@@ -19,21 +19,41 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-FLD_DESC_ENT(RDC_FI_INVALID, "Unknown/Invalid field", "INVALID")
-FLD_DESC_ENT(RDC_FI_GPU_COUNT, "GPU count in the system", "GPU_COUNT")
-FLD_DESC_ENT(RDC_FI_DEV_NAME, "Name of the device", "DEV_NAME")
-FLD_DESC_ENT(RDC_FI_GPU_CLOCK, "Current GPU clock frequencies.", "GPU_CLOCK")
-FLD_DESC_ENT(RDC_FI_MEM_CLOCK, "Current Memory clock frequencies.", "MEM_CLOCK")
-FLD_DESC_ENT(RDC_FI_MEMORY_TEMP, "Memory temperature in millidegrees Celsius.", "MEMORY_TEMP")
-FLD_DESC_ENT(RDC_FI_GPU_TEMP, "GPU temperature in millidegrees Celsius.", "GPU_TEMP")
-FLD_DESC_ENT(RDC_FI_POWER_USAGE, "Power usage in microwatts.", "POWER_USAGE")
-FLD_DESC_ENT(RDC_FI_PCIE_TX, "PCIe Tx utilization in bytes/second.", "PCIE_TX")
-FLD_DESC_ENT(RDC_FI_PCIE_RX, "PCIe Rx utilization in bytes/second.", "PCIE_RX")
-FLD_DESC_ENT(RDC_FI_GPU_UTIL, "GPU busy percentage.", "GPU_UTIL")
-FLD_DESC_ENT(RDC_FI_GPU_MEMORY_USAGE,
-                                 "Memory usage of the GPU instance in bytes.", "GPU_MEMORY_USAGE")
-FLD_DESC_ENT(RDC_FI_GPU_MEMORY_TOTAL, "Total memory of the GPU instance", "GPU_MEMORY_TOTAL")
-FLD_DESC_ENT(RDC_FI_ECC_CORRECT_TOTAL, "Accumulated correctable ECC errors.", "ECC_CORRECT")
-FLD_DESC_ENT(RDC_FI_ECC_UNCORRECT_TOTAL,
-                                      "Accumulated uncorrectable ECC errors.", "ECC_UNCORRECT")
+
+// Description Fields:
+//   Arg #   Type              Meaning
+//  -------------------------------------------------
+//   1       rdc_field_t       enum of field
+//   2       string            description of enum
+//   3       string            rdci display label
+//   4       bool              do or do not display in rdci
+//           rdc_field_t                 Description                                    rdci label          To Display
+//           ===========                 ===========                                    =========           ==========
+FLD_DESC_ENT(RDC_FI_INVALID,             "Unknown/Invalid field",                       "INVALID",          true)
+FLD_DESC_ENT(RDC_FI_GPU_COUNT,           "GPU count in the system",                     "GPU_COUNT",        true)
+FLD_DESC_ENT(RDC_FI_DEV_NAME,            "Name of the device",                          "DEV_NAME",         true)
+FLD_DESC_ENT(RDC_FI_GPU_CLOCK,           "Current GPU clock frequencies.",              "GPU_CLOCK",        true)
+FLD_DESC_ENT(RDC_FI_MEM_CLOCK,           "Current Memory clock frequencies.",           "MEM_CLOCK",        true)
+FLD_DESC_ENT(RDC_FI_MEMORY_TEMP,         "Memory temperature in millidegrees Celsius.", "MEMORY_TEMP",      true)
+FLD_DESC_ENT(RDC_FI_GPU_TEMP,            "GPU temperature in millidegrees Celsius.",    "GPU_TEMP",         true)
+FLD_DESC_ENT(RDC_FI_POWER_USAGE,         "Power usage in microwatts.",                  "POWER_USAGE",      true)
+FLD_DESC_ENT(RDC_FI_PCIE_TX,             "PCIe Tx utilization in bytes/second.",        "PCIE_TX",          true)
+FLD_DESC_ENT(RDC_FI_PCIE_RX,             "PCIe Rx utilization in bytes/second.",        "PCIE_RX",          true)
+FLD_DESC_ENT(RDC_FI_GPU_UTIL,            "GPU busy percentage.",                        "GPU_UTIL",         true)
+FLD_DESC_ENT(RDC_FI_GPU_MEMORY_USAGE,    "Memory usage of the GPU instance in bytes.",  "GPU_MEMORY_USAGE", true)
+FLD_DESC_ENT(RDC_FI_GPU_MEMORY_TOTAL,    "Total memory of the GPU instance",            "GPU_MEMORY_TOTAL", true)
+FLD_DESC_ENT(RDC_FI_ECC_CORRECT_TOTAL,   "Accumulated correctable ECC errors.",         "ECC_CORRECT",      true)
+FLD_DESC_ENT(RDC_FI_ECC_UNCORRECT_TOTAL, "Accumulated uncorrectable ECC errors.",       "ECC_UNCORRECT",    true)
+
+FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_0_REQ_TX,     "Outgoing requests to neighbor 0",             "XGMI_REQ_0",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_0_RESP_TX,    "Outgoing responses to neighbor 0",            "XGMI_RES_0",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_0_BEATS_TX,   "Data sent to neighbor 0 (32 byte pkts)",      "XGMI_BTS_0",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_1_NOP_TX,     "NOPs sent to neighbor 1",                     "XGMI_NOP_1",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_1_REQ_TX,     "Outgoing requests to neighbor 1",             "XGMI_REQ_1",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_1_RESP_TX,    "Outgoing responses to neighbor 1",            "XGMI_RES_1",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_1_BEATS_TX,   "Data sent to neighbor 1 (32 byte pkts)",      "XGMI_BTS_1",       false)
+
+FLD_DESC_ENT(RDC_EVNT_XGMI_0_THRPUT,     "Tx throughput to XGMI neighbor 0 in b/s",     "XGMI_0_T",         true)
+FLD_DESC_ENT(RDC_EVNT_XGMI_1_THRPUT,     "Tx throughput to XGMI neighbor 1 in b/s",     "XGMI_1_T",         true)
 

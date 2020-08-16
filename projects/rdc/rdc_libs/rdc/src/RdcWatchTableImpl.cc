@@ -20,13 +20,18 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include "rdc_lib/impl/RdcWatchTableImpl.h"
 #include <sys/time.h>
 #include <ctime>
 #include <sstream>
 #include <algorithm>
+#include <map>
+#include <unordered_map>
+#include "rdc_lib/impl/RdcWatchTableImpl.h"
+#include "rdc_lib/impl/RdcMetricFetcherImpl.h"
 #include "rdc_lib/rdc_common.h"
+#include "common/rdc_utils.h"
 #include "rdc_lib/RdcLogger.h"
+#include "rdc/rdc.h"
 
 namespace amd {
 namespace rdc {
@@ -171,7 +176,6 @@ rdc_status_t RdcWatchTableImpl::get_fields_from_group(rdc_gpu_group_t group_id,
     return RDC_ST_OK;
 }
 
-
 rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id, uint64_t update_freq,
         double  max_keep_age, uint32_t max_keep_samples) {
@@ -207,6 +211,7 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
 
     // Update the fields_to_watch_
     auto f_in_watch_iter = fields_in_watch.begin();
+
     for (; f_in_watch_iter != fields_in_watch.end(); f_in_watch_iter++) {
        auto ite = fields_to_watch_.find(*f_in_watch_iter);
        if (ite == fields_to_watch_.end()) {  // A new field
@@ -224,6 +229,10 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
               f_in_table.is_watching = true;
               f_in_table.update_freq = update_freq;
           }
+       }
+       result = metric_fetcher_->acquire_rsmi_handle(*f_in_watch_iter);
+       if (result != RDC_ST_OK && result != RDC_ST_ALREADY_EXIST) {
+         return result;
        }
     }
 
@@ -293,6 +302,15 @@ rdc_status_t RdcWatchTableImpl::update_field_in_table_when_unwatch(
          } else {
              f_in_table->second.update_freq = freq_iter->second;
          }
+    }
+
+    fite = fields.begin();
+    for (; fite != fields.end(); fite++) {
+      result = metric_fetcher_->delete_rsmi_handle(*fite);
+
+      if (result != RDC_ST_OK && result != RDC_ST_NOT_SUPPORTED) {
+          return result;
+      }
     }
 
     return RDC_ST_OK;
