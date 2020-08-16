@@ -195,7 +195,7 @@ if (DOXYGEN_FOUND AND LATEX_FOUND)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
    DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/docs/${RDC_MANUAL_NAME}.pdf
                 COMPONENT ${CLIENT_COMPONENT})
-  install(FILES ${PROJECT_SOURCE_DIR}/docs/README.md
+  install(FILES ${PROJECT_SOURCE_DIR}/README.md
                        DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/docs/
                           COMPONENT ${CLIENT_COMPONENT})
 else()
