@@ -124,13 +124,13 @@ class MemManager:
     select_expr = '"Index" = ' + str(recordid) + ' AND "proc-id" = ' + str(procid)
 
     # hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind)
-    hipMemcpy_ptrn = re.compile(r'\(dst\((.*)\) src\((.*)\) sizeBytes\((\d+)\).*\)')
+    hipMemcpy_ptrn = re.compile(r'\(\s*dst\((.*)\) src\((.*)\) sizeBytes\((\d+)\).*\)')
     # hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
     #                   size_t height, hipMemcpyKind kind);
-    hipMemcpy_ptrn2 = re.compile(r'\(dst\((.*)\) .* src\((.*)\) .* width\((\d+)\) height\((\d+)\).*\)')
+    hipMemcpy_ptrn2 = re.compile(r'\(\s*dst\((.*)\) .* src\((.*)\) .* width\((\d+)\) height\((\d+)\).*\)')
     # hipMemcpyToArray(hipArray* dst, size_t wOffset, size_t hOffset, const void* src,
     #                        size_t count, hipMemcpyKind kind);
-    hipMemcpy_ptrn3 = re.compile(r'\(dst\((.*)\) .* src\((.*)\) count\((\d+)\).*\)')
+    hipMemcpy_ptrn3 = re.compile(r'\(\s*dst\((.*)\) .* src\((.*)\) count\((\d+)\).*\)')
     # memcopy with kind argument
     hipMemcpy_ptrn_kind = re.compile(r'.* kind\((\d+)\)\s*.*')
     # aysnc memcopy
@@ -163,34 +163,39 @@ class MemManager:
       '4': "auto",
     }
 
-    if m_basic or m_2d or m_array:
-      if m_basic:
-        dstptr = m_basic.group(1)
-        dstptr_type = self.get_ptr_type(dstptr)
-        srcptr = m_basic.group(2)
-        srcptr_type = self.get_ptr_type(srcptr)
-        size = int(m_basic.group(3))
-      if m_array:
-        dstptr = m_array.group(1)
-        dstptr_type = self.get_ptr_type(dstptr)
-        srcptr = m_array.group(2)
-        srcptr_type = self.get_ptr_type(srcptr)
-        size = m_array.group(3)
-      if m_2d:
-        dstptr = m_2d.group(1)
-        dstptr_type = self.get_ptr_type(dstptr)
-        srcptr = m_2d.group(2)
-        srcptr_type = self.get_ptr_type(srcptr)
-        size = m_2d.group(3)*m_2d.group(4)
+    condition_matched = False
+    if m_basic:
+      dstptr = m_basic.group(1)
+      dstptr_type = self.get_ptr_type(dstptr)
+      srcptr = m_basic.group(2)
+      srcptr_type = self.get_ptr_type(srcptr)
+      size = int(m_basic.group(3))
+      condition_matched = True
+    if m_array:
+      dstptr = m_array.group(1)
+      dstptr_type = self.get_ptr_type(dstptr)
+      srcptr = m_array.group(2)
+      srcptr_type = self.get_ptr_type(srcptr)
+      size = m_array.group(3)
+      condition_matched = True
+    if m_2d:
+      dstptr = m_2d.group(1)
+      dstptr_type = self.get_ptr_type(dstptr)
+      srcptr = m_2d.group(2)
+      srcptr_type = self.get_ptr_type(srcptr)
+      size = m_2d.group(3)*m_2d.group(4)
+      condition_matched = True
 
-      duration = (int(end_time) - int(start_time)) if not is_async else (int(async_copy_end_time) - int(async_copy_start_time))
-      bandwidth = float(size) * 1000 / duration
+    if not condition_matched: fatal('Memcpy args \"' + args + '\" cannot be identified')
 
-      m = hipMemcpy_ptrn_kind.match(args)
-      if m:
-        direction = switcher.get(m.group(1), "unknown")
+    duration = (int(end_time) - int(start_time)) if not is_async else (int(async_copy_end_time) - int(async_copy_start_time))
+    bandwidth = float(size) * 1000 / duration
 
-      copy_line = str(start_time) + DELIM + str(end_time) + DELIM + pid + DELIM + tid + DELIM + event + DELIM + 'Direction=' + direction + DELIM + 'SrcType=' + srcptr_type + DELIM + 'DstType=' + dstptr_type + DELIM + "Size=" + str(size) + DELIM + "BW=" + str(round(bandwidth, 2)) + DELIM + 'Async=' + str(is_async)
+    m = hipMemcpy_ptrn_kind.match(args)
+    if m:
+      direction = switcher.get(m.group(1), "unknown")
+
+    copy_line = str(start_time) + DELIM + str(end_time) + DELIM + pid + DELIM + tid + DELIM + event + DELIM + 'Direction=' + direction + DELIM + 'SrcType=' + srcptr_type + DELIM + 'DstType=' + dstptr_type + DELIM + "Size=" + str(size) + DELIM + "BW=" + str(round(bandwidth, 2)) + DELIM + 'Async=' + str(is_async)
 
     self.memcopies[recordid] = copy_line
     return copy_line;
