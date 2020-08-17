@@ -2,6 +2,9 @@ declare -A FILTER
 
 # FILTER is meant to be used with a negative gtest filter
 
+# Designate the tests to be excluded from all test runs first,
+# followed by tests that should be excluded by device.
+
 # Permanent exclusions
 # These tests are included for debugging, but are not executed in normal
 # execution on any ASIC:
@@ -19,19 +22,17 @@ else
     "$TEMPORARY_BLACKLIST_ALL_ASICS"
 fi
 
-# ASIC specific blacklists
+# Device specific blacklists
 FILTER[vega10]=\
 $BLACKLIST_ALL_ASICS
 
-# SWDEV-207510 rsmitstReadOnly.TestFrequenciesRead .TestProcInfoRead tests
-# error on mi50, mi100
+# SWDEV-207510
 FILTER[vega20]=\
 $BLACKLIST_ALL_ASICS\
 "rsmitstReadOnly.TestFrequenciesRead:"\
 "rsmitstReadOnly.TestProcInfoRead"
 
-# SWDEV-207510 rsmitstReadOnly.TestFrequenciesRead .TestProcInfoRead tests
-# error on mi50, mi100
+# SWDEV-207510
 FILTER[arcturus]=\
 $BLACKLIST_ALL_ASICS\
 "rsmitstReadOnly.TestFrequenciesRead:"\
