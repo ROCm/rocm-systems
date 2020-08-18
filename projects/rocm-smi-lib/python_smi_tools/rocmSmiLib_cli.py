@@ -699,6 +699,25 @@ def setClocks(deviceList, clktype, clk):
     printLogSpacer()
 
 
+def resetGpu(device):
+    """ Perform a GPU reset on the specified device
+
+    Parameters:
+    device -- DRM Device identifier
+    """
+    global RETCODE
+    if  len(device) > 1:
+        logging.error('GPU Reset can only be performed on one GPU per call')
+        RETCODE = 1
+        return
+    debugprefix = '/sys/kernel/debug/dri'
+    filePath = os.path.join(debugprefix, str(device[0]), 'amdgpu_gpu_recover')
+    with open(filePath, 'r') as fileContents:
+            fileValue = fileContents.read()
+            printLog(device[0], 'GPU[%s]\t: Reset was successful' % str(device[0]),None)
+    printLogSpacer()
+
+
 def setFanSpeed(deviceList, fan):
     """ Set fan speed for a list of devices.
 
@@ -2284,6 +2303,15 @@ if __name__ == '__main__':
             args.showclkfrq = True
             args.showclkvolt = True
 
+    # Don't do reset in combination with any other command
+    if args.gpureset:
+        if not args.device:
+            logging.error('No device specified. One device must be specified for GPU reset')
+            sys.exit(1)
+        logging.debug('Only executing GPU reset, no other commands will be executed')
+        resetGpu(deviceList)
+        sys.exit(RETCODE)
+
     if not checkAmdGpus(deviceList):
         logging.warning('No AMD GPUs specified')
 
@@ -2399,9 +2427,6 @@ if __name__ == '__main__':
         pass
         # TODO: setPowerPlayTableLevel(deviceList, \'mclk\', args.setmlevel, args.autorespond)
     # Don't do reset in combination with any other command
-    if args.gpureset:
-        pass
-        # TODO: resetGpu(deviceList)
     if args.resetfans:
         resetFans(deviceList)
     if args.setfan:
