@@ -461,7 +461,8 @@ class rsmi_error_count_t(Structure):
 class rsmi_process_info_t(Structure):
     _fields_ = [('process_id', c_uint32),
                 ('pasid', c_uint32),
-                ('vram_usage', c_uint64)]
+                ('vram_usage', c_uint64),
+                ('sdma_usage', c_uint64)]
 
 
 class rsmi_func_id_iter_handle(Structure):
