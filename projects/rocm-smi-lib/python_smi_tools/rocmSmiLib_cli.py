@@ -1718,6 +1718,7 @@ def showWeightTopology(deviceList):
         for destdevice in deviceList:
             if (srcdevice == destdevice):
                 gpu_links_weight[srcdevice][destdevice] = 0
+                continue
             ret = rocmsmi.rsmi_topo_get_link_weight(srcdevice, destdevice, byref(weight))
             if rsmi_ret_ok(ret):
                 gpu_links_weight[srcdevice][destdevice] = weight
@@ -1754,6 +1755,7 @@ def showHopsTopology(deviceList):
         for destdevice in deviceList:
             if (srcdevice == destdevice):
                 gpu_links_hops[srcdevice][destdevice] = '0'
+                continue
             ret = rocmsmi.rsmi_topo_get_link_type(srcdevice, destdevice, byref(hops), byref(linktype))
             if rsmi_ret_ok(ret):
                 gpu_links_hops[srcdevice][destdevice] = hops
@@ -1790,6 +1792,7 @@ def showTypeTopology(deviceList):
         for destdevice in deviceList:
             if (srcdevice == destdevice):
                 gpu_links_type[srcdevice][destdevice] = '0'
+                continue
             ret = rocmsmi.rsmi_topo_get_link_type(srcdevice, destdevice, byref(hops), byref(linktype))
             if rsmi_ret_ok(ret):
                 if (linktype.value == 1):
