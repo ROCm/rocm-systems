@@ -135,8 +135,14 @@ add_custom_target ( so-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 
 # Install header and library
 install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${DEST_NAME}/lib )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h DESTINATION ${DEST_NAME}/include )
-install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h DESTINATION include/${DEST_NAME} )
+install ( FILES
+          ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h
+          ${CMAKE_CURRENT_SOURCE_DIR}/src/core/activity.h
+          DESTINATION ${DEST_NAME}/include )
+install ( FILES
+          ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h
+          ${CMAKE_CURRENT_SOURCE_DIR}/src/core/activity.h
+          DESTINATION include/${DEST_NAME} )
 # rpl_run.sh tblextr.py txt2xml.sh
 install ( FILES
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/rpl_run.sh

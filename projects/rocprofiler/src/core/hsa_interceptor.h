@@ -51,7 +51,8 @@ SOFTWARE.
     (ID == ROCPROFILER_HSA_CB_ID_DEVICE) ? callbacks_.device: \
     (ID == ROCPROFILER_HSA_CB_ID_MEMCOPY) ? callbacks_.memcopy: \
     (ID == ROCPROFILER_HSA_CB_ID_SUBMIT) ? callbacks_.submit: \
-                                            callbacks_.ksymbol; \
+    (ID == ROCPROFILER_HSA_CB_ID_KSYMBOL) ? callbacks_.ksymbol: \
+                                            callbacks_.codeobj; \
   if ((__callback != NULL) && (recursion_ == false))
 
 #define DO_HSA_CALLBACK \
@@ -230,12 +231,12 @@ class HsaInterceptor {
         rocprofiler_hsa_callback_data_t data{};
         data.allocate.ptr = *ptr;
         data.allocate.size = size;
-  
+
         HSA_RT(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &data.allocate.segment));
         HSA_RT(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &data.allocate.global_flag));
-  
+
         DO_HSA_CALLBACK;
-  
+
         IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_DEVICE) {
           // Scan the pool assigned devices
           agent_callback_data_t callback_data{pool, *ptr};
@@ -303,44 +304,116 @@ class HsaInterceptor {
     void* arg)
   {
     const int free_flag = reinterpret_cast<long>(arg);
-    rocprofiler_hsa_callback_data_t data{};
+    hsa_ven_amd_loader_code_object_storage_type_t storage_type =
+      HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE;
+    int storage_fd = -1;
+    uint64_t memory_base = 0;
+    uint64_t memory_size = 0;
+    uint64_t load_base = 0;
+    uint64_t load_size = 0;
+    uint64_t load_delta = 0;
+    uint32_t uri_len = 0;
+    char* uri_str = NULL;
+
+    HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
+      loaded_code_object,
+      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_TYPE,
+      &storage_type));
+
+    if (storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_FILE) {
+      HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
+        loaded_code_object,
+        HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_FILE,
+        &storage_fd));
+      if (storage_fd == -1) {
+        printf("CodeObjectCallback: fd == -1\n"); fflush(stdout);
+	abort();
+      }
+    } else if (storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY) {
+      HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
+        loaded_code_object,
+        HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_BASE,
+        &memory_base));
+      HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
+        loaded_code_object,
+        HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE,
+        &memory_size));
+    }
 
     HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
       loaded_code_object,
       HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE,
-      &data.allocate.ptr));
+      &load_base));
+    HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
+      loaded_code_object,
+      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE,
+      &load_size));
+    HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
+      loaded_code_object,
+      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA,
+      &load_delta));
 
-    if (free_flag == 0) {
-      HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
-        loaded_code_object,
-        HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE,
-        &data.allocate.size));
-    } else {
-      data.allocate.size = 0;
+    // Getting URI
+    HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
+      loaded_code_object,
+      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI_LENGTH,
+      &uri_len));
+
+    uri_str = (char*)calloc(uri_len + 1, sizeof(char));
+    if (!uri_str) EXC_ABORT(HSA_STATUS_ERROR, "URI allocation");
+
+    HSA_RT(LoaderApiTable.hsa_ven_amd_loader_loaded_code_object_get_info(
+      loaded_code_object,
+      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI,
+      uri_str));
+
+    if (storage_type != HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE) {
+      IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_CODEOBJ) {
+        rocprofiler_hsa_callback_data_t data{};
+        data.codeobj.storage_type = storage_type;
+        data.codeobj.storage_file = storage_fd;
+        data.codeobj.memory_base = memory_base;
+        data.codeobj.memory_size = memory_size;
+        data.codeobj.load_base = load_base;
+        data.codeobj.load_size = load_size;
+        data.codeobj.load_delta = load_delta;
+	data.codeobj.uri_length = uri_len;
+	data.codeobj.uri = uri_str;
+        data.codeobj.unload = free_flag;
+
+        DO_HSA_CALLBACK;
+      }
     }
 
-    // Local GPU memory
-    // GLOBAL; FLAGS: COARSE GRAINED
-    data.allocate.segment = HSA_AMD_SEGMENT_GLOBAL;
-    data.allocate.global_flag = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
-    data.allocate.is_code = 1;
+    {
+      IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE) {
+        // Local GPU memory
+        // GLOBAL; FLAGS: COARSE GRAINED
+        rocprofiler_hsa_callback_data_t data{};
+        data.allocate.ptr = reinterpret_cast<void*>(load_base);
+        data.allocate.size = (free_flag == 0) ? load_size : 0;
+        data.allocate.segment = HSA_AMD_SEGMENT_GLOBAL;
+        data.allocate.global_flag = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED;
+        data.allocate.is_code = 1;
 
-    ISSUE_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE);
+        DO_HSA_CALLBACK;
+      }
+    }
 
-    if (free_flag == 0) {
+    if (free_flag != 0) {
       IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_DEVICE) {
         hsa_amd_pointer_info_t pointer_info{};
         uint32_t num_agents = 0;
         hsa_agent_t* agents = NULL;
         pointer_info.size = sizeof(hsa_amd_pointer_info_t);
         HSA_RT(hsa_amd_pointer_info(
-          const_cast<void*>(data.allocate.ptr),
+          reinterpret_cast<void*>(load_base),
           &pointer_info,
           malloc,
           &num_agents,
           &agents));
-  
-        DeviceCallback(num_agents, agents, data.allocate.ptr);
+
+        DeviceCallback(num_agents, agents, reinterpret_cast<void*>(load_base));
       }
     }
 
@@ -372,7 +445,7 @@ class HsaInterceptor {
       data.ksymbol.object = obj;
       data.ksymbol.name = name;
       data.ksymbol.name_length = len;
-      data.ksymbol.destroy = free_flag;
+      data.ksymbol.unload = free_flag;
 
       ISSUE_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_KSYMBOL);
     }
@@ -388,20 +461,21 @@ class HsaInterceptor {
 
     HSA_RT(hsa_executable_freeze_fn(executable, options));
 
-    IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE) {
+    IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_KSYMBOL) {
+      HSA_RT(hsa_executable_iterate_symbols(
+        executable,
+        KernelSymbolCallback,
+        reinterpret_cast<void*>(0)));
+    }
+
+    unsigned is_codeobj_cb = 0;
+    { IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_CODEOBJ) is_codeobj_cb |= 1; }
+    { IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE) is_codeobj_cb |= 1; }
+    if (is_codeobj_cb) {
       LoaderApiTable.hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
         executable,
         CodeObjectCallback,
         reinterpret_cast<void*>(0));
-    }
-
-    {
-      IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_KSYMBOL) {
-        HSA_RT(hsa_executable_iterate_symbols(
-          executable,
-          KernelSymbolCallback,
-          reinterpret_cast<void*>(0)));
-      }
     }
 
     return status;

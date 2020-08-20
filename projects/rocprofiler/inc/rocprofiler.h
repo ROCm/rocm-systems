@@ -74,6 +74,7 @@ typedef struct {
   uint32_t hsa_intercepting;
   uint32_t k_concurrent;
   uint32_t opt_mode;
+  uint32_t obj_dumping;
 } rocprofiler_settings_t;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -481,7 +482,8 @@ typedef enum {
   ROCPROFILER_HSA_CB_ID_DEVICE = 1,   // Device assign callback
   ROCPROFILER_HSA_CB_ID_MEMCOPY = 2,  // Memcopy callback
   ROCPROFILER_HSA_CB_ID_SUBMIT = 3,   // Packet submit callback
-  ROCPROFILER_HSA_CB_ID_KSYMBOL = 4   // Loading/unloading of kernel symbol
+  ROCPROFILER_HSA_CB_ID_KSYMBOL = 4,  // Loading/unloading of kernel symbol
+  ROCPROFILER_HSA_CB_ID_CODEOBJ = 5   // Loading/unloading of kernel symbol
 } rocprofiler_hsa_cb_id_t;
 
 // HSA callback data type
@@ -516,8 +518,20 @@ typedef struct {
       uint64_t object;                                // kernel symbol object
       const char* name;                               // kernel symbol name
       uint32_t name_length;                           // kernel symbol name length
-      int destroy;                                    // symbol executable destroy
+      int unload;                                     // symbol executable destroy
     } ksymbol;
+    struct {
+      uint32_t storage_type;                          // code object storage type
+      int storage_file;                               // origin file descriptor
+      uint64_t memory_base;                           // origin memory base
+      uint64_t memory_size;                           // origin memory size
+      uint64_t load_base;                             // codeobj load base
+      uint64_t load_size;                             // codeobj load size
+      uint64_t load_delta;                            // codeobj load size
+      uint32_t uri_length;                            // URI string length
+      char* uri;                                      // URI string
+      int unload;                                     // unload flag
+    } codeobj;
   };
 } rocprofiler_hsa_callback_data_t;
 
@@ -534,6 +548,7 @@ typedef struct {
   rocprofiler_hsa_callback_fun_t memcopy; // memory copy callback
   rocprofiler_hsa_callback_fun_t submit; // packet submit callback
   rocprofiler_hsa_callback_fun_t ksymbol; // kernel symbol callback
+  rocprofiler_hsa_callback_fun_t codeobj; // codeobject load/unload callback
 } rocprofiler_hsa_callbacks_t;
 
 // Set callbacks. If the callback is NULL then it is disabled.

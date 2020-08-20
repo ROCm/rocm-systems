@@ -87,6 +87,7 @@ struct kernel_properties_t {
   uint32_t sgpr_count;
   uint32_t fbarrier_count;
   hsa_signal_t signal;
+  uint64_t object;
 };
 
 // Context stored entry type
@@ -524,7 +525,7 @@ bool dump_context_entry(context_entry_t* entry, bool to_clean = true) {
     const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
     const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(entry->agent);
 
-    fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), pid(%u), tid(%u), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), sig(0x%lx), kernel-name(\"%s\")",
+    fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), pid(%u), tid(%u), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), sig(0x%lx), obj(0x%lx), kernel-name(\"%s\")",
       index,
       agent_info->dev_index,
       entry->data.queue_id,
@@ -539,6 +540,7 @@ bool dump_context_entry(context_entry_t* entry, bool to_clean = true) {
       (entry->kernel_properties.sgpr_count + agent_info->sgpr_block_dflt) * agent_info->sgpr_block_size,
       entry->kernel_properties.fbarrier_count,
       entry->kernel_properties.signal.handle,
+      entry->kernel_properties.object,
       nik_name.c_str());
     if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
       record->dispatch,
@@ -780,6 +782,7 @@ void set_kernel_properties(const rocprofiler_callback_data_t* callback_data,
   kernel_properties_ptr->sgpr_count = AMD_HSA_BITS_GET(kernel_code->compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT);
   kernel_properties_ptr->fbarrier_count = kernel_code->workgroup_fbarrier_count;
   kernel_properties_ptr->signal = callback_data->completion_signal;
+  kernel_properties_ptr->object = callback_data->packet->kernel_object;
 }
 
 // Kernel disoatch callback
@@ -1113,6 +1116,7 @@ rocprofiler_hsa_callbacks_t hsa_callbacks {
   hsa_unified_callback,
   hsa_unified_callback,
   hsa_unified_callback,
+  NULL,
   NULL
 };
 
@@ -1121,7 +1125,86 @@ hsa_status_t hsa_ksymbol_cb(rocprofiler_hsa_cb_id_t id,
                     const rocprofiler_hsa_callback_data_t* data,
                     void* arg)
 {
-  HsaRsrcFactory::SetKernelNameRef(data->ksymbol.object, data->ksymbol.name, data->ksymbol.destroy);
+  HsaRsrcFactory::SetKernelNameRef(data->ksymbol.object, data->ksymbol.name, data->ksymbol.unload);
+  return HSA_STATUS_SUCCESS;
+}
+
+// code object callback
+hsa_status_t codeobj_callback(
+  rocprofiler_hsa_cb_id_t id,
+  const rocprofiler_hsa_callback_data_t* data,
+  void* arg)
+{
+  static std::atomic<uint64_t> codeobj_counter{};
+  static FILE* codeobj_csv_file = NULL;
+
+  if (data == NULL) {
+    printf("codeobj_callback error, data == 0\n"); fflush(stdout);
+    abort();
+  }
+
+  if (id == ROCPROFILER_HSA_CB_ID_CODEOBJ) {
+    const uint64_t codeobj_index = codeobj_counter.fetch_add(1, std::memory_order_relaxed);
+    const uint64_t ts = HsaRsrcFactory::Instance().TimestampNs();
+    const int unload = data->codeobj.unload;
+    const uint64_t load_base = data->codeobj.load_base;
+    const uint64_t load_size = data->codeobj.load_size;
+    const int fd1 = data->codeobj.storage_file;
+    const uint64_t count = (fd1 != -1) ? lseek(fd1, 0, SEEK_END) : data->codeobj.memory_size;
+    void* buf = (fd1 != -1) ? malloc(count) : reinterpret_cast<void*>(data->codeobj.memory_base);
+
+    if (fd1 != -1) {
+      ssize_t ret = read(fd1, buf, count);
+      if (ret == -1) {
+        perror("codeobj_callback::read()");
+        abort();
+      }
+      const uint64_t rcount = (uint64_t)ret;
+      if (rcount != count) {
+        printf("codeobj_callback::read() ret(%lu) != count(%lu)\n", rcount, count);
+        abort();
+      }
+      //close(fd1);
+    }
+
+    std::ostringstream oss;
+    oss << "codeobj/" << codeobj_index << ".obj" << std::dec;
+    const char* codeobj_data_name = oss.str().c_str();
+    const char* codeobj_csv_name = "codeobj/index.csv";
+
+    if (codeobj_csv_file == NULL) {
+      codeobj_csv_file = fopen(codeobj_csv_name, "w");
+      if (codeobj_csv_file == NULL) {
+        fprintf(stderr, "file(\"%s\")\n", codeobj_csv_name); fflush(stderr);
+        perror("codeobj_callback::fopen"); fflush(stderr);
+        abort();
+      }
+      fprintf(codeobj_csv_file, "file,ts,base,size,unload\n");
+    }
+    fprintf(codeobj_csv_file, "%s,%lu,0x%lx,0x%lx,%d\n", codeobj_data_name, ts, load_base, load_size, unload);
+    fflush(codeobj_csv_file);
+
+    int fd2 = open(codeobj_data_name, O_RDWR|O_CREAT, 0777);
+    if (fd2 == -1) {
+      fprintf(stderr, "file(\"%s\")\n", codeobj_data_name); fflush(stderr);
+      perror("codeobj_callback::open()"); fflush(stderr);
+      abort();
+    }
+
+    ssize_t ret = write(fd2, buf, count);
+    if (ret == -1) {
+      perror("codeobj_callback::write()");
+      abort();
+    }
+    const uint64_t wcount = (uint64_t)ret;
+    if (wcount != count) {
+      printf("codeobj_callback::write() ret(%lu) != count(%lu)\n", wcount, count);
+      abort();
+    }
+
+    close(fd2);
+  }
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1212,6 +1295,14 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   // Set HSA intercepting
   check_env_var("ROCP_HSA_INTERC", settings->hsa_intercepting);
   if (settings->hsa_intercepting) rocprofiler_set_hsa_callbacks(hsa_callbacks, (void*)14);
+  // Enable code objects dumping
+  check_env_var("ROCP_OBJ_DUMPING", settings->obj_dumping);
+  rocprofiler_hsa_callbacks_t ocb{};
+  ocb.codeobj = codeobj_callback;
+  if (settings->obj_dumping) {
+    rocprofiler_set_hsa_callbacks(ocb, (void*)1);
+    settings->hsa_intercepting = 1;
+  }
   // Enable concurrent SQTT
   check_env_var("ROCP_K_CONCURRENT", settings->k_concurrent);
   // Enable optmized mode

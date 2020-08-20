@@ -20,6 +20,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 *******************************************************************************/
 
+#define ROCP_INTERNAL_BUILD
+#include "activity.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -166,6 +169,67 @@ PUBLIC_API bool EnableActivityCallback(uint32_t op, bool enable) {
   } else {
     rocprofiler_stop_queue_callbacks();
   }
+  return true;
+}
+
+struct evt_cb_entry_t {
+  void* callback;
+  void* arg;
+};
+typedef std::atomic<evt_cb_entry_t> evt_cb_entry_atomic_t;
+evt_cb_entry_atomic_t evt_cb_table[HSA_EVT_ID_NUMBER]{};
+
+hsa_status_t codeobj_evt_callback(
+  rocprofiler_hsa_cb_id_t id,
+  const rocprofiler_hsa_callback_data_t* cb_data,
+  void* arg)
+{
+  evt_cb_entry_t evt = evt_cb_table[id].load(std::memory_order_relaxed);
+  activity_rtapi_callback_t evt_callback = (activity_rtapi_callback_t)evt.callback;
+
+  if (evt_callback != NULL) {
+    evt_callback(ACTIVITY_DOMAIN_HSA_EVT, id, cb_data, evt.arg);
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+PUBLIC_API const char* GetEvtName(uint32_t op) { return strdup("CODEOBJ"); }
+
+PUBLIC_API bool RegisterEvtCallback(uint32_t op, void* callback, void* arg) {
+  evt_cb_table[op].store(evt_cb_entry_t{callback, arg}, std::memory_order_relaxed);
+
+  rocprofiler_hsa_callbacks_t ocb{};
+  switch (op) {
+    case HSA_EVT_ID_ALLOCATE:
+      ocb.allocate = codeobj_evt_callback;
+      break;
+    case HSA_EVT_ID_DEVICE:
+      ocb.device = codeobj_evt_callback;
+      break;
+    case HSA_EVT_ID_MEMCOPY:
+      ocb.memcopy = codeobj_evt_callback;
+      break;
+    case HSA_EVT_ID_SUBMIT:
+      ocb.submit = codeobj_evt_callback;
+      break;
+    case HSA_EVT_ID_KSYMBOL:
+      ocb.ksymbol = codeobj_evt_callback;
+      break;
+    case HSA_EVT_ID_CODEOBJ:
+      ocb.codeobj = codeobj_evt_callback;
+      break;
+    default:
+      fatal("invalid activity opcode");
+  }
+  rocprofiler_set_hsa_callbacks(ocb, NULL);
+
+  return true;
+}
+
+PUBLIC_API bool RemoveEvtCallback(uint32_t op) {
+  rocprofiler_hsa_callbacks_t ocb{};
+  rocprofiler_set_hsa_callbacks(ocb, NULL);
   return true;
 }
 }  // extern "C"
