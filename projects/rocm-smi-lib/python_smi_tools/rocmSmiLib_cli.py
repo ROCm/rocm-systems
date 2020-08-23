@@ -47,6 +47,16 @@ deviceList = []
 # Enable or disable serialized format
 OUTPUT_SERIALIZATION = False
 
+# These are the valid clock types that can be returned/modified:
+# TODO: "clk_type_names" from rsmiBindings.py should fetch valid clocks from
+#       the same location asrocm_smi_device.cc instead of hardcoding the values
+validClockNames = clk_type_names[1:-2]
+# The purpose of the [1:-2] here ^^^^ is to remove the duplicate elements at the
+# beginning and end of the clk_type_names list (specifically sclk and mclk)
+# Also the "invalid" clock in the list is removed since it isn't a valid clock type
+validClockNames.append('pcie')
+validClockNames.sort()
+
 # Check for correct initialization value
 ret_init = rocmsmi.rsmi_init(0)
 if ret_init != 0:
@@ -645,8 +655,6 @@ def setClocks(deviceList, clktype, clk):
         printLog(None, 'Invalid clock frequency', None)
         RETCODE = 1
         return
-    validClockNames = ['mclk', 'pcie', 'sclk']
-    # TODO: Implement DCEF/SOC/SYS/DF/MEM functionality for validClockNames
     if clktype not in validClockNames:
         printErrLog(device, 'Unable to set clock level')
         logging.error('Invalid clock type %s', clktype)
@@ -684,7 +692,7 @@ def setClocks(deviceList, clktype, clk):
                 printErrLog(device, 'Unable to set performance level to manual')
                 RETCODE = 1
                 return
-        if clktype == 'mclk' or clktype == 'sclk':
+        if clktype  != 'pcie':
             ret = rocmsmi.rsmi_dev_gpu_clk_freq_set(device, rsmi_clk_names_dict[clktype], freq_bitmask)
             if rsmi_ret_ok(ret, device):
                 printLog(device, 'Successfully set %s bitmask to' % (clktype), str(bitmask))
@@ -1980,7 +1988,6 @@ def load(savefilepath, autoRespond):
                 setClockOverDrive([device], 'sclk', values['overdrivesclk'], autoRespond)
             if values['overdrivemclk']:
                 setClockOverDrive([device], 'mclk', values['overdrivemclk'], autoRespond)
-            validClockNames = ['mclk', 'pcie', 'sclk']
             for clk in validClockNames:
                 if clk in values['clocks']:
                     setClocks([device], clk, values['clocks'][clk])
