@@ -3183,6 +3183,13 @@ rsmi_func_iter_value_get(rsmi_func_id_iter_handle_t handle,
 
 /** @} */  // end of APISupport
 
+/*****************************************************************************/
+/** @defgroup EvntNotif Event Notification Functions
+ *  These functions are used to configure for and get asynchronous event
+ *  notifications.
+ *  @{
+ */
+
 /**
  * @brief Prepare to collect event notifications for a GPU
  *
@@ -3285,6 +3292,8 @@ rsmi_event_notification_get(int timeout_ms,
  * @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
  */
 rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind);
+
+/** @} */  // end of EvntNotif
 
 #ifdef __cplusplus
 }
