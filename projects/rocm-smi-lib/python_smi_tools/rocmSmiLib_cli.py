@@ -1504,8 +1504,15 @@ def showRange(deviceList, rangeType):
                 printLog(device, 'Valid mclk range: %sMhz - %sMhz' % (int(odvf.mclk_freq_limits.lower_bound / 1000000),\
                          int(odvf.mclk_freq_limits.upper_bound / 1000000)), None)
             if rangeType == 'voltage':
-                # TODO: LIB voltage range not implemented yet, valid range set to 0 as a temporary placeholder
-                printLog(device, 'Valid voltage range: %smV - %smV' % (0, 0), None)
+                num_regions = c_uint32(odvf.num_regions)
+                regions = (rsmi_freq_volt_region_t * odvf.num_regions)()
+                ret = rocmsmi.rsmi_dev_od_volt_curve_regions_get(device, byref(num_regions), byref(regions))
+                if rsmi_ret_ok(ret, device, 'volt'):
+                    for i in range(num_regions.value):
+                        printLog(device, 'Region %d: Valid voltage range: %smV - %smV' % (i, regions[i].volt_range.lower_bound,\
+                             regions[i].volt_range.upper_bound), None)
+                else:
+                    printLog(device, 'Unable to display %s range' % (rangeType), None)
         else:
             printLog(device, 'Unable to display %s range' % (rangeType), None)
     printLogSpacer()
