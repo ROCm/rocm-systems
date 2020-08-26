@@ -1478,9 +1478,9 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   } else {
     // Adding dispatch observer
     rocprofiler_queue_callbacks_t callbacks_ptrs{0};
-    if (settings->k_concurrent != 0) {
+    if (settings->k_concurrent == 2) {      // concurrent trace
       callbacks_ptrs.dispatch = dispatch_callback_con;
-    } else {
+    } else {                                // pmc
       callbacks_ptrs.dispatch = dispatch_callback;
     }
     callbacks_ptrs.destroy = destroy_callback;
