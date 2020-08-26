@@ -233,6 +233,7 @@ class SQLiteDB:
 
   # close DB
   def close(self):
+    self.connection.commit()
     self.connection.close()
 
   # access DB
