@@ -595,6 +595,122 @@ def resetXgmiErr(deviceList):
     printLogSpacer()
 
 
+def setClockRange(deviceList, clkType, level, value, autoRespond):
+    """ Set the range for the specified clktype in the PowerPlay table for a list of devices.
+
+    Parameters:
+    deviceList -- List of DRM devices (can be a single-item list)
+    clktype -- [sclk|mclk] Which clock type to apply the range to
+    level -- [0|1] Whether to set the minimum (0) or maximum (1) speed
+    value -- Value to apply to the clock range
+    autoRespond -- Response to automatically provide for all prompts
+    """
+    global RETCODE
+    if clkType not in {'sclk', 'mclk'}:
+        printLog(None, 'Invalid range identifier %s' % (clkType), None)
+        RETCODE = 1
+        return
+    try:
+        int(value)
+    except ValueError:
+        printErrLog(device, 'Unable to set %s range' % (clkType))
+        logging.error('%s is not an integer', value)
+        RETCODE = 1
+        return
+    confirmOutOfSpecWarning(autoRespond)
+    printLogSpacer(' Set Valid %s Range ' % (clkType))
+    for device in deviceList:
+        if clkType == 'sclk':
+            ret = rocmsmi.rsmi_dev_od_clk_info_set(device, rsmi_freq_ind_t(int(level)), int(value), rsmi_clk_names_dict[clkType])
+            if rsmi_ret_ok(ret, device):
+                printLog(device, 'Successfully set %s level %s to %s(MHz)' % (clkType, level, value), None)
+            else:
+                printErrLog(device, 'Unable to set %s level %s to %s(MHz)' % (clkType, level, value))
+                RETCODE = 1
+        elif clkType == 'mclk':
+            ret = rocmsmi.rsmi_dev_od_clk_info_set(device, rsmi_freq_ind_t(int(level)), int(value), rsmi_clk_names_dict[clkType])
+            if rsmi_ret_ok(ret, device):
+                printLog(device, 'Successfully set %s level %s to %s(MHz)' % (clkType, level, value), None)
+            else:
+                printErrLog(device, 'Unable to set %s level %s to %s(MHz)' % (clkType, level, value))
+                RETCODE = 1
+        else:
+            printErrLog(device, 'Unable to set %s range' % (clkType))
+            logging.error('Unsupported range type %s', clkType)
+            RETCODE = 1
+
+
+def setVoltageCurve(deviceList, point, clk, volt, autoRespond):
+    """ Set voltage curve for a point in the PowerPlay table for a list of devices.
+
+    Parameters:
+    deviceList -- List of DRM devices (can be a single-item list)
+    point -- Point on the voltage curve to modify
+    clk -- Clock speed specified for this curve point
+    volt -- Voltage specified for this curve point
+    autoRespond -- Response to automatically provide for all prompts
+    """
+    global RETCODE
+    value = '%s %s %s' % (point, clk, volt)
+    try:
+        any(int(item) for item in value)
+    except ValueError:
+        printLogNoDev('Unable to set Voltage curve')
+        logging.error('Non-integer characters are present in %s', value)
+        RETCODE = 1
+        return
+    confirmOutOfSpecWarning(autoRespond)
+    for device in deviceList:
+        ret = rocmsmi.rsmi_dev_od_volt_info_set(device, int(point), int(clk), int(volt))
+        if rsmi_ret_ok(ret, device):
+            printLog(device, 'Successfully set voltage point %s to %s(MHz) %s(mV)' % (point, clk, volt), None)
+        else:
+            printErrLog(device, 'Unable to set voltage point %s to %s(MHz) %s(mV)' % (point, clk, volt))
+            RETCODE = 1
+
+
+def setPowerPlayTableLevel(deviceList, clkType, point, clk, volt, autoRespond):
+    """ Set clock frequency and voltage for a level in the PowerPlay table for a list of devices.
+
+    Parameters:
+    deviceList -- List of DRM devices (can be a single-item list)
+    clktype -- [sclk|mclk] Which clock type to apply the range to
+    point -- Point on the voltage curve to modify
+    clk -- Clock speed specified for this curve point
+    volt -- Voltage specified for this curve point
+    autoRespond -- Response to automatically provide for all prompts
+    """
+    global RETCODE
+    value = '%s %s %s' % (point, clk, volt)
+    try:
+        any(int(item) for item in value.split())
+    except ValueError:
+        printLogNoDev('Unable to set PowerPlay table level')
+        logging.error('Non-integer characters are present in %s', value)
+        RETCODE = 1
+        return
+    confirmOutOfSpecWarning(autoRespond)
+    for device in deviceList:
+        if clkType == 'sclk':
+            ret = rocmsmi.rsmi_dev_od_clk_info_set(device, rsmi_freq_ind_t(int(point)), int(clk), rsmi_clk_names_dict[clkType])
+            if rsmi_ret_ok(ret, device):
+                printLog(device, 'Successfully set voltage point %s to %s(MHz) %s(mV)' % (point, clk, volt), None)
+            else:
+                printErrLog(device, 'Unable to set voltage point %s to %s(MHz) %s(mV)' % (point, clk, volt))
+                RETCODE = 1
+        elif clkType == 'mclk':
+            ret = rocmsmi.rsmi_dev_od_clk_info_set(device, rsmi_freq_ind_t(int(point)), int(clk), rsmi_clk_names_dict[clkType])
+            if rsmi_ret_ok(ret, device):
+                printLog(device, 'Successfully set voltage point %s to %s(MHz) %s(mV)' % (point, clk, volt), None)
+            else:
+                printErrLog(device, 'Unable to set voltage point %s to %s(MHz) %s(mV)' % (point, clk, volt))
+                RETCODE = 1
+        else:
+            printErrLog(device, 'Unable to set %s range' % (clkType))
+            logging.error('Unsupported range type %s', clkType)
+            RETCODE = 1
+
+
 def setClockOverDrive(deviceList, clktype, value, autoRespond):
     """ Set clock speed to OverDrive for a list of devices
 
@@ -712,12 +828,14 @@ def setClocks(deviceList, clktype, clk):
                 printLog(device, 'Successfully set %s bitmask to' % (clktype), str(bitmask))
             else:
                 printErrLog(device, 'Unable to set %s bitmask to: %s' % (clktype, str(bitmask)))
+                RETCODE = 1
         else:
             ret = rocmsmi.rsmi_dev_pci_bandwidth_set(device, freq_bitmask)
             if rsmi_ret_ok(ret, device):
                 printLog(device, 'Successfully set %s to level bitmask' % (clktype), str(bitmask))
             else:
                 printErrLog(device, 'Unable to set %s bitmask to: %s' % (clktype, str(bitmask)))
+                RETCODE = 1
     printLogSpacer()
 
 
@@ -2465,12 +2583,9 @@ if __name__ == '__main__':
     if args.setpcie:
         setClocks(deviceList, 'pcie', args.setpcie)
     if args.setslevel:
-        pass
-        # TODO: setPowerPlayTableLevel(deviceList, \'sclk\', args.setslevel, args.autorespond)
+        setPowerPlayTableLevel(deviceList, 'sclk', args.setslevel[0], args.setslevel[1], args.setslevel[2], args.autorespond)
     if args.setmlevel:
-        pass
-        # TODO: setPowerPlayTableLevel(deviceList, \'mclk\', args.setmlevel, args.autorespond)
-    # Don't do reset in combination with any other command
+        setPowerPlayTableLevel(deviceList, 'mclk', args.setmlevel[0], args.setmlevel[1], args.setmlevel[2], args.autorespond)
     if args.resetfans:
         resetFans(deviceList)
     if args.setfan:
@@ -2488,14 +2603,11 @@ if __name__ == '__main__':
     if args.setprofile:
         setProfile(deviceList, args.setprofile)
     if args.setvc:
-        pass
-        # TODO: setVoltageCurve(deviceList, args.setvc[0], args.setvc[1], args.setvc[2], args.autorespond)
+        setVoltageCurve(deviceList, args.setvc[0], args.setvc[1], args.setvc[2], args.autorespond)
     if args.setsrange:
-        pass
-        # TODO: setClockRange(deviceList, \'sclk\', args.setsrange[0], args.setsrange[1], args.autorespond)
+        setClockRange(deviceList, 'sclk', args.setsrange[0], args.setsrange[1], args.autorespond)
     if args.setmrange:
-        pass
-        # TODO: setClockRange(deviceList, \'mclk\', args.setmrange[0], args.setmrange[1], args.autorespond)
+        setClockRange(deviceList, 'mclk', args.setmrange[0], args.setmrange[1], args.autorespond)
     if args.resetprofile:
         resetProfile(deviceList)
     if args.resetxgmierr:

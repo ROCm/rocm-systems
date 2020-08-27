@@ -364,6 +364,8 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_overdrive_level_set",       {{kDevOverDriveLevelFName}, {}}},
   {"rsmi_dev_vbios_version_get",         {{kDevVBiosVerFName}, {}}},
   {"rsmi_dev_od_volt_info_get",          {{kDevPowerODVoltageFName}, {}}},
+  {"rsmi_dev_od_volt_info_set",          {{kDevPowerODVoltageFName,
+                                           kDevPerfLevelFName},  {}}},
   {"rsmi_dev_od_volt_curve_regions_get", {{kDevPowerODVoltageFName}, {}}},
   {"rsmi_dev_ecc_enabled_get",           {{kDevErrCntFeaturesFName}, {}}},
   {"rsmi_dev_ecc_status_get",            {{kDevErrCntFeaturesFName}, {}}},
@@ -571,6 +573,7 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
   switch (type) {
     // The caller is responsible for making sure "val" is within a valid range
     case kDevOverDriveLevel:  // integer between 0 and 20
+    case kDevPowerODVoltage:
     case kDevPowerProfileMode:
       return writeDevInfoStr(type, std::to_string(val));
       break;

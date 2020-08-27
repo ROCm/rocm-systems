@@ -2007,6 +2007,56 @@ rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind,
                                                rsmi_od_volt_freq_data_t *odv);
 
 /**
+ *  @brief This function sets the clock frequency information
+ *
+ *  @details Given a device index @p dv_ind, a frequency level @p level,
+ *  a clock value @p clkvalue and a clock type @p clkType this function
+ *  will set the sclk|mclk range
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] level RSMI_FREQ_IND_MIN|RSMI_FREQ_IND_MAX to set the
+ *  minimum (0) or maximum (1) speed.
+ *
+ *  @param[in] clkvalue value to apply to the clock range. Frequency values
+ *  are in MHz.
+ *
+ *  @param[in] clkType RSMI_CLK_TYPE_SYS | RSMI_CLK_TYPE_MEM range type
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
+                                       uint64_t clkvalue,
+                                       rsmi_clk_type_t clkType);
+
+/**
+ *  @brief This function sets  1 of the 3 voltage curve points.
+ *
+ *  @details Given a device index @p dv_ind, a voltage point @p vpoint
+ *  and a voltage value @p voltvalue this function will set voltage curve point
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] vpoint voltage point [0|1|2] on the voltage curve
+ *
+ *  @param[in] clkvalue clock value component of voltage curve point.
+ *  Frequency values are in MHz.
+ *
+ *  @param[in] voltvalue voltage value component of voltage curve point.
+ *  Voltage is in mV.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
+                                        uint64_t clkvalue, uint64_t voltvalue);
+
+/**
  *  @brief This function will retrieve the current valid regions in the
  *  frequency/voltage space.
  *

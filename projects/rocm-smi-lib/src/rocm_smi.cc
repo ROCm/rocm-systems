@@ -817,6 +817,15 @@ rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
   CATCH
 }
 
+static rsmi_status_t
+set_dev_range(uint32_t dv_ind, std::string range) {
+
+  GET_DEV_FROM_INDX
+
+  int ret = dev->writeDevInfo(amd::smi::kDevPowerODVoltage, range);
+  return amd::smi::ErrnoToRsmiStatus(ret);
+}
+
 static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
             uint32_t dv_ind, rsmi_frequencies_t *f, uint32_t *lanes = nullptr) {
   TRY
@@ -1024,6 +1033,98 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   CATCH
 }
 
+
+rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
+                                        uint64_t clkvalue,
+                                        rsmi_clk_type_t clkType) {
+  TRY
+  rsmi_status_t ret;
+
+  std::string sysvalue;
+  std::map<rsmi_clk_type_t, std::string> ClkStateMap = {
+    {RSMI_CLK_TYPE_SYS, "s"},
+    {RSMI_CLK_TYPE_MEM, "m"},
+  };
+
+  // Set perf. level to manual so that we can then set the power profile
+  ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  // For clock frequency setting, enter a new value by writing a string that
+  // contains “s/m index clock” to the file. The index should be 0 if to set
+  // minimum clock. And 1 if to set maximum clock. E.g., “s 0 500” will update
+  // minimum sclk to be 500 MHz. “m 1 800” will update maximum mclk to 800Mhz.
+
+  switch (clkType) {
+    case RSMI_CLK_TYPE_SYS:
+      sysvalue = ClkStateMap[clkType];
+      sysvalue += ' ' + std::to_string(level);
+      sysvalue += ' ' + std::to_string(clkvalue);
+      sysvalue += '\n';
+      break;
+
+    case RSMI_CLK_TYPE_MEM:
+      sysvalue = ClkStateMap[clkType];
+      sysvalue += ' ' + std::to_string(level);
+      sysvalue += ' ' + std::to_string(clkvalue);
+      sysvalue += '\n';
+      break;
+
+    default:
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+  ret = set_dev_range(dv_ind, sysvalue);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+   }
+  ret = set_dev_range(dv_ind, "c");
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+
+rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
+                                      uint64_t clkvalue, uint64_t voltvalue) {
+  TRY
+  rsmi_status_t ret;
+
+  // Set perf. level to manual so that we can then set the power profile
+  ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  // For sclk voltage curve, enter the new values by writing a string that
+  // contains “vc point clock voltage” to the file. The points are indexed
+  // by 0, 1 and 2. E.g., “vc 0 300 600” will update point1 with clock set
+  // as 300Mhz and voltage as 600mV. “vc 2 1000 1000” will update point3
+  // with clock set as 1000Mhz and voltage 1000mV.
+
+  std::string sysvalue = "vc";
+  sysvalue += ' ' + std::to_string(vpoint);
+  sysvalue += ' ' + std::to_string(clkvalue);
+  sysvalue += ' ' + std::to_string(voltvalue);
+  sysvalue += '\n';
+  ret = set_dev_range(dv_ind, sysvalue);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+  ret = set_dev_range(dv_ind, "c");
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+
 static void get_vc_region(uint32_t start_ind,
                 std::vector<std::string> *val_vec, rsmi_freq_volt_region_t *p) {
   assert(p != nullptr);
@@ -1092,6 +1193,7 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
+
 static rsmi_status_t set_power_profile(uint32_t dv_ind,
                                     rsmi_power_profile_preset_masks_t profile) {
   TRY
