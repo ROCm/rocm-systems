@@ -24,6 +24,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "util/hsa_rsrc_factory.h"
 
+#include <cxxabi.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <hsa.h>
@@ -47,6 +48,13 @@ POSSIBILITY OF SUCH DAMAGE.
 
 namespace rocprofiler {
 namespace util {
+// Demangle C++ symbol name
+static const char* cpp_demangle(const char* symname) {
+  size_t size = 0;
+  int status;
+  const char* ret = abi::__cxa_demangle(symname, NULL, &size, &status);
+  return (ret != 0) ? ret : strdup(symname);
+}
 
 // Callback function to get available in the system agents
 hsa_status_t HsaRsrcFactory::GetHsaAgentsCallback(hsa_agent_t agent, void* data) {
@@ -732,11 +740,12 @@ hsa_status_t HsaRsrcFactory::executable_symbols_cb(hsa_executable_t exec, hsa_ex
     CHECK_STATUS("Error in getting kernel object", status);
     status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &len);
     CHECK_STATUS("Error in getting name len", status);
-    char *name = new char[len + 1];
-    status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name);
+    char symname[len + 1];
+    status = hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, symname);
     CHECK_STATUS("Error in getting kernel name", status);
-    name[len] = 0;
+    symname[len] = 0;
     if (data == NULL) {
+      const char* name = cpp_demangle(symname);
       auto ret = symbols_map_->insert({addr, name});
       if (ret.second == false) {
         delete[] ret.first->second;
