@@ -23,6 +23,20 @@ THE SOFTWARE.
 #ifndef INC_ROCTRACER_HIP_H_
 #define INC_ROCTRACER_HIP_H_
 
+#ifdef __cplusplus
+#include <iostream>
+
+inline static std::ostream& operator<<(std::ostream& out, const unsigned char& v) {
+  out  << (unsigned int)v;
+  return out;
+}
+
+inline static std::ostream& operator<<(std::ostream& out, const char& v) {
+  out  << (unsigned char)v;
+  return out;
+}
+#endif  // __cplusplus
+
 #include <hip_ostream_ops.h>
 #include <hip/hip_runtime.h>
 #include <hip/hcc_detail/hip_prof_str.h>

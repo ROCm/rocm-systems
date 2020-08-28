@@ -1110,6 +1110,7 @@ extern "C" PUBLIC_API void OnUnload() {
 
 extern "C" CONSTRUCTOR_API void constructor() {
   ONLOAD_TRACE_BEG();
+  roctracer::hip_support::HIP_depth_max = 0;
   roctx_trace_buffer = new roctracer::TraceBuffer<roctx_trace_entry_t>("rocTX API", 0x200000, &roctx_flush_prm, 1);
   hip_api_trace_buffer = new roctracer::TraceBuffer<hip_api_trace_entry_t>("HIP API", 0x200000, &hip_api_flush_prm, 1);
   hip_act_trace_buffer = new roctracer::TraceBuffer<hip_act_trace_entry_t>("HIP ACT", 0x200000, &hip_act_flush_prm, 1, 1);
