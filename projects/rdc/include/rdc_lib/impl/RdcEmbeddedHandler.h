@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcCacheManager.h"
 #include "rdc_lib/RdcMetricsUpdater.h"
 #include "rdc_lib/RdcWatchTable.h"
+#include "rdc_lib/RdcModuleMgr.h"
 
 namespace amd {
 namespace rdc {
@@ -96,6 +97,7 @@ class RdcEmbeddedHandler: public RdcHandler {
     RdcGroupSettingsPtr group_settings_;
     RdcCacheManagerPtr cache_mgr_;
     RdcMetricFetcherPtr metric_fetcher_;
+    RdcModuleMgrPtr rdc_module_mgr_;
     RdcWatchTablePtr watch_table_;
     RdcMetricsUpdaterPtr metrics_updater_;
     std::future<void> updater_;

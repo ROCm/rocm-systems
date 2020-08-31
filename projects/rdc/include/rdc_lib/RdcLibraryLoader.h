@@ -36,6 +36,11 @@ class RdcLibraryLoader {
  public:
      RdcLibraryLoader();
 
+     rdc_status_t load(const char* filename);
+
+     template<typename T> rdc_status_t load_symbol(T* func_handler,
+            const char* func_name);
+
      template<typename T> rdc_status_t load(const char* filename,
                 T* func_make_handler);
 
@@ -48,35 +53,44 @@ class RdcLibraryLoader {
      std::mutex library_mutex_;
 };
 
+template<typename T> rdc_status_t RdcLibraryLoader::load_symbol(T* func_handler,
+            const char* func_name) {
+    if (!libHandler_) {
+        RDC_LOG(RDC_ERROR, "Must load the library before load the symbol");
+        return RDC_ST_FAIL_LOAD_MODULE;
+    }
+
+    if (!func_handler || !func_name) {
+        return RDC_ST_FAIL_LOAD_MODULE;
+    }
+
+    std::lock_guard<std::mutex> guard(library_mutex_);
+
+    *reinterpret_cast<void**>(func_handler) =
+            dlsym(libHandler_, func_name);
+    if (*func_handler == nullptr) {
+        char* error = dlerror();
+        RDC_LOG(RDC_ERROR, "RdcLibraryLoader: Fail to load the symbol "
+                    << func_name << ": " << error);
+        return RDC_ST_FAIL_LOAD_MODULE;
+    }
+
+    return RDC_ST_OK;
+}
+
+
 template<typename T> rdc_status_t RdcLibraryLoader::load(const char* filename,
                 T* func_make_handler) {
     if (filename == nullptr || func_make_handler == nullptr) {
             return RDC_ST_FAIL_LOAD_MODULE;
     }
 
-    if (libHandler_) {
-        unload();
+    rdc_status_t status = load(filename);
+    if (status != RDC_ST_OK) {
+        return status;
     }
 
-    std::lock_guard<std::mutex> guard(library_mutex_);
-    libHandler_ = dlopen(filename, RTLD_LAZY);
-    if (!libHandler_) {
-        char* error = dlerror();
-        RDC_LOG(RDC_ERROR, "Fail to open " << filename <<": " << error);
-        return RDC_ST_FAIL_LOAD_MODULE;
-    }
-
-    *reinterpret_cast<void**>(func_make_handler) =
-            dlsym(libHandler_, "make_handler");
-    if (*func_make_handler == nullptr) {
-            char* error = dlerror();
-            RDC_LOG(RDC_ERROR,
-            "Fail to find function make_handler from file "
-                    << filename <<": "  << error);
-            return RDC_ST_FAIL_LOAD_MODULE;
-    }
-
-    return RDC_ST_OK;
+    return load_symbol(func_make_handler, "make_handler");
 }
 
 }  // namespace rdc

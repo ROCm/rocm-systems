@@ -252,8 +252,12 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
     value->status = RSMI_STATUS_NOT_SUPPORTED;
 
     auto read_rsmi_counter = [&](void) {
-      assert(get_rsmi_data(f_key) != nullptr);
       rsmi_data = get_rsmi_data(f_key);
+      if (rsmi_data == nullptr) {
+        value->status = RSMI_STATUS_NOT_SUPPORTED;
+        return;
+      }
+
       value->status = rsmi_counter_read(rsmi_data->evt_handle,
                                                      &rsmi_data->counter_val);
       value->value.l_int = rsmi_data->counter_val.value;

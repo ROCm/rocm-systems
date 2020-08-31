@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcMetricsUpdaterImpl.h"
 #include "rdc_lib/impl/RdcCacheManagerImpl.h"
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
+#include "rdc_lib/impl/RdcModuleMgrImpl.h"
 #include "rdc_lib/rdc_common.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcException.h"
@@ -70,8 +71,9 @@ RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode):
     group_settings_(new RdcGroupSettingsImpl())
     , cache_mgr_(new RdcCacheManagerImpl())
     , metric_fetcher_(new RdcMetricFetcherImpl())
+    , rdc_module_mgr_(new RdcModuleMgrImpl(metric_fetcher_))
     , watch_table_(new RdcWatchTableImpl(group_settings_,
-                cache_mgr_, metric_fetcher_))
+                cache_mgr_, metric_fetcher_, rdc_module_mgr_))
     , metrics_updater_(new RdcMetricsUpdaterImpl(watch_table_,
                         METIC_UPDATE_FREQUENCY)) {
     if (mode == RDC_OPERATION_MODE_AUTO) {

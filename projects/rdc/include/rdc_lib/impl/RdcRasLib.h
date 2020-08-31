@@ -19,46 +19,51 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#ifndef RDC_LIB_IMPL_RDCRASLIB_H_
+#define RDC_LIB_IMPL_RDCRASLIB_H_
 
+#include <map>
+#include <list>
+#include <vector>
+#include <memory>
+#include <algorithm>
+#include <string>
 #include "rdc_lib/RdcLibraryLoader.h"
+#include "rdc_lib/RdcTelemetry.h"
+
 
 namespace amd {
 namespace rdc {
+class RdcRasLib: public RdcTelemetry {
+ public:
+    // get support field ids
+    rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS],
+         uint32_t* field_count) override;
 
-RdcLibraryLoader::RdcLibraryLoader(): libHandler_(nullptr) {
-}
+    // Fetch
+    rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
+      uint32_t fields_count, rdc_field_value_f callback,
+      void*  user_data) override;
 
-rdc_status_t RdcLibraryLoader::load(const char* filename) {
-    if (filename == nullptr) {
-        return RDC_ST_FAIL_LOAD_MODULE;
-    }
-    if (libHandler_) {
-        unload();
-    }
+    rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
+      uint32_t fields_count) override;
 
-    std::lock_guard<std::mutex> guard(library_mutex_);
-    libHandler_ = dlopen(filename, RTLD_LAZY);
-    if (!libHandler_) {
-        char* error = dlerror();
-        RDC_LOG(RDC_ERROR, "Fail to open " << filename <<": " << error);
-        return RDC_ST_FAIL_LOAD_MODULE;
-    }
+    rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
+        uint32_t fields_count) override;
 
-    return RDC_ST_OK;
-}
+    explicit RdcRasLib(const char* lib_name);
 
-rdc_status_t RdcLibraryLoader::unload() {
-        std::lock_guard<std::mutex> guard(library_mutex_);
-        if (libHandler_) {
-            dlclose(libHandler_);
-            libHandler_ = nullptr;
-        }
-        return RDC_ST_OK;
-}
+ private:
+    RdcLibraryLoader lib_loader_;
+    rdc_status_t (*fields_value_get_)(rdc_gpu_field_t*,
+                uint32_t, rdc_field_value_f, void*);
+    rdc_status_t (*fields_query_)(uint32_t[MAX_NUM_FIELDS], uint32_t*);
+};
+typedef std::shared_ptr<RdcRasLib> RdcRasLibPtr;
 
-RdcLibraryLoader::~RdcLibraryLoader() {
-        unload();
-}
 
 }  // namespace rdc
 }  // namespace amd
+
+
+#endif  // RDC_LIB_IMPL_RDCRASLIB_H_

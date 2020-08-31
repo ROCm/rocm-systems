@@ -29,11 +29,11 @@ THE SOFTWARE.
 #include <memory>
 #include <mutex>  // NOLINT
 #include <atomic>
-#include <map>
 #include "rdc_lib/RdcWatchTable.h"
 #include "rdc_lib/RdcGroupSettings.h"
 #include "rdc_lib/RdcCacheManager.h"
 #include "rdc_lib/RdcMetricFetcher.h"
+#include "rdc_lib/RdcModuleMgr.h"
 #include "rocm_smi/rocm_smi.h"
 
 namespace amd {
@@ -83,9 +83,11 @@ class RdcWatchTableImpl : public RdcWatchTable {
     //!< once per second.
     rdc_status_t rdc_field_update_all() override;
 
+    // TODO(bill_liu): Remove the RdcMetricFetcherPtr
     RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings,
         const RdcCacheManagerPtr& cache_mgr,
-        const RdcMetricFetcherPtr& metric_fetcher);
+        const RdcMetricFetcherPtr& metric_fetcher,
+        const RdcModuleMgrPtr& module_mgr);
 
  private:
     //!< Helper function to Update the fields_in_table when unwatch tables
@@ -108,9 +110,14 @@ class RdcWatchTableImpl : public RdcWatchTable {
 
     rdc_status_t initialize_rsmi_handles(RdcFieldKey fk);
 
+    //!< The function will be pass as the callback for bulk fetch
+    static rdc_status_t handle_fields(rdc_gpu_field_value_t*  values,
+            uint32_t num_values, void*  user_data);
+
     RdcGroupSettingsPtr group_settings_;
     RdcCacheManagerPtr cache_mgr_;
     RdcMetricFetcherPtr metric_fetcher_;
+    RdcModuleMgrPtr rdc_module_mgr_;
 
     //!< The watch table to store the watch settings.
     std::map<RdcFieldGroupKey, FieldSettings> watch_table_;

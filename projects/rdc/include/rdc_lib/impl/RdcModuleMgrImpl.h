@@ -19,46 +19,35 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#ifndef RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
+#define RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
 
-#include "rdc_lib/RdcLibraryLoader.h"
+#include <memory>
+#include "rdc_lib/RdcModuleMgr.h"
+#include "rdc_lib/RdcMetricFetcher.h"
+#include "rdc_lib/RdcTelemetry.h"
+#include "rdc_lib/impl/RdcRasLib.h"
 
 namespace amd {
 namespace rdc {
 
-RdcLibraryLoader::RdcLibraryLoader(): libHandler_(nullptr) {
-}
+class RdcModuleMgrImpl: public RdcModuleMgr {
+ public:
+    RdcTelemetryPtr get_telemetry_module() override;
+    explicit RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher);
+ private:
+    //  Function module
+    RdcTelemetryPtr rdc_telemetry_module_;
 
-rdc_status_t RdcLibraryLoader::load(const char* filename) {
-    if (filename == nullptr) {
-        return RDC_ST_FAIL_LOAD_MODULE;
-    }
-    if (libHandler_) {
-        unload();
-    }
+    //  Domain module
+    RdcRasLibPtr ras_lib_;
 
-    std::lock_guard<std::mutex> guard(library_mutex_);
-    libHandler_ = dlopen(filename, RTLD_LAZY);
-    if (!libHandler_) {
-        char* error = dlerror();
-        RDC_LOG(RDC_ERROR, "Fail to open " << filename <<": " << error);
-        return RDC_ST_FAIL_LOAD_MODULE;
-    }
+    RdcMetricFetcherPtr fetcher_;
 
-    return RDC_ST_OK;
-}
-
-rdc_status_t RdcLibraryLoader::unload() {
-        std::lock_guard<std::mutex> guard(library_mutex_);
-        if (libHandler_) {
-            dlclose(libHandler_);
-            libHandler_ = nullptr;
-        }
-        return RDC_ST_OK;
-}
-
-RdcLibraryLoader::~RdcLibraryLoader() {
-        unload();
-}
+};
 
 }  // namespace rdc
 }  // namespace amd
+
+
+#endif  // RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_

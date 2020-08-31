@@ -38,10 +38,12 @@ namespace rdc {
 
 RdcWatchTableImpl::RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings,
         const RdcCacheManagerPtr& cache_mgr,
-        const RdcMetricFetcherPtr& metric_fetcher):
+        const RdcMetricFetcherPtr& metric_fetcher,
+        const RdcModuleMgrPtr& module_mgr):
      group_settings_(group_settings)
     , cache_mgr_(cache_mgr)
     , metric_fetcher_(metric_fetcher)
+    , rdc_module_mgr_(module_mgr)
     , last_cleanup_time_(0) {
 }
 
@@ -213,6 +215,11 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
     auto f_in_watch_iter = fields_in_watch.begin();
 
     for (; f_in_watch_iter != fields_in_watch.end(); f_in_watch_iter++) {
+       // Skip not support fields
+       result = metric_fetcher_->acquire_rsmi_handle(*f_in_watch_iter);
+       if (result != RDC_ST_OK) {
+           continue;
+       }
        auto ite = fields_to_watch_.find(*f_in_watch_iter);
        if (ite == fields_to_watch_.end()) {  // A new field
           fields_to_watch_.insert({*f_in_watch_iter, f});
@@ -229,10 +236,6 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
               f_in_table.is_watching = true;
               f_in_table.update_freq = update_freq;
           }
-       }
-       result = metric_fetcher_->acquire_rsmi_handle(*f_in_watch_iter);
-       if (result != RDC_ST_OK && result != RDC_ST_ALREADY_EXIST) {
-         return result;
        }
     }
 
@@ -351,14 +354,53 @@ bool RdcWatchTableImpl::is_job_watch_field(uint32_t gpu_index,
     return false;
 }
 
-rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
-    uint32_t items_fetched = 0;
-    rdc_status_t result;
+rdc_status_t RdcWatchTableImpl::handle_fields(rdc_gpu_field_value_t*  values,
+        uint32_t num_values, void*  user_data) {
+    if (values == nullptr || user_data == nullptr) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+    RdcWatchTableImpl* watchTable = static_cast<RdcWatchTableImpl*>(user_data);
 
+    for (uint32_t i = 0; i < num_values; i++) {
+        auto gpu_index = values[i].gpu_index;
+        auto field_id = values[i].field_value.field_id;
+
+        // Always Update the timestamp
+        auto ite = watchTable->fields_to_watch_.find({gpu_index, field_id});
+        if (ite != watchTable->fields_to_watch_.end()) {
+            struct timeval  tv;
+            gettimeofday(&tv, NULL);
+            uint64_t now = static_cast<uint64_t>(tv.tv_sec) * 1000
+                    + tv.tv_usec / 1000;
+            ite->second.last_update_time = now;
+        }
+
+        // Only cache valid results
+        if (values[i].field_value.status != RDC_ST_OK) {
+            continue;
+        }
+
+        // Update the cache
+        watchTable->cache_mgr_->rdc_update_cache(gpu_index,
+                        values[i].field_value);
+
+        // Update the job stats cache
+        std::string job_id;
+        if (watchTable->is_job_watch_field(gpu_index, field_id, job_id)) {
+            watchTable->cache_mgr_->rdc_update_job_stats(gpu_index,
+                        job_id, values[i].field_value);
+        }
+    }
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
     struct timeval  tv;
     gettimeofday(&tv, NULL);
     uint64_t now = static_cast<uint64_t>(tv.tv_sec)*1000+tv.tv_usec/1000;
 
+    // Collect all fields need to be updated for bulk fetch
+    std::vector<rdc_gpu_field_t> fields;
     std::lock_guard<std::mutex> guard(watch_mutex_);
     auto fite = fields_to_watch_.begin();
     for (; fite != fields_to_watch_.end(); fite++) {
@@ -368,35 +410,18 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
             fite->second.last_update_time+track_freq > now) {
            continue;
         }
+        fields.push_back({fite->first.first, fite->first.second});
+    }
 
-        // Fetch the metric from rocm_smi_lib
-        rdc_field_value value;
-        result = metric_fetcher_->fetch_smi_field(
-                    fite->first.first, fite->first.second, &value);
-        if (result != RDC_ST_OK) {
-           // To prevent frequently retry when error, update the time
-           gettimeofday(&tv, NULL);
-           now = static_cast<uint64_t>(tv.tv_sec)*1000+tv.tv_usec/1000;
-           fite->second.last_update_time = now;
-           continue;
+    if (fields.size() != 0) {
+        auto rdc_telemetry = rdc_module_mgr_->get_telemetry_module();
+        if (rdc_telemetry) {
+            rdc_telemetry->rdc_telemetry_fields_value_get(&fields[0],
+                        fields.size(), RdcWatchTableImpl::handle_fields, this);
+        } else {
+            RDC_LOG(RDC_ERROR,
+                "RdcWatchTableImpl: Fail to get the telemetry module");
         }
-
-        // Update the cache
-        cache_mgr_->rdc_update_cache(fite->first.first, value);
-
-        // Update the job stats cache
-        std::string job_id;
-        if (is_job_watch_field(fite->first.first, fite->first.second, job_id)) {
-            cache_mgr_->rdc_update_job_stats(fite->first.first, job_id, value);
-        }
-
-
-        // Update the last_upate_time
-        gettimeofday(&tv, NULL);
-        now = static_cast<uint64_t>(tv.tv_sec)*1000+tv.tv_usec/1000;
-        fite->second.last_update_time = now;
-
-        items_fetched++;
     }
 
     // Clean up is expensive, only do it once per second

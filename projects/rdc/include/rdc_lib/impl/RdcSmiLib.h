@@ -19,46 +19,40 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#ifndef RDC_LIB_IMPL_RDCSMILIB_H_
+#define RDC_LIB_IMPL_RDCSMILIB_H_
 
-#include "rdc_lib/RdcLibraryLoader.h"
+#include <vector>
+#include <memory>
+#include "rdc_lib/RdcMetricFetcher.h"
+#include "rdc_lib/RdcTelemetry.h"
 
 namespace amd {
 namespace rdc {
 
-RdcLibraryLoader::RdcLibraryLoader(): libHandler_(nullptr) {
-}
+class RdcSmiLib : public RdcTelemetry {
+ public:
+    // get support field ids
+    rdc_status_t rdc_telemetry_fields_query(
+        uint32_t field_ids[MAX_NUM_FIELDS], uint32_t* field_count) override;
 
-rdc_status_t RdcLibraryLoader::load(const char* filename) {
-    if (filename == nullptr) {
-        return RDC_ST_FAIL_LOAD_MODULE;
-    }
-    if (libHandler_) {
-        unload();
-    }
+    // Fetch
+    rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
+            uint32_t fields_count, rdc_field_value_f callback,
+            void*  user_data) override;
 
-    std::lock_guard<std::mutex> guard(library_mutex_);
-    libHandler_ = dlopen(filename, RTLD_LAZY);
-    if (!libHandler_) {
-        char* error = dlerror();
-        RDC_LOG(RDC_ERROR, "Fail to open " << filename <<": " << error);
-        return RDC_ST_FAIL_LOAD_MODULE;
-    }
+    rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
+            uint32_t fields_count) override;
+    rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
+            uint32_t fields_count) override;
 
-    return RDC_ST_OK;
-}
+    explicit RdcSmiLib(const RdcMetricFetcherPtr& mf);
 
-rdc_status_t RdcLibraryLoader::unload() {
-        std::lock_guard<std::mutex> guard(library_mutex_);
-        if (libHandler_) {
-            dlclose(libHandler_);
-            libHandler_ = nullptr;
-        }
-        return RDC_ST_OK;
-}
-
-RdcLibraryLoader::~RdcLibraryLoader() {
-        unload();
-}
+ private:
+    RdcMetricFetcherPtr metric_fetcher_;
+};
 
 }  // namespace rdc
 }  // namespace amd
+
+#endif  // RDC_LIB_IMPL_RDCSMILIB_H_

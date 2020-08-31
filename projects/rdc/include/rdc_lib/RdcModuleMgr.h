@@ -19,46 +19,26 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#ifndef RDC_LIB_RDCMODULEMGR_H_
+#define RDC_LIB_RDCMODULEMGR_H_
 
-#include "rdc_lib/RdcLibraryLoader.h"
+#include <memory>
+#include "rdc_lib/rdc_common.h"
+#include "rdc/rdc.h"
+#include "rdc_lib/RdcTelemetry.h"
 
 namespace amd {
 namespace rdc {
 
-RdcLibraryLoader::RdcLibraryLoader(): libHandler_(nullptr) {
-}
+class RdcModuleMgr {
+ public:
+    virtual RdcTelemetryPtr get_telemetry_module() = 0;
+};
 
-rdc_status_t RdcLibraryLoader::load(const char* filename) {
-    if (filename == nullptr) {
-        return RDC_ST_FAIL_LOAD_MODULE;
-    }
-    if (libHandler_) {
-        unload();
-    }
-
-    std::lock_guard<std::mutex> guard(library_mutex_);
-    libHandler_ = dlopen(filename, RTLD_LAZY);
-    if (!libHandler_) {
-        char* error = dlerror();
-        RDC_LOG(RDC_ERROR, "Fail to open " << filename <<": " << error);
-        return RDC_ST_FAIL_LOAD_MODULE;
-    }
-
-    return RDC_ST_OK;
-}
-
-rdc_status_t RdcLibraryLoader::unload() {
-        std::lock_guard<std::mutex> guard(library_mutex_);
-        if (libHandler_) {
-            dlclose(libHandler_);
-            libHandler_ = nullptr;
-        }
-        return RDC_ST_OK;
-}
-
-RdcLibraryLoader::~RdcLibraryLoader() {
-        unload();
-}
+typedef std::shared_ptr<RdcModuleMgr> RdcModuleMgrPtr;
 
 }  // namespace rdc
 }  // namespace amd
+
+
+#endif  // RDC_LIB_RDCMODULEMGR_H_
