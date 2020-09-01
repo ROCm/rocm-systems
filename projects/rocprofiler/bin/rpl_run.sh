@@ -443,6 +443,7 @@ while [ 1 ] ; do
   elif [ "$1" = "--parallel-kernels" ] ; then
     ARG_VAL=0
     export ROCP_K_CONCURRENT=1
+    export AQLPROFILE_READ_API=1
   elif [ "$1" = "--verbose" ] ; then
     ARG_VAL=0
     export ROCP_VERBOSE_MODE=1
