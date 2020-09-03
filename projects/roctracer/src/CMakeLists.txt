@@ -11,6 +11,9 @@ execute_process ( COMMAND sh -xc "${CMAKE_C_COMPILER} -E ${HIP_PATH}/include/hip
 execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/gen_ostream_ops.py -in ${GEN_INC_DIR}/hip_runtime_api_pp.h -out ${GEN_INC_DIR}/hip_ostream_ops.h" )
 execute_process ( COMMAND sh -xc "${CMAKE_C_COMPILER} -E ${HSA_RUNTIME_INC_PATH}/hsa.h > ${GEN_INC_DIR}/hsa_pp.h" )
 execute_process ( COMMAND sh -xc "${ROOT_DIR}/script/gen_ostream_ops.py -in ${GEN_INC_DIR}/hsa_pp.h -out ${GEN_INC_DIR}/hsa_ostream_ops.h" )
+execute_process ( COMMAND sh -xc "mkdir ${GEN_INC_DIR}/rocprofiler" )
+execute_process ( COMMAND sh -xc "ln -s ${ROOT_DIR}/../rocprofiler/inc/rocprofiler.h ${GEN_INC_DIR}/rocprofiler/rocprofiler.h" )
+execute_process ( COMMAND sh -xc "ln -s ${ROOT_DIR}/../rocprofiler/src/core/activity.h ${GEN_INC_DIR}/rocprofiler/activity.h" )
 
 # Build dynamic Library object
 set ( TARGET_LIB ${TARGET_NAME} )
@@ -22,14 +25,14 @@ set ( LIB_SRC
   ${LIB_DIR}/util/hsa_rsrc_factory.cpp
 )
 add_library ( ${TARGET_LIB} ${LIBRARY_TYPE} ${LIB_SRC} )
-target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HIP_INC_DIR} ${HCC_INC_DIR} ${HSA_KMT_INC_PATH} ${GEN_INC_DIR} )
+target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HIP_INC_DIR} ${HSA_KMT_INC_PATH} ${ROCM_INC_PATH} ${GEN_INC_DIR} )
 target_link_libraries( ${TARGET_LIB} PRIVATE ${HSA_RUNTIME_LIB} c stdc++ )
 
 # Build KFD/Thunk tracing library
 set ( KFD_LIB "kfdwrapper64" )
 set ( KFD_LIB_SRC ${GEN_SRC_DIR}/kfd_wrapper.cpp)
 add_library ( ${KFD_LIB} SHARED ${KFD_LIB_SRC} )
-target_include_directories ( ${KFD_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HSA_KMT_INC_PATH} ${GEN_INC_DIR} )
+target_include_directories ( ${KFD_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_KMT_INC_PATH} ${GEN_INC_DIR} )
 target_link_libraries( ${KFD_LIB} PRIVATE c stdc++ )
 
 # Build ROCTX tracing library
@@ -39,5 +42,5 @@ set ( ROCTX_LIB_SRC
   ${LIB_DIR}/roctx/roctx_intercept.cpp
 )
 add_library ( ${ROCTX_LIB} SHARED ${ROCTX_LIB_SRC} )
-target_include_directories ( ${ROCTX_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${GEN_INC_DIR} )
+target_include_directories ( ${ROCTX_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${GEN_INC_DIR} )
 target_link_libraries( ${ROCTX_LIB} PRIVATE c stdc++ )

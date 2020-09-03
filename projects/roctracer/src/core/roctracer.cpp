@@ -686,6 +686,8 @@ PUBLIC_API const char* roctracer_op_string(
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_API:
       return roctracer::hsa_support::GetApiName(op);
+    case ACTIVITY_DOMAIN_HSA_EVT:
+      return roctracer::RocpLoader::Instance().GetEvtName(op);
     case ACTIVITY_DOMAIN_HSA_OPS:
       return roctracer::RocpLoader::Instance().GetOpName(op);
     case ACTIVITY_DOMAIN_HCC_OPS:
@@ -731,6 +733,7 @@ static inline uint32_t get_op_num(const uint32_t& domain) {
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: return HSA_OP_ID_NUMBER;
     case ACTIVITY_DOMAIN_HSA_API: return HSA_API_ID_NUMBER;
+    case ACTIVITY_DOMAIN_HSA_EVT: return HSA_EVT_ID_NUMBER;
     case ACTIVITY_DOMAIN_HCC_OPS: return HIP_OP_ID_NUMBER;
     case ACTIVITY_DOMAIN_HIP_API: return HIP_API_ID_NUMBER;
     case ACTIVITY_DOMAIN_KFD_API: return KFD_API_ID_NUMBER;
@@ -760,11 +763,16 @@ static roctracer_status_t roctracer_enable_callback_fun(
 #if 0
       if (op == HSA_API_ID_DISPATCH) {
         const bool succ = roctracer::RocpLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
-        if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::EnableActivityCallback error(" << op << ") failed");
+        if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::RegisterApiCallback error(" << op << ") failed");
         break;
       }
 #endif
       roctracer::hsa_support::cb_table.set(op, callback, user_data);
+      break;
+    }
+    case ACTIVITY_DOMAIN_HSA_EVT: {
+      const bool succ = roctracer::RocpLoader::Instance().RegisterEvtCallback(op, (void*)callback, user_data);
+      if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::RegisterEvtCallback error(" << op << ") failed");
       break;
     }
     case ACTIVITY_DOMAIN_HCC_OPS: break;
@@ -873,6 +881,11 @@ static roctracer_status_t roctracer_disable_callback_fun(
         const hipError_t hip_err = roctracer::HipLoader::Instance().RemoveActivityCallback(op);
         if (hip_err != hipSuccess) HIP_EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIPAPI: HIP::RemoveActivityCallback op(" << op << "), error(" << hip_err << ")");
       }
+      break;
+    }
+    case ACTIVITY_DOMAIN_HSA_EVT: {
+      const bool succ = roctracer::RocpLoader::Instance().RemoveEvtCallback(op);
+      if (succ == false) HCC_EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::RemoveEvtCallback error(" << op << ") failed");
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
@@ -984,6 +997,7 @@ static roctracer_status_t roctracer_enable_activity_fun(
       break;
     }
     case ACTIVITY_DOMAIN_HSA_API: break;
+    case ACTIVITY_DOMAIN_HSA_EVT: break;
     case ACTIVITY_DOMAIN_KFD_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
       const bool init_phase = (roctracer::HccLoader::GetRef() == NULL);
@@ -1080,6 +1094,7 @@ static roctracer_status_t roctracer_disable_activity_fun(
       break;
     }
     case ACTIVITY_DOMAIN_HSA_API: break;
+    case ACTIVITY_DOMAIN_HSA_EVT: break;
     case ACTIVITY_DOMAIN_KFD_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
       if (roctracer::HccLoader::Instance().Enabled() == false) break;
@@ -1248,6 +1263,9 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
     }
     case ACTIVITY_DOMAIN_KFD_API: {
       roctracer::kfd_support::intercept_KFDApiTable();
+      break;
+    }
+    case ACTIVITY_DOMAIN_HSA_EVT: {
       break;
     }
     case ACTIVITY_DOMAIN_HSA_API: {

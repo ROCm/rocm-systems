@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <hsa_ext_amd.h>
 
 #include <roctracer.h>
+#include <rocprofiler/activity.h>
 
 // HSA OP ID enumeration
 enum hsa_op_id_t {
@@ -34,7 +35,7 @@ enum hsa_op_id_t {
   HSA_OP_ID_COPY = 1,
   HSA_OP_ID_BARRIER = 2,
   HSA_OP_ID_RESERVED1 = 3,
-  HSA_OP_ID_NUMBER = 4
+  HSA_OP_ID_NUMBER
 };
 
 #ifdef __cplusplus

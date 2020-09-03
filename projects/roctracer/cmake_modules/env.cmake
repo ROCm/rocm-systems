@@ -151,10 +151,10 @@ get_filename_component ( HSA_RUNTIME_LIB_PATH "${HSA_RUNTIME_LIB}" DIRECTORY )
 
 find_library ( HSA_KMT_LIB "libhsakmt.so" )
 get_filename_component ( HSA_KMT_LIB_PATH "${HSA_KMT_LIB}" DIRECTORY )
-get_filename_component ( ROCM_ROOT_DIR "${HSA_KMT_LIB_PATH}" DIRECTORY )
-
 set ( HSA_KMT_INC_PATH "${HSA_KMT_LIB_PATH}/../include" )
-set ( ROCM_INC_PATH "${HSA_KMT_INC_PATH}" )
+
+get_filename_component ( ROCM_ROOT_DIR "${HSA_KMT_LIB_PATH}" DIRECTORY )
+set ( ROCM_INC_PATH "${ROCM_ROOT_DIR}/include" )
 
 ## Basic Tool Chain Information
 message ( "----------------NBit: ${NBIT}" )
@@ -167,6 +167,7 @@ message ( "-----HSA-Runtime-Inc: ${HSA_RUNTIME_INC_PATH}" )
 message ( "-----HSA-Runtime-Lib: ${HSA_RUNTIME_LIB_PATH}" )
 message ( "----HSA_KMT_LIB_PATH: ${HSA_KMT_LIB_PATH}" )
 message ( "-------ROCM_ROOT_DIR: ${ROCM_ROOT_DIR}" )
+message ( "-------ROCM_INC_PATH: ${ROCM_INC_PATH}" )
 message ( "-------------KFD-Inc: ${HSA_KMT_INC_PATH}" )
 message ( "-------------HIP-Inc: ${HIP_INC_DIR}" )
 message ( "-------------HIP-VDI: ${HIP_VDI}" )

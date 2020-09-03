@@ -50,7 +50,8 @@ set ( HSA_REV "19b1191" )
 set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
 
 ## build HIP tests
-set ( INC_PATH "${INC_PATH} ${PROJECT_BINARY_DIR}/inc" )
+set ( GEN_INC_DIR ${PROJECT_BINARY_DIR}/inc )
+set ( INC_PATH "${INC_PATH} ${GEN_INC_DIR}" )
 set ( TEST_ENV HIP_VDI=${HIP_VDI} ROCM_PATH=${ROCM_ROOT_DIR} HSA_PATH=${ROCM_ROOT_DIR}/hsa INC_PATH=${INC_PATH} LIB_PATH=${LIB_PATH} HIPCC_VERBOSE=3 )
 add_custom_target( mytest
   COMMAND ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose"
@@ -76,9 +77,23 @@ if ( DEFINED ROCTRACER_TARGET )
   set ( TEST_LIB "tracer_tool" )
   set ( TEST_LIB_SRC ${TEST_DIR}/tool/tracer_tool.cpp ${UTIL_SRC} )
   add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
-  target_include_directories ( ${TEST_LIB} PRIVATE ${HSA_TEST_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_HSA_INC_PATH} ${HIP_INC_DIR} ${HCC_INC_DIR} ${HSA_KMT_INC_PATH} ${PROJECT_BINARY_DIR}/inc )
+  target_include_directories ( ${TEST_LIB} PRIVATE ${HSA_TEST_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${HIP_INC_DIR} ${HSA_KMT_INC_PATH} ${GEN_INC_DIR} )
   target_link_libraries ( ${TEST_LIB} ${ROCTRACER_TARGET} ${HSA_RUNTIME_LIB} c stdc++ dl pthread rt )
 endif ()
+
+## Build hsaco_test.cpp referenc test
+set ( CO_LIB_NAME "hsaco_test" )
+set ( CO_LIB_SRC ${TEST_DIR}/app/hsaco_test.cpp )
+add_library ( ${CO_LIB_NAME} SHARED ${CO_LIB_SRC} )
+target_include_directories ( ${CO_LIB_NAME} PRIVATE ${HSA_RUNTIME_INC_PATH} )
+target_link_libraries ( ${CO_LIB_NAME} ${HSA_RUNTIME_LIB} c stdc++ )
+
+## Build codeobj event test
+set ( CO_LIB_NAME "codeobj_test" )
+set ( CO_LIB_SRC ${TEST_DIR}/app/codeobj_test.cpp )
+add_library ( ${CO_LIB_NAME} SHARED ${CO_LIB_SRC} )
+target_include_directories ( ${CO_LIB_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${GEN_INC_DIR} ${HSA_RUNTIME_INC_PATH} ${ROCM_INC_PATH} )
+target_link_libraries ( ${CO_LIB_NAME} ${ROCTRACER_TARGET} c stdc++ )
 
 ## Build HSA test
 execute_process ( COMMAND sh -xc "if [ ! -e ${TEST_DIR}/hsa ] ; then git clone https://github.com/ROCmSoftwarePlatform/hsa-class.git ${TEST_DIR}/hsa; fi" )

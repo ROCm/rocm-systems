@@ -10,3 +10,5 @@ MatrixTranspose_hip_flush_trace --check-order .*
 MatrixTranspose_kfd_trace --check-events .*
 ctrl_hsa_trace --check-event .*
 ctrl_hsa_input_trace --check-event .*
+hsa_co_trace --check-none
+code_obj_trace --check-none
