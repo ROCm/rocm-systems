@@ -2,10 +2,10 @@
 from __future__ import print_function
 import os, sys, re
 
-OUT_H = 'inc/kfd_prof_str.h' 
-OUT_CPP = 'src/kfd/kfd_wrapper.cpp'
-API_HEADERS_H = ( 
-  ('HSAKMTAPI', 'hsakmt.h'), 
+OUT_H = 'inc/kfd_prof_str.h'
+OUT_CPP = 'src/kfd_wrapper.cpp'
+API_HEADERS_H = (
+  ('HSAKMTAPI', 'hsakmt.h'),
 )
 
 LICENSE = \
@@ -38,7 +38,7 @@ def fatal(module, msg):
   sys.exit(1)
 
 # Get next text block
-def NextBlock(pos, record): 
+def NextBlock(pos, record):
   if len(record) == 0: return pos
 
   space_pattern = re.compile(r'(\s+)')
@@ -82,8 +82,8 @@ class API_TableParser:
 
     self.inp = open(header, 'r')
 
-    self.beg_pattern = re.compile(name) 
-    self.end_pattern = re.compile('.*\)\s*;\s*$'); 
+    self.beg_pattern = re.compile(name)
+    self.end_pattern = re.compile('.*\)\s*;\s*$');
     self.array = []
     self.parse()
 
@@ -92,10 +92,10 @@ class API_TableParser:
     return re.sub(r'^\s+', r' ', line)
 
   def fix_comment_line(self, line):
-    return re.sub(r'\/\/.*', r'', line) 
+    return re.sub(r'\/\/.*', r'', line)
 
   def remove_ret_line(self, line):
-    return re.sub(r'\n', r'', line) 
+    return re.sub(r'\n', r'', line)
 
   # check for start record
   def is_start(self, record):
@@ -107,7 +107,7 @@ class API_TableParser:
 
   # check for declaration entry record
   def is_entry(self, record):
-    return re.match(r'^\s*HSAKMTAPI\s*(.*)\s*\((.*)\)', record) 
+    return re.match(r'^\s*HSAKMTAPI\s*(.*)\s*\((.*)\)', record)
 
   # parse method
   def parse(self):
@@ -121,7 +121,7 @@ class API_TableParser:
       line = self.norm_line(line)
       line = self.fix_comment_line(line)
 
-      if cumulate == 1: record += " " + line; 
+      if cumulate == 1: record += " " + line;
       else: record = line;
       if self.is_start(line): rettype = prev_line.strip(); cumulate = 1; prev_line = line; continue;
       if self.is_end(line): record = self.remove_ret_line(record); cumulate = 0; active = 1;
@@ -132,7 +132,7 @@ class API_TableParser:
           mycall_full = rettype  + " " + m.group(1) + ' (' + m.group(2) + ')'
           mycall = m.group(1)
           self.full_fct[mycall] = mycall_full
-          self.array.append(mycall) 
+          self.array.append(mycall)
           rettype = "";
       prev_line = line
 
@@ -173,7 +173,7 @@ class API_DeclParser:
     struct = {'ret': '', 'args': '', 'astr': {}, 'alst': [], 'tlst': []}
     record = re.sub(r'^\s+', r'', record)
     record = re.sub(r'\s*(\*+)\s*', r'\1 ', record)
-    rind = NextBlock(0, record) 
+    rind = NextBlock(0, record)
     struct['ret'] = record[0:rind]
     pos = record.find('(')
     end = NextBlock(pos, record);
@@ -184,7 +184,7 @@ class API_DeclParser:
     struct['args'] = re.sub(r',', r', ', args)
     if args == "void":
       return struct
-        
+
     if len(args) == 0: return struct
 
     pos = 0
@@ -217,7 +217,7 @@ class API_DeclParser:
 
   # parse given api
   def parse(self, call, full_fct):
-    if call in full_fct: 
+    if call in full_fct:
       self.data[call] = self.get_args(full_fct[call])
     else:
       self.data[call] = self.get_args(call)
@@ -238,7 +238,7 @@ class API_DescrParser:
     self.api_calls = {}
     self.api_rettypes = set()
     self.api_id = {}
-    
+
     api_data = {}
     full_fct = {}
     api_list = []
@@ -271,7 +271,7 @@ class API_DescrParser:
     self.ns_calls = ns_calls
 
     self.content_h += "// automatically generated\n\n" + license + '\n'
-    
+
     self.content_h += "/////////////////////////////////////////////////////////////////////////////\n"
     for call in self.ns_calls:
       self.content_h += '// ' + call + ' was not parsed\n'
@@ -298,7 +298,7 @@ class API_DescrParser:
     self.content_h += 'namespace kfd_support {\n'
 
     self.add_section('API get_name function', '    ', self.gen_get_name)
-    self.add_section('API get_code function', '  ', self.gen_get_code) 
+    self.add_section('API get_code function', '  ', self.gen_get_code)
 
     self.add_section('API intercepting code', '', self.gen_intercept_decl)
     self.add_section('API intercepting code', '', self.gen_intercept)
@@ -369,7 +369,7 @@ class API_DescrParser:
       self.content_h += '  KFD_API_ID_NUMBER = ' + str(n) + ',\n'
       self.content_h += '  KFD_API_ID_ANY = ' + str(n + 1) + ',\n'
       self.content_h += '};\n'
-    
+
   # generate API args structure
   def gen_arg_struct(self, n, name, call, struct):
     if n == -1:
@@ -396,7 +396,7 @@ class API_DescrParser:
     else:
       self.content_h += '  } args;\n'
       self.content_h += '} kfd_api_data_t;\n'
-    
+
   # generate API callbacks
   def gen_callbacks(self, n, name, call, struct):
     if n == -1:
@@ -406,7 +406,7 @@ class API_DescrParser:
     if call != '-':
       call_id = self.api_id[call];
       ret_type = struct['ret']
-      self.content_h += ret_type + ' ' + call + '_callback(' + struct['args'] + ') {\n'  # 'static '  + 
+      self.content_h += ret_type + ' ' + call + '_callback(' + struct['args'] + ') {\n'  # 'static '  +
       self.content_h += '  if (' + name + '_table == NULL) intercept_KFDApiTable();\n'
       self.content_h += '  kfd_api_data_t api_data{};\n'
       for var in struct['alst']:
@@ -448,7 +448,7 @@ class API_DescrParser:
 
     if call != '-':
       self.content_h += '  typedef decltype(' + name + '_table_t::' + call + '_fn) ' + call + '_t;\n'
-      self.content_h += '  ' + name + '_table->' + call + '_fn = (' + call + '_t)' + 'dlsym(RTLD_NEXT,\"'  + call + '\");\n' 
+      self.content_h += '  ' + name + '_table->' + call + '_fn = (' + call + '_t)' + 'dlsym(RTLD_NEXT,\"'  + call + '\");\n'
 
   # generate API name function
   def gen_get_name(self, n, name, call, struct):
@@ -493,7 +493,7 @@ class API_DescrParser:
           arg_var = arg_list[ind]
           arg_val = 'api_data.args.' + call + '.' + arg_var
           if re.search(r'MemFlags',arg_var):
-            continue 
+            continue
           self.content_h += '      typedef decltype(' + arg_val.replace("[]","") + ') arg_val_type_t' + str(ind) + ';\n'
           self.content_h += '      roctracer::kfd_support::output_streamer<arg_val_type_t' + str(ind) + '>::put(out, ' + arg_val.replace("[]","") + ')'
           if ind < len(arg_list)-1: self.content_h += ' << ", ";\n'
@@ -510,11 +510,11 @@ class API_DescrParser:
       self.content_h += '      abort();\n'
       self.content_h += '  }\n'
       self.content_h += '  return out;\n'
-      self.content_h += '}\n'  
+      self.content_h += '}\n'
       self.content_h += '#endif\n'
-      self.content_cpp += 'inline std::ostream& operator<< (std::ostream& out, const HsaMemFlags& v) { out << "HsaMemFlags"; return out; }\n' 
+      self.content_cpp += 'inline std::ostream& operator<< (std::ostream& out, const HsaMemFlags& v) { out << "HsaMemFlags"; return out; }\n'
 
-  # generate PUBLIC_API for all API fcts 
+  # generate PUBLIC_API for all API fcts
   def gen_public_api(self, n, name, call, struct):
     if n == -1:
       self.content_cpp += 'extern "C" {\n'
@@ -540,21 +540,21 @@ class API_DescrParser:
 # main
 # Usage
 if len(sys.argv) != 3:
-  print ("Usage:", sys.argv[0], " <rocTracer root> <KFD include path>", file = sys.stderr)
+  print ("Usage:", sys.argv[0], " <OUT prefix> <KFD include path>", file = sys.stderr)
   sys.exit(1)
 else:
-  ROOT = sys.argv[1] + '/'
+  PREFIX = sys.argv[1] + '/'
   KFD_DIR = sys.argv[2] + '/'
 
 descr = API_DescrParser(OUT_H, KFD_DIR, API_HEADERS_H, LICENSE)
 
-out_file = ROOT + OUT_H
+out_file = PREFIX + OUT_H
 print ('Generating "' + out_file + '"')
 f = open(out_file, 'w')
 f.write(descr.content_h[:-1])
 f.close()
 
-out_file = ROOT + OUT_CPP
+out_file = PREFIX + OUT_CPP
 print ('Generating "' + out_file + '"')
 f = open(out_file, 'w')
 f.write(descr.content_cpp[:-1])

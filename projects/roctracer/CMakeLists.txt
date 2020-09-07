@@ -100,12 +100,14 @@ set ( PUBLIC_HEADERS
   roctracer_kfd.h
   roctracer_roctx.h
   roctracer_cb_table.h
+  ext/prof_protocol.h
+  ext/hsa_rt_utils.hpp
+)
+set ( GEN_HEADERS
   hip_ostream_ops.h
   hsa_prof_str.h
   kfd_ostream_ops.h
   kfd_prof_str.h
-  ext/prof_protocol.h
-  ext/hsa_rt_utils.hpp
 )
 
 if ( ${LIBRARY_TYPE} STREQUAL SHARED )
@@ -136,6 +138,11 @@ foreach ( header ${PUBLIC_HEADERS} )
   get_filename_component ( header_subdir ${header} DIRECTORY )
   install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/${header} DESTINATION ${DEST_NAME}/include/${header_subdir} )
   install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/${header} DESTINATION include/${DEST_NAME}/${header_subdir} )
+endforeach ()
+foreach ( header ${GEN_HEADERS} )
+  get_filename_component ( header_subdir ${header} DIRECTORY )
+  install ( FILES ${PROJECT_BINARY_DIR}/inc/${header} DESTINATION ${DEST_NAME}/include/${header_subdir} )
+  install ( FILES ${PROJECT_BINARY_DIR}/inc/${header} DESTINATION include/${DEST_NAME}/${header_subdir} )
 endforeach ()
 #install ( FILES ${PROJECT_BINARY_DIR}/inc-link DESTINATION include RENAME ${DEST_NAME} )
 install ( FILES ${PROJECT_BINARY_DIR}/so-link DESTINATION lib RENAME ${ROCTRACER_LIBRARY}.so )

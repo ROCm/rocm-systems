@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash -e
 SRC_DIR=`dirname $0`
 COMPONENT="roctracer"
 ROCM_PATH="${ROCM_PATH:=/opt/rocm}"
