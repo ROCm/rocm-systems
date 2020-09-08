@@ -614,29 +614,43 @@ def setClockOverDrive(deviceList, clktype, value, autoRespond):
         return
     confirmOutOfSpecWarning(autoRespond)
     for device in deviceList:
-        if clktype == 'mclk':
-            printLog(None, 'Unable to set mclk overdrive, functionality is deprecated', None)
+        if int(value) < 0:
+            printErrLog(device, 'Unable to set OverDrive')
+            logging.debug('Overdrive cannot be less than 0%')
+            RETCODE = 1
             return
-        elif clktype == 'sclk':
-            if int(value) < 0:
-                printErrLog(device, 'Unable to set OverDrive')
-                logging.debug('Overdrive cannot be less than 0%')
-                RETCODE = 1
-                return
-            if int(value) > 20:
-                printLog(device, 'Setting OverDrive to 20%', None)
-                logging.debug('OverDrive cannot be set to a value greater than 20%')
-                value = '20'
+        if int(value) > 20:
+            printLog(device, 'Setting OverDrive to 20%', None)
+            logging.debug('OverDrive cannot be set to a value greater than 20%')
+            value = '20'
+        if getPerfLevel(device) != 'MANUAL':
             ret = rocmsmi.rsmi_dev_perf_level_set(device, rsmi_dev_perf_level_t(3))
             if rsmi_ret_ok(ret, device):
                 printLog(device, 'Performance level set to manual', None)
             else:
                 printErrLog(device, 'Unable to set performance level to manual')
+        if clktype == 'mclk':
+            fsFile = os.path.join('/sys/class/drm', 'card%d' % (device), 'device', 'pp_mclk_od')
+            if not os.path.isfile(fsFile):
+                printLog(None, 'Unable to write to sysfs file', None)
+                logging.debug('%s does not exist', fsFile)
+                continue
+            try:
+                logging.debug('Writing value \'%s\' to file \'%s\'', value, fsFile)
+                with open(fsFile, 'w') as fs:
+                    fs.write(value + '\n')
+            except (IOError, OSError):
+                printLog(None, 'Unable to write to sysfs file %s' % fsFile, None)
+                logging.warning('IO or OS error')
+                RETCODE = 1
+                continue
+            printLog(device, 'Successfully set %s OverDrive to %s%%' % (clktype, value), None)
+        elif clktype == 'sclk':
             ret = rocmsmi.rsmi_dev_overdrive_level_set(device, rsmi_dev_perf_level_t(int(value)))
             if rsmi_ret_ok(ret, device):
-                printLog(device, 'Successfully set sclk OverDrive to %s%%' % (value), None)
+                printLog(device, 'Successfully set %s OverDrive to %s%%' % (clktype, value), None)
             else:
-                printLog(device, 'Unable to set OverDrive to %s%%' % (value), None)
+                printLog(device, 'Unable to set %s OverDrive to %s%%' % (clktype, value), None)
         else:
             printErrLog(device, 'Unable to set OverDrive')
             logging.error('Unsupported clock type %s', clktype)
@@ -1271,17 +1285,30 @@ def showOverDrive(deviceList, odtype):
     @param deviceList: List of DRM devices (can be a single-item list)
     @param odtype: [sclk|mclk] OverDrive type
     """
-    od = c_uint32()
+    rsmi_od = c_uint32()
     printLogSpacer(' OverDrive Level ')
     for device in deviceList:
         if odtype == 'sclk':
-            ret = rocmsmi.rsmi_dev_overdrive_level_get(device, byref(od))
             odStr = 'GPU'
+            ret = rocmsmi.rsmi_dev_overdrive_level_get(device, byref(rsmi_od))
+            od = rsmi_od.value
+            if not rsmi_ret_ok(ret, device):
+                printErrLog(device, 'Unable to retrieve sclk OverDrive level')
         elif odtype == 'mclk':
-            # Legacy
             odStr = 'GPU Memory'
-        if rsmi_ret_ok(ret, device):
-            printLog(device, odStr + ' OverDrive value (%)', od.value)
+            filePath = os.path.join('/sys/class/drm', 'card%d' % (device), 'device', 'pp_mclk_od')
+            if filePath:
+                try:
+                    with open(filePath, 'r') as fileContents:
+                        od = fileContents.read().rstrip('\n')
+                except:
+                    printErrLog(device, 'Unable to retrieve mclk OverDrive level')
+                    return None
+        else:
+            printErrLog(device, 'Unable to retrieve OverDrive')
+            logging.error('Unsupported clock type %s', clktype)
+            RETCODE = 1
+        printLog(device, odStr + ' OverDrive value (%)', od)
     printLogSpacer()
 
 
@@ -2361,7 +2388,7 @@ if __name__ == '__main__':
     if args.showoverdrive:
         showOverDrive(deviceList, 'sclk')
     if args.showmemoverdrive:
-        printLog(None, 'MCLK OverDrive is deprecated', None)
+        showOverDrive(deviceList, 'mclk')
     if args.showmaxpower:
         showMaxPower(deviceList)
     if args.showprofile:
