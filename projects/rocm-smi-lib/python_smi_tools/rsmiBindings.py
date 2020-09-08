@@ -7,8 +7,7 @@ import ctypes.util
 from ctypes import *
 from enum import Enum
 
-path_librocm = '/opt/rocm/rocm_smi/lib/librocm_smi64.so'
-# ----------> TODO: ^^ Make the above path dynamic ^^ (try to look for $DIR/../lib)
+path_librocm = 'librocm_smi64.so'
 # ----------> TODO: Support static libs as well as SO
 
 try:
