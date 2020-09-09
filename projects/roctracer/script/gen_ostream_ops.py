@@ -167,7 +167,7 @@ def gen_cppheader(infilepath, outfilepath, structs_depth):
             continue
         if len(cppHeader.classes[c]["properties"]["public"])!=0:
           if apiname.lower() == 'hip' or apiname.lower() == 'hsa':
-            f.write("std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n")
+            f.write("inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n")
             f.write("{\n")
             f.write("  roctracer::" + apiname.lower() + "_support::operator<<(out, '{');\n")
             if structs_depth != -1:
