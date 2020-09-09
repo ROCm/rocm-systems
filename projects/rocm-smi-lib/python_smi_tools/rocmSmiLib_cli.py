@@ -1435,14 +1435,18 @@ def showPcieBw(deviceList):
 
     @param deviceList: List of DRM devices (can be a single-item list)
     """
-    bandwidth = create_string_buffer(256)
+    sent = c_uint64()
+    received = c_uint64()
+    max_pkt_sz = c_uint64()
     printLogSpacer(' Measured PCIe Bandwidth ')
     for device in deviceList:
-        ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, bandwidth, 256)
-        # TODO: Use rsmi_dev_pci_throughput_get instead
-        if rsmi_ret_ok(ret, device) and bandwidth.value.decode():
-            printLog(device, 'Estimated maximum PCIe bandwidth over the last second (MB/s)',\
-                     bandwidth.value.decode())
+        ret = rocmsmi.rsmi_dev_pci_throughput_get(device, byref(sent), byref(received), byref(max_pkt_sz))
+        if rsmi_ret_ok(ret, device):
+            # Use 1024.0 to ensure that the result is a float and not integer division
+            bw = ((received.value + sent.value) * max_pkt_sz.value) / 1024.0 / 1024.0
+            # Use the bwstr below to control precision on the string
+            bwstr = '%.3f' % bw
+            printLog(device, 'Estimated maximum PCIe bandwidth over the last second (MB/s)', bwstr)
         else:
             logging.debug('GPU PCIe bandwidth usage not supported')
     printLogSpacer()
