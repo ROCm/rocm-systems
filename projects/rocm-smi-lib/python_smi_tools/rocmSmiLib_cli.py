@@ -23,9 +23,9 @@ from rsmiBindings import *
 # Major version - Increment when backwards-compatibility breaks
 # Minor version - Increment when adding a new feature, set to 0 when major is incremented
 # Patch version - Increment when adding a fix, set to 0 when minor is incremented
-SMI_MAJ=1
-SMI_MIN=4
-SMI_PAT=1
+SMI_MAJ = 1
+SMI_MIN = 4
+SMI_PAT = 1
 __version__ = '%s.%s.%s' % (SMI_MAJ, SMI_MIN, SMI_PAT)
 
 # Set to 1 if an error occurs
@@ -76,7 +76,7 @@ def formatJson(device, log):
             continue
         logTuple = line.split(': ')
         if str(device) != 'system':
-            JSON_DATA['card'+str(device)][logTuple[0]] = logTuple[1].strip()
+            JSON_DATA['card' + str(device)][logTuple[0]] = logTuple[1].strip()
         else:
             JSON_DATA['system'][logTuple[0]] = logTuple[1].strip()
 
@@ -103,16 +103,40 @@ def formatCsv(deviceList):
         for val in headerkeys:
             try:
                 if str(dev) != 'system':
-                # Remove commas like the ones in PCIe speed
-                    outStr += '%s,' % JSON_DATA['card' + str(dev)][val].replace(',','')
+                    # Remove commas like the ones in PCIe speed
+                    outStr += '%s,' % JSON_DATA['card' + str(dev)][val].replace(',', '')
                 else:
-                    outStr += '%s,' % JSON_DATA['system'][val].replace(',','')
+                    outStr += '%s,' % JSON_DATA['system'][val].replace(',', '')
             except KeyError as e:
                 # If the key doesn't exist (like dcefclock on Fiji, or unsupported functionality)
                 outStr += 'N/A,'
         # Drop the trailing ',' and replace it with a \n
         outStr = '%s\n' % outStr[0:-1]
     return outStr
+
+def formatMatrixToJSON(deviceList, matrix, metricName):
+    """ Format symmetric matrix of GPU permutations to become JSON print-ready.
+
+    @param deviceList: List of DRM devices (can be a single-item list)
+    @param metricName: Title of the item to print to the log
+    @param matrix: symmetric matrix full of values of every permutation of DRM devices.
+    example:
+           GPU0         GPU1
+    GPU0   0            40
+    GPU1   40           0
+
+    Where matrix content is: [[0, 40], [40, 0]]
+    """
+    devices_ind = range(len(deviceList))
+    for row_indx in devices_ind:
+        # Start at row_indx +1 to avoid printing repeated values ( GPU1 x GPU2 is the same as GPU2 x GPU1 )
+        for col_ind in range(row_indx + 1, len(deviceList)):
+            try:
+                valueStr = matrix[deviceList[row_indx]][deviceList[col_ind]].value
+            except AttributeError:
+                valueStr = matrix[deviceList[row_indx]][deviceList[col_ind]]
+
+            printSysLog(metricName.format(deviceList[row_indx], deviceList[col_ind]), valueStr)
 
 
 def getBus(device):
@@ -498,8 +522,8 @@ def printTableLog(column_headers, data_matrix, device=None, tableName=None, anch
             print('{:{anc}{width}}'.format(cell, anc=anchor, width=len(column_headers[index])), end=v_delim)
         printEmptyLine()
 
-def printTable(space, displayString, v_delim=" "):
-    """ Print out every line of a matrix table
+def printTableRow(space, displayString, v_delim=" "):
+    """ Print out a line of a matrix table
 
     @param space: The item's spacing to print
     @param displayString: The item's value to print
@@ -1016,7 +1040,7 @@ def showAllConcise(deviceList):
         sys.exit(1)
     printLogSpacer(' Concise Info ')
     header = ['GPU', 'Temp', 'AvgPwr', 'SCLK', 'MCLK', 'Fan', 'Perf', 'PwrCap', 'VRAM%', 'GPU%']
-    head_widths = [len(head)+2 for head in header]
+    head_widths = [len(head) + 2 for head in header]
     values = {}
     for device in deviceList:
         temp = str(getTemp(device, 'edge'))
@@ -1052,12 +1076,12 @@ def showAllConcise(deviceList):
         values['card%s' % (str(device))] = [device, temp, avgPwr, sclk, mclk, fan, str(perf).lower(), pwrCap, mem_use_pct, gpu_busy]
         val_widths = {}
     for device in deviceList:
-        val_widths[device] = [len(str(val))+2 for val in values['card%s' % (str(device))]]
+        val_widths[device] = [len(str(val)) + 2 for val in values['card%s' % (str(device))]]
     max_widths = head_widths
     for device in deviceList:
         for col in range(len(val_widths[device])):
             max_widths[col] = max(max_widths[col], val_widths[device][col])
-    printLog(None, "".join(word.ljust(max_widths[col]) for col,word in zip(range(len(max_widths)),header)), None)
+    printLog(None, "".join(word.ljust(max_widths[col]) for col, word in zip(range(len(max_widths)), header)), None)
     for device in deviceList:
         printLog(None, "".join(str(word).ljust(max_widths[col]) for col,word in zip(range(len(max_widths)),values['card%s' % (str(device))])), None)
     printLogSpacer()
@@ -1074,7 +1098,7 @@ def showAllConciseHw(deviceList):
         sys.exit(1)
     printLogSpacer(' Concise Hardware Info ')
     header = ['GPU', 'DID', 'GFX RAS', 'SDMA RAS', 'UMC RAS', 'VBIOS', 'BUS']
-    head_widths = [len(head)+2 for head in header]
+    head_widths = [len(head) + 2 for head in header]
     values = {}
     for device in deviceList:
         gpuid = getId(device)
@@ -1088,12 +1112,12 @@ def showAllConciseHw(deviceList):
         values['card%s' % (str(device))] = [device, gpuid, gfxRas, sdmaRas, umcRas, vbios, bus]
     val_widths = {}
     for device in deviceList:
-        val_widths[device] = [len(str(val))+2 for val in values['card%s' % (str(device))]]
+        val_widths[device] = [len(str(val)) + 2 for val in values['card%s' % (str(device))]]
     max_widths = head_widths
     for device in deviceList:
         for col in range(len(val_widths[device])):
             max_widths[col] = max(max_widths[col], val_widths[device][col])
-    printLog(None, "".join(word.ljust(max_widths[col]) for col,word in zip(range(len(max_widths)),header)), None)
+    printLog(None, "".join(word.ljust(max_widths[col]) for col, word in zip(range(len(max_widths)), header)), None)
     for device in deviceList:
         printLog(None, "".join(str(word).ljust(max_widths[col]) for col,word in zip(range(len(max_widths)),values['card%s' % (str(device))])), None)
     printLogSpacer()
@@ -1144,6 +1168,7 @@ def showClocks(deviceList):
                 else:
                     printLog(device, str(x), str(fr))
             printLog(device, '', None)
+        printLogSpacer(None, '-')  # divider between devices for better visibility
     printLogSpacer()
 
 
@@ -1202,11 +1227,12 @@ def showCurrentFans(deviceList):
 
     for device in deviceList:
         (fanLevel, fanSpeed) = getFanSpeed(device)
+        fanSpeed = round(fanSpeed)
         if PRINT_JSON:
             printLog(device, 'Fan speed (level)', str(fanLevel))
-            printLog(device, 'Fan speed (%)', str(fanSpeed)[:-3])
+            printLog(device, 'Fan speed (%)', str(fanSpeed))
         else:
-            printLog(device, 'Fan Level', str(fanLevel) + ' (%s%%)' %(str(fanSpeed)[:-3]))
+            printLog(device, 'Fan Level', str(fanLevel) + ' (%s%%)' %(str(fanSpeed)))
         ret = rocmsmi.rsmi_dev_fan_rpms_get(device, sensor_ind, byref(rpmSpeed))
         if rsmi_ret_ok(ret, device):
             printLog(device, 'Fan RPM', rpmSpeed.value)
@@ -1625,15 +1651,15 @@ def showProfile(deviceList):
             binaryMaskString = str(format(status.available_profiles, '07b'))[::-1]
             bitMaskPosition = 0
             profileNumber = 0
-            while(bitMaskPosition < 7):
+            while (bitMaskPosition < 7):
                 if binaryMaskString[bitMaskPosition] == '1':
                     profileNumber = profileNumber + 1
                     if 2 ** bitMaskPosition == status.current:
                         printLog(device, '%d. Available power profile (#%d of 7)' % \
-                                (profileNumber, bitMaskPosition + 1),profileString(2 ** bitMaskPosition) + '*')
+                                 (profileNumber, bitMaskPosition + 1), profileString(2 ** bitMaskPosition) + '*')
                     else:
                         printLog(device, '%d. Available power profile (#%d of 7)' % \
-                                (profileNumber, bitMaskPosition + 1), profileString(2 ** bitMaskPosition))
+                                 (profileNumber, bitMaskPosition + 1), profileString(2 ** bitMaskPosition))
                 bitMaskPosition = bitMaskPosition + 1
     printLogSpacer()
 
@@ -1861,7 +1887,7 @@ def showXgmiErr(deviceList):
             else:
                 printErrLog(device, 'Invalid return value from xgmi_error')
                 continue
-            if OUTPUT_SERIALIZATION is True:
+            if PRINT_JSON is True:
                 printLog(device, 'XGMI Error count', err)
             else:
                 printLog(device, 'XGMI Error count', '%s (%s)' % (err, desc))
@@ -1873,10 +1899,12 @@ def showWeightTopology(deviceList):
 
     This reads the HW Topology file and displays the matrix for the nodes
 
-    @param deviceList: Show HW Topology
+    @param deviceList: List of DRM devices (can be a single-item list)
     """
+    global PRINT_JSON
+    devices_ind = range(len(deviceList))
     weight = c_uint64()
-    gpu_links_weight = [[0 for x in range(len(deviceList))] for y in range(len(deviceList))]
+    gpu_links_weight = [[0 for x in devices_ind] for y in devices_ind]
     printLogSpacer(' Weight between two GPUs ')
     for srcdevice in deviceList:
         for destdevice in deviceList:
@@ -1888,19 +1916,24 @@ def showWeightTopology(deviceList):
                 gpu_links_weight[srcdevice][destdevice] = weight
             else:
                 printErrLog(srcdevice, 'Cannot read Link Weight: Not supported on this machine', None)
-    printTable(None, '      ')
+
+    if PRINT_JSON:
+        formatMatrixToJSON(deviceList, gpu_links_weight, "(Topology) Weight between DRM devices {} and {}")
+        return
+
+    printTableRow(None, '      ')
     for row in deviceList:
         tmp = 'GPU%d' % row
-        printTable('%-12s', tmp)
+        printTableRow('%-12s', tmp)
     printEmptyLine()
     for gpu1 in deviceList:
         tmp = 'GPU%d' % gpu1
-        printTable('%-6s', tmp)
+        printTableRow('%-6s', tmp)
         for gpu2 in deviceList:
             if (gpu1 == gpu2):
-                printTable('%-12s', '0')
+                printTableRow('%-12s', '0')
             else:
-                printTable('%-12s', gpu_links_weight[gpu1][gpu2].value)
+                printTableRow('%-12s', gpu_links_weight[gpu1][gpu2].value)
         printEmptyLine()
 
 
@@ -1909,11 +1942,12 @@ def showHopsTopology(deviceList):
 
     This reads the HW Topology file and displays the matrix for the nodes
 
-    @param deviceList: Show HW Topology
+    @param deviceList: List of DRM devices (can be a single-item list)
     """
     hops = c_uint64()
     linktype = c_char_p()
-    gpu_links_hops = [[0 for x in range(len(deviceList))] for y in range(len(deviceList))]
+    devices_ind = range(len(deviceList))
+    gpu_links_hops = [[0 for x in devices_ind] for y in devices_ind]
     printLogSpacer(' Hops between two GPUs ')
     for srcdevice in deviceList:
         for destdevice in deviceList:
@@ -1925,19 +1959,24 @@ def showHopsTopology(deviceList):
                 gpu_links_hops[srcdevice][destdevice] = hops
             else:
                 printErrLog(srcdevice, 'Cannot read Link Hops: Not supported on this machine', None)
-    printTable(None, '      ')
+
+    if PRINT_JSON:
+        formatMatrixToJSON(deviceList, gpu_links_hops, "(Topology) Hops between DRM devices {} and {}")
+        return
+
+    printTableRow(None, '      ')
     for row in deviceList:
         tmp = 'GPU%d' % row
-        printTable('%-12s', tmp)
+        printTableRow('%-12s', tmp)
     printEmptyLine()
     for gpu1 in deviceList:
         tmp = 'GPU%d' % gpu1
-        printTable('%-6s', tmp)
+        printTableRow('%-6s', tmp)
         for gpu2 in deviceList:
             if (gpu1 == gpu2):
-                printTable('%-12s', '0')
+                printTableRow('%-12s', '0')
             else:
-                printTable('%-12s', gpu_links_hops[gpu1][gpu2].value)
+                printTableRow('%-12s', gpu_links_hops[gpu1][gpu2].value)
         printEmptyLine()
 
 
@@ -1946,11 +1985,12 @@ def showTypeTopology(deviceList):
 
     This reads the HW Topology file and displays the matrix for the nodes
 
-    @param deviceList: Show HW Topology
+    @param deviceList: List of DRM devices (can be a single-item list)
     """
+    devices_ind = range(len(deviceList))
     hops = c_uint64()
     linktype = c_uint64()
-    gpu_links_type = [[0 for x in range(len(deviceList))] for y in range(len(deviceList))]
+    gpu_links_type = [[0 for x in devices_ind] for y in devices_ind]
     printLogSpacer(' Link Type between two GPUs ')
     for srcdevice in deviceList:
         for destdevice in deviceList:
@@ -1967,19 +2007,23 @@ def showTypeTopology(deviceList):
                     gpu_links_type[srcdevice][destdevice] = "XXXX"
             else:
                 printErrLog(srcdevice, 'Cannot read Link Type: Not supported on this machine', None)
-    printTable(None, '      ')
+    if PRINT_JSON:
+        formatMatrixToJSON(deviceList, gpu_links_type, "(Topology) Link type between DRM devices {} and {}")
+        return
+
+    printTableRow(None, '      ')
     for row in deviceList:
         tmp = 'GPU%d' % row
-        printTable('%-12s', tmp)
+        printTableRow('%-12s', tmp)
     printEmptyLine()
     for gpu1 in deviceList:
         tmp = 'GPU%d' % gpu1
-        printTable('%-6s', tmp)
+        printTableRow('%-6s', tmp)
         for gpu2 in deviceList:
             if (gpu1 == gpu2):
-                printTable('%-12s', '0')
+                printTableRow('%-12s', '0')
             else:
-                printTable('%-12s', gpu_links_type[gpu1][gpu2])
+                printTableRow('%-12s', gpu_links_type[gpu1][gpu2])
         printEmptyLine()
 
 
@@ -1988,25 +2032,24 @@ def showNumaTopology(deviceList):
 
     This reads the HW Topology file and display the matrix for the nodes
 
-    @param deviceList: Show HW Topology
+    @param deviceList: List of DRM devices (can be a single-item list)
     """
     printLogSpacer(' Numa Nodes ')
-    printTable('%-12s', "GPU")
-    printTable('%-12s', "Numa Node")
-    printTable('%-12s', "Numa Affinity", "\n")
     numa_numbers = c_uint32()
     for device in deviceList:
         ret = rocmsmi.rsmi_topo_get_numa_node_number(device, byref(numa_numbers))
         if rsmi_ret_ok(ret, device):
-            printTable('%-12s', device)
-            printTable('%-12s', numa_numbers.value)
-            ret = rocmsmi.rsmi_topo_numa_affinity_get(device, byref(numa_numbers))
-            if rsmi_ret_ok(ret):
-                printTable('%-12s', numa_numbers.value, "\n")
-            else:
-                printTable('%-12s', 'N/A', "\n")
+            printLog(device, "(Topology) Numa Node", numa_numbers.value)
         else:
-            printErrLog(device, 'Cannot read Numa Node Number: Not supported on this machine', None)
+            printErrLog(device, "Cannot read Numa Node")
+
+        ret = rocmsmi.rsmi_topo_numa_affinity_get(device, byref(numa_numbers))
+        if rsmi_ret_ok(ret):
+                printLog(device, "(Topology) Numa Affinity", numa_numbers.value)
+        else:
+            printErrLog(device, 'Cannot read Numa Affinity', None)
+
+
 
 
 def showHwTopology(deviceList):
@@ -2014,7 +2057,7 @@ def showHwTopology(deviceList):
 
     This reads the HW Topology file and displays the matrix for the nodes
 
-    @param deviceList: Show HW Topology
+    @param deviceList: List of DRM devices (can be a single-item list)
     """
     showWeightTopology(deviceList)
     printEmptyLine()
@@ -2128,7 +2171,7 @@ def load(savefilepath, autoRespond):
         for (device, values) in jsonData.items():
             if values['vJson'] != CLOCK_JSON_VERSION:
                 printLog(None, 'Unable to load legacy clock file - file v%s != current v%s' %
-                              (str(values['vJson']), str(CLOCK_JSON_VERSION)), None)
+                         (str(values['vJson']), str(CLOCK_JSON_VERSION)), None)
                 break
             device = int(device[4:])
             if values['fan']:
@@ -2246,7 +2289,10 @@ def save(deviceList, savefilepath):
             profiles[device] = str(str(bin(status.current))[2:][::-1].index('1') + 1)
         else:
             profiles[device] = str('UNKNOWN')
-        jsonData['card%d' % (device)] = {'vJson': CLOCK_JSON_VERSION, 'clocks': clocks[device], 'fan': fanSpeeds[device], 'overdrivesclk': overDriveGpu[device], 'overdrivemclk': overDriveGpuMem[device], 'profile': profiles[device], 'perflevel': perfLevels[device]}
+        jsonData['card%d' % (device)] = {'vJson': CLOCK_JSON_VERSION, 'clocks': clocks[device],
+                                         'fan': fanSpeeds[device], 'overdrivesclk': overDriveGpu[device],
+                                         'overdrivemclk': overDriveGpuMem[device], 'profile': profiles[device],
+                                         'perflevel': perfLevels[device]}
     printLog(device, 'Current settings successfully saved to', savefilepath)
     with open(savefilepath, 'w') as savefile:
         json.dump(jsonData, savefile, ensure_ascii=True)
@@ -2255,7 +2301,10 @@ def save(deviceList, savefilepath):
 
 # The code below is for when this script is run as an executable instead of when imported as a module
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='AMD ROCm System Management Interface  |  ROCM-SMI version: %s  |  Kernel version: %s' % (__version__, getVersion(None, rsmi_sw_component_t.RSMI_SW_COMP_DRIVER)), formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=90, width=120))
+    parser = argparse.ArgumentParser(
+        description='AMD ROCm System Management Interface  |  ROCM-SMI version: %s  |  Kernel version: %s' % (
+        __version__, getVersion(None, rsmi_sw_component_t.RSMI_SW_COMP_DRIVER)),
+        formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=90, width=120))
     groupDev = parser.add_argument_group()
     groupDisplayOpt = parser.add_argument_group('Display Options')
     groupDisplayTop = parser.add_argument_group('Topology')
@@ -2464,7 +2513,7 @@ if __name__ == '__main__':
         args.showreplaycount = True
         args.showvc = True
 
-        if not OUTPUT_SERIALIZATION:
+        if not PRINT_JSON:
             args.showprofile = True
             args.showclkfrq = True
             args.showclkvolt = True
