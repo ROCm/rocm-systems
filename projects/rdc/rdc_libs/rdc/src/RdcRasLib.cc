@@ -27,12 +27,34 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-RdcRasLib::RdcRasLib(const char* lib_name) {
+RdcRasLib::RdcRasLib(const char* lib_name):
+    fields_value_get_(nullptr)
+    , fields_query_(nullptr)
+    , rdc_module_init_(nullptr)
+    , rdc_module_destroy_(nullptr) {
     rdc_status_t status = lib_loader_.load(lib_name);
     if (status != RDC_ST_OK) {
-        fields_value_get_ = nullptr;
-        fields_query_ = nullptr;
         return;
+    }
+
+    status = lib_loader_.load_symbol(&rdc_module_init_,
+                "rdc_module_init");
+    if (status != RDC_ST_OK) {
+        rdc_module_init_ = nullptr;
+        return;
+    }
+
+    if (rdc_module_init_(0) != RDC_ST_OK) {
+        RDC_LOG(RDC_ERROR, "Fail to init librdc_ras.so:"
+                    << rdc_status_string(status));
+         return;
+    }
+
+
+    status = lib_loader_.load_symbol(&rdc_module_destroy_,
+                "rdc_module_destroy");
+    if (status != RDC_ST_OK) {
+        rdc_module_destroy_ = nullptr;
     }
 
     status = lib_loader_.load_symbol(&fields_value_get_,
@@ -44,6 +66,12 @@ RdcRasLib::RdcRasLib(const char* lib_name) {
                 "rdc_telemetry_fields_query");
     if (status != RDC_ST_OK) {
         fields_query_ = nullptr;
+    }
+}
+
+RdcRasLib::~RdcRasLib() {
+    if (rdc_module_destroy_) {
+        rdc_module_destroy_();
     }
 }
 

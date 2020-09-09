@@ -53,11 +53,16 @@ class RdcRasLib: public RdcTelemetry {
 
     explicit RdcRasLib(const char* lib_name);
 
+    ~RdcRasLib();
+
  private:
     RdcLibraryLoader lib_loader_;
     rdc_status_t (*fields_value_get_)(rdc_gpu_field_t*,
                 uint32_t, rdc_field_value_f, void*);
     rdc_status_t (*fields_query_)(uint32_t[MAX_NUM_FIELDS], uint32_t*);
+
+    rdc_status_t (*rdc_module_init_)(uint64_t);
+    rdc_status_t (*rdc_module_destroy_)();
 };
 typedef std::shared_ptr<RdcRasLib> RdcRasLibPtr;
 
