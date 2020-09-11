@@ -120,14 +120,14 @@ def diff_strings(cnt_r, cnt, metric):
               for evt2 in events_order[tid]:
                 if diff_cnt == diff_cnt_r:
                   if evt != evt2:
-                    print (">I< Difference starts at index: " + str(diff_cnt_r) + ", tid_r " + str(tid_r) + ", tid " + str(tid) + ", with evts " + evt + " and " + evt2 + "\n")
+                    print (">I< Difference starts at tid rank: " + str(cnt_tid) + " event index: " + str(diff_cnt_r) + ", tid_r " + str(tid_r) + ", tid " + str(tid) + ", with evts " + evt + " and " + evt2 + "\n")
                     found_diff_evt = 1
                     break
                 diff_cnt += 1
               diff_cnt_r += 1
               if found_diff_evt: break
             if len(events_order_r[tid_r]) != len(events_order[tid]) and found_diff_evt == 0:
-              print (">I< Difference starts at index: " + str(min(len(events_order_r[tid_r]), len(events_order[tid])))  + ", with missing evts\n")
+              print (">I< Difference starts at tid rank: " + str(cnt_tid) + " event index: " + str(min(len(events_order_r[tid_r]), len(events_order[tid])))  + ", with missing evts\n")
           break
         cnt_tid += 1
       cnt_tid_r += 1
@@ -292,6 +292,10 @@ def gen_events_info(tracefile, trace_level, no_events_cnt, events2ignore, events
   if metric == 'or':
     for tid in sorted (events_order.keys()) :
       res = res + str(events_order[tid])
+  if metric == 'cnt':
+    newres = res.split('\n')
+    newres = sorted(newres)
+    res = str(newres)
   return res
 
 parser = argparse.ArgumentParser(description='check_trace.py: check a trace aainst golden ref. Returns 0 for success, 1 for failure')
