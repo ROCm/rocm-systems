@@ -323,22 +323,26 @@ Monitor::setTempSensorLabelMap(void) {
   }
   auto add_temp_sensor_entry = [&](uint32_t file_index) {
     ret = readMonitor(kMonTempLabel, file_index, &type_str);
-    rsmi_temperature_type_t t_type = kTempSensorNameMap.at(type_str);
+    rsmi_temperature_type_t t_type;
 
     // If readMonitor fails, there is no label file for the file_index.
     // In that case, map the type to file index 0, which is not supported
     // and will fail appropriately later when we check for support.
     if (ret) {
-      temp_type_index_map_.insert({t_type, 0});
       index_temp_type_map_.insert({file_index, RSMI_TEMP_TYPE_INVALID});
     } else {
-      temp_type_index_map_.insert({t_type, file_index});
+      t_type = kTempSensorNameMap.at(type_str);
+      temp_type_index_map_[t_type] = file_index;
       index_temp_type_map_.insert({file_index, t_type});
     }
     index_temp_type_map_.insert({file_index, t_type});
     return 0;
   };
 
+  for (uint32_t t = RSMI_TEMP_TYPE_FIRST; t <= RSMI_TEMP_TYPE_LAST; ++t) {
+    temp_type_index_map_.insert(
+       {static_cast<rsmi_temperature_type_t>(t), RSMI_TEMP_TYPE_INVALID});
+  }
   for (uint32_t i = 1; i <= RSMI_TEMP_TYPE_LAST + 1; ++i) {
     ret = add_temp_sensor_entry(i);
     if (ret) {
