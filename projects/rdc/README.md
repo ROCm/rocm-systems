@@ -35,7 +35,7 @@ For complete list of features and how to start using RDC from pre-built packages
             (ii) AMD ROCk Kernel driver (https://github.com/RadeonOpenCompute/ROCK-Kernel-Driver)
 
 ## Building gRPC and protoc
-**NOTE:** gRPC and protoc compiler must be built from source as pre-built packages are not available. These must be installed to both build RDC and must also be available on machines where RDC will run.
+**NOTE:** gRPC and protoc compiler must be built when building RDC from source as pre-built packages are not available. When installing RDC from a package, gRPC and protoc will be installed from the package.
 
 **IMPORTANT:** Building gRPC and protocol buffers requires CMake 3.15 or greater. With an older version build will quietly succeed with a *message*. However, all components of gRPC will not be installed and RDC will ***fail*** to run
 

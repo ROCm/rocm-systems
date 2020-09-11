@@ -1,10 +1,16 @@
 #!/bin/bash
 
 RDC_LIB_DIR=@RDC_CLIENT_ROOT_PATH@/rdc/lib
+GRPC_LIB_DIR=/usr/grpc/lib
+
 do_create_rdc_user() {
     useradd -r -s /bin/nologin rdc
 }
 
-do_create_rpc_user
-echo -e "${RDC_LIB_DIR}\n${RDC_LIB_DIR}64" > /etc/ld.so.conf.d/x86_64-librdc_client.conf && ldconfig
+do_create_rdc_user
 
+echo "$GRPC_LIB_DIR" > /etc/ld.so.conf.d/x86_64-librdc_client.conf
+echo "$GRPC_LIB_DIR"64 >> /etc/ld.so.conf.d/x86_64-librdc_client.conf
+echo "$RDC_LIB_DIR" >> /etc/ld.so.conf.d/x86_64-librdc_client.conf
+echo "$RDC_LIB_DIR"64 >> /etc/ld.so.conf.d/x86_64-librdc_client.conf
+ldconfig

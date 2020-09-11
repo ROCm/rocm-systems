@@ -1,6 +1,7 @@
 #/bin/bash
 
 RDC_LIB_DIR=@RDC_CLIENT_ROOT_PATH@/rdc/lib
+GRPC_LIB_DIR=/usr/grpc/lib
 
 # This will return 0 if an id is created and non-zero if
 # it already exists
@@ -10,7 +11,8 @@ do_create_rdc_user() {
 
 # librdc_client.so
 do_ldconfig() {
-    echo $RDC_LIB_DIR > /etc/ld.so.conf.d/x86_64-librdc_client.conf && ldconfig
+    echo "$RDC_LIB_DIR" > /etc/ld.so.conf.d/x86_64-librdc_client.conf
+    echo "$GRPC_LIB_DIR" >> /etc/ld.so.conf.d/x86_64-librdc_client.conf && ldconfig
 
     do_create_rdc_user
 
