@@ -89,7 +89,7 @@ else()
   set ( HIP_DEFINES "-D__HIP_PLATFORM_HCC__=1")
 endif()
 
-## Enable HIP/HCC local build
+## Enable HIP local build
 if ( DEFINED LOCAL_BUILD )
   add_definitions ( -DLOCAL_BUILD=${LOCAL_BUILD} )
 else()
@@ -114,15 +114,10 @@ if ( NOT DEFINED CMAKE_PREFIX_PATH AND DEFINED ENV{CMAKE_PREFIX_PATH} )
 endif()
 set ( ENV{CMAKE_PREFIX_PATH} ${CMAKE_PREFIX_PATH} )
 
-set ( HCC_HOME "/opt/rocm/hcc" )
 set ( HIP_PATH "/opt/rocm/hip" )
-if ( DEFINED ENV{HCC_HOME} )
-  set ( HCC_HOME $ENV{HCC_HOME} )
-endif()
 if ( DEFINED ENV{HIP_PATH} )
   set ( HIP_PATH $ENV{HIP_PATH} )
 endif()
-set ( HCC_INC_DIR "${HCC_HOME}/include" )
 set ( HIP_INC_DIR "${HIP_PATH}/include" )
 
 ## Extend Compiler flags based on build type
@@ -170,7 +165,6 @@ message ( "-----HSA-Runtime-Lib: ${HSA_RUNTIME_LIB_PATH}" )
 message ( "----HSA_KMT_LIB_PATH: ${HSA_KMT_LIB_PATH}" )
 message ( "-------ROCM_ROOT_DIR: ${ROCM_ROOT_DIR}" )
 message ( "-------------KFD-Inc: ${HSA_KMT_INC_PATH}" )
-message ( "-------------HCC-Inc: ${HCC_INC_DIR}" )
 message ( "-------------HIP-Inc: ${HIP_INC_DIR}" )
 message ( "-------------HIP-VDI: ${HIP_VDI}" )
 message ( "-----CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}" )

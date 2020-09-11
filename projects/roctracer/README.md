@@ -57,9 +57,8 @@ rocTX API:
 
  - Set environment:
   export CMAKE_PREFIX_PATH=/opt/rocm
- - To use custom HIP/HCC versions:
+ - To use custom HIP version:
   export HIP_PATH=/opt/rocm/hip
-  export HCC_HOME=/opt/rocm/hcc
 
  - To build roctracer library:
   export CMAKE_BUILD_TYPE=<debug|release> # release by default
