@@ -23,7 +23,7 @@ EXECUTABLE=./MatrixTranspose
 
 all: clean $(EXECUTABLE)
 
-CXXFLAGS =-g -I$(INC_PATH) -DLOCAL_BUILD=1 --rocm-path=$(ROCM_PATH)
+CXXFLAGS =-g $(INC_PATH:%=-I%) -DLOCAL_BUILD=1 --rocm-path=$(ROCM_PATH)
 CXX=$(HIPCC)
 
 $(EXECUTABLE): $(OBJECTS)

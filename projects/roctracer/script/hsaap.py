@@ -490,15 +490,15 @@ class API_DescrParser:
 # main
 # Usage
 if len(sys.argv) != 3:
-  print ("Usage:", sys.argv[0], " <rocTracer root> <HSA runtime include path>", file=sys.stderr)
+  print ("Usage:", sys.argv[0], " <OUT prefix> <HSA runtime include path>", file=sys.stderr)
   sys.exit(1)
 else:
-  ROOT = sys.argv[1] + '/'
+  PREFIX = sys.argv[1] + '/'
   HSA_DIR = sys.argv[2] + '/'
 
 descr = API_DescrParser(OUT, HSA_DIR, API_TABLES_H, API_HEADERS_H, LICENSE)
 
-out_file = ROOT + OUT
+out_file = PREFIX + OUT
 print ('Generating "' + out_file + '"')
 f = open(out_file, 'w')
 f.write(descr.content[:-1])
