@@ -149,11 +149,6 @@ set(CMN_INC_LIST ${CMN_INC_LIST} "${SHR_MUTEX_DIR}/shared_mutex.h")
 add_subdirectory("rocm_smi")
 add_subdirectory("oam")
 
-# install(TARGETS ${ROCM_SMI_TARGET}
-#           LIBRARY DESTINATION ${ROCM_SMI}/lib COMPONENT ${ROCM_SMI_COMPONENT})
-# install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/rocm_smi.h
-#                                         DESTINATION rocm_smi/include/rocm_smi)
-
 ## Add the packaging directives for the runtime library.
 
 # TODO set(CPACK_DEBIAN_PACKAGE_HOMEPAGE <GITHUB URL> )

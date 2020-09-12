@@ -121,6 +121,22 @@ install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/rocm_smi.h
                                         DESTINATION rocm_smi/include/rocm_smi)
 install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/kfd_ioctl.h
                                         DESTINATION rocm_smi/include/rocm_smi)
+install(FILES ${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindings.py
+                                        DESTINATION rocm_smi/bindings)
+install(FILES ${COMMON_SRC_ROOT}/python_smi_tools/rocm_smi.py
+       PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ
+                         GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+                                        DESTINATION bin)
+install(FILES ${COMMON_SRC_ROOT}/python_smi_tools/rocm-smi
+                                        DESTINATION bin)
+add_custom_target(bindings_link ALL
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink
+                       ../rocm_smi/bindings/rsmiBindings.py bindings_link)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bindings_link
+                     DESTINATION bin RENAME rsmiBindings.py)
+
+
 # Generate Doxygen documentation
 find_package(Doxygen)
 find_package(LATEX COMPONENTS PDFLATEX)
