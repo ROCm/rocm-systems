@@ -57,7 +57,6 @@ The following tools are required for gRPC build & installation
     $ make
     $ sudo make install
     $ echo "<install dir>/lib" | sudo tee /etc/ld.so.conf.d/grpc.conf
-    $ sudo ldconfig
 
 ## Building RDC
 
@@ -70,6 +69,17 @@ Clone the RDC source code from GitHub and use CMake to build and install
     $ make
     $ make install ## default installation location is /opt/rocm
 
+## Update System Library Path
+
+The following commands need to be executed as root (sudo). It may be easiest to put them into a script and then run that script as root:
+
+    $ RDC_LIB_DIR=<RDC install dir>/lib
+    $ GRPC_LIB_DIR=<gRPC install dir>/lib
+    $ echo "$GRPC_LIB_DIR" > /etc/ld.so.conf.d/x86_64-librdc_client.conf
+    $ echo "$GRPC_LIB_DIR"64 >> /etc/ld.so.conf.d/x86_64-librdc_client.conf
+    $ echo "$RDC_LIB_DIR" >> /etc/ld.so.conf.d/x86_64-librdc_client.conf
+    $ echo "$RDC_LIB_DIR"64 >> /etc/ld.so.conf.d/x86_64-librdc_client.conf
+    $ ldconfig
 
 # Running RDC
 RDC supports encrypted communications between clients and servers. The
