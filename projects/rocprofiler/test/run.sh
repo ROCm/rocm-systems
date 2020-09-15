@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash -x
 
 ################################################################################
 # Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
@@ -56,8 +56,25 @@ eval_test() {
   test_number=$((test_number + 1))
 }
 
+# profiler library lookup
+pwd
+echo "ENV CHECK"
+env
+echo "OPTROCM CHECK"
+find -L /opt -name "librocprofiler*"
+echo "PKGLIB CHECK"
+find -L ../.. -name "librocprofiler*"
+echo "COMPKG CHECK"
+find -L /home/jenkins/compute-package -name "librocprofiler*"
+
+ls -la /home/jenkins/compute-package
+ls -la /home/jenkins/compute-package/lib
+ls -la /home/jenkins/compute-package/lib/*
+
 # paths to ROC profiler and oher libraries
-export LD_LIBRARY_PATH=$PWD
+#ROCP_LIB_PATH=$(find -L /opt/rocm* -name librocprofiler64.so.1 | head -n1)
+#ROCP_LIB_DIR=$(dirname $ROCP_LIB_PATH)
+export LD_LIBRARY_PATH=$PWD:$PWD/../../lib:/home/jenkins/compute-package/lib
 
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
@@ -67,6 +84,8 @@ export ROCPROFILER_LOG=1
 export HSA_VEN_AMD_AQLPROFILE_LOG=1
 # test trace
 export ROC_TEST_TRACE=1
+# enable V3 code object support
+export ROCP_OBJ_TRACKING=1
 
 # Disabple profiler own proxy queue
 unset ROCP_PROXY_QUEUE
@@ -178,7 +197,6 @@ export ROCP_INPUT=set_input.xml
 eval_test "libtool test, counter sets" ./test/ctrl
 
 ## OpenCL test
-#export ROCP_OBJ_TRACKING=1
 #export ROCP_INPUT=input1.xml
 #eval_test "libtool test, OpenCL sample" ./test/ocl/SimpleConvolution
 
@@ -193,7 +211,6 @@ export ROCP_DITER=10
 eval_test "libtool test, counter sets" ./test/ctrl
 
 ## OpenCL test
-#export ROCP_OBJ_TRACKING=1
 #eval_test "libtool test, OpenCL sample" ./test/ocl/SimpleConvolution
 
 #valgrind --leak-check=full $tbin

@@ -80,6 +80,9 @@ class TestKernel {
   // Return name
   virtual std::string Name() const = 0;
 
+  // Return name
+  virtual std::string SymbName() { return Name() + ".kd"; }
+
  protected:
   // Set buffer descriptor
   bool SetInDescr(const uint32_t& buf_id, const des_id_t& des_id, const uint32_t& size) {

@@ -73,7 +73,7 @@ fi
 for GFXIP in $TGT_LIST ; do
   OBJ_PREF=$GFXIP
   OBJ_FILE="${OBJ_PREF}_${OBJ_NAME}.$SO_EXT"
-  $BIN_DIR/clang -cl-std=CL$OCL_VER -include $INC_DIR/opencl-c.h $BITCODE_OPTS -target amdgcn-amd-amdhsa -mcpu=$GFXIP -mno-code-object-v3 $TEST_NAME.cl -o $DST_DIR/$OBJ_FILE
+  $BIN_DIR/clang -cl-std=CL$OCL_VER -include $INC_DIR/opencl-c.h $BITCODE_OPTS -target amdgcn-amd-amdhsa -mcpu=$GFXIP $TEST_NAME.cl -o $DST_DIR/$OBJ_FILE
   echo "'$OBJ_FILE' generated"
 done
 

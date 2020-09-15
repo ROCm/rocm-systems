@@ -96,7 +96,7 @@ bool TestHsa::Setup() {
 
   // Load and Finalize Kernel Code Descriptor
   const char* brig_path = brig_path_obj_.c_str();
-  bool suc = hsa_rsrc_->LoadAndFinalize(agent_info_, brig_path, name_.c_str(), &hsa_exec_,
+  bool suc = hsa_rsrc_->LoadAndFinalize(agent_info_, brig_path, symb_.c_str(), &hsa_exec_,
                                         &kernel_code_desc_);
   if (suc == false) {
     std::cerr << "Error in loading and finalizing Kernel" << std::endl;
@@ -116,8 +116,10 @@ bool TestHsa::Setup() {
         // Check the kernel args size
         const size_t kernarg_size = des.size;
         size_t size_info = 0;
-        hsa_executable_symbol_get_info(
+        const hsa_status_t status = hsa_executable_symbol_get_info(
             kernel_code_desc_, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &size_info);
+        TEST_ASSERT(status == HSA_STATUS_SUCCESS);
+        size_info = kernarg_size;
         const bool kernarg_missmatch = (kernarg_size > size_info);
         if (kernarg_missmatch) {
           std::cout << "kernarg_size = " << kernarg_size << ", size_info = " << size_info

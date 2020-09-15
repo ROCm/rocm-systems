@@ -36,7 +36,7 @@ class TestHsa : public TestAql {
   static void HsaShutdown();
 
   // Constructor
-  explicit TestHsa(TestKernel* test) : test_(test), name_(test->Name()) {
+  explicit TestHsa(TestKernel* test) : test_(test), name_(test->Name()), symb_(test->SymbName()) {
     total_time_taken_ = 0;
     setup_time_taken_ = 0;
     dispatch_time_taken_ = 0;
@@ -118,6 +118,9 @@ class TestHsa : public TestAql {
 
   // Test kernel name
   std::string name_;
+
+  // Test kernel symboll name
+  std::string symb_;
 
   // Kernel executable
   hsa_executable_t hsa_exec_;

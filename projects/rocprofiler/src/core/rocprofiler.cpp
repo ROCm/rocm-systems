@@ -166,9 +166,10 @@ enum {
   CODE_OBJ_TRACKING_MODE = 0x2,
   MEMCOPY_INTERCEPT_MODE = 0x4,
   HSA_INTERCEPT_MODE = 0x8,
+  INTERCEPT_MODE_DFLT = CODE_OBJ_TRACKING_MODE
 };
 uint32_t LoadTool() {
-  uint32_t intercept_mode = 0;
+  uint32_t intercept_mode = INTERCEPT_MODE_DFLT;
   const char* tool_lib = getenv("ROCP_TOOL_LIB");
   std::ostringstream oss;
   if (tool_lib) oss << "load tool library(" << tool_lib << ")";
