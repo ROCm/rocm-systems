@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include <map>
 #include <list>
+#include <vector>
 #include <memory>
 #include "rdc_lib/RdcTelemetry.h"
 #include "rdc_lib/impl/RdcRasLib.h"
@@ -49,7 +50,15 @@ class RdcTelemetryModule : public RdcTelemetry {
 
     RdcTelemetryModule(const RdcMetricFetcherPtr& fetcher,
             const RdcRasLibPtr& ras_module);
+
  private:
+    //< Helper function to dispatch fields to module
+    void get_fields_for_module(
+        rdc_gpu_field_t* fields,
+        uint32_t fields_count,
+        std::map<RdcTelemetryPtr, std::vector<rdc_gpu_field_t>>
+                        & fields_in_module,
+        std::vector<rdc_gpu_field_value_t>& unsupport_fields); // NOLINT
     std::list<RdcTelemetryPtr> telemetry_modules_;
     std::map<uint32_t, RdcTelemetryPtr> fields_id_module_;
 };

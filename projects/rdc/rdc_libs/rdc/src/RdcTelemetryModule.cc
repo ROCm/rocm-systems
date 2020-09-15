@@ -35,10 +35,10 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_query(
     }
     auto ite = telemetry_modules_.begin();
     *field_count = 0;
-    uint32_t count = 0;
     for (; ite != telemetry_modules_.end(); ite++) {
+        uint32_t count = 0;
         rdc_status_t status = (*ite)->rdc_telemetry_fields_query(
-                &(field_ids[count]), &count);
+                &(field_ids[*field_count]), &count);
         if (status == RDC_ST_OK) {
             *field_count += count;
         }
@@ -52,11 +52,20 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_watch(
     if (fields == nullptr) {
         return RDC_ST_BAD_PARAMETER;
     }
-    auto ite = telemetry_modules_.begin();
-    for (; ite != telemetry_modules_.end(); ite++) {
-       (*ite)->rdc_telemetry_fields_watch(
-           fields, fields_count);
+
+    std::map<RdcTelemetryPtr, std::vector<rdc_gpu_field_t>> fields_in_module;
+    std::vector<rdc_gpu_field_value_t> unsupport_fields;
+    get_fields_for_module(fields, fields_count,
+        fields_in_module, unsupport_fields);
+
+    auto ite = fields_in_module.begin();
+    for (; ite != fields_in_module.end(); ite++) {
+        if (ite->second.size() > 0) {
+            ite->first->rdc_telemetry_fields_watch(
+                &ite->second[0], ite->second.size());
+        }
     }
+
     return RDC_ST_OK;
 }
 
@@ -66,11 +75,20 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_unwatch(
     if (fields == nullptr) {
         return RDC_ST_BAD_PARAMETER;
     }
-    auto ite = telemetry_modules_.begin();
-    for (; ite != telemetry_modules_.end(); ite++) {
-       (*ite)->rdc_telemetry_fields_unwatch(
-           fields, fields_count);
+
+    std::map<RdcTelemetryPtr, std::vector<rdc_gpu_field_t>> fields_in_module;
+    std::vector<rdc_gpu_field_value_t> unsupport_fields;
+    get_fields_for_module(fields, fields_count,
+                fields_in_module, unsupport_fields);
+
+    auto ite = fields_in_module.begin();
+    for (; ite != fields_in_module.end(); ite++) {
+        if (ite->second.size() > 0) {
+            ite->first->rdc_telemetry_fields_unwatch(
+                &ite->second[0], ite->second.size());
+        }
     }
+
     return RDC_ST_OK;
 }
 
@@ -86,13 +104,39 @@ RdcTelemetryModule::RdcTelemetryModule(
     auto ite = telemetry_modules_.begin();
     for (; ite != telemetry_modules_.end(); ite++) {
        uint32_t field_ids[MAX_NUM_FIELDS];
-       uint32_t field_count;
-       (*ite)->rdc_telemetry_fields_query(field_ids, &field_count);
-       for (uint32_t index = 0; index < field_count; index++) {
-           fields_id_module_.insert({field_ids[index], (*ite)});
+       uint32_t field_count = 0;
+       rdc_status_t status = (*ite)->
+            rdc_telemetry_fields_query(field_ids, &field_count);
+       if (status == RDC_ST_OK) {
+            for (uint32_t index = 0; index < field_count; index++) {
+                fields_id_module_.insert({field_ids[index], (*ite)});
+            }
        }
     }
 }
+
+void RdcTelemetryModule::get_fields_for_module(
+            rdc_gpu_field_t* fields,
+            uint32_t fields_count,
+            std::map<RdcTelemetryPtr, std::vector<rdc_gpu_field_t>>&
+            fields_in_module,
+            std::vector<rdc_gpu_field_value_t>& unsupport_fields) {
+    for (uint32_t findex = 0; findex < fields_count; findex++) {
+        RdcTelemetryPtr module = fields_id_module_[fields[findex].field_id];
+        if (module) {
+            fields_in_module[module].push_back(fields[findex]);
+        } else {
+            RDC_LOG(RDC_DEBUG, "Unsupported field " <<
+                    field_id_string(fields[findex].field_id));
+            rdc_gpu_field_value_t value;
+            value.gpu_index = fields[findex].gpu_index;
+            value.field_value.field_id = fields[findex].field_id;
+            value.field_value.status = RDC_ST_NOT_SUPPORTED;
+            unsupport_fields.push_back(value);
+        }
+    }
+}
+
 
 rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_value_get(
     rdc_gpu_field_t* fields, uint32_t fields_count,
@@ -104,20 +148,8 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_value_get(
     // Dispatch the fields to the libraries
     std::map<RdcTelemetryPtr, std::vector<rdc_gpu_field_t>> fields_to_fetch;
     std::vector<rdc_gpu_field_value_t> unsupport_fields;
-    for (uint32_t findex = 0; findex < fields_count; findex++) {
-        RdcTelemetryPtr module = fields_id_module_[fields[findex].field_id];
-        if (module) {
-            fields_to_fetch[module].push_back(fields[findex]);
-        } else {
-            RDC_LOG(RDC_DEBUG, "Unsupported field " <<
-                    field_id_string(fields[findex].field_id));
-            rdc_gpu_field_value_t value;
-            value.gpu_index = fields[findex].gpu_index;
-            value.field_value.field_id = fields[findex].field_id;
-            value.field_value.status = RDC_ST_NOT_SUPPORTED;
-            unsupport_fields.push_back(value);
-        }
-    }
+    get_fields_for_module(fields, fields_count,
+            fields_to_fetch, unsupport_fields);
 
     auto ite = fields_to_fetch.begin();
     for (; ite != fields_to_fetch.end(); ite ++) {

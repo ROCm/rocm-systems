@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include <mutex>  // NOLINT(build/c++11)
 #include <future>  // NOLINT(build/c++11)
+#include <memory>
 #include <condition_variable>  // NOLINT(build/c++11)
 #include <map>
 #include <queue>
@@ -54,7 +55,7 @@ struct FieldRSMIData {
     union {
         rsmi_counter_value_t counter_val;
     };
-    ~FieldRSMIData(){}
+    ~FieldRSMIData() {}
     FieldRSMIData() : evt_handle(0), counter_val{0, 0, 0}{}
 };
 

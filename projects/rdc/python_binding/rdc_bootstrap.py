@@ -31,6 +31,11 @@ class rdc_status_t(Enum):
      RDC_ST_CLIENT_ERROR = 8
      RDC_ST_ALREADY_EXIST = 9
      RDC_ST_MAX_LIMIT = 10
+     RDC_ST_INSUFF_RESOURCES = 11
+     RDC_ST_FILE_ERROR = 12
+     RDC_ST_NO_DATA = 13
+     RDC_ST_PERM_ERROR = 14
+     RDC_ST_UNKNOWN_ERROR = 4294967295
 
 class rdc_operation_mode_t(c_int):
      RDC_OPERATION_MODE_AUTO = 0
@@ -62,6 +67,16 @@ class rdc_field_t(c_int):
      RDC_FI_GPU_MEMORY_TOTAL = 502
      RDC_FI_ECC_CORRECT_TOTAL = 600
      RDC_FI_ECC_UNCORRECT_TOTAL = 601
+     RDC_EVNT_XGMI_0_NOP_TX = 1000
+     RDC_EVNT_XGMI_0_REQ_TX = 1001
+     RDC_EVNT_XGMI_0_RESP_TX = 1002
+     RDC_EVNT_XGMI_0_BEATS_TX = 1003
+     RDC_EVNT_XGMI_1_NOP_TX = 1004
+     RDC_EVNT_XGMI_1_REQ_TX = 1005
+     RDC_EVNT_XGMI_1_RESP_TX = 1006
+     RDC_EVNT_XGMI_1_BEATS_TX = 1007
+     RDC_EVNT_XGMI_0_THRPUT = 1500
+     RDC_EVNT_XGMI_1_THRPUT = 1501
 
 rdc_handle_t = c_void_p
 rdc_gpu_group_t = c_uint32

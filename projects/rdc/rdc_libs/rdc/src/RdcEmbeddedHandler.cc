@@ -73,7 +73,7 @@ RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode):
     , metric_fetcher_(new RdcMetricFetcherImpl())
     , rdc_module_mgr_(new RdcModuleMgrImpl(metric_fetcher_))
     , watch_table_(new RdcWatchTableImpl(group_settings_,
-                cache_mgr_, metric_fetcher_, rdc_module_mgr_))
+                cache_mgr_, rdc_module_mgr_))
     , metrics_updater_(new RdcMetricsUpdaterImpl(watch_table_,
                         METIC_UPDATE_FREQUENCY)) {
     if (mode == RDC_OPERATION_MODE_AUTO) {

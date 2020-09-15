@@ -61,6 +61,9 @@ class RdcRasLib: public RdcTelemetry {
                 uint32_t, rdc_field_value_f, void*);
     rdc_status_t (*fields_query_)(uint32_t[MAX_NUM_FIELDS], uint32_t*);
 
+    rdc_status_t (*fields_watch_)(rdc_gpu_field_t*, uint32_t);
+    rdc_status_t (*fields_unwatch_)(rdc_gpu_field_t*, uint32_t);
+
     rdc_status_t (*rdc_module_init_)(uint64_t);
     rdc_status_t (*rdc_module_destroy_)();
 };

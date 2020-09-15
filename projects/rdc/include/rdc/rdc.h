@@ -27,7 +27,11 @@ THE SOFTWARE.
 extern "C" {
 #endif  // __cplusplus
 
+#ifdef __cplusplus
 #include <cstdint>
+#else
+#include <stdint.h>
+#endif
 
 /** \file rdc.h
  *  Main header file for the ROCm RDC library.

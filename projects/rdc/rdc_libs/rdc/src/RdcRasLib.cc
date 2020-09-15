@@ -30,6 +30,8 @@ namespace rdc {
 RdcRasLib::RdcRasLib(const char* lib_name):
     fields_value_get_(nullptr)
     , fields_query_(nullptr)
+    , fields_watch_(nullptr)
+    , fields_unwatch_(nullptr)
     , rdc_module_init_(nullptr)
     , rdc_module_destroy_(nullptr) {
     rdc_status_t status = lib_loader_.load(lib_name);
@@ -67,6 +69,16 @@ RdcRasLib::RdcRasLib(const char* lib_name):
     if (status != RDC_ST_OK) {
         fields_query_ = nullptr;
     }
+    status = lib_loader_.load_symbol(&fields_watch_,
+                "rdc_telemetry_fields_watch");
+    if (status != RDC_ST_OK) {
+        fields_watch_ = nullptr;
+    }
+    status = lib_loader_.load_symbol(&fields_unwatch_,
+                "rdc_telemetry_fields_unwatch");
+    if (status != RDC_ST_OK) {
+        fields_unwatch_ = nullptr;
+    }
 }
 
 RdcRasLib::~RdcRasLib() {
@@ -85,8 +97,9 @@ rdc_status_t RdcRasLib::rdc_telemetry_fields_query(
         return RDC_ST_FAIL_LOAD_MODULE;
     }
 
+    auto status = fields_query_(field_ids, field_count);
     RDC_LOG(RDC_DEBUG, "RAS support " << *field_count << " fields");
-    return fields_query_(field_ids, field_count);
+    return status;
 }
 
 rdc_status_t RdcRasLib::rdc_telemetry_fields_value_get(
@@ -107,24 +120,30 @@ rdc_status_t RdcRasLib::rdc_telemetry_fields_value_get(
 
 rdc_status_t RdcRasLib::rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
       uint32_t fields_count) {
-    // TODO(bill_liu): Not Support yet
     if (fields == nullptr) {
         return RDC_ST_BAD_PARAMETER;
     }
-    (void)fields;
-    (void)fields_count;
-    return RDC_ST_NOT_SUPPORTED;
+    if (!fields_watch_) {
+        return RDC_ST_FAIL_LOAD_MODULE;
+    }
+    rdc_status_t status = fields_watch_(fields, fields_count);
+    RDC_LOG(RDC_DEBUG, "Watch " << fields_count << " fields from RAS: "
+                    << rdc_status_string(status));
+    return status;
 }
 
 rdc_status_t RdcRasLib::rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
       uint32_t fields_count) {
-    // TODO(bill_liu): Not Support yet
     if (fields == nullptr) {
         return RDC_ST_BAD_PARAMETER;
     }
-    (void)fields;
-    (void)fields_count;
-    return RDC_ST_NOT_SUPPORTED;
+    if (!fields_unwatch_) {
+        return RDC_ST_FAIL_LOAD_MODULE;
+    }
+    rdc_status_t status = fields_unwatch_(fields, fields_count);
+    RDC_LOG(RDC_DEBUG, "Unwatch " << fields_count << " fields from RAS: "
+                    << rdc_status_string(status));
+    return status;
 }
 
 }  // namespace rdc

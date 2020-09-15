@@ -38,11 +38,9 @@ namespace rdc {
 
 RdcWatchTableImpl::RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings,
         const RdcCacheManagerPtr& cache_mgr,
-        const RdcMetricFetcherPtr& metric_fetcher,
         const RdcModuleMgrPtr& module_mgr):
      group_settings_(group_settings)
     , cache_mgr_(cache_mgr)
-    , metric_fetcher_(metric_fetcher)
     , rdc_module_mgr_(module_mgr)
     , last_cleanup_time_(0) {
 }
@@ -211,15 +209,44 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
         return result;
     }
 
+    // Skip not supported fields
+    uint32_t unsupported_fields = 0;
+    auto rdc_telemetry = rdc_module_mgr_->get_telemetry_module();
+    if (rdc_telemetry) {
+        uint32_t field_ids[MAX_NUM_FIELDS];
+        uint32_t field_count;
+        result = rdc_telemetry->
+            rdc_telemetry_fields_query(field_ids, &field_count);
+        if (result == RDC_ST_OK) {
+            RDC_LOG(RDC_DEBUG, "The system support "
+                    << field_count << " fields");
+            for (auto it = fields_in_watch.begin();
+                    it != fields_in_watch.end(); ) {
+                bool not_supported = true;
+                for (uint32_t fi = 0; fi < field_count; fi++) {
+                    if (field_ids[fi] == it->second) {
+                        not_supported = false;
+                        break;
+                    }
+                }
+                if (not_supported) {
+                    it = fields_in_watch.erase(it);
+                    unsupported_fields++;
+                } else {
+                    it++;
+                }
+            }  // end for
+        }  // end if
+    }
+    if ( unsupported_fields >0 ) {
+        RDC_LOG(RDC_DEBUG, "Skip watch " << unsupported_fields
+                <<" fields as they are not supported.");
+    }
+
     // Update the fields_to_watch_
     auto f_in_watch_iter = fields_in_watch.begin();
 
     for (; f_in_watch_iter != fields_in_watch.end(); f_in_watch_iter++) {
-       // Skip not support fields
-       result = metric_fetcher_->acquire_rsmi_handle(*f_in_watch_iter);
-       if (result != RDC_ST_OK) {
-           continue;
-       }
        auto ite = fields_to_watch_.find(*f_in_watch_iter);
        if (ite == fields_to_watch_.end()) {  // A new field
           fields_to_watch_.insert({*f_in_watch_iter, f});
@@ -241,6 +268,21 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
 
     // Add to the watch table
     watch_table_.insert({gkey, f});
+
+    // Notify the telemetry_module to watch those fields
+    if (rdc_telemetry) {
+        std::vector<rdc_gpu_field_t> fields;
+        auto fields_to_watch_iter = fields_to_watch_.begin();
+        for (; fields_to_watch_iter != fields_to_watch_.end();
+                fields_to_watch_iter++) {
+            if (fields_to_watch_iter->second.is_watching) {
+                fields.push_back({fields_to_watch_iter->first.first,
+                        fields_to_watch_iter->first.second});
+            }
+        }
+        rdc_telemetry->rdc_telemetry_fields_watch(&fields[0],
+                        fields.size());
+    }
 
     return RDC_ST_OK;
 }
@@ -293,27 +335,28 @@ rdc_status_t RdcWatchTableImpl::update_field_in_table_when_unwatch(
 
     // Update the fields that impacted by this unwatch
     auto fite = fields.begin();
+    std::vector<rdc_gpu_field_t> unwatch_fields;
     for (; fite != fields.end(); fite++) {
          auto f_in_table = fields_to_watch_.find((*fite));
          if (f_in_table == fields_to_watch_.end()) {  // Not in fields_to_watch_
+            unwatch_fields.push_back({fite->first, fite->second});
             continue;
          }
 
          auto freq_iter = update_frequencies.find(*fite);
          if (freq_iter == update_frequencies.end()) {
              f_in_table->second.is_watching = false;
+             unwatch_fields.push_back({fite->first, fite->second});
          } else {
              f_in_table->second.update_freq = freq_iter->second;
          }
     }
 
-    fite = fields.begin();
-    for (; fite != fields.end(); fite++) {
-      result = metric_fetcher_->delete_rsmi_handle(*fite);
-
-      if (result != RDC_ST_OK && result != RDC_ST_NOT_SUPPORTED) {
-          return result;
-      }
+    // Notify the telemetry_module to unwatch those fields
+    auto rdc_telemetry = rdc_module_mgr_->get_telemetry_module();
+    if (rdc_telemetry) {
+        rdc_telemetry->rdc_telemetry_fields_unwatch(&unwatch_fields[0],
+                        unwatch_fields.size());
     }
 
     return RDC_ST_OK;

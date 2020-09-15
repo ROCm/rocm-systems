@@ -83,10 +83,8 @@ class RdcWatchTableImpl : public RdcWatchTable {
     //!< once per second.
     rdc_status_t rdc_field_update_all() override;
 
-    // TODO(bill_liu): Remove the RdcMetricFetcherPtr
     RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings,
         const RdcCacheManagerPtr& cache_mgr,
-        const RdcMetricFetcherPtr& metric_fetcher,
         const RdcModuleMgrPtr& module_mgr);
 
  private:
@@ -116,7 +114,6 @@ class RdcWatchTableImpl : public RdcWatchTable {
 
     RdcGroupSettingsPtr group_settings_;
     RdcCacheManagerPtr cache_mgr_;
-    RdcMetricFetcherPtr metric_fetcher_;
     RdcModuleMgrPtr rdc_module_mgr_;
 
     //!< The watch table to store the watch settings.

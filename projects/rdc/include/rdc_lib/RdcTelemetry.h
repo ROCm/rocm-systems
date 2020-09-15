@@ -24,25 +24,10 @@ THE SOFTWARE.
 
 #include <memory>
 #include "rdc/rdc.h"
+#include "rdc_lib/RdcTelemetryLibInterface.h"
 
 namespace amd {
 namespace rdc {
-
-// Structure to keep both gup index and field value
-typedef struct {
-    uint32_t gpu_index;
-    rdc_field_value field_value;
-} rdc_gpu_field_value_t;
-
-
-typedef struct {
-    uint32_t gpu_index;
-    rdc_field_t field_id;
-} rdc_gpu_field_t;
-
-#define MAX_NUM_FIELDS 8192
-typedef rdc_status_t(*rdc_field_value_f)(rdc_gpu_field_value_t*  values,
-            uint32_t num_values, void*  user_data);
 
 class RdcTelemetry {
  public:
