@@ -63,7 +63,7 @@ set(PKG_VERSION_GIT_TAG_PREFIX "rdc_pkg_ver")
 # provide git to utilities
 find_program (GIT NAMES git)
 
-get_package_version_number("1.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_version_from_tag("1.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 # VERSION_* variables should be set by get_version_from_tag
 message("Package version: ${PKG_VERSION_STR}")
 
@@ -169,8 +169,7 @@ add_subdirectory("example")
 add_subdirectory("rdci")
 
 set(CPACK_PACKAGE_NAME ${RDC_PACKAGE})
-set(CPACK_PACKAGE_VERSION ${PKG_VERSION_STR})
-set(CPACK_PROJECT_CONFIG_FILE ${CMAKE_SOURCE_DIR}/package.txt)
+set(CPACK_PACKAGE_VERSION ${VERSION_STRING})
 
 # This is used by configure_file for *_postinit.in
 set(RDC_CLIENT_ROOT_PATH "${RDC_SERVER_ROOT_PATH}/${RDC_CLIENT_INSTALL_PREFIX}")
@@ -181,14 +180,46 @@ configure_file(
   "${PROJECT_SOURCE_DIR}/src/RPM_rpm_post.in"
   "${PROJECT_SOURCE_DIR}/RPM/rpm_post")
 
+if ( DEFINED ENV{ROCM_LIBPATCH_VERSION} )
+  set ( CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}" )
+  message ( "Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}" )
+else()
+  set ( ROCM_LIBPATCH_VERSION )
+endif()
+
 # TODO set(CPACK_DEBIAN_PACKAGE_HOMEPAGE <GITHUB URL> )
+# Debian package specific variables
+if ( DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE} )
+  set ( CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE} )
+else()
+  set ( CPACK_DEBIAN_PACKAGE_RELEASE "local" )
+endif()
+message ( "Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}" )
+set ( CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT" )
+
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst;
                     ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm")
-set(CPACK_DEBIAN_PACKAGE_VERSION ${PKG_VERSION_STR})
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-smi-lib64")
 
 # RPM package specific variables
+if ( DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE} )
+  set ( CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE} )
+else()
+  set ( CPACK_RPM_PACKAGE_RELEASE "local" )
+endif()
+message ( "Using CPACK_RPM_PACKAGE_RELEASE ${CPACK_RPM_PACKAGE_RELEASE}" )
+
+## 'dist' breaks manual builds on debian systems due to empty Provides
+execute_process( COMMAND rpm --eval %{?dist}
+                 RESULT_VARIABLE PROC_RESULT
+                 OUTPUT_VARIABLE EVAL_RESULT
+                 OUTPUT_STRIP_TRAILING_WHITESPACE )
+if ( PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "" )
+  string ( APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}" )
+endif()
+set ( CPACK_RPM_FILE_NAME "RPM-DEFAULT" )
+
 set(CPACK_RPM_PACKAGE_AUTOREQ 0)
 set(CPACK_RPM_PACKAGE_REQUIRES "rocm-smi-lib64")
 list(APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/lib")
@@ -206,4 +237,3 @@ set(CPACK_RPM_PACKAGE_VERSION ${PKG_VERSION_STR})
 
 ## Add the packaging directives
 include (CPack)
-
