@@ -2386,6 +2386,8 @@ if __name__ == '__main__':
                                   help='Set the maximum GPU power back to the device deafult state',
                                   action='store_true')
     groupActionReset.add_argument('--resetxgmierr', help='Reset XGMI error count', action='store_true')
+    groupAction.add_argument('--setclock', help='Set Clock Frequency Level(s) for specified clock (requires manual Perf level)',
+                             type=str, metavar='LEVEL', nargs=2)
     groupAction.add_argument('--setsclk', help='Set GPU Clock Frequency Level(s) (requires manual Perf level)',
                              type=int, metavar='LEVEL', nargs='+')
     groupAction.add_argument('--setmclk', help='Set GPU Memory Clock Frequency Level(s) (requires manual Perf level)',
@@ -2475,7 +2477,7 @@ if __name__ == '__main__':
             args.load or args.resetclocks or args.setprofile or args.resetprofile or args.setoverdrive or \
             args.setmemoverdrive or args.setpoweroverdrive or args.resetpoweroverdrive or \
             args.rasenable or args.rasdisable or args.rasinject or args.gpureset or \
-            args.setslevel or args.setmlevel or args.setvc or args.setsrange or args.setmrange:
+            args.setslevel or args.setmlevel or args.setvc or args.setsrange or args.setmrange or args.setclock:
         relaunchAsSudo()
 
     if not PRINT_JSON:
@@ -2629,6 +2631,8 @@ if __name__ == '__main__':
         showRange(deviceList, 'voltage')
     if args.showvc:
         showVoltageCurve(deviceList)
+    if args.setclock:
+        setClocks(deviceList, args.setclock[0], args.setclock[1])
     if args.setsclk:
         setClocks(deviceList, 'sclk', args.setsclk)
     if args.setmclk:
