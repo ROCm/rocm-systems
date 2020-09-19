@@ -36,6 +36,7 @@ typedef enum {
   ACTIVITY_DOMAIN_KFD_API = 4,                    // KFD API domain
   ACTIVITY_DOMAIN_EXT_API = 5,                    // External ID domain
   ACTIVITY_DOMAIN_ROCTX   = 6,                    // ROCTX domain
+  ACTIVITY_DOMAIN_HSA_EVT = 7,                    // HSA events
   ACTIVITY_DOMAIN_NUMBER
 } activity_domain_t;
 
