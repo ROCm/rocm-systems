@@ -1621,8 +1621,6 @@ void rocprofiler_unload(bool is_destr) {
     abort();
   }
 
-  if (is_destr) CTX_OUTSTANDING_WAIT = 0;
-
   // Unregister dispatch callback
   rocprofiler_remove_queue_callbacks();
 
@@ -1642,7 +1640,6 @@ void rocprofiler_unload(bool is_destr) {
   }
   fflush(stdout);
 
-#if 0
   // Cleanup
   if (callbacks_data != NULL) {
     delete[] callbacks_data->features;
@@ -1659,7 +1656,6 @@ void rocprofiler_unload(bool is_destr) {
   range_vec = NULL;
   delete context_array;
   context_array = NULL;
-#endif
 
   ONLOAD_TRACE_END();
 }
