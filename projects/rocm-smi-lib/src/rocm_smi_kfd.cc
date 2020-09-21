@@ -451,7 +451,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
       return EINVAL;
     }
 
-    proc->vram_usage += std::stoi(tmp);
+    proc->vram_usage += std::stoull(tmp);
 
     std::string sdma_str_path = proc_str_path;
     sdma_str_path += "/sdma_";
@@ -466,7 +466,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
       return EINVAL;
     }
 
-    proc->sdma_usage += std::stoi(tmp);
+    proc->sdma_usage += std::stoull(tmp);
   }
 
   return 0;
