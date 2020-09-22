@@ -59,6 +59,7 @@
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_device.h"
+#include "rocm_smi/rocm_smi_main.h"
 
 namespace amd {
 namespace smi {
@@ -83,13 +84,13 @@ static const char *kKFDPasidFName = "pasid";
 // static const char *kKFDNodePropGDS_SIZE_IN_KBStr =     "gds_size_in_kb";
 // static const char *kKFDNodePropNUM_GWSStr =            "num_gws";
 // static const char *kKFDNodePropWAVE_FRONT_SIZEStr =    "wave_front_size";
-// static const char *kKFDNodePropARRAY_COUNTStr =        "array_count";
-// static const char *kKFDNodePropSIMD_ARRAYS_PER_ENGINEStr =
-//                                                   "simd_arrays_per_engine";
-// static const char *kKFDNodePropCU_PER_SIMD_ARRAYStr =  "cu_per_simd_array";
-// static const char *kKFDNodePropSIMD_PER_CUStr =        "simd_per_cu";
-// static const char *kKFDNodePropMAX_SLOTS_SCRATCH_CUStr =
-//                                                     "max_slots_scratch_cu";
+
+static const char *kKFDNodePropARRAY_COUNTStr = "array_count";
+static const char *kKFDNodePropSIMD_ARRAYS_PER_ENGINEStr = "simd_arrays_per_engine";
+static const char *kKFDNodePropCU_PER_SIMD_ARRAYStr = "cu_per_simd_array";
+// static const char *kKFDNodePropSIMD_PER_CUStr = "simd_per_cu";
+// static const char *kKFDNodePropMAX_SLOTS_SCRATCH_CUStr = "max_slots_scratch_cu";
+
 // static const char *kKFDNodePropVENDOR_IDStr =          "vendor_id";
 // static const char *kKFDNodePropDEVICE_IDStr =          "device_id";
 static const char *kKFDNodePropLOCATION_IDStr =          "location_id";
@@ -434,6 +435,11 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
 
   proc->vram_usage = 0;
   proc->sdma_usage = 0;
+  proc->cu_occupancy = 0;
+
+  uint32_t cu_count = 0;
+  static amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  static std::map<uint64_t, std::shared_ptr<KFDNode>>& kfd_node_map = smi.kfd_node_map();
 
   for (itr = gpu_set->begin(); itr != gpu_set->end(); itr++) {
     uint64_t gpu_id = (*itr);
@@ -467,6 +473,29 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
     }
 
     proc->sdma_usage += std::stoull(tmp);
+
+    // Build the path and read from Sysfs file, info that
+    // encodes Compute Unit usage by a process of interest
+    std::string cu_occupancy_path = proc_str_path;
+    cu_occupancy_path += "/stats_";
+    cu_occupancy_path += std::to_string(gpu_id);
+    cu_occupancy_path += "/cu_occupancy";
+    err = ReadSysfsStr(cu_occupancy_path, &tmp);
+    if (err == 0) {
+      if (!is_number(tmp)) {
+        return EINVAL;
+      }
+      // Update CU usage by the process
+      proc->cu_occupancy += std::stoi(tmp);
+
+      // Collect count of compute units
+      cu_count += kfd_node_map[gpu_id]->cu_count();
+    }
+  }
+
+  // Adjust CU occupancy to percent.
+  if (cu_count > 0) {
+    proc->cu_occupancy = ((proc->cu_occupancy * 100) / cu_count);
   }
 
   return 0;
@@ -640,6 +669,28 @@ KFDNode::Initialize(void) {
       io_link_weight_[node_to] = link->weight();
     }
   }
+
+  // Pre-compute the total number of compute units a device has
+  uint64_t tmp_val;
+  ret = get_property_value(kKFDNodePropSIMD_ARRAYS_PER_ENGINEStr, &tmp_val);
+  if (ret != 0) {
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+    "Failed to initialize rocm_smi library (get number of shader arrays per engine).");
+  }
+  cu_count_ = uint32_t(tmp_val);
+  ret = get_property_value(kKFDNodePropARRAY_COUNTStr, &tmp_val);
+  if (ret != 0) {
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+    "Failed to initialize rocm_smi library (get number of shader arrays).");
+  }
+  cu_count_ = cu_count_ * uint32_t(tmp_val);
+  ret = get_property_value(kKFDNodePropCU_PER_SIMD_ARRAYStr, &tmp_val);
+  if (ret != 0) {
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+    "Failed to initialize rocm_smi library (get number of CU's per array).");
+  }
+  cu_count_ = cu_count_ * uint32_t(tmp_val);
+
   return ret;
 }
 

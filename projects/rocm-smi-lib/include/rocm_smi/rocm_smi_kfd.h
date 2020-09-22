@@ -70,6 +70,7 @@ class KFDNode {
     uint32_t numa_node_number(void) const {return numa_node_number_;}
     uint64_t numa_node_weight(void) const {return numa_node_weight_;}
     uint64_t xgmi_hive_id(void) const {return xgmi_hive_id_;}
+    uint32_t cu_count(void) const {return cu_count_;}
     IO_LINK_TYPE numa_node_type(void) const {return numa_node_type_;}
     int get_io_link_type(uint32_t node_to, IO_LINK_TYPE *type);
     int get_io_link_weight(uint32_t node_to, uint64_t *weight);
@@ -86,6 +87,7 @@ class KFDNode {
     uint64_t numa_node_weight_;
     IO_LINK_TYPE numa_node_type_;
     uint64_t xgmi_hive_id_;
+    uint32_t cu_count_;
     std::map<uint32_t, IO_LINK_TYPE> io_link_type_;
     std::map<uint32_t, uint64_t> io_link_weight_;
     std::map<uint32_t, std::shared_ptr<IOLink>> io_link_map_;

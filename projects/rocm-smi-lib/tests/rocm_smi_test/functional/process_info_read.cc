@@ -210,6 +210,8 @@ void TestProcInfoRead::Run(void) {
                                    proc_info.vram_usage <<
                                    " SDMA Usage: " <<
                                    proc_info.sdma_usage <<
+                                   " Compute Unit Usage: " <<
+                                   proc_info.cu_occupancy <<
                                    std::endl;
       }
     }
