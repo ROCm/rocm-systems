@@ -443,11 +443,6 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           dur_us = int((end_ns - beg_ns) / 1000)
           from_us = int((beg_ns - START_NS) / 1000) + dur_us
 
-          print('beg_end_ns = ' + str(beg_ns) + ':' + str(end_ns))
-          print('>> START_NS = ' + str(START_NS))
-          print('>> dur_us = ' + str(dur_us))
-          print('>> from_us = ' + str(from_us))
-
           if not proc_id in dep_dict: dep_dict[proc_id] = {}
           dep_proc = dep_dict[proc_id]
           found = 1 if dep_pid in dep_proc else 0
