@@ -37,7 +37,7 @@ GPU_BASE_PID = 6
 NONE_PID = -1
 
 max_gpu_id = -1
-START_US = 0
+START_NS = 0
 
 hsa_activity_found = 0
 
@@ -164,9 +164,10 @@ def parse_res(infile):
           var_table[dispatch_number]['CompleteNs'] = m.group(4)
 
           ## filling dependenciws
-          from_ns = m.group(1)
-          from_us = int(from_ns) / 1000
-          to_us = int(m.group(2)) / 1000
+          from_ns = int(m.group(1))
+          to_ns = int(m.group(2))
+          from_us = int((from_ns - START_NS) / 1000)
+          to_us = int((to_ns - START_NS) / 1000)
 
           kern_dep_list.append((from_ns, disp_pid, disp_tid))
 
@@ -346,6 +347,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   if (hsa_activity_found): copy_raws = db.table_get_raws('COPY')
   copy_csv = ''
   copy_index = 0
+  op_found = 0
 
   file_name = indir + '/' + api_name + '_api_trace.txt'
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
@@ -358,10 +360,6 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   ptrn_multi_kernel = re.compile(r'(.*):(\d+)$')
 
   if not os.path.isfile(file_name): return 0
-
-  dep_tid_list = []
-  dep_from_us_list = []
-  dep_id_list = []
 
   # parsing an input trace file and creating a DB table
   record_id_dict = {}
@@ -410,23 +408,45 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
         # extracting/converting stream id
         (stream_id, stream_found) = get_field(record_args, 'stream')
-        if stream_found != 0:
+        if stream_found == 0:
+          stream_id = 0
+        else:
           stream_id = get_stream_index(stream_id)
           (rec_vals[5], found) = set_field(record_args, 'stream', stream_id)
           if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
-        else: stream_id = 0
 
         # extract kernel name string
         (kernel_str, kernel_found) = get_field(record_args, 'kernel')
+        if kernel_found == 0: kernel_str = ''
+        else: op_found = 1
 
         if stream_found != 0 or kernel_found != 0:
-          ops_patch_data[(corr_id, proc_id)] = (stream_id if stream_found else 0, kernel_str if kernel_found else '')
+          ops_patch_data[(corr_id, proc_id)] = (stream_id, kernel_str)
 
         # dependencies filling
         if ptrn_ac.match(record_name) or hip_mcopy_ptrn.match(record_name):
+          op_found = 1
+
+          # memcopy data
+          if len(copy_raws) != 0:
+            copy_data = list(copy_raws[copy_index])
+            args_str = rec_vals[5]
+            args_str = re.sub(r'\(', r'', args_str)
+            args_str = re.sub(r'\).*$', r'', args_str)
+            copy_line = str(copy_data[0]) + ', ' + str(copy_data[1]) + ', ' + record_name + ', ' + args_str
+            copy_csv += str(copy_index) + ', ' + copy_line + '\n'
+            copy_index += 1
+
+        if op_found:
           beg_ns = int(rec_vals[0])
           end_ns = int(rec_vals[1])
-          from_us = end_ns / 1000
+          dur_us = int((end_ns - beg_ns) / 1000)
+          from_us = int((beg_ns - START_NS) / 1000) + dur_us
+
+          print('beg_end_ns = ' + str(beg_ns) + ':' + str(end_ns))
+          print('>> START_NS = ' + str(START_NS))
+          print('>> dur_us = ' + str(dur_us))
+          print('>> from_us = ' + str(from_us))
 
           if not proc_id in dep_dict: dep_dict[proc_id] = {}
           dep_proc = dep_dict[proc_id]
@@ -438,16 +458,6 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
             dep_str = dep_proc[dep_pid]
             dep_str['from'].append((from_us, thrd_id, stream_id))
             if expl_id: dep_str['id'].append(corr_id)
-
-          # memcopy data
-          if len(copy_raws) != 0:
-            copy_data = list(copy_raws[copy_index])
-            args_str = rec_vals[5]
-            args_str = re.sub(r'\(', r'', args_str)
-            args_str = re.sub(r'\).*$', r'', args_str)
-            copy_line = str(copy_data[0]) + ', ' + str(copy_data[1]) + ', ' + record_name + ', ' + args_str
-            copy_csv += str(copy_index) + ', ' + copy_line + '\n'
-            copy_index += 1
 
         if False:
           # patching activity properties: kernel name, stream-id
@@ -526,11 +536,14 @@ def fill_copy_db(table_name, db, indir):
         db.insert_entry(table_handle, rec_vals)
 
         # filling dependencies
+        to_ns = int(rec_vals[0])
+        to_us = int((to_ns - START_NS) / 1000)
+
         if not proc_id in dep_dict: dep_dict[proc_id] = {}
         dep_proc = dep_dict[proc_id]
         if not pid in dep_proc: dep_proc[pid] = { 'pid': HSA_PID, 'from': [], 'to': {}, 'id': [] }
         dep_str = dep_proc[pid]
-        dep_str['to'][corr_id] = int(rec_vals[0]) / 1000
+        dep_str['to'][corr_id] = to_us
 
       else: fatal("async-copy bad record: '" + record + "'")
 
@@ -616,11 +629,14 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         filtr[(corr_id, proc_id)] = rec_table_name
 
         # filling a dependencies
+        to_ns = int(rec_vals[0])
+        to_us = int((to_ns - START_NS) / 1000)
+
         if not proc_id in dep_dict: dep_dict[proc_id] = {}
         dep_proc = dep_dict[proc_id]
         if not pid in dep_proc: dep_proc[pid] = { 'bsp': OPS_PID, 'to': {} }
         dep_str = dep_proc[pid]
-        dep_str['to'][corr_id] = int(rec_vals[0]) / 1000
+        dep_str['to'][corr_id] = to_us
 
       else:
         fatal("hcc ops bad record: '" + record + "'")
@@ -644,10 +660,10 @@ if os.path.isfile(begin_ts_file):
   with open(begin_ts_file, mode='r') as fd:
     ind = 0
     for line in fd.readlines():
-      val = int(line) / 1000
-      if ind == 0 or val < START_US: START_US = val
+      val = int(line)
+      if ind == 0 or val < START_NS: START_NS = val
       ind += 1
-  print('START timestamp found (' + str(START_US) + 'us)')
+  print('START timestamp found (' + str(START_NS) + 'ns)')
 
 if re.search(r'\.csv$', outfile):
   csvfile = outfile
@@ -718,38 +734,38 @@ else:
       db.label_json(int(ind) + int(GPU_BASE_PID), "GPU" + str(ind), jsonfile)
 
   if ext_trace_found:
-    dform.gen_ext_json_trace(db, 'rocTX', START_US, jsonfile)
+    dform.gen_ext_json_trace(db, 'rocTX', START_NS, jsonfile)
 
   if len(var_table) != 0:
     dform.post_process_data(db, 'A', csvfile)
     dform.gen_table_bins(db, 'A', statfile, 'KernelName', 'DurationNs')
     if hsa_trace_found and 'BeginNs' in var_list:
-      dform.gen_kernel_json_trace(db, 'A', GPU_BASE_PID, START_US, jsonfile)
+      dform.gen_kernel_json_trace(db, 'A', GPU_BASE_PID, START_NS, jsonfile)
 
   if hsa_trace_found:
     dform.post_process_data(db, 'HSA')
     dform.gen_table_bins(db, 'HSA', hsa_statfile, 'Name', 'DurationNs')
-    dform.gen_api_json_trace(db, 'HSA', START_US, jsonfile)
+    dform.gen_api_json_trace(db, 'HSA', START_NS, jsonfile)
 
   if copy_trace_found:
     dform.post_process_data(db, 'COPY')
     dform.gen_table_bins(db, 'COPY', copy_statfile, 'Name', 'DurationNs')
-    dform.gen_api_json_trace(db, 'COPY', START_US, jsonfile)
+    dform.gen_api_json_trace(db, 'COPY', START_NS, jsonfile)
 
   if hip_trace_found:
     dform.post_process_data(db, 'HIP')
     dform.gen_table_bins(db, 'HIP', hip_statfile, 'Name', 'DurationNs')
-    dform.gen_api_json_trace(db, 'HIP', START_US, jsonfile)
+    dform.gen_api_json_trace(db, 'HIP', START_NS, jsonfile)
 
   if ops_filtr:
     dform.post_process_data(db, 'OPS')
     dform.gen_table_bins(db, 'OPS', ops_statfile, 'Name', 'DurationNs')
-    dform.gen_ops_json_trace(db, 'OPS', GPU_BASE_PID, START_US, jsonfile)
+    dform.gen_ops_json_trace(db, 'OPS', GPU_BASE_PID, START_NS, jsonfile)
 
   if kfd_trace_found:
     dform.post_process_data(db, 'KFD')
     dform.gen_table_bins(db, 'KFD', kfd_statfile, 'Name', 'DurationNs')
-    dform.gen_api_json_trace(db, 'KFD', START_US, jsonfile)
+    dform.gen_api_json_trace(db, 'KFD', START_NS, jsonfile)
 
   if any_trace_found:
     dep_id = 0
@@ -771,7 +787,7 @@ else:
         to_us_dict = dep_str['to']
         corr_id_list = dep_str['id']
 
-        db.flow_json(dep_id, from_pid, from_us_list, to_pid, to_us_dict, corr_id_list, START_US, jsonfile)
+        db.flow_json(dep_id, from_pid, from_us_list, to_pid, to_us_dict, corr_id_list, jsonfile)
         dep_id += len(from_us_list)
 
   if any_trace_found:
