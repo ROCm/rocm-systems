@@ -95,6 +95,7 @@ THE SOFTWARE.
 
 
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
+static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Mark callback
@@ -294,13 +295,19 @@ static inline void CorrelationIdRegistr(const activity_correlation_id_t& correla
   if (correlation_id_map == NULL) correlation_id_map = new correlation_id_map_t;
   const auto ret = correlation_id_map->insert({correlation_id, correlation_id_tls});
   if (ret.second == false) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id is not unique(" << correlation_id << ")");
+
+  DEBUG_TRACE("CorrelationIdRegistr id(%lu) id_tls(%lu)\n", correlation_id, correlation_id_tls);
 }
 
 static inline activity_correlation_id_t CorrelationIdLookup(const activity_correlation_id_t& correlation_id) {
   auto it = correlation_id_map->find(correlation_id);
   if (correlation_id_wait) while (it == correlation_id_map->end()) it = correlation_id_map->find(correlation_id);
   if (it == correlation_id_map->end()) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id lookup failed(" << correlation_id << ")");
-  return it->second;
+  const activity_correlation_id_t ret_val = it->second;
+
+  DEBUG_TRACE("CorrelationIdLookup id(%lu) ret(%lu)\n", correlation_id, ret_val);
+
+  return ret_val;
 }
 
 typedef std::mutex hip_activity_mutex_t;
@@ -341,6 +348,7 @@ void* HIP_SyncApiDataCallback(
     const void* callback_data,
     void* arg)
 {
+  void* ret = NULL;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
   hip_api_data_t* data_ptr = const_cast<hip_api_data_t*>(data);
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
@@ -375,16 +383,20 @@ void* HIP_SyncApiDataCallback(
     // Passing correlatin ID
     correlation_id_tls = correlation_id;
 
-    return data_ptr;
+    ret = data_ptr;
   } else {
     // popping the record entry
     if (!record_pair_stack.empty()) record_pair_stack.pop();
 
     // Clearing correlatin ID
     correlation_id_tls = 0;
-
-    return NULL;
   }
+
+  const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0);
+  DEBUG_TRACE("HIP_SyncApiDataCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) correlation_id(%lu)\n",
+    name, phase, op_id, record, data, pool, (int)(record_pair_stack.size()), (data_ptr) ? data_ptr->correlation_id : 0);
+
+  return ret;
 }
 
 void* HIP_SyncActivityCallback(
@@ -395,6 +407,7 @@ void* HIP_SyncActivityCallback(
 {
   static hsa_rt_utils::Timer timer;
 
+  void* ret = NULL;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
   hip_api_data_t* data_ptr = const_cast<hip_api_data_t*>(data);
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
@@ -436,7 +449,7 @@ void* HIP_SyncActivityCallback(
     // Passing correlatin ID
     correlation_id_tls = correlation_id;
 
-    return data_ptr; 
+    ret = data_ptr;
   } else {
     if (pool == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback exit: pool is NULL");
 
@@ -469,9 +482,13 @@ void* HIP_SyncActivityCallback(
 
     // Clearing correlatin ID
     correlation_id_tls = 0;
-
-    return NULL;
   }
+
+  const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0);
+  DEBUG_TRACE("HIP_SyncActivityCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) correlation_id(%lu)\n",
+    name, phase, op_id, record, data, pool, (int)(record_pair_stack.size()), (data_ptr) ? data_ptr->correlation_id : 0);
+
+  return ret;
 }
 
 void HCC_ActivityIdCallback(activity_correlation_id_t correlation_id) {
@@ -484,6 +501,10 @@ void HCC_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
   record_ptr->domain = ACTIVITY_DOMAIN_HCC_OPS;
   record_ptr->correlation_id = CorrelationIdLookup(record_ptr->correlation_id);
   pool->Write(*record_ptr);
+
+  const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HCC_OPS, record_ptr->op, record_ptr->kind);
+  DEBUG_TRACE("HCC_AsyncActivityCallback(\"%s\"): op(%u) kind(%u) record(%p) pool(%p) correlation_id(%d)\n",
+    name, record_ptr->op, record_ptr->kind, record, pool, record_ptr->correlation_id);
 }
 
 // Open output file
@@ -673,6 +694,8 @@ PUBLIC_API const char* roctracer_op_string(
       return roctracer::HipLoader::Instance().ApiName(op);
     case ACTIVITY_DOMAIN_KFD_API:
       return roctracer::kfd_support::GetApiName(op);
+    case ACTIVITY_DOMAIN_EXT_API:
+      return "EXT_API";
     default:
       EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
   }

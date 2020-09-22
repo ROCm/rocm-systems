@@ -100,10 +100,10 @@ class Logger {
     return *obj;
   }
 
- private:
   static uint32_t GetPid() { return syscall(__NR_getpid); }
   static uint32_t GetTid() { return syscall(__NR_gettid); }
 
+ private:
   Logger() : file_(NULL), dirty_(false), streaming_(false), messaging_(false) {
     const char* path = getenv("ROCTRACER_LOG");
     if (path != NULL) {
@@ -196,6 +196,22 @@ class Logger {
         " in " << __FUNCTION__ << " at " << __FILE__ << " line " << __LINE__                       \
                << roctracer::util::Logger::endl;                                                 \
   } while(0)
+#endif
+
+#if DEBUG_TRACE_ON
+inline static void DEBUG_TRACE(const char* fmt, ...) {
+  constexpr int size = 256;
+  char buf[size];
+
+  va_list valist;
+  va_start(valist, fmt);
+  vsnprintf(buf, size, fmt, valist);
+  printf("%u:%u %s",
+    roctracer::util::Logger::GetPid(), roctracer::util::Logger::GetTid(), buf); fflush(stdout);
+  va_end(valist);
+}
+#else
+inline static void DEBUG_TRACE(const char* fmt, ...) {}
 #endif
 
 #endif  // SRC_UTIL_LOGGER_H_

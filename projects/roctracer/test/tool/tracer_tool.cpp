@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <cxxabi.h>  /* names denangle */
 #include <dirent.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/syscall.h>  /* SYS_xxx definitions */
@@ -78,6 +79,24 @@ THE SOFTWARE.
 #define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
 #define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
 
+static inline uint32_t GetPid() { return syscall(__NR_getpid); }
+static inline uint32_t GetTid() { return syscall(__NR_gettid); }
+
+#if DEBUG_TRACE_ON
+inline static void DEBUG_TRACE(const char* fmt, ...) {
+  constexpr int size = 256;
+  char buf[size];
+
+  va_list valist;
+  va_start(valist, fmt);
+  vsnprintf(buf, size, fmt, valist);
+  printf("%u:%u %s", GetPid(), GetTid(), buf); fflush(stdout);
+  va_end(valist);
+}
+#else
+inline static void DEBUG_TRACE(const char* fmt, ...) {}
+#endif
+
 typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
 hsa_rt_utils::Timer* timer = NULL;
 thread_local timestamp_t hsa_begin_timestamp = 0;
@@ -124,9 +143,6 @@ void close_file_handles() {
   if (kfd_api_file_handle) close_output_file(kfd_api_file_handle);
   if (pc_sample_file_handle) close_output_file(pc_sample_file_handle);
 }
-
-static inline uint32_t GetPid() { return syscall(__NR_getpid); }
-static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
 static const uint32_t my_pid = GetPid();
 
@@ -378,19 +394,20 @@ void hip_api_callback(
 {
   (void)arg;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
+  const timestamp_t timestamp = timer->timestamp_fn_ns();
+  hip_api_trace_entry_t* entry = NULL;
 
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    hip_begin_timestamp = timer->timestamp_fn_ns();
+    hip_begin_timestamp = timestamp;
   } else {
     // Post onit of HIP APU args
     hipApiArgsInit((hip_api_id_t)cid, const_cast<hip_api_data_t*>(data));
 
-    const timestamp_t end_timestamp = timer->timestamp_fn_ns();
-    hip_api_trace_entry_t* entry = hip_api_trace_buffer->GetEntry();
+    entry = hip_api_trace_buffer->GetEntry();
     entry->cid = cid;
     entry->domain = domain;
     entry->begin = hip_begin_timestamp;
-    entry->end = end_timestamp;
+    entry->end = timestamp;
     entry->pid = GetPid();
     entry->tid = GetTid();
     entry->data = *data;
@@ -435,6 +452,10 @@ void hip_api_callback(
 
     entry->valid.store(roctracer::TRACE_ENTRY_COMPL, std::memory_order_release);
   }
+
+  const char * name = roctracer_op_string(domain, cid, 0);
+  DEBUG_TRACE("hip_api_callback(\"%s\") phase(%d): cid(%u) data(%p) entry(%p) name(\"%s\") correlation_id(%lu)\n",
+    name, data->phase, cid, data, entry, (entry) ? entry->name : NULL, data->correlation_id);
 }
 
 void mark_api_callback(
@@ -465,12 +486,10 @@ hip_kernel_map_t* hip_kernel_map = NULL;
 std::mutex hip_kernel_mutex;
 
 void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
-  static uint64_t correlation_id = 0;
-  correlation_id += 1;
-
   const uint32_t domain = entry->domain;
   const uint32_t cid = entry->cid;
   const hip_api_data_t* data = &(entry->data);
+  const uint64_t correlation_id = data->correlation_id;
   const timestamp_t begin_timestamp = entry->begin;
   const timestamp_t end_timestamp = entry->end;
   std::ostringstream rec_ss;
@@ -479,6 +498,10 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
   const char* str = (domain != ACTIVITY_DOMAIN_EXT_API) ? roctracer_op_string(domain, cid, 0) : strdup("MARK");
   rec_ss << std::dec << begin_timestamp << ":" << end_timestamp << " " << entry->pid << ":" << entry->tid;
   oss << std::dec << rec_ss.str() << " " << str;
+
+  const char * name = roctracer_op_string(entry->domain, entry->cid, 0);
+  DEBUG_TRACE("hip_api_flush_cb(\"%s\"): domain(%u) cid(%u) entry(%p) name(\"%s\" correlation_id(%lu))\n",
+    name, entry->domain, entry->cid, entry, entry->name, correlation_id);
 
   if (domain == ACTIVITY_DOMAIN_HIP_API) {
 #if HIP_PROF_HIP_API_STRING
@@ -496,6 +519,7 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
         const char* kernel_name = cxx_demangle(entry->name);
         rec_ss << " kernel=" << kernel_name;
       }
+      rec_ss<< " :" << correlation_id;
       fprintf(hip_api_file_handle, "%s\n", rec_ss.str().c_str());
     }
 #else  // !HIP_PROF_HIP_API_STRING
@@ -607,6 +631,9 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
 
   while (record < end_record) {
     const char * name = roctracer_op_string(record->domain, record->op, record->kind);
+    DEBUG_TRACE("pool_activity_callback(\"%s\"): domain(%u) op(%u) kind(%u) record(%p) correlation_id(%lu)\n",
+      name, record->domain, record->op, record->kind, record, record->correlation_id);
+
     switch(record->domain) {
       case ACTIVITY_DOMAIN_HCC_OPS:
         if (hip_memcpy_stats != NULL) {
