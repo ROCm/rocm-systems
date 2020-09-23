@@ -353,11 +353,10 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
   hip_mcopy_ptrn = re.compile(r'hipMemcpy')
   ptrn_ac = re.compile(r'hsa_amd_memory_async_copy')
-  ptrn1_kernel = re.compile(r'^.*kernel\(')
-  ptrn2_kernel = re.compile(r'\)\) .*$')
   ptrn_fixformat = re.compile(r'(\d+:\d+ \d+:\d+ \w+)\(\s*(.*)\)$')
   ptrn_fixkernel = re.compile(r'\s+kernel=(.*)$')
   ptrn_multi_kernel = re.compile(r'(.*):(\d+)$')
+  ptrn_corr_id = re.compile(r'\ :(\d*)$')
 
   if not os.path.isfile(file_name): return 0
 
@@ -376,6 +375,12 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
       line_index += 1
 
       record = line[:-1]
+
+      corr_id = 0
+      m = ptrn_corr_id.search(record)
+      if m:
+        corr_id = int(m.group(1))
+        record = ptrn_corr_id.sub('', record)
 
       kernel_arg = ''
       m = ptrn_fixkernel.search(record)
@@ -402,8 +407,12 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
         # incrementing per-process record id/correlation id
         if not proc_id in record_id_dict: record_id_dict[proc_id] = 0
-        corr_id = record_id_dict[proc_id]
         record_id_dict[proc_id] += 1
+        record_id = record_id_dict[proc_id]
+
+        # setting correlationid to record id if correlation id is not defined
+        if corr_id == 0: corr_id = record_id
+
         rec_vals.append(corr_id)
 
         # extracting/converting stream id
@@ -483,8 +492,8 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   # inserting of dispatch events correlated to the dependent dispatches
   for (from_ns, proc_id, thrd_id) in dep_list:
     if not proc_id in record_id_dict: record_id_dict[proc_id] = 0
-    corr_id = record_id_dict[proc_id]
     record_id_dict[proc_id] += 1
+    corr_id = record_id_dict[proc_id]
     db.insert_entry(table_handle, [from_ns, from_ns, api_pid, thrd_id, 'hsa_dispatch', '', corr_id, ''])
 
   # generating memcopy CSV
@@ -585,7 +594,7 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         m = ptrn_id.match(label)
         if not m: fatal("bad hcc ops entry '" + record + "'")
         name = m.group(1)
-        corr_id = int(m.group(2)) - 1
+        corr_id = int(m.group(2))
         proc_id = int(m.group(3))
 
         # checking name for memcopy pattern
