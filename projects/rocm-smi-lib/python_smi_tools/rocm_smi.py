@@ -57,11 +57,18 @@ validClockNames = clk_type_names[1:-2]
 validClockNames.append('pcie')
 validClockNames.sort()
 
-# Check for correct initialization value
-ret_init = rocmsmi.rsmi_init(0)
-if ret_init != 0:
-    logging.error('ROCm SMI returned %s (the expected value is 0)', ret_init)
-    exit(ret_init)
+def driverInitialized():
+    """ Returns true if amdgpu is found in the list of initialized modules
+    """
+    driverInitialized = ''
+    try:
+        driverInitialized = str(subprocess.check_output("cat /proc/modules|grep amdgpu", shell=True))
+    except subprocess.CalledProcessError:
+        pass
+    if len(driverInitialized) > 0:
+        return True
+    return False
+
 
 def formatJson(device, log):
     """ Print out in JSON format
@@ -2132,6 +2139,20 @@ def doesDeviceExist(device):
     return False
 
 
+def initializeRsmi():
+    """ initializes rocmsmi if the amdgpu driver is initialized
+    """
+    # Check if amdgpu is initialized before initializing rsmi
+    if driverInitialized() is True:
+        ret_init = rocmsmi.rsmi_init(0)
+        if ret_init != 0:
+            logging.error('ROCm SMI returned %s (the expected value is 0)', ret_init)
+            exit(ret_init)
+    else:
+        logging.error('Driver not initialized (amdgpu not found in modules)')
+        exit(0)
+
+
 def isAmdDevice(device):
     """ Return whether the specified device is an AMD device or not
 
@@ -2443,6 +2464,9 @@ if __name__ == '__main__':
     groupActionOutput.add_argument('--csv', help='Print output in CSV format', action='store_true')
 
     args = parser.parse_args()
+
+    # Initialize the rocm SMI library
+    initializeRsmi()
 
     logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.WARNING)
     if args.loglevel is not None:
