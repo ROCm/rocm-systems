@@ -979,6 +979,33 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
  */
 rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id);
 
+
+/**
+ *  @brief Get the SKU for a desired device associated with the device with
+ *  provided device index.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a char @p sku,
+ *  this function will attempt to obtain the SKU from the Product Information
+ *  FRU chip, present on server ASICs. It will write the sku value to the
+ *  char array pointed to by @p sku.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] sku a pointer to char to which the sku will be written
+ *
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t rsmi_dev_sku_get(uint32_t dv_ind, char *sku);
+
 /**
  *  @brief Get the device vendor id associated with the device with provided
  *  device index.

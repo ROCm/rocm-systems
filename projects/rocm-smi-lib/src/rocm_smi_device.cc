@@ -72,6 +72,8 @@ namespace smi {
 
 // Device sysfs file names
 static const char *kDevPerfLevelFName = "power_dpm_force_performance_level";
+static const char *kDevDevProdNameFName = "product_name";
+static const char *kDevDevProdNumFName = "product_number";
 static const char *kDevDevIDFName = "device";
 static const char *kDevVendorIDFName = "vendor";
 static const char *kDevSubSysDevIDFName = "subsystem_device";
@@ -212,6 +214,8 @@ static const char *kDevPerfLevelUnknownStr = "unknown";
 static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevPerfLevel, kDevPerfLevelFName},
     {kDevOverDriveLevel, kDevOverDriveLevelFName},
+    {kDevDevProdName, kDevDevProdNameFName},
+    {kDevDevProdNum, kDevDevProdNumFName},
     {kDevDevID, kDevDevIDFName},
     {kDevVendorID, kDevVendorIDFName},
     {kDevSubSysDevID, kDevSubSysDevIDFName},
@@ -338,7 +342,8 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_vendor_id_get",             {{kDevVendorIDFName}, {}}},
 
   {"rsmi_dev_name_get",                  {{kDevVendorIDFName,
-                                                        kDevDevIDFName}, {}}},
+                                           kDevDevIDFName}, {}}},
+  {"rsmi_dev_sku_get",                   {{kDevDevProdNumFName}, {}}},
   {"rsmi_dev_brand_get",                 {{kDevVendorIDFName}, {}}},
   {"rsmi_dev_vendor_name_get",           {{kDevVendorIDFName}, {}}},
   {"rsmi_dev_serial_number_get",         {{kDevSerialNumberFName}, {}}},
@@ -798,6 +803,8 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevPerfLevel:
     case kDevUsage:
     case kDevOverDriveLevel:
+    case kDevDevProdName:
+    case kDevDevProdNum:
     case kDevDevID:
     case kDevSubSysDevID:
     case kDevSubSysVendorID:

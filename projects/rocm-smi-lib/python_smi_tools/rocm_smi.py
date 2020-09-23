@@ -1621,13 +1621,15 @@ def showProductName(deviceList):
                 device_model = model.value.decode()
                 printLog(device, 'Card model', '\t\t' + device_model)
             printLog(device, 'Card vendor', '\t\t' + device_vendor)
-            # Retrieve the device SKU from VBIOS
-            ret = rocmsmi.rsmi_dev_vbios_version_get(device, vbios, 256)
-            if rsmi_ret_ok(ret, device) and vbios.value.decode():
-                # Device SKU is just 6 characters after the first occurance of '-' in vbios_version
-                # TODO: Use Product Info sysfs where possible
-                device_sku = vbios.value.decode().split('-')[1][:6]
-                printLog(device, 'Card SKU', '\t\t' + device_sku)
+            # Retrieve the SKU
+            ret = rocmsmi.rsmi_dev_sku_get(device, device_sku, 256)
+            if not rsmi_ret_ok(ret, device) or not device_sku.value.decode():
+                # Retrieve the device SKU from VBIOS if product_number doesn't exist
+                ret = rocmsmi.rsmi_dev_vbios_version_get(device, vbios, 256)
+                if rsmi_ret_ok(ret, device) and vbios.value.decode():
+                    # Device SKU is just 6 characters after the first occurance of '-' in vbios_version
+                    device_sku = vbios.value.decode().split('-')[1][:6]
+            printLog(device, 'Card SKU', '\t\t' + device_sku)
         else:
             printLog(device, 'Incompatible device.\n' \
                              'GPU[%s]\t\t: Expected vendor name: Advanced Micro Devices, Inc. [AMD/ATI]\n'\

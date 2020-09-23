@@ -723,6 +723,15 @@ rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
 }
 
 rsmi_status_t
+rsmi_dev_sku_get(uint32_t dv_ind, uint16_t *id) {
+  TRY
+  CHK_SUPPORT_NAME_ONLY(id)
+  DEVICE_MUTEX
+  return get_id(dv_ind, amd::smi::kDevDevProdNum, id);
+  CATCH
+}
+
+rsmi_status_t
 rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t *id) {
   CHK_SUPPORT_NAME_ONLY(id)
   DEVICE_MUTEX
@@ -1530,6 +1539,25 @@ static rsmi_status_t get_backup_name(uint16_t id, char *name, size_t len) {
   return RSMI_STATUS_SUCCESS;
 }
 
+static rsmi_status_t get_dev_name_from_file(uint32_t dv_ind, char *name,
+                                               size_t len) {
+  std::string val_str;
+  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevDevProdName, dv_ind, &val_str);
+
+  if (ret != 0) {
+    return amd::smi::ErrnoToRsmiStatus(ret);
+  }
+  size_t ct = val_str.copy(name, len);
+
+  name[std::min(len - 1, ct)] = '\0';
+
+  if (len < (val_str.size() + 1)) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+
+  return RSMI_STATUS_SUCCESS;
+}
+
 // Parse pci.ids files. Comment lines have # in first column. Otherwise,
 // Syntax:
 // vendor  vendor_name
@@ -1687,7 +1715,11 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
 
   DEVICE_MUTEX
 
-  ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_DEVICE);
+  ret = get_dev_name_from_file(dv_ind, name, len);
+
+  if (ret) {
+    ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_DEVICE);
+  }
 
   return ret;
   CATCH
