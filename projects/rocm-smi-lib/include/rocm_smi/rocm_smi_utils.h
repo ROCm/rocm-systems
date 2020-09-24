@@ -80,6 +80,9 @@ rsmi_status_t handleException();
 rsmi_status_t
 GetDevValueVec(amd::smi::DevInfoTypes type,
                          uint32_t dv_ind, std::vector<std::string> *val_vec);
+rsmi_status_t
+GetDevBinaryVec(amd::smi::DevInfoTypes type,
+                         uint32_t dv_ind, std::vector<unsigned char> *val_vec);
 rsmi_status_t ErrnoToRsmiStatus(uint32_t err);
 
 struct pthread_wrap {

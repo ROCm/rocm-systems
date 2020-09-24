@@ -408,12 +408,17 @@ int main() {
   rsmi_dev_perf_level_t pfl;
   rsmi_frequencies_t f;
   uint32_t num_monitor_devs = 0;
+  rsmi_gpu_metrics_t p;
 
   rsmi_num_monitor_devices(&num_monitor_devs);
   for (uint32_t i = 0; i< num_monitor_devs; ++i) {
     ret = rsmi_dev_id_get(i, &val_ui16);
     CHK_RSMI_RET(ret)
     std::cout << "\t**Device ID: 0x" << std::hex << val_ui64 << std::endl;
+
+    ret = rsmi_dev_gpu_metrics_info_get(i, &p);
+    CHK_RSMI_RET(ret)
+    std::cout << "\t**GPU METRICS" << std::endl;
 
     ret = rsmi_dev_perf_level_get(i, &pfl);
     CHK_RSMI_RET(ret)

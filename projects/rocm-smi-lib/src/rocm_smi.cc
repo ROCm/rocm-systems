@@ -1033,7 +1033,6 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   CATCH
 }
 
-
 rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
                                         uint64_t clkvalue,
                                         rsmi_clk_type_t clkType) {
@@ -2153,6 +2152,29 @@ rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data_t *odv) {
   DEVICE_MUTEX
   CHK_SUPPORT_NAME_ONLY(odv)
   rsmi_status_t ret = get_od_clk_volt_info(dv_ind, odv);
+
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *smu) {
+  TRY
+  DEVICE_MUTEX
+  CHK_SUPPORT_NAME_ONLY(smu)
+
+  std::vector<unsigned char> val_vec;
+  rsmi_status_t ret = GetDevBinaryVec(amd::smi::kDevGpuMetrics, dv_ind,
+                                                                   &val_vec);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  if (val_vec.size() == 0) {
+    return RSMI_STATUS_NOT_YET_IMPLEMENTED;
+  }
+
+  smu = reinterpret_cast<rsmi_gpu_metrics_t *>(val_vec.data());
 
   return ret;
   CATCH

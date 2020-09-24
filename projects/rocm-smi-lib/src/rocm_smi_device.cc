@@ -57,6 +57,7 @@
 #include <vector>
 #include <memory>
 #include <algorithm>
+#include <iterator>
 
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -106,6 +107,7 @@ static const char *kDevMemBusyPercentFName = "mem_busy_percent";
 static const char *kDevXGMIErrorFName = "xgmi_error";
 static const char *kDevSerialNumberFName = "serial_number";
 static const char *kDevNumaNodeFName = "numa_node";
+static const char *kDevGpuMetricsFName = "gpu_metrics";
 
 // Firmware version files
 static const char *kDevFwVersionAsdFName = "fw_version/asd_fw_version";
@@ -265,6 +267,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevSerialNumber, kDevSerialNumberFName},
     {kDevMemPageBad, kDevMemPageBadFName},
     {kDevNumaNode, kDevNumaNodeFName},
+    {kDevGpuMetrics, kDevGpuMetricsFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -375,6 +378,7 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_xgmi_error_reset",          {{kDevXGMIErrorFName}, {}}},
   {"rsmi_dev_memory_reserved_pages_get", {{kDevMemPageBadFName}, {}}},
   {"rsmi_topo_numa_affinity_get",        {{kDevNumaNodeFName}, {}}},
+  {"rsmi_dev_gpu_metrics_info_get",      {{kDevGpuMetricsFName}, {}}},
 
   // These functions with variants, but no sensors/units. (May or may not
   // have mandatory dependencies.)
@@ -624,6 +628,24 @@ int Device::readDevInfoLine(DevInfoTypes type, std::string *line) {
   return 0;
 }
 
+int Device::readDevInfoBinary(DevInfoTypes type,
+                                std::vector<unsigned char> *retVec) {
+  auto sysfs_path = path_;
+
+  sysfs_path += "/device/";
+  sysfs_path += kDevAttribNameMap.at(type);
+
+  std::ifstream fs(sysfs_path, std::ios::binary);
+  if (!fs.is_open()) {
+    return errno;
+  }
+  // copies all data into buffer
+  retVec->insert(retVec->begin(),
+               std::istreambuf_iterator<char>(fs),{});
+
+  return 0;
+}
+
 int Device::readDevInfoMultiLineStr(DevInfoTypes type,
                                            std::vector<std::string> *retVec) {
   std::string line;
@@ -745,6 +767,21 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
     case kDevErrCntGFX:
     case kDevMemPageBad:
       return readDevInfoMultiLineStr(type, val);
+      break;
+
+    default:
+      return EINVAL;
+  }
+
+  return 0;
+}
+
+int Device::readDevInfo(DevInfoTypes type, std::vector<unsigned char> *val) {
+  assert(val != nullptr);
+
+  switch (type) {
+     case kDevGpuMetrics:
+      return readDevInfoBinary(type, val);
       break;
 
     default:

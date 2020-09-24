@@ -757,6 +757,72 @@ typedef struct {
 typedef rsmi_od_volt_freq_data_t rsmi_od_volt_freq_data;
 /// \endcond
 
+
+/**
+ * @brief The following structures hold the gpu metrics values for a device.
+ */
+
+struct metrics_table_header {
+  uint16_t      structure_size;
+  uint8_t       format_revision;
+  uint8_t       content_revision;
+};
+
+typedef struct {
+  struct metrics_table_header common_header;
+
+/* Driver attached timestamp (in ns) */
+  uint64_t      system_clock_counter;
+
+/* Temperature */
+  uint16_t      temperature_edge;
+  uint16_t      temperature_hotspot;
+  uint16_t      temperature_mem;
+  uint16_t      temperature_vrgfx;
+  uint16_t      temperature_vrsoc;
+  uint16_t      temperature_vrmem;
+
+/* Utilization */
+  uint16_t      average_gfx_activity;
+  uint16_t      average_umc_activity; // memory controller
+  uint16_t      average_mm_activity; // UVD or VCN
+
+/* Power/Energy */
+  uint16_t      average_socket_power;
+  uint32_t      energy_accumulator;
+
+/* Average clocks */
+  uint16_t      average_gfxclk_frequency;
+  uint16_t      average_socclk_frequency;
+  uint16_t      average_uclk_frequency;
+  uint16_t      average_vclk0_frequency;
+  uint16_t      average_dclk0_frequency;
+  uint16_t      average_vclk1_frequency;
+  uint16_t      average_dclk1_frequency;
+
+/* Current clocks */
+  uint16_t      current_gfxclk;
+  uint16_t      current_socclk;
+  uint16_t      current_uclk;
+  uint16_t      current_vclk0;
+  uint16_t      current_dclk0;
+  uint16_t      current_vclk1;
+  uint16_t      current_dclk1;
+
+/* Throttle status */
+  uint32_t      throttle_status;
+
+/* Fans */
+  uint16_t      current_fan_speed;
+
+/* Link width/speed */
+  uint8_t       pcie_link_width;
+  uint8_t       pcie_link_speed; // in 0.1 GT/s
+}rsmi_gpu_metrics_t;
+/// \cond Ignore in docs.
+typedef rsmi_gpu_metrics_t rsmi_gpu_metrics;
+/// \endcond
+
 /**
  * @brief This structure holds error counts.
  */
@@ -2013,6 +2079,29 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
  */
 rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind,
                                                rsmi_od_volt_freq_data_t *odv);
+
+/**
+ *  @brief This function retrieves the gpu metrics information
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a
+ *  ::rsmi_gpu_metrics_t structure @p pgpu_metrics, this function will populate
+ *  @p pgpu_metrics. See ::rsmi_gpu_metrics_t for more details.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] pgpu_metrics a pointer to an ::rsmi_gpu_metrics_t structure
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind,
+                                            rsmi_gpu_metrics_t *pgpu_metrics);
 
 /**
  *  @brief This function sets the clock frequency information

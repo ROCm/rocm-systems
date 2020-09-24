@@ -204,6 +204,18 @@ rsmi_status_t GetDevValueVec(amd::smi::DevInfoTypes type,
   return ErrnoToRsmiStatus(ret);
 }
 
+rsmi_status_t GetDevBinaryVec(amd::smi::DevInfoTypes type,
+                         uint32_t dv_ind, std::vector<unsigned char> *val_vec) {
+  assert(val_vec != nullptr);
+  if (val_vec == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  GET_DEV_FROM_INDX
+
+  int ret = dev->readDevInfo(type, val_vec);
+  return ErrnoToRsmiStatus(ret);
+}
+
 rsmi_status_t ErrnoToRsmiStatus(uint32_t err) {
   switch (err) {
     case 0:      return RSMI_STATUS_SUCCESS;
