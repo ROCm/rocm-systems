@@ -23,6 +23,7 @@ THE SOFTWARE.
 #ifndef SRC_UTIL_EXCEPTION_H_
 #define SRC_UTIL_EXCEPTION_H_
 
+#include <hsa.h>
 #include <hsa_ven_amd_aqlprofile.h>
 
 #include <exception>
@@ -31,9 +32,12 @@ THE SOFTWARE.
 
 #define EXC_ABORT(error, stream)                                                                   \
   do {                                                                                             \
+    const char* hsa_err_str = NULL;                                                                \
+    if (hsa_status_string(error, &hsa_err_str) != HSA_STATUS_SUCCESS) hsa_err_str = NULL;          \
     std::ostringstream oss;                                                                        \
-    oss << __FUNCTION__ << "(), " << stream;                                                       \
-    std::cout << "error(" << error << ") \"" << oss.str() << "\"" << std::endl;                    \
+    oss << "error(" << error << ") \"" << __FUNCTION__ << "(), " << stream << "\"" << std::endl;   \
+    if (hsa_err_str != NULL) oss << hsa_err_str << std::endl;                                      \
+    std::cout << oss.str() << std::flush;                                                          \
     abort();                                                                                       \
   } while (0)
 

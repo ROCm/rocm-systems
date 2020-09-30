@@ -187,9 +187,9 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
 
       hsa_api_.hsa_queue_create = table->core_->hsa_queue_create_fn;
       hsa_api_.hsa_queue_destroy = table->core_->hsa_queue_destroy_fn;
-      hsa_api_.hsa_queue_load_write_index_relaxed = table->core_->hsa_queue_load_write_index_relaxed_fn;
-      hsa_api_.hsa_queue_store_write_index_relaxed = table->core_->hsa_queue_store_write_index_relaxed_fn;
       hsa_api_.hsa_queue_load_read_index_relaxed = table->core_->hsa_queue_load_read_index_relaxed_fn;
+      hsa_api_.hsa_queue_load_write_index_relaxed = table->core_->hsa_queue_load_write_index_relaxed_fn;
+      hsa_api_.hsa_queue_add_write_index_scacq_screl = table->core_->hsa_queue_add_write_index_scacq_screl_fn;
 
       hsa_api_.hsa_signal_create = table->core_->hsa_signal_create_fn;
       hsa_api_.hsa_signal_destroy = table->core_->hsa_signal_destroy_fn;
@@ -228,9 +228,9 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
 
       hsa_api_.hsa_queue_create = hsa_queue_create;
       hsa_api_.hsa_queue_destroy = hsa_queue_destroy;
-      hsa_api_.hsa_queue_load_write_index_relaxed = hsa_queue_load_write_index_relaxed;
-      hsa_api_.hsa_queue_store_write_index_relaxed = hsa_queue_store_write_index_relaxed;
       hsa_api_.hsa_queue_load_read_index_relaxed = hsa_queue_load_read_index_relaxed;
+      hsa_api_.hsa_queue_load_write_index_relaxed = hsa_queue_load_write_index_relaxed;
+      hsa_api_.hsa_queue_add_write_index_scacq_screl = hsa_queue_add_write_index_scacq_screl;
 
       hsa_api_.hsa_signal_create = hsa_signal_create;
       hsa_api_.hsa_signal_destroy = hsa_signal_destroy;
@@ -662,17 +662,24 @@ bool HsaRsrcFactory::PrintGpuAgents(const std::string& header) {
   return true;
 }
 
+void* HsaRsrcFactory::GetReadPointer(hsa_queue_t* queue) {
+  const uint32_t slot_size_b = CMD_SLOT_SIZE_B;
+  const uint64_t read_idx = hsa_api_.hsa_queue_load_read_index_relaxed(queue);
+  const uint32_t slot_idx = (uint32_t)(read_idx % queue->size);
+  void* queue_slot = reinterpret_cast<void*>((uintptr_t)(queue->base_address) + (slot_idx * slot_size_b));
+  return queue_slot;
+}
+
 uint64_t HsaRsrcFactory::Submit(hsa_queue_t* queue, const void* packet) {
   const uint32_t slot_size_b = CMD_SLOT_SIZE_B;
 
   // adevance command queue
-  const uint64_t write_idx = hsa_api_.hsa_queue_load_write_index_relaxed(queue);
-  hsa_api_.hsa_queue_store_write_index_relaxed(queue, write_idx + 1);
+  const uint64_t write_idx = hsa_api_.hsa_queue_add_write_index_scacq_screl(queue, 1);
   while ((write_idx - hsa_api_.hsa_queue_load_read_index_relaxed(queue)) >= queue->size) {
     sched_yield();
   }
 
-  uint32_t slot_idx = (uint32_t)(write_idx % queue->size);
+  const uint32_t slot_idx = (uint32_t)(write_idx % queue->size);
   uint32_t* queue_slot = reinterpret_cast<uint32_t*>((uintptr_t)(queue->base_address) + (slot_idx * slot_size_b));
   const uint32_t* slot_data = reinterpret_cast<const uint32_t*>(packet);
 

@@ -87,6 +87,7 @@ decltype(hsa_signal_store_relaxed)* hsa_signal_store_screlease_fn;
 decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed_fn;
 decltype(hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed_fn;
 decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed_fn;
+decltype(hsa_queue_add_write_index_scacq_screl)* hsa_queue_add_write_index_scacq_screl_fn;
 
 decltype(hsa_queue_load_write_index_scacquire)* hsa_queue_load_write_index_scacquire_fn;
 decltype(hsa_queue_store_write_index_screlease)* hsa_queue_store_write_index_screlease_fn;
@@ -121,6 +122,7 @@ void SaveHsaApi(::HsaApiTable* table) {
   hsa_queue_load_write_index_relaxed_fn = table->core_->hsa_queue_load_write_index_relaxed_fn;
   hsa_queue_store_write_index_relaxed_fn = table->core_->hsa_queue_store_write_index_relaxed_fn;
   hsa_queue_load_read_index_relaxed_fn = table->core_->hsa_queue_load_read_index_relaxed_fn;
+  hsa_queue_add_write_index_scacq_screl_fn = table->core_->hsa_queue_add_write_index_scacq_screl_fn;
 
   hsa_queue_load_write_index_scacquire_fn = table->core_->hsa_queue_load_write_index_scacquire_fn;
   hsa_queue_store_write_index_screlease_fn = table->core_->hsa_queue_store_write_index_screlease_fn;
@@ -141,6 +143,7 @@ void RestoreHsaApi() {
   table->core_->hsa_queue_load_write_index_relaxed_fn = hsa_queue_load_write_index_relaxed_fn;
   table->core_->hsa_queue_store_write_index_relaxed_fn = hsa_queue_store_write_index_relaxed_fn;
   table->core_->hsa_queue_load_read_index_relaxed_fn = hsa_queue_load_read_index_relaxed_fn;
+  table->core_->hsa_queue_add_write_index_scacq_screl_fn = hsa_queue_add_write_index_scacq_screl_fn;
 
   table->core_->hsa_queue_load_write_index_scacquire_fn = hsa_queue_load_write_index_scacquire_fn;
   table->core_->hsa_queue_store_write_index_screlease_fn = hsa_queue_store_write_index_screlease_fn;

@@ -82,9 +82,9 @@ struct hsa_pfn_t {
 
   decltype(hsa_queue_create)* hsa_queue_create;
   decltype(hsa_queue_destroy)* hsa_queue_destroy;
-  decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed;
-  decltype(hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed;
   decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed;
+  decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed;
+  decltype(hsa_queue_add_write_index_scacq_screl)* hsa_queue_add_write_index_scacq_screl;
 
   decltype(hsa_signal_create)* hsa_signal_create;
   decltype(hsa_signal_destroy)* hsa_signal_destroy;
@@ -402,7 +402,9 @@ class HsaRsrcFactory {
   // Print the various fields of Hsa Gpu Agents
   bool PrintGpuAgents(const std::string& header);
 
-  // Submit AQL packet to given queue
+  // Utils for submitting AQL packet to a given queue
+  static void* GetSlotPointer(hsa_queue_t* queue, const uint64_t& idx);
+  static void* GetReadPointer(hsa_queue_t* queue);
   static uint64_t Submit(hsa_queue_t* queue, const void* packet);
   static uint64_t Submit(hsa_queue_t* queue, const void* packet, size_t size_bytes);
 

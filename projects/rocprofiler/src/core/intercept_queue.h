@@ -49,6 +49,26 @@ enum {
 extern decltype(hsa_queue_create)* hsa_queue_create_fn;
 extern decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
 
+static inline void print_packet(const void* in_p, const uint32_t& in_n, const uint32_t& w_n = UINT32_MAX) {
+  const uint32_t size32 = util::HsaRsrcFactory::CMD_SLOT_SIZE_B / 4;
+  const uint32_t* beg = (const uint32_t*)in_p;
+  const uint32_t* end = beg + (in_n * size32);
+  const uint32_t p_n = (w_n != UINT32_MAX) ? w_n : size32;
+
+  printf("Packets(%p, %u):\n", beg, in_n);
+  const uint32_t* p = beg;
+  while (p < end) {
+    const uint32_t ind = (p - beg) / size32;
+    printf("%u, packet(%p):\n", ind, p);
+    const uint32_t p_size = (*p == 0) ? size32 : p_n;
+    for (const uint32_t* u = p; u < p + p_size; ++u) {
+      printf("  %p: 0x%08x\n", u, *u);
+    }
+    p += size32;
+  }
+  fflush(stdout);
+}
+
 static std::mutex ctx_a_mutex;
 typedef std::map<Context*, bool> ctx_a_map_t;
 static ctx_a_map_t* ctx_a_map = NULL;
@@ -221,6 +241,20 @@ class InterceptQueue {
     const packet_t* packets_arr = reinterpret_cast<const packet_t*>(in_packets);
     InterceptQueue* obj = reinterpret_cast<InterceptQueue*>(data);
     Queue* proxy = obj->proxy_;
+
+    ////////////////////////////////////////////////
+#if INTERCEPT_QUEUE_TRACE
+    const uint32_t header_val = *(uint32_t*)in_packets;
+    const uint32_t pid = syscall(__NR_getpid);
+    const uint32_t tid = syscall(__NR_gettid);
+    hsa_queue_t* qptr = obj->queue_;
+    const void* slot_ptr = util::HsaRsrcFactory::GetSlotPointer(qptr, user_que_idx);
+    printf("OnSubmitCB: %u:%u queue(%p:%lu) in(%p, %p, %lu) hdr(%u)\n",
+      pid, tid, qptr, user_que_idx, in_packets, slot_ptr, count, header_val); fflush(stdout);
+    print_packet(in_packets, count);
+    abort();
+#endif
+    ////////////////////////////////////////////////
 
     if (submit_callback_fun_) {
       mutex_.lock();
@@ -512,7 +546,11 @@ class InterceptQueue {
 
  private:
   static void queue_event_callback(hsa_status_t status, hsa_queue_t *queue, void *arg) {
-    if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "queue error handling is not supported");
+    if (status != HSA_STATUS_SUCCESS) {
+      uint32_t* read_ptr32 = (uint32_t*)util::HsaRsrcFactory::GetReadPointer(queue);
+      print_packet(read_ptr32, 1);
+      EXC_ABORT(status, "queue(" << queue << ":" << read_ptr32 << ")");
+    }
     InterceptQueue* obj = GetObj(queue);
     if (obj->queue_event_callback_) obj->queue_event_callback_(status, obj->queue_, arg);
   }
