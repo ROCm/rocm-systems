@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 import os, sys, re
 import CppHeaderParser
@@ -176,9 +176,9 @@ def gen_cppheader(infilepath, outfilepath, structs_depth):
             process_struct(f, c, cppHeader, "", apiname)
             global_str = "\n".join(global_str.split("\n")[0:-2])
             if structs_depth != -1: #reindent
-              global_str = string.split(global_str, '\n')
-              global_str = ['    ' + string.lstrip(line) for line in global_str]
-              global_str = string.join(global_str, '\n')
+              global_str = global_str.split('\n')
+              global_str = ['    ' + line.lstrip() for line in global_str]
+              global_str = "\n".join(global_str)
             f.write(global_str+"\n")
             if structs_depth != -1:
               f.write("  };\n")
@@ -199,9 +199,9 @@ def gen_cppheader(infilepath, outfilepath, structs_depth):
             process_struct(f, c, cppHeader, "", apiname)
             global_str = "\n".join(global_str.split("\n")[0:-2])
             if structs_depth != -1: #reindent
-              global_str = string.split(global_str, '\n')
-              global_str = ['    ' + string.lstrip(line) for line in global_str]
-              global_str = string.join(global_str, '\n')
+              global_str = global_str.split('\n')
+              global_str = ['    ' + line.lstrip() for line in global_str]
+              global_str = "\n".join(global_str)
             f.write(global_str+"\n")
             if structs_depth != -1:
               f.write("  };\n")
