@@ -176,7 +176,7 @@ aux_source_directory(${RSMITST_ROOT}/functional functionalSources)
 # Specify the directory containing various libraries of ROCR
 # to be linked against for building ROC Perf applications
 #
-LINK_DIRECTORIES(${RSMI_LIB_DIR})
+LINK_DIRECTORIES(${RSMI_LIB_DIR} ${GTEST_LIB_DIR})
 
 #
 # Extend the list of libraries to be used for linking rsmi apps
