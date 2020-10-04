@@ -106,8 +106,9 @@ set ( PUBLIC_HEADERS
 set ( GEN_HEADERS
   hip_ostream_ops.h
   hsa_prof_str.h
-  kfd_ostream_ops.h
+  hsa_ostream_ops.h
   kfd_prof_str.h
+  kfd_ostream_ops.h
 )
 
 if ( ${LIBRARY_TYPE} STREQUAL SHARED )
