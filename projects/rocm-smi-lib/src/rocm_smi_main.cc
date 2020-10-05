@@ -259,9 +259,13 @@ RocmSMI::Initialize(uint64_t flags) {
       ++i;
   }
 
-  // DiscoverAmdgpuDevices() will seach for devices and monitors and update
+  // DiscoverAmdgpuDevices() will search for devices and monitors and update
   // internal data structures.
-  DiscoverAmdgpuDevices();
+  ret = DiscoverAmdgpuDevices();
+  if (ret != 0) {
+    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
+            "DiscoverAmdgpuDevices() failed.");
+  }
 
   // IterateSMIDevices will iterate through all the known devices and apply
   // the provided call-back to each device found.
@@ -462,7 +466,9 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   }
 
   auto drm_dir = opendir(kPathDRMRoot);
-  assert(drm_dir != nullptr);
+  if (drm_dir == nullptr) {
+    return 1;
+  }
 
   auto dentry = readdir(drm_dir);
 
