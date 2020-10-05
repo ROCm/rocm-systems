@@ -73,7 +73,7 @@ GetSupportedEventGroups(uint32_t dev_ind, dev_evt_grp_set_t*supported_grps);
 struct evnt_info_t {
     uint8_t start_bit;
     uint8_t field_size;
-    uint32_t value;
+    uint64_t value;
 };
 
 struct perf_read_format_t {
