@@ -291,7 +291,6 @@ typedef HipLoaderShared HipLoader;
   template<class T> bool roctracer::BaseLoader<T>::to_check_symb_ = true; \
   template<> const char* roctracer::RocpLoader::lib_name_ = "librocprofiler64.so"; \
   template<> const char* roctracer::HccLoader::lib_name_ = "libamdhip64.so"; \
-  template<> bool roctracer::HccLoader::to_check_open_ = false; \
   template<> const char* roctracer::KfdLoader::lib_name_ = "libkfdwrapper64.so"; \
   template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so"; \
   template<> bool roctracer::RocTxLoader::to_load_ = true;
@@ -302,8 +301,7 @@ typedef HipLoaderShared HipLoader;
   roctracer::HipLoaderStatic::instance_t roctracer::HipLoaderStatic::instance_{};
 #else
 #define LOADER_INSTANTIATE_HIP() \
-  template<> const char* roctracer::HipLoaderShared::lib_name_ = "libamdhip64.so"; \
-  template<> bool roctracer::HipLoaderShared::to_check_open_ = false;
+  template<> const char* roctracer::HipLoaderShared::lib_name_ = "libamdhip64.so";
 #endif
 
 #if HIP_VDI
