@@ -82,6 +82,7 @@
 #include "functional/evt_notif_read_write.h"
 #include "functional/init_shutdown_refcount.h"
 #include "rocm_smi_test/functional/hw_topology_read.h"
+#include "rocm_smi_test/functional/gpu_metrics_read.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -226,6 +227,10 @@ TEST(rsmitstReadOnly, TestProcInfoRead) {
 }
 TEST(rsmitstReadOnly, TestHWTopologyRead) {
   TestHWTopologyRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestGpuMetricsRead) {
+  TestGpuMetricsRead tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadWrite, TestXGMIReadWrite) {
