@@ -205,7 +205,7 @@ typedef uintptr_t rsmi_event_handle_t;
  */
 typedef enum {
   RSMI_EVNT_GRP_XGMI = 0,         //!< Data Fabric (XGMI) related events
-  RSMI_EVNT_GRP_XGMI_DATA_OUT = 10,  //!< XGMI Outbound data
+
   RSMI_EVNT_GRP_INVALID = 0xFFFFFFFF
 } rsmi_event_group_t;
 
@@ -248,34 +248,9 @@ typedef enum {
                                                   //!< neighbor 1; Each beat
                                                   //!< represents 32 bytes
 
-  RSMI_EVNT_XGMI_LAST = RSMI_EVNT_XGMI_1_BEATS_TX,   // 5
+  RSMI_EVNT_XGMI_LAST = RSMI_EVNT_XGMI_1_BEATS_TX,
 
-  RSMI_EVNT_XGMI_DATA_OUT_FIRST = RSMI_EVNT_GRP_XGMI_DATA_OUT,  // 10
-
-  /*
-   * @brief Events in the RSMI_EVNT_GRP_XGMI_DATA_OUT group measure
-   * the number of beats sent on an XGMI link. Each beat represents
-   * 32 bytes. RSMI_EVNT_XGMI_DATA_OUT_n represents the number of
-   * outbound beats (each representing 32 bytes) on link n.<br><br>
-   *
-   * XGMI throughput can be calculated by multiplying a event
-   * such as ::RSMI_EVNT_XGMI_DATA_OUT_n by 32 and dividing by
-   * the time for which event collection occurred,
-   * ::rsmi_counter_value_t.time_running (which is in nanoseconds). To get
-   * bytes per second, multiply this value by 10<sup>9</sup>.<br>
-   * <br>
-   * Throughput = BEATS/time_running * 10<sup>9</sup>  (bytes/second)<br>
-   */
-  // ie, Throughput = BEATS/time_running 10^9  bytes/sec
-  RSMI_EVNT_XGMI_DATA_OUT_0 = RSMI_EVNT_XGMI_DATA_OUT_FIRST,
-  RSMI_EVNT_XGMI_DATA_OUT_1,   //!< Outbound beats to neighbor 1
-  RSMI_EVNT_XGMI_DATA_OUT_2,   //!< Outbound beats to neighbor 2
-  RSMI_EVNT_XGMI_DATA_OUT_3,   //!< Outbound beats to neighbor 3
-  RSMI_EVNT_XGMI_DATA_OUT_4,   //!< Outbound beats to neighbor 4
-  RSMI_EVNT_XGMI_DATA_OUT_5,   //!< Outbound beats to neighbor 5
-  RSMI_EVNT_XGMI_DATA_OUT_LAST = RSMI_EVNT_XGMI_DATA_OUT_5,
-
-  RSMI_EVNT_LAST = RSMI_EVNT_XGMI_LAST,
+  RSMI_EVNT_LAST = RSMI_EVNT_XGMI_LAST
 } rsmi_event_type_t;
 
 /**
@@ -284,7 +259,8 @@ typedef enum {
 typedef enum {
   RSMI_CNTR_CMD_START = 0,  //!< Start the counter
   RSMI_CNTR_CMD_STOP,       //!< Stop the counter; note that this should not
-                            //!< be used before reading.
+                            //!< be used before reading. It is for temporarily
+                            //!< disabling the counter.
 } rsmi_counter_command_t;
 
 /**
@@ -808,8 +784,8 @@ typedef struct {
 
 /* Utilization */
   uint16_t      average_gfx_activity;
-  uint16_t      average_umc_activity;  // memory controller
-  uint16_t      average_mm_activity;   // UVD or VCN
+  uint16_t      average_umc_activity; // memory controller
+  uint16_t      average_mm_activity; // UVD or VCN
 
 /* Power/Energy */
   uint16_t      average_socket_power;
@@ -841,7 +817,7 @@ typedef struct {
 
 /* Link width/speed */
   uint8_t       pcie_link_width;
-  uint8_t       pcie_link_speed;  // in 0.1 GT/s
+  uint8_t       pcie_link_speed; // in 0.1 GT/s
 }rsmi_gpu_metrics_t;
 /// \cond Ignore in docs.
 typedef rsmi_gpu_metrics_t rsmi_gpu_metrics;
