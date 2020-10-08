@@ -718,7 +718,6 @@ get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_t *id) {
 rsmi_status_t
 rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
   CHK_SUPPORT_NAME_ONLY(id)
-  DEVICE_MUTEX
   return get_id(dv_ind, amd::smi::kDevDevID, id);
 }
 
@@ -726,7 +725,6 @@ rsmi_status_t
 rsmi_dev_sku_get(uint32_t dv_ind, uint16_t *id) {
   TRY
   CHK_SUPPORT_NAME_ONLY(id)
-  DEVICE_MUTEX
   return get_id(dv_ind, amd::smi::kDevDevProdNum, id);
   CATCH
 }
@@ -734,21 +732,18 @@ rsmi_dev_sku_get(uint32_t dv_ind, uint16_t *id) {
 rsmi_status_t
 rsmi_dev_subsystem_id_get(uint32_t dv_ind, uint16_t *id) {
   CHK_SUPPORT_NAME_ONLY(id)
-  DEVICE_MUTEX
   return get_id(dv_ind, amd::smi::kDevSubSysDevID, id);
 }
 
 rsmi_status_t
 rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
   CHK_SUPPORT_NAME_ONLY(id)
-  DEVICE_MUTEX
   return get_id(dv_ind, amd::smi::kDevVendorID, id);
 }
 
 rsmi_status_t
 rsmi_dev_subsystem_vendor_id_get(uint32_t dv_ind, uint16_t *id) {
   CHK_SUPPORT_NAME_ONLY(id)
-  DEVICE_MUTEX
   return get_id(dv_ind, amd::smi::kDevSubSysVendorID, id);
 }
 
