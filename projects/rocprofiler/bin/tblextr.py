@@ -454,6 +454,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           op_found = 1
 
         if op_found:
+          op_found = 0
           beg_ns = int(rec_vals[0])
           end_ns = int(rec_vals[1])
           dur_us = int((end_ns - beg_ns) / 1000)
@@ -491,7 +492,6 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
         api_data = memory_manager.register_api(rec_vals) if mcopy_data_enabled and api_name == 'hip' else ''
         rec_vals.append(api_data)
-
         rec_vals[2] = api_pid
 
         db.insert_entry(table_handle, rec_vals)
@@ -633,7 +633,10 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         rec_vals.append(tid)                     # tid
         rec_vals.append(corr_id)                 # Index
         rec_vals.append(proc_id)                 # proc-id
-        rec_vals.append('')                      # Data
+
+        # registering memcopy information
+        activity_data =  memory_manager.register_activity(rec_vals) if mcopy_data_enabled else ''
+        rec_vals.append(activity_data)
         db.insert_entry(table_handle, rec_vals)
 
         # registering a dependency filtr
