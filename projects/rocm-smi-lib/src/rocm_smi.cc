@@ -823,7 +823,6 @@ rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
 
 static rsmi_status_t
 set_dev_range(uint32_t dv_ind, std::string range) {
-
   GET_DEV_FROM_INDX
 
   int ret = dev->writeDevInfo(amd::smi::kDevPowerODVoltage, range);
@@ -1056,9 +1055,9 @@ rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
   }
 
   // For clock frequency setting, enter a new value by writing a string that
-  // contains “s/m index clock” to the file. The index should be 0 if to set
-  // minimum clock. And 1 if to set maximum clock. E.g., “s 0 500” will update
-  // minimum sclk to be 500 MHz. “m 1 800” will update maximum mclk to 800Mhz.
+  // contains "s/m index clock" to the file. The index should be 0 if to set
+  // minimum clock. And 1 if to set maximum clock. E.g., "s 0 500" will update
+  // minimum sclk to be 500 MHz. "m 1 800" will update maximum mclk to 800Mhz.
 
   switch (clkType) {
     case RSMI_CLK_TYPE_SYS:
@@ -1081,7 +1080,7 @@ rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
   ret = set_dev_range(dv_ind, sysvalue);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
-   }
+  }
   ret = set_dev_range(dv_ind, "c");
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
@@ -1104,9 +1103,9 @@ rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
   }
 
   // For sclk voltage curve, enter the new values by writing a string that
-  // contains “vc point clock voltage” to the file. The points are indexed
-  // by 0, 1 and 2. E.g., “vc 0 300 600” will update point1 with clock set
-  // as 300Mhz and voltage as 600mV. “vc 2 1000 1000” will update point3
+  // contains "vc point clock voltage" to the file. The points are indexed
+  // by 0, 1 and 2. E.g., "vc 0 300 600" will update point1 with clock set
+  // as 300Mhz and voltage as 600mV. "vc 2 1000 1000" will update point3
   // with clock set as 1000Mhz and voltage 1000mV.
 
   std::string sysvalue = "vc";
@@ -2850,6 +2849,8 @@ rsmi_counter_available_counters_get(uint32_t dv_ind,
 
   switch (grp) {
     case RSMI_EVNT_GRP_XGMI:
+    case RSMI_EVNT_GRP_XGMI_DATA_OUT:
+
       ret = get_dev_value_int(amd::smi::kDevDFCountersAvailable, dv_ind, &val);
       assert(val < UINT32_MAX);
       *available = static_cast<uint32_t>(val);

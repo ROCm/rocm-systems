@@ -51,6 +51,7 @@
 #include <string>
 #include <algorithm>
 #include <vector>
+#include <memory>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
@@ -70,7 +71,8 @@ PerfCntrEvtGrp::~PerfCntrEvtGrp() {}
     PerfCntrEvtGrp(RSMI_EVNT_GRP_##SHRT, RSMI_EVNT_##SHRT##_FIRST, \
                                                 RSMI_EVNT_##SHRT##_LAST, NAME)
 static const std::vector<PerfCntrEvtGrp> s_event_groups = {
-    PC_EVT_GRP(XGMI, "XGMI")
+    PC_EVT_GRP(XGMI, "XGMI"),
+    PC_EVT_GRP(XGMI_DATA_OUT, "XGMI_DATA_OUT")
 };
 
 TestPerfCntrReadWrite::TestPerfCntrReadWrite() : TestBase() {
@@ -139,8 +141,8 @@ void TestPerfCntrReadWrite::CountEvents(uint32_t dv_ind,
 
   IF_VERB(STANDARD) {
     std::cout << "\t\t\tValue: " << val->value << std::endl;
-    std::cout << "\t\t\tTime Enabled: " << val->time_enabled << std::endl;
-    std::cout << "\t\t\tTime Running: " << val->time_running << std::endl;
+    std::cout << "\t\t\tTime Enabled (nS): " << val->time_enabled << std::endl;
+    std::cout << "\t\t\tTime Running (nS): " << val->time_running << std::endl;
     std::cout << "\t\t\tEvents/Second Running: " <<
             val->value/static_cast<float>(val->time_running) << std::endl;
   }
@@ -148,6 +150,7 @@ void TestPerfCntrReadWrite::CountEvents(uint32_t dv_ind,
   CHK_ERR_ASRT(ret)
 }
 
+static const uint64_t kGigByte = 1073741824;  // 1024^3
 static const uint64_t kGig = 1000000000;
 
 static const uint64_t kVg20Level1Bandwidth = 23;  // 23 GB/sec
@@ -158,6 +161,9 @@ TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
   rsmi_status_t ret;
   rsmi_counter_value_t val;
   uint64_t throughput;
+
+  std::cout << "Test events sequentially (device "   <<
+                                                 dv_ind << ")" << std::endl;
 
   auto utiliz = [&](rsmi_event_type_t evt, uint32_t chan) {
     IF_VERB(STANDARD) {
@@ -174,7 +180,7 @@ TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
       std::cout << "\t\tPass " << i << ":" << std::endl;
 
       CountEvents(dv_ind, evt, &val, 1);
-      double coll_time_sec = static_cast<float>(val.time_running)/kGig;
+      double coll_time_sec = static_cast<double>(val.time_running)/kGig;
       throughput = (val.value * 32)/coll_time_sec;
       std::cout << "\t\t\tCollected events for " << coll_time_sec <<
                                                         " seconds" << std::endl;
@@ -182,15 +188,13 @@ TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
       std::cout << "\t\t\tXGMI throughput: " << throughput <<
                                                    " bytes/second" << std::endl;
       std::cout << "\t\t\tXGMI Channel Utilization: " <<
-               100*throughput/static_cast<float>(kVg20Level1Bandwidth*kGig) <<
+        100*throughput/static_cast<double>(kVg20Level1Bandwidth*kGigByte) <<
                                                                "%" << std::endl;
       std::cout << "\t\t\t****" << std::endl;
     }
     set_verbosity(tmp_verbosity);
   };
 
-  utiliz(RSMI_EVNT_XGMI_1_BEATS_TX, 1);
-  utiliz(RSMI_EVNT_XGMI_0_BEATS_TX, 0);
 
   IF_VERB(STANDARD) {
     std::cout << "****************************" << std::endl;
@@ -206,7 +210,17 @@ TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
     IF_VERB(STANDARD) {
       std::cout << "Testing Event Group " << grp.name() << std::endl;
     }
-
+    if (grp.group() == RSMI_EVNT_GRP_XGMI_DATA_OUT) {
+      utiliz(RSMI_EVNT_XGMI_DATA_OUT_0, 0);
+      utiliz(RSMI_EVNT_XGMI_DATA_OUT_1, 1);
+      utiliz(RSMI_EVNT_XGMI_DATA_OUT_2, 2);
+      utiliz(RSMI_EVNT_XGMI_DATA_OUT_3, 3);
+      utiliz(RSMI_EVNT_XGMI_DATA_OUT_4, 4);
+      utiliz(RSMI_EVNT_XGMI_DATA_OUT_5, 5);
+    } else if (grp.group() == RSMI_EVNT_GRP_XGMI) {
+      utiliz(RSMI_EVNT_XGMI_1_BEATS_TX, 1);
+      utiliz(RSMI_EVNT_XGMI_0_BEATS_TX, 0);
+    }
     for (uint32_t evnt = grp.first_evt(); evnt <= grp.last_evt(); ++evnt) {
       IF_VERB(STANDARD) {
         std::cout << "\tTesting Event Type " << evnt << std::endl;
@@ -218,17 +232,21 @@ TestPerfCntrReadWrite::testEventsIndividually(uint32_t dv_ind) {
 
 void
 TestPerfCntrReadWrite::testEventsSimultaneously(uint32_t dv_ind) {
-  rsmi_event_handle_t evt_handle[RSMI_EVNT_XGMI_LAST -
-                                                    RSMI_EVNT_XGMI_FIRST + 1];
   rsmi_status_t ret;
   rsmi_counter_value_t val;
   uint32_t avail_counters;
 
   IF_VERB(STANDARD) {
     std::cout << "****************************" << std::endl;
-    std::cout << "Test events simultaneously"   << std::endl;
+    std::cout << "Test events simultaneously (device "   <<
+                                                   dv_ind << ")" << std::endl;
     std::cout << "****************************" << std::endl;
   }
+
+  /* This code is a little convoluted. The reason is that it is meant to test
+   * having multiple events being used at one time, rather than sequentially
+   * handling 1 event at a time.
+   */
   for (PerfCntrEvtGrp grp : s_event_groups) {
     ret = rsmi_dev_counter_group_supported(dv_ind, grp.group());
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
@@ -244,13 +262,18 @@ TestPerfCntrReadWrite::testEventsSimultaneously(uint32_t dv_ind) {
     }
 
     ret = rsmi_counter_available_counters_get(dv_ind, grp.group(),
-                                                               &avail_counters);
+                                                             &avail_counters);
     IF_VERB(STANDARD) {
       std::cout << "Available Counters: " << avail_counters << std::endl;
     }
     CHK_ERR_ASRT(ret)
 
-    uint32_t tmp;
+    std::shared_ptr<rsmi_event_handle_t> evt_handle =
+                    std::shared_ptr<rsmi_event_handle_t>(
+                                     new rsmi_event_handle_t[avail_counters]);
+
+    uint32_t tmp, j;
+    uint32_t num_created = 0;
 
     for (uint32_t evnt = grp.first_evt(); evnt <= grp.last_evt();
                                                      evnt += avail_counters) {
@@ -260,25 +283,31 @@ TestPerfCntrReadWrite::testEventsSimultaneously(uint32_t dv_ind) {
       IF_VERB(STANDARD) {
         std::cout << "\tCreating events..." << std::endl;
       }
-      for (uint32_t j = 0; j < avail_counters; ++j) {
+      for (j = 0; j < avail_counters; ++j) {
         tmp = static_cast<rsmi_event_type_t>(evnt + j);
+
+        if (tmp > grp.last_evt()) {
+          break;
+        }
+
         IF_VERB(STANDARD) {
           std::cout << "\tEvent Type " << tmp << std::endl;
         }
 
         ret = rsmi_dev_counter_create(dv_ind,
-                     static_cast<rsmi_event_type_t>(tmp), &evt_handle[tmp]);
+                     static_cast<rsmi_event_type_t>(tmp), &evt_handle.get()[j]);
         CHK_ERR_ASRT(ret)
       }
-
+      num_created = j;
       IF_VERB(STANDARD) {
         std::cout << "\tStart Counters..." << std::endl;
       }
       uint32_t tmp_cntrs;
 
-      for (uint32_t j = 0; j < avail_counters; ++j) {
+      for (j = 0; j < num_created; ++j) {
         tmp = static_cast<rsmi_event_type_t>(evnt + j);
-        ret = rsmi_counter_control(evt_handle[tmp], RSMI_CNTR_CMD_START,
+
+        ret = rsmi_counter_control(evt_handle.get()[j], RSMI_CNTR_CMD_START,
                                                                      nullptr);
         CHK_ERR_ASRT(ret)
 
@@ -293,9 +322,10 @@ TestPerfCntrReadWrite::testEventsSimultaneously(uint32_t dv_ind) {
       IF_VERB(STANDARD) {
         std::cout << "\tRead Counters..." << std::endl;
       }
-      for (uint32_t j = 0; j < avail_counters; ++j) {
+      for (j = 0; j < num_created; ++j) {
         tmp = static_cast<rsmi_event_type_t>(evnt + j);
-        ret = rsmi_counter_read(evt_handle[tmp], &val);
+
+        ret = rsmi_counter_read(evt_handle.get()[j], &val);
         CHK_ERR_ASRT(ret)
 
         IF_VERB(STANDARD) {
@@ -306,9 +336,8 @@ TestPerfCntrReadWrite::testEventsSimultaneously(uint32_t dv_ind) {
           std::cout << "\t\tTime Running: " << val.time_running << std::endl;
         }
       }
-      for (uint32_t j = 0; j < avail_counters; ++j) {
-        tmp = static_cast<rsmi_event_type_t>(evnt + j);
-        ret = rsmi_dev_counter_destroy(evt_handle[tmp]);
+      for (j = 0; j < num_created; ++j) {
+        ret = rsmi_dev_counter_destroy(evt_handle.get()[j]);
         CHK_ERR_ASRT(ret)
       }
     }

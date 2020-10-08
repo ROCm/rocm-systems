@@ -646,7 +646,7 @@ int Device::readDevInfoBinary(DevInfoTypes type,
   }
   // copies all data into buffer
   retVec->insert(retVec->begin(),
-               std::istreambuf_iterator<char>(fs),{});
+               std::istreambuf_iterator<char>(fs), {});
 
   return 0;
 }

@@ -72,6 +72,7 @@ static const char *kPathDeviceEventRoot = "/sys/bus/event_source/devices";
 
 // Event group names
 static const char *kEvGrpDataFabricFName = "amdgpu_df_#";
+static const char *kEvGrpAmdGpuFName = "amdgpu_#";
 
 // Data Fabric event file names
 static const char *kDFEvtCake0FtiReqAllocFName = "cake0_ftiinstat_reqalloc";
@@ -83,6 +84,14 @@ static const char *kDFEvtCake1FtiRspAllocFName = "cake1_ftiinstat_rspalloc";
 static const char *kDFEvtCake1PcsOutTxDataFName = "cake1_pcsout_txdata";
 static const char *kDFEvtCake1PcsOutTxMetaFName = "cake1_pcsout_txmeta";
 
+// XGMI Data Outbound event file names
+static const char *kXGMIDOutBound0FName = "xgmi_link0_data_outbound";
+static const char *kXGMIDOutBound1FName = "xgmi_link1_data_outbound";
+static const char *kXGMIDOutBound2FName = "xgmi_link2_data_outbound";
+static const char *kXGMIDOutBound3FName = "xgmi_link3_data_outbound";
+static const char *kXGMIDOutBound4FName = "xgmi_link4_data_outbound";
+static const char *kXGMIDOutBound5FName = "xgmi_link5_data_outbound";
+
 
 static const std::map<rsmi_event_type_t, const char *> kEventFNameMap = {
   {RSMI_EVNT_XGMI_0_NOP_TX,      kDFEvtCake0PcsOutTxMetaFName},
@@ -93,10 +102,18 @@ static const std::map<rsmi_event_type_t, const char *> kEventFNameMap = {
   {RSMI_EVNT_XGMI_1_REQUEST_TX,  kDFEvtCake1FtiReqAllocFName},
   {RSMI_EVNT_XGMI_1_RESPONSE_TX, kDFEvtCake1FtiRspAllocFName},
   {RSMI_EVNT_XGMI_1_BEATS_TX,    kDFEvtCake1PcsOutTxDataFName},
+
+  {RSMI_EVNT_XGMI_DATA_OUT_0,    kXGMIDOutBound0FName},
+  {RSMI_EVNT_XGMI_DATA_OUT_1,    kXGMIDOutBound1FName},
+  {RSMI_EVNT_XGMI_DATA_OUT_2,    kXGMIDOutBound2FName},
+  {RSMI_EVNT_XGMI_DATA_OUT_3,    kXGMIDOutBound3FName},
+  {RSMI_EVNT_XGMI_DATA_OUT_4,    kXGMIDOutBound4FName},
+  {RSMI_EVNT_XGMI_DATA_OUT_5,    kXGMIDOutBound5FName},
 };
 
 static const std::map<rsmi_event_group_t, const char *> kEvtGrpFNameMap = {
-    {RSMI_EVNT_GRP_XGMI, kEvGrpDataFabricFName},
+    {RSMI_EVNT_GRP_XGMI,          kEvGrpDataFabricFName},
+    {RSMI_EVNT_GRP_XGMI_DATA_OUT, kEvGrpAmdGpuFName},
     {RSMI_EVNT_GRP_INVALID, "bogus"},
 };
 
@@ -107,6 +124,7 @@ static rsmi_event_group_t EvtGrpFromEvtID(rsmi_event_type_t evnt) {
     return EVGRP_ENUM; \
   }
   EVNT_GRP_RANGE_CHK(XGMI, RSMI_EVNT_GRP_XGMI);
+  EVNT_GRP_RANGE_CHK(XGMI_DATA_OUT, RSMI_EVNT_GRP_XGMI_DATA_OUT);
 
   return RSMI_EVNT_GRP_INVALID;
 }
