@@ -35,4 +35,4 @@ set ( LIB_SRC
 )
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
 target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${HSA_KMT_LIB_PATH}/.. )
-target_link_libraries( ${TARGET_LIB} PRIVATE ${HSA_RUNTIME_LIB} c stdc++ atomic )
+target_link_libraries( ${TARGET_LIB} PRIVATE ${HSA_RUNTIME_LIB} c stdc++ )

@@ -173,31 +173,40 @@ PUBLIC_API bool EnableActivityCallback(uint32_t op, bool enable) {
 }
 
 struct evt_cb_entry_t {
-  void* callback;
-  void* arg;
+  typedef std::pair<void*, void*> data_t;
+  data_t data;
+  std::mutex mutex;
+
+  void set(const data_t& in) {
+    mutex.lock();
+    data = in;
+    mutex.unlock();
+  }
+  data_t get() {
+    mutex.lock();
+    const data_t out = data;
+    mutex.unlock();
+    return out;
+  }
+  evt_cb_entry_t() : data{} {}
 };
-typedef std::atomic<evt_cb_entry_t> evt_cb_entry_atomic_t;
-evt_cb_entry_atomic_t evt_cb_table[HSA_EVT_ID_NUMBER]{};
+evt_cb_entry_t evt_cb_table[HSA_EVT_ID_NUMBER];
 
 hsa_status_t codeobj_evt_callback(
   rocprofiler_hsa_cb_id_t id,
   const rocprofiler_hsa_callback_data_t* cb_data,
   void* arg)
 {
-  evt_cb_entry_t evt = evt_cb_table[id].load(std::memory_order_relaxed);
-  activity_rtapi_callback_t evt_callback = (activity_rtapi_callback_t)evt.callback;
-
-  if (evt_callback != NULL) {
-    evt_callback(ACTIVITY_DOMAIN_HSA_EVT, id, cb_data, evt.arg);
-  }
-
+  const auto evt = evt_cb_table[id].get();
+  activity_rtapi_callback_t evt_callback = (activity_rtapi_callback_t)evt.first;
+  if (evt_callback != NULL) evt_callback(ACTIVITY_DOMAIN_HSA_EVT, id, cb_data, evt.second);
   return HSA_STATUS_SUCCESS;
 }
 
 PUBLIC_API const char* GetEvtName(uint32_t op) { return strdup("CODEOBJ"); }
 
 PUBLIC_API bool RegisterEvtCallback(uint32_t op, void* callback, void* arg) {
-  evt_cb_table[op].store(evt_cb_entry_t{callback, arg}, std::memory_order_relaxed);
+  evt_cb_table[op].set({callback, arg});
 
   rocprofiler_hsa_callbacks_t ocb{};
   switch (op) {
