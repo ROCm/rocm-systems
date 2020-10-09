@@ -275,7 +275,7 @@ typedef enum {
   RSMI_EVNT_XGMI_DATA_OUT_5,   //!< Outbound beats to neighbor 5
   RSMI_EVNT_XGMI_DATA_OUT_LAST = RSMI_EVNT_XGMI_DATA_OUT_5,
 
-  RSMI_EVNT_LAST = RSMI_EVNT_XGMI_LAST,
+  RSMI_EVNT_LAST = RSMI_EVNT_XGMI_DATA_OUT_LAST,
 } rsmi_event_type_t;
 
 /**
