@@ -1,7 +1,7 @@
 #
 # Minimum version of cmake required
 #
-cmake_minimum_required(VERSION 3.5.0)
+cmake_minimum_required(VERSION 3.6.3)
 
 set(AMD_SMI_LIBS_TARGET "amd_smi_libraries")
 
@@ -42,36 +42,9 @@ set(PKG_VERSION_NUM_COMMIT 0)
 
 ## Define default variable and variables for the optional build target
 ##  rocm_smi_lib-dev
-if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-    set(CMAKE_INSTALL_PREFIX "/opt/rocm"
-                              CACHE STRING "Default installation directory.")
-endif ()
-set(COMMON_SRC_ROOT ${CMAKE_CURRENT_SOURCE_DIR}
-                              CACHE STRING "Location source code common root.")
-set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm"
-                                      CACHE STRING "Default packaging prefix.")
-set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
-
-if (NOT DEFINED CPACK_PACKAGE_VENDOR)
-    set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
-endif()
-
-if (NOT DEFINED CPACK_PACKAGE_CONTACT)
-    set(CPACK_PACKAGE_CONTACT "Advanced Micro Devices Inc.")
-endif()
-
-if (NOT DEFINED CPACK_PACKAGE_DESCRIPTION_SUMMARY)
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-                 "AMD System Management libraries")
-endif()
-
-if (NOT ROCM_SMI_PACKAGE)
-   set(ROCM_SMI_PACKAGE rocm-smi-lib64)
-endif()
-
-set(CPACK_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
-set(CPACK_PACKAGE_VERSION ${PKG_VERSION_STR})
-set(CPACK_PROJECT_CONFIG_FILE ${CMAKE_SOURCE_DIR}/package.txt)
+set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE STRING "Default installation directory.")
+set(COMMON_SRC_ROOT ${CMAKE_CURRENT_SOURCE_DIR} CACHE STRING "Location source code common root.")
+set(ROCM_SMI_PACKAGE rocm-smi-lib)
 
 project(${AMD_SMI_LIBS_TARGET})
 
@@ -163,22 +136,54 @@ set(CMN_INC_LIST ${CMN_INC_LIST} "${SHR_MUTEX_DIR}/shared_mutex.h")
 add_subdirectory("rocm_smi")
 add_subdirectory("oam")
 
-## Add the packaging directives for the runtime library.
+###########################
+# Packaging directives
+###########################
+set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm" CACHE STRING "Default packaging prefix.")
+set(CPACK_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
+set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
+set(CPACK_PACKAGE_CONTACT "RocmSMILib Support <rocm-smi.support@amd.com>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD System Management libraries")
 
-# TODO set(CPACK_DEBIAN_PACKAGE_HOMEPAGE <GITHUB URL> )
-set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
-    "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst;
-                                    ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm")
-set (CPACK_DEBIAN_PACKAGE_NAME  ${ROCM_SMI_PACKAGE})
-set (CPACK_DEBIAN_PACKAGE_VERSION ${PKG_VERSION_STR})
+#Make proper version for appending
+#Default Value is 99999, setting it first
+set(ROCM_VERSION_FOR_PACKAGE "99999")
+if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
+  set(ROCM_VERSION_FOR_PACKAGE $ENV{ROCM_LIBPATCH_VERSION})
+endif()
+
+#Debian package specific variables
+set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst;${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE ${CPACK_DEBIAN_PACKAGE_HOMEPAGE} CACHE STRING "https://github.com/RadeonOpenCompute/ROCm")
+if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+   set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+else()
+   set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
+endif()
+
 
 # RPM package specific variables
-set(CPACK_RPM_PRE_INSTALL_SCRIPT_FILE
-                                   "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_post")
-set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE
-                                 "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_postun")
-set (CPACK_RPM_PACKAGE_NAME  ${ROCM_SMI_PACKAGE})
-set (CPACK_RPM_PACKAGE_VERSION ${PKG_VERSION_STR})
+set(CPACK_RPM_PRE_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_post")
+set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_postun")
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "${CPACK_PACKAGING_INSTALL_PREFIX} ${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}" )
+if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
+  set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
+else()
+  set(CPACK_RPM_PACKAGE_RELEASE "local")
+endif()
+#Set rpm distro
+if(CPACK_RPM_PACKAGE_RELEASE)
+  set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
+endif()
+
+#Prepare final version for the CPACK use
+set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}")
+
+#Set the names now using CPACK utility
+set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+
 
 include (CPack)
 
