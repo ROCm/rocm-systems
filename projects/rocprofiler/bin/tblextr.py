@@ -347,12 +347,12 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   if (hsa_activity_found): copy_raws = db.table_get_raws('COPY')
   copy_csv = ''
   copy_index = 0
-  op_found = 0
 
   file_name = indir + '/' + api_name + '_api_trace.txt'
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
   hip_mcopy_ptrn = re.compile(r'hipMemcpy')
-  ptrn_ac = re.compile(r'hsa_amd_memory_async_copy')
+  hip_wait_event_ptrn =  re.compile(r'WaitEvent')
+  hsa_mcopy_ptrn = re.compile(r'hsa_amd_memory_async_copy')
   ptrn_fixformat = re.compile(r'(\d+:\d+ \d+:\d+ \w+)\(\s*(.*)\)$')
   ptrn_fixkernel = re.compile(r'\s+kernel=(.*)$')
   ptrn_multi_kernel = re.compile(r'(.*):(\d+)$')
@@ -424,6 +424,9 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           (rec_vals[5], found) = set_field(record_args, 'stream', stream_id)
           if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
 
+        # asyncronous opeartion API found
+        op_found = 0
+
         # extract kernel name string
         (kernel_str, kernel_found) = get_field(record_args, 'kernel')
         if kernel_found == 0: kernel_str = ''
@@ -433,7 +436,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           ops_patch_data[(corr_id, proc_id)] = (stream_id, kernel_str)
 
         # dependencies filling
-        if ptrn_ac.match(record_name) or hip_mcopy_ptrn.match(record_name):
+        if hsa_mcopy_ptrn.match(record_name) or hip_mcopy_ptrn.match(record_name):
           op_found = 1
 
           # memcopy data
@@ -445,6 +448,10 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
             copy_line = str(copy_data[0]) + ', ' + str(copy_data[1]) + ', ' + record_name + ', ' + args_str
             copy_csv += str(copy_index) + ', ' + copy_line + '\n'
             copy_index += 1
+
+        # HIP WaitEvent APIs
+        if hip_wait_event_ptrn.search(record_name):
+          op_found = 1
 
         if op_found:
           beg_ns = int(rec_vals[0])
