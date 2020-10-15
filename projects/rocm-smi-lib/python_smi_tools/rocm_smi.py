@@ -1517,7 +1517,7 @@ def showPids():
     """ Show Information for PIDs created in a KFD (Compute) context """
     printLogSpacer(' KFD Processes ')
     dataArray = []
-    dataArray.append(['PID', 'PROCESS NAME', 'GPU(s)', 'VRAM USED', 'SDMA USED'])
+    dataArray.append(['PID', 'PROCESS NAME', 'GPU(s)', 'VRAM USED', 'SDMA USED', 'CU OCCUPANCY'])
     pidList = getPidList()
     if not pidList:
         printLog(None, 'No KFD PIDs currently running', None)
@@ -1530,6 +1530,7 @@ def showPids():
         gpuNumber = 'UNKNOWN'
         vramUsage = 'UNKNOWN'
         sdmaUsage = 'UNKNOWN'
+        cuOccupancy = 'UNKNOWN'
         ret = rocmsmi.rsmi_compute_process_gpus_get(int(pid), None, byref(num_devices))
         if rsmi_ret_ok(ret):
             dv_indices = (c_uint32 * num_devices.value)()
@@ -1537,14 +1538,15 @@ def showPids():
             if rsmi_ret_ok(ret):
                 gpuNumber = str(num_devices.value)
             else:
-                logging.debug('Unable to fetch PID GPU information')
+                logging.debug('Unable to fetch GPU number by PID')
         ret = rocmsmi.rsmi_compute_process_info_by_pid_get(int(pid), byref(proc))
         if rsmi_ret_ok(ret):
             vramUsage = proc.vram_usage
             sdmaUsage = proc.sdma_usage
+            cuOccupancy = proc.cu_occupancy
         else:
-            logging.debug('Unable to fetch PID VRAM information')
-        dataArray.append([pid, getName(pid), str(gpuNumber), str(vramUsage), str(sdmaUsage)])
+            logging.debug('Unable to fetch process info by PID')
+        dataArray.append([pid, getName(pid), str(gpuNumber), str(vramUsage), str(sdmaUsage), str(cuOccupancy)])
     printLog(None, 'KFD process information:', None)
     print2DArray(dataArray)
     printLogSpacer()
