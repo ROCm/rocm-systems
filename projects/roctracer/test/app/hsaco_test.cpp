@@ -50,11 +50,16 @@ hsa_status_t code_object_callback(
 {
   printf("code_object_callback\n"); fflush(stdout);
 
+  uint64_t load_base = 0;
   uint64_t load_size = 0;
   uint64_t load_delta = 0;
   uint32_t uri_len = 0;
   char* uri_str = NULL;
 
+  HSA_RT(loader_api_table.hsa_ven_amd_loader_loaded_code_object_get_info(
+    loaded_code_object,
+    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE,
+    &load_base));
   HSA_RT(loader_api_table.hsa_ven_amd_loader_loaded_code_object_get_info(
     loaded_code_object,
     HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE,
@@ -79,10 +84,13 @@ hsa_status_t code_object_callback(
     HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI,
     uri_str));
 
+  printf("load_base(0x%lx)\n", load_base); fflush(stdout);
   printf("load_size(0x%lx)\n", load_size); fflush(stdout);
   printf("load_delta(0x%lx)\n", load_delta); fflush(stdout);
   printf("uri_len(%u)\n", uri_len); fflush(stdout);
   printf("uri_str(\"%s\")\n", uri_str); fflush(stdout);
+
+  free(uri_str);
 
   return HSA_STATUS_SUCCESS;
 }
