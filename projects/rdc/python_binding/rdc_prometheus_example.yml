@@ -12,6 +12,12 @@ scrape_configs:
     # metrics_path defaults to '/metrics'
     # scheme defaults to 'http'.
 
+    # Remove the port for display
+    relabel_configs:
+    - source_labels: [__address__]
+      regex: '([^:]+):\d+'
+      target_label: short_instance
+
     file_sd_configs:
     - files:
         - 'prometheus_targets.json'
