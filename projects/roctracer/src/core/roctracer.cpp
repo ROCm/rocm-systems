@@ -93,7 +93,6 @@ THE SOFTWARE.
 #define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
 #define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
 
-
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
@@ -173,6 +172,9 @@ void RestoreHsaApi() {
 }
 
 namespace roctracer {
+// timestamp definitino
+typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
+
 decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
 decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
 
@@ -348,6 +350,8 @@ void* HIP_SyncApiDataCallback(
     const void* callback_data,
     void* arg)
 {
+  static hsa_rt_utils::Timer timer;
+
   void* ret = NULL;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
   hip_api_data_t* data_ptr = const_cast<hip_api_data_t*>(data);
@@ -393,8 +397,8 @@ void* HIP_SyncApiDataCallback(
   }
 
   const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0);
-  DEBUG_TRACE("HIP_SyncApiDataCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) correlation_id(%lu)\n",
-    name, phase, op_id, record, data, pool, (int)(record_pair_stack.size()), (data_ptr) ? data_ptr->correlation_id : 0);
+  DEBUG_TRACE("HIP_SyncApiDataCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) correlation_id(%lu) time_ns(%lu)\n",
+    name, phase, op_id, record, data, pool, (int)(record_pair_stack.size()), (data_ptr) ? data_ptr->correlation_id : 0, timer.timestamp_ns());
 
   return ret;
 }
@@ -406,6 +410,7 @@ void* HIP_SyncActivityCallback(
     void* arg)
 {
   static hsa_rt_utils::Timer timer;
+  const timestamp_t timestamp_ns = timer.timestamp_ns();
 
   void* ret = NULL;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
@@ -436,7 +441,7 @@ void* HIP_SyncActivityCallback(
     // Filing record info
     record->domain = ACTIVITY_DOMAIN_HIP_API;
     record->op = op_id;
-    record->begin_ns = timer.timestamp_ns();
+    record->begin_ns = timestamp_ns;
 
     // Correlation ID generating
     uint64_t correlation_id = data->correlation_id;
@@ -461,7 +466,7 @@ void* HIP_SyncActivityCallback(
     }
 
     // Filing record info
-    record->end_ns = timer.timestamp_ns();
+    record->end_ns = timestamp_ns;
     record->process_id = syscall(__NR_getpid);
     record->thread_id = syscall(__NR_gettid);
 
@@ -485,8 +490,8 @@ void* HIP_SyncActivityCallback(
   }
 
   const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0);
-  DEBUG_TRACE("HIP_SyncActivityCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) correlation_id(%lu)\n",
-    name, phase, op_id, record, data, pool, (int)(record_pair_stack.size()), (data_ptr) ? data_ptr->correlation_id : 0);
+  DEBUG_TRACE("HIP_SyncActivityCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) correlation_id(%lu) beg_ns(%lu) end_ns(%lu)\n",
+    name, phase, op_id, record, data, pool, (int)(record_pair_stack.size()), (data_ptr) ? data_ptr->correlation_id : 0, timestamp_ns);
 
   return ret;
 }
@@ -503,8 +508,8 @@ void HCC_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
   pool->Write(*record_ptr);
 
   const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HCC_OPS, record_ptr->op, record_ptr->kind);
-  DEBUG_TRACE("HCC_AsyncActivityCallback(\"%s\"): op(%u) kind(%u) record(%p) pool(%p) correlation_id(%d)\n",
-    name, record_ptr->op, record_ptr->kind, record, pool, record_ptr->correlation_id);
+  DEBUG_TRACE("HCC_AsyncActivityCallback(\"%s\"): op(%u) kind(%u) record(%p) pool(%p) correlation_id(%d) beg_ns(%lu) end_ns(%lu)\n",
+    name, record_ptr->op, record_ptr->kind, record, pool, record_ptr->correlation_id, record_ptr->begin_ns, record_ptr->end_ns);
 }
 
 // Open output file
