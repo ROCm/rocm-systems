@@ -1914,7 +1914,6 @@ def showWeightTopology(deviceList):
     """
     global PRINT_JSON
     devices_ind = range(len(deviceList))
-    weight = c_uint64()
     gpu_links_weight = [[0 for x in devices_ind] for y in devices_ind]
     printLogSpacer(' Weight between two GPUs ')
     for srcdevice in deviceList:
@@ -1922,6 +1921,7 @@ def showWeightTopology(deviceList):
             if (srcdevice == destdevice):
                 gpu_links_weight[srcdevice][destdevice] = 0
                 continue
+            weight = c_uint64()
             ret = rocmsmi.rsmi_topo_get_link_weight(srcdevice, destdevice, byref(weight))
             if rsmi_ret_ok(ret):
                 gpu_links_weight[srcdevice][destdevice] = weight
@@ -1955,7 +1955,6 @@ def showHopsTopology(deviceList):
 
     @param deviceList: List of DRM devices (can be a single-item list)
     """
-    hops = c_uint64()
     linktype = c_char_p()
     devices_ind = range(len(deviceList))
     gpu_links_hops = [[0 for x in devices_ind] for y in devices_ind]
@@ -1965,6 +1964,7 @@ def showHopsTopology(deviceList):
             if (srcdevice == destdevice):
                 gpu_links_hops[srcdevice][destdevice] = '0'
                 continue
+            hops = c_uint64()
             ret = rocmsmi.rsmi_topo_get_link_type(srcdevice, destdevice, byref(hops), byref(linktype))
             if rsmi_ret_ok(ret):
                 gpu_links_hops[srcdevice][destdevice] = hops
