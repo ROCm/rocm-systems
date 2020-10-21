@@ -90,18 +90,16 @@ class MemManager:
 
       duration = int(async_copy_end_time) - int(async_copy_start_time)
       size = 0
-      m = size_ptrn.match(self.memcopies[key])
+      m = size_ptrn.search(self.memcopies[key])
       if m:
         size = m.group(1)
       bandwidth = round(float(size) * 1000 / duration, 2)
 
       tid = rec_vals[6]
       copy_line_header = str(async_copy_start_time) + DELIM + str(async_copy_end_time) + DELIM + str(procid) + DELIM + str(tid)
-      copy_line_footer = 'BW=' + str(bandwidth) + DELIM + 'Async=' + 1
+      copy_line_footer = 'BW=' + str(bandwidth) + DELIM + 'Async=' + str(1)
       data = copy_line_header + self.memcopies[key] + copy_line_footer
       self.memcopies[key] = data
-
-    if data == '': fatal('register_activity: memcopy API record is not found')
 
     return data
 
