@@ -291,13 +291,21 @@ class rsmi_ras_err_state_t(c_int):
 
 
 # Error type list correlates to rsmi_ras_err_state_t
-rsmi_ras_err_stale_readable = ['no errors', 'ECC disabled',\
-                               'unknown type err', 'single correctable err',\
-                               'multiple uncorrectable err',\
-                               'page isolated, treat as uncorrectable err',\
+rsmi_ras_err_stale_readable = ['no errors', 'ECC disabled',
+                               'unknown type err', 'single correctable err',
+                               'multiple uncorrectable err',
+                               'page isolated, treat as uncorrectable err',
                                'ECC enabled', 'status invalid']
-rsmi_ras_err_stale_machine = ['none', 'disabled', 'unknown error',\
+rsmi_ras_err_stale_machine = ['none', 'disabled', 'unknown error',
                               'sing', 'mult', 'position', 'enabled']
+
+validRasTypes = ['ue', 'ce']
+
+validRasActions = ['disable', 'enable', 'inject']
+
+validRasBlocks = ['fuse', 'mp1', 'mp0', 'sem', 'smn', 'df', 'xgmi_wafl', 'hdp', 'pcie_bif',
+
+                  'athub', 'mmhub', 'gfx', 'sdma', 'umc']
 
 
 class rsmi_memory_type_t(c_int):

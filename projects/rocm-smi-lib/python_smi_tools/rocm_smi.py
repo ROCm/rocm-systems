@@ -889,6 +889,80 @@ def resetGpu(device):
     printLogSpacer()
 
 
+def isRasControlAvailable(device):
+    """ Check if RAS control is available for a specified device.
+
+    Parameters:
+    device -- DRM device identifier
+
+    """
+
+    path = os.path.join('/sys/kernel/debug/dri', 'card%d' % device, 'device', 'ras_ctrl')
+
+    if not doesDeviceExist(device) or not path or not os.path.isfile(path):
+        logging.warning('GPU[%s]\t: RAS control is not available')
+
+        return False
+
+    return True
+
+
+def setRas(deviceList, rasAction, rasBlock, rasType):
+    """ Perform a RAS action on the devices
+    Parameters:
+    deviceList -- List of DRM devices (can be a single-item list)
+    rasAction -- [enable|disable|inject] RAS Action to perform
+    rasBlock -- [$validRasBlocks] RAS block
+    rasType -- [ce|ue] Error type to enable/disable
+
+
+    """
+    global RETCODE
+    printLog(None, "This is experimental feature, use 'amdgpuras' tool for ras error manipulations for newer vbios")
+
+    if rasAction not in validRasActions:
+        printLog(None, 'Unable to perform RAS command %s on block %s for type %s' % (rasAction, rasBlock, rasType),
+                 None)
+        logging.debug('Action %s is not a valid RAS command' % rasAction)
+        return
+    if rasBlock not in validRasBlocks:
+        printLog(None, 'Unable to perform RAS command %s on block %s for type %s' % (rasAction, rasBlock, rasType),
+                 None)
+        printLog(None, 'Block %s is not a valid RAS block' % rasBlock)
+        return
+
+    if rasType not in validRasTypes:
+        printLog(None, 'Unable to perform RAS command %s on block %s for type %s' % (rasAction, rasBlock, rasType),
+                 None)
+        printLog(None, 'Memory error type %s is not a valid RAS memory type' % rasAction)
+        return
+
+    printLogSpacer()
+    # NOTE PSP FW doesn't support enabling disabled counters yet
+    for device in deviceList:
+        if isRasControlAvailable(device):
+            rasFilePath = path = os.path.join('/sys/kernel/debug/dri', 'card%d' % device, 'device', 'ras_ctrl')
+            rasCmd = '%s %s %s' % (rasAction, rasBlock, rasType)
+
+            #writeToSysfs analog to old cli
+            if not os.path.isfile(rasFilePath):
+                printLog(None, 'Unable to write to sysfs file', None)
+                logging.debug('%s does not exist', rasFilePath)
+                return False
+            try:
+                logging.debug('Writing value \'%s\' to file \'%s\'', rasCmd, rasFilePath)
+                with open(rasFilePath, 'w') as fs:
+                    fs.write(rasFilePath + '\n')  # Certain sysfs files require \n at the end
+            except (IOError, OSError):
+                printLog(None, 'Unable to write to sysfs file %s' % rasFilePath, None)
+                logging.warning('IO or OS error')
+                RETCODE = 1
+
+    printLogSpacer()
+
+    return
+
+
 def setFanSpeed(deviceList, fan):
     """ Set fan speed for a list of devices.
 
@@ -2698,14 +2772,11 @@ if __name__ == '__main__':
     if args.resetxgmierr:
         resetXgmiErr(deviceList)
     if args.rasenable:
-        pass
-        # TODO: setRas(deviceList, \'enable\', args.rasenable[0], args.rasenable[1])
+        setRas(deviceList, 'enable', args.rasenable[0], args.rasenable[1])
     if args.rasdisable:
-        pass
-        # TODO: setRas(deviceList, \'disable\', args.rasdisable[0], args.rasdisable[1])
+        setRas(deviceList, 'disable', args.rasdisable[0], args.rasdisable[1])
     if args.rasinject:
-        pass
-        # TODO: setRas(deviceList, \'inject\', args.rasinject[0], args.rasinject[1])
+        setRas(deviceList, 'inject', args.rasinject[0], args.rasinject[1])
     if args.load:
         load(args.load, args.autorespond)
     if args.save:
