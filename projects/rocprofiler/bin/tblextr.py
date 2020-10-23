@@ -343,6 +343,7 @@ api_table_descr = [
 def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep_filtr, expl_id):
   global hsa_activity_found
   global memory_manager
+
   copy_raws = []
   if (hsa_activity_found): copy_raws = db.table_get_raws('COPY')
   copy_csv = ''
@@ -490,7 +491,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
             else:
               activity_record_patching(db, ops_table_name, kernel_found, kernel_str, stream_found, stream_id, select_expr)
 
-        api_data = memory_manager.register_api(rec_vals) if mcopy_data_enabled and api_name == 'hip' else ''
+        api_data = memory_manager.register_api(rec_vals) if mcopy_data_enabled else ''
         rec_vals.append(api_data)
         rec_vals[2] = api_pid
 
@@ -515,8 +516,8 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
 # fill COPY DB
 copy_table_descr = [
-  ['BeginNs', 'EndNs', 'Name', 'pid', 'tid', 'Index', 'proc-id'],
-  {'Index':'INTEGER', 'proc-id':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER'}
+  ['BeginNs', 'EndNs', 'Name', 'pid', 'tid', 'Index', 'proc-id', 'Data'],
+  {'Index':'INTEGER', 'proc-id':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Data':'TEXT'}
 ]
 def fill_copy_db(table_name, db, indir):
   pid = COPY_PID
@@ -544,6 +545,9 @@ def fill_copy_db(table_name, db, indir):
         rec_vals.append(corr_id)
         rec_vals.append(proc_id)
 
+        # registering memcopy information
+        activity_data =  memory_manager.register_copy(rec_vals) if mcopy_data_enabled else ''
+        rec_vals.append(activity_data)
         db.insert_entry(table_handle, rec_vals)
 
         # filling dependencies
@@ -708,14 +712,14 @@ else:
 
   with open(dbfile, mode='w') as fd: fd.truncate()
   db = SQLiteDB(dbfile)
-  memory_manager = MemManager(db)
+  memory_manager = MemManager(db, indir)
 
   ext_trace_found = fill_ext_db('rocTX', db, indir, 'roctx', EXT_PID)
 
   kfd_trace_found = fill_api_db('KFD', db, indir, 'kfd', KFD_PID, NONE_PID, [], {}, 0)
 
-  hsa_activity_found = fill_copy_db('COPY', db, indir)
   hsa_trace_found = fill_api_db('HSA', db, indir, 'hsa', HSA_PID, COPY_PID, kern_dep_list, {}, 0)
+  hsa_activity_found = fill_copy_db('COPY', db, indir)
 
   hip_trace_found = fill_api_db('HIP', db, indir, 'hip', HIP_PID, OPS_PID, [], {}, 1)
   ops_filtr = fill_ops_db('OPS', 'COPY', db, indir)
