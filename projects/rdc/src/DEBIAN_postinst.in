@@ -1,7 +1,7 @@
 #/bin/bash
 
 RDC_LIB_DIR=@RDC_CLIENT_ROOT_PATH@/rdc/lib
-GRPC_LIB_DIR=/usr/grpc/lib
+GRPC_LIB_DIR=@RDC_CLIENT_ROOT_PATH@/grpc/lib
 
 # This will return 0 if an id is created and non-zero if
 # it already exists

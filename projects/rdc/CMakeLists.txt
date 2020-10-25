@@ -159,7 +159,7 @@ set(CLIENT_COMPONENT "client")
 
 install(DIRECTORY ${GRPC_ROOT}
                USE_SOURCE_PERMISSIONS
-               DESTINATION usr
+               DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}
                COMPONENT ${SERVER_COMPONENT})
 
 add_subdirectory("server")
