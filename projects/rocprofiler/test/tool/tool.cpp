@@ -1169,7 +1169,7 @@ hsa_status_t codeobj_callback(
 
     std::ostringstream oss;
     oss << "codeobj/" << codeobj_index << ".obj" << std::dec;
-    const char* codeobj_data_name = oss.str().c_str();
+    const char* codeobj_data_name = strdup(oss.str().c_str());
     const char* codeobj_csv_name = "codeobj/index.csv";
 
     if (codeobj_csv_file == NULL) {
@@ -1203,6 +1203,7 @@ hsa_status_t codeobj_callback(
     }
 
     close(fd2);
+    free((void*)codeobj_data_name);
   }
 
   return HSA_STATUS_SUCCESS;
