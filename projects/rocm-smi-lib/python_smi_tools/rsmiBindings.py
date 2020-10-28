@@ -7,7 +7,10 @@ import ctypes.util
 from ctypes import *
 from enum import Enum
 
-path_librocm = 'librocm_smi64.so'
+import os
+
+# Use ROCm installation path if running from standard installation
+path_librocm = os.path.dirname(os.path.realpath(__file__)) + '/../lib/librocm_smi64.so'
 # ----------> TODO: Support static libs as well as SO
 
 try:
