@@ -769,6 +769,23 @@ rsmi_dev_perf_level_get(uint32_t dv_ind, rsmi_dev_perf_level_t *perf) {
 }
 
 rsmi_status_t
+rsmi_perf_determinism_mode_set(uint32_t dv_ind, uint64_t freq_bitmask) {
+  TRY
+  DEVICE_MUTEX
+
+  rsmi_status_t ret = rsmi_dev_perf_level_set_v1(dv_ind,
+                                          RSMI_DEV_PERF_LEVEL_DETERMINISM);
+  if (ret != RSMI_STATUS_SUCCESS) {
+      return ret;
+  }
+  ret = rsmi_dev_gpu_clk_freq_set(dv_ind, RSMI_CLK_TYPE_SYS, freq_bitmask);
+
+  return ret;
+  CATCH
+}
+
+
+rsmi_status_t
 rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
   TRY
   std::string val_str;

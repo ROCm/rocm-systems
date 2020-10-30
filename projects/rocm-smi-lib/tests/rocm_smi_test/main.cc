@@ -83,6 +83,7 @@
 #include "functional/init_shutdown_refcount.h"
 #include "rocm_smi_test/functional/hw_topology_read.h"
 #include "rocm_smi_test/functional/gpu_metrics_read.h"
+#include "rocm_smi_test/functional/perf_determinism.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -231,6 +232,10 @@ TEST(rsmitstReadOnly, TestHWTopologyRead) {
 }
 TEST(rsmitstReadOnly, TestGpuMetricsRead) {
   TestGpuMetricsRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestPerfDeterminism) {
+  TestPerfDeterminism tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadWrite, TestXGMIReadWrite) {

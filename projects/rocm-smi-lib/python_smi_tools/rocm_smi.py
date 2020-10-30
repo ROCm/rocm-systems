@@ -626,6 +626,21 @@ def resetXgmiErr(deviceList):
     printLogSpacer()
 
 
+def resetPerfDeterminism(deviceList):
+    """ Reset Performance Determinism
+
+    @param deviceList: Disable Performance Determinism for these devices
+    """
+    printLogSpacer('Disable Performance Determinism')
+    for device in deviceList:
+        ret = rocmsmi.rsmi_dev_perf_level_set(device, rsmi_dev_perf_level_t(0)))
+        if rsmi_ret_ok(ret, device, 'disable performance determinism'):
+            printLog(device, 'Successfully disabled performance determinism', None)
+        else:
+            logging.error('GPU[%s]\t\t: Unable to diable performance determinism', device)
+    printLogSpacer()
+
+
 def setClockRange(deviceList, clkType, level, value, autoRespond):
     """ Set the range for the specified clktype in the PowerPlay table for a list of devices.
 
@@ -868,6 +883,30 @@ def setClocks(deviceList, clktype, clk):
                 printErrLog(device, 'Unable to set %s bitmask to: %s' % (clktype, str(bitmask)))
                 RETCODE = 1
     printLogSpacer()
+
+
+def setPerfDeterminism(deviceList, value):
+    """ Set clock frequency level for a list of devices to enable performance
+    determinism.
+
+    @param deviceList: List of DRM devices (can be a single-item list)
+    @param value: Clock frequency level to set
+    """
+    global RETCODE
+    try:
+        int(value)
+    except ValueError:
+        printErrLog(device, 'Unable to set Performance Determinism')
+        logging.error('%s is not an integer', value)
+        RETCODE = 1
+        return
+    for device in deviceList:
+        ret = rocmsmi.rsmi_perf_determinism_mode_set(device, int(value))
+        if rsmi_ret_ok(ret, device):
+            printLog(device, 'Successfully set clock frequency', str(value))
+        else:
+            printErrLog(device, 'Unable to set clock frequency', str(value))
+            RETCODE = 1
 
 
 def resetGpu(device):
@@ -2493,6 +2532,7 @@ if __name__ == '__main__':
                                   help='Set the maximum GPU power back to the device deafult state',
                                   action='store_true')
     groupActionReset.add_argument('--resetxgmierr', help='Reset XGMI error count', action='store_true')
+    groupAction.add_argument('--resetperfdeterminism', help='Disable performance determinism', action='store_true')
     groupAction.add_argument('--setclock', help='Set Clock Frequency Level(s) for specified clock (requires manual Perf level)',
                              type=str, metavar='LEVEL', nargs=2)
     groupAction.add_argument('--setsclk', help='Set GPU Clock Frequency Level(s) (requires manual Perf level)',
@@ -2523,6 +2563,8 @@ if __name__ == '__main__':
     groupAction.add_argument('--setprofile',
                              help='Specify Power Profile level (#) or a quoted string of CUSTOM Profile attributes "# '
                                   '# # #..." (requires manual Perf level)')
+    groupAction.add_argument('--setperfdeterminism', help='Set clock frequency limit to get minimal performance variation',
+                             type=int, metavar='LEVEL', nargs='+')
     groupAction.add_argument('--rasenable', help='Enable RAS for specified block and error type', type=str, nargs=2,
                              metavar=('BLOCK', 'ERRTYPE'))
     groupAction.add_argument('--rasdisable', help='Disable RAS for specified block and error type', type=str, nargs=2,
@@ -2560,7 +2602,7 @@ if __name__ == '__main__':
     if args.setsclk or args.setmclk or args.setpcie or args.resetfans or args.setfan or args.setperflevel or \
             args.load or args.resetclocks or args.setprofile or args.resetprofile or args.setoverdrive or \
             args.setmemoverdrive or args.setpoweroverdrive or args.resetpoweroverdrive or \
-            args.rasenable or args.rasdisable or args.rasinject or args.gpureset or \
+            args.rasenable or args.rasdisable or args.rasinject or args.gpureset or args.setperfdeterminism or\
             args.setslevel or args.setmlevel or args.setvc or args.setsrange or args.setmrange or args.setclock:
         relaunchAsSudo()
 
@@ -2773,10 +2815,14 @@ if __name__ == '__main__':
         setClockRange(deviceList, 'sclk', args.setsrange[0], args.setsrange[1], args.autorespond)
     if args.setmrange:
         setClockRange(deviceList, 'mclk', args.setmrange[0], args.setmrange[1], args.autorespond)
+    if args.setperfdeterminism:
+        setPerfDeterminism(deviceList, args.setperfdeterminism[0])
     if args.resetprofile:
         resetProfile(deviceList)
     if args.resetxgmierr:
         resetXgmiErr(deviceList)
+    if args.resetperfdeterminism:
+        resetPerfDeterminism(deviceList)
     if args.rasenable:
         setRas(deviceList, 'enable', args.rasenable[0], args.rasenable[1])
     if args.rasdisable:

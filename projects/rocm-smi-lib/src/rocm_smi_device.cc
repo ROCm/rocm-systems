@@ -209,6 +209,7 @@ static const char *kDevPerfLevelStandardStr = "profile_standard";
 static const char *kDevPerfLevelMinMClkStr = "profile_min_mclk";
 static const char *kDevPerfLevelMinSClkStr = "profile_min_sclk";
 static const char *kDevPerfLevelPeakStr = "profile_peak";
+static const char *kDevPerfLevelDeterminismStr = "performance_determinism";
 static const char *kDevPerfLevelUnknownStr = "unknown";
 
 static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
@@ -283,6 +284,7 @@ static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
     {RSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK, kDevPerfLevelMinMClkStr},
     {RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK, kDevPerfLevelMinSClkStr},
     {RSMI_DEV_PERF_LEVEL_STABLE_PEAK, kDevPerfLevelPeakStr},
+    {RSMI_DEV_PERF_LEVEL_DETERMINISM, kDevPerfLevelDeterminismStr},
 
     {RSMI_DEV_PERF_LEVEL_UNKNOWN, kDevPerfLevelUnknownStr},
 };
@@ -368,7 +370,10 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_overdrive_level_get",       {{kDevOverDriveLevelFName}, {}}},
   {"rsmi_dev_power_profile_presets_get", {{kDevPowerProfileModeFName}, {}}},
   {"rsmi_dev_perf_level_set",            {{kDevPerfLevelFName}, {}}},
+  {"rsmi_dev_perf_level_set_v1",         {{kDevPerfLevelFName}, {}}},
   {"rsmi_dev_perf_level_get",            {{kDevPerfLevelFName}, {}}},
+  {"rsmi_perf_determinism_mode_set",     {{kDevPerfLevelFName,
+                                           kDevGPUSClkFName}, {}}},
   {"rsmi_dev_overdrive_level_set",       {{kDevOverDriveLevelFName}, {}}},
   {"rsmi_dev_vbios_version_get",         {{kDevVBiosVerFName}, {}}},
   {"rsmi_dev_od_volt_info_get",          {{kDevPowerODVoltageFName}, {}}},
