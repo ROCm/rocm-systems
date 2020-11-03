@@ -439,6 +439,8 @@ class HsaRsrcFactory {
     return HSA_STATUS_SUCCESS;
   }
 
+  void DumpHandles(FILE* output_file);
+
  private:
   // System agents iterating callback
   static hsa_status_t GetHsaAgentsCallback(hsa_agent_t agent, void* data);
