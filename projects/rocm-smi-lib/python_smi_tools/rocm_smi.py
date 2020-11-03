@@ -876,16 +876,21 @@ def resetGpu(device):
     Parameters:
     device -- DRM Device identifier
     """
+    # TODO: Implement GPU reset function in the LIB
+    printLogSpacer(' Reset GPU ')
     global RETCODE
     if  len(device) > 1:
         logging.error('GPU Reset can only be performed on one GPU per call')
         RETCODE = 1
         return
-    debugprefix = '/sys/kernel/debug/dri'
-    filePath = os.path.join(debugprefix, str(device[0]), 'amdgpu_gpu_recover')
-    with open(filePath, 'r') as fileContents:
+    resetDev = int(device[0])
+    filePath = '/sys/kernel/debug/dri/%d/amdgpu_gpu_recover' % (resetDev)
+    if os.path.isfile(filePath):
+        with open(filePath, 'r') as fileContents:
             fileValue = fileContents.read()
-            printLog(device[0], 'GPU[%s]\t: Reset was successful' % str(device[0]),None)
+            printLog(resetDev, 'GPU[%d]\t: Reset was successful' % (resetDev), None)
+    else:
+        printErrLog(resetDev, 'Unable to reset device %d' % (resetDev))
     printLogSpacer()
 
 
@@ -2212,7 +2217,8 @@ def doesDeviceExist(device):
     @param device: DRM device identifier
     """
     availableDevices = listDevices()
-    if device in availableDevices:
+    filePath = '/sys/kernel/debug/dri/%d/' % (int(device))
+    if device in availableDevices or os.path.exists(filePath):
         return True
     return False
 
@@ -2551,6 +2557,13 @@ if __name__ == '__main__':
         numericLogLevel = getattr(logging, args.loglevel.upper(), logging.WARNING)
         logging.getLogger().setLevel(numericLogLevel)
 
+    if args.setsclk or args.setmclk or args.setpcie or args.resetfans or args.setfan or args.setperflevel or \
+            args.load or args.resetclocks or args.setprofile or args.resetprofile or args.setoverdrive or \
+            args.setmemoverdrive or args.setpoweroverdrive or args.resetpoweroverdrive or \
+            args.rasenable or args.rasdisable or args.rasinject or args.gpureset or \
+            args.setslevel or args.setmlevel or args.setvc or args.setsrange or args.setmrange or args.setclock:
+        relaunchAsSudo()
+
     # If there is one or more device specified, use that for all commands, otherwise use a
     # list of all available devices. Also use "is not None" as device 0 would
     # have args.device=0, and "if 0" returns false.
@@ -2562,8 +2575,6 @@ if __name__ == '__main__':
                 sys.exit()
             if (isAmdDevice(device) or args.alldevices) and device not in deviceList:
                 deviceList.append(device)
-            else:
-                printLog(None, 'No supported devices available to display', None)
     else:
         deviceList = listDevices()
 
@@ -2576,13 +2587,6 @@ if __name__ == '__main__':
         PRINT_JSON = True
         for device in deviceList:
             JSON_DATA['card' + str(device)] = {}
-
-    if args.setsclk or args.setmclk or args.setpcie or args.resetfans or args.setfan or args.setperflevel or \
-            args.load or args.resetclocks or args.setprofile or args.resetprofile or args.setoverdrive or \
-            args.setmemoverdrive or args.setpoweroverdrive or args.resetpoweroverdrive or \
-            args.rasenable or args.rasdisable or args.rasinject or args.gpureset or \
-            args.setslevel or args.setmlevel or args.setvc or args.setsrange or args.setmrange or args.setclock:
-        relaunchAsSudo()
 
     if not PRINT_JSON:
         print('\n')
@@ -2630,7 +2634,7 @@ if __name__ == '__main__':
             logging.error('No device specified. One device must be specified for GPU reset')
             sys.exit(1)
         logging.debug('Only executing GPU reset, no other commands will be executed')
-        resetGpu(deviceList)
+        resetGpu(args.device)
         sys.exit(RETCODE)
 
     if not checkAmdGpus(deviceList):
