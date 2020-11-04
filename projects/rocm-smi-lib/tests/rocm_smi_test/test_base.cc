@@ -80,6 +80,10 @@ void TestBase::MakeHeaderStr(const char *inStr,
   }
 }
 
+void TestBase::SetUp(void) {
+  SetUp(0);
+}
+
 void TestBase::SetUp(uint64_t init_flags) {
   std::string label;
   rsmi_status_t err;

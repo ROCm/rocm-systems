@@ -103,7 +103,7 @@ static uint64_t get_multiplier_from_str(char units_char) {
       break;
 
     default:
-      assert(!"Unexpected units for frequency");
+      assert(false);  // Unexpected units for frequency
       throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
   }
   return multiplier;
@@ -155,7 +155,8 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
         throw amd::smi::rsmi_exception(RSMI_STATUS_NO_DATA, __FUNCTION__);
       }
 
-      lanes[i] = std::stoi(star_str.substr(1), nullptr);
+      lanes[i] =
+                static_cast<uint32_t>(std::stoi(star_str.substr(1), nullptr));
     }
   }
   return static_cast<uint64_t>(freq*multiplier);
@@ -375,7 +376,7 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
 
 template <typename T>
 static rsmi_status_t set_dev_mon_value(amd::smi::MonitorTypes type,
-                                 uint32_t dv_ind, int32_t sensor_ind, T val) {
+                                uint32_t dv_ind, uint32_t sensor_ind, T val) {
   GET_DEV_FROM_INDX
 
   assert(dev->monitor() != nullptr);
@@ -394,7 +395,7 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  uint32_t ret = smi.DiscoverAMDPowerMonitors();
+  int ret = smi.DiscoverAMDPowerMonitors();
   if (ret != 0) {
     return amd::smi::ErrnoToRsmiStatus(ret);
   }
@@ -685,7 +686,7 @@ static rsmi_status_t
 get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_t *id) {
   TRY
   std::string val_str;
-  int64_t val_u64;
+  uint64_t val_u64;
 
   assert(id != nullptr);
   if (id == nullptr) {
@@ -781,7 +782,7 @@ rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
   }
 
   errno = 0;
-  int64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+  uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
 
   if (val_ul > 0xFFFFFFFF) {
     return RSMI_STATUS_UNEXPECTED_SIZE;
@@ -796,6 +797,14 @@ rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
 
 rsmi_status_t
 rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od) {
+  if (dv_ind < 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  return rsmi_dev_overdrive_level_set_v1(static_cast<uint32_t>(dv_ind), od);
+}
+
+rsmi_status_t
+rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od) {
   TRY
   REQUIRE_ROOT_ACCESS
 
@@ -809,6 +818,11 @@ rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od) {
 
 rsmi_status_t
 rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
+  return rsmi_dev_perf_level_set_v1(static_cast<uint32_t>(dv_ind), perf_level);
+}
+
+rsmi_status_t
+rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
   TRY
   REQUIRE_ROOT_ACCESS
 
@@ -959,8 +973,8 @@ static const uint32_t kOD_OD_RANGE_label_array_index =
                                          kOD_VDDC_CURVE_label_array_index + 4;
 static const uint32_t kOD_VDDC_CURVE_start_index =
                                            kOD_OD_RANGE_label_array_index + 3;
-static const uint32_t kOD_VDDC_CURVE_num_lines =
-                                               kOD_VDDC_CURVE_start_index + 4;
+// static const uint32_t kOD_VDDC_CURVE_num_lines =
+//                                             kOD_VDDC_CURVE_start_index + 4;
 
 static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
                                                   rsmi_od_volt_freq_data_t *p) {
@@ -1049,7 +1063,7 @@ rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
   };
 
   // Set perf. level to manual so that we can then set the power profile
-  ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
+  ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1097,7 +1111,7 @@ rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
   rsmi_status_t ret;
 
   // Set perf. level to manual so that we can then set the power profile
-  ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
+  ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1222,7 +1236,7 @@ static rsmi_status_t set_power_profile(uint32_t dv_ind,
   assert(ind_map.find(profile) != ind_map.end());
 
   // Set perf. level to manual so that we can then set the power profile
-  ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
+  ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1297,8 +1311,6 @@ rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type_t clk_type,
 rsmi_status_t
 rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
                                                        uint64_t *fw_version) {
-  rsmi_status_t ret;
-
   TRY
   CHK_SUPPORT_VAR(fw_version, block)
 
@@ -1373,12 +1385,7 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
       return RSMI_STATUS_INVALID_ARGS;
   }
 
-  ret = get_dev_value_int(dev_type, dv_ind, fw_version);
-  if (ret != 0) {
-    return amd::smi::ErrnoToRsmiStatus(ret);
-  }
-
-  return RSMI_STATUS_SUCCESS;
+  return get_dev_value_int(dev_type, dv_ind, fw_version);
   CATCH
 }
 
@@ -1438,7 +1445,7 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind];
   assert(dev != nullptr);
 
-  ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
+  ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -1503,8 +1510,13 @@ get_id_name_str_from_line(uint64_t id, std::string ln,
   if (std::stoul(token1, nullptr, 16) == id) {
     int64_t pos = ln_str->tellg();
 
-    pos = ln.find_first_not_of("\t ", pos);
-    ret_str = ln.substr(pos);
+    assert(pos >= 0);
+    if (pos < 0) {
+      throw amd::smi::rsmi_exception(
+          RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
+    }
+    size_t s_pos = ln.find_first_not_of("\t ", static_cast<size_t>(pos));
+    ret_str = ln.substr(static_cast<uint32_t>(s_pos));
   }
   return ret_str;
 }
@@ -1537,7 +1549,8 @@ static rsmi_status_t get_backup_name(uint16_t id, char *name, size_t len) {
 static rsmi_status_t get_dev_name_from_file(uint32_t dv_ind, char *name,
                                                size_t len) {
   std::string val_str;
-  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevDevProdName, dv_ind, &val_str);
+  rsmi_status_t ret =
+              get_dev_value_line(amd::smi::kDevDevProdName, dv_ind, &val_str);
 
   if (ret != 0) {
     return amd::smi::ErrnoToRsmiStatus(ret);
@@ -1885,12 +1898,12 @@ rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
   std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind];
   assert(dev != nullptr);
 
-  ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
+  ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
 
-  uint32_t ret_i;
+  int32_t ret_i;
   ret_i = dev->writeDevInfo(amd::smi::kDevPCIEClk, freq_enable_str);
 
   return amd::smi::ErrnoToRsmiStatus(ret_i);
@@ -2372,7 +2385,7 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
       break;
 
     default:
-      assert(!"Unexpected memory type");
+      assert(false);  // Unexpected memory type
       return RSMI_STATUS_INVALID_ARGS;
   }
 
@@ -2405,7 +2418,7 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
       break;
 
     default:
-      assert(!"Unexpected memory type");
+      assert(false);  // Unexpected memory type
       return RSMI_STATUS_INVALID_ARGS;
   }
 
@@ -2641,7 +2654,7 @@ rsmi_version_str_get(rsmi_sw_component_t component, char *ver_str,
       break;
 
     default:
-      assert(!"Unexpected component type provided");
+      assert(false);  // Unexpected component type provided
       return RSMI_STATUS_INVALID_ARGS;
   }
 
@@ -2757,7 +2770,7 @@ rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  uint32_t ret = 0;
+  int ret = 0;
   amd::smi::evt::Event *evt =
                         reinterpret_cast<amd::smi::evt::Event *>(evnt_handle);
   uint32_t dv_ind = evt->dev_ind();
@@ -2783,7 +2796,7 @@ rsmi_counter_control(rsmi_event_handle_t evt_handle,
 
   REQUIRE_ROOT_ACCESS
 
-  uint32_t ret = 0;
+  int ret = 0;
 
   if (evt_handle == 0) {
     return RSMI_STATUS_INVALID_ARGS;
@@ -2799,7 +2812,7 @@ rsmi_counter_control(rsmi_event_handle_t evt_handle,
       break;
 
     default:
-      assert(!"Unexpected perf counter command");
+      assert(false);  // Unexpected perf counter command
       return RSMI_STATUS_INVALID_ARGS;
   }
   return amd::smi::ErrnoToRsmiStatus(ret);
@@ -2832,8 +2845,11 @@ rsmi_counter_read(rsmi_event_handle_t evt_handle,
   if (ret == 0 && value->value > 0xFFFFFFFFFFFF) {
     ret = evt->getValue(value);
   }
-
-  return amd::smi::ErrnoToRsmiStatus(ret);
+  if (ret == 0) {
+    return RSMI_STATUS_SUCCESS;
+  } else {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
   CATCH
 }
 
@@ -3006,7 +3022,7 @@ rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
         tmp_stat = RSMI_MEM_PAGE_STATUS_RESERVED;
         break;
       default:
-        assert(!"Unexpected retired memory page status code read");
+        assert(false);  // Unexpected retired memory page status code read
         return RSMI_STATUS_UNKNOWN_ERROR;
     }
     records[i].status = tmp_stat;
@@ -3080,7 +3096,7 @@ rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status) {
       break;
 
     default:
-      assert(!"Unexpected XGMI error status read");
+      assert(false);  // Unexpected XGMI error status read
       return RSMI_STATUS_UNKNOWN_ERROR;
   }
   return RSMI_STATUS_SUCCESS;
@@ -3142,20 +3158,20 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
 
   rsmi_status_t status;
   uint32_t node_ind_dst;
-  uint32_t ret = smi.get_node_index(dv_ind_dst, &node_ind_dst);
+  int ret = smi.get_node_index(dv_ind_dst, &node_ind_dst);
 
-  if (!ret) {
+  if (ret == 0) {
     amd::smi::IO_LINK_TYPE type;
     ret = kfd_node->get_io_link_type(node_ind_dst, &type);
-    if (!ret) {
+    if (ret == 0) {
       if (type == amd::smi::IOLINK_TYPE_XGMI) {
         ret = kfd_node->get_io_link_weight(node_ind_dst, weight);
-        if (!ret)
+        if (ret == 0)
           status = RSMI_STATUS_SUCCESS;
         else
           status = RSMI_STATUS_INIT_ERROR;
       } else {
-        assert(!"Unexpected IO Link type read");
+        assert(false);  // Unexpected IO Link type read
         status = RSMI_STATUS_NOT_SUPPORTED;
       }
     } else {
@@ -3173,7 +3189,7 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
             uint64_t io_link_weight;
             ret = smi.get_io_link_weight(numa_number_src, numa_number_dst,
                                          &io_link_weight);
-            if (!ret) {
+            if (ret == 0) {
               *weight = *weight + io_link_weight;
               // from src numa CPU node to dst numa CPU node
             } else {
@@ -3183,11 +3199,11 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
           }
           status = RSMI_STATUS_SUCCESS;
         } else {
-          assert(!"Error to read numa node number");
+          assert(false);  // Error to read numa node number
           status = RSMI_STATUS_INIT_ERROR;
         }
       } else {
-        assert(!"Error to read numa node weight");
+        assert(false);  // Error to read numa node weight
         status = RSMI_STATUS_INIT_ERROR;
       }
     }
@@ -3217,9 +3233,9 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
 
   rsmi_status_t status;
   uint32_t node_ind_dst;
-  uint32_t ret = smi.get_node_index(dv_ind_dst, &node_ind_dst);
+  int ret = smi.get_node_index(dv_ind_dst, &node_ind_dst);
 
-  if (!ret) {
+  if (ret == 0) {
     amd::smi::IO_LINK_TYPE io_link_type;
     ret = kfd_node->get_io_link_type(node_ind_dst, &io_link_type);
     if (!ret) {
@@ -3228,7 +3244,7 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
         *hops = 1;
         status = RSMI_STATUS_SUCCESS;
       } else {
-        assert(!"Unexpected IO Link type read");
+        assert(false);  // Unexpected IO Link type read
         status = RSMI_STATUS_NOT_SUPPORTED;
       }
     } else {
@@ -3242,7 +3258,7 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
           uint64_t io_link_weight;
           ret = smi.get_io_link_weight(numa_number_src, numa_number_dst,
                                        &io_link_weight);
-          if (!ret)
+          if (ret == 0)
             *hops = 3;  // from src CPU node to dst CPU node
           else
             *hops = 4;  // More than one CPU hops, hard coded as 4
@@ -3259,7 +3275,7 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
           status = RSMI_STATUS_INIT_ERROR;
         }
       } else {
-        assert(!"Error to get numa node number");
+        assert(false);  // Error to get numa node number
         status = RSMI_STATUS_INIT_ERROR;
       }
     }
@@ -3379,7 +3395,7 @@ rsmi_dev_supported_variant_iterator_open(
       break;
 
     default:
-      assert(!"Unexpected iterator type");
+      assert(false);  // Unexpected iterator type
       return RSMI_STATUS_INVALID_ARGS;
   }
   return RSMI_STATUS_SUCCESS;
@@ -3566,7 +3582,7 @@ rsmi_event_notification_init(uint32_t dv_ind) {
   }
 
   dev->set_evt_notif_anon_fd(args.anon_fd);
-  FILE *anon_file_ptr = fdopen(args.anon_fd, "r");
+  FILE *anon_file_ptr = fdopen(static_cast<int>(args.anon_fd), "r");
   if (anon_file_ptr == nullptr) {
     close(dev->evt_notif_anon_fd());
     return amd::smi::ErrnoToRsmiStatus(errno);
@@ -3749,5 +3765,5 @@ rsmi_test_refcount(uint64_t refcnt_type) {
     return -1;
   }
 
-  return smi.ref_count();
+  return static_cast<int32_t>(smi.ref_count());
 }

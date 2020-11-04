@@ -86,7 +86,7 @@ static int parse_power_str(std::string s, PowerMonTypes type, uint64_t *val) {
       break;
 
     default:
-      assert(!"Invalid search Power type requested");
+      assert(false);  // Invalid search Power type requested
       return EINVAL;
   }
 
@@ -128,7 +128,7 @@ static int parse_power_str(std::string s, PowerMonTypes type, uint64_t *val) {
       break;
 
     default:
-      assert(!"Invalid search Power type requested");
+      assert(false);  // Invalid search Power type requested
       return EINVAL;
   }
   ss.clear();

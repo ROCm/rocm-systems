@@ -80,9 +80,8 @@ static const char * kRasErrStateStrings[] = {
     "Error Unknown",                 // RSMI_RAS_ERR_STATE_PARITY
     "Single, Correctable",           // RSMI_RAS_ERR_STATE_SING_C
     "Multiple, Uncorrectable",       // RSMI_RAS_ERR_STATE_MULT_UC
-    "Poison"                         // RSMI_RAS_ERR_STATE_POISON
-    "Off",                           // RSMI_RAS_ERR_STATE_DISABLED
-    "On",                            // RSMI_RAS_ERR_STATE_ENABLED
+    "Poison",                        // RSMI_RAS_ERR_STATE_POISON
+    "Enabled",                       // RSMI_RAS_ERR_STATE_ENABLED
 };
 static_assert(
   sizeof(kRasErrStateStrings)/sizeof(char *) == (RSMI_RAS_ERR_STATE_LAST + 1),

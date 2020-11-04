@@ -92,9 +92,9 @@ class Event {
     explicit Event(rsmi_event_type_t event, uint32_t dev_ind);
     ~Event(void);
 
-    uint32_t openPerfHandle();
-    uint32_t startCounter(void);
-    uint32_t stopCounter(void);
+    int32_t openPerfHandle();
+    int32_t startCounter(void);
+    int32_t stopCounter(void);
     uint32_t getValue(rsmi_counter_value_t *val);
     uint32_t dev_file_ind(void) const {return dev_file_ind_;}
     uint32_t dev_ind(void) const {return dev_ind_;}
@@ -111,8 +111,8 @@ class Event {
     int32_t fd_;
     perf_event_attr attr_;
 
-    uint32_t get_event_file_info(void);
-    uint32_t get_event_type(uint32_t *ev_type);
+    int32_t get_event_file_info(void);
+    int32_t get_event_type(uint32_t *ev_type);
 };
 
 

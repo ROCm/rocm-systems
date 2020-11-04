@@ -216,7 +216,7 @@ rsmi_status_t GetDevBinaryVec(amd::smi::DevInfoTypes type,
   return ErrnoToRsmiStatus(ret);
 }
 
-rsmi_status_t ErrnoToRsmiStatus(uint32_t err) {
+rsmi_status_t ErrnoToRsmiStatus(int err) {
   switch (err) {
     case 0:      return RSMI_STATUS_SUCCESS;
     case ESRCH:  return RSMI_STATUS_NOT_FOUND;

@@ -78,7 +78,7 @@ class RocmSMI {
     std::vector<std::shared_ptr<amd::smi::Device>>&
                                   monitor_devices() {return monitor_devices_;}
     uint32_t DiscoverAmdgpuDevices(void);
-    uint32_t DiscoverAMDPowerMonitors(bool force_update = false);
+    int DiscoverAMDPowerMonitors(bool force_update = false);
 
     // Will execute "func" for every Device object known about, or until func
     // returns non-zero;

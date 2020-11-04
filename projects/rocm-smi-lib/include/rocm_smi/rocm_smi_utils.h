@@ -83,7 +83,7 @@ GetDevValueVec(amd::smi::DevInfoTypes type,
 rsmi_status_t
 GetDevBinaryVec(amd::smi::DevInfoTypes type,
                          uint32_t dv_ind, std::vector<unsigned char> *val_vec);
-rsmi_status_t ErrnoToRsmiStatus(uint32_t err);
+rsmi_status_t ErrnoToRsmiStatus(int err);
 
 struct pthread_wrap {
  public:

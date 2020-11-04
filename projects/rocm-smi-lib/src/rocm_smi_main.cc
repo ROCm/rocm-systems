@@ -80,7 +80,8 @@ static uint32_t GetDeviceIndex(const std::string s) {
   size_t tmp = t.find_last_not_of("0123456789");
   t.erase(0, tmp+1);
 
-  return stoi(t);
+  assert(stoi(t) >= 0);
+  return static_cast<uint32_t>(stoi(t));
 }
 
 // Find the drm minor from from sysfs path "/sys/class/drm/cardX/device/drm".
@@ -110,10 +111,10 @@ static uint32_t  GetDrmRenderMinor(const std::string s) {
     dentry = readdir(drm_dir);
   }
 
-  if (closedir(drm_dir))
+  if (closedir(drm_dir)) {
     return 0;
-
-  return drm_minor;
+  }
+  return static_cast<uint32_t>(drm_minor);
 }
 
 static int SameDevice(const std::string fileA, const std::string fileB) {
@@ -192,7 +193,7 @@ static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
   assert(ret < 256);
 
   if (ret <= 0 || ret >= 256) {
-    return -1;
+    return 1;
   }
 
   // We are looking for the last element in the path that has the form
@@ -229,7 +230,7 @@ static uint32_t GetMonitorDevices(const std::shared_ptr<amd::smi::Device> &d,
   if (d->monitor() != nullptr) {
     // Calculate BDFID and set for this device
     if (ConstructBDFID(d->path(), &bdfid) != 0) {
-      return -1;
+      return 1;
     }
     d->set_bdfid(bdfid);
     device_list->push_back(d);
@@ -241,6 +242,7 @@ void
 RocmSMI::Initialize(uint64_t flags) {
   auto i = 0;
   uint32_t ret;
+  int i_ret;
 
   assert(ref_count_ == 1);
   if (ref_count_ != 1) {
@@ -278,16 +280,16 @@ RocmSMI::Initialize(uint64_t flags) {
   }
 
   std::map<uint64_t, std::shared_ptr<KFDNode>> tmp_map;
-  ret = DiscoverKFDNodes(&tmp_map);
-  if (ret != 0) {
+  i_ret = DiscoverKFDNodes(&tmp_map);
+  if (i_ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
                  "Failed to initialize rocm_smi library (KFD node discovery).");
   }
 
   std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<IOLink>>
     io_link_map_tmp;
-  ret = DiscoverIOLinks(&io_link_map_tmp);
-  if (ret != 0) {
+  i_ret = DiscoverIOLinks(&io_link_map_tmp);
+  if (i_ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
                  "Failed to initialize rocm_smi library (IO Links discovery).");
   }
@@ -358,14 +360,16 @@ RocmSMI& RocmSMI::getInstance(uint64_t flags) {
   return singleton;
 }
 
-static int GetEnvVarInteger(const char *ev_str) {
+static uint32_t GetEnvVarUInteger(const char *ev_str) {
 #ifdef NDEBUG
   (void)ev_str;
 #else
   ev_str = getenv(ev_str);
 
   if (ev_str) {
-    return atoi(ev_str);
+    int ret = atoi(ev_str);
+    assert(ret >= 0);
+    return static_cast<uint32_t>(ret);
   }
 #endif
   return 0;
@@ -374,18 +378,18 @@ static int GetEnvVarInteger(const char *ev_str) {
 // Get and store env. variables in this method
 void RocmSMI::GetEnvVariables(void) {
 #ifdef NDEBUG
-  (void)GetEnvVarInteger(nullptr);  // This is to quiet release build warning.
+  (void)GetEnvVarUInteger(nullptr);  // This is to quiet release build warning.
   env_vars_.debug_output_bitfield = 0;
   env_vars_.path_DRM_root_override = nullptr;
   env_vars_.path_HWMon_root_override = nullptr;
   env_vars_.path_power_root_override = nullptr;
   env_vars_.enum_override = 0;
 #else
-  env_vars_.debug_output_bitfield = GetEnvVarInteger("RSMI_DEBUG_BITFIELD");
+  env_vars_.debug_output_bitfield = GetEnvVarUInteger("RSMI_DEBUG_BITFIELD");
   env_vars_.path_DRM_root_override   = getenv("RSMI_DEBUG_DRM_ROOT_OVERRIDE");
   env_vars_.path_HWMon_root_override = getenv("RSMI_DEBUG_HWMON_ROOT_OVERRIDE");
   env_vars_.path_power_root_override = getenv("RSMI_DEBUG_PP_ROOT_OVERRIDE");
-  env_vars_.enum_override = GetEnvVarInteger("RSMI_DEBUG_ENUM_OVERRIDE");
+  env_vars_.enum_override = GetEnvVarUInteger("RSMI_DEBUG_ENUM_OVERRIDE");
 #endif
 }
 
@@ -453,7 +457,7 @@ static bool isAMDGPU(std::string dev_path) {
 }
 
 uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
-  auto ret = 0;
+  uint32_t ret = 0;
 
   // If this gets called more than once, clear previous findings.
   devices_.clear();
@@ -545,7 +549,7 @@ uint32_t RocmSMI::DiscoverAMDMonitors(void) {
 // Instead, we will discover() all the power monitors the first time
 // they are needed and then check for previous discovery on each subsequent
 // call.
-uint32_t RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
+int RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
   if (force_update) {
     power_mons_.clear();
   }
@@ -606,7 +610,7 @@ uint32_t RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
 uint32_t RocmSMI::IterateSMIDevices(
      std::function<uint32_t(std::shared_ptr<Device>&, void *)> func, void *p) {
   if (func == nullptr) {
-    return -1;
+    return 1;
   }
 
   auto d = devices_.begin();

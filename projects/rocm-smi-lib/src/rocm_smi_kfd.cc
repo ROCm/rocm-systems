@@ -86,10 +86,12 @@ static const char *kKFDPasidFName = "pasid";
 // static const char *kKFDNodePropWAVE_FRONT_SIZEStr =    "wave_front_size";
 
 static const char *kKFDNodePropARRAY_COUNTStr = "array_count";
-static const char *kKFDNodePropSIMD_ARRAYS_PER_ENGINEStr = "simd_arrays_per_engine";
+static const char *kKFDNodePropSIMD_ARRAYS_PER_ENGINEStr =
+                                                     "simd_arrays_per_engine";
 static const char *kKFDNodePropCU_PER_SIMD_ARRAYStr = "cu_per_simd_array";
 // static const char *kKFDNodePropSIMD_PER_CUStr = "simd_per_cu";
-// static const char *kKFDNodePropMAX_SLOTS_SCRATCH_CUStr = "max_slots_scratch_cu";
+// static const char *kKFDNodePropMAX_SLOTS_SCRATCH_CUStr =
+//                                                     "max_slots_scratch_cu";
 
 // static const char *kKFDNodePropVENDOR_IDStr =          "vendor_id";
 // static const char *kKFDNodePropDEVICE_IDStr =          "device_id";
@@ -231,7 +233,7 @@ static int ReadKFDGpuId(uint32_t kfd_node_id, uint64_t *gpu_id) {
     return ENXIO;
   }
 
-  *gpu_id = std::stoi(gpu_id_str);
+  *gpu_id = static_cast<uint64_t>(std::stoi(gpu_id_str));
   return 0;
 }
 
@@ -294,7 +296,8 @@ int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
       int err;
       std::string tmp;
 
-      procs[*num_procs_found].process_id = std::stoi(proc_id_str);
+      procs[*num_procs_found].process_id =
+                                static_cast<uint32_t>(std::stoi(proc_id_str));
 
       std::string pasid_str_path = kKFDProcPathRoot;
       pasid_str_path += "/";
@@ -312,7 +315,7 @@ int GetProcessInfo(rsmi_process_info_t *procs, uint32_t num_allocated,
         closedir(proc_dir);
         return EINVAL;
       }
-      procs[*num_procs_found].pasid = std::stoi(tmp);
+      procs[*num_procs_found].pasid = static_cast<uint32_t>(std::stoi(tmp));
     }
     ++(*num_procs_found);
 
@@ -382,7 +385,7 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
 
     uint64_t val;
     try {
-      val = std::stoi(tmp);
+      val = static_cast<uint64_t>(std::stoi(tmp));
     } catch (...) {
       std::cerr << "Error; read invalid data: " << tmp << " from " <<
                                                     q_gpu_id_str << std::endl;
@@ -431,7 +434,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
   if (!is_number(tmp)) {
     return EINVAL;
   }
-  proc->pasid = std::stoi(tmp);
+  proc->pasid = static_cast<uint32_t>(std::stoi(tmp));
 
   proc->vram_usage = 0;
   proc->sdma_usage = 0;
@@ -439,7 +442,8 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
 
   uint32_t cu_count = 0;
   static amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-  static std::map<uint64_t, std::shared_ptr<KFDNode>>& kfd_node_map = smi.kfd_node_map();
+  static std::map<uint64_t, std::shared_ptr<KFDNode>>& kfd_node_map =
+                                                           smi.kfd_node_map();
 
   for (itr = gpu_set->begin(); itr != gpu_set->end(); itr++) {
     uint64_t gpu_id = (*itr);
@@ -531,7 +535,7 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
       continue;
     }
 
-    node_indx = std::stoi(dentry->d_name);
+    node_indx = static_cast<uint32_t>(std::stoi(dentry->d_name));
 
     if (!KFDNodeSupported(node_indx)) {
       dentry = readdir(kfd_node_dir);
@@ -675,7 +679,8 @@ KFDNode::Initialize(void) {
   ret = get_property_value(kKFDNodePropSIMD_ARRAYS_PER_ENGINEStr, &tmp_val);
   if (ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-    "Failed to initialize rocm_smi library (get number of shader arrays per engine).");
+    "Failed to initialize rocm_smi library "
+                                 "(get number of shader arrays per engine).");
   }
   cu_count_ = uint32_t(tmp_val);
   ret = get_property_value(kKFDNodePropARRAY_COUNTStr, &tmp_val);

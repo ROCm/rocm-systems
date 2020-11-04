@@ -53,14 +53,27 @@
 
 #include "rocm_smi/rocm_smi.h"
 
-#define CHK_RSMI_RET(RET) { \
+#define PRINT_RSMI_ERR(RET) { \
   if (RET != RSMI_STATUS_SUCCESS) { \
     const char *err_str; \
     std::cout << "RSMI call returned " << (RET) \
       << " at line " << __LINE__ << std::endl; \
       rsmi_status_string((RET), &err_str); \
       std::cout << err_str << std::endl; \
-    return RET; \
+  } \
+}
+
+#define CHK_RSMI_RET(RET) { \
+  PRINT_RSMI_ERR(RET) \
+  if (RET != RSMI_STATUS_SUCCESS) { \
+    return (RET); \
+  } \
+}
+
+#define CHK_RSMI_RET_I(RET) { \
+  PRINT_RSMI_ERR(RET) \
+  if (RET != RSMI_STATUS_SUCCESS) { \
+    return static_cast<int>(RET); \
   } \
 }
 
@@ -68,7 +81,7 @@
     if ((RET) == RSMI_STATUS_PERMISSION) { \
       std::cout << "This command requires root access." << std::endl; \
     } else { \
-      CHK_RSMI_RET(RET) \
+      CHK_RSMI_RET_I(RET) \
     } \
 }
 
@@ -174,7 +187,7 @@ static rsmi_status_t test_power_profile(uint32_t dv_ind) {
                             power_profile_string(status.current) << std::endl;
   std::cout << "Resetting perf level to auto..." << std::endl;
 
-  ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
+  ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
   CHK_RSMI_RET(ret)
   std::cout << "Done." << std::endl;
 
@@ -235,16 +248,16 @@ static rsmi_status_t test_set_overdrive(uint32_t dv_ind) {
 
   print_test_header("Overdrive Control", dv_ind);
   std::cout << "Set Overdrive level to 0%..." << std::endl;
-  ret = rsmi_dev_overdrive_level_set(dv_ind, 0);
+  ret = rsmi_dev_overdrive_level_set_v1(dv_ind, 0);
   CHK_RSMI_RET(ret)
   std::cout << "Set Overdrive level to 10%..." << std::endl;
-  ret = rsmi_dev_overdrive_level_set(dv_ind, 10);
+  ret = rsmi_dev_overdrive_level_set_v1(dv_ind, 10);
   CHK_RSMI_RET(ret)
   ret = rsmi_dev_overdrive_level_get(dv_ind, &val);
   CHK_RSMI_RET(ret)
   std::cout << "\t**New OverDrive Level:" << val << std::endl;
   std::cout << "Reset Overdrive level to 0%..." << std::endl;
-  ret = rsmi_dev_overdrive_level_set(dv_ind, 0);
+  ret = rsmi_dev_overdrive_level_set_v1(dv_ind, 0);
   CHK_RSMI_RET(ret)
   ret = rsmi_dev_overdrive_level_get(dv_ind, &val);
   CHK_RSMI_RET(ret)
@@ -256,7 +269,7 @@ static rsmi_status_t test_set_overdrive(uint32_t dv_ind) {
 static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
   rsmi_status_t ret;
   int64_t orig_speed;
-  int64_t new_speed;
+  double new_speed;
   int64_t cur_spd;
 
   print_test_header("Fan Speed Control", dv_ind);
@@ -270,11 +283,11 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
     return RSMI_STATUS_SUCCESS;
   }
 
-  new_speed = static_cast<uint64_t>(1.1 * static_cast<double>(orig_speed));
+  new_speed = 1.1 * static_cast<double>(orig_speed);
 
   std::cout << "Setting fan speed to " << new_speed << std::endl;
 
-  ret = rsmi_dev_fan_speed_set(dv_ind, 0, new_speed);
+  ret = rsmi_dev_fan_speed_set(dv_ind, 0, static_cast<uint64_t>(new_speed));
   CHK_RSMI_RET(ret)
 
   sleep(4);
@@ -322,13 +335,13 @@ static rsmi_status_t test_set_perf_level(uint32_t dv_ind) {
 
   std::cout << "Set Performance Level to " << (uint32_t)pfl << " ..." <<
                                                                    std::endl;
-  ret = rsmi_dev_perf_level_set(dv_ind, pfl);
+  ret = rsmi_dev_perf_level_set_v1(dv_ind, pfl);
   CHK_RSMI_RET(ret)
   ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
   CHK_RSMI_RET(ret)
   std::cout << "\t**New Perf Level:" << perf_level_string(pfl) << std::endl;
   std::cout << "Reset Perf level to " << orig_pfl << " ..." << std::endl;
-  ret = rsmi_dev_perf_level_set(dv_ind, orig_pfl);
+  ret = rsmi_dev_perf_level_set_v1(dv_ind, orig_pfl);
   CHK_RSMI_RET(ret)
   ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
   CHK_RSMI_RET(ret)
@@ -377,7 +390,7 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
     ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, 0xFFFFFFFF);
     CHK_RSMI_RET(ret)
 
-    ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
+    ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
     CHK_RSMI_RET(ret)
   }
   return RSMI_STATUS_SUCCESS;
@@ -397,7 +410,7 @@ int main() {
   rsmi_status_t ret;
 
   ret = rsmi_init(0);
-  CHK_RSMI_RET(ret)
+  CHK_RSMI_RET_I(ret)
 
   std::string val_str;
   std::vector<std::string> val_vec;
@@ -413,7 +426,7 @@ int main() {
   rsmi_num_monitor_devices(&num_monitor_devs);
   for (uint32_t i = 0; i< num_monitor_devs; ++i) {
     ret = rsmi_dev_id_get(i, &val_ui16);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
     std::cout << "\t**Device ID: 0x" << std::hex << val_ui64 << std::endl;
 
     ret = rsmi_dev_gpu_metrics_info_get(i, &p);
@@ -421,49 +434,50 @@ int main() {
     std::cout << "\t**GPU METRICS" << std::endl;
 
     ret = rsmi_dev_perf_level_get(i, &pfl);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
     std::cout << "\t**Performance Level:" <<
                                           perf_level_string(pfl) << std::endl;
 
     ret = rsmi_dev_overdrive_level_get(i, &val_ui32);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
     std::cout << "\t**OverDrive Level:" << val_ui32 << std::endl;
 
     ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_MEM, &f);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
     std::cout << "\t**Supported GPU Memory clock frequencies: ";
     std::cout << f.num_supported << std::endl;
     print_frequencies(&f);
 
     ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_SYS, &f);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
     std::cout << "\t**Supported GPU clock frequencies: ";
     std::cout << f.num_supported << std::endl;
     print_frequencies(&f);
 
     char name[20];
     ret = rsmi_dev_name_get(i, name, 20);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
     std::cout << "\t**Monitor name: " << name << std::endl;
 
     ret = rsmi_dev_temp_metric_get(i, 0, RSMI_TEMP_CURRENT, &val_i64);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
     std::cout << "\t**Temperature: " << val_i64/1000 << "C" << std::endl;
 
-    ret = rsmi_dev_volt_metric_get(i, RSMI_VOLT_TYPE_VDDGFX, RSMI_VOLT_CURRENT, &val_i64);
-    CHK_RSMI_RET(ret)
+    ret = rsmi_dev_volt_metric_get(i, RSMI_VOLT_TYPE_VDDGFX,
+                                               RSMI_VOLT_CURRENT, &val_i64);
+    CHK_RSMI_RET_I(ret)
     std::cout << "\t**Voltage: " << val_i64 << "mV" << std::endl;
 
     ret = rsmi_dev_fan_speed_get(i, 0, &val_i64);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
     ret = rsmi_dev_fan_speed_max_get(i, 0, &val_ui64);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
     std::cout << "\t**Current Fan Speed: ";
-    std::cout << val_i64/val_ui64*100;
+    std::cout << val_i64/static_cast<int64_t>(val_ui64)*100;
     std::cout << "% ("<< val_i64 << "/" << val_ui64 << ")" << std::endl;
 
     ret = rsmi_dev_fan_rpms_get(i, 0, &val_i64);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
     std::cout << "\t**Current fan RPMs: " << val_i64 << std::endl;
 
     ret = rsmi_dev_power_cap_get(i, 0, &val_ui64);
@@ -486,22 +500,22 @@ int main() {
   std::cout << "***** Testing write api's" << std::endl;
   for (uint32_t i = 0; i< num_monitor_devs; ++i) {
     ret = test_set_overdrive(i);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
 
     ret = test_set_perf_level(i);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
 
     ret = test_set_freq(i);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
 
     ret = test_set_fan_speed(i);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
 
     ret = test_power_cap(i);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
 
     ret = test_power_profile(i);
-    CHK_RSMI_RET(ret)
+    CHK_RSMI_RET_I(ret)
   }
 
   return 0;

@@ -311,7 +311,7 @@ typedef enum {
   RSMI_EVT_NOTIF_LAST = RSMI_EVT_NOTIF_GPU_POST_RESET
 } rsmi_evt_notification_type_t;
 
-/*
+/**
  * Macro to generate event bitmask from event id
  */
 #define RSMI_EVENT_MASK_FROM_INDEX(i) (1ULL << ((i) - 1))
@@ -786,14 +786,25 @@ typedef rsmi_od_volt_freq_data_t rsmi_od_volt_freq_data;
  * @brief The following structures hold the gpu metrics values for a device.
  */
 
-struct metrics_table_header {
+/**
+ * @brief Size and version information of metrics data
+ */
+struct metrics_table_header_t {
+  // TODO(amd) Doxygen documents
+  /// \cond Ignore in docs.
   uint16_t      structure_size;
   uint8_t       format_revision;
   uint8_t       content_revision;
+  /// \endcond
 };
 
+/**
+ * @brief The following structure holds the gpu metrics values for a device.
+ */
 typedef struct {
-  struct metrics_table_header common_header;
+  // TODO(amd) Doxygen documents
+  /// \cond Ignore in docs.
+  struct metrics_table_header_t common_header;
 
 /* Driver attached timestamp (in ns) */
   uint64_t      system_clock_counter;
@@ -842,10 +853,8 @@ typedef struct {
 /* Link width/speed */
   uint8_t       pcie_link_width;
   uint8_t       pcie_link_speed;  // in 0.1 GT/s
-}rsmi_gpu_metrics_t;
-/// \cond Ignore in docs.
-typedef rsmi_gpu_metrics_t rsmi_gpu_metrics;
-/// \endcond
+  /// \endcond
+} rsmi_gpu_metrics_t;
 
 /**
  * @brief This structure holds error counts.
@@ -1267,8 +1276,8 @@ rsmi_dev_subsystem_name_get(uint32_t dv_ind, char *name, size_t len);
  *  @param[inout] minor a pointer to a uint32_t into which minor number will
  *  be copied
  *
- *  @retval :: RSMI_STATUS_SUCCESS is returned upon successful call.
- *  @retval :: RSMI_STATUS_INIT_ERROR if failed to get minor number during
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_INIT_ERROR if failed to get minor number during
  *  initialization.
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
@@ -1910,7 +1919,6 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
  */
 rsmi_status_t rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
                       rsmi_temperature_metric_t metric, int64_t *temperature);
-/** @} */  // end of PhysQuer
 
 /**
  *  @brief Get the voltage metric value for the specified metric, from the
@@ -2297,6 +2305,9 @@ rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
  *  @brief Set the PowerPlay performance level associated with the device with
  *  provided device index with the provided value.
  *
+ *  @deprecated ::rsmi_dev_perf_level_set_v1() is preferred, with an
+ *  interface that more closely  matches the rest of the rocm_smi API.
+ *
  *  @details Given a device index @p dv_ind and an ::rsmi_dev_perf_level_t @p
  *  perf_level, this function will set the PowerPlay performance level for the
  *  device to the value @p perf_lvl.
@@ -2313,6 +2324,72 @@ rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
  */
 rsmi_status_t
 rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
+
+/**
+ *  @brief Set the PowerPlay performance level associated with the device with
+ *  provided device index with the provided value.
+ *
+ *  @details Given a device index @p dv_ind and an ::rsmi_dev_perf_level_t @p
+ *  perf_level, this function will set the PowerPlay performance level for the
+ *  device to the value @p perf_lvl.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] perf_lvl the value to which the performance level should be set
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *
+ */
+rsmi_status_t
+rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
+
+/**
+ *  @brief Set the overdrive percent associated with the device with provided
+ *  device index with the provided value. See details for WARNING.
+ *
+ *  @deprecated This function is deprecated. ::rsmi_dev_overdrive_level_set_v1
+ *  has the same functionaltiy, with an interface that more closely
+ *  matches the rest of the rocm_smi API.
+ *
+ *  @details Given a device index @p dv_ind and an overdrive level @p od,
+ *  this function will set the overdrive level for the device to the value
+ *  @p od. The overdrive level is an integer value between 0 and 20, inclusive,
+ *  which represents the overdrive percentage; e.g., a value of 5 specifies
+ *  an overclocking of 5%.
+ *
+ *  The overdrive level is specific to the gpu system clock.
+ *
+ *  The overdrive level is the percentage above the maximum Performance Level
+ *  to which overclocking will be limited. The overclocking percentage does
+ *  not apply to clock speeds other than the maximum. This percentage is
+ *  limited to 20%.
+ *
+ *   ******WARNING******
+ *  Operating your AMD GPU outside of official AMD specifications or outside of
+ *  factory settings, including but not limited to the conducting of
+ *  overclocking (including use of this overclocking software, even if such
+ *  software has been directly or indirectly provided by AMD or otherwise
+ *  affiliated in any way with AMD), may cause damage to your AMD GPU, system
+ *  components and/or result in system failure, as well as cause other problems.
+ *  DAMAGES CAUSED BY USE OF YOUR AMD GPU OUTSIDE OF OFFICIAL AMD SPECIFICATIONS
+ *  OR OUTSIDE OF FACTORY SETTINGS ARE NOT COVERED UNDER ANY AMD PRODUCT
+ *  WARRANTY AND MAY NOT BE COVERED BY YOUR BOARD OR SYSTEM MANUFACTURER'S
+ *  WARRANTY. Please use this utility with caution.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] od the value to which the overdrive level should be set
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *
+ */
+rsmi_status_t rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od);
 
 /**
  *  @brief Set the overdrive percent associated with the device with provided
@@ -2353,7 +2430,7 @@ rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od);
+rsmi_status_t rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od);
 
 /**
  * @brief Control the set of allowed frequencies that can be used for the

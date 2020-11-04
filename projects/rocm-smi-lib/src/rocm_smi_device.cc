@@ -683,6 +683,8 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
 
   std::string tempStr;
   int ret;
+  int tmp_val;
+
   switch (type) {
     case kDevDevID:
     case kDevSubSysDevID:
@@ -695,7 +697,11 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
       if (tempStr == "") {
         return EINVAL;
       }
-      *val = std::stoi(tempStr, 0, 16);
+      tmp_val = std::stoi(tempStr, 0, 16);
+      if (tmp_val < 0) {
+        return EINVAL;
+      }
+      *val = static_cast<uint64_t>(tmp_val);
       break;
 
     case kDevUsage:
@@ -942,7 +948,6 @@ bool Device::DeviceAPISupported(std::string name, uint64_t variant,
                                                        uint64_t sub_variant) {
   SupportedFuncMapIt func_it;
   VariantMapIt var_it;
-  SubVariantIt sub_var_it;
 
   fillSupportedFuncs();
   func_it = supported_funcs_.find(name);
@@ -981,7 +986,8 @@ bool Device::DeviceAPISupported(std::string name, uint64_t variant,
       return subvariant_match(&(var_it->second), sub_variant);
     }
   }
-  assert(!"We should not reach here");
+  assert(false);  // We should not reach here
+
   return false;
 }
 

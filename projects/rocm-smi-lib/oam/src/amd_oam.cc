@@ -65,7 +65,7 @@ static int rsmi_status_to_amdoam_errorcode(rsmi_status_t status) {
   if (status > RSMI_STATUS_INIT_ERROR)
     return -AMDOAM_STATUS_ERROR;
   else
-    return -status;
+    return -1 * static_cast<int>(status);
 }
 
 static int handleRSMIException() {
@@ -178,12 +178,13 @@ CATCH
   return AMDOAM_STATUS_SUCCESS;
 }
 
-static int get_num_sensors(std::string hwmon_path, std::string fn_reg) {
+static uint32_t
+get_num_sensors(std::string hwmon_path, std::string fn_reg) {
   uint32_t sensor_max = 0;
   std::string fn_reg_ex = "\\b" + fn_reg + "([0-9]+)([^ ]*)";
   std::string fn;
   std::smatch m;
-  uint32_t temp = 0;
+  int32_t temp = 0;
   std::string s1("in");
   std::regex re(fn_reg_ex);
   auto hwmon_dir = opendir(hwmon_path.c_str());
@@ -198,10 +199,12 @@ static int get_num_sensors(std::string hwmon_path, std::string fn_reg) {
         std::string("$1"));
       temp = stoi(output);
 
+      assert(temp >= 0);
+
       if (s1.compare(fn_reg) == 0)
         ++temp;
-      if (temp > sensor_max)
-        sensor_max = temp;
+      if (static_cast<uint32_t>(temp) > sensor_max)
+        sensor_max = static_cast<uint32_t>(temp);
     }
     dentry = readdir(hwmon_dir);
   }
@@ -350,7 +353,7 @@ get_device_error_count(oam_dev_handle_t *handle,
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   if (ret != RSMI_STATUS_SUCCESS) {
-    return ret;
+    return static_cast<int>(ret);
   }
 
   assert(val_vec.size() == 2);
@@ -368,6 +371,6 @@ get_device_error_count(oam_dev_handle_t *handle,
   assert(junk == "ce:");
   fs2 >> count->total_error_count;
 
-  return ret;
+  return static_cast<int>(ret);
   CATCH
 }

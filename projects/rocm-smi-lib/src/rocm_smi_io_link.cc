@@ -191,7 +191,7 @@ int DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
       continue;
     }
 
-    uint32_t node_indx = std::stoi(dentry_kfd->d_name);
+    uint32_t node_indx = static_cast<uint32_t>(std::stoi(dentry_kfd->d_name));
     std::shared_ptr<IOLink> link;
     uint32_t link_indx;
     std::string io_link_path_root = IOLinkPathRoot(node_indx);
@@ -211,7 +211,7 @@ int DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
         continue;
       }
 
-      link_indx = std::stoi(dentry_io_link->d_name);
+      link_indx = static_cast<uint32_t>(std::stoi(dentry_io_link->d_name));
       link = std::shared_ptr<IOLink>(new IOLink(node_indx, link_indx));
 
       link->Initialize();
@@ -263,7 +263,7 @@ int DiscoverIOLinksPerNode(uint32_t node_indx, std::map<uint32_t,
       continue;
     }
 
-    link_indx = std::stoi(dentry->d_name);
+    link_indx = static_cast<uint32_t>(std::stoi(dentry->d_name));
     link = std::shared_ptr<IOLink>(new IOLink(node_indx, link_indx));
 
     link->Initialize();

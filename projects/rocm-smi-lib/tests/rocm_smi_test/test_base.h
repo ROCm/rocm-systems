@@ -59,7 +59,8 @@ class TestBase {
   // i.e. init runtime, prepare packet...
   // The init_flags option will override any flags set for the whole test
   // suite
-  virtual void SetUp(uint64_t init_flags = 0);
+  void SetUp(uint64_t init_flags);
+  virtual void SetUp(void);
 
   // @Brief: Core measurement codes executing here
   virtual void Run(void);

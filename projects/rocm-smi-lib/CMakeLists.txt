@@ -103,8 +103,6 @@ set(CMAKE_CXX_FLAGS
 if (${ADDRESS_SANITIZER})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
     set(CMAKE_EXE_LINKER_FLAGS -fsanitize=address)
-    message(STATUS "ADDRESS_SANITIZE: CMAKE_CXX_FLAGS=: ${CMAKE_CXX_FLAGS}")
-    message(STATUS "ADDRESS_SANITIZE: CMAKE_EXE_LINKER_FLAGS=: ${CMAKE_EXE_LINKER_FLAGS}")
 else ()
     ## Security breach mitigation flags
     set(CMAKE_CXX_FLAGS

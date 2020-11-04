@@ -199,6 +199,8 @@ class Device {
     void set_evt_notif_anon_file_ptr(FILE *f) {evt_notif_anon_file_ptr_ = f;}
     FILE *evt_notif_anon_file_ptr(void) const {return evt_notif_anon_file_ptr_;}
     void set_evt_notif_anon_fd(int fd) {evt_notif_anon_fd_ = fd;}
+    void set_evt_notif_anon_fd(uint32_t fd) {
+                                   evt_notif_anon_fd_ = static_cast<int>(fd);}
     int evt_notif_anon_fd(void) const {return evt_notif_anon_fd_;}
     void fillSupportedFuncs(void);
     void DumpSupportedFunctions(void);

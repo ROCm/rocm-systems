@@ -281,7 +281,7 @@ Monitor::~Monitor(void) {
 }
 
 std::string
-Monitor::MakeMonitorPath(MonitorTypes type, int32_t sensor_id) {
+Monitor::MakeMonitorPath(MonitorTypes type, uint32_t sensor_id) {
   std::string tempPath = path_;
   std::string fn = kMonitorNameMap.at(type);
 
@@ -313,7 +313,7 @@ int Monitor::readMonitor(MonitorTypes type, uint32_t sensor_id,
   return ReadSysfsStr(sysfs_path, val);
 }
 
-uint32_t
+int32_t
 Monitor::setTempSensorLabelMap(void) {
   std::string type_str;
   int ret;
@@ -352,7 +352,7 @@ Monitor::setTempSensorLabelMap(void) {
   return 0;
 }
 
-uint32_t
+int32_t
 Monitor::setVoltSensorLabelMap(void) {
   std::string type_str;
   int ret;
@@ -406,7 +406,7 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
 
   auto dentry = readdir(hwmon_dir);
   std::smatch match;
-  int64_t mon_val;
+  uint64_t mon_val;
 
   char *endptr;
   try {
@@ -418,7 +418,7 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
       if (std::regex_search(fn, match, re)) {
         assert(match.size() == 2);  // 1 for whole match + 1 for sub-match
         errno = 0;
-        mon_val = strtol(match.str(1).c_str(), &endptr, 10);
+        mon_val = strtoul(match.str(1).c_str(), &endptr, 10);
         assert(errno == 0);
         assert(*endptr == '\0');
         if (errno) {
@@ -611,7 +611,7 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
                  static_cast<uint64_t>(getVoltSensorEnum(supported_monitors[i]))
                                                 << MONITOR_TYPE_BIT_POSITION;
           } else {
-            assert(!"Unexpected monitor type");
+            assert(false);  // Unexpected monitor type
           }
         }
       (*supported_variants)[kMonInfoVarTypeToRSMIVariant.at(*var)] =

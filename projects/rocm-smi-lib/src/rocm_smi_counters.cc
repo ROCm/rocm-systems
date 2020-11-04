@@ -138,7 +138,7 @@ GetSupportedEventGroups(uint32_t dev_num, dev_evt_grp_set_t *supported_grps) {
 
   std::string grp_path_base;
   std::string grp_path;
-  uint32_t ret;
+  int32_t ret;
 
   grp_path_base = kPathDeviceEventRoot;
   grp_path_base += '/';
@@ -225,9 +225,9 @@ parse_field_config(std::string fstr, evnt_info_t *val) {
   val->field_size = static_cast<uint8_t>(end_bit - start_bit + 1);
 }
 
-static uint32_t
+static int32_t
 get_event_bitfield_info(std::string *config_path, evnt_info_t *val) {
-  uint32_t err;
+  int32_t err;
 
   std::string fstr;
 
@@ -240,9 +240,9 @@ get_event_bitfield_info(std::string *config_path, evnt_info_t *val) {
   return 0;
 }
 
-uint32_t
+int32_t
 Event::get_event_file_info(void) {
-  uint32_t err;
+  int32_t err;
 
   std::string fn = evt_path_root_;
   std::string fstr;
@@ -282,7 +282,7 @@ Event::get_event_file_info(void) {
   return 0;
 }
 
-uint32_t
+int32_t
 Event::get_event_type(uint32_t *ev_type) {
   assert(ev_type != nullptr);
   if (ev_type == nullptr) {
@@ -316,9 +316,9 @@ get_perf_attr_config(std::vector<evnt_info_t> *ev_info) {
   return ret_val;
 }
 
-uint32_t
+int32_t
 amd::smi::evt::Event::openPerfHandle(void) {
-  uint32_t ret;
+  int32_t ret;
 
   memset(&attr_, 0, sizeof(struct perf_event_attr));
 
@@ -350,7 +350,7 @@ amd::smi::evt::Event::openPerfHandle(void) {
   return 0;
 }
 
-uint32_t
+int32_t
 amd::smi::evt::Event::startCounter(void) {
   int32_t ret;
 
@@ -370,7 +370,7 @@ amd::smi::evt::Event::startCounter(void) {
   return 0;
 }
 
-uint32_t
+int32_t
 amd::smi::evt::Event::stopCounter(void) {
   int32_t ret;
 
@@ -389,23 +389,25 @@ amd::smi::evt::Event::stopCounter(void) {
 
 static ssize_t
 readn(int fd, void *buf, size_t n) {
-  ssize_t left = n;
+  size_t left = n;
   ssize_t bytes;
 
   while (left) {
     bytes = read(fd, buf, left);
-    if (!bytes) /* reach EOF */
-      return (n - left);
+    if (!bytes) { /* reach EOF */
+      return static_cast<ssize_t>(n - left);
+    }
     if (bytes < 0) {
       if (errno == EINTR) /* read got interrupted */
         continue;
       else
         return -errno;
     }
-    left -= bytes;
+
+    left -= static_cast<size_t>(bytes);
     buf = reinterpret_cast<void *>((reinterpret_cast<uint8_t *>(buf) + bytes));
   }
-  return n;
+  return static_cast<ssize_t>(n);
 }
 
 uint32_t
