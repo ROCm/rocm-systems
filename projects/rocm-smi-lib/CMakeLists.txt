@@ -93,18 +93,28 @@ set(CMAKE_CXX_FLAGS
 set(CMAKE_CXX_FLAGS
  "${CMAKE_CXX_FLAGS} -Wconversion -Wcast-align ")
 set(CMAKE_CXX_FLAGS
- "${CMAKE_CXX_FLAGS} -Wformat=2 -fno-common -Wstrict-overflow -Wtrampolines ")
+ "${CMAKE_CXX_FLAGS} -Wformat=2 -fno-common -Wstrict-overflow ")
  # Intentionally leave out -Wsign-promo. It causes spurious warnings.
 set(CMAKE_CXX_FLAGS
  "${CMAKE_CXX_FLAGS}  -Woverloaded-virtual -Wreorder ")
 
-## Security breach mitigation flags
-set(CMAKE_CXX_FLAGS
- "${CMAKE_CXX_FLAGS} -DFORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align")
-set(CMAKE_CXX_FLAGS
- "${CMAKE_CXX_FLAGS} -Wl,-z,noexecstack -Wl,-znoexecheap -Wl,-z,relro ")
-set(CMAKE_CXX_FLAGS
- "${CMAKE_CXX_FLAGS} -Wl,-z,now -fPIE")
+
+## Address Sanitize Flag
+if (${ADDRESS_SANITIZER})
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+    set(CMAKE_EXE_LINKER_FLAGS -fsanitize=address)
+    message(STATUS "ADDRESS_SANITIZE: CMAKE_CXX_FLAGS=: ${CMAKE_CXX_FLAGS}")
+    message(STATUS "ADDRESS_SANITIZE: CMAKE_EXE_LINKER_FLAGS=: ${CMAKE_EXE_LINKER_FLAGS}")
+else ()
+    ## Security breach mitigation flags
+    set(CMAKE_CXX_FLAGS
+      "${CMAKE_CXX_FLAGS} -DFORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align")
+    ## More security breach mitigation flags
+    set(CMAKE_CXX_FLAGS
+      "${CMAKE_CXX_FLAGS} -Wl,-z,noexecstack -Wl,-znoexecheap -Wl,-z,relro ")
+    set(CMAKE_CXX_FLAGS
+      "${CMAKE_CXX_FLAGS} -Wtrampolines -Wl,-z,now -fPIE")
+endif ()
 
 # Use this instead of above for 32 bit
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
