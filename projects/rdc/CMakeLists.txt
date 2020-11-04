@@ -26,6 +26,11 @@ cmake_minimum_required(VERSION 3.5.0)
 # ROCM_DIR should be passed in via command line; these will be used
 # in sub-projects
 set(RSMI_INC_DIR ${ROCM_DIR}/rocm_smi/include)
+
+# When cmake -DBUILD_STANDALONE=off, it will not build rdcd and rdci
+# which requires the gRPC
+option(BUILD_STANDALONE "Build targets for rdci and rdcd" ON)
+
 set(RSMI_LIB_DIR ${ROCM_DIR}/rocm_smi/lib)
 
 if (NOT DEFINED GRPC_ROOT)
@@ -83,7 +88,9 @@ project(${RDC})
 set(RDC_SRC_ROOT "${PROJECT_SOURCE_DIR}")
 
 message("Build Configuration:")
-message("-----------GRPC ROOT: " ${GRPC_ROOT})
+if(BUILD_STANDALONE)
+  message("-----------GRPC ROOT: " ${GRPC_ROOT})
+endif()
 message("-----------ROCM_DIR : " ${ROCM_DIR})
 
 # Create a configure file to get version info from within library
@@ -110,42 +117,43 @@ endif()
 
 ## Verbose output.
 set(CMAKE_VERBOSE_MAKEFILE on)
+if(BUILD_STANDALONE)
+   # Compile .proto files
+   file(GLOB PROTOB_DEF_SRC_FILES "protos/*.proto")
+   set(PROTOB_SRC_DIR "${PROJECT_SOURCE_DIR}/protos")
+   set(PROTOB_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+   set(PROTOB_CMD "${GRPC_ROOT}/bin/protoc")
+   set(GRPC_PLUGIN "${GRPC_ROOT}/bin/grpc_cpp_plugin")
+   set(GRPC_LIB_DIR "${GRPC_ROOT}/lib")
 
-# Compile .proto files
-file(GLOB PROTOB_DEF_SRC_FILES "protos/*.proto")
-set(PROTOB_SRC_DIR "${PROJECT_SOURCE_DIR}/protos")
-set(PROTOB_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
-set(PROTOB_CMD "${GRPC_ROOT}/bin/protoc")
-set(GRPC_PLUGIN "${GRPC_ROOT}/bin/grpc_cpp_plugin")
-set(GRPC_LIB_DIR "${GRPC_ROOT}/lib")
+   set(ENV{LD_LIBRARY_PATH} ${GRPC_LIB_DIR}:${GRPC_LIB_DIR}64)
+   foreach(file ${PROTOB_DEF_SRC_FILES})
+       execute_process(COMMAND
+               ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
+                                              --cpp_out=${PROTOB_OUT_DIR} ${file}
+               WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+               RESULT_VARIABLE PROTOB_RESULT
+               OUTPUT_VARIABLE PROTOB_OUT_VAR)
+       message("protoc command returned: ${PROTOB_RESULT}")
 
-set(ENV{LD_LIBRARY_PATH} ${GRPC_LIB_DIR}:${GRPC_LIB_DIR}64)
-foreach(file ${PROTOB_DEF_SRC_FILES})
-    execute_process(COMMAND
-            ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
-                                           --cpp_out=${PROTOB_OUT_DIR} ${file}
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-            RESULT_VARIABLE PROTOB_RESULT
-            OUTPUT_VARIABLE PROTOB_OUT_VAR)
-    message("protoc command returned: ${PROTOB_RESULT}")
+   #    find_program (GRPC_PLUGIN NAMES grpc_cpp_plugin)
+       message("GRPC_PLUGIN=${GRPC_PLUGIN})")
+       message("protoc cmd:")
+       message("  $ ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}")
+       message("    --grpc_out=${PROTOB_OUT_DIR}")
+       message("....--plugin=\"${GRPC_PLUGIN}\" ${file}")
 
-#    find_program (GRPC_PLUGIN NAMES grpc_cpp_plugin)
-    message("GRPC_PLUGIN=${GRPC_PLUGIN})")
-    message("protoc cmd:")
-    message("  $ ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}")
-    message("    --grpc_out=${PROTOB_OUT_DIR}")
-    message("....--plugin=\"${GRPC_PLUGIN}\" ${file}")
+       execute_process(COMMAND
+          ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
+                                                     --grpc_out=${PROTOB_OUT_DIR}
+               --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file}
+               WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+               RESULT_VARIABLE PROTOB_RESULT
+               OUTPUT_VARIABLE PROTOB_OUT_VAR)
+       message("protoc command returned: ${PROTOB_RESULT}")
 
-    execute_process(COMMAND
-       ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
-                                                  --grpc_out=${PROTOB_OUT_DIR}
-            --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file}
-            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-            RESULT_VARIABLE PROTOB_RESULT
-            OUTPUT_VARIABLE PROTOB_OUT_VAR)
-    message("protoc command returned: ${PROTOB_RESULT}")
-
-endforeach()
+   endforeach()
+endif()
 
 set(CMAKE_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
                                 CACHE STRING "Default installation directory.")
@@ -157,16 +165,28 @@ set(CPACK_PACKAGING_INSTALL_PREFIX ${RDC_SERVER_ROOT_PATH}
 set(SERVER_COMPONENT "server")
 set(CLIENT_COMPONENT "client")
 
-install(DIRECTORY ${GRPC_ROOT}
-               USE_SOURCE_PERMISSIONS
-               DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}
-               COMPONENT ${SERVER_COMPONENT})
+# Standalone only folders
+if(BUILD_STANDALONE)
+  install(DIRECTORY ${GRPC_ROOT}/lib
+                 USE_SOURCE_PERMISSIONS
+                 DESTINATION usr
+                 FILES_MATCHING PATTERN "libgrpc*")
 
-add_subdirectory("server")
-add_subdirectory("client")
+  add_subdirectory("server")
+  add_subdirectory("client")
+  add_subdirectory("rdci")
+endif()
+
+# Folders for both standalone and embedded
 add_subdirectory("rdc_libs")
 add_subdirectory("example")
-add_subdirectory("rdci")
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/python_binding
+             DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}
+                                         COMPONENT ${CLIENT_COMPONENT})
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/example
+                 DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}
+                                         COMPONENT ${CLIENT_COMPONENT})
+
 
 set(CPACK_PACKAGE_NAME ${RDC_PACKAGE})
 set(CPACK_PACKAGE_VERSION ${VERSION_STRING})

@@ -189,39 +189,40 @@ set_property(TARGET ${RDC_LIB} PROPERTY
 set_property(TARGET ${RDC_LIB} PROPERTY
              VERSION "${SO_VERSION_STRING}")
 
-# librdc_client.so set up
-file(GLOB PROTOBUF_GENERATED_INCLUDES "${PROTOB_OUT_DIR}/*.h")
-file(GLOB PROTOBUF_GENERATED_SRCS "${PROTOB_OUT_DIR}/*.cc")
+if(BUILD_STANDALONE)
+   # librdc_client.so set up
+   file(GLOB PROTOBUF_GENERATED_INCLUDES "${PROTOB_OUT_DIR}/*.h")
+   file(GLOB PROTOBUF_GENERATED_SRCS "${PROTOB_OUT_DIR}/*.cc")
 
-set(RDCCLIENT_LIB "rdc_client")
-set(RDCCLIENT_LIB_COMPONENT "lib${RDCCLIENT_LIB}")
-set(RDCCLIENT_LIB_SRC_LIST "${SRC_DIR}/rdc_client/src/RdcStandaloneHandler.cc")
-set(RDCCLIENT_LIB_SRC_LIST ${RDCCLIENT_LIB_SRC_LIST} "${PROTOBUF_GENERATED_SRCS}")
+   set(RDCCLIENT_LIB "rdc_client")
+   set(RDCCLIENT_LIB_COMPONENT "lib${RDCCLIENT_LIB}")
+   set(RDCCLIENT_LIB_SRC_LIST "${SRC_DIR}/rdc_client/src/RdcStandaloneHandler.cc")
+   set(RDCCLIENT_LIB_SRC_LIST ${RDCCLIENT_LIB_SRC_LIST} "${PROTOBUF_GENERATED_SRCS}")
 
-set(RDCCLIENT_LIB_INC_LIST "${RDC_LIB_INC_DIR}/rdc/rdc.h")
-set(BRDCCLIENT_LIB_INC_LIST ${RDCCLIENT_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/rdc_common.h")
-set(RDCCLIENT_LIB_INC_LIST ${RDCCLIENT_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcHandler.h")
-set(RDCCLIENT_LIB_INC_LIST ${RDCCLIENT_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcStandaloneHandler.h")
+   set(RDCCLIENT_LIB_INC_LIST "${RDC_LIB_INC_DIR}/rdc/rdc.h")
+   set(BRDCCLIENT_LIB_INC_LIST ${RDCCLIENT_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/rdc_common.h")
+   set(RDCCLIENT_LIB_INC_LIST ${RDCCLIENT_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcHandler.h")
+   set(RDCCLIENT_LIB_INC_LIST ${RDCCLIENT_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcStandaloneHandler.h")
 
-message("RDCCLIENT_LIB_INC_LIST=${RDCCLIENT_LIB_INC_LIST}")
+   message("RDCCLIENT_LIB_INC_LIST=${RDCCLIENT_LIB_INC_LIST}")
 
-add_library(${RDCCLIENT_LIB} SHARED ${RDCCLIENT_LIB_SRC_LIST} ${RDCCLIENT_LIB_INC_LIST})
-target_link_libraries(${RDCCLIENT_LIB}  ${BOOTSTRAP_LIB} pthread rt grpc grpc++ grpc++_reflection
+   add_library(${RDCCLIENT_LIB} SHARED ${RDCCLIENT_LIB_SRC_LIST} ${RDCCLIENT_LIB_INC_LIST})
+   target_link_libraries(${RDCCLIENT_LIB}  ${BOOTSTRAP_LIB} pthread rt grpc grpc++ grpc++_reflection
                                                                   dl protobuf)
-target_include_directories(${RDCCLIENT_LIB} PRIVATE
-                                         "${GRPC_ROOT}/include"
-                                         "${PROJECT_SOURCE_DIR}"
-                                         "${PROJECT_SOURCE_DIR}/include"
-                                         "${PROTOB_OUT_DIR}"
-                                         "${CMAKE_CURRENT_SOURCE_DIR}/include")
+   target_include_directories(${RDCCLIENT_LIB} PRIVATE
+                                            "${GRPC_ROOT}/include"
+                                            "${PROJECT_SOURCE_DIR}"
+                                            "${PROJECT_SOURCE_DIR}/include"
+                                            "${PROTOB_OUT_DIR}"
+                                            "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-# TODO: set the properties for the library once we have one
-## Set the VERSION and SOVERSION values
-set_property(TARGET ${RDCCLIENT_LIB} PROPERTY
-             SOVERSION "${VERSION_MAJOR}")
-set_property(TARGET ${RDCCLIENT_LIB} PROPERTY
-             VERSION "${SO_VERSION_STRING}")
-
+   # TODO: set the properties for the library once we have one
+   ## Set the VERSION and SOVERSION values
+   set_property(TARGET ${RDCCLIENT_LIB} PROPERTY
+                SOVERSION "${VERSION_MAJOR}")
+   set_property(TARGET ${RDCCLIENT_LIB} PROPERTY
+                VERSION "${SO_VERSION_STRING}")
+endif()
 
 ## If the library is a release, strip the target library
 if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
@@ -231,15 +232,24 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     add_custom_command(
           TARGET ${RDC_LIB}
           POST_BUILD COMMAND ${CMAKE_STRIP} lib${RDC_LIB}.so)
-    add_custom_command(
-          TARGET ${RDCCLIENT_LIB}
-          POST_BUILD COMMAND ${CMAKE_STRIP} lib${RDCCLIENT_LIB}.so)
+    if(BUILD_STANDALONE)
+       add_custom_command(
+             TARGET ${RDCCLIENT_LIB}
+             POST_BUILD COMMAND ${CMAKE_STRIP} lib${RDCCLIENT_LIB}.so)
+    endif()
 endif ()
 
 ## Add the install directives for the runtime library.
-install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB}
+if(BUILD_STANDALONE)
+    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB}
             LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
                                             COMPONENT ${CLIENT_COMPONENT})
+else()
+    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB}
+            LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
+                                            COMPONENT ${CLIENT_COMPONENT})
+endif()
+
 install(FILES ${SOURCE_DIR}/include/rdc/rdc.h
              DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/include/rdc
                                          COMPONENT ${CLIENT_COMPONENT})

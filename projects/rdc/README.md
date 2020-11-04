@@ -69,6 +69,12 @@ Clone the RDC source code from GitHub and use CMake to build and install
     $ make
     $ make install ## default installation location is /opt/rocm
 
+## Building RDC library only without gRPC (optional)
+
+If only the RDC libraries are needed (i.e. only "embedded mode" is required), the user can choose to not build rdci and rdcd. This will eliminate the need for gRPC and protoc. To build in this way, -DBUILD_STANDALONE=off should be passed on the the cmake command line:
+
+    $ cmake -DROCM_DIR=/opt/rocm -DBUILD_STANDALONE=off <-DCMAKE_INSTALL_PREFIX=<install dir>> ..
+
 ## Update System Library Path
 
 The following commands need to be executed as root (sudo). It may be easiest to put them into a script and then run that script as root:
