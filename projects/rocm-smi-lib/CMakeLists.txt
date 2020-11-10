@@ -103,6 +103,12 @@ set(CMAKE_CXX_FLAGS
 if (${ADDRESS_SANITIZER})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
     set(CMAKE_EXE_LINKER_FLAGS -fsanitize=address)
+
+    if (BUILD_SHARED_LIBS})
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -shared-libasan" )
+    else ()
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libasan" )
+    endif ()
 else ()
     ## Security breach mitigation flags
     set(CMAKE_CXX_FLAGS

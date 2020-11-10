@@ -140,6 +140,19 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pedantic")
 
+## Address Sanitize Flag
+if (${ADDRESS_SANITIZER})
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+    set(CMAKE_EXE_LINKER_FLAGS -fsanitize=address)
+
+    if (BUILD_SHARED_LIBS})
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -shared-libasan" )
+    else ()
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libasan" )
+    endif ()
+endif()
+
+
 #
 # Extend the compiler flags for 64-bit builds
 #
