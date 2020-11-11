@@ -23,11 +23,16 @@ THE SOFTWARE.
 #include <getopt.h>
 #include <unistd.h>
 #include <signal.h>
+#include <assert.h>
+
 #include <limits>
 #include <iomanip>
 #include <unordered_map>
 #include <vector>
 #include <string>
+#include <queue>
+#include <ctime>
+#include <sstream>
 
 #include "rdc_lib/rdc_common.h"
 #include "common/rdc_utils.h"
@@ -44,7 +49,8 @@ volatile sig_atomic_t RdciDmonSubSystem::is_terminating_ = 0;
 
 RdciDmonSubSystem::RdciDmonSubSystem():
     dmon_ops_(DMON_MONITOR)
-    , need_cleanup_(false) {
+    , need_cleanup_(false)
+    , show_timpstamps_(false) {
         signal(SIGINT, set_terminating);
 }
 
@@ -66,6 +72,7 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
         {"help", optional_argument, nullptr, 'h'},
         {"unauth", optional_argument, nullptr, 'u'},
         {"list", optional_argument, nullptr, 'l'},
+        {"time-stamp", optional_argument, nullptr, 't'},
         {"list-all", optional_argument, nullptr, LIST_ALL_FIELDS_OPT},
         {"field-group-id", required_argument, nullptr, 'f'},
         {"field-id", required_argument, nullptr, 'e' },
@@ -81,7 +88,7 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
     std::string gpu_indexes;
     std::string field_ids;
 
-    while ((opt = getopt_long(argc, argv, "hluf:g:c:d:e:i:",
+    while ((opt = getopt_long(argc, argv, "hltuf:g:c:d:e:i:",
                 long_options, &option_index)) != -1) {
         switch (opt) {
             case HOST_OPTIONS:
@@ -93,6 +100,9 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char ** argv) {
             case 'u':
                  use_auth_ = false;
                  break;
+            case 't':
+                  show_timpstamps_ = true;
+                  break;
             case 'l':
                 dmon_ops_ = DMON_LIST_FIELDS;
                 break;
@@ -253,6 +263,8 @@ void RdciDmonSubSystem::show_help() const {
               << "names and \n"
               << "                                 descriptions of the field "
               << "ids\n";
+    std::cout << "  -t  --time-stamp               Include timestamps in "
+              << "display\n";
     std::cout << "  --list-all                     Same as -l, except this "
               << "lists all possible\n"
               << "                                 fields, including "
@@ -327,6 +339,106 @@ void RdciDmonSubSystem::show_field_usage() const {
                                               "used in scripts." << std::endl;
 }
 
+static void separate_notf_events(const rdc_field_group_info_t *f_info,
+                                  std::vector<rdc_field_t> *notif,
+                                           std::vector<rdc_field_t> *reg_ev) {
+  assert(f_info != nullptr && notif != nullptr && reg_ev != nullptr);
+
+  for (uint32_t i = 0; i < f_info->count; ++i) {
+    if (RDC_EVNT_IS_NOTIF_FIELD(f_info->field_ids[i])) {
+      notif->push_back(f_info->field_ids[i]);
+    } else {
+      reg_ev->push_back(f_info->field_ids[i]);
+    }
+  }
+}
+
+typedef struct  {
+    uint32_t dev_ind;
+    rdc_field_value val;
+} notif_dev_value;
+
+struct Compare_ts {
+    bool operator()(const notif_dev_value& r1, const notif_dev_value& r2) {
+      return r1.val.ts > r2.val.ts;
+    }
+};
+
+typedef std::priority_queue<notif_dev_value,
+            std::vector<notif_dev_value>, Compare_ts> field_pq_t;
+
+static void collect_new_notifs(rdc_handle_t h,
+                                const rdc_group_info_t &group_info,
+                                const std::vector<rdc_field_t> &notif_fields,
+                      std::vector<uint64_t> *notif_ts, field_pq_t *notif_pq) {
+  rdc_status_t ret;
+  notif_dev_value value;
+  std::string error_msg;
+  uint64_t next_ts;
+
+  assert(notif_ts != nullptr);
+
+  for (uint32_t gindex = 0; gindex < group_info.count; gindex++) {
+      for (uint32_t findex = 0; findex < notif_fields.size(); findex++) {
+        // There may be multiple, repeated events; get all of them
+        while (true) {
+          ret = rdc_field_get_value_since(h, group_info.entity_ids[gindex],
+             notif_fields[findex], (*notif_ts)[findex], &next_ts, &value.val);
+
+          if (ret == RDC_ST_NOT_FOUND) {
+            break;
+          } else if (ret == RDC_ST_OK) {
+            (*notif_ts)[findex] = next_ts;
+            value.dev_ind = group_info.entity_ids[gindex];
+            if (notif_pq != nullptr) {
+              notif_pq->push(value);
+            }
+          } else {
+            error_msg = "rdc_field_get_value_since() failed";
+            throw RdcException(ret, error_msg.c_str());
+          }
+        }
+      }
+  }
+}
+
+// ts is milliseconds
+static std::string ts_string(const time_t ts) {
+  struct tm *timeinfo;
+  time_t tmp_ts = ts/1000;
+  std::string ret;
+
+  timeinfo = localtime(&tmp_ts);  // NOLINT
+
+  ret = asctime(timeinfo);  // NOLINT
+  ret.pop_back();
+  return ret;
+}
+
+static void print_and_clr_notif_pq(field_pq_t *notif_pq, bool ts) {
+  assert(notif_pq != nullptr);
+  notif_dev_value v;
+  amd::rdc::fld_id2name_map_t &field_id_to_descript =
+                               amd::rdc::get_field_id_description_from_id();
+  while (!notif_pq->empty()) {
+    v = notif_pq->top();
+    notif_pq->pop();
+
+    std::cout << v.dev_ind << "\t";
+
+    if (ts) {
+      std::cout << std::left << std::setw(25) <<
+                                      ts_string(v.val.ts);
+    }
+
+    std::cout << std::left << "   **Event: " <<
+                                field_id_to_descript.at(v.val.field_id).label;
+    std::cout << std::left << "\t\"" << v.val.value.str << "\"";
+
+    std::cout << std::endl;
+  }
+}
+
 void RdciDmonSubSystem::process() {
     if (dmon_ops_ == DMON_HELP ||
             dmon_ops_ == DMON_UNKNOWN) {
@@ -377,6 +489,11 @@ void RdciDmonSubSystem::process() {
             std::to_string(options_[OPTIONS_FIELD_GROUP_ID])
             + " must contain at least 1 field.");
     }
+    // Divide field_info fields into 2 vectors, 1 for notifications
+    // and one for non-notifications. Handle these separately below.
+    std::vector<rdc_field_t> notif_fields;
+    std::vector<rdc_field_t> reg_fields;
+    separate_notf_events(&field_info, &notif_fields, &reg_fields);
 
     // keep extra 1 minute data
     double max_keep_age = options_[OPTIONS_DELAY]/1000.0 + 60;
@@ -385,25 +502,66 @@ void RdciDmonSubSystem::process() {
         options_[OPTIONS_GROUP_ID], options_[OPTIONS_FIELD_GROUP_ID],
         options_[OPTIONS_DELAY]*1000, max_keep_age, max_keep_samples);
     need_cleanup_ = true;
-    std::cout << "GPU\t";
-    for (uint32_t findex = 0; findex < field_info.count; findex++) {
-       std::cout << std::left << std::setw(20)
-            << field_id_string(field_info.field_ids[findex]);
+
+    std::stringstream ss;
+    amd::rdc::fld_id2name_map_t &field_id_to_descript =
+                                 amd::rdc::get_field_id_description_from_id();
+
+    ss << "Listening for events: ";
+    uint32_t i;
+    for (i = 0; i < notif_fields.size() - 1; ++i) {
+      ss << field_id_to_descript.at(notif_fields[i]).label << ", ";
     }
-    std::cout << std::endl;
+    ss << field_id_to_descript.at(notif_fields[i]).label << std::endl;
+    ss << "GPU\t";
+    if (show_timpstamps_) {
+      ss << std::left << std::setw(25) << "TIMESTAMP";
+      ss << "  ";
+    }
+    for (uint32_t findex = 0; findex < reg_fields.size(); findex++) {
+       ss << std::left << std::setw(20)
+            << field_id_string(reg_fields[findex]);
+    }
+    ss << std::endl;
+
+    std::string header_line((std::istreambuf_iterator<char>(ss)),
+                                          (std::istreambuf_iterator<char>()));
+
+    std::vector<uint64_t> notif_ts(notif_fields.size());
+    field_pq_t notif_pq;
+
+    // Call this once without printing out notfications to initialize
+    // timestamps. There may be very stale timestamps in cache.
+    collect_new_notifs(rdc_handle_, group_info, notif_fields,
+                                                        &notif_ts, nullptr);
 
     for (uint32_t i = 0; i < options_[OPTIONS_COUNT]; i++) {
+        if (i % 50 == 0) {
+          std::cout << header_line;
+        }
+
         usleep(options_[OPTIONS_DELAY]*1000);
+
+        collect_new_notifs(rdc_handle_, group_info, notif_fields,
+                                                        &notif_ts, &notif_pq);
+
+        print_and_clr_notif_pq(&notif_pq, show_timpstamps_);
+
         for (uint32_t gindex = 0; gindex < group_info.count; gindex++) {
             std::cout << group_info.entity_ids[gindex] << "\t";
-            for (uint32_t findex = 0; findex < field_info.count; findex++) {
+            for (uint32_t findex = 0; findex < reg_fields.size(); findex++) {
                  rdc_field_value value;
+
                  result = rdc_field_get_latest_value(rdc_handle_,
-                    group_info.entity_ids[gindex],
-                    field_info.field_ids[findex], &value);
+                   group_info.entity_ids[gindex], reg_fields[findex], &value);
                  if (result != RDC_ST_OK) {
                      std::cout << std::left << std::setw(20) << "N/A";
                  } else {
+                     if (show_timpstamps_ && findex == 0) {
+                       std::cout << std::left << std::setw(25) <<
+                                           ts_string(value.ts) << "  ";
+                     }
+
                      if (value.type == INTEGER) {
                         std::cout << std::left << std::setw(20)
                             << value.value.l_int;
@@ -421,7 +579,9 @@ void RdciDmonSubSystem::process() {
                      return;
                  }
             }
-            std::cout << std::endl;
+            if (reg_fields.size()) {
+              std::cout << std::endl;
+            }
         }
     }
 

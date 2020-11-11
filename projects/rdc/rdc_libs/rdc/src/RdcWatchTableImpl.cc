@@ -38,10 +38,12 @@ namespace rdc {
 
 RdcWatchTableImpl::RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings,
         const RdcCacheManagerPtr& cache_mgr,
-        const RdcModuleMgrPtr& module_mgr):
+        const RdcModuleMgrPtr& module_mgr,
+        const RdcNotificationPtr& notif):
      group_settings_(group_settings)
     , cache_mgr_(cache_mgr)
     , rdc_module_mgr_(module_mgr)
+    , notifications_(notif)
     , last_cleanup_time_(0) {
 }
 
@@ -209,6 +211,13 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
         return result;
     }
 
+    // See if any of the fields are notification fields, and
+    // set them up, if so.
+    result = notifications_->set_listen_events(fields_in_watch);
+    if (result != RDC_ST_OK) {
+      RDC_LOG(RDC_DEBUG,
+            "Error in configuring for event notification. Return " << result);
+    }
     // Skip not supported fields
     uint32_t unsupported_fields = 0;
     auto rdc_telemetry = rdc_module_mgr_->get_telemetry_module();
@@ -230,15 +239,17 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
                     }
                 }
                 if (not_supported) {
+                    if (!notifications_->is_notification_event(it->second)) {
+                      unsupported_fields++;
+                    }
                     it = fields_in_watch.erase(it);
-                    unsupported_fields++;
                 } else {
                     it++;
                 }
             }  // end for
         }  // end if
     }
-    if ( unsupported_fields >0 ) {
+    if (unsupported_fields > 0) {
         RDC_LOG(RDC_DEBUG, "Skip watch " << unsupported_fields
                 <<" fields as they are not supported.");
     }
@@ -337,6 +348,12 @@ rdc_status_t RdcWatchTableImpl::update_field_in_table_when_unwatch(
     auto fite = fields.begin();
     std::vector<rdc_gpu_field_t> unwatch_fields;
     for (; fite != fields.end(); fite++) {
+        // Turn off any notification fields
+        if (notifications_->is_notification_event(fite->second)) {
+          notifications_->stop_listening(fite->first);
+          continue;
+        }
+
          auto f_in_table = fields_to_watch_.find((*fite));
          if (f_in_table == fields_to_watch_.end()) {  // Not in fields_to_watch_
             unwatch_fields.push_back({fite->first, fite->second});
@@ -468,12 +485,61 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
     }
 
     // Clean up is expensive, only do it once per second
-    if (now - last_cleanup_time_ >1000) {
+    if (now - last_cleanup_time_ > 1000) {
         clean_up();
         last_cleanup_time_ = now;
     }
 
     return RDC_ST_OK;
+}
+
+rdc_status_t
+RdcWatchTableImpl::rdc_notif_update_cache(
+                      rdc_evnt_notification_t *events, uint32_t num_events) {
+  if (events == nullptr || num_events == 0) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+  std::lock_guard<std::mutex> guard(watch_mutex_);
+
+  for (uint32_t i = 0; i < num_events; i++) {
+    auto gpu_index = events[i].gpu_id;
+    auto field_id = events[i].field.field_id;
+
+    // Always Update the timestamp
+    auto ite = fields_to_watch_.find({gpu_index, field_id});
+    if (ite != fields_to_watch_.end()) {
+      ite->second.last_update_time = events[i].field.ts;
+    }
+
+    // Only cache valid results
+    if (events[i].field.status != RDC_ST_OK) {
+      continue;
+    }
+
+    // Update the cache
+    cache_mgr_->rdc_update_cache(gpu_index, events[i].field);
+
+    // Update the job stats cache
+    std::string job_id;
+    if (is_job_watch_field(gpu_index, field_id, job_id)) {
+      cache_mgr_->rdc_update_job_stats(gpu_index, job_id, events[i].field);
+    }
+  }
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcWatchTableImpl::rdc_field_listen_notif(uint32_t timeout_ms) {
+  rdc_status_t ret;
+  rdc_evnt_notification_t events[kMaxRSMIEvents];
+  uint32_t num_events = kMaxRSMIEvents;
+
+  ret = notifications_->listen(events, &num_events, timeout_ms);
+
+  // Update cache
+  if (ret == RDC_ST_OK && num_events) {
+    ret = rdc_notif_update_cache(events, num_events);
+  }
+  return ret;
 }
 
 void RdcWatchTableImpl::clean_up() {

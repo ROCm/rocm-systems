@@ -38,7 +38,7 @@ rdc_status_t result;
 
 /*TestBase::TestBase() : description_(""), rdc_channel_(0) {
 }*/
-TestBase::TestBase() : description_(""){
+TestBase::TestBase() : description_("") {
 }
 TestBase::~TestBase() {
 }
@@ -99,7 +99,6 @@ void TestBase::Close(void) {
 
   MakeHeaderStr(kCloseLabel, &label);
   printf("\n\t%s\n", label.c_str());
-
 }
 
 void TestBase::DisplayResults(void) const {

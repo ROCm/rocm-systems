@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcCacheManager.h"
 #include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcModuleMgr.h"
+#include "rdc_lib/RdcNotification.h"
 #include "rocm_smi/rocm_smi.h"
 
 namespace amd {
@@ -82,10 +83,12 @@ class RdcWatchTableImpl : public RdcWatchTable {
     //!< is expensive. Internally, this function will throttle the cleanup to
     //!< once per second.
     rdc_status_t rdc_field_update_all() override;
+    rdc_status_t rdc_field_listen_notif(uint32_t timeout_ms) override;
 
     RdcWatchTableImpl(const RdcGroupSettingsPtr& group_settings,
         const RdcCacheManagerPtr& cache_mgr,
-        const RdcModuleMgrPtr& module_mgr);
+        const RdcModuleMgrPtr& module_mgr,
+        const RdcNotificationPtr& notif);
 
  private:
     //!< Helper function to Update the fields_in_table when unwatch tables
@@ -106,8 +109,8 @@ class RdcWatchTableImpl : public RdcWatchTable {
     bool is_job_watch_field(uint32_t gpu_index, rdc_field_t field_id,
                                         std::string& job_id) const;  // NOLINT
 
-    rdc_status_t initialize_rsmi_handles(RdcFieldKey fk);
-
+    rdc_status_t rdc_notif_update_cache(rdc_evnt_notification_t *events,
+                                                         uint32_t num_events);
     //!< The function will be pass as the callback for bulk fetch
     static rdc_status_t handle_fields(rdc_gpu_field_value_t*  values,
             uint32_t num_values, void*  user_data);
@@ -115,6 +118,7 @@ class RdcWatchTableImpl : public RdcWatchTable {
     RdcGroupSettingsPtr group_settings_;
     RdcCacheManagerPtr cache_mgr_;
     RdcModuleMgrPtr rdc_module_mgr_;
+    RdcNotificationPtr notifications_;
 
     //!< The watch table to store the watch settings.
     std::map<RdcFieldGroupKey, FieldSettings> watch_table_;

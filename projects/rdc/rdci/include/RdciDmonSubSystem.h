@@ -65,7 +65,8 @@ class RdciDmonSubSystem: public RdciSubSystem {
      std::vector<rdc_field_t> field_ids_;
      std::vector<uint32_t> gpu_indexes_;
      bool need_cleanup_;
-
+     uint64_t latest_time_stamp_;
+     bool show_timpstamps_;
      static volatile sig_atomic_t is_terminating_;
      static void set_terminating(int sig);
 };

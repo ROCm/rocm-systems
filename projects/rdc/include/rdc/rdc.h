@@ -219,8 +219,19 @@ typedef enum {
                                      //!< neighbor 0 in byes/sec
   RDC_EVNT_XGMI_1_THRPUT,            //!< Transmit throughput to XGMI
                                      //!< neighbor 1 in byes/sec
-} rdc_field_t;
 
+  RDC_EVNT_NOTIF_VMFAULT = 2000,        //!< VM page fault
+  RDC_EVNT_NOTIF_FIRST = RDC_EVNT_NOTIF_VMFAULT,
+
+  RDC_EVNT_NOTIF_THERMAL_THROTTLE,   //!< Clock frequency has decreased
+                                     //!< due to temperature rise
+  RDC_EVNT_NOTIF_PRE_RESET,          //!< GPU reset is about to occur
+  RDC_EVNT_NOTIF_POST_RESET,         //!< GPU reset just occurred
+
+  RDC_EVNT_NOTIF_LAST = RDC_EVNT_NOTIF_POST_RESET,
+} rdc_field_t;
+#define RDC_EVNT_IS_NOTIF_FIELD(FIELD) \
+  ((FIELD) >= RDC_EVNT_NOTIF_FIRST && (FIELD) <= RDC_EVNT_NOTIF_LAST)
 /**
  * @brief handlers used in various rdc calls
  */
@@ -291,6 +302,15 @@ typedef struct {
 } rdc_job_info_t;
 
 /**
+ * @brief Field value data
+ */
+typedef union {
+    int64_t l_int;
+    double  dbl;
+    char str[RDC_MAX_STR_LENGTH];
+} rdc_field_value_data;
+
+/**
  * @brief The structure to store the field value
  */
 typedef struct {
@@ -298,11 +318,7 @@ typedef struct {
     int     status;             //!< RDC_ST_OK or error status
     uint64_t ts;                //!< Timestamp in usec since 1970
     rdc_field_type_t type;      //!< The field type
-    union {
-        int64_t l_int;
-        double  dbl;
-        char str[RDC_MAX_STR_LENGTH];
-    } value;                     //!< Value of the field. Value type
+    rdc_field_value_data value;  //!< Value of the field. Value type
                                  //!< depends on the field type.
 } rdc_field_value;
 
@@ -327,7 +343,6 @@ typedef struct {
     uint64_t start_time;                         //!< job start time
     uint64_t stop_time;                          //!< job stop time
 } rdc_job_group_info_t;
-
 
 /**
  *  @brief Initialize ROCm RDC.

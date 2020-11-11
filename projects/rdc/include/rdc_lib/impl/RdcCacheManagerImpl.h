@@ -35,9 +35,13 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
+// Note, the .cc code relies on RdcCacheEntry only having plain-old-data
+// types and arrays (no pointers). If a pointer is added, make sure to update
+// any code that copies this structure.
 struct RdcCacheEntry {
     uint64_t last_time;
-    int64_t value;
+    rdc_field_type_t type;
+    rdc_field_value_data value;
 };
 
 typedef std::map<RdcFieldKey, std::vector<RdcCacheEntry>> RdcCacheSamples;

@@ -40,6 +40,7 @@ class RdcMetricsUpdaterImpl: public RdcMetricsUpdater {
      RdcWatchTablePtr watch_table_;
      std::atomic<bool> started_;
      std::future<void> updater_;  // keep the future of updater
+     std::future<void> notif_updater_;  // keep the future of notif updater
      const uint32_t _check_frequency;  // Check frequency in milliseconds
 };
 

@@ -59,8 +59,14 @@ rdc_status_t RdcCacheManagerImpl::rdc_field_get_value_since(
                 *next_since_time_stamp = cache_value->last_time + 1;
             }
             value->ts = cache_value->last_time;
-            value->type = INTEGER;
-            value->value.l_int = cache_value->value;
+            value->type = cache_value->type;
+
+            if (value->type == STRING) {
+              strncpy_with_null(value->value.str, cache_value->value.str,
+                                                          RDC_MAX_STR_LENGTH);
+            } else {
+              value->value.l_int = cache_value->value.l_int;
+            }
             value->field_id = field_id;
             return RDC_ST_OK;
         }
@@ -123,8 +129,8 @@ rdc_status_t RdcCacheManagerImpl::rdc_field_get_latest_value(
 
     auto& cache_value = cache_samples_ite->second.back();
     value->ts = cache_value.last_time;
-    value->type = INTEGER;
-    value->value.l_int = cache_value.value;
+    value->type = cache_value.type;
+    value->value = cache_value.value;
     value->field_id = field_id;
 
     return RDC_ST_OK;
@@ -156,11 +162,8 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_cache(uint32_t gpu_index,
         const rdc_field_value& value) {
     RdcCacheEntry entry;
     entry.last_time = value.ts;
-    if (value.type == INTEGER) {
-        entry.value = value.value.l_int;
-    } else {
-        return RDC_ST_NOT_SUPPORTED;
-    }
+    entry.value = value.value;
+    entry.type = value.type;
 
     std::lock_guard<std::mutex> guard(cache_mutex_);
     RdcFieldKey field{gpu_index, value.field_id};

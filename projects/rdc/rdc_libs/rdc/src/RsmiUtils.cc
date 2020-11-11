@@ -19,39 +19,55 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef INCLUDE_RDC_LIB_RDCTELEMETRY_H_
-#define INCLUDE_RDC_LIB_RDCTELEMETRY_H_
 
-#include <memory>
+#include "rocm_smi/rocm_smi.h"
 #include "rdc/rdc.h"
-#include "rdc_lib/RdcTelemetryLibInterface.h"
 
 namespace amd {
 namespace rdc {
 
-class RdcTelemetry {
- public:
-    // get support field ids
-    virtual rdc_status_t rdc_telemetry_fields_query(
-                uint32_t field_ids[MAX_NUM_FIELDS],
-                uint32_t* field_count) = 0;
+rdc_status_t Rsmi2RdcError(rsmi_status_t rsmi) {
+  switch (rsmi) {
+    case RSMI_STATUS_SUCCESS:
+      return RDC_ST_OK;
 
-    // Fetch
-    virtual rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
-                uint32_t fields_count, rdc_field_value_f callback,
-                void*  user_data) = 0;
+    case RSMI_STATUS_INVALID_ARGS:
+      return RDC_ST_BAD_PARAMETER;
 
-    virtual rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
-                uint32_t fields_count) = 0;
-    virtual rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
-            uint32_t fields_count) = 0;
+    case RSMI_STATUS_NOT_SUPPORTED:
+      return RDC_ST_NOT_SUPPORTED;
 
-    virtual ~RdcTelemetry() {}
-};
-typedef std::shared_ptr<RdcTelemetry> RdcTelemetryPtr;
+    case RSMI_STATUS_NOT_FOUND:
+      return RDC_ST_NOT_FOUND;
+
+    case RSMI_STATUS_OUT_OF_RESOURCES:
+      return RDC_ST_INSUFF_RESOURCES;
+
+    case RSMI_STATUS_FILE_ERROR:
+      return RDC_ST_FILE_ERROR;
+
+    case RSMI_STATUS_NO_DATA:
+      return RDC_ST_NO_DATA;
+
+    case RSMI_STATUS_PERMISSION:
+      return RDC_ST_PERM_ERROR;
+
+    case RSMI_STATUS_BUSY:
+    case RSMI_STATUS_UNKNOWN_ERROR:
+    case RSMI_STATUS_INTERNAL_EXCEPTION:
+    case RSMI_STATUS_INPUT_OUT_OF_BOUNDS:
+    case RSMI_STATUS_INIT_ERROR:
+    case RSMI_STATUS_NOT_YET_IMPLEMENTED:
+    case RSMI_STATUS_INSUFFICIENT_SIZE:
+    case RSMI_STATUS_INTERRUPT:
+    case RSMI_STATUS_UNEXPECTED_SIZE:
+    case RSMI_STATUS_UNEXPECTED_DATA:
+    case RSMI_STATUS_REFCOUNT_OVERFLOW:
+    default:
+      return RDC_ST_UNKNOWN_ERROR;
+  }
+}
 
 }  // namespace rdc
 }  // namespace amd
 
-
-#endif  // INCLUDE_RDC_LIB_RDCTELEMETRY_H_

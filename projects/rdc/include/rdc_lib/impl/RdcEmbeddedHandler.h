@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcMetricsUpdater.h"
 #include "rdc_lib/RdcWatchTable.h"
 #include "rdc_lib/RdcModuleMgr.h"
+#include "rdc_lib/RdcNotification.h"
 
 namespace amd {
 namespace rdc {
@@ -85,7 +86,6 @@ class RdcEmbeddedHandler: public RdcHandler {
         uint64_t *next_since_time_stamp, rdc_field_value* value) override;
     rdc_status_t rdc_field_unwatch(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id) override;
-
     // Control API
     rdc_status_t rdc_field_update_all(uint32_t wait_for_update) override;
 
@@ -98,6 +98,7 @@ class RdcEmbeddedHandler: public RdcHandler {
     RdcCacheManagerPtr cache_mgr_;
     RdcMetricFetcherPtr metric_fetcher_;
     RdcModuleMgrPtr rdc_module_mgr_;
+    RdcNotificationPtr rdc_notif_;
     RdcWatchTablePtr watch_table_;
     RdcMetricsUpdaterPtr metrics_updater_;
     std::future<void> updater_;

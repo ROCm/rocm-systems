@@ -77,6 +77,10 @@ class rdc_field_t(c_int):
      RDC_EVNT_XGMI_1_BEATS_TX = 1007
      RDC_EVNT_XGMI_0_THRPUT = 1500
      RDC_EVNT_XGMI_1_THRPUT = 1501
+     RDC_EVNT_NOTIF_VMFAULT = 2000
+     RDC_EVNT_NOTIF_THERMAL_THROTTLE = 2001
+     RDC_EVNT_NOTIF_PRE_RESET = 2002
+     RDC_EVNT_NOTIF_POST_RESET = 2003
 
 rdc_handle_t = c_void_p
 rdc_gpu_group_t = c_uint32

@@ -36,11 +36,20 @@ RdcMetricsUpdaterImpl::RdcMetricsUpdaterImpl(
             , _check_frequency(check_frequency) {
 }
 
+// Make the listen time for notifications a relatively long time.
+// There's no point in starting/stopping it constantly.
+static const uint32_t kRdcFieldListenNotifTime_mS = 10000;
+
 void RdcMetricsUpdaterImpl::start() {
     if (started_) {
         return;
     }
     started_ = true;
+    notif_updater_ = std::async(std::launch::async, [this](){
+      while (started_) {
+        watch_table_->rdc_field_listen_notif(kRdcFieldListenNotifTime_mS);
+      }
+    });
     updater_ = std::async(std::launch::async, [this](){
         while (started_) {
             watch_table_->rdc_field_update_all();

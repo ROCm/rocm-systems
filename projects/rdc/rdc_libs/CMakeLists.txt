@@ -125,6 +125,7 @@ message("BOOTSTRAP_LIB_INC_LIST=${BOOTSTRAP_LIB_INC_LIST}")
 add_library(${BOOTSTRAP_LIB} SHARED ${BOOTSTRAP_LIB_SRC_LIST} ${BOOTSTRAP_LIB_INC_LIST})
 target_link_libraries(${BOOTSTRAP_LIB} pthread dl)
 target_include_directories(${BOOTSTRAP_LIB} PRIVATE
+                                         "${RSMI_INC_DIR}"
                                          "${PROJECT_SOURCE_DIR}"
                                          "${PROJECT_SOURCE_DIR}/include"
                                          "${COMMON_DIR}"
@@ -150,6 +151,8 @@ set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcRasLib.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcSmiLib.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcTelemetryModule.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcModuleMgrImpl.cc")
+set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcNotificationImpl.cc")
+set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RsmiUtils.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${COMMON_DIR}/rdc_fields_supported.cc")
 
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcEmbeddedHandler.h")
@@ -169,6 +172,9 @@ set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcMod
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcModuleMgr.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcTelemetry.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcTelemetryModule.h")
+set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcNotification.h")
+set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcNotificationImpl.h")
+set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RsmiUtils.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${COMMON_DIR}/rdc_fields_supported.h")
 
 message("RDC_LIB_INC_LIST=${RDC_LIB_INC_LIST}")

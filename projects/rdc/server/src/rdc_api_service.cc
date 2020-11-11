@@ -385,7 +385,10 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     } else if (value.type == DOUBLE) {
         reply->set_dbl(value.value.dbl);
     } else if (value.type == STRING || value.type == BLOB) {
-        reply->set_str(value.value.str);
+      std::string val_str(value.value.str);
+      size_t endpos = val_str.find_last_not_of(" ");
+      val_str[endpos + 1] = '\0';
+      reply->set_str(val_str);
     }
 
     return ::grpc::Status::OK;

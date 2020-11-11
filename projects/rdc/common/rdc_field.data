@@ -57,3 +57,8 @@ FLD_DESC_ENT(RDC_EVNT_XGMI_1_BEATS_TX,   "Data sent to neighbor 1 (32 byte pkts)
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_THRPUT,     "Tx throughput to XGMI neighbor 0 in b/s",     "XGMI_0_T",         true)
 FLD_DESC_ENT(RDC_EVNT_XGMI_1_THRPUT,     "Tx throughput to XGMI neighbor 1 in b/s",     "XGMI_1_T",         true)
 
+// Asynchronous event notifications
+FLD_DESC_ENT(RDC_EVNT_NOTIF_VMFAULT,     "VM page fault",                               "VM_PAGE_FAULT",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_THERMAL_THROTTLE, "Clk freq decrease due to temp",          "THERMAL_THROT",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_PRE_RESET,   "GPU reset is about to occur",                 "GPU_PRE_RESET",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_POST_RESET,  "GPU reset just occurred",                     "GPU_POST_RESET",   false)

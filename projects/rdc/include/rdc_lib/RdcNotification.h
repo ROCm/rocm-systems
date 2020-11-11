@@ -19,39 +19,44 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef INCLUDE_RDC_LIB_RDCTELEMETRY_H_
-#define INCLUDE_RDC_LIB_RDCTELEMETRY_H_
+#ifndef INCLUDE_RDC_LIB_RDCNOTIFICATION_H_
+#define INCLUDE_RDC_LIB_RDCNOTIFICATION_H_
 
 #include <memory>
+#include <vector>
+#include "rdc_lib/rdc_common.h"
 #include "rdc/rdc.h"
-#include "rdc_lib/RdcTelemetryLibInterface.h"
 
 namespace amd {
 namespace rdc {
 
-class RdcTelemetry {
+extern const uint32_t kMaxRSMIEvents;
+
+typedef struct {
+    uint32_t gpu_id;
+    rdc_field_value field;
+} rdc_evnt_notification_t;
+
+class RdcNotification {
  public:
-    // get support field ids
-    virtual rdc_status_t rdc_telemetry_fields_query(
-                uint32_t field_ids[MAX_NUM_FIELDS],
-                uint32_t* field_count) = 0;
+    virtual bool is_notification_event(rdc_field_t field) const = 0;
 
-    // Fetch
-    virtual rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
-                uint32_t fields_count, rdc_field_value_f callback,
-                void*  user_data) = 0;
+    virtual rdc_status_t
+                 set_listen_events(const std::vector<RdcFieldKey> fk_arr) = 0;
 
-    virtual rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
-                uint32_t fields_count) = 0;
-    virtual rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
-            uint32_t fields_count) = 0;
+    // Blocking
+    virtual rdc_status_t
+    listen(rdc_evnt_notification_t *events, uint32_t *num_events,
+                                                     uint32_t timeout_ms) = 0;
 
-    virtual ~RdcTelemetry() {}
+    virtual rdc_status_t stop_listening(uint32_t gpu_id) = 0;
+    virtual ~RdcNotification() {}
 };
-typedef std::shared_ptr<RdcTelemetry> RdcTelemetryPtr;
+
+typedef std::shared_ptr<RdcNotification> RdcNotificationPtr;
 
 }  // namespace rdc
 }  // namespace amd
 
+#endif  // INCLUDE_RDC_LIB_RDCNOTIFICATION_H_
 
-#endif  // INCLUDE_RDC_LIB_RDCTELEMETRY_H_
