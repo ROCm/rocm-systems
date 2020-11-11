@@ -148,6 +148,7 @@ uint32_t to_truncate_names = 0;
 bool is_trace_local = true;
 // SPM trace enabled
 bool is_spm_trace = false;
+uint32_t spm_kfd_mode = 0;
 
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
@@ -359,7 +360,7 @@ void dump_spm_trace(const char* label, const void* data, const uint32_t& size) {
     // Open trace file
     std::ostringstream oss;
     oss << result_prefix << "/spm_trace_" << label << ".out";
-    const int fd = open(oss.str().c_str(), O_CREAT|O_WRONLY|O_TRUNC, 0666);
+    const int fd = open(oss.str().c_str(), O_CREAT|O_WRONLY|O_APPEND, 0666);
     if (fd == -1) {
       std::ostringstream errmsg;
       errmsg << "open error, file '" << oss.str().c_str() << "'";
@@ -391,9 +392,11 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
   trace_data_arg_t* arg = reinterpret_cast<trace_data_arg_t*>(data);
   if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA) {
     if (is_spm_trace) {
+#if 0
       if (info_data->sample_id != 0) {
         fatal("Only one SPM sample expected");
       }
+#endif
       const void* data_ptr = info_data->trace_data.ptr;
       const uint32_t data_size = info_data->trace_data.size;
       fprintf(arg->file, "    size(%u)\n", data_size);
@@ -438,6 +441,48 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
     status = HSA_STATUS_ERROR;
   return status;
 }
+
+// SPM counter trace start/stop methods
+std::vector<rocprofiler_t*> spm_ctx_vec;
+void spm_ctrl_start(rocprofiler_feature_t* features, uint32_t features_found) {
+  // Start SPM trace collection for all GPUs
+  uint32_t gpu_count = HsaRsrcFactory::Instance().GetCountOfGpuAgents();
+  for (uint32_t idx = 0; idx < gpu_count; ++idx) {
+    const AgentInfo* agent_info = NULL;
+    const bool ret = HsaRsrcFactory::Instance().GetGpuAgentInfo(idx, &agent_info);
+    if (!ret) {
+      printf("rocprof: spm_ctrl_start error, gpu(%u)\n", idx);
+      abort();
+    }
+    hsa_agent_t agent = agent_info->dev_id;
+
+    rocprofiler_properties_t properties{};
+    properties.queue_depth = 256;
+
+    // Creating SPM context
+    rocprofiler_t* context = NULL;
+    hsa_status_t status = rocprofiler_open(agent, features, features_found, &context,
+                                           ROCPROFILER_MODE_STANDALONE|ROCPROFILER_MODE_CREATEQUEUE, &properties);
+    check_status(status);
+    // Start reading SPM data
+    trace_data_arg_t trace_data_arg{result_file_handle, "glob", agent};
+    status = rocprofiler_iterate_trace_data(context, trace_data_cb, reinterpret_cast<void*>(&trace_data_arg));
+    check_status(status);
+    // Start SPM HW trace
+    status = rocprofiler_start(context, 0);
+    check_status(status);
+    // saving the context in the vectort
+    spm_ctx_vec.push_back(context);
+  }
+}
+void spm_ctrl_stop() {
+  for (rocprofiler_t* context : spm_ctx_vec) {
+    hsa_status_t status = rocprofiler_stop(context, 0);
+    check_status(status);
+    rocprofiler_close(context);
+  }
+}
+
 
 // Align to specified alignment
 unsigned align_size(unsigned size, unsigned alignment) {
@@ -1315,6 +1360,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   check_env_var("ROCP_K_CONCURRENT", settings->k_concurrent);
   // Enable optmized mode
   check_env_var("ROCP_OPT_MODE", settings->opt_mode);
+  // SPM KFD mode
+  check_env_var("ROCP_SPM_KFD_MODE", spm_kfd_mode);
 
   is_trace_local = settings->trace_local;
 
@@ -1508,6 +1555,11 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     ++index;
   }
   fflush(stdout);
+
+  if ((traces_found != 0) && (is_spm_trace == false) && (metrics_vec.size() != 0)) {
+    fatal("ROCProfiler: SQTT and counters are not supported together");
+  }
+
   const uint32_t features_found = metrics_vec.size() + traces_found;
 
   // set a value to indicate tracing mode
@@ -1574,6 +1626,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     rocprofiler_set_hsa_callbacks(cs, NULL);
     settings->code_obj_tracking = 0;
     settings->hsa_intercepting = 1;
+  } else if (is_spm_trace && spm_kfd_mode) {
+    spm_ctrl_start(features, features_found);
   } else {
     // Adding dispatch observer
     rocprofiler_queue_callbacks_t callbacks_ptrs{0};
@@ -1627,6 +1681,11 @@ void rocprofiler_unload(bool is_destr) {
   if (pthread_mutex_unlock(&mutex) != 0) {
     perror("pthread_mutex_unlock");
     abort();
+  }
+
+  // stopping SPM trace if it was enabled
+  if (is_spm_trace && spm_kfd_mode) {
+    spm_ctrl_stop();
   }
 
   // Unregister dispatch callback
