@@ -1686,6 +1686,7 @@ def showProductName(deviceList):
     model = create_string_buffer(256)
     vendor = create_string_buffer(256)
     vbios = create_string_buffer(256)
+    # sku = create_string_buffer(256)
     printLogSpacer(' Product Info ')
     for device in deviceList:
         # Retrieve card vendor
@@ -1704,14 +1705,15 @@ def showProductName(deviceList):
                 device_model = model.value.decode()
                 printLog(device, 'Card model', '\t\t' + device_model)
             printLog(device, 'Card vendor', '\t\t' + device_vendor)
-            # Retrieve the SKU
-            ret = rocmsmi.rsmi_dev_sku_get(device, device_sku, 256)
-            if not rsmi_ret_ok(ret, device) or not device_sku.value.decode():
-                # Retrieve the device SKU from VBIOS if product_number doesn't exist
-                ret = rocmsmi.rsmi_dev_vbios_version_get(device, vbios, 256)
-                if rsmi_ret_ok(ret, device) and vbios.value.decode():
-                    # Device SKU is just 6 characters after the first occurance of '-' in vbios_version
-                    device_sku = vbios.value.decode().split('-')[1][:6]
+            # TODO: Retrieve the SKU using 'rsmi_dev_sku_get' from the LIB
+            # ret = rocmsmi.rsmi_dev_sku_get(device, sku, 256)
+            # if rsmi_ret_ok(ret, device) and sku.value.decode():
+            #     device_sku = sku.value.decode()
+            # Retrieve the device SKU as a substring from VBIOS
+            ret = rocmsmi.rsmi_dev_vbios_version_get(device, vbios, 256)
+            if rsmi_ret_ok(ret, device) and vbios.value.decode():
+                # Device SKU is just 6 characters after the first occurance of '-' in vbios_version
+                device_sku = vbios.value.decode().split('-')[1][:6]
             printLog(device, 'Card SKU', '\t\t' + device_sku)
         else:
             printLog(device, 'Incompatible device.\n' \
