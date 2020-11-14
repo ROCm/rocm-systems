@@ -1,16 +1,19 @@
 #!/bin/bash
 
-RDC_LIB_DIR=@RDC_CLIENT_ROOT_PATH@/rdc/lib
-GRPC_LIB_DIR=@RDC_CLIENT_ROOT_PATH@/grpc/lib
-
 do_create_rdc_user() {
     useradd -r -s /bin/nologin rdc
+    # Make sure this doesn't return non-zero if an id already exists
+    return 0
 }
 
+reload_systemd() {
+    systemctl daemon-reload
+    return 0
+}
 do_create_rdc_user
 
-echo "$GRPC_LIB_DIR" > /etc/ld.so.conf.d/x86_64-librdc_client.conf
-echo "$GRPC_LIB_DIR"64 >> /etc/ld.so.conf.d/x86_64-librdc_client.conf
-echo "$RDC_LIB_DIR" >> /etc/ld.so.conf.d/x86_64-librdc_client.conf
-echo "$RDC_LIB_DIR"64 >> /etc/ld.so.conf.d/x86_64-librdc_client.conf
-ldconfig
+#Symlink RDC Service
+ln -s -f -r /@RDC_CLIENT_INSTALL_PREFIX@/rdc/lib/rdc.service @DISTRO_ROOT@/rdc.service
+
+#Request systemctl to reload file since RDC is adding new file/service
+reload_systemd

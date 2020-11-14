@@ -193,12 +193,27 @@ set(CPACK_PACKAGE_VERSION ${VERSION_STRING})
 
 # This is used by configure_file for *_postinit.in
 set(RDC_CLIENT_ROOT_PATH "${RDC_SERVER_ROOT_PATH}/${RDC_CLIENT_INSTALL_PREFIX}")
+
+#Identify between SLES and Centos for setting symlink for rdc.service
+#SLES need serice file in /usr/lib/systemd/system/rdc.service
+#CENTOS/RHEL Require file in /lib/systemd/system/rdc.service
+file(STRINGS /etc/os-release LINUX_DISTRO LIMIT_COUNT 1 REGEX "NAME=")
+message ( "Using Linux Distro: ${LINUX_DISTRO}" )
+if(LINUX_DISTRO MATCHES "SLES")
+   set(DISTRO_ROOT "/usr/lib/systemd/system")
+else()
+   set(DISTRO_ROOT "/lib/systemd/system")
+endif()
+
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/DEBIAN_postinst.in"
   "${PROJECT_SOURCE_DIR}/DEBIAN/postinst")
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/RPM_rpm_post.in"
   "${PROJECT_SOURCE_DIR}/RPM/rpm_post")
+configure_file(
+  "${PROJECT_SOURCE_DIR}/src/RPM_postun.in"
+  "${PROJECT_SOURCE_DIR}/RPM/rpm_postun")
 
 if ( DEFINED ENV{ROCM_LIBPATCH_VERSION} )
   set ( CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}" )

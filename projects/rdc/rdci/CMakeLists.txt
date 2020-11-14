@@ -89,6 +89,14 @@ link_directories(${LIB_BOOSTRAP_DIR})
 
 add_executable(${RDCI_EXE} "${RDCI_SRC_LIST}")
 
+## RUNPATH should help to run "rdci" without the usage of ldconfig
+set(RDC_RUNPATH "\$ORIGIN:\$ORIGIN/../lib:\$ORIGIN/../lib64")
+set(GRPC_RUNPATH "\$ORIGIN/../../grpc/lib:\$ORIGIN/../../grpc/lib64")
+set(CMAKE_EXE_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--rpath,${RDC_RUNPATH}:${GRPC_RUNPATH}")
+set(CMAKE_SKIP_BUILD_RPATH TRUE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+set(CMAKE_SKIP_RPATH TRUE)
+
 target_link_libraries(${RDCI_EXE} pthread dl rdc_bootstrap)
 
 

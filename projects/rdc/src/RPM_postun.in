@@ -1,0 +1,16 @@
+stop_rdc() {
+    #stop RDC if running
+    systemctl stop rdc
+    return 0
+}
+
+reload_systemd() {
+    systemctl daemon-reload
+    return 0
+}
+
+if [ $1 -eq 0 ]; then
+    stop_rdc
+    unlink @DISTRO_ROOT@/rdc.service
+    reload_systemd
+fi

@@ -24,7 +24,7 @@ AmbientCapabilities=CAP_DAC_OVERRIDE
 # If we need to start anything before rdcd, use this
 # ExecStartPre=
 
-ExecStart=/usr/sbin/rdcd
+ExecStart=/@RDC_CLIENT_INSTALL_PREFIX@/rdc/bin/rdcd
 
 # If we need to start anything after rdcd use this
 # ExecStartPost=

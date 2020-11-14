@@ -81,9 +81,20 @@ set(SERVER_SRC_LIST ${SERVER_SRC_LIST} "${RDC_SRC_ROOT}/common/rdc_utils.cc")
 message("SERVER_SRC_LIST=${SERVER_SRC_LIST}")
 
 set(SERVER_DAEMON_EXE "rdcd")
+configure_file("rdc.service.in" "${PROJECT_BINARY_DIR}/rdc.service" @ONLY)
 set(SERVICE_FILE_NAME "rdc.service")
 
 link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
+
+## Set RUNPATH if ROCM_RPATH is defined and passed by the environment
+## RUNPATH should help to run "rdcd" without the usage of ldconfig
+if (DEFINED ENV{ROCM_RPATH})
+    set (GRPC_RUNPATH "\$ORIGIN/../../grpc/lib:\$ORIGIN/../../grpc/lib64")
+    set (CMAKE_EXE_LINKER_FLAGS "-Wl,--enable-new-dtags")
+    set (CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${GRPC_RUNPATH}")
+    set (CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+    set (CMAKE_SKIP_BUILD_RPATH TRUE)
+endif ()
 
 add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
 # target_include_directories(${SERVER_DAEMON_EXE} PUBLIC ${RSMI_INC_DIR})
@@ -94,10 +105,10 @@ target_link_libraries(${SERVER_DAEMON_EXE} pthread rt grpc grpc++
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${SERVER_DAEMON_EXE}
         PERMISSIONS OWNER_EXECUTE OWNER_READ OWNER_WRITE GROUP_READ
         GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-        DESTINATION usr/sbin
+        DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/rdc/bin
         COMPONENT ${SERVER_COMPONENT})
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${SERVICE_FILE_NAME}
-               DESTINATION lib/systemd/system
+install(FILES ${PROJECT_BINARY_DIR}/${SERVICE_FILE_NAME}
+               DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/rdc/lib
                COMPONENT ${SERVER_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

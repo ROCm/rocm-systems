@@ -100,12 +100,14 @@ When *rdcd* is started from a command-line the *capabilities* are determined by 
     $ cd rdc_install_prefix     ## If specified in Building RDC section
 
     ## To run with authentication. Ensure SSL keys are setup properly
-    $ ./usr/sbin/rdcd           ## rdcd is started with monitor-only capabilities
-    $ sudo ./usr/sbin/rdcd      ## rdcd is started will full-capabilities
+    ## version will be the version number(ex:3.10.0) of ROCm where RDC was pacakged with
+    $ /opt/rocm-<version>/rdc/bin/rdcd           ## rdcd is started with monitor-only capabilities
+    $ sudo /opt/rocm-<version>/rdc/bin/rdcd      ## rdcd is started will full-capabilities
 
     ## To run without authentication. SSL key & certificates are not required.
-    $ ./usr/sbin/rdcd -u        ## rdcd is started with monitor-only capabilities
-    $ sudo ./usr/sbin/rdcd -u   ## rdcd is started will full-capabilities
+    ## version will be the version number(ex:3.10.0) of ROCm where RDC was pacakged with
+    $ /opt/rocm-<version>/rdc/bin/rdcd -u        ## rdcd is started with monitor-only capabilities
+    $ sudo /opt/rocm-<version>/rdc/bin/rdcd -u   ## rdcd is started will full-capabilities
 
 ### Start RDCD using systemd
 *rdcd* can be started by using the systemctl command. systemctl will read /lib/systemd/system/rdc.service, which is installed with rdc. This file has 2 lines that control what *capabilities* with which *rdcd* will run. If left uncommented, rdcd will run with full-capabilities.
@@ -137,6 +139,7 @@ Log messages that can provide useful debug information.
     journalctl -u rdc
 
     ## To run rdcd with debug log from command-line use
-    RDC_LOG=DEBUG ./usr/sbin/rdcd
+    ## version will be the version number(ex:3.10.0) of ROCm where RDC was pacakged with
+    RDC_LOG=DEBUG /opt/rocm-<version>/rdc/bin/rdcd
 
 

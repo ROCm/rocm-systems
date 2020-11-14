@@ -1,28 +1,24 @@
 #/bin/bash
 
-RDC_LIB_DIR=@RDC_CLIENT_ROOT_PATH@/rdc/lib
-GRPC_LIB_DIR=@RDC_CLIENT_ROOT_PATH@/grpc/lib
-
 # This will return 0 if an id is created and non-zero if
 # it already exists
 do_create_rdc_user() {
     useradd -r -s /bin/nologin rdc
+    # Make sure this doesn't return non-zero if an id already exists
+    return 0
 }
 
-# librdc_client.so
-do_ldconfig() {
-    echo "$RDC_LIB_DIR" > /etc/ld.so.conf.d/x86_64-librdc_client.conf
-    echo "$GRPC_LIB_DIR" >> /etc/ld.so.conf.d/x86_64-librdc_client.conf && ldconfig
-
-    do_create_rdc_user
-
-    # Make sure this doesn't return non-zero if an id already exists
+reload_systemd() {
+    systemctl daemon-reload
     return 0
 }
 
 case "$1" in
    configure)
-       do_ldconfig
+       do_create_rdc_user
+       #Symlink RDC Service
+       ln -s -f -r /@RDC_CLIENT_INSTALL_PREFIX@/rdc/lib/rdc.service /lib/systemd/system/rdc.service
+       reload_systemd
        exit 0
    ;;
    abort-upgrade|abort-remove|abort-deconfigure)

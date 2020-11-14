@@ -1,14 +1,21 @@
 #!/bin/bash
-
-set -e
-
-rm_ldconfig() {
-    rm -f /etc/ld.so.conf.d/x86_64-librdc_client.conf && ldconfig
+stop_rdc() {
+    #stop RDC if running
+    systemctl stop rdc
+    return 0
 }
+
+reload_systemd() {
+    systemctl daemon-reload
+    return 0
+}
+set -e
 
 case "$1" in
    remove)
-       rm_ldconfig
+       stop_rdc
+       unlink /lib/systemd/system/rdc.service
+       reload_systemd
    ;;
    purge)
    ;;
