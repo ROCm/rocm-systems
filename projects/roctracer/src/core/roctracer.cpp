@@ -719,11 +719,25 @@ PUBLIC_API roctracer_status_t roctracer_op_code(
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_API: {
       *op = roctracer::hsa_support::GetApiCode(str);
+      if (*op == HSA_API_ID_NUMBER) {
+        EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "Invalid API name \"" << str << "\", domain ID(" << domain << ")");
+      }
       if (kind != NULL) *kind = 0;
       break;
     }
     case ACTIVITY_DOMAIN_KFD_API: {
       *op = roctracer::kfd_support::GetApiCode(str);
+      if (*op == KFD_API_ID_NUMBER) {
+        EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "Invalid API name \"" << str << "\", domain ID(" << domain << ")");
+      }
+      if (kind != NULL) *kind = 0;
+      break;
+    }
+    case ACTIVITY_DOMAIN_HIP_API: {
+      *op = hipApiIdByName(str);
+      if (*op == HIP_API_ID_NUMBER) {
+        EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "Invalid API name \"" << str << "\", domain ID(" << domain << ")");
+      }
       if (kind != NULL) *kind = 0;
       break;
     }

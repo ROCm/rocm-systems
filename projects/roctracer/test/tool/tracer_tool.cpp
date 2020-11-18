@@ -112,6 +112,7 @@ bool trace_pcs = false;
 // API trace vector
 std::vector<std::string> hsa_api_vec;
 std::vector<std::string> kfd_api_vec;
+std::vector<std::string> hip_api_vec;
 
 LOADER_INSTANTIATE();
 TRACE_BUFFER_INSTANTIATE();
@@ -921,6 +922,7 @@ void tool_load() {
         found = true;
         trace_hip_api = true;
         trace_hip_activity = true;
+        hip_api_vec = api_vec;
       }
       if (name == "KFD") {
         found = true;
@@ -1091,9 +1093,19 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     // Enable tracing
     if (trace_hip_api) {
       hip_api_file_handle = open_output_file(output_prefix, "hip_api_trace.txt");
-      ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
+      if (hip_api_vec.size() != 0) {
+        for (unsigned i = 0; i < hip_api_vec.size(); ++i) {
+          uint32_t cid = HIP_API_ID_NUMBER;
+          const char* api = hip_api_vec[i].c_str();
+          ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_HIP_API, api, &cid, NULL));
+          ROCTRACER_CALL(roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API, cid, hip_api_callback, NULL));
+          printf(" %s", api);
+        }
+      }
+      else {
+        ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
+      }
       ROCTRACER_CALL(roctracer_disable_op_callback(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_hipModuleUnload));
-
       if (is_stats_opt) {
 	const char* path = NULL;
 	FILE* f = open_output_file(output_prefix, "hip_api_stats.csv", &path);
