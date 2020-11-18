@@ -456,7 +456,10 @@ class API_DescrParser:
         for ind in range(len(arg_list)):
           arg_var = arg_list[ind]
           arg_val = 'api_data.args.' + call + '.' + arg_var
-          self.content += '      out << ' + arg_val
+          if re.search(r'char\* ', struct['astr'][arg_var]):
+            self.content += '      out << "0x" << std::hex << (uint64_t)' + arg_val
+          else:
+            self.content += '      out << ' + arg_val
           '''
           arg_item = struct['tlst'][ind]
           if re.search(r'\(\* ', arg_item): arg_pref = ''

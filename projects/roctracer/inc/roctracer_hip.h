@@ -37,8 +37,8 @@ inline static std::ostream& operator<<(std::ostream& out, const char& v) {
 }
 #endif  // __cplusplus
 
-#include <hip_ostream_ops.h>
 #include <hip/hip_runtime.h>
+#include <hip_ostream_ops.h>
 #include <hip/hcc_detail/hip_prof_str.h>
 
 #include <roctracer.h>

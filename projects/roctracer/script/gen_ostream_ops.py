@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python
 
 import os, sys, re
 import CppHeaderParser
@@ -29,11 +29,6 @@ LICENSE = \
 '*/\n'
 
 
-header = 'template <typename T>\n' + \
-'struct output_streamer {\n' + \
-'  inline static std::ostream& put(std::ostream& out, const T& v) { return out; }\n' + \
-'};\n\n'
-
 header_basic = \
 'template <typename T>\n' + \
 '  inline static std::ostream& operator<<(std::ostream& out, const T& v) {\n' + \
@@ -43,8 +38,10 @@ header_basic = \
 '     return out; }\n'
 
 structs_analyzed = {}
-global_ops_hip = ''
+global_ops = ''
 global_str = ''
+output_filename_h = None
+apiname = ""
 
 # process_struct traverses recursively all structs to extract all fields
 def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, apiname):
@@ -61,7 +58,6 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
         return
     if cppHeader_struct in structs_analyzed:
         return
-
     structs_analyzed[cppHeader_struct] = 1
     for l in reversed(range(len(cppHeader.classes[cppHeader_struct]["properties"]["public"]))):
         key = 'name'
@@ -90,17 +86,13 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
 
         str = ''
         if "union" not in mtype:
-            if apiname.lower() == 'hip' or apiname.lower() == 'hsa':
-              str += "   roctracer::" + apiname.lower() + "_support::operator<<(out, \"" + name + " = \");\n"
-              str += "   roctracer::" + apiname.lower() + "_support::operator<<(out, v."+name+");\n"
-              str += "   roctracer::" + apiname.lower() + "_support::operator<<(out, \", \");\n"
-            else:
-              str += "   roctracer::" + apiname.lower() + "_support::output_streamer<const char*>::put(out, \"" + name + " = \");\n"
-              if array_size == "":
-                str += "   roctracer::" + apiname.lower() + "_support::output_streamer<" + mtype + ">::put(out, v." + name + ");\n"
-              else:
-                str += "   roctracer::" + apiname.lower() + "_support::output_streamer<" + mtype + "[" + array_size + "]>::put(out, v." + name + ");\n"
-              str += "   roctracer::" + apiname.lower() + "_support::output_streamer<const char*>::put(out, \", \");\n"
+            indent = ""
+            str += "    if (regex_match (\"" + cppHeader_struct + "::" + name + "\", std::regex(" + apiname.upper() + "_structs_regex)))  {\n"
+            indent = "    "
+            str += indent + "  roctracer::" + apiname.lower() + "_support::operator<<(out, \"" + name + "=\");\n"
+            str += indent + "  roctracer::" + apiname.lower() + "_support::operator<<(out, v." + name + ");\n"
+            str += indent + "  roctracer::" + apiname.lower() + "_support::operator<<(out, \", \");\n"
+            str += "    }\n"
             if "void" not in mtype:
                 global_str += str
         else:
@@ -113,133 +105,104 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
             process_struct(file_handle, next_cppHeader_struct, cppHeader, name, apiname)
 
 #  Parses API header file and generates ostream ops files ostream_ops.h
-def gen_cppheader(infilepath, outfilepath, structs_depth):
+def gen_cppheader(infilepath, outfilepath, rank):
 # infilepath: API Header file to be parsed
 # outfilepath: Output file where ostream operators are written
-    global_ops_hip = ''
-    global_ops_hsa = ''
+    global global_ops
+    global output_filename_h
+    global apiname
     global global_str
     try:
         cppHeader = CppHeaderParser.CppHeader(infilepath)
     except CppHeaderParser.CppParseError as e:
         print(e)
         sys.exit(1)
-    mpath = os.path.dirname(outfilepath)
-    if mpath == "":
-       mpath = os.getcwd()
-    apiname = outfilepath.replace(mpath+"/","")
-    apiname = apiname.replace("_ostream_ops.h","")
-    apiname = apiname.upper()
-    f = open(outfilepath,"w+")
-    f.write("// automatically generated\n")
-    f.write(LICENSE + '\n')
-    header_s = \
-      '#ifndef INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
-      '#define INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
-      '#ifdef __cplusplus\n' + \
-      '#include <iostream>\n' + \
-      '\n' + \
-      '#include "roctracer.h"\n'
-    if apiname.lower() == 'hip':
-      header_s = header_s + '\n' + \
-      '#include "hip/hip_runtime_api.h"\n' + \
-      '#include "hip/hcc_detail/hip_vector_types.h"\n\n'
+    if rank == 0 or rank == 2:
+      mpath = os.path.dirname(outfilepath)
+      if mpath == "":
+        mpath = os.getcwd()
+      apiname = outfilepath.replace(mpath + "/","")
+      output_filename_h = open(outfilepath,"w+")
+      apiname = apiname.replace("_ostream_ops.h","")
+      apiname = apiname.upper()
+      output_filename_h.write("// automatically generated\n")
+      output_filename_h.write(LICENSE + '\n')
+      header_s = \
+        '#ifndef INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
+        '#define INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
+        '#ifdef __cplusplus\n' + \
+        '#include <iostream>\n' + \
+        '\n' + \
+        '#include "roctracer.h"\n'
+      header_s += '#include <string>\n#include <regex>\n'
 
-    f.write(header_s)
-    f.write('\n')
-    f.write('namespace roctracer {\n')
-    f.write('namespace ' + apiname.lower() + '_support {\n')
-    if structs_depth != -1:
-      f.write('static int ' + apiname.upper() + '_depth_max = ' + str(structs_depth) + ';\n')
-    f.write('// begin ostream ops for '+ apiname + ' \n')
-    if apiname.lower() == "hip" or apiname.lower() == "hsa":
-      f.write("// basic ostream ops\n")
-      f.write(header_basic)
-      f.write("// End of basic ostream ops\n\n")
-    else:
-      f.write(header)
+      output_filename_h.write(header_s)
+      output_filename_h.write('\n')
+      output_filename_h.write('namespace roctracer {\n')
+      output_filename_h.write('namespace ' + apiname.lower() + '_support {\n')
+      output_filename_h.write('static int ' + apiname.upper() + '_depth_max = 1;\n')
+      output_filename_h.write('static int ' + apiname.upper() + '_depth_max_cnt = 0;\n')
+      output_filename_h.write('static std::string ' + apiname.upper() + '_structs_regex = \".*\";\n')
+      output_filename_h.write('// begin ostream ops for '+ apiname + ' \n')
+      output_filename_h.write("// basic ostream ops\n")
+      output_filename_h.write(header_basic)
+      output_filename_h.write("// End of basic ostream ops\n\n")
 
     for c in cppHeader.classes:
         if "union" in c:
             continue
-        if  apiname.lower() == 'hsa':
-          if c == 'max_align_t' or c == '__fsid_t': #already defined for hip
+        if c in structs_analyzed:
             continue
-        if len(cppHeader.classes[c]["properties"]["public"])!=0:
-          if apiname.lower() == 'hip' or apiname.lower() == 'hsa':
-            f.write("inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n")
-            f.write("{\n")
-            f.write("  roctracer::" + apiname.lower() + "_support::operator<<(out, '{');\n")
-            if structs_depth != -1:
-              f.write("  " + apiname.upper() + "_depth_max++;\n")
-              f.write("  if (" + apiname.upper() + "_depth_max <= " + str(structs_depth) + ") {\n" )
-            process_struct(f, c, cppHeader, "", apiname)
-            global_str = "\n".join(global_str.split("\n")[0:-2])
-            if structs_depth != -1: #reindent
-              global_str = global_str.split('\n')
-              global_str = ['    ' + line.lstrip() for line in global_str]
-              global_str = "\n".join(global_str)
-            f.write(global_str+"\n")
-            if structs_depth != -1:
-              f.write("  };\n")
-              f.write("  " + apiname.upper() + "_depth_max--;\n")
-            f.write("  roctracer::" + apiname.lower() + "_support::operator<<(out, '}');\n")
-            f.write("  return out;\n")
-            f.write("}\n")
-            global_str = ''
-          else:
-            f.write("\ntemplate<>\n")
-            f.write("struct output_streamer<" + c + "&> {\n")
-            f.write("  inline static std::ostream& put(std::ostream& out, "+c+"& v)\n")
-            f.write("{\n")
-            f.write("  roctracer::" + apiname.lower() + "_support::output_streamer<char>::put(out, '{');\n")
-            if structs_depth != -1:
-              f.write(apiname.upper() + "_depth_max++;\n")
-              f.write("  if (" + apiname.upper() + "_depth_max <= " + str(structs_depth) + ") {\n" )
-            process_struct(f, c, cppHeader, "", apiname)
-            global_str = "\n".join(global_str.split("\n")[0:-2])
-            if structs_depth != -1: #reindent
-              global_str = global_str.split('\n')
-              global_str = ['    ' + line.lstrip() for line in global_str]
-              global_str = "\n".join(global_str)
-            f.write(global_str+"\n")
-            if structs_depth != -1:
-              f.write("  };\n")
-              f.write("  " + apiname.upper() + "_depth_max--;\n")
-            f.write("  roctracer::" + apiname.lower() + "_support::output_streamer<char>::put(out, '}');\n")
-            f.write("  return out;\n")
-            f.write("}\n")
-            f.write("};\n")
-            global_str = ''
-          if apiname.lower() == 'hip':
-            global_ops_hip += "inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n" + "{\n" + "  roctracer::hip_support::operator<<(out, v);\n" + "  return out;\n" + "}\n\n"
-          if apiname.lower() == 'hsa':
-            global_ops_hsa += "inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n" + "{\n" + "  roctracer::hsa_support::operator<<(out, v);\n" + "  return out;\n" + "}\n\n"
+        if c == 'max_align_t' or c == '__fsid_t': # Skipping as it is defined in multiple domains
+          continue
+        if len(cppHeader.classes[c]["properties"]["public"]) != 0:
+          output_filename_h.write("inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n")
+          output_filename_h.write("{\n")
+          output_filename_h.write("  roctracer::" + apiname.lower() + "_support::operator<<(out, '{');\n")
+          output_filename_h.write("  " + apiname.upper() + "_depth_max_cnt++;\n")
+          output_filename_h.write("  if (" + apiname.upper() + "_depth_max == -1 || " + apiname.upper() + "_depth_max_cnt <= " + apiname.upper() + "_depth_max" + ") {\n" )
+          process_struct(output_filename_h, c, cppHeader, "", apiname)
+          global_str = "\n".join(global_str.split("\n")[0:-3])
+          if global_str != '': global_str += "\n    }\n"
+          output_filename_h.write(global_str)
+          output_filename_h.write("  };\n")
+          output_filename_h.write("  " + apiname.upper() + "_depth_max_cnt--;\n")
+          output_filename_h.write("  roctracer::" + apiname.lower() + "_support::operator<<(out, '}');\n")
+          output_filename_h.write("  return out;\n")
+          output_filename_h.write("}\n")
+          global_str = ''
+          global_ops += "inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n" + "{\n" + "  roctracer::" + apiname.lower() + "_support::operator<<(out, v);\n" + "  return out;\n" + "}\n\n"
 
-    footer = \
-    '// end ostream ops for '+ apiname + ' \n'
-    footer += '};};\n\n'
-    f.write(footer)
-    f.write(global_ops_hip)
-    f.write(global_ops_hsa)
-    footer = '#endif //__cplusplus\n' + \
-             '#endif // INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
-             ' \n'
-    f.write(footer)
-    f.close()
-    print('File ' + outfilepath + ' generated')
+    if rank == 1 or rank == 2:
+      footer = '// end ostream ops for '+ apiname + ' \n'
+      footer += '};};\n\n'
+      output_filename_h.write(footer)
+      output_filename_h.write(global_ops)
+      footer = '#endif //__cplusplus\n' + \
+               '#endif // INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
+               ' \n'
+      output_filename_h.write(footer)
+      output_filename_h.close()
+      print('File ' + outfilepath + ' generated')
 
     return
 
 parser = argparse.ArgumentParser(description='genOstreamOps.py: generates ostream operators for all typedefs in provided input file.')
 requiredNamed = parser.add_argument_group('Required arguments')
-requiredNamed.add_argument('-in', metavar='file', help='Header file to be parsed', required=True)
+requiredNamed.add_argument('-in', metavar='fileList', help='Comma separated list of header files to be parsed', required=True)
 requiredNamed.add_argument('-out', metavar='file', help='Output file with ostream operators', required=True)
-requiredNamed.add_argument('-depth', metavar='N', type=int, help='Depth for nested structs', required=False)
 
-structs_depth = 0
 args = vars(parser.parse_args())
 
 if __name__ == '__main__':
-    if args['depth'] != None: structs_depth = args['depth']
-    gen_cppheader(args['in'], args['out'], structs_depth)
+   flist = args['in'].split(',')
+   if len(flist) == 1:
+     gen_cppheader(flist[0], args['out'],2)
+   else:
+     for i in range(len(flist)):
+       if i == 0:
+         gen_cppheader(flist[i], args['out'],0)
+       elif i == len(flist)-1:
+         gen_cppheader(flist[i], args['out'],1)
+       else:
+         gen_cppheader(flist[i], args['out'],-1)

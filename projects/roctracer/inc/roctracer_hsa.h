@@ -66,23 +66,6 @@ typedef hsa_support::ops_properties_t hsa_ops_properties_t;
 
 #include "hsa_ostream_ops.h"
 
-std::ostream& operator<<(std::ostream& out, const hsa_amd_memory_pool_t& v)
-{
-   roctracer::hsa_support::operator<<(out, v);
-   return out;
-}
-
-std::ostream& operator<<(std::ostream& out, const hsa_ext_image_t& v)
-{
-   roctracer::hsa_support::operator<<(out, v);
-   return out;
-}
-
-std::ostream& operator<<(std::ostream& out, const hsa_ext_sampler_t& v)
-{
-   roctracer::hsa_support::operator<<(out, v);
-   return out;
-}
 
 #else // !__cplusplus
 typedef void* hsa_amd_queue_intercept_handler;

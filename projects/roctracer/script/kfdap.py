@@ -494,8 +494,7 @@ class API_DescrParser:
           arg_val = 'api_data.args.' + call + '.' + arg_var
           if re.search(r'MemFlags',arg_var):
             continue
-          self.content_h += '      typedef decltype(' + arg_val.replace("[]","") + ') arg_val_type_t' + str(ind) + ';\n'
-          self.content_h += '      roctracer::kfd_support::output_streamer<arg_val_type_t' + str(ind) + '>::put(out, ' + arg_val.replace("[]","") + ')'
+          self.content_h += '      out << ' + arg_val.replace("[]","")
           if ind < len(arg_list)-1: self.content_h += ' << ", ";\n'
           else: self.content_h += ';\n'
       if struct['ret'] != 'void':
@@ -512,7 +511,6 @@ class API_DescrParser:
       self.content_h += '  return out;\n'
       self.content_h += '}\n'
       self.content_h += '#endif\n'
-      self.content_cpp += 'inline std::ostream& operator<< (std::ostream& out, const HsaMemFlags& v) { out << "HsaMemFlags"; return out; }\n'
 
   # generate PUBLIC_API for all API fcts
   def gen_public_api(self, n, name, call, struct):
