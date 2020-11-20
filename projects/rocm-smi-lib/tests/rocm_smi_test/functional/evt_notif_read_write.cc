@@ -125,6 +125,7 @@ void TestEvtNotifReadWrite::Run(void) {
 
   rsmi_evt_notification_data_t data[10];
   uint32_t num_elem = 10;
+  bool read_again = false;
 
   ret = rsmi_event_notification_get(10000, &num_elem, data);
   if (ret == RSMI_STATUS_SUCCESS || ret == RSMI_STATUS_INSUFFICIENT_SIZE) {
@@ -135,6 +136,9 @@ void TestEvtNotifReadWrite::Run(void) {
         std::cout << "\tdv_ind=" << data[i].dv_ind <<
                    "  Type: " << NameFromEvtNotifType(data[i].event) <<
                    "  Mesg: " << data[i].message << std::endl;
+        if (data[i].event == RSMI_EVT_NOTIF_GPU_PRE_RESET) {
+          read_again = true;
+        }
       }
     }
     IF_VERB(STANDARD) {
@@ -152,6 +156,38 @@ void TestEvtNotifReadWrite::Run(void) {
     // This should always fail. We want to print out the return code.
     EXPECT_EQ(ret, RSMI_STATUS_SUCCESS) <<
                   "Unexpected return code for rsmi_event_notification_get()";
+  }
+
+  // In case GPU Pre reset event was collected in the previous read,
+  // read again to get the GPU Post reset event.
+  if (read_again) {
+    ret = rsmi_event_notification_get(10000, &num_elem, data);
+    if (ret == RSMI_STATUS_SUCCESS || ret == RSMI_STATUS_INSUFFICIENT_SIZE) {
+      EXPECT_LE(num_elem, 10) <<
+              "Expected the number of elements found to be <= buffer size (10)";
+      IF_VERB(STANDARD) {
+        for (uint32_t i = 0; i < num_elem; ++i) {
+          std::cout << "\tdv_ind=" << data[i].dv_ind <<
+                     "  Type: " << NameFromEvtNotifType(data[i].event) <<
+                     "  Mesg: " << data[i].message << std::endl;
+        }
+      }
+      IF_VERB(STANDARD) {
+        if (ret == RSMI_STATUS_INSUFFICIENT_SIZE) {
+          std::cout <<
+          "\t\tBuffer size is 10, but more than 10 events are available." <<
+                                                                    std::endl;
+        }
+      }
+    } else if (ret == RSMI_STATUS_NO_DATA) {
+      IF_VERB(STANDARD) {
+        std::cout << "\tNo further events were collected." << std::endl;
+      }
+    } else {
+      // This should always fail. We want to print out the return code.
+      EXPECT_EQ(ret, RSMI_STATUS_SUCCESS) <<
+                  "Unexpected return code for rsmi_event_notification_get()";
+    }
   }
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
