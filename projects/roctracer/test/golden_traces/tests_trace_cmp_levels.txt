@@ -1,4 +1,6 @@
 # dummy
+MatrixTranspose_dryrun_trace --check-none
+ctrl_dryrun_trace --check-none
 MatrixTranspose_ctest_trace --check-count .*
 MatrixTranspose_test_trace --check-count .* --ignore-count hsaKmt.*
 MatrixTranspose_hipaact_test_trace --check-count .* --ignore-count hsaKmt.*|hipMemcpy|__hipPushCallConfiguration|hipLaunchKernel|__hipPopCallConfiguration
