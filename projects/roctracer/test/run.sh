@@ -106,6 +106,10 @@ eval_test() {
   test_number=$((test_number + 1))
 }
 
+# Tests dry run
+eval_test "MatrixTranspose dry run" ./test/MatrixTranspose MatrixTranspose_dryrun_trace
+eval_test "ctrl dry run" ./test/hsa/ctrl ctrl_dryrun_trace
+
 # Standalone test
 # rocTrecer is used explicitely by test
 eval_test "standalone C test" "LD_PRELOAD=libkfdwrapper64.so ./test/MatrixTranspose_ctest" MatrixTranspose_ctest_trace
