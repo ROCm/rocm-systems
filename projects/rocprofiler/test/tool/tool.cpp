@@ -401,9 +401,8 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
       if (is_trace_local == false) fatal("SPM trace supports only local trace allocation");
       HsaRsrcFactory* hsa_rsrc = &HsaRsrcFactory::Instance();
       const AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(arg->agent);
-      const uint32_t mem_size = data_size;
-      void* buffer = hsa_rsrc->AllocateSysMemory(agent_info, mem_size);
-      if(!hsa_rsrc->Memcpy(agent_info, buffer, data_ptr, mem_size)) {
+      void* buffer = hsa_rsrc->AllocateSysMemory(agent_info, data_size);
+      if(!hsa_rsrc->Memcpy(agent_info, buffer, data_ptr, data_size)) {
         fatal("Trace data memcopy to host failed");
       }
       dump_spm_trace(arg->label, buffer, data_size);
@@ -416,13 +415,21 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
       if (is_trace_local) {
         HsaRsrcFactory* hsa_rsrc = &HsaRsrcFactory::Instance();
         const AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(arg->agent);
-        const uint32_t mem_size = data_size;
-        void* buffer = hsa_rsrc->AllocateSysMemory(agent_info, mem_size);
-        if(!hsa_rsrc->Memcpy(agent_info, buffer, data_ptr, mem_size)) {
-          fatal("Trace data memcopy to host failed");
+	void* buffer = NULL;
+
+        if (data_size != 0) {
+          buffer = hsa_rsrc->AllocateSysMemory(agent_info, data_size);
+          if (buffer == NULL) {
+            fatal("Trace data buffer allocation failed");
+          }
+          if(!hsa_rsrc->Memcpy(agent_info, buffer, data_ptr, data_size)) {
+            fatal("Trace data memcopy to host failed");
+          }
         }
+
         dump_sqtt_trace(arg->label, info_data->sample_id, buffer, data_size);
-        HsaRsrcFactory::FreeMemory(buffer);
+
+        if (buffer != NULL) HsaRsrcFactory::FreeMemory(buffer);
       } else {
         dump_sqtt_trace(arg->label, info_data->sample_id, data_ptr, data_size);
       }
