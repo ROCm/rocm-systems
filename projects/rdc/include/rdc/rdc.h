@@ -181,6 +181,48 @@ typedef enum {
   RDC_FI_ECC_CORRECT_TOTAL = 600,    //!< Accumulated correctable ECC errors
   RDC_FI_ECC_UNCORRECT_TOTAL,        //!< Accumulated uncorrectable ECC errors
 
+  RDC_FI_ECC_SDMA_SEC,             //!< SDMA Single Error Correction
+  RDC_FI_ECC_SDMA_DED,             //!< SDMA Double Error Detection
+
+  RDC_FI_ECC_GFX_SEC,              //!< GFX Single Error Correction
+  RDC_FI_ECC_GFX_DED,              //!< GFX Double Error Detection
+
+  RDC_FI_ECC_MMHUB_SEC,            //!< MMHUB Single Error Correction
+  RDC_FI_ECC_MMHUB_DED,            //!< MMHUB Double Error Detection
+
+  RDC_FI_ECC_ATHUB_SEC,            //!< ATHUB Single Error Correction
+  RDC_FI_ECC_ATHUB_DED,            //!< ATHUB Double Error Detection
+
+  RDC_FI_ECC_BIF_SEC,              //!< BIF Single Error Correction
+  RDC_FI_ECC_BIF_DED,              //!< BIF Double Error Detection
+
+  RDC_FI_ECC_HDP_SEC,              //!< HDP Single Error Correction
+  RDC_FI_ECC_HDP_DED,              //!< HDP Double Error Detection
+
+  RDC_FI_ECC_XGMI_WAFL_SEC,        //!< XGMI WAFL Single Error Correction
+  RDC_FI_ECC_XGMI_WAFL_DED,        //!< XGMI WAFL Double Error Detection
+
+  RDC_FI_ECC_DF_SEC,               //!< DF Single Error Correction
+  RDC_FI_ECC_DF_DED,               //!< DF Double Error Detection
+
+  RDC_FI_ECC_SMN_SEC,              //!< SMN Single Error Correction
+  RDC_FI_ECC_SMN_DED,              //!< SMN Double Error Detection
+
+  RDC_FI_ECC_SEM_SEC,              //!< SEM Single Error Correction
+  RDC_FI_ECC_SEM_DED,              //!< SEM Double Error Detection
+
+  RDC_FI_ECC_MP0_SEC,              //!< MP0 Single Error Correction
+  RDC_FI_ECC_MP0_DED,              //!< MP0 Double Error Detection
+
+  RDC_FI_ECC_MP1_SEC,              //!< MP1 Single Error Correction
+  RDC_FI_ECC_MP1_DED,              //!< MP1 Double Error Detection
+
+  RDC_FI_ECC_FUSE_SEC,             //!< FUSE Single Error Correction
+  RDC_FI_ECC_FUSE_DED,             //!< FUSE Double Error Detection
+
+  RDC_FI_ECC_UMC_SEC,              //!< UMC Single Error Correction
+  RDC_FI_ECC_UMC_DED,              //!< UMC Double Error Detection
+
   /*
    * @brief Raw XGMI counter events
    */

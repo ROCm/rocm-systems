@@ -36,6 +36,7 @@ RdcRasLib::RdcRasLib(const char* lib_name):
     , rdc_module_destroy_(nullptr) {
     rdc_status_t status = lib_loader_.load(lib_name);
     if (status != RDC_ST_OK) {
+        RDC_LOG(RDC_ERROR, "RAS related function will not work.");
         return;
     }
 
@@ -46,9 +47,11 @@ RdcRasLib::RdcRasLib(const char* lib_name):
         return;
     }
 
-    if (rdc_module_init_(0) != RDC_ST_OK) {
+    status = rdc_module_init_(0);
+    if (status != RDC_ST_OK) {
         RDC_LOG(RDC_ERROR, "Fail to init librdc_ras.so:"
-                    << rdc_status_string(status));
+            << rdc_status_string(status)
+            << ". RAS related function will not work.");
          return;
     }
 
