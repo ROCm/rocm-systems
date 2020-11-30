@@ -4,9 +4,29 @@ from ctypes import *
 from enum import Enum
 librdc = "librdc_bootstrap.so"
 
+
 # The python ctypes wrapper for "librdc_bootstrap.so"
 
-rdc = CDLL(librdc)
+# Search librdc_bootstrap.so paths
+current_folder = os.path.dirname(os.path.realpath(__file__))
+rdc_paths = [ "", # without path
+        current_folder+"/../lib/",   # package installation
+        current_folder+"/../lib64/", # package installation
+        current_folder+"/../build/rdc_libs/" # build from source code
+]
+
+rdc = None
+for r in rdc_paths:
+    try:
+        rdc = CDLL(r+librdc)
+        break
+    except:
+        pass
+
+if rdc == None:
+    print("Unable to load the librdc_bootstrap.so. Set LD_LIBRARY_PATH to the folder containing librdc_bootstrap.so.")
+    exit(1)
+
 
 GPU_ID_INVALID = -1
 RDC_GROUP_ALL_GPUS = -1000
