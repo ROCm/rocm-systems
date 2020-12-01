@@ -1078,6 +1078,7 @@ rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
     {RSMI_CLK_TYPE_SYS, "s"},
     {RSMI_CLK_TYPE_MEM, "m"},
   };
+  DEVICE_MUTEX
 
   // Set perf. level to manual so that we can then set the power profile
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
@@ -1126,6 +1127,8 @@ rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
                                       uint64_t clkvalue, uint64_t voltvalue) {
   TRY
   rsmi_status_t ret;
+
+  DEVICE_MUTEX
 
   // Set perf. level to manual so that we can then set the power profile
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
@@ -1402,6 +1405,7 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
       return RSMI_STATUS_INVALID_ARGS;
   }
 
+  DEVICE_MUTEX
   return get_dev_value_int(dev_type, dv_ind, fw_version);
   CATCH
 }
@@ -2735,9 +2739,9 @@ rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t *counter) {
   TRY
   CHK_SUPPORT_NAME_ONLY(counter)
 
-  DEVICE_MUTEX
   rsmi_status_t ret;
 
+  DEVICE_MUTEX
   ret = get_dev_value_int(amd::smi::kDevPCIEReplayCount, dv_ind, counter);
   return ret;
 
@@ -2747,11 +2751,11 @@ rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t *counter) {
 rsmi_status_t
 rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
   TRY
-  DEVICE_MUTEX
   rsmi_status_t ret;
 
   CHK_SUPPORT_NAME_ONLY(unique_id)
 
+  DEVICE_MUTEX
   ret = get_dev_value_int(amd::smi::kDevUniqueId, dv_ind, unique_id);
   return ret;
 
@@ -2761,13 +2765,12 @@ rsmi_status_t
 rsmi_dev_counter_create(uint32_t dv_ind, rsmi_event_type_t type,
                                            rsmi_event_handle_t *evnt_handle) {
   TRY
-  DEVICE_MUTEX
   REQUIRE_ROOT_ACCESS
 
   // Note we don't need to pass in the variant to CHK_SUPPORT_VAR because
   // the success of this call doesn't depend on a sysfs file existing.
   CHK_SUPPORT_NAME_ONLY(evnt_handle)
-
+  DEVICE_MUTEX
   *evnt_handle = reinterpret_cast<uintptr_t>(
                                       new amd::smi::evt::Event(type, dv_ind));
 
@@ -3086,13 +3089,12 @@ rsmi_compute_process_info_by_pid_get(uint32_t pid,
 rsmi_status_t
 rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status) {
   TRY
-  DEVICE_MUTEX
-
   CHK_SUPPORT_NAME_ONLY(status)
 
   rsmi_status_t ret;
   uint64_t status_code;
 
+  DEVICE_MUTEX
   ret = get_dev_value_int(amd::smi::kDevXGMIError, dv_ind, &status_code);
 
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -3567,6 +3569,7 @@ rsmi_status_t
 rsmi_event_notification_init(uint32_t dv_ind) {
   TRY
   GET_DEV_FROM_INDX
+  DEVICE_MUTEX
 
   std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
   if (smi.kfd_notif_evt_fh() == -1) {
@@ -3615,6 +3618,7 @@ rsmi_status_t
 rsmi_event_notification_mask_set(uint32_t dv_ind, uint64_t mask) {
   TRY
   GET_DEV_FROM_INDX
+  DEVICE_MUTEX
 
   if (dev->evt_notif_anon_fd() == -1) {
     return RSMI_INITIALIZATION_ERROR;
@@ -3726,6 +3730,8 @@ rsmi_event_notification_get(int timeout_ms,
 rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
   TRY
   GET_DEV_FROM_INDX
+  DEVICE_MUTEX
+
   std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
 
   if (dev->evt_notif_anon_fd() == -1) {

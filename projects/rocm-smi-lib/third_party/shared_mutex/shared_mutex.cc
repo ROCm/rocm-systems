@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include <stdlib.h>  // malloc, free
 #include <string.h>  // strcpy
 #include <time.h>   // clock_gettime
+#include <assert.h>
 
 #include "rocm_smi/rocm_smi_exception.h"
 
@@ -86,9 +87,27 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
   clock_gettime(CLOCK_REALTIME, &expireTime);
   expireTime.tv_sec += 5;
 
-  int ret = pthread_mutex_timedlock(mutex_ptr, &expireTime);
+  int ret;
 
-  if (ret || (mutex.created == 0 &&
+  ret = pthread_mutex_timedlock(mutex_ptr, &expireTime);
+
+  if (ret == EOWNERDEAD) {
+    ret = pthread_mutex_consistent(mutex_ptr);
+    // This function should not fail unless mutex_ptr is not robust
+    // or mutex_ptr is not in an inconsistent state. Neither scenario
+    // should ever be true at this point in the code.
+    assert(!ret);
+
+    // ...but if there are undocumented failure cases for
+    // pthread_mutex_consistent() handle them for release builds.
+    if (ret) {
+      fprintf(stderr, "pthread_mutex_consistent() returned %d\n", ret);
+      free(mutex.name);
+
+      throw amd::smi::rsmi_exception(RSMI_STATUS_BUSY, __FUNCTION__);
+      return mutex;
+    }
+  } else if (ret || (mutex.created == 0 &&
                      reinterpret_cast<shared_mutex_t *>(addr)->ptr == NULL)) {
     // Something is out of sync.
     fprintf(stderr, "pthread_mutex_timedlock() returned %d\n", ret);
@@ -119,6 +138,10 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
 
     if (pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE)) {
       perror("pthread_mutexattr_settype");
+      return mutex;
+    }
+    if (pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST)) {
+      perror("pthread_mutexattr_setrobust");
       return mutex;
     }
     if (pthread_mutex_init(mutex_ptr, &attr)) {

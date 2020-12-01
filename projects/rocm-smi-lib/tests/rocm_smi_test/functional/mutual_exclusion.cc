@@ -250,7 +250,7 @@ void TestMutualExclusion::Run(void) {
     CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_od_volt_curve_regions_get(0, &dmy_ui32, &dmy_vlt_reg);
     CHECK_RET(ret, RSMI_STATUS_BUSY);
-    ret = rsmi_dev_overdrive_level_set(dmy_i32, 0);
+    ret = rsmi_dev_overdrive_level_set_v1(dmy_i32, 0);
     CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_gpu_clk_freq_set(0, RSMI_CLK_TYPE_SYS, 0);
     CHECK_RET(ret, RSMI_STATUS_BUSY);
@@ -260,6 +260,60 @@ void TestMutualExclusion::Run(void) {
     CHECK_RET(ret, RSMI_STATUS_BUSY);
     ret = rsmi_dev_ecc_status_get(0, RSMI_GPU_BLOCK_UMC, &dmy_ras_err_st);
     CHECK_RET(ret, RSMI_STATUS_BUSY);
+
+    /* Other functions holding device mutexes. Listed for reference.
+    rsmi_dev_sku_get
+    rsmi_dev_perf_level_set_v1
+    rsmi_dev_od_clk_info_set
+    rsmi_dev_od_volt_info_set
+    rsmi_dev_firmware_version_get
+    rsmi_dev_firmware_version_get
+    rsmi_dev_name_get
+    rsmi_dev_brand_get
+    rsmi_dev_vram_vendor_get
+    rsmi_dev_subsystem_name_get
+    rsmi_dev_drm_render_minor_get
+    rsmi_dev_vendor_name_get
+    rsmi_dev_pci_bandwidth_get
+    rsmi_dev_pci_bandwidth_set
+    rsmi_dev_pci_throughput_get
+    rsmi_dev_temp_metric_get
+    rsmi_dev_volt_metric_get
+    rsmi_dev_fan_speed_get
+    rsmi_dev_fan_rpms_get
+    rsmi_dev_fan_reset
+    rsmi_dev_fan_speed_set
+    rsmi_dev_fan_speed_max_get
+    rsmi_dev_od_volt_info_get
+    rsmi_dev_gpu_metrics_info_get
+    rsmi_dev_od_volt_curve_regions_get
+    rsmi_dev_power_max_get
+    rsmi_dev_power_ave_get
+    rsmi_dev_power_cap_get
+    rsmi_dev_power_cap_range_get
+    rsmi_dev_power_cap_set
+    rsmi_dev_power_profile_presets_get
+    rsmi_dev_power_profile_set
+    rsmi_dev_memory_total_get
+    rsmi_dev_memory_usage_get
+    rsmi_dev_memory_busy_percent_get
+    rsmi_dev_busy_percent_get
+    rsmi_dev_vbios_version_get
+    rsmi_dev_serial_number_get
+    rsmi_dev_pci_replay_counter_get
+    rsmi_dev_unique_id_get
+    rsmi_dev_counter_create
+    rsmi_counter_available_counters_get
+    rsmi_dev_counter_group_supported
+    rsmi_dev_memory_reserved_pages_get
+    rsmi_dev_xgmi_error_status
+    rsmi_dev_xgmi_error_reset
+    rsmi_dev_xgmi_hive_id_get
+    rsmi_topo_get_link_weight
+    rsmi_event_notification_mask_set
+    rsmi_event_notification_init
+    rsmi_event_notification_stop
+    */
 
     IF_VERB(STANDARD) {
       std::cout << "TESTER process: Finished verifying that all "
