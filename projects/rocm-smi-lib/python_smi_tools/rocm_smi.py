@@ -633,7 +633,7 @@ def resetPerfDeterminism(deviceList):
     """
     printLogSpacer('Disable Performance Determinism')
     for device in deviceList:
-        ret = rocmsmi.rsmi_dev_perf_level_set(device, rsmi_dev_perf_level_t(0)))
+        ret = rocmsmi.rsmi_dev_perf_level_set(device, rsmi_dev_perf_level_t(0))
         if rsmi_ret_ok(ret, device, 'disable performance determinism'):
             printLog(device, 'Successfully disabled performance determinism', None)
         else:
