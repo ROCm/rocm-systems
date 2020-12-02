@@ -1127,6 +1127,11 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_RESERVED1));
   }
 
+  // Dumping HSA handles for agents and pools
+  FILE* handles_file_handle = open_output_file(output_prefix, "hsa_handles.txt");
+  HsaRsrcFactory::Instance().DumpHandles(handles_file_handle);
+  close_output_file(handles_file_handle);
+
   ONLOAD_TRACE_END();
   return true;
 }

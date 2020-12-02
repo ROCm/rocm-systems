@@ -742,6 +742,19 @@ hsa_status_t HsaRsrcFactory::hsa_executable_freeze_interceptor(hsa_executable_t 
   return hsa_api_.hsa_executable_freeze(executable, options);;
 }
 
+void HsaRsrcFactory::DumpHandles(FILE* file) {
+  auto beg = agent_map_.begin();
+  auto end = agent_map_.end();
+  for (auto it = beg; it != end; ++it) {
+    const AgentInfo* agent_info = it->second;
+    fprintf(file, "0x%lx agent %s\n", agent_info->dev_id.handle, (agent_info->dev_type == HSA_DEVICE_TYPE_CPU) ? "cpu" : "gpu");
+    if (agent_info->cpu_pool.handle != 0) fprintf(file, "0x%lx pool cpu\n", agent_info->cpu_pool.handle);
+    if (agent_info->kern_arg_pool.handle != 0) fprintf(file, "0x%lx pool cpu kernarg\n", agent_info->kern_arg_pool.handle);
+    if (agent_info->gpu_pool.handle != 0) fprintf(file, "0x%lx pool gpu\n", agent_info->gpu_pool.handle);
+  }
+  fflush(file);
+}
+
 std::atomic<HsaRsrcFactory*> HsaRsrcFactory::instance_{};
 HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;
 HsaRsrcFactory::timestamp_t HsaRsrcFactory::timeout_ns_ = HsaTimer::TIMESTAMP_MAX;
