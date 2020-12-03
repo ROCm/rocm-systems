@@ -55,17 +55,18 @@ class MemManager:
 
   # Parsing the mapping of HSA agent and memory pool handles
   def parse_hsa_handles(self, infile):
-    inp = open(infile, 'r')
-    cpu_agent_ptrn = re.compile(r'(0x[0-9a-fA-F]+) agent cpu')
-    gpu_agent_ptrn = re.compile(r'(0x[0-9a-fA-F]+) agent gpu')
-    for line in inp.readlines():
-      m_cpu = cpu_agent_ptrn.match(line)
-      if m_cpu:
-        self.hsa_agent_types[str(int(m_cpu.group(1),16))] = 0# "cpu"
-      m_gpu = gpu_agent_ptrn.match(line)
-      if m_gpu:
-        self.hsa_agent_types[str(int(m_gpu.group(1),16))] = 1 #"gpu"
-    inp.close()
+    if os.path.exists(infile):
+      inp = open(infile, 'r')
+      cpu_agent_ptrn = re.compile(r'(0x[0-9a-fA-F]+) agent cpu')
+      gpu_agent_ptrn = re.compile(r'(0x[0-9a-fA-F]+) agent gpu')
+      for line in inp.readlines():
+        m_cpu = cpu_agent_ptrn.match(line)
+        if m_cpu:
+          self.hsa_agent_types[str(int(m_cpu.group(1),16))] = 0 # "cpu"
+        m_gpu = gpu_agent_ptrn.match(line)
+        if m_gpu:
+          self.hsa_agent_types[str(int(m_gpu.group(1),16))] = 1 # "gpu"
+      inp.close()
 
   # register alloc and memcpy API calls
   # ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'args', 'Index', 'Data'],

@@ -468,6 +468,10 @@ if [ "$ARG_CK" = "-" ] ; then
   fatal "Wrong option '$ARG_IN'"
 fi
 
+if [ "$GEN_STATS" = "1" -a "$ROCP_TIMESTAMP_ON" = "0" ] ; then
+  fatal "Wrong options, stats enabled with disabled timestamps"
+fi
+
 if [ -z "$INPUT_FILE" ] ; then
   input_base="results"
   input_type="none"
