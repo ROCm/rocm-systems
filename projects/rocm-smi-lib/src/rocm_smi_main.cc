@@ -461,6 +461,7 @@ static bool isAMDGPU(std::string dev_path) {
 uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   uint32_t ret = 0;
   std::string err_msg;
+  uint32_t count = 0;
 
   // If this gets called more than once, clear previous findings.
   devices_.clear();
@@ -486,16 +487,24 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   while (dentry != nullptr) {
     if (memcmp(dentry->d_name, kDeviceNamePrefix, strlen(kDeviceNamePrefix))
                                                                        == 0) {
-      std::string vend_str_path = kPathDRMRoot;
-      vend_str_path += "/";
-      vend_str_path += dentry->d_name;
-
-      if (isAMDGPU(vend_str_path) ||
-          (init_options_ & RSMI_INIT_FLAG_ALL_GPUS)) {
-        AddToDeviceList(dentry->d_name);
-      }
+        if ((strcmp(dentry->d_name, ".") == 0) ||
+           (strcmp(dentry->d_name, "..") == 0))
+           continue;
+        count++;
     }
     dentry = readdir(drm_dir);
+  }
+
+  for (uint32_t node_id = 0; node_id < count; node_id++) {
+    std::string path = kPathDRMRoot;
+    path += "/card";
+    path += std::to_string(node_id);
+    if (isAMDGPU(path) ||
+       (init_options_ & RSMI_INIT_FLAG_ALL_GPUS)) {
+          std::string d_name = "card";
+          d_name += std::to_string(node_id);
+          AddToDeviceList(d_name);
+      }
   }
 
   if (closedir(drm_dir)) {
