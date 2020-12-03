@@ -11,6 +11,16 @@ import os
 
 # Use ROCm installation path if running from standard installation
 path_librocm = os.path.dirname(os.path.realpath(__file__)) + '/../lib/librocm_smi64.so'
+if not os.path.isfile(path_librocm):
+    print('Unable to find %s . Trying /opt/rocm*' % path_librocm)
+    for root, dirs, files in os.walk('/opt', followlinks=True):
+        if 'librocm_smi64.so' in files:
+            path_librocm = os.path.join(os.path.realpath(root), 'librocm_smi64.so')
+    if os.path.isfile(path_librocm):
+        print('Using lib from %s' % path_librocm)
+    else:
+        print('Unable to find librocm_smi64.so')
+
 # ----------> TODO: Support static libs as well as SO
 
 try:
