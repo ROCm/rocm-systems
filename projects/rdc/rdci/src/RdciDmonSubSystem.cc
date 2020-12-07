@@ -507,12 +507,14 @@ void RdciDmonSubSystem::process() {
     amd::rdc::fld_id2name_map_t &field_id_to_descript =
                                  amd::rdc::get_field_id_description_from_id();
 
-    ss << "Listening for events: ";
-    uint32_t i;
-    for (i = 0; i < notif_fields.size() - 1; ++i) {
-      ss << field_id_to_descript.at(notif_fields[i]).label << ", ";
+    if (notif_fields.size()>0) {
+      ss << "Listening for events: ";
+      uint32_t i;
+      for (i = 0; i < notif_fields.size() - 1; ++i) {
+        ss << field_id_to_descript.at(notif_fields[i]).label << ", ";
+      }
+      ss << field_id_to_descript.at(notif_fields[i]).label << std::endl;
     }
-    ss << field_id_to_descript.at(notif_fields[i]).label << std::endl;
     ss << "GPU\t";
     if (show_timpstamps_) {
       ss << std::left << std::setw(25) << "TIMESTAMP";
