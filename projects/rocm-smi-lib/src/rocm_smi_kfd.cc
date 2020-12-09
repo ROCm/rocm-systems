@@ -559,12 +559,16 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
       node->get_property_value(kKFDNodePropLOCATION_IDStr,
                                                         &kfd_gpu_node_bus_fn);
     if (ret != 0) {
+      std:: cerr << "Failed to open properties file for kfd node " <<
+                                       node->node_index() << "." << std::endl;
       closedir(kfd_node_dir);
       return ret;
     }
     ret =
         node->get_property_value(kKFDNodePropDOMAINStr, &kfd_gpu_node_domain);
     if (ret != 0) {
+      std::cerr << "Failed to get \"domain\" properity from properties "
+              "files for kfd node " << node->node_index() << "." << std::endl;
       closedir(kfd_node_dir);
       return ret;
     }
@@ -577,6 +581,10 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
   }
 
   if (closedir(kfd_node_dir)) {
+    std::string err_str = "Failed to close KFD node directory ";
+    err_str += kKFDNodesPathRoot;
+    err_str += ".";
+    perror(err_str.c_str());
     return 1;
   }
   return 0;

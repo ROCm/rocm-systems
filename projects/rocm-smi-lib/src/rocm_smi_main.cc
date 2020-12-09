@@ -56,6 +56,7 @@
 #include <functional>
 #include <cerrno>
 #include <unordered_map>
+#include <iostream>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -230,6 +231,7 @@ static uint32_t GetMonitorDevices(const std::shared_ptr<amd::smi::Device> &d,
   if (d->monitor() != nullptr) {
     // Calculate BDFID and set for this device
     if (ConstructBDFID(d->path(), &bdfid) != 0) {
+      std::cerr << "Failed to construct BDFID." << std::endl;
       return 1;
     }
     d->set_bdfid(bdfid);
@@ -458,6 +460,7 @@ static bool isAMDGPU(std::string dev_path) {
 
 uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   uint32_t ret = 0;
+  std::string err_msg;
 
   // If this gets called more than once, clear previous findings.
   devices_.clear();
@@ -471,6 +474,10 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
 
   auto drm_dir = opendir(kPathDRMRoot);
   if (drm_dir == nullptr) {
+    err_msg = "Failed to open drm root directory ";
+    err_msg += kPathDRMRoot;
+    err_msg += ".";
+    perror(err_msg.c_str());
     return 1;
   }
 
@@ -492,6 +499,10 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   }
 
   if (closedir(drm_dir)) {
+    err_msg = "Failed to close drm root directory ";
+    err_msg += kPathDRMRoot;
+    err_msg += ".";
+    perror(err_msg.c_str());
     return 1;
   }
   return 0;
@@ -504,6 +515,7 @@ uint32_t RocmSMI::DiscoverAMDMonitors(void) {
 
   std::string mon_name;
   std::string tmp;
+  std::string err_msg;
 
   while (dentry != nullptr) {
     if (dentry->d_name[0] == '.') {
@@ -521,7 +533,11 @@ uint32_t RocmSMI::DiscoverAMDMonitors(void) {
       fs.open(tmp);
 
       if (!fs.is_open()) {
-          return 1;
+        err_msg = "Failed to open monitor file ";
+        err_msg += tmp;
+        err_msg += ".";
+        perror(err_msg.c_str());
+        return 1;
       }
       std::string mon_type;
       fs >> mon_type;
@@ -539,6 +555,10 @@ uint32_t RocmSMI::DiscoverAMDMonitors(void) {
   }
 
   if (closedir(mon_dir)) {
+    err_msg = "Failed to close monitor directory ";
+    err_msg += kPathHWMonRoot;
+    err_msg += ".";
+    perror(err_msg.c_str());
     return 1;
   }
   return 0;

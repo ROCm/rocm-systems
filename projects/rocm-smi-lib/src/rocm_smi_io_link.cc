@@ -177,7 +177,14 @@ int DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
   links->clear();
 
   auto kfd_node_dir = opendir(kKFDNodesPathRoot);
-  assert(kfd_node_dir != nullptr);
+
+  if (kfd_node_dir == nullptr) {
+    std::string err_msg = "Failed to open KFD nodes directory ";
+    err_msg += kKFDNodesPathRoot;
+    err_msg += ".";
+    perror(err_msg.c_str());
+    return 1;
+  }
 
   auto dentry_kfd = readdir(kfd_node_dir);
   while (dentry_kfd != nullptr) {
@@ -222,6 +229,10 @@ int DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
     }
 
     if (closedir(io_link_dir)) {
+      std::string err_msg = "Failed to close KFD nodes directory ";
+      err_msg += kKFDNodesPathRoot;
+      err_msg += ".";
+      perror(err_msg.c_str());
       return 1;
     }
 
