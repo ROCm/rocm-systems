@@ -69,6 +69,14 @@ add_custom_target( mytest
   COMMAND sh -xc "cp ${TEST_DIR}/golden_traces/tests_trace_cmp_levels.txt ${PROJECT_BINARY_DIR}/test/"
 )
 
+## Build HSA test
+execute_process ( COMMAND sh -xc "if [ ! -e ${TEST_DIR}/hsa ] ; then git clone https://github.com/ROCmSoftwarePlatform/hsa-class.git ${TEST_DIR}/hsa; fi" )
+execute_process ( COMMAND sh -xc "if [ -e ${TEST_DIR}/hsa ] ; then cd ${TEST_DIR}/hsa && git fetch origin && git checkout ${HSA_REV}; fi" )
+set ( TMP ${TEST_DIR} )
+set ( TEST_DIR ${HSA_TEST_DIR} )
+add_subdirectory ( ${HSA_TEST_DIR} ${PROJECT_BINARY_DIR}/test/hsa )
+set ( TEST_DIR ${TMP} )
+
 ## Util sources
 file( GLOB UTIL_SRC "${HSA_TEST_DIR}/util/*.cpp" )
 
@@ -94,12 +102,6 @@ set ( CO_LIB_SRC ${TEST_DIR}/app/codeobj_test.cpp )
 add_library ( ${CO_LIB_NAME} SHARED ${CO_LIB_SRC} )
 target_include_directories ( ${CO_LIB_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${GEN_INC_DIR} ${HSA_RUNTIME_INC_PATH} ${ROCM_INC_PATH} )
 target_link_libraries ( ${CO_LIB_NAME} ${ROCTRACER_TARGET} c stdc++ )
-
-## Build HSA test
-execute_process ( COMMAND sh -xc "if [ ! -e ${TEST_DIR}/hsa ] ; then git clone https://github.com/ROCmSoftwarePlatform/hsa-class.git ${TEST_DIR}/hsa; fi" )
-execute_process ( COMMAND sh -xc "if [ -e ${TEST_DIR}/hsa ] ; then cd ${TEST_DIR}/hsa && git fetch origin && git checkout ${HSA_REV}; fi" )
-set ( TEST_DIR ${HSA_TEST_DIR} )
-add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test/hsa )
 
 ## copying run script
 execute_process ( COMMAND sh -xc "cp ${RUN_SCRIPT} ${PROJECT_BINARY_DIR}" )
