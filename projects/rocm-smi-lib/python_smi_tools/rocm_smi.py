@@ -250,7 +250,7 @@ def getMemInfo(device, memType):
     return (memUsed, memTotal)
 
 
-def getName(pid):
+def getProcessName(pid):
     """ Get the process name of a specific pid
 
     @param pid: Process ID of a program to be parsed
@@ -258,14 +258,21 @@ def getName(pid):
     if int(pid) < 1:
         logging.debug('PID must be greater than 0')
         return 'UNKNOWN'
-    pName = str(subprocess.check_output("ps -p %d -o comm=" % (int(pid)), shell=True))
+    try:
+        pName = str(subprocess.check_output("ps -p %d -o comm=" % (int(pid)), shell=True))
+    except subprocess.CalledProcessError as e:
+        print(e.output)
+        pName = 'UNKNOWN'
+
+    if pName == None:
+        pName = 'UNKNOWN'
+
     # Remove the substrings surrounding from process name (b' and \n')
     if str(pName).startswith('b\''):
         pName = pName[2:]
     if str(pName).endswith('\\n\''):
         pName = pName[:-3]
-    else:
-        pName = 'UNKNOWN'
+
     return pName
 
 
@@ -1664,7 +1671,7 @@ def showPids():
             cuOccupancy = proc.cu_occupancy
         else:
             logging.debug('Unable to fetch process info by PID')
-        dataArray.append([pid, getName(pid), str(gpuNumber), str(vramUsage), str(sdmaUsage), str(cuOccupancy)])
+        dataArray.append([pid, getProcessName(pid), str(gpuNumber), str(vramUsage), str(sdmaUsage), str(cuOccupancy)])
     printLog(None, 'KFD process information:', None)
     print2DArray(dataArray)
     printLogSpacer()
