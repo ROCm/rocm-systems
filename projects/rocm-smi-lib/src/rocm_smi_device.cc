@@ -638,21 +638,23 @@ int Device::readDevInfoLine(DevInfoTypes type, std::string *line) {
   return 0;
 }
 
-int Device::readDevInfoBinary(DevInfoTypes type,
-                                std::vector<unsigned char> *retVec) {
+int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
+                                void *p_binary_data) {
   auto sysfs_path = path_;
 
+  FILE *ptr;
   sysfs_path += "/device/";
   sysfs_path += kDevAttribNameMap.at(type);
-
-  std::ifstream fs(sysfs_path, std::ios::binary);
-  if (!fs.is_open()) {
+  ptr  = fopen(sysfs_path.c_str(), "rb");
+  if (!ptr) {
     return errno;
   }
-  // copies all data into buffer
-  retVec->insert(retVec->begin(),
-               std::istreambuf_iterator<char>(fs), {});
 
+  size_t num = fread(p_binary_data, b_size, 1, ptr);
+  fclose(ptr);
+  if((num*b_size) != b_size){
+    return ENOENT;
+  }
   return 0;
 }
 
@@ -792,12 +794,13 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
   return 0;
 }
 
-int Device::readDevInfo(DevInfoTypes type, std::vector<unsigned char> *val) {
-  assert(val != nullptr);
+int Device::readDevInfo(DevInfoTypes type, std::size_t b_size,
+                                        void *p_binary_data) {
+  assert(p_binary_data != nullptr);
 
   switch (type) {
      case kDevGpuMetrics:
-      return readDevInfoBinary(type, val);
+      return readDevInfoBinary(type, b_size, p_binary_data);
       break;
 
     default:

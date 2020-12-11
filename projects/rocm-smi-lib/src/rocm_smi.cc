@@ -2224,18 +2224,17 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *smu) {
   DEVICE_MUTEX
   CHK_SUPPORT_NAME_ONLY(smu)
 
-  std::vector<unsigned char> val_vec;
-  rsmi_status_t ret = GetDevBinaryVec(amd::smi::kDevGpuMetrics, dv_ind,
-                                                                   &val_vec);
+  rsmi_status_t ret = GetDevBinaryBlob(amd::smi::kDevGpuMetrics, dv_ind,
+                                           sizeof(rsmi_gpu_metrics_t), smu);
+
+  // only supports gpu_metrics_v1_0 version
+  if (smu->common_header.format_revision != 1) {
+      return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
-
-  if (val_vec.size() == 0) {
-    return RSMI_STATUS_NOT_YET_IMPLEMENTED;
-  }
-
-  smu = reinterpret_cast<rsmi_gpu_metrics_t *>(val_vec.data());
 
   return ret;
   CATCH

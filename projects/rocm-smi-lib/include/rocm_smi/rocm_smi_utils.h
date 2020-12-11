@@ -81,8 +81,8 @@ rsmi_status_t
 GetDevValueVec(amd::smi::DevInfoTypes type,
                          uint32_t dv_ind, std::vector<std::string> *val_vec);
 rsmi_status_t
-GetDevBinaryVec(amd::smi::DevInfoTypes type,
-                         uint32_t dv_ind, std::vector<unsigned char> *val_vec);
+GetDevBinaryBlob(amd::smi::DevInfoTypes type,
+           uint32_t dv_ind, std::size_t b_size, void* p_binary_data);
 rsmi_status_t ErrnoToRsmiStatus(int err);
 
 struct pthread_wrap {

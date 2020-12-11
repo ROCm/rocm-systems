@@ -204,15 +204,16 @@ rsmi_status_t GetDevValueVec(amd::smi::DevInfoTypes type,
   return ErrnoToRsmiStatus(ret);
 }
 
-rsmi_status_t GetDevBinaryVec(amd::smi::DevInfoTypes type,
-                         uint32_t dv_ind, std::vector<unsigned char> *val_vec) {
-  assert(val_vec != nullptr);
-  if (val_vec == nullptr) {
+rsmi_status_t
+GetDevBinaryBlob(amd::smi::DevInfoTypes type,
+  uint32_t dv_ind, std::size_t b_size, void* p_binary_data) {
+  assert(p_binary_data != nullptr);
+  if (p_binary_data == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
   GET_DEV_FROM_INDX
 
-  int ret = dev->readDevInfo(type, val_vec);
+  int ret = dev->readDevInfo(type, b_size, p_binary_data);
   return ErrnoToRsmiStatus(ret);
 }
 

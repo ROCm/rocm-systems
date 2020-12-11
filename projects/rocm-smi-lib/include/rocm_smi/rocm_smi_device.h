@@ -178,7 +178,8 @@ class Device {
     int readDevInfoLine(DevInfoTypes type, std::string *line);
     int readDevInfo(DevInfoTypes type, std::string *val);
     int readDevInfo(DevInfoTypes type, std::vector<std::string> *retVec);
-    int readDevInfo(DevInfoTypes type, std::vector<unsigned char> *retVec);
+    int readDevInfo(DevInfoTypes type, std::size_t b_size,
+                                      void *p_binary_data);
     int writeDevInfo(DevInfoTypes type, uint64_t val);
     int writeDevInfo(DevInfoTypes type, std::string val);
 
@@ -220,8 +221,8 @@ class Device {
     int readDevInfoStr(DevInfoTypes type, std::string *retStr);
     int readDevInfoMultiLineStr(DevInfoTypes type,
                                             std::vector<std::string> *retVec);
-    int readDevInfoBinary(DevInfoTypes type,
-                                            std::vector<unsigned char> *retVec);
+    int readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
+                                            void *p_binary_data);
     int writeDevInfoStr(DevInfoTypes type, std::string valStr);
     uint64_t bdfid_;
     uint64_t kfd_gpu_id_;
