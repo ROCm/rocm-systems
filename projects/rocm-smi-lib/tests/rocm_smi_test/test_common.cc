@@ -55,6 +55,27 @@
 #include "rocm_smi_test/test_common.h"
 #include "rocm_smi/rocm_smi.h"
 
+static const std::map<rsmi_dev_perf_level_t, const char *>
+   kDevPerfLvlNameMap = {
+    {RSMI_DEV_PERF_LEVEL_AUTO, "RSMI_DEV_PERF_LEVEL_AUTO"},
+    {RSMI_DEV_PERF_LEVEL_LOW, "RSMI_DEV_PERF_LEVEL_LOW"},
+    {RSMI_DEV_PERF_LEVEL_HIGH, "RSMI_DEV_PERF_LEVEL_HIGH"},
+    {RSMI_DEV_PERF_LEVEL_MANUAL, "RSMI_DEV_PERF_LEVEL_MANUAL"},
+    {RSMI_DEV_PERF_LEVEL_STABLE_STD, "RSMI_DEV_PERF_LEVEL_STABLE_STD"},
+    {RSMI_DEV_PERF_LEVEL_STABLE_PEAK, "RSMI_DEV_PERF_LEVEL_STABLE_PEAK"},
+    {RSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK,
+                                       "RSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK"},
+    {RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK,
+                                       "RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK"},
+    {RSMI_DEV_PERF_LEVEL_DETERMINISM, "RSMI_DEV_PERF_LEVEL_DETERMINISM"},
+
+    {RSMI_DEV_PERF_LEVEL_UNKNOWN, "RSMI_DEV_PERF_LEVEL_UNKNOWN"},
+};
+// If the assert below fails, the map above needs to be updated to match
+// rsmi_dev_perf_level_t.
+static_assert(RSMI_DEV_PERF_LEVEL_LAST == RSMI_DEV_PERF_LEVEL_DETERMINISM,
+                                    "kDevPerfLvlNameMap needs to be updated");
+
 static const std::map<rsmi_gpu_block_t, const char *> kBlockNameMap = {
     {RSMI_GPU_BLOCK_UMC, "UMC"},
     {RSMI_GPU_BLOCK_SDMA, "SDMA"},
@@ -181,6 +202,9 @@ uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list) {
   return 0;
 }
 
+const char *GetPerfLevelStr(rsmi_dev_perf_level_t lvl) {
+  return kDevPerfLvlNameMap.at(lvl);
+}
 const char *GetBlockNameStr(rsmi_gpu_block_t id) {
   return kBlockNameMap.at(id);
 }

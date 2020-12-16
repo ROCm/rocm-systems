@@ -54,21 +54,6 @@
 #include "rocm_smi_test/functional/perf_level_read_write.h"
 #include "rocm_smi_test/test_common.h"
 
-static const std::map<rsmi_dev_perf_level_t, const char *>
-   kDevPerfLvlNameMap = {
-    {RSMI_DEV_PERF_LEVEL_AUTO, "RSMI_DEV_PERF_LEVEL_AUTO"},
-    {RSMI_DEV_PERF_LEVEL_LOW, "RSMI_DEV_PERF_LEVEL_LOW"},
-    {RSMI_DEV_PERF_LEVEL_HIGH, "RSMI_DEV_PERF_LEVEL_HIGH"},
-    {RSMI_DEV_PERF_LEVEL_MANUAL, "RSMI_DEV_PERF_LEVEL_MANUAL"},
-    {RSMI_DEV_PERF_LEVEL_STABLE_STD, "RSMI_DEV_PERF_LEVEL_STABLE_STD"},
-    {RSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK,
-                                       "RSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK"},
-    {RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK,
-                                       "RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK"},
-    {RSMI_DEV_PERF_LEVEL_STABLE_PEAK, "RSMI_DEV_PERF_LEVEL_STABLE_PEAK"},
-
-    {RSMI_DEV_PERF_LEVEL_UNKNOWN, "RSMI_DEV_PERF_LEVEL_UNKNOWN"},
-};
 
 TestPerfLevelReadWrite::TestPerfLevelReadWrite() : TestBase() {
   set_title("RSMI Performance Level Read/Write Test");
@@ -121,7 +106,7 @@ void TestPerfLevelReadWrite::Run(void) {
 
     IF_VERB(STANDARD) {
       std::cout << "\t**Original Perf Level:" <<
-                                   kDevPerfLvlNameMap.at(orig_pfl) << std::endl;
+                                       GetPerfLevelStr(orig_pfl) << std::endl;
     }
 
     uint32_t pfl_i = static_cast<uint32_t>(RSMI_DEV_PERF_LEVEL_FIRST);
@@ -132,7 +117,7 @@ void TestPerfLevelReadWrite::Run(void) {
 
       IF_VERB(STANDARD) {
         std::cout << "Set Performance Level to " <<
-            kDevPerfLvlNameMap.at(static_cast<rsmi_dev_perf_level_t>(pfl_i)) <<
+            GetPerfLevelStr(static_cast<rsmi_dev_perf_level_t>(pfl_i)) <<
                                                             " ..." << std::endl;
       }
       ret = rsmi_dev_perf_level_set(dv_ind,
@@ -141,12 +126,12 @@ void TestPerfLevelReadWrite::Run(void) {
       ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) {
-        std::cout << "\t**New Perf Level:" << kDevPerfLvlNameMap.at(pfl) <<
-                                                                      std::endl;
+        std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) <<
+                                                                    std::endl;
       }
     }
     IF_VERB(STANDARD) {
-      std::cout << "Reset Perf level to " << kDevPerfLvlNameMap.at(orig_pfl) <<
+      std::cout << "Reset Perf level to " << GetPerfLevelStr(orig_pfl) <<
                                                             " ..." << std::endl;
     }
     ret = rsmi_dev_perf_level_set(dv_ind, orig_pfl);
@@ -155,7 +140,7 @@ void TestPerfLevelReadWrite::Run(void) {
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
-      std::cout << "\t**New Perf Level:" << kDevPerfLvlNameMap.at(pfl) <<
+      std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) <<
                                                                       std::endl;
     }
   }

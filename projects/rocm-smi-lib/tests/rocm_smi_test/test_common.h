@@ -63,6 +63,7 @@ struct RSMITstGlobals {
 uint32_t ProcessCmdline(RSMITstGlobals* test, int arg_cnt, char** arg_list);
 
 void PrintTestHeader(uint32_t dv_ind);
+const char *GetPerfLevelStr(rsmi_dev_perf_level_t lvl);
 const char *GetBlockNameStr(rsmi_gpu_block_t id);
 const char *GetErrStateNameStr(rsmi_ras_err_state_t st);
 const char *FreqEnumToStr(rsmi_clk_type rsmi_clk);

@@ -58,7 +58,8 @@
 
 TestGpuMetricsRead::TestGpuMetricsRead() : TestBase() {
   set_title("RSMI GPU Metrics Read Test");
-  set_description("The GPU Metrics tests verifies that the gpu metrics info can be read properly.");
+  set_description("The GPU Metrics tests verifies that "
+                  "the gpu metrics info can be read properly.");
 }
 
 TestGpuMetricsRead::~TestGpuMetricsRead(void) {
@@ -179,7 +180,6 @@ void TestGpuMetricsRead::Run(void) {
     // Verify api support checking functionality is working
     err = rsmi_dev_gpu_metrics_info_get(i, nullptr);
     ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
-
     }
   }
 }

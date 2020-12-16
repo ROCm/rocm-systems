@@ -50,6 +50,7 @@
 #include <string>
 #include <map>
 #include <bitset>
+#include <algorithm>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
@@ -74,8 +75,8 @@ static const std::map<rsmi_dev_perf_level_t, const char *>
 
 TestPerfDeterminism::TestPerfDeterminism() : TestBase() {
   set_title("RSMI Performance Determinism Test");
-  set_description("The Performance Determinism tests verifies Enabling/Disabling "
-                   "performance determinism mode.");
+  set_description("The Performance Determinism tests verifies "
+                  "Enabling/Disabling performance determinism mode.");
 }
 
 TestPerfDeterminism::~TestPerfDeterminism(void) {
