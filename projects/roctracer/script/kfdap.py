@@ -1,4 +1,3 @@
-#!/usr/bin/python
 from __future__ import print_function
 import os, sys, re
 
@@ -80,7 +79,7 @@ class API_TableParser:
     if not os.path.isfile(header):
       self.fatal("file '" + header + "' not found")
 
-    self.inp = open(header, 'r')
+    self.inp = open(header, 'r', encoding='utf-8')
 
     self.beg_pattern = re.compile(name)
     self.end_pattern = re.compile('.*\)\s*;\s*$');
@@ -146,7 +145,7 @@ class API_DeclParser:
     if not os.path.isfile(header):
       self.fatal("file '" + header + "' not found")
 
-    self.inp = open(header, 'r')
+    self.inp = open(header, 'r', encoding='utf-8')
 
     self.end_pattern = re.compile('\)\s*;\s*$')
     self.data = data

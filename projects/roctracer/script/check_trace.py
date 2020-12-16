@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 #Copyright (c) 2015-present Advanced Micro Devices, Inc. All rights reserved.
 #
 #Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -200,10 +198,10 @@ def check_trace_status(tracename, verbose, check_trace_flag):
     events_order_r[tid] = events_order[tid]
   cnt = gen_events_info(trace,trace_level,no_events_cnt,events2ignore,events2chkcnt,events2chkord,verbose)
   if verbose:
-      print '\n' + rtrace + ':\n'
-      print cnt_r
-      print '\n' + trace + ':\n'
-      print cnt
+      print ('\n' + rtrace + ':\n')
+      print (cnt_r)
+      print ('\n' + trace + ':\n')
+      print (cnt)
       diff_strings(cnt_r, cnt, metric)
 
   if cnt_r == cnt:

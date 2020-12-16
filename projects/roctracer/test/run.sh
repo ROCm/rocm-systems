@@ -86,11 +86,11 @@ eval_test() {
       is_failed=0;
     else
       if [ $is_failed = 0 ] ; then
-        python ./test/check_trace.py -in $test_name -ck $check_trace_flag
+        python3 ./test/check_trace.py -in $test_name -ck $check_trace_flag
         is_failed=$?
         if [ $is_failed != 0 ] ; then
           echo "Trace checker error:"
-          python ./test/check_trace.py -v -in $test_name -ck $check_trace_flag
+          python3 ./test/check_trace.py -v -in $test_name -ck $check_trace_flag
         fi
       fi
     fi
