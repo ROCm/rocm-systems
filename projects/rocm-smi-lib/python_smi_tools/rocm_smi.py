@@ -377,8 +377,11 @@ def getVersion(deviceList, component):
 
 def print2DArray(dataArray):
     """ Print 2D Array with uniform spacing """
-    # TODO: Add --json/--csv support
+    global PRINT_JSON
     dataArrayLength = []
+    isPid = False
+    if str(dataArray[0][0]) == 'PID':
+        isPid = True
     for position in range(len(dataArray[0])):
         dataArrayLength.append(len(dataArray[0][position]))
     for position in range(len(dataArray)):
@@ -389,7 +392,18 @@ def print2DArray(dataArray):
         printString = ''
         for cell in range(len(dataArray[0])):
             printString += str(dataArray[position][cell]).ljust(dataArrayLength[cell], ' ') + '\t'
-        printLog(None, printString, None)
+        if PRINT_JSON:
+            printString = ' '.join(printString.split()).lower()
+            firstElement = printString.split(' ', 1)[0]
+            printString = printString.split(' ', 1)[1]
+            printString = printString.replace(' ', ', ')
+            if (position > 0):
+                if isPid:
+                    printSysLog('PID%s' % (firstElement), printString)
+                else:
+                    printSysLog(firstElement, printString)
+        else:
+            printLog(None, printString, None)
 
 
 def printEmptyLine():
