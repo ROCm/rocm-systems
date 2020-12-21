@@ -143,6 +143,13 @@ struct rsmi_func_id_iter_handle {
 };
 
 struct RocmSMI_env_vars {
+    // If RSMI_DEBUG_INFINITE_LOOP is non-zero, rsmi_init() will go into
+    // an infinite loop in debug builds. For release builds, this is
+    // ignored. This is useful for debugging RSMI applications with
+    // gdb. After attaching with gdb, the inf. loop can be exited and
+    // RSMI can be debugged.
+    uint32_t debug_inf_loop;
+
     // Bitfield that is AND'd with various RSMI_DEBUG_* bits to determine
     // which debugging information should be turned on. Env. variable
     // RSMI_DEBUG_BITFIELD is used to set all the debug info bits.

@@ -258,6 +258,8 @@ RocmSMI::Initialize(uint64_t flags) {
 
   GetEnvVariables();
 
+  while (env_vars_.debug_inf_loop) {}
+
   while (std::string(kAMDMonitorTypes[i]) != "") {
       amd_monitor_types_.insert(kAMDMonitorTypes[i]);
       ++i;
@@ -386,12 +388,14 @@ void RocmSMI::GetEnvVariables(void) {
   env_vars_.path_HWMon_root_override = nullptr;
   env_vars_.path_power_root_override = nullptr;
   env_vars_.enum_override = 0;
+  env_vars_.debug_inf_loop = 0;
 #else
   env_vars_.debug_output_bitfield = GetEnvVarUInteger("RSMI_DEBUG_BITFIELD");
   env_vars_.path_DRM_root_override   = getenv("RSMI_DEBUG_DRM_ROOT_OVERRIDE");
   env_vars_.path_HWMon_root_override = getenv("RSMI_DEBUG_HWMON_ROOT_OVERRIDE");
   env_vars_.path_power_root_override = getenv("RSMI_DEBUG_PP_ROOT_OVERRIDE");
   env_vars_.enum_override = GetEnvVarUInteger("RSMI_DEBUG_ENUM_OVERRIDE");
+  env_vars_.debug_inf_loop = GetEnvVarUInteger("RSMI_DEBUG_INFINITE_LOOP");
 #endif
 }
 
