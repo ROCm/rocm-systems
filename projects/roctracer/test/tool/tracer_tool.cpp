@@ -1024,10 +1024,18 @@ void tool_load() {
   ONLOAD_TRACE_END();
 }
 
+void exit_handler(int status, void* arg) {
+  ONLOAD_TRACE("status(" << status << ") arg(" << arg << ")");
+  tool_unload();
+  ONLOAD_TRACE_END();
+}
+
 // HSA-runtime tool on-load method
 extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                                   const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
+  on_exit(exit_handler, NULL);
+
   timer = new hsa_rt_utils::Timer(table->core_->hsa_system_get_info_fn);
 
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
@@ -1101,11 +1109,10 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
           ROCTRACER_CALL(roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API, cid, hip_api_callback, NULL));
           printf(" %s", api);
         }
-      }
-      else {
+      } else {
         ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
       }
-      ROCTRACER_CALL(roctracer_disable_op_callback(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_hipModuleUnload));
+
       if (is_stats_opt) {
 	const char* path = NULL;
 	FILE* f = open_output_file(output_prefix, "hip_api_stats.csv", &path);
@@ -1116,6 +1123,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
 	}
       }
     }
+
     if (trace_hip_activity) {
       hcc_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
       ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
@@ -1166,8 +1174,8 @@ extern "C" CONSTRUCTOR_API void constructor() {
 }
 extern "C" DESTRUCTOR_API void destructor() {
   ONLOAD_TRACE_BEG();
-  roctracer_flush_buf();
   tool_unload();
+  roctracer_flush_buf();
 
   if (hip_api_stats) hip_api_stats->dump();
   if (hip_kernel_stats) hip_kernel_stats->dump();
