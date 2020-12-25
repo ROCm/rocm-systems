@@ -1026,8 +1026,10 @@ void tool_load() {
 
 void exit_handler(int status, void* arg) {
   ONLOAD_TRACE("status(" << status << ") arg(" << arg << ")");
+#if 0
   tool_unload();
   ONLOAD_TRACE_END();
+#endif
 }
 
 // HSA-runtime tool on-load method

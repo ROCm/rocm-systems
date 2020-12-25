@@ -279,7 +279,8 @@ struct record_pair_t {
   roctracer_api_data_t data;
   record_pair_t() {};
 };
-static thread_local std::stack<record_pair_t> record_pair_stack;
+typedef std::stack<record_pair_t> record_pair_stack_t;
+static thread_local record_pair_stack_t* record_pair_stack = NULL;
 
 // Correlation id storage
 static thread_local activity_correlation_id_t correlation_id_tls = 0;
@@ -350,6 +351,7 @@ void* HIP_SyncApiDataCallback(
     void* arg)
 {
   static hsa_rt_utils::Timer timer;
+  if (record_pair_stack == NULL) record_pair_stack = new record_pair_stack_t;
 
   void* ret = NULL;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
@@ -368,8 +370,8 @@ void* HIP_SyncApiDataCallback(
     // Allocating a record if NULL passed
     if (record == NULL) {
       if (data != NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback enter: record is NULL");
-      record_pair_stack.push({});
-      auto& top = record_pair_stack.top();
+      record_pair_stack->push({});
+      auto& top = record_pair_stack->top();
       data = &(top.data.hip);
       data_ptr = const_cast<hip_api_data_t*>(data);
       data_ptr->phase = phase;
@@ -389,7 +391,7 @@ void* HIP_SyncApiDataCallback(
     ret = data_ptr;
   } else {
     // popping the record entry
-    if (!record_pair_stack.empty()) record_pair_stack.pop();
+    if (!record_pair_stack->empty()) record_pair_stack->pop();
 
     // Clearing correlatin ID
     correlation_id_tls = 0;
@@ -397,7 +399,7 @@ void* HIP_SyncApiDataCallback(
 
   const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0);
   DEBUG_TRACE("HIP_SyncApiDataCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) correlation_id(%lu) time_ns(%lu)\n",
-    name, phase, op_id, record, data, pool, (int)(record_pair_stack.size()), (data_ptr) ? data_ptr->correlation_id : 0, timer.timestamp_ns());
+    name, phase, op_id, record, data, pool, (int)(record_pair_stack->size()), (data_ptr) ? data_ptr->correlation_id : 0, timer.timestamp_ns());
 
   return ret;
 }
@@ -410,6 +412,7 @@ void* HIP_SyncActivityCallback(
 {
   static hsa_rt_utils::Timer timer;
   const timestamp_t timestamp_ns = timer.timestamp_ns();
+  if (record_pair_stack == NULL) record_pair_stack = new record_pair_stack_t;
 
   void* ret = NULL;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
@@ -428,8 +431,8 @@ void* HIP_SyncActivityCallback(
     // Allocating a record if NULL passed
     if (record == NULL) {
       if (data != NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback enter: record is NULL");
-      record_pair_stack.push({});
-      auto& top = record_pair_stack.top();
+      record_pair_stack->push({});
+      auto& top = record_pair_stack->top();
       record = &(top.record);
       data = &(top.data.hip);
       data_ptr = const_cast<hip_api_data_t*>(data);
@@ -459,8 +462,8 @@ void* HIP_SyncActivityCallback(
 
     // Getting record of stacked
     if (record == NULL) {
-      if (record_pair_stack.empty())  EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback exit: record stack is empty");
-      auto& top  = record_pair_stack.top();
+      if (record_pair_stack->empty())  EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback exit: record stack is empty");
+      auto& top  = record_pair_stack->top();
       record = &(top.record);
     }
 
@@ -482,7 +485,7 @@ void* HIP_SyncActivityCallback(
     pool->Write(*record);
 
     // popping the record entry
-    if (!record_pair_stack.empty()) record_pair_stack.pop();
+    if (!record_pair_stack->empty()) record_pair_stack->pop();
 
     // Clearing correlatin ID
     correlation_id_tls = 0;
@@ -490,7 +493,7 @@ void* HIP_SyncActivityCallback(
 
   const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0);
   DEBUG_TRACE("HIP_SyncActivityCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) correlation_id(%lu) beg_ns(%lu) end_ns(%lu)\n",
-    name, phase, op_id, record, data, pool, (int)(record_pair_stack.size()), (data_ptr) ? data_ptr->correlation_id : 0, timestamp_ns);
+    name, phase, op_id, record, data, pool, (int)(record_pair_stack->size()), (data_ptr) ? data_ptr->correlation_id : 0, timestamp_ns);
 
   return ret;
 }
