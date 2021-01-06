@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <chrono>  //NOLINT
 #include <algorithm>
 #include <vector>
+#include <set>
 #include "rdc_lib/rdc_common.h"
 #include "common/rdc_fields_supported.h"
 #include "rdc_lib/RdcLogger.h"
@@ -225,6 +226,86 @@ void RdcMetricFetcherImpl::get_pcie_throughput(const RdcFieldKey& key) {
                             "RDC_FI_PCIE_RX and RDC_FI_PCIE_TX to cache.");
         }
     } while (0);
+}
+
+rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
+        rdc_gpu_field_t* fields, uint32_t fields_count,
+        std::vector<rdc_gpu_field_value_t>& results) { // NOLINT
+    const std::set<rdc_field_t> rdc_bulk_fields = {
+      RDC_FI_GPU_CLOCK,  // current_gfxclk * 1000000
+      RDC_FI_MEMORY_TEMP,  // temperature_mem * 1000
+      RDC_FI_GPU_TEMP,  // temperature_edge * 1000
+      RDC_FI_POWER_USAGE,  //  average_socket_power * 1000000
+      RDC_FI_GPU_UTIL  // average_gfx_activity
+    };
+
+    // To prevent always call the bulk API even if it is not supported,
+    // the static is used to cache last try.
+    static rsmi_status_t rs = RSMI_STATUS_SUCCESS;
+    if (rs !=  RSMI_STATUS_SUCCESS) {
+      results.clear();
+      return RDC_ST_NOT_SUPPORTED;
+    }
+
+    // Organize the fields per GPU
+    std::map<uint32_t, std::vector<rdc_field_t>> bulk_fields;
+    for (uint32_t i = 0; i < fields_count; i++) {
+      if (rdc_bulk_fields.find(fields[i].field_id) != rdc_bulk_fields.end()) {
+        bulk_fields[fields[i].gpu_index].push_back(fields[i].field_id);
+      }
+    }
+
+    // Call the rocm_smi_lib API to bulk fetch the data
+    auto cur_time = now();
+    auto ite = bulk_fields.begin();
+    for (; ite != bulk_fields.end(); ite++) {
+      rsmi_gpu_metrics_t gpu_metrics;
+      rs = rsmi_dev_gpu_metrics_info_get(ite->first, &gpu_metrics);
+      if (rs != RSMI_STATUS_SUCCESS) {
+        results.clear();
+        return RDC_ST_NOT_SUPPORTED;
+      }
+      for (uint32_t j=0; j < ite->second.size(); j++) {
+        auto field_id = ite->second[j];
+        rdc_gpu_field_value_t value;
+        value.gpu_index = ite->first;
+        value.field_value.field_id = field_id;
+        value.field_value.type = INTEGER;
+        value.field_value.status = RSMI_STATUS_SUCCESS;
+        value.field_value.ts = cur_time;
+
+        switch (field_id) {
+          case RDC_FI_GPU_CLOCK:   // current_gfxclk * 1000000
+            value.field_value.value.l_int =
+              static_cast<int64_t>(gpu_metrics.current_gfxclk * 1000000);
+            break;
+          case RDC_FI_MEMORY_TEMP:   // temperature_mem * 1000
+            value.field_value.value.l_int =
+              static_cast<int64_t>(gpu_metrics.temperature_mem * 1000);
+            break;
+          case RDC_FI_GPU_TEMP:   // temperature_edge * 1000
+            value.field_value.value.l_int =
+              static_cast<int64_t>(gpu_metrics.temperature_edge * 1000);
+            break;
+          case RDC_FI_POWER_USAGE:   // average_socket_power * 1000000
+            value.field_value.value.l_int =
+              static_cast<int64_t>(gpu_metrics.average_socket_power * 1000000);
+            break;
+          case RDC_FI_GPU_UTIL:   // average_gfx_activity
+            value.field_value.value.l_int =
+              static_cast<int64_t>(gpu_metrics.average_gfx_activity);
+            break;
+          default:
+             value.field_value.status = RSMI_STATUS_NOT_SUPPORTED;
+            break;
+        }
+        if (value.field_value.status == RSMI_STATUS_SUCCESS) {
+          results.push_back(value);
+        }
+      }
+    }
+
+    return RDC_ST_OK;
 }
 
 static const uint64_t kGig = 1000000000;

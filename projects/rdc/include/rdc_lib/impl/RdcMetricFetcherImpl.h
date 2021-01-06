@@ -70,6 +70,9 @@ class RdcMetricFetcherImpl: public RdcMetricFetcher {
  public:
     rdc_status_t fetch_smi_field(uint32_t gpu_index,
         rdc_field_t field_id, rdc_field_value* value) override;
+    rdc_status_t bulk_fetch_smi_fields(
+        rdc_gpu_field_t* fields, uint32_t fields_count,
+        std::vector<rdc_gpu_field_value_t>& results) override;  // NOLINT
     RdcMetricFetcherImpl();
     ~RdcMetricFetcherImpl();
 

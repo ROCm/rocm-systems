@@ -23,7 +23,9 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_RDCMETRICFETCHER_H_
 
 #include <memory>
+#include <vector>
 #include "rdc_lib/rdc_common.h"
+#include "rdc_lib/RdcTelemetryLibInterface.h"
 #include "rdc/rdc.h"
 
 
@@ -37,6 +39,10 @@ class  RdcMetricFetcher {
 
     virtual rdc_status_t fetch_smi_field(uint32_t gpu_index,
         rdc_field_t field_id, rdc_field_value* value) = 0;
+
+    virtual rdc_status_t bulk_fetch_smi_fields(
+        rdc_gpu_field_t* fields, uint32_t fields_count,
+        std::vector<rdc_gpu_field_value_t>& results) = 0;  // NOLINT
     virtual ~RdcMetricFetcher() {}
 };
 

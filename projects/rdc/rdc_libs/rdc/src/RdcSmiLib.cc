@@ -39,13 +39,37 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
         return RDC_ST_BAD_PARAMETER;
     }
 
-    RDC_LOG(RDC_DEBUG, "Bulk fetch " << fields_count
+    RDC_LOG(RDC_DEBUG, "Fetch " << fields_count
             << " fields from rocm_smi_lib.");
 
+    // Bulk fetch fields
+    std::vector<rdc_gpu_field_value_t> bulk_results;
+    rdc_status_t status = metric_fetcher_->bulk_fetch_smi_fields(
+        fields, fields_count, bulk_results);
+    RDC_LOG(RDC_DEBUG, "Bulk fetched " << bulk_results.size()
+            << " fields from rocm_smi_lib which return " << status);
+    if (bulk_results.size() > 0) {
+        rdc_status_t status = callback(&bulk_results[0],
+                bulk_results.size(), user_data);
+        if (status != RDC_ST_OK) {
+                return status;
+        }
+    }
+
+    // Fetch it one by one for left fields
     const int BULK_FIELDS_MAX = 16;
     rdc_gpu_field_value_t values[BULK_FIELDS_MAX];
     uint32_t bulk_count = 0;
     for (uint32_t i = 0; i < fields_count; i++) {
+        bool is_fetched = false;
+        for (std::size_t j = 0; j < bulk_results.size(); j++) {
+            if (bulk_results[j].gpu_index == fields[i].gpu_index &&
+                bulk_results[j].field_value.field_id == fields[i].field_id) {
+                    is_fetched = true;
+                    break;
+                }
+        }
+        if (is_fetched) continue;
         if (bulk_count >= BULK_FIELDS_MAX) {
             rdc_status_t status = callback(values, bulk_count, user_data);
             // When the callback returns errors, stop processing and return.
