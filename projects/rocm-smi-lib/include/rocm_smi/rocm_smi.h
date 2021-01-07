@@ -2151,6 +2151,21 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
                              rsmi_clk_type_t clk_type, rsmi_frequencies_t *f);
 
 /**
+ *  @brief Reset the gpu associated with the device with provided device index
+ *
+ *  @details Given a device index @p dv_ind, this function will reset the GPU
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t rsmi_dev_gpu_reset(int32_t dv_ind);
+
+/**
  *  @brief This function retrieves the voltage/frequency curve information
  *
  *  @details Given a device index @p dv_ind and a pointer to a

@@ -70,6 +70,12 @@
 namespace amd {
 namespace smi {
 
+// Debug root file path
+static const char *kPathDebugRootFName = "/sys/kernel/debug/dri/";
+
+// Device debugfs file names
+static const char *kDevGpuResetFName = "amdgpu_gpu_recover";
+
 // Device sysfs file names
 static const char *kDevPerfLevelFName = "power_dpm_force_performance_level";
 static const char *kDevDevProdNameFName = "product_name";
@@ -273,6 +279,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevMemPageBad, kDevMemPageBadFName},
     {kDevNumaNode, kDevNumaNodeFName},
     {kDevGpuMetrics, kDevGpuMetricsFName},
+    {kDevGpuReset, kDevGpuResetFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -389,6 +396,7 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_memory_reserved_pages_get", {{kDevMemPageBadFName}, {}}},
   {"rsmi_topo_numa_affinity_get",        {{kDevNumaNodeFName}, {}}},
   {"rsmi_dev_gpu_metrics_info_get",      {{kDevGpuMetricsFName}, {}}},
+  {"rsmi_dev_gpu_reset",                 {{kDevGpuResetFName}, {}}},
 
   // These functions with variants, but no sensors/units. (May or may not
   // have mandatory dependencies.)
@@ -500,6 +508,33 @@ Device:: ~Device() {
 }
 
 template <typename T>
+int Device::openDebugFileStream(DevInfoTypes type, T *fs, const char *str) {
+  std::string debugfs_path;
+
+  debugfs_path = kPathDebugRootFName;
+  debugfs_path += std::to_string(index());
+  debugfs_path += "/";
+  debugfs_path += kDevAttribNameMap.at(type);
+
+  DBG_FILE_ERROR(debugfs_path, str);
+  bool reg_file;
+  int ret = isRegularFile(debugfs_path, &reg_file);
+
+  if (ret != 0) {
+    return ret;
+  }
+  if (!reg_file) {
+    return ENOENT;
+  }
+
+  fs->open(debugfs_path);
+  if (!fs->is_open()) {
+      return errno;
+  }
+  return 0;
+}
+
+template <typename T>
 int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   auto sysfs_path = path_;
 
@@ -533,6 +568,28 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   if (!fs->is_open()) {
       return errno;
   }
+
+  return 0;
+}
+
+int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
+  std::ifstream fs;
+  std::string line;
+  int ret = 0;
+
+  assert(retStr != nullptr);
+
+  ret = openDebugFileStream(type, &fs);
+  if (ret != 0) {
+    return ret;
+  }
+
+  if (!(fs.peek() == std::ifstream::traits_type::eof())) {
+    getline(fs, line);
+    *retStr = line;
+  }
+
+  fs.close();
 
   return 0;
 }
@@ -762,6 +819,11 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
       *val = std::stoul(tempStr, 0, 16);
       break;
 
+    case kDevGpuReset:
+      ret = readDebugInfoStr(type, &tempStr);
+      RET_IF_NONZERO(ret);
+      break;
+
     default:
       return EINVAL;
   }
@@ -899,7 +961,12 @@ void Device::fillSupportedFuncs(void) {
     mand_depends_met = true;
     for (; dep != it->second.mandatory_depends.end(); dep++) {
       std::string dep_path = dev_rt + "/" + *dep;
-      if (!FileExists(dep_path.c_str())) {
+      std::string debugfs_path;
+      debugfs_path = kPathDebugRootFName;
+      debugfs_path += std::to_string(index());
+      debugfs_path += "/";
+      debugfs_path += *dep;
+      if (!FileExists(dep_path.c_str()) && !FileExists(debugfs_path.c_str())) {
         mand_depends_met = false;
         break;
       }

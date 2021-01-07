@@ -2240,6 +2240,22 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *smu) {
   CATCH
 }
 
+rsmi_status_t
+rsmi_dev_gpu_reset(int32_t dv_ind) {
+  TRY
+  REQUIRE_ROOT_ACCESS
+  DEVICE_MUTEX
+
+  rsmi_status_t ret;
+  uint64_t status_code = 0;
+
+  // Read amdgpu_gpu_recover to reset it
+  ret = get_dev_value_int(amd::smi::kDevGpuReset, dv_ind, &status_code);
+  return ret;
+
+  CATCH
+}
+
 rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
                      uint32_t *num_regions, rsmi_freq_volt_region_t *buffer) {
   TRY

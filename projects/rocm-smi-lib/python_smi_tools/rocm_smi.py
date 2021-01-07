@@ -934,24 +934,21 @@ def setPerfDeterminism(deviceList, value):
 def resetGpu(device):
     """ Perform a GPU reset on the specified device
 
-    Parameters:
-    device -- DRM Device identifier
+    @param device: DRM device identifier
     """
-    # TODO: Implement GPU reset function in the LIB
     printLogSpacer(' Reset GPU ')
     global RETCODE
-    if  len(device) > 1:
+    if len(device) > 1:
         logging.error('GPU Reset can only be performed on one GPU per call')
         RETCODE = 1
         return
     resetDev = int(device[0])
-    filePath = '/sys/kernel/debug/dri/%d/amdgpu_gpu_recover' % (resetDev)
-    if os.path.isfile(filePath):
-        with open(filePath, 'r') as fileContents:
-            fileValue = fileContents.read()
-            printLog(resetDev, 'GPU[%d]\t: Reset was successful' % (resetDev), None)
+    ret = rocmsmi.rsmi_dev_gpu_reset(resetDev)
+    if rsmi_ret_ok(ret, resetDev):
+        printLog(resetDev, 'Successfully reset GPU %d' % (resetDev), None)
     else:
-        printErrLog(resetDev, 'Unable to reset device %d' % (resetDev))
+        printErrLog(resetDev, 'Unable to reset GPU %d' % (resetDev))
+        logging.debug('GPU reset failed with return value of %d' % ret)
     printLogSpacer()
 
 
@@ -2719,6 +2716,7 @@ if __name__ == '__main__':
     if args.gpureset:
         if not args.device:
             logging.error('No device specified. One device must be specified for GPU reset')
+            printLogSpacer()
             sys.exit(1)
         logging.debug('Only executing GPU reset, no other commands will be executed')
         resetGpu(args.device)

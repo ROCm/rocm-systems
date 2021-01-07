@@ -155,7 +155,8 @@ enum DevInfoTypes {
   kDevSerialNumber,
   kDevMemPageBad,
   kDevNumaNode,
-  kDevGpuMetrics
+  kDevGpuMetrics,
+  kDevGpuReset
 };
 
 typedef struct {
@@ -216,8 +217,11 @@ class Device {
     uint32_t card_indx_;  // This index corresponds to the drm index (ie, card#)
     uint32_t drm_render_minor_;
     const RocmSMI_env_vars *env_;
+    template <typename T> int openDebugFileStream(DevInfoTypes type, T *fs,
+                                                   const char *str = nullptr);
     template <typename T> int openSysfsFileStream(DevInfoTypes type, T *fs,
                                                    const char *str = nullptr);
+    int readDebugInfoStr(DevInfoTypes type, std::string *retStr);
     int readDevInfoStr(DevInfoTypes type, std::string *retStr);
     int readDevInfoMultiLineStr(DevInfoTypes type,
                                             std::vector<std::string> *retVec);
