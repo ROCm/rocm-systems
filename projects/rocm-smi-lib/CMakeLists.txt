@@ -178,7 +178,10 @@ if(CPACK_RPM_PACKAGE_RELEASE)
   set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 set (CPACK_RPM_PACKAGE_PROVIDES "rocm-smi")
-set (CPACK_RPM_PACKAGE_SUGGESTS "sudo")
+
+# The line below doesn't currently work; it may be this issue:
+# https://bugzilla.redhat.com/show_bug.cgi?id=1811358
+# set (CPACK_RPM_PACKAGE_SUGGESTS "sudo")
 
 #Prepare final version for the CPACK use
 set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}")
