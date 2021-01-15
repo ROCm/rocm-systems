@@ -146,9 +146,9 @@ if (${ADDRESS_SANITIZER})
     set(CMAKE_EXE_LINKER_FLAGS -fsanitize=address)
 
     if (BUILD_SHARED_LIBS})
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -shared-libasan" )
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -shared-libsan" )
     else ()
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libasan" )
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libsan" )
     endif ()
 endif()
 
