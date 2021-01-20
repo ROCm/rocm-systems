@@ -181,12 +181,10 @@ def getFanSpeed(device):
     ret = rocmsmi.rsmi_dev_fan_speed_get(device, sensor_ind, byref(fanLevel))
     if rsmi_ret_ok(ret, device):
         fl = fanLevel.value
-
     ret = rocmsmi.rsmi_dev_fan_speed_max_get(device, sensor_ind, byref(fanMax))
     if rsmi_ret_ok(ret, device):
         fm = fanMax.value
-
-    if fm == 0:
+    if fl == 0 or fm == 0:
         return (fl, fm) #  to prevent division by zero crash
 
     return (fl, round((float(fl) / float(fm)) * 100, 2))
@@ -1394,6 +1392,12 @@ def showCurrentFans(deviceList):
     for device in deviceList:
         (fanLevel, fanSpeed) = getFanSpeed(device)
         fanSpeed = round(fanSpeed)
+        if fanLevel == 0 or fanSpeed == 0:
+            printLog(device, 'Unable to detect fan speed for GPU %d' % (device), None)
+            logging.debug('Current fan speed is: %d\n' % (fanSpeed) + \
+                          '       Current fan level is: %d\n' % (fanLevel) + \
+                          '       (GPU might be cooled with a non-PWM fan)')
+            continue
         if PRINT_JSON:
             printLog(device, 'Fan speed (level)', str(fanLevel))
             printLog(device, 'Fan speed (%)', str(fanSpeed))
