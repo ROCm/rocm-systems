@@ -150,7 +150,7 @@ if(BUILD_STANDALONE)
        message("protoc cmd:")
        message("  $ ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}")
        message("    --grpc_out=${PROTOB_OUT_DIR}")
-       message("....--plugin=\"${GRPC_PLUGIN}\" ${file}")
+       message("....--plugin=protoc-gen-grpc=\"${GRPC_PLUGIN}\" ${file}")
 
        execute_process(COMMAND
           ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR}
@@ -177,9 +177,19 @@ set(CLIENT_COMPONENT "client")
 # Standalone only folders
 if(BUILD_STANDALONE)
   install(DIRECTORY ${GRPC_ROOT}/lib
-                 USE_SOURCE_PERMISSIONS
-                 DESTINATION usr
-                 FILES_MATCHING PATTERN "libgrpc*")
+                USE_SOURCE_PERMISSIONS
+                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc
+                COMPONENT ${SERVER_COMPONENT})
+# Also include dev setup for people do not want to build grpc
+  install(DIRECTORY ${GRPC_ROOT}/bin
+                USE_SOURCE_PERMISSIONS
+                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc
+                COMPONENT ${SERVER_COMPONENT})
+
+  install(DIRECTORY ${GRPC_ROOT}/include
+                USE_SOURCE_PERMISSIONS
+                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc
+                COMPONENT ${SERVER_COMPONENT})
 
   add_subdirectory("server")
   add_subdirectory("client")

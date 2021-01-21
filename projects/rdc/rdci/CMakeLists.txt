@@ -85,19 +85,29 @@ set(RDCI_SRC_LIST ${RDCI_SRC_LIST}
 message("RDCI_SRC_LIST=${RDCI_SRC_LIST}")
 set(RDCI_EXE "rdci")
 
-link_directories(${LIB_BOOSTRAP_DIR})
+link_directories(${LIB_BOOSTRAP_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
 
 add_executable(${RDCI_EXE} "${RDCI_SRC_LIST}")
 
 ## RUNPATH should help to run "rdci" without the usage of ldconfig
-set(RDC_RUNPATH "\$ORIGIN:\$ORIGIN/../lib:\$ORIGIN/../lib64")
-set(GRPC_RUNPATH "\$ORIGIN/../../grpc/lib:\$ORIGIN/../../grpc/lib64")
-set(CMAKE_EXE_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--rpath,${RDC_RUNPATH}:${GRPC_RUNPATH}")
-set(CMAKE_SKIP_BUILD_RPATH TRUE)
-set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
-set(CMAKE_SKIP_RPATH TRUE)
+if (DEFINED ENV{ROCM_RPATH})
+   set(RDC_RUNPATH "\$ORIGIN:\$ORIGIN/../lib:\$ORIGIN/../lib64")
+   set(GRPC_RUNPATH "\$ORIGIN/../grpc/lib:\$ORIGIN/../grpc/lib64")
+   set(CMAKE_EXE_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--rpath,${RDC_RUNPATH}:${GRPC_RUNPATH} -Wl,--no-as-needed -Wl,-z,origin")
+   set(CMAKE_SKIP_BUILD_RPATH TRUE)
+   set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+   set(CMAKE_SKIP_RPATH TRUE)
 
-target_link_libraries(${RDCI_EXE} pthread dl rdc_bootstrap)
+ # Run path can only include direct refer library, here is the indirect libs
+ # required by gRPC
+   set (RDCD_EXTRA_LIB absl_str_format_internal absl_strings absl_throw_delegate
+        absl_bad_optional_access absl_strings absl_throw_delegate absl_int128
+        absl_strings_internal absl_raw_logging_internal address_sorting
+        gpr upb ssl crypto )
+
+endif()
+
+target_link_libraries(${RDCI_EXE} ${RDCD_EXTRA_LIB} pthread dl rdc_bootstrap)
 
 
 ## Add the install directives for the rdci executable
