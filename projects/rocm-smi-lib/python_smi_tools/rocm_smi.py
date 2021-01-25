@@ -2591,7 +2591,7 @@ if __name__ == '__main__':
     groupAction.add_argument('--setvc', help='Change SCLK Voltage Curve (MHz mV) for a specific point',
                              metavar=('POINT', 'SCLK', 'SVOLT'), nargs=3)
     groupAction.add_argument('--setsrange', help='Set min(0) or max(1) SCLK speed', metavar=('MINMAX', 'SCLK'), nargs=2)
-    groupAction.add_argument('--setmrange', help='Set min(0) or max(1) MCLK speed', metavar=('MINMAX', 'SCLK'), nargs=2)
+    groupAction.add_argument('--setmrange', help='Set min(0) or max(1) MCLK speed', metavar=('MINMAX', 'MCLK'), nargs=2)
     groupAction.add_argument('--setfan', help='Set GPU Fan Speed (Level or %%)', metavar='LEVEL')
     groupAction.add_argument('--setperflevel', help='Set Performance Level', metavar='LEVEL')
     groupAction.add_argument('--setoverdrive', help='Set GPU OverDrive level (requires manual|high Perf level)',

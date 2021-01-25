@@ -47,7 +47,7 @@ usage: rocmSmiLib_cli.py [-h] [-d DEVICE [DEVICE ...]] [--alldevices] [--showhw]
                          [--resetfans] [--resetprofile] [--resetpoweroverdrive] [--resetxgmierr]
                          [--setsclk LEVEL [LEVEL ...]] [--setmclk LEVEL [LEVEL ...]] [--setpcie LEVEL [LEVEL ...]]
                          [--setslevel SCLKLEVEL SCLK SVOLT] [--setmlevel MCLKLEVEL MCLK MVOLT]
-                         [--setvc POINT SCLK SVOLT] [--setsrange MINMAX SCLK] [--setmrange MINMAX SCLK] [--setfan LEVEL]
+                         [--setvc POINT SCLK SVOLT] [--setsrange MINMAX SCLK] [--setmrange MINMAX MCLK] [--setfan LEVEL]
                          [--setperflevel LEVEL] [--setoverdrive %] [--setmemoverdrive %] [--setpoweroverdrive WATTS]
                          [--setprofile SETPROFILE] [--rasenable BLOCK ERRTYPE] [--rasdisable BLOCK ERRTYPE]
                          [--rasinject BLOCK] [--gpureset] [--load FILE | --save FILE] [--autorespond RESPONSE]
@@ -132,7 +132,7 @@ Set options:
                                                         specific Level
   --setvc POINT SCLK SVOLT                              Change SCLK Voltage Curve (MHz mV) for a specific point
   --setsrange MINMAX SCLK                               Set min(0) or max(1) SCLK speed
-  --setmrange MINMAX SCLK                               Set min(0) or max(1) MCLK speed
+  --setmrange MINMAX MCLK                               Set min(0) or max(1) MCLK speed
   --setfan LEVEL                                        Set GPU Fan Speed (Level or %)
   --setperflevel LEVEL                                  Set Performance Level
   --setoverdrive %                                      Set GPU OverDrive level (requires manual|high Perf level)
