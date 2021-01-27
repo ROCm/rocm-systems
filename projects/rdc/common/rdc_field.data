@@ -84,6 +84,10 @@ FLD_DESC_ENT(RDC_EVNT_XGMI_1_BEATS_TX,   "Data sent to neighbor 1 (32 byte pkts)
 
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_THRPUT,     "Tx throughput to XGMI neighbor 0 in b/s",     "XGMI_0_T",         true)
 FLD_DESC_ENT(RDC_EVNT_XGMI_1_THRPUT,     "Tx throughput to XGMI neighbor 1 in b/s",     "XGMI_1_T",         true)
+FLD_DESC_ENT(RDC_EVNT_XGMI_2_THRPUT,     "Tx throughput to XGMI neighbor 2 in b/s",     "XGMI_2_T",         true)
+FLD_DESC_ENT(RDC_EVNT_XGMI_3_THRPUT,     "Tx throughput to XGMI neighbor 3 in b/s",     "XGMI_3_T",         true)
+FLD_DESC_ENT(RDC_EVNT_XGMI_4_THRPUT,     "Tx throughput to XGMI neighbor 4 in b/s",     "XGMI_4_T",         true)
+FLD_DESC_ENT(RDC_EVNT_XGMI_5_THRPUT,     "Tx throughput to XGMI neighbor 5 in b/s",     "XGMI_5_T",         true)
 
 // Asynchronous event notifications
 FLD_DESC_ENT(RDC_EVNT_NOTIF_VMFAULT,     "VM page fault",                               "VM_PAGE_FAULT",    false)

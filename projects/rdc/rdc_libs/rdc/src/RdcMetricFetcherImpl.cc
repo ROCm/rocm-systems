@@ -47,14 +47,14 @@ static const std::unordered_map<rdc_field_t, rsmi_event_type_t>
     {RDC_EVNT_XGMI_1_REQ_TX,  RSMI_EVNT_XGMI_1_REQUEST_TX},
     {RDC_EVNT_XGMI_1_RESP_TX, RSMI_EVNT_XGMI_1_RESPONSE_TX},
     {RDC_EVNT_XGMI_1_BEATS_TX,    RSMI_EVNT_XGMI_1_BEATS_TX},
-};
 
-// This maps pseudo-events to the raw events that they use.
-static const std::unordered_map<rdc_field_t, rdc_field_t> pseudo_evt_map = {
-    {RDC_EVNT_XGMI_0_THRPUT, RDC_EVNT_XGMI_0_BEATS_TX},
-    {RDC_EVNT_XGMI_1_THRPUT, RDC_EVNT_XGMI_1_BEATS_TX},
+    {RDC_EVNT_XGMI_0_THRPUT, RSMI_EVNT_XGMI_DATA_OUT_0},
+    {RDC_EVNT_XGMI_1_THRPUT, RSMI_EVNT_XGMI_DATA_OUT_1},
+    {RDC_EVNT_XGMI_2_THRPUT, RSMI_EVNT_XGMI_DATA_OUT_2},
+    {RDC_EVNT_XGMI_3_THRPUT, RSMI_EVNT_XGMI_DATA_OUT_3},
+    {RDC_EVNT_XGMI_4_THRPUT, RSMI_EVNT_XGMI_DATA_OUT_4},
+    {RDC_EVNT_XGMI_5_THRPUT, RSMI_EVNT_XGMI_DATA_OUT_5},
 };
-
 
 RdcMetricFetcherImpl::RdcMetricFetcherImpl() {
     task_started_ = true;
@@ -442,6 +442,10 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index,
            break;
          case RDC_EVNT_XGMI_0_THRPUT:
          case RDC_EVNT_XGMI_1_THRPUT:
+         case RDC_EVNT_XGMI_2_THRPUT:
+         case RDC_EVNT_XGMI_3_THRPUT:
+         case RDC_EVNT_XGMI_4_THRPUT:
+         case RDC_EVNT_XGMI_5_THRPUT:
            read_rsmi_counter();
            if (value->status == RDC_ST_OK) {
              if (rsmi_data->counter_val.time_running > 0) {
@@ -492,18 +496,6 @@ RdcMetricFetcherImpl::get_rsmi_data(RdcFieldKey key) {
   if (r_info != rsmi_data_.end()) {
     return r_info->second;
   }
-  auto pseudo_key_field_id = pseudo_evt_map.find(key.second);
-  if (pseudo_key_field_id != pseudo_evt_map.end()) {
-    RdcFieldKey new_key;
-
-    new_key.first = key.first;
-    new_key.second = pseudo_key_field_id->second;
-
-    r_info = rsmi_data_.find(new_key);
-    if (r_info != rsmi_data_.end()) {
-      return r_info->second;
-    }
-  }
   return nullptr;
 }
 
@@ -530,17 +522,13 @@ static rdc_status_t init_rsmi_counter(RdcFieldKey fk,
     return RDC_ST_INSUFF_RESOURCES;
   }
 
-  auto raw_evt = pseudo_evt_map.find(f);
-  if (raw_evt != pseudo_evt_map.end()) {
-    f = raw_evt->second;
-  }
   rsmi_event_type_t evt = rdc_evnt_2_rsmi_field.at(f);
   ret = rsmi_dev_counter_create(dv_ind, evt, handle);
   if (ret != RSMI_STATUS_SUCCESS) {
     return Rsmi2RdcError(ret);
   }
 
-  ret = rsmi_counter_control(*handle, RSMI_CNTR_CMD_START, NULL);
+  ret = rsmi_counter_control(*handle, RSMI_CNTR_CMD_START, nullptr);
   return Rsmi2RdcError(ret);
 }
 
@@ -557,7 +545,11 @@ rdc_status_t RdcMetricFetcherImpl::delete_rsmi_handle(RdcFieldKey fk) {
     case RDC_EVNT_XGMI_1_RESP_TX:
     case RDC_EVNT_XGMI_1_BEATS_TX:
     case RDC_EVNT_XGMI_0_THRPUT:
-    case RDC_EVNT_XGMI_1_THRPUT: {
+    case RDC_EVNT_XGMI_1_THRPUT:
+    case RDC_EVNT_XGMI_2_THRPUT:
+    case RDC_EVNT_XGMI_3_THRPUT:
+    case RDC_EVNT_XGMI_4_THRPUT:
+    case RDC_EVNT_XGMI_5_THRPUT: {
       rsmi_event_handle_t h;
       if (rsmi_data_.find(fk) == rsmi_data_.end()) {
         return RDC_ST_NOT_SUPPORTED;
@@ -585,7 +577,33 @@ rdc_status_t RdcMetricFetcherImpl::delete_rsmi_handle(RdcFieldKey fk) {
 }
 
 rdc_status_t RdcMetricFetcherImpl::acquire_rsmi_handle(RdcFieldKey fk) {
-  rdc_status_t result;
+  rdc_status_t ret;
+
+  auto get_evnt_handle = [&](rsmi_event_group_t grp) {
+    rsmi_event_handle_t handle;
+    rdc_status_t result;
+
+    if (get_rsmi_data(fk) != nullptr) {
+      // This event has already been initialized.
+      return RDC_ST_ALREADY_EXIST;
+    }
+
+    result = init_rsmi_counter(fk, grp, &handle);
+    if (result != RDC_ST_OK) {
+      return result;
+    }
+    auto fsh = std::shared_ptr<FieldRSMIData>(new FieldRSMIData);
+
+    if (fsh == nullptr) {
+      return RDC_ST_INSUFF_RESOURCES;
+    }
+
+    fsh->evt_handle = handle;
+
+    rsmi_data_[fk] = fsh;
+
+    return RDC_ST_OK;
+  };
 
   switch (fk.second) {
     case RDC_EVNT_XGMI_0_NOP_TX:
@@ -596,41 +614,30 @@ rdc_status_t RdcMetricFetcherImpl::acquire_rsmi_handle(RdcFieldKey fk) {
     case RDC_EVNT_XGMI_1_REQ_TX:
     case RDC_EVNT_XGMI_1_RESP_TX:
     case RDC_EVNT_XGMI_1_BEATS_TX:
+      ret = get_evnt_handle(RSMI_EVNT_GRP_XGMI);
+      break;
+
     case RDC_EVNT_XGMI_0_THRPUT:
-    case RDC_EVNT_XGMI_1_THRPUT: {
-        rsmi_event_handle_t handle;
-
-        if (get_rsmi_data(fk) != nullptr) {
-          // This event has already been initialized.
-          return RDC_ST_ALREADY_EXIST;
-        }
-
-        result = init_rsmi_counter(fk, RSMI_EVNT_GRP_XGMI, &handle);
-        if (result != RDC_ST_OK) {
-          return result;
-        }
-        auto fsh = std::shared_ptr<FieldRSMIData>(new FieldRSMIData);
-
-        if (fsh == nullptr) {
-          return RDC_ST_INSUFF_RESOURCES;
-        }
-
-        fsh->evt_handle = handle;
-
-        auto pseudo_key = pseudo_evt_map.find(fk.second);
-
-        if (pseudo_key != pseudo_evt_map.end()) {
-          fk.second = pseudo_key->second;
-        }
-        rsmi_data_[fk] = fsh;
-      }
+    case RDC_EVNT_XGMI_1_THRPUT:
+    case RDC_EVNT_XGMI_2_THRPUT:
+    case RDC_EVNT_XGMI_3_THRPUT:
+    case RDC_EVNT_XGMI_4_THRPUT:
+    case RDC_EVNT_XGMI_5_THRPUT:
+      ret = get_evnt_handle(RSMI_EVNT_GRP_XGMI_DATA_OUT);
       break;
 
     default:
       break;
   }
 
-  return RDC_ST_OK;
+  if (ret == RDC_ST_INSUFF_RESOURCES) {
+    amd::rdc::fld_id2name_map_t &field_id_to_descript =
+                                 amd::rdc::get_field_id_description_from_id();
+
+    RDC_LOG(RDC_ERROR, "No event counters are available for " <<
+                     field_id_to_descript.at(fk.second).enum_name << " event.");
+  }
+  return ret;
 }
 
 }  // namespace rdc

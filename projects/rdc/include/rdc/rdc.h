@@ -261,6 +261,14 @@ typedef enum {
                                      //!< neighbor 0 in byes/sec
   RDC_EVNT_XGMI_1_THRPUT,            //!< Transmit throughput to XGMI
                                      //!< neighbor 1 in byes/sec
+  RDC_EVNT_XGMI_2_THRPUT,            //!< Transmit throughput to XGMI
+                                     //!< neighbor 2 in byes/sec
+  RDC_EVNT_XGMI_3_THRPUT,            //!< Transmit throughput to XGMI
+                                     //!< neighbor 3 in byes/sec
+  RDC_EVNT_XGMI_4_THRPUT,            //!< Transmit throughput to XGMI
+                                     //!< neighbor 4 in byes/sec
+  RDC_EVNT_XGMI_5_THRPUT,            //!< Transmit throughput to XGMI
+                                     //!< neighbor 5 in byes/sec
 
   RDC_EVNT_NOTIF_VMFAULT = 2000,        //!< VM page fault
   RDC_EVNT_NOTIF_FIRST = RDC_EVNT_NOTIF_VMFAULT,

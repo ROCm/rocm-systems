@@ -145,7 +145,9 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_query(
             RDC_EVNT_XGMI_0_RESP_TX, RDC_EVNT_XGMI_0_BEATS_TX,
             RDC_EVNT_XGMI_1_NOP_TX, RDC_EVNT_XGMI_1_REQ_TX,
             RDC_EVNT_XGMI_1_RESP_TX, RDC_EVNT_XGMI_1_BEATS_TX,
-            RDC_EVNT_XGMI_0_THRPUT, RDC_EVNT_XGMI_1_THRPUT
+            RDC_EVNT_XGMI_0_THRPUT, RDC_EVNT_XGMI_1_THRPUT,
+            RDC_EVNT_XGMI_2_THRPUT, RDC_EVNT_XGMI_3_THRPUT,
+            RDC_EVNT_XGMI_4_THRPUT, RDC_EVNT_XGMI_5_THRPUT,
     };
     std::copy(fields.begin(), fields.end(), field_ids);
     *field_count = fields.size();

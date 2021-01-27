@@ -25,7 +25,7 @@ THE SOFTWARE.
 
 #include <unordered_map>
 #include <vector>
-#include <mutex>
+#include <mutex>  // NOLINT
 
 #include "rdc/rdc.h"
 #include "rdc_lib/impl/RdcTelemetryModule.h"
