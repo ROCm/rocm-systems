@@ -1088,9 +1088,9 @@ def setPowerOverDrive(deviceList, value, autoRespond):
         printLogSpacer(' Reset GPU Power OverDrive ')
     else:
         printLogSpacer(' Set GPU Power OverDrive ')
-        confirmOutOfSpecWarning(autoRespond)
     # Value in Watts - stored early this way to avoid strenuous value type conversions
     strValue = value
+    specWarningConfirmed = False
     for device in deviceList:
         power_cap_min = c_uint64()
         power_cap_max = c_uint64()
@@ -1111,10 +1111,20 @@ def setPowerOverDrive(deviceList, value, autoRespond):
             logging.error('GPU[%s]\t\t: Value cannot be less than: %dW ', device, power_cap_min.value / 1000000)
             RETCODE = 1
             return
-        new_cap = c_uint64()
+        current_power_cap = c_uint64()
+        default_power_cap = c_uint64()
+        new_power_cap = c_uint64()
         # Wattage input value converted to microWatt for ROCm SMI Lib
-        new_cap.value = int(value) * 1000000
-        ret = rocmsmi.rsmi_dev_power_cap_set(device, 0, new_cap)
+        new_power_cap.value = int(value) * 1000000
+        ret = rocmsmi.rsmi_dev_power_cap_get(device, 0, byref(current_power_cap))
+        ret = rocmsmi.rsmi_dev_power_cap_set(device, 0, 0)
+        ret = rocmsmi.rsmi_dev_power_cap_get(device, 0, byref(default_power_cap))
+        if current_power_cap.value < default_power_cap.value:
+            current_power_cap.value = default_power_cap.value
+        if not specWarningConfirmed and new_power_cap.value > current_power_cap.value:
+            confirmOutOfSpecWarning(autoRespond)
+            specWarningConfirmed = True
+        ret = rocmsmi.rsmi_dev_power_cap_set(device, 0, new_power_cap)
         if rsmi_ret_ok(ret, device):
             if value == 0:
                 power_cap = c_uint64()
@@ -1124,7 +1134,12 @@ def setPowerOverDrive(deviceList, value, autoRespond):
                         printLog(device, 'Successfully reset Power OverDrive to: %sW' % (int(power_cap.value / 1000000)), None)
             else:
                 if not PRINT_JSON:
-                    printLog(device, 'Successfully set power to: %sW' % (strValue), None)
+                    ret = rocmsmi.rsmi_dev_power_cap_get(device, 0, byref(current_power_cap))
+                    if current_power_cap.value == new_power_cap.value:
+                        printLog(device, 'Successfully set power to: %sW' % (strValue), None)
+                    else:
+                        printErrLog(device, 'Unable set power to: %sW, current value is %sW' % \
+                        (strValue, int(current_power_cap.value / 1000000)))
         else:
             if value == 0:
                 printErrLog(device, 'Unable to reset Power OverDrive to default')
