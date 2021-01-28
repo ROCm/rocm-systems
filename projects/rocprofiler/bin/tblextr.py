@@ -673,15 +673,16 @@ inext = re.sub(r'^.*(\.[^\.]+)$', r'\1', inext)
 dbfile = ''
 csvfile = ''
 
-begin_ts_file = indir + '/begin_ts_file.txt'
-if os.path.isfile(begin_ts_file):
-  with open(begin_ts_file, mode='r') as fd:
-    ind = 0
-    for line in fd.readlines():
-      val = int(line)
-      if ind == 0 or val < START_NS: START_NS = val
-      ind += 1
-  print('START timestamp found (' + str(START_NS) + 'ns)')
+if 'ROCP_JSON_REBASE' in os.environ and os.environ['ROCP_JSON_REBASE'] == 0:
+  begin_ts_file = indir + '/begin_ts_file.txt'
+  if os.path.isfile(begin_ts_file):
+    with open(begin_ts_file, mode='r') as fd:
+      ind = 0
+      for line in fd.readlines():
+        val = int(line)
+        if ind == 0 or val < START_NS: START_NS = val
+        ind += 1
+    print('START timestamp found (' + str(START_NS) + 'ns)')
 
 if re.search(r'\.csv$', outfile):
   csvfile = outfile
