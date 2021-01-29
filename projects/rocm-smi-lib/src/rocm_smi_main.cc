@@ -118,10 +118,6 @@ static uint32_t  GetDrmRenderMinor(const std::string s) {
   return static_cast<uint32_t>(drm_minor);
 }
 
-static int SameDevice(const std::string fileA, const std::string fileB) {
-  return SameFile(fileA + "/device", fileB + "/device");
-}
-
 //  Determine if provided string is a bdfid pci path directory of the form
 //  XXXX:XX:XX.X,
 //  domain:bus:device.function
@@ -217,28 +213,6 @@ static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
 
   return 1;
 }
-// Call-back function to append to a vector of Devices
-static uint32_t GetMonitorDevices(const std::shared_ptr<amd::smi::Device> &d,
-                                                                    void *p) {
-  std::string val_str;
-  uint64_t bdfid;
-
-  assert(p != nullptr);
-
-  std::vector<std::shared_ptr<amd::smi::Device>> *device_list =
-    reinterpret_cast<std::vector<std::shared_ptr<amd::smi::Device>> *>(p);
-
-  if (d->monitor() != nullptr) {
-    // Calculate BDFID and set for this device
-    if (ConstructBDFID(d->path(), &bdfid) != 0) {
-      std::cerr << "Failed to construct BDFID." << std::endl;
-      return 1;
-    }
-    d->set_bdfid(bdfid);
-    device_list->push_back(d);
-  }
-  return 0;
-}
 
 void
 RocmSMI::Initialize(uint64_t flags) {
@@ -273,11 +247,14 @@ RocmSMI::Initialize(uint64_t flags) {
             "DiscoverAmdgpuDevices() failed.");
   }
 
-  // IterateSMIDevices will iterate through all the known devices and apply
-  // the provided call-back to each device found.
-  ret = IterateSMIDevices(GetMonitorDevices,
-                                  reinterpret_cast<void *>(&monitor_devices_));
-
+  uint64_t bdfid;
+  for (uint32_t i = 0; i < devices_.size(); ++i) {
+    if (ConstructBDFID(devices_[i]->path(), &bdfid) != 0) {
+      std::cerr << "Failed to construct BDFID." << std::endl;
+      ret = 1;
+    }
+    devices_[i]->set_bdfid(bdfid);
+  }
   if (ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
             "Failed to initialize rocm_smi library (amdgpu node discovery).");
@@ -305,11 +282,11 @@ RocmSMI::Initialize(uint64_t flags) {
 
   // Remove any drm nodes that don't have  a corresponding readable kfd node.
   // kfd nodes will not be added if their properties file is not readable.
-  auto dev_iter = monitor_devices_.begin();
-  while (dev_iter != monitor_devices_.end()) {
+  auto dev_iter = devices_.begin();
+  while (dev_iter != devices_.end()) {
     uint64_t bdfid = (*dev_iter)->bdfid();
     if (tmp_map.find(bdfid) == tmp_map.end()) {
-      dev_iter = monitor_devices_.erase(dev_iter);
+      dev_iter = devices_.erase(dev_iter);
       continue;
     }
     dev_iter++;
@@ -318,8 +295,8 @@ RocmSMI::Initialize(uint64_t flags) {
   // 1. construct kfd_node_map_ with gpu_id as key and *Device as value
   // 2. for each kfd node, write the corresponding dv_ind
   // 3. for each amdgpu device, write the corresponding gpu_id
-  for (uint32_t dv_ind = 0; dv_ind < monitor_devices_.size(); ++dv_ind) {
-    dev = monitor_devices_[dv_ind];
+  for (uint32_t dv_ind = 0; dv_ind < devices_.size(); ++dv_ind) {
+    dev = devices_[dv_ind];
     uint64_t bdfid = dev->bdfid();
     assert(tmp_map.find(bdfid) != tmp_map.end());
     if (tmp_map.find(bdfid) == tmp_map.end()) {
@@ -337,7 +314,6 @@ RocmSMI::Initialize(uint64_t flags) {
 
 void
 RocmSMI::Cleanup() {
-  monitor_devices_.clear();
   devices_.clear();
   monitors_.clear();
 
@@ -399,30 +375,80 @@ void RocmSMI::GetEnvVariables(void) {
 #endif
 }
 
+std::shared_ptr<Monitor>
+RocmSMI::FindMonitor(std::string monitor_path) {
+  std::string tmp;
+  std::string err_msg;
+  std::string mon_name;
+  std::shared_ptr<Monitor> m;
+
+  if (!FileExists(monitor_path.c_str())) {
+    return nullptr;
+  }
+
+  auto mon_dir = opendir(monitor_path.c_str());
+
+  if (mon_dir == nullptr) {
+    return nullptr;
+  }
+  auto dentry = readdir(mon_dir);
+
+  while (dentry != nullptr) {
+    if (dentry->d_name[0] == '.') {
+      dentry = readdir(mon_dir);
+      continue;
+    }
+
+    mon_name = monitor_path;
+    mon_name += "/";
+    mon_name += dentry->d_name;
+    tmp = mon_name + "/name";
+
+    if (FileExists(tmp.c_str())) {
+      std::ifstream fs;
+      fs.open(tmp);
+
+      if (!fs.is_open()) {
+        err_msg = "Failed to open monitor file ";
+        err_msg += tmp;
+        err_msg += ".";
+        perror(err_msg.c_str());
+        return nullptr;
+      }
+      std::string mon_type;
+      fs >> mon_type;
+      fs.close();
+
+      if (amd_monitor_types_.find(mon_type) != amd_monitor_types_.end()) {
+        m = std::shared_ptr<Monitor>(new Monitor(mon_name, &env_vars_));
+        m->setTempSensorLabelMap();
+        m->setVoltSensorLabelMap();
+        break;
+      }
+    }
+    dentry = readdir(mon_dir);
+  }
+
+  if (closedir(mon_dir)) {
+    err_msg = "Failed to close monitor directory ";
+    err_msg += kPathHWMonRoot;
+    err_msg += ".";
+    perror(err_msg.c_str());
+    return nullptr;
+  }
+
+  return m;
+}
 void
 RocmSMI::AddToDeviceList(std::string dev_name) {
-  auto ret = 0;
-
   auto dev_path = std::string(kPathDRMRoot);
   dev_path += "/";
   dev_path += dev_name;
 
   auto dev = std::shared_ptr<Device>(new Device(dev_path, &env_vars_));
 
-  auto m = monitors_.begin();
-
-  while (m != monitors_.end()) {
-      ret = SameDevice(dev->path(), (*m)->path());
-
-      if (ret == 0) {
-        dev->set_monitor(*m);
-        m = monitors_.erase(m);
-        break;
-      } else {
-        assert(ret == 1);
-        ++m;
-      }
-  }
+  std::shared_ptr<Monitor> m = FindMonitor(dev_path + "/device/hwmon");
+  dev->set_monitor(m);
 
   std::string d_name = dev_name;
   uint32_t card_indx = GetDeviceIndex(d_name);
@@ -439,7 +465,12 @@ static const uint32_t kAmdGpuId = 0x1002;
 
 static bool isAMDGPU(std::string dev_path) {
   std::string vend_path = dev_path + "/device/vendor";
+  std::string vbios_v_path = dev_path + "/device/vbios_version";
   if (!FileExists(vend_path.c_str())) {
+    return false;
+  }
+
+  if (!FileExists(vbios_v_path.c_str())) {
     return false;
   }
 
@@ -463,19 +494,12 @@ static bool isAMDGPU(std::string dev_path) {
 }
 
 uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
-  uint32_t ret = 0;
   std::string err_msg;
   uint32_t count = 0;
 
   // If this gets called more than once, clear previous findings.
   devices_.clear();
   monitors_.clear();
-
-  ret = DiscoverAMDMonitors();
-
-  if (ret) {
-    return ret;
-  }
 
   auto drm_dir = opendir(kPathDRMRoot);
   if (drm_dir == nullptr) {
@@ -521,61 +545,6 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   return 0;
 }
 
-uint32_t RocmSMI::DiscoverAMDMonitors(void) {
-  auto mon_dir = opendir(kPathHWMonRoot);
-
-  auto dentry = readdir(mon_dir);
-
-  std::string mon_name;
-  std::string tmp;
-  std::string err_msg;
-
-  while (dentry != nullptr) {
-    if (dentry->d_name[0] == '.') {
-      dentry = readdir(mon_dir);
-      continue;
-    }
-
-    mon_name = kPathHWMonRoot;
-    mon_name += "/";
-    mon_name += dentry->d_name;
-    tmp = mon_name + "/name";
-
-    if (FileExists(tmp.c_str())) {
-      std::ifstream fs;
-      fs.open(tmp);
-
-      if (!fs.is_open()) {
-        err_msg = "Failed to open monitor file ";
-        err_msg += tmp;
-        err_msg += ".";
-        perror(err_msg.c_str());
-        return 1;
-      }
-      std::string mon_type;
-      fs >> mon_type;
-      fs.close();
-
-      if (amd_monitor_types_.find(mon_type) != amd_monitor_types_.end()) {
-        std::shared_ptr<Monitor> m =
-                  std::shared_ptr<Monitor>(new Monitor(mon_name, &env_vars_));
-        m->setTempSensorLabelMap();
-        m->setVoltSensorLabelMap();
-        monitors_.push_back(m);
-      }
-    }
-    dentry = readdir(mon_dir);
-  }
-
-  if (closedir(mon_dir)) {
-    err_msg = "Failed to close monitor directory ";
-    err_msg += kPathHWMonRoot;
-    err_msg += ".";
-    perror(err_msg.c_str());
-    return 1;
-  }
-  return 0;
-}
 
 // Since these sysfs files require sudo access, we won't discover them
 // with rsmi_init() (and thus always require the user to use "sudo".

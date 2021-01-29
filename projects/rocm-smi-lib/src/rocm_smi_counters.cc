@@ -175,8 +175,8 @@ Event::Event(rsmi_event_type_t event, uint32_t dev_ind)  :
 
 
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-  assert(dev_ind < smi.monitor_devices().size());
-  std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dev_ind];
+  assert(dev_ind < smi.devices().size());
+  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dev_ind];
   assert(dev != nullptr);
 
 

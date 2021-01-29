@@ -52,13 +52,13 @@
 
 #define CHECK_DV_IND_RANGE \
     amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
-    if (dv_ind >= smi.monitor_devices().size()) { \
+    if (dv_ind >= smi.devices().size()) { \
       return RSMI_STATUS_INVALID_ARGS; \
     } \
 
 #define GET_DEV_FROM_INDX  \
   CHECK_DV_IND_RANGE \
-  std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind]; \
+  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind]; \
   assert(dev != nullptr);
 
 

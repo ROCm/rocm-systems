@@ -183,10 +183,10 @@ rsmi_status_t handleException() {
 pthread_mutex_t *GetMutex(uint32_t dv_ind) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
-  if (dv_ind >= smi.monitor_devices().size()) {
+  if (dv_ind >= smi.devices().size()) {
     return nullptr;
   }
-  std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind];
+  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
   assert(dev != nullptr);
 
   return dev->mutex();

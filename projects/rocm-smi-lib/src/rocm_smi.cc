@@ -391,7 +391,7 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
                                       uint32_t dv_ind, uint64_t *val) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
-  if (dv_ind >= smi.monitor_devices().size() || val == nullptr) {
+  if (dv_ind >= smi.devices().size() || val == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
@@ -400,7 +400,7 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
     return amd::smi::ErrnoToRsmiStatus(ret);
   }
 
-  std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind];
+  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
   assert(dev != nullptr);
   assert(dev->monitor() != nullptr);
 
@@ -462,9 +462,9 @@ rsmi_shut_down(void) {
 #if DEBUG
   int ret = 0;
 #endif
-  for (uint32_t i = 0; i < smi.monitor_devices().size(); ++i) {
+  for (uint32_t i = 0; i < smi.devices().size(); ++i) {
 #if DEBUG
-    ret = pthread_mutex_unlock(smi.monitor_devices()[i]->mutex());
+    ret = pthread_mutex_unlock(smi.devices()[i]->mutex());
     if (ret != EPERM) {  // We expect to get EPERM if the lock has already
                          // been released
       if (ret == 0) {
@@ -476,7 +476,7 @@ rsmi_shut_down(void) {
       }
     }
 #else
-    (void)pthread_mutex_unlock(smi.monitor_devices()[i]->mutex());
+    (void)pthread_mutex_unlock(smi.devices()[i]->mutex());
 #endif
   }
 
@@ -499,7 +499,7 @@ rsmi_num_monitor_devices(uint32_t *num_devices) {
 
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
-  *num_devices = static_cast<uint32_t>(smi.monitor_devices().size());
+  *num_devices = static_cast<uint32_t>(smi.devices().size());
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -1458,13 +1458,13 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
 
   // Above call to rsmi_dev_get_gpu_clk_freq should have emitted an error if
   // assert below is not true
-  assert(dv_ind < smi.monitor_devices().size());
+  assert(dv_ind < smi.devices().size());
 
   std::string freq_enable_str =
                    bitfield_to_freq_string(freq_bitmask, freqs.num_supported);
 
 
-  std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind];
+  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
   assert(dev != nullptr);
 
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
@@ -1912,12 +1912,12 @@ rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
 
   // Above call to rsmi_dev_pci_bandwidth_get() should have emitted an error
   // if assert below is not true
-  assert(dv_ind < smi.monitor_devices().size());
+  assert(dv_ind < smi.devices().size());
 
   std::string freq_enable_str =
          bitfield_to_freq_string(bw_bitmask, bws.transfer_rate.num_supported);
 
-  std::shared_ptr<amd::smi::Device> dev = smi.monitor_devices()[dv_ind];
+  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
   assert(dev != nullptr);
 
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
@@ -2994,7 +2994,7 @@ rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
   }
 
   *num_devices = static_cast<uint32_t>(gpu_set.size());
-  if (gpu_set.size() > smi.monitor_devices().size()) {
+  if (gpu_set.size() > smi.devices().size()) {
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
 
@@ -3672,11 +3672,11 @@ rsmi_event_notification_get(int timeout_ms,
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
   std::vector<uint32_t> fd_indx_to_dev_id;
 
-  for (uint32_t i = 0; i < smi.monitor_devices().size(); ++i) {
-    if (smi.monitor_devices()[i]->evt_notif_anon_fd() == -1) {
+  for (uint32_t i = 0; i < smi.devices().size(); ++i) {
+    if (smi.devices()[i]->evt_notif_anon_fd() == -1) {
       continue;
     }
-    fds.push_back({smi.monitor_devices()[i]->evt_notif_anon_fd(),
+    fds.push_back({smi.devices()[i]->evt_notif_anon_fd(),
                                                      POLLIN | POLLRDNORM, 0});
     fd_indx_to_dev_id.push_back(i);
   }
@@ -3694,7 +3694,7 @@ rsmi_event_notification_get(int timeout_ms,
       }
 
       FILE *anon_fp =
-         smi.monitor_devices()[fd_indx_to_dev_id[i]]->evt_notif_anon_file_ptr();
+         smi.devices()[fd_indx_to_dev_id[i]]->evt_notif_anon_file_ptr();
       data_item =
            reinterpret_cast<rsmi_evt_notification_data_t *>(&data[*num_elem]);
 
@@ -3754,7 +3754,7 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 //  close(dev->evt_notif_anon_fd());
-  FILE *anon_fp = smi.monitor_devices()[dv_ind]->evt_notif_anon_file_ptr();
+  FILE *anon_fp = smi.devices()[dv_ind]->evt_notif_anon_file_ptr();
   fclose(anon_fp);
   assert(errno == 0 || errno == EAGAIN);
   dev->set_evt_notif_anon_file_ptr(nullptr);
@@ -3800,7 +3800,7 @@ rsmi_test_refcount(uint64_t refcnt_type) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
   std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());
 
-  if (smi.ref_count() == 0 && smi.monitor_devices().size() != 0) {
+  if (smi.ref_count() == 0 && smi.devices().size() != 0) {
     return -1;
   }
 

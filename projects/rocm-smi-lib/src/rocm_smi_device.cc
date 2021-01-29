@@ -709,7 +709,7 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
 
   size_t num = fread(p_binary_data, b_size, 1, ptr);
   fclose(ptr);
-  if((num*b_size) != b_size){
+  if ((num*b_size) != b_size) {
     return ENOENT;
   }
   return 0;
