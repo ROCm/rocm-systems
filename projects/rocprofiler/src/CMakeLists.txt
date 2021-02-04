@@ -26,6 +26,7 @@
 set ( TARGET_LIB "${TARGET_NAME}" )
 set ( LIB_SRC
   ${LIB_DIR}/core/rocprofiler.cpp
+  ${LIB_DIR}/core/gpu_command.cpp
   ${LIB_DIR}/core/proxy_queue.cpp
   ${LIB_DIR}/core/simple_proxy_queue.cpp
   ${LIB_DIR}/core/intercept_queue.cpp

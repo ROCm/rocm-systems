@@ -30,6 +30,7 @@ THE SOFTWARE.
 
 #include "core/context.h"
 #include "core/context_pool.h"
+#include "core/gpu_command.h"
 #include "core/hsa_queue.h"
 #include "core/hsa_interceptor.h"
 #include "core/intercept_queue.h"
@@ -308,53 +309,6 @@ hsa_status_t GetExcStatus(const std::exception& e) {
                                : HSA_STATUS_ERROR;
 }
 
-inline size_t CreateEnableCmd(const rocprofiler::util::AgentInfo* agent_info, packet_t* command, const size_t& slot_count) {
-  const bool is_legacy = (strncmp(agent_info->name, "gfx8", 4) == 0);
-  const size_t packet_count = (is_legacy) ? Profile::LEGACY_SLOT_SIZE_PKT : 1;
-
-  rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
-
-  if (packet_count > slot_count) EXC_RAISING(HSA_STATUS_ERROR, "packet_count > slot_count");
-
-  // AQLprofile object
-  hsa_ven_amd_aqlprofile_profile_t profile{};
-  profile.agent = agent_info->dev_id;
-  // Query for cmd buffer size
-  hsa_status_t status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
-    &profile, HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD, NULL);
-  if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "get_info(ENABLE_CMD).size exc");
-  if (profile.command_buffer.size == 0) EXC_RAISING(status, "get_info(ENABLE_CMD).size == 0");
-  // Allocate cmd buffer
-  const size_t aligment_mask = 0x100 - 1;
-  profile.command_buffer.ptr =
-    hsa_rsrc->AllocateSysMemory(agent_info, profile.command_buffer.size);
-  if ((reinterpret_cast<uintptr_t>(profile.command_buffer.ptr) & aligment_mask) != 0) {
-    EXC_RAISING(status, "profile.command_buffer.ptr bad alignment");
-  }
-
-  // Generating cmd packet
-  if (is_legacy) {
-    packet_t packet{};
-
-    // Query for cmd buffer data
-    status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
-      &profile, HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD, &packet);
-    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "get_info(ENABLE_CMD).data exc");
-
-    // Check for legacy GFXIP
-    status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_legacy_get_pm4(&packet, command);
-    if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
-  } else {
-    // Query for cmd buffer data
-    status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
-      &profile, HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD, command);
-    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "get_info(ENABLE_CMD).data exc");
-  }
-
-  // Return cmd packet data size
-  return (packet_count * sizeof(packet_t));
-}
-
 hsa_status_t CreateQueuePro(
     hsa_agent_t agent,
     uint32_t size,
@@ -365,14 +319,6 @@ hsa_status_t CreateQueuePro(
     uint32_t group_segment_size,
     hsa_queue_t **queue)
 {
-  typedef std::pair<packet_t[Profile::LEGACY_SLOT_SIZE_PKT], uint32_t> cmd_entry_t;
-  typedef std::vector<cmd_entry_t> cmd_vec_t;
-  static cmd_vec_t cmd_vec;
-  static uint32_t cmd_mask = 0;
-  static std::mutex cmd_mutex;
-
-  rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
-
   // Create HSA queue
   hsa_status_t status = hsa_queue_create_fn(
     agent,
@@ -385,31 +331,8 @@ hsa_status_t CreateQueuePro(
     queue);
   if (status != HSA_STATUS_SUCCESS) return status;
 
-  // Create 'Enable' cmd packet
-  const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
-  const uint32_t dev_index = 1 << agent_info->dev_index;
-  const uint32_t dev_mask = 1 << dev_index;
-  if ((cmd_mask & dev_mask) == 0) {
-    std::lock_guard<std::mutex> lck(cmd_mutex);
-
-    if ((cmd_mask & dev_mask) == 0) {
-      cmd_mask |= dev_mask;
-      // Allocating cmd vector
-      uint32_t mask = 1;
-      while (1) {
-        const uint32_t max = 1 << cmd_vec.size();
-        if (mask >= max) cmd_vec.push_back({});
-        if (((mask & dev_mask) != 0) || (mask == 0)) break;
-        mask <<= 1;
-      }
-      if (mask == 0) EXC_RAISING(status, "bad device index (" << dev_index << ")");
-      // Creating cmd packets
-      cmd_vec[dev_index].second = CreateEnableCmd(agent_info, cmd_vec[dev_index].first, Profile::LEGACY_SLOT_SIZE_PKT);
-    }
-  }
-
-  // Enable counters for the queue
-  rocprofiler::util::HsaRsrcFactory::Instance().Submit(*queue, cmd_vec[dev_index].first, cmd_vec[dev_index].second);
+  // Issue PMC-enable GPU command
+  IssueGpuCommand(PMC_ENABLE_GPU_CMD_OP, agent, *queue);
 
   return HSA_STATUS_SUCCESS;
 }
