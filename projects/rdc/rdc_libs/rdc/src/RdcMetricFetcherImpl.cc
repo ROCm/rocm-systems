@@ -33,6 +33,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcLogger.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rdc_lib/impl/RsmiUtils.h"
+#include "common/rdc_capabilities.h"
 
 namespace amd {
 namespace rdc {
@@ -523,12 +524,32 @@ static rdc_status_t init_rsmi_counter(RdcFieldKey fk,
   }
 
   rsmi_event_type_t evt = rdc_evnt_2_rsmi_field.at(f);
+
+  // Temporarily get DAC capability
+  ScopedCapability sc(CAP_DAC_OVERRIDE, CAP_EFFECTIVE);
+
+  if (sc.error()) {
+    RDC_LOG(RDC_ERROR,
+              "Failed to acquire required capabilities. Errno " << sc.error());
+    return RDC_ST_PERM_ERROR;
+  }
+
   ret = rsmi_dev_counter_create(dv_ind, evt, handle);
   if (ret != RSMI_STATUS_SUCCESS) {
     return Rsmi2RdcError(ret);
   }
 
   ret = rsmi_counter_control(*handle, RSMI_CNTR_CMD_START, nullptr);
+
+  // Release DAC capability
+  sc.Relinquish();
+
+  if (sc.error()) {
+    RDC_LOG(RDC_ERROR,
+                    "Failed to relinquish capabilities. Errno " << sc.error());
+    return RDC_ST_PERM_ERROR;
+  }
+
   return Rsmi2RdcError(ret);
 }
 
@@ -561,6 +582,9 @@ rdc_status_t RdcMetricFetcherImpl::delete_rsmi_handle(RdcFieldKey fk) {
       ret = rsmi_counter_control(h, RSMI_CNTR_CMD_STOP, nullptr);
       if (ret != RSMI_STATUS_SUCCESS) {
         rsmi_data_.erase(fk);
+
+        RDC_LOG(RDC_ERROR, "Error in stopping event counter: " <<
+                                                          Rsmi2RdcError(ret));
         return Rsmi2RdcError(ret);
       }
 
@@ -590,6 +614,7 @@ rdc_status_t RdcMetricFetcherImpl::acquire_rsmi_handle(RdcFieldKey fk) {
 
     result = init_rsmi_counter(fk, grp, &handle);
     if (result != RDC_ST_OK) {
+      RDC_LOG(RDC_ERROR, "Failed to init RSMI counter. Return:" << result);
       return result;
     }
     auto fsh = std::shared_ptr<FieldRSMIData>(new FieldRSMIData);
@@ -636,6 +661,8 @@ rdc_status_t RdcMetricFetcherImpl::acquire_rsmi_handle(RdcFieldKey fk) {
 
     RDC_LOG(RDC_ERROR, "No event counters are available for " <<
                      field_id_to_descript.at(fk.second).enum_name << " event.");
+  } else if (ret != RDC_ST_OK) {
+    RDC_LOG(RDC_ERROR, "Error in getting event counter handle: " << ret);
   }
   return ret;
 }

@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
 #include "rocm_smi/rocm_smi.h"
+#include "common/rdc_capabilities.h"
 
 namespace amd {
 namespace rdc {
@@ -95,9 +96,19 @@ RdcNotificationImpl::set_listen_events(const std::vector<RdcFieldKey> fk_arr) {
       // No change to mask; nothing to be done
       continue;
     }
+
+    // Temporarily get DAC capability
+    ScopedCapability sc(CAP_DAC_OVERRIDE, CAP_EFFECTIVE);
+
+    if (sc.error()) {
+        RDC_LOG(RDC_ERROR,
+             "Failed to acquire required capabilities. Errno " << sc.error());
+        return RDC_ST_PERM_ERROR;
+    }
+
     ret = rsmi_event_notification_init(it->first);
     if (ret != RSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_INFO,
+      RDC_LOG(RDC_ERROR,
        "rsmi_event_notification_init() returned " << ret << " for device " <<
                                             it->first << ". " << std::endl <<
                                "  Will not listen for events on this device");
@@ -105,6 +116,14 @@ RdcNotificationImpl::set_listen_events(const std::vector<RdcFieldKey> fk_arr) {
     }
 
     ret = rsmi_event_notification_mask_set(it->first, it->second);
+    // Release DAC capability
+    sc.Relinquish();
+
+    if (sc.error()) {
+      RDC_LOG(RDC_ERROR,
+                   "Failed to relinquish capabilities. Errno " << sc.error());
+      return RDC_ST_PERM_ERROR;
+    }
 
     if (ret == RSMI_STATUS_SUCCESS) {
       gpu_evnt_notif_masks_[it->first] = it->second;
@@ -162,7 +181,7 @@ RdcNotificationImpl::stop_listening(uint32_t gpu_id) {
 
   ret = rsmi_event_notification_mask_set(gpu_id, 0);
   if (ret != RSMI_STATUS_SUCCESS) {
-    RDC_LOG(RDC_INFO, "rsmi_event_notification_mask_set() returned " << ret
+    RDC_LOG(RDC_ERROR, "rsmi_event_notification_mask_set() returned " << ret
                                                  << " for device " << gpu_id);
   }
 
@@ -171,7 +190,7 @@ RdcNotificationImpl::stop_listening(uint32_t gpu_id) {
     std::lock_guard<std::mutex> guard(notif_mutex_);
     gpu_evnt_notif_masks_[gpu_id] = 0;
   } else {
-    RDC_LOG(RDC_INFO, "rsmi_event_notification_stop() returned " << ret
+    RDC_LOG(RDC_ERROR, "rsmi_event_notification_stop() returned " << ret
                                                  << " for device " << gpu_id);
   }
   return RDC_ST_OK;

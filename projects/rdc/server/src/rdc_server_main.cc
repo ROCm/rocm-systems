@@ -41,7 +41,7 @@ THE SOFTWARE.
 #include "rdc/rdc_server_main.h"
 #include "rdc/rdc_rsmi_service.h"
 #include "rdc/rdc_api_service.h"
-#include "rdc/rdc_server_utils.h"
+#include "common/rdc_capabilities.h"
 #include "common/rdc_utils.h"
 
 // TODO(cfreehil):

@@ -98,13 +98,19 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
 
 rdc_status_t RdcSmiLib::rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
       uint32_t fields_count) {
+  rdc_status_t ret;
+
     if (fields == nullptr) {
         return RDC_ST_BAD_PARAMETER;
     }
 
     for (uint32_t i = 0; i < fields_count; i++) {
-        metric_fetcher_->acquire_rsmi_handle(
+        ret = metric_fetcher_->acquire_rsmi_handle(
             {fields[i].gpu_index, fields[i].field_id});
+        if (ret != RDC_ST_OK) {
+            RDC_LOG(RDC_ERROR,
+                              "Failed to acquire rocm_smi handle for field.");
+        }
     }
     RDC_LOG(RDC_DEBUG, "acquire " << fields_count
         << " field handles from rocm_smi_lib");
