@@ -88,6 +88,9 @@ if __name__ == '__main__':
     rdc_ip_port = args.rdc_ip_port
     if args.rdc_embedded:
         rdc_ip_port = None
+    if args.rdc_gpu_indexes != None:
+        for i in range(0, len(args.rdc_gpu_indexes)):
+            args.rdc_gpu_indexes[i] = int(args.rdc_gpu_indexes[i])
 
     reader = PrometheusReader(rdc_ip_port, field_ids, args.rdc_update_freq*1000000,
             args.rdc_max_keep_age, args.rdc_max_keep_samples,
