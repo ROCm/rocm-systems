@@ -31,6 +31,25 @@ set(RSMI_INC_DIR ${ROCM_DIR}/rocm_smi/include)
 # which requires the gRPC
 option(BUILD_STANDALONE "Build targets for rdci and rdcd" ON)
 
+# When cmake -DBUILD_RASLIB=off, it will not build the raslib
+# which requires the ROCT-Thunk-Interface.
+option(BUILD_RASLIB "Build targets for raslib" OFF)
+
+if( NOT EXISTS "${CMAKE_SOURCE_DIR}/raslib/.git" AND BUILD_RASLIB)
+    message( FATAL_ERROR "The git submodule raslib is not available. Please run
+    git submodule update --init --recursive
+    If you do not want to build raslib, use cmake -DBUILD_RASLIB=off"
+    )
+endif()
+
+if (BUILD_RASLIB AND NOT DEFINED HSA_DIR)
+    message( FATAL_ERROR "Please specify libhsakmt directory which is required by raslib
+    cmake -DHSA_DIR=<libhsakmt directory>
+    If you do not want to build raslib, use cmake -DBUILD_RASLIB=off"
+    )
+endif()
+
+
 set(RSMI_LIB_DIR ${ROCM_DIR}/rocm_smi/lib)
 
 if (NOT DEFINED GRPC_ROOT)
@@ -88,6 +107,7 @@ project(${RDC})
 set(RDC_SRC_ROOT "${PROJECT_SOURCE_DIR}")
 
 message("Build Configuration:")
+
 if(BUILD_STANDALONE)
   message("-----------GRPC ROOT: " ${GRPC_ROOT})
 endif()
@@ -194,6 +214,16 @@ if(BUILD_STANDALONE)
   add_subdirectory("server")
   add_subdirectory("client")
   add_subdirectory("rdci")
+endif()
+
+# Raslib
+if(BUILD_RASLIB)
+   message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+   message("                    Build raslib")
+   message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
+
+   set(RDC_BUILD_DIR ${PROJECT_BINARY_DIR}/rdc_libs)
+   add_subdirectory("raslib")
 endif()
 
 # Folders for both standalone and embedded

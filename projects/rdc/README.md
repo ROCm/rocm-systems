@@ -26,6 +26,7 @@ For complete list of features and how to start using RDC from pre-built packages
     Doxygen (1.8.11)                        ## required to build the latest documentation
     Latex (pdfTeX 3.14159265-2.6-1.40.16)   ## required to build the latest documentation
     gRPC and protoc                         ## required for communication
+    libcap-dev                              ## required to manage the privileges.
 
     AMD ROCm platform (https://github.com/RadeonOpenCompute/ROCm)
         * It is recommended to install the complete AMD ROCm platform.
