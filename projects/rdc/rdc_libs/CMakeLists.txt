@@ -68,7 +68,7 @@ set(COMMON_DIR "${PROJECT_SOURCE_DIR}/common")
 ## Set RUNPATH if ROCM_RPATH is defined and passed by the environment
 ## RUNPATH should help to run "rdcd" without the usage of ldconfig
 if (DEFINED ENV{ROCM_RPATH})
- set (LIB_RUNPATH "\$ORIGIN/../lib:\$ORIGIN/../lib64")
+ set (LIB_RUNPATH "\$ORIGIN/../lib:\$ORIGIN/../lib64:\$ORIGIN/../grpc/lib:\$ORIGIN/../grpc/lib64")
  set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--no-as-needed -Wl,-z,origin")
  set (CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${LIB_RUNPATH}")
  set (CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
