@@ -252,13 +252,16 @@ class MemManager:
     hsa_memcpy_ptrn_prev = re.compile(r'\((0x[0-9a-fA-F]+), (\d+), (0x[0-9a-fA-F]+), (\d+), (\d+), .*\) = \d')
     # "(0x7fd83bc00000, {handle=16124864}, 0x7fd89b600000, {handle=16119808}, 800000000, 0, 0, {handle=140573877724672}) = 0"
     hsa_memcpy_ptrn = re.compile(r'\((0x[0-9a-fA-F]+), {handle=(\d+)}, (0x[0-9a-fA-F]+), {handle=(\d+)}, (\d+), .*\) = \d')
+    #    "(0x7f9125cfe7b0, 0x7f9125cfe784, 0x7f9125cfe790, 0x7f9125cfe784, 0x7f9125cfe778, {handle=94324038652880}, 1, 0, 0, {handle=140261380710784}) = 0"
+    #    dst, dst_offset, src, src_offset, range, copy_agent, dir, num_dep_signals, dep_signals, completion_signal
+    hsa_memcpy_ptrn2 = re.compile(r'\((0x[0-9a-fA-F]+), 0x[0-9a-fA-F]+, (0x[0-9a-fA-F]+), 0x[0-9a-fA-F]+, 0x[0-9a-fA-F]+, {z=(\d+), y=(\d+), x=(\d+)}, {handle=(\d+)}, .*\) = \d')
     # aysnc memcopy
     async_event_ptrn = re.compile(r'Async|async')
-
     m_basic_hip = hip_memcpy_ptrn.match(args)
     m_basic_hsa_prev = hsa_memcpy_ptrn_prev.match(args)
     m_basic_hsa = hsa_memcpy_ptrn.match(args)
-    is_hip = True if not (m_basic_hsa_prev or m_basic_hsa) else False
+    m_basic_hsa2 = hsa_memcpy_ptrn2.match(args)
+    is_hip = True if not (m_basic_hsa_prev or m_basic_hsa or m_basic_hsa2) else False
     if not is_hip:
       if procid in self.memcpy_index.keys():
         self.memcpy_index[procid] += 1
@@ -267,12 +270,9 @@ class MemManager:
       recordid = self.memcpy_index[procid]
     m_2d = hip_memcpy_ptrn2.match(args)
     m_array = hip_memcpy_ptrn3.match(args)
-
     is_async = 1 if async_event_ptrn.search(event) else 0
     async_copy_start_time = -1
     async_copy_end_time = -1
-    tid = -1
-
     copy_line = ''
     size = 0
     dstptr_type = 'unknown'
@@ -280,7 +280,6 @@ class MemManager:
     direction = 'unknown'
     bandwidth = 0
     duration = 0
-
     kind_switcher = {
       '0': "HtoH",
       '1': "HtoD",
@@ -297,6 +296,7 @@ class MemManager:
       srcptr_type = self.get_ptr_type(srcptr)
       size = int(m_basic_hip.group(3))
       condition_matched = True
+
     if m_basic_hsa_prev:
       dstptr = m_basic_hsa_prev.group(1)
       dstptr_type = self.get_ptr_type(dstptr)
@@ -315,6 +315,20 @@ class MemManager:
       src_agent_ptr = m_basic_hsa.group(4)
       size = int(m_basic_hsa.group(5))
       condition_matched = True
+
+    if m_basic_hsa2:
+      dstptr = m_basic_hsa2.group(1)
+      dstptr_type = self.get_ptr_type(dstptr)
+      dst_agent_ptr = m_basic_hsa2.group(4)
+      srcptr = m_basic_hsa2.group(2)
+      srcptr_type = self.get_ptr_type(srcptr)
+      src_agent_ptr = m_basic_hsa2.group(4)
+      z = int(m_basic_hsa2.group(3))
+      y = int(m_basic_hsa2.group(4))
+      x = int(m_basic_hsa2.group(5))
+      size = x*y*z
+      condition_matched = True
+
     if m_array:
       dstptr = m_array.group(1)
       dstptr_type = self.get_ptr_type(dstptr)
@@ -322,12 +336,13 @@ class MemManager:
       srcptr_type = self.get_ptr_type(srcptr)
       size = m_array.group(3)
       condition_matched = True
+
     if m_2d:
       dstptr = m_2d.group(1)
       dstptr_type = self.get_ptr_type(dstptr)
       srcptr = m_2d.group(2)
       srcptr_type = self.get_ptr_type(srcptr)
-      size = m_2d.group(3)*m_2d.group(4)
+      size = int(m_2d.group(3))*int(m_2d.group(4))
       condition_matched = True
 
     if not condition_matched: fatal('Memcpy args \"' + args + '\" cannot be identified')
@@ -364,9 +379,9 @@ class MemManager:
 
     copy_line_header = ''
     copy_line_footer = ''
-    if not is_async:
-        copy_line_header = str(start_time) + DELIM + str(end_time) + DELIM + pid + DELIM + tid
-        copy_line_footer = "BW=" + str(bandwidth) + DELIM + 'Async=' + str(is_async)
+    if not is_async or is_hip:
+      copy_line_header = str(start_time) + DELIM + str(end_time) + DELIM + str(pid) + DELIM + str(tid)
+      copy_line_footer = "BW=" + str(bandwidth) + DELIM + 'Async=' + str(is_async)
 
     copy_line = copy_line_header + DELIM + event + DELIM + 'Direction=' + direction + DELIM + 'SrcType=' + srcptr_type + DELIM + 'DstType=' + dstptr_type + DELIM + "Size=" + str(size) + DELIM + copy_line_footer
 

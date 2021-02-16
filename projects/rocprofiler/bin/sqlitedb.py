@@ -207,7 +207,11 @@ class SQLiteDB:
           label = table_fields[value_index]
           value = values[value_index]
           if name_ptrn.search(label): value = sub_ptrn.sub(r'', value)
-          if label != '"Index"': vals_list.append('%s:"%s"' % (label, value))
+          if label != '"Index"':
+            if label == '"dur"' and value == 0:
+              vals_list.append('%s:"%s"' % (label, "1"))
+            else:
+              vals_list.append('%s:"%s"' % (label, value))
 
         args_list = []
         data = list(data_raws[raw_index])
