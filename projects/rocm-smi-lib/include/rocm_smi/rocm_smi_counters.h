@@ -110,7 +110,7 @@ class Event {
     uint32_t dev_ind_;
     int32_t fd_;
     perf_event_attr attr_;
-
+    uint64_t prev_cntr_val_;
     int32_t get_event_file_info(void);
     int32_t get_event_type(uint32_t *ev_type);
 };

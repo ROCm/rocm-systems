@@ -164,7 +164,7 @@ GetSupportedEventGroups(uint32_t dev_num, dev_evt_grp_set_t *supported_grps) {
 }
 //  /sys/bus/event_source/devices/<hw block>_<instance>/type
 Event::Event(rsmi_event_type_t event, uint32_t dev_ind)  :
-                                       event_type_(event) {
+                                       event_type_(event), prev_cntr_val_(0) {
   fd_ = -1;
   rsmi_event_group_t grp = EvtGrpFromEvtID(event);
   assert(grp != RSMI_EVNT_GRP_INVALID);  // This should have failed before now
@@ -425,7 +425,8 @@ amd::smi::evt::Event::getValue(rsmi_counter_value_t *val) {
     return EIO;
   }
 
-  val->value = pvalue.value;
+  val->value = pvalue.value - prev_cntr_val_;
+  prev_cntr_val_ = pvalue.value;
   val->time_enabled = pvalue.enabled_time;
   val->time_running = pvalue.run_time;
 
