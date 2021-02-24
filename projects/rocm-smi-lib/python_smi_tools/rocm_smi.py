@@ -842,7 +842,7 @@ def setClockOverDrive(deviceList, clktype, value, autoRespond):
 
 
 def setClocks(deviceList, clktype, clk):
-    """ Set clock frequency level for a list of devices.
+    """ Set clock frequency levels for a list of devices.
 
     @param deviceList: List of DRM devices (can be a single-item list)
     @param clktype: [validClockNames] Clock type to set
@@ -859,7 +859,6 @@ def setClocks(deviceList, clktype, clk):
         RETCODE = 1
         return
     check_value = ''.join(map(str, clk))
-    value = ' '.join(map(str, clk))
     try:
         int(check_value)
     except ValueError:
@@ -868,17 +867,16 @@ def setClocks(deviceList, clktype, clk):
         RETCODE = 1
         return
     # Generate a frequency bitmask from user input value
-    position = 0
-    bitmask = ''
-    while position < 6:
-        if str(position) in value:
-            bitmask = bitmask + '1'
-        else:
-            bitmask = bitmask + '0'
-        position = position + 1
-    bitmask = bitmask[::-1]
-    freq_bitmask = c_uint64()
-    freq_bitmask = int(bitmask, 2)
+    freq_bitmask = 0
+    for bit in clk:
+        if bit > 63:
+            printErrLog(device, 'Invalid clock frequency')
+            logging.error('Invalid frequency: %s', bit)
+            RETCODE = 1
+            return
+
+        freq_bitmask |= (1 << bit)
+
     printLogSpacer(' Set %s Frequency ' % (str(clktype)))
     for device in deviceList:
         # Check if the performance level is manual, if not then set it to manual
@@ -893,16 +891,16 @@ def setClocks(deviceList, clktype, clk):
         if clktype  != 'pcie':
             ret = rocmsmi.rsmi_dev_gpu_clk_freq_set(device, rsmi_clk_names_dict[clktype], freq_bitmask)
             if rsmi_ret_ok(ret, device):
-                printLog(device, 'Successfully set %s bitmask to' % (clktype), str(bitmask))
+                printLog(device, 'Successfully set %s bitmask to' % (clktype), hex(freq_bitmask))
             else:
-                printErrLog(device, 'Unable to set %s bitmask to: %s' % (clktype, str(bitmask)))
+                printErrLog(device, 'Unable to set %s bitmask to: %s' % (clktype, hex(freq_bitmask)))
                 RETCODE = 1
         else:
             ret = rocmsmi.rsmi_dev_pci_bandwidth_set(device, freq_bitmask)
             if rsmi_ret_ok(ret, device):
-                printLog(device, 'Successfully set %s to level bitmask' % (clktype), str(bitmask))
+                printLog(device, 'Successfully set %s to level bitmask' % (clktype), hex(freq_bitmask))
             else:
-                printErrLog(device, 'Unable to set %s bitmask to: %s' % (clktype, str(bitmask)))
+                printErrLog(device, 'Unable to set %s bitmask to: %s' % (clktype, hex(freq_bitmask)))
                 RETCODE = 1
     printLogSpacer()
 
