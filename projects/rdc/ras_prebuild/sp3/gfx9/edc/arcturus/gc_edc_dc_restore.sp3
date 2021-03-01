@@ -1,0 +1,21 @@
+shader main
+type(CS)
+
+user_sgpr_count(4)
+    v_mov_b32 v0, s0
+    v_mov_b32 v1, s1
+    v_mov_b32 v2, s2
+    v_mov_b32 v3, s3
+    flat_load_dword v4, v[0:1] slc
+    s_waitcnt vmcnt(0)&lgkmcnt(0)
+    v_mov_b32 v5, 0
+    s_sleep 40000
+LOOP:
+    v_add_co_u32 v5, vcc, 1, v5
+    s_waitcnt vmcnt(0)&lgkmcnt(0)
+    v_cmp_lt_u32 vcc, v5, v4
+    s_cbranch_vccnz LOOP
+    flat_store_dword v[2,3], v5
+    s_waitcnt vmcnt(0)&lgkmcnt(0)
+s_endpgm
+end

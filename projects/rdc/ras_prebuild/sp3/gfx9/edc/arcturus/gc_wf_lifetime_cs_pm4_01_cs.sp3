@@ -1,0 +1,58 @@
+//s[0:1]: buffer resource
+//s2: num_threads_x_full
+//s3: num_threads_x_full * num_threads_y_full
+//s4: num_threads_x_full * num_threads_y_full * num_threads_z_full
+//s5: COMPUTE_DIM_X
+//s6: COMPUTE_DIM_X * COMPUTE_DIM_Y
+//s7: loop_lifetime
+//s8: dispatch_offset
+//s[9:11]: thread group ID
+//v[0:2]: thread ID 
+
+shader main
+
+type(CS)
+user_sgpr_count(9)
+tgid_x_en(1) 
+tgid_y_en(1)
+tgid_z_en(1)
+
+//sp3 loop for lifetime
+s_mov_b32 s12, 0                 //init loop idx s12
+label_0004:
+s_cmp_lt_i32 s12, s7            //scc = (s12 < s7) ? 1 : 0
+s_cbranch_scc0  label_0006       //if(scc == 0) then jump to label_0006; else nop
+
+v_mov_b32 v4,s12
+s_add_i32 s12, s12, 1           //add loop incr
+s_branch label_0004
+
+label_0006: //end of SP3 loop
+
+//v3 thread_id_in_group = (tid_z * num_threads_x_full * num_threads_y_full) + (tid_y * num_threads_x_full) + tid_x
+v_mad_u32_u24  v3, v1, s2, v0 //v3 =  tid_y * num_threads_x_full + tid_x
+v_mad_u32_u24 v3, v2, s3, v3 //v3 = tid_z * num_threads_x_ful * num_threads_y_full + v3
+
+//s28 thread_group_id = (tgid_z * COMPUTE_DIM_X * COMPUTE_DIM_Y) + (tgid_y * COMPUTE_DIM_X) + tgid_x
+s_mul_i32 s28, s_tgid_y, s5 //tgid_y * COMPUTE_DIM_X
+s_add_i32 s28, s28, s_tgid_x //tgid_y * COMPUTE_DIM_X + tgid_x
+s_mul_i32 s29, s6, s_tgid_z //tgid_z * COMPUTE_DIM_X * COMPUTE_DIM_Y
+s_add_i32 s28, s29, s28
+
+//v9 absolute thread id = thread_group_id * (num_threads_x_full * num_threads_y_full * num_threads_z_full) + thread_id_in_group
+v_mov_b32 v9, s28 //thread_group_id
+v_mad_u32_u24 v9, v9, s4, v3
+
+//fetch the buffer resource
+s_load_dwordx4 s[24:27], s[0:1], 0x0
+s_waitcnt 0
+
+//write absolute thread id using it as an index
+buffer_store_dword v9, v9, s24, s8 idxen:1
+s_waitcnt 0
+
+s_mov_b32 s16, 0xa5a50000
+s_store_dword s16, s[0:1], 0x40 glc
+
+s_endpgm
+end

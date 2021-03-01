@@ -1,0 +1,69 @@
+shader main
+type(CS)
+
+user_sgpr_count(9)   // 2 for the buffer resource + 5 for thread/thread group parameters
+
+//s[0:1] the mmeory address for the buffer resource
+//s2 x
+//s3 x*y
+//s4 x*y*z
+//s5 X	
+//s6 X*Y
+//s7 output offset
+//s8 loop
+
+tgid_x_en(1)       //s_tgid_x s9
+tgid_y_en(1)       //s_tgid_y s10
+tgid_z_en(1)       //s_tgid_z s11
+
+//vo for tid_x
+//v1 for tid_y
+//v2 for tid_z
+
+// don't care about the loop count, fix 8 loops
+// Totaly number of cacheline equals 2(A,B,)*8
+
+var num_cache_lines = 16
+label BLOCK_64B[num_cache_lines]
+
+
+for var loop = 0; loop < num_cache_lines - 1; loop++
+BLOCK_64B[loop]:
+    s_branch BLOCK_64B[loop+1]     // 1DW
+    for var i = 0; i < 15; i++
+        v_nop
+    end
+    
+end
+
+// last block
+for var i = 0; i < 15; i++
+   v_nop
+end
+//For uei 2 msb and lsb flipped
+// s_nop will become v_nop and it will a legal instruction
+BLOCK_64B[num_cache_lines-1]:
+	for var i = 0; i < 81; i++
+  	   s_nop 0x1
+	end
+s_endpgm
+end 
+
+/** comment, four bank interleave 
+Addr 0x90000000 => Bank A
+Addr 0x90000040 => Bank B
+Addr 0x90000080 => Bank C
+Addr 0x900000c0 => Bank D
+Addr 0x90000100 => Bank B
+Addr 0x90000140 => Bank A
+Addr 0x90000180 => Bank D
+Addr 0x900001c0 => Bank C
+Addr 0x90000200 => Bank C
+Addr 0x90000240 => Bank D
+Addr 0x90000280 => Bank A
+Addr 0x900002c0 => Bank B
+Addr 0x90000300 => Bank D
+Addr 0x90000340 => Bank C
+Addr 0x90000380 => Bank B
+
+**/

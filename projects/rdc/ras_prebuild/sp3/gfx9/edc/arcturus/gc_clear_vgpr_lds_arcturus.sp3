@@ -1,0 +1,42 @@
+shader main
+type(CS)
+user_sgpr_count(0)
+
+    // Clear ACC VGPR
+	for var vgpr = 0; vgpr < 256; ++vgpr
+		v_accvgpr_write acc[vgpr], 0
+	end
+
+    s_movk_i32    m0, 0x0000
+    s_mov_b32     s10, 0x000000f8
+    s_set_gpr_idx_on  s10, 0x8
+label_0004:
+    v_mov_b32     v0, 0
+    v_mov_b32     v1, 0
+    v_mov_b32     v2, 0
+    v_mov_b32     v3, 0
+    v_mov_b32     v4, 0
+    v_mov_b32     v5, 0
+    v_mov_b32     v6, 0
+    v_mov_b32     v7, 0
+    s_sub_u32     s10, s10, 8
+    s_set_gpr_idx_idx  s10
+    s_cbranch_scc0  label_0004
+    s_set_gpr_idx_off
+    v_mbcnt_lo_u32_b32  v1, exec_hi, 0
+    v_mbcnt_hi_u32_b32  v1, exec_lo, v1
+    v_mul_u32_u24  v1, 8, v1
+    s_getreg_b32  s11, hwreg(HW_REG_HW_ID, 4, 2)
+    s_mulk_i32    s11, 0x4000
+    v_add_co_u32  v1, vcc, v1, s11
+    s_mov_b32     s10, 7
+    s_mov_b32     m0, -1
+label_001B:
+    ds_write2_b64  v1, v[2:3], v[2:3] offset1:64
+    ds_write2_b64  v1, v[4:5], v[4:5] offset0:128 offset1:192
+    v_add_co_u32  v1, vcc, 0x00000800, v1
+    s_sub_u32     s10, s10, 1
+    s_cbranch_scc0  label_001B
+
+s_endpgm
+end

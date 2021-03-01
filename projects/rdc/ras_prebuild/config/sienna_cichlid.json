@@ -1,0 +1,34 @@
+{
+    "version": "0.0.1",
+    "type": {
+        "parity": 1,
+        "single_correctable": 2,
+        "multi_uncorrectable": 4,
+        "poison": 8
+    },
+    "block": {
+        "umc": {
+            "index": 0,
+            "support": 1,
+            "type": [
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        }
+    },
+    "tests": [
+        {
+            "name": "ras_umc.0.2",
+            "block": "umc",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx10/edc/bin/sienna_cichlid/gc_edc_sqc_inst_bank_snop.bin"
+        },
+        {
+            "name": "ras_umc.0.4",
+            "block": "umc",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx10/edc/bin/sienna_cichlid/gc_edc_sqc_inst_bank_snop.bin"
+        }
+    ]
+}

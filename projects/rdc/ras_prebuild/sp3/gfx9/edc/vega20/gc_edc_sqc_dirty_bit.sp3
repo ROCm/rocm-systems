@@ -1,0 +1,112 @@
+shader main
+type(CS)
+
+user_sgpr_count(9)   // 2 for the buffer resource + 5 for thread/thread group parameters
+
+//s[0:1] the mmeory address for the buffer resource
+//s2 x
+//s3 x*y
+//s4 x*y*z
+//s5 X	
+//s6 X*Y
+//s7 output offset
+//s8 loop
+
+tgid_x_en(1)       //s_tgid_x s9
+tgid_y_en(1)       //s_tgid_y s10
+tgid_z_en(1)       //s_tgid_z s11
+
+//vo for tid_x
+//v1 for tid_y
+//v2 for tid_z
+
+//fetch the buffer resource through SQC
+s_load_dwordx4 s[24:27], s[0:1], 0x0
+s_waitcnt 0
+
+s_or_b32 s27, s27, 0x8000000 // changing mtype to non volatile
+// v3  thread_id_in_group = (tid_z *x*y) + (tid_y*x) + tid_x
+v_mad_u32_u24 v3, v1, s2, v0 
+v_mad_u32_u24 v3, v2, s3, v3
+
+//s28 thread_group_id = (tgid_z*X*Y) + (tgid_y*X) + tgid_x
+s_mul_i32 s28, s_tgid_y, s5
+s_add_i32 s28, s28, s_tgid_x
+s_mul_i32 s29, s6, s_tgid_z
+s_add_i32 s28, s29, s28
+
+//v9 absolute thread id = thread_group_id *(x*y*z) + thread_id_in_group 
+v_mov_b32 v9, s28
+v_mad_u32_u24 v9, v9, s4, v3
+
+
+//store and load s8 times
+s_mov_b32 s30, s8  
+s_mov_b32 s31, 0x0
+
+s_mov_b32 s9, 0xaa
+s_mov_b32 s10, 0xbb
+s_mov_b32 s11, 0xcc
+
+// BUFFER STORE OFFSETS FOR BANK A AND BANKB
+s_mov_b32 s12, 0x0
+s_mov_b32 s13, 0x10
+s_mov_b32 s14, 0x40
+s_mov_b32 s15, 0x50
+
+
+// The following sequence is needed to inject error in dirty bit ram. Sequence was provided by SQC designer 4/1/2015
+//1. you have an invalid line in data cache, 
+//2. you write to some of the dwords in that line (the remaining dwords are still invalid), 
+//3. then there is a read request that hit on that line, but it needs the dwords that are not yet there in that line 
+//(in other words, it needs some of the invalid dwords of that line), 
+//4. the request will go to TC, 
+//5. when TC return comes back, the dirty bit rm will be read
+
+STORE_LOOP:
+
+var TOUCH_4_BANKS=1
+if TOUCH_4_BANKS
+
+s_mov_b32 m0, s13   // BANKA write one dword to tc 
+s_buffer_store_dwordx2 s[8:9], s[24:27],  m0 glc:1
+s_waitcnt 0
+
+
+s_mov_b32 m0, s12   // BANKA. write one dword to sqc
+s_buffer_store_dwordx2 s[10:11], s[24:27],  m0 glc:0
+s_waitcnt 0
+
+s_mov_b32 m0, s13 // BANK A read the dword that is not in cache
+s_buffer_load_dword s32, s[24:27],  m0 glc:0
+s_waitcnt 0
+
+s_mov_b32 m0, s15   // BANKB write one dword to tc
+s_buffer_store_dwordx2 s[8:9], s[24:27],  m0 glc:1
+s_waitcnt 0
+
+s_mov_b32 m0, s14   // BANKB write one dword to sqc
+s_buffer_store_dwordx2 s[10:11], s[24:27],  m0 glc:0
+s_waitcnt 0
+
+s_mov_b32 m0, s15  // BANK B read the dword that is not in cache 
+s_buffer_load_dword s32, s[24:27],  m0 glc:0
+s_waitcnt 0
+end
+
+s_add_u32 s12, s12,0x80
+s_add_u32 s13, s13,0x80
+s_add_u32 s14, s14,0x80
+s_add_u32 s15, s15,0x80
+s_sub_u32 s8, s8, 1
+s_cmpk_eq_u32 s8, 0
+s_cbranch_scc0 STORE_LOOP
+
+s_dcache_wb   // to make emu, sim img match...
+
+s_mov_b32 s16, 0xa5a50000
+s_store_dword s16, s[0:1], 0x40 glc
+
+s_endpgm
+end 
+

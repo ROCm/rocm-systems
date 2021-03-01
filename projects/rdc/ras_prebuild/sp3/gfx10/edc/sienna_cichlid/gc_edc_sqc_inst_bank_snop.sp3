@@ -1,0 +1,31 @@
+shader main
+asic(GFX10)
+wave_size(32)
+type(CS)
+
+user_sgpr_count(9)   // 2 for the buffer resource + 5 for thread/thread group parameters
+
+//s[0:1] the mmeory address for the buffer resource
+//s2 x
+//s3 x*y
+//s4 x*y*z
+//s5 X	
+//s6 X*Y
+//s7 output offset
+//s8 loop
+
+tgid_x_en(1)       //s_tgid_x s9
+tgid_y_en(1)       //s_tgid_y s10
+tgid_z_en(1)       //s_tgid_z s11
+
+//vo for tid_x
+//v1 for tid_y
+//v2 for tid_z
+
+for var i = 0; i < 1000; i++
+      s_nop 0x1
+end
+
+s_endpgm
+end
+

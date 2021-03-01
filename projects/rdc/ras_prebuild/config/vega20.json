@@ -1,0 +1,4393 @@
+{
+    "version": "0.0.1",
+    "type": {
+        "parity": 1,
+        "single_correctable": 2,
+        "multi_uncorrectable": 4,
+        "poison": 8
+    },
+    "block": {
+        "umc": {
+            "index": 0,
+            "support": 1,
+            "type": [
+                "parity",
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        },
+        "sdma": {
+            "index": 1,
+            "support": 1,
+            "type": [
+                "parity",
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        },
+        "gfx": {
+            "index": 2,
+            "support": 1,
+            "subblock": {
+                "gfx_cpc_scratch": {
+                    "index": 0,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_cpc_ucode": {
+                    "index": 1,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_dc_state_me1": {
+                    "index": 2,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_dc_csinvoc_me1": {
+                    "index": 3,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_dc_restore_me1": {
+                    "index": 4,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_dc_state_me2": {
+                    "index": 5,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_dc_csinvoc_me2": {
+                    "index": 6,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_dc_restore_me2": {
+                    "index": 7,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_cpf_roq_me2": {
+                    "index": 8,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_cpf_roq_me1": {
+                    "index": 9,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_cpf_tag": {
+                    "index": 10,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_cpg_dma_roq": {
+                    "index": 11,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_cpg_dma_tag": {
+                    "index": 12,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_cpg_tag": {
+                    "index": 13,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_gds_mem": {
+                    "index": 14,
+                    "support": 0,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_gds_input_queue": {
+                    "index": 15,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_gds_oa_phy_cmd_ram_mem": {
+                    "index": 16,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_gds_oa_phy_data_ram_mem": {
+                    "index": 17,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_gds_oa_pipe_mem": {
+                    "index": 18,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_spi_sr_mem": {
+                    "index": 19,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sq_sgpr": {
+                    "index": 20,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sq_lds_d": {
+                    "index": 21,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sq_lds_i": {
+                    "index": 22,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sq_vgpr": {
+                    "index": 23,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_inst_utcl1_lfifo": {
+                    "index": 24,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_cu0_write_data_buf": {
+                    "index": 25,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_cu0_utcl1_lfifo": {
+                    "index": 26,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_cu1_write_data_buf": {
+                    "index": 27,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_cu1_utcl1_lfifo": {
+                    "index": 28,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_cu2_write_data_buf": {
+                    "index": 29,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_cu2_utcl1_lfifo": {
+                    "index": 30,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_inst_banka_tag_ram": {
+                    "index": 31,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_inst_banka_utcl1_miss_fifo": {
+                    "index": 32,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_inst_banka_miss_fifo": {
+                    "index": 33,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_inst_banka_bank_ram": {
+                    "index": 34,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_banka_tag_ram": {
+                    "index": 35,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_banka_hit_fifo": {
+                    "index": 36,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_banka_miss_fifo": {
+                    "index": 37,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_banka_dirty_bit_ram": {
+                    "index": 38,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_banka_bank_ram": {
+                    "index": 39,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_inst_bankb_tag_ram": {
+                    "index": 40,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_inst_bankb_utcl1_miss_fifo": {
+                    "index": 41,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_inst_bankb_miss_fifo": {
+                    "index": 42,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_inst_bankb_bank_ram": {
+                    "index": 43,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_bankb_tag_ram": {
+                    "index": 44,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_bankb_hit_fifo": {
+                    "index": 45,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_bankb_miss_fifo": {
+                    "index": 46,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_bankb_dirty_bit_ram": {
+                    "index": 47,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_sqc_data_bankb_bank_ram": {
+                    "index": 48,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_ta_fs_dfifo": {
+                    "index": 49,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_ta_fs_afifo": {
+                    "index": 50,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ta_fl_lfifo": {
+                    "index": 51,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ta_fx_lfifo": {
+                    "index": 52,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ta_fs_cfifo": {
+                    "index": 53,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tca_hole_fifo": {
+                    "index": 54,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tca_req_fifo": {
+                    "index": 55,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_cache_data": {
+                    "index": 56,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_cache_data_bank_0_1": {
+                    "index": 57,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_cache_data_bank_1_0": {
+                    "index": 58,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_cache_data_bank_1_1": {
+                    "index": 59,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_cache_dirty_bank_0": {
+                    "index": 60,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_cache_dirty_bank_1": {
+                    "index": 61,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_high_rate_tag": {
+                    "index": 62,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_low_rate_tag": {
+                    "index": 63,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_in_use_dec": {
+                    "index": 64,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_in_use_transfer": {
+                    "index": 65,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_return_data": {
+                    "support": 1,
+                    "index": 66,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_return_control": {
+                    "index": 67,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_uc_atomic_fifo": {
+                    "index": 68,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_write_return": {
+                    "index": 69,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_write_cache_read": {
+                    "index": 70,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_src_fifo": {
+                    "index": 71,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_src_fifo_next_ram": {
+                    "index": 72,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_cache_tag_probe_fifo": {
+                    "index": 73,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_latency_fifo": {
+                    "index": 74,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_latency_fifo_next_ram": {
+                    "index": 75,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_wrret_tag_write_return": {
+                    "index": 76,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcc_atomic_return_buffer": {
+                    "index": 77,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tci_write_ram": {
+                    "index": 78,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcp_cache_ram": {
+                    "index": 79,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcp_lfifo_ram": {
+                    "index": 80,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcp_cmd_fifo": {
+                    "index": 81,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcp_vm_fifo": {
+                    "index": 82,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcp_db_ram": {
+                    "index": 83,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_tcp_utcl1_lfifo0": {
+                    "index": 84,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_tcp_utcl1_lfifo1": {
+                    "index": 85,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_td_ss_fifo_lo": {
+                    "index": 86,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_td_ss_fifo_hi": {
+                    "index": 87,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_td_cs_fifo": {
+                    "index": 88,
+                    "support": 1,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_dramrd_cmdmem": {
+                    "index": 89,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_dramwr_cmdmem": {
+                    "index": 90,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_dramwr_datamem": {
+                    "index": 91,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_rret_tagmem": {
+                    "index": 92,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_wret_tagmem": {
+                    "index": 93,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_gmird_cmdmem": {
+                    "index": 94,
+                    "support": 0,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_gmiwr_cmdmem": {
+                    "index": 95,
+                    "support": 0,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_gmiwr_datamem": {
+                    "index": 96,
+                    "support": 0,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_dramrd_pagemem": {
+                    "index": 97,
+                    "support": 0,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_dramwr_pagemem": {
+                    "index": 98,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_iord_cmdmem": {
+                    "index": 99,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_iowr_cmdmem": {
+                    "index": 100,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_iowr_datamem": {
+                    "index": 101,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_gmird_pagemem": {
+                    "index": 102,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_gmiwr_pagemem": {
+                    "index": 103,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_mam_d0mem": {
+                    "index": 104,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_mam_d1mem": {
+                    "index": 105,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_mam_d2mem": {
+                    "index": 106,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "gfx_ea_mam_d3mem": {
+                    "index": 107,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "utc_vml2_bank_cache": {
+                    "index": 108,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "utc_vml2_walker": {
+                    "index": 109,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                },
+                "utc_atcl2_cache_2m_bank": {
+                    "index": 110,
+                    "support": 0,
+                    "type": [
+                        "parity",
+                        "poison"
+                    ]
+                },
+                "utc_atcl2_cache_4k_bank": {
+                    "index": 111,
+                    "support": 0,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable",
+                        "poison"
+                    ]
+                }
+            }
+        },
+        "mmhub": {
+            "index": 3,
+            "support": 1,
+            "type": [
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        },
+        "athub": {
+            "index": 4,
+            "support": 0,
+            "type": [
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        },
+        "pcie_bif": {
+            "index": 5,
+            "support": 1,
+            "type": [
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        },
+        "hdp": {
+            "index": 6,
+            "support": 0,
+            "type": [
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        },
+        "xgmi_wafl": {
+            "index": 7,
+            "support": 1,
+            "method" : {
+                "crc": 2,
+                "data_parity": 6,
+                "replay_overflow": 7
+            },
+            "subblock": {
+                "xgmi": {
+                    "index": 0,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable"
+                    ]
+                },
+                "wafl": {
+                    "index": 1,
+                    "support": 1,
+                    "type": [
+                        "single_correctable",
+                        "multi_uncorrectable"
+                    ]
+                }
+            }
+        },
+        "df": {
+            "index": 8,
+            "support": 0,
+            "type": [
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        },
+        "smn": {
+            "index": 9,
+            "support": 0,
+            "type": [
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        },
+        "sem": {
+            "index": 10,
+            "support": 0,
+            "type": [
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        },
+        "mp0": {
+            "index": 11,
+            "support": 0,
+            "type": [
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        },
+        "mp1": {
+            "index": 12,
+            "support": 0,
+            "type": [
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        },
+        "fuse": {
+            "index": 13,
+            "support": 0,
+            "type": [
+                "single_correctable",
+                "multi_uncorrectable",
+                "poison"
+            ]
+        }
+    },
+    "tests": [
+        {
+            "name": "ras_umc.0.2",
+            "block": "umc",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_umc.0.4",
+            "block": "umc",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "GPU Hang"
+        },
+        {
+            "name": "ras_gfx.0.2",
+            "block": "gfx",
+            "subblock": "gfx_cpc_scratch",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.0.4",
+            "block": "gfx",
+            "subblock": "gfx_cpc_scratch",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.0.8",
+            "block": "gfx",
+            "subblock": "gfx_cpc_scratch",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "No GPU hang and no error count change"
+        },
+        {
+            "name": "ras_gfx.1.2",
+            "block": "gfx",
+            "subblock": "gfx_cpc_ucode",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.1.4",
+            "block": "gfx",
+            "subblock": "gfx_cpc_ucode",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.1.8",
+            "block": "gfx",
+            "subblock": "gfx_cpc_ucode",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.2.1",
+            "block": "gfx",
+            "subblock": "gfx_dc_state_me1",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.2.8",
+            "block": "gfx",
+            "subblock": "gfx_dc_state_me1",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "internal": "1",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.3.1",
+            "block": "gfx",
+            "subblock": "gfx_dc_csinvoc_me1",
+            "type": "parity",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "gridX": "4",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.3.8",
+            "block": "gfx",
+            "subblock": "gfx_dc_csinvoc_me1",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "gridX": "4",
+            "internal": "1",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.4.1",
+            "block": "gfx",
+            "subblock": "gfx_dc_restore_me1",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_dc_restore.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.4.8",
+            "block": "gfx",
+            "subblock": "gfx_dc_restore_me1",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_dc_restore.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.5.1",
+            "block": "gfx",
+            "subblock": "gfx_dc_state_me2",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_dc_restore.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "skip": "1",
+            "status": "No Support"
+        },
+        {
+            "name": "ras_gfx.5.8",
+            "block": "gfx",
+            "subblock": "gfx_dc_state_me2",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_dc_restore.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "skip": "1",
+            "status": "No Support"
+        },
+        {
+            "name": "ras_gfx.6.1",
+            "block": "gfx",
+            "subblock": "gfx_dc_csinvoc_me2",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_dc_restore.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "skip": "1",
+            "status": "No Support"
+        },
+        {
+            "name": "ras_gfx.6.8",
+            "block": "gfx",
+            "subblock": "gfx_dc_csinvoc_me2",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_dc_restore.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "skip": "1",
+            "status": "No Support"
+        },
+        {
+            "name": "ras_gfx.7.1",
+            "block": "gfx",
+            "subblock": "gfx_dc_restore_me2",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_dc_restore.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "skip": "1",
+            "status": "No Support"
+        },
+        {
+            "name": "ras_gfx.7.8",
+            "block": "gfx",
+            "subblock": "gfx_dc_restore_me2",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_dc_restore.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "skip": "1",
+            "status": "No Support"
+        },
+        {
+            "name": "ras_gfx.8.1",
+            "block": "gfx",
+            "subblock": "gfx_cpf_roq_me2",
+            "type": "parity",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.8.8",
+            "block": "gfx",
+            "subblock": "gfx_cpf_roq_me2",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "internal": "1",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.9.1",
+            "block": "gfx",
+            "subblock": "gfx_cpf_roq_me1",
+            "type": "parity",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.9.8",
+            "block": "gfx",
+            "subblock": "gfx_cpf_roq_me1",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "internal": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.10.2",
+            "block": "gfx",
+            "subblock": "gfx_cpf_tag",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.10.4",
+            "block": "gfx",
+            "subblock": "gfx_cpf_tag",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.11.1",
+            "block": "gfx",
+            "subblock": "gfx_cpg_dma_roq",
+            "type": "parity",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.11.8",
+            "block": "gfx",
+            "subblock": "gfx_cpg_dma_roq",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "internal": "1",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.12.2",
+            "block": "gfx",
+            "subblock": "gfx_cpg_dma_tag",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.12.4",
+            "block": "gfx",
+            "subblock": "gfx_cpg_dma_tag",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.12.8",
+            "block": "gfx",
+            "subblock": "gfx_cpg_dma_tag",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "internal": "1",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.13.2",
+            "block": "gfx",
+            "subblock": "gfx_cpg_tag",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/bin/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/bin/gc_edc_tc_02.bin",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.13.4",
+            "block": "gfx",
+            "subblock": "gfx_cpg_tag",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.13.8",
+            "block": "gfx",
+            "subblock": "gfx_cpg_tag",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "internal": "1",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.14.2",
+            "block": "gfx",
+            "subblock": "gfx_gds_mem",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_02.bin",
+            "addrType": "mtype_gds",
+            "backend": "drm",
+            "status": "Fail"
+        },
+        {
+            "name": "ras_gfx.14.4",
+            "block": "gfx",
+            "subblock": "gfx_gds_mem",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_02.bin",
+            "addrType": "mtype_gds",
+            "backend": "drm",
+            "status": "Fail"
+        },
+        {
+            "name": "ras_gfx.14.8",
+            "block": "gfx",
+            "subblock": "gfx_gds_mem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_02.bin",
+            "addrType": "mtype_gds",
+            "backend": "drm",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.15.1",
+            "block": "gfx",
+            "subblock": "gfx_gds_input_queue",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_02.bin",
+            "backend": "drm",
+            "status": "GPU hang without error count change"
+        },
+        {
+            "name": "ras_gfx.15.8",
+            "block": "gfx",
+            "subblock": "gfx_gds_input_queue",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_02.bin",
+            "backend": "drm",
+            "status": "GPU hang without error count change"
+        },
+        {
+            "name": "ras_gfx.16.2",
+            "block": "gfx",
+            "subblock": "gfx_gds_oa_phy_cmd_ram_mem",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_oa_phy.bin",
+            "gdsOaPhy": "1",
+            "workGroupSizeX": "64",
+            "workGroupSizeY": "6",
+            "backend": "drm",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.16.4",
+            "block": "gfx",
+            "subblock": "gfx_gds_oa_phy_cmd_ram_mem",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_oa_phy.bin",
+            "gdsOaPhy": "1",
+            "workGroupSizeX": "64",
+            "workGroupSizeY": "6",
+            "backend": "drm",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.16.8",
+            "block": "gfx",
+            "subblock": "gfx_gds_oa_phy_cmd_ram_mem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_oa_phy.bin",
+            "gdsOaPhy": "1",
+            "workGroupSizeX": "64",
+            "workGroupSizeY": "6",
+            "backend": "drm",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.17.1",
+            "block": "gfx",
+            "subblock": "gfx_gds_oa_phy_data_ram_mem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_oa_phy.bin",
+            "gdsOaPhy": "1",
+            "workGroupSizeX": "64",
+            "workGroupSizeY": "6",
+            "backend": "drm",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.17.8",
+            "block": "gfx",
+            "subblock": "gfx_gds_oa_phy_data_ram_mem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_oa_phy.bin",
+            "gdsOaPhy": "1",
+            "workGroupSizeX": "64",
+            "workGroupSizeY": "6",
+            "backend": "drm",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.18.2",
+            "block": "gfx",
+            "subblock": "gfx_gds_oa_pipe_mem",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_oa_phy.bin",
+            "gdsOaPhy": "1",
+            "workGroupSizeX": "64",
+            "workGroupSizeY": "6",
+            "backend": "drm",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.18.4",
+            "block": "gfx",
+            "subblock": "gfx_gds_oa_pipe_mem",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_oa_phy.bin",
+            "gdsOaPhy": "1",
+            "workGroupSizeX": "64",
+            "workGroupSizeY": "6",
+            "backend": "drm",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.18.8",
+            "block": "gfx",
+            "subblock": "gfx_gds_oa_pipe_mem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_gds_oa_phy.bin",
+            "gdsOaPhy": "1",
+            "workGroupSizeX": "64",
+            "workGroupSizeY": "6",
+            "backend": "drm",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.19.1",
+            "block": "gfx",
+            "subblock": "gfx_spi_sr_mem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_dc_restore.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "1",
+            "internal": "1",
+            "status": "GPU hange without error count change"
+        },
+        {
+            "name": "ras_gfx.19.8",
+            "block": "gfx",
+            "subblock": "gfx_spi_sr_mem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_dc_restore.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "1",
+            "internal": "1",
+            "status": "GPU hange without error count change"
+        },
+        {
+            "name": "ras_gfx.20.2",
+            "block": "gfx",
+            "subblock": "gfx_sq_sgpr",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sgpr_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.20.4",
+            "block": "gfx",
+            "subblock": "gfx_sq_sgpr",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sgpr_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.20.8",
+            "block": "gfx",
+            "subblock": "gfx_sq_sgpr",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sgpr_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.21.2",
+            "block": "gfx",
+            "subblock": "gfx_sq_lds_d",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_lds_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.21.4",
+            "block": "gfx",
+            "subblock": "gfx_sq_lds_d",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_lds_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.21.8",
+            "block": "gfx",
+            "subblock": "gfx_sq_lds_d",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_lds_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.22.2",
+            "block": "gfx",
+            "subblock": "gfx_sq_lds_i",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_lds_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.22.4",
+            "block": "gfx",
+            "subblock": "gfx_sq_lds_i",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_lds_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.22.8",
+            "block": "gfx",
+            "subblock": "gfx_sq_lds_i",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_lds_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.23.2",
+            "block": "gfx",
+            "subblock": "gfx_sq_vgpr",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_vgpr_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.23.4",
+            "block": "gfx",
+            "subblock": "gfx_sq_vgpr",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_vgpr_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.23.8",
+            "block": "gfx",
+            "subblock": "gfx_sq_vgpr",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_vgpr_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.24.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_utcl1_lfifo",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.24.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_utcl1_lfifo",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.24.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_utcl1_lfifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.25.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu0_write_data_buf",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.25.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu0_write_data_buf",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.25.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu0_write_data_buf",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.26.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu0_utcl1_lfifo",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sh_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.26.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu0_utcl1_lfifo",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sh_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.26.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu0_utcl1_lfifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sh_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.27.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu1_write_data_buf",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.27.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu1_write_data_buf",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.27.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu1_write_data_buf",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "1",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.28.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu1_utcl1_lfifo",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sh_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.28.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu1_utcl1_lfifo",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sh_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "1",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.28.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu1_utcl1_lfifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sh_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "1",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.29.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu2_write_data_buf",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "2",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.29.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu2_write_data_buf",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "2",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.29.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu2_write_data_buf",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "2",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.30.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu2_utcl1_lfifo",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sh_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "2",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.30.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu2_utcl1_lfifo",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sh_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "2",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.30.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_cu2_utcl1_lfifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sh_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "cuIndex": "2",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.31.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_banka_tag_ram",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.31.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_banka_tag_ram",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.31.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_banka_tag_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.32.1",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_banka_utcl1_miss_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.32.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_banka_utcl1_miss_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.33.1",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_banka_miss_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.33.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_banka_miss_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.34.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_banka_bank_ram",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.34.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_banka_bank_ram",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.34.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_banka_bank_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.35.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_tag_ram",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank_tag.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.35.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_tag_ram",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank_tag.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.35.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_tag_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank_tag.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.36.1",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_hit_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank_tag.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.36.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_hit_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank_tag.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.37.1",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_miss_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.37.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_miss_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.38.1",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_dirty_bit_ram",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_dirty_bit.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "1",
+            "addrType": "mtype_uc_sys",
+            "skip": "1",
+            "status": "No GPU hang and error counter change, Diag also fail"
+        },
+        {
+            "name": "ras_gfx.38.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_dirty_bit_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_dirty_bit.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "1",
+            "addrType": "mtype_uc_sys",
+            "skip": "1",
+            "status": "No GPU hang and error counter change, Diag also fail"
+        },
+        {
+            "name": "ras_gfx.39.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_bank_ram",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.39.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_bank_ram",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.39.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_banka_bank_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.40.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_bankb_tag_ram",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.40.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_bankb_tag_ram",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.40.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_bankb_tag_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.41.1",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_bankb_utcl1_miss_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.41.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_bankb_utcl1_miss_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.42.1",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_bankb_miss_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.42.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_bankb_miss_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.43.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_bankb_bank_ram",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.43.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_bankb_bank_ram",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.43.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_inst_bankb_bank_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.44.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_tag_ram",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank_tag.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.44.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_tag_ram",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank_tag.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.44.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_tag_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank_tag.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change with self injection, but TA doesn't work"
+        },
+        {
+            "name": "ras_gfx.45.1",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_hit_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank_tag.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.45.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_hit_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank_tag.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.46.1",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_miss_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.46.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_miss_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.47.1",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_dirty_bit_ram",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_dirty_bit.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "1",
+            "addrType": "mtype_uc_sys",
+            "skip": "1",
+            "status": "No GPU hang and error counter change, Diag also fail"
+        },
+        {
+            "name": "ras_gfx.47.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_dirty_bit_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_dirty_bit.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "1",
+            "addrType": "mtype_uc_sys",
+            "skip": "1",
+            "status": "No GPU hang and error counter change, Diag also fail"
+        },
+        {
+            "name": "ras_gfx.48.2",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_bank_ram",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.48.4",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_bank_ram",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.48.8",
+            "block": "gfx",
+            "subblock": "gfx_sqc_data_bankb_bank_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.49.2",
+            "block": "gfx",
+            "subblock": "gfx_ta_fs_dfifo",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.49.4",
+            "block": "gfx",
+            "subblock": "gfx_ta_fs_dfifo",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.49.8",
+            "block": "gfx",
+            "subblock": "gfx_ta_fs_dfifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.50.1",
+            "block": "gfx",
+            "subblock": "gfx_ta_fs_afifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.50.8",
+            "block": "gfx",
+            "subblock": "gfx_ta_fs_afifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.51.1",
+            "block": "gfx",
+            "subblock": "gfx_ta_fl_lfifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.51.8",
+            "block": "gfx",
+            "subblock": "gfx_ta_fl_lfifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.52.1",
+            "block": "gfx",
+            "subblock": "gfx_ta_fx_lfifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.52.8",
+            "block": "gfx",
+            "subblock": "gfx_ta_fx_lfifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.53.1",
+            "block": "gfx",
+            "subblock": "gfx_ta_fs_cfifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.53.8",
+            "block": "gfx",
+            "subblock": "gfx_ta_fs_cfifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.54.1",
+            "block": "gfx",
+            "subblock": "gfx_tca_hole_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.54.8",
+            "block": "gfx",
+            "subblock": "gfx_tca_hole_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.55.1",
+            "block": "gfx",
+            "subblock": "gfx_tca_req_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "20",
+            "workGroupSizeX": "256",
+            "gridX": "16",
+            "internal": "1",
+            "COMPUTE_STATIC_THREAD_MGMT_SE0_sh0_cu_en": "255",
+            "status": "Fail"
+        },
+        {
+            "name": "ras_gfx.55.8",
+            "block": "gfx",
+            "subblock": "gfx_tca_req_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "20",
+            "workGroupSizeX": "256",
+            "gridX": "16",
+            "internal": "1",
+            "COMPUTE_STATIC_THREAD_MGMT_SE0_sh0_cu_en": "255",
+            "status": "Fail"
+        },
+        {
+            "name": "ras_gfx.56.2",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.56.4",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.56.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.57.2",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data_bank_0_1",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.57.4",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data_bank_0_1",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.57.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data_bank_0_1",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.58.2",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data_bank_1_0",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.58.4",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data_bank_1_0",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.58.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data_bank_1_0",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.59.2",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data_bank_1_1",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.59.4",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data_bank_1_1",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.59.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_data_bank_1_1",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.60.2",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_dirty_bank_0",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with internal injection"
+        },
+        {
+            "name": "ras_gfx.60.4",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_dirty_bank_0",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with internal injection"
+        },
+        {
+            "name": "ras_gfx.60.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_dirty_bank_0",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "Error count change with internal injection"
+        },
+        {
+            "name": "ras_gfx.61.2",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_dirty_bank_1",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change with internal injection"
+        },
+        {
+            "name": "ras_gfx.61.4",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_dirty_bank_1",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change with internal injection"
+        },
+        {
+            "name": "ras_gfx.61.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_dirty_bank_1",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change with internal injection"
+        },
+        {
+            "name": "ras_gfx.62.2",
+            "block": "gfx",
+            "subblock": "gfx_tcc_high_rate_tag",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.62.4",
+            "block": "gfx",
+            "subblock": "gfx_tcc_high_rate_tag",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.62.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_high_rate_tag",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.63.2",
+            "block": "gfx",
+            "subblock": "gfx_tcc_low_rate_tag",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.63.4",
+            "block": "gfx",
+            "subblock": "gfx_tcc_low_rate_tag",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.63.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_low_rate_tag",
+            "type": "poison",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.64.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_in_use_dec",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.64.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_in_use_dec",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.65.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_in_use_transfer",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.65.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_in_use_transfer",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.66.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_return_data",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.66.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_return_data",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.67.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_return_control",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_atomic_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "64",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.67.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_return_control",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_atomic_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "64",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.68.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_uc_atomic_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change, with internal injection"
+        },
+        {
+            "name": "ras_gfx.68.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_uc_atomic_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change, with internal injection"
+        },
+        {
+            "name": "ras_gfx.69.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_write_return",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change, with internal injection"
+        },
+        {
+            "name": "ras_gfx.69.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_write_return",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change, with internal injection"
+        },
+        {
+            "name": "ras_gfx.70.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_write_cache_read",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "1",
+            "status": "GPU hang with error count change, with internal injection"
+        },
+        {
+            "name": "ras_gfx.70.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_write_cache_read",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "1",
+            "status": "GPU hang with error count change, with internal injection"
+        },
+        {
+            "name": "ras_gfx.71.2",
+            "block": "gfx",
+            "subblock": "gfx_tcc_src_fifo",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change with internal injection"
+        },
+        {
+            "name": "ras_gfx.71.4",
+            "block": "gfx",
+            "subblock": "gfx_tcc_src_fifo",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change with internal injection"
+        },
+        {
+            "name": "ras_gfx.71.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_src_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change with internal injection"
+        },
+        {
+            "name": "ras_gfx.72.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_src_fifo_next_ram",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "5",
+            "internal": "1",
+            "status": "Error count change with internal injection, trafficed by glMark2"
+        },
+        {
+            "name": "ras_gfx.72.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_src_fifo_next_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "5",
+            "internal": "1",
+            "status": "Error count change with internal injection, trafficed by glMark2"
+        },
+        {
+            "name": "ras_gfx.73.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_tag_probe_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "16",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "0",
+            "addrType": "fb",
+            "loop": "16",
+            "status": "Fail with Diag, no error counter change"
+        },
+        {
+            "name": "ras_gfx.73.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_cache_tag_probe_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "16",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "0",
+            "addrType": "fb",
+            "loop": "16",
+            "status": "Fail with Diag, no error counter change"
+        },
+        {
+            "name": "ras_gfx.74.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_latency_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "5",
+            "loop": "128",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.74.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_latency_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "5",
+            "loop": "128",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.75.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_latency_fifo_next_ram",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "1",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "1",
+            "addrType": "fb",
+            "loop": "16",
+            "status": "GPU hang without error count change, TA inject failed, should check with FW team"
+        },
+        {
+            "name": "ras_gfx.75.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_latency_fifo_next_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "1",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "internal": "1",
+            "addrType": "fb",
+            "loop": "16",
+            "status": "GPU hang without error count change, TA inject failed, should check with FW team"
+        },
+        {
+            "name": "ras_gfx.76.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_wrret_tag_write_return",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "16",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "internal": "1",
+            "addrType": "fb",
+            "loop": "2096",
+            "skip": "1",
+            "status": "Fail"
+        },
+        {
+            "name": "ras_gfx.76.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_wrret_tag_write_return",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "16",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "internal": "1",
+            "addrType": "fb",
+            "loop": "2096",
+            "skip": "1",
+            "status": "Fail"
+        },
+        {
+            "name": "ras_gfx.77.1",
+            "block": "gfx",
+            "subblock": "gfx_tcc_atomic_return_buffer",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "16",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "internal": "1",
+            "addrType": "fb",
+            "loop": "2096",
+            "skip": "1",
+            "status": "Fail"
+        },
+        {
+            "name": "ras_gfx.77.8",
+            "block": "gfx",
+            "subblock": "gfx_tcc_atomic_return_buffer",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "maxQueueNum": "16",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "internal": "1",
+            "addrType": "fb",
+            "loop": "2096",
+            "skip": "1",
+            "status": "Fail"
+        },
+        {
+            "name": "ras_gfx.78.1",
+            "block": "gfx",
+            "subblock": "gfx_tci_write_ram",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang without error count change, TA inject failed, should check with FW team"
+        },
+        {
+            "name": "ras_gfx.78.8",
+            "block": "gfx",
+            "subblock": "gfx_tci_write_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_data_bank.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang without error count change, TA inject failed, should check with FW team"
+        },
+        {
+            "name": "ras_gfx.79.2",
+            "block": "gfx",
+            "subblock": "gfx_tcp_cache_ram",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change with glmark2"
+        },
+        {
+            "name": "ras_gfx.79.4",
+            "block": "gfx",
+            "subblock": "gfx_tcp_cache_ram",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change with glmark2"
+        },
+        {
+            "name": "ras_gfx.79.8",
+            "block": "gfx",
+            "subblock": "gfx_tcp_cache_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change with glmark2"
+        },
+        {
+            "name": "ras_gfx.80.2",
+            "block": "gfx",
+            "subblock": "gfx_tcp_lfifo_ram",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change with glmark2"
+        },
+        {
+            "name": "ras_gfx.80.4",
+            "block": "gfx",
+            "subblock": "gfx_tcp_lfifo_ram",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change with glmark2"
+        },
+        {
+            "name": "ras_gfx.80.8",
+            "block": "gfx",
+            "subblock": "gfx_tcp_lfifo_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change with glmark2"
+        },
+        {
+            "name": "ras_gfx.81.1",
+            "block": "gfx",
+            "subblock": "gfx_tcp_cmd_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.81.8",
+            "block": "gfx",
+            "subblock": "gfx_tcp_cmd_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.82.2",
+            "block": "gfx",
+            "subblock": "gfx_tcp_vm_fifo",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.82.4",
+            "block": "gfx",
+            "subblock": "gfx_tcp_vm_fifo",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.82.8",
+            "block": "gfx",
+            "subblock": "gfx_tcp_vm_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.83.1",
+            "block": "gfx",
+            "subblock": "gfx_tcp_db_ram",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change, with glmark2"
+        },
+        {
+            "name": "ras_gfx.83.8",
+            "block": "gfx",
+            "subblock": "gfx_tcp_db_ram",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "1",
+            "status": "GPU hang with error count change, with glmark2"
+        },
+        {
+            "name": "ras_gfx.84.2",
+            "block": "gfx",
+            "subblock": "gfx_tcp_utcl1_lfifo0",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tcp_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.84.4",
+            "block": "gfx",
+            "subblock": "gfx_tcp_utcl1_lfifo0",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tcp_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.84.8",
+            "block": "gfx",
+            "subblock": "gfx_tcp_utcl1_lfifo0",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tcp_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.85.2",
+            "block": "gfx",
+            "subblock": "gfx_tcp_utcl1_lfifo1",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tcp_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.85.4",
+            "block": "gfx",
+            "subblock": "gfx_tcp_utcl1_lfifo1",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tcp_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.85.8",
+            "block": "gfx",
+            "subblock": "gfx_tcp_utcl1_lfifo1",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tcp_atcl1.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.86.2",
+            "block": "gfx",
+            "subblock": "gfx_td_ss_fifo_lo",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "loop": "10",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.86.4",
+            "block": "gfx",
+            "subblock": "gfx_td_ss_fifo_lo",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "loop": "10",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.86.8",
+            "block": "gfx",
+            "subblock": "gfx_td_ss_fifo_lo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "loop": "10",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.87.2",
+            "block": "gfx",
+            "subblock": "gfx_td_ss_fifo_hi",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "loop": "10",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.87.4",
+            "block": "gfx",
+            "subblock": "gfx_td_ss_fifo_hi",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "loop": "10",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.87.8",
+            "block": "gfx",
+            "subblock": "gfx_td_ss_fifo_hi",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "loop": "10",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.88.1",
+            "block": "gfx",
+            "subblock": "gfx_td_cs_fifo",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "loop": "10",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.88.8",
+            "block": "gfx",
+            "subblock": "gfx_td_cs_fifo",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "loop": "10",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.89.2",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramrd_cmdmem",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.89.4",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramrd_cmdmem",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.89.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramrd_cmdmem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.90.2",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramwr_cmdmem",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.90.4",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramwr_cmdmem",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.90.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramwr_cmdmem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.91.2",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramwr_datamem",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.91.4",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramwr_datamem",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.91.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramwr_datamem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.92.2",
+            "block": "gfx",
+            "subblock": "gfx_ea_rret_tagmem",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.92.4",
+            "block": "gfx",
+            "subblock": "gfx_ea_rret_tagmem",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.92.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_rret_tagmem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "0",
+            "status": "Error count change, but next injection will fail"
+        },
+        {
+            "name": "ras_gfx.93.2",
+            "block": "gfx",
+            "subblock": "gfx_ea_wret_tagmem",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.93.4",
+            "block": "gfx",
+            "subblock": "gfx_ea_wret_tagmem",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.93.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_wret_tagmem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "internal": "1",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.94.2",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmird_cmdmem",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.94.4",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmird_cmdmem",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.94.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmird_cmdmem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.95.2",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmiwr_cmdmem",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02_ea.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.95.4",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmiwr_cmdmem",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02_ea.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.95.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmiwr_cmdmem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02_ea.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.96.2",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmiwr_datamem",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.96.4",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmiwr_datamem",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.96.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmiwr_datamem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.97.1",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramrd_pagemem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "5",
+            "addrType": "mtype_uc_vid",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.97.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramrd_pagemem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "5",
+            "addrType": "mtype_uc_vid",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.98.1",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramwr_pagemem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.98.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_dramwr_pagemem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.99.1",
+            "block": "gfx",
+            "subblock": "gfx_ea_iord_cmdmem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.99.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_iord_cmdmem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.100.1",
+            "block": "gfx",
+            "subblock": "gfx_ea_iowr_cmdmem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.100.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_iowr_cmdmem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.101.1",
+            "block": "gfx",
+            "subblock": "gfx_ea_iowr_datamem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.101.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_iowr_datamem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "4",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.102.1",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmird_pagemem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "2",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.102.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmird_pagemem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "2",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.103.1",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmiwr_pagemem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "8",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.103.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_gmiwr_pagemem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "8",
+            "addrType": "sys",
+            "status": "Faild"
+        },
+        {
+            "name": "ras_gfx.104.1",
+            "block": "gfx",
+            "subblock": "gfx_ea_mam_d0mem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_dirty.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "addrType": "fb",
+            "internal": "0",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.104.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_mam_d0mem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_dirty.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "addrType": "fb",
+            "internal": "0",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.105.1",
+            "block": "gfx",
+            "subblock": "gfx_ea_mam_d1mem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_dirty.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "addrType": "fb",
+            "internal": "0",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.105.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_mam_d1mem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_dirty.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "addrType": "fb",
+            "internal": "0",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.106.1",
+            "block": "gfx",
+            "subblock": "gfx_ea_mam_d2mem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_dirty.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "addrType": "fb",
+            "internal": "0",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.106.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_mam_d2mem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_dirty.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "addrType": "fb",
+            "internal": "0",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.107.1",
+            "block": "gfx",
+            "subblock": "gfx_ea_mam_d3mem",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_dirty.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "addrType": "fb",
+            "internal": "0",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.107.8",
+            "block": "gfx",
+            "subblock": "gfx_ea_mam_d3mem",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_ea_dirty.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "64",
+            "gridX": "4",
+            "addrType": "fb",
+            "internal": "0",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.108.2",
+            "block": "gfx",
+            "subblock": "utc_vml2_bank_cache",
+            "type": "single_correctable",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.108.4",
+            "block": "gfx",
+            "subblock": "utc_vml2_bank_cache",
+            "type": "multi_uncorrectable",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.108.8",
+            "block": "gfx",
+            "subblock": "utc_vml2_bank_cache",
+            "type": "poison",
+            "backend": "kfd",
+            "queue": "compute",
+            "internal": "0",
+            "status": "GPU hang with error count change"
+        },
+        {
+            "name": "ras_gfx.109.2",
+            "block": "gfx",
+            "subblock": "utc_vml2_walker",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_utc_vmwalker_pde_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "1",
+            "internal": "0",
+            "loop": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.109.4",
+            "block": "gfx",
+            "subblock": "utc_vml2_walker",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_utc_vmwalker_pde_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "1",
+            "internal": "0",
+            "loop": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.109.8",
+            "block": "gfx",
+            "subblock": "utc_vml2_walker",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_utc_vmwalker_pde_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "512",
+            "gridX": "1",
+            "internal": "0",
+            "loop": "4",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_gfx.110.1",
+            "block": "gfx",
+            "subblock": "utc_atcl2_cache_2m_bank",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "internal": "0",
+            "loop": "4",
+            "addrType": "atcMem",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.110.8",
+            "block": "gfx",
+            "subblock": "utc_atcl2_cache_2m_bank",
+            "type": "parity",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "internal": "0",
+            "loop": "4",
+            "addrType": "atcMem",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.111.2",
+            "block": "gfx",
+            "subblock": "utc_atcl2_cache_4k_bank",
+            "type": "single_correctable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "internal": "0",
+            "loop": "4",
+            "addrType": "atcMem",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.111.4",
+            "block": "gfx",
+            "subblock": "utc_atcl2_cache_4k_bank",
+            "type": "multi_uncorrectable",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "internal": "0",
+            "loop": "4",
+            "addrType": "atcMem",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_gfx.111.8",
+            "block": "gfx",
+            "subblock": "utc_atcl2_cache_4k_bank",
+            "type": "poison",
+            "dispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_tc_02.bin",
+            "backend": "kfd",
+            "queue": "compute",
+            "workGroupSizeX": "256",
+            "gridX": "64",
+            "internal": "0",
+            "loop": "4",
+            "addrType": "atcMem",
+            "status": "Failed"
+        },
+        {
+            "name": "ras_mmhub.0.2",
+            "block": "mmhub",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_mmhub.0.4",
+            "block": "mmhub",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "GPU Hang"
+        },
+        {
+            "name": "ras_pcie_bif.0.2",
+            "block": "pcie_bif",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "Error count change"
+        },
+        {
+            "name": "ras_pcie_bif.0.4",
+            "block": "pcie_bif",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "GPU Hang"
+        },
+        {
+            "name": "xgmi_wafl.0.2",
+            "block": "xgmi_wafl",
+            "subblock": "xgmi",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "Error count change"
+        },
+        {
+            "name": "xgmi_wafl.0.4",
+            "block": "xgmi_wafl",
+            "subblock": "xgmi",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "GPU Hang"
+        },
+        {
+            "name": "xgmi_wafl.1.2",
+            "block": "xgmi_wafl",
+            "subblock": "wafl",
+            "type": "single_correctable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "Error count change"
+        },
+        {
+            "name": "xgmi_wafl.1.4",
+            "block": "xgmi_wafl",
+            "subblock": "wafl",
+            "type": "multi_uncorrectable",
+            "nullDispatchCS": "sp3/gfx9/edc/bin/vega20/gc_edc_sqc_inst_bank_snop.bin",
+            "status": "GPU Hang"
+        }
+    ]
+}

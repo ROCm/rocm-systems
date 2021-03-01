@@ -1,0 +1,26 @@
+{
+    "version": "0.0.1",
+    "devices": [
+        {
+            "name": "VEGA20",
+            "ids": [ "0x66A0", "0x66A1", "0x66A2", "0x66A3", "0x66A4", "0x66A7", "0x66AF" ],
+            "config": "vega20.json",
+            "gfx": "libgfx9.so",
+            "sdma": "libsdma4.so"
+        },
+        {
+            "name": "ARCTURUS",
+            "ids": [ "0x738C", "0x7388", "0x738E" ],
+            "config": "arcturus.json",
+            "gfx": "libgfx9.so",
+            "sdma": "libsdma4.so"
+        },
+        {
+            "name": "SIENNA_CICHLID",
+            "ids": [ "0x73A0", "0x73A2", "0x73A3", "0x73AB", "0x73AE", "0x73BF" ],
+            "config": "sienna_cichlid.json",
+            "gfx": "libgfx10.so",
+            "sdma": "libsdma5.so"
+        }
+    ]
+}

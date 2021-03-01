@@ -1,0 +1,55 @@
+shader main
+type(CS)
+
+user_sgpr_count(9)   // 2 for the buffer resource + 5 for thread/thread group parameters
+
+//s[0:1] the mmeory address for the buffer resource
+//s2 x
+//s3 x*y
+//s4 x*y*z
+//s5 X	
+//s6 X*Y
+//s7 output offset
+//s8 loop
+
+tgid_x_en(1)       //s_tgid_x s9
+tgid_y_en(1)       //s_tgid_y s10
+tgid_z_en(1)       //s_tgid_z s11
+
+//vo for tid_x
+//v1 for tid_y
+//v2 for tid_z
+
+//SPI may touch s0...sn before shader is run
+
+s_mov_b32 s16, s2
+
+//write data
+s_mov_b32 s30, s0
+s_mov_b32 s31, s1
+s_mov_b32 s32, s2
+s_mov_b32 s33, s3
+s_mov_b32 s34, s4
+s_mov_b32 s35, s5
+s_mov_b32 s36, s6
+s_mov_b32 s37, s7
+s_mov_b32 s38, s8
+s_mov_b32 s39, s9
+
+//read back
+s_mov_b32 s0, s30
+s_mov_b32 s1, s31
+s_mov_b32 s2, s32
+s_mov_b32 s3, s33
+s_mov_b32 s4, s34
+s_mov_b32 s5, s35
+s_mov_b32 s6, s36
+s_mov_b32 s7, s37
+s_mov_b32 s8, s38
+s_mov_b32 s9, s39
+
+s_store_dword s16, s[0:1], 0x0 glc
+
+s_endpgm
+end 
+

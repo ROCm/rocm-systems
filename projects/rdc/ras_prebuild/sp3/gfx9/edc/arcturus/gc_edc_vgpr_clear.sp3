@@ -1,0 +1,75 @@
+shader main
+type(CS)
+
+user_sgpr_count(2)   // 2 for the buffer resource + 5 for thread/thread group parameters
+    //s[0:1] the mmeory address for the buffer resource
+
+    tgid_x_en(1)       //s_tgid_x s2
+    tgid_y_en(1)       //s_tgid_y s3
+    tgid_z_en(1)       //s_tgid_z s4
+
+    //vo for tid_x
+    //v1 for tid_y
+    //v2 for tid_z
+
+    for var vgpr = 0; vgpr < 256; ++vgpr
+		v_accvgpr_read v[vgpr], acc[vgpr]
+	end
+
+	for var vgpr = 0; vgpr < 256; ++vgpr
+		v_accvgpr_write acc[vgpr], v[vgpr]
+	end
+
+    s_movk_i32    m0, 0x0000
+    s_mov_b32     s10, 0x000000f8
+    s_set_gpr_idx_on  s10, 0x8
+label_0004:
+    v_mov_b32     v0, 0
+    v_mov_b32     v1, 0
+    v_mov_b32     v2, 0
+    v_mov_b32     v3, 0
+    v_mov_b32     v4, 0
+    v_mov_b32     v5, 0
+    v_mov_b32     v6, 0
+    v_mov_b32     v7, 0
+    s_sub_u32     s10, s10, 8
+    s_set_gpr_idx_idx  s10
+    s_cbranch_scc0  label_0004
+    s_set_gpr_idx_off
+    v_mbcnt_lo_u32_b32  v1, exec_hi, 0
+    v_mbcnt_hi_u32_b32  v1, exec_lo, v1
+    v_mul_u32_u24  v1, 8, v1
+    s_getreg_b32  s11, hwreg(HW_REG_HW_ID, 4, 2)
+    s_mulk_i32    s11, 0x4000
+    v_add_co_u32  v1, vcc, v1, s11
+    s_mov_b32     s10, 7
+    s_mov_b32     m0, -1
+label_001B:
+    ds_write2_b64  v1, v[2:3], v[2:3] offset1:64
+    ds_write2_b64  v1, v[4:5], v[4:5] offset0:128 offset1:192
+    v_add_co_u32  v1, vcc, 0x00000800, v1
+    s_sub_u32     s10, s10, 1
+    s_cbranch_scc0  label_001B
+
+    s_getreg_b32 s20, hwreg(HW_REG_HW_ID, 0, 32)
+    // s12 = SIMD
+    s_lshr_b32 s12,s20,4
+    s_and_b32 s12, s12, 0x3
+    // s13 = CU
+    s_lshr_b32 s13,s20,8
+    s_and_b32 s13, s13, 0xf
+    // s14 = SE
+    s_lshr_b32 s14,s20,13
+    s_and_b32 s14, s14, 0x7
+    // s15 = SE * 16 * 4 + CU * 4 + SIMD
+    s_mul_i32 s16, s14, 64
+    s_mul_i32 s17, s13, 4
+    s_add_i32 s15, s16, s17
+    s_add_i32 s15, s15, s12
+    s_mul_i32 s16, s15, 4
+
+    s_store_dword s15, s[0:1], s16 glc
+    s_waitcnt 0
+
+s_endpgm
+end

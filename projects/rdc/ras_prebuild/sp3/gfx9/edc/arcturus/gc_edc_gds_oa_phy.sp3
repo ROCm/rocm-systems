@@ -1,0 +1,68 @@
+shader main
+  type(CS)
+
+   
+      user_sgpr_count(4) 
+      tgid_x_en(1)      
+      tgid_y_en(1)      
+      tgid_z_en(1)      
+
+      s_getreg_b32 s18, hwreg(HW_REG_HW_ID, 0, 32)
+      s_bfe_u32 s16, s18, 0x2001e  // get meid
+      s_bfe_u32 s17, s18, 0x20006  // get pipeid
+      //s_add_u32 s17, s17, s16 
+      
+      // get ring id 
+      v_mov_b32  v20, s17 
+      s_and_b32  s17, s17, 0x7
+     
+      // Get thread_id inside wave
+      v_mbcnt_lo_u32_b32 v8, 0xffffffff, 0
+      v_mbcnt_hi_u32_b32 v9, 0xffffffff, v8
+
+      s_waitcnt 0
+      
+      // init: gds write address
+      v_mov_b32 v13, 0
+
+      // the first 128DW is for ordered-append counter
+      v_mov_b32 v14, 0x80
+
+      // offset ring
+      v_mov_b32 v15, 0x200
+
+      v_mul_lo_u32 v15, v15, v20   // ring offset
+      v_mov_b32 v16, 0x40   // wave_size
+      
+      v_mul_lo_u32 v18, v1, s1
+      v_add_co_u32 v18, vcc, v18, v0
+      v_lshrrev_b32   v17,6    ,v18    
+      s_mov_b32 s9, s12
+      s_lshr_b32 s9, s9, 6
+      s_and_b32 s9, s9, 0x7ff
+      s_lshl_b32 s17, s17, 18
+      s_or_b32 s9, s9, s17
+      s_mov_b32 m0, s9
+      
+      v_mov_b32 v10, 1         
+      v_mov_b32 v11, 0
+      ds_ordered_count  v11, v10 gds:1 offset0:0 offset1:1
+      s_waitcnt 0
+      
+      v_mov_b32 v18, v11
+      
+      v_mul_lo_u32 v16, v16, v18   // waves offset before.
+      v_add_co_u32 v13, vcc, v13, v14
+      v_add_co_u32 v13, vcc, v13, v15
+      v_add_co_u32 v13, vcc, v13, v16
+      v_add_co_u32 v13, vcc, v13, v9
+
+      v_lshlrev_b32 v13,2,v13 
+      s_mov_b32 m0, 0x4000
+      s_nop 0
+      ds_write_b32 v13, v0 gds:1
+      s_waitcnt 0
+
+s_endpgm      
+end
+
