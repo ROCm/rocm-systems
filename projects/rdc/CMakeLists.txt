@@ -132,12 +132,19 @@ if (NOT DEFINED CPACK_PACKAGE_VENDOR)
 endif()
 
 if (NOT DEFINED CPACK_PACKAGE_CONTACT)
-    set(CPACK_PACKAGE_CONTACT "Advanced Micro Devices, Inc.")
+    set(CPACK_PACKAGE_CONTACT "RDC Support <rdc.support@amd.com>")
 endif()
 
 if (NOT DEFINED CPACK_PACKAGE_DESCRIPTION_SUMMARY)
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-                 "Radeon Data Center Tools")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD Radeon Data Center")
+endif()
+
+if (NOT DEFINED CPACK_PACKAGE_DESCRIPTION)
+    set(CPACK_PACKAGE_DESCRIPTION "This package contains the AMD Radeon Data Center tools.")
+endif()
+
+if (NOT DEFINED CPACK_RESOURCE_FILE_LICENSE)
+    set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
 endif()
 
 if (NOT RDC_PACKAGE)
@@ -265,15 +272,18 @@ else()
    set(DISTRO_ROOT "/lib/systemd/system")
 endif()
 
+# 755 permissions
+set(INST_SCR_PERM "OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ
+                                      GROUP_EXECUTE WORLD_READ WORLD_EXECUTE")
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/DEBIAN_postinst.in"
-  "${PROJECT_SOURCE_DIR}/DEBIAN/postinst")
+  "${PROJECT_SOURCE_DIR}/DEBIAN/postinst" FILE_PERMISSIONS ${INST_SCR_PERM})
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/RPM_rpm_post.in"
-  "${PROJECT_SOURCE_DIR}/RPM/rpm_post")
+  "${PROJECT_SOURCE_DIR}/RPM/rpm_post" FILE_PERMISSIONS ${INST_SCR_PERM})
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/RPM_postun.in"
-  "${PROJECT_SOURCE_DIR}/RPM/rpm_postun")
+  "${PROJECT_SOURCE_DIR}/RPM/rpm_postun" FILE_PERMISSIONS ${INST_SCR_PERM})
 
 if ( DEFINED ENV{ROCM_LIBPATCH_VERSION} )
   set ( CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}" )
@@ -295,7 +305,7 @@ set ( CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT" )
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst;
                     ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-smi-lib")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-smi-lib, libc6")
 
 # RPM package specific variables
 if ( DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE} )

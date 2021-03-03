@@ -1,4 +1,4 @@
-#/bin/bash
+#!/bin/bash
 
 # This will return 0 if an id is created and non-zero if
 # it already exists

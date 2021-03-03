@@ -59,7 +59,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2 -std=c++11 -pthread ")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
 
 if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -s")
 else ()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
 endif ()
