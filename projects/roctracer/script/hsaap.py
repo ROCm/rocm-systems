@@ -362,11 +362,13 @@ class API_DescrParser:
       self.content +=   '    struct {\n'
       for (var, item) in struct['astr'].items():
         self.content += '      ' + item + ';\n'
+        if call == "hsa_amd_memory_async_copy_rect" and item == "const hsa_dim3_t* range":
+          self.content += '      hsa_dim3_t range__val;\n'
       self.content +=   '    } ' + call + ';\n'
     else:
       self.content += '  } args;\n'
       self.content += '};\n'
-    
+
   # generate API callbacks
   def gen_callbacks(self, n, name, call, struct):
     if n == -1:
@@ -384,6 +386,8 @@ class API_DescrParser:
           self.content += '  api_data.args.' + call + '.' + var + ' = ' + '(' + var + ' != NULL) ? strdup(' + var + ')' + ' : NULL;\n'
         else:
           self.content += '  api_data.args.' + call + '.' + var + ' = ' + var + ';\n'
+          if call == 'hsa_amd_memory_async_copy_rect' and var == 'range':
+            self.content += '  api_data.args.' + call + '.' + var + '__val = ' + '*(' + var + ');\n'
       self.content += '  activity_rtapi_callback_t api_callback_fun = NULL;\n'
       self.content += '  void* api_callback_arg = NULL;\n'
       self.content += '  cb_table.get(' + call_id + ', &api_callback_fun, &api_callback_arg);\n'
@@ -459,6 +463,9 @@ class API_DescrParser:
             self.content += '      out << "0x" << std::hex << (uint64_t)' + arg_val
           else:
             self.content += '      out << ' + arg_val
+            if call == "hsa_amd_memory_async_copy_rect" and arg_var == "range":
+              self.content += ' << ", ";\n'
+              self.content += '      out << ' + arg_val + '__val'
           '''
           arg_item = struct['tlst'][ind]
           if re.search(r'\(\* ', arg_item): arg_pref = ''

@@ -315,6 +315,7 @@ constexpr roctracer::TraceBuffer<hsa_api_trace_entry_t>::flush_prm_t hsa_flush_p
 roctracer::TraceBuffer<hsa_api_trace_entry_t>* hsa_api_trace_buffer = NULL;
 
 // HSA API callback function
+
 void hsa_api_callback(
     uint32_t domain,
     uint32_t cid,
@@ -326,6 +327,7 @@ void hsa_api_callback(
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     hsa_begin_timestamp = timer->timestamp_fn_ns();
   } else {
+
     const timestamp_t end_timestamp = (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp : timer->timestamp_fn_ns();
     hsa_api_trace_entry_t* entry = hsa_api_trace_buffer->GetEntry();
     entry->cid = cid;
