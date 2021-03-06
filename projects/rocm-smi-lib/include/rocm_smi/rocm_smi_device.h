@@ -204,6 +204,7 @@ class Device {
     void set_evt_notif_anon_fd(uint32_t fd) {
                                    evt_notif_anon_fd_ = static_cast<int>(fd);}
     int evt_notif_anon_fd(void) const {return evt_notif_anon_fd_;}
+    metrics_table_header_t & gpu_metrics_ver(void) {return gpu_metrics_ver_;}
     void fillSupportedFuncs(void);
     void DumpSupportedFunctions(void);
     bool DeviceAPISupported(std::string name, uint64_t variant,
@@ -237,6 +238,7 @@ class Device {
 
     int evt_notif_anon_fd_;
     FILE *evt_notif_anon_file_ptr_;
+    struct metrics_table_header_t gpu_metrics_ver_;
 };
 
 }  // namespace smi

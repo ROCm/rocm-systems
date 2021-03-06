@@ -802,13 +802,24 @@ struct metrics_table_header_t {
 /**
  * @brief The following structure holds the gpu metrics values for a device.
  */
+// Below is the assumed version of gpu_metric data on the device. If the device
+// is using this version, we can read data directly into rsmi_gpu_metrics_t.
+// If the device is using an older format, a conversion of formats will be
+// required.
+// DGPU targets have a format version of 1. APU targets have a format version of
+// 2. Currently, only version 1 (DGPU) gpu_metrics is supported.
+#define RSMI_GPU_METRICS_API_FORMAT_VER 1
+// The content version increments when gpu_metrics is extended with new and/or
+// existing field sizes are changed.
+#define RSMI_GPU_METRICS_API_CONTENT_VER 1
+
+// This should match NUM_HBM_INSTANCES
+#define RSMI_NUM_HBM_INSTANCES 4
+
 typedef struct {
   // TODO(amd) Doxygen documents
   /// \cond Ignore in docs.
   struct metrics_table_header_t common_header;
-
-/* Driver attached timestamp (in ns) */
-  uint64_t      system_clock_counter;
 
 /* Temperature */
   uint16_t      temperature_edge;
@@ -825,7 +836,10 @@ typedef struct {
 
 /* Power/Energy */
   uint16_t      average_socket_power;
-  uint32_t      energy_accumulator;
+  uint64_t      energy_accumulator;      // v1 mod. (32->64)
+
+/* Driver attached timestamp (in ns) */
+  uint64_t      system_clock_counter;   // v1 mod. (moved from top of struct)
 
 /* Average clocks */
   uint16_t      average_gfxclk_frequency;
@@ -852,8 +866,14 @@ typedef struct {
   uint16_t      current_fan_speed;
 
 /* Link width/speed */
-  uint8_t       pcie_link_width;
-  uint8_t       pcie_link_speed;  // in 0.1 GT/s
+  uint16_t       pcie_link_width;  // v1 mod.(8->16)
+  uint16_t       pcie_link_speed;  // in 0.1 GT/s; v1 mod. (8->16)
+
+  uint16_t       padding;          // new in v1
+
+  uint32_t       gfx_activity_acc;   // new in v1
+  uint32_t       mem_actvity_acc;     // new in v1
+  uint16_t       temperature_hbm[RSMI_NUM_HBM_INSTANCES];  // new in v1
   /// \endcond
 } rsmi_gpu_metrics_t;
 

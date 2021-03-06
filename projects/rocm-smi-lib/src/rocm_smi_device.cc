@@ -482,8 +482,9 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   if (X) return X; \
 }
 
-Device::Device(std::string p, RocmSMI_env_vars const *e) : monitor_(nullptr),
-                                   path_(p), env_(e), evt_notif_anon_fd_(-1) {
+Device::Device(std::string p, RocmSMI_env_vars const *e) :
+            monitor_(nullptr), path_(p), env_(e), evt_notif_anon_fd_(-1),
+                                                   gpu_metrics_ver_{0, 0, 0} {
 #ifdef NDEBUG
     env_ = nullptr;
 #endif
