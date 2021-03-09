@@ -750,7 +750,7 @@ void HsaRsrcFactory::DumpHandles(FILE* file) {
     fprintf(file, "0x%lx agent %s\n", agent_info->dev_id.handle, (agent_info->dev_type == HSA_DEVICE_TYPE_CPU) ? "cpu" : "gpu");
     if (agent_info->cpu_pool.handle != 0) fprintf(file, "0x%lx pool cpu\n", agent_info->cpu_pool.handle);
     if (agent_info->kern_arg_pool.handle != 0) fprintf(file, "0x%lx pool cpu kernarg\n", agent_info->kern_arg_pool.handle);
-    if (agent_info->gpu_pool.handle != 0) fprintf(file, "0x%lx pool gpu\n", agent_info->gpu_pool.handle);
+    if (agent_info->gpu_pool.handle != 0) fprintf(file, "0x%lx pool gpu%u\n", agent_info->gpu_pool.handle, agent_info->dev_index);
   }
   fflush(file);
 }
