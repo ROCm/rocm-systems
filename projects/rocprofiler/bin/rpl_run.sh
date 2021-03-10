@@ -75,8 +75,6 @@ export ROCP_METRICS=$PKG_DIR/lib/metrics.xml
 export AQLPROFILE_READ_API=0
 # ROC Profiler package path
 export ROCP_PACKAGE_DIR=$PKG_DIR
-# To enable SPM KFD mode
-export ROCP_SPM_KFD_MODE=1
 
 # error handling
 fatal() {
