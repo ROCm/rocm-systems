@@ -86,12 +86,12 @@ class MemManager:
 
 
   # register memcpy asynchronous copy
-  # ['BeginNs', 'EndNs', 'Name', 'pid', 'tid', 'Index', 'proc-id'],
+  # ['BeginNs', 'EndNs', 'Name', 'pid', 'tid', 'Index', ...
   def register_copy(self, rec_vals):
     data = ''
     event = rec_vals[2]     # 'Name'
+    procid = rec_vals[3]    # 'pid'
     recordid = rec_vals[5]  # 'Index'
-    procid = rec_vals[6]    # 'proc-id'
     size_ptrn = re.compile(DELIM + 'Size=(\d+)' + DELIM)
 
     # query syncronous memcopy API record
@@ -123,12 +123,12 @@ class MemManager:
     return data
 
   # register memcpy asynchronous activity
-  # rec_vals: ['BeginNs', 'EndNs', 'dev-id', 'queue-id', 'Name', 'pid', 'tid', 'Index', 'proc-id', 'Data'],
+  # rec_vals: ['BeginNs', 'EndNs', 'dev-id', 'queue-id', 'Name', 'pid', 'tid', 'Index', 'Data', ...
   def register_activity(self, rec_vals):
     data = ''
     event = rec_vals[4]     # 'Name'
+    procid = rec_vals[5]    # 'pid'
     recordid = rec_vals[7]  # 'Index'
-    procid = rec_vals[8]    # 'proc-id'
     size_ptrn = re.compile(DELIM + 'Size=(\d+)' + DELIM)
 
     # query syncronous memcopy API record

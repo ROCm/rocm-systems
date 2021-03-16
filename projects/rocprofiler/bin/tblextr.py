@@ -177,7 +177,7 @@ def parse_res(infile):
           if not gpu_pid in dep_proc: dep_proc[gpu_pid] = { 'pid': HSA_PID, 'from': [], 'to': {}, 'id': [] }
           dep_str = dep_proc[gpu_pid]
           to_id = len(dep_str['from'])
-          dep_str['from'].append((from_us, disp_tid, queue_id))
+          dep_str['from'].append((from_us, disp_tid, disp_tid))
           dep_str['to'][to_id] = to_us
           ##
 
@@ -236,8 +236,8 @@ def fill_kernel_db(table_name, db):
 
 # Fill Ext DB
 ext_table_descr = [
-  ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'Index'],
-  {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'Index':'INTEGER'}
+  ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'Index', '__section', '__lane'],
+  {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'Index':'INTEGER', '__section':'INTEGER', '__lane':'INTEGER'}
 ]
 def fill_ext_db(table_name, db, indir, trace_name, api_pid):
   file_name = indir + '/' + trace_name + '_trace.txt'
@@ -268,10 +268,12 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
         if cid != 2:
           rec_vals.append(tms)
           rec_vals.append(tms + 1)
-          rec_vals.append(api_pid)
+          rec_vals.append(pid)
           rec_vals.append(tid)
           rec_vals.append(msg)
           rec_vals.append(record_id)
+          rec_vals.append(api_pid)     # __section
+          rec_vals.append(tid)         # __lane
 
         if cid == 1:
           if not pid in range_stack: range_stack[pid] = {}
@@ -301,8 +303,8 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
             del range_map[rid]
           else: fatal("range id(" + str(rid) + ") is not found")
           rec_vals[0] = tms       # begin timestamp
-          rec_vals[3] = 0         # 0 lane for ranges
           rec_vals[4] = msg       # range message
+          rec_vals[7] = 0         # 0 lane for ranges
 
         db.insert_entry(table_handle, rec_vals)
         record_id += 1
@@ -324,12 +326,13 @@ def get_field(args, field):
 def set_field(args, field, val):
   return re.subn(field + '\(\w+\)([ \)])', field + '(' + str(val) + ')\\1', args, count=1)
 
+hsa_patch_data = {}
 ops_patch_data = {}
 
 # Fill API DB
 api_table_descr = [
-  ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'args', 'Index', 'Data'],
-  {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'Index':'INTEGER', 'Data':'TEXT'}
+  ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'args', 'Index', 'Data', '__section', '__lane'],
+  {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'Index':'INTEGER', 'Data':'TEXT', '__section':'INTEGER', '__lane':'INTEGER'}
 ]
 # Filling API records DB table
 # table_name - created DB table name
@@ -344,12 +347,9 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   global hsa_activity_found
   global memory_manager
 
-  copy_raws = []
-  if (hsa_activity_found): copy_raws = db.table_get_raws('COPY')
   copy_csv = ''
   copy_index = 0
 
-  file_name = indir + '/' + api_name + '_api_trace.txt'
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
   hip_mcopy_ptrn = re.compile(r'hipMemcpy')
   hip_wait_event_ptrn =  re.compile(r'WaitEvent')
@@ -359,7 +359,13 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   ptrn_multi_kernel = re.compile(r'(.*):(\d+)$')
   ptrn_corr_id = re.compile(r'\ :(\d*)$')
 
+  file_name = indir + '/' + api_name + '_api_trace.txt'
   if not os.path.isfile(file_name): return 0
+
+  hsa_copy_file_name = indir + '/' + 'async_copy_trace.txt'
+  hsa_copy_file_name_present = 1 if os.path.isfile(file_name) else 0
+  hsa_copy_deps = 1 if (api_pid == HSA_PID and hsa_copy_file_name_present == 1) else 0
+  print("hsa_copy_deps: " + str(hsa_copy_deps))
 
   # parsing an input trace file and creating a DB table
   record_id_dict = {}
@@ -398,11 +404,11 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
       if not m: fatal(api_name + " bad record: '" + record + "'")
       else:
         rec_vals = []
-        rec_len = len(api_table_descr[0]) - 1
+        rec_len = len(api_table_descr[0]) - 3
         for ind in range(1, rec_len):
           rec_vals.append(m.group(ind))
         proc_id = int(rec_vals[2])
-        thrd_id = int(rec_vals[3])
+        thread_id = int(rec_vals[3])
         record_name = rec_vals[4]
         record_args = rec_vals[5]
 
@@ -427,32 +433,32 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
         # asyncronous opeartion API found
         op_found = 0
+        mcopy_found = 0
 
         # extract kernel name string
         (kernel_str, kernel_found) = get_field(record_args, 'kernel')
         if kernel_found == 0: kernel_str = ''
         else: op_found = 1
 
-        if stream_found != 0 or kernel_found != 0:
-          ops_patch_data[(corr_id, proc_id)] = (stream_id, kernel_str)
-
-        # dependencies filling
-        if hsa_mcopy_ptrn.match(record_name) or hip_mcopy_ptrn.match(record_name):
+        if hip_mcopy_ptrn.match(record_name):
+          mcopy_found = 1
           op_found = 1
 
-          # memcopy data
-          if len(copy_raws) != 0:
-            copy_data = list(copy_raws[copy_index])
-            args_str = rec_vals[5]
-            args_str = re.sub(r'\(', r'', args_str)
-            args_str = re.sub(r'\).*$', r'', args_str)
-            copy_line = str(copy_data[0]) + ', ' + str(copy_data[1]) + ', ' + record_name + ', ' + args_str
-            copy_csv += str(copy_index) + ', ' + copy_line + '\n'
-            copy_index += 1
+        if op_found:
+          ops_patch_data[(corr_id, proc_id)] = (thread_id, stream_id, kernel_str)
 
-        # HIP WaitEvent APIs
+        # HIP WaitEvent API
         if hip_wait_event_ptrn.search(record_name):
           op_found = 1
+
+        # HSA memcopy API
+        if hsa_mcopy_ptrn.match(record_name):
+          mcopy_found = 1
+          op_found = 1
+
+          stream_id = thread_id
+          hsa_patch_data[(copy_index, proc_id)] = thread_id
+          copy_index += 1
 
         if op_found:
           op_found = 0
@@ -461,48 +467,33 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           dur_us = int((end_ns - beg_ns) / 1000)
           from_us = int((beg_ns - START_NS) / 1000) + dur_us
 
-          if not proc_id in dep_dict: dep_dict[proc_id] = {}
-          dep_proc = dep_dict[proc_id]
-          found = 1 if dep_pid in dep_proc else 0
-          if found == 0 and dep_pid == OPS_PID:
-            dep_proc[dep_pid] = { 'pid': api_pid, 'from': [], 'id': [] }
-            found = 1
-          if found == 1:
+          if api_pid == HIP_PID or hsa_copy_deps == 1:
+            if not proc_id in dep_dict: dep_dict[proc_id] = {}
+            dep_proc = dep_dict[proc_id]
+            if not dep_pid in dep_proc:
+              if api_pid == 'HIP_PID': dep_proc[dep_pid] = { 'pid': api_pid, 'from': [], 'id': [] }
+              else: dep_proc[dep_pid] = { 'pid': api_pid, 'from': [], 'id': [], 'to': {} }
             dep_str = dep_proc[dep_pid]
-            dep_str['from'].append((from_us, thrd_id, stream_id))
+            dep_str['from'].append((from_us, thread_id, stream_id))
             if expl_id: dep_str['id'].append(corr_id)
 
-        if False:
-          # patching activity properties: kernel name, stream-id
-          if (corr_id, proc_id) in dep_filtr:
-            ops_table_name = dep_filtr[(corr_id, proc_id)]
-            select_expr = '"Index" = ' + str(corr_id) + ' AND "proc-id" = ' + str(proc_id)
-            is_kernel_list = 1 if kernel_found != 0 and kernel_str[-1] == ';' else 0
-            if is_kernel_list != 0:
-              for kernel_item in kernel_str[:-1].split(';'):
-                m = ptrn_multi_kernel.match(kernel_item)
-                if m:
-                  kernel_name = m.group(1)
-                  dev_id = m.group(2)
-                  select_expr += ' AND "dev-id" = ' + dev_id
-                  activity_record_patching(db, ops_table_name, 1, kernel_name, stream_found, stream_id, select_expr)
-                else:
-                  fatal('Bad multi-kernel format: "' + kernel_item + '" in "' + kernel_str + '"')
-            else:
-              activity_record_patching(db, ops_table_name, kernel_found, kernel_str, stream_found, stream_id, select_expr)
-
+        # memcopy registering
         api_data = memory_manager.register_api(rec_vals) if mcopy_data_enabled else ''
         rec_vals.append(api_data)
-        rec_vals[2] = api_pid
 
+        # setting section and lane
+        rec_vals.append(api_pid)             # __section
+        rec_vals.append(thread_id)           # __lane
+
+        # inserting an API record to DB
         db.insert_entry(table_handle, rec_vals)
 
   # inserting of dispatch events correlated to the dependent dispatches
-  for (from_ns, proc_id, thrd_id) in dep_list:
+  for (from_ns, proc_id, thread_id) in dep_list:
     if not proc_id in record_id_dict: record_id_dict[proc_id] = 0
     record_id_dict[proc_id] += 1
     corr_id = record_id_dict[proc_id]
-    db.insert_entry(table_handle, [from_ns, from_ns, api_pid, thrd_id, 'hsa_dispatch', '', corr_id, ''])
+    db.insert_entry(table_handle, [from_ns, from_ns, proc_id, thread_id, 'hsa_dispatch', '', corr_id, '', api_pid, thread_id])
 
   # generating memcopy CSV
   if copy_csv != '':
@@ -516,14 +507,13 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
 # fill COPY DB
 copy_table_descr = [
-  ['BeginNs', 'EndNs', 'Name', 'pid', 'tid', 'Index', 'proc-id', 'Data'],
-  {'Index':'INTEGER', 'proc-id':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Data':'TEXT'}
+  ['BeginNs', 'EndNs', 'Name', 'pid', 'tid', 'Index', 'Data', '__section', '__lane'],
+  {'Index':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Data':'TEXT', '__section':'INTEGER', '__lane':'INTEGER'}
 ]
 def fill_copy_db(table_name, db, indir):
-  pid = COPY_PID
+  sect_id = COPY_PID
   file_name = indir + '/' + 'async_copy_trace.txt'
-  ptrn_val = re.compile(r'(\d+):(\d+) (.*)$')
-  ptrn_id = re.compile(r'^async-copy:(\d+):(\d+)$')
+  ptrn_val = re.compile(r'^(\d+):(\d+) (async-copy):(\d+):(\d+)$')
 
   if not os.path.isfile(file_name): return 0
 
@@ -532,43 +522,48 @@ def fill_copy_db(table_name, db, indir):
     for line in fd.readlines():
       record = line[:-1]
       m = ptrn_val.match(record)
-      if m:
+      if not m: fatal("bad async-copy entry '" + record + "'")
+      else:
         rec_vals = []
         for ind in range(1,4): rec_vals.append(m.group(ind))
-        rec_vals.append(COPY_PID)
-        rec_vals.append(0)
+        corr_id = int(m.group(4))
+        proc_id = int(m.group(5))
 
-        m = ptrn_id.match(rec_vals[2])
-        if not m: fatal("bad async-copy entry '" + record + "'")
-        corr_id = int(m.group(1))
-        proc_id = int(m.group(2))
-        rec_vals.append(corr_id)
-        rec_vals.append(proc_id)
+        # querying tid value
+        if (corr_id, proc_id) in hsa_patch_data:
+          thread_id = hsa_patch_data[(corr_id, proc_id)]
+
+        # completing record
+        rec_vals.append(proc_id)          # tid
+        rec_vals.append(thread_id)        # tid
+        rec_vals.append(corr_id)          # Index
 
         # registering memcopy information
-        activity_data =  memory_manager.register_copy(rec_vals) if mcopy_data_enabled else ''
+        activity_data = memory_manager.register_copy(rec_vals) if mcopy_data_enabled else ''
         rec_vals.append(activity_data)
+
+        # appending straem ID and section ID
+        rec_vals.append(COPY_PID)     # __section
+        rec_vals.append(thread_id)    # __lane
+
+        # inserting DB activity entry
         db.insert_entry(table_handle, rec_vals)
 
         # filling dependencies
         to_ns = int(rec_vals[0])
         to_us = int((to_ns - START_NS) / 1000)
 
-        if not proc_id in dep_dict: dep_dict[proc_id] = {}
         dep_proc = dep_dict[proc_id]
-        if not pid in dep_proc: dep_proc[pid] = { 'pid': HSA_PID, 'from': [], 'to': {}, 'id': [] }
-        dep_str = dep_proc[pid]
+        dep_str = dep_proc[sect_id]
         dep_str['to'][corr_id] = to_us
-
-      else: fatal("async-copy bad record: '" + record + "'")
 
   return 1
 #############################################################
 
 # fill HCC ops DB
 ops_table_descr = [
-  ['BeginNs', 'EndNs', 'dev-id', 'queue-id', 'Name', 'pid', 'tid', 'Index', 'proc-id', 'Data'],
-  {'Index':'INTEGER', 'proc-id':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'dev-id':'INTEGER', 'queue-id':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Data':'TEXT'}
+  ['BeginNs', 'EndNs', 'dev-id', 'queue-id', 'Name', 'pid', 'tid', 'stream-id', 'Index', 'Data', '__section', '__lane'],
+  {'Index':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'dev-id':'INTEGER', 'queue-id':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Data':'TEXT', 'stream-id':'INTEGER', '__section':'INTEGER', '__lane':'INTEGER'}
 ]
 def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
   global max_gpu_id
@@ -612,35 +607,42 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         if ptrn_mcopy.search(name):
           rec_table_name = mcopy_table_name
           table_handle = mcopy_table_handle
-          pid = COPY_PID;
+          sect_id = COPY_PID;
         else:
           rec_table_name = kernel_table_name
           table_handle = kernel_table_handle
 
           gpu_id = int(rec_vals[2]);
           if (gpu_id > max_gpu_id): max_gpu_id = gpu_id
-          pid = GPU_BASE_PID + int(gpu_id)
+          sect_id = GPU_BASE_PID + int(gpu_id)
 
           if ptrn_barrier.search(name):
             name = '"<barrier packet>"'
 
-        tid = 0
+        thread_id = 0
+        stream_id = 0
         if (corr_id, proc_id) in ops_patch_data:
-          vals = ops_patch_data[(corr_id, proc_id)]
-          tid = vals[0]
-          name_patch = vals[1]
+          (thread_id, stream_id, name_patch) = ops_patch_data[(corr_id, proc_id)]
           if name_patch != '': name = name_patch
+        else:
+          fatal("hcc ops data not found: '" + record + "', " + str(corr_id) + ", " + str(proc_id))
 
-        # insert DB record
+        # activity record
         rec_vals[4] = name                       # Name
-        rec_vals.append(pid)                     # pid
-        rec_vals.append(tid)                     # tid
+        rec_vals.append(proc_id)                 # pid
+        rec_vals.append(thread_id)               # tid
+        rec_vals.append(stream_id)               # StreamId
         rec_vals.append(corr_id)                 # Index
-        rec_vals.append(proc_id)                 # proc-id
 
         # registering memcopy information
-        activity_data =  memory_manager.register_activity(rec_vals) if mcopy_data_enabled else ''
+        activity_data = memory_manager.register_activity(rec_vals) if mcopy_data_enabled else ''
         rec_vals.append(activity_data)
+
+        # activity record data for stream ID and sction ID
+        rec_vals.append(sect_id)                 # __section
+        rec_vals.append(stream_id)               # __lane
+
+        # inserting DB activity entry
         db.insert_entry(table_handle, rec_vals)
 
         # registering a dependency filtr
@@ -652,8 +654,8 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
 
         if not proc_id in dep_dict: dep_dict[proc_id] = {}
         dep_proc = dep_dict[proc_id]
-        if not pid in dep_proc: dep_proc[pid] = { 'bsp': OPS_PID, 'to': {} }
-        dep_str = dep_proc[pid]
+        if not sect_id in dep_proc: dep_proc[sect_id] = { 'bsp': OPS_PID, 'to': {} }
+        dep_str = dep_proc[sect_id]
         dep_str['to'][corr_id] = to_us
 
       else:
@@ -725,7 +727,7 @@ else:
   hip_trace_found = fill_api_db('HIP', db, indir, 'hip', HIP_PID, OPS_PID, [], {}, 1)
   ops_filtr = fill_ops_db('OPS', 'COPY', db, indir)
 
-  fill_kernel_db('A', db)
+  fill_kernel_db('KERN', db)
 
   any_trace_found = ext_trace_found | kfd_trace_found | hsa_trace_found | hip_trace_found
   copy_trace_found = 0
@@ -756,10 +758,10 @@ else:
     dform.gen_ext_json_trace(db, 'rocTX', START_NS, jsonfile)
 
   if len(var_table) != 0:
-    dform.post_process_data(db, 'A', csvfile)
-    dform.gen_table_bins(db, 'A', statfile, 'KernelName', 'DurationNs')
+    dform.post_process_data(db, 'KERN', csvfile)
+    dform.gen_table_bins(db, 'KERN', statfile, 'KernelName', 'DurationNs')
     if hsa_trace_found and 'BeginNs' in var_list:
-      dform.gen_kernel_json_trace(db, 'A', GPU_BASE_PID, START_NS, jsonfile)
+      dform.gen_kernel_json_trace(db, 'KERN', GPU_BASE_PID, START_NS, jsonfile)
 
   if hsa_trace_found:
     dform.post_process_data(db, 'HSA')

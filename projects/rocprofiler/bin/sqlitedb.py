@@ -214,6 +214,7 @@ class SQLiteDB:
         for value_index in range(len(data)):
           label = data_fields[value_index]
           value = data[value_index]
+          if label[:3] == '"__': continue
           if name_ptrn.search(label): value = sub_ptrn.sub(r'', value)
           if label != '"Index"': args_list.append('%s:"%s"' % (label, value))
 

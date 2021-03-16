@@ -47,25 +47,25 @@ def gen_table_bins(db, table, outfile, name_var, dur_ns_var):
   gen_message(outfile)
 
 def gen_api_json_trace(db, table, start_ns, outfile):
-  db.execute('create view B as select "Index", Name as name, pid, tid, ((BeginNs - %d)/1000) as ts, (DurationNs/1000) as dur from %s;' % (start_ns, table));
+  db.execute('create view B as select "Index", Name as name, __section as pid, __lane as tid, ((BeginNs - %d)/1000) as ts, (DurationNs/1000) as dur from %s;' % (start_ns, table));
   db.dump_json('B', table, outfile)
   db.execute('DROP VIEW B')
   gen_message(outfile)
 
 def gen_ext_json_trace(db, table, start_ns, outfile):
-  db.execute('create view B as select Name as name, pid, tid, ((BeginNs - %d)/1000) as ts, ((EndNs - BeginNs)/1000) as dur from %s;' % (start_ns, table));
+  db.execute('create view B as select Name as name, __section as pid, __lane as tid, ((BeginNs - %d)/1000) as ts, ((EndNs - BeginNs)/1000) as dur from %s;' % (start_ns, table));
   db.dump_json('B', table, outfile)
   db.execute('DROP VIEW B')
   gen_message(outfile)
 
 def gen_ops_json_trace(db, table, base_pid, start_ns, outfile):
-  db.execute('create view B as select "Index", Name as name, ("dev-id" + %d) as pid, tid, ((BeginNs - %d)/1000) as ts, (DurationNs/1000) as dur from %s;' % (base_pid, start_ns, table));
+  db.execute('create view B as select "Index", Name as name, ("dev-id" + %d) as pid, __lane as tid, ((BeginNs - %d)/1000) as ts, (DurationNs/1000) as dur from %s;' % (base_pid, start_ns, table));
   db.dump_json('B', table, outfile)
   db.execute('DROP VIEW B')
   gen_message(outfile)
 
 def gen_kernel_json_trace(db, table, base_pid, start_ns, outfile):
-  db.execute('create view B as select "Index", KernelName as name, ("gpu-id" + %d) as pid, (0) as tid, ((BeginNs - %d)/1000) as ts, (DurationNs/1000) as dur from %s;' % (base_pid, start_ns, table));
+  db.execute('create view B as select "Index", KernelName as name, ("gpu-id" + %d) as pid, tid, ((BeginNs - %d)/1000) as ts, (DurationNs/1000) as dur from %s;' % (base_pid, start_ns, table));
   db.dump_json('B', table, outfile)
   db.execute('DROP VIEW B')
   gen_message(outfile)
