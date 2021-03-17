@@ -16,6 +16,9 @@ import logging
 import os
 import sys
 import subprocess
+import _thread
+import time
+from time import ctime
 from subprocess import check_output
 from rsmiBindings import *
 
@@ -49,7 +52,7 @@ OUTPUT_SERIALIZATION = False
 
 # These are the valid clock types that can be returned/modified:
 # TODO: "clk_type_names" from rsmiBindings.py should fetch valid clocks from
-#       the same location asrocm_smi_device.cc instead of hardcoding the values
+#       the same location as rocm_smi_device.cc instead of hardcoding the values
 validClockNames = clk_type_names[1:-2]
 # The purpose of the [1:-2] here ^^^^ is to remove the duplicate elements at the
 # beginning and end of the clk_type_names list (specifically sclk and mclk)
@@ -428,6 +431,35 @@ def printErrLog(device, err):
             logging.error(errstr)
         else:
             logging.debug(errstr)
+
+
+def printEventList(device, delay, eventList):
+    """ Print out notification events for a specified device
+
+    @param device: DRM device identifier
+    @param delay: Notification delay in ms
+    @param eventList: List of event type names (can be a single-item list)
+    """
+    print2DArray([['DEVICE\t', 'TIME\t', 'TYPE\t', 'DESCRIPTION']])
+    mask = 0
+    ret = rocmsmi.rsmi_event_notification_init(device)
+    if not rsmi_ret_ok(ret, device):
+        printErrLog(device, 'Unable to initialize event notifications.')
+        return
+    for eventType in eventList:
+        mask |= 2 ** notification_type_names.index(eventType.upper())
+    ret = rocmsmi.rsmi_event_notification_mask_set(device, mask)
+    if not rsmi_ret_ok(ret, device):
+        printErrLog(device, 'Unable to set event notification mask.')
+        return
+    while 1: # Exit condition from user keyboard input of 'q' or 'ctrl + c'
+        num_elements = c_uint32(1)
+        data = rsmi_evt_notification_data_t(1)
+        rocmsmi.rsmi_event_notification_get(delay, byref(num_elements), byref(data))
+        if len(data.message) > 0:
+            print2DArray([['\rGPU[%d]:\t' % (device), ctime().split()[3], \
+                           notification_type_names[data.event.value - 1], \
+                           data.message.decode('utf8') + '\r']])
 
 
 def printLog(device, metricName, value):
@@ -2053,6 +2085,60 @@ def showVbiosVersion(deviceList):
     printLogSpacer()
 
 
+class _Getch:
+    """
+    Get a single character from standard input
+    """
+    def __init__(self):
+        import sys, tty
+    def __call__(self):
+        import sys, termios, tty
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(sys.stdin.fileno())
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
+
+
+def showEvents(deviceList, eventTypes):
+    """ Display a blocking list of events for a list of devices
+
+    @param deviceList: List of DRM devices (can be a single-item list)
+    @param eventTypes: List of event type names (can be a single-item list)
+    """
+    printLogSpacer(' Show Events ')
+    printLog(None, 'press \'q\' or \'ctrl + c\' to quit', None)
+    eventTypeList = []
+    for event in eventTypes: # Cleaning list from wrong values
+        if event.replace(',', '').upper() in notification_type_names:
+            eventTypeList.append(event.replace(',', '').upper())
+        else:
+            printErrLog(None, 'Ignoring unrecognized event type %s' % (event.replace(',', '')))
+    if len(eventTypeList) == 0:
+        eventTypeList = notification_type_names
+    try: # Create a seperate thread for each GPU
+        for device in deviceList:
+            _thread.start_new_thread(printEventList, (device, 1000, eventTypeList))
+            time.sleep(0.25)
+    except Exception as e:
+        printErrLog(device, 'Unable to start new thread. %s' % (e))
+        return
+    while 1: # Exit condition from user keyboard input of 'q' or 'ctrl + c'
+        getch = _Getch()
+        user_input = getch()
+        # Catch user input for q or Ctrl + c
+        if user_input == 'q' or user_input == '\x03':
+            for device in deviceList:
+                ret = rocmsmi.rsmi_event_notification_stop(device)
+                if not rsmi_ret_ok(ret, device):
+                    printErrLog(device, 'Unable to end event notifications.')
+            print('\r')
+            break
+
+
 def showVersion(deviceList, component):
     """ Display the software version for the specified component
 
@@ -2580,6 +2666,7 @@ if __name__ == '__main__':
                                  action='store_true')
     groupDisplayTop.add_argument('-i', '--showid', help='Show GPU ID', action='store_true')
     groupDisplayTop.add_argument('-v', '--showvbios', help='Show VBIOS version', action='store_true')
+    groupDisplayTop.add_argument('-e', '--showevents', help='Show event list', metavar='EVENT', type=str, nargs='*')
     groupDisplayTop.add_argument('--showdriverversion', help='Show kernel driver version', action='store_true')
     groupDisplayTop.add_argument('--showfwinfo', help='Show FW information', metavar='BLOCK', type=str, nargs='*')
     groupDisplayTop.add_argument('--showmclkrange', help='Show mclk range', action='store_true')
@@ -2808,6 +2895,8 @@ if __name__ == '__main__':
         showUId(deviceList)
     if args.showvbios:
         showVbiosVersion(deviceList)
+    if args.showevents or str(args.showevents) == '[]':
+        showEvents(deviceList, args.showevents)
     if args.resetclocks:
         resetClocks(deviceList)
     if args.showtemp:

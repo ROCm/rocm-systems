@@ -86,6 +86,18 @@ class rsmi_dev_perf_level_t(c_int):
     RSMI_DEV_PERF_LEVEL_UNKNOWN = 0x100
 
 
+notification_type_names = ['VM_FAULT', 'THERMAL_THROTTLE', 'GPU_RESET']
+
+
+class rsmi_evt_notification_type_t(c_int):
+    RSMI_EVT_NOTIF_VMFAULT = 0
+    RSMI_EVT_NOTIF_FIRST = RSMI_EVT_NOTIF_VMFAULT
+    RSMI_EVT_NOTIF_THERMAL_THROTTLE = 1
+    RSMI_EVT_NOTIF_GPU_PRE_RESET = 2
+    RSMI_EVT_NOTIF_GPU_POST_RESET = 3
+    RSMI_EVT_NOTIF_LAST = RSMI_EVT_NOTIF_GPU_POST_RESET
+
+
 class rsmi_voltage_metric_t(c_int):
     RSMI_VOLT_CURRENT = 0
     RSMI_VOLT_FIRST = RSMI_VOLT_CURRENT
@@ -504,6 +516,12 @@ rsmi_od_volt_freq_data = rsmi_od_volt_freq_data_t
 class rsmi_error_count_t(Structure):
     _fields_ = [('correctable_err', c_uint64),
                 ('uncorrectable_err', c_uint64)]
+
+
+class rsmi_evt_notification_data_t(Structure):
+    _fields_ = [('dv_ind', c_uint32),
+                ('event', rsmi_evt_notification_type_t),
+                ('message', c_char*64)]
 
 
 class rsmi_process_info_t(Structure):
