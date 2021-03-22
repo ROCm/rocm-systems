@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 ################################################################################
 # Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
@@ -64,7 +64,7 @@ parse() {
         gpu_index=$line
       fi
     else
-      found=$(echo $feature | sed -n "/^\(pmc\|sqtt\|hsa\)$/ p")
+      found=$(echo $feature | sed -n "/^\(pmc\|sqtt\|hip\|hsa\|kfd\)$/ p")
       if [ -n "$found" ] ; then
         output=$outdir/input${index}.xml
         header="# $timestamp '$output' generated with '$0 $*'"
@@ -85,9 +85,21 @@ EOF
 EOF
         fi
 
+        if [ "$feature" == "hip" ] ; then
+          cat >> $output <<EOF
+<trace name="HIP"><parameters api="$line"></parameters></trace>
+EOF
+        fi
+
         if [ "$feature" == "hsa" ] ; then
           cat >> $output <<EOF
 <trace name="HSA"><parameters api="$line"></parameters></trace>
+EOF
+        fi
+
+        if [ "$feature" == "kfd" ] ; then
+          cat >> $output <<EOF
+<trace name="KFD"><parameters api="$line"></parameters></trace>
 EOF
         fi
       fi

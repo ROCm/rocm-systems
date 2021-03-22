@@ -323,7 +323,7 @@ class Context {
     for (auto& tuple : profile_vector) {
       if (pcsmp_mode_) const_cast<profile_t*>(tuple.profile)->event_count = UINT32_MAX;
       const hsa_status_t status =
-          api_->hsa_ven_amd_aqlprofile_iterate_data(tuple.profile, callback, data);
+        api_->hsa_ven_amd_aqlprofile_iterate_data(tuple.profile, callback, data);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "context iterate data failed");
     }
   }

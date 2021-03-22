@@ -443,7 +443,8 @@ hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
 }
 
 // SPM counter trace start/stop methods
-std::vector<rocprofiler_t*> spm_ctx_vec;
+typedef std::vector<rocprofiler_t*> spm_ctx_vec_t;
+spm_ctx_vec_t *spm_ctx_vec = NULL;
 void spm_ctrl_start(rocprofiler_feature_t* features, uint32_t features_found) {
   // Start SPM trace collection for all GPUs
   uint32_t gpu_count = HsaRsrcFactory::Instance().GetCountOfGpuAgents();
@@ -459,6 +460,14 @@ void spm_ctrl_start(rocprofiler_feature_t* features, uint32_t features_found) {
     rocprofiler_properties_t properties{};
     properties.queue_depth = 256;
 
+    for (rocprofiler_feature_t* p = features; p < features + features_found; ++p) {
+      int val = p->kind;
+      if (val == ROCPROFILER_FEATURE_KIND_METRIC) {
+        val = ROCPROFILER_FEATURE_KIND_TRACE | ROCPROFILER_FEATURE_KIND_SPM_MOD;
+        p->kind = (rocprofiler_feature_kind_t)val;
+      }
+    }
+
     // Creating SPM context
     rocprofiler_t* context = NULL;
     hsa_status_t status = rocprofiler_open(agent, features, features_found, &context,
@@ -472,12 +481,15 @@ void spm_ctrl_start(rocprofiler_feature_t* features, uint32_t features_found) {
     status = rocprofiler_start(context, 0);
     check_status(status);
     // saving the context in the vectort
-    spm_ctx_vec.push_back(context);
+    if (spm_ctx_vec == NULL) spm_ctx_vec = new spm_ctx_vec_t;
+    spm_ctx_vec->push_back(context);
   }
 }
 void spm_ctrl_stop() {
-  for (rocprofiler_t* context : spm_ctx_vec) {
+  for (rocprofiler_t* context : *spm_ctx_vec) {
     hsa_status_t status = rocprofiler_stop(context, 0);
+    check_status(status);
+    status = rocprofiler_iterate_trace_data(context, NULL, NULL);
     check_status(status);
     rocprofiler_close(context);
   }
@@ -1564,12 +1576,6 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
 
   // set a value to indicate tracing mode
   if (settings->k_concurrent != 0) settings->k_concurrent = (traces_found == 0) ? 1 : 2;
-
-  if (is_spm_trace) {
-    for (uint32_t index = 0; index < features_found; index++) {
-      features[index].kind = ROCPROFILER_FEATURE_KIND_TRACE;
-    }
-  }
 
   // Context array aloocation
   context_array = new context_array_t;

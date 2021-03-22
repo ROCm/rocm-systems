@@ -75,6 +75,8 @@ export ROCP_METRICS=$PKG_DIR/lib/metrics.xml
 export AQLPROFILE_READ_API=0
 # ROC Profiler package path
 export ROCP_PACKAGE_DIR=$PKG_DIR
+# enabled SPM KFD mode
+export ROCP_SPM_KFD_MODE=1
 
 # error handling
 fatal() {
@@ -184,7 +186,6 @@ usage() {
   echo "  --flush-rate <rate> - to enable trace flush rate (time period)"
   echo "    Supported time formats: <number(m|s|ms|us)>"
   echo "  --parallel-kernels - to enable cnocurrent kernels"
-  echo "  --spm-mode <on|off> - to enable collecting time-based sampling of HW counter data [off]"
   echo ""
   echo "Configuration file:"
   echo "  You can set your parameters defaults preferences in the configuration file 'rpl_rc.xml'. The search path sequence: .:${HOME}:<package path>"
@@ -445,10 +446,6 @@ while [ 1 ] ; do
     ARG_VAL=0
     export ROCP_K_CONCURRENT=1
     export AQLPROFILE_READ_API=1
-  elif [ "$1" = "--spm-mode" ] ; then
-    if [ "$2" = "on" ] ; then
-      export ROCP_SPM_KFD_MODE=1
-    fi
   elif [ "$1" = "--verbose" ] ; then
     ARG_VAL=0
     export ROCP_VERBOSE_MODE=1
