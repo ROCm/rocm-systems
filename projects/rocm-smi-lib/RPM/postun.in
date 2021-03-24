@@ -1,0 +1,5 @@
+# second term originates from ENABLE_LDCONFIG = ON/OFF at package build
+if [ $1 -eq 0 ] && [ "@ENABLE_LDCONFIG@" == "ON" ]; then
+    rm -f /etc/ld.so.conf.d/x86_64-librocm_smi_lib.conf
+    ldconfig
+fi
