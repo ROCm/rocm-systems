@@ -234,7 +234,7 @@ TEST(rsmitstReadOnly, TestGpuMetricsRead) {
   TestGpuMetricsRead tst;
   RunGenericTest(&tst);
 }
-TEST(rsmitstReadOnly, TestPerfDeterminism) {
+TEST(rsmitstReadWrite, TestPerfDeterminism) {
   TestPerfDeterminism tst;
   RunGenericTest(&tst);
 }

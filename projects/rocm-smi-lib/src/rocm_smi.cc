@@ -769,19 +769,44 @@ rsmi_dev_perf_level_get(uint32_t dv_ind, rsmi_dev_perf_level_t *perf) {
   CATCH
 }
 
+static rsmi_status_t
+set_dev_range(uint32_t dv_ind, std::string range) {
+  GET_DEV_FROM_INDX
+
+  int ret = dev->writeDevInfo(amd::smi::kDevPowerODVoltage, range);
+  return amd::smi::ErrnoToRsmiStatus(ret);
+}
+
 rsmi_status_t
-rsmi_perf_determinism_mode_set(uint32_t dv_ind, uint64_t freq_bitmask) {
+rsmi_perf_determinism_mode_set(uint32_t dv_ind, uint64_t clkvalue) {
   TRY
   DEVICE_MUTEX
 
+  // Set perf. level to performance determinism so that we can then set the power profile
   rsmi_status_t ret = rsmi_dev_perf_level_set_v1(dv_ind,
                                           RSMI_DEV_PERF_LEVEL_DETERMINISM);
   if (ret != RSMI_STATUS_SUCCESS) {
       return ret;
   }
-  ret = rsmi_dev_gpu_clk_freq_set(dv_ind, RSMI_CLK_TYPE_SYS, freq_bitmask);
 
-  return ret;
+  // For clock frequency setting, enter a new value by writing a string that
+  // contains "s index clock" to the file. The index should be 1 to set maximum
+  // clock. E.g., "s 1 500" will update maximum sclk to be 500 MHz.
+
+  std::string sysvalue = "s";
+  sysvalue += ' ' + std::to_string(RSMI_FREQ_IND_MAX);
+  sysvalue += ' ' + std::to_string(clkvalue);
+  sysvalue += '\n';
+  ret = set_dev_range(dv_ind, sysvalue);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+  ret = set_dev_range(dv_ind, "c");
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
@@ -853,13 +878,6 @@ rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
   CATCH
 }
 
-static rsmi_status_t
-set_dev_range(uint32_t dv_ind, std::string range) {
-  GET_DEV_FROM_INDX
-
-  int ret = dev->writeDevInfo(amd::smi::kDevPowerODVoltage, range);
-  return amd::smi::ErrnoToRsmiStatus(ret);
-}
 
 static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
             uint32_t dv_ind, rsmi_frequencies_t *f, uint32_t *lanes = nullptr) {

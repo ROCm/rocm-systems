@@ -2089,24 +2089,17 @@ rsmi_status_t rsmi_dev_perf_level_get(uint32_t dv_ind,
 /**
  *  @brief Enter performance determinism mode with provided device index.
  *
- *  @details Given a device index @p dv_ind and @p freq_bitmask, this function
+ *  @details Given a device index @p dv_ind and @p clkvalue this function
  *  will enable performance determinism mode, which enforces a GFXCLK frequency
- *  SoftMax limit per GPU set by the user. This prevents the GFXCLK FLL from
+ *  SoftMax limit per GPU set by the user. This prevents the GFXCLK PLL from
  *  stretching when running the same workload on different GPUS, making
  *  performance variation minimal. This call will result in the performance
  *  level ::rsmi_dev_perf_level_t of the device being
- *  ::RSMI_DEV_PERF_LEVEL_DETERMINISM. If a bit in @p freq_bitmask has a value
- *  of 1, then the frequency (as ordered in an ::rsmi_frequencies_t returned
- *  by rsmi_dev_gpu_clk_freq_get()) corresponding to that bit index will be
- *  allowed.
- *  ::rsmi_dev_perf_level_set() should be called with ::RSMI_DEV_PERF_LEVEL_AUTO
- *  to restore the performance level to the default value.
+ *  ::RSMI_DEV_PERF_LEVEL_DETERMINISM.
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[in] freq_bitmask A bitmask indicating the indices of the
- *  frequencies that are to be enabled (1) and disabled (0). Only the lowest
- *  ::rsmi_frequencies_t.num_supported bits of this mask are relevant.
+ *  @param[in] clkvalue Softmax value for GFXCLK in MHz.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
@@ -2115,8 +2108,7 @@ rsmi_status_t rsmi_dev_perf_level_get(uint32_t dv_ind,
  *
  */
 
-rsmi_status_t rsmi_perf_determinism_mode_set(uint32_t dv_ind,
-                                             uint64_t freq_bitmask);
+rsmi_status_t rsmi_perf_determinism_mode_set(uint32_t dv_ind, uint64_t clkvalue);
 /**
  *  @brief Get the overdrive percent associated with the device with provided
  *  device index.

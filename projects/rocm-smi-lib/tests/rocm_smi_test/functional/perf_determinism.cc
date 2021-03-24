@@ -107,48 +107,43 @@ void TestPerfDeterminism::Close() {
 void TestPerfDeterminism::Run(void) {
   rsmi_status_t err;
   rsmi_dev_perf_level_t pfl;
-  rsmi_frequencies_t f;
+  rsmi_od_volt_freq_data_t odv;
   rsmi_status_t ret;
-
+  uint64_t clkvalue;
   TestBase::Run();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
     return;
   }
-  // Set clocks to something other than the usual default of the lowest
-  // frequency.
-  uint64_t freq_bitmask = 0b01100;  // Try the 3rd and 4th clocks
-  std::string freq_bm_str =
-          std::bitset<RSMI_MAX_NUM_FREQUENCIES>(freq_bitmask).to_string();
-
-  freq_bm_str.erase(0, std::min(freq_bm_str.find_first_not_of('0'),
-                                                   freq_bm_str.size()-1));
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
+    err = rsmi_dev_od_volt_info_get(i, &odv);
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t** Not supported on this machine" << std::endl;
+      }
+      return;
+    }
+    else{
+      clkvalue = odv.curr_sclk_range.lower_bound + 50;
+    }
 
-    err = rsmi_perf_determinism_mode_set(i, freq_bitmask);
-
+    err = rsmi_perf_determinism_mode_set(i, clkvalue);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t** Not supported on this machine" << std::endl;
       }
       return;
     } else {
-      ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_SYS, &f);
-          if (ret != RSMI_STATUS_SUCCESS) {
-              return;
-          }
-
-      IF_VERB(STANDARD) {
-          std::cout << "\tFrequency is now index " << f.current << std::endl;
-      }
       ret = rsmi_dev_perf_level_get(i, &pfl);
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) {
           std::cout << "\t**New Perf Level:" << kDevPerfLvlNameMap.at(pfl) <<
                                                                   std::endl;
+          std::cout << "\tSCLK is now set to " << clkvalue << std::endl;
       }
+
       std::cout << "\tResetting performance determinism" << std::endl;
       err = rsmi_dev_perf_level_set(i, RSMI_DEV_PERF_LEVEL_AUTO);;
       CHK_ERR_ASRT(err)
