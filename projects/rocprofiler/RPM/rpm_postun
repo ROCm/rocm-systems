@@ -1,1 +1,0 @@
-rm -f /etc/ld.so.conf.d/librocprofiler64.conf && ldconfig
