@@ -823,7 +823,6 @@ void tool_unload() {
   // Flush tracing pool
   close_tracing_pool();
   roctracer::TraceBufferBase::FlushAll();
-  close_file_handles();
 
   ONLOAD_TRACE_END();
 }
@@ -1026,10 +1025,6 @@ void tool_load() {
 
 void exit_handler(int status, void* arg) {
   ONLOAD_TRACE("status(" << status << ") arg(" << arg << ")");
-#if 0
-  tool_unload();
-  ONLOAD_TRACE_END();
-#endif
 }
 
 // HSA-runtime tool on-load method
@@ -1178,6 +1173,8 @@ extern "C" DESTRUCTOR_API void destructor() {
   ONLOAD_TRACE_BEG();
   tool_unload();
   roctracer_flush_buf();
+  close_file_handles();
+
 
   if (hip_api_stats) hip_api_stats->dump();
   if (hip_kernel_stats) hip_kernel_stats->dump();

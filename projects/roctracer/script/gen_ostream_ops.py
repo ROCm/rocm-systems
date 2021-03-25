@@ -85,7 +85,7 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
         str = ''
         if "union" not in mtype:
             indent = ""
-            str += "    if (regex_match (\"" + cppHeader_struct + "::" + name + "\", std::regex(" + apiname.upper() + "_structs_regex)))  {\n"
+            str += "    if (std::string(\"" + cppHeader_struct + "::" + name + "\").find(" + apiname.upper() + "_structs_regex" + "))   {\n"
             indent = "    "
             str += indent + "  roctracer::" + apiname.lower() + "_support::operator<<(out, \"" + name + "=\");\n"
             str += indent + "  roctracer::" + apiname.lower() + "_support::operator<<(out, v." + name + ");\n"
@@ -132,7 +132,7 @@ def gen_cppheader(infilepath, outfilepath, rank):
         '#include <iostream>\n' + \
         '\n' + \
         '#include "roctracer.h"\n'
-      header_s += '#include <string>\n#include <regex>\n'
+      header_s += '#include <string>\n'
 
       output_filename_h.write(header_s)
       output_filename_h.write('\n')
@@ -140,7 +140,7 @@ def gen_cppheader(infilepath, outfilepath, rank):
       output_filename_h.write('namespace ' + apiname.lower() + '_support {\n')
       output_filename_h.write('static int ' + apiname.upper() + '_depth_max = 1;\n')
       output_filename_h.write('static int ' + apiname.upper() + '_depth_max_cnt = 0;\n')
-      output_filename_h.write('static std::string ' + apiname.upper() + '_structs_regex = \".*\";\n')
+      output_filename_h.write('static std::string ' + apiname.upper() + '_structs_regex = \"\";\n')
       output_filename_h.write('// begin ostream ops for '+ apiname + ' \n')
       output_filename_h.write("// basic ostream ops\n")
       output_filename_h.write(header_basic)
