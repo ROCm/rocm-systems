@@ -159,7 +159,7 @@ usage() {
   echo "  --ctx-wait <on|off> - to wait for outstanding contexts on profiler exit [on]"
   echo "  --ctx-limit <max number> - maximum number of outstanding contexts [0 - unlimited]"
   echo "  --heartbeat <rate sec> - to print progress heartbeats [0 - disabled]"
-  echo "  --obj-tracking <on|off> - to turn on/off kernels code objects tracking [off]"
+  echo "  --obj-tracking <on|off> - to turn on/off kernels code objects tracking [on]"
   echo "    To support V3 code object"
   echo ""
   echo "  --stats - generating kernel execution stats, file <output name>.stats.csv"
