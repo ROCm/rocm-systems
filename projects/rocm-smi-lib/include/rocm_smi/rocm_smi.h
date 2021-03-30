@@ -407,8 +407,11 @@ typedef enum {
   RSMI_TEMP_TYPE_JUNCTION,                     //!< Junction/hotspot
                                                //!< temperature
   RSMI_TEMP_TYPE_MEMORY,                       //!< VRAM temperature
-
-  RSMI_TEMP_TYPE_LAST = RSMI_TEMP_TYPE_MEMORY,
+  RSMI_TEMP_TYPE_HBM_0,                        //!< HBM temperature instance 0
+  RSMI_TEMP_TYPE_HBM_1,                        //!< HBM temperature instance 1
+  RSMI_TEMP_TYPE_HBM_2,                        //!< HBM temperature instance 2
+  RSMI_TEMP_TYPE_HBM_3,                        //!< HBM temperature instance 3
+  RSMI_TEMP_TYPE_LAST = RSMI_TEMP_TYPE_HBM_3,
   RSMI_TEMP_TYPE_INVALID = 0xFFFFFFFF          //!< Invalid type
 } rsmi_temperature_type_t;
 

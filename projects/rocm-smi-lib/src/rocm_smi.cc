@@ -2024,6 +2024,40 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
       mon_type = amd::smi::kMonInvalid;
   }
 
+  // The HBM temperature is retreived from the gpu_metrics
+  if (sensor_type == RSMI_TEMP_TYPE_HBM_0
+     || sensor_type == RSMI_TEMP_TYPE_HBM_1
+     || sensor_type == RSMI_TEMP_TYPE_HBM_2
+     || sensor_type == RSMI_TEMP_TYPE_HBM_3) {
+       if (metric != RSMI_TEMP_CURRENT) {   // only support RSMI_TEMP_CURRENT
+          return RSMI_STATUS_NOT_SUPPORTED;
+       }
+
+       rsmi_gpu_metrics_t gpu_metrics;
+       ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
+       if (ret != RSMI_STATUS_SUCCESS) {
+         return ret;
+       }
+
+       if (temperature == nullptr) {
+          return RSMI_STATUS_INVALID_ARGS;
+       }
+
+       if (sensor_type == RSMI_TEMP_TYPE_HBM_0) {
+         *temperature = gpu_metrics.temperature_hbm[0];
+       } else if (sensor_type == RSMI_TEMP_TYPE_HBM_1) {
+         *temperature = gpu_metrics.temperature_hbm[1];
+       } else if (sensor_type == RSMI_TEMP_TYPE_HBM_2) {
+         *temperature = gpu_metrics.temperature_hbm[2];
+       } else if (sensor_type == RSMI_TEMP_TYPE_HBM_3) {
+         *temperature = gpu_metrics.temperature_hbm[3];
+       } else {
+         return RSMI_STATUS_NOT_SUPPORTED;
+       }
+
+       return RSMI_STATUS_SUCCESS;
+  }  // end HBM temperature
+
   DEVICE_MUTEX
 
   GET_DEV_FROM_INDX

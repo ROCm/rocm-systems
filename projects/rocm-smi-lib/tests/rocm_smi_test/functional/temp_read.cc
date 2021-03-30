@@ -60,6 +60,10 @@ static const std::map<uint32_t, std::string> kTempSensorNameMap = {
     {RSMI_TEMP_TYPE_MEMORY, "Memory"},
     {RSMI_TEMP_TYPE_JUNCTION, "Junction"},
     {RSMI_TEMP_TYPE_EDGE, "Edge"},
+    {RSMI_TEMP_TYPE_HBM_0, "HBM_0"},
+    {RSMI_TEMP_TYPE_HBM_1, "HBM_1"},
+    {RSMI_TEMP_TYPE_HBM_2, "HBM_2"},
+    {RSMI_TEMP_TYPE_HBM_3, "HBM_3"},
 };
 TestTempRead::TestTempRead() : TestBase() {
   set_title("RSMI Temp Read Test");
