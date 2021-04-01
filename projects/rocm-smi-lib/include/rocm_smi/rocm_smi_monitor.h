@@ -63,6 +63,7 @@ enum MonitorTypes {
   kMonFanRPMs,
   kMonFanCntrlEnable,
   kMonPowerCap,
+  kMonPowerCapDefault,
   kMonPowerCapMax,
   kMonPowerCapMin,
   kMonPowerAve,

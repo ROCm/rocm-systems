@@ -1654,6 +1654,30 @@ rsmi_status_t
 rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap);
 
 /**
+ *  @brief Get the default power cap for the device specified by @p dv_ind.
+ *
+ *  @details The maximum power cap be temporarily changed by the user. However,
+ *  this function always returns the default reset power cap. The power level
+ *  returned through @p power will be in microWatts.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] default_cap a pointer to a uint64_t that indicates the default
+ *  power cap, in microwatts
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t
+rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint64_t *default_cap);
+
+/**
  *  @brief Get the range of valid values for the power cap
  *
  *  @details This function will return the maximum possible valid power cap

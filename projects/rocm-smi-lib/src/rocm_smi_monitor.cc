@@ -73,6 +73,7 @@ static const char *kMonMaxFanSpeedFName = "pwm#_max";
 static const char *kMonFanRPMsName = "fan#_input";
 static const char *kMonFanControlEnableName = "pwm#_enable";
 static const char *kMonNameFName = "name";
+static const char *kMonPowerCapDefaultName = "power#_cap_default";
 static const char *kMonPowerCapName = "power#_cap";
 static const char *kMonPowerCapMaxName = "power#_cap_max";
 static const char *kMonPowerCapMinName = "power#_cap_min";
@@ -128,6 +129,7 @@ static const std::map<MonitorTypes, const char *> kMonitorNameMap = {
     {kMonMaxFanSpeed, kMonMaxFanSpeedFName},
     {kMonFanRPMs, kMonFanRPMsName},
     {kMonPowerCap, kMonPowerCapName},
+    {kMonPowerCapDefault, kMonPowerCapDefaultName},
     {kMonPowerCapMax, kMonPowerCapMaxName},
     {kMonPowerCapMin, kMonPowerCapMinName},
     {kMonPowerAve, kMonPowerAveName},
@@ -195,6 +197,10 @@ static const std::map<const char *, monitor_depends_t> kMonFuncDependsMap = {
                                     }
   },
   {"rsmi_dev_power_cap_get",        { .mandatory_depends = {kMonPowerCapName},
+                                      .variants = {kMonInvalid},
+                                    }
+  },
+  {"rsmi_dev_power_cap_default_get",        { .mandatory_depends = {kMonPowerCapDefaultName},
                                       .variants = {kMonInvalid},
                                     }
   },

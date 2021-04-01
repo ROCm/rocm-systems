@@ -2633,6 +2633,22 @@ rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t *power,
 }
 
 rsmi_status_t
+rsmi_dev_power_cap_default_get(uint32_t dv_ind, uint64_t *default_cap) {
+  TRY
+
+  uint32_t sensor_ind = 1; // power sysfs files have 1-based indices
+  CHK_SUPPORT_SUBVAR_ONLY(default_cap, sensor_ind)
+
+  rsmi_status_t ret;
+
+  DEVICE_MUTEX
+  ret = get_dev_mon_value(amd::smi::kMonPowerCapDefault, dv_ind, sensor_ind, default_cap);
+
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
 rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap) {
   TRY
 
