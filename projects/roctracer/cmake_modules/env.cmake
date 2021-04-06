@@ -38,7 +38,7 @@ add_definitions ( -DHSA_DEPRECATED= )
 add_definitions ( -D__HIP_PLATFORM_HCC__=1 )
 
 ## Linux Compiler options
-set ( CMAKE_CXX_FLAGS "-std=c++11")
+set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall" )
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror" )
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=return-type" )
