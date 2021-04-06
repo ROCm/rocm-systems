@@ -460,13 +460,26 @@ void spm_ctrl_start(rocprofiler_feature_t* features, uint32_t features_found) {
     rocprofiler_properties_t properties{};
     properties.queue_depth = 256;
 
+    std::ostringstream oss;
+    oss << result_prefix << "spm_counters.txt";
+    FILE* spm_counters_file = fopen(oss.str().c_str(), "w");
+    if (spm_counters_file == NULL) {
+      std::ostringstream errmsg;
+      errmsg << "ROCProfiler: fopen error, file '" << oss.str().c_str() << "'";
+      perror(errmsg.str().c_str());
+      abort();
+    }
+
     for (rocprofiler_feature_t* p = features; p < features + features_found; ++p) {
       int val = p->kind;
       if (val == ROCPROFILER_FEATURE_KIND_METRIC) {
         val = ROCPROFILER_FEATURE_KIND_TRACE | ROCPROFILER_FEATURE_KIND_SPM_MOD;
         p->kind = (rocprofiler_feature_kind_t)val;
+        fprintf(spm_counters_file, "%s\n", p->name);
       }
     }
+
+    fclose(spm_counters_file);
 
     // Creating SPM context
     rocprofiler_t* context = NULL;
