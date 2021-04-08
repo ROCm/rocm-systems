@@ -1,4 +1,0 @@
-pmc : FlatVMemInsts SFetchInsts
-pmc : TCC_HIT_sum TCC_MISS_sum
-pmc : FetchSize
-pmc : WriteSize MemWrites32B

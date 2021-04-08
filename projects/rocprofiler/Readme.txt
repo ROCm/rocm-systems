@@ -1,5 +1,5 @@
 ROC Profiler library.
-Profiling with metrics and traces based on perfcounters (PMC) and traces (SQTT, PMC).
+Profiling with metrics and traces based on perfcounters (PMC) and traces (SPM).
 Implementation is based on AqlProfile HSA extension.
 Library supports GFX8/GFX9.
 
@@ -38,7 +38,7 @@ $ export HSA_TOOLS_LIB=librocprofiler64.so # ROC profiler library loaded by HSA 
 $ export ROCP_TOOL_LIB=test/libtool.so # tool library loaded by ROC profiler
 $ export ROCP_METRICS=metrics.xml # ROC profiler metrics config file
 $ export ROCP_INPUT=input.xml # input file for the tool library
-$ export ROCP_OUTPUT_DIR=./ # output directory for the tool library, for metrics results file 'results.txt' and SQTT trace files 'thread_trace.se<n>.out'
+$ export ROCP_OUTPUT_DIR=./ # output directory for the tool library, for metrics results file 'results.txt' and trace files
 $ <your test>
 
 Internal 'simple_convolution' test run script:
