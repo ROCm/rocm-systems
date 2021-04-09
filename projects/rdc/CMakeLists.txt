@@ -21,7 +21,7 @@
 #
 # Minimum version of cmake required
 #
-cmake_minimum_required(VERSION 3.5.0)
+cmake_minimum_required(VERSION 3.15)
 
 # ROCM_DIR should be passed in via command line; these will be used
 # in sub-projects
