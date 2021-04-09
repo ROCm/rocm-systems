@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <hsa.h>
 
 #include "core/types.h"
+#include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
 
 namespace rocprofiler {
@@ -45,7 +46,12 @@ static inline size_t IssueGpuCommand(gpu_cmd_op_t op,
                                      hsa_queue_t* queue) {
   packet_t* command;
   const size_t size = GetGpuCommand(op, agent_info, &command);
+  hsa_status_t status = hsa_signal_create(1, 0, NULL, &(command->completion_signal));
+  if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
   rocprofiler::util::HsaRsrcFactory::Instance().Submit(queue, command, size);
+  rocprofiler::util::HsaRsrcFactory::Instance().SignalWait(command->completion_signal, 1);
+  status = hsa_signal_destroy(command->completion_signal);
+  if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "signal_destroy " << std::hex << status);
   return HSA_STATUS_SUCCESS;
 }
 

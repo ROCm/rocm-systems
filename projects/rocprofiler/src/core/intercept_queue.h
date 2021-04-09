@@ -369,11 +369,6 @@ class InterceptQueue {
               packets.insert(packets.end(), *packet);
               // Read at kernel end
               packets.insert(packets.end(), mid, read_vector.end());
-
-              // Save the stop packets for eventual PmcStopper
-              if (Context::stop_packets_.empty()) {
-                Context::stop_packets_.insert(Context::stop_packets_.end(), stop_vector.begin(), stop_vector.end());
-              }
             }
 
             if (tracker_entry != NULL) {

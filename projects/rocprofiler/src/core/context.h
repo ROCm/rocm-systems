@@ -345,8 +345,6 @@ class Context {
 
   // Concurrent profiling mode
   static bool k_concurrent_;
-  // Packets to stop the profiling
-  static pkt_vector_t stop_packets_;
 
  private:
   Context(const util::AgentInfo* agent_info, Queue* queue, rocprofiler_feature_t* info,
@@ -648,8 +646,7 @@ class Context {
 };
 
 #define CONTEXT_INSTANTIATE() \
-  bool rocprofiler::Context::k_concurrent_ = false; \
-  std::vector<hsa_ext_amd_aql_pm4_packet_t> rocprofiler::Context::stop_packets_{};
+  bool rocprofiler::Context::k_concurrent_ = false;
 
 }  // namespace rocprofiler
 

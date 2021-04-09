@@ -247,26 +247,22 @@ void PmcStopper() {
 
     // Create queue
     hsa_queue_t* queue;
-    hsa_status_t status = rocprofiler::CreateQueuePro(agent_info->dev_id, 1,
-            HSA_QUEUE_TYPE_MULTI, NULL, NULL, UINT32_MAX, UINT32_MAX, &queue);
-    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "CreateQueuePro ("
-            << gpu_id << ") " << std::hex << status);
+    const bool ret = rsrc->CreateQueue(agent_info, 10, &queue);
+    if (ret != true) EXC_RAISING(HSA_STATUS_ERROR, "CreateQueue(" << gpu_id << ")");
 
-    // Submit packets
-    for (auto& pkt: Context::stop_packets_) {
-      rsrc->Submit(queue, &pkt);
-      // Wait for stop packet to complete
-      rsrc->SignalWaitRestore(pkt.completion_signal, 1);
-    }
+    // Issue PMC-enable GPU command
+    IssueGpuCommand(PMC_DISABLE_GPU_CMD_OP, agent_info, queue);
 
-    hsa_queue_destroy(queue);
+    rsrc->HsaApi()->hsa_queue_destroy(queue);
   }
 }
 
 // Unload profiling tool librray
 void UnloadTool() {
   ONLOAD_TRACE("tool handle(" << tool_handle << ")");
-  //if (Context::k_concurrent_) PmcStopper();
+
+  if (Context::k_concurrent_) PmcStopper();
+
   if (tool_handle) {
     tool_handler_t handler = reinterpret_cast<tool_handler_t>(dlsym(tool_handle, "OnUnloadTool"));
     if (handler == NULL) {

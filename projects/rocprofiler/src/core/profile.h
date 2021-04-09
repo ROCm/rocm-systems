@@ -137,7 +137,7 @@ class Profile {
 
   virtual void Insert(const profile_info_t& info) { info_vector_.push_back(info.rinfo); }
 
-  void SetConcurrent(profile_t* profile) {
+  static void SetConcurrent(profile_t* profile) {
     // Check whether conconcurrent has been set
     for (const parameter_t* p = profile->parameters;
             p < (profile->parameters + profile->parameter_count); ++p) {
