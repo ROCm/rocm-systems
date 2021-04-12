@@ -44,6 +44,9 @@ hsa_activity_found = 0
 # dependencies dictionary
 dep_dict = {}
 kern_dep_list = []
+last_hip_api_map = {}
+hip_streams = []
+from_ids = {}
 
 # stream ID map
 stream_counter = 0
@@ -353,6 +356,12 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
   hip_mcopy_ptrn = re.compile(r'hipMemcpy')
   hip_wait_event_ptrn =  re.compile(r'WaitEvent')
+  hip_sync_event_ptrn = re.compile(r'hipStreamSynchronize')
+  hip_sync_dev_event_ptrn = re.compile(r'hipDeviceSynchronize')
+  wait_event_ptrn = re.compile(r'WaitEvent|hipStreamSynchronize|hipDeviceSynchronize')
+  prop_pattern = re.compile("([\w-]+)\((\w+)\)");
+  beg_pattern = re.compile("^dispatch\[(\d*)\], (.*) kernel-name\(\"([^\"]*)\"\)")
+  hip_strm_cr_event_ptrn = re.compile(r'hipStreamCreate')
   hsa_mcopy_ptrn = re.compile(r'hsa_amd_memory_async_copy')
   ptrn_fixformat = re.compile(r'(\d+:\d+ \d+:\d+ \w+)\(\s*(.*)\)$')
   ptrn_fixkernel = re.compile(r'\s+kernel=(.*)$')
@@ -431,6 +440,42 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           (rec_vals[5], found) = set_field(record_args, 'stream', stream_id)
           if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
 
+        if hip_strm_cr_event_ptrn.match(record_name):
+          hip_streams.append(stream_id)
+
+        if hip_sync_event_ptrn.match(record_name):
+          if (proc_id,stream_id) in last_hip_api_map:
+            (last_hip_api_corr_id, last_hip_api_from_pid) = last_hip_api_map[(proc_id,stream_id)][-1]
+            sync_api_beg_us = int((int(rec_vals[0]) - START_NS) / 1000)
+            if HIP_PID not in dep_dict[proc_id]:
+              dep_dict[proc_id][HIP_PID] = { 'pid': last_hip_api_from_pid, 'from': [], 'to': {}, 'id': [] }
+            dep_dict[proc_id][HIP_PID]['from'].append((-1, stream_id, thread_id))
+            dep_dict[proc_id][HIP_PID]['id'].append(last_hip_api_corr_id)
+            dep_dict[proc_id][HIP_PID]['to'][last_hip_api_corr_id] = sync_api_beg_us
+            from_ids[(last_hip_api_corr_id, proc_id)] = len(dep_dict[proc_id][HIP_PID]['from']) - 1
+
+        m = beg_pattern.match(record)
+        gpu_id = 0
+        if m:
+          kernel_properties = m.group(2)
+          for prop in kernel_properties.split(', '):
+            m = prop_pattern.match(prop)
+            if m:
+              val = m.group(2)
+              var = m.group(1)
+              if var == 'gpu-id':
+                gpu_id = int(val)
+
+
+        if hsa_mcopy_ptrn.match(record_name) or hip_mcopy_ptrn.match(record_name):
+          ops_section_id = COPY_PID
+        else:
+          ops_section_id = GPU_BASE_PID + int(gpu_id)
+
+        if (proc_id,stream_id) not in last_hip_api_map:
+          last_hip_api_map[(proc_id,stream_id)] = []
+        last_hip_api_map[(proc_id, stream_id)].append((corr_id, ops_section_id))
+
         # asyncronous opeartion API found
         op_found = 0
         mcopy_found = 0
@@ -448,7 +493,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           ops_patch_data[(corr_id, proc_id)] = (thread_id, stream_id, kernel_str)
 
         # HIP WaitEvent API
-        if hip_wait_event_ptrn.search(record_name):
+        if wait_event_ptrn.search(record_name):
           op_found = 1
 
         # HSA memcopy API
@@ -466,15 +511,14 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           end_ns = int(rec_vals[1])
           dur_us = int((end_ns - beg_ns) / 1000)
           from_us = int((beg_ns - START_NS) / 1000) + dur_us
-
           if api_pid == HIP_PID or hsa_copy_deps == 1:
             if not proc_id in dep_dict: dep_dict[proc_id] = {}
             dep_proc = dep_dict[proc_id]
-            if not dep_pid in dep_proc:
+            if not dep_pid in dep_proc and dep_pid == OPS_PID:
               if api_pid == 'HIP_PID': dep_proc[dep_pid] = { 'pid': api_pid, 'from': [], 'id': [] }
               else: dep_proc[dep_pid] = { 'pid': api_pid, 'from': [], 'id': [], 'to': {} }
             dep_str = dep_proc[dep_pid]
-            dep_str['from'].append((from_us, thread_id, stream_id))
+            dep_str['from'].append((from_us, stream_id, thread_id))
             if expl_id: dep_str['id'].append(corr_id)
 
         # memcopy registering
@@ -553,7 +597,9 @@ def fill_copy_db(table_name, db, indir):
         to_ns = int(rec_vals[0])
         to_us = int((to_ns - START_NS) / 1000)
 
+        #if not proc_id in dep_dict: dep_dict[proc_id] = {}
         dep_proc = dep_dict[proc_id]
+        #if not pid in dep_proc: dep_proc[pid] = { 'pid': HSA_PID, 'from': [], 'to': {}, 'id': [] }
         dep_str = dep_proc[sect_id]
         dep_str['to'][corr_id] = to_us
 
@@ -651,6 +697,16 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         # filling a dependencies
         to_ns = int(rec_vals[0])
         to_us = int((to_ns - START_NS) / 1000)
+
+        end_ns = int(rec_vals[1])
+        dur_us = int((end_ns - to_ns) / 1000)
+
+        if (corr_id, proc_id) in from_ids:
+          depid = from_ids[(corr_id, proc_id)]
+          from_val = dep_dict[proc_id][HIP_PID]['from'][depid]
+          print("from_val" + str(from_val))
+          from_val_new = (to_us + dur_us, from_val[1], from_val[2])
+          dep_dict[proc_id][HIP_PID]['from'][depid] = from_val_new
 
         if not proc_id in dep_dict: dep_dict[proc_id] = {}
         dep_proc = dep_dict[proc_id]
