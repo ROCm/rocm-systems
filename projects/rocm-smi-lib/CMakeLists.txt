@@ -163,6 +163,8 @@ else()
 endif()
 set (CPACK_DEBIAN_PACKAGE_PROVIDES "rocm-smi")
 set (CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo")
+set (CPACK_DEBIAN_PACKAGE_DEPENDS "python3")
+
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY )
 configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in DEBIAN/prerm @ONLY )
@@ -180,6 +182,8 @@ if(CPACK_RPM_PACKAGE_RELEASE)
   set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 set (CPACK_RPM_PACKAGE_PROVIDES "rocm-smi")
+set (CPACK_RPM_PACKAGE_REQUIRES "python3")
+
 
 # The line below doesn't currently work; it may be this issue:
 # https://bugzilla.redhat.com/show_bug.cgi?id=1811358
