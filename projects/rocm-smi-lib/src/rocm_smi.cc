@@ -2514,6 +2514,30 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
 }
 
 rsmi_status_t
+rsmi_dev_energy_count_get(uint32_t dv_ind,
+                          uint64_t *power, uint64_t *timestamp) {
+  TRY
+
+  rsmi_status_t ret;
+  rsmi_gpu_metrics_t gpu_metrics;
+  ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  if (power == nullptr ||
+      timestamp == nullptr) {
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  *power = gpu_metrics.energy_accumulator;
+  *timestamp = gpu_metrics.system_clock_counter;
+
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
 rsmi_dev_power_cap_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *cap) {
   TRY
 

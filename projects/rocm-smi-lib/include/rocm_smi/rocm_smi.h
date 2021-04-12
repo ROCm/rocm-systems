@@ -1589,6 +1589,38 @@ rsmi_status_t
 rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
 
 /**
+ *  @brief Get the energy accumulator counter of the device with provided
+ *  device index.
+ *
+ *  @details Given a device index @p dv_ind, a pointer to a uint64_t
+ *  @p power, and a pointer to a uint64_t @p timestamp, this function will write
+ *  amount of energy consumed to the uint64_t pointed to by @p power,
+ *  and the timestamp to the uint64_t pointed to by @p timestamp.
+ *  The rsmi_dev_power_ave_get() is an average of a short time. This function
+ *  accumulates all energy consumed.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] power a pointer to uint64_t to which the energy
+ *  counter will be written
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @param[inout] timestamp a pointer to uint64_t to which the timestamp
+ *  will be written.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t
+rsmi_dev_energy_count_get(uint32_t dv_ind,
+                          uint64_t *power, uint64_t *timestamp);
+
+/**
  *  @brief Get the cap on power which, when reached, causes the system to take
  *  action to reduce power.
  *
