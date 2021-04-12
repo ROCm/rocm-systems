@@ -1871,11 +1871,11 @@ def showRange(deviceList, rangeType):
         ret = rocmsmi.rsmi_dev_od_volt_info_get(device, byref(odvf))
         if rsmi_ret_ok(ret, device, 'od volt'):
             if rangeType == 'sclk':
-                printLog(device, 'Valid sclk range: %sMhz - %sMhz' % (int(odvf.sclk_freq_limits.lower_bound / 1000000),\
-                         int(odvf.sclk_freq_limits.upper_bound / 1000000)), None)
+                printLog(device, 'Valid sclk range: %sMhz - %sMhz' % (int(odvf.curr_sclk_range.lower_bound / 1000000),\
+                         int(odvf.curr_sclk_range.upper_bound / 1000000)), None)
             if rangeType == 'mclk':
-                printLog(device, 'Valid mclk range: %sMhz - %sMhz' % (int(odvf.mclk_freq_limits.lower_bound / 1000000),\
-                         int(odvf.mclk_freq_limits.upper_bound / 1000000)), None)
+                printLog(device, 'Valid mclk range: %sMhz - %sMhz' % (int(odvf.curr_mclk_range.lower_bound / 1000000),\
+                         int(odvf.curr_mclk_range.upper_bound / 1000000)), None)
             if rangeType == 'voltage':
                 num_regions = c_uint32(odvf.num_regions)
                 regions = (rsmi_freq_volt_region_t * odvf.num_regions)()

@@ -980,7 +980,11 @@ static rsmi_status_t get_power_profiles(uint32_t dv_ind,
   CATCH
 }
 
-/* We expect the format of the the pp_od_clk_voltage file to look like this:
+/* We expect the pp_od_clk_voltage file to look like either of the two
+formats shown below. Some of the newer ASICs will most likely have the
+new format.
+
+Old Format:
 OD_SCLK:
 0:        872Mhz
 1:       1837Mhz
@@ -999,6 +1003,21 @@ VDDC_CURVE_SCLK[1]:     872Mhz       1900Mhz
 VDDC_CURVE_VOLT[1]:     737mV        1137mV
 VDDC_CURVE_SCLK[2]:     872Mhz       1900Mhz
 VDDC_CURVE_VOLT[2]:     737mV        1137mV
+
+New Format:
+GFXCLK:
+0: 500Mhz
+1: 800Mhz *
+2: 1275Mhz
+MCLK:
+0: 400Mhz
+1: 700Mhz
+2: 1200Mhz
+3: 1600Mhz *
+
+For the new format, GFXCLK field will show min and max values(0/1). If the current
+frequency in neither min/max but lies within the range, this is indicated by
+an additional value followed by * at index 1 and max value at index 2.
 */
 static const uint32_t kOD_SCLK_label_array_index = 0;
 static const uint32_t kOD_MCLK_label_array_index =
@@ -1034,8 +1053,10 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
-  assert(val_vec[kOD_SCLK_label_array_index] == "OD_SCLK:");
-  if (val_vec[kOD_SCLK_label_array_index] != "OD_SCLK:") {
+  assert(val_vec[kOD_SCLK_label_array_index] == "OD_SCLK:" ||
+                            val_vec[kOD_SCLK_label_array_index] == "GFXCLK:");
+  if ((val_vec[kOD_SCLK_label_array_index] != "OD_SCLK:") &&
+                            (val_vec[kOD_SCLK_label_array_index] != "GFXCLK:")) {
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
@@ -1044,15 +1065,28 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   p->curr_sclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
                                      nullptr, kOD_SCLK_label_array_index + 2);
 
-
-  // The condition below indicates old style format, which is not supported
-  if (val_vec[kOD_MCLK_label_array_index] != "OD_MCLK:") {
+  // The condition below checks if it is the old style or new style format.
+  if (val_vec[kOD_MCLK_label_array_index] == "OD_MCLK:") {
+      p->curr_mclk_range.lower_bound = 0;
+      p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
+                                     nullptr, kOD_MCLK_label_array_index + 1);
+  } else if (val_vec[kOD_MCLK_label_array_index] == "MCLK:") {
+        p->curr_mclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
+                                     nullptr, kOD_MCLK_label_array_index + 1);
+        p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
+                                     nullptr, kOD_MCLK_label_array_index + 4);
+        return RSMI_STATUS_SUCCESS;
+  } else if (val_vec[kOD_MCLK_label_array_index + 1] == "MCLK:") {
+        p->curr_sclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
+                                     nullptr, kOD_SCLK_label_array_index + 3);
+        p->curr_mclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
+                                     nullptr, kOD_MCLK_label_array_index + 2);
+        p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
+                                     nullptr, kOD_MCLK_label_array_index + 5);
+        return RSMI_STATUS_SUCCESS;
+  } else {
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
-  p->curr_mclk_range.lower_bound = 0;
-
-  p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
-                                     nullptr, kOD_MCLK_label_array_index + 1);
 
   assert(val_vec[kOD_VDDC_CURVE_label_array_index] == "OD_VDDC_CURVE:");
   if (val_vec[kOD_VDDC_CURVE_label_array_index] != "OD_VDDC_CURVE:") {
