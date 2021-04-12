@@ -1140,8 +1140,11 @@ def setPowerOverDrive(deviceList, value, autoRespond):
         # Wattage input value converted to microWatt for ROCm SMI Lib
         new_power_cap.value = int(value) * 1000000
         ret = rocmsmi.rsmi_dev_power_cap_get(device, 0, byref(current_power_cap))
-        ret = rocmsmi.rsmi_dev_power_cap_set(device, 0, 0)
-        ret = rocmsmi.rsmi_dev_power_cap_get(device, 0, byref(default_power_cap))
+        ret = rocmsmi.rsmi_dev_power_cap_default_get(device, byref(default_power_cap))
+        # If rsmi_dev_power_cap_default_get fails, use manual workaround to fetch default power cap
+        if ret != 0:
+            ret = rocmsmi.rsmi_dev_power_cap_set(device, 0, 0)
+            ret = rocmsmi.rsmi_dev_power_cap_get(device, 0, byref(default_power_cap))
         if current_power_cap.value < default_power_cap.value:
             current_power_cap.value = default_power_cap.value
         if not specWarningConfirmed and new_power_cap.value > current_power_cap.value:
