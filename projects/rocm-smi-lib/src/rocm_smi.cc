@@ -2831,6 +2831,44 @@ rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent) {
 }
 
 rsmi_status_t
+rsmi_utilization_count_get(uint32_t dv_ind,
+                rsmi_utilization_counter_t utilization_counters[],
+                uint32_t count,
+                uint64_t *timestamp) {
+  TRY
+
+  rsmi_status_t ret;
+  rsmi_gpu_metrics_t gpu_metrics;
+  ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  if (timestamp == nullptr ||
+      utilization_counters == nullptr) {
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  for (uint32_t index = 0 ; index < count; index++) {
+    switch (utilization_counters[index].type) {
+      case RSMI_COARSE_GRAIN_GFX_ACTIVITY:
+        utilization_counters[index].value = gpu_metrics.gfx_activity_acc;
+        break;
+      case RSMI_COARSE_GRAIN_MEM_ACTIVITY:
+        utilization_counters[index].value = gpu_metrics.mem_actvity_acc;
+        break;
+      default:
+        return RSMI_STATUS_INVALID_ARGS;
+    }
+  }
+
+  *timestamp = gpu_metrics.system_clock_counter;
+
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
 rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {
   TRY
   CHK_SUPPORT_NAME_ONLY(vbios)

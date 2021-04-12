@@ -141,7 +141,7 @@ typedef enum {
                                          //!< of devices from which SMI
                                          //!< information can be retrieved. By
                                          //!< default, only AMD devices are
-                                         //!<  ennumerated by RSMI.
+                                         //!<  enumerated by RSMI.
   RSMI_INIT_FLAG_RESRV_TEST1 = 0x800000000000000,  //!< Reserved for test
 } rsmi_init_flags_t;
 
@@ -213,7 +213,7 @@ typedef enum {
 /**
  * Event types
  * @brief Event type enum. Events belonging to a particular event group
- * ::rsmi_event_group_t should begin ennumerating at the ::rsmi_event_group_t
+ * ::rsmi_event_group_t should begin enumerating at the ::rsmi_event_group_t
  * value for that group.
  */
 typedef enum {
@@ -397,7 +397,7 @@ typedef rsmi_temperature_metric_t rsmi_temperature_metric;
 /// \endcond
 
 /**
- * @brief This ennumeration is used to indicate from which part of the device a
+ * @brief This enumeration is used to indicate from which part of the device a
  * temperature reading should be obtained.
  */
 typedef enum {
@@ -618,6 +618,25 @@ typedef enum _RSMI_IO_LINK_TYPE {
   RSMI_IOLINK_TYPE_NUMIOLINKTYPES,              //!< Number of IO Link types
   RSMI_IOLINK_TYPE_SIZE           = 0xFFFFFFFF  //!< Max of IO Link types
 } RSMI_IO_LINK_TYPE;
+
+/**
+ * @brief The utilization counter type
+ */
+typedef enum {
+  RSMI_UTILIZATION_COUNTER_FIRST = 0,
+  //!< GFX Activity
+  RSMI_COARSE_GRAIN_GFX_ACTIVITY  = RSMI_UTILIZATION_COUNTER_FIRST,
+  RSMI_COARSE_GRAIN_MEM_ACTIVITY,    //!< Memory Activity
+  RSMI_UTILIZATION_COUNTER_LAST = RSMI_COARSE_GRAIN_MEM_ACTIVITY
+} RSMI_UTILIZATION_COUNTER_TYPE;
+
+/**
+ * @brief The utilization counter data
+ */
+typedef struct  {
+  RSMI_UTILIZATION_COUNTER_TYPE type;   //!< Utilization counter type
+  uint64_t value;                       //!< Utilization counter value
+} rsmi_utilization_counter_t;
 
 /**
  * @brief Reserved Memory Page Record
@@ -2059,6 +2078,41 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind,
  */
 rsmi_status_t
 rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
+
+/**
+ *  @brief Get coarse grain utilization counter of the specified device
+ *
+ *  @details Given a device index @p dv_ind, the array of the utilization counters,
+ *  the size of the array, this function returns the coarse grain utilization counters
+ *  and timestamp.
+ *  The counter is the accumulated percentages. Every milliseconds the firmware calculates
+ *  % busy count and then accumulates that value in the counter. This provides minimally
+ *  invasive coarse grain GPU usage information.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] utilization_counters Multiple utilization counters can be retreived with a single
+ *  call. The caller must allocate enough space to the utilization_counters array. The caller also
+ *  needs to set valid RSMI_UTILIZATION_COUNTER_TYPE type for each element of the array. 
+ *  ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the provided arguments.
+ *
+ *  If the function reutrns RSMI_STATUS_SUCCESS, the counter will be set in the value field of
+ *  the rsmi_utilization_counter_t.
+ *
+ *  @param[in] count The size of @utilization_counters array.
+ *
+ *  @param[inout] timestamp The timestamp when the counter is retreived.
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t
+rsmi_utilization_count_get(uint32_t dv_ind,
+                rsmi_utilization_counter_t utilization_counters[],
+                uint32_t count,
+                uint64_t *timestamp);
 
 /**
  *  @brief Get the performance level of the device with provided
