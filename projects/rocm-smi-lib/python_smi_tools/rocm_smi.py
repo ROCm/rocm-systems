@@ -941,6 +941,10 @@ def resetGpu(device):
         logging.error('GPU Reset can only be performed on one GPU per call')
         RETCODE = 1
         return
+    if not isAmdDevice(device):
+        logging.error('GPU Reset can only be performed on an AMD GPU')
+        RETCODE = 1
+        return
     resetDev = int(device[0])
     ret = rocmsmi.rsmi_dev_gpu_reset(resetDev)
     if rsmi_ret_ok(ret, resetDev):
