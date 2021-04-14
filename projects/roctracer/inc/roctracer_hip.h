@@ -39,7 +39,7 @@ inline static std::ostream& operator<<(std::ostream& out, const char& v) {
 
 #include <hip/hip_runtime.h>
 #include <hip_ostream_ops.h>
-#include <hip/hcc_detail/hip_prof_str.h>
+#include <hip/amd_detail/hip_prof_str.h>
 
 #include <roctracer.h>
 
