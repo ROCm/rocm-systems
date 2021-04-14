@@ -99,7 +99,35 @@ void TestMetricsCounterRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
 
+    IF_VERB(STANDARD) {
+        std::cout << "\t**GPU METRICS ENERGY COUNTER:\n";
+    }
+
+    uint64_t power;
     uint64_t timestamp;
+    err = rsmi_dev_energy_count_get(i, &power, &timestamp);
+    if (err != RSMI_STATUS_SUCCESS) {
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**" <<
+          "Not supported on this machine" << std::endl;
+          return;
+        }
+      }
+    } else {
+      CHK_ERR_ASRT(err);
+      IF_VERB(STANDARD) {
+          std::cout << std::dec << "power="
+          << power << '\n';
+          std::cout << std::dec << "timestamp="
+          << timestamp << '\n';
+      }
+    }
+
+    // Verify api support checking functionality is working
+    err = rsmi_dev_energy_count_get(i, nullptr, nullptr);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+
     // Coarse Grain counters
     rsmi_utilization_counter_t utilization_counters[2];
     utilization_counters[0].type = RSMI_COARSE_GRAIN_GFX_ACTIVITY;
