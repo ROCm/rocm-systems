@@ -227,11 +227,15 @@ class rsmi_temperature_type_t(c_int):
     RSMI_TEMP_TYPE_EDGE = RSMI_TEMP_TYPE_FIRST
     RSMI_TEMP_TYPE_JUNCTION = 1
     RSMI_TEMP_TYPE_MEMORY = 2
-    RSMI_TEMP_TYPE_LAST = RSMI_TEMP_TYPE_MEMORY
+    RSMI_TEMP_TYPE_HBM_0 = 3
+    RSMI_TEMP_TYPE_HBM_1 = 4
+    RSMI_TEMP_TYPE_HBM_2 = 5
+    RSMI_TEMP_TYPE_HBM_3 = 6
+    RSMI_TEMP_TYPE_LAST = RSMI_TEMP_TYPE_HBM_3
 
 
 # temp_type_lst list correlates to rsmi_temperature_type_t
-temp_type_lst = ['edge', 'junction', 'memory']
+temp_type_lst = ['edge', 'junction', 'memory', 'HBM 0', 'HBM 1', 'HBM 2', 'HBM 3']
 
 
 class rsmi_power_profile_preset_masks_t(c_uint64):
