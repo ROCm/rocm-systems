@@ -854,7 +854,7 @@ def setClocks(deviceList, clktype, clk):
         RETCODE = 1
         return
     if clktype not in validClockNames:
-        printErrLog(device, 'Unable to set clock level')
+        printErrLog(None, 'Unable to set clock level')
         logging.error('Invalid clock type %s', clktype)
         RETCODE = 1
         return
@@ -870,7 +870,7 @@ def setClocks(deviceList, clktype, clk):
     freq_bitmask = 0
     for bit in clk:
         if bit > 63:
-            printErrLog(device, 'Invalid clock frequency')
+            printErrLog(None, 'Invalid clock frequency')
             logging.error('Invalid frequency: %s', bit)
             RETCODE = 1
             return
@@ -920,9 +920,8 @@ def setPerfDeterminism(deviceList, clkvalue):
         logging.error('%s is not an integer', clkvalue)
         RETCODE = 1
         return
-    clklevel = c_uint32(1)
     for device in deviceList:
-        ret = rocmsmi.rsmi_perf_determinism_mode_set(device, clklevel, int(clkvalue))
+        ret = rocmsmi.rsmi_perf_determinism_mode_set(device, int(clkvalue))
         if rsmi_ret_ok(ret, device):
             printLog(device, 'Successfully enabled performance determinism and set GFX clock frequency', str(clkvalue))
         else:
