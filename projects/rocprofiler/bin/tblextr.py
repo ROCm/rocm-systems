@@ -514,7 +514,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           if api_pid == HIP_PID or hsa_copy_deps == 1:
             if not proc_id in dep_dict: dep_dict[proc_id] = {}
             dep_proc = dep_dict[proc_id]
-            if not dep_pid in dep_proc and dep_pid == OPS_PID:
+            if not dep_pid in dep_proc:
               if api_pid == 'HIP_PID': dep_proc[dep_pid] = { 'pid': api_pid, 'from': [], 'id': [] }
               else: dep_proc[dep_pid] = { 'pid': api_pid, 'from': [], 'id': [], 'to': {} }
             dep_str = dep_proc[dep_pid]
