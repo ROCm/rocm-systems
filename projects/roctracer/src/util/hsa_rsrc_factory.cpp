@@ -319,8 +319,8 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     agent_info->dev_id = agent;
     agent_info->dev_type = HSA_DEVICE_TYPE_GPU;
     hsa_api_.hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_info->name);
-    const int gfxip_label_len = strlen(agent_info->name) - 2;
-    strncpy(agent_info->gfxip, agent_info->name, gfxip_label_len);
+    const int gfxip_label_len = std::min (strlen(agent_info->name) - 2, sizeof (agent_info->gfxip) - 1);
+    memcpy(agent_info->gfxip, agent_info->name, gfxip_label_len);
     agent_info->gfxip[gfxip_label_len] = '\0';
     hsa_api_.hsa_agent_get_info(agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &agent_info->max_wave_size);
     hsa_api_.hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &agent_info->max_queue_size);
