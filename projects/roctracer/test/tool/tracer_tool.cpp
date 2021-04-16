@@ -567,14 +567,6 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
           cxx_demangle(entry->name),
           data->args.hipExtModuleLaunchKernel.hStream);
         break;
-#if !HIP_VDI
-      case HIP_API_ID_hipHccModuleLaunchKernel:
-        fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n",
-          oss.str().c_str(),
-          cxx_demangle(entry->name),
-          data->args.hipHccModuleLaunchKernel.hStream);
-        break;
-#endif
       default:
         fprintf(hip_api_file_handle, "%s()\n", oss.str().c_str());
     }

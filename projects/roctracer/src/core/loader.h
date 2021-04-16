@@ -225,15 +225,9 @@ class HccApi {
 
   protected:
   void init(Loader* loader) {
-#if HIP_VDI
     InitActivityCallback = loader->GetFun<hipInitAsyncActivityCallback_t>("hipInitActivityCallback");
     EnableActivityCallback = loader->GetFun<hipEnableAsyncActivityCallback_t>("hipEnableActivityCallback");
     GetOpName = loader->GetFun<hipGetOpName_t>("hipGetCmdName");
-#else
-    InitActivityCallback = loader->GetFun<hipInitAsyncActivityCallback_t>("InitActivityCallbackImpl");
-    EnableActivityCallback = loader->GetFun<hipEnableAsyncActivityCallback_t>("EnableActivityCallbackImpl");
-    GetOpName = loader->GetFun<hipGetOpName_t>("GetCmdNameImpl");
-#endif
   }
 };
 
@@ -313,12 +307,8 @@ typedef HipLoaderShared HipLoader;
   template<> const char* roctracer::HipLoaderShared::lib_name_ = "libamdhip64.so";
 #endif
 
-#if HIP_VDI
 #define LOADER_INSTANTIATE() \
   LOADER_INSTANTIATE_2(); \
   LOADER_INSTANTIATE_HIP();
-#else
-#error HCC support dropped
-#endif
 
 #endif // SRC_CORE_LOADER_H_

@@ -52,7 +52,7 @@ set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
 ## build HIP tests
 set ( GEN_INC_DIR ${PROJECT_BINARY_DIR}/inc )
 set ( INC_PATH "${INC_PATH} ${GEN_INC_DIR}" )
-set ( TEST_ENV HIP_VDI=${HIP_VDI} ROCM_PATH=${ROCM_ROOT_DIR} HSA_PATH=${ROCM_ROOT_DIR}/hsa INC_PATH=${INC_PATH} LIB_PATH=${LIB_PATH} HIPCC_VERBOSE=3 )
+set ( TEST_ENV ROCM_PATH=${ROCM_ROOT_DIR} HSA_PATH=${ROCM_ROOT_DIR}/hsa INC_PATH=${INC_PATH} LIB_PATH=${LIB_PATH} HIPCC_VERBOSE=3 )
 add_custom_target( mytest
   COMMAND ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose"
   COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test"
