@@ -838,6 +838,9 @@ struct metrics_table_header_t {
 // This should match NUM_HBM_INSTANCES
 #define RSMI_NUM_HBM_INSTANCES 4
 
+// Unit conversion factor for HBM temperatures
+#define CENTRIGRADE_TO_MILLI_CENTIGRADE 1000
+
 typedef struct {
   // TODO(amd) Doxygen documents
   /// \cond Ignore in docs.

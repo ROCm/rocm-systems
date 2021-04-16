@@ -2062,13 +2062,17 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
        }
 
        if (sensor_type == RSMI_TEMP_TYPE_HBM_0) {
-         *temperature = gpu_metrics.temperature_hbm[0];
+         *temperature = gpu_metrics.temperature_hbm[0] *
+         CENTRIGRADE_TO_MILLI_CENTIGRADE;
        } else if (sensor_type == RSMI_TEMP_TYPE_HBM_1) {
-         *temperature = gpu_metrics.temperature_hbm[1];
+         *temperature = gpu_metrics.temperature_hbm[1] *
+         CENTRIGRADE_TO_MILLI_CENTIGRADE;
        } else if (sensor_type == RSMI_TEMP_TYPE_HBM_2) {
-         *temperature = gpu_metrics.temperature_hbm[2];
+         *temperature = gpu_metrics.temperature_hbm[2] *
+         CENTRIGRADE_TO_MILLI_CENTIGRADE;
        } else if (sensor_type == RSMI_TEMP_TYPE_HBM_3) {
-         *temperature = gpu_metrics.temperature_hbm[3];
+         *temperature = gpu_metrics.temperature_hbm[3] *
+         CENTRIGRADE_TO_MILLI_CENTIGRADE;
        } else {
          return RSMI_STATUS_NOT_SUPPORTED;
        }
