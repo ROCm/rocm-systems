@@ -223,7 +223,7 @@ class HsaTimer {
   void correlated_pair_ns(time_id_t time_id, uint32_t iters,
                           timestamp_t* timestamp_v, timestamp_t* time_v, timestamp_t* error_v) const {
     clockid_t clock_id = 0;
-    switch (clock_id) {
+    switch (time_id) {
       case TIME_ID_CLOCK_REALTIME:
         clock_id = CLOCK_REALTIME;
         break;

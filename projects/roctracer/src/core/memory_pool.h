@@ -52,7 +52,7 @@ class MemoryPool {
     if (*ptr == NULL) {
       *ptr = reinterpret_cast<char*>(malloc(size));
     } else if (size != 0) {
-      *ptr = reinterpret_cast<char*>(realloc(ptr, size));
+      *ptr = reinterpret_cast<char*>(realloc(*ptr, size));
     } else {
       free(*ptr); 
       *ptr = NULL;
