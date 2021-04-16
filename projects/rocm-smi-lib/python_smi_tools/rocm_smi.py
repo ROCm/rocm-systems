@@ -1499,6 +1499,41 @@ def showGpusByPid(pidList):
             print(None, 'Unable to get list of KFD PIDs. A kernel update may be needed', None)
     printLogSpacer()
 
+def getCoarseGrainUtil(device, typeName = None):
+    """ Find Coarse Grain Utilization
+    If typeName is not given, will return array with of all available sensors,
+    where sensor type and value could be addressed like this:
+
+            for ut_counter in utilization_counters:
+                printLog(device, utilization_counter_name[ut_counter.type], ut_counter.val)
+    @param device: DRM device identifier
+    @param typeName: 'GFX Activity', 'Memory Activity'
+    """
+    timestamp = c_uint64(0)
+
+    if typeName != None:
+
+        try:
+            i = utilization_counter_name.index(typeName)
+            length = 1
+            utilization_counters = (rsmi_utilization_counter_t * length)()
+            utilization_counters[0].type = c_int(i)
+        except ValueError:
+            printLog(None,"No such coarse grain counter type")
+            return -1
+
+    else:
+        length = rsmi_utilization_counter_type.RSMI_UTILIZATION_COUNTER_LAST + 1
+        utilization_counters = (rsmi_utilization_counter_t * length)()
+        # populate array with all existing types to query
+        for i in range(0, length):
+            utilization_counters[i].type = c_int(i)
+
+    ret = rocmsmi.rsmi_utilization_count_get(device, utilization_counters, length, byref(timestamp))
+    if rsmi_ret_ok(ret, device):
+        return utilization_counters
+    return -1
+
 
 def showGpuUse(deviceList):
     """ Display GPU use for a list of devices
@@ -1511,6 +1546,10 @@ def showGpuUse(deviceList):
             printLog(device, 'GPU use (%)', getGpuUse(device))
         else:
             printLog(device, 'GPU use Unsupported', None)
+        util_counters = getCoarseGrainUtil(device, "GFX Activity")
+        if util_counters != -1:
+            for ut_counter in util_counters:
+                printLog(device, utilization_counter_name[ut_counter.type], ut_counter.val)
     printLogSpacer()
 
 
@@ -1577,6 +1616,10 @@ def showMemUse(deviceList):
         ret = rocmsmi.rsmi_dev_memory_busy_percent_get(device, byref(memoryUse))
         if rsmi_ret_ok(ret, device, '% memory use'):
             printLog(device, 'GPU memory use (%)', memoryUse.value)
+        util_counters = getCoarseGrainUtil(device, "Memory Activity")
+        if util_counters != -1:
+            for ut_counter in util_counters:
+                printLog(device, utilization_counter_name[ut_counter.type], ut_counter.val)
     printLogSpacer()
 
 

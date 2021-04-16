@@ -384,6 +384,18 @@ fw_block_names_l = ['ASD', 'CE', 'DMCU', 'MC', 'ME', 'MEC', 'MEC2', 'PFP',\
 rsmi_bit_field_t = c_uint64()
 rsmi_bit_field = rsmi_bit_field_t
 
+class rsmi_utilization_counter_type(c_int):
+    RSMI_UTILIZATION_COUNTER_FIRST = 0
+    RSMI_COARSE_GRAIN_GFX_ACTIVITY  = RSMI_UTILIZATION_COUNTER_FIRST
+    RSMI_COARSE_GRAIN_MEM_ACTIVITY = 1
+    RSMI_UTILIZATION_COUNTER_LAST = RSMI_COARSE_GRAIN_MEM_ACTIVITY
+
+utilization_counter_name = ['GFX Activity', 'Memory Activity']
+
+class rsmi_utilization_counter_t(Structure):
+    _fields_ = [('type', c_int),
+                ('val', c_uint64)]
+
 
 class rsmi_xgmi_status_t(c_int):
     RSMI_XGMI_STATUS_NO_ERRORS = 0
