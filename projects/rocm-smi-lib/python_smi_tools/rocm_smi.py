@@ -1552,6 +1552,24 @@ def showGpuUse(deviceList):
                 printLog(device, utilization_counter_name[ut_counter.type], ut_counter.val)
     printLogSpacer()
 
+def showEnergy(deviceList):
+    """ Display amount of energy consumed by device until now
+
+    Default counter value is 10000b, indicating energy status unit
+    is 15.3 micro-Joules increment.
+    @param deviceList: List of DRM devices (can be a single-item list)
+    """
+    power = c_uint64()
+    timestamp = c_uint64()
+    counter_resolution = c_float()
+    printLogSpacer(" Consumed Energy ")
+    for device in deviceList:
+        ret = rocmsmi.rsmi_dev_energy_count_get(device, byref(power), byref(counter_resolution), byref(timestamp))
+        if rsmi_ret_ok(ret, device, "% Energy Counter"):
+            printLog(device, "Energy counter", power.value)
+            printLog(device, "Accumulated Energy (uJ)", round(power.value * counter_resolution.value, 2))
+    printLogSpacer()
+
 
 def showId(deviceList):
     """ Display the device ID for a list of devices
@@ -2614,6 +2632,7 @@ if __name__ == '__main__':
     groupDisplay.add_argument('--showtopohops', help='Shows the number of hops between GPUs ', action='store_true')
     groupDisplay.add_argument('--showtopotype', help='Shows the link type between GPUs ', action='store_true')
     groupDisplay.add_argument('--showtoponuma', help='Shows the numa nodes ', action='store_true')
+    groupDisplay.add_argument('--showenergycounter', help='Energy accumulator that stores amount of energy consumed', action='store_true')
 
     groupActionReset.add_argument('-r', '--resetclocks', help='Reset clocks and OverDrive to default',
                                   action='store_true')
@@ -2744,6 +2763,7 @@ if __name__ == '__main__':
         args.showpower = True
         args.showtemp = True
         args.showuse = True
+        args.showenergycounter = True
         args.showmemuse = True
         args.showvoltage = True
         args.showclocks = True
@@ -2873,6 +2893,8 @@ if __name__ == '__main__':
         showRange(deviceList, 'voltage')
     if args.showvc:
         showVoltageCurve(deviceList)
+    if args.showenergycounter:
+        showEnergy(deviceList)
     if args.setclock:
         setClocks(deviceList, args.setclock[0], args.setclock[1])
     if args.setsclk:
