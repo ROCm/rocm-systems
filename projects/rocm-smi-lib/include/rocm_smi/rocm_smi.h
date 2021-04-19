@@ -2316,6 +2316,32 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind,
                                             rsmi_gpu_metrics_t *pgpu_metrics);
 
 /**
+ *  @brief This function sets the clock range information
+ *
+ *  @details Given a device index @p dv_ind, a minimum clock value @p minclkvalue,
+ *  a maximum clock value @p maxclkvalue and a clock type @p clkType this function
+ *  will set the sclk|mclk range
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] minclkvalue value to apply to the clock range. Frequency values
+ *  are in MHz.
+ *
+ *  @param[in] maxclkvalue value to apply to the clock range. Frequency values
+ *  are in MHz.
+ *
+ *  @param[in] clkType RSMI_CLK_TYPE_SYS | RSMI_CLK_TYPE_MEM range type
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue,
+                                       uint64_t maxclkvalue,
+                                       rsmi_clk_type_t clkType);
+
+/**
  *  @brief This function sets the clock frequency information
  *
  *  @details Given a device index @p dv_ind, a frequency level @p level,
