@@ -179,10 +179,10 @@ def getFanSpeed(device):
     fm = 0
 
     ret = rocmsmi.rsmi_dev_fan_speed_get(device, sensor_ind, byref(fanLevel))
-    if rsmi_ret_ok(ret, device):
+    if rsmi_ret_ok(ret, device, None, True):
         fl = fanLevel.value
     ret = rocmsmi.rsmi_dev_fan_speed_max_get(device, sensor_ind, byref(fanMax))
-    if rsmi_ret_ok(ret, device):
+    if rsmi_ret_ok(ret, device, None, True):
         fm = fanMax.value
     if fl == 0 or fm == 0:
         return (fl, fm) #  to prevent division by zero crash
