@@ -90,6 +90,8 @@ void TestPowerCapReadWrite::Close() {
 void TestPowerCapReadWrite::Run(void) {
   rsmi_status_t ret;
   uint64_t orig, min, max, new_cap;
+  clock_t start, end;
+  double cpu_time_used;
 
   TestBase::Run();
   if (setup_failed_) {
@@ -120,7 +122,11 @@ void TestPowerCapReadWrite::Run(void) {
                                                              " uW" << std::endl;
       std::cout << "Setting new cap to " << new_cap << "..." << std::endl;
     }
+    start = clock();
     ret = rsmi_dev_power_cap_set(dv_ind, 0, new_cap);
+    end = clock();
+    cpu_time_used = ((double) (end - start)) * 1000000UL / CLOCKS_PER_SEC;
+
     CHK_ERR_ASRT(ret)
 
     ret = rsmi_dev_power_cap_get(dv_ind, 0, &new_cap);
@@ -129,6 +135,7 @@ void TestPowerCapReadWrite::Run(void) {
     // TODO(cfreehil) add some kind of assertion to verify new_cap is correct
     //       (or within a range)
     IF_VERB(STANDARD) {
+      std::cout << "Time spent: " << cpu_time_used << " uS" << std::endl;
       std::cout << "New Power Cap: " << new_cap << " uW" << std::endl;
       std::cout << "Resetting cap to " << orig << "..." << std::endl;
     }
