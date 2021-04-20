@@ -663,48 +663,37 @@ def resetPerfDeterminism(deviceList):
     printLogSpacer()
 
 
-def setClockRange(deviceList, clkType, level, value, autoRespond):
+def setClockRange(deviceList, clkType, minvalue, maxvalue, autoRespond):
     """ Set the range for the specified clktype in the PowerPlay table for a list of devices.
 
     Parameters:
     deviceList -- List of DRM devices (can be a single-item list)
     clktype -- [sclk|mclk] Which clock type to apply the range to
-    level -- [0|1] Whether to set the minimum (0) or maximum (1) speed
-    value -- Value to apply to the clock range
+    minvalue -- Minimum value to apply to the clock range
+    maxvalue -- Maximum value to apply to the clock range
     autoRespond -- Response to automatically provide for all prompts
     """
     global RETCODE
     if clkType not in {'sclk', 'mclk'}:
         printLog(None, 'Invalid range identifier %s' % (clkType), None)
+        logging.error('Unsupported range type %s', clkType)
         RETCODE = 1
         return
     try:
-        int(value)
+        int(minvalue) & int(maxvalue)
     except ValueError:
         printErrLog(device, 'Unable to set %s range' % (clkType))
-        logging.error('%s is not an integer', value)
+        logging.error('%s or %s is not an integer', minvalue, maxvalue)
         RETCODE = 1
         return
     confirmOutOfSpecWarning(autoRespond)
     printLogSpacer(' Set Valid %s Range ' % (clkType))
     for device in deviceList:
-        if clkType == 'sclk':
-            ret = rocmsmi.rsmi_dev_od_clk_info_set(device, rsmi_freq_ind_t(int(level)), int(value), rsmi_clk_names_dict[clkType])
-            if rsmi_ret_ok(ret, device):
-                printLog(device, 'Successfully set %s level %s to %s(MHz)' % (clkType, level, value), None)
-            else:
-                printErrLog(device, 'Unable to set %s level %s to %s(MHz)' % (clkType, level, value))
-                RETCODE = 1
-        elif clkType == 'mclk':
-            ret = rocmsmi.rsmi_dev_od_clk_info_set(device, rsmi_freq_ind_t(int(level)), int(value), rsmi_clk_names_dict[clkType])
-            if rsmi_ret_ok(ret, device):
-                printLog(device, 'Successfully set %s level %s to %s(MHz)' % (clkType, level, value), None)
-            else:
-                printErrLog(device, 'Unable to set %s level %s to %s(MHz)' % (clkType, level, value))
-                RETCODE = 1
+        ret = rocmsmi.rsmi_dev_clk_range_set(device, int(minvalue), int(maxvalue), rsmi_clk_names_dict[clkType])
+        if rsmi_ret_ok(ret, device):
+            printLog(device, 'Successfully set %s from %s(MHz) to %s(MHz)' % (clkType, minvalue, maxvalue), None)
         else:
-            printErrLog(device, 'Unable to set %s range' % (clkType))
-            logging.error('Unsupported range type %s', clkType)
+            printErrLog(device, 'Unable to set %s from %s(MHz) to %s(MHz)' % (clkType, minvalue, maxvalue))
             RETCODE = 1
 
 
@@ -2608,8 +2597,8 @@ if __name__ == '__main__':
                              metavar=('MCLKLEVEL', 'MCLK', 'MVOLT'), nargs=3)
     groupAction.add_argument('--setvc', help='Change SCLK Voltage Curve (MHz mV) for a specific point',
                              metavar=('POINT', 'SCLK', 'SVOLT'), nargs=3)
-    groupAction.add_argument('--setsrange', help='Set min(0) or max(1) SCLK speed', metavar=('MINMAX', 'SCLK'), nargs=2)
-    groupAction.add_argument('--setmrange', help='Set min(0) or max(1) MCLK speed', metavar=('MINMAX', 'MCLK'), nargs=2)
+    groupAction.add_argument('--setsrange', help='Set min and max SCLK speed', metavar=('SCLKMIN', 'SCLKMAX'), nargs=2)
+    groupAction.add_argument('--setmrange', help='Set min and max MCLK speed', metavar=('MCLKMIN', 'MCLKMAX'), nargs=2)
     groupAction.add_argument('--setfan', help='Set GPU Fan Speed (Level or %%)', metavar='LEVEL')
     groupAction.add_argument('--setperflevel', help='Set Performance Level', metavar='LEVEL')
     groupAction.add_argument('--setoverdrive', help='Set GPU OverDrive level (requires manual|high Perf level)',
