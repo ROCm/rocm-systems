@@ -1603,6 +1603,8 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
  *  accumulates all energy consumed.
  *
  *  @param[in] dv_ind a device index
+ *  @param[inout] counter_resolution resolution of the counter @p power in
+ *  micro Joules
  *
  *  @param[inout] power a pointer to uint64_t to which the energy
  *  counter will be written
@@ -1620,8 +1622,8 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
 rsmi_status_t
-rsmi_dev_energy_count_get(uint32_t dv_ind,
-                          uint64_t *power, uint64_t *timestamp);
+rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t *power,
+                          float *counter_resolution, uint64_t *timestamp);
 
 /**
  *  @brief Get the cap on power which, when reached, causes the system to take

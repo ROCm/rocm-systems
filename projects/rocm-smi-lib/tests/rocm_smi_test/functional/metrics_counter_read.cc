@@ -105,7 +105,8 @@ void TestMetricsCounterRead::Run(void) {
 
     uint64_t power;
     uint64_t timestamp;
-    err = rsmi_dev_energy_count_get(i, &power, &timestamp);
+    float counter_resolution;
+    err = rsmi_dev_energy_count_get(i, &power, &counter_resolution, &timestamp);
     if (err != RSMI_STATUS_SUCCESS) {
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         IF_VERB(STANDARD) {
@@ -117,15 +118,17 @@ void TestMetricsCounterRead::Run(void) {
     } else {
       CHK_ERR_ASRT(err);
       IF_VERB(STANDARD) {
-          std::cout << std::dec << "power="
+          std::cout << std::dec << "power counter="
           << power << '\n';
+          std::cout << "power in uJ="
+          << (double)(power * counter_resolution) << '\n';
           std::cout << std::dec << "timestamp="
           << timestamp << '\n';
       }
     }
 
     // Verify api support checking functionality is working
-    err = rsmi_dev_energy_count_get(i, nullptr, nullptr);
+    err = rsmi_dev_energy_count_get(i, nullptr, nullptr, nullptr);
     ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
     // Coarse Grain counters

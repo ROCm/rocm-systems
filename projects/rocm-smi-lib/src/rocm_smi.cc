@@ -75,6 +75,7 @@
 #include "rocm_smi/rocm_smi64Config.h"
 
 static const uint32_t kMaxOverdriveLevel = 20;
+static const float kEnergyCounterResolution = 15.3f;
 
 #define TRY try {
 #define CATCH } catch (...) {return amd::smi::handleException();}
@@ -2604,8 +2605,8 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
 }
 
 rsmi_status_t
-rsmi_dev_energy_count_get(uint32_t dv_ind,
-                          uint64_t *power, uint64_t *timestamp) {
+rsmi_dev_energy_count_get(uint32_t dv_ind, uint64_t *power,
+                          float *counter_resolution, uint64_t *timestamp) {
   TRY
 
   rsmi_status_t ret;
@@ -2622,6 +2623,10 @@ rsmi_dev_energy_count_get(uint32_t dv_ind,
 
   *power = gpu_metrics.energy_accumulator;
   *timestamp = gpu_metrics.system_clock_counter;
+  // hard-coded for now since all ASICs have same resolution. If it ASIC
+  // dependent then this information should come from Kernel
+  if (counter_resolution)
+    *counter_resolution = kEnergyCounterResolution;
 
   return ret;
   CATCH
