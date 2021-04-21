@@ -23,7 +23,7 @@
 ################################################################################
 
 time_stamp=`date +%y%m%d_%H%M%S`
-BIN_DIR=$(dirname $(realpath $0))
+BIN_DIR=$(dirname $(realpath ${BASH_SOURCE[0]}))
 PKG_DIR=$(dirname $BIN_DIR)
 ROOT_DIR=$(dirname $PKG_DIR)
 TT_DIR=$ROOT_DIR/roctracer
