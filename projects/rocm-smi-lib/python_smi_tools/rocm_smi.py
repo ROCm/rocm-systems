@@ -1332,6 +1332,9 @@ def showClocks(deviceList):
     for device in deviceList:
         for clk_type in sorted(rsmi_clk_names_dict):
             freq_list = []
+            if not os.path.isfile(os.path.join('/sys/class/drm', 'card%d' % (device), 'device', 'pp_dpm_%s' % clk_type)):
+                logging.debug('No clock file for %s on card%d' % (clk_type, device))
+                continue
             if rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], None) == 1:
                 ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], byref(freq))
                 if rsmi_ret_ok(ret, device, clk_type, True):
@@ -1393,6 +1396,9 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
 
         else:  # if clk is not defined, will display all current clk
             for clk_type in sorted(rsmi_clk_names_dict):
+                if not os.path.isfile(os.path.join('/sys/class/drm', 'card%d' % (device), 'device', 'pp_dpm_%s' % clk_type)):
+                    logging.debug('No clock file for %s on card%d' % (clk_type, device))
+                    continue
                 if rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], None) == 1:
                     ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], byref(freq))
                     if rsmi_ret_ok(ret, device, clk_type, True):
