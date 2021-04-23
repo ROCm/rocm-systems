@@ -461,13 +461,6 @@ class HsaInterceptor {
 
     HSA_RT(hsa_executable_freeze_fn(executable, options));
 
-    IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_KSYMBOL) {
-      HSA_RT(hsa_executable_iterate_symbols(
-        executable,
-        KernelSymbolCallback,
-        reinterpret_cast<void*>(0)));
-    }
-
     unsigned is_codeobj_cb = 0;
     { IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_CODEOBJ) is_codeobj_cb |= 1; }
     { IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_ALLOCATE) is_codeobj_cb |= 1; }
@@ -476,6 +469,13 @@ class HsaInterceptor {
         executable,
         CodeObjectCallback,
         reinterpret_cast<void*>(0));
+    }
+
+    IS_HSA_CALLBACK(ROCPROFILER_HSA_CB_ID_KSYMBOL) {
+      HSA_RT(hsa_executable_iterate_symbols(
+        executable,
+        KernelSymbolCallback,
+        reinterpret_cast<void*>(0)));
     }
 
     return status;
