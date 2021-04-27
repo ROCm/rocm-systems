@@ -114,6 +114,9 @@ get_filename_component ( HSA_RUNTIME_INC_PATH "${HSA_RUNTIME_INC}" DIRECTORY )
 get_filename_component ( HSA_RUNTIME_LIB_PATH "${HSA_RUNTIME_LIB}" DIRECTORY )
 
 find_library ( HSA_KMT_LIB "libhsakmt.so" )
+if ( "${HSA_KMT_LIB_PATH}" STREQUAL "" )
+  find_library ( HSA_KMT_LIB "libhsakmt.a" )
+endif()
 get_filename_component ( HSA_KMT_LIB_PATH "${HSA_KMT_LIB}" DIRECTORY )
 get_filename_component ( ROCM_ROOT_DIR "${HSA_KMT_LIB_PATH}" DIRECTORY )
 

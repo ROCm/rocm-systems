@@ -81,22 +81,22 @@ add_custom_target( mytest
 ## Building standalone test executable
 add_executable ( ${ST_EXE_NAME} ${ST_TST_SRC} ${UTIL_SRC} ${KERN_SRC} )
 target_include_directories ( ${ST_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )
-target_link_libraries ( ${ST_EXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt )
+target_link_libraries ( ${ST_EXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt numa )
 
 ## Building standalone intercept test executable
 add_executable ( ${STIN_EXE_NAME} ${STIN_TST_SRC} ${UTIL_SRC} ${KERN_SRC} )
 target_include_directories ( ${STIN_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )
-target_link_libraries ( ${STIN_EXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt )
+target_link_libraries ( ${STIN_EXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt numa )
 
 ## Building intercept test executable
 add_library ( ${IN_EXE_NAME} SHARED ${IN_TST_SRC} ${UTIL_SRC} ${KERN_SRC} )
 target_include_directories ( ${IN_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )
-target_link_libraries ( ${IN_EXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt )
+target_link_libraries ( ${IN_EXE_NAME} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt numa )
 
 ## Building ctrl test executable
 add_executable ( ${EXE_NAME} ${CTRL_SRC} ${UTIL_SRC} ${KERN_SRC} )
 target_include_directories ( ${EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${HSA_RUNTIME_LIB_PATH}/../include )
-target_link_libraries ( ${EXE_NAME} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt )
+target_link_libraries ( ${EXE_NAME} ${HSA_RUNTIME_LIB} ${HSA_KMT_LIB} c stdc++ dl pthread rt numa )
 execute_process ( COMMAND sh -xc "cp ${TEST_DIR}/run.sh ${PROJECT_BINARY_DIR}" )
 execute_process ( COMMAND sh -xc "cp ${TEST_DIR}/tool/*.xml ${PROJECT_BINARY_DIR}" )
 execute_process ( COMMAND sh -xc "mkdir -p ${PROJECT_BINARY_DIR}/RESULTS" )
@@ -106,7 +106,7 @@ set ( TEST_LIB "tool" )
 set ( TEST_LIB_SRC ${TEST_DIR}/tool/tool.cpp ${UTIL_SRC} )
 add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
 target_include_directories ( ${TEST_LIB} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} )
-target_link_libraries ( ${TEST_LIB} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} c stdc++ dl pthread rt )
+target_link_libraries ( ${TEST_LIB} ${ROCPROFILER_TARGET} ${HSA_RUNTIME_LIB} c stdc++ dl pthread rt numa )
 
 ## Build memory test bench
 add_custom_target( mbench
