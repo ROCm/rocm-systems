@@ -104,6 +104,11 @@ void TestPowerRead::Run(void) {
       IF_VERB(STANDARD) {
         std::cout << "\t**Current Power Cap: " << val_ui64 << "uW" <<std::endl;
       }
+      err = rsmi_dev_power_cap_default_get(i, &val_ui64);
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Default Power Cap: " << val_ui64 << "uW" <<std::endl;
+      }
       err = rsmi_dev_power_cap_range_get(i, 0, &val_ui64, &val2_ui64);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
