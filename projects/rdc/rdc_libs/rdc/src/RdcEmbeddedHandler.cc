@@ -381,6 +381,22 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_unwatch(rdc_gpu_group_t group_id,
     return watch_table_->rdc_field_unwatch(group_id, field_group_id);
 }
 
+// Diagnostic API
+rdc_status_t RdcEmbeddedHandler::rdc_diagnostic_run(
+    rdc_gpu_group_t group_id,
+    rdc_diag_level_t level,
+    rdc_diag_response_t* response) {
+
+    // Get GPU group information
+    rdc_group_info_t rdc_group_info;
+    rdc_status_t status = rdc_group_gpu_get_info(
+        group_id, &rdc_group_info);
+    if (status != RDC_ST_OK)  return status;
+
+    auto diag = rdc_module_mgr_->get_diagnostic_module();
+    return diag->rdc_diagnostic_run(rdc_group_info, level, response);
+}
+
 // Control API
 rdc_status_t RdcEmbeddedHandler::rdc_field_update_all(
     uint32_t wait_for_update) {

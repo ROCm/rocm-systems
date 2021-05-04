@@ -19,39 +19,22 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef INCLUDE_RDC_LIB_IMPL_RDCRASLIB_H_
-#define INCLUDE_RDC_LIB_IMPL_RDCRASLIB_H_
+#ifndef INCLUDE_RDC_LIB_IMPL_DIAGNOSTICMODULE_H_
+#define INCLUDE_RDC_LIB_IMPL_DIAGNOSTICMODULE_H_
 
 #include <map>
 #include <list>
 #include <vector>
 #include <memory>
-#include <algorithm>
-#include <string>
-#include "rdc_lib/RdcLibraryLoader.h"
-#include "rdc_lib/RdcTelemetry.h"
 #include "rdc_lib/RdcDiagnostic.h"
-
+#include "rdc_lib/impl/RdcRasLib.h"
+#include "rdc_lib/impl/RdcSmiLib.h"
 
 namespace amd {
 namespace rdc {
-class RdcRasLib: public RdcTelemetry, public RdcDiagnostic {
+
+class RdcDiagnosticModule : public RdcDiagnostic {
  public:
-    // get support field ids
-    rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS],
-         uint32_t* field_count) override;
-
-    // Fetch
-    rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
-      uint32_t fields_count, rdc_field_value_f callback,
-      void*  user_data) override;
-
-    rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
-      uint32_t fields_count) override;
-
-    rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
-        uint32_t fields_count) override;
-
     rdc_status_t rdc_diag_test_cases_query(
         rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
         uint32_t* test_case_count) override;
@@ -71,27 +54,25 @@ class RdcRasLib: public RdcTelemetry, public RdcDiagnostic {
     rdc_status_t rdc_diag_init(uint64_t flags) override;
     rdc_status_t rdc_diag_destroy() override;
 
-    explicit RdcRasLib(const char* lib_name);
-
-    ~RdcRasLib();
+    explicit RdcDiagnosticModule(const RdcSmiLibPtr& smi_lib,
+        const RdcRasLibPtr& ras_module);
 
  private:
-    RdcLibraryLoader lib_loader_;
-    rdc_status_t (*fields_value_get_)(rdc_gpu_field_t*,
-                uint32_t, rdc_field_value_f, void*);
-    rdc_status_t (*fields_query_)(uint32_t[MAX_NUM_FIELDS], uint32_t*);
-
-    rdc_status_t (*fields_watch_)(rdc_gpu_field_t*, uint32_t);
-    rdc_status_t (*fields_unwatch_)(rdc_gpu_field_t*, uint32_t);
-
-    rdc_status_t (*rdc_module_init_)(uint64_t);
-    rdc_status_t (*rdc_module_destroy_)();
+    //< Helper function to dispatch fields to module
+    void get_fields_for_module(
+        rdc_gpu_field_t* fields,
+        uint32_t fields_count,
+        std::map<RdcDiagnosticPtr, std::vector<rdc_gpu_field_t>>
+                        & fields_in_module,
+        std::vector<rdc_gpu_field_value_t>& unsupport_fields); // NOLINT
+    std::list<RdcDiagnosticPtr> diagnostic_modules_;
+    std::map<rdc_diag_test_cases_t, RdcDiagnosticPtr> testcases_to_module_;
 };
-typedef std::shared_ptr<RdcRasLib> RdcRasLibPtr;
 
+typedef std::shared_ptr<RdcDiagnosticModule> RdcDiagnosticModulePtr;
 
 }  // namespace rdc
 }  // namespace amd
 
 
-#endif  // INCLUDE_RDC_LIB_IMPL_RDCRASLIB_H_
+#endif  // INCLUDE_RDC_LIB_IMPL_DIAGNOSTICMODULE_H_

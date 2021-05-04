@@ -554,6 +554,17 @@ rdc_status_t RdcStandaloneHandler::rdc_field_unwatch(rdc_gpu_group_t group_id,
     return error_handle(status, reply.status());
 }
 
+// Diagnostic API
+rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(
+        rdc_gpu_group_t group_id,
+        rdc_diag_level_t level,
+        rdc_diag_response_t* response) {
+            (void)group_id;
+            (void)level;
+            (void)response;
+        return RDC_ST_NOT_SUPPORTED;
+}
+
 
 // Control RdcAPI
 rdc_status_t RdcStandaloneHandler::rdc_field_update_all(

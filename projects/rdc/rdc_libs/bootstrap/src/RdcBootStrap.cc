@@ -322,6 +322,18 @@ rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle,
               rdc_group_field_destroy(rdc_field_group_id);
 }
 
+rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle,
+    rdc_gpu_group_t group_id,
+    rdc_diag_level_t level,
+    rdc_diag_response_t* response) {
+        if (!p_rdc_handle) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+              rdc_diagnostic_run(group_id, level, response);
+}
+
 const char* rdc_status_string(rdc_status_t result) {
     switch (result) {
         case RDC_ST_OK:
@@ -359,6 +371,21 @@ const char* rdc_status_string(rdc_status_t result) {
         default:
                 return "Unknown";
     }
+}
+
+const char* rdc_diagnostic_result_string(rdc_diag_result_t result) {
+        switch (result) {
+        case RDC_DIAG_RESULT_PASS:
+                return "Pass";
+        case RDC_DIAG_RESULT_SKIP:
+                return "Skip";
+        case RDC_DIAG_RESULT_WARN:
+                return "Warn";
+        case RDC_DIAG_RESULT_FAIL:
+                return "Fail";
+        default:
+                return "Unknown";
+        }
 }
 
 const char* field_id_string(rdc_field_t field_id) {

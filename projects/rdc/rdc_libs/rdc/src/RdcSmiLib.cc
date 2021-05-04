@@ -24,6 +24,8 @@ THE SOFTWARE.
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
 
+
+
 namespace amd {
 namespace rdc {
 
@@ -158,6 +160,43 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_query(
     std::copy(fields.begin(), fields.end(), field_ids);
     *field_count = fields.size();
 
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcSmiLib::rdc_diag_test_cases_query(
+        rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
+        uint32_t* test_case_count) {
+    if (test_case_count == nullptr) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+
+    return RDC_ST_NOT_SUPPORTED;
+}
+
+// Run a specific test case
+rdc_status_t RdcSmiLib::rdc_test_case_run(
+        rdc_diag_test_cases_t test_case,
+        uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
+        uint32_t gpu_count,
+        rdc_diag_test_result_t* result) {
+    if (result == nullptr) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+    return RDC_ST_NOT_SUPPORTED;
+}
+
+rdc_status_t RdcSmiLib::rdc_diagnostic_run(
+        const rdc_group_info_t&,
+        rdc_diag_level_t,
+        rdc_diag_response_t*) {
+    return RDC_ST_NOT_SUPPORTED;
+}
+
+rdc_status_t RdcSmiLib::rdc_diag_init(uint64_t) {
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcSmiLib::rdc_diag_destroy() {
     return RDC_ST_OK;
 }
 

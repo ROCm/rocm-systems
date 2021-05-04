@@ -21,13 +21,15 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcModuleMgrImpl.h"
 #include "rdc_lib/impl/RdcTelemetryModule.h"
+#include "rdc_lib/impl/RdcDiagnosticModule.h"
 #include "rdc_lib/impl/RdcRasLib.h"
 
 namespace amd {
 namespace rdc {
 
 RdcModuleMgrImpl::RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher):
-                fetcher_(fetcher) {
+                smi_lib_(std::make_shared<RdcSmiLib>(fetcher)) {
+    // The smi_lib_ always need to be loaded.
 }
 
 
@@ -42,10 +44,28 @@ RdcTelemetryPtr RdcModuleMgrImpl::get_telemetry_module() {
     }
 
     if (!rdc_telemetry_module_) {
-        rdc_telemetry_module_.reset(new RdcTelemetryModule(fetcher_, ras_lib_));
+        rdc_telemetry_module_.reset(new RdcTelemetryModule(smi_lib_, ras_lib_));
     }
 
     return rdc_telemetry_module_;
+}
+
+RdcDiagnosticPtr RdcModuleMgrImpl::get_diagnostic_module() {
+    if (rdc_diagnostic_module_) {
+        return rdc_diagnostic_module_;
+    }
+
+    //  Delay load
+    if (!ras_lib_) {
+        ras_lib_.reset(new RdcRasLib("librdc_ras.so"));
+    }
+
+    if (!rdc_diagnostic_module_) {
+        rdc_diagnostic_module_.reset(
+            new RdcDiagnosticModule(smi_lib_, ras_lib_));
+    }
+
+    return rdc_diagnostic_module_;
 }
 
 }  // namespace rdc

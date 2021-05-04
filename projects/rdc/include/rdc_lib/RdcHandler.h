@@ -80,6 +80,12 @@ class RdcHandler {
     virtual rdc_status_t rdc_field_unwatch(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id) = 0;
 
+    // Diagnostic API
+    virtual rdc_status_t rdc_diagnostic_run(
+        rdc_gpu_group_t group_id,
+        rdc_diag_level_t level,
+        rdc_diag_response_t* response) = 0;
+
     // Control API
     virtual rdc_status_t rdc_field_update_all(uint32_t wait_for_update) = 0;
 

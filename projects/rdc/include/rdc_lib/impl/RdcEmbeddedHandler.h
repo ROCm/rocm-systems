@@ -86,6 +86,11 @@ class RdcEmbeddedHandler: public RdcHandler {
         uint64_t *next_since_time_stamp, rdc_field_value* value) override;
     rdc_status_t rdc_field_unwatch(rdc_gpu_group_t group_id,
         rdc_field_grp_t field_group_id) override;
+    // Diagnostic API
+    rdc_status_t rdc_diagnostic_run(
+        rdc_gpu_group_t group_id,
+        rdc_diag_level_t level,
+        rdc_diag_response_t* response) override;
     // Control API
     rdc_status_t rdc_field_update_all(uint32_t wait_for_update) override;
 

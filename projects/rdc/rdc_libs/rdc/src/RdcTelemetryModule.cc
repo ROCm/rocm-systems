@@ -93,10 +93,9 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_unwatch(
 }
 
 RdcTelemetryModule::RdcTelemetryModule(
-    const RdcMetricFetcherPtr& fetcher,
+    const RdcSmiLibPtr& smi_lib,
     const RdcRasLibPtr& ras_module) {
-    auto smi_telemetry_module = std::make_shared<RdcSmiLib>(fetcher);
-    telemetry_modules_.push_back(smi_telemetry_module);
+    telemetry_modules_.push_back(smi_lib);
     if (ras_module) {
        telemetry_modules_.push_back(ras_module);
     }

@@ -26,11 +26,12 @@ THE SOFTWARE.
 #include <memory>
 #include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcTelemetry.h"
+#include "rdc_lib/RdcDiagnostic.h"
 
 namespace amd {
 namespace rdc {
 
-class RdcSmiLib : public RdcTelemetry {
+class RdcSmiLib : public RdcTelemetry, public RdcDiagnostic {
  public:
     // get support field ids
     rdc_status_t rdc_telemetry_fields_query(
@@ -46,11 +47,32 @@ class RdcSmiLib : public RdcTelemetry {
     rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
             uint32_t fields_count) override;
 
+    rdc_status_t rdc_diag_test_cases_query(
+        rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
+        uint32_t* test_case_count) override;
+
+    // Run a specific test case
+    rdc_status_t rdc_test_case_run(
+        rdc_diag_test_cases_t test_case,
+        uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
+        uint32_t gpu_count,
+        rdc_diag_test_result_t* result) override;
+
+    rdc_status_t rdc_diagnostic_run(
+        const rdc_group_info_t& gpus,
+        rdc_diag_level_t level,
+        rdc_diag_response_t* response) override;
+
+    rdc_status_t rdc_diag_init(uint64_t flags) override;
+    rdc_status_t rdc_diag_destroy() override;
+
     explicit RdcSmiLib(const RdcMetricFetcherPtr& mf);
 
  private:
     RdcMetricFetcherPtr metric_fetcher_;
 };
+
+typedef std::shared_ptr<RdcSmiLib> RdcSmiLibPtr;
 
 }  // namespace rdc
 }  // namespace amd

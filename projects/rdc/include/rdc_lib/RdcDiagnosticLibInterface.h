@@ -19,28 +19,34 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef INCLUDE_RDC_LIB_RDCMODULEMGR_H_
-#define INCLUDE_RDC_LIB_RDCMODULEMGR_H_
+#ifndef INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_
+#define INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_
 
-#include <memory>
-#include "rdc_lib/rdc_common.h"
-#include "rdc/rdc.h"
-#include "rdc_lib/RdcTelemetry.h"
-#include "rdc_lib/RdcDiagnostic.h"
-
-namespace amd {
-namespace rdc {
-
-class RdcModuleMgr {
- public:
-    virtual RdcTelemetryPtr get_telemetry_module() = 0;
-    virtual RdcDiagnosticPtr get_diagnostic_module() = 0;
-};
-
-typedef std::shared_ptr<RdcModuleMgr> RdcModuleMgrPtr;
-
-}  // namespace rdc
-}  // namespace amd
+// The telemetry interface for libraries, for example, RAS.
+#include <rdc/rdc.h>
 
 
-#endif  // INCLUDE_RDC_LIB_RDCMODULEMGR_H_
+extern "C" {
+
+// The library will implement below function
+
+// Which test cases are supported in the library
+rdc_status_t rdc_diag_test_cases_query(
+        rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
+        uint32_t* test_case_count);
+
+// Run a specific test case
+rdc_status_t rdc_test_case_run(
+    rdc_diag_test_cases_t test_case,
+    uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
+    uint32_t gpu_count,
+    rdc_diag_test_result_t* result);
+
+rdc_status_t rdc_diag_init(uint64_t flags);
+
+rdc_status_t rdc_diag_destroy();
+
+}
+
+
+#endif   // INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_

@@ -395,6 +395,91 @@ typedef struct {
 } rdc_job_group_info_t;
 
 /**
+ * @brief type of diagnostic level
+ */
+typedef enum {
+    RDC_DIAG_LVL_INVALID = 0,       //!< invalid level
+    RDC_DIAG_LVL_SHORT,             //!< take a few seconds to run
+    RDC_DIAG_LVL_MED,               //!< take less than 2 minutes to run
+    RDC_DIAG_LVL_LONG               //!< take up to 15 minutes to run
+} rdc_diag_level_t;
+
+/**
+ * @brief type of diagnostic result
+ */
+typedef enum {
+    RDC_DIAG_RESULT_PASS,           //!< The diagnostic test pass
+    RDC_DIAG_RESULT_SKIP,           //!< The diagnostic test skipped
+    RDC_DIAG_RESULT_WARN,           //!< The diagnostic test has warnings
+    RDC_DIAG_RESULT_FAIL            //!< The diagnostic test fail
+} rdc_diag_result_t;
+
+/**
+ * @brief The test cases to run
+ */
+typedef enum {
+    RDC_DIAG_TEST_FIRST = 0,
+    //!< The diagnostic test pass
+    RDC_DIAG_COMPUTE_PROCESS = RDC_DIAG_TEST_FIRST,
+    RDC_DIAG_SDMA_QUEUE,        //!< The SDMA Queue is ready
+    RDC_DIAG_COMPUTE_QUEUE,     //!< The Compute Queue is ready
+    RDC_DIAG_VRAM_CHECK,        //!< Check VRAM
+    RDC_DIAG_SYS_MEM_CHECK,     //!< Check System memory
+    RDC_DIAG_NODE_TOPOLOGY,     //!< Report node topology
+    RDC_DIAG_GPU_PARAMETERS,    //!< GPU parameters in range
+    RDC_DIAG_TEST_LAST = RDC_DIAG_GPU_PARAMETERS
+} rdc_diag_test_cases_t;
+
+/**
+ * @brief The maximum test cases to run
+ */
+const uint32_t MAX_TEST_CASES =  RDC_DIAG_TEST_LAST - RDC_DIAG_TEST_FIRST + 1;
+
+/**
+ * @brief The maximum length of the diagnostic messages
+ */
+#define MAX_DIAG_MSG_LENGTH 4096
+
+/**
+ * @brief details of the diagnostic errors
+ */
+typedef struct {
+    char msg[MAX_DIAG_MSG_LENGTH];  //!< The test result details
+    uint32_t code;                  //!< The low level error code
+} rdc_diag_detail_t;
+
+/**
+ * @brief details of the per gpu diagnostic results
+ */
+typedef struct {
+    uint32_t gpu_index;     //!< The GPU index
+    rdc_diag_detail_t gpu_result;  //!< The detail results
+} rdc_diag_per_gpu_result_t;
+
+/**
+ * @brief The diagnostic results for all GPUs
+ */
+typedef struct {
+    rdc_diag_result_t status;   //!< The diagnostic result
+    rdc_diag_detail_t details;  //!< The summary details
+    rdc_diag_test_cases_t test_case;  //!< The test case to run
+
+    uint32_t per_gpu_result_count;  //!< How many gpu_results
+    //!< Result details
+    rdc_diag_per_gpu_result_t gpu_results[RDC_MAX_NUM_DEVICES];
+
+    char info[MAX_DIAG_MSG_LENGTH];  //!< Detail information
+} rdc_diag_test_result_t;
+
+/**
+ * @brief The diagnostic responses for test cases
+ */
+typedef struct {
+    uint32_t results_count;
+    rdc_diag_test_result_t diag_info[MAX_TEST_CASES];
+} rdc_diag_response_t;
+
+/**
  *  @brief Initialize ROCm RDC.
  *
  *  @details When called, this initializes internal data structures,
@@ -873,6 +958,29 @@ rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle,
         rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id);
 
 /**
+ *  @brief Run the diagnostic test cases
+ *
+ *  @details Run the diagnostic test cases at differenet levles.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] group_id The GPU group id.
+ *
+ *  @param[in] level  The level decides how long the test will run.
+ *  The RDC_DIAG_LVL_SHORT only take a few seconds, and the 
+ *  the RDC_DIAG_LVL_LONG may take up to 15 minutes.
+ * 
+ *  @param[inout] response  The detail results of the tests run.
+ * 
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_diagnostic_run(
+    rdc_handle_t p_rdc_handle,
+    rdc_gpu_group_t group_id,
+    rdc_diag_level_t level,
+    rdc_diag_response_t* response);
+
+/**
  *  @brief Get a description of a provided RDC error status
  *
  *  @details return the string in human readable format.
@@ -904,6 +1012,17 @@ const char* field_id_string(rdc_field_t field_id);
  *  @retval return RDC_FI_INVALID if the field name is invalid.
  */
 rdc_field_t get_field_id_from_name(const char* name);
+
+/**
+ *  @brief Get a description of a diagnostic result.
+ *
+ *  @details return the string in human readable format.
+ *
+ *  @param[in] result The RDC diagnostic result.
+ *
+ *  @retval The string to describe the RDC diagnostic result.
+ */
+const char* rdc_diagnostic_result_string(rdc_diag_result_t result);
 
 #ifdef __cplusplus
 }

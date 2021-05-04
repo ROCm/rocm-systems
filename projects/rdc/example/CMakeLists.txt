@@ -86,6 +86,16 @@ add_executable(${FIELDVALUE_EXAMPLE_EXE} "${FIELDVALUE_EXAMPLE_SRC_LIST}")
 
 target_link_libraries(${FIELDVALUE_EXAMPLE_EXE} pthread dl rdc_bootstrap)
 
+set(DIAGNOSTIC_EXAMPLE_SRC_LIST "${SRC_DIR}/diagnostic_example.cc")
+message("DIAGNOSTIC_EXAMPLE_SRC_LIST=${DIAGNOSTIC_EXAMPLE_SRC_LIST}")
+set(DIAGNOSTIC_EXAMPLE_EXE "diagnostic")
+
+link_directories(${LIB_BOOSTRAP_DIR})
+
+add_executable(${DIAGNOSTIC_EXAMPLE_EXE} "${DIAGNOSTIC_EXAMPLE_SRC_LIST}")
+
+target_link_libraries(${DIAGNOSTIC_EXAMPLE_EXE} pthread dl rdc_bootstrap)
+
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Example                          ")
