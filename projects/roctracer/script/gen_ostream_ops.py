@@ -147,6 +147,7 @@ def gen_cppheader(infilepath, outfilepath, rank):
       output_filename_h.write("// End of basic ostream ops\n\n")
 
     for c in cppHeader.classes:
+        if c[-2] == ':' and c[-1] == ':': continue #ostream operator cannot be overloaded for anonymous struct therefore it is skipped
         if "union" in c:
             continue
         if c in structs_analyzed:
