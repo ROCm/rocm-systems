@@ -1615,7 +1615,7 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
  *  provided arguments.
  *
  *  @param[inout] timestamp a pointer to uint64_t to which the timestamp
- *  will be written.
+ *  will be written. Resolution: 1 ns.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
@@ -2163,7 +2163,7 @@ rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
  *
  *  @param[in] count The size of @utilization_counters array.
  *
- *  @param[inout] timestamp The timestamp when the counter is retreived.
+ *  @param[inout] timestamp The timestamp when the counter is retreived. Resolution: 1 ns.
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
