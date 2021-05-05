@@ -119,10 +119,10 @@ typedef struct {
 
 static rsmi_status_t GetGPUMetricsFormat1(uint32_t dv_ind,
                                 rsmi_gpu_metrics_t *data, uint8_t content_v) {
-  assert(content_v != RSMI_GPU_METRICS_API_CONTENT_VER);
-  if (content_v == RSMI_GPU_METRICS_API_CONTENT_VER) {
+  assert(content_v != RSMI_GPU_METRICS_API_CONTENT_VER_1);
+  if (content_v == RSMI_GPU_METRICS_API_CONTENT_VER_1) {
     // This function shouldn't be called if content version is
-    // RSMI_GPU_METRICS_API_CONTENT_VER.
+    // RSMI_GPU_METRICS_API_CONTENT_VER_1.
     return RSMI_STATUS_INVALID_ARGS;
   }
   void *metric_data = nullptr;
@@ -224,7 +224,7 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *smu) {
     return RSMI_STATUS_NOT_SUPPORTED;
   } else {  // format_revision == 1
     if (dev->gpu_metrics_ver().content_revision ==
-                                           RSMI_GPU_METRICS_API_CONTENT_VER) {
+                                           RSMI_GPU_METRICS_API_CONTENT_VER_1) {
       ret = GetDevBinaryBlob(amd::smi::kDevGpuMetrics, dv_ind,
                                            sizeof(rsmi_gpu_metrics_t), smu);
     } else {
