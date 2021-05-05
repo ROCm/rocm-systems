@@ -834,6 +834,7 @@ struct metrics_table_header_t {
 // The content version increments when gpu_metrics is extended with new and/or
 // existing field sizes are changed.
 #define RSMI_GPU_METRICS_API_CONTENT_VER_1 1
+#define RSMI_GPU_METRICS_API_CONTENT_VER_2 2
 
 // This should match NUM_HBM_INSTANCES
 #define RSMI_NUM_HBM_INSTANCES 4
