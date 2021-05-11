@@ -154,6 +154,12 @@ class InterceptQueue {
     std::lock_guard<mutex_t> lck(mutex_);
     hsa_status_t status = HSA_STATUS_SUCCESS;
 
+    if (GetObj(queue) == nullptr) {
+      /* This isn't an intercept queue managed by the rocprofiler, call the original function to
+         destroy this queue. */
+      return hsa_queue_destroy_fn(queue);
+    }
+
     if (callbacks_.destroy != NULL) {
       status = callbacks_.destroy(queue, callback_data_);
     }
@@ -608,7 +614,7 @@ class InterceptQueue {
       assert(queue == obj->queue_);
       delete obj;
       obj_map_->erase(it);
-      status = HSA_STATUS_SUCCESS;;
+      status = HSA_STATUS_SUCCESS;
     }
     return status;
   }
