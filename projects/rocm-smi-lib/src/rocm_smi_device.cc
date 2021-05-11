@@ -617,16 +617,21 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
   std::ofstream fs;
   int ret;
 
+  fs.rdbuf()->pubsetbuf(0,0);
   ret = openSysfsFileStream(type, &fs, valStr.c_str());
   if (ret != 0) {
     return ret;
   }
 
   // We'll catch any exceptions in rocm_smi.cc code.
-  fs << valStr;
+  if (fs << valStr) {
+    ret = RSMI_STATUS_SUCCESS;
+  } else {
+    ret = RSMI_STATUS_NOT_SUPPORTED;
+  }
   fs.close();
-
-  return 0;
+  
+  return ret;
 }
 
 rsmi_dev_perf_level Device::perfLvlStrToEnum(std::string s) {
