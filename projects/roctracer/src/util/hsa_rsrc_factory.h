@@ -106,6 +106,7 @@ struct hsa_pfn_t {
   decltype(hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate;
   decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access;
   decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy;
+  decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect;
 
   decltype(hsa_amd_signal_async_handler)* hsa_amd_signal_async_handler;
   decltype(hsa_amd_profiling_set_profiler_enabled)* hsa_amd_profiling_set_profiler_enabled;

@@ -205,6 +205,7 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
       hsa_api_.hsa_amd_memory_pool_allocate = table->amd_ext_->hsa_amd_memory_pool_allocate_fn;
       hsa_api_.hsa_amd_agents_allow_access = table->amd_ext_->hsa_amd_agents_allow_access_fn;
       hsa_api_.hsa_amd_memory_async_copy = table->amd_ext_->hsa_amd_memory_async_copy_fn;
+      hsa_api_.hsa_amd_memory_async_copy_rect = table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
 
       hsa_api_.hsa_amd_signal_async_handler = table->amd_ext_->hsa_amd_signal_async_handler_fn;
       hsa_api_.hsa_amd_profiling_set_profiler_enabled = table->amd_ext_->hsa_amd_profiling_set_profiler_enabled_fn;
@@ -245,6 +246,7 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
       hsa_api_.hsa_amd_memory_pool_allocate = hsa_amd_memory_pool_allocate;
       hsa_api_.hsa_amd_agents_allow_access = hsa_amd_agents_allow_access;
       hsa_api_.hsa_amd_memory_async_copy = hsa_amd_memory_async_copy;
+      hsa_api_.hsa_amd_memory_async_copy_rect = hsa_amd_memory_async_copy_rect;
 
       hsa_api_.hsa_amd_signal_async_handler = hsa_amd_signal_async_handler;
       hsa_api_.hsa_amd_profiling_set_profiler_enabled = hsa_amd_profiling_set_profiler_enabled;

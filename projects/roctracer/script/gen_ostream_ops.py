@@ -85,7 +85,7 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
         str = ''
         if "union" not in mtype:
             indent = ""
-            str += "    if (std::string(\"" + cppHeader_struct + "::" + name + "\").find(" + apiname.upper() + "_structs_regex" + "))   {\n"
+            str += "    if (std::string(\"" + cppHeader_struct + "::" + name + "\").find(" + apiname.upper() + "_structs_regex" + ") != std::string::npos)   {\n"
             indent = "    "
             str += indent + "  roctracer::" + apiname.lower() + "_support::operator<<(out, \"" + name + "=\");\n"
             str += indent + "  roctracer::" + apiname.lower() + "_support::operator<<(out, v." + name + ");\n"
