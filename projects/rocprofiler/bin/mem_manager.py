@@ -95,12 +95,12 @@ class MemManager:
     size_ptrn = re.compile(DELIM + 'Size=(\d+)' + DELIM)
 
     # query syncronous memcopy API record
-    key = (recordid,procid,0)
+    key = (recordid, procid, 0)
     if key in self.memcopies:
       data = self.memcopies[key]
 
     # query asyncronous memcopy API record
-    key = (recordid,procid,1)
+    key = (recordid, procid, 1)
     if key in self.memcopies:
       if data != '': fatal('register_copy: corrupted record sync/async')
 
@@ -299,30 +299,30 @@ class MemManager:
 
     if m_basic_hsa_prev:
       dstptr = m_basic_hsa_prev.group(1)
-      dstptr_type = self.get_ptr_type(dstptr)
       dst_agent_ptr = m_basic_hsa_prev.group(2)
+      dstptr_type = self.get_ptr_type(dst_agent_ptr)
       srcptr = m_basic_hsa_prev.group(3)
-      srcptr_type = self.get_ptr_type(srcptr)
       src_agent_ptr = m_basic_hsa_prev.group(4)
+      srcptr_type = self.get_ptr_type(src_agent_ptr)
       size = int(m_basic_hsa_prev.group(5))
       condition_matched = True
     if m_basic_hsa:
       dstptr = m_basic_hsa.group(1)
-      dstptr_type = self.get_ptr_type(dstptr)
       dst_agent_ptr = m_basic_hsa.group(2)
+      dstptr_type = self.get_ptr_type(dst_agent_ptr)
       srcptr = m_basic_hsa.group(3)
-      srcptr_type = self.get_ptr_type(srcptr)
       src_agent_ptr = m_basic_hsa.group(4)
+      srcptr_type = self.get_ptr_type(src_agent_ptr)
       size = int(m_basic_hsa.group(5))
       condition_matched = True
 
     if m_basic_hsa2:
       dstptr = m_basic_hsa2.group(1)
-      dstptr_type = self.get_ptr_type(dstptr)
-      dst_agent_ptr = m_basic_hsa2.group(4)
+      dst_agent_ptr = m_basic_hsa2.group(6)
+      dstptr_type = self.get_ptr_type(dst_agent_ptr)
       srcptr = m_basic_hsa2.group(2)
-      srcptr_type = self.get_ptr_type(srcptr)
-      src_agent_ptr = m_basic_hsa2.group(4)
+      src_agent_ptr = m_basic_hsa2.group(6)
+      srcptr_type = self.get_ptr_type(src_agent_ptr)
       z = int(m_basic_hsa2.group(3))
       y = int(m_basic_hsa2.group(4))
       x = int(m_basic_hsa2.group(5))
@@ -379,9 +379,8 @@ class MemManager:
 
     copy_line_header = ''
     copy_line_footer = ''
-    if not is_async or is_hip:
-      copy_line_header = str(start_time) + DELIM + str(end_time) + DELIM + str(pid) + DELIM + str(tid)
-      copy_line_footer = "BW=" + str(bandwidth) + DELIM + 'Async=' + str(is_async)
+    copy_line_header = str(start_time) + DELIM + str(end_time) + DELIM + str(pid) + DELIM + str(tid)
+    copy_line_footer = "BW=" + str(bandwidth) + DELIM + 'Async=' + str(is_async)
 
     copy_line = copy_line_header + DELIM + event + DELIM + 'Direction=' + direction + DELIM + 'SrcType=' + srcptr_type + DELIM + 'DstType=' + dstptr_type + DELIM + "Size=" + str(size) + DELIM + copy_line_footer
 
