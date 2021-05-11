@@ -946,7 +946,7 @@ def setPerfDeterminism(deviceList, clkvalue):
         if rsmi_ret_ok(ret, device):
             printLog(device, 'Successfully enabled performance determinism and set GFX clock frequency', str(clkvalue))
         else:
-            printErrLog(device, 'Unable to set performance determinism and clock frequency', str(clkvalue))
+            printErrLog(device, 'Unable to set performance determinism and clock frequency to %s' % (str(clkvalue)))
             RETCODE = 1
 
 
@@ -2770,7 +2770,7 @@ if __name__ == '__main__':
                              help='Specify Power Profile level (#) or a quoted string of CUSTOM Profile attributes "# '
                                   '# # #..." (requires manual Perf level)')
     groupAction.add_argument('--setperfdeterminism', help='Set clock frequency limit to get minimal performance variation',
-                             type=int, metavar='LEVEL', nargs='+')
+                             type=int, metavar='SCLK', nargs=1)
     groupAction.add_argument('--rasenable', help='Enable RAS for specified block and error type', type=str, nargs=2,
                              metavar=('BLOCK', 'ERRTYPE'))
     groupAction.add_argument('--rasdisable', help='Disable RAS for specified block and error type', type=str, nargs=2,
