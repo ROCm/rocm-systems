@@ -291,6 +291,12 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
           case RDC_FI_POWER_USAGE:   // average_socket_power * 1000000
             value.field_value.value.l_int =
               static_cast<int64_t>(gpu_metrics.average_socket_power * 1000000);
+            // Ignore if the power is 0, which will fallback to non-bulk fetch.
+            if (value.field_value.value.l_int == 0) {
+              RDC_LOG(RDC_DEBUG, "Bulk fetch " << value.gpu_index << ":" <<
+                            "RDC_FI_POWER_USAGE fallback to regular way.");
+              continue;
+            }
             break;
           case RDC_FI_GPU_UTIL:   // average_gfx_activity
             value.field_value.value.l_int =
