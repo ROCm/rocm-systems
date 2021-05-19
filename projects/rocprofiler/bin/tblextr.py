@@ -354,7 +354,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   copy_index = 0
 
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
-  hip_mcopy_ptrn = re.compile(r'hipMemcpy')
+  hip_mcopy_ptrn = re.compile(r'hipMemcpy|hipMemset')
   hip_wait_event_ptrn =  re.compile(r'WaitEvent')
   hip_sync_event_ptrn = re.compile(r'hipStreamSynchronize')
   hip_sync_dev_event_ptrn = re.compile(r'hipDeviceSynchronize')
@@ -430,7 +430,6 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
         if corr_id == 0: corr_id = record_id
 
         rec_vals.append(corr_id)
-
         # extracting/converting stream id
         (stream_id, stream_found) = get_field(record_args, 'stream')
         if stream_found == 0:
@@ -489,9 +488,6 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           mcopy_found = 1
           op_found = 1
 
-        if op_found:
-          ops_patch_data[(corr_id, proc_id)] = (thread_id, stream_id, kernel_str)
-
         # HIP WaitEvent API
         if wait_event_ptrn.search(record_name):
           op_found = 1
@@ -504,6 +500,9 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           stream_id = thread_id
           hsa_patch_data[(copy_index, proc_id)] = thread_id
           copy_index += 1
+
+        if op_found:
+          ops_patch_data[(corr_id, proc_id)] = (thread_id, stream_id, kernel_str)
 
         if op_found:
           op_found = 0
@@ -650,6 +649,7 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         proc_id = int(m.group(3))
 
         # checking name for memcopy pattern
+        is_barrier = 0
         if ptrn_mcopy.search(name):
           rec_table_name = mcopy_table_name
           table_handle = mcopy_table_handle
@@ -664,6 +664,7 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
 
           if ptrn_barrier.search(name):
             name = '"<barrier packet>"'
+            is_barrier = 1
 
         thread_id = 0
         stream_id = 0
@@ -671,7 +672,8 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
           (thread_id, stream_id, name_patch) = ops_patch_data[(corr_id, proc_id)]
           if name_patch != '': name = name_patch
         else:
-          fatal("hcc ops data not found: '" + record + "', " + str(corr_id) + ", " + str(proc_id))
+          if is_barrier: continue
+          else: fatal("hcc ops data not found: '" + record + "', " + str(corr_id) + ", " + str(proc_id))
 
         # activity record
         rec_vals[4] = name                       # Name
@@ -878,3 +880,4 @@ else:
 
 sys.exit(0)
 #############################################################
+
