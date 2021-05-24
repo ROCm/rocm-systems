@@ -34,6 +34,7 @@ DATA_DIR="rpl_data_${time_stamp}_$$"
 RPL_PATH=$PKG_DIR/lib
 TLIB_PATH=$PKG_DIR/tool
 TTLIB_PATH=$TT_DIR/tool
+ROCM_LIB_PATH=$ROOT_DIR/lib
 
 GFX=`/opt/rocm/bin/rocm_agent_enumerator | tail -1`
 
@@ -208,12 +209,30 @@ usage() {
 }
 
 # checking for availability of rocminfo utility
-`which rocminfo >/dev/null 2>&1`
-if [ $? != 0 ]; then error "'rocminfo' utility is not found: please add ROCM bin path to PATH env var."; fi
+if !command -v rocminfo > /dev/null 2>&1 ;  then
+  error "'rocminfo' utility is not found: please add ROCM bin path to PATH env var.";
+fi
+
+# setting ROCM_LIB_PATH
+set_rocm_lib_path() {
+
+  for ROCM_LIB_PATH in "$ROOT_DIR/lib" "$ROOT_DIR/lib64" ; do
+     if [ -f "$ROCM_LIB_PATH/libhsakmt.so.1" ]; then
+        return 0
+     fi
+  done
+
+  #error
+  return 255 #FF
+}
 
 # profiling run method
 OUTPUT_LIST=""
 run() {
+  if ! set_rocm_lib_path ; then
+     echo " Fatal could not find libhsakmt "
+     fatal
+  fi
   export ROCP_INPUT="$1"
   OUTPUT_DIR="$2"
   shift
@@ -251,7 +270,7 @@ run() {
   fi
   if [ "$KFD_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":kfd"
-    MY_LD_PRELOAD="$TT_DIR/lib/libkfdwrapper64.so libhsakmt.so.1 $MY_LD_PRELOAD"
+    MY_LD_PRELOAD="$TT_DIR/lib/libkfdwrapper64.so $ROCM_LIB_PATH/libhsakmt.so.1 $MY_LD_PRELOAD"
   fi
   if [ "$HIP_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":hip"
