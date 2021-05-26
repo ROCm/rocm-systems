@@ -71,6 +71,7 @@ set ( TARGET_NAME "${ROCTRACER_TARGET}" )
 set ( ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" )
 set ( LIB_DIR "${ROOT_DIR}/src" )
 set ( TEST_DIR "${ROOT_DIR}/test" )
+set ( DEST_NAME ${ROCTRACER_NAME} )
 
 ## Build library
 include ( ${LIB_DIR}/CMakeLists.txt )
@@ -114,7 +115,6 @@ set ( GEN_HEADERS
 if ( ${LIBRARY_TYPE} STREQUAL SHARED )
 
 ## Installation and packaging
-set ( DEST_NAME ${ROCTRACER_NAME} )
 if ( DEFINED CPACK_PACKAGING_INSTALL_PREFIX )
   get_filename_component ( DEST_NAME ${CPACK_PACKAGING_INSTALL_PREFIX} NAME )
   get_filename_component ( DEST_DIR ${CPACK_PACKAGING_INSTALL_PREFIX} DIRECTORY )
@@ -149,7 +149,6 @@ endforeach ()
 install ( FILES ${PROJECT_BINARY_DIR}/so-link DESTINATION lib RENAME ${ROCTRACER_LIBRARY}.so )
 install ( FILES ${PROJECT_BINARY_DIR}/so-major-link DESTINATION lib RENAME ${ROCTRACER_LIBRARY}.so.${LIB_VERSION_MAJOR} )
 install ( FILES ${PROJECT_BINARY_DIR}/so-patch-link DESTINATION lib RENAME ${ROCTRACER_LIBRARY}.so.${LIB_VERSION_STRING} )
-install ( FILES ${PROJECT_BINARY_DIR}/test/libtracer_tool.so DESTINATION ${DEST_NAME}/tool )
 
 ## rocTX
 set ( ROCTX_TARGET "roctx64" )
