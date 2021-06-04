@@ -607,7 +607,7 @@ rdc_status_t RdcMetricFetcherImpl::delete_rsmi_handle(RdcFieldKey fk) {
 }
 
 rdc_status_t RdcMetricFetcherImpl::acquire_rsmi_handle(RdcFieldKey fk) {
-  rdc_status_t ret;
+  rdc_status_t ret = RDC_ST_OK;
 
   auto get_evnt_handle = [&](rsmi_event_group_t grp) {
     rsmi_event_handle_t handle;

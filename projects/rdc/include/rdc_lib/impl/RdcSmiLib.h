@@ -70,6 +70,7 @@ class RdcSmiLib : public RdcTelemetry, public RdcDiagnostic {
 
  private:
     RdcMetricFetcherPtr metric_fetcher_;
+    bool bulk_fetch_enabled_;
 };
 
 typedef std::shared_ptr<RdcSmiLib> RdcSmiLibPtr;

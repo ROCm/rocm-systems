@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <functional>
+#include <stdlib.h>
+#include <strings.h>
 #include "rdc_lib/rdc_common.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
@@ -29,7 +31,15 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-RdcSmiLib::RdcSmiLib(const RdcMetricFetcherPtr& mf): metric_fetcher_(mf) {
+RdcSmiLib::RdcSmiLib(const RdcMetricFetcherPtr& mf): metric_fetcher_(mf),
+            bulk_fetch_enabled_(false) {  // Disable bulk fetch by default.
+    char* bulk_env = getenv("RDC_BULK_FETCH_ENABLED");
+    if (bulk_env != nullptr && strcasecmp(bulk_env, "true") == 0) {
+        RDC_LOG(RDC_DEBUG, "Bulk fetch enabled.");
+        bulk_fetch_enabled_ = true;
+    } else {
+        RDC_LOG(RDC_DEBUG, "Bulk fetch disabled.");
+    }
 }
 
 // Bulk fetch wrapper for the rocm_smi_lib. This will be replaced after
@@ -46,15 +56,17 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
 
     // Bulk fetch fields
     std::vector<rdc_gpu_field_value_t> bulk_results;
-    rdc_status_t status = metric_fetcher_->bulk_fetch_smi_fields(
-        fields, fields_count, bulk_results);
-    RDC_LOG(RDC_DEBUG, "Bulk fetched " << bulk_results.size()
+    if (bulk_fetch_enabled_) {
+        rdc_status_t status = metric_fetcher_->bulk_fetch_smi_fields(
+            fields, fields_count, bulk_results);
+        RDC_LOG(RDC_DEBUG, "Bulk fetched " << bulk_results.size()
             << " fields from rocm_smi_lib which return " << status);
-    if (bulk_results.size() > 0) {
-        rdc_status_t status = callback(&bulk_results[0],
+        if (bulk_results.size() > 0) {
+            rdc_status_t status = callback(&bulk_results[0],
                 bulk_results.size(), user_data);
-        if (status != RDC_ST_OK) {
+            if (status != RDC_ST_OK) {
                 return status;
+            }
         }
     }
 
