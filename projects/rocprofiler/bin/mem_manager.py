@@ -45,7 +45,6 @@ class MemManager:
     self.allocations = {}
     self.hsa_agent_types = {}
     self.memcopies = {}
-    self.memcpy_index = {}
     self.filename = ''
     self.fd = 0
     self.parse_hsa_handles(indir + '/' + 'hsa_handles.txt');
@@ -262,12 +261,6 @@ class MemManager:
     m_basic_hsa = hsa_memcpy_ptrn.match(args)
     m_basic_hsa2 = hsa_memcpy_ptrn2.match(args)
     is_hip = True if not (m_basic_hsa_prev or m_basic_hsa or m_basic_hsa2) else False
-    if not is_hip:
-      if procid in self.memcpy_index.keys():
-        self.memcpy_index[procid] += 1
-      else:
-        self.memcpy_index[procid] = 0
-      recordid = self.memcpy_index[procid]
     m_2d = hip_memcpy_ptrn2.match(args)
     m_array = hip_memcpy_ptrn3.match(args)
     is_async = 1 if async_event_ptrn.search(event) else 0
