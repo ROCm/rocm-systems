@@ -57,21 +57,6 @@
 #include "rocm_smi_test/functional/perf_determinism.h"
 #include "rocm_smi_test/test_common.h"
 
-static const std::map<rsmi_dev_perf_level_t, const char *>
-   kDevPerfLvlNameMap = {
-    {RSMI_DEV_PERF_LEVEL_AUTO, "RSMI_DEV_PERF_LEVEL_AUTO"},
-    {RSMI_DEV_PERF_LEVEL_LOW, "RSMI_DEV_PERF_LEVEL_LOW"},
-    {RSMI_DEV_PERF_LEVEL_HIGH, "RSMI_DEV_PERF_LEVEL_HIGH"},
-    {RSMI_DEV_PERF_LEVEL_MANUAL, "RSMI_DEV_PERF_LEVEL_MANUAL"},
-    {RSMI_DEV_PERF_LEVEL_STABLE_STD, "RSMI_DEV_PERF_LEVEL_STABLE_STD"},
-    {RSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK,
-                                       "RSMI_DEV_PERF_LEVEL_STABLE_MIN_MCLK"},
-    {RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK,
-                                       "RSMI_DEV_PERF_LEVEL_STABLE_MIN_SCLK"},
-    {RSMI_DEV_PERF_LEVEL_STABLE_PEAK, "RSMI_DEV_PERF_LEVEL_STABLE_PEAK"},
-
-    {RSMI_DEV_PERF_LEVEL_UNKNOWN, "RSMI_DEV_PERF_LEVEL_UNKNOWN"},
-};
 
 TestPerfDeterminism::TestPerfDeterminism() : TestBase() {
   set_title("RSMI Performance Determinism Test");
@@ -126,31 +111,31 @@ void TestPerfDeterminism::Run(void) {
       return;
     }
     else{
-      clkvalue = odv.curr_sclk_range.lower_bound + 50;
+      clkvalue = (odv.curr_sclk_range.lower_bound/1000000) + 50;
     }
 
     err = rsmi_perf_determinism_mode_set(i, clkvalue);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout << "\t** Not supported on this machine" << std::endl;
+        std::cout << "\t**Not supported on this machine" << std::endl;
       }
       return;
     } else {
       ret = rsmi_dev_perf_level_get(i, &pfl);
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) {
-          std::cout << "\t**New Perf Level:" << kDevPerfLvlNameMap.at(pfl) <<
+          std::cout << "\t**New Perf Level:" <<  GetPerfLevelStr(pfl) <<
                                                                   std::endl;
-          std::cout << "\tSCLK is now set to " << clkvalue << std::endl;
+          std::cout << "\t**SCLK is now set to " << clkvalue << std::endl;
       }
 
-      std::cout << "\tResetting performance determinism" << std::endl;
+      std::cout << "\t**Resetting performance determinism" << std::endl;
       err = rsmi_dev_perf_level_set(i, RSMI_DEV_PERF_LEVEL_AUTO);;
       CHK_ERR_ASRT(err)
       ret = rsmi_dev_perf_level_get(i, &pfl);
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) {
-          std::cout << "\t**New Perf Level:" << kDevPerfLvlNameMap.at(pfl) <<
+          std::cout << "\t**New Perf Level:" <<  GetPerfLevelStr(pfl) <<
                                                                   std::endl;
       }
       return;

@@ -122,12 +122,17 @@ void TestPerfLevelReadWrite::Run(void) {
       }
       ret = rsmi_dev_perf_level_set(dv_ind,
                                      static_cast<rsmi_dev_perf_level_t>(pfl_i));
-      CHK_ERR_ASRT(ret)
-      ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
-      CHK_ERR_ASRT(ret)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) <<
+      if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+          std::cout << "\t**" << GetPerfLevelStr(static_cast<rsmi_dev_perf_level_t>(pfl_i)) 
+                  << " returned RSMI_STATUS_NOT_SUPPORTED"  << std::endl;
+      } else {
+          CHK_ERR_ASRT(ret)
+          ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
+          CHK_ERR_ASRT(ret)
+          IF_VERB(STANDARD) {
+              std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) <<
                                                                     std::endl;
+        }
       }
     }
     IF_VERB(STANDARD) {
