@@ -101,3 +101,20 @@
   <metric name="TCC_EA_RDREQ" block=TCC event=38 descr="Number of TCC/EA read requests (either 32-byte or 64-byte)"></metric>
   <metric name="TCC_EA_RDREQ_32B" block=TCC event=39 descr="Number of 32-byte TCC/EA read requests"></metric>
 </gfx908>
+
+<gfx90a base="gfx908">
+  <metric name="SQ_INSTS_VMEM_WR" block=SQ event=53 descr="Number of VMEM write instructions issued (including FLAT). (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VMEM_RD" block=SQ event=54 descr="Number of VMEM read instructions issued (including FLAT). (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_SALU" block=SQ event=56 descr="Number of SALU instructions issued. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_SMEM" block=SQ event=57 descr="Number of SMEM instructions issued. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_FLAT" block=SQ event=58 descr="Number of FLAT instructions issued. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_FLAT_LDS_ONLY" block=SQ event=59 descr="Number of FLAT instructions issued that read/wrote only from/to LDS (only works if EARLY_TA_DONE is enabled). (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_LDS" block=SQ event=60 descr="Number of LDS instructions issued (including FLAT). (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_GDS" block=SQ event=61 descr="Number of GDS instructions issued. (per-simd, emulated)"></metric>
+
+  <metric name="SQ_WAIT_INST_LDS" block=SQ event=91 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
+  <metric name="SQ_ACTIVE_INST_VALU" block=SQ event=99 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
+  <metric name="SQ_INST_CYCLES_SALU" block=SQ event=112 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
+  <metric name="SQ_THREAD_CYCLES_VALU" block=SQ event=113 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
+  <metric name="SQ_LDS_BANK_CONFLICT" block=SQ event=121 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
+</gfx90a>

@@ -65,12 +65,16 @@
   <metric name="TCC_WRREQ_STALL_max" expr=max(TCC_EA_WRREQ_STALL,32) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
 </gfx908_expr>
 
+<gfx90a_expr base="gfx908_expr"></gfx90a_expr>
+
 <gfx8 base="gfx8_expr"></gfx8>
 <gfx9 base="gfx9_expr"></gfx9>
-# VG20
+# Vega20
 <gfx906 base="gfx906_expr"></gfx906>
-# MI100
+# Arcturus
 <gfx908 base="gfx908_expr"></gfx908>
+# Aldebaran
+<gfx90a base="gfx90a_expr"></gfx90a>
 
 <global>
   # GPUBusy         The percentage of time GPU was busy.

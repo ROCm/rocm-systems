@@ -196,9 +196,9 @@ class MetricsDict {
       xml_->AddConst("top.const.metric", "SE_NUM", agent_info->se_num);
       ImportMetrics(agent_info, "const");
       agent_name_ = agent_info->name;
-      if (std::string("gfx906") == agent_info->name) {
-        ImportMetrics(agent_info, agent_info->name);
-      } else if (std::string("gfx908") == agent_info->name) {
+      if (std::string("gfx906") == agent_info->name ||
+          std::string("gfx908") == agent_info->name ||
+          std::string("gfx90a") == agent_info->name) {
         ImportMetrics(agent_info, agent_info->name);
       } else {
         agent_name_ = agent_info->gfxip;
