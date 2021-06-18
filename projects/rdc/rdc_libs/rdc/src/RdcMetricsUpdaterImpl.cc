@@ -48,6 +48,8 @@ void RdcMetricsUpdaterImpl::start() {
     notif_updater_ = std::async(std::launch::async, [this](){
       while (started_) {
         watch_table_->rdc_field_listen_notif(kRdcFieldListenNotifTime_mS);
+        std::this_thread::sleep_for(
+                    std::chrono::microseconds(_check_frequency));
       }
     });
     updater_ = std::async(std::launch::async, [this](){
