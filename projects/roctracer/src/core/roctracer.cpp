@@ -738,7 +738,7 @@ PUBLIC_API roctracer_status_t roctracer_op_code(
     }
     case ACTIVITY_DOMAIN_HIP_API: {
       *op = hipApiIdByName(str);
-      if (*op == HIP_API_ID_NUMBER) {
+      if (*op == HIP_API_ID_NONE) {
         EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "Invalid API name \"" << str << "\", domain ID(" << domain << ")");
       }
       if (kind != NULL) *kind = 0;
@@ -750,13 +750,29 @@ PUBLIC_API roctracer_status_t roctracer_op_code(
   API_METHOD_SUFFIX
 }
 
-static inline uint32_t get_op_num(const uint32_t& domain) {
+static inline uint32_t get_op_begin(uint32_t domain) {
+  switch (domain) {
+    case ACTIVITY_DOMAIN_HSA_OPS: return 0;
+    case ACTIVITY_DOMAIN_HSA_API: return 0;
+    case ACTIVITY_DOMAIN_HSA_EVT: return 0;
+    case ACTIVITY_DOMAIN_HCC_OPS: return 0;
+    case ACTIVITY_DOMAIN_HIP_API: return HIP_API_ID_FIRST;
+    case ACTIVITY_DOMAIN_KFD_API: return 0;
+    case ACTIVITY_DOMAIN_EXT_API: return 0;
+    case ACTIVITY_DOMAIN_ROCTX: return 0;
+    default:
+      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+  }
+  return 0;
+}
+
+static inline uint32_t get_op_end(uint32_t domain) {
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: return HSA_OP_ID_NUMBER;
     case ACTIVITY_DOMAIN_HSA_API: return HSA_API_ID_NUMBER;
     case ACTIVITY_DOMAIN_HSA_EVT: return HSA_EVT_ID_NUMBER;
     case ACTIVITY_DOMAIN_HCC_OPS: return HIP_OP_ID_NUMBER;
-    case ACTIVITY_DOMAIN_HIP_API: return HIP_API_ID_NUMBER;
+    case ACTIVITY_DOMAIN_HIP_API: return HIP_API_ID_LAST + 1;;
     case ACTIVITY_DOMAIN_KFD_API: return KFD_API_ID_NUMBER;
     case ACTIVITY_DOMAIN_EXT_API: return 0;
     case ACTIVITY_DOMAIN_ROCTX: return ROCTX_API_ID_NUMBER;
@@ -850,8 +866,9 @@ PUBLIC_API roctracer_status_t roctracer_enable_domain_callback(
     void* user_data)
 {
   API_METHOD_PREFIX
-  const uint32_t op_num = get_op_num(domain);
-  for (uint32_t op = 0; op < op_num; op++) roctracer_enable_callback_impl(domain, op, callback, user_data);
+  const uint32_t op_end = get_op_end(domain);
+  for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
+    roctracer_enable_callback_impl(domain, op, callback, user_data);
   API_METHOD_SUFFIX
 }
 
@@ -860,9 +877,10 @@ PUBLIC_API roctracer_status_t roctracer_enable_callback(
     void* user_data)
 {
   API_METHOD_PREFIX
-  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; domain++) {
-    const uint32_t op_num = get_op_num(domain);
-    for (uint32_t op = 0; op < op_num; op++) roctracer_enable_callback_impl(domain, op, callback, user_data);
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
+    const uint32_t op_end = get_op_end(domain);
+    for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
+      roctracer_enable_callback_impl(domain, op, callback, user_data);
   }
   API_METHOD_SUFFIX
 }
@@ -943,17 +961,19 @@ PUBLIC_API roctracer_status_t roctracer_disable_domain_callback(
     roctracer_domain_t domain)
 {
   API_METHOD_PREFIX
-  const uint32_t op_num = get_op_num(domain);
-  for (uint32_t op = 0; op < op_num; op++) roctracer_disable_callback_impl(domain, op);
+  const uint32_t op_end = get_op_end(domain);
+  for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
+    roctracer_disable_callback_impl(domain, op);
   API_METHOD_SUFFIX
 }
 
 PUBLIC_API roctracer_status_t roctracer_disable_callback()
 {
   API_METHOD_PREFIX
-  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; domain++) {
-    const uint32_t op_num = get_op_num(domain);
-    for (uint32_t op = 0; op < op_num; op++) roctracer_disable_callback_impl(domain, op);
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
+    const uint32_t op_end = get_op_end(domain);
+    for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
+      roctracer_disable_callback_impl(domain, op);
   }
   API_METHOD_SUFFIX
 }
@@ -1082,8 +1102,9 @@ PUBLIC_API roctracer_status_t roctracer_enable_domain_activity_expl(
     roctracer_pool_t* pool)
 {
   API_METHOD_PREFIX
-  const uint32_t op_num = get_op_num(domain);
-  for (uint32_t op = 0; op < op_num; op++) roctracer_enable_activity_impl(domain, op, pool);
+  const uint32_t op_end = get_op_end(domain);
+  for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
+    roctracer_enable_activity_impl(domain, op, pool);
   API_METHOD_SUFFIX
 }
 
@@ -1091,9 +1112,10 @@ PUBLIC_API roctracer_status_t roctracer_enable_activity_expl(
     roctracer_pool_t* pool)
 {
   API_METHOD_PREFIX
-  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; domain++) {
-    const uint32_t op_num = get_op_num(domain);
-    for (uint32_t op = 0; op < op_num; op++) roctracer_enable_activity_impl(domain, op, pool);
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
+    const uint32_t op_end = get_op_end(domain);
+    for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
+      roctracer_enable_activity_impl(domain, op, pool);
   }
   API_METHOD_SUFFIX
 }
@@ -1165,17 +1187,19 @@ PUBLIC_API roctracer_status_t roctracer_disable_domain_activity(
     roctracer_domain_t domain)
 {
   API_METHOD_PREFIX
-  const uint32_t op_num = get_op_num(domain);
-  for (uint32_t op = 0; op < op_num; op++) roctracer_disable_activity_impl(domain, op);
+  const uint32_t op_end = get_op_end(domain);
+  for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
+    roctracer_disable_activity_impl(domain, op);
   API_METHOD_SUFFIX
 }
 
 PUBLIC_API roctracer_status_t roctracer_disable_activity()
 {
   API_METHOD_PREFIX
-  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; domain++) {
-    const uint32_t op_num = get_op_num(domain);
-    for (uint32_t op = 0; op < op_num; op++) roctracer_disable_activity_impl(domain, op);
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
+    const uint32_t op_end = get_op_end(domain);
+    for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
+      roctracer_disable_activity_impl(domain, op);
   }
   API_METHOD_SUFFIX
 }

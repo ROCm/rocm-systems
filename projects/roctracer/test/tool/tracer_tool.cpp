@@ -1094,7 +1094,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
       hip_api_file_handle = open_output_file(output_prefix, "hip_api_trace.txt");
       if (hip_api_vec.size() != 0) {
         for (unsigned i = 0; i < hip_api_vec.size(); ++i) {
-          uint32_t cid = HIP_API_ID_NUMBER;
+          uint32_t cid = HIP_API_ID_NONE;
           const char* api = hip_api_vec[i].c_str();
           ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_HIP_API, api, &cid, NULL));
           ROCTRACER_CALL(roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API, cid, hip_api_callback, NULL));
@@ -1105,13 +1105,13 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
       }
 
       if (is_stats_opt) {
-	const char* path = NULL;
-	FILE* f = open_output_file(output_prefix, "hip_api_stats.csv", &path);
+        const char* path = NULL;
+        FILE* f = open_output_file(output_prefix, "hip_api_stats.csv", &path);
         hip_api_stats = new EvtStats(f, path);
-	for (uint32_t id = 0; id < HIP_API_ID_NUMBER; id += 1) {
+        for (uint32_t id = HIP_API_ID_FIRST; id <= HIP_API_ID_LAST; id += 1) {
           const char* label = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, id, 0);
           hip_api_stats->set_label(id, label);
-	}
+        }
       }
     }
 
@@ -1120,11 +1120,11 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
       ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
 
       if (is_stats_opt) {
-	FILE* f = NULL;
-	const char* path = NULL;
-	f = open_output_file(output_prefix, "hip_kernel_stats.csv", &path);
+        FILE* f = NULL;
+        const char* path = NULL;
+        f = open_output_file(output_prefix, "hip_kernel_stats.csv", &path);
         hip_kernel_stats = new EvtStatsA(f, path);
-	f = open_output_file(output_prefix, "hip_memcpy_stats.csv", &path);
+        f = open_output_file(output_prefix, "hip_memcpy_stats.csv", &path);
         hip_memcpy_stats = new EvtStatsA(f, path);
       }
     }
