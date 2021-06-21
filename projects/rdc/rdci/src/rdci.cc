@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcException.h"
 #include "RdciDiscoverySubSystem.h"
 #include "RdciDmonSubSystem.h"
+#include "RdciDiagSubSystem.h"
 #include "RdciFieldGroupSubSystem.h"
 #include "RdciGroupSubSystem.h"
 #include "RdciStatsSubSystem.h"
@@ -35,7 +36,7 @@ THE SOFTWARE.
 int main(int argc, char ** argv) {
     const std::string usage_help =
     "Usage:\trdci <subsystem>\nsubsystem: discovery, dmon, group, "
-    "fieldgroup, stats\n";
+    "fieldgroup, stats, diag\n";
 
     if (argc <= 1) {
         std::cout << usage_help;
@@ -49,6 +50,8 @@ int main(int argc, char ** argv) {
            subsystem.reset(new amd::rdc::RdciDiscoverySubSystem());
        } else if (subsystem_name == "dmon") {
            subsystem.reset(new amd::rdc::RdciDmonSubSystem());
+       } else if (subsystem_name == "diag") {
+           subsystem.reset(new amd::rdc::RdciDiagSubSystem());
        } else if (subsystem_name == "group") {
            subsystem.reset(new amd::rdc::RdciGroupSubSystem());
        } else if (subsystem_name == "fieldgroup") {

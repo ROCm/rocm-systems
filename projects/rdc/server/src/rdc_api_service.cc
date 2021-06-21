@@ -559,7 +559,6 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     return ::grpc::Status::OK;
 }
 
-
 ::grpc::Status RdcAPIServiceImpl::RemoveJob(
                   ::grpc::ServerContext* context,
                   const ::rdc::RemoveJobRequest* request,
@@ -591,7 +590,114 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     return ::grpc::Status::OK;
 }
 
+::grpc::Status RdcAPIServiceImpl::DiagnosticRun(
+                  ::grpc::ServerContext* context,
+                  const ::rdc::DiagnosticRunRequest* request,
+                  ::rdc::DiagnosticRunResponse* reply) {
+    (void)(context);
+    if (!reply || !request) {
+      return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+    }
 
+    rdc_diag_response_t diag_response;
+    rdc_status_t result = rdc_diagnostic_run(
+                rdc_handle_,
+                request->group_id(),
+                static_cast<rdc_diag_level_t>(request->level()),
+                &diag_response);
+
+    reply->set_status(result);
+    if (result != RDC_ST_OK) {
+      return ::grpc::Status::OK;
+    }
+
+    ::rdc::DiagnosticResponse* to_response = reply->mutable_response();
+    to_response->set_results_count(diag_response.results_count);
+
+    for (uint32_t i=0 ; i < diag_response.results_count; i++) {
+        const rdc_diag_test_result_t& test_result =
+                            diag_response.diag_info[i];
+        ::rdc::DiagnosticTestResult* to_diag_info =
+                            to_response->add_diag_info();
+
+        to_diag_info->set_status(test_result.status);
+
+        // details
+        auto to_details = to_diag_info->mutable_details();
+        to_details->set_code(test_result.details.code);
+        to_details->set_msg(test_result.details.msg);
+
+        to_diag_info->set_test_case(
+          static_cast<::rdc::DiagnosticTestResult_DiagnosticTestCase>
+          (test_result.test_case));
+        to_diag_info->set_per_gpu_result_count(
+                      test_result.per_gpu_result_count);
+
+        // gpu_results
+        for (uint32_t j=0; j < test_result.per_gpu_result_count; j++) {
+          auto to_result = to_diag_info->add_gpu_results();
+          const rdc_diag_per_gpu_result_t& cur_result =
+                                    test_result.gpu_results[j];
+          to_result->set_gpu_index(cur_result.gpu_index);
+          auto to_per_detail = to_result->mutable_gpu_result();
+          to_per_detail->set_code(cur_result.gpu_result.code);
+          to_per_detail->set_msg(cur_result.gpu_result.msg);
+        }
+        to_diag_info->set_info(test_result.info);
+    }
+
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::DiagnosticTestCaseRun(
+        ::grpc::ServerContext *context,
+        const ::rdc::DiagnosticTestCaseRunRequest *request,
+        ::rdc::DiagnosticTestCaseRunResponse *reply) {
+      (void)(context);
+      if (!reply || !request) {
+        return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+      }
+
+      rdc_diag_test_result_t test_result;
+      rdc_status_t result = rdc_test_case_run(
+          rdc_handle_,
+          request->group_id(),
+          static_cast<rdc_diag_test_cases_t>(request->test_case()),
+          &test_result);
+
+      reply->set_status(result);
+      if (result != RDC_ST_OK) {
+        return ::grpc::Status::OK;
+      }
+      ::rdc::DiagnosticTestResult *to_diag_info =
+          reply->mutable_result();
+      to_diag_info->set_status(test_result.status);
+
+      // details
+      auto to_details = to_diag_info->mutable_details();
+      to_details->set_code(test_result.details.code);
+      to_details->set_msg(test_result.details.msg);
+
+      to_diag_info->set_test_case(
+          static_cast<::rdc::DiagnosticTestResult_DiagnosticTestCase>(
+                                test_result.test_case));
+      to_diag_info->set_per_gpu_result_count(
+          test_result.per_gpu_result_count);
+
+      // gpu_results
+      for (uint32_t j = 0; j < test_result.per_gpu_result_count; j++) {
+        auto to_result = to_diag_info->add_gpu_results();
+        const rdc_diag_per_gpu_result_t &cur_result =
+            test_result.gpu_results[j];
+        to_result->set_gpu_index(cur_result.gpu_index);
+        auto to_per_detail = to_result->mutable_gpu_result();
+        to_per_detail->set_code(cur_result.gpu_result.code);
+        to_per_detail->set_msg(cur_result.gpu_result.msg);
+      }
+      to_diag_info->set_info(test_result.info);
+
+      return ::grpc::Status::OK;
+}
 
 }  // namespace rdc
 }  // namespace amd

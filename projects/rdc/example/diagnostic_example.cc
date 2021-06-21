@@ -145,6 +145,23 @@ int main(int, char **) {
             }
         }
     }
+
+    // (5) run one test case
+    std::cout <<" ============== Run individual diagnostic test ===========\n";
+    rdc_diag_test_result_t test_result;
+    result = rdc_test_case_run(rdc_handle, group_id,
+                RDC_DIAG_COMPUTE_PROCESS, &test_result);
+
+    if (result != RDC_ST_OK) {
+        std::cout << "Error run RDC_DIAG_COMPUTE_PROCESS diagnostic. Return: "
+            << rdc_status_string(result);
+        goto cleanup;
+    }
+
+    std::cout << std::setw(22) << std::left
+            << get_test_name(RDC_DIAG_COMPUTE_PROCESS) + ":"
+            << rdc_diagnostic_result_string(test_result.status) << "\n";
+
     // Cleanup consists of shutting down RDC.
     cleanup:
     std::cout << "Cleaning up.\n";

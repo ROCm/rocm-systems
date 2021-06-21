@@ -91,6 +91,11 @@ class RdcEmbeddedHandler: public RdcHandler {
         rdc_gpu_group_t group_id,
         rdc_diag_level_t level,
         rdc_diag_response_t* response) override;
+    rdc_status_t rdc_test_case_run(
+        rdc_gpu_group_t group_id,
+        rdc_diag_test_cases_t test_case,
+        rdc_diag_test_result_t* result) override;
+
     // Control API
     rdc_status_t rdc_field_update_all(uint32_t wait_for_update) override;
 

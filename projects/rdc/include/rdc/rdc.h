@@ -981,6 +981,27 @@ rdc_status_t rdc_diagnostic_run(
     rdc_diag_response_t* response);
 
 /**
+ *  @brief Run one diagnostic test case
+ *
+ *  @details Run a specific diagnostic test case.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] group_id The GPU group id.
+ *
+ *  @param[in] test_case  The test case to run.
+ * 
+ *  @param[inout] result  The results of the test.
+ * 
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_test_case_run(
+    rdc_handle_t p_rdc_handle,
+    rdc_gpu_group_t group_id,
+    rdc_diag_test_cases_t test_case,
+    rdc_diag_test_result_t* result);
+
+/**
  *  @brief Get a description of a provided RDC error status
  *
  *  @details return the string in human readable format.

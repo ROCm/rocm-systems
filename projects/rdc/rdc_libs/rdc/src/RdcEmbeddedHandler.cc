@@ -67,7 +67,7 @@ namespace amd {
 namespace rdc {
 
 // TODO(bill_liu): make it configurable
-const uint32_t METIC_UPDATE_FREQUENCY = 100;  // 100ms by default
+const uint32_t METIC_UPDATE_FREQUENCY = 1000;  // 1000 microseconds by default
 
 RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode):
     group_settings_(new RdcGroupSettingsImpl())
@@ -386,6 +386,9 @@ rdc_status_t RdcEmbeddedHandler::rdc_diagnostic_run(
     rdc_gpu_group_t group_id,
     rdc_diag_level_t level,
     rdc_diag_response_t* response) {
+    if (!response) {
+        return RDC_ST_BAD_PARAMETER;
+    }
 
     // Get GPU group information
     rdc_group_info_t rdc_group_info;
@@ -395,6 +398,24 @@ rdc_status_t RdcEmbeddedHandler::rdc_diagnostic_run(
 
     auto diag = rdc_module_mgr_->get_diagnostic_module();
     return diag->rdc_diagnostic_run(rdc_group_info, level, response);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_test_case_run(
+    rdc_gpu_group_t group_id,
+    rdc_diag_test_cases_t test_case,
+    rdc_diag_test_result_t* result) {
+    if (!result) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+    // Get GPU group information
+    rdc_group_info_t rdc_group_info;
+    rdc_status_t status = rdc_group_gpu_get_info(
+        group_id, &rdc_group_info);
+    if (status != RDC_ST_OK)  return status;
+
+    auto diag = rdc_module_mgr_->get_diagnostic_module();
+    return diag->rdc_test_case_run(test_case, rdc_group_info.entity_ids,
+                rdc_group_info.count, result);
 }
 
 // Control API
