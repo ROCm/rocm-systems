@@ -120,6 +120,14 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
                   const ::rdc::Empty* request,
                   ::rdc::RemoveAllJobResponse* reply) override;
 
+    ::grpc::Status DiagnosticRun(::grpc::ServerContext* context,
+                  const ::rdc::DiagnosticRunRequest* request,
+                  ::rdc::DiagnosticRunResponse* reply) override;
+
+    ::grpc::Status DiagnosticTestCaseRun(::grpc::ServerContext* context,
+                  const ::rdc::DiagnosticTestCaseRunRequest* request,
+                  ::rdc::DiagnosticTestCaseRunResponse* reply) override;
+
  private:
     bool copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
             ::rdc::GpuUsageInfo* target);

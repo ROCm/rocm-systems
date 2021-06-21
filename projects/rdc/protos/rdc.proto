@@ -214,6 +214,18 @@ service RdcAPI {
 
   // rdc_status_t rdc_job_remove_all()
   rpc RemoveAllJob(Empty) returns (RemoveAllJobResponse) {}
+
+  // rdc_status_t rdc_diagnostic_run(
+  //  rdc_gpu_group_t group_id,
+  //  rdc_diag_level_t level,
+  //  rdc_diag_response_t* response);
+  rpc DiagnosticRun(DiagnosticRunRequest) returns (DiagnosticRunResponse) {}
+
+  // rdc_status_t rdc_test_case_run(
+  //   rdc_gpu_group_t group_id,
+  //    rdc_diag_test_cases_t test_case,
+  //    rdc_diag_test_result_t* result);
+  rpc DiagnosticTestCaseRun(DiagnosticTestCaseRunRequest) returns (DiagnosticTestCaseRunResponse) {}
 }
 
 message Empty {
@@ -459,4 +471,66 @@ message RemoveJobResponse {
 
 message RemoveAllJobResponse {
   uint32 status = 1;
+}
+
+message DiagnosticRunRequest {
+  uint32 group_id = 1;
+  uint32 level = 2;
+}
+
+message DiagnosticDetail {
+  string msg = 1;
+  uint32 code = 2;
+}
+
+message DiagnosticPerGpuResult {
+  uint32 gpu_index = 1;
+  DiagnosticDetail gpu_result = 2;
+}
+
+message DiagnosticTestResult {
+  uint32 status = 1;
+  DiagnosticDetail details = 2;
+  enum DiagnosticTestCase {
+    COMPUTE_PROCESS = 0;
+    SDMA_QUEUE = 1;
+    COMPUTE_QUEUE = 2;
+    VRAM_CHECK = 3;
+    SYS_MEM_CHECK = 4;
+    NODE_TOPOLOGY = 5;
+    GPU_PARAMETERS = 6;
+  };
+  DiagnosticTestCase test_case = 3;
+  uint32 per_gpu_result_count = 4;
+  repeated DiagnosticPerGpuResult gpu_results = 5;
+  string info = 6;
+}
+
+message DiagnosticResponse {
+  uint32 results_count = 1;
+  repeated DiagnosticTestResult diag_info = 2;
+}
+
+message DiagnosticRunResponse {
+  uint32 status = 1;
+  DiagnosticResponse response = 2;
+}
+
+message DiagnosticTestCaseRunRequest {
+    uint32 group_id = 1;
+    enum TestCaseType {
+      COMPUTE_PROCESS = 0;
+      SDMA_QUEUE = 1;
+      COMPUTE_QUEUE = 2;
+      VRAM_CHECK = 3;
+      SYS_MEM_CHECK = 4;
+      NODE_TOPOLOGY = 5;
+      GPU_PARAMETERS = 6;
+    };
+    TestCaseType test_case = 2;
+}
+
+message DiagnosticTestCaseRunResponse {
+  uint32 status = 1;
+  DiagnosticTestResult result = 2;
 }

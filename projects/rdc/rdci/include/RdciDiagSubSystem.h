@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2020 - present Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021 - present Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,35 +19,43 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_
-#define INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_
+#ifndef RDCI_INCLUDE_RDCIDIAGSUBSYSTEM_H_
+#define RDCI_INCLUDE_RDCIDIAGSUBSYSTEM_H_
+#include <signal.h>
+#include <map>
+#include <vector>
+#include <string>
+#include "RdciSubSystem.h"
 
-// The telemetry interface for libraries, for example, RAS.
-#include <rdc/rdc.h>
+namespace amd {
+namespace rdc {
+
+class RdciDiagSubSystem: public RdciSubSystem {
+ public:
+     RdciDiagSubSystem();
+     ~RdciDiagSubSystem();
+     void parse_cmd_opts(int argc, char ** argv) override;
+     void process() override;
+
+ private:
+     void show_help() const;
+
+     std::string get_test_name(
+               rdc_diag_test_cases_t test_case) const;
+
+     enum OPERATIONS {
+        DIAG_UNKNOWN = 0,
+        DIAG_HELP,
+        DIAG_RUN,
+     } diag_ops_;
+
+     rdc_gpu_group_t group_id_;
+     rdc_diag_level_t run_level_;
+};
 
 
-extern "C" {
-
-// The library will implement below function
-
-// Which test cases are supported in the library
-rdc_status_t rdc_diag_test_cases_query(
-        rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
-        uint32_t* test_case_count);
-
-// Run a specific test case
-
-rdc_status_t rdc_diag_test_case_run(
-    rdc_diag_test_cases_t test_case,
-    uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-    uint32_t gpu_count,
-    rdc_diag_test_result_t* result);
-
-rdc_status_t rdc_diag_init(uint64_t flags);
-
-rdc_status_t rdc_diag_destroy();
-
-}
+}  // namespace rdc
+}  // namespace amd
 
 
-#endif   // INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_
+#endif  // RDCI_INCLUDE_RDCIDIAGSUBSYSTEM_H_

@@ -559,10 +559,110 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(
         rdc_gpu_group_t group_id,
         rdc_diag_level_t level,
         rdc_diag_response_t* response) {
-            (void)group_id;
-            (void)level;
-            (void)response;
-        return RDC_ST_NOT_SUPPORTED;
+    if (!response) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+    ::rdc::DiagnosticRunRequest request;
+    ::rdc::DiagnosticRunResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_group_id(group_id);
+    request.set_level(level);
+
+    ::grpc::Status status = stub_->
+        DiagnosticRun(&context, request, &reply);
+    rdc_status_t err_status = error_handle(status, reply.status());
+    if (err_status != RDC_ST_OK) return err_status;
+    auto res = reply.response();
+    response->results_count = res.results_count();
+
+    if (res.diag_info_size() > static_cast<int>(MAX_TEST_CASES)) {
+        return RDC_ST_BAD_PARAMETER;
+    }
+    for (int i = 0; i < res.diag_info_size(); i++) {
+         const ::rdc::DiagnosticTestResult& result = res.diag_info(i);
+         rdc_diag_test_result_t& to_result = response->diag_info[i];
+         to_result.status = static_cast<rdc_diag_result_t>(result.status());
+
+         // Set details
+         to_result.details.code = result.details().code();
+         strncpy_with_null(to_result.details.msg,
+                result.details().msg().c_str(), MAX_DIAG_MSG_LENGTH);
+
+         to_result.test_case = static_cast<rdc_diag_test_cases_t>(
+                                result.test_case());
+         to_result.per_gpu_result_count = result.per_gpu_result_count();
+
+         // Set Result details
+         if (result.gpu_results_size() > RDC_MAX_NUM_DEVICES) {
+            return RDC_ST_BAD_PARAMETER;
+         }
+         for (int j=0; j < result.gpu_results_size(); j++) {
+             auto per_gpu_result = result.gpu_results(j);
+             rdc_diag_per_gpu_result_t& to_per_gpu = to_result.gpu_results[j];
+             to_per_gpu.gpu_index = per_gpu_result.gpu_index();
+             to_per_gpu.gpu_result.code = per_gpu_result.gpu_result().code();
+             strncpy_with_null(to_per_gpu.gpu_result.msg,
+                per_gpu_result.gpu_result().msg().c_str(), MAX_DIAG_MSG_LENGTH);
+         }
+         strncpy_with_null(to_result.info,
+                result.info().c_str(), MAX_DIAG_MSG_LENGTH);
+    }
+
+    return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_test_case_run(
+            rdc_gpu_group_t group_id,
+            rdc_diag_test_cases_t test_case,
+            rdc_diag_test_result_t *to_result) {
+            if (!to_result) {
+                return RDC_ST_BAD_PARAMETER;
+            }
+            ::rdc::DiagnosticTestCaseRunRequest request;
+            ::rdc::DiagnosticTestCaseRunResponse reply;
+            ::grpc::ClientContext context;
+
+            request.set_group_id(group_id);
+            request.set_test_case(static_cast<
+                ::rdc::DiagnosticTestCaseRunRequest_TestCaseType>(test_case));
+
+            ::grpc::Status status = stub_->DiagnosticTestCaseRun(
+                &context, request, &reply);
+            rdc_status_t err_status = error_handle(status, reply.status());
+            if (err_status != RDC_ST_OK)
+                return err_status;
+            auto result = reply.result();
+
+            to_result->status = static_cast<rdc_diag_result_t>(result.status());
+
+            // Set details
+            to_result->details.code = result.details().code();
+            strncpy_with_null(to_result->details.msg,
+                        result.details().msg().c_str(), MAX_DIAG_MSG_LENGTH);
+
+            to_result->test_case = static_cast<rdc_diag_test_cases_t>(
+                result.test_case());
+            to_result->per_gpu_result_count = result.per_gpu_result_count();
+
+            // Set Result details
+            if (result.gpu_results_size() > RDC_MAX_NUM_DEVICES) {
+                return RDC_ST_BAD_PARAMETER;
+            }
+            for (int j = 0; j < result.gpu_results_size(); j++) {
+                auto per_gpu_result = result.gpu_results(j);
+                rdc_diag_per_gpu_result_t &to_per_gpu =
+                        to_result->gpu_results[j];
+                to_per_gpu.gpu_index = per_gpu_result.gpu_index();
+                to_per_gpu.gpu_result.code = per_gpu_result.gpu_result().code();
+                strncpy_with_null(to_per_gpu.gpu_result.msg,
+                        per_gpu_result.gpu_result().msg().c_str(),
+                        MAX_DIAG_MSG_LENGTH);
+            }
+            strncpy_with_null(to_result->info,
+                              result.info().c_str(), MAX_DIAG_MSG_LENGTH);
+
+            return RDC_ST_OK;
 }
 
 

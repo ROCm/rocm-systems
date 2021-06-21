@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcTelemetry.h"
 #include "rdc_lib/RdcDiagnostic.h"
+#include "rdc_lib/impl/RdcSmiDiagnosticImpl.h"
 
 namespace amd {
 namespace rdc {
@@ -71,6 +72,7 @@ class RdcSmiLib : public RdcTelemetry, public RdcDiagnostic {
  private:
     RdcMetricFetcherPtr metric_fetcher_;
     bool bulk_fetch_enabled_;
+    RdcSmiDiagnosticPtr smi_diag_;
 };
 
 typedef std::shared_ptr<RdcSmiLib> RdcSmiLibPtr;

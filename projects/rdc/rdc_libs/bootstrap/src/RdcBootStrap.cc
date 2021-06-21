@@ -334,6 +334,18 @@ rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle,
               rdc_diagnostic_run(group_id, level, response);
 }
 
+rdc_status_t rdc_test_case_run(rdc_handle_t p_rdc_handle,
+    rdc_gpu_group_t group_id,
+    rdc_diag_test_cases_t test_case,
+    rdc_diag_test_result_t* result) {
+        if (!p_rdc_handle) {
+                return RDC_ST_INVALID_HANDLER;
+        }
+
+        return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->
+              rdc_test_case_run(group_id, test_case, result);
+}
+
 const char* rdc_status_string(rdc_status_t result) {
     switch (result) {
         case RDC_ST_OK:

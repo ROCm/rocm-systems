@@ -78,6 +78,7 @@ set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciSubSystem.cc")
 set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciGroupSubSystem.cc")
 set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciFieldGroupSubSystem.cc")
 set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciDmonSubSystem.cc")
+set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciDiagSubSystem.cc")
 set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciStatsSubSystem.cc")
 set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${PROJECT_SOURCE_DIR}/common/rdc_utils.cc")
 set(RDCI_SRC_LIST ${RDCI_SRC_LIST}

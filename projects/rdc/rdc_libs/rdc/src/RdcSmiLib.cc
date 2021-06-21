@@ -31,8 +31,9 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-RdcSmiLib::RdcSmiLib(const RdcMetricFetcherPtr& mf): metric_fetcher_(mf),
-            bulk_fetch_enabled_(false) {  // Disable bulk fetch by default.
+RdcSmiLib::RdcSmiLib(const RdcMetricFetcherPtr& mf): metric_fetcher_(mf)
+        , bulk_fetch_enabled_(false)
+        , smi_diag_(std::make_shared<RdcSmiDiagnosticImpl>()) {
     char* bulk_env = getenv("RDC_BULK_FETCH_ENABLED");
     if (bulk_env != nullptr && strcasecmp(bulk_env, "true") == 0) {
         RDC_LOG(RDC_DEBUG, "Bulk fetch enabled.");
@@ -182,7 +183,14 @@ rdc_status_t RdcSmiLib::rdc_diag_test_cases_query(
         return RDC_ST_BAD_PARAMETER;
     }
 
-    return RDC_ST_NOT_SUPPORTED;
+    const std::vector<rdc_diag_test_cases_t> tests {
+        RDC_DIAG_COMPUTE_PROCESS,
+        RDC_DIAG_NODE_TOPOLOGY,
+        RDC_DIAG_GPU_PARAMETERS
+    };
+    std::copy(tests.begin(), tests.end(), test_cases);
+    *test_case_count = tests.size();
+    return RDC_ST_OK;
 }
 
 // Run a specific test case
@@ -194,7 +202,19 @@ rdc_status_t RdcSmiLib::rdc_test_case_run(
     if (result == nullptr) {
         return RDC_ST_BAD_PARAMETER;
     }
-    return RDC_ST_NOT_SUPPORTED;
+    switch (test_case) {
+        case RDC_DIAG_COMPUTE_PROCESS:
+            return smi_diag_->check_rsmi_process_info(
+                    gpu_index, gpu_count, result);
+        case RDC_DIAG_NODE_TOPOLOGY:
+            return smi_diag_->check_rsmi_topo_info(
+                gpu_index, gpu_count, result);
+        case RDC_DIAG_GPU_PARAMETERS:
+            return smi_diag_->check_rsmi_param_info(
+                gpu_index, gpu_count, result);
+        default:
+            return RDC_ST_NOT_SUPPORTED;
+    }
 }
 
 rdc_status_t RdcSmiLib::rdc_diagnostic_run(
