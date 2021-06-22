@@ -1897,7 +1897,8 @@ def showProductName(deviceList):
             ret = rocmsmi.rsmi_dev_subsystem_name_get(device, model, 256)
             if rsmi_ret_ok(ret, device) and model.value.decode():
                 device_model = model.value.decode()
-                printLog(device, 'Card model', '\t\t' + device_model)
+                # padHexValue is used for applications that expect 4-digit card models
+                printLog(device, 'Card model', '\t\t' + padHexValue(device_model, 4))
             printLog(device, 'Card vendor', '\t\t' + device_vendor)
             # TODO: Retrieve the SKU using 'rsmi_dev_sku_get' from the LIB
             # ret = rocmsmi.rsmi_dev_sku_get(device, sku, 256)
@@ -2541,6 +2542,20 @@ def load(savefilepath, autoRespond):
                 setPerformanceLevel([device], values['perflevel'])
             printLog(device, 'Successfully loaded values from ' + savefilepath, None)
     printLogSpacer()
+
+
+def padHexValue(value, length):
+    """ Pad a hexadecimal value with a given length of zeros
+
+    @param value: A hexadecimal value to be padded with zeros
+    @param length: Number of zeros to pad the hexadecimal value
+    """
+    # Ensure value entered meets the minimum length and is hexadecimal
+    if len(value) > 2 and length > 1 and value[:2].lower() == '0x' \
+    and all(c in '0123456789abcdefABCDEF' for c in value[2:]):
+        # Pad with zeros after '0x' prefix
+        return '0x' + value[2:].zfill(length)
+    return value
 
 
 def profileString(profile):
