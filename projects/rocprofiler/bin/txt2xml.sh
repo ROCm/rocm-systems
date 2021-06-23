@@ -64,7 +64,7 @@ parse() {
         gpu_index=$line
       fi
     else
-      found=$(echo $feature | sed -n "/^\(pmc\|hip\|hsa\|kfd\)$/ p")
+      found=$(echo $feature | sed -n "/^\(pmc\|hip\|hsa\)$/ p")
       if [ -n "$found" ] ; then
         output=$outdir/input${index}.xml
         header="# $timestamp '$output' generated with '$0 $*'"
@@ -90,11 +90,6 @@ EOF
 EOF
         fi
 
-        if [ "$feature" == "kfd" ] ; then
-          cat >> $output <<EOF
-<trace name="KFD"><parameters api="$line"></parameters></trace>
-EOF
-        fi
       fi
     fi
 

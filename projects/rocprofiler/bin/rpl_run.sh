@@ -46,7 +46,6 @@ fi
 
 # runtime API trace
 ROCTX_TRACE=0
-KFD_TRACE=0
 HSA_TRACE=0
 SYS_TRACE=0
 HIP_TRACE=0
@@ -174,7 +173,6 @@ usage() {
   echo "  --hsa-trace - to trace HSA, generates API execution stats and JSON file chrome-tracing compatible"
   echo "  --sys-trace - to trace HIP/HSA APIs and GPU activity, generates stats and JSON trace chrome-tracing compatible"
   echo "    '--hsa-trace' can be used in addition to select activity tracing from HSA (ROCr runtime) level"
-  echo "  --kfd-trace - to trace KFD, generates KFD Thunk API execution stats and JSON file chrome-tracing compatible"
   echo "    Generated files: <output name>.<domain>_stats.txt <output name>.json"
   echo "    Traced API list can be set by input .txt or .xml files."
   echo "    Input .txt:"
@@ -267,10 +265,6 @@ run() {
   MY_LD_PRELOAD=""
   if [ "$ROCTX_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":roctx"
-  fi
-  if [ "$KFD_TRACE" = 1 ] ; then
-    API_TRACE=${API_TRACE}":kfd"
-    MY_LD_PRELOAD="$TT_DIR/lib/libkfdwrapper64.so $ROCM_LIB_PATH/libhsakmt.so.1 $MY_LD_PRELOAD"
   fi
   if [ "$HIP_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":hip"
@@ -416,11 +410,6 @@ while [ 1 ] ; do
     ARG_VAL=0
     GEN_STATS=1
     ROCTX_TRACE=1
-  elif [ "$1" = "--kfd-trace" ] ; then
-    ARG_VAL=0
-    export ROCP_TIMESTAMP_ON=1
-    GEN_STATS=1
-    KFD_TRACE=1
   elif [ "$1" = "--hsa-trace" ] ; then
     ARG_VAL=0
     export ROCP_TIMESTAMP_ON=1
