@@ -422,7 +422,8 @@ static int get_supported_sensors(std::string dir_path, std::string fn_reg_ex,
       if (std::regex_search(fn, match, re)) {
         assert(match.size() == 2);  // 1 for whole match + 1 for sub-match
         errno = 0;
-        mon_val = strtoul(match.str(1).c_str(), &endptr, 10);
+        std::string val_str(match.str(1));
+        mon_val = strtoul(val_str.c_str(), &endptr, 10);
         assert(errno == 0);
         assert(*endptr == '\0');
         if (errno) {
