@@ -304,7 +304,7 @@ set ( CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT" )
 set(CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA
     "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst;
                     ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-smi-lib, libc6")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-smi-lib, libc6, rocm-core")
 
 # RPM package specific variables
 if ( DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE} )
@@ -341,4 +341,9 @@ set(CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE
 set(CPACK_RPM_PACKAGE_VERSION ${PKG_VERSION_STR})
 
 ## Add the packaging directives
+# Remove dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON not given to cmake
+if(NOT ROCM_DEP_ROCMCORE)
+    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
+    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
+endif()
 include (CPack)

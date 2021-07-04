@@ -113,6 +113,8 @@ if (NOT RDC_PACKAGE)
 endif()
 
 set(CPACK_PACKAGE_FILE_NAME "${RDC_PACKAGE}-${PKG_VERSION_STR}")
+set ( CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-core")
+set ( CPACK_RPM_PACKAGE_REQUIRES "rocm-core")
 ## Verbose output.
 set(CMAKE_VERBOSE_MAKEFILE on)
 
