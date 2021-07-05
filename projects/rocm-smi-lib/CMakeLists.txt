@@ -164,7 +164,7 @@ else()
 endif()
 set (CPACK_DEBIAN_PACKAGE_PROVIDES "rocm-smi")
 set (CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo")
-set (CPACK_DEBIAN_PACKAGE_DEPENDS "python3")
+set (CPACK_DEBIAN_PACKAGE_DEPENDS "python3, rocm-core")
 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY )
@@ -183,7 +183,7 @@ if(CPACK_RPM_PACKAGE_RELEASE)
   set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 set (CPACK_RPM_PACKAGE_PROVIDES "rocm-smi")
-set (CPACK_RPM_PACKAGE_REQUIRES "python3")
+set (CPACK_RPM_PACKAGE_REQUIRES "python3, rocm-core")
 
 
 # The line below doesn't currently work; it may be this issue:
@@ -202,6 +202,10 @@ set ( CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post
 #Set the names now using CPACK utility
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
-
+# Remove dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON not given to cmake
+if(NOT ROCM_DEP_ROCMCORE)
+    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
+    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
+endif()
 
 include (CPack)
