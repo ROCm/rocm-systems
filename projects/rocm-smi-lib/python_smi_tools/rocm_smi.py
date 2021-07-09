@@ -440,7 +440,6 @@ def printEventList(device, delay, eventList):
     @param delay: Notification delay in ms
     @param eventList: List of event type names (can be a single-item list)
     """
-    print2DArray([['DEVICE\t', 'TIME\t', 'TYPE\t', 'DESCRIPTION']])
     mask = 0
     ret = rocmsmi.rsmi_event_notification_init(device)
     if not rsmi_ret_ok(ret, device):
@@ -483,7 +482,8 @@ def printLog(device, metricName, value):
     if device is None:
         logstr = logstr[13:]
     logging.debug(logstr)
-    print(logstr)
+    # Force thread safe printing
+    print(logstr + '\n\r', end='')
 
 
 def printListLog(metricName, valuesList):
@@ -2129,7 +2129,9 @@ def showEvents(deviceList, eventTypes):
             printErrLog(None, 'Ignoring unrecognized event type %s' % (event.replace(',', '')))
     if len(eventTypeList) == 0:
         eventTypeList = notification_type_names
-    try: # Create a seperate thread for each GPU
+    try:
+        print2DArray([['DEVICE\t', 'TIME\t', 'TYPE\t', 'DESCRIPTION']])
+        # Create a seperate thread for each GPU
         for device in deviceList:
             _thread.start_new_thread(printEventList, (device, 1000, eventTypeList))
             time.sleep(0.25)
