@@ -354,7 +354,6 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   copy_index = 0
 
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
-  hip_launch_kernel_ptrn = re.compile(r'hipExtLaunchKernel|hipLaunchKernel')
   hip_mcopy_ptrn = re.compile(r'hipMemcpy|hipMemset')
   hip_wait_event_ptrn =  re.compile(r'WaitEvent')
   hip_sync_event_ptrn = re.compile(r'hipStreamSynchronize')
@@ -487,9 +486,6 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
         if hip_mcopy_ptrn.match(record_name):
           mcopy_found = 1
-          op_found = 1
-
-        if hip_launch_kernel_ptrn.match(record_name):
           op_found = 1
 
         # HIP WaitEvent API
