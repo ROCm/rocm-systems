@@ -92,7 +92,7 @@ class MemManager:
     procid = rec_vals[3]    # 'pid'
     recordid = rec_vals[5]  # 'Index'
     size_ptrn = re.compile(DELIM + 'Size=(\d+)' + DELIM)
-
+    filled_ptrn = re.compile('BW=')
     # query syncronous memcopy API record
     key = (recordid, procid, 0)
     if key in self.memcopies:
@@ -102,7 +102,8 @@ class MemManager:
     key = (recordid, procid, 1)
     if key in self.memcopies:
       if data != '': fatal('register_copy: corrupted record sync/async')
-
+      mf = filled_ptrn.search(self.memcopies[key])
+      if mf: return data #already filled, skip
       async_copy_start_time = rec_vals[0]
       async_copy_end_time = rec_vals[1]
 
