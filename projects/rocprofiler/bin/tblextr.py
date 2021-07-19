@@ -31,7 +31,6 @@ EXT_PID = 0
 COPY_PID = 1
 HIP_PID = 2
 HSA_PID = 3
-KFD_PID = 4
 OPS_PID = 5
 GPU_BASE_PID = 6
 NONE_PID = -1
@@ -764,7 +763,6 @@ else:
 
   hsa_statfile = re.sub(r'\.stats\.csv$', r'.hsa_stats.csv', statfile)
   hip_statfile = re.sub(r'\.stats\.csv$', r'.hip_stats.csv', statfile)
-  kfd_statfile = re.sub(r'\.stats\.csv$', r'.kfd_stats.csv', statfile)
   ops_statfile = statfile
   copy_statfile = re.sub(r'\.stats\.csv$', r'.copy_stats.csv', statfile)
   memcopy_info_file = re.sub(r'\.stats\.csv$', r'.memcopy_info.csv', statfile)
@@ -777,8 +775,6 @@ else:
 
   ext_trace_found = fill_ext_db('rocTX', db, indir, 'roctx', EXT_PID)
 
-  kfd_trace_found = fill_api_db('KFD', db, indir, 'kfd', KFD_PID, NONE_PID, [], {}, 0)
-
   hsa_trace_found = fill_api_db('HSA', db, indir, 'hsa', HSA_PID, COPY_PID, kern_dep_list, {}, 0)
   hsa_activity_found = fill_copy_db('COPY', db, indir)
 
@@ -787,7 +783,7 @@ else:
 
   fill_kernel_db('KERN', db)
 
-  any_trace_found = ext_trace_found | kfd_trace_found | hsa_trace_found | hip_trace_found
+  any_trace_found = ext_trace_found | hsa_trace_found | hip_trace_found
   copy_trace_found = 0
   if hsa_activity_found or len(ops_filtr): copy_trace_found = 1
 
@@ -802,9 +798,6 @@ else:
 
   if hsa_trace_found:
     db.label_json(HSA_PID, "CPU HSA API", jsonfile)
-
-  if kfd_trace_found:
-    db.label_json(KFD_PID, "CPU KFD API", jsonfile)
 
   db.label_json(COPY_PID, "COPY", jsonfile)
 
@@ -840,11 +833,6 @@ else:
     dform.post_process_data(db, 'OPS')
     dform.gen_table_bins(db, 'OPS', ops_statfile, 'Name', 'DurationNs')
     dform.gen_ops_json_trace(db, 'OPS', GPU_BASE_PID, START_NS, jsonfile)
-
-  if kfd_trace_found:
-    dform.post_process_data(db, 'KFD')
-    dform.gen_table_bins(db, 'KFD', kfd_statfile, 'Name', 'DurationNs')
-    dform.gen_api_json_trace(db, 'KFD', START_NS, jsonfile)
 
   if any_trace_found:
     dep_id = 0
