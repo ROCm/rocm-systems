@@ -32,7 +32,7 @@ InterceptQueue::mutex_t InterceptQueue::mutex_;
 rocprofiler_queue_callbacks_t InterceptQueue::callbacks_ = {};
 void* InterceptQueue::callback_data_ = NULL;
 std::atomic<rocprofiler_callback_t> InterceptQueue::dispatch_callback_{NULL};
-InterceptQueue::obj_map_t* InterceptQueue::obj_map_ = NULL;
+InterceptQueue::obj_map_t InterceptQueue::obj_map_{};
 const char* InterceptQueue::kernel_none_ = "";
 Tracker* InterceptQueue::tracker_ = NULL;
 bool InterceptQueue::tracker_on_ = false;

@@ -112,9 +112,8 @@ class InterceptQueue {
       if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_set_profiler_enabled()");
     }
 
-    if (!obj_map_) obj_map_ = new obj_map_t;
     InterceptQueue* obj = new InterceptQueue(agent, *queue, proxy);
-    (*obj_map_)[(uint64_t)(*queue)] = obj;
+    obj_map_[(uint64_t)(*queue)] = obj;
     if (k_concurrent_ == K_CONC_TRACE) {
       status = proxy->SetInterceptCB(OnSubmitCB_ctrace, obj);
     } else if (opt_mode_) {
@@ -596,8 +595,8 @@ class InterceptQueue {
   static InterceptQueue* GetObj(const hsa_queue_t* queue) {
     std::lock_guard<mutex_t> lck(mutex_);
     InterceptQueue* obj = NULL;
-    obj_map_t::const_iterator it = obj_map_->find((uint64_t)queue);
-    if (it != obj_map_->end()) {
+    obj_map_t::const_iterator it = obj_map_.find((uint64_t)queue);
+    if (it != obj_map_.end()) {
       obj = it->second;
       assert(queue == obj->queue_);
     }
@@ -608,12 +607,12 @@ class InterceptQueue {
   static hsa_status_t DelObj(const hsa_queue_t* queue) {
     std::lock_guard<mutex_t> lck(mutex_);
     hsa_status_t status = HSA_STATUS_ERROR;
-    obj_map_t::const_iterator it = obj_map_->find((uint64_t)queue);
-    if (it != obj_map_->end()) {
+    obj_map_t::const_iterator it = obj_map_.find((uint64_t)queue);
+    if (it != obj_map_.end()) {
       const InterceptQueue* obj = it->second;
       assert(queue == obj->queue_);
       delete obj;
-      obj_map_->erase(it);
+      obj_map_.erase(it);
       status = HSA_STATUS_SUCCESS;
     }
     return status;
@@ -638,7 +637,7 @@ class InterceptQueue {
   static void* callback_data_;
   static std::atomic<rocprofiler_callback_t> dispatch_callback_;
 
-  static obj_map_t* obj_map_;
+  static obj_map_t obj_map_;
   static const char* kernel_none_;
   static Tracker* tracker_;
   static bool tracker_on_;
