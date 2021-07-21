@@ -119,6 +119,8 @@ install(TARGETS ${ROCM_SMI_TARGET}
 
 install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/rocm_smi.h
                                         DESTINATION rocm_smi/include/rocm_smi)
+install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/${ROCM_SMI_TARGET}Config.h
+                                        DESTINATION rocm_smi/include/rocm_smi)
 install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/kfd_ioctl.h
                                         DESTINATION rocm_smi/include/rocm_smi)
 install(FILES ${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindings.py
