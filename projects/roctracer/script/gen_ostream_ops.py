@@ -47,7 +47,7 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
 # cppHeader_struct: cppHeader struct being processed
 # cppHeader: cppHeader object created by CppHeaderParser.CppHeader(...)
 # parent_hier_name: parent hierarchical name used for nested structs/enums
-# apiname: for example hip, kfd.
+# apiname: for example hip.
     global global_str
 
     if cppHeader_struct == 'max_align_t': #function pointers not working in cppheaderparser

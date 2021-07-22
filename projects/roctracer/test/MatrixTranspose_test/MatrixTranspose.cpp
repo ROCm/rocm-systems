@@ -234,7 +234,6 @@ int main() {
 #include <roctracer_hip.h>
 #include <roctracer_hcc.h>
 #include <roctracer_hsa.h>
-#include <roctracer_kfd.h>
 #include <roctracer_roctx.h>
 
 #include <unistd.h> 
@@ -266,15 +265,6 @@ void api_callback(
   if (domain == ACTIVITY_DOMAIN_ROCTX) {
     const roctx_api_data_t* data = (const roctx_api_data_t*)(callback_data);
     fprintf(stdout, "rocTX <\"%s pid(%d) tid(%d)\">\n", data->args.message, GetPid(), GetTid());
-    return;
-  }
-  if (domain == ACTIVITY_DOMAIN_KFD_API) {
-    const kfd_api_data_t* data = (const kfd_api_data_t*)(callback_data);
-    fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s pid(%d) tid(%d)>\n",
-        roctracer_op_string(ACTIVITY_DOMAIN_KFD_API, cid, 0),
-        cid,
-        data->correlation_id,
-        (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit", GetPid(), GetTid());
     return;
   }
   const hip_api_data_t* data = (const hip_api_data_t*)(callback_data);
@@ -334,7 +324,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
       record->correlation_id,
       record->begin_ns,
       record->end_ns);
-    if ((record->domain == ACTIVITY_DOMAIN_HIP_API) || (record->domain == ACTIVITY_DOMAIN_KFD_API)) {
+    if (record->domain == ACTIVITY_DOMAIN_HIP_API) {
       SPRINT(" process_id(%u) thread_id(%u)",
         record->process_id,
         record->thread_id);
@@ -381,8 +371,6 @@ void init_tracing() {
   ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
   // Enable PC sampling
   ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_RESERVED1));
-  // Enable KFD API tracing
-  ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_KFD_API, api_callback, NULL));
   // Enable rocTX
   ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, api_callback, NULL));
 }
@@ -403,7 +391,6 @@ void stop_tracing() {
 #endif
   ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
   ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
-  ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_KFD_API));
   ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
   ROCTRACER_CALL(roctracer_flush_activity());
   printf("# STOP  #############################\n");

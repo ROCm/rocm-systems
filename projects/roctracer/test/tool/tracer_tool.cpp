@@ -38,7 +38,6 @@ THE SOFTWARE.
 #include <roctracer_hsa.h>
 #include <roctracer_hip.h>
 #include <roctracer_hcc.h>
-#include <roctracer_kfd.h>
 #include <ext/hsa_rt_utils.hpp>
 
 #include "src/core/loader.h"
@@ -101,17 +100,14 @@ typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
 hsa_rt_utils::Timer* timer = NULL;
 thread_local timestamp_t hsa_begin_timestamp = 0;
 thread_local timestamp_t hip_begin_timestamp = 0;
-thread_local timestamp_t kfd_begin_timestamp = 0;
 bool trace_roctx = false;
 bool trace_hsa_api = false;
 bool trace_hsa_activity = false;
 bool trace_hip_api = false;
 bool trace_hip_activity = false;
-bool trace_kfd = false;
 bool trace_pcs = false;
 // API trace vector
 std::vector<std::string> hsa_api_vec;
-std::vector<std::string> kfd_api_vec;
 std::vector<std::string> hip_api_vec;
 
 LOADER_INSTANTIATE();
@@ -130,7 +126,6 @@ FILE* hsa_api_file_handle = NULL;
 FILE* hsa_async_copy_file_handle = NULL;
 FILE* hip_api_file_handle = NULL;
 FILE* hcc_activity_file_handle = NULL;
-FILE* kfd_api_file_handle = NULL;
 FILE* pc_sample_file_handle = NULL;
 
 void close_output_file(FILE* file_handle);
@@ -141,7 +136,6 @@ void close_file_handles() {
   if (hsa_async_copy_file_handle) close_output_file(hsa_async_copy_file_handle);
   if (hip_api_file_handle) close_output_file(hip_api_file_handle);
   if (hcc_activity_file_handle) close_output_file(hcc_activity_file_handle);
-  if (kfd_api_file_handle) close_output_file(kfd_api_file_handle);
   if (pc_sample_file_handle) close_output_file(pc_sample_file_handle);
 }
 
@@ -658,32 +652,6 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-// KFD API tracing
-
-// KFD API callback function
-static thread_local bool in_kfd_api_callback = false;
-void kfd_api_callback(
-    uint32_t domain,
-    uint32_t cid,
-    const void* callback_data,
-    void* arg)
-{
-  (void)arg;
-  if (in_kfd_api_callback) return;
-  in_kfd_api_callback = true;
-  const kfd_api_data_t* data = reinterpret_cast<const kfd_api_data_t*>(callback_data);
-  if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    kfd_begin_timestamp = timer->timestamp_fn_ns();
-  } else {
-    const timestamp_t end_timestamp = timer->timestamp_fn_ns();
-    std::ostringstream os;
-    os << kfd_begin_timestamp << ":" << end_timestamp << " " << GetPid() << ":" << GetTid() << " " << kfd_api_data_pair_t(cid, *data);
-    fprintf(kfd_api_file_handle, "%s\n", os.str().c_str());
-  }
-  in_kfd_api_callback = false;
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Input parser
 std::string normalize_token(const std::string& token, bool not_empty, const std::string& label) {
@@ -810,9 +778,6 @@ void tool_unload() {
     ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
     ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
   }
-  if (trace_kfd) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_KFD_API));
-  }
 
   // Flush tracing pool
   close_tracing_pool();
@@ -863,11 +828,6 @@ void tool_load() {
       trace_hip_activity = true;
     }
 
-    // KFD domain enabling
-    if (std::string(trace_domain).find("kfd") != std::string::npos) {
-      trace_kfd = true;
-    }
-
     // PC sampling enabling
     if (std::string(trace_domain).find("pcs") != std::string::npos) {
       trace_pcs = true;
@@ -916,11 +876,6 @@ void tool_load() {
         trace_hip_api = true;
         trace_hip_activity = true;
         hip_api_vec = api_vec;
-      }
-      if (name == "KFD") {
-        found = true;
-        trace_kfd = true;
-        kfd_api_vec = api_vec;
       }
     }
 
@@ -991,27 +946,6 @@ void tool_load() {
     std::lock_guard<std::mutex> lock(flush_thread_mutex);
     PTHREAD_CALL(pthread_create(&flush_thread, &attr, flush_thr_fun, NULL));
     flush_thread_started = true;
-  }
-
-  // Enable KFD API callbacks/activity
-  if (trace_kfd) {
-    kfd_api_file_handle = open_output_file(output_prefix, "kfd_api_trace.txt");
-    // initialize KFD tracing
-    roctracer_set_properties(ACTIVITY_DOMAIN_KFD_API, NULL);
-
-    printf("    KFD-trace(");
-    if (kfd_api_vec.size() != 0) {
-      for (unsigned i = 0; i < kfd_api_vec.size(); ++i) {
-        uint32_t cid = KFD_API_ID_NUMBER;
-        const char* api = kfd_api_vec[i].c_str();
-        ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_KFD_API, api, &cid, NULL));
-        ROCTRACER_CALL(roctracer_enable_op_callback(ACTIVITY_DOMAIN_KFD_API, cid, kfd_api_callback, NULL));
-        printf(" %s", api);
-      }
-    } else {
-      ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_KFD_API, kfd_api_callback, NULL));
-    }
-    printf(")\n");
   }
 
   ONLOAD_TRACE_END();

@@ -98,7 +98,6 @@ set ( PUBLIC_HEADERS
   roctracer_hcc.h
   roctracer_hip.h
   roctracer_hsa.h
-  roctracer_kfd.h
   roctracer_roctx.h
   roctracer_cb_table.h
   ext/prof_protocol.h
@@ -108,8 +107,6 @@ set ( GEN_HEADERS
   hip_ostream_ops.h
   hsa_prof_str.h
   hsa_ostream_ops.h
-  kfd_prof_str.h
-  kfd_ostream_ops.h
 )
 
 if ( ${LIBRARY_TYPE} STREQUAL SHARED )
@@ -169,9 +166,6 @@ install ( TARGETS "roctx64" LIBRARY DESTINATION ${DEST_NAME}/lib )
 install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-link DESTINATION lib RENAME ${ROCTX_LIBRARY}.so )
 install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-major-link DESTINATION lib RENAME ${ROCTX_LIBRARY}.so.${LIB_VERSION_MAJOR} )
 install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-patch-link DESTINATION lib RENAME ${ROCTX_LIBRARY}.so.${LIB_VERSION_STRING} )
-
-## KFD wrapper
-install ( TARGETS "kfdwrapper64" LIBRARY DESTINATION ${DEST_NAME}/lib )
 
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" )

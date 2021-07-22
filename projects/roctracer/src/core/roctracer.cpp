@@ -27,7 +27,6 @@ THE SOFTWARE.
 #include "inc/roctracer_roctx.h"
 #define PROF_API_IMPL 1
 #include "inc/roctracer_hsa.h"
-#include "inc/roctracer_kfd.h"
 
 #include <dirent.h>
 #include <pthread.h>
@@ -701,8 +700,6 @@ PUBLIC_API const char* roctracer_op_string(
       return roctracer::HccLoader::Instance().GetOpName(kind);
     case ACTIVITY_DOMAIN_HIP_API:
       return roctracer::HipLoader::Instance().ApiName(op);
-    case ACTIVITY_DOMAIN_KFD_API:
-      return roctracer::kfd_support::GetApiName(op);
     case ACTIVITY_DOMAIN_EXT_API:
       return "EXT_API";
     default:
@@ -723,14 +720,6 @@ PUBLIC_API roctracer_status_t roctracer_op_code(
     case ACTIVITY_DOMAIN_HSA_API: {
       *op = roctracer::hsa_support::GetApiCode(str);
       if (*op == HSA_API_ID_NUMBER) {
-        EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "Invalid API name \"" << str << "\", domain ID(" << domain << ")");
-      }
-      if (kind != NULL) *kind = 0;
-      break;
-    }
-    case ACTIVITY_DOMAIN_KFD_API: {
-      *op = roctracer::kfd_support::GetApiCode(str);
-      if (*op == KFD_API_ID_NUMBER) {
         EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER, "Invalid API name \"" << str << "\", domain ID(" << domain << ")");
       }
       if (kind != NULL) *kind = 0;
@@ -757,7 +746,6 @@ static inline uint32_t get_op_begin(uint32_t domain) {
     case ACTIVITY_DOMAIN_HSA_EVT: return 0;
     case ACTIVITY_DOMAIN_HCC_OPS: return 0;
     case ACTIVITY_DOMAIN_HIP_API: return HIP_API_ID_FIRST;
-    case ACTIVITY_DOMAIN_KFD_API: return 0;
     case ACTIVITY_DOMAIN_EXT_API: return 0;
     case ACTIVITY_DOMAIN_ROCTX: return 0;
     default:
@@ -773,7 +761,6 @@ static inline uint32_t get_op_end(uint32_t domain) {
     case ACTIVITY_DOMAIN_HSA_EVT: return HSA_EVT_ID_NUMBER;
     case ACTIVITY_DOMAIN_HCC_OPS: return HIP_OP_ID_NUMBER;
     case ACTIVITY_DOMAIN_HIP_API: return HIP_API_ID_LAST + 1;;
-    case ACTIVITY_DOMAIN_KFD_API: return KFD_API_ID_NUMBER;
     case ACTIVITY_DOMAIN_EXT_API: return 0;
     case ACTIVITY_DOMAIN_ROCTX: return ROCTX_API_ID_NUMBER;
     default:
@@ -790,11 +777,6 @@ static roctracer_status_t roctracer_enable_callback_fun(
     void* user_data)
 {
   switch (domain) {
-    case ACTIVITY_DOMAIN_KFD_API: {
-      const bool succ = roctracer::KfdLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
-      if (succ == false) EXC_RAISING(ROCTRACER_STATUS_ERROR, "KFD RegisterApiCallback error(" << op << ") failed");
-      break;
-    }
     case ACTIVITY_DOMAIN_HSA_OPS: break;
     case ACTIVITY_DOMAIN_HSA_API: {
 #if 0
@@ -891,11 +873,6 @@ static roctracer_status_t roctracer_disable_callback_fun(
     uint32_t op)
 {
   switch (domain) {
-    case ACTIVITY_DOMAIN_KFD_API: {
-      const bool succ = roctracer::KfdLoader::Instance().RemoveApiCallback(op);
-      if (succ == false) EXC_RAISING(ROCTRACER_STATUS_ERROR, "KFD RemoveApiCallback error");
-      break;
-    }
     case ACTIVITY_DOMAIN_HSA_OPS: break;
     case ACTIVITY_DOMAIN_HSA_API: {
 #if 0
@@ -1039,7 +1016,6 @@ static roctracer_status_t roctracer_enable_activity_fun(
     }
     case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_HSA_EVT: break;
-    case ACTIVITY_DOMAIN_KFD_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
       const bool init_phase = (roctracer::HccLoader::GetRef() == NULL);
       if (roctracer::HccLoader::Instance().Enabled() == false) break;
@@ -1138,7 +1114,6 @@ static roctracer_status_t roctracer_disable_activity_fun(
     }
     case ACTIVITY_DOMAIN_HSA_API: break;
     case ACTIVITY_DOMAIN_HSA_EVT: break;
-    case ACTIVITY_DOMAIN_KFD_API: break;
     case ACTIVITY_DOMAIN_HCC_OPS: {
       if (roctracer::HccLoader::Instance().Enabled() == false) break;
 
@@ -1304,10 +1279,6 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(
       table->amd_ext_->hsa_amd_memory_async_copy_fn = roctracer::hsa_amd_memory_async_copy_interceptor;
       table->amd_ext_->hsa_amd_memory_async_copy_rect_fn = roctracer::hsa_amd_memory_async_copy_rect_interceptor;
 
-      break;
-    }
-    case ACTIVITY_DOMAIN_KFD_API: {
-      roctracer::kfd_support::intercept_KFDApiTable();
       break;
     }
     case ACTIVITY_DOMAIN_HSA_EVT: {

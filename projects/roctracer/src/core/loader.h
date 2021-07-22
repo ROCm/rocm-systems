@@ -231,24 +231,6 @@ class HccApi {
   }
 };
 
-// KFD runtime library loader class
-class KfdApi {
-  public:
-  typedef BaseLoader<KfdApi> Loader;
-
-  typedef bool (RegisterApiCallback_t)(uint32_t op, void* callback, void* arg);
-  typedef bool (RemoveApiCallback_t)(uint32_t op);
-
-  RegisterApiCallback_t* RegisterApiCallback;
-  RemoveApiCallback_t* RemoveApiCallback;
-
-  protected:
-  void init(Loader* loader) {
-    RegisterApiCallback = loader->GetFun<RegisterApiCallback_t>("RegisterApiCallback");
-    RemoveApiCallback = loader->GetFun<RemoveApiCallback_t>("RemoveApiCallback");
-  }
-};
-
 // rocTX runtime library loader class
 #include "inc/roctracer_roctx.h"
 class RocTxApi {
@@ -273,7 +255,6 @@ class RocTxApi {
 
 typedef BaseLoader<RocpApi> RocpLoader;
 typedef BaseLoader<HccApi> HccLoader;
-typedef BaseLoader<KfdApi> KfdLoader;
 typedef BaseLoader<RocTxApi> RocTxLoader;
 
 #if STATIC_BUILD
@@ -294,7 +275,6 @@ typedef HipLoaderShared HipLoader;
   template<> const char* roctracer::RocpLoader::lib_name_ = "librocprofiler64.so"; \
   template<> bool roctracer::RocpLoader::to_load_ = true; \
   template<> const char* roctracer::HccLoader::lib_name_ = "libamdhip64.so"; \
-  template<> const char* roctracer::KfdLoader::lib_name_ = "libkfdwrapper64.so"; \
   template<> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so"; \
   template<> bool roctracer::RocTxLoader::to_load_ = true;
 
