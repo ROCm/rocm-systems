@@ -3389,6 +3389,30 @@ rsmi_status_t
 rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
                         uint64_t *hops, RSMI_IO_LINK_TYPE *type);
 
+/**
+ *  @brief Return P2P availability status between 2 GPUs
+ *
+ *  @details Given a source device index @p dv_ind_src and
+ *  a destination device index @p dv_ind_dst, and a pointer to a
+ *  bool @accessible, this function will write the P2P connection status
+ *  between the device @p dv_ind_src and @p dv_ind_dst to the memory
+ *  pointed to by @p accessible.
+ *
+ *  @param[in] dv_ind_src the source device index
+ *
+ *  @param[in] dv_ind_dst the destination device index
+ *
+ *  @param[inout] accessible A pointer to a bool to which the status for
+ *  the P2P connection availablity should be written.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t
+rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                       bool *accessible);
+
 /** @} */  // end of HWTopo
 
 /*****************************************************************************/

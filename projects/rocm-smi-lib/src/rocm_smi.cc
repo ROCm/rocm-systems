@@ -3525,6 +3525,62 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   CATCH
 }
 
+rsmi_status_t
+rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                       bool *accessible) {
+  TRY
+
+  uint32_t dv_ind = dv_ind_src;
+  GET_DEV_AND_KFDNODE_FROM_INDX
+
+  if (accessible == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  uint32_t node_ind_src, node_ind_dst;
+  // Fetch the source and destination GPU node index
+  if (smi.get_node_index(dv_ind_src, &node_ind_src) ||
+      smi.get_node_index(dv_ind_dst, &node_ind_dst)) {
+    *accessible = false;
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  // If source device is same as destination, return true
+  if (dv_ind_src == dv_ind_dst) {
+    *accessible = true;
+    return RSMI_STATUS_SUCCESS;
+  }
+  std::map<uint32_t, std::shared_ptr<amd::smi::IOLink>> io_link_map_tmp;
+  std::map<uint32_t, std::shared_ptr<amd::smi::IOLink>>::iterator it;
+  // Iterate over P2P links
+  if (DiscoverP2PLinksPerNode(node_ind_src, &io_link_map_tmp) == 0) {
+    for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
+      if(it->first == node_ind_dst) {
+        *accessible = true;
+        return RSMI_STATUS_SUCCESS;
+      }
+    }
+    io_link_map_tmp.clear();
+  } else {
+    *accessible = false;
+    return RSMI_STATUS_FILE_ERROR;
+  }
+  // Iterate over IO links
+  if (DiscoverIOLinksPerNode(node_ind_src, &io_link_map_tmp) == 0) {
+    for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
+      if(it->first == node_ind_dst) {
+        *accessible = true;
+        return RSMI_STATUS_SUCCESS;
+      }
+    }
+  } else {
+    *accessible = false;
+    return RSMI_STATUS_FILE_ERROR;
+  }
+  *accessible = false;
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
 enum iterator_handle_type {
   FUNC_ITER = 0,
   VARIANT_ITER,

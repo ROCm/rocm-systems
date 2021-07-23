@@ -77,10 +77,15 @@ typedef enum _IO_LINK_TYPE {
   IOLINK_TYPE_SIZE           = 0xFFFFFFFF
 } IO_LINK_TYPE;
 
+typedef enum _LINK_DIRECTORY_TYPE {
+  IO_LINK_DIRECTORY          = 0,
+  P2P_LINK_DIRECTORY         = 1
+} LINK_DIRECTORY_TYPE;
+
 class IOLink {
  public:
-    explicit IOLink(uint32_t node_indx, uint32_t link_indx) :
-                    node_indx_(node_indx), link_indx_(link_indx) {}
+    explicit IOLink(uint32_t node_indx, uint32_t link_indx, LINK_DIRECTORY_TYPE link_dir_type) :
+                    node_indx_(node_indx), link_indx_(link_indx), link_dir_type_(link_dir_type) {}
     ~IOLink();
 
     int Initialize();
@@ -92,6 +97,7 @@ class IOLink {
     uint32_t node_from(void) const {return node_from_;}
     uint32_t node_to(void) const {return node_to_;}
     uint64_t weight(void) const {return weight_;}
+    LINK_DIRECTORY_TYPE get_directory_type(void) const {return link_dir_type_;}
 
  private:
     uint32_t node_indx_;
@@ -101,6 +107,7 @@ class IOLink {
     uint32_t node_to_;
     uint64_t weight_;
     std::map<std::string, uint64_t> properties_;
+    LINK_DIRECTORY_TYPE link_dir_type_;
 };
 
 int
@@ -108,8 +115,16 @@ DiscoverIOLinksPerNode(uint32_t node_indx, std::map<uint32_t,
                        std::shared_ptr<IOLink>> *links);
 
 int
+DiscoverP2PLinksPerNode(uint32_t node_indx, std::map<uint32_t,
+                        std::shared_ptr<IOLink>> *links);
+
+int
 DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
                 std::shared_ptr<IOLink>> *links);
+
+int
+DiscoverP2PLinks(std::map<std::pair<uint32_t, uint32_t>,
+                 std::shared_ptr<IOLink>> *links);
 
 }  // namespace smi
 }  // namespace amd

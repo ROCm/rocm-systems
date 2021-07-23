@@ -62,6 +62,7 @@ namespace amd {
 namespace smi {
 
 static const char *kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
+static const char *kKFDLinkPath[] = {"io_links", "p2p_links"};
 
 // IO Link Property strings
 static const char *kIOLinkPropTYPEStr =  "type";
@@ -82,24 +83,31 @@ static bool is_number(const std::string &s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
-static std::string IOLinkPathRoot(uint32_t node_indx) {
-  std::string io_link_path = kKFDNodesPathRoot;
-  io_link_path += '/';
-  io_link_path += std::to_string(node_indx);
-  io_link_path += '/';
-  io_link_path += "io_links";
-  return io_link_path;
+static std::string LinkPathRoot(uint32_t node_indx,
+                                LINK_DIRECTORY_TYPE directory) {
+  std::string link_path_root = kKFDNodesPathRoot;
+  link_path_root += '/';
+  link_path_root += std::to_string(node_indx);
+  link_path_root += '/';
+  if (directory < sizeof(kKFDLinkPath)/sizeof(kKFDLinkPath[0])) {
+    link_path_root += kKFDLinkPath[directory];
+  } else {
+    link_path_root = "";
+  }
+  return link_path_root;
 }
 
-static std::string IOLinkPath(uint32_t node_indx, uint32_t link_indx) {
-  std::string io_link_path = IOLinkPathRoot(node_indx);
-  io_link_path += '/';
-  io_link_path += std::to_string(link_indx);
-  return io_link_path;
+static std::string LinkPath(uint32_t node_indx, uint32_t link_indx,
+                            LINK_DIRECTORY_TYPE directory) {
+  std::string link_path = LinkPathRoot(node_indx, directory);
+  link_path += '/';
+  link_path += std::to_string(link_indx);
+  return link_path;
 }
 
-static int OpenIOLinkProperties(uint32_t node_indx, uint32_t link_indx,
-                                std::ifstream *fs) {
+static int OpenLinkProperties(uint32_t node_indx, uint32_t link_indx,
+                              std::ifstream *fs,
+                              LINK_DIRECTORY_TYPE directory) {
   int ret;
   std::string f_path;
   bool reg_file;
@@ -109,7 +117,7 @@ static int OpenIOLinkProperties(uint32_t node_indx, uint32_t link_indx,
     return EINVAL;
   }
 
-  f_path = IOLinkPath(node_indx, link_indx);
+  f_path = LinkPath(node_indx, link_indx, directory);
   f_path += "/";
   f_path += "properties";
 
@@ -131,8 +139,9 @@ static int OpenIOLinkProperties(uint32_t node_indx, uint32_t link_indx,
   return 0;
 }
 
-static int ReadIOLinkProperties(uint32_t node_indx, uint32_t link_indx,
-                                std::vector<std::string> *retVec) {
+static int ReadLinkProperties(uint32_t node_indx, uint32_t link_indx,
+                              std::vector<std::string> *retVec,
+                              LINK_DIRECTORY_TYPE directory) {
   std::string line;
   int ret;
   std::ifstream fs;
@@ -142,7 +151,7 @@ static int ReadIOLinkProperties(uint32_t node_indx, uint32_t link_indx,
     return EINVAL;
   }
 
-  ret = OpenIOLinkProperties(node_indx, link_indx, &fs);
+  ret = OpenLinkProperties(node_indx, link_indx, &fs, directory);
 
   if (ret) {
     return ret;
@@ -166,8 +175,9 @@ static int ReadIOLinkProperties(uint32_t node_indx, uint32_t link_indx,
   return 0;
 }
 
-int DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
-                    std::shared_ptr<IOLink>> *links) {
+static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>,
+                         std::shared_ptr<IOLink>> *links,
+                         LINK_DIRECTORY_TYPE directory) {
   assert(links != nullptr);
   if (links == nullptr) {
     return EINVAL;
@@ -201,9 +211,9 @@ int DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
     uint32_t node_indx = static_cast<uint32_t>(std::stoi(dentry_kfd->d_name));
     std::shared_ptr<IOLink> link;
     uint32_t link_indx;
-    std::string io_link_path_root = IOLinkPathRoot(node_indx);
+    std::string link_path_root = LinkPathRoot(node_indx, directory);
 
-    auto io_link_dir = opendir(io_link_path_root.c_str());
+    auto io_link_dir = opendir(link_path_root.c_str());
     assert(io_link_dir != nullptr);
 
     auto dentry_io_link = readdir(io_link_dir);
@@ -219,7 +229,8 @@ int DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
       }
 
       link_indx = static_cast<uint32_t>(std::stoi(dentry_io_link->d_name));
-      link = std::shared_ptr<IOLink>(new IOLink(node_indx, link_indx));
+      link = std::shared_ptr<IOLink>(new IOLink(node_indx, link_indx,
+                                                directory));
 
       link->Initialize();
 
@@ -245,8 +256,19 @@ int DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
   return 0;
 }
 
-int DiscoverIOLinksPerNode(uint32_t node_indx, std::map<uint32_t,
-                           std::shared_ptr<IOLink>> *links) {
+int DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
+                    std::shared_ptr<IOLink>> *links) {
+  return DiscoverLinks(links, IO_LINK_DIRECTORY);
+}
+
+int DiscoverP2PLinks(std::map<std::pair<uint32_t, uint32_t>,
+                    std::shared_ptr<IOLink>> *links) {
+  return DiscoverLinks(links, P2P_LINK_DIRECTORY);
+}
+
+static int DiscoverLinksPerNode(uint32_t node_indx, std::map<uint32_t,
+                                std::shared_ptr<IOLink>> *links,
+                                LINK_DIRECTORY_TYPE directory) {
   assert(links != nullptr);
   if (links == nullptr) {
     return EINVAL;
@@ -257,9 +279,9 @@ int DiscoverIOLinksPerNode(uint32_t node_indx, std::map<uint32_t,
 
   std::shared_ptr<IOLink> link;
   uint32_t link_indx;
-  std::string io_link_path_root = IOLinkPathRoot(node_indx);
+  std::string link_path_root = LinkPathRoot(node_indx, directory);
 
-  auto io_link_dir = opendir(io_link_path_root.c_str());
+  auto io_link_dir = opendir(link_path_root.c_str());
   assert(io_link_dir != nullptr);
 
   auto dentry = readdir(io_link_dir);
@@ -275,7 +297,8 @@ int DiscoverIOLinksPerNode(uint32_t node_indx, std::map<uint32_t,
     }
 
     link_indx = static_cast<uint32_t>(std::stoi(dentry->d_name));
-    link = std::shared_ptr<IOLink>(new IOLink(node_indx, link_indx));
+    link = std::shared_ptr<IOLink>(new IOLink(node_indx, link_indx,
+                                              directory));
 
     link->Initialize();
 
@@ -288,6 +311,16 @@ int DiscoverIOLinksPerNode(uint32_t node_indx, std::map<uint32_t,
     return 1;
   }
   return 0;
+}
+
+int DiscoverIOLinksPerNode(uint32_t node_indx, std::map<uint32_t,
+                           std::shared_ptr<IOLink>> *links) {
+  return DiscoverLinksPerNode(node_indx, links, IO_LINK_DIRECTORY);
+}
+
+int DiscoverP2PLinksPerNode(uint32_t node_indx, std::map<uint32_t,
+                            std::shared_ptr<IOLink>> *links) {
+  return DiscoverLinksPerNode(node_indx, links, P2P_LINK_DIRECTORY);
 }
 
 IOLink::~IOLink() {
@@ -303,7 +336,8 @@ int IOLink::ReadProperties(void) {
     return 0;
   }
 
-  ret = ReadIOLinkProperties(node_indx_, link_indx_, &propVec);
+  ret = ReadLinkProperties(node_indx_, link_indx_, &propVec,
+                           link_dir_type_);
 
   if (ret) {
     return ret;
