@@ -265,7 +265,6 @@ def getProcessName(pid):
     try:
         pName = str(subprocess.check_output("ps -p %d -o comm=" % (int(pid)), shell=True))
     except subprocess.CalledProcessError as e:
-        print(e.output)
         pName = 'UNKNOWN'
 
     if pName == None:
