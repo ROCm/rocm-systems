@@ -1845,7 +1845,10 @@ def showPower(deviceList):
     """
     printLogSpacer(' Power Consumption ')
     for device in deviceList:
-        if str(getPower(device)) != '0.0':
+        if checkIfSecondaryDie(device):
+            printLog(device, 'Average Graphics Package Power (W)', "Secondary die")
+            printLog(None, "\t\tPrimary die above shows total (primary + secondary) socket power information", None)
+        elif str(getPower(device)) != '0.0':
             printLog(device, 'Average Graphics Package Power (W)', getPower(device))
         else:
             printErrLog(device, 'Unable to get Average Graphics Package Power Consumption')
