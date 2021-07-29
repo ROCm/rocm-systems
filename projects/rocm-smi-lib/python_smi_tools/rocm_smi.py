@@ -60,6 +60,7 @@ validClockNames = clk_type_names[1:-2]
 validClockNames.append('pcie')
 validClockNames.sort()
 
+
 def driverInitialized():
     """ Returns true if amdgpu is found in the list of initialized modules
     """
@@ -123,6 +124,7 @@ def formatCsv(deviceList):
         # Drop the trailing ',' and replace it with a \n
         outStr = '%s\n' % outStr[0:-1]
     return outStr
+
 
 def formatMatrixToJSON(deviceList, matrix, metricName):
     """ Format symmetric matrix of GPU permutations to become JSON print-ready.
@@ -188,7 +190,7 @@ def getFanSpeed(device):
     if rsmi_ret_ok(ret, device, None, True):
         fm = fanMax.value
     if fl == 0 or fm == 0:
-        return (fl, fm) #  to prevent division by zero crash
+        return (fl, fm)  # to prevent division by zero crash
 
     return (fl, round((float(fl) / float(fm)) * 100, 2))
 
@@ -450,13 +452,12 @@ def printEventList(device, delay, eventList):
     if not rsmi_ret_ok(ret, device):
         printErrLog(device, 'Unable to set event notification mask.')
         return
-    while 1: # Exit condition from user keyboard input of 'q' or 'ctrl + c'
+    while 1:  # Exit condition from user keyboard input of 'q' or 'ctrl + c'
         num_elements = c_uint32(1)
         data = rsmi_evt_notification_data_t(1)
         rocmsmi.rsmi_event_notification_get(delay, byref(num_elements), byref(data))
         if len(data.message) > 0:
-            print2DArray([['\rGPU[%d]:\t' % (device), ctime().split()[3], \
-                           notification_type_names[data.event.value - 1], \
+            print2DArray([['\rGPU[%d]:\t' % (device), ctime().split()[3], notification_type_names[data.event.value - 1],
                            data.message.decode('utf8') + '\r']])
 
 
@@ -521,8 +522,8 @@ def printLogSpacer(displayString=None, fill='='):
         if displayString:
             if len(displayString) % 2:
                 displayString += fill
-            logSpacer = fill * int((appWidth - (len(displayString))) / 2) + displayString + \
-                        fill * int((appWidth - (len(displayString))) / 2)
+            logSpacer = fill * int((appWidth - (len(displayString))) / 2) + displayString + fill * int(
+                (appWidth - (len(displayString))) / 2)
         else:
             logSpacer = fill * appWidth
         print(logSpacer)
@@ -582,6 +583,7 @@ def printTableLog(column_headers, data_matrix, device=None, tableName=None, anch
             print('{:{anc}{width}}'.format(cell, anc=anchor, width=len(column_headers[index])), end=v_delim)
         printEmptyLine()
 
+
 def printTableRow(space, displayString, v_delim=" "):
     """ Print out a line of a matrix table
 
@@ -590,9 +592,10 @@ def printTableRow(space, displayString, v_delim=" "):
     @param v_delim: Boundary String delimiter for the print output
     """
     if space:
-        print(space %(displayString), end=v_delim)
+        print(space % (displayString), end=v_delim)
     else:
-        print(displayString, end =v_delim)
+        print(displayString, end=v_delim)
+
 
 def checkIfSecondaryDie(device):
     """ Checks if GCD(die) is the secondary die in a MCM.
@@ -613,6 +616,7 @@ def checkIfSecondaryDie(device):
     if not (rsmi_ret_ok(ret, None, None, False) and power_cap.value == 0):
         return False
     return True
+
 
 def resetClocks(deviceList):
     """ Reset clocks to default
@@ -799,14 +803,16 @@ def setPowerPlayTableLevel(deviceList, clkType, point, clk, volt, autoRespond):
     confirmOutOfSpecWarning(autoRespond)
     for device in deviceList:
         if clkType == 'sclk':
-            ret = rocmsmi.rsmi_dev_od_clk_info_set(device, rsmi_freq_ind_t(int(point)), int(clk), rsmi_clk_names_dict[clkType])
+            ret = rocmsmi.rsmi_dev_od_clk_info_set(device, rsmi_freq_ind_t(int(point)), int(clk),
+                                                   rsmi_clk_names_dict[clkType])
             if rsmi_ret_ok(ret, device):
                 printLog(device, 'Successfully set voltage point %s to %s(MHz) %s(mV)' % (point, clk, volt), None)
             else:
                 printErrLog(device, 'Unable to set voltage point %s to %s(MHz) %s(mV)' % (point, clk, volt))
                 RETCODE = 1
         elif clkType == 'mclk':
-            ret = rocmsmi.rsmi_dev_od_clk_info_set(device, rsmi_freq_ind_t(int(point)), int(clk), rsmi_clk_names_dict[clkType])
+            ret = rocmsmi.rsmi_dev_od_clk_info_set(device, rsmi_freq_ind_t(int(point)), int(clk),
+                                                   rsmi_clk_names_dict[clkType])
             if rsmi_ret_ok(ret, device):
                 printLog(device, 'Successfully set voltage point %s to %s(MHz) %s(mV)' % (point, clk, volt), None)
             else:
@@ -927,7 +933,7 @@ def setClocks(deviceList, clktype, clk):
                 printErrLog(device, 'Unable to set performance level to manual')
                 RETCODE = 1
                 return
-        if clktype  != 'pcie':
+        if clktype != 'pcie':
             ret = rocmsmi.rsmi_dev_gpu_clk_freq_set(device, rsmi_clk_names_dict[clktype], freq_bitmask)
             if rsmi_ret_ok(ret, device):
                 printLog(device, 'Successfully set %s bitmask to' % (clktype), hex(freq_bitmask))
@@ -1048,7 +1054,7 @@ def setRas(deviceList, rasAction, rasBlock, rasType):
             rasFilePath = path = os.path.join('/sys/kernel/debug/dri', 'card%d' % device, 'device', 'ras_ctrl')
             rasCmd = '%s %s %s' % (rasAction, rasBlock, rasType)
 
-            #writeToSysfs analog to old cli
+            # writeToSysfs analog to old cli
             if not os.path.isfile(rasFilePath):
                 printLog(None, 'Unable to write to sysfs file', None)
                 logging.debug('%s does not exist', rasFilePath)
@@ -1080,7 +1086,7 @@ def setFanSpeed(deviceList, fan):
             sensor_ind = c_uint32(0)
             last_char = str(fan)[-1]
             if last_char == '%':
-                fanLevel = int(str(fan)[:-1])/100 * 255
+                fanLevel = int(str(fan)[:-1]) / 100 * 255
             else:
                 fanLevel = int(str(fan))
             ret = rocmsmi.rsmi_dev_fan_speed_set(device, 0, int(fanLevel))
@@ -1175,7 +1181,8 @@ def setPowerOverDrive(deviceList, value, autoRespond):
                 ret = rocmsmi.rsmi_dev_power_cap_get(device, 0, byref(power_cap))
                 if rsmi_ret_ok(ret, device):
                     if not PRINT_JSON:
-                        printLog(device, 'Successfully reset Power OverDrive to: %sW' % (int(power_cap.value / 1000000)), None)
+                        printLog(device,
+                                 'Successfully reset Power OverDrive to: %sW' % (int(power_cap.value / 1000000)), None)
             else:
                 if not PRINT_JSON:
                     ret = rocmsmi.rsmi_dev_power_cap_get(device, 0, byref(current_power_cap))
@@ -1183,7 +1190,7 @@ def setPowerOverDrive(deviceList, value, autoRespond):
                         printLog(device, 'Successfully set power to: %sW' % (strValue), None)
                     else:
                         printErrLog(device, 'Unable set power to: %sW, current value is %sW' % \
-                        (strValue, int(current_power_cap.value / 1000000)))
+                                    (strValue, int(current_power_cap.value / 1000000)))
         else:
             if value == 0:
                 printErrLog(device, 'Unable to reset Power OverDrive to default')
@@ -1276,7 +1283,8 @@ def showAllConcise(deviceList):
             mem_use = 'N/A'
         else:
             mem_use_pct = '% 3.0f%%' % (100 * (float(memInfo[0]) / float(memInfo[1])))
-        values['card%s' % (str(device))] = [device, temp, avgPwr, sclk, mclk, fan, str(perf).lower(), pwrCap, mem_use_pct, gpu_busy]
+        values['card%s' % (str(device))] = [device, temp, avgPwr, sclk, mclk, fan, str(perf).lower(), pwrCap,
+                                            mem_use_pct, gpu_busy]
         val_widths = {}
     for device in deviceList:
         val_widths[device] = [len(str(val)) + 2 for val in values['card%s' % (str(device))]]
@@ -1286,7 +1294,8 @@ def showAllConcise(deviceList):
             max_widths[col] = max(max_widths[col], val_widths[device][col])
     printLog(None, "".join(word.ljust(max_widths[col]) for col, word in zip(range(len(max_widths)), header)), None)
     for device in deviceList:
-        printLog(None, "".join(str(word).ljust(max_widths[col]) for col,word in zip(range(len(max_widths)),values['card%s' % (str(device))])), None)
+        printLog(None, "".join(str(word).ljust(max_widths[col]) for col, word in
+                               zip(range(len(max_widths)), values['card%s' % (str(device))])), None)
     printLogSpacer()
 
 
@@ -1322,7 +1331,8 @@ def showAllConciseHw(deviceList):
             max_widths[col] = max(max_widths[col], val_widths[device][col])
     printLog(None, "".join(word.ljust(max_widths[col]) for col, word in zip(range(len(max_widths)), header)), None)
     for device in deviceList:
-        printLog(None, "".join(str(word).ljust(max_widths[col]) for col,word in zip(range(len(max_widths)),values['card%s' % (str(device))])), None)
+        printLog(None, "".join(str(word).ljust(max_widths[col]) for col, word in
+                               zip(range(len(max_widths)), values['card%s' % (str(device))])), None)
     printLogSpacer()
 
 
@@ -1350,7 +1360,8 @@ def showClocks(deviceList):
     for device in deviceList:
         for clk_type in sorted(rsmi_clk_names_dict):
             freq_list = []
-            if not os.path.isfile(os.path.join('/sys/class/drm', 'card%d' % (device), 'device', 'pp_dpm_%s' % clk_type)):
+            if not os.path.isfile(
+                    os.path.join('/sys/class/drm', 'card%d' % (device), 'device', 'pp_dpm_%s' % clk_type)):
                 logging.debug('No clock file for %s on card%d' % (clk_type, device))
                 continue
             if rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], None) == 1:
@@ -1414,7 +1425,8 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
 
         else:  # if clk is not defined, will display all current clk
             for clk_type in sorted(rsmi_clk_names_dict):
-                if not os.path.isfile(os.path.join('/sys/class/drm', 'card%d' % (device), 'device', 'pp_dpm_%s' % clk_type)):
+                if not os.path.isfile(
+                        os.path.join('/sys/class/drm', 'card%d' % (device), 'device', 'pp_dpm_%s' % clk_type)):
                     logging.debug('No clock file for %s on card%d' % (clk_type, device))
                     continue
                 if rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], None) == 1:
@@ -1434,7 +1446,8 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                 ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
                 if rsmi_ret_ok(ret, device, 'PCIe', True):
                     current_f = bw.transfer_rate.current
-                    fr = '{:.1f}GT/s x{}'.format(bw.transfer_rate.frequency[current_f] / 1000000000, bw.lanes[current_f])
+                    fr = '{:.1f}GT/s x{}'.format(bw.transfer_rate.frequency[current_f] / 1000000000,
+                                                 bw.lanes[current_f])
                     printLog(device, 'pcie clock level', '{} ({})'.format(current_f, fr))
             else:
                 printErrLog(device, 'PCIe clock is unsupported')
@@ -1464,7 +1477,7 @@ def showCurrentFans(deviceList):
             printLog(device, 'Fan speed (level)', str(fanLevel))
             printLog(device, 'Fan speed (%)', str(fanSpeed))
         else:
-            printLog(device, 'Fan Level', str(fanLevel) + ' (%s%%)' %(str(fanSpeed)))
+            printLog(device, 'Fan Level', str(fanLevel) + ' (%s%%)' % (str(fanSpeed)))
         ret = rocmsmi.rsmi_dev_fan_rpms_get(device, sensor_ind, byref(rpmSpeed))
         if rsmi_ret_ok(ret, device):
             printLog(device, 'Fan RPM', rpmSpeed.value)
@@ -1506,7 +1519,8 @@ def showFwInfo(deviceList, fwType):
             if rsmi_ret_ok(ret, device, fw_name):
                 # The VCN, VCE, UVD, and SOS firmware's value needs to be in hexadecimal
                 if fw_name in ['VCN', 'VCE', 'UVD', 'SOS']:
-                    printLog(device, '%s firmware version' % (fw_name), '\t0x%s' % (str(hex(fw_ver.value))[2:].zfill(8)))
+                    printLog(device, '%s firmware version' % (fw_name),
+                             '\t0x%s' % (str(hex(fw_ver.value))[2:].zfill(8)))
                 # The TA XGMI, TA RAS, and SMC firmware's hex value looks like 0x12345678
                 # However, they are parsed as: int(0x12).int(0x34).int(0x56).int(0x78)
                 # Which results in the following: 12.34.56.78
@@ -1558,7 +1572,8 @@ def showGpusByPid(pidList):
             print(None, 'Unable to get list of KFD PIDs. A kernel update may be needed', None)
     printLogSpacer()
 
-def getCoarseGrainUtil(device, typeName = None):
+
+def getCoarseGrainUtil(device, typeName=None):
     """ Find Coarse Grain Utilization
     If typeName is not given, will return array with of all available sensors,
     where sensor type and value could be addressed like this:
@@ -1578,7 +1593,7 @@ def getCoarseGrainUtil(device, typeName = None):
             utilization_counters = (rsmi_utilization_counter_t * length)()
             utilization_counters[0].type = c_int(i)
         except ValueError:
-            printLog(None,"No such coarse grain counter type")
+            printLog(None, "No such coarse grain counter type")
             return -1
 
     else:
@@ -1610,6 +1625,7 @@ def showGpuUse(deviceList):
             for ut_counter in util_counters:
                 printLog(device, utilization_counter_name[ut_counter.type], ut_counter.val)
     printLogSpacer()
+
 
 def showEnergy(deviceList):
     """ Display amount of energy consumed by device until now
@@ -1876,19 +1892,19 @@ def showPowerPlayTable(deviceList):
             printLog(device, '1: %sMhz' % (int(odvf.curr_mclk_range.upper_bound / 1000000)), None)
             printLog(device, 'OD_VDDC_CURVE:', None)
             for position in range(3):
-                printLog(device, '%d: %sMhz %smV' % (position,\
-                         int(list(odvf.curve.vc_points)[position].frequency / 1000000),\
-                         int(list(odvf.curve.vc_points)[position].voltage)), None)
+                printLog(device, '%d: %sMhz %smV' % (
+                position, int(list(odvf.curve.vc_points)[position].frequency / 1000000),
+                int(list(odvf.curve.vc_points)[position].voltage)), None)
             printLog(device, 'OD_RANGE:', None)
-            printLog(device, 'SCLK:     %sMhz        %sMhz' % (int(odvf.sclk_freq_limits.lower_bound / 1000000),\
-                     int(odvf.sclk_freq_limits.upper_bound / 1000000)), None)
-            printLog(device, 'MCLK:     %sMhz        %sMhz' % (int(odvf.mclk_freq_limits.lower_bound / 1000000),\
-                     int(odvf.mclk_freq_limits.upper_bound / 1000000)), None)
+            printLog(device, 'SCLK:     %sMhz        %sMhz' % (
+            int(odvf.sclk_freq_limits.lower_bound / 1000000), int(odvf.sclk_freq_limits.upper_bound / 1000000)), None)
+            printLog(device, 'MCLK:     %sMhz        %sMhz' % (
+            int(odvf.mclk_freq_limits.lower_bound / 1000000), int(odvf.mclk_freq_limits.upper_bound / 1000000)), None)
             for position in range(3):
-                printLog(device, 'VDDC_CURVE_SCLK[%d]:     %sMhz' % (position,\
-                         int(list(odvf.curve.vc_points)[position].frequency / 1000000)), None)
-                printLog(device, 'VDDC_CURVE_VOLT[%d]:     %smV' % (position,\
-                         int(list(odvf.curve.vc_points)[position].voltage)), None)
+                printLog(device, 'VDDC_CURVE_SCLK[%d]:     %sMhz' % (
+                position, int(list(odvf.curve.vc_points)[position].frequency / 1000000)), None)
+                printLog(device, 'VDDC_CURVE_VOLT[%d]:     %smV' % (
+                position, int(list(odvf.curve.vc_points)[position].voltage)), None)
     printLogSpacer()
 
 
@@ -1933,7 +1949,7 @@ def showProductName(deviceList):
             printLog(device, 'Card SKU', '\t\t' + device_sku)
         else:
             printLog(device, 'Incompatible device.\n' \
-                             'GPU[%s]\t\t: Expected vendor name: Advanced Micro Devices, Inc. [AMD/ATI]\n'\
+                             'GPU[%s]\t\t: Expected vendor name: Advanced Micro Devices, Inc. [AMD/ATI]\n' \
                              'GPU[%s]\t\t: Actual vendor name' % (device, device), vendor.value.decode())
     printLogSpacer()
 
@@ -1984,19 +2000,21 @@ def showRange(deviceList, rangeType):
         ret = rocmsmi.rsmi_dev_od_volt_info_get(device, byref(odvf))
         if rsmi_ret_ok(ret, device, 'od volt'):
             if rangeType == 'sclk':
-                printLog(device, 'Valid sclk range: %sMhz - %sMhz' % (int(odvf.curr_sclk_range.lower_bound / 1000000),\
-                         int(odvf.curr_sclk_range.upper_bound / 1000000)), None)
+                printLog(device, 'Valid sclk range: %sMhz - %sMhz' % (
+                int(odvf.curr_sclk_range.lower_bound / 1000000), int(odvf.curr_sclk_range.upper_bound / 1000000)), None)
             if rangeType == 'mclk':
-                printLog(device, 'Valid mclk range: %sMhz - %sMhz' % (int(odvf.curr_mclk_range.lower_bound / 1000000),\
-                         int(odvf.curr_mclk_range.upper_bound / 1000000)), None)
+                printLog(device, 'Valid mclk range: %sMhz - %sMhz' % (
+                int(odvf.curr_mclk_range.lower_bound / 1000000), int(odvf.curr_mclk_range.upper_bound / 1000000)), None)
             if rangeType == 'voltage':
                 num_regions = c_uint32(odvf.num_regions)
                 regions = (rsmi_freq_volt_region_t * odvf.num_regions)()
                 ret = rocmsmi.rsmi_dev_od_volt_curve_regions_get(device, byref(num_regions), byref(regions))
                 if rsmi_ret_ok(ret, device, 'volt'):
                     for i in range(num_regions.value):
-                        printLog(device, 'Region %d: Valid voltage range: %smV - %smV' % (i, regions[i].volt_range.lower_bound,\
-                             regions[i].volt_range.upper_bound), None)
+                        printLog(device,
+                                 'Region %d: Valid voltage range: %smV - %smV' % (i, regions[i].volt_range.lower_bound,
+                                                                                  regions[i].volt_range.upper_bound),
+                                 None)
                 else:
                     printLog(device, 'Unable to display %s range' % (rangeType), None)
         else:
@@ -2038,7 +2056,8 @@ def showRasInfo(deviceList, rasType):
                         row.append(ec.correctable_err)
                         row.append(ec.uncorrectable_err)
                 data.append(row)
-        printTableLog(['         Block', '     Status  ', 'uncorrectable err', 'correctable err'], data, device, 'RAS INFO')
+        printTableLog(['         Block', '     Status  ', 'uncorrectable err', 'correctable err'], data, device,
+                      'RAS INFO')
         # TODO: Use dynamic spacing for column widths
         printLogSpacer(None, '_')
     printLogSpacer()
@@ -2120,8 +2139,10 @@ class _Getch:
     """
     Get a single character from standard input
     """
+
     def __init__(self):
         import sys, tty
+
     def __call__(self):
         import sys, termios, tty
         fd = sys.stdin.fileno()
@@ -2143,7 +2164,7 @@ def showEvents(deviceList, eventTypes):
     printLogSpacer(' Show Events ')
     printLog(None, 'press \'q\' or \'ctrl + c\' to quit', None)
     eventTypeList = []
-    for event in eventTypes: # Cleaning list from wrong values
+    for event in eventTypes:  # Cleaning list from wrong values
         if event.replace(',', '').upper() in notification_type_names:
             eventTypeList.append(event.replace(',', '').upper())
         else:
@@ -2159,7 +2180,7 @@ def showEvents(deviceList, eventTypes):
     except Exception as e:
         printErrLog(device, 'Unable to start new thread. %s' % (e))
         return
-    while 1: # Exit condition from user keyboard input of 'q' or 'ctrl + c'
+    while 1:  # Exit condition from user keyboard input of 'q' or 'ctrl + c'
         getch = _Getch()
         user_input = getch()
         # Catch user input for q or Ctrl + c
@@ -2212,9 +2233,9 @@ def showVoltageCurve(deviceList):
         ret = rocmsmi.rsmi_dev_od_volt_info_get(device, byref(odvf))
         if rsmi_ret_ok(ret, device, 'od volt'):
             for position in range(3):
-                printLog(device, 'Voltage point %d: %sMhz %smV' % (position,\
-                         int(list(odvf.curve.vc_points)[position].frequency / 1000000),\
-                         int(list(odvf.curve.vc_points)[position].voltage)), None)
+                printLog(device, 'Voltage point %d: %sMhz %smV' % (
+                position, int(list(odvf.curve.vc_points)[position].frequency / 1000000),
+                int(list(odvf.curve.vc_points)[position].voltage)), None)
         else:
             printLog(device, 'Voltage Curve is not supported', None)
     printLogSpacer()
@@ -2404,11 +2425,9 @@ def showNumaTopology(deviceList):
 
         ret = rocmsmi.rsmi_topo_numa_affinity_get(device, byref(numa_numbers))
         if rsmi_ret_ok(ret):
-                printLog(device, "(Topology) Numa Affinity", numa_numbers.value)
+            printLog(device, "(Topology) Numa Affinity", numa_numbers.value)
         else:
             printErrLog(device, 'Cannot read Numa Affinity', None)
-
-
 
 
 def showHwTopology(deviceList):
@@ -2575,14 +2594,15 @@ def padHexValue(value, length):
     """
     # Ensure value entered meets the minimum length and is hexadecimal
     if len(value) > 2 and length > 1 and value[:2].lower() == '0x' \
-    and all(c in '0123456789abcdefABCDEF' for c in value[2:]):
+            and all(c in '0123456789abcdefABCDEF' for c in value[2:]):
         # Pad with zeros after '0x' prefix
         return '0x' + value[2:].zfill(length)
     return value
 
 
 def profileString(profile):
-    dictionary = {1: 'CUSTOM', 2:'VIDEO', 4:'POWER SAVING', 8:'COMPUTE', 16:'VR', 32:'3D FULL SCREEN', 64:'BOOTUP DEFAULT'}
+    dictionary = {1: 'CUSTOM', 2: 'VIDEO', 4: 'POWER SAVING', 8: 'COMPUTE', 16: 'VR', 32: '3D FULL SCREEN',
+                  64: 'BOOTUP DEFAULT'}
     # TODO: We should dynamically generate this to avoid hardcoding
     if str(profile).isnumeric() and int(profile) in dictionary.keys():
         return dictionary.get(int(profile))
@@ -2691,7 +2711,7 @@ def save(deviceList, savefilepath):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='AMD ROCm System Management Interface  |  ROCM-SMI version: %s  |  Kernel version: %s' % (
-        __version__, getVersion(None, rsmi_sw_component_t.RSMI_SW_COMP_DRIVER)),
+            __version__, getVersion(None, rsmi_sw_component_t.RSMI_SW_COMP_DRIVER)),
         formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=90, width=120))
     groupDev = parser.add_argument_group()
     groupDisplayOpt = parser.add_argument_group('Display Options')
@@ -2766,7 +2786,8 @@ if __name__ == '__main__':
     groupDisplay.add_argument('--showtopohops', help='Shows the number of hops between GPUs ', action='store_true')
     groupDisplay.add_argument('--showtopotype', help='Shows the link type between GPUs ', action='store_true')
     groupDisplay.add_argument('--showtoponuma', help='Shows the numa nodes ', action='store_true')
-    groupDisplay.add_argument('--showenergycounter', help='Energy accumulator that stores amount of energy consumed', action='store_true')
+    groupDisplay.add_argument('--showenergycounter', help='Energy accumulator that stores amount of energy consumed',
+                              action='store_true')
 
     groupActionReset.add_argument('-r', '--resetclocks', help='Reset clocks and OverDrive to default',
                                   action='store_true')
@@ -2777,7 +2798,8 @@ if __name__ == '__main__':
                                   action='store_true')
     groupActionReset.add_argument('--resetxgmierr', help='Reset XGMI error count', action='store_true')
     groupAction.add_argument('--resetperfdeterminism', help='Disable performance determinism', action='store_true')
-    groupAction.add_argument('--setclock', help='Set Clock Frequency Level(s) for specified clock (requires manual Perf level)',
+    groupAction.add_argument('--setclock',
+                             help='Set Clock Frequency Level(s) for specified clock (requires manual Perf level)',
                              type=str, metavar='LEVEL', nargs=2)
     groupAction.add_argument('--setsclk', help='Set GPU Clock Frequency Level(s) (requires manual Perf level)',
                              type=int, metavar='LEVEL', nargs='+')
@@ -2806,9 +2828,10 @@ if __name__ == '__main__':
                              metavar='WATTS')
     groupAction.add_argument('--setprofile',
                              help='Specify Power Profile level (#) or a quoted string of CUSTOM Profile attributes "# '
-                                  '# # #..." (requires manual Perf level)')
-    groupAction.add_argument('--setperfdeterminism', help='Set clock frequency limit to get minimal performance variation',
-                             type=int, metavar='SCLK', nargs=1)
+                            '# # #..." (requires manual Perf level)')
+    groupAction.add_argument('--setperfdeterminism',
+                             help='Set clock frequency limit to get minimal performance variation', type=int,
+                             metavar='SCLK', nargs=1)
     groupAction.add_argument('--rasenable', help='Enable RAS for specified block and error type', type=str, nargs=2,
                              metavar=('BLOCK', 'ERRTYPE'))
     groupAction.add_argument('--rasdisable', help='Disable RAS for specified block and error type', type=str, nargs=2,
@@ -2827,8 +2850,7 @@ if __name__ == '__main__':
                                metavar='RESPONSE')
 
     groupActionOutput.add_argument('--loglevel',
-                                   help='How much output will be printed for what program is doing, one of '
-                                        'debug/info/warning/error/critical',
+                                   help='How much output will be printed for what program is doing, one of debug/info/warning/error/critical',
                                    metavar='LEVEL')
     groupActionOutput.add_argument('--json', help='Print output in JSON format', action='store_true')
     groupActionOutput.add_argument('--csv', help='Print output in CSV format', action='store_true')
@@ -2843,11 +2865,11 @@ if __name__ == '__main__':
         numericLogLevel = getattr(logging, args.loglevel.upper(), logging.WARNING)
         logging.getLogger().setLevel(numericLogLevel)
 
-    if args.setsclk or args.setmclk or args.setpcie or args.resetfans or args.setfan or args.setperflevel or \
-            args.load or args.resetclocks or args.setprofile or args.resetprofile or args.setoverdrive or \
-            args.setmemoverdrive or args.setpoweroverdrive or args.resetpoweroverdrive or \
-            args.rasenable or args.rasdisable or args.rasinject or args.gpureset or args.setperfdeterminism or\
-            args.setslevel or args.setmlevel or args.setvc or args.setsrange or args.setmrange or args.setclock:
+    if args.setsclk or args.setmclk or args.setpcie or args.resetfans or args.setfan or args.setperflevel or args.load \
+            or args.resetclocks or args.setprofile or args.resetprofile or args.setoverdrive or args.setmemoverdrive \
+            or args.setpoweroverdrive or args.resetpoweroverdrive or args.rasenable or args.rasdisable or \
+            args.rasinject or args.gpureset or args.setperfdeterminism or args.setslevel or args.setmlevel or \
+            args.setvc or args.setsrange or args.setmrange or args.setclock:
         relaunchAsSudo()
 
     # If there is one or more device specified, use that for all commands, otherwise use a
@@ -3040,9 +3062,11 @@ if __name__ == '__main__':
     if args.setpcie:
         setClocks(deviceList, 'pcie', args.setpcie)
     if args.setslevel:
-        setPowerPlayTableLevel(deviceList, 'sclk', args.setslevel[0], args.setslevel[1], args.setslevel[2], args.autorespond)
+        setPowerPlayTableLevel(deviceList, 'sclk', args.setslevel[0], args.setslevel[1], args.setslevel[2],
+                               args.autorespond)
     if args.setmlevel:
-        setPowerPlayTableLevel(deviceList, 'mclk', args.setmlevel[0], args.setmlevel[1], args.setmlevel[2], args.autorespond)
+        setPowerPlayTableLevel(deviceList, 'mclk', args.setmlevel[0], args.setmlevel[1], args.setmlevel[2],
+                               args.autorespond)
     if args.resetfans:
         resetFans(deviceList)
     if args.setfan:
