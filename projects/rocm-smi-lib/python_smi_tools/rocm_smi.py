@@ -594,6 +594,25 @@ def printTableRow(space, displayString, v_delim=" "):
     else:
         print(displayString, end =v_delim)
 
+def checkIfSecondaryDie(device):
+    """ Checks if GCD(die) is the secondary die in a MCM.
+
+    Secondary dies lack power management features.
+    TODO: switch to more robust way to check for primary/secondary die, when implemented in Kernel and rocm_smi_lib.
+    @param device: The device to check
+    """
+    power_cap = c_uint64()
+    # secondary die can currently be determined by checking if all power1_* (power cap) values are equal to zero.
+    ret = rocmsmi.rsmi_dev_power_cap_get(device, 0, byref(power_cap))
+    if not (rsmi_ret_ok(ret, None, None, False) and power_cap.value == 0):
+        return False
+    ret = rocmsmi.rsmi_dev_power_cap_default_get(device, byref(power_cap))
+    if not (rsmi_ret_ok(ret, None, None, False) and power_cap.value == 0):
+        return False
+    ret = rocmsmi.rsmi_dev_power_ave_get(device, 0, byref(power_cap))
+    if not (rsmi_ret_ok(ret, None, None, False) and power_cap.value == 0):
+        return False
+    return True
 
 def resetClocks(deviceList):
     """ Reset clocks to default
