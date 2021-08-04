@@ -121,14 +121,32 @@ typedef struct {
   uint64_t           firmware_timestamp;
 } rsmi_gpu_metrics_v_1_2;
 
+typedef struct {
+  rsmi_gpu_metrics_t base;
+	/* PMFW attached timestamp (10ns resolution) */
+	uint64_t			firmware_timestamp;
+
+	/* Voltage (mV) */
+	uint16_t			voltage_soc;
+	uint16_t			voltage_gfx;
+	uint16_t			voltage_mem;
+
+	/* Throttle status (ASIC independent) */
+	uint64_t			indep_throttle_status;
+
+} rsmi_gpu_metrics_v_1_3;
+
 static rsmi_status_t GetGPUMetricsFormat1(uint32_t dv_ind,
                                 rsmi_gpu_metrics_t *data, uint8_t content_v) {
   assert(content_v != RSMI_GPU_METRICS_API_CONTENT_VER_1 &&
-         content_v != RSMI_GPU_METRICS_API_CONTENT_VER_2 );
+         content_v != RSMI_GPU_METRICS_API_CONTENT_VER_2 &&
+         content_v != RSMI_GPU_METRICS_API_CONTENT_VER_3 );
   if (content_v == RSMI_GPU_METRICS_API_CONTENT_VER_1 ||
-      content_v == RSMI_GPU_METRICS_API_CONTENT_VER_2 ) {
+      content_v == RSMI_GPU_METRICS_API_CONTENT_VER_2 ||
+      content_v == RSMI_GPU_METRICS_API_CONTENT_VER_3 ) {
     // This function shouldn't be called if content version is
     // RSMI_GPU_METRICS_API_CONTENT_VER_1 or RSMI_GPU_METRICS_API_CONTENT_VER_2
+    // or RSMI_GPU_METRICS_API_CONTENT_VER_3
     return RSMI_STATUS_INVALID_ARGS;
   }
   void *metric_data = nullptr;
@@ -226,6 +244,17 @@ static void map_gpu_metrics_1_2_to_rsmi_gpu_metrics_t(
           gpu_metrics_v_1_2->firmware_timestamp * 10;
 }
 
+static void map_gpu_metrics_1_3_to_rsmi_gpu_metrics_t(
+        const rsmi_gpu_metrics_v_1_3 *gpu_metrics_v_1_3,
+        rsmi_gpu_metrics_t *rsmi_gpu_metrics)
+{
+    memcpy(rsmi_gpu_metrics, &gpu_metrics_v_1_3->base,
+           sizeof(rsmi_gpu_metrics_t));
+    // firmware_timestamp is at 10ns resolution
+    rsmi_gpu_metrics->system_clock_counter =
+          gpu_metrics_v_1_3->firmware_timestamp * 10;
+
+}
 
 rsmi_status_t
 rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *smu) {
@@ -233,6 +262,7 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *smu) {
   DEVICE_MUTEX
   CHK_SUPPORT_NAME_ONLY(smu)
   rsmi_gpu_metrics_v_1_2 smu_v_1_2;
+  rsmi_gpu_metrics_v_1_3 smu_v_1_3;
   rsmi_status_t ret;
 
   if (!dev->gpu_metrics_ver().structure_size) {
@@ -248,6 +278,10 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *smu) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
+  // Initialize the smu fiedls to zero as some of them only valid in
+  // a specific version.
+  *smu = {};
+
   if (dev->gpu_metrics_ver().content_revision ==
                                         RSMI_GPU_METRICS_API_CONTENT_VER_1) {
         ret = GetDevBinaryBlob(amd::smi::kDevGpuMetrics, dv_ind,
@@ -257,6 +291,11 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *smu) {
         ret = GetDevBinaryBlob(amd::smi::kDevGpuMetrics, dv_ind,
                                 sizeof(rsmi_gpu_metrics_v_1_2), &smu_v_1_2);
         map_gpu_metrics_1_2_to_rsmi_gpu_metrics_t(&smu_v_1_2, smu);
+  } else if (dev->gpu_metrics_ver().content_revision ==
+                                        RSMI_GPU_METRICS_API_CONTENT_VER_3) {
+        ret = GetDevBinaryBlob(amd::smi::kDevGpuMetrics, dv_ind,
+                                sizeof(rsmi_gpu_metrics_v_1_3), &smu_v_1_3);
+        map_gpu_metrics_1_3_to_rsmi_gpu_metrics_t(&smu_v_1_3, smu);
   } else {
             ret = GetGPUMetricsFormat1(dv_ind, smu,
                                      dev->gpu_metrics_ver().content_revision);
