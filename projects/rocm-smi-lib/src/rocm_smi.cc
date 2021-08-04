@@ -1852,7 +1852,7 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
 
   ret = get_dev_name_from_file(dv_ind, name, len);
 
-  if (ret) {
+  if (ret || name[0] == '\0') {
     ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_DEVICE);
   }
 
