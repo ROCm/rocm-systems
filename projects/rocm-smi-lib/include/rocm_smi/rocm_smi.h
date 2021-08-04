@@ -835,6 +835,7 @@ struct metrics_table_header_t {
 // existing field sizes are changed.
 #define RSMI_GPU_METRICS_API_CONTENT_VER_1 1
 #define RSMI_GPU_METRICS_API_CONTENT_VER_2 2
+#define RSMI_GPU_METRICS_API_CONTENT_VER_3 3
 
 // This should match NUM_HBM_INSTANCES
 #define RSMI_NUM_HBM_INSTANCES 4
@@ -900,6 +901,19 @@ typedef struct {
   uint32_t       gfx_activity_acc;   // new in v1
   uint32_t       mem_actvity_acc;     // new in v1
   uint16_t       temperature_hbm[RSMI_NUM_HBM_INSTANCES];  // new in v1
+
+  /* PMFW attached timestamp (10ns resolution) */
+  uint64_t       firmware_timestamp;      // added in v1_2
+
+  /* Voltage (mV) */
+  uint16_t       voltage_soc;            // added in v1_3
+  uint16_t       voltage_gfx;            // added in v1_3
+  uint16_t       voltage_mem;            // added in v1_3
+
+  uint16_t       padding1;
+
+  /* Throttle status (ASIC independent) */
+  uint64_t       indep_throttle_status;   // added in v1_3
   /// \endcond
 } rsmi_gpu_metrics_t;
 
@@ -2155,7 +2169,7 @@ rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
  *
  *  @param[inout] utilization_counters Multiple utilization counters can be retreived with a single
  *  call. The caller must allocate enough space to the utilization_counters array. The caller also
- *  needs to set valid RSMI_UTILIZATION_COUNTER_TYPE type for each element of the array. 
+ *  needs to set valid RSMI_UTILIZATION_COUNTER_TYPE type for each element of the array.
  *  ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the provided arguments.
  *
  *  If the function reutrns RSMI_STATUS_SUCCESS, the counter will be set in the value field of
