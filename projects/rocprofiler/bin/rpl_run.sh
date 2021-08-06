@@ -423,7 +423,7 @@ while [ 1 ] ; do
     HIP_TRACE=1
   elif [ "$1" = "--trace-start" ] ; then
     if [ "$2" = "off" ] ; then
-      export ROCP_CTRL_RATE="-1"
+      export ROCP_CTRL_RATE="-1:0:0"
     fi
   elif [ "$1" = "--trace-period" ] ; then
     period_expr="^\([^:]*\):\([^:]*\):\([^:]*\)$"
