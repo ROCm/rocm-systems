@@ -11,8 +11,10 @@ endif()
 
 project(
     hosttrace
-    LANGUAGES CXX)
+    LANGUAGES CXX
+    VERSION   0.0.1)
 
+message(STATUS "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
@@ -135,3 +137,11 @@ include(CTest)
 enable_testing()
 
 add_subdirectory(tests)
+
+#------------------------------------------------------------------------------#
+#
+#                   packaging
+#
+#------------------------------------------------------------------------------#
+
+include(ConfigCPack)
