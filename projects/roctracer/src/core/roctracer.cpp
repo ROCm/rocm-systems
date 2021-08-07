@@ -285,7 +285,7 @@ static thread_local record_pair_stack_t* record_pair_stack = NULL;
 static thread_local activity_correlation_id_t correlation_id_tls = 0;
 typedef std::map<activity_correlation_id_t, activity_correlation_id_t> correlation_id_map_t;
 typedef std::mutex correlation_id_mutex_t;
-correlation_id_map_t* correlation_id_map = NULL;
+static correlation_id_map_t correlation_id_map{};
 correlation_id_mutex_t correlation_id_mutex;
 bool correlation_id_wait = true;
 
@@ -293,17 +293,16 @@ static thread_local std::stack<activity_correlation_id_t> external_id_stack;
 
 static inline void CorrelationIdRegistr(const activity_correlation_id_t& correlation_id) {
   std::lock_guard<correlation_id_mutex_t> lck(correlation_id_mutex);
-  if (correlation_id_map == NULL) correlation_id_map = new correlation_id_map_t;
-  const auto ret = correlation_id_map->insert({correlation_id, correlation_id_tls});
+  const auto ret = correlation_id_map.insert({correlation_id, correlation_id_tls});
   if (ret.second == false) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id is not unique(" << correlation_id << ")");
 
   DEBUG_TRACE("CorrelationIdRegistr id(%lu) id_tls(%lu)\n", correlation_id, correlation_id_tls);
 }
 
 static inline activity_correlation_id_t CorrelationIdLookup(const activity_correlation_id_t& correlation_id) {
-  auto it = correlation_id_map->find(correlation_id);
-  if (correlation_id_wait) while (it == correlation_id_map->end()) it = correlation_id_map->find(correlation_id);
-  if (it == correlation_id_map->end()) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id lookup failed(" << correlation_id << ")");
+  auto it = correlation_id_map.find(correlation_id);
+  if (correlation_id_wait) while (it == correlation_id_map.end()) it = correlation_id_map.find(correlation_id);
+  if (it == correlation_id_map.end()) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id lookup failed(" << correlation_id << ")");
   const activity_correlation_id_t ret_val = it->second;
 
   DEBUG_TRACE("CorrelationIdLookup id(%lu) ret(%lu)\n", correlation_id, ret_val);
