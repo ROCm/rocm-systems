@@ -287,7 +287,6 @@ typedef std::map<activity_correlation_id_t, activity_correlation_id_t> correlati
 typedef std::mutex correlation_id_mutex_t;
 static correlation_id_map_t correlation_id_map{};
 correlation_id_mutex_t correlation_id_mutex;
-bool correlation_id_wait = true;
 
 static thread_local std::stack<activity_correlation_id_t> external_id_stack;
 
@@ -300,10 +299,11 @@ static inline void CorrelationIdRegistr(const activity_correlation_id_t& correla
 }
 
 static inline activity_correlation_id_t CorrelationIdLookup(const activity_correlation_id_t& correlation_id) {
+  std::lock_guard<correlation_id_mutex_t> lck(correlation_id_mutex);
   auto it = correlation_id_map.find(correlation_id);
-  if (correlation_id_wait) while (it == correlation_id_map.end()) it = correlation_id_map.find(correlation_id);
   if (it == correlation_id_map.end()) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id lookup failed(" << correlation_id << ")");
   const activity_correlation_id_t ret_val = it->second;
+  correlation_id_map.erase(it);
 
   DEBUG_TRACE("CorrelationIdLookup id(%lu) ret(%lu)\n", correlation_id, ret_val);
 
@@ -505,6 +505,7 @@ void HCC_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
   roctracer_record_t* record_ptr = reinterpret_cast<roctracer_record_t*>(record);
   record_ptr->domain = ACTIVITY_DOMAIN_HCC_OPS;
   record_ptr->correlation_id = CorrelationIdLookup(record_ptr->correlation_id);
+  if (record_ptr->correlation_id == 0) return;
   pool->Write(*record_ptr);
 
   const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HCC_OPS, record_ptr->op, record_ptr->kind);
@@ -1020,14 +1021,6 @@ static roctracer_status_t roctracer_enable_activity_fun(
       if (roctracer::HccLoader::Instance().Enabled() == false) break;
 
       if (init_phase == true) {
-        if (getenv("ROCP_HCC_CORRID_WAIT") != NULL) {
-          roctracer::correlation_id_wait = true;
-          fprintf(stdout, "roctracer: HCC correlation ID wait enabled\n"); fflush(stdout);
-        }
-        if (getenv("ROCP_HCC_CORRID_NOWAIT") != NULL) {
-          roctracer::correlation_id_wait = false;
-          fprintf(stdout, "roctracer: HCC correlation ID wait disabled\n"); fflush(stdout);
-        }
         roctracer::HccLoader::Instance().InitActivityCallback((void*)roctracer::HCC_ActivityIdCallback,
                                                               (void*)roctracer::HCC_AsyncActivityCallback,
                                                               (void*)pool);
@@ -1235,8 +1228,10 @@ PUBLIC_API void roctracer_start() {
 // Stop API
 PUBLIC_API void roctracer_stop() {
   if (roctracer::set_stopped(1)) {
-    roctracer::cb_journal->foreach(roctracer::cb_dis_functor_t(roctracer_disable_callback_fun));
+    // Must disable the activity first as the spawner checks for the activity being NULL 
+    // to indicate that there is no callback.
     roctracer::act_journal->foreach(roctracer::act_dis_functor_t(roctracer_disable_activity_fun));
+    roctracer::cb_journal->foreach(roctracer::cb_dis_functor_t(roctracer_disable_callback_fun));
     if (roctracer::ext_support::roctracer_stop_cb) roctracer::ext_support::roctracer_stop_cb();
   }
 }
