@@ -215,20 +215,20 @@ fi
 set_rocm_lib_path() {
 
   for ROCM_LIB_PATH in "$ROOT_DIR/lib" "$ROOT_DIR/lib64" ; do
-     if [ -f "$ROCM_LIB_PATH/libhsakmt.so.1" ]; then
+     if [ -d "$ROCM_LIB_PATH" ]; then
         return 0
      fi
   done
 
   #error
-  return 255 #FF
+  return 255
 }
 
 # profiling run method
 OUTPUT_LIST=""
 run() {
   if ! set_rocm_lib_path ; then
-     echo " Fatal could not find libhsakmt "
+     echo " Fatal could not find ROCm lib directory "
      fatal
   fi
   export ROCP_INPUT="$1"
