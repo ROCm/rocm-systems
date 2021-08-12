@@ -117,8 +117,8 @@ def parse_res(infile):
   ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
   # var pattern below matches a variable name and a variable value from a one
   # line text in the format of for example "WRITE_SIZE (0.2500000000)" or
-  # "GRBM_GUI_ACTIVE (27867)"
-  var_pattern = re.compile("^\s*([a-zA-Z0-9_]+)\s+\((\d+(?:\.\d+)?)\)")
+  # "GRBM_GUI_ACTIVE (27867)" or "TA_TA_BUSY[0]"
+  var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
 
   dispatch_number = 0
   for line in inp.readlines():
