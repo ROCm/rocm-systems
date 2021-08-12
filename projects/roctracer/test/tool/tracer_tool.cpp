@@ -374,6 +374,7 @@ roctracer::TraceBuffer<hip_api_trace_entry_t>* hip_api_trace_buffer = NULL;
 static inline bool is_hip_kernel_launch_api(const uint32_t& cid) {
   bool ret =
     (cid == HIP_API_ID_hipLaunchKernel) ||
+    (cid == HIP_API_ID_hipExtLaunchKernel) ||
     (cid == HIP_API_ID_hipLaunchCooperativeKernel) ||
     (cid == HIP_API_ID_hipLaunchCooperativeKernelMultiDevice) ||
     (cid == HIP_API_ID_hipExtLaunchMultiKernelMultiDevice) ||
@@ -436,6 +437,13 @@ void hip_api_callback(
         {
           const void* f = data->args.hipLaunchKernel.function_address;
           hipStream_t stream = data->args.hipLaunchKernel.stream;
+          if (f != NULL) entry->name = strdup(roctracer::HipLoader::Instance().KernelNameRefByPtr(f, stream));
+          break;
+        }
+        case HIP_API_ID_hipExtLaunchKernel:
+        {
+          const void* f = data->args.hipExtLaunchKernel.function_address;
+          hipStream_t stream = data->args.hipExtLaunchKernel.stream;
           if (f != NULL) entry->name = strdup(roctracer::HipLoader::Instance().KernelNameRefByPtr(f, stream));
           break;
         }
