@@ -57,7 +57,7 @@ eval_test() {
 }
 
 # paths to ROC profiler and oher libraries
-export LD_LIBRARY_PATH=$PWD:$PWD/../../lib:/home/jenkins/compute-package/lib
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PWD:$PWD/../../lib:/home/jenkins/compute-package/lib
 
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
