@@ -4,32 +4,16 @@
 #include <map>
 
 namespace roctracer {
-enum {
-  API_CB_MASK = 0x1,
-  ACT_CB_MASK = 0x2
-};
+enum { API_CB_MASK = 0x1, ACT_CB_MASK = 0x2 };
 
 class hip_act_cb_tracker_t {
-  struct info_t {
-    uint32_t mask;
-    info_t() : mask(0) {}
-  };
+  private:
+  std::map<uint32_t, uint32_t> data;
 
-  typedef std::map<uint32_t, info_t>  map_t;
-  map_t dara;
+ public:
+  uint32_t enable_check(uint32_t op, uint32_t mask) { return data[op] |= mask; }
 
-  public:
-  uint32_t enable_check(const uint32_t& op, const uint32_t& mask) {
-    uint32_t& val = dara[op].mask;
-    val |= mask;
-    return val;
-  }
-
-  uint32_t disable_check(const uint32_t& op, const uint32_t& mask) {
-    uint32_t& val = dara[op].mask;
-    val &= ~mask;
-    return val;
-  }
+  uint32_t disable_check(uint32_t op, uint32_t mask) { return data[op] &= ~mask; }
 };  // hip_act_cb_tracker_t
 };  // namespace roctracer
 
