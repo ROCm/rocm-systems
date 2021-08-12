@@ -24,7 +24,7 @@ import sys, os, re
 from sqlitedb import SQLiteDB
 
 pinned = ['hipMallocHost', 'hipHostMalloc', 'hipHostAlloc']
-ondevice = ['hipMalloc', 'hipMallocPitch', 'hipMallocArray', 'hipMalloc3DArray']
+ondevice = ['hipMalloc', 'hipMallocPitch', 'hipMallocArray', 'hipMalloc3DArray', 'hsa_amd_memory_pool_allocate']
 
 mm_table_descr = [
   ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'Direction', 'SrcType', 'DstType', 'Size', 'BW', 'Async'],
@@ -239,6 +239,9 @@ class MemManager:
     # hipMemcpyToArray(hipArray* dst, size_t wOffset, size_t hOffset, const void* src,
     #                        size_t count, hipMemcpyKind kind);
     hip_memcpy_ptrn3 = re.compile(r'\(\s*dst\((.*)\) .* src\((.*)\) count\((\d+)\).*\)')
+    # hipMemcpyToSymbol(const void* symbolName, const void* src, size_t sizeBytes,
+    #    size_t offset = 0, hipMemcpyKind kind)
+    hip_memcpy_ptrn4 = re.compile(r'\(\s*symbol\((.*)\) src\((.*)\) sizeBytes\((\d+)\).*\)')
     # memcopy with kind argument
     hip_memcpy_ptrn_kind = re.compile(r'.* kind\((\d+)\)\s*.*')
     #hsa_amd_memory_async_copy(void* dst, hsa_agent_t dst_agent, const void* src,
@@ -257,6 +260,7 @@ class MemManager:
     # aysnc memcopy
     async_event_ptrn = re.compile(r'Async|async')
     m_basic_hip = hip_memcpy_ptrn.match(args)
+    m_basic_hsa3 = hip_memcpy_ptrn4.match(args)
     m_basic_hsa_prev = hsa_memcpy_ptrn_prev.match(args)
     m_basic_hsa = hsa_memcpy_ptrn.match(args)
     m_basic_hsa2 = hsa_memcpy_ptrn2.match(args)
@@ -299,6 +303,7 @@ class MemManager:
       srcptr_type = self.get_ptr_type(src_agent_ptr)
       size = int(m_basic_hsa_prev.group(5))
       condition_matched = True
+
     if m_basic_hsa:
       dstptr = m_basic_hsa.group(1)
       dst_agent_ptr = m_basic_hsa.group(2)
@@ -320,6 +325,14 @@ class MemManager:
       y = int(m_basic_hsa2.group(4))
       x = int(m_basic_hsa2.group(5))
       size = x*y*z
+      condition_matched = True
+
+    if m_basic_hsa3:
+      dstptr = m_basic_hsa3.group(1)
+      dstptr_type = self.get_ptr_type(dstptr)
+      srcptr = m_basic_hsa3.group(2)
+      srcptr_type = self.get_ptr_type(srcptr)
+      size = int(m_basic_hsa3.group(3))
       condition_matched = True
 
     if m_array:
