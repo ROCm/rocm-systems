@@ -78,6 +78,9 @@ void print_features(rocprofiler_feature_t* feature, uint32_t feature_count) {
         case ROCPROFILER_DATA_KIND_INT64:
           std::cout << std::dec << " result64 (" << p->data.result_int64 << ")" << std::endl;
           break;
+        case ROCPROFILER_DATA_KIND_DOUBLE:
+          std::cout << " result64 (" << p->data.result_double << ")" << std::endl;
+          break;
         case ROCPROFILER_DATA_KIND_BYTES: {
           const char* ptr = reinterpret_cast<const char*>(p->data.result_bytes.ptr);
           uint64_t size = 0;

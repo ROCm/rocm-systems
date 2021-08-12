@@ -124,6 +124,9 @@ void dump_context_entry(context_entry_t* entry, rocprofiler_feature_t* features,
       case ROCPROFILER_DATA_KIND_INT64:
         fprintf(stdout, "= (%lu)\n", p->data.result_int64);
         break;
+      case ROCPROFILER_DATA_KIND_DOUBLE:
+	fprintf(stdout, "= (%lf)\n", p->data.result_double);
+	break;
       default:
         fprintf(stderr, "Undefined data kind(%u)\n", p->data.kind);
         abort();

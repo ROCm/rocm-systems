@@ -55,7 +55,7 @@ inline unsigned align_size(unsigned size, unsigned alignment) {
 template <class Map> class MetricArgs : public xml::args_cache_t {
  public:
   MetricArgs(const Map& map) : map_(map) {}
-  bool Lookup(const std::string& name, uint64_t& result) const {
+  bool Lookup(const std::string& name, double& result) const {
     rocprofiler_feature_t* info = NULL;
     auto it = map_.find(name);
     if (it == map_.end()) EXC_RAISING(HSA_STATUS_ERROR, "var '" << name << "' is not found");
@@ -311,8 +311,8 @@ class Context {
         if (it == info_map_.end())
           EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "', rocprofiler info is not found " << this);
         rocprofiler_feature_t* info = it->second;
-        info->data.result_int64 = expr->Eval(args);
-        info->data.kind = ROCPROFILER_DATA_KIND_INT64;
+        info->data.result_double = expr->Eval(args);
+        info->data.kind = ROCPROFILER_DATA_KIND_DOUBLE;
       }
     }
   }

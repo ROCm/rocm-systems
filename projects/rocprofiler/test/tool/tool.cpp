@@ -351,6 +351,9 @@ void output_results(const context_entry_t* entry, const char* label) {
       case ROCPROFILER_DATA_KIND_INT64:
         fprintf(file, "(%lu)\n", p->data.result_int64);
         break;
+      case ROCPROFILER_DATA_KIND_DOUBLE:
+        fprintf(file, "(%.10lf)\n", p->data.result_double);
+        break;
       default:
         fprintf(stderr, "RPL-tool: undefined data kind(%u)\n", p->data.kind);
         abort();
@@ -358,12 +361,13 @@ void output_results(const context_entry_t* entry, const char* label) {
   }
 }
 
-// Output group intermeadate profiling results, created internally for complex metrics
+// Output group intermediate profiling results, created internally for complex metrics
 void output_group(const context_entry_t* entry, const char* label) {
   const rocprofiler_group_t* group = &(entry->group);
   context_entry_t group_entry = *entry;
   for (unsigned i = 0; i < group->feature_count; ++i) {
-    if (group->features[i]->data.kind == ROCPROFILER_DATA_KIND_INT64) {
+    if (group->features[i]->data.kind == ROCPROFILER_DATA_KIND_INT64 ||
+        group->features[i]->data.kind == ROCPROFILER_DATA_KIND_DOUBLE) {
       group_entry.features = group->features[i];
       group_entry.feature_count = 1;
       output_results(&group_entry, label);

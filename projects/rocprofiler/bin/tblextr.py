@@ -115,7 +115,10 @@ def parse_res(infile):
   beg_pattern = re.compile("^dispatch\[(\d*)\], (.*) kernel-name\(\"([^\"]*)\"\)")
   prop_pattern = re.compile("([\w-]+)\((\w+)\)");
   ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
-  var_pattern = re.compile("^\s*([^\s]*)\s+\((\d*)\)")
+  # var pattern below matches a variable name and a variable value from a one
+  # line text in the format of for example "WRITE_SIZE (0.2500000000)" or
+  # "GRBM_GUI_ACTIVE (27867)"
+  var_pattern = re.compile("^\s*([a-zA-Z0-9_]+)\s+\((\d+(?:\.\d+)?)\)")
 
   dispatch_number = 0
   for line in inp.readlines():

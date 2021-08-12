@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include <iostream>
 #include <sstream>
 #include <string.h>
+#include <float.h>
 
 namespace xml {
 class exception_t : public std::exception {
@@ -45,8 +46,8 @@ class div_zero_exception_t : public exception_t {
   explicit div_zero_exception_t(const std::string& msg) : exception_t("Divide by zero exception " + msg) {}
 };
 
-typedef uint64_t args_t;
-static const args_t ARGS_MAX = UINT64_MAX;
+typedef double args_t;
+static const args_t ARGS_MAX = DBL_MAX;
 typedef std::map<std::string, args_t> args_map_t;
 class Expr;
 
