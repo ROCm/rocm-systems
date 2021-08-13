@@ -901,19 +901,6 @@ typedef struct {
   uint32_t       gfx_activity_acc;   // new in v1
   uint32_t       mem_actvity_acc;     // new in v1
   uint16_t       temperature_hbm[RSMI_NUM_HBM_INSTANCES];  // new in v1
-
-  /* PMFW attached timestamp (10ns resolution) */
-  uint64_t       firmware_timestamp;      // added in v1_2
-
-  /* Voltage (mV) */
-  uint16_t       voltage_soc;            // added in v1_3
-  uint16_t       voltage_gfx;            // added in v1_3
-  uint16_t       voltage_mem;            // added in v1_3
-
-  uint16_t       padding1;
-
-  /* Throttle status (ASIC independent) */
-  uint64_t       indep_throttle_status;   // added in v1_3
   /// \endcond
 } rsmi_gpu_metrics_t;
 

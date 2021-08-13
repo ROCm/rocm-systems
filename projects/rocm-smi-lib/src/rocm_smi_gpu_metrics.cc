@@ -123,16 +123,18 @@ typedef struct {
 
 typedef struct {
   rsmi_gpu_metrics_t base;
-	/* PMFW attached timestamp (10ns resolution) */
-	uint64_t			firmware_timestamp;
+  /* PMFW attached timestamp (10ns resolution) */
+  uint64_t			firmware_timestamp;
 
-	/* Voltage (mV) */
-	uint16_t			voltage_soc;
-	uint16_t			voltage_gfx;
-	uint16_t			voltage_mem;
+  /* Voltage (mV) */
+  uint16_t			voltage_soc;
+  uint16_t			voltage_gfx;
+  uint16_t			voltage_mem;
 
-	/* Throttle status (ASIC independent) */
-	uint64_t			indep_throttle_status;
+  uint16_t          padding1;
+
+  /* Throttle status (ASIC independent) */
+  uint64_t			indep_throttle_status;
 
 } rsmi_gpu_metrics_v_1_3;
 
