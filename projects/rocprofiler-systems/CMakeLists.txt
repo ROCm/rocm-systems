@@ -11,7 +11,7 @@ endif()
 
 project(
     hosttrace
-    LANGUAGES CXX
+    LANGUAGES C CXX
     VERSION   0.0.1)
 
 message(STATUS "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
@@ -41,6 +41,8 @@ hosttrace_activate_clang_tidy()
 #
 #------------------------------------------------------------------------------#
 
+option(HOSTTRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
+
 add_library(hosttrace-library SHARED
     ${CMAKE_CURRENT_LIST_DIR}/src/library.cpp
     ${perfetto_DIR}/sdk/perfetto.cc)
@@ -51,8 +53,13 @@ target_include_directories(hosttrace-library PRIVATE
 target_include_directories(hosttrace-library SYSTEM PRIVATE
     ${perfetto_DIR}/sdk)
 
+target_compile_definitions(hosttrace-library PRIVATE
+    $<IF:$<BOOL:${HOSTTRACE_CUSTOM_DATA_SOURCE}>,CUSTOM_DATA_SOURCE,>)
+    
 target_link_libraries(hosttrace-library PRIVATE
     hosttrace::hosttrace-threading
+    $<BUILD_INTERFACE:timemory::timemory-headers>
+    $<BUILD_INTERFACE:timemory::timemory-gotcha>
     $<IF:$<BOOL:${hosttrace_USE_SANITIZER}>,hosttrace::hosttrace-sanitizer,>)
 
 set_target_properties(hosttrace-library PROPERTIES
@@ -78,6 +85,7 @@ target_include_directories(hosttrace-exe PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/include)
 
 target_link_libraries(hosttrace-exe PRIVATE
+    $<BUILD_INTERFACE:timemory::timemory-headers>
     hosttrace::hosttrace-dyninst
     hosttrace::hosttrace-compile-options)
 
@@ -89,35 +97,6 @@ install(
     TARGETS     hosttrace-exe
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     OPTIONAL)
-
-#------------------------------------------------------------------------------#
-#
-#                   clang-format target
-#
-#------------------------------------------------------------------------------#
-
-find_program(CLANG_FORMAT_EXE
-    NAMES
-        clang-format-12
-        clang-format-11
-        clang-format-10
-        clang-format-9
-        clang-format)
-
-if(CLANG_FORMAT_EXE)
-    file(GLOB sources
-        ${PROJECT_SOURCE_DIR}/src/*.cpp)
-    file(GLOB headers
-        ${PROJECT_SOURCE_DIR}/include/*.hpp)
-    file(GLOB_RECURSE examples
-        ${PROJECT_SOURCE_DIR}/examples/*.cpp
-        ${PROJECT_SOURCE_DIR}/examples/*.hpp)
-    add_custom_target(format
-        ${CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}
-        COMMENT "Running ${CLANG_FORMAT_EXE}...")
-else()
-    message(AUTHOR_WARNING "clang-format could not be found. format build target not available.")
-endif()
 
 #------------------------------------------------------------------------------#
 #

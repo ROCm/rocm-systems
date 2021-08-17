@@ -148,9 +148,19 @@ run(int argc, char** argv)
     free(out_matrix);
 }
 
+#if defined(USE_MPI)
+#    include <mpi.h>
+#endif
+
 int
 main(int argc, char** argv)
 {
+#if defined(USE_MPI)
+    MPI_Init(&argc, &argv);
+#endif
     run(argc, argv);
+#if defined(USE_MPI)
+    MPI_Finalize();
+#endif
     return 0;
 }

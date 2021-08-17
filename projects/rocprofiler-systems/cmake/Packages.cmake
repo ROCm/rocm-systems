@@ -121,12 +121,13 @@ endif()
 #
 #----------------------------------------------------------------------------------------#
 
-set(perfetto_DIR ${PROJECT_BINARY_DIR}/stuff/hosttrace-dyninst/perfetto)
-if(NOT EXISTS "${perfetto_DIR}/.git")
-    find_package(Git REQUIRED)
-    execute_process(COMMAND
-        ${GIT_EXECUTABLE} clone -b v17.0 https://android.googlesource.com/platform/external/perfetto/ ${perfetto_DIR})
-endif()
+set(perfetto_DIR ${PROJECT_SOURCE_DIR}/external/perfetto)
+checkout_git_submodule(
+    RELATIVE_PATH       external/perfetto
+    WORKING_DIRECTORY   ${PROJECT_SOURCE_DIR}
+    REPO_URL            https://android.googlesource.com/platform/external/perfetto
+    REPO_BRANCH         v17.0
+    TEST_FILE           sdk/perfetto.cc)
 
 #----------------------------------------------------------------------------------------#
 #
@@ -157,3 +158,57 @@ macro(HOSTTRACE_ACTIVATE_CLANG_TIDY)
         endif()
     endif()
 endmacro()
+
+#------------------------------------------------------------------------------#
+#
+#                   clang-format target
+#
+#------------------------------------------------------------------------------#
+
+find_program(CLANG_FORMAT_EXE
+    NAMES
+        clang-format-12
+        clang-format-11
+        clang-format-10
+        clang-format-9
+        clang-format)
+
+if(CLANG_FORMAT_EXE)
+    file(GLOB sources
+        ${PROJECT_SOURCE_DIR}/src/*.cpp)
+    file(GLOB headers
+        ${PROJECT_SOURCE_DIR}/include/*.hpp)
+    file(GLOB_RECURSE examples
+        ${PROJECT_SOURCE_DIR}/examples/*.cpp
+        ${PROJECT_SOURCE_DIR}/examples/*.hpp)
+    add_custom_target(format
+        ${CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}
+        COMMENT "Running ${CLANG_FORMAT_EXE}...")
+else()
+    message(AUTHOR_WARNING "clang-format could not be found. format build target not available.")
+endif()
+
+#----------------------------------------------------------------------------------------#
+#   configure submodule
+#----------------------------------------------------------------------------------------#
+
+set(TIMEMORY_INSTALL_HEADERS        OFF CACHE BOOL "Disable timemory header install")
+set(TIMEMORY_INSTALL_CONFIG         OFF CACHE BOOL "Disable timemory cmake configuration install")
+set(TIMEMORY_INSTALL_ALL            OFF CACHE BOOL "Disable install target depending on all target")
+set(TIMEMORY_BUILD_TOOLS            OFF CACHE BOOL "Ensure timem executable is built")
+set(TIMEMORY_BUILD_EXCLUDE_FROM_ALL ON  CACHE BOOL "Set timemory to only build dependencies")
+set(TIMEMORY_QUIET_CONFIG           ON  CACHE BOOL "Make timemory configuration quieter")
+
+# timemory feature settings
+set(TIMEMORY_USE_GOTCHA             ON  CACHE BOOL "Enable GOTCHA support in timemory")
+set(TIMEMORY_USE_PERFETTO           OFF CACHE BOOL "Disable perfetto support in timemory")
+# timemory feature build settings
+set(TIMEMORY_BUILD_GOTCHA           ON  CACHE BOOL "Enable building GOTCHA library from submodule")
+
+checkout_git_submodule(
+    RELATIVE_PATH       external/timemory
+    WORKING_DIRECTORY   ${PROJECT_SOURCE_DIR}
+    REPO_URL            https://github.com/NERSC/timemory.git
+    REPO_BRANCH         develop)
+
+add_subdirectory(external/timemory)

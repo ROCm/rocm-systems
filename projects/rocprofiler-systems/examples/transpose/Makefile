@@ -1,11 +1,13 @@
 CXXFLAGS += -std=c++17 -O3 -Wno-unused-result -g
+LINK_FLAGS :=
+
 all: transpose
 
 debug: CXXFLAGS += -ggdb -g
 debug: transpose
 
 transpose: transpose.cpp
-	hipcc ${CXXFLAGS} -o $@ $^ 
+	hipcc ${CXXFLAGS} -o $@ $^ ${LINK_FLAGS}
 
 .PHONY: clean
 

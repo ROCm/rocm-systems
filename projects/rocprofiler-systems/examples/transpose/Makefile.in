@@ -1,11 +1,13 @@
 CXXFLAGS += -std=c++@CMAKE_CXX_STANDARD@ @transpose_CXX_FLAGS@
+LINKFLAGS := @transpose_LINK_FLAGS@
+
 all: transpose
 
 debug: CXXFLAGS += -ggdb -g
 debug: transpose
 
 transpose: transpose.cpp
-	hipcc ${CXXFLAGS} -o $@ $^
+	hipcc ${CXXFLAGS} -o $@ $^ ${LINKFLAGS}
 
 .PHONY: clean
 
