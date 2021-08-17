@@ -2274,6 +2274,41 @@ def showXgmiErr(deviceList):
     printLogSpacer()
 
 
+def showAccessibleTopology(deviceList):
+    """ Display the HW Topology Information based on link accessibility
+
+    This reads the HW Topology file and displays the matrix for the nodes
+
+    @param deviceList: List of DRM devices (can be a single-item list)
+    """
+    devices_ind = range(len(deviceList))
+    accessible = c_bool()
+    gpu_links_type = [[0 for x in devices_ind] for y in devices_ind]
+    printLogSpacer(' Link accessibility between two GPUs ')
+    for srcdevice in deviceList:
+        for destdevice in deviceList:
+            ret = rocmsmi.rsmi_is_P2P_accessible(srcdevice, destdevice, byref(accessible))
+            if rsmi_ret_ok(ret):
+                gpu_links_type[srcdevice][destdevice] = accessible.value
+            else:
+                printErrLog(srcdevice, 'Cannot read link accessibility: Unsupported on this machine', None)
+    if PRINT_JSON:
+        formatMatrixToJSON(deviceList, gpu_links_type, "(Topology) Link accessibility between DRM devices {} and {}")
+        return
+
+    printTableRow(None, '      ')
+    for row in deviceList:
+        tmp = 'GPU%d' % row
+        printTableRow('%-12s', tmp)
+    printEmptyLine()
+    for gpu1 in deviceList:
+        tmp = 'GPU%d' % gpu1
+        printTableRow('%-6s', tmp)
+        for gpu2 in deviceList:
+            printTableRow('%-12s', gpu_links_type[gpu1][gpu2])
+        printEmptyLine()
+
+
 def showWeightTopology(deviceList):
     """ Display the HW Topology Information based on weights
 
@@ -2782,6 +2817,7 @@ if __name__ == '__main__':
     groupDisplay.add_argument('--showvc', help='Show voltage curve', action='store_true')
     groupDisplay.add_argument('--showxgmierr', help='Show XGMI error information since last read', action='store_true')
     groupDisplay.add_argument('--showtopo', help='Show hardware topology information', action='store_true')
+    groupDisplay.add_argument('--showtopoaccess', help='Shows the link accessibility between GPUs ', action='store_true')
     groupDisplay.add_argument('--showtopoweight', help='Shows the relative weight between GPUs ', action='store_true')
     groupDisplay.add_argument('--showtopohops', help='Shows the number of hops between GPUs ', action='store_true')
     groupDisplay.add_argument('--showtopotype', help='Shows the link type between GPUs ', action='store_true')
@@ -3027,6 +3063,8 @@ if __name__ == '__main__':
         showXgmiErr(deviceList)
     if args.showtopo:
         showHwTopology(deviceList)
+    if args.showtopoaccess:
+        showAccessibleTopology(deviceList)
     if args.showtopoweight:
         showWeightTopology(deviceList)
     if args.showtopohops:
