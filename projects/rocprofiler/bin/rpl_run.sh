@@ -36,10 +36,6 @@ TLIB_PATH=$PKG_DIR/tool
 TTLIB_PATH=$TT_DIR/tool
 ROCM_LIB_PATH=$ROOT_DIR/lib
 
-GFX=`/opt/rocm/bin/rocm_agent_enumerator | tail -1`
-
-SPM_COUNTERS_FILE="spm_counters.txt"
-
 if [ -z "$ROCP_PYTHON_VERSION" ] ; then
   ROCP_PYTHON_VERSION=python3
 fi
@@ -562,10 +558,6 @@ for name in $input_list; do
     break
   fi
 done
-
-if [ -e "$SPM_COUNTERS_FILE" ] ; then
-  $ROCP_PYTHON_VERSION $BIN_DIR/spmltgen.py $GFX -f $SPM_COUNTERS_FILE
-fi
 
 if [ -n "$csv_output" ] ; then
   merge_output $OUTPUT_LIST
