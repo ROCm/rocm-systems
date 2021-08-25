@@ -221,7 +221,10 @@ hosttrace_init_perfetto()
     perfetto::TraceConfig                   cfg{};
     perfetto::protos::gen::TrackEventConfig track_event_cfg{};
 
-    cfg.add_buffers()->set_size_kb(buffer_size);
+    auto *buffer_config = cfg.add_buffers();
+    buffer_config->set_size_kb(buffer_size);
+    buffer_config->set_fill_policy(perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD);
+
     auto* ds_cfg = cfg.add_data_sources()->mutable_config();
     ds_cfg->set_name("track_event");
     ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
