@@ -265,13 +265,22 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     endif()
 endif ()
 
+# use the target_include_directories() command to specify the include directories for the target
+target_include_directories(${BOOTSTRAP_LIB}
+                           PUBLIC
+                           "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+                           "$<INSTALL_INTERFACE:${RDC_CLIENT_INSTALL_PREFIX}/rdc/include>"
+)
+
 ## Add the install directives for the runtime library.
 if(BUILD_STANDALONE)
     install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB}
+            EXPORT rdcTargets
             LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
                                             COMPONENT ${CLIENT_COMPONENT})
 else()
     install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB}
+            EXPORT rdcTargets
             LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
                                             COMPONENT ${CLIENT_COMPONENT})
 endif()
