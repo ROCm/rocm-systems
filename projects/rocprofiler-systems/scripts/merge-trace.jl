@@ -26,7 +26,12 @@ for trace in trace_files
     todo = JSON.parsefile(f)
     out["traceEvents"] = vcat(
         out["traceEvents"],
-        todo["traceEvents"])
+        get(todo, "traceEvents", [])
+    )
+    out["systemTraceEvents"] = (*)(
+        get(out, "systemTraceEvents", ""),
+        get(todo, "systemTraceEvents", "")
+    )
 end
 
 output_file = replace("$(string(now())).json", ":" => "-")
