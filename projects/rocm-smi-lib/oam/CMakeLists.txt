@@ -91,8 +91,16 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     endif()
 endif ()
 
+# use the target_include_directories() command to specify the include directories for the target
+target_include_directories(${OAM_TARGET}
+                           PUBLIC
+                           "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+                           "$<INSTALL_INTERFACE:{OAM_NAME}/include>")
+
+
 ## Add the install directives for the runtime library.
 install(TARGETS ${OAM_TARGET}
+          EXPORT rocm_smiTargets
           LIBRARY DESTINATION ${OAM_NAME}/lib
           ARCHIVE DESTINATION ${OAM_NAME}/lib
           COMPONENT ${OAM_COMPONENT})

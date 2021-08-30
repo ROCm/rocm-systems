@@ -80,6 +80,14 @@ target_link_libraries(${ROCM_SMI_TARGET} pthread rt)
 target_include_directories(${ROCM_SMI_TARGET} PRIVATE
           ${CMAKE_CURRENT_SOURCE_DIR} ${COMMON_PROJ_ROOT}/common/shared_mutex)
 
+# use the target_include_directories() command to specify the include directories for the target
+target_include_directories(${ROCM_SMI_TARGET}
+                           PUBLIC
+                           "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+                           "$<INSTALL_INTERFACE:${ROCM_SMI}/include>"
+)
+
+
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY
              SOVERSION "${VERSION_MAJOR}")
@@ -113,6 +121,7 @@ if(${BUILD_SHARED_LIBS})
 endif()
 ## Add the install directives for the runtime library.
 install(TARGETS ${ROCM_SMI_TARGET}
+          EXPORT rocm_smiTargets
           LIBRARY DESTINATION ${ROCM_SMI}/lib
           ARCHIVE DESTINATION ${ROCM_SMI}/lib
           COMPONENT ${ROCM_SMI_COMPONENT})
