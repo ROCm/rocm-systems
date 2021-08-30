@@ -206,7 +206,7 @@ set(CLIENT_COMPONENT "client")
 if(BUILD_STANDALONE)
   install(DIRECTORY ${GRPC_ROOT}/lib
                 USE_SOURCE_PERMISSIONS
-                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc
+                DESTINATION {RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc
                 COMPONENT ${SERVER_COMPONENT})
 # Also include dev setup for people do not want to build grpc
   install(DIRECTORY ${GRPC_ROOT}/bin
@@ -237,6 +237,42 @@ endif()
 # Folders for both standalone and embedded
 add_subdirectory("rdc_libs")
 add_subdirectory("example")
+
+# Create cmake target
+# Add all targets to the build-tree export set
+export(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB}
+  FILE "${PROJECT_BINARY_DIR}/rdc_libs.cmake")
+
+# Export the package for use from the build-tree
+# (this registers the build-tree with a global CMake-registry)
+export(PACKAGE rdc)
+# Create the rdc-config.cmake and rdc-config-version files
+# ... for the build tree
+set(CONF_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}" "${PROJECT_BINARY_DIR}")
+set(CONF_LIB_DIR  "${PROJECT_BINARY_DIR}")
+set(CONF_LIBS "librdc_bootstrap.so")
+configure_file(rdc-config.cmake.in
+  "${PROJECT_BINARY_DIR}/rdc-config.cmake" @ONLY)
+# ... for the install tree
+set(CONF_INCLUDE_DIRS "${CMAKE_INSTALL_PREFIX}${RDC_CLIENT_INSTALL_PREFIX}/rdc/include")
+set(CONF_LIB_DIR  "${CMAKE_INSTALL_PREFIX}${RDC_CLIENT_INSTALL_PREFIX}/rdc/lib")
+set(CONF_LIBS "librdc_bootstrap.so")
+
+configure_file(rdc-config.cmake.in
+  "${PROJECT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/rdc-config.cmake" @ONLY)
+# ... for both
+configure_file(rdc-config-version.cmake.in
+  "${PROJECT_BINARY_DIR}/rdc-config-version.cmake" @ONLY)
+# Install the rdc-config.cmake and rdc-config-version.cmake
+install(FILES
+  "${PROJECT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/rdc-config.cmake"
+  "${PROJECT_BINARY_DIR}/rdc-config-version.cmake"
+  DESTINATION "${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib/cmake" COMPONENT dev)
+# Install the export set for use with the install-tree
+install(EXPORT rdcTargets DESTINATION
+  "${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib/cmake" COMPONENT dev)
+
+
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/python_binding
              DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}
                                          COMPONENT ${CLIENT_COMPONENT})
