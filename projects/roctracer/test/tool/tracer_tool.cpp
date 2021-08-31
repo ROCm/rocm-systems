@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include <unistd.h>  /* usleep */
 
 #include <roctracer_ext.h>
+#include "src/util/exception.h"
 #include <roctracer_roctx.h>
 #include <roctracer_hsa.h>
 #include <roctracer_hip.h>
@@ -915,11 +916,11 @@ void tool_load() {
     uint32_t ctrl_len = 0;
     uint32_t ctrl_rate = 0;
 
-    sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate);
-
+    if (sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate) != 3) {
+      EXC_RAISING(ROCTRACER_STATUS_ERROR, "Invalid ROCP_CTRL_RATE var(" << ctrl_str << "), expected ctrl_delay:ctrl_len:ctrl_rate");
+    }
     if (ctrl_len > ctrl_rate) {
-      fprintf(stderr, "ROCTracer: control length value (%u) > rate value (%u)\n", ctrl_len, ctrl_rate);
-      abort();
+      EXC_RAISING(ROCTRACER_STATUS_ERROR, "Control length value " << ctrl_len << " > rate value " << ctrl_rate);
     }
     control_dist_us = ctrl_rate - ctrl_len;
     control_len_us = ctrl_len;

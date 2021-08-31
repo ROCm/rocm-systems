@@ -82,7 +82,7 @@ typedef std::stack<std::string> message_stack_t;
 typedef std::map<uint32_t, message_stack_t*> thread_map_t;
 typedef std::mutex map_mutex_t;
 map_mutex_t map_mutex;
-thread_map_t* thread_map = NULL;
+thread_map_t thread_map;
 static thread_local message_stack_t* message_stack = NULL;
 
 roctx_status_t GetExcStatus(const std::exception& e) {
@@ -95,8 +95,7 @@ void thread_data_init() {
   const auto tid = GetTid();
 
   std::lock_guard<map_mutex_t> lck(map_mutex);
-  if (thread_map == NULL) thread_map = new thread_map_t;
-  (*thread_map)[tid] = message_stack;
+  thread_map[tid] = message_stack;
 }
 
 // callbacks table
@@ -194,7 +193,7 @@ PUBLIC_API void roctxRangeStop(roctx_range_id_t rangeId) {
 }
 
 PUBLIC_API void RangeStackIterate(roctx_range_iterate_cb_t callback, void* arg) {
-  for (const auto& entry : *roctx::thread_map) {
+  for (const auto& entry : roctx::thread_map) {
     const auto tid = entry.first;
     for (roctx::message_stack_t stack = *(entry.second); !stack.empty(); stack.pop()){
       std::string message = stack.top();
