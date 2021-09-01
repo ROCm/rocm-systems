@@ -331,7 +331,10 @@ class PmcProfile : public Profile {
   hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) {
     profile_.command_buffer.ptr =
       rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
-    profile_.output_buffer.ptr = rsrc->AllocateSysMemory(agent_info_, profile_.output_buffer.size);
+    // Allocate profile output buffer from kernarg memory pool since kernarg
+    // memory buffer is uncached. So when GPU copies performance counter values
+    // to this buffer they are guaranteed to be visible to CPU.
+    profile_.output_buffer.ptr = rsrc->AllocateKernArgMemory(agent_info_, profile_.output_buffer.size);
     return (profile_.command_buffer.ptr && profile_.output_buffer.ptr) ? HSA_STATUS_SUCCESS
                                                                        : HSA_STATUS_ERROR;
   }
