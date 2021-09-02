@@ -135,7 +135,7 @@ In a separate window run:
 ```console
 pkill traced
 traced --background
-perfetto --out ./htrace.out --txt -c $HTRACE/roctrace.cfg
+perfetto --out ./htrace.out --txt -c ${HOSTTRACE_ROOT}/share/roctrace.cfg
 ```
 
 then in the window running the application, configure the hosttrace instrumentation to use the system backend:
