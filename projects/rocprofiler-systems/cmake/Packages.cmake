@@ -204,6 +204,8 @@ set(TIMEMORY_USE_GOTCHA             ON  CACHE BOOL "Enable GOTCHA support in tim
 set(TIMEMORY_USE_PERFETTO           OFF CACHE BOOL "Disable perfetto support in timemory")
 # timemory feature build settings
 set(TIMEMORY_BUILD_GOTCHA           ON  CACHE BOOL "Enable building GOTCHA library from submodule")
+# timemory build settings
+set(TIMEMORY_TLS_MODEL "global-dynamic" CACHE STRING "Thread-local static model" FORCE)
 
 checkout_git_submodule(
     RELATIVE_PATH       external/timemory
@@ -211,4 +213,19 @@ checkout_git_submodule(
     REPO_URL            https://github.com/NERSC/timemory.git
     REPO_BRANCH         develop)
 
+hosttrace_save_variables(BUILD_CONFIG
+    BUILD_SHARED_LIBS
+    BUILD_STATIC_LIBS
+    CMAKE_POSITION_INDEPENDENT_CODE)
+
+# ensure timemory builds PIC static libs so that we don't have to install timemory shared lib
+set(BUILD_SHARED_LIBS ON)
+set(BUILD_STATIC_LIBS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 add_subdirectory(external/timemory)
+
+hosttrace_restore_variables(BUILD_CONFIG
+    BUILD_SHARED_LIBS
+    BUILD_STATIC_LIBS
+    CMAKE_POSITION_INDEPENDENT_CODE)

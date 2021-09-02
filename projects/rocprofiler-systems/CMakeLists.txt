@@ -29,6 +29,7 @@ include(BuildSettings)      # compiler flags
 set(CMAKE_CXX_STANDARD 17 CACHE STRING "CXX language standard")
 add_option(CMAKE_CXX_STANDARD_REQUIRED "Require C++ language standard" ON)
 add_option(CMAKE_CXX_EXTENSIONS "Compiler specific language extensions" OFF)
+add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH "Enable rpath to linked libraries" ON)
 add_option(HOSTTRACE_USE_CLANG_TIDY "Enable clang-tidy" OFF)
 
 include(Packages)           # finds third-party libraries
@@ -45,6 +46,8 @@ option(HOSTTRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
 
 add_library(hosttrace-library SHARED
     ${CMAKE_CURRENT_LIST_DIR}/src/library.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/libmisc.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library.hpp
     ${perfetto_DIR}/sdk/perfetto.cc)
 
 target_include_directories(hosttrace-library PRIVATE
@@ -55,15 +58,23 @@ target_include_directories(hosttrace-library SYSTEM PRIVATE
 
 target_compile_definitions(hosttrace-library PRIVATE
     $<IF:$<BOOL:${HOSTTRACE_CUSTOM_DATA_SOURCE}>,CUSTOM_DATA_SOURCE,>)
-    
+
 target_link_libraries(hosttrace-library PRIVATE
     hosttrace::hosttrace-threading
     $<BUILD_INTERFACE:timemory::timemory-headers>
     $<BUILD_INTERFACE:timemory::timemory-gotcha>
+    $<BUILD_INTERFACE:timemory::timemory-cxx-shared>
+    $<BUILD_INTERFACE:timemory::timemory-threading>
+    $<BUILD_INTERFACE:timemory::timemory-compile-options>
     $<IF:$<BOOL:${hosttrace_USE_SANITIZER}>,hosttrace::hosttrace-sanitizer,>)
 
+if(DYNINST_API_RT)
+    get_filename_component(DYNINST_API_RT_DIR "${DYNINST_API_RT}" DIRECTORY)
+endif()
+
 set_target_properties(hosttrace-library PROPERTIES
-    OUTPUT_NAME hosttrace)
+    OUTPUT_NAME     hosttrace
+    INSTALL_RPATH   "\$ORIGIN:${DYNINST_API_RT_DIR}:${CMAKE_INSTALL_RPATH}")
 
 install(
     TARGETS     hosttrace-library
@@ -87,7 +98,8 @@ target_include_directories(hosttrace-exe PRIVATE
 target_link_libraries(hosttrace-exe PRIVATE
     $<BUILD_INTERFACE:timemory::timemory-headers>
     hosttrace::hosttrace-dyninst
-    hosttrace::hosttrace-compile-options)
+    hosttrace::hosttrace-compile-options
+    $<IF:$<BOOL:${hosttrace_USE_SANITIZER}>,hosttrace::hosttrace-sanitizer,>)
 
 set_target_properties(hosttrace-exe PROPERTIES
     OUTPUT_NAME                 hosttrace

@@ -140,24 +140,25 @@ static int  verbose_level = tim::get_env<int>("TIMEMORY_RUN_VERBOSE", 0);
 //  string settings
 //
 static string_t main_fname         = "main";
-static string_t argv0              = "";
-static string_t cmdv0              = "";
+static string_t argv0              = {};
+static string_t cmdv0              = {};
 static string_t default_components = "wall_clock";
-static string_t prefer_library     = "";
+static string_t prefer_library     = {};
 //
 //  global variables
 //
-static patch_pointer_t bpatch;
-static call_expr_t*    initialize_expr = nullptr;
-static call_expr_t*    terminate_expr  = nullptr;
-static snippet_vec_t   init_names;
-static snippet_vec_t   fini_names;
-static fmodset_t       available_module_functions;
-static fmodset_t       instrumented_module_functions;
-static regexvec_t      func_include;
-static regexvec_t      func_exclude;
-static regexvec_t      file_include;
-static regexvec_t      file_exclude;
+static patch_pointer_t bpatch                        = {};
+static call_expr_t*    initialize_expr               = nullptr;
+static call_expr_t*    terminate_expr                = nullptr;
+static snippet_vec_t   init_names                    = {};
+static snippet_vec_t   fini_names                    = {};
+static fmodset_t       available_module_functions    = {};
+static fmodset_t       instrumented_module_functions = {};
+static fmodset_t       overlapping_module_functions  = {};
+static regexvec_t      func_include                  = {};
+static regexvec_t      func_exclude                  = {};
+static regexvec_t      file_include                  = {};
+static regexvec_t      file_exclude                  = {};
 static auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 //
 //======================================================================================//
@@ -220,17 +221,6 @@ void
 error_func_fake(error_level_t level, int num, const char* const* params);
 
 bool
-find_func_or_calls(std::vector<const char*> names, bpvector_t<point_t*>& points,
-                   image_t* appImage, procedure_loc_t loc = BPatch_locEntry);
-
-bool
-find_func_or_calls(const char* name, bpvector_t<point_t*>& points, image_t* image,
-                   procedure_loc_t loc = BPatch_locEntry);
-
-bool
-load_dependent_libraries(address_space_t* bedit, char* bindings);
-
-bool
 c_stdlib_module_constraint(const string_t& file);
 
 bool
@@ -283,10 +273,10 @@ struct function_signature
     location_t       m_row       = { 0, 0 };
     location_t       m_col       = { 0, 0 };
     string_t         m_return    = "void";
-    string_t         m_name      = "";
+    string_t         m_name      = {};
     string_t         m_params    = "()";
-    string_t         m_file      = "";
-    mutable string_t m_signature = "";
+    string_t         m_file      = {};
+    mutable string_t m_signature = {};
 
     TIMEMORY_DEFAULT_OBJECT(function_signature)
 
@@ -360,7 +350,10 @@ struct function_signature
 //
 struct module_function
 {
-    using width_t = std::array<size_t, 3>;
+    using width_t   = std::array<size_t, 3>;
+    using address_t = Dyninst::Address;
+
+    static constexpr size_t absolute_max_width = 80;
 
     static auto& get_width()
     {
@@ -399,6 +392,13 @@ struct module_function
         module    = modname;
         function  = fname;
         signature = get_func_file_line_info(mod, proc);
+        assert(proc->isInstrumentable() == true);
+        std::pair<address_t, address_t> _range{};
+        if(proc->getAddressRange(_range.first, _range.second))
+            address_range = _range.second - _range.first;
+        auto _instructions = proc->findPoint(BPatch_locInstruction);
+        if(_instructions)
+            instr_count = _instructions->size();
     }
 
     friend bool operator<(const module_function& lhs, const module_function& rhs)
@@ -410,56 +410,85 @@ struct module_function
                    : (lhs.module < rhs.module);
     }
 
+    static void write_header(std::ostream& os)
+    {
+        auto w0 = std::min<size_t>(get_width()[0], absolute_max_width);
+        auto w1 = std::min<size_t>(get_width()[1], absolute_max_width);
+        auto w2 = std::min<size_t>(get_width()[2], absolute_max_width);
+
+        std::stringstream ss;
+        ss << std::setw(14) << "AddressRange"
+           << " " << std::setw(14) << "InstrCount"
+           << "  " << std::setw(w0 + 8) << std::left << "Module"
+           << " " << std::setw(w1 + 8) << std::left << "Function"
+           << " " << std::setw(w2 + 8) << std::left << "FunctionSignature"
+           << "\n";
+        os << ss.str();
+    }
+
     friend std::ostream& operator<<(std::ostream& os, const module_function& rhs)
     {
         std::stringstream ss;
 
-        static size_t absolute_max = 80;
-        auto          w0           = std::min<size_t>(get_width()[0], absolute_max);
-        auto          w1           = std::min<size_t>(get_width()[1], absolute_max);
-        auto          w2           = std::min<size_t>(get_width()[2], absolute_max);
+        auto w0 = std::min<size_t>(get_width()[0], absolute_max_width);
+        auto w1 = std::min<size_t>(get_width()[1], absolute_max_width);
+        auto w2 = std::min<size_t>(get_width()[2], absolute_max_width);
 
         auto _get_str = [](const std::string& _inc) {
-            if(_inc.length() > absolute_max)
-                return _inc.substr(0, absolute_max - 3) + "...";
+            if(_inc.length() > absolute_max_width)
+                return _inc.substr(0, absolute_max_width - 3) + "...";
             return _inc;
         };
 
-        ss << std::setw(w0 + 8) << std::left << _get_str(rhs.module) << " "
+        // clang-format off
+        ss << std::setw(14) << rhs.address_range << " "
+           << std::setw(14) << rhs.instr_count << "  "
+           << std::setw(w0 + 8) << std::left << _get_str(rhs.module) << " "
            << std::setw(w1 + 8) << std::left << _get_str(rhs.function) << " "
            << std::setw(w2 + 8) << std::left << _get_str(rhs.signature.get());
+        // clang-format on
+
         os << ss.str();
         return os;
     }
 
-    string_t           module   = "";
-    string_t           function = "";
+    size_t             address_range = 0;
+    size_t             instr_count   = 0;
+    string_t           module        = {};
+    string_t           function      = {};
     function_signature signature;
 };
 //
 //======================================================================================//
 //
 static inline void
-dump_info(const string_t& _oname, const fmodset_t& _data, int level)
+dump_info(std::ostream& _os, const fmodset_t& _data)
 {
-    if(!debug_print && verbose_level < level)
-        return;
-
     module_function::reset_width();
     for(const auto& itr : _data)
         module_function::update_width(itr);
 
+    module_function::write_header(_os);
+    for(const auto& itr : _data)
+        _os << itr << '\n';
+
+    module_function::reset_width();
+}
+//
+static inline void
+dump_info(const string_t& _oname, const fmodset_t& _data, int _level)
+{
+    if(!debug_print && verbose_level < _level)
+        return;
+
     std::ofstream ofs(_oname);
     if(ofs)
     {
-        verbprintf(level, "Dumping '%s'... ", _oname.c_str());
-        for(const auto& itr : _data)
-            ofs << itr << '\n';
-        verbprintf(level, "Done\n");
+        verbprintf(_level, "Dumping '%s'... ", _oname.c_str());
+        dump_info(ofs, _data);
+        verbprintf(_level, "Done\n");
     }
     ofs.close();
-
-    module_function::reset_width();
 }
 //
 //======================================================================================//
@@ -554,7 +583,7 @@ private:
 //
 static inline address_space_t*
 hosttrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
-                            bool _rewrite, int _pid = -1, string_t _name = "")
+                            bool _rewrite, int _pid = -1, string_t _name = {})
 {
     address_space_t* mutatee = nullptr;
 

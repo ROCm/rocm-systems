@@ -4,3 +4,4 @@ project(hosttrace-dyninst-examples
     LANGUAGES CXX)
 
 add_subdirectory(transpose)
+add_subdirectory(parallel-overhead)
