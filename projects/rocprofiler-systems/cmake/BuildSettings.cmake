@@ -12,16 +12,16 @@ include(Compilers)
 include(FindPackageHandleStandardArgs)
 include(MacroUtilities)
 
-option(hosttrace_BUILD_DEVELOPER "Extra build flags for development like -Werror" OFF)
-option(hosttrace_BUILD_EXTRA_OPTIMIZATIONS "Extra optimization flags" OFF)
-option(hosttrace_BUILD_LTO "Build with link-time optimization" OFF)
-option(hosttrace_USE_COMPILE_TIMING "" OFF)
-option(hosttrace_USE_COVERAGE "" OFF)
-option(hosttrace_USE_SANITIZER "" OFF)
+option(HOSTTRACE_BUILD_DEVELOPER "Extra build flags for development like -Werror" OFF)
+option(HOSTTRACE_BUILD_EXTRA_OPTIMIZATIONS "Extra optimization flags" OFF)
+option(HOSTTRACE_BUILD_LTO "Build with link-time optimization" OFF)
+option(HOSTTRACE_USE_COMPILE_TIMING "" OFF)
+option(HOSTTRACE_USE_COVERAGE "" OFF)
+option(HOSTTRACE_USE_SANITIZER "" OFF)
 
 target_compile_definitions(hosttrace-compile-options INTERFACE $<$<CONFIG:DEBUG>:DEBUG>)
 
-set(hosttrace_SANITIZER_TYPE "leak" CACHE STRING "Sanitizer type")
+set(HOSTTRACE_SANITIZER_TYPE "leak" CACHE STRING "Sanitizer type")
 
 #----------------------------------------------------------------------------------------#
 #   dynamic linking and runtime libraries
@@ -108,7 +108,7 @@ endif()
 # non-debug optimizations
 #
 add_interface_library(hosttrace-compile-extra "Extra optimization flags")
-if(NOT hosttrace_USE_COVERAGE)
+if(NOT HOSTTRACE_USE_COVERAGE)
     add_target_flag_if_avail(hosttrace-compile-extra
         "-finline-functions"
         "-funroll-loops"
@@ -117,7 +117,7 @@ if(NOT hosttrace_USE_COVERAGE)
         "-ftree-loop-vectorize")
 endif()
 
-if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug" AND hosttrace_BUILD_EXTRA_OPTIMIZATIONS)
+if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug" AND HOSTTRACE_BUILD_EXTRA_OPTIMIZATIONS)
     target_link_libraries(hosttrace-compile-options INTERFACE
         $<BUILD_INTERFACE:hosttrace-compile-extra>)
     add_flag_if_avail(
@@ -136,7 +136,7 @@ endif()
 #
 add_cxx_flag_if_avail("-faligned-new")
 
-if(hosttrace_BUILD_LTO)
+if(HOSTTRACE_BUILD_LTO)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 endif()
 
@@ -159,7 +159,7 @@ else()
     target_link_options(hosttrace-lto INTERFACE -flto=thin)
 endif()
 
-if(hosttrace_BUILD_LTO)
+if(HOSTTRACE_BUILD_LTO)
     target_link_libraries(hosttrace-compile-options INTERFACE hosttrace::hosttrace-lto)
 endif()
 
@@ -180,7 +180,7 @@ else()
     add_target_flag_if_avail(hosttrace-compile-timing "-ftime-report")
 endif()
 
-if(hosttrace_USE_COMPILE_TIMING)
+if(HOSTTRACE_USE_COMPILE_TIMING)
     target_link_libraries(hosttrace-compile-options INTERFACE hosttrace-compile-timing)
 endif()
 
@@ -192,7 +192,7 @@ endif()
 # developer build flags
 #
 add_interface_library(hosttrace-develop-options "Adds developer compiler flags")
-if(hosttrace_BUILD_DEVELOPER)
+if(HOSTTRACE_BUILD_DEVELOPER)
     add_target_flag_if_avail(hosttrace-develop-options
         # "-Wabi"
         "-Wdouble-promotion"
@@ -235,16 +235,16 @@ endif()
 #----------------------------------------------------------------------------------------#
 # sanitizer
 #
-set(hosttrace_SANITIZER_TYPES address memory thread leak undefined unreachable null bounds alignment)
-set_property(CACHE hosttrace_SANITIZER_TYPE PROPERTY STRINGS "${hosttrace_SANITIZER_TYPES}")
+set(HOSTTRACE_SANITIZER_TYPES address memory thread leak undefined unreachable null bounds alignment)
+set_property(CACHE HOSTTRACE_SANITIZER_TYPE PROPERTY STRINGS "${HOSTTRACE_SANITIZER_TYPES}")
 add_interface_library(hosttrace-sanitizer-compile-options "Adds compiler flags for sanitizers")
 add_interface_library(hosttrace-sanitizer
-    "Adds compiler flags to enable ${hosttrace_SANITIZER_TYPE} sanitizer (-fsanitizer=${hosttrace_SANITIZER_TYPE})")
+    "Adds compiler flags to enable ${HOSTTRACE_SANITIZER_TYPE} sanitizer (-fsanitizer=${HOSTTRACE_SANITIZER_TYPE})")
 
 set(COMMON_SANITIZER_FLAGS "-fno-optimize-sibling-calls" "-fno-omit-frame-pointer" "-fno-inline-functions")
 add_target_flag(hosttrace-sanitizer-compile-options ${COMMON_SANITIZER_FLAGS})
 
-foreach(_TYPE ${hosttrace_SANITIZER_TYPES})
+foreach(_TYPE ${HOSTTRACE_SANITIZER_TYPES})
     set(_FLAG "-fsanitize=${_TYPE}")
     add_interface_library(hosttrace-${_TYPE}-sanitizer
         "Adds compiler flags to enable ${_TYPE} sanitizer (${_FLAG})")
@@ -258,8 +258,8 @@ endforeach()
 unset(_FLAG)
 unset(COMMON_SANITIZER_FLAGS)
 
-if(hosttrace_USE_SANITIZER)
-    foreach(_TYPE ${hosttrace_SANITIZER_TYPE})
+if(HOSTTRACE_USE_SANITIZER)
+    foreach(_TYPE ${HOSTTRACE_SANITIZER_TYPE})
         if(TARGET hosttrace-${_TYPE}-sanitizer)
             target_link_libraries(hosttrace-sanitizer INTERFACE hosttrace-${_TYPE}-sanitizer)
         else()
@@ -267,8 +267,8 @@ if(hosttrace_USE_SANITIZER)
         endif()
     endforeach()
 else()
-    set(hosttrace_USE_SANITIZER OFF)
-    inform_empty_interface(hosttrace-sanitizer "${hosttrace_SANITIZER_TYPE} sanitizer")
+    set(HOSTTRACE_USE_SANITIZER OFF)
+    inform_empty_interface(hosttrace-sanitizer "${HOSTTRACE_SANITIZER_TYPE} sanitizer")
 endif()
 
 if (MSVC)

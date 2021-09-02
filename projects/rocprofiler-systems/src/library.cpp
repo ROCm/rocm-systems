@@ -148,12 +148,21 @@ get_functors()
 }
 
 bool
-hosttrace_init_perfetto()
+hosttrace_init_tooling()
 {
     if(get_state() != State::PreInit)
         return false;
 
     HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
+
+    if(!get_use_timemory() && !get_use_perfetto())
+    {
+        get_state() = State::Finalized;
+        HOSTTRACE_DEBUG("[%s] Both perfetto and timemory are disabled. Setting the state "
+                        "to finalized\n",
+                        __FUNCTION__);
+        return false;
+    }
 
     // always initialize timemory because gotcha wrappers are always used
     tim::settings::flamegraph_output()     = false;
@@ -346,7 +355,7 @@ extern "C"
         if(get_state() == State::Finalized)
             return;
 
-        if(get_state() != State::Active && !hosttrace_init_perfetto())
+        if(get_state() != State::Active && !hosttrace_init_tooling())
         {
             HOSTTRACE_DEBUG("[%s] %s :: not active and perfetto not initialized\n",
                             __FUNCTION__, name);
@@ -376,7 +385,7 @@ extern "C"
     void hosttrace_trace_init(const char*, bool, const char*)
     {
         HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
-        hosttrace_init_perfetto();
+        hosttrace_init_tooling();
     }
 
     void hosttrace_trace_finalize(void)
@@ -485,6 +494,6 @@ namespace
 {
 // if static objects are destroyed randomly (relatively uncommon behavior)
 // this might call finalization before perfetto ends the tracing session
-// but static variable in hosttrace_init_perfetto is more likely
+// but static variable in hosttrace_init_tooling is more likely
 auto _ensure_finalization = ensure_finalization();
 }  // namespace

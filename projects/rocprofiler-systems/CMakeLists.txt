@@ -31,6 +31,12 @@ add_option(CMAKE_CXX_STANDARD_REQUIRED "Require C++ language standard" ON)
 add_option(CMAKE_CXX_EXTENSIONS "Compiler specific language extensions" OFF)
 add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH "Enable rpath to linked libraries" ON)
 add_option(HOSTTRACE_USE_CLANG_TIDY "Enable clang-tidy" OFF)
+add_option(HOSTTRACE_USE_MPI "Enable MPI support" OFF)
+add_option(HOSTTRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
+
+# ensure synced
+set(TIMEMORY_USE_MPI  ${HOSTTRACE_USE_MPI} CACHE BOOL "Enable MPI support" FORCE)
+set(TRANSPOSE_USE_MPI ${HOSTTRACE_USE_MPI} CACHE BOOL "Enable MPI support" FORCE)
 
 include(Packages)           # finds third-party libraries
 
@@ -41,8 +47,6 @@ hosttrace_activate_clang_tidy()
 #                   hosttrace-library target
 #
 #------------------------------------------------------------------------------#
-
-option(HOSTTRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
 
 add_library(hosttrace-library SHARED
     ${CMAKE_CURRENT_LIST_DIR}/src/library.cpp
@@ -61,12 +65,11 @@ target_compile_definitions(hosttrace-library PRIVATE
 
 target_link_libraries(hosttrace-library PRIVATE
     hosttrace::hosttrace-threading
+    hosttrace::hosttrace-compile-options
     $<BUILD_INTERFACE:timemory::timemory-headers>
     $<BUILD_INTERFACE:timemory::timemory-gotcha>
     $<BUILD_INTERFACE:timemory::timemory-cxx-shared>
-    $<BUILD_INTERFACE:timemory::timemory-threading>
-    $<BUILD_INTERFACE:timemory::timemory-compile-options>
-    $<IF:$<BOOL:${hosttrace_USE_SANITIZER}>,hosttrace::hosttrace-sanitizer,>)
+    $<IF:$<BOOL:${HOSTTRACE_USE_SANITIZER}>,hosttrace::hosttrace-sanitizer,>)
 
 if(DYNINST_API_RT)
     get_filename_component(DYNINST_API_RT_DIR "${DYNINST_API_RT}" DIRECTORY)
@@ -96,10 +99,10 @@ target_include_directories(hosttrace-exe PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/include)
 
 target_link_libraries(hosttrace-exe PRIVATE
-    $<BUILD_INTERFACE:timemory::timemory-headers>
     hosttrace::hosttrace-dyninst
     hosttrace::hosttrace-compile-options
-    $<IF:$<BOOL:${hosttrace_USE_SANITIZER}>,hosttrace::hosttrace-sanitizer,>)
+    $<BUILD_INTERFACE:timemory::timemory-headers>
+    $<IF:$<BOOL:${HOSTTRACE_USE_SANITIZER}>,hosttrace::hosttrace-sanitizer,>)
 
 set_target_properties(hosttrace-exe PROPERTIES
     OUTPUT_NAME                 hosttrace
@@ -108,6 +111,25 @@ set_target_properties(hosttrace-exe PROPERTIES
 install(
     TARGETS     hosttrace-exe
     DESTINATION ${CMAKE_INSTALL_BINDIR}
+    OPTIONAL)
+
+# build the timemory-avail exe
+add_dependencies(hosttrace-exe timemory-avail)
+
+#------------------------------------------------------------------------------#
+#
+#                   miscellaneous installs
+#
+#------------------------------------------------------------------------------#
+
+install(
+    PROGRAMS    ${PROJECT_SOURCE_DIR}/scripts/hosttrace-merge.jl
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    OPTIONAL)
+
+install(
+    FILES       ${PROJECT_SOURCE_DIR}/roctrace.cfg
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}
     OPTIONAL)
 
 #------------------------------------------------------------------------------#
