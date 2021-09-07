@@ -358,6 +358,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   hip_sync_event_ptrn = re.compile(r'hipStreamSynchronize')
   hip_sync_dev_event_ptrn = re.compile(r'hipDeviceSynchronize')
   wait_event_ptrn = re.compile(r'WaitEvent|hipStreamSynchronize|hipDeviceSynchronize')
+  hip_stream_wait_write_ptrn = re.compile(r'hipStreamWaitValue64|hipStreamWriteValue64|hipStreamWaitValue32|hipStreamWriteValue32')
   prop_pattern = re.compile("([\w-]+)\((\w+)\)");
   beg_pattern = re.compile("^dispatch\[(\d*)\], (.*) kernel-name\(\"([^\"]*)\"\)")
   hip_strm_cr_event_ptrn = re.compile(r'hipStreamCreate')
@@ -489,6 +490,9 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
         # HIP WaitEvent API
         if wait_event_ptrn.search(record_name):
+          op_found = 1
+
+        if hip_stream_wait_write_ptrn.search(record_name):
           op_found = 1
 
         # HSA memcopy API
