@@ -1522,5 +1522,53 @@ FUNCTION(PRINT_FEATURES)
     print_disabled_interfaces()
 ENDFUNCTION()
 
+#----------------------------------------------------------------------------------------#
+# this function is provided to easily select which files use alternative compiler:
+#
+#       GLOBAL      --> all files
+#       TARGET      --> all files in a target
+#       SOURCE      --> specific source files
+#       DIRECTORY   --> all files in directory
+#       PROJECT     --> all files/targets in a project/subproject
+#
+FUNCTION(hosttrace_custom_compilation)
+    CMAKE_PARSE_ARGUMENTS(COMP "GLOBAL;PROJECT" "COMPILER" "DIRECTORY;TARGET;SOURCE" ${ARGN})
+
+    # find hosttrace_launch_compiler
+    FIND_PROGRAM(HOSTTRACE_COMPILE_LAUNCHER
+        NAMES           hosttrace_launch_compiler
+        HINTS           ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
+        PATHS           ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
+        PATH_SUFFIXES   scripts bin)
+
+    IF(NOT COMP_COMPILER)
+        MESSAGE(FATAL_ERROR "hosttrace_custom_compilation not provided COMPILER argument")
+    ENDIF()
+
+    IF(NOT HOSTTRACE_COMPILE_LAUNCHER)
+        MESSAGE(FATAL_ERROR "hosttrace could not find 'hosttrace_launch_compiler'. Please set '-DHOSTTRACE_COMPILE_LAUNCHER=/path/to/launcher'")
+    ENDIF()
+
+    IF(COMP_GLOBAL)
+        # if global, don't bother setting others
+        SET_PROPERTY(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
+        SET_PROPERTY(GLOBAL PROPERTY RULE_LAUNCH_LINK "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
+    ELSE()
+        FOREACH(_TYPE PROJECT DIRECTORY TARGET SOURCE)
+            # make project/subproject scoping easy, e.g. hosttrace_custom_compilation(PROJECT) after project(...)
+            IF("${_TYPE}" STREQUAL "PROJECT" AND COMP_${_TYPE})
+                LIST(APPEND COMP_DIRECTORY ${PROJECT_SOURCE_DIR})
+                UNSET(COMP_${_TYPE})
+            ENDIF()
+            # set the properties if defined
+            IF(COMP_${_TYPE})
+                FOREACH(_VAL ${COMP_${_TYPE}})
+                    SET_PROPERTY(${_TYPE} ${_VAL} PROPERTY RULE_LAUNCH_COMPILE "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
+                    SET_PROPERTY(${_TYPE} ${_VAL} PROPERTY RULE_LAUNCH_LINK "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
+                ENDFOREACH()
+            ENDIF()
+        ENDFOREACH()
+    ENDIF()
+ENDFUNCTION()
 
 cmake_policy(POP)

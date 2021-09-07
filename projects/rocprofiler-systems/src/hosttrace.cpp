@@ -30,10 +30,11 @@
 
 static bool     is_driver                                         = false;
 static bool     allow_overlapping                                 = false;
+static bool     instr_dynamic_callsites                           = false;
 static size_t   batch_size                                        = 50;
 static strset_t extra_libs                                        = {};
 static size_t   min_address_range                                 = (1 << 9);  // 512
-static size_t   min_loop_address_range                            = (1 << 6);  // 64
+static size_t   min_loop_address_range                            = (1 << 9);  // 512
 static std::vector<std::pair<uint64_t, string_t>> hash_ids        = {};
 static std::map<string_t, bool>                   use_stubs       = {};
 static std::map<string_t, procedure_t*>           beg_stubs       = {};
@@ -282,6 +283,15 @@ main(int argc, char** argv)
         .count(1)
         .dtype("size_t")
         .action([](parser_t& p) { batch_size = p.get<size_t>("batch-size"); });
+    parser
+        .add_argument({ "--dynamic-callsites" },
+                      "Force instrumentation if a function has dynamic callsites (e.g. "
+                      "function pointers)")
+        .max_count(1)
+        .dtype("boolean")
+        .action([](parser_t& p) {
+            instr_dynamic_callsites = p.get<bool>("dynamic-callsites");
+        });
     parser
         .add_argument({ "-r", "--min-address-range" },
                       "If the address range of a function is less than this value, "
@@ -1361,10 +1371,10 @@ main(int argc, char** argv)
             if(cfg)
                 cfg->getOuterLoops(basic_loop);
 
-            // if the function has dynamic callsites and we are in binary rewrite mode,
-            // force the instrumentation
+            // if the function has dynamic callsites and user specified instrumenting
+            // dynamic callsites, force the instrumentation
             bool _force_instr = false;
-            if(cfg && binary_rewrite)
+            if(cfg && instr_dynamic_callsites)
                 _force_instr = cfg->containsDynamicCallsites();
 
             auto _address_range = module_function{ mod, itr }.address_range;
@@ -1395,26 +1405,12 @@ main(int argc, char** argv)
                            (unsigned long) min_loop_address_range);
                 continue;
             }
-            else if(_address_range >= min_loop_address_range &&
-                    _address_range < min_address_range && _has_loop_entries)
-            {
-                verbprintf(
-                    1,
-                    "Enabling function [min-loop-address-range]: %s / %s despite not "
-                    "satisfy minimum loop address range (address range = %lu, minimum "
-                    "= %lu) because it has at least one loop (found: %lu)\n",
-                    name.m_name.c_str(), name.get().c_str(),
-                    (unsigned long) _address_range,
-                    (unsigned long) min_loop_address_range,
-                    (unsigned long) _num_loop_entries);
-            }
-            else if(_address_range < min_address_range && _force_instr)
+            else if(_force_instr)
             {
                 verbprintf(1,
-                           "Enabling function [min-address-range]: %s / %s despite not "
+                           "Enabling function [dynamic-callsite]: %s / %s despite not "
                            "satisfy minimum address range (address range = %lu, minimum "
-                           "= %lu) because contains dynamic callsites which may not be "
-                           "instrumented in binary rewrite mode\n",
+                           "= %lu) because contains dynamic callsites\n",
                            name.m_name.c_str(), name.get().c_str(),
                            (unsigned long) _address_range,
                            (unsigned long) min_address_range);

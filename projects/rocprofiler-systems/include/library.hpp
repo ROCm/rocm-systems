@@ -4,12 +4,14 @@
 #if !defined(TIMEMORY_USE_PERFETTO)
 #    include <perfetto.h>
 #    define PERFETTO_CATEGORIES                                                          \
-        perfetto::Category("hosttrace").SetDescription("Function trace")
+        perfetto::Category("host").SetDescription("Host-side function tracing"),         \
+            perfetto::Category("device").SetDescription("Device-side function tracing")
 #else
 #    define PERFETTO_CATEGORIES                                                          \
-        perfetto::Category("hosttrace").SetDescription("Function trace"),                \
-            perfetto::Category("timemory")                                               \
-                .SetDescription("Events from the timemory API")
+        perfetto::Category("host").SetDescription("Host-side function tracing"),         \
+            perfetto::Category("device").SetDescription("Device-side function tracing")
+perfetto::Category("timemory")
+    .SetDescription("Events from the timemory API")
 #    define TIMEMORY_PERFETTO_CATEGORIES PERFETTO_CATEGORIES
 #endif
 
@@ -41,6 +43,8 @@
 #include "timemory/settings.hpp"
 #include "timemory/storage.hpp"
 #include "timemory/variadic.hpp"
+
+#include "roctracer.hpp"
 
 // forward decl of the API
 extern "C"
@@ -74,6 +78,11 @@ namespace audit     = tim::audit;
 namespace comp      = tim::component;
 namespace quirk     = tim::quirk;
 namespace threading = tim::threading;
+namespace scope     = tim::scope;
+namespace dmp       = tim::dmp;
+namespace process   = tim::process;
+namespace units     = tim::units;
+namespace trait     = tim::trait;
 
 // this is used to wrap fork()
 struct fork_gotcha : comp::base<fork_gotcha, void>
@@ -122,12 +131,16 @@ private:
     const char* m_prefix = nullptr;
 };
 
+using papi_tot_ins  = comp::papi_tuple<PAPI_TOT_INS>;
 using fork_gotcha_t = comp::gotcha<4, tim::component_tuple<fork_gotcha>, hosttrace>;
 using mpi_gotcha_t  = comp::gotcha<4, tim::component_tuple<mpi_gotcha>, hosttrace>;
 using hosttrace_bundle_t =
     tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::cpu_clock,
-                           comp::cpu_util, comp::user_global_bundle, fork_gotcha_t,
-                           mpi_gotcha_t>;
+                           comp::cpu_util, comp::roctracer, papi_tot_ins,
+                           comp::user_global_bundle, fork_gotcha_t, mpi_gotcha_t>;
+using hosttrace_thread_bundle_t =
+    tim::lightweight_tuple<comp::wall_clock, comp::thread_cpu_clock,
+                           comp::thread_cpu_util, papi_tot_ins>;
 using bundle_t =
     tim::component_bundle<hosttrace, comp::wall_clock*, comp::user_global_bundle*>;
 using bundle_allocator_t = tim::data::ring_buffer_allocator<bundle_t>;
@@ -189,6 +202,54 @@ get_state();
 
 std::unique_ptr<hosttrace_bundle_t>&
 get_main_bundle();
+
+bool
+get_use_perfetto();
+
+bool
+get_use_timemory();
+
+//--------------------------------------------------------------------------------------//
+
+template <typename Tp, size_t MaxThreads = 1024>
+struct hosttrace_thread_data
+{
+    static constexpr size_t max_supported_threads = MaxThreads;
+    using instance_array_t = std::array<std::unique_ptr<Tp>, max_supported_threads>;
+
+    template <typename... Args>
+    static void                 construct(Args&&...);
+    static std::unique_ptr<Tp>& instance();
+    static instance_array_t&    instances();
+};
+
+template <typename Tp, size_t MaxThreads>
+template <typename... Args>
+void
+hosttrace_thread_data<Tp, MaxThreads>::construct(Args&&... _args)
+{
+    static thread_local bool _v = [&_args...]() {
+        instances().at(threading::get_id()) =
+            std::make_unique<Tp>(std::forward<Args>(_args)...);
+        return true;
+    }();
+    (void) _v;
+}
+
+template <typename Tp, size_t MaxThreads>
+std::unique_ptr<Tp>&
+hosttrace_thread_data<Tp, MaxThreads>::instance()
+{
+    return instances().at(threading::get_id());
+}
+
+template <typename Tp, size_t MaxThreads>
+typename hosttrace_thread_data<Tp, MaxThreads>::instance_array_t&
+hosttrace_thread_data<Tp, MaxThreads>::instances()
+{
+    static auto _v = instance_array_t{};
+    return _v;
+}
 
 //--------------------------------------------------------------------------------------//
 

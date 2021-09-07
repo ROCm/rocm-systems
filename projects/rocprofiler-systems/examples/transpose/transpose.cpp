@@ -123,14 +123,15 @@ run(int argc, char** argv)
     for(size_t i = 0; i < times; i++)
     {
         hipLaunchKernelGGL(transpose_a, grid, block, 0, 0, in, out, M, N);
-        check_hip_error();
-        HIP_API_CALL(hipDeviceSynchronize());
     }
+    check_hip_error();
+    HIP_API_CALL(hipDeviceSynchronize());
     t2 = std::chrono::high_resolution_clock::now();
     double time =
         std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
     float GB = (float) size * times * 2 / (1 << 30);
-    std::cout << "The average performance of transpose is " << GB / time << " GBytes/sec"
+    std::cout << "Runtime of transpose is " << time << " sec\n"
+              << "The average performance of transpose is " << GB / time << " GBytes/sec"
               << std::endl;
 
     int* out_matrix = (int*) malloc(size);

@@ -272,7 +272,7 @@ find_function(image_t* app_image, const std::string& _name, strset_t _extra)
     }
 
     if(!_func)
-        verbprintf(0, "timemory-run: Unable to find function %s\n", _name.c_str());
+        verbprintf(2, "hosttrace: Unable to find function %s\n", _name.c_str());
 
     return _func;
 }

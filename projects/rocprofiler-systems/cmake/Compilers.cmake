@@ -535,10 +535,16 @@ foreach(LANG C CXX CUDA)
         SET_COMPILER_VAR(       CLANG               1)
         SET_COMPILER_VAR( APPLE_CLANG               1)
 
+
     elseif(CMAKE_${LANG}_COMPILER_ID MATCHES "Clang")
 
         # Clang/LLVM compiler
         SET_COMPILER_VAR(       CLANG               1)
+
+        # HIP Clang compiler
+        if(CMAKE_${LANG}_COMPILER MATCHES "hipcc")
+            SET_COMPILER_VAR(   HIPCC               1)
+        endif()
 
     elseif(CMAKE_${LANG}_COMPILER_ID MATCHES "PGI")
 
@@ -585,7 +591,7 @@ foreach(LANG C CXX CUDA)
     endif()
 
     # set other to no
-    foreach(TYPE GNU INTEL INTEL_ICC INTEL_ICPC APPLE_CLANG CLANG PGI XLC HP_ACC MIPS MSVC NVIDIA)
+    foreach(TYPE GNU INTEL INTEL_ICC INTEL_ICPC APPLE_CLANG CLANG PGI XLC HP_ACC MIPS MSVC NVIDIA HIPCC)
         if(NOT DEFINED CMAKE_${LANG}_COMPILER_IS_${TYPE})
             SET_COMPILER_VAR(${TYPE} 0)
         endif()

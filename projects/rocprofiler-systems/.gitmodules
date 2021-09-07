@@ -4,3 +4,6 @@
 [submodule "external/perfetto"]
 	path = external/perfetto
 	url = https://android.googlesource.com/platform/external/perfetto
+[submodule "external/elfio"]
+	path = external/elfio
+	url = https://github.com/jrmadsen/ELFIO.git

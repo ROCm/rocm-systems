@@ -396,9 +396,6 @@ struct module_function
         std::pair<address_t, address_t> _range{};
         if(proc->getAddressRange(_range.first, _range.second))
             address_range = _range.second - _range.first;
-        auto _instructions = proc->findPoint(BPatch_locInstruction);
-        if(_instructions)
-            instr_count = _instructions->size();
     }
 
     friend bool operator<(const module_function& lhs, const module_function& rhs)
@@ -418,7 +415,6 @@ struct module_function
 
         std::stringstream ss;
         ss << std::setw(14) << "AddressRange"
-           << " " << std::setw(14) << "InstrCount"
            << "  " << std::setw(w0 + 8) << std::left << "Module"
            << " " << std::setw(w1 + 8) << std::left << "Function"
            << " " << std::setw(w2 + 8) << std::left << "FunctionSignature"
@@ -442,7 +438,6 @@ struct module_function
 
         // clang-format off
         ss << std::setw(14) << rhs.address_range << " "
-           << std::setw(14) << rhs.instr_count << "  "
            << std::setw(w0 + 8) << std::left << _get_str(rhs.module) << " "
            << std::setw(w1 + 8) << std::left << _get_str(rhs.function) << " "
            << std::setw(w2 + 8) << std::left << _get_str(rhs.signature.get());
@@ -453,7 +448,6 @@ struct module_function
     }
 
     size_t             address_range = 0;
-    size_t             instr_count   = 0;
     string_t           module        = {};
     string_t           function      = {};
     function_signature signature;

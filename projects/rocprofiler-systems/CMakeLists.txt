@@ -33,6 +33,7 @@ add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH "Enable rpath to linked libraries" 
 add_option(HOSTTRACE_USE_CLANG_TIDY "Enable clang-tidy" OFF)
 add_option(HOSTTRACE_USE_MPI "Enable MPI support" OFF)
 add_option(HOSTTRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
+add_option(HOSTTRACE_USE_ROCTRACER "Enable roctracer support" ON)
 
 # ensure synced
 set(TIMEMORY_USE_MPI  ${HOSTTRACE_USE_MPI} CACHE BOOL "Enable MPI support" FORCE)
@@ -54,6 +55,12 @@ add_library(hosttrace-library SHARED
     ${CMAKE_CURRENT_LIST_DIR}/include/library.hpp
     ${perfetto_DIR}/sdk/perfetto.cc)
 
+if(HOSTTRACE_USE_ROCTRACER)
+    target_sources(hosttrace-library PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/include/roctracer.hpp
+        ${CMAKE_CURRENT_LIST_DIR}/src/roctracer.cpp)
+endif()
+
 target_include_directories(hosttrace-library PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/include)
 
@@ -66,6 +73,7 @@ target_compile_definitions(hosttrace-library PRIVATE
 target_link_libraries(hosttrace-library PRIVATE
     hosttrace::hosttrace-threading
     hosttrace::hosttrace-compile-options
+    hosttrace::hosttrace-roctracer
     $<BUILD_INTERFACE:timemory::timemory-headers>
     $<BUILD_INTERFACE:timemory::timemory-gotcha>
     $<BUILD_INTERFACE:timemory::timemory-cxx-shared>
