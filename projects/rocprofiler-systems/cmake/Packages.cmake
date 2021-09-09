@@ -89,7 +89,7 @@ if(HOSTTRACE_BUILD_DYNINST)
         endif()
     endforeach()
     target_include_directories(hosttrace-dyninst SYSTEM INTERFACE
-        ${TBB_INCLUDE_DIRS}
+        ${TBB_INCLUDE_DIR}
         ${Boost_INCLUDE_DIRS}
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/dyninst/dyninstAPI/h>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/dyninst/instructionAPI/h>
@@ -143,10 +143,6 @@ else()
             PATH_SUFFIXES include)
     endif()
 
-    if(TBB_INCLUDE_DIR AND NOT TBB_INCLUDE_DIRS)
-        set(TBB_INCLUDE_DIRS ${TBB_INCLUDE_DIR})
-    endif()
-
     if(DYNINST_API_RT)
         target_compile_definitions(hosttrace-dyninst INTERFACE
             DYNINST_API_RT="${DYNINST_API_RT}")
@@ -173,7 +169,7 @@ else()
         endif()
     endforeach()
     target_include_directories(hosttrace-dyninst SYSTEM INTERFACE
-        ${TBB_INCLUDE_DIRS}
+        ${TBB_INCLUDE_DIR}
         ${Boost_INCLUDE_DIRS}
         ${DYNINST_HEADER_DIR})
     target_compile_definitions(hosttrace-dyninst INTERFACE hosttrace_USE_DYNINST)
