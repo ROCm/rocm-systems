@@ -59,6 +59,9 @@ static std::string modfunc_dump_dir   = "hosttrace-module-functions";
 std::string
 get_absolute_exe_filepath(std::string exe_name);
 
+std::string
+get_absolute_lib_filepath(std::string lib_name);
+
 //======================================================================================//
 //
 // entry point
@@ -798,8 +801,9 @@ main(int argc, char** argv)
         bool result = false;
         // track the tried library names
         string_t _tried_libs;
-        for(const auto& _libname : _libnames)
+        for(auto _libname : _libnames)
         {
+            _libname = get_absolute_lib_filepath(_libname);
             _tried_libs += string_t("|") + _libname;
             verbprintf(0, "loading library: '%s'...\n", _libname.c_str());
             result = (addr_space->loadLibrary(_libname.c_str()) != nullptr);
@@ -2216,6 +2220,41 @@ get_absolute_exe_filepath(std::string exe_name)
         }
     }
     return exe_name;
+}
+
+//======================================================================================//
+//
+std::string
+get_absolute_lib_filepath(std::string lib_name)
+{
+    auto file_exists = [](const std::string& name) {
+        struct stat buffer;
+        return (stat(name.c_str(), &buffer) == 0);
+    };
+
+    if(!lib_name.empty() && (!file_exists(lib_name) ||
+                             std::regex_match(lib_name, std::regex("^[A-Za-z0-9].*"))))
+    {
+        auto _lib_orig = lib_name;
+        auto _paths = tim::delimit(tim::get_env<std::string>("LD_LIBRARY_PATH", ""), ":");
+        for(auto& pitr : _paths)
+        {
+            if(file_exists(TIMEMORY_JOIN('/', pitr, lib_name)))
+            {
+                lib_name = TIMEMORY_JOIN('/', pitr, lib_name);
+                verbprintf(0, "Resolved '%s' to '%s'...\n", _lib_orig.c_str(),
+                           lib_name.c_str());
+                break;
+            }
+        }
+
+        if(!file_exists(lib_name))
+        {
+            verbprintf(0, "Warning! File path to '%s' could not be determined...\n",
+                       lib_name.c_str());
+        }
+    }
+    return lib_name;
 }
 
 //======================================================================================//

@@ -27,6 +27,14 @@ find_path(roctracer_INCLUDE_DIR
 
 mark_as_advanced(roctracer_INCLUDE_DIR)
 
+find_path(roctracer_hsa_INCLUDE_DIR
+    NAMES           hsa.h
+    HINTS           ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
+    PATHS           ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
+    PATH_SUFFIXES   include include/hsa)
+
+mark_as_advanced(roctracer_hsa_INCLUDE_DIR)
+
 #----------------------------------------------------------------------------------------#
 
 find_library(roctracer_LIBRARY
@@ -64,6 +72,7 @@ mark_as_advanced(roctracer_LIBRARY roctracer_roctx_LIBRARY)
 find_package_handle_standard_args(roctracer DEFAULT_MSG
     roctracer_ROOT_DIR
     roctracer_INCLUDE_DIR
+    roctracer_hsa_INCLUDE_DIR
     roctracer_LIBRARY
     roctracer_roctx_LIBRARY)
 
@@ -72,12 +81,12 @@ find_package_handle_standard_args(roctracer DEFAULT_MSG
 if(roctracer_FOUND)
     add_library(roctracer::roctracer INTERFACE IMPORTED)
     add_library(roctracer::roctx INTERFACE IMPORTED)
-    set(roctracer_INCLUDE_DIRS ${roctracer_INCLUDE_DIR})
+    set(roctracer_INCLUDE_DIRS ${roctracer_INCLUDE_DIR} ${roctracer_hsa_INCLUDE_DIR})
     set(roctracer_LIBRARIES ${roctracer_LIBRARY} ${roctracer_roctx_LIBRARY})
     set(roctracer_LIBRARY_DIRS ${roctracer_LIBRARY_DIR})
 
-    target_include_directories(roctracer::roctracer INTERFACE ${roctracer_INCLUDE_DIR})
-    target_include_directories(roctracer::roctx INTERFACE ${roctracer_INCLUDE_DIR})
+    target_include_directories(roctracer::roctracer INTERFACE ${roctracer_INCLUDE_DIR} ${roctracer_hsa_INCLUDE_DIR})
+    target_include_directories(roctracer::roctx INTERFACE ${roctracer_INCLUDE_DIR} ${roctracer_hsa_INCLUDE_DIR})
 
     target_link_libraries(roctracer::roctracer INTERFACE ${roctracer_LIBRARY})
     target_link_libraries(roctracer::roctx INTERFACE ${roctracer_roctx_LIBRARY})
