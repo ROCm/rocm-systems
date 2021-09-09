@@ -15,7 +15,10 @@ void
 hosttrace_mpi_set_attr()
 {
 #if defined(TIMEMORY_USE_MPI)
-    static auto _mpi_finalize = [](MPI_Comm, int, void*, void*) {
+    static auto _mpi_copy = [](MPI_Comm, int, void*, void*, void*, int*) {
+        return MPI_SUCCESS;
+    };
+    static auto _mpi_fini = [](MPI_Comm, int, void*, void*) {
         if(mpip_index != std::numeric_limits<uint64_t>::max())
             comp::deactivate_mpip<tim::component_tuple<hosttrace_component>, hosttrace>(
                 mpip_index);
@@ -23,9 +26,11 @@ hosttrace_mpi_set_attr()
         hosttrace_trace_finalize();
         return MPI_SUCCESS;
     };
-    using func_t  = int (*)(MPI_Comm, int, void*, void*);
-    int _comm_key = -1;
-    if(PMPI_Comm_create_keyval(nullptr, static_cast<func_t>(_mpi_finalize), &_comm_key,
+    using copy_func_t = int (*)(MPI_Comm, int, void*, void*, void*, int*);
+    using fini_func_t = int (*)(MPI_Comm, int, void*, void*);
+    int _comm_key     = -1;
+    if(PMPI_Comm_create_keyval(static_cast<copy_func_t>(_mpi_copy),
+                               static_cast<fini_func_t>(_mpi_fini), &_comm_key,
                                nullptr) == MPI_SUCCESS)
         PMPI_Comm_set_attr(MPI_COMM_SELF, _comm_key, nullptr);
 #endif
