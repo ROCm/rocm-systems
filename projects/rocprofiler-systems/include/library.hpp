@@ -34,6 +34,7 @@ perfetto::Category("timemory")
 #include "timemory/backends/threading.hpp"
 #include "timemory/components.hpp"
 #include "timemory/components/gotcha/mpip.hpp"
+#include "timemory/components/papi/papi_tuple.hpp"
 #include "timemory/config.hpp"
 #include "timemory/environment.hpp"
 #include "timemory/manager.hpp"

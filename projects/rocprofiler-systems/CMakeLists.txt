@@ -34,6 +34,7 @@ add_option(HOSTTRACE_USE_CLANG_TIDY "Enable clang-tidy" OFF)
 add_option(HOSTTRACE_USE_MPI "Enable MPI support" OFF)
 add_option(HOSTTRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
 add_option(HOSTTRACE_USE_ROCTRACER "Enable roctracer support" ON)
+add_option(HOSTTRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
 
 # ensure synced
 set(TIMEMORY_USE_MPI  ${HOSTTRACE_USE_MPI} CACHE BOOL "Enable MPI support" FORCE)

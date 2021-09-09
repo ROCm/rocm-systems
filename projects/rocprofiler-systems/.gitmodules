@@ -7,3 +7,6 @@
 [submodule "external/elfio"]
 	path = external/elfio
 	url = https://github.com/jrmadsen/ELFIO.git
+[submodule "external/dyninst"]
+	path = external/dyninst
+	url = https://github.com/jrmadsen/dyninst.git
