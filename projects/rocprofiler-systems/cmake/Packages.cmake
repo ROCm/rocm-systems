@@ -89,11 +89,22 @@ find_library(DYNINST_API_RT dyninstAPI_RT
     PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
     PATH_SUFFIXES lib)
 
-find_path(TBB_INCLUDE_DIR
-    NAMES tbb/tbb.h
-PATH_SUFFIXES include)
+# try to find TBB
+find_package(TBB QUIET)
 
-if(TBB_INCLUDE_DIR)
+# if fail try to use the Dyninst installed FindTBB.cmake
+if(NOT TBB_FOUND)
+    list(APPEND CMAKE_MODULE_PATH ${Dyninst_DIR}/Modules)
+    find_package(TBB QUIET)
+endif()
+
+if(NOT TBB_FOUND)
+    find_path(TBB_INCLUDE_DIR
+        NAMES tbb/tbb.h
+        PATH_SUFFIXES include)
+endif()
+
+if(TBB_INCLUDE_DIR AND NOT TBB_INCLUDE_DIRS)
     set(TBB_INCLUDE_DIRS ${TBB_INCLUDE_DIR})
 endif()
 
