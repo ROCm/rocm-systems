@@ -35,5 +35,5 @@ set ( LIB_SRC
   ${LIB_DIR}/util/hsa_rsrc_factory.cpp
 )
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
-target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${HSA_KMT_LIB_PATH}/.. )
-target_link_libraries( ${TARGET_LIB} PRIVATE ${HSA_RUNTIME_LIB} c stdc++ )
+target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} )
+target_link_libraries( ${TARGET_LIB} PRIVATE hsa-runtime64::hsa-runtime64 c stdc++ )
