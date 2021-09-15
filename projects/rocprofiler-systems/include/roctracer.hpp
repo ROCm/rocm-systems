@@ -32,11 +32,17 @@ struct roctracer
 
     TIMEMORY_DEFAULT_OBJECT(roctracer)
 
-    static void setup();
-    static void tear_down();
     static void preinit();
     static void global_init() { setup(); }
     static void global_finalize() { tear_down(); }
+
+    static bool is_setup();
+    static void setup();
+    static void tear_down();
+    static void add_setup(const std::string&, std::function<void()>&&);
+    static void add_tear_down(const std::string&, std::function<void()>&&);
+    static void remove_setup(const std::string&);
+    static void remove_tear_down(const std::string&);
 
     void start();
     void stop();

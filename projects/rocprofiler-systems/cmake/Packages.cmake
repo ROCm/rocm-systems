@@ -65,119 +65,126 @@ endif()
 #----------------------------------------------------------------------------------------#
 
 if(HOSTTRACE_BUILD_DYNINST)
-    if(CMAKE_GENERATOR MATCHES "Ninja")
-        message(FATAL_ERROR "Building dyninst submodule requires the cmake generator to be Unix Makefiles")
-    endif()
-
     checkout_git_submodule(
         RELATIVE_PATH       external/dyninst
         WORKING_DIRECTORY   ${PROJECT_SOURCE_DIR}
         REPO_URL            https://github.com/jrmadsen/dyninst.git
         REPO_BRANCH         hosttrace-submodule)
 
-    add_subdirectory(external/dyninst)
+    set(DYNINST_OPTION_PREFIX       ON)
+    set(DYNINST_BUILD_DOCS          OFF)
+    set(DYNINST_QUIET_CONFIG        ON  CACHE BOOL "Suppress dyninst cmake messages")
+    set(DYNINST_BUILD_PARSE_THAT    OFF CACHE BOOL "Build dyninst parseThat executable")
+    set(DYNINST_BUILD_SHARED_LIBS   OFF CACHE BOOL "Build shared dyninst libraries")
+    set(DYNINST_BUILD_STATIC_LIBS   ON  CACHE BOOL "Build static dyninst libraries")
+    set(DYNINST_ENABLE_LTO          ON  CACHE BOOL "Enable LTO for dyninst libraries")
 
-    target_link_libraries(hosttrace-dyninst INTERFACE
-        ${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
-    foreach(_TARG dyninst dyninstAPI instructionAPI symtabAPI parseAPI headers atomic system thread date_time TBB)
-        if(TARGET Dyninst::${_TARG})
-            target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::${_TARG})
-        elseif(TARGET Boost::${_TARG})
-            target_link_libraries(hosttrace-dyninst INTERFACE Boost::${_TARG})
-        elseif(TARGET ${_TARG})
-            target_link_libraries(hosttrace-dyninst INTERFACE ${_TARG})
-        endif()
+    hosttrace_save_variables(PIC CMAKE_POSITION_INDEPENDENT_CODE)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    add_subdirectory(external/dyninst)
+    hosttrace_restore_variables(PIC CMAKE_POSITION_INDEPENDENT_CODE)
+
+    add_library(Dyninst::Dyninst INTERFACE IMPORTED)
+    foreach(_LIB common dyninstAPI parseAPI instructionAPI symtabAPI stackwalk Boost TBB)
+        target_link_libraries(Dyninst::Dyninst INTERFACE Dyninst::${_LIB})
     endforeach()
-    target_include_directories(hosttrace-dyninst SYSTEM INTERFACE
-        ${TBB_INCLUDE_DIR}
-        ${Boost_INCLUDE_DIRS}
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/dyninst/dyninstAPI/h>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/dyninst/instructionAPI/h>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/dyninst/proccontrol/h>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/dyninst/dataflowAPI/h>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/dyninst/symtabAPI/h>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/dyninst/parseAPI/h>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/dyninst/common/h>
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/dyninst/common/h>)
-    target_compile_definitions(hosttrace-dyninst INTERFACE hosttrace_USE_DYNINST)
+
+    target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::Dyninst)
+
+    set(HOSTTRACE_DYNINST_API_RT ${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI_RT/libdyninstAPI_RT${CMAKE_SHARED_LIBRARY_SUFFIX})
+
+    if(HOSTTRACE_DYNINST_API_RT)
+        target_compile_definitions(hosttrace-dyninst INTERFACE
+            DYNINST_API_RT="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}:$<TARGET_FILE_DIR:Dyninst::dyninstAPI_RT>:${CMAKE_INSTALL_PREFIX}/lib/$<TARGET_FILE_NAME:Dyninst::dyninstAPI_RT>:$<TARGET_FILE:Dyninst::dyninstAPI_RT>")
+    endif()
 
 else()
-    find_package(Dyninst ${hosttrace_FIND_QUIETLY} REQUIRED
-        COMPONENTS dyninstAPI parseAPI instructionAPI symtabAPI)
-    set(_BOOST_COMPONENTS atomic system thread date_time)
-    set(hosttrace_BOOST_COMPONENTS "${_BOOST_COMPONENTS}" CACHE STRING
-        "Boost components used by Dyninst in hosttrace")
-    set(Boost_NO_BOOST_CMAKE ON)
-    find_package(Boost QUIET REQUIRED
-        COMPONENTS ${hosttrace_BOOST_COMPONENTS})
+    find_package(Dyninst ${hosttrace_FIND_QUIETLY} REQUIRED COMPONENTS dyninstAPI parseAPI instructionAPI symtabAPI)
 
-    # some installs of dyninst don't set this properly
-    if(EXISTS "${DYNINST_INCLUDE_DIR}" AND NOT DYNINST_HEADER_DIR)
-        get_filename_component(DYNINST_HEADER_DIR "${DYNINST_INCLUDE_DIR}" REALPATH CACHE)
-    else()
-        find_path(DYNINST_HEADER_DIR
-            NAMES BPatch.h dyninstAPI_RT.h
-            HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR} ${Dyninst_DIR}/../../..
-            PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR} ${Dyninst_DIR}/../../..
-            PATH_SUFFIXES include)
-    endif()
+    if(TARGET Dyninst::Dyninst)     # updated Dyninst CMake system was found
+        # useful for defining the location of the runtime API
+        find_library(HOSTTRACE_DYNINST_API_RT dyninstAPI_RT
+            HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
+            PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
+            PATH_SUFFIXES lib)
 
-    # useful for defining the location of the runtime API
-    find_library(DYNINST_API_RT dyninstAPI_RT
-        HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
-        PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
-        PATH_SUFFIXES lib)
+        if(HOSTTRACE_DYNINST_API_RT)
+            target_compile_definitions(hosttrace-dyninst INTERFACE
+                DYNINST_API_RT="${HOSTTRACE_DYNINST_API_RT}")
+        endif()
 
-    # try to find TBB
-    find_package(TBB QUIET)
+        add_rpath(${Dyninst_LIBRARIES})
+        target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::Dyninst)
+    else()  # updated Dyninst CMake system was not found
+        set(_BOOST_COMPONENTS atomic system thread date_time)
+        set(hosttrace_BOOST_COMPONENTS "${_BOOST_COMPONENTS}" CACHE STRING
+            "Boost components used by Dyninst in hosttrace")
+        set(Boost_NO_BOOST_CMAKE ON)
+        find_package(Boost QUIET REQUIRED
+            COMPONENTS ${hosttrace_BOOST_COMPONENTS})
 
-    # if fail try to use the Dyninst installed FindTBB.cmake
-    if(NOT TBB_FOUND)
-        list(APPEND CMAKE_MODULE_PATH ${Dyninst_DIR}/Modules)
+        # some installs of dyninst don't set this properly
+        if(EXISTS "${DYNINST_INCLUDE_DIR}" AND NOT DYNINST_HEADER_DIR)
+            get_filename_component(DYNINST_HEADER_DIR "${DYNINST_INCLUDE_DIR}" REALPATH CACHE)
+        else()
+            find_path(DYNINST_HEADER_DIR
+                NAMES BPatch.h dyninstAPI_RT.h
+                HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR} ${Dyninst_DIR}/../../..
+                PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR} ${Dyninst_DIR}/../../..
+                PATH_SUFFIXES include)
+        endif()
+
+        # useful for defining the location of the runtime API
+        find_library(DYNINST_API_RT dyninstAPI_RT
+            HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
+            PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
+            PATH_SUFFIXES lib)
+
+        # try to find TBB
         find_package(TBB QUIET)
-    endif()
 
-    if(NOT TBB_FOUND)
-        find_path(TBB_INCLUDE_DIR
-            NAMES tbb/tbb.h
-            PATH_SUFFIXES include)
-    endif()
-
-    if(DYNINST_API_RT)
-        target_compile_definitions(hosttrace-dyninst INTERFACE
-            DYNINST_API_RT="${DYNINST_API_RT}")
-    endif()
-
-    if(Boost_DIR)
-        get_filename_component(Boost_RPATH_DIR "${Boost_DIR}" DIRECTORY)
-        get_filename_component(Boost_RPATH_DIR "${Boost_RPATH_DIR}" DIRECTORY)
-        if(EXISTS "${Boost_RPATH_DIR}" AND IS_DIRECTORY "${Boost_RPATH_DIR}")
-            set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${Boost_RPATH_DIR}")
+        # if fail try to use the Dyninst installed FindTBB.cmake
+        if(NOT TBB_FOUND)
+            list(APPEND CMAKE_MODULE_PATH ${Dyninst_DIR}/Modules)
+            find_package(TBB QUIET)
         endif()
-    endif()
 
-    add_rpath(${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
-    target_link_libraries(hosttrace-dyninst INTERFACE
-        ${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
-    foreach(_TARG dyninst dyninstAPI instructionAPI symtabAPI parseAPI headers atomic system thread date_time TBB)
-        if(TARGET Dyninst::${_TARG})
-            target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::${_TARG})
-        elseif(TARGET Boost::${_TARG})
-            target_link_libraries(hosttrace-dyninst INTERFACE Boost::${_TARG})
-        elseif(TARGET ${_TARG})
-            target_link_libraries(hosttrace-dyninst INTERFACE ${_TARG})
+        if(NOT TBB_FOUND)
+            find_path(TBB_INCLUDE_DIR
+                NAMES tbb/tbb.h
+                PATH_SUFFIXES include)
         endif()
-    endforeach()
-    target_include_directories(hosttrace-dyninst SYSTEM INTERFACE
-        ${TBB_INCLUDE_DIR}
-        ${Boost_INCLUDE_DIRS}
-        ${DYNINST_HEADER_DIR})
-    target_compile_definitions(hosttrace-dyninst INTERFACE hosttrace_USE_DYNINST)
 
-    if(DYNINST_API_RT)
-        add_cmake_defines(DYNINST_API_RT VALUE QUOTE DEFAULT)
-    else()
-        add_cmake_defines(DYNINST_API_RT VALUE QUOTE)
+        if(DYNINST_API_RT)
+            target_compile_definitions(hosttrace-dyninst INTERFACE
+                DYNINST_API_RT="${DYNINST_API_RT}")
+        endif()
+
+        if(Boost_DIR)
+            get_filename_component(Boost_RPATH_DIR "${Boost_DIR}" DIRECTORY)
+            get_filename_component(Boost_RPATH_DIR "${Boost_RPATH_DIR}" DIRECTORY)
+            if(EXISTS "${Boost_RPATH_DIR}" AND IS_DIRECTORY "${Boost_RPATH_DIR}")
+                set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${Boost_RPATH_DIR}")
+            endif()
+        endif()
+
+        add_rpath(${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
+        target_link_libraries(hosttrace-dyninst INTERFACE
+            ${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
+        foreach(_TARG dyninst dyninstAPI instructionAPI symtabAPI parseAPI headers atomic system thread date_time TBB)
+            if(TARGET Dyninst::${_TARG})
+                target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::${_TARG})
+            elseif(TARGET Boost::${_TARG})
+                target_link_libraries(hosttrace-dyninst INTERFACE Boost::${_TARG})
+            elseif(TARGET ${_TARG})
+                target_link_libraries(hosttrace-dyninst INTERFACE ${_TARG})
+            endif()
+        endforeach()
+        target_include_directories(hosttrace-dyninst SYSTEM INTERFACE
+            ${TBB_INCLUDE_DIR}
+            ${Boost_INCLUDE_DIRS}
+            ${DYNINST_HEADER_DIR})
+        target_compile_definitions(hosttrace-dyninst INTERFACE hosttrace_USE_DYNINST)
     endif()
 endif()
 

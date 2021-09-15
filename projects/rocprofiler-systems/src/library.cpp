@@ -167,8 +167,10 @@ get_functors()
 bool
 hosttrace_init_tooling()
 {
-    if(get_state() != State::PreInit)
+    static bool _once = false;
+    if(get_state() != State::PreInit || _once)
         return false;
+    _once = true;
 
     HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
 
@@ -466,6 +468,11 @@ extern "C"
 
         get_state() = State::Finalized;
 
+#if defined(HOSTTRACE_USE_ROCTRACER)
+        // ensure that threads running roctracer callbacks shutdown
+        comp::roctracer::tear_down();
+#endif
+
         // stop the main bundle and report the high-level metrics
         if(get_main_bundle())
         {
@@ -506,6 +513,7 @@ extern "C"
             }
         }
 
+        bool _perfetto_output_error = false;
         if(get_use_perfetto() && !is_system_backend())
         {
             // Make sure the last event is closed for this example.
@@ -535,14 +543,20 @@ extern "C"
             std::ofstream output{};
             output.open(get_perfetto_output_filename(), std::ios::out | std::ios::binary);
             if(!output)
+            {
                 fprintf(stderr, "[%s]> Error opening '%s'...\n", __FUNCTION__,
                         get_perfetto_output_filename().c_str());
+                _perfetto_output_error = true;
+            }
             else
                 output.write(&trace_data[0], trace_data.size());
             output.close();
         }
 
         tim::timemory_finalize();
+
+        if(_perfetto_output_error)
+            throw std::runtime_error("Unable to create perfetto output file");
     }
 
     void hosttrace_trace_set_env(const char* env_name, const char* env_val)

@@ -1,0 +1,327 @@
+name: linux-ci
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  BUILD_TYPE: Release
+  ELFUTILS_DOWNLOAD_VERSION: 0.183
+
+jobs:
+  ubuntu-focal:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        compiler: ['g++']
+        mpi: [ '', 'libmpich-dev mpich', 'libopenmpi-dev openmpi-bin libfabric-dev' ]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Packages
+      run:
+        sudo apt-get update &&
+        sudo apt-get install -y build-essential python3-pip libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev ${{ matrix.compiler }} ${{ matrix.mpi }} &&
+        python3 -m pip install --upgrade pip &&
+        python3 -m pip install 'cmake==3.15.3'
+
+    - name: Configure Env
+      run:
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "/opt/hosttrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/hosttrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+    - name: Configure CMake
+      run:
+        cmake --version &&
+        if [ -z "${{ matrix.mpi }}" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
+        cmake -B ${{ github.workspace }}/build
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_INSTALL_PREFIX=/opt/hosttrace
+          -DHOSTTRACE_USE_MPI=${USE_MPI}
+          -DHOSTTRACE_USE_ROCTRACER=OFF
+          -DHOSTTRACE_BUILD_DYNINST=ON
+          -DDYNINST_BUILD_ELFUTILS=ON
+          -DDYNINST_BUILD_LIBIBERTY=ON
+          -DDYNINST_BUILD_SHARED_LIBS=ON
+          -DDYNINST_BUILD_STATIC_LIBS=OFF
+
+    - name: Build
+      run:
+        cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
+
+    - name: Install
+      run:
+        cmake --build ${{ github.workspace }}/build --target install --parallel 2
+
+    - name: Test
+      working-directory: ${{ github.workspace }}/build
+      run:
+        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest.log
+
+    - name: Test Install
+      run:
+        hosttrace --help &&
+        hosttrace -- sleep 1 &&
+        hosttrace -o sleep.inst -- sleep &&
+        ./sleep.inst 1 &&
+        rm ./sleep.inst
+
+    - name: Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: ctest-log
+        path: |
+          ${{ github.workspace }}/build/hosttrace-ctest.log
+
+  ubuntu-bionic:
+    runs-on: ubuntu-18.04
+    strategy:
+      matrix:
+        compiler: ['g++-7', 'g++-8']
+        mpi: [ '', 'libmpich-dev mpich', 'libopenmpi-dev openmpi-bin libfabric-dev' ]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Packages
+      run:
+        sudo apt-get update &&
+        sudo apt-get install -y build-essential python3-pip ${{ matrix.compiler }} ${{ matrix.mpi }} &&
+        python3 -m pip install --upgrade pip &&
+        python3 -m pip install 'cmake==3.15.3'
+
+    - name: Configure Env
+      run:
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "/opt/hosttrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/hosttrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+    - name: Configure CMake
+      run:
+        cmake --version &&
+        if [ -z "${{ matrix.mpi }}" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
+        cmake -B ${{ github.workspace }}/build
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_INSTALL_PREFIX=/opt/hosttrace
+          -DHOSTTRACE_USE_MPI=${USE_MPI}
+          -DHOSTTRACE_USE_ROCTRACER=OFF
+          -DHOSTTRACE_BUILD_DYNINST=ON
+          -DDYNINST_BUILD_TBB=ON
+          -DDYNINST_BUILD_BOOST=ON
+          -DDYNINST_BUILD_ELFUTILS=ON
+          -DDYNINST_BUILD_LIBIBERTY=ON
+
+    - name: Build
+      run:
+        cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
+
+    - name: Install
+      run:
+        cmake --build ${{ github.workspace }}/build --target install --parallel 2
+
+    - name: Test
+      working-directory: ${{ github.workspace }}/build
+      run:
+        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest.log
+
+    - name: Test Install
+      run:
+        hosttrace --help &&
+        hosttrace -- sleep 1 &&
+        hosttrace -o sleep.inst -- sleep &&
+        ./sleep.inst 1 &&
+        rm ./sleep.inst
+
+    - name: Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: ctest-log
+        path: |
+          ${{ github.workspace }}/build/hosttrace-ctest.log
+
+  ubuntu-focal-external:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        compiler: ['g++-7', 'g++-8', 'g++-9', 'g++-10']
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Packages
+      run:
+        sudo apt-get update &&
+        sudo apt-get install -y build-essential python3-pip libboost-{atomic,system,thread,date-time,filesystem,timer}-dev libtbb-dev libiberty-dev ${{ matrix.compiler }} &&
+        sudo python3 -m pip install --upgrade pip &&
+        python3 -m pip install 'cmake==3.15.3'
+
+    - name: Configure Env
+      run:
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "CMAKE_PREFIX_PATH=/opt/opt/dyninst:/opt/elfutils:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV &&
+        echo "/opt/hosttrace/bin:/opt/dyninst/bin:/opt/elfutils/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/hosttrace/lib:/opt/dyninst/lib:/opt/elfutils/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+    - name: Install ElfUtils
+      run:
+        pushd external &&
+        wget https://sourceware.org/elfutils/ftp/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2 &&
+        tar xjf elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2 &&
+        pushd elfutils-${ELFUTILS_DOWNLOAD_VERSION} &&
+        CFLAGS="-g -O2" ./configure --enable-install-elfh --prefix=/opt/elfutils --disable-libdebuginfod --disable-debuginfod &&
+        make -j2 &&
+        make install -j2 &&
+        popd &&
+        rm -rf elfutils*
+
+    - name: Install Dyninst
+      run:
+        cmake --version &&
+        git submodule update --init external/dyninst &&
+        cd external/dyninst &&
+        cmake -B build
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_INSTALL_PREFIX=/opt/dyninst &&
+        cmake --build build --target all --parallel 2 &&
+        cmake --build build --target install --parallel 2 &&
+        rm -rf build
+
+    - name: Configure CMake
+      run:
+        cmake --version &&
+        cmake -B ${{ github.workspace }}/build
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_INSTALL_PREFIX=/opt/hosttrace
+          -DHOSTTRACE_USE_MPI=OFF
+          -DHOSTTRACE_USE_ROCTRACER=OFF
+
+    - name: Build
+      run:
+        cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
+
+    - name: Install
+      run:
+        cmake --build ${{ github.workspace }}/build --target install --parallel 2
+
+    - name: Test
+      working-directory: ${{ github.workspace }}/build
+      run:
+        ldd ./hosttrace &&
+        ./hosttrace --help &&
+        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest.log
+
+    - name: Test Install
+      run:
+        ldd $(which hosttrace) &&
+        hosttrace --help &&
+        hosttrace -- sleep 1 &&
+        hosttrace -o sleep.inst -- sleep &&
+        ./sleep.inst 1 &&
+        rm ./sleep.inst
+
+    - name: Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: ctest-log
+        path: |
+          ${{ github.workspace }}/build/hosttrace-ctest.log
+
+  ubuntu-focal-dyninst-package:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        compiler: ['g++']
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Packages
+      run:
+        sudo apt-get update &&
+        sudo apt-get install -y build-essential python3-pip ${{ matrix.compiler }} &&
+        sudo python3 -m pip install --upgrade pip &&
+        python3 -m pip install 'cmake==3.15.3'
+
+    - name: Configure Env
+      run:
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "CMAKE_PREFIX_PATH=/opt/opt/dyninst:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV &&
+        echo "/opt/hosttrace/bin:/opt/dyninst/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/hosttrace/lib:/opt/dyninst/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+    - name: Install Dyninst
+      run:
+        cmake --version &&
+        git submodule update --init external/dyninst &&
+        cd external/dyninst &&
+        cmake -B build
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/external/dyninst-install
+          -DBUILD_TBB=ON
+          -DBUILD_BOOST=ON
+          -DBUILD_ELFUTILS=ON
+          -DBUILD_LIBIBERTY=ON &&
+        cmake --build build --target package --parallel 4 &&
+        mkdir /opt/dyninst &&
+        ./build/Dyninst-*-Linux.sh --prefix=/opt/dyninst --exclude-subdir --skip-license &&
+        rm -rf build
+
+    - name: Configure CMake
+      run:
+        cmake --version &&
+        cmake -B ${{ github.workspace }}/build
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_INSTALL_PREFIX=/opt/hosttrace
+          -DHOSTTRACE_USE_MPI=OFF
+          -DHOSTTRACE_USE_ROCTRACER=OFF
+
+    - name: Build
+      run:
+        cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
+
+    - name: Install
+      run:
+        cmake --build ${{ github.workspace }}/build --target install --parallel 2
+
+    - name: Test
+      working-directory: ${{ github.workspace }}/build
+      run:
+        ldd ./hosttrace &&
+        ./hosttrace --help &&
+        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest.log
+
+    - name: Test Install
+      run:
+        ldd $(which hosttrace) &&
+        hosttrace --help &&
+        hosttrace -- sleep 1 &&
+        hosttrace -o sleep.inst -- sleep &&
+        ./sleep.inst 1 &&
+        rm ./sleep.inst
+
+    - name: Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: ctest-log
+        path: |
+          ${{ github.workspace }}/build/hosttrace-ctest.log

@@ -1,0 +1,39 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: formatting
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  formatting:
+    runs-on: ubuntu-18.04
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install dependencies
+      run: |
+        DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
+        sudo apt-get update
+        sudo apt-get install -y software-properties-common wget curl
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+        echo "deb http://apt.llvm.org/${DISTRIB_CODENAME}/ llvm-toolchain-${DISTRIB_CODENAME}-11 main" | sudo tee -a /etc/apt/sources.list.d/llvm-toolchain.list
+        echo "deb-src http://apt.llvm.org/${DISTRIB_CODENAME}/ llvm-toolchain-${DISTRIB_CODENAME}-11 main" | sudo tee -a /etc/apt/sources.list.d/llvm-toolchain.list
+        sudo apt-get update
+        sudo apt-get install -y clang-format-11
+    - name: clang-format
+      run: |
+        set +e
+        FILES=$(find include src examples -type f | egrep '\.hpp$|\.cpp$|\.cpp\.in$')
+        FORMAT_OUT=$(clang-format-11 -output-replacements-xml ${FILES})
+        RET=$(echo ${FORMAT_OUT} | grep -c '<replacement ')
+        if [ "${RET}" -ne 0 ]; then
+          echo -e "\nError! Code not formatted. Detected ${RET} lines\n"
+          clang-format-11 -i ${FILES}
+          git diff
+          exit ${RET}
+        fi

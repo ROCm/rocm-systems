@@ -187,7 +187,7 @@ consume_parameters(T&&...)
 extern "C"
 {
     bool are_file_include_exclude_lists_empty();
-    bool process_file_for_instrumentation(const string_t& file_name);
+    bool instrument_module(const string_t& file_name);
     bool instrument_entity(const string_t& function_name);
     bool module_constraint(char* fname);
     bool routine_constraint(const char* fname);

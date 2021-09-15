@@ -72,8 +72,31 @@ int
 main(int argc, char** argv)
 {
 #if defined(DYNINST_API_RT)
-    tim::set_env<string_t>("DYNINSTAPI_RT_LIB", DYNINST_API_RT, 0);
+    auto _dyn_api_rt_paths = tim::delimit(DYNINST_API_RT, ":");
+#else
+    auto _dyn_api_rt_paths = std::vector<std::string>{};
 #endif
+    auto _dyn_api_rt_abs = get_absolute_lib_filepath("libdyninstAPI_RT.so");
+    _dyn_api_rt_paths.insert(_dyn_api_rt_paths.begin(), _dyn_api_rt_abs);
+    for(auto&& itr : _dyn_api_rt_paths)
+    {
+        auto file_exists = [](const std::string& _fname) {
+            struct stat _buffer;
+            if(stat(_fname.c_str(), &_buffer) == 0)
+                return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
+            return false;
+        };
+        if(file_exists(itr))
+            tim::set_env<string_t>("DYNINSTAPI_RT_LIB", itr, 0);
+        else if(file_exists(TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.so")))
+            tim::set_env<string_t>("DYNINSTAPI_RT_LIB",
+                                   TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.so"), 0);
+        else if(file_exists(TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.a")))
+            tim::set_env<string_t>("DYNINSTAPI_RT_LIB",
+                                   TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.a"), 0);
+    }
+    verbprintf(0, "[hosttrace] DYNINST_API_RT: %s\n",
+               tim::get_env<string_t>("DYNINSTAPI_RT_LIB", "").c_str());
 
     argv0 = argv[0];
 
@@ -156,12 +179,12 @@ main(int argc, char** argv)
 
     if(verbose_level > 1)
     {
-        std::cout << "[original]: " << cmd_string(argc, argv) << std::endl;
-        std::cout << "[cfg-args]: " << cmd_string(_argc, _argv) << std::endl;
+        std::cout << "[hosttrace][original]: " << cmd_string(argc, argv) << std::endl;
+        std::cout << "[hosttrace][cfg-args]: " << cmd_string(_argc, _argv) << std::endl;
     }
 
     if(_cmdc > 0)
-        std::cout << "\n [command]: " << cmd_string(_cmdc, _cmdv) << "\n\n";
+        std::cout << "\n[hosttrace][command]: " << cmd_string(_cmdc, _cmdv) << "\n\n";
 
     if(_cmdc > 0)
         cmdv0 = _cmdv[0];
@@ -380,17 +403,18 @@ main(int argc, char** argv)
 
     string_t extra_help = "-- <CMD> <ARGS>";
     auto     err        = parser.parse(_argc, _argv);
-    if(err)
-    {
-        std::cerr << err << std::endl;
-        parser.print_help(extra_help);
-        return -1;
-    }
 
     if(parser.exists("h") || parser.exists("help"))
     {
         parser.print_help(extra_help);
         return 0;
+    }
+
+    if(err)
+    {
+        std::cerr << err << std::endl;
+        parser.print_help(extra_help);
+        return -1;
     }
 
     if(parser.exists("e"))
@@ -892,7 +916,7 @@ main(int argc, char** argv)
         use_mpi = true;
 
     bool use_mpip = false;
-    if(use_mpi && binary_rewrite)
+    if(use_mpi)
         use_mpip = true;
 
     //----------------------------------------------------------------------------------//
@@ -1146,8 +1170,9 @@ main(int argc, char** argv)
     auto trace_call_args =
         hosttrace_call_expr("HOSTTRACE_COMPONENTS", default_components);
     auto use_mpi_call_args  = hosttrace_call_expr("HOSTTRACE_USE_MPI", "ON");
-    auto use_mpip_call_args = hosttrace_call_expr("HOSTTRACE_USE_MPIP", "ON");
-    auto none_call_args     = hosttrace_call_expr();
+    auto use_mpip_call_args = hosttrace_call_expr(
+        "HOSTTRACE_USE_MPIP", (binary_rewrite && use_mpi && use_mpip) ? "ON" : "OFF");
+    auto none_call_args = hosttrace_call_expr();
 
     verbprintf(2, "Done\n");
     verbprintf(2, "Getting call snippets... ");
@@ -1231,7 +1256,7 @@ main(int argc, char** argv)
     if(use_mpi && umpi_call)
         init_names.push_back(umpi_call.get());
 
-    if(init_call)
+    if(init_call && binary_rewrite)
         init_names.push_back(init_call.get());
 
     if(binary_rewrite)
@@ -1317,11 +1342,11 @@ main(int argc, char** argv)
             if(std::string{ modname }.find("libdyninst") != std::string::npos)
                 continue;
 
-            if(module_constraint(modname) || !process_file_for_instrumentation(modname))
-            {
-                verbprintf(1, "Skipping constrained module: '%s'\n", modname);
+            if(module_constraint(modname))
                 continue;
-            }
+
+            if(!instrument_module(modname))
+                continue;
 
             itr->getName(fname, FUNCNAMELEN);
 
@@ -1334,18 +1359,10 @@ main(int argc, char** argv)
             }
 
             if(routine_constraint(name.m_name.c_str()))
-            {
-                verbprintf(1, "Skipping function [constrained]: %s\n",
-                           name.m_name.c_str());
                 continue;
-            }
 
             if(!instrument_entity(name.m_name))
-            {
-                verbprintf(1, "Skipping function [excluded]: %s / %s\n",
-                           name.m_name.c_str(), name.get().c_str());
                 continue;
-            }
 
             if(is_static_exe && has_debug_info && string_t{ fname } == "_fini" &&
                string_t{ modname } == "DEFAULT_MODULE")
@@ -1816,8 +1833,19 @@ main(int argc, char** argv)
 //======================================================================================//
 
 bool
-process_file_for_instrumentation(const string_t& file_name)
+instrument_module(const string_t& file_name)
 {
+    auto _report = [&file_name](const string_t& _action, const string_t& _reason,
+                                int _lvl) {
+        static strset_t already_reported{};
+        if(already_reported.count(file_name) == 0)
+        {
+            verbprintf(_lvl, "%s module [%s] : '%s'...\n", _action.c_str(),
+                       _reason.c_str(), file_name.c_str());
+            already_reported.insert(file_name);
+        }
+    };
+
     auto is_include = [&](bool _if_empty) {
         if(file_include.empty())
             return _if_empty;
@@ -1835,28 +1863,22 @@ process_file_for_instrumentation(const string_t& file_name)
         for(auto& itr : file_exclude)
         {
             if(std::regex_search(file_name, itr))
-            {
-                verbprintf(2, "Excluding module [user-regex] : '%s'...\n",
-                           file_name.c_str());
                 return true;
-            }
         }
         return false;
     };
 
-    auto _user_include = is_include(false) && !is_exclude();
+    auto _user_include = is_include(false);
+    auto _user_exclude = is_exclude();
 
-    if(_user_include)
-    {
-        verbprintf(2, "Including module [user-regex] : '%s'...\n", file_name.c_str());
-        return true;
-    }
+    if(_user_include && !_user_exclude)
+        return (_report("Including", "user-regex", 2), true);
 
     string_t          ext_str = "\\.(s|S)$";
     static std::regex ext_regex(ext_str, regex_opts);
     static std::regex sys_regex("^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts);
     static std::regex userlib_regex(
-        "^lib(hosttrace|caliper|gotcha|papi|cupti|TAU|likwid|"
+        "^(lib|)(hosttrace|caliper|gotcha|papi|cupti|TAU|likwid|"
         "profiler|tcmalloc|dyninst|pfm|nvtx|upcxx|pthread|nvperf|hsa)",
         regex_opts);
     static std::regex corelib_regex("^lib(rt-|dl-|util-|python)", regex_opts);
@@ -1887,37 +1909,27 @@ process_file_for_instrumentation(const string_t& file_name)
 
     if(std::regex_search(file_name, ext_regex))
     {
-        verbprintf(3, "Excluding instrumentation [file extension] : '%s'...\n",
-                   file_name.c_str());
-        return false;
+        return (_report("Excluding", "file extension", 3), false);
     }
 
     if(std::regex_search(file_name, sys_regex))
     {
-        verbprintf(3, "Excluding instrumentation [system library] : '%s'...\n",
-                   file_name.c_str());
-        return false;
+        return (_report("Excluding", "system library", 3), false);
     }
 
     if(std::regex_search(file_name, corelib_regex))
     {
-        verbprintf(3, "Excluding instrumentation [core library] : '%s'...\n",
-                   file_name.c_str());
-        return false;
+        return (_report("Excluding", "core library", 3), false);
     }
 
     if(std::regex_search(file_name, userlib_regex))
     {
-        verbprintf(3, "Excluding instrumentation [instr library] : '%s'...\n",
-                   file_name.c_str());
-        return false;
+        return (_report("Excluding", "instrumentation", 3), false);
     }
 
     if(std::regex_search(file_name, prefix_regex))
     {
-        verbprintf(3, "Excluding instrumentation [prefix match] : '%s'...\n",
-                   file_name.c_str());
-        return false;
+        return (_report("Excluding", "prefix match", 3), false);
     }
 
     /*if(std::regex_search(file_name, suffix_regex))
@@ -1927,17 +1939,12 @@ process_file_for_instrumentation(const string_t& file_name)
         return false;
     }*/
 
-    bool use = is_include(true) && !is_exclude();
-    if(use)
-    {
-        static strset_t already_reported;
-        if(already_reported.count(file_name) == 0)
-        {
-            verbprintf(2, "%s |> [ %s ]\n", __FUNCTION__, file_name.c_str());
-            already_reported.insert(file_name);
-        }
-    }
-    return use;
+    if(_user_exclude)
+        return (_report("Excluding", "user-regex", 2), false);
+
+    _report("Including", "no constraint", 2);
+
+    return true;
 }
 
 //======================================================================================//
@@ -1990,7 +1997,7 @@ instrument_entity(const string_t& function_name)
         "delete|std::allocat|"
         "nvtx|gcov|main\\.cold|TAU|tau|Tau|dyn|RT|dl|sys|pthread|posix|clone|virtual "
         "thunk|non-virtual thunk|transaction "
-        "clone|RtsLayer|DYNINST|PthreadLayer|threaded_func|targ8)",
+        "clone|RtsLayer|DYNINST|PthreadLayer|threaded_func|targ8|PMPI)",
         regex_opts);
     static std::regex trailing("(\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$",
                                regex_opts);
@@ -2140,18 +2147,7 @@ module_constraint(char* fname)
     if(_fname == "DEFAULT_MODULE" || _fname == "LIBRARY_MODULE")
         return false;
 
-    // auto _valid_file_extension = std::regex_search(
-    //    _fname, std::regex{ "\\.(a|c|f|o|cc|so|cxx|cpp|C|F|CC|f90|F90|so\\.[0-9\\.]+)$",
-    //                        regex_opts });
-
-    auto _valid_file_regex = process_file_for_instrumentation(_fname);
-
-    // if module compiled from C, C++, or Fortran or a library
-    // if(_valid_file_extension && _valid_file_regex)
-    //    return false;
-
-    // apply regex expressions
-    if(_valid_file_regex)
+    if(instrument_module(_fname))
         return false;
 
     // do not instrument
@@ -2207,7 +2203,7 @@ get_absolute_exe_filepath(std::string exe_name)
             if(file_exists(TIMEMORY_JOIN('/', pitr, exe_name)))
             {
                 exe_name = TIMEMORY_JOIN('/', pitr, exe_name);
-                verbprintf(0, "Resolved '%s' to '%s'...\n", _exe_orig.c_str(),
+                verbprintf(0, "[hosttrace] Resolved '%s' to '%s'...\n", _exe_orig.c_str(),
                            exe_name.c_str());
                 break;
             }
@@ -2242,7 +2238,7 @@ get_absolute_lib_filepath(std::string lib_name)
             if(file_exists(TIMEMORY_JOIN('/', pitr, lib_name)))
             {
                 lib_name = TIMEMORY_JOIN('/', pitr, lib_name);
-                verbprintf(0, "Resolved '%s' to '%s'...\n", _lib_orig.c_str(),
+                verbprintf(0, "[hosttrace] Resolved '%s' to '%s'...\n", _lib_orig.c_str(),
                            lib_name.c_str());
                 break;
             }

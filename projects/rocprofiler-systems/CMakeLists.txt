@@ -44,6 +44,10 @@ include(Packages)           # finds third-party libraries
 
 hosttrace_activate_clang_tidy()
 
+set(CMAKE_C_VISIBILITY_PRESET "hidden")
+set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
 #------------------------------------------------------------------------------#
 #
 #                   hosttrace-library target
@@ -86,7 +90,7 @@ endif()
 
 set_target_properties(hosttrace-library PROPERTIES
     OUTPUT_NAME     hosttrace
-    INSTALL_RPATH   "\$ORIGIN:${DYNINST_API_RT_DIR}:${CMAKE_INSTALL_RPATH}")
+    INSTALL_RPATH   "\$ORIGIN:${DYNINST_API_RT_DIR}")
 
 install(
     TARGETS     hosttrace-library
@@ -115,7 +119,8 @@ target_link_libraries(hosttrace-exe PRIVATE
 
 set_target_properties(hosttrace-exe PROPERTIES
     OUTPUT_NAME                 hosttrace
-    INSTALL_RPATH_USE_LINK_PATH ON)
+    INSTALL_RPATH_USE_LINK_PATH ON
+    INSTALL_RPATH               "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:${DYNINST_API_RT_DIR}")
 
 install(
     TARGETS     hosttrace-exe

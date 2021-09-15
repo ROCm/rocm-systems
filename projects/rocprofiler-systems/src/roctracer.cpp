@@ -145,6 +145,14 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                     TRACE_EVENT_END("device", end_timestamp);
                 }
 
+                /*if(get_use_timemory())
+                {
+                    static auto _scope = scope::flat() + scope::timeline();
+                    roctracer_bundle_t{ _name, _scope }
+                        .start()
+                        .store(end_timestamp - hsa_begin_timestamp)
+                        .stop();
+                }*/
                 // timemory is disabled in this callback because collecting data in this
                 // thread causes strange segmentation faults
             }
@@ -341,6 +349,22 @@ roctracer_is_setup()
     static bool _v = false;
     return _v;
 }
+
+using roctracer_functions_t = std::vector<std::pair<std::string, std::function<void()>>>;
+
+auto&
+roctracer_setup_routines()
+{
+    static auto _v = roctracer_functions_t{};
+    return _v;
+}
+
+auto&
+roctracer_tear_down_routines()
+{
+    static auto _v = roctracer_functions_t{};
+    return _v;
+}
 }  // namespace
 
 #if !defined(HOSTTRACE_ROCTRACER_LIBKFDWRAPPER)
@@ -391,6 +415,52 @@ roctracer::preinit()
     roctracer_data::description() = "ROCm tracer (activity API)";
 }
 
+bool
+roctracer::is_setup()
+{
+    return roctracer_is_setup();
+}
+
+void
+roctracer::add_setup(const std::string& _lbl, std::function<void()>&& _func)
+{
+    roctracer_setup_routines().emplace_back(_lbl, std::move(_func));
+}
+
+void
+roctracer::add_tear_down(const std::string& _lbl, std::function<void()>&& _func)
+{
+    roctracer_tear_down_routines().emplace_back(_lbl, std::move(_func));
+}
+
+void
+roctracer::remove_setup(const std::string& _lbl)
+{
+    auto& _data = roctracer_setup_routines();
+    for(auto itr = _data.begin(); itr != _data.end(); ++itr)
+    {
+        if(itr->first == _lbl)
+        {
+            _data.erase(itr);
+            break;
+        }
+    }
+}
+
+void
+roctracer::remove_tear_down(const std::string& _lbl)
+{
+    auto& _data = roctracer_setup_routines();
+    for(auto itr = _data.begin(); itr != _data.end(); ++itr)
+    {
+        if(itr->first == _lbl)
+        {
+            _data.erase(itr);
+            break;
+        }
+    }
+}
+
 void
 roctracer::setup()
 {
@@ -408,17 +478,25 @@ roctracer::setup()
     auto _kfdwrapper = dynamic_library{ "HOSTTRACE_ROCTRACER_LIBKFDWRAPPER",
                                         HOSTTRACE_ROCTRACER_LIBKFDWRAPPER };
 
-    // Allocating tracing pool
-    roctracer_properties_t properties{};
-    properties.buffer_size         = 0x1000;
-    properties.buffer_callback_fun = hip_activity_callback;
-    ROCTRACER_CALL(roctracer_open_pool(&properties));
     ROCTRACER_CALL(roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, nullptr));
+
+    if(roctracer_default_pool() == nullptr)
+    {
+        // Allocating tracing pool
+        roctracer_properties_t properties{};
+        properties.buffer_size         = 0x1000;
+        properties.buffer_callback_fun = hip_activity_callback;
+        ROCTRACER_CALL(roctracer_open_pool(&properties));
+    }
 
     // Enable API callbacks, all domains
     ROCTRACER_CALL(roctracer_enable_callback(hip_api_callback, nullptr));
     // Enable activity tracing, all domains
     ROCTRACER_CALL(roctracer_enable_activity());
+
+    // callback for HSA
+    for(auto& itr : roctracer_setup_routines())
+        itr.second();
 }
 
 void
@@ -431,22 +509,21 @@ roctracer::tear_down()
     HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
 
     // flush all the activity
-    ROCTRACER_CALL(roctracer_flush_activity());
-
+    if(roctracer_default_pool() != nullptr)
+    {
+        ROCTRACER_CALL(roctracer_flush_activity());
+    }
     // flush all buffers
     roctracer_flush_buf();
 
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
-
-    ROCTRACER_CALL(
-        roctracer_disable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
+    // callback for hsa
+    for(auto& itr : roctracer_tear_down_routines())
+        itr.second();
 
     // Disable tracing and closing the pool
     ROCTRACER_CALL(roctracer_disable_callback());
     ROCTRACER_CALL(roctracer_disable_activity());
-
-    // closing the pool with HSA enabled causes segfaults
-    // ROCTRACER_CALL(roctracer_close_pool());
+    ROCTRACER_CALL(roctracer_close_pool());
 }
 
 void
@@ -459,8 +536,6 @@ roctracer::start()
 void
 roctracer::stop()
 {
-    // flush all the activity
-    ROCTRACER_CALL(roctracer_flush_activity());
     if(tracker_type::stop() == 0)
         tear_down();
 }
@@ -471,84 +546,112 @@ TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(roctracer, false, void)
 TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(roctracer_data, true, double)
 
 // HSA-runtime tool on-load method
-extern "C" TIMEMORY_VISIBILITY("default") bool OnLoad(
-    HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-    const char* const* failed_tool_names)
+extern "C"
 {
-    puts(__FUNCTION__);
-    tim::consume_parameters(table, runtime_version, failed_tool_count, failed_tool_names);
+    TIMEMORY_VISIBILITY("default")
+    bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
+                const char* const* failed_tool_names);
+    TIMEMORY_VISIBILITY("default") void OnUnload();
 
-    // ONLOAD_TRACE_BEG();
-    // on_exit(exit_handler, nullptr);
-
-    get_hsa_timer() = std::make_unique<hsa_timer_t>(table->core_->hsa_system_get_info_fn);
-
-    // const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
-    const char* output_prefix = nullptr;
-
-    // App begin timestamp begin_ts_file.txt
-    // begin_ts_file_handle = open_output_file(output_prefix, "begin_ts_file.txt");
-    // const timestamp_t app_start_time = timer->timestamp_fn_ns();
-    // fprintf(begin_ts_file_handle, "%lu\n", app_start_time);
-
-    bool trace_hsa_api = tim::get_env("HOSTTRACE_ROCTRACER_HSA_API", true);
-    std::vector<std::string> hsa_api_vec =
-        tim::delimit(tim::get_env<std::string>("HOSTTRACE_ROCTRACER_HSA_API_TYPES", ""));
-
-    // Enable HSA API callbacks/activity
-    if(trace_hsa_api)
+    bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
+                const char* const* failed_tool_names)
     {
-        // hsa_api_file_handle = open_output_file(output_prefix, "hsa_api_trace.txt");
+        puts(__FUNCTION__);
+        tim::consume_parameters(table, runtime_version, failed_tool_count,
+                                failed_tool_names);
 
-        // initialize HSA tracing
-        roctracer_set_properties(ACTIVITY_DOMAIN_HSA_API, (void*) table);
+        // ONLOAD_TRACE_BEG();
+        // on_exit(exit_handler, nullptr);
 
-        fprintf(stdout, "    HSA-trace(");
-        fflush(stdout);
-        if(!hsa_api_vec.empty())
-        {
-            for(unsigned i = 0; i < hsa_api_vec.size(); ++i)
+        auto _setup = [=]() {
+            get_hsa_timer() =
+                std::make_unique<hsa_timer_t>(table->core_->hsa_system_get_info_fn);
+
+            // const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
+            const char* output_prefix = nullptr;
+
+            // App begin timestamp begin_ts_file.txt
+            // begin_ts_file_handle = open_output_file(output_prefix,
+            // "begin_ts_file.txt"); const timestamp_t app_start_time =
+            // timer->timestamp_fn_ns(); fprintf(begin_ts_file_handle, "%lu\n",
+            // app_start_time);
+
+            bool trace_hsa_api = tim::get_env("HOSTTRACE_ROCTRACER_HSA_API", true);
+            std::vector<std::string> hsa_api_vec = tim::delimit(
+                tim::get_env<std::string>("HOSTTRACE_ROCTRACER_HSA_API_TYPES", ""));
+
+            // Enable HSA API callbacks/activity
+            if(trace_hsa_api)
             {
-                uint32_t    cid = HSA_API_ID_NUMBER;
-                const char* api = hsa_api_vec[i].c_str();
-                ROCTRACER_CALL(
-                    roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api, &cid, nullptr));
-                ROCTRACER_CALL(roctracer_enable_op_callback(ACTIVITY_DOMAIN_HSA_API, cid,
-                                                            hsa_api_callback, nullptr));
-                printf(" %s", api);
+                // hsa_api_file_handle = open_output_file(output_prefix,
+                // "hsa_api_trace.txt");
+
+                // initialize HSA tracing
+                roctracer_set_properties(ACTIVITY_DOMAIN_HSA_API, (void*) table);
+
+                fprintf(stdout, "    HSA-trace(");
+                fflush(stdout);
+                if(!hsa_api_vec.empty())
+                {
+                    for(unsigned i = 0; i < hsa_api_vec.size(); ++i)
+                    {
+                        uint32_t    cid = HSA_API_ID_NUMBER;
+                        const char* api = hsa_api_vec[i].c_str();
+                        ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api,
+                                                         &cid, nullptr));
+                        ROCTRACER_CALL(roctracer_enable_op_callback(
+                            ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, nullptr));
+                        printf(" %s", api);
+                    }
+                }
+                else
+                {
+                    ROCTRACER_CALL(roctracer_enable_domain_callback(
+                        ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, nullptr));
+                }
+                printf(")\n");
             }
-        }
-        else
-        {
-            ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HSA_API,
-                                                            hsa_api_callback, nullptr));
-        }
-        printf(")\n");
-    }
 
-    bool trace_hsa_activity = tim::get_env("HOSTTRACE_ROCTRACER_HSA_ACTIVITY", true);
-    // Enable HSA GPU activity
-    if(trace_hsa_activity)
-    {
-        // initialize HSA tracing
-        roctracer::hsa_ops_properties_t ops_properties{
-            table, reinterpret_cast<activity_async_callback_t>(hsa_activity_callback),
-            nullptr, output_prefix
+            bool trace_hsa_activity =
+                tim::get_env("HOSTTRACE_ROCTRACER_HSA_ACTIVITY", true);
+            // Enable HSA GPU activity
+            if(trace_hsa_activity)
+            {
+                // initialize HSA tracing
+                roctracer::hsa_ops_properties_t ops_properties{
+                    table,
+                    reinterpret_cast<activity_async_callback_t>(hsa_activity_callback),
+                    nullptr, output_prefix
+                };
+                roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
+
+                fprintf(stdout, "    HSA-activity-trace()\n");
+                fflush(stdout);
+                ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS,
+                                                            HSA_OP_ID_COPY));
+            }
         };
-        roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
 
-        fprintf(stdout, "    HSA-activity-trace()\n");
-        fflush(stdout);
-        ROCTRACER_CALL(
-            roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
+        auto _tear_down = []() {
+            ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
+
+            ROCTRACER_CALL(
+                roctracer_disable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
+        };
+
+        if(comp::roctracer::is_setup())
+            _setup();
+
+        comp::roctracer::add_setup("hsa", std::move(_setup));
+        comp::roctracer::add_tear_down("hsa", std::move(_tear_down));
+
+        return true;
     }
 
-    return true;
-}
-
-// HSA-runtime on-unload method
-extern "C" TIMEMORY_VISIBILITY("default") void OnUnload()
-{
-    puts(__FUNCTION__);
-    // ONLOAD_TRACE("");
+    // HSA-runtime on-unload method
+    void OnUnload()
+    {
+        puts(__FUNCTION__);
+        // ONLOAD_TRACE("");
+    }
 }
