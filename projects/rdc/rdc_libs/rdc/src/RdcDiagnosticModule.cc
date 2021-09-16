@@ -83,8 +83,6 @@ rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(
         rdc_runs.push_back(RDC_DIAG_NODE_TOPOLOGY);
         rdc_runs.push_back(RDC_DIAG_GPU_PARAMETERS);
         rdc_runs.push_back(RDC_DIAG_COMPUTE_QUEUE);
-        rdc_runs.push_back(RDC_DIAG_SDMA_QUEUE);
-        rdc_runs.push_back(RDC_DIAG_VRAM_CHECK);
         rdc_runs.push_back(RDC_DIAG_SYS_MEM_CHECK);
     }
 
@@ -117,11 +115,13 @@ rdc_status_t RdcDiagnosticModule::RdcDiagnosticModule::rdc_diag_destroy() {
 }
 
 RdcDiagnosticModule::RdcDiagnosticModule(const RdcSmiLibPtr& smi_lib,
-    const RdcRasLibPtr& ras_module) {
+    const RdcRasLibPtr& ras_module, const RdcRocrLibPtr& rocr_module) {
     if (smi_lib) {
        diagnostic_modules_.push_back(smi_lib);
     }
-
+    if (rocr_module) {
+       diagnostic_modules_.push_back(rocr_module);
+    }
     if (ras_module) {
        diagnostic_modules_.push_back(ras_module);
     }

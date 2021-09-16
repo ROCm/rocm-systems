@@ -138,9 +138,7 @@ std::string RdciDiagSubSystem::get_test_name
                     (rdc_diag_test_cases_t test_case) const {
         const std::map<rdc_diag_test_cases_t, std::string> test_desc = {
             {RDC_DIAG_COMPUTE_PROCESS, "No compute process"},
-            {RDC_DIAG_SDMA_QUEUE, "SDMA Queue ready"},
             {RDC_DIAG_COMPUTE_QUEUE, "Compute Queue ready"},
-            {RDC_DIAG_VRAM_CHECK, "VRAM check"},
             {RDC_DIAG_SYS_MEM_CHECK, "System memory check"},
             {RDC_DIAG_NODE_TOPOLOGY, "Node topology check"},
             {RDC_DIAG_GPU_PARAMETERS, "GPU parameters check"},

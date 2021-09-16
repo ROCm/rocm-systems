@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcTelemetryModule.h"
 #include "rdc_lib/impl/RdcDiagnosticModule.h"
 #include "rdc_lib/impl/RdcRasLib.h"
+#include "rdc_lib/impl/RdcRocrLib.h"
 
 namespace amd {
 namespace rdc {
@@ -60,9 +61,13 @@ RdcDiagnosticPtr RdcModuleMgrImpl::get_diagnostic_module() {
         ras_lib_.reset(new RdcRasLib("librdc_ras.so"));
     }
 
+    if (!rocr_lib_) {
+        rocr_lib_.reset(new RdcRocrLib("librdc_rocr.so"));
+    }
+
     if (!rdc_diagnostic_module_) {
         rdc_diagnostic_module_.reset(
-            new RdcDiagnosticModule(smi_lib_, ras_lib_));
+            new RdcDiagnosticModule(smi_lib_, ras_lib_, rocr_lib_));
     }
 
     return rdc_diagnostic_module_;

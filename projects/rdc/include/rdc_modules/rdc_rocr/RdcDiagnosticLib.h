@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2020 - present Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021 - present Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,39 +19,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
-#define INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
-
-#include <memory>
-#include "rdc_lib/RdcModuleMgr.h"
-#include "rdc_lib/RdcMetricFetcher.h"
-#include "rdc_lib/RdcTelemetry.h"
-#include "rdc_lib/impl/RdcRasLib.h"
-#include "rdc_lib/impl/RdcSmiLib.h"
-#include "rdc_lib/impl/RdcRocrLib.h"
-
-namespace amd {
-namespace rdc {
-
-class RdcModuleMgrImpl: public RdcModuleMgr {
- public:
-    RdcTelemetryPtr get_telemetry_module() override;
-    RdcDiagnosticPtr get_diagnostic_module() override;
-    explicit RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher);
- private:
-    //  Function module
-    RdcTelemetryPtr rdc_telemetry_module_;
-    RdcDiagnosticPtr rdc_diagnostic_module_;
-
-    //  Domain module
-    RdcRasLibPtr ras_lib_;
-    RdcSmiLibPtr smi_lib_;
-    RdcMetricFetcherPtr fetcher_;
-    RdcRocrLibPtr rocr_lib_;
-};
-
-}  // namespace rdc
-}  // namespace amd
+#ifndef RDC_MODULES_RDC_DIAGNOSTIC_RDCDIAGNOSTICLIB_H_
+#define RDC_MODULES_RDC_DIAGNOSTIC_RDCDIAGNOSTICLIB_H_
+#include "rdc/rdc.h"
+#include "rdc_lib/RdcDiagnosticLibInterface.h"
 
 
-#endif  // INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
+#endif  // RDC_MODULES_RDC_DIAGNOSTIC_RDCDIAGNOSTICLIB_H_

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2020 - present Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021 - present Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,39 +19,34 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
-#define INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
 
-#include <memory>
-#include "rdc_lib/RdcModuleMgr.h"
-#include "rdc_lib/RdcMetricFetcher.h"
-#include "rdc_lib/RdcTelemetry.h"
-#include "rdc_lib/impl/RdcRasLib.h"
-#include "rdc_lib/impl/RdcSmiLib.h"
-#include "rdc_lib/impl/RdcRocrLib.h"
+#include "rdc_modules/rdc_rocr/RdcRocrBase.h"
+#include <string.h>
 
 namespace amd {
 namespace rdc {
 
-class RdcModuleMgrImpl: public RdcModuleMgr {
- public:
-    RdcTelemetryPtr get_telemetry_module() override;
-    RdcDiagnosticPtr get_diagnostic_module() override;
-    explicit RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher);
- private:
-    //  Function module
-    RdcTelemetryPtr rdc_telemetry_module_;
-    RdcDiagnosticPtr rdc_diagnostic_module_;
+RdcRocrBase::RdcRocrBase(void) {
+  num_iteration_ = 1;
+  cpu_device_.handle = -1;
+  gpu_device1_.handle = -1;
+  device_pool_.handle = 0;
+  kern_arg_pool_.handle = 0;
+  main_queue_ = nullptr;
+  kernarg_buffer_ = nullptr;
+  kernel_object_ = 0;
+  memset(&aql_, 0, sizeof(aql_));
+  set_requires_profile(-1);
+  set_enable_interrupt(false);
+  set_kernel_file_name("");
+  set_verbosity(1);
+  set_monitor_verbosity(0);
+  set_title("unset_title");
+  orig_hsa_enable_interrupt_ = nullptr;
+}
 
-    //  Domain module
-    RdcRasLibPtr ras_lib_;
-    RdcSmiLibPtr smi_lib_;
-    RdcMetricFetcherPtr fetcher_;
-    RdcRocrLibPtr rocr_lib_;
-};
+RdcRocrBase::~RdcRocrBase() {
+}
 
 }  // namespace rdc
 }  // namespace amd
-
-
-#endif  // INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
