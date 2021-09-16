@@ -1859,15 +1859,19 @@ def showPower(deviceList):
 
     @param deviceList: List of DRM devices (can be a single-item list)
     """
+    secondaryPresent=False
     printLogSpacer(' Power Consumption ')
     for device in deviceList:
         if checkIfSecondaryDie(device):
-            printLog(device, 'Average Graphics Package Power (W)', "Secondary die")
-            printLog(None, "\t\tPrimary die above shows total (primary + secondary) socket power information", None)
+            printLog(device, 'Average Graphics Package Power (W)', "N/A (Secondary die)")
+            secondaryPresent=True
         elif str(getPower(device)) != '0.0':
             printLog(device, 'Average Graphics Package Power (W)', getPower(device))
         else:
             printErrLog(device, 'Unable to get Average Graphics Package Power Consumption')
+    if secondaryPresent:
+        printLog(None, "\n\t\tPrimary die (usually one above or below the secondary) shows total (primary + secondary) socket power information", None)
+
     printLogSpacer()
 
 
