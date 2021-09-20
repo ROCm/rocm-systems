@@ -32,12 +32,9 @@ main(int argc, char** argv)
     size_t nthread = 16;
     size_t nitr    = 50000;
     long   nfib    = 10;
-    if(argc > 1)
-        nfib = atol(argv[1]);
-    if(argc > 2)
-        nthread = atol(argv[2]);
-    if(argc > 3)
-        nitr = atol(argv[3]);
+    if(argc > 1) nfib = atol(argv[1]);
+    if(argc > 2) nthread = atol(argv[2]);
+    if(argc > 3) nitr = atol(argv[3]);
 
     std::vector<std::thread> threads{};
     for(size_t i = 0; i < nthread; ++i)

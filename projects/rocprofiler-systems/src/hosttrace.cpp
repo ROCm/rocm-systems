@@ -186,8 +186,7 @@ main(int argc, char** argv)
     if(_cmdc > 0)
         std::cout << "\n[hosttrace][command]: " << cmd_string(_cmdc, _cmdv) << "\n\n";
 
-    if(_cmdc > 0)
-        cmdv0 = _cmdv[0];
+    if(_cmdc > 0) cmdv0 = _cmdv[0];
 
     std::stringstream jump_description;
     jump_description
@@ -417,8 +416,7 @@ main(int argc, char** argv)
         return -1;
     }
 
-    if(parser.exists("e"))
-        werror = true;
+    if(parser.exists("e")) werror = true;
 
     if(parser.exists("v"))
     {
@@ -434,11 +432,9 @@ main(int argc, char** argv)
         debug_print   = true;
     }
 
-    if(parser.exists("m"))
-        main_fname = parser.get<string_t>("m");
+    if(parser.exists("m")) main_fname = parser.get<string_t>("m");
 
-    if(parser.exists("l"))
-        loop_level_instr = true;
+    if(parser.exists("l")) loop_level_instr = true;
 
     if(_cmdc == 0 && parser.exists("c"))
     {
@@ -485,17 +481,13 @@ main(int argc, char** argv)
         inputlib = parser.get<strvec_t>("L");
     }
 
-    if(parser.exists("S"))
-        stl_func_instr = true;
+    if(parser.exists("S")) stl_func_instr = true;
 
-    if(parser.exists("cstdlib"))
-        cstd_func_instr = true;
+    if(parser.exists("cstdlib")) cstd_func_instr = true;
 
-    if(parser.exists("mpi"))
-        use_mpi = true;
+    if(parser.exists("mpi")) use_mpi = true;
 
-    if(parser.exists("p"))
-        _pid = parser.get<int>("p");
+    if(parser.exists("p")) _pid = parser.get<int>("p");
 
     if(parser.exists("d"))
     {
@@ -509,8 +501,7 @@ main(int argc, char** argv)
                 break;
             }
             default_components += _components.at(i);
-            if(i + 1 < _components.size())
-                default_components += ",";
+            if(i + 1 < _components.size()) default_components += ",";
         }
         if(default_components == "none")
             default_components = {};
@@ -531,8 +522,7 @@ main(int argc, char** argv)
         instr_pop_hash  = "hosttrace_pop_" + instr_mode + "_hash";
     }
 
-    if(parser.exists("prefer"))
-        prefer_library = parser.get<string_t>("prefer");
+    if(parser.exists("prefer")) prefer_library = parser.get<string_t>("prefer");
 
     if(parser.exists("load"))
     {
@@ -564,8 +554,7 @@ main(int argc, char** argv)
     fini_stub_names = parser.get<strvec_t>("fini-functions");
     auto env_vars   = parser.get<strvec_t>("env");
 
-    if(verbose_level >= 0)
-        tim::makedir(modfunc_dump_dir);
+    if(verbose_level >= 0) tim::makedir(modfunc_dump_dir);
 
     //----------------------------------------------------------------------------------//
     //
@@ -576,8 +565,7 @@ main(int argc, char** argv)
     //  Helper function for adding regex expressions
     //
     auto add_regex = [](auto& regex_array, const string_t& regex_expr) {
-        if(!regex_expr.empty())
-            regex_array.push_back(std::regex(regex_expr, regex_opts));
+        if(!regex_expr.empty()) regex_array.push_back(std::regex(regex_expr, regex_opts));
     };
 
     add_regex(func_include, tim::get_env<string_t>("HOSTTRACE_REGEX_INCLUDE", ""));
@@ -783,8 +771,7 @@ main(int argc, char** argv)
             auto itr = module_names.begin();
             std::advance(itr, i);
             std::cout << std::setw(mwid) << *itr << " | ";
-            if(i % ncol == ncol - 1)
-                std::cout << "\n| ";
+            if(i % ncol == ncol - 1) std::cout << "\n| ";
         }
         std::cout << '\n' << std::endl;
     }
@@ -833,8 +820,7 @@ main(int argc, char** argv)
             result = (addr_space->loadLibrary(_libname.c_str()) != nullptr);
             verbprintf(1, "loadLibrary(%s) result = %s\n", _libname.c_str(),
                        (result) ? "success" : "failure");
-            if(result)
-                break;
+            if(result) break;
         }
         if(!result)
         {
@@ -906,18 +892,15 @@ main(int argc, char** argv)
     auto* mpi_init_func = find_function(app_image, "MPI_Init", { "MPI_Init_thread" });
     auto* mpi_fini_func = find_function(app_image, "MPI_Finalize");
 
-    if(!main_func && main_fname == "main")
-        main_func = find_function(app_image, "_main");
+    if(!main_func && main_fname == "main") main_func = find_function(app_image, "_main");
 
     verbprintf(0, "Instrumenting with '%s' and '%s'...\n", instr_push_func.c_str(),
                instr_pop_func.c_str());
 
-    if(mpi_init_func && mpi_fini_func)
-        use_mpi = true;
+    if(mpi_init_func && mpi_fini_func) use_mpi = true;
 
     bool use_mpip = false;
-    if(use_mpi)
-        use_mpip = true;
+    if(use_mpi) use_mpip = true;
 
     //----------------------------------------------------------------------------------//
     //
@@ -930,8 +913,7 @@ main(int argc, char** argv)
         verbprintf(3,
                    "Attempting to find instrumentation for '%s' via '%s' and '%s'...\n",
                    _name.c_str(), _beg.c_str(), _end.c_str());
-        if(_beg.empty() || _end.empty())
-            return false;
+        if(_beg.empty() || _end.empty()) return false;
         auto* _beg_func = find_function(app_image, _beg);
         auto* _end_func = find_function(app_image, _end);
         if(_beg_func && _end_func)
@@ -957,17 +939,14 @@ main(int argc, char** argv)
     {
         string_t _name = itr;
         size_t   _pos  = _name.find_last_of('/');
-        if(_pos != npos_v)
-            _name = _name.substr(_pos + 1);
+        if(_pos != npos_v) _name = _name.substr(_pos + 1);
         _pos = _name.find('.');
-        if(_pos != npos_v)
-            _name = _name.substr(0, _pos);
+        if(_pos != npos_v) _name = _name.substr(0, _pos);
         _pos = _name.find("libhosttrace-");
         if(_pos != npos_v)
             _name = _name.erase(_pos, std::string("libhosttrace-").length());
         _pos = _name.find("lib");
-        if(_pos == 0)
-            _name = _name.substr(_pos + std::string("lib").length());
+        if(_pos == 0) _name = _name.substr(_pos + std::string("lib").length());
         while((_pos = _name.find('-')) != npos_v)
             _name.replace(_pos, 1, "_");
 
@@ -1005,18 +984,15 @@ main(int argc, char** argv)
             }
         }
 
-        if(add_instr_library(_name, best_init_name, base_fini_name))
-            continue;
+        if(add_instr_library(_name, best_init_name, base_fini_name)) continue;
 
         // check user-specified signatures first
         for(const auto& bitr : init_stub_names)
         {
-            if(used_stub_names.find(bitr) != used_stub_names.end())
-                continue;
+            if(used_stub_names.find(bitr) != used_stub_names.end()) continue;
             for(const auto& fitr : fini_stub_names)
             {
-                if(used_stub_names.find(fitr) != used_stub_names.end())
-                    continue;
+                if(used_stub_names.find(fitr) != used_stub_names.end()) continue;
                 if(add_instr_library(_name, bitr, fitr))
                     goto found_instr_functions;  // exit loop after match
             }
@@ -1065,8 +1041,7 @@ main(int argc, char** argv)
           pair_t(fini_func, "hosttrace_trace_finalize"),
           pair_t(env_func, "hosttrace_trace_set_env") })
     {
-        if(itr.first == main_func && !is_driver)
-            continue;
+        if(itr.first == main_func && !is_driver) continue;
         if(!itr.first)
         {
             stringstream_t ss;
@@ -1092,8 +1067,7 @@ main(int argc, char** argv)
             {
                 char moduleName[MUTNAMELEN];
                 _module->getName(moduleName, MUTNAMELEN);
-                if(strcmp(moduleName, "DEFAULT_MODULE") != 0)
-                    _has_debug_info = true;
+                if(strcmp(moduleName, "DEFAULT_MODULE") != 0) _has_debug_info = true;
             }
         }
     };
@@ -1153,8 +1127,7 @@ main(int argc, char** argv)
     {
         verbprintf(2, "Getting main function signature...\n");
         main_sign = get_func_file_line_info(main_func->getModule(), main_func);
-        if(main_sign.m_params == "()")
-            main_sign.m_params = "(int argc, char** argv)";
+        if(main_sign.m_params == "()") main_sign.m_params = "(int argc, char** argv)";
     }
 
     verbprintf(2, "Getting call expressions... ");
@@ -1221,23 +1194,16 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    if(trace_env_call)
-        init_names.push_back(trace_env_call.get());
-    if(mode_env_call)
-        init_names.push_back(mode_env_call.get());
-    if(mpii_env_call)
-        init_names.push_back(mpii_env_call.get());
-    if(mpif_env_call)
-        init_names.push_back(mpif_env_call.get());
-    if(use_mpi && use_mpi_env_call)
-        init_names.push_back(use_mpi_env_call.get());
-    if(use_mpip && use_mpip_env_call)
-        init_names.push_back(use_mpip_env_call.get());
+    if(trace_env_call) init_names.push_back(trace_env_call.get());
+    if(mode_env_call) init_names.push_back(mode_env_call.get());
+    if(mpii_env_call) init_names.push_back(mpii_env_call.get());
+    if(mpif_env_call) init_names.push_back(mpif_env_call.get());
+    if(use_mpi && use_mpi_env_call) init_names.push_back(use_mpi_env_call.get());
+    if(use_mpip && use_mpip_env_call) init_names.push_back(use_mpip_env_call.get());
 
     for(const auto& itr : env_variables)
     {
-        if(itr)
-            init_names.push_back(itr.get());
+        if(itr) init_names.push_back(itr.get());
     }
 
     for(const auto& itr : beg_expr)
@@ -1253,11 +1219,9 @@ main(int argc, char** argv)
         }
     }
 
-    if(use_mpi && umpi_call)
-        init_names.push_back(umpi_call.get());
+    if(use_mpi && umpi_call) init_names.push_back(umpi_call.get());
 
-    if(init_call && binary_rewrite)
-        init_names.push_back(init_call.get());
+    if(init_call && binary_rewrite) init_names.push_back(init_call.get());
 
     if(binary_rewrite)
     {
@@ -1299,13 +1263,11 @@ main(int argc, char** argv)
         verbprintf(0, "No binary_rewrite and no app_thread!...\n");
     }
 
-    if(fini_call)
-        fini_names.push_back(fini_call.get());
+    if(fini_call) fini_names.push_back(fini_call.get());
 
     for(const auto& itr : end_expr)
     {
-        if(itr.second)
-            fini_names.push_back(itr.second.get());
+        if(itr.second) fini_names.push_back(itr.second.get());
     }
 
     //----------------------------------------------------------------------------------//
@@ -1321,8 +1283,7 @@ main(int argc, char** argv)
                    (unsigned long) procedures.size());
         for(auto* itr : procedures)
         {
-            if(itr == main_func)
-                continue;
+            if(itr == main_func) continue;
 
             char modname[MUTNAMELEN];
             char fname[FUNCNAMELEN];
@@ -1339,14 +1300,11 @@ main(int argc, char** argv)
                 continue;
             }
 
-            if(std::string{ modname }.find("libdyninst") != std::string::npos)
-                continue;
+            if(std::string{ modname }.find("libdyninst") != std::string::npos) continue;
 
-            if(module_constraint(modname))
-                continue;
+            if(module_constraint(modname)) continue;
 
-            if(!instrument_module(modname))
-                continue;
+            if(!instrument_module(modname)) continue;
 
             itr->getName(fname, FUNCNAMELEN);
 
@@ -1358,11 +1316,9 @@ main(int argc, char** argv)
                 continue;
             }
 
-            if(routine_constraint(name.m_name.c_str()))
-                continue;
+            if(routine_constraint(name.m_name.c_str())) continue;
 
-            if(!instrument_entity(name.m_name))
-                continue;
+            if(!instrument_entity(name.m_name)) continue;
 
             if(is_static_exe && has_debug_info && string_t{ fname } == "_fini" &&
                string_t{ modname } == "DEFAULT_MODULE")
@@ -1389,8 +1345,7 @@ main(int argc, char** argv)
             // try to get loops via the control flow graph
             flow_graph_t*    cfg = itr->getCFG();
             basic_loop_vec_t basic_loop{};
-            if(cfg)
-                cfg->getOuterLoops(basic_loop);
+            if(cfg) cfg->getOuterLoops(basic_loop);
 
             // if the function has dynamic callsites and user specified instrumenting
             // dynamic callsites, force the instrumentation
@@ -1502,8 +1457,7 @@ main(int argc, char** argv)
     {
         char modname[1024];
         m->getName(modname, 1024);
-        if(strstr(modname, "libdyninst") != nullptr)
-            continue;
+        if(strstr(modname, "libdyninst") != nullptr) continue;
 
         if(!m->getProcedures())
         {
@@ -1513,8 +1467,7 @@ main(int argc, char** argv)
 
         verbprintf(1, "Parsing module: %s\n", modname);
         bpvector_t<procedure_t*>* p = m->getProcedures();
-        if(!p)
-            continue;
+        if(!p) continue;
 
         instr_procedures(*p);
     }
@@ -1692,8 +1645,7 @@ main(int argc, char** argv)
         }
         for(auto& mitr : _data)
         {
-            if(_mode != "modules")
-                std::cout << "\n" << mitr.first << ":\n";
+            if(_mode != "modules") std::cout << "\n" << mitr.first << ":\n";
             for(auto& itr : mitr.second)
             {
                 std::cout << "    " << itr << "\n";
@@ -1701,23 +1653,20 @@ main(int argc, char** argv)
         }
     };
 
-    if(!print_available.empty())
-        _dump_info(print_available, available_module_functions);
+    if(!print_available.empty()) _dump_info(print_available, available_module_functions);
     if(!print_instrumented.empty())
         _dump_info(print_instrumented, instrumented_module_functions);
     if(!print_overlapping.empty())
         _dump_info(print_overlapping, overlapping_module_functions);
 
-    if(_dump_and_exit)
-        exit(EXIT_SUCCESS);
+    if(_dump_and_exit) exit(EXIT_SUCCESS);
 
     //----------------------------------------------------------------------------------//
     //
     //  Either write the instrumented binary or execute the application
     //
     //----------------------------------------------------------------------------------//
-    if(binary_rewrite)
-        addr_space->finalizeInsertionSet(false, nullptr);
+    if(binary_rewrite) addr_space->finalizeInsertionSet(false, nullptr);
 
     int code = -1;
     if(binary_rewrite)
@@ -1753,8 +1702,7 @@ main(int argc, char** argv)
             strvec_t linked_libraries = tim::popen::read_fork(ldd);
 
             auto perr = tim::popen::pclose(ldd);
-            if(perr != 0)
-                perror("Error in hosttrace_fork");
+            if(perr != 0) perror("Error in hosttrace_fork");
 
             for(const auto& itr : linked_libraries)
                 printf("\t%s\n", itr.c_str());
@@ -1847,13 +1795,11 @@ instrument_module(const string_t& file_name)
     };
 
     auto is_include = [&](bool _if_empty) {
-        if(file_include.empty())
-            return _if_empty;
+        if(file_include.empty()) return _if_empty;
         // NOLINTNEXTLINE(readability-use-anyofallof)
         for(auto& itr : file_include)
         {
-            if(std::regex_search(file_name, itr))
-                return true;
+            if(std::regex_search(file_name, itr)) return true;
         }
         return false;
     };
@@ -1862,8 +1808,7 @@ instrument_module(const string_t& file_name)
         // NOLINTNEXTLINE(readability-use-anyofallof)
         for(auto& itr : file_exclude)
         {
-            if(std::regex_search(file_name, itr))
-                return true;
+            if(std::regex_search(file_name, itr)) return true;
         }
         return false;
     };
@@ -1939,8 +1884,7 @@ instrument_module(const string_t& file_name)
         return false;
     }*/
 
-    if(_user_exclude)
-        return (_report("Excluding", "user-regex", 2), false);
+    if(_user_exclude) return (_report("Excluding", "user-regex", 2), false);
 
     _report("Including", "no constraint", 2);
 
@@ -1953,13 +1897,11 @@ bool
 instrument_entity(const string_t& function_name)
 {
     auto is_include = [&](bool _if_empty) {
-        if(func_include.empty())
-            return _if_empty;
+        if(func_include.empty()) return _if_empty;
         // NOLINTNEXTLINE(readability-use-anyofallof)
         for(auto& itr : func_include)
         {
-            if(std::regex_search(function_name, itr))
-                return true;
+            if(std::regex_search(function_name, itr)) return true;
         }
         return false;
     };
@@ -2073,8 +2015,7 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
              basic_loop_t* loopToInstrument)
 {
     module_t* module = funcToInstr->getModule();
-    if(!module || !traceFunc)
-        return;
+    if(!module || !traceFunc) return;
 
     bpvector_t<point_t*>* _points = nullptr;
     auto                  _trace  = traceFunc.get();
@@ -2091,10 +2032,8 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
         _points = funcToInstr->findPoint(traceLoc);
     }
 
-    if(_points == nullptr)
-        return;
-    if(_points->empty())
-        return;
+    if(_points == nullptr) return;
+    if(_points->empty()) return;
 
     /*if(loop_level_instr)
     {
@@ -2140,15 +2079,12 @@ module_constraint(char* fname)
     string_t _fname = fname;
 
     // never instrumentat any module matching hosttrace
-    if(_fname.find("hosttrace") != string_t::npos)
-        return true;
+    if(_fname.find("hosttrace") != string_t::npos) return true;
 
     // always instrument these modules
-    if(_fname == "DEFAULT_MODULE" || _fname == "LIBRARY_MODULE")
-        return false;
+    if(_fname == "DEFAULT_MODULE" || _fname == "LIBRARY_MODULE") return false;
 
-    if(instrument_module(_fname))
-        return false;
+    if(instrument_module(_fname)) return false;
 
     // do not instrument
     return true;
@@ -2161,8 +2097,7 @@ bool
 routine_constraint(const char* fname)
 {
     string_t _fname = fname;
-    if(_fname.find("hosttrace") != string_t::npos)
-        return true;
+    if(_fname.find("hosttrace") != string_t::npos) return true;
 
     auto npos = std::string::npos;
     if(_fname.find("FunctionInfo") != npos || _fname.find("_L_lock") != npos ||

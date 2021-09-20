@@ -1,29 +1,28 @@
 # include guard
 include_guard(DIRECTORY)
 
-##########################################################################################
+# ########################################################################################
 #
-#                       External Packages are found here
+# External Packages are found here
 #
-##########################################################################################
+# ########################################################################################
 
 add_interface_library(hosttrace-headers
-    "Provides minimal set of include flags to compile with hosttrace")
-add_interface_library(hosttrace-threading
-    "Enables multithreading support")
-add_interface_library(hosttrace-dyninst
+                      "Provides minimal set of include flags to compile with hosttrace")
+add_interface_library(hosttrace-threading "Enables multithreading support")
+add_interface_library(
+    hosttrace-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)")
-add_interface_library(hosttrace-roctracer
-    "Provides flags and libraries for roctracer")
+add_interface_library(hosttrace-roctracer "Provides flags and libraries for roctracer")
 
 # include threading because of rooflines
 target_link_libraries(hosttrace-headers INTERFACE hosttrace-threading)
 
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 #
-#                               Threading
+# Threading
 #
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 
 if(NOT WIN32)
     set(CMAKE_THREAD_PREFER_PTHREAD ON)
@@ -42,12 +41,11 @@ if(pthread_LIBRARY AND NOT WIN32)
     target_link_libraries(hosttrace-threading INTERFACE ${pthread_LIBRARY})
 endif()
 
-
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 #
-#                               roctracer
+# roctracer
 #
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 
 if(HOSTTRACE_USE_ROCTRACER)
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
@@ -58,31 +56,41 @@ if(HOSTTRACE_USE_ROCTRACER)
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${roctracer_LIBRARY_DIRS}")
 endif()
 
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 #
-#                               Dyninst
+# Dyninst
 #
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 
 if(HOSTTRACE_BUILD_DYNINST)
     checkout_git_submodule(
-        RELATIVE_PATH       external/dyninst
-        WORKING_DIRECTORY   ${PROJECT_SOURCE_DIR}
-        REPO_URL            https://github.com/jrmadsen/dyninst.git
-        REPO_BRANCH         hosttrace-submodule)
+        RELATIVE_PATH external/dyninst
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/jrmadsen/dyninst.git
+        REPO_BRANCH formatting)
 
-    set(DYNINST_OPTION_PREFIX       ON)
-    set(DYNINST_BUILD_DOCS          OFF)
-    set(DYNINST_QUIET_CONFIG        ON  CACHE BOOL "Suppress dyninst cmake messages")
-    set(DYNINST_BUILD_PARSE_THAT    OFF CACHE BOOL "Build dyninst parseThat executable")
-    set(DYNINST_BUILD_SHARED_LIBS   OFF CACHE BOOL "Build shared dyninst libraries")
-    set(DYNINST_BUILD_STATIC_LIBS   ON  CACHE BOOL "Build static dyninst libraries")
-    set(DYNINST_ENABLE_LTO          ON  CACHE BOOL "Enable LTO for dyninst libraries")
+    set(DYNINST_OPTION_PREFIX ON)
+    set(DYNINST_BUILD_DOCS OFF)
+    set(DYNINST_QUIET_CONFIG
+        ON
+        CACHE BOOL "Suppress dyninst cmake messages")
+    set(DYNINST_BUILD_PARSE_THAT
+        OFF
+        CACHE BOOL "Build dyninst parseThat executable")
+    set(DYNINST_BUILD_SHARED_LIBS
+        OFF
+        CACHE BOOL "Build shared dyninst libraries")
+    set(DYNINST_BUILD_STATIC_LIBS
+        ON
+        CACHE BOOL "Build static dyninst libraries")
+    set(DYNINST_ENABLE_LTO
+        ON
+        CACHE BOOL "Enable LTO for dyninst libraries")
 
-    hosttrace_save_variables(PIC CMAKE_POSITION_INDEPENDENT_CODE)
+    hosttrace_save_variables(PIC VARIABLES CMAKE_POSITION_INDEPENDENT_CODE)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
     add_subdirectory(external/dyninst)
-    hosttrace_restore_variables(PIC CMAKE_POSITION_INDEPENDENT_CODE)
+    hosttrace_restore_variables(PIC VARIABLES CMAKE_POSITION_INDEPENDENT_CODE)
 
     add_library(Dyninst::Dyninst INTERFACE IMPORTED)
     foreach(_LIB common dyninstAPI parseAPI instructionAPI symtabAPI stackwalk Boost TBB)
@@ -91,43 +99,52 @@ if(HOSTTRACE_BUILD_DYNINST)
 
     target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::Dyninst)
 
-    set(HOSTTRACE_DYNINST_API_RT ${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI_RT/libdyninstAPI_RT${CMAKE_SHARED_LIBRARY_SUFFIX})
+    set(HOSTTRACE_DYNINST_API_RT
+        ${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI_RT/libdyninstAPI_RT${CMAKE_SHARED_LIBRARY_SUFFIX}
+        )
 
     if(HOSTTRACE_DYNINST_API_RT)
-        target_compile_definitions(hosttrace-dyninst INTERFACE
-            DYNINST_API_RT="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}:$<TARGET_FILE_DIR:Dyninst::dyninstAPI_RT>:${CMAKE_INSTALL_PREFIX}/lib/$<TARGET_FILE_NAME:Dyninst::dyninstAPI_RT>:$<TARGET_FILE:Dyninst::dyninstAPI_RT>")
+        target_compile_definitions(
+            hosttrace-dyninst
+            INTERFACE
+                DYNINST_API_RT="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}:$<TARGET_FILE_DIR:Dyninst::dyninstAPI_RT>:${CMAKE_INSTALL_PREFIX}/lib/$<TARGET_FILE_NAME:Dyninst::dyninstAPI_RT>:$<TARGET_FILE:Dyninst::dyninstAPI_RT>"
+            )
     endif()
 
 else()
-    find_package(Dyninst ${hosttrace_FIND_QUIETLY} REQUIRED COMPONENTS dyninstAPI parseAPI instructionAPI symtabAPI)
+    find_package(Dyninst ${hosttrace_FIND_QUIETLY} REQUIRED
+                 COMPONENTS dyninstAPI parseAPI instructionAPI symtabAPI)
 
-    if(TARGET Dyninst::Dyninst)     # updated Dyninst CMake system was found
+    if(TARGET Dyninst::Dyninst) # updated Dyninst CMake system was found
         # useful for defining the location of the runtime API
-        find_library(HOSTTRACE_DYNINST_API_RT dyninstAPI_RT
+        find_library(
+            HOSTTRACE_DYNINST_API_RT dyninstAPI_RT
             HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
             PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
             PATH_SUFFIXES lib)
 
         if(HOSTTRACE_DYNINST_API_RT)
-            target_compile_definitions(hosttrace-dyninst INTERFACE
-                DYNINST_API_RT="${HOSTTRACE_DYNINST_API_RT}")
+            target_compile_definitions(
+                hosttrace-dyninst INTERFACE DYNINST_API_RT="${HOSTTRACE_DYNINST_API_RT}")
         endif()
 
         add_rpath(${Dyninst_LIBRARIES})
         target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::Dyninst)
-    else()  # updated Dyninst CMake system was not found
+    else() # updated Dyninst CMake system was not found
         set(_BOOST_COMPONENTS atomic system thread date_time)
-        set(hosttrace_BOOST_COMPONENTS "${_BOOST_COMPONENTS}" CACHE STRING
-            "Boost components used by Dyninst in hosttrace")
+        set(hosttrace_BOOST_COMPONENTS
+            "${_BOOST_COMPONENTS}"
+            CACHE STRING "Boost components used by Dyninst in hosttrace")
         set(Boost_NO_BOOST_CMAKE ON)
-        find_package(Boost QUIET REQUIRED
-            COMPONENTS ${hosttrace_BOOST_COMPONENTS})
+        find_package(Boost QUIET REQUIRED COMPONENTS ${hosttrace_BOOST_COMPONENTS})
 
         # some installs of dyninst don't set this properly
         if(EXISTS "${DYNINST_INCLUDE_DIR}" AND NOT DYNINST_HEADER_DIR)
-            get_filename_component(DYNINST_HEADER_DIR "${DYNINST_INCLUDE_DIR}" REALPATH CACHE)
+            get_filename_component(DYNINST_HEADER_DIR "${DYNINST_INCLUDE_DIR}" REALPATH
+                                   CACHE)
         else()
-            find_path(DYNINST_HEADER_DIR
+            find_path(
+                DYNINST_HEADER_DIR
                 NAMES BPatch.h dyninstAPI_RT.h
                 HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR} ${Dyninst_DIR}/../../..
                 PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR} ${Dyninst_DIR}/../../..
@@ -135,7 +152,8 @@ else()
         endif()
 
         # useful for defining the location of the runtime API
-        find_library(DYNINST_API_RT dyninstAPI_RT
+        find_library(
+            DYNINST_API_RT dyninstAPI_RT
             HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
             PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
             PATH_SUFFIXES lib)
@@ -150,14 +168,15 @@ else()
         endif()
 
         if(NOT TBB_FOUND)
-            find_path(TBB_INCLUDE_DIR
+            find_path(
+                TBB_INCLUDE_DIR
                 NAMES tbb/tbb.h
                 PATH_SUFFIXES include)
         endif()
 
         if(DYNINST_API_RT)
-            target_compile_definitions(hosttrace-dyninst INTERFACE
-                DYNINST_API_RT="${DYNINST_API_RT}")
+            target_compile_definitions(hosttrace-dyninst
+                                       INTERFACE DYNINST_API_RT="${DYNINST_API_RT}")
         endif()
 
         if(Boost_DIR)
@@ -169,9 +188,21 @@ else()
         endif()
 
         add_rpath(${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
-        target_link_libraries(hosttrace-dyninst INTERFACE
-            ${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
-        foreach(_TARG dyninst dyninstAPI instructionAPI symtabAPI parseAPI headers atomic system thread date_time TBB)
+        target_link_libraries(hosttrace-dyninst INTERFACE ${DYNINST_LIBRARIES}
+                                                          ${Boost_LIBRARIES})
+        foreach(
+            _TARG
+            dyninst
+            dyninstAPI
+            instructionAPI
+            symtabAPI
+            parseAPI
+            headers
+            atomic
+            system
+            thread
+            date_time
+            TBB)
             if(TARGET Dyninst::${_TARG})
                 target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::${_TARG})
             elseif(TARGET Boost::${_TARG})
@@ -180,49 +211,48 @@ else()
                 target_link_libraries(hosttrace-dyninst INTERFACE ${_TARG})
             endif()
         endforeach()
-        target_include_directories(hosttrace-dyninst SYSTEM INTERFACE
-            ${TBB_INCLUDE_DIR}
-            ${Boost_INCLUDE_DIRS}
-            ${DYNINST_HEADER_DIR})
+        target_include_directories(
+            hosttrace-dyninst SYSTEM INTERFACE ${TBB_INCLUDE_DIR} ${Boost_INCLUDE_DIRS}
+                                               ${DYNINST_HEADER_DIR})
         target_compile_definitions(hosttrace-dyninst INTERFACE hosttrace_USE_DYNINST)
     endif()
 endif()
 
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 #
-#                               Perfetto
+# Perfetto
 #
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 
 set(perfetto_DIR ${PROJECT_SOURCE_DIR}/external/perfetto)
 checkout_git_submodule(
-    RELATIVE_PATH       external/perfetto
-    WORKING_DIRECTORY   ${PROJECT_SOURCE_DIR}
-    REPO_URL            https://android.googlesource.com/platform/external/perfetto
-    REPO_BRANCH         v17.0
-    TEST_FILE           sdk/perfetto.cc)
+    RELATIVE_PATH external/perfetto
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    REPO_URL https://android.googlesource.com/platform/external/perfetto
+    REPO_BRANCH v17.0
+    TEST_FILE sdk/perfetto.cc)
 
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 #
-#                               ELFIO
+# ELFIO
 #
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 
 if(HOSTTRACE_BUILD_DEVICETRACE)
     checkout_git_submodule(
-        RELATIVE_PATH       external/elfio
-        WORKING_DIRECTORY   ${PROJECT_SOURCE_DIR}
-        REPO_URL            https://github.com/jrmadsen/ELFIO.git
-        REPO_BRANCH         set-offset-support)
+        RELATIVE_PATH external/elfio
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/jrmadsen/ELFIO.git
+        REPO_BRANCH set-offset-support)
 
     add_subdirectory(external/elfio)
 endif()
 
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 #
-#                               Clang Tidy
+# Clang Tidy
 #
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 
 # clang-tidy
 macro(HOSTTRACE_ACTIVATE_CLANG_TIDY)
@@ -230,17 +260,18 @@ macro(HOSTTRACE_ACTIVATE_CLANG_TIDY)
         find_program(CLANG_TIDY_COMMAND NAMES clang-tidy)
         add_feature(CLANG_TIDY_COMMAND "Path to clang-tidy command")
         if(NOT CLANG_TIDY_COMMAND)
-            timemory_message(WARNING "HOSTTRACE_USE_CLANG_TIDY is ON but clang-tidy is not found!")
+            timemory_message(
+                WARNING "HOSTTRACE_USE_CLANG_TIDY is ON but clang-tidy is not found!")
             set(HOSTTRACE_USE_CLANG_TIDY OFF)
         else()
             set(CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY_COMMAND})
 
-            # Create a preprocessor definition that depends on .clang-tidy content so
-            # the compile command will change when .clang-tidy changes.  This ensures
-            # that a subsequent build re-runs clang-tidy on all sources even if they
-            # do not otherwise need to be recompiled.  Nothing actually uses this
-            # definition.  We add it to targets on which we run clang-tidy just to
-            # get the build dependency on the .clang-tidy file.
+            # Create a preprocessor definition that depends on .clang-tidy content so the
+            # compile command will change when .clang-tidy changes.  This ensures that a
+            # subsequent build re-runs clang-tidy on all sources even if they do not
+            # otherwise need to be recompiled.  Nothing actually uses this definition.  We
+            # add it to targets on which we run clang-tidy just to get the build
+            # dependency on the .clang-tidy file.
             file(SHA1 ${CMAKE_CURRENT_LIST_DIR}/.clang-tidy clang_tidy_sha1)
             set(CLANG_TIDY_DEFINITIONS "CLANG_TIDY_SHA1=${clang_tidy_sha1}")
             unset(clang_tidy_sha1)
@@ -248,75 +279,91 @@ macro(HOSTTRACE_ACTIVATE_CLANG_TIDY)
     endif()
 endmacro()
 
-#------------------------------------------------------------------------------#
+# ------------------------------------------------------------------------------#
 #
-#                   clang-format target
+# clang-format target
 #
-#------------------------------------------------------------------------------#
+# ------------------------------------------------------------------------------#
 
-find_program(HOSTTRACE_CLANG_FORMAT_EXE
-    NAMES
-        clang-format-12
-        clang-format-11
-        clang-format-10
-        clang-format-9
-        clang-format)
+find_program(HOSTTRACE_CLANG_FORMAT_EXE NAMES clang-format-11 clang-format-mp-11
+                                              clang-format)
 
 if(HOSTTRACE_CLANG_FORMAT_EXE)
-    file(GLOB sources
-        ${PROJECT_SOURCE_DIR}/src/*.cpp)
-    file(GLOB headers
-        ${PROJECT_SOURCE_DIR}/include/*.hpp)
-    file(GLOB_RECURSE examples
-        ${PROJECT_SOURCE_DIR}/examples/*.cpp
-        ${PROJECT_SOURCE_DIR}/examples/*.hpp)
-    add_custom_target(format
+    file(GLOB sources ${PROJECT_SOURCE_DIR}/src/*.cpp)
+    file(GLOB headers ${PROJECT_SOURCE_DIR}/include/*.hpp)
+    file(GLOB_RECURSE examples ${PROJECT_SOURCE_DIR}/examples/*.cpp
+         ${PROJECT_SOURCE_DIR}/examples/*.hpp)
+    add_custom_target(
+        format
         ${HOSTTRACE_CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}
         COMMENT "Running ${HOSTTRACE_CLANG_FORMAT_EXE}...")
 else()
-    message(AUTHOR_WARNING "clang-format could not be found. format build target not available.")
+    message(
+        AUTHOR_WARNING
+            "clang-format could not be found. format build target not available.")
 endif()
 
-#----------------------------------------------------------------------------------------#
-#   configure submodule
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
+# configure submodule
+# ----------------------------------------------------------------------------------------#
 
-set(TIMEMORY_INSTALL_HEADERS        OFF CACHE BOOL "Disable timemory header install")
-set(TIMEMORY_INSTALL_CONFIG         OFF CACHE BOOL "Disable timemory cmake configuration install")
-set(TIMEMORY_INSTALL_ALL            OFF CACHE BOOL "Disable install target depending on all target")
-set(TIMEMORY_BUILD_C                OFF CACHE BOOL "Disable timemory C library")
-set(TIMEMORY_BUILD_FORTRAN          OFF CACHE BOOL "Disable timemory Fortran library")
-set(TIMEMORY_BUILD_TOOLS            OFF CACHE BOOL "Ensure timem executable is built")
-set(TIMEMORY_BUILD_EXCLUDE_FROM_ALL ON  CACHE BOOL "Set timemory to only build dependencies")
-set(TIMEMORY_QUIET_CONFIG           ON  CACHE BOOL "Make timemory configuration quieter")
+set(TIMEMORY_INSTALL_HEADERS
+    OFF
+    CACHE BOOL "Disable timemory header install")
+set(TIMEMORY_INSTALL_CONFIG
+    OFF
+    CACHE BOOL "Disable timemory cmake configuration install")
+set(TIMEMORY_INSTALL_ALL
+    OFF
+    CACHE BOOL "Disable install target depending on all target")
+set(TIMEMORY_BUILD_C
+    OFF
+    CACHE BOOL "Disable timemory C library")
+set(TIMEMORY_BUILD_FORTRAN
+    OFF
+    CACHE BOOL "Disable timemory Fortran library")
+set(TIMEMORY_BUILD_TOOLS
+    OFF
+    CACHE BOOL "Ensure timem executable is built")
+set(TIMEMORY_BUILD_EXCLUDE_FROM_ALL
+    ON
+    CACHE BOOL "Set timemory to only build dependencies")
+set(TIMEMORY_QUIET_CONFIG
+    ON
+    CACHE BOOL "Make timemory configuration quieter")
 
 # timemory feature settings
-set(TIMEMORY_USE_GOTCHA             ON  CACHE BOOL "Enable GOTCHA support in timemory")
-set(TIMEMORY_USE_PERFETTO           OFF CACHE BOOL "Disable perfetto support in timemory")
+set(TIMEMORY_USE_GOTCHA
+    ON
+    CACHE BOOL "Enable GOTCHA support in timemory")
+set(TIMEMORY_USE_PERFETTO
+    OFF
+    CACHE BOOL "Disable perfetto support in timemory")
 # timemory feature build settings
-set(TIMEMORY_BUILD_GOTCHA           ON  CACHE BOOL "Enable building GOTCHA library from submodule")
+set(TIMEMORY_BUILD_GOTCHA
+    ON
+    CACHE BOOL "Enable building GOTCHA library from submodule")
 # timemory build settings
-set(TIMEMORY_TLS_MODEL "global-dynamic" CACHE STRING "Thread-local static model" FORCE)
+set(TIMEMORY_TLS_MODEL
+    "global-dynamic"
+    CACHE STRING "Thread-local static model" FORCE)
 
 checkout_git_submodule(
-    RELATIVE_PATH       external/timemory
-    WORKING_DIRECTORY   ${PROJECT_SOURCE_DIR}
-    REPO_URL            https://github.com/NERSC/timemory.git
-    REPO_BRANCH         develop)
+    RELATIVE_PATH external/timemory
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    REPO_URL https://github.com/NERSC/timemory.git
+    REPO_BRANCH gpu-kernel-instrumentation)
 
-hosttrace_save_variables(BUILD_CONFIG
-    BUILD_SHARED_LIBS
-    BUILD_STATIC_LIBS
-    CMAKE_POSITION_INDEPENDENT_CODE)
+hosttrace_save_variables(BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
+                                                CMAKE_POSITION_INDEPENDENT_CODE)
 
-# ensure timemory builds PIC static libs so that we don't have to install timemory shared lib
+# ensure timemory builds PIC static libs so that we don't have to install timemory shared
+# lib
 set(BUILD_SHARED_LIBS ON)
 set(BUILD_STATIC_LIBS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_subdirectory(external/timemory)
 
-hosttrace_restore_variables(BUILD_CONFIG
-    BUILD_SHARED_LIBS
-    BUILD_STATIC_LIBS
-    CMAKE_POSITION_INDEPENDENT_CODE)
+hosttrace_restore_variables(BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
+                                                   CMAKE_POSITION_INDEPENDENT_CODE)

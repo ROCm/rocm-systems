@@ -56,8 +56,7 @@ void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 {
     HOSTTRACE_DEBUG("[%s] %s(int*, char***)\n", __FUNCTION__, _data.tool_id.c_str());
-    if(get_state() == ::State::DelayedInit)
-        get_state() = ::State::PreInit;
+    if(get_state() == ::State::DelayedInit) get_state() = ::State::PreInit;
 }
 
 void
@@ -65,8 +64,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, in
 {
     HOSTTRACE_DEBUG("[%s] %s(int*, char***, int, int*)\n", __FUNCTION__,
                     _data.tool_id.c_str());
-    if(get_state() == ::State::DelayedInit)
-        get_state() = ::State::PreInit;
+    if(get_state() == ::State::DelayedInit) get_state() = ::State::PreInit;
 }
 
 void
@@ -96,15 +94,13 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 void
 hosttrace_component::start()
 {
-    if(m_prefix)
-        hosttrace_push_trace(m_prefix);
+    if(m_prefix) hosttrace_push_trace(m_prefix);
 }
 
 void
 hosttrace_component::stop()
 {
-    if(m_prefix)
-        hosttrace_pop_trace(m_prefix);
+    if(m_prefix) hosttrace_pop_trace(m_prefix);
 }
 
 void

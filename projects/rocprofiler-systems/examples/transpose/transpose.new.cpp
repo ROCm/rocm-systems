@@ -130,18 +130,14 @@ main(int argc, char** argv)
 {
     int nx = 32;
     int ny = 32;
-    if(argc > 1)
-        nx = atoi(argv[1]);
-    if(argc > 2)
-        ny = atoi(argv[2]);
+    if(argc > 1) nx = atoi(argv[1]);
+    if(argc > 2) ny = atoi(argv[2]);
 
     unsigned int M = 4960;
     unsigned int N = 4960;
 
-    if(argc > 3)
-        M = atoi(argv[3]);
-    if(argc > 4)
-        N = atoi(argv[4]);
+    if(argc > 3) M = atoi(argv[3]);
+    if(argc > 4) N = atoi(argv[4]);
 
     std::cout << "M: " << M << " N: " << N << std::endl;
     size_t size   = sizeof(int) * M * N;

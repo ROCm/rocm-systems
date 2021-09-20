@@ -63,7 +63,7 @@ jobs:
     - name: Test
       working-directory: ${{ github.workspace }}/build
       run:
-        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest.log
+        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal.log
 
     - name: Test Install
       run:
@@ -78,7 +78,7 @@ jobs:
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/hosttrace-ctest.log
+          ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal.log
 
   ubuntu-bionic:
     runs-on: ubuntu-18.04
@@ -132,7 +132,7 @@ jobs:
     - name: Test
       working-directory: ${{ github.workspace }}/build
       run:
-        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest.log
+        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-bionic.log
 
     - name: Test Install
       run:
@@ -147,7 +147,7 @@ jobs:
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/hosttrace-ctest.log
+          ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-bionic.log
 
   ubuntu-focal-external:
     runs-on: ubuntu-20.04
@@ -223,7 +223,7 @@ jobs:
       run:
         ldd ./hosttrace &&
         ./hosttrace --help &&
-        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest.log
+        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal-external.log
 
     - name: Test Install
       run:
@@ -239,7 +239,7 @@ jobs:
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/hosttrace-ctest.log
+          ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal-external.log
 
   ubuntu-focal-dyninst-package:
     runs-on: ubuntu-20.04
@@ -308,7 +308,7 @@ jobs:
       run:
         ldd ./hosttrace &&
         ./hosttrace --help &&
-        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest.log
+        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal-dyninst-package.log
 
     - name: Test Install
       run:
@@ -324,4 +324,4 @@ jobs:
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/hosttrace-ctest.log
+          ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal-dyninst-package.log

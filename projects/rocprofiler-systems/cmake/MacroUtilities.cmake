@@ -18,25 +18,26 @@ string(TOLOWER "${PROJECT_NAME}" PROJECT_NAME_LC)
 unset(${PROJECT_NAME_UC}_COMPILED_LIBRARIES CACHE)
 unset(${PROJECT_NAME_UC}_INTERFACE_LIBRARIES CACHE)
 
-#-----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # message which handles HOSTTRACE_QUIET_CONFIG settings
-#-----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 #
-FUNCTION(HOSTTRACE_MESSAGE TYPE)
+function(HOSTTRACE_MESSAGE TYPE)
     if(NOT HOSTTRACE_QUIET_CONFIG)
         message(${TYPE} "[hosttrace] ${ARGN}")
     endif()
-ENDFUNCTION()
+endfunction()
 
-#-----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # Save a set of variables with the given prefix
-#-----------------------------------------------------------------------
-MACRO(HOSTTRACE_SAVE_VARIABLES _PREFIX)
+# -----------------------------------------------------------------------
+macro(HOSTTRACE_SAVE_VARIABLES _PREFIX)
     # parse args
-    cmake_parse_arguments(SAVE
-        ""                # options
-        "CONDITION"       # single value args
-        "VARIABLES"       # multiple value args
+    cmake_parse_arguments(
+        SAVE
+        "" # options
+        "CONDITION" # single value args
+        "VARIABLES" # multiple value args
         ${ARGN})
     if(DEFINED SAVE_CONDITION AND NOT "${SAVE_CONDITION}" STREQUAL "")
         if(${SAVE_CONDITION})
@@ -59,17 +60,18 @@ MACRO(HOSTTRACE_SAVE_VARIABLES _PREFIX)
     endif()
     unset(SAVE_CONDITION)
     unset(SAVE_VARIABLES)
-ENDMACRO()
+endmacro()
 
-#-----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # Restore a set of variables with the given prefix
-#-----------------------------------------------------------------------
-MACRO(HOSTTRACE_RESTORE_VARIABLES _PREFIX)
+# -----------------------------------------------------------------------
+macro(HOSTTRACE_RESTORE_VARIABLES _PREFIX)
     # parse args
-    cmake_parse_arguments(RESTORE
-        ""                # options
-        "CONDITION"       # single value args
-        "VARIABLES"       # multiple value args
+    cmake_parse_arguments(
+        RESTORE
+        "" # options
+        "CONDITION" # single value args
+        "VARIABLES" # multiple value args
         ${ARGN})
     if(DEFINED RESTORE_CONDITION AND NOT "${RESTORE_CONDITION}" STREQUAL "")
         if(${RESTORE_CONDITION})
@@ -94,125 +96,118 @@ MACRO(HOSTTRACE_RESTORE_VARIABLES _PREFIX)
     endif()
     unset(RESTORE_CONDITION)
     unset(RESTORE_VARIABLES)
-ENDMACRO()
+endmacro()
 
-#-----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # CACHED LIST
-#-----------------------------------------------------------------------
-# macro set_ifnot(<var> <value>)
-#       If variable var is not set, set its value to that provided
+# -----------------------------------------------------------------------
+# macro set_ifnot(<var> <value>) If variable var is not set, set its value to that
+# provided
 #
-MACRO(CACHE_LIST _OP _LIST)
+macro(CACHE_LIST _OP _LIST)
     set(_TMP_CACHE_LIST ${${_LIST}})
     # apply operation on list
     list(${_OP} _TMP_CACHE_LIST ${ARGN})
     # replace list
-    set(${_LIST} "${_TMP_CACHE_LIST}" CACHE INTERNAL "" FORCE)
-ENDMACRO()
+    set(${_LIST}
+        "${_TMP_CACHE_LIST}"
+        CACHE INTERNAL "" FORCE)
+endmacro()
 
-
-#-----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # CMAKE EXTENSIONS
-#-----------------------------------------------------------------------
-# macro set_ifnot(<var> <value>)
-#       If variable var is not set, set its value to that provided
+# -----------------------------------------------------------------------
+# macro set_ifnot(<var> <value>) If variable var is not set, set its value to that
+# provided
 #
-MACRO(SET_IFNOT _var _value)
+macro(SET_IFNOT _var _value)
     if(NOT DEFINED ${_var})
         set(${_var} ${_value} ${ARGN})
     endif()
-ENDMACRO()
+endmacro()
 
-
-#-----------------------------------------------------------------------
-# macro safe_remove_duplicates(<list>)
-#       ensures remove_duplicates is only called if list has values
+# -----------------------------------------------------------------------
+# macro safe_remove_duplicates(<list>) ensures remove_duplicates is only called if list
+# has values
 #
-MACRO(SAFE_REMOVE_DUPLICATES _list)
+macro(SAFE_REMOVE_DUPLICATES _list)
     if(NOT "${${_list}}" STREQUAL "")
         list(REMOVE_DUPLICATES ${_list})
     endif(NOT "${${_list}}" STREQUAL "")
-ENDMACRO()
+endmacro()
 
-
-#-----------------------------------------------------------------------
-# function - capitalize - make a string capitalized (first letter is capital)
-#   usage:
-#       capitalize("SHARED" CShared)
-#   message(STATUS "-- CShared is \"${CShared}\"")
-#   $ -- CShared is "Shared"
-FUNCTION(CAPITALIZE str var)
+# -----------------------------------------------------------------------
+# function - capitalize - make a string capitalized (first letter is capital) usage:
+# capitalize("SHARED" CShared) message(STATUS "-- CShared is \"${CShared}\"") $ -- CShared
+# is "Shared"
+function(CAPITALIZE str var)
     # make string lower
     string(TOLOWER "${str}" str)
     string(SUBSTRING "${str}" 0 1 _first)
     string(TOUPPER "${_first}" _first)
     string(SUBSTRING "${str}" 1 -1 _remainder)
     string(CONCAT str "${_first}" "${_remainder}")
-    set(${var} "${str}" PARENT_SCOPE)
-ENDFUNCTION()
+    set(${var}
+        "${str}"
+        PARENT_SCOPE)
+endfunction()
 
-
-#-----------------------------------------------------------------------
-# macro set_ifnot_match(<var> <value>)
-#       If variable var is not set, set its value to that provided
+# -----------------------------------------------------------------------
+# macro set_ifnot_match(<var> <value>) If variable var is not set, set its value to that
+# provided
 #
-MACRO(SET_IFNOT_MATCH VAR APPEND)
+macro(SET_IFNOT_MATCH VAR APPEND)
     if(NOT "${APPEND}" STREQUAL "")
-        STRING(REGEX MATCH "${APPEND}" _MATCH "${${VAR}}")
+        string(REGEX MATCH "${APPEND}" _MATCH "${${VAR}}")
         if(NOT "${_MATCH}" STREQUAL "")
-            SET(${VAR} "${${VAR}} ${APPEND}")
+            set(${VAR} "${${VAR}} ${APPEND}")
         endif()
     endif()
-ENDMACRO()
+endmacro()
 
-
-#-----------------------------------------------------------------------
-# macro cache_ifnot(<var> <value>)
-#       If variable var is not set, set its value to that provided and cache it
+# -----------------------------------------------------------------------
+# macro cache_ifnot(<var> <value>) If variable var is not set, set its value to that
+# provided and cache it
 #
-MACRO(CACHE_IFNOT _var _value _type _doc)
-  if(NOT ${_var} OR NOT ${CACHE_VARIABLES} MATCHES ${_var})
-    set(${_var} ${_value} CACHE ${_type} "${_doc}")
-  endif()
-ENDMACRO()
+macro(CACHE_IFNOT _var _value _type _doc)
+    if(NOT ${_var} OR NOT ${CACHE_VARIABLES} MATCHES ${_var})
+        set(${_var}
+            ${_value}
+            CACHE ${_type} "${_doc}")
+    endif()
+endmacro()
 
-
-#-----------------------------------------------------------------------
-# function add_enabled_interface(<NAME>)
-#          Mark an interface library as enabled
+# -----------------------------------------------------------------------
+# function add_enabled_interface(<NAME>) Mark an interface library as enabled
 #
-FUNCTION(ADD_ENABLED_INTERFACE _var)
+function(ADD_ENABLED_INTERFACE _var)
     set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_ENABLED_INTERFACES ${_var})
-ENDFUNCTION()
+endfunction()
 
-
-#-----------------------------------------------------------------------
-# function add_disabled_interface(<NAME>)
-#          Mark an interface as disabled
+# -----------------------------------------------------------------------
+# function add_disabled_interface(<NAME>) Mark an interface as disabled
 #
-FUNCTION(ADD_DISABLED_INTERFACE _var)
+function(ADD_DISABLED_INTERFACE _var)
     get_property(_DISABLED GLOBAL PROPERTY ${PROJECT_NAME}_DISABLED_INTERFACES)
     if(NOT ${_var} IN_LIST _DISABLED)
         set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_DISABLED_INTERFACES ${_var})
     endif()
-ENDFUNCTION()
+endfunction()
 
-
-#------------------------------------------------------------------------------#
+# ------------------------------------------------------------------------------#
 # macro for creating a library target
 #
-FUNCTION(CREATE_EXECUTABLE)
-    # for include dirs, compile flags, definitions, etc. --> use INTERFACE libs
-    # and add them to "LINK_LIBRARIES"
-    # list of arguments taking multiple values
-    set(multival_args
-        HEADERS SOURCES PROPERTIES LINK_LIBRARIES INSTALL_DESTINATION)
+function(CREATE_EXECUTABLE)
+    # for include dirs, compile flags, definitions, etc. --> use INTERFACE libs and add
+    # them to "LINK_LIBRARIES" list of arguments taking multiple values
+    set(multival_args HEADERS SOURCES PROPERTIES LINK_LIBRARIES INSTALL_DESTINATION)
 
     # parse args
-    cmake_parse_arguments(EXE
-        "INSTALL;EXCLUDE_FROM_ALL"   # options
-        "TARGET_NAME;"               # single value args
-        "${multival_args}"           # multiple value args
+    cmake_parse_arguments(
+        EXE
+        "INSTALL;EXCLUDE_FROM_ALL" # options
+        "TARGET_NAME;" # single value args
+        "${multival_args}" # multiple value args
         ${ARGN})
 
     set(_EXCLUDE)
@@ -237,60 +232,59 @@ FUNCTION(CREATE_EXECUTABLE)
     # Install the exe
     if(EXE_INSTALL_DESTINATION)
         install(
-            TARGETS     ${EXE_TARGET_NAME}
+            TARGETS ${EXE_TARGET_NAME}
             DESTINATION ${EXE_INSTALL_DESTINATION}
             OPTIONAL)
     endif()
-ENDFUNCTION()
+endfunction()
 
-
-#------------------------------------------------------------------------------#
+# ------------------------------------------------------------------------------#
 # function add_hosttrace_test_target()
 #
 # Creates a target which runs ctest but depends on all the tests being built.
 #
-FUNCTION(ADD_HOSTTRACE_TEST_TARGET)
+function(ADD_HOSTTRACE_TEST_TARGET)
     if(NOT TARGET hosttrace-test)
-        add_custom_target(hosttrace-test
+        add_custom_target(
+            hosttrace-test
             COMMAND ${CMAKE_COMMAND} --build ${PROJECT_BINARY_DIR} --target test
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
             COMMENT "Running tests...")
     endif()
-ENDFUNCTION()
+endfunction()
 
-
-#------------------------------------------------------------------------------#
+# ------------------------------------------------------------------------------#
 # macro add_googletest()
 #
-# Adds a unit test and links against googletest. Additional arguments are linked
-# against the test.
+# Adds a unit test and links against googletest. Additional arguments are linked against
+# the test.
 #
-FUNCTION(ADD_HOSTTRACE_GOOGLE_TEST TEST_NAME)
+function(ADD_HOSTTRACE_GOOGLE_TEST TEST_NAME)
     if(NOT HOSTTRACE_BUILD_GOOGLE_TEST)
         return()
     endif()
-    set(_OPTS )
+    set(_OPTS)
     if(NOT HOSTTRACE_BUILD_TESTING)
         set(_OPTS EXCLUDE_FROM_ALL)
     endif()
     add_hosttrace_test_target()
     include(GoogleTest)
     # list of arguments taking multiple values
-    set(multival_args SOURCES DEPENDS PROPERTIES DEFINITIONS LINK_LIBRARIES
-        COMMAND OPTIONS ENVIRONMENT)
+    set(multival_args SOURCES DEPENDS PROPERTIES DEFINITIONS LINK_LIBRARIES COMMAND
+                      OPTIONS ENVIRONMENT)
     # parse args
     cmake_parse_arguments(TEST "DISCOVER_TESTS;ADD_TESTS;MPI" "NPROCS;TIMEOUT;TARGET"
-        "${multival_args}" ${ARGN})
+                          "${multival_args}" ${ARGN})
 
     if(NOT TARGET google-test-debug-options)
         add_library(google-test-debug-options INTERFACE)
-        target_compile_definitions(google-test-debug-options INTERFACE
-            $<$<CONFIG:Debug>:DEBUG> HOSTTRACE_TESTING)
+        target_compile_definitions(google-test-debug-options
+                                   INTERFACE $<$<CONFIG:Debug>:DEBUG> HOSTTRACE_TESTING)
     endif()
     if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug" OR HOSTTRACE_USE_COVERAGE)
         # create a pre-processor which relaxes pass/fail when converage is enabled
-        target_compile_definitions(google-test-debug-options INTERFACE
-            HOSTTRACE_RELAXED_TESTING)
+        target_compile_definitions(google-test-debug-options
+                                   INTERFACE HOSTTRACE_RELAXED_TESTING)
     endif()
     list(APPEND TEST_LINK_LIBRARIES google-test-debug-options)
 
@@ -299,12 +293,19 @@ FUNCTION(ADD_HOSTTRACE_GOOGLE_TEST TEST_NAME)
     endif()
 
     if(TEST_SOURCES AND NOT TARGET ${TEST_TARGET})
-        CREATE_EXECUTABLE(${_OPTS}
-            TARGET_NAME     ${TEST_TARGET}
-            OUTPUT_NAME     ${TEST_TARGET}
-            SOURCES         ${TEST_SOURCES}
-            LINK_LIBRARIES  hosttrace-google-test ${TEST_LINK_LIBRARIES}
-            PROPERTIES      "${TEST_PROPERTIES}")
+        create_executable(
+            ${_OPTS}
+            TARGET_NAME
+            ${TEST_TARGET}
+            OUTPUT_NAME
+            ${TEST_TARGET}
+            SOURCES
+            ${TEST_SOURCES}
+            LINK_LIBRARIES
+            hosttrace-google-test
+            ${TEST_LINK_LIBRARIES}
+            PROPERTIES
+            "${TEST_PROPERTIES}")
 
         target_compile_definitions(${TEST_TARGET} PUBLIC ${TEST_DEFINITIONS})
 
@@ -312,18 +313,20 @@ FUNCTION(ADD_HOSTTRACE_GOOGLE_TEST TEST_NAME)
         add_dependencies(hosttrace-test ${TEST_TARGET})
 
         if(WIN32)
-            set_target_properties(${TEST_TARGET}
-                PROPERTIES
-                FOLDER                   tests
-                RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/outputs/runtime
-                LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/outputs/runtime
-                ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/outputs/archive
-                PDB_OUTPUT_DIRECTORY     ${PROJECT_BINARY_DIR}/outputs/runtime)
+            set_target_properties(
+                ${TEST_TARGET}
+                PROPERTIES FOLDER tests
+                           RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/outputs/runtime
+                           LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/outputs/runtime
+                           ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/outputs/archive
+                           PDB_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/outputs/runtime)
         endif()
     endif()
 
     set(TEST_LAUNCHER)
-    if(HOSTTRACE_USE_MPI AND TEST_MPI AND MPIEXEC_EXECUTABLE)
+    if(HOSTTRACE_USE_MPI
+       AND TEST_MPI
+       AND MPIEXEC_EXECUTABLE)
         if(NOT TEST_NPROCS)
             set(TEST_NPROCS 2)
         endif()
@@ -351,67 +354,63 @@ FUNCTION(ADD_HOSTTRACE_GOOGLE_TEST TEST_NAME)
 
     if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug" OR HOSTTRACE_USE_COVERAGE)
         if(TEST_ENVIRONMENT)
-            set(TEST_ENVIRONMENT "HOSTTRACE_DEBUG=ON;HOSTTRACE_VERBOSE=6;${TEST_ENVIRONMENT}")
+            set(TEST_ENVIRONMENT
+                "HOSTTRACE_DEBUG=ON;HOSTTRACE_VERBOSE=6;${TEST_ENVIRONMENT}")
         else()
             set(TEST_ENVIRONMENT "HOSTTRACE_DEBUG=ON;HOSTTRACE_VERBOSE=6")
         endif()
     endif()
 
     if(TEST_DISCOVER_TESTS)
-        GTEST_DISCOVER_TESTS(${TEST_TARGET}
-            TEST_LIST ${TEST_NAME}_TESTS
-            ${TEST_OPTIONS}
-            DISCOVERY_TIMEOUT 15
+        gtest_discover_tests(
+            ${TEST_TARGET}
+            TEST_LIST ${TEST_NAME}_TESTS ${TEST_OPTIONS} DISCOVERY_TIMEOUT 15
             WORKING_DIRECTORY ${WORKING_DIR})
-        SET_TESTS_PROPERTIES(${${TEST_NAME}_TESTS} PROPERTIES
-            ENVIRONMENT "${TEST_ENVIRONMENT}"
-            TIMEOUT     ${TEST_TIMEOUT})
+        set_tests_properties(
+            ${${TEST_NAME}_TESTS} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}" TIMEOUT
+                                             ${TEST_TIMEOUT})
     elseif(TEST_ADD_TESTS)
-        GTEST_ADD_TESTS(TARGET ${TEST_TARGET}
-            TEST_LIST ${TEST_NAME}_TESTS
-            ${TEST_OPTIONS}
+        gtest_add_tests(
+            TARGET ${TEST_TARGET}
+            TEST_LIST ${TEST_NAME}_TESTS ${TEST_OPTIONS}
             WORKING_DIRECTORY ${WORKING_DIR})
-        SET_TESTS_PROPERTIES(${${TEST_NAME}_TESTS} PROPERTIES
-            ENVIRONMENT "${TEST_ENVIRONMENT}"
-            TIMEOUT     ${TEST_TIMEOUT})
+        set_tests_properties(
+            ${${TEST_NAME}_TESTS} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}" TIMEOUT
+                                             ${TEST_TIMEOUT})
     else()
-        ADD_TEST(
-            NAME                ${TEST_NAME}
-            COMMAND             ${TEST_COMMAND}
-            WORKING_DIRECTORY   ${WORKING_DIR}
-            ${TEST_OPTIONS})
-        SET_TESTS_PROPERTIES(${TEST_NAME} PROPERTIES
-            ENVIRONMENT "${TEST_ENVIRONMENT}"
-            TIMEOUT     ${TEST_TIMEOUT})
+        add_test(
+            NAME ${TEST_NAME}
+            COMMAND ${TEST_COMMAND}
+            WORKING_DIRECTORY ${WORKING_DIR} ${TEST_OPTIONS})
+        set_tests_properties(${TEST_NAME} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}"
+                                                     TIMEOUT ${TEST_TIMEOUT})
     endif()
 
     if(TEST_DEPENDS)
-        set_property(TEST ${TEST_NAME} APPEND PROPERTY DEPENDS ${TEST_DEPENDS})
+        set_property(
+            TEST ${TEST_NAME}
+            APPEND
+            PROPERTY DEPENDS ${TEST_DEPENDS})
     endif()
 
-ENDFUNCTION()
+endfunction()
 
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 # macro CHECKOUT_GIT_SUBMODULE()
 #
-#   Run "git submodule update" if a file in a submodule does not exist
+# Run "git submodule update" if a file in a submodule does not exist
 #
-#   ARGS:
-#       RECURSIVE (option) -- add "--recursive" flag
-#       RELATIVE_PATH (one value) -- typically the relative path to submodule
-#                                    from PROJECT_SOURCE_DIR
-#       WORKING_DIRECTORY (one value) -- (default: PROJECT_SOURCE_DIR)
-#       TEST_FILE (one value) -- file to check for (default: CMakeLists.txt)
-#       ADDITIONAL_CMDS (many value) -- any addition commands to pass
+# ARGS: RECURSIVE (option) -- add "--recursive" flag RELATIVE_PATH (one value) --
+# typically the relative path to submodule from PROJECT_SOURCE_DIR WORKING_DIRECTORY (one
+# value) -- (default: PROJECT_SOURCE_DIR) TEST_FILE (one value) -- file to check for
+# (default: CMakeLists.txt) ADDITIONAL_CMDS (many value) -- any addition commands to pass
 #
-FUNCTION(CHECKOUT_GIT_SUBMODULE)
+function(CHECKOUT_GIT_SUBMODULE)
     # parse args
     cmake_parse_arguments(
-        CHECKOUT
-        "RECURSIVE"
+        CHECKOUT "RECURSIVE"
         "RELATIVE_PATH;WORKING_DIRECTORY;TEST_FILE;REPO_URL;REPO_BRANCH"
-        "ADDITIONAL_CMDS"
-        ${ARGN})
+        "ADDITIONAL_CMDS" ${ARGN})
 
     if(NOT CHECKOUT_WORKING_DIRECTORY)
         set(CHECKOUT_WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
@@ -435,8 +434,8 @@ FUNCTION(CHECKOUT_GIT_SUBMODULE)
         endif()
     endif()
 
-    # if this file exists --> project has been checked out
-    # if not exists --> not been checked out
+    # if this file exists --> project has been checked out if not exists --> not been
+    # checked out
     set(_TEST_FILE "${_DIR}/${CHECKOUT_TEST_FILE}")
     # assuming a .gitmodules file exists
     set(_SUBMODULE "${PROJECT_SOURCE_DIR}/.gitmodules")
@@ -466,11 +465,9 @@ FUNCTION(CHECKOUT_GIT_SUBMODULE)
     if(NOT _TEST_FILE_EXISTS AND _SUBMODULE_EXISTS)
         # perform the checkout
         execute_process(
-            COMMAND
-                ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+            COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
                     ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}
-            WORKING_DIRECTORY
-                ${CHECKOUT_WORKING_DIRECTORY}
+            WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
             RESULT_VARIABLE RET)
 
         # check the return code
@@ -485,7 +482,8 @@ FUNCTION(CHECKOUT_GIT_SUBMODULE)
     endif()
 
     if(NOT _TEST_FILE_EXISTS AND _HAS_REPO_URL)
-        message(STATUS "Checking out '${CHECKOUT_REPO_URL}' @ '${CHECKOUT_REPO_BRANCH}'...")
+        message(
+            STATUS "Checking out '${CHECKOUT_REPO_URL}' @ '${CHECKOUT_REPO_BRANCH}'...")
 
         # remove the existing directory
         if(EXISTS "${_DIR}")
@@ -496,26 +494,26 @@ FUNCTION(CHECKOUT_GIT_SUBMODULE)
         execute_process(
             COMMAND
                 ${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
-                    ${CHECKOUT_ADDITIONAL_CMDS}
-                    ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}
-            WORKING_DIRECTORY
-                ${CHECKOUT_WORKING_DIRECTORY}
+                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}
+            WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
             RESULT_VARIABLE RET)
 
         # perform the submodule update
-        if(CHECKOUT_RECURSIVE AND EXISTS "${_DIR}" AND IS_DIRECTORY "${_DIR}")
+        if(CHECKOUT_RECURSIVE
+           AND EXISTS "${_DIR}"
+           AND IS_DIRECTORY "${_DIR}")
             execute_process(
-                COMMAND
-                    ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
-                WORKING_DIRECTORY
-                    ${_DIR}
+                COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
+                WORKING_DIRECTORY ${_DIR}
                 RESULT_VARIABLE RET)
         endif()
 
         # check the return code
         if(RET GREATER 0)
-            set(_CMD "${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
-                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}")
+            set(_CMD
+                "${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
+                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}"
+                )
             message(STATUS "function(CHECKOUT_GIT_SUBMODULE) failed.")
             message(FATAL_ERROR "Command: \"${_CMD}\"")
         else()
@@ -524,64 +522,72 @@ FUNCTION(CHECKOUT_GIT_SUBMODULE)
     endif()
 
     if(NOT EXISTS "${_TEST_FILE}" OR NOT _TEST_FILE_EXISTS)
-        message(FATAL_ERROR "Error checking out submodule: '${CHECKOUT_RELATIVE_PATH}' to '${_DIR}'")
+        message(
+            FATAL_ERROR
+                "Error checking out submodule: '${CHECKOUT_RELATIVE_PATH}' to '${_DIR}'")
     endif()
 
-ENDFUNCTION()
+endfunction()
 
-
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 # try to find a package quietly
 #
-FUNCTION(HOSTTRACE_TEST_FIND_PACKAGE PACKAGE_NAME OUTPUT_VAR)
-    cmake_parse_arguments(
-        PACKAGE "" "" "UNSET" ${ARGN})
+function(HOSTTRACE_TEST_FIND_PACKAGE PACKAGE_NAME OUTPUT_VAR)
+    cmake_parse_arguments(PACKAGE "" "" "UNSET" ${ARGN})
     find_package(${PACKAGE_NAME} QUIET ${PACKAGE_UNPARSED_ARGUMENTS})
     if(NOT ${PACKAGE_NAME}_FOUND)
-        set(${OUTPUT_VAR} OFF PARENT_SCOPE)
+        set(${OUTPUT_VAR}
+            OFF
+            PARENT_SCOPE)
     else()
-        set(${OUTPUT_VAR} ON PARENT_SCOPE)
+        set(${OUTPUT_VAR}
+            ON
+            PARENT_SCOPE)
     endif()
     foreach(_ARG ${PACKAGE_UNSET} FIND_PACKAGE_MESSAGE_DETAILS_${PACKAGE_NAME})
         unset(${_ARG} CACHE)
     endforeach()
-ENDFUNCTION()
+endfunction()
 
-
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 # macro to add an interface lib
 #
-MACRO(ADD_INTERFACE_LIBRARY _TARGET)
+macro(ADD_INTERFACE_LIBRARY _TARGET)
     add_library(${_TARGET} INTERFACE)
     add_library(${PROJECT_NAME}::${_TARGET} ALIAS ${_TARGET})
     cache_list(APPEND ${PROJECT_NAME_UC}_INTERFACE_LIBRARIES ${_TARGET})
     install(
-        TARGETS     ${_TARGET}
+        TARGETS ${_TARGET}
         DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        EXPORT      ${PROJECT_NAME}-library-depends
+        EXPORT ${PROJECT_NAME}-library-depends
         OPTIONAL)
     add_enabled_interface(${_TARGET})
     if(NOT "${ARGN}" STREQUAL "")
         set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_INTERFACE_DOC
-            "${PROJECT_NAME}::${_TARGET}` | ${ARGN} |")
+                                            "${PROJECT_NAME}::${_TARGET}` | ${ARGN} |")
     endif()
-ENDMACRO()
+endmacro()
 
-
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 #
-#                           handle empty interface
+# handle empty interface
 #
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 
-FUNCTION(INFORM_EMPTY_INTERFACE _TARGET _PACKAGE)
+function(INFORM_EMPTY_INTERFACE _TARGET _PACKAGE)
     if(NOT TARGET ${_TARGET})
-        hosttrace_message(AUTHOR_WARNING "A non-existant target was passed to INFORM_EMPTY_INTERFACE: ${_TARGET}")
+        hosttrace_message(
+            AUTHOR_WARNING
+            "A non-existant target was passed to INFORM_EMPTY_INTERFACE: ${_TARGET}")
     endif()
     if(NOT ${_TARGET} IN_LIST HOSTTRACE_EMPTY_INTERFACE_LIBRARIES)
-        hosttrace_message(STATUS
-                "[interface] ${_PACKAGE} not found/enabled. '${_TARGET}' interface will not provide ${_PACKAGE}...")
-        set(HOSTTRACE_EMPTY_INTERFACE_LIBRARIES ${HOSTTRACE_EMPTY_INTERFACE_LIBRARIES} ${_TARGET} PARENT_SCOPE)
+        hosttrace_message(
+            STATUS
+            "[interface] ${_PACKAGE} not found/enabled. '${_TARGET}' interface will not provide ${_PACKAGE}..."
+            )
+        set(HOSTTRACE_EMPTY_INTERFACE_LIBRARIES
+            ${HOSTTRACE_EMPTY_INTERFACE_LIBRARIES} ${_TARGET}
+            PARENT_SCOPE)
     endif()
     add_disabled_interface(${_TARGET})
 endfunction()
@@ -589,52 +595,46 @@ endfunction()
 function(ADD_RPATH)
     set(_DIRS)
     foreach(_ARG ${ARGN})
-    if(EXISTS "${_ARG}" AND IS_DIRECTORY "${_ARG}")
-        list(APPEND _DIRS "${_ARG}")
-    endif()
+        if(EXISTS "${_ARG}" AND IS_DIRECTORY "${_ARG}")
+            list(APPEND _DIRS "${_ARG}")
+        endif()
         get_filename_component(_DIR "${_ARG}" DIRECTORY)
-    if(EXISTS "${_DIR}" AND IS_DIRECTORY "${_DIR}")
-        list(APPEND _DIRS "${_DIR}")
-    endif()
+        if(EXISTS "${_DIR}" AND IS_DIRECTORY "${_DIR}")
+            list(APPEND _DIRS "${_DIR}")
+        endif()
     endforeach()
     if(_DIRS)
         list(REMOVE_DUPLICATES _DIRS)
         string(REPLACE ";" ":" _RPATH "${_DIRS}")
         # message(STATUS "\n\tRPATH additions: ${_RPATH}\n")
-        set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_RPATH}" PARENT_SCOPE)
+        set(CMAKE_INSTALL_RPATH
+            "${CMAKE_INSTALL_RPATH}:${_RPATH}"
+            PARENT_SCOPE)
     endif()
-ENDFUNCTION()
+endfunction()
 
-
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 # macro to build a library of type: shared, static, object
 #
-FUNCTION(BUILD_LIBRARY)
+function(BUILD_LIBRARY)
 
     # options
-    set(_options    PIC
-                    NO_CACHE_LIST
-                    EXCLUDE_FROM_ALL)
+    set(_options PIC NO_CACHE_LIST EXCLUDE_FROM_ALL)
     # single-value
-    set(_onevalue   TYPE
-                    OUTPUT_NAME
-                    TARGET_NAME
-                    OUTPUT_DIR
-                    LANGUAGE
-                    LINKER_LANGUAGE)
+    set(_onevalue TYPE OUTPUT_NAME TARGET_NAME OUTPUT_DIR LANGUAGE LINKER_LANGUAGE)
     # multi-value
-    set(_multival   SOURCES
-                    LINK_LIBRARIES
-                    COMPILE_DEFINITIONS
-                    INCLUDE_DIRECTORIES
-                    C_COMPILE_OPTIONS
-                    CXX_COMPILE_OPTIONS
-                    CUDA_COMPILE_OPTIONS
-                    LINK_OPTIONS
-                    EXTRA_PROPERTIES)
+    set(_multival
+        SOURCES
+        LINK_LIBRARIES
+        COMPILE_DEFINITIONS
+        INCLUDE_DIRECTORIES
+        C_COMPILE_OPTIONS
+        CXX_COMPILE_OPTIONS
+        CUDA_COMPILE_OPTIONS
+        LINK_OPTIONS
+        EXTRA_PROPERTIES)
 
-    cmake_parse_arguments(
-        LIBRARY "${_options}" "${_onevalue}" "${_multival}" ${ARGN})
+    cmake_parse_arguments(LIBRARY "${_options}" "${_onevalue}" "${_multival}" ${ARGN})
 
     if("${LIBRARY_LANGUAGE}" STREQUAL "")
         set(LIBRARY_LANGUAGE CXX)
@@ -660,17 +660,15 @@ FUNCTION(BUILD_LIBRARY)
 
     if(NOT "${LIBRARY_TYPE}" STREQUAL "OBJECT")
         if(NOT WIN32 AND NOT XCODE)
-            list(APPEND LIBRARY_EXTRA_PROPERTIES
-                VERSION                     ${PROJECT_VERSION}
-                SOVERSION                   ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
+            list(APPEND LIBRARY_EXTRA_PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION
+                 ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
         endif()
 
         if(NOT WIN32)
-            set(LIB_PREFIX )
-            list(APPEND LIBRARY_EXTRA_PROPERTIES
-                LIBRARY_OUTPUT_DIRECTORY    ${LIBRARY_OUTPUT_DIR}
-                ARCHIVE_OUTPUT_DIRECTORY    ${LIBRARY_OUTPUT_DIR}
-                RUNTIME_OUTPUT_DIRECTORY    ${LIBRARY_OUTPUT_DIR})
+            set(LIB_PREFIX)
+            list(APPEND LIBRARY_EXTRA_PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+                 ${LIBRARY_OUTPUT_DIR} ARCHIVE_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIR}
+                 RUNTIME_OUTPUT_DIRECTORY ${LIBRARY_OUTPUT_DIR})
         else()
             set(LIB_PREFIX lib)
         endif()
@@ -695,37 +693,36 @@ FUNCTION(BUILD_LIBRARY)
 
     # append include directories
     target_include_directories(${LIBRARY_TARGET_NAME}
-        PUBLIC ${LIBRARY_INCLUDE_DIRECTORIES})
+                               PUBLIC ${LIBRARY_INCLUDE_DIRECTORIES})
 
     # compile definitions
-    hosttrace_target_compile_definitions(${LIBRARY_TARGET_NAME}
-        PUBLIC ${LIBRARY_COMPILE_DEFINITIONS})
+    hosttrace_target_compile_definitions(${LIBRARY_TARGET_NAME} PUBLIC
+                                         ${LIBRARY_COMPILE_DEFINITIONS})
 
     # compile flags
-    target_compile_options(${LIBRARY_TARGET_NAME} PRIVATE
-        $<$<COMPILE_LANGUAGE:C>:${LIBRARY_C_COMPILE_OPTIONS}>
-        $<$<COMPILE_LANGUAGE:CXX>:${LIBRARY_CXX_COMPILE_OPTIONS}>)
+    target_compile_options(
+        ${LIBRARY_TARGET_NAME}
+        PRIVATE $<$<COMPILE_LANGUAGE:C>:${LIBRARY_C_COMPILE_OPTIONS}>
+                $<$<COMPILE_LANGUAGE:CXX>:${LIBRARY_CXX_COMPILE_OPTIONS}>)
 
-    # windows
-    # docs.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-library
-    # if(MSVC AND NOT "${LIBRARY_TYPE}" STREQUAL "OBJECT")
-    #    set(_MSVC_FLAGS /MD)
-    #    if("${LIBRARY_TYPE}" STREQUAL "STATIC")
-    #        set(_MSVC_FLAGS /MT)
-    #    endif()
-    #    target_compile_options(${LIBRARY_TARGET_NAME} PUBLIC
-    #        $<$<COMPILE_LANGUAGE:C>:${_MSVC_FLAGS}>
-    #        $<$<COMPILE_LANGUAGE:CXX>:${_MSVC_FLAGS}>)
+    # windows docs.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-library
+    # if(MSVC AND NOT "${LIBRARY_TYPE}" STREQUAL "OBJECT") set(_MSVC_FLAGS /MD)
+    # if("${LIBRARY_TYPE}" STREQUAL "STATIC") set(_MSVC_FLAGS /MT) endif()
+    # target_compile_options(${LIBRARY_TARGET_NAME} PUBLIC
+    # $<$<COMPILE_LANGUAGE:C>:${_MSVC_FLAGS}>
+    # $<$<COMPILE_LANGUAGE:CXX>:${_MSVC_FLAGS}>)
     # endif()
 
     # cuda flags
     if(_CUDA)
-        target_compile_options(${LIBRARY_TARGET_NAME} PRIVATE
-            $<$<COMPILE_LANGUAGE:CUDA>:${LIBRARY_CUDA_COMPILE_OPTIONS}>)
+        target_compile_options(
+            ${LIBRARY_TARGET_NAME}
+            PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${LIBRARY_CUDA_COMPILE_OPTIONS}>)
     endif()
 
     # link libraries
-    target_link_libraries(${LIBRARY_TARGET_NAME}
+    target_link_libraries(
+        ${LIBRARY_TARGET_NAME}
         PUBLIC ${LIBRARY_LINK_LIBRARIES}
         PRIVATE ${_ANALYSIS_TOOLS} ${_ARCH_LIBRARY})
 
@@ -739,39 +736,40 @@ FUNCTION(BUILD_LIBRARY)
         endif()
         #
         set_target_properties(
-            ${LIBRARY_TARGET_NAME}      PROPERTIES
-            OUTPUT_NAME                 ${LIB_PREFIX}${LIBRARY_OUTPUT_NAME}
-            LANGUAGE                    ${LIBRARY_LANGUAGE}
-            LINKER_LANGUAGE             ${LIBRARY_LINKER_LANGUAGE}
-            POSITION_INDEPENDENT_CODE   ${LIBRARY_PIC}
-            ${LIBRARY_EXTRA_PROPERTIES})
+            ${LIBRARY_TARGET_NAME}
+            PROPERTIES OUTPUT_NAME ${LIB_PREFIX}${LIBRARY_OUTPUT_NAME}
+                       LANGUAGE ${LIBRARY_LANGUAGE}
+                       LINKER_LANGUAGE ${LIBRARY_LINKER_LANGUAGE}
+                       POSITION_INDEPENDENT_CODE ${LIBRARY_PIC}
+                       ${LIBRARY_EXTRA_PROPERTIES})
     else()
         set_target_properties(
-            ${LIBRARY_TARGET_NAME}      PROPERTIES
-            LANGUAGE                    ${LIBRARY_LANGUAGE}
-            POSITION_INDEPENDENT_CODE   ${LIBRARY_PIC}
-            ${LIBRARY_EXTRA_PROPERTIES})
+            ${LIBRARY_TARGET_NAME}
+            PROPERTIES LANGUAGE ${LIBRARY_LANGUAGE}
+                       POSITION_INDEPENDENT_CODE ${LIBRARY_PIC}
+                       ${LIBRARY_EXTRA_PROPERTIES})
     endif()
 
     set(COMPILED_TYPES "SHARED" "STATIC" "MODULE")
     if(NOT LIBRARY_NO_CACHE_LIST)
         # add to cached list of compiled libraries
         if("${LIBRARY_TYPE}" IN_LIST COMPILED_TYPES)
-            cache_list(APPEND ${PROJECT_NAME_UC}_COMPILED_LIBRARIES ${LIBRARY_TARGET_NAME})
+            cache_list(APPEND ${PROJECT_NAME_UC}_COMPILED_LIBRARIES
+                       ${LIBRARY_TARGET_NAME})
         endif()
     endif()
     unset(COMPILED_TYPES)
 
     set_property(GLOBAL APPEND PROPERTY HOSTTRACE_${LIBRARY_TYPE}_LIBRARIES
-        ${LIBRARY_TARGET_NAME})
+                                        ${LIBRARY_TARGET_NAME})
 
     if("${LIBRARY_TYPE}" STREQUAL "SHARED" AND _ENABLE_CUSTOM_COMMAND)
         set(_PREFIX ${CMAKE_SHARED_LIBRARY_PREFIX})
         set(_SUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX})
 
-        get_target_property(_OUTNAME    ${LIBRARY_TARGET_NAME} OUTPUT_NAME)
-        get_target_property(_VERSION    ${LIBRARY_TARGET_NAME} VERSION)
-        get_target_property(_SOVERSION  ${LIBRARY_TARGET_NAME} SOVERSION)
+        get_target_property(_OUTNAME ${LIBRARY_TARGET_NAME} OUTPUT_NAME)
+        get_target_property(_VERSION ${LIBRARY_TARGET_NAME} VERSION)
+        get_target_property(_SOVERSION ${LIBRARY_TARGET_NAME} SOVERSION)
 
         set(_FILENAME ${_PREFIX}${_OUTNAME}${_SUFFIX})
 
@@ -779,41 +777,41 @@ FUNCTION(BUILD_LIBRARY)
         if(NOT IS_ABSOLUTE "${_OUTDIR}")
             set(_OUTDIR "${PROJECT_BINARY_DIR}/${_OUTDIR}")
         endif()
-        file(RELATIVE_PATH BINARY_RELPATH
-            "${PROJECT_BINARY_DIR}/hosttrace/libs" "${_OUTDIR}")
+        file(RELATIVE_PATH BINARY_RELPATH "${PROJECT_BINARY_DIR}/hosttrace/libs"
+             "${_OUTDIR}")
 
         string(REGEX REPLACE "/$" "" BINARY_RELPATH "${BINARY_RELPATH}")
 
         # build tree
         if(WIN32)
             # copy if on windows
-            add_custom_command(TARGET ${LIBRARY_TARGET_NAME}
+            add_custom_command(
+                TARGET ${LIBRARY_TARGET_NAME}
                 POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                COMMAND
+                    ${CMAKE_COMMAND} -E copy_if_different
                     $<TARGET_FILE:${LIBRARY_TARGET_NAME}>
                     ${PROJECT_BINARY_DIR}/hosttrace/libs
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         else()
             # symlink if not windows
-            add_custom_command(TARGET ${LIBRARY_TARGET_NAME}
+            add_custom_command(
+                TARGET ${LIBRARY_TARGET_NAME}
                 POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E create_symlink
-                    ${BINARY_RELPATH}/${_FILENAME}
-                    ${PROJECT_BINARY_DIR}/hosttrace/libs/${_FILENAME}
+                COMMAND ${CMAKE_COMMAND} -E create_symlink ${BINARY_RELPATH}/${_FILENAME}
+                        ${PROJECT_BINARY_DIR}/hosttrace/libs/${_FILENAME}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
     endif()
 
-ENDFUNCTION()
+endfunction()
 
-
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 # finds dependencies
 #
 function(HOSTTRACE_GET_INTERNAL_DEPENDS VAR LINK)
-    # set the depends before creating the library so it does not
-    # link to itself
+    # set the depends before creating the library so it does not link to itself
     set(DEPENDS)
     foreach(DEP ${ARGN})
         #
@@ -843,15 +841,16 @@ function(HOSTTRACE_GET_INTERNAL_DEPENDS VAR LINK)
             list(APPEND DEPENDS hosttrace-${DEP}-component-${LINK})
         endif()
     endforeach()
-    set(${VAR} "${DEPENDS}" PARENT_SCOPE)
+    set(${VAR}
+        "${DEPENDS}"
+        PARENT_SCOPE)
 endfunction()
 
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 # finds dependencies
 #
 function(HOSTTRACE_GET_PROPERTY_DEPENDS VAR LINK)
-    # set the depends before creating the library so it does not
-    # link to itself
+    # set the depends before creating the library so it does not link to itself
     set(DEPENDS)
     foreach(DEP ${ARGN})
         get_property(TMP GLOBAL PROPERTY HOSTTRACE_${LINK}_${DEP}_LIBRARIES)
@@ -867,11 +866,12 @@ function(HOSTTRACE_GET_PROPERTY_DEPENDS VAR LINK)
             endif()
         endforeach()
     endforeach()
-    set(${VAR} "${DEPENDS}" PARENT_SCOPE)
+    set(${VAR}
+        "${DEPENDS}"
+        PARENT_SCOPE)
 endfunction()
 
-
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 # require variable
 #
 function(CHECK_REQUIRED VAR)
@@ -880,11 +880,10 @@ function(CHECK_REQUIRED VAR)
     endif()
 endfunction()
 
-
-#-----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # C/C++ development headers
 #
-FUNCTION(HOSTTRACE_INSTALL_HEADER_FILES)
+function(HOSTTRACE_INSTALL_HEADER_FILES)
     if(NOT HOSTTRACE_INSTALL_HEADERS)
         return()
     endif()
@@ -893,25 +892,25 @@ FUNCTION(HOSTTRACE_INSTALL_HEADER_FILES)
             continue()
         endif()
         if(NOT EXISTS "${_header}")
-            hosttrace_message(AUTHOR_WARNING
+            hosttrace_message(
+                AUTHOR_WARNING
                 "Skipping install of non-existant hosttrace header: '${_header}'")
         endif()
         file(RELATIVE_PATH _relative ${PROJECT_SOURCE_DIR}/source ${_header})
         get_filename_component(_destpath ${_relative} DIRECTORY)
         install(
-            FILES       ${_header}
+            FILES ${_header}
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${_destpath}
             OPTIONAL)
     endforeach()
-ENDFUNCTION()
+endfunction()
 
-
-#-----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # Library installation
 #
-FUNCTION(HOSTTRACE_INSTALL_LIBRARIES)
-    cmake_parse_arguments(
-        LIB "LINK_VERSION;LINK_SOVERSION" "DESTINATION;EXPORT" "TARGETS" ${ARGN})
+function(HOSTTRACE_INSTALL_LIBRARIES)
+    cmake_parse_arguments(LIB "LINK_VERSION;LINK_SOVERSION" "DESTINATION;EXPORT"
+                          "TARGETS" ${ARGN})
 
     if(NOT LIB_DESTINATION)
         set(LIB_DESTINATION ${CMAKE_INSTALL_LIBDIR})
@@ -937,10 +936,9 @@ FUNCTION(HOSTTRACE_INSTALL_LIBRARIES)
 
     list(REMOVE_DUPLICATES LIB_TARGETS)
 
-    if (WIN32)
-        # use the defaults for destination folders on windows; this follows
-        # conventional windows locations by putting DLLs into bin and LIBs
-        # into lib
+    if(WIN32)
+        # use the defaults for destination folders on windows; this follows conventional
+        # windows locations by putting DLLs into bin and LIBs into lib
         set(_dst)
     else()
         # set destination to be the one specified by input argument
@@ -959,27 +957,29 @@ FUNCTION(HOSTTRACE_INSTALL_LIBRARIES)
         set_property(GLOBAL APPEND PROPERTY HOSTTRACE_EXPORTED_LIBRARIES ${_LIB})
 
         install(
-            TARGETS ${_LIB}
-            ${_dst}
+            TARGETS ${_LIB} ${_dst}
             EXPORT ${PROJECT_NAME}-library-depends
             OPTIONAL)
 
-        if (WIN32 AND "${_LIB}" IN_LIST SHARED_LIBS)
+        if(WIN32 AND "${_LIB}" IN_LIST SHARED_LIBS)
             # for windows install pdb files too
-            install(FILES $<TARGET_PDB_FILE:${_LIB}> DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+            install(
+                FILES $<TARGET_PDB_FILE:${_LIB}>
+                DESTINATION ${CMAKE_INSTALL_BINDIR}
+                OPTIONAL)
         endif()
 
         if(HOSTTRACE_USE_PYTHON AND ${_LIB} IN_LIST SHARED_LIBS)
             set(_PREFIX ${CMAKE_SHARED_LIBRARY_PREFIX})
             set(_SUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX})
 
-            get_target_property(_OUTNAME    ${_LIB} OUTPUT_NAME)
-            get_target_property(_VERSION    ${_LIB} VERSION)
-            get_target_property(_SOVERSION  ${_LIB} SOVERSION)
+            get_target_property(_OUTNAME ${_LIB} OUTPUT_NAME)
+            get_target_property(_VERSION ${_LIB} VERSION)
+            get_target_property(_SOVERSION ${_LIB} SOVERSION)
 
             set(_FILENAME ${_PREFIX}${_OUTNAME}${_SUFFIX})
-            set(_VERSION_FILENAME )
-            set(_SOVERSION_FILENAME )
+            set(_VERSION_FILENAME)
+            set(_SOVERSION_FILENAME)
             set(_FILE_TYPES _FILENAME)
             #
             if(_VERSION AND LIB_LINK_VERSION)
@@ -1001,7 +1001,7 @@ FUNCTION(HOSTTRACE_INSTALL_LIBRARIES)
             endif()
 
             file(RELATIVE_PATH INSTALL_RELPATH "${_PYLIB}"
-                "${CMAKE_INSTALL_PREFIX}/${LIB_DESTINATION}")
+                 "${CMAKE_INSTALL_PREFIX}/${LIB_DESTINATION}")
 
             get_target_property(_OUTDIR ${_LIB} LIBRARY_OUTPUT_DIRECTORY)
             if(NOT IS_ABSOLUTE "${_OUTDIR}")
@@ -1017,11 +1017,12 @@ FUNCTION(HOSTTRACE_INSTALL_LIBRARIES)
                 endif()
                 if(WIN32)
                     # install a second time if windows
-                    install(TARGETS ${_LIB} DESTINATION ${CMAKE_INSTALL_PYTHONDIR}/${PROJECT_NAME}/libs)
+                    install(TARGETS ${_LIB}
+                            DESTINATION ${CMAKE_INSTALL_PYTHONDIR}/${PROJECT_NAME}/libs)
                 else()
                     # symlink if not windows
-                    install(CODE
-                        "
+                    install(
+                        CODE "
                         EXECUTE_PROCESS(
                             COMMAND ${CMAKE_COMMAND} -E create_symlink
                             ${INSTALL_RELPATH}/${${_FNAME}} ${_PYLIB}/${${_FNAME}}
@@ -1033,15 +1034,13 @@ FUNCTION(HOSTTRACE_INSTALL_LIBRARIES)
             endforeach()
         endif()
     endforeach()
-ENDFUNCTION()
+endfunction()
 
-
-#-----------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # Add pre-compiled headers
 #
-FUNCTION(HOSTTRACE_TARGET_PRECOMPILE_HEADERS _TARG)
-    cmake_parse_arguments(
-        HEAD "INSTALL_INTERFACE" "" "FILES" ${ARGN})
+function(HOSTTRACE_TARGET_PRECOMPILE_HEADERS _TARG)
+    cmake_parse_arguments(HEAD "INSTALL_INTERFACE" "" "FILES" ${ARGN})
 
     if(HOSTTRACE_PRECOMPILE_HEADERS)
         set(_BINARY_IFACE)
@@ -1053,45 +1052,29 @@ FUNCTION(HOSTTRACE_TARGET_PRECOMPILE_HEADERS _TARG)
             string(REPLACE "source/" "" _HEADER "${_HEADER}")
             list(APPEND _INSTALL_IFACE "<${_HEADER}>")
         endforeach()
-        target_precompile_headers(${_TARG} INTERFACE
-            $<BUILD_INTERFACE:${_BINARY_IFACE}>)
+        target_precompile_headers(${_TARG} INTERFACE $<BUILD_INTERFACE:${_BINARY_IFACE}>)
         if(HEAD_INSTALL_INTERFACE)
             target_precompile_headers(${_TARG} INTERFACE
-                $<BUILD_INTERFACE:${_PRECOMPILE_HEADERS}>)
+                                      $<BUILD_INTERFACE:${_PRECOMPILE_HEADERS}>)
         endif()
     endif()
-ENDFUNCTION()
+endfunction()
 
-
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 # macro to build a library of type: shared, static, object
 #
-FUNCTION(BUILD_INTERMEDIATE_LIBRARY)
+function(BUILD_INTERMEDIATE_LIBRARY)
 
     # options
-    set(_options    USE_INTERFACE
-                    USE_CATEGORY
-                    INSTALL_SOURCE
-                    FORCE_OBJECT
-                    FORCE_SHARED
-                    FORCE_STATIC)
+    set(_options USE_INTERFACE USE_CATEGORY INSTALL_SOURCE FORCE_OBJECT FORCE_SHARED
+                 FORCE_STATIC)
     # single-value
-    set(_onevalue   NAME
-                    TARGET
-                    CATEGORY
-                    FOLDER
-                    VISIBILITY)
+    set(_onevalue NAME TARGET CATEGORY FOLDER VISIBILITY)
     # multi-value
-    set(_multival   HEADERS
-                    SOURCES
-                    DEPENDS
-                    INCLUDES
-                    PROPERTY_DEPENDS
-                    PUBLIC_LINK
-                    PRIVATE_LINK)
+    set(_multival HEADERS SOURCES DEPENDS INCLUDES PROPERTY_DEPENDS PUBLIC_LINK
+                  PRIVATE_LINK)
 
-    cmake_parse_arguments(
-        COMP "${_options}" "${_onevalue}" "${_multival}" ${ARGN})
+    cmake_parse_arguments(COMP "${_options}" "${_onevalue}" "${_multival}" ${ARGN})
 
     check_required(COMP_NAME)
     check_required(COMP_TARGET)
@@ -1099,7 +1082,7 @@ FUNCTION(BUILD_INTERMEDIATE_LIBRARY)
     check_required(COMP_FOLDER)
 
     if(NOT COMP_VISIBILITY)
-      set(COMP_VISIBILITY default)
+        set(COMP_VISIBILITY default)
     endif()
 
     set(VIS_OPTS "default" "hidden")
@@ -1140,8 +1123,8 @@ FUNCTION(BUILD_INTERMEDIATE_LIBRARY)
             get_filename_component(_SOURCE_NAME "${_SOURCE}" NAME)
             get_filename_component(_SOURCE_DIR "${_SOURCE}" DIRECTORY)
             get_filename_component(_SOURCE_DIR "${_SOURCE_DIR}" NAME)
-            if(NOT "${_SOURCE_NAME}" STREQUAL "extern.cpp" AND
-               NOT "${_SOURCE_DIR}" STREQUAL "extern")
+            if(NOT "${_SOURCE_NAME}" STREQUAL "extern.cpp" AND NOT "${_SOURCE_DIR}"
+                                                               STREQUAL "extern")
                 list(APPEND _SOURCES ${_SOURCE})
             else()
                 message(WARNING "Not installing ${_SOURCE} source")
@@ -1162,7 +1145,8 @@ FUNCTION(BUILD_INTERMEDIATE_LIBRARY)
         # set the depends before creating the library so it does not link to itself
         hosttrace_get_internal_depends(_DEPENDS ${LINK} ${COMP_DEPENDS} hosttrace-core)
         hosttrace_get_property_depends(_PROPERTY_OBJS OBJECT ${COMP_PROPERTY_DEPENDS})
-        hosttrace_get_property_depends(_PROPERTY_LINK ${UPP_LINK} ${COMP_PROPERTY_DEPENDS})
+        hosttrace_get_property_depends(_PROPERTY_LINK ${UPP_LINK}
+                                       ${COMP_PROPERTY_DEPENDS})
 
         # must reset this variable
         set(DEPENDS)
@@ -1180,22 +1164,30 @@ FUNCTION(BUILD_INTERMEDIATE_LIBRARY)
 
         set_property(GLOBAL APPEND PROPERTY HOSTTRACE_HEADERS ${COMP_HEADERS})
         set_property(GLOBAL APPEND PROPERTY HOSTTRACE_SOURCES ${COMP_SOURCES})
-        set_property(GLOBAL APPEND PROPERTY HOSTTRACE_${UPP_LINK}_${COMP_CATEGORY}_LIBRARIES
-            hosttrace-${COMP_TARGET}-${LINK})
+        set_property(
+            GLOBAL APPEND PROPERTY HOSTTRACE_${UPP_LINK}_${COMP_CATEGORY}_LIBRARIES
+                                   hosttrace-${COMP_TARGET}-${LINK})
 
-        # message(STATUS "Building ${TARGET_NAME}")
-        # message(STATUS "[-------] ${TARGET_NAME} :: ${DEPENDS}")
+        # message(STATUS "Building ${TARGET_NAME}") message(STATUS "[-------]
+        # ${TARGET_NAME} :: ${DEPENDS}")
 
         build_library(
             NO_CACHE_LIST
             ${${LINK}_OPTIONS}
-            TARGET_NAME         ${TARGET_NAME}
-            OUTPUT_NAME         hosttrace-${COMP_TARGET}
-            LANGUAGE            CXX
-            LINKER_LANGUAGE     ${_LINKER_LANGUAGE}
-            OUTPUT_DIR          ${PROJECT_BINARY_DIR}/${COMP_FOLDER}
-            SOURCES             ${_SOURCES}
-            CXX_COMPILE_OPTIONS ${${PROJECT_NAME}_CXX_COMPILE_OPTIONS})
+            TARGET_NAME
+            ${TARGET_NAME}
+            OUTPUT_NAME
+            hosttrace-${COMP_TARGET}
+            LANGUAGE
+            CXX
+            LINKER_LANGUAGE
+            ${_LINKER_LANGUAGE}
+            OUTPUT_DIR
+            ${PROJECT_BINARY_DIR}/${COMP_FOLDER}
+            SOURCES
+            ${_SOURCES}
+            CXX_COMPILE_OPTIONS
+            ${${PROJECT_NAME}_CXX_COMPILE_OPTIONS})
 
         target_include_directories(${TARGET_NAME} PUBLIC ${COMP_INCLUDES})
 
@@ -1213,36 +1205,31 @@ FUNCTION(BUILD_INTERMEDIATE_LIBRARY)
             list(REMOVE_DUPLICATES DEPENDS)
         endif()
 
-        target_link_libraries(${TARGET_NAME} PUBLIC
-            hosttrace-external-${LINK}
-            hosttrace-headers
-            hosttrace-vector
-            hosttrace-dmp
-            ${DEPENDS}
-            ${COMP_PUBLIC_LINK})
+        target_link_libraries(
+            ${TARGET_NAME}
+            PUBLIC hosttrace-external-${LINK} hosttrace-headers hosttrace-vector
+                   hosttrace-dmp ${DEPENDS} ${COMP_PUBLIC_LINK})
 
-        target_link_libraries(${TARGET_NAME} PRIVATE
-            hosttrace-compile-options
-            hosttrace-develop-options
-            hosttrace-${COMP_VISIBILITY}-visibility
-            ${COMP_PRIVATE_LINK})
+        target_link_libraries(
+            ${TARGET_NAME}
+            PRIVATE hosttrace-compile-options hosttrace-develop-options
+                    hosttrace-${COMP_VISIBILITY}-visibility ${COMP_PRIVATE_LINK})
 
-        hosttrace_target_compile_definitions(${TARGET_NAME} PRIVATE
-            HOSTTRACE_SOURCE
-            HOSTTRACE_${COMP_CATEGORY}_SOURCE
+        hosttrace_target_compile_definitions(
+            ${TARGET_NAME} PRIVATE HOSTTRACE_SOURCE HOSTTRACE_${COMP_CATEGORY}_SOURCE
             HOSTTRACE_${UPP_COMP}_SOURCE)
 
         hosttrace_target_compile_definitions(${TARGET_NAME} INTERFACE
-            HOSTTRACE_USE_${UPP_COMP}_EXTERN)
+                                             HOSTTRACE_USE_${UPP_COMP}_EXTERN)
 
         if(NOT "${UPP_COMP}" STREQUAL "CORE")
             hosttrace_target_compile_definitions(${TARGET_NAME} PUBLIC
-                HOSTTRACE_USE_CORE_EXTERN)
+                                                 HOSTTRACE_USE_CORE_EXTERN)
         endif()
 
         if("${COMP_CATEGORY}" STREQUAL "COMPONENT" OR COMP_USE_CATEGORY)
             hosttrace_target_compile_definitions(${TARGET_NAME} INTERFACE
-                HOSTTRACE_USE_${COMP_CATEGORY}_EXTERN)
+                                                 HOSTTRACE_USE_${COMP_CATEGORY}_EXTERN)
         endif()
 
         if("${LINK}" STREQUAL "OBJECT")
@@ -1250,8 +1237,8 @@ FUNCTION(BUILD_INTERMEDIATE_LIBRARY)
                 add_interface_library(hosttrace-${LC_CATEGORY}-${LINK})
             endif()
             if(NOT "hosttrace-${LC_CATEGORY}-${LINK}" STREQUAL "${TARGET_NAME}")
-                target_sources(hosttrace-${LC_CATEGORY}-${LINK} INTERFACE
-                    $<TARGET_OBJECTS:${TARGET_NAME}>)
+                target_sources(hosttrace-${LC_CATEGORY}-${LINK}
+                               INTERFACE $<TARGET_OBJECTS:${TARGET_NAME}>)
             endif()
         else()
             if(NOT TARGET hosttrace-${LC_CATEGORY}-${LINK})
@@ -1259,17 +1246,18 @@ FUNCTION(BUILD_INTERMEDIATE_LIBRARY)
             endif()
 
             if(NOT "hosttrace-${LC_CATEGORY}-${LINK}" STREQUAL "${TARGET_NAME}")
-                target_link_libraries(hosttrace-${LC_CATEGORY}-${LINK} INTERFACE ${TARGET_NAME})
+                target_link_libraries(hosttrace-${LC_CATEGORY}-${LINK}
+                                      INTERFACE ${TARGET_NAME})
             endif()
 
             hosttrace_install_libraries(
-                TARGETS     ${TARGET_NAME}
-                DESTINATION ${CMAKE_INSTALL_LIBDIR}
-                EXPORT      ${PROJECT_NAME}-library-depends)
+                TARGETS ${TARGET_NAME} DESTINATION ${CMAKE_INSTALL_LIBDIR} EXPORT
+                ${PROJECT_NAME}-library-depends)
 
-            set_property(GLOBAL APPEND PROPERTY HOSTTRACE_INTERMEDIATE_TARGETS ${TARGET_NAME})
+            set_property(GLOBAL APPEND PROPERTY HOSTTRACE_INTERMEDIATE_TARGETS
+                                                ${TARGET_NAME})
             set_property(GLOBAL APPEND PROPERTY HOSTTRACE_INTERMEDIATE_${UPP_LINK}_TARGETS
-                ${TARGET_NAME})
+                                                ${TARGET_NAME})
         endif()
 
     endforeach()
@@ -1281,109 +1269,116 @@ FUNCTION(BUILD_INTERMEDIATE_LIBRARY)
 
     if(NOT TARGET hosttrace-${COMP_TARGET})
         add_interface_library(hosttrace-${COMP_TARGET})
-        target_link_libraries(hosttrace-${COMP_TARGET} INTERFACE
-            hosttrace-${COMP_TARGET}-${_LIB_DEFAULT_TYPE})
+        target_link_libraries(hosttrace-${COMP_TARGET}
+                              INTERFACE hosttrace-${COMP_TARGET}-${_LIB_DEFAULT_TYPE})
     endif()
 
     if(NOT TARGET hosttrace-${LC_CATEGORY})
         add_interface_library(hosttrace-${LC_CATEGORY})
-        target_link_libraries(hosttrace-${LC_CATEGORY} INTERFACE
-            hosttrace-${LC_CATEGORY}-${_LIB_DEFAULT_TYPE})
+        target_link_libraries(hosttrace-${LC_CATEGORY}
+                              INTERFACE hosttrace-${LC_CATEGORY}-${_LIB_DEFAULT_TYPE})
     endif()
 
-    if(WIN32 AND TARGET hosttrace-${COMP_TARGET}-shared AND TARGET hosttrace-${COMP_TARGET}-static)
+    if(WIN32
+       AND TARGET hosttrace-${COMP_TARGET}-shared
+       AND TARGET hosttrace-${COMP_TARGET}-static)
         add_dependencies(hosttrace-${COMP_TARGET}-shared hosttrace-${COMP_TARGET}-static)
     endif()
 
-ENDFUNCTION()
+endfunction()
 
-
-FUNCTION(ADD_CMAKE_DEFINES _VAR)
+function(ADD_CMAKE_DEFINES _VAR)
     # parse args
     cmake_parse_arguments(DEF "VALUE;QUOTE;DEFAULT" "" "" ${ARGN})
     if(DEF_VALUE)
         if(DEF_QUOTE)
-            SET_PROPERTY(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES
-                "${_VAR} \"@${_VAR}@\"")
+            set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES
+                                                "${_VAR} \"@${_VAR}@\"")
         else()
-            SET_PROPERTY(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES "${_VAR} @${_VAR}@")
+            set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES
+                                                "${_VAR} @${_VAR}@")
         endif()
         if(DEF_DEFAULT)
             if(DEF_QUOTE)
-                SET_PROPERTY(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_DEFAULT_CMAKE_DEFINES
-                    "#if !defined(${_VAR})\n#cmakedefine ${_VAR} \"@${_VAR}@\"\n#endif\n")
+                set_property(
+                    GLOBAL APPEND
+                    PROPERTY
+                        ${PROJECT_NAME}_DEFAULT_CMAKE_DEFINES
+                        "#if !defined(${_VAR})\n#cmakedefine ${_VAR} \"@${_VAR}@\"\n#endif\n"
+                    )
             else()
-                SET_PROPERTY(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_DEFAULT_CMAKE_DEFINES
-                    "#if !defined(${_VAR})\n#cmakedefine ${_VAR} @${_VAR}@\n#endif\n")
+                set_property(
+                    GLOBAL APPEND
+                    PROPERTY
+                        ${PROJECT_NAME}_DEFAULT_CMAKE_DEFINES
+                        "#if !defined(${_VAR})\n#cmakedefine ${_VAR} @${_VAR}@\n#endif\n")
             endif()
         endif()
     else()
-        SET_PROPERTY(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES "${_VAR}")
+        set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES "${_VAR}")
     endif()
-ENDFUNCTION()
+endfunction()
 
-#-----------------------------------------------------------------------
-# function add_feature(<NAME> <DOCSTRING>)
-#          Add a project feature, whose activation is specified by the
-#          existence of the variable <NAME>, to the list of enabled/disabled
-#          features, plus a docstring describing the feature
+# -----------------------------------------------------------------------
+# function add_feature(<NAME> <DOCSTRING>) Add a project feature, whose activation is
+# specified by the existence of the variable <NAME>, to the list of enabled/disabled
+# features, plus a docstring describing the feature
 #
-FUNCTION(ADD_FEATURE _var _description)
-  set(EXTRA_DESC "")
-  foreach(currentArg ${ARGN})
-      if(NOT "${currentArg}" STREQUAL "${_var}" AND
-         NOT "${currentArg}" STREQUAL "${_description}" AND
-         NOT "${currentArg}" STREQUAL "CMAKE_DEFINE" AND
-         NOT "${currentArg}" STREQUAL "DOC")
-          set(EXTRA_DESC "${EXTA_DESC}${currentArg}")
-      endif()
-  endforeach()
+function(ADD_FEATURE _var _description)
+    set(EXTRA_DESC "")
+    foreach(currentArg ${ARGN})
+        if(NOT "${currentArg}" STREQUAL "${_var}"
+           AND NOT "${currentArg}" STREQUAL "${_description}"
+           AND NOT "${currentArg}" STREQUAL "CMAKE_DEFINE"
+           AND NOT "${currentArg}" STREQUAL "DOC")
+            set(EXTRA_DESC "${EXTA_DESC}${currentArg}")
+        endif()
+    endforeach()
 
-  set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_FEATURES ${_var})
-  set_property(GLOBAL PROPERTY ${_var}_DESCRIPTION "${_description}${EXTRA_DESC}")
+    set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_FEATURES ${_var})
+    set_property(GLOBAL PROPERTY ${_var}_DESCRIPTION "${_description}${EXTRA_DESC}")
 
-  IF("CMAKE_DEFINE" IN_LIST ARGN)
-      SET_PROPERTY(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES "${_var} @${_var}@")
-      IF(HOSTTRACE_BUILD_DOCS)
-          SET_PROPERTY(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
-              "${_var}` | ${_description}${EXTRA_DESC} |")
-      ENDIF()
-  ELSEIF("DOC" IN_LIST ARGN AND HOSTTRACE_BUILD_DOCS)
-      SET_PROPERTY(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
-          "${_var}` | ${_description}${EXTRA_DESC} |")
-  ENDIF()
-ENDFUNCTION()
+    if("CMAKE_DEFINE" IN_LIST ARGN)
+        set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES
+                                            "${_var} @${_var}@")
+        if(HOSTTRACE_BUILD_DOCS)
+            set_property(
+                GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
+                                       "${_var}` | ${_description}${EXTRA_DESC} |")
+        endif()
+    elseif("DOC" IN_LIST ARGN AND HOSTTRACE_BUILD_DOCS)
+        set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
+                                            "${_var}` | ${_description}${EXTRA_DESC} |")
+    endif()
+endfunction()
 
-
-#----------------------------------------------------------------------------------------#
-# function add_option(<OPTION_NAME> <DOCSRING> <DEFAULT_SETTING> [NO_FEATURE])
-#          Add an option and add as a feature if NO_FEATURE is not provided
+# ----------------------------------------------------------------------------------------#
+# function add_option(<OPTION_NAME> <DOCSRING> <DEFAULT_SETTING> [NO_FEATURE]) Add an
+# option and add as a feature if NO_FEATURE is not provided
 #
-FUNCTION(ADD_OPTION _NAME _MESSAGE _DEFAULT)
-    OPTION(${_NAME} "${_MESSAGE}" ${_DEFAULT})
-    IF("NO_FEATURE" IN_LIST ARGN)
-        MARK_AS_ADVANCED(${_NAME})
-    ELSE()
-        ADD_FEATURE(${_NAME} "${_MESSAGE}")
-        IF(HOSTTRACE_BUILD_DOCS)
-            SET_PROPERTY(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
-                "${_NAME}` | ${_MESSAGE} |")
-        ENDIF()
-    ENDIF()
-    IF("ADVANCED" IN_LIST ARGN)
-        MARK_AS_ADVANCED(${_NAME})
-    ENDIF()
-    IF("CMAKE_DEFINE" IN_LIST ARGN)
-        SET_PROPERTY(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES ${_NAME})
-    ENDIF()
-ENDFUNCTION()
+function(ADD_OPTION _NAME _MESSAGE _DEFAULT)
+    option(${_NAME} "${_MESSAGE}" ${_DEFAULT})
+    if("NO_FEATURE" IN_LIST ARGN)
+        mark_as_advanced(${_NAME})
+    else()
+        add_feature(${_NAME} "${_MESSAGE}")
+        if(HOSTTRACE_BUILD_DOCS)
+            set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
+                                                "${_NAME}` | ${_MESSAGE} |")
+        endif()
+    endif()
+    if("ADVANCED" IN_LIST ARGN)
+        mark_as_advanced(${_NAME})
+    endif()
+    if("CMAKE_DEFINE" IN_LIST ARGN)
+        set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES ${_NAME})
+    endif()
+endfunction()
 
-
-#----------------------------------------------------------------------------------------#
-# function print_enabled_features()
-#          Print enabled  features plus their docstrings.
+# ----------------------------------------------------------------------------------------#
+# function print_enabled_features() Print enabled  features plus their docstrings.
 #
-FUNCTION(PRINT_ENABLED_FEATURES)
+function(PRINT_ENABLED_FEATURES)
     set(_basemsg "The following features are defined/enabled (+):")
     set(_currentFeatureText "${_basemsg}")
     get_property(_features GLOBAL PROPERTY ${PROJECT_NAME}_FEATURES)
@@ -1399,11 +1394,13 @@ FUNCTION(PRINT_ENABLED_FEATURES)
             get_property(_desc GLOBAL PROPERTY ${_feature}_DESCRIPTION)
             # print description, if not standard ON/OFF, print what is set to
             if(_desc)
-                if(NOT "${${_feature}}" STREQUAL "ON" AND
-                   NOT "${${_feature}}" STREQUAL "TRUE")
-                    set(_currentFeatureText "${_currentFeatureText}: ${_desc} -- [\"${${_feature}}\"]")
+                if(NOT "${${_feature}}" STREQUAL "ON" AND NOT "${${_feature}}" STREQUAL
+                                                          "TRUE")
+                    set(_currentFeatureText
+                        "${_currentFeatureText}: ${_desc} -- [\"${${_feature}}\"]")
                 else()
-                    string(REGEX REPLACE "^${PROJECT_NAME}_USE_" "" _feature_tmp "${_feature}")
+                    string(REGEX REPLACE "^${PROJECT_NAME}_USE_" "" _feature_tmp
+                                         "${_feature}")
                     string(TOLOWER "${_feature_tmp}" _feature_tmp_l)
                     capitalize("${_feature_tmp}" _feature_tmp_c)
                     foreach(_var _feature _feature_tmp _feature_tmp_l _feature_tmp_c)
@@ -1424,14 +1421,12 @@ FUNCTION(PRINT_ENABLED_FEATURES)
     if(NOT "${_currentFeatureText}" STREQUAL "${_basemsg}")
         message(STATUS "${_currentFeatureText}\n")
     endif()
-ENDFUNCTION()
+endfunction()
 
-
-#----------------------------------------------------------------------------------------#
-# function print_disabled_features()
-#          Print disabled features plus their docstrings.
+# ----------------------------------------------------------------------------------------#
+# function print_disabled_features() Print disabled features plus their docstrings.
 #
-FUNCTION(PRINT_DISABLED_FEATURES)
+function(PRINT_DISABLED_FEATURES)
     set(_basemsg "The following features are NOT defined/enabled (-):")
     set(_currentFeatureText "${_basemsg}")
     get_property(_features GLOBAL PROPERTY ${PROJECT_NAME}_FEATURES)
@@ -1446,8 +1441,8 @@ FUNCTION(PRINT_DISABLED_FEATURES)
             get_property(_desc GLOBAL PROPERTY ${_feature}_DESCRIPTION)
 
             if(_desc)
-              set(_currentFeatureText "${_currentFeatureText}: ${_desc}")
-              set(_desc NOTFOUND)
+                set(_currentFeatureText "${_currentFeatureText}: ${_desc}")
+                set(_desc NOTFOUND)
             endif(_desc)
         endif()
     endforeach(_feature)
@@ -1455,14 +1450,13 @@ FUNCTION(PRINT_DISABLED_FEATURES)
     if(NOT "${_currentFeatureText}" STREQUAL "${_basemsg}")
         message(STATUS "${_currentFeatureText}\n")
     endif()
-ENDFUNCTION()
+endfunction()
 
-
-#----------------------------------------------------------------------------------------#
-# function print_enabled_interfaces()
-#          Print enabled INTERFACE libraries plus their docstrings.
+# ----------------------------------------------------------------------------------------#
+# function print_enabled_interfaces() Print enabled INTERFACE libraries plus their
+# docstrings.
 #
-FUNCTION(PRINT_ENABLED_INTERFACES)
+function(PRINT_ENABLED_INTERFACES)
     set(_basemsg "The following INTERFACE libraries are enabled:")
     set(_currentFeatureText "${_basemsg}")
     get_property(_enabled GLOBAL PROPERTY ${PROJECT_NAME}_ENABLED_INTERFACES)
@@ -1484,15 +1478,14 @@ FUNCTION(PRINT_ENABLED_INTERFACES)
     if(NOT "${_currentFeatureText}" STREQUAL "${_basemsg}")
         message(STATUS "${_currentFeatureText}\n")
     endif()
-ENDFUNCTION()
+endfunction()
 
-
-#----------------------------------------------------------------------------------------#
-# function print_disabled_interfaces()
-#          Print disabled interfaces plus their docstrings.
+# ----------------------------------------------------------------------------------------#
+# function print_disabled_interfaces() Print disabled interfaces plus their docstrings.
 #
-FUNCTION(PRINT_DISABLED_INTERFACES)
-    set(_basemsg "The following INTERFACE libraries are NOT enabled (empty INTERFACE libraries):")
+function(PRINT_DISABLED_INTERFACES)
+    set(_basemsg
+        "The following INTERFACE libraries are NOT enabled (empty INTERFACE libraries):")
     set(_currentFeatureText "${_basemsg}")
     get_property(_disabled GLOBAL PROPERTY ${PROJECT_NAME}_DISABLED_INTERFACES)
     if(NOT "${_disabled}" STREQUAL "")
@@ -1506,69 +1499,89 @@ FUNCTION(PRINT_DISABLED_INTERFACES)
     if(NOT "${_currentFeatureText}" STREQUAL "${_basemsg}")
         message(STATUS "${_currentFeatureText}\n")
     endif()
-ENDFUNCTION()
+endfunction()
 
-
-#----------------------------------------------------------------------------------------#
-# function print_features()
-#          Print all features plus their docstrings.
+# ----------------------------------------------------------------------------------------#
+# function print_features() Print all features plus their docstrings.
 #
-FUNCTION(PRINT_FEATURES)
+function(PRINT_FEATURES)
     message(STATUS "")
     print_enabled_features()
     print_disabled_features()
     message(STATUS "")
     print_enabled_interfaces()
     print_disabled_interfaces()
-ENDFUNCTION()
+endfunction()
 
-#----------------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 # this function is provided to easily select which files use alternative compiler:
 #
-#       GLOBAL      --> all files
-#       TARGET      --> all files in a target
-#       SOURCE      --> specific source files
-#       DIRECTORY   --> all files in directory
-#       PROJECT     --> all files/targets in a project/subproject
+# GLOBAL      --> all files TARGET      --> all files in a target SOURCE      --> specific
+# source files DIRECTORY   --> all files in directory PROJECT     --> all files/targets in
+# a project/subproject
 #
-FUNCTION(hosttrace_custom_compilation)
-    CMAKE_PARSE_ARGUMENTS(COMP "GLOBAL;PROJECT" "COMPILER" "DIRECTORY;TARGET;SOURCE" ${ARGN})
+function(hosttrace_custom_compilation)
+    cmake_parse_arguments(COMP "GLOBAL;PROJECT" "COMPILER" "DIRECTORY;TARGET;SOURCE"
+                          ${ARGN})
 
     # find hosttrace_launch_compiler
-    FIND_PROGRAM(HOSTTRACE_COMPILE_LAUNCHER
-        NAMES           hosttrace_launch_compiler
-        HINTS           ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
-        PATHS           ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
-        PATH_SUFFIXES   scripts bin)
+    find_program(
+        HOSTTRACE_COMPILE_LAUNCHER
+        NAMES hosttrace_launch_compiler
+        HINTS ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
+        PATHS ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
+        PATH_SUFFIXES scripts bin)
 
-    IF(NOT COMP_COMPILER)
-        MESSAGE(FATAL_ERROR "hosttrace_custom_compilation not provided COMPILER argument")
-    ENDIF()
+    if(NOT COMP_COMPILER)
+        message(FATAL_ERROR "hosttrace_custom_compilation not provided COMPILER argument")
+    endif()
 
-    IF(NOT HOSTTRACE_COMPILE_LAUNCHER)
-        MESSAGE(FATAL_ERROR "hosttrace could not find 'hosttrace_launch_compiler'. Please set '-DHOSTTRACE_COMPILE_LAUNCHER=/path/to/launcher'")
-    ENDIF()
+    if(NOT HOSTTRACE_COMPILE_LAUNCHER)
+        message(
+            FATAL_ERROR
+                "hosttrace could not find 'hosttrace_launch_compiler'. Please set '-DHOSTTRACE_COMPILE_LAUNCHER=/path/to/launcher'"
+            )
+    endif()
 
-    IF(COMP_GLOBAL)
+    if(COMP_GLOBAL)
         # if global, don't bother setting others
-        SET_PROPERTY(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
-        SET_PROPERTY(GLOBAL PROPERTY RULE_LAUNCH_LINK "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
-    ELSE()
-        FOREACH(_TYPE PROJECT DIRECTORY TARGET SOURCE)
-            # make project/subproject scoping easy, e.g. hosttrace_custom_compilation(PROJECT) after project(...)
-            IF("${_TYPE}" STREQUAL "PROJECT" AND COMP_${_TYPE})
-                LIST(APPEND COMP_DIRECTORY ${PROJECT_SOURCE_DIR})
-                UNSET(COMP_${_TYPE})
-            ENDIF()
+        set_property(
+            GLOBAL
+            PROPERTY
+                RULE_LAUNCH_COMPILE
+                "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
+        set_property(
+            GLOBAL
+            PROPERTY
+                RULE_LAUNCH_LINK
+                "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
+    else()
+        foreach(_TYPE PROJECT DIRECTORY TARGET SOURCE)
+            # make project/subproject scoping easy, e.g.
+            # hosttrace_custom_compilation(PROJECT) after project(...)
+            if("${_TYPE}" STREQUAL "PROJECT" AND COMP_${_TYPE})
+                list(APPEND COMP_DIRECTORY ${PROJECT_SOURCE_DIR})
+                unset(COMP_${_TYPE})
+            endif()
             # set the properties if defined
-            IF(COMP_${_TYPE})
-                FOREACH(_VAL ${COMP_${_TYPE}})
-                    SET_PROPERTY(${_TYPE} ${_VAL} PROPERTY RULE_LAUNCH_COMPILE "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
-                    SET_PROPERTY(${_TYPE} ${_VAL} PROPERTY RULE_LAUNCH_LINK "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
-                ENDFOREACH()
-            ENDIF()
-        ENDFOREACH()
-    ENDIF()
-ENDFUNCTION()
+            if(COMP_${_TYPE})
+                foreach(_VAL ${COMP_${_TYPE}})
+                    set_property(
+                        ${_TYPE} ${_VAL}
+                        PROPERTY
+                            RULE_LAUNCH_COMPILE
+                            "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}"
+                        )
+                    set_property(
+                        ${_TYPE} ${_VAL}
+                        PROPERTY
+                            RULE_LAUNCH_LINK
+                            "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}"
+                        )
+                endforeach()
+            endif()
+        endforeach()
+    endif()
+endfunction()
 
 cmake_policy(POP)

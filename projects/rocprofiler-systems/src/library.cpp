@@ -68,8 +68,7 @@ void
 setup_gotchas()
 {
     static bool _initialized = false;
-    if(_initialized)
-        return;
+    if(_initialized) return;
     _initialized = true;
 
     HOSTTRACE_DEBUG(
@@ -168,8 +167,7 @@ bool
 hosttrace_init_tooling()
 {
     static bool _once = false;
-    if(get_state() != State::PreInit || _once)
-        return false;
+    if(get_state() != State::PreInit || _once) return false;
     _once = true;
 
     HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
@@ -195,19 +193,16 @@ hosttrace_init_tooling()
         "HOSTTRACE_COMPONENTS", "wall_clock", get_use_timemory());
 
     // enable timestamp directories when perfetto + mpi is activated
-    if(get_use_perfetto() && get_use_mpi())
-        tim::settings::time_output() = true;
+    if(get_use_perfetto() && get_use_mpi()) tim::settings::time_output() = true;
 
     auto _cmd = tim::read_command_line(process::get_id());
     auto _exe = (_cmd.empty()) ? "hosttrace" : _cmd.front();
     auto _pos = _exe.find_last_of('/');
-    if(_pos < _exe.length() - 1)
-        _exe = _exe.substr(_pos + 1);
+    if(_pos < _exe.length() - 1) _exe = _exe.substr(_pos + 1);
 
     tim::timemory_init({ _exe }, "hosttrace-");
 
-    if(get_sample_rate() < 1)
-        get_sample_rate() = 1;
+    if(get_sample_rate() < 1) get_sample_rate() = 1;
     get_sample_data().reserve(512);
 
     if(get_use_timemory())
@@ -269,10 +264,8 @@ hosttrace_init_tooling()
 
         args.shmem_size_hint_kb = shmem_size_hint;
 
-        if(get_backend() != "inprocess")
-            args.backends |= perfetto::kSystemBackend;
-        if(get_backend() != "system")
-            args.backends |= perfetto::kInProcessBackend;
+        if(get_backend() != "inprocess") args.backends |= perfetto::kSystemBackend;
+        if(get_backend() != "system") args.backends |= perfetto::kInProcessBackend;
 
         perfetto::Tracing::Initialize(args);
         perfetto::TrackEvent::Register();
@@ -395,8 +388,7 @@ hosttrace_init_tooling()
     // ends the tracing session
     static auto _ensure_finalization = ensure_finalization();
 
-    if(dmp::rank() == 0)
-        puts("");
+    if(dmp::rank() == 0) puts("");
     return true;
 }
 }  // namespace
@@ -408,8 +400,7 @@ extern "C"
     void hosttrace_push_trace(const char* name)
     {
         // return if not active
-        if(get_state() == State::Finalized)
-            return;
+        if(get_state() == State::Finalized) return;
 
         if(get_state() != State::Active && !hosttrace_init_tooling())
         {
@@ -426,8 +417,7 @@ extern "C"
         static thread_local size_t _sample_idx  = 0;
         auto                       _enabled     = (_sample_idx++ % _sample_rate == 0);
         get_sample_data().emplace_back(_enabled);
-        if(_enabled)
-            get_functors().first(name);
+        if(_enabled) get_functors().first(name);
     }
 
     void hosttrace_pop_trace(const char* name)
@@ -438,8 +428,7 @@ extern "C"
             auto& _sample_data = get_sample_data();
             if(!_sample_data.empty())
             {
-                if(_sample_data.back())
-                    get_functors().second(name);
+                if(_sample_data.back()) get_functors().second(name);
                 _sample_data.pop_back();
             }
         }
@@ -458,13 +447,11 @@ extern "C"
     void hosttrace_trace_finalize(void)
     {
         // return if not active
-        if(get_state() != State::Active)
-            return;
+        if(get_state() != State::Active) return;
 
         HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
 
-        if(dmp::rank() == 0)
-            puts("");
+        if(dmp::rank() == 0) puts("");
 
         get_state() = State::Finalized;
 

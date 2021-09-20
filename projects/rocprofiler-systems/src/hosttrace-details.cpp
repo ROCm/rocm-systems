@@ -43,8 +43,7 @@ function_signature
 get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* cfGraph,
                         basic_loop_t* loopToInstrument)
 {
-    if(!cfGraph || !loopToInstrument || !f)
-        return function_signature("", "", "");
+    if(!cfGraph || !loopToInstrument || !f) return function_signature{ "", "", "" };
 
     char        fname[MUTNAMELEN];
     char        mname[MUTNAMELEN];
@@ -57,8 +56,7 @@ get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* 
     bpvector_t<point_t*>* loopExitInst =
         cfGraph->findLoopInstPoints(BPatch_locLoopEndIter, loopToInstrument);
 
-    if(!loopStartInst || !loopExitInst)
-        return function_signature("", "", "");
+    if(!loopStartInst || !loopExitInst) return function_signature{ "", "", "" };
 
     unsigned long baseAddr = (unsigned long) (*loopStartInst)[0]->getAddress();
     unsigned long lastAddr =
@@ -85,8 +83,7 @@ get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* 
         for(auto itr : *params)
         {
             string_t _name = itr->getType()->getName();
-            if(_name.empty())
-                _name = itr->getName();
+            if(_name.empty()) _name = itr->getName();
             _params.push_back(_name);
         }
     }
@@ -103,8 +100,7 @@ get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* 
         // filename = lines[0].fileName();
         auto row1 = lines[0].lineNumber();
         auto col1 = lines[0].lineOffset();
-        if(col1 < 0)
-            col1 = 0;
+        if(col1 < 0) col1 = 0;
 
         // This following section is attempting to remedy the limitations of
         // getSourceLines for loops. As the program goes through the loop, the resulting
@@ -122,10 +118,8 @@ get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* 
         {
             auto row2 = linesEnd[0].lineNumber();
             auto col2 = linesEnd[0].lineOffset();
-            if(col2 < 0)
-                col2 = 0;
-            if(row2 < row1)
-                row1 = row2; /* Fix for wrong line numbers*/
+            if(col2 < 0) col2 = 0;
+            if(row2 < row1) row1 = row2;  // Fix for wrong line numbers
 
             return function_signature(typeName, fname, filename, _params, { row1, row2 },
                                       { col1, col2 }, true, info1, info2);
@@ -180,8 +174,7 @@ get_func_file_line_info(module_t* mutatee_module, procedure_t* f)
         for(auto itr : *params)
         {
             string_t _name = itr->getType()->getName();
-            if(_name.empty())
-                _name = itr->getName();
+            if(_name.empty()) _name = itr->getName();
             _params.push_back(_name);
         }
     }
@@ -196,17 +189,14 @@ get_func_file_line_info(module_t* mutatee_module, procedure_t* f)
         row1 = lines[0].lineNumber();
         col1 = lines[0].lineOffset();
 
-        if(col1 < 0)
-            col1 = 0;
+        if(col1 < 0) col1 = 0;
         info2 = mutatee_module->getSourceLines((unsigned long) (lastAddr - 1), lines);
         if(info2)
         {
             row2 = lines[1].lineNumber();
             col2 = lines[1].lineOffset();
-            if(col2 < 0)
-                col2 = 0;
-            if(row2 < row1)
-                row1 = row2;
+            if(col2 < 0) col2 = 0;
+            if(row2 < row1) row1 = row2;
             return function_signature(typeName, fname, filename, _params, { row1, 0 },
                                       { 0, 0 }, false, info1, info2);
         }
@@ -239,8 +229,7 @@ errorFunc(error_level_t level, int num, const char** params)
     {
         printf("Error #%d (level %d): %s\n", num, level, line);
         // We consider some errors fatal.
-        if(num == 101)
-            exit(-1);
+        if(num == 101) exit(-1);
     }
 }
 
@@ -251,15 +240,13 @@ errorFunc(error_level_t level, int num, const char** params)
 procedure_t*
 find_function(image_t* app_image, const std::string& _name, strset_t _extra)
 {
-    if(_name.empty())
-        return nullptr;
+    if(_name.empty()) return nullptr;
 
     auto _find = [app_image](const string_t& _f) -> procedure_t* {
         // Extract the vector of functions
         bpvector_t<procedure_t*> _found;
         auto ret = app_image->findFunction(_f.c_str(), _found, false, true, true);
-        if(ret == nullptr || _found.empty())
-            return nullptr;
+        if(ret == nullptr || _found.empty()) return nullptr;
         return _found.at(0);
     };
 
@@ -271,8 +258,7 @@ find_function(image_t* app_image, const std::string& _name, strset_t _extra)
         ++itr;
     }
 
-    if(!_func)
-        verbprintf(2, "hosttrace: Unable to find function %s\n", _name.c_str());
+    if(!_func) verbprintf(2, "hosttrace: Unable to find function %s\n", _name.c_str());
 
     return _func;
 }
@@ -289,8 +275,7 @@ error_func_real(error_level_t level, int num, const char* const* params)
         {
             if(level == BPatchInfo)
             {
-                if(error_print > 1)
-                    printf("%s\n", params[0]);
+                if(error_print > 1) printf("%s\n", params[0]);
             }
             else
                 printf("%s", params[0]);
@@ -306,8 +291,7 @@ error_func_real(error_level_t level, int num, const char* const* params)
         {
             printf("Error #%d (level %d): %s\n", num, level, line);
             // We consider some errors fatal.
-            if(num == 101)
-                exit(-1);
+            if(num == 101) exit(-1);
         }
     }
 }

@@ -58,9 +58,9 @@
 #include <cstring>
 #include <unistd.h>
 
-#define MUTNAMELEN 1024
-#define FUNCNAMELEN 32 * 1024
-#define NO_ERROR -1
+#define MUTNAMELEN       1024
+#define FUNCNAMELEN      32 * 1024
+#define NO_ERROR         -1
 #define TIMEMORY_BIN_DIR "bin"
 
 #if !defined(PATH_MAX)
@@ -165,14 +165,12 @@ static auto regex_opts = std::regex_constants::egrep | std::regex_constants::opt
 
 // control debug printf statements
 #define dprintf(...)                                                                     \
-    if(debug_print || verbose_level > 0)                                                 \
-        fprintf(stderr, __VA_ARGS__);                                                    \
+    if(debug_print || verbose_level > 0) fprintf(stderr, __VA_ARGS__);                   \
     fflush(stderr);
 
 // control verbose printf statements
 #define verbprintf(LEVEL, ...)                                                           \
-    if(verbose_level >= LEVEL)                                                           \
-        fprintf(stdout, __VA_ARGS__);                                                    \
+    if(verbose_level >= LEVEL) fprintf(stdout, __VA_ARGS__);                             \
     fflush(stdout);
 
 //======================================================================================//
@@ -316,11 +314,9 @@ struct function_signature
     string_t get() const
     {
         std::stringstream ss;
-        if(use_return_info)
-            ss << m_return << " ";
+        if(use_return_info) ss << m_return << " ";
         ss << m_name;
-        if(use_args_info)
-            ss << m_params;
+        if(use_args_info) ss << m_params;
         if(m_loop && m_info_beg)
         {
             if(m_info_end)
@@ -335,10 +331,8 @@ struct function_signature
         }
         else
         {
-            if(use_file_info && m_file.length() > 0)
-                ss << '/' << m_file;
-            if(use_line_info && m_row.first > 0)
-                ss << ":" << m_row.first;
+            if(use_file_info && m_file.length() > 0) ss << '/' << m_file;
+            if(use_line_info && m_row.first > 0) ss << ":" << m_row.first;
         }
 
         m_signature = ss.str();
@@ -472,8 +466,7 @@ dump_info(std::ostream& _os, const fmodset_t& _data)
 static inline void
 dump_info(const string_t& _oname, const fmodset_t& _data, int _level)
 {
-    if(!debug_print && verbose_level < _level)
-        return;
+    if(!debug_print && verbose_level < _level) return;
 
     std::ofstream ofs(_oname);
     if(ofs)
@@ -585,8 +578,7 @@ hosttrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
     {
         verbprintf(1, "Opening '%s' for binary rewrite... ", _name.c_str());
         fflush(stderr);
-        if(!_name.empty())
-            mutatee = _bpatch->openBinary(_name.c_str(), false);
+        if(!_name.empty()) mutatee = _bpatch->openBinary(_name.c_str(), false);
         if(!mutatee)
         {
             fprintf(stderr, "[hosttrace]> Failed to open binary '%s'\n", _name.c_str());
@@ -617,8 +609,7 @@ hosttrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
             std::stringstream ss;
             for(int i = 0; i < _cmdc; ++i)
             {
-                if(!_cmdv[i])
-                    continue;
+                if(!_cmdv[i]) continue;
                 ss << _cmdv[i] << " ";
             }
             fprintf(stderr, "[hosttrace]> Failed to create process: '%s'\n",
@@ -636,8 +627,7 @@ hosttrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
 TIMEMORY_NOINLINE inline void
 hosttrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
 {
-    if(!thread)
-        return;
+    if(!thread) return;
 
     BPatch_process* app = thread->getProcess();
 
@@ -650,16 +640,19 @@ hosttrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
 
     switch(exit_type)
     {
-        case ExitedNormally: {
+        case ExitedNormally:
+        {
             fprintf(stderr, "[hosttrace]> Thread exited normally\n");
             break;
         }
-        case ExitedViaSignal: {
+        case ExitedViaSignal:
+        {
             fprintf(stderr, "[hosttrace]> Thread terminated unexpectedly\n");
             break;
         }
         case NoExit:
-        default: {
+        default:
+        {
             fprintf(stderr, "[hosttrace]> %s invoked with NoExit\n", __FUNCTION__);
             break;
         }
