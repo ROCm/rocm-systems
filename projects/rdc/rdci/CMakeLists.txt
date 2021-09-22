@@ -113,7 +113,7 @@ target_link_libraries(${RDCI_EXE} ${RDCD_EXTRA_LIB} pthread dl rdc_bootstrap)
 
 ## Add the install directives for the rdci executable
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${RDCI_EXE}
-        PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
                                                     WORLD_READ WORLD_EXECUTE
         COMPONENT ${CLIENT_COMPONENT}
         DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/bin)
