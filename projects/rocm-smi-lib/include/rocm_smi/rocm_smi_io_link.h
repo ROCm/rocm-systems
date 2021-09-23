@@ -98,6 +98,9 @@ class IOLink {
     uint32_t node_to(void) const {return node_to_;}
     uint64_t weight(void) const {return weight_;}
     LINK_DIRECTORY_TYPE get_directory_type(void) const {return link_dir_type_;}
+    uint64_t min_bandwidth(void) const {return min_bandwidth_;}
+    uint64_t max_bandwidth(void) const {return max_bandwidth_;}
+
 
  private:
     uint32_t node_indx_;
@@ -106,6 +109,8 @@ class IOLink {
     uint32_t node_from_;
     uint32_t node_to_;
     uint64_t weight_;
+    uint64_t min_bandwidth_;
+    uint64_t max_bandwidth_;
     std::map<std::string, uint64_t> properties_;
     LINK_DIRECTORY_TYPE link_dir_type_;
 };

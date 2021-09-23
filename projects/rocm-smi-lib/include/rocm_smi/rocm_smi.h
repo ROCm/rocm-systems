@@ -3362,6 +3362,32 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
                           uint64_t *weight);
 
 /**
+ *  @brief Retreive minimal and maximal io link bandwidth between 2 GPUs
+ *
+ *  @details Given a source device index @p dv_ind_src and
+ *  a destination device index @p dv_ind_dst,  pointer to an
+ *  uint64_t @p min_bandwidth, and a pointer to uint64_t @p max_bandiwidth,
+ *  this function will write theoretical minimal and maximal bandwidth limits.
+ *  API works if src and dst are connected via xgmi and have 1 hop distance.
+ *
+ *  @param[in] dv_ind_src the source device index
+ *
+ *  @param[in] dv_ind_dst the destination device index
+ *
+ *  @param[inout] min_bandwidth A pointer to an uint64_t to which the
+ *  minimal bandwidth for the connection should be written.
+ *
+ *  @param[inout] max_bandwidth A pointer to an uint64_t to which the
+ *  maximal bandwidth for the connection should be written.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t
+rsmi_minmax_bandwidth_get(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                          uint64_t *min_bandwidth, uint64_t *max_bandwidth);
+
+/**
  *  @brief Retrieve the hops and the connection type between 2 GPUs
  *
  *  @details Given a source device index @p dv_ind_src and

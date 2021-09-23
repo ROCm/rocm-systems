@@ -73,8 +73,8 @@ static const char *kIOLinkPropNODE_TOStr = "node_to";
 static const char *kIOLinkPropWEIGHTStr = "weight";
 // static const char *kIOLinkPropMIN_LATENCYStr = "min_latency";
 // static const char *kIOLinkPropMAX_LATENCYStr = "max_latency";
-// static const char *kIOLinkPropMIN_BANDWIDTHStr = "min_bandwidth";
-// static const char *kIOLinkPropMAX_BANDWIDTHStr = "max_bandwidth";
+static const char *kIOLinkPropMIN_BANDWIDTHStr = "min_bandwidth";
+static const char *kIOLinkPropMAX_BANDWIDTHStr = "max_bandwidth";
 // static const char *kIOLinkPropRECOMMENDED_TRANSFER_SIZEStr =
 // "recommended_transfer_size";
 // static const char *kIOLinkPropFLAGSStr = "flags";
@@ -380,6 +380,12 @@ IOLink::Initialize(void) {
   if (ret) {return ret;}
 
   ret = get_property_value(kIOLinkPropWEIGHTStr, &weight_);
+  if (ret) {return ret;}
+
+  ret = get_property_value(kIOLinkPropMIN_BANDWIDTHStr, &min_bandwidth_);
+  if (ret) {return ret;}
+
+  ret = get_property_value(kIOLinkPropMAX_BANDWIDTHStr, &max_bandwidth_);
 
   return ret;
 }

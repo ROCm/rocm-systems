@@ -74,6 +74,8 @@ class KFDNode {
     IO_LINK_TYPE numa_node_type(void) const {return numa_node_type_;}
     int get_io_link_type(uint32_t node_to, IO_LINK_TYPE *type);
     int get_io_link_weight(uint32_t node_to, uint64_t *weight);
+    int get_io_link_bandwidth(uint32_t node_to, uint64_t *max_bandwidth,
+                                                       uint64_t *min_bandwidth);
     std::shared_ptr<Device> amdgpu_device(void) const {return amdgpu_device_;}
     uint32_t amdgpu_dev_index(void) const {return amdgpu_dev_index_;}
     void set_amdgpu_dev_index(uint32_t val) {amdgpu_dev_index_ = val;}
@@ -90,6 +92,8 @@ class KFDNode {
     uint32_t cu_count_;
     std::map<uint32_t, IO_LINK_TYPE> io_link_type_;
     std::map<uint32_t, uint64_t> io_link_weight_;
+    std::map<uint32_t, uint64_t> io_link_max_bandwidth_;
+    std::map<uint32_t, uint64_t> io_link_min_bandwidth_;
     std::map<uint32_t, std::shared_ptr<IOLink>> io_link_map_;
     std::map<std::string, uint64_t> properties_;
     std::shared_ptr<Device> amdgpu_device_;

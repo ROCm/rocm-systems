@@ -679,6 +679,9 @@ KFDNode::Initialize(void) {
     } else {
       io_link_type_[node_to] = link->type();
       io_link_weight_[node_to] = link->weight();
+      io_link_max_bandwidth_[node_to] = link->max_bandwidth();
+      io_link_min_bandwidth_[node_to] = link->min_bandwidth();
+
     }
   }
 
@@ -743,6 +746,25 @@ KFDNode::get_io_link_weight(uint32_t node_to, uint64_t *weight) {
     return EINVAL;
   }
   *weight = io_link_weight_[node_to];
+  return 0;
+}
+
+int
+KFDNode::get_io_link_bandwidth(uint32_t node_to, uint64_t *max_bandwidth,
+                                                      uint64_t *min_bandwidth){
+  assert (max_bandwidth != nullptr && min_bandwidth != nullptr);
+  if (max_bandwidth == nullptr || min_bandwidth == nullptr ){
+    return EINVAL;
+  }
+
+  if (io_link_max_bandwidth_.find(node_to) == io_link_max_bandwidth_.end() ||
+      io_link_min_bandwidth_.find(node_to) == io_link_min_bandwidth_.end()){
+        return EINVAL;
+      }
+
+  *max_bandwidth = io_link_max_bandwidth_[node_to];
+  *min_bandwidth = io_link_min_bandwidth_[node_to];
+
   return 0;
 }
 

@@ -3453,6 +3453,49 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   CATCH
 }
 
+ rsmi_status_t
+ rsmi_minmax_bandwidth_get(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                           uint64_t *min_bandwidth, uint64_t *max_bandwidth){
+  TRY
+
+  uint32_t dv_ind = dv_ind_src;
+  GET_DEV_AND_KFDNODE_FROM_INDX
+  DEVICE_MUTEX
+
+  if (min_bandwidth == nullptr || max_bandwidth == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  if (dv_ind_src == dv_ind_dst) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  rsmi_status_t status;
+  uint32_t node_ind_dst;
+  int ret = smi.get_node_index(dv_ind_dst, &node_ind_dst);
+
+  if (ret != 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+
+  amd::smi::IO_LINK_TYPE type;
+  ret = kfd_node->get_io_link_type(node_ind_dst, &type);
+  if ( ret == 0 && type == amd::smi::IOLINK_TYPE_XGMI) {
+      ret = kfd_node->get_io_link_bandwidth(node_ind_dst,max_bandwidth,
+                                                               min_bandwidth);
+      if (ret == 0)
+        status = RSMI_STATUS_SUCCESS;
+      else
+        status = RSMI_STATUS_INIT_ERROR;
+  } else {  // from src GPU to it's CPU node, or type not XGMI
+    status = RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  return status;
+  CATCH
+}
+
 rsmi_status_t
 rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
                         uint64_t *hops, RSMI_IO_LINK_TYPE *type) {
