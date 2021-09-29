@@ -561,9 +561,11 @@ extern "C"
         {
             auto& _main_bundle = get_main_bundle();
             _main_bundle->start();
+#if defined(TIMEMORY_USE_MPI)
             tim::set_env("HOSTTRACE_USE_MPI", "ON", 1);
             get_use_mpi() = true;
-            get_state()   = State::DelayedInit;
+#endif
+            get_state() = State::DelayedInit;
         }
     }
 }

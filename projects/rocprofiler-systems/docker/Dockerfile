@@ -1,0 +1,26 @@
+
+FROM ubuntu:20.04
+
+ENV HOME /root
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US
+ENV LC_ALL C
+ENV SHELL /bin/bash
+ENV BASH_ENV /etc/bash.bashrc
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /tmp
+SHELL [ "/bin/bash", "-c" ]
+
+RUN apt-get update && \
+    apt-get dist-upgrade -y && \
+    apt-get install -y build-essential cmake libnuma-dev wget gnupg2 m4 && \
+    wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \
+    echo 'deb [arch=amd64] https://repo.radeon.com/rocm/apt/debian/ ubuntu main' | tee /etc/apt/sources.list.d/rocm.list && \
+    apt-get update && \
+    apt-get dist-upgrade -y && \
+    apt-get install -y rocm-dev rocm-utils roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev
+
+ENV LC_ALL C.UTF-8
+WORKDIR /home
+SHELL [ "/bin/bash", "--login", "-c" ]

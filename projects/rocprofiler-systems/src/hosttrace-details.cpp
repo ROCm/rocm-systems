@@ -443,8 +443,8 @@ c_stdlib_function_constraint(const std::string& _func)
 inline void
 consume()
 {
-    consume_parameters(initialize_expr, bpatch, use_mpi, stl_func_instr, cstd_func_instr,
-                       werror, loop_level_instr, error_print, binary_rewrite, debug_print,
+    consume_parameters(initialize_expr, bpatch, use_mpi, stl_func_instr, werror,
+                       loop_level_instr, error_print, binary_rewrite, debug_print,
                        expect_error, is_static_exe, available_module_functions,
                        instrumented_module_functions);
 }

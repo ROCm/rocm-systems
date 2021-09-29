@@ -29,7 +29,7 @@ run(size_t nitr, long n)
 int
 main(int argc, char** argv)
 {
-    size_t nthread = 16;
+    size_t nthread = std::min<size_t>(16, std::thread::hardware_concurrency());
     size_t nitr    = 50000;
     long   nfib    = 10;
     if(argc > 1) nfib = atol(argv[1]);

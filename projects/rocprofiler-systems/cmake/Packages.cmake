@@ -78,13 +78,13 @@ if(HOSTTRACE_BUILD_DYNINST)
         OFF
         CACHE BOOL "Build dyninst parseThat executable")
     set(DYNINST_BUILD_SHARED_LIBS
-        OFF
+        ON
         CACHE BOOL "Build shared dyninst libraries")
     set(DYNINST_BUILD_STATIC_LIBS
-        ON
+        OFF
         CACHE BOOL "Build static dyninst libraries")
     set(DYNINST_ENABLE_LTO
-        ON
+        OFF
         CACHE BOOL "Enable LTO for dyninst libraries")
 
     hosttrace_save_variables(PIC VARIABLES CMAKE_POSITION_INDEPENDENT_CODE)

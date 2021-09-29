@@ -122,7 +122,6 @@ static bool binary_rewrite   = 0;
 static bool loop_level_instr = false;
 static bool werror           = false;
 static bool stl_func_instr   = false;
-static bool cstd_func_instr  = false;
 static bool use_mpi          = false;
 static bool is_static_exe    = false;
 static bool use_return_info  = false;
@@ -200,11 +199,16 @@ function_signature
 get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* cfGraph,
                         basic_loop_t* loopToInstrument);
 
+bool
+query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc,
+            flow_graph_t* cfGraph = nullptr, basic_loop_t* loopToInstrument = nullptr,
+            bool allow_traps = true);
+
 template <typename Tp>
-void
+bool
 insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
              procedure_loc_t traceLoc, flow_graph_t* cfGraph = nullptr,
-             basic_loop_t* loopToInstrument = nullptr);
+             basic_loop_t* loopToInstrument = nullptr, bool allow_traps = true);
 
 void
 errorFunc(error_level_t level, int num, const char** params);
@@ -321,19 +325,17 @@ struct function_signature
         {
             if(m_info_end)
             {
-                ss << '/' << "[{" << m_row.first << "," << m_col.first << "}-{"
-                   << m_row.second << "," << m_col.second << "}]";
+                ss << " [{" << m_row.first << "," << m_col.first << "}-{" << m_row.second
+                   << "," << m_col.second << "}]";
             }
             else
             {
                 ss << "[{" << m_row.first << "," << m_col.first << "}]";
             }
         }
-        else
-        {
-            if(use_file_info && m_file.length() > 0) ss << '/' << m_file;
-            if(use_line_info && m_row.first > 0) ss << ":" << m_row.first;
-        }
+        if(use_file_info && m_file.length() > 0) ss << " [" << m_file;
+        if(use_line_info && m_row.first > 0) ss << ":" << m_row.first;
+        if(use_file_info && m_file.length() > 0) ss << "]";
 
         m_signature = ss.str();
         return m_signature;
@@ -369,18 +371,25 @@ struct module_function
     }
 
     module_function(const string_t& _module, const string_t& _func,
-                    const function_signature& _sign)
+                    const function_signature& _sign, procedure_t* proc)
     : module(_module)
     , function(_func)
     , signature(_sign)
-    {}
+    {
+        if(proc)
+        {
+            std::pair<address_t, address_t> _range{};
+            if(proc->getAddressRange(_range.first, _range.second))
+                address_range = _range.second - _range.first;
+        }
+    }
 
     module_function(module_t* mod, procedure_t* proc)
     {
         char modname[FUNCNAMELEN];
         char fname[FUNCNAMELEN];
 
-        mod->getName(modname, FUNCNAMELEN);
+        mod->getFullName(modname, FUNCNAMELEN);
         proc->getName(fname, FUNCNAMELEN);
 
         module    = modname;
@@ -431,7 +440,7 @@ struct module_function
         };
 
         // clang-format off
-        ss << std::setw(14) << rhs.address_range << " "
+        ss << std::setw(14) << rhs.address_range << "  "
            << std::setw(w0 + 8) << std::left << _get_str(rhs.module) << " "
            << std::setw(w1 + 8) << std::left << _get_str(rhs.function) << " "
            << std::setw(w2 + 8) << std::left << _get_str(rhs.signature.get());

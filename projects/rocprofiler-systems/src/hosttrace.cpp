@@ -31,6 +31,8 @@
 static bool     is_driver                                         = false;
 static bool     allow_overlapping                                 = false;
 static bool     instr_dynamic_callsites                           = false;
+static bool     instr_traps                                       = false;
+static bool     instr_loop_traps                                  = false;
 static size_t   batch_size                                        = 50;
 static strset_t extra_libs                                        = {};
 static size_t   min_address_range                                 = (1 << 9);  // 512
@@ -54,7 +56,7 @@ static string_t    instr_pop_hash     = "hosttrace_pop_trace_hash";
 static string_t    print_instrumented = {};
 static string_t    print_available    = {};
 static string_t    print_overlapping  = {};
-static std::string modfunc_dump_dir   = "hosttrace-module-functions";
+static std::string modfunc_dump_dir   = {};
 
 std::string
 get_absolute_exe_filepath(std::string exe_name);
@@ -114,14 +116,14 @@ main(int argc, char** argv)
     bpatch->setTypeChecking(true);
     bpatch->setSaveFPR(true);
     bpatch->setDelayedParsing(true);
-    bpatch->setInstrStackFrames(true);
+    bpatch->setDebugParsing(false);
+    bpatch->setInstrStackFrames(false);
     bpatch->setLivenessAnalysis(false);
     bpatch->setBaseTrampDeletion(false);
     bpatch->setTrampRecursive(false);
     bpatch->setMergeTramp(false);
 
-    std::set<std::string> dyninst_defs = { "TypeChecking", "SaveFPR", "DelayedParsing",
-                                           "InstrStackFrames" };
+    std::set<std::string> dyninst_defs = { "TypeChecking", "SaveFPR", "DelayedParsing" };
 
     int _argc = argc;
     int _cmdc = 0;
@@ -329,14 +331,35 @@ main(int argc, char** argv)
     parser
         .add_argument({ "--min-address-range-loop" },
                       "If the address range of a function containing a loop is less than "
-                      "this value, "
-                      "exclude it from instrumentation")
+                      "this value, exclude it from instrumentation")
         .count(1)
         .dtype("size_t")
         .set_default(min_loop_address_range)
         .action([](parser_t& p) {
             min_loop_address_range = p.get<size_t>("min-address-range-loop");
         });
+    parser
+        .add_argument(
+            { "--traps" },
+            "Instrument points which require using a trap. On the x86 architecture, "
+            "because instructions are of variable size, the instruction at a point may "
+            "be too small for Dyninst to replace it with the normal code sequence used "
+            "to call instrumentation. Also, when instrumentation is placed at points "
+            "other than subroutine entry, exit, or call points, traps may be used to "
+            "ensure the instrumentation fits. In this case, Dyninst replaces the "
+            "instruction with a single-byte instruction that generates a trap.")
+        .max_count(1)
+        .dtype("bool")
+        .set_default(instr_traps)
+        .action([](parser_t& p) { instr_traps = p.get<bool>("traps"); });
+    parser
+        .add_argument({ "--loop-traps" },
+                      "Instrument points within a loop which require using a trap (only "
+                      "relevant when --instrument-loops is enabled).")
+        .max_count(1)
+        .dtype("bool")
+        .set_default(instr_loop_traps)
+        .action([](parser_t& p) { instr_loop_traps = p.get<bool>("loop-traps"); });
     parser.add_argument()
         .names({ "--allow-overlapping" })
         .description(
@@ -352,7 +375,6 @@ main(int argc, char** argv)
             "function lists, e.g. {print-dir}/available.txt")
         .count(1)
         .dtype("string")
-        .set_default(modfunc_dump_dir)
         .action([](parser_t& p) { modfunc_dump_dir = p.get<std::string>("print-dir"); });
     parser
         .add_argument(
@@ -397,8 +419,9 @@ main(int argc, char** argv)
         .add_argument({ "--dyninst-options" },
                       "Advanced dyninst options: BPatch::set<OPTION>(bool), e.g. "
                       "bpatch->setTrampRecursive(true)")
-        .choices({ "TypeChecking", "SaveFPR", "DelayedParsing", "InstrStackFrames",
-                   "TrampRecursive", "MergeTramp", "BaseTrampDeletion" });
+        .choices({ "TypeChecking", "SaveFPR", "DebugParsing", "DelayedParsing",
+                   "InstrStackFrames", "TrampRecursive", "MergeTramp",
+                   "BaseTrampDeletion" });
 
     string_t extra_help = "-- <CMD> <ARGS>";
     auto     err        = parser.parse(_argc, _argv);
@@ -483,8 +506,6 @@ main(int argc, char** argv)
 
     if(parser.exists("S")) stl_func_instr = true;
 
-    if(parser.exists("cstdlib")) cstd_func_instr = true;
-
     if(parser.exists("mpi")) use_mpi = true;
 
     if(parser.exists("p")) _pid = parser.get<int>("p");
@@ -554,6 +575,15 @@ main(int argc, char** argv)
     fini_stub_names = parser.get<strvec_t>("fini-functions");
     auto env_vars   = parser.get<strvec_t>("env");
 
+    if(modfunc_dump_dir.empty())
+    {
+        auto _exe_base = (binary_rewrite) ? outfile : std::string{ cmdv0 };
+        auto _pos      = _exe_base.find_last_of('/');
+        if(_pos != std::string::npos && _pos + 1 < _exe_base.length())
+            _exe_base = _exe_base.substr(_pos + 1);
+        modfunc_dump_dir = TIMEMORY_JOIN("-", "hosttrace", _exe_base, "output");
+    }
+
     if(verbose_level >= 0) tim::makedir(modfunc_dump_dir);
 
     //----------------------------------------------------------------------------------//
@@ -622,8 +652,9 @@ main(int argc, char** argv)
     bpatch->setTypeChecking(get_dyninst_option("TypeChecking"));
     bpatch->setSaveFPR(get_dyninst_option("SaveFPR"));
     bpatch->setDelayedParsing(get_dyninst_option("DelayedParsing"));
-    bpatch->setInstrStackFrames(get_dyninst_option("InstrStackFrames"));
 
+    bpatch->setDebugParsing(get_dyninst_option("DebugParsing"));
+    bpatch->setInstrStackFrames(get_dyninst_option("InstrStackFrames"));
     bpatch->setTrampRecursive(get_dyninst_option("TrampRecursive"));
     bpatch->setMergeTramp(get_dyninst_option("MergeTramp"));
     bpatch->setBaseTrampDeletion(get_dyninst_option("BaseTrampDeletion"));
@@ -764,21 +795,28 @@ main(int argc, char** argv)
             module_function::update_width(itr);
 
         auto mwid = module_function::get_width().at(0);
-        auto ncol = 240 / std::min<size_t>(mwid, 240);
+        mwid      = std::min<size_t>(mwid, 90);
+        auto ncol = 180 / std::min<size_t>(mwid, 180);
         std::cout << "### MODULES ###\n| ";
         for(size_t i = 0; i < module_names.size(); ++i)
         {
             auto itr = module_names.begin();
             std::advance(itr, i);
-            std::cout << std::setw(mwid) << *itr << " | ";
+            std::string _v = *itr;
+            if(_v.length() >= mwid)
+            {
+                auto _resume = _v.length() - mwid + 15;
+                _v           = _v.substr(0, 12) + "..." + _v.substr(_resume);
+            }
+            std::cout << std::setw(mwid) << _v << " | ";
             if(i % ncol == ncol - 1) std::cout << "\n| ";
         }
         std::cout << '\n' << std::endl;
     }
 
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "available.txt"),
+    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "available-instr.txt"),
               available_module_functions, 1);
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "overlapping.txt"),
+    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "overlapping-instr.txt"),
               overlapping_module_functions, 1);
 
     //----------------------------------------------------------------------------------//
@@ -1065,8 +1103,8 @@ main(int argc, char** argv)
             module_t* _module = _func->getModule();
             if(_module)
             {
-                char moduleName[MUTNAMELEN];
-                _module->getName(moduleName, MUTNAMELEN);
+                char moduleName[FUNCNAMELEN];
+                _module->getFullName(moduleName, FUNCNAMELEN);
                 if(strcmp(moduleName, "DEFAULT_MODULE") != 0) _has_debug_info = true;
             }
         }
@@ -1283,16 +1321,26 @@ main(int argc, char** argv)
                    (unsigned long) procedures.size());
         for(auto* itr : procedures)
         {
-            if(itr == main_func) continue;
-
-            char modname[MUTNAMELEN];
+            if(!itr) continue;
+            char modname[FUNCNAMELEN];
             char fname[FUNCNAMELEN];
 
+            itr->getName(fname, FUNCNAMELEN);
             module_t* mod = itr->getModule();
             if(mod)
-                mod->getName(modname, MUTNAMELEN);
+                mod->getFullName(modname, FUNCNAMELEN);
             else
-                itr->getModuleName(modname, MUTNAMELEN);
+                itr->getModuleName(modname, FUNCNAMELEN);
+
+            if(itr == main_func)
+            {
+                hash_ids.emplace_back(std::hash<string_t>()(main_sign.get()),
+                                      main_sign.get());
+                auto main_mf = module_function(modname, fname, main_sign, itr);
+                available_module_functions.insert(main_mf);
+                instrumented_module_functions.insert(main_mf);
+                continue;
+            }
 
             if(!itr->isInstrumentable())
             {
@@ -1303,10 +1351,7 @@ main(int argc, char** argv)
             if(std::string{ modname }.find("libdyninst") != std::string::npos) continue;
 
             if(module_constraint(modname)) continue;
-
             if(!instrument_module(modname)) continue;
-
-            itr->getName(fname, FUNCNAMELEN);
 
             auto name = get_func_file_line_info(mod, itr);
 
@@ -1317,7 +1362,6 @@ main(int argc, char** argv)
             }
 
             if(routine_constraint(name.m_name.c_str())) continue;
-
             if(!instrument_entity(name.m_name)) continue;
 
             if(is_static_exe && has_debug_info && string_t{ fname } == "_fini" &&
@@ -1392,6 +1436,29 @@ main(int argc, char** argv)
                            (unsigned long) min_address_range);
             }
 
+            bool _entr_success =
+                query_instr(itr, BPatch_entry, nullptr, nullptr, instr_traps);
+            bool _exit_success =
+                query_instr(itr, BPatch_exit, nullptr, nullptr, instr_traps);
+            if(!_entr_success && !_exit_success)
+            {
+                verbprintf(2,
+                           "Skipping function [insert-instr]: %s / %s. Either no entry "
+                           "instrumentation points were found or instrumentation "
+                           "required traps and instrumenting via traps were disabled.\n",
+                           name.m_name.c_str(), name.get().c_str());
+                continue;
+            }
+            else if(_entr_success && !_exit_success)
+            {
+                verbprintf(2,
+                           "Skipping function [insert-instr]: %s / %s. Function can be "
+                           "only partially instrumented: entry = %s, exit = %s\n",
+                           name.m_name.c_str(), name.get().c_str(),
+                           _entr_success ? "y" : "n", _exit_success ? "y" : "n");
+                continue;
+            }
+
             hash_ids.emplace_back(std::hash<string_t>()(name.get()), name.get());
             available_module_functions.insert(module_function(mod, itr));
             instrumented_module_functions.insert(module_function(mod, itr));
@@ -1408,8 +1475,10 @@ main(int argc, char** argv)
                 auto _entr       = _trace_entr.get((entr_hash) ? entr_hash : entr_trace);
                 auto _exit       = _trace_exit.get((exit_hash) ? exit_hash : exit_trace);
 
-                insert_instr(addr_space, itr, _entr, BPatch_entry, nullptr, nullptr);
-                insert_instr(addr_space, itr, _exit, BPatch_exit, nullptr, nullptr);
+                insert_instr(addr_space, itr, _entr, BPatch_entry, nullptr, nullptr,
+                             instr_traps);
+                insert_instr(addr_space, itr, _exit, BPatch_exit, nullptr, nullptr,
+                             instr_traps);
             };
 
             instr_procedure_functions.emplace_back(_f);
@@ -1421,6 +1490,31 @@ main(int argc, char** argv)
 
                 for(auto* litr : basic_loop)
                 {
+                    bool _lentr_success =
+                        query_instr(itr, BPatch_entry, cfg, litr, instr_loop_traps);
+                    bool _lexit_success =
+                        query_instr(itr, BPatch_exit, cfg, litr, instr_loop_traps);
+                    if(!_lentr_success && !_lexit_success)
+                    {
+                        verbprintf(
+                            2,
+                            "Skipping function [insert-instr-loop]: %s / %s. Either no "
+                            "entry instrumentation points were found or instrumentation "
+                            "required traps and instrumenting via traps were disabled.\n",
+                            name.m_name.c_str(), name.get().c_str());
+                        continue;
+                    }
+                    else if(_lentr_success && !_lexit_success)
+                    {
+                        verbprintf(
+                            2,
+                            "Skipping function [insert-instr-loop]: %s / %s. Function "
+                            "can be only partially instrumented: entry = %s, exit = %s\n",
+                            name.m_name.c_str(), name.get().c_str(),
+                            _lentr_success ? "y" : "n", _lexit_success ? "y" : "n");
+                        continue;
+                    }
+
                     auto lname  = get_loop_file_line_info(mod, itr, cfg, litr);
                     auto _lname = lname.get();
                     auto _lhash = std::hash<string_t>()(_lname);
@@ -1437,8 +1531,10 @@ main(int argc, char** argv)
                         auto _lexit =
                             _ltrace_exit.get((exit_hash) ? exit_hash : exit_trace);
 
-                        insert_instr(addr_space, itr, _lentr, BPatch_entry, cfg, litr);
-                        insert_instr(addr_space, itr, _lexit, BPatch_exit, cfg, litr);
+                        insert_instr(addr_space, itr, _lentr, BPatch_entry, cfg, litr,
+                                     instr_loop_traps);
+                        insert_instr(addr_space, itr, _lexit, BPatch_exit, cfg, litr,
+                                     instr_loop_traps);
                     };
                     instr_procedure_functions.emplace_back(_lf);
                 }
@@ -1585,11 +1681,11 @@ main(int argc, char** argv)
     bool _dump_and_exit = ((print_available.length() + print_instrumented.length() +
                             print_overlapping.length()) > 0);
 
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "available.txt"),
+    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "available-instr.txt"),
               available_module_functions, 0);
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "instrumented.txt"),
+    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "instrumented-instr.txt"),
               instrumented_module_functions, 0);
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "overlapping.txt"),
+    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "overlapping-instr.txt"),
               overlapping_module_functions, 0);
 
     auto _dump_info = [](string_t _mode, const fmodset_t& _modset) {
@@ -1824,12 +1920,15 @@ instrument_module(const string_t& file_name)
     static std::regex sys_regex("^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts);
     static std::regex userlib_regex(
         "^(lib|)(hosttrace|caliper|gotcha|papi|cupti|TAU|likwid|"
-        "profiler|tcmalloc|dyninst|pfm|nvtx|upcxx|pthread|nvperf|hsa)",
+        "profiler|tcmalloc|dyninst|pfm|nvtx|upcxx|pthread|nvperf|hsa|\\.\\./sysdeps/|/"
+        "build/)",
         regex_opts);
-    static std::regex corelib_regex("^lib(rt-|dl-|util-|python)", regex_opts);
+    static std::regex corelib_regex("^lib(c|z|rt|dl|util|zstd|elf|dw|pthread|dyninstAPI_"
+                                    "RT|gcc_s|tbbmalloc|tbbmalloc_proxy)(-|\\.)",
+                                    regex_opts);
     // these are all due to TAU
     static std::regex prefix_regex(
-        "^(_|\\.|RT|Tau|Profiler|Rts|Papi|Py|Comp_xl\\.cpp|Comp_gnu\\.cpp|"
+        "^(_|\\.[a-zA-Z0-9]|RT|Tau|Profiler|Rts|Papi|Py|Comp_xl\\.cpp|Comp_gnu\\.cpp|"
         "UserEvent\\.cpp|FunctionInfo\\.cpp|PthreadLayer\\.cpp|"
         "Comp_intel[0-9]\\.cpp|Tracer\\.cpp)",
         regex_opts);
@@ -1844,13 +1943,6 @@ instrument_module(const string_t& file_name)
         "basename|^wcp[a-z]+|[a-z]+dir|^mb[a-z]+|^dir[a-z]+|euid[a-z]+|^c[36][24][a-z]+|^"
         "set[a-z_]+|^get[a-z_]+|^shm[a-z]+|^wc[a-z_]+|brk|^write[a-z]+)\\.c$",
         regex_opts);*/
-
-    /*if(!cstd_func_instr && c_stdlib_module_constraint(file_name))
-    {
-        verbprintf(3, "Excluding instrumentation [c std library] : '%s'...\n",
-                   file_name.c_str());
-        return false;
-    }*/
 
     if(std::regex_search(file_name, ext_regex))
     {
@@ -1952,12 +2044,6 @@ instrument_entity(const string_t& function_name)
         return false;
     }
 
-    /*if(!cstd_func_instr && c_stdlib_function_constraint(function_name))
-    {
-        verbprintf(3, "Excluding function [libc] : '%s'...\n", function_name.c_str());
-        return false;
-    }*/
-
     // don't instrument the functions when key is found anywhere in function name
     if(std::regex_search(function_name, exclude))
     {
@@ -1999,23 +2085,62 @@ instrument_entity(const string_t& function_name)
 
     bool use = is_include(true) && !is_exclude();
     if(use)
-        verbprintf(2, "Including function [user-regex] : '%s'...\n",
+        verbprintf(2, "Including function [no constraint] : '%s'...\n",
                    function_name.c_str());
 
     return use;
 }
 
 //======================================================================================//
+// query_instr -- check whether there are one or more instrumentation points
+//
+bool
+query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cfGraph,
+            basic_loop_t* loopToInstrument, bool allow_traps)
+{
+    module_t* module = funcToInstr->getModule();
+    if(!module) return false;
+
+    bpvector_t<point_t*>* _points = nullptr;
+
+    if(cfGraph && loopToInstrument)
+    {
+        if(traceLoc == BPatch_entry)
+            _points = cfGraph->findLoopInstPoints(BPatch_locLoopEntry, loopToInstrument);
+        else if(traceLoc == BPatch_exit)
+            _points = cfGraph->findLoopInstPoints(BPatch_locLoopExit, loopToInstrument);
+    }
+    else
+    {
+        _points = funcToInstr->findPoint(traceLoc);
+    }
+
+    if(_points == nullptr) return false;
+    if(_points->empty()) return false;
+
+    size_t _n = _points->size();
+    for(auto& itr : *_points)
+    {
+        if(!itr)
+            --_n;
+        else if(itr && !allow_traps && itr->usesTrap_NP())
+            --_n;
+    }
+
+    return (_n > 0);
+}
+
+//======================================================================================//
 // insert_instr -- generic insert instrumentation function
 //
 template <typename Tp>
-void
+bool
 insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
              procedure_loc_t traceLoc, flow_graph_t* cfGraph,
-             basic_loop_t* loopToInstrument)
+             basic_loop_t* loopToInstrument, bool allow_traps)
 {
     module_t* module = funcToInstr->getModule();
-    if(!module || !traceFunc) return;
+    if(!module || !traceFunc) return false;
 
     bpvector_t<point_t*>* _points = nullptr;
     auto                  _trace  = traceFunc.get();
@@ -2032,8 +2157,8 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
         _points = funcToInstr->findPoint(traceLoc);
     }
 
-    if(_points == nullptr) return;
-    if(_points->empty()) return;
+    if(_points == nullptr) return false;
+    if(_points->empty()) return false;
 
     /*if(loop_level_instr)
     {
@@ -2056,9 +2181,19 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
 
     // verbprintf(0, "Instrumenting |> [ %s ]\n", name.m_name.c_str());
 
+    std::set<point_t*> _traps{};
+    if(!allow_traps)
+    {
+        for(auto& itr : *_points)
+        {
+            if(itr && itr->usesTrap_NP()) _traps.insert(itr);
+        }
+    }
+
+    size_t _n = 0;
     for(auto& itr : *_points)
     {
-        if(!itr)
+        if(!itr || _traps.count(itr) > 0)
             continue;
         else if(traceLoc == BPatch_entry)
             mutatee->insertSnippet(*_trace, *itr, BPatch_callBefore, BPatch_firstSnippet);
@@ -2067,8 +2202,12 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
         //    BPatch_firstSnippet);
         else
             mutatee->insertSnippet(*_trace, *itr);
+        ++_n;
     }
+
+    return (_n > 0);
 }
+
 //======================================================================================//
 // Constraints for instrumentation. Returns true for those modules that
 // shouldn't be instrumented.

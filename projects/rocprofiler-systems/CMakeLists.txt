@@ -12,7 +12,7 @@ endif()
 project(
     hosttrace
     LANGUAGES C CXX
-    VERSION 0.0.1)
+    VERSION 0.0.2)
 
 message(
     STATUS
@@ -108,8 +108,9 @@ if(DYNINST_API_RT)
 endif()
 
 set_target_properties(
-    hosttrace-library PROPERTIES OUTPUT_NAME hosttrace INSTALL_RPATH
-                                                       "\$ORIGIN:${DYNINST_API_RT_DIR}")
+    hosttrace-library
+    PROPERTIES OUTPUT_NAME hosttrace
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/dyninst-tpls/libs:${DYNINST_API_RT_DIR}")
 
 install(
     TARGETS hosttrace-library
@@ -138,9 +139,12 @@ target_link_libraries(
 
 set_target_properties(
     hosttrace-exe
-    PROPERTIES OUTPUT_NAME hosttrace
-               INSTALL_RPATH_USE_LINK_PATH ON
-               INSTALL_RPATH "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:${DYNINST_API_RT_DIR}")
+    PROPERTIES
+        OUTPUT_NAME hosttrace
+        INSTALL_RPATH_USE_LINK_PATH ON
+        INSTALL_RPATH
+        "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib:${DYNINST_API_RT_DIR}"
+    )
 
 install(
     TARGETS hosttrace-exe
