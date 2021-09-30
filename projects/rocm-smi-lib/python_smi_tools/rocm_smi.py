@@ -190,7 +190,7 @@ def getFanSpeed(device):
     if rsmi_ret_ok(ret, device, None, True):
         fm = fanMax.value
     if fl == 0 or fm == 0:
-        return (fl, fm)  # to prevent division by zero crash
+        return (fl, 0)  # to prevent division by zero crash
 
     return (fl, round((float(fl) / float(fm)) * 100, 2))
 
