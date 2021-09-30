@@ -400,42 +400,38 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
   ONLOAD_TRACE_BEG();
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
-  bool intercept_mode = false;
 
   // Checking environment to enable intercept mode
   const char* intercept_env = getenv("ROCP_HSA_INTERCEPT");
+
+  int intercept_env_value = 0;
   if (intercept_env != NULL) {
-    switch (atoi(intercept_env)) {
-      // Intercepting disabled
+    intercept_env_value = atoi(intercept_env);
+
+    switch (intercept_env_value) {
       case 0:
-        intercept_mode = false;
-        rocprofiler::InterceptQueue::TrackerOn(false);
-        break;
-      // Intercepting enabled without timestamping
       case 1:
-        intercept_mode = true;
+	// 0: Intercepting disabled
+	// 1: Intercepting enabled without timestamping
         rocprofiler::InterceptQueue::TrackerOn(false);
         break;
-      // Intercepting enabled with timestamping
       case 2:
-        intercept_mode = true;
+	// Intercepting enabled with timestamping
         rocprofiler::InterceptQueue::TrackerOn(true);
         break;
       default:
-        ERR_LOGGING("Bad ROCP_HSA_INTERCEPT env var value (" << intercept_env << ")");
+        ERR_LOGGING("Bad ROCP_HSA_INTERCEPT env var value (" << intercept_env << "): " <<
+		    "valid values are 0 (standalone), 1 (intercepting without timestamp), 2 (intercepting with timestamp)");
         return false;
     }
   }
 
+  // always enable excutable tracking
+  rocprofiler::util::HsaRsrcFactory::EnableExecutableTracking(table);
+
   // Loading a tool lib and setting of intercept mode
   const uint32_t intercept_mode_mask = rocprofiler::LoadTool();
-  if (intercept_mode_mask & rocprofiler::DISPATCH_INTERCEPT_MODE) {
-    intercept_mode = true;
-  }
-  if (intercept_mode_mask & rocprofiler::CODE_OBJ_TRACKING_MODE) {
-    if (intercept_mode == false) EXC_RAISING(HSA_STATUS_ERROR, "code objects tracking without intercept mode enabled");
-    rocprofiler::util::HsaRsrcFactory::EnableExecutableTracking(table);
-  }
+
   if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
     hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
     if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_async_copy_enable");
@@ -453,14 +449,14 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
   }
 
   // HSA intercepting
-  if (intercept_mode) {
+  if (intercept_env_value != 0) {
     rocprofiler::ProxyQueue::HsaIntercept(table);
     rocprofiler::InterceptQueue::HsaIntercept(table);
   } else {
     rocprofiler::StandaloneIntercept();
   }
 
-  ONLOAD_TRACE("end intercept_mode(" << std::hex << intercept_mode << ")" <<
+  ONLOAD_TRACE("end intercept_mode(" << std::hex << intercept_env_value << ")" <<
                " intercept_mode_mask(" << std::hex << intercept_mode_mask << ")" << std::dec);
   return true;
 }
