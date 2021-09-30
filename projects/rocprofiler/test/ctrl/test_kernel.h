@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <string.h>
 #include <stdint.h>
 #include <map>
+#include <string>
 
 // Class implements kernel test
 class TestKernel {
@@ -85,7 +86,7 @@ class TestKernel {
 
  protected:
   // Set buffer descriptor
-  bool SetInDescr(const uint32_t& buf_id, const des_id_t& des_id, const uint32_t& size) {
+  bool SetInDescr(uint32_t buf_id, des_id_t des_id, uint32_t size) {
     bool suc = SetMemDescr(buf_id, des_id, size);
     if (des_id == KERNARG_DES_ID) {
       test_map_[KERNARG_EXP_ID] = &mem_map_[buf_id];
@@ -94,14 +95,14 @@ class TestKernel {
   }
 
   // Set results descriptor
-  bool SetOutDescr(const uint32_t& buf_id, const des_id_t& des_id, const uint32_t& size) {
+  bool SetOutDescr(uint32_t buf_id, des_id_t des_id, uint32_t size) {
     bool suc = SetMemDescr(buf_id, des_id, size);
     test_map_[OUTPUT_EXP_ID] = &mem_map_[buf_id];
     return suc;
   }
 
   // Set host descriptor
-  bool SetHostDescr(const uint32_t& buf_id, const des_id_t& des_id, const uint32_t& size) {
+  bool SetHostDescr(uint32_t buf_id, des_id_t des_id, uint32_t size) {
     bool suc = SetMemDescr(buf_id, des_id, size);
     if (suc) {
       mem_descr_t& descr = mem_map_[buf_id];
@@ -115,14 +116,14 @@ class TestKernel {
   }
 
   // Get memory descriptor
-  mem_descr_t GetDescr(const uint32_t& buf_id) const {
+  mem_descr_t GetDescr(uint32_t buf_id) const {
     mem_const_it_t it = mem_map_.find(buf_id);
     return (it != mem_map_.end()) ? it->second : NullDescriptor();
   }
 
  private:
   // Set memory descriptor
-  bool SetMemDescr(const uint32_t& buf_id, const des_id_t& des_id, const uint32_t& size) {
+  bool SetMemDescr(uint32_t buf_id, des_id_t des_id, uint32_t size) {
     const mem_descr_t des = {des_id, NULL, size};
     auto ret = mem_map_.insert(mem_map_t::value_type(buf_id, des));
     return ret.second;
