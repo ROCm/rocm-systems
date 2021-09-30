@@ -97,13 +97,10 @@ struct gpu_cmd_fncomp_t {
 };
 typedef std::map<gpu_cmd_key_t, gpu_cmd_entry_t, gpu_cmd_fncomp_t> gpu_cmd_map_t;
 
-typedef std::mutex gpu_cmd_mutex_t;
-gpu_cmd_mutex_t gpu_cmd_mutex;
-
 size_t GetGpuCommand(gpu_cmd_op_t op,
                        const rocprofiler::util::AgentInfo* agent_info,
                        packet_t** command_out) {
-  static gpu_cmd_map_t* map = NULL;
+  thread_local gpu_cmd_map_t map;
 
   // Getting chip-id
   uint32_t chip_id = 0;
@@ -112,9 +109,7 @@ size_t GetGpuCommand(gpu_cmd_op_t op,
   if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_agent_get_info failed");
 
   // Query/create a command
-  std::lock_guard<gpu_cmd_mutex_t> lck(gpu_cmd_mutex);
-  if (map == NULL) map = new gpu_cmd_map_t;
-  auto ret = map->insert({gpu_cmd_key_t{op, chip_id}, gpu_cmd_entry_t{}});
+  auto ret = map.insert({gpu_cmd_key_t{op, chip_id}, gpu_cmd_entry_t{}});
   gpu_cmd_map_t::iterator it = ret.first;
   if (ret.second) {
     it->second.size = CreateGpuCommand(op, agent_info, it->second.command, Profile::LEGACY_SLOT_SIZE_PKT);
