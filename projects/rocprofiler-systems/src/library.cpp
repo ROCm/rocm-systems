@@ -83,6 +83,9 @@ setup_gotchas()
         mpi_gotcha_t::template configure<0, int, int*, char***>("MPI_Init");
         mpi_gotcha_t::template configure<1, int, int*, char***, int, int*>(
             "MPI_Init_thread");
+#if defined(HOSTTRACE_USE_MPI_HEADERS)
+        mpi_gotcha_t::template configure<3, int>("MPI_Finalize");
+#endif
     };
 }
 

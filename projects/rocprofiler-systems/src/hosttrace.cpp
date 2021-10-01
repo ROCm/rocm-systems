@@ -730,12 +730,14 @@ main(int argc, char** argv)
     std::set<std::string> module_names;
 
     auto _add_overlapping = [](module_t* mitr, procedure_t* pitr) {
+        if(!pitr->isInstrumentable()) return;
         std::vector<procedure_t*> _overlapping{};
         if(pitr->findOverlapping(_overlapping))
         {
             overlapping_module_functions.insert(module_function{ mitr, pitr });
             for(auto oitr : _overlapping)
             {
+                if(!oitr->isInstrumentable()) continue;
                 overlapping_module_functions.insert(
                     module_function{ oitr->getModule(), oitr });
             }
@@ -752,7 +754,8 @@ main(int argc, char** argv)
             {
                 for(auto* pitr : *procedures)
                 {
-                    auto _modfn = module_function(itr, pitr);
+                    if(!pitr->isInstrumentable()) continue;
+                    auto _modfn = module_function{ itr, pitr };
                     module_names.insert(_modfn.module);
                     available_module_functions.insert(std::move(_modfn));
                     _add_overlapping(itr, pitr);
@@ -771,9 +774,9 @@ main(int argc, char** argv)
         for(auto* itr : *app_functions)
         {
             module_t* mod = itr->getModule();
-            if(mod)
+            if(mod && itr->isInstrumentable())
             {
-                auto _modfn = module_function(mod, itr);
+                auto _modfn = module_function{ mod, itr };
                 module_names.insert(_modfn.module);
                 available_module_functions.insert(std::move(_modfn));
                 _add_overlapping(mod, itr);
@@ -1332,11 +1335,11 @@ main(int argc, char** argv)
             else
                 itr->getModuleName(modname, FUNCNAMELEN);
 
-            if(itr == main_func)
+            if(itr == main_func && main_func->isInstrumentable())
             {
                 hash_ids.emplace_back(std::hash<string_t>()(main_sign.get()),
                                       main_sign.get());
-                auto main_mf = module_function(modname, fname, main_sign, itr);
+                auto main_mf = module_function{ modname, fname, main_sign, itr };
                 available_module_functions.insert(main_mf);
                 instrumented_module_functions.insert(main_mf);
                 continue;
@@ -1460,8 +1463,8 @@ main(int argc, char** argv)
             }
 
             hash_ids.emplace_back(std::hash<string_t>()(name.get()), name.get());
-            available_module_functions.insert(module_function(mod, itr));
-            instrumented_module_functions.insert(module_function(mod, itr));
+            available_module_functions.insert(module_function{ mod, itr });
+            instrumented_module_functions.insert(module_function{ mod, itr });
 
             auto _f = [=]() {
                 verbprintf(1, "Instrumenting |> [ %s ] -> [ %s ]\n", modname,

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+BASEDIR=$(dirname ${BASH_SOURCE[0]})
+BASEDIR=$(cd ${BASEDIR}/../.. && pwd)
+
+if [ ! -d "${BASEDIR}" ]; then
+    echo "${BASEDIR} does not exist"
+    return 1
+fi
+
+export PATH=${BASEDIR}/bin:${PATH}
+export LD_LIBRARY_PATH=${BASEDIR}/@CMAKE_INSTALL_LIBDIR@:${LD_LIBRARY_PATH}
+
+return 0

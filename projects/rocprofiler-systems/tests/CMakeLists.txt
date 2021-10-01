@@ -1,18 +1,25 @@
-if(NOT DYNINST_API_RT_DIR AND DYNINST_API_RT)
-    get_filename_component(DYNINST_API_RT_DIR "${DYNINST_API_RT}" DIRECTORY)
+if(NOT HOSTTRACE_DYNINST_API_RT_DIR AND HOSTTRACE_DYNINST_API_RT)
+    get_filename_component(HOSTTRACE_DYNINST_API_RT_DIR "${HOSTTRACE_DYNINST_API_RT}"
+                           DIRECTORY)
 endif()
 
 if(HOSTTRACE_BUILD_DYNINST)
-    set(DYNINST_API_RT_DIR
+    set(HOSTTRACE_DYNINST_API_RT_DIR
         "${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI_RT:${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI"
         )
 endif()
 
 set(_test_environment
     "HOSTTRACE_USE_PERFETTO=ON"
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}")
+    "HOSTTRACE_USE_TIMEMORY=ON"
+    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${HOSTTRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
 
 if(TARGET transpose)
+    if(TRANSPOSE_USE_MPI)
+        set(COMMAND_PREFIX ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2)
+    endif()
+
     add_test(
         NAME transpose-binary-rewrite
         COMMAND
@@ -22,7 +29,7 @@ if(TARGET transpose)
 
     add_test(
         NAME transpose-binary-rewrite-run
-        COMMAND $<TARGET_FILE_DIR:transpose>/transpose.inst
+        COMMAND ${COMMAND_PREFIX} $<TARGET_FILE_DIR:transpose>/transpose.inst
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
 
     add_test(

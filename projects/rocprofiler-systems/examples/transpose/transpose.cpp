@@ -84,14 +84,14 @@ transpose_a(int* in, int* out, int M, int N)
 }
 
 void
-run(int argc, char** argv)
+run(int rank, int argc, char** argv)
 {
     (void) argc;
     (void) argv;
     unsigned int M = 4960;
     unsigned int N = 4960;
 
-    std::cout << "M: " << M << " N: " << N << std::endl;
+    std::cout << "[" << rank << "] M: " << M << " N: " << N << std::endl;
     size_t size   = sizeof(int) * M * N;
     int*   matrix = (int*) malloc(size);
     for(size_t i = 0; i < M * N; i++)
@@ -130,7 +130,7 @@ run(int argc, char** argv)
     double time =
         std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
     float GB = (float) size * times * 2 / (1 << 30);
-    std::cout << "Runtime of transpose is " << time << " sec\n"
+    std::cout << "[" << rank << "] Runtime of transpose is " << time << " sec\n"
               << "The average performance of transpose is " << GB / time << " GBytes/sec"
               << std::endl;
 
@@ -151,6 +151,21 @@ run(int argc, char** argv)
 
 #if defined(USE_MPI)
 #    include <mpi.h>
+
+void
+do_a2a(int rank)
+{
+    // Define my value
+    int values[3];
+    for(int i = 0; i < 3; ++i)
+        values[i] = rank * 300 + i * 100;
+    printf("Process %d, values = %d, %d, %d.\n", rank, values[0], values[1], values[2]);
+
+    int buffer_recv[3];
+    MPI_Alltoall(&values, 1, MPI_INT, buffer_recv, 1, MPI_INT, MPI_COMM_WORLD);
+    printf("Values collected on process %d: %d, %d, %d.\n", rank, buffer_recv[0],
+           buffer_recv[1], buffer_recv[2]);
+}
 #endif
 
 int
@@ -161,9 +176,10 @@ main(int argc, char** argv)
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 #endif
-    if(rank == 0) run(argc, argv);
+    if(rank == 0) run(rank, argc, argv);
 #if defined(USE_MPI)
     MPI_Barrier(MPI_COMM_WORLD);
+    do_a2a(rank);
     MPI_Finalize();
 #endif
     return 0;

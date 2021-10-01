@@ -9,16 +9,23 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR AND CMAKE_CURRENT_SOURCE_DIR STREQ
     message(AUTHOR_WARNING "In-source build")
 endif()
 
+if(NOT UNIX OR APPLE)
+    message(
+        AUTHOR_WARNING
+            "hosttrace only supports Linux. Configure and/or build is likely to fail")
+endif()
+
 project(
     hosttrace
     LANGUAGES C CXX
-    VERSION 0.0.2)
+    VERSION 0.0.3)
 
 message(
     STATUS
         "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}"
     )
-set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${PROJECT_SOURCE_DIR}/cmake/Modules
+                      ${CMAKE_MODULE_PATH})
 set(BUILD_SHARED_LIBS
     ON
     CACHE BOOL "Build shared libraries")
@@ -51,12 +58,11 @@ add_option(HOSTTRACE_USE_MPI "Enable MPI support" OFF)
 add_option(HOSTTRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
 add_option(HOSTTRACE_USE_ROCTRACER "Enable roctracer support" ON)
 add_option(HOSTTRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
+add_option(HOSTTRACE_USE_MPI_HEADERS
+           "Enable wrapping MPI functions w/o enabling MPI dependency" OFF)
 
 # ensure synced
 set(TIMEMORY_USE_MPI
-    ${HOSTTRACE_USE_MPI}
-    CACHE BOOL "Enable MPI support" FORCE)
-set(TRANSPOSE_USE_MPI
     ${HOSTTRACE_USE_MPI}
     CACHE BOOL "Enable MPI support" FORCE)
 
@@ -98,19 +104,20 @@ target_link_libraries(
     PRIVATE hosttrace::hosttrace-threading
             hosttrace::hosttrace-compile-options
             hosttrace::hosttrace-roctracer
+            hosttrace::hosttrace-mpi
             $<BUILD_INTERFACE:timemory::timemory-headers>
             $<BUILD_INTERFACE:timemory::timemory-gotcha>
             $<BUILD_INTERFACE:timemory::timemory-cxx-shared>
             $<IF:$<BOOL:${HOSTTRACE_USE_SANITIZER}>,hosttrace::hosttrace-sanitizer,>)
 
-if(DYNINST_API_RT)
-    get_filename_component(DYNINST_API_RT_DIR "${DYNINST_API_RT}" DIRECTORY)
+if(HOSTTRACE_DYNINST_API_RT)
+    get_filename_component(HOSTTRACE_DYNINST_API_RT_DIR "${HOSTTRACE_DYNINST_API_RT}"
+                           DIRECTORY)
 endif()
 
 set_target_properties(
-    hosttrace-library
-    PROPERTIES OUTPUT_NAME hosttrace
-               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/dyninst-tpls/libs:${DYNINST_API_RT_DIR}")
+    hosttrace-library PROPERTIES OUTPUT_NAME hosttrace
+                                 INSTALL_RPATH "\$ORIGIN:\$ORIGIN/dyninst-tpls/libs")
 
 install(
     TARGETS hosttrace-library
@@ -143,7 +150,7 @@ set_target_properties(
         OUTPUT_NAME hosttrace
         INSTALL_RPATH_USE_LINK_PATH ON
         INSTALL_RPATH
-        "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib:${DYNINST_API_RT_DIR}"
+        "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib"
     )
 
 install(
@@ -160,6 +167,9 @@ add_dependencies(hosttrace-exe timemory-avail)
 #
 # ------------------------------------------------------------------------------#
 
+configure_file(${PROJECT_SOURCE_DIR}/scripts/setup-env.sh.in
+               ${PROJECT_BINARY_DIR}/scripts/setup-env.sh @ONLY)
+
 install(
     PROGRAMS ${PROJECT_SOURCE_DIR}/scripts/hosttrace-merge.jl
     DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -167,7 +177,12 @@ install(
 
 install(
     FILES ${PROJECT_SOURCE_DIR}/roctrace.cfg
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
+    OPTIONAL)
+
+install(
+    FILES ${PROJECT_BINARY_DIR}/scripts/setup-env.sh
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
     OPTIONAL)
 
 # ------------------------------------------------------------------------------#

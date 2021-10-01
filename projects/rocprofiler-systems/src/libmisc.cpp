@@ -92,6 +92,17 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 }
 
 void
+mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
+{
+    HOSTTRACE_DEBUG("[%s] %s()\n", __FUNCTION__, _data.tool_id.c_str());
+    if(mpip_index != std::numeric_limits<uint64_t>::max())
+        comp::deactivate_mpip<tim::component_tuple<hosttrace_component>, hosttrace>(
+            mpip_index);
+    hosttrace_pop_trace("MPI_Finalize()");
+    hosttrace_trace_finalize();
+}
+
+void
 hosttrace_component::start()
 {
     if(m_prefix) hosttrace_push_trace(m_prefix);

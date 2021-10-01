@@ -115,6 +115,9 @@ struct mpi_gotcha : comp::base<mpi_gotcha, void>
 
     // this will get called right after MPI_Init and MPI_Init_thread with the return value
     void audit(const gotcha_data_t& _data, audit::outgoing, int _retval);
+
+    // this will get called right before MPI_Finalize
+    void audit(const gotcha_data_t& _data, audit::incoming);
 };
 
 // timemory api struct

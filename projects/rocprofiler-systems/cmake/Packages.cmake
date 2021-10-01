@@ -14,6 +14,7 @@ add_interface_library(
     hosttrace-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)")
 add_interface_library(hosttrace-roctracer "Provides flags and libraries for roctracer")
+add_interface_library(hosttrace-mpi "Provides MPI or MPI headers")
 
 # include threading because of rooflines
 target_link_libraries(hosttrace-headers INTERFACE hosttrace-threading)
@@ -54,6 +55,22 @@ if(HOSTTRACE_USE_ROCTRACER)
     target_compile_definitions(hosttrace-roctracer INTERFACE HOSTTRACE_USE_ROCTRACER)
     target_link_libraries(hosttrace-roctracer INTERFACE hip::host roctracer::roctracer)
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${roctracer_LIBRARY_DIRS}")
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# MPI
+#
+# ----------------------------------------------------------------------------------------#
+
+if(HOSTTRACE_USE_MPI)
+    find_package(MPI ${hosttrace_FIND_QUIETLY} REQUIRED)
+    target_link_libraries(hosttrace-mpi INTERFACE MPI::MPI_C MPI::MPI_CXX)
+elseif(HOSTTRACE_USE_MPI_HEADERS)
+    find_package(MPI-Headers ${hosttrace_FIND_QUIETLY} REQUIRED)
+    target_compile_definitions(hosttrace-mpi INTERFACE TIMEMORY_USE_MPI_HEADERS
+                                                       HOSTTRACE_USE_MPI_HEADERS)
+    target_link_libraries(hosttrace-mpi INTERFACE MPI::MPI_HEADERS)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -153,7 +170,7 @@ else()
 
         # useful for defining the location of the runtime API
         find_library(
-            DYNINST_API_RT dyninstAPI_RT
+            HOSTTRACE_DYNINST_API_RT dyninstAPI_RT
             HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
             PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
             PATH_SUFFIXES lib)
@@ -174,9 +191,9 @@ else()
                 PATH_SUFFIXES include)
         endif()
 
-        if(DYNINST_API_RT)
-            target_compile_definitions(hosttrace-dyninst
-                                       INTERFACE DYNINST_API_RT="${DYNINST_API_RT}")
+        if(HOSTTRACE_DYNINST_API_RT)
+            target_compile_definitions(
+                hosttrace-dyninst INTERFACE DYNINST_API_RT="${HOSTTRACE_DYNINST_API_RT}")
         endif()
 
         if(Boost_DIR)

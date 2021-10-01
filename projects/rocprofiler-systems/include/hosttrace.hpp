@@ -395,7 +395,13 @@ struct module_function
         module    = modname;
         function  = fname;
         signature = get_func_file_line_info(mod, proc);
-        assert(proc->isInstrumentable() == true);
+        if(!proc->isInstrumentable())
+        {
+            verbprintf(0,
+                       "Warning! module function generated for un-instrumentable "
+                       "function: %s [%s]\n",
+                       function.c_str(), module.c_str());
+        }
         std::pair<address_t, address_t> _range{};
         if(proc->getAddressRange(_range.first, _range.second))
             address_range = _range.second - _range.first;
