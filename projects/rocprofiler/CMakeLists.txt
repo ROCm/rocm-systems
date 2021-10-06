@@ -152,6 +152,7 @@ install ( FILES
           DESTINATION include/${DEST_NAME} )
 # rpl_run.sh tblextr.py txt2xml.sh
 install ( FILES
+          ${CMAKE_CURRENT_SOURCE_DIR}/bin/merge_traces.sh
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/rpl_run.sh
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2xml.sh
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2params.py
