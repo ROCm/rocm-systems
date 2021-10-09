@@ -960,15 +960,10 @@ void tool_load() {
   ONLOAD_TRACE_END();
 }
 
-void exit_handler(int status, void* arg) {
-  ONLOAD_TRACE("status(" << status << ") arg(" << arg << ")");
-}
-
 // HSA-runtime tool on-load method
 extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                                   const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
-  on_exit(exit_handler, NULL);
 
   timer = new hsa_rt_utils::Timer(table->core_->hsa_system_get_info_fn);
 
