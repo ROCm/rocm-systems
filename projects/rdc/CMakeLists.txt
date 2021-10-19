@@ -206,7 +206,7 @@ set(CLIENT_COMPONENT "client")
 if(BUILD_STANDALONE)
   install(DIRECTORY ${GRPC_ROOT}/lib
                 USE_SOURCE_PERMISSIONS
-                DESTINATION {RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc
+                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc
                 COMPONENT ${SERVER_COMPONENT})
 # Also include dev setup for people do not want to build grpc
   install(DIRECTORY ${GRPC_ROOT}/bin
