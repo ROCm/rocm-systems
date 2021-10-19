@@ -358,6 +358,10 @@ while [ 1 ] ; do
     INPUT_FILE="$2"
   elif [ "$1" = "-o" ] ; then
     output="$2"
+    if [[ $output != *.csv ]]; then
+      echo "error: file name must have .CSV extension"
+      exit 1
+    fi
   elif [ "$1" = "-d" ] ; then
     DATA_PATH=$2
   elif [ "$1" = "-t" ] ; then
