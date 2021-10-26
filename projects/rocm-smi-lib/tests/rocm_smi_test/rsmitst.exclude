@@ -39,3 +39,13 @@ $BLACKLIST_ALL_ASICS\
 "rsmitstReadWrite.TestFrequenciesReadWrite:"\
 "rsmitstReadOnly.TestProcInfoRead"
 
+# SWDEV-306889
+FILTER[aldebaran]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadOnly.FanRead:"\
+"rsmitstReadOnly.TestVoltCurvRead:"\
+"rsmitstReadOnly.TestFrequenciesRead:"\
+"rsmitstReadWrite.FanReadWrite:"\
+"rsmitstReadWrite.TestFrequenciesReadWrite:"\
+"rsmitstReadWrite.TestPciReadWrite:"\
+"rsmitstReadWrite.TestPowerReadWrite"
