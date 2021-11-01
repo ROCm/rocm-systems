@@ -59,6 +59,7 @@ typedef struct {
   std::string type;
   uint64_t hops;
   uint64_t weight;
+  bool accessible;
 } gpu_link_t;
 
 TestHWTopologyRead::TestHWTopologyRead() : TestBase() {
@@ -135,6 +136,7 @@ void TestHWTopologyRead::Run(void) {
         gpu_links[dv_ind_src][dv_ind_dst].type = "X";
         gpu_links[dv_ind_src][dv_ind_dst].hops = 0;
         gpu_links[dv_ind_src][dv_ind_dst].weight = 0;
+        gpu_links[dv_ind_src][dv_ind_dst].accessible = false;
       } else {
         RSMI_IO_LINK_TYPE type;
         err = rsmi_topo_get_link_type(dv_ind_src, dv_ind_dst,
@@ -175,6 +177,20 @@ void TestHWTopologyRead::Run(void) {
             IF_VERB(STANDARD) {
               std::cout <<
                       "\t**Link Weight. read: Not supported on this machine"
+                                                                 << std::endl;
+              return;
+            }
+          } else {
+            CHK_ERR_ASRT(err)
+          }
+        }
+        err = rsmi_is_P2P_accessible(dv_ind_src, dv_ind_dst,
+                                   &gpu_links[dv_ind_src][dv_ind_dst].accessible);
+        if (err != RSMI_STATUS_SUCCESS) {
+          if (err == RSMI_STATUS_NOT_SUPPORTED) {
+            IF_VERB(STANDARD) {
+              std::cout <<
+                      "\t**P2P Access. check: Not supported on this machine"
                                                                  << std::endl;
               return;
             }
@@ -264,6 +280,23 @@ void TestHWTopologyRead::Run(void) {
       } else {
         std::cout << std::setw(12) << std::left << gpu_links[i][j].weight;
       }
+    }
+    std::cout << std::endl;
+  }
+  std::cout << std::endl;
+  std::cout << "**Access between two GPUs**" << std::endl;
+  std::cout << "      ";
+  for (i = 0; i < num_devices; ++i) {
+    tmp = "GPU" + std::to_string(i);
+    std::cout << std::setw(12) << std::left << tmp;
+  }
+  std::cout << std::endl;
+  for (i = 0; i < num_devices; i++) {
+    tmp = "GPU" + std::to_string(i);
+    std::cout << std::setw(6) << std::left << tmp;
+    for (j = 0; j < num_devices; j++) {
+      std::cout << std::boolalpha;
+      std::cout << std::setw(12) << std::left << gpu_links[i][j].accessible;
     }
     std::cout << std::endl;
   }
