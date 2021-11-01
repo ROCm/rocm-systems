@@ -31,9 +31,7 @@ THE SOFTWARE.
 static std::string get_test_name(rdc_diag_test_cases_t test_case) {
         const std::map<rdc_diag_test_cases_t, std::string> test_desc = {
             {RDC_DIAG_COMPUTE_PROCESS, "No compute process"},
-            {RDC_DIAG_SDMA_QUEUE, "SDMA Queue ready"},
             {RDC_DIAG_COMPUTE_QUEUE, "Compute Queue ready"},
-            {RDC_DIAG_VRAM_CHECK, "VRAM check"},
             {RDC_DIAG_SYS_MEM_CHECK, "System memory check"},
             {RDC_DIAG_NODE_TOPOLOGY, "Node topology check"},
             {RDC_DIAG_GPU_PARAMETERS, "GPU parameters check"},
@@ -160,7 +158,8 @@ int main(int, char **) {
 
     std::cout << std::setw(22) << std::left
             << get_test_name(RDC_DIAG_COMPUTE_PROCESS) + ":"
-            << rdc_diagnostic_result_string(test_result.status) << "\n";
+            <<  test_result.info << "\n";
+
 
     // Cleanup consists of shutting down RDC.
     cleanup:

@@ -35,6 +35,10 @@ option(BUILD_STANDALONE "Build targets for rdci and rdcd" ON)
 # which requires the ROCT-Thunk-Interface.
 option(BUILD_RASLIB "Build targets for raslib" OFF)
 
+# When cmake -DBUILD_ROCRTEST=off, it will not build the librdc_rocr.so
+# which requires the Rocm run time.
+option(BUILD_ROCRTEST "Build targets for librdc_rocr.so" ON)
+
 if( NOT EXISTS "${CMAKE_SOURCE_DIR}/raslib/.git" AND BUILD_RASLIB)
     message( FATAL_ERROR "The git submodule raslib is not available. Please run
     git submodule update --init --recursive

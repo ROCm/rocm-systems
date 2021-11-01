@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcDiagnostic.h"
 #include "rdc_lib/impl/RdcRasLib.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
+#include "rdc_lib/impl/RdcRocrLib.h"
 
 namespace amd {
 namespace rdc {
@@ -55,7 +56,8 @@ class RdcDiagnosticModule : public RdcDiagnostic {
     rdc_status_t rdc_diag_destroy() override;
 
     explicit RdcDiagnosticModule(const RdcSmiLibPtr& smi_lib,
-        const RdcRasLibPtr& ras_module);
+        const RdcRasLibPtr& ras_module,
+        const RdcRocrLibPtr& rocr_module);
 
  private:
     //< Helper function to dispatch fields to module

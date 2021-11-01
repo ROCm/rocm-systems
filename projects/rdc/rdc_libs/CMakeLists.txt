@@ -161,12 +161,14 @@ set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcMetricsUpdaterIm
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcWatchTableImpl.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcRasLib.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcSmiLib.cc")
+set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcRocrLib.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcTelemetryModule.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcDiagnosticModule.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcSmiDiagnosticImpl.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcModuleMgrImpl.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcNotificationImpl.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RsmiUtils.cc")
+set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${SRC_DIR}/rdc/src/RdcPerfTimer.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${COMMON_DIR}/rdc_fields_supported.cc")
 set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST} "${COMMON_DIR}/rdc_capabilities.cc")
 
@@ -183,6 +185,7 @@ set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcWatchTab
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcWatchTableImpl.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcRasLib.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcSmiLib.h")
+set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcRocrLib.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcModuleMgrImpl.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcModuleMgr.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcTelemetry.h")
@@ -194,6 +197,7 @@ set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcSmi
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcNotification.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RdcNotificationImpl.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/impl/RsmiUtils.h")
+set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcPerfTimer.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${COMMON_DIR}/rdc_fields_supported.h")
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST} "${COMMON_DIR}/rdc_capabilities.h")
 
@@ -214,6 +218,54 @@ set_property(TARGET ${RDC_LIB} PROPERTY
              SOVERSION "${VERSION_MAJOR}")
 set_property(TARGET ${RDC_LIB} PROPERTY
              VERSION "${SO_VERSION_STRING}")
+
+# librdc_rocr.so set up
+set(DIAGNOSTIC_LIB "rdc_rocr")
+set(DIAGNOSTIC_LIB_COMPONENT "lib${DIAGNOSTIC_LIB}")
+set(DIAGNOSTIC_LIB_SRC_LIST "${SRC_DIR}/rdc_modules/rdc_rocr/RdcDiagnosticLib.cc")
+set(DIAGNOSTIC_LIB_SRC_LIST ${DIAGNOSTIC_LIB_SRC_LIST} "${SRC_DIR}/bootstrap/src/RdcLogger.cc")
+set(DIAGNOSTIC_LIB_SRC_LIST ${DIAGNOSTIC_LIB_SRC_LIST} "${SRC_DIR}/rdc_modules/rdc_rocr/RdcRocrBase.cc")
+set(DIAGNOSTIC_LIB_SRC_LIST ${DIAGNOSTIC_LIB_SRC_LIST} "${SRC_DIR}/rdc_modules/rdc_rocr/MemoryTest.cc")
+set(DIAGNOSTIC_LIB_SRC_LIST ${DIAGNOSTIC_LIB_SRC_LIST} "${SRC_DIR}/rdc_modules/rdc_rocr/MemoryAccess.cc")
+set(DIAGNOSTIC_LIB_SRC_LIST ${DIAGNOSTIC_LIB_SRC_LIST} "${SRC_DIR}/rdc_modules/rdc_rocr/TestBase.cc")
+set(DIAGNOSTIC_LIB_SRC_LIST ${DIAGNOSTIC_LIB_SRC_LIST} "${SRC_DIR}/rdc_modules/rdc_rocr/base_rocr_utils.cc")
+set(DIAGNOSTIC_LIB_SRC_LIST ${DIAGNOSTIC_LIB_SRC_LIST} "${SRC_DIR}/rdc_modules/rdc_rocr/ComputeQueueTest.cc")
+set(DIAGNOSTIC_LIB_SRC_LIST ${DIAGNOSTIC_LIB_SRC_LIST} "${SRC_DIR}/rdc_modules/rdc_rocr/common.cc")
+set(DIAGNOSTIC_LIB_INC_LIST "${RDC_LIB_INC_DIR}/rdc/rdc.h")
+set(DIAGNOSTIC_LIB_INC_LIST ${DIAGNOSTIC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcDiagnosticLibInterface.h")
+set(DIAGNOSTIC_LIB_INC_LIST ${DIAGNOSTIC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/rdc_common.h")
+set(DIAGNOSTIC_LIB_INC_LIST ${DIAGNOSTIC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_lib/RdcLogger.h")
+set(DIAGNOSTIC_LIB_INC_LIST ${DIAGNOSTIC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_modules/rdc_rocr/RdcDiagnosticLib.h")
+set(DIAGNOSTIC_LIB_INC_LIST ${DIAGNOSTIC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_modules/rdc_rocr/RdcRocrBase.h")
+set(DIAGNOSTIC_LIB_INC_LIST ${DIAGNOSTIC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_modules/rdc_rocr/TestBase.h")
+set(DIAGNOSTIC_LIB_INC_LIST ${DIAGNOSTIC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_modules/rdc_rocr/MemoryTest.h")
+set(DIAGNOSTIC_LIB_INC_LIST ${DIAGNOSTIC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_modules/rdc_rocr/MemoryAccess.h")
+set(DIAGNOSTIC_LIB_INC_LIST ${DIAGNOSTIC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_modules/rdc_rocr/base_rocr_utils.h")
+set(DIAGNOSTIC_LIB_INC_LIST ${DIAGNOSTIC_LIB_INC_LIST} "${RDC_LIB_INC_DIR}/rdc_modules/rdc_rocr/common.h")
+
+if(BUILD_ROCRTEST)
+   message("Build librdc_rocr.so is enabled, make sure the Rocm run time is installed.")
+
+    message("DIAGNOSTIC_LIB_INC_LIST=${DIAGNOSTIC_LIB_INC_LIST}")
+
+    set(HSA_LIB "hsa-runtime64")
+    add_library(${DIAGNOSTIC_LIB} SHARED ${DIAGNOSTIC_LIB_SRC_LIST} ${DIAGNOSTIC_LIB_INC_LIST})
+    target_link_libraries(${DIAGNOSTIC_LIB} ${RDC_LIB} ${BOOTSTRAP_LIB} ${HSA_LIB} pthread dl)
+    target_include_directories(${DIAGNOSTIC_LIB} PRIVATE
+                                            "${RSMI_INC_DIR}"
+                                            "${ROCM_DIR}/include"
+                                            "${PROJECT_SOURCE_DIR}"
+                                            "${PROJECT_SOURCE_DIR}/include"
+                                            "${COMMON_DIR}"
+                                            "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
+    # TODO: set the properties for the library once we have one
+    ## Set the VERSION and SOVERSION values
+    set_property(TARGET ${DIAGNOSTIC_LIB} PROPERTY
+                SOVERSION "${VERSION_MAJOR}")
+    set_property(TARGET ${DIAGNOSTIC_LIB} PROPERTY
+                VERSION "${SO_VERSION_STRING}")
+endif()
 
 if(BUILD_STANDALONE)
    # librdc_client.so set up
@@ -274,12 +326,12 @@ target_include_directories(${BOOTSTRAP_LIB}
 
 ## Add the install directives for the runtime library.
 if(BUILD_STANDALONE)
-    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB}
+    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB} ${DIAGNOSTIC_LIB}
             EXPORT rdcTargets
             LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
                                             COMPONENT ${CLIENT_COMPONENT})
 else()
-    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB}
+    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${DIAGNOSTIC_LIB}
             EXPORT rdcTargets
             LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
                                             COMPONENT ${CLIENT_COMPONENT})
@@ -288,6 +340,12 @@ endif()
 install(FILES ${SOURCE_DIR}/include/rdc/rdc.h
              DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/include/rdc
                                          COMPONENT ${CLIENT_COMPONENT})
+
+# Install the kernel files
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/kernels/hsaco
+    DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
+    COMPONENT ${CLIENT_COMPONENT})
+
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake RDC Lib                      ")

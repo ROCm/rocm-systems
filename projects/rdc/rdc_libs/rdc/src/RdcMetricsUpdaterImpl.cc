@@ -22,6 +22,7 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcMetricsUpdaterImpl.h"
 #include <sys/time.h>
 #include <ctime>
+#include <thread>
 #include <chrono>  // NOLINT(build/c++11)
 #include "rdc_lib/rdc_common.h"
 

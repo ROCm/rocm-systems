@@ -421,9 +421,7 @@ typedef enum {
     RDC_DIAG_TEST_FIRST = 0,
     //!< The diagnostic test pass
     RDC_DIAG_COMPUTE_PROCESS = RDC_DIAG_TEST_FIRST,
-    RDC_DIAG_SDMA_QUEUE,        //!< The SDMA Queue is ready
     RDC_DIAG_COMPUTE_QUEUE,     //!< The Compute Queue is ready
-    RDC_DIAG_VRAM_CHECK,        //!< Check VRAM
     RDC_DIAG_SYS_MEM_CHECK,     //!< Check System memory
     RDC_DIAG_NODE_TOPOLOGY,     //!< Report node topology
     RDC_DIAG_GPU_PARAMETERS,    //!< GPU parameters in range

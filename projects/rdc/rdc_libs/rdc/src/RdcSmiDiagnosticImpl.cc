@@ -61,13 +61,12 @@ rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_process_info(
         result->status = RDC_DIAG_RESULT_PASS;
         result->per_gpu_result_count = 0;
         strncpy_with_null(result->info,
-            "Do not have any compute process running on any devices",
+            "No processes running on any devices.",
             MAX_DIAG_MSG_LENGTH);
         return RDC_ST_OK;
     }
 
-    std::string info = std::to_string(num_items)
-                    + " compute process is using devices.";
+    std::string info;
     // Find details of the process running on each GPU
     std::vector<rsmi_process_info_t> procs(num_items);
     err = rsmi_compute_process_info_get(
@@ -81,6 +80,9 @@ rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_process_info(
 
     std::map<uint32_t, std::vector<uint32_t>> pids_per_gpu;
     for (uint32_t i=0; i < num_items; i++) {
+        // Skip the process does not occupy any GPUs. The hsa_shutdown()
+        // will not clear /proc sys file until the process is terminated.
+        if (procs[i].cu_occupancy == 0 ) continue;
         info += " Process: " + std::to_string(procs[i].process_id)
          += ", pasid: "  + std::to_string(procs[i].pasid)
          += ", vram_usage: "  + std::to_string(procs[i].vram_usage)
@@ -118,11 +120,13 @@ rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_process_info(
         }
     }  // end for (uint32_t i=0 ...)
 
+    result->status = RDC_DIAG_RESULT_PASS;  // pass by default
     if (pids_per_gpu.size() == 0) {
-        result->status = RDC_DIAG_RESULT_WARN;
-        info += " Cannot detect the processes running in which devices.";
-    } else {
-        result->status = RDC_DIAG_RESULT_PASS;  // pass by default
+        result->per_gpu_result_count = 0;
+        strncpy_with_null(result->info,
+            "No processes running on any devices.",
+            MAX_DIAG_MSG_LENGTH);
+        return RDC_ST_OK;
     }
 
     // Mark as fail
@@ -359,7 +363,7 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
     int64_t critical_temp = 0;
     err = rsmi_dev_temp_metric_get(gpu_index,
                                     type, met, &critical_temp);
-    if (err != RSMI_STATUS_SUCCESS)  {
+    if (err == RSMI_STATUS_SUCCESS)  {
         if (current_temp >= critical_temp) {
             result = RDC_DIAG_RESULT_FAIL;
             per_gpu_info += "Critical ";
@@ -384,7 +388,7 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
     int64_t emergency_temp = 0;
     err = rsmi_dev_temp_metric_get(gpu_index,
                                     type, met, &emergency_temp);
-    if (err != RSMI_STATUS_SUCCESS)  {
+    if (err == RSMI_STATUS_SUCCESS)  {
         if (current_temp >= critical_temp) {
             result = RDC_DIAG_RESULT_FAIL;
             per_gpu_info += "Emergency ";
@@ -409,7 +413,7 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
     int64_t critical_min_temp = 0;
     err = rsmi_dev_temp_metric_get(gpu_index,
                                     type, met, &critical_min_temp);
-    if (err != RSMI_STATUS_SUCCESS)  {
+    if (err == RSMI_STATUS_SUCCESS)  {
         if (current_temp <= critical_min_temp) {
             result = RDC_DIAG_RESULT_FAIL;
             per_gpu_info += "Critical Min ";
