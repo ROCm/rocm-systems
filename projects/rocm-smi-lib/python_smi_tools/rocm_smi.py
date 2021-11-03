@@ -2295,7 +2295,7 @@ def showAccessibleTopology(deviceList):
             if rsmi_ret_ok(ret):
                 gpu_links_type[srcdevice][destdevice] = accessible.value
             else:
-                printErrLog(srcdevice, 'Cannot read link accessibility: Unsupported on this machine', None)
+                printErrLog(srcdevice, 'Cannot read link accessibility: Unsupported on this machine')
     if PRINT_JSON:
         formatMatrixToJSON(deviceList, gpu_links_type, "(Topology) Link accessibility between DRM devices {} and {}")
         return
@@ -2334,7 +2334,7 @@ def showWeightTopology(deviceList):
             if rsmi_ret_ok(ret):
                 gpu_links_weight[srcdevice][destdevice] = weight
             else:
-                printErrLog(srcdevice, 'Cannot read Link Weight: Not supported on this machine', None)
+                printErrLog(srcdevice, 'Cannot read Link Weight: Not supported on this machine')
 
     if PRINT_JSON:
         formatMatrixToJSON(deviceList, gpu_links_weight, "(Topology) Weight between DRM devices {} and {}")
@@ -2377,7 +2377,7 @@ def showHopsTopology(deviceList):
             if rsmi_ret_ok(ret):
                 gpu_links_hops[srcdevice][destdevice] = hops
             else:
-                printErrLog(srcdevice, 'Cannot read Link Hops: Not supported on this machine', None)
+                printErrLog(srcdevice, 'Cannot read Link Hops: Not supported on this machine')
 
     if PRINT_JSON:
         formatMatrixToJSON(deviceList, gpu_links_hops, "(Topology) Hops between DRM devices {} and {}")
@@ -2425,7 +2425,7 @@ def showTypeTopology(deviceList):
                 else:
                     gpu_links_type[srcdevice][destdevice] = "XXXX"
             else:
-                printErrLog(srcdevice, 'Cannot read Link Type: Not supported on this machine', None)
+                printErrLog(srcdevice, 'Cannot read Link Type: Not supported on this machine')
     if PRINT_JSON:
         formatMatrixToJSON(deviceList, gpu_links_type, "(Topology) Link type between DRM devices {} and {}")
         return
@@ -2466,7 +2466,7 @@ def showNumaTopology(deviceList):
         if rsmi_ret_ok(ret):
             printLog(device, "(Topology) Numa Affinity", numa_numbers.value)
         else:
-            printErrLog(device, 'Cannot read Numa Affinity', None)
+            printErrLog(device, 'Cannot read Numa Affinity')
 
 
 def showHwTopology(deviceList):
