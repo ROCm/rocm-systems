@@ -2081,6 +2081,7 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
 
   rsmi_status_t ret;
   amd::smi::MonitorTypes mon_type;
+  uint16_t val_ui16;
 
   switch (metric) {
     case RSMI_TEMP_CURRENT:
@@ -2148,21 +2149,26 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
           return RSMI_STATUS_INVALID_ARGS;
        }
 
-       if (sensor_type == RSMI_TEMP_TYPE_HBM_0) {
-         *temperature = gpu_metrics.temperature_hbm[0] *
-         CENTRIGRADE_TO_MILLI_CENTIGRADE;
-       } else if (sensor_type == RSMI_TEMP_TYPE_HBM_1) {
-         *temperature = gpu_metrics.temperature_hbm[1] *
-         CENTRIGRADE_TO_MILLI_CENTIGRADE;
-       } else if (sensor_type == RSMI_TEMP_TYPE_HBM_2) {
-         *temperature = gpu_metrics.temperature_hbm[2] *
-         CENTRIGRADE_TO_MILLI_CENTIGRADE;
-       } else if (sensor_type == RSMI_TEMP_TYPE_HBM_3) {
-         *temperature = gpu_metrics.temperature_hbm[3] *
-         CENTRIGRADE_TO_MILLI_CENTIGRADE;
-       } else {
-         return RSMI_STATUS_NOT_SUPPORTED;
+       switch (sensor_type) {
+         case RSMI_TEMP_TYPE_HBM_0:
+           val_ui16 = gpu_metrics.temperature_hbm[0];
+           break;
+         case RSMI_TEMP_TYPE_HBM_1:
+           val_ui16 = gpu_metrics.temperature_hbm[1];
+           break;
+         case RSMI_TEMP_TYPE_HBM_2:
+           val_ui16 = gpu_metrics.temperature_hbm[2];
+           break;
+         case RSMI_TEMP_TYPE_HBM_3:
+           val_ui16 = gpu_metrics.temperature_hbm[3];
+           break;
+         default:
+           return RSMI_STATUS_INVALID_ARGS;
        }
+       if (val_ui16 == UINT16_MAX)
+          return RSMI_STATUS_NOT_SUPPORTED;
+       else
+          *temperature = val_ui16 * CENTRIGRADE_TO_MILLI_CENTIGRADE;
 
        return RSMI_STATUS_SUCCESS;
   }  // end HBM temperature
