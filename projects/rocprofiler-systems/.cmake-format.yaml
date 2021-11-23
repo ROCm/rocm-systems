@@ -1,6 +1,6 @@
 parse:
   additional_commands:
-    checkout_git_submodule:
+    hosttrace_checkout_git_submodule:
       flags:
       - RECURSIVE
       kwargs:

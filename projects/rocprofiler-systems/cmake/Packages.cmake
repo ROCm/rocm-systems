@@ -7,14 +7,19 @@ include_guard(DIRECTORY)
 #
 # ########################################################################################
 
-add_interface_library(hosttrace-headers
-                      "Provides minimal set of include flags to compile with hosttrace")
-add_interface_library(hosttrace-threading "Enables multithreading support")
-add_interface_library(
+hosttrace_add_interface_library(
+    hosttrace-headers "Provides minimal set of include flags to compile with hosttrace")
+hosttrace_add_interface_library(hosttrace-threading "Enables multithreading support")
+hosttrace_add_interface_library(
     hosttrace-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)")
-add_interface_library(hosttrace-roctracer "Provides flags and libraries for roctracer")
-add_interface_library(hosttrace-mpi "Provides MPI or MPI headers")
+hosttrace_add_interface_library(hosttrace-roctracer
+                                "Provides flags and libraries for roctracer")
+hosttrace_add_interface_library(hosttrace-mpi "Provides MPI or MPI headers")
+hosttrace_add_interface_library(hosttrace-ptl "Enables PTL support (tasking)")
+
+target_include_directories(hosttrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/include
+                                                       ${PROJECT_BINARY_DIR}/include)
 
 # include threading because of rooflines
 target_link_libraries(hosttrace-headers INTERFACE hosttrace-threading)
@@ -80,7 +85,7 @@ endif()
 # ----------------------------------------------------------------------------------------#
 
 if(HOSTTRACE_BUILD_DYNINST)
-    checkout_git_submodule(
+    hosttrace_checkout_git_submodule(
         RELATIVE_PATH external/dyninst
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/jrmadsen/dyninst.git
@@ -145,7 +150,7 @@ else()
                 hosttrace-dyninst INTERFACE DYNINST_API_RT="${HOSTTRACE_DYNINST_API_RT}")
         endif()
 
-        add_rpath(${Dyninst_LIBRARIES})
+        hosttrace_add_rpath(${Dyninst_LIBRARIES})
         target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::Dyninst)
     else() # updated Dyninst CMake system was not found
         set(_BOOST_COMPONENTS atomic system thread date_time)
@@ -204,7 +209,7 @@ else()
             endif()
         endif()
 
-        add_rpath(${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
+        hosttrace_add_rpath(${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
         target_link_libraries(hosttrace-dyninst INTERFACE ${DYNINST_LIBRARIES}
                                                           ${Boost_LIBRARIES})
         foreach(
@@ -242,7 +247,7 @@ endif()
 # ----------------------------------------------------------------------------------------#
 
 set(perfetto_DIR ${PROJECT_SOURCE_DIR}/external/perfetto)
-checkout_git_submodule(
+hosttrace_checkout_git_submodule(
     RELATIVE_PATH external/perfetto
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://android.googlesource.com/platform/external/perfetto
@@ -256,7 +261,7 @@ checkout_git_submodule(
 # ----------------------------------------------------------------------------------------#
 
 if(HOSTTRACE_BUILD_DEVICETRACE)
-    checkout_git_submodule(
+    hosttrace_checkout_git_submodule(
         RELATIVE_PATH external/elfio
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/jrmadsen/ELFIO.git
@@ -267,61 +272,8 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
-# Clang Tidy
+# timemory submodule
 #
-# ----------------------------------------------------------------------------------------#
-
-# clang-tidy
-macro(HOSTTRACE_ACTIVATE_CLANG_TIDY)
-    if(HOSTTRACE_USE_CLANG_TIDY)
-        find_program(CLANG_TIDY_COMMAND NAMES clang-tidy)
-        add_feature(CLANG_TIDY_COMMAND "Path to clang-tidy command")
-        if(NOT CLANG_TIDY_COMMAND)
-            timemory_message(
-                WARNING "HOSTTRACE_USE_CLANG_TIDY is ON but clang-tidy is not found!")
-            set(HOSTTRACE_USE_CLANG_TIDY OFF)
-        else()
-            set(CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY_COMMAND})
-
-            # Create a preprocessor definition that depends on .clang-tidy content so the
-            # compile command will change when .clang-tidy changes.  This ensures that a
-            # subsequent build re-runs clang-tidy on all sources even if they do not
-            # otherwise need to be recompiled.  Nothing actually uses this definition.  We
-            # add it to targets on which we run clang-tidy just to get the build
-            # dependency on the .clang-tidy file.
-            file(SHA1 ${CMAKE_CURRENT_LIST_DIR}/.clang-tidy clang_tidy_sha1)
-            set(CLANG_TIDY_DEFINITIONS "CLANG_TIDY_SHA1=${clang_tidy_sha1}")
-            unset(clang_tidy_sha1)
-        endif()
-    endif()
-endmacro()
-
-# ------------------------------------------------------------------------------#
-#
-# clang-format target
-#
-# ------------------------------------------------------------------------------#
-
-find_program(HOSTTRACE_CLANG_FORMAT_EXE NAMES clang-format-11 clang-format-mp-11
-                                              clang-format)
-
-if(HOSTTRACE_CLANG_FORMAT_EXE)
-    file(GLOB sources ${PROJECT_SOURCE_DIR}/src/*.cpp)
-    file(GLOB headers ${PROJECT_SOURCE_DIR}/include/*.hpp)
-    file(GLOB_RECURSE examples ${PROJECT_SOURCE_DIR}/examples/*.cpp
-         ${PROJECT_SOURCE_DIR}/examples/*.hpp)
-    add_custom_target(
-        format
-        ${HOSTTRACE_CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}
-        COMMENT "Running ${HOSTTRACE_CLANG_FORMAT_EXE}...")
-else()
-    message(
-        AUTHOR_WARNING
-            "clang-format could not be found. format build target not available.")
-endif()
-
-# ----------------------------------------------------------------------------------------#
-# configure submodule
 # ----------------------------------------------------------------------------------------#
 
 set(TIMEMORY_INSTALL_HEADERS
@@ -365,7 +317,7 @@ set(TIMEMORY_TLS_MODEL
     "global-dynamic"
     CACHE STRING "Thread-local static model" FORCE)
 
-checkout_git_submodule(
+hosttrace_checkout_git_submodule(
     RELATIVE_PATH external/timemory
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://github.com/NERSC/timemory.git
@@ -384,3 +336,41 @@ add_subdirectory(external/timemory)
 
 hosttrace_restore_variables(BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
                                                    CMAKE_POSITION_INDEPENDENT_CODE)
+
+# ----------------------------------------------------------------------------------------#
+#
+# PTL (Parallel Tasking Library) submodule
+#
+# ----------------------------------------------------------------------------------------#
+
+# timemory might provide PTL::ptl-shared
+if(NOT TARGET PTL::ptl-shared)
+    hosttrace_checkout_git_submodule(
+        RELATIVE_PATH external/PTL
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/jrmadsen/PTL.git
+        REPO_BRANCH master)
+
+    set(PTL_BUILD_EXAMPLES OFF)
+    set(PTL_USE_TBB OFF)
+    set(PTL_USE_GPU OFF)
+    set(PTL_DEVELOPER_INSTALL OFF)
+
+    hosttrace_save_variables(
+        BUILD_CONFIG
+        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS CMAKE_POSITION_INDEPENDENT_CODE
+                  CMAKE_CXX_VISIBILITY_PRESET CMAKE_VISIBILITY_INLINES_HIDDEN)
+
+    set(BUILD_SHARED_LIBS ON)
+    set(BUILD_STATIC_LIBS OFF)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
+    add_subdirectory(external/PTL)
+    hosttrace_restore_variables(
+        BUILD_CONFIG
+        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS CMAKE_POSITION_INDEPENDENT_CODE
+                  CMAKE_CXX_VISIBILITY_PRESET CMAKE_VISIBILITY_INLINES_HIDDEN)
+endif()
+
+target_link_libraries(hosttrace-ptl INTERFACE PTL::ptl-shared)

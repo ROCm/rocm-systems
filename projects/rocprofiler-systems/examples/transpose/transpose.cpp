@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <thread>
 #include <vector>
 
 #define HIP_API_CALL(CALL)                                                               \
@@ -88,8 +89,8 @@ run(int rank, int argc, char** argv)
 {
     (void) argc;
     (void) argv;
-    unsigned int M = 4960;
-    unsigned int N = 4960;
+    unsigned int M = 4960 * 2;
+    unsigned int N = 4960 * 2;
 
     std::cout << "[" << rank << "] M: " << M << " N: " << N << std::endl;
     size_t size   = sizeof(int) * M * N;
@@ -102,29 +103,30 @@ run(int rank, int argc, char** argv)
 
     HIP_API_CALL(hipMalloc(&in, size));
     HIP_API_CALL(hipMalloc(&out, size));
-    check_hip_error();
     HIP_API_CALL(hipMemset(in, 0, size));
     HIP_API_CALL(hipMemset(out, 0, size));
     HIP_API_CALL(hipMemcpy(in, matrix, size, hipMemcpyHostToDevice));
-    HIP_API_CALL(hipDeviceSynchronize());
-    check_hip_error();
     hipDeviceProp_t props;
     HIP_API_CALL(hipGetDeviceProperties(&props, 0));
 
     dim3 grid(M / 32, N / 32, 1);
     dim3 block(32, 32, 1);  // transpose_a
 
-    // warmup
-    hipLaunchKernelGGL(transpose_a, grid, block, 0, 0, in, out, M, N);
-    check_hip_error();
-
     t1                   = std::chrono::high_resolution_clock::now();
     const unsigned times = 10000;
-    for(size_t i = 0; i < times; i++)
-    {
-        hipLaunchKernelGGL(transpose_a, grid, block, 0, 0, in, out, M, N);
-    }
-    check_hip_error();
+    auto           _func = [&](hipStream_t stream) {
+        for(size_t i = 0; i < times / 2; i++)
+        {
+            transpose_a<<<grid, block, 0, stream>>>(in, out, M, N);
+            check_hip_error();
+        }
+        HIP_API_CALL(hipStreamSynchronize(stream));
+    };
+    hipStream_t _stream{};
+    HIP_API_CALL(hipStreamCreate(&_stream));
+    std::thread _t{ _func, _stream };
+    _t.join();
+    _func(0);
     HIP_API_CALL(hipDeviceSynchronize());
     t2 = std::chrono::high_resolution_clock::now();
     double time =
@@ -136,14 +138,12 @@ run(int rank, int argc, char** argv)
 
     int* out_matrix = (int*) malloc(size);
     HIP_API_CALL(hipMemcpy(out_matrix, out, size, hipMemcpyDeviceToHost));
-    check_hip_error();
 
     // cpu_transpose(matrix, out_matrix, M, N);
     verify(matrix, out_matrix, M, N);
 
     HIP_API_CALL(hipFree(in));
     HIP_API_CALL(hipFree(out));
-    check_hip_error();
 
     free(matrix);
     free(out_matrix);
@@ -171,12 +171,32 @@ do_a2a(int rank)
 int
 main(int argc, char** argv)
 {
-    int rank = 0;
+    int rank     = 0;
+    int nthreads = 2;
+    if(argc > 1) nthreads = atoi(argv[1]);
+
 #if defined(USE_MPI)
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 #endif
-    if(rank == 0) run(rank, argc, argv);
+    // this is a temporary workaround in hosttrace when HIP + MPI is enabled
+    int ndevice = 0;
+    int devid   = rank;
+    HIP_API_CALL(hipGetDeviceCount(&ndevice));
+    if(ndevice > 0)
+    {
+        devid = rank % ndevice;
+        HIP_API_CALL(hipSetDevice(devid));
+    }
+    if(rank == devid && rank < ndevice)
+    {
+        std::vector<std::thread> _threads{};
+        for(int i = 1; i < nthreads; ++i)
+            _threads.emplace_back(run, rank, argc, argv);
+        run(rank, argc, argv);
+        for(auto& itr : _threads)
+            itr.join();
+    }
 #if defined(USE_MPI)
     MPI_Barrier(MPI_COMM_WORLD);
     do_a2a(rank);

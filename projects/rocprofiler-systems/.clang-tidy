@@ -18,6 +18,7 @@ modernize-*,\
 -modernize-use-using,\
 -modernize-use-auto,\
 -modernize-concat-nested-namespaces,\
+-modernize-use-nodiscard,\
 performance-*,\
 readability-*,\
 -readability-function-size,\

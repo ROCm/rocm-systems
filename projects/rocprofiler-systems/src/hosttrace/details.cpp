@@ -1,26 +1,30 @@
-// MIT License
-//
-// Copyright (c) 2020, The Regents of the University of California,
-// through Lawrence Berkeley National Laboratory (subject to receipt of any
-// required approvals from the U.S. Dept. of Energy).  All rights reserved.
+// Copyright (c) 2018 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
+// with the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// * Redistributions of source code must retain the above copyright notice,
+// this list of conditions and the following disclaimers.
+//
+// * Redistributions in binary form must reproduce the above copyright
+// notice, this list of conditions and the following disclaimers in the
+// documentation and/or other materials provided with the distribution.
+//
+// * Neither the names of Advanced Micro Devices, Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this Software without specific prior written permission.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
+// THE SOFTWARE.
 
 #include "hosttrace.hpp"
 
@@ -47,7 +51,7 @@ get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* 
 
     char        fname[MUTNAMELEN];
     char        mname[MUTNAMELEN];
-    const char* typeName = nullptr;
+    std::string typeName = {};
 
     mutatee_module->getName(mname, MUTNAMELEN);
 
@@ -73,8 +77,6 @@ get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* 
     {
         typeName = returnType->getName();
     }
-    else
-        typeName = "void";
 
     auto                  params = f->getParams();
     std::vector<string_t> _params;
@@ -148,8 +150,8 @@ get_func_file_line_info(module_t* mutatee_module, procedure_t* f)
     char          fname[MUTNAMELEN];
     char          mname[MUTNAMELEN];
     int           row1, col1, row2, col2;
-    string_t      filename;
-    string_t      typeName;
+    string_t      filename = {};
+    string_t      typeName = {};
 
     mutatee_module->getName(mname, MUTNAMELEN);
 
@@ -164,8 +166,6 @@ get_func_file_line_info(module_t* mutatee_module, procedure_t* f)
     {
         typeName = returnType->getName();
     }
-    else
-        typeName = "void";
 
     auto                  params = f->getParams();
     std::vector<string_t> _params;

@@ -50,29 +50,72 @@ include(BuildSettings) # compiler flags
 set(CMAKE_CXX_STANDARD
     17
     CACHE STRING "CXX language standard")
-add_option(CMAKE_CXX_STANDARD_REQUIRED "Require C++ language standard" ON)
-add_option(CMAKE_CXX_EXTENSIONS "Compiler specific language extensions" OFF)
-add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH "Enable rpath to linked libraries" ON)
-add_option(HOSTTRACE_USE_CLANG_TIDY "Enable clang-tidy" OFF)
-add_option(HOSTTRACE_USE_MPI "Enable MPI support" OFF)
-add_option(HOSTTRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
-add_option(HOSTTRACE_USE_ROCTRACER "Enable roctracer support" ON)
-add_option(HOSTTRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
-add_option(HOSTTRACE_USE_MPI_HEADERS
-           "Enable wrapping MPI functions w/o enabling MPI dependency" OFF)
+hosttrace_add_feature(CMAKE_CXX_STANDARD "CXX language standard")
+hosttrace_add_option(CMAKE_CXX_STANDARD_REQUIRED "Require C++ language standard" ON)
+hosttrace_add_option(CMAKE_CXX_EXTENSIONS "Compiler specific language extensions" OFF)
+hosttrace_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH "Enable rpath to linked libraries"
+                     ON)
+hosttrace_add_option(HOSTTRACE_USE_CLANG_TIDY "Enable clang-tidy" OFF)
+hosttrace_add_option(HOSTTRACE_USE_MPI "Enable MPI support" OFF)
+hosttrace_add_option(HOSTTRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
+hosttrace_add_option(HOSTTRACE_USE_ROCTRACER "Enable roctracer support" ON)
+hosttrace_add_option(HOSTTRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
+hosttrace_add_option(HOSTTRACE_USE_MPI_HEADERS
+                     "Enable wrapping MPI functions w/o enabling MPI dependency" OFF)
+
+include(ProcessorCount)
+processorcount(HOSTTRACE_PROCESSOR_COUNT)
+math(EXPR HOSTTRACE_THREAD_COUNT "8 * ${HOSTTRACE_PROCESSOR_COUNT}")
+set(HOSTTRACE_MAX_THREADS
+    "${HOSTTRACE_THREAD_COUNT}"
+    CACHE
+        STRING
+        "Maximum number of threads in the host application. Likely only needs to be increased if host app does not use thread-pool but creates many threads"
+    )
+hosttrace_add_feature(
+    HOSTTRACE_MAX_THREADS
+    "Maximum number of total threads supported in the host application (default: 8 * nproc)"
+    )
 
 # ensure synced
 set(TIMEMORY_USE_MPI
     ${HOSTTRACE_USE_MPI}
     CACHE BOOL "Enable MPI support" FORCE)
 
+# default visibility settings
+set(CMAKE_C_VISIBILITY_PRESET "default")
+set(CMAKE_CXX_VISIBILITY_PRESET "default")
+set(CMAKE_VISIBILITY_INLINES_HIDDEN OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+include(Formatting) # format target
 include(Packages) # finds third-party libraries
+
+if(HOSTTRACE_USE_ROCTRACER)
+    find_package(HIP QUIET)
+    if(HIP_VERSION_MAJOR GREATER_EQUAL 4 AND HIP_VERSION_MINOR GREATER 3)
+        set(roctracer_kfdwrapper_LIBRARY)
+    endif()
+else()
+    set(HIP_VERSION "0.0.0")
+    set(HIP_VERSION_MAJOR 0)
+    set(HIP_VERSION_MINOR 0)
+    set(HIP_VERSION_PATCH 0)
+endif()
+
+configure_file(${PROJECT_SOURCE_DIR}/include/library/defines.hpp.in
+               ${PROJECT_BINARY_DIR}/include/library/defines.hpp @ONLY)
 
 hosttrace_activate_clang_tidy()
 
+# custom visibility settings
 set(CMAKE_C_VISIBILITY_PRESET "hidden")
 set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
+if(HOSTTRACE_BUILD_LTO)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+endif()
 
 # ------------------------------------------------------------------------------#
 #
@@ -80,18 +123,50 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 #
 # ------------------------------------------------------------------------------#
 
-add_library(
-    hosttrace-library SHARED
-    ${CMAKE_CURRENT_LIST_DIR}/src/library.cpp ${CMAKE_CURRENT_LIST_DIR}/src/libmisc.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/library.hpp ${perfetto_DIR}/sdk/perfetto.cc)
+set(library_sources
+    ${CMAKE_CURRENT_LIST_DIR}/src/library.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/config.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/critical_trace.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/fork_gotcha.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/hosttrace_component.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/mpi_gotcha.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/perfetto.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/ptl.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/thread_data.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/timemory.cpp
+    ${perfetto_DIR}/sdk/perfetto.cc)
+
+set(library_headers
+    ${CMAKE_CURRENT_LIST_DIR}/include/library.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/api.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/config.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/common.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/critical_trace.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/debug.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/fork_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/hosttrace_component.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/mpi_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/perfetto.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/ptl.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/state.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/thread_data.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/timemory.hpp
+    ${perfetto_DIR}/sdk/perfetto.h)
+
+if(NOT TIMEMORY_USE_PERFETTO)
+
+endif()
+
+add_library(hosttrace-library SHARED ${library_sources} ${library_headers})
 
 if(HOSTTRACE_USE_ROCTRACER)
     target_sources(
-        hosttrace-library PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include/roctracer.hpp
-                                  ${CMAKE_CURRENT_LIST_DIR}/src/roctracer.cpp)
+        hosttrace-library
+        PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include/library/roctracer.hpp
+                ${CMAKE_CURRENT_LIST_DIR}/src/library/roctracer.cpp
+                ${CMAKE_CURRENT_LIST_DIR}/include/library/roctracer_callbacks.hpp
+                ${CMAKE_CURRENT_LIST_DIR}/src/library/roctracer_callbacks.cpp)
 endif()
-
-target_include_directories(hosttrace-library PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
 
 target_include_directories(hosttrace-library SYSTEM PRIVATE ${perfetto_DIR}/sdk)
 
@@ -101,10 +176,12 @@ target_compile_definitions(
 
 target_link_libraries(
     hosttrace-library
-    PRIVATE hosttrace::hosttrace-threading
+    PRIVATE hosttrace::hosttrace-headers
+            hosttrace::hosttrace-threading
             hosttrace::hosttrace-compile-options
             hosttrace::hosttrace-roctracer
             hosttrace::hosttrace-mpi
+            hosttrace::hosttrace-ptl
             $<BUILD_INTERFACE:timemory::timemory-headers>
             $<BUILD_INTERFACE:timemory::timemory-gotcha>
             $<BUILD_INTERFACE:timemory::timemory-cxx-shared>
@@ -134,13 +211,13 @@ add_executable(
     hosttrace-exe
     ${_EXCLUDE} ${CMAKE_CURRENT_LIST_DIR}/src/hosttrace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/include/hosttrace.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/hosttrace-details.cpp)
-
-target_include_directories(hosttrace-exe PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
+    ${CMAKE_CURRENT_LIST_DIR}/src/hosttrace/details.cpp)
 
 target_link_libraries(
     hosttrace-exe
-    PRIVATE hosttrace::hosttrace-dyninst hosttrace::hosttrace-compile-options
+    PRIVATE hosttrace::hosttrace-headers
+            hosttrace::hosttrace-dyninst
+            hosttrace::hosttrace-compile-options
             $<BUILD_INTERFACE:timemory::timemory-headers>
             $<IF:$<BOOL:${HOSTTRACE_USE_SANITIZER}>,hosttrace::hosttrace-sanitizer,>)
 
@@ -211,3 +288,11 @@ add_subdirectory(tests)
 # ------------------------------------------------------------------------------#
 
 include(ConfigCPack)
+
+# ------------------------------------------------------------------------------#
+#
+# config info
+#
+# ------------------------------------------------------------------------------#
+
+hosttrace_print_features()

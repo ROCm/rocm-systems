@@ -1,66 +1,43 @@
+// Copyright (c) 2018 Advanced Micro Devices, Inc. All Rights Reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// with the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// * Redistributions of source code must retain the above copyright notice,
+// this list of conditions and the following disclaimers.
+//
+// * Redistributions in binary form must reproduce the above copyright
+// notice, this list of conditions and the following disclaimers in the
+// documentation and/or other materials provided with the distribution.
+//
+// * Neither the names of Advanced Micro Devices, Inc. nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this Software without specific prior written permission.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
+// THE SOFTWARE.
 
 #include "library.hpp"
-
-bool
-get_debug()
-{
-    static bool _v = tim::get_env("HOSTTRACE_DEBUG", false);
-    return _v;
-}
-
-State&
-get_state()
-{
-    static State _v{ State::PreInit };
-    return _v;
-}
-
-bool
-get_use_perfetto()
-{
-    // if using timemory, default to perfetto being off
-    static auto _default_v = !tim::get_env<bool>("HOSTTRACE_USE_TIMEMORY", false, false);
-    // explicit env control for using perfetto
-    static auto _v = tim::get_env<bool>("HOSTTRACE_USE_PERFETTO", _default_v);
-    return _v;
-}
-
-bool
-get_use_timemory()
-{
-    // default to opposite of whether perfetto setting
-    // to use both timemory and perfetto, both HOSTTRACE_USE_TIMEMORY and
-    // HOSTTRACE_USE_PERFETTO must be true
-    static auto _v = tim::get_env<bool>("HOSTTRACE_USE_TIMEMORY", !get_use_perfetto());
-    return _v;
-}
-
-//--------------------------------------------------------------------------------------//
+#include "library/config.hpp"
+#include "library/critical_trace.hpp"
+#include "library/thread_data.hpp"
+#include <string_view>
 
 namespace
 {
-size_t&
-get_sample_rate()
-{
-    static auto _v = tim::get_env<size_t>("HOSTTRACE_SAMPLE_RATE", 1);
-    return _v;
-}
-
 std::vector<bool>&
 get_sample_data()
 {
     static thread_local auto _v = std::vector<bool>{};
-    return _v;
-}
-
-bool&
-get_use_mpi()
-{
-#if defined(TIMEMORY_USE_MPI)
-    static bool _v = tim::get_env("HOSTTRACE_USE_MPI", false);
-#else
-    static bool _v = false;
-#endif
     return _v;
 }
 
@@ -83,16 +60,17 @@ setup_gotchas()
         mpi_gotcha_t::template configure<0, int, int*, char***>("MPI_Init");
         mpi_gotcha_t::template configure<1, int, int*, char***, int, int*>(
             "MPI_Init_thread");
-#if defined(HOSTTRACE_USE_MPI_HEADERS)
         mpi_gotcha_t::template configure<3, int>("MPI_Finalize");
-#endif
     };
 }
 
 auto
-ensure_finalization()
+ensure_finalization(bool _static_init = false)
 {
-    HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
+    if(!_static_init)
+    {
+        HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
+    }
     return scope::destructor{ []() { hosttrace_trace_finalize(); } };
 }
 
@@ -104,45 +82,6 @@ get_trace_session()
 }
 
 auto
-get_perfetto_output_filename()
-{
-    static auto _v = []() {
-        // default name: perfetto-trace.<pid>.proto or perfetto-trace.<rank>.proto
-        auto _default_fname = tim::settings::compose_output_filename(
-            JOIN('.', "perfetto-trace", (get_use_mpi()) ? "%rank%" : "%pid%"), "proto");
-        // have the default display the full path to the output file
-        return tim::get_env<std::string>(
-            "HOSTTRACE_OUTPUT_FILE",
-            JOIN('/', tim::get_env<std::string>("PWD", ".", false), _default_fname));
-    }();
-
-    auto _tmp     = _v;
-    auto _replace = [&_tmp](const std::string& _key, auto&& _val) {
-        auto _pos = _tmp.find(_key);
-        if(_pos != std::string::npos)
-            _tmp.replace(_pos, _key.length(), std::to_string(_val()));
-    };
-    _replace("%pid%", []() { return process::get_id(); });
-    _replace("%rank%", []() { return tim::mpi::rank(); });
-    // backwards compatibility
-    _replace("%p", []() { return process::get_id(); });
-    return _tmp;
-}
-
-auto&
-get_backend()
-{
-    // select inprocess, system, or both (i.e. all)
-    static auto _v = tim::get_env_choice<std::string>(
-        "HOSTTRACE_BACKEND",
-        tim::get_env("HOSTTRACE_BACKEND_SYSTEM", false, false)
-            ? "system"      // if HOSTTRACE_BACKEND_SYSTEM is true, default to system.
-            : "inprocess",  // Otherwise, default to inprocess
-        { "inprocess", "system", "all" });
-    return _v;
-}
-
-auto
 is_system_backend()
 {
     // if get_backend() returns 'system' or 'all', this is true
@@ -150,10 +89,10 @@ is_system_backend()
 }
 
 auto&
-get_timemory_data()
+get_instrumentation_bundles()
 {
     static thread_local auto& _v =
-        hosttrace_timemory_data::instances().at(threading::get_id());
+        instrumentation_bundles::instances().at(threading::get_id());
     return _v;
 }
 
@@ -165,6 +104,17 @@ get_functors()
         std::pair<functor_t, functor_t>{ [](const char*) {}, [](const char*) {} };
     return _v;
 }
+
+auto&
+get_cpu_cid_parents()
+{
+    static thread_local auto _v =
+        std::unordered_map<uint64_t, std::tuple<uint64_t, uint16_t>>{};
+    return _v;
+}
+
+using Device = critical_trace::Device;
+using Phase  = critical_trace::Phase;
 
 bool
 hosttrace_init_tooling()
@@ -184,26 +134,17 @@ hosttrace_init_tooling()
         return false;
     }
 
-    // always initialize timemory because gotcha wrappers are always used
-    tim::settings::flamegraph_output()     = false;
-    tim::settings::cout_output()           = false;
-    tim::settings::file_output()           = true;
-    tim::settings::enable_signal_handler() = true;
-    tim::settings::collapse_processes()    = false;
-    tim::settings::collapse_threads()      = false;
-    tim::settings::max_thread_bookmarks()  = 1;
-    tim::settings::global_components()     = tim::get_env<std::string>(
-        "HOSTTRACE_COMPONENTS", "wall_clock", get_use_timemory());
+    int _threadpool_verbose = (get_debug()) ? 4 : -1;
+    tasking::get_roctracer_thread_pool().set_verbose(_threadpool_verbose);
+    tasking::get_critical_trace_thread_pool().set_verbose(_threadpool_verbose);
 
-    // enable timestamp directories when perfetto + mpi is activated
-    if(get_use_perfetto() && get_use_mpi()) tim::settings::time_output() = true;
+    // below will effectively do:
+    //      get_cpu_cid_stack(0)->emplace_back(-1);
+    // plus query some env variables
+    add_critical_trace<Device::CPU, Phase::NONE>(0, -1, 0, 0, 0, 0, 0, 0);
 
-    auto _cmd = tim::read_command_line(process::get_id());
-    auto _exe = (_cmd.empty()) ? "hosttrace" : _cmd.front();
-    auto _pos = _exe.find_last_of('/');
-    if(_pos < _exe.length() - 1) _exe = _exe.substr(_pos + 1);
-
-    tim::timemory_init({ _exe }, "hosttrace-");
+    // configure the settings
+    configure_settings();
 
     if(get_sample_rate() < 1) get_sample_rate() = 1;
     get_sample_data().reserve(512);
@@ -218,16 +159,18 @@ hosttrace_init_tooling()
         if(_comps.size() == 1 && _comps.find(TIMEMORY_WALL_CLOCK) != _comps.end())
         {
             // using wall_clock directly is lower overhead than using it via user_bundle
-            bundle_t::get_initializer() = [](bundle_t& _bundle) {
-                _bundle.initialize<comp::wall_clock>();
-            };
+            instrumentation_bundle_t::get_initializer() =
+                [](instrumentation_bundle_t& _bundle) {
+                    _bundle.initialize<comp::wall_clock>();
+                };
         }
         else if(!_comps.empty())
         {
             // use user_bundle for other than wall-clock
-            bundle_t::get_initializer() = [](bundle_t& _bundle) {
-                _bundle.initialize<comp::user_global_bundle>();
-            };
+            instrumentation_bundle_t::get_initializer() =
+                [](instrumentation_bundle_t& _bundle) {
+                    _bundle.initialize<comp::user_global_bundle>();
+                };
         }
         else
         {
@@ -252,9 +195,8 @@ hosttrace_init_tooling()
     if(get_use_perfetto())
     {
         // environment settings
-        auto shmem_size_hint =
-            tim::get_env<size_t>("HOSTTRACE_SHMEM_SIZE_HINT_KB", 40960);
-        auto buffer_size = tim::get_env<size_t>("HOSTTRACE_BUFFER_SIZE_KB", 1024000);
+        auto shmem_size_hint = get_perfetto_shmem_size_hint();
+        auto buffer_size     = get_perfetto_buffer_size();
 
         auto* buffer_config = cfg.add_buffers();
         buffer_config->set_size_kb(buffer_size);
@@ -276,6 +218,7 @@ hosttrace_init_tooling()
         (void) get_perfetto_output_filename();
     }
 
+    auto        _exe         = get_exe_name();
     static auto _thread_init = [_exe]() {
         hosttrace_thread_data<hosttrace_thread_bundle_t>::construct(
             TIMEMORY_JOIN("", _exe, "/thread-", threading::get_id()),
@@ -285,10 +228,11 @@ hosttrace_init_tooling()
         } };
         (void) _dtor;
     };
+
     // functors for starting and stopping timemory
     static auto _push_timemory = [](const char* name) {
         _thread_init();
-        auto& _data = get_timemory_data();
+        auto& _data = get_instrumentation_bundles();
         // this generates a hash for the raw string array
         auto  _hash   = tim::add_hash_id(tim::string_view_t{ name });
         auto* _bundle = _data.allocator.allocate(1);
@@ -311,7 +255,7 @@ hosttrace_init_tooling()
     };
 
     static auto _pop_timemory = [](const char* name) {
-        auto& _data = get_timemory_data();
+        auto& _data = get_instrumentation_bundles();
         if(_data.bundles.empty())
         {
             HOSTTRACE_DEBUG("[%s] skipped %s :: empty bundle stack\n",
@@ -358,8 +302,22 @@ hosttrace_init_tooling()
 
     if(dmp::rank() == 0)
     {
-        tim::print_env(std::cerr,
-                       [](const std::string& _v) { return _v.find("HOSTTRACE_") == 0; });
+        // generic filter for filtering relevant options
+        auto _is_hosttrace_option = [](const auto& _v) {
+#if !defined(HOSTTRACE_USE_ROCTRACER)
+            if(_v.find("HOSTTRACE_ROCTRACER_") == 0) return false;
+#endif
+            if(!get_use_critical_trace() && _v.find("HOSTTRACE_CRITICAL_TRACE_") == 0)
+                return false;
+            return (_v.find("HOSTTRACE_") == 0) ||
+                   ((_v.find("TIMEMORY_") != 0) && (_v.find("SIGNAL_") != 0));
+        };
+
+        tim::print_env(std::cerr, [_is_hosttrace_option](const std::string& _v) {
+            return _is_hosttrace_option(_v);
+        });
+
+        print_config_settings(std::cerr, _is_hosttrace_option);
     }
 
     if(get_use_perfetto() && !is_system_backend())
@@ -421,6 +379,21 @@ extern "C"
         auto                       _enabled     = (_sample_idx++ % _sample_rate == 0);
         get_sample_data().emplace_back(_enabled);
         if(_enabled) get_functors().first(name);
+        if(get_use_critical_trace())
+        {
+            auto     _ts         = comp::wall_clock::record();
+            auto     _cid        = get_cpu_cid()++;
+            uint16_t _depth      = (get_cpu_cid_stack()->empty())
+                                       ? get_cpu_cid_stack(0)->size()
+                                       : get_cpu_cid_stack()->size() - 1;
+            auto     _parent_cid = (get_cpu_cid_stack()->empty())
+                                       ? get_cpu_cid_stack(0)->back()
+                                       : get_cpu_cid_stack()->back();
+            get_cpu_cid_parents().emplace(_cid, std::make_tuple(_parent_cid, _depth));
+            add_critical_trace<Device::CPU, Phase::BEGIN>(
+                threading::get_id(), _cid, 0, _parent_cid, _ts, 0,
+                critical_trace::add_hash_id(name), _depth);
+        }
     }
 
     void hosttrace_pop_trace(const char* name)
@@ -433,6 +406,20 @@ extern "C"
             {
                 if(_sample_data.back()) get_functors().second(name);
                 _sample_data.pop_back();
+            }
+            if(get_use_critical_trace())
+            {
+                if(get_cpu_cid_stack() && !get_cpu_cid_stack()->empty())
+                {
+                    auto     _ts                  = comp::wall_clock::record();
+                    auto     _cid                 = get_cpu_cid_stack()->back();
+                    uint64_t _parent_cid          = 0;
+                    uint16_t _depth               = 0;
+                    std::tie(_parent_cid, _depth) = get_cpu_cid_parents().at(_cid);
+                    add_critical_trace<Device::CPU, Phase::END>(
+                        threading::get_id(), _cid, 0, _parent_cid, _ts, _ts,
+                        critical_trace::add_hash_id(name), _depth);
+                }
             }
         }
         else
@@ -463,15 +450,19 @@ extern "C"
         comp::roctracer::tear_down();
 #endif
 
+        // join extra thread(s) used by roctracer
+        HOSTTRACE_DEBUG("[%s] waiting for all roctracer tasks to complete...\n",
+                        __FUNCTION__);
+        tasking::get_roctracer_task_group().join();
+
         // stop the main bundle and report the high-level metrics
         if(get_main_bundle())
         {
             get_main_bundle()->stop();
-            int64_t           _id = (get_use_mpi()) ? dmp::rank() : process::get_id();
-            std::stringstream _ss{};
-            _ss << "[" << __FUNCTION__ << "][" << _id << "] " << *get_main_bundle()
-                << "\n";
-            std::cerr << _ss.str();
+            std::string _msg = JOIN("", *get_main_bundle());
+            auto        _pos = _msg.find(">>>  ");
+            if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
+            HOSTTRACE_PRINT("%s\n", _msg.c_str());
             get_main_bundle().reset();
         }
 
@@ -484,14 +475,15 @@ extern "C"
             if(itr && itr->get<comp::wall_clock>() &&
                !itr->get<comp::wall_clock>()->get_is_running())
             {
-                std::stringstream _ss{};
-                _ss << *itr << "\n";
-                std::cerr << _ss.str();
+                std::string _msg = JOIN("", *itr);
+                auto        _pos = _msg.find(">>>  ");
+                if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
+                HOSTTRACE_PRINT("%s\n", _msg.c_str());
             }
         }
 
         // ensure that all the MT instances are flushed
-        for(auto& itr : hosttrace_timemory_data::instances())
+        for(auto& itr : instrumentation_bundles::instances())
         {
             while(!itr.bundles.empty())
             {
@@ -502,6 +494,44 @@ extern "C"
                 itr.bundles.pop_back();
             }
         }
+
+        if(get_use_critical_trace())
+        {
+            // increase the thread-pool size
+            tasking::get_critical_trace_thread_pool().initialize_threadpool(
+                get_critical_trace_num_threads());
+
+            for(size_t i = 0; i < max_supported_threads; ++i)
+            {
+                using critical_trace_hash_data =
+                    hosttrace_thread_data<critical_trace::hash_ids, critical_trace::id>;
+
+                if(critical_trace_hash_data::instances().at(i))
+                    critical_trace::add_hash_id(
+                        *critical_trace_hash_data::instances().at(i));
+            }
+
+            for(size_t i = 0; i < max_supported_threads; ++i)
+            {
+                using critical_trace_chain_data =
+                    hosttrace_thread_data<critical_trace::call_chain>;
+
+                if(critical_trace_chain_data::instances().at(i))
+                    critical_trace::update(i);  // launch update task
+            }
+
+            // make sure outstanding hash tasks completed before compute
+            HOSTTRACE_PRINT("[%s] waiting for all critical trace tasks to complete...\n",
+                            __FUNCTION__);
+            tasking::get_critical_trace_task_group().join();
+
+            // launch compute task
+            HOSTTRACE_PRINT("[%s] launching critical trace compute task...\n",
+                            __FUNCTION__);
+            critical_trace::compute();
+        }
+
+        tasking::get_critical_trace_task_group().join();
 
         bool _perfetto_output_error = false;
         if(get_use_perfetto() && !is_system_backend())
@@ -530,20 +560,27 @@ extern "C"
                     static_cast<double>(trace_data.size()) / units::KB,
                     static_cast<double>(trace_data.size()) / units::MB,
                     static_cast<double>(trace_data.size()) / units::GB);
-            std::ofstream output{};
-            output.open(get_perfetto_output_filename(), std::ios::out | std::ios::binary);
-            if(!output)
+            std::ofstream ofs{};
+            if(!tim::filepath::open(ofs, get_perfetto_output_filename(),
+                                    std::ios::out | std::ios::binary))
             {
                 fprintf(stderr, "[%s]> Error opening '%s'...\n", __FUNCTION__,
                         get_perfetto_output_filename().c_str());
                 _perfetto_output_error = true;
             }
             else
-                output.write(&trace_data[0], trace_data.size());
-            output.close();
+                ofs.write(&trace_data[0], trace_data.size());
+            ofs.close();
         }
 
+        // these should be destroyed before timemory is finalized, especially the
+        // roctracer thread-pool
+        tasking::get_roctracer_thread_pool().destroy_threadpool();
+        tasking::get_critical_trace_thread_pool().destroy_threadpool();
+
+        HOSTTRACE_DEBUG("Finalizing timemory...\n");
         tim::timemory_finalize();
+        HOSTTRACE_DEBUG("Finalizing timemory... Done\n");
 
         if(_perfetto_output_error)
             throw std::runtime_error("Unable to create perfetto output file");
@@ -564,20 +601,17 @@ extern "C"
         {
             auto& _main_bundle = get_main_bundle();
             _main_bundle->start();
-#if defined(TIMEMORY_USE_MPI)
-            tim::set_env("HOSTTRACE_USE_MPI", "ON", 1);
-            get_use_mpi() = true;
-#endif
-            get_state() = State::DelayedInit;
+            get_use_pid() = true;
+            get_state()   = State::DelayedInit;
         }
     }
 }
 
-std::unique_ptr<hosttrace_bundle_t>&
+std::unique_ptr<main_bundle_t>&
 get_main_bundle()
 {
     static auto _v =
-        (setup_gotchas(), std::make_unique<hosttrace_bundle_t>(
+        (setup_gotchas(), std::make_unique<main_bundle_t>(
                               "hosttrace", quirk::config<quirk::auto_start>{}));
     return _v;
 }
@@ -587,5 +621,5 @@ namespace
 // if static objects are destroyed randomly (relatively uncommon behavior)
 // this might call finalization before perfetto ends the tracing session
 // but static variable in hosttrace_init_tooling is more likely
-auto _ensure_finalization = ensure_finalization();
+auto _ensure_finalization = ensure_finalization(true);
 }  // namespace

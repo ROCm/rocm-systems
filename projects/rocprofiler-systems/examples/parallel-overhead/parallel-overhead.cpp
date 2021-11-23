@@ -38,7 +38,10 @@ main(int argc, char** argv)
 
     std::vector<std::thread> threads{};
     for(size_t i = 0; i < nthread; ++i)
-        threads.emplace_back(&run, nitr, nfib);
+    {
+        size_t _nitr = ((i % 2) == 1) ? (nitr - (0.1 * nitr)) : (nitr + (0.1 * nitr));
+        threads.emplace_back(&run, _nitr, nfib);
+    }
 
     for(auto& itr : threads)
         itr.join();

@@ -3,6 +3,10 @@ if(NOT HOSTTRACE_DYNINST_API_RT_DIR AND HOSTTRACE_DYNINST_API_RT)
                            DIRECTORY)
 endif()
 
+if(NOT DEFINED NUM_PROCS)
+    set(NUM_PROCS 2)
+endif()
+
 if(HOSTTRACE_BUILD_DYNINST)
     set(HOSTTRACE_DYNINST_API_RT_DIR
         "${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI_RT:${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI"
@@ -16,8 +20,8 @@ set(_test_environment
     )
 
 if(TARGET transpose)
-    if(TRANSPOSE_USE_MPI)
-        set(COMMAND_PREFIX ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2)
+    if(TRANSPOSE_USE_MPI AND NUM_PROCS GREATER 0)
+        set(COMMAND_PREFIX ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${NUM_PROCS})
     endif()
 
     add_test(

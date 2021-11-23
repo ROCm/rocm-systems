@@ -68,7 +68,7 @@ endif()
 # ----------------------------------------------------------------------------------------#
 # extra flags for debug information in debug or optimized binaries
 #
-add_interface_library(
+hosttrace_add_interface_library(
     hosttrace-compile-debuginfo
     "Attempts to set best flags for more expressive profiling information in debug or optimized binaries"
     )
@@ -108,7 +108,7 @@ endif()
 # ----------------------------------------------------------------------------------------#
 # non-debug optimizations
 #
-add_interface_library(hosttrace-compile-extra "Extra optimization flags")
+hosttrace_add_interface_library(hosttrace-compile-extra "Extra optimization flags")
 if(NOT HOSTTRACE_USE_COVERAGE)
     add_target_flag_if_avail(
         hosttrace-compile-extra "-finline-functions" "-funroll-loops" "-ftree-vectorize"
@@ -130,21 +130,16 @@ endif()
 #
 add_cxx_flag_if_avail("-faligned-new")
 
-if(HOSTTRACE_BUILD_LTO)
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
-endif()
-
 hosttrace_save_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
 set(CMAKE_CXX_FLAGS "-flto=thin ${CMAKE_CXX_FLAGS}")
 
-add_interface_library(hosttrace-lto "Adds link-time-optimization flags")
+hosttrace_add_interface_library(hosttrace-lto "Adds link-time-optimization flags")
 add_target_flag_if_avail(hosttrace-lto "-flto=thin")
 if(NOT cxx_hosttrace_lto_flto_thin)
     set(CMAKE_CXX_FLAGS "-flto ${CMAKE_CXX_FLAGS}")
     add_target_flag_if_avail(hosttrace-lto "-flto")
     if(NOT cxx_hosttrace_lto_flto)
-        add_disabled_interface(hosttrace-lto)
-        set(hosttrace_BUILD_LTO OFF)
+        set(HOSTTRACE_BUILD_LTO OFF)
     else()
         target_link_options(hosttrace-lto INTERFACE -flto)
     endif()
@@ -161,8 +156,9 @@ hosttrace_restore_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
 # ----------------------------------------------------------------------------------------#
 # print compilation timing reports (Clang compiler)
 #
-add_interface_library(hosttrace-compile-timing
-                      "Adds compiler flags which report compilation timing metrics")
+hosttrace_add_interface_library(
+    hosttrace-compile-timing
+    "Adds compiler flags which report compilation timing metrics")
 if(CMAKE_CXX_COMPILER_IS_CLANG)
     add_target_flag_if_avail(hosttrace-compile-timing "-ftime-trace")
     if(NOT cxx_hosttrace_compile_timing_ftime_trace)
@@ -176,15 +172,10 @@ if(HOSTTRACE_USE_COMPILE_TIMING)
     target_link_libraries(hosttrace-compile-options INTERFACE hosttrace-compile-timing)
 endif()
 
-if(NOT cxx_hosttrace_compile_timing_ftime_report
-   AND NOT cxx_hosttrace_compile_timing_ftime_trace)
-    add_disabled_interface(hosttrace-compile-timing)
-endif()
-
 # ----------------------------------------------------------------------------------------#
 # developer build flags
 #
-add_interface_library(hosttrace-develop-options "Adds developer compiler flags")
+hosttrace_add_interface_library(hosttrace-develop-options "Adds developer compiler flags")
 if(HOSTTRACE_BUILD_DEVELOPER)
     add_target_flag_if_avail(
         hosttrace-develop-options
@@ -195,20 +186,14 @@ endif()
 # ----------------------------------------------------------------------------------------#
 # visibility build flags
 #
-add_interface_library(hosttrace-default-visibility
-                      "Adds -fvisibility=default compiler flag")
-add_interface_library(hosttrace-hidden-visibility
-                      "Adds -fvisibility=hidden compiler flag")
+hosttrace_add_interface_library(hosttrace-default-visibility
+                                "Adds -fvisibility=default compiler flag")
+hosttrace_add_interface_library(hosttrace-hidden-visibility
+                                "Adds -fvisibility=hidden compiler flag")
 
 add_target_flag_if_avail(hosttrace-default-visibility "-fvisibility=default")
 add_target_flag_if_avail(hosttrace-hidden-visibility "-fvisibility=hidden"
                          "-fvisibility-inlines-hidden")
-
-foreach(_TYPE default hidden)
-    if(NOT cxx_hosttrace_${_TYPE}_visibility_fvisibility_${_TYPE})
-        add_disabled_interface(hosttrace-${_TYPE}-visibility)
-    endif()
-endforeach()
 
 # ----------------------------------------------------------------------------------------#
 # developer build flags
@@ -235,9 +220,9 @@ set(HOSTTRACE_SANITIZER_TYPES
     alignment)
 set_property(CACHE HOSTTRACE_SANITIZER_TYPE PROPERTY STRINGS
                                                      "${HOSTTRACE_SANITIZER_TYPES}")
-add_interface_library(hosttrace-sanitizer-compile-options
-                      "Adds compiler flags for sanitizers")
-add_interface_library(
+hosttrace_add_interface_library(hosttrace-sanitizer-compile-options
+                                "Adds compiler flags for sanitizers")
+hosttrace_add_interface_library(
     hosttrace-sanitizer
     "Adds compiler flags to enable ${HOSTTRACE_SANITIZER_TYPE} sanitizer (-fsanitizer=${HOSTTRACE_SANITIZER_TYPE})"
     )
@@ -248,8 +233,9 @@ add_target_flag(hosttrace-sanitizer-compile-options ${COMMON_SANITIZER_FLAGS})
 
 foreach(_TYPE ${HOSTTRACE_SANITIZER_TYPES})
     set(_FLAG "-fsanitize=${_TYPE}")
-    add_interface_library(hosttrace-${_TYPE}-sanitizer
-                          "Adds compiler flags to enable ${_TYPE} sanitizer (${_FLAG})")
+    hosttrace_add_interface_library(
+        hosttrace-${_TYPE}-sanitizer
+        "Adds compiler flags to enable ${_TYPE} sanitizer (${_FLAG})")
     add_target_flag(hosttrace-${_TYPE}-sanitizer ${_FLAG})
     target_link_libraries(hosttrace-${_TYPE}-sanitizer
                           INTERFACE hosttrace-sanitizer-compile-options)
@@ -273,7 +259,6 @@ if(HOSTTRACE_USE_SANITIZER)
     endforeach()
 else()
     set(HOSTTRACE_USE_SANITIZER OFF)
-    inform_empty_interface(hosttrace-sanitizer "${HOSTTRACE_SANITIZER_TYPE} sanitizer")
 endif()
 
 if(MSVC)

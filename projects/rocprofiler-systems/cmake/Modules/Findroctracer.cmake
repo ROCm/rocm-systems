@@ -100,10 +100,6 @@ if(roctracer_FOUND)
 
     if(roctracer_kfdwrapper_LIBRARY)
         list(APPEND roctracer_LIBRARIES ${roctracer_kfdwrapper_LIBRARY})
-        target_compile_definitions(
-            roctracer::roctracer
-            INTERFACE
-                HOSTTRACE_ROCTRACER_LIBKFDWRAPPER=\"${roctracer_kfdwrapper_LIBRARY}\")
         target_link_libraries(roctracer::roctracer
                               INTERFACE ${roctracer_kfdwrapper_LIBRARY})
         target_link_libraries(roctracer::roctx INTERFACE ${roctracer_kfdwrapper_LIBRARY})
