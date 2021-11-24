@@ -1604,7 +1604,7 @@ def getCoarseGrainUtil(device, typeName=None):
             utilization_counters[i].type = c_int(i)
 
     ret = rocmsmi.rsmi_utilization_count_get(device, utilization_counters, length, byref(timestamp))
-    if rsmi_ret_ok(ret, device):
+    if rsmi_ret_ok(ret, device, typeName, True):
         return utilization_counters
     return -1
 
@@ -1624,6 +1624,9 @@ def showGpuUse(deviceList):
         if util_counters != -1:
             for ut_counter in util_counters:
                 printLog(device, utilization_counter_name[ut_counter.type], ut_counter.val)
+        else:
+            printLog(device, 'GFX Activity', 'N/A')
+
     printLogSpacer()
 
 
@@ -1713,6 +1716,8 @@ def showMemUse(deviceList):
         if util_counters != -1:
             for ut_counter in util_counters:
                 printLog(device, utilization_counter_name[ut_counter.type], ut_counter.val)
+        else:
+            printLog(device, 'Memory Activity', 'N/A')
     printLogSpacer()
 
 

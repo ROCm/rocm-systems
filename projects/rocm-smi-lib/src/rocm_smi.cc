@@ -2803,6 +2803,8 @@ rsmi_utilization_count_get(uint32_t dv_ind,
 
   rsmi_status_t ret;
   rsmi_gpu_metrics_t gpu_metrics;
+  uint32_t val_ui32;
+
   ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
@@ -2816,14 +2818,18 @@ rsmi_utilization_count_get(uint32_t dv_ind,
   for (uint32_t index = 0 ; index < count; index++) {
     switch (utilization_counters[index].type) {
       case RSMI_COARSE_GRAIN_GFX_ACTIVITY:
-        utilization_counters[index].value = gpu_metrics.gfx_activity_acc;
+        val_ui32 = gpu_metrics.gfx_activity_acc;
         break;
       case RSMI_COARSE_GRAIN_MEM_ACTIVITY:
-        utilization_counters[index].value = gpu_metrics.mem_actvity_acc;
+        val_ui32 = gpu_metrics.mem_actvity_acc;
         break;
       default:
         return RSMI_STATUS_INVALID_ARGS;
     }
+    if (val_ui32 == UINT32_MAX)
+      return RSMI_STATUS_NOT_SUPPORTED;
+    else
+      utilization_counters[index].value = val_ui32;
   }
 
   *timestamp = gpu_metrics.system_clock_counter;
