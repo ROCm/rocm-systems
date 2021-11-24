@@ -33,7 +33,7 @@
 void
 fork_gotcha::audit(const gotcha_data_t&, audit::incoming)
 {
-    HOSTTRACE_DEBUG(
+    OMNITRACE_DEBUG(
         "Warning! Calling fork() within an OpenMPI application using libfabric "
         "may result is segmentation fault\n");
     TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug(), 16);
@@ -42,5 +42,5 @@ fork_gotcha::audit(const gotcha_data_t&, audit::incoming)
 void
 fork_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, pid_t _pid)
 {
-    HOSTTRACE_DEBUG("%s() return PID %i\n", _data.tool_id.c_str(), (int) _pid);
+    OMNITRACE_DEBUG("%s() return PID %i\n", _data.tool_id.c_str(), (int) _pid);
 }

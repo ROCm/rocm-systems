@@ -28,7 +28,7 @@
 
 #pragma once
 
-// used for specifying the state of hosttrace
+// used for specifying the state of omnitrace
 enum class State : unsigned short
 {
     DelayedInit = 0,

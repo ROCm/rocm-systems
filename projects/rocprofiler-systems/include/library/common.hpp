@@ -46,5 +46,5 @@
 #include <vector>
 
 // timemory api struct
-struct hosttrace : tim::concepts::api
+struct omnitrace : tim::concepts::api
 {};

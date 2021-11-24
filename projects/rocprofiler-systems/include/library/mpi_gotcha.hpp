@@ -34,21 +34,31 @@
 // this is used to wrap MPI_Init and MPI_Init_thread
 struct mpi_gotcha : comp::base<mpi_gotcha, void>
 {
+    using comm_t        = tim::mpi::comm_t;
     using gotcha_data_t = comp::gotcha_data;
 
     TIMEMORY_DEFAULT_OBJECT(mpi_gotcha)
 
-    // this will get called right before MPI_Init with that functions arguments
-    void audit(const gotcha_data_t& _data, audit::incoming, int*, char***);
+    // called right before MPI_Init with that functions arguments
+    static void audit(const gotcha_data_t& _data, audit::incoming, int*, char***);
 
-    // this will get called right before MPI_Init_thread with that functions arguments
-    void audit(const gotcha_data_t& _data, audit::incoming, int*, char***, int, int*);
+    // called right before MPI_Init_thread with that functions arguments
+    static void audit(const gotcha_data_t& _data, audit::incoming, int*, char***, int,
+                      int*);
 
-    // this will get called right after MPI_Init and MPI_Init_thread with the return value
+    // called right before MPI_Finalize
+    static void audit(const gotcha_data_t& _data, audit::incoming);
+
+    // called right before MPI_Comm_{rank,size} with that functions arguments
+    void audit(const gotcha_data_t& _data, audit::incoming, comm_t, int*);
+
+    // called right after MPI_{Init,Init_thread,Comm_rank,Comm_size} with the return value
     void audit(const gotcha_data_t& _data, audit::outgoing, int _retval);
 
-    // this will get called right before MPI_Finalize
-    void audit(const gotcha_data_t& _data, audit::incoming);
+private:
+    comm_t m_comm = tim::mpi::comm_world_v;
+    int*   m_rank = nullptr;
+    int*   m_size = nullptr;
 };
 
-using mpi_gotcha_t = comp::gotcha<4, tim::component_tuple<mpi_gotcha>, hosttrace>;
+using mpi_gotcha_t = comp::gotcha<5, tim::component_tuple<mpi_gotcha>, omnitrace>;

@@ -12,16 +12,16 @@ include(Compilers)
 include(FindPackageHandleStandardArgs)
 include(MacroUtilities)
 
-option(HOSTTRACE_BUILD_DEVELOPER "Extra build flags for development like -Werror" OFF)
-option(HOSTTRACE_BUILD_EXTRA_OPTIMIZATIONS "Extra optimization flags" OFF)
-option(HOSTTRACE_BUILD_LTO "Build with link-time optimization" OFF)
-option(HOSTTRACE_USE_COMPILE_TIMING "" OFF)
-option(HOSTTRACE_USE_COVERAGE "" OFF)
-option(HOSTTRACE_USE_SANITIZER "" OFF)
+option(OMNITRACE_BUILD_DEVELOPER "Extra build flags for development like -Werror" OFF)
+option(OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS "Extra optimization flags" OFF)
+option(OMNITRACE_BUILD_LTO "Build with link-time optimization" OFF)
+option(OMNITRACE_USE_COMPILE_TIMING "" OFF)
+option(OMNITRACE_USE_COVERAGE "" OFF)
+option(OMNITRACE_USE_SANITIZER "" OFF)
 
-target_compile_definitions(hosttrace-compile-options INTERFACE $<$<CONFIG:DEBUG>:DEBUG>)
+target_compile_definitions(omnitrace-compile-options INTERFACE $<$<CONFIG:DEBUG>:DEBUG>)
 
-set(HOSTTRACE_SANITIZER_TYPE
+set(OMNITRACE_SANITIZER_TYPE
     "leak"
     CACHE STRING "Sanitizer type")
 
@@ -46,7 +46,7 @@ find_package_handle_standard_args(rt-library REQUIRED_VARS rt_LIBRARY)
 # find_package_handle_standard_args(dw-library REQUIRED_VARS dw_LIBRARY)
 
 if(dl_LIBRARY)
-    target_link_libraries(hosttrace-compile-options INTERFACE ${dl_LIBRARY})
+    target_link_libraries(omnitrace-compile-options INTERFACE ${dl_LIBRARY})
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -68,56 +68,56 @@ endif()
 # ----------------------------------------------------------------------------------------#
 # extra flags for debug information in debug or optimized binaries
 #
-hosttrace_add_interface_library(
-    hosttrace-compile-debuginfo
+omnitrace_add_interface_library(
+    omnitrace-compile-debuginfo
     "Attempts to set best flags for more expressive profiling information in debug or optimized binaries"
     )
 
-add_target_flag_if_avail(hosttrace-compile-debuginfo "-g" "-fno-omit-frame-pointer"
+add_target_flag_if_avail(omnitrace-compile-debuginfo "-g" "-fno-omit-frame-pointer"
                          "-fno-optimize-sibling-calls")
 
 if(CMAKE_CUDA_COMPILER_IS_NVIDIA)
-    add_target_cuda_flag(hosttrace-compile-debuginfo "-lineinfo")
+    add_target_cuda_flag(omnitrace-compile-debuginfo "-lineinfo")
 endif()
 
 target_compile_options(
-    hosttrace-compile-debuginfo
+    omnitrace-compile-debuginfo
     INTERFACE $<$<COMPILE_LANGUAGE:C>:$<$<C_COMPILER_ID:GNU>:-rdynamic>>
               $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-rdynamic>>)
 
 if(NOT APPLE)
-    target_link_options(hosttrace-compile-debuginfo INTERFACE
+    target_link_options(omnitrace-compile-debuginfo INTERFACE
                         $<$<CXX_COMPILER_ID:GNU>:-rdynamic>)
 endif()
 
 if(CMAKE_CUDA_COMPILER_IS_NVIDIA)
     target_compile_options(
-        hosttrace-compile-debuginfo
+        omnitrace-compile-debuginfo
         INTERFACE
             $<$<COMPILE_LANGUAGE:CUDA>:$<$<CXX_COMPILER_ID:GNU>:-Xcompiler=-rdynamic>>)
 endif()
 
 if(dl_LIBRARY)
-    target_link_libraries(hosttrace-compile-debuginfo INTERFACE ${dl_LIBRARY})
+    target_link_libraries(omnitrace-compile-debuginfo INTERFACE ${dl_LIBRARY})
 endif()
 
 if(rt_LIBRARY)
-    target_link_libraries(hosttrace-compile-debuginfo INTERFACE ${rt_LIBRARY})
+    target_link_libraries(omnitrace-compile-debuginfo INTERFACE ${rt_LIBRARY})
 endif()
 
 # ----------------------------------------------------------------------------------------#
 # non-debug optimizations
 #
-hosttrace_add_interface_library(hosttrace-compile-extra "Extra optimization flags")
-if(NOT HOSTTRACE_USE_COVERAGE)
+omnitrace_add_interface_library(omnitrace-compile-extra "Extra optimization flags")
+if(NOT OMNITRACE_USE_COVERAGE)
     add_target_flag_if_avail(
-        hosttrace-compile-extra "-finline-functions" "-funroll-loops" "-ftree-vectorize"
+        omnitrace-compile-extra "-finline-functions" "-funroll-loops" "-ftree-vectorize"
         "-ftree-loop-optimize" "-ftree-loop-vectorize")
 endif()
 
-if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug" AND HOSTTRACE_BUILD_EXTRA_OPTIMIZATIONS)
-    target_link_libraries(hosttrace-compile-options
-                          INTERFACE $<BUILD_INTERFACE:hosttrace-compile-extra>)
+if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug" AND OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS)
+    target_link_libraries(omnitrace-compile-options
+                          INTERFACE $<BUILD_INTERFACE:omnitrace-compile-extra>)
     add_flag_if_avail(
         "-fno-signaling-nans" "-fno-trapping-math" "-fno-signed-zeros"
         "-ffinite-math-only" "-fno-math-errno" "-fpredictive-commoning"
@@ -130,55 +130,55 @@ endif()
 #
 add_cxx_flag_if_avail("-faligned-new")
 
-hosttrace_save_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
+omnitrace_save_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
 set(CMAKE_CXX_FLAGS "-flto=thin ${CMAKE_CXX_FLAGS}")
 
-hosttrace_add_interface_library(hosttrace-lto "Adds link-time-optimization flags")
-add_target_flag_if_avail(hosttrace-lto "-flto=thin")
-if(NOT cxx_hosttrace_lto_flto_thin)
+omnitrace_add_interface_library(omnitrace-lto "Adds link-time-optimization flags")
+add_target_flag_if_avail(omnitrace-lto "-flto=thin")
+if(NOT cxx_omnitrace_lto_flto_thin)
     set(CMAKE_CXX_FLAGS "-flto ${CMAKE_CXX_FLAGS}")
-    add_target_flag_if_avail(hosttrace-lto "-flto")
-    if(NOT cxx_hosttrace_lto_flto)
-        set(HOSTTRACE_BUILD_LTO OFF)
+    add_target_flag_if_avail(omnitrace-lto "-flto")
+    if(NOT cxx_omnitrace_lto_flto)
+        set(OMNITRACE_BUILD_LTO OFF)
     else()
-        target_link_options(hosttrace-lto INTERFACE -flto)
+        target_link_options(omnitrace-lto INTERFACE -flto)
     endif()
 else()
-    target_link_options(hosttrace-lto INTERFACE -flto=thin)
+    target_link_options(omnitrace-lto INTERFACE -flto=thin)
 endif()
 
-if(HOSTTRACE_BUILD_LTO)
-    target_link_libraries(hosttrace-compile-options INTERFACE hosttrace::hosttrace-lto)
+if(OMNITRACE_BUILD_LTO)
+    target_link_libraries(omnitrace-compile-options INTERFACE omnitrace::omnitrace-lto)
 endif()
 
-hosttrace_restore_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
+omnitrace_restore_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
 
 # ----------------------------------------------------------------------------------------#
 # print compilation timing reports (Clang compiler)
 #
-hosttrace_add_interface_library(
-    hosttrace-compile-timing
+omnitrace_add_interface_library(
+    omnitrace-compile-timing
     "Adds compiler flags which report compilation timing metrics")
 if(CMAKE_CXX_COMPILER_IS_CLANG)
-    add_target_flag_if_avail(hosttrace-compile-timing "-ftime-trace")
-    if(NOT cxx_hosttrace_compile_timing_ftime_trace)
-        add_target_flag_if_avail(hosttrace-compile-timing "-ftime-report")
+    add_target_flag_if_avail(omnitrace-compile-timing "-ftime-trace")
+    if(NOT cxx_omnitrace_compile_timing_ftime_trace)
+        add_target_flag_if_avail(omnitrace-compile-timing "-ftime-report")
     endif()
 else()
-    add_target_flag_if_avail(hosttrace-compile-timing "-ftime-report")
+    add_target_flag_if_avail(omnitrace-compile-timing "-ftime-report")
 endif()
 
-if(HOSTTRACE_USE_COMPILE_TIMING)
-    target_link_libraries(hosttrace-compile-options INTERFACE hosttrace-compile-timing)
+if(OMNITRACE_USE_COMPILE_TIMING)
+    target_link_libraries(omnitrace-compile-options INTERFACE omnitrace-compile-timing)
 endif()
 
 # ----------------------------------------------------------------------------------------#
 # developer build flags
 #
-hosttrace_add_interface_library(hosttrace-develop-options "Adds developer compiler flags")
-if(HOSTTRACE_BUILD_DEVELOPER)
+omnitrace_add_interface_library(omnitrace-develop-options "Adds developer compiler flags")
+if(OMNITRACE_BUILD_DEVELOPER)
     add_target_flag_if_avail(
-        hosttrace-develop-options
+        omnitrace-develop-options
         # "-Wabi"
         "-Wdouble-promotion" "-Wshadow" "-Wextra" "-Wpedantic" "-Werror" "/showIncludes")
 endif()
@@ -186,13 +186,13 @@ endif()
 # ----------------------------------------------------------------------------------------#
 # visibility build flags
 #
-hosttrace_add_interface_library(hosttrace-default-visibility
+omnitrace_add_interface_library(omnitrace-default-visibility
                                 "Adds -fvisibility=default compiler flag")
-hosttrace_add_interface_library(hosttrace-hidden-visibility
+omnitrace_add_interface_library(omnitrace-hidden-visibility
                                 "Adds -fvisibility=hidden compiler flag")
 
-add_target_flag_if_avail(hosttrace-default-visibility "-fvisibility=default")
-add_target_flag_if_avail(hosttrace-hidden-visibility "-fvisibility=hidden"
+add_target_flag_if_avail(omnitrace-default-visibility "-fvisibility=default")
+add_target_flag_if_avail(omnitrace-hidden-visibility "-fvisibility=hidden"
                          "-fvisibility-inlines-hidden")
 
 # ----------------------------------------------------------------------------------------#
@@ -208,7 +208,7 @@ endif()
 # ----------------------------------------------------------------------------------------#
 # sanitizer
 #
-set(HOSTTRACE_SANITIZER_TYPES
+set(OMNITRACE_SANITIZER_TYPES
     address
     memory
     thread
@@ -218,47 +218,47 @@ set(HOSTTRACE_SANITIZER_TYPES
     null
     bounds
     alignment)
-set_property(CACHE HOSTTRACE_SANITIZER_TYPE PROPERTY STRINGS
-                                                     "${HOSTTRACE_SANITIZER_TYPES}")
-hosttrace_add_interface_library(hosttrace-sanitizer-compile-options
+set_property(CACHE OMNITRACE_SANITIZER_TYPE PROPERTY STRINGS
+                                                     "${OMNITRACE_SANITIZER_TYPES}")
+omnitrace_add_interface_library(omnitrace-sanitizer-compile-options
                                 "Adds compiler flags for sanitizers")
-hosttrace_add_interface_library(
-    hosttrace-sanitizer
-    "Adds compiler flags to enable ${HOSTTRACE_SANITIZER_TYPE} sanitizer (-fsanitizer=${HOSTTRACE_SANITIZER_TYPE})"
+omnitrace_add_interface_library(
+    omnitrace-sanitizer
+    "Adds compiler flags to enable ${OMNITRACE_SANITIZER_TYPE} sanitizer (-fsanitizer=${OMNITRACE_SANITIZER_TYPE})"
     )
 
 set(COMMON_SANITIZER_FLAGS "-fno-optimize-sibling-calls" "-fno-omit-frame-pointer"
                            "-fno-inline-functions")
-add_target_flag(hosttrace-sanitizer-compile-options ${COMMON_SANITIZER_FLAGS})
+add_target_flag(omnitrace-sanitizer-compile-options ${COMMON_SANITIZER_FLAGS})
 
-foreach(_TYPE ${HOSTTRACE_SANITIZER_TYPES})
+foreach(_TYPE ${OMNITRACE_SANITIZER_TYPES})
     set(_FLAG "-fsanitize=${_TYPE}")
-    hosttrace_add_interface_library(
-        hosttrace-${_TYPE}-sanitizer
+    omnitrace_add_interface_library(
+        omnitrace-${_TYPE}-sanitizer
         "Adds compiler flags to enable ${_TYPE} sanitizer (${_FLAG})")
-    add_target_flag(hosttrace-${_TYPE}-sanitizer ${_FLAG})
-    target_link_libraries(hosttrace-${_TYPE}-sanitizer
-                          INTERFACE hosttrace-sanitizer-compile-options)
-    set_property(TARGET hosttrace-${_TYPE}-sanitizer
+    add_target_flag(omnitrace-${_TYPE}-sanitizer ${_FLAG})
+    target_link_libraries(omnitrace-${_TYPE}-sanitizer
+                          INTERFACE omnitrace-sanitizer-compile-options)
+    set_property(TARGET omnitrace-${_TYPE}-sanitizer
                  PROPERTY INTERFACE_LINK_OPTIONS ${_FLAG} ${COMMON_SANITIZER_FLAGS})
 endforeach()
 
 unset(_FLAG)
 unset(COMMON_SANITIZER_FLAGS)
 
-if(HOSTTRACE_USE_SANITIZER)
-    foreach(_TYPE ${HOSTTRACE_SANITIZER_TYPE})
-        if(TARGET hosttrace-${_TYPE}-sanitizer)
-            target_link_libraries(hosttrace-sanitizer
-                                  INTERFACE hosttrace-${_TYPE}-sanitizer)
+if(OMNITRACE_USE_SANITIZER)
+    foreach(_TYPE ${OMNITRACE_SANITIZER_TYPE})
+        if(TARGET omnitrace-${_TYPE}-sanitizer)
+            target_link_libraries(omnitrace-sanitizer
+                                  INTERFACE omnitrace-${_TYPE}-sanitizer)
         else()
             message(
-                FATAL_ERROR "Error! Target 'hosttrace-${_TYPE}-sanitizer' does not exist!"
+                FATAL_ERROR "Error! Target 'omnitrace-${_TYPE}-sanitizer' does not exist!"
                 )
         endif()
     endforeach()
 else()
-    set(HOSTTRACE_USE_SANITIZER OFF)
+    set(OMNITRACE_USE_SANITIZER OFF)
 endif()
 
 if(MSVC)
@@ -274,5 +274,5 @@ endif()
 get_property(LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)
 
 if(NOT APPLE OR "$ENV{CONDA_PYTHON_EXE}" STREQUAL "")
-    add_user_flags(hosttrace-compile-options "CXX")
+    add_user_flags(omnitrace-compile-options "CXX")
 endif()

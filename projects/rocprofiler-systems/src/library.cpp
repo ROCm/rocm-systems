@@ -48,7 +48,7 @@ setup_gotchas()
     if(_initialized) return;
     _initialized = true;
 
-    HOSTTRACE_DEBUG(
+    OMNITRACE_DEBUG(
         "[%s] Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread\n",
         __FUNCTION__);
 
@@ -60,7 +60,11 @@ setup_gotchas()
         mpi_gotcha_t::template configure<0, int, int*, char***>("MPI_Init");
         mpi_gotcha_t::template configure<1, int, int*, char***, int, int*>(
             "MPI_Init_thread");
-        mpi_gotcha_t::template configure<3, int>("MPI_Finalize");
+        mpi_gotcha_t::template configure<2, int>("MPI_Finalize");
+        // mpi_gotcha_t::template configure<3, int, tim::mpi::comm_t,
+        // int*>("MPI_Comm_rank");
+        // mpi_gotcha_t::template configure<4, int, tim::mpi::comm_t,
+        // int*>("MPI_Comm_size");
     };
 }
 
@@ -69,9 +73,9 @@ ensure_finalization(bool _static_init = false)
 {
     if(!_static_init)
     {
-        HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
+        OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
     }
-    return scope::destructor{ []() { hosttrace_trace_finalize(); } };
+    return scope::destructor{ []() { omnitrace_trace_finalize(); } };
 }
 
 auto&
@@ -117,18 +121,18 @@ using Device = critical_trace::Device;
 using Phase  = critical_trace::Phase;
 
 bool
-hosttrace_init_tooling()
+omnitrace_init_tooling()
 {
     static bool _once = false;
     if(get_state() != State::PreInit || _once) return false;
     _once = true;
 
-    HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
 
     if(!get_use_timemory() && !get_use_perfetto())
     {
         get_state() = State::Finalized;
-        HOSTTRACE_DEBUG("[%s] Both perfetto and timemory are disabled. Setting the state "
+        OMNITRACE_DEBUG("[%s] Both perfetto and timemory are disabled. Setting the state "
                         "to finalized\n",
                         __FUNCTION__);
         return false;
@@ -174,7 +178,7 @@ hosttrace_init_tooling()
         }
         else
         {
-            tim::trait::runtime_enabled<hosttrace>::set(false);
+            tim::trait::runtime_enabled<omnitrace>::set(false);
         }
     }
 
@@ -182,7 +186,7 @@ hosttrace_init_tooling()
     auto& _main_bundle = get_main_bundle();
     _main_bundle->start();
     assert(_main_bundle->get<mpi_gotcha_t>()->get_is_running());
-#if defined(HOSTTRACE_USE_ROCTRACER)
+#if defined(OMNITRACE_USE_ROCTRACER)
     assert(_main_bundle->get<comp::roctracer>() != nullptr);
     assert(_main_bundle->get<comp::roctracer>()->get_is_running());
 #endif
@@ -220,11 +224,11 @@ hosttrace_init_tooling()
 
     auto        _exe         = get_exe_name();
     static auto _thread_init = [_exe]() {
-        hosttrace_thread_data<hosttrace_thread_bundle_t>::construct(
+        omnitrace_thread_data<omnitrace_thread_bundle_t>::construct(
             TIMEMORY_JOIN("", _exe, "/thread-", threading::get_id()),
             quirk::config<quirk::auto_start>{});
         static thread_local auto _dtor = scope::destructor{ []() {
-            hosttrace_thread_data<hosttrace_thread_bundle_t>::instance()->stop();
+            omnitrace_thread_data<omnitrace_thread_bundle_t>::instance()->stop();
         } };
         (void) _dtor;
     };
@@ -258,8 +262,8 @@ hosttrace_init_tooling()
         auto& _data = get_instrumentation_bundles();
         if(_data.bundles.empty())
         {
-            HOSTTRACE_DEBUG("[%s] skipped %s :: empty bundle stack\n",
-                            "hosttrace_pop_trace", name);
+            OMNITRACE_DEBUG("[%s] skipped %s :: empty bundle stack\n",
+                            "omnitrace_pop_trace", name);
             return;
         }
         _data.bundles.back()->stop();
@@ -303,21 +307,21 @@ hosttrace_init_tooling()
     if(dmp::rank() == 0)
     {
         // generic filter for filtering relevant options
-        auto _is_hosttrace_option = [](const auto& _v) {
-#if !defined(HOSTTRACE_USE_ROCTRACER)
-            if(_v.find("HOSTTRACE_ROCTRACER_") == 0) return false;
+        auto _is_omnitrace_option = [](const auto& _v) {
+#if !defined(OMNITRACE_USE_ROCTRACER)
+            if(_v.find("OMNITRACE_ROCTRACER_") == 0) return false;
 #endif
-            if(!get_use_critical_trace() && _v.find("HOSTTRACE_CRITICAL_TRACE_") == 0)
+            if(!get_use_critical_trace() && _v.find("OMNITRACE_CRITICAL_TRACE_") == 0)
                 return false;
-            return (_v.find("HOSTTRACE_") == 0) ||
+            return (_v.find("OMNITRACE_") == 0) ||
                    ((_v.find("TIMEMORY_") != 0) && (_v.find("SIGNAL_") != 0));
         };
 
-        tim::print_env(std::cerr, [_is_hosttrace_option](const std::string& _v) {
-            return _is_hosttrace_option(_v);
+        tim::print_env(std::cerr, [_is_omnitrace_option](const std::string& _v) {
+            return _is_omnitrace_option(_v);
         });
 
-        print_config_settings(std::cerr, _is_hosttrace_option);
+        print_config_settings(std::cerr, _is_omnitrace_option);
     }
 
     if(get_use_perfetto() && !is_system_backend())
@@ -358,20 +362,20 @@ hosttrace_init_tooling()
 
 extern "C"
 {
-    void hosttrace_push_trace(const char* name)
+    void omnitrace_push_trace(const char* name)
     {
         // return if not active
         if(get_state() == State::Finalized) return;
 
-        if(get_state() != State::Active && !hosttrace_init_tooling())
+        if(get_state() != State::Active && !omnitrace_init_tooling())
         {
-            HOSTTRACE_DEBUG("[%s] %s :: not active and perfetto not initialized\n",
+            OMNITRACE_DEBUG("[%s] %s :: not active and perfetto not initialized\n",
                             __FUNCTION__, name);
             return;
         }
         else
         {
-            HOSTTRACE_DEBUG("[%s] %s\n", __FUNCTION__, name);
+            OMNITRACE_DEBUG("[%s] %s\n", __FUNCTION__, name);
         }
 
         static auto                _sample_rate = std::max<size_t>(get_sample_rate(), 1);
@@ -396,11 +400,11 @@ extern "C"
         }
     }
 
-    void hosttrace_pop_trace(const char* name)
+    void omnitrace_pop_trace(const char* name)
     {
         if(get_state() == State::Active)
         {
-            HOSTTRACE_DEBUG("[%s] %s\n", __FUNCTION__, name);
+            OMNITRACE_DEBUG("[%s] %s\n", __FUNCTION__, name);
             auto& _sample_data = get_sample_data();
             if(!_sample_data.empty())
             {
@@ -424,34 +428,34 @@ extern "C"
         }
         else
         {
-            HOSTTRACE_DEBUG("[%s] %s :: not active\n", __FUNCTION__, name);
+            OMNITRACE_DEBUG("[%s] %s :: not active\n", __FUNCTION__, name);
         }
     }
 
-    void hosttrace_trace_init(const char*, bool, const char*)
+    void omnitrace_trace_init(const char*, bool, const char*)
     {
-        HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
-        hosttrace_init_tooling();
+        OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
+        omnitrace_init_tooling();
     }
 
-    void hosttrace_trace_finalize(void)
+    void omnitrace_trace_finalize(void)
     {
         // return if not active
         if(get_state() != State::Active) return;
 
-        HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
+        OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
 
         if(dmp::rank() == 0) puts("");
 
         get_state() = State::Finalized;
 
-#if defined(HOSTTRACE_USE_ROCTRACER)
+#if defined(OMNITRACE_USE_ROCTRACER)
         // ensure that threads running roctracer callbacks shutdown
         comp::roctracer::tear_down();
 #endif
 
         // join extra thread(s) used by roctracer
-        HOSTTRACE_DEBUG("[%s] waiting for all roctracer tasks to complete...\n",
+        OMNITRACE_DEBUG("[%s] waiting for all roctracer tasks to complete...\n",
                         __FUNCTION__);
         tasking::get_roctracer_task_group().join();
 
@@ -462,7 +466,7 @@ extern "C"
             std::string _msg = JOIN("", *get_main_bundle());
             auto        _pos = _msg.find(">>>  ");
             if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-            HOSTTRACE_PRINT("%s\n", _msg.c_str());
+            OMNITRACE_PRINT("%s\n", _msg.c_str());
             get_main_bundle().reset();
         }
 
@@ -470,7 +474,7 @@ extern "C"
         // if they are still running (e.g. thread-pool still alive), the
         // thread-specific data will be wrong if try to stop them from
         // the main thread.
-        for(auto& itr : hosttrace_thread_data<hosttrace_thread_bundle_t>::instances())
+        for(auto& itr : omnitrace_thread_data<omnitrace_thread_bundle_t>::instances())
         {
             if(itr && itr->get<comp::wall_clock>() &&
                !itr->get<comp::wall_clock>()->get_is_running())
@@ -478,7 +482,7 @@ extern "C"
                 std::string _msg = JOIN("", *itr);
                 auto        _pos = _msg.find(">>>  ");
                 if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-                HOSTTRACE_PRINT("%s\n", _msg.c_str());
+                OMNITRACE_PRINT("%s\n", _msg.c_str());
             }
         }
 
@@ -504,7 +508,7 @@ extern "C"
             for(size_t i = 0; i < max_supported_threads; ++i)
             {
                 using critical_trace_hash_data =
-                    hosttrace_thread_data<critical_trace::hash_ids, critical_trace::id>;
+                    omnitrace_thread_data<critical_trace::hash_ids, critical_trace::id>;
 
                 if(critical_trace_hash_data::instances().at(i))
                     critical_trace::add_hash_id(
@@ -514,19 +518,19 @@ extern "C"
             for(size_t i = 0; i < max_supported_threads; ++i)
             {
                 using critical_trace_chain_data =
-                    hosttrace_thread_data<critical_trace::call_chain>;
+                    omnitrace_thread_data<critical_trace::call_chain>;
 
                 if(critical_trace_chain_data::instances().at(i))
                     critical_trace::update(i);  // launch update task
             }
 
             // make sure outstanding hash tasks completed before compute
-            HOSTTRACE_PRINT("[%s] waiting for all critical trace tasks to complete...\n",
+            OMNITRACE_PRINT("[%s] waiting for all critical trace tasks to complete...\n",
                             __FUNCTION__);
             tasking::get_critical_trace_task_group().join();
 
             // launch compute task
-            HOSTTRACE_PRINT("[%s] launching critical trace compute task...\n",
+            OMNITRACE_PRINT("[%s] launching critical trace compute task...\n",
                             __FUNCTION__);
             critical_trace::compute();
         }
@@ -578,24 +582,24 @@ extern "C"
         tasking::get_roctracer_thread_pool().destroy_threadpool();
         tasking::get_critical_trace_thread_pool().destroy_threadpool();
 
-        HOSTTRACE_DEBUG("Finalizing timemory...\n");
+        OMNITRACE_DEBUG("Finalizing timemory...\n");
         tim::timemory_finalize();
-        HOSTTRACE_DEBUG("Finalizing timemory... Done\n");
+        OMNITRACE_DEBUG("Finalizing timemory... Done\n");
 
         if(_perfetto_output_error)
             throw std::runtime_error("Unable to create perfetto output file");
     }
 
-    void hosttrace_trace_set_env(const char* env_name, const char* env_val)
+    void omnitrace_trace_set_env(const char* env_name, const char* env_val)
     {
-        HOSTTRACE_DEBUG("[%s] Setting env: %s=%s\n", __FUNCTION__, env_name, env_val);
+        OMNITRACE_DEBUG("[%s] Setting env: %s=%s\n", __FUNCTION__, env_name, env_val);
 
         tim::set_env(env_name, env_val, 0);
     }
 
-    void hosttrace_trace_set_mpi(bool use, bool attached)
+    void omnitrace_trace_set_mpi(bool use, bool attached)
     {
-        HOSTTRACE_DEBUG("[%s] use: %s, attached: %s\n", __FUNCTION__, (use) ? "y" : "n",
+        OMNITRACE_DEBUG("[%s] use: %s, attached: %s\n", __FUNCTION__, (use) ? "y" : "n",
                         (attached) ? "y" : "n");
         if(use && !attached)
         {
@@ -612,7 +616,7 @@ get_main_bundle()
 {
     static auto _v =
         (setup_gotchas(), std::make_unique<main_bundle_t>(
-                              "hosttrace", quirk::config<quirk::auto_start>{}));
+                              "omnitrace", quirk::config<quirk::auto_start>{}));
     return _v;
 }
 
@@ -620,6 +624,6 @@ namespace
 {
 // if static objects are destroyed randomly (relatively uncommon behavior)
 // this might call finalization before perfetto ends the tracing session
-// but static variable in hosttrace_init_tooling is more likely
+// but static variable in omnitrace_init_tooling is more likely
 auto _ensure_finalization = ensure_finalization(true);
 }  // namespace

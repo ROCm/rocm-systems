@@ -49,7 +49,7 @@ auto&
 get_roctracer_hip_data(int64_t _tid = threading::get_id())
 {
     using data_t        = std::unordered_map<uint64_t, roctracer_bundle_t>;
-    using thread_data_t = hosttrace_thread_data<data_t, api::roctracer>;
+    using thread_data_t = omnitrace_thread_data<data_t, api::roctracer>;
     static auto& _v     = thread_data_t::instances(thread_data_t::construct_on_init{});
     return _v.at(_tid);
 }
@@ -80,7 +80,7 @@ auto&
 get_hip_activity_callbacks(int64_t _tid = threading::get_id())
 {
     using thread_data_t =
-        hosttrace_thread_data<std::vector<std::function<void()>>, api::roctracer>;
+        omnitrace_thread_data<std::vector<std::function<void()>>, api::roctracer>;
     static auto& _v = thread_data_t::instances(thread_data_t::construct_on_init{});
     return _v.at(_tid);
 }
@@ -113,7 +113,7 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
     (void) arg;
     const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
-    HOSTTRACE_DEBUG("<%-30s id(%u)\tcorrelation_id(%lu) %s>\n",
+    OMNITRACE_DEBUG("<%-30s id(%u)\tcorrelation_id(%lu) %s>\n",
                     roctracer_op_string(domain, cid, 0), cid, data->correlation_id,
                     (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
 
@@ -295,7 +295,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
     if(op_name == nullptr) return;
 
     const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
-    HOSTTRACE_DEBUG("<%-30s id(%u)\tcorrelation_id(%lu) %s>\n", op_name, cid,
+    OMNITRACE_DEBUG("<%-30s id(%u)\tcorrelation_id(%lu) %s>\n", op_name, cid,
                     data->correlation_id,
                     (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
 
@@ -450,7 +450,7 @@ hip_activity_callback(const char* begin, const char* end, void*)
     const roctracer_record_t* end_record =
         reinterpret_cast<const roctracer_record_t*>(end);
 
-    HOSTTRACE_DEBUG("Activity records:\n");
+    OMNITRACE_DEBUG("Activity records:\n");
 
     while(record < end_record)
     {
@@ -460,7 +460,7 @@ hip_activity_callback(const char* begin, const char* end, void*)
 
         if(op_name != nullptr)
         {
-            HOSTTRACE_DEBUG("\t%-30s\tcorrelation_id(%6lu) time_ns(%12lu:%12lu) "
+            OMNITRACE_DEBUG("\t%-30s\tcorrelation_id(%6lu) time_ns(%12lu:%12lu) "
                             "delta_ns(%12lu) device_id(%d) "
                             "stream_id(%lu)\n",
                             op_name, record->correlation_id, record->begin_ns,

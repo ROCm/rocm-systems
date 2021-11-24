@@ -7,14 +7,14 @@ include_guard(DIRECTORY)
 # ----------------------------------------------------------------------------------------#
 
 # clang-tidy
-macro(HOSTTRACE_ACTIVATE_CLANG_TIDY)
-    if(HOSTTRACE_USE_CLANG_TIDY)
+macro(OMNITRACE_ACTIVATE_CLANG_TIDY)
+    if(OMNITRACE_USE_CLANG_TIDY)
         find_program(CLANG_TIDY_COMMAND NAMES clang-tidy)
-        hosttrace_add_feature(CLANG_TIDY_COMMAND "Path to clang-tidy command")
+        omnitrace_add_feature(CLANG_TIDY_COMMAND "Path to clang-tidy command")
         if(NOT CLANG_TIDY_COMMAND)
             timemory_message(
-                WARNING "HOSTTRACE_USE_CLANG_TIDY is ON but clang-tidy is not found!")
-            set(HOSTTRACE_USE_CLANG_TIDY OFF)
+                WARNING "OMNITRACE_USE_CLANG_TIDY is ON but clang-tidy is not found!")
+            set(OMNITRACE_USE_CLANG_TIDY OFF)
         else()
             set(CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY_COMMAND})
 
@@ -37,22 +37,22 @@ endmacro()
 #
 # ------------------------------------------------------------------------------#
 
-find_program(HOSTTRACE_CLANG_FORMAT_EXE NAMES clang-format-11 clang-format-mp-11
+find_program(OMNITRACE_CLANG_FORMAT_EXE NAMES clang-format-11 clang-format-mp-11
                                               clang-format)
 
-if(HOSTTRACE_CLANG_FORMAT_EXE)
+if(OMNITRACE_CLANG_FORMAT_EXE)
     file(GLOB_RECURSE sources ${PROJECT_SOURCE_DIR}/src/*.cpp)
     file(GLOB_RECURSE headers ${PROJECT_SOURCE_DIR}/include/*.hpp)
     file(GLOB_RECURSE examples ${PROJECT_SOURCE_DIR}/examples/*.cpp
          ${PROJECT_SOURCE_DIR}/examples/*.hpp)
     add_custom_target(
-        format-hosttrace
-        ${HOSTTRACE_CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}
-        COMMENT "Running C++ formatter ${HOSTTRACE_CLANG_FORMAT_EXE}...")
+        format-omnitrace
+        ${OMNITRACE_CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}
+        COMMENT "Running C++ formatter ${OMNITRACE_CLANG_FORMAT_EXE}...")
     if(NOT TARGET format)
         add_custom_target(format)
     endif()
-    add_dependencies(format format-hosttrace)
+    add_dependencies(format format-omnitrace)
 else()
     message(
         AUTHOR_WARNING

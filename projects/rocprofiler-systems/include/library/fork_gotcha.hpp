@@ -45,4 +45,4 @@ struct fork_gotcha : comp::base<fork_gotcha, void>
     void audit(const gotcha_data_t& _data, audit::outgoing, pid_t _pid);
 };
 
-using fork_gotcha_t = comp::gotcha<4, tim::component_tuple<fork_gotcha>, hosttrace>;
+using fork_gotcha_t = comp::gotcha<4, tim::component_tuple<fork_gotcha>, omnitrace>;

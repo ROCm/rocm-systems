@@ -32,8 +32,8 @@ jobs:
       run:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
-        echo "/opt/hosttrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
-        echo "LD_LIBRARY_PATH=/opt/hosttrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "/opt/omnitrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Configure CMake
       run:
@@ -43,10 +43,10 @@ jobs:
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-          -DCMAKE_INSTALL_PREFIX=/opt/hosttrace
-          -DHOSTTRACE_USE_MPI=${USE_MPI}
-          -DHOSTTRACE_USE_ROCTRACER=OFF
-          -DHOSTTRACE_BUILD_DYNINST=ON
+          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
+          -DOMNITRACE_USE_MPI=${USE_MPI}
+          -DOMNITRACE_USE_ROCTRACER=OFF
+          -DOMNITRACE_BUILD_DYNINST=ON
           -DDYNINST_BUILD_ELFUTILS=ON
           -DDYNINST_BUILD_LIBIBERTY=ON
           -DDYNINST_BUILD_SHARED_LIBS=ON
@@ -63,13 +63,13 @@ jobs:
     - name: Test
       working-directory: ${{ github.workspace }}/build
       run:
-        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal.log
+        ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal.log
 
     - name: Test Install
       run:
-        hosttrace --help &&
-        hosttrace -- sleep 1 &&
-        hosttrace -o sleep.inst -- sleep &&
+        omnitrace --help &&
+        omnitrace -- sleep 1 &&
+        omnitrace -o sleep.inst -- sleep &&
         ./sleep.inst 1 &&
         rm ./sleep.inst
 
@@ -78,7 +78,7 @@ jobs:
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal.log
+          ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal.log
 
   ubuntu-bionic:
     runs-on: ubuntu-18.04
@@ -101,8 +101,8 @@ jobs:
       run:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
-        echo "/opt/hosttrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
-        echo "LD_LIBRARY_PATH=/opt/hosttrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "/opt/omnitrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Configure CMake
       run:
@@ -112,10 +112,10 @@ jobs:
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-          -DCMAKE_INSTALL_PREFIX=/opt/hosttrace
-          -DHOSTTRACE_USE_MPI=${USE_MPI}
-          -DHOSTTRACE_USE_ROCTRACER=OFF
-          -DHOSTTRACE_BUILD_DYNINST=ON
+          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
+          -DOMNITRACE_USE_MPI=${USE_MPI}
+          -DOMNITRACE_USE_ROCTRACER=OFF
+          -DOMNITRACE_BUILD_DYNINST=ON
           -DDYNINST_BUILD_TBB=ON
           -DDYNINST_BUILD_BOOST=ON
           -DDYNINST_BUILD_ELFUTILS=ON
@@ -132,13 +132,13 @@ jobs:
     - name: Test
       working-directory: ${{ github.workspace }}/build
       run:
-        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-bionic.log
+        ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-bionic.log
 
     - name: Test Install
       run:
-        hosttrace --help &&
-        hosttrace -- sleep 1 &&
-        hosttrace -o sleep.inst -- sleep &&
+        omnitrace --help &&
+        omnitrace -- sleep 1 &&
+        omnitrace -o sleep.inst -- sleep &&
         ./sleep.inst 1 &&
         rm ./sleep.inst
 
@@ -147,7 +147,7 @@ jobs:
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-bionic.log
+          ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-bionic.log
 
   ubuntu-focal-external:
     runs-on: ubuntu-20.04
@@ -170,8 +170,8 @@ jobs:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
         echo "CMAKE_PREFIX_PATH=/opt/opt/dyninst:/opt/elfutils:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV &&
-        echo "/opt/hosttrace/bin:/opt/dyninst/bin:/opt/elfutils/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
-        echo "LD_LIBRARY_PATH=/opt/hosttrace/lib:/opt/dyninst/lib:/opt/elfutils/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "/opt/omnitrace/bin:/opt/dyninst/bin:/opt/elfutils/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:/opt/dyninst/lib:/opt/elfutils/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Install ElfUtils
       run:
@@ -206,9 +206,9 @@ jobs:
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-          -DCMAKE_INSTALL_PREFIX=/opt/hosttrace
-          -DHOSTTRACE_USE_MPI=OFF
-          -DHOSTTRACE_USE_ROCTRACER=OFF
+          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
+          -DOMNITRACE_USE_MPI=OFF
+          -DOMNITRACE_USE_ROCTRACER=OFF
 
     - name: Build
       run:
@@ -221,16 +221,16 @@ jobs:
     - name: Test
       working-directory: ${{ github.workspace }}/build
       run:
-        ldd ./hosttrace &&
-        ./hosttrace --help &&
-        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal-external.log
+        ldd ./omnitrace &&
+        ./omnitrace --help &&
+        ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal-external.log
 
     - name: Test Install
       run:
-        ldd $(which hosttrace) &&
-        hosttrace --help &&
-        hosttrace -- sleep 1 &&
-        hosttrace -o sleep.inst -- sleep &&
+        ldd $(which omnitrace) &&
+        omnitrace --help &&
+        omnitrace -- sleep 1 &&
+        omnitrace -o sleep.inst -- sleep &&
         ./sleep.inst 1 &&
         rm ./sleep.inst
 
@@ -239,7 +239,7 @@ jobs:
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal-external.log
+          ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal-external.log
 
   ubuntu-focal-dyninst-package:
     runs-on: ubuntu-20.04
@@ -262,8 +262,8 @@ jobs:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
         echo "CMAKE_PREFIX_PATH=/opt/opt/dyninst:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV &&
-        echo "/opt/hosttrace/bin:/opt/dyninst/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
-        echo "LD_LIBRARY_PATH=/opt/hosttrace/lib:/opt/dyninst/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "/opt/omnitrace/bin:/opt/dyninst/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:/opt/dyninst/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Install Dyninst
       run:
@@ -291,9 +291,9 @@ jobs:
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-          -DCMAKE_INSTALL_PREFIX=/opt/hosttrace
-          -DHOSTTRACE_USE_MPI=OFF
-          -DHOSTTRACE_USE_ROCTRACER=OFF
+          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
+          -DOMNITRACE_USE_MPI=OFF
+          -DOMNITRACE_USE_ROCTRACER=OFF
 
     - name: Build
       run:
@@ -306,16 +306,16 @@ jobs:
     - name: Test
       working-directory: ${{ github.workspace }}/build
       run:
-        ldd ./hosttrace &&
-        ./hosttrace --help &&
-        ctest -V --output-log ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal-dyninst-package.log
+        ldd ./omnitrace &&
+        ./omnitrace --help &&
+        ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal-dyninst-package.log
 
     - name: Test Install
       run:
-        ldd $(which hosttrace) &&
-        hosttrace --help &&
-        hosttrace -- sleep 1 &&
-        hosttrace -o sleep.inst -- sleep &&
+        ldd $(which omnitrace) &&
+        omnitrace --help &&
+        omnitrace -- sleep 1 &&
+        omnitrace -o sleep.inst -- sleep &&
         ./sleep.inst 1 &&
         rm ./sleep.inst
 
@@ -324,4 +324,4 @@ jobs:
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/hosttrace-ctest-ubuntu-focal-dyninst-package.log
+          ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal-dyninst-package.log

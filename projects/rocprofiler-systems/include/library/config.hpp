@@ -40,7 +40,7 @@
 
 #include <string_view>
 
-// bundle of components around hosttrace_init and hosttrace_finalize
+// bundle of components around omnitrace_init and omnitrace_finalize
 using main_bundle_t =
     tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::cpu_clock,
                            comp::cpu_util, comp::roctracer, papi_tot_ins,
@@ -48,13 +48,13 @@ using main_bundle_t =
 
 // bundle of components used in instrumentation
 using instrumentation_bundle_t =
-    tim::component_bundle<hosttrace, comp::wall_clock*, comp::user_global_bundle*>;
+    tim::component_bundle<omnitrace, comp::wall_clock*, comp::user_global_bundle*>;
 
 // allocator for instrumentation_bundle_t
 using bundle_allocator_t = tim::data::ring_buffer_allocator<instrumentation_bundle_t>;
 
 // bundle of components around each thread
-using hosttrace_thread_bundle_t =
+using omnitrace_thread_bundle_t =
     tim::lightweight_tuple<comp::wall_clock, comp::thread_cpu_clock,
                            comp::thread_cpu_util,
 #if defined(TIMEMORY_RUSAGE_THREAD) && TIMEMORY_RUSAGE_THREAD > 0

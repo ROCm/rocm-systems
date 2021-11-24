@@ -7,22 +7,22 @@ include_guard(DIRECTORY)
 #
 # ########################################################################################
 
-hosttrace_add_interface_library(
-    hosttrace-headers "Provides minimal set of include flags to compile with hosttrace")
-hosttrace_add_interface_library(hosttrace-threading "Enables multithreading support")
-hosttrace_add_interface_library(
-    hosttrace-dyninst
+omnitrace_add_interface_library(
+    omnitrace-headers "Provides minimal set of include flags to compile with omnitrace")
+omnitrace_add_interface_library(omnitrace-threading "Enables multithreading support")
+omnitrace_add_interface_library(
+    omnitrace-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)")
-hosttrace_add_interface_library(hosttrace-roctracer
+omnitrace_add_interface_library(omnitrace-roctracer
                                 "Provides flags and libraries for roctracer")
-hosttrace_add_interface_library(hosttrace-mpi "Provides MPI or MPI headers")
-hosttrace_add_interface_library(hosttrace-ptl "Enables PTL support (tasking)")
+omnitrace_add_interface_library(omnitrace-mpi "Provides MPI or MPI headers")
+omnitrace_add_interface_library(omnitrace-ptl "Enables PTL support (tasking)")
 
-target_include_directories(hosttrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/include
+target_include_directories(omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/include
                                                        ${PROJECT_BINARY_DIR}/include)
 
 # include threading because of rooflines
-target_link_libraries(hosttrace-headers INTERFACE hosttrace-threading)
+target_link_libraries(omnitrace-headers INTERFACE omnitrace-threading)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -37,14 +37,14 @@ endif()
 
 find_library(pthread_LIBRARY NAMES pthread pthreads)
 find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
-find_package(Threads ${hosttrace_FIND_QUIETLY} ${hosttrace_FIND_REQUIREMENT})
+find_package(Threads ${omnitrace_FIND_QUIETLY} ${omnitrace_FIND_REQUIREMENT})
 
 if(Threads_FOUND)
-    target_link_libraries(hosttrace-threading INTERFACE ${CMAKE_THREAD_LIBS_INIT})
+    target_link_libraries(omnitrace-threading INTERFACE ${CMAKE_THREAD_LIBS_INIT})
 endif()
 
 if(pthread_LIBRARY AND NOT WIN32)
-    target_link_libraries(hosttrace-threading INTERFACE ${pthread_LIBRARY})
+    target_link_libraries(omnitrace-threading INTERFACE ${pthread_LIBRARY})
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -53,12 +53,12 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-if(HOSTTRACE_USE_ROCTRACER)
+if(OMNITRACE_USE_ROCTRACER)
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
-    find_package(roctracer ${hosttrace_FIND_QUIETLY} REQUIRED)
-    find_package(hip ${hosttrace_FIND_QUIETLY} REQUIRED)
-    target_compile_definitions(hosttrace-roctracer INTERFACE HOSTTRACE_USE_ROCTRACER)
-    target_link_libraries(hosttrace-roctracer INTERFACE hip::host roctracer::roctracer)
+    find_package(roctracer ${omnitrace_FIND_QUIETLY} REQUIRED)
+    find_package(hip ${omnitrace_FIND_QUIETLY} REQUIRED)
+    target_compile_definitions(omnitrace-roctracer INTERFACE OMNITRACE_USE_ROCTRACER)
+    target_link_libraries(omnitrace-roctracer INTERFACE hip::host roctracer::roctracer)
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${roctracer_LIBRARY_DIRS}")
 endif()
 
@@ -68,14 +68,14 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-if(HOSTTRACE_USE_MPI)
-    find_package(MPI ${hosttrace_FIND_QUIETLY} REQUIRED)
-    target_link_libraries(hosttrace-mpi INTERFACE MPI::MPI_C MPI::MPI_CXX)
-elseif(HOSTTRACE_USE_MPI_HEADERS)
-    find_package(MPI-Headers ${hosttrace_FIND_QUIETLY} REQUIRED)
-    target_compile_definitions(hosttrace-mpi INTERFACE TIMEMORY_USE_MPI_HEADERS
-                                                       HOSTTRACE_USE_MPI_HEADERS)
-    target_link_libraries(hosttrace-mpi INTERFACE MPI::MPI_HEADERS)
+if(OMNITRACE_USE_MPI)
+    find_package(MPI ${omnitrace_FIND_QUIETLY} REQUIRED)
+    target_link_libraries(omnitrace-mpi INTERFACE MPI::MPI_C MPI::MPI_CXX)
+elseif(OMNITRACE_USE_MPI_HEADERS)
+    find_package(MPI-Headers ${omnitrace_FIND_QUIETLY} REQUIRED)
+    target_compile_definitions(omnitrace-mpi INTERFACE TIMEMORY_USE_MPI_HEADERS
+                                                       OMNITRACE_USE_MPI_HEADERS)
+    target_link_libraries(omnitrace-mpi INTERFACE MPI::MPI_HEADERS)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -84,8 +84,8 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-if(HOSTTRACE_BUILD_DYNINST)
-    hosttrace_checkout_git_submodule(
+if(OMNITRACE_BUILD_DYNINST)
+    omnitrace_checkout_git_submodule(
         RELATIVE_PATH external/dyninst
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/jrmadsen/dyninst.git
@@ -109,56 +109,56 @@ if(HOSTTRACE_BUILD_DYNINST)
         OFF
         CACHE BOOL "Enable LTO for dyninst libraries")
 
-    hosttrace_save_variables(PIC VARIABLES CMAKE_POSITION_INDEPENDENT_CODE)
+    omnitrace_save_variables(PIC VARIABLES CMAKE_POSITION_INDEPENDENT_CODE)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
     add_subdirectory(external/dyninst)
-    hosttrace_restore_variables(PIC VARIABLES CMAKE_POSITION_INDEPENDENT_CODE)
+    omnitrace_restore_variables(PIC VARIABLES CMAKE_POSITION_INDEPENDENT_CODE)
 
     add_library(Dyninst::Dyninst INTERFACE IMPORTED)
     foreach(_LIB common dyninstAPI parseAPI instructionAPI symtabAPI stackwalk Boost TBB)
         target_link_libraries(Dyninst::Dyninst INTERFACE Dyninst::${_LIB})
     endforeach()
 
-    target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::Dyninst)
+    target_link_libraries(omnitrace-dyninst INTERFACE Dyninst::Dyninst)
 
-    set(HOSTTRACE_DYNINST_API_RT
+    set(OMNITRACE_DYNINST_API_RT
         ${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI_RT/libdyninstAPI_RT${CMAKE_SHARED_LIBRARY_SUFFIX}
         )
 
-    if(HOSTTRACE_DYNINST_API_RT)
+    if(OMNITRACE_DYNINST_API_RT)
         target_compile_definitions(
-            hosttrace-dyninst
+            omnitrace-dyninst
             INTERFACE
                 DYNINST_API_RT="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}:$<TARGET_FILE_DIR:Dyninst::dyninstAPI_RT>:${CMAKE_INSTALL_PREFIX}/lib/$<TARGET_FILE_NAME:Dyninst::dyninstAPI_RT>:$<TARGET_FILE:Dyninst::dyninstAPI_RT>"
             )
     endif()
 
 else()
-    find_package(Dyninst ${hosttrace_FIND_QUIETLY} REQUIRED
+    find_package(Dyninst ${omnitrace_FIND_QUIETLY} REQUIRED
                  COMPONENTS dyninstAPI parseAPI instructionAPI symtabAPI)
 
     if(TARGET Dyninst::Dyninst) # updated Dyninst CMake system was found
         # useful for defining the location of the runtime API
         find_library(
-            HOSTTRACE_DYNINST_API_RT dyninstAPI_RT
+            OMNITRACE_DYNINST_API_RT dyninstAPI_RT
             HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
             PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
             PATH_SUFFIXES lib)
 
-        if(HOSTTRACE_DYNINST_API_RT)
+        if(OMNITRACE_DYNINST_API_RT)
             target_compile_definitions(
-                hosttrace-dyninst INTERFACE DYNINST_API_RT="${HOSTTRACE_DYNINST_API_RT}")
+                omnitrace-dyninst INTERFACE DYNINST_API_RT="${OMNITRACE_DYNINST_API_RT}")
         endif()
 
-        hosttrace_add_rpath(${Dyninst_LIBRARIES})
-        target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::Dyninst)
+        omnitrace_add_rpath(${Dyninst_LIBRARIES})
+        target_link_libraries(omnitrace-dyninst INTERFACE Dyninst::Dyninst)
     else() # updated Dyninst CMake system was not found
         set(_BOOST_COMPONENTS atomic system thread date_time)
-        set(hosttrace_BOOST_COMPONENTS
+        set(omnitrace_BOOST_COMPONENTS
             "${_BOOST_COMPONENTS}"
-            CACHE STRING "Boost components used by Dyninst in hosttrace")
+            CACHE STRING "Boost components used by Dyninst in omnitrace")
         set(Boost_NO_BOOST_CMAKE ON)
-        find_package(Boost QUIET REQUIRED COMPONENTS ${hosttrace_BOOST_COMPONENTS})
+        find_package(Boost QUIET REQUIRED COMPONENTS ${omnitrace_BOOST_COMPONENTS})
 
         # some installs of dyninst don't set this properly
         if(EXISTS "${DYNINST_INCLUDE_DIR}" AND NOT DYNINST_HEADER_DIR)
@@ -175,7 +175,7 @@ else()
 
         # useful for defining the location of the runtime API
         find_library(
-            HOSTTRACE_DYNINST_API_RT dyninstAPI_RT
+            OMNITRACE_DYNINST_API_RT dyninstAPI_RT
             HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
             PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
             PATH_SUFFIXES lib)
@@ -196,9 +196,9 @@ else()
                 PATH_SUFFIXES include)
         endif()
 
-        if(HOSTTRACE_DYNINST_API_RT)
+        if(OMNITRACE_DYNINST_API_RT)
             target_compile_definitions(
-                hosttrace-dyninst INTERFACE DYNINST_API_RT="${HOSTTRACE_DYNINST_API_RT}")
+                omnitrace-dyninst INTERFACE DYNINST_API_RT="${OMNITRACE_DYNINST_API_RT}")
         endif()
 
         if(Boost_DIR)
@@ -209,8 +209,8 @@ else()
             endif()
         endif()
 
-        hosttrace_add_rpath(${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
-        target_link_libraries(hosttrace-dyninst INTERFACE ${DYNINST_LIBRARIES}
+        omnitrace_add_rpath(${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
+        target_link_libraries(omnitrace-dyninst INTERFACE ${DYNINST_LIBRARIES}
                                                           ${Boost_LIBRARIES})
         foreach(
             _TARG
@@ -226,17 +226,17 @@ else()
             date_time
             TBB)
             if(TARGET Dyninst::${_TARG})
-                target_link_libraries(hosttrace-dyninst INTERFACE Dyninst::${_TARG})
+                target_link_libraries(omnitrace-dyninst INTERFACE Dyninst::${_TARG})
             elseif(TARGET Boost::${_TARG})
-                target_link_libraries(hosttrace-dyninst INTERFACE Boost::${_TARG})
+                target_link_libraries(omnitrace-dyninst INTERFACE Boost::${_TARG})
             elseif(TARGET ${_TARG})
-                target_link_libraries(hosttrace-dyninst INTERFACE ${_TARG})
+                target_link_libraries(omnitrace-dyninst INTERFACE ${_TARG})
             endif()
         endforeach()
         target_include_directories(
-            hosttrace-dyninst SYSTEM INTERFACE ${TBB_INCLUDE_DIR} ${Boost_INCLUDE_DIRS}
+            omnitrace-dyninst SYSTEM INTERFACE ${TBB_INCLUDE_DIR} ${Boost_INCLUDE_DIRS}
                                                ${DYNINST_HEADER_DIR})
-        target_compile_definitions(hosttrace-dyninst INTERFACE hosttrace_USE_DYNINST)
+        target_compile_definitions(omnitrace-dyninst INTERFACE omnitrace_USE_DYNINST)
     endif()
 endif()
 
@@ -247,7 +247,7 @@ endif()
 # ----------------------------------------------------------------------------------------#
 
 set(perfetto_DIR ${PROJECT_SOURCE_DIR}/external/perfetto)
-hosttrace_checkout_git_submodule(
+omnitrace_checkout_git_submodule(
     RELATIVE_PATH external/perfetto
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://android.googlesource.com/platform/external/perfetto
@@ -260,8 +260,8 @@ hosttrace_checkout_git_submodule(
 #
 # ----------------------------------------------------------------------------------------#
 
-if(HOSTTRACE_BUILD_DEVICETRACE)
-    hosttrace_checkout_git_submodule(
+if(OMNITRACE_BUILD_DEVICETRACE)
+    omnitrace_checkout_git_submodule(
         RELATIVE_PATH external/elfio
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/jrmadsen/ELFIO.git
@@ -317,13 +317,13 @@ set(TIMEMORY_TLS_MODEL
     "global-dynamic"
     CACHE STRING "Thread-local static model" FORCE)
 
-hosttrace_checkout_git_submodule(
+omnitrace_checkout_git_submodule(
     RELATIVE_PATH external/timemory
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://github.com/NERSC/timemory.git
     REPO_BRANCH gpu-kernel-instrumentation)
 
-hosttrace_save_variables(BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
+omnitrace_save_variables(BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
                                                 CMAKE_POSITION_INDEPENDENT_CODE)
 
 # ensure timemory builds PIC static libs so that we don't have to install timemory shared
@@ -334,7 +334,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_subdirectory(external/timemory)
 
-hosttrace_restore_variables(BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
+omnitrace_restore_variables(BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
                                                    CMAKE_POSITION_INDEPENDENT_CODE)
 
 # ----------------------------------------------------------------------------------------#
@@ -345,7 +345,7 @@ hosttrace_restore_variables(BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATI
 
 # timemory might provide PTL::ptl-shared
 if(NOT TARGET PTL::ptl-shared)
-    hosttrace_checkout_git_submodule(
+    omnitrace_checkout_git_submodule(
         RELATIVE_PATH external/PTL
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/jrmadsen/PTL.git
@@ -356,7 +356,7 @@ if(NOT TARGET PTL::ptl-shared)
     set(PTL_USE_GPU OFF)
     set(PTL_DEVELOPER_INSTALL OFF)
 
-    hosttrace_save_variables(
+    omnitrace_save_variables(
         BUILD_CONFIG
         VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS CMAKE_POSITION_INDEPENDENT_CODE
                   CMAKE_CXX_VISIBILITY_PRESET CMAKE_VISIBILITY_INLINES_HIDDEN)
@@ -367,10 +367,10 @@ if(NOT TARGET PTL::ptl-shared)
     set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
     add_subdirectory(external/PTL)
-    hosttrace_restore_variables(
+    omnitrace_restore_variables(
         BUILD_CONFIG
         VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS CMAKE_POSITION_INDEPENDENT_CODE
                   CMAKE_CXX_VISIBILITY_PRESET CMAKE_VISIBILITY_INLINES_HIDDEN)
 endif()
 
-target_link_libraries(hosttrace-ptl INTERFACE PTL::ptl-shared)
+target_link_libraries(omnitrace-ptl INTERFACE PTL::ptl-shared)

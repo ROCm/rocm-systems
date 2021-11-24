@@ -178,7 +178,7 @@ entry::operator+=(const entry& rhs)
     }
     else
     {
-        HOSTTRACE_PRINT(
+        OMNITRACE_PRINT(
             "Warning! Incorrect phase. entry::operator+=(entry) is only valid for "
             "Phase::BEGIN += Phase::END\n");
     }
@@ -231,7 +231,7 @@ entry::get_overlap(const entry& rhs) const
         return (rhs.end_ns - begin_ns);
     else
     {
-        HOSTTRACE_PRINT("Warning! entry::get_overlap(entry, tid) "
+        OMNITRACE_PRINT("Warning! entry::get_overlap(entry, tid) "
                         "could not determine the overlap :: %s\n",
                         JOIN("", *this).c_str());
     }
@@ -265,7 +265,7 @@ entry::get_independent(const entry& rhs) const
         return (end_ns - rhs.end_ns);
     else
     {
-        HOSTTRACE_PRINT("Warning! entry::get_independent(entry, tid) "
+        OMNITRACE_PRINT("Warning! entry::get_independent(entry, tid) "
                         "could not determine the overlap :: %s\n",
                         JOIN("", *this).c_str());
     }
@@ -335,7 +335,7 @@ entry::is_delta(const entry& _v, const std::string_view& _ctx)
 {
     if(_v.phase != Phase::DELTA)
     {
-        HOSTTRACE_CT_DEBUG(
+        OMNITRACE_CT_DEBUG(
             "Warning! Invalid phase for entry. entry::%s requires Phase::DELTA :: %s\n",
             _ctx.data(), JOIN("", _v).c_str());
         return true;
@@ -487,7 +487,7 @@ get_update_frequency()
 std::unique_ptr<call_chain>&
 get(int64_t _tid)
 {
-    static auto&             _v    = hosttrace_thread_data<call_chain>::instances();
+    static auto&             _v    = omnitrace_thread_data<call_chain>::instances();
     static thread_local auto _once = [_tid]() {
         if(!_v.at(0)) _v.at(0) = std::make_unique<call_chain>();
         if(!_v.at(_tid)) _v.at(_tid) = std::make_unique<call_chain>();
@@ -517,7 +517,7 @@ size_t
 add_hash_id(const std::string& _label)
 {
     using critical_trace_hash_data =
-        hosttrace_thread_data<critical_trace::hash_ids, critical_trace::id>;
+        omnitrace_thread_data<critical_trace::hash_ids, critical_trace::id>;
 
     auto _hash = tim::hash::add_hash_id(_label);
     if(get_use_critical_trace())
@@ -575,7 +575,7 @@ save_call_graph(const std::string& _fname, const std::string& _label,
                 const call_graph_t& _call_graph, bool _msg = false,
                 std::string _func = {})
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
 
     using perfstats_t =
         tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss>;
@@ -590,7 +590,7 @@ save_call_graph(const std::string& _fname, const std::string& _label,
         auto _hash_map = *tim::hash::get_hash_ids();
         for(auto& itr : _hash_map)
             itr.second = tim::demangle(itr.second);
-        ar->setNextName("hosttrace");
+        ar->setNextName("omnitrace");
         ar->startNode();
         (*ar)(cereal::make_nvp("hash_map", _hash_map));
         ar->setNextName(_label.c_str());
@@ -606,7 +606,7 @@ save_call_graph(const std::string& _fname, const std::string& _label,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            HOSTTRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
+            OMNITRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
         }
         ofs << oss.str() << std::endl;
     }
@@ -614,7 +614,7 @@ save_call_graph(const std::string& _fname, const std::string& _label,
     _perf.stop();
     if(_msg)
     {
-        HOSTTRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
     }
 }
 
@@ -623,7 +623,7 @@ save_critical_trace(const std::string& _fname, const std::string& _label,
                     const std::vector<call_chain>& _cchain, bool _msg = false,
                     std::string _func = {})
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
 
     using perfstats_t =
         tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss>;
@@ -637,7 +637,7 @@ save_critical_trace(const std::string& _fname, const std::string& _label,
         auto _hash_map = *tim::hash::get_hash_ids();
         for(auto& itr : _hash_map)
             itr.second = tim::demangle(itr.second);
-        ar->setNextName("hosttrace");
+        ar->setNextName("omnitrace");
         ar->startNode();
         (*ar)(cereal::make_nvp("hash_map", _hash_map),
               cereal::make_nvp(_label.c_str(), _cchain));
@@ -650,7 +650,7 @@ save_critical_trace(const std::string& _fname, const std::string& _label,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            HOSTTRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
+            OMNITRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
         }
         std::stringstream oss{};
         if(_cchain.size() > 1000)
@@ -667,7 +667,7 @@ save_critical_trace(const std::string& _fname, const std::string& _label,
     _perf.stop();
     if(_msg)
     {
-        HOSTTRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
     }
 }
 
@@ -675,7 +675,7 @@ void
 save_call_chain_text(const std::string& _fname, const call_chain& _call_chain,
                      bool _msg = false, std::string _func = {})
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
 
     using perfstats_t =
         tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss>;
@@ -688,7 +688,7 @@ save_call_chain_text(const std::string& _fname, const call_chain& _call_chain,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            HOSTTRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
+            OMNITRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
         }
         ofs << _call_chain << "\n";
     }
@@ -696,7 +696,7 @@ save_call_chain_text(const std::string& _fname, const call_chain& _call_chain,
     _perf.stop();
     if(_msg)
     {
-        HOSTTRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
     }
 }
 
@@ -705,7 +705,7 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
                      const call_chain& _call_chain, bool _msg = false,
                      std::string _func = {})
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
 
     using perfstats_t =
         tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss>;
@@ -719,7 +719,7 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
         auto _hash_map = *tim::hash::get_hash_ids();
         for(auto& itr : _hash_map)
             itr.second = tim::demangle(itr.second);
-        ar->setNextName("hosttrace");
+        ar->setNextName("omnitrace");
         ar->startNode();
         (*ar)(cereal::make_nvp("hash_map", _hash_map),
               cereal::make_nvp(_label.c_str(), _call_chain));
@@ -732,7 +732,7 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            HOSTTRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
+            OMNITRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
         }
         std::stringstream oss{};
         if(_call_chain.size() > 100000)
@@ -749,7 +749,7 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
     _perf.stop();
     if(_msg)
     {
-        HOSTTRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
     }
 }
 
@@ -764,7 +764,7 @@ load_call_chain(const std::string& _fname, const std::string& _label,
         namespace cereal = tim::cereal;
         auto ar          = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
 
-        ar->setNextName("hosttrace");
+        ar->setNextName("omnitrace");
         ar->startNode();
         (*ar)(cereal::make_nvp(_label.c_str(), _call_chain));
         ar->finishNode();
@@ -798,7 +798,7 @@ find(
 void
 squash_critical_path(call_chain& _targ)
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
     static auto _strict_equal = [](const entry& _lhs, const entry& _rhs) {
         auto _same_phase  = (_lhs.phase == _rhs.phase);
         bool _phase_check = true;
@@ -836,7 +836,7 @@ squash_critical_path(call_chain& _targ)
 void
 combine_critical_path(call_chain& _targ, call_chain _chain)
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
     call_chain _delta{};
     call_chain _begin{};
     call_chain _end{};
@@ -876,7 +876,7 @@ combine_critical_path(call_chain& _targ, call_chain _chain)
 auto
 get_indexed(const call_chain& _chain)
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
     std::map<int64_t, std::vector<entry>> _indexed = {};
 
     // allocate for all cpu correlation ids
@@ -906,7 +906,7 @@ get_indexed(const call_chain& _chain)
 void
 find_children(PTL::ThreadPool& _tp, call_graph_t& _graph, const call_chain& _chain)
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
 
     using iterator_t      = call_graph_sibling_itr_t;
     using itr_entry_vec_t = std::vector<std::pair<iterator_t, entry>>;
@@ -916,20 +916,20 @@ find_children(PTL::ThreadPool& _tp, call_graph_t& _graph, const call_chain& _cha
     std::map<entry, std::vector<entry>> _entry_map{};
 
     // allocate all entries
-    HOSTTRACE_CT_DEBUG("[%s] Allocating...\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s] Allocating...\n", __FUNCTION__);
     for(const auto& itr : _chain)
     {
         auto _ins = _entry_map.emplace(itr, std::vector<entry>{});
         if(!_ins.second)
         {
             auto _existing = _ins.first->first;
-            HOSTTRACE_PRINT("Warning! Duplicate entry for [%s] :: [%s]\n",
+            OMNITRACE_PRINT("Warning! Duplicate entry for [%s] :: [%s]\n",
                             JOIN("", _existing).c_str(), JOIN("", itr).c_str());
         }
     }
 
     task_group_t _tg{ &_tp };
-    HOSTTRACE_CT_DEBUG("[%s] Parallel mapping...\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s] Parallel mapping...\n", __FUNCTION__);
     for(const auto& itr : _chain)
     {
         _tg.run([&]() { _entry_map[itr] = _indexed.at(itr.cpu_cid); });
@@ -972,12 +972,12 @@ find_children(PTL::ThreadPool& _tp, call_graph_t& _graph, const call_chain& _cha
 
     if(!_indexed.at(-1).empty())
     {
-        HOSTTRACE_CT_DEBUG("[%s] Setting root (line %i)...\n", __FUNCTION__, __LINE__);
+        OMNITRACE_CT_DEBUG("[%s] Setting root (line %i)...\n", __FUNCTION__, __LINE__);
         _graph.set_head(_indexed.at(-1).front());
     }
     else
     {
-        HOSTTRACE_CT_DEBUG("[%s] Setting root (line %i)...\n", __FUNCTION__, __LINE__);
+        OMNITRACE_CT_DEBUG("[%s] Setting root (line %i)...\n", __FUNCTION__, __LINE__);
         auto  _depth = static_cast<uint16_t>(-1);
         entry _root{ 0, Device::NONE, Phase::NONE, _depth, 0, 0, 0, 0, 0, 0, 0 };
         _graph.set_head(_root);
@@ -988,7 +988,7 @@ find_children(PTL::ThreadPool& _tp, call_graph_t& _graph, const call_chain& _cha
     {
         if(itr.first.depth == _root->depth + 1)
         {
-            HOSTTRACE_CT_DEBUG("[%s] Generating call-graph...\n", __FUNCTION__);
+            OMNITRACE_CT_DEBUG("[%s] Generating call-graph...\n", __FUNCTION__);
             // _recursive_func(_root, itr.first);
             itr_entry_vec_t _data = _func(_root, itr.first);
             while(_loop_func(_data))
@@ -1001,7 +1001,7 @@ void
 find_sequences(PTL::ThreadPool& _tp, call_graph_t& _graph,
                std::vector<call_chain>& _chain)
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
     using iterator_t = call_graph_preorder_itr_t;
     std::vector<iterator_t> _end_nodes{};
     size_t                  _n = 0;
@@ -1010,13 +1010,13 @@ find_sequences(PTL::ThreadPool& _tp, call_graph_t& _graph,
         auto _nchild = _graph.number_of_children(itr);
         if(_nchild > 0)
         {
-            HOSTTRACE_CT_DEBUG("Skipping node #%zu with %u children :: %s\n", _n, _nchild,
+            OMNITRACE_CT_DEBUG("Skipping node #%zu with %u children :: %s\n", _n, _nchild,
                                JOIN("", *itr).c_str());
             continue;
         }
         _end_nodes.emplace_back(itr);
     }
-    HOSTTRACE_CT_DEBUG("Number of end nodes: %zu\n", _end_nodes.size());
+    OMNITRACE_CT_DEBUG("Number of end nodes: %zu\n", _end_nodes.size());
     _chain.resize(_end_nodes.size());
 
     auto _construct = [&](size_t i) {
@@ -1044,7 +1044,7 @@ template <typename ArchiveT, typename T, typename AllocatorT>
 void
 serialize_graph(ArchiveT& ar, const tim::graph<T, AllocatorT>& t)
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
 
     namespace cereal = tim::cereal;
     using iterator_t = typename tim::graph<T, AllocatorT>::sibling_iterator;
@@ -1084,7 +1084,7 @@ serialize_subgraph(ArchiveT& ar, const tim::graph<T, AllocatorT>& _graph,
 void
 update_critical_path(call_chain _chain, int64_t _tid)
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
     try
     {
         // remove any data not
@@ -1103,7 +1103,7 @@ template <Device DevT>
 std::vector<call_chain>
 get_top(const std::vector<call_chain>& _chain, size_t _count)
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
     std::vector<call_chain> _data{};
     _data.reserve(_count);
     for(const auto& itr : _chain)
@@ -1121,7 +1121,7 @@ template <Device DevT>
 void
 generate_perfetto(const std::vector<call_chain>& _data)
 {
-    HOSTTRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
     auto _func = [&](size_t _beg, size_t _end) {
         // ensure all hash ids exist
         copy_hash_ids();
@@ -1151,7 +1151,7 @@ compute_critical_trace()
 
     if(_computed) return;
 
-    HOSTTRACE_CT_DEBUG("[%s] Generating critical trace...\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s] Generating critical trace...\n", __FUNCTION__);
 
     // ensure all hash ids exist
     copy_hash_ids();
@@ -1169,7 +1169,7 @@ compute_critical_trace()
         _tp.set_verbose(-1);
         PTL::TaskGroup<void> _tg{ &_tp };
 
-        HOSTTRACE_CT_DEBUG("[%s] initial call chain: %zu entries\n", __FUNCTION__,
+        OMNITRACE_CT_DEBUG("[%s] initial call chain: %zu entries\n", __FUNCTION__,
                            complete_call_chain.size());
 
         perfstats_t _perf{ get_perf_name(__FUNCTION__) };
@@ -1178,17 +1178,17 @@ compute_critical_trace()
         std::sort(complete_call_chain.begin(), complete_call_chain.end());
 
         _perf.stop().rekey("Sorting critical trace");
-        HOSTTRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
 
         _perf.start();
 
         squash_critical_path(complete_call_chain);
 
-        HOSTTRACE_CT_DEBUG("[%s] complete call chain: %zu entries\n", __FUNCTION__,
+        OMNITRACE_CT_DEBUG("[%s] complete call chain: %zu entries\n", __FUNCTION__,
                            complete_call_chain.size());
 
         _perf.stop().rekey("Squash critical path");
-        HOSTTRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
 
         _tg.run(
             [](call_chain _chain, std::string _func) {
@@ -1203,15 +1203,15 @@ compute_critical_trace()
 
         _perf.reset().start();
 
-        HOSTTRACE_CT_DEBUG("[%s] Finding children...\n", __FUNCTION__);
+        OMNITRACE_CT_DEBUG("[%s] Finding children...\n", __FUNCTION__);
         call_graph_t _graph{};
         find_children(_tp, _graph, complete_call_chain);
 
-        HOSTTRACE_CT_DEBUG("[%s] complete call graph: %zu entries\n", __FUNCTION__,
+        OMNITRACE_CT_DEBUG("[%s] complete call graph: %zu entries\n", __FUNCTION__,
                            _graph.size() - 1);
 
         _perf.stop().rekey("Finding children");
-        HOSTTRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
 
         _tg.run(
             [&](std::string _func) {
@@ -1227,17 +1227,17 @@ compute_critical_trace()
 
         _perf.reset().start();
 
-        HOSTTRACE_CT_DEBUG("[%s] Finding sequences...\n", __FUNCTION__);
+        OMNITRACE_CT_DEBUG("[%s] Finding sequences...\n", __FUNCTION__);
         // find the sequences
         std::vector<call_chain> _top{};
         find_sequences(_tp, _graph, _top);
 
         _perf.stop().rekey("Finding sequences");
-        HOSTTRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
 
         if(get_critical_trace_count() == 0)
         {
-            HOSTTRACE_CT_DEBUG("[%s] Saving critical trace...\n", __FUNCTION__);
+            OMNITRACE_CT_DEBUG("[%s] Saving critical trace...\n", __FUNCTION__);
             save_critical_trace(
                 tim::settings::compose_output_filename(
                     "critical-trace", ".json", get_use_pid(),
@@ -1246,15 +1246,15 @@ compute_critical_trace()
         }
         else
         {
-            HOSTTRACE_CT_DEBUG("[%s] Getting top CPU functions...\n", __FUNCTION__);
+            OMNITRACE_CT_DEBUG("[%s] Getting top CPU functions...\n", __FUNCTION__);
             // get the top CPU critical traces
             auto _top_cpu = get_top<Device::CPU>(_top, get_critical_trace_count());
             if(!_top_cpu.empty())
             {
-                HOSTTRACE_CT_DEBUG("[%s] Generating perfetto CPU critical traces...\n",
+                OMNITRACE_CT_DEBUG("[%s] Generating perfetto CPU critical traces...\n",
                                    __FUNCTION__);
                 generate_perfetto<Device::CPU>(_top_cpu);
-                HOSTTRACE_CT_DEBUG("[%s] Saving CPU critical traces...\n", __FUNCTION__);
+                OMNITRACE_CT_DEBUG("[%s] Saving CPU critical traces...\n", __FUNCTION__);
                 save_critical_trace(tim::settings::compose_output_filename(
                                         "critical-trace-cpu", ".json", get_use_pid(),
                                         (tim::dmp::is_initialized()) ? tim::dmp::rank()
@@ -1262,15 +1262,15 @@ compute_critical_trace()
                                     "critical_trace", _top_cpu, true, __FUNCTION__);
             }
 
-            HOSTTRACE_CT_DEBUG("[%s] Getting top GPU functions...\n", __FUNCTION__);
+            OMNITRACE_CT_DEBUG("[%s] Getting top GPU functions...\n", __FUNCTION__);
             // get the top GPU critical traces
             auto _top_gpu = get_top<Device::GPU>(_top, get_critical_trace_count());
             if(!_top_gpu.empty())
             {
-                HOSTTRACE_CT_DEBUG("[%s] Generating perfetto GPU critical traces...\n",
+                OMNITRACE_CT_DEBUG("[%s] Generating perfetto GPU critical traces...\n",
                                    __FUNCTION__);
                 generate_perfetto<Device::GPU>(_top_gpu);
-                HOSTTRACE_CT_DEBUG("[%s] Saving GPU critical traces...\n", __FUNCTION__);
+                OMNITRACE_CT_DEBUG("[%s] Saving GPU critical traces...\n", __FUNCTION__);
                 save_critical_trace(tim::settings::compose_output_filename(
                                         "critical-trace-gpu", ".json", get_use_pid(),
                                         (tim::dmp::is_initialized()) ? tim::dmp::rank()
@@ -1285,7 +1285,7 @@ compute_critical_trace()
 
     } catch(const std::exception& e)
     {
-        HOSTTRACE_PRINT("Thread exited '%s' with exception: %s\n", __FUNCTION__,
+        OMNITRACE_PRINT("Thread exited '%s' with exception: %s\n", __FUNCTION__,
                         e.what());
         TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(true, 32);
     }
@@ -1294,7 +1294,7 @@ compute_critical_trace()
     auto _ct_msg = JOIN("", _ct_perf);
     auto _ct_pos = _ct_msg.find(">>>  ");
     if(_ct_pos != std::string::npos) _ct_msg = _ct_msg.substr(_ct_pos + 5);
-    HOSTTRACE_PRINT("%s\n", _ct_msg.c_str());
+    OMNITRACE_PRINT("%s\n", _ct_msg.c_str());
 }
 }  // namespace
 }  // namespace critical_trace

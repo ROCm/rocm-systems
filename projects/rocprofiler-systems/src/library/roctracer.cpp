@@ -39,7 +39,7 @@ namespace component
 void
 roctracer::preinit()
 {
-    HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
     roctracer_data::label()       = "roctracer";
     roctracer_data::description() = "ROCm tracer (activity API)";
 }
@@ -98,12 +98,12 @@ roctracer::setup()
     auto_lock_t _lk{ type_mutex<roctracer>() };
     if(roctracer_is_setup()) return;
     roctracer_is_setup() = true;
-    HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
 
-    tim::set_env("HSA_TOOLS_LIB", "libhosttrace.so", 0);
+    tim::set_env("HSA_TOOLS_LIB", "libomnitrace.so", 0);
 
-    auto _kfdwrapper = dynamic_library{ "HOSTTRACE_ROCTRACER_LIBKFDWRAPPER",
-                                        HOSTTRACE_ROCTRACER_LIBKFDWRAPPER };
+    auto _kfdwrapper = dynamic_library{ "OMNITRACE_ROCTRACER_LIBKFDWRAPPER",
+                                        OMNITRACE_ROCTRACER_LIBKFDWRAPPER };
 
     ROCTRACER_CALL(roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, nullptr));
 
@@ -134,7 +134,7 @@ roctracer::tear_down()
     auto_lock_t _lk{ type_mutex<roctracer>() };
     if(!roctracer_is_setup()) return;
     roctracer_is_setup() = false;
-    HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
 
     // flush all the activity
     if(roctracer_default_pool() != nullptr)
@@ -185,7 +185,7 @@ extern "C"
     bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                 const char* const* failed_tool_names)
     {
-        HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
+        OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
         tim::consume_parameters(table, runtime_version, failed_tool_count,
                                 failed_tool_names);
 
@@ -218,7 +218,7 @@ extern "C"
                 // initialize HSA tracing
                 roctracer_set_properties(ACTIVITY_DOMAIN_HSA_API, (void*) table);
 
-                HOSTTRACE_DEBUG("    HSA-trace(");
+                OMNITRACE_DEBUG("    HSA-trace(");
                 if(!hsa_api_vec.empty())
                 {
                     for(const auto& itr : hsa_api_vec)
@@ -230,7 +230,7 @@ extern "C"
                         ROCTRACER_CALL(roctracer_enable_op_callback(
                             ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, nullptr));
 
-                        HOSTTRACE_DEBUG(" %s", api);
+                        OMNITRACE_DEBUG(" %s", api);
                     }
                 }
                 else
@@ -238,7 +238,7 @@ extern "C"
                     ROCTRACER_CALL(roctracer_enable_domain_callback(
                         ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, nullptr));
                 }
-                HOSTTRACE_DEBUG("\n");
+                OMNITRACE_DEBUG("\n");
             }
 
             bool trace_hsa_activity = get_trace_hsa_activity();
@@ -253,7 +253,7 @@ extern "C"
                 };
                 roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
 
-                HOSTTRACE_DEBUG("    HSA-activity-trace()\n");
+                OMNITRACE_DEBUG("    HSA-activity-trace()\n");
                 ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS,
                                                             HSA_OP_ID_COPY));
             }
@@ -277,7 +277,7 @@ extern "C"
     // HSA-runtime on-unload method
     void OnUnload()
     {
-        HOSTTRACE_DEBUG("[%s]\n", __FUNCTION__);
+        OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
         // ONLOAD_TRACE("");
     }
 }

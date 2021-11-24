@@ -29,29 +29,29 @@
 #include "library/mpi_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
-#include "library/hosttrace_component.hpp"
+#include "library/omnitrace_component.hpp"
 
 namespace
 {
 uint64_t    mpip_index      = std::numeric_limits<uint64_t>::max();
 std::string mpi_init_string = {};
 
-// this ensures hosttrace_trace_finalize is called before MPI_Finalize
+// this ensures omnitrace_trace_finalize is called before MPI_Finalize
 void
-hosttrace_mpi_set_attr()
+omnitrace_mpi_set_attr()
 {
 #if defined(TIMEMORY_USE_MPI)
     static auto _mpi_copy = [](MPI_Comm, int, void*, void*, void*, int*) {
         return MPI_SUCCESS;
     };
     static auto _mpi_fini = [](MPI_Comm, int, void*, void*) {
-        HOSTTRACE_DEBUG("MPI Comm attribute finalize\n");
+        OMNITRACE_DEBUG("MPI Comm attribute finalize\n");
         if(mpip_index != std::numeric_limits<uint64_t>::max())
-            comp::deactivate_mpip<tim::component_tuple<hosttrace_component>, hosttrace>(
+            comp::deactivate_mpip<tim::component_tuple<omnitrace_component>, omnitrace>(
                 mpip_index);
-        if(!mpi_init_string.empty()) hosttrace_pop_trace(mpi_init_string.c_str());
+        if(!mpi_init_string.empty()) omnitrace_pop_trace(mpi_init_string.c_str());
         mpi_init_string = {};
-        hosttrace_trace_finalize();
+        omnitrace_trace_finalize();
         return MPI_SUCCESS;
     };
     using copy_func_t = int (*)(MPI_Comm, int, void*, void*, void*, int*);
@@ -68,7 +68,7 @@ hosttrace_mpi_set_attr()
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 {
-    HOSTTRACE_DEBUG("[%s] %s(int*, char***)\n", __FUNCTION__, _data.tool_id.c_str());
+    OMNITRACE_DEBUG("[%s] %s(int*, char***)\n", __FUNCTION__, _data.tool_id.c_str());
     if(get_state() == ::State::DelayedInit)
     {
         get_state()     = ::State::PreInit;
@@ -79,7 +79,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, int, int*)
 {
-    HOSTTRACE_DEBUG("[%s] %s(int*, char***, int, int*)\n", __FUNCTION__,
+    OMNITRACE_DEBUG("[%s] %s(int*, char***, int, int*)\n", __FUNCTION__,
                     _data.tool_id.c_str());
     if(get_state() == ::State::DelayedInit)
     {
@@ -89,39 +89,88 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, in
 }
 
 void
+mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
+{
+    OMNITRACE_DEBUG("[%s] %s()\n", __FUNCTION__, _data.tool_id.c_str());
+    if(mpip_index != std::numeric_limits<uint64_t>::max())
+        comp::deactivate_mpip<tim::component_tuple<omnitrace_component>, omnitrace>(
+            mpip_index);
+    if(!mpi_init_string.empty()) omnitrace_pop_trace(mpi_init_string.c_str());
+    mpi_init_string = {};
+    omnitrace_trace_finalize();
+}
+
+void
+mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int* _val)
+{
+    OMNITRACE_DEBUG("[%s] %s()\n", __FUNCTION__, _data.tool_id.c_str());
+    m_comm = _comm;
+    if(_data.tool_id == "MPI_Comm_rank")
+    {
+        m_rank = _val;
+    }
+    else if(_data.tool_id == "MPI_Comm_size")
+    {
+        m_size = _val;
+    }
+    else
+    {
+        OMNITRACE_PRINT("[%s] %s(<comm>, %p) :: unexpected function wrapper\n",
+                        __FUNCTION__, _data.tool_id.c_str(), _val);
+    }
+}
+
+void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 {
-    HOSTTRACE_DEBUG("[%s] %s() returned %i\n", __FUNCTION__, _data.tool_id.c_str(),
+    OMNITRACE_DEBUG("[%s] %s() returned %i\n", __FUNCTION__, _data.tool_id.c_str(),
                     (int) _retval);
-    if(_retval == tim::mpi::success_v && get_state() == ::State::PreInit)
+    if(_retval == tim::mpi::success_v && get_state() == ::State::PreInit &&
+       _data.tool_id.find("MPI_Init") == 0)
     {
-        hosttrace_mpi_set_attr();
-        // hosttrace will set this environement variable to true in binary rewrite mode
+        omnitrace_mpi_set_attr();
+        // omnitrace will set this environement variable to true in binary rewrite mode
         // when it detects MPI. Hides this env variable from the user to avoid this
         // being activated unwaringly during runtime instrumentation because that
         // will result in double instrumenting the MPI functions (unless the MPI functions
         // were excluded via a regex expression)
         if(get_use_mpip())
         {
-            HOSTTRACE_DEBUG("[%s] Activating MPI wrappers...\n", __FUNCTION__);
-            comp::configure_mpip<tim::component_tuple<hosttrace_component>, hosttrace>();
-            mpip_index = comp::activate_mpip<tim::component_tuple<hosttrace_component>,
-                                             hosttrace>();
+            OMNITRACE_DEBUG("[%s] Activating MPI wrappers...\n", __FUNCTION__);
+            comp::configure_mpip<tim::component_tuple<omnitrace_component>, omnitrace>();
+            mpip_index = comp::activate_mpip<tim::component_tuple<omnitrace_component>,
+                                             omnitrace>();
         }
-        hosttrace_push_trace(_data.tool_id.c_str());
+        omnitrace_push_trace(_data.tool_id.c_str());
     }
-}
-
-void
-mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
-{
-    HOSTTRACE_DEBUG("[%s] %s()\n", __FUNCTION__, _data.tool_id.c_str());
-    if(mpip_index != std::numeric_limits<uint64_t>::max())
-        comp::deactivate_mpip<tim::component_tuple<hosttrace_component>, hosttrace>(
-            mpip_index);
-    if(!mpi_init_string.empty()) hosttrace_pop_trace(mpi_init_string.c_str());
-    mpi_init_string = {};
-    hosttrace_trace_finalize();
+    else if(_retval == tim::mpi::success_v && _data.tool_id.find("MPI_Comm_") == 0)
+    {
+        /*if(_data.tool_id == "MPI_Comm_rank")
+        {
+            if(m_rank)
+                tim::mpi::set_rank(*m_rank, m_comm);
+            else
+            {
+                OMNITRACE_PRINT("[%s] %s() returned %i :: nullptr to rank\n",
+                                __FUNCTION__, _data.tool_id.c_str(), (int) _retval);
+            }
+        }
+        else if(_data.tool_id == "MPI_Comm_size")
+        {
+            if(m_size)
+                tim::mpi::set_size(*m_size, m_comm);
+            else
+            {
+                OMNITRACE_PRINT("[%s] %s() returned %i :: nullptr to size\n",
+                                __FUNCTION__, _data.tool_id.c_str(), (int) _retval);
+            }
+        }
+        else
+        {
+            OMNITRACE_PRINT("[%s] %s() returned %i :: unexpected function wrapper\n",
+                            __FUNCTION__, _data.tool_id.c_str(), (int) _retval);
+        }*/
+    }
 }
 
 TIMEMORY_INITIALIZE_STORAGE(mpi_gotcha)

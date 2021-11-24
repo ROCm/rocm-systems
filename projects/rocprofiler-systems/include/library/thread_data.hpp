@@ -36,14 +36,14 @@
 #include <memory>
 #include <type_traits>
 
-#if !defined(HOSTTRACE_MAX_THREADS)
-#    define HOSTTRACE_MAX_THREADS 1024
+#if !defined(OMNITRACE_MAX_THREADS)
+#    define OMNITRACE_MAX_THREADS 1024
 #endif
 
-static constexpr size_t max_supported_threads = HOSTTRACE_MAX_THREADS;
+static constexpr size_t max_supported_threads = OMNITRACE_MAX_THREADS;
 
 template <typename Tp, typename Tag = void, size_t MaxThreads = max_supported_threads>
-struct hosttrace_thread_data
+struct omnitrace_thread_data
 {
     using instance_array_t  = std::array<std::unique_ptr<Tp>, MaxThreads>;
     using construct_on_init = std::true_type;
@@ -61,7 +61,7 @@ struct hosttrace_thread_data
 template <typename Tp, typename Tag, size_t MaxThreads>
 template <typename... Args>
 void
-hosttrace_thread_data<Tp, Tag, MaxThreads>::construct(Args&&... _args)
+omnitrace_thread_data<Tp, Tag, MaxThreads>::construct(Args&&... _args)
 {
     static thread_local bool _v = [&_args...]() {
         instances().at(threading::get_id()) =
@@ -73,14 +73,14 @@ hosttrace_thread_data<Tp, Tag, MaxThreads>::construct(Args&&... _args)
 
 template <typename Tp, typename Tag, size_t MaxThreads>
 std::unique_ptr<Tp>&
-hosttrace_thread_data<Tp, Tag, MaxThreads>::instance()
+omnitrace_thread_data<Tp, Tag, MaxThreads>::instance()
 {
     return instances().at(threading::get_id());
 }
 
 template <typename Tp, typename Tag, size_t MaxThreads>
-typename hosttrace_thread_data<Tp, Tag, MaxThreads>::instance_array_t&
-hosttrace_thread_data<Tp, Tag, MaxThreads>::instances()
+typename omnitrace_thread_data<Tp, Tag, MaxThreads>::instance_array_t&
+omnitrace_thread_data<Tp, Tag, MaxThreads>::instances()
 {
     static auto _v = instance_array_t{};
     return _v;
@@ -89,7 +89,7 @@ hosttrace_thread_data<Tp, Tag, MaxThreads>::instances()
 template <typename Tp, typename Tag, size_t MaxThreads>
 template <typename... Args>
 std::unique_ptr<Tp>&
-hosttrace_thread_data<Tp, Tag, MaxThreads>::instance(construct_on_init, Args&&... _args)
+omnitrace_thread_data<Tp, Tag, MaxThreads>::instance(construct_on_init, Args&&... _args)
 {
     construct(std::forward<Args>(_args)...);
     return instances().at(threading::get_id());
@@ -97,8 +97,8 @@ hosttrace_thread_data<Tp, Tag, MaxThreads>::instance(construct_on_init, Args&&..
 
 template <typename Tp, typename Tag, size_t MaxThreads>
 template <typename... Args>
-typename hosttrace_thread_data<Tp, Tag, MaxThreads>::instance_array_t&
-hosttrace_thread_data<Tp, Tag, MaxThreads>::instances(construct_on_init, Args&&... _args)
+typename omnitrace_thread_data<Tp, Tag, MaxThreads>::instance_array_t&
+omnitrace_thread_data<Tp, Tag, MaxThreads>::instances(construct_on_init, Args&&... _args)
 {
     static auto _v = [&]() {
         auto _internal = instance_array_t{};

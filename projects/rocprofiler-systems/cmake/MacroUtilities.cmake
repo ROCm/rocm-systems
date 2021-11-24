@@ -12,19 +12,19 @@ include(CMakeDependentOption)
 include(CMakeParseArguments)
 
 # -----------------------------------------------------------------------
-# message which handles HOSTTRACE_QUIET_CONFIG settings
+# message which handles OMNITRACE_QUIET_CONFIG settings
 # -----------------------------------------------------------------------
 #
-function(HOSTTRACE_MESSAGE TYPE)
-    if(NOT HOSTTRACE_QUIET_CONFIG)
-        message(${TYPE} "[hosttrace] ${ARGN}")
+function(OMNITRACE_MESSAGE TYPE)
+    if(NOT OMNITRACE_QUIET_CONFIG)
+        message(${TYPE} "[omnitrace] ${ARGN}")
     endif()
 endfunction()
 
 # -----------------------------------------------------------------------
 # Save a set of variables with the given prefix
 # -----------------------------------------------------------------------
-macro(HOSTTRACE_SAVE_VARIABLES _PREFIX)
+macro(OMNITRACE_SAVE_VARIABLES _PREFIX)
     # parse args
     cmake_parse_arguments(
         SAVE
@@ -58,7 +58,7 @@ endmacro()
 # -----------------------------------------------------------------------
 # Restore a set of variables with the given prefix
 # -----------------------------------------------------------------------
-macro(HOSTTRACE_RESTORE_VARIABLES _PREFIX)
+macro(OMNITRACE_RESTORE_VARIABLES _PREFIX)
     # parse args
     cmake_parse_arguments(
         RESTORE
@@ -92,10 +92,10 @@ macro(HOSTTRACE_RESTORE_VARIABLES _PREFIX)
 endmacro()
 
 # -----------------------------------------------------------------------
-# function - hosttrace_capitalize - make a string capitalized (first letter is capital)
+# function - omnitrace_capitalize - make a string capitalized (first letter is capital)
 # usage: capitalize("SHARED" CShared) message(STATUS "-- CShared is \"${CShared}\"") $ --
 # CShared is "Shared"
-function(HOSTTRACE_CAPITALIZE str var)
+function(OMNITRACE_CAPITALIZE str var)
     # make string lower
     string(TOLOWER "${str}" str)
     string(SUBSTRING "${str}" 0 1 _first)
@@ -108,14 +108,14 @@ function(HOSTTRACE_CAPITALIZE str var)
 endfunction()
 
 # ------------------------------------------------------------------------------#
-# function add_hosttrace_test_target()
+# function add_omnitrace_test_target()
 #
 # Creates a target which runs ctest but depends on all the tests being built.
 #
-function(ADD_HOSTTRACE_TEST_TARGET)
-    if(NOT TARGET hosttrace-test)
+function(ADD_OMNITRACE_TEST_TARGET)
+    if(NOT TARGET omnitrace-test)
         add_custom_target(
-            hosttrace-test
+            omnitrace-test
             COMMAND ${CMAKE_COMMAND} --build ${PROJECT_BINARY_DIR} --target test
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
             COMMENT "Running tests...")
@@ -123,7 +123,7 @@ function(ADD_HOSTTRACE_TEST_TARGET)
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
-# macro hosttrace_checkout_git_submodule()
+# macro omnitrace_checkout_git_submodule()
 #
 # Run "git submodule update" if a file in a submodule does not exist
 #
@@ -132,7 +132,7 @@ endfunction()
 # value) -- (default: PROJECT_SOURCE_DIR) TEST_FILE (one value) -- file to check for
 # (default: CMakeLists.txt) ADDITIONAL_CMDS (many value) -- any addition commands to pass
 #
-function(HOSTTRACE_CHECKOUT_GIT_SUBMODULE)
+function(OMNITRACE_CHECKOUT_GIT_SUBMODULE)
     # parse args
     cmake_parse_arguments(
         CHECKOUT "RECURSIVE"
@@ -201,7 +201,7 @@ function(HOSTTRACE_CHECKOUT_GIT_SUBMODULE)
         if(RET GREATER 0)
             set(_CMD "${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}")
-            message(STATUS "function(hosttrace_checkout_git_submodule) failed.")
+            message(STATUS "function(omnitrace_checkout_git_submodule) failed.")
             message(FATAL_ERROR "Command: \"${_CMD}\"")
         else()
             set(_TEST_FILE_EXISTS ON)
@@ -241,7 +241,7 @@ function(HOSTTRACE_CHECKOUT_GIT_SUBMODULE)
                 "${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}"
                 )
-            message(STATUS "function(hosttrace_checkout_git_submodule) failed.")
+            message(STATUS "function(omnitrace_checkout_git_submodule) failed.")
             message(FATAL_ERROR "Command: \"${_CMD}\"")
         else()
             set(_TEST_FILE_EXISTS ON)
@@ -259,7 +259,7 @@ endfunction()
 # ----------------------------------------------------------------------------------------#
 # try to find a package quietly
 #
-function(HOSTTRACE_TEST_FIND_PACKAGE PACKAGE_NAME OUTPUT_VAR)
+function(OMNITRACE_TEST_FIND_PACKAGE PACKAGE_NAME OUTPUT_VAR)
     cmake_parse_arguments(PACKAGE "" "" "UNSET" ${ARGN})
     find_package(${PACKAGE_NAME} QUIET ${PACKAGE_UNPARSED_ARGUMENTS})
     if(NOT ${PACKAGE_NAME}_FOUND)
@@ -279,7 +279,7 @@ endfunction()
 # ----------------------------------------------------------------------------------------#
 # macro to add an interface lib
 #
-macro(HOSTTRACE_ADD_INTERFACE_LIBRARY _TARGET)
+macro(OMNITRACE_ADD_INTERFACE_LIBRARY _TARGET)
     add_library(${_TARGET} INTERFACE)
     add_library(${PROJECT_NAME}::${_TARGET} ALIAS ${_TARGET})
     install(
@@ -293,7 +293,7 @@ macro(HOSTTRACE_ADD_INTERFACE_LIBRARY _TARGET)
     endif()
 endmacro()
 
-function(HOSTTRACE_ADD_RPATH)
+function(OMNITRACE_ADD_RPATH)
     set(_DIRS)
     foreach(_ARG ${ARGN})
         if(EXISTS "${_ARG}" AND IS_DIRECTORY "${_ARG}")
@@ -319,7 +319,7 @@ endfunction()
 # specified by the existence of the variable <NAME>, to the list of enabled/disabled
 # features, plus a docstring describing the feature
 #
-function(HOSTTRACE_ADD_FEATURE _var _description)
+function(OMNITRACE_ADD_FEATURE _var _description)
     set(EXTRA_DESC "")
     foreach(currentArg ${ARGN})
         if(NOT "${currentArg}" STREQUAL "${_var}"
@@ -336,12 +336,12 @@ function(HOSTTRACE_ADD_FEATURE _var _description)
     if("CMAKE_DEFINE" IN_LIST ARGN)
         set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES
                                             "${_var} @${_var}@")
-        if(HOSTTRACE_BUILD_DOCS)
+        if(OMNITRACE_BUILD_DOCS)
             set_property(
                 GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
                                        "${_var}` | ${_description}${EXTRA_DESC} |")
         endif()
-    elseif("DOC" IN_LIST ARGN AND HOSTTRACE_BUILD_DOCS)
+    elseif("DOC" IN_LIST ARGN AND OMNITRACE_BUILD_DOCS)
         set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
                                             "${_var}` | ${_description}${EXTRA_DESC} |")
     endif()
@@ -351,13 +351,13 @@ endfunction()
 # function add_option(<OPTION_NAME> <DOCSRING> <DEFAULT_SETTING> [NO_FEATURE]) Add an
 # option and add as a feature if NO_FEATURE is not provided
 #
-function(HOSTTRACE_ADD_OPTION _NAME _MESSAGE _DEFAULT)
+function(OMNITRACE_ADD_OPTION _NAME _MESSAGE _DEFAULT)
     option(${_NAME} "${_MESSAGE}" ${_DEFAULT})
     if("NO_FEATURE" IN_LIST ARGN)
         mark_as_advanced(${_NAME})
     else()
-        hosttrace_add_feature(${_NAME} "${_MESSAGE}")
-        if(HOSTTRACE_BUILD_DOCS)
+        omnitrace_add_feature(${_NAME} "${_MESSAGE}")
+        if(OMNITRACE_BUILD_DOCS)
             set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
                                                 "${_NAME}` | ${_MESSAGE} |")
         endif()
@@ -373,7 +373,7 @@ endfunction()
 # ----------------------------------------------------------------------------------------#
 # function print_enabled_features() Print enabled  features plus their docstrings.
 #
-function(HOSTTRACE_PRINT_ENABLED_FEATURES)
+function(OMNITRACE_PRINT_ENABLED_FEATURES)
     set(_basemsg "The following features are defined/enabled (+):")
     set(_currentFeatureText "${_basemsg}")
     get_property(_features GLOBAL PROPERTY ${PROJECT_NAME}_FEATURES)
@@ -397,7 +397,7 @@ function(HOSTTRACE_PRINT_ENABLED_FEATURES)
                     string(REGEX REPLACE "^${PROJECT_NAME}_USE_" "" _feature_tmp
                                          "${_feature}")
                     string(TOLOWER "${_feature_tmp}" _feature_tmp_l)
-                    hosttrace_capitalize("${_feature_tmp}" _feature_tmp_c)
+                    omnitrace_capitalize("${_feature_tmp}" _feature_tmp_c)
                     foreach(_var _feature _feature_tmp _feature_tmp_l _feature_tmp_c)
                         set(_ver "${${${_var}}_VERSION}")
                         if(NOT "${_ver}" STREQUAL "")
@@ -421,7 +421,7 @@ endfunction()
 # ----------------------------------------------------------------------------------------#
 # function print_disabled_features() Print disabled features plus their docstrings.
 #
-function(HOSTTRACE_PRINT_DISABLED_FEATURES)
+function(OMNITRACE_PRINT_DISABLED_FEATURES)
     set(_basemsg "The following features are NOT defined/enabled (-):")
     set(_currentFeatureText "${_basemsg}")
     get_property(_features GLOBAL PROPERTY ${PROJECT_NAME}_FEATURES)
@@ -450,9 +450,9 @@ endfunction()
 # ----------------------------------------------------------------------------------------#
 # function print_features() Print all features plus their docstrings.
 #
-function(HOSTTRACE_PRINT_FEATURES)
-    hosttrace_print_enabled_features()
-    hosttrace_print_disabled_features()
+function(OMNITRACE_PRINT_FEATURES)
+    omnitrace_print_enabled_features()
+    omnitrace_print_disabled_features()
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
@@ -462,26 +462,26 @@ endfunction()
 # source files DIRECTORY   --> all files in directory PROJECT     --> all files/targets in
 # a project/subproject
 #
-function(hosttrace_custom_compilation)
+function(omnitrace_custom_compilation)
     cmake_parse_arguments(COMP "GLOBAL;PROJECT" "COMPILER" "DIRECTORY;TARGET;SOURCE"
                           ${ARGN})
 
-    # find hosttrace_launch_compiler
+    # find omnitrace_launch_compiler
     find_program(
-        HOSTTRACE_COMPILE_LAUNCHER
-        NAMES hosttrace_launch_compiler
+        OMNITRACE_COMPILE_LAUNCHER
+        NAMES omnitrace_launch_compiler
         HINTS ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
         PATHS ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
         PATH_SUFFIXES scripts bin)
 
     if(NOT COMP_COMPILER)
-        message(FATAL_ERROR "hosttrace_custom_compilation not provided COMPILER argument")
+        message(FATAL_ERROR "omnitrace_custom_compilation not provided COMPILER argument")
     endif()
 
-    if(NOT HOSTTRACE_COMPILE_LAUNCHER)
+    if(NOT OMNITRACE_COMPILE_LAUNCHER)
         message(
             FATAL_ERROR
-                "hosttrace could not find 'hosttrace_launch_compiler'. Please set '-DHOSTTRACE_COMPILE_LAUNCHER=/path/to/launcher'"
+                "omnitrace could not find 'omnitrace_launch_compiler'. Please set '-DOMNITRACE_COMPILE_LAUNCHER=/path/to/launcher'"
             )
     endif()
 
@@ -491,16 +491,16 @@ function(hosttrace_custom_compilation)
             GLOBAL
             PROPERTY
                 RULE_LAUNCH_COMPILE
-                "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
+                "${OMNITRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
         set_property(
             GLOBAL
             PROPERTY
                 RULE_LAUNCH_LINK
-                "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
+                "${OMNITRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}")
     else()
         foreach(_TYPE PROJECT DIRECTORY TARGET SOURCE)
             # make project/subproject scoping easy, e.g.
-            # hosttrace_custom_compilation(PROJECT) after project(...)
+            # omnitrace_custom_compilation(PROJECT) after project(...)
             if("${_TYPE}" STREQUAL "PROJECT" AND COMP_${_TYPE})
                 list(APPEND COMP_DIRECTORY ${PROJECT_SOURCE_DIR})
                 unset(COMP_${_TYPE})
@@ -512,13 +512,13 @@ function(hosttrace_custom_compilation)
                         ${_TYPE} ${_VAL}
                         PROPERTY
                             RULE_LAUNCH_COMPILE
-                            "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}"
+                            "${OMNITRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}"
                         )
                     set_property(
                         ${_TYPE} ${_VAL}
                         PROPERTY
                             RULE_LAUNCH_LINK
-                            "${HOSTTRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}"
+                            "${OMNITRACE_COMPILE_LAUNCHER} ${COMP_COMPILER} ${CMAKE_CXX_COMPILER}"
                         )
                 endforeach()
             endif()

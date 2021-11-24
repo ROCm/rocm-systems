@@ -41,40 +41,40 @@ bool
 get_critical_trace_debug();
 
 #if defined(TIMEMORY_USE_MPI)
-#    define HOSTTRACE_CONDITIONAL_PRINT(COND, ...)                                       \
+#    define OMNITRACE_CONDITIONAL_PRINT(COND, ...)                                       \
         if(COND)                                                                         \
         {                                                                                \
             fflush(stderr);                                                              \
             tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };              \
-            fprintf(stderr, "[hosttrace][%i][%li] ", static_cast<int>(tim::dmp::rank()), \
+            fprintf(stderr, "[omnitrace][%i][%li] ", static_cast<int>(tim::dmp::rank()), \
                     tim::threading::get_id());                                           \
             fprintf(stderr, __VA_ARGS__);                                                \
             fflush(stderr);                                                              \
         }
 #else
-#    define HOSTTRACE_CONDITIONAL_PRINT(COND, ...)                                       \
+#    define OMNITRACE_CONDITIONAL_PRINT(COND, ...)                                       \
         if(COND)                                                                         \
         {                                                                                \
             fflush(stderr);                                                              \
             tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };              \
-            fprintf(stderr, "[hosttrace][%i][%li] ",                                     \
+            fprintf(stderr, "[omnitrace][%i][%li] ",                                     \
                     static_cast<int>(tim::process::get_id()), tim::threading::get_id()); \
             fprintf(stderr, __VA_ARGS__);                                                \
             fflush(stderr);                                                              \
         }
 #endif
 
-#define HOSTTRACE_CONDITIONAL_BASIC_PRINT(COND, ...)                                     \
+#define OMNITRACE_CONDITIONAL_BASIC_PRINT(COND, ...)                                     \
     if(COND)                                                                             \
     {                                                                                    \
         fflush(stderr);                                                                  \
         tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };                  \
-        fprintf(stderr, "[hosttrace] ");                                                 \
+        fprintf(stderr, "[omnitrace] ");                                                 \
         fprintf(stderr, __VA_ARGS__);                                                    \
         fflush(stderr);                                                                  \
     }
 
-#define HOSTTRACE_DEBUG(...) HOSTTRACE_CONDITIONAL_PRINT(get_debug(), __VA_ARGS__)
-#define HOSTTRACE_PRINT(...) HOSTTRACE_CONDITIONAL_PRINT(true, __VA_ARGS__)
-#define HOSTTRACE_CT_DEBUG(...)                                                          \
-    HOSTTRACE_CONDITIONAL_PRINT(get_critical_trace_debug(), __VA_ARGS__)
+#define OMNITRACE_DEBUG(...) OMNITRACE_CONDITIONAL_PRINT(get_debug(), __VA_ARGS__)
+#define OMNITRACE_PRINT(...) OMNITRACE_CONDITIONAL_PRINT(true, __VA_ARGS__)
+#define OMNITRACE_CT_DEBUG(...)                                                          \
+    OMNITRACE_CONDITIONAL_PRINT(get_critical_trace_debug(), __VA_ARGS__)

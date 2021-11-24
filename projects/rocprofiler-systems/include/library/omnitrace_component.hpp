@@ -30,9 +30,9 @@
 
 #include "library/timemory.hpp"
 
-// timemory component which calls hosttrace functions
+// timemory component which calls omnitrace functions
 // (used in gotcha wrappers)
-struct hosttrace_component : comp::base<hosttrace_component, void>
+struct omnitrace_component : comp::base<omnitrace_component, void>
 {
     void start();
     void stop();

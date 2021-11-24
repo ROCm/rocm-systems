@@ -26,7 +26,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
-#include "hosttrace.hpp"
+#include "omnitrace.hpp"
 
 //======================================================================================//
 //
@@ -258,7 +258,7 @@ find_function(image_t* app_image, const std::string& _name, strset_t _extra)
         ++itr;
     }
 
-    if(!_func) verbprintf(2, "hosttrace: Unable to find function %s\n", _name.c_str());
+    if(!_func) verbprintf(2, "omnitrace: Unable to find function %s\n", _name.c_str());
 
     return _func;
 }

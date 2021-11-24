@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 
-project(hosttrace-transpose LANGUAGES CXX)
+project(omnitrace-transpose LANGUAGES CXX)
 
 find_program(HIPCC_EXECUTABLE NAMES hipcc)
 
@@ -17,8 +17,8 @@ endif()
 
 add_executable(transpose transpose.cpp)
 
-if(CMAKE_CXX_COMPILER_IS_CLANG AND TARGET hosttrace::hosttrace-compile-options)
-    target_link_libraries(transpose PRIVATE hosttrace::hosttrace-compile-options)
+if(CMAKE_CXX_COMPILER_IS_CLANG AND TARGET omnitrace::omnitrace-compile-options)
+    target_link_libraries(transpose PRIVATE omnitrace::omnitrace-compile-options)
 else()
     target_compile_options(transpose PRIVATE -W -Wall)
 endif()
@@ -34,6 +34,6 @@ if(NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
     if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
         # defined in MacroUtilities.cmake
-        hosttrace_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transpose)
+        omnitrace_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transpose)
     endif()
 endif()

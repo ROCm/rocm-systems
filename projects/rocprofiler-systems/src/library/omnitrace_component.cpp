@@ -26,25 +26,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
-#include "library/hosttrace_component.hpp"
+#include "library/omnitrace_component.hpp"
 #include "library/api.hpp"
 
 void
-hosttrace_component::start()
+omnitrace_component::start()
 {
-    if(m_prefix) hosttrace_push_trace(m_prefix);
+    if(m_prefix) omnitrace_push_trace(m_prefix);
 }
 
 void
-hosttrace_component::stop()
+omnitrace_component::stop()
 {
-    if(m_prefix) hosttrace_pop_trace(m_prefix);
+    if(m_prefix) omnitrace_pop_trace(m_prefix);
 }
 
 void
-hosttrace_component::set_prefix(const char* _prefix)
+omnitrace_component::set_prefix(const char* _prefix)
 {
     m_prefix = _prefix;
 }
 
-TIMEMORY_INITIALIZE_STORAGE(hosttrace_component)
+TIMEMORY_INITIALIZE_STORAGE(omnitrace_component)

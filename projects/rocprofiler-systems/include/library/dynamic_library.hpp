@@ -53,7 +53,7 @@ struct dynamic_library
             handle = dlopen(filename.c_str(), flags);
             if(!handle)
             {
-                HOSTTRACE_DEBUG("%s\n", dlerror());
+                OMNITRACE_DEBUG("%s\n", dlerror());
             }
             dlerror();  // Clear any existing error
         }

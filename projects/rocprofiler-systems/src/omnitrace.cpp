@@ -26,7 +26,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
-#include "hosttrace.hpp"
+#include "omnitrace.hpp"
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -52,10 +52,10 @@ static std::map<string_t, call_expr_pointer_t>    beg_expr        = {};
 static std::map<string_t, call_expr_pointer_t>    end_expr        = {};
 static const auto                                 npos_v          = string_t::npos;
 static string_t                                   instr_mode      = "trace";
-static string_t    instr_push_func    = "hosttrace_push_trace";
-static string_t    instr_pop_func     = "hosttrace_pop_trace";
-static string_t    instr_push_hash    = "hosttrace_push_trace_hash";
-static string_t    instr_pop_hash     = "hosttrace_pop_trace_hash";
+static string_t    instr_push_func    = "omnitrace_push_trace";
+static string_t    instr_pop_func     = "omnitrace_pop_trace";
+static string_t    instr_push_hash    = "omnitrace_push_trace_hash";
+static string_t    instr_pop_hash     = "omnitrace_pop_trace_hash";
 static string_t    print_instrumented = {};
 static string_t    print_available    = {};
 static string_t    print_overlapping  = {};
@@ -100,7 +100,7 @@ main(int argc, char** argv)
             tim::set_env<string_t>("DYNINSTAPI_RT_LIB",
                                    TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.a"), 0);
     }
-    verbprintf(0, "[hosttrace] DYNINST_API_RT: %s\n",
+    verbprintf(0, "[omnitrace] DYNINST_API_RT: %s\n",
                tim::get_env<string_t>("DYNINSTAPI_RT_LIB", "").c_str());
 
     argv0 = argv[0];
@@ -184,19 +184,19 @@ main(int argc, char** argv)
 
     if(verbose_level > 1)
     {
-        std::cout << "[hosttrace][original]: " << cmd_string(argc, argv) << std::endl;
-        std::cout << "[hosttrace][cfg-args]: " << cmd_string(_argc, _argv) << std::endl;
+        std::cout << "[omnitrace][original]: " << cmd_string(argc, argv) << std::endl;
+        std::cout << "[omnitrace][cfg-args]: " << cmd_string(_argc, _argv) << std::endl;
     }
 
     if(_cmdc > 0)
-        std::cout << "\n[hosttrace][command]: " << cmd_string(_cmdc, _cmdv) << "\n\n";
+        std::cout << "\n[omnitrace][command]: " << cmd_string(_cmdc, _cmdv) << "\n\n";
 
     if(_cmdc > 0) cmdv0 = _cmdv[0];
 
     std::stringstream jump_description;
     jump_description
-        << "Instrument with function pointers in HOSTTRACE_JUMP_LIBRARY (default: "
-        << tim::get_env<string_t>("HOSTTRACE_JUMP_LIBRARY", "jump/libhosttrace.so")
+        << "Instrument with function pointers in OMNITRACE_JUMP_LIBRARY (default: "
+        << tim::get_env<string_t>("OMNITRACE_JUMP_LIBRARY", "jump/libomnitrace.so")
         << ")";
 
     // now can loop through the options.  If the first character is '-', then we know
@@ -204,7 +204,7 @@ main(int argc, char** argv)
     // it is unrecognized, then set the errflag to report an error.  When we come to a
     // non '-' charcter, then we must be at the application name.
     using parser_t = tim::argparse::argument_parser;
-    parser_t parser("hosttrace");
+    parser_t parser("omnitrace");
 
     parser.enable_help();
     parser.add_argument()
@@ -251,7 +251,7 @@ main(int argc, char** argv)
     parser.add_argument()
         .names({ "-L", "--library" })
         .description(
-            "Libraries with instrumentation routines (default: \"libhosttrace\")");
+            "Libraries with instrumentation routines (default: \"libomnitrace\")");
     parser.add_argument()
         .names({ "-S", "--stdlib" })
         .description("Enable instrumentation of C++ standard library functions.")
@@ -267,17 +267,17 @@ main(int argc, char** argv)
     parser.add_argument()
         .names({ "-d", "--default-components" })
         .description("Default components to instrument (only useful when timemory is "
-                     "enabled in hosttrace library)");
+                     "enabled in omnitrace library)");
     parser.add_argument()
         .names({ "-M", "--mode" })
         .description("Instrumentation mode. 'trace' mode is immutable, 'region' mode is "
-                     "mutable by hosttrace library interface")
+                     "mutable by omnitrace library interface")
         .choices({ "trace", "region" })
         .count(1);
     parser.add_argument()
         .names({ "--env" })
         .description("Environment variables to add to the runtime in form "
-                     "VARIABLE=VALUE. E.g. use '--env HOSTTRACE_USE_TIMEMORY=ON' to "
+                     "VARIABLE=VALUE. E.g. use '--env OMNITRACE_USE_TIMEMORY=ON' to "
                      "default to using timemory instead of perfetto");
     parser.add_argument()
         .names({ "--prefer" })
@@ -289,7 +289,7 @@ main(int argc, char** argv)
         .action([](auto&) { is_driver = true; });
     parser
         .add_argument({ "--mpi" },
-                      "Enable MPI support (requires hosttrace built w/ MPI and GOTCHA "
+                      "Enable MPI support (requires omnitrace built w/ MPI and GOTCHA "
                       "support). NOTE: this will automatically be activated if "
                       "MPI_Init/MPI_Init_thread and MPI_Finalize are found in the symbol "
                       "table of target")
@@ -489,7 +489,7 @@ main(int argc, char** argv)
     if(!parser.exists("L"))
     {
         for(auto& itr : inputlib)
-            itr += "libhosttrace";
+            itr += "libomnitrace";
 
         if(parser.exists("s"))
         {
@@ -540,10 +540,10 @@ main(int argc, char** argv)
     if(parser.exists("M"))
     {
         instr_mode      = parser.get<string_t>("M");
-        instr_push_func = "hosttrace_push_" + instr_mode;
-        instr_push_hash = "hosttrace_push_" + instr_mode + "_hash";
-        instr_pop_func  = "hosttrace_pop_" + instr_mode;
-        instr_pop_hash  = "hosttrace_pop_" + instr_mode + "_hash";
+        instr_push_func = "omnitrace_push_" + instr_mode;
+        instr_push_hash = "omnitrace_push_" + instr_mode + "_hash";
+        instr_pop_func  = "omnitrace_pop_" + instr_mode;
+        instr_pop_hash  = "omnitrace_pop_" + instr_mode + "_hash";
     }
 
     if(parser.exists("prefer")) prefer_library = parser.get<string_t>("prefer");
@@ -584,7 +584,7 @@ main(int argc, char** argv)
         auto _pos      = _exe_base.find_last_of('/');
         if(_pos != std::string::npos && _pos + 1 < _exe_base.length())
             _exe_base = _exe_base.substr(_pos + 1);
-        modfunc_dump_dir = TIMEMORY_JOIN("-", "hosttrace", _exe_base, "output");
+        modfunc_dump_dir = TIMEMORY_JOIN("-", "omnitrace", _exe_base, "output");
     }
 
     if(verbose_level >= 0) tim::makedir(modfunc_dump_dir);
@@ -601,8 +601,8 @@ main(int argc, char** argv)
         if(!regex_expr.empty()) regex_array.push_back(std::regex(regex_expr, regex_opts));
     };
 
-    add_regex(func_include, tim::get_env<string_t>("HOSTTRACE_REGEX_INCLUDE", ""));
-    add_regex(func_exclude, tim::get_env<string_t>("HOSTTRACE_REGEX_EXCLUDE", ""));
+    add_regex(func_include, tim::get_env<string_t>("OMNITRACE_REGEX_INCLUDE", ""));
+    add_regex(func_exclude, tim::get_env<string_t>("OMNITRACE_REGEX_EXCLUDE", ""));
 
     if(parser.exists("R"))
     {
@@ -672,8 +672,8 @@ main(int argc, char** argv)
     {
         parser.print_help(extra_help);
         fprintf(stderr, "\nError! No command for dynamic instrumentation. Use "
-                        "\n\thosttrace <OPTIONS> -- <COMMAND> <ARGS>\nE.g. "
-                        "\n\thosttrace -o foo.inst -- ./foo\nwill output an "
+                        "\n\tomnitrace <OPTIONS> -- <COMMAND> <ARGS>\nE.g. "
+                        "\n\tomnitrace -o foo.inst -- ./foo\nwill output an "
                         "instrumented version of 'foo' executable to 'foo.inst'\n");
         return EXIT_FAILURE;
     }
@@ -705,11 +705,11 @@ main(int argc, char** argv)
     //----------------------------------------------------------------------------------//
 
     addr_space =
-        hosttrace_get_address_space(bpatch, _cmdc, _cmdv, binary_rewrite, _pid, mutname);
+        omnitrace_get_address_space(bpatch, _cmdc, _cmdv, binary_rewrite, _pid, mutname);
 
     if(!addr_space)
     {
-        fprintf(stderr, "[hosttrace]> Error! address space for dynamic "
+        fprintf(stderr, "[omnitrace]> Error! address space for dynamic "
                         "instrumentation was not created\n");
         exit(EXIT_FAILURE);
     }
@@ -928,11 +928,11 @@ main(int argc, char** argv)
     auto* exit_trace    = find_function(app_image, instr_pop_func.c_str());
     auto* entr_hash     = find_function(app_image, instr_push_hash.c_str());
     auto* exit_hash     = find_function(app_image, instr_pop_hash.c_str());
-    auto* init_func     = find_function(app_image, "hosttrace_trace_init");
-    auto* fini_func     = find_function(app_image, "hosttrace_trace_finalize");
-    auto* env_func      = find_function(app_image, "hosttrace_trace_set_env");
-    auto* mpi_func      = find_function(app_image, "hosttrace_trace_set_mpi");
-    auto* hash_func     = find_function(app_image, "hosttrace_add_hash_id");
+    auto* init_func     = find_function(app_image, "omnitrace_trace_init");
+    auto* fini_func     = find_function(app_image, "omnitrace_trace_finalize");
+    auto* env_func      = find_function(app_image, "omnitrace_trace_set_env");
+    auto* mpi_func      = find_function(app_image, "omnitrace_trace_set_mpi");
+    auto* hash_func     = find_function(app_image, "omnitrace_add_hash_id");
     auto* mpi_init_func = find_function(app_image, "MPI_Init", { "MPI_Init_thread" });
     auto* mpi_fini_func = find_function(app_image, "MPI_Finalize");
 
@@ -986,9 +986,9 @@ main(int argc, char** argv)
         if(_pos != npos_v) _name = _name.substr(_pos + 1);
         _pos = _name.find('.');
         if(_pos != npos_v) _name = _name.substr(0, _pos);
-        _pos = _name.find("libhosttrace-");
+        _pos = _name.find("libomnitrace-");
         if(_pos != npos_v)
-            _name = _name.erase(_pos, std::string("libhosttrace-").length());
+            _name = _name.erase(_pos, std::string("libomnitrace-").length());
         _pos = _name.find("lib");
         if(_pos == 0) _name = _name.substr(_pos + std::string("lib").length());
         while((_pos = _name.find('-')) != npos_v)
@@ -997,7 +997,7 @@ main(int argc, char** argv)
         verbprintf(2,
                    "Supplemental instrumentation library '%s' is named '%s' after "
                    "removing everything before last '/', everything after first '.', and "
-                   "'libhosttrace-'...\n",
+                   "'libomnitrace-'...\n",
                    itr.c_str(), _name.c_str());
 
         use_stubs[_name] = false;
@@ -1043,8 +1043,8 @@ main(int argc, char** argv)
         }
 
         // check standard function signature if no user-specified matches
-        if(add_instr_library(_name, TIMEMORY_JOIN("", "hosttrace_register_" + _name),
-                             TIMEMORY_JOIN("", "hosttrace_deregister_" + _name)))
+        if(add_instr_library(_name, TIMEMORY_JOIN("", "omnitrace_register_" + _name),
+                             TIMEMORY_JOIN("", "omnitrace_deregister_" + _name)))
             continue;
 
     found_instr_functions:
@@ -1059,16 +1059,16 @@ main(int argc, char** argv)
 
     if(!main_func && is_driver)
     {
-        fprintf(stderr, "[hosttrace]> Couldn't find '%s'\n", main_fname.c_str());
+        fprintf(stderr, "[omnitrace]> Couldn't find '%s'\n", main_fname.c_str());
         if(!_mutatee_init || !_mutatee_fini)
         {
-            fprintf(stderr, "[hosttrace]> Couldn't find '%s' or '%s', aborting\n",
+            fprintf(stderr, "[omnitrace]> Couldn't find '%s' or '%s', aborting\n",
                     "_init", "_fini");
             throw std::runtime_error("Could not find main function");
         }
         else
         {
-            fprintf(stderr, "[hosttrace]> using '%s' and '%s' in lieu of '%s'...",
+            fprintf(stderr, "[omnitrace]> using '%s' and '%s' in lieu of '%s'...",
                     "_init", "_fini", main_fname.c_str());
         }
     }
@@ -1081,23 +1081,23 @@ main(int argc, char** argv)
 
     for(const auto& itr :
         { pair_t(main_func, main_fname), pair_t(entr_trace, instr_push_func),
-          pair_t(exit_trace, instr_pop_func), pair_t(init_func, "hosttrace_trace_init"),
-          pair_t(fini_func, "hosttrace_trace_finalize"),
-          pair_t(env_func, "hosttrace_trace_set_env") })
+          pair_t(exit_trace, instr_pop_func), pair_t(init_func, "omnitrace_trace_init"),
+          pair_t(fini_func, "omnitrace_trace_finalize"),
+          pair_t(env_func, "omnitrace_trace_set_env") })
     {
         if(itr.first == main_func && !is_driver) continue;
         if(!itr.first)
         {
             stringstream_t ss;
             ss << "Error! Couldn't find '" << itr.second.c_str() << "' function";
-            fprintf(stderr, "[hosttrace]> %s\n", ss.str().c_str());
+            fprintf(stderr, "[omnitrace]> %s\n", ss.str().c_str());
             throw std::runtime_error(ss.str());
         }
     }
 
     if(use_mpi && !(mpi_func || (mpi_init_func && mpi_fini_func)))
     {
-        throw std::runtime_error("MPI support was requested but hosttrace was not built "
+        throw std::runtime_error("MPI support was requested but omnitrace was not built "
                                  "with MPI and GOTCHA support");
     }
 
@@ -1176,20 +1176,20 @@ main(int argc, char** argv)
 
     verbprintf(2, "Getting call expressions... ");
 
-    auto main_call_args = hosttrace_call_expr(main_sign.get());
-    auto init_call_args = hosttrace_call_expr(default_components, binary_rewrite, cmdv0);
-    auto fini_call_args = hosttrace_call_expr();
-    auto umpi_call_args = hosttrace_call_expr(use_mpi, is_attached);
+    auto main_call_args = omnitrace_call_expr(main_sign.get());
+    auto init_call_args = omnitrace_call_expr(default_components, binary_rewrite, cmdv0);
+    auto fini_call_args = omnitrace_call_expr();
+    auto umpi_call_args = omnitrace_call_expr(use_mpi, is_attached);
     auto mode_call_args =
-        hosttrace_call_expr("HOSTTRACE_INSTRUMENTATION_MODE", instr_mode);
-    auto mpie_init_args = hosttrace_call_expr("HOSTTRACE_MPI_INIT", "OFF");
-    auto mpie_fini_args = hosttrace_call_expr("HOSTTRACE_MPI_FINALIZE", "OFF");
+        omnitrace_call_expr("OMNITRACE_INSTRUMENTATION_MODE", instr_mode);
+    auto mpie_init_args = omnitrace_call_expr("OMNITRACE_MPI_INIT", "OFF");
+    auto mpie_fini_args = omnitrace_call_expr("OMNITRACE_MPI_FINALIZE", "OFF");
     auto trace_call_args =
-        hosttrace_call_expr("HOSTTRACE_COMPONENTS", default_components);
-    auto use_mpi_call_args  = hosttrace_call_expr("HOSTTRACE_USE_PID", "ON");
-    auto use_mpip_call_args = hosttrace_call_expr(
-        "HOSTTRACE_USE_MPIP", (binary_rewrite && use_mpi && use_mpip) ? "ON" : "OFF");
-    auto none_call_args = hosttrace_call_expr();
+        omnitrace_call_expr("OMNITRACE_COMPONENTS", default_components);
+    auto use_mpi_call_args  = omnitrace_call_expr("OMNITRACE_USE_PID", "ON");
+    auto use_mpip_call_args = omnitrace_call_expr(
+        "OMNITRACE_USE_MPIP", (binary_rewrite && use_mpi && use_mpip) ? "ON" : "OFF");
+    auto none_call_args = omnitrace_call_expr();
 
     verbprintf(2, "Done\n");
     verbprintf(2, "Getting call snippets... ");
@@ -1228,7 +1228,7 @@ main(int argc, char** argv)
                       << " not in form VARIABLE=VALUE\n";
             throw std::runtime_error("Bad format");
         }
-        auto _expr = hosttrace_call_expr(p.at(0), p.at(1));
+        auto _expr = omnitrace_call_expr(p.at(0), p.at(1));
         env_variables.push_back(_expr.get(env_func));
     }
 
@@ -1474,10 +1474,10 @@ main(int argc, char** argv)
                            name.m_name.c_str());
                 auto _name       = name.get();
                 auto _hash       = std::hash<string_t>()(_name);
-                auto _trace_entr = (entr_hash) ? hosttrace_call_expr(_hash)
-                                               : hosttrace_call_expr(_name.c_str());
-                auto _trace_exit = (exit_hash) ? hosttrace_call_expr(_hash)
-                                               : hosttrace_call_expr(_name.c_str());
+                auto _trace_entr = (entr_hash) ? omnitrace_call_expr(_hash)
+                                               : omnitrace_call_expr(_name.c_str());
+                auto _trace_exit = (exit_hash) ? omnitrace_call_expr(_hash)
+                                               : omnitrace_call_expr(_name.c_str());
                 auto _entr       = _trace_entr.get((entr_hash) ? entr_hash : entr_trace);
                 auto _exit       = _trace_exit.get((exit_hash) ? exit_hash : exit_trace);
 
@@ -1527,11 +1527,11 @@ main(int argc, char** argv)
                     hash_ids.emplace_back(_lhash, _lname);
                     auto _lf = [=]() {
                         auto _ltrace_entr = (entr_hash)
-                                                ? hosttrace_call_expr(_lhash)
-                                                : hosttrace_call_expr(_lname.c_str());
+                                                ? omnitrace_call_expr(_lhash)
+                                                : omnitrace_call_expr(_lname.c_str());
                         auto _ltrace_exit = (exit_hash)
-                                                ? hosttrace_call_expr(_lhash)
-                                                : hosttrace_call_expr(_lname.c_str());
+                                                ? omnitrace_call_expr(_lhash)
+                                                : omnitrace_call_expr(_lname.c_str());
                         auto _lentr =
                             _ltrace_entr.get((entr_hash) ? entr_hash : entr_trace);
                         auto _lexit =
@@ -1580,7 +1580,7 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    hosttrace_snippet_vec hash_snippet_vec;
+    omnitrace_snippet_vec hash_snippet_vec;
     // generate a call expression for each hash + key
     for(auto& itr : hash_ids)
         hash_snippet_vec.generate(hash_func, itr.first, itr.second.c_str());
@@ -1792,8 +1792,8 @@ main(int argc, char** argv)
 
         if(main_func)
         {
-            printf("[hosttrace]> Getting linked libraries for %s...\n", cmdv0.c_str());
-            printf("[hosttrace]> Consider instrumenting the relevant libraries...\n\n");
+            printf("[omnitrace]> Getting linked libraries for %s...\n", cmdv0.c_str());
+            printf("[omnitrace]> Consider instrumenting the relevant libraries...\n\n");
 
             using TIMEMORY_PIPE = tim::popen::TIMEMORY_PIPE;
 
@@ -1804,7 +1804,7 @@ main(int argc, char** argv)
             strvec_t linked_libraries = tim::popen::read_fork(ldd);
 
             auto perr = tim::popen::pclose(ldd);
-            if(perr != 0) perror("Error in hosttrace_fork");
+            if(perr != 0) perror("Error in omnitrace_fork");
 
             for(const auto& itr : linked_libraries)
                 printf("\t%s\n", itr.c_str());
@@ -1824,8 +1824,8 @@ main(int argc, char** argv)
         // addr_space->beginInsertionSet();
 
         verbprintf(4, "Registering fork callbacks...\n");
-        auto _prefork  = bpatch->registerPreForkCallback(&hosttrace_fork_callback);
-        auto _postfork = bpatch->registerPostForkCallback(&hosttrace_fork_callback);
+        auto _prefork  = bpatch->registerPreForkCallback(&omnitrace_fork_callback);
+        auto _postfork = bpatch->registerPostForkCallback(&omnitrace_fork_callback);
 
         auto _wait_exec = [&]() {
             while(!app_thread->isTerminated())
@@ -1854,7 +1854,7 @@ main(int argc, char** argv)
         if(app_thread->terminationStatus() == ExitedNormally)
         {
             if(app_thread->isTerminated())
-                printf("\nEnd of hosttrace\n");
+                printf("\nEnd of omnitrace\n");
             else
                 _wait_exec();
         }
@@ -1925,7 +1925,7 @@ instrument_module(const string_t& file_name)
     static std::regex ext_regex(ext_str, regex_opts);
     static std::regex sys_regex("^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts);
     static std::regex userlib_regex(
-        "^(lib|)(hosttrace|caliper|gotcha|papi|cupti|TAU|likwid|"
+        "^(lib|)(omnitrace|caliper|gotcha|papi|cupti|TAU|likwid|"
         "profiler|tcmalloc|dyninst|pfm|nvtx|upcxx|pthread|nvperf|hsa|\\.\\./sysdeps/|/"
         "build/)",
         regex_opts);
@@ -2028,7 +2028,7 @@ instrument_entity(const string_t& function_name)
     }
 
     static std::regex exclude(
-        "(hosttrace|tim::|cereal|N3tim|MPI_Init|MPI_Finalize|::__[A-Za-z]|"
+        "(omnitrace|tim::|cereal|N3tim|MPI_Init|MPI_Finalize|::__[A-Za-z]|"
         "dyninst|tm_clones|malloc$|calloc$|free$|realloc$|std::addressof)",
         regex_opts);
     static std::regex exclude_cxx("(std::_Sp_counted_base|std::use_facet)", regex_opts);
@@ -2223,8 +2223,8 @@ module_constraint(char* fname)
     // fname is the name of module/file
     string_t _fname = fname;
 
-    // never instrumentat any module matching hosttrace
-    if(_fname.find("hosttrace") != string_t::npos) return true;
+    // never instrumentat any module matching omnitrace
+    if(_fname.find("omnitrace") != string_t::npos) return true;
 
     // always instrument these modules
     if(_fname == "DEFAULT_MODULE" || _fname == "LIBRARY_MODULE") return false;
@@ -2242,7 +2242,7 @@ bool
 routine_constraint(const char* fname)
 {
     string_t _fname = fname;
-    if(_fname.find("hosttrace") != string_t::npos) return true;
+    if(_fname.find("omnitrace") != string_t::npos) return true;
 
     auto npos = std::string::npos;
     if(_fname.find("FunctionInfo") != npos || _fname.find("_L_lock") != npos ||
@@ -2283,7 +2283,7 @@ get_absolute_exe_filepath(std::string exe_name)
             if(file_exists(TIMEMORY_JOIN('/', pitr, exe_name)))
             {
                 exe_name = TIMEMORY_JOIN('/', pitr, exe_name);
-                verbprintf(0, "[hosttrace] Resolved '%s' to '%s'...\n", _exe_orig.c_str(),
+                verbprintf(0, "[omnitrace] Resolved '%s' to '%s'...\n", _exe_orig.c_str(),
                            exe_name.c_str());
                 break;
             }
@@ -2318,7 +2318,7 @@ get_absolute_lib_filepath(std::string lib_name)
             if(file_exists(TIMEMORY_JOIN('/', pitr, lib_name)))
             {
                 lib_name = TIMEMORY_JOIN('/', pitr, lib_name);
-                verbprintf(0, "[hosttrace] Resolved '%s' to '%s'...\n", _lib_orig.c_str(),
+                verbprintf(0, "[omnitrace] Resolved '%s' to '%s'...\n", _lib_orig.c_str(),
                            lib_name.c_str());
                 break;
             }

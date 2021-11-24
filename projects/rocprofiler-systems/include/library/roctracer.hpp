@@ -39,7 +39,7 @@
 
 TIMEMORY_DECLARE_COMPONENT(roctracer)
 
-#if !defined(HOSTTRACE_USE_ROCTRACER)
+#if !defined(OMNITRACE_USE_ROCTRACER)
 TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::roctracer, false_type)
 #endif
 

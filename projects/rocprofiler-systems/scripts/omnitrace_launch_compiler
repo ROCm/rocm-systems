@@ -1,7 +1,7 @@
 #!/bin/bash -e
 #
 #   This script allows CMAKE_CXX_COMPILER to be a standard
-#   C++ compiler and hosttrace sets RULE_LAUNCH_COMPILE and
+#   C++ compiler and omnitrace sets RULE_LAUNCH_COMPILE and
 #   RULE_LAUNCH_LINK in CMake so that all compiler and link
 #   commands are prefixed with this script followed by the
 #   C++ compiler. Thus if $1 == $2 then we know the command
@@ -15,24 +15,24 @@
 
 # emit a message about the underlying command executed
 : ${DEBUG:=0}
-: ${HOSTTRACE_DEBUG_LAUNCH_COMPILER:=${DEBUG}}
+: ${OMNITRACE_DEBUG_LAUNCH_COMPILER:=${DEBUG}}
 
 debug-message()
 {
-    if [ "${HOSTTRACE_DEBUG_LAUNCH_COMPILER}" -ne 0 ]; then
+    if [ "${OMNITRACE_DEBUG_LAUNCH_COMPILER}" -ne 0 ]; then
         echo -e "##### $(basename ${BASH_SOURCE[0]}) executing: \"$@\"... #####"
     fi
 }
 
-# if hosttrace compiler is not passed, someone is probably trying to invoke it directly
+# if omnitrace compiler is not passed, someone is probably trying to invoke it directly
 if [ -z "${1}" ]; then
-    echo -e "\n${BASH_SOURCE[0]} was invoked without the hosttrace compiler as the first argument."
+    echo -e "\n${BASH_SOURCE[0]} was invoked without the omnitrace compiler as the first argument."
     echo "This script is not indended to be directly invoked by any mechanism other"
     echo -e "than through a RULE_LAUNCH_COMPILE or RULE_LAUNCH_LINK property set in CMake.\n"
     exit 1
 fi
 
-# if hosttrace compiler is not passed, someone is probably trying to invoke it directly
+# if omnitrace compiler is not passed, someone is probably trying to invoke it directly
 if [ -z "${2}" ]; then
     echo -e "\n${BASH_SOURCE[0]} was invoked without the C++ compiler as the second argument."
     echo "This script is not indended to be directly invoked by any mechanism other"
@@ -43,10 +43,10 @@ fi
 # if there aren't two args, this isn't necessarily invalid, just a bit strange
 if [ -z "${3}" ]; then exit 0; fi
 
-# store the hosttrace compiler
-HOSTTRACE_COMPILER=${1}
+# store the omnitrace compiler
+OMNITRACE_COMPILER=${1}
 
-# remove the hosttrace compiler from the arguments
+# remove the omnitrace compiler from the arguments
 shift
 
 # store the expected C++ compiler
@@ -57,19 +57,19 @@ shift
 
 if [[ "${CXX_COMPILER}" != "${1}" ]]; then
     debug-message $@
-    # the command does not depend on hosttrace so just execute the command w/o re-directing to ${HOSTTRACE_COMPILER}
+    # the command does not depend on omnitrace so just execute the command w/o re-directing to ${OMNITRACE_COMPILER}
     eval $@
 else
-    # the executable is the C++ compiler, so we need to re-direct to ${HOSTTRACE_COMPILER}
-    if [ ! -f "${HOSTTRACE_COMPILER}" ]; then
-        echo -e "\nError: the compiler redirect for hosttrace was not found at ${HOSTTRACE_COMPILER}\n"
+    # the executable is the C++ compiler, so we need to re-direct to ${OMNITRACE_COMPILER}
+    if [ ! -f "${OMNITRACE_COMPILER}" ]; then
+        echo -e "\nError: the compiler redirect for omnitrace was not found at ${OMNITRACE_COMPILER}\n"
         exit 1
     fi
 
     # discard the compiler from the command
     shift
 
-    debug-message ${HOSTTRACE_COMPILER} $@
-    # execute ${HOSTTRACE_COMPILER} (again, usually nvcc_wrapper)
-    ${HOSTTRACE_COMPILER} $@
+    debug-message ${OMNITRACE_COMPILER} $@
+    # execute ${OMNITRACE_COMPILER} (again, usually nvcc_wrapper)
+    ${OMNITRACE_COMPILER} $@
 fi

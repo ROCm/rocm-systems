@@ -172,14 +172,16 @@ int
 main(int argc, char** argv)
 {
     int rank     = 0;
+    int size     = 1;
     int nthreads = 2;
     if(argc > 1) nthreads = atoi(argv[1]);
 
 #if defined(USE_MPI)
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
 #endif
-    // this is a temporary workaround in hosttrace when HIP + MPI is enabled
+    // this is a temporary workaround in omnitrace when HIP + MPI is enabled
     int ndevice = 0;
     int devid   = rank;
     HIP_API_CALL(hipGetDeviceCount(&ndevice));

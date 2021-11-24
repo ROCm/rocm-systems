@@ -33,12 +33,12 @@
 // forward decl of the API
 extern "C"
 {
-    void hosttrace_push_trace(const char* name) TIMEMORY_VISIBILITY("default");
-    void hosttrace_pop_trace(const char* name) TIMEMORY_VISIBILITY("default");
-    void hosttrace_trace_init(const char*, bool, const char*)
+    void omnitrace_push_trace(const char* name) TIMEMORY_VISIBILITY("default");
+    void omnitrace_pop_trace(const char* name) TIMEMORY_VISIBILITY("default");
+    void omnitrace_trace_init(const char*, bool, const char*)
         TIMEMORY_VISIBILITY("default");
-    void hosttrace_trace_finalize(void) TIMEMORY_VISIBILITY("default");
-    void hosttrace_trace_set_env(const char* env_name, const char* env_val)
+    void omnitrace_trace_finalize(void) TIMEMORY_VISIBILITY("default");
+    void omnitrace_trace_set_env(const char* env_name, const char* env_val)
         TIMEMORY_VISIBILITY("default");
-    void hosttrace_trace_set_mpi(bool use, bool attached) TIMEMORY_VISIBILITY("default");
+    void omnitrace_trace_set_mpi(bool use, bool attached) TIMEMORY_VISIBILITY("default");
 }

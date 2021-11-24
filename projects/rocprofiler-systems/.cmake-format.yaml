@@ -1,6 +1,6 @@
 parse:
   additional_commands:
-    hosttrace_checkout_git_submodule:
+    omnitrace_checkout_git_submodule:
       flags:
       - RECURSIVE
       kwargs:
@@ -10,11 +10,11 @@ parse:
         REPO_URL: '*'
         REPO_BRANCH: '*'
         ADDITIONAL_COMMANDS: '*'
-    hosttrace_save_variables:
+    omnitrace_save_variables:
       kwargs:
         VARIABLES: '*'
         CONDITION: '*'
-    hosttrace_restore_variables:
+    omnitrace_restore_variables:
       kwargs:
         VARIABLES: '*'
         CONDITION: '*'

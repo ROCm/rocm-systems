@@ -111,7 +111,7 @@ using basic_loop_vec_t      = bpvector_t<basic_loop_t*>;
 using snippet_pointer_vec_t = std::vector<snippet_pointer_t>;
 
 void
-hosttrace_prefork_callback(thread_t* parent, thread_t* child);
+omnitrace_prefork_callback(thread_t* parent, thread_t* child);
 
 //======================================================================================//
 //
@@ -526,12 +526,12 @@ get_snippets(Args&&... args)
 //
 //======================================================================================//
 //
-struct hosttrace_call_expr
+struct omnitrace_call_expr
 {
     using snippet_pointer_t = std::shared_ptr<snippet_t>;
 
     template <typename... Args>
-    hosttrace_call_expr(Args&&... args)
+    omnitrace_call_expr(Args&&... args)
     : m_params(get_snippets(std::forward<Args>(args)...))
     {}
 
@@ -555,15 +555,15 @@ private:
 //
 //======================================================================================//
 //
-struct hosttrace_snippet_vec
+struct omnitrace_snippet_vec
 {
-    using entry_type = std::vector<hosttrace_call_expr>;
+    using entry_type = std::vector<omnitrace_call_expr>;
     using value_type = std::vector<call_expr_pointer_t>;
 
     template <typename... Args>
     void generate(procedure_t* func, Args&&... args)
     {
-        auto _expr = hosttrace_call_expr(std::forward<Args>(args)...);
+        auto _expr = omnitrace_call_expr(std::forward<Args>(args)...);
         auto _call = _expr.get(func);
         if(_call)
         {
@@ -587,7 +587,7 @@ private:
 //======================================================================================//
 //
 static inline address_space_t*
-hosttrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
+omnitrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
                             bool _rewrite, int _pid = -1, string_t _name = {})
 {
     address_space_t* mutatee = nullptr;
@@ -599,7 +599,7 @@ hosttrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
         if(!_name.empty()) mutatee = _bpatch->openBinary(_name.c_str(), false);
         if(!mutatee)
         {
-            fprintf(stderr, "[hosttrace]> Failed to open binary '%s'\n", _name.c_str());
+            fprintf(stderr, "[omnitrace]> Failed to open binary '%s'\n", _name.c_str());
             throw std::runtime_error("Failed to open binary");
         }
         verbprintf(1, "Done\n");
@@ -612,7 +612,7 @@ hosttrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
         mutatee      = _bpatch->processAttach(_cmdv0, _pid);
         if(!mutatee)
         {
-            fprintf(stderr, "[hosttrace]> Failed to connect to process %i\n", (int) _pid);
+            fprintf(stderr, "[omnitrace]> Failed to connect to process %i\n", (int) _pid);
             throw std::runtime_error("Failed to attach to process");
         }
         verbprintf(1, "Done\n");
@@ -630,7 +630,7 @@ hosttrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
                 if(!_cmdv[i]) continue;
                 ss << _cmdv[i] << " ";
             }
-            fprintf(stderr, "[hosttrace]> Failed to create process: '%s'\n",
+            fprintf(stderr, "[omnitrace]> Failed to create process: '%s'\n",
                     ss.str().c_str());
             throw std::runtime_error("Failed to create process");
         }
@@ -643,7 +643,7 @@ hosttrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
 //======================================================================================//
 //
 TIMEMORY_NOINLINE inline void
-hosttrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
+omnitrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
 {
     if(!thread) return;
 
@@ -651,7 +651,7 @@ hosttrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
 
     if(!terminate_expr)
     {
-        fprintf(stderr, "[hosttrace]> continuing execution\n");
+        fprintf(stderr, "[omnitrace]> continuing execution\n");
         app->continueExecution();
         return;
     }
@@ -660,18 +660,18 @@ hosttrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
     {
         case ExitedNormally:
         {
-            fprintf(stderr, "[hosttrace]> Thread exited normally\n");
+            fprintf(stderr, "[omnitrace]> Thread exited normally\n");
             break;
         }
         case ExitedViaSignal:
         {
-            fprintf(stderr, "[hosttrace]> Thread terminated unexpectedly\n");
+            fprintf(stderr, "[omnitrace]> Thread terminated unexpectedly\n");
             break;
         }
         case NoExit:
         default:
         {
-            fprintf(stderr, "[hosttrace]> %s invoked with NoExit\n", __FUNCTION__);
+            fprintf(stderr, "[omnitrace]> %s invoked with NoExit\n", __FUNCTION__);
             break;
         }
     }
@@ -679,14 +679,14 @@ hosttrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
     // terminate_expr = nullptr;
     thread->oneTimeCode(*terminate_expr);
 
-    fprintf(stderr, "[hosttrace]> continuing execution\n");
+    fprintf(stderr, "[omnitrace]> continuing execution\n");
     app->continueExecution();
 }
 //
 //======================================================================================//
 //
 TIMEMORY_NOINLINE inline void
-hosttrace_fork_callback(thread_t* parent, thread_t* child)
+omnitrace_fork_callback(thread_t* parent, thread_t* child)
 {
     if(child)
     {
