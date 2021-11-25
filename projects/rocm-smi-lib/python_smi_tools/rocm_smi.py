@@ -483,7 +483,7 @@ def printLog(device, metricName, value):
         logstr = logstr[13:]
     logging.debug(logstr)
     # Force thread safe printing
-    print(logstr + '\n\r', end='')
+    print(logstr + '\n', end='')
 
 
 def printListLog(metricName, valuesList):
