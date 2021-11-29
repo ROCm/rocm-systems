@@ -124,7 +124,7 @@ void TestTempRead::Run(void) {
 
             // Verify api support checking functionality is working
             err = rsmi_dev_temp_metric_get(i, type, met, nullptr);
-            ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+            ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
             return;
           } else {
             CHK_ERR_ASRT(err)
