@@ -2130,6 +2130,10 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
       mon_type = amd::smi::kMonInvalid;
   }
 
+  if (temperature == nullptr) {
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+
   // The HBM temperature is retreived from the gpu_metrics
   if (sensor_type == RSMI_TEMP_TYPE_HBM_0
      || sensor_type == RSMI_TEMP_TYPE_HBM_1
@@ -2143,10 +2147,6 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
        ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
        if (ret != RSMI_STATUS_SUCCESS) {
          return ret;
-       }
-
-       if (temperature == nullptr) {
-          return RSMI_STATUS_INVALID_ARGS;
        }
 
        switch (sensor_type) {
