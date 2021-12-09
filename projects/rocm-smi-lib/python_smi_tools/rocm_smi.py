@@ -483,7 +483,7 @@ def printLog(device, metricName, value):
         logstr = logstr[13:]
     logging.debug(logstr)
     # Force thread safe printing
-    print(logstr + '\n\r', end='')
+    print(logstr + '\n', end='')
 
 
 def printListLog(metricName, valuesList):
@@ -1623,7 +1623,7 @@ def getCoarseGrainUtil(device, typeName=None):
             utilization_counters[i].type = c_int(i)
 
     ret = rocmsmi.rsmi_utilization_count_get(device, utilization_counters, length, byref(timestamp))
-    if rsmi_ret_ok(ret, device):
+    if rsmi_ret_ok(ret, device, typeName, True):
         return utilization_counters
     return -1
 
@@ -1643,6 +1643,9 @@ def showGpuUse(deviceList):
         if util_counters != -1:
             for ut_counter in util_counters:
                 printLog(device, utilization_counter_name[ut_counter.type], ut_counter.val)
+        else:
+            printLog(device, 'GFX Activity', 'N/A')
+
     printLogSpacer()
 
 
@@ -1732,6 +1735,8 @@ def showMemUse(deviceList):
         if util_counters != -1:
             for ut_counter in util_counters:
                 printLog(device, utilization_counter_name[ut_counter.type], ut_counter.val)
+        else:
+            printLog(device, 'Memory Activity', 'N/A')
     printLogSpacer()
 
 
@@ -2314,7 +2319,7 @@ def showAccessibleTopology(deviceList):
             if rsmi_ret_ok(ret):
                 gpu_links_type[srcdevice][destdevice] = accessible.value
             else:
-                printErrLog(srcdevice, 'Cannot read link accessibility: Unsupported on this machine', None)
+                printErrLog(srcdevice, 'Cannot read link accessibility: Unsupported on this machine')
     if PRINT_JSON:
         formatMatrixToJSON(deviceList, gpu_links_type, "(Topology) Link accessibility between DRM devices {} and {}")
         return
@@ -2353,7 +2358,7 @@ def showWeightTopology(deviceList):
             if rsmi_ret_ok(ret):
                 gpu_links_weight[srcdevice][destdevice] = weight
             else:
-                printErrLog(srcdevice, 'Cannot read Link Weight: Not supported on this machine', None)
+                printErrLog(srcdevice, 'Cannot read Link Weight: Not supported on this machine')
 
     if PRINT_JSON:
         formatMatrixToJSON(deviceList, gpu_links_weight, "(Topology) Weight between DRM devices {} and {}")
@@ -2396,7 +2401,7 @@ def showHopsTopology(deviceList):
             if rsmi_ret_ok(ret):
                 gpu_links_hops[srcdevice][destdevice] = hops
             else:
-                printErrLog(srcdevice, 'Cannot read Link Hops: Not supported on this machine', None)
+                printErrLog(srcdevice, 'Cannot read Link Hops: Not supported on this machine')
 
     if PRINT_JSON:
         formatMatrixToJSON(deviceList, gpu_links_hops, "(Topology) Hops between DRM devices {} and {}")
@@ -2444,7 +2449,7 @@ def showTypeTopology(deviceList):
                 else:
                     gpu_links_type[srcdevice][destdevice] = "XXXX"
             else:
-                printErrLog(srcdevice, 'Cannot read Link Type: Not supported on this machine', None)
+                printErrLog(srcdevice, 'Cannot read Link Type: Not supported on this machine')
     if PRINT_JSON:
         formatMatrixToJSON(deviceList, gpu_links_type, "(Topology) Link type between DRM devices {} and {}")
         return
@@ -2485,7 +2490,7 @@ def showNumaTopology(deviceList):
         if rsmi_ret_ok(ret):
             printLog(device, "(Topology) Numa Affinity", numa_numbers.value)
         else:
-            printErrLog(device, 'Cannot read Numa Affinity', None)
+            printErrLog(device, 'Cannot read Numa Affinity')
 
 
 def showHwTopology(deviceList):
@@ -2502,6 +2507,43 @@ def showHwTopology(deviceList):
     showTypeTopology(deviceList)
     printEmptyLine()
     showNumaTopology(deviceList)
+
+
+def showNodesBw(deviceList):
+    """ Display max and min bandwidth between nodes.
+    Currently supports XGMI only.
+    This reads the HW Topology file and displays the matrix for the nodes
+    @param deviceList: List of DRM devices (can be a single-item list)
+    """
+    devices_ind = range(len(deviceList))
+    minBW = c_uint32()
+    maxBW = c_uint32()
+    gpu_links_type = [[0 for x in devices_ind] for y in devices_ind]
+    printLogSpacer(' Bandwidth ')
+    for srcdevice in deviceList:
+        for destdevice in deviceList:
+            if srcdevice != destdevice:
+                ret = rocmsmi.rsmi_minmax_bandwidth_get(srcdevice, destdevice, byref(minBW), byref(maxBW))
+                if rsmi_ret_ok(ret, " {}  to {}".format(srcdevice, destdevice),None ):
+                    gpu_links_type[srcdevice][destdevice] = "{}-{}".format(minBW.value, maxBW.value)
+            else:
+                gpu_links_type[srcdevice][destdevice] = "N/A"
+    if PRINT_JSON:
+        formatMatrixToJSON(deviceList, "{}-{}".format(minBW.value, maxBW.value),  " min-max bandwidth between DRM devices {} and {}".format(srcdevice, destdevice))
+        return
+    printTableRow(None, '      ')
+    for row in deviceList:
+        tmp = 'GPU%d' % row
+        printTableRow('%-12s', tmp)
+    printEmptyLine()
+    for gpu1 in deviceList:
+        tmp = 'GPU%d' % gpu1
+        printTableRow('%-6s', tmp)
+        for gpu2 in deviceList:
+            printTableRow('%-12s', gpu_links_type[gpu1][gpu2])
+        printEmptyLine()
+    printLog(None,"Format: min-max; Units: mps", None)
+    printLog(None,'"0-0" min-max bandwidth indicates devices are not connected dirrectly', None)
 
 
 def checkAmdGpus(deviceList):
@@ -2847,6 +2889,7 @@ if __name__ == '__main__':
     groupDisplay.add_argument('--showtoponuma', help='Shows the numa nodes ', action='store_true')
     groupDisplay.add_argument('--showenergycounter', help='Energy accumulator that stores amount of energy consumed',
                               action='store_true')
+    groupDisplay.add_argument('--shownodesbw', help='Shows the numa nodes ', action='store_true')
 
     groupActionReset.add_argument('-r', '--resetclocks', help='Reset clocks and OverDrive to default',
                                   action='store_true')
@@ -3084,6 +3127,8 @@ if __name__ == '__main__':
         showProductName(deviceList)
     if args.showxgmierr:
         showXgmiErr(deviceList)
+    if args.shownodesbw:
+        showNodesBw(deviceList)
     if args.showtopo:
         showHwTopology(deviceList)
     if args.showtopoaccess:

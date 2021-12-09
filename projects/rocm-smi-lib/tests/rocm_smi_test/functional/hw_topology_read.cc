@@ -136,7 +136,7 @@ void TestHWTopologyRead::Run(void) {
         gpu_links[dv_ind_src][dv_ind_dst].type = "X";
         gpu_links[dv_ind_src][dv_ind_dst].hops = 0;
         gpu_links[dv_ind_src][dv_ind_dst].weight = 0;
-        gpu_links[dv_ind_src][dv_ind_dst].accessible = false;
+        gpu_links[dv_ind_src][dv_ind_dst].accessible = true;
       } else {
         RSMI_IO_LINK_TYPE type;
         err = rsmi_topo_get_link_type(dv_ind_src, dv_ind_dst,

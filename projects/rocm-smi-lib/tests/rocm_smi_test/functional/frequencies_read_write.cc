@@ -141,8 +141,15 @@ void TestFrequenciesReadWrite::Run(void) {
                                                                     std::endl;
         }
         ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, freq_bitmask);
+        //Certain ASICs does not allow to set particular clocks. If set function for a clock returns
+        //permission error despite root access, manually set ret value to success and return
+        if (ret == RSMI_STATUS_PERMISSION && geteuid() == 0) {
+          std::cout << "\t**Set " << FreqEnumToStr(rsmi_clk) <<
+                              ": Not supported on this machine. Skipping..." << std::endl;
+          ret = RSMI_STATUS_SUCCESS;
+          return;
+        }
         CHK_ERR_ASRT(ret)
-
         ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
         if (ret != RSMI_STATUS_SUCCESS) {
           return;
