@@ -51,6 +51,7 @@ extern "C" {
 #endif  // __cplusplus
 
 #include <stddef.h>
+#include <stdbool.h>
 
 #include "rocm_smi/kfd_ioctl.h"
 
