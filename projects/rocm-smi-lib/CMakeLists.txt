@@ -74,6 +74,7 @@ set(CMAKE_CXX_FLAGS
 
 ## Address Sanitize Flag
 if (${ADDRESS_SANITIZER})
+    set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--build-id")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -g")
     set(CMAKE_EXE_LINKER_FLAGS -fsanitize=address)
 
