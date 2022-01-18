@@ -101,7 +101,15 @@ void TestFanReadWrite::Run(void) {
     PrintDeviceHeader(dv_ind);
 
     ret = rsmi_dev_fan_speed_get(dv_ind, 0, &orig_speed);
-    CHK_ERR_ASRT(ret)
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+       IF_VERB(STANDARD) {
+          std::cout << "\t**" <<  ": " <<
+                             "Not supported on this machine" << std::endl;
+        }
+        return;
+    } else {
+        CHK_ERR_ASRT(ret)
+    }
     IF_VERB(STANDARD) {
       std::cout << "Original fan speed: " << orig_speed << std::endl;
     }

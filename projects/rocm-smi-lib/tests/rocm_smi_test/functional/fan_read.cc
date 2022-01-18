@@ -102,7 +102,16 @@ void TestFanRead::Run(void) {
         std::cout << "\t**Current Fan Speed: ";
       }
       err = rsmi_dev_fan_speed_get(i, 0, &val_i64);
-      CHK_ERR_ASRT(err)
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+          IF_VERB(STANDARD) {
+            std::cout << "\t**" <<  ": " <<
+                               "Not supported on this machine" << std::endl;
+          }
+          return;
+      } else {
+        CHK_ERR_ASRT(err)
+      }
+
 
       // Verify api support checking functionality is working
       err = rsmi_dev_fan_speed_get(i, 0, nullptr);
