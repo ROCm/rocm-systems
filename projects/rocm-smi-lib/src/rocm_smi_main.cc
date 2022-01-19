@@ -341,7 +341,7 @@ RocmSMI& RocmSMI::getInstance(uint64_t flags) {
 }
 
 static uint32_t GetEnvVarUInteger(const char *ev_str) {
-#ifdef NDEBUG
+#ifndef DEBUG
   (void)ev_str;
 #else
   ev_str = getenv(ev_str);
@@ -357,7 +357,7 @@ static uint32_t GetEnvVarUInteger(const char *ev_str) {
 
 // Get and store env. variables in this method
 void RocmSMI::GetEnvVariables(void) {
-#ifdef NDEBUG
+#ifndef DEBUG
   (void)GetEnvVarUInteger(nullptr);  // This is to quiet release build warning.
   env_vars_.debug_output_bitfield = 0;
   env_vars_.path_DRM_root_override = nullptr;
