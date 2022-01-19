@@ -279,7 +279,7 @@ static const std::map<const char *, monitor_depends_t> kMonFuncDependsMap = {
 
   Monitor::Monitor(std::string path, RocmSMI_env_vars const *e) :
                                                         path_(path), env_(e) {
-#ifdef NDEBUG
+#ifndef DEBUG
     env_ = nullptr;
 #endif
 }
