@@ -176,6 +176,7 @@ install(EXPORT rocm_smiTargets DESTINATION
   "${ROCM_SMI}/lib/cmake" COMPONENT dev)
 
 #License file
+set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
 install( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION share/doc/smi-lib RENAME LICENSE.txt)
 
 ###########################
