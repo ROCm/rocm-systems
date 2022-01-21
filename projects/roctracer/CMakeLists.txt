@@ -184,6 +184,9 @@ set ( CPACK_PACKAGE_CONTACT "ROCm Profiler Support <dl.ROCm-Profiler.support@amd
 set ( CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD ROCTRACER library" )
 set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" )
 
+# Install license file
+install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION share/doc/${CPACK_PACKAGE_NAME})
+
 ## Debian package specific variables
 if ( DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE} )
   set ( CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE} )
@@ -204,6 +207,8 @@ else()
   set ( CPACK_RPM_PACKAGE_RELEASE "local" )
 endif()
 message ( "Using CPACK_RPM_PACKAGE_RELEASE ${CPACK_RPM_PACKAGE_RELEASE}" )
+
+set( CPACK_RPM_PACKAGE_LICENSE "MIT" )
 
 ## 'dist' breaks manual builds on debian systems due to empty Provides
 execute_process( COMMAND rpm --eval %{?dist}
