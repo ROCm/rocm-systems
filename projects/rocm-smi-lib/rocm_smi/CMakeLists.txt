@@ -99,7 +99,7 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
   if(${BUILD_SHARED_LIBS}) #stripping only for .so
     add_custom_command(
           TARGET ${ROCM_SMI_TARGET}
-          POST_BUILD COMMAND ${CMAKE_STRIP} lib${ROCM_SMI_TARGET}.so)
+          POST_BUILD COMMAND ${CMAKE_STRIP} lib${ROCM_SMI_TARGET}.so.${SO_VERSION_STRING})
   endif()
 endif ()
 

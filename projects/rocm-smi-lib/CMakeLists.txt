@@ -14,6 +14,10 @@ endif()
 ## Include common cmake modules
 include(utils)
 
+if (NOT DEFINED CPACK_RESOURCE_FILE_LICENSE)
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/License.txt")
+endif()
+
 set(ROCM_SMI "rocm_smi")
 set(ROCM_SMI_COMPONENT "lib${ROCM_SMI}")
 set(ROCM_SMI_TARGET "${ROCM_SMI}64")
@@ -74,6 +78,7 @@ set(CMAKE_CXX_FLAGS
 
 ## Address Sanitize Flag
 if (${ADDRESS_SANITIZER})
+    set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--build-id")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -g")
     set(CMAKE_EXE_LINKER_FLAGS -fsanitize=address)
 
@@ -170,7 +175,8 @@ install(FILES
 install(EXPORT rocm_smiTargets DESTINATION
   "${ROCM_SMI}/lib/cmake" COMPONENT dev)
 
-
+#License file
+install( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION share/doc/smi-lib RENAME LICENSE.txt)
 
 ###########################
 # Packaging directives

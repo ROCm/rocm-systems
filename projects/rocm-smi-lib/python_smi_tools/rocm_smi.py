@@ -1536,8 +1536,8 @@ def showFwInfo(deviceList, fwType):
             fw_name = fw_name.upper()
             ret = rocmsmi.rsmi_dev_firmware_version_get(device, fw_block_names_l.index(fw_name), byref(fw_ver))
             if rsmi_ret_ok(ret, device, fw_name):
-                # The VCN, VCE, UVD, and SOS firmware's value needs to be in hexadecimal
-                if fw_name in ['VCN', 'VCE', 'UVD', 'SOS']:
+                # The VCN, VCE, UVD, SOS and ASD firmware's value needs to be in hexadecimal
+                if fw_name in ['VCN', 'VCE', 'UVD', 'SOS', 'ASD']:
                     printLog(device, '%s firmware version' % (fw_name),
                              '\t0x%s' % (str(hex(fw_ver.value))[2:].zfill(8)))
                 # The TA XGMI, TA RAS, and SMC firmware's hex value looks like 0x12345678
