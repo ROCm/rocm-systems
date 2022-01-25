@@ -26,25 +26,33 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
-#include "library/omnitrace_component.hpp"
-#include "library/api.hpp"
+#pragma once
 
-void
-omnitrace_component::start()
+#include "library/common.hpp"
+#include "library/defines.hpp"
+#include "library/timemory.hpp"
+
+namespace omnitrace
 {
-    if(m_prefix) omnitrace_push_trace(m_prefix);
-}
-
-void
-omnitrace_component::stop()
+// this is used to wrap fork()
+struct fork_gotcha : comp::base<fork_gotcha, void>
 {
-    if(m_prefix) omnitrace_pop_trace(m_prefix);
-}
+    using gotcha_data_t = comp::gotcha_data;
 
-void
-omnitrace_component::set_prefix(const char* _prefix)
-{
-    m_prefix = _prefix;
-}
+    TIMEMORY_DEFAULT_OBJECT(fork_gotcha)
 
-TIMEMORY_INITIALIZE_STORAGE(omnitrace_component)
+    // string id for component
+    static std::string label() { return "fork_gotcha"; }
+
+    // generate the gotcha wrappers
+    static void configure();
+
+    // this will get called right before fork
+    static void audit(const gotcha_data_t& _data, audit::incoming);
+
+    // this will get called right after fork with the return value
+    static void audit(const gotcha_data_t& _data, audit::outgoing, pid_t _pid);
+};
+
+using fork_gotcha_t = comp::gotcha<4, tim::component_tuple<fork_gotcha>, api::omnitrace>;
+}  // namespace omnitrace

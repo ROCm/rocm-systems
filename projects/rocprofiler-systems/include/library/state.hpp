@@ -28,6 +28,10 @@
 
 #pragma once
 
+#include "library/defines.hpp"
+
+namespace omnitrace
+{
 // used for specifying the state of omnitrace
 enum class State : unsigned short
 {
@@ -36,3 +40,4 @@ enum class State : unsigned short
     Active,
     Finalized
 };
+}  // namespace omnitrace

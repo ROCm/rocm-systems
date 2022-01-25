@@ -28,17 +28,23 @@
 
 #pragma once
 
-#include <cstdio>
+#include "library/defines.hpp"
+
 #include <timemory/api.hpp>
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/utility/utility.hpp>
 
+#include <cstdio>
+
+namespace omnitrace
+{
 bool
 get_debug();
 
 bool
 get_critical_trace_debug();
+}  // namespace omnitrace
 
 #if defined(TIMEMORY_USE_MPI)
 #    define OMNITRACE_CONDITIONAL_PRINT(COND, ...)                                       \
@@ -74,7 +80,8 @@ get_critical_trace_debug();
         fflush(stderr);                                                                  \
     }
 
-#define OMNITRACE_DEBUG(...) OMNITRACE_CONDITIONAL_PRINT(get_debug(), __VA_ARGS__)
+#define OMNITRACE_DEBUG(...)                                                             \
+    OMNITRACE_CONDITIONAL_PRINT(::omnitrace::get_debug(), __VA_ARGS__)
 #define OMNITRACE_PRINT(...) OMNITRACE_CONDITIONAL_PRINT(true, __VA_ARGS__)
 #define OMNITRACE_CT_DEBUG(...)                                                          \
-    OMNITRACE_CONDITIONAL_PRINT(get_critical_trace_debug(), __VA_ARGS__)
+    OMNITRACE_CONDITIONAL_PRINT(::omnitrace::get_critical_trace_debug(), __VA_ARGS__)

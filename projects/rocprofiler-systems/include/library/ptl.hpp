@@ -28,11 +28,14 @@
 
 #pragma once
 
-#include "PTL/PTL.hh"
-#include "timemory/macros/attributes.hpp"
+#include "library/defines.hpp"
+
+#include <PTL/PTL.hh>
 
 #include <mutex>
 
+namespace omnitrace
+{
 namespace tasking
 {
 std::mutex&
@@ -53,3 +56,4 @@ get_critical_trace_thread_pool();
 PTL::TaskGroup<void>&
 get_critical_trace_task_group();
 }  // namespace tasking
+}  // namespace omnitrace

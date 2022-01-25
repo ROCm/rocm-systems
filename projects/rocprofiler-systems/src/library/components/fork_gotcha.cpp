@@ -26,23 +26,38 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
-#pragma once
+#include "library/components/fork_gotcha.hpp"
+#include "library/config.hpp"
+#include "library/debug.hpp"
 
-#include "library/common.hpp"
-#include "library/timemory.hpp"
-
-// this is used to wrap fork()
-struct fork_gotcha : comp::base<fork_gotcha, void>
+namespace omnitrace
 {
-    using gotcha_data_t = comp::gotcha_data;
+void
+fork_gotcha::configure()
+{
+    fork_gotcha_t::get_initializer() = []() {
+        TIMEMORY_C_GOTCHA(fork_gotcha_t, 0, fork);
+    };
 
-    TIMEMORY_DEFAULT_OBJECT(fork_gotcha)
+    pthread_gotcha_t::get_initializer() = []() {
+        TIMEMORY_C_GOTCHA(pthread_gotcha_t, 0, pthread_create);
+    };
+}
 
-    // this will get called right before fork
-    void audit(const gotcha_data_t& _data, audit::incoming);
+void
+fork_gotcha::audit(const gotcha_data_t&, audit::incoming)
+{
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(
+        get_debug_env(),
+        "Warning! Calling fork() within an OpenMPI application using libfabric "
+        "may result is segmentation fault\n");
+    TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);
+}
 
-    // this will get called right after fork with the return value
-    void audit(const gotcha_data_t& _data, audit::outgoing, pid_t _pid);
-};
-
-using fork_gotcha_t = comp::gotcha<4, tim::component_tuple<fork_gotcha>, omnitrace>;
+void
+fork_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, pid_t _pid)
+{
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(), "%s() return PID %i\n",
+                                      _data.tool_id.c_str(), (int) _pid);
+}
+}  // namespace omnitrace

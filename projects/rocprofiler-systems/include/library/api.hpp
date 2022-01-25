@@ -28,6 +28,8 @@
 
 #pragma once
 
+#include "library/defines.hpp"
+
 #include <timemory/compat/macros.h>
 
 // forward decl of the API

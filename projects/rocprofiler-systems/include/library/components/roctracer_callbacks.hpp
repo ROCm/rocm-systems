@@ -28,12 +28,12 @@
 
 #pragma once
 
+#include "library/components/roctracer.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/dynamic_library.hpp"
 #include "library/perfetto.hpp"
 #include "library/ptl.hpp"
-#include "library/roctracer.hpp"
 
 #include <roctracer.h>
 #include <roctracer_ext.h>
@@ -58,12 +58,15 @@
         }                                                                                \
     } while(0)
 
-using hsa_timer_t            = hsa_rt_utils::Timer;
-using timestamp_t            = hsa_timer_t::timestamp_t;
-using roctracer_bundle_t     = tim::component_bundle<omnitrace, comp::roctracer_data,
-                                                 comp::wall_clock, quirk::explicit_pop>;
-using roctracer_hsa_bundle_t = tim::component_bundle<omnitrace, comp::roctracer_data>;
-using roctracer_functions_t  = std::vector<std::pair<std::string, std::function<void()>>>;
+namespace omnitrace
+{
+using hsa_timer_t = hsa_rt_utils::Timer;
+using timestamp_t = hsa_timer_t::timestamp_t;
+using roctracer_bundle_t =
+    tim::component_bundle<api::omnitrace, comp::roctracer_data, comp::wall_clock>;
+using roctracer_hsa_bundle_t =
+    tim::component_bundle<api::omnitrace, comp::roctracer_data>;
+using roctracer_functions_t = std::vector<std::pair<std::string, std::function<void()>>>;
 
 std::unique_ptr<hsa_timer_t>&
 get_hsa_timer();
@@ -94,3 +97,4 @@ roctracer_setup_routines();
 
 roctracer_functions_t&
 roctracer_tear_down_routines();
+}  // namespace omnitrace

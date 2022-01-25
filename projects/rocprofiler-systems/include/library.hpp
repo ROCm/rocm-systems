@@ -34,10 +34,10 @@
 // clang-format on
 
 #include "library/timemory.hpp"
-#include "library/roctracer.hpp"
+#include "library/components/roctracer.hpp"
 #include "library/api.hpp"
-#include "library/fork_gotcha.hpp"
-#include "library/mpi_gotcha.hpp"
+#include "library/components/fork_gotcha.hpp"
+#include "library/components/mpi_gotcha.hpp"
 #include "library/api.hpp"
 #include "library/common.hpp"
 #include "library/state.hpp"
@@ -51,6 +51,8 @@
 
 #include <mutex>
 
+namespace omnitrace
+{
 template <critical_trace::Device DevID, critical_trace::Phase PhaseID,
           bool UpdateStack = true>
 inline void
@@ -74,7 +76,7 @@ add_critical_trace(int64_t _tid, size_t _cpu_cid, size_t _gpu_cid, size_t _paren
     if constexpr(PhaseID != critical_trace::Phase::NONE)
     {
         // unique lock per thread
-        auto&       _mtx = type_mutex<critical_insert, omnitrace, num_mutexes>(_tid);
+        auto&       _mtx = type_mutex<critical_insert, api::omnitrace, num_mutexes>(_tid);
         auto_lock_t _lk{ _mtx };
 
         auto& _critical_trace = critical_trace::get(_tid);
@@ -86,7 +88,7 @@ add_critical_trace(int64_t _tid, size_t _cpu_cid, size_t _gpu_cid, size_t _paren
     if constexpr(UpdateStack)
     {
         // unique lock per thread
-        auto& _mtx = type_mutex<cpu_cid_stack, omnitrace, num_mutexes>(_tid);
+        auto& _mtx = type_mutex<cpu_cid_stack, api::omnitrace, num_mutexes>(_tid);
 
         if constexpr(PhaseID == critical_trace::Phase::NONE)
         {
@@ -110,3 +112,4 @@ add_critical_trace(int64_t _tid, size_t _cpu_cid, size_t _gpu_cid, size_t _paren
     tim::consume_parameters(_tid, _cpu_cid, _gpu_cid, _parent_cid, _ts_beg, _ts_val,
                             _hash, _depth, _prio);
 }
+}  // namespace omnitrace

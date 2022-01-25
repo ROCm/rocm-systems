@@ -26,7 +26,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
-#include "library/roctracer_callbacks.hpp"
+#include "library/components/roctracer_callbacks.hpp"
 #include "library.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
@@ -36,6 +36,8 @@
 #include <cstdint>
 
 TIMEMORY_DEFINE_API(roctracer)
+namespace omnitrace
+{
 namespace api = tim::api;
 
 std::unordered_set<uint64_t>&
@@ -364,9 +366,17 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         }
         if(get_use_timemory())
         {
-            get_roctracer_hip_data()->emplace(
-                data->correlation_id,
-                roctracer_bundle_t{ op_name, quirk::config<quirk::auto_start>{} });
+            auto itr = get_roctracer_hip_data()->emplace(data->correlation_id,
+                                                         roctracer_bundle_t{ op_name });
+            if(itr.second)
+            {
+                itr.first->second.start();
+            }
+            else if(itr.first != get_roctracer_hip_data()->end())
+            {
+                itr.first->second.stop();
+                get_roctracer_hip_data()->erase(itr.first);
+            }
         }
         if(get_use_critical_trace())
         {
@@ -403,7 +413,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                 auto  itr   = _data->find(data->correlation_id);
                 if(itr != get_roctracer_hip_data()->end())
                 {
-                    itr->second.stop().pop();
+                    itr->second.stop();
                     _data->erase(itr);
                     return true;
                 }
@@ -597,3 +607,4 @@ roctracer_tear_down_routines()
     static auto _v = roctracer_functions_t{};
     return _v;
 }
+}  // namespace omnitrace

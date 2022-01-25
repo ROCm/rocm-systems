@@ -45,6 +45,11 @@ if(OMNITRACE_CLANG_FORMAT_EXE)
     file(GLOB_RECURSE headers ${PROJECT_SOURCE_DIR}/include/*.hpp)
     file(GLOB_RECURSE examples ${PROJECT_SOURCE_DIR}/examples/*.cpp
          ${PROJECT_SOURCE_DIR}/examples/*.hpp)
+    file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/examples/lulesh/external/*.cpp
+         ${PROJECT_SOURCE_DIR}/examples/lulesh/external/*.hpp)
+    if(external)
+        list(REMOVE_ITEM examples ${external})
+    endif()
     add_custom_target(
         format-omnitrace
         ${OMNITRACE_CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}

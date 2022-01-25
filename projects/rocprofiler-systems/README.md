@@ -53,19 +53,53 @@ omnitrace <omnitrace-options> -- <exe-or-library> <exe-options>
 
 ## Omnitrace Library Environment Settings
 
-| Environment Variable        | Default Value                 | Description                                                                      |
-|-----------------------------|-------------------------------|----------------------------------------------------------------------------------|
-| `OMNITRACE_DEBUG`           | `false`                       | Enable debugging statements                                                      |
-| `OMNITRACE_USE_PERFETTO`    | `true`                        | Collect profiling data via perfetto                                              |
-| `OMNITRACE_USE_TIMEMORY`    | `false`                       | Collection profiling data via timemory                                           |
-| `OMNITRACE_SAMPLE_RATE`     | `1`                           | Invoke perfetto and/or timemory once every N function calls                      |
-| `OMNITRACE_USE_MPI`         | `true`                        | Label perfetto output files via rank instead of PID                              |
-| `OMNITRACE_OUTPUT_FILE`     | `perfetto-trace.%rank%.proto` | Output file for perfetto (may use `%pid`)                                        |
-| `OMNITRACE_BACKEND`         | `"inprocess"`                 | Configure perfetto to use either "inprocess" data management, "system", or "all" |
-| `OMNITRACE_COMPONENTS`      | `"wall_clock"`                | Timemory components to activate when enabled                                     |
-| `OMNITRACE_SHMEM_SIZE_HINT` | `40960`                       | Hint for perfetto shared memory buffer                                           |
-| `OMNITRACE_BUFFER_SIZE_KB`  | `1024000`                     | Maximum amount of memory perfetto will use to collect data in-process            |
-| `TIMEMORY_TIME_OUTPUT`      | `true`                        | Create unique output subdirectory with date and launch time                      |
+| Environment Variable                       | Default Value            | Description                                                                                                      |
+|--------------------------------------------|--------------------------|------------------------------------------------------------------------------------------------------------------|
+| `OMNITRACE_USE_PERFETTO`                   | `false`                  | Enable perfetto backend                                                                                          |
+| `OMNITRACE_USE_PID`                        | `true`                   | Enable tagging filenames with process identifier (either MPI rank or pid)                                        |
+| `OMNITRACE_USE_ROCTRACER`                  | `true`                   | Enable ROCM tracing                                                                                              |
+| `OMNITRACE_USE_SAMPLING`                   | `true`                   | Enable statistical sampling of call-stack                                                                        |
+| `OMNITRACE_USE_TIMEMORY`                   | `false`                  | Enable timemory backend                                                                                          |
+| `OMNITRACE_BACKEND`                        | `inprocess`              | Specify the perfetto backend to activate. Options are: 'inprocess', 'system', or 'all'                           |
+| `OMNITRACE_BUFFER_SIZE_KB`                 | `1024000`                | Size of perfetto buffer (in KB)                                                                                  |
+| `OMNITRACE_COUT_OUTPUT`                    | `false`                  | Write output to stdout                                                                                           |
+| `OMNITRACE_CRITICAL_TRACE`                 | `false`                  | Enable generation of the critical trace                                                                          |
+| `OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT`    | `2000`                   | Number of critical trace records to store in thread-local memory before submitting to shared buffer              |
+| `OMNITRACE_CRITICAL_TRACE_COUNT`           | `0`                      | Number of critical trace to export (0 == all)                                                                    |
+| `OMNITRACE_CRITICAL_TRACE_DEBUG`           | `false`                  | Enable debugging for critical trace                                                                              |
+| `OMNITRACE_CRITICAL_TRACE_NUM_THREADS`     | `8`                      | Number of threads to use when generating the critical trace                                                      |
+| `OMNITRACE_CRITICAL_TRACE_PER_ROW`         | `0`                      | How many critical traces per row in perfetto (0 == all in one row)                                               |
+| `OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES` | `false`                  | Include names in serialization of critical trace (mainly for debugging)                                          |
+| `OMNITRACE_DIFF_OUTPUT`                    | `false`                  | Generate a difference output vs. a pre-existing output (see also: TIMEMORY_INPUT_PATH and TIMEMORY_INPUT_PREFIX) |
+| `OMNITRACE_FLAT_SAMPLING`                  | `false`                  | Ignore hierarchy in all statistical sampling entries                                                             |
+| `OMNITRACE_INSTRUMENTATION_INTERVAL`       | `1`                      | Instrumentation only takes measurements once every N function calls (not statistical)                            |
+| `OMNITRACE_JSON_OUTPUT`                    | `true`                   | Write json output files                                                                                          |
+| `OMNITRACE_MEMORY_PRECISION`               | `-1`                     | Set the precision for components with 'is_memory_category' type-trait                                            |
+| `OMNITRACE_MEMORY_SCIENTIFIC`              | `false`                  | Set the numerical reporting format for components with 'is_memory_category' type-trait                           |
+| `OMNITRACE_MEMORY_UNITS`                   | `""`                     | Set the units for components with 'uses_memory_units' type-trait                                                 |
+| `OMNITRACE_OUTPUT_FILE`                    | `""`                     | Perfetto filename                                                                                                |
+| `OMNITRACE_OUTPUT_PATH`                    | `omnitrace-{EXE}-output` | Explicitly specify the output folder for results                                                                 |
+| `OMNITRACE_OUTPUT_PREFIX`                  | `""`                     | Explicitly specify a prefix for all output files                                                                 |
+| `OMNITRACE_PRECISION`                      | `-1`                     | Set the global output precision for components                                                                   |
+| `OMNITRACE_ROCTRACER_FLAT_PROFILE`         | `false`                  | Ignore hierarchy in all kernels entries with timemory backend                                                    |
+| `OMNITRACE_ROCTRACER_HSA_ACTIVITY`         | `false`                  | Enable HSA activity tracing support                                                                              |
+| `OMNITRACE_ROCTRACER_HSA_API`              | `false`                  | Enable HSA API tracing support                                                                                   |
+| `OMNITRACE_ROCTRACER_HSA_API_TYPES`        | `""`                     | HSA API type to collect                                                                                          |
+| `OMNITRACE_ROCTRACER_TIMELINE_PROFILE`     | `false`                  | Create unique entries for every kernel with timemory backend                                                     |
+| `OMNITRACE_SAMPLING_DELAY`                   | `1e-06`                  | Number of seconds to delay activating the statistical sampling                                                   |
+| `OMNITRACE_SAMPLING_FREQ`                    | `10`                     | Number of software interrupts per second when OMNITTRACE_USE_SAMPLING=ON                                         |
+| `OMNITRACE_SCIENTIFIC`                     | `false`                  | Set the global numerical reporting to scientific format                                                          |
+| `OMNITRACE_SETTINGS_DESC`                  | `false`                  | Provide descriptions when printing settings                                                                      |
+| `OMNITRACE_SHMEM_SIZE_HINT_KB`             | `40960`                  | Hint for shared-memory buffer size in perfetto (in KB)                                                           |
+| `OMNITRACE_TEXT_OUTPUT`                    | `true`                   | Write text output files                                                                                          |
+| `OMNITRACE_TIMELINE_SAMPLING`              | `false`                  | Create unique entries for every sample when statistical sampling is enabled                                      |
+| `OMNITRACE_TIMEMORY_COMPONENTS`            | `wall_clock`             | List of components to collect via timemory (see timemory-avail)                                                  |
+| `OMNITRACE_TIME_FORMAT`                    | `%F_%I.%M_%p`            | Customize the folder generation when TIMEMORY_TIME_OUTPUT is enabled (see also: strftime)                        |
+| `OMNITRACE_TIME_OUTPUT`                    | `true`                   | Output data to subfolder w/ a timestamp (see also: TIMEMORY_TIME_FORMAT)                                         |
+| `OMNITRACE_TIMING_PRECISION`               | `6`                      | Set the precision for components with 'is_timing_category' type-trait                                            |
+| `OMNITRACE_TIMING_SCIENTIFIC`              | `false`                  | Set the numerical reporting format for components with 'is_timing_category' type-trait                           |
+| `OMNITRACE_TIMING_UNITS`                   | `""`                     | Set the units for components with 'uses_timing_units' type-trait                                                 |
+| `OMNITRACE_TREE_OUTPUT`                    | `true`                   | Write hierarchical json output files                                                                             |
 
 ### Example Omnitrace Instrumentation
 
@@ -165,7 +199,7 @@ variable. The special character sequences `%pid%` and `%rank%` will be replaced 
 
 ## Merging the traces from rocprof and omnitrace
 
-> NOTE: Using `rocprof` externally is deprecated. The current version has built-in support for
+> NOTE: Using `rocprof` externally for tracing is deprecated. The current version has built-in support for
 > recording the GPU activity and HIP API calls. If you want to use an external rocprof, either
 > configure CMake with `-DOMNITRACE_USE_ROCTRACER=OFF` or explicitly set `TIMEMORY_ROCTRACER_ENABLED=OFF` in the
 > environment.

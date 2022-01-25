@@ -36,6 +36,9 @@ main(int argc, char** argv)
     if(argc > 2) nthread = atol(argv[2]);
     if(argc > 3) nitr = atol(argv[3]);
 
+    printf("[%s] Threads: %zu\n[%s] Iterations: %zu\n[%s] fibonacci(%li)...\n", argv[0],
+           nthread, argv[0], nitr, argv[0], nfib);
+
     std::vector<std::thread> threads{};
     for(size_t i = 0; i < nthread; ++i)
     {
@@ -43,10 +46,11 @@ main(int argc, char** argv)
         threads.emplace_back(&run, _nitr, nfib);
     }
 
+    run(nitr - 0.25 * nitr, nfib - 0.1 * nfib);
     for(auto& itr : threads)
         itr.join();
 
-    printf("fibonacci(%li) x %lu = %li\n", nfib, nthread, total.load());
+    printf("[%s] fibonacci(%li) x %lu = %li\n", argv[0], nfib, nthread, total.load());
 
     return 0;
 }

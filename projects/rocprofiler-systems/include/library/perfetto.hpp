@@ -28,6 +28,8 @@
 
 #pragma once
 
+#include "library/defines.hpp"
+
 #if defined(PERFETTO_CATEGORIES)
 #    error "PERFETTO_CATEGORIES is already defined. Please include \"" __FILE__ "\" before including any timemory files"
 #endif
@@ -58,6 +60,8 @@
 PERFETTO_DEFINE_CATEGORIES(PERFETTO_CATEGORIES);
 #endif
 
+namespace omnitrace
+{
 #if defined(CUSTOM_DATA_SOURCE)
 class CustomDataSource : public perfetto::DataSource<CustomDataSource>
 {
@@ -89,3 +93,4 @@ public:
 
 PERFETTO_DECLARE_DATA_SOURCE_STATIC_MEMBERS(CustomDataSource);
 #endif
+}  // namespace omnitrace

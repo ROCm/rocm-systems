@@ -28,37 +28,29 @@
 
 #pragma once
 
-#include "library/common.hpp"
+#include "library/defines.hpp"
 #include "library/timemory.hpp"
 
-// this is used to wrap MPI_Init and MPI_Init_thread
-struct mpi_gotcha : comp::base<mpi_gotcha, void>
+namespace omnitrace
 {
-    using comm_t        = tim::mpi::comm_t;
-    using gotcha_data_t = comp::gotcha_data;
-
-    TIMEMORY_DEFAULT_OBJECT(mpi_gotcha)
-
-    // called right before MPI_Init with that functions arguments
-    static void audit(const gotcha_data_t& _data, audit::incoming, int*, char***);
-
-    // called right before MPI_Init_thread with that functions arguments
-    static void audit(const gotcha_data_t& _data, audit::incoming, int*, char***, int,
-                      int*);
-
-    // called right before MPI_Finalize
-    static void audit(const gotcha_data_t& _data, audit::incoming);
-
-    // called right before MPI_Comm_{rank,size} with that functions arguments
-    void audit(const gotcha_data_t& _data, audit::incoming, comm_t, int*);
-
-    // called right after MPI_{Init,Init_thread,Comm_rank,Comm_size} with the return value
-    void audit(const gotcha_data_t& _data, audit::outgoing, int _retval);
+namespace component
+{
+// timemory component which calls omnitrace functions
+// (used in gotcha wrappers)
+struct omnitrace : comp::base<omnitrace, void>
+{
+    static std::string label() { return "omnitrace"; }
+    void               start();
+    void               stop();
+    void               set_prefix(const char*);
 
 private:
-    comm_t m_comm = tim::mpi::comm_world_v;
-    int*   m_rank = nullptr;
-    int*   m_size = nullptr;
+    const char* m_prefix = nullptr;
 };
+}  // namespace component
+}  // namespace omnitrace
 
-using mpi_gotcha_t = comp::gotcha<5, tim::component_tuple<mpi_gotcha>, omnitrace>;
+TIMEMORY_METADATA_SPECIALIZATION(
+    omnitrace::component::omnitrace, "omnitrace",
+    "Invokes instrumentation functions 'omnitrace_push_trace' and 'omnitrace_pop_trace'",
+    "Used by gotcha wrappers")

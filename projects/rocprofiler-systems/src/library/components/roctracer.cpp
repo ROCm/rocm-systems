@@ -26,11 +26,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
-#include "library/roctracer.hpp"
+#include "library/components/roctracer.hpp"
+#include "library/components/roctracer_callbacks.hpp"
 #include "library/config.hpp"
 #include "library/defines.hpp"
-#include "library/roctracer_callbacks.hpp"
 #include "library/thread_data.hpp"
+
+using namespace omnitrace;
 
 namespace tim
 {

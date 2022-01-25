@@ -29,8 +29,10 @@
 #pragma once
 
 #include "library/config.hpp"
+#include "library/defines.hpp"
 #include "library/thread_data.hpp"
-#include "timemory/tpls/cereal/cereal/cereal.hpp"
+
+#include <timemory/tpls/cereal/cereal/cereal.hpp>
 
 #include <cstdint>
 #include <cstdlib>
@@ -38,6 +40,8 @@
 #include <string>
 #include <vector>
 
+namespace omnitrace
+{
 namespace critical_trace
 {
 enum class Device : short
@@ -207,3 +211,4 @@ struct id
 {};
 
 }  // namespace critical_trace
+}  // namespace omnitrace

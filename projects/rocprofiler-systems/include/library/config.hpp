@@ -30,9 +30,11 @@
 
 #include "library/api.hpp"
 #include "library/common.hpp"
-#include "library/fork_gotcha.hpp"
-#include "library/mpi_gotcha.hpp"
-#include "library/roctracer.hpp"
+#include "library/components/fork_gotcha.hpp"
+#include "library/components/mpi_gotcha.hpp"
+#include "library/components/pthread_gotcha.hpp"
+#include "library/components/roctracer.hpp"
+#include "library/defines.hpp"
 #include "library/state.hpp"
 #include "library/timemory.hpp"
 
@@ -40,37 +42,42 @@
 
 #include <string_view>
 
+namespace omnitrace
+{
 // bundle of components around omnitrace_init and omnitrace_finalize
 using main_bundle_t =
     tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::cpu_clock,
-                           comp::cpu_util, comp::roctracer, papi_tot_ins,
-                           comp::user_global_bundle, fork_gotcha_t, mpi_gotcha_t>;
+                           comp::cpu_util, comp::roctracer, comp::user_global_bundle,
+                           fork_gotcha_t, mpi_gotcha_t, pthread_gotcha_t>;
 
 // bundle of components used in instrumentation
 using instrumentation_bundle_t =
-    tim::component_bundle<omnitrace, comp::wall_clock*, comp::user_global_bundle*>;
+    tim::component_bundle<api::omnitrace, comp::wall_clock*, comp::user_global_bundle*>;
 
 // allocator for instrumentation_bundle_t
 using bundle_allocator_t = tim::data::ring_buffer_allocator<instrumentation_bundle_t>;
 
 // bundle of components around each thread
+#if defined(TIMEMORY_RUSAGE_THREAD) && TIMEMORY_RUSAGE_THREAD > 0
 using omnitrace_thread_bundle_t =
     tim::lightweight_tuple<comp::wall_clock, comp::thread_cpu_clock,
-                           comp::thread_cpu_util,
-#if defined(TIMEMORY_RUSAGE_THREAD) && TIMEMORY_RUSAGE_THREAD > 0
-                           comp::peak_rss,
+                           comp::thread_cpu_util, comp::peak_rss>;
+#else
+using omnitrace_thread_bundle_t =
+    tim::lightweight_tuple<comp::wall_clock, comp::thread_cpu_clock,
+                           comp::thread_cpu_util>;
 #endif
-                           papi_tot_ins>;
 
 //
 //      Initialization routines
 //
 void
-configure_settings();
+configure_settings() TIMEMORY_VISIBILITY("default");
 
 void
-print_config_settings(std::ostream&                                  _os,
-                      std::function<bool(const std::string_view&)>&& _filter);
+print_config_settings(
+    std::ostream&                                                                _os,
+    std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter);
 
 std::string&
 get_exe_name();
@@ -82,22 +89,37 @@ std::string
 get_config_file();
 
 bool
+get_debug_env();
+
+bool
 get_debug();
 
-bool
+bool&
 get_use_perfetto();
 
-bool
+bool&
 get_use_timemory();
+
+bool&
+get_use_roctracer();
+
+bool&
+get_use_sampling();
 
 bool&
 get_use_pid();
 
-bool
+bool&
 get_use_mpip();
 
-bool
+bool&
 get_use_critical_trace();
+
+bool
+get_timeline_sampling();
+
+bool
+get_flat_sampling();
 
 bool
 get_roctracer_timeline_profile();
@@ -135,14 +157,20 @@ get_trace_hsa_api_types();
 std::string&
 get_backend();
 
-std::string
+std::string&
 get_perfetto_output_filename();
 
 int64_t
 get_critical_trace_count();
 
 size_t&
-get_sample_rate();
+get_instrumentation_interval();
+
+double&
+get_sampling_freq();
+
+double&
+get_sampling_delay();
 
 int64_t
 get_critical_trace_per_row();
@@ -161,3 +189,4 @@ get_cpu_cid();
 
 std::unique_ptr<std::vector<uint64_t>>&
 get_cpu_cid_stack(int64_t _tid = threading::get_id());
+}  // namespace omnitrace

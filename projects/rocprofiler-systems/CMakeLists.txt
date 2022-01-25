@@ -58,21 +58,37 @@ set(CMAKE_CXX_STANDARD
     17
     CACHE STRING "CXX language standard")
 omnitrace_add_feature(CMAKE_CXX_STANDARD "CXX language standard")
+omnitrace_add_feature(CMAKE_BUILD_TYPE "Build optimization level")
 omnitrace_add_option(CMAKE_CXX_STANDARD_REQUIRED "Require C++ language standard" ON)
 omnitrace_add_option(CMAKE_CXX_EXTENSIONS "Compiler specific language extensions" OFF)
 omnitrace_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH "Enable rpath to linked libraries"
                      ON)
+
 omnitrace_add_option(OMNITRACE_USE_CLANG_TIDY "Enable clang-tidy" OFF)
 omnitrace_add_option(OMNITRACE_USE_MPI "Enable MPI support" OFF)
-omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
-omnitrace_add_option(OMNITRACE_USE_ROCTRACER "Enable roctracer support" ON)
-omnitrace_add_option(OMNITRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
+omnitrace_add_option(OMNITRACE_USE_HIP "Enable HIP support" ON)
+omnitrace_add_option(OMNITRACE_USE_ROCTRACER "Enable roctracer support"
+                     ${OMNITRACE_USE_HIP})
 omnitrace_add_option(OMNITRACE_USE_MPI_HEADERS
                      "Enable wrapping MPI functions w/o enabling MPI dependency" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_TESTING "Enable building the testing suite" OFF)
+omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_HIDDEN_VISIBILITY
+                     "Build with hidden visibility (disable for Debug builds)" ON)
+
+if(NOT OMNITRACE_USE_HIP)
+    set(OMNITRACE_USE_ROCTRACER
+        OFF
+        CACHE BOOL "Disabled via OMNITRACE_USE_HIP=OFF" FORCE)
+endif()
 
 include(ProcessorCount)
 processorcount(OMNITRACE_PROCESSOR_COUNT)
-math(EXPR OMNITRACE_THREAD_COUNT "8 * ${OMNITRACE_PROCESSOR_COUNT}")
+math(EXPR OMNITRACE_THREAD_COUNT "16 * ${OMNITRACE_PROCESSOR_COUNT}")
+if(OMNITRACE_THREAD_COUNT LESS 128)
+    set(OMNITRACE_THREAD_COUNT 128)
+endif()
 set(OMNITRACE_MAX_THREADS
     "${OMNITRACE_THREAD_COUNT}"
     CACHE
@@ -81,24 +97,25 @@ set(OMNITRACE_MAX_THREADS
     )
 omnitrace_add_feature(
     OMNITRACE_MAX_THREADS
-    "Maximum number of total threads supported in the host application (default: 8 * nproc)"
+    "Maximum number of total threads supported in the host application (default: max of 128 or 16 * nproc)"
     )
 
-# ensure synced
-set(TIMEMORY_USE_MPI
-    ${OMNITRACE_USE_MPI}
-    CACHE BOOL "Enable MPI support" FORCE)
-
 # default visibility settings
-set(CMAKE_C_VISIBILITY_PRESET "default")
-set(CMAKE_CXX_VISIBILITY_PRESET "default")
-set(CMAKE_VISIBILITY_INLINES_HIDDEN OFF)
+set(CMAKE_C_VISIBILITY_PRESET
+    "default"
+    CACHE STRING "Visibility preset for non-inline C functions")
+set(CMAKE_CXX_VISIBILITY_PRESET
+    "default"
+    CACHE STRING "Visibility preset for non-inline C++ functions/objects")
+set(CMAKE_VISIBILITY_INLINES_HIDDEN
+    OFF
+    CACHE BOOL "Visibility preset for inline functions")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(Formatting) # format target
 include(Packages) # finds third-party libraries
 
-if(OMNITRACE_USE_ROCTRACER)
+if(OMNITRACE_USE_HIP OR OMNITRACE_USE_ROCTRACER)
     find_package(HIP QUIET)
     if(HIP_VERSION_MAJOR GREATER_EQUAL 4 AND HIP_VERSION_MINOR GREATER 3)
         set(roctracer_kfdwrapper_LIBRARY)
@@ -116,9 +133,11 @@ configure_file(${PROJECT_SOURCE_DIR}/include/library/defines.hpp.in
 omnitrace_activate_clang_tidy()
 
 # custom visibility settings
-set(CMAKE_C_VISIBILITY_PRESET "hidden")
-set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
-set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+if(OMNITRACE_BUILD_HIDDEN_VISIBILITY)
+    set(CMAKE_C_VISIBILITY_PRESET "hidden")
+    set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
+    set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+endif()
 
 if(OMNITRACE_BUILD_LTO)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
@@ -134,13 +153,17 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/src/library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/config.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/critical_trace.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/library/fork_gotcha.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/library/omnitrace_component.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/library/mpi_gotcha.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/gpu.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/perfetto.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/ptl.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/sampling.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/thread_data.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/timemory.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/components/backtrace.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/components/fork_gotcha.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/components/mpi_gotcha.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/components/omnitrace.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/components/pthread_gotcha.cpp
     ${perfetto_DIR}/sdk/perfetto.cc)
 
 set(library_headers
@@ -150,49 +173,53 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/library/common.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/critical_trace.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/debug.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/library/fork_gotcha.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/library/omnitrace_component.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/library/mpi_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/gpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/perfetto.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/ptl.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/sampling.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/thread_data.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/timemory.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/components/fwd.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/components/backtrace.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/components/fork_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/components/mpi_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/components/omnitrace.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/components/pthread_gotcha.hpp
     ${perfetto_DIR}/sdk/perfetto.h)
-
-if(NOT TIMEMORY_USE_PERFETTO)
-
-endif()
 
 add_library(omnitrace-library SHARED ${library_sources} ${library_headers})
 
 if(OMNITRACE_USE_ROCTRACER)
     target_sources(
         omnitrace-library
-        PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include/library/roctracer.hpp
-                ${CMAKE_CURRENT_LIST_DIR}/src/library/roctracer.cpp
-                ${CMAKE_CURRENT_LIST_DIR}/include/library/roctracer_callbacks.hpp
-                ${CMAKE_CURRENT_LIST_DIR}/src/library/roctracer_callbacks.cpp)
+        PRIVATE
+            ${CMAKE_CURRENT_LIST_DIR}/src/library/components/roctracer.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/src/library/components/roctracer_callbacks.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/include/library/components/roctracer.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/include/library/components/roctracer_callbacks.hpp)
 endif()
 
 target_include_directories(omnitrace-library SYSTEM PRIVATE ${perfetto_DIR}/sdk)
 
 target_compile_definitions(
     omnitrace-library
-    PRIVATE $<IF:$<BOOL:${OMNITRACE_CUSTOM_DATA_SOURCE}>,CUSTOM_DATA_SOURCE,>)
+    PRIVATE OMNITRACE_MAX_THREADS=${OMNITRACE_MAX_THREADS}
+            $<IF:$<BOOL:${OMNITRACE_CUSTOM_DATA_SOURCE}>,CUSTOM_DATA_SOURCE,>)
 
 target_link_libraries(
     omnitrace-library
-    PRIVATE omnitrace::omnitrace-headers
-            omnitrace::omnitrace-threading
-            omnitrace::omnitrace-compile-options
-            omnitrace::omnitrace-roctracer
-            omnitrace::omnitrace-mpi
-            omnitrace::omnitrace-ptl
-            $<BUILD_INTERFACE:timemory::timemory-headers>
-            $<BUILD_INTERFACE:timemory::timemory-gotcha>
-            $<BUILD_INTERFACE:timemory::timemory-cxx-shared>
-            $<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>)
+    PUBLIC $<BUILD_INTERFACE:omnitrace::omnitrace-headers>
+           $<BUILD_INTERFACE:omnitrace::omnitrace-threading>
+           $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
+           $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
+           $<BUILD_INTERFACE:omnitrace::omnitrace-roctracer>
+           $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
+           $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
+           $<BUILD_INTERFACE:timemory::timemory-headers>
+           $<BUILD_INTERFACE:timemory::timemory-gotcha>
+           $<BUILD_INTERFACE:timemory::timemory-cxx-shared>
+           $<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>)
 
 if(OMNITRACE_DYNINST_API_RT)
     get_filename_component(OMNITRACE_DYNINST_API_RT_DIR "${OMNITRACE_DYNINST_API_RT}"
@@ -200,12 +227,33 @@ if(OMNITRACE_DYNINST_API_RT)
 endif()
 
 set_target_properties(
-    omnitrace-library PROPERTIES OUTPUT_NAME omnitrace
-                                 INSTALL_RPATH "\$ORIGIN:\$ORIGIN/dyninst-tpls/libs")
+    omnitrace-library
+    PROPERTIES OUTPUT_NAME omnitrace
+               INSTALL_RPATH
+               "\$ORIGIN:\$ORIGIN/timemory/libunwind:\$ORIGIN/dyninst-tpls/libs")
 
 install(
     TARGETS omnitrace-library
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    OPTIONAL)
+
+# ------------------------------------------------------------------------------#
+#
+# omnitrace-avail target
+#
+# ------------------------------------------------------------------------------#
+
+add_executable(omnitrace-avail ${CMAKE_CURRENT_LIST_DIR}/src/avail.cpp
+                               ${CMAKE_CURRENT_LIST_DIR}/include/avail.hpp)
+
+target_include_directories(omnitrace-avail PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
+target_compile_definitions(omnitrace-avail PRIVATE OMNITRACE_EXTERN_COMPONENTS=0)
+target_link_libraries(omnitrace-avail PRIVATE omnitrace-library)
+set_target_properties(omnitrace-avail PROPERTIES INSTALL_RPATH_USE_LINK_PATH ON)
+
+install(
+    TARGETS omnitrace-avail
+    DESTINATION bin
     OPTIONAL)
 
 # ------------------------------------------------------------------------------#
@@ -234,16 +282,13 @@ set_target_properties(
         OUTPUT_NAME omnitrace
         INSTALL_RPATH_USE_LINK_PATH ON
         INSTALL_RPATH
-        "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib"
+        "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/timemory/libunwind:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib"
     )
 
 install(
     TARGETS omnitrace-exe
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     OPTIONAL)
-
-# build the timemory-avail exe
-add_dependencies(omnitrace-exe timemory-avail)
 
 # ------------------------------------------------------------------------------#
 #
@@ -275,7 +320,9 @@ install(
 #
 # ------------------------------------------------------------------------------#
 
-add_subdirectory(examples)
+if(OMNITRACE_BUILD_TESTING)
+    add_subdirectory(examples)
+endif()
 
 # ------------------------------------------------------------------------------#
 #
@@ -283,10 +330,12 @@ add_subdirectory(examples)
 #
 # ------------------------------------------------------------------------------#
 
-include(CTest)
-enable_testing()
+if(OMNITRACE_BUILD_TESTING)
+    include(CTest)
+    enable_testing()
 
-add_subdirectory(tests)
+    add_subdirectory(tests)
+endif()
 
 # ------------------------------------------------------------------------------#
 #

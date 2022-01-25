@@ -27,18 +27,20 @@
 // THE SOFTWARE.
 
 #include "library/critical_trace.hpp"
-#include "PTL/ThreadPool.hh"
 #include "library/config.hpp"
 #include "library/debug.hpp"
+#include "library/defines.hpp"
 #include "library/perfetto.hpp"
 #include "library/ptl.hpp"
-#include "timemory/backends/dmp.hpp"
-#include "timemory/hash/types.hpp"
-#include "timemory/tpls/cereal/cereal/archives/json.hpp"
-#include "timemory/tpls/cereal/cereal/cereal.hpp"
-#include "timemory/utility/macros.hpp"
-#include "timemory/utility/types.hpp"
-#include "timemory/utility/utility.hpp"
+
+#include <PTL/ThreadPool.hh>
+#include <timemory/backends/dmp.hpp>
+#include <timemory/hash/types.hpp>
+#include <timemory/tpls/cereal/cereal/archives/json.hpp>
+#include <timemory/tpls/cereal/cereal/cereal.hpp>
+#include <timemory/utility/macros.hpp>
+#include <timemory/utility/types.hpp>
+#include <timemory/utility/utility.hpp>
 
 #include <cctype>
 #include <cstdint>
@@ -47,6 +49,8 @@
 #include <stdexcept>
 #include <utility>
 
+namespace omnitrace
+{
 namespace critical_trace
 {
 namespace
@@ -1165,7 +1169,7 @@ compute_critical_trace()
     try
     {
         PTL::ThreadPool _tp{ get_critical_trace_num_threads(), []() { copy_hash_ids(); },
-                             false };
+                             []() {} };
         _tp.set_verbose(-1);
         PTL::TaskGroup<void> _tg{ &_tp };
 
@@ -1191,7 +1195,7 @@ compute_critical_trace()
         OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
 
         _tg.run(
-            [](call_chain _chain, std::string _func) {
+            [](call_chain _chain, std::string _func) {  // NOLINT
                 save_call_chain_json(tim::settings::compose_output_filename(
                                          "call-chain", ".json", get_use_pid(),
                                          (tim::dmp::is_initialized())
@@ -1298,3 +1302,4 @@ compute_critical_trace()
 }
 }  // namespace
 }  // namespace critical_trace
+}  // namespace omnitrace

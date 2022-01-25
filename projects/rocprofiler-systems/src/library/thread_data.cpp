@@ -28,9 +28,12 @@
 
 #include "library/thread_data.hpp"
 
+namespace omnitrace
+{
 instrumentation_bundles::instance_array_t&
 instrumentation_bundles::instances()
 {
     static auto _v = instance_array_t{};
     return _v;
 }
+}  // namespace omnitrace

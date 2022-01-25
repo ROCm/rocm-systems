@@ -13,6 +13,7 @@ omnitrace_add_interface_library(omnitrace-threading "Enables multithreading supp
 omnitrace_add_interface_library(
     omnitrace-dyninst
     "Provides flags and libraries for Dyninst (dynamic instrumentation)")
+omnitrace_add_interface_library(omnitrace-hip "Provides flags and libraries for HIP")
 omnitrace_add_interface_library(omnitrace-roctracer
                                 "Provides flags and libraries for roctracer")
 omnitrace_add_interface_library(omnitrace-mpi "Provides MPI or MPI headers")
@@ -23,6 +24,9 @@ target_include_directories(omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/inc
 
 # include threading because of rooflines
 target_link_libraries(omnitrace-headers INTERFACE omnitrace-threading)
+
+# ensure the env overrides the appending /opt/rocm later
+string(REPLACE ":" ";" CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH};${CMAKE_PREFIX_PATH}")
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -49,6 +53,19 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
+# HIP
+#
+# ----------------------------------------------------------------------------------------#
+
+if(OMNITRACE_USE_HIP)
+    list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+    find_package(hip ${omnitrace_FIND_QUIETLY} REQUIRED)
+    target_compile_definitions(omnitrace-hip INTERFACE OMNITRACE_USE_HIP)
+    target_link_libraries(omnitrace-hip INTERFACE hip::host)
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
 # roctracer
 #
 # ----------------------------------------------------------------------------------------#
@@ -56,9 +73,9 @@ endif()
 if(OMNITRACE_USE_ROCTRACER)
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
     find_package(roctracer ${omnitrace_FIND_QUIETLY} REQUIRED)
-    find_package(hip ${omnitrace_FIND_QUIETLY} REQUIRED)
     target_compile_definitions(omnitrace-roctracer INTERFACE OMNITRACE_USE_ROCTRACER)
-    target_link_libraries(omnitrace-roctracer INTERFACE hip::host roctracer::roctracer)
+    target_link_libraries(omnitrace-roctracer INTERFACE roctracer::roctracer
+                                                        omnitrace::omnitrace-hip)
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${roctracer_LIBRARY_DIRS}")
 endif()
 
@@ -297,25 +314,47 @@ set(TIMEMORY_BUILD_TOOLS
 set(TIMEMORY_BUILD_EXCLUDE_FROM_ALL
     ON
     CACHE BOOL "Set timemory to only build dependencies")
+set(TIMEMORY_BUILD_HIDDEN_VISIBILITY
+    ON
+    CACHE BOOL "Build timemory with hidden visibility")
 set(TIMEMORY_QUIET_CONFIG
     ON
     CACHE BOOL "Make timemory configuration quieter")
 
 # timemory feature settings
+set(TIMEMORY_USE_MPI
+    ${OMNITRACE_USE_MPI}
+    CACHE BOOL "Enable MPI support in timemory" FORCE)
 set(TIMEMORY_USE_GOTCHA
     ON
     CACHE BOOL "Enable GOTCHA support in timemory")
 set(TIMEMORY_USE_PERFETTO
     OFF
     CACHE BOOL "Disable perfetto support in timemory")
+set(TIMEMORY_USE_LIBUNWIND
+    ON
+    CACHE BOOL "Enable libunwind support in timemory")
+
 # timemory feature build settings
 set(TIMEMORY_BUILD_GOTCHA
     ON
     CACHE BOOL "Enable building GOTCHA library from submodule")
+set(TIMEMORY_BUILD_LIBUNWIND
+    ON
+    CACHE BOOL "Enable building libunwind library from submodule")
+set(TIMEMORY_BUILD_EXTRA_OPTIMIZATIONS
+    ${OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS}
+    CACHE BOOL "Enable building GOTCHA library from submodule" FORCE)
+
 # timemory build settings
 set(TIMEMORY_TLS_MODEL
     "global-dynamic"
     CACHE STRING "Thread-local static model" FORCE)
+
+set(TIMEMORY_SETTINGS_PREFIX
+    "OMNITRACE_"
+    CACHE STRING "Prefix used for settings and environment variables")
+mark_as_advanced(TIMEMORY_SETTINGS_PREFIX)
 
 omnitrace_checkout_git_submodule(
     RELATIVE_PATH external/timemory
@@ -323,19 +362,29 @@ omnitrace_checkout_git_submodule(
     REPO_URL https://github.com/NERSC/timemory.git
     REPO_BRANCH gpu-kernel-instrumentation)
 
-omnitrace_save_variables(BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
-                                                CMAKE_POSITION_INDEPENDENT_CODE)
+omnitrace_save_variables(
+    BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
+                           CMAKE_POSITION_INDEPENDENT_CODE CMAKE_PREFIX_PATH)
 
 # ensure timemory builds PIC static libs so that we don't have to install timemory shared
 # lib
 set(BUILD_SHARED_LIBS ON)
 set(BUILD_STATIC_LIBS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(TIMEMORY_CTP_OPTIONS GLOBAL)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    # results in undefined symbols to component::base<T>::load()
+    set(TIMEMORY_BUILD_HIDDEN_VISIBILITY
+        OFF
+        CACHE BOOL "" FORCE)
+endif()
 
 add_subdirectory(external/timemory)
 
-omnitrace_restore_variables(BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
-                                                   CMAKE_POSITION_INDEPENDENT_CODE)
+omnitrace_restore_variables(
+    BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
+                           CMAKE_POSITION_INDEPENDENT_CODE CMAKE_PREFIX_PATH)
 
 # ----------------------------------------------------------------------------------------#
 #

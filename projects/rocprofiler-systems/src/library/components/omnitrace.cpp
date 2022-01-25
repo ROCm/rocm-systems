@@ -26,21 +26,31 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
-#include "library/fork_gotcha.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
+#include "library/components/omnitrace.hpp"
+#include "library/api.hpp"
 
-void
-fork_gotcha::audit(const gotcha_data_t&, audit::incoming)
+namespace omnitrace
 {
-    OMNITRACE_DEBUG(
-        "Warning! Calling fork() within an OpenMPI application using libfabric "
-        "may result is segmentation fault\n");
-    TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug(), 16);
+namespace component
+{
+void
+omnitrace::start()
+{
+    if(m_prefix) omnitrace_push_trace(m_prefix);
 }
 
 void
-fork_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, pid_t _pid)
+omnitrace::stop()
 {
-    OMNITRACE_DEBUG("%s() return PID %i\n", _data.tool_id.c_str(), (int) _pid);
+    if(m_prefix) omnitrace_pop_trace(m_prefix);
 }
+
+void
+omnitrace::set_prefix(const char* _prefix)
+{
+    m_prefix = _prefix;
+}
+}  // namespace component
+}  // namespace omnitrace
+
+TIMEMORY_INITIALIZE_STORAGE(omnitrace::component::omnitrace)

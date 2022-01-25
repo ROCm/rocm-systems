@@ -28,4 +28,6 @@
 
 #include "library/timemory.hpp"
 
+using namespace omnitrace;
+
 TIMEMORY_INITIALIZE_STORAGE(comp::wall_clock, comp::user_global_bundle)

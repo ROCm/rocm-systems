@@ -28,9 +28,23 @@
 
 #include "omnitrace.hpp"
 
+#include <chrono>
+#include <cstdlib>
+#include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <thread>
 
+bool debug_print   = false;
+int  verbose_level = tim::get_env<int>("TIMEMORY_RUN_VERBOSE", 0);
+
+static bool     binary_rewrite                                    = false;
+static bool     is_attached                                       = false;
+static bool     loop_level_instr                                  = false;
+static bool     werror                                            = false;
+static bool     stl_func_instr                                    = false;
+static bool     use_mpi                                           = false;
+static bool     is_static_exe                                     = false;
 static bool     is_driver                                         = false;
 static bool     allow_overlapping                                 = false;
 static bool     instr_dynamic_callsites                           = false;
@@ -38,8 +52,8 @@ static bool     instr_traps                                       = false;
 static bool     instr_loop_traps                                  = false;
 static size_t   batch_size                                        = 50;
 static strset_t extra_libs                                        = {};
-static size_t   min_address_range                                 = (1 << 9);  // 512
-static size_t   min_loop_address_range                            = (1 << 9);  // 512
+static size_t   min_address_range                                 = (1 << 8);  // 256
+static size_t   min_loop_address_range                            = (1 << 8);  // 256
 static std::vector<std::pair<uint64_t, string_t>> hash_ids        = {};
 static std::map<string_t, bool>                   use_stubs       = {};
 static std::map<string_t, procedure_t*>           beg_stubs       = {};
@@ -60,6 +74,7 @@ static string_t    print_instrumented = {};
 static string_t    print_available    = {};
 static string_t    print_overlapping  = {};
 static std::string modfunc_dump_dir   = {};
+static auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
 std::string
 get_absolute_exe_filepath(std::string exe_name);
@@ -100,17 +115,16 @@ main(int argc, char** argv)
             tim::set_env<string_t>("DYNINSTAPI_RT_LIB",
                                    TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.a"), 0);
     }
-    verbprintf(0, "[omnitrace] DYNINST_API_RT: %s\n",
+    verbprintf(0, "[omnitrace][exe] DYNINST_API_RT: %s\n",
                tim::get_env<string_t>("DYNINSTAPI_RT_LIB", "").c_str());
 
     argv0 = argv[0];
 
     bpatch                              = std::make_shared<patch_t>();
-    bool                  is_attached   = false;
     address_space_t*      addr_space    = nullptr;
     string_t              mutname       = {};
     string_t              outfile       = {};
-    std::vector<string_t> inputlib      = { "" };
+    std::vector<string_t> inputlib      = { "libomnitrace" };
     std::vector<string_t> libname       = {};
     std::vector<string_t> sharedlibname = {};
     std::vector<string_t> staticlibname = {};
@@ -126,7 +140,8 @@ main(int argc, char** argv)
     bpatch->setTrampRecursive(false);
     bpatch->setMergeTramp(false);
 
-    std::set<std::string> dyninst_defs = { "TypeChecking", "SaveFPR", "DelayedParsing" };
+    std::set<std::string> dyninst_defs = { "TypeChecking", "SaveFPR", "DelayedParsing",
+                                           "InstrStackFrames" };
 
     int _argc = argc;
     int _cmdc = 0;
@@ -184,12 +199,15 @@ main(int argc, char** argv)
 
     if(verbose_level > 1)
     {
-        std::cout << "[omnitrace][original]: " << cmd_string(argc, argv) << std::endl;
-        std::cout << "[omnitrace][cfg-args]: " << cmd_string(_argc, _argv) << std::endl;
+        std::cout << "[omnitrace][exe][original]: " << cmd_string(argc, argv)
+                  << std::endl;
+        std::cout << "[omnitrace][exe][cfg-args]: " << cmd_string(_argc, _argv)
+                  << std::endl;
     }
 
     if(_cmdc > 0)
-        std::cout << "\n[omnitrace][command]: " << cmd_string(_cmdc, _cmdv) << "\n\n";
+        std::cout << "\n[omnitrace][exe][command]: " << cmd_string(_cmdc, _cmdv)
+                  << "\n\n";
 
     if(_cmdc > 0) cmdv0 = _cmdv[0];
 
@@ -205,172 +223,30 @@ main(int argc, char** argv)
     // non '-' charcter, then we must be at the application name.
     using parser_t = tim::argparse::argument_parser;
     parser_t parser("omnitrace");
+    string_t extra_help = "-- <CMD> <ARGS>";
 
     parser.enable_help();
-    parser.add_argument()
-        .names({ "-v", "--verbose" })
-        .description("Verbose output")
-        .max_count(1);
-    parser.add_argument().names({ "--debug" }).description("Debug output").count(0);
-    parser.add_argument()
-        .names({ "-e", "--error" })
-        .description("All warnings produce runtime errors")
-        .count(0);
-    parser.add_argument()
-        .names({ "-o", "--output" })
-        .description("Enable binary-rewrite to new executable")
-        .count(1);
-    parser.add_argument()
-        .names({ "-I", "-R", "--function-include" })
-        .description("Regex for selecting functions");
-    parser.add_argument()
-        .names({ "-E", "--function-exclude" })
-        .description("Regex for excluding functions");
-    parser.add_argument()
-        .names({ "-MI", "-MR", "--module-include" })
-        .description("Regex for selecting modules/files/libraries");
-    parser.add_argument()
-        .names({ "-ME", "--module-exclude" })
-        .description("Regex for excluding modules/files/libraries");
-    parser.add_argument()
-        .names({ "-m", "--main-function" })
-        .description("The primary function to instrument around, e.g. 'main'")
-        .count(1);
-    parser.add_argument()
-        .names({ "-l", "--instrument-loops" })
-        .description("Instrument at the loop level")
-        .count(0);
-    parser.add_argument()
-        .names({ "-j", "--jump" })
-        .description(jump_description.str())
-        .count(0);
-    parser.add_argument()
-        .names({ "-s", "--stubs" })
-        .description("Instrument with library stubs for LD_PRELOAD")
-        .count(0);
-    parser.add_argument()
-        .names({ "-L", "--library" })
-        .description(
-            "Libraries with instrumentation routines (default: \"libomnitrace\")");
-    parser.add_argument()
-        .names({ "-S", "--stdlib" })
-        .description("Enable instrumentation of C++ standard library functions.")
-        .count(0);
-    parser.add_argument()
-        .names({ "--cstdlib" })
-        .description("Enable instrumentation of C standard library functions.")
-        .count(0);
-    parser.add_argument()
-        .names({ "-p", "--pid" })
-        .description("Connect to running process")
-        .count(1);
-    parser.add_argument()
-        .names({ "-d", "--default-components" })
-        .description("Default components to instrument (only useful when timemory is "
-                     "enabled in omnitrace library)");
-    parser.add_argument()
-        .names({ "-M", "--mode" })
-        .description("Instrumentation mode. 'trace' mode is immutable, 'region' mode is "
-                     "mutable by omnitrace library interface")
-        .choices({ "trace", "region" })
-        .count(1);
-    parser.add_argument()
-        .names({ "--env" })
-        .description("Environment variables to add to the runtime in form "
-                     "VARIABLE=VALUE. E.g. use '--env OMNITRACE_USE_TIMEMORY=ON' to "
-                     "default to using timemory instead of perfetto");
-    parser.add_argument()
-        .names({ "--prefer" })
-        .description("Prefer this library types when available")
-        .choices({ "shared", "static" })
-        .count(1);
-    parser.add_argument({ "--driver" }, "Force main or _init/_fini instrumentation")
-        .count(0)
-        .action([](auto&) { is_driver = true; });
-    parser
-        .add_argument({ "--mpi" },
-                      "Enable MPI support (requires omnitrace built w/ MPI and GOTCHA "
-                      "support). NOTE: this will automatically be activated if "
-                      "MPI_Init/MPI_Init_thread and MPI_Finalize are found in the symbol "
-                      "table of target")
-        .count(0);
-    parser.add_argument({ "--label" }, "Labeling info for functions")
-        .choices({ "file", "line", "return", "args" });
-    parser.add_argument({ "--load" },
-                        "Supplemental instrumentation library names w/o extension (e.g. "
-                        "'libinstr' for 'libinstr.so' or 'libinstr.a')");
-    parser.add_argument(
-        { "--init-functions" },
-        "Initialization function(s) for supplemental instrumentation libraries");
-    parser.add_argument(
-        { "--fini-functions" },
-        "Finalization function(s) for supplemental instrumentation libraries");
-    parser
-        .add_argument(
-            { "-b", "--batch-size" },
-            "Dyninst supports batch insertion of multiple points. If one large batch "
-            "insertion fails, this value will be used to create smaller batches")
-        .count(1)
-        .dtype("size_t")
-        .action([](parser_t& p) { batch_size = p.get<size_t>("batch-size"); });
-    parser
-        .add_argument({ "--dynamic-callsites" },
-                      "Force instrumentation if a function has dynamic callsites (e.g. "
-                      "function pointers)")
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "[DEBUG OPTIONS]" }, "");
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "--debug" }, "Debug output")
         .max_count(1)
+        .action([](parser_t& p) {
+            debug_print = p.get<bool>("debug");
+            if(debug_print && !p.exists("verbose")) verbose_level = 256;
+        });
+    parser.add_argument({ "-v", "--verbose" }, "Verbose output")
+        .max_count(1)
+        .action([](parser_t& p) {
+            if(p.get_count("v") == 0)
+                verbose_level = 1;
+            else
+                verbose_level = p.get<int>("v");
+        });
+    parser.add_argument({ "-e", "--error" }, "All warnings produce runtime errors")
         .dtype("boolean")
-        .action([](parser_t& p) {
-            instr_dynamic_callsites = p.get<bool>("dynamic-callsites");
-        });
-    parser
-        .add_argument({ "-r", "--min-address-range" },
-                      "If the address range of a function is less than this value, "
-                      "exclude it from instrumentation")
-        .count(1)
-        .dtype("size_t")
-        .set_default(min_address_range)
-        .action(
-            [](parser_t& p) { min_address_range = p.get<size_t>("min-address-range"); });
-    parser
-        .add_argument({ "--min-address-range-loop" },
-                      "If the address range of a function containing a loop is less than "
-                      "this value, exclude it from instrumentation")
-        .count(1)
-        .dtype("size_t")
-        .set_default(min_loop_address_range)
-        .action([](parser_t& p) {
-            min_loop_address_range = p.get<size_t>("min-address-range-loop");
-        });
-    parser
-        .add_argument(
-            { "--traps" },
-            "Instrument points which require using a trap. On the x86 architecture, "
-            "because instructions are of variable size, the instruction at a point may "
-            "be too small for Dyninst to replace it with the normal code sequence used "
-            "to call instrumentation. Also, when instrumentation is placed at points "
-            "other than subroutine entry, exit, or call points, traps may be used to "
-            "ensure the instrumentation fits. In this case, Dyninst replaces the "
-            "instruction with a single-byte instruction that generates a trap.")
         .max_count(1)
-        .dtype("bool")
-        .set_default(instr_traps)
-        .action([](parser_t& p) { instr_traps = p.get<bool>("traps"); });
-    parser
-        .add_argument({ "--loop-traps" },
-                      "Instrument points within a loop which require using a trap (only "
-                      "relevant when --instrument-loops is enabled).")
-        .max_count(1)
-        .dtype("bool")
-        .set_default(instr_loop_traps)
-        .action([](parser_t& p) { instr_loop_traps = p.get<bool>("loop-traps"); });
-    parser.add_argument()
-        .names({ "--allow-overlapping" })
-        .description(
-            "Allow dyninst to instrument either multiple functions which overlap (share "
-            "part of same function body) or single functions with multiple entry points. "
-            "For more info, see Section 2 of the DyninstAPI documentation.")
-        .count(0)
-        .action([](parser_t&) { allow_overlapping = true; });
+        .action([](parser_t& p) { werror = p.get<bool>("error"); });
     parser
         .add_argument(
             { "--print-dir" },
@@ -410,13 +286,276 @@ main(int argc, char** argv)
             print_overlapping = p.get<std::string>("print-overlapping");
         });
 
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "[MODE OPTIONS]" }, "");
+    parser.add_argument({ "" }, "");
+    parser
+        .add_argument({ "-o", "--output" },
+                      "Enable generation of a new executable (binary-rewrite)")
+        .count(1)
+        .action([&outfile](parser_t& p) {
+            binary_rewrite = true;
+            outfile        = p.get<string_t>("output");
+        });
+    parser.add_argument({ "-p", "--pid" }, "Connect to running process")
+        .dtype("int")
+        .count(1)
+        .action([&_pid](parser_t& p) { _pid = p.get<int>("pid"); });
+    parser
+        .add_argument({ "-M", "--mode" },
+                      "Instrumentation mode. 'trace' mode instruments the selected "
+                      "functions, 'sampling' mode only instruments the main function to "
+                      "start and stop the sampler.")
+        .choices({ "trace", "sampling" })
+        .count(1)
+        .action([](parser_t& p) { instr_mode = p.get<string_t>("mode"); });
     if(_cmdc == 0)
     {
-        parser.add_argument()
-            .names({ "-c", "--command" })
-            .description("Input executable and arguments (if '-- <CMD>' not provided)")
-            .count(1);
+        parser
+            .add_argument({ "-c", "--command" },
+                          "Input executable and arguments (if '-- <CMD>' not provided)")
+            .count(1)
+            .action([&](parser_t& p) {
+                auto keys = p.get<strvec_t>("c");
+                if(keys.empty())
+                {
+                    p.print_help(extra_help);
+                    std::exit(EXIT_FAILURE);
+                }
+                keys.at(0) = get_absolute_exe_filepath(keys.at(0));
+                mutname    = keys.at(0);
+                _cmdc      = keys.size();
+                _cmdv      = new char*[_cmdc];
+                for(int i = 0; i < _cmdc; ++i)
+                    copy_str(_cmdv[i], keys.at(i).c_str());
+            });
     }
+
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "[LIBRARY OPTIONS]" }, "");
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "--prefer" }, "Prefer this library types when available")
+        .choices({ "shared", "static" })
+        .count(1)
+        .action([](parser_t& p) { prefer_library = p.get<string_t>("prefer"); });
+    parser
+        .add_argument(
+            { "-L", "--library" },
+            "Libraries with instrumentation routines (default: \"libomnitrace\")")
+        .action([&inputlib](parser_t& p) { inputlib = p.get<strvec_t>("library"); });
+    parser
+        .add_argument({ "-m", "--main-function" },
+                      "The primary function to instrument around, e.g. 'main'")
+        .count(1)
+        .action([](parser_t& p) { main_fname = p.get<string_t>("main-function"); });
+    parser.add_argument({ "-j", "--jump" }, jump_description.str())
+        .dtype("boolean")
+        .max_count(1)
+        .action([&inputlib](parser_t& p) {
+            if(p.get<bool>("jump"))
+            {
+                for(auto& itr : inputlib)
+                    itr += "-jump";
+            }
+        });
+    parser
+        .add_argument({ "-s", "--stubs" }, "Instrument with library stubs for LD_PRELOAD")
+        .dtype("boolean")
+        .max_count(1)
+        .action([&inputlib](parser_t& p) {
+            if(p.get<bool>("stubs"))
+            {
+                for(auto& itr : inputlib)
+                    itr += "-stubs";
+            }
+        });
+    parser.add_argument({ "--driver" }, "Force main or _init/_fini instrumentation")
+        .dtype("boolean")
+        .max_count(1)
+        .action([](parser_t& p) { is_driver = p.get<bool>("driver"); });
+    parser
+        .add_argument({ "--load" },
+                      "Supplemental instrumentation library names w/o extension (e.g. "
+                      "'libinstr' for 'libinstr.so' or 'libinstr.a')")
+        .dtype("string")
+        .action([](parser_t& p) {
+            auto _load = p.get<strvec_t>("load");
+            for(const auto& itr : _load)
+                extra_libs.insert(itr);
+        });
+    parser
+        .add_argument({ "--init-functions" },
+                      "Initialization function(s) for supplemental instrumentation "
+                      "libraries (see '--load' option)")
+        .dtype("string")
+        .action([](parser_t& p) { init_stub_names = p.get<strvec_t>("init-functions"); });
+    parser
+        .add_argument({ "--fini-functions" },
+                      "Finalization function(s) for supplemental instrumentation "
+                      "libraries (see '--load' option)")
+        .dtype("string")
+        .action([](parser_t& p) { init_stub_names = p.get<strvec_t>("fini-functions"); });
+
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "[SYMBOL SELECTION OPTIONS]" }, "");
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "-I", "-R", "--function-include" },
+                        "Regex for selecting functions");
+    parser.add_argument({ "-E", "--function-exclude" }, "Regex for excluding functions");
+    parser.add_argument({ "-MI", "-MR", "--module-include" },
+                        "Regex for selecting modules/files/libraries");
+    parser.add_argument({ "-ME", "--module-exclude" },
+                        "Regex for excluding modules/files/libraries");
+    parser
+        .add_argument({ "-S", "--stdlib" },
+                      "Enable instrumentation of C++ standard library functions.")
+        .max_count(1)
+        .action([](parser_t& p) { stl_func_instr = p.get<bool>("stdlib"); });
+
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "[RUNTIME OPTIONS]" }, "");
+    parser.add_argument({ "" }, "");
+    parser
+        .add_argument({ "--label" },
+                      "Labeling info for functions. By default, just the function name "
+                      "is recorded. Use these options to gain more information about the "
+                      "function signature or location of the functions")
+        .choices({ "file", "line", "return", "args" })
+        .dtype("string")
+        .action([](parser_t& p) {
+            auto _labels = p.get<strvec_t>("label");
+            for(const auto& itr : _labels)
+            {
+                if(std::regex_match(itr, std::regex("file", std::regex_constants::icase)))
+                    use_file_info = true;
+                else if(std::regex_match(
+                            itr, std::regex("return", std::regex_constants::icase)))
+                    use_return_info = true;
+                else if(std::regex_match(itr,
+                                         std::regex("args", std::regex_constants::icase)))
+                    use_args_info = true;
+                else if(std::regex_match(itr,
+                                         std::regex("line", std::regex_constants::icase)))
+                    use_line_info = true;
+            }
+        });
+    parser.add_argument()
+        .names({ "-d", "--default-components" })
+        .dtype("string")
+        .description("Default components to instrument (only useful when timemory is "
+                     "enabled in omnitrace library)")
+        .action([](parser_t& p) {
+            auto _components   = p.get<strvec_t>("default-components");
+            default_components = {};
+            for(size_t i = 0; i < _components.size(); ++i)
+            {
+                if(_components.at(i) == "none")
+                {
+                    default_components = "none";
+                    break;
+                }
+                default_components += _components.at(i);
+                if(i + 1 < _components.size()) default_components += ",";
+            }
+            if(default_components == "none")
+                default_components = {};
+            else
+            {
+                auto _strcomp = p.get<std::string>("default-components");
+                if(!_strcomp.empty() && default_components.empty())
+                    default_components = _strcomp;
+            }
+        });
+    parser.add_argument({ "--env" },
+                        "Environment variables to add to the runtime in form "
+                        "VARIABLE=VALUE. E.g. use '--env OMNITRACE_USE_TIMEMORY=ON' to "
+                        "default to using timemory instead of perfetto");
+    parser
+        .add_argument({ "--mpi" },
+                      "Enable MPI support (requires omnitrace built w/ MPI and GOTCHA "
+                      "support). NOTE: this will automatically be activated if "
+                      "MPI_Init/MPI_Init_thread and MPI_Finalize are found in the symbol "
+                      "table of target")
+        .max_count(1)
+        .action([](parser_t& p) { use_mpi = p.get<bool>("mpi"); });
+
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "[GRANULARITY OPTIONS]" }, "");
+    parser.add_argument({ "" }, "");
+    parser
+        .add_argument({ "--dynamic-callsites" },
+                      "Force instrumentation if a function has dynamic callsites (e.g. "
+                      "function pointers)")
+        .max_count(1)
+        .dtype("boolean")
+        .action([](parser_t& p) {
+            instr_dynamic_callsites = p.get<bool>("dynamic-callsites");
+        });
+    parser.add_argument({ "-l", "--instrument-loops" }, "Instrument at the loop level")
+        .dtype("boolean")
+        .max_count(1)
+        .action([](parser_t& p) { loop_level_instr = p.get<bool>("instrument-loops"); });
+    parser
+        .add_argument({ "-r", "--min-address-range" },
+                      "If the address range of a function is less than this value, "
+                      "exclude it from instrumentation")
+        .count(1)
+        .dtype("int")
+        .set_default(min_address_range)
+        .action(
+            [](parser_t& p) { min_address_range = p.get<size_t>("min-address-range"); });
+    parser
+        .add_argument({ "--min-address-range-loop" },
+                      "If the address range of a function containing a loop is less than "
+                      "this value, exclude it from instrumentation")
+        .count(1)
+        .dtype("int")
+        .set_default(min_loop_address_range)
+        .action([](parser_t& p) {
+            min_loop_address_range = p.get<size_t>("min-address-range-loop");
+        });
+    parser
+        .add_argument(
+            { "--traps" },
+            "Instrument points which require using a trap. On the x86 architecture, "
+            "because instructions are of variable size, the instruction at a point may "
+            "be too small for Dyninst to replace it with the normal code sequence used "
+            "to call instrumentation. Also, when instrumentation is placed at points "
+            "other than subroutine entry, exit, or call points, traps may be used to "
+            "ensure the instrumentation fits. In this case, Dyninst replaces the "
+            "instruction with a single-byte instruction that generates a trap.")
+        .max_count(1)
+        .dtype("bool")
+        .set_default(instr_traps)
+        .action([](parser_t& p) { instr_traps = p.get<bool>("traps"); });
+    parser
+        .add_argument({ "--loop-traps" },
+                      "Instrument points within a loop which require using a trap (only "
+                      "relevant when --instrument-loops is enabled).")
+        .max_count(1)
+        .dtype("bool")
+        .set_default(instr_loop_traps)
+        .action([](parser_t& p) { instr_loop_traps = p.get<bool>("loop-traps"); });
+    parser
+        .add_argument(
+            { "--allow-overlapping" },
+            "Allow dyninst to instrument either multiple functions which overlap (share "
+            "part of same function body) or single functions with multiple entry points. "
+            "For more info, see Section 2 of the DyninstAPI documentation.")
+        .count(0)
+        .action([](parser_t&) { allow_overlapping = true; });
+
+    parser.add_argument({ "" }, "");
+    parser.add_argument({ "[DYNINST OPTIONS]" }, "");
+    parser.add_argument({ "" }, "");
+    parser
+        .add_argument(
+            { "-b", "--batch-size" },
+            "Dyninst supports batch insertion of multiple points. If one large batch "
+            "insertion fails, this value will be used to create smaller batches")
+        .count(1)
+        .dtype("int")
+        .action([](parser_t& p) { batch_size = p.get<size_t>("batch-size"); });
 
     parser
         .add_argument({ "--dyninst-options" },
@@ -426,8 +565,7 @@ main(int argc, char** argv)
                    "InstrStackFrames", "TrampRecursive", "MergeTramp",
                    "BaseTrampDeletion" });
 
-    string_t extra_help = "-- <CMD> <ARGS>";
-    auto     err        = parser.parse(_argc, _argv);
+    auto err = parser.parse(_argc, _argv);
 
     if(parser.exists("h") || parser.exists("help"))
     {
@@ -442,149 +580,17 @@ main(int argc, char** argv)
         return -1;
     }
 
-    if(parser.exists("e")) werror = true;
-
-    if(parser.exists("v"))
-    {
-        if(parser.get_count("v") == 0)
-            verbose_level = 1;
-        else
-            verbose_level = parser.get<int>("v");
-    }
-
-    if(parser.exists("debug"))
-    {
-        verbose_level = 256;
-        debug_print   = true;
-    }
-
-    if(parser.exists("m")) main_fname = parser.get<string_t>("m");
-
-    if(parser.exists("l")) loop_level_instr = true;
-
-    if(_cmdc == 0 && parser.exists("c"))
-    {
-        auto keys = parser.get<strvec_t>("c");
-        if(keys.empty())
-        {
-            parser.print_help(extra_help);
-            return EXIT_FAILURE;
-        }
-        keys.at(0) = get_absolute_exe_filepath(keys.at(0));
-        mutname    = keys.at(0);
-        _cmdc      = keys.size();
-        _cmdv      = new char*[_cmdc];
-        for(int i = 0; i < _cmdc; ++i)
-        {
-            copy_str(_cmdv[i], keys.at(i).c_str());
-        }
-    }
-
-    if(parser.exists("o"))
-    {
-        binary_rewrite = true;
-        outfile        = parser.get<string_t>("o");
-    }
-
-    if(!parser.exists("L"))
-    {
-        for(auto& itr : inputlib)
-            itr += "libomnitrace";
-
-        if(parser.exists("s"))
-        {
-            for(auto& itr : inputlib)
-                itr += "-stubs";
-        }
-        else if(parser.exists("j"))
-        {
-            for(auto& itr : inputlib)
-                itr += "-jump";
-        }
-    }
-    else
-    {
-        inputlib = parser.get<strvec_t>("L");
-    }
-
-    if(parser.exists("S")) stl_func_instr = true;
-
-    if(parser.exists("mpi")) use_mpi = true;
-
-    if(parser.exists("p")) _pid = parser.get<int>("p");
-
-    if(parser.exists("d"))
-    {
-        auto _components   = parser.get<strvec_t>("default-components");
-        default_components = {};
-        for(size_t i = 0; i < _components.size(); ++i)
-        {
-            if(_components.at(i) == "none")
-            {
-                default_components = "none";
-                break;
-            }
-            default_components += _components.at(i);
-            if(i + 1 < _components.size()) default_components += ",";
-        }
-        if(default_components == "none")
-            default_components = {};
-        else
-        {
-            auto _strcomp = parser.get<std::string>("d");
-            if(!_strcomp.empty() && default_components.empty())
-                default_components = _strcomp;
-        }
-    }
-
-    if(parser.exists("M"))
-    {
-        instr_mode      = parser.get<string_t>("M");
-        instr_push_func = "omnitrace_push_" + instr_mode;
-        instr_push_hash = "omnitrace_push_" + instr_mode + "_hash";
-        instr_pop_func  = "omnitrace_pop_" + instr_mode;
-        instr_pop_hash  = "omnitrace_pop_" + instr_mode + "_hash";
-    }
-
-    if(parser.exists("prefer")) prefer_library = parser.get<string_t>("prefer");
-
-    if(parser.exists("load"))
-    {
-        auto _load = parser.get<strvec_t>("load");
-        for(const auto& itr : _load)
-            extra_libs.insert(itr);
-    }
-
-    if(parser.exists("label"))
-    {
-        auto _labels = parser.get<strvec_t>("label");
-        for(const auto& itr : _labels)
-        {
-            if(std::regex_match(itr, std::regex("file", std::regex_constants::icase)))
-                use_file_info = true;
-            else if(std::regex_match(itr,
-                                     std::regex("return", std::regex_constants::icase)))
-                use_return_info = true;
-            else if(std::regex_match(itr,
-                                     std::regex("args", std::regex_constants::icase)))
-                use_args_info = true;
-            else if(std::regex_match(itr,
-                                     std::regex("line", std::regex_constants::icase)))
-                use_line_info = true;
-        }
-    }
-
-    init_stub_names = parser.get<strvec_t>("init-functions");
-    fini_stub_names = parser.get<strvec_t>("fini-functions");
-    auto env_vars   = parser.get<strvec_t>("env");
-
     if(modfunc_dump_dir.empty())
     {
-        auto _exe_base = (binary_rewrite) ? outfile : std::string{ cmdv0 };
-        auto _pos      = _exe_base.find_last_of('/');
-        if(_pos != std::string::npos && _pos + 1 < _exe_base.length())
-            _exe_base = _exe_base.substr(_pos + 1);
-        modfunc_dump_dir = TIMEMORY_JOIN("-", "omnitrace", _exe_base, "output");
+        modfunc_dump_dir = tim::get_env<std::string>("OMNITRACE_OUTPUT_PATH", "");
+        if(modfunc_dump_dir.empty())
+        {
+            auto _exe_base = (binary_rewrite) ? outfile : std::string{ cmdv0 };
+            auto _pos      = _exe_base.find_last_of('/');
+            if(_pos != std::string::npos && _pos + 1 < _exe_base.length())
+                _exe_base = _exe_base.substr(_pos + 1);
+            modfunc_dump_dir = TIMEMORY_JOIN("-", "omnitrace", _exe_base, "output");
+        }
     }
 
     if(verbose_level >= 0) tim::makedir(modfunc_dump_dir);
@@ -709,7 +715,7 @@ main(int argc, char** argv)
 
     if(!addr_space)
     {
-        fprintf(stderr, "[omnitrace]> Error! address space for dynamic "
+        fprintf(stderr, "[omnitrace][exe] Error! address space for dynamic "
                         "instrumentation was not created\n");
         exit(EXIT_FAILURE);
     }
@@ -738,7 +744,7 @@ main(int argc, char** argv)
         if(pitr->findOverlapping(_overlapping))
         {
             overlapping_module_functions.insert(module_function{ mitr, pitr });
-            for(auto oitr : _overlapping)
+            for(auto* oitr : _overlapping)
             {
                 if(!oitr->isInstrumentable()) continue;
                 overlapping_module_functions.insert(
@@ -801,6 +807,7 @@ main(int argc, char** argv)
             module_function::update_width(itr);
 
         auto mwid = module_function::get_width().at(0);
+        mwid      = std::max<size_t>(mwid, 15);
         mwid      = std::min<size_t>(mwid, 90);
         auto ncol = 180 / std::min<size_t>(mwid, 180);
         std::cout << "### MODULES ###\n| ";
@@ -820,10 +827,14 @@ main(int argc, char** argv)
         std::cout << '\n' << std::endl;
     }
 
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "available-instr.txt"),
-              available_module_functions, 1);
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "overlapping-instr.txt"),
-              overlapping_module_functions, 1);
+    auto _output_prefix = tim::get_env<std::string>("OMNITRACE_OUTPUT_PREFIX", "");
+
+    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
+                            TIMEMORY_JOIN("", _output_prefix, "available-instr.txt")),
+              available_module_functions, 1, werror);
+    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
+                            TIMEMORY_JOIN("", _output_prefix, "overlapping-instr.txt")),
+              overlapping_module_functions, 1, werror);
 
     //----------------------------------------------------------------------------------//
     //
@@ -903,6 +914,9 @@ main(int argc, char** argv)
 
     auto* _mutatee_init = find_function(app_image, "_init");
     auto* _mutatee_fini = find_function(app_image, "_fini");
+    auto* main_func     = find_function(app_image, main_fname.c_str());
+    auto* mpi_init_func = find_function(app_image, "MPI_Init", { "MPI_Init_thread" });
+    auto* mpi_fini_func = find_function(app_image, "MPI_Finalize");
 
     //----------------------------------------------------------------------------------//
     //
@@ -923,18 +937,15 @@ main(int argc, char** argv)
 
     verbprintf(0, "Finding functions in image...\n");
 
-    auto* main_func     = find_function(app_image, main_fname.c_str());
-    auto* entr_trace    = find_function(app_image, instr_push_func.c_str());
-    auto* exit_trace    = find_function(app_image, instr_pop_func.c_str());
-    auto* entr_hash     = find_function(app_image, instr_push_hash.c_str());
-    auto* exit_hash     = find_function(app_image, instr_pop_hash.c_str());
-    auto* init_func     = find_function(app_image, "omnitrace_trace_init");
-    auto* fini_func     = find_function(app_image, "omnitrace_trace_finalize");
-    auto* env_func      = find_function(app_image, "omnitrace_trace_set_env");
-    auto* mpi_func      = find_function(app_image, "omnitrace_trace_set_mpi");
-    auto* hash_func     = find_function(app_image, "omnitrace_add_hash_id");
-    auto* mpi_init_func = find_function(app_image, "MPI_Init", { "MPI_Init_thread" });
-    auto* mpi_fini_func = find_function(app_image, "MPI_Finalize");
+    auto* entr_trace = find_function(app_image, instr_push_func.c_str());
+    auto* exit_trace = find_function(app_image, instr_pop_func.c_str());
+    auto* entr_hash  = find_function(app_image, instr_push_hash.c_str());
+    auto* exit_hash  = find_function(app_image, instr_pop_hash.c_str());
+    auto* init_func  = find_function(app_image, "omnitrace_trace_init");
+    auto* fini_func  = find_function(app_image, "omnitrace_trace_finalize");
+    auto* env_func   = find_function(app_image, "omnitrace_trace_set_env");
+    auto* mpi_func   = find_function(app_image, "omnitrace_trace_set_mpi");
+    auto* hash_func  = find_function(app_image, "omnitrace_add_hash_id");
 
     if(!main_func && main_fname == "main") main_func = find_function(app_image, "_main");
 
@@ -1059,16 +1070,16 @@ main(int argc, char** argv)
 
     if(!main_func && is_driver)
     {
-        fprintf(stderr, "[omnitrace]> Couldn't find '%s'\n", main_fname.c_str());
+        fprintf(stderr, "[omnitrace][exe] Couldn't find '%s'\n", main_fname.c_str());
         if(!_mutatee_init || !_mutatee_fini)
         {
-            fprintf(stderr, "[omnitrace]> Couldn't find '%s' or '%s', aborting\n",
+            fprintf(stderr, "[omnitrace][exe] Couldn't find '%s' or '%s', aborting\n",
                     "_init", "_fini");
             throw std::runtime_error("Could not find main function");
         }
         else
         {
-            fprintf(stderr, "[omnitrace]> using '%s' and '%s' in lieu of '%s'...",
+            fprintf(stderr, "[omnitrace][exe] using '%s' and '%s' in lieu of '%s'...",
                     "_init", "_fini", main_fname.c_str());
         }
     }
@@ -1090,7 +1101,7 @@ main(int argc, char** argv)
         {
             stringstream_t ss;
             ss << "Error! Couldn't find '" << itr.second.c_str() << "' function";
-            fprintf(stderr, "[omnitrace]> %s\n", ss.str().c_str());
+            fprintf(stderr, "[omnitrace][exe] %s\n", ss.str().c_str());
             throw std::runtime_error(ss.str());
         }
     }
@@ -1180,15 +1191,6 @@ main(int argc, char** argv)
     auto init_call_args = omnitrace_call_expr(default_components, binary_rewrite, cmdv0);
     auto fini_call_args = omnitrace_call_expr();
     auto umpi_call_args = omnitrace_call_expr(use_mpi, is_attached);
-    auto mode_call_args =
-        omnitrace_call_expr("OMNITRACE_INSTRUMENTATION_MODE", instr_mode);
-    auto mpie_init_args = omnitrace_call_expr("OMNITRACE_MPI_INIT", "OFF");
-    auto mpie_fini_args = omnitrace_call_expr("OMNITRACE_MPI_FINALIZE", "OFF");
-    auto trace_call_args =
-        omnitrace_call_expr("OMNITRACE_COMPONENTS", default_components);
-    auto use_mpi_call_args  = omnitrace_call_expr("OMNITRACE_USE_PID", "ON");
-    auto use_mpip_call_args = omnitrace_call_expr(
-        "OMNITRACE_USE_MPIP", (binary_rewrite && use_mpi && use_mpip) ? "ON" : "OFF");
     auto none_call_args = omnitrace_call_expr();
 
     verbprintf(2, "Done\n");
@@ -1201,13 +1203,6 @@ main(int argc, char** argv)
     auto main_beg_call = main_call_args.get(entr_trace);
     auto main_end_call = main_call_args.get(exit_trace);
 
-    auto trace_env_call    = trace_call_args.get(env_func);
-    auto mode_env_call     = mode_call_args.get(env_func);
-    auto mpii_env_call     = mpie_init_args.get(env_func);
-    auto mpif_env_call     = mpie_fini_args.get(env_func);
-    auto use_mpi_env_call  = use_mpi_call_args.get(env_func);
-    auto use_mpip_env_call = use_mpip_call_args.get(env_func);
-
     verbprintf(2, "Done\n");
 
     for(const auto& itr : use_stubs)
@@ -1219,6 +1214,16 @@ main(int argc, char** argv)
         }
     }
 
+    auto env_vars = parser.get<strvec_t>("env");
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MODE", instr_mode));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_INIT", "OFF"));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_FINALIZE", "OFF"));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_COMPONENTS", default_components));
+    env_vars.emplace_back(
+        TIMEMORY_JOIN('=', "OMNITRACE_USE_MPIP",
+                      (binary_rewrite && use_mpi && use_mpip) ? "ON" : "OFF"));
+    if(use_mpi) env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_USE_PID", "ON"));
+
     for(auto& itr : env_vars)
     {
         auto p = tim::delimit(itr, "=");
@@ -1228,6 +1233,7 @@ main(int argc, char** argv)
                       << " not in form VARIABLE=VALUE\n";
             throw std::runtime_error("Bad format");
         }
+        tim::set_env(p.at(0), p.at(1));
         auto _expr = omnitrace_call_expr(p.at(0), p.at(1));
         env_variables.push_back(_expr.get(env_func));
     }
@@ -1237,13 +1243,6 @@ main(int argc, char** argv)
     //  Configure the initialization and finalization routines
     //
     //----------------------------------------------------------------------------------//
-
-    if(trace_env_call) init_names.push_back(trace_env_call.get());
-    if(mode_env_call) init_names.push_back(mode_env_call.get());
-    if(mpii_env_call) init_names.push_back(mpii_env_call.get());
-    if(mpif_env_call) init_names.push_back(mpif_env_call.get());
-    if(use_mpi && use_mpi_env_call) init_names.push_back(use_mpi_env_call.get());
-    if(use_mpip && use_mpip_env_call) init_names.push_back(use_mpip_env_call.get());
 
     for(const auto& itr : env_variables)
     {
@@ -1554,24 +1553,27 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    verbprintf(2, "Beginning loop over modules [hash id generation pass]\n");
-    for(auto& m : modules)
+    if(instr_mode == "trace")
     {
-        char modname[1024];
-        m->getName(modname, 1024);
-        if(strstr(modname, "libdyninst") != nullptr) continue;
-
-        if(!m->getProcedures())
+        verbprintf(2, "Beginning loop over modules [hash id generation pass]\n");
+        for(auto& m : modules)
         {
-            verbprintf(1, "Skipping module w/ no procedures: '%s'\n", modname);
-            continue;
+            char modname[1024];
+            m->getName(modname, 1024);
+            if(strstr(modname, "libdyninst") != nullptr) continue;
+
+            if(!m->getProcedures())
+            {
+                verbprintf(1, "Skipping module w/ no procedures: '%s'\n", modname);
+                continue;
+            }
+
+            verbprintf(1, "Parsing module: %s\n", modname);
+            bpvector_t<procedure_t*>* p = m->getProcedures();
+            if(!p) continue;
+
+            instr_procedures(*p);
         }
-
-        verbprintf(1, "Parsing module: %s\n", modname);
-        bpvector_t<procedure_t*>* p = m->getProcedures();
-        if(!p) continue;
-
-        instr_procedures(*p);
     }
 
     //----------------------------------------------------------------------------------//
@@ -1580,7 +1582,7 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    omnitrace_snippet_vec hash_snippet_vec;
+    omnitrace_snippet_vec hash_snippet_vec{};
     // generate a call expression for each hash + key
     for(auto& itr : hash_ids)
         hash_snippet_vec.generate(hash_func, itr.first, itr.second.c_str());
@@ -1594,23 +1596,26 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    if(binary_rewrite)
+    if(is_attached)
     {
-        verbprintf(1, "Adding main entry and exit snippets\n");
+        assert(app_thread != nullptr);
+        verbprintf(1, "Executing initial snippets...\n");
+        for(auto* itr : init_names)
+            app_thread->oneTimeCode(*itr);
+    }
+    else
+    {
+        verbprintf(1, "Adding main entry snippets...\n");
         if(main_entr_points)
             addr_space->insertSnippet(BPatch_sequence(init_names), *main_entr_points,
                                       BPatch_callBefore, BPatch_firstSnippet);
-        if(main_exit_points)
-            addr_space->insertSnippet(BPatch_sequence(fini_names), *main_exit_points,
-                                      BPatch_callAfter, BPatch_firstSnippet);
     }
-    else if(app_thread)
+
+    if(main_exit_points)
     {
-        verbprintf(1, "Executing init_names...\n");
-        for(auto* itr : init_names)
-        {
-            app_thread->oneTimeCode(*itr);
-        }
+        verbprintf(1, "Adding main exit snippets...\n");
+        addr_space->insertSnippet(BPatch_sequence(fini_names), *main_exit_points,
+                                  BPatch_callAfter, BPatch_firstSnippet);
     }
 
     //----------------------------------------------------------------------------------//
@@ -1687,14 +1692,17 @@ main(int argc, char** argv)
     bool _dump_and_exit = ((print_available.length() + print_instrumented.length() +
                             print_overlapping.length()) > 0);
 
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "available-instr.txt"),
-              available_module_functions, 0);
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "instrumented-instr.txt"),
-              instrumented_module_functions, 0);
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir, "overlapping-instr.txt"),
-              overlapping_module_functions, 0);
+    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
+                            TIMEMORY_JOIN("", _output_prefix, "available-instr.txt")),
+              available_module_functions, 0, werror);
+    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
+                            TIMEMORY_JOIN("", _output_prefix, "instrumented-instr.txt")),
+              instrumented_module_functions, 0, werror);
+    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
+                            TIMEMORY_JOIN("", _output_prefix, "overlapping-instr.txt")),
+              overlapping_module_functions, 0, werror);
 
-    auto _dump_info = [](string_t _mode, const fmodset_t& _modset) {
+    auto _dump_info = [](const string_t& _mode, const fmodset_t& _modset) {
         std::map<std::string, std::vector<std::string>>                  _data{};
         std::unordered_map<std::string, std::unordered_set<std::string>> _dups{};
         auto _insert = [&](const std::string& _m, const std::string& _v) {
@@ -1773,10 +1781,6 @@ main(int argc, char** argv)
     int code = -1;
     if(binary_rewrite)
     {
-        char  cwd[FUNCNAMELEN];
-        auto* ret = getcwd(cwd, FUNCNAMELEN);
-        consume_parameters(ret);
-
         const auto& outf = outfile;
         if(outf.find('/') != string_t::npos)
         {
@@ -1787,13 +1791,26 @@ main(int argc, char** argv)
         bool success = app_binary->writeFile(outfile.c_str());
         code         = (success) ? EXIT_SUCCESS : EXIT_FAILURE;
         if(success)
-            printf("\nThe instrumented executable image is stored in '%s/%s'\n", cwd,
-                   outfile.c_str());
+        {
+            if(outfile.find('/') != 0)
+            {
+                char  cwd[FUNCNAMELEN];
+                auto* ret = getcwd(cwd, FUNCNAMELEN);
+                consume_parameters(ret);
+                printf("\nThe instrumented executable image is stored in '%s/%s'\n", cwd,
+                       outfile.c_str());
+            }
+            else
+                printf("\nThe instrumented executable image is stored in '%s'\n",
+                       outfile.c_str());
+        }
 
         if(main_func)
         {
-            printf("[omnitrace]> Getting linked libraries for %s...\n", cmdv0.c_str());
-            printf("[omnitrace]> Consider instrumenting the relevant libraries...\n\n");
+            printf("[omnitrace][exe] Getting linked libraries for %s...\n",
+                   cmdv0.c_str());
+            printf("[omnitrace][exe] Consider instrumenting the relevant "
+                   "libraries...\n\n");
 
             using TIMEMORY_PIPE = tim::popen::TIMEMORY_PIPE;
 
@@ -1814,7 +1831,7 @@ main(int argc, char** argv)
     }
     else
     {
-        printf("Executing...\n");
+        verbprintf(0, "Executing...\n");
 
         // bpatch->setDebugParsing(false);
         // bpatch->setTypeChecking(false);
@@ -1833,8 +1850,8 @@ main(int argc, char** argv)
                 verbprintf(3, "Continuing execution...\n");
                 app_thread->continueExecution();
                 verbprintf(4, "Process is not terminated...\n");
-                // std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 bpatch->waitForStatusChange();
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 verbprintf(4, "Process status change...\n");
                 if(app_thread->isStopped())
                 {
@@ -1925,20 +1942,21 @@ instrument_module(const string_t& file_name)
     static std::regex ext_regex(ext_str, regex_opts);
     static std::regex sys_regex("^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts);
     static std::regex userlib_regex(
-        "^(lib|)(omnitrace|caliper|gotcha|papi|cupti|TAU|likwid|"
-        "profiler|tcmalloc|dyninst|pfm|nvtx|upcxx|pthread|nvperf|hsa|\\.\\./sysdeps/|/"
-        "build/)",
+        "^(lib|)(omnitrace|caliper|gotcha|papi|cupti|TAU|likwid|dyninst|pfm|nvtx|upcxx|"
+        "nvperf|hsa|amdhip64|pthread|sem_|malloc|RT[A-Za-z_0-9\\-]+\\.c$|\\.\\./sysdeps/"
+        "|/build/)",
         regex_opts);
-    static std::regex corelib_regex("^lib(c|z|rt|dl|util|zstd|elf|dw|pthread|dyninstAPI_"
-                                    "RT|gcc_s|tbbmalloc|tbbmalloc_proxy)(-|\\.)",
-                                    regex_opts);
+    static std::regex corelib_regex(
+        "^lib(c|z|rt|dl|dw|util|zstd|elf|pthread|open[\\-]rte|open[\\-]pal|"
+        "hwloc|numa|event|udev|dyninstAPI_RT|gcc_s|tcmalloc|profiler|tbbmalloc|"
+        "tbbmalloc_proxy)(-|\\.)",
+        regex_opts);
     // these are all due to TAU
     static std::regex prefix_regex(
         "^(_|\\.[a-zA-Z0-9]|RT|Tau|Profiler|Rts|Papi|Py|Comp_xl\\.cpp|Comp_gnu\\.cpp|"
         "UserEvent\\.cpp|FunctionInfo\\.cpp|PthreadLayer\\.cpp|"
         "Comp_intel[0-9]\\.cpp|Tracer\\.cpp)",
         regex_opts);
-    /*
     static std::regex suffix_regex(
         "(printf|gettext|^sig[a-z]+|^exit|^setenv|on_exit|quick_exit|_crypt|^str[a-z_]+|"
         "mmap[0-9]+|^err|getu[a-z]+|^call_once|^sendto|^timer_[a-z]+|^read|^close|^recv|^"
@@ -1947,8 +1965,13 @@ instrument_module(const string_t& file_name)
         "timeofday|timespec_get|locale|^abort|scanf|tmpfile|getline|fseek|putc|rewind|"
         "vscanf|memmove|uid|tsz|gid|cvt|cvt_r|^error|_r|[a-z]64|^f[a-z]+|^makecontext|^"
         "basename|^wcp[a-z]+|[a-z]+dir|^mb[a-z]+|^dir[a-z]+|euid[a-z]+|^c[36][24][a-z]+|^"
-        "set[a-z_]+|^get[a-z_]+|^shm[a-z]+|^wc[a-z_]+|brk|^write[a-z]+)\\.c$",
-        regex_opts);*/
+        "set[a-z_]+|^get[a-z_]+|^shm[a-z]+|^wc[a-z_]+|brk|^write[a-z]+|RTcommon|"
+        "RTfreebsd|RTheap|RTheap-freebsd|RTheap-linux|RTheap-win|RTlinux|RTmemEmulator|"
+        "RTposix|RTsignal|RTstatic_ctors_dtors-aarch64|RTstatic_ctors_dtors_begin|"
+        "RTstatic_ctors_dtors_end|RTstatic_ctors_dtors-ppc32|RTstatic_ctors_dtors-ppc64|"
+        "RTstatic_ctors_dtors-x86|RTthread-aarch64|RTthread|RTthread-powerpc|RTthread-"
+        "x86-64|RTthread-x86|RTwinnt|unwind)\\.c$",
+        regex_opts);
 
     if(std::regex_search(file_name, ext_regex))
     {
@@ -1975,12 +1998,10 @@ instrument_module(const string_t& file_name)
         return (_report("Excluding", "prefix match", 3), false);
     }
 
-    /*if(std::regex_search(file_name, suffix_regex))
+    if(std::regex_search(file_name, suffix_regex))
     {
-        verbprintf(3, "Excluding instrumentation [suffix match] : '%s'...\n",
-                   file_name.c_str());
-        return false;
-    }*/
+        return (_report("Excluding", "suffix match", 3), false);
+    }
 
     if(_user_exclude) return (_report("Excluding", "user-regex", 2), false);
 
@@ -1991,6 +2012,7 @@ instrument_module(const string_t& file_name)
 
 //======================================================================================//
 
+extern const strset_t exclude_function_names;
 bool
 instrument_entity(const string_t& function_name)
 {
@@ -2042,7 +2064,7 @@ instrument_entity(const string_t& function_name)
     static std::regex trailing("(\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$",
                                regex_opts);
     static std::regex stlfunc("^std::", regex_opts);
-    strset_t          whole = { "init", "fini", "_init", "_fini", "atexit" };
+    static strset_t   whole = get_whole_function_names();
 
     if(!stl_func_instr && std::regex_search(function_name, stlfunc))
     {
@@ -2283,8 +2305,8 @@ get_absolute_exe_filepath(std::string exe_name)
             if(file_exists(TIMEMORY_JOIN('/', pitr, exe_name)))
             {
                 exe_name = TIMEMORY_JOIN('/', pitr, exe_name);
-                verbprintf(0, "[omnitrace] Resolved '%s' to '%s'...\n", _exe_orig.c_str(),
-                           exe_name.c_str());
+                verbprintf(0, "[omnitrace][exe] Resolved '%s' to '%s'...\n",
+                           _exe_orig.c_str(), exe_name.c_str());
                 break;
             }
         }
@@ -2318,8 +2340,8 @@ get_absolute_lib_filepath(std::string lib_name)
             if(file_exists(TIMEMORY_JOIN('/', pitr, lib_name)))
             {
                 lib_name = TIMEMORY_JOIN('/', pitr, lib_name);
-                verbprintf(0, "[omnitrace] Resolved '%s' to '%s'...\n", _lib_orig.c_str(),
-                           lib_name.c_str());
+                verbprintf(0, "[omnitrace][exe] Resolved '%s' to '%s'...\n",
+                           _lib_orig.c_str(), lib_name.c_str());
                 break;
             }
         }
@@ -2331,17 +2353,4 @@ get_absolute_lib_filepath(std::string lib_name)
         }
     }
     return lib_name;
-}
-
-//======================================================================================//
-//
-inline void
-consume()
-{
-    consume_parameters(initialize_expr, expect_error, error_print);
-}
-//
-namespace
-{
-auto _consumed = (consume(), true);
 }

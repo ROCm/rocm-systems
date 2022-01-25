@@ -28,16 +28,49 @@
 
 #pragma once
 
+#include "library/common.hpp"
+#include "library/components/backtrace.hpp"
+#include "library/components/fwd.hpp"
+#include "library/defines.hpp"
+#include "library/thread_data.hpp"
 #include "library/timemory.hpp"
 
-// timemory component which calls omnitrace functions
-// (used in gotcha wrappers)
-struct omnitrace_component : comp::base<omnitrace_component, void>
-{
-    void start();
-    void stop();
-    void set_prefix(const char*);
+#include <timemory/macros/language.hpp>
+#include <timemory/sampling/sampler.hpp>
+#include <timemory/variadic/types.hpp>
 
-private:
-    const char* m_prefix = nullptr;
-};
+#include <cstdint>
+#include <memory>
+#include <set>
+
+namespace omnitrace
+{
+namespace sampling
+{
+using component::backtrace;
+using component::backtrace_cpu_clock;   // NOLINT
+using component::backtrace_fraction;    // NOLINT
+using component::backtrace_wall_clock;  // NOLINT
+using component::sampling_cpu_clock;
+using component::sampling_percent;
+using component::sampling_wall_clock;
+
+std::set<int>
+setup();
+
+std::set<int>
+shutdown();
+
+void block_signals(std::set<int> = {});
+
+void unblock_signals(std::set<int> = {});
+
+using bundle_t          = tim::lightweight_tuple<backtrace>;
+using sampler_t         = tim::sampling::sampler<bundle_t, tim::sampling::dynamic>;
+using sampler_instances = omnitrace_thread_data<sampler_t, api::sampling>;
+
+std::unique_ptr<sampler_t>&
+get_sampler(int64_t _tid = threading::get_id());
+
+}  // namespace sampling
+}  // namespace omnitrace

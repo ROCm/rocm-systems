@@ -13,12 +13,13 @@ WORKDIR /tmp
 SHELL [ "/bin/bash", "-c" ]
 
 ARG EXTRA_PACKAGES=""
+ARG ROCM_REPO_VERSION="debian"
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
-    apt-get install -y build-essential cmake libnuma-dev wget gnupg2 m4 bash-completion git-core && \
+    apt-get install -y build-essential cmake libnuma-dev wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev && \
     wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \
-    echo 'deb [arch=amd64] https://repo.radeon.com/rocm/apt/debian/ ubuntu main' | tee /etc/apt/sources.list.d/rocm.list && \
+    echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${ROCM_REPO_VERSION}/ ubuntu main" | tee /etc/apt/sources.list.d/rocm.list && \
     apt-get update && \
     apt-get dist-upgrade -y && \
     apt-get install -y rocm-dev rocm-utils roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev ${EXTRA_PACKAGES}

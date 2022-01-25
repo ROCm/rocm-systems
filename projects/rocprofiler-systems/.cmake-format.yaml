@@ -18,6 +18,17 @@ parse:
       kwargs:
         VARIABLES: '*'
         CONDITION: '*'
+    omnitrace_add_test:
+      kwargs:
+        NAME: '*'
+        TARGET: '*'
+        MPI: '*'
+        NUM_PROCS: '*'
+        REWRITE_ARGS: '*'
+        RUNTIME_ARGS: '*'
+        RUN_ARGS: '*'
+        ENVIRONMENT: '*'
+        LABELS: '*'
   override_spec: {}
   vartags: []
   proptags: []

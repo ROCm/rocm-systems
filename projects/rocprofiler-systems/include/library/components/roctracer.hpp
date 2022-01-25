@@ -28,20 +28,17 @@
 
 #pragma once
 
-#include "timemory/api.hpp"
-#include "timemory/components/base.hpp"
-#include "timemory/components/data_tracker/components.hpp"
-#include "timemory/components/macros.hpp"
-#include "timemory/enum.h"
-#include "timemory/macros/os.hpp"
-#include "timemory/mpl/type_traits.hpp"
-#include "timemory/mpl/types.hpp"
+#include "library/components/fwd.hpp"
+#include "library/defines.hpp"
 
-TIMEMORY_DECLARE_COMPONENT(roctracer)
-
-#if !defined(OMNITRACE_USE_ROCTRACER)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::roctracer, false_type)
-#endif
+#include <timemory/api.hpp>
+#include <timemory/components/base.hpp>
+#include <timemory/components/data_tracker/components.hpp>
+#include <timemory/components/macros.hpp>
+#include <timemory/enum.h>
+#include <timemory/macros/os.hpp>
+#include <timemory/mpl/type_traits.hpp>
+#include <timemory/mpl/types.hpp>
 
 namespace tim
 {
@@ -86,7 +83,12 @@ TIMEMORY_SET_COMPONENT_API(component::roctracer_data, project::timemory, categor
 TIMEMORY_DEFINE_CONCRETE_TRAIT(is_timing_category, component::roctracer_data, true_type)
 TIMEMORY_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::roctracer_data, true_type)
 
-#include "timemory/operations.hpp"
+#if !defined(OMNITRACE_EXTERN_COMPONENTS) ||                                             \
+    (defined(OMNITRACE_EXTERN_COMPONENTS) && OMNITRACE_EXTERN_COMPONENTS > 0)
+
+#    include <timemory/operations.hpp>
 
 TIMEMORY_DECLARE_EXTERN_COMPONENT(roctracer, false, void)
 TIMEMORY_DECLARE_EXTERN_COMPONENT(roctracer_data, true, double)
+
+#endif

@@ -7,3 +7,7 @@ set(CMAKE_CXX_VISIBILITY_PRESET "default")
 
 add_subdirectory(transpose)
 add_subdirectory(parallel-overhead)
+
+option(BUILD_SHARED_LIBS "Build dynamic libraries" ON)
+
+add_subdirectory(lulesh)

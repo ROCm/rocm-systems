@@ -32,7 +32,7 @@
 #include "timemory/environment.hpp"
 #include "timemory/mpl/apply.hpp"
 #include "timemory/utility/argparse.hpp"
-#include "timemory/utility/macros.hpp"
+#include "timemory/utility/demangle.hpp"
 #include "timemory/utility/popen.hpp"
 #include "timemory/variadic/macros.hpp"
 
@@ -49,9 +49,11 @@
 
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <regex>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 //
@@ -121,23 +123,15 @@ omnitrace_prefork_callback(thread_t* parent, thread_t* child);
 //
 //  boolean settings
 //
-static bool binary_rewrite   = 0;
-static bool loop_level_instr = false;
-static bool werror           = false;
-static bool stl_func_instr   = false;
-static bool use_mpi          = false;
-static bool is_static_exe    = false;
-static bool use_return_info  = false;
-static bool use_args_info    = false;
-static bool use_file_info    = false;
-static bool use_line_info    = false;
+static bool use_return_info = false;
+static bool use_args_info   = false;
+static bool use_file_info   = false;
+static bool use_line_info   = false;
 //
 //  integral settings
 //
-static bool debug_print   = false;
-static int  expect_error  = NO_ERROR;
-static int  error_print   = 0;
-static int  verbose_level = tim::get_env<int>("TIMEMORY_RUN_VERBOSE", 0);
+extern bool debug_print;
+extern int  verbose_level;
 //
 //  string settings
 //
@@ -150,7 +144,6 @@ static string_t prefer_library     = {};
 //  global variables
 //
 static patch_pointer_t bpatch                        = {};
-static call_expr_t*    initialize_expr               = nullptr;
 static call_expr_t*    terminate_expr                = nullptr;
 static snippet_vec_t   init_names                    = {};
 static snippet_vec_t   fini_names                    = {};
@@ -161,18 +154,18 @@ static regexvec_t      func_include                  = {};
 static regexvec_t      func_exclude                  = {};
 static regexvec_t      file_include                  = {};
 static regexvec_t      file_exclude                  = {};
-static auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 //
 //======================================================================================//
 
 // control debug printf statements
 #define dprintf(...)                                                                     \
-    if(debug_print || verbose_level > 0) fprintf(stderr, __VA_ARGS__);                   \
+    if(debug_print || verbose_level > 0)                                                 \
+        fprintf(stderr, "[omnitrace][exe] " __VA_ARGS__);                                \
     fflush(stderr);
 
 // control verbose printf statements
 #define verbprintf(LEVEL, ...)                                                           \
-    if(verbose_level >= LEVEL) fprintf(stdout, __VA_ARGS__);                             \
+    if(verbose_level >= LEVEL) fprintf(stdout, "[omnitrace][exe] " __VA_ARGS__);         \
     fflush(stdout);
 
 //======================================================================================//
@@ -194,6 +187,9 @@ extern "C"
 }
 
 //======================================================================================//
+
+strset_t
+get_whole_function_names();
 
 function_signature
 get_func_file_line_info(module_t* mutatee_module, procedure_t* f);
@@ -217,7 +213,7 @@ void
 errorFunc(error_level_t level, int num, const char** params);
 
 procedure_t*
-find_function(image_t* appImage, const string_t& functionName, strset_t = {});
+find_function(image_t* appImage, const string_t& functionName, const strset_t& = {});
 
 void
 error_func_real(error_level_t level, int num, const char* const* params);
@@ -242,15 +238,15 @@ get_absolute_path(const char* fname)
 
     if(!(p = strrchr((char*) fname, '/')))
     {
-        auto ret = getcwd(abs_exe_path, sizeof(abs_exe_path));
+        auto* ret = getcwd(abs_exe_path, sizeof(abs_exe_path));
         consume_parameters(ret);
     }
     else
     {
-        auto rets = getcwd(path_save, sizeof(path_save));
-        auto retf = chdir(fname);
-        auto reta = getcwd(abs_exe_path, sizeof(abs_exe_path));
-        auto retp = chdir(path_save);
+        auto* rets = getcwd(path_save, sizeof(path_save));
+        auto  retf = chdir(fname);
+        auto* reta = getcwd(abs_exe_path, sizeof(abs_exe_path));
+        auto  retp = chdir(path_save);
         consume_parameters(rets, retf, reta, retp);
     }
     return string_t(abs_exe_path);
@@ -285,34 +281,32 @@ struct function_signature
 
     TIMEMORY_DEFAULT_OBJECT(function_signature)
 
-    function_signature(string_t _ret, string_t _name, string_t _file,
+    function_signature(string_t _ret, const string_t& _name, string_t _file,
                        location_t _row = { 0, 0 }, location_t _col = { 0, 0 },
                        bool _loop = false, bool _info_beg = false, bool _info_end = false)
     : m_loop(_loop)
     , m_info_beg(_info_beg)
     , m_info_end(_info_end)
-    , m_row(_row)
-    , m_col(_col)
-    , m_return(_ret)
+    , m_row(std::move(_row))
+    , m_col(std::move(_col))
+    , m_return(std::move(_ret))
     , m_name(tim::demangle(_name))
-    , m_file(_file)
+    , m_file(std::move(_file))
     {
         if(m_file.find('/') != string_t::npos)
             m_file = m_file.substr(m_file.find_last_of('/') + 1);
     }
 
-    function_signature(string_t _ret, string_t _name, string_t _file,
-                       std::vector<string_t> _params, location_t _row = { 0, 0 },
-                       location_t _col = { 0, 0 }, bool _loop = false,
+    function_signature(const string_t& _ret, const string_t& _name, const string_t& _file,
+                       const std::vector<string_t>& _params, location_t&& _row = { 0, 0 },
+                       location_t&& _col = { 0, 0 }, bool _loop = false,
                        bool _info_beg = false, bool _info_end = false)
     : function_signature(_ret, _name, _file, _row, _col, _loop, _info_beg, _info_end)
     {
-        std::stringstream ss;
-        ss << "(";
-        for(auto& itr : _params)
-            ss << itr << ", ";
-        m_params = ss.str();
-        m_params = m_params.substr(0, m_params.length() - 2);
+        m_params = "(";
+        for(const auto& itr : _params)
+            m_params.append(itr + ", ");
+        if(!_params.empty()) m_params = m_params.substr(0, m_params.length() - 2);
         m_params += ")";
     }
 
@@ -373,11 +367,11 @@ struct module_function
         get_width()[2] = std::max<size_t>(get_width()[2], rhs.signature.get().length());
     }
 
-    module_function(const string_t& _module, const string_t& _func,
-                    const function_signature& _sign, procedure_t* proc)
-    : module(_module)
-    , function(_func)
-    , signature(_sign)
+    module_function(string_t _module, string_t _func, function_signature _sign,
+                    procedure_t* proc)
+    : module(std::move(_module))
+    , function(std::move(_func))
+    , signature(std::move(_sign))
     {
         if(proc)
         {
@@ -482,35 +476,43 @@ dump_info(std::ostream& _os, const fmodset_t& _data)
 }
 //
 static inline void
-dump_info(const string_t& _oname, const fmodset_t& _data, int _level)
+dump_info(const string_t& _oname, const fmodset_t& _data, int _level, bool _fail)
 {
     if(!debug_print && verbose_level < _level) return;
 
-    std::ofstream ofs(_oname);
+    std::ofstream ofs{ _oname };
     if(ofs)
     {
         verbprintf(_level, "Dumping '%s'... ", _oname.c_str());
         dump_info(ofs, _data);
         verbprintf(_level, "Done\n");
     }
+    else
+    {
+        std::stringstream _msg{};
+        _msg << "[" << __FUNCTION__ << "] Error opening '" << _oname << " for output";
+        verbprintf(_level, "%s\n", _msg.str().c_str());
+        if(_fail) throw std::runtime_error(_msg.str());
+    }
     ofs.close();
 }
 //
 //======================================================================================//
 //
-template <typename Tp>
+template <typename Tp, std::enable_if_t<!std::is_same<Tp, std::string>::value, int> = 0>
 snippet_pointer_t
 get_snippet(Tp arg)
 {
-    return snippet_pointer_t(new const_expr_t(arg));
+    return std::make_shared<snippet_t>(const_expr_t{ arg });
 }
 //
 //======================================================================================//
 //
-inline snippet_pointer_t
-get_snippet(string_t arg)
+template <typename Tp, std::enable_if_t<std::is_same<Tp, std::string>::value, int> = 0>
+snippet_pointer_t
+get_snippet(const Tp& arg)
 {
-    return snippet_pointer_t(new const_expr_t(arg.c_str()));
+    return std::make_shared<snippet_t>(const_expr_t{ arg.c_str() });
 }
 //
 //======================================================================================//
@@ -519,7 +521,7 @@ template <typename... Args>
 snippet_pointer_vec_t
 get_snippets(Args&&... args)
 {
-    snippet_pointer_vec_t _tmp;
+    snippet_pointer_vec_t _tmp{};
     TIMEMORY_FOLD_EXPRESSION(_tmp.push_back(get_snippet(std::forward<Args>(args))));
     return _tmp;
 }
@@ -587,8 +589,8 @@ private:
 //======================================================================================//
 //
 static inline address_space_t*
-omnitrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
-                            bool _rewrite, int _pid = -1, string_t _name = {})
+omnitrace_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
+                            bool _rewrite, int _pid = -1, const string_t& _name = {})
 {
     address_space_t* mutatee = nullptr;
 
@@ -599,7 +601,8 @@ omnitrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
         if(!_name.empty()) mutatee = _bpatch->openBinary(_name.c_str(), false);
         if(!mutatee)
         {
-            fprintf(stderr, "[omnitrace]> Failed to open binary '%s'\n", _name.c_str());
+            fprintf(stderr, "[omnitrace][exe] Failed to open binary '%s'\n",
+                    _name.c_str());
             throw std::runtime_error("Failed to open binary");
         }
         verbprintf(1, "Done\n");
@@ -612,7 +615,8 @@ omnitrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
         mutatee      = _bpatch->processAttach(_cmdv0, _pid);
         if(!mutatee)
         {
-            fprintf(stderr, "[omnitrace]> Failed to connect to process %i\n", (int) _pid);
+            fprintf(stderr, "[omnitrace][exe] Failed to connect to process %i\n",
+                    (int) _pid);
             throw std::runtime_error("Failed to attach to process");
         }
         verbprintf(1, "Done\n");
@@ -630,7 +634,7 @@ omnitrace_get_address_space(patch_pointer_t _bpatch, int _cmdc, char** _cmdv,
                 if(!_cmdv[i]) continue;
                 ss << _cmdv[i] << " ";
             }
-            fprintf(stderr, "[omnitrace]> Failed to create process: '%s'\n",
+            fprintf(stderr, "[omnitrace][exe] Failed to create process: '%s'\n",
                     ss.str().c_str());
             throw std::runtime_error("Failed to create process");
         }
@@ -651,7 +655,7 @@ omnitrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
 
     if(!terminate_expr)
     {
-        fprintf(stderr, "[omnitrace]> continuing execution\n");
+        fprintf(stderr, "[omnitrace][exe] continuing execution\n");
         app->continueExecution();
         return;
     }
@@ -660,18 +664,18 @@ omnitrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
     {
         case ExitedNormally:
         {
-            fprintf(stderr, "[omnitrace]> Thread exited normally\n");
+            fprintf(stderr, "[omnitrace][exe] Thread exited normally\n");
             break;
         }
         case ExitedViaSignal:
         {
-            fprintf(stderr, "[omnitrace]> Thread terminated unexpectedly\n");
+            fprintf(stderr, "[omnitrace][exe] Thread terminated unexpectedly\n");
             break;
         }
         case NoExit:
         default:
         {
-            fprintf(stderr, "[omnitrace]> %s invoked with NoExit\n", __FUNCTION__);
+            fprintf(stderr, "[omnitrace][exe] %s invoked with NoExit\n", __FUNCTION__);
             break;
         }
     }
@@ -679,7 +683,7 @@ omnitrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
     // terminate_expr = nullptr;
     thread->oneTimeCode(*terminate_expr);
 
-    fprintf(stderr, "[omnitrace]> continuing execution\n");
+    fprintf(stderr, "[omnitrace][exe] continuing execution\n");
     app->continueExecution();
 }
 //
@@ -703,7 +707,7 @@ omnitrace_fork_callback(thread_t* parent, thread_t* child)
 
     if(parent)
     {
-        auto app = parent->getProcess();
+        auto* app = parent->getProcess();
         if(app)
         {
             verbprintf(4, "Continuing execution on parent after fork callback...\n");

@@ -24,9 +24,9 @@ jobs:
     - name: Install Packages
       run:
         sudo apt-get update &&
-        sudo apt-get install -y build-essential python3-pip libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev ${{ matrix.compiler }} ${{ matrix.mpi }} &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev ${{ matrix.compiler }} ${{ matrix.mpi }} &&
         python3 -m pip install --upgrade pip &&
-        python3 -m pip install 'cmake==3.15.3'
+        python3 -m pip install 'cmake==3.16.3'
 
     - name: Configure Env
       run:
@@ -44,15 +44,17 @@ jobs:
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
           -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
-          -DOMNITRACE_USE_MPI=${USE_MPI}
-          -DOMNITRACE_USE_ROCTRACER=OFF
+          -DOMNITRACE_BUILD_TESTING=ON
           -DOMNITRACE_BUILD_DYNINST=ON
+          -DOMNITRACE_USE_MPI=${USE_MPI}
+          -DOMNITRACE_USE_HIP=OFF
           -DDYNINST_BUILD_ELFUTILS=ON
           -DDYNINST_BUILD_LIBIBERTY=ON
           -DDYNINST_BUILD_SHARED_LIBS=ON
           -DDYNINST_BUILD_STATIC_LIBS=OFF
 
     - name: Build
+      timeout-minutes: 45
       run:
         cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
 
@@ -61,31 +63,40 @@ jobs:
         cmake --build ${{ github.workspace }}/build --target install --parallel 2
 
     - name: Test
+      timeout-minutes: 30
       working-directory: ${{ github.workspace }}/build
       run:
         ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal.log
 
     - name: Test Install
+      timeout-minutes: 10
       run:
         omnitrace --help &&
-        omnitrace -- sleep 1 &&
-        omnitrace -o sleep.inst -- sleep &&
-        ./sleep.inst 1 &&
-        rm ./sleep.inst
+        omnitrace -e -v 1 -o ls.inst -- ls &&
+        ./ls.inst &&
+        rm ./ls.inst &&
+        omnitrace -e -v 1 -- ls
 
-    - name: Artifacts
+    - name: CTest Artifacts
       uses: actions/upload-artifact@v2
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal.log
+          ${{ github.workspace }}/build/*.log
+
+    - name: Data Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: data-files
+        path: |
+          ${{ github.workspace }}/build/omnitrace-tests-output/*.txt
 
   ubuntu-bionic:
     runs-on: ubuntu-18.04
     strategy:
       matrix:
         compiler: ['g++-7', 'g++-8']
-        mpi: [ '', 'libmpich-dev mpich', 'libopenmpi-dev openmpi-bin libfabric-dev' ]
+        mpi: [ '', 'libmpich-dev mpich' ]
 
     steps:
     - uses: actions/checkout@v2
@@ -93,9 +104,9 @@ jobs:
     - name: Install Packages
       run:
         sudo apt-get update &&
-        sudo apt-get install -y build-essential python3-pip ${{ matrix.compiler }} ${{ matrix.mpi }} &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.compiler }} ${{ matrix.mpi }} &&
         python3 -m pip install --upgrade pip &&
-        python3 -m pip install 'cmake==3.15.3'
+        python3 -m pip install 'cmake==3.16.3'
 
     - name: Configure Env
       run:
@@ -113,15 +124,17 @@ jobs:
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
           -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
-          -DOMNITRACE_USE_MPI=${USE_MPI}
-          -DOMNITRACE_USE_ROCTRACER=OFF
+          -DOMNITRACE_BUILD_TESTING=ON
           -DOMNITRACE_BUILD_DYNINST=ON
+          -DOMNITRACE_USE_MPI=${USE_MPI}
+          -DOMNITRACE_USE_HIP=OFF
           -DDYNINST_BUILD_TBB=ON
           -DDYNINST_BUILD_BOOST=ON
           -DDYNINST_BUILD_ELFUTILS=ON
           -DDYNINST_BUILD_LIBIBERTY=ON
 
     - name: Build
+      timeout-minutes: 45
       run:
         cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
 
@@ -130,24 +143,33 @@ jobs:
         cmake --build ${{ github.workspace }}/build --target install --parallel 2
 
     - name: Test
+      timeout-minutes: 30
       working-directory: ${{ github.workspace }}/build
       run:
         ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-bionic.log
 
     - name: Test Install
+      timeout-minutes: 10
       run:
         omnitrace --help &&
-        omnitrace -- sleep 1 &&
-        omnitrace -o sleep.inst -- sleep &&
-        ./sleep.inst 1 &&
-        rm ./sleep.inst
+        omnitrace -e -v 1 -o ls.inst -- ls &&
+        ./ls.inst &&
+        rm ./ls.inst &&
+        omnitrace -e -v 1 -- ls
 
-    - name: Artifacts
+    - name: CTest Artifacts
       uses: actions/upload-artifact@v2
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-bionic.log
+          ${{ github.workspace }}/build/*.log
+
+    - name: Data Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: data-files
+        path: |
+          ${{ github.workspace }}/build/omnitrace-tests-output/*.txt
 
   ubuntu-focal-external:
     runs-on: ubuntu-20.04
@@ -161,15 +183,15 @@ jobs:
     - name: Install Packages
       run:
         sudo apt-get update &&
-        sudo apt-get install -y build-essential python3-pip libboost-{atomic,system,thread,date-time,filesystem,timer}-dev libtbb-dev libiberty-dev ${{ matrix.compiler }} &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libboost-{atomic,system,thread,date-time,filesystem,timer}-dev libtbb-dev libiberty-dev ${{ matrix.compiler }} &&
         sudo python3 -m pip install --upgrade pip &&
-        python3 -m pip install 'cmake==3.15.3'
+        python3 -m pip install 'cmake==3.16.3'
 
     - name: Configure Env
       run:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
-        echo "CMAKE_PREFIX_PATH=/opt/opt/dyninst:/opt/elfutils:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV &&
+        echo "CMAKE_PREFIX_PATH=/opt/dyninst:/opt/elfutils:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV &&
         echo "/opt/omnitrace/bin:/opt/dyninst/bin:/opt/elfutils/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:/opt/dyninst/lib:/opt/elfutils/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
@@ -193,7 +215,7 @@ jobs:
         cmake -B build
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_INSTALL_PREFIX=/opt/dyninst &&
         cmake --build build --target all --parallel 2 &&
         cmake --build build --target install --parallel 2 &&
@@ -205,12 +227,14 @@ jobs:
         cmake -B ${{ github.workspace }}/build
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
+          -DOMNITRACE_BUILD_TESTING=ON
           -DOMNITRACE_USE_MPI=OFF
-          -DOMNITRACE_USE_ROCTRACER=OFF
+          -DOMNITRACE_USE_HIP=OFF
 
     - name: Build
+      timeout-minutes: 45
       run:
         cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
 
@@ -219,6 +243,7 @@ jobs:
         cmake --build ${{ github.workspace }}/build --target install --parallel 2
 
     - name: Test
+      timeout-minutes: 30
       working-directory: ${{ github.workspace }}/build
       run:
         ldd ./omnitrace &&
@@ -226,20 +251,28 @@ jobs:
         ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal-external.log
 
     - name: Test Install
+      timeout-minutes: 10
       run:
         ldd $(which omnitrace) &&
         omnitrace --help &&
-        omnitrace -- sleep 1 &&
-        omnitrace -o sleep.inst -- sleep &&
-        ./sleep.inst 1 &&
-        rm ./sleep.inst
+        omnitrace -e -v 1 -o ls.inst -- ls &&
+        ./ls.inst &&
+        rm ./ls.inst &&
+        omnitrace -e -v 1 -- ls
 
-    - name: Artifacts
+    - name: CTest Artifacts
       uses: actions/upload-artifact@v2
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal-external.log
+          ${{ github.workspace }}/build/*.log
+
+    - name: Data Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: data-files
+        path: |
+          ${{ github.workspace }}/build/omnitrace-tests-output/*.txt
 
   ubuntu-focal-dyninst-package:
     runs-on: ubuntu-20.04
@@ -253,15 +286,15 @@ jobs:
     - name: Install Packages
       run:
         sudo apt-get update &&
-        sudo apt-get install -y build-essential python3-pip ${{ matrix.compiler }} &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.compiler }} &&
         sudo python3 -m pip install --upgrade pip &&
-        python3 -m pip install 'cmake==3.15.3'
+        python3 -m pip install 'cmake==3.16.3'
 
     - name: Configure Env
       run:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
-        echo "CMAKE_PREFIX_PATH=/opt/opt/dyninst:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV &&
+        echo "CMAKE_PREFIX_PATH=/opt/dyninst:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV &&
         echo "/opt/omnitrace/bin:/opt/dyninst/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:/opt/dyninst/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
@@ -292,10 +325,12 @@ jobs:
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
           -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
+          -DOMNITRACE_BUILD_TESTING=ON
           -DOMNITRACE_USE_MPI=OFF
-          -DOMNITRACE_USE_ROCTRACER=OFF
+          -DOMNITRACE_USE_HIP=OFF
 
     - name: Build
+      timeout-minutes: 45
       run:
         cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
 
@@ -304,6 +339,7 @@ jobs:
         cmake --build ${{ github.workspace }}/build --target install --parallel 2
 
     - name: Test
+      timeout-minutes: 30
       working-directory: ${{ github.workspace }}/build
       run:
         ldd ./omnitrace &&
@@ -311,17 +347,127 @@ jobs:
         ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal-dyninst-package.log
 
     - name: Test Install
+      timeout-minutes: 10
       run:
         ldd $(which omnitrace) &&
         omnitrace --help &&
-        omnitrace -- sleep 1 &&
-        omnitrace -o sleep.inst -- sleep &&
-        ./sleep.inst 1 &&
-        rm ./sleep.inst
+        omnitrace -e -v 1 -o ls.inst -- ls &&
+        ./ls.inst &&
+        rm ./ls.inst &&
+        omnitrace -e -v 1 -- ls
 
-    - name: Artifacts
+    - name: CTest Artifacts
       uses: actions/upload-artifact@v2
       with:
         name: ctest-log
         path: |
-          ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal-dyninst-package.log
+          ${{ github.workspace }}/build/*.log
+
+    - name: Data Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: data-files
+        path: |
+          ${{ github.workspace }}/build/omnitrace-tests-output/*.txt
+
+  ubuntu-focal-external-rocm:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        compiler: ['g++']
+        rocm_version: ['4.3', '4.3.1', '4.5']
+        mpi: [ 'libmpich-dev mpich', 'libopenmpi-dev openmpi-bin libfabric-dev' ]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Packages
+      run:
+        echo '1' | sudo tee /proc/sys/kernel/perf_event_paranoid &&
+        sudo apt-get update &&
+        sudo apt-get install -y software-properties-common wget gnupg2 &&
+        sudo wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add - &&
+        echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm_version }}/ ubuntu main" | sudo tee /etc/apt/sources.list.d/rocm.list &&
+        sudo apt-get update &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libboost-{atomic,system,thread,date-time,filesystem,timer}-dev libtbb-dev libiberty-dev ${{ matrix.compiler }} libnuma-dev rocm-dev rocm-utils roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev ${{ matrix.mpi }} libpapi-dev &&
+        sudo python3 -m pip install --upgrade pip &&
+        python3 -m pip install 'cmake==3.16.3'
+
+    - name: Configure Env
+      run:
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "CMAKE_PREFIX_PATH=/opt/dyninst:/opt/elfutils:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV &&
+        echo "/opt/omnitrace/bin:/opt/dyninst/bin:/opt/elfutils/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:/opt/dyninst/lib:/opt/elfutils/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+    - name: Install ElfUtils
+      run:
+        pushd external &&
+        wget https://sourceware.org/elfutils/ftp/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2 &&
+        tar xjf elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2 &&
+        pushd elfutils-${ELFUTILS_DOWNLOAD_VERSION} &&
+        CFLAGS="-O3" ./configure --enable-install-elfh --prefix=/opt/elfutils --disable-libdebuginfod --disable-debuginfod &&
+        make -j2 &&
+        make install -j2 &&
+        popd &&
+        rm -rf elfutils*
+
+    - name: Install Dyninst
+      run:
+        cmake --version &&
+        git submodule update --init external/dyninst &&
+        cd external/dyninst &&
+        cmake -B build
+          -DCMAKE_C_COMPILER=${CC}
+          -DCMAKE_CXX_COMPILER=${CXX}
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX=/opt/dyninst &&
+        cmake --build build --target all --parallel 2 &&
+        cmake --build build --target install --parallel 2 &&
+        rm -rf build
+
+    - name: Configure CMake
+      run:
+        cmake --version &&
+        cmake -B ${{ github.workspace }}/build
+          -DCMAKE_C_COMPILER=${CC}
+          -DCMAKE_CXX_COMPILER=${CXX}
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
+          -DOMNITRACE_BUILD_TESTING=OFF
+          -DOMNITRACE_BUILD_DEVELOPER=ON
+          -DOMNITRACE_BUILD_EXTRA_OPTIMIZATIONS=OFF
+          -DOMNITRACE_BUILD_LTO=OFF
+          -DOMNITRACE_USE_MPI=OFF
+          -DOMNITRACE_USE_MPI_HEADERS=ON
+          -DOMNITRACE_USE_HIP=ON
+          -DOMNITRACE_MAX_THREADS=256
+          -DOMNITRACE_USE_SANITIZER=OFF
+          -DTIMEMORY_USE_PAPI=ON
+
+    - name: Build
+      timeout-minutes: 45
+      run:
+        cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
+
+    - name: Install
+      run:
+        cmake --build ${{ github.workspace }}/build --target install --parallel 2
+
+    - name: Test
+      timeout-minutes: 30
+      working-directory: ${{ github.workspace }}/build
+      run:
+        ldd ./omnitrace &&
+        ./omnitrace --help
+
+    - name: Test Install
+      timeout-minutes: 10
+      run:
+        ldd $(which omnitrace) &&
+        omnitrace --help &&
+        omnitrace -e -v 1 -o ls.inst -- ls &&
+        ./ls.inst &&
+        rm ./ls.inst &&
+        omnitrace -e -v 1 -- ls

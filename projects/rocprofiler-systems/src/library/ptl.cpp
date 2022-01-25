@@ -27,9 +27,32 @@
 // THE SOFTWARE.
 
 #include "library/ptl.hpp"
+#include "library/config.hpp"
+#include "library/debug.hpp"
+#include "library/defines.hpp"
 
+#include <PTL/ThreadPool.hh>
+#include <timemory/utility/declaration.hpp>
+
+namespace omnitrace
+{
 namespace tasking
 {
+namespace
+{
+auto _thread_pool_cfg = []() {
+    PTL::ThreadPool::Config _v{};
+    _v.init         = true;
+    _v.use_affinity = false;
+    _v.use_tbb      = false;
+    _v.initializer  = []() {};
+    _v.finalizer    = []() {};
+    _v.priority     = 5;
+    _v.pool_size    = 1;
+    return _v;
+}();
+}
+
 std::mutex&
 get_roctracer_mutex()
 {
@@ -40,7 +63,7 @@ get_roctracer_mutex()
 PTL::ThreadPool&
 get_roctracer_thread_pool()
 {
-    static auto _v = PTL::ThreadPool{ 1 };
+    static auto _v = PTL::ThreadPool{ _thread_pool_cfg };
     return _v;
 }
 
@@ -61,7 +84,7 @@ get_critical_trace_mutex()
 PTL::ThreadPool&
 get_critical_trace_thread_pool()
 {
-    static auto _v = PTL::ThreadPool{ 1 };
+    static auto _v = PTL::ThreadPool{ _thread_pool_cfg };
     return _v;
 }
 
@@ -72,9 +95,5 @@ get_critical_trace_task_group()
     return _v;
 }
 
-namespace
-{
-bool _ptl_initialized =
-    (get_roctracer_thread_pool(), get_critical_trace_thread_pool(), true);
-}
 }  // namespace tasking
+}  // namespace omnitrace

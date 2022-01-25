@@ -28,36 +28,39 @@
 
 #pragma once
 
+#include "library/components/fwd.hpp"
+#include "library/defines.hpp"
+
 #include <timemory/api.hpp>
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components.hpp>
 #include <timemory/components/gotcha/mpip.hpp>
-#include <timemory/components/papi/papi_tuple.hpp>
 #include <timemory/config.hpp>
 #include <timemory/environment.hpp>
 #include <timemory/manager.hpp>
-#include <timemory/mpl/apply.hpp>
+#include <timemory/mpl.hpp>
 #include <timemory/operations.hpp>
 #include <timemory/runtime.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/storage.hpp>
 #include <timemory/variadic.hpp>
 
-namespace audit     = tim::audit;
-namespace comp      = tim::component;
-namespace quirk     = tim::quirk;
-namespace threading = tim::threading;
-namespace scope     = tim::scope;
-namespace dmp       = tim::dmp;
-namespace process   = tim::process;
-namespace units     = tim::units;
-namespace trait     = tim::trait;
+namespace omnitrace
+{
+namespace audit     = tim::audit;      // NOLINT
+namespace comp      = tim::component;  // NOLINT
+namespace quirk     = tim::quirk;      // NOLINT
+namespace threading = tim::threading;  // NOLINT
+namespace scope     = tim::scope;      // NOLINT
+namespace dmp       = tim::dmp;        // NOLINT
+namespace process   = tim::process;    // NOLINT
+namespace units     = tim::units;      // NOLINT
+namespace trait     = tim::trait;      // NOLINT
 
 // same sort of functionality as python's " ".join([...])
 #if !defined(JOIN)
 #    define JOIN(...) tim::mpl::apply<std::string>::join(__VA_ARGS__)
 #endif
-
-using papi_tot_ins = comp::papi_tuple<PAPI_TOT_INS>;
+}  // namespace omnitrace

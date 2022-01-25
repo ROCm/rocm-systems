@@ -29,6 +29,7 @@
 #pragma once
 
 #include "library/config.hpp"
+#include "library/defines.hpp"
 
 #include <array>
 #include <cstdint>
@@ -40,6 +41,8 @@
 #    define OMNITRACE_MAX_THREADS 1024
 #endif
 
+namespace omnitrace
+{
 static constexpr size_t max_supported_threads = OMNITRACE_MAX_THREADS;
 
 template <typename Tp, typename Tag = void, size_t MaxThreads = max_supported_threads>
@@ -63,8 +66,10 @@ template <typename... Args>
 void
 omnitrace_thread_data<Tp, Tag, MaxThreads>::construct(Args&&... _args)
 {
-    static thread_local bool _v = [&_args...]() {
-        instances().at(threading::get_id()) =
+    // construct outside of lambda to prevent data-race
+    static auto&             _instances = instances();
+    static thread_local bool _v         = [&_args...]() {
+        _instances.at(threading::get_id()) =
             std::make_unique<Tp>(std::forward<Args>(_args)...);
         return true;
     }();
@@ -124,3 +129,4 @@ struct instrumentation_bundles
 
     static instance_array_t& instances();
 };
+}  // namespace omnitrace

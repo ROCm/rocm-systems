@@ -29,11 +29,15 @@
 #pragma once
 
 #include "library/debug.hpp"
+#include "library/defines.hpp"
+
+#include <timemory/environment.hpp>
 
 #include <dlfcn.h>
 #include <string>
-#include <timemory/environment.hpp>
 
+namespace omnitrace
+{
 struct dynamic_library
 {
     dynamic_library()                           = delete;
@@ -69,3 +73,4 @@ struct dynamic_library
     int         flags    = 0;
     void*       handle   = nullptr;
 };
+}  // namespace omnitrace

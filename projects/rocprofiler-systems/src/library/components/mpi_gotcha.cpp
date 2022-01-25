@@ -26,11 +26,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
-#include "library/mpi_gotcha.hpp"
+#include "library/components/mpi_gotcha.hpp"
+#include "library/components/omnitrace.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
-#include "library/omnitrace_component.hpp"
+#include "timemory/backends/mpi.hpp"
 
+namespace omnitrace
+{
 namespace
 {
 uint64_t    mpip_index      = std::numeric_limits<uint64_t>::max();
@@ -45,10 +48,11 @@ omnitrace_mpi_set_attr()
         return MPI_SUCCESS;
     };
     static auto _mpi_fini = [](MPI_Comm, int, void*, void*) {
-        OMNITRACE_DEBUG("MPI Comm attribute finalize\n");
+        OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(),
+                                          "MPI Comm attribute finalize\n");
         if(mpip_index != std::numeric_limits<uint64_t>::max())
-            comp::deactivate_mpip<tim::component_tuple<omnitrace_component>, omnitrace>(
-                mpip_index);
+            comp::deactivate_mpip<tim::component_tuple<omnitrace::component::omnitrace>,
+                                  api::omnitrace>(mpip_index);
         if(!mpi_init_string.empty()) omnitrace_pop_trace(mpi_init_string.c_str());
         mpi_init_string = {};
         omnitrace_trace_finalize();
@@ -66,45 +70,74 @@ omnitrace_mpi_set_attr()
 }  // namespace
 
 void
+mpi_gotcha::configure()
+{
+    mpi_gotcha_t::get_initializer() = []() {
+        mpi_gotcha_t::template configure<0, int, int*, char***>("MPI_Init");
+        mpi_gotcha_t::template configure<1, int, int*, char***, int, int*>(
+            "MPI_Init_thread");
+        mpi_gotcha_t::template configure<2, int>("MPI_Finalize");
+        mpi_gotcha_t::template configure<3, int, tim::mpi::comm_t, int*>("MPI_Comm_rank");
+        mpi_gotcha_t::template configure<4, int, tim::mpi::comm_t, int*>("MPI_Comm_size");
+    };
+}
+
+void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 {
-    OMNITRACE_DEBUG("[%s] %s(int*, char***)\n", __FUNCTION__, _data.tool_id.c_str());
-    if(get_state() == ::State::DelayedInit)
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(), "[%s] %s(int*, char***)\n",
+                                      __FUNCTION__, _data.tool_id.c_str());
+    if(get_state() == ::omnitrace::State::DelayedInit)
     {
-        get_state()     = ::State::PreInit;
+        get_state()     = ::omnitrace::State::PreInit;
         mpi_init_string = _data.tool_id;
+#if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
+        tim::mpi::is_initialized_callback() = []() { return true; };
+        tim::mpi::is_finalized()            = false;
+#endif
     }
 }
 
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, int, int*)
 {
-    OMNITRACE_DEBUG("[%s] %s(int*, char***, int, int*)\n", __FUNCTION__,
-                    _data.tool_id.c_str());
-    if(get_state() == ::State::DelayedInit)
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(),
+                                      "[%s] %s(int*, char***, int, int*)\n", __FUNCTION__,
+                                      _data.tool_id.c_str());
+    if(get_state() == ::omnitrace::State::DelayedInit)
     {
-        get_state()     = ::State::PreInit;
+        get_state()     = ::omnitrace::State::PreInit;
         mpi_init_string = _data.tool_id;
+#if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
+        tim::mpi::is_initialized_callback() = []() { return true; };
+        tim::mpi::is_finalized()            = false;
+#endif
     }
 }
 
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
 {
-    OMNITRACE_DEBUG("[%s] %s()\n", __FUNCTION__, _data.tool_id.c_str());
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(), "[%s] %s()\n", __FUNCTION__,
+                                      _data.tool_id.c_str());
     if(mpip_index != std::numeric_limits<uint64_t>::max())
-        comp::deactivate_mpip<tim::component_tuple<omnitrace_component>, omnitrace>(
-            mpip_index);
+        comp::deactivate_mpip<tim::component_tuple<omnitrace::component::omnitrace>,
+                              api::omnitrace>(mpip_index);
     if(!mpi_init_string.empty()) omnitrace_pop_trace(mpi_init_string.c_str());
     mpi_init_string = {};
     omnitrace_trace_finalize();
+#if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
+    tim::mpi::is_initialized_callback() = []() { return false; };
+    tim::mpi::is_finalized()            = true;
+#endif
 }
 
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int* _val)
 {
-    OMNITRACE_DEBUG("[%s] %s()\n", __FUNCTION__, _data.tool_id.c_str());
-    m_comm = _comm;
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(), "[%s] %s()\n", __FUNCTION__,
+                                      _data.tool_id.c_str());
+    m_comm = &_comm;
     if(_data.tool_id == "MPI_Comm_rank")
     {
         m_rank = _val;
@@ -123,9 +156,9 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 {
-    OMNITRACE_DEBUG("[%s] %s() returned %i\n", __FUNCTION__, _data.tool_id.c_str(),
-                    (int) _retval);
-    if(_retval == tim::mpi::success_v && get_state() == ::State::PreInit &&
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(), "[%s] %s() returned %i\n",
+                                      __FUNCTION__, _data.tool_id.c_str(), (int) _retval);
+    if(_retval == tim::mpi::success_v && get_state() == ::omnitrace::State::PreInit &&
        _data.tool_id.find("MPI_Init") == 0)
     {
         omnitrace_mpi_set_attr();
@@ -136,19 +169,27 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         // were excluded via a regex expression)
         if(get_use_mpip())
         {
-            OMNITRACE_DEBUG("[%s] Activating MPI wrappers...\n", __FUNCTION__);
-            comp::configure_mpip<tim::component_tuple<omnitrace_component>, omnitrace>();
-            mpip_index = comp::activate_mpip<tim::component_tuple<omnitrace_component>,
-                                             omnitrace>();
+            OMNITRACE_CONDITIONAL_BASIC_PRINT(
+                get_debug_env(), "[%s] Activating MPI wrappers...\n", __FUNCTION__);
+            comp::configure_mpip<tim::component_tuple<omnitrace::component::omnitrace>,
+                                 api::omnitrace>();
+            mpip_index =
+                comp::activate_mpip<tim::component_tuple<omnitrace::component::omnitrace>,
+                                    api::omnitrace>();
         }
         omnitrace_push_trace(_data.tool_id.c_str());
     }
     else if(_retval == tim::mpi::success_v && _data.tool_id.find("MPI_Comm_") == 0)
     {
-        /*if(_data.tool_id == "MPI_Comm_rank")
+        if(_data.tool_id == "MPI_Comm_rank")
         {
             if(m_rank)
-                tim::mpi::set_rank(*m_rank, m_comm);
+            {
+                tim::mpi::set_rank(*m_rank, *static_cast<comm_t*>(m_comm));
+                tim::settings::default_process_suffix() = *m_rank;
+                get_perfetto_output_filename().clear();
+                (void) get_perfetto_output_filename();
+            }
             else
             {
                 OMNITRACE_PRINT("[%s] %s() returned %i :: nullptr to rank\n",
@@ -158,7 +199,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         else if(_data.tool_id == "MPI_Comm_size")
         {
             if(m_size)
-                tim::mpi::set_size(*m_size, m_comm);
+                tim::mpi::set_size(*m_size, *static_cast<comm_t*>(m_comm));
             else
             {
                 OMNITRACE_PRINT("[%s] %s() returned %i :: nullptr to size\n",
@@ -169,8 +210,9 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         {
             OMNITRACE_PRINT("[%s] %s() returned %i :: unexpected function wrapper\n",
                             __FUNCTION__, _data.tool_id.c_str(), (int) _retval);
-        }*/
+        }
     }
 }
+}  // namespace omnitrace
 
-TIMEMORY_INITIALIZE_STORAGE(mpi_gotcha)
+TIMEMORY_INITIALIZE_STORAGE(omnitrace::mpi_gotcha)

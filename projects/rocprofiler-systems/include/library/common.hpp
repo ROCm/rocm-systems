@@ -28,6 +28,8 @@
 
 #pragma once
 
+#include "library/defines.hpp"
+
 #include <timemory/api.hpp>
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/process.hpp>
@@ -45,6 +47,10 @@
 #include <utility>
 #include <vector>
 
-// timemory api struct
-struct omnitrace : tim::concepts::api
-{};
+TIMEMORY_DEFINE_NS_API(api, omnitrace)
+TIMEMORY_DEFINE_NS_API(api, sampling)
+
+namespace omnitrace
+{
+namespace api = tim::api;  // NOLINT
+}
