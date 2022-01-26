@@ -15,8 +15,15 @@ build-release()
     docker run -it --rm -v ${PWD}:/home/omnitrace --env ROCM_VERSION=${ROCM_VERSION} --env VERSION=${CODE_VERSION} ${CONTAINER} /home/omnitrace/scripts/build-release.sh
 }
 
+: ${DISTRO:=ubuntu}
+: ${VERSIONS:=20.04 18.04}
+
 CODE_VERSION=$(cat VERSION)
 
-build-release jrmadsen/omnitrace-base-rocm-4.5   4.5.0 ${CODE_VERSION}
-build-release jrmadsen/omnitrace-base-rocm-4.3   4.3.0 ${CODE_VERSION}
-build-release jrmadsen/omnitrace-base-rocm-4.3.1 4.3.1 ${CODE_VERSION}
+for VERSION in ${VERSIONS}
+do
+    TAG=${DISTRO}-${VERSION}
+    build-release jrmadsen/omnitrace-${TAG}-rocm-4.5   4.5.0 ${CODE_VERSION}
+    build-release jrmadsen/omnitrace-${TAG}-rocm-4.3   4.3.0 ${CODE_VERSION}
+    build-release jrmadsen/omnitrace-${TAG}-rocm-4.3.1 4.3.1 ${CODE_VERSION}
+done

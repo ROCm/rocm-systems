@@ -274,12 +274,12 @@ configure_settings()
 
 void
 print_config_settings(
-    std::ostream&                                                                _os,
+    std::ostream&                                                                _ros,
     std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter)
 {
     OMNITRACE_CONDITIONAL_BASIC_PRINT(true, "configuration:\n");
 
-    auto _flags = _os.flags();
+    std::stringstream _os{};
 
     bool _md = tim::get_env<bool>("OMNITRACE_SETTINGS_DESC_MARKDOWN", false);
 
@@ -370,7 +370,7 @@ print_config_settings(
     }
     _os << _spacer.str() << "\n";
 
-    _os.setf(_flags);
+    _ros << _os.str() << std::flush;
 }
 
 std::string&

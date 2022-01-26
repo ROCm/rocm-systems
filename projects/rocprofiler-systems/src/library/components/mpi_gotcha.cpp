@@ -133,18 +133,17 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
 }
 
 void
-mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int* _val)
+mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t, int* _val)
 {
     OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(), "[%s] %s()\n", __FUNCTION__,
                                       _data.tool_id.c_str());
-    m_comm = &_comm;
     if(_data.tool_id == "MPI_Comm_rank")
     {
-        m_rank = _val;
+        m_rank_ptr = _val;
     }
     else if(_data.tool_id == "MPI_Comm_size")
     {
-        m_size = _val;
+        m_size_ptr = _val;
     }
     else
     {
@@ -171,6 +170,9 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         {
             OMNITRACE_CONDITIONAL_BASIC_PRINT(
                 get_debug_env(), "[%s] Activating MPI wrappers...\n", __FUNCTION__);
+
+            // use env vars OMNITRACE_MPIP_PERMIT_LIST and OMNITRACE_MPIP_REJECT_LIST
+            // to control the gotcha bindings at runtime
             comp::configure_mpip<tim::component_tuple<omnitrace::component::omnitrace>,
                                  api::omnitrace>();
             mpip_index =
@@ -183,10 +185,13 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
     {
         if(_data.tool_id == "MPI_Comm_rank")
         {
-            if(m_rank)
+            if(m_rank_ptr)
             {
-                tim::mpi::set_rank(*m_rank, *static_cast<comm_t*>(m_comm));
-                tim::settings::default_process_suffix() = *m_rank;
+                m_rank = std::max<int>(*m_rank_ptr, m_rank);
+                OMNITRACE_CONDITIONAL_BASIC_PRINT(tim::settings::verbose() > 0,
+                                                  "MPI rank: %i\n", m_rank);
+                tim::mpi::set_rank(m_rank);
+                tim::settings::default_process_suffix() = m_rank;
                 get_perfetto_output_filename().clear();
                 (void) get_perfetto_output_filename();
             }
@@ -198,8 +203,13 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         }
         else if(_data.tool_id == "MPI_Comm_size")
         {
-            if(m_size)
-                tim::mpi::set_size(*m_size, *static_cast<comm_t*>(m_comm));
+            if(m_size_ptr)
+            {
+                m_size = std::max<int>(*m_size_ptr, m_size);
+                OMNITRACE_CONDITIONAL_BASIC_PRINT(tim::settings::verbose() > 0,
+                                                  "MPI size: %i\n", m_size);
+                tim::mpi::set_size(m_size);
+            }
             else
             {
                 OMNITRACE_PRINT("[%s] %s() returned %i :: nullptr to size\n",

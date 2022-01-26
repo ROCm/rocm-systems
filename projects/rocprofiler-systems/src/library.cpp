@@ -387,9 +387,10 @@ omnitrace_init_tooling()
             return (_v.find("OMNITRACE_") == 0);
         };
 
-        tim::print_env(std::cerr, [_is_omnitrace_option](const std::string& _v) {
-            return _is_omnitrace_option(_v, std::set<std::string>{});
-        });
+        if(tim::settings::verbose() > 0)
+            tim::print_env(std::cerr, [_is_omnitrace_option](const std::string& _v) {
+                return _is_omnitrace_option(_v, std::set<std::string>{});
+            });
 
         print_config_settings(std::cerr, _is_omnitrace_option);
     }

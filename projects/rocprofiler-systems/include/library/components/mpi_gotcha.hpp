@@ -65,9 +65,10 @@ struct mpi_gotcha : comp::base<mpi_gotcha, void>
     void audit(const gotcha_data_t& _data, audit::outgoing, int _retval);
 
 private:
-    void* m_comm = nullptr;
-    int*  m_rank = nullptr;
-    int*  m_size = nullptr;
+    int* m_rank_ptr = nullptr;
+    int* m_size_ptr = nullptr;
+    int  m_rank     = 0;
+    int  m_size     = 1;
 };
 
 using mpi_gotcha_t = comp::gotcha<5, tim::component_tuple<mpi_gotcha>, api::omnitrace>;
