@@ -119,31 +119,35 @@ def parse_res(infile):
   # line text in the format of for example "WRITE_SIZE (0.2500000000)" or
   # "GRBM_GUI_ACTIVE (27867)" or "TA_TA_BUSY[0]"
   var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+  pid_pattern = re.compile("pid\((\d*)\)")
 
   dispatch_number = 0
+  disp_pid = -1
   for line in inp.readlines():
     record = line[:-1]
 
+    m = pid_pattern.search(record)
+    if m: disp_pid = int(m.group(1))
+
     m = var_pattern.match(record)
     if m:
-      if not dispatch_number in var_table: fatal("Error: dispatch number not found '" + str(dispatch_number) + "'")
+      if not (disp_pid, dispatch_number) in var_table: fatal("Error: dispatch number not found '" + str(dispatch_number) + "'")
       var = m.group(1)
       val = m.group(2)
-      var_table[dispatch_number][var] = val
+      var_table[(disp_pid, dispatch_number)][var] = val
       if not var in var_list: var_list.append(var)
 
     m = beg_pattern.match(record)
     if m:
       dispatch_number = m.group(1)
-      if not dispatch_number in var_table:
-        var_table[dispatch_number] = {
+      if not (disp_pid, dispatch_number) in var_table:
+        var_table[(disp_pid, dispatch_number)] = {
           'Index': dispatch_number,
           'KernelName': "\"" + m.group(3) + "\""
         }
 
         gpu_id = 0
         queue_id = 0
-        disp_pid = 0
         disp_tid = 0
 
         kernel_properties = m.group(2)
@@ -152,7 +156,7 @@ def parse_res(infile):
           if m:
             var = m.group(1)
             val = m.group(2)
-            var_table[dispatch_number][var] = val
+            var_table[(disp_pid, dispatch_number)][var] = val
             if not var in var_list: var_list.append(var);
             if var == 'gpu-id':
               gpu_id = int(val)
@@ -163,10 +167,10 @@ def parse_res(infile):
           else: fatal('wrong kernel property "' + prop + '" in "'+ kernel_properties + '"')
         m = ts_pattern.search(record)
         if m:
-          var_table[dispatch_number]['DispatchNs'] = m.group(1)
-          var_table[dispatch_number]['BeginNs'] = m.group(2)
-          var_table[dispatch_number]['EndNs'] = m.group(3)
-          var_table[dispatch_number]['CompleteNs'] = m.group(4)
+          var_table[(disp_pid, dispatch_number)]['DispatchNs'] = m.group(1)
+          var_table[(disp_pid, dispatch_number)]['BeginNs'] = m.group(2)
+          var_table[(disp_pid, dispatch_number)]['EndNs'] = m.group(3)
+          var_table[(disp_pid, dispatch_number)]['CompleteNs'] = m.group(4)
 
           ## filling dependenciws
           from_ns = int(m.group(1))
@@ -189,10 +193,17 @@ def parse_res(infile):
   inp.close()
 #############################################################
 
+# Comparator to sort a dictionary of tuples. This comparator will convert
+# the second element of tuple to an int and return the new tuple. Then
+# the dictionary can use the default comparison i.e sort by first element,
+# then sort by second element.
+def tuple_comparator(tupleElem) :
+    return tupleElem[0], int(tupleElem[1])
+
 # merge results table
 def merge_table():
   global var_list
-  keys = sorted(var_table.keys(), key=int)
+  keys = sorted(var_table.keys(), key=tuple_comparator)
 
   fields = set(var_table[keys[0]])
   if 'DispatchNs' in fields:
@@ -206,7 +217,7 @@ def merge_table():
 # dump CSV results
 def dump_csv(file_name):
   global var_list
-  keys = sorted(var_table.keys(), key=int)
+  keys = sorted(var_table.keys(), key=tuple_comparator)
 
   with open(file_name, mode='w') as fd:
     fd.write(','.join(var_list) + '\n');
@@ -223,7 +234,7 @@ def dump_csv(file_name):
 # fill kernels DB
 def fill_kernel_db(table_name, db):
   global var_list
-  keys = sorted(var_table.keys(), key=int)
+  keys = sorted(var_table.keys(), key=tuple_comparator)
 
   for var in set(var_list).difference(set(table_descr[1])):
     table_descr[1][var] = 'INTEGER'
@@ -231,8 +242,8 @@ def fill_kernel_db(table_name, db):
 
   table_handle = db.add_table(table_name, table_descr)
 
-  for ind in keys:
-    entry = var_table[ind]
+  for pid, ind in keys:
+    entry = var_table[(pid, ind)]
     dispatch_number = entry['Index']
     if ind != dispatch_number: fatal("Dispatch #" + ind + " index mismatch (" + dispatch_number + ")\n")
     val_list = [entry[var] for var in var_list]
