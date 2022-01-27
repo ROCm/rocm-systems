@@ -1,30 +1,24 @@
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All Rights Reserved.
+// MIT License
+//
+// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
-// with the Software without restriction, including without limitation the
-// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-// sell copies of the Software, and to permit persons to whom the Software is
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// * Redistributions of source code must retain the above copyright notice,
-// this list of conditions and the following disclaimers.
-//
-// * Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimers in the
-// documentation and/or other materials provided with the distribution.
-//
-// * Neither the names of Advanced Micro Devices, Inc. nor the names of its
-// contributors may be used to endorse or promote products derived from
-// this Software without specific prior written permission.
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
-// THE SOFTWARE.
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #include "library/config.hpp"
 #include "library/debug.hpp"
@@ -235,7 +229,8 @@ configure_settings()
     for(auto&& itr :
         tim::delimit(_config->get<std::string>("OMNITRACE_CONFIG_FILE"), ";:"))
     {
-        OMNITRACE_CONDITIONAL_BASIC_PRINT(true, "Reading config file %s\n", itr.c_str());
+        OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose_env() > 0,
+                                          "Reading config file %s\n", itr.c_str());
         _config->read(itr);
     }
 
@@ -269,7 +264,7 @@ configure_settings()
 #if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
     if(tim::mpi::is_initialized()) settings::default_process_suffix() = tim::mpi::rank();
 #endif
-    OMNITRACE_CONDITIONAL_BASIC_PRINT(true, "configuration complete\n");
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose_env() > 0, "configuration complete\n");
 }
 
 void
@@ -277,6 +272,8 @@ print_config_settings(
     std::ostream&                                                                _ros,
     std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter)
 {
+    if(get_verbose() < 1) return;
+
     OMNITRACE_CONDITIONAL_BASIC_PRINT(true, "configuration:\n");
 
     std::stringstream _os{};
@@ -398,6 +395,19 @@ get_debug()
 {
     static auto _v = get_config()->find("OMNITRACE_DEBUG");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+int
+get_verbose_env()
+{
+    return tim::get_env<int>("OMNITRACE_VERBOSE", 0);
+}
+
+int
+get_verbose()
+{
+    static auto _v = get_config()->find("OMNITRACE_VERBOSE");
+    return static_cast<tim::tsettings<int>&>(*_v->second).get();
 }
 
 bool&

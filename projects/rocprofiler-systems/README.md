@@ -1,13 +1,41 @@
 # omnitrace: application tracing with static/dynamic binary instrumentation
 
+It is highly recommended to use the ore-built binary installers for omnitrace which are provided in the "Assets" section of each release.
+
 ## Dependencies
 
+- Ubuntu 18.04 or Ubuntu 20.04
+  - Other OS distributions may be supported but are not tested
+- GCC compiler v7+
+  - Older GCC compilers may be supported but are not tested
+  - Clang compilers are generally supported for Omnitrace but not Dyninst
+- [CMake](https://cmake.org/) v3.15+
 - [DynInst](https://github.com/dyninst/dyninst) for dynamic or static instrumentation
-- [Julia](https://julialang.org/) for merging perfetto traces
+  - [TBB](https://github.com/oneapi-src/oneTBB) required by Dyninst
+  - [ElfUtils](https://sourceware.org/elfutils/) required by Dyninst
+  - [LibIberty](https://github.com/gcc-mirror/gcc/tree/master/libiberty) required by Dyninst
+  - [Boost](https://www.boost.org/) required by Dyninst
+  - [OpenMP](https://www.openmp.org/) optional by Dyninst
+- [ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html#ubuntu) (optional)
+  - HIP
+  - Roctracer for HIP API and kernel tracing
+- [PAPI](https://icl.utk.edu/papi/)
+- [libunwind](https://www.nongnu.org/libunwind/) for call-stack sampling
+- Several optional third-party profiling tools supported by timemory (e.g. TAU, Caliper, CrayPAT, etc.)
+
+## Installing CMake
+
+If using Ubuntu 20.04, `apt-get install cmake` will install cmake v3.16.3. If using Ubuntu 18.04, the cmake version via apt is too old (v3.10.2). In this case, run:
+
+```console
+python3 -m pip install `cmake==3.18.4`
+export PATH=${HOME}/.local/bin
+```
 
 ## Installing DynInst
 
-The easiest way to install Dyninst is via spack
+The easiest way to install Dyninst is to configure omnitrace with `-DOMNITRACE_BUILD_DYNINST` and have Dyninst install it's dependencies:
+`-DDyninst_BUILD_TBB=ON -DDyninst_BUILD_ELFUTILS=ON -DDyninst_BUILD_BOOST=ON -DDyninst_BUILD_LIBIBERTY=ON`.
 
 ```shell
 git clone https://github.com/spack/spack.git
@@ -18,26 +46,21 @@ spack install dyninst
 spack load -r dyninst
 ```
 
-## Installing Julia
-
-Julia is available via Linux package managers or may be available via a module. Debian-based distributions such as Ubuntu can run (as a super-user):
-
-```shell
-apt-get install julia
-```
-
-Once Julia is installed, install the necessary packages (this operation only needs to be performed once):
-
-```shell
-julia -e 'using Pkg; for name in ["JSON", "DataFrames", "Dates", "CSV", "Chain", "PrettyTables"]; Pkg.add(name); end'
-```
-
 ## Installing omnitrace
+
+Omnitrace can have full MPI support (`-DOMNITRACE_USE_MPI=ON`) or partially (`-DOMNITRACE_USE_MPI_HEADERS=ON`). The only difference between these two modes
+is whether or not the results collected via timemory can be aggregated into one output file. If full MPI support is selected, make sure your target application
+is built against the same MPI distribution as omnitrace, i.e. do not build omnitrace with MPICH and use it on a target application built against OpenMPI.
+If partial support is selected, build omnitrace against OpenMPI -- the reason this is recommended is because the `MPI_COMM_WORLD` in OpenMPI is a pointer to
+`ompi_communicator_t` (8 bytes) whereas `MPI_COMM_WORLD` in MPICH is an `int` (4 bytes). Building omnitrace with partial MPI support and the MPICH header and using
+on an application using OpenMPI will thus implicitly cast `MPI_COMM_WORLD` to 4 bytes in the MPI function wrappers before calling the underlying OpenMPI function
+resulting in an incorrect address for `ompi_communicator_t` whereas partial MPI support with the OpenMPI headers does not cast `MPI_COMM_WORLD` into a smaller datatype
+which used with MPICH.
 
 ```shell
 OMNITRACE_ROOT=${HOME}/sw/omnitrace
-git clone https://github.com/AARInternal/omnitrace-dyninst.git
-cmake -B build-omnitrace -DOMNITRACE_USE_MPI=ON -DCMAKE_INSTALL_PREFIX=${OMNITRACE_ROOT} omnitrace-dyninst
+git clone https://github.com/AARInternal/omnitrace.git
+cmake -B build-omnitrace -DOMNITRACE_USE_MPI=ON -DCMAKE_INSTALL_PREFIX=${OMNITRACE_ROOT} omnitrace
 cmake --build build-omnitrace --target all --parallel 8
 cmake --build build-omnitrace --target install
 export PATH=${OMNITRACE_ROOT}/bin:${PATH}
@@ -51,7 +74,14 @@ omnitrace --help
 omnitrace <omnitrace-options> -- <exe-or-library> <exe-options>
 ```
 
-## Omnitrace Library Environment Settings
+## Omnitrace Settings
+
+`omnitrace-avail -Sd` will provide a list of all the possible omnitrace settings, their current value, and a description of the setting.
+
+> NOTE: Some settings may only affect the timemory backend.
+
+These settings can be set via environment variables or placed in a config file and specified via `OMNITRACE_CONFIG_FILE=/path/to/config/file`. The config file
+can be a text, JSON, or XML file. Some of the most relevant settings are provided below:
 
 | Environment Variable                       | Default Value            | Description                                                                                                      |
 |--------------------------------------------|--------------------------|------------------------------------------------------------------------------------------------------------------|
@@ -93,7 +123,7 @@ omnitrace <omnitrace-options> -- <exe-or-library> <exe-options>
 | `OMNITRACE_SHMEM_SIZE_HINT_KB`             | `40960`                  | Hint for shared-memory buffer size in perfetto (in KB)                                                           |
 | `OMNITRACE_TEXT_OUTPUT`                    | `true`                   | Write text output files                                                                                          |
 | `OMNITRACE_TIMELINE_SAMPLING`              | `false`                  | Create unique entries for every sample when statistical sampling is enabled                                      |
-| `OMNITRACE_TIMEMORY_COMPONENTS`            | `wall_clock`             | List of components to collect via timemory (see timemory-avail)                                                  |
+| `OMNITRACE_TIMEMORY_COMPONENTS`            | `wall_clock`             | List of components to collect via timemory (see omnitrace-avail)                                                  |
 | `OMNITRACE_TIME_FORMAT`                    | `%F_%I.%M_%p`            | Customize the folder generation when TIMEMORY_TIME_OUTPUT is enabled (see also: strftime)                        |
 | `OMNITRACE_TIME_OUTPUT`                    | `true`                   | Output data to subfolder w/ a timestamp (see also: TIMEMORY_TIME_FORMAT)                                         |
 | `OMNITRACE_TIMING_PRECISION`               | `6`                      | Set the precision for components with 'is_timing_category' type-trait                                            |
@@ -179,18 +209,18 @@ omnitrace -E 'rocr::atomic|rocr::core|rocr::HSA' --  /path/to/app
   - `OMNITRACE_USE_PERFETTO=OFF` yields the same result `OMNITRACE_USE_TIMEMORY=ON`
   - `OMNITRACE_USE_PERFETTO=ON` yields the same result as `OMNITRACE_USE_TIMEMORY=OFF`
   - In order to enable _both_ timemory and perfetto, set both `OMNITRACE_USE_TIMEMORY=ON` and `OMNITRACE_USE_PERFETTO=ON`
-  - Setting `OMNITRACE_USE_TIMEMORY=OFF` and `OMNITRACE_USE_PERFETTO=OFF` will disable all instrumentation
-- Use `timemory-avail -S` to view the various settings for timemory
+  - Setting `OMNITRACE_USE_TIMEMORY=OFF` and `OMNITRACE_USE_PERFETTO=OFF` will disable all instrumentation but call-stack sampling (`OMNITRACE_USE_SAMPLING=ON`) is still available.
+- Use `omnitrace-avail -S` to view the various settings for timemory
 - Set `OMNITRACE_COMPONENTS="<comma-delimited-list-of-component-name>"` to control which components timemory collects
-  - The list of components and their descriptions can be viewed via `timemory-avail -Cd`
-  - The list of components and their string identifiers can be view via `timemory-avail -Cbs`
-- You can filter any `timemory-avail` results via `-r <regex> -hl`
+  - The list of components and their descriptions can be viewed via `omnitrace-avail -Cd`
+  - The list of components and their string identifiers can be view via `omnitrace-avail -Cbs`
+- You can filter any `omnitrace-avail` results via `-r <regex> -hl`
 
 ## Omnitrace Output
 
 `omnitrace` will create an output directory named `omnitrace-<EXE_NAME>-output`, e.g. if your executable
 is named `app.inst`, the output directory will be `omnitrace-app.inst-output`. Depending on whether
-`TIMEMORY_TIME_OUTPUT=ON` (the default when perfetto is enabled), there will be a subdirectory with the date and time,
+`OMNITRACE_TIME_OUTPUT=ON` (the default when perfetto is enabled), there will be a subdirectory with the date and time,
 e.g. `2021-09-02_01.03_PM`. Within this directory, all perfetto files will be named `perfetto-trace.<PID>.proto` or
 when `OMNITRACE_USE_MPI=ON`, `perfetto-trace.<RANK>.proto` (assuming omnitrace was built with MPI support).
 
@@ -199,15 +229,31 @@ variable. The special character sequences `%pid%` and `%rank%` will be replaced 
 
 ## Merging the traces from rocprof and omnitrace
 
+This section requires installing [Julia](https://julialang.org/).
+
+### Installing Julia
+
+Julia is available via Linux package managers or may be available via a module. Debian-based distributions such as Ubuntu can run (as a super-user):
+
+```shell
+apt-get install julia
+```
+
+Once Julia is installed, install the necessary packages (this operation only needs to be performed once):
+
+```shell
+julia -e 'using Pkg; for name in ["JSON", "DataFrames", "Dates", "CSV", "Chain", "PrettyTables"]; Pkg.add(name); end'
+```
+
 > NOTE: Using `rocprof` externally for tracing is deprecated. The current version has built-in support for
 > recording the GPU activity and HIP API calls. If you want to use an external rocprof, either
-> configure CMake with `-DOMNITRACE_USE_ROCTRACER=OFF` or explicitly set `TIMEMORY_ROCTRACER_ENABLED=OFF` in the
+> configure CMake with `-DOMNITRACE_USE_ROCTRACER=OFF` or explicitly set `OMNITRACE_ROCTRACER_ENABLED=OFF` in the
 > environment.
 
 Use the `omnitrace-merge.jl` Julia script to merge rocprof and perfetto traces.
 
 ```shell
-export TIMEMORY_ROCTRACER_ENABLED=OFF
+export OMNITRACE_ROCTRACER_ENABLED=OFF
 rocprof --hip-trace --roctx-trace --stats ./app.inst
 omnitrace-merge.jl results.json omnitrace-app.inst-output/2021-09-02_01.03_PM/*.proto
 ```

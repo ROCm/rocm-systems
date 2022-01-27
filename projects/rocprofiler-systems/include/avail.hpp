@@ -33,10 +33,10 @@
 #define TIMEMORY_DISABLE_BANNER
 #define TIMEMORY_DISABLE_COMPONENT_STORAGE_INIT
 
-#include "timemory/settings/macros.hpp"
-#include "timemory/tpls/cereal/archives.hpp"
-#include "timemory/tpls/cereal/cereal/external/base64.hpp"
-#include "timemory/utility/demangle.hpp"
+#include <timemory/settings/macros.hpp>
+#include <timemory/tpls/cereal/archives.hpp>
+#include <timemory/tpls/cereal/cereal/external/base64.hpp>
+#include <timemory/utility/demangle.hpp>
 
 #include <algorithm>
 #include <array>
@@ -113,6 +113,7 @@ public:
             current_value = &((*current_entry)[name]);
             return;
         }
+
         if(value_keys.count(name) > 0)
         {
             return;

@@ -32,15 +32,15 @@
 #include "library/config.hpp"
 #include "library/sampling.hpp"
 
-#include "timemory/components.hpp"
-#include "timemory/components/definition.hpp"
-#include "timemory/components/placeholder.hpp"
-#include "timemory/components/properties.hpp"
-#include "timemory/components/skeletons.hpp"
-#include "timemory/mpl/types.hpp"
-#include "timemory/timemory.hpp"
-#include "timemory/utility/argparse.hpp"
-#include "timemory/utility/types.hpp"
+#include <timemory/components.hpp>
+#include <timemory/components/definition.hpp>
+#include <timemory/components/placeholder.hpp>
+#include <timemory/components/properties.hpp>
+#include <timemory/components/skeletons.hpp>
+#include <timemory/mpl/types.hpp>
+#include <timemory/timemory.hpp>
+#include <timemory/utility/argparse.hpp>
+#include <timemory/utility/types.hpp>
 
 #include <algorithm>
 #include <array>
@@ -700,18 +700,24 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
     using width_bool             = array_t<bool, size>;
 
     array_type _setting_output;
-    unique_set _settings_exclude = { "TIMEMORY_ENVIRONMENT",
-                                     "TIMEMORY_COMMAND_LINE",
+    unique_set _settings_exclude = { "OMNITRACE_ENVIRONMENT",
+                                     "OMNITRACE_COMMAND_LINE",
                                      "cereal_class_version",
                                      "settings",
-                                     "TIMEMORY_CUPTI_PCSAMPLING_NUM_COLLECT",
-                                     "TIMEMORY_CUPTI_PCSAMPLING_PERIOD",
-                                     "TIMEMORY_CUPTI_PCSAMPLING_PER_LINE",
-                                     "TIMEMORY_CUPTI_PCSAMPLING_REGION_TOTALS",
-                                     "TIMEMORY_CUPTI_PCSAMPLING_SERIALIZED",
-                                     "TIMEMORY_CUPTI_PCSAMPLING_STALL_REASONS" };
+                                     "OMNITRACE_CUDA_EVENT_BATCH_SIZE",
+                                     "OMNITRACE_CUPTI_ACTIVITY_KINDS",
+                                     "OMNITRACE_CUPTI_ACTIVITY_LEVEL",
+                                     "OMNITRACE_CUPTI_DEVICE",
+                                     "OMNITRACE_CUPTI_EVENTS",
+                                     "OMNITRACE_CUPTI_METRICS",
+                                     "OMNITRACE_CUPTI_PCSAMPLING_NUM_COLLECT",
+                                     "OMNITRACE_CUPTI_PCSAMPLING_PERIOD",
+                                     "OMNITRACE_CUPTI_PCSAMPLING_PER_LINE",
+                                     "OMNITRACE_CUPTI_PCSAMPLING_REGION_TOTALS",
+                                     "OMNITRACE_CUPTI_PCSAMPLING_SERIALIZED",
+                                     "OMNITRACE_CUPTI_PCSAMPLING_STALL_REASONS" };
 
-    cereal::SettingsTextArchive settings_archive(_setting_output, _settings_exclude);
+    cereal::SettingsTextArchive settings_archive{ _setting_output, _settings_exclude };
     settings::serialize_settings(settings_archive);
 
     width_type _widths = { 0, 0, 0, 0, 0, 0, 0 };
@@ -720,12 +726,19 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
     };
     width_bool _mark = { false, false, false, true, true, true, false };
 
+    _setting_output.erase(std::remove_if(_setting_output.begin(), _setting_output.end(),
+                                         [&_settings_exclude](const auto& itr) {
+                                             return _settings_exclude.find(
+                                                        itr.find("environ")->second) !=
+                                                    _settings_exclude.end();
+                                         }),
+                          _setting_output.end());
+
     if(alphabetical)
     {
         std::sort(_setting_output.begin(), _setting_output.end(),
                   [](const auto& lhs, const auto& rhs) {
-                      return (lhs.find("identifier")->second <
-                              rhs.find("identifier")->second);
+                      return (lhs.find("environ")->second < rhs.find("environ")->second);
                   });
     }
 
@@ -876,6 +889,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     {
         for(const auto& itr : fitr)
         {
+            if(available_only && !itr.available()) continue;
             width_type _w = { { (int64_t) itr.symbol().length(), (int64_t) 6,
                                 (int64_t) itr.short_description().length(),
                                 (int64_t) itr.long_description().length() } };
@@ -930,6 +944,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
 
         for(const auto& itr : fitr)
         {
+            if(available_only && !itr.available()) continue;
             std::stringstream ss;
             int               _selected = 0;
             if(options[0])

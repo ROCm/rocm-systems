@@ -25,7 +25,7 @@ if(DYNINST_BUILD_ELFUTILS)
 endif()
 
 # Debian package specific variables
-set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/AARInternal/omnitrace-dyninst")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/AARInternal/omnitrace")
 if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
     set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
 else()

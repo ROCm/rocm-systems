@@ -354,7 +354,11 @@ set(TIMEMORY_TLS_MODEL
 set(TIMEMORY_SETTINGS_PREFIX
     "OMNITRACE_"
     CACHE STRING "Prefix used for settings and environment variables")
+set(TIMEMORY_SETTINGS_CONFIG_NAME
+    "omnitrace"
+    CACHE STRING "Name for configuration")
 mark_as_advanced(TIMEMORY_SETTINGS_PREFIX)
+mark_as_advanced(TIMEMORY_SETTINGS_CONFIG_NAME)
 
 omnitrace_checkout_git_submodule(
     RELATIVE_PATH external/timemory
