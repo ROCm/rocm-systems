@@ -98,14 +98,15 @@ namespace omnitrace
 {
 namespace component
 {
+using hw_counters               = typename backtrace::hw_counters;
 using signal_type_instances     = omnitrace_thread_data<std::set<int>, api::sampling>;
 using backtrace_init_instances  = omnitrace_thread_data<backtrace, api::sampling>;
 using sampler_running_instances = omnitrace_thread_data<bool, api::sampling>;
-using papi_vector_instances     = omnitrace_thread_data<comp::papi_vector, api::sampling>;
+using papi_vector_instances     = omnitrace_thread_data<hw_counters, api::sampling>;
 
 namespace
 {
-std::unique_ptr<comp::papi_vector>&
+std::unique_ptr<hw_counters>&
 get_papi_vector(int64_t _tid)
 {
     static auto& _v = papi_vector_instances::instances();
@@ -124,17 +125,6 @@ std::unique_ptr<bool>&
 get_sampler_running(int64_t _tid)
 {
     static auto& _v = sampler_running_instances::instances();
-    return _v.at(_tid);
-}
-
-std::unique_ptr<std::set<int>>&
-get_signal_types(int64_t _tid)
-{
-    static auto& _v = signal_type_instances::instances();
-    // on the main thread, use both SIGALRM and SIGPROF.
-    // on secondary threads, only use SIGPROF.
-    signal_type_instances::construct((_tid == 0) ? std::set<int>{ SIGALRM, SIGPROF }
-                                                 : std::set<int>{ SIGPROF });
     return _v.at(_tid);
 }
 }  // namespace
@@ -269,17 +259,21 @@ backtrace::sample(int signum)
         }
     }
 
-    if constexpr(tim::trait::is_available<comp::papi_vector>::value)
+    if constexpr(tim::trait::is_available<hw_counters>::value)
     {
-        assert(get_papi_vector(m_tid).get() != nullptr);
-        static thread_local auto& _pv         = get_papi_vector(m_tid);
-        auto                      _hw_counter = _pv->record();
-        for(size_t i = 0; i < std::min<size_t>(_hw_counter.size(), num_hw_counters); ++i)
+        if(tim::trait::runtime_enabled<hw_counters>::get())
         {
-            auto& _last     = get_last_hwcounters().at(i);
-            auto  itr       = _hw_counter.at(i);
-            m_hw_counter[i] = itr - _last;
-            _last           = itr;
+            assert(get_papi_vector(m_tid).get() != nullptr);
+            static thread_local auto& _pv         = get_papi_vector(m_tid);
+            auto                      _hw_counter = _pv->record();
+            auto _num_hw_counters = std::min<size_t>(_hw_counter.size(), num_hw_counters);
+            for(size_t i = 0; i < _num_hw_counters; ++i)
+            {
+                auto& _last     = get_last_hwcounters().at(i);
+                auto  itr       = _hw_counter.at(i);
+                m_hw_counter[i] = itr - _last;
+                _last           = itr;
+            }
         }
     }
 }
@@ -290,7 +284,7 @@ backtrace::configure(bool _setup, int64_t _tid)
     auto& _sampler      = sampling::get_sampler(_tid);
     auto& _running      = get_sampler_running(_tid);
     bool  _is_running   = (!_running) ? false : *_running;
-    auto& _signal_types = get_signal_types(_tid);
+    auto& _signal_types = sampling::get_signal_types(_tid);
 
     ensure_storage<comp::trip_count, sampling_wall_clock, sampling_cpu_clock, hw_counters,
                    sampling_percent>{}();
@@ -299,7 +293,7 @@ backtrace::configure(bool _setup, int64_t _tid)
     {
         assert(_tid == threading::get_id());
         sampling::block_signals(*_signal_types);
-        if constexpr(tim::trait::is_available<comp::papi_vector>::value)
+        if constexpr(tim::trait::is_available<hw_counters>::value)
         {
             OMNITRACE_DEBUG("HW COUNTER: starting...\n");
             if(get_papi_vector(_tid)) get_papi_vector(_tid)->start();
@@ -318,13 +312,17 @@ backtrace::configure(bool _setup, int64_t _tid)
         _sampler->set_delay(_delay);
         _sampler->set_frequency(_prof_freq, { SIGPROF });
         _sampler->set_frequency(_alrm_freq, { SIGALRM });
+        static_assert(tim::trait::buffer_size<sampling::sampler_t>::value > 0,
+                      "Error! Zero buffer size");
+        if(_sampler->get_buffer_size() == 0)
+            throw std::runtime_error("dynamic sampler has a zero buffer size");
 
         OMNITRACE_DEBUG("Sampler for thread %lu will be triggered %5.1fx per second "
                         "(every %5.2e seconds)...\n",
                         _tid, _sampler->get_frequency(units::sec),
                         _sampler->get_rate(units::sec));
 
-        (void) sampling::sampler_t::get_samplers(_tid);
+        // (void) sampling::sampler_t::get_samplers(_tid);
         get_backtrace_init(_tid)->sample();
         _sampler->configure(false);
         _sampler->start();
@@ -344,7 +342,7 @@ backtrace::configure(bool _setup, int64_t _tid)
 
         _sampler->stop();
         _sampler->swap_data();
-        if constexpr(tim::trait::is_available<comp::papi_vector>::value)
+        if constexpr(tim::trait::is_available<hw_counters>::value)
         {
             if(_tid == threading::get_id())
             {

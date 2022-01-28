@@ -219,13 +219,14 @@ main(int argc, char** argv)
         for(int i = 0; i < nthreads; ++i)
             HIP_API_CALL(hipStreamDestroy(_streams.at(i)));
     }
+    HIP_API_CALL(hipDeviceSynchronize());
+    HIP_API_CALL(hipDeviceReset());
+
 #if defined(USE_MPI)
     MPI_Barrier(MPI_COMM_WORLD);
     do_a2a(rank);
     MPI_Finalize();
 #endif
-    HIP_API_CALL(hipDeviceSynchronize());
-    HIP_API_CALL(hipDeviceReset());
 
     return 0;
 }

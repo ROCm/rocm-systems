@@ -133,7 +133,7 @@ roctracer::tear_down()
     OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
 
     // flush all the activity
-    if(roctracer_default_pool() != nullptr)
+    // if(roctracer_default_pool() != nullptr)
     {
         ROCTRACER_CALL(roctracer_flush_activity());
     }

@@ -634,6 +634,38 @@ get_critical_trace_count()
     return static_cast<tim::tsettings<int64_t>&>(*_v->second).get();
 }
 
+bool
+get_debug_tid()
+{
+    static auto _vlist = []() {
+        std::unordered_set<int64_t> _tids{};
+        for(auto itr : tim::delimit<std::vector<int64_t>>(
+                tim::get_env<std::string>("OMNITRACE_DEBUG_TIDS", ""),
+                ",: ", [](const std::string& _v) { return std::stoll(_v); }))
+            _tids.insert(itr);
+        return _tids;
+    }();
+    static thread_local bool _v =
+        _vlist.empty() || _vlist.count(tim::threading::get_id()) > 0;
+    return _v;
+}
+
+bool
+get_debug_pid()
+{
+    static auto _vlist = []() {
+        std::unordered_set<int64_t> _pids{};
+        for(auto itr : tim::delimit<std::vector<int64_t>>(
+                tim::get_env<std::string>("OMNITRACE_DEBUG_PIDS", ""),
+                ",: ", [](const std::string& _v) { return std::stoll(_v); }))
+            _pids.insert(itr);
+        return _pids;
+    }();
+    static bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
+                     _vlist.count(dmp::rank()) > 0;
+    return _v;
+}
+
 State&
 get_state()
 {
@@ -663,5 +695,42 @@ get_cpu_cid_stack(int64_t _tid)
     }();
     return _v.at(_tid);
     (void) _v_check;
+}
+
+namespace
+{
+void
+setup_gotchas()
+{
+    static bool _initialized = false;
+    if(_initialized) return;
+    _initialized = true;
+
+    OMNITRACE_CONDITIONAL_PRINT(
+        get_debug_env(),
+        "[%s] Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread\n",
+        __FUNCTION__);
+
+    mpi_gotcha::configure();
+    fork_gotcha::configure();
+    pthread_gotcha::configure();
+}
+}  // namespace
+
+std::unique_ptr<main_bundle_t>&
+get_main_bundle()
+{
+    static auto _v =
+        std::make_unique<main_bundle_t>("omnitrace", quirk::config<quirk::auto_start>{});
+    return _v;
+}
+
+std::unique_ptr<gotcha_bundle_t>&
+get_gotcha_bundle()
+{
+    static auto _v =
+        (setup_gotchas(), std::make_unique<gotcha_bundle_t>(
+                              "omnitrace", quirk::config<quirk::auto_start>{}));
+    return _v;
 }
 }  // namespace omnitrace

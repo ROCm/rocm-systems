@@ -49,6 +49,9 @@ using component::sampling_cpu_clock;
 using component::sampling_percent;
 using component::sampling_wall_clock;
 
+std::unique_ptr<std::set<int>>&
+get_signal_types(int64_t _tid);
+
 std::set<int>
 setup();
 
@@ -68,3 +71,12 @@ get_sampler(int64_t _tid = threading::get_id());
 
 }  // namespace sampling
 }  // namespace omnitrace
+
+TIMEMORY_DEFINE_CONCRETE_TRAIT(prevent_reentry, omnitrace::sampling::sampler_t,
+                               std::true_type)
+
+TIMEMORY_DEFINE_CONCRETE_TRAIT(check_signals, omnitrace::sampling::sampler_t,
+                               std::false_type)
+
+TIMEMORY_DEFINE_CONCRETE_TRAIT(buffer_size, omnitrace::sampling::sampler_t,
+                               TIMEMORY_ESC(std::integral_constant<size_t, 256>))

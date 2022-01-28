@@ -12,18 +12,25 @@ include(Compilers)
 include(FindPackageHandleStandardArgs)
 include(MacroUtilities)
 
-option(OMNITRACE_BUILD_DEVELOPER "Extra build flags for development like -Werror" OFF)
-option(OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS "Extra optimization flags" OFF)
-option(OMNITRACE_BUILD_LTO "Build with link-time optimization" OFF)
-option(OMNITRACE_USE_COMPILE_TIMING "" OFF)
-option(OMNITRACE_USE_COVERAGE "" OFF)
-option(OMNITRACE_USE_SANITIZER "" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_DEVELOPER
+                     "Extra build flags for development like -Werror" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS "Extra optimization flags" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_LTO "Build with link-time optimization" OFF)
+omnitrace_add_option(OMNITRACE_USE_COMPILE_TIMING
+                     "Build with timing metrics for compilation" OFF)
+omnitrace_add_option(OMNITRACE_USE_COVERAGE "Build with code-coverage flags" OFF)
+omnitrace_add_option(OMNITRACE_USE_SANITIZER
+                     "Build with -fsanitze=\${OMNITRACE_SANITIZER_TYPE}" OFF)
 
 target_compile_definitions(omnitrace-compile-options INTERFACE $<$<CONFIG:DEBUG>:DEBUG>)
 
 set(OMNITRACE_SANITIZER_TYPE
     "leak"
     CACHE STRING "Sanitizer type")
+if(OMNITRACE_USE_SANITIZER)
+    omnitrace_add_feature(OMNITRACE_SANITIZER_TYPE
+                          "Sanitizer type, e.g. leak, thread, address, memory, etc.")
+endif()
 
 # ----------------------------------------------------------------------------------------#
 # dynamic linking and runtime libraries
@@ -131,17 +138,22 @@ endif()
 add_cxx_flag_if_avail("-faligned-new")
 
 omnitrace_save_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
-set(CMAKE_CXX_FLAGS "-flto=thin ${CMAKE_CXX_FLAGS}")
+set(_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS "-flto=thin ${_CXX_FLAGS}")
 
 omnitrace_add_interface_library(omnitrace-lto "Adds link-time-optimization flags")
 add_target_flag_if_avail(omnitrace-lto "-flto=thin")
 if(NOT cxx_omnitrace_lto_flto_thin)
-    set(CMAKE_CXX_FLAGS "-flto ${CMAKE_CXX_FLAGS}")
+    set(CMAKE_CXX_FLAGS "-flto ${_CXX_FLAGS}")
     add_target_flag_if_avail(omnitrace-lto "-flto")
     if(NOT cxx_omnitrace_lto_flto)
         set(OMNITRACE_BUILD_LTO OFF)
     else()
         target_link_options(omnitrace-lto INTERFACE -flto)
+    endif()
+    add_target_flag_if_avail(omnitrace-lto "-fno-fat-lto-objects")
+    if(cxx_omnitrace_lto_fno_fat_lto_objects)
+        target_link_options(omnitrace-lto INTERFACE -fno-fat-lto-objects)
     endif()
 else()
     target_link_options(omnitrace-lto INTERFACE -flto=thin)

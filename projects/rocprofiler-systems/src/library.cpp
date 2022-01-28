@@ -46,23 +46,6 @@ get_interval_data()
     return _v;
 }
 
-void
-setup_gotchas()
-{
-    static bool _initialized = false;
-    if(_initialized) return;
-    _initialized = true;
-
-    OMNITRACE_CONDITIONAL_PRINT(
-        get_debug_env(),
-        "[%s] Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread\n",
-        __FUNCTION__);
-
-    mpi_gotcha::configure();
-    fork_gotcha::configure();
-    pthread_gotcha::configure();
-}
-
 auto
 ensure_finalization(bool _static_init = false)
 {
@@ -221,10 +204,8 @@ omnitrace_init_tooling()
         }
     }
 
-    // always activate gotcha wrappers
     auto& _main_bundle = get_main_bundle();
     _main_bundle->start();
-    assert(_main_bundle->get<mpi_gotcha_t>()->get_is_running());
 
 #if defined(OMNITRACE_USE_ROCTRACER)
     if(get_use_roctracer())
@@ -426,321 +407,316 @@ omnitrace_init_tooling()
 
 //--------------------------------------------------------------------------------------//
 
-extern "C"
+extern "C" void
+omnitrace_push_trace(const char* name)
 {
-    void omnitrace_push_trace(const char* name)
+    // return if not active
+    if(get_state() == State::Finalized) return;
+
+    if(get_state() != State::Active && !omnitrace_init_tooling())
     {
-        // return if not active
-        if(get_state() == State::Finalized) return;
-
-        if(get_state() != State::Active && !omnitrace_init_tooling())
-        {
-            OMNITRACE_DEBUG("[%s] %s :: not active and perfetto not initialized\n",
-                            __FUNCTION__, name);
-            return;
-        }
-        else
-        {
-            OMNITRACE_DEBUG("[%s] %s\n", __FUNCTION__, name);
-        }
-
-        static auto _sample_rate = std::max<size_t>(get_instrumentation_interval(), 1);
-        static thread_local size_t _sample_idx = 0;
-        auto                       _enabled    = (_sample_idx++ % _sample_rate == 0);
-        get_interval_data().emplace_back(_enabled);
-        if(_enabled) get_functors().first(name);
-        if(get_use_critical_trace())
-        {
-            auto     _ts         = comp::wall_clock::record();
-            auto     _cid        = get_cpu_cid()++;
-            uint16_t _depth      = (get_cpu_cid_stack()->empty())
-                                       ? get_cpu_cid_stack(0)->size()
-                                       : get_cpu_cid_stack()->size() - 1;
-            auto     _parent_cid = (get_cpu_cid_stack()->empty())
-                                       ? get_cpu_cid_stack(0)->back()
-                                       : get_cpu_cid_stack()->back();
-            get_cpu_cid_parents().emplace(_cid, std::make_tuple(_parent_cid, _depth));
-            add_critical_trace<Device::CPU, Phase::BEGIN>(
-                threading::get_id(), _cid, 0, _parent_cid, _ts, 0,
-                critical_trace::add_hash_id(name), _depth);
-        }
+        OMNITRACE_DEBUG("[%s] %s :: not active and perfetto not initialized\n",
+                        __FUNCTION__, name);
+        return;
+    }
+    else
+    {
+        OMNITRACE_DEBUG("[%s] %s\n", __FUNCTION__, name);
     }
 
-    void omnitrace_pop_trace(const char* name)
+    static auto _sample_rate = std::max<size_t>(get_instrumentation_interval(), 1);
+    static thread_local size_t _sample_idx = 0;
+    auto                       _enabled    = (_sample_idx++ % _sample_rate == 0);
+    get_interval_data().emplace_back(_enabled);
+    if(_enabled) get_functors().first(name);
+    if(get_use_critical_trace())
     {
-        if(get_state() == State::Active)
+        auto     _ts     = comp::wall_clock::record();
+        auto     _cid    = get_cpu_cid()++;
+        uint16_t _depth  = (get_cpu_cid_stack()->empty())
+                               ? get_cpu_cid_stack(0)->size()
+                               : get_cpu_cid_stack()->size() - 1;
+        auto _parent_cid = (get_cpu_cid_stack()->empty()) ? get_cpu_cid_stack(0)->back()
+                                                          : get_cpu_cid_stack()->back();
+        get_cpu_cid_parents().emplace(_cid, std::make_tuple(_parent_cid, _depth));
+        add_critical_trace<Device::CPU, Phase::BEGIN>(
+            threading::get_id(), _cid, 0, _parent_cid, _ts, 0,
+            critical_trace::add_hash_id(name), _depth);
+    }
+}
+
+extern "C" void
+omnitrace_pop_trace(const char* name)
+{
+    if(get_state() == State::Active)
+    {
+        OMNITRACE_DEBUG("[%s] %s\n", __FUNCTION__, name);
+        auto& _interval_data = get_interval_data();
+        if(!_interval_data.empty())
         {
-            OMNITRACE_DEBUG("[%s] %s\n", __FUNCTION__, name);
-            auto& _interval_data = get_interval_data();
-            if(!_interval_data.empty())
+            if(_interval_data.back()) get_functors().second(name);
+            _interval_data.pop_back();
+        }
+        if(get_use_critical_trace())
+        {
+            if(get_cpu_cid_stack() && !get_cpu_cid_stack()->empty())
             {
-                if(_interval_data.back()) get_functors().second(name);
-                _interval_data.pop_back();
-            }
-            if(get_use_critical_trace())
-            {
-                if(get_cpu_cid_stack() && !get_cpu_cid_stack()->empty())
+                auto _cid = get_cpu_cid_stack()->back();
+                if(get_cpu_cid_parents().find(_cid) != get_cpu_cid_parents().end())
                 {
-                    auto _cid = get_cpu_cid_stack()->back();
-                    if(get_cpu_cid_parents().find(_cid) != get_cpu_cid_parents().end())
-                    {
-                        uint64_t _parent_cid          = 0;
-                        uint16_t _depth               = 0;
-                        auto     _ts                  = comp::wall_clock::record();
-                        std::tie(_parent_cid, _depth) = get_cpu_cid_parents().at(_cid);
-                        add_critical_trace<Device::CPU, Phase::END>(
-                            threading::get_id(), _cid, 0, _parent_cid, _ts, _ts,
-                            critical_trace::add_hash_id(name), _depth);
-                    }
+                    uint64_t _parent_cid          = 0;
+                    uint16_t _depth               = 0;
+                    auto     _ts                  = comp::wall_clock::record();
+                    std::tie(_parent_cid, _depth) = get_cpu_cid_parents().at(_cid);
+                    add_critical_trace<Device::CPU, Phase::END>(
+                        threading::get_id(), _cid, 0, _parent_cid, _ts, _ts,
+                        critical_trace::add_hash_id(name), _depth);
                 }
             }
         }
-        else
-        {
-            OMNITRACE_DEBUG("[%s] %s :: not active\n", __FUNCTION__, name);
-        }
+    }
+    else
+    {
+        OMNITRACE_DEBUG("[%s] %s :: not active\n", __FUNCTION__, name);
+    }
+}
+
+extern "C" void
+omnitrace_trace_init(const char* _info, bool _b, const char* _extra)
+{
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(), "[%s] %s | %s | %s\n",
+                                      __FUNCTION__, _info, (_b) ? "y" : "n", _extra);
+    auto& _gotcha_bundle = get_gotcha_bundle();
+    (void) _gotcha_bundle;
+}
+
+extern "C" void
+omnitrace_trace_finalize(void)
+{
+    // return if not active
+    if(get_state() != State::Active) return;
+
+    OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
+
+    if(dmp::rank() == 0) puts("");
+
+    get_state() = State::Finalized;
+
+    if(get_use_sampling())
+    {
+        OMNITRACE_DEBUG("[%s] Shutting down sampling...\n", __FUNCTION__);
+        pthread_gotcha::enable_sampling_on_child_threads() = false;
+        sampling::shutdown();
+        sampling::block_signals();
     }
 
-    void omnitrace_trace_init(const char* _info, bool _b, const char* _extra)
+    OMNITRACE_DEBUG("[%s] Stopping gotcha bundle...\n", __FUNCTION__);
+
+    // stop the gotcha bundle
+    if(get_gotcha_bundle())
     {
-        OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(), "[%s] %s | %s | %s\n",
-                                          __FUNCTION__, _info, (_b) ? "y" : "n", _extra);
-        omnitrace_init_tooling();
+        get_gotcha_bundle()->stop();
+        get_gotcha_bundle().reset();
     }
-
-    void omnitrace_trace_finalize(void)
-    {
-        // return if not active
-        if(get_state() != State::Active) return;
-
-        OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
-
-        if(get_use_sampling())
-        {
-            OMNITRACE_DEBUG("[%s] Shutting down sampling...\n", __FUNCTION__);
-            pthread_gotcha::enable_sampling_on_child_threads() = false;
-            sampling::shutdown();
-            sampling::block_signals();
-        }
-
-        int _threadpool_verbose = (get_debug()) ? 4 : -1;
-        tasking::get_roctracer_thread_pool().set_verbose(_threadpool_verbose);
-        tasking::get_critical_trace_thread_pool().set_verbose(_threadpool_verbose);
-
-        if(dmp::rank() == 0) puts("");
-
-        get_state() = State::Finalized;
 
 #if defined(OMNITRACE_USE_ROCTRACER)
-        OMNITRACE_DEBUG("[%s] Shutting down roctracer...\n", __FUNCTION__);
-        // ensure that threads running roctracer callbacks shutdown
-        if(get_use_roctracer()) comp::roctracer::tear_down();
+    OMNITRACE_DEBUG("[%s] Shutting down roctracer...\n", __FUNCTION__);
+    // ensure that threads running roctracer callbacks shutdown
+    if(get_use_roctracer()) comp::roctracer::tear_down();
 #endif
 
-        // join extra thread(s) used by roctracer
-        OMNITRACE_DEBUG("[%s] waiting for all roctracer tasks to complete...\n",
-                        __FUNCTION__);
-        tasking::get_roctracer_task_group().join();
+    OMNITRACE_DEBUG("[%s] Stopping main bundle...\n", __FUNCTION__);
+    // stop the main bundle and report the high-level metrics
+    if(get_main_bundle())
+    {
+        get_main_bundle()->stop();
+        std::string _msg = JOIN("", *get_main_bundle());
+        auto        _pos = _msg.find(">>>  ");
+        if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
+        OMNITRACE_PRINT("%s\n", _msg.c_str());
+        get_main_bundle().reset();
+    }
 
-        OMNITRACE_DEBUG("[%s] Stopping main bundle...\n", __FUNCTION__);
-        // stop the main bundle and report the high-level metrics
-        if(get_main_bundle())
+    int _threadpool_verbose = (get_debug()) ? 4 : -1;
+    tasking::get_roctracer_thread_pool().set_verbose(_threadpool_verbose);
+    tasking::get_critical_trace_thread_pool().set_verbose(_threadpool_verbose);
+
+    // join extra thread(s) used by roctracer
+    OMNITRACE_DEBUG("[%s] waiting for all roctracer tasks to complete...\n",
+                    __FUNCTION__);
+    tasking::get_roctracer_task_group().join();
+
+    // print out thread-data if they are not still running
+    // if they are still running (e.g. thread-pool still alive), the
+    // thread-specific data will be wrong if try to stop them from
+    // the main thread.
+    OMNITRACE_DEBUG("[%s] Destroying thread bundle data...\n", __FUNCTION__);
+    for(auto& itr : omnitrace_thread_data<omnitrace_thread_bundle_t>::instances())
+    {
+        if(itr && itr->get<comp::wall_clock>() &&
+           !itr->get<comp::wall_clock>()->get_is_running())
         {
-            get_main_bundle()->stop();
-            std::string _msg = JOIN("", *get_main_bundle());
+            std::string _msg = JOIN("", *itr);
             auto        _pos = _msg.find(">>>  ");
             if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
             OMNITRACE_PRINT("%s\n", _msg.c_str());
-            get_main_bundle().reset();
         }
+    }
 
-        // print out thread-data if they are not still running
-        // if they are still running (e.g. thread-pool still alive), the
-        // thread-specific data will be wrong if try to stop them from
-        // the main thread.
-        OMNITRACE_DEBUG("[%s] Destroying thread bundle data...\n", __FUNCTION__);
-        for(auto& itr : omnitrace_thread_data<omnitrace_thread_bundle_t>::instances())
+    // ensure that all the MT instances are flushed
+    OMNITRACE_DEBUG("[%s] Stopping and destroying instrumentation bundles...\n",
+                    __FUNCTION__);
+    for(auto& itr : instrumentation_bundles::instances())
+    {
+        while(!itr.bundles.empty())
         {
-            if(itr && itr->get<comp::wall_clock>() &&
-               !itr->get<comp::wall_clock>()->get_is_running())
-            {
-                std::string _msg = JOIN("", *itr);
-                auto        _pos = _msg.find(">>>  ");
-                if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-                OMNITRACE_PRINT("%s\n", _msg.c_str());
-            }
+            itr.bundles.back()->stop();
+            itr.bundles.back()->pop();
+            itr.allocator.destroy(itr.bundles.back());
+            itr.allocator.deallocate(itr.bundles.back(), 1);
+            itr.bundles.pop_back();
         }
+    }
 
-        // ensure that all the MT instances are flushed
-        OMNITRACE_DEBUG("[%s] Stopping and destroying instrumentation bundles...\n",
+    // ensure that all the MT instances are flushed
+    if(get_use_sampling())
+    {
+        OMNITRACE_DEBUG("[%s] Post-processing the sampling backtraces...\n",
                         __FUNCTION__);
-        for(auto& itr : instrumentation_bundles::instances())
+        for(size_t i = 0; i < max_supported_threads; ++i)
         {
-            while(!itr.bundles.empty())
-            {
-                itr.bundles.back()->stop();
-                itr.bundles.back()->pop();
-                itr.allocator.destroy(itr.bundles.back());
-                itr.allocator.deallocate(itr.bundles.back(), 1);
-                itr.bundles.pop_back();
-            }
+            sampling::backtrace::post_process(i);
+            sampling::get_sampler(i).reset();
+        }
+    }
+
+    if(get_use_critical_trace())
+    {
+        OMNITRACE_DEBUG("[%s] Generating the critical trace...\n", __FUNCTION__);
+        // increase the thread-pool size
+        tasking::get_critical_trace_thread_pool().initialize_threadpool(
+            get_critical_trace_num_threads());
+
+        for(size_t i = 0; i < max_supported_threads; ++i)
+        {
+            using critical_trace_hash_data =
+                omnitrace_thread_data<critical_trace::hash_ids, critical_trace::id>;
+
+            if(critical_trace_hash_data::instances().at(i))
+                critical_trace::add_hash_id(*critical_trace_hash_data::instances().at(i));
         }
 
-        // ensure that all the MT instances are flushed
-        if(get_use_sampling())
+        for(size_t i = 0; i < max_supported_threads; ++i)
         {
-            OMNITRACE_DEBUG("[%s] Post-processing the sampling backtraces...\n",
-                            __FUNCTION__);
-            for(size_t i = 0; i < max_supported_threads; ++i)
-            {
-                sampling::backtrace::post_process(i);
-                sampling::get_sampler(i).reset();
-            }
+            using critical_trace_chain_data =
+                omnitrace_thread_data<critical_trace::call_chain>;
+
+            if(critical_trace_chain_data::instances().at(i))
+                critical_trace::update(i);  // launch update task
         }
 
-        if(get_use_critical_trace())
-        {
-            OMNITRACE_DEBUG("[%s] Generating the critical trace...\n", __FUNCTION__);
-            // increase the thread-pool size
-            tasking::get_critical_trace_thread_pool().initialize_threadpool(
-                get_critical_trace_num_threads());
-
-            for(size_t i = 0; i < max_supported_threads; ++i)
-            {
-                using critical_trace_hash_data =
-                    omnitrace_thread_data<critical_trace::hash_ids, critical_trace::id>;
-
-                if(critical_trace_hash_data::instances().at(i))
-                    critical_trace::add_hash_id(
-                        *critical_trace_hash_data::instances().at(i));
-            }
-
-            for(size_t i = 0; i < max_supported_threads; ++i)
-            {
-                using critical_trace_chain_data =
-                    omnitrace_thread_data<critical_trace::call_chain>;
-
-                if(critical_trace_chain_data::instances().at(i))
-                    critical_trace::update(i);  // launch update task
-            }
-
-            // make sure outstanding hash tasks completed before compute
-            OMNITRACE_PRINT("[%s] waiting for all critical trace tasks to complete...\n",
-                            __FUNCTION__);
-            tasking::get_critical_trace_task_group().join();
-
-            // launch compute task
-            OMNITRACE_PRINT("[%s] launching critical trace compute task...\n",
-                            __FUNCTION__);
-            critical_trace::compute();
-        }
-
+        // make sure outstanding hash tasks completed before compute
+        OMNITRACE_PRINT("[%s] waiting for all critical trace tasks to complete...\n",
+                        __FUNCTION__);
         tasking::get_critical_trace_task_group().join();
 
-        bool _perfetto_output_error = false;
-        if(get_use_perfetto() && !is_system_backend())
+        // launch compute task
+        OMNITRACE_PRINT("[%s] launching critical trace compute task...\n", __FUNCTION__);
+        critical_trace::compute();
+    }
+
+    tasking::get_critical_trace_task_group().join();
+
+    bool _perfetto_output_error = false;
+    if(get_use_perfetto() && !is_system_backend())
+    {
+        OMNITRACE_DEBUG("[%s] Flushing perfetto...\n", __FUNCTION__);
+        // Make sure the last event is closed for this example.
+        perfetto::TrackEvent::Flush();
+
+        auto& tracing_session = get_trace_session();
+        OMNITRACE_DEBUG("[%s] Stopping the blocking perfetto trace sessions...\n",
+                        __FUNCTION__);
+        tracing_session->StopBlocking();
+
+        OMNITRACE_DEBUG("[%s] Getting the trace data...\n", __FUNCTION__);
+        std::vector<char> trace_data{ tracing_session->ReadTraceBlocking() };
+
+        if(trace_data.empty())
         {
-            OMNITRACE_DEBUG("[%s] Flushing perfetto...\n", __FUNCTION__);
-            // Make sure the last event is closed for this example.
-            perfetto::TrackEvent::Flush();
-
-            auto& tracing_session = get_trace_session();
-            OMNITRACE_DEBUG("[%s] Stopping the blocking perfetto trace sessions...\n",
-                            __FUNCTION__);
-            tracing_session->StopBlocking();
-
-            OMNITRACE_DEBUG("[%s] Getting the trace data...\n", __FUNCTION__);
-            std::vector<char> trace_data{ tracing_session->ReadTraceBlocking() };
-
-            if(trace_data.empty())
-            {
-                fprintf(stderr,
-                        "[%s]> trace data is empty. File '%s' will not be written...\n",
-                        __FUNCTION__, get_perfetto_output_filename().c_str());
-                return;
-            }
-            // Write the trace into a file.
             fprintf(stderr,
-                    "[%s]> Outputting '%s'. Trace data: %lu B (%.2f KB / %.2f MB / %.2f "
-                    "GB)... ",
-                    __FUNCTION__, get_perfetto_output_filename().c_str(),
-                    (unsigned long) trace_data.size(),
-                    static_cast<double>(trace_data.size()) / units::KB,
-                    static_cast<double>(trace_data.size()) / units::MB,
-                    static_cast<double>(trace_data.size()) / units::GB);
-            std::ofstream ofs{};
-            if(!tim::filepath::open(ofs, get_perfetto_output_filename(),
-                                    std::ios::out | std::ios::binary))
-            {
-                fprintf(stderr, "\n[%s]> Error opening '%s'...\n", __FUNCTION__,
-                        get_perfetto_output_filename().c_str());
-                _perfetto_output_error = true;
-            }
-            else
-            {
-                // Write the trace into a file.
-                fprintf(stderr, "Done\n");
-                ofs.write(&trace_data[0], trace_data.size());
-            }
-            ofs.close();
+                    "[%s]> trace data is empty. File '%s' will not be written...\n",
+                    __FUNCTION__, get_perfetto_output_filename().c_str());
+            return;
         }
-
-        // these should be destroyed before timemory is finalized, especially the
-        // roctracer thread-pool
-        OMNITRACE_DEBUG("[%s] Destroing the thread pools...\n", __FUNCTION__);
-        tasking::get_roctracer_thread_pool().destroy_threadpool();
-        tasking::get_critical_trace_thread_pool().destroy_threadpool();
-
-        if(get_use_sampling())
-            static_cast<tim::tsettings<bool>*>(
-                tim::settings::instance()->find("OMNITRACE_DEBUG")->second.get())
-                ->set(false);
-
-        OMNITRACE_DEBUG("[%s] Finalizing timemory...\n", __FUNCTION__);
-        tim::timemory_finalize();
-        OMNITRACE_DEBUG("[%s] Finalizing timemory... Done\n", __FUNCTION__);
-
-        if(_perfetto_output_error)
-            throw std::runtime_error("Unable to create perfetto output file");
-    }
-
-    void omnitrace_trace_set_env(const char* env_name, const char* env_val)
-    {
-        // just search env to avoid initializing the settings
-        OMNITRACE_CONDITIONAL_PRINT(get_debug_env(), "[%s] Setting env: %s=%s\n",
-                                    __FUNCTION__, env_name, env_val);
-
-        tim::set_env(env_name, env_val, 0);
-    }
-
-    void omnitrace_trace_set_mpi(bool use, bool attached)
-    {
-        // just search env to avoid initializing the settings
-        OMNITRACE_CONDITIONAL_PRINT(get_debug_env(), "[%s] use: %s, attached: %s\n",
-                                    __FUNCTION__, (use) ? "y" : "n",
-                                    (attached) ? "y" : "n");
-        if(use && !attached &&
-           (get_state() == State::PreInit || get_state() == State::DelayedInit))
+        // Write the trace into a file.
+        fprintf(stderr,
+                "[%s]> Outputting '%s'. Trace data: %lu B (%.2f KB / %.2f MB / %.2f "
+                "GB)... ",
+                __FUNCTION__, get_perfetto_output_filename().c_str(),
+                (unsigned long) trace_data.size(),
+                static_cast<double>(trace_data.size()) / units::KB,
+                static_cast<double>(trace_data.size()) / units::MB,
+                static_cast<double>(trace_data.size()) / units::GB);
+        std::ofstream ofs{};
+        if(!tim::filepath::open(ofs, get_perfetto_output_filename(),
+                                std::ios::out | std::ios::binary))
         {
-            auto& _main_bundle = get_main_bundle();
-            _main_bundle->start();
-            tim::set_env("OMNITRACE_USE_PID", "ON", 1);
-            get_state() = State::DelayedInit;
+            fprintf(stderr, "\n[%s]> Error opening '%s'...\n", __FUNCTION__,
+                    get_perfetto_output_filename().c_str());
+            _perfetto_output_error = true;
         }
+        else
+        {
+            // Write the trace into a file.
+            fprintf(stderr, "Done\n");
+            ofs.write(&trace_data[0], trace_data.size());
+        }
+        ofs.close();
     }
+
+    // these should be destroyed before timemory is finalized, especially the
+    // roctracer thread-pool
+    OMNITRACE_DEBUG("[%s] Destroying the thread pools...\n", __FUNCTION__);
+    tasking::get_roctracer_thread_pool().destroy_threadpool();
+    tasking::get_critical_trace_thread_pool().destroy_threadpool();
+
+    if(get_use_sampling())
+        static_cast<tim::tsettings<bool>*>(
+            tim::settings::instance()->find("OMNITRACE_DEBUG")->second.get())
+            ->set(false);
+
+    OMNITRACE_DEBUG("[%s] Finalizing timemory...\n", __FUNCTION__);
+    tim::timemory_finalize();
+    OMNITRACE_DEBUG("[%s] Finalizing timemory... Done\n", __FUNCTION__);
+
+    if(_perfetto_output_error)
+        throw std::runtime_error("Unable to create perfetto output file");
 }
 
-namespace omnitrace
+extern "C" void
+omnitrace_trace_set_env(const char* env_name, const char* env_val)
 {
-std::unique_ptr<main_bundle_t>&
-get_main_bundle()
-{
-    static auto _v =
-        (setup_gotchas(), std::make_unique<main_bundle_t>(
-                              "omnitrace", quirk::config<quirk::auto_start>{}));
-    return _v;
+    // just search env to avoid initializing the settings
+    OMNITRACE_CONDITIONAL_PRINT(get_debug_env(), "[%s] Setting env: %s=%s\n",
+                                __FUNCTION__, env_name, env_val);
+
+    tim::set_env(env_name, env_val, 0);
 }
-}  // namespace omnitrace
+
+extern "C" void
+omnitrace_trace_set_mpi(bool use, bool attached)
+{
+    // just search env to avoid initializing the settings
+    OMNITRACE_CONDITIONAL_PRINT(get_debug_env(), "[%s] use: %s, attached: %s\n",
+                                __FUNCTION__, (use) ? "y" : "n", (attached) ? "y" : "n");
+    if(use && !attached &&
+       (get_state() == State::PreInit || get_state() == State::DelayedInit))
+    {
+        tim::set_env("OMNITRACE_USE_PID", "ON", 1);
+        get_state() = State::DelayedInit;
+    }
+}
 
 namespace
 {

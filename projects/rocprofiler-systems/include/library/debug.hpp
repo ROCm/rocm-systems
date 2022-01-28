@@ -37,12 +37,18 @@ bool
 get_debug();
 
 bool
+get_debug_tid();
+
+bool
+get_debug_pid();
+
+bool
 get_critical_trace_debug();
 }  // namespace omnitrace
 
 #if defined(TIMEMORY_USE_MPI)
 #    define OMNITRACE_CONDITIONAL_PRINT(COND, ...)                                       \
-        if(COND)                                                                         \
+        if((COND) && get_debug_tid() && get_debug_pid())                                 \
         {                                                                                \
             fflush(stderr);                                                              \
             tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };              \
@@ -53,7 +59,7 @@ get_critical_trace_debug();
         }
 #else
 #    define OMNITRACE_CONDITIONAL_PRINT(COND, ...)                                       \
-        if(COND)                                                                         \
+        if((COND) && get_debug_tid() && get_debug_pid())                                 \
         {                                                                                \
             fflush(stderr);                                                              \
             tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };              \
@@ -65,7 +71,7 @@ get_critical_trace_debug();
 #endif
 
 #define OMNITRACE_CONDITIONAL_BASIC_PRINT(COND, ...)                                     \
-    if(COND)                                                                             \
+    if((COND) && get_debug_tid() && get_debug_pid())                                     \
     {                                                                                    \
         fflush(stderr);                                                                  \
         tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };                  \

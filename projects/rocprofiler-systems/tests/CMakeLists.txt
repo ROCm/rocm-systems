@@ -223,7 +223,7 @@ omnitrace_add_test(
         --dyninst-options
         DelayedParsing
         TypeChecking
-    RUN_ARGS 20 ${NUM_THREADS}
+    RUN_ARGS 10 ${NUM_THREADS}
     ENVIRONMENT "${_fast_environment}")
 
 omnitrace_add_test(

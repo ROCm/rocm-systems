@@ -34,15 +34,19 @@
 
 #include <timemory/backends/threading.hpp>
 
+#include <string>
 #include <string_view>
+#include <unordered_set>
 
 namespace omnitrace
 {
 // bundle of components around omnitrace_init and omnitrace_finalize
 using main_bundle_t =
     tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::cpu_clock,
-                           comp::cpu_util, comp::roctracer, comp::user_global_bundle,
-                           fork_gotcha_t, mpi_gotcha_t, pthread_gotcha_t>;
+                           comp::cpu_util, comp::roctracer>;
+
+using gotcha_bundle_t =
+    tim::lightweight_tuple<fork_gotcha_t, mpi_gotcha_t, pthread_gotcha_t>;
 
 // bundle of components used in instrumentation
 using instrumentation_bundle_t =
@@ -87,6 +91,12 @@ get_debug_env();
 
 bool
 get_debug();
+
+bool
+get_debug_tid();
+
+bool
+get_debug_pid();
 
 int
 get_verbose_env();
@@ -183,6 +193,9 @@ get_state();
 
 std::unique_ptr<main_bundle_t>&
 get_main_bundle();
+
+std::unique_ptr<gotcha_bundle_t>&
+get_gotcha_bundle();
 
 std::atomic<uint64_t>&
 get_cpu_cid();

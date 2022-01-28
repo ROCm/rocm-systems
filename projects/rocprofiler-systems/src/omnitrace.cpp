@@ -1845,7 +1845,7 @@ main(int argc, char** argv)
                 app_thread->continueExecution();
                 verbprintf(4, "Process is not terminated...\n");
                 bpatch->waitForStatusChange();
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
                 verbprintf(4, "Process status change...\n");
                 if(app_thread->isStopped())
                 {
