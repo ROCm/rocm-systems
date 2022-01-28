@@ -630,7 +630,7 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
     ret = RSMI_STATUS_NOT_SUPPORTED;
   }
   fs.close();
-  
+
   return ret;
 }
 
@@ -742,7 +742,8 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
     return 0;
   }
   // Remove any *trailing* empty (whitespace) lines
-  while (retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
+  while (retVec->size() != 0 &&
+        retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
     retVec->pop_back();
   }
   return 0;

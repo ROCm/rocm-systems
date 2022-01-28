@@ -49,3 +49,8 @@ $BLACKLIST_ALL_ASICS\
 "rsmitstReadWrite.TestFrequenciesReadWrite:"\
 "rsmitstReadWrite.TestPciReadWrite:"\
 "rsmitstReadWrite.TestPowerReadWrite"
+
+# SWDEV-319795
+FILTER[sienna_cichlid]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadWrite.TestPerfLevelReadWrite"
