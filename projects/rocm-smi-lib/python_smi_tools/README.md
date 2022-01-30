@@ -1,4 +1,5 @@
-### ROCm System Management Interface
+## Synopsis
+Radeon Open Compute Platform - System Management Interface - Command Line tool.
 
 This tool acts as a command line interface for manipulating
 and monitoring the amdgpu kernel, and is intended to replace
@@ -7,14 +8,14 @@ It uses Ctypes to call the rocm_smi_lib API.
 Recommended: At least one AMD GPU with ROCm driver installed
 Required: ROCm SMI library installed (librocm_smi64)
 
-#### Installation
+## Installation
 
 Follow installation procedure for rocm_smi_lib.
 Please refer to [https://github.com/RadeonOpenCompute/rocm_smi_lib](https://github.com/RadeonOpenCompute/rocm_smi_lib) for the installation guide.
 LD_LIBRARY_PATH  should be set to the folder containing librocm_smi64.
 
 
-### Version
+## Version
 The SMI will report a "version" which is the version of the kernel installed:
 ```shell
 AMD ROCm System Management Interface v$(uname)
@@ -26,7 +27,7 @@ which will be equivalent to the following bash command:
 $(uname -a) | cut -d ' ' -f 3)
 ```
 
-#### Usage
+## Usage
 
 For detailed and up to date usage information, we recommend consulting the help:
 ```shell
@@ -167,7 +168,7 @@ Output options:
 ```
 
 
-#### Detailed Option Descriptions
+## Detailed Option Descriptions
 
 --setsclk/--setmclk # [# # ...]:
     This allows you to set a mask for the levels. For example, if a GPU has 8 clock levels,
@@ -235,21 +236,34 @@ Output options:
     The Compute Profile accepts 1 or n parameters, either the Profile to select (see --showprofile for a list
     of preset Power Profiles) or a quoted string of values for the CUSTOM profile.
     NOTE: These values can vary based on the ASIC, and may include:
-        SCLK_PROFILE_ENABLE  - Whether or not to apply the 3 following SCLK settings (0=disable,1=enable)
-            NOTE: This is a hidden field. If set to 0, the following 3 values are displayed as '-'
-        SCLK_UP_HYST         - Delay before sclk is increased (in milliseconds)
-        SCLK_DOWN_HYST       - Delay before sclk is decresed (in milliseconds)
-        SCLK_ACTIVE_LEVEL    - Workload required before sclk levels change (in %)
-        MCLK_PROFILE_ENABLE  - Whether or not to apply the 3 following MCLK settings (0=disable,1=enable)
-            NOTE: This is a hidden field. If set to 0, the following 3 values are displayed as '-'
-        MCLK_UP_HYST         - Delay before mclk is increased (in milliseconds)
-        MCLK_DOWN_HYST       - Delay before mclk is decresed (in milliseconds)
-        MCLK_ACTIVE_LEVEL    - Workload required before mclk levels change (in %)
 
-        BUSY_SET_POINT       - Threshold for raw activity level before levels change
-        FPS                  - Frames Per Second
-        USE_RLC_BUSY         - When set to 1, DPM is switched up as long as RLC busy message is received
-        MIN_ACTIVE_LEVEL     - Workload required before levels change (in %)
+
+      SCLK_PROFILE_ENABLE - Whether or not to apply the 3 following SCLK settings (0=disable,1=enable)
+          NOTE: This is a hidden field. If set to 0, the following 3 values are displayed as '-’
+
+| Setting           | Description                                        |
+|-------------------|----------------------------------------------------|
+| SCLK_UP_HYST      | Delay before sclk is increased (in milliseconds)   |
+| SCLK_DOWN_HYST    | Delay before sclk is decresed (in milliseconds)    |
+| SCLK_ACTIVE_LEVEL | Workload required before sclk levels change (in %) |
+
+      MCLK_PROFILE_ENABLE  - Whether or not to apply the 3 following MCLK settings (0=disable,1=enable)
+          NOTE: This is a hidden field. If set to 0, the following 3 values are displayed as '-'
+
+| Setting           | Description                                        |
+|-------------------|----------------------------------------------------|
+| MCLK_UP_HYST      | Delay before mclk is increased (in milliseconds)   |
+| MCLK_DOWN_HYST    | Delay before mclk is decresed (in milliseconds)    |
+| MCLK_ACTIVE_LEVEL | Workload required before mclk levels change (in %) |
+
+      Other settings:
+
+| Setting          | Description                                                               |
+|------------------|---------------------------------------------------------------------------|
+| BUSY_SET_POINT   | Threshold for raw activity level before levels change                     |
+| FPS              | Frames Per Second                                                         |
+| USE_RLC_BUSY     | When set to 1, DPM is switched up as long as RLC busy message is received |
+| MIN_ACTIVE_LEVEL | Workload required before levels change (in %)                             |
 
     NOTES:
         When a compute queue is detected, the COMPUTE Power Profile values will be automatically
@@ -301,16 +315,19 @@ This shows the RAS information for a given block. This includes enablement of th
 ue - Uncorrectable errors
 ce - Correctable errors
 
-### Clock Type Descriptions
-DCEFCLK - DCE (Display)
-FCLK    - Data fabric (VG20 and later) - Data flow from XGMI, Memory, PCIe
-SCLK    - GFXCLK (Graphics core)
-          Note - SOCCLK split from SCLK as of Vega10. Pre-Vega10 they were both controlled by SCLK
-MCLK    - GPU Memory (VRAM)
-PCLK    - PCIe bus
-          Note - This gives 2 speeds, PCIe Gen1 x1 and the highest available based on the hardware
-SOCCLK  - System clock (VG10 and later) - Data Fabric (DF), MM HUB, AT HUB, SYSTEM HUB, OSS, DFD
-          Note - DF split from SOCCLK as of Vega20. Pre-Vega20 they were both controlled by SOCCLK
+## Clock Type Descriptions
+| Clock type | Description |
+| --- | --- |
+| DCEFCLK    | DCE (Display) |
+| FCLK       | Data fabric (VG20 and later) - Data flow from XGMI, Memory, PCIe |
+| SCLK       | GFXCLK (Graphics core) |
+|            | **Note - SOCCLK split from SCLK as of Vega10. Pre-Vega10 they were both controlled by SCLK** |
+| MCLK       | GPU Memory (VRAM) |
+| PCLK       | PCIe bus |
+|            | **Note - This gives 2 speeds, PCIe Gen1 x1 and the highest available based on the hardware** |
+| SOCCLK     | System clock (VG10 and later) - Data Fabric (DF), MM HUB, AT HUB, SYSTEM HUB, OSS, DFD |
+|            | **Note - DF split from SOCCLK as of Vega20. Pre-Vega20 they were both controlled by SOCCLK** |
+
 
 --gpureset:
 This flag will attempt to reset the GPU for a specified device. This will invoke the GPU reset through
@@ -350,7 +367,7 @@ is calculated in a generic sense.
 as well as the total available for those partitions. The percentage shown there indicates the
 amount of used memory in terms of current allocations
 
-### OverDrive settings ####
+## OverDrive settings
 
 Enabling OverDrive requires both a card that support OverDrive and a driver parameter that enables its use.
 Because OverDrive features can damage your card, most workstation and server GPUs cannot use OverDrive.
@@ -381,7 +398,7 @@ These are the flags that require OverDrive functionality to be enabled for the f
 --setmrange
 
 
-#### Disclaimer
+## Disclaimer
 
 The information contained herein is for informational purposes only, and is subject to change without notice. While every precaution has been taken in the preparation of this document, it may contain technical inaccuracies, omissions and typographical errors, and AMD is under no obligation to update or otherwise correct this information. Advanced Micro Devices, Inc. makes no representations or warranties with respect to the accuracy or completeness of the contents of this document, and assumes no liability of any kind, including the implied warranties of noninfringement, merchantability or fitness for particular purposes, with respect to the operation or use of AMD hardware, software or other products described herein.
 
