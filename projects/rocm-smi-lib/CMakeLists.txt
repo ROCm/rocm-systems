@@ -75,10 +75,13 @@ set(CMAKE_CXX_FLAGS
 set(CMAKE_CXX_FLAGS
  "${CMAKE_CXX_FLAGS}  -Woverloaded-virtual -Wreorder ")
 
+# Clang does not set the build-id
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--build-id=sha1")
+endif()
 
 ## Address Sanitize Flag
 if (${ADDRESS_SANITIZER})
-    set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--build-id")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -g")
     set(CMAKE_EXE_LINKER_FLAGS -fsanitize=address)
 
