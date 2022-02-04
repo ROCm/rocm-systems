@@ -212,6 +212,13 @@ if(BUILD_STANDALONE)
                 USE_SOURCE_PERMISSIONS
                 DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc
                 COMPONENT ${SERVER_COMPONENT})
+  # In SLES, The libprotobuf is created under lib64 folder, install it as well
+  if(EXISTS ${GRPC_ROOT}/lib64)
+      install(DIRECTORY ${GRPC_ROOT}/lib64/
+                USE_SOURCE_PERMISSIONS
+                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc/lib
+                COMPONENT ${SERVER_COMPONENT})
+  endif() 
 # Also include dev setup for people do not want to build grpc
   install(DIRECTORY ${GRPC_ROOT}/bin
                 USE_SOURCE_PERMISSIONS
