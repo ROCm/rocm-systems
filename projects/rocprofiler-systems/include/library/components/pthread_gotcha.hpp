@@ -56,6 +56,7 @@ struct pthread_gotcha : tim::component::base<pthread_gotcha, void>
 
     // generate the gotcha wrappers
     static void configure();
+    static void shutdown();
 
     // threads can set this to avoid starting sampling on child threads
     static bool& enable_sampling_on_child_threads();

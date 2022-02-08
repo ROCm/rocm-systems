@@ -21,8 +21,10 @@
 // SOFTWARE.
 
 #include "library/components/fwd.hpp"
+#include "library/components/rocm_smi.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
+#include "library/perfetto.hpp"
 #include "library/ptl.hpp"
 #include "library/sampling.hpp"
 
@@ -44,6 +46,7 @@
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/storage.hpp>
+#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
@@ -99,10 +102,10 @@ namespace omnitrace
 namespace component
 {
 using hw_counters               = typename backtrace::hw_counters;
-using signal_type_instances     = omnitrace_thread_data<std::set<int>, api::sampling>;
-using backtrace_init_instances  = omnitrace_thread_data<backtrace, api::sampling>;
-using sampler_running_instances = omnitrace_thread_data<bool, api::sampling>;
-using papi_vector_instances     = omnitrace_thread_data<hw_counters, api::sampling>;
+using signal_type_instances     = thread_data<std::set<int>, api::sampling>;
+using backtrace_init_instances  = thread_data<backtrace, api::sampling>;
+using sampler_running_instances = thread_data<bool, api::sampling>;
+using papi_vector_instances     = thread_data<hw_counters, api::sampling>;
 
 namespace
 {
@@ -154,9 +157,31 @@ backtrace::preinit()
     sampling_cpu_clock::label()       = "sampling_cpu_clock";
     sampling_cpu_clock::description() = "CPU clock time (via sampling)";
 
-    sampling_percent::label()        = "sampling_percent";
-    sampling_percent::description()  = "Percentage of samples";
-    sampling_percent::display_unit() = "%";
+    sampling_percent::label()       = "sampling_percent";
+    sampling_percent::description() = "Percentage of samples";
+
+    sampling_gpu_busy::label()       = "sampling_gpu_busy_percent";
+    sampling_gpu_busy::description() = "Utilization of GPU(s)";
+    sampling_gpu_busy::set_precision(0);
+    sampling_gpu_busy::set_format_flags(sampling_gpu_busy::get_format_flags() &
+                                        std::ios_base::showpoint);
+
+    sampling_gpu_memory::label()       = "sampling_gpu_memory_usage";
+    sampling_gpu_memory::description() = "Memory usage of GPU(s)";
+
+    sampling_gpu_power::label()        = "sampling_gpu_power";
+    sampling_gpu_power::description()  = "Power usage of GPU(s)";
+    sampling_gpu_power::unit()         = units::watt;
+    sampling_gpu_power::display_unit() = "watts";
+    sampling_gpu_power::set_precision(2);
+    sampling_gpu_power::set_format_flags(sampling_gpu_power::get_format_flags());
+
+    sampling_gpu_temp::label()        = "sampling_gpu_temperature";
+    sampling_gpu_temp::description()  = "Temperature of GPU(s)";
+    sampling_gpu_temp::unit()         = 1;
+    sampling_gpu_temp::display_unit() = "degC";
+    sampling_gpu_temp::set_precision(1);
+    sampling_gpu_temp::set_format_flags(sampling_gpu_temp::get_format_flags());
 }
 
 std::string
@@ -236,6 +261,7 @@ backtrace::sample(int signum)
     m_tid        = threading::get_id();
     m_ts         = clock_type::now();
     m_thr_cpu_ts = tim::get_clock_thread_now<int64_t, std::nano>();
+    m_mem_peak   = tim::get_peak_rss(RUSAGE_THREAD);
     m_data       = tim::get_unw_backtrace<128, 4, false>();
     auto* itr    = m_data.begin();
     for(; itr != m_data.end(); ++itr, ++m_size)
@@ -295,11 +321,12 @@ backtrace::configure(bool _setup, int64_t _tid)
         sampling::block_signals(*_signal_types);
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
+            perfetto_counter_track<hw_counters>::init();
             OMNITRACE_DEBUG("HW COUNTER: starting...\n");
             if(get_papi_vector(_tid)) get_papi_vector(_tid)->start();
         }
 
-        auto _alrm_freq = 1.0 / std::min<double>(get_sampling_freq(), 10.0);
+        auto _alrm_freq = 1.0 / std::min<double>(get_sampling_freq(), 5.0);
         auto _prof_freq = 1.0 / get_sampling_freq();
         auto _delay     = std::max<double>(1.0e-3, get_sampling_delay());
 
@@ -312,10 +339,14 @@ backtrace::configure(bool _setup, int64_t _tid)
         _sampler->set_delay(_delay);
         _sampler->set_frequency(_prof_freq, { SIGPROF });
         _sampler->set_frequency(_alrm_freq, { SIGALRM });
+
         static_assert(tim::trait::buffer_size<sampling::sampler_t>::value > 0,
                       "Error! Zero buffer size");
-        if(_sampler->get_buffer_size() == 0)
-            throw std::runtime_error("dynamic sampler has a zero buffer size");
+
+        OMNITRACE_CONDITIONAL_THROW(
+            _sampler->get_buffer_size() <= 0,
+            "dynamic sampler requires a positive buffer size: %zu",
+            _sampler->get_buffer_size());
 
         OMNITRACE_DEBUG("Sampler for thread %lu will be triggered %5.1fx per second "
                         "(every %5.2e seconds)...\n",
@@ -365,6 +396,8 @@ backtrace::get_last_hwcounters()
 void
 backtrace::post_process(int64_t _tid)
 {
+    namespace quirk = tim::quirk;
+
     configure(false, _tid);
 
     auto& _sampler = sampling::sampler_instances::instances().at(_tid);
@@ -392,9 +425,12 @@ backtrace::post_process(int64_t _tid)
         // debugging feature
         static bool _keep_internal =
             tim::get_env<bool>("OMNITRACE_SAMPLING_KEEP_INTERNAL", get_debug());
-        if(_keep_internal) return 1;
         const auto _npos = std::string::npos;
+        if(_keep_internal) return 1;
         if(_lbl.find("omnitrace_init_tooling") != _npos) return -1;
+        if(_lbl.find("omnitrace_push_trace") != _npos) return -1;
+        if(_lbl.find("omnitrace_pop_trace") != _npos) return -1;
+        if(_lbl.find("amd_comgr_") == 0) return -1;
         if(_check_internal)
         {
             if(std::regex_search(
@@ -423,11 +459,141 @@ backtrace::post_process(int64_t _tid)
         return _lbl.replace(_pos, _dyninst.length(), "");
     };
 
-    auto _data = _sampler->get_allocator().get_data();
+    using common_type_t = typename hw_counters::common_type;
+    auto _hw_cnt_labels = (get_papi_vector(_tid))
+                              ? comp::papi_common::get_events<common_type_t>()
+                              : std::vector<int>{};
+
+    auto _process_perfetto_counters = [&](const std::vector<sampling::bundle_t*>& _data) {
+        if(!perfetto_counter_track<comp::peak_rss>::exists(_tid))
+        {
+            auto _thrname = TIMEMORY_JOIN("", "[Thread ", _tid, "] ");
+            auto addendum = [&](const std::string& _v) { return _thrname + _v + " (S)"; };
+            perfetto_counter_track<comp::peak_rss>::emplace(
+                _tid, addendum("Peak Memory Usage"), "MB");
+        }
+
+        if(!perfetto_counter_track<hw_counters>::exists(_tid) &&
+           tim::trait::runtime_enabled<hw_counters>::get())
+        {
+            auto _thrname = TIMEMORY_JOIN("", "[Thread ", _tid, "] ");
+            auto addendum = [&](const std::string& _v) { return _thrname + _v + " (S)"; };
+            for(auto& itr : _hw_cnt_labels)
+            {
+                perfetto_counter_track<hw_counters>::emplace(
+                    _tid, addendum(tim::papi::get_event_info(itr).short_descr), "");
+            }
+        }
+
+        for(const auto& ditr : _data)
+        {
+            const auto* _bt = ditr->get<backtrace>();
+            if(_bt->m_tid != _tid) continue;
+
+            auto _ts = static_cast<uint64_t>(_bt->m_ts.time_since_epoch().count());
+
+            TRACE_COUNTER("sampling", perfetto_counter_track<comp::peak_rss>::at(_tid, 0),
+                          _ts, _bt->m_mem_peak / units::megabyte);
+
+            if(tim::trait::runtime_enabled<hw_counters>::get())
+            {
+                for(size_t i = 0; i < perfetto_counter_track<hw_counters>::size(_tid);
+                    ++i)
+                {
+                    if(i < _bt->m_hw_counter.size())
+                    {
+                        TRACE_COUNTER("sampling",
+                                      perfetto_counter_track<hw_counters>::at(_tid, i),
+                                      _ts, _bt->m_hw_counter.at(i));
+                    }
+                }
+            }
+        }
+    };
+
+    auto _process_perfetto = [&](const std::vector<sampling::bundle_t*>& _data,
+                                 bool                                    _rename) {
+        if(_rename)
+            threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid, "(S)").c_str());
+        time_point_type _last_wall_ts = _init->get_timestamp();
+
+        for(const auto& ditr : _data)
+        {
+            const auto* _bt = ditr->get<backtrace>();
+            if(_bt->m_tid != _tid) continue;
+
+            static std::set<std::string> _static_strings{};
+            std::string                  _last = {};
+            for(const auto& itr : _bt->get())
+            {
+                auto _name = tim::demangle(_patch_label(itr));
+                auto _use =
+                    _use_label(_name, !_last.empty() &&
+                                          (_last == "start_thread" || _last == "clone"));
+                if(_use == -1) break;
+                if(_use == 0) continue;
+                auto sitr = _static_strings.emplace(_name);
+                _last     = *sitr.first;
+                auto _ts  = static_cast<uint64_t>(_bt->m_ts.time_since_epoch().count());
+
+                TRACE_EVENT_BEGIN(
+                    "sampling", perfetto::StaticString{ sitr.first->c_str() },
+                    static_cast<uint64_t>(_last_wall_ts.time_since_epoch().count()));
+                TRACE_EVENT_END("sampling", _ts);
+            }
+            _last_wall_ts = _bt->m_ts;
+        }
+    };
+
+    auto _raw_data = _sampler->get_allocator().get_data();
     // single sample that is useless (backtrace to unblocking signals)
-    if(_data.size() == 1 && _data.front().size() <= 1) _data.clear();
-    OMNITRACE_DEBUG("Post-processing %zu sampling entries for thread %lu...\n",
-                    _data.size(), _tid);
+    if(_raw_data.size() == 1 && _raw_data.front().size() <= 1) _raw_data.clear();
+
+    std::vector<sampling::bundle_t*> _data{};
+    for(auto& ditr : _raw_data)
+    {
+        _data.reserve(_data.size() + ditr.size());
+        for(auto& ritr : ditr)
+        {
+            auto* _bt = ritr.get<backtrace>();
+            if(!_bt)
+            {
+                OMNITRACE_PRINT(
+                    "Warning! Nullptr to backtrace instance for thread %lu...\n", _tid);
+                continue;
+            }
+            if(_bt->empty()) continue;
+            _data.emplace_back(&ritr);
+        }
+    }
+
+    if(_data.empty()) return;
+
+    OMNITRACE_CONDITIONAL_PRINT(
+        get_verbose() >= 0 || get_debug(),
+        "Post-processing %zu sampling entries for thread %lu...\n", _data.size(), _tid);
+
+    std::sort(_data.begin(), _data.end(),
+              [](const sampling::bundle_t* _lhs, const sampling::bundle_t* _rhs) {
+                  return _lhs->get<backtrace>()->m_ts < _rhs->get<backtrace>()->m_ts;
+              });
+
+    if(get_use_perfetto())
+    {
+        _process_perfetto_counters(_data);
+
+        if(_tid == 0 && get_mode() == Mode::Sampling)
+            _process_perfetto(_data, false);
+        else
+        {
+            auto _v = pthread_gotcha::enable_sampling_on_child_threads();
+            pthread_gotcha::enable_sampling_on_child_threads() = false;
+            std::thread{ _process_perfetto, _data, true }.join();
+            pthread_gotcha::enable_sampling_on_child_threads() = _v;
+        }
+    }
+
+    if(!get_use_timemory()) return;
 
     std::map<int64_t, std::map<int64_t, int64_t>> _depth_sum = {};
     auto                                          _scope     = tim::scope::config{};
@@ -441,125 +607,101 @@ backtrace::post_process(int64_t _tid)
         using bundle_t = tim::lightweight_tuple<comp::trip_count, sampling_wall_clock,
                                                 sampling_cpu_clock, hw_counters>;
 
-        for(auto& ritr : ditr)
+        auto* _bt = ditr->get<backtrace>();
+
+        double _elapsed_wc = (_bt->m_ts - _last_wall_ts).count();
+        double _elapsed_cc = (_bt->m_thr_cpu_ts - _last_cpu_ts);
+
+        std::vector<bundle_t> _tc{};
+        _tc.reserve(_bt->size());
+
+        // generate the instances of the tuple of components and start them
+        for(const auto& itr : _bt->get())
         {
-            auto* _bt = ritr.get<backtrace>();
-            if(!_bt)
-            {
-                OMNITRACE_PRINT(
-                    "Warning! Nullptr to backtrace instance for thread %lu...\n", _tid);
-                continue;
-            }
-
-            if(_bt->empty()) continue;
-
-            double _elapsed_wc = (_bt->m_ts - _last_wall_ts).count();
-            double _elapsed_cc = (_bt->m_thr_cpu_ts - _last_cpu_ts);
-
-            std::vector<bundle_t> _tc{};
-            _tc.reserve(_bt->size());
-
-            // generate the instances of the tuple of components and start them
-            for(const auto& itr : _bt->get())
-            {
-                auto _lbl = _patch_label(itr);
-                auto _use = _use_label(_lbl, !_tc.empty() &&
-                                                 (_tc.back().key() == "start_thread" ||
+            auto _lbl = _patch_label(itr);
+            auto _use =
+                _use_label(_lbl, !_tc.empty() && (_tc.back().key() == "start_thread" ||
                                                   _tc.back().key() == "clone"));
-                if(_use == -1) break;
-                if(_use == 0) continue;
-                _tc.emplace_back(tim::string_view_t{ _lbl }, _scope);
-                _tc.back().push(_bt->m_tid);
-                _tc.back().start();
-            }
-
-            // stop the instances and update the values as needed
-            for(size_t i = 0; i < _tc.size(); ++i)
-            {
-                auto&  itr    = _tc.at(_tc.size() - i - 1);
-                size_t _depth = 0;
-                _depth_sum[_bt->m_tid][_depth] += 1;
-                itr.stop();
-                if constexpr(tim::trait::is_available<sampling_wall_clock>::value)
-                {
-                    auto* _sc = itr.get<sampling_wall_clock>();
-                    if(_sc)
-                    {
-                        auto _value = _elapsed_wc / sampling_wall_clock::get_unit();
-                        _sc->set_value(_value);
-                        _sc->set_accum(_value);
-                    }
-                }
-                if constexpr(tim::trait::is_available<sampling_cpu_clock>::value)
-                {
-                    auto* _cc = itr.get<sampling_cpu_clock>();
-                    if(_cc)
-                    {
-                        _cc->set_value(_elapsed_cc / sampling_cpu_clock::get_unit());
-                        _cc->set_accum(_elapsed_cc / sampling_cpu_clock::get_unit());
-                    }
-                }
-                if constexpr(tim::trait::is_available<hw_counters>::value)
-                {
-                    auto* _hw_counter = itr.get<hw_counters>();
-                    if(_hw_counter)
-                    {
-                        _hw_counter->set_value(_bt->m_hw_counter);
-                        _hw_counter->set_accum(_bt->m_hw_counter);
-                    }
-                }
-                itr.pop();
-            }
-            _last_wall_ts = _bt->m_ts;
-            _last_cpu_ts  = _bt->m_thr_cpu_ts;
+            if(_use == -1) break;
+            if(_use == 0) continue;
+            _tc.emplace_back(tim::string_view_t{ _lbl }, _scope);
+            _tc.back().push(_bt->m_tid);
+            _tc.back().start();
         }
-    }
 
-    namespace quirk = tim::quirk;
+        // stop the instances and update the values as needed
+        for(size_t i = 0; i < _tc.size(); ++i)
+        {
+            auto&  itr    = _tc.at(_tc.size() - i - 1);
+            size_t _depth = 0;
+            _depth_sum[_bt->m_tid][_depth] += 1;
+            itr.stop();
+            if constexpr(tim::trait::is_available<sampling_wall_clock>::value)
+            {
+                auto* _sc = itr.get<sampling_wall_clock>();
+                if(_sc)
+                {
+                    auto _value = _elapsed_wc / sampling_wall_clock::get_unit();
+                    _sc->set_value(_value);
+                    _sc->set_accum(_value);
+                }
+            }
+            if constexpr(tim::trait::is_available<sampling_cpu_clock>::value)
+            {
+                auto* _cc = itr.get<sampling_cpu_clock>();
+                if(_cc)
+                {
+                    _cc->set_value(_elapsed_cc / sampling_cpu_clock::get_unit());
+                    _cc->set_accum(_elapsed_cc / sampling_cpu_clock::get_unit());
+                }
+            }
+            if constexpr(tim::trait::is_available<hw_counters>::value)
+            {
+                auto* _hw_counter = itr.get<hw_counters>();
+                if(_hw_counter)
+                {
+                    _hw_counter->set_value(_bt->m_hw_counter);
+                    _hw_counter->set_accum(_bt->m_hw_counter);
+                }
+            }
+            itr.pop();
+        }
+        _last_wall_ts = _bt->m_ts;
+        _last_cpu_ts  = _bt->m_thr_cpu_ts;
+    }
 
     for(auto&& ditr : _data)
     {
         using bundle_t =
             tim::lightweight_tuple<sampling_percent, quirk::config<quirk::tree_scope>>;
 
-        for(auto& ritr : ditr)
+        auto* _bt = ditr->get<backtrace>();
+
+        std::vector<bundle_t> _tc{};
+        _tc.reserve(_bt->size());
+
+        // generate the instances of the tuple of components and start them
+        for(const auto& itr : _bt->get())
         {
-            auto* _bt = ritr.get<backtrace>();
-            if(!_bt)
-            {
-                OMNITRACE_PRINT(
-                    "Warning! Nullptr to backtrace instance for thread %lu...\n", _tid);
-                continue;
-            }
+            auto _lbl = _patch_label(itr);
+            auto _use =
+                _use_label(_lbl, !_tc.empty() && _tc.back().key() == "start_thread");
+            if(_use == -1) break;
+            if(_use == 0) continue;
+            _tc.emplace_back(tim::string_view_t{ _lbl });
+            _tc.back().push(_bt->m_tid);
+            _tc.back().start();
+        }
 
-            if(_bt->empty()) continue;
-
-            std::vector<bundle_t> _tc{};
-            _tc.reserve(_bt->size());
-
-            // generate the instances of the tuple of components and start them
-            for(const auto& itr : _bt->get())
-            {
-                auto _lbl = _patch_label(itr);
-                auto _use =
-                    _use_label(_lbl, !_tc.empty() && _tc.back().key() == "start_thread");
-                if(_use == -1) break;
-                if(_use == 0) continue;
-                _tc.emplace_back(tim::string_view_t{ _lbl });
-                _tc.back().push(_bt->m_tid);
-                _tc.back().start();
-            }
-
-            // stop the instances and update the values as needed
-            for(size_t i = 0; i < _tc.size(); ++i)
-            {
-                auto&  itr    = _tc.at(_tc.size() - i - 1);
-                size_t _depth = 0;
-                double _value = (1.0 / _depth_sum[_bt->m_tid][_depth]) * 100.0;
-                itr.store(std::plus<double>{}, _value);
-                itr.stop();
-                itr.pop();
-            }
+        // stop the instances and update the values as needed
+        for(size_t i = 0; i < _tc.size(); ++i)
+        {
+            auto&  itr    = _tc.at(_tc.size() - i - 1);
+            size_t _depth = 0;
+            double _value = (1.0 / _depth_sum[_bt->m_tid][_depth]) * 100.0;
+            itr.store(std::plus<double>{}, _value);
+            itr.stop();
+            itr.pop();
         }
     }
 }

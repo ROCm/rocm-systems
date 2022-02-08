@@ -76,10 +76,10 @@ namespace omnitrace
 namespace sampling
 {
 using hw_counters               = typename component::backtrace::hw_counters;
-using signal_type_instances     = omnitrace_thread_data<std::set<int>, api::sampling>;
-using backtrace_init_instances  = omnitrace_thread_data<backtrace, api::sampling>;
-using sampler_running_instances = omnitrace_thread_data<bool, api::sampling>;
-using papi_vector_instances     = omnitrace_thread_data<hw_counters, api::sampling>;
+using signal_type_instances     = thread_data<std::set<int>, api::sampling>;
+using backtrace_init_instances  = thread_data<backtrace, api::sampling>;
+using sampler_running_instances = thread_data<bool, api::sampling>;
+using papi_vector_instances     = thread_data<hw_counters, api::sampling>;
 
 namespace
 {
@@ -134,6 +134,7 @@ get_signal_types(int64_t _tid)
 std::set<int>
 setup()
 {
+    if(!get_use_sampling()) return std::set<int>{};
     return backtrace::configure(true);
 }
 

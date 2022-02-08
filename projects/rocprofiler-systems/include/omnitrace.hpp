@@ -160,6 +160,10 @@ static regexvec_t      file_exclude                  = {};
     if(verbose_level >= LEVEL) fprintf(stdout, "[omnitrace][exe] " __VA_ARGS__);         \
     fflush(stdout);
 
+#define verbprintf_bare(LEVEL, ...)                                                      \
+    if(verbose_level >= LEVEL) fprintf(stdout, __VA_ARGS__);                             \
+    fflush(stdout);
+
 //======================================================================================//
 
 template <typename... T>
@@ -477,7 +481,7 @@ dump_info(const string_t& _oname, const fmodset_t& _data, int _level, bool _fail
     {
         verbprintf(_level, "Dumping '%s'... ", _oname.c_str());
         dump_info(ofs, _data);
-        verbprintf(_level, "Done\n");
+        verbprintf_bare(_level, "Done\n");
     }
     else
     {
@@ -597,7 +601,7 @@ omnitrace_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
                     _name.c_str());
             throw std::runtime_error("Failed to open binary");
         }
-        verbprintf(1, "Done\n");
+        verbprintf_bare(1, "Done\n");
     }
     else if(_pid >= 0)
     {
@@ -611,7 +615,7 @@ omnitrace_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
                     (int) _pid);
             throw std::runtime_error("Failed to attach to process");
         }
-        verbprintf(1, "Done\n");
+        verbprintf_bare(1, "Done\n");
     }
     else
     {
@@ -630,7 +634,7 @@ omnitrace_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
                     ss.str().c_str());
             throw std::runtime_error("Failed to create process");
         }
-        verbprintf(1, "Done\n");
+        verbprintf_bare(1, "Done\n");
     }
 
     return mutatee;

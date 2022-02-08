@@ -23,52 +23,55 @@
 #include "omnitrace.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <thread>
+#include <utility>
+#include <vector>
 
 bool debug_print   = false;
 int  verbose_level = tim::get_env<int>("TIMEMORY_RUN_VERBOSE", 0);
 
-static bool     binary_rewrite                                    = false;
-static bool     is_attached                                       = false;
-static bool     loop_level_instr                                  = false;
-static bool     werror                                            = false;
-static bool     stl_func_instr                                    = false;
-static bool     use_mpi                                           = false;
-static bool     is_static_exe                                     = false;
-static bool     is_driver                                         = false;
-static bool     allow_overlapping                                 = false;
-static bool     instr_dynamic_callsites                           = false;
-static bool     instr_traps                                       = false;
-static bool     instr_loop_traps                                  = false;
-static size_t   batch_size                                        = 50;
-static strset_t extra_libs                                        = {};
-static size_t   min_address_range                                 = (1 << 8);  // 256
-static size_t   min_loop_address_range                            = (1 << 8);  // 256
-static std::vector<std::pair<uint64_t, string_t>> hash_ids        = {};
-static std::map<string_t, bool>                   use_stubs       = {};
-static std::map<string_t, procedure_t*>           beg_stubs       = {};
-static std::map<string_t, procedure_t*>           end_stubs       = {};
-static strvec_t                                   init_stub_names = {};
-static strvec_t                                   fini_stub_names = {};
-static strset_t                                   used_stub_names = {};
-static std::vector<call_expr_pointer_t>           env_variables   = {};
-static std::map<string_t, call_expr_pointer_t>    beg_expr        = {};
-static std::map<string_t, call_expr_pointer_t>    end_expr        = {};
-static const auto                                 npos_v          = string_t::npos;
-static string_t                                   instr_mode      = "trace";
-static string_t    instr_push_func    = "omnitrace_push_trace";
-static string_t    instr_pop_func     = "omnitrace_pop_trace";
-static string_t    instr_push_hash    = "omnitrace_push_trace_hash";
-static string_t    instr_pop_hash     = "omnitrace_pop_trace_hash";
-static string_t    print_instrumented = {};
-static string_t    print_available    = {};
-static string_t    print_overlapping  = {};
-static std::string modfunc_dump_dir   = {};
-static auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
+namespace
+{
+bool                                       binary_rewrite          = false;
+bool                                       is_attached             = false;
+bool                                       loop_level_instr        = false;
+bool                                       werror                  = false;
+bool                                       stl_func_instr          = false;
+bool                                       use_mpi                 = false;
+bool                                       is_static_exe           = false;
+bool                                       is_driver               = false;
+bool                                       allow_overlapping       = false;
+bool                                       instr_dynamic_callsites = false;
+bool                                       instr_traps             = false;
+bool                                       instr_loop_traps        = false;
+size_t                                     batch_size              = 50;
+strset_t                                   extra_libs              = {};
+size_t                                     min_address_range       = (1 << 8);  // 256
+size_t                                     min_loop_address_range  = (1 << 8);  // 256
+std::vector<std::pair<uint64_t, string_t>> hash_ids                = {};
+std::map<string_t, bool>                   use_stubs               = {};
+std::map<string_t, procedure_t*>           beg_stubs               = {};
+std::map<string_t, procedure_t*>           end_stubs               = {};
+strvec_t                                   init_stub_names         = {};
+strvec_t                                   fini_stub_names         = {};
+strset_t                                   used_stub_names         = {};
+std::vector<call_expr_pointer_t>           env_variables           = {};
+std::map<string_t, call_expr_pointer_t>    beg_expr                = {};
+std::map<string_t, call_expr_pointer_t>    end_expr                = {};
+const auto                                 npos_v                  = string_t::npos;
+string_t                                   instr_mode              = "trace";
+string_t                                   print_instrumented      = {};
+string_t                                   print_available         = {};
+string_t                                   print_overlapping       = {};
+std::string                                modfunc_dump_dir        = {};
+auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
+}  // namespace
 
 std::string
 get_absolute_exe_filepath(std::string exe_name);
@@ -132,10 +135,10 @@ main(int argc, char** argv)
     bpatch->setLivenessAnalysis(false);
     bpatch->setBaseTrampDeletion(false);
     bpatch->setTrampRecursive(false);
-    bpatch->setMergeTramp(false);
+    bpatch->setMergeTramp(true);
 
     std::set<std::string> dyninst_defs = { "TypeChecking", "SaveFPR", "DelayedParsing",
-                                           "InstrStackFrames" };
+                                           "MergeTramp" };
 
     int _argc = argc;
     int _cmdc = 0;
@@ -598,7 +601,8 @@ main(int argc, char** argv)
     //  Helper function for adding regex expressions
     //
     auto add_regex = [](auto& regex_array, const string_t& regex_expr) {
-        if(!regex_expr.empty()) regex_array.push_back(std::regex(regex_expr, regex_opts));
+        if(!regex_expr.empty())
+            regex_array.emplace_back(std::regex(regex_expr, regex_opts));
     };
 
     add_regex(func_include, tim::get_env<string_t>("OMNITRACE_REGEX_INCLUDE", ""));
@@ -638,7 +642,7 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    int dyninst_verb = 1;
+    int dyninst_verb = 2;
     if(parser.exists("dyninst-options"))
     {
         dyninst_defs = parser.get<std::set<std::string>>("dyninst-options");
@@ -704,6 +708,26 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
+    // for runtime instrumentation, we need to set this before the process gets created
+    if(!binary_rewrite)
+    {
+        tim::set_env("HSA_ENABLE_INTERRUPT", "0", 0);
+        if(_pid >= 0)
+        {
+            verbprintf(-10, "#-------------------------------------------------------"
+                            "-------------------------------------------#\n");
+            verbprintf(-10, "\n");
+            verbprintf(-10, "WARNING! Sampling may result in ioctl() deadlock within "
+                            "the ROCR runtime.\n");
+            verbprintf(-10,
+                       "To avoid this, set HSA_ENABLE_INTERRUPT=0 in the environment "
+                       "before starting your ROCm/HIP application\n");
+            verbprintf(-10, "\n");
+            verbprintf(-10, "#-------------------------------------------------------"
+                            "-------------------------------------------#\n");
+        }
+    }
+
     addr_space =
         omnitrace_get_address_space(bpatch, _cmdc, _cmdv, binary_rewrite, _pid, mutname);
 
@@ -750,7 +774,7 @@ main(int argc, char** argv)
     if(app_modules && !app_modules->empty())
     {
         modules = *app_modules;
-        for(auto* itr : *app_modules)
+        for(auto* itr : modules)
         {
             auto* procedures = itr->getProcedures();
             if(procedures)
@@ -774,7 +798,7 @@ main(int argc, char** argv)
     if(app_functions && !app_functions->empty())
     {
         functions = *app_functions;
-        for(auto* itr : *app_functions)
+        for(auto* itr : functions)
         {
             module_t* mod = itr->getModule();
             if(mod && itr->isInstrumentable())
@@ -792,9 +816,9 @@ main(int argc, char** argv)
     }
 
     verbprintf(0, "Module size before loading instrumentation library: %lu\n",
-               (long unsigned) app_modules->size());
+               (long unsigned) modules.size());
 
-    if(debug_print || verbose_level > 1)
+    if(debug_print || verbose_level > 2)
     {
         module_function::reset_width();
         for(const auto& itr : available_module_functions)
@@ -931,20 +955,17 @@ main(int argc, char** argv)
 
     verbprintf(0, "Finding functions in image...\n");
 
-    auto* entr_trace = find_function(app_image, instr_push_func.c_str());
-    auto* exit_trace = find_function(app_image, instr_pop_func.c_str());
-    auto* entr_hash  = find_function(app_image, instr_push_hash.c_str());
-    auto* exit_hash  = find_function(app_image, instr_pop_hash.c_str());
-    auto* init_func  = find_function(app_image, "omnitrace_trace_init");
-    auto* fini_func  = find_function(app_image, "omnitrace_trace_finalize");
-    auto* env_func   = find_function(app_image, "omnitrace_trace_set_env");
-    auto* mpi_func   = find_function(app_image, "omnitrace_trace_set_mpi");
+    auto* entr_trace = find_function(app_image, "omnitrace_push_trace");
+    auto* exit_trace = find_function(app_image, "omnitrace_pop_trace");
+    auto* entr_hash  = find_function(app_image, "omnitrace_push_trace_hash");
+    auto* exit_hash  = find_function(app_image, "omnitrace_pop_trace_hash");
+    auto* init_func  = find_function(app_image, "omnitrace_init");
+    auto* fini_func  = find_function(app_image, "omnitrace_finalize");
+    auto* env_func   = find_function(app_image, "omnitrace_set_env");
+    auto* mpi_func   = find_function(app_image, "omnitrace_set_mpi");
     auto* hash_func  = find_function(app_image, "omnitrace_add_hash_id");
 
     if(!main_func && main_fname == "main") main_func = find_function(app_image, "_main");
-
-    verbprintf(0, "Instrumenting with '%s' and '%s'...\n", instr_push_func.c_str(),
-               instr_pop_func.c_str());
 
     if(mpi_init_func && mpi_fini_func) use_mpi = true;
 
@@ -1085,10 +1106,10 @@ main(int argc, char** argv)
     using pair_t = std::pair<procedure_t*, string_t>;
 
     for(const auto& itr :
-        { pair_t(main_func, main_fname), pair_t(entr_trace, instr_push_func),
-          pair_t(exit_trace, instr_pop_func), pair_t(init_func, "omnitrace_trace_init"),
-          pair_t(fini_func, "omnitrace_trace_finalize"),
-          pair_t(env_func, "omnitrace_trace_set_env") })
+        { pair_t(main_func, main_fname), pair_t(entr_trace, "omnitrace_push_trace"),
+          pair_t(exit_trace, "omnitrace_pop_trace"), pair_t(init_func, "omnitrace_init"),
+          pair_t(fini_func, "omnitrace_finalize"),
+          pair_t(env_func, "omnitrace_set_env") })
     {
         if(itr.first == main_func && !is_driver) continue;
         if(!itr.first)
@@ -1182,7 +1203,7 @@ main(int argc, char** argv)
     verbprintf(2, "Getting call expressions... ");
 
     auto main_call_args = omnitrace_call_expr(main_sign.get());
-    auto init_call_args = omnitrace_call_expr(default_components, binary_rewrite, cmdv0);
+    auto init_call_args = omnitrace_call_expr(instr_mode, binary_rewrite, cmdv0);
     auto fini_call_args = omnitrace_call_expr();
     auto umpi_call_args = omnitrace_call_expr(use_mpi, is_attached);
     auto none_call_args = omnitrace_call_expr();
@@ -1208,11 +1229,19 @@ main(int argc, char** argv)
         }
     }
 
+    std::string _libname = {};
+    for(auto&& itr : sharedlibname)
+        _libname = get_absolute_lib_filepath(itr);
+    if(_libname.empty()) _libname = "libomnitrace.so";
+
     auto env_vars = parser.get<strvec_t>("env");
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MODE", instr_mode));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "HSA_ENABLE_INTERRUPT", "0"));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "HSA_TOOLS_LIB", _libname));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_INIT", "OFF"));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_FINALIZE", "OFF"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_COMPONENTS", default_components));
+    env_vars.emplace_back(
+        TIMEMORY_JOIN('=', "OMNITRACE_TIMEMORY_COMPONENTS", default_components));
     env_vars.emplace_back(
         TIMEMORY_JOIN('=', "OMNITRACE_USE_MPIP",
                       (binary_rewrite && use_mpi && use_mpip) ? "ON" : "OFF"));
@@ -1229,7 +1258,7 @@ main(int argc, char** argv)
         }
         tim::set_env(p.at(0), p.at(1));
         auto _expr = omnitrace_call_expr(p.at(0), p.at(1));
-        env_variables.push_back(_expr.get(env_func));
+        env_variables.emplace_back(_expr.get(env_func));
     }
 
     //----------------------------------------------------------------------------------//
@@ -1240,7 +1269,7 @@ main(int argc, char** argv)
 
     for(const auto& itr : env_variables)
     {
-        if(itr) init_names.push_back(itr.get());
+        if(itr) init_names.emplace_back(itr.get());
     }
 
     for(const auto& itr : beg_expr)
@@ -1248,7 +1277,7 @@ main(int argc, char** argv)
         if(itr.second)
         {
             verbprintf(1, "+ Adding %s instrumentation...\n", itr.first.c_str());
-            init_names.push_back(itr.second.get());
+            init_names.emplace_back(itr.second.get());
         }
         else
         {
@@ -1256,55 +1285,35 @@ main(int argc, char** argv)
         }
     }
 
-    if(use_mpi && umpi_call) init_names.push_back(umpi_call.get());
-
-    if(init_call && binary_rewrite) init_names.push_back(init_call.get());
+    if(umpi_call) init_names.emplace_back(umpi_call.get());
+    if(init_call) init_names.emplace_back(init_call.get());
 
     if(binary_rewrite)
     {
-        if(mpi_init_func && mpi_fini_func)
-        {
-            verbprintf(2, "Patching MPI init functions\n");
-            if(init_call)
-                insert_instr(addr_space, mpi_init_func, init_call, BPatch_exit, nullptr,
-                             nullptr);
-            if(fini_call)
-                insert_instr(addr_space, mpi_fini_func, fini_call, BPatch_entry, nullptr,
-                             nullptr);
-        }
-        else
-        {
-            verbprintf(2, "Adding main begin and end snippets...\n");
-            init_names.push_back(main_beg_call.get());
-            fini_names.push_back(main_end_call.get());
-        }
+        verbprintf(2, "Adding main begin and end snippets...\n");
+        if(main_beg_call) init_names.emplace_back(main_beg_call.get());
+        if(main_end_call) fini_names.emplace_back(main_end_call.get());
     }
     else if(app_thread)
     {
         verbprintf(2, "Patching main function\n");
-        if(init_call)
-            insert_instr(addr_space, main_func, init_call, BPatch_entry, nullptr,
-                         nullptr);
-        if(!use_mpi)
-        {
+        if(main_beg_call)
             insert_instr(addr_space, main_func, main_beg_call, BPatch_entry, nullptr,
                          nullptr);
+        if(main_end_call)
             insert_instr(addr_space, main_func, main_end_call, BPatch_exit, nullptr,
                          nullptr);
-        }
-        if(fini_call)
-            insert_instr(addr_space, main_func, fini_call, BPatch_exit, nullptr, nullptr);
     }
     else
     {
         verbprintf(0, "No binary_rewrite and no app_thread!...\n");
     }
 
-    if(fini_call) fini_names.push_back(fini_call.get());
+    if(fini_call) fini_names.emplace_back(fini_call.get());
 
     for(const auto& itr : end_expr)
     {
-        if(itr.second) fini_names.push_back(itr.second.get());
+        if(itr.second) fini_names.emplace_back(itr.second.get());
     }
 
     //----------------------------------------------------------------------------------//
@@ -1316,7 +1325,7 @@ main(int argc, char** argv)
     //----------------------------------------------------------------------------------//
     std::vector<std::function<void()>> instr_procedure_functions;
     auto instr_procedures = [&](const procedure_vec_t& procedures) {
-        verbprintf(2, "Instrumenting %lu procedures...\n",
+        verbprintf(3, "Instrumenting %lu procedures...\n",
                    (unsigned long) procedures.size());
         for(auto* itr : procedures)
         {
@@ -1356,7 +1365,7 @@ main(int argc, char** argv)
 
             if(name.get().empty())
             {
-                verbprintf(1, "Skipping function [empty name]: %s\n", fname);
+                verbprintf(2, "Skipping function [empty name]: %s\n", fname);
                 continue;
             }
 
@@ -1366,7 +1375,7 @@ main(int argc, char** argv)
             if(is_static_exe && has_debug_info && string_t{ fname } == "_fini" &&
                string_t{ modname } == "DEFAULT_MODULE")
             {
-                verbprintf(1, "Skipping function [DEFAULT_MODULE]: %s\n", fname);
+                verbprintf(2, "Skipping function [DEFAULT_MODULE]: %s\n", fname);
                 continue;
             }
 
@@ -1376,7 +1385,7 @@ main(int argc, char** argv)
                overlapping_module_functions.find(module_function{ mod, itr }) !=
                    overlapping_module_functions.end())
             {
-                verbprintf(1, "Skipping function [overlapping]: %s / %s\n",
+                verbprintf(2, "Skipping function [overlapping]: %s / %s\n",
                            name.m_name.c_str(), name.get().c_str());
                 continue;
             }
@@ -1402,8 +1411,33 @@ main(int argc, char** argv)
                     ? std::max<size_t>(_loop_entries->size(), basic_loop.size())
                     : basic_loop.size();
             auto _has_loop_entries = (_num_loop_entries > 0);
+            auto _skip_range =
+                (_has_loop_entries) ? false : (_address_range < min_address_range);
+            auto _skip_loop_range =
+                (_has_loop_entries) ? (_address_range < min_loop_address_range) : false;
 
-            if(_address_range < min_address_range && !_has_loop_entries && !_force_instr)
+            if(_force_instr && _skip_range)
+            {
+                verbprintf(
+                    1,
+                    "Instrumenting function [dynamic-callsite]: %s / %s despite not "
+                    "satisfy minimum address range (address range = %lu, minimum "
+                    "= %lu) because contains dynamic callsites\n",
+                    name.m_name.c_str(), name.get().c_str(),
+                    (unsigned long) _address_range, (unsigned long) min_address_range);
+            }
+            else if(_force_instr && _skip_loop_range)
+            {
+                verbprintf(
+                    1,
+                    "Instrumenting function [dynamic-callsite]: %s / %s despite not "
+                    "satisfy minimum loop address range (address range = %lu, minimum "
+                    "= %lu) because contains dynamic callsites\n",
+                    name.m_name.c_str(), name.get().c_str(),
+                    (unsigned long) _address_range,
+                    (unsigned long) min_loop_address_range);
+            }
+            else if(_skip_range)
             {
                 verbprintf(1,
                            "Skipping function [min-address-range]: %s / %s (address "
@@ -1413,8 +1447,7 @@ main(int argc, char** argv)
                            (unsigned long) min_address_range);
                 continue;
             }
-            else if(_address_range < min_loop_address_range && _has_loop_entries &&
-                    !_force_instr)
+            else if(_skip_loop_range)
             {
                 verbprintf(1,
                            "Skipping function [min-loop-address-range]: %s / %s (address "
@@ -1423,16 +1456,6 @@ main(int argc, char** argv)
                            (unsigned long) _address_range,
                            (unsigned long) min_loop_address_range);
                 continue;
-            }
-            else if(_force_instr)
-            {
-                verbprintf(1,
-                           "Enabling function [dynamic-callsite]: %s / %s despite not "
-                           "satisfy minimum address range (address range = %lu, minimum "
-                           "= %lu) because contains dynamic callsites\n",
-                           name.m_name.c_str(), name.get().c_str(),
-                           (unsigned long) _address_range,
-                           (unsigned long) min_address_range);
             }
 
             bool _entr_success =
@@ -1562,7 +1585,7 @@ main(int argc, char** argv)
                 continue;
             }
 
-            verbprintf(1, "Parsing module: %s\n", modname);
+            verbprintf(3, "Parsing module: %s\n", modname);
             bpvector_t<procedure_t*>* p = m->getProcedures();
             if(!p) continue;
 
@@ -1590,7 +1613,7 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    if(is_attached)
+    if(app_thread)
     {
         assert(app_thread != nullptr);
         verbprintf(1, "Executing initial snippets...\n");
@@ -1827,58 +1850,52 @@ main(int argc, char** argv)
     {
         verbprintf(0, "Executing...\n");
 
-        // bpatch->setDebugParsing(false);
-        // bpatch->setTypeChecking(false);
-        // bpatch->setDelayedParsing(true);
-        // bpatch->setInstrStackFrames(true);
-        // bpatch->setLivenessAnalysis(false);
-        // addr_space->beginInsertionSet();
-
-        verbprintf(4, "Registering fork callbacks...\n");
-        auto _prefork  = bpatch->registerPreForkCallback(&omnitrace_fork_callback);
-        auto _postfork = bpatch->registerPostForkCallback(&omnitrace_fork_callback);
-
-        auto _wait_exec = [&]() {
-            while(!app_thread->isTerminated())
+        if(!app_thread->isTerminated())
+        {
+            app_thread->detach(true);
+            pid_t cpid = app_thread->getPid();
+            pid_t w;
+            int   status = 0;
+            do
             {
-                verbprintf(3, "Continuing execution...\n");
-                app_thread->continueExecution();
-                verbprintf(4, "Process is not terminated...\n");
-                bpatch->waitForStatusChange();
-                std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
-                verbprintf(4, "Process status change...\n");
-                if(app_thread->isStopped())
+                w = waitpid(cpid, &status, WUNTRACED);
+                if(w == -1)
                 {
-                    verbprintf(4, "Process is stopped, continuing execution...\n");
-                    if(!app_thread->continueExecution())
-                    {
-                        fprintf(stderr, "continueExecution failed\n");
-                        exit(EXIT_FAILURE);
-                    }
+                    perror("waitpid");
+                    exit(EXIT_FAILURE);
                 }
+
+                if(WIFEXITED(status))
+                {
+                    code = WEXITSTATUS(status);
+                }
+                else if(WIFSIGNALED(status))
+                {
+                    code = WTERMSIG(status);
+                }
+                else if(WIFSTOPPED(status))
+                {
+                    code = WSTOPSIG(status);
+                }
+                else if(WIFCONTINUED(status))
+                {
+                    code = WIFCONTINUED(status);
+                }
+            } while(!WIFEXITED(status) && !WIFSIGNALED(status));
+        }
+        else
+        {
+            if(app_thread->terminationStatus() == ExitedNormally)
+            {
+                if(app_thread->isTerminated()) verbprintf(0, "End of omnitrace\n");
             }
-        };
-
-        verbprintf(4, "Entering wait for status change mode...\n");
-        _wait_exec();
-
-        if(app_thread->terminationStatus() == ExitedNormally)
-        {
-            if(app_thread->isTerminated())
-                printf("\nEnd of omnitrace\n");
-            else
-                _wait_exec();
+            else if(app_thread->terminationStatus() == ExitedViaSignal)
+            {
+                auto sign = app_thread->getExitSignal();
+                fprintf(stderr, "\nApplication exited with signal: %i\n", int(sign));
+            }
+            code = app_thread->getExitCode();
         }
-        else if(app_thread->terminationStatus() == ExitedViaSignal)
-        {
-            auto sign = app_thread->getExitSignal();
-            fprintf(stderr, "\nApplication exited with signal: %i\n", int(sign));
-        }
-
-        // addr_space->finalizeInsertionSet(false, nullptr);
-
-        code = app_thread->getExitCode();
-        consume_parameters(_prefork, _postfork);
     }
 
     // cleanup
@@ -1888,6 +1905,9 @@ main(int argc, char** argv)
     for(int i = 0; i < _cmdc; ++i)
         delete[] _cmdv[i];
     delete[] _cmdv;
+
+    verbprintf(0, "End of omnitrace\n");
+    verbprintf(1, "Exit code: %i\n", code);
     return code;
 }
 
@@ -1943,7 +1963,7 @@ instrument_module(const string_t& file_name)
     static std::regex corelib_regex(
         "^lib(c|z|rt|dl|dw|util|zstd|elf|pthread|open[\\-]rte|open[\\-]pal|"
         "hwloc|numa|event|udev|dyninstAPI_RT|gcc_s|tcmalloc|profiler|tbbmalloc|"
-        "tbbmalloc_proxy)(-|\\.)",
+        "tbbmalloc_proxy|event_pthreads|ltdl)(-|\\.)",
         regex_opts);
     // these are all due to TAU
     static std::regex prefix_regex(
@@ -2049,11 +2069,13 @@ instrument_entity(const string_t& function_name)
         regex_opts);
     static std::regex exclude_cxx("(std::_Sp_counted_base|std::use_facet)", regex_opts);
     static std::regex leading(
-        "^(_|\\.|frame_dummy|\\(|targ|new|delete|operator new|operator "
-        "delete|std::allocat|"
-        "nvtx|gcov|main\\.cold|TAU|tau|Tau|dyn|RT|dl|sys|pthread|posix|clone|virtual "
-        "thunk|non-virtual thunk|transaction "
-        "clone|RtsLayer|DYNINST|PthreadLayer|threaded_func|targ8|PMPI)",
+        "^(_|\\.|frame_dummy|\\(|targ|new|delete|operator new|operator delete|"
+        "std::allocat|nvtx|gcov|main\\.cold|TAU|tau|Tau|dyn|RT|"
+        "sys|pthread|posix|clone|"
+        "virtual thunk|non-virtual thunk|transaction clone|"
+        "RtsLayer|DYNINST|PthreadLayer|threaded_func|PMPI|"
+        "Kokkos::Impl::|Kokkos::Experimental::Impl::|Kokkos::impl_|"
+        "Kokkos::[A-Za-z]+::impl_|Kokkos::Tools::|Kokkos::Profiling::)",
         regex_opts);
     static std::regex trailing("(\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$",
                                regex_opts);
@@ -2328,7 +2350,8 @@ get_absolute_lib_filepath(std::string lib_name)
                              std::regex_match(lib_name, std::regex("^[A-Za-z0-9].*"))))
     {
         auto _lib_orig = lib_name;
-        auto _paths = tim::delimit(tim::get_env<std::string>("LD_LIBRARY_PATH", ""), ":");
+        auto _paths    = tim::delimit(
+            std::string{ ".:" } + tim::get_env<std::string>("LD_LIBRARY_PATH", ""), ":");
         for(auto& pitr : _paths)
         {
             if(file_exists(TIMEMORY_JOIN('/', pitr, lib_name)))

@@ -9,6 +9,8 @@ on:
 env:
   BUILD_TYPE: Release
   ELFUTILS_DOWNLOAD_VERSION: 0.183
+  OMNITRACE_DEBUG_FINALIZE: ON
+  OMNITRACE_VERBOSE: 1
 
 jobs:
   ubuntu-focal:
@@ -22,6 +24,7 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Packages
+      timeout-minutes: 5
       run:
         sudo apt-get update &&
         sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev ${{ matrix.compiler }} ${{ matrix.mpi }} &&
@@ -36,6 +39,7 @@ jobs:
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Configure CMake
+      timeout-minutes: 5
       run:
         cmake --version &&
         if [ -z "${{ matrix.mpi }}" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
@@ -102,6 +106,7 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Packages
+      timeout-minutes: 5
       run:
         sudo apt-get update &&
         sudo apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.compiler }} ${{ matrix.mpi }} &&
@@ -116,6 +121,7 @@ jobs:
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Configure CMake
+      timeout-minutes: 5
       run:
         cmake --version &&
         if [ -z "${{ matrix.mpi }}" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
@@ -181,6 +187,7 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Packages
+      timeout-minutes: 5
       run:
         sudo apt-get update &&
         sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libboost-{atomic,system,thread,date-time,filesystem,timer}-dev libtbb-dev libiberty-dev ${{ matrix.compiler }} &&
@@ -196,6 +203,7 @@ jobs:
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:/opt/dyninst/lib:/opt/elfutils/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Install ElfUtils
+      timeout-minutes: 5
       run:
         pushd external &&
         wget https://sourceware.org/elfutils/ftp/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2 &&
@@ -208,6 +216,7 @@ jobs:
         rm -rf elfutils*
 
     - name: Install Dyninst
+      timeout-minutes: 20
       run:
         cmake --version &&
         git submodule update --init external/dyninst &&
@@ -222,6 +231,7 @@ jobs:
         rm -rf build
 
     - name: Configure CMake
+      timeout-minutes: 5
       run:
         cmake --version &&
         cmake -B ${{ github.workspace }}/build
@@ -284,6 +294,7 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Packages
+      timeout-minutes: 5
       run:
         sudo apt-get update &&
         sudo apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.compiler }} &&
@@ -299,6 +310,7 @@ jobs:
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:/opt/dyninst/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Install Dyninst
+      timeout-minutes: 20
       run:
         cmake --version &&
         git submodule update --init external/dyninst &&
@@ -318,6 +330,7 @@ jobs:
         rm -rf build
 
     - name: Configure CMake
+      timeout-minutes: 5
       run:
         cmake --version &&
         cmake -B ${{ github.workspace }}/build
@@ -382,6 +395,7 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Packages
+      timeout-minutes: 5
       run:
         echo '1' | sudo tee /proc/sys/kernel/perf_event_paranoid &&
         sudo apt-get update &&
@@ -389,7 +403,7 @@ jobs:
         sudo wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add - &&
         echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm_version }}/ ubuntu main" | sudo tee /etc/apt/sources.list.d/rocm.list &&
         sudo apt-get update &&
-        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libboost-{atomic,system,thread,date-time,filesystem,timer}-dev libtbb-dev libiberty-dev ${{ matrix.compiler }} libnuma-dev rocm-dev rocm-utils roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev ${{ matrix.mpi }} libpapi-dev &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libboost-{atomic,system,thread,date-time,filesystem,timer}-dev libtbb-dev libiberty-dev ${{ matrix.compiler }} libudev-dev libnuma-dev rocm-dev rocm-utils roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev ${{ matrix.mpi }} libpapi-dev &&
         sudo python3 -m pip install --upgrade pip &&
         python3 -m pip install 'cmake==3.16.3'
 
@@ -402,6 +416,7 @@ jobs:
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:/opt/dyninst/lib:/opt/elfutils/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Install ElfUtils
+      timeout-minutes: 5
       run:
         pushd external &&
         wget https://sourceware.org/elfutils/ftp/${ELFUTILS_DOWNLOAD_VERSION}/elfutils-${ELFUTILS_DOWNLOAD_VERSION}.tar.bz2 &&
@@ -414,6 +429,7 @@ jobs:
         rm -rf elfutils*
 
     - name: Install Dyninst
+      timeout-minutes: 20
       run:
         cmake --version &&
         git submodule update --init external/dyninst &&
@@ -428,6 +444,7 @@ jobs:
         rm -rf build
 
     - name: Configure CMake
+      timeout-minutes: 5
       run:
         cmake --version &&
         cmake -B ${{ github.workspace }}/build

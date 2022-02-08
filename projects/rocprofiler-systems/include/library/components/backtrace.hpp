@@ -91,6 +91,7 @@ struct backtrace
 private:
     int64_t           m_tid        = 0;
     int64_t           m_thr_cpu_ts = 0;
+    int64_t           m_mem_peak   = 0;
     size_t            m_size       = 0;
     time_point_type   m_ts         = {};
     data_t            m_data       = {};

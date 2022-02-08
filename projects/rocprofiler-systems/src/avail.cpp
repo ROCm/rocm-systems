@@ -23,14 +23,14 @@
 //  IN THE SOFTWARE.
 
 #include "avail.hpp"
-
+#include "library/api.hpp"
+#include "library/components/backtrace.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/omnitrace.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/roctracer.hpp"
 #include "library/config.hpp"
-#include "library/sampling.hpp"
 
 #include <timemory/components.hpp>
 #include <timemory/components/definition.hpp>
@@ -249,8 +249,6 @@ enum
 int
 main(int argc, char** argv)
 {
-    omnitrace::configure_settings();
-
     array_t<bool, 6>     options  = { false, false, false, false, false, false };
     array_t<string_t, 6> fields   = {};
     array_t<bool, 6>     use_mark = {};
@@ -436,7 +434,7 @@ main(int argc, char** argv)
     _parser_set_if_exists(include_hw_counters, "hw-counters");
 
     if(!include_components && !include_settings && !include_hw_counters)
-        include_components = true;
+        include_settings = true;
 
     if(markdown || include_hw_counters) padding = 6;
 
@@ -456,6 +454,8 @@ main(int argc, char** argv)
     }
 
     if(!os) os = &std::cout;
+
+    omnitrace_init_library();
 
     if(include_components) write_component_info(*os, options, use_mark, fields);
 
@@ -699,39 +699,49 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
     using width_type             = array_t<int64_t, size>;
     using width_bool             = array_t<bool, size>;
 
-    array_type _setting_output;
-    unique_set _settings_exclude = { "OMNITRACE_ENVIRONMENT",
-                                     "OMNITRACE_COMMAND_LINE",
-                                     "cereal_class_version",
-                                     "settings",
-                                     "OMNITRACE_CUDA_EVENT_BATCH_SIZE",
-                                     "OMNITRACE_CUPTI_ACTIVITY_KINDS",
-                                     "OMNITRACE_CUPTI_ACTIVITY_LEVEL",
-                                     "OMNITRACE_CUPTI_DEVICE",
-                                     "OMNITRACE_CUPTI_EVENTS",
-                                     "OMNITRACE_CUPTI_METRICS",
-                                     "OMNITRACE_CUPTI_PCSAMPLING_NUM_COLLECT",
-                                     "OMNITRACE_CUPTI_PCSAMPLING_PERIOD",
-                                     "OMNITRACE_CUPTI_PCSAMPLING_PER_LINE",
-                                     "OMNITRACE_CUPTI_PCSAMPLING_REGION_TOTALS",
-                                     "OMNITRACE_CUPTI_PCSAMPLING_SERIALIZED",
-                                     "OMNITRACE_CUPTI_PCSAMPLING_STALL_REASONS" };
-
-    cereal::SettingsTextArchive settings_archive{ _setting_output, _settings_exclude };
-    settings::serialize_settings(settings_archive);
-
     width_type _widths = { 0, 0, 0, 0, 0, 0, 0 };
     width_bool _wusing = {
         true, !force_brief, opts[0], opts[1], opts[1], opts[1], opts[2]
     };
     width_bool _mark = { false, false, false, true, true, true, false };
 
+    // this settings has delayed initialization. make sure it is generated
+    (void) omnitrace::config::get_perfetto_output_filename();
+
+    array_type _setting_output;
+    unique_set _settings_exclude = { "OMNITRACE_ENVIRONMENT", "OMNITRACE_COMMAND_LINE",
+                                     "cereal_class_version", "settings" };
+
+#if !defined(TIMEMORY_USE_CRAYPAT)
+    _settings_exclude.emplace("OMNITRACE_CRAYPAT");
+#endif
+
+    cereal::SettingsTextArchive settings_archive{ _setting_output, _settings_exclude };
+    settings::serialize_settings(settings_archive);
+
+    // exclude some timemory settings which are not relevant to omnitrace
+    //  exact matches, e.g. OMNITRACE_BANNER
+    std::string _settings_rexclude_exact =
+        "^OMNITRACE_(BANNER|DESTRUCTOR_REPORT|COMPONENTS|(GLOBAL|MPIP|NCCLP|OMPT|"
+        "PROFILER|TRACE)_COMPONENTS|PYTHON_EXE|PAPI_ATTACH|PLOT_OUTPUT|SEPARATOR_FREQ|"
+        "STACK_CLEARING|TARGET_PID|THROTTLE_(COUNT|VALUE)|(AUTO|FLAMEGRAPH)_OUTPUT|"
+        "(ENABLE|DISABLE)_ALL_SIGNALS|ALLOW_SIGNAL_HANDLER|CTEST_NOTES)$";
+    //  leading matches, e.g. OMNITRACE_MPI_[A-Z_]+
+    std::string _settings_rexclude_begin =
+        "^OMNITRACE_(ERT|DART|MPI|UPCXX|ROOFLINE|CUDA|NVTX|CUPTI)_[A-Z_]+$";
+
+    // lambda for deciding which settings we want to restrict displaying
+    auto&& _remove_conditions = [&_settings_exclude, &_settings_rexclude_exact,
+                                 &_settings_rexclude_begin](const auto& itr) {
+        auto&& _v = itr.find("environ")->second;
+        bool   _a = _settings_exclude.find(_v) != _settings_exclude.end();
+        bool   _b = std::regex_match(_v, std::regex(_settings_rexclude_exact));
+        bool   _c = std::regex_match(_v, std::regex(_settings_rexclude_begin));
+        return (_a || _b || _c);
+    };
+
     _setting_output.erase(std::remove_if(_setting_output.begin(), _setting_output.end(),
-                                         [&_settings_exclude](const auto& itr) {
-                                             return _settings_exclude.find(
-                                                        itr.find("environ")->second) !=
-                                                    _settings_exclude.end();
-                                         }),
+                                         _remove_conditions),
                           _setting_output.end());
 
     if(alphabetical)

@@ -457,6 +457,9 @@ endfunction()
 # ----------------------------------------------------------------------------------------#
 function(OMNITRACE_TARGET_COMPILE_DEFINITIONS _TARG _VIS)
     foreach(_DEF ${ARGN})
+        if(NOT "${_DEF}" MATCHES "[A-Za-z_]+=.*" AND "${_DEF}" MATCHES "^OMNITRACE_")
+            set(_DEF "${_DEF}=1")
+        endif()
         target_compile_definitions(${_TARG} ${_VIS} $<$<COMPILE_LANGUAGE:CXX>:${_DEF}>)
         if(CMAKE_CUDA_COMPILER_IS_NVIDIA)
             target_compile_definitions(${_TARG} ${_VIS}

@@ -2,9 +2,6 @@
 #if USE_MPI
 #    include <mpi.h>
 #endif
-#if _OPENMP
-#    include <omp.h>
-#endif
 #include "lulesh.h"
 #include <cstdlib>
 #include <limits.h>
@@ -13,12 +10,12 @@
 #include <string.h>
 
 static KOKKOS_INLINE_FUNCTION Real_t
-                              CalcElemVolume(const Real_t x0, const Real_t x1, const Real_t x2, const Real_t x3,
-                                             const Real_t x4, const Real_t x5, const Real_t x6, const Real_t x7,
-                                             const Real_t y0, const Real_t y1, const Real_t y2, const Real_t y3,
-                                             const Real_t y4, const Real_t y5, const Real_t y6, const Real_t y7,
-                                             const Real_t z0, const Real_t z1, const Real_t z2, const Real_t z3,
-                                             const Real_t z4, const Real_t z5, const Real_t z6, const Real_t z7)
+CalcElemVolume(const Real_t x0, const Real_t x1, const Real_t x2, const Real_t x3,
+               const Real_t x4, const Real_t x5, const Real_t x6, const Real_t x7,
+               const Real_t y0, const Real_t y1, const Real_t y2, const Real_t y3,
+               const Real_t y4, const Real_t y5, const Real_t y6, const Real_t y7,
+               const Real_t z0, const Real_t z1, const Real_t z2, const Real_t z3,
+               const Real_t z4, const Real_t z5, const Real_t z6, const Real_t z7)
 {
     Real_t twelveth = Real_t(1.0) / Real_t(12.0);
 
@@ -122,15 +119,15 @@ Domain::Domain(Int_t numRanks, Index_t colLoc, Index_t rowLoc, Index_t planeLoc,
 , m_dvovmax(Real_t(0.1))
 , m_refdens(Real_t(1.0))
 ,
-    //
-    // set pointers to (potentially) "new'd" arrays to null to
-    // simplify deallocation.
-    //
-    m_regNumList(0)
-, m_nodeElemStart(0)
-, m_nodeElemCornerList(0)
-, m_regElemSize(0)
-, m_regElemlist(0)
+//
+// set pointers to (potentially) "new'd" arrays to null to
+// simplify deallocation.
+//
+m_regNumList(0)
+//   m_nodeElemStart(0),
+//   m_nodeElemCornerList(0),
+// m_regElemSize(0),
+// m_regElemlist(0)
 #if USE_MPI
 , commDataSend(0)
 , commDataRecv(0)
@@ -171,48 +168,27 @@ Domain::Domain(Int_t numRanks, Index_t colLoc, Index_t rowLoc, Index_t planeLoc,
     SetupCommBuffers(edgeNodes);
 
     // Basic Field Initialization
-    for(Index_t i = 0; i < numElem(); ++i)
-    {
-        e(i)  = Real_t(0.0);
-        p(i)  = Real_t(0.0);
-        q(i)  = Real_t(0.0);
-        ss(i) = Real_t(0.0);
-    }
+    Kokkos::deep_copy(m_e, 0.0);
+    Kokkos::deep_copy(m_p, 0.0);
+    Kokkos::deep_copy(m_q, 0.0);
+    Kokkos::deep_copy(m_ss, 0.0);
 
     // Note - v initializes to 1.0, not 0.0!
-    for(Index_t i = 0; i < numElem(); ++i)
-    {
-        v(i) = Real_t(1.0);
-    }
+    Kokkos::deep_copy(m_v, 1.0);
 
-    for(Index_t i = 0; i < numNode(); ++i)
-    {
-        xd(i) = Real_t(0.0);
-        yd(i) = Real_t(0.0);
-        zd(i) = Real_t(0.0);
-    }
+    Kokkos::deep_copy(m_xd, 0.0);
+    Kokkos::deep_copy(m_yd, 0.0);
+    Kokkos::deep_copy(m_zd, 0.0);
 
-    for(Index_t i = 0; i < numNode(); ++i)
-    {
-        xdd(i) = Real_t(0.0);
-        ydd(i) = Real_t(0.0);
-        zdd(i) = Real_t(0.0);
-    }
+    Kokkos::deep_copy(m_xdd, 0.0);
+    Kokkos::deep_copy(m_ydd, 0.0);
+    Kokkos::deep_copy(m_zdd, 0.0);
 
-    for(Index_t i = 0; i < numNode(); ++i)
-    {
-        nodalMass(i) = Real_t(0.0);
-    }
+    Kokkos::deep_copy(m_nodalMass, 0.0);
 
     BuildMesh(nx, edgeNodes, edgeElems);
 
-#if _OPENMP
     SetupThreadSupportStructures();
-#else
-    // These arrays are not used if we're not threaded
-    m_nodeElemStart      = NULL;
-    m_nodeElemCornerList = NULL;
-#endif
 
     // Setup region index sets. For now, these are constant sized
     // throughout the run, but could be changed every cycle to
@@ -247,29 +223,45 @@ Domain::Domain(Int_t numRanks, Index_t colLoc, Index_t rowLoc, Index_t planeLoc,
     time()            = Real_t(0.);
     cycle()           = Int_t(0);
 
+    // With C++17 requirement we could just run this on the device
+    // without creating temporary host copies
+    auto h_nodelist  = Kokkos::create_mirror_view(m_nodelist);
+    auto h_x         = Kokkos::create_mirror_view(m_x);
+    auto h_y         = Kokkos::create_mirror_view(m_y);
+    auto h_z         = Kokkos::create_mirror_view(m_z);
+    auto h_volo      = Kokkos::create_mirror_view(m_volo);
+    auto h_elemMass  = Kokkos::create_mirror_view(m_elemMass);
+    auto h_nodalMass = Kokkos::create_mirror_view(m_nodalMass);
+    Kokkos::deep_copy(h_nodelist, m_nodelist);
+    Kokkos::deep_copy(h_x, m_x);
+    Kokkos::deep_copy(h_y, m_y);
+    Kokkos::deep_copy(h_z, m_z);
     // initialize field data
     for(Index_t i = 0; i < numElem(); ++i)
     {
-        Real_t   x_local[8], y_local[8], z_local[8];
-        Index_t* elemToNode = nodelist(i);
+        Real_t x_local[8], y_local[8], z_local[8];
         for(Index_t lnode = 0; lnode < 8; ++lnode)
         {
-            Index_t gnode  = elemToNode[lnode];
-            x_local[lnode] = x(gnode);
-            y_local[lnode] = y(gnode);
-            z_local[lnode] = z(gnode);
+            Index_t gnode  = h_nodelist(i, lnode);
+            x_local[lnode] = h_x(gnode);
+            y_local[lnode] = h_y(gnode);
+            z_local[lnode] = h_z(gnode);
         }
 
         // volume calculations
         Real_t volume = CalcElemVolume(x_local, y_local, z_local);
-        volo(i)       = volume;
-        elemMass(i)   = volume;
+        h_volo(i)     = volume;
+        h_elemMass(i) = volume;
         for(Index_t j = 0; j < 8; ++j)
         {
-            Index_t idx = elemToNode[j];
-            nodalMass(idx) += volume / Real_t(8.0);
+            Index_t idx = h_nodelist(i, j);
+            h_nodalMass(idx) += volume / Real_t(8.0);
         }
     }
+
+    Kokkos::deep_copy(m_volo, h_volo);
+    Kokkos::deep_copy(m_elemMass, h_elemMass);
+    Kokkos::deep_copy(m_nodalMass, h_nodalMass);
 
     // deposit initial energy
     // An energy of 3.948746e+7 is correct for a problem with
@@ -281,10 +273,11 @@ Domain::Domain(Int_t numRanks, Index_t colLoc, Index_t rowLoc, Index_t planeLoc,
     {
         // Dump into the first zone (which we know is in the corner)
         // of the domain that sits at the origin
-        e(0) = einit;
+        Kokkos::deep_copy(Kokkos::subview(m_e, 0), einit);
+        // e(0) = einit;
     }
     // set initial deltatime base on analytic CFL calculation
-    deltatime() = (Real_t(.5) * cbrt(volo(0))) / sqrt(Real_t(2.0) * einit);
+    deltatime() = (Real_t(.5) * cbrt(h_volo(0))) / sqrt(Real_t(2.0) * einit);
 
 }  // End constructor
 
@@ -315,6 +308,10 @@ Domain::BuildMesh(Int_t nx, Int_t edgeNodes, Int_t edgeElems)
 {
     Index_t meshEdgeElems = m_tp * nx;
 
+    auto h_x = Kokkos::create_mirror_view(m_x);
+    auto h_y = Kokkos::create_mirror_view(m_y);
+    auto h_z = Kokkos::create_mirror_view(m_z);
+
     // initialize nodal coordinates
     Index_t nidx = 0;
     Real_t  tz   = Real_t(1.125) * Real_t(m_planeLoc * nx) / Real_t(meshEdgeElems);
@@ -326,9 +323,9 @@ Domain::BuildMesh(Int_t nx, Int_t edgeNodes, Int_t edgeElems)
             Real_t tx = Real_t(1.125) * Real_t(m_colLoc * nx) / Real_t(meshEdgeElems);
             for(Index_t col = 0; col < edgeNodes; ++col)
             {
-                x(nidx) = tx;
-                y(nidx) = ty;
-                z(nidx) = tz;
+                h_x(nidx) = tx;
+                h_y(nidx) = ty;
+                h_z(nidx) = tz;
                 ++nidx;
                 // tx += ds ; // may accumulate roundoff...
                 tx = Real_t(1.125) * Real_t(m_colLoc * nx + col + 1) /
@@ -341,6 +338,11 @@ Domain::BuildMesh(Int_t nx, Int_t edgeNodes, Int_t edgeElems)
         tz = Real_t(1.125) * Real_t(m_planeLoc * nx + plane + 1) / Real_t(meshEdgeElems);
     }
 
+    Kokkos::deep_copy(m_x, h_x);
+    Kokkos::deep_copy(m_y, h_y);
+    Kokkos::deep_copy(m_z, h_z);
+
+    auto h_nodelist = Kokkos::create_mirror_view(m_nodelist);
     // embed hexehedral elements in nodal point lattice
     Index_t zidx = 0;
     nidx         = 0;
@@ -350,15 +352,14 @@ Domain::BuildMesh(Int_t nx, Int_t edgeNodes, Int_t edgeElems)
         {
             for(Index_t col = 0; col < edgeElems; ++col)
             {
-                Index_t* localNode = nodelist(zidx);
-                localNode[0]       = nidx;
-                localNode[1]       = nidx + 1;
-                localNode[2]       = nidx + edgeNodes + 1;
-                localNode[3]       = nidx + edgeNodes;
-                localNode[4]       = nidx + edgeNodes * edgeNodes;
-                localNode[5]       = nidx + edgeNodes * edgeNodes + 1;
-                localNode[6]       = nidx + edgeNodes * edgeNodes + edgeNodes + 1;
-                localNode[7]       = nidx + edgeNodes * edgeNodes + edgeNodes;
+                h_nodelist(zidx, 0) = nidx;
+                h_nodelist(zidx, 1) = nidx + 1;
+                h_nodelist(zidx, 2) = nidx + edgeNodes + 1;
+                h_nodelist(zidx, 3) = nidx + edgeNodes;
+                h_nodelist(zidx, 4) = nidx + edgeNodes * edgeNodes;
+                h_nodelist(zidx, 5) = nidx + edgeNodes * edgeNodes + 1;
+                h_nodelist(zidx, 6) = nidx + edgeNodes * edgeNodes + edgeNodes + 1;
+                h_nodelist(zidx, 7) = nidx + edgeNodes * edgeNodes + edgeNodes;
                 ++zidx;
                 ++nidx;
             }
@@ -366,6 +367,7 @@ Domain::BuildMesh(Int_t nx, Int_t edgeNodes, Int_t edgeElems)
         }
         nidx += edgeNodes;
     }
+    Kokkos::deep_copy(m_nodelist, h_nodelist);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -373,32 +375,31 @@ void
 Domain::SetupThreadSupportStructures()
 {
     // set up node-centered indexing of elements
-    Index_t* nodeElemCount = Allocate<Index_t>(numNode());
-
-    for(Index_t i = 0; i < numNode(); ++i)
-    {
-        nodeElemCount[i] = 0;
-    }
+    Kokkos::View<Index_t*, Kokkos::HostSpace> nodeElemCount("nodeElemCount", numNode());
+    auto h_nodelist = Kokkos::create_mirror_view(m_nodelist);
+    Kokkos::deep_copy(h_nodelist, m_nodelist);
 
     for(Index_t i = 0; i < numElem(); ++i)
     {
-        Index_t* nl = nodelist(i);
         for(Index_t j = 0; j < 8; ++j)
         {
-            ++(nodeElemCount[nl[j]]);
+            ++(nodeElemCount[h_nodelist(i, j)]);
         }
     }
 
-    m_nodeElemStart = Allocate<Index_t>(numNode() + 1);
+    m_nodeElemStart      = Kokkos::View<Index_t*>("m_nodeElemStart", numNode() + 1);
+    auto h_nodeElemStart = Kokkos::create_mirror_view(m_nodeElemStart);
 
-    m_nodeElemStart[0] = 0;
+    h_nodeElemStart[0] = 0;
 
     for(Index_t i = 1; i <= numNode(); ++i)
     {
-        m_nodeElemStart[i] = m_nodeElemStart[i - 1] + nodeElemCount[i - 1];
+        h_nodeElemStart[i] = h_nodeElemStart[i - 1] + nodeElemCount[i - 1];
     }
 
-    m_nodeElemCornerList = Allocate<Index_t>(m_nodeElemStart[numNode()]);
+    m_nodeElemCornerList =
+        Kokkos::View<Index_t*>("nodeElemCornerList", h_nodeElemStart[numNode()]);
+    auto h_nodeElemCornerList = Kokkos::create_mirror_view(m_nodeElemCornerList);
 
     for(Index_t i = 0; i < numNode(); ++i)
     {
@@ -407,21 +408,20 @@ Domain::SetupThreadSupportStructures()
 
     for(Index_t i = 0; i < numElem(); ++i)
     {
-        Index_t* nl = nodelist(i);
         for(Index_t j = 0; j < 8; ++j)
         {
-            Index_t m                    = nl[j];
+            Index_t m                    = h_nodelist(i, j);
             Index_t k                    = i * 8 + j;
-            Index_t offset               = m_nodeElemStart[m] + nodeElemCount[m];
-            m_nodeElemCornerList[offset] = k;
+            Index_t offset               = h_nodeElemStart[m] + nodeElemCount[m];
+            h_nodeElemCornerList[offset] = k;
             ++(nodeElemCount[m]);
         }
     }
 
-    Index_t clSize = m_nodeElemStart[numNode()];
+    Index_t clSize = h_nodeElemStart[numNode()];
     for(Index_t i = 0; i < clSize; ++i)
     {
-        Index_t clv = m_nodeElemCornerList[i];
+        Index_t clv = h_nodeElemCornerList[i];
         if((clv < 0) || (clv > numElem() * 8))
         {
             fprintf(
@@ -434,8 +434,8 @@ Domain::SetupThreadSupportStructures()
 #endif
         }
     }
-
-    Release<Index_t>(&nodeElemCount);
+    Kokkos::deep_copy(m_nodeElemCornerList, h_nodeElemCornerList);
+    Kokkos::deep_copy(m_nodeElemStart, h_nodeElemStart);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -486,12 +486,9 @@ Domain::SetupCommBuffers(Int_t edgeNodes)
 #endif
 
     // Boundary nodesets
-    if(m_colLoc == 0)
-        m_symmX.resize(edgeNodes * edgeNodes);
-    if(m_rowLoc == 0)
-        m_symmY.resize(edgeNodes * edgeNodes);
-    if(m_planeLoc == 0)
-        m_symmZ.resize(edgeNodes * edgeNodes);
+    if(m_colLoc == 0) Kokkos::resize(m_symmX, edgeNodes * edgeNodes);
+    if(m_rowLoc == 0) Kokkos::resize(m_symmY, edgeNodes * edgeNodes);
+    if(m_planeLoc == 0) Kokkos::resize(m_symmZ, edgeNodes * edgeNodes);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -506,9 +503,14 @@ Domain::CreateRegionIndexSets(Int_t nr, Int_t balance)
     srand(0);
     Index_t myRank = 0;
 #endif
-    this->numReg()    = nr;
-    m_regElemSize     = Allocate<Index_t>(numReg());
-    m_regElemlist     = Allocate<Index_t*>(numReg());
+    this->numReg()     = nr;
+    m_regElemSize      = Allocate<Index_t>(numReg());
+    auto row_map       = Kokkos::View<Index_t*>("regElemlist::row_map", numReg() + 1);
+    auto h_row_map     = Kokkos::create_mirror_view(row_map);
+    auto entries       = Kokkos::View<Index_t*>("regElemlist::entries", numElem());
+    m_regElemlist      = t_regElemlist(entries, row_map);
+    auto h_regElemlist = typename t_regElemlist::HostMirror(
+        Kokkos::create_mirror_view(m_regElemlist.entries), h_row_map);
     Index_t nextIndex = 0;
     // if we only have one region just fill it
     // Fill out the regNumList with material numbers, which are always
@@ -525,14 +527,14 @@ Domain::CreateRegionIndexSets(Int_t nr, Int_t balance)
     // If we have more than one region distribute the elements.
     else
     {
-        Int_t   regionNum;
-        Int_t   regionVar;
-        Int_t   lastReg = -1;
-        Int_t   binSize;
-        Index_t elements;
-        Index_t runto           = 0;
-        Int_t   costDenominator = 0;
-        Int_t*  regBinEnd       = Allocate<Int_t>(numReg());
+        Int_t                                   regionNum;
+        Int_t                                   regionVar;
+        Int_t                                   lastReg = -1;
+        Int_t                                   binSize;
+        Index_t                                 elements;
+        Index_t                                 runto           = 0;
+        Int_t                                   costDenominator = 0;
+        Kokkos::View<Int_t*, Kokkos::HostSpace> regBinEnd("regBinEnd", numReg());
         // Determine the relative weights of all the regions.  This is based off the -b
         // flag.  Balance is the value passed into b.
         for(Index_t i = 0; i < numReg(); ++i)
@@ -612,23 +614,28 @@ Domain::CreateRegionIndexSets(Int_t nr, Int_t balance)
     // Second, allocate each region index set
     for(Index_t i = 0; i < numReg(); ++i)
     {
-        m_regElemlist[i] = Allocate<Int_t>(regElemSize(i));
+        h_row_map(i + 1) = regElemSize(i);
         regElemSize(i)   = 0;
     }
     // Third, fill index sets
     for(Index_t i = 0; i < numElem(); ++i)
     {
-        Index_t r              = regNumList(i) - 1;  // region index == regnum-1
-        Index_t regndx         = regElemSize(r)++;   // Note increment
-        regElemlist(r, regndx) = i;
+        Index_t r      = regNumList(i) - 1;  // region index == regnum-1
+        Index_t regndx = regElemSize(r)++;   // Note increment
+        h_regElemlist.entries(h_row_map(r) + regndx) = i;
     }
+    Kokkos::deep_copy(m_regElemlist.entries, h_regElemlist.entries);
+    Kokkos::deep_copy(row_map, h_row_map);
 }
 
 /////////////////////////////////////////////////////////////
 void
 Domain::SetupSymmetryPlanes(Int_t edgeNodes)
 {
-    Index_t nidx = 0;
+    Index_t nidx    = 0;
+    auto    h_symmZ = Kokkos::create_mirror_view(m_symmZ);
+    auto    h_symmY = Kokkos::create_mirror_view(m_symmY);
+    auto    h_symmX = Kokkos::create_mirror_view(m_symmX);
     for(Index_t i = 0; i < edgeNodes; ++i)
     {
         Index_t planeInc = i * edgeNodes * edgeNodes;
@@ -637,55 +644,72 @@ Domain::SetupSymmetryPlanes(Int_t edgeNodes)
         {
             if(m_planeLoc == 0)
             {
-                m_symmZ[nidx] = rowInc + j;
+                h_symmZ[nidx] = rowInc + j;
             }
             if(m_rowLoc == 0)
             {
-                m_symmY[nidx] = planeInc + j;
+                h_symmY[nidx] = planeInc + j;
             }
             if(m_colLoc == 0)
             {
-                m_symmX[nidx] = planeInc + j * edgeNodes;
+                h_symmX[nidx] = planeInc + j * edgeNodes;
             }
             ++nidx;
         }
     }
+    Kokkos::deep_copy(m_symmZ, h_symmZ);
+    Kokkos::deep_copy(m_symmY, h_symmY);
+    Kokkos::deep_copy(m_symmX, h_symmX);
 }
 
 /////////////////////////////////////////////////////////////
 void
 Domain::SetupElementConnectivities(Int_t edgeElems)
 {
-    lxim(0) = 0;
+    // With C++17 we wouldn't need to do this and could run this on the GPU
+    // using class lambdas
+    auto h_lxim = Kokkos::create_mirror_view(m_lxim);
+    auto h_lxip = Kokkos::create_mirror_view(m_lxip);
+    h_lxim(0)   = 0;
     for(Index_t i = 1; i < numElem(); ++i)
     {
-        lxim(i)     = i - 1;
-        lxip(i - 1) = i;
+        h_lxim(i)     = i - 1;
+        h_lxip(i - 1) = i;
     }
-    lxip(numElem() - 1) = numElem() - 1;
+    h_lxip(numElem() - 1) = numElem() - 1;
+    Kokkos::deep_copy(m_lxim, h_lxim);
+    Kokkos::deep_copy(m_lxip, h_lxip);
 
+    auto h_letam = Kokkos::create_mirror_view(m_letam);
+    auto h_letap = Kokkos::create_mirror_view(m_letap);
     for(Index_t i = 0; i < edgeElems; ++i)
     {
-        letam(i)                         = i;
-        letap(numElem() - edgeElems + i) = numElem() - edgeElems + i;
+        h_letam(i)                         = i;
+        h_letap(numElem() - edgeElems + i) = numElem() - edgeElems + i;
     }
     for(Index_t i = edgeElems; i < numElem(); ++i)
     {
-        letam(i)             = i - edgeElems;
-        letap(i - edgeElems) = i;
+        h_letam(i)             = i - edgeElems;
+        h_letap(i - edgeElems) = i;
     }
+    Kokkos::deep_copy(m_letam, h_letam);
+    Kokkos::deep_copy(m_letap, h_letap);
 
+    auto h_lzetam = Kokkos::create_mirror_view(m_lzetam);
+    auto h_lzetap = Kokkos::create_mirror_view(m_lzetap);
     for(Index_t i = 0; i < edgeElems * edgeElems; ++i)
     {
-        lzetam(i) = i;
-        lzetap(numElem() - edgeElems * edgeElems + i) =
+        h_lzetam(i) = i;
+        h_lzetap(numElem() - edgeElems * edgeElems + i) =
             numElem() - edgeElems * edgeElems + i;
     }
     for(Index_t i = edgeElems * edgeElems; i < numElem(); ++i)
     {
-        lzetam(i)                         = i - edgeElems * edgeElems;
-        lzetap(i - edgeElems * edgeElems) = i;
+        h_lzetam(i)                         = i - edgeElems * edgeElems;
+        h_lzetap(i - edgeElems * edgeElems) = i;
     }
+    Kokkos::deep_copy(m_lzetam, h_lzetam);
+    Kokkos::deep_copy(m_lzetap, h_lzetap);
 }
 
 /////////////////////////////////////////////////////////////
@@ -693,11 +717,24 @@ void
 Domain::SetupBoundaryConditions(Int_t edgeElems)
 {
     Index_t ghostIdx[6];  // offsets to ghost locations
+    auto    h_elemBC = Kokkos::create_mirror_view(m_elemBC);
+    auto    h_lzetam = Kokkos::create_mirror_view(m_lzetam);
+    auto    h_lzetap = Kokkos::create_mirror_view(m_lzetap);
+    auto    h_letam  = Kokkos::create_mirror_view(m_letam);
+    auto    h_letap  = Kokkos::create_mirror_view(m_letap);
+    auto    h_lxim   = Kokkos::create_mirror_view(m_lxim);
+    auto    h_lxip   = Kokkos::create_mirror_view(m_lxip);
+    Kokkos::deep_copy(h_lzetam, m_lzetam);
+    Kokkos::deep_copy(h_lzetap, m_lzetap);
+    Kokkos::deep_copy(h_letam, m_letam);
+    Kokkos::deep_copy(h_letap, m_letap);
+    Kokkos::deep_copy(h_lxim, m_lxim);
+    Kokkos::deep_copy(h_lxip, m_lxip);
 
     // set up boundary condition information
     for(Index_t i = 0; i < numElem(); ++i)
     {
-        elemBC(i) = Int_t(0);
+        h_elemBC(i) = Int_t(0);
     }
 
     for(Index_t i = 0; i < 6; ++i)
@@ -750,67 +787,75 @@ Domain::SetupBoundaryConditions(Int_t edgeElems)
         {
             if(m_planeLoc == 0)
             {
-                elemBC(rowInc + j) |= ZETA_M_SYMM;
+                h_elemBC(rowInc + j) |= ZETA_M_SYMM;
             }
             else
             {
-                elemBC(rowInc + j) |= ZETA_M_COMM;
-                lzetam(rowInc + j) = ghostIdx[0] + rowInc + j;
+                h_elemBC(rowInc + j) |= ZETA_M_COMM;
+                h_lzetam(rowInc + j) = ghostIdx[0] + rowInc + j;
             }
 
             if(m_planeLoc == m_tp - 1)
             {
-                elemBC(rowInc + j + numElem() - edgeElems * edgeElems) |= ZETA_P_FREE;
+                h_elemBC(rowInc + j + numElem() - edgeElems * edgeElems) |= ZETA_P_FREE;
             }
             else
             {
-                elemBC(rowInc + j + numElem() - edgeElems * edgeElems) |= ZETA_P_COMM;
-                lzetap(rowInc + j + numElem() - edgeElems * edgeElems) =
+                h_elemBC(rowInc + j + numElem() - edgeElems * edgeElems) |= ZETA_P_COMM;
+                h_lzetap(rowInc + j + numElem() - edgeElems * edgeElems) =
                     ghostIdx[1] + rowInc + j;
             }
 
             if(m_rowLoc == 0)
             {
-                elemBC(planeInc + j) |= ETA_M_SYMM;
+                h_elemBC(planeInc + j) |= ETA_M_SYMM;
             }
             else
             {
-                elemBC(planeInc + j) |= ETA_M_COMM;
-                letam(planeInc + j) = ghostIdx[2] + rowInc + j;
+                h_elemBC(planeInc + j) |= ETA_M_COMM;
+                h_letam(planeInc + j) = ghostIdx[2] + rowInc + j;
             }
 
             if(m_rowLoc == m_tp - 1)
             {
-                elemBC(planeInc + j + edgeElems * edgeElems - edgeElems) |= ETA_P_FREE;
+                h_elemBC(planeInc + j + edgeElems * edgeElems - edgeElems) |= ETA_P_FREE;
             }
             else
             {
-                elemBC(planeInc + j + edgeElems * edgeElems - edgeElems) |= ETA_P_COMM;
-                letap(planeInc + j + edgeElems * edgeElems - edgeElems) =
+                h_elemBC(planeInc + j + edgeElems * edgeElems - edgeElems) |= ETA_P_COMM;
+                h_letap(planeInc + j + edgeElems * edgeElems - edgeElems) =
                     ghostIdx[3] + rowInc + j;
             }
 
             if(m_colLoc == 0)
             {
-                elemBC(planeInc + j * edgeElems) |= XI_M_SYMM;
+                h_elemBC(planeInc + j * edgeElems) |= XI_M_SYMM;
             }
             else
             {
-                elemBC(planeInc + j * edgeElems) |= XI_M_COMM;
-                lxim(planeInc + j * edgeElems) = ghostIdx[4] + rowInc + j;
+                h_elemBC(planeInc + j * edgeElems) |= XI_M_COMM;
+                h_lxim(planeInc + j * edgeElems) = ghostIdx[4] + rowInc + j;
             }
 
             if(m_colLoc == m_tp - 1)
             {
-                elemBC(planeInc + j * edgeElems + edgeElems - 1) |= XI_P_FREE;
+                h_elemBC(planeInc + j * edgeElems + edgeElems - 1) |= XI_P_FREE;
             }
             else
             {
-                elemBC(planeInc + j * edgeElems + edgeElems - 1) |= XI_P_COMM;
-                lxip(planeInc + j * edgeElems + edgeElems - 1) = ghostIdx[5] + rowInc + j;
+                h_elemBC(planeInc + j * edgeElems + edgeElems - 1) |= XI_P_COMM;
+                h_lxip(planeInc + j * edgeElems + edgeElems - 1) =
+                    ghostIdx[5] + rowInc + j;
             }
         }
     }
+    Kokkos::deep_copy(m_elemBC, h_elemBC);
+    Kokkos::deep_copy(m_lzetam, h_lzetam);
+    Kokkos::deep_copy(m_lzetap, h_lzetap);
+    Kokkos::deep_copy(m_letam, h_letam);
+    Kokkos::deep_copy(m_letap, h_letap);
+    Kokkos::deep_copy(m_lxim, h_lxim);
+    Kokkos::deep_copy(m_lxip, h_lxip);
 }
 
 ///////////////////////////////////////////////////////////////////////////

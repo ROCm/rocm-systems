@@ -31,7 +31,25 @@ enum class State : unsigned short
 {
     DelayedInit = 0,
     PreInit,
+    Init,
     Active,
     Finalized
 };
+
+enum class Mode : unsigned short
+{
+    Trace = 0,
+    Sampling
+};
 }  // namespace omnitrace
+
+#include <string>
+
+namespace std
+{
+std::string
+to_string(omnitrace::State _v);
+
+std::string
+to_string(omnitrace::Mode _v);
+}  // namespace std

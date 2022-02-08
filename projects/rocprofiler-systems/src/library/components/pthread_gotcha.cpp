@@ -21,10 +21,13 @@
 // SOFTWARE.
 
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/omnitrace.hpp"
+#include "library/components/roctracer.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/sampling.hpp"
 
+#include <ostream>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/utility/types.hpp>
 
@@ -40,6 +43,47 @@ std::set<int>
 shutdown();
 }  // namespace sampling
 
+namespace mpl = tim::mpl;
+
+using bundle_t  = tim::lightweight_tuple<comp::wall_clock, comp::roctracer_data>;
+using wall_pw_t = mpl::piecewise_select<comp::wall_clock>;  // only wall-clock
+using main_pw_t = mpl::piecewise_ignore<comp::wall_clock>;  // exclude wall-clock
+using omni_pw_t = mpl::piecewise_select<>;
+
+namespace
+{
+std::map<int64_t, std::shared_ptr<bundle_t>> bundles = {};
+std::mutex                                   bundles_mutex{};
+
+inline void
+start_bundle(bundle_t& _bundle)
+{
+    if(comp::roctracer::is_setup())
+    {
+        _bundle.push(main_pw_t{});
+        _bundle.start();
+    }
+    else
+    {
+        _bundle.push(omni_pw_t{});
+        _bundle.start(omni_pw_t{});
+    }
+}
+
+inline void
+stop_bundle(bundle_t& _bundle, int64_t _tid)
+{
+    _bundle.stop(wall_pw_t{});  // stop wall-clock so we can get the value
+    // update roctracer_data
+    _bundle.store(std::plus<double>{},
+                  _bundle.get<comp::wall_clock>()->get() * units::sec);
+    // stop all other components including roctracer_data after update
+    _bundle.stop(main_pw_t{});
+    // exclude popping wall-clock
+    _bundle.pop(main_pw_t{}, _tid);
+}
+}  // namespace
+
 pthread_gotcha::wrapper::wrapper(routine_t _routine, void* _arg, bool _enable_sampling,
                                  promise_t* _p)
 : m_enable_sampling{ _enable_sampling }
@@ -51,10 +95,41 @@ pthread_gotcha::wrapper::wrapper(routine_t _routine, void* _arg, bool _enable_sa
 void*
 pthread_gotcha::wrapper::operator()() const
 {
-    std::set<int> _signals{};
-    auto&         _enable_sampling = pthread_gotcha::enable_sampling_on_child_threads();
-    if(m_enable_sampling && _enable_sampling)
+    std::shared_ptr<bundle_t> _bundle{};
+    std::set<int>             _signals{};
+    auto&   _enable_sampling = pthread_gotcha::enable_sampling_on_child_threads();
+    auto    _active          = (get_state() == omnitrace::State::Active);
+    int64_t _tid             = -1;
+    auto    _is_sampling     = false;
+    auto    _dtor            = scope::destructor{ [&]() {
+        if(_is_sampling)
+        {
+            sampling::block_signals(_signals);
+            sampling::shutdown();
+        }
+
+        if(_bundle)
+        {
+            std::unique_lock<std::mutex> _lk{ bundles_mutex };
+            stop_bundle(*_bundle, _tid);
+            _bundle.reset();
+            bundles.erase(_tid);
+        }
+    } };
+
+    if(m_enable_sampling && _enable_sampling && _active)
     {
+        _tid = threading::get_id();
+        threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid).c_str());
+        {
+            std::unique_lock<std::mutex> _lk{ bundles_mutex };
+            if(comp::roctracer::is_setup())
+                _bundle =
+                    bundles.emplace(_tid, std::make_shared<bundle_t>("start_thread"))
+                        .first->second;
+        }
+        if(_bundle) start_bundle(*_bundle);
+        _is_sampling     = true;
         _enable_sampling = false;
         _signals         = sampling::setup();
         _enable_sampling = true;
@@ -64,15 +139,7 @@ pthread_gotcha::wrapper::operator()() const
     if(m_promise) m_promise->set_value();
 
     // execute the original function
-    auto* _ret = m_routine(m_arg);
-
-    if(m_enable_sampling && _enable_sampling)
-    {
-        sampling::block_signals(_signals);
-        sampling::shutdown();
-    }
-
-    return _ret;
+    return m_routine(m_arg);
 }
 
 void*
@@ -95,6 +162,27 @@ pthread_gotcha::configure()
     };
 }
 
+void
+pthread_gotcha::shutdown()
+{
+    std::unique_lock<std::mutex> _lk{ bundles_mutex };
+    unsigned long                _ndangling = 0;
+    for(auto itr : bundles)
+    {
+        if(itr.second)
+        {
+            stop_bundle(*itr.second, itr.first);
+            ++_ndangling;
+        }
+        itr.second.reset();
+    }
+
+    OMNITRACE_CONDITIONAL_PRINT(
+        (get_verbose() > 0 || get_debug()) && _ndangling > 0,
+        "pthread_gotcha::shutdown() cleaned up %lu dangling bundles\n", _ndangling);
+    bundles.clear();
+}
+
 bool&
 pthread_gotcha::enable_sampling_on_child_threads()
 {
@@ -107,13 +195,18 @@ int
 pthread_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
                            void* (*start_routine)(void*), void*     arg) const
 {
-    auto _enable_sampling = enable_sampling_on_child_threads();
+    bundle_t _bundle{ "pthread_create" };
+    auto     _enable_sampling = enable_sampling_on_child_threads();
 
-    if(!_enable_sampling)
+    if(!get_use_sampling() || !_enable_sampling)
     {
+        // if(!get_use_sampling()) start_bundle(_bundle);
         auto* _obj = new wrapper(start_routine, arg, _enable_sampling, nullptr);
         // create the thread
-        return pthread_create(thread, attr, &wrapper::wrap, static_cast<void*>(_obj));
+        auto _ret =
+            pthread_create(thread, attr, &wrapper::wrap, static_cast<void*>(_obj));
+        // if(!get_use_sampling()) stop_bundle(_bundle, threading::get_id());
+        return _ret;
     }
 
     // block the signals in entire process
@@ -121,17 +214,21 @@ pthread_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     tim::sampling::block_signals({ SIGALRM, SIGPROF },
                                  tim::sampling::sigmask_scope::process);
 
+    start_bundle(_bundle);
+
     // promise set by thread when signal handler is configured
     auto  _promise = std::promise<void>{};
     auto  _fut     = _promise.get_future();
-    auto* _obj     = new wrapper(start_routine, arg, _enable_sampling, &_promise);
+    auto* _wrap    = new wrapper(start_routine, arg, _enable_sampling, &_promise);
 
     // create the thread
-    auto _ret = pthread_create(thread, attr, &wrapper::wrap, static_cast<void*>(_obj));
+    auto _ret = pthread_create(thread, attr, &wrapper::wrap, static_cast<void*>(_wrap));
 
     // wait for thread to set promise
     OMNITRACE_DEBUG("waiting for child to signal it is setup...\n");
     _fut.wait();
+
+    stop_bundle(_bundle, threading::get_id());
 
     // unblock the signals in the entire process
     OMNITRACE_DEBUG("unblocking signals...\n");

@@ -55,8 +55,6 @@ add_critical_trace(int64_t _tid, size_t _cpu_cid, size_t _gpu_cid, size_t _paren
                    int64_t _ts_beg, int64_t _ts_val, size_t _hash, uint16_t _depth,
                    uint16_t _prio = 0)
 {
-    if(!get_use_critical_trace()) return;
-
     // clang-format off
     // these are used to create unique type mutexes
     struct critical_insert {};

@@ -31,6 +31,7 @@
 #include "library/defines.hpp"
 #include "library/state.hpp"
 #include "library/timemory.hpp"
+#include "timemory/macros/language.hpp"
 
 #include <timemory/backends/threading.hpp>
 
@@ -43,10 +44,9 @@ namespace omnitrace
 // bundle of components around omnitrace_init and omnitrace_finalize
 using main_bundle_t =
     tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::cpu_clock,
-                           comp::cpu_util, comp::roctracer>;
+                           comp::cpu_util, pthread_gotcha_t>;
 
-using gotcha_bundle_t =
-    tim::lightweight_tuple<fork_gotcha_t, mpi_gotcha_t, pthread_gotcha_t>;
+using gotcha_bundle_t = tim::lightweight_tuple<fork_gotcha_t, mpi_gotcha_t>;
 
 // bundle of components used in instrumentation
 using instrumentation_bundle_t =
@@ -69,16 +69,35 @@ using omnitrace_thread_bundle_t =
 //
 //      Initialization routines
 //
+inline namespace config
+{
 void
-configure_settings() TIMEMORY_VISIBILITY("default");
+configure_settings();
 
 void
-print_config_settings(
+print_banner(std::ostream& _os = std::cout);
+
+void
+print_settings(
     std::ostream&                                                                _os,
     std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter);
 
+void
+print_settings();
+
 std::string&
 get_exe_name();
+
+template <typename Tp>
+bool
+set_setting_value(const std::string& _name, Tp&& _v)
+{
+    auto _instance = tim::settings::shared_instance();
+    auto _setting  = _instance->find(_name);
+    if(_setting == _instance->end()) return false;
+    if(!_setting->second) return false;
+    return _setting->second->set(std::forward<Tp>(_v));
+}
 
 //
 //      User-configurable settings
@@ -86,8 +105,26 @@ get_exe_name();
 std::string
 get_config_file();
 
+Mode
+get_mode();
+
+bool&
+is_attached();
+
+bool&
+is_binary_rewrite();
+
+bool
+get_is_continuous_integration();
+
 bool
 get_debug_env();
+
+bool
+get_debug_init();
+
+bool
+get_debug_finalize();
 
 bool
 get_debug();
@@ -114,6 +151,9 @@ bool&
 get_use_roctracer();
 
 bool&
+get_use_rocm_smi();
+
+bool&
 get_use_sampling();
 
 bool&
@@ -124,6 +164,9 @@ get_use_mpip();
 
 bool&
 get_use_critical_trace();
+
+bool
+get_use_kokkosp();
 
 bool
 get_timeline_sampling();
@@ -167,8 +210,9 @@ get_trace_hsa_api_types();
 std::string&
 get_backend();
 
+// make this visible so omnitrace-avail can call it
 std::string&
-get_perfetto_output_filename();
+get_perfetto_output_filename() TIMEMORY_VISIBILITY("default");
 
 int64_t
 get_critical_trace_count();
@@ -182,8 +226,15 @@ get_sampling_freq();
 double&
 get_sampling_delay();
 
+double&
+get_rocm_smi_freq();
+
+std::string
+get_rocm_smi_devices();
+
 int64_t
 get_critical_trace_per_row();
+}  // namespace config
 
 //
 //      Runtime configuration data

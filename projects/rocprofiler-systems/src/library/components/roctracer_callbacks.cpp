@@ -24,6 +24,7 @@
 #include "library.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
+#include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 
 #include <timemory/backends/threading.hpp>
@@ -46,7 +47,7 @@ auto&
 get_roctracer_hip_data(int64_t _tid = threading::get_id())
 {
     using data_t        = std::unordered_map<uint64_t, roctracer_bundle_t>;
-    using thread_data_t = omnitrace_thread_data<data_t, api::roctracer>;
+    using thread_data_t = thread_data<data_t, api::roctracer>;
     static auto& _v     = thread_data_t::instances(thread_data_t::construct_on_init{});
     return _v.at(_tid);
 }
@@ -76,9 +77,8 @@ get_roctracer_cid_data()
 auto&
 get_hip_activity_callbacks(int64_t _tid = threading::get_id())
 {
-    using thread_data_t =
-        omnitrace_thread_data<std::vector<std::function<void()>>, api::roctracer>;
-    static auto& _v = thread_data_t::instances(thread_data_t::construct_on_init{});
+    using thread_data_t = thread_data<std::vector<std::function<void()>>, api::roctracer>;
+    static auto& _v     = thread_data_t::instances(thread_data_t::construct_on_init{});
     return _v.at(_tid);
 }
 
@@ -214,10 +214,16 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 void
 hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
 {
+    if(get_state() != State::Active || !trait::runtime_enabled<comp::roctracer>::get())
+        return;
+
     static const char* copy_op_name     = "hsa_async_copy";
     static const char* dispatch_op_name = "hsa_dispatch";
     static const char* barrier_op_name  = "hsa_barrier";
     const char**       _name            = nullptr;
+
+    static thread_local auto _once = (threading::set_thread_name("omni.roctracer"), true);
+    (void) _once;
 
     switch(op)
     {
@@ -318,7 +324,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                                           data->args.hipLaunchKernel.stream);
                 if(_name != nullptr)
                 {
-                    if(get_use_perfetto() || get_use_timemory())
+                    if(get_use_perfetto() || get_use_timemory() || get_use_rocm_smi())
                     {
                         tim::auto_lock_t _lk{ tim::type_mutex<key_data_mutex_t>() };
                         get_roctracer_key_data().emplace(data->correlation_id, _name);
@@ -333,7 +339,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                 const char* _name = hipKernelNameRef(data->args.hipModuleLaunchKernel.f);
                 if(_name != nullptr)
                 {
-                    if(get_use_perfetto() || get_use_timemory())
+                    if(get_use_perfetto() || get_use_timemory() || get_use_rocm_smi())
                     {
                         tim::auto_lock_t _lk{ tim::type_mutex<key_data_mutex_t>() };
                         get_roctracer_key_data().emplace(data->correlation_id, _name);
@@ -345,7 +351,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
             }
             default:
             {
-                if(get_use_perfetto() || get_use_timemory())
+                if(get_use_perfetto() || get_use_timemory() || get_use_rocm_smi())
                 {
                     tim::auto_lock_t _lk{ tim::type_mutex<key_data_mutex_t>() };
                     get_roctracer_key_data().emplace(data->correlation_id, op_name);
@@ -373,7 +379,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                 get_roctracer_hip_data()->erase(itr.first);
             }
         }
-        if(get_use_critical_trace())
+        if(get_use_critical_trace() || get_use_rocm_smi())
         {
             auto     _cid        = get_cpu_cid()++;
             uint16_t _depth      = (get_cpu_cid_stack()->empty())
@@ -422,7 +428,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                 }
             }
         }
-        if(get_use_critical_trace())
+        if(get_use_critical_trace() || get_use_rocm_smi())
         {
             uint16_t _depth      = 0;
             uint64_t _cid        = 0;
@@ -445,6 +451,14 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 void
 hip_activity_callback(const char* begin, const char* end, void*)
 {
+    if(get_state() != State::Active || !trait::runtime_enabled<comp::roctracer>::get())
+        return;
+
+    sampling::block_signals();
+
+    static thread_local auto _once = (threading::set_thread_name("omni.roctracer"), true);
+    (void) _once;
+
     using Device = critical_trace::Device;
     using Phase  = critical_trace::Phase;
 
@@ -494,7 +508,7 @@ hip_activity_callback(const char* begin, const char* end, void*)
         auto        _laps           = _indexes[_corr_id]++;  // see note #1
         const char* _name           = nullptr;
         bool        _found          = false;
-        bool        _critical_trace = get_use_critical_trace();
+        bool        _critical_trace = get_use_critical_trace() || get_use_rocm_smi();
 
         {
             tim::auto_lock_t _lk{ tim::type_mutex<key_data_mutex_t>() };
@@ -597,7 +611,7 @@ roctracer_setup_routines()
 }
 
 roctracer_functions_t&
-roctracer_tear_down_routines()
+roctracer_shutdown_routines()
 {
     static auto _v = roctracer_functions_t{};
     return _v;

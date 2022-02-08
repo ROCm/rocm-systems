@@ -26,7 +26,29 @@ endif()
 set(_base_environment
     "OMNITRACE_USE_PERFETTO=ON"
     "OMNITRACE_USE_TIMEMORY=ON"
-    "OMNITRACE_USE_SAMPLING=OFF"
+    "OMNITRACE_USE_SAMPLING=ON"
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMP_PROC_BIND=spread"
+    "OMP_PLACES=threads"
+    "OMP_NUM_THREADS=2"
+    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
+
+set(_perfetto_environment
+    "OMNITRACE_USE_PERFETTO=ON"
+    "OMNITRACE_USE_TIMEMORY=OFF"
+    "OMNITRACE_USE_SAMPLING=ON"
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMP_PROC_BIND=spread"
+    "OMP_PLACES=threads"
+    "OMP_NUM_THREADS=2"
+    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
+
+set(_timemory_environment
+    "OMNITRACE_USE_PERFETTO=OFF"
+    "OMNITRACE_USE_TIMEMORY=ON"
+    "OMNITRACE_USE_SAMPLING=ON"
     "OMNITRACE_TIME_OUTPUT=OFF"
     "OMP_PROC_BIND=spread"
     "OMP_PLACES=threads"
@@ -48,12 +70,15 @@ set(_fast_environment
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
     )
 
+# -------------------------------------------------------------------------------------- #
+
 function(OMNITRACE_ADD_TEST)
     cmake_parse_arguments(
         TEST
         "" # options
-        "NAME;TARGET;MPI;NUM_PROCS" # single value args
-        "REWRITE_ARGS;RUNTIME_ARGS;RUN_ARGS;ENVIRONMENT;LABELS" # multiple value args
+        "NAME;TARGET;MPI;NUM_PROCS;REWRITE_TIMEOUT;RUNTIME_TIMEOUT" # single value args
+        "REWRITE_ARGS;RUNTIME_ARGS;RUN_ARGS;ENVIRONMENT;LABELS;PROPERTIES" # multiple
+                                                                           # value args
         ${ARGN})
 
     if("${TEST_MPI}" STREQUAL "")
@@ -68,9 +93,19 @@ function(OMNITRACE_ADD_TEST)
         set(TEST_NUM_PROCS 0)
     endif()
 
+    if(NOT TEST_REWRITE_TIMEOUT)
+        set(TEST_REWRITE_TIMEOUT 120)
+    endif()
+
+    if(NOT TEST_RUNTIME_TIMEOUT)
+        set(TEST_RUNTIME_TIMEOUT 300)
+    endif()
+
     if(NOT DEFINED TEST_ENVIRONMENT OR "${TEST_ENVIRONMENT}" STREQUAL "")
         set(TEST_ENVIRONMENT "${_test_environment}")
     endif()
+
+    list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON")
 
     if(TARGET ${TEST_TARGET})
         if(DEFINED TEST_MPI
@@ -88,14 +123,14 @@ function(OMNITRACE_ADD_TEST)
 
         add_test(
             NAME ${TEST_NAME}-baseline
-            COMMAND $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
+            COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
             WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
 
         add_test(
             NAME ${TEST_NAME}-binary-rewrite
             COMMAND
                 $<TARGET_FILE:omnitrace-exe> -o
-                $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_TARGET}.inst ${TEST_REWRITE_ARGS}
+                $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst ${TEST_REWRITE_ARGS}
                 -- $<TARGET_FILE:${TEST_TARGET}>
             WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
 
@@ -103,20 +138,20 @@ function(OMNITRACE_ADD_TEST)
             NAME ${TEST_NAME}-binary-rewrite-sampling
             COMMAND
                 $<TARGET_FILE:omnitrace-exe> -o
-                $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_TARGET}.samp -M sampling
+                $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp -M sampling
                 ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
             WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
 
         add_test(
             NAME ${TEST_NAME}-binary-rewrite-run
-            COMMAND ${COMMAND_PREFIX}
-                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_TARGET}.inst ${TEST_RUN_ARGS}
+            COMMAND ${COMMAND_PREFIX} $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
+                    ${TEST_RUN_ARGS}
             WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
 
         add_test(
             NAME ${TEST_NAME}-binary-rewrite-run-sampling
-            COMMAND ${COMMAND_PREFIX}
-                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_TARGET}.samp ${TEST_RUN_ARGS}
+            COMMAND ${COMMAND_PREFIX} $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp
+                    ${TEST_RUN_ARGS}
             WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
 
         add_test(
@@ -127,10 +162,8 @@ function(OMNITRACE_ADD_TEST)
 
         add_test(
             NAME ${TEST_NAME}-runtime-instrument-sampling
-            COMMAND
-                $<TARGET_FILE:omnitrace-exe> -M sampling --env
-                OMNITRACE_OUTPUT_PREFIX=sampling- ${TEST_RUNTIME_ARGS} --
-                $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
+            COMMAND $<TARGET_FILE:omnitrace-exe> -M sampling ${TEST_RUNTIME_ARGS} --
+                    $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
             WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
 
         set_tests_properties(${TEST_NAME}-binary-rewrite-run
@@ -143,36 +176,52 @@ function(OMNITRACE_ADD_TEST)
             _TEST
             baseline binary-rewrite binary-rewrite-run binary-rewrite-sampling
             binary-rewrite-run-sampling runtime-instrument runtime-instrument-sampling)
-            string(REPLACE "-run-" "-" _PREFIX "${TEST_NAME}-${_TEST}-")
+            string(REPLACE "-run-" "-" _prefix "${TEST_NAME}-${_TEST}-")
             set(_environ "${TEST_ENVIRONMENT}")
+            set(_labels "${_TEST}")
+            set(_timeout ${TEST_REWRITE_TIMEOUT})
             list(APPEND _environ "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
-                 "OMNITRACE_OUTPUT_PREFIX=${_PREFIX}")
-            set(_LABELS "${_TEST}")
-            string(REPLACE "-run" "" _LABELS "${_TEST}")
-            string(REPLACE "-sampling" ";sampling" _LABELS "${_LABELS}")
-            set_tests_properties(
-                ${TEST_NAME}-${_TEST} PROPERTIES ENVIRONMENT "${_environ}" TIMEOUT 600
-                                                 LABELS "${_LABELS};${TEST_LABELS}")
+                 "OMNITRACE_OUTPUT_PREFIX=${_prefix}")
+            string(REPLACE "-run" "" _labels "${_TEST}")
+            string(REPLACE "-sampling" ";sampling" _labels "${_labels}")
+            if("${_TEST}" MATCHES "runtime-instrument")
+                set(_timeout ${TEST_RUNTIME_TIMEOUT})
+            endif()
+            set(_props)
+            if("${_TEST}" MATCHES "run|baseline")
+                set(_props ${TEST_PROPERTIES})
+                if(NOT "RUN_SERIAL" IN_LIST _props)
+                    list(APPEND _props RUN_SERIAL ON)
+                endif()
+            endif()
+            if(TEST ${TEST_NAME}-${_TEST})
+                set_tests_properties(
+                    ${TEST_NAME}-${_TEST}
+                    PROPERTIES ENVIRONMENT "${_environ}" TIMEOUT ${_timeout} LABELS
+                               "${_labels};${TEST_LABELS}" ${_props})
+            endif()
         endforeach()
     endif()
 endfunction()
+
+# -------------------------------------------------------------------------------------- #
 
 omnitrace_add_test(
     NAME transpose
     TARGET transpose
     MPI ${TRANSPOSE_USE_MPI}
     NUM_PROCS ${NUM_PROCS}
-    REWRITE_ARGS -e -v 1
+    REWRITE_ARGS -e -v 2
     RUNTIME_ARGS -e -v 1 --label file line return args
     RUN_ARGS ""
-    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=ON")
+    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
 
 omnitrace_add_test(
     NAME transpose-no-save-fpr
     TARGET transpose
     MPI ${TRANSPOSE_USE_MPI}
     NUM_PROCS ${NUM_PROCS}
-    REWRITE_ARGS -e -v 1 --dyninst-options DelayedParsing TypeChecking
+    REWRITE_ARGS -e -v 2 --dyninst-options DelayedParsing TypeChecking
     RUNTIME_ARGS
         -e
         -v
@@ -191,7 +240,7 @@ omnitrace_add_test(
 omnitrace_add_test(
     NAME parallel-overhead
     TARGET parallel-overhead
-    REWRITE_ARGS -e -v 1 --min-address-range-loop=64
+    REWRITE_ARGS -e -v 2 --min-address-range-loop=64
     RUNTIME_ARGS
         -e
         -v
@@ -202,13 +251,13 @@ omnitrace_add_test(
         line
         return
         args
-    RUN_ARGS 10 ${NUM_THREADS}
+    RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
 
 omnitrace_add_test(
     NAME parallel-overhead-no-save-fpr
     TARGET parallel-overhead
-    REWRITE_ARGS -e -v 1 --min-address-range-loop=32 --dyninst-options DelayedParsing
+    REWRITE_ARGS -e -v 2 --min-address-range-loop=32 --dyninst-options DelayedParsing
                  TypeChecking
     RUNTIME_ARGS
         -e
@@ -223,7 +272,7 @@ omnitrace_add_test(
         --dyninst-options
         DelayedParsing
         TypeChecking
-    RUN_ARGS 10 ${NUM_THREADS}
+    RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_fast_environment}")
 
 omnitrace_add_test(
@@ -231,7 +280,7 @@ omnitrace_add_test(
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
     NUM_PROCS 8
-    REWRITE_ARGS -e -v 1
+    REWRITE_ARGS -e -v 2
     RUNTIME_ARGS
         -e
         -v
@@ -242,6 +291,69 @@ omnitrace_add_test(
         return
         args
         -ME
-        [==['lib(gomp|m-)']==]
+        [==[lib(gomp|m-)]==]
     RUN_ARGS -i 10 -s 20 -p
-    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
+    ENVIRONMENT
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF")
+
+omnitrace_add_test(
+    NAME lulesh-kokkosp
+    TARGET lulesh
+    MPI ${LULESH_USE_MPI}
+    NUM_PROCS 8
+    REWRITE_ARGS -e -v 2
+    RUNTIME_ARGS
+        -e
+        -v
+        1
+        --label
+        file
+        line
+        return
+        args
+        -ME
+        [==[lib(gomp|m-)]==]
+    RUN_ARGS -i 10 -s 20 -p
+    ENVIRONMENT
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON")
+
+omnitrace_add_test(
+    NAME lulesh-perfetto
+    TARGET lulesh
+    MPI ${LULESH_USE_MPI}
+    NUM_PROCS 8
+    REWRITE_ARGS -e -v 2
+    RUNTIME_ARGS
+        -e
+        -v
+        1
+        -l
+        --dynamic-callsites
+        --traps
+        --allow-overlapping
+        -ME
+        [==[libgomp]==]
+    RUN_ARGS -i 10 -s 20 -p
+    ENVIRONMENT
+        "${_perfetto_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF")
+
+omnitrace_add_test(
+    NAME lulesh-timemory
+    TARGET lulesh
+    MPI ${LULESH_USE_MPI}
+    NUM_PROCS 8
+    REWRITE_ARGS -e -v 2 -l --dynamic-callsites --traps --allow-overlapping
+    RUNTIME_ARGS
+        -e
+        -v
+        1
+        -l
+        --dynamic-callsites
+        -ME
+        [==[libgomp]==]
+        -d
+        wall_clock
+        peak_rss
+    RUN_ARGS -i 10 -s 20 -p
+    ENVIRONMENT
+        "${_timemory_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF")

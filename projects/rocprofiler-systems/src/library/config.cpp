@@ -54,12 +54,30 @@ get_config()
     (void) _once;
 }
 
+std::string
+get_setting_name(std::string _v)
+{
+    static const auto _prefix = tim::string_view_t{ "omnitrace_" };
+    for(auto& itr : _v)
+        itr = tolower(itr);
+    auto _pos = _v.find(_prefix);
+    if(_pos == 0) return _v.substr(_prefix.length());
+    return _v;
+}
+
 #define OMNITRACE_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)        \
-    _config->insert<TYPE, TYPE>(                                                         \
-        ENV_NAME, ENV_NAME, DESCRIPTION, INITIAL_VALUE,                                  \
-        std::set<std::string>{ "custom", "omnitrace", __VA_ARGS__ })
+    {                                                                                    \
+        auto _ret = _config->insert<TYPE, TYPE>(                                         \
+            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, INITIAL_VALUE,            \
+            std::set<std::string>{ "custom", "omnitrace", __VA_ARGS__ });                \
+        if(!_ret.second)                                                                 \
+            OMNITRACE_PRINT("Warning! Duplicate setting: %s / %s\n",                     \
+                            get_setting_name(ENV_NAME).c_str(), ENV_NAME);               \
+    }
 }  // namespace
 
+inline namespace config
+{
 void
 configure_settings()
 {
@@ -67,24 +85,23 @@ configure_settings()
     if(_once) return;
     _once = true;
 
+    OMNITRACE_CONDITIONAL_THROW(
+        get_state() < State::Init,
+        "config::configure_settings() called before omnitrace_init_library. state = %s",
+        std::to_string(get_state()).c_str());
+
+    OMNITRACE_CONDITIONAL_THROW(
+        get_state() > State::Init,
+        "config::configure_settings() called after omnitrace was initialized. state = %s",
+        std::to_string(get_state()).c_str());
+
     static auto _config = settings::shared_instance();
-    // auto* _config = settings::instance();
 
     // if using timemory, default to perfetto being off
     auto _default_perfetto_v =
         !tim::get_env<bool>("OMNITRACE_USE_TIMEMORY", false, false);
 
-    auto _default_config_file =
-        JOIN("/", tim::get_env<std::string>("HOME", "."), "omnitrace.cfg");
-
     auto _system_backend = tim::get_env("OMNITRACE_BACKEND_SYSTEM", false, false);
-
-    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_CONFIG_FILE",
-                             "Configuration file of omnitrace and timemory settings",
-                             _default_config_file, "config");
-
-    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_DEBUG", "Enable debugging output",
-                             _config->get_debug(), "debugging");
 
     auto _omnitrace_debug = _config->get<bool>("OMNITRACE_DEBUG");
     if(_omnitrace_debug) tim::set_env("TIMEMORY_DEBUG_SETTINGS", "1", 0);
@@ -101,6 +118,22 @@ configure_settings()
                              "backend", "roctracer");
 #endif
 
+#if defined(OMNITRACE_USE_ROCM_SMI)
+    OMNITRACE_CONFIG_SETTING(
+        bool, "OMNITRACE_USE_ROCM_SMI",
+        "Enable sampling GPU power, temp, utilization, and memory usage", true, "backend",
+        "rocm-smi");
+
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_ROCM_SMI_DEVICES",
+                             "Devices to query when OMNITRACE_USE_ROCM_SMI=ON", "all",
+                             "backend", "rocm-smi");
+
+    OMNITRACE_CONFIG_SETTING(
+        double, "OMNITRACE_ROCM_SMI_FREQ",
+        "Number of rocm-smi samples per second when OMNITTRACE_USE_ROCM_SMI=ON", 5.0,
+        "backend", "rocm-smi");
+#endif
+
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_SAMPLING",
                              "Enable statistical sampling of call-stack", false,
                              "backend", "sampling");
@@ -109,6 +142,9 @@ configure_settings()
         bool, "OMNITRACE_USE_PID",
         "Enable tagging filenames with process identifier (either MPI rank or pid)", true,
         "io");
+
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_KOKKOSP",
+                             "Enable support for Kokkos Tools", true, "kokkos");
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_INSTRUMENTATION_INTERVAL",
                              "Instrumentation only takes measurements once every N "
@@ -225,6 +261,40 @@ configure_settings()
     _config->get_stack_clearing()        = false;
     _config->get_time_output()           = true;
     _config->get_timing_precision()      = 6;
+    _config->get_max_thread_bookmarks()  = 1;
+    _config->get_timing_units()          = "sec";
+    _config->get_memory_units()          = "MB";
+    _config->get_papi_events()           = "PAPI_TOT_CYC, PAPI_TOT_INS";
+
+#if defined(TIMEMORY_USE_PAPI)
+    int _paranoid = 2;
+    {
+        std::ifstream _fparanoid{ "/proc/sys/kernel/perf_event_paranoid" };
+        if(_fparanoid) _fparanoid >> _paranoid;
+    }
+
+    if(_paranoid > 1)
+    {
+        OMNITRACE_CONDITIONAL_BASIC_PRINT(
+            get_verbose_env() >= 0,
+            "/proc/sys/kernel/perf_event_paranoid has a value of %i. "
+            "Disabling PAPI (requires a value <= 1)...\n",
+            _paranoid);
+        OMNITRACE_CONDITIONAL_BASIC_PRINT(
+            get_verbose_env() >= 0,
+            "In order to enable PAPI support, run 'echo N | sudo tee "
+            "/proc/sys/kernel/perf_event_paranoid' where N is < 2\n");
+        tim::trait::runtime_enabled<comp::papi_common>::set(false);
+        tim::trait::runtime_enabled<comp::papi_array_t>::set(false);
+        tim::trait::runtime_enabled<comp::papi_vector>::set(false);
+        tim::trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
+        tim::trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
+        tim::trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
+        _config->get_papi_events() = "";
+    }
+#else
+    _config->get_papi_quiet() = true;
+#endif
 
     for(auto&& itr :
         tim::delimit(_config->get<std::string>("OMNITRACE_CONFIG_FILE"), ";:"))
@@ -265,15 +335,39 @@ configure_settings()
     if(tim::mpi::is_initialized()) settings::default_process_suffix() = tim::mpi::rank();
 #endif
     OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose_env() > 0, "configuration complete\n");
+
+#if defined(OMNITRACE_USE_ROCM_SMI)
+    auto _rsmi_freq = _config->find("OMNITRACE_ROCM_SMI_FREQ");
+    if(_rsmi_freq != _config->end())
+    {
+        double& _rsmi_freq_v =
+            static_cast<tim::tsettings<double>&>(*_rsmi_freq->second).get();
+        if(_rsmi_freq_v > 1000) _rsmi_freq_v = 1000.;
+    }
+#endif
 }
 
 void
-print_config_settings(
+print_banner(std::ostream& _os)
+{
+    static const char* _banner = R"banner(
+
+      ______   .___  ___. .__   __.  __  .___________..______          ___       ______  _______
+     /  __  \  |   \/   | |  \ |  | |  | |           ||   _  \        /   \     /      ||   ____|
+    |  |  |  | |  \  /  | |   \|  | |  | `---|  |----`|  |_)  |      /  ^  \   |  ,----'|  |__
+    |  |  |  | |  |\/|  | |  . `  | |  |     |  |     |      /      /  /_\  \  |  |     |   __|
+    |  `--'  | |  |  |  | |  |\   | |  |     |  |     |  |\  \----./  _____  \ |  `----.|  |____
+     \______/  |__|  |__| |__| \__| |__|     |__|     | _| `._____/__/     \__\ \______||_______|
+
+    )banner";
+    _os << _banner << std::endl;
+}
+
+void
+print_settings(
     std::ostream&                                                                _ros,
     std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter)
 {
-    if(get_verbose() < 1) return;
-
     OMNITRACE_CONDITIONAL_BASIC_PRINT(true, "configuration:\n");
 
     std::stringstream _os{};
@@ -370,6 +464,61 @@ print_config_settings(
     _ros << _os.str() << std::flush;
 }
 
+void
+print_settings()
+{
+    if(dmp::rank() > 0) return;
+
+    static std::set<tim::string_view_t> _sample_options = {
+        "OMNITRACE_SAMPLING_FREQ", "OMNITRACE_SAMPLING_DELAY",
+        "OMNITRACE_FLAT_SAMPLING", "OMNITRACE_TIMELINE_SAMPLING",
+        "OMNITRACE_FLAT_SAMPLING", "OMNITRACE_TIMELINE_SAMPLING",
+    };
+    static std::set<tim::string_view_t> _perfetto_options = {
+        "OMNITRACE_OUTPUT_FILE",
+        "OMNITRACE_BACKEND",
+        "OMNITRACE_SHMEM_SIZE_HINT_KB",
+        "OMNITRACE_BUFFER_SIZE_KB",
+    };
+    static std::set<tim::string_view_t> _timemory_options = {
+        "OMNITRACE_ROCTRACER_FLAT_PROFILE", "OMNITRACE_ROCTRACER_TIMELINE_PROFILE"
+    };
+    // generic filter for filtering relevant options
+    auto _is_omnitrace_option = [](const auto& _v, const auto& _c) {
+        if(!get_use_roctracer() && _v.find("OMNITRACE_ROCTRACER_") == 0) return false;
+        if(!get_use_critical_trace() && _v.find("OMNITRACE_CRITICAL_TRACE_") == 0)
+            return false;
+        if(!get_use_perfetto() && _perfetto_options.count(_v) > 0) return false;
+        if(!get_use_timemory() && _timemory_options.count(_v) > 0) return false;
+        if(!get_use_sampling() && _sample_options.count(_v) > 0) return false;
+        const auto npos = std::string::npos;
+        if(_v.find("WIDTH") != npos || _v.find("SEPARATOR_FREQ") != npos ||
+           _v.find("AUTO_OUTPUT") != npos || _v.find("DART_OUTPUT") != npos ||
+           _v.find("FILE_OUTPUT") != npos || _v.find("PLOT_OUTPUT") != npos ||
+           _v.find("FLAMEGRAPH_OUTPUT") != npos)
+            return false;
+        if(!_c.empty())
+        {
+            if(_c.find("omnitrace") != _c.end()) return true;
+            if(_c.find("debugging") != _c.end() && _v.find("DEBUG") != npos) return true;
+            if(_c.find("config") != _c.end()) return true;
+            if(_c.find("dart") != _c.end()) return false;
+            if(_c.find("io") != _c.end() && _v.find("_OUTPUT") != npos) return true;
+            if(_c.find("format") != _c.end()) return true;
+            return false;
+        }
+        return (_v.find("OMNITRACE_") == 0);
+    };
+
+    tim::print_env(std::cerr, [_is_omnitrace_option](const std::string& _v) {
+        return _is_omnitrace_option(_v, std::set<std::string>{});
+    });
+
+    print_settings(std::cerr, _is_omnitrace_option);
+
+    fprintf(stderr, "\n");
+}
+
 std::string&
 get_exe_name()
 {
@@ -384,10 +533,54 @@ get_config_file()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
+Mode
+get_mode()
+{
+    static auto _v = []() {
+        auto _mode = tim::get_env_choice<std::string>("OMNITRACE_MODE", "trace",
+                                                      { "trace", "sampling" });
+        if(_mode == "sampling") return Mode::Sampling;
+        return Mode::Trace;
+    }();
+    return _v;
+}
+
+bool&
+is_attached()
+{
+    static bool _v = false;
+    return _v;
+}
+
+bool&
+is_binary_rewrite()
+{
+    static bool _v = false;
+    return _v;
+}
+
 bool
 get_debug_env()
 {
     return tim::get_env<bool>("OMNITRACE_DEBUG", false);
+}
+
+bool
+get_is_continuous_integration()
+{
+    return tim::get_env<bool>("OMNITRACE_CI", false);
+}
+
+bool
+get_debug_init()
+{
+    return tim::get_env<bool>("OMNITRACE_DEBUG_INIT", false);
+}
+
+bool
+get_debug_finalize()
+{
+    return tim::get_env<bool>("OMNITRACE_DEBUG_FINALIZE", false);
 }
 
 bool
@@ -431,6 +624,18 @@ get_use_roctracer()
     static auto _v = get_config()->find("OMNITRACE_USE_ROCTRACER");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
+    static auto _v            = false;
+    return _v;
+#endif
+}
+
+bool&
+get_use_rocm_smi()
+{
+#if defined(OMNITRACE_USE_ROCM_SMI)
+    static auto _v = get_config()->find("OMNITRACE_USE_ROCM_SMI");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+#else
     static auto _v = false;
     return _v;
 #endif
@@ -443,10 +648,9 @@ get_use_sampling()
     static auto _v = get_config()->find("OMNITRACE_USE_SAMPLING");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
+    OMNITRACE_THROW(
+        "Error! sampling was enabled but omnitrace was not built with libunwind support");
     static bool _v = false;
-    if(_v)
-        throw std::runtime_error("Error! sampling was enabled but omnitrace was not "
-                                 "built with libunwind support");
     return _v;
 #endif
 }
@@ -469,6 +673,13 @@ bool&
 get_use_critical_trace()
 {
     static auto _v = get_config()->find("OMNITRACE_CRITICAL_TRACE");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_use_kokkosp()
+{
+    static auto _v = get_config()->find("OMNITRACE_USE_KOKKOSP");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
@@ -634,6 +845,20 @@ get_critical_trace_count()
     return static_cast<tim::tsettings<int64_t>&>(*_v->second).get();
 }
 
+double&
+get_rocm_smi_freq()
+{
+    static auto _v = get_config()->find("OMNITRACE_ROCM_SMI_FREQ");
+    return static_cast<tim::tsettings<double>&>(*_v->second).get();
+}
+
+std::string
+get_rocm_smi_devices()
+{
+    static auto _v = get_config()->find("OMNITRACE_ROCM_SMI_DEVICES");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
 bool
 get_debug_tid()
 {
@@ -665,6 +890,7 @@ get_debug_pid()
                      _vlist.count(dmp::rank()) > 0;
     return _v;
 }
+}  // namespace config
 
 State&
 get_state()
@@ -685,8 +911,7 @@ get_cpu_cid_stack(int64_t _tid)
 {
     struct omnitrace_cpu_cid_stack
     {};
-    using thread_data_t =
-        omnitrace_thread_data<std::vector<uint64_t>, omnitrace_cpu_cid_stack>;
+    using thread_data_t = thread_data<std::vector<uint64_t>, omnitrace_cpu_cid_stack>;
     static auto&             _v       = thread_data_t::instances();
     static thread_local auto _v_check = [_tid]() {
         thread_data_t::construct((_tid > 0) ? *thread_data_t::instances().at(0)

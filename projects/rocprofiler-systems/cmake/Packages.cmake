@@ -16,6 +16,8 @@ omnitrace_add_interface_library(
 omnitrace_add_interface_library(omnitrace-hip "Provides flags and libraries for HIP")
 omnitrace_add_interface_library(omnitrace-roctracer
                                 "Provides flags and libraries for roctracer")
+omnitrace_add_interface_library(omnitrace-rocm-smi
+                                "Provides flags and libraries for rocm-smi")
 omnitrace_add_interface_library(omnitrace-mpi "Provides MPI or MPI headers")
 omnitrace_add_interface_library(omnitrace-ptl "Enables PTL support (tasking)")
 
@@ -60,7 +62,7 @@ endif()
 if(OMNITRACE_USE_HIP)
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
     find_package(hip ${omnitrace_FIND_QUIETLY} REQUIRED)
-    target_compile_definitions(omnitrace-hip INTERFACE OMNITRACE_USE_HIP)
+    omnitrace_target_compile_definitions(omnitrace-hip INTERFACE OMNITRACE_USE_HIP)
     target_link_libraries(omnitrace-hip INTERFACE hip::host)
 endif()
 
@@ -73,10 +75,26 @@ endif()
 if(OMNITRACE_USE_ROCTRACER)
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
     find_package(roctracer ${omnitrace_FIND_QUIETLY} REQUIRED)
-    target_compile_definitions(omnitrace-roctracer INTERFACE OMNITRACE_USE_ROCTRACER)
+    omnitrace_target_compile_definitions(omnitrace-roctracer
+                                         INTERFACE OMNITRACE_USE_ROCTRACER)
     target_link_libraries(omnitrace-roctracer INTERFACE roctracer::roctracer
                                                         omnitrace::omnitrace-hip)
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${roctracer_LIBRARY_DIRS}")
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# rocm-smmi
+#
+# ----------------------------------------------------------------------------------------#
+
+if(OMNITRACE_USE_ROCM_SMI)
+    list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+    find_package(rocm-smi ${omnitrace_FIND_QUIETLY} REQUIRED)
+    omnitrace_target_compile_definitions(omnitrace-rocm-smi
+                                         INTERFACE OMNITRACE_USE_ROCM_SMI)
+    target_link_libraries(omnitrace-rocm-smi INTERFACE rocm-smi::rocm-smi)
+    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${rocm-smi_LIBRARY_DIRS}")
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -90,8 +108,8 @@ if(OMNITRACE_USE_MPI)
     target_link_libraries(omnitrace-mpi INTERFACE MPI::MPI_C MPI::MPI_CXX)
 elseif(OMNITRACE_USE_MPI_HEADERS)
     find_package(MPI-Headers ${omnitrace_FIND_QUIETLY} REQUIRED)
-    target_compile_definitions(omnitrace-mpi INTERFACE TIMEMORY_USE_MPI_HEADERS
-                                                       OMNITRACE_USE_MPI_HEADERS)
+    omnitrace_target_compile_definitions(
+        omnitrace-mpi INTERFACE TIMEMORY_USE_MPI_HEADERS OMNITRACE_USE_MPI_HEADERS)
     target_link_libraries(omnitrace-mpi INTERFACE MPI::MPI_HEADERS)
 endif()
 
@@ -143,7 +161,7 @@ if(OMNITRACE_BUILD_DYNINST)
         )
 
     if(OMNITRACE_DYNINST_API_RT)
-        target_compile_definitions(
+        omnitrace_target_compile_definitions(
             omnitrace-dyninst
             INTERFACE
                 DYNINST_API_RT="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}:$<TARGET_FILE_DIR:Dyninst::dyninstAPI_RT>:${CMAKE_INSTALL_PREFIX}/lib/$<TARGET_FILE_NAME:Dyninst::dyninstAPI_RT>:$<TARGET_FILE:Dyninst::dyninstAPI_RT>"
@@ -163,7 +181,7 @@ else()
             PATH_SUFFIXES lib)
 
         if(OMNITRACE_DYNINST_API_RT)
-            target_compile_definitions(
+            omnitrace_target_compile_definitions(
                 omnitrace-dyninst INTERFACE DYNINST_API_RT="${OMNITRACE_DYNINST_API_RT}")
         endif()
 
@@ -214,7 +232,7 @@ else()
         endif()
 
         if(OMNITRACE_DYNINST_API_RT)
-            target_compile_definitions(
+            omnitrace_target_compile_definitions(
                 omnitrace-dyninst INTERFACE DYNINST_API_RT="${OMNITRACE_DYNINST_API_RT}")
         endif()
 
@@ -253,7 +271,8 @@ else()
         target_include_directories(
             omnitrace-dyninst SYSTEM INTERFACE ${TBB_INCLUDE_DIR} ${Boost_INCLUDE_DIRS}
                                                ${DYNINST_HEADER_DIR})
-        target_compile_definitions(omnitrace-dyninst INTERFACE omnitrace_USE_DYNINST)
+        omnitrace_target_compile_definitions(omnitrace-dyninst
+                                             INTERFACE OMNITRACE_USE_DYNINST)
     endif()
 endif()
 

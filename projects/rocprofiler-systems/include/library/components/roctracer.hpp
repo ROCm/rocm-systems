@@ -52,25 +52,41 @@ struct roctracer
 
     static void preinit();
     static void global_init() { setup(); }
-    static void global_finalize() { tear_down(); }
+    static void global_finalize() { shutdown(); }
 
     static bool is_setup();
     static void setup();
-    static void tear_down();
+    static void shutdown();
     static void add_setup(const std::string&, std::function<void()>&&);
-    static void add_tear_down(const std::string&, std::function<void()>&&);
+    static void add_shutdown(const std::string&, std::function<void()>&&);
     static void remove_setup(const std::string&);
-    static void remove_tear_down(const std::string&);
+    static void remove_shutdown(const std::string&);
 
     void start();
     void stop();
-    void set_prefix(const char* _v) { m_prefix = _v; }
-
-private:
-    const char* m_prefix = nullptr;
 };
+
+#if !defined(OMNITRACE_USE_ROCTRACER)
+inline void
+roctracer::setup()
+{}
+
+inline void
+roctracer::shutdown()
+{}
+
+inline bool
+roctracer::is_setup()
+{
+    return false;
+}
+#endif
 }  // namespace component
 }  // namespace tim
+
+#if !defined(OMNITRACE_USE_ROCTRACER)
+TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::roctracer_data, false_type)
+#endif
 
 TIMEMORY_SET_COMPONENT_API(component::roctracer_data, project::timemory, category::timing,
                            os::supports_unix)

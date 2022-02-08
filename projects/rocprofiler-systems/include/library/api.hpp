@@ -29,12 +29,25 @@
 // forward decl of the API
 extern "C"
 {
+    /// handles configuration logic
+    void omnitrace_init_library(void) TIMEMORY_VISIBILITY("default");
+
+    /// starts gotcha wrappers
+    void omnitrace_init(const char*, bool, const char*) TIMEMORY_VISIBILITY("default");
+
+    /// shuts down all tooling and generates output
+    void omnitrace_finalize(void) TIMEMORY_VISIBILITY("default");
+
+    /// sets an environment variable
+    void omnitrace_set_env(const char* env_name, const char* env_val)
+        TIMEMORY_VISIBILITY("default");
+
+    /// sets whether MPI should be used
+    void omnitrace_set_mpi(bool use, bool attached) TIMEMORY_VISIBILITY("default");
+
+    /// starts an instrumentation region
     void omnitrace_push_trace(const char* name) TIMEMORY_VISIBILITY("default");
+
+    /// stops an instrumentation region
     void omnitrace_pop_trace(const char* name) TIMEMORY_VISIBILITY("default");
-    void omnitrace_trace_init(const char*, bool, const char*)
-        TIMEMORY_VISIBILITY("default");
-    void omnitrace_trace_finalize(void) TIMEMORY_VISIBILITY("default");
-    void omnitrace_trace_set_env(const char* env_name, const char* env_val)
-        TIMEMORY_VISIBILITY("default");
-    void omnitrace_trace_set_mpi(bool use, bool attached) TIMEMORY_VISIBILITY("default");
 }

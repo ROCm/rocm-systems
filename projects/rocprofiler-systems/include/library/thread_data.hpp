@@ -40,7 +40,7 @@ namespace omnitrace
 static constexpr size_t max_supported_threads = OMNITRACE_MAX_THREADS;
 
 template <typename Tp, typename Tag = void, size_t MaxThreads = max_supported_threads>
-struct omnitrace_thread_data
+struct thread_data
 {
     using instance_array_t  = std::array<std::unique_ptr<Tp>, MaxThreads>;
     using construct_on_init = std::true_type;
@@ -58,7 +58,7 @@ struct omnitrace_thread_data
 template <typename Tp, typename Tag, size_t MaxThreads>
 template <typename... Args>
 void
-omnitrace_thread_data<Tp, Tag, MaxThreads>::construct(Args&&... _args)
+thread_data<Tp, Tag, MaxThreads>::construct(Args&&... _args)
 {
     // construct outside of lambda to prevent data-race
     static auto&             _instances = instances();
@@ -72,14 +72,14 @@ omnitrace_thread_data<Tp, Tag, MaxThreads>::construct(Args&&... _args)
 
 template <typename Tp, typename Tag, size_t MaxThreads>
 std::unique_ptr<Tp>&
-omnitrace_thread_data<Tp, Tag, MaxThreads>::instance()
+thread_data<Tp, Tag, MaxThreads>::instance()
 {
     return instances().at(threading::get_id());
 }
 
 template <typename Tp, typename Tag, size_t MaxThreads>
-typename omnitrace_thread_data<Tp, Tag, MaxThreads>::instance_array_t&
-omnitrace_thread_data<Tp, Tag, MaxThreads>::instances()
+typename thread_data<Tp, Tag, MaxThreads>::instance_array_t&
+thread_data<Tp, Tag, MaxThreads>::instances()
 {
     static auto _v = instance_array_t{};
     return _v;
@@ -88,7 +88,7 @@ omnitrace_thread_data<Tp, Tag, MaxThreads>::instances()
 template <typename Tp, typename Tag, size_t MaxThreads>
 template <typename... Args>
 std::unique_ptr<Tp>&
-omnitrace_thread_data<Tp, Tag, MaxThreads>::instance(construct_on_init, Args&&... _args)
+thread_data<Tp, Tag, MaxThreads>::instance(construct_on_init, Args&&... _args)
 {
     construct(std::forward<Args>(_args)...);
     return instances().at(threading::get_id());
@@ -96,8 +96,8 @@ omnitrace_thread_data<Tp, Tag, MaxThreads>::instance(construct_on_init, Args&&..
 
 template <typename Tp, typename Tag, size_t MaxThreads>
 template <typename... Args>
-typename omnitrace_thread_data<Tp, Tag, MaxThreads>::instance_array_t&
-omnitrace_thread_data<Tp, Tag, MaxThreads>::instances(construct_on_init, Args&&... _args)
+typename thread_data<Tp, Tag, MaxThreads>::instance_array_t&
+thread_data<Tp, Tag, MaxThreads>::instances(construct_on_init, Args&&... _args)
 {
     static auto _v = [&]() {
         auto _internal = instance_array_t{};

@@ -29,6 +29,12 @@ parse:
         RUN_ARGS: '*'
         ENVIRONMENT: '*'
         LABELS: '*'
+        PROPERTIES: '*'
+    omnitrace_target_compile_definitions:
+      kwargs:
+        PUBLIC: '*'
+        PRIVATE: '*'
+        INTERFACE: '*'
   override_spec: {}
   vartags: []
   proptags: []

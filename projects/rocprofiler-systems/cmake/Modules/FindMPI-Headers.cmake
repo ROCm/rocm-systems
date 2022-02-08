@@ -9,7 +9,7 @@ include(FindPackageHandleStandardArgs)
 find_path(
     MPI_HEADERS_INCLUDE_DIR
     NAMES mpi.h
-    PATH_SUFFIXES include include/mpich include/openmpi mpich openmpi
+    PATH_SUFFIXES include/openmpi openmpi include include/mpich mpich
     HINTS ${MPI_ROOT_DIR}
     PATHS ${MPI_ROOT_DIR})
 

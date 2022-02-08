@@ -61,18 +61,25 @@ find_library(
     PATHS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
     PATH_SUFFIXES lib lib64)
 
-find_library(
-    roctracer_hsakmt_LIBRARY
-    NAMES hsakmt
-    HINTS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
-    PATHS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
-    PATH_SUFFIXES lib lib64)
+find_package(hsakmt)
+if(hsakmt_FOUND)
+    set(roctracer_hsakmt_LIBRARY
+        hsakmt::hsakmt
+        CACHE STRING "Imported hsakmt target")
+else()
+    find_library(
+        roctracer_hsakmt_LIBRARY
+        NAMES hsakmt
+        HINTS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
+        PATHS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
+        PATH_SUFFIXES lib lib64)
+endif()
 
 if(roctracer_LIBRARY)
     get_filename_component(roctracer_LIBRARY_DIR "${roctracer_LIBRARY}" PATH CACHE)
 endif()
 
-mark_as_advanced(roctracer_LIBRARY roctracer_roctx_LIBRARY)
+mark_as_advanced(roctracer_LIBRARY roctracer_roctx_LIBRARY roctracer_hsakmt_LIBRARY)
 
 # ----------------------------------------------------------------------------------------#
 

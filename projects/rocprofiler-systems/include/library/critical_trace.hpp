@@ -175,7 +175,7 @@ struct call_chain : private std::vector<entry>
     }
 
     template <Device DevT>
-    void generate_perfetto(std::set<entry>& _used) const;
+    void generate_perfetto(std::set<entry>& _used, bool _basic = false) const;
 
     template <bool BoolV = true, typename FuncT>
     bool query(FuncT&&) const;
@@ -200,6 +200,11 @@ update(int64_t _tid = threading::get_id());
 
 void
 compute(int64_t _tid = threading::get_id());
+
+std::vector<std::pair<std::string, entry>>
+get_entries(
+    int64_t                                  _ts,
+    const std::function<bool(const entry&)>& _eval = [](const entry&) { return true; });
 
 struct id
 {};

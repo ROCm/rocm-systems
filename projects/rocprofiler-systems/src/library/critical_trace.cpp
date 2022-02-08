@@ -29,6 +29,7 @@
 
 #include <PTL/ThreadPool.hh>
 #include <timemory/backends/dmp.hpp>
+#include <timemory/backends/threading.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/tpls/cereal/cereal/archives/json.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
@@ -38,6 +39,7 @@
 
 #include <cctype>
 #include <cstdint>
+#include <exception>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -176,7 +178,8 @@ entry::operator+=(const entry& rhs)
     }
     else
     {
-        OMNITRACE_PRINT(
+        OMNITRACE_CONDITIONAL_PRINT(
+            get_verbose() > 1,
             "Warning! Incorrect phase. entry::operator+=(entry) is only valid for "
             "Phase::BEGIN += Phase::END\n");
     }
@@ -427,46 +430,80 @@ call_chain::query(FuncT&& _func) const
 
 template <>
 void
-call_chain::generate_perfetto<Device::NONE>(std::set<entry>&) const
+call_chain::generate_perfetto<Device::NONE>(std::set<entry>&, bool) const
 {}
 
 template <>
 void
-call_chain::generate_perfetto<Device::CPU>(std::set<entry>& _used) const
+call_chain::generate_perfetto<Device::CPU>(std::set<entry>& _used, bool _basic) const
 {
     static std::set<std::string> _static_strings{};
     static std::mutex            _static_mutex{};
     for(const auto& itr : *this)
     {
-        if(!_used.emplace(itr).second) continue;
-        std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
-        _static_mutex.lock();
-        auto sitr = _static_strings.emplace(_name);
-        _static_mutex.unlock();
-        TRACE_EVENT_BEGIN("host-critical-trace",
-                          perfetto::StaticString{ sitr.first->c_str() },
-                          static_cast<uint64_t>(itr.begin_ns));
-        TRACE_EVENT_END("host-critical-trace", static_cast<uint64_t>(itr.end_ns));
+        if(_basic)
+        {
+            if(itr.device == Device::CPU)
+            {
+                TRACE_EVENT_BEGIN("device-critical-trace", "CPU",
+                                  static_cast<uint64_t>(itr.begin_ns));
+            }
+            else if(itr.device == Device::GPU)
+            {
+                TRACE_EVENT_BEGIN("device-critical-trace", "GPU",
+                                  static_cast<uint64_t>(itr.begin_ns));
+            }
+            TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns));
+        }
+        else
+        {
+            if(!_used.emplace(itr).second) continue;
+            std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
+            _static_mutex.lock();
+            auto sitr = _static_strings.emplace(_name);
+            _static_mutex.unlock();
+            TRACE_EVENT_BEGIN("host-critical-trace",
+                              perfetto::StaticString{ sitr.first->c_str() },
+                              static_cast<uint64_t>(itr.begin_ns));
+            TRACE_EVENT_END("host-critical-trace", static_cast<uint64_t>(itr.end_ns));
+        }
     }
 }
 
 template <>
 void
-call_chain::generate_perfetto<Device::GPU>(std::set<entry>& _used) const
+call_chain::generate_perfetto<Device::GPU>(std::set<entry>& _used, bool _basic) const
 {
     static std::set<std::string> _static_strings{};
     static std::mutex            _static_mutex{};
     for(const auto& itr : *this)
     {
-        if(!_used.emplace(itr).second) continue;
-        std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
-        _static_mutex.lock();
-        auto sitr = _static_strings.emplace(_name);
-        _static_mutex.unlock();
-        TRACE_EVENT_BEGIN("device-critical-trace",
-                          perfetto::StaticString{ sitr.first->c_str() },
-                          static_cast<uint64_t>(itr.begin_ns));
-        TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns));
+        if(_basic)
+        {
+            if(itr.device == Device::CPU)
+            {
+                TRACE_EVENT_BEGIN("device-critical-trace", "CPU",
+                                  static_cast<uint64_t>(itr.begin_ns));
+            }
+            else if(itr.device == Device::GPU)
+            {
+                TRACE_EVENT_BEGIN("device-critical-trace", "GPU",
+                                  static_cast<uint64_t>(itr.begin_ns));
+            }
+            TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns));
+        }
+        else
+        {
+            if(!_used.emplace(itr).second) continue;
+            std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
+            _static_mutex.lock();
+            auto sitr = _static_strings.emplace(_name);
+            _static_mutex.unlock();
+            TRACE_EVENT_BEGIN("device-critical-trace",
+                              perfetto::StaticString{ sitr.first->c_str() },
+                              static_cast<uint64_t>(itr.begin_ns));
+            TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns));
+        }
     }
 }
 
@@ -485,7 +522,7 @@ get_update_frequency()
 std::unique_ptr<call_chain>&
 get(int64_t _tid)
 {
-    static auto&             _v    = omnitrace_thread_data<call_chain>::instances();
+    static auto&             _v    = thread_data<call_chain>::instances();
     static thread_local auto _once = [_tid]() {
         if(!_v.at(0)) _v.at(0) = std::make_unique<call_chain>();
         if(!_v.at(_tid)) _v.at(_tid) = std::make_unique<call_chain>();
@@ -515,10 +552,10 @@ size_t
 add_hash_id(const std::string& _label)
 {
     using critical_trace_hash_data =
-        omnitrace_thread_data<critical_trace::hash_ids, critical_trace::id>;
+        thread_data<critical_trace::hash_ids, critical_trace::id>;
 
     auto _hash = tim::hash::add_hash_id(_label);
-    if(get_use_critical_trace())
+    if(get_use_critical_trace() || get_use_rocm_smi())
     {
         critical_trace_hash_data::construct();
         critical_trace_hash_data::instance()->emplace(_label);
@@ -529,7 +566,7 @@ add_hash_id(const std::string& _label)
 void
 update(int64_t _tid)
 {
-    if(!get_use_critical_trace()) return;
+    if(!get_use_critical_trace() && !get_use_rocm_smi()) return;
     std::unique_lock<std::mutex> _lk{ tasking::get_critical_trace_mutex(),
                                       std::defer_lock };
     if(!_lk.owns_lock()) _lk.lock();
@@ -604,7 +641,8 @@ save_call_graph(const std::string& _fname, const std::string& _label,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
+            OMNITRACE_CONDITIONAL_PRINT(get_verbose() >= 0, "[%s] Outputting '%s'...\n",
+                                        _func.c_str(), _fname.c_str());
         }
         ofs << oss.str() << std::endl;
     }
@@ -648,7 +686,8 @@ save_critical_trace(const std::string& _fname, const std::string& _label,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
+            OMNITRACE_CONDITIONAL_PRINT(get_verbose() >= 0, "[%s] Outputting '%s'...\n",
+                                        _func.c_str(), _fname.c_str());
         }
         std::stringstream oss{};
         if(_cchain.size() > 1000)
@@ -686,7 +725,8 @@ save_call_chain_text(const std::string& _fname, const call_chain& _call_chain,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
+            OMNITRACE_CONDITIONAL_PRINT(get_verbose() >= 0, "[%s] Outputting '%s'...\n",
+                                        _func.c_str(), _fname.c_str());
         }
         ofs << _call_chain << "\n";
     }
@@ -730,7 +770,8 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_PRINT("[%s] Outputting '%s'...\n", _func.c_str(), _fname.c_str());
+            OMNITRACE_CONDITIONAL_PRINT(get_verbose() >= 0, "[%s] Outputting '%s'...\n",
+                                        _func.c_str(), _fname.c_str());
         }
         std::stringstream oss{};
         if(_call_chain.size() > 100000)
@@ -1117,27 +1158,33 @@ get_top(const std::vector<call_chain>& _chain, size_t _count)
 
 template <Device DevT>
 void
-generate_perfetto(const std::vector<call_chain>& _data)
+generate_perfetto(const std::vector<call_chain>& _data, bool _basic = false)
 {
     OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
-    auto _func = [&](size_t _beg, size_t _end) {
+
+    auto _nrows = std::min<size_t>(get_critical_trace_per_row(), _data.size());
+
+    // run in separate thread(s) so that it ends up in unique row
+    if(_nrows < 1) _nrows = _data.size();
+
+    auto _func = [&](size_t _idx, size_t _beg, size_t _end) {
+        if(_nrows != 1)
+            threading::set_thread_name(TIMEMORY_JOIN(" ", "CriticalPath", _idx).c_str());
+        else
+            threading::set_thread_name("CritialPath");
         // ensure all hash ids exist
         copy_hash_ids();
         std::set<entry> _used{};
         for(size_t i = _beg; i < _end; ++i)
         {
             if(i >= _data.size()) break;
-            _data.at(i).generate_perfetto<DevT>(_used);
+            _data.at(i).generate_perfetto<DevT>(_used, _basic);
         }
     };
 
-    // run in separate thread(s) so that it ends up in unique row
-    auto _nrows = get_critical_trace_per_row();
-    if(_nrows < 1) _nrows = _data.size();
-
     for(size_t i = 0; i < _data.size(); i += _nrows)
     {
-        std::thread{ _func, i, i + _nrows }.join();
+        std::thread{ _func, i, i, i + _nrows }.join();
     }
 }
 
@@ -1225,6 +1272,8 @@ compute_critical_trace()
 
         _perf.reset().start();
 
+        generate_perfetto<Device::GPU>({ complete_call_chain }, true);
+
         OMNITRACE_CT_DEBUG("[%s] Finding sequences...\n", __FUNCTION__);
         // find the sequences
         std::vector<call_chain> _top{};
@@ -1280,8 +1329,7 @@ compute_critical_trace()
         _tg.join();
         _tp.destroy_threadpool();
         _computed = true;
-
-    } catch(const std::exception& e)
+    } catch(std::exception& e)
     {
         OMNITRACE_PRINT("Thread exited '%s' with exception: %s\n", __FUNCTION__,
                         e.what());
@@ -1295,5 +1343,36 @@ compute_critical_trace()
     OMNITRACE_PRINT("%s\n", _ct_msg.c_str());
 }
 }  // namespace
+
+std::vector<std::pair<std::string, entry>>
+get_entries(int64_t _ts, const std::function<bool(const entry&)>& _eval)
+{
+    copy_hash_ids();
+    auto _func = [_eval, _ts](std::vector<std::pair<std::string, entry>>* _targ,
+                              size_t*                                     _avail) {
+        copy_hash_ids();
+        squash_critical_path(complete_call_chain);
+        *_avail = complete_call_chain.size();
+        std::vector<std::pair<std::string, entry>> _v{};
+        std::sort(complete_call_chain.begin(), complete_call_chain.end());
+        for(const auto& itr : complete_call_chain)
+        {
+            if(itr.phase != Phase::DELTA) continue;
+            if(itr.begin_ns <= _ts && itr.end_ns >= _ts)
+            {
+                if(_eval(itr)) _v.emplace_back(tim::get_hash_identifier(itr.hash), itr);
+            }
+        }
+        *_targ = _v;
+    };
+    size_t                                     _n = 0;
+    std::vector<std::pair<std::string, entry>> _v{};
+    tasking::get_critical_trace_task_group().exec(_func, &_v, &_n);
+    tasking::get_critical_trace_task_group().join();
+    OMNITRACE_DEBUG("critical_trace::%s :: found %zu out of %zu entries at %li...\n",
+                    __FUNCTION__, _v.size(), _n, _ts);
+    return _v;
+}
+
 }  // namespace critical_trace
 }  // namespace omnitrace

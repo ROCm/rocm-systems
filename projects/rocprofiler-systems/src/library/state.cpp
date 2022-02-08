@@ -20,33 +20,34 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/gpu.hpp"
+#include "library/state.hpp"
 
-#if defined(OMNITRACE_USE_ROCM_SMI)
-#    include "library/components/rocm_smi.hpp"
-#elif defined(OMNITRACE_USE_HIP)
-#    if !defined(TIMEMORY_USE_HIP)
-#        define TIMEMORY_USE_HIP 1
-#    endif
-#    include "timemory/components/hip/backends.hpp"
-#endif
+#include <string>
 
-namespace omnitrace
+namespace std
 {
-namespace gpu
+std::string
+to_string(omnitrace::State _v)
 {
-int
-device_count()
-{
-#if defined(OMNITRACE_USE_ROCM_SMI)
-    // store as static since calls after rsmi_shutdown will return zero
-    static auto _v = rocm_smi::device_count();
-    return _v;
-#elif defined(OMNITRACE_USE_HIP)
-    return ::tim::hip::device_count();
-#else
-    return 0;
-#endif
+    switch(_v)
+    {
+        case omnitrace::State::DelayedInit: return "DelayedInit";
+        case omnitrace::State::PreInit: return "PreInit";
+        case omnitrace::State::Init: return "Init";
+        case omnitrace::State::Active: return "Active";
+        case omnitrace::State::Finalized: return "Finalized";
+    }
+    return {};
 }
-}  // namespace gpu
-}  // namespace omnitrace
+
+std::string
+to_string(omnitrace::Mode _v)
+{
+    switch(_v)
+    {
+        case omnitrace::Mode::Trace: return "Trace";
+        case omnitrace::Mode::Sampling: return "Sampling";
+    }
+    return {};
+}
+}  // namespace std

@@ -403,8 +403,7 @@ static void
 LULESH_PMPIO_Close(void* file, void* udata)
 {
     DBfile* db = (DBfile*) file;
-    if(db)
-        DBClose(db);
+    if(db) DBClose(db);
 }
 #    endif
 

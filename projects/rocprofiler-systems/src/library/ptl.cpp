@@ -24,6 +24,7 @@
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
+#include "library/sampling.hpp"
 
 #include <PTL/ThreadPool.hh>
 #include <timemory/utility/declaration.hpp>
@@ -39,10 +40,14 @@ auto _thread_pool_cfg = []() {
     _v.init         = true;
     _v.use_affinity = false;
     _v.use_tbb      = false;
-    _v.initializer  = []() {};
-    _v.finalizer    = []() {};
-    _v.priority     = 5;
-    _v.pool_size    = 1;
+    _v.initializer  = []() {
+        sampling::block_signals();
+        threading::set_thread_name(
+            TIMEMORY_JOIN('.', "ptl", PTL::Threading::GetThreadId()).c_str());
+    };
+    _v.finalizer = []() {};
+    _v.priority  = 5;
+    _v.pool_size = 1;
     return _v;
 }();
 }

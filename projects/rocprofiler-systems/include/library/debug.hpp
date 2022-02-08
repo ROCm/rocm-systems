@@ -33,6 +33,8 @@
 
 namespace omnitrace
 {
+inline namespace config
+{
 bool
 get_debug();
 
@@ -44,6 +46,7 @@ get_debug_pid();
 
 bool
 get_critical_trace_debug();
+}  // namespace config
 }  // namespace omnitrace
 
 #if defined(TIMEMORY_USE_MPI)
@@ -80,8 +83,58 @@ get_critical_trace_debug();
         fflush(stderr);                                                                  \
     }
 
+#if defined(TIMEMORY_USE_MPI)
+#    define OMNITRACE_CONDITIONAL_THROW(COND, ...)                                       \
+        if(COND)                                                                         \
+        {                                                                                \
+            char _msg_buffer[2048];                                                      \
+            snprintf(_msg_buffer, 2048, "[omnitrace][%i][%li] ",                         \
+                     static_cast<int>(tim::dmp::rank()), tim::threading::get_id());      \
+            auto len = strlen(_msg_buffer);                                              \
+            snprintf(_msg_buffer + len, 2048 - len, __VA_ARGS__);                        \
+            throw std::runtime_error(_msg_buffer);                                       \
+        }
+#else
+#    define OMNITRACE_CONDITIONAL_THROW(COND, ...)                                       \
+        if(COND)                                                                         \
+        {                                                                                \
+            char _msg_buffer[2048];                                                      \
+            snprintf(_msg_buffer, 2048, "[omnitrace][%i][%li] ",                         \
+                     static_cast<int>(tim::process::get_id()),                           \
+                     tim::threading::get_id());                                          \
+            auto len = strlen(_msg_buffer);                                              \
+            snprintf(_msg_buffer + len, 2048 - len, __VA_ARGS__);                        \
+            throw std::runtime_error(_msg_buffer);                                       \
+        }
+#endif
+
+#define OMNITRACE_CONDITIONAL_BASIC_THROW(COND, ...)                                     \
+    if(COND)                                                                             \
+    {                                                                                    \
+        char _msg_buffer[2048];                                                          \
+        snprintf(_msg_buffer, 2048, "[omnitrace] " __VA_ARGS__);                         \
+        auto len = strlen(_msg_buffer);                                                  \
+        snprintf(_msg_buffer + len, 2048 - len, __VA_ARGS__);                            \
+        throw std::runtime_error(_msg_buffer);                                           \
+    }
+
 #define OMNITRACE_DEBUG(...)                                                             \
     OMNITRACE_CONDITIONAL_PRINT(::omnitrace::get_debug(), __VA_ARGS__)
 #define OMNITRACE_PRINT(...) OMNITRACE_CONDITIONAL_PRINT(true, __VA_ARGS__)
 #define OMNITRACE_CT_DEBUG(...)                                                          \
     OMNITRACE_CONDITIONAL_PRINT(::omnitrace::get_critical_trace_debug(), __VA_ARGS__)
+#define OMNITRACE_BASIC_PRINT(...) OMNITRACE_CONDITIONAL_BASIC_PRINT(true, __VA_ARGS__)
+
+#define OMNITRACE_THROW(...)       OMNITRACE_CONDITIONAL_THROW(true, __VA_ARGS__)
+#define OMNITRACE_BASIC_THROW(...) OMNITRACE_CONDITIONAL_BASIC_THROW(true, __VA_ARGS__)
+
+#include <string>
+
+namespace std
+{
+inline std::string
+to_string(bool _v)
+{
+    return (_v) ? "true" : "false";
+}
+}  // namespace std

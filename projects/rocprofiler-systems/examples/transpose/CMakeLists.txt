@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 project(omnitrace-transpose LANGUAGES CXX)
 
 find_program(HIPCC_EXECUTABLE NAMES hipcc)
+mark_as_advanced(HIPCC_EXECUTABLE)
 
 if(NOT HIPCC_EXECUTABLE)
     message(AUTHOR_WARNING "hipcc could not be found. Cannot build transpose target")

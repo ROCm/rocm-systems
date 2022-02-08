@@ -90,5 +90,5 @@ roctracer_functions_t&
 roctracer_setup_routines();
 
 roctracer_functions_t&
-roctracer_tear_down_routines();
+roctracer_shutdown_routines();
 }  // namespace omnitrace

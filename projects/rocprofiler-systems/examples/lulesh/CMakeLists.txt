@@ -4,7 +4,16 @@ project(lulesh LANGUAGES C CXX)
 
 list(INSERT CMAKE_MODULE_PATH 0 ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
-add_subdirectory(external)
+option(LULESH_BUILD_KOKKOS "Build Kokkos from submodule" ON)
+if(LULESH_BUILD_KOKKOS)
+    add_subdirectory(external)
+    if(LULESH_USE_CUDA OR LULESH_USE_HIP)
+        kokkos_compilation(PROJECT)
+    endif()
+else()
+    find_package(Kokkos REQUIRED COMPONENTS separable_compilation)
+    kokkos_compilation(PROJECT)
+endif()
 
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -14,7 +23,9 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "")
         CACHE STRING "CMake build type" FORCE)
 endif()
 
-if(DEFINED OMNITRACE_USE_MPI)
+if(DEFINED OMNITRACE_USE_MPI
+   AND NOT LULESH_USE_CUDA
+   AND NOT LULESH_USE_HIP)
     option(LULESH_USE_MPI "Enable MPI" ${OMNITRACE_USE_MPI})
 else()
     option(LULESH_USE_MPI "Enable MPI" OFF)

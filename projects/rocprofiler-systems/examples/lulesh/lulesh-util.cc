@@ -15,8 +15,7 @@ StrToInt(const char* token, int* retVal)
     char*       endptr;
     const int   decimal_base = 10;
 
-    if(token == NULL)
-        return 0;
+    if(token == NULL) return 0;
 
     c       = token;
     *retVal = (int) strtol(c, &endptr, decimal_base);
@@ -229,11 +228,13 @@ VerifyAndWriteFinalOutput(Real_t elapsed_time, Domain& locDom, Int_t nx, Int_t n
         ((elapsed_time * 1e6) / locDom.cycle()) / (nx * nx * nx * numRanks);
 
     Index_t ElemId = 0;
+    auto    h_e    = Kokkos::create_mirror_view(locDom.e_view());
+    Kokkos::deep_copy(h_e, locDom.e_view());
     printf("Run completed:  \n");
     printf("   Problem size        =  %i \n", nx);
     printf("   MPI tasks           =  %i \n", numRanks);
     printf("   Iteration count     =  %i \n", locDom.cycle());
-    printf("   Final Origin Energy = %12.6e \n", locDom.e(ElemId));
+    printf("   Final Origin Energy = %12.6e \n", h_e(ElemId));
 
     Real_t MaxAbsDiff   = Real_t(0.0);
     Real_t TotalAbsDiff = Real_t(0.0);
@@ -243,16 +244,14 @@ VerifyAndWriteFinalOutput(Real_t elapsed_time, Domain& locDom, Int_t nx, Int_t n
     {
         for(Index_t k = j + 1; k < nx; ++k)
         {
-            Real_t AbsDiff = FABS(locDom.e(j * nx + k) - locDom.e(k * nx + j));
+            Real_t AbsDiff = FABS(h_e(j * nx + k) - h_e(k * nx + j));
             TotalAbsDiff += AbsDiff;
 
-            if(MaxAbsDiff < AbsDiff)
-                MaxAbsDiff = AbsDiff;
+            if(MaxAbsDiff < AbsDiff) MaxAbsDiff = AbsDiff;
 
-            Real_t RelDiff = AbsDiff / locDom.e(k * nx + j);
+            Real_t RelDiff = AbsDiff / h_e(k * nx + j);
 
-            if(MaxRelDiff < RelDiff)
-                MaxRelDiff = RelDiff;
+            if(MaxRelDiff < RelDiff) MaxRelDiff = RelDiff;
         }
     }
 

@@ -69,6 +69,9 @@ omnitrace_add_option(OMNITRACE_USE_MPI "Enable MPI support" OFF)
 omnitrace_add_option(OMNITRACE_USE_HIP "Enable HIP support" ON)
 omnitrace_add_option(OMNITRACE_USE_ROCTRACER "Enable roctracer support"
                      ${OMNITRACE_USE_HIP})
+omnitrace_add_option(
+    OMNITRACE_USE_ROCM_SMI "Enable rocm-smi support for power/temp/etc. sampling"
+    ${OMNITRACE_USE_HIP})
 omnitrace_add_option(OMNITRACE_USE_MPI_HEADERS
                      "Enable wrapping MPI functions w/o enabling MPI dependency" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
@@ -139,7 +142,12 @@ if(OMNITRACE_BUILD_HIDDEN_VISIBILITY)
     set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 endif()
 
+if(NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+endif()
+
 if(OMNITRACE_BUILD_LTO)
+    omnitrace_save_variables(LTO VARIABLES CMAKE_INTERPROCEDURAL_OPTIMIZATION)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 endif()
 
@@ -153,10 +161,12 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/src/library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/config.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/critical_trace.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/kokkosp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/gpu.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/perfetto.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/ptl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/sampling.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/thread_data.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/timemory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/components/backtrace.cpp
@@ -185,6 +195,9 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/library/components/fork_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/components/mpi_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/components/omnitrace.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/components/rocm_smi.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/components/roctracer.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/components/roctracer_callbacks.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/components/pthread_gotcha.hpp
     ${perfetto_DIR}/sdk/perfetto.h)
 
@@ -193,11 +206,13 @@ add_library(omnitrace-library SHARED ${library_sources} ${library_headers})
 if(OMNITRACE_USE_ROCTRACER)
     target_sources(
         omnitrace-library
-        PRIVATE
-            ${CMAKE_CURRENT_LIST_DIR}/src/library/components/roctracer.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/src/library/components/roctracer_callbacks.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/include/library/components/roctracer.hpp
-            ${CMAKE_CURRENT_LIST_DIR}/include/library/components/roctracer_callbacks.hpp)
+        PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/library/components/roctracer.cpp
+                ${CMAKE_CURRENT_LIST_DIR}/src/library/components/roctracer_callbacks.cpp)
+endif()
+
+if(OMNITRACE_USE_ROCM_SMI)
+    target_sources(omnitrace-library
+                   PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src/library/components/rocm_smi.cpp)
 endif()
 
 target_include_directories(omnitrace-library SYSTEM PRIVATE ${perfetto_DIR}/sdk)
@@ -214,6 +229,7 @@ target_link_libraries(
            $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
            $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
            $<BUILD_INTERFACE:omnitrace::omnitrace-roctracer>
+           $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
            $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
            $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
            $<BUILD_INTERFACE:timemory::timemory-headers>
@@ -285,6 +301,11 @@ set_target_properties(
         "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/timemory/libunwind:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib"
     )
 
+if(CMAKE_BUILD_TYPE MATCHES "^(DEBUG|Debug)")
+    string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+    target_compile_options(omnitrace-exe PRIVATE ${_FLAGS})
+endif()
+
 install(
     TARGETS omnitrace-exe
     DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -319,6 +340,10 @@ install(
 # examples
 #
 # ------------------------------------------------------------------------------#
+
+if(OMNITRACE_BUILD_LTO)
+    omnitrace_restore_variables(LTO VARIABLES CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+endif()
 
 if(OMNITRACE_BUILD_TESTING)
     add_subdirectory(examples)

@@ -13,10 +13,10 @@
 
 #include "lulesh.h"
 
-static Real_t* buffer;
-static size_t  buffer_size;
-static size_t  buffer_offset;
-static int     do_atomic;
+static Kokkos::View<Real_t*> buffer;
+static size_t                buffer_size;
+static size_t                buffer_offset;
+static int                   do_atomic;
 
 void
 ResizeBuffer(const size_t size)
@@ -25,8 +25,7 @@ ResizeBuffer(const size_t size)
     if(size / sizeof(Real_t) + 1 > buffer_size)
     {
         buffer_size = size / sizeof(Real_t) + 1;
-        Release<Real_t>(&buffer);
-        buffer = Allocate<Real_t>(buffer_size);
+        buffer      = Kokkos::View<Real_t*>("Buffer", buffer_size);
     }
 }
 
@@ -35,7 +34,7 @@ Type*
 AllocateFromBuffer(const Index_t& count)
 {
     const Index_t offset = (count * sizeof(Type) + sizeof(Real_t) - 1) / sizeof(Real_t);
-    Real_t*       ptr    = buffer + buffer_offset;
+    Real_t*       ptr    = buffer.data() + buffer_offset;
     buffer_offset += ((offset + 511) / 512) * 512;
     return static_cast<Type*>(ptr);
 }
@@ -150,13 +149,13 @@ static inline void
 InitStressTermsForElems(Domain& domain, Real_t* sigxx, Real_t* sigyy, Real_t* sigzz,
                         Index_t numElem)
 {
-    Kokkos::parallel_for("InitStressTermsForElems", numElem,
-                         KOKKOS_LAMBDA(const Index_t& i) {
-                             sigxx[i] = sigyy[i] = sigzz[i] = -domain.p(i) - domain.q(i);
-                         });
+    Kokkos::parallel_for(
+        "InitStressTermsForElems", numElem, KOKKOS_LAMBDA(const Index_t& i) {
+            sigxx[i] = sigyy[i] = sigzz[i] = -domain.p(i) - domain.q(i);
+        });
 }
 
-static inline void
+KOKKOS_INLINE_FUNCTION void
 CalcElemShapeFunctionDerivatives(Real_t const x[], Real_t const y[], Real_t const z[],
                                  Real_t b[][8], Real_t* const volume)
 {
@@ -343,7 +342,7 @@ IntegrateStressForElems(Domain& domain, Real_t* sigxx, Real_t* sigyy, Real_t* si
 
     Kokkos::parallel_for(
         "IntegrateStressForElems A", numElem, KOKKOS_LAMBDA(const int k) {
-            const Index_t* const elemToNode = domain.nodelist(k);
+            const Index_t* const elemToNode = &domain.nodelist(k, 0);
             Real_t               B[3][8];
             Real_t               x_local[8];
             Real_t               y_local[8];
@@ -359,12 +358,9 @@ IntegrateStressForElems(Domain& domain, Real_t* sigxx, Real_t* sigyy, Real_t* si
                                         &fy_elem[k * 8], &fz_elem[k * 8]);
         });
 
-#ifdef KOKKOS_HAVE_CUDA
-    int team_size =
-        std::is_same<Kokkos::DefaultExecutionSpace, Kokkos::Cuda>::value ? 128 : 1;
-#else
     int team_size = 1;
-#endif
+    if(Kokkos::DefaultExecutionSpace().concurrency() > 1024) team_size = 128;
+
     Kokkos::parallel_for(
         "IntegrateStressForElems B",
         Kokkos::TeamPolicy<>((numNode + 127) / 128, team_size, 2),
@@ -398,7 +394,7 @@ IntegrateStressForElems(Domain& domain, Real_t* sigxx, Real_t* sigyy, Real_t* si
         });
 }
 
-static inline void
+KOKKOS_INLINE_FUNCTION void
 VoluDer(const Real_t x0, const Real_t x1, const Real_t x2, const Real_t x3,
         const Real_t x4, const Real_t x5, const Real_t y0, const Real_t y1,
         const Real_t y2, const Real_t y3, const Real_t y4, const Real_t y5,
@@ -542,7 +538,7 @@ CalcFBHourglassForceForElems(
             Real_t hourgam[4][8];
             Real_t xd1[8];
 
-            const Index_t* elemToNode = domain.nodelist(i2);
+            const Index_t* elemToNode = &domain.nodelist(i2, 0);
             Index_t        i3         = 8 * i2;
             Real_t         volinv     = Real_t(1.0) / determ[i2];
 
@@ -690,12 +686,9 @@ CalcFBHourglassForceForElems(
 
     if(!do_atomic)
     {
-#ifdef KOKKOS_HAVE_CUDA
-        int team_size =
-            std::is_same<Kokkos::DefaultExecutionSpace, Kokkos::Cuda>::value ? 128 : 1;
-#else
         int team_size = 1;
-#endif
+        if(Kokkos::DefaultExecutionSpace().concurrency() > 1024) team_size = 128;
+
         Kokkos::parallel_for(
             "CalcFBHourglassForceForElems B",
             Kokkos::TeamPolicy<>((numNode + 127) / 128, team_size, 2),
@@ -762,7 +755,7 @@ CalcHourglassControlForElems(Domain& domain, Real_t determ[], Real_t hgcoef)
         KOKKOS_LAMBDA(const int i, int& err) {
             Real_t x1[8], y1[8], z1[8];
 
-            Index_t* elemToNode = domain.nodelist(i);
+            Index_t* elemToNode = &domain.nodelist(i, 0);
             CollectDomainNodesToElemNodes(domain, elemToNode, x1, y1, z1);
 
             CalcElemVolumeDerivative(i, v_dvdx, v_dvdy, v_dvdz, x1, y1, z1);
@@ -805,27 +798,29 @@ CalcVolumeForceForElems(Domain& domain)
     Index_t numElem = domain.numElem();
     if(numElem != 0)
     {
-        Real_t  hgcoef = domain.hgcoef();
-        Real_t* sigxx  = Allocate<Real_t>(numElem);
-        Real_t* sigyy  = Allocate<Real_t>(numElem);
-        Real_t* sigzz  = Allocate<Real_t>(numElem);
-        Real_t* determ = Allocate<Real_t>(numElem);
+        Real_t                hgcoef = domain.hgcoef();
+        Kokkos::View<Real_t*> sigxx("sigxx", numElem);
+        Kokkos::View<Real_t*> sigyy("sigyy", numElem);
+        Kokkos::View<Real_t*> sigzz("sigzz", numElem);
+        Kokkos::View<Real_t*> determ("determ", numElem);
 
-        InitStressTermsForElems(domain, sigxx, sigyy, sigzz, numElem);
+        InitStressTermsForElems(domain, sigxx.data(), sigyy.data(), sigzz.data(),
+                                numElem);
 
-        IntegrateStressForElems(domain, sigxx, sigyy, sigzz, determ, numElem,
-                                domain.numNode());
+        IntegrateStressForElems(domain, sigxx.data(), sigyy.data(), sigzz.data(),
+                                determ.data(), numElem, domain.numNode());
 
         // check for negative element volume
         int error = 0;
-        Kokkos::parallel_reduce(numElem,
-                                KOKKOS_LAMBDA(const int k, int& err) {
-                                    if(determ[k] <= Real_t(0.0))
-                                    {
-                                        err++;
-                                    }
-                                },
-                                error);
+        Kokkos::parallel_reduce(
+            numElem,
+            KOKKOS_LAMBDA(const int k, int& err) {
+                if(determ[k] <= Real_t(0.0))
+                {
+                    err++;
+                }
+            },
+            error);
 
         if(error)
 #if USE_MPI
@@ -834,12 +829,7 @@ CalcVolumeForceForElems(Domain& domain)
             exit(VolumeError);
 #endif
 
-        CalcHourglassControlForElems(domain, determ, hgcoef);
-
-        Release(&determ);
-        Release(&sigzz);
-        Release(&sigyy);
-        Release(&sigxx);
+        CalcHourglassControlForElems(domain, determ.data(), hgcoef);
     }
 }
 
@@ -853,11 +843,12 @@ CalcForceForNodes(Domain& domain)
              domain.sizeZ() + 1, true, false);
 #endif
 
-    Kokkos::parallel_for("CalcForceForNodes", numNode, KOKKOS_LAMBDA(const int i) {
-        domain.fx(i) = Real_t(0.0);
-        domain.fy(i) = Real_t(0.0);
-        domain.fz(i) = Real_t(0.0);
-    });
+    Kokkos::parallel_for(
+        "CalcForceForNodes", numNode, KOKKOS_LAMBDA(const int i) {
+            domain.fx(i) = Real_t(0.0);
+            domain.fy(i) = Real_t(0.0);
+            domain.fz(i) = Real_t(0.0);
+        });
 
     CalcVolumeForceForElems(domain);
 
@@ -876,11 +867,12 @@ CalcForceForNodes(Domain& domain)
 static inline void
 CalcAccelerationForNodes(Domain& domain, Index_t numNode)
 {
-    Kokkos::parallel_for("CalcAccelerationForNodes", numNode, KOKKOS_LAMBDA(const int i) {
-        domain.xdd(i) = domain.fx(i) / domain.nodalMass(i);
-        domain.ydd(i) = domain.fy(i) / domain.nodalMass(i);
-        domain.zdd(i) = domain.fz(i) / domain.nodalMass(i);
-    });
+    Kokkos::parallel_for(
+        "CalcAccelerationForNodes", numNode, KOKKOS_LAMBDA(const int i) {
+            domain.xdd(i) = domain.fx(i) / domain.nodalMass(i);
+            domain.ydd(i) = domain.fy(i) / domain.nodalMass(i);
+            domain.zdd(i) = domain.fz(i) / domain.nodalMass(i);
+        });
 }
 
 static inline void
@@ -914,34 +906,33 @@ ApplyAccelerationBoundaryConditionsForNodes(Domain& domain)
 static inline void
 CalcVelocityForNodes(Domain& domain, const Real_t dt, const Real_t u_cut, Index_t numNode)
 {
-    Kokkos::parallel_for("CalcVelocityForNodes", numNode, KOKKOS_LAMBDA(const int i) {
-        Real_t xdtmp, ydtmp, zdtmp;
+    Kokkos::parallel_for(
+        "CalcVelocityForNodes", numNode, KOKKOS_LAMBDA(const int i) {
+            Real_t xdtmp, ydtmp, zdtmp;
 
-        xdtmp = domain.xd(i) + domain.xdd(i) * dt;
-        if(FABS(xdtmp) < u_cut)
-            xdtmp = Real_t(0.0);
-        domain.xd(i) = xdtmp;
+            xdtmp = domain.xd(i) + domain.xdd(i) * dt;
+            if(FABS(xdtmp) < u_cut) xdtmp = Real_t(0.0);
+            domain.xd(i) = xdtmp;
 
-        ydtmp = domain.yd(i) + domain.ydd(i) * dt;
-        if(FABS(ydtmp) < u_cut)
-            ydtmp = Real_t(0.0);
-        domain.yd(i) = ydtmp;
+            ydtmp = domain.yd(i) + domain.ydd(i) * dt;
+            if(FABS(ydtmp) < u_cut) ydtmp = Real_t(0.0);
+            domain.yd(i) = ydtmp;
 
-        zdtmp = domain.zd(i) + domain.zdd(i) * dt;
-        if(FABS(zdtmp) < u_cut)
-            zdtmp = Real_t(0.0);
-        domain.zd(i) = zdtmp;
-    });
+            zdtmp = domain.zd(i) + domain.zdd(i) * dt;
+            if(FABS(zdtmp) < u_cut) zdtmp = Real_t(0.0);
+            domain.zd(i) = zdtmp;
+        });
 }
 
 static inline void
 CalcPositionForNodes(Domain& domain, const Real_t dt, Index_t numNode)
 {
-    Kokkos::parallel_for("CalcPositionForNodes", numNode, KOKKOS_LAMBDA(const int i) {
-        domain.x(i) += domain.xd(i) * dt;
-        domain.y(i) += domain.yd(i) * dt;
-        domain.z(i) += domain.zd(i) * dt;
-    });
+    Kokkos::parallel_for(
+        "CalcPositionForNodes", numNode, KOKKOS_LAMBDA(const int i) {
+            domain.x(i) += domain.xd(i) * dt;
+            domain.y(i) += domain.yd(i) * dt;
+            domain.z(i) += domain.zd(i) * dt;
+        });
 }
 
 static inline void
@@ -989,12 +980,12 @@ LagrangeNodal(Domain& domain)
 }
 
 KOKKOS_INLINE_FUNCTION Real_t
-                       CalcElemVolume(const Real_t x0, const Real_t x1, const Real_t x2, const Real_t x3,
-                                      const Real_t x4, const Real_t x5, const Real_t x6, const Real_t x7,
-                                      const Real_t y0, const Real_t y1, const Real_t y2, const Real_t y3,
-                                      const Real_t y4, const Real_t y5, const Real_t y6, const Real_t y7,
-                                      const Real_t z0, const Real_t z1, const Real_t z2, const Real_t z3,
-                                      const Real_t z4, const Real_t z5, const Real_t z6, const Real_t z7)
+CalcElemVolume(const Real_t x0, const Real_t x1, const Real_t x2, const Real_t x3,
+               const Real_t x4, const Real_t x5, const Real_t x6, const Real_t x7,
+               const Real_t y0, const Real_t y1, const Real_t y2, const Real_t y3,
+               const Real_t y4, const Real_t y5, const Real_t y6, const Real_t y7,
+               const Real_t z0, const Real_t z1, const Real_t z2, const Real_t z3,
+               const Real_t z4, const Real_t z5, const Real_t z6, const Real_t z7)
 {
     Real_t twelveth = Real_t(1.0) / Real_t(12.0);
 
@@ -1073,7 +1064,8 @@ CalcElemVolume(const Real_t x[8], const Real_t y[8], const Real_t z[8])
                           z[4], z[5], z[6], z[7]);
 }
 
-static inline Real_t
+KOKKOS_INLINE_FUNCTION
+Real_t
 AreaFace(const Real_t x0, const Real_t x1, const Real_t x2, const Real_t x3,
          const Real_t y0, const Real_t y1, const Real_t y2, const Real_t y3,
          const Real_t z0, const Real_t z1, const Real_t z2, const Real_t z3)
@@ -1090,8 +1082,8 @@ AreaFace(const Real_t x0, const Real_t x1, const Real_t x2, const Real_t x3,
 }
 
 KOKKOS_INLINE_FUNCTION Real_t
-                       CalcElemCharacteristicLength(const Real_t x[8], const Real_t y[8], const Real_t z[8],
-                                                    const Real_t volume)
+CalcElemCharacteristicLength(const Real_t x[8], const Real_t y[8], const Real_t z[8],
+                             const Real_t volume)
 {
     Real_t a, charLength = Real_t(0.0);
 
@@ -1118,7 +1110,7 @@ KOKKOS_INLINE_FUNCTION Real_t
     return charLength;
 }
 
-static inline void
+KOKKOS_INLINE_FUNCTION void
 CalcElemVelocityGradient(const Real_t* const xvel, const Real_t* const yvel,
                          const Real_t* const zvel, const Real_t b[][8], const Real_t detJ,
                          Real_t* const d)
@@ -1163,55 +1155,56 @@ CalcElemVelocityGradient(const Real_t* const xvel, const Real_t* const yvel,
 void
 CalcKinematicsForElems(Domain& domain, Real_t deltaTime, Index_t numElem)
 {
-    Kokkos::parallel_for("CalcKinematicsForElems", numElem, KOKKOS_LAMBDA(const int k) {
-        Real_t B[3][8];
-        Real_t D[6];
-        Real_t x_local[8];
-        Real_t y_local[8];
-        Real_t z_local[8];
-        Real_t xd_local[8];
-        Real_t yd_local[8];
-        Real_t zd_local[8];
-        Real_t detJ = Real_t(0.0);
+    Kokkos::parallel_for(
+        "CalcKinematicsForElems", numElem, KOKKOS_LAMBDA(const int k) {
+            Real_t B[3][8];
+            Real_t D[6];
+            Real_t x_local[8];
+            Real_t y_local[8];
+            Real_t z_local[8];
+            Real_t xd_local[8];
+            Real_t yd_local[8];
+            Real_t zd_local[8];
+            Real_t detJ = Real_t(0.0);
 
-        Real_t               volume;
-        Real_t               relativeVolume;
-        const Index_t* const elemToNode = domain.nodelist(k);
+            Real_t               volume;
+            Real_t               relativeVolume;
+            const Index_t* const elemToNode = &domain.nodelist(k, 0);
 
-        CollectDomainNodesToElemNodes(domain, elemToNode, x_local, y_local, z_local);
+            CollectDomainNodesToElemNodes(domain, elemToNode, x_local, y_local, z_local);
 
-        volume         = CalcElemVolume(x_local, y_local, z_local);
-        relativeVolume = volume / domain.volo(k);
-        domain.vnew(k) = relativeVolume;
-        domain.delv(k) = relativeVolume - domain.v(k);
+            volume         = CalcElemVolume(x_local, y_local, z_local);
+            relativeVolume = volume / domain.volo(k);
+            domain.vnew(k) = relativeVolume;
+            domain.delv(k) = relativeVolume - domain.v(k);
 
-        domain.arealg(k) =
-            CalcElemCharacteristicLength(x_local, y_local, z_local, volume);
+            domain.arealg(k) =
+                CalcElemCharacteristicLength(x_local, y_local, z_local, volume);
 
-        for(Index_t lnode = 0; lnode < 8; ++lnode)
-        {
-            Index_t gnode   = elemToNode[lnode];
-            xd_local[lnode] = domain.c_xd(gnode);
-            yd_local[lnode] = domain.c_yd(gnode);
-            zd_local[lnode] = domain.c_zd(gnode);
-        }
+            for(Index_t lnode = 0; lnode < 8; ++lnode)
+            {
+                Index_t gnode   = elemToNode[lnode];
+                xd_local[lnode] = domain.c_xd(gnode);
+                yd_local[lnode] = domain.c_yd(gnode);
+                zd_local[lnode] = domain.c_zd(gnode);
+            }
 
-        Real_t dt2 = Real_t(0.5) * deltaTime;
-        for(Index_t j = 0; j < 8; ++j)
-        {
-            x_local[j] -= dt2 * xd_local[j];
-            y_local[j] -= dt2 * yd_local[j];
-            z_local[j] -= dt2 * zd_local[j];
-        }
+            Real_t dt2 = Real_t(0.5) * deltaTime;
+            for(Index_t j = 0; j < 8; ++j)
+            {
+                x_local[j] -= dt2 * xd_local[j];
+                y_local[j] -= dt2 * yd_local[j];
+                z_local[j] -= dt2 * zd_local[j];
+            }
 
-        CalcElemShapeFunctionDerivatives(x_local, y_local, z_local, B, &detJ);
+            CalcElemShapeFunctionDerivatives(x_local, y_local, z_local, B, &detJ);
 
-        CalcElemVelocityGradient(xd_local, yd_local, zd_local, B, detJ, D);
+            CalcElemVelocityGradient(xd_local, yd_local, zd_local, B, detJ, D);
 
-        domain.dxx(k) = D[0];
-        domain.dyy(k) = D[1];
-        domain.dzz(k) = D[2];
-    });
+            domain.dxx(k) = D[0];
+            domain.dyy(k) = D[1];
+            domain.dzz(k) = D[2];
+        });
 }
 
 static inline void
@@ -1227,23 +1220,23 @@ CalcLagrangeElements(Domain& domain)
         CalcKinematicsForElems(domain, deltatime, numElem);
 
         int error = 0;
-        Kokkos::parallel_reduce(numElem,
-                                KOKKOS_LAMBDA(const int k, int& err) {
-                                    Real_t vdov =
-                                        domain.dxx(k) + domain.dyy(k) + domain.dzz(k);
-                                    Real_t vdovthird = vdov / Real_t(3.0);
+        Kokkos::parallel_reduce(
+            numElem,
+            KOKKOS_LAMBDA(const int k, int& err) {
+                Real_t vdov      = domain.dxx(k) + domain.dyy(k) + domain.dzz(k);
+                Real_t vdovthird = vdov / Real_t(3.0);
 
-                                    domain.vdov(k) = vdov;
-                                    domain.dxx(k) -= vdovthird;
-                                    domain.dyy(k) -= vdovthird;
-                                    domain.dzz(k) -= vdovthird;
+                domain.vdov(k) = vdov;
+                domain.dxx(k) -= vdovthird;
+                domain.dyy(k) -= vdovthird;
+                domain.dzz(k) -= vdovthird;
 
-                                    if(domain.vnew(k) <= Real_t(0.0))
-                                    {
-                                        err++;
-                                    }
-                                },
-                                error);
+                if(domain.vnew(k) <= Real_t(0.0))
+                {
+                    err++;
+                }
+            },
+            error);
 
         if(error)
 #if USE_MPI
@@ -1267,7 +1260,7 @@ CalcMonotonicQGradientsForElems(Domain& domain)
             Real_t       ax, ay, az;
             Real_t       dxv, dyv, dzv;
 
-            const Index_t* elemToNode = domain.nodelist(i);
+            const Index_t* elemToNode = &domain.nodelist(i, 0);
             Index_t        n0         = elemToNode[0];
             Index_t        n1         = elemToNode[1];
             Index_t        n2         = elemToNode[2];
@@ -1446,14 +1439,10 @@ CalcMonotonicQRegionForElems(Domain& domain, Int_t r, Real_t ptiny)
             delvm *= monoq_limiter_mult;
             delvp *= monoq_limiter_mult;
 
-            if(delvm < phixi)
-                phixi = delvm;
-            if(delvp < phixi)
-                phixi = delvp;
-            if(phixi < Real_t(0.))
-                phixi = Real_t(0.);
-            if(phixi > monoq_max_slope)
-                phixi = monoq_max_slope;
+            if(delvm < phixi) phixi = delvm;
+            if(delvp < phixi) phixi = delvp;
+            if(phixi < Real_t(0.)) phixi = Real_t(0.);
+            if(phixi > monoq_max_slope) phixi = monoq_max_slope;
 
             norm = Real_t(1.) / (domain.delv_eta(ielem) + ptiny);
 
@@ -1488,14 +1477,10 @@ CalcMonotonicQRegionForElems(Domain& domain, Int_t r, Real_t ptiny)
             delvm *= monoq_limiter_mult;
             delvp *= monoq_limiter_mult;
 
-            if(delvm < phieta)
-                phieta = delvm;
-            if(delvp < phieta)
-                phieta = delvp;
-            if(phieta < Real_t(0.))
-                phieta = Real_t(0.);
-            if(phieta > monoq_max_slope)
-                phieta = monoq_max_slope;
+            if(delvm < phieta) phieta = delvm;
+            if(delvp < phieta) phieta = delvp;
+            if(phieta < Real_t(0.)) phieta = Real_t(0.);
+            if(phieta > monoq_max_slope) phieta = monoq_max_slope;
 
             norm = Real_t(1.) / (domain.delv_zeta(ielem) + ptiny);
 
@@ -1530,14 +1515,10 @@ CalcMonotonicQRegionForElems(Domain& domain, Int_t r, Real_t ptiny)
             delvm *= monoq_limiter_mult;
             delvp *= monoq_limiter_mult;
 
-            if(delvm < phizeta)
-                phizeta = delvm;
-            if(delvp < phizeta)
-                phizeta = delvp;
-            if(phizeta < Real_t(0.))
-                phizeta = Real_t(0.);
-            if(phizeta > monoq_max_slope)
-                phizeta = monoq_max_slope;
+            if(delvm < phizeta) phizeta = delvm;
+            if(delvp < phizeta) phizeta = delvp;
+            if(phizeta < Real_t(0.)) phizeta = Real_t(0.);
+            if(phizeta > monoq_max_slope) phizeta = monoq_max_slope;
 
             if(domain.vdov(ielem) > Real_t(0.))
             {
@@ -1550,12 +1531,9 @@ CalcMonotonicQRegionForElems(Domain& domain, Int_t r, Real_t ptiny)
                 Real_t delvxeta  = domain.delv_eta(ielem) * domain.delx_eta(ielem);
                 Real_t delvxzeta = domain.delv_zeta(ielem) * domain.delx_zeta(ielem);
 
-                if(delvxxi > Real_t(0.))
-                    delvxxi = Real_t(0.);
-                if(delvxeta > Real_t(0.))
-                    delvxeta = Real_t(0.);
-                if(delvxzeta > Real_t(0.))
-                    delvxzeta = Real_t(0.);
+                if(delvxxi > Real_t(0.)) delvxxi = Real_t(0.);
+                if(delvxeta > Real_t(0.)) delvxeta = Real_t(0.);
+                if(delvxzeta > Real_t(0.)) delvxzeta = Real_t(0.);
 
                 Real_t rho =
                     domain.elemMass(ielem) / (domain.volo(ielem) * domain.vnew(ielem));
@@ -1628,14 +1606,15 @@ CalcQForElems(Domain& domain)
         domain.DeallocateGradients();
 
         Index_t idx = 0;
-        Kokkos::parallel_reduce(numElem,
-                                KOKKOS_LAMBDA(const Index_t& i, Index_t& count) {
-                                    if(domain.q(i) > domain.qstop())
-                                    {
-                                        count++;
-                                    }
-                                },
-                                idx);
+        Kokkos::parallel_reduce(
+            numElem,
+            KOKKOS_LAMBDA(const Index_t& i, Index_t& count) {
+                if(domain.q(i) > domain.qstop())
+                {
+                    count++;
+                }
+            },
+            idx);
 
         if(idx > 0)
         {
@@ -1661,14 +1640,12 @@ CalcPressureForElem(Real_t& p_new_i, Real_t& bvc_i, Real_t& pbvc_i, const Real_t
 
     p_new_i = bvc_i * e_old_i;
 
-    if(FABS(p_new_i) < p_cut)
-        p_new_i = Real_t(0.0);
+    if(FABS(p_new_i) < p_cut) p_new_i = Real_t(0.0);
 
     if(vnewc_e >= eosvmax) /* impossible condition here? */
         p_new_i = Real_t(0.0);
 
-    if(p_new_i < pmin)
-        p_new_i = pmin;
+    if(p_new_i < pmin) p_new_i = pmin;
 }
 
 static inline void
@@ -1677,135 +1654,138 @@ CalcEnergyForElems(Real_t* p_new, Real_t* e_new, Real_t* q_new, Real_t* bvc, Rea
                    Real_t* compHalfStep, Real_t* vnewc, Real_t* work, Real_t* delvc,
                    Real_t pmin, Real_t p_cut, Real_t e_cut, Real_t q_cut, Real_t emin,
                    Real_t* qq_old, Real_t* ql_old, Real_t rho0, Real_t eosvmax,
-                   Index_t length, Index_t* regElemList)
+                   Index_t length, Domain& domain, Index_t r)
 {
-    Kokkos::parallel_for("CalcEnergyForElems", length, KOKKOS_LAMBDA(const int i) {
-        const Real_t delvc_i = delvc[i];
-        const Real_t p_old_i = p_old[i];
-        const Real_t q_old_i = q_old[i];
-        Real_t       e_new_i = e_old[i] - Real_t(0.5) * delvc_i * (p_old_i + q_old_i) +
-                         Real_t(0.5) * work[i];
+    Kokkos::parallel_for(
+        "CalcEnergyForElems", length, KOKKOS_LAMBDA(const int i) {
+            const Real_t delvc_i = delvc[i];
+            const Real_t p_old_i = p_old[i];
+            const Real_t q_old_i = q_old[i];
+            Real_t e_new_i = e_old[i] - Real_t(0.5) * delvc_i * (p_old_i + q_old_i) +
+                             Real_t(0.5) * work[i];
 
-        if(e_new_i < emin)
-        {
-            e_new_i = emin;
-        }
-
-        Real_t       bvc_i, pbvc_i;
-        Real_t       pHalfStep_i;
-        const Real_t vnewc_e        = vnewc[regElemList[i]];
-        const Real_t compHalfStep_i = compHalfStep[i];
-        CalcPressureForElem(pHalfStep_i, bvc_i, pbvc_i, e_new_i, compHalfStep_i, vnewc_e,
-                            pmin, p_cut, eosvmax);
-
-        Real_t vhalf = Real_t(1.) / (Real_t(1.) + compHalfStep_i);
-
-        Real_t       q_new_i;
-        const Real_t ql_old_i = ql_old[i];
-        const Real_t qq_old_i = qq_old[i];
-        if(delvc_i > Real_t(0.))
-        {
-            q_new_i /* = qq_old[i] = ql_old[i] */ = Real_t(0.);
-        }
-        else
-        {
-            Real_t ssc = (pbvc_i * e_new_i + vhalf * vhalf * bvc_i * pHalfStep_i) / rho0;
-
-            if(ssc <= Real_t(.1111111e-36))
+            if(e_new_i < emin)
             {
-                ssc = Real_t(.3333333e-18);
+                e_new_i = emin;
+            }
+
+            Real_t       bvc_i, pbvc_i;
+            Real_t       pHalfStep_i;
+            const Real_t vnewc_e        = vnewc[domain.regElemlist(r, i)];
+            const Real_t compHalfStep_i = compHalfStep[i];
+            CalcPressureForElem(pHalfStep_i, bvc_i, pbvc_i, e_new_i, compHalfStep_i,
+                                vnewc_e, pmin, p_cut, eosvmax);
+
+            Real_t vhalf = Real_t(1.) / (Real_t(1.) + compHalfStep_i);
+
+            Real_t       q_new_i;
+            const Real_t ql_old_i = ql_old[i];
+            const Real_t qq_old_i = qq_old[i];
+            if(delvc_i > Real_t(0.))
+            {
+                q_new_i /* = qq_old[i] = ql_old[i] */ = Real_t(0.);
             }
             else
             {
-                ssc = SQRT(ssc);
+                Real_t ssc =
+                    (pbvc_i * e_new_i + vhalf * vhalf * bvc_i * pHalfStep_i) / rho0;
+
+                if(ssc <= Real_t(.1111111e-36))
+                {
+                    ssc = Real_t(.3333333e-18);
+                }
+                else
+                {
+                    ssc = SQRT(ssc);
+                }
+
+                q_new_i = (ssc * ql_old_i + qq_old_i);
             }
 
-            q_new_i = (ssc * ql_old_i + qq_old_i);
-        }
+            e_new_i = e_new_i + Real_t(0.5) * delvc_i *
+                                    (Real_t(3.0) * (p_old_i + q_old_i) -
+                                     Real_t(4.0) * (pHalfStep_i + q_new_i));
 
-        e_new_i = e_new_i + Real_t(0.5) * delvc_i *
-                                (Real_t(3.0) * (p_old_i + q_old_i) -
-                                 Real_t(4.0) * (pHalfStep_i + q_new_i));
+            e_new_i += Real_t(0.5) * work[i];
 
-        e_new_i += Real_t(0.5) * work[i];
-
-        if(FABS(e_new_i) < e_cut)
-        {
-            e_new_i = Real_t(0.);
-        }
-        if(e_new_i < emin)
-        {
-            e_new_i = emin;
-        }
-        Real_t       p_new_i;
-        const Real_t compression_i = compression[i];
-        CalcPressureForElem(p_new_i, bvc_i, pbvc_i, e_new_i, compression_i, vnewc_e, pmin,
-                            p_cut, eosvmax);
-
-        const Real_t sixth = Real_t(1.0) / Real_t(6.0);
-        Real_t       q_tilde;
-
-        if(delvc_i > Real_t(0.))
-        {
-            q_tilde = Real_t(0.);
-        }
-        else
-        {
-            Real_t ssc = (pbvc_i * e_new_i + vnewc_e * vnewc_e * bvc_i * p_new_i) / rho0;
-
-            if(ssc <= Real_t(.1111111e-36))
+            if(FABS(e_new_i) < e_cut)
             {
-                ssc = Real_t(.3333333e-18);
+                e_new_i = Real_t(0.);
+            }
+            if(e_new_i < emin)
+            {
+                e_new_i = emin;
+            }
+            Real_t       p_new_i;
+            const Real_t compression_i = compression[i];
+            CalcPressureForElem(p_new_i, bvc_i, pbvc_i, e_new_i, compression_i, vnewc_e,
+                                pmin, p_cut, eosvmax);
+
+            const Real_t sixth = Real_t(1.0) / Real_t(6.0);
+            Real_t       q_tilde;
+
+            if(delvc_i > Real_t(0.))
+            {
+                q_tilde = Real_t(0.);
             }
             else
             {
-                ssc = SQRT(ssc);
+                Real_t ssc =
+                    (pbvc_i * e_new_i + vnewc_e * vnewc_e * bvc_i * p_new_i) / rho0;
+
+                if(ssc <= Real_t(.1111111e-36))
+                {
+                    ssc = Real_t(.3333333e-18);
+                }
+                else
+                {
+                    ssc = SQRT(ssc);
+                }
+
+                q_tilde = (ssc * ql_old_i + qq_old_i);
             }
 
-            q_tilde = (ssc * ql_old_i + qq_old_i);
-        }
+            e_new_i =
+                e_new_i - (Real_t(7.0) * (p_old_i + q_old_i) -
+                           Real_t(8.0) * (pHalfStep_i + q_new_i) + (p_new_i + q_tilde)) *
+                              delvc_i * sixth;
 
-        e_new_i =
-            e_new_i - (Real_t(7.0) * (p_old_i + q_old_i) -
-                       Real_t(8.0) * (pHalfStep_i + q_new_i) + (p_new_i + q_tilde)) *
-                          delvc_i * sixth;
-
-        if(FABS(e_new_i) < e_cut)
-        {
-            e_new_i = Real_t(0.);
-        }
-        if(e_new_i < emin)
-        {
-            e_new_i = emin;
-        }
-
-        CalcPressureForElem(p_new_i, bvc_i, pbvc_i, e_new_i, compression_i, vnewc_e, pmin,
-                            p_cut, eosvmax);
-        bvc[i]   = bvc_i;
-        pbvc[i]  = pbvc_i;
-        p_new[i] = p_new_i;
-
-        if(delvc_i <= Real_t(0.))
-        {
-            Real_t ssc = (pbvc_i * e_new_i + vnewc_e * vnewc_e * bvc_i * p_new_i) / rho0;
-
-            if(ssc <= Real_t(.1111111e-36))
+            if(FABS(e_new_i) < e_cut)
             {
-                ssc = Real_t(.3333333e-18);
+                e_new_i = Real_t(0.);
             }
-            else
+            if(e_new_i < emin)
             {
-                ssc = SQRT(ssc);
+                e_new_i = emin;
             }
 
-            q_new_i = (ssc * ql_old_i + qq_old_i);
+            CalcPressureForElem(p_new_i, bvc_i, pbvc_i, e_new_i, compression_i, vnewc_e,
+                                pmin, p_cut, eosvmax);
+            bvc[i]   = bvc_i;
+            pbvc[i]  = pbvc_i;
+            p_new[i] = p_new_i;
 
-            if(FABS(q_new_i) < q_cut)
-                q_new_i = Real_t(0.);
-        }
-        q_new[i] = q_new_i;
-        e_new[i] = e_new_i;
-    });
+            if(delvc_i <= Real_t(0.))
+            {
+                Real_t ssc =
+                    (pbvc_i * e_new_i + vnewc_e * vnewc_e * bvc_i * p_new_i) / rho0;
+
+                if(ssc <= Real_t(.1111111e-36))
+                {
+                    ssc = Real_t(.3333333e-18);
+                }
+                else
+                {
+                    ssc = SQRT(ssc);
+                }
+
+                q_new_i = (ssc * ql_old_i + qq_old_i);
+
+                if(FABS(q_new_i) < q_cut) q_new_i = Real_t(0.);
+            }
+            q_new[i] = q_new_i;
+            e_new[i] = e_new_i;
+        });
 
     return;
 }
@@ -1813,27 +1793,28 @@ CalcEnergyForElems(Real_t* p_new, Real_t* e_new, Real_t* q_new, Real_t* bvc, Rea
 static inline void
 CalcSoundSpeedForElems(Domain& domain, Real_t* vnewc, Real_t rho0, Real_t* enewc,
                        Real_t* pnewc, Real_t* pbvc, Real_t* bvc, Real_t ss4o3,
-                       Index_t len, Index_t* regElemList)
+                       Index_t len, Index_t r)
 {
-    Kokkos::parallel_for("CalcSoundSpeedForElems", len, KOKKOS_LAMBDA(const int i) {
-        Index_t ielem = regElemList[i];
-        Real_t  ssTmp =
-            (pbvc[i] * enewc[i] + vnewc[ielem] * vnewc[ielem] * bvc[i] * pnewc[i]) / rho0;
-        if(ssTmp <= Real_t(.1111111e-36))
-        {
-            ssTmp = Real_t(.3333333e-18);
-        }
-        else
-        {
-            ssTmp = SQRT(ssTmp);
-        }
-        domain.ss(ielem) = ssTmp;
-    });
+    Kokkos::parallel_for(
+        "CalcSoundSpeedForElems", len, KOKKOS_LAMBDA(const int i) {
+            Index_t ielem = domain.regElemlist(r, i);
+            Real_t  ssTmp =
+                (pbvc[i] * enewc[i] + vnewc[ielem] * vnewc[ielem] * bvc[i] * pnewc[i]) /
+                rho0;
+            if(ssTmp <= Real_t(.1111111e-36))
+            {
+                ssTmp = Real_t(.3333333e-18);
+            }
+            else
+            {
+                ssTmp = SQRT(ssTmp);
+            }
+            domain.ss(ielem) = ssTmp;
+        });
 }
 
 static inline void
-EvalEOSForElems(Domain& domain, Real_t* vnewc, Int_t numElemReg, Index_t* regElemList,
-                Int_t rep)
+EvalEOSForElems(Domain& domain, Real_t* vnewc, Int_t numElemReg, Index_t r, Int_t rep)
 {
     Real_t e_cut = domain.e_cut();
     Real_t p_cut = domain.p_cut();
@@ -1865,54 +1846,56 @@ EvalEOSForElems(Domain& domain, Real_t* vnewc, Int_t numElemReg, Index_t* regEle
 
     for(Int_t j = 0; j < rep; j++)
     {
-        Kokkos::parallel_for("EvalEOSForElems A", numElemReg, KOKKOS_LAMBDA(const int i) {
-            Index_t ielem            = regElemList[i];
-            e_old[i]                 = domain.c_e(ielem);
-            delvc[i]                 = domain.c_delv(ielem);
-            p_old[i]                 = domain.c_p(ielem);
-            q_old[i]                 = domain.c_q(ielem);
-            qq_old[i]                = domain.c_qq(ielem);
-            ql_old[i]                = domain.c_ql(ielem);
-            const Real_t vnewc_ielem = vnewc[ielem];
-            Real_t       vchalf;
-            compression[i]  = Real_t(1.) / vnewc_ielem - Real_t(1.);
-            vchalf          = vnewc_ielem - delvc[i] * Real_t(.5);
-            compHalfStep[i] = Real_t(1.) / vchalf - Real_t(1.);
+        Kokkos::parallel_for(
+            "EvalEOSForElems A", numElemReg, KOKKOS_LAMBDA(const int i) {
+                Index_t ielem            = domain.regElemlist(r, i);
+                e_old[i]                 = domain.c_e(ielem);
+                delvc[i]                 = domain.c_delv(ielem);
+                p_old[i]                 = domain.c_p(ielem);
+                q_old[i]                 = domain.c_q(ielem);
+                qq_old[i]                = domain.c_qq(ielem);
+                ql_old[i]                = domain.c_ql(ielem);
+                const Real_t vnewc_ielem = vnewc[ielem];
+                Real_t       vchalf;
+                compression[i]  = Real_t(1.) / vnewc_ielem - Real_t(1.);
+                vchalf          = vnewc_ielem - delvc[i] * Real_t(.5);
+                compHalfStep[i] = Real_t(1.) / vchalf - Real_t(1.);
 
-            if(eosvmin != Real_t(0.))
-            {
-                if(vnewc_ielem <= eosvmin)
-                { /* impossible due to calling func? */
-                    compHalfStep[i] = compression[i];
+                if(eosvmin != Real_t(0.))
+                {
+                    if(vnewc_ielem <= eosvmin)
+                    { /* impossible due to calling func? */
+                        compHalfStep[i] = compression[i];
+                    }
                 }
-            }
-            if(eosvmax != Real_t(0.))
-            {
-                if(vnewc_ielem >= eosvmax)
-                { /* impossible due to calling func? */
-                    p_old[i]        = Real_t(0.);
-                    compression[i]  = Real_t(0.);
-                    compHalfStep[i] = Real_t(0.);
+                if(eosvmax != Real_t(0.))
+                {
+                    if(vnewc_ielem >= eosvmax)
+                    { /* impossible due to calling func? */
+                        p_old[i]        = Real_t(0.);
+                        compression[i]  = Real_t(0.);
+                        compHalfStep[i] = Real_t(0.);
+                    }
                 }
-            }
-            work[i] = Real_t(0.);
-        });
+                work[i] = Real_t(0.);
+            });
 
         CalcEnergyForElems(p_new, e_new, q_new, bvc, pbvc, p_old, e_old, q_old,
                            compression, compHalfStep, vnewc, work, delvc, pmin, p_cut,
                            e_cut, q_cut, emin, qq_old, ql_old, rho0, eosvmax, numElemReg,
-                           regElemList);
+                           domain, r);
     }
 
-    Kokkos::parallel_for("EvalEOSForElems F", numElemReg, KOKKOS_LAMBDA(const int i) {
-        Index_t ielem   = regElemList[i];
-        domain.p(ielem) = p_new[i];
-        domain.e(ielem) = e_new[i];
-        domain.q(ielem) = q_new[i];
-    });
+    Kokkos::parallel_for(
+        "EvalEOSForElems F", numElemReg, KOKKOS_LAMBDA(const int i) {
+            Index_t ielem   = domain.regElemlist(r, i);
+            domain.p(ielem) = p_new[i];
+            domain.e(ielem) = e_new[i];
+            domain.q(ielem) = q_new[i];
+        });
 
     CalcSoundSpeedForElems(domain, vnewc, rho0, e_new, p_new, pbvc, bvc, ss4o3,
-                           numElemReg, regElemList);
+                           numElemReg, r);
 }
 
 static inline void
@@ -1922,51 +1905,49 @@ ApplyMaterialPropertiesForElems(Domain& domain)
 
     if(numElem != 0)
     {
-        Real_t  eosvmin = domain.eosvmin();
-        Real_t  eosvmax = domain.eosvmax();
-        Real_t* vnewc   = Allocate<Real_t>(numElem);
+        Real_t                eosvmin = domain.eosvmin();
+        Real_t                eosvmax = domain.eosvmax();
+        Kokkos::View<Real_t*> vnewc("vnewc", numElem);
 
-        Kokkos::parallel_for("ApplyMaterialPropertiesForElems A", numElem,
-                             KOKKOS_LAMBDA(const int i) { vnewc[i] = domain.vnew(i); });
+        Kokkos::parallel_for(
+            "ApplyMaterialPropertiesForElems A", numElem,
+            KOKKOS_LAMBDA(const int i) { vnewc[i] = domain.vnew(i); });
 
         if(eosvmin != Real_t(0.))
         {
-            Kokkos::parallel_for("ApplyMaterialPropertiesForElems B", numElem,
-                                 KOKKOS_LAMBDA(const int i) {
-                                     if(vnewc[i] < eosvmin)
-                                         vnewc[i] = eosvmin;
-                                 });
+            Kokkos::parallel_for(
+                "ApplyMaterialPropertiesForElems B", numElem, KOKKOS_LAMBDA(const int i) {
+                    if(vnewc[i] < eosvmin) vnewc[i] = eosvmin;
+                });
         }
 
         if(eosvmax != Real_t(0.))
         {
-            Kokkos::parallel_for("ApplyMaterialPropertiesForElems C", numElem,
-                                 KOKKOS_LAMBDA(const int i) {
-                                     if(vnewc[i] > eosvmax)
-                                         vnewc[i] = eosvmax;
-                                 });
+            Kokkos::parallel_for(
+                "ApplyMaterialPropertiesForElems C", numElem, KOKKOS_LAMBDA(const int i) {
+                    if(vnewc[i] > eosvmax) vnewc[i] = eosvmax;
+                });
         }
 
         int error = 0;
-        Kokkos::parallel_reduce(numElem,
-                                KOKKOS_LAMBDA(const int i, int& err) {
-                                    Real_t vc = domain.v(i);
-                                    if(eosvmin != Real_t(0.))
-                                    {
-                                        if(vc < eosvmin)
-                                            vc = eosvmin;
-                                    }
-                                    if(eosvmax != Real_t(0.))
-                                    {
-                                        if(vc > eosvmax)
-                                            vc = eosvmax;
-                                    }
-                                    if(vc <= 0.)
-                                    {
-                                        err++;
-                                    }
-                                },
-                                error);
+        Kokkos::parallel_reduce(
+            numElem,
+            KOKKOS_LAMBDA(const int i, int& err) {
+                Real_t vc = domain.v(i);
+                if(eosvmin != Real_t(0.))
+                {
+                    if(vc < eosvmin) vc = eosvmin;
+                }
+                if(eosvmax != Real_t(0.))
+                {
+                    if(vc > eosvmax) vc = eosvmax;
+                }
+                if(vc <= 0.)
+                {
+                    err++;
+                }
+            },
+            error);
 
         if(error)
 #if USE_MPI
@@ -1977,19 +1958,17 @@ ApplyMaterialPropertiesForElems(Domain& domain)
 
         for(Int_t r = 0; r < domain.numReg(); r++)
         {
-            Index_t  numElemReg  = domain.regElemSize(r);
-            Index_t* regElemList = domain.regElemlist(r);
-            Int_t    rep;
+            Index_t numElemReg = domain.regElemSize(r);
+            //      Index_t *regElemList = domain.regElemlist(r);
+            Int_t rep;
             if(r < domain.numReg() / 2)
                 rep = 1;
             else if(r < (domain.numReg() - (domain.numReg() + 15) / 20))
                 rep = 1 + domain.cost();
             else
                 rep = 10 * (1 + domain.cost());
-            EvalEOSForElems(domain, vnewc, numElemReg, regElemList, rep);
+            EvalEOSForElems(domain, vnewc.data(), numElemReg, r, rep);
         }
-
-        Release(&vnewc);
     }
 }
 
@@ -1998,14 +1977,14 @@ UpdateVolumesForElems(Domain& domain, Real_t v_cut, Index_t length)
 {
     if(length != 0)
     {
-        Kokkos::parallel_for("UpdateVolumesForElems", length, KOKKOS_LAMBDA(const int i) {
-            Real_t tmpV = domain.vnew(i);
+        Kokkos::parallel_for(
+            "UpdateVolumesForElems", length, KOKKOS_LAMBDA(const int i) {
+                Real_t tmpV = domain.vnew(i);
 
-            if(FABS(tmpV - Real_t(1.0)) < v_cut)
-                tmpV = Real_t(1.0);
+                if(FABS(tmpV - Real_t(1.0)) < v_cut) tmpV = Real_t(1.0);
 
-            domain.v(i) = tmpV;
-        });
+                domain.v(i) = tmpV;
+            });
     }
 
     return;
@@ -2024,8 +2003,8 @@ LagrangeElements(Domain& domain, Index_t numElem)
 }
 
 static inline void
-CalcCourantConstraintForElems(Domain& domain, Index_t length, Index_t* regElemlist,
-                              Real_t qqc, Real_t& dtcourant)
+CalcCourantConstraintForElems(Domain& domain, Index_t length, Index_t r, Real_t qqc,
+                              Real_t& dtcourant)
 {
     typedef Kokkos::View<Real_t*> view_real_t;
 
@@ -2035,28 +2014,28 @@ CalcCourantConstraintForElems(Domain& domain, Index_t length, Index_t* regElemli
 
     MinFinder result;
 
-    Kokkos::parallel_reduce(length,
-                            KOKKOS_LAMBDA(const int i, MinFinder& minf) {
-                                Index_t indx = regElemlist[i];
-                                Real_t  dtf  = domain.ss(indx) * domain.ss(indx);
+    Kokkos::parallel_reduce(
+        length,
+        KOKKOS_LAMBDA(const int i, MinFinder& minf) {
+            Index_t indx = domain.regElemlist(r, i);
+            Real_t  dtf  = domain.ss(indx) * domain.ss(indx);
 
-                                if(domain.vdov(indx) < Real_t(0.))
-                                {
-                                    dtf = dtf + qqc2 * domain.arealg(indx) *
-                                                    domain.arealg(indx) *
-                                                    domain.vdov(indx) * domain.vdov(indx);
-                                }
+            if(domain.vdov(indx) < Real_t(0.))
+            {
+                dtf = dtf + qqc2 * domain.arealg(indx) * domain.arealg(indx) *
+                                domain.vdov(indx) * domain.vdov(indx);
+            }
 
-                                dtf = SQRT(dtf);
-                                dtf = domain.arealg(indx) / dtf;
+            dtf = SQRT(dtf);
+            dtf = domain.arealg(indx) / dtf;
 
-                                MinFinder tmp(dtf, i);
-                                if(domain.vdov(indx) != Real_t(0.))
-                                {
-                                    minf += tmp;
-                                }
-                            },
-                            result);
+            MinFinder tmp(dtf, i);
+            if(domain.vdov(indx) != Real_t(0.))
+            {
+                minf += tmp;
+            }
+        },
+        result);
 
     dtcourant_tmp = result.val;
 
@@ -2076,8 +2055,8 @@ CalcCourantConstraintForElems(Domain& domain, Index_t length, Index_t* regElemli
 }
 
 static inline void
-CalcHydroConstraintForElems(Domain& domain, Index_t length, Index_t* regElemlist,
-                            Real_t dvovmax, Real_t& dthydro)
+CalcHydroConstraintForElems(Domain& domain, Index_t length, Index_t r, Real_t dvovmax,
+                            Real_t& dthydro)
 {
     typedef Kokkos::View<Real_t*> view_real_t;
 
@@ -2085,23 +2064,23 @@ CalcHydroConstraintForElems(Domain& domain, Index_t length, Index_t* regElemlist
     Index_t   hydro_elem  = -1;
     MinFinder result;
 
-    Kokkos::parallel_reduce(length,
-                            KOKKOS_LAMBDA(const int i, MinFinder& minf) {
-                                Index_t indx = regElemlist[i];
+    Kokkos::parallel_reduce(
+        length,
+        KOKKOS_LAMBDA(const int i, MinFinder& minf) {
+            Index_t indx = domain.regElemlist(r, i);
 
-                                if(domain.vdov(indx) != Real_t(0.))
-                                {
-                                    Real_t dtdvov = dvovmax / (FABS(domain.vdov(indx)) +
-                                                               Real_t(1.e-20));
+            if(domain.vdov(indx) != Real_t(0.))
+            {
+                Real_t dtdvov = dvovmax / (FABS(domain.vdov(indx)) + Real_t(1.e-20));
 
-                                    MinFinder tmp(dtdvov, i);
-                                    if(domain.vdov(indx) != Real_t(0.))
-                                    {
-                                        minf += tmp;
-                                    }
-                                }
-                            },
-                            result);
+                MinFinder tmp(dtdvov, i);
+                if(domain.vdov(indx) != Real_t(0.))
+                {
+                    minf += tmp;
+                }
+            }
+        },
+        result);
 
     if(result.val > dthydro)
     {
@@ -2124,12 +2103,11 @@ CalcTimeConstraintsForElems(Domain& domain)
 
     for(Index_t r = 0; r < domain.numReg(); ++r)
     {
-        CalcCourantConstraintForElems(domain, domain.regElemSize(r),
-                                      domain.regElemlist(r), domain.qqc(),
+        CalcCourantConstraintForElems(domain, domain.regElemSize(r), r, domain.qqc(),
                                       domain.dtcourant());
 
-        CalcHydroConstraintForElems(domain, domain.regElemSize(r), domain.regElemlist(r),
-                                    domain.dvovmax(), domain.dthydro());
+        CalcHydroConstraintForElems(domain, domain.regElemSize(r), r, domain.dvovmax(),
+                                    domain.dthydro());
     }
 }
 
@@ -2213,9 +2191,6 @@ main(int argc, char* argv[])
         {
             printf("Running problem size %d^3 per domain until completion\n", opts.nx);
             printf("Num processors: %d\n", numRanks);
-#if _OPENMP
-            printf("Num threads: %d\n", omp_get_max_threads());
-#endif
             printf("Total number of elements: %lld\n\n",
                    (long long int) (numRanks * opts.nx * opts.nx * opts.nx));
             printf("To run other sizes, use -s <integer>.\n");
@@ -2254,16 +2229,10 @@ main(int argc, char* argv[])
         timeval start;
         gettimeofday(&start, NULL);
 #endif
-        Kokkos::Tools::pushRegion("Time-Loop");
         while((locDom.time() < locDom.stoptime()) && (locDom.cycle() < opts.its))
         {
-            Kokkos::Tools::pushRegion("TimeIncrement");
             TimeIncrement(locDom);
-            Kokkos::Tools::popRegion();
-
-            Kokkos::Tools::pushRegion("LagrangeLeapFrog");
             LagrangeLeapFrog(locDom);
-            Kokkos::Tools::popRegion();
 
             if((opts.showProg != 0) && (opts.quiet == 0) && (myRank == 0))
             {
@@ -2271,7 +2240,6 @@ main(int argc, char* argv[])
                        double(locDom.time()), double(locDom.deltatime()));
             }
         }
-        Kokkos::Tools::popRegion();
 
         double elapsed_time;
 #if USE_MPI
@@ -2300,7 +2268,7 @@ main(int argc, char* argv[])
             VerifyAndWriteFinalOutput(elapsed_timeG, locDom, opts.nx, numRanks);
         }
 
-        Release(&buffer);
+        buffer = Kokkos::View<Real_t*>();
     }
     Kokkos::finalize();
 #if USE_MPI

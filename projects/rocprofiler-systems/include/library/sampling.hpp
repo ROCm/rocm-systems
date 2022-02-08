@@ -46,6 +46,10 @@ using component::backtrace_cpu_clock;   // NOLINT
 using component::backtrace_fraction;    // NOLINT
 using component::backtrace_wall_clock;  // NOLINT
 using component::sampling_cpu_clock;
+using component::sampling_gpu_busy;
+using component::sampling_gpu_memory;
+using component::sampling_gpu_power;
+using component::sampling_gpu_temp;
 using component::sampling_percent;
 using component::sampling_wall_clock;
 
@@ -64,7 +68,7 @@ void unblock_signals(std::set<int> = {});
 
 using bundle_t          = tim::lightweight_tuple<backtrace>;
 using sampler_t         = tim::sampling::sampler<bundle_t, tim::sampling::dynamic>;
-using sampler_instances = omnitrace_thread_data<sampler_t, api::sampling>;
+using sampler_instances = thread_data<sampler_t, api::sampling>;
 
 std::unique_ptr<sampler_t>&
 get_sampler(int64_t _tid = threading::get_id());
@@ -76,7 +80,7 @@ TIMEMORY_DEFINE_CONCRETE_TRAIT(prevent_reentry, omnitrace::sampling::sampler_t,
                                std::true_type)
 
 TIMEMORY_DEFINE_CONCRETE_TRAIT(check_signals, omnitrace::sampling::sampler_t,
-                               std::false_type)
+                               std::true_type)
 
 TIMEMORY_DEFINE_CONCRETE_TRAIT(buffer_size, omnitrace::sampling::sampler_t,
                                TIMEMORY_ESC(std::integral_constant<size_t, 256>))

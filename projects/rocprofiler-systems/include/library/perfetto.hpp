@@ -33,6 +33,9 @@
 #    define PERFETTO_CATEGORIES                                                          \
         perfetto::Category("host").SetDescription("Host-side function tracing"),         \
             perfetto::Category("device").SetDescription("Device-side function tracing"), \
+            perfetto::Category("rocm_smi").SetDescription("Device-level metrics"),       \
+            perfetto::Category("sampling")                                               \
+                .SetDescription("Metrics derived from sampling"),                        \
             perfetto::Category("host-critical-trace")                                    \
                 .SetDescription("Host-side critical traces"),                            \
             perfetto::Category("device-critical-trace")                                  \
@@ -41,6 +44,9 @@
 #    define PERFETTO_CATEGORIES                                                          \
         perfetto::Category("host").SetDescription("Host-side function tracing"),         \
             perfetto::Category("device").SetDescription("Device-side function tracing"), \
+            perfetto::Category("rocm_smi").SetDescription("Device-level metrics"),       \
+            perfetto::Category("sampling")                                               \
+                .SetDescription("Metrics derived from sampling"),                        \
             perfetto::Category("host-critical-trace")                                    \
                 .SetDescription("Host-side critical traces"),                            \
             perfetto::Category("device-critical-trace")                                  \
@@ -87,4 +93,44 @@ public:
 
 PERFETTO_DECLARE_DATA_SOURCE_STATIC_MEMBERS(CustomDataSource);
 #endif
+
+template <typename Tp>
+struct perfetto_counter_track
+{
+    using track_map_t = std::map<uint32_t, std::vector<perfetto::CounterTrack>>;
+    using name_map_t  = std::map<uint32_t, std::vector<std::string>>;
+    using data_t      = std::pair<name_map_t, track_map_t>;
+
+    static auto init() { (void) get_data(); }
+
+    static auto exists(size_t _idx, int64_t _n = -1)
+    {
+        bool _v = get_data().second.count(_idx) != 0;
+        if(_n < 0 || !_v) return _v;
+        return static_cast<size_t>(_n) < get_data().second.at(_idx).size();
+    }
+
+    static size_t size(size_t _idx)
+    {
+        bool _v = get_data().second.count(_idx) != 0;
+        if(!_v) return 0;
+        return get_data().second.at(_idx).size();
+    }
+
+    static auto emplace(size_t _idx, const std::string& _v, const char* _units)
+    {
+        get_data().first[_idx].emplace_back(_v);
+        get_data().second[_idx].emplace_back(get_data().first[_idx].back().c_str(),
+                                             _units);
+    }
+
+    static auto& at(size_t _idx, size_t _n) { return get_data().second.at(_idx).at(_n); }
+
+private:
+    static data_t& get_data()
+    {
+        static auto* _v = new data_t{};
+        return *_v;
+    }
+};
 }  // namespace omnitrace

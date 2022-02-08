@@ -9,8 +9,8 @@
 /* Comm Routines */
 
 #    define ALLOW_UNPACKED_PLANE false
-#    define ALLOW_UNPACKED_ROW false
-#    define ALLOW_UNPACKED_COL false
+#    define ALLOW_UNPACKED_ROW   false
+#    define ALLOW_UNPACKED_COL   false
 
 /*
    There are coherence issues for packing and unpacking message
@@ -59,8 +59,7 @@ void
 CommRecv(Domain& domain, int msgType, Index_t xferFields, Index_t dx, Index_t dy,
          Index_t dz, bool doRecv, bool planeOnly)
 {
-    if(domain.numRanks() == 1)
-        return;
+    if(domain.numRanks() == 1) return;
 
     /* post recieve buffers for all incoming messages */
     int          myRank;
@@ -366,8 +365,7 @@ void
 CommSend(Domain& domain, int msgType, Index_t xferFields, Domain_member* fieldData,
          Index_t dx, Index_t dy, Index_t dz, bool doSend, bool planeOnly)
 {
-    if(domain.numRanks() == 1)
-        return;
+    if(domain.numRanks() == 1) return;
 
     /* post recieve buffers for all incoming messages */
     int          myRank;
@@ -926,8 +924,7 @@ CommSend(Domain& domain, int msgType, Index_t xferFields, Domain_member* fieldDa
 void
 CommSBN(Domain& domain, int xferFields, Domain_member* fieldData)
 {
-    if(domain.numRanks() == 1)
-        return;
+    if(domain.numRanks() == 1) return;
 
     /* summation order should be from smallest value to largest */
     /* or we could try out kahan summation! */
@@ -1405,8 +1402,7 @@ CommSBN(Domain& domain, int xferFields, Domain_member* fieldData)
 void
 CommSyncPosVel(Domain& domain)
 {
-    if(domain.numRanks() == 1)
-        return;
+    if(domain.numRanks() == 1) return;
 
     int           myRank;
     bool          doRecv     = false;
@@ -1893,8 +1889,7 @@ CommSyncPosVel(Domain& domain)
 void
 CommMonoQ(Domain& domain)
 {
-    if(domain.numRanks() == 1)
-        return;
+    if(domain.numRanks() == 1) return;
 
     int           myRank;
     Index_t       xferFields = 3; /* delv_xi, delv_eta, delv_zeta */
