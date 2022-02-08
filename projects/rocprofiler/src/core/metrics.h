@@ -198,8 +198,11 @@ class MetricsDict {
       agent_name_ = agent_info->name;
       if (std::string("gfx906") == agent_info->name ||
           std::string("gfx908") == agent_info->name ||
-          std::string("gfx90a") == agent_info->name) {
-        ImportMetrics(agent_info, agent_info->name);
+          std::string("gfx90a") == agent_info->name ||
+          std::string("gfx1032") == agent_info->name ||
+          std::string("gfx1031") == agent_info->name || 
+          std::string("gfx1030") == agent_info->name){ 
+         ImportMetrics(agent_info, agent_info->name);
       } else {
         agent_name_ = agent_info->gfxip;
         ImportMetrics(agent_info, agent_info->gfxip);
