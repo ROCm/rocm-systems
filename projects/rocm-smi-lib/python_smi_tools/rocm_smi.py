@@ -2883,7 +2883,7 @@ if __name__ == '__main__':
     groupAction.add_argument('--resetperfdeterminism', help='Disable performance determinism', action='store_true')
     groupAction.add_argument('--setclock',
                              help='Set Clock Frequency Level(s) for specified clock (requires manual Perf level)',
-                             type=str, metavar='LEVEL', nargs=2)
+                             metavar=('TYPE','LEVEL'), nargs=2)
     groupAction.add_argument('--setsclk', help='Set GPU Clock Frequency Level(s) (requires manual Perf level)',
                              type=int, metavar='LEVEL', nargs='+')
     groupAction.add_argument('--setmclk', help='Set GPU Memory Clock Frequency Level(s) (requires manual Perf level)',
@@ -3141,7 +3141,7 @@ if __name__ == '__main__':
     if args.showenergycounter:
         showEnergy(deviceList)
     if args.setclock:
-        setClocks(deviceList, args.setclock[0], args.setclock[1])
+        setClocks(deviceList, args.setclock[0], [int(args.setclock[1])])
     if args.setsclk:
         setClocks(deviceList, 'sclk', args.setsclk)
     if args.setmclk:
