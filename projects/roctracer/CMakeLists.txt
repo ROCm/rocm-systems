@@ -168,7 +168,7 @@ install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-major-link DESTINATION lib RENAME
 install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-patch-link DESTINATION lib RENAME ${ROCTX_LIBRARY}.so.${LIB_VERSION_STRING} )
 
 ## Packaging directives
-set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" )
+set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR DEB;RPM")
 set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
 set ( CPACK_PACKAGE_NAME "${ROCTRACER_NAME}-dev" )
 set ( CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." )
