@@ -3242,7 +3242,7 @@ if __name__ == '__main__':
                 print(devCsv)
 
     if RETCODE and not PRINT_JSON:
-        logging.warning(' \t\t One or more commands failed')
+        logging.debug(' \t\t One or more commands failed.')
     printLogSpacer(footerString)
 
     rsmi_ret_ok(rocmsmi.rsmi_shut_down())
