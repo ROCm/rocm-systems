@@ -3,7 +3,7 @@
 # ########################################################################
 
 function(add_rccl_test TEST)
-    set(TEST_SOURCE "${TEST}.cu")
+    set(TEST_SOURCE "${TEST}.cpp")
     set_property(SOURCE ${TEST_SOURCE} PROPERTY LANGUAGE CXX)
 
     # Check that file exists
@@ -14,9 +14,6 @@ function(add_rccl_test TEST)
     # Establish hipified copy of the source file
     set(HIP_FILE "${HIPIFY_DIR}/${TEST_SOURCE}")
     get_filename_component(HIP_FILE_DIR ${HIP_FILE} DIRECTORY)
-
-    # Convert .cu files to .cpp so that they get processed properly
-    string(REPLACE "\.cu" "\.cu.cpp" HIP_FILE ${HIP_FILE})
 
     # Create a custom command to create hipified source code
     add_custom_command(
@@ -72,7 +69,7 @@ set(COMMON_FILES
   collector.h
   collector.cu
   common.h
-  common.cu
+  common.cpp
   nccl1_compat.h
   rccl_compat.h
   rccl_float8.h
@@ -81,7 +78,7 @@ set(COMMON_FILES
   util.h
   util.cu
   ../verifiable/verifiable.h
-  ../verifiable/verifiable.cu
+  ../verifiable/verifiable.cpp
 )
 
 # Hipify common files (copy of source generated into hipify directory)
@@ -101,8 +98,6 @@ foreach(COMMON_FILE ${COMMON_FILES})
   get_filename_component(HIP_FILE_NAME ${HIPIFY_DIR}/${COMMON_FILE} NAME)
   set(HIP_FILE "${HIPIFY_DIR}/${HIP_FILE_NAME}")
 
-  # Convert .cu files to .cpp so that they get processed properly
-  string(REPLACE "\.cu" "\.cu.cpp" HIP_FILE ${HIP_FILE})
   list(APPEND HIP_COMMON_SOURCES ${HIP_FILE})
 
   # Create a custom command to create hipified source code

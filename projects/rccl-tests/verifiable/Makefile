@@ -71,7 +71,7 @@ include verifiable.mk
 
 self_test: $(DST_DIR)/self_test
 
-$(DST_DIR)/self_test: main.cu $(TEST_VERIFIABLE_LIBS)
+$(DST_DIR)/self_test: main.cpp $(TEST_VERIFIABLE_LIBS)
 	@printf "Linking  %s\n" $@
 	@mkdir -p $(DST_DIR)
 	$(HIPCC) -o $@ $(HIPCUFLAGS) -DSELF_TEST=1 $< -L$(TEST_VERIFIABLE_BUILDDIR) -lverifiable $(HIPLDFLAGS) -Xlinker "-rpath=\$$ORIGIN"

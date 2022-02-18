@@ -123,7 +123,7 @@ endif
 BUILDDIR ?= ../build
 HIPIFY_DIR ?= $(BUILDDIR)/hipify
 
-.PRECIOUS: $(HIPIFY_DIR)/%.cu.cpp $(HIPIFY_DIR)/%.h
+.PRECIOUS: $(HIPIFY_DIR)/%.cpp $(HIPIFY_DIR)/%.h
 
 ifeq ($(MPI), 1)
 HIPCUFLAGS += -DMPI_SUPPORT -I${MPI_HOME}/include -I${MPI_HOME}/include/openmpi -I${MPI_HOME}/openmpi/include -I${MPI_HOME}/openmpi/include/openmpi
@@ -165,7 +165,7 @@ $(GIT_VERSION_FILE):
 	@mkdir -p ${DST_DIR}/src
 	@echo 'const char* rcclTestsGitHash = "$(GIT_BRANCH):$(GIT_REV)$(GIT_DIFF)";' > $@
 
-${HIPIFY_DIR}/%.cu.cpp: %.cu
+${HIPIFY_DIR}/%.cpp: %.cpp
 	@printf "Hipifying  %-35s > %s\n" $< $@
 	@mkdir -p ${HIPIFY_DIR}
 	${HIPIFY_PL_EXE} ${HIPIFY_PL_FLAGS} $< > $@
@@ -177,13 +177,13 @@ ${HIPIFY_DIR}/%.h: %.h
 
 .PRECIOUS: ${DST_DIR}/%.o
 
-${DST_DIR}/%.o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
+${DST_DIR}/%.o: ${HIPIFY_DIR}/%.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<"
 	$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<
 
-${DST_DIR}/%$(NAME_SUFFIX).o: ${HIPIFY_DIR}/%.cu.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
+${DST_DIR}/%$(NAME_SUFFIX).o: ${HIPIFY_DIR}/%.cpp ${HIPIFY_DIR}/common.h ${HIPIFY_DIR}/util.h ${HIPIFY_DIR}/collector.h $(TEST_VERIFIABLE_HDRS) $(GIT_VERSION_FILE)
 	@printf "Compiling  %-35s > %s\n" $< $@
 	@mkdir -p ${DST_DIR}
 	echo "$(HIPCC) $(HIPCUFLAGS) -I. -c -o $@ $<"
