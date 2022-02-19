@@ -214,7 +214,7 @@ omnitrace_add_test(
     REWRITE_ARGS -e -v 2
     RUNTIME_ARGS -e -v 1 --label file line return args
     RUN_ARGS ""
-    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
+    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=ON")
 
 omnitrace_add_test(
     NAME transpose-no-save-fpr

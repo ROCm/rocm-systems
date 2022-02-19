@@ -22,32 +22,23 @@
 
 #pragma once
 
-#include "library/defines.hpp"
-
-#include <timemory/compat/macros.h>
-
-// forward decl of the API
-extern "C"
+namespace omnitrace
 {
-    /// handles configuration logic
-    void omnitrace_init_library(void) TIMEMORY_VISIBILITY("default");
+namespace cpu_freq
+{
+void
+setup();
 
-    /// starts gotcha wrappers
-    void omnitrace_init(const char*, bool, const char*) TIMEMORY_VISIBILITY("default");
+void
+config();
 
-    /// shuts down all tooling and generates output
-    void omnitrace_finalize(void) TIMEMORY_VISIBILITY("default");
+void
+sample();
 
-    /// sets an environment variable
-    void omnitrace_set_env(const char* env_name, const char* env_val)
-        TIMEMORY_VISIBILITY("default");
+void
+shutdown();
 
-    /// sets whether MPI should be used
-    void omnitrace_set_mpi(bool use, bool attached) TIMEMORY_VISIBILITY("default");
-
-    /// starts an instrumentation region
-    void omnitrace_push_trace(const char* name) TIMEMORY_VISIBILITY("default");
-
-    /// stops an instrumentation region
-    void omnitrace_pop_trace(const char* name) TIMEMORY_VISIBILITY("default");
-}
+void
+post_process();
+}  // namespace cpu_freq
+}  // namespace omnitrace

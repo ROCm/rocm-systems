@@ -67,26 +67,6 @@ void
 compute_critical_trace();
 
 void
-find_children(PTL::ThreadPool& _tp, call_graph_t& _graph, const call_chain& _chain);
-
-void
-find_sequences(PTL::ThreadPool& _tp, call_graph_t& _graph,
-               std::vector<call_chain>& _chain);
-
-void
-find_sequences(PTL::ThreadPool& _tp, call_graph_t& _graph, call_graph_itr_t _root,
-               std::vector<call_chain>& _chain);
-
-template <typename ArchiveT, typename T, typename AllocatorT>
-void
-serialize_graph(ArchiveT& ar, const tim::graph<T, AllocatorT>& _graph);
-
-template <typename ArchiveT, typename T, typename AllocatorT>
-void
-serialize_subgraph(ArchiveT& ar, const tim::graph<T, AllocatorT>& _graph,
-                   typename tim::graph<T, AllocatorT>::iterator _root);
-
-void
 copy_hash_ids()
 {
     // make copy to avoid parallel iteration issues
@@ -417,93 +397,85 @@ call_chain::get_top_chains()
     return _v;
 }
 
-template <bool BoolV, typename FuncT>
-bool
-call_chain::query(FuncT&& _func) const
+template <>
+void
+call_chain::generate_perfetto<Device::NONE>(std::set<entry>& _used) const
 {
     for(const auto& itr : *this)
     {
-        if(std::forward<FuncT>(_func)(itr)) return BoolV;
-    }
-    return !BoolV;
-}
-
-template <>
-void
-call_chain::generate_perfetto<Device::NONE>(std::set<entry>&, bool) const
-{}
-
-template <>
-void
-call_chain::generate_perfetto<Device::CPU>(std::set<entry>& _used, bool _basic) const
-{
-    static std::set<std::string> _static_strings{};
-    static std::mutex            _static_mutex{};
-    for(const auto& itr : *this)
-    {
-        if(_basic)
+        if(!_used.emplace(itr).second) continue;
+        if(itr.device == Device::CPU)
         {
-            if(itr.device == Device::CPU)
-            {
-                TRACE_EVENT_BEGIN("device-critical-trace", "CPU",
-                                  static_cast<uint64_t>(itr.begin_ns));
-            }
-            else if(itr.device == Device::GPU)
-            {
-                TRACE_EVENT_BEGIN("device-critical-trace", "GPU",
-                                  static_cast<uint64_t>(itr.begin_ns));
-            }
-            TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns));
-        }
-        else
-        {
-            if(!_used.emplace(itr).second) continue;
-            std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
-            _static_mutex.lock();
-            auto sitr = _static_strings.emplace(_name);
-            _static_mutex.unlock();
-            TRACE_EVENT_BEGIN("host-critical-trace",
-                              perfetto::StaticString{ sitr.first->c_str() },
+            TRACE_EVENT_BEGIN("device-critical-trace", "CPU",
                               static_cast<uint64_t>(itr.begin_ns));
-            TRACE_EVENT_END("host-critical-trace", static_cast<uint64_t>(itr.end_ns));
         }
+        else if(itr.device == Device::GPU)
+        {
+            TRACE_EVENT_BEGIN("device-critical-trace", "GPU",
+                              static_cast<uint64_t>(itr.begin_ns));
+        }
+        TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns));
     }
 }
 
 template <>
 void
-call_chain::generate_perfetto<Device::GPU>(std::set<entry>& _used, bool _basic) const
+call_chain::generate_perfetto<Device::CPU>(std::set<entry>& _used) const
 {
     static std::set<std::string> _static_strings{};
     static std::mutex            _static_mutex{};
     for(const auto& itr : *this)
     {
-        if(_basic)
-        {
-            if(itr.device == Device::CPU)
-            {
-                TRACE_EVENT_BEGIN("device-critical-trace", "CPU",
-                                  static_cast<uint64_t>(itr.begin_ns));
-            }
-            else if(itr.device == Device::GPU)
-            {
-                TRACE_EVENT_BEGIN("device-critical-trace", "GPU",
-                                  static_cast<uint64_t>(itr.begin_ns));
-            }
-            TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns));
-        }
-        else
-        {
-            if(!_used.emplace(itr).second) continue;
-            std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
-            _static_mutex.lock();
-            auto sitr = _static_strings.emplace(_name);
-            _static_mutex.unlock();
-            TRACE_EVENT_BEGIN("device-critical-trace",
-                              perfetto::StaticString{ sitr.first->c_str() },
-                              static_cast<uint64_t>(itr.begin_ns));
-            TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns));
-        }
+        if(!_used.emplace(itr).second) continue;
+        if(itr.device != Device::CPU) continue;
+        std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
+        _static_mutex.lock();
+        auto sitr = _static_strings.emplace(_name);
+        _static_mutex.unlock();
+        TRACE_EVENT_BEGIN("host-critical-trace",
+                          perfetto::StaticString{ sitr.first->c_str() },
+                          static_cast<uint64_t>(itr.begin_ns));
+        TRACE_EVENT_END("host-critical-trace", static_cast<uint64_t>(itr.end_ns));
+    }
+}
+
+template <>
+void
+call_chain::generate_perfetto<Device::GPU>(std::set<entry>& _used) const
+{
+    static std::set<std::string> _static_strings{};
+    static std::mutex            _static_mutex{};
+    for(const auto& itr : *this)
+    {
+        if(!_used.emplace(itr).second) continue;
+        if(itr.device != Device::GPU) continue;
+        std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
+        _static_mutex.lock();
+        auto sitr = _static_strings.emplace(_name);
+        _static_mutex.unlock();
+        TRACE_EVENT_BEGIN("device-critical-trace",
+                          perfetto::StaticString{ sitr.first->c_str() },
+                          static_cast<uint64_t>(itr.begin_ns));
+        TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns));
+    }
+}
+
+template <>
+void
+call_chain::generate_perfetto<Device::ANY>(std::set<entry>& _used) const
+{
+    static std::set<std::string> _static_strings{};
+    static std::mutex            _static_mutex{};
+    for(const auto& itr : *this)
+    {
+        if(!_used.emplace(itr).second) continue;
+        std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
+        _static_mutex.lock();
+        auto sitr = _static_strings.emplace(_name);
+        _static_mutex.unlock();
+        TRACE_EVENT_BEGIN("critical-trace", perfetto::StaticString{ sitr.first->c_str() },
+                          static_cast<uint64_t>(itr.begin_ns));
+        TRACE_EVENT_END("critical-trace", static_cast<uint64_t>(itr.end_ns));
     }
 }
 
@@ -590,8 +562,6 @@ compute(int64_t _tid)
 
 namespace
 {
-//--------------------------------------------------------------------------------------//
-
 std::string
 get_perf_name(std::string _func)
 {
@@ -601,141 +571,6 @@ get_perf_name(std::string _func)
         _func = _func.replace(_pos, 1, " ");
     if(_func.length() > 0) _func.at(0) = std::toupper(_func.at(0));
     return _func;
-}
-
-//--------------------------------------------------------------------------------------//
-
-void
-save_call_graph(const std::string& _fname, const std::string& _label,
-                const call_graph_t& _call_graph, bool _msg = false,
-                std::string _func = {})
-{
-    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
-
-    using perfstats_t =
-        tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss>;
-    perfstats_t _perf{ get_perf_name(__FUNCTION__) };
-    _perf.start();
-
-    std::stringstream oss{};
-    {
-        namespace cereal = tim::cereal;
-        auto ar = tim::policy::output_archive<cereal::MinimalJSONOutputArchive>::get(oss);
-
-        auto _hash_map = *tim::hash::get_hash_ids();
-        for(auto& itr : _hash_map)
-            itr.second = tim::demangle(itr.second);
-        ar->setNextName("omnitrace");
-        ar->startNode();
-        (*ar)(cereal::make_nvp("hash_map", _hash_map));
-        ar->setNextName(_label.c_str());
-        ar->startNode();
-        serialize_graph(*ar, _call_graph);
-        ar->finishNode();
-        ar->finishNode();
-    }
-
-    std::ofstream ofs{};
-    if(tim::filepath::open(ofs, _fname))
-    {
-        if(_msg)
-        {
-            if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_CONDITIONAL_PRINT(get_verbose() >= 0, "[%s] Outputting '%s'...\n",
-                                        _func.c_str(), _fname.c_str());
-        }
-        ofs << oss.str() << std::endl;
-    }
-
-    _perf.stop();
-    if(_msg)
-    {
-        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
-    }
-}
-
-void
-save_critical_trace(const std::string& _fname, const std::string& _label,
-                    const std::vector<call_chain>& _cchain, bool _msg = false,
-                    std::string _func = {})
-{
-    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
-
-    using perfstats_t =
-        tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss>;
-    perfstats_t _perf{ get_perf_name(__FUNCTION__) };
-    _perf.start();
-
-    auto _save = [&](std::ostream& _os) {
-        namespace cereal = tim::cereal;
-        auto ar = tim::policy::output_archive<cereal::MinimalJSONOutputArchive>::get(_os);
-
-        auto _hash_map = *tim::hash::get_hash_ids();
-        for(auto& itr : _hash_map)
-            itr.second = tim::demangle(itr.second);
-        ar->setNextName("omnitrace");
-        ar->startNode();
-        (*ar)(cereal::make_nvp("hash_map", _hash_map),
-              cereal::make_nvp(_label.c_str(), _cchain));
-        ar->finishNode();
-    };
-
-    std::ofstream ofs{};
-    if(tim::filepath::open(ofs, _fname))
-    {
-        if(_msg)
-        {
-            if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_CONDITIONAL_PRINT(get_verbose() >= 0, "[%s] Outputting '%s'...\n",
-                                        _func.c_str(), _fname.c_str());
-        }
-        std::stringstream oss{};
-        if(_cchain.size() > 1000)
-        {
-            _save(ofs);
-        }
-        else
-        {
-            _save(oss);
-            ofs << oss.str() << std::endl;
-        }
-    }
-
-    _perf.stop();
-    if(_msg)
-    {
-        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
-    }
-}
-
-void
-save_call_chain_text(const std::string& _fname, const call_chain& _call_chain,
-                     bool _msg = false, std::string _func = {})
-{
-    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
-
-    using perfstats_t =
-        tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss>;
-    perfstats_t _perf{ get_perf_name(__FUNCTION__) };
-    _perf.start();
-
-    std::ofstream ofs{};
-    if(tim::filepath::open(ofs, _fname))
-    {
-        if(_msg)
-        {
-            if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_CONDITIONAL_PRINT(get_verbose() >= 0, "[%s] Outputting '%s'...\n",
-                                        _func.c_str(), _fname.c_str());
-        }
-        ofs << _call_chain << "\n";
-    }
-
-    _perf.stop();
-    if(_msg)
-    {
-        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
-    }
 }
 
 void
@@ -789,24 +624,6 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
     if(_msg)
     {
         OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
-    }
-}
-
-void
-load_call_chain(const std::string& _fname, const std::string& _label,
-                call_chain& _call_chain)
-{
-    std::ifstream ifs{};
-    ifs.open(_fname);
-    if(ifs && ifs.is_open())
-    {
-        namespace cereal = tim::cereal;
-        auto ar          = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
-
-        ar->setNextName("omnitrace");
-        ar->startNode();
-        (*ar)(cereal::make_nvp(_label.c_str(), _call_chain));
-        ar->finishNode();
     }
 }
 
@@ -912,279 +729,21 @@ combine_critical_path(call_chain& _targ, call_chain _chain)
     // squash_critical_path(_targ);
 }
 
-auto
-get_indexed(const call_chain& _chain)
-{
-    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
-    std::map<int64_t, std::vector<entry>> _indexed = {};
-
-    // allocate for all cpu correlation ids
-    for(const auto& itr : _chain)
-    {
-        _indexed.emplace(static_cast<int64_t>(itr.cpu_cid), std::vector<entry>{});
-        _indexed.emplace(static_cast<int64_t>(itr.parent_cid), std::vector<entry>{});
-    }
-
-    // index based on parent correlation id
-    for(const auto& itr : _chain)
-    {
-        if(itr.depth < 1 && itr.phase == Phase::BEGIN) continue;
-        _indexed[static_cast<int64_t>(itr.parent_cid)].emplace_back(itr);
-    }
-
-    for(auto& itr : _indexed)
-        std::sort(itr.second.begin(), itr.second.end(),
-                  [](const entry& lhs, const entry& rhs) {
-                      // return lhs.cpu_cid < rhs.cpu_cid;
-                      return lhs.begin_ns < rhs.begin_ns;
-                  });
-
-    return _indexed;
-}
-
 void
-find_children(PTL::ThreadPool& _tp, call_graph_t& _graph, const call_chain& _chain)
-{
-    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
-
-    using iterator_t      = call_graph_sibling_itr_t;
-    using itr_entry_vec_t = std::vector<std::pair<iterator_t, entry>>;
-    using task_group_t    = PTL::TaskGroup<void>;
-
-    auto                                _indexed = get_indexed(_chain);
-    std::map<entry, std::vector<entry>> _entry_map{};
-
-    // allocate all entries
-    OMNITRACE_CT_DEBUG("[%s] Allocating...\n", __FUNCTION__);
-    for(const auto& itr : _chain)
-    {
-        auto _ins = _entry_map.emplace(itr, std::vector<entry>{});
-        if(!_ins.second)
-        {
-            auto _existing = _ins.first->first;
-            OMNITRACE_PRINT("Warning! Duplicate entry for [%s] :: [%s]\n",
-                            JOIN("", _existing).c_str(), JOIN("", itr).c_str());
-        }
-    }
-
-    task_group_t _tg{ &_tp };
-    OMNITRACE_CT_DEBUG("[%s] Parallel mapping...\n", __FUNCTION__);
-    for(const auto& itr : _chain)
-    {
-        _tg.run([&]() { _entry_map[itr] = _indexed.at(itr.cpu_cid); });
-    }
-    _tg.join();
-
-    std::function<void(iterator_t, const entry&)> _recursive_func;
-    _recursive_func = [&](iterator_t itr, const entry& _v) {
-        auto _child    = _graph.append_child(itr, _v);
-        auto _children = std::move(_entry_map[_v]);
-        _entry_map[_v].clear();
-        for(auto&& vitr : _children)
-        {
-            _recursive_func(_child, vitr);
-        }
-    };
-
-    // the recursive version of _func + _loop_func has a tendency to overflow the stack
-    auto _func = [&](iterator_t itr, const entry& _v) {
-        auto _child    = _graph.append_child(itr, _v);
-        auto _children = std::move(_entry_map[_v]);
-        _entry_map[_v].clear();
-        itr_entry_vec_t _data{};
-        for(auto&& vitr : _children)
-            _data.emplace_back(_child, vitr);
-        return _data;
-    };
-
-    auto _loop_func = [&_func](itr_entry_vec_t& _data) {
-        auto _inp = _data;
-        _data.clear();
-        for(auto itr : _inp)
-        {
-            for(auto&& fitr : _func(itr.first, itr.second))
-                _data.emplace_back(std::move(fitr));
-        }
-        // if data is empty return false so we can break out of while loop
-        return !_data.empty();
-    };
-
-    if(!_indexed.at(-1).empty())
-    {
-        OMNITRACE_CT_DEBUG("[%s] Setting root (line %i)...\n", __FUNCTION__, __LINE__);
-        _graph.set_head(_indexed.at(-1).front());
-    }
-    else
-    {
-        OMNITRACE_CT_DEBUG("[%s] Setting root (line %i)...\n", __FUNCTION__, __LINE__);
-        auto  _depth = static_cast<uint16_t>(-1);
-        entry _root{ 0, Device::NONE, Phase::NONE, _depth, 0, 0, 0, 0, 0, 0, 0 };
-        _graph.set_head(_root);
-    }
-
-    iterator_t _root = _graph.begin();
-    for(auto&& itr : _entry_map)
-    {
-        if(itr.first.depth == _root->depth + 1)
-        {
-            OMNITRACE_CT_DEBUG("[%s] Generating call-graph...\n", __FUNCTION__);
-            // _recursive_func(_root, itr.first);
-            itr_entry_vec_t _data = _func(_root, itr.first);
-            while(_loop_func(_data))
-            {}
-        }
-    }
-}
-
-void
-find_sequences(PTL::ThreadPool& _tp, call_graph_t& _graph,
-               std::vector<call_chain>& _chain)
-{
-    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
-    using iterator_t = call_graph_preorder_itr_t;
-    std::vector<iterator_t> _end_nodes{};
-    size_t                  _n = 0;
-    for(iterator_t itr = _graph.begin(); itr != _graph.end(); ++itr, ++_n)
-    {
-        auto _nchild = _graph.number_of_children(itr);
-        if(_nchild > 0)
-        {
-            OMNITRACE_CT_DEBUG("Skipping node #%zu with %u children :: %s\n", _n, _nchild,
-                               JOIN("", *itr).c_str());
-            continue;
-        }
-        _end_nodes.emplace_back(itr);
-    }
-    OMNITRACE_CT_DEBUG("Number of end nodes: %zu\n", _end_nodes.size());
-    _chain.resize(_end_nodes.size());
-
-    auto _construct = [&](size_t i) {
-        auto itr = _end_nodes.at(i);
-        while(itr != nullptr && _graph.is_valid(itr))
-        {
-            _chain.at(i).emplace_back(*itr);
-            itr = _graph.parent(itr);
-        }
-        std::reverse(_chain.at(i).begin(), _chain.at(i).end());
-    };
-
-    PTL::TaskGroup<void> _tg{ &_tp };
-    for(size_t i = 0; i < _end_nodes.size(); ++i)
-        _tg.run(_construct, i);
-    _tg.join();
-
-    std::sort(_chain.begin(), _chain.end(),
-              [](const call_chain& lhs, const call_chain& rhs) {
-                  return lhs.get_cost() > rhs.get_cost();
-              });
-}
-
-template <typename ArchiveT, typename T, typename AllocatorT>
-void
-serialize_graph(ArchiveT& ar, const tim::graph<T, AllocatorT>& t)
-{
-    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
-
-    namespace cereal = tim::cereal;
-    using iterator_t = typename tim::graph<T, AllocatorT>::sibling_iterator;
-
-    ar(cereal::make_nvp("graph_nodes", t.size()));
-    ar.setNextName("graph");
-    ar.startNode();
-    ar.makeArray();
-    for(iterator_t itr = t.begin(); itr != t.end(); ++itr)
-        serialize_subgraph(ar, t, itr);
-    ar.finishNode();
-}
-
-template <typename ArchiveT, typename T, typename AllocatorT>
-void
-serialize_subgraph(ArchiveT& ar, const tim::graph<T, AllocatorT>& _graph,
-                   typename tim::graph<T, AllocatorT>::iterator _root)
-{
-    using iterator_t = typename tim::graph<T, AllocatorT>::sibling_iterator;
-
-    if(_graph.empty()) return;
-
-    ar.setNextName("node");
-    ar.startNode();
-    ar(*_root);
-    {
-        ar.setNextName("children");
-        ar.startNode();
-        ar.makeArray();
-        for(iterator_t itr = _graph.begin(_root); itr != _graph.end(_root); ++itr)
-            serialize_subgraph(ar, _graph, itr);
-        ar.finishNode();
-    }
-    ar.finishNode();
-}
-
-void
-update_critical_path(call_chain _chain, int64_t _tid)
+update_critical_path(call_chain _chain, int64_t)
 {
     OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
     try
     {
         // remove any data not
-        auto _diff_tid = [_tid](const entry& _v) { return _v.tid != _tid; };
-        _chain.erase(std::remove_if(_chain.begin(), _chain.end(), _diff_tid),
-                     _chain.end());
+        // auto _diff_tid = [_tid](const entry& _v) { return _v.tid != _tid; };
+        //_chain.erase(std::remove_if(_chain.begin(), _chain.end(), _diff_tid),
+        //             _chain.end());
         combine_critical_path(complete_call_chain, std::move(_chain));
     } catch(const std::exception& e)
     {
         std::cerr << "Thread exited with exception: " << e.what() << std::endl;
         TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(true, 32);
-    }
-}
-
-template <Device DevT>
-std::vector<call_chain>
-get_top(const std::vector<call_chain>& _chain, size_t _count)
-{
-    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
-    std::vector<call_chain> _data{};
-    _data.reserve(_count);
-    for(const auto& itr : _chain)
-    {
-        if(_data.size() >= _count) break;
-        if(itr.query<>([](const entry& _v) { return (_v.device == DevT); }))
-        {
-            _data.emplace_back(itr);
-        }
-    }
-    return _data;
-}
-
-template <Device DevT>
-void
-generate_perfetto(const std::vector<call_chain>& _data, bool _basic = false)
-{
-    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
-
-    auto _nrows = std::min<size_t>(get_critical_trace_per_row(), _data.size());
-
-    // run in separate thread(s) so that it ends up in unique row
-    if(_nrows < 1) _nrows = _data.size();
-
-    auto _func = [&](size_t _idx, size_t _beg, size_t _end) {
-        if(_nrows != 1)
-            threading::set_thread_name(TIMEMORY_JOIN(" ", "CriticalPath", _idx).c_str());
-        else
-            threading::set_thread_name("CritialPath");
-        // ensure all hash ids exist
-        copy_hash_ids();
-        std::set<entry> _used{};
-        for(size_t i = _beg; i < _end; ++i)
-        {
-            if(i >= _data.size()) break;
-            _data.at(i).generate_perfetto<DevT>(_used, _basic);
-        }
-    };
-
-    for(size_t i = 0; i < _data.size(); i += _nrows)
-    {
-        std::thread{ _func, i, i, i + _nrows }.join();
     }
 }
 
@@ -1196,7 +755,8 @@ compute_critical_trace()
 
     if(_computed) return;
 
-    OMNITRACE_CT_DEBUG("[%s] Generating critical trace...\n", __FUNCTION__);
+    OMNITRACE_CONDITIONAL_PRINT(get_critical_trace_debug() || get_verbose() >= 0,
+                                "[%s] Generating critical trace...\n", __FUNCTION__);
 
     // ensure all hash ids exist
     copy_hash_ids();
@@ -1209,11 +769,6 @@ compute_critical_trace()
 
     try
     {
-        PTL::ThreadPool _tp{ get_critical_trace_num_threads(), []() { copy_hash_ids(); },
-                             []() {} };
-        _tp.set_verbose(-1);
-        PTL::TaskGroup<void> _tg{ &_tp };
-
         OMNITRACE_CT_DEBUG("[%s] initial call chain: %zu entries\n", __FUNCTION__,
                            complete_call_chain.size());
 
@@ -1225,110 +780,14 @@ compute_critical_trace()
         _perf.stop().rekey("Sorting critical trace");
         OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
 
-        _perf.start();
-
-        squash_critical_path(complete_call_chain);
-
-        OMNITRACE_CT_DEBUG("[%s] complete call chain: %zu entries\n", __FUNCTION__,
-                           complete_call_chain.size());
-
-        _perf.stop().rekey("Squash critical path");
-        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
-
-        _tg.run(
-            [](call_chain _chain, std::string _func) {  // NOLINT
-                save_call_chain_json(tim::settings::compose_output_filename(
-                                         "call-chain", ".json", get_use_pid(),
-                                         (tim::dmp::is_initialized())
-                                             ? tim::dmp::rank()
-                                             : process::get_id()),
-                                     "call_chain", _chain, true, std::move(_func));
-            },
-            complete_call_chain, __FUNCTION__);
-
         _perf.reset().start();
+        save_call_chain_json(
+            tim::settings::compose_output_filename("call-chain", ".json"), "call_chain",
+            complete_call_chain, true, __FUNCTION__);
 
-        OMNITRACE_CT_DEBUG("[%s] Finding children...\n", __FUNCTION__);
-        call_graph_t _graph{};
-        find_children(_tp, _graph, complete_call_chain);
-
-        OMNITRACE_CT_DEBUG("[%s] complete call graph: %zu entries\n", __FUNCTION__,
-                           _graph.size() - 1);
-
-        _perf.stop().rekey("Finding children");
+        _perf.stop().rekey("Save call-chain");
         OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
 
-        _tg.run(
-            [&](std::string _func) {
-                save_call_graph(tim::settings::compose_output_filename(
-                                    "call-graph", ".json", get_use_pid(),
-                                    (tim::dmp::is_initialized()) ? tim::dmp::rank()
-                                                                 : process::get_id()),
-                                "call_graph", _graph, true, std::move(_func));
-            },
-            __FUNCTION__);
-
-        _tg.join();
-
-        _perf.reset().start();
-
-        generate_perfetto<Device::GPU>({ complete_call_chain }, true);
-
-        OMNITRACE_CT_DEBUG("[%s] Finding sequences...\n", __FUNCTION__);
-        // find the sequences
-        std::vector<call_chain> _top{};
-        find_sequences(_tp, _graph, _top);
-
-        _perf.stop().rekey("Finding sequences");
-        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
-
-        if(get_critical_trace_count() == 0)
-        {
-            OMNITRACE_CT_DEBUG("[%s] Saving critical trace...\n", __FUNCTION__);
-            save_critical_trace(
-                tim::settings::compose_output_filename(
-                    "critical-trace", ".json", get_use_pid(),
-                    (tim::dmp::is_initialized()) ? tim::dmp::rank() : process::get_id()),
-                "critical_trace", _top, true, __FUNCTION__);
-        }
-        else
-        {
-            OMNITRACE_CT_DEBUG("[%s] Getting top CPU functions...\n", __FUNCTION__);
-            // get the top CPU critical traces
-            auto _top_cpu = get_top<Device::CPU>(_top, get_critical_trace_count());
-            if(!_top_cpu.empty())
-            {
-                OMNITRACE_CT_DEBUG("[%s] Generating perfetto CPU critical traces...\n",
-                                   __FUNCTION__);
-                generate_perfetto<Device::CPU>(_top_cpu);
-                OMNITRACE_CT_DEBUG("[%s] Saving CPU critical traces...\n", __FUNCTION__);
-                save_critical_trace(tim::settings::compose_output_filename(
-                                        "critical-trace-cpu", ".json", get_use_pid(),
-                                        (tim::dmp::is_initialized()) ? tim::dmp::rank()
-                                                                     : process::get_id()),
-                                    "critical_trace", _top_cpu, true, __FUNCTION__);
-            }
-
-            OMNITRACE_CT_DEBUG("[%s] Getting top GPU functions...\n", __FUNCTION__);
-            // get the top GPU critical traces
-            auto _top_gpu = get_top<Device::GPU>(_top, get_critical_trace_count());
-            if(!_top_gpu.empty())
-            {
-                OMNITRACE_CT_DEBUG("[%s] Generating perfetto GPU critical traces...\n",
-                                   __FUNCTION__);
-                generate_perfetto<Device::GPU>(_top_gpu);
-                OMNITRACE_CT_DEBUG("[%s] Saving GPU critical traces...\n", __FUNCTION__);
-                save_critical_trace(tim::settings::compose_output_filename(
-                                        "critical-trace-gpu", ".json", get_use_pid(),
-                                        (tim::dmp::is_initialized()) ? tim::dmp::rank()
-                                                                     : process::get_id()),
-                                    "critical_trace", _top_gpu, true, __FUNCTION__);
-            }
-        }
-
-        _tg.join();
-        _tp.destroy_threadpool();
-        _computed = true;
     } catch(std::exception& e)
     {
         OMNITRACE_PRINT("Thread exited '%s' with exception: %s\n", __FUNCTION__,

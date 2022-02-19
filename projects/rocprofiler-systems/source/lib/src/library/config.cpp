@@ -127,11 +127,6 @@ configure_settings()
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_ROCM_SMI_DEVICES",
                              "Devices to query when OMNITRACE_USE_ROCM_SMI=ON", "all",
                              "backend", "rocm-smi");
-
-    OMNITRACE_CONFIG_SETTING(
-        double, "OMNITRACE_ROCM_SMI_FREQ",
-        "Number of rocm-smi samples per second when OMNITTRACE_USE_ROCM_SMI=ON", 5.0,
-        "backend", "rocm-smi");
 #endif
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_SAMPLING",
@@ -144,7 +139,7 @@ configure_settings()
         "io");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_KOKKOSP",
-                             "Enable support for Kokkos Tools", true, "kokkos");
+                             "Enable support for Kokkos Tools", false, "kokkos");
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_INSTRUMENTATION_INTERVAL",
                              "Instrumentation only takes measurements once every N "
@@ -335,16 +330,6 @@ configure_settings()
     if(tim::mpi::is_initialized()) settings::default_process_suffix() = tim::mpi::rank();
 #endif
     OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose_env() > 0, "configuration complete\n");
-
-#if defined(OMNITRACE_USE_ROCM_SMI)
-    auto _rsmi_freq = _config->find("OMNITRACE_ROCM_SMI_FREQ");
-    if(_rsmi_freq != _config->end())
-    {
-        double& _rsmi_freq_v =
-            static_cast<tim::tsettings<double>&>(*_rsmi_freq->second).get();
-        if(_rsmi_freq_v > 1000) _rsmi_freq_v = 1000.;
-    }
-#endif
 }
 
 void
@@ -846,17 +831,21 @@ get_critical_trace_count()
 }
 
 double&
-get_rocm_smi_freq()
+get_thread_sampling_freq()
 {
-    static auto _v = get_config()->find("OMNITRACE_ROCM_SMI_FREQ");
-    return static_cast<tim::tsettings<double>&>(*_v->second).get();
+    static auto _v = std::min<double>(get_sampling_freq(), 1000.0);
+    return _v;
 }
 
 std::string
 get_rocm_smi_devices()
 {
+#if defined(OMNITRACE_USE_ROCM_SMI)
     static auto _v = get_config()->find("OMNITRACE_ROCM_SMI_DEVICES");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+#else
+    return std::string{};
+#endif
 }
 
 bool

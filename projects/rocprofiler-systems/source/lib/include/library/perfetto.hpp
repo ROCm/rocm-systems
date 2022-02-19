@@ -36,6 +36,8 @@
             perfetto::Category("rocm_smi").SetDescription("Device-level metrics"),       \
             perfetto::Category("sampling")                                               \
                 .SetDescription("Metrics derived from sampling"),                        \
+            perfetto::Category("critical-trace")                                         \
+                .SetDescription("Combined critical traces"),                             \
             perfetto::Category("host-critical-trace")                                    \
                 .SetDescription("Host-side critical traces"),                            \
             perfetto::Category("device-critical-trace")                                  \
@@ -47,6 +49,8 @@
             perfetto::Category("rocm_smi").SetDescription("Device-level metrics"),       \
             perfetto::Category("sampling")                                               \
                 .SetDescription("Metrics derived from sampling"),                        \
+            perfetto::Category("critical-trace")                                         \
+                .SetDescription("Combined critical traces"),                             \
             perfetto::Category("host-critical-trace")                                    \
                 .SetDescription("Host-side critical traces"),                            \
             perfetto::Category("device-critical-trace")                                  \

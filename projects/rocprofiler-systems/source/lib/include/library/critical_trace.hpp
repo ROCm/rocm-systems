@@ -26,7 +26,9 @@
 #include "library/defines.hpp"
 #include "library/thread_data.hpp"
 
-#include <timemory/tpls/cereal/cereal/cereal.hpp>
+#include <timemory/hash/types.hpp>
+#include <timemory/tpls/cereal/cereal.hpp>
+#include <timemory/utility/demangle.hpp>
 
 #include <cstdint>
 #include <cstdlib>
@@ -43,6 +45,7 @@ enum class Device : short
     NONE = 0,
     CPU,
     GPU,
+    ANY,
 };
 
 enum class Phase : short
@@ -106,27 +109,44 @@ struct entry
         return _os;
     }
     template <typename Archive>
-    void serialize(Archive& ar, unsigned int);
+    void save(Archive& ar, unsigned int) const;
+
+    template <typename Archive>
+    void load(Archive& ar, unsigned int);
 };
 
 template <typename Archive>
 void
-entry::serialize(Archive& ar, unsigned int)
+entry::save(Archive& ar, unsigned int) const
 {
     namespace cereal = tim::cereal;
+    std::string _name{};
+    if(hash > 0) _name = tim::get_hash_identifier(hash);
     ar(cereal::make_nvp("priority", priority), cereal::make_nvp("device", device),
        cereal::make_nvp("phase", phase), cereal::make_nvp("depth", depth),
        cereal::make_nvp("tid", tid), cereal::make_nvp("cpu_cid", cpu_cid),
        cereal::make_nvp("gpu_cid", gpu_cid), cereal::make_nvp("parent_cid", parent_cid),
        cereal::make_nvp("begin_ns", begin_ns), cereal::make_nvp("end_ns", end_ns),
-       cereal::make_nvp("hash", hash));
+       cereal::make_nvp("hash", hash), cereal::make_nvp("name", _name),
+       cereal::make_nvp("demangled_name", tim::demangle(_name)));
+}
 
-    if(get_critical_trace_serialize_names())
-    {
-        std::string _name{};
-        if(hash > 0) _name = tim::demangle(tim::get_hash_identifier(hash));
-        ar(cereal::make_nvp("name", _name));
-    }
+template <typename Archive>
+void
+entry::load(Archive& ar, unsigned int)
+{
+    namespace cereal = tim::cereal;
+    std::string _name{};
+    std::string _demangled_name{};
+    ar(cereal::make_nvp("priority", priority), cereal::make_nvp("device", device),
+       cereal::make_nvp("phase", phase), cereal::make_nvp("depth", depth),
+       cereal::make_nvp("tid", tid), cereal::make_nvp("cpu_cid", cpu_cid),
+       cereal::make_nvp("gpu_cid", gpu_cid), cereal::make_nvp("parent_cid", parent_cid),
+       cereal::make_nvp("begin_ns", begin_ns), cereal::make_nvp("end_ns", end_ns),
+       cereal::make_nvp("hash", hash), cereal::make_nvp("name", _name),
+       cereal::make_nvp("demangled_name", _demangled_name));
+
+    tim::get_hash_ids()->emplace(hash, _name);
 }
 
 struct call_chain : private std::vector<entry>
@@ -175,11 +195,22 @@ struct call_chain : private std::vector<entry>
     }
 
     template <Device DevT>
-    void generate_perfetto(std::set<entry>& _used, bool _basic = false) const;
+    void generate_perfetto(std::set<entry>& _used) const;
 
     template <bool BoolV = true, typename FuncT>
     bool query(FuncT&&) const;
 };
+
+template <bool BoolV, typename FuncT>
+bool
+call_chain::query(FuncT&& _func) const
+{
+    for(const auto& itr : *this)
+    {
+        if(std::forward<FuncT>(_func)(itr)) return BoolV;
+    }
+    return !BoolV;
+}
 
 using hash_ids = std::unordered_set<std::string>;
 

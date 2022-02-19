@@ -234,9 +234,6 @@ extern "C"
                                                   "[%s] setting up HSA...\n",
                                                   __FUNCTION__);
 
-                get_hsa_timer() =
-                    std::make_unique<hsa_timer_t>(table->core_->hsa_system_get_info_fn);
-
                 // const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
                 const char* output_prefix = nullptr;
 
@@ -314,7 +311,7 @@ extern "C"
         comp::roctracer::add_setup("hsa", std::move(_setup));
         comp::roctracer::add_shutdown("hsa", std::move(_shutdown));
 
-        rocm_smi::setup();
+        rocm_smi::set_state(State::Active);
         comp::roctracer::setup();
 
         pthread_gotcha::enable_sampling_on_child_threads() = true;
@@ -325,7 +322,7 @@ extern "C"
     void OnUnload()
     {
         OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
-        rocm_smi::shutdown();
+        rocm_smi::set_state(State::Finalized);
         comp::roctracer::shutdown();
     }
 }

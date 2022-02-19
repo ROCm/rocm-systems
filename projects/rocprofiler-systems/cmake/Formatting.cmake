@@ -41,9 +41,9 @@ find_program(OMNITRACE_CLANG_FORMAT_EXE NAMES clang-format-11 clang-format-mp-11
                                               clang-format)
 
 if(OMNITRACE_CLANG_FORMAT_EXE)
-    file(GLOB_RECURSE sources ${PROJECT_SOURCE_DIR}/src/*.cpp)
-    file(GLOB_RECURSE headers ${PROJECT_SOURCE_DIR}/include/*.hpp
-         ${PROJECT_SOURCE_DIR}/include/*.hpp.in)
+    file(GLOB_RECURSE sources ${PROJECT_SOURCE_DIR}/source/*.cpp)
+    file(GLOB_RECURSE headers ${PROJECT_SOURCE_DIR}/source/*.hpp
+         ${PROJECT_SOURCE_DIR}/source/*.hpp.in)
     file(GLOB_RECURSE examples ${PROJECT_SOURCE_DIR}/examples/*.cpp
          ${PROJECT_SOURCE_DIR}/examples/*.hpp)
     file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/examples/lulesh/external/*.cpp

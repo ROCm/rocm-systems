@@ -23,7 +23,6 @@
 #include "library.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
-#include "library/components/rocm_smi.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
 #include "library/debug.hpp"
@@ -31,6 +30,7 @@
 #include "library/gpu.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
+#include "library/thread_sampler.hpp"
 #include "library/timemory.hpp"
 #include "timemory/mpl/type_traits.hpp"
 
@@ -112,9 +112,6 @@ get_cpu_cid_parents()
 
 using Device = critical_trace::Device;
 using Phase  = critical_trace::Phase;
-
-bool
-omnitrace_init_tooling();
 }  // namespace
 
 //======================================================================================//
@@ -133,9 +130,8 @@ omnitrace_push_trace(const char* name)
     if(get_state() != State::Active && !omnitrace_init_tooling())
     {
         static auto _debug = get_debug_env();
-        OMNITRACE_CONDITIONAL_BASIC_PRINT(
-            _debug, "[%s] %s :: not active and perfetto not initialized\n", __FUNCTION__,
-            name);
+        OMNITRACE_CONDITIONAL_BASIC_PRINT_F(_debug, "%s :: not active. state = %s\n",
+                                            name, std::to_string(get_state()).c_str());
         return;
     }
 
@@ -342,9 +338,7 @@ omnitrace_init_library()
 
 //======================================================================================//
 
-namespace
-{
-bool
+extern "C" bool
 omnitrace_init_tooling()
 {
     static bool _once = false;
@@ -366,22 +360,10 @@ omnitrace_init_tooling()
     OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
 
     auto _dtor = scope::destructor{ []() {
-        // if roctracer is not enabled, we cannot rely on OnLoad(...) via HSA tools
-        // to setup rocm-smi
-        if constexpr(!trait::is_available<comp::roctracer>::value)
-        {
-            try
-            {
-                rocm_smi::setup();
-            } catch(std::exception& _e)
-            {
-                OMNITRACE_PRINT("Exception: %s\n", _e.what());
-            }
-        }
-
         if(get_use_sampling())
         {
             pthread_gotcha::enable_sampling_on_child_threads() = false;
+            thread_sampler::setup();
             sampling::setup();
             pthread_gotcha::enable_sampling_on_child_threads() = true;
             sampling::unblock_signals();
@@ -500,7 +482,8 @@ omnitrace_init_tooling()
 
     static auto _push_perfetto = [](const char* name) {
         _thread_init();
-        TRACE_EVENT_BEGIN("host", perfetto::StaticString(name));
+        uint64_t _ts = comp::wall_clock::record();
+        TRACE_EVENT_BEGIN("host", perfetto::StaticString(name), _ts);
     };
 
     static auto _pop_timemory = [](const char* name) {
@@ -517,7 +500,10 @@ omnitrace_init_tooling()
         _data.bundles.pop_back();
     };
 
-    static auto _pop_perfetto = [](const char*) { TRACE_EVENT_END("host"); };
+    static auto _pop_perfetto = [](const char*) {
+        uint64_t _ts = comp::wall_clock::record();
+        TRACE_EVENT_END("host", _ts);
+    };
 
     if(get_use_perfetto() && get_use_timemory())
     {
@@ -572,7 +558,6 @@ omnitrace_init_tooling()
 
     return true;
 }
-}  // namespace
 
 //======================================================================================//
 
@@ -590,6 +575,10 @@ omnitrace_init(const char* _mode, bool _is_binary_rewrite, const char* _argv0)
     tim::set_env("OMNITRACE_MODE", _mode, 0);
     config::is_binary_rewrite() = _is_binary_rewrite;
 
+    // default to KokkosP enabled when sampling, otherwise default to off
+    tim::set_env("OMNITRACE_USE_KOKKOSP", (get_mode() == Mode::Sampling) ? "ON" : "OFF",
+                 0);
+
     if(!_set_mpi_called)
     {
         _start_gotcha_callback = []() { get_gotcha_bundle()->start(); };
@@ -606,7 +595,12 @@ extern "C" void
 omnitrace_finalize(void)
 {
     // return if not active
-    if(get_state() != State::Active) return;
+    if(get_state() != State::Active)
+    {
+        OMNITRACE_DEBUG_F("State = %s. Finalization skipped\n",
+                          std::to_string(get_state()).c_str());
+        return;
+    }
 
     pthread_gotcha::enable_sampling_on_child_threads() = false;
 
@@ -643,12 +637,7 @@ omnitrace_finalize(void)
     }
 
     pthread_gotcha::shutdown();
-
-    if(get_use_rocm_smi())
-    {
-        OMNITRACE_DEBUG("[%s] Shutting down rocm-smi sampling...\n", __FUNCTION__);
-        rocm_smi::shutdown();
-    }
+    thread_sampler::shutdown();
 
     OMNITRACE_DEBUG("[%s] Shutting down roctracer...\n", __FUNCTION__);
     // ensure that threads running roctracer callbacks shutdown
@@ -746,20 +735,7 @@ omnitrace_finalize(void)
         }
     }
 
-    // ensure that all the MT instances are flushed
-    if(get_use_rocm_smi())
-    {
-        size_t _ndevice = gpu::device_count();
-        OMNITRACE_CONDITIONAL_PRINT(
-            get_debug() || get_verbose() > 0,
-            "[%s] Post-processing rocm-smi samples for %zu devices...\n", __FUNCTION__,
-            _ndevice);
-        for(size_t i = 0; i < _ndevice; ++i)
-        {
-            rocm_smi::data::post_process(i);
-            rocm_smi::sampler_instances::instances().at(i).reset();
-        }
-    }
+    thread_sampler::post_process();
 
     if(get_use_critical_trace())
     {

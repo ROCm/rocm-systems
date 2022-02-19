@@ -120,9 +120,6 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     HIP_API_CALL(hipMemcpy(in, matrix, size, hipMemcpyHostToDevice));
     HIP_API_CALL(hipDeviceSynchronize());
 
-    hipDeviceProp_t props;
-    HIP_API_CALL(hipGetDeviceProperties(&props, 0));
-
     dim3 grid(M / 32, N / 32, 1);
     dim3 block(32, 32, 1);  // transpose_a
 
@@ -189,6 +186,9 @@ main(int argc, char** argv)
     if(argc > 1) nthreads = atoi(argv[1]);
     if(argc > 2) nitr = atoi(argv[2]);
 
+    printf("[transpose] Number of threads: %i\n", nthreads);
+    printf("[transpose] Number of iterations: %i\n", nitr);
+
 #if defined(USE_MPI)
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -200,10 +200,12 @@ main(int argc, char** argv)
     int ndevice = 0;
     int devid   = rank;
     HIP_API_CALL(hipGetDeviceCount(&ndevice));
+    printf("[transpose] Number of devices found: %i\n", ndevice);
     if(ndevice > 0)
     {
         devid = rank % ndevice;
         HIP_API_CALL(hipSetDevice(devid));
+        printf("[transpose] Rank %i assigned to device %i\n", rank, devid);
     }
     if(rank == devid && rank < ndevice)
     {

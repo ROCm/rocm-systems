@@ -216,7 +216,7 @@ jobs:
         rm -rf elfutils*
 
     - name: Install Dyninst
-      timeout-minutes: 20
+      timeout-minutes: 25
       run:
         cmake --version &&
         git submodule update --init external/dyninst &&
@@ -310,7 +310,7 @@ jobs:
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:/opt/dyninst/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Install Dyninst
-      timeout-minutes: 20
+      timeout-minutes: 25
       run:
         cmake --version &&
         git submodule update --init external/dyninst &&
@@ -429,7 +429,7 @@ jobs:
         rm -rf elfutils*
 
     - name: Install Dyninst
-      timeout-minutes: 20
+      timeout-minutes: 25
       run:
         cmake --version &&
         git submodule update --init external/dyninst &&

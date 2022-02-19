@@ -52,7 +52,18 @@ void
 setup();
 
 void
+config();
+
+void
+sample();
+
+void
 shutdown();
+
+void
+post_process();
+
+void set_state(State);
 
 uint32_t
 device_count();
@@ -77,12 +88,6 @@ struct data
     void sample(uint32_t _dev_id);
     void print(std::ostream& _os) const;
 
-    template <typename Tp                                                      = nsec_t,
-              std::enable_if_t<!std::is_same_v<std::decay_t<Tp>, nsec_t>, int> = 0>
-    static void poll(std::atomic<State>* _state, Tp&& _interval, promise_t*);
-
-    static void set_state(State);
-    static void poll(std::atomic<State>* _state, nsec_t _interval, promise_t*);
     static void post_process(uint32_t _dev_id);
 
     uint32_t    m_dev_id    = std::numeric_limits<uint32_t>::max();
@@ -100,7 +105,10 @@ struct data
 
 private:
     friend void omnitrace::rocm_smi::setup();
+    friend void omnitrace::rocm_smi::config();
+    friend void omnitrace::rocm_smi::sample();
     friend void omnitrace::rocm_smi::shutdown();
+    friend void omnitrace::rocm_smi::post_process();
 
     static size_t                        device_count;
     static std::set<uint32_t>            device_list;
@@ -111,28 +119,28 @@ private:
     static bool                          shutdown();
 };
 
-template <
-    typename Tp,
-    std::enable_if_t<!std::is_same_v<std::decay_t<Tp>, std::chrono::nanoseconds>, int>>
-void
-data::poll(std::atomic<State>* _state, Tp&& _interval, promise_t* _prom)
-{
-    poll(_state, std::chrono::duration_cast<nsec_t>(_interval), _prom);
-}
-
-using bundle_t          = std::deque<data>;
-using sampler_instances = thread_data<bundle_t, api::rocm_smi>;
-
 #if !defined(OMNITRACE_USE_ROCM_SMI)
 inline void
 setup()
 {}
 
 inline void
+config()
+{}
+
+inline void
+sample()
+{}
+
+inline void
 shutdown()
 {}
 
-inline void data::post_process(uint32_t) {}
+inline void
+post_process()
+{}
+
+inline void set_state(State) {}
 #endif
 }  // namespace rocm_smi
 }  // namespace omnitrace

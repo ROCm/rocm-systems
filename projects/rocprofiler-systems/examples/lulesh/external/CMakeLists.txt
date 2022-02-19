@@ -1,4 +1,4 @@
-# include(Utilities)
+include(Utilities)
 
 option(LULESH_USE_CUDA "Enable Kokkos CUDA backend for lulesh" OFF)
 option(LULESH_USE_HIP "Enable Kokkos HIP backend for lulesh" OFF)

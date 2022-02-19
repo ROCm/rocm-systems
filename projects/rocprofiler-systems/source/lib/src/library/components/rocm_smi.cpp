@@ -60,7 +60,9 @@ namespace omnitrace
 namespace rocm_smi
 {
 using tim::type_mutex;
-using auto_lock_t = tim::auto_lock_t;
+using auto_lock_t       = tim::auto_lock_t;
+using bundle_t          = std::deque<data>;
+using sampler_instances = thread_data<bundle_t, api::rocm_smi>;
 
 namespace
 {
@@ -125,17 +127,51 @@ data::print(std::ostream& _os) const
 
 namespace
 {
-struct cpu_freq
-{};
-using freq_pair_t                                     = std::pair<size_t, double>;
-std::vector<std::vector<freq_pair_t>> cpu_frequencies = {};
+std::vector<std::unique_ptr<bundle_t>*> _bundle_data{};
+}
 
-struct cpu_mem
-{};
-using cpu_mem_usage_pair_t                      = std::pair<size_t, int64_t>;
-std::vector<cpu_mem_usage_pair_t> cpu_mem_usage = {};
-}  // namespace
+void
+config()
+{
+    _bundle_data.resize(data::device_count, nullptr);
+    for(size_t i = 0; i < data::device_count; ++i)
+    {
+        if(data::device_list.count(i) > 0)
+        {
+            _bundle_data.at(i) = &sampler_instances::instances().at(i);
+            if(!*_bundle_data.at(i)) *_bundle_data.at(i) = std::make_unique<bundle_t>();
+        }
+    }
 
+    data::get_initial().resize(data::device_count);
+    for(auto itr : data::device_list)
+        data::get_initial().at(itr).sample(itr);
+}
+
+void
+sample()
+{
+    if(get_rocm_smi_state() != State::Active) return;
+
+    for(auto itr : data::device_list)
+    {
+        OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug(),
+                                          "Polling rocm-smi for device %u...\n", itr);
+        auto& _data = *_bundle_data.at(itr);
+        if(!_data) continue;
+        _data->emplace_back(data{ itr });
+        OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug(), "    %s\n",
+                                          TIMEMORY_JOIN("", _data->back()).c_str());
+    }
+}
+
+void
+set_state(State _v)
+{
+    get_rocm_smi_state().store(_v);
+}
+
+/*
 void
 data::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 {
@@ -155,71 +191,6 @@ data::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
         }
     }
 
-    auto                _ncpu = threading::affinity::hw_concurrency();
-    std::vector<size_t> _cpu_mhz_pos{};
-    std::ifstream       _ifs{ "/proc/cpuinfo" };
-    if(_ifs)
-    {
-        for(size_t i = 0; i < _ncpu; ++i)
-        {
-            short       _n = 0;
-            std::string _st{};
-            while(_ifs && _ifs.good())
-            {
-                std::string _s{};
-                _ifs >> _s;
-                if(!_ifs.good() || !_ifs) break;
-
-                if(_s == "cpu" || _s == "MHz" || _s == ":")
-                {
-                    ++_n;
-                    _st += _s + " ";
-                }
-                else
-                {
-                    _n  = 0;
-                    _st = {};
-                }
-
-                if(_n == 3)
-                {
-                    size_t _pos = _ifs.tellg();
-                    _cpu_mhz_pos.emplace_back(_pos + 1);
-                    _ifs >> _s;
-                    if(!_ifs.good() || !_ifs) break;
-                    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug() || get_verbose() > 1,
-                                                      "[%zu] %s %s (pos = %zu)\n", i,
-                                                      _st.c_str(), _s.c_str(), _pos + 1);
-                    break;
-                }
-            }
-        }
-    }
-
-    cpu_frequencies.resize(_ncpu);
-
-    _ifs                = std::ifstream{ "/proc/cpuinfo", std::ifstream::binary };
-    auto _read_cpu_freq = [&_cpu_mhz_pos, &_ifs](size_t _idx) {
-        double _freq = 0;
-        _ifs.seekg(_cpu_mhz_pos.at(_idx), _ifs.beg);
-        _ifs >> _freq;
-        return _freq;
-    };
-
-    auto _read_cpu_mem_usage = []() {
-        cpu_mem_usage.emplace_back(tim::get_clock_real_now<size_t, std::nano>(),
-                                   tim::get_page_rss());
-    };
-
-    auto _read_cpu_freqs = [&_read_cpu_freq, _ncpu]() {
-        auto _ts = tim::get_clock_real_now<size_t, std::nano>();
-        for(size_t i = 0; i < _ncpu; ++i)
-        {
-            auto _freq = _read_cpu_freq(i);
-            cpu_frequencies.at(i).emplace_back(_ts, _freq);
-        }
-    };
-
     OMNITRACE_CONDITIONAL_BASIC_PRINT(
         get_verbose() > 0 || get_debug(),
         "Polling rocm-smi for %zu device(s) at an interval of %f seconds...\n",
@@ -235,8 +206,6 @@ data::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     {
         std::this_thread::sleep_until(_now);
         if(_state->load() != State::Active) continue;
-        _read_cpu_mem_usage();
-        _read_cpu_freqs();
         for(auto itr : device_list)
         {
             OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug(),
@@ -254,6 +223,7 @@ data::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 
     if(polling_finished) polling_finished->set_value();
 }
+*/
 
 std::vector<data>&
 data::get_initial()
@@ -262,73 +232,20 @@ data::get_initial()
     return _v;
 }
 
-std::unique_ptr<std::thread>&
-data::get_thread()
-{
-    static std::unique_ptr<std::thread> _v;
-    return _v;
-}
-
-void
-data::set_state(State _state)
-{
-    get_rocm_smi_state().store(_state);
-}
-
 bool
 data::setup()
 {
-    perfetto_counter_track<cpu_freq>::init();
-    perfetto_counter_track<cpu_mem>::init();
     perfetto_counter_track<data>::init();
-
-    // shutdown if already running
-    shutdown();
-
-    OMNITRACE_DEBUG("Configuring rocm-smi...\n");
-
-    auto     _freq      = get_rocm_smi_freq();
-    uint64_t _msec_freq = (1.0 / _freq) * 1.0e3;
-
-    promise_t _prom{};
-    auto      _fut   = _prom.get_future();
-    polling_finished = std::make_unique<promise_t>();
-
     set_state(State::PreInit);
-    get_thread() = std::make_unique<std::thread>(
-        &data::poll<msec_t>, &get_rocm_smi_state(), msec_t{ _msec_freq }, &_prom);
-
-    _fut.wait();
     return true;
 }
 
 bool
 data::shutdown()
 {
-    auto& _thread = get_thread();
-    if(_thread)
-    {
-        OMNITRACE_DEBUG("Shutting down rocm-smi...\n");
-        set_state(State::Finalized);
-        if(polling_finished)
-        {
-            auto     _fut  = polling_finished->get_future();
-            uint64_t _freq = (1.0 / get_rocm_smi_freq()) * 1.0e3;
-            _fut.wait_for(msec_t{ 5 * _freq });
-            _thread->join();
-        }
-        else
-        {
-            uint64_t _freq = (1.0 / get_rocm_smi_freq()) * 1.0e3;
-            std::this_thread::sleep_for(msec_t{ 5 * _freq });
-            pthread_cancel(_thread->native_handle());
-            _thread->detach();
-        }
-        _thread          = std::unique_ptr<std::thread>{};
-        polling_finished = std::unique_ptr<promise_t>{};
-        return true;
-    }
-    return false;
+    OMNITRACE_DEBUG("Shutting down rocm-smi...\n");
+    set_state(State::Finalized);
+    return true;
 }
 
 #define GPU_METRIC(COMPONENT, ...)                                                       \
@@ -354,50 +271,6 @@ data::post_process(uint32_t _dev_id)
     using component::sampling_gpu_temp;
     using bundle_t = tim::lightweight_tuple<sampling_gpu_busy, sampling_gpu_temp,
                                             sampling_gpu_power, sampling_gpu_memory>;
-
-    auto _process_frequencies = [](size_t _idx) {
-        using counter_track = perfetto_counter_track<cpu_freq>;
-        if(!counter_track::exists(_idx))
-        {
-            auto _devname = TIMEMORY_JOIN("", "[CPU ", _idx, "] ");
-            auto addendum = [&](const char* _v) { return _devname + std::string{ _v }; };
-            counter_track::emplace(_idx, addendum("Frequency (S)"), "MHz");
-        }
-
-        for(auto& itr : cpu_frequencies.at(_idx))
-        {
-            uint64_t _ts   = itr.first;
-            double   _freq = itr.second;
-            TRACE_COUNTER("sampling", counter_track::at(_idx, 0), _ts, _freq);
-        }
-    };
-
-    auto _process_cpu_mem_usage = []() {
-        using counter_track = perfetto_counter_track<cpu_mem>;
-        if(!counter_track::exists(0))
-        {
-            auto _devname = TIMEMORY_JOIN("", "[CPU] ");
-            auto addendum = [&](const char* _v) { return _devname + std::string{ _v }; };
-            counter_track::emplace(0, addendum("Memory Usage (S)"), "MB");
-        }
-
-        for(auto& itr : cpu_mem_usage)
-        {
-            uint64_t _ts        = itr.first;
-            double   _mem_usage = itr.second;
-            TRACE_COUNTER("sampling", counter_track::at(0, 0), _ts,
-                          _mem_usage / units::megabyte);
-        }
-    };
-
-    static bool _once = false;
-    if(!_once)
-    {
-        _once = true;
-        _process_cpu_mem_usage();
-        for(size_t i = 0; i < cpu_frequencies.size(); ++i)
-            _process_frequencies(i);
-    }
 
     if(device_count < _dev_id) return;
 
@@ -474,6 +347,7 @@ setup()
 
     if(is_initialized() || !get_use_rocm_smi()) return;
 
+    auto _enable_samp = pthread_gotcha::enable_sampling_on_child_threads();
     pthread_gotcha::enable_sampling_on_child_threads() = false;
 
     // assign the data value to determined by rocm-smi
@@ -513,8 +387,7 @@ setup()
 
     data::setup();
 
-    pthread_gotcha::enable_sampling_on_child_threads() = true;
-    omnitrace::rocm_smi::data::set_state(State::Active);
+    pthread_gotcha::enable_sampling_on_child_threads() = _enable_samp;
 }
 
 void
@@ -530,6 +403,13 @@ shutdown()
     }
 
     is_initialized() = false;
+}
+
+void
+post_process()
+{
+    for(auto itr : data::device_list)
+        data::post_process(itr);
 }
 
 uint32_t

@@ -8,9 +8,8 @@ include(CMakeDependentOption)
 include(CMakeParseArguments)
 
 # -----------------------------------------------------------------------
-# function - capitalize - make a string capitalized (first letter is capital) usage:
-# capitalize("SHARED" CShared) message(STATUS "-- CShared is \"${CShared}\"") $ -- CShared
-# is "Shared"
+# function - capitalize - make a string capitalized (first letter is capital)
+#
 function(CAPITALIZE str var)
     # make string lower
     string(TOLOWER "${str}" str)
@@ -24,7 +23,7 @@ function(CAPITALIZE str var)
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
-# macro CHECKOUT_GIT_SUBMODULE()
+# function CHECKOUT_GIT_SUBMODULE()
 #
 # Run "git submodule update" if a file in a submodule does not exist
 #
@@ -45,7 +44,7 @@ function(CHECKOUT_GIT_SUBMODULE)
     endif()
 
     if(NOT CHECKOUT_TEST_FILE)
-        set(CHECKOUT_TEST_FILE "Makefile")
+        set(CHECKOUT_TEST_FILE "CMakeLists.txt")
     endif()
 
     # default assumption
@@ -156,160 +155,3 @@ function(CHECKOUT_GIT_SUBMODULE)
     endif()
 
 endfunction()
-
-# ----------------------------------------------------------------------------------------#
-# require variable
-#
-function(CHECK_REQUIRED VAR)
-    if(NOT DEFINED ${VAR} OR "${${VAR}}" STREQUAL "")
-        message(FATAL_ERROR "Variable '${VAR}' must be defined and not empty")
-    endif()
-endfunction()
-
-# -----------------------------------------------------------------------
-# function add_feature(<NAME> <DOCSTRING>) Add a project feature, whose activation is
-# specified by the existence of the variable <NAME>, to the list of enabled/disabled
-# features, plus a docstring describing the feature
-#
-function(ADD_FEATURE _var _description)
-    set(EXTRA_DESC "")
-    foreach(currentArg ${ARGN})
-        if(NOT "${currentArg}" STREQUAL "${_var}" AND NOT "${currentArg}" STREQUAL
-                                                      "${_description}")
-            set(EXTRA_DESC "${EXTA_DESC}${currentArg}")
-        endif()
-    endforeach()
-
-    set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_FEATURES ${_var})
-    set_property(GLOBAL PROPERTY ${_var}_DESCRIPTION "${_description}${EXTRA_DESC}")
-
-    if("CMAKE_DEFINE" IN_LIST ARGN)
-        set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES
-                                            "${_var} @${_var}@")
-    endif()
-endfunction()
-
-# ----------------------------------------------------------------------------------------#
-# function add_option(<OPTION_NAME> <DOCSRING> <DEFAULT_SETTING> [NO_FEATURE]) Add an
-# option and add as a feature if NO_FEATURE is not provided
-#
-function(ADD_OPTION _NAME _MESSAGE _DEFAULT)
-    option(${_NAME} "${_MESSAGE}" ${_DEFAULT})
-    if("NO_FEATURE" IN_LIST ARGN)
-        mark_as_advanced(${_NAME})
-    else()
-        add_feature(${_NAME} "${_MESSAGE}")
-    endif()
-    if("ADVANCED" IN_LIST ARGN)
-        mark_as_advanced(${_NAME})
-    endif()
-endfunction()
-
-# ----------------------------------------------------------------------------------------#
-# function print_enabled_features() Print enabled  features plus their docstrings.
-#
-function(PRINT_ENABLED_FEATURES)
-    set(_basemsg "The following features are defined/enabled (+):")
-    set(_currentFeatureText "${_basemsg}")
-    get_property(_features GLOBAL PROPERTY ${PROJECT_NAME}_FEATURES)
-    if(NOT "${_features}" STREQUAL "")
-        list(REMOVE_DUPLICATES _features)
-        list(SORT _features)
-    endif()
-    foreach(_feature ${_features})
-        if(${_feature})
-            # add feature to text
-            set(_currentFeatureText "${_currentFeatureText}\n     ${_feature}")
-            # get description
-            get_property(_desc GLOBAL PROPERTY ${_feature}_DESCRIPTION)
-            # print description, if not standard ON/OFF, print what is set to
-            if(_desc)
-                if(NOT "${${_feature}}" STREQUAL "ON" AND NOT "${${_feature}}" STREQUAL
-                                                          "TRUE")
-                    set(_currentFeatureText
-                        "${_currentFeatureText}: ${_desc} -- [\"${${_feature}}\"]")
-                else()
-                    string(REGEX REPLACE "^${PROJECT_NAME}_USE_" "" _feature_tmp
-                                         "${_feature}")
-                    string(TOLOWER "${_feature_tmp}" _feature_tmp_l)
-                    capitalize("${_feature_tmp}" _feature_tmp_c)
-                    foreach(_var _feature _feature_tmp _feature_tmp_l _feature_tmp_c)
-                        set(_ver "${${${_var}}_VERSION}")
-                        if(NOT "${_ver}" STREQUAL "")
-                            set(_desc "${_desc} -- [found version ${_ver}]")
-                            break()
-                        endif()
-                        unset(_ver)
-                    endforeach()
-                    set(_currentFeatureText "${_currentFeatureText}: ${_desc}")
-                endif()
-                set(_desc NOTFOUND)
-            endif()
-        endif()
-    endforeach()
-
-    if(NOT "${_currentFeatureText}" STREQUAL "${_basemsg}")
-        message(STATUS "${_currentFeatureText}\n")
-    endif()
-endfunction()
-
-# ----------------------------------------------------------------------------------------#
-# function print_disabled_features() Print disabled features plus their docstrings.
-#
-function(PRINT_DISABLED_FEATURES)
-    set(_basemsg "The following features are NOT defined/enabled (-):")
-    set(_currentFeatureText "${_basemsg}")
-    get_property(_features GLOBAL PROPERTY ${PROJECT_NAME}_FEATURES)
-    if(NOT "${_features}" STREQUAL "")
-        list(REMOVE_DUPLICATES _features)
-        list(SORT _features)
-    endif()
-    foreach(_feature ${_features})
-        if(NOT ${_feature})
-            set(_currentFeatureText "${_currentFeatureText}\n     ${_feature}")
-            get_property(_desc GLOBAL PROPERTY ${_feature}_DESCRIPTION)
-            if(_desc)
-                set(_currentFeatureText "${_currentFeatureText}: ${_desc}")
-                set(_desc NOTFOUND)
-            endif(_desc)
-        endif()
-    endforeach(_feature)
-
-    if(NOT "${_currentFeatureText}" STREQUAL "${_basemsg}")
-        message(STATUS "${_currentFeatureText}\n")
-    endif()
-endfunction()
-
-# ----------------------------------------------------------------------------------------#
-# function print_features() Print all features plus their docstrings.
-#
-function(PRINT_FEATURES)
-    message(STATUS "")
-    print_enabled_features()
-    print_disabled_features()
-endfunction()
-
-# ----------------------------------------------------------------------------------------#
-# macro ADD_SUBPROJECT() Does a git submodule update + add_subdirectory
-#
-macro(ADD_SUBPROJECT PACKAGE_NAME)
-    # parse args
-    cmake_parse_arguments(PACKAGE "SUBMODULE" "DIRECTORY" "" ${ARGN})
-    if(NOT PACKAGE_DIRECTORY)
-        set(PACKAGE_DIRECTORY ${PACKAGE_NAME})
-    endif()
-    # if specified in options
-    if("${PACKAGE_NAME}" IN_LIST PROJECTS)
-        if(PACKAGE_SUBMODULE)
-            checkout_git_submodule(RECURSIVE RELATIVE_PATH ${PACKAGE_DIRECTORY})
-        endif()
-        if(NOT EXISTS "${PROJECT_SOURCE_DIR}/${PACKAGE_DIRECTORY}/CMakeLists.txt")
-            message(
-                STATUS
-                    "Warning! '${PROJECT_SOURCE_DIR}/${PACKAGE_DIRECTORY}/CMakeLists.txt' does not exist!"
-                )
-        else()
-            add_subdirectory(${PACKAGE_DIRECTORY})
-        endif()
-    endif()
-endmacro()

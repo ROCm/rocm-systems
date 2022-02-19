@@ -212,7 +212,7 @@ get_backend();
 
 // make this visible so omnitrace-avail can call it
 std::string&
-get_perfetto_output_filename() TIMEMORY_VISIBILITY("default");
+get_perfetto_output_filename();
 
 int64_t
 get_critical_trace_count();
@@ -227,7 +227,7 @@ double&
 get_sampling_delay();
 
 double&
-get_rocm_smi_freq();
+get_thread_sampling_freq();
 
 std::string
 get_rocm_smi_devices();

@@ -82,13 +82,6 @@ get_hip_activity_callbacks(int64_t _tid = threading::get_id())
     return _v.at(_tid);
 }
 
-std::unique_ptr<hsa_timer_t>&
-get_hsa_timer()
-{
-    static auto _v = std::unique_ptr<hsa_timer_t>{};
-    return _v;
-}
-
 using hip_activity_mutex_t = std::decay_t<decltype(get_hip_activity_callbacks())>;
 using key_data_mutex_t     = std::decay_t<decltype(get_roctracer_key_data())>;
 using hip_data_mutex_t     = std::decay_t<decltype(get_roctracer_hip_data())>;
@@ -114,16 +107,13 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                     roctracer_op_string(domain, cid, 0), cid, data->correlation_id,
                     (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
 
-    static thread_local timestamp_t begin_timestamp = 0;
-    static auto&                    timer           = get_hsa_timer();
-    static auto                     _scope          = []() {
+    static thread_local int64_t begin_timestamp = 0;
+    static auto                 _scope          = []() {
         auto _v = scope::config{};
         if(get_roctracer_timeline_profile()) _v += scope::timeline{};
         if(get_roctracer_flat_profile()) _v += scope::flat{};
         return _v;
     }();
-
-    if(!timer) return;
 
     switch(cid)
     {
@@ -172,22 +162,22 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         {
             if(data->phase == ACTIVITY_API_PHASE_ENTER)
             {
-                begin_timestamp = timer->timestamp_fn_ns();
+                begin_timestamp = comp::wall_clock::record();
             }
             else
             {
-                const auto*       _name         = roctracer_op_string(domain, cid, 0);
-                const timestamp_t end_timestamp = (cid == HSA_API_ID_hsa_shut_down)
-                                                      ? begin_timestamp
-                                                      : timer->timestamp_fn_ns();
+                const auto* _name         = roctracer_op_string(domain, cid, 0);
+                const auto  end_timestamp = (cid == HSA_API_ID_hsa_shut_down)
+                                                ? begin_timestamp
+                                                : comp::wall_clock::record();
 
                 if(begin_timestamp > end_timestamp) return;
 
                 if(get_use_perfetto())
                 {
                     TRACE_EVENT_BEGIN("device", perfetto::StaticString{ _name },
-                                      begin_timestamp);
-                    TRACE_EVENT_END("device", end_timestamp);
+                                      static_cast<uint64_t>(begin_timestamp));
+                    TRACE_EVENT_END("device", static_cast<uint64_t>(end_timestamp));
                 }
 
                 if(get_use_timemory())
@@ -247,8 +237,9 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
     auto _func = [_begin_ns, _end_ns, _name]() {
         if(get_use_perfetto())
         {
-            TRACE_EVENT_BEGIN("device", perfetto::StaticString{ *_name }, _begin_ns);
-            TRACE_EVENT_END("device", _end_ns);
+            TRACE_EVENT_BEGIN("device", perfetto::StaticString{ *_name },
+                              static_cast<uint64_t>(_begin_ns));
+            TRACE_EVENT_END("device", static_cast<uint64_t>(_end_ns));
         }
         if(get_use_timemory())
         {
@@ -312,6 +303,8 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         default: break;
     }
 
+    int64_t _ts = comp::wall_clock::record();
+
     if(data->phase == ACTIVITY_API_PHASE_ENTER)
     {
         switch(cid)
@@ -349,21 +342,13 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                 }
                 break;
             }
-            default:
-            {
-                if(get_use_perfetto() || get_use_timemory() || get_use_rocm_smi())
-                {
-                    tim::auto_lock_t _lk{ tim::type_mutex<key_data_mutex_t>() };
-                    get_roctracer_key_data().emplace(data->correlation_id, op_name);
-                    get_roctracer_tid_data().emplace(data->correlation_id,
-                                                     threading::get_id());
-                }
-            }
+            default: break;
         }
 
         if(get_use_perfetto())
         {
-            TRACE_EVENT_BEGIN("device", perfetto::StaticString{ op_name });
+            TRACE_EVENT_BEGIN("device", perfetto::StaticString{ op_name },
+                              static_cast<uint64_t>(_ts));
         }
         if(get_use_timemory())
         {
@@ -388,8 +373,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
             auto     _parent_cid = (get_cpu_cid_stack()->empty())
                                        ? get_cpu_cid_stack(0)->back()
                                        : get_cpu_cid_stack()->back();
-            int64_t  _ts         = comp::wall_clock::record();
-            add_critical_trace<Device::GPU, Phase::BEGIN>(
+            add_critical_trace<Device::CPU, Phase::BEGIN>(
                 threading::get_id(), _cid, data->correlation_id, _parent_cid, _ts, 0,
                 critical_trace::add_hash_id(op_name), _depth);
             tim::auto_lock_t _lk{ tim::type_mutex<cid_data_mutex_t>() };
@@ -405,7 +389,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
         if(get_use_perfetto())
         {
-            TRACE_EVENT_END("device");
+            TRACE_EVENT_END("device", static_cast<uint64_t>(_ts));
         }
         if(get_use_timemory())
         {
@@ -438,8 +422,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                 std::tie(_cid, _parent_cid, _depth) =
                     get_roctracer_cid_data().at(data->correlation_id);
             }
-            int64_t _ts = comp::wall_clock::record();
-            add_critical_trace<Device::GPU, Phase::END>(
+            add_critical_trace<Device::CPU, Phase::END>(
                 threading::get_id(), _cid, data->correlation_id, _parent_cid, _ts, _ts,
                 critical_trace::add_hash_id(op_name), _depth);
         }
@@ -471,20 +454,50 @@ hip_activity_callback(const char* begin, const char* end, void*)
 
     OMNITRACE_DEBUG("Activity records:\n");
 
+    auto&& _advance_record = [&record]() {
+        ROCTRACER_CALL(roctracer_next_record(record, &record));
+    };
+
     while(record < end_record)
     {
+        // make sure every iteration advances regardless of where return point happens
+        scope::destructor _next_dtor{ _advance_record };
+
         const char* op_name =
             roctracer_op_string(record->domain, record->correlation_id, 0);
         if(op_name == nullptr) op_name = hip_api_name(record->correlation_id);
 
+        switch(record->kind)
+        {
+            case HIP_API_ID_hipLaunchKernel:
+            case HIP_API_ID_hipLaunchCooperativeKernel:
+            case HIP_API_ID_hipModuleLaunchKernel: break;
+            case HIP_API_ID_hipGetLastError: continue;
+            default:
+            {
+                if(op_name != nullptr && strcmp(op_name, "unknown") != 0 &&
+                   strcmp(op_name, "InternalMarker") != 0)
+                {
+                    OMNITRACE_BASIC_VERBOSE_F(2, "[%s] ignoring callback for %s\n",
+                                              __FUNCTION__, op_name);
+                    continue;
+                }
+                break;
+            }
+        }
+
+        auto _dev_id = record->device_id;
+        auto _thr_id = record->thread_id;
+        auto _prc_id = record->process_id;
+        auto _que_id = record->queue_id;
+
         if(op_name != nullptr)
         {
-            OMNITRACE_DEBUG("\t%-30s\tcorrelation_id(%6lu) time_ns(%12lu:%12lu) "
-                            "delta_ns(%12lu) device_id(%d) "
-                            "stream_id(%lu)\n",
-                            op_name, record->correlation_id, record->begin_ns,
-                            record->end_ns, (record->end_ns - record->begin_ns),
-                            record->device_id, record->queue_id);
+            OMNITRACE_DEBUG(
+                "\t%-30s\tcorrelation_id(%6lu) time_ns(%12lu:%12lu) "
+                "delta_ns(%12lu) device_id(%d) stream_id(%lu) proc_id(%u) thr_id(%u)\n",
+                op_name, record->correlation_id, record->begin_ns, record->end_ns,
+                (record->end_ns - record->begin_ns), _dev_id, _que_id, _prc_id, _thr_id);
         }
 
         auto        _begin_ns = record->begin_ns;
@@ -543,8 +556,8 @@ hip_activity_callback(const char* begin, const char* end, void*)
                     TRACE_EVENT_BEGIN(
                         "device",
                         perfetto::StaticString{ _kernel_names.at(_name).c_str() },
-                        _begin_ns);
-                    TRACE_EVENT_END("device", _end_ns);
+                        static_cast<uint64_t>(_begin_ns));
+                    TRACE_EVENT_END("device", static_cast<uint64_t>(_end_ns));
                 }
                 if(get_use_timemory())
                 {
@@ -589,8 +602,6 @@ hip_activity_callback(const char* begin, const char* end, void*)
             tim::auto_lock_t _lk{ get_hip_activity_mutex(_tid) };
             _async_ops->emplace_back(std::move(_func));
         }
-
-        ROCTRACER_CALL(roctracer_next_record(record, &record));
     }
 }
 

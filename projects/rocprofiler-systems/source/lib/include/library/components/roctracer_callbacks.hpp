@@ -54,16 +54,11 @@
 
 namespace omnitrace
 {
-using hsa_timer_t = hsa_rt_utils::Timer;
-using timestamp_t = hsa_timer_t::timestamp_t;
 using roctracer_bundle_t =
     tim::component_bundle<api::omnitrace, comp::roctracer_data, comp::wall_clock>;
 using roctracer_hsa_bundle_t =
     tim::component_bundle<api::omnitrace, comp::roctracer_data>;
 using roctracer_functions_t = std::vector<std::pair<std::string, std::function<void()>>>;
-
-std::unique_ptr<hsa_timer_t>&
-get_hsa_timer();
 
 // HSA API callback function
 void
