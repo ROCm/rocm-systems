@@ -185,14 +185,15 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                     std::unique_lock<std::mutex> _lk{ tasking::get_roctracer_mutex() };
                     auto                         _begin_ns = begin_timestamp;
                     auto                         _end_ns   = end_timestamp;
-                    tasking::get_roctracer_task_group().exec(
-                        [_name, _begin_ns, _end_ns]() {
-                            roctracer_hsa_bundle_t _bundle{ _name, _scope };
-                            _bundle.start()
-                                .store(std::plus<double>{},
-                                       static_cast<double>(_end_ns - _begin_ns))
-                                .stop();
-                        });
+                    if(tasking::get_roctracer_task_group().pool())
+                        tasking::get_roctracer_task_group().exec(
+                            [_name, _begin_ns, _end_ns]() {
+                                roctracer_hsa_bundle_t _bundle{ _name, _scope };
+                                _bundle.start()
+                                    .store(std::plus<double>{},
+                                           static_cast<double>(_end_ns - _begin_ns))
+                                    .stop();
+                            });
                 }
                 // timemory is disabled in this callback because collecting data in this
                 // thread causes strange segmentation faults
@@ -251,7 +252,8 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
     };
 
     std::unique_lock<std::mutex> _lk{ tasking::get_roctracer_mutex() };
-    tasking::get_roctracer_task_group().exec(_func);
+    if(tasking::get_roctracer_task_group().pool())
+        tasking::get_roctracer_task_group().exec(_func);
 
     // timemory is disabled in this callback because collecting data in this thread
     // causes strange segmentation faults

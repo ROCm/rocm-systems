@@ -31,9 +31,9 @@
 #include "library/defines.hpp"
 #include "library/state.hpp"
 #include "library/timemory.hpp"
-#include "timemory/macros/language.hpp"
 
 #include <timemory/backends/threading.hpp>
+#include <timemory/macros/language.hpp>
 
 #include <string>
 #include <string_view>
@@ -128,6 +128,9 @@ get_debug_finalize();
 
 bool
 get_debug();
+
+bool
+get_debug_sampling();
 
 bool
 get_debug_tid();
@@ -252,5 +255,5 @@ std::atomic<uint64_t>&
 get_cpu_cid();
 
 std::unique_ptr<std::vector<uint64_t>>&
-get_cpu_cid_stack(int64_t _tid = threading::get_id());
+get_cpu_cid_stack(int64_t _tid = threading::get_id(), int64_t _parent = 0);
 }  // namespace omnitrace

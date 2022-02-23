@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/config.hpp"
+#include "library/api.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 #include "library/thread_data.hpp"
@@ -29,16 +30,21 @@
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/environment.hpp>
+#include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
+#include <timemory/utility/declaration.hpp>
+#include <timemory/utility/signals.hpp>
 
 #include <array>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <numeric>
 #include <ostream>
 #include <string>
+#include <unistd.h>
 
 namespace omnitrace
 {
@@ -69,7 +75,8 @@ get_setting_name(std::string _v)
     {                                                                                    \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
             ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, INITIAL_VALUE,            \
-            std::set<std::string>{ "custom", "omnitrace", __VA_ARGS__ });                \
+            std::set<std::string>{ "custom", "omnitrace", "omnitrace-library",           \
+                                   __VA_ARGS__ });                                       \
         if(!_ret.second)                                                                 \
             OMNITRACE_PRINT("Warning! Duplicate setting: %s / %s\n",                     \
                             get_setting_name(ENV_NAME).c_str(), ENV_NAME);               \
@@ -261,6 +268,24 @@ configure_settings()
     _config->get_memory_units()          = "MB";
     _config->get_papi_events()           = "PAPI_TOT_CYC, PAPI_TOT_INS";
 
+    // settings native to timemory but critically and/or extensively used by omnitrace
+    auto _add_omnitrace_category = [](auto itr) {
+        if(itr != _config->end())
+        {
+            auto _categories = itr->second->get_categories();
+            _categories.emplace("omnitrace");
+            _categories.emplace("omnitrace-library");
+            itr->second->set_categories(_categories);
+        }
+    };
+
+    _add_omnitrace_category(_config->find("OMNITRACE_CONFIG_FILE"));
+    _add_omnitrace_category(_config->find("OMNITRACE_DEBUG"));
+    _add_omnitrace_category(_config->find("OMNITRACE_VERBOSE"));
+    _add_omnitrace_category(_config->find("OMNITRACE_TIME_OUTPUT"));
+    _add_omnitrace_category(_config->find("OMNITRACE_OUTPUT_PREFIX"));
+    _add_omnitrace_category(_config->find("OMNITRACE_OUTPUT_PATH"));
+
 #if defined(TIMEMORY_USE_PAPI)
     int _paranoid = 2;
     {
@@ -286,6 +311,10 @@ configure_settings()
         tim::trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
         tim::trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
         _config->get_papi_events() = "";
+    }
+    else
+    {
+        _add_omnitrace_category(_config->find("OMNITRACE_PAPI_EVENTS"));
     }
 #else
     _config->get_papi_quiet() = true;
@@ -330,6 +359,30 @@ configure_settings()
     if(tim::mpi::is_initialized()) settings::default_process_suffix() = tim::mpi::rank();
 #endif
     OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose_env() > 0, "configuration complete\n");
+
+    if(_config->get_enable_signal_handler())
+    {
+        using signal_settings = tim::signal_settings;
+        using sys_signal      = tim::sys_signal;
+        tim::disable_signal_detection();
+        auto _exit_action = [](int nsig) {
+            tim::sampling::block_signals({ SIGPROF, SIGALRM },
+                                         tim::sampling::sigmask_scope::process);
+            OMNITRACE_BASIC_PRINT(
+                "Finalizing afer signal %i :: %s\n", nsig,
+                signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
+            if(get_state() == State::Active) omnitrace_finalize();
+            kill(process::get_id(), nsig);
+        };
+        signal_settings::set_exit_action(_exit_action);
+        tim::set_env("SIGNAL_ENABLE_INTERRUPT", "1", 0);
+        signal_settings::check_environment();
+        auto default_signals = signal_settings::get_default();
+        for(const auto& itr : default_signals)
+            signal_settings::enable(itr);
+        auto enabled_signals = signal_settings::get_enabled();
+        tim::enable_signal_detection(enabled_signals);
+    }
 }
 
 void
@@ -573,6 +626,13 @@ get_debug()
 {
     static auto _v = get_config()->find("OMNITRACE_DEBUG");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_debug_sampling()
+{
+    static bool _v = tim::get_env<bool>("OMNITRACE_DEBUG_SAMPLING", get_debug_env());
+    return (_v || get_debug());
 }
 
 int
@@ -896,19 +956,24 @@ get_cpu_cid()
 }
 
 std::unique_ptr<std::vector<uint64_t>>&
-get_cpu_cid_stack(int64_t _tid)
+get_cpu_cid_stack(int64_t _tid, int64_t _parent)
 {
     struct omnitrace_cpu_cid_stack
     {};
     using thread_data_t = thread_data<std::vector<uint64_t>, omnitrace_cpu_cid_stack>;
-    static auto&             _v       = thread_data_t::instances();
-    static thread_local auto _v_check = [_tid]() {
-        thread_data_t::construct((_tid > 0) ? *thread_data_t::instances().at(0)
-                                            : std::vector<uint64_t>{});
+    static auto&             _v      = thread_data_t::instances();
+    static thread_local auto _v_copy = [_tid, _parent]() {
+        auto _parent_tid = _parent;
+        // if tid != parent and there is not a valid pointer for the provided parent
+        // thread id set it to zero since that will always be valid
+        if(_tid != _parent_tid && !_v.at(_parent_tid)) _parent_tid = 0;
+        // copy over the thread ids from the parent if tid != parent
+        thread_data_t::construct((_tid != _parent_tid) ? *(_v.at(_parent_tid))
+                                                       : std::vector<uint64_t>{});
         return true;
     }();
     return _v.at(_tid);
-    (void) _v_check;
+    (void) _v_copy;
 }
 
 namespace

@@ -30,27 +30,27 @@
 extern "C"
 {
     /// handles configuration logic
-    void omnitrace_init_library(void) TIMEMORY_VISIBILITY("default");
+    void omnitrace_init_library(void) OMNITRACE_VISIBILITY("default");
 
     /// starts gotcha wrappers
-    void omnitrace_init(const char*, bool, const char*) TIMEMORY_VISIBILITY("default");
+    void omnitrace_init(const char*, bool, const char*) OMNITRACE_VISIBILITY("default");
 
     /// shuts down all tooling and generates output
-    void omnitrace_finalize(void) TIMEMORY_VISIBILITY("default");
+    void omnitrace_finalize(void) OMNITRACE_VISIBILITY("default");
 
     /// sets an environment variable
     void omnitrace_set_env(const char* env_name, const char* env_val)
-        TIMEMORY_VISIBILITY("default");
+        OMNITRACE_VISIBILITY("default");
 
     /// sets whether MPI should be used
-    void omnitrace_set_mpi(bool use, bool attached) TIMEMORY_VISIBILITY("default");
+    void omnitrace_set_mpi(bool use, bool attached) OMNITRACE_VISIBILITY("default");
 
     /// starts an instrumentation region
-    void omnitrace_push_trace(const char* name) TIMEMORY_VISIBILITY("default");
+    void omnitrace_push_trace(const char* name) OMNITRACE_VISIBILITY("default");
 
     /// stops an instrumentation region
-    void omnitrace_pop_trace(const char* name) TIMEMORY_VISIBILITY("default");
+    void omnitrace_pop_trace(const char* name) OMNITRACE_VISIBILITY("default");
 
     /// used by omnitrace-critical-trace
-    bool omnitrace_init_tooling() TIMEMORY_VISIBILITY("hidden");
+    bool omnitrace_init_tooling() OMNITRACE_VISIBILITY("hidden");
 }

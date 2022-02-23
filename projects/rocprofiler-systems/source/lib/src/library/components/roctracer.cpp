@@ -215,8 +215,8 @@ TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(roctracer_data, true, double)
 extern "C"
 {
     bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-                const char* const* failed_tool_names) TIMEMORY_VISIBILITY("default");
-    void OnUnload() TIMEMORY_VISIBILITY("default");
+                const char* const* failed_tool_names) OMNITRACE_VISIBILITY("default");
+    void OnUnload() OMNITRACE_VISIBILITY("default");
 
     bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                 const char* const* failed_tool_names)

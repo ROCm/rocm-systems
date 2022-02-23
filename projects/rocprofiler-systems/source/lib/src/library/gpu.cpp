@@ -28,7 +28,7 @@
 #    if !defined(TIMEMORY_USE_HIP)
 #        define TIMEMORY_USE_HIP 1
 #    endif
-#    include "timemory/components/hip/backends.hpp"
+#    include <timemory/components/hip/backends.hpp>
 #endif
 
 namespace omnitrace

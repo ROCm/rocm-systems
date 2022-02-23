@@ -22,10 +22,12 @@
 
 #include "omnitrace.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -42,7 +44,6 @@ bool                                       binary_rewrite          = false;
 bool                                       is_attached             = false;
 bool                                       loop_level_instr        = false;
 bool                                       werror                  = false;
-bool                                       stl_func_instr          = false;
 bool                                       use_mpi                 = false;
 bool                                       is_static_exe           = false;
 bool                                       is_driver               = false;
@@ -50,6 +51,7 @@ bool                                       allow_overlapping       = false;
 bool                                       instr_dynamic_callsites = false;
 bool                                       instr_traps             = false;
 bool                                       instr_loop_traps        = false;
+bool                                       explicit_dump_and_exit  = false;
 size_t                                     batch_size              = 50;
 strset_t                                   extra_libs              = {};
 size_t                                     min_address_range       = (1 << 8);  // 256
@@ -67,17 +69,29 @@ std::map<string_t, call_expr_pointer_t>    end_expr                = {};
 const auto                                 npos_v                  = string_t::npos;
 string_t                                   instr_mode              = "trace";
 string_t                                   print_instrumented      = {};
+string_t                                   print_excluded          = {};
 string_t                                   print_available         = {};
 string_t                                   print_overlapping       = {};
+strset_t                                   print_formats           = { "txt", "json" };
 std::string                                modfunc_dump_dir        = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
+
+std::string
+get_absolute_exe_filepath(std::string exe_name, const std::string& env_path = "PATH");
+
+std::string
+get_absolute_lib_filepath(std::string        lib_name,
+                          const std::string& env_path = "LD_LIBRARY_PATH");
+
+bool
+file_exists(const std::string& name);
+
+std::string
+get_realpath(const std::string&);
+
+std::string
+get_cwd();
 }  // namespace
-
-std::string
-get_absolute_exe_filepath(std::string exe_name);
-
-std::string
-get_absolute_lib_filepath(std::string lib_name);
 
 //======================================================================================//
 //
@@ -97,22 +111,22 @@ main(int argc, char** argv)
     _dyn_api_rt_paths.insert(_dyn_api_rt_paths.begin(), _dyn_api_rt_abs);
     for(auto&& itr : _dyn_api_rt_paths)
     {
-        auto file_exists = [](const std::string& _fname) {
+        auto _file_exists = [](const std::string& _fname) {
             struct stat _buffer;
             if(stat(_fname.c_str(), &_buffer) == 0)
                 return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
             return false;
         };
-        if(file_exists(itr))
+        if(_file_exists(itr))
             tim::set_env<string_t>("DYNINSTAPI_RT_LIB", itr, 0);
-        else if(file_exists(TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.so")))
+        else if(_file_exists(TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.so")))
             tim::set_env<string_t>("DYNINSTAPI_RT_LIB",
                                    TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.so"), 0);
-        else if(file_exists(TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.a")))
+        else if(_file_exists(TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.a")))
             tim::set_env<string_t>("DYNINSTAPI_RT_LIB",
                                    TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.a"), 0);
     }
-    verbprintf(0, "[omnitrace][exe] DYNINST_API_RT: %s\n",
+    verbprintf(0, "DYNINST_API_RT: %s\n",
                tim::get_env<string_t>("DYNINSTAPI_RT_LIB", "").c_str());
 
     argv0 = argv[0];
@@ -121,11 +135,18 @@ main(int argc, char** argv)
     address_space_t*      addr_space    = nullptr;
     string_t              mutname       = {};
     string_t              outfile       = {};
-    std::vector<string_t> inputlib      = { "libomnitrace" };
+    std::vector<string_t> inputlib      = { "libomnitrace-dl" };
     std::vector<string_t> libname       = {};
     std::vector<string_t> sharedlibname = {};
     std::vector<string_t> staticlibname = {};
     tim::process::id_t    _pid          = -1;
+
+    fixed_module_functions = {
+        { &available_module_functions, false },
+        { &instrumented_module_functions, false },
+        { &excluded_module_functions, false },
+        { &overlapping_module_functions, false },
+    };
 
     bpatch->setTypeChecking(true);
     bpatch->setSaveFPR(true);
@@ -176,11 +197,12 @@ main(int argc, char** argv)
         }
     }
 
-    auto cmd_string = [](int _ac, char** _av) {
+    auto cmd_string = [](int _ac, char** _av) -> std::string {
+        if(_ac == 0) return std::string{};
         stringstream_t ss;
         for(int i = 0; i < _ac; ++i)
-            ss << _av[i] << " ";
-        return ss.str();
+            ss << " " << _av[i];
+        return ss.str().substr(1);
     };
 
     if(_cmdc > 0 && !mutname.empty())
@@ -207,12 +229,6 @@ main(int argc, char** argv)
                   << "\n\n";
 
     if(_cmdc > 0) cmdv0 = _cmdv[0];
-
-    std::stringstream jump_description;
-    jump_description
-        << "Instrument with function pointers in OMNITRACE_JUMP_LIBRARY (default: "
-        << tim::get_env<string_t>("OMNITRACE_JUMP_LIBRARY", "jump/libomnitrace.so")
-        << ")";
 
     // now can loop through the options.  If the first character is '-', then we know
     // we have an option.  Check to see if it is one of our options and process it. If
@@ -245,13 +261,40 @@ main(int argc, char** argv)
         .max_count(1)
         .action([](parser_t& p) { werror = p.get<bool>("error"); });
     parser
-        .add_argument(
-            { "--print-dir" },
-            "Output directory for diagnostic available/instrumented/overlapping module "
-            "function lists, e.g. {print-dir}/available.txt")
+        .add_argument({ "--simulate" },
+                      "Exit after outputting diagnostic "
+                      "{available,instrumented,excluded,overlapping} module "
+                      "function lists, e.g. available-instr.txt")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) { explicit_dump_and_exit = p.get<bool>("simulate"); });
+    parser
+        .add_argument({ "--print-format" },
+                      "Output format for diagnostic "
+                      "{available,instrumented,excluded,overlapping} module "
+                      "function lists, e.g. {print-dir}/available-instr.txt")
+        .min_count(1)
+        .max_count(3)
+        .dtype("string")
+        .choices({ "xml", "json", "txt" })
+        .action([](parser_t& p) { print_formats = p.get<strset_t>("print-format"); });
+    parser
+        .add_argument({ "--print-dir" },
+                      "Output directory for diagnostic "
+                      "{available,instrumented,excluded,overlapping} module "
+                      "function lists, e.g. {print-dir}/available-instr.txt")
         .count(1)
         .dtype("string")
         .action([](parser_t& p) { modfunc_dump_dir = p.get<std::string>("print-dir"); });
+    parser
+        .add_argument(
+            { "--print-available" },
+            "Print the available entities for instrumentation (functions, modules, or "
+            "module-function pair) to stdout applying regular expressions and exit")
+        .count(1)
+        .choices({ "functions", "modules", "functions+", "pair", "pair+" })
+        .action(
+            [](parser_t& p) { print_available = p.get<std::string>("print-available"); });
     parser
         .add_argument(
             { "--print-instrumented" },
@@ -263,14 +306,15 @@ main(int argc, char** argv)
             print_instrumented = p.get<std::string>("print-instrumented");
         });
     parser
-        .add_argument(
-            { "--print-available" },
-            "Print the available entities for instrumentation (functions, modules, or "
-            "module-function pair) to stdout applying regular expressions and exit")
+        .add_argument({ "--print-excluded" },
+                      "Print the entities for instrumentation (functions, modules, or "
+                      "module-function "
+                      "pair) which are excluded from the instrumentation to stdout after "
+                      "applying regular expressions and exit")
         .count(1)
         .choices({ "functions", "modules", "functions+", "pair", "pair+" })
         .action(
-            [](parser_t& p) { print_available = p.get<std::string>("print-available"); });
+            [](parser_t& p) { print_excluded = p.get<std::string>("print-excluded"); });
     parser
         .add_argument(
             { "--print-overlapping" },
@@ -288,8 +332,14 @@ main(int argc, char** argv)
     parser.add_argument({ "" }, "");
     parser
         .add_argument({ "-o", "--output" },
-                      "Enable generation of a new executable (binary-rewrite)")
-        .count(1)
+                      "Enable generation of a new executable (binary-rewrite). If a "
+                      "filename is not provided, omnitrace will use the basename and "
+                      "output to the cwd, unless the target binary is in the cwd. In the "
+                      "latter case, omnitrace will either use ${PWD}/<basename>.inst "
+                      "(non-libraries) or ${PWD}/instrumented/<basename> (libraries)")
+        .min_count(0)
+        .max_count(1)
+        .dtype("string")
         .action([&outfile](parser_t& p) {
             binary_rewrite = true;
             outfile        = p.get<string_t>("output");
@@ -345,16 +395,7 @@ main(int argc, char** argv)
                       "The primary function to instrument around, e.g. 'main'")
         .count(1)
         .action([](parser_t& p) { main_fname = p.get<string_t>("main-function"); });
-    parser.add_argument({ "-j", "--jump" }, jump_description.str())
-        .dtype("boolean")
-        .max_count(1)
-        .action([&inputlib](parser_t& p) {
-            if(p.get<bool>("jump"))
-            {
-                for(auto& itr : inputlib)
-                    itr += "-jump";
-            }
-        });
+    /*
     parser
         .add_argument({ "-s", "--stubs" }, "Instrument with library stubs for LD_PRELOAD")
         .dtype("boolean")
@@ -366,6 +407,7 @@ main(int argc, char** argv)
                     itr += "-stubs";
             }
         });
+    */
     parser.add_argument({ "--driver" }, "Force main or _init/_fini instrumentation")
         .dtype("boolean")
         .max_count(1)
@@ -379,6 +421,31 @@ main(int argc, char** argv)
             auto _load = p.get<strvec_t>("load");
             for(const auto& itr : _load)
                 extra_libs.insert(itr);
+        });
+    parser
+        .add_argument({ "--load-instr" },
+                      "Load {available,instrumented,excluded,overlapping}-instr JSON or "
+                      "XML file(s) and override what is read from the binary")
+        .dtype("filepath")
+        .max_count(-1)
+        .action([](parser_t& p) {
+            auto                              _load = p.get<strvec_t>("load-instr");
+            std::map<std::string, fmodset_t*> module_function_map = {
+                { "available_module_functions", &available_module_functions },
+                { "instrumented_module_functions", &instrumented_module_functions },
+                { "excluded_module_functions", &excluded_module_functions },
+                { "overlapping_module_functions", &overlapping_module_functions },
+            };
+            for(const auto& itr : _load)
+                load_info(itr, module_function_map, 0);
+            for(const auto& itr : module_function_map)
+            {
+                auto _empty = itr.second->empty();
+                if(!_empty)
+                    verbprintf(0, "Loaded %zu module functions for %s\n",
+                               itr.second->size(), itr.first.c_str());
+                fixed_module_functions.at(itr.second) = !_empty;
+            }
         });
     parser
         .add_argument({ "--init-functions" },
@@ -396,18 +463,22 @@ main(int argc, char** argv)
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[SYMBOL SELECTION OPTIONS]" }, "");
     parser.add_argument({ "" }, "");
-    parser.add_argument({ "-I", "-R", "--function-include" },
-                        "Regex for selecting functions");
-    parser.add_argument({ "-E", "--function-exclude" }, "Regex for excluding functions");
-    parser.add_argument({ "-MI", "-MR", "--module-include" },
-                        "Regex for selecting modules/files/libraries");
+    parser.add_argument({ "-I", "--function-include" },
+                        "Regex(es) for including functions (despite heuristics)");
+    parser.add_argument({ "-E", "--function-exclude" },
+                        "Regex(es) for excluding functions (always applied)");
+    parser.add_argument({ "-R", "--function-restrict" },
+                        "Regex(es) for restricting functions only to those "
+                        "that match the provided regular-expressions");
+    parser.add_argument({ "-MI", "--module-include" },
+                        "Regex(es) for selecting modules/files/libraries "
+                        "(despite heuristics)");
     parser.add_argument({ "-ME", "--module-exclude" },
-                        "Regex for excluding modules/files/libraries");
-    parser
-        .add_argument({ "-S", "--stdlib" },
-                      "Enable instrumentation of C++ standard library functions.")
-        .max_count(1)
-        .action([](parser_t& p) { stl_func_instr = p.get<bool>("stdlib"); });
+                        "Regex(es) for excluding modules/files/libraries "
+                        "(always applied)");
+    parser.add_argument({ "-MR", "--module-restrict" },
+                        "Regex(es) for restricting modules/files/libraries only to those "
+                        "that match the provided regular-expressions");
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[RUNTIME OPTIONS]" }, "");
@@ -479,15 +550,6 @@ main(int argc, char** argv)
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[GRANULARITY OPTIONS]" }, "");
     parser.add_argument({ "" }, "");
-    parser
-        .add_argument({ "--dynamic-callsites" },
-                      "Force instrumentation if a function has dynamic callsites (e.g. "
-                      "function pointers)")
-        .max_count(1)
-        .dtype("boolean")
-        .action([](parser_t& p) {
-            instr_dynamic_callsites = p.get<bool>("dynamic-callsites");
-        });
     parser.add_argument({ "-l", "--instrument-loops" }, "Instrument at the loop level")
         .dtype("boolean")
         .max_count(1)
@@ -510,6 +572,15 @@ main(int argc, char** argv)
         .set_default(min_loop_address_range)
         .action([](parser_t& p) {
             min_loop_address_range = p.get<size_t>("min-address-range-loop");
+        });
+    parser
+        .add_argument({ "--dynamic-callsites" },
+                      "Force instrumentation if a function has dynamic callsites (e.g. "
+                      "function pointers)")
+        .max_count(1)
+        .dtype("boolean")
+        .action([](parser_t& p) {
+            instr_dynamic_callsites = p.get<bool>("dynamic-callsites");
         });
     parser
         .add_argument(
@@ -548,8 +619,10 @@ main(int argc, char** argv)
     parser
         .add_argument(
             { "-b", "--batch-size" },
-            "Dyninst supports batch insertion of multiple points. If one large batch "
-            "insertion fails, this value will be used to create smaller batches")
+            "Dyninst supports batch insertion of multiple points during runtime "
+            "instrumentation. If one large batch "
+            "insertion fails, this value will be used to create smaller batches. Larger "
+            "batches generally decrease the instrumentation time")
         .count(1)
         .dtype("int")
         .action([](parser_t& p) { batch_size = p.get<size_t>("batch-size"); });
@@ -577,6 +650,34 @@ main(int argc, char** argv)
         return -1;
     }
 
+    if(binary_rewrite && outfile.empty())
+    {
+        auto _is_local = (get_realpath(cmdv0) ==
+                          TIMEMORY_JOIN('/', get_cwd(), ::basename(cmdv0.c_str())));
+        auto _cmd      = std::string{ ::basename(cmdv0.c_str()) };
+        if(_cmd.find('.') == std::string::npos)
+        {
+            // there is no extension, assume it is an exe
+            outfile = (_is_local) ? TIMEMORY_JOIN('.', _cmd, "inst") : _cmd;
+        }
+        else if(_cmd.find("lib") == 0 || _cmd.find(".so") != std::string::npos ||
+                _cmd.find(".a") == _cmd.length() - 2)
+        {
+            // if it starts with lib, ends with .a, or contains .so (e.g. libfoo.so,
+            // libfoo.so.2), assume it is a library and retain the name but put it in a
+            // different directory
+            outfile = (_is_local) ? TIMEMORY_JOIN('/', "instrumented", _cmd) : _cmd;
+        }
+        else
+        {
+            outfile = (_is_local) ? TIMEMORY_JOIN('.', _cmd, "inst") : _cmd;
+        }
+        verbprintf(0,
+                   "Binary rewrite was activated via '-o' but no filename was provided. "
+                   "Using: '%s'\n",
+                   outfile.c_str());
+    }
+
     if(modfunc_dump_dir.empty())
     {
         modfunc_dump_dir = tim::get_env<std::string>("OMNITRACE_OUTPUT_PATH", "");
@@ -598,42 +699,41 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
     //
-    //  Helper function for adding regex expressions
-    //
-    auto add_regex = [](auto& regex_array, const string_t& regex_expr) {
-        if(!regex_expr.empty())
-            regex_array.emplace_back(std::regex(regex_expr, regex_opts));
-    };
-
-    add_regex(func_include, tim::get_env<string_t>("OMNITRACE_REGEX_INCLUDE", ""));
-    add_regex(func_exclude, tim::get_env<string_t>("OMNITRACE_REGEX_EXCLUDE", ""));
-
-    if(parser.exists("R"))
     {
-        auto keys = parser.get<strvec_t>("R");
-        for(const auto& itr : keys)
-            add_regex(func_include, itr);
-    }
+        //  Helper function for adding regex expressions
+        auto add_regex = [](auto& regex_array, const string_t& regex_expr) {
+            if(!regex_expr.empty())
+                regex_array.emplace_back(std::regex(regex_expr, regex_opts));
+        };
 
-    if(parser.exists("E"))
-    {
-        auto keys = parser.get<strvec_t>("E");
-        for(const auto& itr : keys)
-            add_regex(func_exclude, itr);
-    }
+        add_regex(func_include, tim::get_env<string_t>("OMNITRACE_REGEX_INCLUDE", ""));
+        add_regex(func_exclude, tim::get_env<string_t>("OMNITRACE_REGEX_EXCLUDE", ""));
+        add_regex(func_restrict, tim::get_env<string_t>("OMNITRACE_REGEX_RESTRICT", ""));
 
-    if(parser.exists("MI"))
-    {
-        auto keys = parser.get<strvec_t>("MI");
-        for(const auto& itr : keys)
-            add_regex(file_include, itr);
-    }
+        add_regex(file_include,
+                  tim::get_env<string_t>("OMNITRACE_REGEX_MODULE_INCLUDE", ""));
+        add_regex(file_exclude,
+                  tim::get_env<string_t>("OMNITRACE_REGEX_MODULE_EXCLUDE", ""));
+        add_regex(file_restrict,
+                  tim::get_env<string_t>("OMNITRACE_REGEX_MODULE_RESTRICT", ""));
 
-    if(parser.exists("ME"))
-    {
-        auto keys = parser.get<strvec_t>("ME");
-        for(const auto& itr : keys)
-            add_regex(file_exclude, itr);
+        //  Helper function for parsing the regex options
+        auto _parse_regex_option = [&parser, &add_regex](const string_t& _option,
+                                                         regexvec_t&     _regex_vec) {
+            if(parser.exists(_option))
+            {
+                auto keys = parser.get<strvec_t>(_option);
+                for(const auto& itr : keys)
+                    add_regex(_regex_vec, itr);
+            }
+        };
+
+        _parse_regex_option("function-include", func_include);
+        _parse_regex_option("function-exclude", func_exclude);
+        _parse_regex_option("function-restrict", func_restrict);
+        _parse_regex_option("module-include", file_include);
+        _parse_regex_option("module-exclude", file_exclude);
+        _parse_regex_option("module-restrict", file_restrict);
     }
 
     //----------------------------------------------------------------------------------//
@@ -756,17 +856,22 @@ main(int argc, char** argv)
     //----------------------------------------------------------------------------------//
     std::set<std::string> module_names;
 
+    static auto _insert_module_function = [](fmodset_t& _module_funcs, auto _v) {
+        if(!fixed_module_functions.at(&_module_funcs)) _module_funcs.emplace(_v);
+    };
+
     auto _add_overlapping = [](module_t* mitr, procedure_t* pitr) {
         if(!pitr->isInstrumentable()) return;
         std::vector<procedure_t*> _overlapping{};
         if(pitr->findOverlapping(_overlapping))
         {
-            overlapping_module_functions.insert(module_function{ mitr, pitr });
+            _insert_module_function(overlapping_module_functions,
+                                    module_function{ mitr, pitr });
             for(auto* oitr : _overlapping)
             {
                 if(!oitr->isInstrumentable()) continue;
-                overlapping_module_functions.insert(
-                    module_function{ oitr->getModule(), oitr });
+                _insert_module_function(overlapping_module_functions,
+                                        module_function{ oitr->getModule(), oitr });
             }
         }
     };
@@ -784,7 +889,7 @@ main(int argc, char** argv)
                     if(!pitr->isInstrumentable()) continue;
                     auto _modfn = module_function{ itr, pitr };
                     module_names.insert(_modfn.module);
-                    available_module_functions.insert(std::move(_modfn));
+                    _insert_module_function(available_module_functions, _modfn);
                     _add_overlapping(itr, pitr);
                 }
             }
@@ -805,7 +910,7 @@ main(int argc, char** argv)
             {
                 auto _modfn = module_function{ mod, itr };
                 module_names.insert(_modfn.module);
-                available_module_functions.insert(std::move(_modfn));
+                _insert_module_function(available_module_functions, _modfn);
                 _add_overlapping(mod, itr);
             }
         }
@@ -848,11 +953,12 @@ main(int argc, char** argv)
     auto _output_prefix = tim::get_env<std::string>("OMNITRACE_OUTPUT_PREFIX", "");
 
     dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
-                            TIMEMORY_JOIN("", _output_prefix, "available-instr.txt")),
-              available_module_functions, 1, werror);
+                            TIMEMORY_JOIN("", _output_prefix, "available-instr")),
+              available_module_functions, 1, werror, "available-instr", print_formats);
     dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
-                            TIMEMORY_JOIN("", _output_prefix, "overlapping-instr.txt")),
-              overlapping_module_functions, 1, werror);
+                            TIMEMORY_JOIN("", _output_prefix, "overlapping-instr")),
+              overlapping_module_functions, 1, werror, "overlapping_module_functions",
+              print_formats);
 
     //----------------------------------------------------------------------------------//
     //
@@ -1231,9 +1337,18 @@ main(int argc, char** argv)
 
     std::string _libname = {};
     for(auto&& itr : sharedlibname)
-        _libname = get_absolute_lib_filepath(itr);
+    {
+        if(_libname.empty()) _libname = get_absolute_lib_filepath(itr, "LD_LIBRARY_PATH");
+        if(_libname.empty()) _libname = get_absolute_lib_filepath(itr, "LIBRARY_PATH");
+    }
+    for(auto&& itr : staticlibname)
+    {
+        if(_libname.empty()) _libname = get_absolute_lib_filepath(itr, "LIBRARY_PATH");
+        if(_libname.empty()) _libname = get_absolute_lib_filepath(itr, "LD_LIBRARY_PATH");
+    }
     if(_libname.empty()) _libname = "libomnitrace.so";
 
+    // prioritize the user environment arguments
     auto env_vars = parser.get<strvec_t>("env");
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MODE", instr_mode));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "HSA_ENABLE_INTERRUPT", "0"));
@@ -1325,11 +1440,33 @@ main(int argc, char** argv)
     //----------------------------------------------------------------------------------//
     std::vector<std::function<void()>> instr_procedure_functions;
     auto instr_procedures = [&](const procedure_vec_t& procedures) {
-        verbprintf(3, "Instrumenting %lu procedures...\n",
+        //
+        auto _report = [](int _lvl, const string_t& _action, const string_t& _type,
+                          const string_t& _reason, const string_t& _name) {
+            static std::map<std::string, strset_t> already_reported{};
+            if(already_reported[_type].count(_name) == 0)
+            {
+                verbprintf(_lvl, "[%s][%s] %s :: '%s'...\n", _type.c_str(),
+                           _action.c_str(), _reason.c_str(), _name.c_str());
+                already_reported[_type].insert(_name);
+            }
+        };
+
+        verbprintf(2, "Instrumenting %lu procedures...\n",
                    (unsigned long) procedures.size());
+
+        auto check_regex_restrictions = [](const std::string& _name,
+                                           const regexvec_t&  _regexes) {
+            // NOLINTNEXTLINE
+            for(auto& itr : _regexes)
+                if(std::regex_search(_name, itr)) return true;
+            return false;
+        };
+
         for(auto* itr : procedures)
         {
             if(!itr) continue;
+
             char modname[FUNCNAMELEN];
             char fname[FUNCNAMELEN];
 
@@ -1340,122 +1477,209 @@ main(int argc, char** argv)
             else
                 itr->getModuleName(modname, FUNCNAMELEN);
 
-            if(itr == main_func && main_func->isInstrumentable())
+            if(!itr->isInstrumentable())
+            {
+                _report(2, "Skipping", "function", "uninstrumentable", fname);
+                continue;
+            }
+
+            if(itr == main_func)
             {
                 hash_ids.emplace_back(std::hash<string_t>()(main_sign.get()),
                                       main_sign.get());
-                auto main_mf = module_function{ modname, fname, main_sign, itr };
-                available_module_functions.insert(main_mf);
-                instrumented_module_functions.insert(main_mf);
+                _insert_module_function(
+                    available_module_functions,
+                    module_function{ modname, fname, main_sign, itr });
+                _insert_module_function(
+                    instrumented_module_functions,
+                    module_function{ modname, fname, main_sign, itr });
                 continue;
             }
-
-            if(!itr->isInstrumentable())
-            {
-                verbprintf(2, "Skipping uninstrumentable function: %s\n", fname);
-                continue;
-            }
-
-            if(std::string{ modname }.find("libdyninst") != std::string::npos) continue;
-
-            if(module_constraint(modname)) continue;
-            if(!instrument_module(modname)) continue;
 
             auto name = get_func_file_line_info(mod, itr);
 
+            if(strlen(modname) == 0)
+            {
+                _report(3, "Skipping", "module", "empty name", modname);
+                continue;
+            }
+
             if(name.get().empty())
             {
-                verbprintf(2, "Skipping function [empty name]: %s\n", fname);
+                _report(3, "Skipping", "function", "empty name", fname);
                 continue;
             }
 
-            if(routine_constraint(name.m_name.c_str())) continue;
-            if(!instrument_entity(name.m_name)) continue;
+            // apply module and function restrictions
+            auto _force_inc = false;
 
-            if(is_static_exe && has_debug_info && string_t{ fname } == "_fini" &&
-               string_t{ modname } == "DEFAULT_MODULE")
+            //--------------------------------------------------------------------------//
+            //
+            //              RESTRICT REGEXES
+            //
+            //--------------------------------------------------------------------------//
+            if(!file_restrict.empty())
             {
-                verbprintf(2, "Skipping function [DEFAULT_MODULE]: %s\n", fname);
-                continue;
+                if(check_regex_restrictions(modname, file_restrict))
+                {
+                    _report(1, "Forcing", "module", "module-restrict-regex", modname);
+                    _force_inc = true;
+                }
+                else
+                {
+                    _report(2, "Skipping", "module", "module-restrict-regex", modname);
+                    continue;
+                }
             }
 
-            _add_overlapping(mod, itr);
-
-            if(!allow_overlapping &&
-               overlapping_module_functions.find(module_function{ mod, itr }) !=
-                   overlapping_module_functions.end())
+            if(!func_restrict.empty())
             {
-                verbprintf(2, "Skipping function [overlapping]: %s / %s\n",
-                           name.m_name.c_str(), name.get().c_str());
-                continue;
+                if(check_regex_restrictions(name.m_name, func_restrict))
+                {
+                    _report(1, "Forcing", "function", "function-restrict-regex",
+                            name.m_name);
+                    _force_inc = true;
+                }
+                else if(check_regex_restrictions(name.get(), func_restrict))
+                {
+                    _report(1, "Forcing", "function", "function-restrict-regex",
+                            name.get());
+                    _force_inc = true;
+                }
+                else
+                {
+                    _report(2, "Skipping", "function", "function-restrict-regex",
+                            name.get());
+                    continue;
+                }
             }
 
-            // directly try to get loop entry points
-            const std::vector<point_t*>* _loop_entries =
-                itr->findPoint(BPatch_locLoopEntry);
+            //--------------------------------------------------------------------------//
+            //
+            //              INCLUDE REGEXES
+            //
+            //--------------------------------------------------------------------------//
+            if(!file_include.empty())
+            {
+                if(check_regex_restrictions(modname, file_include))
+                {
+                    _report(1, "Forcing", "module", "module-include-regex", modname);
+                    _force_inc = true;
+                }
+            }
+
+            if(!func_include.empty())
+            {
+                if(check_regex_restrictions(name.m_name, func_include))
+                {
+                    _report(1, "Forcing", "function", "function-include-regex",
+                            name.m_name);
+                    _force_inc = true;
+                }
+                else if(check_regex_restrictions(name.get(), func_include))
+                {
+                    _report(1, "Forcing", "function", "function-include-regex",
+                            name.get());
+                    _force_inc = true;
+                }
+            }
+
+            //--------------------------------------------------------------------------//
+            //
+            //              EXCLUDE REGEXES
+            //
+            //--------------------------------------------------------------------------//
+            if(!file_exclude.empty())
+            {
+                if(check_regex_restrictions(modname, file_exclude))
+                {
+                    _report(1, "Skipping", "module", "module-exclude-regex", modname);
+                    continue;
+                }
+            }
+
+            if(!func_exclude.empty())
+            {
+                if(check_regex_restrictions(name.m_name, func_exclude))
+                {
+                    _report(1, "Skipping", "function", "function-exclude-regex",
+                            name.m_name);
+                    continue;
+                }
+                else if(check_regex_restrictions(name.get(), func_exclude))
+                {
+                    _report(1, "Skipping", "function", "function-exclude-regex",
+                            name.get());
+                    continue;
+                }
+            }
 
             // try to get loops via the control flow graph
             flow_graph_t*    cfg = itr->getCFG();
             basic_loop_vec_t basic_loop{};
             if(cfg) cfg->getOuterLoops(basic_loop);
 
-            // if the function has dynamic callsites and user specified instrumenting
-            // dynamic callsites, force the instrumentation
-            bool _force_instr = false;
-            if(cfg && instr_dynamic_callsites)
-                _force_instr = cfg->containsDynamicCallsites();
+            if(!_force_inc)
+            {
+                if(module_constraint(modname)) continue;
+                if(!instrument_module(modname)) continue;
 
-            auto _address_range = module_function{ mod, itr }.address_range;
-            auto _num_loop_entries =
-                (_loop_entries)
-                    ? std::max<size_t>(_loop_entries->size(), basic_loop.size())
-                    : basic_loop.size();
-            auto _has_loop_entries = (_num_loop_entries > 0);
-            auto _skip_range =
-                (_has_loop_entries) ? false : (_address_range < min_address_range);
-            auto _skip_loop_range =
-                (_has_loop_entries) ? (_address_range < min_loop_address_range) : false;
+                if(routine_constraint(name.m_name.c_str())) continue;
+                if(!instrument_entity(name.m_name)) continue;
 
-            if(_force_instr && _skip_range)
-            {
-                verbprintf(
-                    1,
-                    "Instrumenting function [dynamic-callsite]: %s / %s despite not "
-                    "satisfy minimum address range (address range = %lu, minimum "
-                    "= %lu) because contains dynamic callsites\n",
-                    name.m_name.c_str(), name.get().c_str(),
-                    (unsigned long) _address_range, (unsigned long) min_address_range);
-            }
-            else if(_force_instr && _skip_loop_range)
-            {
-                verbprintf(
-                    1,
-                    "Instrumenting function [dynamic-callsite]: %s / %s despite not "
-                    "satisfy minimum loop address range (address range = %lu, minimum "
-                    "= %lu) because contains dynamic callsites\n",
-                    name.m_name.c_str(), name.get().c_str(),
-                    (unsigned long) _address_range,
-                    (unsigned long) min_loop_address_range);
-            }
-            else if(_skip_range)
-            {
-                verbprintf(1,
-                           "Skipping function [min-address-range]: %s / %s (address "
-                           "range = %lu, minimum = %lu)\n",
-                           name.m_name.c_str(), name.get().c_str(),
-                           (unsigned long) _address_range,
-                           (unsigned long) min_address_range);
-                continue;
-            }
-            else if(_skip_loop_range)
-            {
-                verbprintf(1,
-                           "Skipping function [min-loop-address-range]: %s / %s (address "
-                           "range = %lu, minimum = %lu)\n",
-                           name.m_name.c_str(), name.get().c_str(),
-                           (unsigned long) _address_range,
-                           (unsigned long) min_loop_address_range);
-                continue;
+                if(is_static_exe && has_debug_info && string_t{ fname } == "_fini" &&
+                   string_t{ modname } == "DEFAULT_MODULE")
+                {
+                    _report(2, "Skipping", "function", "DEFAULT_MODULE", fname);
+                    continue;
+                }
+
+                _add_overlapping(mod, itr);
+
+                if(!allow_overlapping &&
+                   overlapping_module_functions.find(module_function{ mod, itr }) !=
+                       overlapping_module_functions.end())
+                {
+                    _report(2, "Skipping", "function", "overlapping", fname);
+                    continue;
+                }
+
+                // directly try to get loop entry points
+                const std::vector<point_t*>* _loop_entries =
+                    itr->findPoint(BPatch_locLoopEntry);
+
+                // if the function has dynamic callsites and user specified instrumenting
+                // dynamic callsites, force the instrumentation
+                bool _force_instr = false;
+                if(cfg && instr_dynamic_callsites)
+                    _force_instr = cfg->containsDynamicCallsites();
+
+                auto _address_range = module_function{ mod, itr }.address_range;
+                auto _num_loop_entries =
+                    (_loop_entries)
+                        ? std::max<size_t>(_loop_entries->size(), basic_loop.size())
+                        : basic_loop.size();
+                auto _has_loop_entries = (_num_loop_entries > 0);
+                auto _skip_range =
+                    (_has_loop_entries) ? false : (_address_range < min_address_range);
+                auto _skip_loop_range = (_has_loop_entries)
+                                            ? (_address_range < min_loop_address_range)
+                                            : false;
+
+                if(_force_instr && (_skip_range || _skip_loop_range))
+                {
+                    _report(1, "Forcing", "function", "dynamic-callsite", fname);
+                }
+                else if(_skip_range)
+                {
+                    _report(1, "Skipping", "function", "min-address-range", fname);
+                    continue;
+                }
+                else if(_skip_loop_range)
+                {
+                    _report(1, "Skipping", "function", "min-address-range-loop", fname);
+                    continue;
+                }
             }
 
             bool _entr_success =
@@ -1464,30 +1688,39 @@ main(int argc, char** argv)
                 query_instr(itr, BPatch_exit, nullptr, nullptr, instr_traps);
             if(!_entr_success && !_exit_success)
             {
-                verbprintf(2,
-                           "Skipping function [insert-instr]: %s / %s. Either no entry "
-                           "instrumentation points were found or instrumentation "
-                           "required traps and instrumenting via traps were disabled.\n",
-                           name.m_name.c_str(), name.get().c_str());
+                _report(2, "Skipping", "function",
+                        "Either no entry "
+                        "instrumentation points were found or instrumentation "
+                        "required traps and instrumenting via traps were disabled.",
+                        fname);
                 continue;
             }
             else if(_entr_success && !_exit_success)
             {
-                verbprintf(2,
-                           "Skipping function [insert-instr]: %s / %s. Function can be "
-                           "only partially instrumented: entry = %s, exit = %s\n",
-                           name.m_name.c_str(), name.get().c_str(),
-                           _entr_success ? "y" : "n", _exit_success ? "y" : "n");
+                std::stringstream _ss{};
+                _ss << "Function can be only partially instrument (entry = "
+                    << std::boolalpha << _entr_success << ", exit = " << _exit_success
+                    << ")";
+                _report(2, "Skipping", "function", _ss.str(), fname);
                 continue;
             }
 
             hash_ids.emplace_back(std::hash<string_t>()(name.get()), name.get());
-            available_module_functions.insert(module_function{ mod, itr });
-            instrumented_module_functions.insert(module_function{ mod, itr });
+            _insert_module_function(available_module_functions,
+                                    module_function{ mod, itr });
+            _insert_module_function(instrumented_module_functions,
+                                    module_function{ mod, itr });
 
             auto _f = [=]() {
-                verbprintf(1, "Instrumenting |> [ %s ] -> [ %s ]\n", modname,
-                           name.m_name.c_str());
+                static std::set<size_t> _reported{};
+                auto                    _hashv =
+                    std::hash<std::string>{}(TIMEMORY_JOIN('|', modname, name.m_name));
+                if(!_reported.emplace(_hashv).second)
+                {
+                    verbprintf(1, "Instrumenting |> [ %s ] -> [ %s ]\n", modname,
+                               name.m_name.c_str());
+                }
+
                 auto _name       = name.get();
                 auto _hash       = std::hash<string_t>()(_name);
                 auto _trace_entr = (entr_hash) ? omnitrace_call_expr(_hash)
@@ -1507,7 +1740,7 @@ main(int argc, char** argv)
 
             if(loop_level_instr)
             {
-                verbprintf(1, "Instrumenting at the loop level: %s\n",
+                verbprintf(3, "Instrumenting at the loop level: %s\n",
                            name.m_name.c_str());
 
                 for(auto* litr : basic_loop)
@@ -1518,22 +1751,21 @@ main(int argc, char** argv)
                         query_instr(itr, BPatch_exit, cfg, litr, instr_loop_traps);
                     if(!_lentr_success && !_lexit_success)
                     {
-                        verbprintf(
-                            2,
-                            "Skipping function [insert-instr-loop]: %s / %s. Either no "
-                            "entry instrumentation points were found or instrumentation "
-                            "required traps and instrumenting via traps were disabled.\n",
-                            name.m_name.c_str(), name.get().c_str());
+                        _report(
+                            2, "Skipping", "function-loop",
+                            "Either no entry instrumentation points were found or "
+                            "instrumentation "
+                            "required traps and instrumenting via traps were disabled.",
+                            fname);
                         continue;
                     }
                     else if(_lentr_success && !_lexit_success)
                     {
-                        verbprintf(
-                            2,
-                            "Skipping function [insert-instr-loop]: %s / %s. Function "
-                            "can be only partially instrumented: entry = %s, exit = %s\n",
-                            name.m_name.c_str(), name.get().c_str(),
-                            _lentr_success ? "y" : "n", _lexit_success ? "y" : "n");
+                        std::stringstream _ss{};
+                        _ss << "Function can be only partially instrument (entry = "
+                            << std::boolalpha << _lentr_success
+                            << ", exit = " << _lexit_success << ")";
+                        _report(2, "Skipping", "function-loop", _ss.str(), fname);
                         continue;
                     }
 
@@ -1542,6 +1774,14 @@ main(int argc, char** argv)
                     auto _lhash = std::hash<string_t>()(_lname);
                     hash_ids.emplace_back(_lhash, _lname);
                     auto _lf = [=]() {
+                        static std::set<size_t> _reported{};
+                        auto                    _hashv = std::hash<std::string>{}(
+                            TIMEMORY_JOIN('|', modname, name.m_name));
+                        if(!_reported.emplace(_hashv).second)
+                        {
+                            verbprintf(1, "Loop Instrumenting |> [ %s ] -> [ %s ]\n",
+                                       modname, name.m_name.c_str());
+                        }
                         auto _ltrace_entr = (entr_hash)
                                                 ? omnitrace_call_expr(_lhash)
                                                 : omnitrace_call_expr(_lname.c_str());
@@ -1613,7 +1853,7 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    if(app_thread)
+    if(app_thread && is_attached)
     {
         assert(app_thread != nullptr);
         verbprintf(1, "Executing initial snippets...\n");
@@ -1622,10 +1862,12 @@ main(int argc, char** argv)
     }
     else
     {
-        verbprintf(1, "Adding main entry snippets...\n");
         if(main_entr_points)
+        {
+            verbprintf(1, "Adding main entry snippets...\n");
             addr_space->insertSnippet(BPatch_sequence(init_names), *main_entr_points,
                                       BPatch_callBefore, BPatch_firstSnippet);
+        }
     }
 
     if(main_exit_points)
@@ -1706,20 +1948,34 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
+    for(const auto& itr : available_module_functions)
+    {
+        _insert_module_function(excluded_module_functions, itr);
+    }
+
     bool _dump_and_exit = ((print_available.length() + print_instrumented.length() +
-                            print_overlapping.length()) > 0);
+                            print_overlapping.length() + print_excluded.length()) > 0) ||
+                          explicit_dump_and_exit;
 
     dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
-                            TIMEMORY_JOIN("", _output_prefix, "available-instr.txt")),
-              available_module_functions, 0, werror);
+                            TIMEMORY_JOIN("", _output_prefix, "available-instr")),
+              available_module_functions, 0, werror, "available_module_functions",
+              print_formats);
     dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
-                            TIMEMORY_JOIN("", _output_prefix, "instrumented-instr.txt")),
-              instrumented_module_functions, 0, werror);
+                            TIMEMORY_JOIN("", _output_prefix, "instrumented-instr")),
+              instrumented_module_functions, 0, werror, "instrumented_module_functions",
+              print_formats);
     dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
-                            TIMEMORY_JOIN("", _output_prefix, "overlapping-instr.txt")),
-              overlapping_module_functions, 0, werror);
+                            TIMEMORY_JOIN("", _output_prefix, "excluded-instr")),
+              excluded_module_functions, 0, werror, "excluded_module_functions",
+              print_formats);
+    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
+                            TIMEMORY_JOIN("", _output_prefix, "overlapping-instr")),
+              overlapping_module_functions, 0, werror, "overlapping_module_functions",
+              print_formats);
 
-    auto _dump_info = [](const string_t& _mode, const fmodset_t& _modset) {
+    auto _dump_info = [](const std::string& _label, const string_t& _mode,
+                         const fmodset_t& _modset) {
         std::map<std::string, std::vector<std::string>>                  _data{};
         std::unordered_map<std::string, std::unordered_set<std::string>> _dups{};
         auto _insert = [&](const std::string& _m, const std::string& _v) {
@@ -1732,17 +1988,19 @@ main(int argc, char** argv)
         if(_mode == "modules")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module, itr.module);
+                _insert(itr.module, TIMEMORY_JOIN("", "[", itr.module, "]"));
         }
         else if(_mode == "functions")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module, itr.function);
+                _insert(itr.module, TIMEMORY_JOIN("", "[", itr.function, "][",
+                                                  itr.address_range, "]"));
         }
         else if(_mode == "functions+")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module, itr.signature.get());
+                _insert(itr.module, TIMEMORY_JOIN("", "[", itr.signature.get(), "][",
+                                                  itr.address_range, "]"));
         }
         else if(_mode == "pair")
         {
@@ -1750,8 +2008,8 @@ main(int argc, char** argv)
             {
                 std::stringstream _ss{};
                 _ss << std::boolalpha;
-                _ss << "[" << itr.module << "] --> [ " << itr.address_range << " ]["
-                    << itr.function << "]";
+                _ss << "" << itr.module << "] --> [" << itr.function << "]["
+                    << itr.address_range << "]";
                 _insert(itr.module, _ss.str());
             }
         }
@@ -1761,8 +2019,8 @@ main(int argc, char** argv)
             {
                 std::stringstream _ss{};
                 _ss << std::boolalpha;
-                _ss << "[" << itr.module << "] --> [ " << itr.address_range << " ]["
-                    << itr.signature.get() << "]";
+                _ss << "[" << itr.module << "] --> [" << itr.signature.get() << "]["
+                    << itr.address_range << "]";
                 _insert(itr.module, _ss.str());
             }
         }
@@ -1772,19 +2030,24 @@ main(int argc, char** argv)
         }
         for(auto& mitr : _data)
         {
-            if(_mode != "modules") std::cout << "\n" << mitr.first << ":\n";
+            if(_mode != "modules" && _mode != "pair" && _mode != "pair+")
+                std::cout << "\n[" << _label << "] " << mitr.first << ":\n";
+            std::sort(mitr.second.begin(), mitr.second.end());
             for(auto& itr : mitr.second)
             {
-                std::cout << "    " << itr << "\n";
+                std::cout << "[" << _label << "]    " << itr << "\n";
             }
         }
     };
 
-    if(!print_available.empty()) _dump_info(print_available, available_module_functions);
+    if(!print_available.empty())
+        _dump_info("available", print_available, available_module_functions);
     if(!print_instrumented.empty())
-        _dump_info(print_instrumented, instrumented_module_functions);
+        _dump_info("instrumented", print_instrumented, instrumented_module_functions);
+    if(!print_excluded.empty())
+        _dump_info("excluded", print_excluded, excluded_module_functions);
     if(!print_overlapping.empty())
-        _dump_info(print_overlapping, overlapping_module_functions);
+        _dump_info("overlapping", print_overlapping, overlapping_module_functions);
 
     if(_dump_and_exit) exit(EXIT_SUCCESS);
 
@@ -1809,25 +2072,23 @@ main(int argc, char** argv)
         code         = (success) ? EXIT_SUCCESS : EXIT_FAILURE;
         if(success)
         {
+            verbprintf(0, "\n");
             if(outfile.find('/') != 0)
             {
-                char  cwd[FUNCNAMELEN];
-                auto* ret = getcwd(cwd, FUNCNAMELEN);
-                consume_parameters(ret);
-                printf("\nThe instrumented executable image is stored in '%s/%s'\n", cwd,
-                       outfile.c_str());
+                verbprintf(0, "The instrumented executable image is stored in '%s/%s'\n",
+                           get_cwd().c_str(), outfile.c_str());
             }
             else
-                printf("\nThe instrumented executable image is stored in '%s'\n",
-                       outfile.c_str());
+            {
+                verbprintf(0, "The instrumented executable image is stored in '%s'\n",
+                           outfile.c_str());
+            }
         }
 
         if(main_func)
         {
-            printf("[omnitrace][exe] Getting linked libraries for %s...\n",
-                   cmdv0.c_str());
-            printf("[omnitrace][exe] Consider instrumenting the relevant "
-                   "libraries...\n\n");
+            verbprintf(0, "Getting linked libraries for %s...\n", cmdv0.c_str());
+            verbprintf(0, "Consider instrumenting the relevant libraries...\n\n");
 
             using TIMEMORY_PIPE = tim::popen::TIMEMORY_PIPE;
 
@@ -1852,13 +2113,12 @@ main(int argc, char** argv)
 
         if(!app_thread->isTerminated())
         {
-            app_thread->detach(true);
-            pid_t cpid = app_thread->getPid();
-            pid_t w;
+            pid_t cpid   = app_thread->getPid();
             int   status = 0;
+            app_thread->detach(true);
             do
             {
-                w = waitpid(cpid, &status, WUNTRACED);
+                pid_t w = waitpid(cpid, &status, WUNTRACED);
                 if(w == -1)
                 {
                     perror("waitpid");
@@ -1927,97 +2187,63 @@ instrument_module(const string_t& file_name)
         }
     };
 
-    auto is_include = [&](bool _if_empty) {
-        if(file_include.empty()) return _if_empty;
-        // NOLINTNEXTLINE(readability-use-anyofallof)
-        for(auto& itr : file_include)
-        {
-            if(std::regex_search(file_name, itr)) return true;
-        }
-        return false;
+    static std::regex ext_regex{ "\\.(s|S)$", regex_opts };
+    static std::regex sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts };
+    static std::regex sys_build_regex{ "^(\\.\\./sysdeps/|/build/)", regex_opts };
+    static std::regex dyninst_regex{ "(dyninst|DYNINST|(^|/)RT[[:graph:]]+\\.c$)",
+                                     regex_opts };
+    static std::regex dependlib_regex{ "^(lib|)(omnitrace|pthread|caliper|gotcha|papi|"
+                                       "cupti|TAU|likwid|pfm|nvperf|unwind)",
+                                       regex_opts };
+    static std::regex core_cmod_regex{
+        "^(malloc|(f|)lock|sig|sem)[a-z_]+(|64|_r|_l)\\.c$"
     };
-
-    auto is_exclude = [&]() {
-        // NOLINTNEXTLINE(readability-use-anyofallof)
-        for(auto& itr : file_exclude)
-        {
-            if(std::regex_search(file_name, itr)) return true;
-        }
-        return false;
+    static std::regex core_lib_regex{
+        "^(lib|)(c|z|rt|dl|dw|util|zstd|elf|pthread|open[\\-]rte|open[\\-]pal|"
+        "gcc_s|tcmalloc|profiler|tbbmalloc|tbbmalloc_proxy|event_pthreads|ltdl|"
+        "stdc\\+\\+|malloc|selinux|pcre[0-9]+)(-|\\.)",
+        regex_opts
     };
+    static std::regex prefix_regex{ "^(_|\\.[a-zA-Z0-9])", regex_opts };
 
-    auto _user_include = is_include(false);
-    auto _user_exclude = is_exclude();
-
-    if(_user_include && !_user_exclude)
-        return (_report("Including", "user-regex", 2), true);
-
-    string_t          ext_str = "\\.(s|S)$";
-    static std::regex ext_regex(ext_str, regex_opts);
-    static std::regex sys_regex("^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts);
-    static std::regex userlib_regex(
-        "^(lib|)(omnitrace|caliper|gotcha|papi|cupti|TAU|likwid|dyninst|pfm|nvtx|upcxx|"
-        "nvperf|hsa|amdhip64|pthread|sem_|malloc|RT[A-Za-z_0-9\\-]+\\.c$|\\.\\./sysdeps/"
-        "|/build/)",
-        regex_opts);
-    static std::regex corelib_regex(
-        "^lib(c|z|rt|dl|dw|util|zstd|elf|pthread|open[\\-]rte|open[\\-]pal|"
-        "hwloc|numa|event|udev|dyninstAPI_RT|gcc_s|tcmalloc|profiler|tbbmalloc|"
-        "tbbmalloc_proxy|event_pthreads|ltdl)(-|\\.)",
-        regex_opts);
-    // these are all due to TAU
-    static std::regex prefix_regex(
-        "^(_|\\.[a-zA-Z0-9]|RT|Tau|Profiler|Rts|Papi|Py|Comp_xl\\.cpp|Comp_gnu\\.cpp|"
-        "UserEvent\\.cpp|FunctionInfo\\.cpp|PthreadLayer\\.cpp|"
-        "Comp_intel[0-9]\\.cpp|Tracer\\.cpp)",
-        regex_opts);
-    static std::regex suffix_regex(
-        "(printf|gettext|^sig[a-z]+|^exit|^setenv|on_exit|quick_exit|_crypt|^str[a-z_]+|"
-        "mmap[0-9]+|^err|getu[a-z]+|^call_once|^sendto|^timer_[a-z]+|^read|^close|^recv|^"
-        "lseek[0-9]+|^open[a-z0-9]+|^nlist|^fclrexcpt|^conj[a-z0-9]*|^cimag[a-"
-        "z0-9]*|^creal[a-z0-9]*|^cabs[a-z0-9]*|^wmem[a-z_]+|^mem[a-z_]+|^asctime|time|"
-        "timeofday|timespec_get|locale|^abort|scanf|tmpfile|getline|fseek|putc|rewind|"
-        "vscanf|memmove|uid|tsz|gid|cvt|cvt_r|^error|_r|[a-z]64|^f[a-z]+|^makecontext|^"
-        "basename|^wcp[a-z]+|[a-z]+dir|^mb[a-z]+|^dir[a-z]+|euid[a-z]+|^c[36][24][a-z]+|^"
-        "set[a-z_]+|^get[a-z_]+|^shm[a-z]+|^wc[a-z_]+|brk|^write[a-z]+|RTcommon|"
-        "RTfreebsd|RTheap|RTheap-freebsd|RTheap-linux|RTheap-win|RTlinux|RTmemEmulator|"
-        "RTposix|RTsignal|RTstatic_ctors_dtors-aarch64|RTstatic_ctors_dtors_begin|"
-        "RTstatic_ctors_dtors_end|RTstatic_ctors_dtors-ppc32|RTstatic_ctors_dtors-ppc64|"
-        "RTstatic_ctors_dtors-x86|RTthread-aarch64|RTthread|RTthread-powerpc|RTthread-"
-        "x86-64|RTthread-x86|RTwinnt|unwind)\\.c$",
-        regex_opts);
-
+    // file extensions that should not be instrumented
     if(std::regex_search(file_name, ext_regex))
     {
         return (_report("Excluding", "file extension", 3), false);
     }
 
-    if(std::regex_search(file_name, sys_regex))
+    // system modules that should not be instrumented (wastes time)
+    if(std::regex_search(file_name, sys_regex) ||
+       std::regex_search(file_name, sys_build_regex))
     {
-        return (_report("Excluding", "system library", 3), false);
+        return (_report("Excluding", "system module", 3), false);
     }
 
-    if(std::regex_search(file_name, corelib_regex))
+    // dyninst modules that must not be instrumented
+    if(std::regex_search(file_name, dyninst_regex))
     {
-        return (_report("Excluding", "core library", 3), false);
+        return (_report("Excluding", "dyninst module", 3), false);
     }
 
-    if(std::regex_search(file_name, userlib_regex))
+    // modules used by omnitrace and dependent libraries
+    if(std::regex_search(file_name, core_lib_regex) ||
+       std::regex_search(file_name, core_cmod_regex))
     {
-        return (_report("Excluding", "instrumentation", 3), false);
+        return (_report("Excluding", "core module", 3), false);
     }
 
+    // modules used by omnitrace and dependent libraries
+    if(std::regex_search(file_name, dependlib_regex))
+    {
+        return (_report("Excluding", "dependency module", 3), false);
+    }
+
+    // known set of modules whose starting sequence of characters suggest it should not be
+    // instrumented (wastes time)
     if(std::regex_search(file_name, prefix_regex))
     {
         return (_report("Excluding", "prefix match", 3), false);
     }
-
-    if(std::regex_search(file_name, suffix_regex))
-    {
-        return (_report("Excluding", "suffix match", 3), false);
-    }
-
-    if(_user_exclude) return (_report("Excluding", "user-regex", 2), false);
 
     _report("Including", "no constraint", 2);
 
@@ -2030,48 +2256,25 @@ extern const strset_t exclude_function_names;
 bool
 instrument_entity(const string_t& function_name)
 {
-    auto is_include = [&](bool _if_empty) {
-        if(func_include.empty()) return _if_empty;
-        // NOLINTNEXTLINE(readability-use-anyofallof)
-        for(auto& itr : func_include)
+    auto _report = [&function_name](const string_t& _action, const string_t& _reason,
+                                    int _lvl) {
+        static strset_t already_reported{};
+        if(already_reported.count(function_name) == 0)
         {
-            if(std::regex_search(function_name, itr)) return true;
+            verbprintf(_lvl, "%s function [%s] : '%s'...\n", _action.c_str(),
+                       _reason.c_str(), function_name.c_str());
+            already_reported.insert(function_name);
         }
-        return false;
     };
-
-    auto is_exclude = [&]() {
-        // NOLINTNEXTLINE(readability-use-anyofallof)
-        for(auto& itr : func_exclude)
-        {
-            if(std::regex_search(function_name, itr))
-            {
-                verbprintf(2, "Excluding function [user-regex] : '%s'...\n",
-                           function_name.c_str());
-                return true;
-            }
-        }
-        return false;
-    };
-
-    auto _user_include = is_include(false) && !is_exclude();
-
-    if(_user_include)
-    {
-        verbprintf(2, "Including function [user-regex] : '%s'...\n",
-                   function_name.c_str());
-        return true;
-    }
 
     static std::regex exclude(
-        "(omnitrace|tim::|cereal|N3tim|MPI_Init|MPI_Finalize|::__[A-Za-z]|"
+        "(omnitrace|tim::|N3tim|MPI_Init|MPI_Finalize|::__[A-Za-z]|"
         "dyninst|tm_clones|malloc$|calloc$|free$|realloc$|std::addressof)",
         regex_opts);
     static std::regex exclude_cxx("(std::_Sp_counted_base|std::use_facet)", regex_opts);
     static std::regex leading(
         "^(_|\\.|frame_dummy|\\(|targ|new|delete|operator new|operator delete|"
-        "std::allocat|nvtx|gcov|main\\.cold|TAU|tau|Tau|dyn|RT|"
-        "sys|pthread|posix|clone|"
+        "std::allocat|nvtx|gcov|TAU|tau|Tau|dyn|RT|sys|pthread|posix|clone|"
         "virtual thunk|non-virtual thunk|transaction clone|"
         "RtsLayer|DYNINST|PthreadLayer|threaded_func|PMPI|"
         "Kokkos::Impl::|Kokkos::Experimental::Impl::|Kokkos::impl_|"
@@ -2079,60 +2282,39 @@ instrument_entity(const string_t& function_name)
         regex_opts);
     static std::regex trailing("(\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$",
                                regex_opts);
-    static std::regex stlfunc("^std::", regex_opts);
     static strset_t   whole = get_whole_function_names();
 
-    if(!stl_func_instr && std::regex_search(function_name, stlfunc))
+    // don't instrument the functions when key is found anywhere in function name
+    if(std::regex_search(function_name, exclude) ||
+       std::regex_search(function_name, exclude_cxx))
     {
-        verbprintf(3, "Excluding function [stl] : '%s'...\n", function_name.c_str());
+        _report("critical", function_name, 3);
         return false;
     }
 
-    // don't instrument the functions when key is found anywhere in function name
-    if(std::regex_search(function_name, exclude))
+    if(whole.count(function_name) > 0)
     {
-        verbprintf(3, "Excluding function [critical, any match] : '%s'...\n",
-                   function_name.c_str());
-        return false;
-    }
-
-    // don't instrument the functions when key is found anywhere in function name
-    if(std::regex_search(function_name, exclude_cxx))
-    {
-        verbprintf(3, "Excluding function [critical_cxx, any match] : '%s'...\n",
-                   function_name.c_str());
+        _report("critical", function_name, 3);
         return false;
     }
 
     // don't instrument the functions when key is found at the start of the function name
     if(std::regex_search(function_name, leading))
     {
-        verbprintf(3, "Excluding function [critical, leading match] : '%s'...\n",
-                   function_name.c_str());
+        _report("recommended", function_name, 3);
         return false;
     }
 
     // don't instrument the functions when key is found at the end of the function name
     if(std::regex_search(function_name, trailing))
     {
-        verbprintf(3, "Excluding function [critical, trailing match] : '%s'...\n",
-                   function_name.c_str());
+        _report("recommended", function_name, 3);
         return false;
     }
 
-    if(whole.count(function_name) > 0)
-    {
-        verbprintf(3, "Excluding function [critical, whole match] : '%s'...\n",
-                   function_name.c_str());
-        return false;
-    }
+    _report("Including function [no constraint] : '%s'...\n", function_name, 3);
 
-    bool use = is_include(true) && !is_exclude();
-    if(use)
-        verbprintf(2, "Including function [no constraint] : '%s'...\n",
-                   function_name.c_str());
-
-    return use;
+    return true;
 }
 
 //======================================================================================//
@@ -2302,25 +2484,22 @@ routine_constraint(const char* fname)
     }
 }
 
+namespace
+{
 //======================================================================================//
 //
 std::string
-get_absolute_exe_filepath(std::string exe_name)
+get_absolute_exe_filepath(std::string exe_name, const std::string& env_path)
 {
-    auto file_exists = [](const std::string& name) {
-        struct stat buffer;
-        return (stat(name.c_str(), &buffer) == 0);
-    };
-
     if(!exe_name.empty() && !file_exists(exe_name))
     {
         auto _exe_orig = exe_name;
-        auto _paths    = tim::delimit(tim::get_env<std::string>("PATH", ""), ":");
+        auto _paths    = tim::delimit(tim::get_env<std::string>(env_path, ""), ":");
         for(auto& pitr : _paths)
         {
             if(file_exists(TIMEMORY_JOIN('/', pitr, exe_name)))
             {
-                exe_name = TIMEMORY_JOIN('/', pitr, exe_name);
+                exe_name = get_realpath(TIMEMORY_JOIN('/', pitr, exe_name));
                 verbprintf(0, "[omnitrace][exe] Resolved '%s' to '%s'...\n",
                            _exe_orig.c_str(), exe_name.c_str());
                 break;
@@ -2333,30 +2512,30 @@ get_absolute_exe_filepath(std::string exe_name)
                        exe_name.c_str());
         }
     }
+    else if(!exe_name.empty())
+    {
+        return get_realpath(exe_name);
+    }
+
     return exe_name;
 }
 
 //======================================================================================//
 //
 std::string
-get_absolute_lib_filepath(std::string lib_name)
+get_absolute_lib_filepath(std::string lib_name, const std::string& env_path)
 {
-    auto file_exists = [](const std::string& name) {
-        struct stat buffer;
-        return (stat(name.c_str(), &buffer) == 0);
-    };
-
     if(!lib_name.empty() && (!file_exists(lib_name) ||
                              std::regex_match(lib_name, std::regex("^[A-Za-z0-9].*"))))
     {
         auto _lib_orig = lib_name;
         auto _paths    = tim::delimit(
-            std::string{ ".:" } + tim::get_env<std::string>("LD_LIBRARY_PATH", ""), ":");
+            std::string{ ".:" } + tim::get_env<std::string>(env_path, ""), ":");
         for(auto& pitr : _paths)
         {
             if(file_exists(TIMEMORY_JOIN('/', pitr, lib_name)))
             {
-                lib_name = TIMEMORY_JOIN('/', pitr, lib_name);
+                lib_name = get_realpath(TIMEMORY_JOIN('/', pitr, lib_name));
                 verbprintf(0, "[omnitrace][exe] Resolved '%s' to '%s'...\n",
                            _lib_orig.c_str(), lib_name.c_str());
                 break;
@@ -2369,5 +2548,39 @@ get_absolute_lib_filepath(std::string lib_name)
                        lib_name.c_str());
         }
     }
+    else if(!lib_name.empty())
+    {
+        return get_realpath(lib_name);
+    }
+
     return lib_name;
 }
+
+//======================================================================================//
+//
+bool
+file_exists(const std::string& name)
+{
+    struct stat buffer;
+    return (stat(name.c_str(), &buffer) == 0);
+}
+
+std::string
+get_realpath(const std::string& _f)
+{
+    char _buffer[PATH_MAX];
+    if(!::realpath(_f.c_str(), _buffer))
+    {
+        verbprintf(2, "Warning! realpath could not be found for %s\n", _f.c_str());
+        return _f;
+    }
+    return std::string{ _buffer };
+}
+
+std::string
+get_cwd()
+{
+    char cwd[PATH_MAX];
+    return std::string{ getcwd(cwd, PATH_MAX) };
+}
+}  // namespace

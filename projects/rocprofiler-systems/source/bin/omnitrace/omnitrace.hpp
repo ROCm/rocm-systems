@@ -25,6 +25,10 @@
 #include <timemory/backends/process.hpp>
 #include <timemory/environment.hpp>
 #include <timemory/mpl/apply.hpp>
+#include <timemory/mpl/concepts.hpp>
+#include <timemory/mpl/policy.hpp>
+#include <timemory/tpls/cereal/archives.hpp>
+#include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/demangle.hpp>
 #include <timemory/utility/popen.hpp>
@@ -45,12 +49,16 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <ostream>
 #include <regex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -76,6 +84,7 @@ using strvec_t              = std::vector<string_t>;
 using strset_t              = std::set<string_t>;
 using regexvec_t            = std::vector<std::regex>;
 using fmodset_t             = std::set<module_function>;
+using fixed_modset_t        = std::map<fmodset_t*, bool>;
 using exec_callback_t       = BPatchExecCallback;
 using exit_callback_t       = BPatchExitCallback;
 using fork_callback_t       = BPatchForkCallback;
@@ -142,10 +151,14 @@ static snippet_vec_t   fini_names                    = {};
 static fmodset_t       available_module_functions    = {};
 static fmodset_t       instrumented_module_functions = {};
 static fmodset_t       overlapping_module_functions  = {};
+static fmodset_t       excluded_module_functions     = {};
+static fixed_modset_t  fixed_module_functions        = {};
 static regexvec_t      func_include                  = {};
 static regexvec_t      func_exclude                  = {};
 static regexvec_t      file_include                  = {};
 static regexvec_t      file_exclude                  = {};
+static regexvec_t      file_restrict                 = {};
+static regexvec_t      func_restrict                 = {};
 //
 //======================================================================================//
 
@@ -217,12 +230,6 @@ error_func_real(error_level_t level, int num, const char* const* params);
 void
 error_func_fake(error_level_t level, int num, const char* const* params);
 
-bool
-c_stdlib_module_constraint(const string_t& file);
-
-bool
-c_stdlib_function_constraint(const string_t& func);
-
 //======================================================================================//
 
 inline string_t
@@ -277,6 +284,19 @@ struct function_signature
 
     TIMEMORY_DEFAULT_OBJECT(function_signature)
 
+    template <typename ArchiveT>
+    void serialize(ArchiveT& _ar, const unsigned)
+    {
+        namespace cereal = tim::cereal;
+        (void) get();
+        _ar(cereal::make_nvp("loop", m_loop), cereal::make_nvp("info_beg", m_info_beg),
+            cereal::make_nvp("info_end", m_info_end), cereal::make_nvp("row", m_row),
+            cereal::make_nvp("col", m_col), cereal::make_nvp("return", m_return),
+            cereal::make_nvp("name", m_name), cereal::make_nvp("params", m_params),
+            cereal::make_nvp("file", m_file), cereal::make_nvp("signature", m_signature));
+        (void) get();
+    }
+
     function_signature(string_t _ret, const string_t& _name, string_t _file,
                        location_t _row = { 0, 0 }, location_t _col = { 0, 0 },
                        bool _loop = false, bool _info_beg = false, bool _info_end = false)
@@ -294,8 +314,8 @@ struct function_signature
     }
 
     function_signature(const string_t& _ret, const string_t& _name, const string_t& _file,
-                       const std::vector<string_t>& _params, location_t&& _row = { 0, 0 },
-                       location_t&& _col = { 0, 0 }, bool _loop = false,
+                       const std::vector<string_t>& _params, location_t _row = { 0, 0 },
+                       location_t _col = { 0, 0 }, bool _loop = false,
                        bool _info_beg = false, bool _info_end = false)
     : function_signature(_ret, _name, _file, _row, _col, _loop, _info_beg, _info_end)
     {
@@ -304,6 +324,11 @@ struct function_signature
             m_params.append(itr + ", ");
         if(!_params.empty()) m_params = m_params.substr(0, m_params.length() - 2);
         m_params += ")";
+    }
+
+    friend bool operator==(const function_signature& lhs, const function_signature& rhs)
+    {
+        return lhs.get() == rhs.get();
     }
 
     static auto get(function_signature& sig) { return sig.get(); }
@@ -353,6 +378,8 @@ struct module_function
         }();
         return _instance;
     }
+
+    TIMEMORY_DEFAULT_OBJECT(module_function)
 
     static void reset_width() { get_width().fill(0); }
 
@@ -409,6 +436,12 @@ struct module_function
                    : (lhs.module < rhs.module);
     }
 
+    friend bool operator==(const module_function& lhs, const module_function& rhs)
+    {
+        return std::tie(lhs.module, lhs.function, lhs.signature, lhs.address_range) ==
+               std::tie(rhs.module, rhs.function, rhs.signature, rhs.address_range);
+    }
+
     static void write_header(std::ostream& os)
     {
         auto w0 = std::min<size_t>(get_width()[0], absolute_max_width);
@@ -452,7 +485,16 @@ struct module_function
     size_t             address_range = 0;
     string_t           module        = {};
     string_t           function      = {};
-    function_signature signature;
+    function_signature signature     = {};
+
+    template <typename ArchiveT>
+    void serialize(ArchiveT& _ar, const unsigned)
+    {
+        namespace cereal = tim::cereal;
+        _ar(cereal::make_nvp("address_range", address_range),
+            cereal::make_nvp("module", module), cereal::make_nvp("function", function),
+            cereal::make_nvp("signature", signature));
+    }
 };
 //
 //======================================================================================//
@@ -471,26 +513,215 @@ dump_info(std::ostream& _os, const fmodset_t& _data)
     module_function::reset_width();
 }
 //
+template <typename ArchiveT,
+          std::enable_if_t<tim::concepts::is_archive<ArchiveT>::value, int> = 0>
 static inline void
-dump_info(const string_t& _oname, const fmodset_t& _data, int _level, bool _fail)
+dump_info(ArchiveT& _ar, const fmodset_t& _data)
 {
+    _ar(tim::cereal::make_nvp("module_functions", _data));
+}
+//
+static inline void
+dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
+          const fmodset_t& _data, int _level, bool _fail)
+{
+    namespace cereal = tim::cereal;
+    namespace policy = tim::policy;
+
+    _oname += "." + _ext;
+    auto _handle_error = [&]() {
+        std::stringstream _msg{};
+        _msg << "[dump_info] Error opening '" << _oname << " for output";
+        verbprintf(_level, "%s\n", _msg.str().c_str());
+        if(_fail)
+            throw std::runtime_error(std::string{ "[omnitrace][exe]" } + _msg.str());
+    };
+
     if(!debug_print && verbose_level < _level) return;
 
-    std::ofstream ofs{ _oname };
-    if(ofs)
+    if(_ext == "txt")
     {
-        verbprintf(_level, "Dumping '%s'... ", _oname.c_str());
-        dump_info(ofs, _data);
-        verbprintf_bare(_level, "Done\n");
+        std::ofstream ofs{};
+        if(!tim::filepath::open(ofs, _oname))
+            _handle_error();
+        else
+        {
+            verbprintf(_level, "Outputting '%s'... ", _oname.c_str());
+            dump_info(ofs, _data);
+            verbprintf_bare(_level, "Done\n");
+        }
+        ofs.close();
+    }
+    else if(_ext == "xml")
+    {
+        std::stringstream oss{};
+        {
+            using output_policy     = policy::output_archive<cereal::XMLOutputArchive>;
+            output_policy::indent() = true;
+            auto ar                 = output_policy::get(oss);
+
+            ar->setNextName("omnitrace");
+            ar->startNode();
+            ar->setNextName(_label.c_str());
+            ar->startNode();
+            (*ar)(cereal::make_nvp("module_functions", _data));
+            ar->finishNode();
+            ar->finishNode();
+        }
+
+        std::ofstream ofs{};
+        if(!tim::filepath::open(ofs, _oname))
+            _handle_error();
+        else
+        {
+            verbprintf(_level, "Outputting '%s'... ", _oname.c_str());
+            ofs << oss.str() << std::endl;
+            verbprintf_bare(_level, "Done\n");
+        }
+        ofs.close();
+    }
+    else if(_ext == "json")
+    {
+        std::stringstream oss{};
+        {
+            using output_policy = policy::output_archive<cereal::PrettyJSONOutputArchive>;
+            auto ar             = output_policy::get(oss);
+
+            ar->setNextName("omnitrace");
+            ar->startNode();
+            ar->setNextName(_label.c_str());
+            ar->startNode();
+            (*ar)(cereal::make_nvp("module_functions", _data));
+            ar->finishNode();
+            ar->finishNode();
+        }
+
+        std::ofstream ofs{};
+        if(!tim::filepath::open(ofs, _oname))
+            _handle_error();
+        else
+        {
+            verbprintf(_level, "Outputting '%s'... ", _oname.c_str());
+            ofs << oss.str() << std::endl;
+            verbprintf_bare(_level, "Done\n");
+        }
+        ofs.close();
     }
     else
     {
-        std::stringstream _msg{};
-        _msg << "[" << __FUNCTION__ << "] Error opening '" << _oname << " for output";
-        verbprintf(_level, "%s\n", _msg.str().c_str());
-        if(_fail) throw std::runtime_error(_msg.str());
+        throw std::runtime_error(TIMEMORY_JOIN(
+            "", "[omnitrace][exe] Error in ", __FUNCTION__, " :: filename '", _oname,
+            "' does not have one of recognized file extensions: txt, json, xml"));
     }
-    ofs.close();
+}
+//
+static inline void
+dump_info(const string_t& _oname, const fmodset_t& _data, int _level, bool _fail,
+          const string_t& _type, const strset_t& _ext)
+{
+    for(const auto& itr : _ext)
+        dump_info(_type, _oname, itr, _data, _level, _fail);
+}
+//
+static inline void
+load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int _level)
+{
+    namespace cereal = tim::cereal;
+    namespace policy = tim::policy;
+
+    auto        _pos = _iname.find_last_of('.');
+    std::string _ext = {};
+    if(_pos != std::string::npos) _ext = _iname.substr(_pos + 1, _iname.length());
+
+    auto _handle_error = [&]() {
+        std::stringstream _msg{};
+        _msg << "[load_info] Error opening '" << _iname << " for input";
+        verbprintf(_level, "%s\n", _msg.str().c_str());
+        throw std::runtime_error(std::string{ "[omnitrace][exe]" } + _msg.str());
+    };
+
+    if(_ext == "xml")
+    {
+        verbprintf(_level, "Reading '%s'... ", _iname.c_str());
+        std::ifstream ifs{ _iname };
+        if(!ifs)
+            _handle_error();
+        else
+        {
+            using input_policy = policy::input_archive<cereal::XMLInputArchive>;
+            auto ar            = input_policy::get(ifs);
+
+            ar->setNextName("omnitrace");
+            ar->startNode();
+            ar->setNextName(_label.c_str());
+            ar->startNode();
+            (*ar)(cereal::make_nvp("module_functions", _data));
+            ar->finishNode();
+            ar->finishNode();
+        }
+        verbprintf_bare(_level, "Done\n");
+        ifs.close();
+    }
+    else if(_ext == "json")
+    {
+        verbprintf(_level, "Reading '%s'... ", _iname.c_str());
+        std::ifstream ifs{ _iname };
+        if(!ifs)
+            _handle_error();
+        else
+        {
+            using input_policy = policy::input_archive<cereal::JSONInputArchive>;
+            auto ar            = input_policy::get(ifs);
+
+            ar->setNextName("omnitrace");
+            ar->startNode();
+            ar->setNextName(_label.c_str());
+            ar->startNode();
+            (*ar)(cereal::make_nvp("module_functions", _data));
+            ar->finishNode();
+            ar->finishNode();
+        }
+        verbprintf_bare(_level, "Done\n");
+        ifs.close();
+    }
+    else
+    {
+        throw std::runtime_error(TIMEMORY_JOIN(
+            "", "[omnitrace][exe] Error in ", __FUNCTION__, " :: filename '", _iname,
+            "' does not have one of recognized extentions: txt, json, xml :: ", _ext));
+    }
+}
+//
+static inline void
+load_info(const string_t& _inp, std::map<std::string, fmodset_t*>& _data, int _level)
+{
+    std::vector<std::string> _exceptions{};
+    _exceptions.reserve(_data.size());
+    for(auto& itr : _data)
+    {
+        try
+        {
+            fmodset_t _tmp{};
+            load_info(itr.first, _inp, _tmp, _level);
+            // add to the existing
+            itr.second->insert(_tmp.begin(), _tmp.end());
+            // if it did not throw it was successfully loaded
+            _exceptions.clear();
+            break;
+        } catch(std::exception& _e)
+        {
+            _exceptions.emplace_back(_e.what());
+        }
+    }
+    if(!_exceptions.empty())
+    {
+        std::stringstream _msg{};
+        for(auto& itr : _exceptions)
+        {
+            _msg << "[omnitrace][exe] " << itr << "\n";
+        }
+        throw std::runtime_error(_msg.str());
+    }
 }
 //
 //======================================================================================//

@@ -27,10 +27,11 @@
 #include "library/debug.hpp"
 #include "library/sampling.hpp"
 
-#include <ostream>
+#include <timemory/backends/threading.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <ostream>
 #include <pthread.h>
 
 namespace omnitrace
@@ -85,8 +86,9 @@ stop_bundle(bundle_t& _bundle, int64_t _tid)
 }  // namespace
 
 pthread_gotcha::wrapper::wrapper(routine_t _routine, void* _arg, bool _enable_sampling,
-                                 promise_t* _p)
+                                 int64_t _parent, promise_t* _p)
 : m_enable_sampling{ _enable_sampling }
+, m_parent_tid{ _parent }
 , m_routine{ _routine }
 , m_arg{ _arg }
 , m_promise{ _p }
@@ -116,6 +118,8 @@ pthread_gotcha::wrapper::operator()() const
             bundles.erase(_tid);
         }
     } };
+
+    if(_active) get_cpu_cid_stack(threading::get_id(), m_parent_tid);
 
     if(m_enable_sampling && _enable_sampling && _active)
     {
@@ -197,11 +201,16 @@ pthread_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
 {
     bundle_t _bundle{ "pthread_create" };
     auto     _enable_sampling = enable_sampling_on_child_threads();
+    auto     _active          = (get_state() == omnitrace::State::Active);
+    int64_t  _tid             = (_active) ? threading::get_id() : 0;
+
+    // ensure that cpu cid stack exists on the parent thread if active
+    if(_active) get_cpu_cid_stack();
 
     if(!get_use_sampling() || !_enable_sampling)
     {
         // if(!get_use_sampling()) start_bundle(_bundle);
-        auto* _obj = new wrapper(start_routine, arg, _enable_sampling, nullptr);
+        auto* _obj = new wrapper(start_routine, arg, _enable_sampling, _tid, nullptr);
         // create the thread
         auto _ret =
             pthread_create(thread, attr, &wrapper::wrap, static_cast<void*>(_obj));
@@ -219,7 +228,7 @@ pthread_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     // promise set by thread when signal handler is configured
     auto  _promise = std::promise<void>{};
     auto  _fut     = _promise.get_future();
-    auto* _wrap    = new wrapper(start_routine, arg, _enable_sampling, &_promise);
+    auto* _wrap    = new wrapper(start_routine, arg, _enable_sampling, _tid, &_promise);
 
     // create the thread
     auto _ret = pthread_create(thread, attr, &wrapper::wrap, static_cast<void*>(_wrap));

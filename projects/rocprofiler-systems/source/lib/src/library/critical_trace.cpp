@@ -508,10 +508,9 @@ get(int64_t _tid)
 void
 add_hash_id(const hash_ids& _labels)
 {
-    std::unique_lock<std::mutex> _lk{ tasking::get_critical_trace_mutex(),
-                                      std::defer_lock };
-    if(!_lk.owns_lock()) _lk.lock();
-    tasking::get_critical_trace_task_group().run([_labels]() {
+    std::unique_lock<std::mutex> _lk{ tasking::get_critical_trace_mutex() };
+    if(!tasking::get_critical_trace_task_group().pool()) return;
+    tasking::get_critical_trace_task_group().exec([_labels]() {
         static std::mutex _mtx{};
         _mtx.lock();
         for(auto itr : _labels)
@@ -539,9 +538,8 @@ void
 update(int64_t _tid)
 {
     if(!get_use_critical_trace() && !get_use_rocm_smi()) return;
-    std::unique_lock<std::mutex> _lk{ tasking::get_critical_trace_mutex(),
-                                      std::defer_lock };
-    if(!_lk.owns_lock()) _lk.lock();
+    std::unique_lock<std::mutex> _lk{ tasking::get_critical_trace_mutex() };
+    if(!tasking::get_critical_trace_task_group().pool()) return;
     call_chain _data{};
     std::swap(_data, *critical_trace::get(_tid));
     tasking::get_critical_trace_task_group().exec(update_critical_path, _data, _tid);
@@ -551,6 +549,8 @@ void
 compute(int64_t _tid)
 {
     update(_tid);
+    std::unique_lock<std::mutex> _lk{ tasking::get_critical_trace_mutex() };
+    if(!tasking::get_critical_trace_task_group().pool()) return;
     tasking::get_critical_trace_task_group().exec(compute_critical_trace);
 }
 
@@ -824,8 +824,10 @@ get_entries(int64_t _ts, const std::function<bool(const entry&)>& _eval)
         }
         *_targ = _v;
     };
+    std::unique_lock<std::mutex>               _lk{ tasking::get_critical_trace_mutex() };
     size_t                                     _n = 0;
     std::vector<std::pair<std::string, entry>> _v{};
+    if(!tasking::get_critical_trace_task_group().pool()) return _v;
     tasking::get_critical_trace_task_group().exec(_func, &_v, &_n);
     tasking::get_critical_trace_task_group().join();
     OMNITRACE_DEBUG("critical_trace::%s :: found %zu out of %zu entries at %li...\n",

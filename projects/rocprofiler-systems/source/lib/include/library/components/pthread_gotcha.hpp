@@ -37,13 +37,14 @@ struct pthread_gotcha : tim::component::base<pthread_gotcha, void>
         using routine_t = void* (*) (void*);
         using promise_t = std::promise<void>;
 
-        wrapper(routine_t _routine, void* _arg, bool, promise_t*);
+        wrapper(routine_t _routine, void* _arg, bool, int64_t, promise_t*);
         void* operator()() const;
 
         static void* wrap(void* _arg);
 
     private:
         bool       m_enable_sampling = false;
+        int64_t    m_parent_tid      = 0;
         routine_t  m_routine         = nullptr;
         void*      m_arg             = nullptr;
         promise_t* m_promise         = nullptr;

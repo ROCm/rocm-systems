@@ -24,11 +24,15 @@
 
 #include "library/defines.hpp"
 
+#include <timemory/api.hpp>
+#include <timemory/api/macros.hpp>
 #include <timemory/components/data_tracker/types.hpp>
 #include <timemory/components/macros.hpp>
 #include <timemory/components/user_bundle/types.hpp>
 #include <timemory/enum.h>
 #include <timemory/mpl/concepts.hpp>
+
+TIMEMORY_DEFINE_NS_API(project, omnitrace)
 
 TIMEMORY_DECLARE_COMPONENT(roctracer)
 
@@ -91,6 +95,34 @@ TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, omnitrace::component::sampling_gpu_
 TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, omnitrace::component::sampling_gpu_memory,
                                false_type)
 #endif
+
+TIMEMORY_SET_COMPONENT_API(omnitrace::component::omnitrace, project::omnitrace,
+                           category::dynamic_instrumentation, os::supports_linux)
+TIMEMORY_SET_COMPONENT_API(omnitrace::component::roctracer, project::omnitrace,
+                           tpls::rocm, device::gpu, os::supports_linux,
+                           category::external)
+TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_wall_clock, project::omnitrace,
+                           category::timing, os::supports_unix, category::sampling,
+                           category::interrupt_sampling)
+TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_cpu_clock, project::omnitrace,
+                           category::timing, os::supports_unix, category::sampling,
+                           category::interrupt_sampling)
+TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_percent, project::omnitrace,
+                           category::timing, os::supports_unix, category::sampling,
+                           category::interrupt_sampling)
+TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_gpu_busy, project::omnitrace,
+                           tpls::rocm, device::gpu, os::supports_linux,
+                           category::sampling, category::thread_sampling)
+TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_gpu_memory, project::omnitrace,
+                           tpls::rocm, device::gpu, os::supports_linux, category::memory,
+                           category::sampling, category::thread_sampling)
+TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_gpu_power, project::omnitrace,
+                           tpls::rocm, device::gpu, os::supports_linux, category::power,
+                           category::sampling, category::thread_sampling)
+TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_gpu_temp, project::omnitrace,
+                           tpls::rocm, device::gpu, os::supports_linux,
+                           category::temperature, category::sampling,
+                           category::thread_sampling)
 
 TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::omnitrace, OMNITRACE_COMPONENT,
                                  "omnitrace", "omnitrace_component")

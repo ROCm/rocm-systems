@@ -44,11 +44,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <ostream>
+#include <set>
 #include <sstream>
+#include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #if defined(TIMEMORY_UNIX)
@@ -65,7 +69,9 @@ using array_t        = std::array<Tp, N>;
 using string_t       = std::string;
 using stringstream_t = std::stringstream;
 using str_vec_t      = std::vector<string_t>;
+using str_set_t      = std::set<string_t>;
 using info_type_base = std::tuple<string_t, bool, str_vec_t>;
+using parser_t       = tim::argparse::argument_parser;
 
 struct info_type : info_type_base
 {
@@ -85,8 +91,9 @@ struct info_type : info_type_base
     const auto& id_strings() const { return info().at(3); }
     const auto& label() const { return info().at(4); }
     const auto& description() const { return info().at(5); }
+    const auto& categories() const { return info().at(6); }
 
-    bool valid() const { return !name().empty() && info().size() >= 5; }
+    bool valid() const { return !name().empty() && info().size() >= 6; }
 
     bool operator<(const info_type& rhs) const { return name() < rhs.name(); }
     bool operator!=(const info_type& rhs) const { return !(*this == rhs); }
@@ -101,6 +108,22 @@ struct info_type : info_type_base
     }
 };
 
+//--------------------------------------------------------------------------------------//
+
+enum
+{
+    VAL      = 0,
+    ENUM     = 1,
+    LANG     = 2,
+    CID      = 3,
+    FNAME    = 4,
+    DESC     = 5,
+    CATEGORY = 6,
+    TOTAL    = 7
+};
+
+//--------------------------------------------------------------------------------------//
+
 namespace
 {
 char              global_delim           = '|';
@@ -111,16 +134,43 @@ bool              all_info               = false;
 bool              force_brief            = false;
 bool              debug_msg              = false;
 bool              case_insensitive       = false;
+bool              regex_hl               = false;
 int32_t           max_width              = 0;
 int32_t           num_cols               = 0;
 int32_t           min_width              = 40;
 int32_t           padding                = 4;
 str_vec_t         regex_keys             = {};
-bool              regex_hl               = false;
-constexpr size_t  num_component_options  = 6;
-constexpr size_t  num_settings_options   = 3;
+str_vec_t         category_regex_keys    = {};
+str_set_t         category_view          = {};
+constexpr size_t  num_component_options  = 7;
+constexpr size_t  num_settings_options   = 4;
 constexpr size_t  num_hw_counter_options = 4;
 std::stringstream lerr{};
+
+// explicit setting names to exclude
+std::set<std::string> settings_exclude = {
+    "OMNITRACE_ENVIRONMENT", "OMNITRACE_COMMAND_LINE", "cereal_class_version", "settings",
+#if !defined(TIMEMORY_USE_CRAYPAT)
+    "OMNITRACE_CRAYPAT"
+#endif
+};
+
+// exclude some timemory settings which are not relevant to omnitrace
+//  exact matches, e.g. OMNITRACE_BANNER
+std::string settings_rexclude_exact =
+    "^OMNITRACE_(BANNER|DESTRUCTOR_REPORT|COMPONENTS|(GLOBAL|MPIP|NCCLP|OMPT|"
+    "PROFILER|TRACE|KOKKOS)_COMPONENTS|PYTHON_EXE|PAPI_ATTACH|PLOT_OUTPUT|SEPARATOR_"
+    "FREQ|"
+    "STACK_CLEARING|TARGET_PID|THROTTLE_(COUNT|VALUE)|(AUTO|FLAMEGRAPH)_OUTPUT|"
+    "(ENABLE|DISABLE)_ALL_SIGNALS|ALLOW_SIGNAL_HANDLER|CTEST_NOTES|INSTRUCTION_"
+    "ROOFLINE)$";
+
+//  leading matches, e.g. OMNITRACE_MPI_[A-Z_]+
+std::string settings_rexclude_begin =
+    "^OMNITRACE_(ERT|DART|MPI|UPCXX|ROOFLINE|CUDA|NVTX|CUPTI)_[A-Z_]+$";
+
+bool
+exclude_setting(const std::string&);
 }  // namespace
 
 //--------------------------------------------------------------------------------------//
@@ -153,6 +203,9 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, char filler = '-', char deli
 bool
 is_selected(const std::string& line);
 
+bool
+is_category_selected(const std::string& _line);
+
 std::string
 hl_selected(const std::string& line);
 
@@ -173,6 +226,12 @@ write_hw_counter_info(std::ostream&, const array_t<bool, N>& = {},
 
 template <typename Type = void>
 struct get_availability;
+
+template <typename Type = void>
+struct component_categories;
+
+void
+process_categories(parser_t&, const str_set_t&);
 
 //--------------------------------------------------------------------------------------//
 
@@ -233,15 +292,53 @@ struct get_availability<void>
 
 //--------------------------------------------------------------------------------------//
 
-enum
+template <typename Type>
+struct component_categories
 {
-    VAL   = 0,
-    ENUM  = 1,
-    LANG  = 2,
-    CID   = 3,
-    FNAME = 4,
-    DESC  = 5,
-    TOTAL = 6
+    template <typename... Tp>
+    void operator()(std::set<std::string>& _v, type_list<Tp...>) const
+    {
+        //
+        auto _cleanup = [](std::string _type, const std::string& _pattern) {
+            auto _pos = std::string::npos;
+            while((_pos = _type.find(_pattern)) != std::string::npos)
+                _type.erase(_pos, _pattern.length());
+            return _type;
+        };
+        (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
+
+        TIMEMORY_FOLD_EXPRESSION(_v.emplace(
+            TIMEMORY_JOIN("::", "component", _cleanup(demangle<Tp>(), "tim::"))));
+    }
+
+    void operator()(std::set<std::string>& _v) const
+    {
+        if constexpr(!concepts::is_placeholder<Type>::value)
+            (*this)(_v, trait::component_apis_t<Type>{});
+    }
+};
+
+template <>
+struct component_categories<void>
+{
+    template <size_t... Idx>
+    void operator()(std::set<std::string>& _v, std::index_sequence<Idx...>) const
+    {
+        TIMEMORY_FOLD_EXPRESSION(
+            component_categories<component::enumerator_t<Idx>>{}(_v));
+    }
+
+    void operator()(std::set<std::string>& _v) const
+    {
+        (*this)(_v, std::make_index_sequence<TIMEMORY_COMPONENTS_END>{});
+    }
+
+    auto operator()() const
+    {
+        std::set<std::string> _categories{};
+        (*this)(_categories);
+        return _categories;
+    }
 };
 
 //--------------------------------------------------------------------------------------//
@@ -249,28 +346,48 @@ enum
 int
 main(int argc, char** argv)
 {
-    array_t<bool, 6>     options  = { false, false, false, false, false, false };
-    array_t<string_t, 6> fields   = {};
-    array_t<bool, 6>     use_mark = {};
+    omnitrace_init_library();
+
+    std::set<std::string> _category_options = component_categories{}();
+    {
+        auto _settings = tim::settings::shared_instance();
+        for(const auto& itr : *_settings)
+        {
+            if(exclude_setting(itr.second->get_env_name())) continue;
+            for(const auto& eitr : itr.second->get_categories())
+            {
+                if(eitr == "native")
+                    _category_options.emplace("settings::timemory");
+                else
+                    _category_options.emplace(TIMEMORY_JOIN("::", "settings", eitr));
+            }
+        }
+    }
+
+    array_t<bool, TOTAL> options    = { false, false, false, false, false, false, false };
+    array_t<string_t, TOTAL> fields = {};
+    array_t<bool, TOTAL>     use_mark = {};
 
     std::string cols_via{};
     std::tie(num_cols, cols_via) = tim::utility::console::get_columns();
     std::string col_msg =
         "(default: " + std::to_string(num_cols) + " [via " + cols_via + "])";
 
-    fields[VAL]   = "VALUE_TYPE";
-    fields[ENUM]  = "ENUMERATION";
-    fields[LANG]  = "C++ ALIAS / PYTHON ENUMERATION";
-    fields[FNAME] = "FILENAME";
-    fields[CID]   = "STRING_IDS";
-    fields[DESC]  = "DESCRIPTION";
+    fields[VAL]      = "VALUE_TYPE";
+    fields[ENUM]     = "ENUMERATION";
+    fields[LANG]     = "C++ ALIAS / PYTHON ENUMERATION";
+    fields[FNAME]    = "FILENAME";
+    fields[CID]      = "STRING_IDS";
+    fields[DESC]     = "DESCRIPTION";
+    fields[CATEGORY] = "CATEGORY";
 
-    use_mark[VAL]   = true;
-    use_mark[ENUM]  = true;
-    use_mark[LANG]  = true;
-    use_mark[FNAME] = false;
-    use_mark[CID]   = false;
-    use_mark[DESC]  = false;
+    use_mark[VAL]      = true;
+    use_mark[ENUM]     = true;
+    use_mark[LANG]     = true;
+    use_mark[FNAME]    = false;
+    use_mark[CID]      = false;
+    use_mark[DESC]     = false;
+    use_mark[CATEGORY] = false;
 
     bool include_settings    = false;
     bool include_components  = false;
@@ -278,7 +395,6 @@ main(int argc, char** argv)
 
     std::string file = {};
 
-    using parser_t = tim::argparse::argument_parser;
     parser_t parser("omnitrace-avail");
 
     parser.enable_help();
@@ -329,6 +445,16 @@ main(int argc, char** argv)
         .min_count(1)
         .dtype("list of strings")
         .action([](parser_t& p) { regex_keys = p.get<str_vec_t>("filter"); });
+    parser
+        .add_argument({ "-R", "--category-filter" },
+                      "Filter the output according to provided regex w.r.t. the "
+                      "categories (egrep + "
+                      "case-sensitive) [e.g. -r \"true\"]")
+        .min_count(1)
+        .dtype("list of strings")
+        .action([](parser_t& p) {
+            category_regex_keys = p.get<str_vec_t>("category-filter");
+        });
     parser.add_argument({ "-i", "--ignore-case" }, "Ignore case when filtering")
         .max_count(1)
         .dtype("bool")
@@ -341,6 +467,15 @@ main(int argc, char** argv)
     parser.add_argument({ "--alphabetical" }, "Sort the output alphabetically")
         .max_count(1)
         .action([](parser_t& p) { alphabetical = p.get<bool>("alphabetical"); });
+    parser
+        .add_argument({ "--list-categories" },
+                      "List the available categories for --categories option")
+        .count(0)
+        .action([_category_options](parser_t&) {
+            std::cout << "Categories:\n";
+            for(const auto& itr : _category_options)
+                std::cout << "    " << itr << "\n";
+        });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[COLUMN OPTIONS]" }, "");
@@ -349,6 +484,14 @@ main(int argc, char** argv)
         .action([](parser_t& p) { force_brief = p.get<bool>("brief"); });
     parser.add_argument({ "-d", "--description" }, "Display the component description")
         .max_count(1);
+    parser
+        .add_argument({ "--categories" },
+                      "Display the category information (use --list-categories to see "
+                      "the available categories)")
+        .dtype("string")
+        .action([&_category_options](parser_t& p) {
+            process_categories(p, _category_options);
+        });
     parser.add_argument({ "-s", "--string" }, "Display all acceptable string identifiers")
         .max_count(1);
     parser
@@ -405,6 +548,8 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
+    if(parser.exists("list-categories")) return EXIT_SUCCESS;
+
     std::string _pos_regex{};
     if(parser.get_positional_count() > 0)
     {
@@ -417,7 +562,11 @@ main(int argc, char** argv)
         }
     }
 
-    if(!_pos_regex.empty()) regex_keys.emplace_back(_pos_regex);
+    if(!_pos_regex.empty())
+    {
+        regex_keys.emplace_back(_pos_regex);
+        category_regex_keys.emplace_back(_pos_regex);
+    }
 
     auto _parser_set_if_exists = [&parser](auto& _var, const std::string& _opt) {
         using Tp = decay_t<decltype(_var)>;
@@ -428,10 +577,15 @@ main(int argc, char** argv)
     _parser_set_if_exists(options[DESC], "description");
     _parser_set_if_exists(options[VAL], "value");
     _parser_set_if_exists(options[CID], "string");
+    _parser_set_if_exists(options[CATEGORY], "categories");
     _parser_set_if_exists(file, "output");
     _parser_set_if_exists(include_components, "components");
     _parser_set_if_exists(include_settings, "settings");
     _parser_set_if_exists(include_hw_counters, "hw-counters");
+
+    if(options[CATEGORY] && force_brief) options[CATEGORY] = false;
+
+    if(category_view.empty()) category_view = _category_options;
 
     if(!include_components && !include_settings && !include_hw_counters)
         include_settings = true;
@@ -462,12 +616,14 @@ main(int argc, char** argv)
     dump_log();
 
     if(include_settings)
-        write_settings_info(*os, { options[VAL], options[LANG], options[DESC] });
+        write_settings_info(
+            *os, { options[VAL], options[LANG], options[DESC], options[CATEGORY] });
 
     dump_log();
 
     if(include_hw_counters)
-        write_hw_counter_info(*os, { true, !force_brief, !options[DESC], options[DESC] });
+        write_hw_counter_info(*os, { true, !force_brief && !available_only,
+                                     !options[DESC], options[DESC] });
 
     dump_log();
 
@@ -522,27 +678,34 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
     _info.erase(std::remove_if(_info.begin(), _info.end(),
                                [](const auto& itr) {
+                                   // NOLINTNEXTLINE
                                    for(const auto& nitr :
-                                       { "cuda", "cupti", "ompt", "roofline", "_bundle",
+                                       { "cuda", "cupti", "nvtx", "roofline", "_bundle",
                                          "data_integer", "data_unsigned", "data_floating",
                                          "printer" })
                                    {
                                        if(itr.name().find(nitr) != std::string::npos)
                                            return true;
                                    }
-                                   return false;
+                                   auto _categories = tim::delimit(
+                                       itr.categories(), ", ", [](const string_t& _v) {
+                                           return "component::" + _v;
+                                       });
+                                   for(const auto& citr : _categories)
+                                       if(category_view.count(citr) > 0) return false;
+                                   return true;
                                }),
                 _info.end());
 
     using width_type = std::vector<int64_t>;
     using width_bool = std::array<bool, N + 2>;
 
-    width_type _widths = width_type{ 30, 12, 20, 20, 20, 40, 20, 40 };
-    width_bool _wusing = width_bool{ true, !force_brief };
+    auto       _available_column = !force_brief && !available_only;
+    width_type _widths           = width_type{ 30, 12, 20, 20, 20, 40, 20, 40, 10 };
+    width_bool _wusing           = width_bool{ true, _available_column };
+    int64_t    pad               = padding;
     for(size_t i = 0; i < options.size(); ++i)
         _wusing[i + 2] = options[i];
-
-    int64_t pad = padding;
 
     {
         constexpr size_t idx = 0;
@@ -550,6 +713,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         write_entry(ss, "COMPONENT", _widths.at(0), false, true);
         _widths.at(idx) = std::max<int64_t>(ss.str().length() + pad, _widths.at(idx));
     }
+
     {
         constexpr size_t idx = 1;
         stringstream_t   ss;
@@ -582,7 +746,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             std::stringstream ss;
             _selected += (is_selected(std::get<0>(itr))) ? 1 : 0;
             write_entry(ss, std::get<0>(itr), _widths.at(0), false, true);
-            if(!force_brief)
+            if(_available_column)
             {
                 std::stringstream _avss{};
                 _avss << std::boolalpha << std::get<1>(itr);
@@ -597,6 +761,9 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                 write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
                             _mark.at(i));
             }
+
+            _selected += (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
+
             if(_selected == 0) continue;
         }
 
@@ -632,7 +799,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
     os << global_delim;
     write_entry(os, "COMPONENT", _widths.at(0), true, false);
-    if(!force_brief) write_entry(os, "AVAILABLE", _widths.at(1), true, false);
+    if(_available_column) write_entry(os, "AVAILABLE", _widths.at(1), true, false);
     for(size_t i = 0; i < fields.size(); ++i)
     {
         if(!options[i]) continue;
@@ -647,7 +814,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         std::stringstream ss;
         _selected += (is_selected(std::get<0>(itr))) ? 1 : 0;
         write_entry(ss, std::get<0>(itr), _widths.at(0), false, true);
-        if(!force_brief)
+        if(_available_column)
         {
             std::stringstream _avss{};
             _avss << std::boolalpha << std::get<1>(itr);
@@ -662,6 +829,8 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
                         _mark.at(i));
         }
+
+        _selected += (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
 
         if(_selected > 0)
         {
@@ -692,56 +861,83 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
 {
     static_assert(N >= num_settings_options, "Error! Too few settings options + fields");
 
-    static constexpr size_t size = 7;
+    static constexpr size_t size = 8;
     using archive_type           = cereal::SettingsTextArchive;
     using array_type             = typename archive_type::array_type;
-    using unique_set             = typename archive_type::unique_set;
     using width_type             = array_t<int64_t, size>;
     using width_bool             = array_t<bool, size>;
 
-    width_type _widths = { 0, 0, 0, 0, 0, 0, 0 };
+    width_type _widths = { 0, 0, 0, 0, 0, 0, 0, 0 };
     width_bool _wusing = {
-        true, !force_brief, opts[0], opts[1], opts[1], opts[1], opts[2]
+        true, !force_brief, opts[0], opts[1], opts[1], opts[1], opts[2], opts[3],
     };
-    width_bool _mark = { false, false, false, true, true, true, false };
+    width_bool _mark = { false, false, false, true, true, true, false, false };
 
     // this settings has delayed initialization. make sure it is generated
     (void) omnitrace::config::get_perfetto_output_filename();
 
     array_type _setting_output;
-    unique_set _settings_exclude = { "OMNITRACE_ENVIRONMENT", "OMNITRACE_COMMAND_LINE",
-                                     "cereal_class_version", "settings" };
 
-#if !defined(TIMEMORY_USE_CRAYPAT)
-    _settings_exclude.emplace("OMNITRACE_CRAYPAT");
-#endif
-
-    cereal::SettingsTextArchive settings_archive{ _setting_output, _settings_exclude };
+    cereal::SettingsTextArchive settings_archive{ _setting_output, settings_exclude };
     settings::serialize_settings(settings_archive);
 
-    // exclude some timemory settings which are not relevant to omnitrace
-    //  exact matches, e.g. OMNITRACE_BANNER
-    std::string _settings_rexclude_exact =
-        "^OMNITRACE_(BANNER|DESTRUCTOR_REPORT|COMPONENTS|(GLOBAL|MPIP|NCCLP|OMPT|"
-        "PROFILER|TRACE)_COMPONENTS|PYTHON_EXE|PAPI_ATTACH|PLOT_OUTPUT|SEPARATOR_FREQ|"
-        "STACK_CLEARING|TARGET_PID|THROTTLE_(COUNT|VALUE)|(AUTO|FLAMEGRAPH)_OUTPUT|"
-        "(ENABLE|DISABLE)_ALL_SIGNALS|ALLOW_SIGNAL_HANDLER|CTEST_NOTES)$";
-    //  leading matches, e.g. OMNITRACE_MPI_[A-Z_]+
-    std::string _settings_rexclude_begin =
-        "^OMNITRACE_(ERT|DART|MPI|UPCXX|ROOFLINE|CUDA|NVTX|CUPTI)_[A-Z_]+$";
+    _setting_output.erase(
+        std::remove_if(_setting_output.begin(), _setting_output.end(),
+                       [](const auto& itr) { return itr.find("environ") == itr.end(); }),
+        _setting_output.end());
 
-    // lambda for deciding which settings we want to restrict displaying
-    auto&& _remove_conditions = [&_settings_exclude, &_settings_rexclude_exact,
-                                 &_settings_rexclude_begin](const auto& itr) {
-        auto&& _v = itr.find("environ")->second;
-        bool   _a = _settings_exclude.find(_v) != _settings_exclude.end();
-        bool   _b = std::regex_match(_v, std::regex(_settings_rexclude_exact));
-        bool   _c = std::regex_match(_v, std::regex(_settings_rexclude_begin));
-        return (_a || _b || _c);
-    };
+    // patch up the categories
+    str_set_t _not_in_category_view{};
+    auto      _settings = tim::settings::shared_instance();
+    for(auto& itr : _setting_output)
+    {
+        auto _name = itr.find("environ")->second;
+        auto sitr  = _settings->find(_name);
+        if(sitr != _settings->end())
+        {
+            str_set_t _categories{};
+            for(const auto& citr : sitr->second->get_categories())
+            {
+                if(citr == "native")
+                    _categories.emplace("settings::timemory");
+                else
+                    _categories.emplace(TIMEMORY_JOIN("::", "settings", citr));
+            }
+            bool _found = false;
+            for(const auto& citr : _categories)
+            {
+                if(category_view.count(citr) > 0) _found = true;
+            }
+            if(!_found)
+            {
+                _not_in_category_view.emplace(_name);
+                continue;
+            }
+            std::stringstream _ss{};
+            for(const auto& citr : sitr->second->get_categories())
+                _ss << ", " << citr;
+            if(!_ss.str().empty())
+            {
+                itr["categories"] = _ss.str().substr(2);
+            }
+        }
+    }
+
+    // erase excluded settings and erase settings not in category view
+    _setting_output.erase(
+        std::remove_if(_setting_output.begin(), _setting_output.end(),
+                       [&_not_in_category_view](const auto& itr) {
+                           return (exclude_setting(itr.find("environ")->second) ||
+                                   _not_in_category_view.count(
+                                       itr.find("environ")->second) > 0);
+                       }),
+        _setting_output.end());
 
     _setting_output.erase(std::remove_if(_setting_output.begin(), _setting_output.end(),
-                                         _remove_conditions),
+                                         [](const auto& itr) {
+                                             return !is_category_selected(
+                                                 itr.find("categories")->second);
+                                         }),
                           _setting_output.end());
 
     if(alphabetical)
@@ -753,14 +949,16 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
     }
 
     array_t<string_t, size> _labels = {
-        "ENVIRONMENT VARIABLE", "VALUE",           "DATA TYPE",  "C++ STATIC ACCESSOR",
-        "C++ MEMBER ACCESSOR",  "Python ACCESSOR", "DESCRIPTION"
+        "ENVIRONMENT VARIABLE", "VALUE",           "DATA TYPE",   "C++ STATIC ACCESSOR",
+        "C++ MEMBER ACCESSOR",  "Python ACCESSOR", "DESCRIPTION", "CATEGORIES",
     };
     array_t<string_t, size> _keys   = { "environ",         "value",
                                       "data_type",       "static_accessor",
                                       "member_accessor", "python_accessor",
-                                      "description" };
-    array_t<bool, size>     _center = { false, true, true, false, false, false, false };
+                                      "description",     "categories" };
+    array_t<bool, size>     _center = {
+        false, true, true, false, false, false, false, false
+    };
 
     for(size_t i = 0; i < _widths.size(); ++i)
     {
@@ -1039,11 +1237,42 @@ using component_value_type_t =
 
 //--------------------------------------------------------------------------------------//
 
+template <typename... Tp>
+auto get_categories(type_list<Tp...>)
+{
+    auto _cleanup = [](std::string _type, const std::string& _pattern) {
+        auto _pos = std::string::npos;
+        while((_pos = _type.find(_pattern)) != std::string::npos)
+            _type.erase(_pos, _pattern.length());
+        return _type;
+    };
+    (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
+
+    auto _vec = str_vec_t{ _cleanup(demangle<Tp>(), "tim::")... };
+    std::sort(_vec.begin(), _vec.end(), [](const auto& lhs, const auto& rhs) {
+        // prioritize project category
+        auto lpos = lhs.find("project::");
+        auto rpos = rhs.find("project::");
+        return (lpos == rpos) ? (lhs < rhs) : (lpos < rpos);
+    });
+    std::stringstream _ss{};
+    for(auto&& itr : _vec)
+    {
+        _ss << ", " << itr;
+    }
+    std::string _v = _ss.str();
+    if(!_v.empty()) return _v.substr(2);
+    return _v;
+}
+
+//--------------------------------------------------------------------------------------//
+
 template <typename Type>
 info_type
 get_availability<Type>::get_info()
 {
-    using value_type = component_value_type_t<Type>;
+    using value_type     = component_value_type_t<Type>;
+    using category_types = typename trait::component_apis<Type>::type;
 
     auto _cleanup = [](std::string _type, const std::string& _pattern) {
         auto _pos = std::string::npos;
@@ -1080,21 +1309,25 @@ get_availability<Type>::get_info()
         id_type   = "";
         ids_set.clear();
     }
-    auto     itr = ids_set.begin();
-    string_t db  = (markdown) ? "`\"" : "\"";
-    string_t de  = (markdown) ? "\"`" : "\"";
-    if(has_metadata) description += ". " + metadata_t::extra_description();
-    description += ".";
-    while(itr->empty())
-        ++itr;
     string_t ids_str = {};
-    if(itr != ids_set.end())
-        ids_str = TIMEMORY_JOIN("", TIMEMORY_JOIN("", db, *itr++, de));
-    for(; itr != ids_set.end(); ++itr)
     {
-        if(!itr->empty())
-            ids_str = TIMEMORY_JOIN("  ", ids_str, TIMEMORY_JOIN("", db, *itr, de));
+        auto     itr = ids_set.begin();
+        string_t db  = (markdown) ? "`\"" : "\"";
+        string_t de  = (markdown) ? "\"`" : "\"";
+        if(has_metadata) description += ". " + metadata_t::extra_description();
+        description += ".";
+        while(itr->empty())
+            ++itr;
+        if(itr != ids_set.end())
+            ids_str = TIMEMORY_JOIN("", TIMEMORY_JOIN("", db, *itr++, de));
+        for(; itr != ids_set.end(); ++itr)
+        {
+            if(!itr->empty())
+                ids_str = TIMEMORY_JOIN("  ", ids_str, TIMEMORY_JOIN("", db, *itr, de));
+        }
     }
+
+    string_t categories = get_categories(category_types{});
 
 #if 0
     auto _remove_typelist = [](std::string _tmp) {
@@ -1120,7 +1353,7 @@ get_availability<Type>::get_info()
     data_type   = _replace(_cleanup(data_type, "::__1"), "> >", ">>");
     return info_type{ name, is_available,
                       str_vec_t{ data_type, enum_type, id_type, ids_str, label,
-                                 description } };
+                                 description, categories } };
 }
 
 //--------------------------------------------------------------------------------------//
@@ -1393,6 +1626,65 @@ regex_replace(const std::string& _line)
 #endif
     return _line;
 }
+
+const std::string&
+get_category_regex_pattern()
+{
+    static std::string _pattern = []() {
+        std::string _v{};
+        for(const auto& itr : category_regex_keys)
+        {
+            lerr << "Adding regex key: '" << itr << "'...\n";
+            _v += "|" + itr;
+        }
+        return (_v.empty()) ? _v : _v.substr(1);
+    }();
+    return _pattern;
+}
+
+auto
+get_category_regex()
+{
+    static auto _rc = std::regex(get_category_regex_pattern(), get_regex_constants());
+    return _rc;
+}
+
+bool
+category_regex_match(const std::string& _line)
+{
+    if(get_regex_pattern().empty()) return true;
+
+    static size_t lerr_width = 0;
+    lerr_width               = std::max<size_t>(lerr_width, _line.length());
+    std::stringstream _line_ss;
+    _line_ss << "'" << _line << "'";
+
+    if(std::regex_match(_line, get_category_regex()))
+    {
+        lerr << std::left << std::setw(lerr_width) << _line_ss.str()
+             << " matched pattern '" << get_category_regex_pattern() << "'...\n";
+        return true;
+    }
+    if(std::regex_search(_line, get_category_regex()))
+    {
+        lerr << std::left << std::setw(lerr_width) << _line_ss.str() << " found pattern '"
+             << get_category_regex_pattern() << "'...\n";
+        return true;
+    }
+
+    lerr << std::left << std::setw(lerr_width) << _line_ss.str() << " missing pattern '"
+         << get_category_regex_pattern() << "'...\n";
+    return false;
+}
+
+bool
+exclude_setting(const std::string& _v)
+{
+    bool _a = settings_exclude.find(_v) != settings_exclude.end();
+    bool _b = std::regex_match(_v, std::regex{ settings_rexclude_exact });
+    bool _c = std::regex_match(_v, std::regex{ settings_rexclude_begin });
+    return (_a || _b || _c);
+}
 }  // namespace
 
 //--------------------------------------------------------------------------------------//
@@ -1405,10 +1697,53 @@ is_selected(const std::string& _line)
 
 //--------------------------------------------------------------------------------------//
 
+bool
+is_category_selected(const std::string& _line)
+{
+    return category_regex_match(_line);
+}
+
+//--------------------------------------------------------------------------------------//
+
 std::string
 hl_selected(const std::string& _line)
 {
     return (regex_hl) ? regex_replace(_line) : _line;
+}
+
+//--------------------------------------------------------------------------------------//
+
+void
+process_categories(parser_t& p, const str_set_t& _category_options)
+{
+    category_view = p.get<str_set_t>("categories");
+    std::vector<std::function<void()>> _shorthand_patches{};
+    for(const auto& itr : category_view)
+    {
+        auto _is_shorthand = [&_shorthand_patches, &_category_options,
+                              itr](const std::string& _prefix) {
+            auto _opt = TIMEMORY_JOIN("::", _prefix, itr);
+            if(_category_options.count(_opt) > 0)
+            {
+                _shorthand_patches.emplace_back([itr, _opt]() {
+                    category_view.erase(itr);
+                    category_view.emplace(_opt);
+                });
+                return true;
+            }
+            return false;
+        };
+
+        if(_category_options.count(itr) == 0)
+        {
+            if(!_is_shorthand("component") && !_is_shorthand("settings"))
+                throw std::runtime_error(
+                    itr + " is not a valid category. Use --list-categories to view "
+                          "valid categories");
+        }
+    }
+    for(auto&& itr : _shorthand_patches)
+        itr();
 }
 
 //--------------------------------------------------------------------------------------//

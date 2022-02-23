@@ -231,8 +231,16 @@ backtrace::get_thread_cpu_timestamp() const
 void
 backtrace::sample(int signum)
 {
-    static bool _debug = tim::get_env<bool>("OMNITRACE_DEBUG_SAMPLING", get_debug());
-    if(_debug)
+    if(get_state() != State::Active)
+    {
+        OMNITRACE_CONDITIONAL_PRINT(
+            get_debug_sampling(),
+            "request to sample (signal %i) ignored because omnitrace is not active\n",
+            signum);
+        return;
+    }
+
+    if(get_debug_sampling())
     {
         static auto _timestamp_str = [](const auto& _tp) {
             char _repr[64];
@@ -269,7 +277,7 @@ backtrace::sample(int signum)
         if(strlen(*itr) == 0) break;
     }
     std::reverse(m_data.begin(), itr);
-    if(!get_debug())
+    if(!get_debug_sampling())
     {
         bool _ignore = false;
         for(auto& itr : m_data)
@@ -317,6 +325,7 @@ backtrace::configure(bool _setup, int64_t _tid)
 
     if(_setup && !_sampler && !_is_running)
     {
+        (void) get_debug_sampling();  // make sure query in sampler does not allocate
         assert(_tid == threading::get_id());
         sampling::block_signals(*_signal_types);
         if constexpr(tim::trait::is_available<hw_counters>::value)
@@ -424,7 +433,7 @@ backtrace::post_process(int64_t _tid)
     auto _use_label = [](const std::string& _lbl, bool _check_internal) -> short {
         // debugging feature
         static bool _keep_internal =
-            tim::get_env<bool>("OMNITRACE_SAMPLING_KEEP_INTERNAL", get_debug());
+            tim::get_env<bool>("OMNITRACE_SAMPLING_KEEP_INTERNAL", get_debug_sampling());
         const auto _npos = std::string::npos;
         if(_keep_internal) return 1;
         if(_lbl.find("omnitrace_init_tooling") != _npos) return -1;
@@ -450,8 +459,8 @@ backtrace::post_process(int64_t _tid)
     // "_dyninst", i.e. "main" will show up as "main_dyninst" in the backtrace.
     auto _patch_label = [](std::string _lbl) -> std::string {
         // debugging feature
-        static bool _keep_suffix =
-            tim::get_env<bool>("OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX", get_debug());
+        static bool _keep_suffix = tim::get_env<bool>(
+            "OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX", get_debug_sampling());
         if(_keep_suffix) return _lbl;
         const std::string _dyninst{ "_dyninst" };
         auto              _pos = _lbl.find(_dyninst);
@@ -570,7 +579,7 @@ backtrace::post_process(int64_t _tid)
     if(_data.empty()) return;
 
     OMNITRACE_CONDITIONAL_PRINT(
-        get_verbose() >= 0 || get_debug(),
+        get_verbose() >= 0 || get_debug_sampling(),
         "Post-processing %zu sampling entries for thread %lu...\n", _data.size(), _tid);
 
     std::sort(_data.begin(), _data.end(),

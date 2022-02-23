@@ -30,7 +30,7 @@ target_link_libraries(
               $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
               $<BUILD_INTERFACE:timemory::timemory-headers>
               $<BUILD_INTERFACE:timemory::timemory-gotcha>
-              $<BUILD_INTERFACE:timemory::timemory-cxx-shared>
+              $<BUILD_INTERFACE:timemory::timemory-cxx-static>
               $<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>)
 
 # ------------------------------------------------------------------------------#
@@ -135,5 +135,33 @@ set_target_properties(
 
 install(
     TARGETS omnitrace-library
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    OPTIONAL)
+
+# ------------------------------------------------------------------------------#
+#
+# omnitrace dl library
+#
+# ------------------------------------------------------------------------------#
+
+add_library(omnitrace-dl-library SHARED)
+add_library(omnitrace::omnitrace-dl-library ALIAS omnitrace-dl-library)
+
+target_compile_definitions(omnitrace-dl-library PRIVATE TIMEMORY_USE_VISIBILITY=0)
+target_sources(omnitrace-dl-library PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/dl.cpp)
+target_link_libraries(omnitrace-dl-library
+                      PRIVATE $<BUILD_INTERFACE:timemory::timemory-headers>)
+
+set_target_properties(
+    omnitrace-dl-library
+    PROPERTIES OUTPUT_NAME omnitrace-dl
+               CXX_VISIBILITY_PRESET "hidden"
+               VERSION ${PROJECT_VERSION}
+               SOVERSION ${PROJECT_VERSION_MAJOR}
+               POSITION_INDEPENDENT_CODE ON
+               INSTALL_RPATH "\$ORIGIN")
+
+install(
+    TARGETS omnitrace-dl-library
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
     OPTIONAL)

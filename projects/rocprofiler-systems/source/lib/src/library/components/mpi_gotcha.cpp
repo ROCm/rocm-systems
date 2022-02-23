@@ -25,10 +25,10 @@
 #include "library/components/omnitrace.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
-#include "timemory/backends/process.hpp"
 
 #include <thread>
 #include <timemory/backends/mpi.hpp>
+#include <timemory/backends/process.hpp>
 
 namespace omnitrace
 {

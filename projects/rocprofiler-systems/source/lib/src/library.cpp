@@ -28,11 +28,11 @@
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 #include "library/gpu.hpp"
+#include "library/ptl.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_sampler.hpp"
 #include "library/timemory.hpp"
-#include "timemory/mpl/type_traits.hpp"
 
 #include <mutex>
 #include <string_view>
@@ -44,7 +44,11 @@ namespace
 std::vector<bool>&
 get_interval_data()
 {
-    static thread_local auto _v = std::vector<bool>{};
+    static thread_local auto _v = []() {
+        auto _tmp = std::vector<bool>{};
+        _tmp.reserve(max_supported_threads);
+        return _tmp;
+    }();
     return _v;
 }
 
@@ -86,10 +90,9 @@ is_system_backend()
 }
 
 auto&
-get_instrumentation_bundles()
+get_instrumentation_bundles(int64_t _tid = threading::get_id())
 {
-    static thread_local auto& _v =
-        instrumentation_bundles::instances().at(threading::get_id());
+    static thread_local auto& _v = instrumentation_bundles::instances().at(_tid);
     return _v;
 }
 
@@ -120,10 +123,41 @@ using Phase  = critical_trace::Phase;
 /// \brief the "start" function for an instrumentation region
 ///
 //======================================================================================//
+namespace
+{
+auto&
+push_count()
+{
+    static thread_local uint16_t _v = 0;
+    return _v;
+}
+auto&
+pop_count()
+{
+    static thread_local uint16_t _v = 0;
+    return _v;
+}
+
+struct reentry_guard
+{
+    reentry_guard(uint16_t& _v)
+    : m_v{ _v }
+    {
+        ++m_v;
+    }
+    ~reentry_guard() { --m_v; }
+    uint16_t& m_v;
+
+    operator bool() const { return (m_v <= 1); }
+};
+}  // namespace
 
 extern "C" void
 omnitrace_push_trace(const char* name)
 {
+    reentry_guard _lk{ push_count() };
+    if(!_lk) return;
+
     // return if not active
     if(get_state() == State::Finalized) return;
 
@@ -135,12 +169,14 @@ omnitrace_push_trace(const char* name)
         return;
     }
 
-    OMNITRACE_DEBUG("[%s] %s\n", __FUNCTION__, name);
+    OMNITRACE_DEBUG_F("%s\n", name);
 
     static auto _sample_rate = std::max<size_t>(get_instrumentation_interval(), 1);
     static thread_local size_t _sample_idx = 0;
+    auto&                      _interval   = get_interval_data();
     auto                       _enabled    = (_sample_idx++ % _sample_rate == 0);
-    get_interval_data().emplace_back(_enabled);
+
+    _interval.emplace_back(_enabled);
     if(_enabled) get_functors().first(name);
     if(get_use_critical_trace())
     {
@@ -168,9 +204,17 @@ omnitrace_push_trace(const char* name)
 extern "C" void
 omnitrace_pop_trace(const char* name)
 {
+    // the same thread should not be pushing AND popping
+    if(push_count() > 0) return;
+
+    reentry_guard _lk{ pop_count() };
+    // return if reentry
+    if(!_lk) return;
+
+    // only execute when active
     if(get_state() == State::Active)
     {
-        OMNITRACE_DEBUG("[%s] %s\n", __FUNCTION__, name);
+        OMNITRACE_DEBUG_F("%s\n", name);
         auto& _interval_data = get_interval_data();
         if(!_interval_data.empty())
         {
@@ -382,9 +426,8 @@ omnitrace_init_tooling()
        !get_use_rocm_smi())
     {
         get_state() = State::Finalized;
-        OMNITRACE_DEBUG("[%s] Both perfetto and timemory are disabled. Setting the state "
-                        "to finalized\n",
-                        __FUNCTION__);
+        OMNITRACE_DEBUG_F("Both perfetto and timemory are disabled. Setting the state "
+                          "to finalized\n");
         return false;
     }
 
@@ -487,6 +530,7 @@ omnitrace_init_tooling()
     };
 
     static auto _pop_timemory = [](const char* name) {
+        auto  _hash = tim::hash::get_hash_id(tim::string_view_t{ name });
         auto& _data = get_instrumentation_bundles();
         if(_data.bundles.empty())
         {
@@ -494,10 +538,17 @@ omnitrace_init_tooling()
                             "omnitrace_pop_trace", name);
             return;
         }
-        _data.bundles.back()->stop();
-        _data.allocator.destroy(_data.bundles.back());
-        _data.allocator.deallocate(_data.bundles.back(), 1);
-        _data.bundles.pop_back();
+        for(size_t i = _data.bundles.size(); i > 0; --i)
+        {
+            auto*& _v = _data.bundles.at(i - 1);
+            if(_v->get_hash() == _hash)
+            {
+                _v->stop();
+                _data.allocator.destroy(_v);
+                _data.allocator.deallocate(_v, 1);
+                _data.bundles.erase(_data.bundles.begin() + (i - 1));
+            }
+        }
     };
 
     static auto _pop_perfetto = [](const char*) {
@@ -597,9 +648,30 @@ omnitrace_finalize(void)
     // return if not active
     if(get_state() != State::Active)
     {
-        OMNITRACE_DEBUG_F("State = %s. Finalization skipped\n",
-                          std::to_string(get_state()).c_str());
+        OMNITRACE_BASIC_DEBUG_F("State = %s. Finalization skipped\n",
+                                std::to_string(get_state()).c_str());
         return;
+    }
+
+    get_state() = State::Finalized;
+
+    get_functors().first  = [](const char*) {};
+    get_functors().second = [](const char*) {};
+
+    if(get_use_timemory())
+    {
+        auto& _data = get_instrumentation_bundles();
+        if(!_data.bundles.empty())
+        {
+            for(size_t i = _data.bundles.size(); i > 0; --i)
+            {
+                auto*& _v = _data.bundles.at(i - 1);
+                _v->stop();
+                _data.allocator.destroy(_v);
+                _data.allocator.deallocate(_v, 1);
+            }
+            _data.bundles.clear();
+        }
     }
 
     pthread_gotcha::enable_sampling_on_child_threads() = false;
@@ -611,24 +683,22 @@ omnitrace_finalize(void)
         if(_debug_init) config::set_setting_value("OMNITRACE_DEBUG", _debug_value);
     } };
 
-    OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_DEBUG_F("\n");
 
     auto& _thread_bundle = thread_data<omnitrace_thread_bundle_t>::instance();
     if(_thread_bundle) _thread_bundle->stop();
 
     if(dmp::rank() == 0 && get_verbose() >= 0) fprintf(stderr, "\n");
-    if(get_verbose_env() > 0) config::print_settings();
-
-    get_state() = State::Finalized;
+    if(get_verbose() > 0 || get_debug()) config::print_settings();
 
     if(get_use_sampling())
     {
-        OMNITRACE_DEBUG("[%s] Shutting down sampling...\n", __FUNCTION__);
+        OMNITRACE_DEBUG_F("Shutting down sampling...\n");
         sampling::shutdown();
         sampling::block_signals();
     }
 
-    OMNITRACE_DEBUG("[%s] Stopping gotcha bundle...\n", __FUNCTION__);
+    OMNITRACE_DEBUG_F("Stopping gotcha bundle...\n");
     // stop the gotcha bundle
     if(get_gotcha_bundle())
     {
@@ -639,13 +709,13 @@ omnitrace_finalize(void)
     pthread_gotcha::shutdown();
     thread_sampler::shutdown();
 
-    OMNITRACE_DEBUG("[%s] Shutting down roctracer...\n", __FUNCTION__);
+    OMNITRACE_DEBUG_F("Shutting down roctracer...\n");
     // ensure that threads running roctracer callbacks shutdown
     comp::roctracer::shutdown();
 
     if(dmp::rank() == 0) fprintf(stderr, "\n");
 
-    OMNITRACE_DEBUG("[%s] Stopping main bundle...\n", __FUNCTION__);
+    OMNITRACE_DEBUG_F("Stopping main bundle...\n");
     // stop the main bundle and report the high-level metrics
     if(get_main_bundle())
     {
@@ -659,18 +729,18 @@ omnitrace_finalize(void)
 
     int _threadpool_verbose = (get_debug()) ? 4 : -1;
     tasking::get_roctracer_thread_pool().set_verbose(_threadpool_verbose);
-    tasking::get_critical_trace_thread_pool().set_verbose(_threadpool_verbose);
+    if(get_use_critical_trace())
+        tasking::get_critical_trace_thread_pool().set_verbose(_threadpool_verbose);
 
     // join extra thread(s) used by roctracer
-    OMNITRACE_DEBUG("[%s] waiting for all roctracer tasks to complete...\n",
-                    __FUNCTION__);
+    OMNITRACE_DEBUG_F("waiting for all roctracer tasks to complete...\n");
     tasking::get_roctracer_task_group().join();
 
     // print out thread-data if they are not still running
     // if they are still running (e.g. thread-pool still alive), the
     // thread-specific data will be wrong if try to stop them from
     // the main thread.
-    OMNITRACE_DEBUG("[%s] Destroying thread bundle data...\n", __FUNCTION__);
+    OMNITRACE_DEBUG_F("Destroying thread bundle data...\n");
     for(auto& itr : thread_data<omnitrace_thread_bundle_t>::instances())
     {
         if(itr && itr->get<comp::wall_clock>() &&
@@ -684,8 +754,7 @@ omnitrace_finalize(void)
     }
 
     // ensure that all the MT instances are flushed
-    OMNITRACE_DEBUG("[%s] Stopping and destroying instrumentation bundles...\n",
-                    __FUNCTION__);
+    OMNITRACE_DEBUG_F("Stopping and destroying instrumentation bundles...\n");
     for(auto& itr : instrumentation_bundles::instances())
     {
         while(!itr.bundles.empty())
@@ -701,8 +770,7 @@ omnitrace_finalize(void)
     // ensure that all the MT instances are flushed
     if(get_use_sampling())
     {
-        OMNITRACE_DEBUG("[%s] Post-processing the sampling backtraces...\n",
-                        __FUNCTION__);
+        OMNITRACE_DEBUG_F("Post-processing the sampling backtraces...\n");
         for(size_t i = 0; i < max_supported_threads; ++i)
         {
             sampling::backtrace::post_process(i);
@@ -712,7 +780,7 @@ omnitrace_finalize(void)
 
     if(get_use_critical_trace() || (get_use_rocm_smi() && get_use_roctracer()))
     {
-        OMNITRACE_DEBUG("[%s] Generating the critical trace...\n", __FUNCTION__);
+        OMNITRACE_DEBUG_F("Generating the critical trace...\n");
         // increase the thread-pool size
         tasking::get_critical_trace_thread_pool().initialize_threadpool(
             get_critical_trace_num_threads());
@@ -739,18 +807,12 @@ omnitrace_finalize(void)
 
     if(get_use_critical_trace())
     {
-        OMNITRACE_DEBUG("[%s] Generating the critical trace...\n", __FUNCTION__);
-        // increase the thread-pool size
-        tasking::get_critical_trace_thread_pool().initialize_threadpool(
-            get_critical_trace_num_threads());
-
         // make sure outstanding hash tasks completed before compute
-        OMNITRACE_PRINT("[%s] waiting for all critical trace tasks to complete...\n",
-                        __FUNCTION__);
+        OMNITRACE_PRINT_F("waiting for all critical trace tasks to complete...\n");
         tasking::get_critical_trace_task_group().join();
 
         // launch compute task
-        OMNITRACE_PRINT("[%s] launching critical trace compute task...\n", __FUNCTION__);
+        OMNITRACE_PRINT_F("launching critical trace compute task...\n");
         critical_trace::compute();
     }
 
@@ -767,11 +829,10 @@ omnitrace_finalize(void)
         perfetto::TrackEvent::Flush();
 
         auto& tracing_session = get_trace_session();
-        OMNITRACE_DEBUG("[%s] Stopping the blocking perfetto trace sessions...\n",
-                        __FUNCTION__);
+        OMNITRACE_DEBUG_F("Stopping the blocking perfetto trace sessions...\n");
         tracing_session->StopBlocking();
 
-        OMNITRACE_DEBUG("[%s] Getting the trace data...\n", __FUNCTION__);
+        OMNITRACE_DEBUG_F("Getting the trace data...\n");
         std::vector<char> trace_data{ tracing_session->ReadTraceBlocking() };
 
         if(trace_data.empty())
@@ -808,18 +869,31 @@ omnitrace_finalize(void)
 
     // these should be destroyed before timemory is finalized, especially the
     // roctracer thread-pool
-    OMNITRACE_DEBUG("[%s] Destroying the thread pools...\n", __FUNCTION__);
-    tasking::get_roctracer_thread_pool().destroy_threadpool();
-    tasking::get_critical_trace_thread_pool().destroy_threadpool();
+    OMNITRACE_DEBUG_F("Destroying the roctracer thread pool...\n");
+    {
+        std::unique_lock<std::mutex> _lk{ tasking::get_roctracer_mutex() };
+        tasking::get_roctracer_task_group().join();
+        tasking::get_roctracer_task_group().clear();
+        tasking::get_roctracer_task_group().set_pool(nullptr);
+        tasking::get_roctracer_thread_pool().destroy_threadpool();
+    }
 
-    if(get_use_sampling())
-        static_cast<tim::tsettings<bool>*>(
-            tim::settings::instance()->find("OMNITRACE_DEBUG")->second.get())
-            ->set(false);
+    OMNITRACE_DEBUG_F("Destroying the critical trace thread pool...\n");
+    {
+        std::unique_lock<std::mutex> _lk{ tasking::get_critical_trace_mutex() };
+        tasking::get_critical_trace_task_group().join();
+        tasking::get_critical_trace_task_group().clear();
+        tasking::get_critical_trace_task_group().set_pool(nullptr);
+        tasking::get_critical_trace_thread_pool().destroy_threadpool();
+    }
 
-    OMNITRACE_DEBUG("[%s] Finalizing timemory...\n", __FUNCTION__);
+    OMNITRACE_DEBUG_F("Finalizing timemory...\n");
     tim::timemory_finalize();
-    OMNITRACE_DEBUG("[%s] Finalizing timemory... Done\n", __FUNCTION__);
+
+    OMNITRACE_DEBUG_F("Disabling signal handling...\n");
+    tim::disable_signal_detection();
+
+    OMNITRACE_DEBUG_F("Finalized\n");
 
     if(_perfetto_output_error)
     {

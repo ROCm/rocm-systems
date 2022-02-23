@@ -22,14 +22,65 @@
 
 #include "omnitrace.hpp"
 
-static int  expect_error = NO_ERROR;
-static int  error_print  = 0;
-static auto regex_opts   = std::regex_constants::egrep | std::regex_constants::optimize;
+static int expect_error = NO_ERROR;
+static int error_print  = 0;
 
 // set of whole function names to exclude
 strset_t
 get_whole_function_names()
 {
+#if 1
+    return strset_t{ "sem_init",
+                     "sem_destroy",
+                     "sem_open",
+                     "sem_close",
+                     "sem_post",
+                     "sem_wait",
+                     "sem_getvalue",
+                     "sem_clockwait",
+                     "sem_timedwait",
+                     "sem_trywait",
+                     "do_futex_wait",
+                     "sem_unlink",
+                     "fork",
+                     "dl_iterate_phdr",
+                     "dlinfo",
+                     "dlopen",
+                     "dlmopen",
+                     "dlvsym",
+                     "dlsym",
+                     "getenv",
+                     "setenv",
+                     "unsetenv",
+                     "fflush",
+                     "malloc",
+                     "malloc_stats",
+                     "malloc_trim",
+                     "mallopt",
+                     "calloc",
+                     "free",
+                     "pvalloc",
+                     "valloc",
+                     "mmap",
+                     "munmap",
+                     "fmemopen",
+                     "fmemclose",
+                     "backtrace",
+                     "backtrace_symbols",
+                     "backtrace_symbols_fd",
+                     "sigaddset",
+                     "sigandset",
+                     "sigdelset",
+                     "sigemptyset",
+                     "sigfillset",
+                     "sighold",
+                     "sigisemptyset",
+                     "sigismember",
+                     "sigorset",
+                     "sigrelse",
+                     "sigvec" };
+#else
+    // should hopefully be removed soon
     return strset_t{ "a64l",
                      "advance",
                      "aio_return",
@@ -487,6 +538,7 @@ get_whole_function_names()
                      "xencrypt",
                      "xprt_register",
                      "xprt_unregister" };
+#endif
 }
 
 //======================================================================================//
@@ -780,137 +832,3 @@ error_func_fake(error_level_t level, int num, const char* const* params)
     consume_parameters(level, num, params);
     // It does nothing.
 }
-
-//======================================================================================//
-//
-bool
-c_stdlib_module_constraint(const std::string& _file)
-{
-    static std::regex _pattern(
-        "^(a64l|accept4|alphasort|argp-help|argp-parse|asprintf|atof|atoi|atol|atoll|"
-        "auth_des|auth_none|auth_unix|backtrace|backtracesyms|backtracesymsfd|c16rtomb|"
-        "cacheinfo|canonicalize|carg|cargf|cargf128|cargl|"
-        "catgets|cfmakeraw|cfsetspeed|check_pf|chflags|"
-        "clearerr|clearerr_u|clnt_perr|clnt_raw|clnt_tcp|clnt_udp|clnt_unix"
-        "settime|copy_file_range|"
-        "creat64|ctermid|ctime|ctime_r|ctype|ctype-c99|ctype-c99_l|ctype-extn|ctype_l|"
-        "cuserid|daemon|dcigettext|difftime|dirname|div|dl-error|dl-libc|dl-sym|dlerror|"
-        "duplocale|dysize|endutxent|envz|epoll_wait|"
-        "ether_aton|ether_aton_r|ether_hton|ether_line|ether_ntoa|ether_ntoh|eventfd_"
-        "read|eventfd_write|execlp|execv|execvp|explicit_bzero|faccessat|fallocate64|"
-        "fattach|fchflags|fchmodat|fdatasync|fdetach|fdopendir|fedisblxcpt|feenablxcpt|"
-        "fegetexcept|fegetmode|feholdexcpt|feof_u|ferror_u|fesetenv|fesetexcept|"
-        "fesetmode|fesetround|fetestexceptflag|fexecve|ffsll|fgetexcptflg|fgetgrent|"
-        "fgetpwent|fgetsgent|fgetspent|fileno|fmemopen|fmtmsg|fnmatch|fprintf|fputc|"
-        "fputc_u|fputwc|fputwc_u|freopen|freopen64|fscanf|fseeko|fsetexcptflg|fstab|"
-        "fsync|ftello|ftime|ftok|fts|ftw|futimens|futimesat|fwide|fxprintf|gconv_conf|"
-        "gconv_db|gconv_dl|genops|getaddrinfo|getaliasent|getaliasent_r|getaliasname|"
-        "getauxval|getc|getchar|getchar_u|getdate|getdirentries|getdirname|getentropy|"
-        "getenv|getgrent|getgrent_r|getgrgid|getgrnam|gethostid|gethstbyad|gethstbynm|"
-        "gethstbynm2|gethstent|gethstent_r|getipv4sourcefilter|getloadavg|getlogin|"
-        "getlogin_r|getmsg|getnameinfo|getnetbyad|getnetbynm|getnetent|getnetent_r|"
-        "getnetgrent|getnetgrent_r|getopt|getopt1|getpass|getproto|getprtent|getprtent_r|"
-        "getprtname|getpwent|getpwent_r|getpwnam|getpwnam_r|getpwuid|getrandom|"
-        "getrpcbyname|getrpcbynumber|getrpcent|getrpcent_r|getrpcport|getservent|"
-        "getservent_r|getsgent|getsgent_r|getsgnam|getsourcefilter|getspent|getspent_r|"
-        "getspnam|getsrvbynm|getsrvbynm_r|getsrvbypt|getsubopt|getsysstats|getttyent|"
-        "getusershell|getutent_r|getutline|getutmp|getutxent|getutxid|getutxline|getw|"
-        "getwchar|getwchar_u|getwd|glob|gmon|gmtime|grantpt|group_member|gtty|herror|"
-        "hsearch|hsearch_r|htons|iconv|iconv_close|iconv_open|idn-stub|if_index|ifaddrs|"
-        "inet6_|inet_|inet_|initgroups|insremque|iofgets|iofgetws|iofgetws_u|iofputws|"
-        "iofwide|iopopen|ioungetwc|isastream|isctype|isfdtype|key_call|key_prot|killpg|"
-        "l64a|labs|lchmod|lckpwdf|lcong48|ldiv|llabs|lldiv|lockf|longjmp|lsearch|lutimes|"
-        "makedev|malloc|mblen|mbrtoc16|mbsinit|mbstowcs|mbtowc|mcheck|memccpy|"
-        "memchr|memcmp|memfrob|memmem|memset|memstream|mkdtemp|mkfifo|mkfifoat|mkostemp|"
-        "mkostemps|mkstemp|mkstemps|mktemp|mlock2|mntent|mntent_r|mpa|"
-        "msgctl|msgget|msgsnd|msort|msync|mtrace|netname|nice|nl_langinfo|nsap_addr|nscd_"
-        "getgr_r|nscd_gethst_r|nscd_getpw_r|nscd_getserv_r|nscd_helper|"
-        "nsswitch|ntp_gettime|ntp_gettimex|obprintf|obstack|oldfmemopen|open_by_handle_"
-        "at|opendir|pathconf|pclose|perror|pkey_mprotect|pm_getmaps|pmap_prot|pmap_rmt|"
-        "posix_fallocate|posix_fallocate64|preadv64|preadv64v2|printf-prs|printf_fp|"
-        "printf_size|profil|psiginfo|psignal|ptrace|ptsname|putc_u|putchar|putchar_u|"
-        "putenv|putgrent|putmsg|putpwent|putsgent|putspent|pututxline|putw|putwc_u|"
-        "putwchar|putwchar_u|pwritev64|pwritev64v2|raise|rcmd|readv|"
-        "reboot|recvfrom|recvmmsg|regex|regexp|remove|rename|renameat|res-close|res_"
-        "hconf|res_init|resolv_conf|rexec|rpc_thread|rpmatch|ruserpass|scandir|sched_"
-        "cpucount|sched_getaffinity|sched_getcpu|seed48|seekdir|semget|semop|semtimedop|"
-        "sendmsg|setbuf|setegid|seteuid|sethostid|setipv4sourcefilter|setlinebuf|"
-        "setlogin|setpgrp|setresuid|setrlimit64|setsourcefilter|setutxent|sgetsgent|"
-        "sgetspent|shmat|shmdt|shmget|sigandset|sigdelset|siggetmask|sighold|sigignore|"
-        "sigintr|sigisempty|signalfd|sigorset|sigpause|sigpending|sigrelse|sigset|"
-        "sigstack|sockatmark|speed|splice|sprofil|sscanf|sstk|stime|strcasecmp|"
-        "strcasestr|strcat|strchr|strcmp|strcpy|strcspn|strerror|strerror_l|strfmon|"
-        "strfromd|strfromf|strfromf128|strfroml|strfry|strlen|strncase|strncat|strncmp|"
-        "strncpy|strpbrk|strrchr|strsignal|strspn|strstr|strtod_l|strtof|strtof128_l|"
-        "strtof_l|strtoimax|strtok|strtol_l|strtold_l|strtoul|strtoumax|strxfrm|stty|svc|"
-        "svc_raw|svc_simple|svc_tcp|svc_udp|svc_unix|swab|sync_file_range|syslog|system|"
-        "tcflow|tcflush|tcgetattr|tcgetsid|tcsendbrk|tcsetpgrp|tee|telldir|tempnam|"
-        "tmpnam|tmpnam_r|tsearch|ttyname|ttyname_r|ttyslot|tzset|ualarm|ulimit|umount|"
-        "unlockpt|updwtmpx|ustat|utimensat|utmp_file|utmpxname|version|"
-        "versionsort|vfprintf|vfscanf|vfwscanf|vlimit|vmsplice|vprintf|vtimes|wait[0-9]|"
-        "wcfuncs|wcfuncs_l|wcscpy|wcscspn|wcsdup|wcsncat|wcsncmp|wcsnrtombs|wcspbrk|"
-        "wcsrchr|wcsstr|wcstod_l|wcstof|wcstoimax|wcstok|wcstold_l|wcstombs|wcstoumax|"
-        "wcswidth|wcsxfrm|wctob|wctype_l|wcwidth|wfileops|wgenops|wmemcmp|wmemstream|"
-        "wordexp|wstrops|x2y2m1l|xcrypt|xdr|xdr_float|xdr_intXX_t|xdr_mem|xdr_rec|xdr_"
-        "ref|xdr_sizeof|xdr_stdio|mq_notify|aio_|timer_routines|nptl-|shm-|sem_close|"
-        "setuid|pt-raise|x2y2)",
-        regex_opts);
-
-    return std::regex_search(_file, _pattern);
-}
-
-//======================================================================================//
-//
-bool
-c_stdlib_function_constraint(const std::string& _func)
-{
-    static std::regex _pattern(
-        "^(malloc|calloc|free|buffer|fscan|fstab|internal|gnu|fprint|isalnum|isalpha|"
-        "isascii|isastream|isblank|isblank_l|iscntrl|isctype|isdigit|isdigit_l|isfdtype|"
-        "isgraph|islower|islower_l|isprint|isprint_l|ispunct|isspace|isupper|isupper_l|"
-        "iswprint|isxdigit|asprintf|atof|atoi|atol|atoll|memalign|memccpy|memcpy|memchr|"
-        "memcmp|memfrob|memset|mkdtemp|mkfifo|mkfifoat|mkostemp64|mkostemps64|mkstemp|"
-        "mkstemps64|mktemp|mlock2|monstartup|mprobe|mremap_chunk|get_current_dir_name|"
-        "get_free_list|getaliasbyname|getaliasent|getauxval|getchar|getchar_unlocked|"
-        "getdate|getdirentries|getentropy|getenv|getfs|getgrent|getgrgid|"
-        "getgrnam|getgrouplist|gethostbyaddr|gethostbyname|gethostbyname2|gethostent|"
-        "gethostid|getifaddrs|getifaddrs_internal|getipv4sourcefilter|getkeyserv_handle|"
-        "getloadavg|getlogin|getlogin_fd0|getlogin_r_fd0|getmntent|getmsg|getnetbyaddr|"
-        "getnetbyname|getnetent|getnetgrent|getopt|getopt_long|getopt_long_only|getpass|"
-        "getprotobyname|getprotobynumber|getprotoent|getpwent|getpwnam|getpwnam_r|"
-        "getpwuid|getrandom|getrpcbyname|getrpcbynumber|getrpcent|getrpcport|"
-        "getservbyname|getservbyname_r|getservbyport|getservent|getsgent|getsgnam|"
-        "getsourcefilter|getspent|getspnam|getsubopt|getttyname|getttyname_r|"
-        "getusershell|getutent_r_file|getutent_r_unknown|getutid_r_file|getutid_r_"
-        "unknown|getutline|getutline_r_file|getutline_r_unknown|getutmp|getutxent|"
-        "getutxid|getutxline|getw|psiginfo|psignal|ptmalloc_init|ptrace|ptsname|putc_"
-        "unlocked|putchar|putchar_unlocked|putenv|putgrent|putmsg|putpwent|putsgent|"
-        "putspent|pututline_file|pututxline|putw|pw_map_free|pwritev|pwritev2|"
-        "qsort|raise|rcmd|re_acquire_state|re_acquire_state_context|re_"
-        "comp|re_compile_internal|re_dfa_add_node|re_exec|re_node_set_init_union|re_node_"
-        "set_insert|re_node_set_merge|re_search_internal|re_search_stub|re_string_"
-        "context_at|re_string_reconstruct|readtcp|readunix|readv|realloc|realpath|str_to_"
-        "mpn|strcasecmp|strcat|strcmp|strcpy|strcspn|strerror|strerror_l|strerror_thread_"
-        "freeres|strfmon|strfromd|strfromf|strfromf128|strfroml|strfry|strlen|"
-        "strncasecmp|strncat|strncmp|strncpy|strpbrk|strrchr|strsignal|strspn|strtof32|"
-        "strtoimax|strtok|strtol_l|strtold_l|strtoull|strtoumax|strxfrm|xdrstdio|xdrmem|"
-        "inet_|inet6_|clock_|backtrace_|dummy_|fts_|fts64_|fexecv|execv|stime|ftime|"
-        "gmtime|wcs|envz_|fmem|fputc|fgetc|fputwc|fgetwc|vprintf|feget|fetest|feenable|"
-        "feset|fedisable|nscd_|fork|execl|tzset|ntp_|mtrace|tr_[a-z]+hook|mcheck_[a-z_]+"
-        "ftell|fputs|fgets|siglongjmp|sigdelset|killpg|tolower|toupper|daemon|"
-        "iconv_[a-z_]+|catopen|catgets|catclose|check_add_mapping$|sem_open|sem_close|"
-        "sem_unlink|do_futex_wait|sem_timedwait|unwind_stop|unwind_cleanup|longjmp_"
-        "compat|vfork_|elision_init|cr_|cri_|aio_|mq_|sem_init|waitpid$|sigcancel_"
-        "handler|sighandler_setxid|start_thread$|clock$|semctl$|shm_open$|shm_unlink$|"
-        "printf|dprintf|walker$|clear_once_control$|libcr_|sem_wait$|sem_trywait$|vfork|"
-        "pause$|wait$|waitid$|msgrcv$|sigwait$|sigsuspend$|recvmsg$|sendmsg$|"
-        "ftrylockfile$|funlockfile$|tee$|setbuf$|setbuffer$|enlarge_userbuf$|convert_and_"
-        "print$|feraise|lio_|atomic_|err$|errx$|print_errno_message$|error_tail$|"
-        "clntunix_|sem_destroy|setxid_mark_thread|feupdate|send$|connect$|longjmp|pwrite|"
-        "accept$|stpncpy$|writeunix$|xflowf$|mbrlen$)",
-        regex_opts);
-
-    return std::regex_search(_func, _pattern);
-}
-//======================================================================================//
-//

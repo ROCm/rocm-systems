@@ -373,11 +373,11 @@ set(TIMEMORY_TLS_MODEL
 set(TIMEMORY_SETTINGS_PREFIX
     "OMNITRACE_"
     CACHE STRING "Prefix used for settings and environment variables")
-set(TIMEMORY_SETTINGS_CONFIG_NAME
+set(TIMEMORY_PROJECT_NAME
     "omnitrace"
     CACHE STRING "Name for configuration")
 mark_as_advanced(TIMEMORY_SETTINGS_PREFIX)
-mark_as_advanced(TIMEMORY_SETTINGS_CONFIG_NAME)
+mark_as_advanced(TIMEMORY_PROJECT_NAME)
 
 omnitrace_checkout_git_submodule(
     RELATIVE_PATH external/timemory
@@ -391,8 +391,8 @@ omnitrace_save_variables(
 
 # ensure timemory builds PIC static libs so that we don't have to install timemory shared
 # lib
-set(BUILD_SHARED_LIBS ON)
-set(BUILD_STATIC_LIBS OFF)
+set(BUILD_SHARED_LIBS OFF)
+set(BUILD_STATIC_LIBS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(TIMEMORY_CTP_OPTIONS GLOBAL)
 

@@ -74,11 +74,24 @@ jobs:
 
     - name: Test Install
       timeout-minutes: 10
-      run:
-        omnitrace --help &&
-        omnitrace -e -v 1 -o ls.inst -- ls &&
-        ./ls.inst &&
-        rm ./ls.inst &&
+      run: |
+        set -v
+        export OMNITRACE_DEBUG=ON
+        which omnitrace-avail
+        ldd $(which omnitrace-avail)
+        omnitrace-avail --help
+        omnitrace-avail -a
+        which omnitrace-critical-trace
+        ldd $(which omnitrace-critical-trace)
+        which omnitrace
+        ldd $(which omnitrace)
+        omnitrace --help
+        omnitrace -e -v 1 -o ls.inst --simulate -- ls
+        for i in omnitrace-ls.inst-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        omnitrace -e -v 1 -o ls.inst -- ls
+        ./ls.inst
+        omnitrace -e -v 1 --simulate -- ls
+        for i in omnitrace-ls-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
         omnitrace -e -v 1 -- ls
 
     - name: CTest Artifacts
@@ -156,11 +169,24 @@ jobs:
 
     - name: Test Install
       timeout-minutes: 10
-      run:
-        omnitrace --help &&
-        omnitrace -e -v 1 -o ls.inst -- ls &&
-        ./ls.inst &&
-        rm ./ls.inst &&
+      run: |
+        set -v
+        export OMNITRACE_DEBUG=ON
+        which omnitrace-avail
+        ldd $(which omnitrace-avail)
+        omnitrace-avail --help
+        omnitrace-avail -a
+        which omnitrace-critical-trace
+        ldd $(which omnitrace-critical-trace)
+        which omnitrace
+        ldd $(which omnitrace)
+        omnitrace --help
+        omnitrace -e -v 1 -o ls.inst --simulate -- ls
+        for i in omnitrace-ls.inst-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        omnitrace -e -v 1 -o ls.inst -- ls
+        ./ls.inst
+        omnitrace -e -v 1 --simulate -- ls
+        for i in omnitrace-ls-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
         omnitrace -e -v 1 -- ls
 
     - name: CTest Artifacts
@@ -262,12 +288,24 @@ jobs:
 
     - name: Test Install
       timeout-minutes: 10
-      run:
-        ldd $(which omnitrace) &&
-        omnitrace --help &&
-        omnitrace -e -v 1 -o ls.inst -- ls &&
-        ./ls.inst &&
-        rm ./ls.inst &&
+      run: |
+        set -v
+        export OMNITRACE_DEBUG=ON
+        which omnitrace-avail
+        ldd $(which omnitrace-avail)
+        omnitrace-avail --help
+        omnitrace-avail -a
+        which omnitrace-critical-trace
+        ldd $(which omnitrace-critical-trace)
+        which omnitrace
+        ldd $(which omnitrace)
+        omnitrace --help
+        omnitrace -e -v 1 -o ls.inst --simulate -- ls
+        for i in omnitrace-ls.inst-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        omnitrace -e -v 1 -o ls.inst -- ls
+        ./ls.inst
+        omnitrace -e -v 1 --simulate -- ls
+        for i in omnitrace-ls-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
         omnitrace -e -v 1 -- ls
 
     - name: CTest Artifacts
@@ -361,12 +399,24 @@ jobs:
 
     - name: Test Install
       timeout-minutes: 10
-      run:
-        ldd $(which omnitrace) &&
-        omnitrace --help &&
-        omnitrace -e -v 1 -o ls.inst -- ls &&
-        ./ls.inst &&
-        rm ./ls.inst &&
+      run: |
+        set -v
+        export OMNITRACE_DEBUG=ON
+        which omnitrace-avail
+        ldd $(which omnitrace-avail)
+        omnitrace-avail --help
+        omnitrace-avail -a
+        which omnitrace-critical-trace
+        ldd $(which omnitrace-critical-trace)
+        which omnitrace
+        ldd $(which omnitrace)
+        omnitrace --help
+        omnitrace -e -v 1 -o ls.inst --simulate -- ls
+        for i in omnitrace-ls.inst-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        omnitrace -e -v 1 -o ls.inst -- ls
+        ./ls.inst
+        omnitrace -e -v 1 --simulate -- ls
+        for i in omnitrace-ls-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
         omnitrace -e -v 1 -- ls
 
     - name: CTest Artifacts
@@ -481,10 +531,22 @@ jobs:
 
     - name: Test Install
       timeout-minutes: 10
-      run:
-        ldd $(which omnitrace) &&
-        omnitrace --help &&
-        omnitrace -e -v 1 -o ls.inst -- ls &&
-        ./ls.inst &&
-        rm ./ls.inst &&
+      run: |
+        set -v
+        export OMNITRACE_DEBUG=ON
+        which omnitrace-avail
+        ldd $(which omnitrace-avail)
+        omnitrace-avail --help
+        omnitrace-avail -a
+        which omnitrace-critical-trace
+        ldd $(which omnitrace-critical-trace)
+        which omnitrace
+        ldd $(which omnitrace)
+        omnitrace --help
+        omnitrace -e -v 1 -o ls.inst --simulate -- ls
+        for i in omnitrace-ls.inst-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        omnitrace -e -v 1 -o ls.inst -- ls
+        ./ls.inst
+        omnitrace -e -v 1 --simulate -- ls
+        for i in omnitrace-ls-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
         omnitrace -e -v 1 -- ls
