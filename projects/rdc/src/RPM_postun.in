@@ -9,7 +9,8 @@ reload_systemd() {
     return 0
 }
 
-if [ $1 -eq 0 ]; then
+if [ $1 -le 1 ]; then
+    # perform the below actions for rpm remove($1=0) or upgrade($1=1) operations
     stop_rdc
     unlink @DISTRO_ROOT@/rdc.service
     reload_systemd
