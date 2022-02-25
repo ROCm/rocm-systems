@@ -89,7 +89,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
     if(get_state() == ::omnitrace::State::DelayedInit)
         get_state() = ::omnitrace::State::PreInit;
 
-    omnitrace_push_trace(_data.tool_id.c_str());
+    omnitrace_push_trace_hidden(_data.tool_id.c_str());
 #if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
     tim::mpi::is_initialized_callback() = []() { return true; };
     tim::mpi::is_finalized()            = false;
@@ -105,7 +105,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, in
     if(get_state() == ::omnitrace::State::DelayedInit)
         get_state() = ::omnitrace::State::PreInit;
 
-    omnitrace_push_trace(_data.tool_id.c_str());
+    omnitrace_push_trace_hidden(_data.tool_id.c_str());
 #if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
     tim::mpi::is_initialized_callback() = []() { return true; };
     tim::mpi::is_finalized()            = false;
@@ -136,7 +136,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t, int* _val
     OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(), "[%s] %s()\n", __FUNCTION__,
                                       _data.tool_id.c_str());
 
-    omnitrace_push_trace(_data.tool_id.c_str());
+    omnitrace_push_trace_hidden(_data.tool_id.c_str());
     if(_data.tool_id == "MPI_Comm_rank")
     {
         m_rank_ptr = _val;
@@ -224,7 +224,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
                 _data.tool_id.c_str(), (int) _retval);
         }
     }
-    omnitrace_pop_trace(_data.tool_id.c_str());
+    omnitrace_pop_trace_hidden(_data.tool_id.c_str());
 }
 }  // namespace omnitrace
 

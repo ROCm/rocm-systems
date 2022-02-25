@@ -163,19 +163,37 @@ static regexvec_t      func_restrict                 = {};
 //======================================================================================//
 
 // control debug printf statements
-#define dprintf(...)                                                                     \
-    if(debug_print || verbose_level > 0)                                                 \
-        fprintf(stderr, "[omnitrace][exe] " __VA_ARGS__);                                \
-    fflush(stderr);
+#define errprintf(LEVEL, ...)                                                            \
+    {                                                                                    \
+        if(werror || LEVEL < 0)                                                          \
+        {                                                                                \
+            if(debug_print || verbose_level >= LEVEL)                                    \
+                fprintf(stderr, "[omnitrace][exe] Error! " __VA_ARGS__);                 \
+            char _buff[FUNCNAMELEN];                                                     \
+            sprintf(_buff, "[omnitrace][exe] Error! " __VA_ARGS__);                      \
+            throw std::runtime_error(std::string{ _buff });                              \
+        }                                                                                \
+        else                                                                             \
+        {                                                                                \
+            if(debug_print || verbose_level >= LEVEL)                                    \
+                fprintf(stderr, "[omnitrace][exe] Warning! " __VA_ARGS__);               \
+        }                                                                                \
+        fflush(stderr);                                                                  \
+    }
 
 // control verbose printf statements
 #define verbprintf(LEVEL, ...)                                                           \
-    if(verbose_level >= LEVEL) fprintf(stdout, "[omnitrace][exe] " __VA_ARGS__);         \
-    fflush(stdout);
+    {                                                                                    \
+        if(debug_print || verbose_level >= LEVEL)                                        \
+            fprintf(stdout, "[omnitrace][exe] " __VA_ARGS__);                            \
+        fflush(stdout);                                                                  \
+    }
 
 #define verbprintf_bare(LEVEL, ...)                                                      \
-    if(verbose_level >= LEVEL) fprintf(stdout, __VA_ARGS__);                             \
-    fflush(stdout);
+    {                                                                                    \
+        if(debug_print || verbose_level >= LEVEL) fprintf(stdout, __VA_ARGS__);          \
+        fflush(stdout);                                                                  \
+    }
 
 //======================================================================================//
 

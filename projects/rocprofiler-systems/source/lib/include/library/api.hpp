@@ -30,27 +30,34 @@
 extern "C"
 {
     /// handles configuration logic
-    void omnitrace_init_library(void) OMNITRACE_VISIBILITY("default");
+    void omnitrace_init_library(void) OMNITRACE_PUBLIC_API;
 
     /// starts gotcha wrappers
-    void omnitrace_init(const char*, bool, const char*) OMNITRACE_VISIBILITY("default");
+    void omnitrace_init(const char*, bool, const char*) OMNITRACE_PUBLIC_API;
 
     /// shuts down all tooling and generates output
-    void omnitrace_finalize(void) OMNITRACE_VISIBILITY("default");
+    void omnitrace_finalize(void) OMNITRACE_PUBLIC_API;
 
     /// sets an environment variable
-    void omnitrace_set_env(const char* env_name, const char* env_val)
-        OMNITRACE_VISIBILITY("default");
+    void omnitrace_set_env(const char* env_name,
+                           const char* env_val) OMNITRACE_PUBLIC_API;
 
     /// sets whether MPI should be used
-    void omnitrace_set_mpi(bool use, bool attached) OMNITRACE_VISIBILITY("default");
+    void omnitrace_set_mpi(bool use, bool attached) OMNITRACE_PUBLIC_API;
 
     /// starts an instrumentation region
-    void omnitrace_push_trace(const char* name) OMNITRACE_VISIBILITY("default");
+    void omnitrace_push_trace(const char* name) OMNITRACE_PUBLIC_API;
 
     /// stops an instrumentation region
-    void omnitrace_pop_trace(const char* name) OMNITRACE_VISIBILITY("default");
+    void omnitrace_pop_trace(const char* name) OMNITRACE_PUBLIC_API;
 
-    /// used by omnitrace-critical-trace
-    bool omnitrace_init_tooling() OMNITRACE_VISIBILITY("hidden");
+    // these are the real implementations for internal calling convention
+    void omnitrace_init_library_hidden(void) OMNITRACE_HIDDEN_API;
+    void omnitrace_init_hidden(const char*, bool, const char*) OMNITRACE_HIDDEN_API;
+    void omnitrace_finalize_hidden(void) OMNITRACE_HIDDEN_API;
+    void omnitrace_set_env_hidden(const char* env_name,
+                                  const char* env_val) OMNITRACE_HIDDEN_API;
+    void omnitrace_set_mpi_hidden(bool use, bool attached) OMNITRACE_HIDDEN_API;
+    void omnitrace_push_trace_hidden(const char* name) OMNITRACE_HIDDEN_API;
+    void omnitrace_pop_trace_hidden(const char* name) OMNITRACE_HIDDEN_API;
 }

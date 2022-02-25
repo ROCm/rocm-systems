@@ -20,31 +20,46 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/components/omnitrace.hpp"
 #include "library/api.hpp"
 
-namespace omnitrace
+extern "C" void
+omnitrace_push_trace(const char* _name)
 {
-namespace component
-{
-void
-omnitrace::start()
-{
-    if(m_prefix) omnitrace_push_trace_hidden(m_prefix);
+    omnitrace_push_trace_hidden(_name);
 }
 
-void
-omnitrace::stop()
+extern "C" void
+omnitrace_pop_trace(const char* _name)
 {
-    if(m_prefix) omnitrace_pop_trace_hidden(m_prefix);
+    omnitrace_pop_trace_hidden(_name);
 }
 
-void
-omnitrace::set_prefix(const char* _prefix)
+extern "C" void
+omnitrace_init_library(void)
 {
-    m_prefix = _prefix;
+    omnitrace_init_library_hidden();
 }
-}  // namespace component
-}  // namespace omnitrace
 
-TIMEMORY_INITIALIZE_STORAGE(omnitrace::component::omnitrace)
+extern "C" void
+omnitrace_init(const char* _mode, bool _rewrite, const char* _arg0)
+{
+    omnitrace_init_hidden(_mode, _rewrite, _arg0);
+}
+
+extern "C" void
+omnitrace_finalize(void)
+{
+    omnitrace_finalize_hidden();
+}
+
+extern "C" void
+omnitrace_set_env(const char* env_name, const char* env_val)
+{
+    omnitrace_set_env_hidden(env_name, env_val);
+}
+
+extern "C" void
+omnitrace_set_mpi(bool use, bool attached)
+{
+    omnitrace_set_mpi_hidden(use, attached);
+}

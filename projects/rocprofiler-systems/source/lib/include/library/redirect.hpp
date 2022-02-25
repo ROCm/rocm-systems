@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <array>
 #include <iostream>
 #include <ostream>
 #include <sstream>
@@ -60,8 +61,8 @@ struct redirect
         // restore stream buffer
         m_os.rdbuf(m_strm_buffer);
         auto _v      = m_buffer.str();
-        _v           = replace(m_buffer.str(), '\n');
-        auto _expect = replace(m_expected, '\n');
+        _v           = replace<3>(m_buffer.str(), { '\n', '\t', ' ' });
+        auto _expect = replace<3>(m_expected, { '\n', '\t', ' ' });
         if(_v != _expect)
         {
             if(get_verbose() > 0)
@@ -75,14 +76,18 @@ struct redirect
     }
 
 private:
-    template <typename Tp>
-    static std::string replace(std::string _v, Tp _c, const std::string& _s = " ")
+    template <size_t N>
+    static std::string replace(std::string _v, const std::array<char, N>& _c,
+                               const std::string& _s = "")
     {
-        while(true)
+        for(const auto& itr : _c)
         {
-            auto _pos = _v.find(_c);
-            if(_pos == std::string::npos) break;
-            _v = _v.replace(_pos, 1, _s);
+            while(true)
+            {
+                auto _pos = _v.find(itr);
+                if(_pos == std::string::npos) break;
+                _v = _v.replace(_pos, 1, _s);
+            }
         }
         return _v;
     }

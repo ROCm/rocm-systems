@@ -43,14 +43,14 @@
 
 // Macro to check ROC-tracer calls status
 #define ROCTRACER_CALL(call)                                                             \
-    do                                                                                   \
     {                                                                                    \
+        OMNITRACE_DEBUG_F(#call);                                                        \
         int err = call;                                                                  \
         if(err != 0)                                                                     \
         {                                                                                \
-            std::cerr << roctracer_error_string() << " in: " << #call << std::flush;     \
+            OMNITRACE_PRINT_F("%s in: %s\n", roctracer_error_string(), #call);           \
         }                                                                                \
-    } while(0)
+    }
 
 namespace omnitrace
 {

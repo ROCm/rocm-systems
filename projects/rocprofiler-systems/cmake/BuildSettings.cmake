@@ -32,6 +32,11 @@ if(OMNITRACE_USE_SANITIZER)
                           "Sanitizer type, e.g. leak, thread, address, memory, etc.")
 endif()
 
+if(OMNITRACE_BUILD_CI)
+    omnitrace_target_compile_definitions(${LIBNAME}-compile-options
+                                         INTERFACE OMNITRACE_CI)
+endif()
+
 # ----------------------------------------------------------------------------------------#
 # dynamic linking and runtime libraries
 #

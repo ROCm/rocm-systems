@@ -354,12 +354,16 @@ main(int argc, char** argv)
         for(const auto& itr : *_settings)
         {
             if(exclude_setting(itr.second->get_env_name())) continue;
+            auto _categories = itr.second->get_categories();
+            if(_categories.find("native") != _categories.end())
+            {
+                _categories.erase("native");
+                _categories.emplace("timemory");
+                itr.second->set_categories(_categories);
+            }
             for(const auto& eitr : itr.second->get_categories())
             {
-                if(eitr == "native")
-                    _category_options.emplace("settings::timemory");
-                else
-                    _category_options.emplace(TIMEMORY_JOIN("::", "settings", eitr));
+                _category_options.emplace(TIMEMORY_JOIN("::", "settings", eitr));
             }
         }
     }
@@ -898,10 +902,7 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
             str_set_t _categories{};
             for(const auto& citr : sitr->second->get_categories())
             {
-                if(citr == "native")
-                    _categories.emplace("settings::timemory");
-                else
-                    _categories.emplace(TIMEMORY_JOIN("::", "settings", citr));
+                _categories.emplace(TIMEMORY_JOIN("::", "settings", citr));
             }
             bool _found = false;
             for(const auto& citr : _categories)

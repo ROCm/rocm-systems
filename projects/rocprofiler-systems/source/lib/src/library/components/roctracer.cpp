@@ -113,29 +113,24 @@ roctracer::setup()
     if(roctracer_is_setup()) return;
     roctracer_is_setup() = true;
 
-    OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_VERBOSE_F(1, "setting up roctracer...\n");
 
 #if OMNITRACE_HIP_VERSION_MAJOR == 4 && OMNITRACE_HIP_VERSION_MINOR < 4
     auto _kfdwrapper = dynamic_library{ "OMNITRACE_ROCTRACER_LIBKFDWRAPPER",
                                         OMNITRACE_ROCTRACER_LIBKFDWRAPPER };
 #endif
 
-    ROCTRACER_CALL(
-        roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, (void*) hip_api_callback));
+    ROCTRACER_CALL(roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, nullptr));
 
-    if(roctracer_default_pool() == nullptr)
-    {
-        // Allocating tracing pool
-        roctracer_properties_t properties{};
-        memset(&properties, 0, sizeof(roctracer_properties_t));
-        // properties.mode                = 0x1000;
-        properties.buffer_size         = 0x1000;
-        properties.buffer_callback_fun = hip_activity_callback;
-        ROCTRACER_CALL(roctracer_open_pool(&properties));
-    }
+    // Allocating tracing pool
+    roctracer_properties_t properties{};
+    memset(&properties, 0, sizeof(roctracer_properties_t));
+    // properties.mode                = 0x1000;
+    properties.buffer_size         = 0x100;
+    properties.buffer_callback_fun = hip_activity_callback;
+    ROCTRACER_CALL(roctracer_open_pool(&properties));
 
-#if OMNITRACE_HIP_VERSION_MAJOR == 4 && OMNITRACE_HIP_VERSION_MINOR >= 4 &&              \
-    OMNITRACE_HIP_VERSION_MINOR <= 5
+#if OMNITRACE_HIP_VERSION_MAJOR == 4 && OMNITRACE_HIP_VERSION_MINOR >= 4
     // HIP 4.5.0 has an invalid warning
     redirect _rd{ std::cerr, "roctracer_enable_callback(), get_op_end(), invalid domain "
                              "ID(4)  in: roctracer_enable_callback(hip_api_callback, "
@@ -143,14 +138,18 @@ roctracer::setup()
                              "invalid domain ID(4)  in: roctracer_enable_activity()" };
 #endif
 
-    // Enable API callbacks, all domains
-    ROCTRACER_CALL(roctracer_enable_callback(hip_api_callback, nullptr));
-    // Enable activity tracing, all domains
-    ROCTRACER_CALL(roctracer_enable_activity());
+    ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API,
+                                                    hip_api_callback, nullptr));
+    // ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX,
+    //                                                hip_api_callback, nullptr));
+    // Enable HIP activity tracing
+    ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
 
     // callback for HSA
     for(auto& itr : roctracer_setup_routines())
         itr.second();
+
+    OMNITRACE_VERBOSE_F(1, "roctracer is setup\n");
 }
 
 void
@@ -159,31 +158,20 @@ roctracer::shutdown()
     auto_lock_t _lk{ type_mutex<roctracer>() };
     if(!roctracer_is_setup()) return;
     roctracer_is_setup() = false;
-    OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
 
-    // flush all the activity
-    if(roctracer_default_pool() != nullptr)
-    {
-        OMNITRACE_DEBUG("[%s] roctracer_flush_activity\n", __FUNCTION__);
-        ROCTRACER_CALL(roctracer_flush_activity());
+    OMNITRACE_VERBOSE_F(1, "shutting down roctracer...\n");
 
-        // flush all buffers
-        OMNITRACE_DEBUG("[%s] roctracer_flush_buf\n", __FUNCTION__);
-        roctracer_flush_buf();
-    }
-
-    OMNITRACE_DEBUG("[%s] executing hip_exec_activity_callbacks\n", __FUNCTION__);
+    OMNITRACE_DEBUG_F("executing hip_exec_activity_callbacks\n");
     // make sure all async operations are executed
     for(size_t i = 0; i < max_supported_threads; ++i)
         hip_exec_activity_callbacks(i);
 
     // callback for hsa
-    OMNITRACE_DEBUG("[%s] executing roctracer_shutdown_routines...\n", __FUNCTION__);
+    OMNITRACE_DEBUG_F("executing roctracer_shutdown_routines...\n");
     for(auto& itr : roctracer_shutdown_routines())
         itr.second();
 
-#if OMNITRACE_HIP_VERSION_MAJOR == 4 && OMNITRACE_HIP_VERSION_MINOR >= 4 &&              \
-    OMNITRACE_HIP_VERSION_MINOR <= 5
+#if OMNITRACE_HIP_VERSION_MAJOR == 4 && OMNITRACE_HIP_VERSION_MINOR >= 4
     OMNITRACE_DEBUG("[%s] redirecting roctracer warnings\n", __FUNCTION__);
     // HIP 4.5.0 has an invalid warning
     redirect _rd{
@@ -193,17 +181,12 @@ roctracer::shutdown()
     };
 #endif
 
-    // Disable tracing and closing the pool
-    OMNITRACE_DEBUG("[%s] roctracer_disable_callback\n", __FUNCTION__);
-    ROCTRACER_CALL(roctracer_disable_callback());
+    // ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
+    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
+    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
+    ROCTRACER_CALL(roctracer_flush_activity());
 
-    OMNITRACE_DEBUG("[%s] roctracer_disable_activity\n", __FUNCTION__);
-    ROCTRACER_CALL(roctracer_disable_activity());
-
-    OMNITRACE_DEBUG("[%s] roctracer_close_pool\n", __FUNCTION__);
-    ROCTRACER_CALL(roctracer_close_pool());
-
-    OMNITRACE_DEBUG("[%s] roctracer is shutdown\n", __FUNCTION__);
+    OMNITRACE_VERBOSE_F(1, "roctracer is shutdown\n");
 }
 }  // namespace component
 }  // namespace tim

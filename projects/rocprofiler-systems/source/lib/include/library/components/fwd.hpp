@@ -32,9 +32,28 @@
 #include <timemory/enum.h>
 #include <timemory/mpl/concepts.hpp>
 
+#include <type_traits>
+
 TIMEMORY_DEFINE_NS_API(project, omnitrace)
 
 TIMEMORY_DECLARE_COMPONENT(roctracer)
+
+/// \struct tim::trait::name
+/// \brief provides a constexpr string in ::value
+TIMEMORY_DECLARE_TYPE_TRAIT(name, typename Tp)
+
+#define TIMEMORY_DEFINE_NAME_TRAIT(NAME, ...)                                            \
+    namespace tim                                                                        \
+    {                                                                                    \
+    namespace trait                                                                      \
+    {                                                                                    \
+    template <>                                                                          \
+    struct name<__VA_ARGS__>                                                             \
+    {                                                                                    \
+        static constexpr auto value = NAME;                                              \
+    };                                                                                   \
+    }                                                                                    \
+    }
 
 namespace omnitrace
 {
@@ -42,6 +61,11 @@ namespace component
 {
 template <typename... Tp>
 using data_tracker = tim::component::data_tracker<Tp...>;
+
+template <typename... Tp>
+using functor_t = std::function<void(Tp...)>;
+
+using default_functor_t = functor_t<const char*>;
 
 struct omnitrace;
 struct backtrace;
@@ -67,6 +91,10 @@ using sampling_gpu_temp   = data_tracker<double, backtrace_gpu_temp>;
 using sampling_gpu_power  = data_tracker<double, backtrace_gpu_power>;
 using sampling_gpu_memory = data_tracker<double, backtrace_gpu_memory>;
 using roctracer           = tim::component::roctracer;
+
+template <typename ApiT, typename StartFuncT = default_functor_t,
+          typename StopFuncT = default_functor_t>
+struct functors;
 }  // namespace component
 }  // namespace omnitrace
 

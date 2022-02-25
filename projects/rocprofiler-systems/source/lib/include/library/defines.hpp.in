@@ -55,3 +55,13 @@
 #define OMNITRACE_VISIBILITY(MODE) OMNITRACE_ATTRIBUTE(visibility(MODE))
 #define OMNITRACE_PUBLIC_API       OMNITRACE_VISIBILITY("default")
 #define OMNITRACE_HIDDEN_API       OMNITRACE_VISIBILITY("hidden")
+
+#if defined(OMNITRACE_CI) && OMNITRACE_CI > 0
+#    if defined(NDEBUG)
+#        undef NDEBUG
+#    endif
+#    if !defined(DEBUG)
+#        define DEBUG 1
+#    endif
+#    include <cassert>
+#endif

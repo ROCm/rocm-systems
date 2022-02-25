@@ -58,6 +58,10 @@ struct mpi_gotcha : comp::base<mpi_gotcha, void>
     // called right after MPI_{Init,Init_thread,Comm_rank,Comm_size} with the return value
     void audit(const gotcha_data_t& _data, audit::outgoing, int _retval);
 
+    // without these you will get a verbosity level 1 warning
+    static void start() {}
+    static void stop() {}
+
 private:
     int* m_rank_ptr = nullptr;
     int* m_size_ptr = nullptr;

@@ -79,6 +79,18 @@ omnitrace_add_option(OMNITRACE_BUILD_TESTING "Enable building the testing suite"
 omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_HIDDEN_VISIBILITY
                      "Build with hidden visibility (disable for Debug builds)" ON)
+omnitrace_add_option(OMNITRACE_BUILD_CI "Enable internal asserts, etc." OFF ADVANCED
+                     NO_FEATURE)
+
+if(NOT "$ENV{OMNITRACE_CI}" STREQUAL "")
+    message(
+        AUTHOR_WARNING
+            "OMNITRACE_CI environment variable ($ENV{OMNITRACE_CI}) is overridding the OMNITRACE_BUILD_CI cache value"
+        )
+    set(OMNITRACE_BUILD_CI
+        "$ENV{OMNITRACE_CI}"
+        CACHE BOOL "Enable internal asserts, etc" FORCE)
+endif()
 
 if(NOT OMNITRACE_USE_HIP)
     set(OMNITRACE_USE_ROCTRACER

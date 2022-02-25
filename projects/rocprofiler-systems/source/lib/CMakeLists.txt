@@ -47,6 +47,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/library/defines.hpp.in
 
 set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/src/library.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/api.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/config.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/cpu_freq.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/critical_trace.cpp
@@ -85,6 +86,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/library/components/fwd.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/components/backtrace.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/components/fork_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/components/functors.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/components/mpi_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/components/omnitrace.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/components/rocm_smi.hpp
@@ -144,21 +146,38 @@ install(
 #
 # ------------------------------------------------------------------------------#
 
+set(CMAKE_BUILD_TYPE "Release")
+set(CMAKE_SKIP_RPATH OFF)
+set(BUILD_RPATH_USE_ORIGIN ON)
+
 add_library(omnitrace-dl-library SHARED)
 add_library(omnitrace::omnitrace-dl-library ALIAS omnitrace-dl-library)
 
-target_compile_definitions(omnitrace-dl-library PRIVATE TIMEMORY_USE_VISIBILITY=0)
 target_sources(omnitrace-dl-library PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/dl.cpp)
-target_link_libraries(omnitrace-dl-library
-                      PRIVATE $<BUILD_INTERFACE:timemory::timemory-headers>)
+target_link_libraries(omnitrace-dl-library PRIVATE ${dl_LIBRARY})
+
+check_cxx_compiler_flag("-fno-exceptions" omnitrace_dl_library_fno_exceptions)
+check_cxx_compiler_flag("-ftls-model=local-dynamic"
+                        omnitrace_dl_library_ftls_module_local_dynamic)
+
+if(OMNITRACE_BUILD_DEVELOPER)
+    if(omnitrace_dl_library_fno_exceptions)
+        target_compile_options(omnitrace-dl-library PRIVATE -fno-exceptions)
+    endif()
+
+    if(omnitrace_dl_library_ftls_module_local_dynamic)
+        target_compile_options(omnitrace-dl-library PRIVATE -ftls-model=local-dynamic)
+    endif()
+endif()
 
 set_target_properties(
     omnitrace-dl-library
     PROPERTIES OUTPUT_NAME omnitrace-dl
-               CXX_VISIBILITY_PRESET "hidden"
+               CXX_VISIBILITY_PRESET "protected"
                VERSION ${PROJECT_VERSION}
                SOVERSION ${PROJECT_VERSION_MAJOR}
                POSITION_INDEPENDENT_CODE ON
+               BUILD_RPATH "\$ORIGIN"
                INSTALL_RPATH "\$ORIGIN")
 
 install(

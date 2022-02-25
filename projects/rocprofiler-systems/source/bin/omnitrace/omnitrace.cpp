@@ -833,9 +833,7 @@ main(int argc, char** argv)
 
     if(!addr_space)
     {
-        fprintf(stderr, "[omnitrace][exe] Error! address space for dynamic "
-                        "instrumentation was not created\n");
-        exit(EXIT_FAILURE);
+        errprintf(-1, "address space for dynamic instrumentation was not created\n");
     }
 
     process_t*     app_thread = nullptr;
@@ -977,8 +975,8 @@ main(int argc, char** argv)
 
     if(!app_binary && !app_thread)
     {
-        fprintf(stderr, "No application thread or binary!...\n");
-        throw std::runtime_error("Nullptr to BPatch_binaryEdit* and BPatch_process*");
+        errprintf(-1, "No application thread or binary! nullptr to BPatch_binaryEdit* "
+                      "and BPatch_process*\n")
     }
 
     //----------------------------------------------------------------------------------//
@@ -997,7 +995,7 @@ main(int argc, char** argv)
             _tried_libs += string_t("|") + _libname;
             verbprintf(0, "loading library: '%s'...\n", _libname.c_str());
             result = (addr_space->loadLibrary(_libname.c_str()) != nullptr);
-            verbprintf(1, "loadLibrary(%s) result = %s\n", _libname.c_str(),
+            verbprintf(2, "loadLibrary(%s) result = %s\n", _libname.c_str(),
                        (result) ? "success" : "failure");
             if(result) break;
         }
@@ -1191,17 +1189,15 @@ main(int argc, char** argv)
 
     if(!main_func && is_driver)
     {
-        fprintf(stderr, "[omnitrace][exe] Couldn't find '%s'\n", main_fname.c_str());
+        errprintf(0, "could not find '%s'\n", main_fname.c_str());
         if(!_mutatee_init || !_mutatee_fini)
         {
-            fprintf(stderr, "[omnitrace][exe] Couldn't find '%s' or '%s', aborting\n",
-                    "_init", "_fini");
-            throw std::runtime_error("Could not find main function");
+            errprintf(-1, "could not find '%s' or '%s', aborting\n", "_init", "_fini");
         }
         else
         {
-            fprintf(stderr, "[omnitrace][exe] using '%s' and '%s' in lieu of '%s'...",
-                    "_init", "_fini", main_fname.c_str());
+            errprintf(0, "using '%s' and '%s' in lieu of '%s'...", "_init", "_fini",
+                      main_fname.c_str());
         }
     }
     else if(!main_func && !is_driver)
@@ -1220,17 +1216,15 @@ main(int argc, char** argv)
         if(itr.first == main_func && !is_driver) continue;
         if(!itr.first)
         {
-            stringstream_t ss;
-            ss << "Error! Couldn't find '" << itr.second.c_str() << "' function";
-            fprintf(stderr, "[omnitrace][exe] %s\n", ss.str().c_str());
-            throw std::runtime_error(ss.str());
+            errprintf(-1, "could not find required function :: '%s;\n",
+                      itr.second.c_str());
         }
     }
 
     if(use_mpi && !(mpi_func || (mpi_init_func && mpi_fini_func)))
     {
-        throw std::runtime_error("MPI support was requested but omnitrace was not built "
-                                 "with MPI and GOTCHA support");
+        errprintf(-1, "MPI support was requested but omnitrace was not built with MPI "
+                      "and GOTCHA support");
     }
 
     auto check_for_debug_info = [](bool& _has_debug_info, auto* _func) {
@@ -1308,8 +1302,11 @@ main(int argc, char** argv)
 
     verbprintf(2, "Getting call expressions... ");
 
+    auto _init_arg0 = main_fname;
+    if(main_func) main_sign.get();
+
     auto main_call_args = omnitrace_call_expr(main_sign.get());
-    auto init_call_args = omnitrace_call_expr(instr_mode, binary_rewrite, cmdv0);
+    auto init_call_args = omnitrace_call_expr(instr_mode, binary_rewrite, _init_arg0);
     auto fini_call_args = omnitrace_call_expr();
     auto umpi_call_args = omnitrace_call_expr(use_mpi, is_attached);
     auto none_call_args = omnitrace_call_expr();
@@ -1322,7 +1319,6 @@ main(int argc, char** argv)
     auto umpi_call = umpi_call_args.get(mpi_func);
 
     auto main_beg_call = main_call_args.get(entr_trace);
-    auto main_end_call = main_call_args.get(exit_trace);
 
     verbprintf(2, "Done\n");
 
@@ -1367,9 +1363,8 @@ main(int argc, char** argv)
         auto p = tim::delimit(itr, "=");
         if(p.size() != 2)
         {
-            std::cerr << "Error! environment variable: " << itr
-                      << " not in form VARIABLE=VALUE\n";
-            throw std::runtime_error("Bad format");
+            errprintf(0, "environment variable %s not in form VARIABLE=VALUE\n",
+                      itr.c_str());
         }
         tim::set_env(p.at(0), p.at(1));
         auto _expr = omnitrace_call_expr(p.at(0), p.at(1));
@@ -1402,34 +1397,11 @@ main(int argc, char** argv)
 
     if(umpi_call) init_names.emplace_back(umpi_call.get());
     if(init_call) init_names.emplace_back(init_call.get());
-
-    if(binary_rewrite)
-    {
-        verbprintf(2, "Adding main begin and end snippets...\n");
-        if(main_beg_call) init_names.emplace_back(main_beg_call.get());
-        if(main_end_call) fini_names.emplace_back(main_end_call.get());
-    }
-    else if(app_thread)
-    {
-        verbprintf(2, "Patching main function\n");
-        if(main_beg_call)
-            insert_instr(addr_space, main_func, main_beg_call, BPatch_entry, nullptr,
-                         nullptr);
-        if(main_end_call)
-            insert_instr(addr_space, main_func, main_end_call, BPatch_exit, nullptr,
-                         nullptr);
-    }
-    else
-    {
-        verbprintf(0, "No binary_rewrite and no app_thread!...\n");
-    }
-
-    if(fini_call) fini_names.emplace_back(fini_call.get());
+    if(main_beg_call) init_names.emplace_back(main_beg_call.get());
 
     for(const auto& itr : end_expr)
-    {
         if(itr.second) fini_names.emplace_back(itr.second.get());
-    }
+    if(fini_call) fini_names.emplace_back(fini_call.get());
 
     //----------------------------------------------------------------------------------//
     //
@@ -1442,18 +1414,18 @@ main(int argc, char** argv)
     auto instr_procedures = [&](const procedure_vec_t& procedures) {
         //
         auto _report = [](int _lvl, const string_t& _action, const string_t& _type,
-                          const string_t& _reason, const string_t& _name) {
+                          const string_t& _reason, const string_t& _name,
+                          const std::string& _extra = {}) {
             static std::map<std::string, strset_t> already_reported{};
             if(already_reported[_type].count(_name) == 0)
             {
-                verbprintf(_lvl, "[%s][%s] %s :: '%s'...\n", _type.c_str(),
-                           _action.c_str(), _reason.c_str(), _name.c_str());
+                verbprintf(_lvl, "[%s][%s] %s :: '%s'", _type.c_str(), _action.c_str(),
+                           _reason.c_str(), _name.c_str());
+                if(!_extra.empty()) verbprintf_bare(_lvl, " (%s)", _extra.c_str());
+                verbprintf_bare(_lvl, "...\n");
                 already_reported[_type].insert(_name);
             }
         };
-
-        verbprintf(2, "Instrumenting %lu procedures...\n",
-                   (unsigned long) procedures.size());
 
         auto check_regex_restrictions = [](const std::string& _name,
                                            const regexvec_t&  _regexes) {
@@ -1463,6 +1435,7 @@ main(int argc, char** argv)
             return false;
         };
 
+        std::pair<size_t, size_t> _count = { 0, 0 };
         for(auto* itr : procedures)
         {
             if(!itr) continue;
@@ -1479,11 +1452,13 @@ main(int argc, char** argv)
 
             if(!itr->isInstrumentable())
             {
-                _report(2, "Skipping", "function", "uninstrumentable", fname);
+                _report(3, "Skipping", "function", "uninstrumentable", fname);
                 continue;
             }
 
-            if(itr == main_func)
+            auto name = get_func_file_line_info(mod, itr);
+
+            if(itr == main_func || name.m_name == "main" || name.get() == main_sign.get())
             {
                 hash_ids.emplace_back(std::hash<string_t>()(main_sign.get()),
                                       main_sign.get());
@@ -1495,8 +1470,6 @@ main(int argc, char** argv)
                     module_function{ modname, fname, main_sign, itr });
                 continue;
             }
-
-            auto name = get_func_file_line_info(mod, itr);
 
             if(strlen(modname) == 0)
             {
@@ -1522,12 +1495,12 @@ main(int argc, char** argv)
             {
                 if(check_regex_restrictions(modname, file_restrict))
                 {
-                    _report(1, "Forcing", "module", "module-restrict-regex", modname);
+                    _report(2, "Forcing", "module", "module-restrict-regex", modname);
                     _force_inc = true;
                 }
                 else
                 {
-                    _report(2, "Skipping", "module", "module-restrict-regex", modname);
+                    _report(3, "Skipping", "module", "module-restrict-regex", modname);
                     continue;
                 }
             }
@@ -1536,19 +1509,19 @@ main(int argc, char** argv)
             {
                 if(check_regex_restrictions(name.m_name, func_restrict))
                 {
-                    _report(1, "Forcing", "function", "function-restrict-regex",
+                    _report(2, "Forcing", "function", "function-restrict-regex",
                             name.m_name);
                     _force_inc = true;
                 }
                 else if(check_regex_restrictions(name.get(), func_restrict))
                 {
-                    _report(1, "Forcing", "function", "function-restrict-regex",
+                    _report(2, "Forcing", "function", "function-restrict-regex",
                             name.get());
                     _force_inc = true;
                 }
                 else
                 {
-                    _report(2, "Skipping", "function", "function-restrict-regex",
+                    _report(3, "Skipping", "function", "function-restrict-regex",
                             name.get());
                     continue;
                 }
@@ -1563,7 +1536,7 @@ main(int argc, char** argv)
             {
                 if(check_regex_restrictions(modname, file_include))
                 {
-                    _report(1, "Forcing", "module", "module-include-regex", modname);
+                    _report(2, "Forcing", "module", "module-include-regex", modname);
                     _force_inc = true;
                 }
             }
@@ -1572,13 +1545,13 @@ main(int argc, char** argv)
             {
                 if(check_regex_restrictions(name.m_name, func_include))
                 {
-                    _report(1, "Forcing", "function", "function-include-regex",
+                    _report(2, "Forcing", "function", "function-include-regex",
                             name.m_name);
                     _force_inc = true;
                 }
                 else if(check_regex_restrictions(name.get(), func_include))
                 {
-                    _report(1, "Forcing", "function", "function-include-regex",
+                    _report(2, "Forcing", "function", "function-include-regex",
                             name.get());
                     _force_inc = true;
                 }
@@ -1593,7 +1566,7 @@ main(int argc, char** argv)
             {
                 if(check_regex_restrictions(modname, file_exclude))
                 {
-                    _report(1, "Skipping", "module", "module-exclude-regex", modname);
+                    _report(2, "Skipping", "module", "module-exclude-regex", modname);
                     continue;
                 }
             }
@@ -1602,13 +1575,13 @@ main(int argc, char** argv)
             {
                 if(check_regex_restrictions(name.m_name, func_exclude))
                 {
-                    _report(1, "Skipping", "function", "function-exclude-regex",
+                    _report(2, "Skipping", "function", "function-exclude-regex",
                             name.m_name);
                     continue;
                 }
                 else if(check_regex_restrictions(name.get(), func_exclude))
                 {
-                    _report(1, "Skipping", "function", "function-exclude-regex",
+                    _report(2, "Skipping", "function", "function-exclude-regex",
                             name.get());
                     continue;
                 }
@@ -1630,7 +1603,7 @@ main(int argc, char** argv)
                 if(is_static_exe && has_debug_info && string_t{ fname } == "_fini" &&
                    string_t{ modname } == "DEFAULT_MODULE")
                 {
-                    _report(2, "Skipping", "function", "DEFAULT_MODULE", fname);
+                    _report(3, "Skipping", "function", "DEFAULT_MODULE", fname);
                     continue;
                 }
 
@@ -1640,7 +1613,7 @@ main(int argc, char** argv)
                    overlapping_module_functions.find(module_function{ mod, itr }) !=
                        overlapping_module_functions.end())
                 {
-                    _report(2, "Skipping", "function", "overlapping", fname);
+                    _report(3, "Skipping", "function", "overlapping", fname);
                     continue;
                 }
 
@@ -1668,16 +1641,18 @@ main(int argc, char** argv)
 
                 if(_force_instr && (_skip_range || _skip_loop_range))
                 {
-                    _report(1, "Forcing", "function", "dynamic-callsite", fname);
+                    _report(2, "Forcing", "function", "dynamic-callsite", fname);
                 }
                 else if(_skip_range)
                 {
-                    _report(1, "Skipping", "function", "min-address-range", fname);
+                    _report(2, "Skipping", "function", "min-address-range", fname,
+                            TIMEMORY_JOIN('=', "range", _address_range));
                     continue;
                 }
                 else if(_skip_loop_range)
                 {
-                    _report(1, "Skipping", "function", "min-address-range-loop", fname);
+                    _report(2, "Skipping", "function", "min-address-range-loop", fname,
+                            TIMEMORY_JOIN('=', "range", _address_range));
                     continue;
                 }
             }
@@ -1688,7 +1663,7 @@ main(int argc, char** argv)
                 query_instr(itr, BPatch_exit, nullptr, nullptr, instr_traps);
             if(!_entr_success && !_exit_success)
             {
-                _report(2, "Skipping", "function",
+                _report(3, "Skipping", "function",
                         "Either no entry "
                         "instrumentation points were found or instrumentation "
                         "required traps and instrumenting via traps were disabled.",
@@ -1701,7 +1676,7 @@ main(int argc, char** argv)
                 _ss << "Function can be only partially instrument (entry = "
                     << std::boolalpha << _entr_success << ", exit = " << _exit_success
                     << ")";
-                _report(2, "Skipping", "function", _ss.str(), fname);
+                _report(3, "Skipping", "function", _ss.str(), fname);
                 continue;
             }
 
@@ -1737,6 +1712,7 @@ main(int argc, char** argv)
             };
 
             instr_procedure_functions.emplace_back(_f);
+            ++_count.first;
 
             if(loop_level_instr)
             {
@@ -1752,7 +1728,7 @@ main(int argc, char** argv)
                     if(!_lentr_success && !_lexit_success)
                     {
                         _report(
-                            2, "Skipping", "function-loop",
+                            3, "Skipping", "function-loop",
                             "Either no entry instrumentation points were found or "
                             "instrumentation "
                             "required traps and instrumenting via traps were disabled.",
@@ -1765,7 +1741,7 @@ main(int argc, char** argv)
                         _ss << "Function can be only partially instrument (entry = "
                             << std::boolalpha << _lentr_success
                             << ", exit = " << _lexit_success << ")";
-                        _report(2, "Skipping", "function-loop", _ss.str(), fname);
+                        _report(3, "Skipping", "function-loop", _ss.str(), fname);
                         continue;
                     }
 
@@ -1799,9 +1775,11 @@ main(int argc, char** argv)
                                      instr_loop_traps);
                     };
                     instr_procedure_functions.emplace_back(_lf);
+                    ++_count.second;
                 }
             }
         }
+        return _count;
     };
 
     //----------------------------------------------------------------------------------//
@@ -1812,7 +1790,9 @@ main(int argc, char** argv)
 
     if(instr_mode == "trace")
     {
+        const int _verbose_lvl = 2;
         verbprintf(2, "Beginning loop over modules [hash id generation pass]\n");
+        std::vector<std::pair<std::string, std::pair<size_t, size_t>>> _pass_info{};
         for(auto& m : modules)
         {
             char modname[1024];
@@ -1821,15 +1801,39 @@ main(int argc, char** argv)
 
             if(!m->getProcedures())
             {
-                verbprintf(1, "Skipping module w/ no procedures: '%s'\n", modname);
+                verbprintf(_verbose_lvl, "Skipping module w/ no procedures: '%s'\n",
+                           modname);
                 continue;
             }
 
-            verbprintf(3, "Parsing module: %s\n", modname);
+            verbprintf(_verbose_lvl + 1, "Parsing module: %s\n", modname);
             bpvector_t<procedure_t*>* p = m->getProcedures();
             if(!p) continue;
 
-            instr_procedures(*p);
+            verbprintf(_verbose_lvl, "%4zu procedures are begin processed in %s\n",
+                       p->size(), modname);
+
+            auto _count = instr_procedures(*p);
+
+            _pass_info.emplace_back(modname, _count);
+        }
+        // report the instrumented
+        for(auto& itr : _pass_info)
+        {
+            auto _valid = (verbose_level > _verbose_lvl ||
+                           (itr.second.first + itr.second.second) > 0);
+            if(_valid)
+            {
+                verbprintf(_verbose_lvl, "%4zu instrumented procedures in %s\n",
+                           itr.second.first, itr.first.c_str());
+                _valid = (loop_level_instr &&
+                          (verbose_level > _verbose_lvl || itr.second.second > 0));
+                if(_valid)
+                {
+                    verbprintf(_verbose_lvl, "%4zu instrumented loop procedures in %s\n",
+                               itr.second.second, itr.first.c_str());
+                }
+            }
         }
     }
 
@@ -1889,8 +1893,10 @@ main(int argc, char** argv)
     }
 
     verbprintf(2, "Beginning loop over modules [instrumentation pass]\n");
+    verbprintf(1, "\n");
     for(auto& instr_procedure : instr_procedure_functions)
         instr_procedure();
+    verbprintf(1, "\n");
 
     if(app_thread)
     {
@@ -2026,7 +2032,7 @@ main(int argc, char** argv)
         }
         else
         {
-            throw std::runtime_error("Unknown mode " + _mode);
+            errprintf(0, "Unknown mode :: %s\n", _mode.c_str());
         }
         for(auto& mitr : _data)
         {
@@ -2282,7 +2288,14 @@ instrument_entity(const string_t& function_name)
         regex_opts);
     static std::regex trailing("(\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$",
                                regex_opts);
-    static strset_t   whole = get_whole_function_names();
+    static strset_t   whole = []() {
+        auto _v   = get_whole_function_names();
+        auto _ret = _v;
+        for(std::string _ext : { "64", "_l", "_r" })
+            for(const auto& itr : _v)
+                _ret.emplace(itr + _ext);
+        return _ret;
+    }();
 
     // don't instrument the functions when key is found anywhere in function name
     if(std::regex_search(function_name, exclude) ||
@@ -2500,8 +2513,8 @@ get_absolute_exe_filepath(std::string exe_name, const std::string& env_path)
             if(file_exists(TIMEMORY_JOIN('/', pitr, exe_name)))
             {
                 exe_name = get_realpath(TIMEMORY_JOIN('/', pitr, exe_name));
-                verbprintf(0, "[omnitrace][exe] Resolved '%s' to '%s'...\n",
-                           _exe_orig.c_str(), exe_name.c_str());
+                verbprintf(0, "Resolved '%s' to '%s'...\n", _exe_orig.c_str(),
+                           exe_name.c_str());
                 break;
             }
         }
@@ -2536,8 +2549,8 @@ get_absolute_lib_filepath(std::string lib_name, const std::string& env_path)
             if(file_exists(TIMEMORY_JOIN('/', pitr, lib_name)))
             {
                 lib_name = get_realpath(TIMEMORY_JOIN('/', pitr, lib_name));
-                verbprintf(0, "[omnitrace][exe] Resolved '%s' to '%s'...\n",
-                           _lib_orig.c_str(), lib_name.c_str());
+                verbprintf(0, "Resolved '%s' to '%s'...\n", _lib_orig.c_str(),
+                           lib_name.c_str());
                 break;
             }
         }

@@ -109,7 +109,7 @@ if(OMNITRACE_USE_MPI)
 elseif(OMNITRACE_USE_MPI_HEADERS)
     find_package(MPI-Headers ${omnitrace_FIND_QUIETLY} REQUIRED)
     omnitrace_target_compile_definitions(
-        omnitrace-mpi INTERFACE TIMEMORY_USE_MPI_HEADERS OMNITRACE_USE_MPI_HEADERS)
+        omnitrace-mpi INTERFACE TIMEMORY_USE_MPI_HEADERS=1 OMNITRACE_USE_MPI_HEADERS)
     target_link_libraries(omnitrace-mpi INTERFACE MPI::MPI_HEADERS)
 endif()
 

@@ -256,4 +256,18 @@ get_cpu_cid();
 
 std::unique_ptr<std::vector<uint64_t>>&
 get_cpu_cid_stack(int64_t _tid = threading::get_id(), int64_t _parent = 0);
+
+using cpu_cid_data_t       = std::tuple<uint64_t, uint64_t, uint16_t>;
+using cpu_cid_pair_t       = std::tuple<uint64_t, uint16_t>;
+using cpu_cid_parent_map_t = std::unordered_map<uint64_t, cpu_cid_pair_t>;
+
+std::unique_ptr<cpu_cid_parent_map_t>&
+get_cpu_cid_parents(int64_t _tid = threading::get_id());
+
+cpu_cid_data_t
+create_cpu_cid_entry(int64_t _tid = threading::get_id());
+
+cpu_cid_pair_t
+get_cpu_cid_entry(uint64_t _cid, int64_t _tid = threading::get_id());
+
 }  // namespace omnitrace
