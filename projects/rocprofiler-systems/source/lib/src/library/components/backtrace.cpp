@@ -595,10 +595,9 @@ backtrace::post_process(int64_t _tid)
             _process_perfetto(_data, false);
         else
         {
-            auto _v = pthread_gotcha::enable_sampling_on_child_threads();
-            pthread_gotcha::enable_sampling_on_child_threads() = false;
+            pthread_gotcha::push_enable_sampling_on_child_threads(false);
             std::thread{ _process_perfetto, _data, true }.join();
-            pthread_gotcha::enable_sampling_on_child_threads() = _v;
+            pthread_gotcha::pop_enable_sampling_on_child_threads();
         }
     }
 

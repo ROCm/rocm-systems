@@ -30,7 +30,6 @@
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 
-namespace rocm_smi = omnitrace::rocm_smi;
 using namespace omnitrace;
 
 namespace tim
@@ -204,7 +203,7 @@ extern "C"
     bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                 const char* const* failed_tool_names)
     {
-        pthread_gotcha::enable_sampling_on_child_threads() = false;
+        pthread_gotcha::push_enable_sampling_on_child_threads(false);
         OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env() || get_verbose_env() > 0,
                                           "[%s]\n", __FUNCTION__);
         tim::consume_parameters(table, runtime_version, failed_tool_count,
@@ -297,7 +296,7 @@ extern "C"
         rocm_smi::set_state(State::Active);
         comp::roctracer::setup();
 
-        pthread_gotcha::enable_sampling_on_child_threads() = true;
+        pthread_gotcha::pop_enable_sampling_on_child_threads();
         return true;
     }
 

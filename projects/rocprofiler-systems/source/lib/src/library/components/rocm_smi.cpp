@@ -347,8 +347,7 @@ setup()
 
     if(is_initialized() || !get_use_rocm_smi()) return;
 
-    auto _enable_samp = pthread_gotcha::enable_sampling_on_child_threads();
-    pthread_gotcha::enable_sampling_on_child_threads() = false;
+    pthread_gotcha::push_enable_sampling_on_child_threads(false);
 
     // assign the data value to determined by rocm-smi
     data::device_count = device_count();
@@ -387,7 +386,7 @@ setup()
 
     data::setup();
 
-    pthread_gotcha::enable_sampling_on_child_threads() = _enable_samp;
+    pthread_gotcha::pop_enable_sampling_on_child_threads();
 }
 
 void

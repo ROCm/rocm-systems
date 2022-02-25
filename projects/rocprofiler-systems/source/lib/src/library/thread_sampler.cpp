@@ -104,8 +104,7 @@ sampler::setup()
     // shutdown if already running
     shutdown();
 
-    auto _enable_samp = pthread_gotcha::enable_sampling_on_child_threads();
-    pthread_gotcha::enable_sampling_on_child_threads() = false;
+    pthread_gotcha::push_enable_sampling_on_child_threads(false);
 
     if(get_use_rocm_smi())
     {
@@ -142,7 +141,7 @@ sampler::setup()
 
     _fut.wait();
 
-    pthread_gotcha::enable_sampling_on_child_threads() = _enable_samp;
+    pthread_gotcha::pop_enable_sampling_on_child_threads();
     set_state(State::Active);
 }
 

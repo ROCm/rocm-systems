@@ -26,6 +26,7 @@
 #include "library/components/functors.hpp"
 #include "library/components/fwd.hpp"
 #include "library/components/mpi_gotcha.hpp"
+#include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
 #include "library/debug.hpp"
@@ -383,7 +384,7 @@ omnitrace_init_library_hidden()
         OMNITRACE_CONDITIONAL_PRINT_F(get_verbose() >= 0,
                                       "Disabling critical trace in %s mode...\n",
                                       std::to_string(_mode).c_str());
-        get_use_sampling()       = true;
+        get_use_sampling()       = tim::get_env("OMNITRACE_USE_SAMPLING", true);
         get_use_critical_trace() = false;
     }
 
@@ -441,10 +442,11 @@ omnitrace_init_tooling_hidden()
     auto _dtor = scope::destructor{ []() {
         if(get_use_sampling())
         {
-            pthread_gotcha::enable_sampling_on_child_threads() = false;
+            pthread_gotcha::push_enable_sampling_on_child_threads(false);
             thread_sampler::setup();
             sampling::setup();
-            pthread_gotcha::enable_sampling_on_child_threads() = true;
+            pthread_gotcha::pop_enable_sampling_on_child_threads();
+            pthread_gotcha::push_enable_sampling_on_child_threads(get_use_sampling());
             sampling::unblock_signals();
         }
         get_main_bundle()->start();
@@ -453,7 +455,7 @@ omnitrace_init_tooling_hidden()
 
     if(get_use_sampling())
     {
-        pthread_gotcha::enable_sampling_on_child_threads() = false;
+        pthread_gotcha::push_enable_sampling_on_child_threads(false);
         sampling::block_signals();
     }
 
@@ -692,6 +694,10 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
     tim::set_env("OMNITRACE_MODE", _mode, 0);
     config::is_binary_rewrite() = _is_binary_rewrite;
 
+    // set OMNITRACE_USE_SAMPLING to ON by default if mode is sampling
+    tim::set_env("OMNITRACE_USE_SAMPLING", (get_mode() == Mode::Sampling) ? "ON" : "OFF",
+                 0);
+
     // default to KokkosP enabled when sampling, otherwise default to off
     tim::set_env("OMNITRACE_USE_KOKKOSP", (get_mode() == Mode::Sampling) ? "ON" : "OFF",
                  0);
@@ -738,7 +744,8 @@ omnitrace_finalize_hidden(void)
 
     library_functors::configure([](const char*) {}, [](const char*) {});
 
-    pthread_gotcha::enable_sampling_on_child_threads() = false;
+    pthread_gotcha::push_enable_sampling_on_child_threads(false);
+    pthread_gotcha::set_sampling_on_all_future_threads(false);
 
     auto _debug_init  = get_debug_finalize();
     auto _debug_value = get_debug();

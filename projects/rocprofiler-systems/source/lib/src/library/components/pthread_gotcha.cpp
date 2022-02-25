@@ -26,6 +26,7 @@
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/sampling.hpp"
+#include "library/thread_data.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/sampling/allocator.hpp>
@@ -83,6 +84,21 @@ stop_bundle(bundle_t& _bundle, int64_t _tid)
     // exclude popping wall-clock
     _bundle.pop(main_pw_t{}, _tid);
 }
+
+auto
+get_thread_index()
+{
+    static std::atomic<int64_t> _c{ 0 };
+    static thread_local int64_t _v = _c++;
+    return _v;
+}
+
+auto&
+get_sampling_on_child_threads_history(int64_t _idx = get_thread_index())
+{
+    static auto _v = std::array<std::vector<bool>, OMNITRACE_MAX_THREADS>{};
+    return _v.at(_idx);
+}
 }  // namespace
 
 pthread_gotcha::wrapper::wrapper(routine_t _routine, void* _arg, bool _enable_sampling,
@@ -99,11 +115,10 @@ pthread_gotcha::wrapper::operator()() const
 {
     std::shared_ptr<bundle_t> _bundle{};
     std::set<int>             _signals{};
-    auto&   _enable_sampling = pthread_gotcha::enable_sampling_on_child_threads();
-    auto    _active          = (get_state() == omnitrace::State::Active);
-    int64_t _tid             = -1;
-    auto    _is_sampling     = false;
-    auto    _dtor            = scope::destructor{ [&]() {
+    auto                      _active      = (get_state() == omnitrace::State::Active);
+    int64_t                   _tid         = -1;
+    auto                      _is_sampling = false;
+    auto                      _dtor        = scope::destructor{ [&]() {
         if(_is_sampling)
         {
             sampling::block_signals(_signals);
@@ -121,7 +136,7 @@ pthread_gotcha::wrapper::operator()() const
 
     if(_active) get_cpu_cid_stack(threading::get_id(), m_parent_tid);
 
-    if(m_enable_sampling && _enable_sampling && _active)
+    if(m_enable_sampling && _active)
     {
         _tid = threading::get_id();
         threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid).c_str());
@@ -133,10 +148,10 @@ pthread_gotcha::wrapper::operator()() const
                         .first->second;
         }
         if(_bundle) start_bundle(*_bundle);
-        _is_sampling     = true;
-        _enable_sampling = false;
-        _signals         = sampling::setup();
-        _enable_sampling = true;
+        _is_sampling = true;
+        push_enable_sampling_on_child_threads(false);
+        _signals = sampling::setup();
+        pop_enable_sampling_on_child_threads();
         sampling::unblock_signals();
     }
 
@@ -187,10 +202,48 @@ pthread_gotcha::shutdown()
     bundles.clear();
 }
 
-bool&
-pthread_gotcha::enable_sampling_on_child_threads()
+bool
+pthread_gotcha::sampling_enabled_on_child_threads()
 {
-    static thread_local bool _v = get_use_sampling();
+    return sampling_on_child_threads();
+}
+
+bool
+pthread_gotcha::push_enable_sampling_on_child_threads(bool _v)
+{
+    auto& _hist = get_sampling_on_child_threads_history();
+    bool  _last = sampling_on_child_threads();
+    _hist.emplace_back(_last);
+    sampling_on_child_threads() = _v;
+    return _last;
+}
+
+bool
+pthread_gotcha::pop_enable_sampling_on_child_threads()
+{
+    auto& _hist = get_sampling_on_child_threads_history();
+    if(!_hist.empty())
+    {
+        bool _restored = _hist.back();
+        _hist.pop_back();
+        sampling_on_child_threads() = _restored;
+    }
+    return sampling_on_child_threads();
+}
+
+void
+pthread_gotcha::set_sampling_on_all_future_threads(bool _v)
+{
+    for(size_t i = 0; i < max_supported_threads; ++i)
+        get_sampling_on_child_threads_history(i).emplace_back(_v);
+}
+
+bool&
+pthread_gotcha::sampling_on_child_threads()
+{
+    static thread_local bool _v = get_sampling_on_child_threads_history().empty()
+                                      ? false
+                                      : get_sampling_on_child_threads_history().back();
     return _v;
 }
 
@@ -200,7 +253,7 @@ pthread_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
                            void* (*start_routine)(void*), void*     arg) const
 {
     bundle_t _bundle{ "pthread_create" };
-    auto     _enable_sampling = enable_sampling_on_child_threads();
+    auto     _enable_sampling = sampling_enabled_on_child_threads();
     auto     _active          = (get_state() == omnitrace::State::Active);
     int64_t  _tid             = (_active) ? threading::get_id() : 0;
 

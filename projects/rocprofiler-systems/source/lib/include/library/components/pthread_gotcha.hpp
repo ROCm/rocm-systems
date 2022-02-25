@@ -26,6 +26,7 @@
 #include "library/defines.hpp"
 #include "library/timemory.hpp"
 
+#include <cstdint>
 #include <future>
 
 namespace omnitrace
@@ -59,12 +60,24 @@ struct pthread_gotcha : tim::component::base<pthread_gotcha, void>
     static void configure();
     static void shutdown();
 
-    // threads can set this to avoid starting sampling on child threads
-    static bool& enable_sampling_on_child_threads();
+    // query current value
+    static bool sampling_enabled_on_child_threads();
+
+    // use this to disable sampling in a region (e.g. right before thread creation)
+    static bool push_enable_sampling_on_child_threads(bool _v);
+
+    // use this to restore previous setting
+    static bool pop_enable_sampling_on_child_threads();
+
+    // make sure every newly created thead starts with this value
+    static void set_sampling_on_all_future_threads(bool _v);
 
     // pthread_create
     int operator()(pthread_t* thread, const pthread_attr_t* attr,
                    void* (*start_routine)(void*), void*     arg) const;
+
+private:
+    static bool& sampling_on_child_threads();
 };
 
 using pthread_gotcha_t = tim::component::gotcha<2, std::tuple<>, pthread_gotcha>;
