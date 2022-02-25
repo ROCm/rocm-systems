@@ -121,31 +121,21 @@ message ( "-----------Dest-name: ${DEST_NAME}" )
 message ( "------Install-prefix: ${CMAKE_INSTALL_PREFIX}" )
 message ( "-----------CPACK-dir: ${CPACK_PACKAGING_INSTALL_PREFIX}" )
 
-#add_custom_target ( inc-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-#                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/include inc-link )
-add_custom_target ( so-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTRACER_LIBRARY}.so so-link )
-add_custom_target ( so-major-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTRACER_LIBRARY}.so.${LIB_VERSION_MAJOR} so-major-link )
-add_custom_target ( so-patch-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTRACER_LIBRARY}.so.${LIB_VERSION_STRING} so-patch-link )
-
 ## Install information
-install ( TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION ${DEST_NAME}/lib )
+install ( TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION lib )
 foreach ( header ${PUBLIC_HEADERS} )
   get_filename_component ( header_subdir ${header} DIRECTORY )
-  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/${header} DESTINATION ${DEST_NAME}/include/${header_subdir} )
   install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/${header} DESTINATION include/${DEST_NAME}/${header_subdir} )
 endforeach ()
 foreach ( header ${GEN_HEADERS} )
   get_filename_component ( header_subdir ${header} DIRECTORY )
-  install ( FILES ${PROJECT_BINARY_DIR}/inc/${header} DESTINATION ${DEST_NAME}/include/${header_subdir} )
   install ( FILES ${PROJECT_BINARY_DIR}/inc/${header} DESTINATION include/${DEST_NAME}/${header_subdir} )
 endforeach ()
-#install ( FILES ${PROJECT_BINARY_DIR}/inc-link DESTINATION include RENAME ${DEST_NAME} )
-install ( FILES ${PROJECT_BINARY_DIR}/so-link DESTINATION lib RENAME ${ROCTRACER_LIBRARY}.so )
-install ( FILES ${PROJECT_BINARY_DIR}/so-major-link DESTINATION lib RENAME ${ROCTRACER_LIBRARY}.so.${LIB_VERSION_MAJOR} )
-install ( FILES ${PROJECT_BINARY_DIR}/so-patch-link DESTINATION lib RENAME ${ROCTRACER_LIBRARY}.so.${LIB_VERSION_STRING} )
+
+option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
+if(FILE_REORG_BACKWARD_COMPATIBILITY)
+  include(roctracer-backward-compat.cmake)
+endif()
 
 ## rocTX
 set ( ROCTX_TARGET "roctx64" )
@@ -155,17 +145,7 @@ set ( ROCTX_LIBRARY "lib${ROCTX_TARGET}" )
 set_property ( TARGET ${ROCTX_TARGET} PROPERTY VERSION "${LIB_VERSION_STRING}" )
 set_property ( TARGET ${ROCTX_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
 
-add_custom_target ( so-roctx-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTX_LIBRARY}.so so-roctx-link )
-add_custom_target ( so-roctx-major-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTX_LIBRARY}.so.${LIB_VERSION_MAJOR} so-roctx-major-link )
-add_custom_target ( so-roctx-patch-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCTX_LIBRARY}.so.${LIB_VERSION_STRING} so-roctx-patch-link )
-
-install ( TARGETS "roctx64" LIBRARY DESTINATION ${DEST_NAME}/lib )
-install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-link DESTINATION lib RENAME ${ROCTX_LIBRARY}.so )
-install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-major-link DESTINATION lib RENAME ${ROCTX_LIBRARY}.so.${LIB_VERSION_MAJOR} )
-install ( FILES ${PROJECT_BINARY_DIR}/so-roctx-patch-link DESTINATION lib RENAME ${ROCTX_LIBRARY}.so.${LIB_VERSION_STRING} )
+install ( TARGETS ${ROCTX_TARGET} LIBRARY DESTINATION lib )
 
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR DEB;RPM")
