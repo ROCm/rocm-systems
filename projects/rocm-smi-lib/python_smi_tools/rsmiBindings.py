@@ -10,7 +10,9 @@ from enum import Enum
 import os
 
 # Use ROCm installation path if running from standard installation
-path_librocm = os.path.dirname(os.path.realpath(__file__)) + '/../lib/librocm_smi64.so'
+# With File Reorg rsmiBindings.py will be installed in  /opt/rocm/libexec/rocm_smi.
+# relative path changed accordingly
+path_librocm = os.path.dirname(os.path.realpath(__file__)) + '/../../lib/librocm_smi64.so'
 if not os.path.isfile(path_librocm):
     print('Unable to find %s . Trying /opt/rocm*' % path_librocm)
     for root, dirs, files in os.walk('/opt', followlinks=True):

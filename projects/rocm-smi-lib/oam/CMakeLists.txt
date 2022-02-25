@@ -101,12 +101,12 @@ target_include_directories(${OAM_TARGET}
 ## Add the install directives for the runtime library.
 install(TARGETS ${OAM_TARGET}
           EXPORT rocm_smiTargets
-          LIBRARY DESTINATION ${OAM_NAME}/lib
-          ARCHIVE DESTINATION ${OAM_NAME}/lib
+          LIBRARY DESTINATION lib
+          ARCHIVE DESTINATION lib
           COMPONENT ${OAM_COMPONENT})
 install(FILES ${COMMON_SRC_ROOT}/oam/include/oam/oam_mapi.h
               ${COMMON_SRC_ROOT}/oam/include/oam/amd_oam.h
-                                        DESTINATION oam/include/oam)
+                                        DESTINATION include/oam)
 
 # Generate Doxygen documentation
 if (DOXYGEN_FOUND)
