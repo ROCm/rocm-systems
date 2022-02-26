@@ -31,7 +31,7 @@ if [ ! -f build-release/${PACKAGE_BASE_TAG}.sh ]; then
     cp build-release/${DISTRO}-core/omnitrace-${VERSION}-Linux.sh build-release/${PACKAGE_BASE_TAG}.sh
 fi
 
-apt-get install -y libopenmpi-dev openmpi-bin
+apt-get install -y libopenmpi-dev openmpi-bin libudev-dev
 
 STANDARD_ARGS="${STANDARD_ARGS} -DOMNITRACE_USE_HIP=ON -DOMNITRACE_USE_MPI_HEADERS=ON -DDYNINST_USE_OpenMP=ON"
 
@@ -48,6 +48,8 @@ if [ ! -f build-release/${PACKAGE_BASE_TAG}-ROCm-${ROCM_VERSION}-PAPI.sh ]; then
     cmake --build build-release/${DISTRO}-rocm-${ROCM_VERSION}-papi --target package --parallel ${NJOBS}
     cp build-release/${DISTRO}-rocm-${ROCM_VERSION}-papi/omnitrace-${VERSION}-Linux.sh build-release/${PACKAGE_BASE_TAG}-ROCm-${ROCM_VERSION}-PAPI.sh
 fi
+
+if [ "${MPI}" -lt  1 ]; then exit 0; fi
 
 STANDARD_ARGS="${STANDARD_ARGS} -DOMNITRACE_USE_MPI=ON"
 
