@@ -132,51 +132,47 @@ message ( "CMake-install-prefix: ${CMAKE_INSTALL_PREFIX}" )
 message ( "CPack-install-prefix: ${CPACK_PACKAGING_INSTALL_PREFIX}" )
 message ( "-----------Dest-name: ${DEST_NAME}" )
 
-## Create symlinks for packaging and install
-add_custom_target ( rocprof-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/bin/rpl_run.sh rocprof-link )
-#add_custom_target ( inc-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-#                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/include inc-link )
-add_custom_target ( so-link ALL WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink ../${DEST_NAME}/lib/${ROCPROFILER_LIBRARY}.so so-link )
 
 # Install header and library
-install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${DEST_NAME}/lib )
-install ( FILES
-          ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h
-          ${CMAKE_CURRENT_SOURCE_DIR}/src/core/activity.h
-          DESTINATION ${DEST_NAME}/include )
+install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION lib )
 install ( FILES
           ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h
           ${CMAKE_CURRENT_SOURCE_DIR}/src/core/activity.h
           DESTINATION include/${DEST_NAME} )
 # rpl_run.sh tblextr.py txt2xml.sh
 install ( FILES
-          ${CMAKE_CURRENT_SOURCE_DIR}/bin/merge_traces.sh
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/rpl_run.sh
+          DESTINATION bin
+          PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+          RENAME rocprof )
+
+install ( FILES
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2xml.sh
+          ${CMAKE_CURRENT_SOURCE_DIR}/bin/merge_traces.sh
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2params.py
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/tblextr.py
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/dform.py
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/mem_manager.py
           ${CMAKE_CURRENT_SOURCE_DIR}/bin/sqlitedb.py
-          DESTINATION ${DEST_NAME}/bin
+          DESTINATION libexec/${DEST_NAME}
           PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )
 # gfx_metrics.xml metrics.xml
 install ( FILES
           ${CMAKE_CURRENT_SOURCE_DIR}/test/tool/metrics.xml
           ${CMAKE_CURRENT_SOURCE_DIR}/test/tool/gfx_metrics.xml
-          DESTINATION ${DEST_NAME}/lib )
-# libtool.so
-install ( FILES ${PROJECT_BINARY_DIR}/test/libtool.so DESTINATION ${DEST_NAME}/tool )
-install ( FILES ${PROJECT_BINARY_DIR}/test/ctrl DESTINATION ${DEST_NAME}/tool
+          DESTINATION lib/${DEST_NAME} )
+# librocprof-tool.so
+install ( FILES ${PROJECT_BINARY_DIR}/test/librocprof-tool.so DESTINATION lib/${DEST_NAME} )
+install ( FILES ${PROJECT_BINARY_DIR}/test/rocprof-ctrl DESTINATION lib/${DEST_NAME}
           PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE )
+
+# File reorg Backward compatibility
+option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
+if(FILE_REORG_BACKWARD_COMPATIBILITY)
+  include (rocprofiler-backward-compat.cmake)
+endif()
 # links
-install ( FILES ${PROJECT_BINARY_DIR}/so-link DESTINATION lib RENAME ${ROCPROFILER_LIBRARY}.so )
 #install ( FILES ${PROJECT_BINARY_DIR}/inc-link DESTINATION include RENAME ${DEST_NAME} )
-install ( FILES ${PROJECT_BINARY_DIR}/rocprof-link DESTINATION bin
-          PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-          RENAME rocprof )
 
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR e.g. DEB;RPM" )
