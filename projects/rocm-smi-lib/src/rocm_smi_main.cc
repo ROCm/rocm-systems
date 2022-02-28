@@ -183,6 +183,7 @@ static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
   assert(bdfid != nullptr);
   char tpath[256];
   ssize_t ret;
+  memset(tpath,0,256);
 
   ret = readlink(path.c_str(), tpath, 256);
 
