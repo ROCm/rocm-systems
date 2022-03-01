@@ -185,10 +185,8 @@ class MetricsGroupSet {
   uint32_t GetSize() const { return groups_.size(); }
 
   void Print(FILE* file) const {
-    uint32_t idx = 0;
     for (const auto* group : groups_) {
-      ++idx;
-      fprintf(stdout, " group%u:", idx); fflush(stdout);
+      fprintf(stdout, " pmc : "); fflush(stdout);
       group->Print(file);
     }
   }
