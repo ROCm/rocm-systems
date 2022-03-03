@@ -54,3 +54,13 @@ $BLACKLIST_ALL_ASICS\
 FILTER[sienna_cichlid]=\
 $BLACKLIST_ALL_ASICS\
 "rsmitstReadWrite.TestPerfLevelReadWrite"
+
+# SWDEV-321166
+FILTER[virtualization]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadOnly.TestOverdriveRead:"\
+"rsmitstReadOnly.TestGPUBusyRead:"\
+"rsmitstReadWrite.FanReadWrite:"\
+"rsmitstReadWrite.TestOverdriveReadWrite:"\
+"rsmitstReadWrite.TestPowerReadWrite:"\
+"rsmitstReadWrite.TestPowerCapReadWrite"
