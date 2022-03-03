@@ -36,7 +36,7 @@ add_definitions ( -DHSA_LARGE_MODEL= )
 add_definitions ( -DHSA_DEPRECATED= )
 
 ## Linux Compiler options
-set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall" )
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror" )
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=return-type" )
@@ -48,12 +48,9 @@ set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fmerge-all-constants" )
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fms-extensions" )
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fmerge-all-constants" )
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=unused-result" )
-#set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=int-in-bool-context" )
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC" )
 
 add_link_options ("-Bdynamic -z,neexecstack")
-
-set ( CMAKE_SKIP_BUILD_RPATH TRUE )
 
 add_definitions ( -DNEW_TRACE_API=1 )
 
@@ -96,22 +93,11 @@ else ()
   set ( CMAKE_BUILD_TYPE "release" )
 endif ()
 
-## Extend Compiler flags based on Processor architecture
-if ( ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64" )
-  set ( NBIT 64 )
-  set ( NBITSTR "64" )
-  set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m64  -msse -msse2" )
-elseif ( ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86" )
-  set ( NBIT 32 )
-  set ( NBITSTR "" )
-  set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32" )
-endif ()
-
 ## Find hsa-runtime
-find_package(hsa-runtime64 1.0 REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /opt/rocm)
+find_package(hsa-runtime64 CONFIG REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /opt/rocm PATH_SUFFIXES lib/cmake/hsa-runtime64 )
 
 # find KFD thunk
-find_package(hsakmt 1.0 REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /opt/rocm)
+find_package(hsakmt CONFIG REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /opt/rocm PATH_SUFFIXES lib/cmake/hsakmt )
 
 ## Find ROCm
 find_library ( HSA_KMT_LIB "libhsakmt.so" )
@@ -122,7 +108,6 @@ get_filename_component ( HSA_KMT_LIB_PATH "${HSA_KMT_LIB}" DIRECTORY )
 get_filename_component ( ROCM_ROOT_DIR "${HSA_KMT_LIB_PATH}" DIRECTORY )
 
 ## Basic Tool Chain Information
-message ( "----------------NBit: ${NBIT}" )
 message ( "----------Build-Type: ${CMAKE_BUILD_TYPE}" )
 message ( "------------Compiler: ${CMAKE_CXX_COMPILER}" )
 message ( "----Compiler-Version: ${CMAKE_CXX_COMPILER_VERSION}" )

@@ -17,6 +17,8 @@ The library source tree:
 
 Build environment:
 
+Roctracer & Rocprofiler need to be installed in the same directory.
+
 $ export CMAKE_PREFIX_PATH=<path to hsa-runtime includes>:<path to hsa-runtime library>
 $ export CMAKE_BUILD_TYPE=<debug|release> # release by default
 $ export CMAKE_DEBUG_TRACE=1 # 1 to enable debug tracing

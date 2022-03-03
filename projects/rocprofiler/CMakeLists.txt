@@ -22,9 +22,6 @@
 
 cmake_minimum_required ( VERSION 2.8.12 )
 
-# Install prefix
-set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix default")
-
 ## Verbose output.
 set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
 
@@ -78,9 +75,9 @@ endif()
 # Protocol header lookup
 set(PROF_API_HEADER_NAME prof_protocol.h)
 if(USE_PROF_API EQUAL 1)
-    find_path(PROF_API_HEADER_DIR ${PROF_API_HEADER_NAME}
+  find_path(PROF_API_HEADER_DIR ${PROF_API_HEADER_NAME}
         HINTS
-            ${PROF_API_HEADER_PATH}
+          ${PROF_API_HEADER_PATH}
         PATHS
             /opt/rocm/include
         PATH_SUFFIXES
@@ -132,7 +129,6 @@ message ( "CMake-install-prefix: ${CMAKE_INSTALL_PREFIX}" )
 message ( "CPack-install-prefix: ${CPACK_PACKAGING_INSTALL_PREFIX}" )
 message ( "-----------Dest-name: ${DEST_NAME}" )
 
-
 # Install header and library
 install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION lib )
 install ( FILES
@@ -171,8 +167,6 @@ option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compat
 if(FILE_REORG_BACKWARD_COMPATIBILITY)
   include (rocprofiler-backward-compat.cmake)
 endif()
-# links
-#install ( FILES ${PROJECT_BINARY_DIR}/inc-link DESTINATION include RENAME ${DEST_NAME} )
 
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR e.g. DEB;RPM" )
