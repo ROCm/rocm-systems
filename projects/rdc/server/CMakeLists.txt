@@ -101,6 +101,14 @@ if (DEFINED ENV{ROCM_RPATH})
    absl_bad_optional_access absl_strings absl_throw_delegate absl_int128
         absl_strings_internal absl_raw_logging_internal address_sorting
         gpr upb ssl crypto)
+
+  # Include absl_synchronization from higher version gRPC
+  find_library(ABSL_SYNC_LIB absl_synchronization PATHS ${GRPC_ROOT} PATH_SUFFIXES lib lib64)
+  if(ABSL_SYNC_LIB)
+      message("link to libabsl_synchronization.so from grpc ......")
+      set(RDCD_EXTRA_LIB ${RDCD_EXTRA_LIB} absl_synchronization)
+  endif()
+
 endif()
 
 add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
