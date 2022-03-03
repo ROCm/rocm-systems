@@ -50,7 +50,7 @@ void Fail(const char* msg) {
 // Tests that an assertion failure throws a subclass of
 // std::runtime_error.
 void TestFailureThrowsRuntimeError() {
-  testing::GTEST_FLAG(throw_on_failure) = true;
+  GTEST_FLAG_SET(throw_on_failure, true);
 
   // A successful assertion shouldn't throw.
   try {
@@ -63,8 +63,7 @@ void TestFailureThrowsRuntimeError() {
   try {
     EXPECT_EQ(2, 3) << "Expected failure";
   } catch(const std::runtime_error& e) {
-    if (strstr(e.what(), "Expected failure") != NULL)
-      return;
+    if (strstr(e.what(), "Expected failure") != nullptr) return;
 
     printf("%s",
            "A failed assertion did throw an exception of the right type, "
