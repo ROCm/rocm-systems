@@ -221,8 +221,8 @@ def dump_csv(file_name):
 
   with open(file_name, mode='w') as fd:
     fd.write(','.join(var_list) + '\n');
-    for ind in keys:
-      entry = var_table[ind]
+    for pid, ind in keys:
+      entry = var_table[(pid, ind)]
       dispatch_number = entry['Index']
       if ind != dispatch_number: fatal("Dispatch #" + ind + " index mismatch (" + dispatch_number + ")\n")
       val_list = [entry[var] for var in var_list]
