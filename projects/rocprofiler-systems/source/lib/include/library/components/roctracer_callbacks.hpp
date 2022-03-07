@@ -30,13 +30,6 @@
 #include "library/ptl.hpp"
 
 #include <roctracer.h>
-#include <roctracer_ext.h>
-#include <roctracer_hcc.h>
-#include <roctracer_hip.h>
-
-#define AMD_INTERNAL_BUILD 1
-#include <ext/hsa_rt_utils.hpp>
-#include <roctracer_hsa.h>
 
 #include <iostream>
 #include <memory>
