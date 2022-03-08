@@ -5,7 +5,7 @@ set -e
 do_ldconfig() {
   # left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
   if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
-    echo @CPACK_PACKAGING_INSTALL_PREFIX@/rocprofiler/lib > /etc/ld.so.conf.d/librocprofiler64.conf
+    echo @CPACK_PACKAGING_INSTALL_PREFIX@/lib > /etc/ld.so.conf.d/librocprofiler64.conf
     ldconfig
   fi
 }

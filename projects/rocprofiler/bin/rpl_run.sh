@@ -24,17 +24,17 @@
 
 time_stamp=`date +%y%m%d_%H%M%S`
 BIN_DIR=$(dirname $(realpath ${BASH_SOURCE[0]}))
-PKG_DIR=$(dirname $BIN_DIR)
-ROOT_DIR=$(dirname $PKG_DIR)
+ROOT_DIR=$(dirname $BIN_DIR)
 TT_DIR=$ROOT_DIR/roctracer
 RUN_DIR=`pwd`
 TMP_DIR="/tmp"
 DATA_DIR="rpl_data_${time_stamp}_$$"
 
-RPL_PATH=$PKG_DIR/lib
-TLIB_PATH=$PKG_DIR/tool
+RPL_PATH=$ROOT_DIR/lib
+TLIB_PATH=$RPL_PATH/rocprofiler
 TTLIB_PATH=$TT_DIR/tool
 ROCM_LIB_PATH=$ROOT_DIR/lib
+PROF_BIN_DIR=$ROOT_DIR/libexec/rocprofiler
 
 if [ -z "$ROCP_PYTHON_VERSION" ] ; then
   ROCP_PYTHON_VERSION=python3
@@ -64,17 +64,17 @@ unset ROCPROFILER_SESS
 # Loading of profiler library by HSA runtime
 MY_HSA_TOOLS_LIB="$RPL_PATH/librocprofiler64.so"
 # Loading of the test tool by ROC Profiler
-export ROCP_TOOL_LIB=$TLIB_PATH/libtool.so
+export ROCP_TOOL_LIB=$TLIB_PATH/librocprof-tool.so
 # Enabling HSA dispatches intercepting by ROC PRofiler
 export ROCP_HSA_INTERCEPT=1
 # Disabling internal ROC Profiler proxy queue (simple version supported for testing purposes)
 unset ROCP_PROXY_QUEUE
 # ROC Profiler metrics definition
-export ROCP_METRICS=$PKG_DIR/lib/metrics.xml
+export ROCP_METRICS=$TLIB_PATH/metrics.xml
 # Disable AQL-profile read API
 export AQLPROFILE_READ_API=0
 # ROC Profiler package path
-export ROCP_PACKAGE_DIR=$PKG_DIR
+export ROCP_PACKAGE_DIR=$ROOT_DIR
 # enabled SPM KFD mode
 export ROCP_SPM_KFD_MODE=1
 
@@ -104,7 +104,7 @@ usage() {
   bin_name=`basename $0`
   echo "ROCm Profiling Library (RPL) run script, a part of ROCprofiler library package."
   echo "Full path: $BIN_DIR/$bin_name"
-  echo "Metrics definition: $PKG_DIR/lib/metrics.xml"
+  echo "Metrics definition: $TLIB_PATH/metrics.xml"
   echo ""
   echo "Usage:"
   echo "  $bin_name [-h] [--list-basic] [--list-derived] [-i <input .txt/.xml file>] [-o <output CSV file>] <app command line>"
@@ -336,7 +336,7 @@ convert_time_val() {
 
 ################################################################################################
 # main
-echo "RPL: on '$time_stamp' from '$PKG_DIR' in '$RUN_DIR'"
+echo "RPL: on '$time_stamp' from '$ROOT_DIR' in '$RUN_DIR'"
 # Parsing arguments
 if [ -z "$1" ] ; then
   usage
@@ -374,11 +374,11 @@ while [ 1 ] ; do
     export ROCP_METRICS="$2"
   elif [ "$1" = "--list-basic" ] ; then
     export ROCP_INFO=b
-    HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" eval "$PKG_DIR/tool/ctrl"
+    HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" eval "$TLIB_PATH/rocprof-ctrl"
     exit 1
   elif [ "$1" = "--list-derived" ] ; then
     export ROCP_INFO=d
-    HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" eval "$PKG_DIR/tool/ctrl"
+    HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" eval "$TLIB_PATH/rocprof-ctrl"
     exit 1
   elif [ "$1" = "--basenames" ] ; then
     if [ "$2" = "on" ] ; then
@@ -536,7 +536,7 @@ elif [ "$input_type" = "txt" -o "$input_type" = "none" ] ; then
   mkdir -p $RES_DIR
   echo "RPL: output dir '$RES_DIR'"
   if [ "$input_type" = "txt" ] ; then
-    $BIN_DIR/txt2xml.sh $INPUT_FILE $RES_DIR
+    $PROF_BIN_DIR/txt2xml.sh $INPUT_FILE $RES_DIR
   else
     echo "<metric></metric>" > $RES_DIR/input.xml
   fi
@@ -567,9 +567,9 @@ if [ -n "$csv_output" ] ; then
   merge_output $OUTPUT_LIST
   if [ "$GEN_STATS" = "1" ] ; then
     db_output=$(echo $csv_output | sed "s/\.csv/.db/")
-    $ROCP_PYTHON_VERSION $BIN_DIR/tblextr.py $db_output $OUTPUT_LIST
+    $ROCP_PYTHON_VERSION $PROF_BIN_DIR/tblextr.py $db_output $OUTPUT_LIST
   else
-    $ROCP_PYTHON_VERSION $BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST
+    $ROCP_PYTHON_VERSION $PROF_BIN_DIR/tblextr.py $csv_output $OUTPUT_LIST
   fi
   if [ "$?" -ne 0 ] ; then
     echo "Profiling data corrupted: '$OUTPUT_LIST'" | tee "$ROCPROFILER_SESS/error"

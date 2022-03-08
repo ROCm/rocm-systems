@@ -23,7 +23,7 @@
 cmake_minimum_required ( VERSION 2.8.12 )
 set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
 
-set ( EXE_NAME "ctrl" )
+set ( EXE_NAME "rocprof-ctrl" )
 
 if ( NOT DEFINED TEST_DIR )
   set ( TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR} )
@@ -105,7 +105,7 @@ execute_process ( COMMAND sh -xc "cp ${TEST_DIR}/tool/*.xml ${PROJECT_BINARY_DIR
 execute_process ( COMMAND sh -xc "mkdir -p ${PROJECT_BINARY_DIR}/RESULTS" )
 
 ## Build test library
-set ( TEST_LIB "tool" )
+set ( TEST_LIB "rocprof-tool" )
 set ( TEST_LIB_SRC ${TEST_DIR}/tool/tool.cpp ${UTIL_SRC} )
 add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
 target_include_directories ( ${TEST_LIB} PRIVATE ${TEST_DIR} ${ROOT_DIR} )
