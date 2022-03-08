@@ -30,6 +30,7 @@
 #include "library/components/omnitrace.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/roctracer.hpp"
+#include "library/components/user_region.hpp"
 #include "library/config.hpp"
 
 #include <timemory/components.hpp>
@@ -613,8 +614,6 @@ main(int argc, char** argv)
 
     if(!os) os = &std::cout;
 
-    omnitrace_init_library();
-
     if(include_components) write_component_info(*os, options, use_mark, fields);
 
     dump_log();
@@ -766,7 +765,9 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                             _mark.at(i));
             }
 
-            _selected += (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
+            if(!category_regex_keys.empty())
+                _selected +=
+                    (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
 
             if(_selected == 0) continue;
         }
@@ -834,7 +835,8 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
                         _mark.at(i));
         }
 
-        _selected += (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
+        if(!category_regex_keys.empty())
+            _selected += (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
 
         if(_selected > 0)
         {

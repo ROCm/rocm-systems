@@ -55,17 +55,3 @@ if(NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY
                                                      ${CMAKE_BINARY_DIR})
 endif()
-
-enable_testing()
-if(LULESH_USE_MPI)
-    add_test(
-        NAME lulesh
-        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 8
-                $<TARGET_FILE:${PROJECT_NAME}> -i 100 -s 20 -p
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-else()
-    add_test(
-        NAME lulesh
-        COMMAND $<TARGET_FILE:${PROJECT_NAME}> -i 100 -s 20 -p
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-endif()

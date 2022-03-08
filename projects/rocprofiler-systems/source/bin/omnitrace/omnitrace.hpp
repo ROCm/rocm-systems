@@ -22,231 +22,10 @@
 
 #pragma once
 
-#include <timemory/backends/process.hpp>
-#include <timemory/environment.hpp>
-#include <timemory/mpl/apply.hpp>
-#include <timemory/mpl/concepts.hpp>
-#include <timemory/mpl/policy.hpp>
-#include <timemory/tpls/cereal/archives.hpp>
-#include <timemory/tpls/cereal/cereal.hpp>
-#include <timemory/utility/argparse.hpp>
-#include <timemory/utility/demangle.hpp>
-#include <timemory/utility/popen.hpp>
-#include <timemory/variadic/macros.hpp>
-
-#include <BPatch.h>
-#include <BPatch_Vector.h>
-#include <BPatch_addressSpace.h>
-#include <BPatch_basicBlockLoop.h>
-#include <BPatch_callbacks.h>
-#include <BPatch_function.h>
-#include <BPatch_point.h>
-#include <BPatch_process.h>
-#include <BPatch_snippet.h>
-#include <BPatch_statement.h>
-
-#include <climits>
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
-#include <exception>
-#include <fstream>
-#include <limits>
-#include <memory>
-#include <numeric>
-#include <ostream>
-#include <regex>
-#include <set>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <unistd.h>
-#include <vector>
-
-#define MUTNAMELEN       1024
-#define FUNCNAMELEN      32 * 1024
-#define NO_ERROR         -1
-#define TIMEMORY_BIN_DIR "bin"
-
-#if !defined(PATH_MAX)
-#    define PATH_MAX std::numeric_limits<int>::max();
-#endif
-
-struct function_signature;
-struct module_function;
-
-template <typename Tp>
-using bpvector_t = BPatch_Vector<Tp>;
-
-using string_t              = std::string;
-using stringstream_t        = std::stringstream;
-using strvec_t              = std::vector<string_t>;
-using strset_t              = std::set<string_t>;
-using regexvec_t            = std::vector<std::regex>;
-using fmodset_t             = std::set<module_function>;
-using fixed_modset_t        = std::map<fmodset_t*, bool>;
-using exec_callback_t       = BPatchExecCallback;
-using exit_callback_t       = BPatchExitCallback;
-using fork_callback_t       = BPatchForkCallback;
-using patch_t               = BPatch;
-using process_t             = BPatch_process;
-using thread_t              = BPatch_thread;
-using binary_edit_t         = BPatch_binaryEdit;
-using image_t               = BPatch_image;
-using module_t              = BPatch_module;
-using procedure_t           = BPatch_function;
-using snippet_t             = BPatch_snippet;
-using call_expr_t           = BPatch_funcCallExpr;
-using address_space_t       = BPatch_addressSpace;
-using flow_graph_t          = BPatch_flowGraph;
-using basic_loop_t          = BPatch_basicBlockLoop;
-using procedure_loc_t       = BPatch_procedureLocation;
-using point_t               = BPatch_point;
-using local_var_t           = BPatch_localVar;
-using const_expr_t          = BPatch_constExpr;
-using error_level_t         = BPatchErrorLevel;
-using patch_pointer_t       = std::shared_ptr<patch_t>;
-using snippet_pointer_t     = std::shared_ptr<snippet_t>;
-using call_expr_pointer_t   = std::shared_ptr<call_expr_t>;
-using snippet_vec_t         = bpvector_t<snippet_t*>;
-using procedure_vec_t       = bpvector_t<procedure_t*>;
-using basic_loop_vec_t      = bpvector_t<basic_loop_t*>;
-using snippet_pointer_vec_t = std::vector<snippet_pointer_t>;
-
-void
-omnitrace_prefork_callback(thread_t* parent, thread_t* child);
-
-//======================================================================================//
-//
-//                                  Global Variables
-//
-//======================================================================================//
-//
-//  boolean settings
-//
-static bool use_return_info = false;
-static bool use_args_info   = false;
-static bool use_file_info   = false;
-static bool use_line_info   = false;
-//
-//  integral settings
-//
-extern bool debug_print;
-extern int  verbose_level;
-//
-//  string settings
-//
-static string_t main_fname         = "main";
-static string_t argv0              = {};
-static string_t cmdv0              = {};
-static string_t default_components = "wall_clock";
-static string_t prefer_library     = {};
-//
-//  global variables
-//
-static patch_pointer_t bpatch                        = {};
-static call_expr_t*    terminate_expr                = nullptr;
-static snippet_vec_t   init_names                    = {};
-static snippet_vec_t   fini_names                    = {};
-static fmodset_t       available_module_functions    = {};
-static fmodset_t       instrumented_module_functions = {};
-static fmodset_t       overlapping_module_functions  = {};
-static fmodset_t       excluded_module_functions     = {};
-static fixed_modset_t  fixed_module_functions        = {};
-static regexvec_t      func_include                  = {};
-static regexvec_t      func_exclude                  = {};
-static regexvec_t      file_include                  = {};
-static regexvec_t      file_exclude                  = {};
-static regexvec_t      file_restrict                 = {};
-static regexvec_t      func_restrict                 = {};
-//
-//======================================================================================//
-
-// control debug printf statements
-#define errprintf(LEVEL, ...)                                                            \
-    {                                                                                    \
-        if(werror || LEVEL < 0)                                                          \
-        {                                                                                \
-            if(debug_print || verbose_level >= LEVEL)                                    \
-                fprintf(stderr, "[omnitrace][exe] Error! " __VA_ARGS__);                 \
-            char _buff[FUNCNAMELEN];                                                     \
-            sprintf(_buff, "[omnitrace][exe] Error! " __VA_ARGS__);                      \
-            throw std::runtime_error(std::string{ _buff });                              \
-        }                                                                                \
-        else                                                                             \
-        {                                                                                \
-            if(debug_print || verbose_level >= LEVEL)                                    \
-                fprintf(stderr, "[omnitrace][exe] Warning! " __VA_ARGS__);               \
-        }                                                                                \
-        fflush(stderr);                                                                  \
-    }
-
-// control verbose printf statements
-#define verbprintf(LEVEL, ...)                                                           \
-    {                                                                                    \
-        if(debug_print || verbose_level >= LEVEL)                                        \
-            fprintf(stdout, "[omnitrace][exe] " __VA_ARGS__);                            \
-        fflush(stdout);                                                                  \
-    }
-
-#define verbprintf_bare(LEVEL, ...)                                                      \
-    {                                                                                    \
-        if(debug_print || verbose_level >= LEVEL) fprintf(stdout, __VA_ARGS__);          \
-        fflush(stdout);                                                                  \
-    }
-
-//======================================================================================//
-
-template <typename... T>
-void
-consume_parameters(T&&...)
-{}
-
-//======================================================================================//
-
-extern "C"
-{
-    bool are_file_include_exclude_lists_empty();
-    bool instrument_module(const string_t& file_name);
-    bool instrument_entity(const string_t& function_name);
-    bool module_constraint(char* fname);
-    bool routine_constraint(const char* fname);
-}
-
-//======================================================================================//
-
-strset_t
-get_whole_function_names();
-
-function_signature
-get_func_file_line_info(module_t* mutatee_module, procedure_t* f);
-
-function_signature
-get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* cfGraph,
-                        basic_loop_t* loopToInstrument);
-
-bool
-query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc,
-            flow_graph_t* cfGraph = nullptr, basic_loop_t* loopToInstrument = nullptr,
-            bool allow_traps = true);
-
-template <typename Tp>
-bool
-insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
-             procedure_loc_t traceLoc, flow_graph_t* cfGraph = nullptr,
-             basic_loop_t* loopToInstrument = nullptr, bool allow_traps = true);
-
-void
-errorFunc(error_level_t level, int num, const char** params);
-
-procedure_t*
-find_function(image_t* appImage, const string_t& functionName, const strset_t& = {});
-
-void
-error_func_real(error_level_t level, int num, const char* const* params);
-
-void
-error_func_fake(error_level_t level, int num, const char* const* params);
+#include "function_signature.hpp"
+#include "fwd.hpp"
+#include "info.hpp"
+#include "module_function.hpp"
 
 //======================================================================================//
 
@@ -281,465 +60,6 @@ to_lower(string_t s)
     for(auto& itr : s)
         itr = tolower(itr);
     return s;
-}
-//
-//======================================================================================//
-//
-struct function_signature
-{
-    using location_t = std::pair<unsigned long, unsigned long>;
-
-    bool             m_loop      = false;
-    bool             m_info_beg  = false;
-    bool             m_info_end  = false;
-    location_t       m_row       = { 0, 0 };
-    location_t       m_col       = { 0, 0 };
-    string_t         m_return    = {};
-    string_t         m_name      = {};
-    string_t         m_params    = "()";
-    string_t         m_file      = {};
-    mutable string_t m_signature = {};
-
-    TIMEMORY_DEFAULT_OBJECT(function_signature)
-
-    template <typename ArchiveT>
-    void serialize(ArchiveT& _ar, const unsigned)
-    {
-        namespace cereal = tim::cereal;
-        (void) get();
-        _ar(cereal::make_nvp("loop", m_loop), cereal::make_nvp("info_beg", m_info_beg),
-            cereal::make_nvp("info_end", m_info_end), cereal::make_nvp("row", m_row),
-            cereal::make_nvp("col", m_col), cereal::make_nvp("return", m_return),
-            cereal::make_nvp("name", m_name), cereal::make_nvp("params", m_params),
-            cereal::make_nvp("file", m_file), cereal::make_nvp("signature", m_signature));
-        (void) get();
-    }
-
-    function_signature(string_t _ret, const string_t& _name, string_t _file,
-                       location_t _row = { 0, 0 }, location_t _col = { 0, 0 },
-                       bool _loop = false, bool _info_beg = false, bool _info_end = false)
-    : m_loop(_loop)
-    , m_info_beg(_info_beg)
-    , m_info_end(_info_end)
-    , m_row(std::move(_row))
-    , m_col(std::move(_col))
-    , m_return(std::move(_ret))
-    , m_name(tim::demangle(_name))
-    , m_file(std::move(_file))
-    {
-        if(m_file.find('/') != string_t::npos)
-            m_file = m_file.substr(m_file.find_last_of('/') + 1);
-    }
-
-    function_signature(const string_t& _ret, const string_t& _name, const string_t& _file,
-                       const std::vector<string_t>& _params, location_t _row = { 0, 0 },
-                       location_t _col = { 0, 0 }, bool _loop = false,
-                       bool _info_beg = false, bool _info_end = false)
-    : function_signature(_ret, _name, _file, _row, _col, _loop, _info_beg, _info_end)
-    {
-        m_params = "(";
-        for(const auto& itr : _params)
-            m_params.append(itr + ", ");
-        if(!_params.empty()) m_params = m_params.substr(0, m_params.length() - 2);
-        m_params += ")";
-    }
-
-    friend bool operator==(const function_signature& lhs, const function_signature& rhs)
-    {
-        return lhs.get() == rhs.get();
-    }
-
-    static auto get(function_signature& sig) { return sig.get(); }
-
-    string_t get() const
-    {
-        std::stringstream ss;
-        if(use_return_info && !m_return.empty()) ss << m_return << " ";
-        ss << m_name;
-        if(use_args_info) ss << m_params;
-        if(m_loop && m_info_beg)
-        {
-            if(m_info_end)
-            {
-                ss << " [{" << m_row.first << "," << m_col.first << "}-{" << m_row.second
-                   << "," << m_col.second << "}]";
-            }
-            else
-            {
-                ss << "[{" << m_row.first << "," << m_col.first << "}]";
-            }
-        }
-        if(use_file_info && m_file.length() > 0) ss << " [" << m_file;
-        if(use_line_info && m_row.first > 0) ss << ":" << m_row.first;
-        if(use_file_info && m_file.length() > 0) ss << "]";
-
-        m_signature = ss.str();
-        return m_signature;
-    }
-};
-//
-//======================================================================================//
-//
-struct module_function
-{
-    using width_t   = std::array<size_t, 3>;
-    using address_t = Dyninst::Address;
-
-    static constexpr size_t absolute_max_width = 80;
-
-    static auto& get_width()
-    {
-        static width_t _instance = []() {
-            width_t _tmp;
-            _tmp.fill(0);
-            return _tmp;
-        }();
-        return _instance;
-    }
-
-    TIMEMORY_DEFAULT_OBJECT(module_function)
-
-    static void reset_width() { get_width().fill(0); }
-
-    static void update_width(const module_function& rhs)
-    {
-        get_width()[0] = std::max<size_t>(get_width()[0], rhs.module.length());
-        get_width()[1] = std::max<size_t>(get_width()[1], rhs.function.length());
-        get_width()[2] = std::max<size_t>(get_width()[2], rhs.signature.get().length());
-    }
-
-    module_function(string_t _module, string_t _func, function_signature _sign,
-                    procedure_t* proc)
-    : module(std::move(_module))
-    , function(std::move(_func))
-    , signature(std::move(_sign))
-    {
-        if(proc)
-        {
-            std::pair<address_t, address_t> _range{};
-            if(proc->getAddressRange(_range.first, _range.second))
-                address_range = _range.second - _range.first;
-        }
-    }
-
-    module_function(module_t* mod, procedure_t* proc)
-    {
-        char modname[FUNCNAMELEN];
-        char fname[FUNCNAMELEN];
-
-        mod->getFullName(modname, FUNCNAMELEN);
-        proc->getName(fname, FUNCNAMELEN);
-
-        module    = modname;
-        function  = fname;
-        signature = get_func_file_line_info(mod, proc);
-        if(!proc->isInstrumentable())
-        {
-            verbprintf(0,
-                       "Warning! module function generated for un-instrumentable "
-                       "function: %s [%s]\n",
-                       function.c_str(), module.c_str());
-        }
-        std::pair<address_t, address_t> _range{};
-        if(proc->getAddressRange(_range.first, _range.second))
-            address_range = _range.second - _range.first;
-    }
-
-    friend bool operator<(const module_function& lhs, const module_function& rhs)
-    {
-        return (lhs.module == rhs.module)
-                   ? ((lhs.function == rhs.function)
-                          ? (lhs.signature.get() < rhs.signature.get())
-                          : (lhs.function < rhs.function))
-                   : (lhs.module < rhs.module);
-    }
-
-    friend bool operator==(const module_function& lhs, const module_function& rhs)
-    {
-        return std::tie(lhs.module, lhs.function, lhs.signature, lhs.address_range) ==
-               std::tie(rhs.module, rhs.function, rhs.signature, rhs.address_range);
-    }
-
-    static void write_header(std::ostream& os)
-    {
-        auto w0 = std::min<size_t>(get_width()[0], absolute_max_width);
-        auto w1 = std::min<size_t>(get_width()[1], absolute_max_width);
-        auto w2 = std::min<size_t>(get_width()[2], absolute_max_width);
-
-        std::stringstream ss;
-        ss << std::setw(14) << "AddressRange"
-           << "  " << std::setw(w0 + 8) << std::left << "Module"
-           << " " << std::setw(w1 + 8) << std::left << "Function"
-           << " " << std::setw(w2 + 8) << std::left << "FunctionSignature"
-           << "\n";
-        os << ss.str();
-    }
-
-    friend std::ostream& operator<<(std::ostream& os, const module_function& rhs)
-    {
-        std::stringstream ss;
-
-        auto w0 = std::min<size_t>(get_width()[0], absolute_max_width);
-        auto w1 = std::min<size_t>(get_width()[1], absolute_max_width);
-        auto w2 = std::min<size_t>(get_width()[2], absolute_max_width);
-
-        auto _get_str = [](const std::string& _inc) {
-            if(_inc.length() > absolute_max_width)
-                return _inc.substr(0, absolute_max_width - 3) + "...";
-            return _inc;
-        };
-
-        // clang-format off
-        ss << std::setw(14) << rhs.address_range << "  "
-           << std::setw(w0 + 8) << std::left << _get_str(rhs.module) << " "
-           << std::setw(w1 + 8) << std::left << _get_str(rhs.function) << " "
-           << std::setw(w2 + 8) << std::left << _get_str(rhs.signature.get());
-        // clang-format on
-
-        os << ss.str();
-        return os;
-    }
-
-    size_t             address_range = 0;
-    string_t           module        = {};
-    string_t           function      = {};
-    function_signature signature     = {};
-
-    template <typename ArchiveT>
-    void serialize(ArchiveT& _ar, const unsigned)
-    {
-        namespace cereal = tim::cereal;
-        _ar(cereal::make_nvp("address_range", address_range),
-            cereal::make_nvp("module", module), cereal::make_nvp("function", function),
-            cereal::make_nvp("signature", signature));
-    }
-};
-//
-//======================================================================================//
-//
-static inline void
-dump_info(std::ostream& _os, const fmodset_t& _data)
-{
-    module_function::reset_width();
-    for(const auto& itr : _data)
-        module_function::update_width(itr);
-
-    module_function::write_header(_os);
-    for(const auto& itr : _data)
-        _os << itr << '\n';
-
-    module_function::reset_width();
-}
-//
-template <typename ArchiveT,
-          std::enable_if_t<tim::concepts::is_archive<ArchiveT>::value, int> = 0>
-static inline void
-dump_info(ArchiveT& _ar, const fmodset_t& _data)
-{
-    _ar(tim::cereal::make_nvp("module_functions", _data));
-}
-//
-static inline void
-dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
-          const fmodset_t& _data, int _level, bool _fail)
-{
-    namespace cereal = tim::cereal;
-    namespace policy = tim::policy;
-
-    _oname += "." + _ext;
-    auto _handle_error = [&]() {
-        std::stringstream _msg{};
-        _msg << "[dump_info] Error opening '" << _oname << " for output";
-        verbprintf(_level, "%s\n", _msg.str().c_str());
-        if(_fail)
-            throw std::runtime_error(std::string{ "[omnitrace][exe]" } + _msg.str());
-    };
-
-    if(!debug_print && verbose_level < _level) return;
-
-    if(_ext == "txt")
-    {
-        std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
-            _handle_error();
-        else
-        {
-            verbprintf(_level, "Outputting '%s'... ", _oname.c_str());
-            dump_info(ofs, _data);
-            verbprintf_bare(_level, "Done\n");
-        }
-        ofs.close();
-    }
-    else if(_ext == "xml")
-    {
-        std::stringstream oss{};
-        {
-            using output_policy     = policy::output_archive<cereal::XMLOutputArchive>;
-            output_policy::indent() = true;
-            auto ar                 = output_policy::get(oss);
-
-            ar->setNextName("omnitrace");
-            ar->startNode();
-            ar->setNextName(_label.c_str());
-            ar->startNode();
-            (*ar)(cereal::make_nvp("module_functions", _data));
-            ar->finishNode();
-            ar->finishNode();
-        }
-
-        std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
-            _handle_error();
-        else
-        {
-            verbprintf(_level, "Outputting '%s'... ", _oname.c_str());
-            ofs << oss.str() << std::endl;
-            verbprintf_bare(_level, "Done\n");
-        }
-        ofs.close();
-    }
-    else if(_ext == "json")
-    {
-        std::stringstream oss{};
-        {
-            using output_policy = policy::output_archive<cereal::PrettyJSONOutputArchive>;
-            auto ar             = output_policy::get(oss);
-
-            ar->setNextName("omnitrace");
-            ar->startNode();
-            ar->setNextName(_label.c_str());
-            ar->startNode();
-            (*ar)(cereal::make_nvp("module_functions", _data));
-            ar->finishNode();
-            ar->finishNode();
-        }
-
-        std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, _oname))
-            _handle_error();
-        else
-        {
-            verbprintf(_level, "Outputting '%s'... ", _oname.c_str());
-            ofs << oss.str() << std::endl;
-            verbprintf_bare(_level, "Done\n");
-        }
-        ofs.close();
-    }
-    else
-    {
-        throw std::runtime_error(TIMEMORY_JOIN(
-            "", "[omnitrace][exe] Error in ", __FUNCTION__, " :: filename '", _oname,
-            "' does not have one of recognized file extensions: txt, json, xml"));
-    }
-}
-//
-static inline void
-dump_info(const string_t& _oname, const fmodset_t& _data, int _level, bool _fail,
-          const string_t& _type, const strset_t& _ext)
-{
-    for(const auto& itr : _ext)
-        dump_info(_type, _oname, itr, _data, _level, _fail);
-}
-//
-static inline void
-load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int _level)
-{
-    namespace cereal = tim::cereal;
-    namespace policy = tim::policy;
-
-    auto        _pos = _iname.find_last_of('.');
-    std::string _ext = {};
-    if(_pos != std::string::npos) _ext = _iname.substr(_pos + 1, _iname.length());
-
-    auto _handle_error = [&]() {
-        std::stringstream _msg{};
-        _msg << "[load_info] Error opening '" << _iname << " for input";
-        verbprintf(_level, "%s\n", _msg.str().c_str());
-        throw std::runtime_error(std::string{ "[omnitrace][exe]" } + _msg.str());
-    };
-
-    if(_ext == "xml")
-    {
-        verbprintf(_level, "Reading '%s'... ", _iname.c_str());
-        std::ifstream ifs{ _iname };
-        if(!ifs)
-            _handle_error();
-        else
-        {
-            using input_policy = policy::input_archive<cereal::XMLInputArchive>;
-            auto ar            = input_policy::get(ifs);
-
-            ar->setNextName("omnitrace");
-            ar->startNode();
-            ar->setNextName(_label.c_str());
-            ar->startNode();
-            (*ar)(cereal::make_nvp("module_functions", _data));
-            ar->finishNode();
-            ar->finishNode();
-        }
-        verbprintf_bare(_level, "Done\n");
-        ifs.close();
-    }
-    else if(_ext == "json")
-    {
-        verbprintf(_level, "Reading '%s'... ", _iname.c_str());
-        std::ifstream ifs{ _iname };
-        if(!ifs)
-            _handle_error();
-        else
-        {
-            using input_policy = policy::input_archive<cereal::JSONInputArchive>;
-            auto ar            = input_policy::get(ifs);
-
-            ar->setNextName("omnitrace");
-            ar->startNode();
-            ar->setNextName(_label.c_str());
-            ar->startNode();
-            (*ar)(cereal::make_nvp("module_functions", _data));
-            ar->finishNode();
-            ar->finishNode();
-        }
-        verbprintf_bare(_level, "Done\n");
-        ifs.close();
-    }
-    else
-    {
-        throw std::runtime_error(TIMEMORY_JOIN(
-            "", "[omnitrace][exe] Error in ", __FUNCTION__, " :: filename '", _iname,
-            "' does not have one of recognized extentions: txt, json, xml :: ", _ext));
-    }
-}
-//
-static inline void
-load_info(const string_t& _inp, std::map<std::string, fmodset_t*>& _data, int _level)
-{
-    std::vector<std::string> _exceptions{};
-    _exceptions.reserve(_data.size());
-    for(auto& itr : _data)
-    {
-        try
-        {
-            fmodset_t _tmp{};
-            load_info(itr.first, _inp, _tmp, _level);
-            // add to the existing
-            itr.second->insert(_tmp.begin(), _tmp.end());
-            // if it did not throw it was successfully loaded
-            _exceptions.clear();
-            break;
-        } catch(std::exception& _e)
-        {
-            _exceptions.emplace_back(_e.what());
-        }
-    }
-    if(!_exceptions.empty())
-    {
-        std::stringstream _msg{};
-        for(auto& itr : _exceptions)
-        {
-            _msg << "[omnitrace][exe] " << itr << "\n";
-        }
-        throw std::runtime_error(_msg.str());
-    }
 }
 //
 //======================================================================================//
@@ -962,4 +282,79 @@ omnitrace_fork_callback(thread_t* parent, thread_t* child)
 }
 //
 //======================================================================================//
+// insert_instr -- generic insert instrumentation function
 //
+template <typename Tp>
+bool
+insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
+             procedure_loc_t traceLoc, flow_graph_t* cfGraph,
+             basic_loop_t* loopToInstrument, bool allow_traps)
+{
+    module_t* module = funcToInstr->getModule();
+    if(!module || !traceFunc) return false;
+
+    bpvector_t<point_t*>* _points = nullptr;
+    auto                  _trace  = traceFunc.get();
+
+    if(cfGraph && loopToInstrument)
+    {
+        if(traceLoc == BPatch_entry)
+            _points = cfGraph->findLoopInstPoints(BPatch_locLoopEntry, loopToInstrument);
+        else if(traceLoc == BPatch_exit)
+            _points = cfGraph->findLoopInstPoints(BPatch_locLoopExit, loopToInstrument);
+    }
+    else
+    {
+        _points = funcToInstr->findPoint(traceLoc);
+    }
+
+    if(_points == nullptr) return false;
+    if(_points->empty()) return false;
+
+    /*if(loop_level_instr)
+    {
+        flow_graph_t*                     flow = funcToInstr->getCFG();
+        bpvector_t<basic_loop_t*> basicLoop;
+        flow->getOuterLoops(basicLoop);
+        for(auto litr = basicLoop.begin(); litr != basicLoop.end(); ++litr)
+        {
+            bpvector_t<point_t*>* _tmp;
+            if(traceLoc == BPatch_entry)
+                _tmp = cfGraph->findLoopInstPoints(BPatch_locLoopEntry, *litr);
+            else if(traceLoc == BPatch_exit)
+                _tmp = cfGraph->findLoopInstPoints(BPatch_locLoopExit, *litr);
+            if(!_tmp)
+                continue;
+            for(auto& itr : *_tmp)
+                _points->push_back(itr);
+        }
+    }*/
+
+    // verbprintf(0, "Instrumenting |> [ %s ]\n", name.m_name.c_str());
+
+    std::set<point_t*> _traps{};
+    if(!allow_traps)
+    {
+        for(auto& itr : *_points)
+        {
+            if(itr && itr->usesTrap_NP()) _traps.insert(itr);
+        }
+    }
+
+    size_t _n = 0;
+    for(auto& itr : *_points)
+    {
+        if(!itr || _traps.count(itr) > 0)
+            continue;
+        else if(traceLoc == BPatch_entry)
+            mutatee->insertSnippet(*_trace, *itr, BPatch_callBefore, BPatch_firstSnippet);
+        // else if(traceLoc == BPatch_exit)
+        //    mutatee->insertSnippet(*_trace, *itr, BPatch_callAfter,
+        //    BPatch_firstSnippet);
+        else
+            mutatee->insertSnippet(*_trace, *itr);
+        ++_n;
+    }
+
+    return (_n > 0);
+}

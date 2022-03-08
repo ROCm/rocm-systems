@@ -34,6 +34,19 @@ set(_base_environment
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
     )
 
+set(_ompt_environment
+    "OMNITRACE_USE_PERFETTO=ON"
+    "OMNITRACE_USE_TIMEMORY=ON"
+    "OMNITRACE_USE_SAMPLING=ON"
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_USE_OMPT=ON"
+    "OMNITRACE_CRITICAL_TRACE=OFF"
+    "OMP_PROC_BIND=spread"
+    "OMP_PLACES=threads"
+    "OMP_NUM_THREADS=2"
+    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
+
 set(_perfetto_environment
     "OMNITRACE_USE_PERFETTO=ON"
     "OMNITRACE_USE_TIMEMORY=OFF"
@@ -75,7 +88,7 @@ set(_fast_environment
 function(OMNITRACE_ADD_TEST)
     cmake_parse_arguments(
         TEST
-        "" # options
+        "SKIP_REWRITE;SKIP_RUNTIME;SKIP_SAMPLING" # options
         "NAME;TARGET;MPI;NUM_PROCS;REWRITE_TIMEOUT;RUNTIME_TIMEOUT" # single value args
         "REWRITE_ARGS;RUNTIME_ARGS;RUN_ARGS;ENVIRONMENT;LABELS;PROPERTIES" # multiple
                                                                            # value args
@@ -126,57 +139,74 @@ function(OMNITRACE_ADD_TEST)
             COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
             WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
 
-        add_test(
-            NAME ${TEST_NAME}-binary-rewrite
-            COMMAND
-                $<TARGET_FILE:omnitrace-exe> -o
-                $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst ${TEST_REWRITE_ARGS}
-                -- $<TARGET_FILE:${TEST_TARGET}>
-            WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+        if(NOT TEST_SKIP_REWRITE)
+            add_test(
+                NAME ${TEST_NAME}-binary-rewrite
+                COMMAND
+                    $<TARGET_FILE:omnitrace-exe> -o
+                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
+                    ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
+                WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
 
-        add_test(
-            NAME ${TEST_NAME}-binary-rewrite-sampling
-            COMMAND
-                $<TARGET_FILE:omnitrace-exe> -o
-                $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp -M sampling
-                ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
-            WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+            if(NOT TEST_SKIP_SAMPLING)
+                add_test(
+                    NAME ${TEST_NAME}-binary-rewrite-sampling
+                    COMMAND
+                        $<TARGET_FILE:omnitrace-exe> -o
+                        $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp -M sampling
+                        ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
+                    WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+            endif()
 
-        add_test(
-            NAME ${TEST_NAME}-binary-rewrite-run
-            COMMAND ${COMMAND_PREFIX} $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
+            add_test(
+                NAME ${TEST_NAME}-binary-rewrite-run
+                COMMAND
+                    ${COMMAND_PREFIX} $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
                     ${TEST_RUN_ARGS}
-            WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+                WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
 
-        add_test(
-            NAME ${TEST_NAME}-binary-rewrite-run-sampling
-            COMMAND ${COMMAND_PREFIX} $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp
-                    ${TEST_RUN_ARGS}
-            WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+            if(NOT TEST_SKIP_SAMPLING)
+                add_test(
+                    NAME ${TEST_NAME}-binary-rewrite-run-sampling
+                    COMMAND
+                        ${COMMAND_PREFIX}
+                        $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp
+                        ${TEST_RUN_ARGS}
+                    WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+            endif()
+        endif()
 
-        add_test(
-            NAME ${TEST_NAME}-runtime-instrument
-            COMMAND $<TARGET_FILE:omnitrace-exe> ${TEST_RUNTIME_ARGS} --
-                    $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-            WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+        if(NOT TEST_SKIP_RUNTIME)
+            add_test(
+                NAME ${TEST_NAME}-runtime-instrument
+                COMMAND $<TARGET_FILE:omnitrace-exe> ${TEST_RUNTIME_ARGS} --
+                        $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
+                WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
 
-        add_test(
-            NAME ${TEST_NAME}-runtime-instrument-sampling
-            COMMAND $<TARGET_FILE:omnitrace-exe> -M sampling ${TEST_RUNTIME_ARGS} --
-                    $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-            WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+            if(NOT TEST_SKIP_SAMPLING)
+                add_test(
+                    NAME ${TEST_NAME}-runtime-instrument-sampling
+                    COMMAND $<TARGET_FILE:omnitrace-exe> -M sampling ${TEST_RUNTIME_ARGS}
+                            -- $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
+                    WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+            endif()
+        endif()
 
-        set_tests_properties(${TEST_NAME}-binary-rewrite-run
-                             PROPERTIES DEPENDS ${TEST_NAME}-binary-rewrite)
+        if(TEST ${TEST_NAME}-binary-rewrite-run)
+            set_tests_properties(${TEST_NAME}-binary-rewrite-run
+                                 PROPERTIES DEPENDS ${TEST_NAME}-binary-rewrite)
+        endif()
 
-        set_tests_properties(${TEST_NAME}-binary-rewrite-run-sampling
-                             PROPERTIES DEPENDS ${TEST_NAME}-binary-rewrite-sampling)
+        if(TEST ${TEST_NAME}-binary-rewrite-run-sampling)
+            set_tests_properties(${TEST_NAME}-binary-rewrite-run-sampling
+                                 PROPERTIES DEPENDS ${TEST_NAME}-binary-rewrite-sampling)
+        endif()
 
         foreach(
             _TEST
             baseline binary-rewrite binary-rewrite-run binary-rewrite-sampling
             binary-rewrite-run-sampling runtime-instrument runtime-instrument-sampling)
-            string(REPLACE "-run-" "-" _prefix "${TEST_NAME}-${_TEST}-")
+            string(REPLACE "-run-" "-" _prefix "${TEST_NAME}-${_TEST}/")
             set(_environ "${TEST_ENVIRONMENT}")
             set(_labels "${_TEST}")
             set(_timeout ${TEST_REWRITE_TIMEOUT})
@@ -255,6 +285,23 @@ omnitrace_add_test(
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
 
 omnitrace_add_test(
+    NAME user-api
+    TARGET user-api
+    REWRITE_ARGS -e -v 2 --min-address-range-loop=64
+    RUNTIME_ARGS
+        -e
+        -v
+        1
+        --min-address-range-loop=64
+        --label
+        file
+        line
+        return
+        args
+    RUN_ARGS 10 ${NUM_THREADS} 1000
+    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
+
+omnitrace_add_test(
     NAME parallel-overhead-no-save-fpr
     TARGET parallel-overhead
     REWRITE_ARGS -e -v 2 --min-address-range-loop=32 --dyninst-options DelayedParsing
@@ -280,7 +327,7 @@ omnitrace_add_test(
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
     NUM_PROCS 8
-    REWRITE_ARGS -e -v 2
+    REWRITE_ARGS -e -v 2 --label file line return args
     RUNTIME_ARGS
         -e
         -v
@@ -357,3 +404,19 @@ omnitrace_add_test(
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
         "${_timemory_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF")
+
+omnitrace_add_test(
+    NAME openmp-cg
+    TARGET openmp-cg
+    REWRITE_ARGS -e -v 2 --instrument-loops
+    RUNTIME_ARGS -e -v 1 --label return args
+    RUN_ARGS
+    ENVIRONMENT "${_ompt_environment}")
+
+omnitrace_add_test(
+    NAME openmp-lu
+    TARGET openmp-lu
+    REWRITE_ARGS -e -v 2 --instrument-loops
+    RUNTIME_ARGS -e -v 1 --label return args
+    RUN_ARGS REWRITE_TIMEOUT 180 RUNTIME_TIMEOUT 360
+    ENVIRONMENT "${_ompt_environment}")

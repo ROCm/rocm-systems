@@ -40,25 +40,45 @@ endmacro()
 find_program(OMNITRACE_CLANG_FORMAT_EXE NAMES clang-format-11 clang-format-mp-11
                                               clang-format)
 
+find_program(OMNITRACE_CMAKE_FORMAT_EXE NAMES cmake-format)
+
 if(OMNITRACE_CLANG_FORMAT_EXE)
     file(GLOB_RECURSE sources ${PROJECT_SOURCE_DIR}/source/*.cpp)
     file(GLOB_RECURSE headers ${PROJECT_SOURCE_DIR}/source/*.hpp
-         ${PROJECT_SOURCE_DIR}/source/*.hpp.in)
+         ${PROJECT_SOURCE_DIR}/source/*.hpp.in ${PROJECT_SOURCE_DIR}/source/*.h
+         ${PROJECT_SOURCE_DIR}/source/*.h.in)
     file(GLOB_RECURSE examples ${PROJECT_SOURCE_DIR}/examples/*.cpp
          ${PROJECT_SOURCE_DIR}/examples/*.hpp)
-    file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/examples/lulesh/external/*.cpp
-         ${PROJECT_SOURCE_DIR}/examples/lulesh/external/*.hpp)
+    file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/examples/lulesh/external/kokkos/*)
+    file(GLOB_RECURSE cmake_files ${PROJECT_SOURCE_DIR}/source/*CMakeLists.txt
+         ${PROJECT_SOURCE_DIR}/examples/*CMakeLists.txt
+         ${PROJECT_SOURCE_DIR}/tests/*CMakeLists.txt ${PROJECT_SOURCE_DIR}/cmake/*.cmake)
+    list(APPEND cmake_files ${PROJECT_SOURCE_DIR}/CMakeLists.txt)
     if(external)
         list(REMOVE_ITEM examples ${external})
+        list(REMOVE_ITEM cmake_files ${external})
     endif()
     add_custom_target(
-        format-omnitrace
+        format-omnitrace-source
         ${OMNITRACE_CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}
-        COMMENT "Running C++ formatter ${OMNITRACE_CLANG_FORMAT_EXE}...")
+        COMMENT "[omnitrace] Running C++ formatter ${OMNITRACE_CLANG_FORMAT_EXE}...")
+    add_custom_target(format-omnitrace)
+    add_dependencies(format-omnitrace format-omnitrace-source)
     if(NOT TARGET format)
         add_custom_target(format)
     endif()
     add_dependencies(format format-omnitrace)
+    if(OMNITRACE_CMAKE_FORMAT_EXE)
+        add_custom_target(
+            format-omnitrace-cmake
+            ${OMNITRACE_CMAKE_FORMAT_EXE} -i ${cmake_files}
+            COMMENT "[omnitrace] Running CMake formatter ${OMNITRACE_CMAKE_FORMAT_EXE}..."
+            )
+        if(NOT TARGET format-cmake)
+            add_custom_target(format-cmake)
+        endif()
+        add_dependencies(format-cmake format-omnitrace-cmake)
+    endif()
 else()
     message(
         AUTHOR_WARNING

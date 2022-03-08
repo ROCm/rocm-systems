@@ -7,6 +7,8 @@ set(CMAKE_CXX_VISIBILITY_PRESET "default")
 
 add_subdirectory(transpose)
 add_subdirectory(parallel-overhead)
+add_subdirectory(user-api)
+add_subdirectory(openmp)
 
 option(BUILD_SHARED_LIBS "Build dynamic libraries" ON)
 

@@ -21,9 +21,11 @@
 // SOFTWARE.
 
 #include "omnitrace.hpp"
+#include "fwd.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <map>
@@ -35,45 +37,73 @@
 #include <utility>
 #include <vector>
 
-bool debug_print   = false;
-int  verbose_level = tim::get_env<int>("TIMEMORY_RUN_VERBOSE", 0);
+bool     use_return_info         = false;
+bool     use_args_info           = false;
+bool     use_file_info           = false;
+bool     use_line_info           = false;
+bool     allow_overlapping       = false;
+bool     loop_level_instr        = false;
+bool     instr_dynamic_callsites = false;
+bool     instr_traps             = false;
+bool     instr_loop_traps        = false;
+size_t   min_address_range       = (1 << 8);  // 256
+size_t   min_loop_address_range  = (1 << 8);  // 256
+size_t   min_instructions        = (1 << 6);  // 64
+bool     werror                  = false;
+bool     debug_print             = false;
+int      verbose_level           = tim::get_env<int>("OMNITRACE_VERBOSE_INSTRUMENT", 0);
+string_t main_fname              = "main";
+string_t argv0                   = {};
+string_t cmdv0                   = {};
+string_t default_components      = "wall_clock";
+string_t prefer_library          = {};
+//
+//  global variables
+//
+patch_pointer_t bpatch                        = {};
+call_expr_t*    terminate_expr                = nullptr;
+snippet_vec_t   init_names                    = {};
+snippet_vec_t   fini_names                    = {};
+fmodset_t       available_module_functions    = {};
+fmodset_t       instrumented_module_functions = {};
+fmodset_t       overlapping_module_functions  = {};
+fmodset_t       excluded_module_functions     = {};
+fixed_modset_t  fixed_module_functions        = {};
+regexvec_t      func_include                  = {};
+regexvec_t      func_exclude                  = {};
+regexvec_t      file_include                  = {};
+regexvec_t      file_exclude                  = {};
+regexvec_t      file_restrict                 = {};
+regexvec_t      func_restrict                 = {};
 
 namespace
 {
-bool                                       binary_rewrite          = false;
-bool                                       is_attached             = false;
-bool                                       loop_level_instr        = false;
-bool                                       werror                  = false;
-bool                                       use_mpi                 = false;
-bool                                       is_static_exe           = false;
-bool                                       is_driver               = false;
-bool                                       allow_overlapping       = false;
-bool                                       instr_dynamic_callsites = false;
-bool                                       instr_traps             = false;
-bool                                       instr_loop_traps        = false;
-bool                                       explicit_dump_and_exit  = false;
-size_t                                     batch_size              = 50;
-strset_t                                   extra_libs              = {};
-size_t                                     min_address_range       = (1 << 8);  // 256
-size_t                                     min_loop_address_range  = (1 << 8);  // 256
-std::vector<std::pair<uint64_t, string_t>> hash_ids                = {};
-std::map<string_t, bool>                   use_stubs               = {};
-std::map<string_t, procedure_t*>           beg_stubs               = {};
-std::map<string_t, procedure_t*>           end_stubs               = {};
-strvec_t                                   init_stub_names         = {};
-strvec_t                                   fini_stub_names         = {};
-strset_t                                   used_stub_names         = {};
-std::vector<call_expr_pointer_t>           env_variables           = {};
-std::map<string_t, call_expr_pointer_t>    beg_expr                = {};
-std::map<string_t, call_expr_pointer_t>    end_expr                = {};
-const auto                                 npos_v                  = string_t::npos;
-string_t                                   instr_mode              = "trace";
-string_t                                   print_instrumented      = {};
-string_t                                   print_excluded          = {};
-string_t                                   print_available         = {};
-string_t                                   print_overlapping       = {};
-strset_t                                   print_formats           = { "txt", "json" };
-std::string                                modfunc_dump_dir        = {};
+bool                                       binary_rewrite         = false;
+bool                                       is_attached            = false;
+bool                                       use_mpi                = false;
+bool                                       is_static_exe          = false;
+bool                                       is_driver              = false;
+bool                                       explicit_dump_and_exit = false;
+size_t                                     batch_size             = 50;
+strset_t                                   extra_libs             = {};
+std::vector<std::pair<uint64_t, string_t>> hash_ids               = {};
+std::map<string_t, bool>                   use_stubs              = {};
+std::map<string_t, procedure_t*>           beg_stubs              = {};
+std::map<string_t, procedure_t*>           end_stubs              = {};
+strvec_t                                   init_stub_names        = {};
+strvec_t                                   fini_stub_names        = {};
+strset_t                                   used_stub_names        = {};
+std::vector<call_expr_pointer_t>           env_variables          = {};
+std::map<string_t, call_expr_pointer_t>    beg_expr               = {};
+std::map<string_t, call_expr_pointer_t>    end_expr               = {};
+const auto                                 npos_v                 = string_t::npos;
+string_t                                   instr_mode             = "trace";
+string_t                                   print_instrumented     = {};
+string_t                                   print_excluded         = {};
+string_t                                   print_available        = {};
+string_t                                   print_overlapping      = {};
+strset_t                                   print_formats          = { "txt", "json" };
+std::string                                modfunc_dump_dir       = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
 std::string
@@ -555,6 +585,15 @@ main(int argc, char** argv)
         .max_count(1)
         .action([](parser_t& p) { loop_level_instr = p.get<bool>("instrument-loops"); });
     parser
+        .add_argument({ "-i", "--min-instructions" },
+                      "If the number of instructions in a function is less than this "
+                      "value, exclude it from instrumentation")
+        .count(1)
+        .dtype("int")
+        .set_default(min_instructions)
+        .action(
+            [](parser_t& p) { min_instructions = p.get<size_t>("min-instructions"); });
+    parser
         .add_argument({ "-r", "--min-address-range" },
                       "If the address range of a function is less than this value, "
                       "exclude it from instrumentation")
@@ -886,7 +925,7 @@ main(int argc, char** argv)
                 {
                     if(!pitr->isInstrumentable()) continue;
                     auto _modfn = module_function{ itr, pitr };
-                    module_names.insert(_modfn.module);
+                    module_names.insert(_modfn.module_name);
                     _insert_module_function(available_module_functions, _modfn);
                     _add_overlapping(itr, pitr);
                 }
@@ -907,7 +946,7 @@ main(int argc, char** argv)
             if(mod && itr->isInstrumentable())
             {
                 auto _modfn = module_function{ mod, itr };
-                module_names.insert(_modfn.module);
+                module_names.insert(_modfn.module_name);
                 _insert_module_function(available_module_functions, _modfn);
                 _add_overlapping(mod, itr);
             }
@@ -1034,11 +1073,15 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    auto* _mutatee_init = find_function(app_image, "_init");
-    auto* _mutatee_fini = find_function(app_image, "_fini");
-    auto* main_func     = find_function(app_image, main_fname.c_str());
-    auto* mpi_init_func = find_function(app_image, "MPI_Init", { "MPI_Init_thread" });
-    auto* mpi_fini_func = find_function(app_image, "MPI_Finalize");
+    auto* _mutatee_init   = find_function(app_image, "_init");
+    auto* _mutatee_fini   = find_function(app_image, "_fini");
+    auto* main_func       = find_function(app_image, main_fname.c_str());
+    auto* mpi_init_func   = find_function(app_image, "MPI_Init", { "MPI_Init_thread" });
+    auto* mpi_fini_func   = find_function(app_image, "MPI_Finalize");
+    auto* user_start_func = find_function(app_image, "omnitrace_user_start_trace",
+                                          { "omnitrace_user_start_thread_trace" });
+    auto* user_stop_func  = find_function(app_image, "omnitrace_user_stop_trace",
+                                         { "omnitrace_user_stop_thread_trace" });
 
     //----------------------------------------------------------------------------------//
     //
@@ -1057,17 +1100,14 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    verbprintf(0, "Finding functions in image...\n");
+    verbprintf(0, "Finding instrumentation functions...\n");
 
     auto* entr_trace = find_function(app_image, "omnitrace_push_trace");
     auto* exit_trace = find_function(app_image, "omnitrace_pop_trace");
-    auto* entr_hash  = find_function(app_image, "omnitrace_push_trace_hash");
-    auto* exit_hash  = find_function(app_image, "omnitrace_pop_trace_hash");
     auto* init_func  = find_function(app_image, "omnitrace_init");
     auto* fini_func  = find_function(app_image, "omnitrace_finalize");
     auto* env_func   = find_function(app_image, "omnitrace_set_env");
     auto* mpi_func   = find_function(app_image, "omnitrace_set_mpi");
-    auto* hash_func  = find_function(app_image, "omnitrace_add_hash_id");
 
     if(!main_func && main_fname == "main") main_func = find_function(app_image, "_main");
 
@@ -1352,6 +1392,9 @@ main(int argc, char** argv)
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_INIT", "OFF"));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_FINALIZE", "OFF"));
     env_vars.emplace_back(
+        TIMEMORY_JOIN('=', "OMNITRACE_INIT_ENABLED",
+                      (user_start_func && user_stop_func) ? "OFF" : "ON"));
+    env_vars.emplace_back(
         TIMEMORY_JOIN('=', "OMNITRACE_TIMEMORY_COMPONENTS", default_components));
     env_vars.emplace_back(
         TIMEMORY_JOIN('=', "OMNITRACE_USE_MPIP",
@@ -1405,450 +1448,26 @@ main(int argc, char** argv)
 
     //----------------------------------------------------------------------------------//
     //
-    //  Lambda for instrumenting procedures. The first pass (usage_pass = true) will
-    //  generate the hash_ids for each string so that these can be inserted in bulk
-    //  with one operation and do not have to be calculated during runtime.
-    //
-    //----------------------------------------------------------------------------------//
-    std::vector<std::function<void()>> instr_procedure_functions;
-    auto instr_procedures = [&](const procedure_vec_t& procedures) {
-        //
-        auto _report = [](int _lvl, const string_t& _action, const string_t& _type,
-                          const string_t& _reason, const string_t& _name,
-                          const std::string& _extra = {}) {
-            static std::map<std::string, strset_t> already_reported{};
-            if(already_reported[_type].count(_name) == 0)
-            {
-                verbprintf(_lvl, "[%s][%s] %s :: '%s'", _type.c_str(), _action.c_str(),
-                           _reason.c_str(), _name.c_str());
-                if(!_extra.empty()) verbprintf_bare(_lvl, " (%s)", _extra.c_str());
-                verbprintf_bare(_lvl, "...\n");
-                already_reported[_type].insert(_name);
-            }
-        };
-
-        auto check_regex_restrictions = [](const std::string& _name,
-                                           const regexvec_t&  _regexes) {
-            // NOLINTNEXTLINE
-            for(auto& itr : _regexes)
-                if(std::regex_search(_name, itr)) return true;
-            return false;
-        };
-
-        std::pair<size_t, size_t> _count = { 0, 0 };
-        for(auto* itr : procedures)
-        {
-            if(!itr) continue;
-
-            char modname[FUNCNAMELEN];
-            char fname[FUNCNAMELEN];
-
-            itr->getName(fname, FUNCNAMELEN);
-            module_t* mod = itr->getModule();
-            if(mod)
-                mod->getFullName(modname, FUNCNAMELEN);
-            else
-                itr->getModuleName(modname, FUNCNAMELEN);
-
-            if(!itr->isInstrumentable())
-            {
-                _report(3, "Skipping", "function", "uninstrumentable", fname);
-                continue;
-            }
-
-            auto name = get_func_file_line_info(mod, itr);
-
-            if(itr == main_func || name.m_name == "main" || name.get() == main_sign.get())
-            {
-                hash_ids.emplace_back(std::hash<string_t>()(main_sign.get()),
-                                      main_sign.get());
-                _insert_module_function(
-                    available_module_functions,
-                    module_function{ modname, fname, main_sign, itr });
-                _insert_module_function(
-                    instrumented_module_functions,
-                    module_function{ modname, fname, main_sign, itr });
-                continue;
-            }
-
-            if(strlen(modname) == 0)
-            {
-                _report(3, "Skipping", "module", "empty name", modname);
-                continue;
-            }
-
-            if(name.get().empty())
-            {
-                _report(3, "Skipping", "function", "empty name", fname);
-                continue;
-            }
-
-            // apply module and function restrictions
-            auto _force_inc = false;
-
-            //--------------------------------------------------------------------------//
-            //
-            //              RESTRICT REGEXES
-            //
-            //--------------------------------------------------------------------------//
-            if(!file_restrict.empty())
-            {
-                if(check_regex_restrictions(modname, file_restrict))
-                {
-                    _report(2, "Forcing", "module", "module-restrict-regex", modname);
-                    _force_inc = true;
-                }
-                else
-                {
-                    _report(3, "Skipping", "module", "module-restrict-regex", modname);
-                    continue;
-                }
-            }
-
-            if(!func_restrict.empty())
-            {
-                if(check_regex_restrictions(name.m_name, func_restrict))
-                {
-                    _report(2, "Forcing", "function", "function-restrict-regex",
-                            name.m_name);
-                    _force_inc = true;
-                }
-                else if(check_regex_restrictions(name.get(), func_restrict))
-                {
-                    _report(2, "Forcing", "function", "function-restrict-regex",
-                            name.get());
-                    _force_inc = true;
-                }
-                else
-                {
-                    _report(3, "Skipping", "function", "function-restrict-regex",
-                            name.get());
-                    continue;
-                }
-            }
-
-            //--------------------------------------------------------------------------//
-            //
-            //              INCLUDE REGEXES
-            //
-            //--------------------------------------------------------------------------//
-            if(!file_include.empty())
-            {
-                if(check_regex_restrictions(modname, file_include))
-                {
-                    _report(2, "Forcing", "module", "module-include-regex", modname);
-                    _force_inc = true;
-                }
-            }
-
-            if(!func_include.empty())
-            {
-                if(check_regex_restrictions(name.m_name, func_include))
-                {
-                    _report(2, "Forcing", "function", "function-include-regex",
-                            name.m_name);
-                    _force_inc = true;
-                }
-                else if(check_regex_restrictions(name.get(), func_include))
-                {
-                    _report(2, "Forcing", "function", "function-include-regex",
-                            name.get());
-                    _force_inc = true;
-                }
-            }
-
-            //--------------------------------------------------------------------------//
-            //
-            //              EXCLUDE REGEXES
-            //
-            //--------------------------------------------------------------------------//
-            if(!file_exclude.empty())
-            {
-                if(check_regex_restrictions(modname, file_exclude))
-                {
-                    _report(2, "Skipping", "module", "module-exclude-regex", modname);
-                    continue;
-                }
-            }
-
-            if(!func_exclude.empty())
-            {
-                if(check_regex_restrictions(name.m_name, func_exclude))
-                {
-                    _report(2, "Skipping", "function", "function-exclude-regex",
-                            name.m_name);
-                    continue;
-                }
-                else if(check_regex_restrictions(name.get(), func_exclude))
-                {
-                    _report(2, "Skipping", "function", "function-exclude-regex",
-                            name.get());
-                    continue;
-                }
-            }
-
-            // try to get loops via the control flow graph
-            flow_graph_t*    cfg = itr->getCFG();
-            basic_loop_vec_t basic_loop{};
-            if(cfg) cfg->getOuterLoops(basic_loop);
-
-            if(!_force_inc)
-            {
-                if(module_constraint(modname)) continue;
-                if(!instrument_module(modname)) continue;
-
-                if(routine_constraint(name.m_name.c_str())) continue;
-                if(!instrument_entity(name.m_name)) continue;
-
-                if(is_static_exe && has_debug_info && string_t{ fname } == "_fini" &&
-                   string_t{ modname } == "DEFAULT_MODULE")
-                {
-                    _report(3, "Skipping", "function", "DEFAULT_MODULE", fname);
-                    continue;
-                }
-
-                _add_overlapping(mod, itr);
-
-                if(!allow_overlapping &&
-                   overlapping_module_functions.find(module_function{ mod, itr }) !=
-                       overlapping_module_functions.end())
-                {
-                    _report(3, "Skipping", "function", "overlapping", fname);
-                    continue;
-                }
-
-                // directly try to get loop entry points
-                const std::vector<point_t*>* _loop_entries =
-                    itr->findPoint(BPatch_locLoopEntry);
-
-                // if the function has dynamic callsites and user specified instrumenting
-                // dynamic callsites, force the instrumentation
-                bool _force_instr = false;
-                if(cfg && instr_dynamic_callsites)
-                    _force_instr = cfg->containsDynamicCallsites();
-
-                auto _address_range = module_function{ mod, itr }.address_range;
-                auto _num_loop_entries =
-                    (_loop_entries)
-                        ? std::max<size_t>(_loop_entries->size(), basic_loop.size())
-                        : basic_loop.size();
-                auto _has_loop_entries = (_num_loop_entries > 0);
-                auto _skip_range =
-                    (_has_loop_entries) ? false : (_address_range < min_address_range);
-                auto _skip_loop_range = (_has_loop_entries)
-                                            ? (_address_range < min_loop_address_range)
-                                            : false;
-
-                if(_force_instr && (_skip_range || _skip_loop_range))
-                {
-                    _report(2, "Forcing", "function", "dynamic-callsite", fname);
-                }
-                else if(_skip_range)
-                {
-                    _report(2, "Skipping", "function", "min-address-range", fname,
-                            TIMEMORY_JOIN('=', "range", _address_range));
-                    continue;
-                }
-                else if(_skip_loop_range)
-                {
-                    _report(2, "Skipping", "function", "min-address-range-loop", fname,
-                            TIMEMORY_JOIN('=', "range", _address_range));
-                    continue;
-                }
-            }
-
-            bool _entr_success =
-                query_instr(itr, BPatch_entry, nullptr, nullptr, instr_traps);
-            bool _exit_success =
-                query_instr(itr, BPatch_exit, nullptr, nullptr, instr_traps);
-            if(!_entr_success && !_exit_success)
-            {
-                _report(3, "Skipping", "function",
-                        "Either no entry "
-                        "instrumentation points were found or instrumentation "
-                        "required traps and instrumenting via traps were disabled.",
-                        fname);
-                continue;
-            }
-            else if(_entr_success && !_exit_success)
-            {
-                std::stringstream _ss{};
-                _ss << "Function can be only partially instrument (entry = "
-                    << std::boolalpha << _entr_success << ", exit = " << _exit_success
-                    << ")";
-                _report(3, "Skipping", "function", _ss.str(), fname);
-                continue;
-            }
-
-            hash_ids.emplace_back(std::hash<string_t>()(name.get()), name.get());
-            _insert_module_function(available_module_functions,
-                                    module_function{ mod, itr });
-            _insert_module_function(instrumented_module_functions,
-                                    module_function{ mod, itr });
-
-            auto _f = [=]() {
-                static std::set<size_t> _reported{};
-                auto                    _hashv =
-                    std::hash<std::string>{}(TIMEMORY_JOIN('|', modname, name.m_name));
-                if(!_reported.emplace(_hashv).second)
-                {
-                    verbprintf(1, "Instrumenting |> [ %s ] -> [ %s ]\n", modname,
-                               name.m_name.c_str());
-                }
-
-                auto _name       = name.get();
-                auto _hash       = std::hash<string_t>()(_name);
-                auto _trace_entr = (entr_hash) ? omnitrace_call_expr(_hash)
-                                               : omnitrace_call_expr(_name.c_str());
-                auto _trace_exit = (exit_hash) ? omnitrace_call_expr(_hash)
-                                               : omnitrace_call_expr(_name.c_str());
-                auto _entr       = _trace_entr.get((entr_hash) ? entr_hash : entr_trace);
-                auto _exit       = _trace_exit.get((exit_hash) ? exit_hash : exit_trace);
-
-                insert_instr(addr_space, itr, _entr, BPatch_entry, nullptr, nullptr,
-                             instr_traps);
-                insert_instr(addr_space, itr, _exit, BPatch_exit, nullptr, nullptr,
-                             instr_traps);
-            };
-
-            instr_procedure_functions.emplace_back(_f);
-            ++_count.first;
-
-            if(loop_level_instr)
-            {
-                verbprintf(3, "Instrumenting at the loop level: %s\n",
-                           name.m_name.c_str());
-
-                for(auto* litr : basic_loop)
-                {
-                    bool _lentr_success =
-                        query_instr(itr, BPatch_entry, cfg, litr, instr_loop_traps);
-                    bool _lexit_success =
-                        query_instr(itr, BPatch_exit, cfg, litr, instr_loop_traps);
-                    if(!_lentr_success && !_lexit_success)
-                    {
-                        _report(
-                            3, "Skipping", "function-loop",
-                            "Either no entry instrumentation points were found or "
-                            "instrumentation "
-                            "required traps and instrumenting via traps were disabled.",
-                            fname);
-                        continue;
-                    }
-                    else if(_lentr_success && !_lexit_success)
-                    {
-                        std::stringstream _ss{};
-                        _ss << "Function can be only partially instrument (entry = "
-                            << std::boolalpha << _lentr_success
-                            << ", exit = " << _lexit_success << ")";
-                        _report(3, "Skipping", "function-loop", _ss.str(), fname);
-                        continue;
-                    }
-
-                    auto lname  = get_loop_file_line_info(mod, itr, cfg, litr);
-                    auto _lname = lname.get();
-                    auto _lhash = std::hash<string_t>()(_lname);
-                    hash_ids.emplace_back(_lhash, _lname);
-                    auto _lf = [=]() {
-                        static std::set<size_t> _reported{};
-                        auto                    _hashv = std::hash<std::string>{}(
-                            TIMEMORY_JOIN('|', modname, name.m_name));
-                        if(!_reported.emplace(_hashv).second)
-                        {
-                            verbprintf(1, "Loop Instrumenting |> [ %s ] -> [ %s ]\n",
-                                       modname, name.m_name.c_str());
-                        }
-                        auto _ltrace_entr = (entr_hash)
-                                                ? omnitrace_call_expr(_lhash)
-                                                : omnitrace_call_expr(_lname.c_str());
-                        auto _ltrace_exit = (exit_hash)
-                                                ? omnitrace_call_expr(_lhash)
-                                                : omnitrace_call_expr(_lname.c_str());
-                        auto _lentr =
-                            _ltrace_entr.get((entr_hash) ? entr_hash : entr_trace);
-                        auto _lexit =
-                            _ltrace_exit.get((exit_hash) ? exit_hash : exit_trace);
-
-                        insert_instr(addr_space, itr, _lentr, BPatch_entry, cfg, litr,
-                                     instr_loop_traps);
-                        insert_instr(addr_space, itr, _lexit, BPatch_exit, cfg, litr,
-                                     instr_loop_traps);
-                    };
-                    instr_procedure_functions.emplace_back(_lf);
-                    ++_count.second;
-                }
-            }
-        }
-        return _count;
-    };
-
-    //----------------------------------------------------------------------------------//
-    //
-    //  Do a first pass through all procedures to generate the hash ids
+    //  Sort the available module functions into appropriate containers
     //
     //----------------------------------------------------------------------------------//
 
     if(instr_mode == "trace")
     {
-        const int _verbose_lvl = 2;
-        verbprintf(2, "Beginning loop over modules [hash id generation pass]\n");
-        std::vector<std::pair<std::string, std::pair<size_t, size_t>>> _pass_info{};
-        for(auto& m : modules)
+        for(const auto& itr : available_module_functions)
         {
-            char modname[1024];
-            m->getName(modname, 1024);
-            if(strstr(modname, "libdyninst") != nullptr) continue;
-
-            if(!m->getProcedures())
+            if(itr.should_instrument())
             {
-                verbprintf(_verbose_lvl, "Skipping module w/ no procedures: '%s'\n",
-                           modname);
-                continue;
+                if(itr.function != main_func && itr.function != _mutatee_init &&
+                   itr.function != _mutatee_fini)
+                    _insert_module_function(instrumented_module_functions, itr);
             }
-
-            verbprintf(_verbose_lvl + 1, "Parsing module: %s\n", modname);
-            bpvector_t<procedure_t*>* p = m->getProcedures();
-            if(!p) continue;
-
-            verbprintf(_verbose_lvl, "%4zu procedures are begin processed in %s\n",
-                       p->size(), modname);
-
-            auto _count = instr_procedures(*p);
-
-            _pass_info.emplace_back(modname, _count);
-        }
-        // report the instrumented
-        for(auto& itr : _pass_info)
-        {
-            auto _valid = (verbose_level > _verbose_lvl ||
-                           (itr.second.first + itr.second.second) > 0);
-            if(_valid)
-            {
-                verbprintf(_verbose_lvl, "%4zu instrumented procedures in %s\n",
-                           itr.second.first, itr.first.c_str());
-                _valid = (loop_level_instr &&
-                          (verbose_level > _verbose_lvl || itr.second.second > 0));
-                if(_valid)
-                {
-                    verbprintf(_verbose_lvl, "%4zu instrumented loop procedures in %s\n",
-                               itr.second.second, itr.first.c_str());
-                }
-            }
+            else
+                _insert_module_function(excluded_module_functions, itr);
+            if(itr.is_overlapping())
+                _insert_module_function(overlapping_module_functions, itr);
         }
     }
-
-    //----------------------------------------------------------------------------------//
-    //
-    //  Add the snippet that assign the hash ids
-    //
-    //----------------------------------------------------------------------------------//
-
-    omnitrace_snippet_vec hash_snippet_vec{};
-    // generate a call expression for each hash + key
-    for(auto& itr : hash_ids)
-        hash_snippet_vec.generate(hash_func, itr.first, itr.second.c_str());
-    // append all the call expressions to init names
-    hash_snippet_vec.append(init_names);
 
     //----------------------------------------------------------------------------------//
     //
@@ -1892,11 +1511,56 @@ main(int argc, char** argv)
         addr_space->beginInsertionSet();
     }
 
-    verbprintf(2, "Beginning loop over modules [instrumentation pass]\n");
+    verbprintf(2, "Beginning instrumentation loop...\n");
     verbprintf(1, "\n");
-    for(auto& instr_procedure : instr_procedure_functions)
-        instr_procedure();
+    std::map<std::string, std::pair<size_t, size_t>> _pass_info{};
+    const int                                        _pass_verbose_lvl = 2;
+    for(const auto& itr : instrumented_module_functions)
+    {
+        auto _count = itr(addr_space, entr_trace, exit_trace);
+        _pass_info[itr.module_name].first += _count.first;
+        _pass_info[itr.module_name].second += _count.second;
+
+        auto _report = [](int _lvl, const string_t& _action, const string_t& _type,
+                          const string_t& _reason, const string_t& _name,
+                          const std::string& _extra = {}) {
+            static std::map<std::string, strset_t> already_reported{};
+            auto                                   _key = _type + _action + _reason;
+            if(already_reported[_key].count(_name) == 0)
+            {
+                verbprintf(_lvl, "[%s][%s] %s :: '%s'", _type.c_str(), _action.c_str(),
+                           _reason.c_str(), _name.c_str());
+                if(!_extra.empty()) verbprintf_bare(_lvl, " (%s)", _extra.c_str());
+                verbprintf_bare(_lvl, "...\n");
+                already_reported[_key].insert(_name);
+            }
+        };
+
+        for(const auto& mitr : itr.messages)
+            _report(std::get<0>(mitr), std::get<1>(mitr), std::get<2>(mitr),
+                    std::get<3>(mitr),
+                    std::get<2>(mitr) == "module" ? itr.module_name : itr.function_name);
+    }
     verbprintf(1, "\n");
+
+    // report the instrumented
+    for(auto& itr : _pass_info)
+    {
+        auto _valid = (verbose_level > _pass_verbose_lvl ||
+                       (itr.second.first + itr.second.second) > 0);
+        if(_valid)
+        {
+            verbprintf(_pass_verbose_lvl, "%4zu instrumented procedures in %s\n",
+                       itr.second.first, itr.first.c_str());
+            _valid = (loop_level_instr &&
+                      (verbose_level > _pass_verbose_lvl || itr.second.second > 0));
+            if(_valid)
+            {
+                verbprintf(_pass_verbose_lvl, "%4zu instrumented loop procedures in %s\n",
+                           itr.second.second, itr.first.c_str());
+            }
+        }
+    }
 
     if(app_thread)
     {
@@ -1908,40 +1572,41 @@ main(int argc, char** argv)
             verbprintf(
                 1,
                 "Using insertion set failed. Restarting with individual insertion...\n");
-            auto _execute_batch = [&instr_procedure_functions, &addr_space](size_t _beg,
-                                                                            size_t _end) {
+            auto _execute_batch = [&addr_space, &entr_trace, &exit_trace](size_t _beg,
+                                                                          size_t _end) {
                 verbprintf(1, "Instrumenting batch of functions [%lu, %lu)\n",
                            (unsigned long) _beg, (unsigned long) _end);
                 addr_space->beginInsertionSet();
-                for(size_t i = _beg; i < _end; ++i)
-                {
-                    if(i < instr_procedure_functions.size())
-                        instr_procedure_functions.at(i)();
-                }
+                auto itr = instrumented_module_functions.begin();
+                std::advance(itr, _beg);
+                for(size_t i = _beg; i < _end; ++i, ++itr)
+                    (*itr)(addr_space, entr_trace, exit_trace);
                 bool _modified = true;
                 bool _success  = addr_space->finalizeInsertionSet(true, &_modified);
                 return _success;
             };
 
-            auto execute_batch = [&_execute_batch,
-                                  &instr_procedure_functions](size_t _beg) {
+            auto execute_batch = [&_execute_batch, &addr_space, &entr_trace,
+                                  &exit_trace](size_t _beg) {
                 if(!_execute_batch(_beg, _beg + batch_size))
                 {
                     verbprintf(1,
                                "Batch instrumentation of functions [%lu, %lu) failed. "
                                "Beginning non-batched instrumentation for this set\n",
                                (unsigned long) _beg, (unsigned long) _beg + batch_size);
-                    for(size_t i = _beg; i < _beg + batch_size; ++i)
+                    auto itr  = instrumented_module_functions.begin();
+                    auto _end = instrumented_module_functions.end();
+                    std::advance(itr, _beg);
+                    for(size_t i = _beg; i < _beg + batch_size && itr != _end; ++i, ++itr)
                     {
-                        if(i < instr_procedure_functions.size())
-                            instr_procedure_functions.at(i)();
+                        (*itr)(addr_space, entr_trace, exit_trace);
                     }
                 }
                 return _beg + batch_size;
             };
 
             size_t nidx = 0;
-            while(nidx < instr_procedure_functions.size())
+            while(nidx < instrumented_module_functions.size())
             {
                 nidx = execute_batch(nidx);
             }
@@ -1994,19 +1659,19 @@ main(int argc, char** argv)
         if(_mode == "modules")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module, TIMEMORY_JOIN("", "[", itr.module, "]"));
+                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.module_name, "]"));
         }
         else if(_mode == "functions")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module, TIMEMORY_JOIN("", "[", itr.function, "][",
-                                                  itr.address_range, "]"));
+                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.function_name, "][",
+                                                       itr.address_range, "]"));
         }
         else if(_mode == "functions+")
         {
             for(const auto& itr : _modset)
-                _insert(itr.module, TIMEMORY_JOIN("", "[", itr.signature.get(), "][",
-                                                  itr.address_range, "]"));
+                _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.signature.get(), "][",
+                                                       itr.address_range, "]"));
         }
         else if(_mode == "pair")
         {
@@ -2014,9 +1679,9 @@ main(int argc, char** argv)
             {
                 std::stringstream _ss{};
                 _ss << std::boolalpha;
-                _ss << "" << itr.module << "] --> [" << itr.function << "]["
+                _ss << "" << itr.module_name << "] --> [" << itr.function_name << "]["
                     << itr.address_range << "]";
-                _insert(itr.module, _ss.str());
+                _insert(itr.module_name, _ss.str());
             }
         }
         else if(_mode == "pair+")
@@ -2025,9 +1690,9 @@ main(int argc, char** argv)
             {
                 std::stringstream _ss{};
                 _ss << std::boolalpha;
-                _ss << "[" << itr.module << "] --> [" << itr.signature.get() << "]["
+                _ss << "[" << itr.module_name << "] --> [" << itr.signature.get() << "]["
                     << itr.address_range << "]";
-                _insert(itr.module, _ss.str());
+                _insert(itr.module_name, _ss.str());
             }
         }
         else
@@ -2117,6 +1782,17 @@ main(int argc, char** argv)
     {
         verbprintf(0, "Executing...\n");
 
+#define WAITPID_DEBUG_MESSAGE(QUERY)                                                     \
+    {                                                                                    \
+        QUERY;                                                                           \
+        verbprintf(3,                                                                    \
+                   "waitpid (%i, %i) returned [%s:%i] :: %s :: code: %i, status %i. "    \
+                   "WIFEXITED(status) = "                                                \
+                   "%i, WIFSIGNALED(status) = %i\n",                                     \
+                   cpid, w, __FILE__, __LINE__, #QUERY, code, status, WIFEXITED(status), \
+                   WIFSIGNALED(status));                                                 \
+    }
+
         if(!app_thread->isTerminated())
         {
             pid_t cpid   = app_thread->getPid();
@@ -2124,6 +1800,7 @@ main(int argc, char** argv)
             app_thread->detach(true);
             do
             {
+                status  = 0;
                 pid_t w = waitpid(cpid, &status, WUNTRACED);
                 if(w == -1)
                 {
@@ -2133,21 +1810,21 @@ main(int argc, char** argv)
 
                 if(WIFEXITED(status))
                 {
-                    code = WEXITSTATUS(status);
+                    WAITPID_DEBUG_MESSAGE(code = WEXITSTATUS(status));
                 }
                 else if(WIFSIGNALED(status))
                 {
-                    code = WTERMSIG(status);
+                    WAITPID_DEBUG_MESSAGE(code = WTERMSIG(status));
                 }
                 else if(WIFSTOPPED(status))
                 {
-                    code = WSTOPSIG(status);
+                    WAITPID_DEBUG_MESSAGE(code = WSTOPSIG(status));
                 }
                 else if(WIFCONTINUED(status))
                 {
-                    code = WIFCONTINUED(status);
+                    WAITPID_DEBUG_MESSAGE(code = WIFCONTINUED(status));
                 }
-            } while(!WIFEXITED(status) && !WIFSIGNALED(status));
+            } while(WIFEXITED(status) == 0 && WIFSIGNALED(status) == 0);
         }
         else
         {
@@ -2258,7 +1935,6 @@ instrument_module(const string_t& file_name)
 
 //======================================================================================//
 
-extern const strset_t exclude_function_names;
 bool
 instrument_entity(const string_t& function_name)
 {
@@ -2284,7 +1960,8 @@ instrument_entity(const string_t& function_name)
         "virtual thunk|non-virtual thunk|transaction clone|"
         "RtsLayer|DYNINST|PthreadLayer|threaded_func|PMPI|"
         "Kokkos::Impl::|Kokkos::Experimental::Impl::|Kokkos::impl_|"
-        "Kokkos::[A-Za-z]+::impl_|Kokkos::Tools::|Kokkos::Profiling::)",
+        "Kokkos::[A-Za-z]+::impl_|Kokkos::Tools::|Kokkos::Profiling::|"
+        "kmp_threadprivate_)",
         regex_opts);
     static std::regex trailing("(\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$",
                                regex_opts);
@@ -2301,31 +1978,31 @@ instrument_entity(const string_t& function_name)
     if(std::regex_search(function_name, exclude) ||
        std::regex_search(function_name, exclude_cxx))
     {
-        _report("critical", function_name, 3);
+        _report("Excluding", "critical", 3);
         return false;
     }
 
     if(whole.count(function_name) > 0)
     {
-        _report("critical", function_name, 3);
+        _report("Excluding", "critical", 3);
         return false;
     }
 
     // don't instrument the functions when key is found at the start of the function name
     if(std::regex_search(function_name, leading))
     {
-        _report("recommended", function_name, 3);
+        _report("Excluding", "recommended", 3);
         return false;
     }
 
     // don't instrument the functions when key is found at the end of the function name
     if(std::regex_search(function_name, trailing))
     {
-        _report("recommended", function_name, 3);
+        _report("Excluding", "recommended", 3);
         return false;
     }
 
-    _report("Including function [no constraint] : '%s'...\n", function_name, 3);
+    _report("Including", "no constraint", 2);
 
     return true;
 }
@@ -2369,20 +2046,14 @@ query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cf
     return (_n > 0);
 }
 
-//======================================================================================//
-// insert_instr -- generic insert instrumentation function
-//
-template <typename Tp>
-bool
-insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
-             procedure_loc_t traceLoc, flow_graph_t* cfGraph,
-             basic_loop_t* loopToInstrument, bool allow_traps)
+std::tuple<size_t, size_t>
+query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cfGraph,
+            basic_loop_t* loopToInstrument)
 {
     module_t* module = funcToInstr->getModule();
-    if(!module || !traceFunc) return false;
+    if(!module) return { 0, 0 };
 
     bpvector_t<point_t*>* _points = nullptr;
-    auto                  _trace  = traceFunc.get();
 
     if(cfGraph && loopToInstrument)
     {
@@ -2396,65 +2067,31 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
         _points = funcToInstr->findPoint(traceLoc);
     }
 
-    if(_points == nullptr) return false;
-    if(_points->empty()) return false;
-
-    /*if(loop_level_instr)
-    {
-        flow_graph_t*                     flow = funcToInstr->getCFG();
-        bpvector_t<basic_loop_t*> basicLoop;
-        flow->getOuterLoops(basicLoop);
-        for(auto litr = basicLoop.begin(); litr != basicLoop.end(); ++litr)
-        {
-            bpvector_t<point_t*>* _tmp;
-            if(traceLoc == BPatch_entry)
-                _tmp = cfGraph->findLoopInstPoints(BPatch_locLoopEntry, *litr);
-            else if(traceLoc == BPatch_exit)
-                _tmp = cfGraph->findLoopInstPoints(BPatch_locLoopExit, *litr);
-            if(!_tmp)
-                continue;
-            for(auto& itr : *_tmp)
-                _points->push_back(itr);
-        }
-    }*/
-
-    // verbprintf(0, "Instrumenting |> [ %s ]\n", name.m_name.c_str());
-
-    std::set<point_t*> _traps{};
-    if(!allow_traps)
-    {
-        for(auto& itr : *_points)
-        {
-            if(itr && itr->usesTrap_NP()) _traps.insert(itr);
-        }
-    }
+    if(_points == nullptr) return { 0, 0 };
+    if(_points->empty()) return { 0, 0 };
 
     size_t _n = 0;
+    size_t _t = 0;
     for(auto& itr : *_points)
     {
-        if(!itr || _traps.count(itr) > 0)
-            continue;
-        else if(traceLoc == BPatch_entry)
-            mutatee->insertSnippet(*_trace, *itr, BPatch_callBefore, BPatch_firstSnippet);
-        // else if(traceLoc == BPatch_exit)
-        //    mutatee->insertSnippet(*_trace, *itr, BPatch_callAfter,
-        //    BPatch_firstSnippet);
-        else
-            mutatee->insertSnippet(*_trace, *itr);
-        ++_n;
+        if(itr)
+        {
+            ++_n;
+            if(itr->usesTrap_NP()) ++_t;
+        }
     }
 
-    return (_n > 0);
+    return { _n, _t };
 }
 
 //======================================================================================//
 // Constraints for instrumentation. Returns true for those modules that
 // shouldn't be instrumented.
 bool
-module_constraint(char* fname)
+module_constraint(string_view_t fname)
 {
     // fname is the name of module/file
-    string_t _fname = fname;
+    string_t _fname = string_t{ fname };
 
     // never instrumentat any module matching omnitrace
     if(_fname.find("omnitrace") != string_t::npos) return true;
@@ -2472,9 +2109,9 @@ module_constraint(char* fname)
 // Constraint for routines. The constraint returns true for those routines that
 // should not be instrumented.
 bool
-routine_constraint(const char* fname)
+routine_constraint(string_view_t fname)
 {
-    string_t _fname = fname;
+    string_t _fname = string_t{ fname };
     if(_fname.find("omnitrace") != string_t::npos) return true;
 
     auto npos = std::string::npos;

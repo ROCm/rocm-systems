@@ -35,6 +35,23 @@ parse:
         PUBLIC: '*'
         PRIVATE: '*'
         INTERFACE: '*'
+    omnitrace_add_bin_test:
+      flags:
+      - WILL_FAIL
+      kwargs:
+        NAME: '*'
+        ARGS: '*'
+        LABELS: '*'
+        TARGET: '*'
+        DEPENDS: '*'
+        COMMAND: '*'
+        TIMEOUT: '*'
+        PROPERTIES: '*'
+        ENVIRONMENT: '*'
+        WORKING_DIRECTORY: '*'
+        PASS_REGULAR_EXPRESSION: '*'
+        FAIL_REGULAR_EXPRESSION: '*'
+        SKIP_REGULAR_EXPRESSION: '*'
   override_spec: {}
   vartags: []
   proptags: []

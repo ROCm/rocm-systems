@@ -350,6 +350,9 @@ set(TIMEMORY_USE_GOTCHA
 set(TIMEMORY_USE_PERFETTO
     OFF
     CACHE BOOL "Disable perfetto support in timemory")
+set(TIMEMORY_USE_OMPT
+    ${OMNITRACE_USE_OMPT}
+    CACHE BOOL "Enable OMPT support in timemory" FORCE)
 set(TIMEMORY_USE_LIBUNWIND
     ON
     CACHE BOOL "Enable libunwind support in timemory")
@@ -369,7 +372,9 @@ set(TIMEMORY_BUILD_EXTRA_OPTIMIZATIONS
 set(TIMEMORY_TLS_MODEL
     "global-dynamic"
     CACHE STRING "Thread-local static model" FORCE)
-
+set(TIMEMORY_MAX_THREADS
+    "${OMNITRACE_MAX_THREADS}"
+    CACHE STRING "Max statically-allocated threads" FORCE)
 set(TIMEMORY_SETTINGS_PREFIX
     "OMNITRACE_"
     CACHE STRING "Prefix used for settings and environment variables")
@@ -430,19 +435,24 @@ if(NOT TARGET PTL::ptl-shared)
 
     omnitrace_save_variables(
         BUILD_CONFIG
-        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS CMAKE_POSITION_INDEPENDENT_CODE
-                  CMAKE_CXX_VISIBILITY_PRESET CMAKE_VISIBILITY_INLINES_HIDDEN)
+        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
+                  CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
+                  CMAKE_VISIBILITY_INLINES_HIDDEN)
 
-    set(BUILD_SHARED_LIBS ON)
+    set(BUILD_SHARED_LIBS OFF)
     set(BUILD_STATIC_LIBS OFF)
+    set(BUILD_OBJECT_LIBS ON)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
     set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
     add_subdirectory(external/PTL)
     omnitrace_restore_variables(
         BUILD_CONFIG
-        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS CMAKE_POSITION_INDEPENDENT_CODE
-                  CMAKE_CXX_VISIBILITY_PRESET CMAKE_VISIBILITY_INLINES_HIDDEN)
+        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
+                  CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
+                  CMAKE_VISIBILITY_INLINES_HIDDEN)
 endif()
 
-target_link_libraries(omnitrace-ptl INTERFACE PTL::ptl-shared)
+target_sources(omnitrace-ptl INTERFACE $<TARGET_OBJECTS:PTL::ptl-object>)
+target_link_libraries(omnitrace-ptl INTERFACE PTL::ptl-object)

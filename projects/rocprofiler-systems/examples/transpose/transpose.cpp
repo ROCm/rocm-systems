@@ -95,7 +95,7 @@ transpose_a(int* in, int* out, int M, int N)
 void
 run(int rank, int tid, hipStream_t stream, int argc, char** argv)
 {
-    size_t       nitr = 5000;
+    size_t       nitr = 500;
     unsigned int M    = 4960 * 2;
     unsigned int N    = 4960 * 2;
     if(argc > 2) nitr = atoll(argv[2]);

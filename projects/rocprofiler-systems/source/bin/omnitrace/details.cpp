@@ -40,7 +40,7 @@ get_whole_function_names()
         "backtrace", "backtrace_symbols", "backtrace_symbols_fd", "sigaddset",
         "sigandset", "sigdelset", "sigemptyset", "sigfillset", "sighold", "sigisemptyset",
         "sigismember", "sigorset", "sigrelse", "sigvec", "strtok", "strstr", "sbrk",
-        "strxfrm",
+        "strxfrm", "atexit", "ompt_start_tool", "nanosleep",
         // below are functions which never terminate
         "rocr::core::Signal::WaitAny", "rocr::core::Runtime::AsyncEventsLoop",
         "rocr::core::BusyWaitSignal::WaitAcquire",
@@ -525,10 +525,32 @@ are_file_include_exclude_lists_empty()
 //  the instrumented loop and formats it properly.
 //
 function_signature
-get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* cfGraph,
+get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t* cfGraph,
                         basic_loop_t* loopToInstrument)
 {
-    if(!cfGraph || !loopToInstrument || !f) return function_signature{ "", "", "" };
+    if(!cfGraph || !loopToInstrument || !func) return function_signature{ "", "", "" };
+
+    std::vector<BPatch_basicBlock*> basic_blocks{};
+    loopToInstrument->getLoopBasicBlocksExclusive(basic_blocks);
+
+    if(basic_blocks.empty()) return function_signature{ "", "", "" };
+
+    auto           base_addr = basic_blocks.front()->getStartAddress();
+    auto           last_addr = basic_blocks.front()->getEndAddress();
+    basic_block_t* block     = basic_blocks.front();
+    for(const auto& itr : basic_blocks)
+    {
+        if(itr == block) continue;
+        if(itr->dominates(block))
+        {
+            base_addr = itr->getStartAddress();
+            last_addr = itr->getEndAddress();
+            block     = itr;
+        }
+    }
+
+    verbprintf(4, "Loop: size = %lu: base_addr = %lu, last_addr = %lu\n",
+               (unsigned long) (last_addr - base_addr), base_addr, last_addr);
 
     char        fname[FUNCNAMELEN + 1];
     char        mname[FUNCNAMELEN + 1];
@@ -537,32 +559,14 @@ get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* 
     memset(fname, '\0', FUNCNAMELEN + 1);
     memset(mname, '\0', FUNCNAMELEN + 1);
 
-    mutatee_module->getName(mname, FUNCNAMELEN);
+    module->getName(mname, FUNCNAMELEN);
+    func->getName(fname, FUNCNAMELEN);
 
-    bpvector_t<point_t*>* loopStartInst =
-        cfGraph->findLoopInstPoints(BPatch_locLoopStartIter, loopToInstrument);
-    bpvector_t<point_t*>* loopExitInst =
-        cfGraph->findLoopInstPoints(BPatch_locLoopEndIter, loopToInstrument);
+    auto* returnType = func->getReturnType();
 
-    if(!loopStartInst || !loopExitInst) return function_signature{ "", "", "" };
+    if(returnType) typeName = returnType->getName();
 
-    unsigned long baseAddr = (unsigned long) (*loopStartInst)[0]->getAddress();
-    unsigned long lastAddr =
-        (unsigned long) (*loopExitInst)[loopExitInst->size() - 1]->getAddress();
-    verbprintf(3, "Loop: size of lastAddr = %lu: baseAddr = %lu, lastAddr = %lu\n",
-               (unsigned long) loopExitInst->size(), (unsigned long) baseAddr,
-               (unsigned long) lastAddr);
-
-    f->getName(fname, FUNCNAMELEN);
-
-    auto* returnType = f->getReturnType();
-
-    if(returnType)
-    {
-        typeName = returnType->getName();
-    }
-
-    auto*                 params = f->getParams();
+    auto*                 params = func->getParams();
     std::vector<string_t> _params;
     if(params)
     {
@@ -574,36 +578,51 @@ get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* 
         }
     }
 
-    bpvector_t<BPatch_statement> lines;
-    bpvector_t<BPatch_statement> linesEnd;
+    bpvector_t<BPatch_statement> lines{};
+    bpvector_t<BPatch_statement> linesEnd{};
 
-    bool info1 = mutatee_module->getSourceLines(baseAddr, lines);
+    bool info1 = module->getSourceLines(base_addr, lines);
 
     string_t filename = mname;
 
     if(info1)
     {
         // filename = lines[0].fileName();
-        auto row1 = lines[0].lineNumber();
-        auto col1 = lines[0].lineOffset();
+        int row1 = 0;
+        int col1 = 0;
+        for(auto& itr : lines)
+        {
+            if(itr.lineNumber() > 0)
+            {
+                row1 = itr.lineNumber();
+                col1 = itr.lineOffset();
+                break;
+            }
+        }
+
+        if(row1 == 0 && col1 == 0)
+            return function_signature(typeName, fname, filename, _params);
+
+        int row2 = 0;
+        int col2 = 0;
+        for(auto& itr : lines)
+        {
+            row2 = std::max(row2, itr.lineNumber());
+            col2 = std::max(col2, itr.lineOffset());
+        }
+
         if(col1 < 0) col1 = 0;
 
-        // This following section is attempting to remedy the limitations of
-        // getSourceLines for loops. As the program goes through the loop, the resulting
-        // lines go from the loop head, through the instructions present in the loop, to
-        // the last instruction in the loop, back to the loop head, then to the next
-        // instruction outside of the loop. What this section does is starts at the last
-        // instruction in the loop, then goes through the addresses until it reaches the
-        // next instruction outside of the loop. We then bump back a line. This is not a
-        // perfect solution, but we will work with the Dyninst team to find something
-        // better.
-        bool info2 = mutatee_module->getSourceLines((unsigned long) lastAddr, linesEnd);
-        verbprintf(3, "size of linesEnd = %lu\n", (unsigned long) linesEnd.size());
+        bool info2 = module->getSourceLines(last_addr, linesEnd);
+        verbprintf(4, "size of linesEnd = %lu\n", (unsigned long) linesEnd.size());
 
         if(info2)
         {
-            auto row2 = linesEnd[0].lineNumber();
-            auto col2 = linesEnd[0].lineOffset();
+            for(auto& itr : linesEnd)
+            {
+                row2 = std::max(row2, itr.lineNumber());
+                col2 = std::max(col2, itr.lineOffset());
+            }
             if(col2 < 0) col2 = 0;
             if(row2 < row1) row1 = row2;  // Fix for wrong line numbers
 
@@ -627,35 +646,30 @@ get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* 
 //  We create a new name that embeds the file and line information in the name
 //
 function_signature
-get_func_file_line_info(module_t* mutatee_module, procedure_t* f)
+get_func_file_line_info(module_t* module, procedure_t* func)
 {
-    bool          info1, info2;
-    unsigned long baseAddr, lastAddr;
-    char          fname[FUNCNAMELEN + 1];
-    char          mname[FUNCNAMELEN + 1];
-    int           row1, col1, row2, col2;
-    string_t      filename = {};
-    string_t      typeName = {};
+    using address_t = Dyninst::Address;
+
+    char     fname[FUNCNAMELEN + 1];
+    char     mname[FUNCNAMELEN + 1];
+    string_t typeName = {};
 
     memset(fname, '\0', FUNCNAMELEN + 1);
     memset(mname, '\0', FUNCNAMELEN + 1);
 
-    mutatee_module->getName(mname, FUNCNAMELEN);
+    module->getName(mname, FUNCNAMELEN);
+    func->getName(fname, FUNCNAMELEN);
 
-    baseAddr = (unsigned long) (f->getBaseAddr());
-    f->getAddressRange(baseAddr, lastAddr);
-    bpvector_t<BPatch_statement> lines;
-    f->getName(fname, FUNCNAMELEN);
+    address_t base_addr{};
+    address_t last_addr{};
+    func->getAddressRange(base_addr, last_addr);
 
-    auto* returnType = f->getReturnType();
+    auto* returnType = func->getReturnType();
 
-    if(returnType)
-    {
-        typeName = returnType->getName();
-    }
+    if(returnType) typeName = returnType->getName();
 
-    auto*                 params = f->getParams();
-    std::vector<string_t> _params;
+    auto*                 params  = func->getParams();
+    std::vector<string_t> _params = {};
     if(params)
     {
         for(auto* itr : *params)
@@ -666,32 +680,16 @@ get_func_file_line_info(module_t* mutatee_module, procedure_t* f)
         }
     }
 
-    info1 = mutatee_module->getSourceLines((unsigned long) baseAddr, lines);
+    bpvector_t<BPatch_statement> lines = {};
+    bool                         info  = module->getSourceLines(base_addr, lines);
 
-    filename = mname;
+    string_t filename = mname;
 
-    if(info1)
+    if(info && !lines.empty())
     {
-        // filename = lines[0].fileName();
-        row1 = lines[0].lineNumber();
-        col1 = lines[0].lineOffset();
-
-        if(col1 < 0) col1 = 0;
-        info2 = mutatee_module->getSourceLines((unsigned long) (lastAddr - 1), lines);
-        if(info2)
-        {
-            row2 = lines[1].lineNumber();
-            col2 = lines[1].lineOffset();
-            if(col2 < 0) col2 = 0;
-            if(row2 < row1) row1 = row2;
-            return function_signature(typeName, fname, filename, _params, { row1, 0 },
-                                      { 0, 0 }, false, info1, info2);
-        }
-        else
-        {
-            return function_signature(typeName, fname, filename, _params, { row1, 0 },
-                                      { 0, 0 }, false, info1, info2);
-        }
+        auto row = lines.front().lineNumber();
+        return function_signature(typeName, fname, filename, _params, { row, 0 },
+                                  { 0, 0 }, false, info, false);
     }
     else
     {

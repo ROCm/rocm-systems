@@ -12,3 +12,13 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
 
 add_subdirectory(lib)
 add_subdirectory(bin)
+
+if(OMNITRACE_BUILD_DEVELOPER)
+    add_custom_target(omnitrace-precommit)
+    foreach(_TARGET format-omnitrace-source format-omnitrace-cmake format-timemory-source
+                    format-timemory-cmake)
+        if(TARGET ${_TARGET})
+            add_dependencies(omnitrace-precommit ${_TARGET})
+        endif()
+    endforeach()
+endif()

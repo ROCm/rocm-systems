@@ -74,7 +74,9 @@ omnitrace_add_option(
     ${OMNITRACE_USE_HIP})
 omnitrace_add_option(OMNITRACE_USE_MPI_HEADERS
                      "Enable wrapping MPI functions w/o enabling MPI dependency" OFF)
+omnitrace_add_option(OMNITRACE_USE_OMPT "Enable OpenMP tools support" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_EXAMPLES "Enable building the examples" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_TESTING "Enable building the testing suite" OFF)
 omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_HIDDEN_VISIBILITY
@@ -96,6 +98,12 @@ if(NOT OMNITRACE_USE_HIP)
     set(OMNITRACE_USE_ROCTRACER
         OFF
         CACHE BOOL "Disabled via OMNITRACE_USE_HIP=OFF" FORCE)
+endif()
+
+if(OMNITRACE_BUILD_TESTING)
+    set(OMNITRACE_BUILD_EXAMPLES
+        ON
+        CACHE BOOL "Enable building the examples" FORCE)
 endif()
 
 include(ProcessorCount)
@@ -151,6 +159,11 @@ if(OMNITRACE_BUILD_HIDDEN_VISIBILITY)
     set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 endif()
 
+if(OMNITRACE_BUILD_TESTING)
+    include(CTest)
+    enable_testing()
+endif()
+
 # ------------------------------------------------------------------------------#
 #
 # library and executables
@@ -193,7 +206,7 @@ if(OMNITRACE_BUILD_LTO)
     omnitrace_restore_variables(LTO VARIABLES CMAKE_INTERPROCEDURAL_OPTIMIZATION)
 endif()
 
-if(OMNITRACE_BUILD_TESTING)
+if(OMNITRACE_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
@@ -204,9 +217,6 @@ endif()
 # ------------------------------------------------------------------------------#
 
 if(OMNITRACE_BUILD_TESTING)
-    include(CTest)
-    enable_testing()
-
     add_subdirectory(tests)
 endif()
 

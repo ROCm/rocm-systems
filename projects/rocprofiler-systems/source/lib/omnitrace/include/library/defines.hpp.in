@@ -1,0 +1,69 @@
+// MIT License
+//
+// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#pragma once
+
+// clang-format off
+#define OMNITRACE_HIP_VERSION_STRING "@HIP_VERSION@"
+#define OMNITRACE_HIP_VERSION_MAJOR @HIP_VERSION_MAJOR@
+#define OMNITRACE_HIP_VERSION_MINOR @HIP_VERSION_MINOR@
+#define OMNITRACE_HIP_VERSION_PATCH @HIP_VERSION_PATCH@
+
+#if defined(OMNITRACE_USE_ROCTRACER)
+#    define OMNITRACE_ROCTRACER_LIBKFDWRAPPER "@roctracer_kfdwrapper_LIBRARY@"
+#else
+#    define OMNITRACE_ROCTRACER_LIBKFDWRAPPER "/opt/rocm/roctracer/lib/libkfdwrapper64.so"
+#endif
+// clang-format on
+
+#define TIMEMORY_USER_COMPONENT_ENUM                                                     \
+    OMNITRACE_COMPONENT_idx, OMNITRACE_USER_REGION_idx, OMNITRACE_ROCTRACER_idx,         \
+        OMNITRACE_SAMPLING_WALL_CLOCK_idx, OMNITRACE_SAMPLING_CPU_CLOCK_idx,             \
+        OMNITRACE_SAMPLING_PERCENT_idx, OMNITRACE_SAMPLING_GPU_POWER_idx,                \
+        OMNITRACE_SAMPLING_GPU_TEMP_idx, OMNITRACE_SAMPLING_GPU_BUSY_idx,                \
+        OMNITRACE_SAMPLING_GPU_MEMORY_USAGE_idx,
+
+#define OMNITRACE_COMPONENT                 OMNITRACE_COMPONENT_idx
+#define OMNITRACE_USER_REGION               OMNITRACE_USER_REGION_idx
+#define OMNITRACE_ROCTRACER                 OMNITRACE_ROCTRACER_idx
+#define OMNITRACE_SAMPLING_WALL_CLOCK       OMNITRACE_SAMPLING_WALL_CLOCK_idx
+#define OMNITRACE_SAMPLING_CPU_CLOCK        OMNITRACE_SAMPLING_CPU_CLOCK_idx
+#define OMNITRACE_SAMPLING_PERCENT          OMNITRACE_SAMPLING_PERCENT_idx
+#define OMNITRACE_SAMPLING_GPU_POWER        OMNITRACE_SAMPLING_GPU_POWER_idx
+#define OMNITRACE_SAMPLING_GPU_TEMP         OMNITRACE_SAMPLING_GPU_TEMP_idx
+#define OMNITRACE_SAMPLING_GPU_BUSY         OMNITRACE_SAMPLING_GPU_BUSY_idx
+#define OMNITRACE_SAMPLING_GPU_MEMORY_USAGE OMNITRACE_SAMPLING_GPU_MEMORY_USAGE_idx
+
+#define OMNITRACE_ATTRIBUTE(...)   __attribute__((__VA_ARGS__))
+#define OMNITRACE_VISIBILITY(MODE) OMNITRACE_ATTRIBUTE(visibility(MODE))
+#define OMNITRACE_PUBLIC_API       OMNITRACE_VISIBILITY("default")
+#define OMNITRACE_HIDDEN_API       OMNITRACE_VISIBILITY("hidden")
+
+#if defined(OMNITRACE_CI) && OMNITRACE_CI > 0
+#    if defined(NDEBUG)
+#        undef NDEBUG
+#    endif
+#    if !defined(DEBUG)
+#        define DEBUG 1
+#    endif
+#    include <cassert>
+#endif

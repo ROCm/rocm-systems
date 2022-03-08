@@ -28,7 +28,7 @@ jobs:
       timeout-minutes: 5
       run:
         sudo apt-get update &&
-        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev ${{ matrix.compiler }} ${{ matrix.mpi }} &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev clang libomp-dev ${{ matrix.compiler }} ${{ matrix.mpi }} &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install 'cmake==3.16.3'
 
@@ -107,7 +107,7 @@ jobs:
       with:
         name: data-files
         path: |
-          ${{ github.workspace }}/build/omnitrace-tests-output/*.txt
+          ${{ github.workspace }}/build/omnitrace-tests-output/**/*.txt
 
   ubuntu-bionic:
     runs-on: ubuntu-18.04
@@ -202,7 +202,7 @@ jobs:
       with:
         name: data-files
         path: |
-          ${{ github.workspace }}/build/omnitrace-tests-output/*.txt
+          ${{ github.workspace }}/build/omnitrace-tests-output/**/*.txt
 
   ubuntu-focal-external:
     runs-on: ubuntu-20.04
@@ -217,7 +217,7 @@ jobs:
       timeout-minutes: 5
       run:
         sudo apt-get update &&
-        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libboost-{atomic,system,thread,date-time,filesystem,timer}-dev libtbb-dev libiberty-dev ${{ matrix.compiler }} &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libboost-{atomic,system,thread,date-time,filesystem,timer}-dev libtbb-dev libiberty-dev clang libomp-dev ${{ matrix.compiler }} &&
         sudo python3 -m pip install --upgrade pip &&
         python3 -m pip install 'cmake==3.16.3'
 
@@ -321,7 +321,7 @@ jobs:
       with:
         name: data-files
         path: |
-          ${{ github.workspace }}/build/omnitrace-tests-output/*.txt
+          ${{ github.workspace }}/build/omnitrace-tests-output/**/*.txt
 
   ubuntu-focal-dyninst-package:
     runs-on: ubuntu-20.04
@@ -336,7 +336,7 @@ jobs:
       timeout-minutes: 5
       run:
         sudo apt-get update &&
-        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.compiler }} &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev ${{ matrix.compiler }} &&
         sudo python3 -m pip install --upgrade pip &&
         python3 -m pip install 'cmake==3.16.3'
 
@@ -432,7 +432,7 @@ jobs:
       with:
         name: data-files
         path: |
-          ${{ github.workspace }}/build/omnitrace-tests-output/*.txt
+          ${{ github.workspace }}/build/omnitrace-tests-output/**/*.txt
 
   ubuntu-focal-external-rocm:
     runs-on: ubuntu-20.04
@@ -454,7 +454,7 @@ jobs:
         sudo wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add - &&
         echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm_version }}/ ubuntu main" | sudo tee /etc/apt/sources.list.d/rocm.list &&
         sudo apt-get update &&
-        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libboost-{atomic,system,thread,date-time,filesystem,timer}-dev libtbb-dev libiberty-dev ${{ matrix.compiler }} libudev-dev libnuma-dev rocm-dev rocm-utils roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev ${{ matrix.mpi }} libpapi-dev &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libboost-{atomic,system,thread,date-time,filesystem,timer}-dev libtbb-dev libiberty-dev clang libomp-dev ${{ matrix.compiler }} libudev-dev libnuma-dev rocm-dev rocm-utils roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev ${{ matrix.mpi }} libpapi-dev &&
         sudo python3 -m pip install --upgrade pip &&
         python3 -m pip install 'cmake==3.16.3'
 
