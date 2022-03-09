@@ -107,9 +107,23 @@ bool trace_hsa_activity = false;
 bool trace_hip_api = false;
 bool trace_hip_activity = false;
 bool trace_pcs = false;
-// API trace vector
-std::vector<std::string> hsa_api_vec;
-std::vector<std::string> hip_api_vec;
+
+// The below getter functions have been written intentionally to fix an issue
+// with constructor ordering. Previously when hip_api_vec and hsa_api_vec 
+// were left as simple global variables, whenever the tool_load() function
+// was called from "extern "C" CONSTRUCTOR_API void constructor()" of libtracer_tool.so
+// the ordering of std::vector constructor becomes undefined. This meant that you could assign
+// hip_api_vec and hsa_api_vec with a value in tool_load() and once the function returns, the std::vector
+// default constructor would execute later, causing the values to be lost. 
+
+static std::vector<std::string> &hsa_api_vec() {
+  static std::vector<std::string> hsa_api_vec;
+  return hsa_api_vec;
+}
+static std::vector<std::string> &hip_api_vec() {
+  static std::vector<std::string> hip_api_vec;
+  return hip_api_vec;
+}
 
 LOADER_INSTANTIATE();
 TRACE_BUFFER_INSTANTIATE();
@@ -874,7 +888,7 @@ void tool_load() {
       if (name == "HSA") {
         found = true;
         trace_hsa_api = true;
-        hsa_api_vec = api_vec;
+        hsa_api_vec() = api_vec;
       }
       if (name == "GPU") {
         found = true;
@@ -884,7 +898,7 @@ void tool_load() {
         found = true;
         trace_hip_api = true;
         trace_hip_activity = true;
-        hip_api_vec = api_vec;
+        hip_api_vec() = api_vec;
       }
     }
 
@@ -982,10 +996,10 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     roctracer_set_properties(ACTIVITY_DOMAIN_HSA_API, (void*)table);
 
     fprintf(stdout, "    HSA-trace("); fflush(stdout);
-    if (hsa_api_vec.size() != 0) {
-      for (unsigned i = 0; i < hsa_api_vec.size(); ++i) {
+    if (hsa_api_vec().size() != 0) {
+      for (unsigned i = 0; i < hsa_api_vec().size(); ++i) {
         uint32_t cid = HSA_API_ID_NUMBER;
-        const char* api = hsa_api_vec[i].c_str();
+        const char* api = hsa_api_vec()[i].c_str();
         ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api, &cid, NULL));
         ROCTRACER_CALL(roctracer_enable_op_callback(ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, NULL));
         printf(" %s", api);
@@ -1030,10 +1044,10 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, 
     // Enable tracing
     if (trace_hip_api) {
       hip_api_file_handle = open_output_file(output_prefix, "hip_api_trace.txt");
-      if (hip_api_vec.size() != 0) {
-        for (unsigned i = 0; i < hip_api_vec.size(); ++i) {
+      if (hip_api_vec().size() != 0) {
+        for (unsigned i = 0; i < hip_api_vec().size(); ++i) {
           uint32_t cid = HIP_API_ID_NONE;
-          const char* api = hip_api_vec[i].c_str();
+          const char* api = hip_api_vec()[i].c_str();
           ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_HIP_API, api, &cid, NULL));
           ROCTRACER_CALL(roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API, cid, hip_api_callback, NULL));
           printf(" %s", api);
