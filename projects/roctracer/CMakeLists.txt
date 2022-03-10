@@ -28,9 +28,6 @@ cmake_minimum_required ( VERSION 3.5.0 )
 ## Verbose output.
 set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
 
-# Install prefix
-set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
-
 ## Set module name and project name.
 set ( ROCTRACER_NAME "roctracer" )
 set ( ROCTRACER_TARGET "${ROCTRACER_NAME}64" )
