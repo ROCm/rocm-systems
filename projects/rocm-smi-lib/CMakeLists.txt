@@ -145,6 +145,10 @@ set(CMN_INC_LIST ${CMN_INC_LIST} "${SHR_MUTEX_DIR}/shared_mutex.h")
 add_subdirectory("rocm_smi")
 add_subdirectory("oam")
 
+option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
+if(FILE_REORG_BACKWARD_COMPATIBILITY)
+  include(rocm_smi-backward-compat.cmake)
+endif()
 #TODO: Should use GNUInstallDirs to match distro standards
 #This need fix in subdirectory CMakefile as well
 #include(GNUInstallDirs)
@@ -190,7 +194,7 @@ install(EXPORT rocm_smiTargets DESTINATION
 
 #License file
 set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
-install( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION share/doc/smi-lib RENAME LICENSE.txt)
+install( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION share/doc/${ROCM_SMI} RENAME LICENSE.txt)
 
 ###########################
 # Packaging directives

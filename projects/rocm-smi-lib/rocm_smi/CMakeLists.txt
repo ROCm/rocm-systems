@@ -102,51 +102,35 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
           POST_BUILD COMMAND ${CMAKE_STRIP} lib${ROCM_SMI_TARGET}.so.${SO_VERSION_STRING})
   endif()
 endif ()
+#file reorganization changes
+#rocm_smi.py moved to libexec/rocm_smi. so creating rocm-smi symlink
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
+add_custom_target(link-rocm-smi ALL
+                  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                  COMMAND ${CMAKE_COMMAND} -E create_symlink
+                  ../libexec/${ROCM_SMI}/rocm_smi.py ${CMAKE_CURRENT_BINARY_DIR}/bin/rocm-smi)
 
-## Add symlinks from top level ROCm lib dir to rocm-smi lib so files
-if(${BUILD_SHARED_LIBS})
-  add_custom_target ( so-link ALL WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink
-                          ../${ROCM_SMI}/lib/${ROCM_SMI_LIB_NAME}.so so-link )
-  add_custom_target ( so-major-link ALL WORKING_DIRECTORY
-                  ${CMAKE_CURRENT_BINARY_DIR} COMMAND ${CMAKE_COMMAND}
-                  -E create_symlink
-                  ../${ROCM_SMI}/lib/${ROCM_SMI_LIB_NAME}.so.${VERSION_MAJOR}
-                                                               so-major-link )
-
-  install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/so-link DESTINATION lib RENAME
-                                                     ${ROCM_SMI_LIB_NAME}.so )
-  install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/so-major-link DESTINATION lib
-                             RENAME ${ROCM_SMI_LIB_NAME}.so.${VERSION_MAJOR} )
-endif()
 ## Add the install directives for the runtime library.
 install(TARGETS ${ROCM_SMI_TARGET}
           EXPORT rocm_smiTargets
-          LIBRARY DESTINATION ${ROCM_SMI}/lib
-          ARCHIVE DESTINATION ${ROCM_SMI}/lib
+          LIBRARY DESTINATION lib
+          ARCHIVE DESTINATION lib
           COMPONENT ${ROCM_SMI_COMPONENT})
 
 install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/rocm_smi.h
-                                        DESTINATION rocm_smi/include/rocm_smi)
+                                        DESTINATION include/rocm_smi)
 install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/${ROCM_SMI_TARGET}Config.h
-                                        DESTINATION rocm_smi/include/rocm_smi)
+                                        DESTINATION include/rocm_smi)
 install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/kfd_ioctl.h
-                                        DESTINATION rocm_smi/include/rocm_smi)
+                                        DESTINATION include/rocm_smi)
 install(FILES ${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindings.py
-                                        DESTINATION rocm_smi/bindings)
+                                        DESTINATION libexec/${ROCM_SMI})
 install(FILES ${COMMON_SRC_ROOT}/python_smi_tools/rocm_smi.py
        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ
                          GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+                                        DESTINATION libexec/${ROCM_SMI})
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bin/rocm-smi
                                         DESTINATION bin)
-install(FILES ${COMMON_SRC_ROOT}/python_smi_tools/rocm-smi
-                                        DESTINATION bin)
-add_custom_target(bindings_link ALL
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                    COMMAND ${CMAKE_COMMAND} -E create_symlink
-                       ../rocm_smi/bindings/rsmiBindings.py bindings_link)
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bindings_link
-                     DESTINATION bin RENAME rsmiBindings.py)
-
 
 # Generate Doxygen documentation
 find_package(Doxygen)
@@ -173,9 +157,9 @@ if (DOXYGEN_FOUND AND LATEX_FOUND)
 
   add_dependencies(${ROCM_SMI_TARGET} docs)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
-                         DESTINATION ${ROCM_SMI}/docs/${RSMI_MANUAL_NAME}.pdf)
+                         DESTINATION share/doc/${ROCM_SMI} RENAME ${RSMI_MANUAL_NAME}.pdf)
   install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../README.md
-                          DESTINATION ${ROCM_SMI}/docs/)
+                          DESTINATION share/doc/${ROCM_SMI}/)
 else()
   message("Doxygen or Latex is not found. Will not generate documents.")
 endif(DOXYGEN_FOUND AND LATEX_FOUND)

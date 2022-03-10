@@ -1,5 +1,5 @@
 # left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
 if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
-  echo -e "@CPACK_PACKAGING_INSTALL_PREFIX@/rocm_smi/lib\n@CPACK_PACKAGING_INSTALL_PREFIX@/rocm_smi/lib64" > /etc/ld.so.conf.d/x86_64-librocm_smi_lib.conf
+  echo -e "@CPACK_PACKAGING_INSTALL_PREFIX@/lib\n@CPACK_PACKAGING_INSTALL_PREFIX@/lib64" > /etc/ld.so.conf.d/x86_64-librocm_smi_lib.conf
   ldconfig
 fi
