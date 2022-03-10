@@ -12,7 +12,7 @@ reload_systemd() {
 set -e
 
 case "$1" in
-   remove)
+   remove | upgrade )
        stop_rdc
        unlink /lib/systemd/system/rdc.service
        reload_systemd
