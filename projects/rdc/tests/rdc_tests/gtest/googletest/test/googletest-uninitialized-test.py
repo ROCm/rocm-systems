@@ -31,7 +31,7 @@
 
 """Verifies that Google Test warns the user when not initialized properly."""
 
-import gtest_test_utils
+from googletest.test import gtest_test_utils
 
 COMMAND = gtest_test_utils.GetTestExecutablePath('googletest-uninitialized-test_')
 
@@ -43,8 +43,8 @@ def Assert(condition):
 
 def AssertEq(expected, actual):
   if expected != actual:
-    print 'Expected: %s' % (expected,)
-    print '  Actual: %s' % (actual,)
+    print('Expected: %s' % (expected,))
+    print('  Actual: %s' % (actual,))
     raise AssertionError
 
 

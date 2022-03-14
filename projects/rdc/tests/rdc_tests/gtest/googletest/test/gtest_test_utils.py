@@ -32,22 +32,17 @@
 # pylint: disable-msg=C6204
 
 import os
+import subprocess
 import sys
 
 IS_WINDOWS = os.name == 'nt'
 IS_CYGWIN = os.name == 'posix' and 'CYGWIN' in os.uname()[0]
+IS_OS2 = os.name == 'os2'
 
 import atexit
 import shutil
 import tempfile
 import unittest as _test_module
-
-try:
-  import subprocess
-  _SUBPROCESS_MODULE_AVAILABLE = True
-except:
-  import popen2
-  _SUBPROCESS_MODULE_AVAILABLE = False
 # pylint: enable-msg=C6204
 
 GTEST_OUTPUT_VAR_NAME = 'GTEST_OUTPUT'
@@ -164,7 +159,7 @@ def GetTestExecutablePath(executable_name, build_dir=None):
 
   path = os.path.abspath(os.path.join(build_dir or GetBuildDir(),
                                       executable_name))
-  if (IS_WINDOWS or IS_CYGWIN) and not path.endswith('.exe'):
+  if (IS_WINDOWS or IS_CYGWIN or IS_OS2) and not path.endswith('.exe'):
     path += '.exe'
 
   if not os.path.exists(path):
@@ -172,7 +167,7 @@ def GetTestExecutablePath(executable_name, build_dir=None):
         'Unable to find the test binary "%s". Please make sure to provide\n'
         'a path to the binary via the --build_dir flag or the BUILD_DIR\n'
         'environment variable.' % path)
-    print >> sys.stderr, message
+    print(message, file=sys.stderr)
     sys.exit(1)
 
   return path
@@ -214,83 +209,31 @@ class Subprocess:
     Returns:
       An object that represents outcome of the executed process. It has the
       following attributes:
-        terminated_by_signal   True iff the child process has been terminated
-                               by a signal.
-        signal                 Sygnal that terminated the child process.
-        exited                 True iff the child process exited normally.
+        terminated_by_signal   True if and only if the child process has been
+                               terminated by a signal.
+        exited                 True if and only if the child process exited
+                               normally.
         exit_code              The code with which the child process exited.
         output                 Child process's stdout and stderr output
                                combined in a string.
     """
 
-    # The subprocess module is the preferrable way of running programs
-    # since it is available and behaves consistently on all platforms,
-    # including Windows. But it is only available starting in python 2.4.
-    # In earlier python versions, we revert to the popen2 module, which is
-    # available in python 2.0 and later but doesn't provide required
-    # functionality (Popen4) under Windows. This allows us to support Mac
-    # OS X 10.4 Tiger, which has python 2.3 installed.
-    if _SUBPROCESS_MODULE_AVAILABLE:
-      if capture_stderr:
-        stderr = subprocess.STDOUT
-      else:
-        stderr = subprocess.PIPE
-
-      p = subprocess.Popen(command,
-                           stdout=subprocess.PIPE, stderr=stderr,
-                           cwd=working_dir, universal_newlines=True, env=env)
-      # communicate returns a tuple with the file object for the child's
-      # output.
-      self.output = p.communicate()[0]
-      self._return_code = p.returncode
+    if capture_stderr:
+      stderr = subprocess.STDOUT
     else:
-      old_dir = os.getcwd()
+      stderr = subprocess.PIPE
 
-      def _ReplaceEnvDict(dest, src):
-        # Changes made by os.environ.clear are not inheritable by child
-        # processes until Python 2.6. To produce inheritable changes we have
-        # to delete environment items with the del statement.
-        for key in dest.keys():
-          del dest[key]
-        dest.update(src)
+    p = subprocess.Popen(command,
+                         stdout=subprocess.PIPE, stderr=stderr,
+                         cwd=working_dir, universal_newlines=True, env=env)
+    # communicate returns a tuple with the file object for the child's
+    # output.
+    self.output = p.communicate()[0]
+    self._return_code = p.returncode
 
-      # When 'env' is not None, backup the environment variables and replace
-      # them with the passed 'env'. When 'env' is None, we simply use the
-      # current 'os.environ' for compatibility with the subprocess.Popen
-      # semantics used above.
-      if env is not None:
-        old_environ = os.environ.copy()
-        _ReplaceEnvDict(os.environ, env)
-
-      try:
-        if working_dir is not None:
-          os.chdir(working_dir)
-        if capture_stderr:
-          p = popen2.Popen4(command)
-        else:
-          p = popen2.Popen3(command)
-        p.tochild.close()
-        self.output = p.fromchild.read()
-        ret_code = p.wait()
-      finally:
-        os.chdir(old_dir)
-
-        # Restore the old environment variables
-        # if they were replaced.
-        if env is not None:
-          _ReplaceEnvDict(os.environ, old_environ)
-
-      # Converts ret_code to match the semantics of
-      # subprocess.Popen.returncode.
-      if os.WIFSIGNALED(ret_code):
-        self._return_code = -os.WTERMSIG(ret_code)
-      else:  # os.WIFEXITED(ret_code) should return True here.
-        self._return_code = os.WEXITSTATUS(ret_code)
-
-    if self._return_code < 0:
+    if bool(self._return_code & 0x80000000):
       self.terminated_by_signal = True
       self.exited = False
-      self.signal = -self._return_code
     else:
       self.terminated_by_signal = False
       self.exited = True
@@ -306,8 +249,6 @@ def Main():
   _ParseAndStripGTestFlags(sys.argv)
   # The tested binaries should not be writing XML output files unless the
   # script explicitly instructs them to.
-  # FIXME: Move this into Subprocess when we implement
-  # passing environment into it as a parameter.
   if GTEST_OUTPUT_VAR_NAME in os.environ:
     del os.environ[GTEST_OUTPUT_VAR_NAME]
 

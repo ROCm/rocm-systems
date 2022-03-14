@@ -26,7 +26,7 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
+
 // Google Test filepath utilities
 //
 // This header file declares classes and functions used internally by
@@ -35,10 +35,12 @@
 // This file is #included in gtest/internal/gtest-internal.h.
 // Do not include this header file separately!
 
-// GOOGLETEST_CM0001 DO NOT DELETE
+// IWYU pragma: private, include "gtest/gtest.h"
+// IWYU pragma: friend gtest/.*
+// IWYU pragma: friend gmock/.*
 
-#ifndef GTEST_INCLUDE_GTEST_INTERNAL_GTEST_FILEPATH_H_
-#define GTEST_INCLUDE_GTEST_INTERNAL_GTEST_FILEPATH_H_
+#ifndef GOOGLETEST_INCLUDE_GTEST_INTERNAL_GTEST_FILEPATH_H_
+#define GOOGLETEST_INCLUDE_GTEST_INTERNAL_GTEST_FILEPATH_H_
 
 #include "gtest/internal/gtest-string.h"
 
@@ -110,7 +112,7 @@ class GTEST_API_ FilePath {
                                          const FilePath& base_name,
                                          const char* extension);
 
-  // Returns true iff the path is "".
+  // Returns true if and only if the path is "".
   bool IsEmpty() const { return pathname_.empty(); }
 
   // If input name has a trailing separator character, removes it and returns
@@ -195,7 +197,7 @@ class GTEST_API_ FilePath {
 
   void Normalize();
 
-  // Returns a pointer to the last occurence of a valid path separator in
+  // Returns a pointer to the last occurrence of a valid path separator in
   // the FilePath. On Windows, for example, both '/' and '\' are valid path
   // separators. Returns NULL if no path separator was found.
   const char* FindLastPathSeparator() const;
@@ -208,4 +210,4 @@ class GTEST_API_ FilePath {
 
 GTEST_DISABLE_MSC_WARNINGS_POP_()  //  4251
 
-#endif  // GTEST_INCLUDE_GTEST_INTERNAL_GTEST_FILEPATH_H_
+#endif  // GOOGLETEST_INCLUDE_GTEST_INTERNAL_GTEST_FILEPATH_H_
