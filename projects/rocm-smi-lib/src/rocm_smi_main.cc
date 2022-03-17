@@ -181,7 +181,7 @@ static bool bdfid_from_path(const std::string in_name, uint64_t *bdfid) {
 
 static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
   assert(bdfid != nullptr);
-  char tpath[256];
+  char tpath[256] = {'\0'};
   ssize_t ret;
   memset(tpath,0,256);
 
