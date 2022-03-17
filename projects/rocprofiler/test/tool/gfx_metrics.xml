@@ -103,6 +103,26 @@
 </gfx908>
 
 <gfx90a base="gfx908">
+  <metric name="SQ_INSTS_VALU_ADD_F16" block=SQ event=27 descr="Number of VALU ADD/SUB instructions on float16. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_MUL_F16" block=SQ event=28 descr="Number of VALU MUL instructions on float16. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_FMA_F16" block=SQ event=29 descr="Number of VALU FMA/MAD instructions on float16. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_TRANS_F16" block=SQ event=30 descr="Number of VALU transcendental instructions on float16. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_ADD_F32" block=SQ event=31 descr="Number of VALU ADD/SUB instructions on float32. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_MUL_F32" block=SQ event=32 descr="Number of VALU MUL instructions on float32. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_FMA_F32" block=SQ event=33 descr="Number of VALU FMA/MAD instructions on float32. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_TRANS_F32" block=SQ event=34 descr="Number of VALU transcendental instructions on float32. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_ADD_F64" block=SQ event=35 descr="Number of VALU ADD/SUB instructions on float64. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_MUL_F64" block=SQ event=36 descr="Number of VALU MUL instructions on float64. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_FMA_F64" block=SQ event=37 descr="Number of VALU FMA/MAD instructions on float64. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_TRANS_F64" block=SQ event=38 descr="Number of VALU transcendental instructions on float64. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_INT32" block=SQ event=39 descr="Number of VALU 32-bit integer (signed or unsigned) instructions. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_INT64" block=SQ event=40 descr="Number of VALU 64-bit integer (signed or unsigned) instructions. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_CVT" block=SQ event=41 descr="Number of VALU data conversion instructions. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_MFMA_MOPS_I8" block=SQ event=47 descr="Number of VALU matrix math operations (add or mul) performed dividied by 512, assuming a full EXEC mask, of data type I8. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_MFMA_MOPS_F16" block=SQ event=48 descr="Number of VALU matrix math operations (add or mul) performed dividied by 512, assuming a full EXEC mask, of data type F16. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_MFMA_MOPS_BF16" block=SQ event=49 descr="Number of VALU matrix math operations (add or mul) performed dividied by 512, assuming a full EXEC mask, of data type BF16. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_MFMA_MOPS_F32" block=SQ event=50 descr="Number of VALU matrix math operations (add or mul) performed dividied by 512, assuming a full EXEC mask, of data type F32. (per-simd, emulated)"></metric>
+  <metric name="SQ_INSTS_VALU_MFMA_MOPS_F64" block=SQ event=51 descr="Number of VALU matrix math operations (add or mul) performed dividied by 512, assuming a full EXEC mask, of data type F64. (per-simd, emulated)"></metric>
   <metric name="SQ_INSTS_VMEM_WR" block=SQ event=53 descr="Number of VMEM write instructions issued (including FLAT). (per-simd, emulated)"></metric>
   <metric name="SQ_INSTS_VMEM_RD" block=SQ event=54 descr="Number of VMEM read instructions issued (including FLAT). (per-simd, emulated)"></metric>
   <metric name="SQ_INSTS_SALU" block=SQ event=56 descr="Number of SALU instructions issued. (per-simd, emulated)"></metric>
