@@ -1,40 +1,44 @@
 # Googletest FAQ
 
+## Why should test suite names and test names not contain underscore?
 
-## Why should test case names and test names not contain underscore?
+{: .callout .note}
+Note: Googletest reserves underscore (`_`) for special purpose keywords, such as
+[the `DISABLED_` prefix](advanced.md#temporarily-disabling-tests), in addition
+to the following rationale.
 
 Underscore (`_`) is special, as C++ reserves the following to be used by the
 compiler and the standard library:
 
 1.  any identifier that starts with an `_` followed by an upper-case letter, and
-1.  any identifier that contains two consecutive underscores (i.e. `__`)
+2.  any identifier that contains two consecutive underscores (i.e. `__`)
     *anywhere* in its name.
 
 User code is *prohibited* from using such identifiers.
 
 Now let's look at what this means for `TEST` and `TEST_F`.
 
-Currently `TEST(TestCaseName, TestName)` generates a class named
-`TestCaseName_TestName_Test`. What happens if `TestCaseName` or `TestName`
+Currently `TEST(TestSuiteName, TestName)` generates a class named
+`TestSuiteName_TestName_Test`. What happens if `TestSuiteName` or `TestName`
 contains `_`?
 
-1.  If `TestCaseName` starts with an `_` followed by an upper-case letter (say,
+1.  If `TestSuiteName` starts with an `_` followed by an upper-case letter (say,
     `_Foo`), we end up with `_Foo_TestName_Test`, which is reserved and thus
     invalid.
-1.  If `TestCaseName` ends with an `_` (say, `Foo_`), we get
+2.  If `TestSuiteName` ends with an `_` (say, `Foo_`), we get
     `Foo__TestName_Test`, which is invalid.
-1.  If `TestName` starts with an `_` (say, `_Bar`), we get
-    `TestCaseName__Bar_Test`, which is invalid.
-1.  If `TestName` ends with an `_` (say, `Bar_`), we get
-    `TestCaseName_Bar__Test`, which is invalid.
+3.  If `TestName` starts with an `_` (say, `_Bar`), we get
+    `TestSuiteName__Bar_Test`, which is invalid.
+4.  If `TestName` ends with an `_` (say, `Bar_`), we get
+    `TestSuiteName_Bar__Test`, which is invalid.
 
-So clearly `TestCaseName` and `TestName` cannot start or end with `_` (Actually,
-`TestCaseName` can start with `_` -- as long as the `_` isn't followed by an
-upper-case letter. But that's getting complicated. So for simplicity we just say
-that it cannot start with `_`.).
+So clearly `TestSuiteName` and `TestName` cannot start or end with `_`
+(Actually, `TestSuiteName` can start with `_` -- as long as the `_` isn't
+followed by an upper-case letter. But that's getting complicated. So for
+simplicity we just say that it cannot start with `_`.).
 
-It may seem fine for `TestCaseName` and `TestName` to contain `_` in the middle.
-However, consider this:
+It may seem fine for `TestSuiteName` and `TestName` to contain `_` in the
+middle. However, consider this:
 
 ```c++
 TEST(Time, Flies_Like_An_Arrow) { ... }
@@ -44,7 +48,7 @@ TEST(Time_Flies, Like_An_Arrow) { ... }
 Now, the two `TEST`s will both generate the same class
 (`Time_Flies_Like_An_Arrow_Test`). That's not good.
 
-So for simplicity, we just ask the users to avoid `_` in `TestCaseName` and
+So for simplicity, we just ask the users to avoid `_` in `TestSuiteName` and
 `TestName`. The rule is more constraining than necessary, but it's simple and
 easy to remember. It also gives googletest some wiggle room in case its
 implementation needs to change in the future.
@@ -56,9 +60,10 @@ the rule.
 
 ## Why does googletest support `EXPECT_EQ(NULL, ptr)` and `ASSERT_EQ(NULL, ptr)` but not `EXPECT_NE(NULL, ptr)` and `ASSERT_NE(NULL, ptr)`?
 
-First of all you can use `EXPECT_NE(nullptr, ptr)` and `ASSERT_NE(nullptr,
-ptr)`. This is the preferred syntax in the style guide because nullptr does not
-have the type problems that NULL does. Which is why NULL does not work.
+First of all, you can use `nullptr` with each of these macros, e.g.
+`EXPECT_EQ(ptr, nullptr)`, `EXPECT_NE(ptr, nullptr)`, `ASSERT_EQ(ptr, nullptr)`,
+`ASSERT_NE(ptr, nullptr)`. This is the preferred syntax in the style guide
+because `nullptr` does not have the type problems that `NULL` does.
 
 Due to some peculiarity of C++, it requires some non-trivial template meta
 programming tricks to support using `NULL` as an argument of the `EXPECT_XX()`
@@ -66,22 +71,21 @@ and `ASSERT_XX()` macros. Therefore we only do it where it's most needed
 (otherwise we make the implementation of googletest harder to maintain and more
 error-prone than necessary).
 
-The `EXPECT_EQ()` macro takes the *expected* value as its first argument and the
-*actual* value as the second. It's reasonable that someone wants to write
-`EXPECT_EQ(NULL, some_expression)`, and this indeed was requested several times.
-Therefore we implemented it.
+Historically, the `EXPECT_EQ()` macro took the *expected* value as its first
+argument and the *actual* value as the second, though this argument order is now
+discouraged. It was reasonable that someone wanted
+to write `EXPECT_EQ(NULL, some_expression)`, and this indeed was requested
+several times. Therefore we implemented it.
 
-The need for `EXPECT_NE(NULL, ptr)` isn't nearly as strong. When the assertion
+The need for `EXPECT_NE(NULL, ptr)` wasn't nearly as strong. When the assertion
 fails, you already know that `ptr` must be `NULL`, so it doesn't add any
 information to print `ptr` in this case. That means `EXPECT_TRUE(ptr != NULL)`
 works just as well.
 
-If we were to support `EXPECT_NE(NULL, ptr)`, for consistency we'll have to
-support `EXPECT_NE(ptr, NULL)` as well, as unlike `EXPECT_EQ`, we don't have a
-convention on the order of the two arguments for `EXPECT_NE`. This means using
-the template meta programming tricks twice in the implementation, making it even
-harder to understand and maintain. We believe the benefit doesn't justify the
-cost.
+If we were to support `EXPECT_NE(NULL, ptr)`, for consistency we'd have to
+support `EXPECT_NE(ptr, NULL)` as well. This means using the template meta
+programming tricks twice in the implementation, making it even harder to
+understand and maintain. We believe the benefit doesn't justify the cost.
 
 Finally, with the growth of the gMock matcher library, we are encouraging people
 to use the unified `EXPECT_THAT(value, matcher)` syntax more often in tests. One
@@ -107,12 +111,12 @@ rough guidelines:
     `new Bar(5)`. To accommodate for the differences, you can write factory
     function wrappers and pass these function pointers to the tests as their
     parameters.
-*   When a typed test fails, the output includes the name of the type, which can
-    help you quickly identify which implementation is wrong. Value-parameterized
-    tests cannot do this, so there you'll have to look at the iteration number
-    to know which implementation the failure is from, which is less direct.
-*   If you make a mistake writing a typed test, the compiler errors can be
-    harder to digest, as the code is templatized.
+*   When a typed test fails, the default output includes the name of the type,
+    which can help you quickly identify which implementation is wrong.
+    Value-parameterized tests only show the number of the failed iteration by
+    default. You will need to define a function that returns the iteration name
+    and pass it as the third parameter to INSTANTIATE_TEST_SUITE_P to have more
+    useful output.
 *   When using typed tests, you need to make sure you are testing against the
     interface type, not the concrete types (in other words, you want to make
     sure `implicit_cast<MyInterface*>(my_concrete_impl)` works, not just that
@@ -124,23 +128,14 @@ both approaches a try. Practice is a much better way to grasp the subtle
 differences between the two tools. Once you have some concrete experience, you
 can much more easily decide which one to use the next time.
 
-## My death tests became very slow - what happened?
-
-In August 2008 we had to switch the default death test style from `fast` to
-`threadsafe`, as the former is no longer safe now that threaded logging is the
-default. This caused many death tests to slow down. Unfortunately this change
-was necessary.
-
-Please read [Fixing Failing Death Tests](death_test_styles.md) for what you can
-do.
-
 ## I got some run-time errors about invalid proto descriptors when using `ProtocolMessageEquals`. Help!
 
+{: .callout .note}
 **Note:** `ProtocolMessageEquals` and `ProtocolMessageEquiv` are *deprecated*
 now. Please use `EqualsProto`, etc instead.
 
 `ProtocolMessageEquals` and `ProtocolMessageEquiv` were redefined recently and
-are now less tolerant on invalid protocol buffer definitions. In particular, if
+are now less tolerant of invalid protocol buffer definitions. In particular, if
 you have a `foo.proto` that doesn't fully qualify the type of a protocol message
 it references (e.g. `message<Bar>` where it should be `message<blah.Bar>`), you
 will now get run-time errors like:
@@ -162,10 +157,10 @@ result, any in-memory side effects they incur are observable in their respective
 sub-processes, but not in the parent process. You can think of them as running
 in a parallel universe, more or less.
 
-In particular, if you use [gMock](../../googlemock) and the death test statement
-invokes some mock methods, the parent process will think the calls have never
-occurred. Therefore, you may want to move your `EXPECT_CALL` statements inside
-the `EXPECT_DEATH` macro.
+In particular, if you use mocking and the death test statement invokes some mock
+methods, the parent process will think the calls have never occurred. Therefore,
+you may want to move your `EXPECT_CALL` statements inside the `EXPECT_DEATH`
+macro.
 
 ## EXPECT_EQ(htonl(blah), blah_blah) generates weird compiler errors in opt mode. Is this a googletest bug?
 
@@ -184,18 +179,6 @@ The implementation of `EXPECT_EQ(a, b)` uses `sizeof(... a ...)` inside a
 template argument, and thus doesn't compile in opt mode when `a` contains a call
 to `htonl()`. It is difficult to make `EXPECT_EQ` bypass the `htonl()` bug, as
 the solution must work with different compilers on various platforms.
-
-`htonl()` has some other problems as described in `//util/endian/endian.h`,
-which defines `ghtonl()` to replace it. `ghtonl()` does the same thing `htonl()`
-does, only without its problems. We suggest you to use `ghtonl()` instead of
-`htonl()`, both in your tests and production code.
-
-`//util/endian/endian.h` also defines `ghtons()`, which solves similar problems
-in `htons()`.
-
-Don't forget to add `//util/endian` to the list of dependencies in the `BUILD`
-file wherever `ghtonl()` and `ghtons()` are used. The library consists of a
-single header file and will not bloat your binary.
 
 ## The compiler complains about "undefined references" to some static const member variables, but I did define them in the class body. What's wrong?
 
@@ -220,19 +203,31 @@ particular, using it in googletest comparison assertions (`EXPECT_EQ`, etc) will
 generate an "undefined reference" linker error. The fact that "it used to work"
 doesn't mean it's valid. It just means that you were lucky. :-)
 
+If the declaration of the static data member is `constexpr` then it is
+implicitly an `inline` definition, and a separate definition in `foo.cc` is not
+needed:
+
+```c++
+// foo.h
+class Foo {
+  ...
+  static constexpr int kBar = 100;  // Defines kBar, no need to do it in foo.cc.
+};
+```
+
 ## Can I derive a test fixture from another?
 
 Yes.
 
-Each test fixture has a corresponding and same named test case. This means only
-one test case can use a particular fixture. Sometimes, however, multiple test
+Each test fixture has a corresponding and same named test suite. This means only
+one test suite can use a particular fixture. Sometimes, however, multiple test
 cases may want to use the same or slightly different fixtures. For example, you
-may want to make sure that all of a GUI library's test cases don't leak
+may want to make sure that all of a GUI library's test suites don't leak
 important system resources like fonts and brushes.
 
-In googletest, you share a fixture among test cases by putting the shared logic
+In googletest, you share a fixture among test suites by putting the shared logic
 in a base test fixture, then deriving from that base a separate fixture for each
-test case that wants to use this common logic. You then use `TEST_F()` to write
+test suite that wants to use this common logic. You then use `TEST_F()` to write
 tests using each derived fixture.
 
 Typically, your code looks like this:
@@ -271,8 +266,8 @@ TEST_F(FooTest, Baz) { ... }
 If necessary, you can continue to derive test fixtures from a derived fixture.
 googletest has no limit on how deep the hierarchy can be.
 
-For a complete example using derived test fixtures, see [googletest
-sample](https://github.com/google/googletest/blob/master/googletest/samples/sample5_unittest.cc)
+For a complete example using derived test fixtures, see
+[sample5_unittest.cc](https://github.com/google/googletest/blob/master/googletest/samples/sample5_unittest.cc).
 
 ## My compiler complains "void value not ignored as it ought to be." What does this mean?
 
@@ -284,13 +279,14 @@ disabled by our build system. Please see more details
 ## My death test hangs (or seg-faults). How do I fix it?
 
 In googletest, death tests are run in a child process and the way they work is
-delicate. To write death tests you really need to understand how they work.
-Please make sure you have read [this](advanced.md#how-it-works).
+delicate. To write death tests you really need to understand how they work—see
+the details at [Death Assertions](reference/assertions.md#death) in the
+Assertions Reference.
 
 In particular, death tests don't like having multiple threads in the parent
 process. So the first thing you can try is to eliminate creating threads outside
-of `EXPECT_DEATH()`. For example, you may want to use [mocks](../../googlemock)
-or fake objects instead of real ones in your tests.
+of `EXPECT_DEATH()`. For example, you may want to use mocks or fake objects
+instead of real ones in your tests.
 
 Sometimes this is impossible as some library you must use may be creating
 threads before `main()` is even reached. In this case, you can try to minimize
@@ -304,10 +300,10 @@ program from the beginning in the child process. Therefore make sure your
 program can run side-by-side with itself and is deterministic.
 
 In the end, this boils down to good concurrent programming. You have to make
-sure that there is no race conditions or dead locks in your program. No silver
+sure that there are no race conditions or deadlocks in your program. No silver
 bullet - sorry!
 
-## Should I use the constructor/destructor of the test fixture or SetUp()/TearDown()?
+## Should I use the constructor/destructor of the test fixture or SetUp()/TearDown()? {#CtorVsSetUp}
 
 The first thing to remember is that googletest does **not** reuse the same test
 fixture object across multiple tests. For each `TEST_F`, googletest will create
@@ -328,12 +324,21 @@ The former is usually preferred, as it has the following benefits:
     forgetting to call the base class' `SetUp()/TearDown()` or call them at the
     wrong time.
 
-You may still want to use `SetUp()/TearDown()` in the following rare cases:
+You may still want to use `SetUp()/TearDown()` in the following cases:
 
+*   C++ does not allow virtual function calls in constructors and destructors.
+    You can call a method declared as virtual, but it will not use dynamic
+    dispatch. It will use the definition from the class the constructor of which
+    is currently executing. This is because calling a virtual method before the
+    derived class constructor has a chance to run is very dangerous - the
+    virtual method might operate on uninitialized data. Therefore, if you need
+    to call a method that will be overridden in a derived class, you have to use
+    `SetUp()/TearDown()`.
 *   In the body of a constructor (or destructor), it's not possible to use the
     `ASSERT_xx` macros. Therefore, if the set-up operation could cause a fatal
     test failure that should prevent the test from running, it's necessary to
-    use a `CHECK` macro or to use `SetUp()` instead of a constructor.
+    use `abort` and abort the whole test
+    executable, or to use `SetUp()` instead of a constructor.
 *   If the tear-down operation could throw an exception, you must use
     `TearDown()` as opposed to the destructor, as throwing in a destructor leads
     to undefined behavior and usually will kill your program right away. Note
@@ -346,81 +351,11 @@ You may still want to use `SetUp()/TearDown()` in the following rare cases:
     failures from a subroutine to its caller. Therefore, you shouldn't use
     googletest assertions in a destructor if your code could run on such a
     platform.
-*   In a constructor or destructor, you cannot make a virtual function call on
-    this object. (You can call a method declared as virtual, but it will be
-    statically bound.) Therefore, if you need to call a method that will be
-    overridden in a derived class, you have to use `SetUp()/TearDown()`.
-
 
 ## The compiler complains "no matching function to call" when I use ASSERT_PRED*. How do I fix it?
 
-If the predicate function you use in `ASSERT_PRED*` or `EXPECT_PRED*` is
-overloaded or a template, the compiler will have trouble figuring out which
-overloaded version it should use. `ASSERT_PRED_FORMAT*` and
-`EXPECT_PRED_FORMAT*` don't have this problem.
-
-If you see this error, you might want to switch to
-`(ASSERT|EXPECT)_PRED_FORMAT*`, which will also give you a better failure
-message. If, however, that is not an option, you can resolve the problem by
-explicitly telling the compiler which version to pick.
-
-For example, suppose you have
-
-```c++
-bool IsPositive(int n) {
-  return n > 0;
-}
-
-bool IsPositive(double x) {
-  return x > 0;
-}
-```
-
-you will get a compiler error if you write
-
-```c++
-EXPECT_PRED1(IsPositive, 5);
-```
-
-However, this will work:
-
-```c++
-EXPECT_PRED1(static_cast<bool (*)(int)>(IsPositive), 5);
-```
-
-(The stuff inside the angled brackets for the `static_cast` operator is the type
-of the function pointer for the `int`-version of `IsPositive()`.)
-
-As another example, when you have a template function
-
-```c++
-template <typename T>
-bool IsNegative(T x) {
-  return x < 0;
-}
-```
-
-you can use it in a predicate assertion like this:
-
-```c++
-ASSERT_PRED1(IsNegative<int>, -5);
-```
-
-Things are more interesting if your template has more than one parameters. The
-following won't compile:
-
-```c++
-ASSERT_PRED2(GreaterThan<int, int>, 5, 0);
-```
-
-as the C++ pre-processor thinks you are giving `ASSERT_PRED2` 4 arguments, which
-is one more than expected. The workaround is to wrap the predicate function in
-parentheses:
-
-```c++
-ASSERT_PRED2((GreaterThan<int, int>), 5, 0);
-```
-
+See details for [`EXPECT_PRED*`](reference/assertions.md#EXPECT_PRED) in the
+Assertions Reference.
 
 ## My compiler complains about "ignoring return value" when I call RUN_ALL_TESTS(). Why?
 
@@ -472,17 +407,10 @@ switch to `EXPECT_*()` if that works. This
 
 C++ is case-sensitive. Did you spell it as `Setup()`?
 
-Similarly, sometimes people spell `SetUpTestCase()` as `SetupTestCase()` and
+Similarly, sometimes people spell `SetUpTestSuite()` as `SetupTestSuite()` and
 wonder why it's never called.
 
-## How do I jump to the line of a failure in Emacs directly?
-
-googletest's failure message format is understood by Emacs and many other IDEs,
-like acme and XCode. If a googletest message is in a compilation buffer in
-Emacs, then it's clickable.
-
-
-## I have several test cases which share the same test fixture logic, do I have to define a new test fixture class for each of them? This seems pretty tedious.
+## I have several test suites which share the same test fixture logic, do I have to define a new test fixture class for each of them? This seems pretty tedious.
 
 You don't have to. Instead of
 
@@ -527,7 +455,6 @@ example:
 $ ./my_test > gtest_output.txt
 ```
 
-
 ## Why should I prefer test fixtures over global variables?
 
 There are several good reasons:
@@ -537,16 +464,15 @@ There are several good reasons:
     contaminating others, making debugging difficult. By using fixtures, each
     test has a fresh set of variables that's different (but with the same
     names). Thus, tests are kept independent of each other.
-1.  Global variables pollute the global namespace.
-1.  Test fixtures can be reused via subclassing, which cannot be done easily
-    with global variables. This is useful if many test cases have something in
+2.  Global variables pollute the global namespace.
+3.  Test fixtures can be reused via subclassing, which cannot be done easily
+    with global variables. This is useful if many test suites have something in
     common.
 
+## What can the statement argument in ASSERT_DEATH() be?
 
-    ## What can the statement argument in ASSERT_DEATH() be?
-
-`ASSERT_DEATH(*statement*, *regex*)` (or any death assertion macro) can be used
-wherever `*statement*` is valid. So basically `*statement*` can be any C++
+`ASSERT_DEATH(statement, matcher)` (or any death assertion macro) can be used
+wherever *`statement`* is valid. So basically *`statement`* can be any C++
 statement that makes sense in the current context. In particular, it can
 reference global and/or local variables, and can be:
 
@@ -569,7 +495,7 @@ TEST(MyDeathTest, ComplexExpression) {
                "(Func1|Method) failed");
 }
 
-// Death assertions can be used any where in a function.  In
+// Death assertions can be used anywhere in a function.  In
 // particular, they can be inside a loop.
 TEST(MyDeathTest, InsideLoop) {
   // Verifies that Foo(0), Foo(1), ..., and Foo(4) all die.
@@ -592,8 +518,6 @@ TEST(MyDeathTest, CompoundStatement) {
 }
 ```
 
-gtest-death-test_test.cc contains more examples if you are interested.
-
 ## I have a fixture class `FooTest`, but `TEST_F(FooTest, Bar)` gives me error ``"no matching function for call to `FooTest::FooTest()'"``. Why?
 
 Googletest needs to be able to create objects of your test fixture class, so it
@@ -611,7 +535,7 @@ However, there are cases where you have to define your own:
 ## Why does ASSERT_DEATH complain about previous threads that were already joined?
 
 With the Linux pthread library, there is no turning back once you cross the line
-from single thread to multiple threads. The first time you create a thread, a
+from a single thread to multiple threads. The first time you create a thread, a
 manager thread is created in addition, so you get 3, not 2, threads. Later when
 the thread you create joins the main thread, the thread count decrements by 1,
 but the manager thread will never be killed, so you still have 2 threads, which
@@ -621,14 +545,14 @@ The new NPTL thread library doesn't suffer from this problem, as it doesn't
 create a manager thread. However, if you don't control which machine your test
 runs on, you shouldn't depend on this.
 
-## Why does googletest require the entire test case, instead of individual tests, to be named *DeathTest when it uses ASSERT_DEATH?
+## Why does googletest require the entire test suite, instead of individual tests, to be named *DeathTest when it uses ASSERT_DEATH?
 
-googletest does not interleave tests from different test cases. That is, it runs
-all tests in one test case first, and then runs all tests in the next test case,
-and so on. googletest does this because it needs to set up a test case before
-the first test in it is run, and tear it down afterwords. Splitting up the test
-case would require multiple set-up and tear-down processes, which is inefficient
-and makes the semantics unclean.
+googletest does not interleave tests from different test suites. That is, it
+runs all tests in one test suite first, and then runs all tests in the next test
+suite, and so on. googletest does this because it needs to set up a test suite
+before the first test in it is run, and tear it down afterwards. Splitting up
+the test case would require multiple set-up and tear-down processes, which is
+inefficient and makes the semantics unclean.
 
 If we were to determine the order of tests based on test name instead of test
 case name, then we would have a problem with the following situation:
@@ -642,13 +566,13 @@ TEST_F(BarTest, Xyz) { ... }
 ```
 
 Since `FooTest.AbcDeathTest` needs to run before `BarTest.Xyz`, and we don't
-interleave tests from different test cases, we need to run all tests in the
+interleave tests from different test suites, we need to run all tests in the
 `FooTest` case before running any test in the `BarTest` case. This contradicts
 with the requirement to run `BarTest.DefDeathTest` before `FooTest.Uvw`.
 
-## But I don't like calling my entire test case \*DeathTest when it contains both death tests and non-death tests. What do I do?
+## But I don't like calling my entire test suite \*DeathTest when it contains both death tests and non-death tests. What do I do?
 
-You don't have to, but if you like, you may split up the test case into
+You don't have to, but if you like, you may split up the test suite into
 `FooTest` and `FooDeathTest`, where the names make it clear that they are
 related:
 
@@ -675,14 +599,15 @@ break the death test (e.g. by changing the regex pattern it is expected to
 match). Admittedly, this is a hack. We'll consider a more permanent solution
 after the fork-and-exec-style death tests are implemented.
 
-## The compiler complains about "no match for 'operator<<'" when I use an assertion. What gives?
+## The compiler complains about `no match for 'operator<<'` when I use an assertion. What gives?
 
 If you use a user-defined type `FooType` in an assertion, you must make sure
 there is an `std::ostream& operator<<(std::ostream&, const FooType&)` function
 defined such that we can print a value of `FooType`.
 
 In addition, if `FooType` is declared in a name space, the `<<` operator also
-needs to be defined in the *same* name space. See go/totw/49 for details.
+needs to be defined in the *same* name space. See
+[Tip of the Week #49](http://abseil.io/tips/49) for details.
 
 ## How do I suppress the memory leak messages on Windows?
 
@@ -692,7 +617,6 @@ end of the program run. The easiest way to avoid this is to use the
 `_CrtMemCheckpoint` and `_CrtMemDumpAllObjectsSince` calls to not report any
 statically initialized heap objects. See MSDN for more details and additional
 heap check/debug routines.
-
 
 ## How can my code detect if it is running in a test?
 
@@ -704,34 +628,32 @@ mistake in production. Such cleverness also leads to
 advise against the practice, and googletest doesn't provide a way to do it.
 
 In general, the recommended way to cause the code to behave differently under
-test is [Dependency Injection](https://en.wikipedia.org/wiki/Dependency_injection). You can inject
+test is [Dependency Injection](http://en.wikipedia.org/wiki/Dependency_injection). You can inject
 different functionality from the test and from the production code. Since your
 production code doesn't link in the for-test logic at all (the
-[`testonly`](https://docs.bazel.build/versions/master/be/common-definitions.html#common.testonly)
-attribute for BUILD targets helps to ensure that), there is no danger in
-accidentally running it.
+[`testonly`](http://docs.bazel.build/versions/master/be/common-definitions.html#common.testonly) attribute for BUILD targets helps to ensure
+that), there is no danger in accidentally running it.
 
 However, if you *really*, *really*, *really* have no choice, and if you follow
 the rule of ending your test program names with `_test`, you can use the
 *horrible* hack of sniffing your executable name (`argv[0]` in `main()`) to know
 whether the code is under test.
 
-
 ## How do I temporarily disable a test?
 
 If you have a broken test that you cannot fix right away, you can add the
-DISABLED_ prefix to its name. This will exclude it from execution. This is
-better than commenting out the code or using #if 0, as disabled tests are still
-compiled (and thus won't rot).
+`DISABLED_` prefix to its name. This will exclude it from execution. This is
+better than commenting out the code or using `#if 0`, as disabled tests are
+still compiled (and thus won't rot).
 
 To include disabled tests in test execution, just invoke the test program with
-the --gtest_also_run_disabled_tests flag.
+the `--gtest_also_run_disabled_tests` flag.
 
 ## Is it OK if I have two separate `TEST(Foo, Bar)` test methods defined in different namespaces?
 
 Yes.
 
-The rule is **all test methods in the same test case must use the same fixture
+The rule is **all test methods in the same test suite must use the same fixture
 class.** This means that the following is **allowed** because both tests use the
 same fixture class (`::testing::Test`).
 
@@ -751,7 +673,7 @@ TEST(CoolTest, DoSomething) {
 
 However, the following code is **not allowed** and will produce a runtime error
 from googletest because the test methods are using different test fixture
-classes with the same test case name.
+classes with the same test suite name.
 
 ```c++
 namespace foo {
