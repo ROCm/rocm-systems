@@ -708,14 +708,19 @@ int get_xml_array(const xml::Xml::level_t* node, const std::string& field, const
     size_t pos1 = 0;
     const size_t string_len = array_string.length();
     while (pos1 < string_len) {
-      const size_t pos2 = array_string.find(delim, pos1);
+      // set pos2 such that it also handles case of multiple delimiter options. 
+      // For example-  "hipLaunchKernel, hipExtModuleLaunchKernel, hipMemsetAsync"
+      // in this example delimiters are ' ' and also ','
+      const size_t pos2 = array_string.find_first_of(delim, pos1);
       const bool found = (pos2 != std::string::npos);
       const size_t token_len = (pos2 != std::string::npos) ? pos2 - pos1 : string_len - pos1;
       const std::string token = array_string.substr(pos1, token_len);
       const std::string norm_str = normalize_token(token, found, "get_xml_array");
       if (norm_str.length() != 0) vec->push_back(norm_str);
       if (!found) break;
-      pos1 = pos2 + 1;
+      // update pos2 such that it represents the first non-delimiter character 
+      // in case multiple delimiters are specified in variable 'delim' 
+      pos1 = array_string.find_first_not_of(delim, pos2); 
       ++parse_iter;
     }
   }
@@ -877,7 +882,7 @@ void tool_load() {
       std::vector<std::string> api_vec;
       for (const auto* node : entry->nodes) {
         if (node->tag != "parameters") fatal("ROCTracer: trace node is not supported '" + name + ":" + node->tag + "'");
-        get_xml_array(node, "api", ",", &api_vec);
+        get_xml_array(node, "api", ", ", &api_vec); // delimiter options given as both spaces and commas (' ' and ',')
         break;
       }
 
