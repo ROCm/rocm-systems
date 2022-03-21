@@ -57,12 +57,13 @@ function(create_header_template)
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
    THE SOFTWARE.
-   */\n\n#ifndef @include_guard@\n#define @include_guard@ \n\n#pragma message(\"This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with ${ROCM_SMI}\")\n@include_statements@ \n\n#endif")
+   */\n\n#ifndef @include_guard@\n#define @include_guard@ \n\n#pragma message(\"This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with @prefix_name@\")\n@include_statements@ \n\n#endif")
 endfunction()
 
 #use header template file and generate wrapper header files
 function(generate_wrapper_header)
   file(MAKE_DIRECTORY ${RSMI_WRAPPER_INC_DIR})
+  set(prefix_name "${prefix_name}${ROCM_SMI}")
   #Generate wrapper header files from  the list
   foreach(header_file ${PUBLIC_RSMI_HEADERS})
     # set include guard
@@ -76,9 +77,11 @@ function(generate_wrapper_header)
     unset(include_guard)
     unset(include_statements)
   endforeach()
+  unset(prefix_name)
 
 #OAM Wrpper Header file generation
   file(MAKE_DIRECTORY ${OAM_WRAPPER_INC_DIR})
+  set(prefix_name "${prefix_name}${OAM_TARGET_NAME}")
   #Generate wrapper header files from  the list
   foreach(header_file ${OAM_HEADERS})
     # set include guard
@@ -92,26 +95,8 @@ function(generate_wrapper_header)
     unset(include_guard)
     unset(include_statements)
   endforeach()
+  unset(prefix_name)
 
-endfunction()
-
-#function to create symlink to binaries
-function(create_binary_symlink)
-  file(MAKE_DIRECTORY ${RSMI_WRAPPER_DIR}/bin)
-
-  file(GLOB binary_files ${COMMON_SRC_ROOT}/python_smi_tools/*.py )
-  foreach(binary_file ${binary_files})
-    get_filename_component(file_name ${binary_file} NAME)
-    add_custom_target(link_${file_name} ALL
-                  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                  COMMAND ${CMAKE_COMMAND} -E create_symlink
-                  ../../libexec/${ROCM_SMI}/${file_name} ${RSMI_WRAPPER_DIR}/bin/${file_name})
-  endforeach()
-  #soft link rocm_smi binary
-  add_custom_target(link_${ROCM_SMI} ALL
-                   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                   COMMAND ${CMAKE_COMMAND} -E create_symlink
-                   ../../bin/${ROCM_SMI} ${RSMI_WRAPPER_DIR}/bin/${ROCM_SMI})
 endfunction()
 
 #function to create symlink to libraries
@@ -181,9 +166,6 @@ create_header_template()
 generate_wrapper_header()
 install(DIRECTORY ${RSMI_WRAPPER_INC_DIR} DESTINATION ${ROCM_SMI}/include)
 install(DIRECTORY ${OAM_WRAPPER_INC_DIR} DESTINATION ${OAM_TARGET_NAME}/include)
-# Create symlink to binaries
-create_binary_symlink()
-install(DIRECTORY ${RSMI_WRAPPER_DIR}/bin  DESTINATION ${ROCM_SMI})
 # Create symlink to library files
 create_library_symlink()
 install(DIRECTORY ${RSMI_WRAPPER_LIB_DIR} DESTINATION ${ROCM_SMI} COMPONENT lib${ROCM_SMI})
