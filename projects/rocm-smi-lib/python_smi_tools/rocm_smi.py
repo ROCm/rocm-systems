@@ -96,8 +96,33 @@ def formatCsv(deviceList):
     """ Print out the JSON_DATA in CSV format """
     global JSON_DATA
     jsondata = json.dumps(JSON_DATA)
-
-    header = ['device']
+    outstr = jsondata
+    # Check if the first json data element is 'system' or 'device'
+    outputType = outstr[outstr.find('\"')+1:]
+    outputType = outputType[:outputType.find('\"')]
+    header = []
+    my_string = ''
+    if outputType != 'system':
+        header.append('device')
+    else:
+        header.append('system')
+    if outputType == 'system':
+        jsonobj = json.loads(jsondata)
+        keylist = header
+        for record in jsonobj:
+            my_string += str(record)
+            for key in keylist:
+                if key == 'system':
+                    tempstr = str(jsonobj[record])
+                    tempstr = tempstr[tempstr.find('\'')+1:]
+                    tempstr = tempstr[:tempstr.find('\'')]
+                    # Force output device type to 'system'
+                    my_string += ',%s\nsystem,%s' % (tempstr, jsonobj[record][tempstr])
+            my_string += '\n'
+        # Force output device type to 'system'
+        if my_string.startswith('system'):
+            my_string = 'device' + my_string[6:]
+        return my_string
     headerkeys = []
     # Separate device-specific information from system-level information
     for dev in deviceList:
@@ -110,7 +135,10 @@ def formatCsv(deviceList):
     if len(header) <= 1:
         return ''
     for dev in deviceList:
-        outStr += 'card%s,' % dev
+        if str(dev) != 'system':
+            outStr += 'card%s,' % dev
+        else:
+            outStr += 'system,'
         for val in headerkeys:
             try:
                 if str(dev) != 'system':
