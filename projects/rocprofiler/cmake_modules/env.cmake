@@ -134,3 +134,8 @@ message ( "---------GPU_TARGETS: ${GPU_TARGETS}" )
 if ( "${ROCM_ROOT_DIR}" STREQUAL "" )
   message ( FATAL_ERROR "ROCM_ROOT_DIR is not found." )
 endif ()
+
+find_library ( FIND_AQL_PROFILE_LIB "libhsa-amd-aqlprofile64.so" HINTS ${CMAKE_INSTALL_PREFIX} PATHS ${ROCM_ROOT_DIR})
+if (  NOT FIND_AQL_PROFILE_LIB )
+  message ( FATAL_ERROR "AQL_PROFILE not installed. Please install AQL_PROFILE" )
+endif()
