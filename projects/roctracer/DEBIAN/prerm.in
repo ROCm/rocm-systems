@@ -11,7 +11,7 @@ rm_ldconfig() {
 }
 
 case "$1" in
-  ( remove )
+  ( remove | upgrade )
     rm_ldconfig
   ;;
   ( purge )

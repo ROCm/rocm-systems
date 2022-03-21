@@ -7,7 +7,7 @@ rm_pkgconfig() {
 }
 
 case "$1" in
-   remove)
+   remove | upgrade )
        rm_pkgconfig
    ;;
    purge)
