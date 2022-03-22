@@ -1,0 +1,122 @@
+name: ubuntu-bionic
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  BUILD_TYPE: Release
+  ELFUTILS_DOWNLOAD_VERSION: 0.183
+  OMNITRACE_DEBUG_FINALIZE: ON
+  OMNITRACE_VERBOSE: 1
+  OMNITRACE_CI: ON
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+jobs:
+  ubuntu-bionic:
+    runs-on: ubuntu-18.04
+    container:
+      image: jrmadsen/omnitrace-ci:ubuntu-18.04
+    strategy:
+      matrix:
+        compiler: ['g++-7', 'g++-8']
+        mpi: [ '', 'libmpich-dev mpich' ]
+
+    steps:
+    - name: Patch Git
+      timeout-minutes: 5
+      run: |
+        apt-get update
+        apt-get install -y software-properties-common
+        add-apt-repository -y ppa:git-core/ppa
+        apt-get update
+        apt-get upgrade -y
+        apt-get install -y git
+
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+
+    - name: Install Packages
+      timeout-minutes: 5
+      run:
+        apt-get update &&
+        apt-get upgrade -y &&
+        apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.compiler }} ${{ matrix.mpi }} &&
+        python3 -m pip install --upgrade pip &&
+        python3 -m pip install 'cmake==3.16.3'
+
+    - name: Configure Env
+      run:
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "/opt/omnitrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+    - name: Configure CMake
+      timeout-minutes: 5
+      run:
+        cmake --version &&
+        if [ -z "${{ matrix.mpi }}" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
+        cmake -B build
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
+          -DOMNITRACE_BUILD_TESTING=ON
+          -DOMNITRACE_BUILD_DYNINST=OFF
+          -DOMNITRACE_USE_MPI=${USE_MPI}
+          -DOMNITRACE_USE_HIP=OFF
+
+    - name: Build
+      timeout-minutes: 45
+      run:
+        cmake --build build --target all --parallel 2 -- VERBOSE=1
+
+    - name: Install
+      run:
+        cmake --build build --target install --parallel 2
+
+    - name: Test
+      timeout-minutes: 30
+      run:
+        cd build &&
+        ctest -V --output-log build/omnitrace-ctest-ubuntu-bionic.log
+
+    - name: Test Install
+      timeout-minutes: 10
+      run: |
+        set -v
+        export OMNITRACE_DEBUG=ON
+        which omnitrace-avail
+        ldd $(which omnitrace-avail)
+        omnitrace-avail --help
+        omnitrace-avail -a
+        which omnitrace-critical-trace
+        ldd $(which omnitrace-critical-trace)
+        which omnitrace
+        ldd $(which omnitrace)
+        omnitrace --help
+        omnitrace -e -v 1 -o ls.inst --simulate -- ls
+        for i in omnitrace-ls.inst-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        omnitrace -e -v 1 -o ls.inst -- ls
+        ./ls.inst
+        omnitrace -e -v 1 --simulate -- ls
+        for i in omnitrace-ls-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        omnitrace -e -v 1 -- ls
+
+    - name: CTest Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: ctest-log
+        path: |
+          build/*.log
+
+    - name: Data Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: data-files
+        path: |
+          build/omnitrace-tests-output/**/*.txt

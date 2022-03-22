@@ -128,7 +128,7 @@ omnitrace_add_bin_test(
     )
 
 omnitrace_add_bin_test(
-    NAME omnitrace-avail-category-filer-omnitrace
+    NAME omnitrace-avail-category-filter-omnitrace
     TARGET omnitrace-avail
     ARGS --categories settings::omnitrace --brief
     LABELS omnitrace-avail
@@ -139,7 +139,7 @@ omnitrace_add_bin_test(
     )
 
 omnitrace_add_bin_test(
-    NAME omnitrace-avail-category-filer-timemory
+    NAME omnitrace-avail-category-filter-timemory
     TARGET omnitrace-avail
     ARGS --categories settings::timemory --brief
     LABELS omnitrace-avail

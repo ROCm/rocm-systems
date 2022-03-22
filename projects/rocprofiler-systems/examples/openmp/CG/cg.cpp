@@ -155,7 +155,9 @@ main(int /*argc*/, char** /*argv*/)
     double  t, mflops, tmax;
     char    class_npb;
     boolean verified;
-    double  zeta_verify_value, epsilon, err;
+    double  zeta_verify_value = 0.0;
+    double  epsilon           = 0.0;
+    double  err               = 0.0;
 
     char* t_names[T_LAST];
 

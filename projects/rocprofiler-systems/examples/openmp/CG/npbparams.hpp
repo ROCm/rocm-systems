@@ -4,9 +4,9 @@
   c  It sets the number of processors and the class_npb of the NPB
   c  in this directory. Do not modify it by hand.
  */
-#define NA              75000
+#define NA              50000
 #define NONZER          13
-#define NITER           75
+#define NITER           50
 #define SHIFT           60.0
 #define RCOND           1.0e-1
 #define CONVERTDOUBLE   FALSE

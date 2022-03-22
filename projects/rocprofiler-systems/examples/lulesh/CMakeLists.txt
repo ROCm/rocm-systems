@@ -23,14 +23,7 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "")
         CACHE STRING "CMake build type" FORCE)
 endif()
 
-if(DEFINED OMNITRACE_USE_MPI
-   AND NOT LULESH_USE_CUDA
-   AND NOT LULESH_USE_HIP)
-    option(LULESH_USE_MPI "Enable MPI" ${OMNITRACE_USE_MPI})
-else()
-    option(LULESH_USE_MPI "Enable MPI" OFF)
-endif()
-
+option(LULESH_USE_MPI "Enable MPI" OFF)
 add_library(lulesh-mpi INTERFACE)
 if(LULESH_USE_MPI)
     find_package(MPI REQUIRED)

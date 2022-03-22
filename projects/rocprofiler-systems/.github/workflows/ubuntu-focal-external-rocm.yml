@@ -1,0 +1,105 @@
+name: ubuntu-focal-external-rocm
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  BUILD_TYPE: Release
+  ELFUTILS_DOWNLOAD_VERSION: 0.183
+  OMNITRACE_DEBUG_FINALIZE: ON
+  OMNITRACE_VERBOSE: 1
+  OMNITRACE_CI: ON
+
+jobs:
+  ubuntu-focal-external-rocm:
+    runs-on: ubuntu-20.04
+    container:
+      image: jrmadsen/omnitrace-ci:ubuntu-20.04
+    strategy:
+      matrix:
+        compiler: ['g++']
+        rocm_version: ['4.3', '4.5', 'debian']
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install Packages
+      timeout-minutes: 5
+      run:
+        apt-get update &&
+        apt-get install -y software-properties-common wget gnupg2 &&
+        wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - &&
+        echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm_version }}/ ubuntu main" | tee /etc/apt/sources.list.d/rocm.list &&
+        apt-get update &&
+        apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev ${{ matrix.compiler }} libudev-dev libnuma-dev rocm-dev rocm-utils roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev libpapi-dev libopenmpi-dev &&
+        python3 -m pip install --upgrade pip &&
+        python3 -m pip install 'cmake==3.16.3'
+
+    - name: Configure Env
+      run:
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "CMAKE_PREFIX_PATH=/opt/dyninst:/opt/elfutils:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV &&
+        echo "/opt/omnitrace/bin:/opt/dyninst/bin:/opt/elfutils/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:/opt/dyninst/lib:/opt/elfutils/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+    - name: Configure CMake
+      timeout-minutes: 5
+      run:
+        cmake --version &&
+        cmake -B build
+          -DCMAKE_C_COMPILER=${CC}
+          -DCMAKE_CXX_COMPILER=${CXX}
+          -DCMAKE_BUILD_TYPE=MinSizeRel
+          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
+          -DOMNITRACE_BUILD_TESTING=OFF
+          -DOMNITRACE_BUILD_DEVELOPER=ON
+          -DOMNITRACE_BUILD_EXTRA_OPTIMIZATIONS=OFF
+          -DOMNITRACE_BUILD_LTO=OFF
+          -DOMNITRACE_USE_MPI=OFF
+          -DOMNITRACE_USE_MPI_HEADERS=ON
+          -DOMNITRACE_USE_HIP=ON
+          -DOMNITRACE_MAX_THREADS=64
+          -DOMNITRACE_USE_SANITIZER=OFF
+          -DTIMEMORY_USE_PAPI=OFF
+
+    - name: Build
+      timeout-minutes: 45
+      run:
+        cmake --build build --target all --parallel 2 -- VERBOSE=1
+
+    - name: Install
+      run:
+        cmake --build build --target install --parallel 2
+
+    - name: Test
+      timeout-minutes: 30
+      run:
+        cd build &&
+        ldd ./omnitrace &&
+        ./omnitrace --help
+
+    - name: Test Install
+      timeout-minutes: 10
+      run: |
+        set -v
+        export OMNITRACE_DEBUG=ON
+        which omnitrace-avail
+        ldd $(which omnitrace-avail)
+        omnitrace-avail --help
+        omnitrace-avail -a
+        which omnitrace-critical-trace
+        ldd $(which omnitrace-critical-trace)
+        which omnitrace
+        ldd $(which omnitrace)
+        omnitrace --help
+        omnitrace -e -v 1 -o ls.inst --simulate -- ls
+        for i in omnitrace-ls.inst-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        omnitrace -e -v 1 -o ls.inst -- ls
+        ./ls.inst
+        omnitrace -e -v 1 --simulate -- ls
+        for i in omnitrace-ls-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        omnitrace -e -v 1 -- ls

@@ -318,6 +318,9 @@ set(TIMEMORY_INSTALL_HEADERS
 set(TIMEMORY_INSTALL_CONFIG
     OFF
     CACHE BOOL "Disable timemory cmake configuration install")
+set(TIMEMORY_INSTALL_LIBRARIES
+    OFF
+    CACHE BOOL "Disable timemory installation of libraries not needed at runtime")
 set(TIMEMORY_INSTALL_ALL
     OFF
     CACHE BOOL "Disable install target depending on all target")

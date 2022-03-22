@@ -30,6 +30,7 @@ set_target_properties(
     omnitrace-exe
     PROPERTIES
         OUTPUT_NAME omnitrace
+        BUILD_RPATH "\$ORIGIN:${PROJECT_BINARY_DIR}:${CMAKE_BINARY_DIR}"
         INSTALL_RPATH_USE_LINK_PATH ON
         INSTALL_RPATH
         "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/timemory/libunwind:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib"

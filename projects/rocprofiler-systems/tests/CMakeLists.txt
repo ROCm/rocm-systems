@@ -410,7 +410,8 @@ omnitrace_add_test(
     TARGET openmp-cg
     REWRITE_ARGS -e -v 2 --instrument-loops
     RUNTIME_ARGS -e -v 1 --label return args
-    RUN_ARGS
+    REWRITE_TIMEOUT 180
+    RUNTIME_TIMEOUT 360
     ENVIRONMENT "${_ompt_environment}")
 
 omnitrace_add_test(
@@ -418,5 +419,6 @@ omnitrace_add_test(
     TARGET openmp-lu
     REWRITE_ARGS -e -v 2 --instrument-loops
     RUNTIME_ARGS -e -v 1 --label return args
-    RUN_ARGS REWRITE_TIMEOUT 180 RUNTIME_TIMEOUT 360
+    REWRITE_TIMEOUT 180
+    RUNTIME_TIMEOUT 360
     ENVIRONMENT "${_ompt_environment}")

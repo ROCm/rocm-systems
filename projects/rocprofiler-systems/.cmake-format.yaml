@@ -24,6 +24,8 @@ parse:
         TARGET: '*'
         MPI: '*'
         NUM_PROCS: '*'
+        REWRITE_TIMEOUT: '*'
+        RUNTIME_TIMEOUT: '*'
         REWRITE_ARGS: '*'
         RUNTIME_ARGS: '*'
         RUN_ARGS: '*'

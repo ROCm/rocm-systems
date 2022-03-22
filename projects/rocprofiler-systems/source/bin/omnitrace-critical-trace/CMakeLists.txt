@@ -15,7 +15,14 @@ target_include_directories(omnitrace-critical-trace
 target_compile_definitions(omnitrace-critical-trace PRIVATE OMNITRACE_EXTERN_COMPONENTS=0)
 target_link_libraries(omnitrace-critical-trace
                       PRIVATE omnitrace::omnitrace-interface-library)
-set_target_properties(omnitrace-critical-trace PROPERTIES INSTALL_RPATH_USE_LINK_PATH ON)
+set_target_properties(
+    omnitrace-critical-trace
+    PROPERTIES
+        BUILD_RPATH "\$ORIGIN:${PROJECT_BINARY_DIR}:${CMAKE_BINARY_DIR}"
+        INSTALL_RPATH_USE_LINK_PATH ON
+        INSTALL_RPATH
+        "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/timemory/libunwind:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib"
+    )
 
 install(
     TARGETS omnitrace-critical-trace
