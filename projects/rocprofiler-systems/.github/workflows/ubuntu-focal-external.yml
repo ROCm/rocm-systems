@@ -71,7 +71,7 @@ jobs:
         cd build &&
         ldd ./omnitrace &&
         ./omnitrace --help &&
-        ctest -V --output-log build/omnitrace-ctest-ubuntu-focal-external.log
+        ctest -V --output-log build/omnitrace-ctest-ubuntu-focal-external.log --stop-on-failure
 
     - name: Test Install
       timeout-minutes: 10

@@ -52,10 +52,10 @@ extern "C"
     void omnitrace_pop_trace(const char* name) OMNITRACE_PUBLIC_API;
 
     /// starts an instrumentation region (user-defined)
-    void omnitrace_push_region(const char* name) OMNITRACE_PUBLIC_API;
+    int omnitrace_push_region(const char* name) OMNITRACE_PUBLIC_API;
 
     /// stops an instrumentation region (user-defined)
-    void omnitrace_pop_region(const char* name) OMNITRACE_PUBLIC_API;
+    int omnitrace_pop_region(const char* name) OMNITRACE_PUBLIC_API;
 
     // these are the real implementations for internal calling convention
     void omnitrace_init_library_hidden(void) OMNITRACE_HIDDEN_API;

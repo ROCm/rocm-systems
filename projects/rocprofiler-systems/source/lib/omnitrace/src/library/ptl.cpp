@@ -40,6 +40,7 @@ auto _thread_pool_cfg = []() {
     _v.init         = true;
     _v.use_affinity = false;
     _v.use_tbb      = false;
+    _v.verbose      = -1;
     _v.initializer  = []() {
         sampling::block_signals();
         threading::set_thread_name(

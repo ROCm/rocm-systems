@@ -1054,10 +1054,9 @@ setup_gotchas()
     if(_initialized) return;
     _initialized = true;
 
-    OMNITRACE_CONDITIONAL_PRINT(
+    OMNITRACE_CONDITIONAL_PRINT_F(
         get_debug_env(),
-        "[%s] Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread\n",
-        __FUNCTION__);
+        "Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread\n");
 
     mpi_gotcha::configure();
     fork_gotcha::configure();

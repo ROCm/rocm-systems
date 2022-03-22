@@ -8,10 +8,11 @@ on:
 
 env:
   BUILD_TYPE: Release
-  ELFUTILS_DOWNLOAD_VERSION: 0.183
   OMNITRACE_DEBUG_FINALIZE: ON
   OMNITRACE_VERBOSE: 1
   OMNITRACE_CI: ON
+  OMNITRACE_OUTPUT_PATH: omnitrace-tests-output
+  OMNITRACE_OUTPUT_PREFIX: "%argt%/"
 
 jobs:
   ubuntu-focal-external-rocm:
@@ -80,7 +81,8 @@ jobs:
       run:
         cd build &&
         ldd ./omnitrace &&
-        ./omnitrace --help
+        ./omnitrace --help &&
+        ctest -V --output-log omnitrace-ctest-ubuntu-focal-external-rocm.log --stop-on-failure
 
     - name: Test Install
       timeout-minutes: 10
@@ -97,9 +99,22 @@ jobs:
         ldd $(which omnitrace)
         omnitrace --help
         omnitrace -e -v 1 -o ls.inst --simulate -- ls
-        for i in omnitrace-ls.inst-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
         omnitrace -e -v 1 -o ls.inst -- ls
         ./ls.inst
         omnitrace -e -v 1 --simulate -- ls
-        for i in omnitrace-ls-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
         omnitrace -e -v 1 -- ls
+
+    - name: CTest Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: ctest-log
+        path: |
+          build/*.log
+
+    - name: Data Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: data-files
+        path: |
+          omnitrace-tests-output/**/*.txt
+          build/omnitrace-tests-output/**/*.txt

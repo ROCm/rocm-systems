@@ -78,17 +78,18 @@ invoke(const char* _name, int _verbose, FuncT&& _func, Args... _args)
         int32_t _lk = get_guard()++;
         if(_lk == 0)
         {
-            if(_verbose > 3)
+            if(_verbose >= 3)
             {
                 fflush(stderr);
                 fprintf(stderr,
-                        "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME "][%li] %s(%s)\n",
-                        get_thread_index(), _name, join(", ", _args...).c_str());
+                        "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
+                        "][%li][%i] %s(%s)\n",
+                        get_thread_index(), _lk, _name, join(", ", _args...).c_str());
                 fflush(stderr);
             }
             return std::invoke(std::forward<FuncT>(_func), _args...);
         }
-        else if(_verbose > 2)
+        else if(_verbose >= 2)
         {
             fflush(stderr);
             fprintf(stderr,

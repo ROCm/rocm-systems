@@ -29,6 +29,7 @@
 #include <timemory/backends/process.hpp>
 #include <timemory/utility/utility.hpp>
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <string_view>
@@ -40,6 +41,12 @@ inline namespace config
 {
 bool
 get_debug();
+
+int
+get_verbose();
+
+bool
+get_is_continuous_integration();
 
 bool
 get_debug_tid();
@@ -56,17 +63,11 @@ namespace debug
 namespace
 {
 template <typename T, size_t... Idx>
-auto get_chars(std::index_sequence<Idx...>)
-{
-    static const char _v[sizeof...(Idx) + 1] = { T::get()[Idx]..., '\0' };
-    return _v;
-}
-
-template <typename T>
 auto
-get_chars()
+get_chars(T&& _c, std::index_sequence<Idx...>)
 {
-    return get_chars<T>(typename T::sequence{});
+    return std::array<const char, sizeof...(Idx) + 1>{ std::forward<T>(_c)[Idx]...,
+                                                       '\0' };
 }
 }  // namespace
 }  // namespace debug
@@ -86,25 +87,31 @@ get_chars()
 #    define OMNITRACE_PROCESS_IDENTIFIER static_cast<int>(::tim::process::get_id())
 #endif
 
-#define OMNITRACE_FUNCTION                                                               \
-    std::string{ __FUNCTION__ }                                                          \
-        .substr(0, std::string_view{ __FUNCTION__ }.find("_hidden"))                     \
-        .c_str()
-
-#define OMNITRACE_CT_FUNCTION(VAR, STR)                                                  \
-    static constexpr auto OMNITRACE_VARIABLE(__LINE__) = std::string_view{ STR };        \
-    VAR = OMNITRACE_CT_FUNCTION_IMPL(OMNITRACE_VARIABLE(__LINE__));
-
-#define OMNITRACE_CT_FUNCTION_IMPL(STR)                                                  \
-    []() {                                                                               \
-        struct wrapper                                                                   \
-        {                                                                                \
-            static constexpr const char* get() { return STR.data(); }                    \
-            using sequence =                                                             \
-                std::make_index_sequence<std::min(STR.find("_hidden"), STR.length())>;   \
-        };                                                                               \
-        return ::omnitrace::debug::get_chars<wrapper>();                                 \
-    }();
+#if defined(__clang__) || (__GNUC__ < 9)
+#    define OMNITRACE_FUNCTION                                                           \
+        std::string{ __FUNCTION__ }                                                      \
+            .substr(0, std::string_view{ __FUNCTION__ }.find("_hidden"))                 \
+            .c_str()
+#    define OMNITRACE_PRETTY_FUNCTION                                                    \
+        std::string{ __PRETTY_FUNCTION__ }                                               \
+            .substr(0, std::string_view{ __PRETTY_FUNCTION__ }.find("_hidden"))          \
+            .c_str()
+#else
+#    define OMNITRACE_FUNCTION                                                           \
+        ::omnitrace::debug::get_chars(                                                   \
+            std::string_view{ __FUNCTION__ },                                            \
+            std::make_index_sequence<std::min(                                           \
+                std::string_view{ __FUNCTION__ }.find("_hidden"),                        \
+                std::string_view{ __FUNCTION__ }.length())>{})                           \
+            .data()
+#    define OMNITRACE_PRETTY_FUNCTION                                                    \
+        ::omnitrace::debug::get_chars(                                                   \
+            std::string_view{ __PRETTY_FUNCTION__ },                                     \
+            std::make_index_sequence<std::min(                                           \
+                std::string_view{ __PRETTY_FUNCTION__ }.find("_hidden"),                 \
+                std::string_view{ __PRETTY_FUNCTION__ }.length())>{})                    \
+            .data()
+#endif
 
 #define OMNITRACE_CONDITIONAL_PRINT(COND, ...)                                           \
     if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \

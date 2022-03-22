@@ -25,60 +25,134 @@
 #include "omnitrace/user.h"
 
 #include <cstdio>
+#include <cstdlib>
 
 namespace
 {
-using void_func_t   = void (*)(void);
-using region_func_t = void (*)(const char*);
+using trace_func_t  = int (*)(void);
+using region_func_t = int (*)(const char*);
 
-void_func_t   _start_trace        = nullptr;
-void_func_t   _stop_trace         = nullptr;
-void_func_t   _start_thread_trace = nullptr;
-void_func_t   _stop_thread_trace  = nullptr;
+trace_func_t  _start_trace        = nullptr;
+trace_func_t  _stop_trace         = nullptr;
+trace_func_t  _start_thread_trace = nullptr;
+trace_func_t  _stop_thread_trace  = nullptr;
 region_func_t _push_region        = nullptr;
 region_func_t _pop_region         = nullptr;
+
+const char*
+as_string(OMNITRACE_USER_BINDINGS _category)
+{
+    switch(_category)
+    {
+        case OMNITRACE_USER_START_STOP: return "OMNITRACE_USER_START_STOP";
+        case OMNITRACE_USER_START_STOP_THREAD: return "OMNITRACE_USER_START_STOP_THREAD";
+        case OMNITRACE_USER_REGION: return "OMNITRACE_USER_REGION";
+        default:
+        {
+            fprintf(stderr, "[omnitrace][user] Unknown user binding category: %i\n",
+                    static_cast<int>(_category));
+            fflush(stderr);
+            break;
+        }
+    }
+    return "OMNITRACE_USER_BINDINGS_unknown";
+}
+
+template <typename... Args>
+inline auto
+invoke(int (*_func)(Args...), Args... args)
+{
+    if(!_func) return OMNITRACE_USER_ERROR_NO_BINDING;
+    if((*_func)(args...) != 0) return OMNITRACE_USER_ERROR_INTERNAL;
+    return OMNITRACE_USER_SUCCESS;
+}
 }  // namespace
 
 extern "C"
 {
-    void omnitrace_user_start_trace(void)
+    int omnitrace_user_start_trace(void) { return invoke(_start_trace); }
+    int omnitrace_user_stop_trace(void) { return invoke(_stop_trace); }
+    int omnitrace_user_start_thread_trace(void) { return invoke(_start_thread_trace); }
+    int omnitrace_user_stop_thread_trace(void) { return invoke(_stop_thread_trace); }
+    int omnitrace_user_push_region(const char* id) { return invoke(_push_region, id); }
+    int omnitrace_user_pop_region(const char* id) { return invoke(_pop_region, id); }
+
+    int omnitrace_user_configure(int category, void* begin_func, void* end_func)
     {
-        if(_start_trace) (*_start_trace)();
+        switch(category)
+        {
+            case OMNITRACE_USER_START_STOP:
+            {
+                if(begin_func) _start_trace = reinterpret_cast<trace_func_t>(begin_func);
+                if(end_func) _stop_trace = reinterpret_cast<trace_func_t>(end_func);
+                break;
+            }
+            case OMNITRACE_USER_START_STOP_THREAD:
+            {
+                if(begin_func)
+                    _start_thread_trace = reinterpret_cast<trace_func_t>(begin_func);
+                if(end_func)
+                    _stop_thread_trace = reinterpret_cast<trace_func_t>(end_func);
+                break;
+            }
+            case OMNITRACE_USER_REGION:
+            {
+                if(begin_func) _push_region = reinterpret_cast<region_func_t>(begin_func);
+                if(end_func) _pop_region = reinterpret_cast<region_func_t>(end_func);
+                break;
+            }
+            default:
+            {
+                return OMNITRACE_USER_ERROR_INVALID_CATEGORY;
+            }
+        }
+
+        return OMNITRACE_USER_SUCCESS;
     }
 
-    void omnitrace_user_stop_trace(void)
+    int omnitrace_user_get_callbacks(int category, void** begin_func, void** end_func)
     {
-        if(_stop_trace) (*_stop_trace)();
+        switch(category)
+        {
+            case OMNITRACE_USER_START_STOP:
+            {
+                if(begin_func) *begin_func = reinterpret_cast<void*>(_start_trace);
+                if(end_func) *end_func = reinterpret_cast<void*>(_stop_trace);
+                break;
+            }
+            case OMNITRACE_USER_START_STOP_THREAD:
+            {
+                if(begin_func) *begin_func = reinterpret_cast<void*>(_start_thread_trace);
+                if(end_func) *end_func = reinterpret_cast<void*>(_stop_thread_trace);
+                break;
+            }
+            case OMNITRACE_USER_REGION:
+            {
+                if(begin_func) *begin_func = reinterpret_cast<void*>(_push_region);
+                if(end_func) *end_func = reinterpret_cast<void*>(_pop_region);
+                break;
+            }
+            default:
+            {
+                return OMNITRACE_USER_ERROR_INVALID_CATEGORY;
+            }
+        }
+
+        return OMNITRACE_USER_SUCCESS;
     }
 
-    void omnitrace_user_start_thread_trace(void)
+    const char* omnitrace_user_error_string(int error_category)
     {
-        if(_start_thread_trace) (*_start_thread_trace)();
-    }
-
-    void omnitrace_user_stop_thread_trace(void)
-    {
-        if(_stop_thread_trace) (*_stop_thread_trace)();
-    }
-
-    void omnitrace_user_push_region(const char* name)
-    {
-        if(_push_region) (*_push_region)(name);
-    }
-
-    void omnitrace_user_pop_region(const char* name)
-    {
-        if(_pop_region) (*_pop_region)(name);
-    }
-
-    void omnitrace_user_configure(void (*_a)(), void (*_b)(), void (*_c)(), void (*_d)(),
-                                  void (*_e)(const char*), void (*_f)(const char*))
-    {
-        _start_trace        = _a;
-        _stop_trace         = _b;
-        _start_thread_trace = _c;
-        _stop_thread_trace  = _d;
-        _push_region        = _e;
-        _pop_region         = _f;
+        switch(error_category)
+        {
+            case OMNITRACE_USER_SUCCESS: return "Success";
+            case OMNITRACE_USER_ERROR_NO_BINDING: return "Function pointer not assigned";
+            case OMNITRACE_USER_ERROR_INVALID_CATEGORY:
+                return "Invalid user binding category";
+            case OMNITRACE_USER_ERROR_INTERNAL:
+                return "An unknown error occurred within omnitrace library";
+            default: break;
+        }
+        return "No error";
     }
 }

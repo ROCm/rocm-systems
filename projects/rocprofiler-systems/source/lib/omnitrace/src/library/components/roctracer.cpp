@@ -170,7 +170,7 @@ roctracer::shutdown()
         itr.second();
 
 #if OMNITRACE_HIP_VERSION_MAJOR == 4 && OMNITRACE_HIP_VERSION_MINOR >= 4
-    OMNITRACE_DEBUG("[%s] redirecting roctracer warnings\n", __FUNCTION__);
+    OMNITRACE_DEBUG_F("redirecting roctracer warnings\n");
     // HIP 4.5.0 has an invalid warning
     redirect _rd{
         std::cerr, "roctracer_disable_callback(), get_op_end(), invalid domain ID(4)  "

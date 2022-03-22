@@ -83,7 +83,7 @@ jobs:
       timeout-minutes: 30
       run:
         cd build &&
-        ctest -V --output-log build/omnitrace-ctest-ubuntu-bionic.log
+        ctest -V --output-log build/omnitrace-ctest-ubuntu-bionic.log --stop-on-failure
 
     - name: Test Install
       timeout-minutes: 10

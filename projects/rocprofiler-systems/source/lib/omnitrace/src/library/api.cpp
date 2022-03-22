@@ -21,6 +21,10 @@
 // SOFTWARE.
 
 #include "library/api.hpp"
+#include "library/debug.hpp"
+
+#include <exception>
+#include <stdexcept>
 
 extern "C" void
 omnitrace_push_trace(const char* _name)
@@ -34,16 +38,32 @@ omnitrace_pop_trace(const char* _name)
     omnitrace_pop_trace_hidden(_name);
 }
 
-extern "C" void
+extern "C" int
 omnitrace_push_region(const char* _name)
 {
-    omnitrace_push_region_hidden(_name);
+    try
+    {
+        omnitrace_push_region_hidden(_name);
+    } catch(std::exception& _e)
+    {
+        OMNITRACE_VERBOSE_F(1, "Exception caught: %s\n", _e.what());
+        return -1;
+    }
+    return 0;
 }
 
-extern "C" void
+extern "C" int
 omnitrace_pop_region(const char* _name)
 {
-    omnitrace_pop_region_hidden(_name);
+    try
+    {
+        omnitrace_pop_region_hidden(_name);
+    } catch(std::exception& _e)
+    {
+        OMNITRACE_VERBOSE_F(1, "Exception caught: %s\n", _e.what());
+        return -1;
+    }
+    return 0;
 }
 
 extern "C" void

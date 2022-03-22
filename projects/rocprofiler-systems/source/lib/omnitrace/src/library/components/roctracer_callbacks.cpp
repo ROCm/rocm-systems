@@ -685,17 +685,16 @@ extern "C"
                 const char* const* failed_tool_names)
     {
         pthread_gotcha::push_enable_sampling_on_child_threads(false);
-        OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env() || get_verbose_env() > 0,
-                                          "[%s]\n", __FUNCTION__);
+        OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug_env() || get_verbose_env() > 0,
+                                            "\n");
         tim::consume_parameters(table, runtime_version, failed_tool_count,
                                 failed_tool_names);
 
         auto _setup = [=]() {
             try
             {
-                OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug() || get_verbose() > 1,
-                                                  "[%s] setting up HSA...\n",
-                                                  __FUNCTION__);
+                OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug() || get_verbose() > 1,
+                                                    "setting up HSA...\n");
 
                 // const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
                 const char* output_prefix = nullptr;
@@ -763,10 +762,10 @@ extern "C"
         };
 
         auto _shutdown = []() {
-            OMNITRACE_DEBUG("[%s] roctracer_disable_domain_callback\n", __FUNCTION__);
+            OMNITRACE_DEBUG_F("roctracer_disable_domain_callback\n");
             ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
 
-            OMNITRACE_DEBUG("[%s] roctracer_disable_op_activity\n", __FUNCTION__);
+            OMNITRACE_DEBUG_F("roctracer_disable_op_activity\n");
             ROCTRACER_CALL(
                 roctracer_disable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
         };
@@ -784,7 +783,7 @@ extern "C"
     // HSA-runtime on-unload method
     void OnUnload()
     {
-        OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
+        OMNITRACE_DEBUG_F("\n");
         rocm_smi::set_state(State::Finalized);
         comp::roctracer::shutdown();
     }

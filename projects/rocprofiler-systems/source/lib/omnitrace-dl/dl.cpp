@@ -30,6 +30,8 @@
 #include "common/invoke.hpp"
 #include "common/join.hpp"
 
+#include "omnitrace/user.h"
+
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -60,6 +62,11 @@
             fprintf(stderr, "[omnitrace][dl][pid=%i]> %s :: %s\n", getpid(), FUNCNAME,   \
                     dlerror());                                                          \
         }                                                                                \
+        else if(_omnitrace_dl_verbose > _info_verbose)                                   \
+        {                                                                                \
+            fprintf(stderr, "[omnitrace][dl][pid=%i]> %s :: success\n", getpid(),        \
+                    FUNCNAME);                                                           \
+        }                                                                                \
     }
 
 //--------------------------------------------------------------------------------------//
@@ -81,14 +88,14 @@ extern "C"
     void omnitrace_push_trace(const char* name) OMNITRACE_PUBLIC_API;
     void omnitrace_pop_trace(const char* name) OMNITRACE_PUBLIC_API;
 
-    void omnitrace_user_start_trace_dl(void) OMNITRACE_HIDDEN_API;
-    void omnitrace_user_stop_trace_dl(void) OMNITRACE_HIDDEN_API;
+    int omnitrace_user_start_trace_dl(void) OMNITRACE_HIDDEN_API;
+    int omnitrace_user_stop_trace_dl(void) OMNITRACE_HIDDEN_API;
 
-    void omnitrace_user_start_thread_trace_dl(void) OMNITRACE_HIDDEN_API;
-    void omnitrace_user_stop_thread_trace_dl(void) OMNITRACE_HIDDEN_API;
+    int omnitrace_user_start_thread_trace_dl(void) OMNITRACE_HIDDEN_API;
+    int omnitrace_user_stop_thread_trace_dl(void) OMNITRACE_HIDDEN_API;
 
-    void omnitrace_user_push_region_dl(const char*) OMNITRACE_HIDDEN_API;
-    void omnitrace_user_pop_region_dl(const char*) OMNITRACE_HIDDEN_API;
+    int omnitrace_user_push_region_dl(const char*) OMNITRACE_HIDDEN_API;
+    int omnitrace_user_pop_region_dl(const char*) OMNITRACE_HIDDEN_API;
 
     ompt_start_tool_result_t* ompt_start_tool(unsigned int,
                                               const char*) OMNITRACE_PUBLIC_API;
@@ -168,7 +175,7 @@ struct OMNITRACE_HIDDEN_API indirect
     : m_omnilib{ find_path(std::move(omnilib)) }
     , m_userlib{ find_path(std::move(userlib)) }
     {
-        if(_omnitrace_dl_verbose > 0)
+        if(_omnitrace_dl_verbose >= 1)
         {
             fprintf(stderr, "[omnitrace][dl][pid=%i] libomnitrace.so resolved to '%s'\n",
                     getpid(), m_omnilib.c_str());
@@ -190,7 +197,7 @@ struct OMNITRACE_HIDDEN_API indirect
 
         if(libhandle)
         {
-            if(_omnitrace_dl_verbose > 0)
+            if(_omnitrace_dl_verbose >= 1)
             {
                 fprintf(stderr, "[omnitrace][dl][pid=%i] dlopen(%s, %s) :: success\n",
                         getpid(), _lib.c_str(), _omnitrace_dl_dlopen_descr);
@@ -216,6 +223,7 @@ struct OMNITRACE_HIDDEN_API indirect
         if(!m_omnihandle) m_omnihandle = open(m_omnilib);
 
         int _warn_verbose = 0;
+        int _info_verbose = 2;
         // Initialize all pointers
         OMNITRACE_DLSYM(omnitrace_init_library_f, m_omnihandle, "omnitrace_init_library");
         OMNITRACE_DLSYM(omnitrace_init_f, m_omnihandle, "omnitrace_init");
@@ -239,10 +247,17 @@ struct OMNITRACE_HIDDEN_API indirect
         if(omnitrace_user_configure_f)
         {
             (*omnitrace_user_configure_f)(
-                &omnitrace_user_start_trace_dl, &omnitrace_user_stop_trace_dl,
-                &omnitrace_user_start_thread_trace_dl,
-                &omnitrace_user_stop_thread_trace_dl, &omnitrace_user_push_region_dl,
-                &omnitrace_user_pop_region_dl);
+                OMNITRACE_USER_START_STOP,
+                reinterpret_cast<void*>(&omnitrace_user_start_trace_dl),
+                reinterpret_cast<void*>(&omnitrace_user_stop_trace_dl));
+            (*omnitrace_user_configure_f)(
+                OMNITRACE_USER_START_STOP_THREAD,
+                reinterpret_cast<void*>(&omnitrace_user_start_thread_trace_dl),
+                reinterpret_cast<void*>(&omnitrace_user_stop_thread_trace_dl));
+            (*omnitrace_user_configure_f)(
+                OMNITRACE_USER_REGION,
+                reinterpret_cast<void*>(&omnitrace_user_push_region_dl),
+                reinterpret_cast<void*>(&omnitrace_user_pop_region_dl));
         }
     }
 
@@ -267,18 +282,16 @@ struct OMNITRACE_HIDDEN_API indirect
     }
 
 public:
-    void (*omnitrace_init_library_f)(void)                    = nullptr;
-    void (*omnitrace_init_f)(const char*, bool, const char*)  = nullptr;
-    void (*omnitrace_finalize_f)(void)                        = nullptr;
-    void (*omnitrace_set_env_f)(const char*, const char*)     = nullptr;
-    void (*omnitrace_set_mpi_f)(bool, bool)                   = nullptr;
-    void (*omnitrace_push_trace_f)(const char*)               = nullptr;
-    void (*omnitrace_pop_trace_f)(const char*)                = nullptr;
-    void (*omnitrace_push_region_f)(const char*)              = nullptr;
-    void (*omnitrace_pop_region_f)(const char*)               = nullptr;
-    void (*omnitrace_user_configure_f)(void (*)(void), void (*)(void), void (*)(void),
-                                       void (*)(void), void (*)(const char*),
-                                       void (*)(const char*)) = nullptr;
+    void (*omnitrace_init_library_f)(void)                   = nullptr;
+    void (*omnitrace_init_f)(const char*, bool, const char*) = nullptr;
+    void (*omnitrace_finalize_f)(void)                       = nullptr;
+    void (*omnitrace_set_env_f)(const char*, const char*)    = nullptr;
+    void (*omnitrace_set_mpi_f)(bool, bool)                  = nullptr;
+    void (*omnitrace_push_trace_f)(const char*)              = nullptr;
+    void (*omnitrace_pop_trace_f)(const char*)               = nullptr;
+    int (*omnitrace_push_region_f)(const char*)              = nullptr;
+    int (*omnitrace_pop_region_f)(const char*)               = nullptr;
+    int (*omnitrace_user_configure_f)(int, void*, void*)     = nullptr;
     ompt_start_tool_result_t* (*ompt_start_tool_f)(unsigned int, const char*);
 
 private:
@@ -403,21 +416,40 @@ extern "C"
         OMNITRACE_DL_INVOKE(get_indirect().omnitrace_set_mpi_f, a, b);
     }
 
-    void omnitrace_user_start_trace_dl(void) { dl::get_enabled().store(true); }
-    void omnitrace_user_stop_trace_dl(void) { dl::get_enabled().store(false); }
-    void omnitrace_user_start_thread_trace_dl(void) { dl::get_thread_enabled() = true; }
-    void omnitrace_user_stop_thread_trace_dl(void) { dl::get_thread_enabled() = false; }
-
-    void omnitrace_user_push_region_dl(const char* name)
+    int omnitrace_user_start_trace_dl(void)
     {
-        if(!dl::get_active()) return;
-        OMNITRACE_DL_INVOKE(get_indirect().omnitrace_push_region_f, name);
+        dl::get_enabled().store(true);
+        return omnitrace_user_start_thread_trace_dl();
     }
 
-    void omnitrace_user_pop_region_dl(const char* name)
+    int omnitrace_user_stop_trace_dl(void)
     {
-        if(!dl::get_active()) return;
-        OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_region_f, name);
+        dl::get_enabled().store(false);
+        return omnitrace_user_stop_thread_trace_dl();
+    }
+
+    int omnitrace_user_start_thread_trace_dl(void)
+    {
+        dl::get_thread_enabled() = true;
+        return 0;
+    }
+
+    int omnitrace_user_stop_thread_trace_dl(void)
+    {
+        dl::get_thread_enabled() = false;
+        return 0;
+    }
+
+    int omnitrace_user_push_region_dl(const char* name)
+    {
+        if(!dl::get_active()) return 0;
+        return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_push_region_f, name);
+    }
+
+    int omnitrace_user_pop_region_dl(const char* name)
+    {
+        if(!dl::get_active()) return 0;
+        return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_region_f, name);
     }
 
     ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,

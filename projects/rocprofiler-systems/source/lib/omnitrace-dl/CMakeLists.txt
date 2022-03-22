@@ -14,6 +14,8 @@ add_library(omnitrace::omnitrace-dl-library ALIAS omnitrace-dl-library)
 target_sources(omnitrace-dl-library PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/dl.cpp)
 target_link_libraries(omnitrace-dl-library PRIVATE ${dl_LIBRARY}
                                                    omnitrace::common-library)
+target_include_directories(omnitrace-dl-library
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../omnitrace-user)
 
 check_cxx_compiler_flag("-fno-exceptions" omnitrace_dl_library_fno_exceptions)
 check_cxx_compiler_flag("-ftls-model=local-dynamic"

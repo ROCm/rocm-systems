@@ -103,11 +103,11 @@ ensure_finalization(bool _static_init = false)
     (void) _main_tid;
     if(!_static_init)
     {
-        OMNITRACE_DEBUG("[%s]\n", __FUNCTION__);
+        OMNITRACE_DEBUG_F("\n");
     }
     else
     {
-        OMNITRACE_CONDITIONAL_PRINT(get_debug_env(), "[%s]\n", __FUNCTION__);
+        OMNITRACE_CONDITIONAL_PRINT_F(get_debug_env(), "\n");
         // This environment variable forces the ROCR-Runtime to use polling to wait
         // for signals rather than interrupts. We set this variable to avoid issues with
         // rocm/roctracer hanging when interrupted by the sampler
@@ -345,9 +345,8 @@ extern "C" void
 omnitrace_set_env_hidden(const char* env_name, const char* env_val)
 {
     // just search env to avoid initializing the settings
-    OMNITRACE_CONDITIONAL_PRINT(get_debug_init() || get_verbose_env() > 2,
-                                "[%s] Setting env: %s=%s\n", __FUNCTION__, env_name,
-                                env_val);
+    OMNITRACE_CONDITIONAL_PRINT_F(get_debug_init() || get_verbose_env() > 2,
+                                  "Setting env: %s=%s\n", env_name, env_val);
 
     tim::set_env(env_name, env_val, 0);
 
@@ -375,9 +374,9 @@ extern "C" void
 omnitrace_set_mpi_hidden(bool use, bool attached)
 {
     // just search env to avoid initializing the settings
-    OMNITRACE_CONDITIONAL_PRINT(get_debug_init() || get_verbose_env() > 2,
-                                "[%s] use: %s, attached: %s\n", __FUNCTION__,
-                                (use) ? "y" : "n", (attached) ? "y" : "n");
+    OMNITRACE_CONDITIONAL_PRINT_F(get_debug_init() || get_verbose_env() > 2,
+                                  "use: %s, attached: %s\n", (use) ? "y" : "n",
+                                  (attached) ? "y" : "n");
 
     _set_mpi_called       = true;
     config::is_attached() = attached;
@@ -513,7 +512,8 @@ omnitrace_init_tooling_hidden()
 
     OMNITRACE_CONDITIONAL_THROW(
         get_state() == State::Init,
-        "%s called after omnitrace_init_library() was explicitly called", __FUNCTION__);
+        "%s called after omnitrace_init_library() was explicitly called",
+        OMNITRACE_FUNCTION);
 
     OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_verbose_env() >= 0,
                                         "Instrumentation mode: %s\n",
@@ -828,9 +828,9 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
         if(get_state() != State::Finalized) omnitrace_finalize_hidden();
     });
 
-    OMNITRACE_CONDITIONAL_BASIC_PRINT(
+    OMNITRACE_CONDITIONAL_BASIC_PRINT_F(
         get_debug_env() || get_verbose_env() > 2,
-        "[%s] mode: %s | is binary rewrite: %s | command: %s\n", __FUNCTION__, _mode,
+        "mode: %s | is binary rewrite: %s | command: %s\n", _mode,
         (_is_binary_rewrite) ? "y" : "n", _argv0);
 
     tim::set_env("OMNITRACE_MODE", _mode, 0);
@@ -1080,29 +1080,31 @@ omnitrace_finalize_hidden(void)
     {
         if(get_verbose() >= 0) fprintf(stderr, "\n");
         if(get_verbose() >= 0 || get_debug())
-            fprintf(stderr, "[%s]|%i> Flushing perfetto...\n", __FUNCTION__, dmp::rank());
+            fprintf(stderr, "[%s]|%i> Flushing perfetto...\n", OMNITRACE_FUNCTION,
+                    dmp::rank());
 
         // Make sure the last event is closed for this example.
         perfetto::TrackEvent::Flush();
 
         auto& tracing_session = get_trace_session();
-        OMNITRACE_DEBUG_F("Stopping the blocking perfetto trace sessions...\n");
+        OMNITRACE_VERBOSE_F(3, "Stopping the blocking perfetto trace sessions...\n");
         tracing_session->StopBlocking();
 
-        OMNITRACE_DEBUG_F("Getting the trace data...\n");
+        OMNITRACE_VERBOSE_F(3, "Getting the trace data...\n");
         std::vector<char> trace_data{ tracing_session->ReadTraceBlocking() };
 
         if(trace_data.empty())
         {
             fprintf(stderr,
                     "[%s]> trace data is empty. File '%s' will not be written...\n",
-                    __FUNCTION__, get_perfetto_output_filename().c_str());
+                    OMNITRACE_FUNCTION, get_perfetto_output_filename().c_str());
             return;
         }
         // Write the trace into a file.
         if(get_verbose() >= 0)
             fprintf(stderr, "[%s]|%i> Outputting '%s' (%.2f KB / %.2f MB / %.2f GB)... ",
-                    __FUNCTION__, dmp::rank(), get_perfetto_output_filename().c_str(),
+                    OMNITRACE_FUNCTION, dmp::rank(),
+                    get_perfetto_output_filename().c_str(),
                     static_cast<double>(trace_data.size()) / units::KB,
                     static_cast<double>(trace_data.size()) / units::MB,
                     static_cast<double>(trace_data.size()) / units::GB);
@@ -1110,7 +1112,7 @@ omnitrace_finalize_hidden(void)
         if(!tim::filepath::open(ofs, get_perfetto_output_filename(),
                                 std::ios::out | std::ios::binary))
         {
-            fprintf(stderr, "\n[%s]> Error opening '%s'...\n", __FUNCTION__,
+            fprintf(stderr, "\n[%s]> Error opening '%s'...\n", OMNITRACE_FUNCTION,
                     get_perfetto_output_filename().c_str());
             _perfetto_output_error = true;
         }
