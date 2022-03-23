@@ -215,8 +215,6 @@ data::post_process(uint32_t _dev_id)
     using component::sampling_gpu_memory;
     using component::sampling_gpu_power;
     using component::sampling_gpu_temp;
-    using bundle_t = tim::lightweight_tuple<sampling_gpu_busy, sampling_gpu_temp,
-                                            sampling_gpu_power, sampling_gpu_memory>;
 
     if(device_count < _dev_id) return;
 
@@ -255,6 +253,11 @@ data::post_process(uint32_t _dev_id)
 
     if(!get_use_timemory()) return;
 
+#if !defined(TIMEMORY_USE_MPI)
+    // timemory + MPI here causes hangs for some reason. it is unclear why
+    using bundle_t = tim::lightweight_tuple<sampling_gpu_busy, sampling_gpu_temp,
+                                            sampling_gpu_power, sampling_gpu_memory>;
+
     for(auto& itr : _rocm_smi)
     {
         using entry_t = critical_trace::entry;
@@ -282,6 +285,7 @@ data::post_process(uint32_t _dev_id)
             _v.pop();
         }
     }
+#endif
 }
 
 //--------------------------------------------------------------------------------------//

@@ -371,7 +371,7 @@ configure_settings()
     settings::suppress_config()   = true;
     settings::use_output_suffix() = _config->get<bool>("OMNITRACE_USE_PID");
 #if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
-    if(tim::mpi::is_initialized()) settings::default_process_suffix() = tim::mpi::rank();
+    if(tim::dmp::is_initialized()) settings::default_process_suffix() = tim::dmp::rank();
 #endif
     OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose_env() > 0, "configuration complete\n");
 
@@ -865,10 +865,11 @@ get_backend()
 std::string&
 get_perfetto_output_filename()
 {
-    static auto  _v = get_config()->find("OMNITRACE_OUTPUT_FILE");
-    static auto& _t = static_cast<tim::tsettings<std::string>&>(*_v->second);
-    if(_t.get().empty())
-    {
+    static auto  _v        = get_config()->find("OMNITRACE_OUTPUT_FILE");
+    static auto& _t        = static_cast<tim::tsettings<std::string>&>(*_v->second);
+    static auto  _generate = []() {
+        if(tim::dmp::is_initialized())
+            settings::default_process_suffix() = tim::dmp::rank();
         // default name: perfetto-trace.<pid>.proto or perfetto-trace.<rank>.proto
         auto _default_fname =
             settings::compose_output_filename("perfetto-trace", "proto", get_use_pid());
@@ -879,10 +880,16 @@ get_perfetto_output_filename()
             _default_fname =
                 _default_fname.replace(_dpos, _pid_patch.length(), "/perfetto-trace");
         // have the default display the full path to the output file
-        _t.set(tim::get_env<std::string>(
+        return tim::get_env<std::string>(
             "OMNITRACE_OUTPUT_FILE",
             JOIN('/', tim::get_env<std::string>("PWD", ".", false), _default_fname),
-            false));
+            false);
+    };
+    static auto _generated = _generate();
+    if(_t.get().empty() || _t.get() == _generated)
+    {
+        _t.set(_generate());
+        _generated = _t.get();
     }
     return _t.get();
 }

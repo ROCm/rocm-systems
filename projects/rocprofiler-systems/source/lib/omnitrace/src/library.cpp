@@ -1060,6 +1060,7 @@ omnitrace_finalize_hidden(void)
         }
     }
 
+    OMNITRACE_DEBUG_F("Post-processing the system-level samples...\n");
     thread_sampler::post_process();
 
     if(get_use_critical_trace())
