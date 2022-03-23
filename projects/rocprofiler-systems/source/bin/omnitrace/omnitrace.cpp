@@ -1882,9 +1882,8 @@ instrument_module(const string_t& file_name)
         "^(malloc|(f|)lock|sig|sem)[a-z_]+(|64|_r|_l)\\.c$"
     };
     static std::regex core_lib_regex{
-        "^(lib|)(c|z|rt|dl|dw|util|zstd|elf|pthread|open[\\-]rte|open[\\-]pal|"
-        "gcc_s|tcmalloc|profiler|tbbmalloc|tbbmalloc_proxy|event_pthreads|ltdl|"
-        "stdc\\+\\+|malloc|selinux|pcre[0-9]+)(-|\\.)",
+        "^(lib|)(c|dl|dw|pthread|tcmalloc|profiler|"
+        "tbbmalloc|tbbmalloc_proxy|malloc|stdc\\+\\+)(-|\\.)",
         regex_opts
     };
     static std::regex prefix_regex{ "^(_|\\.[a-zA-Z0-9])", regex_opts };
@@ -1950,22 +1949,16 @@ instrument_entity(const string_t& function_name)
     };
 
     static std::regex exclude(
-        "(omnitrace|tim::|N3tim|MPI_Init|MPI_Finalize|::__[A-Za-z]|"
-        "dyninst|tm_clones|malloc$|calloc$|free$|realloc$|std::addressof)",
+        "(omnitrace|tim::|N3tim|MPI_Init|MPI_Finalize|dyninst|tm_clones)", regex_opts);
+    static std::regex exclude_cxx(
+        "(std::_Sp_counted_base|std::(use|has)_facet|std::locale|::sentry|^std::_|::_(M|"
+        "S)_|::basic_string[a-zA-Z,<>: ]+::_M_create)",
         regex_opts);
-    static std::regex exclude_cxx("(std::_Sp_counted_base|std::use_facet)", regex_opts);
-    static std::regex leading(
-        "^(_|\\.|frame_dummy|\\(|targ|new|delete|operator new|operator delete|"
-        "std::allocat|nvtx|gcov|TAU|tau|Tau|dyn|RT|sys|pthread|posix|clone|"
-        "virtual thunk|non-virtual thunk|transaction clone|"
-        "RtsLayer|DYNINST|PthreadLayer|threaded_func|PMPI|"
-        "Kokkos::Impl::|Kokkos::Experimental::Impl::|Kokkos::impl_|"
-        "Kokkos::[A-Za-z]+::impl_|Kokkos::Tools::|Kokkos::Profiling::|"
-        "kmp_threadprivate_)",
-        regex_opts);
-    static std::regex trailing("(\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$",
-                               regex_opts);
-    static strset_t   whole = []() {
+    static std::regex leading("^(_|\\.|frame_dummy|\\(|targ|kmp_threadprivate_)",
+                              regex_opts);
+    static std::regex trailing(
+        "(_|\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$", regex_opts);
+    static strset_t whole = []() {
         auto _v   = get_whole_function_names();
         auto _ret = _v;
         for(std::string _ext : { "64", "_l", "_r" })

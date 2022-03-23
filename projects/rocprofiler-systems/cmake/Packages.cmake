@@ -356,6 +356,9 @@ set(TIMEMORY_USE_PERFETTO
 set(TIMEMORY_USE_OMPT
     ${OMNITRACE_USE_OMPT}
     CACHE BOOL "Enable OMPT support in timemory" FORCE)
+set(TIMEMORY_USE_PAPI
+    ${OMNITRACE_USE_PAPI}
+    CACHE BOOL "Enable PAPI support in timemory" FORCE)
 set(TIMEMORY_USE_LIBUNWIND
     ON
     CACHE BOOL "Enable libunwind support in timemory")

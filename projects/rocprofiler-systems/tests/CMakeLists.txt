@@ -243,7 +243,6 @@ omnitrace_add_test(
     NUM_PROCS ${NUM_PROCS}
     REWRITE_ARGS -e -v 2
     RUNTIME_ARGS -e -v 1 --label file line return args
-    RUN_ARGS ""
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=ON")
 
 omnitrace_add_test(
@@ -264,7 +263,6 @@ omnitrace_add_test(
         --dyninst-options
         DelayedParsing
         TypeChecking
-    RUN_ARGS ""
     ENVIRONMENT "${_fast_environment}")
 
 omnitrace_add_test(
@@ -287,12 +285,26 @@ omnitrace_add_test(
 omnitrace_add_test(
     NAME user-api
     TARGET user-api
-    REWRITE_ARGS -e -v 2 --min-address-range-loop=64
+    REWRITE_ARGS
+        -e
+        -v
+        2
+        -l
+        --min-address-range=0
+        --min-address-range-loop=0
+        --min-instructions=8
+        -E
+        custom_push_region
     RUNTIME_ARGS
         -e
         -v
         1
-        --min-address-range-loop=64
+        -l
+        --min-address-range=0
+        --min-address-range-loop=0
+        --min-instructions=8
+        -E
+        custom_push_region
         --label
         file
         line

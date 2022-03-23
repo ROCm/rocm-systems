@@ -40,7 +40,8 @@ get_whole_function_names()
         "backtrace", "backtrace_symbols", "backtrace_symbols_fd", "sigaddset",
         "sigandset", "sigdelset", "sigemptyset", "sigfillset", "sighold", "sigisemptyset",
         "sigismember", "sigorset", "sigrelse", "sigvec", "strtok", "strstr", "sbrk",
-        "strxfrm", "atexit", "ompt_start_tool", "nanosleep",
+        "strxfrm", "atexit", "ompt_start_tool", "nanosleep", "cfree", "tolower",
+        "toupper", "fileno", "fileno_unlocked",
         // below are functions which never terminate
         "rocr::core::Signal::WaitAny", "rocr::core::Runtime::AsyncEventsLoop",
         "rocr::core::BusyWaitSignal::WaitAcquire",

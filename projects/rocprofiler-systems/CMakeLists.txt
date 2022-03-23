@@ -67,6 +67,7 @@ omnitrace_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH "Enable rpath to linked l
 omnitrace_add_option(OMNITRACE_USE_CLANG_TIDY "Enable clang-tidy" OFF)
 omnitrace_add_option(OMNITRACE_USE_MPI "Enable MPI support" OFF)
 omnitrace_add_option(OMNITRACE_USE_HIP "Enable HIP support" ON)
+omnitrace_add_option(OMNITRACE_USE_PAPI "Enable HW counter support via PAPI" OFF)
 omnitrace_add_option(OMNITRACE_USE_ROCTRACER "Enable roctracer support"
                      ${OMNITRACE_USE_HIP})
 omnitrace_add_option(
@@ -96,6 +97,9 @@ endif()
 
 if(NOT OMNITRACE_USE_HIP)
     set(OMNITRACE_USE_ROCTRACER
+        OFF
+        CACHE BOOL "Disabled via OMNITRACE_USE_HIP=OFF" FORCE)
+    set(OMNITRACE_USE_ROCM_SMI
         OFF
         CACHE BOOL "Disabled via OMNITRACE_USE_HIP=OFF" FORCE)
 endif()
@@ -143,6 +147,7 @@ if(OMNITRACE_USE_HIP OR OMNITRACE_USE_ROCTRACER)
     if(HIP_VERSION_MAJOR GREATER_EQUAL 4 AND HIP_VERSION_MINOR GREATER 3)
         set(roctracer_kfdwrapper_LIBRARY)
     endif()
+    omnitrace_add_feature(HIP_VERSION "HIP version")
 else()
     set(HIP_VERSION "0.0.0")
     set(HIP_VERSION_MAJOR 0)
