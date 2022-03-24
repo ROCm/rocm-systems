@@ -592,6 +592,8 @@ def fill_copy_db(table_name, db, indir):
         # querying tid value
         if (corr_id, proc_id) in hsa_patch_data:
           thread_id = hsa_patch_data[(corr_id, proc_id)]
+        else:
+          thread_id = -1
 
         # completing record
         rec_vals.append(proc_id)          # tid
@@ -613,11 +615,12 @@ def fill_copy_db(table_name, db, indir):
         to_ns = int(rec_vals[0])
         to_us = int((to_ns - START_NS) / 1000)
 
-        #if not proc_id in dep_dict: dep_dict[proc_id] = {}
-        dep_proc = dep_dict[proc_id]
-        #if not pid in dep_proc: dep_proc[pid] = { 'pid': HSA_PID, 'from': [], 'to': {}, 'id': [] }
-        dep_str = dep_proc[sect_id]
-        dep_str['to'][corr_id] = to_us
+        if thread_id != -1:
+          #if not proc_id in dep_dict: dep_dict[proc_id] = {}
+          dep_proc = dep_dict[proc_id]
+          #if not pid in dep_proc: dep_proc[pid] = { 'pid': HSA_PID, 'from': [], 'to': {}, 'id': [] }
+          dep_str = dep_proc[sect_id]
+          dep_str['to'][corr_id] = to_us
 
   return 1
 #############################################################
