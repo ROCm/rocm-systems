@@ -551,6 +551,7 @@ if [ -n "$csv_output" ] ; then
 fi
 
 RET=1
+export ROCP_MERGE_PIDS=1
 for name in $input_list; do
   run $name $OUTPUT_DIR $APP_CMD
   RET=$?

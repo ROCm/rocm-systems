@@ -122,32 +122,33 @@ def parse_res(infile):
   pid_pattern = re.compile("pid\((\d*)\)")
 
   dispatch_number = 0
-  disp_pid = -1
+  var_table_pid = 0
   for line in inp.readlines():
     record = line[:-1]
 
     m = pid_pattern.search(record)
-    if m: disp_pid = int(m.group(1))
+    if m and not os.getenv('ROCP_MERGE_PIDS'): var_table_pid = int(m.group(1))
 
     m = var_pattern.match(record)
     if m:
-      if not (disp_pid, dispatch_number) in var_table: fatal("Error: dispatch number not found '" + str(dispatch_number) + "'")
+      if not (var_table_pid, dispatch_number) in var_table: fatal("Error: dispatch number not found '" + str(dispatch_number) + "'")
       var = m.group(1)
       val = m.group(2)
-      var_table[(disp_pid, dispatch_number)][var] = val
+      var_table[(var_table_pid, dispatch_number)][var] = val
       if not var in var_list: var_list.append(var)
 
     m = beg_pattern.match(record)
     if m:
       dispatch_number = m.group(1)
-      if not (disp_pid, dispatch_number) in var_table:
-        var_table[(disp_pid, dispatch_number)] = {
+      if not (var_table_pid, dispatch_number) in var_table:
+        var_table[(var_table_pid, dispatch_number)] = {
           'Index': dispatch_number,
           'KernelName': "\"" + m.group(3) + "\""
         }
 
         gpu_id = 0
         queue_id = 0
+        disp_pid = 0
         disp_tid = 0
 
         kernel_properties = m.group(2)
@@ -156,7 +157,7 @@ def parse_res(infile):
           if m:
             var = m.group(1)
             val = m.group(2)
-            var_table[(disp_pid, dispatch_number)][var] = val
+            var_table[(var_table_pid, dispatch_number)][var] = val
             if not var in var_list: var_list.append(var);
             if var == 'gpu-id':
               gpu_id = int(val)
@@ -167,10 +168,10 @@ def parse_res(infile):
           else: fatal('wrong kernel property "' + prop + '" in "'+ kernel_properties + '"')
         m = ts_pattern.search(record)
         if m:
-          var_table[(disp_pid, dispatch_number)]['DispatchNs'] = m.group(1)
-          var_table[(disp_pid, dispatch_number)]['BeginNs'] = m.group(2)
-          var_table[(disp_pid, dispatch_number)]['EndNs'] = m.group(3)
-          var_table[(disp_pid, dispatch_number)]['CompleteNs'] = m.group(4)
+          var_table[(var_table_pid, dispatch_number)]['DispatchNs'] = m.group(1)
+          var_table[(var_table_pid, dispatch_number)]['BeginNs'] = m.group(2)
+          var_table[(var_table_pid, dispatch_number)]['EndNs'] = m.group(3)
+          var_table[(var_table_pid, dispatch_number)]['CompleteNs'] = m.group(4)
 
           ## filling dependenciws
           from_ns = int(m.group(1))
