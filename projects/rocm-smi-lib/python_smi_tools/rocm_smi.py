@@ -66,7 +66,7 @@ def driverInitialized():
     """
     driverInitialized = ''
     try:
-        driverInitialized = str(subprocess.check_output("cat /proc/modules|grep amdgpu", shell=True))
+        driverInitialized = str(subprocess.check_output("cat /sys/module/amdgpu/initstate |grep live", shell=True))
     except subprocess.CalledProcessError:
         pass
     if len(driverInitialized) > 0:
