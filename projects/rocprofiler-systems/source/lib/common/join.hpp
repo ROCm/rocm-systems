@@ -41,13 +41,15 @@ join(DelimT&& _delim, Args&&... _args)
 {
     std::stringstream _ss{};
     OMNITRACE_FOLD_EXPRESSION(_ss << _delim << _args);
+    auto _ret = _ss.str();
     if constexpr(std::is_same<DelimT, char>::value)
     {
-        return _ss.str().substr(1);
+        return (_ret.length() > 1) ? _ret.substr(1) : std::string{};
     }
     else
     {
-        return _ss.str().substr(std::string{ _delim }.length());
+        auto&& _len = std::string{ _delim }.length();
+        return (_ret.length() > _len) ? _ret.substr(_len) : std::string{};
     }
 }
 }  // namespace

@@ -1,0 +1,180 @@
+name: cpack-focal
+
+on:
+  push:
+    branches: [releases/**]
+  pull_request:
+    branches: [releases/**]
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+  CORE_CMAKE_ARGS: -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
+  OMNITRACE_CMAKE_ARGS: -DOMNITRACE_MAX_THREADS=2048 -DOMNITRACE_BUILD_TESTING=OFF -DOMNITRACE_USE_MPI_HEADERS=ON -DOMNITRACE_USE_HIP=OFF
+  TIMEMORY_CMAKE_ARGS: -DTIMEMORY_USE_LIBUNWIND=ON -DTIMEMORY_BUILD_LIBUNWIND=ON -DTIMEMORY_BUILD_PORTABLE=ON
+  DYNINST_CMAKE_ARGS: -DOMNITRACE_BUILD_DYNINST=ON -DDYNINST_BUILD_TBB=ON -DDYNINST_BUILD_BOOST=ON -DDYNINST_BUILD_ELFUTILS=ON -DDYNINST_BUILD_LIBIBERTY=ON
+  DEBIAN_FRONTEND: noninteractive
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+jobs:
+  cpack:
+    runs-on: ubuntu-20.04
+    container:
+      image: ubuntu:${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [20.04]
+        extensions: ["", "all"]
+
+    steps:
+      - name: Patch Git
+        timeout-minutes: 5
+        run: |
+          apt-get update
+          apt-get install -y software-properties-common
+          add-apt-repository -y ppa:git-core/ppa
+          apt-get update
+          apt-get upgrade -y
+          apt-get install -y git
+
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Install System Packages
+        timeout-minutes: 20
+        run: |
+          set -v
+          apt-get update
+          apt-get dist-upgrade -y
+          apt-get install -y build-essential cmake libnuma-dev wget gnupg2 m4 git-core autoconf libtool autotools-dev python3-pip lsb-release libpapi-dev libpfm4-dev libudev-dev libopenmpi-dev openmpi-bin rpm librpm-dev
+          python3 -m pip install 'cmake==3.18.4'
+
+      - name: Configure Env
+        run: |
+          export OMNITRACE_VERSION=$(cat VERSION)
+          export OMNITRACE_DISTRO=$(lsb_release -i | awk '{print $NF}')-$(lsb_release -r | awk '{print $NF}')
+          echo "OMNITRACE_VERSION=${OMNITRACE_VERSION}" >> $GITHUB_ENV
+          echo "OMNITRACE_DISTRO=${OMNITRACE_DISTRO}" >> $GITHUB_ENV
+          echo "COMMON_CMAKE_ARGS=${CORE_CMAKE_ARGS} ${OMNITRACE_CMAKE_ARGS} ${TIMEMORY_CMAKE_ARGS} ${DYNINST_CMAKE_ARGS}" >> $GITHUB_ENV
+          echo "PACKAGE_BASE_TAG=omnitrace-${OMNITRACE_VERSION}-${OMNITRACE_DISTRO}" >> $GITHUB_ENV
+          echo "PATH=${HOME}/.local/bin:${PATH}" >> $GITHUB_ENV
+
+      - name: Print Env
+        run: |
+          env
+
+      # CORE without extensions
+      - name: Configure Package
+        if: ${{ matrix.extensions == '' }}
+        timeout-minutes: 10
+        run: |
+          set -v
+          cmake -B build-release ${COMMON_CMAKE_ARGS} -DDYNINST_USE_OpenMP=OFF .
+
+      # CORE with extensions
+      - name: Configure Package
+        if: ${{ matrix.extensions == 'all' }}
+        timeout-minutes: 10
+        run: |
+          set -v
+          cmake -B build-release ${COMMON_CMAKE_ARGS} -DDYNINST_USE_OpenMP=ON -DOMNITRACE_USE_PAPI=ON -DOMNITRACE_USE_OMPT=ON .
+
+      # Build
+      - name: Build Package
+        timeout-minutes: 45
+        run: |
+          set -v
+          cmake --build build-release --target all
+
+      # Generate STGZ
+      - name: Generate STGZ
+        timeout-minutes: 45
+        run: |
+          set -v
+          cd build-release
+          cpack -G STGZ
+
+      # Generate DEB
+      - name: Generate DEB
+        timeout-minutes: 45
+        run: |
+          set -v
+          cd build-release
+          cpack -G DEB -D CPACK_PACKAGING_INSTALL_PREFIX=/opt/omnitrace
+
+      - name: List Files
+        timeout-minutes: 10
+        run: |
+          find . -type f | egrep '\.(sh|deb|rpm)$'
+
+      - name: STGZ Artifacts
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v2
+        with:
+          name: stgz-installers
+          path: |
+            build-release/omnitrace-*.sh
+
+      - name: DEB Artifacts
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v2
+        with:
+          name: deb-installers
+          path: |
+            build-release/omnitrace_*.deb
+
+      # before testing remove any artifacts of the build
+      - name: Remove Build and Install
+        timeout-minutes: 10
+        run: |
+          mv build-release/omnitrace-*.sh ./
+          mv build-release/omnitrace_*.deb ./
+          rm -rf build-release
+          rm -rf /opt/omnitrace
+
+      - name: STGZ Install
+        timeout-minutes: 10
+        run: |
+          set -v
+          mkdir /opt/omnitrace-stgz
+          ./omnitrace-*.sh --prefix=/opt/omnitrace-stgz --skip-license --exclude-dir
+
+      - name: List STGZ Install
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          find /opt/omnitrace-stgz
+
+      - name: Test STGZ Install
+        timeout-minutes: 10
+        run: |
+          set -v
+          export PATH=/opt/omnitrace-stgz/bin:${PATH}
+          export LD_LIBRARY_PATH=/opt/omnitrace-stgz/lib:${LD_LIBRARY_PATH}
+          omnitrace-avail --help
+          omnitrace --help
+          omnitrace-critical-trace --help
+
+      - name: DEB Install
+        timeout-minutes: 10
+        run: |
+          set -v
+          dpkg --contents ./omnitrace_*.deb
+          dpkg -i ./omnitrace_*.deb
+
+      - name: List DEB Install
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          find /opt/omnitrace
+
+      - name: Test DEB Install
+        timeout-minutes: 10
+        run: |
+          set -v
+          export PATH=/opt/omnitrace/bin:${PATH}
+          export LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}
+          omnitrace-avail --help
+          omnitrace --help
+          omnitrace-critical-trace --help

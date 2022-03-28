@@ -99,6 +99,33 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
+# hip version
+#
+# ----------------------------------------------------------------------------------------#
+
+if(OMNITRACE_USE_HIP
+   OR OMNITRACE_USE_ROCTRACER
+   OR OMNITRACE_USE_ROCM_SMI)
+    find_package(ROCmVersion REQUIRED)
+    set(OMNITRACE_ROCM_VERSION ${ROCmVersion_FULL_VERSION})
+    set(OMNITRACE_HIP_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
+    set(OMNITRACE_HIP_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
+    set(OMNITRACE_HIP_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
+    set(OMNITRACE_HIP_VERSION ${ROCmVersion_TRIPLE_VERSION})
+    if(OMNITRACE_HIP_VERSION_MAJOR GREATER_EQUAL 4 AND OMNITRACE_HIP_VERSION_MINOR
+                                                       GREATER 3)
+        set(roctracer_kfdwrapper_LIBRARY)
+    endif()
+    omnitrace_add_feature(OMNITRACE_ROCM_VERSION "ROCm version used by omnitrace")
+else()
+    set(OMNITRACE_HIP_VERSION "0.0.0")
+    set(OMNITRACE_HIP_VERSION_MAJOR 0)
+    set(OMNITRACE_HIP_VERSION_MINOR 0)
+    set(OMNITRACE_HIP_VERSION_PATCH 0)
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
 # MPI
 #
 # ----------------------------------------------------------------------------------------#

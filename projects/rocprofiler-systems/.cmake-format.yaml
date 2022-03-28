@@ -54,6 +54,13 @@ parse:
         PASS_REGULAR_EXPRESSION: '*'
         FAIL_REGULAR_EXPRESSION: '*'
         SKIP_REGULAR_EXPRESSION: '*'
+    rocm_version_message:
+      flags:
+        - STATUS
+        - WARNING
+        - SEND_ERROR
+        - FATAL_ERROR
+        - AUTHOR_WARNING
   override_spec: {}
   vartags: []
   proptags: []

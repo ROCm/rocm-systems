@@ -142,19 +142,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(Formatting) # format target
 include(Packages) # finds third-party libraries
 
-if(OMNITRACE_USE_HIP OR OMNITRACE_USE_ROCTRACER)
-    find_package(HIP QUIET)
-    if(HIP_VERSION_MAJOR GREATER_EQUAL 4 AND HIP_VERSION_MINOR GREATER 3)
-        set(roctracer_kfdwrapper_LIBRARY)
-    endif()
-    omnitrace_add_feature(HIP_VERSION "HIP version")
-else()
-    set(HIP_VERSION "0.0.0")
-    set(HIP_VERSION_MAJOR 0)
-    set(HIP_VERSION_MINOR 0)
-    set(HIP_VERSION_PATCH 0)
-endif()
-
 omnitrace_activate_clang_tidy()
 
 # custom visibility settings
