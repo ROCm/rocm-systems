@@ -44,7 +44,6 @@ endif ()
 
 ## Path to HSA test
 set ( HSA_TEST_DIR "${TEST_DIR}/hsa/test" )
-set ( HSA_REV "f8b3870" )
 
 ## test run script
 set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
@@ -70,8 +69,6 @@ add_custom_target( mytest
 )
 
 ## Build HSA test
-execute_process ( COMMAND sh -xc "if [ ! -e ${TEST_DIR}/hsa ] ; then git clone https://github.com/ROCmSoftwarePlatform/hsa-class.git ${TEST_DIR}/hsa; fi" )
-execute_process ( COMMAND sh -xc "if [ -e ${TEST_DIR}/hsa ] ; then cd ${TEST_DIR}/hsa && git fetch origin && git checkout ${HSA_REV}; fi" )
 set ( TMP ${TEST_DIR} )
 set ( TEST_DIR ${HSA_TEST_DIR} )
 add_subdirectory ( ${HSA_TEST_DIR} ${PROJECT_BINARY_DIR}/test/hsa )

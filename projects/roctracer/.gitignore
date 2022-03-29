@@ -5,6 +5,5 @@
 *.swp
 *.Po
 build
-test/hsa
 test/MatrixTranspose/MatrixTranspose
 test/MatrixTranspose_test/MatrixTranspose
