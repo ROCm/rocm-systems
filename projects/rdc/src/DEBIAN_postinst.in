@@ -4,6 +4,11 @@
 # it already exists
 do_create_rdc_user() {
     useradd -r -s /bin/nologin rdc
+    if [ $(getent group render) ]; then
+        usermod -a -G render rdc
+    else
+        usermod -a -G video rdc
+    fi
     # Make sure this doesn't return non-zero if an id already exists
     return 0
 }
