@@ -436,7 +436,6 @@ rsmi_init(uint64_t flags) {
       smi.Initialize(flags);
     } catch(...) {
       smi.Cleanup();
-      std::cerr << "rsmi_init() failed" << std::endl;
       throw amd::smi::rsmi_exception(RSMI_STATUS_INIT_ERROR, __FUNCTION__);
     }
   }
