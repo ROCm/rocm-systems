@@ -28,6 +28,9 @@
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
 
+#include <sstream>
+#include <string>
+
 struct module_function
 {
     using width_t   = std::array<size_t, 4>;
@@ -74,16 +77,18 @@ struct module_function
     bool is_address_range_constrained() const;     // checks address range constraint
     bool is_num_instructions_constrained() const;  // check # instructions constraint
 
-    uint64_t           address_range    = 0;
-    uint64_t           num_instructions = 0;
-    module_t*          module           = nullptr;
-    procedure_t*       function         = nullptr;
-    flow_graph_t*      flow_graph       = nullptr;
-    string_t           module_name      = {};
-    string_t           function_name    = {};
-    function_signature signature        = {};
-    basic_block_set_t  basic_blocks     = {};
-    basic_loop_vec_t   loop_blocks      = {};
+    size_t                     start_address    = 0;
+    uint64_t                   address_range    = 0;
+    uint64_t                   num_instructions = 0;
+    module_t*                  module           = nullptr;
+    procedure_t*               function         = nullptr;
+    flow_graph_t*              flow_graph       = nullptr;
+    string_t                   module_name      = {};
+    string_t                   function_name    = {};
+    function_signature         signature        = {};
+    basic_block_set_t          basic_blocks     = {};
+    basic_loop_vec_t           loop_blocks      = {};
+    std::vector<instruction_t> instructions     = {};
 
     using str_msg_t     = std::tuple<int, string_t, string_t, string_t>;
     using str_msg_vec_t = std::vector<str_msg_t>;
@@ -131,8 +136,11 @@ public:
             return _inc;
         };
 
+        std::stringstream _addr{};
+        _addr << "0x" << std::hex << rhs.start_address;
         // clang-format off
-        ss << std::setw(14) << rhs.address_range << " "
+        ss << std::setw(14) << _addr.str() << " "
+           << std::setw(14) << rhs.address_range << " "
            << std::setw(14) << rhs.num_instructions << " "
            << std::setw(6) << std::setprecision(2) << std::fixed << (rhs.address_range / static_cast<double>(rhs.num_instructions)) << "  "
            << std::setw(w0 + 8) << std::left << _get_str(rhs.module_name) << " "
@@ -150,6 +158,13 @@ void
 module_function::serialize(ArchiveT& ar, const unsigned)
 {
     namespace cereal = tim::cereal;
+    if constexpr(tim::concepts::is_output_archive<ArchiveT>::value)
+    {
+        std::stringstream _addr{};
+        _addr << "0x" << std::hex << start_address;
+        ar(cereal::make_nvp("start_address", _addr.str()));
+    }
+
     ar(cereal::make_nvp("address_range", address_range),
        cereal::make_nvp("instructions", num_instructions),
        cereal::make_nvp("module", module_name),
@@ -181,5 +196,17 @@ module_function::serialize(ArchiveT& ar, const unsigned)
            cereal::make_nvp("is_num_instructions_constrained",
                             is_num_instructions_constrained()));
         ar.finishNode();
+        // instructions can inflate JSON size so only output when verbosity is increased
+        // above default
+        if(verbose_level > 0)
+        {
+            std::vector<std::string> _instructions{};
+            _instructions.reserve(instructions.size());
+            for(auto&& itr : instructions)
+            {
+                _instructions.emplace_back(itr.format());
+            }
+            ar(cereal::make_nvp("instructions", _instructions));
+        }
     }
 }

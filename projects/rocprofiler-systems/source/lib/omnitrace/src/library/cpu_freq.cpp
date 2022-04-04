@@ -29,6 +29,7 @@
 #include "library/timemory.hpp"
 
 #include <cstdlib>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -40,8 +41,9 @@ namespace
 {
 struct cpu_freq
 {};
-using freq_pair_t                                    = std::pair<size_t, double>;
-std::vector<std::deque<freq_pair_t>> cpu_frequencies = {};
+using freq_pair_t                                            = std::pair<size_t, double>;
+std::vector<std::deque<freq_pair_t>> cpu_frequencies         = {};
+std::set<size_t>                     enabled_cpu_frequencies = {};
 
 struct cpu_mem
 {};
@@ -107,6 +109,42 @@ config()
 
     _ifs.close();
 
+    auto _enabled_val = get_sampling_cpus();
+    if(_enabled_val != "none" && _enabled_val != "all")
+    {
+        auto _enabled = tim::delimit(_enabled_val, ",; \t");
+        if(_enabled.empty())
+        {
+            for(size_t i = 0; i < _ncpu; ++i)
+                enabled_cpu_frequencies.emplace(i);
+        }
+        for(auto&& _v : _enabled)
+        {
+            if(_v.find_first_not_of("0123456789-") != std::string::npos)
+            {
+                OMNITRACE_VERBOSE_F(
+                    0,
+                    "Invalid CPU specification. Only numerical values (e.g., 0) or "
+                    "ranges (e.g., 0-7) are permitted. Ignoring %s...",
+                    _v.c_str());
+                continue;
+            }
+            if(_v.find('-') != std::string::npos)
+            {
+                auto _vv = tim::delimit(_v, "-");
+                OMNITRACE_CONDITIONAL_THROW(
+                    _vv.size() != 2,
+                    "Invalid CPU range specification: %s. Required format N-M, e.g. 0-4",
+                    _v.c_str());
+                for(size_t i = std::stoull(_vv.at(0)); i < std::stoull(_vv.at(1)); ++i)
+                    enabled_cpu_frequencies.insert(i);
+            }
+            else
+            {
+                enabled_cpu_frequencies.insert(std::stoull(_v));
+            }
+        }
+    }
     cpu_frequencies.resize(_ncpu);
     cpu_mhz_pos = _cpu_mhz_pos;
     ifs         = std::make_unique<std::ifstream>("/proc/cpuinfo", std::ifstream::binary);
@@ -129,7 +167,11 @@ sample()
 
     auto _ts = tim::get_clock_real_now<size_t, std::nano>();
     for(int64_t i = 0; i < ncpu; ++i)
+    {
+        if(!enabled_cpu_frequencies.empty() && enabled_cpu_frequencies.count(i) == 0)
+            continue;
         cpu_frequencies.at(i).emplace_back(_ts, _read_cpu_freq(i));
+    }
 }
 
 void

@@ -1,0 +1,36 @@
+ARG DISTRO=opensuse/leap
+ARG VERSION=15.3
+FROM ${DISTRO}:${VERSION}
+
+ENV HOME /root
+ENV SHELL /bin/bash
+ENV BASH_ENV /etc/bash.bashrc
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /tmp
+SHELL [ "/bin/bash", "-c" ]
+
+ENV PATH /usr/local/bin:${PATH}
+
+ARG EXTRA_PACKAGES=""
+ARG ELFUTILS_DOWNLOAD_VERSION="0.183"
+ARG NJOBS="12"
+
+RUN zypper update -y && \
+    zypper dist-upgrade -y && \
+    zypper install -y -t pattern devel_basis && \
+    zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build papi-devel && \
+    python3 -m pip install 'cmake==3.18.4'
+
+COPY ./dyninst-source /tmp/dyninst
+
+RUN cd /tmp/dyninst && \
+    cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON && \
+    cmake --build build --target all --parallel ${NJOBS} && \
+    cmake --build build --target install --parallel ${NJOBS} && \
+    cd /tmp && \
+    shopt -s dotglob extglob && \
+    rm -rf *
+
+WORKDIR /home
+SHELL [ "/bin/bash", "--login", "-c" ]

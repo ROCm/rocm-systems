@@ -206,7 +206,7 @@ function(OMNITRACE_ADD_TEST)
             _TEST
             baseline binary-rewrite binary-rewrite-run binary-rewrite-sampling
             binary-rewrite-run-sampling runtime-instrument runtime-instrument-sampling)
-            string(REPLACE "-run-" "-" _prefix "${TEST_NAME}-${_TEST}/")
+            string(REGEX REPLACE "-run(-|/)" "\\1" _prefix "${TEST_NAME}-${_TEST}/")
             set(_environ "${TEST_ENVIRONMENT}")
             set(_labels "${_TEST}")
             set(_timeout ${TEST_REWRITE_TIMEOUT})

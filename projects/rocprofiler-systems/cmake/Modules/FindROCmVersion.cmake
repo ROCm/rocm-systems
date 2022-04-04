@@ -190,10 +190,7 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
         endforeach()
     endfunction()
 
-    # search for HIP to set ROCM_PATH
-    if(NOT hip_FOUND)
-        find_package(hip)
-    endif()
+    # search for HIP to set ROCM_PATH if(NOT hip_FOUND) find_package(hip) endif()
 
     function(COMPUTE_ROCM_VERSION_DIR)
         if(EXISTS "${ROCmVersion_VERSION_FILE}" AND IS_ABSOLUTE
@@ -231,7 +228,7 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
         set(_PATHS ${ROCmVersion_DIR})
     else()
         set(_PATHS ${ROCmVersion_DIR} ${ROCmVersion_ROOT} ${ROCmVersion_ROOT_DIR}
-                   ${ROCM_PATH} $ENV{CMAKE_PREFIX_PATH} ${CMAKE_PREFIX_PATH} /opt/rocm)
+                   $ENV{CMAKE_PREFIX_PATH} ${CMAKE_PREFIX_PATH} ${ROCM_PATH} /opt/rocm)
         rocm_version_message(STATUS "ROCmVersion search paths: ${_PATHS}")
     endif()
 

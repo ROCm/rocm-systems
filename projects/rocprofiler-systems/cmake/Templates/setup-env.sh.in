@@ -8,7 +8,8 @@ if [ ! -d "${BASEDIR}" ]; then
     return 1
 fi
 
-export PATH=${BASEDIR}/bin:${PATH}
-export LD_LIBRARY_PATH=${BASEDIR}/@CMAKE_INSTALL_LIBDIR@:${LD_LIBRARY_PATH}
+PATH=${BASEDIR}/bin:${PATH}
+LD_LIBRARY_PATH=${BASEDIR}/@CMAKE_INSTALL_LIBDIR@:${LD_LIBRARY_PATH}
 
-return 0
+export PATH
+export LD_LIBRARY_PATH

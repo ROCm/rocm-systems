@@ -45,6 +45,8 @@ function(OMNITRACE_ADD_BIN_TEST)
                        "${TEST_ENVIRONMENT}"
                        TIMEOUT
                        ${TEST_TIMEOUT}
+                       DEPENDS
+                       "${TEST_DEPENDS}"
                        LABELS
                        "omnitrace-bin;${TEST_LABELS}"
                        PASS_REGULAR_EXPRESSION
@@ -66,6 +68,8 @@ function(OMNITRACE_ADD_BIN_TEST)
                        "${TEST_ENVIRONMENT}"
                        TIMEOUT
                        ${TEST_TIMEOUT}
+                       DEPENDS
+                       "${TEST_DEPENDS}"
                        LABELS
                        "omnitrace-bin;${TEST_LABELS}"
                        PASS_REGULAR_EXPRESSION

@@ -232,6 +232,9 @@ get_sampling_freq();
 double&
 get_sampling_delay();
 
+std::string
+get_sampling_cpus();
+
 double&
 get_thread_sampling_freq();
 

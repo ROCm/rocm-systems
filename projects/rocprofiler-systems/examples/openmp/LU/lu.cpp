@@ -59,7 +59,6 @@ Authors of the OpenMP code:
 
 #include "../common/npb-CPP.hpp"
 #include "npbparams.hpp"
-#include "omp.h"
 
 /*
  * ---------------------------------------------------------------------
@@ -2095,8 +2094,8 @@ read_input()
      * ---------------------------------------------------------------------
      */
     FILE* fp;
-    int   avoid_warning;
-    if((fp = fopen("inputlu.data", "r")) != NULL)
+    int   avoid_warning = 0;
+    if((fp = fopen("inputlu.data", "r")) != nullptr)
     {
         printf("Reading from input file inputlu.data\n");
         while(fgetc(fp) != '\n')
@@ -2156,6 +2155,7 @@ read_input()
         ny0       = ISIZ2;
         nz0       = ISIZ3;
     }
+    (void) avoid_warning;
     /*
      * ---------------------------------------------------------------------
      * check problem size

@@ -1,0 +1,32 @@
+ARG DISTRO=opensuse/leap
+ARG VERSION=15.3
+FROM ${DISTRO}:${VERSION}
+
+ENV HOME /root
+ENV SHELL /bin/bash
+ENV BASH_ENV /etc/bash.bashrc
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /tmp
+SHELL [ "/bin/bash", "-c" ]
+
+ENV PATH /usr/local/bin:${PATH}
+
+RUN zypper update -y && \
+    zypper dist-upgrade -y && \
+    zypper install -y -t pattern devel_basis && \
+    zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build && \
+    python3 -m pip install 'cmake==3.18.4'
+
+# ARG AMDGPU_RPM=21.40.2/sle/15/amdgpu-install-21.40.2.40502-1.noarch.rpm
+ARG AMDGPU_RPM=latest/sle/15/amdgpu-install-21.50.50000-1.noarch.rpm
+
+RUN zypper --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
+    zypper addrepo https://download.opensuse.org/repositories/devel:languages:perl/SLE_15/devel:languages:perl.repo && \
+    zypper --non-interactive --gpg-auto-import-keys refresh && \
+    amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms -y && \
+    zypper install -y rocm-hip-sdk roctracer-dev rocm-smi-lib rocprofiler-dev && \
+    zypper clean --all
+
+WORKDIR /home
+SHELL [ "/bin/bash", "--login", "-c" ]

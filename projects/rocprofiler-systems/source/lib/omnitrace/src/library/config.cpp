@@ -172,6 +172,13 @@ configure_settings()
         "increasing this value can fix deadlocks during init",
         0.5, "sampling");
 
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_SAMPLING_CPUS",
+        "CPUs to collect frequency information for. Values should be separated by commas "
+        "and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies 'all' and "
+        "'none' suppresses all CPU frequency sampling",
+        "", "sampling");
+
     auto _backend = tim::get_env_choice<std::string>(
         "OMNITRACE_BACKEND",
         (_system_backend)
@@ -522,9 +529,10 @@ print_settings()
     if(dmp::rank() > 0) return;
 
     static std::set<tim::string_view_t> _sample_options = {
-        "OMNITRACE_SAMPLING_FREQ", "OMNITRACE_SAMPLING_DELAY",
-        "OMNITRACE_FLAT_SAMPLING", "OMNITRACE_TIMELINE_SAMPLING",
-        "OMNITRACE_FLAT_SAMPLING", "OMNITRACE_TIMELINE_SAMPLING",
+        "OMNITRACE_SAMPLING_FREQ",     "OMNITRACE_SAMPLING_DELAY",
+        "OMNITRACE_SAMPLING_CPUS",     "OMNITRACE_FLAT_SAMPLING",
+        "OMNITRACE_TIMELINE_SAMPLING", "OMNITRACE_FLAT_SAMPLING",
+        "OMNITRACE_TIMELINE_SAMPLING",
     };
     static std::set<tim::string_view_t> _perfetto_options = {
         "OMNITRACE_OUTPUT_FILE",
@@ -913,6 +921,13 @@ get_sampling_delay()
 {
     static auto _v = get_config()->find("OMNITRACE_SAMPLING_DELAY");
     return static_cast<tim::tsettings<double>&>(*_v->second).get();
+}
+
+std::string
+get_sampling_cpus()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUS");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
 int64_t

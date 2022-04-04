@@ -1,8 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020, The Regents of the University of California,
-// through Lawrence Berkeley National Laboratory (subject to receipt of any
-// required approvals from the U.S. Dept. of Energy).  All rights reserved.
+// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,36 +20,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#if !defined(OMNITRACE_DL_SOURCE)
+#    define OMNITRACE_DL_SOURCE 1
+#endif
+
 #define OMNITRACE_COMMON_LIBRARY_NAME "dl"
 
-#include "common/defines.h"
+#include "dl.hpp"
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/invoke.hpp"
 #include "common/join.hpp"
 
-#include "omnitrace/user.h"
-
-#include <atomic>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <dlfcn.h>
-#include <functional>
-#include <gnu/libc-version.h>
-#include <iostream>
-#include <limits>
-#include <memory>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <sys/stat.h>
-#include <unistd.h>
-
-#if !defined(OMNITRACE_USE_OMPT)
-#    define OMNITRACE_USE_OMPT 0
-#endif
+//--------------------------------------------------------------------------------------//
 
 #define OMNITRACE_DLSYM(VARNAME, HANDLE, FUNCNAME)                                       \
     if(HANDLE)                                                                           \
@@ -68,38 +49,6 @@
                     FUNCNAME);                                                           \
         }                                                                                \
     }
-
-//--------------------------------------------------------------------------------------//
-//
-//      omnitrace symbols
-//
-//--------------------------------------------------------------------------------------//
-
-extern "C"
-{
-    struct ompt_start_tool_result_t;
-
-    void omnitrace_init_library(void) OMNITRACE_PUBLIC_API;
-    void omnitrace_init(const char*, bool, const char*) OMNITRACE_PUBLIC_API;
-    void omnitrace_finalize(void) OMNITRACE_PUBLIC_API;
-    void omnitrace_set_env(const char* env_name,
-                           const char* env_val) OMNITRACE_PUBLIC_API;
-    void omnitrace_set_mpi(bool use, bool attached) OMNITRACE_PUBLIC_API;
-    void omnitrace_push_trace(const char* name) OMNITRACE_PUBLIC_API;
-    void omnitrace_pop_trace(const char* name) OMNITRACE_PUBLIC_API;
-
-    int omnitrace_user_start_trace_dl(void) OMNITRACE_HIDDEN_API;
-    int omnitrace_user_stop_trace_dl(void) OMNITRACE_HIDDEN_API;
-
-    int omnitrace_user_start_thread_trace_dl(void) OMNITRACE_HIDDEN_API;
-    int omnitrace_user_stop_thread_trace_dl(void) OMNITRACE_HIDDEN_API;
-
-    int omnitrace_user_push_region_dl(const char*) OMNITRACE_HIDDEN_API;
-    int omnitrace_user_pop_region_dl(const char*) OMNITRACE_HIDDEN_API;
-
-    ompt_start_tool_result_t* ompt_start_tool(unsigned int,
-                                              const char*) OMNITRACE_PUBLIC_API;
-}
 
 //--------------------------------------------------------------------------------------//
 
@@ -398,6 +347,32 @@ extern "C"
         if(dl::get_thread_enabled())
         {
             OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_trace_f, name);
+        }
+        else
+        {
+            if(dl::get_thread_count()-- == 0) omnitrace_user_start_thread_trace_dl();
+        }
+    }
+
+    void omnitrace_push_region(const char* name)
+    {
+        if(!dl::get_active()) return;
+        if(dl::get_thread_enabled())
+        {
+            OMNITRACE_DL_INVOKE(get_indirect().omnitrace_push_region_f, name);
+        }
+        else
+        {
+            ++dl::get_thread_count();
+        }
+    }
+
+    void omnitrace_pop_region(const char* name)
+    {
+        if(!dl::get_active()) return;
+        if(dl::get_thread_enabled())
+        {
+            OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_region_f, name);
         }
         else
         {

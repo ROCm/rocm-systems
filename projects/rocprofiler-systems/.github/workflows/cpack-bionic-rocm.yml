@@ -136,7 +136,7 @@ jobs:
         timeout-minutes: 10
         uses: actions/upload-artifact@v2
         with:
-          name: stgz-installers
+          name: ubuntu-bionic-rocm-stgz-installers
           path: |
             build-release/omnitrace-*.sh
 
@@ -144,7 +144,7 @@ jobs:
         timeout-minutes: 10
         uses: actions/upload-artifact@v2
         with:
-          name: deb-installers
+          name: ubuntu-bionic-rocm-deb-installers
           path: |
             build-release/omnitrace_*.deb
 

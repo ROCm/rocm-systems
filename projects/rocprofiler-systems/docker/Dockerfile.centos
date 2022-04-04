@@ -1,0 +1,57 @@
+ARG DISTRO=centos
+ARG VERSION=7
+FROM ${DISTRO}:${VERSION}
+
+ENV HOME /root
+ENV SHELL /bin/bash
+ENV BASH_ENV /etc/bash.bashrc
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /tmp
+SHELL [ "/bin/bash", "-c" ]
+
+ENV PATH /usr/local/bin:${PATH}
+
+RUN yum update -y && \
+    yum groupinstall -y "Development Tools" && \
+    yum install -y centos-release-scl && \
+    yum install -y epel-release && \
+    yum install -y devtoolset-9 python3-pip openmpi3-devel zlib-devel numactl-devel papi-devel dpkg-devel dpkg-dev && \
+    python3 -m pip install 'cmake==3.18.4'
+
+ARG AMDGPU_RPM=21.40.2/rhel/7.9/amdgpu-install-21.40.2.40502-1.el7.noarch.rpm
+# ARG AMDGPU_RPM=latest/rhel/7.9/amdgpu-install-21.50.50000-1.el7.noarch.rpm
+
+RUN yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
+    amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms --skip-broken -y && \
+    yum install -y rocm-hip-sdk roctracer-dev rocm-smi-lib rocprofiler-dev && \
+    yum update -y && \
+    yum clean all
+
+RUN ln -s /opt/rocm-* /opt/rocm
+
+WORKDIR /home
+SHELL [ "/bin/bash", "--login", "-c" ]
+COPY ./entrypoint-centos.sh /docker-entrypoint.sh
+ENTRYPOINT [ "/docker-entrypoint.sh" ]
+
+#1  yum update
+#2  yum groupinstall "Development Tools"
+#3  yum install devtoolset-9-toolchain
+#4  yum install devtoolset-9
+#5  yum install devtoolset-7-toolchain
+#6  yum search devtoolset
+#7  yum search -a devtoolset
+#8  yum search --help
+#9  yum repolist
+#10  yum list available
+#11  yum list available devtoolset*
+#12  yum list available devtoolset\*
+#13  subscription-manager list --available
+#14  yum install subscription-manager
+#15  subscription-manager list --available
+#16  yum install centos-release-scl
+#17  yum-config-manager --enable rhel-server-rhscl-7-rpms
+#18  yum install devtoolset-7
+#19  yum install devtoolset-9
+#20  scl enable devtoolset-9 bash

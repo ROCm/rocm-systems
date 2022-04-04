@@ -12,12 +12,14 @@ add_executable(openmp-lu ${CMAKE_CURRENT_SOURCE_DIR}/LU/lu.cpp
                          $<TARGET_OBJECTS:openmp-common>)
 
 find_program(CLANGXX_EXECUTABLE NAMES clang++)
-if(CLANGXX_EXECUTABLE)
+find_library(LIBOMP_LIBRARY
+             NAMES omp ${CMAKE_SHARED_LIBRARY_PREFIX}omp${CMAKE_SHARED_LIBRARY_SUFFIX}.5)
+if(CLANGXX_EXECUTABLE AND LIBOMP_LIBRARY)
     target_compile_options(openmp-common PUBLIC -W -Wall -fopenmp=libomp)
     target_compile_options(openmp-cg PRIVATE -W -Wall -fopenmp=libomp)
-    target_link_libraries(openmp-cg PRIVATE omp)
+    target_link_libraries(openmp-cg PRIVATE ${LIBOMP_LIBRARY})
     target_compile_options(openmp-lu PRIVATE -W -Wall -fopenmp=libomp)
-    target_link_libraries(openmp-lu PRIVATE omp)
+    target_link_libraries(openmp-lu PRIVATE ${LIBOMP_LIBRARY})
     omnitrace_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE} TARGET openmp-common)
     omnitrace_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE} TARGET openmp-cg)
     omnitrace_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE} TARGET openmp-lu)

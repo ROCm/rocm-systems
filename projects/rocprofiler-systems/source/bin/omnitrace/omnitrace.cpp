@@ -1954,7 +1954,8 @@ instrument_entity(const string_t& function_name)
         "(std::_Sp_counted_base|std::(use|has)_facet|std::locale|::sentry|^std::_|::_(M|"
         "S)_|::basic_string[a-zA-Z,<>: ]+::_M_create)",
         regex_opts);
-    static std::regex leading("^(_|\\.|frame_dummy|\\(|targ|kmp_threadprivate_)",
+    static std::regex leading("^(_|\\.|frame_dummy|transaction clone|virtual "
+                              "thunk|non-virtual thunk|\\(|targ|kmp_threadprivate_)",
                               regex_opts);
     static std::regex trailing(
         "(_|\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$", regex_opts);

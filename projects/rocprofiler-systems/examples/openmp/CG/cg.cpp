@@ -57,7 +57,6 @@ Authors of the OpenMP code:
 
 #include "../common/npb-CPP.hpp"
 #include "npbparams.hpp"
-#include "omp.h"
 
 /*
  * ---------------------------------------------------------------------

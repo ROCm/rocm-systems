@@ -1,0 +1,5 @@
+/build*
+/_build
+/_doxygen
+/.gitinfo
+/omnitrace.dox

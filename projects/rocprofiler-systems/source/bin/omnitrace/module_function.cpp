@@ -62,9 +62,12 @@ module_function::module_function(module_t* mod, procedure_t* proc)
 
     for(const auto& itr : basic_blocks)
     {
-        std::vector<instruction_t> instructions{};
-        itr->getInstructions(instructions);
-        num_instructions += instructions.size();
+        std::vector<instruction_t> _instructions{};
+        itr->getInstructions(_instructions);
+        num_instructions += _instructions.size();
+        instructions.reserve(instructions.size() + _instructions.size());
+        for(auto&& iitr : _instructions)
+            instructions.emplace_back(iitr);
     }
 
     char modname[FUNCNAMELEN];
@@ -84,7 +87,10 @@ module_function::module_function(module_t* mod, procedure_t* proc)
     }
     std::pair<address_t, address_t> _range{};
     if(function->getAddressRange(_range.first, _range.second))
+    {
+        start_address = _range.first;
         address_range = _range.second - _range.first;
+    }
 }
 
 void
@@ -95,7 +101,8 @@ module_function::write_header(std::ostream& os)
     auto w2 = std::min<size_t>(get_width()[2], absolute_max_width);
 
     std::stringstream ss;
-    ss << std::setw(14) << "AddressRange"
+    ss << std::setw(14) << "StartAddress"
+       << " " << std::setw(14) << "AddressRange"
        << " " << std::setw(14) << "#Instructions"
        << " " << std::setw(6) << "Ratio"
        << "  " << std::setw(w0 + 8) << std::left << "Module"

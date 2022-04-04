@@ -1,71 +1,13 @@
 # omnitrace: application tracing with static/dynamic binary instrumentation
 
-It is highly recommended to use the ore-built binary installers for omnitrace which are provided in the "Assets" section of each release.
+[![Ubuntu 18.04 (GCC 7, 8, MPICH)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-bionic.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-bionic.yml)
+[![Ubuntu 20.04 (GCC 7, 8, 9, 10)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external.yml)
+[![Ubuntu 20.04 (GCC 9, external Dyninst)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-dyninst-package.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-dyninst-package.yml)
+[![Ubuntu 20.04 (GCC 9, MPICH, OpenMPI)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml)
+[![Ubuntu 20.04 (GCC 9, MPICH, OpenMPI, ROCm 4.3, 4.5, 5.0)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external-rocm.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external-rocm.yml)
 
-## Dependencies
-
-- Ubuntu 18.04 or Ubuntu 20.04
-  - Other OS distributions may be supported but are not tested
-- GCC compiler v7+
-  - Older GCC compilers may be supported but are not tested
-  - Clang compilers are generally supported for Omnitrace but not Dyninst
-- [CMake](https://cmake.org/) v3.15+
-- [DynInst](https://github.com/dyninst/dyninst) for dynamic or static instrumentation
-  - [TBB](https://github.com/oneapi-src/oneTBB) required by Dyninst
-  - [ElfUtils](https://sourceware.org/elfutils/) required by Dyninst
-  - [LibIberty](https://github.com/gcc-mirror/gcc/tree/master/libiberty) required by Dyninst
-  - [Boost](https://www.boost.org/) required by Dyninst
-  - [OpenMP](https://www.openmp.org/) optional by Dyninst
-- [ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html#ubuntu) (optional)
-  - HIP
-  - Roctracer for HIP API and kernel tracing
-- [PAPI](https://icl.utk.edu/papi/)
-- [libunwind](https://www.nongnu.org/libunwind/) for call-stack sampling
-- Several optional third-party profiling tools supported by timemory (e.g. TAU, Caliper, CrayPAT, etc.)
-
-## Installing CMake
-
-If using Ubuntu 20.04, `apt-get install cmake` will install cmake v3.16.3. If using Ubuntu 18.04, the cmake version via apt is too old (v3.10.2). In this case, run:
-
-```console
-python3 -m pip install `cmake==3.18.4`
-export PATH=${HOME}/.local/bin
-```
-
-## Installing DynInst
-
-The easiest way to install Dyninst is to configure omnitrace with `-DOMNITRACE_BUILD_DYNINST` and have Dyninst install it's dependencies:
-`-DDyninst_BUILD_TBB=ON -DDyninst_BUILD_ELFUTILS=ON -DDyninst_BUILD_BOOST=ON -DDyninst_BUILD_LIBIBERTY=ON`.
-
-```shell
-git clone https://github.com/spack/spack.git
-source ./spack/share/spack/setup-env.sh
-spack compiler find
-spack external find
-spack install dyninst
-spack load -r dyninst
-```
-
-## Installing omnitrace
-
-Omnitrace can have full MPI support (`-DOMNITRACE_USE_MPI=ON`) or partially (`-DOMNITRACE_USE_MPI_HEADERS=ON`). The only difference between these two modes
-is whether or not the results collected via timemory can be aggregated into one output file. If full MPI support is selected, make sure your target application
-is built against the same MPI distribution as omnitrace, i.e. do not build omnitrace with MPICH and use it on a target application built against OpenMPI.
-If partial support is selected, build omnitrace against OpenMPI -- the reason this is recommended is because the `MPI_COMM_WORLD` in OpenMPI is a pointer to
-`ompi_communicator_t` (8 bytes) whereas `MPI_COMM_WORLD` in MPICH is an `int` (4 bytes). Building omnitrace with partial MPI support and the MPICH header and using
-on an application using OpenMPI will thus implicitly cast `MPI_COMM_WORLD` to 4 bytes in the MPI function wrappers before calling the underlying OpenMPI function
-resulting in an incorrect address for `ompi_communicator_t` whereas partial MPI support with the OpenMPI headers does not cast `MPI_COMM_WORLD` into a smaller datatype
-which used with MPICH.
-
-```shell
-OMNITRACE_ROOT=${HOME}/sw/omnitrace
-git clone https://github.com/AARInternal/omnitrace.git
-cmake -B build-omnitrace -DOMNITRACE_USE_MPI=ON -DCMAKE_INSTALL_PREFIX=${OMNITRACE_ROOT} omnitrace
-cmake --build build-omnitrace --target all --parallel 8
-cmake --build build-omnitrace --target install
-export PATH=${OMNITRACE_ROOT}/bin:${PATH}
-export LD_LIBRARY_PATH=${OMNITRACE_ROOT}/lib64:${OMNITRACE_ROOT}/lib:${LD_LIBRARY_PATH}
-```
+Omnitrace is an AMD research project and should not be treated as an offical part of the ROCm software stack. 
+The documentation for omnitrace is available at [amdresearch.github.io/omnitrace](https://amdresearch.github.io/omnitrace/).
 
 ## Using Omnitrace Executable
 

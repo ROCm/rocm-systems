@@ -191,7 +191,7 @@ if(OMNITRACE_BUILD_DYNINST)
         omnitrace_target_compile_definitions(
             omnitrace-dyninst
             INTERFACE
-                DYNINST_API_RT="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}:$<TARGET_FILE_DIR:Dyninst::dyninstAPI_RT>:${CMAKE_INSTALL_PREFIX}/lib/$<TARGET_FILE_NAME:Dyninst::dyninstAPI_RT>:$<TARGET_FILE:Dyninst::dyninstAPI_RT>"
+                DYNINST_API_RT="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}:$<TARGET_FILE_DIR:Dyninst::dyninstAPI_RT>:${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/$<TARGET_FILE_NAME:Dyninst::dyninstAPI_RT>:$<TARGET_FILE:Dyninst::dyninstAPI_RT>"
             )
     endif()
 
@@ -466,6 +466,9 @@ if(NOT TARGET PTL::ptl-shared)
     set(PTL_USE_GPU OFF)
     set(PTL_DEVELOPER_INSTALL OFF)
 
+    if(NOT DEFINED BUILD_OBJECT_LIBS)
+        set(BUILD_OBJECT_LIBS OFF)
+    endif()
     omnitrace_save_variables(
         BUILD_CONFIG
         VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS

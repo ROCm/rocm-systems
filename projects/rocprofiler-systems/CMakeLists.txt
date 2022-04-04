@@ -25,7 +25,7 @@ project(
     LANGUAGES C CXX
     VERSION ${OMNITRACE_VERSION}
     DESCRIPTION "CPU/GPU Application tracing with static/dynamic binary instrumentation"
-    HOMEPAGE_URL "https://github.com/AARInternal/omnitrace")
+    HOMEPAGE_URL "https://github.com/AMDResearch/omnitrace")
 
 message(
     STATUS
@@ -54,11 +54,17 @@ include(MacroUtilities) # various functions and macros
 include(Compilers) # compiler identification
 include(BuildSettings) # compiler flags
 
+# force this because dyninst always installs to lib
+set(CMAKE_INSTALL_LIBDIR
+    "lib"
+    CACHE STRING "Object code libraries (lib)" FORCE)
 set(CMAKE_CXX_STANDARD
     17
     CACHE STRING "CXX language standard")
-omnitrace_add_feature(CMAKE_CXX_STANDARD "CXX language standard")
 omnitrace_add_feature(CMAKE_BUILD_TYPE "Build optimization level")
+omnitrace_add_feature(CMAKE_INSTALL_PREFIX "Installation prefix")
+omnitrace_add_feature(CMAKE_CXX_COMPILER "C++ compiler")
+omnitrace_add_feature(CMAKE_CXX_STANDARD "CXX language standard")
 omnitrace_add_option(CMAKE_CXX_STANDARD_REQUIRED "Require C++ language standard" ON)
 omnitrace_add_option(CMAKE_CXX_EXTENSIONS "Compiler specific language extensions" OFF)
 omnitrace_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH "Enable rpath to linked libraries"
@@ -170,8 +176,13 @@ add_subdirectory(source)
 #
 # ------------------------------------------------------------------------------#
 
-configure_file(${PROJECT_SOURCE_DIR}/scripts/setup-env.sh.in
-               ${PROJECT_BINARY_DIR}/scripts/setup-env.sh @ONLY)
+configure_file(${PROJECT_SOURCE_DIR}/cmake/Templates/setup-env.sh.in
+               ${PROJECT_BINARY_DIR}/install-tree/setup-env.sh @ONLY)
+
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/Templates/modulefile.in
+    ${PROJECT_BINARY_DIR}/install-tree/modulefiles/${PROJECT_NAME}/${OMNITRACE_VERSION}
+    @ONLY)
 
 install(
     PROGRAMS ${PROJECT_SOURCE_DIR}/scripts/omnitrace-merge.jl
@@ -184,8 +195,14 @@ install(
     OPTIONAL)
 
 install(
-    FILES ${PROJECT_BINARY_DIR}/scripts/setup-env.sh
+    FILES ${PROJECT_BINARY_DIR}/install-tree/setup-env.sh
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
+    OPTIONAL)
+
+install(
+    FILES
+        ${PROJECT_BINARY_DIR}/install-tree/modulefiles/${PROJECT_NAME}/${OMNITRACE_VERSION}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}
     OPTIONAL)
 
 # ------------------------------------------------------------------------------#
@@ -193,10 +210,6 @@ install(
 # examples
 #
 # ------------------------------------------------------------------------------#
-
-if(OMNITRACE_BUILD_LTO)
-    omnitrace_restore_variables(LTO VARIABLES CMAKE_INTERPROCEDURAL_OPTIMIZATION)
-endif()
 
 if(OMNITRACE_BUILD_EXAMPLES)
     add_subdirectory(examples)
