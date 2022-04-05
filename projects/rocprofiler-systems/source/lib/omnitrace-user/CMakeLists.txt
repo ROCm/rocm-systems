@@ -43,6 +43,8 @@ set_target_properties(
                BUILD_RPATH "\$ORIGIN"
                INSTALL_RPATH "\$ORIGIN")
 
+omnitrace_strip_target(omnitrace-user-library)
+
 install(
     TARGETS omnitrace-user-library
     EXPORT omnitrace-user-library-targets

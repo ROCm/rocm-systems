@@ -354,7 +354,9 @@ configure_settings()
         _config->get<std::string>("OMNITRACE_TIMEMORY_COMPONENTS");
 
     // always initialize timemory because gotcha wrappers are always used
-    auto _cmd = tim::read_command_line(process::get_id());
+    auto _cmd     = tim::read_command_line(process::get_id());
+    auto _cmd_env = tim::get_env<std::string>("OMNITRACE_COMMAND_LINE", "");
+    if(!_cmd_env.empty()) _cmd = tim::delimit(_cmd_env, " ");
     auto _exe = (_cmd.empty()) ? "exe" : _cmd.front();
     auto _pos = _exe.find_last_of('/');
     if(_pos < _exe.length() - 1) _exe = _exe.substr(_pos + 1);

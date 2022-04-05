@@ -51,6 +51,7 @@ size_t   min_loop_address_range  = (1 << 8);  // 256
 size_t   min_instructions        = (1 << 6);  // 64
 bool     werror                  = false;
 bool     debug_print             = false;
+bool     instr_print             = false;
 int      verbose_level           = tim::get_env<int>("OMNITRACE_VERBOSE_INSTRUMENT", 0);
 string_t main_fname              = "main";
 string_t argv0                   = {};
@@ -356,6 +357,12 @@ main(int argc, char** argv)
         .action([](parser_t& p) {
             print_overlapping = p.get<std::string>("print-overlapping");
         });
+    parser
+        .add_argument(
+            { "--print-instructions" },
+            "Print the instructions for each basic-block in the JSON/XML outputs")
+        .max_count(1)
+        .action([](parser_t& p) { instr_print = p.get<bool>("print-instructions"); });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[MODE OPTIONS]" }, "");

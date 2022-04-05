@@ -21,6 +21,15 @@ omnitrace_add_option(OMNITRACE_USE_COMPILE_TIMING
 omnitrace_add_option(OMNITRACE_USE_COVERAGE "Build with code-coverage flags" OFF)
 omnitrace_add_option(OMNITRACE_USE_SANITIZER
                      "Build with -fsanitze=\${OMNITRACE_SANITIZER_TYPE}" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_STATIC_LIBGCC
+                     "Build with -static-libgcc if possible" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_STATIC_LIBSTDCXX
+                     "Build with -static-libstdc++ if possible" OFF)
+
+omnitrace_add_interface_library(omnitrace-static-libgcc
+                                "Link to static version of libgcc")
+omnitrace_add_interface_library(omnitrace-static-libstdcxx
+                                "Link to static version of libstdc++")
 
 target_compile_definitions(omnitrace-compile-options INTERFACE $<$<CONFIG:DEBUG>:DEBUG>)
 
@@ -284,6 +293,17 @@ if(MSVC)
     add_flag_if_avail("/Zi")
     add_flag_if_avail("/DEBUG")
 endif()
+
+# ----------------------------------------------------------------------------------------#
+# static lib flags
+#
+target_compile_options(
+    omnitrace-static-libgcc
+    INTERFACE $<$<COMPILE_LANGUAGE:C>:$<$<C_COMPILER_ID:GNU>:-static-libgcc>>
+              $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-static-libgcc>>)
+target_compile_options(
+    omnitrace-static-libstdcxx
+    INTERFACE $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-static-libstdc++>>)
 
 # ----------------------------------------------------------------------------------------#
 # user customization

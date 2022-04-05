@@ -77,18 +77,18 @@ struct module_function
     bool is_address_range_constrained() const;     // checks address range constraint
     bool is_num_instructions_constrained() const;  // check # instructions constraint
 
-    size_t                     start_address    = 0;
-    uint64_t                   address_range    = 0;
-    uint64_t                   num_instructions = 0;
-    module_t*                  module           = nullptr;
-    procedure_t*               function         = nullptr;
-    flow_graph_t*              flow_graph       = nullptr;
-    string_t                   module_name      = {};
-    string_t                   function_name    = {};
-    function_signature         signature        = {};
-    basic_block_set_t          basic_blocks     = {};
-    basic_loop_vec_t           loop_blocks      = {};
-    std::vector<instruction_t> instructions     = {};
+    size_t                                  start_address    = 0;
+    uint64_t                                address_range    = 0;
+    uint64_t                                num_instructions = 0;
+    module_t*                               module           = nullptr;
+    procedure_t*                            function         = nullptr;
+    flow_graph_t*                           flow_graph       = nullptr;
+    string_t                                module_name      = {};
+    string_t                                function_name    = {};
+    function_signature                      signature        = {};
+    basic_block_set_t                       basic_blocks     = {};
+    basic_loop_vec_t                        loop_blocks      = {};
+    std::vector<std::vector<instruction_t>> instructions     = {};
 
     using str_msg_t     = std::tuple<int, string_t, string_t, string_t>;
     using str_msg_vec_t = std::vector<str_msg_t>;
@@ -198,13 +198,17 @@ module_function::serialize(ArchiveT& ar, const unsigned)
         ar.finishNode();
         // instructions can inflate JSON size so only output when verbosity is increased
         // above default
-        if(verbose_level > 0)
+        if(debug_print || verbose_level > 3 || instr_print)
         {
-            std::vector<std::string> _instructions{};
+            std::vector<std::vector<std::string>> _instructions{};
             _instructions.reserve(instructions.size());
             for(auto&& itr : instructions)
             {
-                _instructions.emplace_back(itr.format());
+                std::vector<std::string> _subinstr{};
+                _subinstr.reserve(itr.size());
+                for(auto&& iitr : itr)
+                    _subinstr.emplace_back(iitr.format());
+                _instructions.emplace_back(std::move(_subinstr));
             }
             ar(cereal::make_nvp("instructions", _instructions));
         }

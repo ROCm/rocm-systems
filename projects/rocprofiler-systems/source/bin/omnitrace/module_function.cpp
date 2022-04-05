@@ -60,14 +60,14 @@ module_function::module_function(module_t* mod, procedure_t* proc)
         flow_graph->getOuterLoops(loop_blocks);
     }
 
+    instructions.reserve(basic_blocks.size());
     for(const auto& itr : basic_blocks)
     {
         std::vector<instruction_t> _instructions{};
         itr->getInstructions(_instructions);
         num_instructions += _instructions.size();
-        instructions.reserve(instructions.size() + _instructions.size());
-        for(auto&& iitr : _instructions)
-            instructions.emplace_back(iitr);
+        if(debug_print || verbose_level > 3 || instr_print)
+            instructions.emplace_back(std::move(_instructions));
     }
 
     char modname[FUNCNAMELEN];

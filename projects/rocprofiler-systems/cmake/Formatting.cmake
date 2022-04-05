@@ -50,9 +50,14 @@ if(OMNITRACE_CLANG_FORMAT_EXE)
     file(GLOB_RECURSE examples ${PROJECT_SOURCE_DIR}/examples/*.cpp
          ${PROJECT_SOURCE_DIR}/examples/*.hpp)
     file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/examples/lulesh/external/kokkos/*)
-    file(GLOB_RECURSE cmake_files ${PROJECT_SOURCE_DIR}/source/*CMakeLists.txt
-         ${PROJECT_SOURCE_DIR}/examples/*CMakeLists.txt
-         ${PROJECT_SOURCE_DIR}/tests/*CMakeLists.txt ${PROJECT_SOURCE_DIR}/cmake/*.cmake)
+    file(
+        GLOB_RECURSE
+        cmake_files
+        ${PROJECT_SOURCE_DIR}/source/*CMakeLists.txt
+        ${PROJECT_SOURCE_DIR}/examples/*CMakeLists.txt
+        ${PROJECT_SOURCE_DIR}/tests/*CMakeLists.txt
+        ${PROJECT_SOURCE_DIR}/cmake/*.cmake
+        ${PROJECT_SOURCE_DIR}/source/*.cmake)
     list(APPEND cmake_files ${PROJECT_SOURCE_DIR}/CMakeLists.txt)
     if(external)
         list(REMOVE_ITEM examples ${external})

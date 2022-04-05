@@ -413,7 +413,8 @@ backtrace::post_process(int64_t _tid)
     if(!_sampler)
     {
         // this should be relatively common
-        OMNITRACE_DEBUG(
+        OMNITRACE_CONDITIONAL_PRINT(
+            get_debug() && get_verbose() > 1,
             "Post-processing sampling entries for thread %lu skipped (no sampler)\n",
             _tid);
         return;

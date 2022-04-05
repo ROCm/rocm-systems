@@ -236,6 +236,77 @@ endfunction()
 
 # -------------------------------------------------------------------------------------- #
 
+function(OMNITRACE_ADD_PYTHON_TEST)
+    if(NOT OMNITRACE_USE_PYTHON)
+        return()
+    endif()
+
+    cmake_parse_arguments(
+        TEST
+        "STANDALONE" # options
+        "NAME;FILE;TIMEOUT" # single value args
+        "PROFILE_ARGS;RUN_ARGS;ENVIRONMENT;LABELS;PROPERTIES" # multiple value args
+        ${ARGN})
+
+    if(NOT TEST_TIMEOUT)
+        set(TEST_TIMEOUT 120)
+    endif()
+
+    if(NOT DEFINED TEST_ENVIRONMENT OR "${TEST_ENVIRONMENT}" STREQUAL "")
+        set(TEST_ENVIRONMENT "${_test_environment}")
+    endif()
+
+    list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON")
+    list(APPEND TEST_ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python:$ENV{PYTHONPATH}")
+    list(APPEND TEST_LABELS "python")
+
+    get_filename_component(_TEST_FILE "${TEST_FILE}" NAME)
+    configure_file(${TEST_FILE} ${CMAKE_BINARY_DIR}/${_TEST_FILE} @ONLY)
+
+    if(NOT TEST_STANDALONE)
+
+    endif()
+
+    if(TEST_STANDALONE)
+        add_test(
+            NAME ${TEST_NAME}-run
+            COMMAND ${PYTHON_EXECUTABLE} ${_TEST_FILE} ${TEST_RUN_ARGS}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    else()
+        add_test(
+            NAME ${TEST_NAME}-run
+            COMMAND ${PYTHON_EXECUTABLE} -m omnitrace ${TEST_PROFILE_ARGS} --
+                    ${_TEST_FILE} ${TEST_RUN_ARGS}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    endif()
+
+    foreach(_TEST run)
+        string(REGEX REPLACE "-run(-|/)" "\\1" _prefix "${TEST_NAME}-${_TEST}/")
+        set(_environ "${TEST_ENVIRONMENT}")
+        set(_labels "${_TEST}")
+        set(_timeout ${TEST_TIMEOUT})
+        list(APPEND _environ "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
+             "OMNITRACE_OUTPUT_PREFIX=${_prefix}")
+        string(REPLACE "-run" "" _labels "${_TEST}")
+        string(REPLACE "-sampling" ";sampling" _labels "${_labels}")
+        set(_props)
+        if("${_TEST}" MATCHES "run|baseline")
+            set(_props ${TEST_PROPERTIES})
+            if(NOT "RUN_SERIAL" IN_LIST _props)
+                list(APPEND _props RUN_SERIAL ON)
+            endif()
+        endif()
+        if(TEST ${TEST_NAME}-${_TEST})
+            set_tests_properties(
+                ${TEST_NAME}-${_TEST}
+                PROPERTIES ENVIRONMENT "${_environ}" TIMEOUT ${_timeout} LABELS
+                           "${_labels};${TEST_LABELS}" ${_props})
+        endif()
+    endforeach()
+endfunction()
+
+# -------------------------------------------------------------------------------------- #
+
 omnitrace_add_test(
     NAME transpose
     TARGET transpose
@@ -244,26 +315,6 @@ omnitrace_add_test(
     REWRITE_ARGS -e -v 2
     RUNTIME_ARGS -e -v 1 --label file line return args
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=ON")
-
-omnitrace_add_test(
-    NAME transpose-no-save-fpr
-    TARGET transpose
-    MPI ${TRANSPOSE_USE_MPI}
-    NUM_PROCS ${NUM_PROCS}
-    REWRITE_ARGS -e -v 2 --dyninst-options DelayedParsing TypeChecking
-    RUNTIME_ARGS
-        -e
-        -v
-        1
-        --label
-        file
-        line
-        return
-        args
-        --dyninst-options
-        DelayedParsing
-        TypeChecking
-    ENVIRONMENT "${_fast_environment}")
 
 omnitrace_add_test(
     NAME parallel-overhead
@@ -312,27 +363,6 @@ omnitrace_add_test(
         args
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
-
-omnitrace_add_test(
-    NAME parallel-overhead-no-save-fpr
-    TARGET parallel-overhead
-    REWRITE_ARGS -e -v 2 --min-address-range-loop=32 --dyninst-options DelayedParsing
-                 TypeChecking
-    RUNTIME_ARGS
-        -e
-        -v
-        1
-        --min-address-range-loop=32
-        --label
-        file
-        line
-        return
-        args
-        --dyninst-options
-        DelayedParsing
-        TypeChecking
-    RUN_ARGS 10 ${NUM_THREADS} 1000
-    ENVIRONMENT "${_fast_environment}")
 
 omnitrace_add_test(
     NAME lulesh
@@ -434,3 +464,24 @@ omnitrace_add_test(
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
     ENVIRONMENT "${_ompt_environment}")
+
+omnitrace_add_python_test(
+    NAME python-external
+    FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
+    PROFILE_ARGS -l -f
+    RUN_ARGS 10
+    ENVIRONMENT "${_base_environment};OMNITRACE_USE_PID=OFF")
+
+omnitrace_add_python_test(
+    NAME python-builtin
+    FILE ${CMAKE_SOURCE_DIR}/examples/python/builtin.py
+    PROFILE_ARGS -b -l -f
+    RUN_ARGS 10
+    ENVIRONMENT "${_base_environment};OMNITRACE_USE_PID=OFF")
+
+omnitrace_add_python_test(
+    STANDALONE
+    NAME python-source
+    FILE ${CMAKE_SOURCE_DIR}/examples/python/source.py
+    RUN_ARGS 5
+    ENVIRONMENT "${_base_environment};OMNITRACE_USE_PID=OFF")

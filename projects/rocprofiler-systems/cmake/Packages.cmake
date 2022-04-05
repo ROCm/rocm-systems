@@ -20,6 +20,7 @@ omnitrace_add_interface_library(omnitrace-rocm-smi
                                 "Provides flags and libraries for rocm-smi")
 omnitrace_add_interface_library(omnitrace-mpi "Provides MPI or MPI headers")
 omnitrace_add_interface_library(omnitrace-ptl "Enables PTL support (tasking)")
+omnitrace_add_interface_library(omnitrace-python "Enables Python support")
 
 target_include_directories(omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/include
                                                        ${PROJECT_BINARY_DIR}/include)
@@ -305,6 +306,34 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
+# Modify CMAKE_C_FLAGS and CMAKE_CXX_FLAGS with -static-libgcc and -static-libstdc++
+#
+# ----------------------------------------------------------------------------------------#
+
+if(OMNITRACE_BUILD_STATIC_LIBGCC)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU")
+        omnitrace_save_variables(STATIC_LIBGCC_C VARIABLES CMAKE_C_FLAGS)
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -static-libgcc")
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+        omnitrace_save_variables(STATIC_LIBGCC_CXX VARIABLES CMAKE_CXX_FLAGS)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libgcc")
+    else()
+        set(OMNITRACE_BUILD_STATIC_LIBGCC OFF)
+    endif()
+endif()
+
+if(OMNITRACE_BUILD_STATIC_LIBSTDCXX)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+        omnitrace_save_variables(STATIC_LIBSTDCXX_CXX VARIABLES CMAKE_CXX_FLAGS)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static-libstdc++")
+    else()
+        set(OMNITRACE_BUILD_STATIC_LIBSTDCXX OFF)
+    endif()
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
 # Perfetto
 #
 # ----------------------------------------------------------------------------------------#
@@ -492,3 +521,42 @@ endif()
 
 target_sources(omnitrace-ptl INTERFACE $<TARGET_OBJECTS:PTL::ptl-object>)
 target_link_libraries(omnitrace-ptl INTERFACE PTL::ptl-object)
+
+# ----------------------------------------------------------------------------------------#
+#
+# Restore the CMAKE_C_FLAGS and CMAKE_CXX_FLAGS in the inverse order
+#
+# ----------------------------------------------------------------------------------------#
+
+if(OMNITRACE_BUILD_STATIC_LIBSTDCXX)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+        omnitrace_restore_variables(STATIC_LIBSTDCXX_CXX VARIABLES CMAKE_CXX_FLAGS)
+    endif()
+endif()
+
+if(OMNITRACE_BUILD_STATIC_LIBGCC)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU")
+        omnitrace_restore_variables(STATIC_LIBGCC_C VARIABLES CMAKE_C_FLAGS)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+        omnitrace_restore_variables(STATIC_LIBGCC_CXX VARIABLES CMAKE_CXX_FLAGS)
+    endif()
+endif()
+
+omnitrace_add_feature(CMAKE_C_FLAGS "C compiler flags")
+omnitrace_add_feature(CMAKE_CXX_FLAGS "C++ compiler flags")
+
+# ----------------------------------------------------------------------------------------#
+#
+# Python
+#
+# ----------------------------------------------------------------------------------------#
+
+if(OMNITRACE_USE_PYTHON)
+    if(OMNITRACE_USE_PYTHON AND NOT OMNITRACE_BUILD_PYTHON)
+        find_package(pybind11 REQUIRED)
+    endif()
+
+    list(INSERT CMAKE_MODULE_PATH 0 ${PROJECT_SOURCE_DIR}/source/python/cmake)
+    include(ConfigPython)
+endif()

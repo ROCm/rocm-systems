@@ -46,6 +46,7 @@ jobs:
         apt-get upgrade -y &&
         apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.compiler }} ${{ matrix.mpi }} &&
         python3 -m pip install --upgrade pip &&
+        python3 -m pip install numpy &&
         python3 -m pip install 'cmake==3.16.3'
 
     - name: Configure Env
@@ -69,6 +70,7 @@ jobs:
           -DOMNITRACE_BUILD_DYNINST=OFF
           -DOMNITRACE_USE_MPI=${USE_MPI}
           -DOMNITRACE_USE_HIP=OFF
+          -DOMNITRACE_USE_PYTHON=ON
 
     - name: Build
       timeout-minutes: 45
@@ -80,7 +82,7 @@ jobs:
         cmake --build build --target install --parallel 2
 
     - name: Test
-      timeout-minutes: 30
+      timeout-minutes: 45
       run:
         cd build &&
         ctest -V --output-log build/omnitrace-ctest-ubuntu-bionic.log --stop-on-failure

@@ -108,6 +108,36 @@ function(OMNITRACE_CAPITALIZE str var)
 endfunction()
 
 # ------------------------------------------------------------------------------#
+# function omnitrace_strip_target()
+#
+# Creates a target which runs ctest but depends on all the tests being built.
+#
+function(OMNITRACE_STRIP_TARGET _TARGET)
+    if(CMAKE_STRIP AND OMNITRACE_STRIP_LIBRARIES)
+        add_custom_command(
+            TARGET ${_TARGET}
+            POST_BUILD
+            COMMAND
+                ${CMAKE_STRIP} --keep-symbol="omnitrace_init"
+                --keep-symbol="omnitrace_finalize" --keep-symbol="omnitrace_push_trace"
+                --keep-symbol="omnitrace_pop_trace" --keep-symbol="omnitrace_push_region"
+                --keep-symbol="omnitrace_pop_region" --keep-symbol="omnitrace_set_env"
+                --keep-symbol="omnitrace_set_mpi" --keep-symbol="omnitrace_user_configure"
+                --keep-symbol="omnitrace_user_get_callbacks"
+                --keep-symbol="omnitrace_user_error_string"
+                --keep-symbol="omnitrace_user_start_trace"
+                --keep-symbol="omnitrace_user_stop_trace"
+                --keep-symbol="omnitrace_user_start_thread_trace"
+                --keep-symbol="omnitrace_user_stop_thread_trace"
+                --keep-symbol="omnitrace_user_push_region"
+                --keep-symbol="omnitrace_user_pop_region" --keep-symbol="ompt_start_tool"
+                ${ARGN} $<TARGET_FILE:${_TARGET}>
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Stripping ${_TARGET}...")
+    endif()
+endfunction()
+
+# ------------------------------------------------------------------------------#
 # function add_omnitrace_test_target()
 #
 # Creates a target which runs ctest but depends on all the tests being built.

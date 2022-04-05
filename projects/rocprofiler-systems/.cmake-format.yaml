@@ -54,6 +54,18 @@ parse:
         PASS_REGULAR_EXPRESSION: '*'
         FAIL_REGULAR_EXPRESSION: '*'
         SKIP_REGULAR_EXPRESSION: '*'
+    omnitrace_add_python_test:
+      flags:
+      - STANDALONE
+      kwargs:
+        NAME: '*'
+        FILE: '*'
+        TIMEOUT: '*'
+        PROFILE_ARGS: '*'
+        RUN_ARGS: '*'
+        ENVIRONMENT: '*'
+        LABELS: '*'
+        PROPERTIES: '*'
     rocm_version_message:
       flags:
         - STATUS

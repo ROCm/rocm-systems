@@ -20,18 +20,21 @@ target_compile_definitions(
 
 target_link_libraries(
     omnitrace-interface-library
-    INTERFACE $<BUILD_INTERFACE:omnitrace::omnitrace-headers>
-              $<BUILD_INTERFACE:omnitrace::omnitrace-threading>
-              $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
-              $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
-              $<BUILD_INTERFACE:omnitrace::omnitrace-roctracer>
-              $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
-              $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
-              $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
-              $<BUILD_INTERFACE:timemory::timemory-headers>
-              $<BUILD_INTERFACE:timemory::timemory-gotcha>
-              $<BUILD_INTERFACE:timemory::timemory-cxx-static>
-              $<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>)
+    INTERFACE
+        $<BUILD_INTERFACE:omnitrace::omnitrace-headers>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-threading>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-roctracer>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
+        $<BUILD_INTERFACE:timemory::timemory-headers>
+        $<BUILD_INTERFACE:timemory::timemory-gotcha>
+        $<BUILD_INTERFACE:timemory::timemory-cxx-static>
+        $<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,$<BUILD_INTERFACE:omnitrace::omnitrace-static-libgcc>,>
+        $<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBSTDCXX}>,$<BUILD_INTERFACE:omnitrace::omnitrace-static-libstdcxx>,>
+        $<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>)
 
 # ------------------------------------------------------------------------------#
 #
@@ -138,6 +141,8 @@ set_target_properties(
                SOVERSION ${PROJECT_VERSION_MAJOR}
                INSTALL_RPATH
                "\$ORIGIN:\$ORIGIN/timemory/libunwind:\$ORIGIN/dyninst-tpls/libs")
+
+omnitrace_strip_target(omnitrace-library)
 
 install(
     TARGETS omnitrace-library

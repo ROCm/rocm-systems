@@ -11,11 +11,14 @@ set(BUILD_RPATH_USE_ORIGIN ON)
 add_library(omnitrace-dl-library SHARED)
 add_library(omnitrace::omnitrace-dl-library ALIAS omnitrace-dl-library)
 
-target_sources(omnitrace-dl-library PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/dl.cpp)
-target_link_libraries(omnitrace-dl-library PRIVATE ${dl_LIBRARY}
-                                                   omnitrace::common-library)
-target_include_directories(omnitrace-dl-library
-                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../omnitrace-user)
+target_sources(omnitrace-dl-library PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/dl.cpp
+                                            ${CMAKE_CURRENT_SOURCE_DIR}/dl.hpp)
+target_link_libraries(omnitrace-dl-library
+                      PUBLIC ${dl_LIBRARY} $<BUILD_INTERFACE:omnitrace::common-library>)
+target_include_directories(
+    omnitrace-dl-library
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../omnitrace-user>)
 
 check_cxx_compiler_flag("-fno-exceptions" omnitrace_dl_library_fno_exceptions)
 check_cxx_compiler_flag("-ftls-model=local-dynamic"
@@ -32,17 +35,20 @@ if(OMNITRACE_BUILD_DEVELOPER)
 endif()
 
 omnitrace_target_compile_definitions(
-    omnitrace-dl-library PRIVATE OMNITRACE_USE_OMPT=$<BOOL:${OMNITRACE_USE_OMPT}>)
+    omnitrace-dl-library
+    PUBLIC $<BUILD_INTERFACE:OMNITRACE_USE_OMPT=$<BOOL:${OMNITRACE_USE_OMPT}>>)
 
 set_target_properties(
     omnitrace-dl-library
     PROPERTIES OUTPUT_NAME omnitrace-dl
-               CXX_VISIBILITY_PRESET "protected"
+               CXX_VISIBILITY_PRESET "internal"
                VERSION ${PROJECT_VERSION}
                SOVERSION ${PROJECT_VERSION_MAJOR}
                POSITION_INDEPENDENT_CODE ON
                BUILD_RPATH "\$ORIGIN"
                INSTALL_RPATH "\$ORIGIN")
+
+omnitrace_strip_target(omnitrace-dl-library)
 
 install(
     TARGETS omnitrace-dl-library

@@ -1,0 +1,11 @@
+from setuptools import setup
+
+setup(
+    name="@PROJECT_NAME@",
+    version="@PROJECT_VERSION@",
+    description="@PROJECT_DESCRIPTION@",
+    author="AMD Research",
+    url="@PROJECT_HOMEPAGE_URL@",
+    packages=["@PROJECT_NAME@"],
+    python_requires="=@OMNITRACE_PYTHON_VERSION@",
+)

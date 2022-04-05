@@ -89,7 +89,7 @@ omnitrace_add_bin_test(
     TARGET omnitrace-exe
     ARGS --help
     LABELS omnitrace-exe
-    TIMEOUT 15
+    TIMEOUT 45
     PASS_REGULAR_EXPRESSION
         ".*\\\[omnitrace\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[MODE OPTIONS\\\].*\\\[LIBRARY OPTIONS\\\].*\\\[SYMBOL SELECTION OPTIONS\\\].*\\\[RUNTIME OPTIONS\\\].*\\\[GRANULARITY OPTIONS\\\].*\\\[DYNINST OPTIONS\\\].*"
     )
@@ -97,8 +97,16 @@ omnitrace_add_bin_test(
 omnitrace_add_bin_test(
     NAME omnitrace-exe-simulate-ls
     TARGET omnitrace-exe
-    ARGS --simulate --print-format json txt xml -- ls
-    TIMEOUT 60)
+    ARGS --simulate
+         --print-format
+         json
+         txt
+         xml
+         -v
+         1
+         --
+         ls
+    TIMEOUT 120)
 
 omnitrace_add_bin_test(
     NAME omnitrace-exe-simulate-ls-check
@@ -106,7 +114,7 @@ omnitrace_add_bin_test(
     COMMAND ls
     WORKING_DIRECTORY
         ${PROJECT_BINARY_DIR}/omnitrace-tests-output/omnitrace-exe-simulate-ls
-    TIMEOUT 30
+    TIMEOUT 60
     PASS_REGULAR_EXPRESSION
         ".*available-instr.json.*available-instr.txt.*available-instr.xml.*excluded-instr.json.*excluded-instr.txt.*excluded-instr.xml.*instrumented-instr.json.*instrumented-instr.txt.*instrumented-instr.xml.*overlapping-instr.json.*overlapping-instr.txt.*overlapping-instr.xml.*"
     )
@@ -116,7 +124,7 @@ omnitrace_add_bin_test(
     TARGET omnitrace-avail
     ARGS --help
     LABELS omnitrace-avail
-    TIMEOUT 15
+    TIMEOUT 45
     PASS_REGULAR_EXPRESSION
         ".*\\\[omnitrace-avail\\\] Usage:.*\\\[CATEGORIES\\\].*\\\[VIEW OPTIONS\\\].*\\\[COLUMN OPTIONS\\\].*\\\[WIDTH OPTIONS\\\].*\\\[OUTPUT OPTIONS\\\].*"
     )
@@ -126,7 +134,7 @@ omnitrace_add_bin_test(
     TARGET omnitrace-avail
     ARGS -r wall_clock -C --available
     LABELS omnitrace-avail
-    TIMEOUT 15
+    TIMEOUT 45
     PASS_REGULAR_EXPRESSION
         "\\\|[-]+\\\|\n\\\|[ ]+COMPONENT[ ]+\\\|\n\\\|[-]+\\\|\n\\\| (wall_clock)[ ]+\\\|\n\\\| (sampling_wall_clock)[ ]+\\\|\n\\\|[-]+\\\|"
     )
@@ -136,7 +144,7 @@ omnitrace_add_bin_test(
     TARGET omnitrace-avail
     ARGS --categories settings::omnitrace --brief
     LABELS omnitrace-avail
-    TIMEOUT 15
+    TIMEOUT 45
     PASS_REGULAR_EXPRESSION "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"
     FAIL_REGULAR_EXPRESSION
         "OMNITRACE_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
@@ -147,7 +155,7 @@ omnitrace_add_bin_test(
     TARGET omnitrace-avail
     ARGS --categories settings::timemory --brief
     LABELS omnitrace-avail
-    TIMEOUT 15
+    TIMEOUT 45
     PASS_REGULAR_EXPRESSION
         "OMNITRACE_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
     FAIL_REGULAR_EXPRESSION "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE)")

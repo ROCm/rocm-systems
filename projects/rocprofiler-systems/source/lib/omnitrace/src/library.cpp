@@ -981,13 +981,9 @@ omnitrace_finalize_hidden(void)
         auto        _pos = _msg.find(">>>  ");
         if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
         OMNITRACE_PRINT("%s\n", _msg.c_str());
-        get_main_bundle().reset();
+        OMNITRACE_DEBUG_F("Resetting main bundle...\n");
+        get_main_bundle()->reset();
     }
-
-    int _threadpool_verbose = (get_debug()) ? 4 : -1;
-    tasking::get_roctracer_thread_pool().set_verbose(_threadpool_verbose);
-    if(get_use_critical_trace())
-        tasking::get_critical_trace_thread_pool().set_verbose(_threadpool_verbose);
 
     // join extra thread(s) used by roctracer
     OMNITRACE_DEBUG_F("waiting for all roctracer tasks to complete...\n");

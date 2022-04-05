@@ -2,11 +2,10 @@
 
 [![Ubuntu 18.04 (GCC 7, 8, MPICH)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-bionic.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-bionic.yml)
 [![Ubuntu 20.04 (GCC 7, 8, 9, 10)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external.yml)
-[![Ubuntu 20.04 (GCC 9, external Dyninst)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-dyninst-package.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-dyninst-package.yml)
 [![Ubuntu 20.04 (GCC 9, MPICH, OpenMPI)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml)
 [![Ubuntu 20.04 (GCC 9, MPICH, OpenMPI, ROCm 4.3, 4.5, 5.0)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external-rocm.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external-rocm.yml)
 
-Omnitrace is an AMD research project and should not be treated as an offical part of the ROCm software stack. 
+Omnitrace is an AMD research project and should not be treated as an offical part of the ROCm software stack.
 The documentation for omnitrace is available at [amdresearch.github.io/omnitrace](https://amdresearch.github.io/omnitrace/).
 
 ## Using Omnitrace Executable

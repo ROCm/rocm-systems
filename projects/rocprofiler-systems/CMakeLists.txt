@@ -47,6 +47,19 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "")
     set(CMAKE_BUILD_TYPE
         RelWithDebInfo
         CACHE STRING "Build type" FORCE)
+else()
+    set(VALID_BUILD_TYPES "Release" "RelWithDebInfo" "Debug" "MinSizeRel")
+    if(NOT "${CMAKE_BUILD_TYPE}" IN_LIST VALID_BUILD_TYPES)
+        string(REPLACE ";" ", " _VALID_BUILD_TYPES "${VALID_BUILD_TYPES}")
+        message(
+            FATAL_ERROR
+                "Invalid CMAKE_BUILD_TYPE :: ${CMAKE_BUILD_TYPE}. Valid build types are: ${_VALID_BUILD_TYPES}"
+            )
+    endif()
+endif()
+set(_STRIP_LIBRARIES_DEFAULT OFF)
+if("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
+    set(_STRIP_LIBRARIES_DEFAULT ON)
 endif()
 
 include(GNUInstallDirs) # install directories
@@ -82,14 +95,24 @@ omnitrace_add_option(
 omnitrace_add_option(OMNITRACE_USE_MPI_HEADERS
                      "Enable wrapping MPI functions w/o enabling MPI dependency" OFF)
 omnitrace_add_option(OMNITRACE_USE_OMPT "Enable OpenMP tools support" OFF)
+omnitrace_add_option(OMNITRACE_USE_PYTHON "Enable Python support" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_EXAMPLES "Enable building the examples" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_TESTING "Enable building the testing suite" OFF)
-omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF)
-omnitrace_add_option(OMNITRACE_BUILD_HIDDEN_VISIBILITY
-                     "Build with hidden visibility (disable for Debug builds)" ON)
+omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF
+                     ADVANCED)
+omnitrace_add_option(
+    OMNITRACE_BUILD_HIDDEN_VISIBILITY
+    "Build with hidden visibility (disable for Debug builds)" ON ADVANCED)
 omnitrace_add_option(OMNITRACE_BUILD_CI "Enable internal asserts, etc." OFF ADVANCED
                      NO_FEATURE)
+omnitrace_add_option(OMNITRACE_STRIP_LIBRARIES "Strip the libraries"
+                     ${_STRIP_LIBRARIES_DEFAULT} ADVANCED)
+
+if(OMNITRACE_USE_PYTHON)
+    omnitrace_add_option(OMNITRACE_BUILD_PYTHON
+                         "Build python bindings with internal pybind11" ON)
+endif()
 
 if(NOT "$ENV{OMNITRACE_CI}" STREQUAL "")
     message(

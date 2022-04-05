@@ -153,6 +153,7 @@ extern size_t min_instructions;
 //
 extern bool werror;
 extern bool debug_print;
+extern bool instr_print;
 extern int  verbose_level;
 //
 //  string settings
