@@ -220,7 +220,7 @@ class SQLiteDB:
           value = data[value_index]
           if label[:3] == '"__': continue
           if name_ptrn.search(label): value = sub_ptrn.sub(r'', value)
-          if label != '"Index"': args_list.append('%s:"%s"' % (label, value))
+          if label != '"Index"' and label != '"roctx-range"': args_list.append('%s:"%s"' % (label, value))
 
         fd.write(',{"ph":"%s",%s,\n  "args":{\n    %s\n  }\n}\n' % ('X', ','.join(vals_list), ',\n    '.join(args_list)))
 

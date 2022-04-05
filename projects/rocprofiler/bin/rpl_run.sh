@@ -179,6 +179,8 @@ usage() {
   echo "        </parameters>"
   echo "      </trace>"
   echo ""
+  echo "  --roctx-rename - to rename kernels with their enclosing rocTX range's message."
+  echo ""
   echo "  --trace-start <on|off> - to enable tracing on start [on]"
   echo "  --trace-period <dealy:length:rate> - to enable trace with initial delay, with periodic sample length and rate"
   echo "    Supported time formats: <number(m|s|ms|us)>"
@@ -425,6 +427,9 @@ while [ 1 ] ; do
     export ROCP_TIMESTAMP_ON=1
     GEN_STATS=1
     HIP_TRACE=1
+  elif [ "$1" = "--roctx-rename" ] ; then
+    ARG_VAL=0
+    export ROCP_RENAME_KERNEL=1
   elif [ "$1" = "--trace-start" ] ; then
     if [ "$2" = "off" ] ; then
       export ROCP_CTRL_RATE="-1:0:0"

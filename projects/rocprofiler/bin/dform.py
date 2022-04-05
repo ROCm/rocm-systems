@@ -20,6 +20,7 @@
 # THE SOFTWARE.
 ################################################################################
 
+import os
 from sqlitedb import SQLiteDB
 
 def gen_message(outfile):
@@ -59,7 +60,7 @@ def gen_ext_json_trace(db, table, start_ns, outfile):
   gen_message(outfile)
 
 def gen_ops_json_trace(db, table, base_pid, start_ns, outfile):
-  db.execute('create view B as select "Index", Name as name, ("dev-id" + %d) as pid, __lane as tid, ((BeginNs - %d)/1000) as ts, (DurationNs/1000) as dur from %s;' % (base_pid, start_ns, table));
+  db.execute('create view B as select "Index", "%s" as name, ("dev-id" + %d) as pid, __lane as tid, ((BeginNs - %d)/1000) as ts, (DurationNs/1000) as dur from %s;' % ('roctx-range' if 'ROCP_RENAME_KERNEL' in os.environ else 'Name',base_pid, start_ns, table));
   db.dump_json('B', table, outfile)
   db.execute('DROP VIEW B')
   gen_message(outfile)

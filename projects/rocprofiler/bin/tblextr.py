@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 ################################################################################
 
-import os, sys, re, subprocess
+import os, sys, re, subprocess, bisect
 from sqlitedb import SQLiteDB
 from mem_manager import MemManager
 import dform
@@ -257,12 +257,15 @@ ext_table_descr = [
   {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'Index':'INTEGER', '__section':'INTEGER', '__lane':'INTEGER'}
 ]
 def fill_ext_db(table_name, db, indir, trace_name, api_pid):
+  global range_data
+
   file_name = indir + '/' + trace_name + '_trace.txt'
   # tms pid:tid cid:rid:'.....'
-  ptrn_val = re.compile(r'(\d+) (\d+):(\d+) (\d+):(\d+):(.*)$')
+  ptrn_val = re.compile(r'(\d+) (\d+):(\d+) (\d+):(\d+):"(.*)"$')
 
   if not os.path.isfile(file_name): return 0
 
+  range_data = {}
   range_stack = {}
   range_map = {}
 
@@ -275,12 +278,13 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
       if m:
         tms = int(m.group(1))
         pid = m.group(2)
-        tid = m.group(3)
+        tid = int(m.group(3))
         cid = int(m.group(4))
         rid = int(m.group(5))
         msg = m.group(6)
 
         rec_vals = []
+        if not tid in range_data: range_data[tid] = {}
 
         if cid != 2:
           rec_vals.append(tms)
@@ -307,6 +311,12 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
           rec_stack = pid_stack[tid]
           rec_vals = rec_stack.pop()
           rec_vals[1] = tms
+          # record the range's start/stop timestamps, its parent (ranges can be nested), and its message.
+          range_start = rec_vals[0]
+          range_stop = tms
+          range_parent = rec_stack[-1][0] if len(rec_stack) != 0 else 0
+          range_msg = rec_vals[4]
+          range_data[tid][range_start] = (range_stop, range_parent, range_msg)
 
         # range start
         if cid == 3:
@@ -364,6 +374,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   global hsa_activity_found
   global memory_manager
 
+  range_start_times = {}
   copy_csv = ''
   copy_index = 0
 
@@ -520,7 +531,26 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           copy_index += 1
 
         if op_found:
-          ops_patch_data[(corr_id, proc_id)] = (thread_id, stream_id, kernel_str)
+          roctx_msg = ''
+
+          if not thread_id in range_start_times:
+            range_start_times[thread_id] = sorted(range_data[thread_id].keys()) if thread_id in range_data else []
+          start_times = range_start_times[thread_id]
+
+          index = bisect.bisect_right(start_times,int(rec_vals[0]))
+          if index > 0:
+            # We found the range that is closest to this operation. Iterate the
+            # range stack this range is part of until we find a range that entirely
+            # contains the operation.
+            range_start = start_times[index - 1]
+            while range_start != 0:
+              (range_end, range_start, msg) = range_data[thread_id][range_start]
+              if int(rec_vals[1]) < range_end:
+                # This range contains the operation.
+                roctx_msg = msg
+                break
+
+          ops_patch_data[(corr_id, proc_id)] = (thread_id, stream_id, kernel_str, roctx_msg)
 
         if op_found:
           op_found = 0
@@ -628,8 +658,8 @@ def fill_copy_db(table_name, db, indir):
 
 # fill HCC ops DB
 ops_table_descr = [
-  ['BeginNs', 'EndNs', 'dev-id', 'queue-id', 'Name', 'pid', 'tid', 'stream-id', 'Index', 'Data', '__section', '__lane'],
-  {'Index':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'dev-id':'INTEGER', 'queue-id':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Data':'TEXT', 'stream-id':'INTEGER', '__section':'INTEGER', '__lane':'INTEGER'}
+  ['BeginNs', 'EndNs', 'dev-id', 'queue-id', 'Name', 'pid', 'tid', 'roctx-range', 'stream-id', 'Index', 'Data', '__section', '__lane'],
+  {'Index':'INTEGER', 'Name':'TEXT', 'args':'TEXT', 'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'dev-id':'INTEGER', 'queue-id':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'roctx-range':'TEXT', 'Data':'TEXT', 'stream-id':'INTEGER', '__section':'INTEGER', '__lane':'INTEGER'}
 ]
 def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
   global max_gpu_id
@@ -689,9 +719,11 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
 
         thread_id = 0
         stream_id = 0
+        roctx_range = ''
         if (corr_id, proc_id) in ops_patch_data:
-          (thread_id, stream_id, name_patch) = ops_patch_data[(corr_id, proc_id)]
+          (thread_id, stream_id, name_patch, roctx_range) = ops_patch_data[(corr_id, proc_id)]
           if name_patch != '': name = name_patch
+          if roctx_range == '': roctx_range = name
         else:
           if is_barrier: continue
           else: fatal("hcc ops data not found: '" + record + "', " + str(corr_id) + ", " + str(proc_id))
@@ -700,6 +732,7 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
         rec_vals[4] = name                       # Name
         rec_vals.append(proc_id)                 # pid
         rec_vals.append(thread_id)               # tid
+        rec_vals.append(roctx_range)             # roctx-range
         rec_vals.append(stream_id)               # StreamId
         rec_vals.append(corr_id)                 # Index
 
