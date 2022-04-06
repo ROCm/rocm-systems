@@ -384,6 +384,12 @@ configure_settings()
 #endif
     OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose_env() > 0, "configuration complete\n");
 
+    auto _ignore_dyninst_trampoline =
+        tim::get_env("OMNITRACE_IGNORE_DYNINST_TRAMPOLINE", false);
+    // this is how dyninst looks up the env variable
+    static auto _dyninst_trampoline_signal =
+        getenv("DYNINST_SIGNAL_TRAMPOLINE_SIGILL") ? SIGILL : SIGTRAP;
+
     if(_config->get_enable_signal_handler())
     {
         using signal_settings = tim::signal_settings;
@@ -403,8 +409,32 @@ configure_settings()
         auto default_signals = signal_settings::get_default();
         for(const auto& itr : default_signals)
             signal_settings::enable(itr);
+        if(_ignore_dyninst_trampoline)
+            signal_settings::disable(static_cast<sys_signal>(_dyninst_trampoline_signal));
         auto enabled_signals = signal_settings::get_enabled();
         tim::enable_signal_detection(enabled_signals);
+    }
+
+    if(_ignore_dyninst_trampoline)
+    {
+        using signal_handler_t                      = void (*)(int);
+        static signal_handler_t _old_handler        = nullptr;
+        static auto             _trampoline_handler = [](int _v) {
+            if(_v == _dyninst_trampoline_signal)
+            {
+                auto _info =
+                    ::tim::signal_settings::get_info(static_cast<tim::sys_signal>(_v));
+                OMNITRACE_CONDITIONAL_BASIC_PRINT(
+                    get_verbose_env() > 0 || get_debug_env(),
+                    "signal %s (%i) ignored (OMNITRACE_IGNORE_DYNINST_TRAMPOLINE=ON)",
+                    std::get<0>(_info).c_str(), _v);
+                if(get_verbose_env() > 1 || get_debug_env())
+                    ::tim::print_demangled_backtrace<64>();
+                if(_old_handler) _old_handler(_v);
+            }
+        };
+        _old_handler = signal(_dyninst_trampoline_signal,
+                              static_cast<signal_handler_t>(_trampoline_handler));
     }
 }
 
