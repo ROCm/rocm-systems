@@ -25,15 +25,23 @@
 
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
+#include <timemory/environment.hpp>
 #include <timemory/mpl/apply.hpp>
 #include <timemory/utility/macros.hpp>
+#include <timemory/utility/types.hpp>
 #include <timemory/variadic/macros.hpp>
+
+#include <pybind11/detail/common.h>
+#include <pybind11/pybind11.h>
+#include <pyerrors.h>
 
 #include <cctype>
 #include <cstdint>
+#include <exception>
 #include <locale>
 #include <regex>
 #include <set>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace pyomnitrace
@@ -48,18 +56,94 @@ generate(py::module& _pymod);
 PYBIND11_MODULE(libpyomnitrace, omni)
 {
     using namespace pyomnitrace;
-    py::doc("omnitrace profiler for python");
-    pyprofile::generate(omni);
+
+    static bool _is_initialized = false;
+    static bool _is_finalized   = false;
+    static auto _get_use_mpi    = []() {
+        bool _use_mpi = false;
+        try
+        {
+            py::module::import("mpi4py");
+            _use_mpi = true;
+        } catch(py::error_already_set& _exc)
+        {
+            if(!_exc.matches(PyExc_ImportError)) throw;
+        }
+        return _use_mpi;
+    };
+
+    omni.def(
+        "is_initialized", []() { return _is_initialized; }, "Initialization state");
+
+    omni.def(
+        "is_finalized", []() { return _is_finalized; }, "Finalization state");
 
     omni.def(
         "initialize",
         [](const std::string& _v) {
-            omnitrace_set_mpi(false, false);
+            if(_is_initialized)
+                throw std::runtime_error("Error! omnitrace is already initialized");
+            _is_initialized = true;
+            omnitrace_set_mpi(_get_use_mpi(), false);
             omnitrace_init("trace", false, _v.c_str());
         },
         "Initialize omnitrace");
+
     omni.def(
-        "finalize", []() { omnitrace_finalize(); }, "Initialize omnitrace");
+        "initialize",
+        [](const py::list& _v) {
+            if(_is_initialized)
+                throw std::runtime_error("Error! omnitrace is already initialized");
+            _is_initialized = true;
+            omnitrace_set_mpi(_get_use_mpi(), false);
+            std::string _cmd      = {};
+            std::string _cmd_line = {};
+            for(auto&& itr : _v)
+            {
+                if(_cmd.empty()) _cmd = itr.cast<std::string>();
+                _cmd_line += " " + itr.cast<std::string>();
+            }
+            if(!_cmd_line.empty())
+            {
+                _cmd_line.substr(_cmd_line.find_first_not_of(' '));
+                tim::set_env("OMNITRACE_COMMAND_LINE", _cmd_line, 0);
+            }
+            omnitrace_init("trace", false, _cmd.c_str());
+        },
+        "Initialize omnitrace");
+
+    omni.def(
+        "initialize",
+        [](const std::string& _v) {
+            if(_is_initialized)
+                throw std::runtime_error("Error! omnitrace is already initialized");
+            _is_initialized = true;
+            bool _use_mpi   = false;
+            try
+            {
+                py::module::import("mpi4py");
+                _use_mpi = true;
+            } catch(py::error_already_set& _exc)
+            {
+                if(!_exc.matches(PyExc_ImportError)) throw;
+            }
+            omnitrace_set_mpi(_use_mpi, false);
+            omnitrace_init("trace", false, _v.c_str());
+        },
+        "Initialize omnitrace");
+
+    omni.def(
+        "finalize",
+        []() {
+            if(_is_finalized)
+                throw std::runtime_error("Error! omnitrace is already finalized");
+            _is_finalized = true;
+            omnitrace_finalize();
+        },
+        "Initialize omnitrace");
+
+    py::doc("omnitrace profiler for python");
+    pyprofile::generate(omni);
 }
 
 //======================================================================================//
@@ -69,38 +153,39 @@ namespace pyomnitrace
 namespace pyprofile
 {
 //
-using profiler_t           = std::pair<std::function<void()>, std::function<void()>>;
+using profiler_t           = std::function<void()>;
 using profiler_vec_t       = std::vector<profiler_t>;
 using profiler_label_map_t = std::unordered_map<std::string, profiler_vec_t>;
 using profiler_index_map_t = std::unordered_map<uint32_t, profiler_label_map_t>;
 using strset_t             = std::unordered_set<std::string>;
 //
+namespace
+{
+strset_t default_exclude_functions = { "^<.*>$" };
+strset_t default_exclude_filenames = { "(encoder|decoder|threading).py$", "^<.*>$" };
+}  // namespace
+//
 struct config
 {
-    bool        is_running         = false;
-    bool        trace_c            = false;
-    bool        include_internal   = false;
-    bool        include_args       = false;
-    bool        include_line       = false;
-    bool        include_filename   = false;
-    bool        full_filepath      = false;
-    int32_t     ignore_stack_depth = 0;
-    int32_t     base_stack_depth   = -1;
-    std::string base_module_path   = {};
-    strset_t    include_functions  = {};
-    strset_t    include_filenames  = {};
-    strset_t    exclude_functions  = { "^(FILE|FUNC|LINE)$",
-                                   "^get_fcode$",
-                                   "^_(_exit__|handle_fromlist|shutdown|get_sep)$",
-                                   "^is(function|class)$",
-                                   "^basename$",
-                                   "^<.*>$" };
-    strset_t    exclude_filenames  = {
-        "(__init__|__main__|functools|encoder|decoder|_pylab_helpers|threading).py$",
-        "^<.*>$"
-    };
-    profiler_index_map_t records = {};
-    int32_t              verbose = 0;
+    bool                    is_running         = false;
+    bool                    trace_c            = false;
+    bool                    include_internal   = false;
+    bool                    include_args       = false;
+    bool                    include_line       = false;
+    bool                    include_filename   = false;
+    bool                    full_filepath      = false;
+    int32_t                 ignore_stack_depth = 0;
+    int32_t                 base_stack_depth   = -1;
+    int32_t                 verbose            = 0;
+    int64_t                 depth_tracker      = 0;
+    std::string             base_module_path   = {};
+    strset_t                restrict_functions = {};
+    strset_t                restrict_filenames = {};
+    strset_t                include_functions  = {};
+    strset_t                include_filenames  = {};
+    strset_t                exclude_functions  = default_exclude_functions;
+    strset_t                exclude_filenames  = default_exclude_filenames;
+    std::vector<profiler_t> records            = {};
 };
 //
 inline config&
@@ -112,20 +197,24 @@ get_config()
         auto                         _cnt = _count++;
         if(_cnt == 0) return _instance;
 
-        auto* _tmp              = new config{};
-        _tmp->is_running        = _instance->is_running;
-        _tmp->trace_c           = _instance->trace_c;
-        _tmp->include_internal  = _instance->include_internal;
-        _tmp->include_args      = _instance->include_args;
-        _tmp->include_line      = _instance->include_line;
-        _tmp->include_filename  = _instance->include_filename;
-        _tmp->full_filepath     = _instance->full_filepath;
-        _tmp->base_module_path  = _instance->base_module_path;
-        _tmp->include_functions = _instance->include_functions;
-        _tmp->include_filenames = _instance->include_filenames;
-        _tmp->exclude_functions = _instance->exclude_functions;
-        _tmp->exclude_filenames = _instance->exclude_filenames;
-        _tmp->verbose           = _instance->verbose;
+        auto* _tmp               = new config{};
+        _tmp->is_running         = _instance->is_running;
+        _tmp->trace_c            = _instance->trace_c;
+        _tmp->include_internal   = _instance->include_internal;
+        _tmp->include_args       = _instance->include_args;
+        _tmp->include_line       = _instance->include_line;
+        _tmp->include_filename   = _instance->include_filename;
+        _tmp->full_filepath      = _instance->full_filepath;
+        _tmp->base_module_path   = _instance->base_module_path;
+        _tmp->restrict_functions = _instance->restrict_functions;
+        _tmp->restrict_filenames = _instance->restrict_filenames;
+        _tmp->include_functions  = _instance->include_functions;
+        _tmp->include_filenames  = _instance->include_filenames;
+        _tmp->exclude_functions  = _instance->exclude_functions;
+        _tmp->exclude_filenames  = _instance->exclude_filenames;
+        _tmp->verbose            = _instance->verbose;
+        // if full filepath is specified, include filename is implied
+        if(_tmp->full_filepath && !_tmp->include_filename) _tmp->include_filename = true;
         return _tmp;
     }();
     return *_tl_instance;
@@ -160,7 +249,6 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
                : (strcmp(swhat, "return") == 0)   ? PyTrace_RETURN
                : (strcmp(swhat, "c_return") == 0) ? PyTrace_C_RETURN
                                                   : -1;
-
     // only support PyTrace_{CALL,C_CALL,RETURN,C_RETURN}
     if(what < 0)
     {
@@ -170,6 +258,29 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         return;
     }
 
+    auto _update_ignore_stack_depth = [what]() {
+        switch(what)
+        {
+            case PyTrace_CALL: ++_config.ignore_stack_depth; break;
+            case PyTrace_RETURN: --_config.ignore_stack_depth; break;
+            default: break;
+        }
+    };
+
+    if(_config.ignore_stack_depth > 0)
+    {
+        if(_config.verbose > 2)
+            TIMEMORY_PRINT_HERE("%s :: %s :: %u", "Ignoring call/return", swhat,
+                                _config.ignore_stack_depth);
+        _update_ignore_stack_depth();
+        return;
+    }
+    else if(_config.ignore_stack_depth < 0)
+    {
+        TIMEMORY_PRINT_HERE("WARNING! ignore_stack_depth is < 0 :: ",
+                            _config.ignore_stack_depth);
+    }
+
     // if PyTrace_C_{CALL,RETURN} is not enabled
     if(!_config.trace_c && (what == PyTrace_C_CALL || what == PyTrace_C_RETURN))
     {
@@ -177,23 +288,6 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
             TIMEMORY_PRINT_HERE("%s :: %s", "Ignoring C call/return", swhat);
         return;
     }
-
-    // get the function name
-    auto _get_funcname = [&]() -> std::string {
-        return py::cast<std::string>(frame->f_code->co_name);
-    };
-
-    // get the filename
-    auto _get_filename = [&]() -> std::string {
-        return py::cast<std::string>(frame->f_code->co_filename);
-    };
-
-    // get the basename of the filename
-    auto _get_basename = [&](const std::string& _fullpath) {
-        if(_fullpath.find('/') != std::string::npos)
-            return _fullpath.substr(_fullpath.find_last_of('/') + 1);
-        return _fullpath;
-    };
 
     // get the arguments
     auto _get_args = [&]() {
@@ -239,35 +333,54 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     auto _find_matching = [](const strset_t& _expr, const std::string& _name) {
         const auto _rconstants =
             std::regex_constants::egrep | std::regex_constants::optimize;
-        for(const auto& itr : _expr)
+        for(const auto& itr : _expr)  // NOLINT
         {
             if(std::regex_search(_name, std::regex(itr, _rconstants))) return true;
         }
         return false;
     };
 
-    auto& _only_funcs = _config.include_functions;
+    bool  _force      = false;
+    auto& _only_funcs = _config.restrict_functions;
+    auto& _incl_funcs = _config.include_functions;
     auto& _skip_funcs = _config.exclude_functions;
-    auto  _func       = _get_funcname();
+    auto  _func       = py::cast<std::string>(frame->f_code->co_name);
 
-    if(!_only_funcs.empty() && !_find_matching(_only_funcs, _func))
+    if(!_only_funcs.empty())
     {
-        if(_config.verbose > 1)
-            TIMEMORY_PRINT_HERE("Skipping non-included function: %s", _func.c_str());
-        return;
+        _force = _find_matching(_only_funcs, _func);
+        if(!_force)
+        {
+            if(_config.verbose > 2)
+                TIMEMORY_PRINT_HERE("Skipping non-restricted function: %s",
+                                    _func.c_str());
+            return;
+        }
     }
 
-    if(_find_matching(_skip_funcs, _func))
+    if(!_force)
     {
-        if(_config.verbose > 1)
-            TIMEMORY_PRINT_HERE("Skipping designated function: '%s'", _func.c_str());
-        return;
+        if(_find_matching(_incl_funcs, _func))
+        {
+            _force = true;
+        }
+        else if(_find_matching(_skip_funcs, _func))
+        {
+            if(_config.verbose > 1)
+                TIMEMORY_PRINT_HERE("Skipping designated function: '%s'", _func.c_str());
+            if(!_find_matching(default_exclude_functions, _func))
+                _update_ignore_stack_depth();
+            return;
+        }
     }
 
-    auto& _only_files = _config.include_filenames;
+    auto& _only_files = _config.restrict_filenames;
+    auto& _incl_files = _config.include_filenames;
     auto& _skip_files = _config.exclude_filenames;
-    auto  _full       = _get_filename();
-    auto  _file       = _get_basename(_full);
+    auto  _full       = py::cast<std::string>(frame->f_code->co_filename);
+    auto  _file       = (_full.find('/') != std::string::npos)
+                            ? _full.substr(_full.find_last_of('/') + 1)
+                            : _full;
 
     if(!_config.include_internal &&
        strncmp(_full.c_str(), _omnitrace_path.c_str(), _omnitrace_path.length()) == 0)
@@ -277,18 +390,29 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         return;
     }
 
-    if(!_only_files.empty() && !_find_matching(_only_files, _full))
+    if(!_force && !_only_files.empty())
     {
-        if(_config.verbose > 2)
-            TIMEMORY_PRINT_HERE("Skipping non-included file: %s", _full.c_str());
-        return;
+        _force = _find_matching(_only_files, _full);
+        if(!_force)
+        {
+            if(_config.verbose > 2)
+                TIMEMORY_PRINT_HERE("Skipping non-restricted file: %s", _full.c_str());
+            return;
+        }
     }
 
-    if(_find_matching(_skip_files, _full))
+    if(!_force)
     {
-        if(_config.verbose > 2)
-            TIMEMORY_PRINT_HERE("Skipping non-included file: %s", _full.c_str());
-        return;
+        if(_find_matching(_incl_files, _full))
+        {
+            _force = true;
+        }
+        else if(_find_matching(_skip_files, _full))
+        {
+            if(_config.verbose > 2)
+                TIMEMORY_PRINT_HERE("Skipping non-included file: %s", _full.c_str());
+            return;
+        }
     }
 
     TIMEMORY_CONDITIONAL_PRINT_HERE(_config.verbose > 3, "%8s | %s%s | %s | %s", swhat,
@@ -301,36 +425,17 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     static thread_local strset_t _labels{};
     const auto&                  _label_ref = *_labels.emplace(_label).first;
 
-    // get the depth of the frame
-    // auto _fdepth = get_depth(frame);
-    static thread_local int32_t _depth_tracker = 0;
-    auto                        _fdepth        = _depth_tracker;
-    switch(what)
-    {
-        case PyTrace_CALL:
-        case PyTrace_C_CALL: _fdepth = _depth_tracker++; break;
-        case PyTrace_RETURN:
-        case PyTrace_C_RETURN: _fdepth = --_depth_tracker; break;
-    }
-
     // start function
     auto _profiler_call = [&]() {
-        auto& _entry = _config.records[_fdepth][_label];
-        _entry.emplace_back(
-            [&_label_ref]() { omnitrace_push_region(_label_ref.c_str()); },
+        _config.records.emplace_back(
             [&_label_ref]() { omnitrace_pop_region(_label_ref.c_str()); });
-        _entry.back().first();
+        omnitrace_push_region(_label_ref.c_str());
     };
 
     // stop function
     auto _profiler_return = [&]() {
-        auto fitr = _config.records.find(_fdepth);
-        if(fitr == _config.records.end()) return;
-        auto litr = fitr->second.find(_label);
-        if(litr == fitr->second.end()) return;
-        if(litr->second.empty()) return;
-        litr->second.back().second();
-        litr->second.pop_back();
+        _config.records.back()();
+        _config.records.pop_back();
     };
 
     // process what
@@ -430,13 +535,21 @@ generate(py::module& _pymod)
         CONFIGURATION_PROPERTY_LAMBDA(NAME, DOC, GET, SET)                               \
     }
 
-    CONFIGURATION_STRSET("only_functions", "Function regexes to collect exclusively",
+    CONFIGURATION_STRSET("restrict_functions", "Function regexes to collect exclusively",
+                         get_config().restrict_functions)
+    CONFIGURATION_STRSET("restrict_modules", "Filename regexes to collect exclusively",
+                         get_config().restrict_filenames)
+    CONFIGURATION_STRSET("include_functions",
+                         "Function regexes to always include in collection",
                          get_config().include_functions)
-    CONFIGURATION_STRSET("only_filenames", "Filename regexes to collect exclusively",
+    CONFIGURATION_STRSET("include_modules",
+                         "Filename regexes to always include in collection",
                          get_config().include_filenames)
-    CONFIGURATION_STRSET("skip_functions", "Function regexes to filter out of collection",
+    CONFIGURATION_STRSET("exclude_functions",
+                         "Function regexes to filter out of collection",
                          get_config().exclude_functions)
-    CONFIGURATION_STRSET("skip_filenames", "Filename regexes to filter out of collection",
+    CONFIGURATION_STRSET("exclude_modules",
+                         "Filename regexes to filter out of collection",
                          get_config().exclude_filenames)
 
     return _prof;

@@ -180,8 +180,8 @@ There are three ways to perform instrumentation:
      see [Binary Rewriting a Library](#binary-rewriting-a-library) for help
 
 
-> NOTE: Attaching to a running process is an alpha feature and support for detaching from the target process
-> without ending the target process is not currently supported.
+> ***Attaching to a running process is an alpha feature and support for detaching from the target process***
+> ***without ending the target process is not currently supported.***
 
 The general syntax for separating omnitrace command line arguments from the application arguments follows the
 is consistent with the LLVM style of using a standalone double-hyphen (`--`). All arguments preceding the double-hyphen
@@ -322,7 +322,7 @@ These options are always applied regardless of whether the module or function sa
 
 #### Example Available Module and Function Info Output
 
-> `omnitrace -o lulesh.inst --label file line args --simulate -- lulesh`
+> ***`omnitrace -o lulesh.inst --label file line args --simulate -- lulesh`***
 
 ```console
   AddressRange  Module                                    Function                                                                                 FunctionSignature
@@ -540,7 +540,7 @@ These options are always applied regardless of whether the module or function sa
 
 #### Example Instrumented Module and Function Info Output
 
-> `omnitrace -o lulesh.inst --label file line args --simulate -- lulesh`
+> ***`omnitrace -o lulesh.inst --label file line args --simulate -- lulesh`***
 
 After the heuristics are applied in [Example Available Module and Function Info Output](#example-available-module-and-function-info-output),
 the selected module/functions are:
@@ -674,7 +674,7 @@ You will have to remove or modify the rpath in order to get `foo.inst` to resolv
 
 #### Modifying RPATH
 
-> Requires `patchelf` package
+> ***Requires `patchelf` package***
 
 ```shell
 patchelf --remove-rpath <exe-or-library>

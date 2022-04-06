@@ -30,9 +30,7 @@ def run(nfib):
 
 
 if __name__ == "__main__":
-    omnitrace.initialize(__file__)
     nfib = int(sys.argv[1]) if len(sys.argv) > 1 else 20
     for i in range(5):
         ans = run(nfib)
         print(f"[{i}] fibonacci({nfib}) = {ans}")
-    omnitrace.finalize()

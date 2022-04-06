@@ -36,7 +36,7 @@ project = "omnitrace"
 copyright = "2022, Advanced Micro Devices, Inc."
 author = "Audacious Software Group"
 
-version = open(os.path.join("..", "VERSION")).read().strip()
+version = open(os.path.join("..", "..", "VERSION")).read().strip()
 # The full version, including alpha/beta/rc tags
 release = version
 

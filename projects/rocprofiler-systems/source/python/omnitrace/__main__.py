@@ -93,33 +93,42 @@ def parse_args(args=None):
         else:
             raise argparse.ArgumentTypeError("Boolean value expected.")
 
-    parser = argparse.ArgumentParser(add_help=True)
-    parser.add_argument(
-        "-c",
-        "--config",
-        default=None,
-        type=str,
-        help="Omnitrace configuration file",
+    parser = argparse.ArgumentParser(
+        "omnitrace",
+        add_help=True,
+        epilog="usage: {} -m omnitrace <OMNITRACE_ARGS> -- <SCRIPT> <SCRIPT_ARGS>".format(
+            os.path.basename(sys.executable)
+        ),
     )
     parser.add_argument(
         "-b",
         "--builtin",
         action="store_true",
-        help="Put 'profile' in the builtins. Use 'profile.enable()' and "
-        "'profile.disable()' in your code to turn it on and off, or "
-        "'@profile' to decorate a single function, or 'with profile:' "
-        "to profile a single section of code.",
+        help=(
+            "Put 'profile' in the builtins. Use '@profile' to decorate a single function, "
+            "or 'with profile:' to profile a single section of code."
+        ),
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        default=None,
+        type=str,
+        metavar="FILE",
+        help="Omnitrace configuration file",
     )
     parser.add_argument(
         "-s",
         "--setup",
         default=None,
+        metavar="FILE",
         help="Code to execute before the code to profile",
     )
     parser.add_argument(
         "--trace-c",
         type=str2bool,
         nargs="?",
+        metavar="BOOL",
         const=True,
         default=_profiler_config.trace_c,
         help="Enable profiling C functions",
@@ -129,6 +138,7 @@ def parse_args(args=None):
         "--include-args",
         type=str2bool,
         nargs="?",
+        metavar="BOOL",
         const=True,
         default=_profiler_config.include_args,
         help="Encode the argument values",
@@ -138,6 +148,7 @@ def parse_args(args=None):
         "--include-line",
         type=str2bool,
         nargs="?",
+        metavar="BOOL",
         const=True,
         default=_profiler_config.include_line,
         help="Encode the function line number",
@@ -147,6 +158,7 @@ def parse_args(args=None):
         "--include-file",
         type=str2bool,
         nargs="?",
+        metavar="BOOL",
         const=True,
         default=_profiler_config.include_filename,
         help="Encode the function filename",
@@ -156,36 +168,63 @@ def parse_args(args=None):
         "--full-filepath",
         type=str2bool,
         nargs="?",
+        metavar="BOOL",
         const=True,
         default=_profiler_config.full_filepath,
         help="Encode the full function filename (instead of basename)",
     )
     parser.add_argument(
-        "--skip-funcs",
+        "-I",
+        "--function-include",
         type=str,
         nargs="+",
-        default=_profiler_config.skip_functions,
+        metavar="FUNC",
+        default=_profiler_config.include_functions,
+        help="Include any entries with these function names",
+    )
+    parser.add_argument(
+        "-E",
+        "--function-exclude",
+        type=str,
+        nargs="+",
+        metavar="FUNC",
+        default=_profiler_config.exclude_functions,
         help="Filter out any entries with these function names",
     )
     parser.add_argument(
-        "--skip-files",
+        "-R",
+        "--function-restrict",
         type=str,
         nargs="+",
-        default=_profiler_config.skip_filenames,
-        help="Filter out any entries from these files",
-    )
-    parser.add_argument(
-        "--only-funcs",
-        type=str,
-        nargs="+",
-        default=_profiler_config.only_functions,
+        metavar="FUNC",
+        default=_profiler_config.restrict_functions,
         help="Select only entries with these function names",
     )
     parser.add_argument(
-        "--only-files",
+        "-MI",
+        "--module-include",
         type=str,
         nargs="+",
-        default=_profiler_config.only_filenames,
+        metavar="FILE",
+        default=_profiler_config.include_modules,
+        help="Include any entries from these files",
+    )
+    parser.add_argument(
+        "-ME",
+        "--module-exclude",
+        type=str,
+        nargs="+",
+        metavar="FILE",
+        default=_profiler_config.exclude_modules,
+        help="Filter out any entries from these files",
+    )
+    parser.add_argument(
+        "-MR",
+        "--module-restrict",
+        type=str,
+        nargs="+",
+        metavar="FILE",
+        default=_profiler_config.restrict_modules,
         help="Select only entries from these files",
     )
     parser.add_argument(
@@ -282,7 +321,7 @@ def main():
     if os.path.isfile(argv[0]):
         argv[0] = os.path.realpath(argv[0])
 
-    initialize(argv[0])
+    initialize(argv)
 
     from .libpyomnitrace.profiler import config as _profiler_config
 
@@ -291,10 +330,12 @@ def main():
     _profiler_config.include_line = opts.include_line
     _profiler_config.include_filename = opts.include_file
     _profiler_config.full_filepath = opts.full_filepath
-    _profiler_config.skip_functions = opts.skip_funcs
-    _profiler_config.skip_filenames = opts.skip_files
-    _profiler_config.only_functions = opts.only_funcs
-    _profiler_config.only_filenames = opts.only_files
+    _profiler_config.include_functions = opts.function_include
+    _profiler_config.include_modules = opts.module_include
+    _profiler_config.exclude_functions = opts.function_exclude
+    _profiler_config.exclude_modules = opts.module_exclude
+    _profiler_config.restrict_functions = opts.function_restrict
+    _profiler_config.restrict_modules = opts.module_restrict
     _profiler_config.verbosity = opts.verbosity
 
     print("[omnitrace]> profiling: {}".format(argv))

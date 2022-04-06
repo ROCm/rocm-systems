@@ -43,6 +43,8 @@ try:
     )
     from .libpyomnitrace import initialize
     from .libpyomnitrace import finalize
+    from .libpyomnitrace import is_initialized
+    from .libpyomnitrace import is_finalized
     from .libpyomnitrace.profiler import config as Config
 
     config = Config
@@ -52,6 +54,8 @@ try:
     __all__ = [
         "initialize",
         "finalize",
+        "is_initialized",
+        "is_finalized",
         "Profiler",
         "Config",
         "FakeProfiler",
@@ -62,6 +66,14 @@ try:
         "profile",
         "noprofile",
     ]
+
+    import atexit
+
+    def _finalize_at_exit():
+        if not is_finalized():
+            finalize()
+
+    atexit.register(_finalize_at_exit)
 
 except Exception as e:
     print("{}".format(e))

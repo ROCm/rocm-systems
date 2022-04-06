@@ -46,6 +46,10 @@ struct fork_gotcha : comp::base<fork_gotcha, void>
 
     // this will get called right after fork with the return value
     static void audit(const gotcha_data_t& _data, audit::outgoing, pid_t _pid);
+
+    // silence SFINAE disabled for omnitrace::fork_gotcha warnings
+    static inline void start() {}
+    static inline void stop() {}
 };
 
 using fork_gotcha_t = comp::gotcha<4, tim::component_tuple<fork_gotcha>, api::omnitrace>;

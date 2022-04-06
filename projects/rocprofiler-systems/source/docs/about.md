@@ -6,10 +6,10 @@
    :maxdepth: 4
 ```
 
-[Browse Omnitrace source code on Github](https://github.com/AMDResearch/omnitrace)
+> ***[Omnitrace](https://github.com/AMDResearch/omnitrace) is an AMD research project and should***
+> ***not be treated as an offical part of the ROCm software stack.***
 
-> [Omnitrace](https://github.com/AMDResearch/omnitrace) is an AMD research project and should
-> not be treated as an offical part of the ROCm software stack.
+[Browse Omnitrace source code on Github](https://github.com/AMDResearch/omnitrace)
 
 [Omnitrace](https://github.com/AMDResearch/omnitrace) is designed for both high-level and
 comprehensive application tracing and profiling on both the CPU and GPU.

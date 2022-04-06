@@ -22,7 +22,7 @@ In order to view the list of the available runtime settings, their current value
 omnitrace-avail --description
 ```
 
-> HINT: use `--brief` to suppress printing current value and/or `-c 0` to suppress truncation of the descriptions
+> ***Hint: use `--brief` to suppress printing current value and/or `-c 0` to suppress truncation of the descriptions***
 
 Any setting which is boolean (`omnitrace-avail --settings --value --brief --filter bool`) accepts a case insensitive
 match to nearly all common expressions for boolean logic: ON, OFF, YES, NO, TRUE, FALSE, 0, 1, etc.

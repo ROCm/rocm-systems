@@ -61,7 +61,7 @@ $ omnitrace -- ./foo
 
 ### Core Configuration Settings
 
-> See also: [Customizing Omnitrace Runtime](runtime.md)
+> ***See also: [Customizing Omnitrace Runtime](runtime.md)***
 
 | Setting                   | Value              | Description                                                                                       |
 |---------------------------|--------------------|---------------------------------------------------------------------------------------------------|
@@ -105,10 +105,10 @@ set `OMNITRACE_OUTPUT_PREFIX="%argt%-"` and let omnitrace cleanly organize the o
 | `%r`            | Shorthand for `%rank%`                                                                        |
 | `%s`            | Shorthand for `%size%`                                                                        |
 
-> NOTE: any output prefix key which contain a '/' will have the `/` characters
-> replaced with `_` and any leading underscores will be stripped, e.g. if `%arg0%` is `/usr/bin/foo`, this
-> will translate to `usr_bin_foo`. Additionally, any `%arg<N>%` keys which do not have a command line argument
-> at position `<N>` will be ignored.
+> ***Any output prefix key which contain a `/` will have the `/` characters***
+> ***replaced with `_` and any leading underscores will be stripped, e.g. if `%arg0%` is `/usr/bin/foo`, this***
+> ***will translate to `usr_bin_foo`. Additionally, any `%arg<N>%` keys which do not have a command line argument***
+> ***at position `<N>` will be ignored.***
 
 ## Perfetto Output
 
@@ -140,7 +140,7 @@ requires significantly less memory than perfetto, this is not the case in timeli
 
 ### Timemory Text Output
 
-> Hint: the generation of text output is configurable via `OMNITRACE_TEXT_OUTPUT`
+> ***Hint: the generation of text output is configurable via `OMNITRACE_TEXT_OUTPUT`***
 
 Timemory text output files are meant for human-consumption (use JSON formats for analysis)
 and as such, some fields such as the `LABEL` fields may be truncated for readability.
@@ -336,7 +336,7 @@ component explicitly sets type-traits which specify that the data is only releva
 
 ### Timemory Flat JSON Output
 
-> Hint: the generation of flat JSON output is configurable via `OMNITRACE_JSON_OUTPUT`
+> ***Hint: the generation of flat JSON output is configurable via `OMNITRACE_JSON_OUTPUT`***
 
 Timemory provides two JSON output formats. The flat JSON output files are similar to the text files: the hierarchical information
 is represented by the indentation of the `"prefix"` field and the `"depth"` field. All the data entries are in a single JSON array,
@@ -521,7 +521,7 @@ This script applied to the corresponding JSON output from [Text Output Example](
 
 ### Timemory Hierarchical JSON Output
 
-> Hint: the generation of hierarchical JSON output is configurable via `OMNITRACE_TREE_OUTPUT`
+> ***Hint: the generation of hierarchical JSON output is configurable via `OMNITRACE_TREE_OUTPUT`***
 
 The hierarchical JSON output (extension: `.tree.json`) contains the very similar data to the flat JSON output, however,
 it's structure requires processing through recursion. The main use of these files are their analysis support

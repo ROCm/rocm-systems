@@ -30,6 +30,7 @@ __version__ = "@PROJECT_VERSION@"
 __maintainer__ = "AMD Research"
 __status__ = "Development"
 
+import os
 import sys
 import threading
 from functools import wraps
@@ -80,6 +81,68 @@ config = _profiler_config
 Config = _profiler_config
 
 
+def _file(back=2, only_basename=True, use_dirname=False, noquotes=True):
+    """
+    Returns the file name
+    """
+
+    from os.path import basename, dirname
+
+    def get_fcode(back):
+        fname = "<module>"
+        try:
+            fname = sys._getframe(back).f_code.co_filename
+        except Exception as e:
+            print(e)
+            fname = "<module>"
+        return fname
+
+    result = None
+    if only_basename is True:
+        if use_dirname is True:
+            result = "{}".format(
+                join(
+                    basename(dirname(get_fcode(back))),
+                    basename(get_fcode(back)),
+                )
+            )
+        else:
+            result = "{}".format(basename(get_fcode(back)))
+    else:
+        result = "{}".format(get_fcode(back))
+
+    if noquotes is False:
+        result = "'{}'".format(result)
+
+    return result
+
+
+def _get_argv(init_file, argv=None):
+    if argv is None:
+        argv = sys.argv[:]
+
+    if "--" in argv:
+        _idx = argv.index("--")
+        argv = sys.argv[(_idx + 1) :]
+
+    if len(argv) > 1:
+        if argv[0] == "-m":
+            argv = argv[1:]
+        elif argv[0] == "-c":
+            argv[0] = os.path.basename(sys.executable)
+        else:
+            while len(argv) > 1 and argv[0].startswith("-"):
+                argv = argv[1:]
+                if os.path.exists(argv[0]):
+                    break
+    if len(argv) == 0:
+        argv = [init_file]
+    elif not os.path.exists(argv[0]):
+        argv[0] = init_file
+
+    return argv
+
+
 #
 class Profiler:
     """Provides decorators and context-manager for the omnitrace profilers"""
@@ -118,8 +181,11 @@ class Profiler:
         )
         self._unset = 0
         self._use = (
-            not _profiler_config._is_running and Profiler.is_enabled() is True
+            not _profiler_config._is_running
+            and Profiler.is_enabled() is True
+            and not libpyomnitrace.is_finalized()
         )
+        self._file = _file()
         self.debug = kwargs["debug"] if "debug" in kwargs else False
 
     # ---------------------------------------------------------------------------------- #
@@ -134,6 +200,9 @@ class Profiler:
     #
     def configure(self):
         """Initialize, configure the bundle, store original profiler function"""
+
+        if not libpyomnitrace.is_initialized():
+            libpyomnitrace.initialize(_get_argv(self._file))
 
         _profiler_init()
 
@@ -157,6 +226,7 @@ class Profiler:
             not _profiler_config._is_running
             and Profiler.is_enabled() is True
             and sys.getprofile() == self._original_function
+            and not libpyomnitrace.is_finalized()
         )
 
     # ---------------------------------------------------------------------------------- #

@@ -65,7 +65,12 @@ parse:
         RUN_ARGS: '*'
         ENVIRONMENT: '*'
         LABELS: '*'
+        DEPENDS: '*'
+        COMMAND: '*'
         PROPERTIES: '*'
+        PASS_REGULAR_EXPRESSION: '*'
+        FAIL_REGULAR_EXPRESSION: '*'
+        SKIP_REGULAR_EXPRESSION: '*'
     rocm_version_message:
       flags:
         - STATUS

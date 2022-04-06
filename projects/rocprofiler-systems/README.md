@@ -5,7 +5,9 @@
 [![Ubuntu 20.04 (GCC 9, MPICH, OpenMPI)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml)
 [![Ubuntu 20.04 (GCC 9, MPICH, OpenMPI, ROCm 4.3, 4.5, 5.0)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external-rocm.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external-rocm.yml)
 
-Omnitrace is an AMD research project and should not be treated as an offical part of the ROCm software stack.
+> ***[Omnitrace](https://github.com/AMDResearch/omnitrace) is an AMD research project and should***
+> ***not be treated as an offical part of the ROCm software stack.***
+
 The documentation for omnitrace is available at [amdresearch.github.io/omnitrace](https://amdresearch.github.io/omnitrace/).
 
 ## Using Omnitrace Executable
@@ -19,7 +21,7 @@ omnitrace <omnitrace-options> -- <exe-or-library> <exe-options>
 
 `omnitrace-avail -Sd` will provide a list of all the possible omnitrace settings, their current value, and a description of the setting.
 
-> NOTE: Some settings may only affect the timemory backend.
+> ***Some settings may only affect the timemory backend.***
 
 These settings can be set via environment variables or placed in a config file and specified via `OMNITRACE_CONFIG_FILE=/path/to/config/file`. The config file
 can be a text, JSON, or XML file. Some of the most relevant settings are provided below:
@@ -91,8 +93,8 @@ omnitrace -R '^hip' -o ./lib/libamdhip64.so.4 -- /opt/rocm/lib/libamdhip64.so.4
 export LD_LIBRARY_PATH=${PWD}/lib:${LD_LIBRARY_PATH}
 ```
 
-> NOTE: Verify via `ldd` that your executable will load the instrumented library -- if you built your executable with
-> an RPATH to the original library's directory, then prefixing `LD_LIBRARY_PATH` will have no effect.
+> ***Verify via `ldd` that your executable will load the instrumented library -- if you built your executable with***
+> ***an RPATH to the original library's directory, then prefixing `LD_LIBRARY_PATH` will have no effect.***
 
 Once you have rewritten your executable and/or libraries with instrumentation, you can just run the (instrumented) executable
 or exectuable which loads the instrumented libraries normally, e.g.:
@@ -186,10 +188,10 @@ Once Julia is installed, install the necessary packages (this operation only nee
 julia -e 'using Pkg; for name in ["JSON", "DataFrames", "Dates", "CSV", "Chain", "PrettyTables"]; Pkg.add(name); end'
 ```
 
-> NOTE: Using `rocprof` externally for tracing is deprecated. The current version has built-in support for
-> recording the GPU activity and HIP API calls. If you want to use an external rocprof, either
-> configure CMake with `-DOMNITRACE_USE_ROCTRACER=OFF` or explicitly set `OMNITRACE_ROCTRACER_ENABLED=OFF` in the
-> environment.
+> ***Using `rocprof` externally for tracing is deprecated. The current version has built-in support for***
+> ***recording the GPU activity and HIP API calls. If you want to use an external rocprof, either***
+> ***configure CMake with `-DOMNITRACE_USE_ROCTRACER=OFF` or explicitly set `OMNITRACE_ROCTRACER_ENABLED=OFF` in the***
+> ***environment.***
 
 Use the `omnitrace-merge.jl` Julia script to merge rocprof and perfetto traces.
 

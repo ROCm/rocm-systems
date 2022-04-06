@@ -15,5 +15,5 @@ string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
 string(REGEX REPLACE "([0-9]+)\\.([0-9]+)\\.([0-9]+)(.*)" "\\1.\\2.\\3" OMNITRACE_VERSION
                      "${FULL_VERSION_STRING}")
 
-configure_file(${SOURCE_DIR}/docs-source/omnitrace.dox.in
-               ${SOURCE_DIR}/docs-source/omnitrace.dox @ONLY)
+configure_file(${SOURCE_DIR}/source/docs/omnitrace.dox.in
+               ${SOURCE_DIR}/source/docs/omnitrace.dox @ONLY)

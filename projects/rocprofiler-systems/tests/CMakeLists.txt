@@ -71,17 +71,15 @@ set(_timemory_environment
 
 set(_test_environment ${_base_environment} "OMNITRACE_CRITICAL_TRACE=OFF")
 
-set(_fast_environment
-    "OMNITRACE_USE_PERFETTO=OFF"
-    "OMNITRACE_USE_TIMEMORY=OFF"
+set(_python_environment
+    "OMNITRACE_USE_PERFETTO=ON"
+    "OMNITRACE_USE_TIMEMORY=ON"
     "OMNITRACE_USE_SAMPLING=OFF"
-    "OMNITRACE_CRITICAL_TRACE=OFF"
     "OMNITRACE_TIME_OUTPUT=OFF"
-    "OMP_PROC_BIND=spread"
-    "OMP_PLACES=threads"
-    "OMP_NUM_THREADS=2"
+    "OMNITRACE_USE_PID=OFF"
+    "OMNITRACE_TIMEMORY_COMPONENTS=trip_count"
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
-    )
+    "PYTHONPATH=${CMAKE_BINARY_DIR}/python:$ENV{PYTHONPATH}")
 
 # -------------------------------------------------------------------------------------- #
 
@@ -245,7 +243,8 @@ function(OMNITRACE_ADD_PYTHON_TEST)
         TEST
         "STANDALONE" # options
         "NAME;FILE;TIMEOUT" # single value args
-        "PROFILE_ARGS;RUN_ARGS;ENVIRONMENT;LABELS;PROPERTIES" # multiple value args
+        "PROFILE_ARGS;RUN_ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGULAR_EXPRESSION;FAIL_REGULAR_EXPRESSION;SKIP_REGULAR_EXPRESSION;DEPENDS;COMMAND" # multiple
+                                                                                                                                                      # value args
         ${ARGN})
 
     if(NOT TEST_TIMEOUT)
@@ -253,56 +252,81 @@ function(OMNITRACE_ADD_PYTHON_TEST)
     endif()
 
     if(NOT DEFINED TEST_ENVIRONMENT OR "${TEST_ENVIRONMENT}" STREQUAL "")
-        set(TEST_ENVIRONMENT "${_test_environment}")
+        set(TEST_ENVIRONMENT "${_python_environment}")
     endif()
 
-    list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON")
-    list(APPEND TEST_ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python:$ENV{PYTHONPATH}")
     list(APPEND TEST_LABELS "python")
+    list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON"
+         "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
+         "OMNITRACE_OUTPUT_PREFIX=${TEST_NAME}/")
 
-    get_filename_component(_TEST_FILE "${TEST_FILE}" NAME)
-    configure_file(${TEST_FILE} ${CMAKE_BINARY_DIR}/${_TEST_FILE} @ONLY)
-
-    if(NOT TEST_STANDALONE)
-
-    endif()
-
-    if(TEST_STANDALONE)
-        add_test(
-            NAME ${TEST_NAME}-run
-            COMMAND ${PYTHON_EXECUTABLE} ${_TEST_FILE} ${TEST_RUN_ARGS}
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    if(NOT TEST_COMMAND)
+        get_filename_component(_TEST_FILE "${TEST_FILE}" NAME)
+        configure_file(${TEST_FILE} ${CMAKE_BINARY_DIR}/${_TEST_FILE} @ONLY)
+        if(TEST_STANDALONE)
+            add_test(
+                NAME ${TEST_NAME}
+                COMMAND ${PYTHON_EXECUTABLE} ${_TEST_FILE} ${TEST_RUN_ARGS}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+        else()
+            add_test(
+                NAME ${TEST_NAME}
+                COMMAND ${PYTHON_EXECUTABLE} -m omnitrace ${TEST_PROFILE_ARGS} --
+                        ${_TEST_FILE} ${TEST_RUN_ARGS}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+        endif()
     else()
         add_test(
-            NAME ${TEST_NAME}-run
-            COMMAND ${PYTHON_EXECUTABLE} -m omnitrace ${TEST_PROFILE_ARGS} --
-                    ${_TEST_FILE} ${TEST_RUN_ARGS}
+            NAME ${TEST_NAME}
+            COMMAND ${TEST_COMMAND} ${TEST_FILE}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+        add_test(
+            NAME ${TEST_NAME}-inverse
+            COMMAND ${TEST_COMMAND} ${TEST_FILE}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     endif()
 
-    foreach(_TEST run)
-        string(REGEX REPLACE "-run(-|/)" "\\1" _prefix "${TEST_NAME}-${_TEST}/")
-        set(_environ "${TEST_ENVIRONMENT}")
-        set(_labels "${_TEST}")
-        set(_timeout ${TEST_TIMEOUT})
-        list(APPEND _environ "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
-             "OMNITRACE_OUTPUT_PREFIX=${_prefix}")
-        string(REPLACE "-run" "" _labels "${_TEST}")
-        string(REPLACE "-sampling" ";sampling" _labels "${_labels}")
-        set(_props)
-        if("${_TEST}" MATCHES "run|baseline")
-            set(_props ${TEST_PROPERTIES})
-            if(NOT "RUN_SERIAL" IN_LIST _props)
-                list(APPEND _props RUN_SERIAL ON)
-            endif()
-        endif()
-        if(TEST ${TEST_NAME}-${_TEST})
-            set_tests_properties(
-                ${TEST_NAME}-${_TEST}
-                PROPERTIES ENVIRONMENT "${_environ}" TIMEOUT ${_timeout} LABELS
-                           "${_labels};${TEST_LABELS}" ${_props})
-        endif()
-    endforeach()
+    set_tests_properties(
+        ${TEST_NAME}
+        PROPERTIES ENVIRONMENT
+                   "${TEST_ENVIRONMENT}"
+                   TIMEOUT
+                   ${TEST_TIMEOUT}
+                   LABELS
+                   "${TEST_LABELS}"
+                   DEPENDS
+                   "${TEST_DEPENDS}"
+                   PASS_REGULAR_EXPRESSION
+                   "${TEST_PASS_REGULAR_EXPRESSION}"
+                   FAIL_REGULAR_EXPRESSION
+                   "${TEST_FAIL_REGULAR_EXPRESSION}"
+                   SKIP_REGULAR_EXPRESSION
+                   "${TEST_SKIP_REGULAR_EXPRESSION}"
+                   REQUIRED_FILES
+                   "${TEST_FILE}"
+                   ${TEST_PROPERTIES})
+
+    if(TEST ${TEST_NAME}-inverse)
+        set_tests_properties(
+            ${TEST_NAME}-inverse
+            PROPERTIES ENVIRONMENT
+                       "${TEST_ENVIRONMENT}"
+                       TIMEOUT
+                       ${TEST_TIMEOUT}
+                       LABELS
+                       "${TEST_LABELS}"
+                       DEPENDS
+                       "${TEST_DEPENDS}"
+                       PASS_REGULAR_EXPRESSION
+                       "${TEST_FAIL_REGULAR_EXPRESSION}"
+                       FAIL_REGULAR_EXPRESSION
+                       "${TEST_PASS_REGULAR_EXPRESSION}"
+                       WILL_FAIL
+                       ON
+                       REQUIRED_FILES
+                       "${TEST_FILE}"
+                       ${TEST_PROPERTIES})
+    endif()
 endfunction()
 
 # -------------------------------------------------------------------------------------- #
@@ -465,23 +489,95 @@ omnitrace_add_test(
     RUNTIME_TIMEOUT 360
     ENVIRONMENT "${_ompt_environment}")
 
+# -------------------------------------------------------------------------------------- #
+#
+# python tests
+#
+# -------------------------------------------------------------------------------------- #
+
 omnitrace_add_python_test(
     NAME python-external
     FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
-    PROFILE_ARGS -l -f
+    PROFILE_ARGS -f
     RUN_ARGS 10
-    ENVIRONMENT "${_base_environment};OMNITRACE_USE_PID=OFF")
+    ENVIRONMENT "${_python_environment}")
+
+omnitrace_add_python_test(
+    NAME python-external-exclude-inefficient
+    FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
+    PROFILE_ARGS -E "^inefficient$"
+    RUN_ARGS 10
+    ENVIRONMENT "${_python_environment}")
 
 omnitrace_add_python_test(
     NAME python-builtin
     FILE ${CMAKE_SOURCE_DIR}/examples/python/builtin.py
     PROFILE_ARGS -b -l -f
     RUN_ARGS 10
-    ENVIRONMENT "${_base_environment};OMNITRACE_USE_PID=OFF")
+    ENVIRONMENT "${_python_environment}")
 
 omnitrace_add_python_test(
     STANDALONE
     NAME python-source
     FILE ${CMAKE_SOURCE_DIR}/examples/python/source.py
     RUN_ARGS 5
-    ENVIRONMENT "${_base_environment};OMNITRACE_USE_PID=OFF")
+    ENVIRONMENT "${_python_environment}")
+
+# -------------------------------------------------------------------------------------- #
+#
+# python output tests
+#
+# -------------------------------------------------------------------------------------- #
+
+if(CMAKE_VERSION VERSION_LESS "3.18.0")
+    find_program(
+        OMNITRACE_CAT_EXE
+        NAMES cat
+        PATH_SUFFIXES bin)
+    if(OMNITRACE_CAT_EXE)
+        set(OMNITRACE_CAT_COMMAND ${OMNITRACE_CAT_EXE})
+    endif()
+else()
+    set(OMNITRACE_CAT_COMMAND ${CMAKE_COMMAND} -E cat)
+endif()
+
+if(OMNITRACE_CAT_COMMAND)
+    omnitrace_add_python_test(
+        NAME python-external-check
+        COMMAND ${OMNITRACE_CAT_COMMAND}
+        FILE omnitrace-tests-output/python-external/trip_count.txt
+        PASS_REGULAR_EXPRESSION
+            "(\\\[compile\\\]).*(\\\| \\\|0>>> \\\[run\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[fib\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[inefficient\\\]\\\[external.py\\\])"
+        DEPENDS python-external
+        ENVIRONMENT "${_python_environment}")
+
+    omnitrace_add_python_test(
+        NAME python-external-exclude-inefficient-check
+        COMMAND ${OMNITRACE_CAT_COMMAND}
+        FILE omnitrace-tests-output/python-external-exclude-inefficient/trip_count.txt
+        FAIL_REGULAR_EXPRESSION "(\\\|_inefficient).*(\\\|_sum)"
+        DEPENDS python-external-exclude-inefficient
+        ENVIRONMENT "${_python_environment}")
+
+    omnitrace_add_python_test(
+        NAME python-builtin-check
+        COMMAND ${OMNITRACE_CAT_COMMAND}
+        FILE omnitrace-tests-output/python-builtin/trip_count.txt
+        PASS_REGULAR_EXPRESSION "\\\[inefficient\\\]\\\[builtin.py:11\\\]"
+        DEPENDS python-builtin
+        ENVIRONMENT "${_python_environment}")
+
+    omnitrace_add_python_test(
+        NAME python-source-check
+        COMMAND ${OMNITRACE_CAT_COMMAND}
+        FILE omnitrace-tests-output/python-source/trip_count.txt
+        PASS_REGULAR_EXPRESSION
+            "(\\\| \\\|0>>> run           \\\|      5).*(\\\| \\\|0>>> \\\|_fib         \\\|     40).*(\\\| \\\|0>>>         \\\|_fib \\\|      5).*(\\\| \\\|0>>> \\\|_inefficient \\\|      5).*(\\\| \\\|0>>>   \\\|__sum      \\\|      5)"
+        DEPENDS python-source
+        ENVIRONMENT "${_python_environment}")
+else()
+    omnitrace_message(
+        WARNING
+        "Neither 'cat' nor 'cmake -E cat' are available. Python source checks are disabled"
+        )
+endif()

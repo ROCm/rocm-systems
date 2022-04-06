@@ -12,4 +12,5 @@
    getting_started
    output
    user_api
+   python
 ```

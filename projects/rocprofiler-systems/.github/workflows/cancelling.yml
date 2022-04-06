@@ -1,20 +1,20 @@
 name: cancel-builds-on-update
 on:
   workflow_run:
-    workflows: ['formatting', 'ubuntu-bionic', 'ubuntu-focal-dyninst-package', 'ubuntu-focal-external-rocm', 'ubuntu-focal-external', 'ubuntu-focal', 'cpack-bionic', 'cpack-bionic-rocm', 'cpack-focal', cpack-focal-rocm']
+    workflows: ['formatting', 'ubuntu-bionic', 'ubuntu-focal-external-rocm', 'ubuntu-focal-external', 'ubuntu-focal', 'cpack-bionic', 'cpack-bionic-rocm', 'cpack-focal', cpack-focal-rocm']
     types: ['requested']
 
 jobs:
   cancel-duplicate-workflow-runs:
-    name: "Cancel duplicate workflow runs"
+    name: "Cancel duplicate ${{ github.event.workflow_run.id }} workflow runs"
     runs-on: ubuntu-latest
     steps:
       - uses: potiuk/cancel-workflow-runs@master
-        name: "Cancel duplicate workflow runs"
+        name: "Cancel duplicate ${{ github.event.workflow_run.id }} workflow runs"
         with:
           cancelMode: duplicates
           cancelFutureDuplicates: true
           token: ${{ secrets.GITHUB_TOKEN }}
           sourceRunId: ${{ github.event.workflow_run.id }}
-          notifyPRCancel: true
+          notifyPRCancel: false
           skipEventTypes: '["schedule"]'
