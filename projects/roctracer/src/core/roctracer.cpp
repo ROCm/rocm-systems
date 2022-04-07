@@ -409,12 +409,12 @@ void* HIP_SyncApiDataCallback(uint32_t op_id, roctracer_record_t* record, const 
     correlation_id_tls = 0;
   }
 
-  const char* name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0);
   DEBUG_TRACE(
       "HIP_SyncApiDataCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) "
       "correlation_id(%lu) time_ns(%lu)\n",
-      name, phase, op_id, record, data, pool, (int)(record_pair_stack->size()),
-      (data_ptr) ? data_ptr->correlation_id : 0, timer.timestamp_ns());
+      roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0), phase, op_id, record, data, pool,
+      (int)(record_pair_stack->size()), (data_ptr) ? data_ptr->correlation_id : 0,
+      timer.timestamp_ns());
 
   return ret;
 }
@@ -503,12 +503,11 @@ void* HIP_SyncActivityCallback(uint32_t op_id, roctracer_record_t* record,
     correlation_id_tls = 0;
   }
 
-  const char* name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0);
   DEBUG_TRACE(
       "HIP_SyncActivityCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) "
       "correlation_id(%lu) beg_ns(%lu) end_ns(%lu)\n",
-      name, phase, op_id, record, data, pool, (int)(record_pair_stack->size()),
-      (data_ptr) ? data_ptr->correlation_id : 0, timestamp_ns);
+      roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0), phase, op_id, record, data, pool,
+      (int)(record_pair_stack->size()), (data_ptr) ? data_ptr->correlation_id : 0, timestamp_ns);
 
   return ret;
 }
@@ -525,11 +524,11 @@ void HIP_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
   if (record_ptr->correlation_id == 0) return;
   pool->Write(*record_ptr);
 
-  const char* name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_OPS, record_ptr->op, record_ptr->kind);
   DEBUG_TRACE(
       "HIP_AsyncActivityCallback(\"%s\"): op(%u) kind(%u) record(%p) pool(%p) correlation_id(%d) "
       "beg_ns(%lu) end_ns(%lu)\n",
-      name, record_ptr->op, record_ptr->kind, record, pool, record_ptr->correlation_id,
+      roctracer_op_string(ACTIVITY_DOMAIN_HIP_OPS, record_ptr->op, record_ptr->kind),
+      record_ptr->op, record_ptr->kind, record, pool, record_ptr->correlation_id,
       record_ptr->begin_ns, record_ptr->end_ns);
 }
 

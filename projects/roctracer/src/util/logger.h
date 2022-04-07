@@ -209,7 +209,7 @@ inline static void DEBUG_TRACE(const char* fmt, ...) {
   va_end(valist);
 }
 #else
-inline static void DEBUG_TRACE(const char* fmt, ...) {}
+#define DEBUG_TRACE(...)
 #endif
 
 #endif  // SRC_UTIL_LOGGER_H_

@@ -94,7 +94,7 @@ inline static void DEBUG_TRACE(const char* fmt, ...) {
   va_end(valist);
 }
 #else
-inline static void DEBUG_TRACE(const char* fmt, ...) {}
+#define DEBUG_TRACE(...)
 #endif
 
 typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
@@ -466,12 +466,11 @@ void hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
     entry->valid.store(roctracer::TRACE_ENTRY_COMPL, std::memory_order_release);
   }
 
-  const char* name = roctracer_op_string(domain, cid, 0);
   DEBUG_TRACE(
       "hip_api_callback(\"%s\") phase(%d): cid(%u) data(%p) entry(%p) name(\"%s\") "
       "correlation_id(%lu) timestamp(%lu)\n",
-      name, data->phase, cid, data, entry, (entry) ? entry->name : NULL, data->correlation_id,
-      timestamp);
+      roctracer_op_string(domain, cid, 0), data->phase, cid, data, entry,
+      (entry) ? entry->name : NULL, data->correlation_id, timestamp);
 }
 
 void mark_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg) {
@@ -512,12 +511,11 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
          << entry->tid;
   oss << std::dec << rec_ss.str() << " " << str;
 
-  const char* name = roctracer_op_string(entry->domain, entry->cid, 0);
   DEBUG_TRACE(
       "hip_api_flush_cb(\"%s\"): domain(%u) cid(%u) entry(%p) name(\"%s\" correlation_id(%lu) "
       "beg(%lu) end(%lu))\n",
-      name, entry->domain, entry->cid, entry, entry->name, correlation_id, begin_timestamp,
-      end_timestamp);
+      roctracer_op_string(entry->domain, entry->cid, 0), entry->domain, entry->cid, entry,
+      entry->name, correlation_id, begin_timestamp, end_timestamp);
 
   if (domain == ACTIVITY_DOMAIN_HIP_API) {
 #if HIP_PROF_HIP_API_STRING
