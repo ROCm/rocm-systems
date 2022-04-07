@@ -294,6 +294,8 @@ static inline void CorrelationIdRegistr(const activity_correlation_id_t& correla
   std::lock_guard<correlation_id_mutex_t> lck(correlation_id_mutex);
   const auto ret = correlation_id_map.insert({correlation_id, correlation_id_tls});
   if (ret.second == false) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id is not unique(" << correlation_id << ")");
+
+  DEBUG_TRACE("CorrelationIdRegistr id(%lu) id_tls(%lu)\n", correlation_id, correlation_id_tls);
 }
 
 static inline activity_correlation_id_t CorrelationIdLookup(const activity_correlation_id_t& correlation_id) {
@@ -302,6 +304,9 @@ static inline activity_correlation_id_t CorrelationIdLookup(const activity_corre
   if (it == correlation_id_map.end()) EXC_ABORT(ROCTRACER_STATUS_ERROR, "HCC activity id lookup failed(" << correlation_id << ")");
   const activity_correlation_id_t ret_val = it->second;
   correlation_id_map.erase(it);
+
+  DEBUG_TRACE("CorrelationIdLookup id(%lu) ret(%lu)\n", correlation_id, ret_val);
+
   return ret_val;
 }
 
@@ -389,6 +394,11 @@ void* HIP_SyncApiDataCallback(
     // Clearing correlatin ID
     correlation_id_tls = 0;
   }
+
+  const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0);
+  DEBUG_TRACE("HIP_SyncApiDataCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) correlation_id(%lu) time_ns(%lu)\n",
+    name, phase, op_id, record, data, pool, (int)(record_pair_stack->size()), (data_ptr) ? data_ptr->correlation_id : 0, timer.timestamp_ns());
+
   return ret;
 }
 
@@ -478,6 +488,11 @@ void* HIP_SyncActivityCallback(
     // Clearing correlatin ID
     correlation_id_tls = 0;
   }
+
+  const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0);
+  DEBUG_TRACE("HIP_SyncActivityCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) correlation_id(%lu) beg_ns(%lu) end_ns(%lu)\n",
+    name, phase, op_id, record, data, pool, (int)(record_pair_stack->size()), (data_ptr) ? data_ptr->correlation_id : 0, timestamp_ns);
+
   return ret;
 }
 
@@ -492,6 +507,10 @@ void HCC_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
   record_ptr->correlation_id = CorrelationIdLookup(record_ptr->correlation_id);
   if (record_ptr->correlation_id == 0) return;
   pool->Write(*record_ptr);
+
+  const char * name = roctracer_op_string(ACTIVITY_DOMAIN_HCC_OPS, record_ptr->op, record_ptr->kind);
+  DEBUG_TRACE("HCC_AsyncActivityCallback(\"%s\"): op(%u) kind(%u) record(%p) pool(%p) correlation_id(%d) beg_ns(%lu) end_ns(%lu)\n",
+    name, record_ptr->op, record_ptr->kind, record, pool, record_ptr->correlation_id, record_ptr->begin_ns, record_ptr->end_ns);
 }
 
 // Open output file

@@ -82,6 +82,21 @@ THE SOFTWARE.
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
+#if DEBUG_TRACE_ON
+inline static void DEBUG_TRACE(const char* fmt, ...) {
+  constexpr int size = 256;
+  char buf[size];
+
+  va_list valist;
+  va_start(valist, fmt);
+  vsnprintf(buf, size, fmt, valist);
+  printf("%u:%u %s", GetPid(), GetTid(), buf); fflush(stdout);
+  va_end(valist);
+}
+#else
+inline static void DEBUG_TRACE(const char* fmt, ...) {}
+#endif
+
 typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
 hsa_rt_utils::Timer* timer = NULL;
 thread_local timestamp_t hsa_begin_timestamp = 0;
@@ -457,6 +472,10 @@ void hip_api_callback(
 
     entry->valid.store(roctracer::TRACE_ENTRY_COMPL, std::memory_order_release);
   }
+
+  const char * name = roctracer_op_string(domain, cid, 0);
+  DEBUG_TRACE("hip_api_callback(\"%s\") phase(%d): cid(%u) data(%p) entry(%p) name(\"%s\") correlation_id(%lu) timestamp(%lu)\n",
+    name, data->phase, cid, data, entry, (entry) ? entry->name : NULL, data->correlation_id, timestamp);
 }
 
 void mark_api_callback(
@@ -499,7 +518,11 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
   const char* str = (domain != ACTIVITY_DOMAIN_EXT_API) ? roctracer_op_string(domain, cid, 0) : strdup("MARK");
   rec_ss << std::dec << begin_timestamp << ":" << end_timestamp << " " << entry->pid << ":" << entry->tid;
   oss << std::dec << rec_ss.str() << " " << str;
-  
+
+  const char * name = roctracer_op_string(entry->domain, entry->cid, 0);
+  DEBUG_TRACE("hip_api_flush_cb(\"%s\"): domain(%u) cid(%u) entry(%p) name(\"%s\" correlation_id(%lu) beg(%lu) end(%lu))\n",
+    name, entry->domain, entry->cid, entry, entry->name, correlation_id, begin_timestamp, end_timestamp);
+
   if (domain == ACTIVITY_DOMAIN_HIP_API) {
 #if HIP_PROF_HIP_API_STRING
     if (hip_api_stats != NULL) {
@@ -620,6 +643,9 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
 
   while (record < end_record) {
     const char * name = roctracer_op_string(record->domain, record->op, record->kind);
+    DEBUG_TRACE("pool_activity_callback(\"%s\"): domain(%u) op(%u) kind(%u) record(%p) correlation_id(%lu) beg(%lu) end(%lu)\n",
+      name, record->domain, record->op, record->kind, record, record->correlation_id, record->begin_ns, record->end_ns);
+
     switch(record->domain) {
       case ACTIVITY_DOMAIN_HCC_OPS:
         if (hip_memcpy_stats != NULL) {
