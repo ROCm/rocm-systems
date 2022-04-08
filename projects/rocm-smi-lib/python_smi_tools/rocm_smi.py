@@ -1170,6 +1170,10 @@ def setPowerOverDrive(deviceList, value, autoRespond):
     strValue = value
     specWarningConfirmed = False
     for device in deviceList:
+        # Continue to next device in deviceList loop if the device is a secondary die
+        if checkIfSecondaryDie(device):
+            logging.debug("Unavailable for secondary die.")
+            continue
         power_cap_min = c_uint64()
         power_cap_max = c_uint64()
         current_power_cap = c_uint64()
@@ -1195,17 +1199,17 @@ def setPowerOverDrive(deviceList, value, autoRespond):
         if rsmi_ret_ok(ret, device) == False:
             printErrLog(device, 'Unable to parse Power OverDrive range')
             RETCODE = 1
-            return
+            continue
         if int(strValue) > (power_cap_max.value / 1000000):
             printErrLog(device, 'Unable to set Power OverDrive')
             logging.error('GPU[%s]\t\t: Value cannot be greater than: %dW ', device, power_cap_max.value / 1000000)
             RETCODE = 1
-            return
+            continue
         if int(strValue) < (power_cap_min.value / 1000000):
             printErrLog(device, 'Unable to set Power OverDrive')
             logging.error('GPU[%s]\t\t: Value cannot be less than: %dW ', device, power_cap_min.value / 1000000)
             RETCODE = 1
-            return
+            continue
         if new_power_cap.value == current_power_cap.value:
             printErrLog(device,'Max power was already at: {}W'.format(new_power_cap.value / 1000000))
 
