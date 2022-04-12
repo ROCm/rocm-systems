@@ -36,7 +36,8 @@ project = "omnitrace"
 copyright = "2022, Advanced Micro Devices, Inc."
 author = "Audacious Software Group"
 
-version = open(os.path.join("..", "..", "VERSION")).read().strip()
+project_root = os.path.normpath(os.path.join(os.getcwd(), "..", ".."))
+version = open(os.path.join(project_root, "VERSION")).read().strip()
 # The full version, including alpha/beta/rc tags
 release = version
 
@@ -131,7 +132,7 @@ breathe_default_project = "omnitrace"
 breathe_default_members = ('members', )
 breathe_projects_source = {
     "auto": (
-        "../source",
+        os.path.join(project_root, "source"),
         [
             "lib/omnitrace-user/omnitrace/user.h",
         ],
