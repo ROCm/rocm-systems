@@ -263,11 +263,11 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
   # tms pid:tid cid:rid:'.....'
   ptrn_val = re.compile(r'(\d+) (\d+):(\d+) (\d+):(\d+):"(.*)"$')
 
-  if not os.path.isfile(file_name): return 0
-
   range_data = {}
   range_stack = {}
   range_map = {}
+
+  if not os.path.isfile(file_name): return 0
 
   record_id = 0
   table_handle = db.add_table(table_name, ext_table_descr)
