@@ -129,6 +129,11 @@ class SQLiteDB:
     with open(file_name, mode='w') as fd:
       fd.write(','.join(fields) + '\n')
       for raw in self._get_raws(table_name):
+        tmp = list(raw)
+        for idx in range(len(tmp)):
+          if type(tmp[idx]) == str:
+            if(not(tmp[idx][0] == tmp[idx][-1] == '"')): tmp[idx] = '"'+tmp[idx]+'"'
+        raw = tuple(tmp)
         fd.write(reduce(lambda a, b: str(a) + ',' + str(b), raw) + '\n')
 
   # dump JSON trace
