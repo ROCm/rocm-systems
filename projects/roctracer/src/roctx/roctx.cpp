@@ -37,7 +37,6 @@
 #define API_METHOD_PREFIX                                                                          \
   roctx_status_t err = ROCTX_STATUS_SUCCESS;                                                       \
   try {
-
 #define API_METHOD_SUFFIX                                                                          \
   }                                                                                                \
   catch (std::exception & e) {                                                                     \
@@ -52,7 +51,7 @@
     ERR_LOGGING(__FUNCTION__ << "(), " << e.what());                                               \
     err = roctx::GetExcStatus(e);                                                                  \
   }                                                                                                \
-  (void)err;                                                                                       \
+  (void)err;
 
 #define API_METHOD_CATCH(X)                                                                        \
   }                                                                                                \
@@ -84,8 +83,10 @@ thread_map_t thread_map;
 static thread_local message_stack_t* message_stack = NULL;
 
 roctx_status_t GetExcStatus(const std::exception& e) {
-  const roctracer::util::exception* roctx_exc_ptr = dynamic_cast<const roctracer::util::exception*>(&e);
-  return (roctx_exc_ptr) ? static_cast<roctx_status_t>(roctx_exc_ptr->status()) : ROCTX_STATUS_ERROR;
+  const roctracer::util::exception* roctx_exc_ptr =
+      dynamic_cast<const roctracer::util::exception*>(&e);
+  return (roctx_exc_ptr) ? static_cast<roctx_status_t>(roctx_exc_ptr->status())
+                         : ROCTX_STATUS_ERROR;
 }
 
 void thread_data_init() {
@@ -124,7 +125,8 @@ PUBLIC_API void roctxMarkA(const char* message) {
   activity_rtapi_callback_t api_callback_fun = NULL;
   void* api_callback_arg = NULL;
   roctx::cb_table.get(ROCTX_API_ID_roctxMarkA, &api_callback_fun, &api_callback_arg);
-  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxMarkA, &api_data, api_callback_arg);
+  if (api_callback_fun)
+    api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxMarkA, &api_data, api_callback_arg);
   API_METHOD_SUFFIX_NRET
 }
 
@@ -137,7 +139,9 @@ PUBLIC_API int roctxRangePushA(const char* message) {
   activity_rtapi_callback_t api_callback_fun = NULL;
   void* api_callback_arg = NULL;
   roctx::cb_table.get(ROCTX_API_ID_roctxRangePushA, &api_callback_fun, &api_callback_arg);
-  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePushA, &api_data, api_callback_arg);
+  if (api_callback_fun)
+    api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePushA, &api_data,
+                     api_callback_arg);
   roctx::message_stack->push(strdup(message));
 
   return roctx::message_stack->size() - 1;
@@ -152,11 +156,13 @@ PUBLIC_API int roctxRangePop() {
   activity_rtapi_callback_t api_callback_fun = NULL;
   void* api_callback_arg = NULL;
   roctx::cb_table.get(ROCTX_API_ID_roctxRangePop, &api_callback_fun, &api_callback_arg);
-  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePop, &api_data, api_callback_arg);
+  if (api_callback_fun)
+    api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePop, &api_data,
+                     api_callback_arg);
   if (roctx::message_stack->empty()) {
-      EXC_ABORT(ROCTX_STATUS_ERROR, "Pop from empty stack!");
+    EXC_ABORT(ROCTX_STATUS_ERROR, "Pop from empty stack!");
   } else {
-      roctx::message_stack->pop();
+    roctx::message_stack->pop();
   }
 
   return roctx::message_stack->size();
@@ -173,7 +179,9 @@ PUBLIC_API roctx_range_id_t roctxRangeStartA(const char* message) {
   activity_rtapi_callback_t api_callback_fun = NULL;
   void* api_callback_arg = NULL;
   roctx::cb_table.get(ROCTX_API_ID_roctxRangeStartA, &api_callback_fun, &api_callback_arg);
-  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangeStartA, &api_data, api_callback_arg);
+  if (api_callback_fun)
+    api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangeStartA, &api_data,
+                     api_callback_arg);
 
   return roctx_range_counter;
   API_METHOD_CATCH(-1);
@@ -186,14 +194,16 @@ PUBLIC_API void roctxRangeStop(roctx_range_id_t rangeId) {
   activity_rtapi_callback_t api_callback_fun = NULL;
   void* api_callback_arg = NULL;
   roctx::cb_table.get(ROCTX_API_ID_roctxRangeStop, &api_callback_fun, &api_callback_arg);
-  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangeStop, &api_data, api_callback_arg);
+  if (api_callback_fun)
+    api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangeStop, &api_data,
+                     api_callback_arg);
   API_METHOD_SUFFIX_NRET
 }
 
 PUBLIC_API void RangeStackIterate(roctx_range_iterate_cb_t callback, void* arg) {
   for (const auto& entry : roctx::thread_map) {
     const auto tid = entry.first;
-    for (roctx::message_stack_t stack = *(entry.second); !stack.empty(); stack.pop()){
+    for (roctx::message_stack_t stack = *(entry.second); !stack.empty(); stack.pop()) {
       std::string message = stack.top();
       roctx_range_data_t data{};
       data.message = message.c_str();

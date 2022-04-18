@@ -42,9 +42,7 @@ enum hsa_op_id_t {
 
 namespace roctracer {
 namespace hsa_support {
-enum {
-  HSA_OP_ID_async_copy = 0
-};
+enum { HSA_OP_ID_async_copy = 0 };
 
 extern CoreApiTable CoreApiTable_saved;
 extern AmdExtTable AmdExtTable_saved;
@@ -57,18 +55,18 @@ struct ops_properties_t {
   const char* output_prefix;
 };
 
-}; // namespace hsa_support
+};  // namespace hsa_support
 
 typedef hsa_support::ops_properties_t hsa_ops_properties_t;
-}; // namespace roctracer
+};  // namespace roctracer
 
 #include "hsa_ostream_ops.h"
 
 
-#else // !__cplusplus
+#else   // !__cplusplus
 typedef void* hsa_amd_queue_intercept_handler;
 typedef void* hsa_amd_runtime_queue_notifier;
-#endif //! __cplusplus
+#endif  //! __cplusplus
 
 #include <hsa_prof_str.h>
-#endif // INC_ROCTRACER_HSA_H_
+#endif  // INC_ROCTRACER_HSA_H_

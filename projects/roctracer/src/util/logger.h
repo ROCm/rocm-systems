@@ -168,32 +168,32 @@ class Logger {
 }  // namespace roctracer
 
 #define ERR_LOGGING(stream)                                                                        \
-  do {                                                                                                \
-    roctracer::util::Logger::Instance() << "error: " << roctracer::util::Logger::begm          \
-                                          << stream << roctracer::util::Logger::endl;            \
-  } while(0)
+  do {                                                                                             \
+    roctracer::util::Logger::Instance()                                                            \
+        << "error: " << roctracer::util::Logger::begm << stream << roctracer::util::Logger::endl;  \
+  } while (0)
 
 #define INFO_LOGGING(stream)                                                                       \
-  do {                                                                                                \
-    roctracer::util::Logger::Instance() << "info: " << roctracer::util::Logger::begm << stream \
-                                          << roctracer::util::Logger::endl;                      \
-  } while(0)
+  do {                                                                                             \
+    roctracer::util::Logger::Instance()                                                            \
+        << "info: " << roctracer::util::Logger::begm << stream << roctracer::util::Logger::endl;   \
+  } while (0)
 
 #define WARN_LOGGING(stream)                                                                       \
-  do {                                                                                                \
-    std::cerr << "ROCProfiler: " << stream << std::endl;                                                              \
-    roctracer::util::Logger::Instance() << "warning: " << roctracer::util::Logger::begm << stream \
-                                          << roctracer::util::Logger::endl;                      \
-  } while(0)
+  do {                                                                                             \
+    std::cerr << "ROCProfiler: " << stream << std::endl;                                           \
+    roctracer::util::Logger::Instance() << "warning: " << roctracer::util::Logger::begm << stream  \
+                                        << roctracer::util::Logger::endl;                          \
+  } while (0)
 
 #ifdef DEBUG
 #define DBG_LOGGING(stream)                                                                        \
-  do {                                                                                                \
-    roctracer::util::Logger::Instance() << roctracer::util::Logger::begm << "debug: \""        \
-                                          << stream << "\"" < < < <                                \
+  do {                                                                                             \
+    roctracer::util::Logger::Instance()                                                            \
+            << roctracer::util::Logger::begm << "debug: \"" << stream << "\"" < < < <              \
         " in " << __FUNCTION__ << " at " << __FILE__ << " line " << __LINE__                       \
-               << roctracer::util::Logger::endl;                                                 \
-  } while(0)
+               << roctracer::util::Logger::endl;                                                   \
+  } while (0)
 #endif
 
 #if DEBUG_TRACE_ON
@@ -204,8 +204,8 @@ inline static void DEBUG_TRACE(const char* fmt, ...) {
   va_list valist;
   va_start(valist, fmt);
   vsnprintf(buf, size, fmt, valist);
-  printf("%u:%u %s",
-    roctracer::util::Logger::GetPid(), roctracer::util::Logger::GetTid(), buf); fflush(stdout);
+  printf("%u:%u %s", roctracer::util::Logger::GetPid(), roctracer::util::Logger::GetTid(), buf);
+  fflush(stdout);
   va_end(valist);
 }
 #else

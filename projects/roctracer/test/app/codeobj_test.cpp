@@ -43,19 +43,18 @@ void check_status(roctracer_status_t status) {
 void codeobj_callback(uint32_t domain, uint32_t cid, const void* data, void* arg) {
   const hsa_evt_data_t* evt_data = reinterpret_cast<const hsa_evt_data_t*>(data);
   const char* uri = evt_data->codeobj.uri;
-  printf("codeobj_callback domain(%u) cid(%u): load_base(0x%lx) load_size(0x%lx) load_delta(0x%lx) uri(\"%s\")\n",
-    domain,
-    cid,
-    evt_data->codeobj.load_base,
-    evt_data->codeobj.load_size,
-    evt_data->codeobj.load_delta,
-    uri);
+  printf(
+      "codeobj_callback domain(%u) cid(%u): load_base(0x%lx) load_size(0x%lx) load_delta(0x%lx) "
+      "uri(\"%s\")\n",
+      domain, cid, evt_data->codeobj.load_base, evt_data->codeobj.load_size,
+      evt_data->codeobj.load_delta, uri);
   free((void*)uri);
   fflush(stdout);
 }
 
 void initialize() {
-  roctracer_status_t status = roctracer_enable_op_callback(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_CODEOBJ, codeobj_callback, NULL);
+  roctracer_status_t status = roctracer_enable_op_callback(
+      ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_CODEOBJ, codeobj_callback, NULL);
   check_status(status);
 }
 
@@ -79,9 +78,8 @@ extern "C" PUBLIC_API void OnUnloadTool() {
 }
 
 extern "C" CONSTRUCTOR_API void constructor() {
-  printf("constructor\n"); fflush(stdout);
+  printf("constructor\n");
+  fflush(stdout);
 }
 
-extern "C" DESTRUCTOR_API void destructor() {
-  OnUnloadTool();
-}
+extern "C" DESTRUCTOR_API void destructor() { OnUnloadTool(); }

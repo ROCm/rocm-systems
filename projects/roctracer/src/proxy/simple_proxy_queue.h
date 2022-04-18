@@ -30,7 +30,7 @@
 #include "util/hsa_rsrc_factory.h"
 
 #ifndef ROCP_PROXY_LOCK
-# define ROCP_PROXY_LOCK 1
+#define ROCP_PROXY_LOCK 1
 #endif
 
 namespace rocprofiler {
@@ -125,7 +125,8 @@ class SimpleProxyQueue : public ProxyQueue {
     const uint64_t que_idx = hsa_queue_load_write_index_relaxed_fn(queue_);
 
     // Waiting untill there is a free space in the queue
-    while (que_idx >= (hsa_queue_load_read_index_relaxed_fn(queue_) + size_));
+    while (que_idx >= (hsa_queue_load_read_index_relaxed_fn(queue_) + size_))
+      ;
 
     // Increment the write index
     hsa_queue_store_write_index_relaxed_fn(queue_, que_idx + 1);
@@ -160,8 +161,7 @@ class SimpleProxyQueue : public ProxyQueue {
         queue_mask_(0),
         submit_index_(0),
         on_submit_cb_(NULL),
-        on_submit_cb_data_(NULL)
-  {
+        on_submit_cb_data_(NULL) {
     printf("ROCProfiler: SimpleProxyQueue is enabled\n");
     fflush(stdout);
   }
@@ -200,8 +200,8 @@ class SimpleProxyQueue : public ProxyQueue {
 
           if (queue_map_ == NULL) queue_map_ = new queue_map_t;
           (*queue_map_)[queue_->doorbell_signal.handle] = this;
-        }
-        else abort();
+        } else
+          abort();
       }
     }
     if (status != HSA_STATUS_SUCCESS) abort();

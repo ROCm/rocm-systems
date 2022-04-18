@@ -44,23 +44,25 @@
 #define HSA_QUEUE_ALIGN_BYTES 64
 #define HSA_PACKET_ALIGN_BYTES 64
 
-#define CHECK_STATUS(msg, status) do {                                                             \
-  if ((status) != HSA_STATUS_SUCCESS) {                                                            \
-    const char* emsg = 0;                                                                          \
-    hsa_status_string(status, &emsg);                                                              \
-    printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                      \
-    abort();                                                                                       \
-  }                                                                                                \
-} while (0)
+#define CHECK_STATUS(msg, status)                                                                  \
+  do {                                                                                             \
+    if ((status) != HSA_STATUS_SUCCESS) {                                                          \
+      const char* emsg = 0;                                                                        \
+      hsa_status_string(status, &emsg);                                                            \
+      printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                    \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
 
-#define CHECK_ITER_STATUS(msg, status) do {                                                        \
-  if ((status) != HSA_STATUS_INFO_BREAK) {                                                         \
-    const char* emsg = 0;                                                                          \
-    hsa_status_string(status, &emsg);                                                              \
-    printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                      \
-    abort();                                                                                       \
-  }                                                                                                \
-} while (0)
+#define CHECK_ITER_STATUS(msg, status)                                                             \
+  do {                                                                                             \
+    if ((status) != HSA_STATUS_INFO_BREAK) {                                                       \
+      const char* emsg = 0;                                                                        \
+      hsa_status_string(status, &emsg);                                                            \
+      printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                    \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
 
 namespace util {
 static const size_t MEM_PAGE_BYTES = 0x1000;
@@ -174,15 +176,12 @@ class HsaTimer {
   static const timestamp_t TIMESTAMP_MAX = UINT64_MAX;
   typedef long double freq_t;
 
-  enum time_id_t {
-    TIME_ID_CLOCK_REALTIME = 0,
-    TIME_ID_CLOCK_MONOTONIC = 1,
-    TIME_ID_NUMBER
-  };
+  enum time_id_t { TIME_ID_CLOCK_REALTIME = 0, TIME_ID_CLOCK_MONOTONIC = 1, TIME_ID_NUMBER };
 
   HsaTimer(const hsa_pfn_t* hsa_api) : hsa_api_(hsa_api) {
     timestamp_t sysclock_hz = 0;
-    hsa_status_t status = hsa_api_->hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
+    hsa_status_t status =
+        hsa_api_->hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
     CHECK_STATUS("hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY)", status);
     sysclock_factor_ = (freq_t)1000000000 / (freq_t)sysclock_hz;
   }
@@ -217,8 +216,8 @@ class HsaTimer {
 
   // Return pair of correlated values of profiling timestamp and time with
   // correlation error for a given time ID and number of iterations
-  void correlated_pair_ns(time_id_t time_id, uint32_t iters,
-                          timestamp_t* timestamp_v, timestamp_t* time_v, timestamp_t* error_v) const {
+  void correlated_pair_ns(time_id_t time_id, uint32_t iters, timestamp_t* timestamp_v,
+                          timestamp_t* time_v, timestamp_t* error_v) const {
     clockid_t clock_id = 0;
     switch (time_id) {
       case TIME_ID_CLOCK_REALTIME:
@@ -357,7 +356,8 @@ class HsaRsrcFactory {
   uint8_t* AllocateCmdMemory(const AgentInfo* agent_info, size_t size);
 
   // Wait signal
-  hsa_signal_value_t SignalWait(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const;
+  hsa_signal_value_t SignalWait(const hsa_signal_t& signal,
+                                const hsa_signal_value_t& signal_value) const;
 
   // Wait signal with signal value restore
   void SignalWaitRestore(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const;
@@ -403,7 +403,9 @@ class HsaRsrcFactory {
   const hsa_ven_amd_loader_1_00_pfn_t* LoaderApi() const { return &loader_api_; }
 
   // Methods for system-clock/ns conversion and timestamp in 'ns'
-  timestamp_t SysclockToNs(const timestamp_t& sysclock) const { return timer_->sysclock_to_ns(sysclock); }
+  timestamp_t SysclockToNs(const timestamp_t& sysclock) const {
+    return timer_->sysclock_to_ns(sysclock);
+  }
   timestamp_t NsToSysclock(const timestamp_t& time) const { return timer_->ns_to_sysclock(time); }
   timestamp_t TimestampNs() const { return timer_->timestamp_ns(); }
 
@@ -482,8 +484,10 @@ class HsaRsrcFactory {
   typedef std::map<uint64_t, const char*> symbols_map_t;
   static symbols_map_t* symbols_map_;
   static bool executable_tracking_on_;
-  static hsa_status_t hsa_executable_freeze_interceptor(hsa_executable_t executable, const char *options);
-  static hsa_status_t executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol, void *data);
+  static hsa_status_t hsa_executable_freeze_interceptor(hsa_executable_t executable,
+                                                        const char* options);
+  static hsa_status_t executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol,
+                                            void* data);
 
   // HSA runtime API table
   static hsa_pfn_t hsa_api_;
@@ -507,8 +511,8 @@ class HsaRsrcFactory {
   timestamp_t time_error_[HsaTimer::TIME_ID_NUMBER];
 
   // CPU/kern-arg memory pools
-  hsa_amd_memory_pool_t *cpu_pool_;
-  hsa_amd_memory_pool_t *kern_arg_pool_;
+  hsa_amd_memory_pool_t* cpu_pool_;
+  hsa_amd_memory_pool_t* kern_arg_pool_;
 };
 
 }  // namespace util

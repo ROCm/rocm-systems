@@ -27,7 +27,7 @@ namespace roctracer {
 enum { API_CB_MASK = 0x1, ACT_CB_MASK = 0x2 };
 
 class hip_act_cb_tracker_t {
-  private:
+ private:
   std::map<uint32_t, uint32_t> data;
 
  public:

@@ -35,20 +35,21 @@
 
 namespace proxy {
 class Tracker {
-  public:
+ public:
   typedef util::HsaRsrcFactory::timestamp_t timestamp_t;
   typedef roctracer::trace_entry_t entry_t;
   typedef roctracer::entry_type_t entry_type_t;
 
   // Add tracker entry
-  inline static void Enable(entry_type_t type, const hsa_agent_t& agent, const hsa_signal_t& signal, entry_t* entry) {
+  inline static void Enable(entry_type_t type, const hsa_agent_t& agent, const hsa_signal_t& signal,
+                            entry_t* entry) {
     hsa_status_t status = HSA_STATUS_ERROR;
     util::HsaRsrcFactory* hsa_rsrc = &(util::HsaRsrcFactory::Instance());
 
     // Creating a new tracker entry
     entry->type = type;
     entry->agent = agent;
-    entry->dev_index = 0; //hsa_rsrc->GetAgentInfo(agent)->dev_index;
+    entry->dev_index = 0;  // hsa_rsrc->GetAgentInfo(agent)->dev_index;
     entry->orig = signal;
     entry->dispatch = hsa_rsrc->TimestampNs();
     entry->valid.store(roctracer::TRACE_ENTRY_INIT, std::memory_order_release);
@@ -56,7 +57,8 @@ class Tracker {
     // Creating a proxy signal
     status = hsa_signal_create(1, 0, NULL, &(entry->signal));
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_signal_create");
-    status = hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
+    status =
+        hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
   }
 
@@ -66,7 +68,7 @@ class Tracker {
     entry->valid.store(roctracer::TRACE_ENTRY_INV, std::memory_order_release);
   }
 
-  private:
+ private:
   // Entry completion
   inline static void Complete(hsa_signal_value_t signal_value, entry_t* entry) {
     // Query begin/end and complete timestamps
@@ -74,12 +76,14 @@ class Tracker {
     if (entry->type == roctracer::COPY_ENTRY_TYPE) {
       hsa_amd_profiling_async_copy_time_t async_copy_time{};
       hsa_status_t status = hsa_amd_profiling_get_async_copy_time(entry->signal, &async_copy_time);
-      if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_async_copy_time");
+      if (status != HSA_STATUS_SUCCESS)
+        EXC_RAISING(status, "hsa_amd_profiling_get_async_copy_time");
       entry->begin = hsa_rsrc->SysclockToNs(async_copy_time.start);
       entry->end = hsa_rsrc->SysclockToNs(async_copy_time.end);
     } else {
       hsa_amd_profiling_dispatch_time_t dispatch_time{};
-      hsa_status_t status = hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
+      hsa_status_t status =
+          hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_dispatch_time");
       entry->begin = hsa_rsrc->SysclockToNs(dispatch_time.start);
       entry->end = hsa_rsrc->SysclockToNs(dispatch_time.end);
@@ -101,7 +105,8 @@ class Tracker {
       orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
 
       const hsa_signal_value_t new_value = hsa_signal_load_relaxed(orig) - 1;
-      if (signal_value != new_value) EXC_ABORT(HSA_STATUS_ERROR, "Tracker::Complete bad signal value");
+      if (signal_value != new_value)
+        EXC_ABORT(HSA_STATUS_ERROR, "Tracker::Complete bad signal value");
       hsa_signal_store_screlease(orig, signal_value);
     }
     hsa_signal_destroy(signal);
@@ -111,7 +116,8 @@ class Tracker {
   static bool Handler(hsa_signal_value_t signal_value, void* arg) {
     // Acquire entry
     entry_t* entry = reinterpret_cast<entry_t*>(arg);
-    while (entry->valid.load(std::memory_order_acquire) != roctracer::TRACE_ENTRY_INIT) sched_yield();
+    while (entry->valid.load(std::memory_order_acquire) != roctracer::TRACE_ENTRY_INIT)
+      sched_yield();
 
     // Complete entry
     Tracker::Complete(signal_value, entry);
@@ -119,6 +125,6 @@ class Tracker {
   }
 };
 
-} // namespace rocprofiler
+}  // namespace proxy
 
-#endif // SRC_PROXY_TRACKER_H_
+#endif  // SRC_PROXY_TRACKER_H_

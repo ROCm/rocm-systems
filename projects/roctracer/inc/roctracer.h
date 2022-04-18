@@ -81,17 +81,15 @@ typedef activity_domain_t roctracer_domain_t;
 
 // Return Op string by given domain and Op code
 // NULL returned on the error and the library errno is set
-const char* roctracer_op_string(
-  uint32_t domain,                                        // tracing domain
-  uint32_t op,                                            // activity op ID
-  uint32_t kind);                                         // activity kind
+const char* roctracer_op_string(uint32_t domain,  // tracing domain
+                                uint32_t op,      // activity op ID
+                                uint32_t kind);   // activity kind
 
 // Return Op code and kind by given string
-roctracer_status_t roctracer_op_code(
-  uint32_t domain,                                        // tracing domain
-  const char* str,                                        // [in] op string
-  uint32_t* op,                                           // [out] op code
-  uint32_t* kind);                                        // [out] op kind code if not NULL
+roctracer_status_t roctracer_op_code(uint32_t domain,  // tracing domain
+                                     const char* str,  // [in] op string
+                                     uint32_t* op,     // [out] op code
+                                     uint32_t* kind);  // [out] op kind code if not NULL
 
 ////////////////////////////////////////////////////////////////////////////////
 // Callback API
@@ -106,24 +104,22 @@ typedef activity_rtapi_callback_t roctracer_rtapi_callback_t;
 
 // Enable runtime API callbacks
 roctracer_status_t roctracer_enable_op_callback(
-    activity_domain_t domain,                             // tracing domain
-    uint32_t op,                                          // API call ID
-    activity_rtapi_callback_t callback,                   // callback function pointer
-    void* arg);                                           // [in/out] callback arg
+    activity_domain_t domain,            // tracing domain
+    uint32_t op,                         // API call ID
+    activity_rtapi_callback_t callback,  // callback function pointer
+    void* arg);                          // [in/out] callback arg
 roctracer_status_t roctracer_enable_domain_callback(
-    activity_domain_t domain,                             // tracing domain
-    activity_rtapi_callback_t callback,                   // callback function pointer
-    void* arg);                                           // [in/out] callback arg
+    activity_domain_t domain,            // tracing domain
+    activity_rtapi_callback_t callback,  // callback function pointer
+    void* arg);                          // [in/out] callback arg
 roctracer_status_t roctracer_enable_callback(
-    activity_rtapi_callback_t callback,                   // callback function pointer
-    void* arg);                                           // [in/out] callback arg
+    activity_rtapi_callback_t callback,  // callback function pointer
+    void* arg);                          // [in/out] callback arg
 
 // Disable runtime API callbacks
-roctracer_status_t roctracer_disable_op_callback(
-    activity_domain_t domain,                             // tracing domain
-    uint32_t op);                                         // API call ID
-roctracer_status_t roctracer_disable_domain_callback(
-    activity_domain_t domain);                            // tracing domain
+roctracer_status_t roctracer_disable_op_callback(activity_domain_t domain,       // tracing domain
+                                                 uint32_t op);                   // API call ID
+roctracer_status_t roctracer_disable_domain_callback(activity_domain_t domain);  // tracing domain
 roctracer_status_t roctracer_disable_callback();
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -140,33 +136,32 @@ typedef activity_record_t roctracer_record_t;
 
 // Return next record
 static inline roctracer_status_t roctracer_next_record(
-    const activity_record_t* record,                      // [in] record ptr
-    const activity_record_t** next)                       // [out] next record ptr
+    const activity_record_t* record,  // [in] record ptr
+    const activity_record_t** next)   // [out] next record ptr
 {
   *next = record + 1;
   return ROCTRACER_STATUS_SUCCESS;
 }
 
 // Tracer allocator type
-typedef void (*roctracer_allocator_t)(
-    char** ptr,                                           // memory pointer
-    size_t size,                                          // memory size
-    void* arg);                                           // allocator arg
+typedef void (*roctracer_allocator_t)(char** ptr,   // memory pointer
+                                      size_t size,  // memory size
+                                      void* arg);   // allocator arg
 
 // Pool callback type
 typedef void (*roctracer_buffer_callback_t)(
-    const char* begin,                                    // [in] available buffered trace records
-    const char* end,                                      // [in] end of buffered trace records
-    void* arg);                                           // [in/out] callback arg
+    const char* begin,  // [in] available buffered trace records
+    const char* end,    // [in] end of buffered trace records
+    void* arg);         // [in/out] callback arg
 
 // Tracer properties
 typedef struct {
-    uint32_t mode;                                        // roctracer mode
-    size_t buffer_size;                                   // buffer size
-    roctracer_allocator_t alloc_fun;                      // memory alocator function pointer
-    void* alloc_arg;                                      // memory alocator function pointer
-    roctracer_buffer_callback_t buffer_callback_fun;      // tracer record callback function
-    void* buffer_callback_arg;                            // tracer record callback arg
+  uint32_t mode;                                    // roctracer mode
+  size_t buffer_size;                               // buffer size
+  roctracer_allocator_t alloc_fun;                  // memory alocator function pointer
+  void* alloc_arg;                                  // memory alocator function pointer
+  roctracer_buffer_callback_t buffer_callback_fun;  // tracer record callback function
+  void* buffer_callback_arg;                        // tracer record callback arg
 } roctracer_properties_t;
 
 // Tracer memory pool type
@@ -175,78 +170,69 @@ typedef void roctracer_pool_t;
 // Create tracer memory pool
 // The first invocation sets the default pool
 roctracer_status_t roctracer_open_pool_expl(
-    const roctracer_properties_t* properties,             // tracer pool properties
-    roctracer_pool_t** pool);                             // [out] returns tracer pool if not NULL,
-                                                          // otherwise sets the default one if it is not set yet
+    const roctracer_properties_t* properties,  // tracer pool properties
+    roctracer_pool_t** pool);                  // [out] returns tracer pool if not NULL,
+                               // otherwise sets the default one if it is not set yet
 static inline roctracer_status_t roctracer_open_pool(
-    const roctracer_properties_t* properties)             // tracer pool properties
+    const roctracer_properties_t* properties)  // tracer pool properties
 {
-    return roctracer_open_pool_expl(properties, NULL);
+  return roctracer_open_pool_expl(properties, NULL);
 }
-                                                          // otherwise the error is generated
+// otherwise the error is generated
 
 // Close tracer memory pool
 roctracer_status_t roctracer_close_pool_expl(
-    roctracer_pool_t* pool);                              // [in] memory pool, NULL is a default one
-static inline roctracer_status_t roctracer_close_pool()
-{
-    return roctracer_close_pool_expl(NULL);
-}
+    roctracer_pool_t* pool);  // [in] memory pool, NULL is a default one
+static inline roctracer_status_t roctracer_close_pool() { return roctracer_close_pool_expl(NULL); }
 
 // Return current default pool
 // Set new default pool if the argument is not NULL
 roctracer_pool_t* roctracer_default_pool_expl(
-    roctracer_pool_t* pool);                              // [in] new default pool if not NULL
-static inline roctracer_pool_t* roctracer_default_pool()
-{
-    return roctracer_default_pool_expl(NULL);
+    roctracer_pool_t* pool);  // [in] new default pool if not NULL
+static inline roctracer_pool_t* roctracer_default_pool() {
+  return roctracer_default_pool_expl(NULL);
 }
 
 // Enable activity records logging
 roctracer_status_t roctracer_enable_op_activity_expl(
-    activity_domain_t domain,                             // tracing domain
-    uint32_t op,                                          // activity op ID
-    roctracer_pool_t* pool);                              // memory pool, NULL is a default one
+    activity_domain_t domain,  // tracing domain
+    uint32_t op,               // activity op ID
+    roctracer_pool_t* pool);   // memory pool, NULL is a default one
 static inline roctracer_status_t roctracer_enable_op_activity(
-    activity_domain_t domain,                             // tracing domain
-    uint32_t op)                                          // activity op ID
+    activity_domain_t domain,  // tracing domain
+    uint32_t op)               // activity op ID
 {
-    return roctracer_enable_op_activity_expl(domain, op, NULL);
+  return roctracer_enable_op_activity_expl(domain, op, NULL);
 }
 roctracer_status_t roctracer_enable_domain_activity_expl(
-    activity_domain_t domain,                             // tracing domain
-    roctracer_pool_t* pool);                              // memory pool, NULL is a default one
+    activity_domain_t domain,  // tracing domain
+    roctracer_pool_t* pool);   // memory pool, NULL is a default one
 static inline roctracer_status_t roctracer_enable_domain_activity(
-    activity_domain_t domain)                             // tracing domain
+    activity_domain_t domain)  // tracing domain
 {
-    return roctracer_enable_domain_activity_expl(domain, NULL);
+  return roctracer_enable_domain_activity_expl(domain, NULL);
 }
 roctracer_status_t roctracer_enable_activity_expl(
-    roctracer_pool_t* pool);                       // memory pool, NULL is a default one
-static inline roctracer_status_t roctracer_enable_activity()
-{
-    return roctracer_enable_activity_expl(NULL);
+    roctracer_pool_t* pool);  // memory pool, NULL is a default one
+static inline roctracer_status_t roctracer_enable_activity() {
+  return roctracer_enable_activity_expl(NULL);
 }
 
 // Disable activity records logging
-roctracer_status_t roctracer_disable_op_activity(
-    activity_domain_t domain,                             // tracing domain
-    uint32_t op);                                         // activity op ID
-roctracer_status_t roctracer_disable_domain_activity(
-    activity_domain_t domain);                            // tracing domain
+roctracer_status_t roctracer_disable_op_activity(activity_domain_t domain,       // tracing domain
+                                                 uint32_t op);                   // activity op ID
+roctracer_status_t roctracer_disable_domain_activity(activity_domain_t domain);  // tracing domain
 roctracer_status_t roctracer_disable_activity();
 
 // Flush available activity records
 roctracer_status_t roctracer_flush_activity_expl(
-    roctracer_pool_t* pool);                              // memory pool, NULL is a default one
-static inline roctracer_status_t roctracer_flush_activity()
-{
-    return roctracer_flush_activity_expl(NULL);
+    roctracer_pool_t* pool);  // memory pool, NULL is a default one
+static inline roctracer_status_t roctracer_flush_activity() {
+  return roctracer_flush_activity_expl(NULL);
 }
 
 // Get system timestamp
-roctracer_status_t roctracer_get_timestamp(
-    uint64_t* timestamp);                                 // [out] return timestamp
+roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp);  // [out] return timestamp
 
 // Load/Unload methods
 bool roctracer_load();
@@ -254,9 +240,8 @@ void roctracer_unload();
 void roctracer_flush_buf();
 
 // Set properties
-roctracer_status_t roctracer_set_properties(
-    roctracer_domain_t domain,                            // tracing domain
-    void* propertes);                                     // tracing properties
+roctracer_status_t roctracer_set_properties(roctracer_domain_t domain,  // tracing domain
+                                            void* propertes);           // tracing properties
 
 #ifdef __cplusplus
 }  // extern "C" block

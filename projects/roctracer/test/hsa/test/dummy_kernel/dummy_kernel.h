@@ -33,10 +33,7 @@ class DummyKernel : public TestKernel {
   enum { KERNARG_BUF_ID, LOCAL_BUF_ID };
 
   // Constructor
-  DummyKernel() :
-    width_(64),
-    height_(64)
-  {
+  DummyKernel() : width_(64), height_(64) {
     SetInDescr(KERNARG_BUF_ID, KERNARG_DES_ID, 0);
     SetOutDescr(LOCAL_BUF_ID, LOCAL_DES_ID, 0);
   }
@@ -57,7 +54,9 @@ class DummyKernel : public TestKernel {
   // Reference CPU implementation
   bool ReferenceImplementation(uint32_t* output, const uint32_t* input, const float* mask,
                                const uint32_t width, const uint32_t height,
-                               const uint32_t maskWidth, const uint32_t maskHeight) { return true; }
+                               const uint32_t maskWidth, const uint32_t maskHeight) {
+    return true;
+  }
 
   // Width of the Input array
   const uint32_t width_;

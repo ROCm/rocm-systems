@@ -34,11 +34,12 @@ typedef hsa_ext_amd_aql_pm4_packet_t packet_t;
 typedef uint32_t packet_word_t;
 typedef uint64_t timestamp_t;
 
-inline std::ostream& operator<< (std::ostream& out, const event_t& event) {
-  out << "[block_name(" << event.block_name << "). block_index(" << event.block_index << "). counter_id(" << event.counter_id << ")]";
+inline std::ostream& operator<<(std::ostream& out, const event_t& event) {
+  out << "[block_name(" << event.block_name << "). block_index(" << event.block_index
+      << "). counter_id(" << event.counter_id << ")]";
   return out;
 }
-inline std::ostream& operator<< (std::ostream& out, const parameter_t& parameter) {
+inline std::ostream& operator<<(std::ostream& out, const parameter_t& parameter) {
   out << "[parameter_name(" << parameter.parameter_name << "). value(" << parameter.value << ")]";
   return out;
 }

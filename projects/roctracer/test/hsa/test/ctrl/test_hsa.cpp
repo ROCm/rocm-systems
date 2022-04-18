@@ -63,7 +63,8 @@ bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
       return false;
     }
   }
-  std::clog << "> Using agent[" << agent_info_->dev_index << "] : " << agent_info_->name << std::endl;
+  std::clog << "> Using agent[" << agent_info_->dev_index << "] : " << agent_info_->name
+            << std::endl;
 
   // Create an instance of Aql Queue
   if (hsa_queue_ == NULL) {
@@ -116,8 +117,8 @@ bool TestHsa::Setup() {
         size_t size_info = 0;
         const hsa_status_t status = hsa_executable_symbol_get_info(
             kernel_code_desc_, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &size_info);
-	TEST_ASSERT(status == HSA_STATUS_SUCCESS);
-	size_info = kernarg_size;
+        TEST_ASSERT(status == HSA_STATUS_SUCCESS);
+        size_info = kernarg_size;
         const bool kernarg_missmatch = (kernarg_size > size_info);
         if (kernarg_missmatch) {
           std::cout << "kernarg_size = " << kernarg_size << ", size_info = " << size_info
@@ -209,7 +210,8 @@ bool TestHsa::Run() {
   // Submit AQL packet to the queue
   const uint64_t que_idx = hsa_rsrc_->Submit(hsa_queue_, &aql);
 
-  std::clog << "> Waiting on kernel dispatch signal, que_idx=" << que_idx << std::endl << std::flush;
+  std::clog << "> Waiting on kernel dispatch signal, que_idx=" << que_idx << std::endl
+            << std::flush;
 
   // Wait on the dispatch signal until the kernel is finished.
   // Update wait condition to HSA_WAIT_STATE_ACTIVE for Polling

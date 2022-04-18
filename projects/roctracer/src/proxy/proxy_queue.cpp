@@ -36,10 +36,10 @@ ProxyQueue* ProxyQueue::Create(hsa_agent_t agent, uint32_t size, hsa_queue_type3
                                hsa_status_t* status) {
   hsa_status_t suc = HSA_STATUS_ERROR;
   ProxyQueue* instance =
-      (rocp_type_) ? (ProxyQueue*) new SimpleProxyQueue() : (ProxyQueue*) new HsaProxyQueue();
+      (rocp_type_) ? (ProxyQueue*)new SimpleProxyQueue() : (ProxyQueue*)new HsaProxyQueue();
   if (instance != NULL) {
     suc = instance->Init(agent, size, type, callback, data, private_segment_size,
-                                    group_segment_size, queue);
+                         group_segment_size, queue);
     if (suc != HSA_STATUS_SUCCESS) {
       delete instance;
       instance = NULL;

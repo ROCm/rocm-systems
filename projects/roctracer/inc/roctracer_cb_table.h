@@ -28,9 +28,8 @@
 namespace roctracer {
 
 // Generic callbacks table
-template <int N>
-class CbTable {
-  public:
+template <int N> class CbTable {
+ public:
   typedef std::mutex mutex_t;
 
   CbTable() {
@@ -63,7 +62,7 @@ class CbTable {
     return ret;
   }
 
-  private:
+ private:
   activity_rtapi_callback_t callback_[N];
   void* arg_[N];
   mutex_t mutex_;

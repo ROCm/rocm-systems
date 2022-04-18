@@ -42,7 +42,7 @@
 namespace roctracer {
 
 class MemoryPool {
-  public:
+ public:
   typedef std::mutex mutex_t;
 
   static void allocator_default(char** ptr, size_t size, void* arg) {
@@ -52,12 +52,12 @@ class MemoryPool {
     } else if (size != 0) {
       *ptr = reinterpret_cast<char*>(realloc(*ptr, size));
     } else {
-      free(*ptr); 
+      free(*ptr);
       *ptr = NULL;
     }
   }
 
-  MemoryPool(const roctracer_properties_t& properties) { 
+  MemoryPool(const roctracer_properties_t& properties) {
     // Assigning pool allocator
     alloc_fun_ = allocator_default;
     alloc_arg_ = NULL;
@@ -89,14 +89,14 @@ class MemoryPool {
   ~MemoryPool() {
     Flush();
     PTHREAD_CALL(pthread_cancel(consumer_thread_));
-    void *res;
+    void* res;
     PTHREAD_CALL(pthread_join(consumer_thread_, &res));
-    if (res != PTHREAD_CANCELED) EXC_ABORT(ROCTRACER_STATUS_ERROR, "consumer thread wasn't stopped correctly");
+    if (res != PTHREAD_CANCELED)
+      EXC_ABORT(ROCTRACER_STATUS_ERROR, "consumer thread wasn't stopped correctly");
     allocator_default(&pool_begin_, 0, alloc_arg_);
   }
 
-  template <typename Record>
-  void Write(const Record& record) {
+  template <typename Record> void Write(const Record& record) {
     std::lock_guard<mutex_t> lock(write_mutex_);
     getRecord<Record>(record);
   }
@@ -112,7 +112,7 @@ class MemoryPool {
     }
   }
 
-  private:
+ private:
   struct consumer_arg_t {
     MemoryPool* obj;
     const char* begin;
@@ -126,11 +126,13 @@ class MemoryPool {
     }
   };
 
-  template <typename Record>
-  Record* getRecord(const Record& init) {
+  template <typename Record> Record* getRecord(const Record& init) {
     char* next = write_ptr_ + sizeof(Record);
     if (next > buffer_end_) {
-      if (write_ptr_ == buffer_begin_) EXC_ABORT(ROCTRACER_STATUS_ERROR, "buffer size(" << buffer_size_ << ") is less then the record(" << sizeof(Record) << ")");
+      if (write_ptr_ == buffer_begin_)
+        EXC_ABORT(ROCTRACER_STATUS_ERROR,
+                  "buffer size(" << buffer_size_ << ") is less then the record(" << sizeof(Record)
+                                 << ")");
       spawn_reader(buffer_begin_, write_ptr_);
       buffer_begin_ = (buffer_end_ == pool_end_) ? pool_begin_ : buffer_end_;
       buffer_end_ = buffer_begin_ + buffer_size_;
@@ -145,12 +147,10 @@ class MemoryPool {
     return ptr;
   }
 
-  static void reset_reader(consumer_arg_t* arg) {
-    arg->valid.store(false);
-  }
+  static void reset_reader(consumer_arg_t* arg) { arg->valid.store(false); }
 
   static void sync_reader(const consumer_arg_t* arg) {
-    while(arg->valid.load() == true) PTHREAD_CALL(sched_yield());
+    while (arg->valid.load() == true) PTHREAD_CALL(sched_yield());
   }
 
   static void* reader_fun(void* consumer_arg) {

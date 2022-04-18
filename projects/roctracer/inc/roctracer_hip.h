@@ -25,12 +25,12 @@
 #include <iostream>
 
 inline static std::ostream& operator<<(std::ostream& out, const unsigned char& v) {
-  out  << (unsigned int)v;
+  out << (unsigned int)v;
   return out;
 }
 
 inline static std::ostream& operator<<(std::ostream& out, const char& v) {
-  out  << (unsigned char)v;
+  out << (unsigned char)v;
   return out;
 }
 #endif  // __cplusplus

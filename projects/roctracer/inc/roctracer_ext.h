@@ -62,7 +62,8 @@ roctracer_status_t roctracer_activity_push_external_correlation_id(activity_corr
 // Notifies that the calling thread is leaving an external API region.
 // Pop an external correlation id for the calling thread.
 // 'lastId' returns the last external correlation if not NULL
-roctracer_status_t roctracer_activity_pop_external_correlation_id(activity_correlation_id_t* last_id);
+roctracer_status_t roctracer_activity_pop_external_correlation_id(
+    activity_correlation_id_t* last_id);
 
 #ifdef __cplusplus
 }  // extern "C" block

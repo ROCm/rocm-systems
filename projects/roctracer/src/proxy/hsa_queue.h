@@ -31,9 +31,7 @@ class HsaQueue : public Queue {
  public:
   HsaQueue(const util::AgentInfo* agent_info, hsa_queue_t* queue) : queue_(queue) {}
 
-  void Submit(const packet_t* packet) {
-    util::HsaRsrcFactory::Instance().Submit(queue_, packet);
-  }
+  void Submit(const packet_t* packet) { util::HsaRsrcFactory::Instance().Submit(queue_, packet); }
 
  private:
   hsa_queue_t* queue_;

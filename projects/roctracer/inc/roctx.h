@@ -59,8 +59,8 @@ void roctxMarkA(const char* message);
 ////////////////////////////////////////////////////////////////////////////////
 // Ranges annotating API
 
-// Returns the 0 based level of a nested range being started by given message associated to this range.
-// A negative value is returned on the error.
+// Returns the 0 based level of a nested range being started by given message associated to this
+// range. A negative value is returned on the error.
 int roctxRangePushA(const char* message);
 #define roctxRangePush(message) roctxRangePushA(message)
 

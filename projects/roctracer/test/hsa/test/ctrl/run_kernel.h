@@ -24,7 +24,9 @@
 #include "ctrl/test_hsa.h"
 #include "util/test_assert.h"
 
-template <class Kernel, class Test> bool RunKernel(int argc = 0, char* argv[] = NULL, const AgentInfo* agent_info = NULL, hsa_queue_t* queue = NULL, int count = 1) {
+template <class Kernel, class Test>
+bool RunKernel(int argc = 0, char* argv[] = NULL, const AgentInfo* agent_info = NULL,
+               hsa_queue_t* queue = NULL, int count = 1) {
   bool ret_val = false;
 
   if (getenv("ROC_TEST_TRACE") == NULL) std::clog.rdbuf(NULL);

@@ -45,8 +45,6 @@ PUBLIC_API bool RegisterApiCallback(uint32_t op, void* callback, void* arg) {
   return roctx::cb_table.set(op, reinterpret_cast<activity_rtapi_callback_t>(callback), arg);
 }
 
-PUBLIC_API bool RemoveApiCallback(uint32_t op) {
-  return roctx::cb_table.set(op, NULL, NULL);
-}
+PUBLIC_API bool RemoveApiCallback(uint32_t op) { return roctx::cb_table.set(op, NULL, NULL); }
 
 }  // extern "C"

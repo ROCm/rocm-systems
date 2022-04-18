@@ -212,7 +212,8 @@ class Xml {
       buf[size - 1] = '\0';
 
       if (strncmp(buf, "#include \"", 10) == 0) {
-        for (ind = 0; (ind < size) && (buf[ind] != '\n'); ++ind) {}
+        for (ind = 0; (ind < size) && (buf[ind] != '\n'); ++ind) {
+        }
         if (ind == size) {
           fprintf(stderr, "XML PreProcess failed, line size limit %zu\n", kBufSize);
           error = true;
@@ -222,7 +223,8 @@ class Xml {
         size = ind;
         lseek(fd_, pos + ind + 1, SEEK_SET);
 
-        for (ind = 10; (ind < size) && (buf[ind] != '"'); ++ind) {}
+        for (ind = 10; (ind < size) && (buf[ind] != '"'); ++ind) {
+        }
         if (ind == size) {
           error = true;
           break;

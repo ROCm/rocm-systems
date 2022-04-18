@@ -37,7 +37,9 @@
 #include "util/hsa_rsrc_factory.h"
 #include "util/exception.h"
 
-namespace roctracer { extern TraceBuffer<trace_entry_t>* trace_buffer; }
+namespace roctracer {
+extern TraceBuffer<trace_entry_t>* trace_buffer;
+}
 
 namespace rocprofiler {
 extern decltype(hsa_queue_create)* hsa_queue_create_fn;
@@ -48,25 +50,25 @@ class InterceptQueue {
   typedef std::recursive_mutex mutex_t;
   typedef std::map<uint64_t, InterceptQueue*> obj_map_t;
   typedef hsa_status_t (*queue_callback_t)(hsa_queue_t*, void* data);
-  typedef void (*queue_event_callback_t)(hsa_status_t status, hsa_queue_t *queue, void *arg);
+  typedef void (*queue_event_callback_t)(hsa_status_t status, hsa_queue_t* queue, void* arg);
   typedef uint32_t queue_id_t;
 
   static void HsaIntercept(HsaApiTable* table);
 
-  static hsa_status_t InterceptQueueCreate(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
-                                  void (*callback)(hsa_status_t status, hsa_queue_t* source,
-                                                   void* data),
-                                  void* data, uint32_t private_segment_size,
-                                  uint32_t group_segment_size, hsa_queue_t** queue,
-                                  const bool& tracker_on) {
+  static hsa_status_t InterceptQueueCreate(
+      hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+      void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
+      uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue,
+      const bool& tracker_on) {
     std::lock_guard<mutex_t> lck(mutex_);
     hsa_status_t status = HSA_STATUS_ERROR;
 
     if (in_create_call_) EXC_ABORT(status, "recursive InterceptQueueCreate()");
     in_create_call_ = true;
 
-    ProxyQueue* proxy = ProxyQueue::Create(agent, size, type, queue_event_callback, data, private_segment_size,
-                                           group_segment_size, queue, &status);
+    ProxyQueue* proxy =
+        ProxyQueue::Create(agent, size, type, queue_event_callback, data, private_segment_size,
+                           group_segment_size, queue, &status);
     if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "ProxyQueue::Create()");
 
     status = util::HsaRsrcFactory::HsaApi()->hsa_amd_profiling_set_profiler_enabled(*queue, true);
@@ -78,7 +80,8 @@ class InterceptQueue {
     obj->queue_id = current_queue_id;
     (*obj_map_)[(uint64_t)(*queue)] = obj;
 
-    status = (is_enabled) ? proxy->SetInterceptCB(OnSubmitCB, obj) : proxy->SetInterceptCB(OnSubmitCB_dummy, obj);
+    status = (is_enabled) ? proxy->SetInterceptCB(OnSubmitCB, obj)
+                          : proxy->SetInterceptCB(OnSubmitCB_dummy, obj);
 
 #if 0
     if (create_callback_ != NULL) {
@@ -96,15 +99,17 @@ class InterceptQueue {
                                                    void* data),
                                   void* data, uint32_t private_segment_size,
                                   uint32_t group_segment_size, hsa_queue_t** queue) {
-    return InterceptQueueCreate(agent, size, type, callback, data, private_segment_size, group_segment_size, queue, false);
+    return InterceptQueueCreate(agent, size, type, callback, data, private_segment_size,
+                                group_segment_size, queue, false);
   }
 
   static hsa_status_t QueueCreateTracked(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
-                                  void (*callback)(hsa_status_t status, hsa_queue_t* source,
-                                                   void* data),
-                                  void* data, uint32_t private_segment_size,
-                                  uint32_t group_segment_size, hsa_queue_t** queue) {
-    return InterceptQueueCreate(agent, size, type, callback, data, private_segment_size, group_segment_size, queue, true);
+                                         void (*callback)(hsa_status_t status, hsa_queue_t* source,
+                                                          void* data),
+                                         void* data, uint32_t private_segment_size,
+                                         uint32_t group_segment_size, hsa_queue_t** queue) {
+    return InterceptQueueCreate(agent, size, type, callback, data, private_segment_size,
+                                group_segment_size, queue, true);
   }
 
   static hsa_status_t QueueDestroy(hsa_queue_t* queue) {
@@ -122,8 +127,8 @@ class InterceptQueue {
     return status;
   }
 
-  static void OnSubmitCB_dummy(const void* in_packets, uint64_t count, uint64_t user_que_idx, void* data,
-                               hsa_amd_queue_intercept_packet_writer writer) {
+  static void OnSubmitCB_dummy(const void* in_packets, uint64_t count, uint64_t user_que_idx,
+                               void* data, hsa_amd_queue_intercept_packet_writer writer) {
     const packet_t* packets_arr = reinterpret_cast<const packet_t*>(in_packets);
 
     // Submitting the original packets if profiling was not enabled
@@ -161,8 +166,10 @@ class InterceptQueue {
         ::proxy::Tracker::entry_t* entry = roctracer::trace_buffer->GetEntry();
         entry->kernel.tid = syscall(__NR_gettid);
         entry->kernel.name = kernel_name;
-        ::proxy::Tracker::Enable(roctracer::KERNEL_ENTRY_TYPE, obj->agent_info_->dev_id, completion_signal, entry);
-        const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal = entry->signal;
+        ::proxy::Tracker::Enable(roctracer::KERNEL_ENTRY_TYPE, obj->agent_info_->dev_id,
+                                 completion_signal, entry);
+        const_cast<hsa_kernel_dispatch_packet_t*>(dispatch_packet)->completion_signal =
+            entry->signal;
       }
     }
 
@@ -190,7 +197,7 @@ class InterceptQueue {
   static void Enable(bool val) { is_enabled = val; }
 
  private:
-  static void queue_event_callback(hsa_status_t status, hsa_queue_t *queue, void *arg) {
+  static void queue_event_callback(hsa_status_t status, hsa_queue_t* queue, void* arg) {
     if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "queue error handling is not supported");
     InterceptQueue* obj = GetObj(queue);
     if (obj->queue_event_callback_) obj->queue_event_callback_(status, obj->queue_, arg);
@@ -201,7 +208,8 @@ class InterceptQueue {
     return static_cast<hsa_packet_type_t>((*header >> HSA_PACKET_HEADER_TYPE) & header_type_mask);
   }
 
-  static const amd_kernel_code_t* GetKernelCode(const hsa_kernel_dispatch_packet_t* dispatch_packet) {
+  static const amd_kernel_code_t* GetKernelCode(
+      const hsa_kernel_dispatch_packet_t* dispatch_packet) {
     const amd_kernel_code_t* kernel_code = NULL;
     hsa_status_t status =
         util::HsaRsrcFactory::Instance().LoaderApi()->hsa_ven_amd_loader_query_host_address(
@@ -256,22 +264,19 @@ class InterceptQueue {
       assert(queue == obj->queue_);
       delete obj;
       obj_map_->erase(it);
-      status = HSA_STATUS_SUCCESS;;
+      status = HSA_STATUS_SUCCESS;
+      ;
     }
     return status;
   }
 
-  InterceptQueue(const hsa_agent_t& agent, hsa_queue_t* const queue, ProxyQueue* proxy) :
-    queue_(queue),
-    proxy_(proxy)
-  {
+  InterceptQueue(const hsa_agent_t& agent, hsa_queue_t* const queue, ProxyQueue* proxy)
+      : queue_(queue), proxy_(proxy) {
     agent_info_ = util::HsaRsrcFactory::Instance().GetAgentInfo(agent);
     queue_event_callback_ = NULL;
   }
 
-  ~InterceptQueue() {
-    ProxyQueue::Destroy(proxy_);
-  }
+  ~InterceptQueue() { ProxyQueue::Destroy(proxy_); }
 
   static bool is_enabled;
 

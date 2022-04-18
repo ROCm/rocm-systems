@@ -21,19 +21,14 @@
 #ifndef INC_ROCTRACER_HCC_H_
 #define INC_ROCTRACER_HCC_H_
 
-enum {
-    HIP_OP_ID_DISPATCH = 0,
-    HIP_OP_ID_COPY = 1,
-    HIP_OP_ID_BARRIER = 2,
-    HIP_OP_ID_NUMBER = 3
-};
+enum { HIP_OP_ID_DISPATCH = 0, HIP_OP_ID_COPY = 1, HIP_OP_ID_BARRIER = 2, HIP_OP_ID_NUMBER = 3 };
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-typedef void (hipInitAsyncActivityCallback_t)(void* id_callback, void* op_callback, void* arg);
-typedef bool (hipEnableAsyncActivityCallback_t)(unsigned op, bool enable);
-typedef const char* (hipGetOpName_t)(unsigned op);
+typedef void(hipInitAsyncActivityCallback_t)(void* id_callback, void* op_callback, void* arg);
+typedef bool(hipEnableAsyncActivityCallback_t)(unsigned op, bool enable);
+typedef const char*(hipGetOpName_t)(unsigned op);
 #ifdef __cplusplus
 }
 #endif
