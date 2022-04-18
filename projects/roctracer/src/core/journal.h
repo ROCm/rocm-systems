@@ -21,78 +21,40 @@
 #ifndef SRC_CORE_JOURNAL_H_
 #define SRC_CORE_JOURNAL_H_
 
-#include <map>
+#include "ext/prof_protocol.h"
+
 #include <mutex>
+#include <type_traits>
+#include <unordered_map>
 
 namespace roctracer {
 
-template <class Data>
-class Journal {
-  public:
-  typedef std::mutex mutex_t;
-  typedef std::map<uint32_t, Data> domain_map_t;
-  typedef std::map<uint32_t, domain_map_t*> journal_map_t;
-
-  struct record_t {
-    uint32_t domain;
-    uint32_t op;
-    Data data;
-  };
-
-  Journal() {
-    domain_mask_ = 0;
-    map_ = new journal_map_t;
+template <typename Data> class Journal {
+ public:
+  /* Insert { domain, op } into the journal. Return false if the insertion failed.  */
+  template <typename T = Data, std::enable_if_t<std::is_constructible_v<Data, T>, int> = 0>
+  bool Insert(roctracer_domain_t domain, uint32_t op, T&& data) {
+    std::lock_guard lock(mutex_);
+    return map_[domain].emplace(op, std::forward<T>(data)).second;
   }
 
-  ~Journal() {
-    for (auto& val : *map_) delete val.second;
-    delete map_;
+  /* Remove { domain, op } from the journal. Return false if the entry did not exist.  */
+  bool Remove(roctracer_domain_t domain, uint32_t op) {
+    std::lock_guard lock(mutex_);
+    return map_[domain].erase(op) == 1;
   }
 
-  void registr(const record_t& record) {
-    std::lock_guard<mutex_t> lck(mutex_);
-    auto* map = get_domain_map(record.domain);
-    map->insert({record.op, record.data});
+  template <typename Functor> void ForEach(Functor&& func) {
+    std::lock_guard lock(mutex_);
+    for (auto&& domain : map_)
+      for (auto&& operation : domain.second)
+        if (!func(domain.first /* domain */, operation.first /* op */, operation.second /* data */))
+          break; /* FIXME: what are we breaking out of? */
   }
 
-  void remove(const record_t& record) {
-    std::lock_guard<mutex_t> lck(mutex_);
-    auto* map = get_domain_map(record.domain);
-    map->erase(record.op);
-  }
-
-  template <class F>
-  F foreach(const F& f_i) {
-    std::lock_guard<mutex_t> lck(mutex_);
-    F f = f_i;
-    for (uint32_t domain = 0, mask = domain_mask_; mask != 0; ++domain, mask >>= 1) {
-      if (mask & 1) {
-        auto map = get_domain_map(domain);
-        auto begin = map->begin();
-        auto end = map->end();
-        for (auto it = begin; it != end; ++it) {
-          if (f.fun({domain, it->first, it->second}) == false) break;
-        }
-      }
-    }
-    return f;
-  }
-
-  private:
-  domain_map_t* get_domain_map(const uint32_t& domain) {
-    domain_mask_ |= 1u << domain;
-    auto domain_it = map_->find(domain);
-    if (domain_it == map_->end()) {
-      auto* domain_map = new domain_map_t;
-      auto ret = map_->insert({domain, domain_map});
-      domain_it = ret.first;
-    }
-    return domain_it->second;
-  }
-
-  mutex_t mutex_;
-  journal_map_t* map_;
-  uint32_t domain_mask_;
+ private:
+  std::mutex mutex_;
+  std::unordered_map<roctracer_domain_t, std::unordered_map<uint32_t, Data>> map_;
 };
 
 }  // namespace roctracer
