@@ -788,7 +788,8 @@ static roctracer_status_t roctracer_enable_callback_fun(roctracer_domain_t domai
         break;
       }
 #endif
-      roctracer::hsa_support::cb_table.set(op, callback, user_data);
+      if (op >= HSA_API_ID_NUMBER) return ROCTRACER_STATUS_BAD_PARAMETER;
+      roctracer::hsa_support::cb_table.Set(op, callback, user_data);
       break;
     }
     case ACTIVITY_DOMAIN_HSA_EVT: {
@@ -885,7 +886,8 @@ static roctracer_status_t roctracer_disable_callback_fun(roctracer_domain_t doma
         break;
       }
 #endif
-      roctracer::hsa_support::cb_table.set(op, NULL, NULL);
+      if (op >= HSA_API_ID_NUMBER) return ROCTRACER_STATUS_BAD_PARAMETER;
+      roctracer::hsa_support::cb_table.Set(op, NULL, NULL);
       break;
     }
     case ACTIVITY_DOMAIN_HCC_OPS:

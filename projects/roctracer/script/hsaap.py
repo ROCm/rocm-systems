@@ -324,6 +324,7 @@ class API_DescrParser:
 
     self.content += '\n'
     self.content += '#if PROF_API_IMPL\n'
+    self.content += '#include \"core/callback_table.h\"\n';
     self.content += 'namespace roctracer {\n'
     self.content += 'namespace hsa_support {\n'
     self.add_section('API callback functions', '', self.gen_callbacks)
@@ -394,7 +395,7 @@ class API_DescrParser:
   # generate API callbacks
   def gen_callbacks(self, n, name, call, struct):
     if n == -1:
-      self.content += 'typedef CbTable<HSA_API_ID_NUMBER> cb_table_t;\n'
+      self.content += 'typedef CallbackTable<HSA_API_ID_NUMBER> cb_table_t;\n'
       self.content += 'extern cb_table_t cb_table;\n'
       self.content += '\n'
     if call != '-':
@@ -412,7 +413,7 @@ class API_DescrParser:
             self.content += '  api_data.args.' + call + '.' + var + '__val = ' + '*(' + var + ');\n'
       self.content += '  activity_rtapi_callback_t api_callback_fun = NULL;\n'
       self.content += '  void* api_callback_arg = NULL;\n'
-      self.content += '  cb_table.get(' + call_id + ', &api_callback_fun, &api_callback_arg);\n'
+      self.content += '  cb_table.Get(' + call_id + ', &api_callback_fun, &api_callback_arg);\n'
       self.content += '  api_data.phase = 0;\n'
       self.content += '  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_HSA_API, ' + call_id + ', &api_data, api_callback_arg);\n'
       if ret_type != 'void':

@@ -18,56 +18,42 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef CB_TABLE_H_
-#define CB_TABLE_H_
+#ifndef CALLBACK_TABLE_H_
+#define CALLBACK_TABLE_H_
 
 #include <ext/prof_protocol.h>
 
+#include <cassert>
 #include <mutex>
+#include <utility>
 
 namespace roctracer {
 
 // Generic callbacks table
-template <int N> class CbTable {
+template <uint32_t N> class CallbackTable {
  public:
-  typedef std::mutex mutex_t;
+  CallbackTable()
+      // Zero initialize the callbacks array as the function pointer is used to determine if the
+      // callback is enabled.
+      : callbacks_() {}
 
-  CbTable() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    for (int i = 0; i < N; i++) {
-      callback_[i] = NULL;
-      arg_[i] = NULL;
-    }
+  void Set(uint32_t id, activity_rtapi_callback_t callback, void* arg) {
+    assert(id < N && "id is out of range");
+    std::lock_guard lock(mutex_);
+    callbacks_[id] = {callback, arg};
   }
 
-  bool set(uint32_t id, activity_rtapi_callback_t callback, void* arg) {
-    std::lock_guard<mutex_t> lck(mutex_);
-    bool ret = false;
-    if (id < N) {
-      callback_[id] = callback;
-      arg_[id] = arg;
-      ret = true;
-    }
-    return ret;
-  }
-
-  bool get(uint32_t id, activity_rtapi_callback_t* callback, void** arg) {
-    std::lock_guard<mutex_t> lck(mutex_);
-    bool ret = false;
-    if (id < N) {
-      *callback = callback_[id];
-      *arg = arg_[id];
-      ret = true;
-    }
-    return ret;
+  void Get(uint32_t id, activity_rtapi_callback_t* callback, void** arg) const {
+    assert(id < N && "id is out of range");
+    std::lock_guard lock(mutex_);
+    std::tie(*callback, *arg) = callbacks_[id];
   }
 
  private:
-  activity_rtapi_callback_t callback_[N];
-  void* arg_[N];
-  mutex_t mutex_;
+  std::array<std::pair<activity_rtapi_callback_t /* callback */, void* /* arg */>, N> callbacks_;
+  mutable std::mutex mutex_;
 };
 
 }  // namespace roctracer
 
-#endif  // CB_TALE_H_
+#endif  // CALLBACK_TABLE_H_

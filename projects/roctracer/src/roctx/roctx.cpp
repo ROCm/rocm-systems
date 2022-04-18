@@ -27,6 +27,7 @@
 #include <stack>
 
 #include "inc/ext/prof_protocol.h"
+#include "core/callback_table.h"
 #include "util/exception.h"
 #include "util/logger.h"
 
@@ -75,6 +76,14 @@ typedef enum {
 // Library implementation
 //
 namespace roctx {
+
+// ROCTX callbacks table type
+typedef roctracer::CallbackTable<ROCTX_API_ID_NUMBER> cb_table_t;
+
+// callbacks table
+cb_table_t cb_table;
+
+
 typedef std::stack<std::string> message_stack_t;
 typedef std::map<uint32_t, message_stack_t*> thread_map_t;
 typedef std::mutex map_mutex_t;
@@ -124,7 +133,7 @@ PUBLIC_API void roctxMarkA(const char* message) {
   api_data.args.roctxMarkA.message = strdup(message);
   activity_rtapi_callback_t api_callback_fun = NULL;
   void* api_callback_arg = NULL;
-  roctx::cb_table.get(ROCTX_API_ID_roctxMarkA, &api_callback_fun, &api_callback_arg);
+  roctx::cb_table.Get(ROCTX_API_ID_roctxMarkA, &api_callback_fun, &api_callback_arg);
   if (api_callback_fun)
     api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxMarkA, &api_data, api_callback_arg);
   API_METHOD_SUFFIX_NRET
@@ -138,7 +147,7 @@ PUBLIC_API int roctxRangePushA(const char* message) {
   api_data.args.roctxRangePushA.message = strdup(message);
   activity_rtapi_callback_t api_callback_fun = NULL;
   void* api_callback_arg = NULL;
-  roctx::cb_table.get(ROCTX_API_ID_roctxRangePushA, &api_callback_fun, &api_callback_arg);
+  roctx::cb_table.Get(ROCTX_API_ID_roctxRangePushA, &api_callback_fun, &api_callback_arg);
   if (api_callback_fun)
     api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePushA, &api_data,
                      api_callback_arg);
@@ -155,7 +164,7 @@ PUBLIC_API int roctxRangePop() {
   roctx_api_data_t api_data{};
   activity_rtapi_callback_t api_callback_fun = NULL;
   void* api_callback_arg = NULL;
-  roctx::cb_table.get(ROCTX_API_ID_roctxRangePop, &api_callback_fun, &api_callback_arg);
+  roctx::cb_table.Get(ROCTX_API_ID_roctxRangePop, &api_callback_fun, &api_callback_arg);
   if (api_callback_fun)
     api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePop, &api_data,
                      api_callback_arg);
@@ -178,7 +187,7 @@ PUBLIC_API roctx_range_id_t roctxRangeStartA(const char* message) {
   api_data.args.roctxRangeStartA.id = roctx_range_counter;
   activity_rtapi_callback_t api_callback_fun = NULL;
   void* api_callback_arg = NULL;
-  roctx::cb_table.get(ROCTX_API_ID_roctxRangeStartA, &api_callback_fun, &api_callback_arg);
+  roctx::cb_table.Get(ROCTX_API_ID_roctxRangeStartA, &api_callback_fun, &api_callback_arg);
   if (api_callback_fun)
     api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangeStartA, &api_data,
                      api_callback_arg);
@@ -193,7 +202,7 @@ PUBLIC_API void roctxRangeStop(roctx_range_id_t rangeId) {
   api_data.args.roctxRangeStop.id = rangeId;
   activity_rtapi_callback_t api_callback_fun = NULL;
   void* api_callback_arg = NULL;
-  roctx::cb_table.get(ROCTX_API_ID_roctxRangeStop, &api_callback_fun, &api_callback_arg);
+  roctx::cb_table.Get(ROCTX_API_ID_roctxRangeStop, &api_callback_fun, &api_callback_arg);
   if (api_callback_fun)
     api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangeStop, &api_data,
                      api_callback_arg);
@@ -211,6 +220,18 @@ PUBLIC_API void RangeStackIterate(roctx_range_iterate_cb_t callback, void* arg) 
       callback(&data, arg);
     }
   }
+}
+
+PUBLIC_API bool RegisterApiCallback(uint32_t op, void* callback, void* arg) {
+  if (op >= ROCTX_API_ID_NUMBER) return false;
+  roctx::cb_table.Set(op, reinterpret_cast<activity_rtapi_callback_t>(callback), arg);
+  return true;
+}
+
+PUBLIC_API bool RemoveApiCallback(uint32_t op) {
+  if (op >= ROCTX_API_ID_NUMBER) return false;
+  roctx::cb_table.Get(op, NULL, NULL);
+  return true;
 }
 
 }  // extern "C"

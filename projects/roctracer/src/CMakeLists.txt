@@ -53,7 +53,6 @@ target_link_libraries( ${TARGET_LIB} PRIVATE ${HSA_RUNTIME_LIB} c stdc++ )
 set ( ROCTX_LIB "roctx64" )
 set ( ROCTX_LIB_SRC
   ${LIB_DIR}/roctx/roctx.cpp
-  ${LIB_DIR}/roctx/roctx_intercept.cpp
 )
 add_library ( ${ROCTX_LIB} SHARED ${ROCTX_LIB_SRC} )
 target_include_directories ( ${ROCTX_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${GEN_INC_DIR} )

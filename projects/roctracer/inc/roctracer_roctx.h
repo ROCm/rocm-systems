@@ -32,6 +32,10 @@
 #define INC_ROCTRACER_ROCTX_H_
 #include <roctx.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
 // ROC-TX API ID enumeration
 enum roctx_api_id_t {
   ROCTX_API_ID_roctxMarkA = 0,
@@ -69,18 +73,6 @@ typedef struct roctx_api_data_s {
     } roctxRangeStop;
   } args;
 } roctx_api_data_t;
-
-#ifdef __cplusplus
-#include <roctracer_cb_table.h>
-namespace roctx {
-// ROCTX callbacks table type
-typedef roctracer::CbTable<ROCTX_API_ID_NUMBER> cb_table_t;
-}  // namespace roctx
-#endif
-
-#ifdef __cplusplus
-extern "C" {
-#endif  // __cplusplus
 
 // Regiter ROCTX callback for given opertaion id
 bool RegisterApiCallback(uint32_t op, void* callback, void* arg);
