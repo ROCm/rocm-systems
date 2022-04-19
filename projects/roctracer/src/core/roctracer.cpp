@@ -763,7 +763,6 @@ static inline uint32_t get_op_end(uint32_t domain) {
       return HIP_OP_ID_NUMBER;
     case ACTIVITY_DOMAIN_HIP_API:
       return HIP_API_ID_LAST + 1;
-      ;
     case ACTIVITY_DOMAIN_EXT_API:
       return 0;
     case ACTIVITY_DOMAIN_ROCTX:

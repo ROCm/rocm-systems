@@ -190,9 +190,9 @@ class Logger {
 #define DBG_LOGGING(stream)                                                                        \
   do {                                                                                             \
     roctracer::util::Logger::Instance()                                                            \
-            << roctracer::util::Logger::begm << "debug: \"" << stream << "\"" < < < <              \
-        " in " << __FUNCTION__ << " at " << __FILE__ << " line " << __LINE__                       \
-               << roctracer::util::Logger::endl;                                                   \
+        << roctracer::util::Logger::begm << "debug: \"" << stream << "\""                          \
+        << " in " << __FUNCTION__ << " at " << __FILE__ << " line " << __LINE__                    \
+        << roctracer::util::Logger::endl;                                                          \
   } while (0)
 #endif
 
