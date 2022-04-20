@@ -760,8 +760,9 @@ void open_tracing_pool() {
 
 // Flush tracing pool
 void close_tracing_pool() {
-  if (roctracer_default_pool() != NULL) {
-    ROCTRACER_CALL(roctracer_flush_activity());
+  if (roctracer_pool_t* pool = roctracer_default_pool(); pool != nullptr) {
+    ROCTRACER_CALL(roctracer_flush_activity_expl(pool));
+    ROCTRACER_CALL(roctracer_close_pool_expl(pool));
   }
 }
 
