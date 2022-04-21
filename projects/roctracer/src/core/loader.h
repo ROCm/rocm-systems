@@ -133,6 +133,7 @@ class RocpApi {
 };
 
 // HIP runtime library loader class
+#include "inc/roctracer_hip.h"
 #if STATIC_BUILD
 __attribute__((weak)) hipError_t hipRegisterApiCallback(uint32_t id, void* fun, void* arg) {
   return hipErrorUnknown;
@@ -174,6 +175,10 @@ class HipLoaderStatic {
   GetStreamDeviceId_t* GetStreamDeviceId;
   ApiName_t* ApiName;
 
+  hipInitAsyncActivityCallback_t* InitActivityCallback;
+  hipEnableAsyncActivityCallback_t* EnableActivityCallback;
+  hipGetOpName_t* GetOpName;
+
   static inline loader_t& Instance() {
     loader_t* obj = instance_.load(std::memory_order_acquire);
     if (obj == NULL) {
@@ -187,6 +192,7 @@ class HipLoaderStatic {
   }
 
   bool Enabled() const { return true; }
+  bool& InitActivityDone() { return init_activity_done_; }
 
  private:
   HipLoaderStatic() {
@@ -198,10 +204,15 @@ class HipLoaderStatic {
     KernelNameRefByPtr = hipKernelNameRefByPtr;
     GetStreamDeviceId = hipGetStreamDeviceId;
     ApiName = hipApiName;
+
+    InitActivityCallback = hipInitActivityCallback;
+    EnableActivityCallback = hipEnableActivityCallback;
+    GetOpName = hipGetCmdName;
   }
 
   static mutex_t mutex_;
   static instance_t instance_;
+  bool init_activity_done_ = false;
 };
 #else
 class HipApi {
@@ -226,6 +237,12 @@ class HipApi {
   GetStreamDeviceId_t* GetStreamDeviceId;
   ApiName_t* ApiName;
 
+  hipInitAsyncActivityCallback_t* InitActivityCallback;
+  hipEnableAsyncActivityCallback_t* EnableActivityCallback;
+  hipGetOpName_t* GetOpName;
+
+  bool& InitActivityDone() { return init_activity_done_; }
+
  protected:
   void init(Loader* loader) {
     RegisterApiCallback = loader->GetFun<RegisterApiCallback_t>("hipRegisterApiCallback");
@@ -237,29 +254,18 @@ class HipApi {
     KernelNameRefByPtr = loader->GetFun<KernelNameRefByPtr_t>("hipKernelNameRefByPtr");
     GetStreamDeviceId = loader->GetFun<GetStreamDeviceId_t>("hipGetStreamDeviceId");
     ApiName = loader->GetFun<ApiName_t>("hipApiName");
-  }
-};
-#endif
 
-// HCC runtime library loader class
-#include "inc/roctracer_hip.h"
-class HccApi {
- public:
-  typedef BaseLoader<HccApi> Loader;
-
-  hipInitAsyncActivityCallback_t* InitActivityCallback;
-  hipEnableAsyncActivityCallback_t* EnableActivityCallback;
-  hipGetOpName_t* GetOpName;
-
- protected:
-  void init(Loader* loader) {
     InitActivityCallback =
         loader->GetFun<hipInitAsyncActivityCallback_t>("hipInitActivityCallback");
     EnableActivityCallback =
         loader->GetFun<hipEnableAsyncActivityCallback_t>("hipEnableActivityCallback");
     GetOpName = loader->GetFun<hipGetOpName_t>("hipGetCmdName");
   }
+
+ private:
+  bool init_activity_done_ = false;
 };
+#endif
 
 // rocTX runtime library loader class
 #include "inc/roctracer_roctx.h"
@@ -284,7 +290,6 @@ class RocTxApi {
 };
 
 typedef BaseLoader<RocpApi> RocpLoader;
-typedef BaseLoader<HccApi> HccLoader;
 typedef BaseLoader<RocTxApi> RocTxLoader;
 
 #if STATIC_BUILD
@@ -304,7 +309,6 @@ typedef HipLoaderShared HipLoader;
   template <class T> bool roctracer::BaseLoader<T>::to_check_symb_ = true;                         \
   template <> const char* roctracer::RocpLoader::lib_name_ = "librocprofiler64.so";                \
   template <> bool roctracer::RocpLoader::to_load_ = true;                                         \
-  template <> const char* roctracer::HccLoader::lib_name_ = "libamdhip64.so";                      \
   template <> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so";                     \
   template <> bool roctracer::RocTxLoader::to_load_ = true;
 
