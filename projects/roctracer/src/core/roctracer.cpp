@@ -35,8 +35,8 @@
 #include <atomic>
 #include <mutex>
 #include <stack>
+#include <unordered_map>
 
-#include "core/hip_act_cb_tracker.h"
 #include "core/journal.h"
 #include "core/loader.h"
 #include "core/memory_pool.h"
@@ -221,6 +221,17 @@ bool act_en_functor_t::operator()(activity_domain_t domain, uint32_t op, Data&& 
   func_(domain, op, data.pool);
   return true;
 }
+
+enum { API_CB_MASK = 0x1, ACT_CB_MASK = 0x2 };
+
+class hip_act_cb_tracker_t {
+ public:
+  uint32_t enable_check(uint32_t op, uint32_t mask) { return data_[op] |= mask; }
+  uint32_t disable_check(uint32_t op, uint32_t mask) { return data_[op] &= ~mask; }
+
+ private:
+  std::unordered_map<uint32_t, uint32_t> data_;
+};
 
 void hsa_async_copy_handler(::proxy::Tracker::entry_t* entry);
 void hsa_kernel_handler(::proxy::Tracker::entry_t* entry);
