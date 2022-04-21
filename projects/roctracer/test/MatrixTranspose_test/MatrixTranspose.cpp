@@ -316,7 +316,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
            record->begin_ns, record->end_ns);
     if (record->domain == ACTIVITY_DOMAIN_HIP_API) {
       SPRINT(" process_id(%u) thread_id(%u)", record->process_id, record->thread_id);
-    } else if (record->domain == ACTIVITY_DOMAIN_HCC_OPS) {
+    } else if (record->domain == ACTIVITY_DOMAIN_HIP_OPS) {
       SPRINT(" device_id(%d) queue_id(%lu)", record->device_id, record->queue_id);
       if (record->op == HIP_OP_ID_COPY) SPRINT(" bytes(0x%zx)", record->bytes);
     } else if (record->domain == ACTIVITY_DOMAIN_HSA_OPS) {
@@ -352,7 +352,7 @@ void init_tracing() {
 #if HIP_API_ACTIVITY_ON
   ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
 #endif
-  ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
+  ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
   // Enable PC sampling
   ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_RESERVED1));
   // Enable rocTX
@@ -375,7 +375,7 @@ void stop_tracing() {
 #if HIP_API_ACTIVITY_ON
   ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
 #endif
-  ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
+  ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
   ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
   ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
   ROCTRACER_CALL(roctracer_flush_activity());

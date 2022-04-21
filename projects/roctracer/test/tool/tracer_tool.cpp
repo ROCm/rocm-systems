@@ -595,7 +595,7 @@ roctracer::TraceBuffer<hip_act_trace_entry_t>* hip_act_trace_buffer = NULL;
 
 // HIP ACT trace buffer flush callback
 void hip_act_flush_cb(hip_act_trace_entry_t* entry) {
-  const uint32_t domain = ACTIVITY_DOMAIN_HCC_OPS;
+  const uint32_t domain = ACTIVITY_DOMAIN_HIP_OPS;
   const uint32_t op = 0;
   const char* name = roctracer_op_string(domain, op, entry->kind);
   if (name == NULL) {
@@ -635,7 +635,7 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
         record->begin_ns, record->end_ns);
 
     switch (record->domain) {
-      case ACTIVITY_DOMAIN_HCC_OPS:
+      case ACTIVITY_DOMAIN_HIP_OPS:
         if (hip_memcpy_stats != NULL) {
           hip_act_trace_entry_t* entry = hip_act_trace_buffer->GetEntry();
           entry->kind = record->kind;
@@ -797,7 +797,7 @@ void tool_unload() {
   if (trace_hip_api || trace_hip_activity) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
     ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
-    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
+    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
   }
 
   // Flush tracing pool
@@ -1089,7 +1089,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 
     if (trace_hip_activity) {
       hcc_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
-      ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HCC_OPS));
+      ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
 
       if (is_stats_opt) {
         FILE* f = NULL;

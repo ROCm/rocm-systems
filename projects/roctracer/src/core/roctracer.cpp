@@ -519,12 +519,12 @@ void HCC_ActivityIdCallback(activity_correlation_id_t correlation_id) {
 void HCC_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
   roctracer_record_t* record_ptr = reinterpret_cast<roctracer_record_t*>(record);
-  record_ptr->domain = ACTIVITY_DOMAIN_HCC_OPS;
+  record_ptr->domain = ACTIVITY_DOMAIN_HIP_OPS;
   record_ptr->correlation_id = CorrelationIdLookup(record_ptr->correlation_id);
   if (record_ptr->correlation_id == 0) return;
   pool->Write(*record_ptr);
 
-  const char* name = roctracer_op_string(ACTIVITY_DOMAIN_HCC_OPS, record_ptr->op, record_ptr->kind);
+  const char* name = roctracer_op_string(ACTIVITY_DOMAIN_HIP_OPS, record_ptr->op, record_ptr->kind);
   DEBUG_TRACE(
       "HCC_AsyncActivityCallback(\"%s\"): op(%u) kind(%u) record(%p) pool(%p) correlation_id(%d) "
       "beg_ns(%lu) end_ns(%lu)\n",
@@ -698,7 +698,7 @@ PUBLIC_API const char* roctracer_op_string(uint32_t domain, uint32_t op, uint32_
       return roctracer::RocpLoader::Instance().GetEvtName(op);
     case ACTIVITY_DOMAIN_HSA_OPS:
       return roctracer::RocpLoader::Instance().GetOpName(op);
-    case ACTIVITY_DOMAIN_HCC_OPS:
+    case ACTIVITY_DOMAIN_HIP_OPS:
       return roctracer::HccLoader::Instance().GetOpName(kind);
     case ACTIVITY_DOMAIN_HIP_API:
       return roctracer::HipLoader::Instance().ApiName(op);
@@ -747,7 +747,7 @@ static inline uint32_t get_op_begin(uint32_t domain) {
       return 0;
     case ACTIVITY_DOMAIN_HSA_EVT:
       return 0;
-    case ACTIVITY_DOMAIN_HCC_OPS:
+    case ACTIVITY_DOMAIN_HIP_OPS:
       return 0;
     case ACTIVITY_DOMAIN_HIP_API:
       return HIP_API_ID_FIRST;
@@ -769,7 +769,7 @@ static inline uint32_t get_op_end(uint32_t domain) {
       return HSA_API_ID_NUMBER;
     case ACTIVITY_DOMAIN_HSA_EVT:
       return HSA_EVT_ID_NUMBER;
-    case ACTIVITY_DOMAIN_HCC_OPS:
+    case ACTIVITY_DOMAIN_HIP_OPS:
       return HIP_OP_ID_NUMBER;
     case ACTIVITY_DOMAIN_HIP_API:
       return HIP_API_ID_LAST + 1;
@@ -810,7 +810,7 @@ static roctracer_status_t roctracer_enable_callback_fun(roctracer_domain_t domai
                         "HSA::RegisterEvtCallback error(" << op << ") failed");
       break;
     }
-    case ACTIVITY_DOMAIN_HCC_OPS:
+    case ACTIVITY_DOMAIN_HIP_OPS:
       break;
     case ACTIVITY_DOMAIN_HIP_API: {
       if (roctracer::HipLoader::Instance().Enabled() == false) break;
@@ -900,7 +900,7 @@ static roctracer_status_t roctracer_disable_callback_fun(roctracer_domain_t doma
       roctracer::hsa_support::cb_table.Set(op, NULL, NULL);
       break;
     }
-    case ACTIVITY_DOMAIN_HCC_OPS:
+    case ACTIVITY_DOMAIN_HIP_OPS:
       break;
     case ACTIVITY_DOMAIN_HIP_API: {
       if (roctracer::HipLoader::Instance().Enabled() == false) break;
@@ -1032,7 +1032,7 @@ static roctracer_status_t roctracer_enable_activity_fun(roctracer_domain_t domai
       break;
     case ACTIVITY_DOMAIN_HSA_EVT:
       break;
-    case ACTIVITY_DOMAIN_HCC_OPS: {
+    case ACTIVITY_DOMAIN_HIP_OPS: {
       const bool init_phase = (roctracer::HccLoader::GetRef() == NULL);
       if (roctracer::HccLoader::Instance().Enabled() == false) break;
 
@@ -1119,7 +1119,7 @@ static roctracer_status_t roctracer_disable_activity_fun(roctracer_domain_t doma
       break;
     case ACTIVITY_DOMAIN_HSA_EVT:
       break;
-    case ACTIVITY_DOMAIN_HCC_OPS: {
+    case ACTIVITY_DOMAIN_HIP_OPS: {
       if (roctracer::HccLoader::Instance().Enabled() == false) break;
 
       const bool succ = roctracer::HccLoader::Instance().EnableActivityCallback(op, false);
@@ -1305,7 +1305,7 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(roctracer_domain_t domain
       roctracer::hsa_support::intercept_ImageExtTable(table->image_ext_);
       break;
     }
-    case ACTIVITY_DOMAIN_HCC_OPS:
+    case ACTIVITY_DOMAIN_HIP_OPS:
     case ACTIVITY_DOMAIN_HIP_API: {
       mark_api_callback_ptr = reinterpret_cast<mark_api_callback_t*>(properties);
       if (roctracer::hip_act_cb_tracker == NULL)

@@ -445,11 +445,11 @@ int main() {
    ROCTRACER_CALL(roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API,
                                      HIP_API_ID_hipModuleLaunchKernel,
                                      hip_api_callback, NULL));
-   ROCTRACER_CALL(roctracer_enable_op_acticity(ACTIVITY_DOMAIN_HIP_API,
+   ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HIP_API,
                                      HIP_API_ID_hipModuleLaunchKernel));
    // Enable HIP kernel dispatch activity tracing
-   ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HCC_OPS,
-                                               hc::HSA_OP_ID_DISPATCH));
+   ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HIP_OPS,
+                                               HIP_OP_ID_DISPATCH));
 
    <test code>
 
