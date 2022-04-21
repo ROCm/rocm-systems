@@ -242,7 +242,7 @@ class HipApi {
 #endif
 
 // HCC runtime library loader class
-#include "inc/roctracer_hcc.h"
+#include "inc/roctracer_hip.h"
 class HccApi {
  public:
   typedef BaseLoader<HccApi> Loader;

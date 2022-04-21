@@ -237,7 +237,6 @@ int main() {
 //
 #if 1
 #include <roctracer_hip.h>
-#include <roctracer_hcc.h>
 #include <roctracer_hsa.h>
 #include <roctracer_roctx.h>
 

@@ -41,12 +41,18 @@ inline static std::ostream& operator<<(std::ostream& out, const char& v) {
 
 #include <roctracer.h>
 
+enum { HIP_OP_ID_DISPATCH = 0, HIP_OP_ID_COPY = 1, HIP_OP_ID_BARRIER = 2, HIP_OP_ID_NUMBER = 3 };
+
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
 
 // Traced calls ID enumeration
 typedef enum hip_api_id_t roctracer_hip_api_cid_t;
+
+typedef void(hipInitAsyncActivityCallback_t)(void* id_callback, void* op_callback, void* arg);
+typedef bool(hipEnableAsyncActivityCallback_t)(unsigned op, bool enable);
+typedef const char*(hipGetOpName_t)(unsigned op);
 
 #ifdef __cplusplus
 }  // extern "C" block

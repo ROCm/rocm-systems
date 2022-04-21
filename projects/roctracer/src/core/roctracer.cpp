@@ -19,7 +19,6 @@
  THE SOFTWARE. */
 
 #include "inc/roctracer.h"
-#include "inc/roctracer_hcc.h"
 #include "inc/roctracer_hip.h"
 #include "inc/roctracer_ext.h"
 #include "inc/roctracer_roctx.h"
