@@ -40,16 +40,6 @@
     throw roctracer::util::exception(error, oss.str());                                            \
   } while (0)
 
-#define HCC_EXC_RAISING(error, stream)                                                             \
-  do {                                                                                             \
-    EXC_RAISING(error, "HCC error: " << stream);                                                   \
-  } while (0)
-
-#define HIP_EXC_RAISING(error, stream)                                                             \
-  do {                                                                                             \
-    EXC_RAISING(error, "HIP error: " << stream);                                                   \
-  } while (0)
-
 namespace roctracer {
 namespace util {
 
