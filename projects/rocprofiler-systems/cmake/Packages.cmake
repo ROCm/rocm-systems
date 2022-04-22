@@ -20,9 +20,18 @@ omnitrace_add_interface_library(omnitrace-rocm-smi
                                 "Provides flags and libraries for rocm-smi")
 omnitrace_add_interface_library(omnitrace-mpi "Provides MPI or MPI headers")
 omnitrace_add_interface_library(omnitrace-ptl "Enables PTL support (tasking)")
+omnitrace_add_interface_library(omnitrace-papi "Enable PAPI support")
+omnitrace_add_interface_library(omnitrace-ompt "Enable OMPT support")
 omnitrace_add_interface_library(omnitrace-python "Enables Python support")
 omnitrace_add_interface_library(omnitrace-timemory-config
                                 "CMake interface library applied to all timemory targets")
+omnitrace_add_interface_library(omnitrace-compile-definitions "Compile definitions")
+
+# libraries with relevant compile definitions
+set(OMNITRACE_EXTENSION_LIBRARIES
+    omnitrace::omnitrace-hip omnitrace::omnitrace-roctracer omnitrace::omnitrace-rocm-smi
+    omnitrace::omnitrace-mpi omnitrace::omnitrace-ptl omnitrace::omnitrace-ompt
+    omnitrace::omnitrace-papi)
 
 target_include_directories(omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/include
                                                        ${PROJECT_BINARY_DIR}/include)
@@ -142,6 +151,15 @@ elseif(OMNITRACE_USE_MPI_HEADERS)
         omnitrace-mpi INTERFACE TIMEMORY_USE_MPI_HEADERS=1 OMNITRACE_USE_MPI_HEADERS)
     target_link_libraries(omnitrace-mpi INTERFACE MPI::MPI_HEADERS)
 endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# OMPT
+#
+# ----------------------------------------------------------------------------------------#
+
+omnitrace_target_compile_definitions(
+    omnitrace-ompt INTERFACE OMNITRACE_USE_OMPT=$<BOOL:${OMNITRACE_USE_OMPT}>)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -596,3 +614,21 @@ if(OMNITRACE_USE_PYTHON)
 
     include(ConfigPython)
 endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# Compile definitions
+#
+# ----------------------------------------------------------------------------------------#
+
+foreach(_LIB ${OMNITRACE_EXTENSION_LIBRARIES})
+    get_target_property(_COMPILE_DEFS ${_LIB} INTERFACE_COMPILE_DEFINITIONS)
+    if(_COMPILE_DEFS)
+        foreach(_DEF ${_COMPILE_DEFS})
+            if("${_DEF}" MATCHES "OMNITRACE_")
+                target_compile_definitions(omnitrace-compile-definitions
+                                           INTERFACE ${_DEF})
+            endif()
+        endforeach()
+    endif()
+endforeach()

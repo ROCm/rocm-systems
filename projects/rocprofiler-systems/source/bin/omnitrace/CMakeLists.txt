@@ -23,6 +23,7 @@ target_link_libraries(
     PRIVATE omnitrace::omnitrace-headers
             omnitrace::omnitrace-dyninst
             omnitrace::omnitrace-compile-options
+            omnitrace::omnitrace-compile-definitions
             $<BUILD_INTERFACE:timemory::timemory-headers>
             $<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>)
 
@@ -32,6 +33,8 @@ set_target_properties(
                BUILD_RPATH "\$ORIGIN:${PROJECT_BINARY_DIR}:${CMAKE_BINARY_DIR}"
                INSTALL_RPATH_USE_LINK_PATH ON
                INSTALL_RPATH "${OMNITRACE_EXE_INSTALL_RPATH}")
+
+omnitrace_strip_target(omnitrace-exe)
 
 if(CMAKE_BUILD_TYPE MATCHES "^(DEBUG|Debug)")
     string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")

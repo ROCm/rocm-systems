@@ -13,8 +13,10 @@ add_library(omnitrace::omnitrace-dl-library ALIAS omnitrace-dl-library)
 
 target_sources(omnitrace-dl-library PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/dl.cpp
                                             ${CMAKE_CURRENT_SOURCE_DIR}/dl.hpp)
-target_link_libraries(omnitrace-dl-library
-                      PUBLIC ${dl_LIBRARY} $<BUILD_INTERFACE:omnitrace::common-library>)
+target_link_libraries(
+    omnitrace-dl-library
+    PUBLIC ${dl_LIBRARY} $<BUILD_INTERFACE:omnitrace::common-library>
+           $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>)
 target_include_directories(
     omnitrace-dl-library
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
@@ -33,10 +35,6 @@ if(OMNITRACE_BUILD_DEVELOPER)
         target_compile_options(omnitrace-dl-library PRIVATE -ftls-model=local-dynamic)
     endif()
 endif()
-
-omnitrace_target_compile_definitions(
-    omnitrace-dl-library
-    PUBLIC $<BUILD_INTERFACE:OMNITRACE_USE_OMPT=$<BOOL:${OMNITRACE_USE_OMPT}>>)
 
 set_target_properties(
     omnitrace-dl-library

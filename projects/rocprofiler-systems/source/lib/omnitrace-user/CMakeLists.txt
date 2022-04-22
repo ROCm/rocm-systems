@@ -19,6 +19,8 @@ target_sources(
 target_include_directories(
     omnitrace-user-library PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
                                   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_link_libraries(omnitrace-user-library
+                      PRIVATE $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>)
 
 check_cxx_compiler_flag("-fno-exceptions" omnitrace_user_library_fno_exceptions)
 check_cxx_compiler_flag("-ftls-model=local-dynamic"

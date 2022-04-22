@@ -19,4 +19,4 @@ get_filename_component(COMMON_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTOR
 
 target_include_directories(omnitrace-common-library INTERFACE ${COMMON_INCLUDE_DIR})
 target_compile_definitions(omnitrace-common-library
-                           INTERFACE $<BUILD_INTERFACE:OMNITRACE_INTERNAL_BUILD>)
+                           INTERFACE $<BUILD_INTERFACE:OMNITRACE_INTERNAL_BUILD=1>)

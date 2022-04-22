@@ -7,9 +7,6 @@
 
 include_guard(GLOBAL)
 
-# always provide Dyninst::ElfUtils even if it is a dummy
-omnitrace_add_interface_library(omnitrace-papi "omnitrace interface library")
-
 omnitrace_checkout_git_submodule(
     RELATIVE_PATH external/papi
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
@@ -242,8 +239,9 @@ set(PAPI_pfm_STATIC_LIBRARY
     CACHE FILEPATH "PAPI library" FORCE)
 
 target_include_directories(omnitrace-papi SYSTEM INTERFACE ${PAPI_INCLUDE_DIR})
-target_compile_definitions(omnitrace-papi INTERFACE TIMEMORY_USE_PAPI=1)
 target_link_libraries(omnitrace-papi INTERFACE ${PAPI_LIBRARY} ${PAPI_pfm_LIBRARY})
+omnitrace_target_compile_definitions(omnitrace-papi INTERFACE OMNITRACE_USE_PAPI
+                                                              TIMEMORY_USE_PAPI=1)
 
 install(
     DIRECTORY ${OMNITRACE_PAPI_INSTALL_DIR}/lib/

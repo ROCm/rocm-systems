@@ -24,6 +24,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:omnitrace::omnitrace-headers>
         $<BUILD_INTERFACE:omnitrace::omnitrace-threading>
         $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
         $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
         $<BUILD_INTERFACE:omnitrace::omnitrace-roctracer>
         $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>

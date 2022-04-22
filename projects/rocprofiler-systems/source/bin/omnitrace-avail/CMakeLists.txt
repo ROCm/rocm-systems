@@ -11,7 +11,8 @@ add_executable(
 
 target_include_directories(omnitrace-avail PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
 target_compile_definitions(omnitrace-avail PRIVATE OMNITRACE_EXTERN_COMPONENTS=0)
-target_link_libraries(omnitrace-avail PRIVATE omnitrace::omnitrace-interface-library)
+target_link_libraries(omnitrace-avail PRIVATE omnitrace::omnitrace-compile-definitions
+                                              omnitrace::omnitrace-interface-library)
 set_target_properties(
     omnitrace-avail
     PROPERTIES BUILD_RPATH "\$ORIGIN:${PROJECT_BINARY_DIR}:${CMAKE_BINARY_DIR}"

@@ -13,8 +13,9 @@ add_executable(
 target_include_directories(omnitrace-critical-trace
                            PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
 target_compile_definitions(omnitrace-critical-trace PRIVATE OMNITRACE_EXTERN_COMPONENTS=0)
-target_link_libraries(omnitrace-critical-trace
-                      PRIVATE omnitrace::omnitrace-interface-library)
+target_link_libraries(
+    omnitrace-critical-trace PRIVATE omnitrace::omnitrace-compile-definitions
+                                     omnitrace::omnitrace-interface-library)
 set_target_properties(
     omnitrace-critical-trace
     PROPERTIES BUILD_RPATH "\$ORIGIN:${PROJECT_BINARY_DIR}:${CMAKE_BINARY_DIR}"
