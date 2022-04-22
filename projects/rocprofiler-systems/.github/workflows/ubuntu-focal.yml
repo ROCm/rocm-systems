@@ -74,7 +74,8 @@ jobs:
       timeout-minutes: 45
       working-directory: ${{ github.workspace }}/build
       run:
-        ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-ubuntu-focal.log --stop-on-failure
+        ctest -V -N -O ${{ github.workspace }}/build/omnitrace-ctest-${{ env.GITHUB_JOB }}-commands.log &&
+        ctest --output-on-failure --output-log ${{ github.workspace }}/build/omnitrace-ctest-${{ env.GITHUB_JOB }}.log --stop-on-failure
 
     - name: Test Install
       timeout-minutes: 10

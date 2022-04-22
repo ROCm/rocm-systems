@@ -5,7 +5,8 @@ set -e
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=20.04 18.04}
 : ${NJOBS=$(nproc)}
-: ${ELFUTILS_VERSION:=0.183}
+: ${ELFUTILS_VERSION:=0.186}
+: ${PUSH:=0}
 
 send-error()
 {
@@ -38,6 +39,9 @@ do
         "--elfutils-version")
             shift
             ELFUTILS_VERSION=${1}
+            ;;
+        "--push")
+            PUSH=1
             ;;
         *)
             send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
@@ -76,5 +80,12 @@ do
         --build-arg NJOBS=${NJOBS} \
         --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION}
 done
+
+if [ "${PUSH}" -gt 0 ]; then
+    for VERSION in ${VERSIONS}
+    do
+        verbose-run docker push jrmadsen/omnitrace-ci:${DISTRO}-${VERSION}
+    done
+fi
 
 verbose-run rm -rf ./dyninst-source

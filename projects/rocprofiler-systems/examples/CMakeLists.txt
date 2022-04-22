@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 project(omnitrace-dyninst-examples LANGUAGES CXX)
 
@@ -10,6 +10,14 @@ add_subdirectory(parallel-overhead)
 add_subdirectory(user-api)
 add_subdirectory(openmp)
 
-option(BUILD_SHARED_LIBS "Build dynamic libraries" ON)
+if(CMAKE_VERSION VERSION_LESS 3.16 AND (NOT DEFINED LULESH_BUILD_KOKKOS
+                                        OR LULESH_BUILD_KOKKOS))
+    message(
+        AUTHOR_WARNING
+            "lulesh example cannot build Kokkos (requires CMake 3.16+, current version is ${CMAKE_VERSION})"
+        )
+else()
+    option(BUILD_SHARED_LIBS "Build dynamic libraries" ON)
 
-add_subdirectory(lulesh)
+    add_subdirectory(lulesh)
+endif()

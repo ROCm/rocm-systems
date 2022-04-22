@@ -13,8 +13,9 @@ WORKDIR /tmp
 SHELL [ "/bin/bash", "-c" ]
 
 ARG EXTRA_PACKAGES=""
-ARG ELFUTILS_DOWNLOAD_VERSION="0.183"
+ARG ELFUTILS_DOWNLOAD_VERSION="0.186"
 ARG NJOBS="12"
+ARG PYTHON_VERSIONS="6 7 8 9"
 
 ENV PATH ${HOME}/.local/bin:${PATH}
 ENV LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}
@@ -30,12 +31,20 @@ RUN apt-get update && \
     apt-get autoclean && \
     locale -a && \
     cd /tmp/dyninst && \
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON && \
+    cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON -DELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_DOWNLOAD_VERSION} && \
     cmake --build build --target all --parallel ${NJOBS} && \
     cmake --build build --target install --parallel ${NJOBS} && \
+    wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
+    bash miniconda.sh -b -p /opt/conda && \
+    export PATH="/opt/conda/bin:${PATH}" && \
+    conda config --set always_yes yes --set changeps1 no && \
+    conda update -c defaults -n base conda && \
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults python=3.${i} pip numpy; done && \
+    conda clean -a -y && \
     cd /tmp && \
     shopt -s dotglob extglob && \
     rm -rf *
+
 
 ENV LC_ALL C.UTF-8
 WORKDIR /home

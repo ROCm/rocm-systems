@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 project(lulesh LANGUAGES C CXX)
 
@@ -19,7 +19,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
     set(CMAKE_BUILD_TYPE
-        "RelWithDebInfo"
+        "Release"
         CACHE STRING "CMake build type" FORCE)
 endif()
 

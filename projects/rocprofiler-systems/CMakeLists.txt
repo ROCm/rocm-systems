@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR AND CMAKE_CURRENT_SOURCE_DIR STREQUAL
                                                   CMAKE_SOURCE_DIR)
@@ -45,7 +45,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
     set(CMAKE_BUILD_TYPE
-        RelWithDebInfo
+        Release
         CACHE STRING "Build type" FORCE)
 else()
     set(VALID_BUILD_TYPES "Release" "RelWithDebInfo" "Debug" "MinSizeRel")
