@@ -18,8 +18,8 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef SRC_PROXY_TRACKER_H_
-#define SRC_PROXY_TRACKER_H_
+#ifndef SRC_CORE_TRACKER_H_
+#define SRC_CORE_TRACKER_H_
 
 #include <amd_hsa_signal.h>
 #include <assert.h>
@@ -33,10 +33,10 @@
 #include "util/logger.h"
 #include "core/trace_buffer.h"
 
-namespace proxy {
+namespace roctracer {
 class Tracker {
  public:
-  typedef util::HsaRsrcFactory::timestamp_t timestamp_t;
+  typedef ::util::HsaRsrcFactory::timestamp_t timestamp_t;
   typedef roctracer::trace_entry_t entry_t;
   typedef roctracer::entry_type_t entry_type_t;
 
@@ -44,7 +44,7 @@ class Tracker {
   inline static void Enable(entry_type_t type, const hsa_agent_t& agent, const hsa_signal_t& signal,
                             entry_t* entry) {
     hsa_status_t status = HSA_STATUS_ERROR;
-    util::HsaRsrcFactory* hsa_rsrc = &(util::HsaRsrcFactory::Instance());
+    ::util::HsaRsrcFactory* hsa_rsrc = &(::util::HsaRsrcFactory::Instance());
 
     // Creating a new tracker entry
     entry->type = type;
@@ -72,7 +72,7 @@ class Tracker {
   // Entry completion
   inline static void Complete(hsa_signal_value_t signal_value, entry_t* entry) {
     // Query begin/end and complete timestamps
-    util::HsaRsrcFactory* hsa_rsrc = &(util::HsaRsrcFactory::Instance());
+    ::util::HsaRsrcFactory* hsa_rsrc = &(::util::HsaRsrcFactory::Instance());
     if (entry->type == roctracer::COPY_ENTRY_TYPE) {
       hsa_amd_profiling_async_copy_time_t async_copy_time{};
       hsa_status_t status = hsa_amd_profiling_get_async_copy_time(entry->signal, &async_copy_time);
@@ -125,6 +125,6 @@ class Tracker {
   }
 };
 
-}  // namespace proxy
+}  // namespace roctracer
 
-#endif  // SRC_PROXY_TRACKER_H_
+#endif  // SRC_CORE_TRACKER_H_

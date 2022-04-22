@@ -40,16 +40,11 @@
 #include "core/loader.h"
 #include "core/memory_pool.h"
 #include "core/trace_buffer.h"
-#include "proxy/tracker.h"
+#include "core/tracker.h"
 #include "ext/hsa_rt_utils.hpp"
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
 #include "util/logger.h"
-
-#include "proxy/hsa_queue.h"
-#include "proxy/intercept_queue.h"
-#include "proxy/proxy_queue.h"
-#include "proxy/simple_proxy_queue.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
 #define CONSTRUCTOR_API __attribute__((constructor))
@@ -233,10 +228,9 @@ class hip_act_cb_tracker_t {
   std::unordered_map<uint32_t, uint32_t> data_;
 };
 
-void hsa_async_copy_handler(::proxy::Tracker::entry_t* entry);
-void hsa_kernel_handler(::proxy::Tracker::entry_t* entry);
+void hsa_async_copy_handler(Tracker::entry_t* entry);
 constexpr TraceBuffer<trace_entry_t>::flush_prm_t trace_buffer_prm[] = {
-    {COPY_ENTRY_TYPE, hsa_async_copy_handler}, {KERNEL_ENTRY_TYPE, hsa_kernel_handler}};
+    {COPY_ENTRY_TYPE, hsa_async_copy_handler}};
 TraceBuffer<trace_entry_t>* trace_buffer = NULL;
 
 namespace hsa_support {
@@ -554,45 +548,7 @@ void close_output_file(FILE* file_handle) {
   if ((file_handle != NULL) && (file_handle != stdout)) fclose(file_handle);
 }
 
-FILE* kernel_file_handle = NULL;
-void hsa_kernel_handler(::proxy::Tracker::entry_t* entry) {
-  static uint64_t index = 0;
-  if (index == 0) {
-    kernel_file_handle = open_output_file(hsa_support::output_prefix, "results.txt");
-  }
-  fprintf(kernel_file_handle,
-          "dispatch[%lu], gpu-id(%u), tid(%u), kernel-name(\"%s\"), time(%lu,%lu,%lu,%lu)\n", index,
-          //::util::HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index,
-          entry->dev_index, entry->kernel.tid, entry->kernel.name, entry->dispatch, entry->begin,
-          entry->end, entry->complete);
-#if 0
-  fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), tid(%lu), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), sig(0x%lx), kernel-name(\"%s\")",
-    index,
-    HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index,
-    entry->data.queue_id,
-    entry->data.queue_index,
-    entry->data.thread_id,
-    entry->kernel_properties.grid_size,
-    entry->kernel_properties.workgroup_size,
-    entry->kernel_properties.lds_size,
-    entry->kernel_properties.scratch_size,
-    entry->kernel_properties.vgpr_count,
-    entry->kernel_properties.sgpr_count,
-    entry->kernel_properties.fbarrier_count,
-    entry->kernel_properties.signal.handle,
-    nik_name.c_str());
-  if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
-    record->dispatch,
-    record->begin,
-    record->end,
-    record->complete);
-  fprintf(file_handle, "\n");
-  fflush(file_handle);
-#endif
-  index++;
-}
-
-void hsa_async_copy_handler(::proxy::Tracker::entry_t* entry) {
+void hsa_async_copy_handler(Tracker::entry_t* entry) {
   activity_record_t record{};
   record.domain = ACTIVITY_DOMAIN_HSA_OPS;  // activity domain id
   record.begin_ns = entry->begin;           // host begin timestamp
@@ -611,10 +567,10 @@ hsa_status_t hsa_amd_memory_async_copy_interceptor(void* dst, hsa_agent_t dst_ag
   hsa_status_t status = HSA_STATUS_SUCCESS;
   if (hsa_support::async_copy_callback_enabled) {
     trace_entry_t* entry = trace_buffer->GetEntry();
-    ::proxy::Tracker::Enable(COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
+    Tracker::Enable(COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
     status = hsa_amd_memory_async_copy_fn(dst, dst_agent, src, src_agent, size, num_dep_signals,
                                           dep_signals, entry->signal);
-    if (status != HSA_STATUS_SUCCESS) ::proxy::Tracker::Disable(entry);
+    if (status != HSA_STATUS_SUCCESS) Tracker::Disable(entry);
   } else {
     status = hsa_amd_memory_async_copy_fn(dst, dst_agent, src, src_agent, size, num_dep_signals,
                                           dep_signals, completion_signal);
@@ -630,10 +586,10 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
   hsa_status_t status = HSA_STATUS_SUCCESS;
   if (hsa_support::async_copy_callback_enabled) {
     trace_entry_t* entry = trace_buffer->GetEntry();
-    ::proxy::Tracker::Enable(COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
+    Tracker::Enable(COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
     status = hsa_amd_memory_async_copy_rect_fn(dst, dst_offset, src, src_offset, range, copy_agent,
                                                dir, num_dep_signals, dep_signals, entry->signal);
-    if (status != HSA_STATUS_SUCCESS) ::proxy::Tracker::Disable(entry);
+    if (status != HSA_STATUS_SUCCESS) Tracker::Disable(entry);
   } else {
     status =
         hsa_amd_memory_async_copy_rect_fn(dst, dst_offset, src, src_offset, range, copy_agent, dir,
@@ -1355,7 +1311,6 @@ PUBLIC_API void roctracer_unload() {
     roctracer::act_journal = NULL;
   }
 
-  roctracer::close_output_file(roctracer::kernel_file_handle);
   ONLOAD_TRACE_END();
 }
 
