@@ -32,10 +32,6 @@ fork_gotcha::configure()
     fork_gotcha_t::get_initializer() = []() {
         TIMEMORY_C_GOTCHA(fork_gotcha_t, 0, fork);
     };
-
-    pthread_gotcha_t::get_initializer() = []() {
-        TIMEMORY_C_GOTCHA(pthread_gotcha_t, 0, pthread_create);
-    };
 }
 
 void

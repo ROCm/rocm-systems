@@ -478,9 +478,10 @@ omnitrace_init_library_hidden()
     }
 
     tim::trait::runtime_enabled<comp::roctracer>::set(get_use_roctracer());
-    tim::trait::runtime_enabled<comp::roctracer_data>::set(get_use_roctracer());
+    tim::trait::runtime_enabled<comp::roctracer_data>::set(get_use_roctracer() &&
+                                                           get_use_timemory());
 
-    if(get_instrumentation_interval() < 1) get_instrumentation_interval() = 1;
+    get_instrumentation_interval() = std::max<size_t>(get_instrumentation_interval(), 1);
 
     if(get_use_kokkosp())
     {
@@ -1146,25 +1147,25 @@ omnitrace_finalize_hidden(void)
     OMNITRACE_DEBUG_F("Finalizing timemory...\n");
     tim::timemory_finalize();
 
-    OMNITRACE_DEBUG_F("Disabling signal handling...\n");
-    tim::disable_signal_detection();
-
-    OMNITRACE_DEBUG_F("Finalized\n");
-
     if(_perfetto_output_error)
     {
         OMNITRACE_THROW("Error opening perfetto output file: %s",
                         get_perfetto_output_filename().c_str());
     }
 
-    OMNITRACE_CONDITIONAL_THROW(
-        get_is_continuous_integration() && _push_count > _pop_count, "%s",
+    OMNITRACE_CI_THROW(
+        _push_count > _pop_count, "%s",
         TIMEMORY_JOIN(" ",
                       "omnitrace_push_trace was called more times than "
                       "omnitrace_pop_trace. The inverse is fine but the current state "
                       "means not every measurement was ended :: pushed:",
                       _push_count, "vs. popped:", _pop_count)
             .c_str());
+
+    OMNITRACE_DEBUG_F("Disabling signal handling...\n");
+    tim::disable_signal_detection();
+
+    OMNITRACE_PRINT_F("Finalized\n");
 }
 
 //======================================================================================//

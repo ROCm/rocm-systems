@@ -12,8 +12,9 @@ add_executable(openmp-lu ${CMAKE_CURRENT_SOURCE_DIR}/LU/lu.cpp
                          $<TARGET_OBJECTS:openmp-common>)
 
 find_program(CLANGXX_EXECUTABLE NAMES clang++)
-find_library(LIBOMP_LIBRARY
-             NAMES omp ${CMAKE_SHARED_LIBRARY_PREFIX}omp${CMAKE_SHARED_LIBRARY_SUFFIX}.5)
+find_library(
+    LIBOMP_LIBRARY
+    NAMES omp omp5 ${CMAKE_SHARED_LIBRARY_PREFIX}omp${CMAKE_SHARED_LIBRARY_SUFFIX}.5)
 if(CLANGXX_EXECUTABLE AND LIBOMP_LIBRARY)
     target_compile_options(openmp-common PUBLIC -W -Wall -fopenmp=libomp)
     target_compile_options(openmp-cg PRIVATE -W -Wall -fopenmp=libomp)

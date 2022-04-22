@@ -103,8 +103,6 @@ roctracer::remove_shutdown(const std::string& _lbl)
 void
 roctracer::setup()
 {
-    trait::runtime_enabled<roctracer_data>::set(get_use_timemory());
-
     if(!get_use_roctracer()) return;
 
     auto_lock_t _lk{ type_mutex<roctracer>() };

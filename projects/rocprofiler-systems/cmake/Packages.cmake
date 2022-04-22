@@ -21,6 +21,8 @@ omnitrace_add_interface_library(omnitrace-rocm-smi
 omnitrace_add_interface_library(omnitrace-mpi "Provides MPI or MPI headers")
 omnitrace_add_interface_library(omnitrace-ptl "Enables PTL support (tasking)")
 omnitrace_add_interface_library(omnitrace-python "Enables Python support")
+omnitrace_add_interface_library(omnitrace-timemory-config
+                                "CMake interface library applied to all timemory targets")
 
 target_include_directories(omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/include
                                                        ${PROJECT_BINARY_DIR}/include)
@@ -364,10 +366,26 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
+# papi submodule
+#
+# ----------------------------------------------------------------------------------------#
+
+if(OMNITRACE_USE_PAPI AND OMNITRACE_BUILD_PAPI)
+    include(PAPI)
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
 # timemory submodule
 #
 # ----------------------------------------------------------------------------------------#
 
+target_compile_definitions(omnitrace-timemory-config
+                           INTERFACE TIMEMORY_PAPI_ARRAY_SIZE=16)
+
+set(TIMEMORY_EXTERNAL_INTERFACE_LIBRARY
+    omnitrace-timemory-config
+    CACHE STRING "timemory configuration interface library")
 set(TIMEMORY_INSTALL_HEADERS
     OFF
     CACHE BOOL "Disable timemory header install")
@@ -475,6 +493,20 @@ add_subdirectory(external/timemory)
 omnitrace_restore_variables(
     BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
                            CMAKE_POSITION_INDEPENDENT_CODE CMAKE_PREFIX_PATH)
+
+if(TARGET omnitrace-papi-build)
+    foreach(_TARGET PAPI::papi timemory-core timemory-common timemory-papi-component
+                    timemory-cxx)
+        if(TARGET "${_TARGET}")
+            add_dependencies(${_TARGET} omnitrace-papi-build)
+        endif()
+        foreach(_LINK shared static)
+            if(TARGET "${_TARGET}-${_LINK}")
+                add_dependencies(${_TARGET}-${_LINK} omnitrace-papi-build)
+            endif()
+        endforeach()
+    endforeach()
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #

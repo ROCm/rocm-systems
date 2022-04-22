@@ -16,3 +16,6 @@
 [submodule "external/kokkos"]
 	path = examples/lulesh/external/kokkos
 	url = https://github.com/kokkos/kokkos.git
+[submodule "external/papi"]
+	path = external/papi
+	url = https://bitbucket.org/icl/papi.git

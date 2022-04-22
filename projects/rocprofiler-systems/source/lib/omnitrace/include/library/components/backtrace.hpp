@@ -30,6 +30,7 @@
 
 #include <timemory/components/base.hpp>
 #include <timemory/components/papi/papi_array.hpp>
+#include <timemory/components/papi/types.hpp>
 #include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/sampling/sampler.hpp>
@@ -50,7 +51,7 @@ struct backtrace
 : tim::component::empty_base
 , tim::concepts::component
 {
-    static constexpr size_t num_hw_counters = 8;
+    static constexpr size_t num_hw_counters = TIMEMORY_PAPI_ARRAY_SIZE;
 
     using data_t            = std::array<char[512], 128>;
     using clock_type        = std::chrono::steady_clock;

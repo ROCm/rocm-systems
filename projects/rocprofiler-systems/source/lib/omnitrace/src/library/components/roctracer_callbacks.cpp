@@ -674,6 +674,9 @@ roctracer_shutdown_routines()
 
 using namespace omnitrace;
 
+extern "C" bool
+omnitrace_init_tooling_hidden() OMNITRACE_HIDDEN_API;
+
 // HSA-runtime tool on-load method
 extern "C"
 {
@@ -689,6 +692,8 @@ extern "C"
                                             "\n");
         tim::consume_parameters(table, runtime_version, failed_tool_count,
                                 failed_tool_names);
+
+        if(get_state() < State::Active) omnitrace_init_tooling_hidden();
 
         auto _setup = [=]() {
             try

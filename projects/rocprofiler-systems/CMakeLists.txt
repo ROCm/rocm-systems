@@ -62,12 +62,21 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
     set(_STRIP_LIBRARIES_DEFAULT ON)
 endif()
 
+if(DEFINED CMAKE_INSTALL_LIBDIR AND NOT DEFINED CMAKE_DEFAULT_INSTALL_LIBDIR)
+    # always have a fresh install
+    unset(CMAKE_INSTALL_LIBDIR CACHE)
+    include(GNUInstallDirs) # install directories
+    # force this because dyninst always installs to lib
+    set(CMAKE_DEFAULT_INSTALL_LIBDIR
+        "${CMAKE_INSTALL_LIBDIR}"
+        CACHE STRING "Object code libraries" FORCE)
+endif()
+
 include(GNUInstallDirs) # install directories
 include(MacroUtilities) # various functions and macros
 include(Compilers) # compiler identification
 include(BuildSettings) # compiler flags
 
-# force this because dyninst always installs to lib
 set(CMAKE_INSTALL_LIBDIR
     "lib"
     CACHE STRING "Object code libraries (lib)" FORCE)
@@ -86,7 +95,7 @@ omnitrace_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH "Enable rpath to linked l
 omnitrace_add_option(OMNITRACE_USE_CLANG_TIDY "Enable clang-tidy" OFF)
 omnitrace_add_option(OMNITRACE_USE_MPI "Enable MPI support" OFF)
 omnitrace_add_option(OMNITRACE_USE_HIP "Enable HIP support" ON)
-omnitrace_add_option(OMNITRACE_USE_PAPI "Enable HW counter support via PAPI" OFF)
+omnitrace_add_option(OMNITRACE_USE_PAPI "Enable HW counter support via PAPI" ON)
 omnitrace_add_option(OMNITRACE_USE_ROCTRACER "Enable roctracer support"
                      ${OMNITRACE_USE_HIP})
 omnitrace_add_option(
@@ -94,7 +103,7 @@ omnitrace_add_option(
     ${OMNITRACE_USE_HIP})
 omnitrace_add_option(OMNITRACE_USE_MPI_HEADERS
                      "Enable wrapping MPI functions w/o enabling MPI dependency" OFF)
-omnitrace_add_option(OMNITRACE_USE_OMPT "Enable OpenMP tools support" OFF)
+omnitrace_add_option(OMNITRACE_USE_OMPT "Enable OpenMP tools support" ON)
 omnitrace_add_option(OMNITRACE_USE_PYTHON "Enable Python support" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_EXAMPLES "Enable building the examples" OFF)
@@ -108,6 +117,10 @@ omnitrace_add_option(OMNITRACE_BUILD_CI "Enable internal asserts, etc." OFF ADVA
                      NO_FEATURE)
 omnitrace_add_option(OMNITRACE_STRIP_LIBRARIES "Strip the libraries"
                      ${_STRIP_LIBRARIES_DEFAULT} ADVANCED)
+
+if(OMNITRACE_USE_PAPI)
+    omnitrace_add_option(OMNITRACE_BUILD_PAPI "Build PAPI from submodule" ON)
+endif()
 
 if(OMNITRACE_USE_PYTHON)
     omnitrace_add_option(OMNITRACE_BUILD_PYTHON

@@ -53,6 +53,7 @@ jobs:
           -DOMNITRACE_BUILD_TESTING=ON
           -DOMNITRACE_USE_MPI=OFF
           -DOMNITRACE_USE_HIP=OFF
+          -DOMNITRACE_USE_OMPT=OFF
           -DOMNITRACE_USE_PYTHON=ON
 
     - name: Build

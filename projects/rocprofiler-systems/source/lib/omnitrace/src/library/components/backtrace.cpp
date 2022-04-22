@@ -472,7 +472,7 @@ backtrace::post_process(int64_t _tid)
     using common_type_t = typename hw_counters::common_type;
     auto _hw_cnt_labels = (get_papi_vector(_tid))
                               ? comp::papi_common::get_events<common_type_t>()
-                              : std::vector<int>{};
+                              : std::vector<std::string>{};
 
     auto _process_perfetto_counters = [&](const std::vector<sampling::bundle_t*>& _data) {
         if(!perfetto_counter_track<comp::peak_rss>::exists(_tid))
