@@ -60,28 +60,6 @@ enum entry_type_t {
   NUM_ENTRY_TYPE = 4
 };
 
-struct trace_entry_t {
-  std::atomic<uint32_t> valid;
-  entry_type_t type;
-  uint64_t dispatch;
-  uint64_t begin;  // kernel begin timestamp, ns
-  uint64_t end;    // kernel end timestamp, ns
-  uint64_t complete;
-  hsa_agent_t agent;
-  uint32_t dev_index;
-  hsa_signal_t orig;
-  hsa_signal_t signal;
-  union {
-    struct {
-    } copy;
-    struct {
-      const char* name;
-      hsa_agent_t agent;
-      uint32_t tid;
-    } kernel;
-  };
-};
-
 template <class T> struct push_element_fun {
   T* const elem_;
   T** prev_;

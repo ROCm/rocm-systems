@@ -39,7 +39,7 @@
 #include <ext/hsa_rt_utils.hpp>
 
 #include "src/core/loader.h"
-#include "src/core/trace_buffer.h"
+#include "test/tool/trace_buffer.h"
 #include "util/evt_stats.h"
 #include "util/hsa_rsrc_factory.h"
 #include "util/xml.h"
@@ -357,14 +357,6 @@ void hsa_api_flush_cb(hsa_api_trace_entry_t* entry) {
   fflush(hsa_api_file_handle);
 }
 
-void hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg) {
-  static uint64_t index = 0;
-  fprintf(hsa_async_copy_file_handle, "%lu:%lu async-copy:%lu:%u\n", record->begin_ns,
-          record->end_ns, index, my_pid);
-  fflush(hsa_async_copy_file_handle);
-  index++;
-}
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 // HIP API tracing
 
@@ -648,7 +640,13 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
         }
         break;
       case ACTIVITY_DOMAIN_HSA_OPS:
-        if (record->op == HSA_OP_ID_RESERVED1) {
+        if (record->op == HSA_OP_ID_COPY) {
+          static uint64_t index = 0;
+          fprintf(hsa_async_copy_file_handle, "%lu:%lu async-copy:%lu:%u\n", record->begin_ns,
+                  record->end_ns, index, my_pid);
+          fflush(hsa_async_copy_file_handle);
+          index++;
+        } else if (record->op == HSA_OP_ID_RESERVED1) {
           fprintf(pc_sample_file_handle, "%u %lu 0x%lx %s\n", record->pc_sample.se,
                   record->pc_sample.cycle, record->pc_sample.pc, name);
           fflush(pc_sample_file_handle);
@@ -1032,10 +1030,12 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
     hsa_async_copy_file_handle = open_output_file(output_prefix, "async_copy_trace.txt");
 
     // initialize HSA tracing
-    roctracer::hsa_ops_properties_t ops_properties{
-        table, reinterpret_cast<activity_async_callback_t>(hsa_activity_callback), NULL,
-        output_prefix};
+    roctracer::hsa_ops_properties_t ops_properties{};
+    ops_properties.table = table;
     roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
+
+    // Allocating tracing pool
+    open_tracing_pool();
 
     fprintf(stdout, "    HSA-activity-trace()\n");
     fflush(stdout);

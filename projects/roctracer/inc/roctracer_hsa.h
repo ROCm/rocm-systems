@@ -50,9 +50,7 @@ extern ImageExtTable ImageExtTable_saved;
 
 struct ops_properties_t {
   void* table;
-  activity_async_callback_t async_copy_callback_fun;
-  void* async_copy_callback_arg;
-  const char* output_prefix;
+  void* reserved1[3];
 };
 
 };  // namespace hsa_support

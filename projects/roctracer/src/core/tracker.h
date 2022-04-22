@@ -31,14 +31,45 @@
 #include "util/hsa_rsrc_factory.h"
 #include "util/exception.h"
 #include "util/logger.h"
-#include "core/trace_buffer.h"
 
 namespace roctracer {
 class Tracker {
  public:
   typedef ::util::HsaRsrcFactory::timestamp_t timestamp_t;
-  typedef roctracer::trace_entry_t entry_t;
-  typedef roctracer::entry_type_t entry_type_t;
+
+  enum { ENTRY_INV = 0, ENTRY_INIT = 1, ENTRY_COMPL = 2 };
+
+  enum entry_type_t {
+    DFLT_ENTRY_TYPE = 0,
+    API_ENTRY_TYPE = 1,
+    COPY_ENTRY_TYPE = 2,
+    KERNEL_ENTRY_TYPE = 3,
+    NUM_ENTRY_TYPE = 4
+  };
+
+  struct entry_t {
+    std::atomic<uint32_t> valid;
+    entry_type_t type;
+    uint64_t dispatch;
+    uint64_t begin;  // kernel begin timestamp, ns
+    uint64_t end;    // kernel end timestamp, ns
+    uint64_t complete;
+    hsa_agent_t agent;
+    uint32_t dev_index;
+    hsa_signal_t orig;
+    hsa_signal_t signal;
+    void (*handler)(const entry_t*);
+    MemoryPool* pool;
+    union {
+      struct {
+      } copy;
+      struct {
+        const char* name;
+        hsa_agent_t agent;
+        uint32_t tid;
+      } kernel;
+    };
+  };
 
   // Add tracker entry
   inline static void Enable(entry_type_t type, const hsa_agent_t& agent, const hsa_signal_t& signal,
@@ -52,7 +83,7 @@ class Tracker {
     entry->dev_index = 0;  // hsa_rsrc->GetAgentInfo(agent)->dev_index;
     entry->orig = signal;
     entry->dispatch = hsa_rsrc->TimestampNs();
-    entry->valid.store(roctracer::TRACE_ENTRY_INIT, std::memory_order_release);
+    entry->valid.store(ENTRY_INIT, std::memory_order_release);
 
     // Creating a proxy signal
     status = hsa_signal_create(1, 0, NULL, &(entry->signal));
@@ -67,7 +98,7 @@ class Tracker {
   // Delete tracker entry
   inline static void Disable(entry_t* entry) {
     hsa_signal_destroy(entry->signal);
-    entry->valid.store(roctracer::TRACE_ENTRY_INV, std::memory_order_release);
+    entry->valid.store(ENTRY_INV, std::memory_order_release);
   }
 
  private:
@@ -75,7 +106,7 @@ class Tracker {
   inline static void Complete(hsa_signal_value_t signal_value, entry_t* entry) {
     // Query begin/end and complete timestamps
     ::util::HsaRsrcFactory* hsa_rsrc = &(::util::HsaRsrcFactory::Instance());
-    if (entry->type == roctracer::COPY_ENTRY_TYPE) {
+    if (entry->type == COPY_ENTRY_TYPE) {
       hsa_amd_profiling_async_copy_time_t async_copy_time{};
       hsa_status_t status = hsa_amd_profiling_get_async_copy_time(entry->signal, &async_copy_time);
       if (status != HSA_STATUS_SUCCESS)
@@ -98,7 +129,10 @@ class Tracker {
     hsa_signal_t signal = entry->signal;
 
     // Releasing completed entry
-    entry->valid.store(roctracer::TRACE_ENTRY_COMPL, std::memory_order_release);
+    entry->valid.store(ENTRY_COMPL, std::memory_order_release);
+
+    assert(entry->handler != nullptr);
+    entry->handler(entry);
 
     // Original intercepted signal completion
     if (orig.handle) {
@@ -112,14 +146,14 @@ class Tracker {
       hsa_signal_store_screlease(orig, signal_value);
     }
     hsa_signal_destroy(signal);
+    delete entry;
   }
 
   // Handler for packet completion
   static bool Handler(hsa_signal_value_t signal_value, void* arg) {
     // Acquire entry
     entry_t* entry = reinterpret_cast<entry_t*>(arg);
-    while (entry->valid.load(std::memory_order_acquire) != roctracer::TRACE_ENTRY_INIT)
-      sched_yield();
+    while (entry->valid.load(std::memory_order_acquire) != ENTRY_INIT) sched_yield();
 
     // Complete entry
     Tracker::Complete(signal_value, entry);
