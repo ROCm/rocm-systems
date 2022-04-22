@@ -46,6 +46,12 @@ int
 get_verbose();
 
 bool
+get_debug_env();
+
+int
+get_verbose_env();
+
+bool
 get_is_continuous_integration();
 
 bool
@@ -77,14 +83,24 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 #define OMNITRACE_LINESTR                TIMEMORY_STRINGIZE(__LINE__)
 #define OMNITRACE_VARIABLE(LABEL)        OMNITRACE_VAR_NAME_COMBINE(_omni_var_, LABEL)
 
-#if defined(TIMEMORY_USE_MPI)
-#    define OMNITRACE_PROCESS_IDENTIFIER static_cast<int>(::tim::dmp::rank())
-#elif defined(TIMEMORY_USE_MPI_HEADERS)
-#    define OMNITRACE_PROCESS_IDENTIFIER                                                 \
-        (::tim::dmp::is_initialized()) ? static_cast<int>(::tim::dmp::rank())            \
-                                       : static_cast<int>(::tim::process::get_id())
-#else
-#    define OMNITRACE_PROCESS_IDENTIFIER static_cast<int>(::tim::process::get_id())
+#if !defined(OMNITRACE_DEBUG_BUFFER_LEN)
+#    define OMNITRACE_DEBUG_BUFFER_LEN 2048
+#endif
+
+#if !defined(OMNITRACE_PROCESS_IDENTIFIER)
+#    if defined(TIMEMORY_USE_MPI)
+#        define OMNITRACE_PROCESS_IDENTIFIER static_cast<int>(::tim::dmp::rank())
+#    elif defined(TIMEMORY_USE_MPI_HEADERS)
+#        define OMNITRACE_PROCESS_IDENTIFIER                                             \
+            (::tim::dmp::is_initialized()) ? static_cast<int>(::tim::dmp::rank())        \
+                                           : static_cast<int>(::tim::process::get_id())
+#    else
+#        define OMNITRACE_PROCESS_IDENTIFIER static_cast<int>(::tim::process::get_id())
+#    endif
+#endif
+
+#if !defined(OMNITRACE_THREAD_IDENTIFIER)
+#    define OMNITRACE_THREAD_IDENTIFIER ::tim::threading::get_id()
 #endif
 
 #if defined(__clang__) || (__GNUC__ < 9)
@@ -120,7 +136,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         fflush(stderr);                                                                  \
         tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };                  \
         fprintf(stderr, "[omnitrace][%i][%li] ", OMNITRACE_PROCESS_IDENTIFIER,           \
-                tim::threading::get_id());                                               \
+                OMNITRACE_THREAD_IDENTIFIER);                                            \
         fprintf(stderr, __VA_ARGS__);                                                    \
         fflush(stderr);                                                                  \
     }
@@ -143,7 +159,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         fflush(stderr);                                                                  \
         tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };                  \
         fprintf(stderr, "[omnitrace][%i][%li][%s] ", OMNITRACE_PROCESS_IDENTIFIER,       \
-                tim::threading::get_id(), OMNITRACE_FUNCTION);                           \
+                OMNITRACE_THREAD_IDENTIFIER, OMNITRACE_FUNCTION);                        \
         fprintf(stderr, __VA_ARGS__);                                                    \
         fflush(stderr);                                                                  \
     }
@@ -162,22 +178,23 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 #define OMNITRACE_CONDITIONAL_THROW(COND, ...)                                           \
     if(COND)                                                                             \
     {                                                                                    \
-        char _msg_buffer[2048];                                                          \
-        snprintf(_msg_buffer, 2048, "[omnitrace][%i][%li][%s] ",                         \
-                 OMNITRACE_PROCESS_IDENTIFIER, tim::threading::get_id(),                 \
+        char _msg_buffer[OMNITRACE_DEBUG_BUFFER_LEN];                                    \
+        snprintf(_msg_buffer, OMNITRACE_DEBUG_BUFFER_LEN, "[omnitrace][%i][%li][%s] ",   \
+                 OMNITRACE_PROCESS_IDENTIFIER, OMNITRACE_THREAD_IDENTIFIER,              \
                  OMNITRACE_FUNCTION);                                                    \
         auto len = strlen(_msg_buffer);                                                  \
-        snprintf(_msg_buffer + len, 2048 - len, __VA_ARGS__);                            \
+        snprintf(_msg_buffer + len, OMNITRACE_DEBUG_BUFFER_LEN - len, __VA_ARGS__);      \
         throw std::runtime_error(_msg_buffer);                                           \
     }
 
 #define OMNITRACE_CONDITIONAL_BASIC_THROW(COND, ...)                                     \
     if(COND)                                                                             \
     {                                                                                    \
-        char _msg_buffer[2048];                                                          \
-        snprintf(_msg_buffer, 2048, "[omnitrace][%s] ", OMNITRACE_FUNCTION);             \
+        char _msg_buffer[OMNITRACE_DEBUG_BUFFER_LEN];                                    \
+        snprintf(_msg_buffer, OMNITRACE_DEBUG_BUFFER_LEN, "[omnitrace][%s] ",            \
+                 OMNITRACE_FUNCTION);                                                    \
         auto len = strlen(_msg_buffer);                                                  \
-        snprintf(_msg_buffer + len, 2048 - len, __VA_ARGS__);                            \
+        snprintf(_msg_buffer + len, OMNITRACE_DEBUG_BUFFER_LEN - len, __VA_ARGS__);      \
         throw std::runtime_error(_msg_buffer);                                           \
     }
 
@@ -247,7 +264,8 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 
 #define OMNITRACE_BASIC_PRINT(...) OMNITRACE_CONDITIONAL_BASIC_PRINT(true, __VA_ARGS__)
 
-#define OMNITRACE_BASIC_PRINT_F(...) OMNITRACE_CONDITIONAL_BASIC_PRINT(true, __VA_ARGS__)
+#define OMNITRACE_BASIC_PRINT_F(...)                                                     \
+    OMNITRACE_CONDITIONAL_BASIC_PRINT_F(true, __VA_ARGS__)
 
 //--------------------------------------------------------------------------------------//
 //

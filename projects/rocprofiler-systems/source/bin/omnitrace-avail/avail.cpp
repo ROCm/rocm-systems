@@ -345,6 +345,7 @@ struct component_categories<void>
 int
 main(int argc, char** argv)
 {
+    tim::set_env("OMNITRACE_INIT_TOOLING", "OFF", 1);
     omnitrace_init_library();
 
     std::set<std::string> _category_options = component_categories{}();

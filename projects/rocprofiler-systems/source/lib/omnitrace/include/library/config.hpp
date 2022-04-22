@@ -42,6 +42,9 @@ namespace omnitrace
 //
 inline namespace config
 {
+bool
+settings_are_configured();
+
 void
 configure_settings(bool _init = true);
 

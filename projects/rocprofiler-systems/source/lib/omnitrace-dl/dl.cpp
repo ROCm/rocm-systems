@@ -129,10 +129,10 @@ struct OMNITRACE_HIDDEN_API indirect
             fprintf(stderr, "[omnitrace][dl][pid=%i] libomnitrace.so resolved to '%s'\n",
                     getpid(), m_omnilib.c_str());
         }
-        auto        _omni_hsa_lib = m_omnilib;
-        const char* _hsa_lib      = getenv("HSA_TOOLS_LIB");
-        if(_hsa_lib) _omni_hsa_lib.append(":").append(_hsa_lib);
-        setenv("HSA_TOOLS_LIB", _omni_hsa_lib.c_str(), 1);
+#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
+        auto _omni_hsa_lib = m_omnilib;
+        setenv("HSA_TOOLS_LIB", _omni_hsa_lib.c_str(), 0);
+#endif
         m_omnihandle = open(m_omnilib);
         m_userhandle = open(m_userlib);
         init();

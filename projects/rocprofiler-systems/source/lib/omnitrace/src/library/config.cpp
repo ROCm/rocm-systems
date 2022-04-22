@@ -84,9 +84,30 @@ get_setting_name(std::string _v)
 
 inline namespace config
 {
+namespace
+{
+TIMEMORY_NOINLINE bool&
+_settings_are_configured()
+{
+    static bool _v = false;
+    return _v;
+}
+}  // namespace
+
+bool
+settings_are_configured()
+{
+    volatile bool _v = _settings_are_configured();
+    return _v;
+}
+
 void
 configure_settings(bool _init)
 {
+    volatile bool _v = _settings_are_configured();
+    if(_v) return;
+    _settings_are_configured() = true;
+
     static bool _once = false;
     if(_once) return;
     _once = true;

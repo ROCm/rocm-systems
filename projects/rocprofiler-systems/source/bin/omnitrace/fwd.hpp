@@ -148,6 +148,7 @@ extern bool   instr_loop_traps;
 extern size_t min_address_range;
 extern size_t min_loop_address_range;
 extern size_t min_instructions;
+extern size_t min_loop_instructions;
 //
 //  debug settings
 //

@@ -44,6 +44,7 @@ jobs:
     - name: Configure CMake
       timeout-minutes: 5
       run:
+        git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         cmake -B build
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')

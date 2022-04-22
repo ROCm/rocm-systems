@@ -49,6 +49,7 @@ bool     instr_loop_traps        = false;
 size_t   min_address_range       = (1 << 8);  // 256
 size_t   min_loop_address_range  = (1 << 8);  // 256
 size_t   min_instructions        = (1 << 6);  // 64
+size_t   min_loop_instructions   = (1 << 6);  // 64
 bool     werror                  = false;
 bool     debug_print             = false;
 bool     instr_print             = false;
@@ -597,16 +598,23 @@ main(int argc, char** argv)
                       "value, exclude it from instrumentation")
         .count(1)
         .dtype("int")
-        .set_default(min_instructions)
         .action(
             [](parser_t& p) { min_instructions = p.get<size_t>("min-instructions"); });
+    parser
+        .add_argument({ "--min-instructions-loop" },
+                      "If the number of instructions in a function containing a loop is "
+                      "less than this value, exclude it from instrumentation")
+        .count(1)
+        .dtype("int")
+        .action([](parser_t& p) {
+            min_loop_instructions = p.get<size_t>("min-instructions-loop");
+        });
     parser
         .add_argument({ "-r", "--min-address-range" },
                       "If the address range of a function is less than this value, "
                       "exclude it from instrumentation")
         .count(1)
         .dtype("int")
-        .set_default(min_address_range)
         .action(
             [](parser_t& p) { min_address_range = p.get<size_t>("min-address-range"); });
     parser
@@ -615,7 +623,6 @@ main(int argc, char** argv)
                       "this value, exclude it from instrumentation")
         .count(1)
         .dtype("int")
-        .set_default(min_loop_address_range)
         .action([](parser_t& p) {
             min_loop_address_range = p.get<size_t>("min-address-range-loop");
         });
@@ -695,6 +702,56 @@ main(int argc, char** argv)
         parser.print_help(extra_help);
         return -1;
     }
+
+    auto _handle_heuristics = [&parser](std::string&& _exists, std::string&& _not_exists,
+                                        auto& _field, auto _value, std::string&& _msg,
+                                        bool _cond) {
+        // if first is specified but second is not, to reduce verbosity of command-line
+        // and increase simplicity, set _field to specified value
+        if(parser.exists(_exists) && !parser.exists(_not_exists) && _cond)
+        {
+            verbprintf(3,
+                       "Option '--%s' specified but '--%s <N>' was not specified. "
+                       "Setting %s to %s...\n",
+                       _exists.c_str(), _not_exists.c_str(), _msg.c_str(),
+                       TIMEMORY_JOIN("", _value).c_str());
+            _field = _value;
+        }
+    };
+
+    // if instructions was specified and address range was not
+    _handle_heuristics("min-instructions", "min-address-range", min_address_range, 0,
+                       "minimum address range", true);
+    _handle_heuristics("min-instructions-loop", "min-address-range-loop",
+                       min_loop_address_range, 0, "minimum address range for loops",
+                       true);
+
+    // if address range was specified but instructions was not
+    _handle_heuristics("min-address-range", "min-instructions", min_instructions, 0,
+                       "minimum instructions", true);
+    _handle_heuristics("min-address-range-loop", "min-instructions-loop",
+                       min_loop_instructions, 0, "minimum instructions for loops", true);
+
+    // if non-loop value was specified but loop value was not
+    _handle_heuristics("min-instructions", "min-instructions-loop", min_loop_instructions,
+                       min_instructions, "minimum instructions for loops", true);
+    _handle_heuristics("min-address-range", "min-address-range-loop",
+                       min_loop_address_range, min_address_range,
+                       "minimum address range for loops", true);
+
+    // if non-loop instructions was specified and loop address range was not specified
+    // as long as non-loop address range and loop instructions were not specified
+    _handle_heuristics("min-instructions", "min-address-range-loop",
+                       min_loop_address_range, 0, "minimum address range for loops",
+                       !parser.exists("min-address-range") &&
+                           !parser.exists("min-instructions-loop"));
+
+    // if non-loop address range was specified and loop instructions was not specified
+    // as long as non-loop instructions and loop address range were not specified
+    _handle_heuristics("min-address-range", "min-instructions-loop",
+                       min_loop_instructions, 0, "minimum instructions for loops",
+                       !parser.exists("min-instructions") &&
+                           !parser.exists("min-address-range-loop"));
 
     if(binary_rewrite && outfile.empty())
     {
@@ -857,7 +914,9 @@ main(int argc, char** argv)
     // for runtime instrumentation, we need to set this before the process gets created
     if(!binary_rewrite)
     {
+#if defined(OMNITRACE_USE_ROCTRACER)
         tim::set_env("HSA_ENABLE_INTERRUPT", "0", 0);
+#endif
         if(_pid >= 0)
         {
             verbprintf(-10, "#-------------------------------------------------------"
@@ -1394,8 +1453,10 @@ main(int argc, char** argv)
     // prioritize the user environment arguments
     auto env_vars = parser.get<strvec_t>("env");
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MODE", instr_mode));
+#if defined(OMNITRACE_USE_ROCTRACER)
     env_vars.emplace_back(TIMEMORY_JOIN('=', "HSA_ENABLE_INTERRUPT", "0"));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "HSA_TOOLS_LIB", _libname));
+#endif
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_INIT", "OFF"));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_FINALIZE", "OFF"));
     env_vars.emplace_back(
@@ -1459,7 +1520,7 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    if(instr_mode == "trace")
+    if(instr_mode != "sampling")
     {
         for(const auto& itr : available_module_functions)
         {
@@ -1959,7 +2020,8 @@ instrument_entity(const string_t& function_name)
         "(omnitrace|tim::|N3tim|MPI_Init|MPI_Finalize|dyninst|tm_clones)", regex_opts);
     static std::regex exclude_cxx(
         "(std::_Sp_counted_base|std::(use|has)_facet|std::locale|::sentry|^std::_|::_(M|"
-        "S)_|::basic_string[a-zA-Z,<>: ]+::_M_create)",
+        "S)_|::basic_string[a-zA-Z,<>: ]+::_M_create|::__|::_(Alloc|State)|"
+        "std::(basic_|)(ifstream|ios|istream|ostream|stream))",
         regex_opts);
     static std::regex leading("^(_|\\.|frame_dummy|transaction clone|virtual "
                               "thunk|non-virtual thunk|\\(|targ|kmp_threadprivate_)",

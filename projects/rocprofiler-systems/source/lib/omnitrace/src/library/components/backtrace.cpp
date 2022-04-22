@@ -345,6 +345,7 @@ backtrace::configure(bool _setup, int64_t _tid)
         _sampler->set_signals(*_signal_types);
         _sampler->set_flags(SA_RESTART);
         _sampler->set_delay(_delay);
+        _sampler->set_verbose(std::min<size_t>(_sampler->get_verbose(), 1));
         _sampler->set_frequency(_prof_freq, { SIGPROF });
         _sampler->set_frequency(_alrm_freq, { SIGALRM });
 

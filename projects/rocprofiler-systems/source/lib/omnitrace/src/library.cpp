@@ -114,7 +114,9 @@ ensure_finalization(bool _static_init = false)
         //
         // see:
         // https://github.com/ROCm-Developer-Tools/roctracer/issues/22#issuecomment-572814465
+#if defined(OMNITRACE_USE_ROCTRACER)
         tim::set_env("HSA_ENABLE_INTERRUPT", "0", 0);
+#endif
     }
     return scope::destructor{ []() { omnitrace_finalize_hidden(); } };
 }
@@ -502,6 +504,12 @@ omnitrace_init_library_hidden()
 extern "C" bool
 omnitrace_init_tooling_hidden()
 {
+    if(!tim::get_env("OMNITRACE_INIT_TOOLING", true))
+    {
+        omnitrace_init_library_hidden();
+        return false;
+    }
+
     static bool _once       = false;
     static auto _debug_init = get_debug_init();
 

@@ -28,8 +28,10 @@
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 
+#include <timemory/backends/cpu.hpp>
 #include <timemory/backends/threading.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 
@@ -48,30 +50,60 @@ namespace api = tim::api;
 int64_t
 get_clock_skew()
 {
-    static auto _v = []() {
+    static auto _use = tim::get_env("OMNITRACE_USE_ROCTRACER_CLOCK_SKEW", true);
+    static auto _v   = []() {
+        namespace cpu = tim::cpu;
         // synchronize timestamps
         // We'll take a CPU timestamp before and after taking a GPU timestmp, then
         // take the average of those two, hoping that it's roughly at the same time
         // as the GPU timestamp.
-        auto _now = []() {
-            return std::chrono::duration_cast<std::chrono::nanoseconds>(
-                       std::chrono::steady_clock::now().time_since_epoch())
-                .count();
+        static auto _cpu_now = []() {
+            cpu::fence();
+            return comp::wall_clock::record();
         };
-        uint64_t _cpu_ts = _now();
-        uint64_t _gpu_ts;
-        roctracer_get_timestamp(&_gpu_ts);
-        _cpu_ts += _now();
-        _cpu_ts /= 2;
 
-        // assume CPU timestamp is greater than GPU
-        OMNITRACE_BASIC_VERBOSE_F(2, "CPU timestamp: %lu\n", _cpu_ts);
-        OMNITRACE_BASIC_VERBOSE_F(2, "HIP timestamp: %lu\n", _gpu_ts);
-        auto _diff = static_cast<int64_t>(_cpu_ts) - static_cast<int64_t>(_gpu_ts);
-        OMNITRACE_BASIC_VERBOSE_F(2, "CPU/HIP timestamp skew: %li\n", _diff);
+        static auto _gpu_now = []() {
+            cpu::fence();
+            uint64_t _v = 0;
+            ROCTRACER_CALL(roctracer_get_timestamp(&_v));
+            return _v;
+        };
+
+        do
+        {
+            // warm up cache and allow for any static initialization
+            (void) _cpu_now();
+            (void) _gpu_now();
+        } while(false);
+
+        auto _compute = [](volatile uint64_t& _cpu_ts, volatile uint64_t& _gpu_ts) {
+            _cpu_ts = 0;
+            _gpu_ts = 0;
+            _cpu_ts += _cpu_now() / 2;
+            _gpu_ts += _gpu_now() / 1;
+            _cpu_ts += _cpu_now() / 2;
+            return static_cast<int64_t>(_cpu_ts) - static_cast<int64_t>(_gpu_ts);
+        };
+        constexpr int64_t _n       = 10;
+        int64_t           _cpu_ave = 0;
+        int64_t           _gpu_ave = 0;
+        int64_t           _diff    = 0;
+        for(int64_t i = 0; i < _n; ++i)
+        {
+            volatile uint64_t _cpu_ts = 0;
+            volatile uint64_t _gpu_ts = 0;
+            _diff += _compute(_cpu_ts, _gpu_ts);
+            _cpu_ave += _cpu_ts / _n;
+            _gpu_ave += _gpu_ts / _n;
+        }
+        OMNITRACE_BASIC_VERBOSE(1, "CPU timestamp: %li\n", _cpu_ave);
+        OMNITRACE_BASIC_VERBOSE(1, "HIP timestamp: %li\n", _gpu_ave);
+        OMNITRACE_BASIC_VERBOSE(0, "CPU/HIP timestamp skew: %li (used: %s)\n", _diff,
+                                _use ? "yes" : "no");
+        _diff /= _n;
         return _diff;
     }();
-    return _v;
+    return (_use) ? _v : 0;
 }
 
 std::unordered_set<uint64_t>&
@@ -141,9 +173,10 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
     (void) arg;
     const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
-    OMNITRACE_DEBUG("<%-30s id(%u)\tcorrelation_id(%lu) %s>\n",
-                    roctracer_op_string(domain, cid, 0), cid, data->correlation_id,
-                    (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
+    OMNITRACE_CONDITIONAL_PRINT_F(
+        get_debug() && get_verbose() > 1, "<%-30s id(%u)\tcorrelation_id(%lu) %s>\n",
+        roctracer_op_string(domain, cid, 0), cid, data->correlation_id,
+        (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
 
     static thread_local int64_t begin_timestamp = 0;
     static auto                 _scope          = []() {
@@ -246,6 +279,8 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
     if(get_state() != State::Active || !trait::runtime_enabled<comp::roctracer>::get())
         return;
 
+    sampling::block_signals();
+
     static const char* copy_op_name     = "hsa_async_copy";
     static const char* dispatch_op_name = "hsa_dispatch";
     static const char* barrier_op_name  = "hsa_barrier";
@@ -321,8 +356,6 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
     if(get_state() != State::Active || !trait::runtime_enabled<comp::roctracer>::get())
         return;
 
-    (void) get_clock_skew();
-
     using Device = critical_trace::Device;
     using Phase  = critical_trace::Phase;
 
@@ -347,9 +380,10 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
     }
 
     const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
-    OMNITRACE_DEBUG("<%-30s id(%u)\tcorrelation_id(%lu) %s>\n", op_name, cid,
-                    data->correlation_id,
-                    (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
+    OMNITRACE_CONDITIONAL_PRINT_F(
+        get_debug() && get_verbose() > 1, "<%-30s id(%u)\tcorrelation_id(%lu) %s>\n",
+        op_name, cid, data->correlation_id,
+        (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
 
     int64_t  _ts         = comp::wall_clock::record();
     auto     _tid        = threading::get_id();
@@ -579,8 +613,8 @@ hip_activity_callback(const char* begin, const char* end, void*)
 
         {
             static size_t _n = 0;
-            OMNITRACE_VERBOSE_F(
-                2,
+            OMNITRACE_CONDITIONAL_PRINT_F(
+                get_debug() && get_verbose() > 1,
                 "%4zu :: %-20s :: %-20s :: correlation_id(%6lu) time_ns(%12lu:%12lu) "
                 "delta_ns(%12lu) device_id(%d) stream_id(%lu) proc_id(%u) thr_id(%lu)\n",
                 _n++, op_name, _name, record->correlation_id, _beg_ns, _end_ns,
@@ -603,6 +637,8 @@ hip_activity_callback(const char* begin, const char* end, void*)
                 _beg_ns, perfetto::Flow::ProcessScoped(_cid), "corr_id",
                 record->correlation_id, "device", record->device_id, "queue",
                 record->queue_id, "op", _op_id_names.at(record->op));
+            TRACE_EVENT_END("device", _end_ns);
+            // for some reason, this is necessary to make sure very last one ends
             TRACE_EVENT_END("device", _end_ns);
         }
 
@@ -687,13 +723,16 @@ extern "C"
     bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                 const char* const* failed_tool_names)
     {
+        if(!tim::get_env("OMNITRACE_INIT_TOOLING", true)) return true;
+
         pthread_gotcha::push_enable_sampling_on_child_threads(false);
         OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug_env() || get_verbose_env() > 0,
                                             "\n");
         tim::consume_parameters(table, runtime_version, failed_tool_count,
                                 failed_tool_names);
 
-        if(get_state() < State::Active) omnitrace_init_tooling_hidden();
+        if(!config::settings_are_configured() && get_state() < State::Active)
+            omnitrace_init_tooling_hidden();
 
         auto _setup = [=]() {
             try
@@ -774,6 +813,8 @@ extern "C"
             ROCTRACER_CALL(
                 roctracer_disable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
         };
+
+        (void) get_clock_skew();
 
         comp::roctracer::add_setup("hsa", std::move(_setup));
         comp::roctracer::add_shutdown("hsa", std::move(_shutdown));

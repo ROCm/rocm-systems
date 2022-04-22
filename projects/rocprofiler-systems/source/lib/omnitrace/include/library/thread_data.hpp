@@ -53,6 +53,14 @@ struct thread_data
     static std::unique_ptr<Tp>& instance(construct_on_init, Args&&...);
     template <typename... Args>
     static instance_array_t& instances(construct_on_init, Args&&...);
+
+    static constexpr size_t size() { return MaxThreads; }
+
+    decltype(auto) begin() { return instances().begin(); }
+    decltype(auto) end() { return instances().end(); }
+
+    decltype(auto) begin() const { return instances().begin(); }
+    decltype(auto) end() const { return instances().end(); }
 };
 
 template <typename Tp, typename Tag, size_t MaxThreads>
