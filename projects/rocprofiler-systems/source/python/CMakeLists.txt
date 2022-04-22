@@ -12,31 +12,23 @@ set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME python)
 
 # ########################################################################################
 
-function(OMNITRACE_CONFIGURE_PYTARGET _TARGET)
+function(OMNITRACE_CONFIGURE_PYTARGET _TARGET _VERSION)
 
     add_library(omnitrace::${_TARGET} ALIAS ${_TARGET})
     target_link_libraries(${_TARGET} PRIVATE libpyomnitrace-interface)
 
-    set(_SUBDIR ${ARGN})
-    if(_SUBDIR)
-        set(_SUBDIR "/${_SUBDIR}")
-    endif()
-
     set_target_properties(
         ${_TARGET}
         PROPERTIES PREFIX ""
-                   SUFFIX "${PYTHON_MODULE_EXTENSION}"
-                   LIBRARY_OUTPUT_DIRECTORY
-                   ${PROJECT_BINARY_DIR}/python/omnitrace${_SUBDIR}
-                   ARCHIVE_OUTPUT_DIRECTORY
-                   ${PROJECT_BINARY_DIR}/python/omnitrace${_SUBDIR}
-                   RUNTIME_OUTPUT_DIRECTORY
-                   ${PROJECT_BINARY_DIR}/python/omnitrace${_SUBDIR}
-                   PDB_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/python/omnitrace${_SUBDIR}
+                   OUTPUT_NAME libpyomnitrace
+                   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/python/omnitrace
+                   ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/python/omnitrace
+                   RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/python/omnitrace
+                   PDB_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/python/omnitrace
                    INSTALL_RPATH_USE_LINK_PATH ON
                    ${EXTRA_PROPERTIES})
 
-    set(_PYLIB ${CMAKE_INSTALL_PYTHONDIR}/omnitrace${_SUBDIR})
+    set(_PYLIB ${CMAKE_INSTALL_PYTHONDIR}/omnitrace)
     if(NOT IS_ABSOLUTE "${_PYLIB}")
         set(_PYLIB ${CMAKE_INSTALL_PREFIX}/${_PYLIB})
     endif()
@@ -57,12 +49,8 @@ function(OMNITRACE_CONFIGURE_PYTARGET _TARGET)
 
     install(
         TARGETS ${_TARGET}
-        DESTINATION ${CMAKE_INSTALL_PYTHONDIR}/omnitrace${_SUBDIR}
+        DESTINATION ${CMAKE_INSTALL_PYTHONDIR}/omnitrace
         OPTIONAL)
-
-    if(NOT "${_TARGET}" STREQUAL "libpyomnitrace")
-        add_dependencies(libpyomnitrace ${_TARGET})
-    endif()
 endfunction()
 
 # ########################################################################################
@@ -96,12 +84,160 @@ target_link_libraries(
 
 target_compile_definitions(libpyomnitrace-interface INTERFACE OMNITRACE_PYBIND11_SOURCE)
 
-add_library(libpyomnitrace MODULE ${pysources} ${pyheaders})
-omnitrace_configure_pytarget(libpyomnitrace)
+# ----------------------------------------------------------------------------
+# Console scripts
+#
+function(OMNITRACE_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
+    set(options)
+    set(args VERSION ROOT_DIR)
+    set(kwargs)
+    cmake_parse_arguments(ARG "${options}" "${args}" "${kwargs}" ${ARGN})
 
-add_subdirectory(omnitrace)
+    if(ARG_VERSION AND ARG_ROOT_DIR)
+        set(Python3_ROOT_DIR "${ARG_ROOT_DIR}")
+        find_package(Python3 ${ARG_VERSION} EXACT QUIET MODULE COMPONENTS Interpreter)
+        set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+        configure_file(${PROJECT_SOURCE_DIR}/cmake/Templates/console-script.in
+                       ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION} @ONLY)
 
-if(PYTHON_EXECUTABLE)
+        if(CMAKE_INSTALL_PYTHONDIR)
+            install(
+                PROGRAMS ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION}
+                DESTINATION ${CMAKE_INSTALL_BINDIR}
+                OPTIONAL)
+        endif()
+
+        if(OMNITRACE_BUILD_TESTING OR OMNITRACE_BUILD_PYTHON)
+            add_test(
+                NAME ${SCRIPT_NAME}-console-script-test-${ARG_VERSION}
+                COMMAND ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION} --help
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+            set_tests_properties(
+                ${SCRIPT_NAME}-console-script-test-${ARG_VERSION}
+                PROPERTIES LABELS "python;python-${ARG_VERSION};console-script")
+            add_test(
+                NAME ${SCRIPT_NAME}-generic-console-script-test-${ARG_VERSION}
+                COMMAND ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME} --help
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+            set_tests_properties(
+                ${SCRIPT_NAME}-generic-console-script-test-${ARG_VERSION}
+                PROPERTIES ENVIRONMENT "PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}" LABELS
+                           "python;python-${ARG_VERSION};console-script")
+        endif()
+    else()
+        set(PYTHON_EXECUTABLE "python3")
+
+        configure_file(${PROJECT_SOURCE_DIR}/cmake/Templates/console-script.in
+                       ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME} @ONLY)
+
+        if(CMAKE_INSTALL_PYTHONDIR)
+            install(
+                PROGRAMS ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}
+                DESTINATION ${CMAKE_INSTALL_BINDIR}
+                OPTIONAL)
+        endif()
+    endif()
+endfunction()
+
+include(PyBind11Tools)
+
+# OMNITRACE_PYTHON_ROOT_DIRS=/opt/conda/envs/py36;/opt/conda/envs/py37;/opt/conda/envs/py38;/opt/conda/envs/py39
+# OMNITRACE_PYTHON_VERSIONS=3.6;3.7;3.8;3.9
+
+if(NOT OMNITRACE_PYTHON_VERSIONS AND OMNITRACE_PYTHON_VERSION)
+    set(OMNITRACE_PYTHON_VERSIONS "${OMNITRACE_PYTHON_VERSION}")
+    if(NOT OMNITRACE_PYTHON_ROOT_DIRS)
+        omnitrace_find_python(_PY VERSION ${OMNITRACE_PYTHON_VERSION})
+        set(OMNITRACE_PYTHON_ROOT_DIRS
+            "${_PY_ROOT_DIR}"
+            CACHE INTERNAL "" FORCE)
+    endif()
+elseif(
+    NOT OMNITRACE_PYTHON_VERSIONS
+    AND NOT OMNITRACE_PYTHON_VERSION
+    AND OMNITRACE_PYTHON_ROOT_DIRS)
+    set(_PY_VERSIONS)
+    foreach(_DIR ${OMNITRACE_PYTHON_ROOT_DIRS})
+        omnitrace_find_python(_PY ROOT_DIR ${_DIR})
+        if(NOT _PY_FOUND)
+            continue()
+        endif()
+        if(NOT "${_PY_VERSION}" IN_LIST _PY_VERSIONS)
+            list(APPEND _PY_VERSIONS "${_PY_VERSION}")
+        endif()
+    endforeach()
+    set(OMNITRACE_PYTHON_VERSIONS
+        "${_PY_VERSIONS}"
+        CACHE INTERNAL "" FORCE)
+elseif(
+    NOT OMNITRACE_PYTHON_VERSIONS
+    AND NOT OMNITRACE_PYTHON_VERSION
+    AND NOT OMNITRACE_PYTHON_ROOT_DIRS)
+    omnitrace_find_python(_PY REQUIRED)
+    set(OMNITRACE_PYTHON_ROOT_DIRS
+        "${_PY_ROOT_DIR}"
+        CACHE INTERNAL "" FORCE)
+    set(OMNITRACE_PYTHON_VERSIONS
+        "${_PY_VERSION}"
+        CACHE INTERNAL "" FORCE)
+endif()
+
+list(LENGTH OMNITRACE_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
+list(LENGTH OMNITRACE_PYTHON_ROOT_DIRS _NUM_PYTHON_ROOT_DIRS)
+
+if(NOT _NUM_PYTHON_VERSIONS EQUAL _NUM_PYTHON_ROOT_DIRS)
+    omnitrace_message(
+        WARNING
+        "Error! Number of python versions  : ${_NUM_PYTHON_VERSIONS}. VERSIONS :: ${OMNITRACE_PYTHON_VERSIONS}"
+        )
+    omnitrace_message(
+        WARNING
+        "Error! Number of python root directories : ${_NUM_PYTHON_ROOT_DIRS}. ROOT DIRS :: ${OMNITRACE_PYTHON_ROOT_DIRS}"
+        )
+    omnitrace_message(
+        FATAL_ERROR
+        "Error! Number of python versions != number of python root directories")
+endif()
+
+file(GLOB_RECURSE PYTHON_FILES ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/*.py)
+foreach(_IN ${PYTHON_FILES})
+    string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/omnitrace"
+                   "${PROJECT_BINARY_DIR}/python/omnitrace" _OUT "${_IN}")
+    configure_file(${_IN} ${_OUT} @ONLY)
+    install(
+        FILES ${_OUT}
+        DESTINATION ${CMAKE_INSTALL_PYTHONDIR}/omnitrace
+        OPTIONAL)
+endforeach()
+
+omnitrace_python_console_script("omnitrace-python" "omnitrace")
+
+execute_process(
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_INSTALL_LIBDIR}/python
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ../../python
+            ${CMAKE_INSTALL_LIBDIR}/python/site-packages
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+set(_INDEX 0)
+foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
+    # add_library(libpyomnitrace MODULE ${pysources} ${pyheaders})
+    list(GET OMNITRACE_PYTHON_ROOT_DIRS ${_INDEX} Python3_ROOT_DIR)
+    omnitrace_pybind11_add_module(
+        libpyomnitrace-${_VERSION} MODULE
+        PYTHON_VERSION ${_VERSION}
+        VISIBILITY "hidden" ${pysources} ${pyheaders})
+    omnitrace_configure_pytarget(libpyomnitrace-${_VERSION} ${_VERSION})
+
+    if(OMNITRACE_USE_PYTHON)
+        omnitrace_python_console_script(
+            "omnitrace-python" "omnitrace"
+            VERSION ${_VERSION}
+            ROOT_DIR "${Python3_ROOT_DIR}")
+    endif()
+    math(EXPR _INDEX "${_INDEX} + 1")
+endforeach()
+
+if(PYTHON_EXECUTABLE AND OFF)
     configure_file(${CMAKE_CURRENT_LIST_DIR}/setup.py.in
                    ${PROJECT_BINARY_DIR}/python/setup.py @ONLY)
     configure_file(${CMAKE_CURRENT_LIST_DIR}/setup.cfg.in

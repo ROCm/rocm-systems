@@ -59,6 +59,7 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/src/library/ompt.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/perfetto.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/ptl.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/runtime.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/sampling.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/thread_data.cpp
@@ -84,6 +85,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/library/ompt.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/perfetto.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/ptl.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/runtime.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/sampling.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/thread_data.hpp
@@ -139,8 +141,7 @@ set_target_properties(
     PROPERTIES OUTPUT_NAME omnitrace
                VERSION ${PROJECT_VERSION}
                SOVERSION ${PROJECT_VERSION_MAJOR}
-               INSTALL_RPATH
-               "\$ORIGIN:\$ORIGIN/timemory/libunwind:\$ORIGIN/dyninst-tpls/libs")
+               INSTALL_RPATH "${OMNITRACE_LIB_INSTALL_RPATH}")
 
 omnitrace_strip_target(omnitrace-library)
 

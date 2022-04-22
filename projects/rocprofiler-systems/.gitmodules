@@ -19,3 +19,6 @@
 [submodule "external/papi"]
 	path = external/papi
 	url = https://bitbucket.org/icl/papi.git
+[submodule "external/pybind11"]
+	path = external/pybind11
+	url = https://github.com/jrmadsen/pybind11.git

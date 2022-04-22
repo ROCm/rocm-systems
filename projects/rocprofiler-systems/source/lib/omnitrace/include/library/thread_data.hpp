@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "library/config.hpp"
 #include "library/defines.hpp"
+#include "library/runtime.hpp"
 
 #include <array>
 #include <cstdint>

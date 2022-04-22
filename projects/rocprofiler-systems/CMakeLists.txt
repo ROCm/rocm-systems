@@ -32,7 +32,7 @@ message(
         "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}"
     )
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${PROJECT_SOURCE_DIR}/cmake/Modules
-                      ${CMAKE_MODULE_PATH})
+                      ${PROJECT_SOURCE_DIR}/source/python/cmake ${CMAKE_MODULE_PATH})
 set(BUILD_SHARED_LIBS
     ON
     CACHE BOOL "Build shared libraries")

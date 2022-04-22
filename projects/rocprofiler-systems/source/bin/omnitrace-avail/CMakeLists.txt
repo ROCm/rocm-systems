@@ -14,12 +14,9 @@ target_compile_definitions(omnitrace-avail PRIVATE OMNITRACE_EXTERN_COMPONENTS=0
 target_link_libraries(omnitrace-avail PRIVATE omnitrace::omnitrace-interface-library)
 set_target_properties(
     omnitrace-avail
-    PROPERTIES
-        BUILD_RPATH "\$ORIGIN:${PROJECT_BINARY_DIR}:${CMAKE_BINARY_DIR}"
-        INSTALL_RPATH_USE_LINK_PATH ON
-        INSTALL_RPATH
-        "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/timemory/libunwind:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib"
-    )
+    PROPERTIES BUILD_RPATH "\$ORIGIN:${PROJECT_BINARY_DIR}:${CMAKE_BINARY_DIR}"
+               INSTALL_RPATH_USE_LINK_PATH ON
+               INSTALL_RPATH "${OMNITRACE_EXE_INSTALL_RPATH}")
 
 install(
     TARGETS omnitrace-avail

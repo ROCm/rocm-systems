@@ -1,4 +1,4 @@
-#!@PYTHON_EXECUTABLE@
+#!/usr/bin/env python@_VERSION@
 # MIT License
 #
 # Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.

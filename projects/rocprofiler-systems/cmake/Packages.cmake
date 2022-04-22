@@ -584,11 +584,15 @@ omnitrace_add_feature(CMAKE_CXX_FLAGS "C++ compiler flags")
 #
 # ----------------------------------------------------------------------------------------#
 
+set(OMNITRACE_INSTALL_PYTHONDIR
+    "${CMAKE_INSTALL_LIBDIR}/python/site-packages"
+    CACHE STRING "Installation prefix for python")
+set(CMAKE_INSTALL_PYTHONDIR ${OMNITRACE_INSTALL_PYTHONDIR})
+
 if(OMNITRACE_USE_PYTHON)
     if(OMNITRACE_USE_PYTHON AND NOT OMNITRACE_BUILD_PYTHON)
         find_package(pybind11 REQUIRED)
     endif()
 
-    list(INSERT CMAKE_MODULE_PATH 0 ${PROJECT_SOURCE_DIR}/source/python/cmake)
     include(ConfigPython)
 endif()

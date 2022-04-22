@@ -3,6 +3,7 @@
 : ${ROCM_VERSIONS:="5.0 4.5 4.3"}
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=20.04 18.04}
+: ${PYTHON_VERSIONS:="6 7 8 9"}
 : ${CI:=""}
 
 set -e
@@ -35,6 +36,10 @@ do
             shift
             ROCM_VERSIONS=${1}
             ;;
+        "--python-versions")
+            shift
+            PYTHON_VERSIONS=${1}
+            ;;
         *)
             if [ "${n}" -eq 0 ]; then
                 DISTRO=${1}
@@ -65,17 +70,16 @@ do
             ROCM_REPO_DIST="ubuntu"
             ROCM_REPO_VERSION=${i}
             case "${i}" in
-                5.0*)
+                5.1*)
                     ROCM_REPO_VERSION="debian"
                     ;;
                 4.1* | 4.0*)
                     ROCM_REPO_DIST="xenial"
                     ;;
                 *)
-                    send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${i}"
                     ;;
             esac
-            verbose-run docker build . -f ${DOCKER_FILE} --tag jrmadsen/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST}
+            verbose-run docker build . -f ${DOCKER_FILE} --tag jrmadsen/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "centos" ]; then
             case "${VERSION}" in
                 7)
@@ -106,7 +110,7 @@ do
                     send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${i}"
                     ;;
             esac
-            verbose-run docker build . -f ${DOCKER_FILE} --tag jrmadsen/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM}
+            verbose-run docker build . -f ${DOCKER_FILE} --tag jrmadsen/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "opensuse" ]; then
             case "${VERSION}" in
                 15.*)
@@ -134,7 +138,7 @@ do
                     send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${i}"
                 ;;
             esac
-            verbose-run docker build . -f ${DOCKER_FILE} --tag jrmadsen/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM}
+            verbose-run docker build . -f ${DOCKER_FILE} --tag jrmadsen/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         fi
     done
 done

@@ -11,13 +11,34 @@ if(DYNINST_BUILD_ELFUTILS AND DYNINST_ELFUTILS_DOWNLOAD_VERSION)
     endforeach()
 endif()
 
-if(EXISTS /etc/lsb-release AND NOT IS_DIRECTORY /etc/lsb-release)
-    file(READ /etc/lsb-release _LSB_RELEASE)
-    if(_LSB_RELEASE)
-        string(REGEX REPLACE "DISTRIB_ID=(.*)\nDISTRIB_RELEASE=(.*)\nDISTRIB_CODENAME=.*"
-                             "\\1-\\2" _SYSTEM_NAME "${_LSB_RELEASE}")
+function(omnitrace_parse_release)
+    if(EXISTS /etc/lsb-release AND NOT IS_DIRECTORY /etc/lsb-release)
+        file(READ /etc/lsb-release _LSB_RELEASE)
+        if(_LSB_RELEASE)
+            string(REGEX
+                   REPLACE "DISTRIB_ID=(.*)\nDISTRIB_RELEASE=(.*)\nDISTRIB_CODENAME=.*"
+                           "\\1-\\2" _SYSTEM_NAME "${_LSB_RELEASE}")
+        endif()
+    elseif(EXISTS /etc/os-release AND NOT IS_DIRECTORY /etc/os-release)
+        file(READ /etc/os-release _OS_RELEASE)
+        if(_OS_RELEASE)
+            string(REPLACE "\"" "" _OS_RELEASE "${_OS_RELEASE}")
+            string(REPLACE "-" " " _OS_RELEASE "${_OS_RELEASE}")
+            string(REGEX REPLACE "NAME=.*\nVERSION=([0-9\.]+).*\nID=([a-z]+).*" "\\2-\\1"
+                                 _SYSTEM_NAME "${_OS_RELEASE}")
+        endif()
     endif()
-endif()
+    string(TOLOWER "${_SYSTEM_NAME}" _SYSTEM_NAME)
+    if(NOT _SYSTEM_NAME)
+        set(_SYSTEM_NAME "${CMAKE_SYSTEM_NAME}")
+    endif()
+    set(_SYSTEM_NAME
+        "${_SYSTEM_NAME}"
+        PARENT_SCOPE)
+endfunction()
+
+# parse either /etc/lsb-release or /etc/os-release
+omnitrace_parse_release()
 
 if(NOT _SYSTEM_NAME)
     set(_SYSTEM_NAME "${CMAKE_SYSTEM_NAME}")
@@ -86,9 +107,13 @@ if(OMNITRACE_USE_MPI)
 endif()
 
 if(OMNITRACE_USE_PYTHON)
-    string(REPLACE "." "" OMNITRACE_CPACK_PYTHON_VERSION "PY${OMNITRACE_PYTHON_VERSION}")
-    set(OMNITRACE_CPACK_PACKAGE_SUFFIX
-        "${OMNITRACE_CPACK_PACKAGE_SUFFIX}-${OMNITRACE_CPACK_PYTHON_VERSION}")
+    set(_OMNITRACE_PYTHON_NAME "Python3")
+    foreach(_VER ${OMNITRACE_PYTHON_VERSIONS})
+        if("${_VER}" VERSION_LESS 3.0.0)
+            set(_OMNITRACE_PYTHON_NAME "Python")
+        endif()
+    endforeach()
+    set(OMNITRACE_CPACK_PACKAGE_SUFFIX "${OMNITRACE_CPACK_PACKAGE_SUFFIX}-Python3")
 endif()
 
 set(CPACK_PACKAGE_FILE_NAME

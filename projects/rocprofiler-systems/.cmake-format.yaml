@@ -68,6 +68,8 @@ parse:
         DEPENDS: '*'
         COMMAND: '*'
         PROPERTIES: '*'
+        PYTHON_EXECUTABLE: '*'
+        PYTHON_VERSION: '*'
         PASS_REGULAR_EXPRESSION: '*'
         FAIL_REGULAR_EXPRESSION: '*'
         SKIP_REGULAR_EXPRESSION: '*'
@@ -78,6 +80,31 @@ parse:
         - SEND_ERROR
         - FATAL_ERROR
         - AUTHOR_WARNING
+    omnitrace_find_python:
+      flags:
+        - REQUIRED
+        - QUIET
+      kwargs:
+        VERSION: '*'
+        ROOT_DIR: '*'
+        COMPONENTS: '*'
+    omnitrace_python_console_script:
+      kwargs:
+        VERSION: '*'
+        ROOT_DIR: '*'
+    omnitrace_pybind11_add_module:
+      flags:
+        - MODULE
+        - SHARED
+        - EXCLUDE_FROM_ALL
+        - NO_EXTRAS
+        - SYSTEM
+        - THIN_LTO
+        - LTO
+      kwargs:
+        PYTHON_VERSION: '*'
+        CXX_STANDARD: '*'
+        VISIBILITY: '*'
   override_spec: {}
   vartags: []
   proptags: []

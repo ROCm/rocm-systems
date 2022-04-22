@@ -76,10 +76,11 @@ set(_python_environment
     "OMNITRACE_USE_TIMEMORY=ON"
     "OMNITRACE_USE_SAMPLING=OFF"
     "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_TREE_OUTPUT=OFF"
     "OMNITRACE_USE_PID=OFF"
     "OMNITRACE_TIMEMORY_COMPONENTS=trip_count"
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
-    "PYTHONPATH=${CMAKE_BINARY_DIR}/python:$ENV{PYTHONPATH}")
+    "PYTHONPATH=${CMAKE_BINARY_DIR}/python")
 
 # -------------------------------------------------------------------------------------- #
 
@@ -242,7 +243,7 @@ function(OMNITRACE_ADD_PYTHON_TEST)
     cmake_parse_arguments(
         TEST
         "STANDALONE" # options
-        "NAME;FILE;TIMEOUT" # single value args
+        "NAME;FILE;TIMEOUT;PYTHON_EXECUTABLE;PYTHON_VERSION" # single value args
         "PROFILE_ARGS;RUN_ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGULAR_EXPRESSION;FAIL_REGULAR_EXPRESSION;SKIP_REGULAR_EXPRESSION;DEPENDS;COMMAND" # multiple
                                                                                                                                                       # value args
         ${ARGN})
@@ -251,64 +252,70 @@ function(OMNITRACE_ADD_PYTHON_TEST)
         set(TEST_TIMEOUT 120)
     endif()
 
+    set(PYTHON_EXECUTABLE "${TEST_PYTHON_EXECUTABLE}")
+
     if(NOT DEFINED TEST_ENVIRONMENT OR "${TEST_ENVIRONMENT}" STREQUAL "")
         set(TEST_ENVIRONMENT "${_python_environment}")
     endif()
 
-    list(APPEND TEST_LABELS "python")
-    list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON"
-         "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
-         "OMNITRACE_OUTPUT_PREFIX=${TEST_NAME}/")
+    list(APPEND TEST_LABELS "python" "python-${TEST_PYTHON_VERSION}")
 
     if(NOT TEST_COMMAND)
+        list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON"
+             "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
+             "OMNITRACE_OUTPUT_PREFIX=${TEST_NAME}/${TEST_PYTHON_VERSION}/")
         get_filename_component(_TEST_FILE "${TEST_FILE}" NAME)
-        configure_file(${TEST_FILE} ${CMAKE_BINARY_DIR}/${_TEST_FILE} @ONLY)
+        set(_TEST_FILE
+            ${CMAKE_BINARY_DIR}/python/tests/${TEST_PYTHON_VERSION}/${_TEST_FILE})
+        configure_file(${TEST_FILE} ${_TEST_FILE} @ONLY)
         if(TEST_STANDALONE)
             add_test(
-                NAME ${TEST_NAME}
-                COMMAND ${PYTHON_EXECUTABLE} ${_TEST_FILE} ${TEST_RUN_ARGS}
+                NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}
+                COMMAND ${TEST_PYTHON_EXECUTABLE} ${_TEST_FILE} ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
         else()
             add_test(
-                NAME ${TEST_NAME}
-                COMMAND ${PYTHON_EXECUTABLE} -m omnitrace ${TEST_PROFILE_ARGS} --
+                NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}
+                COMMAND ${TEST_PYTHON_EXECUTABLE} -m omnitrace ${TEST_PROFILE_ARGS} --
                         ${_TEST_FILE} ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
         endif()
     else()
+        list(APPEND TEST_LABELS "python-check" "python-${TEST_PYTHON_VERSION}-check")
         add_test(
-            NAME ${TEST_NAME}
+            NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}
             COMMAND ${TEST_COMMAND} ${TEST_FILE}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
         add_test(
-            NAME ${TEST_NAME}-inverse
+            NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}-inverse
             COMMAND ${TEST_COMMAND} ${TEST_FILE}
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     endif()
 
-    set_tests_properties(
-        ${TEST_NAME}
-        PROPERTIES ENVIRONMENT
-                   "${TEST_ENVIRONMENT}"
-                   TIMEOUT
-                   ${TEST_TIMEOUT}
-                   LABELS
-                   "${TEST_LABELS}"
-                   DEPENDS
-                   "${TEST_DEPENDS}"
-                   PASS_REGULAR_EXPRESSION
-                   "${TEST_PASS_REGULAR_EXPRESSION}"
-                   FAIL_REGULAR_EXPRESSION
-                   "${TEST_FAIL_REGULAR_EXPRESSION}"
-                   SKIP_REGULAR_EXPRESSION
-                   "${TEST_SKIP_REGULAR_EXPRESSION}"
-                   REQUIRED_FILES
-                   "${TEST_FILE}"
-                   ${TEST_PROPERTIES})
+    foreach(_TEST ${TEST_NAME}-${TEST_PYTHON_VERSION}
+                  ${TEST_NAME}-${TEST_PYTHON_VERSION}-inverse)
 
-    if(TEST ${TEST_NAME}-inverse)
+        if(NOT TEST "${_TEST}")
+            continue()
+        endif()
+
+        set(_TEST_PROPERTIES "${TEST_PROPERTIES}")
+        if(NOT "${_TEST}" MATCHES "inverse")
+            # assign pass variable to pass regex
+            set(_PASS_REGEX TEST_PASS_REGULAR_EXPRESSION)
+            # assign fail variable to fail regex
+            set(_FAIL_REGEX TEST_FAIL_REGULAR_EXPRESSION)
+        else()
+            # assign pass variable to fail regex
+            set(_PASS_REGEX TEST_FAIL_REGULAR_EXPRESSION)
+            # assign fail variable to pass regex
+            set(_FAIL_REGEX TEST_PASS_REGULAR_EXPRESSION)
+            # set to will fail
+            list(APPEND _TEST_PROPERTIES WILL_FAIL ON)
+        endif()
+
         set_tests_properties(
-            ${TEST_NAME}-inverse
+            ${_TEST}
             PROPERTIES ENVIRONMENT
                        "${TEST_ENVIRONMENT}"
                        TIMEOUT
@@ -318,15 +325,15 @@ function(OMNITRACE_ADD_PYTHON_TEST)
                        DEPENDS
                        "${TEST_DEPENDS}"
                        PASS_REGULAR_EXPRESSION
-                       "${TEST_FAIL_REGULAR_EXPRESSION}"
+                       "${${_PASS_REGEX}}"
                        FAIL_REGULAR_EXPRESSION
-                       "${TEST_PASS_REGULAR_EXPRESSION}"
-                       WILL_FAIL
-                       ON
+                       "${${_FAIL_REGEX}}"
+                       SKIP_REGULAR_EXPRESSION
+                       "${TEST_SKIP_REGULAR_EXPRESSION}"
                        REQUIRED_FILES
                        "${TEST_FILE}"
-                       ${TEST_PROPERTIES})
-    endif()
+                       ${_TEST_PROPERTIES})
+    endforeach()
 endfunction()
 
 # -------------------------------------------------------------------------------------- #
@@ -495,89 +502,113 @@ omnitrace_add_test(
 #
 # -------------------------------------------------------------------------------------- #
 
-omnitrace_add_python_test(
-    NAME python-external
-    FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
-    PROFILE_ARGS -f
-    RUN_ARGS 10
-    ENVIRONMENT "${_python_environment}")
+set(_INDEX 0)
+foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
+    list(GET OMNITRACE_PYTHON_ROOT_DIRS ${_INDEX} _PYTHON_ROOT_DIR)
 
-omnitrace_add_python_test(
-    NAME python-external-exclude-inefficient
-    FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
-    PROFILE_ARGS -E "^inefficient$"
-    RUN_ARGS 10
-    ENVIRONMENT "${_python_environment}")
+    omnitrace_find_python(
+        _PYTHON
+        ROOT_DIR "${_PYTHON_ROOT_DIR}"
+        COMPONENTS Interpreter)
 
-omnitrace_add_python_test(
-    NAME python-builtin
-    FILE ${CMAKE_SOURCE_DIR}/examples/python/builtin.py
-    PROFILE_ARGS -b -l -f
-    RUN_ARGS 10
-    ENVIRONMENT "${_python_environment}")
+    # ---------------------------------------------------------------------------------- #
+    # python tests
+    # ---------------------------------------------------------------------------------- #
+    omnitrace_add_python_test(
+        NAME python-external
+        PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
+        PYTHON_VERSION ${_VERSION}
+        FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
+        PROFILE_ARGS -f
+        RUN_ARGS -v 10 -n 5
+        ENVIRONMENT "${_python_environment}")
 
-omnitrace_add_python_test(
-    STANDALONE
-    NAME python-source
-    FILE ${CMAKE_SOURCE_DIR}/examples/python/source.py
-    RUN_ARGS 5
-    ENVIRONMENT "${_python_environment}")
+    omnitrace_add_python_test(
+        NAME python-external-exclude-inefficient
+        PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
+        PYTHON_VERSION ${_VERSION}
+        FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
+        PROFILE_ARGS -E "^inefficient$"
+        RUN_ARGS -v 10 -n 5
+        ENVIRONMENT "${_python_environment}")
 
-# -------------------------------------------------------------------------------------- #
-#
-# python output tests
-#
-# -------------------------------------------------------------------------------------- #
+    omnitrace_add_python_test(
+        NAME python-builtin
+        PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
+        PYTHON_VERSION ${_VERSION}
+        FILE ${CMAKE_SOURCE_DIR}/examples/python/builtin.py
+        PROFILE_ARGS -b -l -f
+        RUN_ARGS -v 10 -n 5
+        ENVIRONMENT "${_python_environment}")
 
-if(CMAKE_VERSION VERSION_LESS "3.18.0")
-    find_program(
-        OMNITRACE_CAT_EXE
-        NAMES cat
-        PATH_SUFFIXES bin)
-    if(OMNITRACE_CAT_EXE)
-        set(OMNITRACE_CAT_COMMAND ${OMNITRACE_CAT_EXE})
+    omnitrace_add_python_test(
+        STANDALONE
+        NAME python-source
+        PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
+        PYTHON_VERSION ${_VERSION}
+        FILE ${CMAKE_SOURCE_DIR}/examples/python/source.py
+        RUN_ARGS -v 5 -n 5
+        ENVIRONMENT "${_python_environment}")
+
+    # ---------------------------------------------------------------------------------- #
+    # python output tests
+    # ---------------------------------------------------------------------------------- #
+
+    if(CMAKE_VERSION VERSION_LESS "3.18.0")
+        find_program(
+            OMNITRACE_CAT_EXE
+            NAMES cat
+            PATH_SUFFIXES bin)
+        if(OMNITRACE_CAT_EXE)
+            set(OMNITRACE_CAT_COMMAND ${OMNITRACE_CAT_EXE})
+        endif()
+    else()
+        set(OMNITRACE_CAT_COMMAND ${CMAKE_COMMAND} -E cat)
     endif()
-else()
-    set(OMNITRACE_CAT_COMMAND ${CMAKE_COMMAND} -E cat)
-endif()
 
-if(OMNITRACE_CAT_COMMAND)
-    omnitrace_add_python_test(
-        NAME python-external-check
-        COMMAND ${OMNITRACE_CAT_COMMAND}
-        FILE omnitrace-tests-output/python-external/trip_count.txt
-        PASS_REGULAR_EXPRESSION
-            "(\\\[compile\\\]).*(\\\| \\\|0>>> \\\[run\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[fib\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[inefficient\\\]\\\[external.py\\\])"
-        DEPENDS python-external
-        ENVIRONMENT "${_python_environment}")
+    if(OMNITRACE_CAT_COMMAND)
+        omnitrace_add_python_test(
+            NAME python-external-check
+            COMMAND ${OMNITRACE_CAT_COMMAND}
+            PYTHON_VERSION ${_VERSION}
+            FILE omnitrace-tests-output/python-external/${_VERSION}/trip_count.txt
+            PASS_REGULAR_EXPRESSION
+                "(\\\[compile\\\]).*(\\\| \\\|0>>> \\\[run\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[fib\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[inefficient\\\]\\\[external.py\\\])"
+            DEPENDS python-external-${_VERSION}
+            ENVIRONMENT "${_python_environment}")
 
-    omnitrace_add_python_test(
-        NAME python-external-exclude-inefficient-check
-        COMMAND ${OMNITRACE_CAT_COMMAND}
-        FILE omnitrace-tests-output/python-external-exclude-inefficient/trip_count.txt
-        FAIL_REGULAR_EXPRESSION "(\\\|_inefficient).*(\\\|_sum)"
-        DEPENDS python-external-exclude-inefficient
-        ENVIRONMENT "${_python_environment}")
+        omnitrace_add_python_test(
+            NAME python-external-exclude-inefficient-check
+            COMMAND ${OMNITRACE_CAT_COMMAND}
+            PYTHON_VERSION ${_VERSION}
+            FILE omnitrace-tests-output/python-external-exclude-inefficient/${_VERSION}/trip_count.txt
+            FAIL_REGULAR_EXPRESSION "(\\\|_inefficient).*(\\\|_sum)"
+            DEPENDS python-external-exclude-inefficient-${_VERSION}
+            ENVIRONMENT "${_python_environment}")
 
-    omnitrace_add_python_test(
-        NAME python-builtin-check
-        COMMAND ${OMNITRACE_CAT_COMMAND}
-        FILE omnitrace-tests-output/python-builtin/trip_count.txt
-        PASS_REGULAR_EXPRESSION "\\\[inefficient\\\]\\\[builtin.py:11\\\]"
-        DEPENDS python-builtin
-        ENVIRONMENT "${_python_environment}")
+        omnitrace_add_python_test(
+            NAME python-builtin-check
+            COMMAND ${OMNITRACE_CAT_COMMAND}
+            PYTHON_VERSION ${_VERSION}
+            FILE omnitrace-tests-output/python-builtin/${_VERSION}/trip_count.txt
+            PASS_REGULAR_EXPRESSION "\\\[inefficient\\\]\\\[builtin.py:14\\\]"
+            DEPENDS python-builtin-${_VERSION}
+            ENVIRONMENT "${_python_environment}")
 
-    omnitrace_add_python_test(
-        NAME python-source-check
-        COMMAND ${OMNITRACE_CAT_COMMAND}
-        FILE omnitrace-tests-output/python-source/trip_count.txt
-        PASS_REGULAR_EXPRESSION
-            "(\\\| \\\|0>>> run           \\\|      5).*(\\\| \\\|0>>> \\\|_fib         \\\|     40).*(\\\| \\\|0>>>         \\\|_fib \\\|      5).*(\\\| \\\|0>>> \\\|_inefficient \\\|      5).*(\\\| \\\|0>>>   \\\|__sum      \\\|      5)"
-        DEPENDS python-source
-        ENVIRONMENT "${_python_environment}")
-else()
-    omnitrace_message(
-        WARNING
-        "Neither 'cat' nor 'cmake -E cat' are available. Python source checks are disabled"
-        )
-endif()
+        omnitrace_add_python_test(
+            NAME python-source-check
+            COMMAND ${OMNITRACE_CAT_COMMAND}
+            PYTHON_VERSION ${_VERSION}
+            FILE omnitrace-tests-output/python-source/${_VERSION}/trip_count.txt
+            PASS_REGULAR_EXPRESSION
+                "(\\\| \\\|0>>> run           \\\|      5).*(\\\| \\\|0>>> \\\|_fib         \\\|     40).*(\\\| \\\|0>>>         \\\|_fib \\\|      5).*(\\\| \\\|0>>> \\\|_inefficient \\\|      5).*(\\\| \\\|0>>>   \\\|__sum      \\\|      5)"
+            DEPENDS python-source-${_VERSION}
+            ENVIRONMENT "${_python_environment}")
+    else()
+        omnitrace_message(
+            WARNING
+            "Neither 'cat' nor 'cmake -E cat' are available. Python source checks are disabled"
+            )
+    endif()
+    math(EXPR _INDEX "${_INDEX} + 1")
+endforeach()
