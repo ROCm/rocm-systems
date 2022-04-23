@@ -151,6 +151,11 @@ __attribute__((weak)) const char* hipKernelNameRefByPtr(const void* hostFunction
 __attribute__((weak)) int hipGetStreamDeviceId(hipStream_t stream) { return 0; }
 __attribute__((weak)) const char* hipApiName(uint32_t id) { return NULL; }
 
+__attribute__((weak)) void hipInitActivityCallback(void* id_callback, void* op_callback,
+                                                   void* arg) {}
+__attribute__((weak)) bool hipEnableActivityCallback(unsigned op, bool enable) { return false; }
+__attribute__((weak)) const char* hipGetCmdName(unsigned op) { return NULL; }
+
 class HipLoaderStatic {
  public:
   typedef std::mutex mutex_t;
