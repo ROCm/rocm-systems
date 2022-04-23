@@ -82,9 +82,9 @@ if(USE_PROF_API EQUAL 1)
         HINTS
             ${PROF_API_HEADER_PATH}
         PATHS
-            /opt/rocm/roctracer
+            /opt/rocm/include
         PATH_SUFFIXES
-            include/ext
+            roctracer/ext
     )
     if(NOT PROF_API_HEADER_DIR)
         MESSAGE(FATAL_ERROR "Profiling API header not found. Tracer integration disabled. Use -DPROF_API_HEADER_PATH=<path to ${PROF_API_HEADER_NAME} header>")
