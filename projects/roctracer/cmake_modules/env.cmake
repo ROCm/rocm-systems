@@ -73,10 +73,8 @@ if ( ${LIBRARY_TYPE} STREQUAL STATIC )
   add_definitions ( -DSTATIC_BUILD=1 )
 endif()
 
-if ( NOT DEFINED HIP_API_STRING )
-  set ( HIP_API_STRING 1 )
-endif()
-add_definitions ( -DHIP_PROF_HIP_API_STRING=${HIP_API_STRING} )
+## Enable Hip API call to translate hip call args function
+add_definitions ( -DHIP_PROF_HIP_API_STRING=1 )
 
 ## Enable HIP_VDI mode
 add_definitions ( -D__HIP_ROCclr__=1 )

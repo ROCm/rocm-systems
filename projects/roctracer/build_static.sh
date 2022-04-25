@@ -45,7 +45,6 @@ if [ -z "$PACKAGE_ROOT" ] ; then PACKAGE_ROOT=$ROCM_PATH; fi
 if [ -z "$PACKAGE_PREFIX" ] ; then PACKAGE_PREFIX="$ROCM_PATH/$COMPONENT"; fi
 if [ -z "$PREFIX_PATH" ] ; then PREFIX_PATH=$PACKAGE_ROOT; fi
 if [ -z "$HIP_VDI" ] ; then HIP_VDI=0; fi
-if [ -z "$HIP_API_STRING" ] ; then HIP_API_STRING=1; fi
 if [ -n "$ROCM_RPATH" ] ; then LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,${ROCM_RPATH}"; fi
 
 ROCTRACER_ROOT=$(cd $ROCTRACER_ROOT && echo $PWD)
@@ -61,7 +60,6 @@ cmake \
     -DCMAKE_INSTALL_PREFIX=$PACKAGE_ROOT \
     -DCMAKE_SHARED_LINKER_FLAGS="$LD_RUNPATH_FLAG" \
     -DHIP_VDI="$HIP_VDI" \
-    -DHIP_API_STRING="$HIP_API_STRING" \
     -DLIBRARY_TYPE=STATIC \
     $ROCTRACER_ROOT
 

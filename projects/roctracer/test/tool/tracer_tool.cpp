@@ -499,7 +499,6 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
       entry->name, correlation_id, begin_timestamp, end_timestamp);
 
   if (domain == ACTIVITY_DOMAIN_HIP_API) {
-#if HIP_PROF_HIP_API_STRING
     if (hip_api_stats != NULL) {
       hip_api_stats->add_event(cid, end_timestamp - begin_timestamp);
       if (is_hip_kernel_launch_api(cid)) {
@@ -517,38 +516,6 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
       rec_ss << " :" << correlation_id;
       fprintf(hip_api_file_handle, "%s\n", rec_ss.str().c_str());
     }
-#else   // !HIP_PROF_HIP_API_STRING
-    switch (cid) {
-      case HIP_API_ID_hipMemcpy:
-        fprintf(hip_api_file_handle, "%s(dst(%p) src(%p) size(0x%x) kind(%u))\n", oss.str().c_str(),
-                data->args.hipMemcpy.dst, data->args.hipMemcpy.src,
-                (uint32_t)(data->args.hipMemcpy.sizeBytes), (uint32_t)(data->args.hipMemcpy.kind));
-        break;
-      case HIP_API_ID_hipMemcpyAsync:
-        fprintf(hip_api_file_handle, "%s(dst(%p) src(%p) size(0x%x) kind(%u) stream(%p))\n",
-                oss.str().c_str(), data->args.hipMemcpyAsync.dst, data->args.hipMemcpyAsync.src,
-                (uint32_t)(data->args.hipMemcpyAsync.sizeBytes),
-                (uint32_t)(data->args.hipMemcpyAsync.kind), data->args.hipMemcpyAsync.stream);
-        break;
-      case HIP_API_ID_hipMalloc:
-        fprintf(hip_api_file_handle, "%s(ptr(%p) size(0x%x))\n", oss.str().c_str(), entry->ptr,
-                (uint32_t)(data->args.hipMalloc.size));
-        break;
-      case HIP_API_ID_hipFree:
-        fprintf(hip_api_file_handle, "%s(ptr(%p))\n", oss.str().c_str(), data->args.hipFree.ptr);
-        break;
-      case HIP_API_ID_hipModuleLaunchKernel:
-        fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n", oss.str().c_str(),
-                cxx_demangle(entry->name), data->args.hipModuleLaunchKernel.stream);
-        break;
-      case HIP_API_ID_hipExtModuleLaunchKernel:
-        fprintf(hip_api_file_handle, "%s(kernel(%s) stream(%p))\n", oss.str().c_str(),
-                cxx_demangle(entry->name), data->args.hipExtModuleLaunchKernel.hStream);
-        break;
-      default:
-        fprintf(hip_api_file_handle, "%s()\n", oss.str().c_str());
-    }
-#endif  // !HIP_PROF_HIP_API_STRING
   } else {
     fprintf(hip_api_file_handle, "%s(name(%s))\n", oss.str().c_str(), entry->name);
   }
