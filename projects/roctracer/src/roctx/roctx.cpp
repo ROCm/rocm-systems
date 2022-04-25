@@ -92,10 +92,9 @@ thread_map_t thread_map;
 static thread_local message_stack_t* message_stack = NULL;
 
 roctx_status_t GetExcStatus(const std::exception& e) {
-  const roctracer::util::exception* roctx_exc_ptr =
-      dynamic_cast<const roctracer::util::exception*>(&e);
-  return (roctx_exc_ptr) ? static_cast<roctx_status_t>(roctx_exc_ptr->status())
-                         : ROCTX_STATUS_ERROR;
+  const roctracer::util::exception<roctx_status_t>* roctx_exc_ptr =
+      dynamic_cast<const roctracer::util::exception<roctx_status_t>*>(&e);
+  return (roctx_exc_ptr) ? roctx_exc_ptr->status() : ROCTX_STATUS_ERROR;
 }
 
 void thread_data_init() {
@@ -169,11 +168,10 @@ PUBLIC_API int roctxRangePop() {
     api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePop, &api_data,
                      api_callback_arg);
   if (roctx::message_stack->empty()) {
-    EXC_ABORT(ROCTX_STATUS_ERROR, "Pop from empty stack!");
-  } else {
-    roctx::message_stack->pop();
+    EXC_RAISING(ROCTX_STATUS_ERROR, "Pop from empty stack!");
   }
 
+  roctx::message_stack->pop();
   return roctx::message_stack->size();
   API_METHOD_CATCH(-1)
 }

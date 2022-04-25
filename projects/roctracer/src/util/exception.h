@@ -21,40 +21,30 @@
 #ifndef SRC_UTIL_EXCEPTION_H_
 #define SRC_UTIL_EXCEPTION_H_
 
-#include <exception>
 #include <sstream>
+#include <stdexcept>
 #include <string>
-
-#define EXC_ABORT(error, stream)                                                                   \
-  do {                                                                                             \
-    std::ostringstream oss;                                                                        \
-    oss << __FUNCTION__ << "(), " << stream;                                                       \
-    std::cout << oss.str() << std::endl;                                                           \
-    abort();                                                                                       \
-  } while (0)
 
 #define EXC_RAISING(error, stream)                                                                 \
   do {                                                                                             \
     std::ostringstream oss;                                                                        \
     oss << __FUNCTION__ << "(), " << stream;                                                       \
     throw roctracer::util::exception(error, oss.str());                                            \
-  } while (0)
+  } while (false)
 
-namespace roctracer {
-namespace util {
+namespace roctracer::util {
 
-class exception : public std::exception {
+template <class Status> class exception : public std::runtime_error {
  public:
-  explicit exception(const uint32_t& status, const std::string& msg) : status_(status), str_(msg) {}
-  const char* what() const throw() { return str_.c_str(); }
-  uint32_t status() const throw() { return status_; }
+  explicit exception(Status status, const std::string& what_arg)
+      : std::runtime_error(what_arg), status_(status) {}
 
- protected:
-  const uint32_t status_;
-  const std::string str_;
+  Status status() const noexcept { return status_; }
+
+ private:
+  const Status status_;
 };
 
-}  // namespace util
-}  // namespace roctracer
+}  // namespace roctracer::util
 
 #endif  // SRC_UTIL_EXCEPTION_H_

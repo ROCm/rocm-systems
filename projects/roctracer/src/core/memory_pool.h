@@ -23,6 +23,7 @@
 
 #include "util/exception.h"
 
+#include <cassert>
 #include <condition_variable>
 #include <cstdlib>
 #include <cstring>
@@ -40,7 +41,7 @@ class MemoryPool {
     const size_t allocation_size = 2 * properties_.buffer_size;
     pool_begin_ = nullptr;
     AllocateMemory(&pool_begin_, allocation_size);
-    if (pool_begin_ == nullptr) EXC_ABORT(ROCTRACER_STATUS_ERROR, "pool allocator failed");
+    assert(pool_begin_ != nullptr && "pool allocator failed");
 
     pool_end_ = pool_begin_ + allocation_size;
     buffer_begin_ = pool_begin_;
@@ -80,10 +81,7 @@ class MemoryPool {
       write_ptr_ = buffer_begin_;
 
       next = write_ptr_ + sizeof(record);
-      if (next > buffer_end_)
-        EXC_ABORT(ROCTRACER_STATUS_ERROR,
-                  "buffer size(" << properties_.buffer_size << ") is less then the record("
-                                 << sizeof(record) << ")");
+      assert(next <= buffer_end_ && "buffer size is less then the record size");
     }
 
     // Store the record into the buffer, and increment the write pointer.

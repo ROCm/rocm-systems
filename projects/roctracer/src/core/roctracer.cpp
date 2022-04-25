@@ -25,6 +25,7 @@
 #define PROF_API_IMPL 1
 #include "inc/roctracer_hsa.h"
 
+#include <assert.h>
 #include <dirent.h>
 #include <pthread.h>
 #include <string.h>
@@ -255,9 +256,9 @@ roctracer_stop_cb_t roctracer_stop_cb = NULL;
 }  // namespace ext_support
 
 roctracer_status_t GetExcStatus(const std::exception& e) {
-  const util::exception* roctracer_exc_ptr = dynamic_cast<const util::exception*>(&e);
-  return (roctracer_exc_ptr) ? static_cast<roctracer_status_t>(roctracer_exc_ptr->status())
-                             : ROCTRACER_STATUS_ERROR;
+  const util::exception<roctracer_status_t>* roctracer_exc_ptr =
+      dynamic_cast<const util::exception<roctracer_status_t>*>(&e);
+  return (roctracer_exc_ptr) ? roctracer_exc_ptr->status() : ROCTRACER_STATUS_ERROR;
 }
 
 class GlobalCounter {
@@ -302,8 +303,7 @@ static thread_local std::stack<activity_correlation_id_t> external_id_stack;
 static inline void CorrelationIdRegistr(const activity_correlation_id_t& correlation_id) {
   std::lock_guard<correlation_id_mutex_t> lck(correlation_id_mutex);
   const auto ret = correlation_id_map.insert({correlation_id, correlation_id_tls});
-  if (ret.second == false)
-    EXC_ABORT(ROCTRACER_STATUS_ERROR, "HIP activity id is not unique(" << correlation_id << ")");
+  assert(ret.second && "HIP activity id is not unique");
 
   DEBUG_TRACE("CorrelationIdRegistr id(%lu) id_tls(%lu)\n", correlation_id, correlation_id_tls);
 }
@@ -312,8 +312,7 @@ static inline activity_correlation_id_t CorrelationIdLookup(
     const activity_correlation_id_t& correlation_id) {
   std::lock_guard<correlation_id_mutex_t> lck(correlation_id_mutex);
   auto it = correlation_id_map.find(correlation_id);
-  if (it == correlation_id_map.end())
-    EXC_ABORT(ROCTRACER_STATUS_ERROR, "HIP activity id lookup failed(" << correlation_id << ")");
+  assert(it != correlation_id_map.end() && "HIP activity id lookup failed");
   const activity_correlation_id_t ret_val = it->second;
   correlation_id_map.erase(it);
 
@@ -328,27 +327,27 @@ hip_activity_mutex_t hip_activity_mutex;
 hip_act_cb_tracker_t* hip_act_cb_tracker = NULL;
 
 inline uint32_t HipApiActivityEnableCheck(uint32_t op) {
-  if (hip_act_cb_tracker == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "hip_act_cb_tracker is NULL");
+  assert(hip_act_cb_tracker != nullptr && "hip_act_cb_tracker is NULL");
   const uint32_t mask = hip_act_cb_tracker->enable_check(op, API_CB_MASK);
   const uint32_t ret = (mask & ACT_CB_MASK);
   return ret;
 }
 
 inline uint32_t HipApiActivityDisableCheck(uint32_t op) {
-  if (hip_act_cb_tracker == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "hip_act_cb_tracker is NULL");
+  assert(hip_act_cb_tracker != nullptr && "hip_act_cb_tracker is NULL");
   const uint32_t mask = hip_act_cb_tracker->disable_check(op, API_CB_MASK);
   const uint32_t ret = (mask & ACT_CB_MASK);
   return ret;
 }
 
 inline uint32_t HipActActivityEnableCheck(uint32_t op) {
-  if (hip_act_cb_tracker == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "hip_act_cb_tracker is NULL");
+  assert(hip_act_cb_tracker != nullptr && "hip_act_cb_tracker is NULL");
   hip_act_cb_tracker->enable_check(op, ACT_CB_MASK);
   return 0;
 }
 
 inline uint32_t HipActActivityDisableCheck(uint32_t op) {
-  if (hip_act_cb_tracker == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "hip_act_cb_tracker is NULL");
+  assert(hip_act_cb_tracker != nullptr && "hip_act_cb_tracker is NULL");
   const uint32_t mask = hip_act_cb_tracker->disable_check(op, ACT_CB_MASK);
   const uint32_t ret = (mask & API_CB_MASK);
   return ret;
@@ -366,7 +365,7 @@ void* HIP_SyncApiDataCallback(uint32_t op_id, roctracer_record_t* record, const 
 
   int phase = ACTIVITY_API_PHASE_ENTER;
   if (record != NULL) {
-    if (data == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback: data is NULL");
+    assert(data != nullptr && "ActivityCallback: data is NULL");
     phase = data->phase;
   } else if (pool != NULL) {
     phase = ACTIVITY_API_PHASE_EXIT;
@@ -375,7 +374,7 @@ void* HIP_SyncApiDataCallback(uint32_t op_id, roctracer_record_t* record, const 
   if (phase == ACTIVITY_API_PHASE_ENTER) {
     // Allocating a record if NULL passed
     if (record == NULL) {
-      if (data != NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback enter: record is NULL");
+      assert(data == nullptr && "ActivityCallback enter: record is NULL");
       record_pair_stack->push({});
       auto& top = record_pair_stack->top();
       data = &(top.data.hip);
@@ -426,7 +425,7 @@ void* HIP_SyncActivityCallback(uint32_t op_id, roctracer_record_t* record,
 
   int phase = ACTIVITY_API_PHASE_ENTER;
   if (record != NULL) {
-    if (data == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback: data is NULL");
+    assert(data != NULL && "ActivityCallback: data is NULL");
     phase = data->phase;
   } else if (pool != NULL) {
     phase = ACTIVITY_API_PHASE_EXIT;
@@ -435,7 +434,7 @@ void* HIP_SyncActivityCallback(uint32_t op_id, roctracer_record_t* record,
   if (phase == ACTIVITY_API_PHASE_ENTER) {
     // Allocating a record if NULL passed
     if (record == NULL) {
-      if (data != NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback enter: record is NULL");
+      assert(data == nullptr && "ActivityCallback enter: record is NULL");
       record_pair_stack->push({});
       auto& top = record_pair_stack->top();
       record = &(top.record);
@@ -463,12 +462,11 @@ void* HIP_SyncActivityCallback(uint32_t op_id, roctracer_record_t* record,
 
     ret = data_ptr;
   } else {
-    if (pool == NULL) EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback exit: pool is NULL");
+    assert(pool != nullptr && "ActivityCallback exit: pool is NULL");
 
     // Getting record of stacked
     if (record == NULL) {
-      if (record_pair_stack->empty())
-        EXC_ABORT(ROCTRACER_STATUS_ERROR, "ActivityCallback exit: record stack is empty");
+      assert(!record_pair_stack->empty() && "ActivityCallback exit: record stack is empty");
       auto& top = record_pair_stack->top();
       record = &(top.record);
     }
@@ -1239,7 +1237,7 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(roctracer_domain_t domain
 
       // HSA async-copy tracing
       hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
-      if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_async_copy_enable");
+      assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
       roctracer::hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
       roctracer::hsa_amd_memory_async_copy_rect_fn =
           table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;

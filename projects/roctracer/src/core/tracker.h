@@ -56,10 +56,12 @@ class Tracker {
 
     // Creating a proxy signal
     status = hsa_signal_create(1, 0, NULL, &(entry->signal));
-    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_signal_create");
+    if (status != HSA_STATUS_SUCCESS)
+      EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_signal_create failed");
     status =
         hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
-    if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
+    if (status != HSA_STATUS_SUCCESS)
+      EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_amd_signal_async_handler failed");
   }
 
   // Delete tracker entry
@@ -77,14 +79,15 @@ class Tracker {
       hsa_amd_profiling_async_copy_time_t async_copy_time{};
       hsa_status_t status = hsa_amd_profiling_get_async_copy_time(entry->signal, &async_copy_time);
       if (status != HSA_STATUS_SUCCESS)
-        EXC_RAISING(status, "hsa_amd_profiling_get_async_copy_time");
+        EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_amd_profiling_get_async_copy_time failed");
       entry->begin = hsa_rsrc->SysclockToNs(async_copy_time.start);
       entry->end = hsa_rsrc->SysclockToNs(async_copy_time.end);
     } else {
       hsa_amd_profiling_dispatch_time_t dispatch_time{};
       hsa_status_t status =
           hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
-      if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_dispatch_time");
+      if (status != HSA_STATUS_SUCCESS)
+        EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_amd_profiling_get_dispatch_time failed");
       entry->begin = hsa_rsrc->SysclockToNs(dispatch_time.start);
       entry->end = hsa_rsrc->SysclockToNs(dispatch_time.end);
       entry->dev_index = (hsa_rsrc->GetAgentInfo(entry->agent))->dev_index;
@@ -105,8 +108,7 @@ class Tracker {
       orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
 
       const hsa_signal_value_t new_value = hsa_signal_load_relaxed(orig) - 1;
-      if (signal_value != new_value)
-        EXC_ABORT(HSA_STATUS_ERROR, "Tracker::Complete bad signal value");
+      assert(signal_value == new_value && "Tracker::Complete bad signal value");
       hsa_signal_store_screlease(orig, signal_value);
     }
     hsa_signal_destroy(signal);
