@@ -25,6 +25,12 @@
 #include "fwd.hpp"
 #include "module_function.hpp"
 
+#include <timemory/mpl/policy.hpp>
+#include <timemory/settings.hpp>
+#include <timemory/tpls/cereal/cereal.hpp>
+#include <timemory/utility/delimit.hpp>
+#include <timemory/utility/filepath.hpp>
+
 static inline void
 dump_info(std::ostream& _os, const fmodset_t& _data)
 {
@@ -54,7 +60,7 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
     namespace cereal = tim::cereal;
     namespace policy = tim::policy;
 
-    _oname += "." + _ext;
+    _oname             = tim::settings::compose_output_filename(_oname, _ext);
     auto _handle_error = [&]() {
         std::stringstream _msg{};
         _msg << "[dump_info] Error opening '" << _oname << " for output";

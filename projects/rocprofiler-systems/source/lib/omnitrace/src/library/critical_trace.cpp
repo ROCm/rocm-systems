@@ -26,6 +26,7 @@
 #include "library/defines.hpp"
 #include "library/perfetto.hpp"
 #include "library/ptl.hpp"
+#include "library/thread_data.hpp"
 
 #include <PTL/ThreadPool.hh>
 #include <timemory/backends/dmp.hpp>
@@ -491,13 +492,13 @@ get_update_frequency()
     return get_critical_trace_update_freq();
 }
 
-std::unique_ptr<call_chain>&
+unique_ptr_t<call_chain>&
 get(int64_t _tid)
 {
     static auto&             _v    = thread_data<call_chain>::instances();
     static thread_local auto _once = [_tid]() {
-        if(!_v.at(0)) _v.at(0) = std::make_unique<call_chain>();
-        if(!_v.at(_tid)) _v.at(_tid) = std::make_unique<call_chain>();
+        if(!_v.at(0)) _v.at(0) = unique_ptr_t<call_chain>{ new call_chain{} };
+        if(!_v.at(_tid)) _v.at(_tid) = unique_ptr_t<call_chain>{ new call_chain{} };
         if(_tid > 0) *_v.at(_tid) = *_v.at(0);
         return true;
     }();

@@ -73,6 +73,18 @@ set_setting_value(const std::string& _name, Tp&& _v)
     return _setting->second->set(std::forward<Tp>(_v));
 }
 
+template <typename Tp>
+std::pair<bool, Tp>
+get_setting_value(const std::string& _name)
+{
+    auto _instance = tim::settings::shared_instance();
+    if(!_instance) return std::make_pair(false, Tp{});
+    auto _setting = _instance->find(_name);
+    if(_setting == _instance->end() || !_setting->second)
+        return std::make_pair(false, Tp{});
+    return _setting->second->get<Tp>();
+}
+
 //
 //      User-configurable settings
 //
@@ -146,7 +158,13 @@ bool
 get_use_kokkosp();
 
 bool
+get_use_kokkosp_kernel_logger();
+
+bool
 get_use_ompt();
+
+bool
+get_use_code_coverage();
 
 bool
 get_timeline_sampling();

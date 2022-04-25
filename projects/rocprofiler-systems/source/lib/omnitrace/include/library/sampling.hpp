@@ -53,7 +53,7 @@ using component::sampling_gpu_temp;
 using component::sampling_percent;
 using component::sampling_wall_clock;
 
-std::unique_ptr<std::set<int>>&
+unique_ptr_t<std::set<int>>&
 get_signal_types(int64_t _tid);
 
 std::set<int>
@@ -70,7 +70,7 @@ using bundle_t          = tim::lightweight_tuple<backtrace>;
 using sampler_t         = tim::sampling::sampler<bundle_t, tim::sampling::dynamic>;
 using sampler_instances = thread_data<sampler_t, api::sampling>;
 
-std::unique_ptr<sampler_t>&
+unique_ptr_t<sampler_t>&
 get_sampler(int64_t _tid = threading::get_id());
 
 }  // namespace sampling

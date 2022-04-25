@@ -96,9 +96,9 @@ get_clock_skew()
             _cpu_ave += _cpu_ts / _n;
             _gpu_ave += _gpu_ts / _n;
         }
-        OMNITRACE_BASIC_VERBOSE(1, "CPU timestamp: %li\n", _cpu_ave);
-        OMNITRACE_BASIC_VERBOSE(1, "HIP timestamp: %li\n", _gpu_ave);
-        OMNITRACE_BASIC_VERBOSE(0, "CPU/HIP timestamp skew: %li (used: %s)\n", _diff,
+        OMNITRACE_BASIC_VERBOSE(2, "CPU timestamp: %li\n", _cpu_ave);
+        OMNITRACE_BASIC_VERBOSE(2, "HIP timestamp: %li\n", _gpu_ave);
+        OMNITRACE_BASIC_VERBOSE(1, "CPU/HIP timestamp skew: %li (used: %s)\n", _diff,
                                 _use ? "yes" : "no");
         _diff /= _n;
         return _diff;
@@ -339,8 +339,11 @@ hip_exec_activity_callbacks(int64_t _tid)
     // ROCTRACER_CALL(roctracer_flush_activity());
     tim::auto_lock_t _lk{ get_hip_activity_mutex(_tid) };
     auto&            _async_ops = get_hip_activity_callbacks(_tid);
+    if(!_async_ops) return;
     for(auto& itr : *_async_ops)
-        itr();
+    {
+        if(itr) itr();
+    }
     _async_ops->clear();
 }
 
@@ -734,7 +737,7 @@ extern "C"
         if(!config::settings_are_configured() && get_state() < State::Active)
             omnitrace_init_tooling_hidden();
 
-        auto _setup = [=]() {
+        static auto _setup = [=]() {
             try
             {
                 OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug() || get_verbose() > 1,
@@ -805,7 +808,7 @@ extern "C"
             }
         };
 
-        auto _shutdown = []() {
+        static auto _shutdown = []() {
             OMNITRACE_DEBUG_F("roctracer_disable_domain_callback\n");
             ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
 
@@ -816,8 +819,8 @@ extern "C"
 
         (void) get_clock_skew();
 
-        comp::roctracer::add_setup("hsa", std::move(_setup));
-        comp::roctracer::add_shutdown("hsa", std::move(_shutdown));
+        comp::roctracer::add_setup("hsa", _setup);
+        comp::roctracer::add_shutdown("hsa", _shutdown);
 
         rocm_smi::set_state(State::Active);
         comp::roctracer::setup();
@@ -832,5 +835,6 @@ extern "C"
         OMNITRACE_DEBUG_F("\n");
         rocm_smi::set_state(State::Finalized);
         comp::roctracer::shutdown();
+        omnitrace_finalize_hidden();
     }
 }

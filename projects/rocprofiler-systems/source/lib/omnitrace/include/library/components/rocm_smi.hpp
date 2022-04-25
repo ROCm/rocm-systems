@@ -31,6 +31,7 @@
 #include "library/common.hpp"
 #include "library/components/fwd.hpp"
 #include "library/defines.hpp"
+#include "library/state.hpp"
 #include "library/thread_data.hpp"
 
 #include <chrono>
@@ -145,7 +146,7 @@ inline void set_state(State) {}
 }  // namespace rocm_smi
 }  // namespace omnitrace
 
-#if defined(OMNITRACE_USE_ROCM_SMI)
+#if defined(OMNITRACE_USE_ROCM_SMI) && OMNITRACE_USE_ROCM_SMI > 0
 #    if !defined(OMNITRACE_EXTERN_COMPONENTS) ||                                         \
         (defined(OMNITRACE_EXTERN_COMPONENTS) && OMNITRACE_EXTERN_COMPONENTS > 0)
 

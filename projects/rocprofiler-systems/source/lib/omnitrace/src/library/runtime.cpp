@@ -57,7 +57,7 @@ get_cpu_cid()
     return _v;
 }
 
-std::unique_ptr<std::vector<uint64_t>>&
+unique_ptr_t<std::vector<uint64_t>>&
 get_cpu_cid_stack(int64_t _tid, int64_t _parent)
 {
     struct omnitrace_cpu_cid_stack
@@ -78,7 +78,7 @@ get_cpu_cid_stack(int64_t _tid, int64_t _parent)
     (void) _v_copy;
 }
 
-std::unique_ptr<cpu_cid_parent_map_t>&
+unique_ptr_t<cpu_cid_parent_map_t>&
 get_cpu_cid_parents(int64_t _tid)
 {
     struct omnitrace_cpu_cid_stack

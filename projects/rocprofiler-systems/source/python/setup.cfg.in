@@ -26,7 +26,6 @@ classifiers =
     Operating System :: Unix
     Programming Language :: C++
     Programming Language :: Python :: 3
-    Programming Language :: Python :: @OMNITRACE_PYTHON_VERSION@
     Topic :: Software Development :: Libraries :: Python Modules
     Topic :: Utilities
 

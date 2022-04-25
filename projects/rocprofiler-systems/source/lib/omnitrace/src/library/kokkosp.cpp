@@ -26,6 +26,7 @@
 
 #include "library/components/omnitrace.hpp"
 #include "library/config.hpp"
+#include "library/debug.hpp"
 
 #include <timemory/api/kokkosp.hpp>
 
@@ -53,26 +54,11 @@ std::string kokkos_banner =
 
 //--------------------------------------------------------------------------------------//
 
-bool enable_kernel_logger = false;
-
-inline void
-add_kernel_logger()
-{
-    static bool _first = true;
-    if(!_first) return;
-    _first         = false;
-    using strvec_t = std::vector<std::string>;
-
-    tim::settings::instance()->insert<bool, bool&>(
-        std::string{ "OMNITRACE_KOKKOS_KERNEL_LOGGER" }, std::string{},
-        std::string{ "Enables kernel logging" }, enable_kernel_logger,
-        strvec_t({ "--omnitrace-kokkos-kernel-logger" }));
-}
-
 inline void
 setup_kernel_logger()
 {
-    if(tim::settings::debug() || tim::settings::verbose() > 3 || enable_kernel_logger)
+    if((tim::settings::debug() && tim::settings::verbose() >= 3) ||
+       omnitrace::config::get_use_kokkosp_kernel_logger())
     {
         kokkosp::logger_t::get_initializer() = [](kokkosp::logger_t& _obj) {
             _obj.initialize<kokkosp::kernel_logger>();
@@ -98,28 +84,27 @@ extern "C"
     void kokkosp_init_library(const int loadSeq, const uint64_t interfaceVer,
                               const uint32_t devInfoCount, void* deviceInfo)
     {
-        add_kernel_logger();
-
         tim::consume_parameters(devInfoCount, deviceInfo);
 
-        printf("%s\n", kokkos_banner.c_str());
-        printf("# KokkosP: omnitrace connector (sequence is %d, version: %llu)\n",
-               loadSeq, (unsigned long long) interfaceVer);
-        printf("%s\n", kokkos_banner.c_str());
+        OMNITRACE_VERBOSE_F(0,
+                            "Initializing connector (sequence is %d, version: %llu)...",
+                            loadSeq, (unsigned long long) interfaceVer);
 
         setup_kernel_logger();
 
         tim::trait::runtime_enabled<kokkosp::memory_tracker>::set(
             omnitrace::config::get_use_timemory());
+
+        if(omnitrace::get_verbose() >= 0) fprintf(stderr, "Done\n");
     }
 
     void kokkosp_finalize_library()
     {
-        printf("%s\n", kokkos_banner.c_str());
-        printf("# KokkosP: Finalization of omnitrace connector. Complete.\n");
-        printf("%s\n", kokkos_banner.c_str());
+        OMNITRACE_VERBOSE_F(0, "Finalizing connector... \n");
 
         kokkosp::cleanup();
+
+        if(omnitrace::get_verbose() >= 0) fprintf(stderr, "Done\n");
     }
 
     //----------------------------------------------------------------------------------//

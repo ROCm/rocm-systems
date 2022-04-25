@@ -80,6 +80,20 @@ get_setting_name(std::string _v)
             OMNITRACE_PRINT("Warning! Duplicate setting: %s / %s\n",                     \
                             get_setting_name(ENV_NAME).c_str(), ENV_NAME);               \
     }
+
+// setting + command line option
+#define OMNITRACE_CONFIG_CL_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE,          \
+                                    CMD_LINE, ...)                                       \
+    {                                                                                    \
+        auto _ret = _config->insert<TYPE, TYPE>(                                         \
+            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, INITIAL_VALUE,            \
+            std::set<std::string>{ "custom", "omnitrace", "omnitrace-library",           \
+                                   __VA_ARGS__ },                                        \
+            std::vector<std::string>{ CMD_LINE });                                       \
+        if(!_ret.second)                                                                 \
+            OMNITRACE_PRINT("Warning! Duplicate setting: %s / %s\n",                     \
+                            get_setting_name(ENV_NAME).c_str(), ENV_NAME);               \
+    }
 }  // namespace
 
 inline namespace config
@@ -140,12 +154,12 @@ configure_settings(bool _init)
                              !_config->get<bool>("OMNITRACE_USE_PERFETTO"), "backend",
                              "timemory", "instrumentation", "sampling");
 
-#if defined(OMNITRACE_USE_ROCTRACER)
+#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_ROCTRACER", "Enable ROCM tracing", true,
                              "backend", "roctracer", "rocm");
 #endif
 
-#if defined(OMNITRACE_USE_ROCM_SMI)
+#if defined(OMNITRACE_USE_ROCM_SMI) && OMNITRACE_USE_ROCM_SMI > 0
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_USE_ROCM_SMI",
         "Enable sampling GPU power, temp, utilization, and memory usage", true, "backend",
@@ -169,11 +183,19 @@ configure_settings(bool _init)
                              "Enable support for Kokkos Tools", false, "kokkos",
                              "backend");
 
-#if defined(TIMEMORY_USE_OMPT)
+    OMNITRACE_CONFIG_CL_SETTING(
+        bool, "OMNITRACE_KOKKOS_KERNEL_LOGGER", "Enables kernel logging", false,
+        "--omnitrace-kokkos-kernel-logger", "kokkos", "debugging");
+
+#if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_OMPT",
-                             "Enable support for OpenMP-Tools", true, "openmp", "ompt",
+                             "Enable support for OpenMP-Tools", false, "openmp", "ompt",
                              "backend");
 #endif
+
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_CODE_COVERAGE",
+                             "Enable support for code coverage", false, "coverage",
+                             "backend");
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_INSTRUMENTATION_INTERVAL",
                              "Instrumentation only takes measurements once every N "
@@ -651,9 +673,12 @@ Mode
 get_mode()
 {
     static auto _v = []() {
-        auto _mode = tim::get_env_choice<std::string>("OMNITRACE_MODE", "trace",
-                                                      { "trace", "sampling" });
-        if(_mode == "sampling") return Mode::Sampling;
+        auto _mode = tim::get_env_choice<std::string>(
+            "OMNITRACE_MODE", "trace", { "trace", "sampling", "coverage" });
+        if(_mode == "sampling")
+            return Mode::Sampling;
+        else if(_mode == "coverage")
+            return Mode::Coverage;
         return Mode::Trace;
     }();
     return _v;
@@ -741,7 +766,7 @@ get_use_timemory()
 bool&
 get_use_roctracer()
 {
-#if defined(OMNITRACE_USE_ROCTRACER)
+#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
     static auto _v = get_config()->find("OMNITRACE_USE_ROCTRACER");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
@@ -753,7 +778,7 @@ get_use_roctracer()
 bool&
 get_use_rocm_smi()
 {
-#if defined(OMNITRACE_USE_ROCM_SMI)
+#if defined(OMNITRACE_USE_ROCM_SMI) && OMNITRACE_USE_ROCM_SMI > 0
     static auto _v = get_config()->find("OMNITRACE_USE_ROCM_SMI");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
@@ -805,6 +830,13 @@ get_use_kokkosp()
 }
 
 bool
+get_use_kokkosp_kernel_logger()
+{
+    static auto _v = get_config()->find("OMNITRACE_KOKKOS_KERNEL_LOGGER");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
 get_use_ompt()
 {
 #if defined(TIMEMORY_USE_OMPT)
@@ -813,6 +845,13 @@ get_use_ompt()
 #else
     return false;
 #endif
+}
+
+bool
+get_use_code_coverage()
+{
+    static auto _v = get_config()->find("OMNITRACE_USE_CODE_COVERAGE");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 bool
@@ -1001,7 +1040,7 @@ get_thread_sampling_freq()
 std::string
 get_rocm_smi_devices()
 {
-#if defined(OMNITRACE_USE_ROCM_SMI)
+#if defined(OMNITRACE_USE_ROCM_SMI) && OMNITRACE_USE_ROCM_SMI > 0
     static auto _v = get_config()->find("OMNITRACE_ROCM_SMI_DEVICES");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 #else

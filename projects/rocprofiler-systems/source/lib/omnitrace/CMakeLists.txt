@@ -30,9 +30,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
         $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
         $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
-        $<BUILD_INTERFACE:timemory::timemory-headers>
-        $<BUILD_INTERFACE:timemory::timemory-gotcha>
-        $<BUILD_INTERFACE:timemory::timemory-cxx-static>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-timemory>
         $<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,$<BUILD_INTERFACE:omnitrace::omnitrace-static-libgcc>,>
         $<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBSTDCXX}>,$<BUILD_INTERFACE:omnitrace::omnitrace-static-libstdcxx>,>
         $<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>)
@@ -53,6 +51,7 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/src/library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/api.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/config.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/library/coverage.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/cpu_freq.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/critical_trace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/library/kokkosp.cpp
@@ -79,6 +78,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/include/library/api.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/config.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/common.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/include/library/coverage.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/cpu_freq.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/critical_trace.hpp
     ${CMAKE_CURRENT_LIST_DIR}/include/library/debug.hpp

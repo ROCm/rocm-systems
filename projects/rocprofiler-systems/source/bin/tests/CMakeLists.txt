@@ -4,7 +4,7 @@ function(OMNITRACE_ADD_BIN_TEST)
         TEST
         "" # options
         "NAME;TARGET;TIMEOUT;WORKING_DIRECTORY" # single value args
-        "ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGULAR_EXPRESSION;FAIL_REGULAR_EXPRESSION;SKIP_REGULAR_EXPRESSION;DEPENDS;COMMAND" # multiple
+        "ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;COMMAND" # multiple
         # value args
         ${ARGN})
 
@@ -50,11 +50,11 @@ function(OMNITRACE_ADD_BIN_TEST)
                        LABELS
                        "omnitrace-bin;${TEST_LABELS}"
                        PASS_REGULAR_EXPRESSION
-                       "${TEST_PASS_REGULAR_EXPRESSION}"
+                       "${TEST_PASS_REGEX}"
                        FAIL_REGULAR_EXPRESSION
-                       "${TEST_FAIL_REGULAR_EXPRESSION}"
+                       "${TEST_FAIL_REGEX}"
                        SKIP_REGULAR_EXPRESSION
-                       "${TEST_SKIP_REGULAR_EXPRESSION}"
+                       "${TEST_SKIP_REGEX}"
                        ${TEST_PROPERTIES})
     elseif(TARGET ${TEST_TARGET})
         add_test(
@@ -73,11 +73,11 @@ function(OMNITRACE_ADD_BIN_TEST)
                        LABELS
                        "omnitrace-bin;${TEST_LABELS}"
                        PASS_REGULAR_EXPRESSION
-                       "${TEST_PASS_REGULAR_EXPRESSION}"
+                       "${TEST_PASS_REGEX}"
                        FAIL_REGULAR_EXPRESSION
-                       "${TEST_FAIL_REGULAR_EXPRESSION}"
+                       "${TEST_FAIL_REGEX}"
                        SKIP_REGULAR_EXPRESSION
-                       "${TEST_SKIP_REGULAR_EXPRESSION}"
+                       "${TEST_SKIP_REGEX}"
                        ${TEST_PROPERTIES})
     elseif(OMNITRACE_BUILD_TESTING)
         message(FATAL_ERROR "Error! ${TEST_TARGET} does not exist")
@@ -90,7 +90,7 @@ omnitrace_add_bin_test(
     ARGS --help
     LABELS omnitrace-exe
     TIMEOUT 45
-    PASS_REGULAR_EXPRESSION
+    PASS_REGEX
         ".*\\\[omnitrace\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[MODE OPTIONS\\\].*\\\[LIBRARY OPTIONS\\\].*\\\[SYMBOL SELECTION OPTIONS\\\].*\\\[RUNTIME OPTIONS\\\].*\\\[GRANULARITY OPTIONS\\\].*\\\[DYNINST OPTIONS\\\].*"
     )
 
@@ -115,7 +115,7 @@ omnitrace_add_bin_test(
     WORKING_DIRECTORY
         ${PROJECT_BINARY_DIR}/omnitrace-tests-output/omnitrace-exe-simulate-ls
     TIMEOUT 60
-    PASS_REGULAR_EXPRESSION
+    PASS_REGEX
         ".*available-instr.json.*available-instr.txt.*available-instr.xml.*excluded-instr.json.*excluded-instr.txt.*excluded-instr.xml.*instrumented-instr.json.*instrumented-instr.txt.*instrumented-instr.xml.*overlapping-instr.json.*overlapping-instr.txt.*overlapping-instr.xml.*"
     )
 
@@ -125,7 +125,7 @@ omnitrace_add_bin_test(
     ARGS --help
     LABELS omnitrace-avail
     TIMEOUT 45
-    PASS_REGULAR_EXPRESSION
+    PASS_REGEX
         ".*\\\[omnitrace-avail\\\] Usage:.*\\\[CATEGORIES\\\].*\\\[VIEW OPTIONS\\\].*\\\[COLUMN OPTIONS\\\].*\\\[WIDTH OPTIONS\\\].*\\\[OUTPUT OPTIONS\\\].*"
     )
 
@@ -135,7 +135,7 @@ omnitrace_add_bin_test(
     ARGS -r wall_clock -C --available
     LABELS omnitrace-avail
     TIMEOUT 45
-    PASS_REGULAR_EXPRESSION
+    PASS_REGEX
         "\\\|[-]+\\\|\n\\\|[ ]+COMPONENT[ ]+\\\|\n\\\|[-]+\\\|\n\\\| (wall_clock)[ ]+\\\|\n\\\| (sampling_wall_clock)[ ]+\\\|\n\\\|[-]+\\\|"
     )
 
@@ -145,8 +145,8 @@ omnitrace_add_bin_test(
     ARGS --categories settings::omnitrace --brief
     LABELS omnitrace-avail
     TIMEOUT 45
-    PASS_REGULAR_EXPRESSION "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"
-    FAIL_REGULAR_EXPRESSION
+    PASS_REGEX "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"
+    FAIL_REGEX
         "OMNITRACE_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
     )
 
@@ -156,6 +156,6 @@ omnitrace_add_bin_test(
     ARGS --categories settings::timemory --brief
     LABELS omnitrace-avail
     TIMEOUT 45
-    PASS_REGULAR_EXPRESSION
+    PASS_REGEX
         "OMNITRACE_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
-    FAIL_REGULAR_EXPRESSION "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE)")
+    FAIL_REGEX "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE)")

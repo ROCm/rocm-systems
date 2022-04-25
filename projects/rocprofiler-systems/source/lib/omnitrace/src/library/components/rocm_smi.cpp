@@ -33,6 +33,7 @@
 #include "library/components/rocm_smi.hpp"
 #include "library/common.hpp"
 #include "library/components/fwd.hpp"
+#include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
 #include "library/debug.hpp"
@@ -127,7 +128,7 @@ data::print(std::ostream& _os) const
 
 namespace
 {
-std::vector<std::unique_ptr<bundle_t>*> _bundle_data{};
+std::vector<unique_ptr_t<bundle_t>*> _bundle_data{};
 }
 
 void
@@ -139,7 +140,8 @@ config()
         if(data::device_list.count(i) > 0)
         {
             _bundle_data.at(i) = &sampler_instances::instances().at(i);
-            if(!*_bundle_data.at(i)) *_bundle_data.at(i) = std::make_unique<bundle_t>();
+            if(!*_bundle_data.at(i))
+                *_bundle_data.at(i) = unique_ptr_t<bundle_t>{ new bundle_t{} };
         }
     }
 

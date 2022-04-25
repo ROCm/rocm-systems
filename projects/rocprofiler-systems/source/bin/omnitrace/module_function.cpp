@@ -115,15 +115,27 @@ module_function::write_header(std::ostream& os)
 bool
 module_function::should_instrument() const
 {
+    return should_instrument(false);
+}
+
+bool
+module_function::should_coverage_instrument() const
+{
+    return should_instrument(true);
+}
+
+bool
+module_function::should_instrument(bool coverage) const
+{
     // hard constraints
     if(!is_instrumentable()) return false;
     if(!can_instrument_entry()) return false;
-    if(!can_instrument_exit()) return false;
+    if(!coverage && !can_instrument_exit()) return false;
     if(is_module_constrained()) return false;
     if(is_routine_constrained()) return false;
 
     // should be before user selection
-    constexpr int absolute_min_instructions = 4;
+    constexpr int absolute_min_instructions = 2;
     if(num_instructions < absolute_min_instructions)
     {
         messages.emplace_back(
@@ -134,8 +146,6 @@ module_function::should_instrument() const
 
     // user selection
     if(is_user_excluded()) return false;
-    if(is_user_restricted()) return true;
-    if(is_user_included()) return true;
 
     // should be applied before dynamic-callsite check
     if(is_overlapping_constrained()) return false;
@@ -144,6 +154,10 @@ module_function::should_instrument() const
 
     // needs to be applied before address range and number of instruction constraints
     if(is_dynamic_callsite_forced()) return true;
+
+    // user selection
+    if(!file_restrict.empty() || !func_restrict.empty()) return !is_user_restricted();
+    if(is_user_included()) return true;
 
     if(is_address_range_constrained()) return false;
     if(is_num_instructions_constrained()) return false;
@@ -194,7 +208,7 @@ module_function::is_user_restricted() const
 
     if(!func_restrict.empty())
     {
-        if(check_regex_restrictions(module_name, func_restrict))
+        if(check_regex_restrictions(function_name, func_restrict))
         {
             messages.emplace_back(2, "Forcing", "function", "function-restrict-regex");
             return false;
@@ -282,23 +296,134 @@ module_function::is_overlapping() const
 bool
 module_function::is_module_constrained() const
 {
-    if(!instrument_module(module_name) || module_constraint(module_name.c_str()))
-    {
-        messages.emplace_back(2, "Skipping", "module", "module-constraint");
+    auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
+    auto _report    = [&](const string_t& _action, const string_t& _reason, int _lvl) {
+        messages.emplace_back(_lvl, _action, "module", _reason);
         return true;
-    }
+    };
+
+    if(module_constraint(function_name.c_str())) return true;
+
+    // always instrument these modules
+    if(module_name == "DEFAULT_MODULE" || module_name == "LIBRARY_MODULE")
+        return _report("Skipping", "default module", 2);
+
+    static std::regex ext_regex{ "\\.(s|S)$", regex_opts };
+    static std::regex sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts };
+    static std::regex sys_build_regex{ "^(\\.\\./sysdeps/|/build/)", regex_opts };
+    static std::regex dyninst_regex{ "(dyninst|DYNINST|(^|/)RT[[:graph:]]+\\.c$)",
+                                     regex_opts };
+    static std::regex dependlib_regex{ "^(lib|)(omnitrace|pthread|caliper|gotcha|papi|"
+                                       "cupti|TAU|likwid|pfm|nvperf|unwind)",
+                                       regex_opts };
+    static std::regex core_cmod_regex{
+        "^(malloc|(f|)lock|sig|sem)[a-z_]+(|64|_r|_l)\\.c$"
+    };
+    static std::regex core_lib_regex{
+        "^(lib|)(c|dl|dw|pthread|tcmalloc|profiler|"
+        "tbbmalloc|tbbmalloc_proxy|malloc|stdc\\+\\+)(-|\\.)",
+        regex_opts
+    };
+    static std::regex prefix_regex{ "^(_|\\.[a-zA-Z0-9])", regex_opts };
+
+    // file extensions that should not be instrumented
+    if(std::regex_search(module_name, ext_regex))
+        return _report("Excluding", "file extension", 3);
+
+    // system modules that should not be instrumented (wastes time)
+    if(std::regex_search(module_name, sys_regex) ||
+       std::regex_search(module_name, sys_build_regex))
+        return _report("Excluding", "system module", 3);
+
+    // dyninst modules that must not be instrumented
+    if(std::regex_search(module_name, dyninst_regex))
+        return _report("Excluding", "dyninst module", 3);
+
+    // modules used by omnitrace and dependent libraries
+    if(std::regex_search(module_name, core_lib_regex) ||
+       std::regex_search(module_name, core_cmod_regex))
+        return _report("Excluding", "core module", 3);
+
+    // modules used by omnitrace and dependent libraries
+    if(std::regex_search(module_name, dependlib_regex))
+        return _report("Excluding", "dependency module", 3);
+
+    // known set of modules whose starting sequence of characters suggest it should not be
+    // instrumented (wastes time)
+    if(std::regex_search(module_name, prefix_regex))
+        return _report("Excluding", "prefix match", 3);
+
     return false;
 }
 
 bool
 module_function::is_routine_constrained() const
 {
-    if(!instrument_entity(function_name) || !instrument_entity(signature.get()) ||
-       routine_constraint(function_name) || routine_constraint(signature.get()))
-    {
-        messages.emplace_back(2, "Skipping", "function", "function-constraint");
+    auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
+    auto _report    = [&](const string_t& _action, const string_t& _reason, int _lvl) {
+        messages.emplace_back(_lvl, _action, "function", _reason);
         return true;
+    };
+
+    if(routine_constraint(function_name.c_str())) return true;
+
+    auto npos = std::string::npos;
+    if(function_name.find("omnitrace") != npos)
+    {
+        return _report("Skipping", "omnitrace-function", 1);
     }
+
+    if(function_name.find("FunctionInfo") != npos ||
+       function_name.find("_L_lock") != npos || function_name.find("_L_unlock") != npos)
+    {
+        return _report("Skipping", "function-constraint", 2);
+    }
+
+    static std::regex exclude(
+        "(omnitrace|tim::|N3tim|MPI_Init|MPI_Finalize|dyninst|tm_clones)", regex_opts);
+    static std::regex exclude_cxx(
+        "(std::_Sp_counted_base|std::(use|has)_facet|std::locale|::sentry|^std::_|::_(M|"
+        "S)_|::basic_string[a-zA-Z,<>: ]+::_M_create|::__|::_(Alloc|State)|"
+        "std::(basic_|)(ifstream|ios|istream|ostream|stream))",
+        regex_opts);
+    static std::regex leading("^(_|\\.|frame_dummy|transaction clone|virtual "
+                              "thunk|non-virtual thunk|\\(|targ|kmp_threadprivate_)",
+                              regex_opts);
+    static std::regex trailing(
+        "(_|\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$", regex_opts);
+    static strset_t whole = []() {
+        auto _v   = get_whole_function_names();
+        auto _ret = _v;
+        for(std::string _ext : { "64", "_l", "_r" })
+            for(const auto& itr : _v)
+                _ret.emplace(itr + _ext);
+        return _ret;
+    }();
+
+    // don't instrument the functions when key is found anywhere in function name
+    if(std::regex_search(function_name, exclude) ||
+       std::regex_search(function_name, exclude_cxx))
+    {
+        return _report("Excluding", "critical", 3);
+    }
+
+    if(whole.count(function_name) > 0)
+    {
+        return _report("Excluding", "critical-whole-match", 3);
+    }
+
+    // don't instrument the functions when key is found at the start of the function name
+    if(std::regex_search(function_name, leading))
+    {
+        return _report("Excluding", "recommended-leading-match", 3);
+    }
+
+    // don't instrument the functions when key is found at the end of the function name
+    if(std::regex_search(function_name, trailing))
+    {
+        return _report("Excluding", "recommended-trailing-match", 3);
+    }
+
     return false;
 }
 
@@ -364,9 +489,25 @@ module_function::is_loop_address_range_constrained() const
 bool
 module_function::is_num_instructions_constrained() const
 {
+    if(!loop_blocks.empty()) return is_loop_num_instructions_constrained();
+
     if(num_instructions < min_instructions)
     {
         messages.emplace_back(2, "Skipping", "function", "min-instructions");
+        return true;
+    }
+
+    return false;
+}
+
+bool
+module_function::is_loop_num_instructions_constrained() const
+{
+    if(loop_blocks.empty()) return false;
+
+    if(num_instructions < min_loop_instructions)
+    {
+        messages.emplace_back(2, "Skipping", "function", "min-instructions-loop");
         return true;
     }
 
@@ -459,10 +600,8 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
     auto _entr       = _trace_entr.get(_entr_trace);
     auto _exit       = _trace_exit.get(_exit_trace);
 
-    if(insert_instr(_addr_space, function, _entr, BPatch_entry, nullptr, nullptr,
-                    instr_traps) &&
-       insert_instr(_addr_space, function, _exit, BPatch_exit, nullptr, nullptr,
-                    instr_traps))
+    if(insert_instr(_addr_space, function, _entr, BPatch_entry) &&
+       insert_instr(_addr_space, function, _exit, BPatch_exit))
     {
         messages.emplace_back(1, "Instrumenting", "function", "no-constraint");
         ++_count.first;
@@ -514,5 +653,94 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
                      instr_loop_traps);
     }
 
+    return _count;
+}
+
+void
+module_function::register_source(address_space_t* _addr_space, procedure_t* _entr_trace,
+                                 const std::vector<point_t*>& _entr_points) const
+{
+    switch(coverage_mode)
+    {
+        case CODECOV_FUNCTION:
+        {
+            auto _name = signature.get_coverage(false);
+            auto _trace_entr =
+                omnitrace_call_expr(signature.m_file, signature.m_name,
+                                    signature.m_row.first, start_address, _name);
+            auto _entr = _trace_entr.get(_entr_trace);
+
+            if(insert_instr(_addr_space, _entr_points, _entr, BPatch_entry))
+            {
+                messages.emplace_back(1, "Code Coverage", "function", "no-constraint");
+            }
+            break;
+        }
+        case CODECOV_BASIC_BLOCK:
+        {
+            for(auto&& itr : get_basic_block_file_line_info(module, function))
+            {
+                auto  _start_addr = itr.second.start_address;
+                auto& _signature  = itr.second.signature;
+                auto  _name       = _signature.get_coverage(true);
+                auto  _trace_entr =
+                    omnitrace_call_expr(_signature.m_file, _signature.m_name,
+                                        _signature.m_row.first, _start_addr, _name);
+                auto _entr = _trace_entr.get(_entr_trace);
+
+                if(insert_instr(_addr_space, _entr_points, _entr, BPatch_entry))
+                {
+                    messages.emplace_back(1, "Code Coverage", "basic_block",
+                                          "no-constraint");
+                }
+            }
+            break;
+        }
+        case CODECOV_NONE: break;
+    }
+}
+
+std::pair<size_t, size_t>
+module_function::register_coverage(address_space_t* _addr_space,
+                                   procedure_t*     _entr_trace) const
+{
+    std::pair<size_t, size_t> _count = { 0, 0 };
+    switch(coverage_mode)
+    {
+        case CODECOV_FUNCTION:
+        {
+            auto _trace_entr =
+                omnitrace_call_expr(signature.m_file, signature.m_name, start_address);
+            auto _entr = _trace_entr.get(_entr_trace);
+
+            if(insert_instr(_addr_space, function, _entr, BPatch_entry))
+            {
+                messages.emplace_back(1, "Code Coverage", "function", "no-constraint");
+                ++_count.first;
+            }
+            break;
+        }
+        case CODECOV_BASIC_BLOCK:
+        {
+            for(auto&& itr : get_basic_block_file_line_info(module, function))
+            {
+                auto  _start_addr = itr.second.start_address;
+                auto& _signature  = itr.second.signature;
+                auto  _trace_entr = omnitrace_call_expr(_signature.m_file,
+                                                       _signature.m_name, _start_addr);
+                auto  _entr       = _trace_entr.get(_entr_trace);
+
+                if(insert_instr(_addr_space, _entr, BPatch_entry, itr.first))
+                {
+                    ++_count.second;
+                    messages.emplace_back(1, "Code Coverage", "basic_block",
+                                          "no-constraint");
+                }
+            }
+            verbprintf(0, "Basic-block code coverage is not available yet\n");
+            break;
+        }
+        case CODECOV_NONE: break;
+    }
     return _count;
 }

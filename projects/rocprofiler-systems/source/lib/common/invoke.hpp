@@ -62,7 +62,7 @@ get_thread_index()
 
 template <typename FuncT, typename... Args>
 auto
-invoke(const char* _name, int _verbose, FuncT&& _func, Args... _args)
+invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _args)
 {
     if(_func)
     {
@@ -78,6 +78,7 @@ invoke(const char* _name, int _verbose, FuncT&& _func, Args... _args)
         int32_t _lk = get_guard()++;
         if(_lk == 0)
         {
+            _toggle = !_toggle;
             if(_verbose >= 3)
             {
                 fflush(stderr);

@@ -64,6 +64,11 @@ extern "C"
     void omnitrace_pop_trace(const char* name) OMNITRACE_PUBLIC_API;
     void omnitrace_push_region(const char*) OMNITRACE_PUBLIC_API;
     void omnitrace_pop_region(const char*) OMNITRACE_PUBLIC_API;
+    void omnitrace_register_source(const char* file, const char* func, size_t line,
+                                   size_t      address,
+                                   const char* source) OMNITRACE_PUBLIC_API;
+    void omnitrace_register_coverage(const char* file, const char* func,
+                                     size_t address) OMNITRACE_PUBLIC_API;
 
 #if defined(OMNITRACE_DL_SOURCE) && (OMNITRACE_DL_SOURCE > 0)
     int omnitrace_user_start_trace_dl(void) OMNITRACE_HIDDEN_API;

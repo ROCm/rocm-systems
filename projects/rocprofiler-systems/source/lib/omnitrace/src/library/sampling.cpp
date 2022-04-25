@@ -120,7 +120,7 @@ get_signal_names(Tp&& _v)
 }
 }  // namespace
 
-std::unique_ptr<std::set<int>>&
+unique_ptr_t<std::set<int>>&
 get_signal_types(int64_t _tid)
 {
     static auto& _v = signal_type_instances::instances();
@@ -178,7 +178,7 @@ unblock_signals(std::set<int> _signals)
     thread_sigmask(SIG_UNBLOCK, &_v, nullptr);
 }
 
-std::unique_ptr<sampler_t>&
+unique_ptr_t<sampler_t>&
 get_sampler(int64_t _tid)
 {
     static auto& _v = sampler_instances::instances();

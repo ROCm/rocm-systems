@@ -8,7 +8,6 @@ on:
 
 env:
   BUILD_TYPE: MinSizeRel
-  OMNITRACE_DEBUG_FINALIZE: ON
   OMNITRACE_VERBOSE: 1
   OMNITRACE_CI: ON
   OMNITRACE_OUTPUT_PATH: omnitrace-tests-output
@@ -84,8 +83,8 @@ jobs:
         cd build &&
         ldd ./omnitrace &&
         ./omnitrace --help &&
-        ctest -V -N -O omnitrace-ctest-${{ env.GITHUB_JOB }}-commands.log &&
-        ctest --output-on-failure --output-log omnitrace-ctest-${{ env.GITHUB_JOB }}.log --stop-on-failure
+        ctest -V -N -O omnitrace-ctest-${{ github.job }}-commands.log &&
+        ctest -V --output-log omnitrace-ctest-${{ github.job }}.log --stop-on-failure
 
     - name: Test Install
       timeout-minutes: 10
@@ -108,16 +107,19 @@ jobs:
         omnitrace -e -v 1 -- ls
 
     - name: CTest Artifacts
+      if: success() || failure()
       uses: actions/upload-artifact@v2
       with:
-        name: ctest-log
+        name: ctest-${{ github.job }}-log
         path: |
           build/*.log
 
     - name: Data Artifacts
+      if: success() || failure()
       uses: actions/upload-artifact@v2
       with:
-        name: data-files
+        name: data-${{ github.job }}-files
         path: |
           omnitrace-tests-output/**/*.txt
           build/omnitrace-tests-output/**/*.txt
+          build/omnitrace-tests-output/**/*-instr*.json

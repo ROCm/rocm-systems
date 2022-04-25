@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/thread_sampler.hpp"
+#include "library/components/pthread_gotcha.hpp"
 #include "library/components/rocm_smi.hpp"
 #include "library/config.hpp"
 #include "library/cpu_freq.hpp"

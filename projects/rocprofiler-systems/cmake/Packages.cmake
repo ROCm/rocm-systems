@@ -23,6 +23,7 @@ omnitrace_add_interface_library(omnitrace-ptl "Enables PTL support (tasking)")
 omnitrace_add_interface_library(omnitrace-papi "Enable PAPI support")
 omnitrace_add_interface_library(omnitrace-ompt "Enable OMPT support")
 omnitrace_add_interface_library(omnitrace-python "Enables Python support")
+omnitrace_add_interface_library(omnitrace-timemory "Provides timemory libraries")
 omnitrace_add_interface_library(omnitrace-timemory-config
                                 "CMake interface library applied to all timemory targets")
 omnitrace_add_interface_library(omnitrace-compile-definitions "Compile definitions")
@@ -525,6 +526,12 @@ if(TARGET omnitrace-papi-build)
         endforeach()
     endforeach()
 endif()
+
+target_link_libraries(
+    omnitrace-timemory
+    INTERFACE $<BUILD_INTERFACE:timemory::timemory-headers>
+              $<BUILD_INTERFACE:timemory::timemory-gotcha>
+              $<BUILD_INTERFACE:timemory::timemory-cxx-static>)
 
 # ----------------------------------------------------------------------------------------#
 #

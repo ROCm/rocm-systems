@@ -19,6 +19,11 @@ parse:
         VARIABLES: '*'
         CONDITION: '*'
     omnitrace_add_test:
+      flags:
+        - SKIP_BASELINE
+        - SKIP_REWRITE
+        - SKIP_RUNTIME
+        - SKIP_SAMPLING
       kwargs:
         NAME: '*'
         TARGET: '*'
@@ -32,6 +37,12 @@ parse:
         ENVIRONMENT: '*'
         LABELS: '*'
         PROPERTIES: '*'
+        RUNTIME_PASS_REGEX: '*'
+        RUNTIME_FAIL_REGEX: '*'
+        REWRITE_PASS_REGEX: '*'
+        REWRITE_FAIL_REGEX: '*'
+        REWRITE_RUN_PASS_REGEX: '*'
+        REWRITE_RUN_FAIL_REGEX: '*'
     omnitrace_target_compile_definitions:
       kwargs:
         PUBLIC: '*'
@@ -51,9 +62,9 @@ parse:
         PROPERTIES: '*'
         ENVIRONMENT: '*'
         WORKING_DIRECTORY: '*'
-        PASS_REGULAR_EXPRESSION: '*'
-        FAIL_REGULAR_EXPRESSION: '*'
-        SKIP_REGULAR_EXPRESSION: '*'
+        PASS_REGEX: '*'
+        FAIL_REGEX: '*'
+        SKIP_REGEX: '*'
     omnitrace_add_python_test:
       flags:
       - STANDALONE
@@ -70,9 +81,9 @@ parse:
         PROPERTIES: '*'
         PYTHON_EXECUTABLE: '*'
         PYTHON_VERSION: '*'
-        PASS_REGULAR_EXPRESSION: '*'
-        FAIL_REGULAR_EXPRESSION: '*'
-        SKIP_REGULAR_EXPRESSION: '*'
+        PASS_REGEX: '*'
+        FAIL_REGEX: '*'
+        SKIP_REGEX: '*'
     rocm_version_message:
       flags:
         - STATUS
@@ -105,6 +116,22 @@ parse:
         PYTHON_VERSION: '*'
         CXX_STANDARD: '*'
         VISIBILITY: '*'
+    omnitrace_directory:
+      flags:
+        - MKDIR
+        - FAIL
+      kwargs:
+        PREFIX: '*'
+        OUTPUT_VARIABLE: '*'
+        WORKING_DIRECTORY: '*'
+        PATHS: '*'
+    omnitrace_check_python_dirs_and_versions:
+      flags:
+        - UNSET
+        - FAIL
+      kwargs:
+        RESULT_VARIABLE: '*'
+        OUTPUT_VARIABLE: '*'
   override_spec: {}
   vartags: []
   proptags: []

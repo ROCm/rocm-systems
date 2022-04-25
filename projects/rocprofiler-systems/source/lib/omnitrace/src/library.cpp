@@ -28,6 +28,7 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
+#include "library/coverage.hpp"
 #include "library/critical_trace.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
@@ -114,9 +115,7 @@ ensure_finalization(bool _static_init = false)
         //
         // see:
         // https://github.com/ROCm-Developer-Tools/roctracer/issues/22#issuecomment-572814465
-#if defined(OMNITRACE_USE_ROCTRACER)
         tim::set_env("HSA_ENABLE_INTERRUPT", "0", 0);
-#endif
     }
     return scope::destructor{ []() { omnitrace_finalize_hidden(); } };
 }
@@ -346,6 +345,13 @@ omnitrace_pop_region_hidden(const char* name)
 extern "C" void
 omnitrace_set_env_hidden(const char* env_name, const char* env_val)
 {
+    struct set_env_s  // NOLINT
+    {};
+    tim::auto_lock_t _lk{ tim::type_mutex<set_env_s>() };
+
+    static auto _set_envs = std::set<std::string_view>{};
+    bool        _success  = _set_envs.emplace(env_name).second;
+
     // just search env to avoid initializing the settings
     OMNITRACE_CONDITIONAL_PRINT_F(get_debug_init() || get_verbose_env() > 2,
                                   "Setting env: %s=%s\n", env_name, env_val);
@@ -353,7 +359,7 @@ omnitrace_set_env_hidden(const char* env_name, const char* env_val)
     tim::set_env(env_name, env_val, 0);
 
     OMNITRACE_CONDITIONAL_THROW(
-        get_state() >= State::Init &&
+        _success && get_state() >= State::Init &&
             (config::get_is_continuous_integration() || get_debug_init()),
         "omnitrace_set_env(\"%s\", \"%s\") called after omnitrace was initialized. state "
         "= %s",
@@ -375,6 +381,14 @@ std::function<void()> _start_gotcha_callback = []() {};
 extern "C" void
 omnitrace_set_mpi_hidden(bool use, bool attached)
 {
+    static bool _once = false;
+    static auto _args = std::make_pair(use, attached);
+
+    // this function may be called multiple times if multiple libraries are instrumented
+    // we want to guard against multiple calls which with different arguments
+    if(_once && std::tie(_args.first, _args.second) == std::tie(use, attached)) return;
+    _once = true;
+
     // just search env to avoid initializing the settings
     OMNITRACE_CONDITIONAL_PRINT_F(get_debug_init() || get_verbose_env() > 2,
                                   "use: %s, attached: %s\n", (use) ? "y" : "n",
@@ -478,6 +492,20 @@ omnitrace_init_library_hidden()
         get_use_sampling()       = tim::get_env("OMNITRACE_USE_SAMPLING", true);
         get_use_critical_trace() = false;
     }
+    else if(_mode == Mode::Coverage)
+    {
+        for(auto&& itr :
+            { "USE_SAMPLING", "CRITICAL_TRACE", "USE_ROCTRACER", "USE_ROCM_SMI",
+              "USE_PERFETTO", "USE_TIMEMORY", "USE_KOKKOSP", "USE_OMPT" })
+        {
+            auto _name = JOIN('_', "OMNITRACE", itr);
+            if(!config::set_setting_value(_name, false))
+            {
+                OMNITRACE_VERBOSE_F(4, "No configuration setting named '%s'",
+                                    _name.c_str());
+            }
+        }
+    }
 
     tim::trait::runtime_enabled<comp::roctracer>::set(get_use_roctracer());
     tim::trait::runtime_enabled<comp::roctracer_data>::set(get_use_roctracer() &&
@@ -494,7 +522,7 @@ omnitrace_init_library_hidden()
         tim::set_env("KOKKOS_PROFILE_LIBRARY", "libomnitrace.so", _force);
     }
 
-#if defined(OMNITRACE_USE_ROCTRACER)
+#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
     tim::set_env("HSA_TOOLS_LIB", "libomnitrace.so", 0);
 #endif
 }
@@ -814,10 +842,39 @@ omnitrace_init_tooling_hidden()
 extern "C" void
 omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _argv0)
 {
+    static int  _total_count = 0;
+    static auto _args = std::make_pair(std::string_view{ _mode }, _is_binary_rewrite);
+
+    auto _count   = _total_count++;
+    auto _mode_sv = std::string_view{ _mode };
+    // this function may be called multiple times if multiple libraries are instrumented
+    // we want to guard against multiple calls which with different arguments
+    if(_count > 0 &&
+       std::tie(_args.first, _args.second) == std::tie(_mode_sv, _is_binary_rewrite))
+        return;
+
+    OMNITRACE_CONDITIONAL_THROW(
+        _count > 0 &&
+            std::tie(_args.first, _args.second) != std::tie(_mode_sv, _is_binary_rewrite),
+        "\nomnitrace_init(...) called multiple times with different arguments for mode "
+        "and/or is_binary_rewrite:"
+        "\n    Invocation #1: omnitrace_init(mode=%-8s, is_binary_rewrite=%-5s, ...)"
+        "\n    Invocation #%i: omnitrace_init(mode=%-8s, is_binary_rewrite=%-5s, ...)",
+        _args.first.data(), std::to_string(_args.second).c_str(), _count + 1, _mode,
+        std::to_string(_is_binary_rewrite).c_str());
+
     // always the first
     (void) get_state();
     (void) push_count();
     (void) pop_count();
+
+    OMNITRACE_CONDITIONAL_THROW(
+        get_state() >= State::Init &&
+            (config::get_is_continuous_integration() || get_debug_init()),
+        "omnitrace_init(mode=%s, is_binary_rewrite=%s, argv0=%s) called after omnitrace "
+        "was initialized. state = %s",
+        _mode, std::to_string(_is_binary_rewrite).c_str(), _argv0,
+        std::to_string(get_state()).c_str());
 
     get_finalization_functions().emplace_back([_argv0]() {
         OMNITRACE_CI_THROW(get_state() != State::Active,
@@ -844,6 +901,16 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
 
     tim::set_env("OMNITRACE_MODE", _mode, 0);
     config::is_binary_rewrite() = _is_binary_rewrite;
+
+    if(get_mode() == Mode::Coverage)
+    {
+        tim::set_env("OMNITRACE_USE_PERFETTO", "OFF", 0);
+        tim::set_env("OMNITRACE_USE_TIMEMORY", "OFF", 0);
+        tim::set_env("OMNITRACE_USE_KOKKOSP", "OFF", 0);
+        tim::set_env("OMNITRACE_USE_SAMPLING", "OFF", 0);
+        tim::set_env("OMNITRACE_USE_ROCTRACER", "OFF", 0);
+        tim::set_env("OMNITRACE_USE_ROCM_SMI", "OFF", 0);
+    }
 
     // set OMNITRACE_USE_SAMPLING to ON by default if mode is sampling
     tim::set_env("OMNITRACE_USE_SAMPLING", (get_mode() == Mode::Sampling) ? "ON" : "OFF",
@@ -1086,8 +1153,8 @@ omnitrace_finalize_hidden(void)
     {
         if(get_verbose() >= 0) fprintf(stderr, "\n");
         if(get_verbose() >= 0 || get_debug())
-            fprintf(stderr, "[%s]|%i> Flushing perfetto...\n", OMNITRACE_FUNCTION,
-                    dmp::rank());
+            fprintf(stderr, "[%s][%s]|%i> Flushing perfetto...\n", TIMEMORY_PROJECT_NAME,
+                    OMNITRACE_FUNCTION, dmp::rank());
 
         // Make sure the last event is closed for this example.
         perfetto::TrackEvent::Flush();
@@ -1108,8 +1175,9 @@ omnitrace_finalize_hidden(void)
         }
         // Write the trace into a file.
         if(get_verbose() >= 0)
-            fprintf(stderr, "[%s]|%i> Outputting '%s' (%.2f KB / %.2f MB / %.2f GB)... ",
-                    OMNITRACE_FUNCTION, dmp::rank(),
+            fprintf(stderr,
+                    "[%s][%s]|%i> Outputting '%s' (%.2f KB / %.2f MB / %.2f GB)... ",
+                    TIMEMORY_PROJECT_NAME, OMNITRACE_FUNCTION, dmp::rank(),
                     get_perfetto_output_filename().c_str(),
                     static_cast<double>(trace_data.size()) / units::KB,
                     static_cast<double>(trace_data.size()) / units::MB,
@@ -1151,6 +1219,8 @@ omnitrace_finalize_hidden(void)
         tasking::get_critical_trace_task_group().set_pool(nullptr);
         tasking::get_critical_trace_thread_pool().destroy_threadpool();
     }
+
+    coverage::post_process();
 
     OMNITRACE_DEBUG_F("Finalizing timemory...\n");
     tim::timemory_finalize();

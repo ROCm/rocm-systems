@@ -32,6 +32,8 @@
 #include "common/invoke.hpp"
 #include "common/join.hpp"
 
+#include <cassert>
+
 //--------------------------------------------------------------------------------------//
 
 #define OMNITRACE_DLSYM(VARNAME, HANDLE, FUNCNAME)                                       \
@@ -183,6 +185,11 @@ struct OMNITRACE_HIDDEN_API indirect
         OMNITRACE_DLSYM(omnitrace_pop_trace_f, m_omnihandle, "omnitrace_pop_trace");
         OMNITRACE_DLSYM(omnitrace_push_region_f, m_omnihandle, "omnitrace_push_region");
         OMNITRACE_DLSYM(omnitrace_pop_region_f, m_omnihandle, "omnitrace_pop_region");
+        OMNITRACE_DLSYM(omnitrace_register_source_f, m_omnihandle,
+                        "omnitrace_register_source");
+        OMNITRACE_DLSYM(omnitrace_register_coverage_f, m_omnihandle,
+                        "omnitrace_register_coverage");
+
 #if OMNITRACE_USE_OMPT == 0
         _warn_verbose = 5;
 #endif
@@ -231,16 +238,19 @@ struct OMNITRACE_HIDDEN_API indirect
     }
 
 public:
-    void (*omnitrace_init_library_f)(void)                   = nullptr;
-    void (*omnitrace_init_f)(const char*, bool, const char*) = nullptr;
-    void (*omnitrace_finalize_f)(void)                       = nullptr;
-    void (*omnitrace_set_env_f)(const char*, const char*)    = nullptr;
-    void (*omnitrace_set_mpi_f)(bool, bool)                  = nullptr;
-    void (*omnitrace_push_trace_f)(const char*)              = nullptr;
-    void (*omnitrace_pop_trace_f)(const char*)               = nullptr;
-    int (*omnitrace_push_region_f)(const char*)              = nullptr;
-    int (*omnitrace_pop_region_f)(const char*)               = nullptr;
-    int (*omnitrace_user_configure_f)(int, void*, void*)     = nullptr;
+    void (*omnitrace_init_library_f)(void)                                  = nullptr;
+    void (*omnitrace_init_f)(const char*, bool, const char*)                = nullptr;
+    void (*omnitrace_finalize_f)(void)                                      = nullptr;
+    void (*omnitrace_set_env_f)(const char*, const char*)                   = nullptr;
+    void (*omnitrace_set_mpi_f)(bool, bool)                                 = nullptr;
+    void (*omnitrace_register_source_f)(const char*, const char*, size_t, size_t,
+                                        const char*)                        = nullptr;
+    void (*omnitrace_register_coverage_f)(const char*, const char*, size_t) = nullptr;
+    void (*omnitrace_push_trace_f)(const char*)                             = nullptr;
+    void (*omnitrace_pop_trace_f)(const char*)                              = nullptr;
+    int (*omnitrace_push_region_f)(const char*)                             = nullptr;
+    int (*omnitrace_pop_region_f)(const char*)                              = nullptr;
+    int (*omnitrace_user_configure_f)(int, void*, void*)                    = nullptr;
     ompt_start_tool_result_t* (*ompt_start_tool_f)(unsigned int, const char*);
 
 private:
@@ -263,17 +273,31 @@ get_indirect()
 }
 
 auto&
+get_inited()
+{
+    static bool* _v = new bool{ false };
+    return *_v;
+}
+
+auto&
+get_finied()
+{
+    static bool* _v = new bool{ false };
+    return *_v;
+}
+
+auto&
 get_active()
 {
-    static bool _v = false;
-    return _v;
+    static bool* _v = new bool{ false };
+    return *_v;
 }
 
 auto&
 get_enabled()
 {
-    static std::atomic<bool> _v{ get_env("OMNITRACE_INIT_ENABLED", true) };
-    return _v;
+    static auto* _v = new std::atomic<bool>{ get_env("OMNITRACE_INIT_ENABLED", true) };
+    return *_v;
 }
 
 auto&
@@ -284,18 +308,24 @@ get_thread_enabled()
 }
 
 auto&
-get_count()
-{
-    static std::atomic<int64_t> _v{ 0 };
-    return _v;
-}
-
-auto&
 get_thread_count()
 {
     static thread_local int64_t _v = 0;
     return _v;
 }
+
+auto&
+get_thread_status()
+{
+    static thread_local bool _v = false;
+    return _v;
+}
+
+// ensure finalization is called
+bool _omnitrace_dl_fini = (std::atexit([]() {
+                               if(get_active()) omnitrace_finalize();
+                           }),
+                           true);
 }  // namespace
 }  // namespace dl
 }  // namespace omnitrace
@@ -304,7 +334,20 @@ get_thread_count()
 
 #define OMNITRACE_DL_INVOKE(...)                                                         \
     ::omnitrace::common::invoke(__FUNCTION__, ::omnitrace::dl::_omnitrace_dl_verbose,    \
+                                (::omnitrace::dl::get_thread_status() = false),          \
                                 __VA_ARGS__)
+
+#define OMNITRACE_DL_INVOKE_STATUS(STATUS, ...)                                          \
+    ::omnitrace::common::invoke(__FUNCTION__, ::omnitrace::dl::_omnitrace_dl_verbose,    \
+                                STATUS, __VA_ARGS__)
+
+#define OMNITRACE_DL_LOG(LEVEL, ...)                                                     \
+    if(::omnitrace::dl::_omnitrace_dl_verbose >= LEVEL)                                  \
+    {                                                                                    \
+        fflush(stderr);                                                                  \
+        fprintf(stderr, "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME "] " __VA_ARGS__);  \
+        fflush(stderr);                                                                  \
+    }
 
 using omnitrace::get_indirect;
 namespace dl = omnitrace::dl;
@@ -318,14 +361,50 @@ extern "C"
 
     void omnitrace_init(const char* a, bool b, const char* c)
     {
-        OMNITRACE_DL_INVOKE(get_indirect().omnitrace_init_f, a, b, c);
-        dl::get_active() = true;
+        if(dl::get_inited() && dl::get_finied())
+        {
+            OMNITRACE_DL_LOG(2, "%s(%s) ignored :: already initialized and finalized\n",
+                             __FUNCTION__, ::omnitrace::join(", ", a, b, c).c_str());
+            return;
+        }
+        else if(dl::get_inited() && dl::get_active())
+        {
+            OMNITRACE_DL_LOG(2, "%s(%s) ignored :: already initialized and active\n",
+                             __FUNCTION__, ::omnitrace::join(", ", a, b, c).c_str());
+            return;
+        }
+
+        bool _invoked = false;
+        OMNITRACE_DL_INVOKE_STATUS(_invoked, get_indirect().omnitrace_init_f, a, b, c);
+        if(_invoked)
+        {
+            dl::get_active() = true;
+            dl::get_inited() = true;
+        }
     }
 
     void omnitrace_finalize(void)
     {
-        dl::get_active() = false;
-        OMNITRACE_DL_INVOKE(get_indirect().omnitrace_finalize_f);
+        if(dl::get_inited() && dl::get_finied())
+        {
+            OMNITRACE_DL_LOG(2, "%s() ignored :: already initialized and finalized\n",
+                             __FUNCTION__);
+            return;
+        }
+        else if(dl::get_finied() && !dl::get_active())
+        {
+            OMNITRACE_DL_LOG(2, "%s() ignored :: already finalized but not active\n",
+                             __FUNCTION__);
+            return;
+        }
+
+        bool _invoked = false;
+        OMNITRACE_DL_INVOKE_STATUS(_invoked, get_indirect().omnitrace_finalize_f);
+        if(_invoked)
+        {
+            dl::get_active() = false;
+            dl::get_finied() = true;
+        }
     }
 
     void omnitrace_push_trace(const char* name)
@@ -389,6 +468,19 @@ extern "C"
     void omnitrace_set_mpi(bool a, bool b)
     {
         OMNITRACE_DL_INVOKE(get_indirect().omnitrace_set_mpi_f, a, b);
+    }
+
+    void omnitrace_register_source(const char* file, const char* func, size_t line,
+                                   size_t address, const char* source)
+    {
+        OMNITRACE_DL_INVOKE(get_indirect().omnitrace_register_source_f, file, func, line,
+                            address, source);
+    }
+
+    void omnitrace_register_coverage(const char* file, const char* func, size_t address)
+    {
+        OMNITRACE_DL_INVOKE(get_indirect().omnitrace_register_coverage_f, file, func,
+                            address);
     }
 
     int omnitrace_user_start_trace_dl(void)

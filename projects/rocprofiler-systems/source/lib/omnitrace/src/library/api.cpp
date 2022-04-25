@@ -95,3 +95,16 @@ omnitrace_set_mpi(bool use, bool attached)
 {
     omnitrace_set_mpi_hidden(use, attached);
 }
+
+extern "C" void
+omnitrace_register_source(const char* file, const char* func, size_t line, size_t address,
+                          const char* source)
+{
+    omnitrace_register_source_hidden(file, func, line, address, source);
+}
+
+extern "C" void
+omnitrace_register_coverage(const char* file, const char* func, size_t address)
+{
+    omnitrace_register_coverage_hidden(file, func, address);
+}

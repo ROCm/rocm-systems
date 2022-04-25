@@ -73,7 +73,7 @@ mpi_gotcha::configure()
         mpi_gotcha_t::template configure<1, int, int*, char***, int, int*>(
             "MPI_Init_thread");
         mpi_gotcha_t::template configure<2, int>("MPI_Finalize");
-#if defined(OMNITRACE_USE_MPI_HEADERS)
+#if defined(OMNITRACE_USE_MPI_HEADERS) && OMNITRACE_USE_MPI_HEADERS > 0
         mpi_gotcha_t::template configure<3, int, comm_t, int*>("MPI_Comm_rank");
         mpi_gotcha_t::template configure<4, int, comm_t, int*>("MPI_Comm_size");
 #endif

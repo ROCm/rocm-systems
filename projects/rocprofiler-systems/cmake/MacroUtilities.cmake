@@ -556,4 +556,206 @@ function(omnitrace_custom_compilation)
     endif()
 endfunction()
 
+function(OMNITRACE_WATCH_FOR_CHANGE _var)
+    list(LENGTH ARGN _NUM_EXTRA_ARGS)
+    if(_NUM_EXTRA_ARGS EQUAL 1)
+        set(_VAR ${ARGN})
+    else()
+        set(_VAR)
+    endif()
+
+    macro(update_var _VAL)
+        if(_VAR)
+            set(${_VAR}
+                ${_VAL}
+                PARENT_SCOPE)
+        endif()
+    endmacro()
+
+    update_var(OFF)
+
+    set(_omnitrace_watch_var_name OMNITRACE_WATCH_VALUE_${_var})
+    if(DEFINED ${_omnitrace_watch_var_name})
+        if("${${_var}}" STREQUAL "${${_omnitrace_watch_var_name}}")
+            return()
+        else()
+            omnitrace_message(
+                STATUS
+                "${_var} changed :: ${${_omnitrace_watch_var_name}} --> ${${_var}}")
+            update_var(ON)
+        endif()
+    else()
+        if(NOT "${${_var}}" STREQUAL "")
+            omnitrace_message(STATUS "${_var} :: ${${_var}}")
+            update_var(ON)
+        endif()
+    endif()
+
+    # store the value for the next run
+    set(${_omnitrace_watch_var_name}
+        "${${_var}}"
+        CACHE INTERNAL "Last value of ${_var}" FORCE)
+endfunction()
+
+function(OMNITRACE_DIRECTORY)
+    cmake_parse_arguments(F "MKDIR;FAIL;FORCE" "PREFIX;OUTPUT_VARIABLE;WORKING_DIRECTORY"
+                          "PATHS" ${ARGN})
+
+    if(F_PREFIX AND NOT IS_ABSOLUTE "${F_PREFIX}")
+        if(F_WORKING_DIRECTORY)
+            omnitrace_message(
+                STATUS
+                "PREFIX was specified as a relative path, using working directory + prefix :: '${F_WORKING_DIRECTORY}/${F_PREFIX}'..."
+                )
+            set(F_PREFIX ${F_WORKING_DIRECTORY}/${F_PREFIX})
+        else()
+            omnitrace_message(
+                FATAL_ERROR
+                "PREFIX was specified but it is not an absolute path: ${F_PREFIX}")
+        endif()
+    endif()
+
+    if(NOT F_WORKING_DIRECTORY)
+        set(F_WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+    endif()
+
+    foreach(_PATH ${F_PREFIX} ${F_PATHS})
+        if(F_PREFIX AND NOT "${_PATH}" STREQUAL "${F_PREFIX}")
+            # if path is relative, set to prefix + path
+            if(NOT IS_ABSOLUTE "${_PATH}")
+                set(_PATH ${F_PREFIX}/${_PATH})
+            endif()
+            list(APPEND _OUTPUT_VAR ${_PATH})
+        elseif(NOT F_PREFIX)
+            list(APPEND _OUTPUT_VAR ${_PATH})
+        endif()
+
+        if(NOT EXISTS "${_PATH}" AND F_FAIL)
+            omnitrace_message(FATAL_ERROR "Directory '${_PATH}' does not exist")
+        elseif(NOT IS_DIRECTORY "${_PATH}" AND F_FAIL)
+            omnitrace_message(FATAL_ERROR "'${_PATH}' exists but is not a directory")
+        elseif(NOT EXISTS "${_PATH}" AND F_MKDIR)
+            execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${_PATH}
+                            WORKING_DIRECTORY ${F_WORKING_DIRECTORY})
+        elseif(
+            EXISTS "${_PATH}"
+            AND NOT IS_DIRECTORY "${_PATH}"
+            AND F_MKDIR)
+            if(F_FORCE)
+                execute_process(COMMAND ${CMAKE_COMMAND} -E rm ${_PATH}
+                                WORKING_DIRECTORY ${F_WORKING_DIRECTORY})
+            endif()
+            execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${_PATH}
+                            WORKING_DIRECTORY ${F_WORKING_DIRECTORY})
+        endif()
+    endforeach()
+
+    if(F_OUTPUT_VARIABLE)
+        set(${F_OUTPUT_VARIABLE}
+            "${_OUTPUT_VAR}"
+            PARENT_SCOPE)
+    endif()
+endfunction()
+
+function(OMNITRACE_CHECK_PYTHON_DIRS_AND_VERSIONS)
+    cmake_parse_arguments(F "FAIL;UNSET" "RESULT_VARIABLE;OUTPUT_VARIABLE" "" ${ARGN})
+
+    list(LENGTH OMNITRACE_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
+    list(LENGTH OMNITRACE_PYTHON_ROOT_DIRS _NUM_PYTHON_ROOT_DIRS)
+
+    if(NOT _NUM_PYTHON_VERSIONS EQUAL _NUM_PYTHON_ROOT_DIRS)
+        set(_RET 1)
+    else()
+        set(_RET 0)
+        if(F_OUTPUT_VARIABLE)
+            set(${F_OUTPUT_VARIABLE}
+                ${_NUM_PYTHON_VERSIONS}
+                PARENT_SCOPE)
+        endif()
+    endif()
+
+    if(F_RESULT_VARIABLE)
+        set(${F_RESULT_VARIABLE}
+            ${_RET}
+            PARENT_SCOPE)
+    endif()
+
+    if(NOT ${_RET} EQUAL 0)
+        if(F_FAIL)
+            omnitrace_message(
+                WARNING
+                "Error! Number of python versions  : ${_NUM_PYTHON_VERSIONS}. VERSIONS :: ${OMNITRACE_PYTHON_VERSIONS}"
+                )
+            omnitrace_message(
+                WARNING
+                "Error! Number of python root directories : ${_NUM_PYTHON_ROOT_DIRS}. ROOT DIRS :: ${OMNITRACE_PYTHON_ROOT_DIRS}"
+                )
+            omnitrace_message(
+                FATAL_ERROR
+                "Error! Number of python versions != number of python root directories")
+        elseif(F_UNSET)
+            unset(OMNITRACE_PYTHON_VERSIONS CACHE)
+            unset(OMNITRACE_PYTHON_ROOT_DIRS CACHE)
+            if(F_OUTPUT_VARIABLE)
+                set(${F_OUTPUT_VARIABLE} 0)
+            endif()
+        endif()
+    endif()
+endfunction()
+
+# ----------------------------------------------------------------------------
+# Console scripts
+#
+function(OMNITRACE_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
+    set(options)
+    set(args VERSION ROOT_DIR)
+    set(kwargs)
+    cmake_parse_arguments(ARG "${options}" "${args}" "${kwargs}" ${ARGN})
+
+    if(ARG_VERSION AND ARG_ROOT_DIR)
+        set(Python3_ROOT_DIR "${ARG_ROOT_DIR}")
+        find_package(Python3 ${ARG_VERSION} EXACT QUIET MODULE COMPONENTS Interpreter)
+        set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+        configure_file(${PROJECT_SOURCE_DIR}/cmake/Templates/console-script.in
+                       ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION} @ONLY)
+
+        if(CMAKE_INSTALL_PYTHONDIR)
+            install(
+                PROGRAMS ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION}
+                DESTINATION ${CMAKE_INSTALL_BINDIR}
+                OPTIONAL)
+        endif()
+
+        if(OMNITRACE_BUILD_TESTING OR OMNITRACE_BUILD_PYTHON)
+            add_test(
+                NAME ${SCRIPT_NAME}-console-script-test-${ARG_VERSION}
+                COMMAND ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION} --help
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+            set_tests_properties(
+                ${SCRIPT_NAME}-console-script-test-${ARG_VERSION}
+                PROPERTIES LABELS "python;python-${ARG_VERSION};console-script")
+            add_test(
+                NAME ${SCRIPT_NAME}-generic-console-script-test-${ARG_VERSION}
+                COMMAND ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME} --help
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+            set_tests_properties(
+                ${SCRIPT_NAME}-generic-console-script-test-${ARG_VERSION}
+                PROPERTIES ENVIRONMENT "PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}" LABELS
+                           "python;python-${ARG_VERSION};console-script")
+        endif()
+    else()
+        set(PYTHON_EXECUTABLE "python3")
+
+        configure_file(${PROJECT_SOURCE_DIR}/cmake/Templates/console-script.in
+                       ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME} @ONLY)
+
+        if(CMAKE_INSTALL_PYTHONDIR)
+            install(
+                PROGRAMS ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}
+                DESTINATION ${CMAKE_INSTALL_BINDIR}
+                OPTIONAL)
+        endif()
+    endif()
+endfunction()
+
 cmake_policy(POP)

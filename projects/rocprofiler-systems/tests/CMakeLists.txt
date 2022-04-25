@@ -37,7 +37,6 @@ set(_base_environment
 set(_ompt_environment
     "OMNITRACE_USE_PERFETTO=ON"
     "OMNITRACE_USE_TIMEMORY=ON"
-    "OMNITRACE_USE_SAMPLING=ON"
     "OMNITRACE_TIME_OUTPUT=OFF"
     "OMNITRACE_USE_OMPT=ON"
     "OMNITRACE_CRITICAL_TRACE=OFF"
@@ -80,22 +79,32 @@ set(_python_environment
     "OMNITRACE_USE_PID=OFF"
     "OMNITRACE_TIMEMORY_COMPONENTS=trip_count"
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
-    "PYTHONPATH=${CMAKE_BINARY_DIR}/python")
+    "PYTHONPATH=${PROJECT_BINARY_DIR}/lib/python/site-packages")
 
 # -------------------------------------------------------------------------------------- #
 
 function(OMNITRACE_ADD_TEST)
+    foreach(_PREFIX RUNTIME REWRITE REWRITE_RUN)
+        foreach(_TYPE PASS FAIL SKIP)
+            list(APPEND _REGEX_OPTS "${_PREFIX}_${_TYPE}_REGEX")
+        endforeach()
+    endforeach()
+    set(_KWARGS REWRITE_ARGS RUNTIME_ARGS RUN_ARGS ENVIRONMENT LABELS PROPERTIES
+                ${_REGEX_OPTS})
+
     cmake_parse_arguments(
         TEST
-        "SKIP_REWRITE;SKIP_RUNTIME;SKIP_SAMPLING" # options
+        "SKIP_BASELINE;SKIP_REWRITE;SKIP_RUNTIME;SKIP_SAMPLING" # options
         "NAME;TARGET;MPI;NUM_PROCS;REWRITE_TIMEOUT;RUNTIME_TIMEOUT" # single value args
-        "REWRITE_ARGS;RUNTIME_ARGS;RUN_ARGS;ENVIRONMENT;LABELS;PROPERTIES" # multiple
-                                                                           # value args
+        "${_KWARGS}" # multiple value args
         ${ARGN})
 
     if("${TEST_MPI}" STREQUAL "")
         set(TEST_MPI OFF)
     endif()
+
+    list(INSERT TEST_REWRITE_ARGS 0 --print-instrumented functions)
+    list(INSERT TEST_RUNTIME_ARGS 0 --print-instrumented functions)
 
     if(NOT DEFINED TEST_NUM_PROCS)
         set(TEST_NUM_PROCS ${NUM_PROCS})
@@ -133,10 +142,12 @@ function(OMNITRACE_ADD_TEST)
             list(APPEND TEST_ENVIRONMENT "OMNITRACE_USE_PID=OFF")
         endif()
 
-        add_test(
-            NAME ${TEST_NAME}-baseline
-            COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-            WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+        if(NOT SKIP_BASELINE)
+            add_test(
+                NAME ${TEST_NAME}-baseline
+                COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
+                WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+        endif()
 
         if(NOT TEST_SKIP_REWRITE)
             add_test(
@@ -213,6 +224,9 @@ function(OMNITRACE_ADD_TEST)
                  "OMNITRACE_OUTPUT_PREFIX=${_prefix}")
             string(REPLACE "-run" "" _labels "${_TEST}")
             string(REPLACE "-sampling" ";sampling" _labels "${_labels}")
+            if(TEST_TARGET)
+                list(APPEND _labels "${TEST_TARGET}")
+            endif()
             if("${_TEST}" MATCHES "runtime-instrument")
                 set(_timeout ${TEST_RUNTIME_TIMEOUT})
             endif()
@@ -223,11 +237,41 @@ function(OMNITRACE_ADD_TEST)
                     list(APPEND _props RUN_SERIAL ON)
                 endif()
             endif()
+
+            if("${_TEST}" MATCHES "binary-rewrite-run")
+                set(_REGEX_VAR REWRITE_RUN)
+            elseif("${_TEST}" MATCHES "runtime-instrument")
+                set(_REGEX_VAR RUNTIME)
+            elseif("${_TEST}" MATCHES "binary-rewrite")
+                set(_REGEX_VAR REWRITE)
+            else()
+                set(_REGEX_VAR)
+            endif()
+
+            foreach(_TYPE PASS FAIL SKIP)
+                if(_REGEX_VAR)
+                    set(_${_TYPE}_REGEX TEST_${_REGEX_VAR}_${_TYPE}_REGEX)
+                else()
+                    set(_${_TYPE}_REGEX)
+                endif()
+            endforeach()
+
             if(TEST ${TEST_NAME}-${_TEST})
                 set_tests_properties(
                     ${TEST_NAME}-${_TEST}
-                    PROPERTIES ENVIRONMENT "${_environ}" TIMEOUT ${_timeout} LABELS
-                               "${_labels};${TEST_LABELS}" ${_props})
+                    PROPERTIES ENVIRONMENT
+                               "${_environ}"
+                               TIMEOUT
+                               ${_timeout}
+                               LABELS
+                               "${_labels};${TEST_LABELS}"
+                               PASS_REGULAR_EXPRESSION
+                               "${${_PASS_REGEX}}"
+                               FAIL_REGULAR_EXPRESSION
+                               "${${_FAIL_REGEX}}"
+                               SKIP_REGULAR_EXPRESSION
+                               "${${_SKIP_REGEX}}"
+                               ${_props})
             endif()
         endforeach()
     endif()
@@ -244,8 +288,8 @@ function(OMNITRACE_ADD_PYTHON_TEST)
         TEST
         "STANDALONE" # options
         "NAME;FILE;TIMEOUT;PYTHON_EXECUTABLE;PYTHON_VERSION" # single value args
-        "PROFILE_ARGS;RUN_ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGULAR_EXPRESSION;FAIL_REGULAR_EXPRESSION;SKIP_REGULAR_EXPRESSION;DEPENDS;COMMAND" # multiple
-                                                                                                                                                      # value args
+        "PROFILE_ARGS;RUN_ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;COMMAND" # multiple
+        # value args
         ${ARGN})
 
     if(NOT TEST_TIMEOUT)
@@ -302,14 +346,14 @@ function(OMNITRACE_ADD_PYTHON_TEST)
         set(_TEST_PROPERTIES "${TEST_PROPERTIES}")
         if(NOT "${_TEST}" MATCHES "inverse")
             # assign pass variable to pass regex
-            set(_PASS_REGEX TEST_PASS_REGULAR_EXPRESSION)
+            set(_PASS_REGEX TEST_PASS_REGEX)
             # assign fail variable to fail regex
-            set(_FAIL_REGEX TEST_FAIL_REGULAR_EXPRESSION)
+            set(_FAIL_REGEX TEST_FAIL_REGEX)
         else()
             # assign pass variable to fail regex
-            set(_PASS_REGEX TEST_FAIL_REGULAR_EXPRESSION)
+            set(_PASS_REGEX TEST_FAIL_REGEX)
             # assign fail variable to pass regex
-            set(_FAIL_REGEX TEST_PASS_REGULAR_EXPRESSION)
+            set(_FAIL_REGEX TEST_PASS_REGEX)
             # set to will fail
             list(APPEND _TEST_PROPERTIES WILL_FAIL ON)
         endif()
@@ -329,7 +373,7 @@ function(OMNITRACE_ADD_PYTHON_TEST)
                        FAIL_REGULAR_EXPRESSION
                        "${${_FAIL_REGEX}}"
                        SKIP_REGULAR_EXPRESSION
-                       "${TEST_SKIP_REGULAR_EXPRESSION}"
+                       "${TEST_SKIP_REGEX}"
                        REQUIRED_FILES
                        "${TEST_FILE}"
                        ${_TEST_PROPERTIES})
@@ -350,12 +394,12 @@ omnitrace_add_test(
 omnitrace_add_test(
     NAME parallel-overhead
     TARGET parallel-overhead
-    REWRITE_ARGS -e -v 2 --min-address-range-loop=64
+    REWRITE_ARGS -e -v 2 --min-instructions=8
     RUNTIME_ARGS
         -e
         -v
         1
-        --min-address-range-loop=64
+        --min-instructions=8
         --label
         file
         line
@@ -367,23 +411,12 @@ omnitrace_add_test(
 omnitrace_add_test(
     NAME user-api
     TARGET user-api
-    REWRITE_ARGS
-        -e
-        -v
-        2
-        -l
-        --min-address-range=0
-        --min-address-range-loop=0
-        --min-instructions=8
-        -E
-        custom_push_region
+    REWRITE_ARGS -e -v 2 -l --min-instructions=8 -E custom_push_region
     RUNTIME_ARGS
         -e
         -v
         1
         -l
-        --min-address-range=0
-        --min-address-range-loop=0
         --min-instructions=8
         -E
         custom_push_region
@@ -400,6 +433,7 @@ omnitrace_add_test(
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
     NUM_PROCS 8
+    LABELS "kokkos"
     REWRITE_ARGS -e -v 2 --label file line return args
     RUNTIME_ARGS
         -e
@@ -417,10 +451,12 @@ omnitrace_add_test(
         "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF")
 
 omnitrace_add_test(
+    SKIP_BASELINE
     NAME lulesh-kokkosp
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
     NUM_PROCS 8
+    LABELS "kokkos"
     REWRITE_ARGS -e -v 2
     RUNTIME_ARGS
         -e
@@ -438,10 +474,12 @@ omnitrace_add_test(
         "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON")
 
 omnitrace_add_test(
+    SKIP_BASELINE SKIP_SAMPLING
     NAME lulesh-perfetto
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
     NUM_PROCS 8
+    LABELS "kokkos"
     REWRITE_ARGS -e -v 2
     RUNTIME_ARGS
         -e
@@ -458,10 +496,12 @@ omnitrace_add_test(
         "${_perfetto_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF")
 
 omnitrace_add_test(
+    SKIP_SAMPLING
     NAME lulesh-timemory
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
     NUM_PROCS 8
+    LABELS "kokkos"
     REWRITE_ARGS -e -v 2 -l --dynamic-callsites --traps --allow-overlapping
     RUNTIME_ARGS
         -e
@@ -479,22 +519,159 @@ omnitrace_add_test(
         "${_timemory_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF")
 
 omnitrace_add_test(
+    SKIP_SAMPLING
     NAME openmp-cg
     TARGET openmp-cg
+    LABELS "openmp"
     REWRITE_ARGS -e -v 2 --instrument-loops
     RUNTIME_ARGS -e -v 1 --label return args
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
-    ENVIRONMENT "${_ompt_environment}")
+    ENVIRONMENT "${_ompt_environment};OMNITRACE_USE_SAMPLING=OFF")
 
 omnitrace_add_test(
+    SKIP_RUNTIME
     NAME openmp-lu
     TARGET openmp-lu
+    LABELS "openmp"
     REWRITE_ARGS -e -v 2 --instrument-loops
-    RUNTIME_ARGS -e -v 1 --label return args
+    RUNTIME_ARGS -e -v 1 --label return args -E ^GOMP
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
-    ENVIRONMENT "${_ompt_environment}")
+    ENVIRONMENT
+        "${_ompt_environment};OMNITRACE_USE_SAMPLING=ON;OMNITRACE_SAMPLING_FREQ=100")
+
+omnitrace_add_test(
+    SKIP_BASELINE SKIP_SAMPLING
+    NAME code-coverage
+    TARGET code-coverage
+    REWRITE_ARGS
+        -e
+        -v
+        2
+        --min-instructions=4
+        -E
+        ^std::
+        -M
+        coverage
+        --coverage
+        function
+    RUNTIME_ARGS
+        -e
+        -v
+        1
+        --min-instructions=4
+        -E
+        ^std::
+        --label
+        file
+        line
+        return
+        args
+        -M
+        coverage
+        --coverage
+        function
+        --module-restrict
+        code.coverage
+    LABELS "coverage;function-coverage"
+    RUN_ARGS 10 ${NUM_THREADS} 1000
+    ENVIRONMENT "${_base_environment}"
+    RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%"
+    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%")
+
+omnitrace_add_test(
+    SKIP_BASELINE SKIP_SAMPLING
+    NAME code-coverage-hybrid
+    TARGET code-coverage
+    REWRITE_ARGS -e -v 2 --min-instructions=4 -E ^std:: --coverage function
+    RUNTIME_ARGS
+        -e
+        -v
+        1
+        --min-instructions=4
+        -E
+        ^std::
+        --label
+        file
+        line
+        return
+        args
+        --coverage
+        function
+        --module-restrict
+        code.coverage
+    LABELS "coverage;function-coverage;hybrid-coverage"
+    RUN_ARGS 10 ${NUM_THREADS} 1000
+    ENVIRONMENT "${_base_environment}"
+    RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%"
+    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%")
+
+omnitrace_add_test(
+    SKIP_BASELINE SKIP_SAMPLING
+    NAME code-coverage-basic-blocks
+    TARGET code-coverage
+    REWRITE_ARGS
+        -e
+        -v
+        2
+        --min-instructions=4
+        -E
+        ^std::
+        -M
+        coverage
+        --coverage
+        basic_block
+    RUNTIME_ARGS
+        -e
+        -v
+        1
+        --min-instructions=4
+        -E
+        ^std::
+        --label
+        file
+        line
+        return
+        args
+        -M
+        coverage
+        --coverage
+        basic_block
+        --module-restrict
+        code.coverage
+    LABELS "coverage;bb-coverage"
+    RUN_ARGS 10 ${NUM_THREADS} 1000
+    ENVIRONMENT "${_base_environment}"
+    RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
+    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%")
+
+omnitrace_add_test(
+    SKIP_BASELINE SKIP_SAMPLING
+    NAME code-coverage-basic-blocks-hybrid
+    TARGET code-coverage
+    REWRITE_ARGS -e -v 2 --min-instructions=4 -E ^std:: --coverage basic_block
+    RUNTIME_ARGS
+        -e
+        -v
+        1
+        --min-instructions=4
+        -E
+        ^std::
+        --label
+        file
+        line
+        return
+        args
+        --coverage
+        basic_block
+        --module-restrict
+        code.coverage
+    LABELS "coverage;bb-coverage;hybrid-coverage"
+    RUN_ARGS 10 ${NUM_THREADS} 1000
+    ENVIRONMENT "${_base_environment}"
+    RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
+    REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%")
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -572,7 +749,7 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
             COMMAND ${OMNITRACE_CAT_COMMAND}
             PYTHON_VERSION ${_VERSION}
             FILE omnitrace-tests-output/python-external/${_VERSION}/trip_count.txt
-            PASS_REGULAR_EXPRESSION
+            PASS_REGEX
                 "(\\\[compile\\\]).*(\\\| \\\|0>>> \\\[run\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[fib\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[inefficient\\\]\\\[external.py\\\])"
             DEPENDS python-external-${_VERSION}
             ENVIRONMENT "${_python_environment}")
@@ -582,7 +759,7 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
             COMMAND ${OMNITRACE_CAT_COMMAND}
             PYTHON_VERSION ${_VERSION}
             FILE omnitrace-tests-output/python-external-exclude-inefficient/${_VERSION}/trip_count.txt
-            FAIL_REGULAR_EXPRESSION "(\\\|_inefficient).*(\\\|_sum)"
+            FAIL_REGEX "(\\\|_inefficient).*(\\\|_sum)"
             DEPENDS python-external-exclude-inefficient-${_VERSION}
             ENVIRONMENT "${_python_environment}")
 
@@ -591,7 +768,7 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
             COMMAND ${OMNITRACE_CAT_COMMAND}
             PYTHON_VERSION ${_VERSION}
             FILE omnitrace-tests-output/python-builtin/${_VERSION}/trip_count.txt
-            PASS_REGULAR_EXPRESSION "\\\[inefficient\\\]\\\[builtin.py:14\\\]"
+            PASS_REGEX "\\\[inefficient\\\]\\\[builtin.py:14\\\]"
             DEPENDS python-builtin-${_VERSION}
             ENVIRONMENT "${_python_environment}")
 
@@ -600,7 +777,7 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
             COMMAND ${OMNITRACE_CAT_COMMAND}
             PYTHON_VERSION ${_VERSION}
             FILE omnitrace-tests-output/python-source/${_VERSION}/trip_count.txt
-            PASS_REGULAR_EXPRESSION
+            PASS_REGEX
                 "(\\\| \\\|0>>> run           \\\|      5).*(\\\| \\\|0>>> \\\|_fib         \\\|     40).*(\\\| \\\|0>>>         \\\|_fib \\\|      5).*(\\\| \\\|0>>> \\\|_inefficient \\\|      5).*(\\\| \\\|0>>>   \\\|__sum      \\\|      5)"
             DEPENDS python-source-${_VERSION}
             ENVIRONMENT "${_python_environment}")

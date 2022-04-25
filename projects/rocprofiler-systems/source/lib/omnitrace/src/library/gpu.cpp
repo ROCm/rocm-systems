@@ -22,9 +22,9 @@
 
 #include "library/gpu.hpp"
 
-#if defined(OMNITRACE_USE_ROCM_SMI)
+#if defined(OMNITRACE_USE_ROCM_SMI) && OMNITRACE_USE_ROCM_SMI > 0
 #    include "library/components/rocm_smi.hpp"
-#elif defined(OMNITRACE_USE_HIP)
+#elif defined(OMNITRACE_USE_HIP) && OMNITRACE_USE_HIP > 0
 #    if !defined(TIMEMORY_USE_HIP)
 #        define TIMEMORY_USE_HIP 1
 #    endif
@@ -38,11 +38,11 @@ namespace gpu
 int
 device_count()
 {
-#if defined(OMNITRACE_USE_ROCM_SMI)
+#if defined(OMNITRACE_USE_ROCM_SMI) && OMNITRACE_USE_ROCM_SMI > 0
     // store as static since calls after rsmi_shutdown will return zero
     static auto _v = rocm_smi::device_count();
     return _v;
-#elif defined(OMNITRACE_USE_HIP)
+#elif defined(OMNITRACE_USE_HIP) && OMNITRACE_USE_HIP > 0
     return ::tim::hip::device_count();
 #else
     return 0;

@@ -23,12 +23,17 @@
 #include "omnitrace.hpp"
 #include "fwd.hpp"
 
+#include <timemory/config.hpp>
+#include <timemory/settings.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
@@ -62,50 +67,53 @@ string_t prefer_library          = {};
 //
 //  global variables
 //
-patch_pointer_t bpatch                        = {};
-call_expr_t*    terminate_expr                = nullptr;
-snippet_vec_t   init_names                    = {};
-snippet_vec_t   fini_names                    = {};
-fmodset_t       available_module_functions    = {};
-fmodset_t       instrumented_module_functions = {};
-fmodset_t       overlapping_module_functions  = {};
-fmodset_t       excluded_module_functions     = {};
-fixed_modset_t  fixed_module_functions        = {};
-regexvec_t      func_include                  = {};
-regexvec_t      func_exclude                  = {};
-regexvec_t      file_include                  = {};
-regexvec_t      file_exclude                  = {};
-regexvec_t      file_restrict                 = {};
-regexvec_t      func_restrict                 = {};
+patch_pointer_t  bpatch                        = {};
+call_expr_t*     terminate_expr                = nullptr;
+snippet_vec_t    init_names                    = {};
+snippet_vec_t    fini_names                    = {};
+fmodset_t        available_module_functions    = {};
+fmodset_t        instrumented_module_functions = {};
+fmodset_t        coverage_module_functions     = {};
+fmodset_t        overlapping_module_functions  = {};
+fmodset_t        excluded_module_functions     = {};
+fixed_modset_t   fixed_module_functions        = {};
+regexvec_t       func_include                  = {};
+regexvec_t       func_exclude                  = {};
+regexvec_t       file_include                  = {};
+regexvec_t       file_exclude                  = {};
+regexvec_t       file_restrict                 = {};
+regexvec_t       func_restrict                 = {};
+CodeCoverageMode coverage_mode                 = CODECOV_NONE;
 
 namespace
 {
-bool                                       binary_rewrite         = false;
-bool                                       is_attached            = false;
-bool                                       use_mpi                = false;
-bool                                       is_static_exe          = false;
-bool                                       is_driver              = false;
-bool                                       explicit_dump_and_exit = false;
-size_t                                     batch_size             = 50;
-strset_t                                   extra_libs             = {};
-std::vector<std::pair<uint64_t, string_t>> hash_ids               = {};
-std::map<string_t, bool>                   use_stubs              = {};
-std::map<string_t, procedure_t*>           beg_stubs              = {};
-std::map<string_t, procedure_t*>           end_stubs              = {};
-strvec_t                                   init_stub_names        = {};
-strvec_t                                   fini_stub_names        = {};
-strset_t                                   used_stub_names        = {};
-std::vector<call_expr_pointer_t>           env_variables          = {};
-std::map<string_t, call_expr_pointer_t>    beg_expr               = {};
-std::map<string_t, call_expr_pointer_t>    end_expr               = {};
-const auto                                 npos_v                 = string_t::npos;
-string_t                                   instr_mode             = "trace";
-string_t                                   print_instrumented     = {};
-string_t                                   print_excluded         = {};
-string_t                                   print_available        = {};
-string_t                                   print_overlapping      = {};
-strset_t                                   print_formats          = { "txt", "json" };
-std::string                                modfunc_dump_dir       = {};
+bool                                       binary_rewrite       = false;
+bool                                       is_attached          = false;
+bool                                       use_mpi              = false;
+bool                                       is_static_exe        = false;
+bool                                       simulate             = false;
+size_t                                     batch_size           = 50;
+strset_t                                   extra_libs           = {};
+std::vector<std::pair<uint64_t, string_t>> hash_ids             = {};
+std::map<string_t, bool>                   use_stubs            = {};
+std::map<string_t, procedure_t*>           beg_stubs            = {};
+std::map<string_t, procedure_t*>           end_stubs            = {};
+strvec_t                                   init_stub_names      = {};
+strvec_t                                   fini_stub_names      = {};
+strset_t                                   used_stub_names      = {};
+strvec_t                                   env_config_variables = {};
+std::vector<call_expr_pointer_t>           env_variables        = {};
+std::map<string_t, call_expr_pointer_t>    beg_expr             = {};
+std::map<string_t, call_expr_pointer_t>    end_expr             = {};
+const auto                                 npos_v               = string_t::npos;
+string_t                                   instr_mode           = "trace";
+string_t                                   print_coverage       = {};
+string_t                                   print_instrumented   = {};
+string_t                                   print_excluded       = {};
+string_t                                   print_available      = {};
+string_t                                   print_overlapping    = {};
+strset_t                                   print_formats        = { "txt", "json" };
+std::string                                modfunc_dump_dir     = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
 std::string
@@ -176,6 +184,7 @@ main(int argc, char** argv)
     fixed_module_functions = {
         { &available_module_functions, false },
         { &instrumented_module_functions, false },
+        { &coverage_module_functions, false },
         { &excluded_module_functions, false },
         { &overlapping_module_functions, false },
     };
@@ -218,7 +227,9 @@ main(int argc, char** argv)
             int k        = 0;
             for(int j = i + 1; j < argc; ++j, ++k)
             {
-                copy_str(_cmdv[k], argv[j]);
+                auto _v =
+                    std::regex_replace(argv[j], std::regex{ "(.*)([ \t\n\r]+)$" }, "$1");
+                copy_str(_cmdv[k], _v.c_str());
             }
             mutname = _cmdv[0];
             break;
@@ -256,9 +267,9 @@ main(int argc, char** argv)
                   << std::endl;
     }
 
-    if(_cmdc > 0)
-        std::cout << "\n[omnitrace][exe][command]: " << cmd_string(_cmdc, _cmdv)
-                  << "\n\n";
+    verbprintf(0, "\n");
+    verbprintf(0, "command :: '%s'...\n", cmd_string(_cmdc, _cmdv).c_str());
+    verbprintf(0, "\n");
 
     if(_cmdc > 0) cmdv0 = _cmdv[0];
 
@@ -299,7 +310,7 @@ main(int argc, char** argv)
                       "function lists, e.g. available-instr.txt")
         .max_count(1)
         .dtype("bool")
-        .action([](parser_t& p) { explicit_dump_and_exit = p.get<bool>("simulate"); });
+        .action([](parser_t& p) { simulate = p.get<bool>("simulate"); });
     parser
         .add_argument({ "--print-format" },
                       "Output format for diagnostic "
@@ -317,12 +328,14 @@ main(int argc, char** argv)
                       "function lists, e.g. {print-dir}/available-instr.txt")
         .count(1)
         .dtype("string")
-        .action([](parser_t& p) { modfunc_dump_dir = p.get<std::string>("print-dir"); });
+        .action([](parser_t& p) {
+            tim::settings::output_path() = p.get<std::string>("print-dir");
+        });
     parser
         .add_argument(
             { "--print-available" },
             "Print the available entities for instrumentation (functions, modules, or "
-            "module-function pair) to stdout applying regular expressions and exit")
+            "module-function pair) to stdout after applying regular expressions")
         .count(1)
         .choices({ "functions", "modules", "functions+", "pair", "pair+" })
         .action(
@@ -331,18 +344,27 @@ main(int argc, char** argv)
         .add_argument(
             { "--print-instrumented" },
             "Print the instrumented entities (functions, modules, or module-function "
-            "pair) to stdout after applying regular expressions and exit")
+            "pair) to stdout after applying regular expressions")
         .count(1)
         .choices({ "functions", "modules", "functions+", "pair", "pair+" })
         .action([](parser_t& p) {
             print_instrumented = p.get<std::string>("print-instrumented");
         });
     parser
+        .add_argument({ "--print-coverage" },
+                      "Print the instrumented coverage entities (functions, modules, or "
+                      "module-function "
+                      "pair) to stdout after applying regular expressions")
+        .count(1)
+        .choices({ "functions", "modules", "functions+", "pair", "pair+" })
+        .action(
+            [](parser_t& p) { print_coverage = p.get<std::string>("print-coverage"); });
+    parser
         .add_argument({ "--print-excluded" },
                       "Print the entities for instrumentation (functions, modules, or "
                       "module-function "
                       "pair) which are excluded from the instrumentation to stdout after "
-                      "applying regular expressions and exit")
+                      "applying regular expressions")
         .count(1)
         .choices({ "functions", "modules", "functions+", "pair", "pair+" })
         .action(
@@ -352,7 +374,7 @@ main(int argc, char** argv)
             { "--print-overlapping" },
             "Print the entities for instrumentation (functions, modules, or "
             "module-function pair) which overlap other function calls or have multiple "
-            "entry points to stdout applying regular expressions and exit")
+            "entry points to stdout after applying regular expressions")
         .count(1)
         .choices({ "functions", "modules", "functions+", "pair", "pair+" })
         .action([](parser_t& p) {
@@ -391,9 +413,13 @@ main(int argc, char** argv)
                       "Instrumentation mode. 'trace' mode instruments the selected "
                       "functions, 'sampling' mode only instruments the main function to "
                       "start and stop the sampler.")
-        .choices({ "trace", "sampling" })
+        .choices({ "trace", "sampling", "coverage" })
         .count(1)
-        .action([](parser_t& p) { instr_mode = p.get<string_t>("mode"); });
+        .action([](parser_t& p) {
+            instr_mode = p.get<string_t>("mode");
+            if(instr_mode == "coverage" && !p.exists("coverage"))
+                coverage_mode = CODECOV_FUNCTION;
+        });
     if(_cmdc == 0)
     {
         parser
@@ -433,23 +459,6 @@ main(int argc, char** argv)
                       "The primary function to instrument around, e.g. 'main'")
         .count(1)
         .action([](parser_t& p) { main_fname = p.get<string_t>("main-function"); });
-    /*
-    parser
-        .add_argument({ "-s", "--stubs" }, "Instrument with library stubs for LD_PRELOAD")
-        .dtype("boolean")
-        .max_count(1)
-        .action([&inputlib](parser_t& p) {
-            if(p.get<bool>("stubs"))
-            {
-                for(auto& itr : inputlib)
-                    itr += "-stubs";
-            }
-        });
-    */
-    parser.add_argument({ "--driver" }, "Force main or _init/_fini instrumentation")
-        .dtype("boolean")
-        .max_count(1)
-        .action([](parser_t& p) { is_driver = p.get<bool>("driver"); });
     parser
         .add_argument({ "--load" },
                       "Supplemental instrumentation library names w/o extension (e.g. "
@@ -471,6 +480,7 @@ main(int argc, char** argv)
             std::map<std::string, fmodset_t*> module_function_map = {
                 { "available_module_functions", &available_module_functions },
                 { "instrumented_module_functions", &instrumented_module_functions },
+                { "coverage_module_functions", &coverage_module_functions },
                 { "excluded_module_functions", &excluded_module_functions },
                 { "overlapping_module_functions", &overlapping_module_functions },
             };
@@ -545,6 +555,12 @@ main(int argc, char** argv)
                     use_line_info = true;
             }
         });
+    parser.add_argument()
+        .names({ "-C", "--config" })
+        .dtype("string")
+        .min_count(1)
+        .description("Read in a configuration file and encode these values as the "
+                     "defaults in the executable");
     parser.add_argument()
         .names({ "-d", "--default-components" })
         .dtype("string")
@@ -626,6 +642,18 @@ main(int argc, char** argv)
         .action([](parser_t& p) {
             min_loop_address_range = p.get<size_t>("min-address-range-loop");
         });
+    parser.add_argument({ "--coverage" }, "Enable recording the code coverage")
+        .max_count(1)
+        .choices({ "none", "function", "basic_block" })
+        .action([](parser_t& p) {
+            auto _v = p.get<std::string>("coverage");
+            if(_v == "function" || _v.empty())
+                coverage_mode = CODECOV_FUNCTION;
+            else if(_v == "basic_block")
+                coverage_mode = CODECOV_BASIC_BLOCK;
+            else
+                coverage_mode = CODECOV_NONE;
+        });
     parser
         .add_argument({ "--dynamic-callsites" },
                       "Force instrumentation if a function has dynamic callsites (e.g. "
@@ -701,6 +729,41 @@ main(int argc, char** argv)
         std::cerr << err << std::endl;
         parser.print_help(extra_help);
         return -1;
+    }
+
+    if(parser.exists("config"))
+    {
+        struct omnitrace_env_config_s
+        {};
+        auto _configs = parser.get<strvec_t>("config");
+        for(auto&& itr : _configs)
+        {
+            auto _settings = tim::settings::push<omnitrace_env_config_s>();
+            for(auto&& itr : *_settings)
+            {
+                itr.second->set_config_updated(false);
+                itr.second->set_environ_updated(false);
+            }
+            _settings->read(itr);
+            for(auto&& itr : *_settings)
+            {
+                if(itr.second && itr.second->get_config_updated())
+                {
+                    env_config_variables.emplace_back(TIMEMORY_JOIN(
+                        '=', itr.second->get_env_name(), itr.second->as_string()));
+                    verbprintf(1, "Exporting known config value :: %s\n",
+                               env_config_variables.back().c_str());
+                }
+            }
+            for(auto&& itr : _settings->get_unknown_configs())
+            {
+                env_config_variables.emplace_back(
+                    TIMEMORY_JOIN('=', itr.first, itr.second));
+                verbprintf(1, "Exporting unknown config value :: %s\n",
+                           env_config_variables.back().c_str());
+            }
+            tim::settings::pop<omnitrace_env_config_s>();
+        }
     }
 
     auto _handle_heuristics = [&parser](std::string&& _exists, std::string&& _not_exists,
@@ -781,20 +844,17 @@ main(int argc, char** argv)
                    outfile.c_str());
     }
 
-    if(modfunc_dump_dir.empty())
+    if(binary_rewrite)
     {
-        modfunc_dump_dir = tim::get_env<std::string>("OMNITRACE_OUTPUT_PATH", "");
-        if(modfunc_dump_dir.empty())
-        {
-            auto _exe_base = (binary_rewrite) ? outfile : std::string{ cmdv0 };
-            auto _pos      = _exe_base.find_last_of('/');
-            if(_pos != std::string::npos && _pos + 1 < _exe_base.length())
-                _exe_base = _exe_base.substr(_pos + 1);
-            modfunc_dump_dir = TIMEMORY_JOIN("-", "omnitrace", _exe_base, "output");
-        }
+        auto* _save = _cmdv[0];
+        _cmdv[0]    = const_cast<char*>(outfile.c_str());
+        tim::timemory_init(_cmdc, _cmdv, "omnitrace-");
+        _cmdv[0] = _save;
     }
-
-    if(verbose_level >= 0) tim::makedir(modfunc_dump_dir);
+    else
+    {
+        tim::timemory_init(_cmdc, _cmdv, "omnitrace-");
+    }
 
     //----------------------------------------------------------------------------------//
     //
@@ -914,9 +974,7 @@ main(int argc, char** argv)
     // for runtime instrumentation, we need to set this before the process gets created
     if(!binary_rewrite)
     {
-#if defined(OMNITRACE_USE_ROCTRACER)
         tim::set_env("HSA_ENABLE_INTERRUPT", "0", 0);
-#endif
         if(_pid >= 0)
         {
             verbprintf(-10, "#-------------------------------------------------------"
@@ -1053,15 +1111,10 @@ main(int argc, char** argv)
         std::cout << '\n' << std::endl;
     }
 
-    auto _output_prefix = tim::get_env<std::string>("OMNITRACE_OUTPUT_PREFIX", "");
-
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
-                            TIMEMORY_JOIN("", _output_prefix, "available-instr")),
-              available_module_functions, 1, werror, "available-instr", print_formats);
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
-                            TIMEMORY_JOIN("", _output_prefix, "overlapping-instr")),
-              overlapping_module_functions, 1, werror, "overlapping_module_functions",
+    dump_info("available-instr", available_module_functions, 1, werror, "available-instr",
               print_formats);
+    dump_info("overlapping-instr", overlapping_module_functions, 1, werror,
+              "overlapping_module_functions", print_formats);
 
     //----------------------------------------------------------------------------------//
     //
@@ -1139,8 +1192,8 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    auto* _mutatee_init   = find_function(app_image, "_init");
-    auto* _mutatee_fini   = find_function(app_image, "_fini");
+    auto* main_init       = find_function(app_image, "_init");
+    auto* main_fini       = find_function(app_image, "_fini");
     auto* main_func       = find_function(app_image, main_fname.c_str());
     auto* mpi_init_func   = find_function(app_image, "MPI_Init", { "MPI_Init_thread" });
     auto* mpi_fini_func   = find_function(app_image, "MPI_Finalize");
@@ -1168,12 +1221,14 @@ main(int argc, char** argv)
 
     verbprintf(0, "Finding instrumentation functions...\n");
 
-    auto* entr_trace = find_function(app_image, "omnitrace_push_trace");
-    auto* exit_trace = find_function(app_image, "omnitrace_pop_trace");
-    auto* init_func  = find_function(app_image, "omnitrace_init");
-    auto* fini_func  = find_function(app_image, "omnitrace_finalize");
-    auto* env_func   = find_function(app_image, "omnitrace_set_env");
-    auto* mpi_func   = find_function(app_image, "omnitrace_set_mpi");
+    auto* init_func    = find_function(app_image, "omnitrace_init");
+    auto* fini_func    = find_function(app_image, "omnitrace_finalize");
+    auto* env_func     = find_function(app_image, "omnitrace_set_env");
+    auto* mpi_func     = find_function(app_image, "omnitrace_set_mpi");
+    auto* entr_trace   = find_function(app_image, "omnitrace_push_trace");
+    auto* exit_trace   = find_function(app_image, "omnitrace_pop_trace");
+    auto* reg_src_func = find_function(app_image, "omnitrace_register_source");
+    auto* reg_cov_func = find_function(app_image, "omnitrace_register_coverage");
 
     if(!main_func && main_fname == "main") main_func = find_function(app_image, "_main");
 
@@ -1293,36 +1348,42 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    if(!main_func && is_driver)
+    if(!main_func)
     {
-        errprintf(0, "could not find '%s'\n", main_fname.c_str());
-        if(!_mutatee_init || !_mutatee_fini)
+        if(!main_init && !main_fini)
         {
-            errprintf(-1, "could not find '%s' or '%s', aborting\n", "_init", "_fini");
+            errprintf(-1, "could not find '%s', '_init' or '_fini', aborting...\n",
+                      main_fname.c_str());
+        }
+        else if(!main_init)
+        {
+            errprintf(-1, "could not find '%s' or '_init', aborting...\n",
+                      main_fname.c_str());
+        }
+        else if(!main_fini)
+        {
+            errprintf(-1, "could not find '%s' or '_fini', aborting...\n",
+                      main_fname.c_str());
         }
         else
         {
-            errprintf(0, "using '%s' and '%s' in lieu of '%s'...", "_init", "_fini",
-                      main_fname.c_str());
+            verbprintf(0, "using '%s' and '%s' in lieu of '%s'...", "_init", "_fini",
+                       main_fname.c_str());
         }
-    }
-    else if(!main_func && !is_driver)
-    {
-        verbprintf(0, "Warning! No main function and is not driver!\n");
     }
 
     using pair_t = std::pair<procedure_t*, string_t>;
 
     for(const auto& itr :
-        { pair_t(main_func, main_fname), pair_t(entr_trace, "omnitrace_push_trace"),
+        { pair_t(entr_trace, "omnitrace_push_trace"),
           pair_t(exit_trace, "omnitrace_pop_trace"), pair_t(init_func, "omnitrace_init"),
-          pair_t(fini_func, "omnitrace_finalize"),
-          pair_t(env_func, "omnitrace_set_env") })
+          pair_t(fini_func, "omnitrace_finalize"), pair_t(env_func, "omnitrace_set_env"),
+          pair_t(reg_src_func, "omnitrace_register_source"),
+          pair_t(reg_cov_func, "omnitrace_register_coverage") })
     {
-        if(itr.first == main_func && !is_driver) continue;
         if(!itr.first)
         {
-            errprintf(-1, "could not find required function :: '%s;\n",
+            errprintf(-1, "could not find required function :: '%s'\n",
                       itr.second.c_str());
         }
     }
@@ -1350,8 +1411,8 @@ main(int argc, char** argv)
 
     bool has_debug_info = false;
     check_for_debug_info(has_debug_info, main_func);
-    check_for_debug_info(has_debug_info, _mutatee_init);
-    check_for_debug_info(has_debug_info, _mutatee_fini);
+    check_for_debug_info(has_debug_info, main_init);
+    check_for_debug_info(has_debug_info, main_fini);
 
     //----------------------------------------------------------------------------------//
     //
@@ -1370,18 +1431,15 @@ main(int argc, char** argv)
         main_exit_points = main_func->findPoint(BPatch_exit);
         verbprintf(2, "Done\n");
     }
-    else if(is_driver)
+    else
     {
-        if(_mutatee_init)
-        {
-            verbprintf(2, "Finding init entry...\n");
-            main_entr_points = _mutatee_init->findPoint(BPatch_entry);
-        }
-        if(_mutatee_fini)
-        {
-            verbprintf(2, "Finding fini exit...\n");
-            main_exit_points = _mutatee_fini->findPoint(BPatch_exit);
-        }
+        verbprintf(2, "Finding init entry... ");
+        main_entr_points = main_init->findPoint(BPatch_entry);
+        verbprintf(2, "Done\n");
+
+        verbprintf(2, "Finding fini exit... ");
+        main_exit_points = main_fini->findPoint(BPatch_exit);
+        verbprintf(2, "Done\n");
     }
 
     //----------------------------------------------------------------------------------//
@@ -1452,9 +1510,12 @@ main(int argc, char** argv)
 
     // prioritize the user environment arguments
     auto env_vars = parser.get<strvec_t>("env");
+    env_vars.reserve(env_vars.size() + env_config_variables.size());
+    for(auto&& itr : env_config_variables)
+        env_vars.emplace_back(itr);
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MODE", instr_mode));
-#if defined(OMNITRACE_USE_ROCTRACER)
     env_vars.emplace_back(TIMEMORY_JOIN('=', "HSA_ENABLE_INTERRUPT", "0"));
+#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
     env_vars.emplace_back(TIMEMORY_JOIN('=', "HSA_TOOLS_LIB", _libname));
 #endif
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_INIT", "OFF"));
@@ -1467,6 +1528,8 @@ main(int argc, char** argv)
     env_vars.emplace_back(
         TIMEMORY_JOIN('=', "OMNITRACE_USE_MPIP",
                       (binary_rewrite && use_mpi && use_mpip) ? "ON" : "OFF"));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_USE_CODE_COVERAGE",
+                                        (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
     if(use_mpi) env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_USE_PID", "ON"));
 
     for(auto& itr : env_vars)
@@ -1508,7 +1571,7 @@ main(int argc, char** argv)
 
     if(umpi_call) init_names.emplace_back(umpi_call.get());
     if(init_call) init_names.emplace_back(init_call.get());
-    if(main_beg_call) init_names.emplace_back(main_beg_call.get());
+    if(main_func && main_beg_call) init_names.emplace_back(main_beg_call.get());
 
     for(const auto& itr : end_expr)
         if(itr.second) fini_names.emplace_back(itr.second.get());
@@ -1524,14 +1587,20 @@ main(int argc, char** argv)
     {
         for(const auto& itr : available_module_functions)
         {
+            bool _is_not_main = itr.function != main_func && itr.function != main_init &&
+                                itr.function != main_fini;
             if(itr.should_instrument())
             {
-                if(itr.function != main_func && itr.function != _mutatee_init &&
-                   itr.function != _mutatee_fini)
+                if(_is_not_main)
                     _insert_module_function(instrumented_module_functions, itr);
             }
             else
                 _insert_module_function(excluded_module_functions, itr);
+            if(coverage_mode != CODECOV_NONE)
+            {
+                if(itr.should_coverage_instrument() && _is_not_main)
+                    _insert_module_function(coverage_module_functions, itr);
+            }
             if(itr.is_overlapping())
                 _insert_module_function(overlapping_module_functions, itr);
         }
@@ -1581,54 +1650,102 @@ main(int argc, char** argv)
 
     verbprintf(2, "Beginning instrumentation loop...\n");
     verbprintf(1, "\n");
-    std::map<std::string, std::pair<size_t, size_t>> _pass_info{};
-    const int                                        _pass_verbose_lvl = 2;
-    for(const auto& itr : instrumented_module_functions)
-    {
-        auto _count = itr(addr_space, entr_trace, exit_trace);
-        _pass_info[itr.module_name].first += _count.first;
-        _pass_info[itr.module_name].second += _count.second;
-
-        auto _report = [](int _lvl, const string_t& _action, const string_t& _type,
-                          const string_t& _reason, const string_t& _name,
-                          const std::string& _extra = {}) {
-            static std::map<std::string, strset_t> already_reported{};
-            auto                                   _key = _type + _action + _reason;
-            if(already_reported[_key].count(_name) == 0)
-            {
-                verbprintf(_lvl, "[%s][%s] %s :: '%s'", _type.c_str(), _action.c_str(),
-                           _reason.c_str(), _name.c_str());
-                if(!_extra.empty()) verbprintf_bare(_lvl, " (%s)", _extra.c_str());
-                verbprintf_bare(_lvl, "...\n");
-                already_reported[_key].insert(_name);
-            }
-        };
-
-        for(const auto& mitr : itr.messages)
-            _report(std::get<0>(mitr), std::get<1>(mitr), std::get<2>(mitr),
-                    std::get<3>(mitr),
-                    std::get<2>(mitr) == "module" ? itr.module_name : itr.function_name);
-    }
-    verbprintf(1, "\n");
-
-    // report the instrumented
-    for(auto& itr : _pass_info)
-    {
-        auto _valid = (verbose_level > _pass_verbose_lvl ||
-                       (itr.second.first + itr.second.second) > 0);
-        if(_valid)
+    auto _report_info = [](int _lvl, const string_t& _action, const string_t& _type,
+                           const string_t& _reason, const string_t& _name,
+                           const std::string& _extra = {}) {
+        static std::map<std::string, strset_t> already_reported{};
+        auto _key = TIMEMORY_JOIN('_', _type, _action, _reason, _name, _extra);
+        if(already_reported[_key].count(_name) == 0)
         {
+            verbprintf(_lvl, "[%s][%s] %s :: '%s'", _type.c_str(), _action.c_str(),
+                       _reason.c_str(), _name.c_str());
+            if(!_extra.empty()) verbprintf_bare(_lvl, " (%s)", _extra.c_str());
+            verbprintf_bare(_lvl, "...\n");
+            already_reported[_key].insert(_name);
+        }
+    };
+
+    if(instr_mode != "coverage")
+    {
+        std::map<std::string, std::pair<size_t, size_t>> _pass_info{};
+        const int                                        _pass_verbose_lvl = 1;
+        for(const auto& itr : instrumented_module_functions)
+        {
+            auto _count = itr(addr_space, entr_trace, exit_trace);
+            _pass_info[itr.module_name].first += _count.first;
+            _pass_info[itr.module_name].second += _count.second;
+
+            for(const auto& mitr : itr.messages)
+                _report_info(std::get<0>(mitr), std::get<1>(mitr), std::get<2>(mitr),
+                             std::get<3>(mitr),
+                             std::get<2>(mitr) == "module" ? itr.module_name
+                                                           : itr.function_name);
+        }
+
+        // report the trace instrumented functions
+        for(auto& itr : _pass_info)
+        {
+            auto _valid = (verbose_level > _pass_verbose_lvl ||
+                           (itr.second.first + itr.second.second) > 0);
+            if(!_valid) continue;
             verbprintf(_pass_verbose_lvl, "%4zu instrumented procedures in %s\n",
                        itr.second.first, itr.first.c_str());
             _valid = (loop_level_instr &&
                       (verbose_level > _pass_verbose_lvl || itr.second.second > 0));
             if(_valid)
             {
-                verbprintf(_pass_verbose_lvl, "%4zu instrumented loop procedures in %s\n",
+                verbprintf(_pass_verbose_lvl, "%4zu instrumented loops in procedure %s\n",
                            itr.second.second, itr.first.c_str());
             }
         }
     }
+
+    if(coverage_mode != CODECOV_NONE)
+    {
+        std::map<std::string, std::pair<size_t, size_t>> _covr_info{};
+        const int                                        _covr_verbose_lvl = 1;
+        for(const auto& itr : coverage_module_functions)
+        {
+            itr.register_source(addr_space, reg_src_func, *main_entr_points);
+            auto _count = itr.register_coverage(addr_space, reg_cov_func);
+            _covr_info[itr.module_name].first += _count.first;
+            _covr_info[itr.module_name].second += _count.second;
+
+            for(const auto& mitr : itr.messages)
+                _report_info(std::get<0>(mitr), std::get<1>(mitr), std::get<2>(mitr),
+                             std::get<3>(mitr),
+                             std::get<2>(mitr) == "module" ? itr.module_name
+                                                           : itr.function_name);
+        }
+
+        // report the coverage instrumented functions
+        for(auto& itr : _covr_info)
+        {
+            auto _valid = (verbose_level > _covr_verbose_lvl ||
+                           (itr.second.first + itr.second.second) > 0);
+            if(!_valid) continue;
+            switch(coverage_mode)
+            {
+                case CODECOV_NONE:
+                {
+                    break;
+                }
+                case CODECOV_FUNCTION:
+                {
+                    verbprintf(_covr_verbose_lvl, "%4zu coverage functions in %s\n",
+                               itr.second.first, itr.first.c_str());
+                    break;
+                }
+                case CODECOV_BASIC_BLOCK:
+                {
+                    verbprintf(_covr_verbose_lvl, "%4zu coverage basic blocks in %s\n",
+                               itr.second.second, itr.first.c_str());
+                    break;
+                }
+            }
+        }
+    }
+    verbprintf(1, "\n");
 
     if(app_thread)
     {
@@ -1692,26 +1809,17 @@ main(int argc, char** argv)
         _insert_module_function(excluded_module_functions, itr);
     }
 
-    bool _dump_and_exit = ((print_available.length() + print_instrumented.length() +
-                            print_overlapping.length() + print_excluded.length()) > 0) ||
-                          explicit_dump_and_exit;
-
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
-                            TIMEMORY_JOIN("", _output_prefix, "available-instr")),
-              available_module_functions, 0, werror, "available_module_functions",
-              print_formats);
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
-                            TIMEMORY_JOIN("", _output_prefix, "instrumented-instr")),
-              instrumented_module_functions, 0, werror, "instrumented_module_functions",
-              print_formats);
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
-                            TIMEMORY_JOIN("", _output_prefix, "excluded-instr")),
-              excluded_module_functions, 0, werror, "excluded_module_functions",
-              print_formats);
-    dump_info(TIMEMORY_JOIN('/', modfunc_dump_dir,
-                            TIMEMORY_JOIN("", _output_prefix, "overlapping-instr")),
-              overlapping_module_functions, 0, werror, "overlapping_module_functions",
-              print_formats);
+    dump_info("available-instr", available_module_functions, 0, werror,
+              "available_module_functions", print_formats);
+    dump_info("instrumented-instr", instrumented_module_functions, 0, werror,
+              "instrumented_module_functions", print_formats);
+    dump_info("excluded-instr", excluded_module_functions, 0, werror,
+              "excluded_module_functions", print_formats);
+    if(coverage_mode != CODECOV_NONE)
+        dump_info("coverage-instr", coverage_module_functions, 0, werror,
+                  "coverage_module_functions", print_formats);
+    dump_info("overlapping-instr", overlapping_module_functions, 0, werror,
+              "overlapping_module_functions", print_formats);
 
     auto _dump_info = [](const std::string& _label, const string_t& _mode,
                          const fmodset_t& _modset) {
@@ -1733,13 +1841,13 @@ main(int argc, char** argv)
         {
             for(const auto& itr : _modset)
                 _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.function_name, "][",
-                                                       itr.address_range, "]"));
+                                                       itr.num_instructions, "]"));
         }
         else if(_mode == "functions+")
         {
             for(const auto& itr : _modset)
                 _insert(itr.module_name, TIMEMORY_JOIN("", "[", itr.signature.get(), "][",
-                                                       itr.address_range, "]"));
+                                                       itr.num_instructions, "]"));
         }
         else if(_mode == "pair")
         {
@@ -1748,7 +1856,7 @@ main(int argc, char** argv)
                 std::stringstream _ss{};
                 _ss << std::boolalpha;
                 _ss << "" << itr.module_name << "] --> [" << itr.function_name << "]["
-                    << itr.address_range << "]";
+                    << itr.num_instructions << "]";
                 _insert(itr.module_name, _ss.str());
             }
         }
@@ -1759,7 +1867,7 @@ main(int argc, char** argv)
                 std::stringstream _ss{};
                 _ss << std::boolalpha;
                 _ss << "[" << itr.module_name << "] --> [" << itr.signature.get() << "]["
-                    << itr.address_range << "]";
+                    << itr.num_instructions << "]";
                 _insert(itr.module_name, _ss.str());
             }
         }
@@ -1785,10 +1893,12 @@ main(int argc, char** argv)
         _dump_info("instrumented", print_instrumented, instrumented_module_functions);
     if(!print_excluded.empty())
         _dump_info("excluded", print_excluded, excluded_module_functions);
+    if(!print_coverage.empty())
+        _dump_info("coverage", print_coverage, coverage_module_functions);
     if(!print_overlapping.empty())
         _dump_info("overlapping", print_overlapping, overlapping_module_functions);
 
-    if(_dump_and_exit) exit(EXIT_SUCCESS);
+    if(simulate) exit(EXIT_SUCCESS);
 
     //----------------------------------------------------------------------------------//
     //
@@ -1923,154 +2033,6 @@ main(int argc, char** argv)
 }
 
 //======================================================================================//
-
-bool
-instrument_module(const string_t& file_name)
-{
-    auto _report = [&file_name](const string_t& _action, const string_t& _reason,
-                                int _lvl) {
-        static strset_t already_reported{};
-        if(already_reported.count(file_name) == 0)
-        {
-            verbprintf(_lvl, "%s module [%s] : '%s'...\n", _action.c_str(),
-                       _reason.c_str(), file_name.c_str());
-            already_reported.insert(file_name);
-        }
-    };
-
-    static std::regex ext_regex{ "\\.(s|S)$", regex_opts };
-    static std::regex sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts };
-    static std::regex sys_build_regex{ "^(\\.\\./sysdeps/|/build/)", regex_opts };
-    static std::regex dyninst_regex{ "(dyninst|DYNINST|(^|/)RT[[:graph:]]+\\.c$)",
-                                     regex_opts };
-    static std::regex dependlib_regex{ "^(lib|)(omnitrace|pthread|caliper|gotcha|papi|"
-                                       "cupti|TAU|likwid|pfm|nvperf|unwind)",
-                                       regex_opts };
-    static std::regex core_cmod_regex{
-        "^(malloc|(f|)lock|sig|sem)[a-z_]+(|64|_r|_l)\\.c$"
-    };
-    static std::regex core_lib_regex{
-        "^(lib|)(c|dl|dw|pthread|tcmalloc|profiler|"
-        "tbbmalloc|tbbmalloc_proxy|malloc|stdc\\+\\+)(-|\\.)",
-        regex_opts
-    };
-    static std::regex prefix_regex{ "^(_|\\.[a-zA-Z0-9])", regex_opts };
-
-    // file extensions that should not be instrumented
-    if(std::regex_search(file_name, ext_regex))
-    {
-        return (_report("Excluding", "file extension", 3), false);
-    }
-
-    // system modules that should not be instrumented (wastes time)
-    if(std::regex_search(file_name, sys_regex) ||
-       std::regex_search(file_name, sys_build_regex))
-    {
-        return (_report("Excluding", "system module", 3), false);
-    }
-
-    // dyninst modules that must not be instrumented
-    if(std::regex_search(file_name, dyninst_regex))
-    {
-        return (_report("Excluding", "dyninst module", 3), false);
-    }
-
-    // modules used by omnitrace and dependent libraries
-    if(std::regex_search(file_name, core_lib_regex) ||
-       std::regex_search(file_name, core_cmod_regex))
-    {
-        return (_report("Excluding", "core module", 3), false);
-    }
-
-    // modules used by omnitrace and dependent libraries
-    if(std::regex_search(file_name, dependlib_regex))
-    {
-        return (_report("Excluding", "dependency module", 3), false);
-    }
-
-    // known set of modules whose starting sequence of characters suggest it should not be
-    // instrumented (wastes time)
-    if(std::regex_search(file_name, prefix_regex))
-    {
-        return (_report("Excluding", "prefix match", 3), false);
-    }
-
-    _report("Including", "no constraint", 2);
-
-    return true;
-}
-
-//======================================================================================//
-
-bool
-instrument_entity(const string_t& function_name)
-{
-    auto _report = [&function_name](const string_t& _action, const string_t& _reason,
-                                    int _lvl) {
-        static strset_t already_reported{};
-        if(already_reported.count(function_name) == 0)
-        {
-            verbprintf(_lvl, "%s function [%s] : '%s'...\n", _action.c_str(),
-                       _reason.c_str(), function_name.c_str());
-            already_reported.insert(function_name);
-        }
-    };
-
-    static std::regex exclude(
-        "(omnitrace|tim::|N3tim|MPI_Init|MPI_Finalize|dyninst|tm_clones)", regex_opts);
-    static std::regex exclude_cxx(
-        "(std::_Sp_counted_base|std::(use|has)_facet|std::locale|::sentry|^std::_|::_(M|"
-        "S)_|::basic_string[a-zA-Z,<>: ]+::_M_create|::__|::_(Alloc|State)|"
-        "std::(basic_|)(ifstream|ios|istream|ostream|stream))",
-        regex_opts);
-    static std::regex leading("^(_|\\.|frame_dummy|transaction clone|virtual "
-                              "thunk|non-virtual thunk|\\(|targ|kmp_threadprivate_)",
-                              regex_opts);
-    static std::regex trailing(
-        "(_|\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$", regex_opts);
-    static strset_t whole = []() {
-        auto _v   = get_whole_function_names();
-        auto _ret = _v;
-        for(std::string _ext : { "64", "_l", "_r" })
-            for(const auto& itr : _v)
-                _ret.emplace(itr + _ext);
-        return _ret;
-    }();
-
-    // don't instrument the functions when key is found anywhere in function name
-    if(std::regex_search(function_name, exclude) ||
-       std::regex_search(function_name, exclude_cxx))
-    {
-        _report("Excluding", "critical", 3);
-        return false;
-    }
-
-    if(whole.count(function_name) > 0)
-    {
-        _report("Excluding", "critical", 3);
-        return false;
-    }
-
-    // don't instrument the functions when key is found at the start of the function name
-    if(std::regex_search(function_name, leading))
-    {
-        _report("Excluding", "recommended", 3);
-        return false;
-    }
-
-    // don't instrument the functions when key is found at the end of the function name
-    if(std::regex_search(function_name, trailing))
-    {
-        _report("Excluding", "recommended", 3);
-        return false;
-    }
-
-    _report("Including", "no constraint", 2);
-
-    return true;
-}
-
-//======================================================================================//
 // query_instr -- check whether there are one or more instrumentation points
 //
 bool
@@ -2151,50 +2113,18 @@ query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cf
 // Constraints for instrumentation. Returns true for those modules that
 // shouldn't be instrumented.
 bool
-module_constraint(string_view_t fname)
+module_constraint(const char*)
 {
-    // fname is the name of module/file
-    string_t _fname = string_t{ fname };
-
-    // never instrumentat any module matching omnitrace
-    if(_fname.find("omnitrace") != string_t::npos) return true;
-
-    // always instrument these modules
-    if(_fname == "DEFAULT_MODULE" || _fname == "LIBRARY_MODULE") return false;
-
-    if(instrument_module(_fname)) return false;
-
-    // do not instrument
-    return true;
+    return false;
 }
 
 //======================================================================================//
 // Constraint for routines. The constraint returns true for those routines that
 // should not be instrumented.
 bool
-routine_constraint(string_view_t fname)
+routine_constraint(const char*)
 {
-    string_t _fname = string_t{ fname };
-    if(_fname.find("omnitrace") != string_t::npos) return true;
-
-    auto npos = std::string::npos;
-    if(_fname.find("FunctionInfo") != npos || _fname.find("_L_lock") != npos ||
-       _fname.find("_L_unlock") != npos)
-        return true;  // Don't instrument
-    else
-    {
-        // Should the routine fname be instrumented?
-        if(instrument_entity(string_t(fname)))
-        {
-            // Yes it should be instrumented. Return false
-            return false;
-        }
-        else
-        {
-            // No. The selective instrumentation file says: don't instrument it
-            return true;
-        }
-    }
+    return false;
 }
 
 namespace

@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include <string_view>
 #include <timemory/backends/process.hpp>
 #include <timemory/environment.hpp>
 #include <timemory/mpl/apply.hpp>
@@ -65,6 +64,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unistd.h>
 #include <vector>
 
@@ -78,6 +78,7 @@
 #endif
 
 struct function_signature;
+struct basic_block_signature;
 struct module_function;
 
 template <typename Tp>
@@ -105,6 +106,7 @@ using snippet_t             = BPatch_snippet;
 using call_expr_t           = BPatch_funcCallExpr;
 using address_space_t       = BPatch_addressSpace;
 using flow_graph_t          = BPatch_flowGraph;
+using statement_t           = BPatch_statement;
 using basic_block_t         = BPatch_basicBlock;
 using basic_loop_t          = BPatch_basicBlockLoop;
 using procedure_loc_t       = BPatch_procedureLocation;
@@ -124,6 +126,13 @@ using instruction_t         = Dyninst::InstructionAPI::Instruction;
 
 void
 omnitrace_prefork_callback(thread_t* parent, thread_t* child);
+
+enum CodeCoverageMode
+{
+    CODECOV_NONE = 0,
+    CODECOV_FUNCTION,
+    CODECOV_BASIC_BLOCK
+};
 
 //======================================================================================//
 //
@@ -167,21 +176,22 @@ extern string_t prefer_library;
 //
 //  global variables
 //
-extern patch_pointer_t bpatch;
-extern call_expr_t*    terminate_expr;
-extern snippet_vec_t   init_names;
-extern snippet_vec_t   fini_names;
-extern fmodset_t       available_module_functions;
-extern fmodset_t       instrumented_module_functions;
-extern fmodset_t       overlapping_module_functions;
-extern fmodset_t       excluded_module_functions;
-extern fixed_modset_t  fixed_module_functions;
-extern regexvec_t      func_include;
-extern regexvec_t      func_exclude;
-extern regexvec_t      file_include;
-extern regexvec_t      file_exclude;
-extern regexvec_t      file_restrict;
-extern regexvec_t      func_restrict;
+extern patch_pointer_t  bpatch;
+extern call_expr_t*     terminate_expr;
+extern snippet_vec_t    init_names;
+extern snippet_vec_t    fini_names;
+extern fmodset_t        available_module_functions;
+extern fmodset_t        instrumented_module_functions;
+extern fmodset_t        overlapping_module_functions;
+extern fmodset_t        excluded_module_functions;
+extern fixed_modset_t   fixed_module_functions;
+extern regexvec_t       func_include;
+extern regexvec_t       func_exclude;
+extern regexvec_t       file_include;
+extern regexvec_t       file_exclude;
+extern regexvec_t       file_restrict;
+extern regexvec_t       func_restrict;
+extern CodeCoverageMode coverage_mode;
 //
 //======================================================================================//
 
@@ -230,10 +240,8 @@ consume_parameters(T&&...)
 extern "C"
 {
     bool are_file_include_exclude_lists_empty();
-    bool instrument_module(const string_t& file_name);
-    bool instrument_entity(const string_t& function_name);
-    bool module_constraint(string_view_t fname);
-    bool routine_constraint(string_view_t fname);
+    bool module_constraint(const char* fname);
+    bool routine_constraint(const char* fname);
 }
 
 //======================================================================================//
@@ -248,6 +256,12 @@ function_signature
 get_loop_file_line_info(module_t* mutatee_module, procedure_t* f, flow_graph_t* cfGraph,
                         basic_loop_t* loopToInstrument);
 
+std::map<basic_block_t*, basic_block_signature>
+get_basic_block_file_line_info(module_t* module, procedure_t* func);
+
+std::vector<statement_t>
+get_source_code(module_t* module, procedure_t* func);
+
 std::tuple<size_t, size_t>
 query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc,
             flow_graph_t* cfGraph = nullptr, basic_loop_t* loopToInstrument = nullptr);
@@ -258,9 +272,19 @@ query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cf
 
 template <typename Tp>
 bool
+insert_instr(address_space_t* mutatee, const bpvector_t<point_t*>& _points, Tp traceFunc,
+             procedure_loc_t traceLoc, bool allow_traps = instr_traps);
+
+template <typename Tp>
+bool
 insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
              procedure_loc_t traceLoc, flow_graph_t* cfGraph = nullptr,
-             basic_loop_t* loopToInstrument = nullptr, bool allow_traps = true);
+             basic_loop_t* loopToInstrument = nullptr, bool allow_traps = instr_traps);
+
+template <typename Tp>
+bool
+insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
+             basic_block_t* basicBlock, bool allow_traps = instr_traps);
 
 void
 errorFunc(error_level_t level, int num, const char** params);

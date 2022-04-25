@@ -41,7 +41,8 @@ struct function_signature
                        bool _info_beg = false, bool _info_end = false);
 
     static string_t get(function_signature& sig);
-    string_t        get() const;
+    string_t        get(bool _all = false, bool _save = true) const;
+    string_t        get_coverage(bool _is_basic_block) const;
 
     bool             m_loop      = false;
     bool             m_info_beg  = false;
@@ -71,4 +72,13 @@ struct function_signature
             cereal::make_nvp("file", m_file), cereal::make_nvp("signature", m_signature));
         (void) get();
     }
+};
+
+struct basic_block_signature
+{
+    using address_t = Dyninst::Address;
+
+    address_t          start_address = {};
+    address_t          last_address  = {};
+    function_signature signature     = {};
 };

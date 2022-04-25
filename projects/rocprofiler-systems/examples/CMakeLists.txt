@@ -7,6 +7,7 @@ set(CMAKE_CXX_VISIBILITY_PRESET "default")
 
 add_subdirectory(transpose)
 add_subdirectory(parallel-overhead)
+add_subdirectory(code-coverage)
 add_subdirectory(user-api)
 add_subdirectory(openmp)
 

@@ -282,7 +282,42 @@ omnitrace_fork_callback(thread_t* parent, thread_t* child)
 }
 //
 //======================================================================================//
-// insert_instr -- generic insert instrumentation function
+// insert_instr -- insert instrumentation into a function
+//
+template <typename Tp>
+bool
+insert_instr(address_space_t* mutatee, const bpvector_t<point_t*>& _points, Tp traceFunc,
+             procedure_loc_t traceLoc, bool allow_traps)
+{
+    if(!traceFunc || _points.empty()) return false;
+
+    auto _trace = traceFunc.get();
+    auto _traps = std::set<point_t*>{};
+    if(!allow_traps)
+    {
+        for(const auto& itr : _points)
+        {
+            if(itr && itr->usesTrap_NP()) _traps.insert(itr);
+        }
+    }
+
+    size_t _n = 0;
+    for(const auto& itr : _points)
+    {
+        if(!itr || _traps.count(itr) > 0)
+            continue;
+        else if(traceLoc == BPatch_entry)
+            mutatee->insertSnippet(*_trace, *itr, BPatch_callBefore, BPatch_firstSnippet);
+        else
+            mutatee->insertSnippet(*_trace, *itr);
+        ++_n;
+    }
+
+    return (_n > 0);
+}
+//
+//======================================================================================//
+// insert_instr -- insert instrumentation into loops
 //
 template <typename Tp>
 bool
@@ -311,27 +346,6 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     if(_points == nullptr) return false;
     if(_points->empty()) return false;
 
-    /*if(loop_level_instr)
-    {
-        flow_graph_t*                     flow = funcToInstr->getCFG();
-        bpvector_t<basic_loop_t*> basicLoop;
-        flow->getOuterLoops(basicLoop);
-        for(auto litr = basicLoop.begin(); litr != basicLoop.end(); ++litr)
-        {
-            bpvector_t<point_t*>* _tmp;
-            if(traceLoc == BPatch_entry)
-                _tmp = cfGraph->findLoopInstPoints(BPatch_locLoopEntry, *litr);
-            else if(traceLoc == BPatch_exit)
-                _tmp = cfGraph->findLoopInstPoints(BPatch_locLoopExit, *litr);
-            if(!_tmp)
-                continue;
-            for(auto& itr : *_tmp)
-                _points->push_back(itr);
-        }
-    }*/
-
-    // verbprintf(0, "Instrumenting |> [ %s ]\n", name.m_name.c_str());
-
     std::set<point_t*> _traps{};
     if(!allow_traps)
     {
@@ -348,13 +362,53 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
             continue;
         else if(traceLoc == BPatch_entry)
             mutatee->insertSnippet(*_trace, *itr, BPatch_callBefore, BPatch_firstSnippet);
-        // else if(traceLoc == BPatch_exit)
-        //    mutatee->insertSnippet(*_trace, *itr, BPatch_callAfter,
-        //    BPatch_firstSnippet);
         else
             mutatee->insertSnippet(*_trace, *itr);
         ++_n;
     }
 
     return (_n > 0);
+}
+//
+//======================================================================================//
+// insert_instr -- insert instrumentation into basic blocks
+//
+template <typename Tp>
+bool
+insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
+             basic_block_t* basicBlock, bool allow_traps)
+{
+    point_t* _point = nullptr;
+    auto     _trace = traceFunc.get();
+
+    basic_block_t* _bb = basicBlock;
+    switch(traceLoc)
+    {
+        case BPatch_entry: _point = _bb->findEntryPoint(); break;
+        case BPatch_exit: _point = _bb->findExitPoint(); break;
+        default:
+            verbprintf(0, "Warning! trace location type %i not supported\n",
+                       (int) traceLoc);
+            return false;
+    }
+
+    if(_point == nullptr) return false;
+
+    if(!allow_traps && _point->usesTrap_NP()) return false;
+
+    switch(traceLoc)
+    {
+        case BPatch_entry:
+            return (mutatee->insertSnippet(*_trace, *_point, BPatch_callBefore,
+                                           BPatch_firstSnippet) != nullptr);
+        case BPatch_exit: return (mutatee->insertSnippet(*_trace, *_point) != nullptr);
+        default:
+        {
+            verbprintf(0, "Warning! trace location type %i not supported\n",
+                       (int) traceLoc);
+            return false;
+        }
+    }
+
+    return false;
 }

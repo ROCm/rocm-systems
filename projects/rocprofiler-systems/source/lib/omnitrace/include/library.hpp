@@ -40,6 +40,7 @@
 #include "library/ptl.hpp"
 #include "library/debug.hpp"
 #include "library/critical_trace.hpp"
+#include "library/runtime.hpp"
 
 #include <timemory/macros/language.hpp>
 #include <timemory/utility/utility.hpp>

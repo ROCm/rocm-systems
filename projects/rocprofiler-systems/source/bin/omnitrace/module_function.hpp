@@ -46,12 +46,20 @@ struct module_function
 
     module_function(module_t* mod, procedure_t* proc);
 
+    // code coverage
+    void register_source(address_space_t* _addr_space, procedure_t* _entr_trace,
+                         const std::vector<point_t*>&) const;
+    std::pair<size_t, size_t> register_coverage(address_space_t* _addr_space,
+                                                procedure_t*     _entr_trace) const;
+
+    // instrumentation
     std::pair<size_t, size_t> operator()(address_space_t* _addr_space,
                                          procedure_t*     _entr_trace,
                                          procedure_t*     _exit_trace) const;
 
     // applies logic for all "is_*" and "can_*" checks below
     bool should_instrument() const;
+    bool should_coverage_instrument() const;
 
     // hard constraints
     bool is_instrumentable() const;       // checks whether can instrument
@@ -98,8 +106,10 @@ struct module_function
     bool is_overlapping() const;  // checks if func overlaps
 
 private:
+    bool is_loop_num_instructions_constrained() const;  // checks loop instr constraint
     bool is_loop_address_range_constrained() const;  // checks loop addr range constraint
     bool contains_dynamic_callsites() const;
+    bool should_instrument(bool _coverage) const;
 
 public:
     template <typename ArchiveT>
@@ -176,6 +186,7 @@ module_function::serialize(ArchiveT& ar, const unsigned)
         ar.setNextName("heuristics");
         ar.startNode();
         ar(cereal::make_nvp("should_instrument", should_instrument()),
+           cereal::make_nvp("should_coverage_instrument", should_coverage_instrument()),
            cereal::make_nvp("is_instrumentable", is_instrumentable()),
            cereal::make_nvp("can_instrument_entry", can_instrument_entry()),
            cereal::make_nvp("can_instrument_exit", can_instrument_exit()),

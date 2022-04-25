@@ -59,12 +59,14 @@ function_signature::get(function_signature& sig)
 }
 
 string_t
-function_signature::get() const
+function_signature::get(bool _all, bool _save) const
 {
+    if(!_all && _save && !m_signature.empty()) return m_signature;
+
     std::stringstream ss;
-    if(use_return_info && !m_return.empty()) ss << m_return << " ";
+    if((_all || use_return_info) && !m_return.empty()) ss << m_return << " ";
     ss << m_name;
-    if(use_args_info) ss << m_params;
+    if(_all || use_args_info) ss << m_params;
     if(m_loop && m_info_beg)
     {
         auto _row_col_str = [](unsigned long _row, unsigned long _col) {
@@ -90,10 +92,52 @@ function_signature::get() const
         else
             errprintf(1, "loop line info is empty!");
     }
-    if(use_file_info && m_file.length() > 0) ss << " [" << m_file;
-    if(use_line_info && m_row.first > 0) ss << ":" << m_row.first;
-    if(use_file_info && m_file.length() > 0) ss << "]";
+    if((_all || use_file_info) && m_file.length() > 0) ss << " [" << m_file;
+    if((_all || use_line_info) && m_row.first > 0) ss << ":" << m_row.first;
+    if((_all || use_file_info) && m_file.length() > 0) ss << "]";
 
-    m_signature = ss.str();
-    return m_signature;
+    if(_save) m_signature = ss.str();
+    return ss.str();
+}
+
+string_t
+function_signature::get_coverage(bool _basic_block) const
+{
+    std::stringstream ss;
+    if(!m_return.empty()) ss << m_return << " ";
+    ss << m_name << m_params;
+    if(_basic_block && m_loop && m_info_beg)
+    {
+        if(m_file.length() > 0) ss << " [" << m_file << "]";
+        auto _row_col_str = [](unsigned long _row, unsigned long _col) {
+            std::stringstream _ss{};
+            if(_row == 0 && _col == 0) return std::string{};
+            if(_col > 0)
+                _ss << "{" << _row << "," << _col << "}";
+            else
+                _ss << "{" << _row << "}";
+            return _ss.str();
+        };
+
+        auto _rc1 = _row_col_str(m_row.first, m_col.first);
+        auto _rc2 = _row_col_str(m_row.second, m_col.second);
+        if(m_info_end && !_rc1.empty() && !_rc2.empty() && _rc1 != _rc2)
+            ss << " [" << _rc1 << "-" << _rc2 << "]";
+        else if(m_info_end && !_rc1.empty() && !_rc2.empty() && _rc1 == _rc2)
+            ss << " [" << _rc1 << "]";
+        else if(m_info_end && !_rc1.empty() && _rc2.empty())
+            ss << " [" << _rc1 << "]";
+        else if(!m_info_end && !_rc1.empty())
+            ss << " [" << _rc1 << "]";
+        else
+            errprintf(1, "loop line info is empty!");
+    }
+    else
+    {
+        if(m_file.length() > 0) ss << " [" << m_file;
+        if(m_row.first > 0) ss << ":" << m_row.first;
+        if(m_file.length() > 0) ss << "]";
+    }
+
+    return ss.str();
 }

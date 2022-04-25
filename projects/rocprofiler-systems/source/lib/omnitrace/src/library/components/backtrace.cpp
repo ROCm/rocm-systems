@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/components/fwd.hpp"
+#include "library/components/pthread_gotcha.hpp"
 #include "library/components/rocm_smi.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
@@ -109,7 +110,7 @@ using papi_vector_instances     = thread_data<hw_counters, api::sampling>;
 
 namespace
 {
-std::unique_ptr<hw_counters>&
+unique_ptr_t<hw_counters>&
 get_papi_vector(int64_t _tid)
 {
     static auto& _v = papi_vector_instances::instances();
@@ -117,14 +118,14 @@ get_papi_vector(int64_t _tid)
     return _v.at(_tid);
 }
 
-std::unique_ptr<backtrace>&
+unique_ptr_t<backtrace>&
 get_backtrace_init(int64_t _tid)
 {
     static auto& _v = backtrace_init_instances::instances();
     return _v.at(_tid);
 }
 
-std::unique_ptr<bool>&
+unique_ptr_t<bool>&
 get_sampler_running(int64_t _tid)
 {
     static auto& _v = sampler_running_instances::instances();
@@ -345,7 +346,7 @@ backtrace::configure(bool _setup, int64_t _tid)
         _sampler->set_signals(*_signal_types);
         _sampler->set_flags(SA_RESTART);
         _sampler->set_delay(_delay);
-        _sampler->set_verbose(std::min<size_t>(_sampler->get_verbose(), 1));
+        _sampler->set_verbose(std::min<size_t>(_sampler->get_verbose(), 2));
         _sampler->set_frequency(_prof_freq, { SIGPROF });
         _sampler->set_frequency(_alrm_freq, { SIGALRM });
 

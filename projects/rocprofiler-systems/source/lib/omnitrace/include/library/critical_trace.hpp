@@ -217,7 +217,7 @@ using hash_ids = std::unordered_set<std::string>;
 uint64_t
 get_update_frequency();
 
-std::unique_ptr<call_chain>&
+unique_ptr_t<call_chain>&
 get(int64_t _tid = threading::get_id());
 
 size_t

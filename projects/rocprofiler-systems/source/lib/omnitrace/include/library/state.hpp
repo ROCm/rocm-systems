@@ -39,7 +39,8 @@ enum class State : unsigned short
 enum class Mode : unsigned short
 {
     Trace = 0,
-    Sampling
+    Sampling,
+    Coverage
 };
 }  // namespace omnitrace
 

@@ -8,8 +8,7 @@ on:
 
 env:
   BUILD_TYPE: Release
-  ELFUTILS_DOWNLOAD_VERSION: 0.183
-  OMNITRACE_DEBUG_FINALIZE: ON
+  ELFUTILS_DOWNLOAD_VERSION: 0.186
   OMNITRACE_VERBOSE: 1
   OMNITRACE_CI: ON
 
@@ -60,6 +59,7 @@ jobs:
           -DDYNINST_BUILD_LIBIBERTY=ON
           -DDYNINST_BUILD_SHARED_LIBS=ON
           -DDYNINST_BUILD_STATIC_LIBS=OFF
+          -DDYNINST_ELFUTILS_DOWNLOAD_VERSION=${{ env.ELFUTILS_DOWNLOAD_VERSION }}
 
     - name: Build
       timeout-minutes: 45
@@ -74,8 +74,8 @@ jobs:
       timeout-minutes: 45
       working-directory: ${{ github.workspace }}/build
       run:
-        ctest -V -N -O ${{ github.workspace }}/build/omnitrace-ctest-${{ env.GITHUB_JOB }}-commands.log &&
-        ctest --output-on-failure --output-log ${{ github.workspace }}/build/omnitrace-ctest-${{ env.GITHUB_JOB }}.log --stop-on-failure
+        ctest -V -N -O ${{ github.workspace }}/build/omnitrace-ctest-${{ github.job }}-commands.log &&
+        ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-${{ github.job }}.log --stop-on-failure
 
     - name: Test Install
       timeout-minutes: 10
@@ -100,15 +100,18 @@ jobs:
         omnitrace -e -v 1 -- ls
 
     - name: CTest Artifacts
+      if: success() || failure()
       uses: actions/upload-artifact@v2
       with:
-        name: ctest-log
+        name: ctest-${{ github.job }}-log
         path: |
           ${{ github.workspace }}/build/*.log
 
     - name: Data Artifacts
+      if: success() || failure()
       uses: actions/upload-artifact@v2
       with:
-        name: data-files
+        name: data-${{ github.job }}-files
         path: |
           ${{ github.workspace }}/build/omnitrace-tests-output/**/*.txt
+          ${{ github.workspace }}/build/omnitrace-tests-output/**/*-instr*.json

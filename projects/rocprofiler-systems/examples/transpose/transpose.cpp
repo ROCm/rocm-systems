@@ -104,33 +104,36 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     std::cout << "[" << rank << "][" << tid << "] M: " << M << " N: " << N << std::endl;
     _lk.unlock();
 
-    size_t size   = sizeof(int) * M * N;
-    int*   matrix = new int[size];
+    size_t size       = sizeof(int) * M * N;
+    int*   inp_matrix = new int[size];
+    int*   out_matrix = new int[size];
     for(size_t i = 0; i < M * N; i++)
-        matrix[i] = rand() % 1002;
+    {
+        inp_matrix[i] = rand() % 1002;
+        out_matrix[i] = 0;
+    }
     int* in  = nullptr;
     int* out = nullptr;
 
-    std::chrono::high_resolution_clock::time_point t1, t2;
-
     HIP_API_CALL(hipMalloc(&in, size));
     HIP_API_CALL(hipMalloc(&out, size));
-    HIP_API_CALL(hipMemset(in, 0, size));
-    HIP_API_CALL(hipMemset(out, 0, size));
-    HIP_API_CALL(hipMemcpy(in, matrix, size, hipMemcpyHostToDevice));
-    HIP_API_CALL(hipDeviceSynchronize());
+    HIP_API_CALL(hipMemsetAsync(in, 0, size, stream));
+    HIP_API_CALL(hipMemsetAsync(out, 0, size, stream));
+    HIP_API_CALL(hipMemcpyAsync(in, inp_matrix, size, hipMemcpyHostToDevice, stream));
+    HIP_API_CALL(hipStreamSynchronize(stream));
 
     dim3 grid(M / 32, N / 32, 1);
     dim3 block(32, 32, 1);  // transpose_a
 
-    t1 = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::high_resolution_clock::now();
     for(size_t i = 0; i < nitr; i++)
     {
         transpose_a<<<grid, block, 0, stream>>>(in, out, M, N);
         check_hip_error();
     }
+    auto t2 = std::chrono::high_resolution_clock::now();
     HIP_API_CALL(hipStreamSynchronize(stream));
-    t2 = std::chrono::high_resolution_clock::now();
+    HIP_API_CALL(hipMemcpyAsync(out_matrix, out, size, hipMemcpyDeviceToHost, stream));
     double time =
         std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
     float GB = (float) size * nitr * 2 / (1 << 30);
@@ -142,18 +145,15 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
               << std::endl;
     print_lock.unlock();
 
-    HIP_API_CALL(hipDeviceSynchronize());
-
-    int* out_matrix = new int[size];
-    HIP_API_CALL(hipMemcpy(out_matrix, out, size, hipMemcpyDeviceToHost));
+    HIP_API_CALL(hipStreamSynchronize(stream));
 
     // cpu_transpose(matrix, out_matrix, M, N);
-    verify(matrix, out_matrix, M, N);
+    verify(inp_matrix, out_matrix, M, N);
 
     HIP_API_CALL(hipFree(in));
     HIP_API_CALL(hipFree(out));
 
-    delete[] matrix;
+    delete[] inp_matrix;
     delete[] out_matrix;
 }
 

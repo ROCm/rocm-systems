@@ -22,9 +22,9 @@ target_link_libraries(
     omnitrace-exe
     PRIVATE omnitrace::omnitrace-headers
             omnitrace::omnitrace-dyninst
+            omnitrace::omnitrace-timemory
             omnitrace::omnitrace-compile-options
             omnitrace::omnitrace-compile-definitions
-            $<BUILD_INTERFACE:timemory::timemory-headers>
             $<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>)
 
 set_target_properties(

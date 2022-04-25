@@ -26,6 +26,8 @@
 
 #include <timemory/compat/macros.h>
 
+#include <cstddef>
+
 // forward decl of the API
 extern "C"
 {
@@ -57,6 +59,15 @@ extern "C"
     /// stops an instrumentation region (user-defined)
     int omnitrace_pop_region(const char* name) OMNITRACE_PUBLIC_API;
 
+    /// stores source code information
+    void omnitrace_register_source(const char* file, const char* func, size_t line,
+                                   size_t      address,
+                                   const char* source) OMNITRACE_PUBLIC_API;
+
+    /// increments coverage values
+    void omnitrace_register_coverage(const char* file, const char* func,
+                                     size_t address) OMNITRACE_PUBLIC_API;
+
     // these are the real implementations for internal calling convention
     void omnitrace_init_library_hidden(void) OMNITRACE_HIDDEN_API;
     void omnitrace_init_hidden(const char*, bool, const char*) OMNITRACE_HIDDEN_API;
@@ -68,4 +79,9 @@ extern "C"
     void omnitrace_pop_trace_hidden(const char* name) OMNITRACE_HIDDEN_API;
     void omnitrace_push_region_hidden(const char* name) OMNITRACE_HIDDEN_API;
     void omnitrace_pop_region_hidden(const char* name) OMNITRACE_HIDDEN_API;
+    void omnitrace_register_source_hidden(const char* file, const char* func, size_t line,
+                                          size_t      address,
+                                          const char* source) OMNITRACE_HIDDEN_API;
+    void omnitrace_register_coverage_hidden(const char* file, const char* func,
+                                            size_t address) OMNITRACE_HIDDEN_API;
 }
