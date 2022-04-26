@@ -66,7 +66,7 @@ inline uint32_t GetPid() { return syscall(__NR_getpid); }
 inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Library errors enumaration
+// Library errors enumeration
 typedef enum {
   ROCTX_STATUS_SUCCESS = 0,
   ROCTX_STATUS_ERROR = 1,

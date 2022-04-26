@@ -24,10 +24,10 @@
 //
 // ROC-tracer library, Runtimes Generic Callback/Activity APIs.
 // The goal of the implementation is to provide a generic independent from
-// specific runtime profiler to trace API and asyncronous activity.
+// specific runtime profiler to trace API and asynchronous activity.
 //
 // The API provides functionality for registering the runtimes API callbacks and
-// asyncronous activity records pool support.
+// asynchronous activity records pool support.
 //
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -55,7 +55,7 @@ uint32_t roctracer_version_major();
 uint32_t roctracer_version_minor();
 
 ////////////////////////////////////////////////////////////////////////////////
-// Library errors enumaration
+// Library errors enumeration
 typedef enum {
   ROCTRACER_STATUS_SUCCESS = 0,
   ROCTRACER_STATUS_ERROR = 1,
@@ -159,8 +159,8 @@ typedef void (*roctracer_buffer_callback_t)(
 typedef struct {
   uint32_t mode;                                    // roctracer mode
   size_t buffer_size;                               // buffer size
-  roctracer_allocator_t alloc_fun;                  // memory alocator function pointer
-  void* alloc_arg;                                  // memory alocator function pointer
+  roctracer_allocator_t alloc_fun;                  // memory allocator function pointer
+  void* alloc_arg;                                  // memory allocator function pointer
   roctracer_buffer_callback_t buffer_callback_fun;  // tracer record callback function
   void* buffer_callback_arg;                        // tracer record callback arg
 } roctracer_properties_t;
@@ -242,7 +242,7 @@ void roctracer_flush_buf();
 
 // Set properties
 roctracer_status_t roctracer_set_properties(roctracer_domain_t domain,  // tracing domain
-                                            void* propertes);           // tracing properties
+                                            void* properties);          // tracing properties
 
 #ifdef __cplusplus
 }  // extern "C" block

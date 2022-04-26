@@ -236,7 +236,7 @@ TraceBuffer<trace_entry_t>* trace_buffer = NULL;
 namespace hsa_support {
 // callbacks table
 cb_table_t cb_table;
-// asyc copy activity callback
+// async copy activity callback
 bool async_copy_callback_enabled = false;
 activity_async_callback_t async_copy_callback_fun = NULL;
 void* async_copy_callback_arg = NULL;
@@ -252,7 +252,7 @@ ImageExtTable ImageExtTable_saved{};
 namespace ext_support {
 roctracer_start_cb_t roctracer_start_cb = NULL;
 roctracer_stop_cb_t roctracer_stop_cb = NULL;
-}  // namespace ext_suppoprt
+}  // namespace ext_support
 
 roctracer_status_t GetExcStatus(const std::exception& e) {
   const util::exception* roctracer_exc_ptr = dynamic_cast<const util::exception*>(&e);
@@ -391,7 +391,7 @@ void* HIP_SyncApiDataCallback(uint32_t op_id, roctracer_record_t* record, const 
       data_ptr->correlation_id = correlation_id;
     }
 
-    // Passing correlatin ID
+    // Passing correlation ID
     correlation_id_tls = correlation_id;
 
     ret = data_ptr;
@@ -399,7 +399,7 @@ void* HIP_SyncApiDataCallback(uint32_t op_id, roctracer_record_t* record, const 
     // popping the record entry
     if (!record_pair_stack->empty()) record_pair_stack->pop();
 
-    // Clearing correlatin ID
+    // Clearing correlation ID
     correlation_id_tls = 0;
   }
 
@@ -458,7 +458,7 @@ void* HIP_SyncActivityCallback(uint32_t op_id, roctracer_record_t* record,
     }
     record->correlation_id = correlation_id;
 
-    // Passing correlatin ID
+    // Passing correlation ID
     correlation_id_tls = correlation_id;
 
     ret = data_ptr;
@@ -493,7 +493,7 @@ void* HIP_SyncActivityCallback(uint32_t op_id, roctracer_record_t* record,
     // popping the record entry
     if (!record_pair_stack->empty()) record_pair_stack->pop();
 
-    // Clearing correlatin ID
+    // Clearing correlation ID
     correlation_id_tls = 0;
   }
 
@@ -614,7 +614,7 @@ MemoryPool* memory_pool = NULL;
 typedef std::recursive_mutex memory_pool_mutex_t;
 memory_pool_mutex_t memory_pool_mutex;
 
-// Stop sttaus routines and primitives
+// Stop status routines and primitives
 unsigned stop_status_value = 0;
 typedef std::mutex stop_status_mutex_t;
 stop_status_mutex_t stop_status_mutex;
@@ -634,7 +634,7 @@ TRACE_BUFFER_INSTANTIATE();
 //
 extern "C" {
 
-// Returns library vesrion
+// Returns library version
 PUBLIC_API uint32_t roctracer_version_major() { return ROCTRACER_VERSION_MAJOR; }
 PUBLIC_API uint32_t roctracer_version_minor() { return ROCTRACER_VERSION_MINOR; }
 
