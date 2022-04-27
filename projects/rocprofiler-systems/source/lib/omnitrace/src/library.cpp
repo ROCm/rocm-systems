@@ -1190,41 +1190,64 @@ omnitrace_finalize_hidden(void)
         OMNITRACE_VERBOSE_F(3, "Stopping the blocking perfetto trace sessions...\n");
         tracing_session->StopBlocking();
 
+        using char_vec_t = std::vector<char>;
         OMNITRACE_VERBOSE_F(3, "Getting the trace data...\n");
-        std::vector<char> trace_data{ tracing_session->ReadTraceBlocking() };
 
-        if(trace_data.empty())
-        {
-            fprintf(stderr,
-                    "[%s]> trace data is empty. File '%s' will not be written...\n",
-                    OMNITRACE_FUNCTION, get_perfetto_output_filename().c_str());
-            return;
-        }
-        // Write the trace into a file.
-        if(get_verbose() >= 0)
-            fprintf(stderr,
-                    "[%s][%s]|%i> Outputting '%s' (%.2f KB / %.2f MB / %.2f GB)... ",
-                    TIMEMORY_PROJECT_NAME, OMNITRACE_FUNCTION, dmp::rank(),
-                    get_perfetto_output_filename().c_str(),
-                    static_cast<double>(trace_data.size()) / units::KB,
-                    static_cast<double>(trace_data.size()) / units::MB,
-                    static_cast<double>(trace_data.size()) / units::GB);
-        std::ofstream ofs{};
-        if(!tim::filepath::open(ofs, get_perfetto_output_filename(),
-                                std::ios::out | std::ios::binary))
-        {
-            fprintf(stderr, "\n[%s]> Error opening '%s'...\n", OMNITRACE_FUNCTION,
-                    get_perfetto_output_filename().c_str());
-            _perfetto_output_error = true;
-        }
-        else
+#if defined(TIMEMORY_USE_MPI) && TIMEMORY_USE_MPI > 0
+        using perfetto_mpi_get_t = tim::operation::finalize::mpi_get<char_vec_t, true>;
+
+        char_vec_t              _trace_data{ tracing_session->ReadTraceBlocking() };
+        std::vector<char_vec_t> _rank_data = {};
+        auto _combine = [](char_vec_t& _dst, const char_vec_t& _src) -> char_vec_t& {
+            _dst.reserve(_dst.size() + _src.size());
+            for(auto&& itr : _src)
+                _dst.emplace_back(itr);
+            return _dst;
+        };
+
+        perfetto_mpi_get_t{ _rank_data, _trace_data, _combine };
+        auto trace_data = char_vec_t{};
+        for(auto& itr : _rank_data)
+            trace_data =
+                (trace_data.empty()) ? std::move(itr) : _combine(trace_data, itr);
+#else
+        char_vec_t trace_data{ tracing_session->ReadTraceBlocking() };
+#endif
+
+        if(!trace_data.empty())
         {
             // Write the trace into a file.
-            if(get_verbose() >= 0) fprintf(stderr, "Done\n");
-            ofs.write(&trace_data[0], trace_data.size());
+            if(get_verbose() >= 0)
+                fprintf(stderr,
+                        "[%s][%s]|%i> Outputting '%s' (%.2f KB / %.2f MB / %.2f GB)... ",
+                        TIMEMORY_PROJECT_NAME, OMNITRACE_FUNCTION, dmp::rank(),
+                        get_perfetto_output_filename().c_str(),
+                        static_cast<double>(trace_data.size()) / units::KB,
+                        static_cast<double>(trace_data.size()) / units::MB,
+                        static_cast<double>(trace_data.size()) / units::GB);
+            std::ofstream ofs{};
+            if(!tim::filepath::open(ofs, get_perfetto_output_filename(),
+                                    std::ios::out | std::ios::binary))
+            {
+                OMNITRACE_VERBOSE_F(0, "Error opening '%s'...\n",
+                                    get_perfetto_output_filename().c_str());
+                _perfetto_output_error = true;
+            }
+            else
+            {
+                // Write the trace into a file.
+                if(get_verbose() >= 0) fprintf(stderr, "Done\n");
+                ofs.write(&trace_data[0], trace_data.size());
+            }
+            ofs.close();
+            if(get_verbose() >= 0) fprintf(stderr, "\n");
         }
-        ofs.close();
-        if(get_verbose() >= 0) fprintf(stderr, "\n");
+        else if(dmp::rank() == 0)
+        {
+            OMNITRACE_VERBOSE_F(0,
+                                "trace data is empty. File '%s' will not be written...\n",
+                                get_perfetto_output_filename().c_str());
+        }
     }
 
     // shutdown tasking before timemory is finalized, especially the roctracer thread-pool

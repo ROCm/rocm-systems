@@ -10,6 +10,7 @@ add_subdirectory(parallel-overhead)
 add_subdirectory(code-coverage)
 add_subdirectory(user-api)
 add_subdirectory(openmp)
+add_subdirectory(mpi)
 
 if(CMAKE_VERSION VERSION_LESS 3.16 AND (NOT DEFINED LULESH_BUILD_KOKKOS
                                         OR LULESH_BUILD_KOKKOS))

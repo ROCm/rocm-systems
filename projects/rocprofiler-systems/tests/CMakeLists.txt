@@ -135,6 +135,8 @@ function(OMNITRACE_ADD_TEST)
             if(NOT TEST_NUM_PROCS GREATER NUM_PROCS_REAL)
                 set(COMMAND_PREFIX ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG}
                                    ${TEST_NUM_PROCS})
+                list(APPEND TEST_LABELS mpi parallel-${TEST_NUM_PROCS})
+                list(APPEND TEST_PROPERTIES PARALLEL_LEVEL ${TEST_NUM_PROCS})
             else()
                 set(COMMAND_PREFIX ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1)
             endif()
@@ -427,6 +429,36 @@ omnitrace_add_test(
         args
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
+
+omnitrace_add_test(
+    SKIP_RUNTIME
+    NAME "mpi"
+    TARGET mpi-example
+    MPI ON
+    NUM_PROCS 4
+    REWRITE_ARGS
+        -e
+        -v
+        2
+        --label
+        file
+        line
+        return
+        args
+        --min-instructions
+        0
+    RUNTIME_ARGS
+        -e
+        -v
+        1
+        --label
+        file
+        line
+        return
+        args
+        --min-instructions
+        0
+    ENVIRONMENT "${_base_environment}")
 
 omnitrace_add_test(
     NAME lulesh
