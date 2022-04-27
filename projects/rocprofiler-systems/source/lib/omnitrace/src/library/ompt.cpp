@@ -28,8 +28,6 @@
 
 #    include "library/components/fwd.hpp"
 #    include "library/components/user_region.hpp"
-#    include "library/config.hpp"
-#    include "library/debug.hpp"
 
 #    include <timemory/components/ompt.hpp>
 #    include <timemory/components/ompt/extern.hpp>
@@ -62,24 +60,18 @@ bool _init_toolset_off = (trait::runtime_enabled<ompt_toolset_t>::set(false), tr
 void
 setup()
 {
-    OMNITRACE_VERBOSE(1, "Setting up OMPT...\n");
-    trait::runtime_enabled<ompt_toolset_t>::set(config::get_use_ompt());
+    trait::runtime_enabled<ompt_toolset_t>::set(true);
     comp::user_ompt_bundle::global_init();
     comp::user_ompt_bundle::reset();
-    // provide environment variable for enabling/disabling
-    if(config::get_use_ompt())
-    {
-        tim::auto_lock_t lk{ tim::type_mutex<ompt_handle_t>() };
-        comp::user_ompt_bundle::configure<omnitrace::component::user_region>();
-        f_bundle =
-            std::make_unique<ompt_bundle_t>("ompt", quirk::config<quirk::auto_start>{});
-    }
+    tim::auto_lock_t lk{ tim::type_mutex<ompt_handle_t>() };
+    comp::user_ompt_bundle::configure<omnitrace::component::user_region>();
+    f_bundle =
+        std::make_unique<ompt_bundle_t>("ompt", quirk::config<quirk::auto_start>{});
 }
 
 void
 shutdown()
 {
-    OMNITRACE_VERBOSE(1, "Shutting down OMPT...\n");
     if(f_bundle)
     {
         f_bundle->stop();

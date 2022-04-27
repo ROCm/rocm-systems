@@ -174,6 +174,11 @@ configure_settings(bool _init)
                              "Enable statistical sampling of call-stack", false,
                              "backend", "sampling");
 
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_THREAD_SAMPLING",
+                             "Enable a background thread which samples system metrics "
+                             "such as the CPU/GPU freq, power, etc.",
+                             true, "backend", "sampling");
+
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_USE_PID",
         "Enable tagging filenames with process identifier (either MPI rank or pid)", true,
@@ -626,7 +631,9 @@ print_settings()
             return false;
         if(!get_use_perfetto() && _perfetto_options.count(_v) > 0) return false;
         if(!get_use_timemory() && _timemory_options.count(_v) > 0) return false;
-        if(!get_use_sampling() && _sample_options.count(_v) > 0) return false;
+        if(!get_use_sampling() && !get_use_thread_sampling() &&
+           _sample_options.count(_v) > 0)
+            return false;
         const auto npos = std::string::npos;
         if(_v.find("WIDTH") != npos || _v.find("SEPARATOR_FREQ") != npos ||
            _v.find("AUTO_OUTPUT") != npos || _v.find("DART_OUTPUT") != npos ||
@@ -799,6 +806,13 @@ get_use_sampling()
     static bool _v = false;
     return _v;
 #endif
+}
+
+bool&
+get_use_thread_sampling()
+{
+    static auto _v = get_config()->find("OMNITRACE_USE_THREAD_SAMPLING");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 bool&

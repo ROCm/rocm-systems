@@ -146,6 +146,9 @@ bool&
 get_use_sampling();
 
 bool&
+get_use_thread_sampling();
+
+bool&
 get_use_pid();
 
 bool&

@@ -62,20 +62,24 @@ get_cpu_cid_stack(int64_t _tid, int64_t _parent)
 {
     struct omnitrace_cpu_cid_stack
     {};
+    using init_data_t   = thread_data<bool, omnitrace_cpu_cid_stack>;
     using thread_data_t = thread_data<std::vector<uint64_t>, omnitrace_cpu_cid_stack>;
-    static auto&             _v      = thread_data_t::instances();
-    static thread_local auto _v_copy = [_tid, _parent]() {
+
+    static auto& _v = thread_data_t::instances(thread_data_t::construct_on_init{});
+    static auto& _b = init_data_t::instances(init_data_t::construct_on_init{}, false);
+
+    auto& _v_tid = _v.at(_tid);
+    if(_b.at(_tid) && !(*_b.at(_tid)))
+    {
+        *_b.at(_tid)     = true;
         auto _parent_tid = _parent;
         // if tid != parent and there is not a valid pointer for the provided parent
         // thread id set it to zero since that will always be valid
         if(_tid != _parent_tid && !_v.at(_parent_tid)) _parent_tid = 0;
         // copy over the thread ids from the parent if tid != parent
-        thread_data_t::construct((_tid != _parent_tid) ? *(_v.at(_parent_tid))
-                                                       : std::vector<uint64_t>{});
-        return true;
-    }();
-    return _v.at(_tid);
-    (void) _v_copy;
+        if(_tid != _parent_tid) *_v_tid = *_v.at(_parent_tid);
+    }
+    return _v_tid;
 }
 
 unique_ptr_t<cpu_cid_parent_map_t>&
@@ -92,12 +96,23 @@ get_cpu_cid_parents(int64_t _tid)
 std::tuple<uint64_t, uint64_t, uint16_t>
 create_cpu_cid_entry(int64_t _tid)
 {
-    auto&& _cid        = get_cpu_cid()++;
-    auto&& _parent_cid = (get_cpu_cid_stack(_tid)->empty()) ? get_cpu_cid_stack(0)->back()
-                                                            : get_cpu_cid_stack()->back();
-    uint16_t&& _depth  = (get_cpu_cid_stack(_tid)->empty())
-                             ? get_cpu_cid_stack(0)->size()
-                             : get_cpu_cid_stack()->size() - 1;
+    using tim::auto_lock_t;
+
+    // unique lock for _tid
+    auto&       _mtx = get_cpu_cid_stack_lock(_tid);
+    auto_lock_t _lk{ _mtx, std::defer_lock };
+    if(!_lk.owns_lock()) _lk.lock();
+
+    int64_t _p_idx = (get_cpu_cid_stack(_tid)->empty()) ? 0 : _tid;
+
+    auto&       _p_mtx = get_cpu_cid_stack_lock(_p_idx);
+    auto_lock_t _p_lk{ _p_mtx, std::defer_lock };
+    if(!_p_lk.owns_lock()) _p_lk.lock();
+
+    auto&&     _cid        = get_cpu_cid()++;
+    auto&&     _parent_cid = get_cpu_cid_stack(_p_idx)->back();
+    uint16_t&& _depth = get_cpu_cid_stack(_p_idx)->size() - ((_p_idx == _tid) ? 1 : 0);
+
     get_cpu_cid_parents(_tid)->emplace(_cid, std::make_tuple(_parent_cid, _depth));
     return std::make_tuple(_cid, _parent_cid, _depth);
 }
@@ -106,6 +121,14 @@ cpu_cid_pair_t
 get_cpu_cid_entry(uint64_t _cid, int64_t _tid)
 {
     return get_cpu_cid_parents(_tid)->at(_cid);
+}
+
+tim::mutex_t&
+get_cpu_cid_stack_lock(int64_t _tid)
+{
+    struct cpu_cid_stack_s
+    {};
+    return tim::type_mutex<cpu_cid_stack_s, api::omnitrace, max_supported_threads>(_tid);
 }
 
 namespace

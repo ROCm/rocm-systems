@@ -108,6 +108,8 @@ data::sample(uint32_t _dev_id)
     auto _ts = tim::get_clock_real_now<size_t, std::nano>();
     assert(_ts < std::numeric_limits<int64_t>::max());
 
+    if(get_state() != State::Active) return;
+
     m_dev_id = _dev_id;
     m_ts     = _ts;
 
@@ -153,17 +155,14 @@ config()
 void
 sample()
 {
-    if(rocm_smi::get_state() != State::Active) return;
-
     for(auto itr : data::device_list)
     {
-        OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug(),
-                                          "Polling rocm-smi for device %u...\n", itr);
+        if(rocm_smi::get_state() != State::Active) continue;
+        OMNITRACE_DEBUG_F("Polling rocm-smi for device %u...\n", itr);
         auto& _data = *_bundle_data.at(itr);
         if(!_data) continue;
         _data->emplace_back(data{ itr });
-        OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug(), "    %s\n",
-                                          TIMEMORY_JOIN("", _data->back()).c_str());
+        OMNITRACE_DEBUG_F("    %s\n", TIMEMORY_JOIN("", _data->back()).c_str());
     }
 }
 

@@ -86,4 +86,7 @@ create_cpu_cid_entry(int64_t _tid = threading::get_id());
 cpu_cid_pair_t
 get_cpu_cid_entry(uint64_t _cid, int64_t _tid = threading::get_id());
 
+tim::mutex_t&
+get_cpu_cid_stack_lock(int64_t _tid = threading::get_id());
+
 }  // namespace omnitrace

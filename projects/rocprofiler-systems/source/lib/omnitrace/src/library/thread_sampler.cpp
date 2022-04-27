@@ -62,6 +62,13 @@ get_sampler_state()
     static std::atomic<State> _v{ State::PreInit };
     return _v;
 }
+
+std::atomic<bool>&
+get_sampler_is_sampling()
+{
+    static std::atomic<bool> _v{ false };
+    return _v;
+}
 }  // namespace
 
 void
@@ -85,8 +92,10 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     {
         std::this_thread::sleep_until(_now);
         if(_state->load() != State::Active) continue;
+        get_sampler_is_sampling().store(true);
         for(auto& itr : instances)
             itr->sample();
+        get_sampler_is_sampling().store(false);
         while(_now < std::chrono::steady_clock::now())
             _now += _interval;
     }
@@ -100,6 +109,12 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 void
 sampler::setup()
 {
+    if(!get_use_thread_sampling())
+    {
+        OMNITRACE_DEBUG("Background sampler is disabled...\n");
+        return;
+    }
+
     OMNITRACE_VERBOSE(1, "Setting up background sampler...\n");
 
     // shutdown if already running
@@ -155,19 +170,20 @@ sampler::shutdown()
     auto& _thread = get_thread();
     if(_thread)
     {
-        OMNITRACE_VERBOSE(1, "Shutting down background sampler...\n");
         set_state(State::Finalized);
+        while(get_sampler_is_sampling().load())
+        {}
         if(polling_finished)
         {
             auto     _fut  = polling_finished->get_future();
             uint64_t _freq = (1.0 / get_thread_sampling_freq()) * 1.0e3;
-            _fut.wait_for(msec_t{ 5 * _freq });
+            _fut.wait_for(msec_t{ 10 * _freq });
             _thread->join();
         }
         else
         {
             uint64_t _freq = (1.0 / get_thread_sampling_freq()) * 1.0e3;
-            std::this_thread::sleep_for(msec_t{ 5 * _freq });
+            std::this_thread::sleep_for(msec_t{ 10 * _freq });
             pthread_cancel(_thread->native_handle());
             _thread->detach();
         }

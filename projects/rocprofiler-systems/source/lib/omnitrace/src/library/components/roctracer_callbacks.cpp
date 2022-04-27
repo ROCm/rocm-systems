@@ -645,39 +645,30 @@ hip_activity_callback(const char* begin, const char* end, void*)
             TRACE_EVENT_END("device", _end_ns);
         }
 
-        auto _func = [_critical_trace, _depth, _tid, _cid, _laps, _beg_ns, _end_ns,
-                      _corr_id, _name]() {
-            // NOTE #1: we get two measurements for 1 kernel so we need to
-            // tweak the number of laps for the wall-clock component
-            if(_name != nullptr)
-            {
-                if(get_use_timemory())
-                {
-                    roctracer_bundle_t _bundle{ _name, _scope };
-                    _bundle.start()
-                        .store(std::plus<double>{},
-                               static_cast<double>(_end_ns - _beg_ns))
-                        .stop()
-                        .get<comp::wall_clock>([&](comp::wall_clock* wc) {
-                            wc->set_value(_end_ns - _beg_ns);
-                            wc->set_accum(_end_ns - _beg_ns);
-                            return wc;
-                        });
-                    _bundle.pop();
-                }
-                if(_critical_trace)
-                {
-                    auto     _hash = critical_trace::add_hash_id(_name);
-                    uint16_t _prio = _laps + 1;  // priority
-                    add_critical_trace<Device::GPU, Phase::DELTA, false>(
-                        _tid, _cid, _corr_id, _cid, _beg_ns, _end_ns, _hash, _depth + 1,
-                        _prio);
-                }
-            }
-        };
-
-        if(_found)
+        if(_critical_trace)
         {
+            auto     _hash = critical_trace::add_hash_id(_name);
+            uint16_t _prio = _laps + 1;  // priority
+            add_critical_trace<Device::GPU, Phase::DELTA, false>(
+                _tid, _cid, _corr_id, _cid, _beg_ns, _end_ns, _hash, _depth + 1, _prio);
+        }
+
+        if(_found && _name != nullptr && get_use_timemory())
+        {
+            auto _func = [_depth, _tid, _cid, _laps, _beg_ns, _end_ns, _corr_id,
+                          _name]() {
+                roctracer_bundle_t _bundle{ _name, _scope };
+                _bundle.start()
+                    .store(std::plus<double>{}, static_cast<double>(_end_ns - _beg_ns))
+                    .stop()
+                    .get<comp::wall_clock>([&](comp::wall_clock* wc) {
+                        wc->set_value(_end_ns - _beg_ns);
+                        wc->set_accum(_end_ns - _beg_ns);
+                        return wc;
+                    });
+                _bundle.pop();
+            };
+
             auto&            _async_ops = get_hip_activity_callbacks(_tid);
             tim::auto_lock_t _lk{ get_hip_activity_mutex(_tid) };
             _async_ops->emplace_back(std::move(_func));
