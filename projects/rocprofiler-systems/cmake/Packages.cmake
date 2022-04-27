@@ -34,8 +34,9 @@ set(OMNITRACE_EXTENSION_LIBRARIES
     omnitrace::omnitrace-mpi omnitrace::omnitrace-ptl omnitrace::omnitrace-ompt
     omnitrace::omnitrace-papi)
 
-target_include_directories(omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/include
-                                                       ${PROJECT_BINARY_DIR}/include)
+target_include_directories(
+    omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/source/lib/omnitrace/include
+                                ${PROJECT_BINARY_DIR}/source/lib/omnitrace/include)
 
 # include threading because of rooflines
 target_link_libraries(omnitrace-headers INTERFACE omnitrace-threading)

@@ -253,11 +253,11 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
                 if(get_use_timemory())
                 {
-                    std::unique_lock<std::mutex> _lk{ tasking::get_roctracer_mutex() };
+                    std::unique_lock<std::mutex> _lk{ tasking::roctracer::get_mutex() };
                     auto                         _beg_ns = begin_timestamp;
                     auto                         _end_ns = end_timestamp;
-                    if(tasking::get_roctracer_task_group().pool())
-                        tasking::get_roctracer_task_group().exec(
+                    if(tasking::roctracer::get_task_group().pool())
+                        tasking::roctracer::get_task_group().exec(
                             [_name, _beg_ns, _end_ns]() {
                                 roctracer_hsa_bundle_t _bundle{ _name, _scope };
                                 _bundle.start()
@@ -324,9 +324,9 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
         }
     };
 
-    std::unique_lock<std::mutex> _lk{ tasking::get_roctracer_mutex() };
-    if(tasking::get_roctracer_task_group().pool())
-        tasking::get_roctracer_task_group().exec(_func);
+    std::unique_lock<std::mutex> _lk{ tasking::roctracer::get_mutex() };
+    if(tasking::roctracer::get_task_group().pool())
+        tasking::roctracer::get_task_group().exec(_func);
 
     // timemory is disabled in this callback because collecting data in this thread
     // causes strange segmentation faults
@@ -712,9 +712,6 @@ roctracer_shutdown_routines()
 #include "library/components/rocm_smi.hpp"
 
 using namespace omnitrace;
-
-extern "C" bool
-omnitrace_init_tooling_hidden() OMNITRACE_HIDDEN_API;
 
 // HSA-runtime tool on-load method
 extern "C"

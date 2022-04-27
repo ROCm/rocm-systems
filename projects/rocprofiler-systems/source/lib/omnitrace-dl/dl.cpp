@@ -192,8 +192,9 @@ struct OMNITRACE_HIDDEN_API indirect
 
 #if OMNITRACE_USE_OMPT == 0
         _warn_verbose = 5;
-#endif
+#else
         OMNITRACE_DLSYM(ompt_start_tool_f, m_omnihandle, "ompt_start_tool");
+#endif
 
         if(!m_userhandle) m_userhandle = open(m_userlib);
         _warn_verbose = 0;
@@ -251,7 +252,9 @@ public:
     int (*omnitrace_push_region_f)(const char*)                             = nullptr;
     int (*omnitrace_pop_region_f)(const char*)                              = nullptr;
     int (*omnitrace_user_configure_f)(int, void*, void*)                    = nullptr;
+#if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0
     ompt_start_tool_result_t* (*ompt_start_tool_f)(unsigned int, const char*);
+#endif
 
 private:
     void*       m_omnihandle = nullptr;
@@ -519,17 +522,13 @@ extern "C"
         return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_region_f, name);
     }
 
+#if OMNITRACE_USE_OMPT > 0
     ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,
                                               const char*  runtime_version)
     {
-#if OMNITRACE_USE_OMPT == 0
-        (void) omp_version;
-        (void) runtime_version;
-        return nullptr;
-#else
         if(!omnitrace::common::get_env("OMNITRACE_USE_OMPT", true)) return nullptr;
         return OMNITRACE_DL_INVOKE(get_indirect().ompt_start_tool_f, omp_version,
                                    runtime_version);
-#endif
     }
+#endif
 }

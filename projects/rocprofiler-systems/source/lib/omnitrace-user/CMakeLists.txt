@@ -22,20 +22,6 @@ target_include_directories(
 target_link_libraries(omnitrace-user-library
                       PRIVATE $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>)
 
-check_cxx_compiler_flag("-fno-exceptions" omnitrace_user_library_fno_exceptions)
-check_cxx_compiler_flag("-ftls-model=local-dynamic"
-                        omnitrace_user_library_ftls_module_local_dynamic)
-
-if(OMNITRACE_BUILD_DEVELOPER)
-    if(omnitrace_user_library_fno_exceptions)
-        target_compile_options(omnitrace-user-library PRIVATE -fno-exceptions)
-    endif()
-
-    if(omnitrace_user_library_ftls_module_local_dynamic)
-        target_compile_options(omnitrace-user-library PRIVATE -ftls-model=local-dynamic)
-    endif()
-endif()
-
 set_target_properties(
     omnitrace-user-library
     PROPERTIES OUTPUT_NAME omnitrace-user

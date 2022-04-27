@@ -70,6 +70,7 @@ extern "C"
 
     // these are the real implementations for internal calling convention
     void omnitrace_init_library_hidden(void) OMNITRACE_HIDDEN_API;
+    bool omnitrace_init_tooling_hidden(void) OMNITRACE_HIDDEN_API;
     void omnitrace_init_hidden(const char*, bool, const char*) OMNITRACE_HIDDEN_API;
     void omnitrace_finalize_hidden(void) OMNITRACE_HIDDEN_API;
     void omnitrace_set_env_hidden(const char* env_name,

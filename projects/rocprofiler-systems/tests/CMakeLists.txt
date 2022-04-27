@@ -448,7 +448,8 @@ omnitrace_add_test(
         [==[lib(gomp|m-)]==]
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
-        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF")
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace.so"
+    )
 
 omnitrace_add_test(
     SKIP_BASELINE

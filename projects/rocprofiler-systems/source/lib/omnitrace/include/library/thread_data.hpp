@@ -134,8 +134,8 @@ template <typename... Args>
 typename thread_data<Tp, Tag, MaxThreads>::instance_array_t&
 thread_data<Tp, Tag, MaxThreads>::instances(construct_on_init, Args&&... _args)
 {
-    static auto _v = [&]() {
-        auto _internal = instance_array_t{};
+    static auto& _v = [&]() -> instance_array_t& {
+        auto& _internal = instances();
         for(size_t i = 0; i < MaxThreads; ++i)
             _internal.at(i) = unique_ptr_t<Tp>{ new Tp(std::forward<Args>(_args)...) };
         return _internal;

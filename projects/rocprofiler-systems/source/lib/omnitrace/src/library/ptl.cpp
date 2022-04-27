@@ -53,45 +53,119 @@ auto _thread_pool_cfg = []() {
 }();
 }
 
+namespace roctracer
+{
+namespace
+{
+auto&
+get_thread_pool_state()
+{
+    static auto _v = State::PreInit;
+    return _v;
+}
+}  // namespace
+}  // namespace roctracer
+
+namespace critical_trace
+{
+namespace
+{
+auto&
+get_thread_pool_state()
+{
+    static auto _v = State::PreInit;
+    return _v;
+}
+}  // namespace
+}  // namespace critical_trace
+
+void
+setup()
+{}
+
+void
+join()
+{
+    if(roctracer::get_thread_pool_state() == State::Active)
+    {
+        OMNITRACE_DEBUG_F("waiting for all roctracer tasks to complete...\n");
+        tasking::roctracer::get_task_group().join();
+    }
+
+    if(critical_trace::get_thread_pool_state() == State::Active)
+    {
+        OMNITRACE_DEBUG_F("waiting for all critical tasks to complete...\n");
+        tasking::critical_trace::get_task_group().join();
+    }
+}
+
+void
+shutdown()
+{
+    if(roctracer::get_thread_pool_state() == State::Active)
+    {
+        OMNITRACE_DEBUG_F("Destroying the roctracer thread pool...\n");
+        std::unique_lock<std::mutex> _lk{ roctracer::get_mutex() };
+        roctracer::get_task_group().join();
+        roctracer::get_task_group().clear();
+        roctracer::get_task_group().set_pool(nullptr);
+        roctracer::get_thread_pool().destroy_threadpool();
+        roctracer::get_thread_pool_state() = State::Finalized;
+    }
+
+    if(critical_trace::get_thread_pool_state() == State::Active)
+    {
+        OMNITRACE_DEBUG_F("Destroying the critical trace thread pool...\n");
+        std::unique_lock<std::mutex> _lk{ critical_trace::get_mutex() };
+        critical_trace::get_task_group().join();
+        critical_trace::get_task_group().clear();
+        critical_trace::get_task_group().set_pool(nullptr);
+        critical_trace::get_thread_pool().destroy_threadpool();
+        critical_trace::get_thread_pool_state() = State::Finalized;
+    }
+}
+
 std::mutex&
-get_roctracer_mutex()
+roctracer::get_mutex()
 {
     static std::mutex _v{};
     return _v;
 }
 
 PTL::ThreadPool&
-get_roctracer_thread_pool()
+roctracer::get_thread_pool()
 {
-    static auto _v = PTL::ThreadPool{ _thread_pool_cfg };
+    static auto _v = (roctracer::get_thread_pool_state() = State::Active,
+                      PTL::ThreadPool{ _thread_pool_cfg });
     return _v;
 }
 
 PTL::TaskGroup<void>&
-get_roctracer_task_group()
+roctracer::get_task_group()
 {
-    static PTL::TaskGroup<void> _v{ &get_roctracer_thread_pool() };
+    static PTL::TaskGroup<void> _v{ &roctracer::get_thread_pool() };
     return _v;
 }
 
 std::mutex&
-get_critical_trace_mutex()
+critical_trace::get_mutex()
 {
     static std::mutex _v{};
     return _v;
 }
 
 PTL::ThreadPool&
-get_critical_trace_thread_pool()
+critical_trace::get_thread_pool()
 {
-    static auto _v = PTL::ThreadPool{ _thread_pool_cfg };
+    static auto _v = (critical_trace::get_thread_pool_state() = State::Active,
+                      PTL::ThreadPool{ _thread_pool_cfg });
     return _v;
 }
 
 PTL::TaskGroup<void>&
-get_critical_trace_task_group()
+critical_trace::get_task_group()
 {
-    static PTL::TaskGroup<void> _v{ &get_critical_trace_thread_pool() };
+    static PTL::TaskGroup<void> _v{ &critical_trace::get_thread_pool() };
     return _v;
 }
 

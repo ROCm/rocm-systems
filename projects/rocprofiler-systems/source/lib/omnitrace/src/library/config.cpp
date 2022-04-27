@@ -469,8 +469,8 @@ configure_settings(bool _init)
                 auto _info =
                     ::tim::signal_settings::get_info(static_cast<tim::sys_signal>(_v));
                 OMNITRACE_CONDITIONAL_BASIC_PRINT(
-                    get_verbose_env() > 0 || get_debug_env(),
-                    "signal %s (%i) ignored (OMNITRACE_IGNORE_DYNINST_TRAMPOLINE=ON)",
+                    get_verbose_env() >= 2 || get_debug_env(),
+                    "signal %s (%i) ignored (OMNITRACE_IGNORE_DYNINST_TRAMPOLINE=ON)\n",
                     std::get<0>(_info).c_str(), _v);
                 if(get_verbose_env() > 1 || get_debug_env())
                     ::tim::print_demangled_backtrace<64>();

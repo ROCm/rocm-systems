@@ -32,22 +32,55 @@ namespace omnitrace
 {
 namespace tasking
 {
+void
+setup();
+
+void
+join();
+
+void
+shutdown();
+
+//--------------------------------------------------------------------------------------//
+//
+//      roctracer
+//
+//--------------------------------------------------------------------------------------//
+
+namespace roctracer
+{
 std::mutex&
-get_roctracer_mutex();
+get_mutex();
 
 PTL::ThreadPool&
-get_roctracer_thread_pool();
+get_thread_pool();
 
 PTL::TaskGroup<void>&
-get_roctracer_task_group();
+get_task_group();
 
+bool
+get_thread_pool_is_active();
+}  // namespace roctracer
+
+//--------------------------------------------------------------------------------------//
+//
+//      critical trace
+//
+//--------------------------------------------------------------------------------------//
+
+namespace critical_trace
+{
 std::mutex&
-get_critical_trace_mutex();
+get_mutex();
 
 PTL::ThreadPool&
-get_critical_trace_thread_pool();
+get_thread_pool();
 
 PTL::TaskGroup<void>&
-get_critical_trace_task_group();
+get_task_group();
+
+bool
+get_thread_pool_is_active();
+}  // namespace critical_trace
 }  // namespace tasking
 }  // namespace omnitrace

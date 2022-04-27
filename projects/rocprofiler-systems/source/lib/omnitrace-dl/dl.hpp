@@ -80,9 +80,11 @@ extern "C"
     int omnitrace_user_push_region_dl(const char*) OMNITRACE_HIDDEN_API;
     int omnitrace_user_pop_region_dl(const char*) OMNITRACE_HIDDEN_API;
 
+#    if OMNITRACE_USE_OMPT > 0
     struct ompt_start_tool_result_t;
 
     ompt_start_tool_result_t* ompt_start_tool(unsigned int,
                                               const char*) OMNITRACE_PUBLIC_API;
+#    endif
 #endif
 }

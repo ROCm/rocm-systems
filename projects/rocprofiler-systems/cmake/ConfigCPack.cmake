@@ -186,7 +186,7 @@ endif()
 string(REPLACE ";" ", " _DEBIAN_PACKAGE_DEPENDS "${_DEBIAN_PACKAGE_DEPENDS}")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
     "${_DEBIAN_PACKAGE_DEPENDS}"
-    CACHE STRING "Debian package dependencies")
+    CACHE STRING "Debian package dependencies" FORCE)
 omnitrace_add_feature(CPACK_DEBIAN_PACKAGE_DEPENDS "Debian package dependencies")
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 

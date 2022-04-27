@@ -10,6 +10,8 @@
 : ${PYTHON_VERSIONS:="6 7 8 9"}
 : ${GENERATORS:="STGZ DEB RPM"}
 : ${MPI_IMPL:="openmpi"}
+: ${CLEAN:=0}
+: ${FRESH:=0}
 
 if [ -z "${DISTRO}" ]; then
     if [ -f /etc/os-release ]; then
@@ -65,7 +67,14 @@ build-and-package-base()
 {
     local DIR=${1}
     shift
+    if [ "${FRESH}" -gt 0 ]; then
+        verbose-run rm -rf ${BUILD_DIR}/${DIR}/*
+    fi
     verbose-run cmake -B ${BUILD_DIR}/${DIR} -DCMAKE_INSTALL_PREFIX=${BUILD_DIR}/${DIR}/install-release ${STANDARD_ARGS} $@ .
+    if [ "${CLEAN}" -gt 0 ]; then
+        verbose-run cmake --build ${BUILD_DIR}/${DIR} --target clean
+    fi
+    verbose-run cmake --build ${BUILD_DIR}/${DIR} --target all --parallel ${NJOBS}
     verbose-run cmake --build ${BUILD_DIR}/${DIR} --target all --parallel ${NJOBS}
     pushd ${BUILD_DIR}/${DIR}
     verbose-run rm -f *.sh *.deb *.rpm
@@ -107,14 +116,14 @@ build-and-package-python()
 {
     local DIR=${1}
     shift
+    local _PYTHON_ENVS=""
     for i in ${PYTHON_VERSIONS}
     do
         conda activate py3.${i}
-        _PYTHON_VERS="${_PYTHON_VERS}3.${i};"
-        _PYTHON_DIRS="${_PYTHON_DIRS}$(dirname $(dirname $(which python)));"
+        _PYTHON_ENVS="${_PYTHON_ENVS}$(dirname $(dirname $(which python)));"
         conda deactivate
     done
-    build-and-package-base ${DIR}-python $@ -DOMNITRACE_USE_PYTHON=ON -DOMNITRACE_BUILD_PYTHON=ON -DOMNITRACE_PYTHON_VERSIONS=\"${_PYTHON_VERS}\" -DOMNITRACE_PYTHON_ROOT_DIRS=\"${_PYTHON_DIRS}\"
+    build-and-package-base ${DIR}-python $@ -DOMNITRACE_USE_PYTHON=ON -DOMNITRACE_BUILD_PYTHON=ON -DOMNITRACE_PYTHON_ENVS=\"${_PYTHON_ENVS}\"
 }
 
 build-and-package()
@@ -156,6 +165,17 @@ do
     shift
     VAL=0
 
+    case "${ARG}" in
+        --clean)
+            CLEAN=1
+            continue
+            ;;
+        --fresh)
+            FRESH=1
+            continue
+            ;;
+    esac
+
     while [[ $# -gt 0 ]]
     do
         if [ "$1" = "-python" ]; then
@@ -188,6 +208,10 @@ do
             ;;
         --mpi-impl)
             MPI_IMPL=${1}
+            shift
+            ;;
+        --clean)
+            CLEAN=1
             shift
             ;;
         *)

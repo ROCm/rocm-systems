@@ -1367,7 +1367,7 @@ main(int argc, char** argv)
         }
         else
         {
-            verbprintf(0, "using '%s' and '%s' in lieu of '%s'...", "_init", "_fini",
+            verbprintf(0, "using '%s' and '%s' in lieu of '%s'...\n", "_init", "_fini",
                        main_fname.c_str());
         }
     }

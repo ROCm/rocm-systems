@@ -401,6 +401,24 @@ function(OMNITRACE_ADD_OPTION _NAME _MESSAGE _DEFAULT)
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
+# function omnitrace_report_feature_changes() :: print changes in features
+#
+function(OMNITRACE_REPORT_FEATURE_CHANGES)
+    get_property(_features GLOBAL PROPERTY ${PROJECT_NAME}_FEATURES)
+    if(NOT "${_features}" STREQUAL "")
+        list(REMOVE_DUPLICATES _features)
+        list(SORT _features)
+    endif()
+    foreach(_feature ${_features})
+        if("${ARGN}" STREQUAL "")
+            omnitrace_watch_for_change(${_feature})
+        elseif("${_feature}" IN_LIST ARGN)
+            omnitrace_watch_for_change(${_feature})
+        endif()
+    endforeach()
+endfunction()
+
+# ----------------------------------------------------------------------------------------#
 # function print_enabled_features() Print enabled  features plus their docstrings.
 #
 function(OMNITRACE_PRINT_ENABLED_FEATURES)
@@ -481,6 +499,7 @@ endfunction()
 # function print_features() Print all features plus their docstrings.
 #
 function(OMNITRACE_PRINT_FEATURES)
+    omnitrace_report_feature_changes()
     omnitrace_print_enabled_features()
     omnitrace_print_disabled_features()
 endfunction()

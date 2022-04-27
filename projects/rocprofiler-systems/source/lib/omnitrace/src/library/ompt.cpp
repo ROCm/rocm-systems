@@ -24,7 +24,7 @@
 
 #include <timemory/defines.h>
 
-#if defined(TIMEMORY_USE_OMPT)
+#if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0
 
 #    include "library/components/fwd.hpp"
 #    include "library/components/user_region.hpp"

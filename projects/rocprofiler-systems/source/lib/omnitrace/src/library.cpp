@@ -45,6 +45,7 @@
 #include <string_view>
 
 using namespace omnitrace;
+using tim::type_list;
 
 //======================================================================================//
 
@@ -59,16 +60,13 @@ struct user_regions
 using omni_functors = omnitrace::component::functors<omni_regions>;
 using user_functors = omnitrace::component::functors<user_regions>;
 
-// TIMEMORY_DEFINE_NAME_TRAIT("host", omni_functors);
-// TIMEMORY_DEFINE_NAME_TRAIT("user", user_functors);
+TIMEMORY_DEFINE_NAME_TRAIT("host", omni_functors);
+TIMEMORY_DEFINE_NAME_TRAIT("user", user_functors);
 
 TIMEMORY_INVOKE_PREINIT(omni_functors)
 TIMEMORY_INVOKE_PREINIT(user_functors)
 
 //======================================================================================//
-
-extern "C" bool
-omnitrace_init_tooling_hidden() OMNITRACE_HIDDEN_API;
 
 namespace
 {
@@ -100,15 +98,14 @@ get_timemory_hash_aliases(int64_t _tid = threading::get_id())
 auto
 ensure_finalization(bool _static_init = false)
 {
-    auto _main_tid = threading::get_id();
-    (void) _main_tid;
+    (void) threading::get_id();
     if(!_static_init)
     {
         OMNITRACE_DEBUG_F("\n");
     }
     else
     {
-        OMNITRACE_CONDITIONAL_PRINT_F(get_debug_env(), "\n");
+        OMNITRACE_BASIC_DEBUG_F("\n");
         // This environment variable forces the ROCR-Runtime to use polling to wait
         // for signals rather than interrupts. We set this variable to avoid issues with
         // rocm/roctracer hanging when interrupted by the sampler
@@ -522,6 +519,10 @@ omnitrace_init_library_hidden()
         tim::set_env("KOKKOS_PROFILE_LIBRARY", "libomnitrace.so", _force);
     }
 
+    // recycle all subsequent thread ids
+    threading::recycle_ids() =
+        tim::get_env<bool>("OMNITRACE_RECYCLE_TIDS", !get_use_sampling());
+
 #if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
     tim::set_env("HSA_TOOLS_LIB", "libomnitrace.so", 0);
 #endif
@@ -721,27 +722,17 @@ omnitrace_init_tooling_hidden()
     };
 
     // functors for starting and stopping perfetto omni functors
-    auto _push_perfetto = [](const char* name) {
-        uint64_t _ts = comp::wall_clock::record();
-        TRACE_EVENT_BEGIN("host", perfetto::StaticString(name), _ts);
+    auto _push_perfetto = [](auto _category, const char* name) {
+        using CategoryT = std::decay_t<decltype(_category)>;
+        uint64_t _ts    = comp::wall_clock::record();
+        TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name),
+                          _ts);
     };
 
-    auto _pop_perfetto = [](const char*) {
-        uint64_t _ts = comp::wall_clock::record();
-        TRACE_EVENT_END("host", _ts);
-    };
-
-    // functors for starting and stopping perfetto user functors
-    auto _push_user_perfetto = [](const char* name) {
-        uint64_t _ts = comp::wall_clock::record();
-        TRACE_EVENT_BEGIN("user", nullptr, _ts, [name](perfetto::EventContext& _ctx) {
-            _ctx.event()->set_name(name);
-        });
-    };
-
-    auto _pop_user_perfetto = [](const char*) {
-        uint64_t _ts = comp::wall_clock::record();
-        TRACE_EVENT_END("user", _ts);
+    auto _pop_perfetto = [](auto _category, const char*) {
+        using CategoryT = std::decay_t<decltype(_category)>;
+        uint64_t _ts    = comp::wall_clock::record();
+        TRACE_EVENT_END(trait::name<CategoryT>::value, _ts);
     };
 
     if(get_use_perfetto() && get_use_timemory())
@@ -749,23 +740,23 @@ omnitrace_init_tooling_hidden()
         omni_functors::configure(
             [=](const char* name) {
                 _thread_init();
-                _push_perfetto(name);
+                _push_perfetto(type_list<omni_functors>{}, name);
                 _push_timemory(name);
                 _setup_thread_sampling();
             },
             [=](const char* name) {
                 _pop_timemory(name);
-                _pop_perfetto(name);
+                _pop_perfetto(type_list<omni_functors>{}, name);
             });
         user_functors::configure(
             [=](const char* name) {
                 _thread_init();
-                _push_user_perfetto(name);
+                _push_perfetto(type_list<user_functors>{}, name);
                 _push_timemory(name);
             },
             [=](const char* name) {
                 _pop_timemory(name);
-                _pop_user_perfetto(name);
+                _pop_perfetto(type_list<user_functors>{}, name);
             });
     }
     else if(get_use_perfetto())
@@ -773,17 +764,17 @@ omnitrace_init_tooling_hidden()
         omni_functors::configure(
             [=](const char* name) {
                 _thread_init();
-                _push_perfetto(name);
+                _push_perfetto(type_list<omni_functors>{}, name);
                 _setup_thread_sampling();
             },
-            [=](const char* name) { _pop_perfetto(name); });
+            [=](const char* name) { _pop_perfetto(type_list<omni_functors>{}, name); });
         user_functors::configure(
             [=](const char* name) {
                 _thread_init();
-                _push_user_perfetto(name);
+                _push_perfetto(type_list<user_functors>{}, name);
                 _setup_thread_sampling();
             },
-            [=](const char* name) { _pop_user_perfetto(name); });
+            [=](const char* name) { _pop_perfetto(type_list<user_functors>{}, name); });
     }
     else if(get_use_timemory())
     {
@@ -935,6 +926,9 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
 extern "C" void
 omnitrace_finalize_hidden(void)
 {
+    // disable thread id recycling during finalization
+    threading::recycle_ids() = false;
+
     // return if not active
     if(get_state() != State::Active)
     {
@@ -1062,8 +1056,7 @@ omnitrace_finalize_hidden(void)
     }
 
     // join extra thread(s) used by roctracer
-    OMNITRACE_DEBUG_F("waiting for all roctracer tasks to complete...\n");
-    tasking::get_roctracer_task_group().join();
+    tasking::join();
 
     // print out thread-data if they are not still running
     // if they are still running (e.g. thread-pool still alive), the
@@ -1111,7 +1104,7 @@ omnitrace_finalize_hidden(void)
     {
         OMNITRACE_DEBUG_F("Generating the critical trace...\n");
         // increase the thread-pool size
-        tasking::get_critical_trace_thread_pool().initialize_threadpool(
+        tasking::critical_trace::get_thread_pool().initialize_threadpool(
             get_critical_trace_num_threads());
 
         for(size_t i = 0; i < max_supported_threads; ++i)
@@ -1138,15 +1131,14 @@ omnitrace_finalize_hidden(void)
     if(get_use_critical_trace())
     {
         // make sure outstanding hash tasks completed before compute
-        OMNITRACE_PRINT_F("waiting for all critical trace tasks to complete...\n");
-        tasking::get_critical_trace_task_group().join();
+        tasking::join();
 
         // launch compute task
         OMNITRACE_PRINT_F("launching critical trace compute task...\n");
         critical_trace::compute();
     }
 
-    tasking::get_critical_trace_task_group().join();
+    tasking::join();
 
     bool _perfetto_output_error = false;
     if(get_use_perfetto() && !is_system_backend())
@@ -1200,25 +1192,8 @@ omnitrace_finalize_hidden(void)
         if(get_verbose() >= 0) fprintf(stderr, "\n");
     }
 
-    // these should be destroyed before timemory is finalized, especially the
-    // roctracer thread-pool
-    OMNITRACE_DEBUG_F("Destroying the roctracer thread pool...\n");
-    {
-        std::unique_lock<std::mutex> _lk{ tasking::get_roctracer_mutex() };
-        tasking::get_roctracer_task_group().join();
-        tasking::get_roctracer_task_group().clear();
-        tasking::get_roctracer_task_group().set_pool(nullptr);
-        tasking::get_roctracer_thread_pool().destroy_threadpool();
-    }
-
-    OMNITRACE_DEBUG_F("Destroying the critical trace thread pool...\n");
-    {
-        std::unique_lock<std::mutex> _lk{ tasking::get_critical_trace_mutex() };
-        tasking::get_critical_trace_task_group().join();
-        tasking::get_critical_trace_task_group().clear();
-        tasking::get_critical_trace_task_group().set_pool(nullptr);
-        tasking::get_critical_trace_thread_pool().destroy_threadpool();
-    }
+    // shutdown tasking before timemory is finalized, especially the roctracer thread-pool
+    tasking::shutdown();
 
     coverage::post_process();
 

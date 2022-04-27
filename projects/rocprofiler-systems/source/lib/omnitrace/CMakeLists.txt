@@ -25,12 +25,12 @@ target_link_libraries(
         $<BUILD_INTERFACE:omnitrace::omnitrace-threading>
         $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
         $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-timemory>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
         $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
         $<BUILD_INTERFACE:omnitrace::omnitrace-roctracer>
         $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-timemory>
         $<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,$<BUILD_INTERFACE:omnitrace::omnitrace-static-libgcc>,>
         $<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBSTDCXX}>,$<BUILD_INTERFACE:omnitrace::omnitrace-static-libstdcxx>,>
         $<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>)
