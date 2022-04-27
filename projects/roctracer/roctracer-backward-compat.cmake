@@ -25,29 +25,19 @@ set(ROCT_WRAPPER_INC_DIR ${ROCT_WRAPPER_DIR}/include)
 set(ROCT_WRAPPER_LIB_DIR ${ROCT_WRAPPER_DIR}/lib)
 set(ROCT_WRAPPER_TOOL_DIR ${ROCT_WRAPPER_DIR}/tool)
 
-#Function to generate header template file
-function(create_header_template)
-    file(WRITE ${ROCT_WRAPPER_DIR}/header.hpp.in "/*
-    Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+#Function to set actual file contents in wrapper files
+#Some components grep for the contents in the file
+function(set_file_contents input_file)
+    set(hashzero_check "#if 0  //Area for original file dump\n
+/* The following is a copy of the original file for the benefit of build systems which grep for values
+ * in this file rather than preprocess it. This is just for backward compatibility */")
 
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the \"Software\"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in
-    all copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   THE SOFTWARE.
-   */\n\n#ifndef @include_guard@\n#define @include_guard@ \n\n#pragma message(\"This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with roctracer\")\n@include_statements@ \n\n#endif")
+    file(READ ${input_file} file_contents)
+    set(original_contents "${hashzero_check}\n
+${file_contents}
+#endif")
+    get_filename_component(file_name ${input_file} NAME)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
 endfunction()
 
 #use header template file and generate wrapper header files
@@ -58,33 +48,33 @@ function(generate_wrapper_header)
     #set include  guard
     get_filename_component(INC_GAURD_NAME ${header_file} NAME_WE)
     string(TOUPPER ${INC_GAURD_NAME} INC_GAURD_NAME)
-    set(include_guard "${include_guard}ROCTRACER_WRAPPER_INCLUDE_${INC_GAURD_NAME}_H")
+    set(include_guard "ROCTRACER_WRAPPER_INCLUDE_${INC_GAURD_NAME}_H")
     #set include statements
     get_filename_component(file_name ${header_file} NAME)
     get_filename_component ( header_subdir ${header_file} DIRECTORY )
     if(header_subdir)
-      set(include_statements "${include_statements}#include \"../../../include/${ROCTRACER_NAME}/${header_subdir}/${file_name}\"\n")
-      configure_file(${ROCT_WRAPPER_DIR}/header.hpp.in ${ROCT_WRAPPER_INC_DIR}/${header_subdir}/${file_name})
+      set(include_statements "#include \"../../../include/${ROCTRACER_NAME}/${header_subdir}/${file_name}\"\n")
+      configure_file(${CMAKE_CURRENT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${header_subdir}/${file_name})
     else()
-      set(include_statements "${include_statements}#include \"../../include/${ROCTRACER_NAME}/${file_name}\"\n")
-      configure_file(${ROCT_WRAPPER_DIR}/header.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
+      set(include_statements "#include \"../../include/${ROCTRACER_NAME}/${file_name}\"\n")
+      if(${file_name} STREQUAL "roctracer.h")
+        set_file_contents(${CMAKE_CURRENT_SOURCE_DIR}/inc/${file_name})
+      else()
+        configure_file(${CMAKE_CURRENT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
+      endif()
     endif()
-    unset(include_guard)
-    unset(include_statements)
   endforeach()
 
   foreach(header_file ${GEN_HEADERS})
     #set include  guard
     get_filename_component(INC_GAURD_NAME ${header_file} NAME_WE)
     string(TOUPPER ${INC_GAURD_NAME} INC_GAURD_NAME)
-    set(include_guard "${include_guard}ROCTRACER_WRAPPER_INCLUDE_${INC_GAURD_NAME}_H")
+    set(include_guard "ROCTRACER_WRAPPER_INCLUDE_${INC_GAURD_NAME}_H")
     #set include statements
     get_filename_component(file_name ${header_file} NAME)
-    set(include_statements "${include_statements}#include \"../../include/${ROCTRACER_NAME}/${file_name}\"\n")
-    configure_file(${ROCT_WRAPPER_DIR}/header.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
+    set(include_statements "#include \"../../include/${ROCTRACER_NAME}/${file_name}\"\n")
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
 
-    unset(include_guard)
-    unset(include_statements)
   endforeach()
 
 endfunction()
@@ -117,8 +107,6 @@ function(create_library_symlink)
                   ../../lib/${ROCTRACER_NAME}/${LIB_ROCTRACERTOOL} ${ROCT_WRAPPER_TOOL_DIR}/${LIB_TRACERTOOL})
 endfunction()
 
-#Creater a template for header file
-create_header_template()
 #Use template header file and generater wrapper header files
 generate_wrapper_header()
 install(DIRECTORY ${ROCT_WRAPPER_INC_DIR} DESTINATION ${ROCTRACER_NAME})
