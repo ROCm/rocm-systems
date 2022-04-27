@@ -45,6 +45,7 @@ template <uint32_t N> class CallbackTable {
 
   void Get(uint32_t id, activity_rtapi_callback_t* callback, void** arg) const {
     assert(id < N && "id is out of range");
+    assert(callback != nullptr && arg != nullptr && "invalid arguments");
     std::lock_guard lock(mutex_);
     std::tie(*callback, *arg) = callbacks_[id];
   }

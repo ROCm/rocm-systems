@@ -230,7 +230,7 @@ PUBLIC_API bool RegisterApiCallback(uint32_t op, void* callback, void* arg) {
 
 PUBLIC_API bool RemoveApiCallback(uint32_t op) {
   if (op >= ROCTX_API_ID_NUMBER) return false;
-  roctx::cb_table.Get(op, NULL, NULL);
+  roctx::cb_table.Set(op, nullptr, nullptr);
   return true;
 }
 
