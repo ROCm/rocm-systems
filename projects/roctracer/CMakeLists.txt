@@ -29,7 +29,7 @@ set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
 set ( ROCTRACER_NAME "roctracer" )
 set ( ROCTRACER_TARGET "${ROCTRACER_NAME}64" )
 set ( ROCTRACER_LIBRARY "lib${ROCTRACER_TARGET}" )
-project ( ${ROCTRACER_TARGET} )
+project ( ${ROCTRACER_TARGET} VERSION 4.0.0)
 
 ## Adding default path cmake modules
 list ( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
@@ -202,5 +202,38 @@ set ( CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post" 
 set ( CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun" )
 
 include ( CPack )
+
+endif()
+
+find_package(Doxygen)
+if(DOXYGEN_FOUND)
+  # set input and output files
+  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in)
+  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+
+  # request to configure the file
+  configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/doc/html/index.html ${CMAKE_CURRENT_BINARY_DIR}/doc/latex/refman.pdf
+    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+    COMMAND make -C ${CMAKE_CURRENT_BINARY_DIR}/doc/latex pdf
+    MAIN_DEPENDENCY ${DOXYGEN_OUT} ${DOXYGEN_IN}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer.h
+    COMMENT "Generating documentation")
+
+  add_custom_target(doc DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/doc/html/index.html
+    ${CMAKE_CURRENT_BINARY_DIR}/doc/latex/refman.pdf)
+
+  install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/doc/latex/refman.pdf"
+    DESTINATION share/doc/roctracer
+    RENAME "roctracer.pdf"
+    OPTIONAL)
+
+  install(DIRECTORY
+    "${CMAKE_CURRENT_BINARY_DIR}/doc/html/"
+    DESTINATION share/html/roctracer
+    OPTIONAL)
 
 endif()
