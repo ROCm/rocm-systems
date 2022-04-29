@@ -1417,7 +1417,7 @@ def showClocks(deviceList):
                             printLog(device, str(x), str(fr))
                     printLog(device, '', None)
             else:
-                printErrLog(device, '%s frequency is unsupported' % (clk_type))
+                logging.debug('{} frequency is unsupported on device[{}]'.format(clk_type, device))
                 printLog(device, '', None)
         if rocmsmi.rsmi_dev_pci_bandwidth_get(device, None) == 1:
             ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
@@ -1432,7 +1432,7 @@ def showClocks(deviceList):
                         printLog(device, str(x), str(fr))
                 printLog(device, '', None)
         else:
-            printErrLog(device, 'PCIe frequency is unsupported')
+            logging.debug('PCIe frequency is unsupported on device [{}]'.format(device))
             printLog(device, '', None)
         printLogSpacer(None, '-')  # divider between devices for better visibility
     printLogSpacer()
@@ -1481,7 +1481,7 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                         else:
                             printLog(device, '%s clock level: %s' % (clk_type, levl), '(%sMhz)' % (str(fr)[:-2]))
                 else:
-                    printErrLog(device, '%s clock is unsupported' % (clk_type))
+                    logging.debug('{} clock is unsupported on device[{}]'.format(clk_type, device))
             # pcie clocks
             if rocmsmi.rsmi_dev_pci_bandwidth_get(device, None) == 1:
                 ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
@@ -1491,7 +1491,7 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                                                  bw.lanes[current_f])
                     printLog(device, 'pcie clock level', '{} ({})'.format(current_f, fr))
             else:
-                printErrLog(device, 'PCIe clock is unsupported')
+                logging.debug('PCIe clock is unsupported on device[{}]'.format(device))
     printLogSpacer()
 
 
