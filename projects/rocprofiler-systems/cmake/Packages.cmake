@@ -35,11 +35,11 @@ set(OMNITRACE_EXTENSION_LIBRARIES
     omnitrace::omnitrace-papi)
 
 target_include_directories(
-    omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/source/lib/omnitrace/include
-                                ${PROJECT_BINARY_DIR}/source/lib/omnitrace/include)
+    omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/source/lib/omnitrace
+                                ${PROJECT_BINARY_DIR}/source/lib/omnitrace)
 
 # include threading because of rooflines
-target_link_libraries(omnitrace-headers INTERFACE omnitrace-threading)
+target_link_libraries(omnitrace-headers INTERFACE omnitrace::omnitrace-threading)
 
 # ensure the env overrides the appending /opt/rocm later
 string(REPLACE ":" ";" CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH};${CMAKE_PREFIX_PATH}")
