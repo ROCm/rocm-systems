@@ -77,6 +77,15 @@
 static const uint32_t kMaxOverdriveLevel = 20;
 static const float kEnergyCounterResolution = 15.3f;
 
+std::map<rsmi_clk_type_t, std::string> ClkStateMap = {
+    {RSMI_CLK_TYPE_SYS, "SCLK"},
+    {RSMI_CLK_TYPE_DF, "DFCLK"},
+    {RSMI_CLK_TYPE_DCEF, "DCEFCLK"},
+    {RSMI_CLK_TYPE_SOC, "SOCCLK"},
+    {RSMI_CLK_TYPE_MEM, "MCLK"},
+    {RSMI_CLK_TYPE_PCIE, "PCIECLK"},
+  };
+
 #define TRY try {
 #define CATCH } catch (...) {return amd::smi::handleException();}
 
@@ -895,7 +904,7 @@ rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
 }
 
 
-static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
+static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_t clk_type,
             uint32_t dv_ind, rsmi_frequencies_t *f, uint32_t *lanes = nullptr) {
   TRY
   std::vector<std::string> val_vec;
@@ -925,19 +934,34 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type,
     // Our assumption is that frequencies are read in from lowest to highest.
     // Check that that is true.
     if (i > 0) {
-      assert(f->frequency[i-1] <= f->frequency[i]);
+      if (f->frequency[i] < f->frequency[i-1]) {
+        std::string sysvalue = ClkStateMap[clk_type];
+        sysvalue += " Current Value";
+        sysvalue += ' ' + std::to_string(f->frequency[i]);
+        sysvalue += " Previous Value";
+        sysvalue += ' ' + std::to_string(f->frequency[i-1]);
+        DEBUG_LOG("Frequencies are not read from lowest to highest. ", sysvalue);
+      }
     }
     if (current) {
-      // Should only be 1 current frequency
-      assert(f->current == RSMI_MAX_NUM_FREQUENCIES + 1);
-      f->current = i;
+      // set the current frequency
+      if (f->current != RSMI_MAX_NUM_FREQUENCIES + 1) {
+        std::string sysvalue = ClkStateMap[clk_type];
+        sysvalue += " Current Value";
+        sysvalue += ' ' + std::to_string(f->frequency[i]);
+        sysvalue += " Previous Value";
+        sysvalue += ' ' + std::to_string(f->frequency[f->current]);
+        DEBUG_LOG("More than one current clock. ", sysvalue);
+      }
+      else
+          f->current = i;
     }
   }
 
   // Some older drivers will not have the current frequency set
   // assert(f->current < f->num_supported);
   if (f->current >= f->num_supported) {
-    return RSMI_STATUS_NOT_SUPPORTED;
+      f->current = -1;
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -1444,7 +1468,7 @@ rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type_t clk_type,
 
   DEVICE_MUTEX
 
-  return get_frequencies(dev_type, dv_ind, f);
+  return get_frequencies(dev_type, clk_type, dv_ind, f);
 
   CATCH
 }
@@ -2006,7 +2030,7 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
 
   DEVICE_MUTEX
 
-  return get_frequencies(amd::smi::kDevPCIEClk, dv_ind,
+  return get_frequencies(amd::smi::kDevPCIEClk, RSMI_CLK_TYPE_PCIE, dv_ind,
                                         &b->transfer_rate, b->lanes);
 
   CATCH
