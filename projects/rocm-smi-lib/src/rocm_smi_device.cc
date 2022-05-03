@@ -99,6 +99,10 @@ static const char *kDevPCIEThruPutFName = "pcie_bw";
 static const char *kDevErrCntSDMAFName = "ras/sdma_err_count";
 static const char *kDevErrCntUMCFName = "ras/umc_err_count";
 static const char *kDevErrCntGFXFName = "ras/gfx_err_count";
+static const char *kDevErrCntMMHUBFName = "ras/mmhub_err_count";
+static const char *kDevErrCntPCIEBIFFName = "ras/pcie_bif_err_count";
+static const char *kDevErrCntHDPFName = "ras/hdp_err_count";
+static const char *kDevErrCntXGMIWAFLFName = "ras/xgmi_wafl_err_count";
 static const char *kDevErrCntFeaturesFName = "ras/features";
 static const char *kDevMemPageBadFName = "ras/gpu_vram_bad_pages";
 static const char *kDevMemTotGTTFName = "mem_info_gtt_total";
@@ -241,6 +245,10 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevErrCntSDMA, kDevErrCntSDMAFName},
     {kDevErrCntUMC, kDevErrCntUMCFName},
     {kDevErrCntGFX, kDevErrCntGFXFName},
+    {kDevErrCntMMHUB, kDevErrCntMMHUBFName},
+    {kDevErrCntPCIEBIF, kDevErrCntPCIEBIFFName},
+    {kDevErrCntHDP, kDevErrCntHDPFName},
+    {kDevErrCntXGMIWAFL, kDevErrCntXGMIWAFLFName},
     {kDevErrCntFeatures, kDevErrCntFeaturesFName},
     {kDevMemTotGTT, kDevMemTotGTTFName},
     {kDevMemTotVisVRAM, kDevMemTotVisVRAMFName},
@@ -339,6 +347,10 @@ static  std::map<DevInfoTypes, uint8_t> kDevInfoVarTypeToRSMIVariant = {
     {kDevErrCntUMC, RSMI_GPU_BLOCK_UMC},
     {kDevErrCntSDMA, RSMI_GPU_BLOCK_SDMA},
     {kDevErrCntGFX, RSMI_GPU_BLOCK_GFX},
+    {kDevErrCntMMHUB, RSMI_GPU_BLOCK_MMHUB},
+    {kDevErrCntPCIEBIF, RSMI_GPU_BLOCK_PCIE_BIF},
+    {kDevErrCntHDP, RSMI_GPU_BLOCK_HDP},
+    {kDevErrCntXGMIWAFL, RSMI_GPU_BLOCK_XGMI_WAFL},
 
     // rsmi_event_group_t
     {kDevDFCountersAvailable, RSMI_EVNT_GRP_XGMI}
@@ -467,6 +479,10 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
                                         kDevErrCntUMC,
                                         kDevErrCntSDMA,
                                         kDevErrCntGFX,
+                                        kDevErrCntMMHUB,
+                                        kDevErrCntPCIEBIF,
+                                        kDevErrCntHDP,
+                                        kDevErrCntXGMIWAFL,
                                       }
                                     }
   },
@@ -852,6 +868,10 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
     case kDevErrCntSDMA:
     case kDevErrCntUMC:
     case kDevErrCntGFX:
+    case kDevErrCntMMHUB:
+    case kDevErrCntPCIEBIF:
+    case kDevErrCntHDP:
+    case kDevErrCntXGMIWAFL:
     case kDevMemPageBad:
       return readDevInfoMultiLineStr(type, val);
       break;
