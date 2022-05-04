@@ -141,7 +141,7 @@ class Tracker {
       orig_signal_ptr->start_ts = prof_signal_ptr->start_ts;
       orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
 
-      const hsa_signal_value_t new_value = hsa_signal_load_relaxed(orig) - 1;
+      [[maybe_unused]] const hsa_signal_value_t new_value = hsa_signal_load_relaxed(orig) - 1;
       assert(signal_value == new_value && "Tracker::Complete bad signal value");
       hsa_signal_store_screlease(orig, signal_value);
     }

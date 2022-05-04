@@ -294,7 +294,7 @@ static thread_local std::stack<activity_correlation_id_t> external_id_stack;
 
 static inline void CorrelationIdRegistr(const activity_correlation_id_t& correlation_id) {
   std::lock_guard<correlation_id_mutex_t> lck(correlation_id_mutex);
-  const auto ret = correlation_id_map.insert({correlation_id, correlation_id_tls});
+  [[maybe_unused]] const auto ret = correlation_id_map.insert({correlation_id, correlation_id_tls});
   assert(ret.second && "HIP activity id is not unique");
 
   DEBUG_TRACE("CorrelationIdRegistr id(%lu) id_tls(%lu)\n", correlation_id, correlation_id_tls);
@@ -1229,7 +1229,7 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(roctracer_domain_t domain
 #endif
 
       // HSA async-copy tracing
-      hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
+      [[maybe_unused]] hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
       assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
       roctracer::hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
       roctracer::hsa_amd_memory_async_copy_rect_fn =
