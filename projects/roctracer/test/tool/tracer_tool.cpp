@@ -249,14 +249,9 @@ roctracer::TraceBuffer<roctx_trace_entry_t>* roctx_trace_buffer = NULL;
 // rocTX callback function
 static inline void roctx_callback_fun(uint32_t domain, uint32_t cid, uint32_t tid,
                                       roctx_range_id_t rid, const char* message) {
-#if ROCTX_CLOCK_TIME
-  const timestamp_t time = HsaTimer::clocktime_ns(HsaTimer::TIME_ID_CLOCK_MONOTONIC);
-#else
-  const timestamp_t time = timer->timestamp_fn_ns();
-#endif
   roctx_trace_entry_t* entry = roctx_trace_buffer->GetEntry();
   entry->cid = cid;
-  entry->time = time;
+  entry->time = timer->timestamp_fn_ns();
   entry->pid = GetPid();
   entry->tid = tid;
   entry->rid = rid;
@@ -287,15 +282,8 @@ void stop_callback() {
 
 // rocTX buffer flush function
 void roctx_flush_cb(roctx_trace_entry_t* entry) {
-#if ROCTX_CLOCK_TIME
-  timestamp_t timestamp = 0;
-  HsaRsrcFactory::Instance().GetTimestamp(HsaTimer::TIME_ID_CLOCK_MONOTONIC, entry->time,
-                                          &timestamp);
-#else
-  const timestamp_t timestamp = entry->time;
-#endif
   std::ostringstream os;
-  os << timestamp << " " << entry->pid << ":" << entry->tid << " " << entry->cid << ":"
+  os << entry->time << " " << entry->pid << ":" << entry->tid << " " << entry->cid << ":"
      << entry->rid;
   if (entry->message != NULL)
     os << ":\"" << entry->message << "\"";
