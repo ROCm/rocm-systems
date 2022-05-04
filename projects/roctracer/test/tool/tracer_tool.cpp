@@ -42,7 +42,6 @@
 #include "src/core/loader.h"
 #include "test/tool/trace_buffer.h"
 #include "util/evt_stats.h"
-#include "util/hsa_rsrc_factory.h"
 #include "util/xml.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
@@ -947,6 +946,29 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
 
+  // Dumping HSA handles for agents
+  FILE* handles_file_handle = open_output_file(output_prefix, "hsa_handles.txt");
+  auto iterate_agent_data = std::make_pair(table, handles_file_handle);
+
+  [[maybe_unused]] hsa_status_t status = table->core_->hsa_iterate_agents_fn(
+      [](hsa_agent_t agent, void* user_data) {
+        auto [hsa_api_table, hsa_handles_file] =
+            *reinterpret_cast<decltype(iterate_agent_data)*>(user_data);
+        hsa_device_type_t type;
+
+        if (hsa_api_table->core_->hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_DEVICE, &type) !=
+            HSA_STATUS_SUCCESS)
+          return HSA_STATUS_ERROR;
+
+        fprintf(hsa_handles_file, "0x%lx agent %s\n", agent.handle,
+                (type == HSA_DEVICE_TYPE_CPU) ? "cpu" : "gpu");
+        return HSA_STATUS_SUCCESS;
+      },
+      &iterate_agent_data);
+  assert(status == HSA_STATUS_SUCCESS && "failed to iterate HSA agents");
+
+  close_output_file(handles_file_handle);
+
   // App begin timestamp begin_ts_file.txt
   begin_ts_file_handle = open_output_file(output_prefix, "begin_ts_file.txt");
   const timestamp_t app_start_time = timer->timestamp_fn_ns();
@@ -1060,11 +1082,6 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
     pc_sample_file_handle = open_output_file(output_prefix, "pcs_trace.txt");
     ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_RESERVED1));
   }
-
-  // Dumping HSA handles for agents and pools
-  FILE* handles_file_handle = open_output_file(output_prefix, "hsa_handles.txt");
-  HsaRsrcFactory::Instance().DumpHandles(handles_file_handle);
-  close_output_file(handles_file_handle);
 
   ONLOAD_TRACE_END();
   return true;
