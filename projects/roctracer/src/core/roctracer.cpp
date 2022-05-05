@@ -494,28 +494,6 @@ void HIP_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
       record_ptr->begin_ns, record_ptr->end_ns);
 }
 
-// Open output file
-FILE* open_output_file(const char* prefix, const char* name) {
-  FILE* file_handle = NULL;
-  if (prefix != NULL) {
-    std::ostringstream oss;
-    oss << prefix << "/" << GetPid() << "_" << name;
-    file_handle = fopen(oss.str().c_str(), "w");
-    if (file_handle == NULL) {
-      std::ostringstream errmsg;
-      errmsg << "ROCTracer: fopen error, file '" << oss.str().c_str() << "'";
-      perror(errmsg.str().c_str());
-      abort();
-    }
-  } else
-    file_handle = stdout;
-  return file_handle;
-}
-
-void close_output_file(FILE* file_handle) {
-  if ((file_handle != NULL) && (file_handle != stdout)) fclose(file_handle);
-}
-
 void hsa_async_copy_handler(const Tracker::entry_t* entry) {
   activity_record_t record{};
   record.domain = ACTIVITY_DOMAIN_HSA_OPS;
