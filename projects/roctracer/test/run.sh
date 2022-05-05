@@ -42,6 +42,9 @@ fi
 if [ -n "$ROCTRACER_LIB_PATH" ] ; then
   export LD_LIBRARY_PATH=$ROCTRACER_LIB_PATH
 fi
+if [ -z "$ROCTRACER_LIB_PATH" ] ; then
+  ROCTRACER_LIB_PATH="."
+fi
 if [ -z "$ROCTRACER_TOOL_PATH" ] ; then
   ROCTRACER_TOOL_PATH="./test"
 fi
@@ -119,7 +122,7 @@ eval_test "standalone HIP MGPU test" "./test/MatrixTranspose_mgpu" MatrixTranspo
 
 # Tool test
 # rocTracer/tool is loaded by HSA runtime
-export HSA_TOOLS_LIB="$ROCTRACER_TOOL_PATH/libtracer_tool.so"
+export HSA_TOOLS_LIB="$ROCTRACER_LIB_PATH/libroctracer64.so $ROCTRACER_TOOL_PATH/libroctracer_tool.so"
 
 # SYS test
 export ROCTRACER_DOMAIN="sys:roctx"
@@ -157,11 +160,11 @@ echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_p
 export ROCP_INPUT=input.xml
 eval_test "tool HSA test input" ./test/hsa/ctrl ctrl_hsa_input_trace
 
-export HSA_TOOLS_LIB=./test/libhsaco_test.so
+export HSA_TOOLS_LIB="$ROCTRACER_LIB_PATH/libroctracer64.so ./test/libhsaco_test.so"
 eval_test "tool HSA codeobj" ./test/MatrixTranspose hsa_co_trace
 
 export ROCP_TOOL_LIB=./test/libcodeobj_test.so
-export HSA_TOOLS_LIB=librocprofiler64.so
+export HSA_TOOLS_LIB="$ROCTRACER_LIB_PATH/libroctracer64.so librocprofiler64.so"
 eval_test "tool tracer codeobj" ./test/MatrixTranspose code_obj_trace
 
 #valgrind --leak-check=full $tbin

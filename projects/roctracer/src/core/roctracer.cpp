@@ -41,9 +41,7 @@
 #include "core/loader.h"
 #include "core/memory_pool.h"
 #include "core/tracker.h"
-#include "ext/hsa_rt_utils.hpp"
 #include "util/exception.h"
-#include "util/hsa_rsrc_factory.h"
 #include "util/logger.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
@@ -98,78 +96,50 @@ mark_api_callback_t* mark_api_callback_ptr = NULL;
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Internal library methods
 //
-namespace rocprofiler {
-decltype(hsa_queue_create)* hsa_queue_create_fn;
-decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
-
-decltype(hsa_signal_store_relaxed)* hsa_signal_store_relaxed_fn;
-decltype(hsa_signal_store_relaxed)* hsa_signal_store_screlease_fn;
-
-decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed_fn;
-decltype(hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed_fn;
-decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed_fn;
-
-decltype(hsa_queue_load_write_index_scacquire)* hsa_queue_load_write_index_scacquire_fn;
-decltype(hsa_queue_store_write_index_screlease)* hsa_queue_store_write_index_screlease_fn;
-decltype(hsa_queue_load_read_index_scacquire)* hsa_queue_load_read_index_scacquire_fn;
-
-decltype(hsa_amd_queue_intercept_create)* hsa_amd_queue_intercept_create_fn;
-decltype(hsa_amd_queue_intercept_register)* hsa_amd_queue_intercept_register_fn;
-
-decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
-decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
+namespace roctracer {
+decltype(hsa_system_get_info)* hsa_system_get_info_fn = hsa_system_get_info;
+decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn = hsa_amd_memory_async_copy;
+decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn =
+    hsa_amd_memory_async_copy_rect;
 
 ::HsaApiTable* kHsaApiTable;
 
 void SaveHsaApi(::HsaApiTable* table) {
-  util::HsaRsrcFactory::InitHsaApiTable(table);
-
   kHsaApiTable = table;
-  hsa_queue_create_fn = table->core_->hsa_queue_create_fn;
-  hsa_queue_destroy_fn = table->core_->hsa_queue_destroy_fn;
-
-  hsa_signal_store_relaxed_fn = table->core_->hsa_signal_store_relaxed_fn;
-  hsa_signal_store_screlease_fn = table->core_->hsa_signal_store_screlease_fn;
-
-  hsa_queue_load_write_index_relaxed_fn = table->core_->hsa_queue_load_write_index_relaxed_fn;
-  hsa_queue_store_write_index_relaxed_fn = table->core_->hsa_queue_store_write_index_relaxed_fn;
-  hsa_queue_load_read_index_relaxed_fn = table->core_->hsa_queue_load_read_index_relaxed_fn;
-
-  hsa_queue_load_write_index_scacquire_fn = table->core_->hsa_queue_load_write_index_scacquire_fn;
-  hsa_queue_store_write_index_screlease_fn = table->core_->hsa_queue_store_write_index_screlease_fn;
-  hsa_queue_load_read_index_scacquire_fn = table->core_->hsa_queue_load_read_index_scacquire_fn;
-
-  hsa_amd_queue_intercept_create_fn = table->amd_ext_->hsa_amd_queue_intercept_create_fn;
-  hsa_amd_queue_intercept_register_fn = table->amd_ext_->hsa_amd_queue_intercept_register_fn;
+  hsa_system_get_info_fn = table->core_->hsa_system_get_info_fn;
+  hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
+  hsa_amd_memory_async_copy_rect_fn = table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
 }
 
 void RestoreHsaApi() {
   ::HsaApiTable* table = kHsaApiTable;
-  table->core_->hsa_queue_create_fn = hsa_queue_create_fn;
-  table->core_->hsa_queue_destroy_fn = hsa_queue_destroy_fn;
-
-  table->core_->hsa_signal_store_relaxed_fn = hsa_signal_store_relaxed_fn;
-  table->core_->hsa_signal_store_screlease_fn = hsa_signal_store_screlease_fn;
-
-  table->core_->hsa_queue_load_write_index_relaxed_fn = hsa_queue_load_write_index_relaxed_fn;
-  table->core_->hsa_queue_store_write_index_relaxed_fn = hsa_queue_store_write_index_relaxed_fn;
-  table->core_->hsa_queue_load_read_index_relaxed_fn = hsa_queue_load_read_index_relaxed_fn;
-
-  table->core_->hsa_queue_load_write_index_scacquire_fn = hsa_queue_load_write_index_scacquire_fn;
-  table->core_->hsa_queue_store_write_index_screlease_fn = hsa_queue_store_write_index_screlease_fn;
-  table->core_->hsa_queue_load_read_index_scacquire_fn = hsa_queue_load_read_index_scacquire_fn;
-
-  table->amd_ext_->hsa_amd_queue_intercept_create_fn = hsa_amd_queue_intercept_create_fn;
-  table->amd_ext_->hsa_amd_queue_intercept_register_fn = hsa_amd_queue_intercept_register_fn;
-}
+  table->core_->hsa_system_get_info_fn = hsa_system_get_info_fn;
+  table->amd_ext_->hsa_amd_memory_async_copy_fn = hsa_amd_memory_async_copy_fn;
+  table->amd_ext_->hsa_amd_memory_async_copy_rect_fn = hsa_amd_memory_async_copy_rect_fn;
 }
 
-namespace roctracer {
-// timestamp definitino
-typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
 
-decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
-decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
+namespace util {
+
+uint64_t timestamp_ns() {
+  uint64_t sysclock;
+
+  hsa_status_t status = roctracer::hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
+  if (status == HSA_STATUS_ERROR_NOT_INITIALIZED) return 0;
+  CHECK_STATUS("hsa_system_get_info()", status);
+
+  static uint64_t sysclock_period = []() {
+    uint64_t sysclock_hz = 0;
+    hsa_status_t status =
+        roctracer::hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
+    CHECK_STATUS("hsa_system_get_info()", status);
+    return (uint64_t)1000000000 / sysclock_hz;
+  }();
+
+  return sysclock * sysclock_period;
+}
+
+}  // namespace util
 
 typedef decltype(roctracer_enable_op_callback)* roctracer_enable_op_callback_t;
 typedef decltype(roctracer_disable_op_callback)* roctracer_disable_op_callback_t;
@@ -347,7 +317,6 @@ inline uint32_t HipActActivityDisableCheck(uint32_t op) {
 
 void* HIP_SyncApiDataCallback(uint32_t op_id, roctracer_record_t* record, const void* callback_data,
                               void* arg) {
-  static hsa_rt_utils::Timer timer;
   if (record_pair_stack == NULL) record_pair_stack = new record_pair_stack_t;
 
   void* ret = NULL;
@@ -399,15 +368,14 @@ void* HIP_SyncApiDataCallback(uint32_t op_id, roctracer_record_t* record, const 
       "correlation_id(%lu) time_ns(%lu)\n",
       roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0), phase, op_id, record, data, pool,
       (int)(record_pair_stack->size()), (data_ptr) ? data_ptr->correlation_id : 0,
-      timer.timestamp_ns());
+      util::timestamp_ns());
 
   return ret;
 }
 
 void* HIP_SyncActivityCallback(uint32_t op_id, roctracer_record_t* record,
                                const void* callback_data, void* arg) {
-  static hsa_rt_utils::Timer timer;
-  const timestamp_t timestamp_ns = timer.timestamp_ns();
+  const uint64_t timestamp_ns = util::timestamp_ns();
   if (record_pair_stack == NULL) record_pair_stack = new record_pair_stack_t;
 
   void* ret = NULL;
@@ -1205,7 +1173,7 @@ PUBLIC_API void roctracer_stop() {
 
 PUBLIC_API roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp) {
   API_METHOD_PREFIX
-  *timestamp = util::HsaRsrcFactory::Instance().TimestampNs();
+  *timestamp = roctracer::util::timestamp_ns();
   API_METHOD_SUFFIX
 }
 
@@ -1219,14 +1187,6 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(roctracer_domain_t domain
       roctracer::hsa_ops_properties_t* ops_properties =
           reinterpret_cast<roctracer::hsa_ops_properties_t*>(properties);
       HsaApiTable* table = reinterpret_cast<HsaApiTable*>(ops_properties->table);
-
-#if 0
-      // HSA dispatches intercepting
-      rocprofiler::SaveHsaApi(table);
-      rocprofiler::ProxyQueue::InitFactory();
-      rocprofiler::ProxyQueue::HsaIntercept(table);
-      rocprofiler::InterceptQueue::HsaIntercept(table);
-#endif
 
       // HSA async-copy tracing
       [[maybe_unused]] hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
@@ -1320,9 +1280,18 @@ CONSTRUCTOR_API void constructor() {
 DESTRUCTOR_API void destructor() {
   ONLOAD_TRACE_BEG();
   roctracer_unload();
-  util::HsaRsrcFactory::Destroy();
   roctracer::util::Logger::Destroy();
   ONLOAD_TRACE_END();
 }
+
+// HSA-runtime tool on-load method
+extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
+                                  uint64_t failed_tool_count,
+                                  const char* const* failed_tool_names) {
+  roctracer::SaveHsaApi(table);
+  return true;
+}
+
+extern "C" PUBLIC_API void OnUnload() {}
 
 }  // extern "C"

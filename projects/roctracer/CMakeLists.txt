@@ -93,7 +93,6 @@ set ( PUBLIC_HEADERS
   roctracer_hsa.h
   roctracer_roctx.h
   ext/prof_protocol.h
-  ext/hsa_rt_utils.hpp
 )
 set ( GEN_HEADERS
   hip_ostream_ops.h
