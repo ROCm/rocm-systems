@@ -22,11 +22,6 @@
 #include "inc/roctracer_roctx.h"
 
 #include <cassert>
-#include <cstring>
-#include <unordered_map>
-#include <mutex>
-#include <stack>
-#include <string>
 
 #include "inc/ext/prof_protocol.h"
 #include "core/callback_table.h"
@@ -63,14 +58,7 @@ typedef enum {
 namespace {
 
 roctracer::CallbackTable<ROCTX_API_ID_NUMBER> callbacks;
-std::unordered_map<uint32_t, std::stack<std::string>> message_stack_map;
-std::mutex message_stack_mutex;
-
-thread_local auto& message_stack = []() -> decltype(message_stack_map)::mapped_type& {
-  const auto tid = syscall(__NR_gettid);
-  std::lock_guard lock(message_stack_mutex);
-  return message_stack_map[tid];
-}();
+thread_local int range_level(0);
 
 }  // namespace
 
@@ -106,8 +94,7 @@ PUBLIC_API int roctxRangePushA(const char* message) {
                      api_callback_arg);
   }
 
-  message_stack.emplace(message);
-  return message_stack.size() - 1;
+  return range_level++;
   API_METHOD_CATCH(-1);
 }
 
@@ -120,12 +107,8 @@ PUBLIC_API int roctxRangePop() {
                      api_callback_arg);
   }
 
-  if (message_stack.empty()) {
-    EXC_RAISING(ROCTX_STATUS_ERROR, "Pop from empty stack!");
-  }
-
-  message_stack.pop();
-  return message_stack.size();
+  if (range_level == 0) EXC_RAISING(ROCTX_STATUS_ERROR, "Pop from empty stack!");
+  return --range_level;
   API_METHOD_CATCH(-1)
 }
 
@@ -157,26 +140,13 @@ PUBLIC_API void roctxRangeStop(roctx_range_id_t rangeId) {
   API_METHOD_SUFFIX_NRET
 }
 
-PUBLIC_API void RangeStackIterate(roctx_range_iterate_cb_t callback, void* arg) {
-  std::lock_guard lock(message_stack_mutex);
-  for (auto&& [tid, message_stack] : message_stack_map) {
-    // Since we can't iterate a std::stack, we must first make a copy and then unwind it.
-    for (auto stack_copy = message_stack; !stack_copy.empty(); stack_copy.pop()) {
-      roctx_range_data_t data{};
-      data.message = stack_copy.top().c_str();
-      data.tid = tid;
-      callback(&data, arg);
-    }
-  }
-}
-
-PUBLIC_API bool RegisterApiCallback(uint32_t op, void* callback, void* arg) {
+extern "C" PUBLIC_API bool RegisterApiCallback(uint32_t op, void* callback, void* arg) {
   if (op >= ROCTX_API_ID_NUMBER) return false;
   callbacks.Set(op, reinterpret_cast<activity_rtapi_callback_t>(callback), arg);
   return true;
 }
 
-PUBLIC_API bool RemoveApiCallback(uint32_t op) {
+extern "C" PUBLIC_API bool RemoveApiCallback(uint32_t op) {
   if (op >= ROCTX_API_ID_NUMBER) return false;
   callbacks.Set(op, nullptr, nullptr);
   return true;

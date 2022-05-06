@@ -256,37 +256,20 @@ struct roctx_trace_entry_t {
 roctracer::TraceBuffer<roctx_trace_entry_t>* roctx_trace_buffer = NULL;
 
 // rocTX callback function
-static inline void roctx_callback_fun(uint32_t domain, uint32_t cid, uint32_t tid,
-                                      roctx_range_id_t rid, const char* message) {
+void roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
+                        void* /* user_arg */) {
+  const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
+
   roctx_trace_entry_t* entry = roctx_trace_buffer->GetEntry();
   entry->cid = cid;
   entry->time = util::timestamp_ns();
   entry->pid = GetPid();
-  entry->tid = tid;
-  entry->rid = rid;
-  entry->message = (message != NULL) ? strdup(message) : NULL;
+  entry->tid = GetTid();
+  entry->rid = data->args.id;
+  entry->message = (data->args.message != NULL)
+      ? strdup(data->args.message) /* FIXME: Who frees the message? */
+      : NULL;
   entry->valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
-}
-
-void roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg) {
-  (void)arg;
-  const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
-  roctx_callback_fun(domain, cid, GetTid(), data->args.id, data->args.message);
-}
-
-// rocTX Start/Stop callbacks
-void roctx_range_start_callback(const roctx_range_data_t* data, void* arg) {
-  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePushA, data->tid, 0,
-                     data->message);
-}
-void roctx_range_stop_callback(const roctx_range_data_t* data, void* arg) {
-  roctx_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePop, data->tid, 0, NULL);
-}
-void start_callback() {
-  roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_start_callback, NULL);
-}
-void stop_callback() {
-  roctracer::RocTxLoader::Instance().RangeStackIterate(roctx_range_stop_callback, NULL);
 }
 
 // rocTX buffer flush function
@@ -859,9 +842,6 @@ void tool_load() {
     roctx_file_handle = open_output_file(output_prefix, "roctx_trace.txt");
 
     // initialize HSA tracing
-    roctracer_ext_properties_t properties{start_callback, stop_callback};
-    roctracer_set_properties(ACTIVITY_DOMAIN_EXT_API, &properties);
-
     fprintf(stdout, "    rocTX-trace()\n");
     fflush(stdout);
     ROCTRACER_CALL(
