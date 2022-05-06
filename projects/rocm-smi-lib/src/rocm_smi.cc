@@ -604,6 +604,22 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
       type = amd::smi::kDevErrCntGFX;
       break;
 
+    case RSMI_GPU_BLOCK_MMHUB:
+      type = amd::smi::kDevErrCntMMHUB;
+      break;
+
+    case RSMI_GPU_BLOCK_PCIE_BIF:
+      type = amd::smi::kDevErrCntPCIEBIF;
+      break;
+
+    case RSMI_GPU_BLOCK_HDP:
+      type = amd::smi::kDevErrCntHDP;
+      break;
+
+    case RSMI_GPU_BLOCK_XGMI_WAFL:
+      type = amd::smi::kDevErrCntXGMIWAFL;
+      break;
+
     default:
       return RSMI_STATUS_NOT_SUPPORTED;
   }

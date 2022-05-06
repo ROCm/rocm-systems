@@ -1420,10 +1420,6 @@ def showClocks(deviceList):
     for device in deviceList:
         for clk_type in sorted(rsmi_clk_names_dict):
             freq_list = []
-            if not os.path.isfile(
-                    os.path.join('/sys/class/drm', 'card%d' % (device), 'device', 'pp_dpm_%s' % clk_type)):
-                logging.debug('No clock file for %s on card%d' % (clk_type, device))
-                continue
             if rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], None) == 1:
                 ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], byref(freq))
                 if rsmi_ret_ok(ret, device, clk_type, True):
@@ -1436,7 +1432,7 @@ def showClocks(deviceList):
                             printLog(device, str(x), str(fr))
                     printLog(device, '', None)
             else:
-                printErrLog(device, '%s frequency is unsupported' % (clk_type))
+                logging.debug('{} frequency is unsupported on device[{}]'.format(clk_type, device))
                 printLog(device, '', None)
         if rocmsmi.rsmi_dev_pci_bandwidth_get(device, None) == 1:
             ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
@@ -1451,7 +1447,7 @@ def showClocks(deviceList):
                         printLog(device, str(x), str(fr))
                 printLog(device, '', None)
         else:
-            printErrLog(device, 'PCIe frequency is unsupported')
+            logging.debug('PCIe frequency is unsupported on device [{}]'.format(device))
             printLog(device, '', None)
         printLogSpacer(None, '-')  # divider between devices for better visibility
     printLogSpacer()
@@ -1485,10 +1481,6 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
 
         else:  # if clk is not defined, will display all current clk
             for clk_type in sorted(rsmi_clk_names_dict):
-                if not os.path.isfile(
-                        os.path.join('/sys/class/drm', 'card%d' % (device), 'device', 'pp_dpm_%s' % clk_type)):
-                    logging.debug('No clock file for %s on card%d' % (clk_type, device))
-                    continue
                 if rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], None) == 1:
                     ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], byref(freq))
                     if rsmi_ret_ok(ret, device, clk_type, True):
@@ -1500,7 +1492,7 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                         else:
                             printLog(device, '%s clock level: %s' % (clk_type, levl), '(%sMhz)' % (str(fr)[:-2]))
                 else:
-                    printErrLog(device, '%s clock is unsupported' % (clk_type))
+                    logging.debug('{} clock is unsupported on device[{}]'.format(clk_type, device))
             # pcie clocks
             if rocmsmi.rsmi_dev_pci_bandwidth_get(device, None) == 1:
                 ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
@@ -1510,7 +1502,7 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                                                  bw.lanes[current_f])
                     printLog(device, 'pcie clock level', '{} ({})'.format(current_f, fr))
             else:
-                printErrLog(device, 'PCIe clock is unsupported')
+                logging.debug('PCIe clock is unsupported on device[{}]'.format(device))
     printLogSpacer()
 
 
