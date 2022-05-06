@@ -37,21 +37,20 @@ template <uint32_t N> class CallbackTable {
       // callback is enabled.
       : callbacks_() {}
 
-  void Set(uint32_t id, activity_rtapi_callback_t callback, void* arg) {
-    assert(id < N && "id is out of range");
+  void Set(uint32_t callback_id, activity_rtapi_callback_t callback_function, void* user_arg) {
+    assert(callback_id < N && "callback_id is out of range");
     std::lock_guard lock(mutex_);
-    callbacks_[id] = {callback, arg};
+    callbacks_[callback_id] = {callback_function, user_arg};
   }
 
-  void Get(uint32_t id, activity_rtapi_callback_t* callback, void** arg) const {
-    assert(id < N && "id is out of range");
-    assert(callback != nullptr && arg != nullptr && "invalid arguments");
+  std::pair<activity_rtapi_callback_t, void*> Get(uint32_t callback_id) const {
+    assert(callback_id < N && "id is out of range");
     std::lock_guard lock(mutex_);
-    std::tie(*callback, *arg) = callbacks_[id];
+    return callbacks_[callback_id];
   }
 
  private:
-  std::array<std::pair<activity_rtapi_callback_t /* callback */, void* /* arg */>, N> callbacks_;
+  std::array<std::pair<activity_rtapi_callback_t, void*>, N> callbacks_;
   mutable std::mutex mutex_;
 };
 

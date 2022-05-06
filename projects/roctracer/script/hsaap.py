@@ -411,9 +411,7 @@ class API_DescrParser:
           self.content += '  api_data.args.' + call + '.' + var + ' = ' + var + ';\n'
           if call == 'hsa_amd_memory_async_copy_rect' and var == 'range':
             self.content += '  api_data.args.' + call + '.' + var + '__val = ' + '*(' + var + ');\n'
-      self.content += '  activity_rtapi_callback_t api_callback_fun = NULL;\n'
-      self.content += '  void* api_callback_arg = NULL;\n'
-      self.content += '  cb_table.Get(' + call_id + ', &api_callback_fun, &api_callback_arg);\n'
+      self.content += '  auto [ api_callback_fun, api_callback_arg ] = cb_table.Get(' + call_id + ');\n'
       self.content += '  api_data.phase = 0;\n'
       self.content += '  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_HSA_API, ' + call_id + ', &api_data, api_callback_arg);\n'
       if ret_type != 'void':
