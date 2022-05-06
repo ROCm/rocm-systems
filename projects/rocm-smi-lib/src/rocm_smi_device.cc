@@ -319,6 +319,7 @@ static  std::map<DevInfoTypes, uint8_t> kDevInfoVarTypeToRSMIVariant = {
     {kDevFClk, RSMI_CLK_TYPE_DF},
     {kDevDCEFClk, RSMI_CLK_TYPE_DCEF},
     {kDevSOCClk, RSMI_CLK_TYPE_SOC},
+    {kDevPCIEClk, RSMI_CLK_TYPE_PCIE},
 
     // rsmi_fw_block_t
     {kDevFwVersionAsd, RSMI_FW_BLOCK_ASD},

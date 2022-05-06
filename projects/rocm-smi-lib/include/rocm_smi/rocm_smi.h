@@ -341,6 +341,7 @@ typedef enum {
   RSMI_CLK_TYPE_DCEF,                 //!< Display Controller Engine clock
   RSMI_CLK_TYPE_SOC,                  //!< SOC clock
   RSMI_CLK_TYPE_MEM,                  //!< Memory clock
+  RSMI_CLK_TYPE_PCIE,                 //!< PCIE clock
 
   // Add new clocks to the end (not in the middle) and update
   // RSMI_CLK_TYPE_LAST
