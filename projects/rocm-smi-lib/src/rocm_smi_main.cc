@@ -376,6 +376,10 @@ void RocmSMI::GetEnvVariables(void) {
 #endif
 }
 
+const RocmSMI_env_vars& RocmSMI::getEnv(void) {
+  return env_vars_;
+}
+
 std::shared_ptr<Monitor>
 RocmSMI::FindMonitor(std::string monitor_path) {
   std::string tmp;

@@ -112,6 +112,7 @@ class RocmSMI {
     int get_io_link_weight(uint32_t node_from, uint32_t node_to,
                            uint64_t *weight);
     int get_node_index(uint32_t dv_ind, uint32_t *node_ind);
+    const RocmSMI_env_vars& getEnv(void);
 
  private:
     std::vector<std::shared_ptr<Device>> devices_;

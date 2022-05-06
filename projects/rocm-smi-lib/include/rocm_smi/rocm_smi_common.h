@@ -133,8 +133,16 @@
                                                                    std::endl;\
   }
 
+#define DEBUG_LOG(WR_STR, VR) \
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
+  if (smi.getEnv().debug_output_bitfield & RSMI_DEBUG_VAL) { \
+      if ((WR_STR) != nullptr)  \
+          std::cout << (WR_STR) << " " << (VR) << std::endl;\
+  }
+
 // Add different debug filters here, as powers of 2; e.g, 1, 2, 4, 8, ...
-#define RSMI_DEBUG_SYSFS_FILE_PATHS 1
+#define RSMI_DEBUG_SYSFS_FILE_PATHS 1<<0
+#define RSMI_DEBUG_VAL 1<<1
 
 struct rsmi_func_id_iter_handle {
     uintptr_t func_id_iter;
