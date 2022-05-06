@@ -8,14 +8,10 @@ The ROCm™ Data Center Tool simplifies the administration and addresses key inf
 - Integration with third-party tools
 - Open source
 
-For complete list of features and how to start using RDC from pre-built packages, please refer to [**user guide**](docs/AMD_ROCm_Data_Center_Tool_User_Guide.pdf)
+For up-to-date document and how to start using RDC from pre-built packages, please refer to [**user guide**](https://docs.amd.com/bundle/ROCm-Data-Center-Tool-User-Guide-v5.1/page/Overview.html)
 
 # Supported platforms
-    Ubuntu 18.04.5 (Kernel 5.3)
-    CentOS v7.7 (Using devtoolset-7 runtime support)
-    RHEL v7.7 (Using devtoolset-7 runtime support)
-    SLES 15 SP1
-    CentOS and RHEL 8.1(Kernel 4.18.0-147)
+RDC can run on AMD ROCm supported platforms, please refer to [List of Supported Operating Systems](https://rocmdocs.amd.com/en/latest/Current_Release_Notes/Current-Release-Notes.html)
 
 # Building RDC from source
 
@@ -30,7 +26,7 @@ For complete list of features and how to start using RDC from pre-built packages
 
     AMD ROCm platform (https://github.com/RadeonOpenCompute/ROCm)
         * It is recommended to install the complete AMD ROCm platform.
-          For installation instruction see https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html
+          For installation instruction see https://rocmdocs.amd.com/en/latest/Current_Release_Notes/Current-Release-Notes.html
         * At the minimum, these two components are required
             (i)  AMD ROCm SMI Library (https://github.com/RadeonOpenCompute/rocm_smi_lib)
             (ii) AMD ROCk Kernel driver (https://github.com/RadeonOpenCompute/ROCK-Kernel-Driver)
@@ -96,7 +92,7 @@ The following commands need to be executed as root (sudo). It may be easiest to 
 
 # Running RDC
 RDC supports encrypted communications between clients and servers. The
-communication can be configured to be *authenticated* or *not authenticated*. The [**user guide**](docs/AMD_ROCm_Data_Center_Tool_User_Guide.pdf) has information on how to generate and install SSL keys and certificates for authentication. By default, authentication is enabled.
+communication can be configured to be *authenticated* or *not authenticated*. The [**user guide**](https://docs.amd.com/bundle/ROCm-Data-Center-Tool-User-Guide-v5.1/page/Developer_Handbook.html) has information on how to generate and install SSL keys and certificates for authentication. By default, authentication is enabled.
 
 ## Starting ROCm™ Data Center Daemon (RDCD)
 For an RDC client application to monitor and/or control a remote system, the RDC server daemon, *rdcd*, must be running on the remote system. *rdcd* can be configured to run with (a) full-capabilities which includes ability to set or change GPU configuration or (b) monitor-only capabilities which limits to monitoring GPU metrics.
@@ -117,10 +113,10 @@ When *rdcd* is started from a command-line the *capabilities* are determined by 
     $ sudo /opt/rocm-<version>/rdc/bin/rdcd -u   ## rdcd is started will full-capabilities
 
 ### Start RDCD using systemd
-*rdcd* can be started by using the systemctl command. systemctl will read /lib/systemd/system/rdc.service, which is installed with rdc. This file has 2 lines that control what *capabilities* with which *rdcd* will run. If left uncommented, rdcd will run with full-capabilities.
+*rdcd* can be started by using the systemctl command. You can copy /opt/rocm-\<version\>/rdc/lib/rdc.service, which is installed with RDC, to the systemd folder. This file has 2 lines that control what *capabilities* with which *rdcd* will run. If left uncommented, rdcd will run with full-capabilities.
 
 
-    ## file: /lib/systemd/system/rdc.service
+    ## file: /opt/rocm-<version>/rdc/lib/rdc.service
     ## Comment the following two lines to run with monitor-only capabilities
     CapabilityBoundingSet=CAP_DAC_OVERRIDE
     AmbientCapabilities=CAP_DAC_OVERRIDE
@@ -128,15 +124,15 @@ When *rdcd* is started from a command-line the *capabilities* are determined by 
     systemctl start rdc         ## start rdc as systemd service
 
 ## Invoke RDC using ROCm™ Data Center Interface (RDCI)
-RDCI provides command-line interface to all RDC features. This CLI can be run locally or remotely. Refer to [**user guide**](docs/AMD_ROCm_Data_Center_Tool_User_Guide) for the current list of features.
+RDCI provides command-line interface to all RDC features. This CLI can be run locally or remotely. Refer to [**user guide**](https://docs.amd.com/bundle/ROCm-Data-Center-Tool-User-Guide-v5.1/page/Feature_Overview.html) for the current list of features.
 
     ## sample rdci commands to test RDC functionality
     ## discover devices in a local or remote compute node
     ## NOTE: option -u (for unauthenticated) is required is rdcd was started in this mode
 
     $ cd rdc_install_prefix                           ## If specified in Building RDC section
-    ./opt/rocm/rdc/bin/rdci discovery -l <-u>         ## list available GPUs in localhost
-    ./opt/rocm/rdc/bin/rdci discovery <host> -l <-u>  ## list available GPUs in host machine
+    ./opt/rocm-<version>/rdc/bin/rdci discovery -l <-u>         ## list available GPUs in localhost
+    ./opt/rocm-<version>/rdc/bin/rdci discovery <host> -l <-u>  ## list available GPUs in host machine
 
 ## Troubleshooting rdcd
 
@@ -148,5 +144,4 @@ Log messages that can provide useful debug information.
     ## To run rdcd with debug log from command-line use
     ## version will be the version number(ex:3.10.0) of ROCm where RDC was pacakged with
     RDC_LOG=DEBUG /opt/rocm-<version>/rdc/bin/rdcd
-
 
