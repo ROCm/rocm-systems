@@ -57,7 +57,7 @@ typedef enum {
 //
 namespace {
 
-roctracer::CallbackTable<ROCTX_API_ID_NUMBER> callbacks;
+roctracer::CallbackTable<ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_NUMBER> callbacks;
 thread_local int range_level(0);
 
 }  // namespace
@@ -75,24 +75,17 @@ PUBLIC_API uint32_t roctx_version_minor() { return ROCTX_VERSION_MINOR; }
 
 PUBLIC_API void roctxMarkA(const char* message) {
   API_METHOD_PREFIX
-  if (auto [api_callback_fun, api_callback_arg] = callbacks.Get(ROCTX_API_ID_roctxMarkA);
-      api_callback_fun != nullptr) {
-    roctx_api_data_t api_data{};
-    api_data.args.roctxMarkA.message = message;
-    api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxMarkA, &api_data, api_callback_arg);
-  }
+  roctx_api_data_t api_data{};
+  api_data.args.roctxMarkA.message = message;
+  callbacks.Invoke(ROCTX_API_ID_roctxMarkA, &api_data);
   API_METHOD_SUFFIX_NRET
 }
 
 PUBLIC_API int roctxRangePushA(const char* message) {
   API_METHOD_PREFIX
-  if (auto [api_callback_fun, api_callback_arg] = callbacks.Get(ROCTX_API_ID_roctxRangePushA);
-      api_callback_fun != nullptr) {
-    roctx_api_data_t api_data{};
-    api_data.args.roctxRangePushA.message = message;
-    api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePushA, &api_data,
-                     api_callback_arg);
-  }
+  roctx_api_data_t api_data{};
+  api_data.args.roctxRangePushA.message = message;
+  callbacks.Invoke(ROCTX_API_ID_roctxRangePushA, &api_data);
 
   return range_level++;
   API_METHOD_CATCH(-1);
@@ -100,12 +93,9 @@ PUBLIC_API int roctxRangePushA(const char* message) {
 
 PUBLIC_API int roctxRangePop() {
   API_METHOD_PREFIX
-  if (auto [api_callback_fun, api_callback_arg] = callbacks.Get(ROCTX_API_ID_roctxRangePop);
-      api_callback_fun != nullptr) {
-    roctx_api_data_t api_data{};
-    api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangePop, &api_data,
-                     api_callback_arg);
-  }
+
+  roctx_api_data_t api_data{};
+  callbacks.Invoke(ROCTX_API_ID_roctxRangePop, &api_data);
 
   if (range_level == 0) EXC_RAISING(ROCTX_STATUS_ERROR, "Pop from empty stack!");
   return --range_level;
@@ -116,13 +106,9 @@ PUBLIC_API roctx_range_id_t roctxRangeStartA(const char* message) {
   API_METHOD_PREFIX
   static std::atomic<roctx_range_id_t> roctx_range_counter(1);
 
-  if (auto [api_callback_fun, api_callback_arg] = callbacks.Get(ROCTX_API_ID_roctxRangeStartA);
-      api_callback_fun != nullptr) {
-    roctx_api_data_t api_data{};
-    api_data.args.roctxRangeStartA.message = message;
-    api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangeStartA, &api_data,
-                     api_callback_arg);
-  }
+  roctx_api_data_t api_data{};
+  api_data.args.roctxRangeStartA.message = message;
+  callbacks.Invoke(ROCTX_API_ID_roctxRangeStartA, &api_data);
 
   return roctx_range_counter++;
   API_METHOD_CATCH(-1)
@@ -130,13 +116,9 @@ PUBLIC_API roctx_range_id_t roctxRangeStartA(const char* message) {
 
 PUBLIC_API void roctxRangeStop(roctx_range_id_t rangeId) {
   API_METHOD_PREFIX
-  if (auto [api_callback_fun, api_callback_arg] = callbacks.Get(ROCTX_API_ID_roctxRangeStop);
-      api_callback_fun != nullptr) {
-    roctx_api_data_t api_data{};
-    api_data.args.roctxRangeStop.id = rangeId;
-    api_callback_fun(ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_roctxRangeStop, &api_data,
-                     api_callback_arg);
-  }
+  roctx_api_data_t api_data{};
+  api_data.args.roctxRangeStop.id = rangeId;
+  callbacks.Invoke(ROCTX_API_ID_roctxRangeStop, &api_data);
   API_METHOD_SUFFIX_NRET
 }
 

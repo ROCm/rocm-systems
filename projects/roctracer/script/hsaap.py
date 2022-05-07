@@ -395,7 +395,7 @@ class API_DescrParser:
   # generate API callbacks
   def gen_callbacks(self, n, name, call, struct):
     if n == -1:
-      self.content += 'typedef CallbackTable<HSA_API_ID_NUMBER> cb_table_t;\n'
+      self.content += 'typedef CallbackTable<ACTIVITY_DOMAIN_HSA_API, HSA_API_ID_NUMBER> cb_table_t;\n'
       self.content += 'extern cb_table_t cb_table;\n'
       self.content += '\n'
     if call != '-':

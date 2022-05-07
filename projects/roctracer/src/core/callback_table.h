@@ -23,6 +23,8 @@
 
 #include <ext/prof_protocol.h>
 
+#include <array>
+#include <atomic>
 #include <cassert>
 #include <mutex>
 #include <utility>
@@ -30,7 +32,7 @@
 namespace roctracer {
 
 // Generic callbacks table
-template <uint32_t N> class CallbackTable {
+template <activity_domain_t Domain, uint32_t N> class CallbackTable {
  public:
   CallbackTable()
       // Zero initialize the callbacks array as the function pointer is used to determine if the
@@ -40,17 +42,26 @@ template <uint32_t N> class CallbackTable {
   void Set(uint32_t callback_id, activity_rtapi_callback_t callback_function, void* user_arg) {
     assert(callback_id < N && "callback_id is out of range");
     std::lock_guard lock(mutex_);
-    callbacks_[callback_id] = {callback_function, user_arg};
+    auto& callback = callbacks_[callback_id];
+    callback.first.store(callback_function, std::memory_order_relaxed);
+    callback.second = user_arg;
   }
 
-  std::pair<activity_rtapi_callback_t, void*> Get(uint32_t callback_id) const {
+  auto Get(uint32_t callback_id) const {
     assert(callback_id < N && "id is out of range");
     std::lock_guard lock(mutex_);
-    return callbacks_[callback_id];
+    auto& callback = callbacks_[callback_id];
+    return std::make_pair(callback.first.load(std::memory_order_relaxed), callback.second);
+  }
+
+  template <typename... Args> void Invoke(uint32_t callback_id, Args... args) {
+    if (callbacks_[callback_id].first.load(std::memory_order_relaxed) == nullptr) return;
+    if (auto [callback_function, user_arg] = Get(callback_id); callback_function != nullptr)
+      callback_function(Domain, callback_id, std::forward<Args>(args)..., user_arg);
   }
 
  private:
-  std::array<std::pair<activity_rtapi_callback_t, void*>, N> callbacks_;
+  std::array<std::pair<std::atomic<activity_rtapi_callback_t>, void*>, N> callbacks_;
   mutable std::mutex mutex_;
 };
 
