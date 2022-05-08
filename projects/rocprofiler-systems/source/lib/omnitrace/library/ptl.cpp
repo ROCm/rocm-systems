@@ -24,9 +24,11 @@
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
+#include "library/runtime.hpp"
 #include "library/sampling.hpp"
 
 #include <PTL/ThreadPool.hh>
+
 #include <timemory/utility/declaration.hpp>
 
 namespace omnitrace
@@ -42,9 +44,10 @@ auto _thread_pool_cfg = []() {
     _v.use_tbb      = false;
     _v.verbose      = -1;
     _v.initializer  = []() {
+        set_thread_state(ThreadState::Internal);
         sampling::block_signals();
         threading::set_thread_name(
-            TIMEMORY_JOIN('.', "ptl", PTL::Threading::GetThreadId()).c_str());
+            JOIN('.', "ptl", PTL::Threading::GetThreadId()).c_str());
     };
     _v.finalizer = []() {};
     _v.priority  = 5;

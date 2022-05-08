@@ -8,8 +8,8 @@ add_library(omnitrace-interface-library INTERFACE)
 add_library(omnitrace::omnitrace-interface-library ALIAS omnitrace-interface-library)
 
 target_include_directories(
-    omnitrace-interface-library INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include
-                                          ${CMAKE_CURRENT_BINARY_DIR}/include)
+    omnitrace-interface-library INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}
+                                          ${CMAKE_CURRENT_BINARY_DIR})
 target_include_directories(omnitrace-interface-library SYSTEM
                            INTERFACE ${perfetto_DIR}/sdk)
 
@@ -54,6 +54,7 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/library/coverage.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/cpu_freq.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/critical_trace.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/debug.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/kokkosp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/gpu.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/ompt.cpp
@@ -70,6 +71,8 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/library/components/mpi_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/omnitrace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_gotcha.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_create_gotcha.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_mutex_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/user_region.cpp
     ${perfetto_DIR}/sdk/perfetto.cc)
 
@@ -92,6 +95,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/library/thread_data.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/thread_sampler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/timemory.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/utility.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/fwd.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/backtrace.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/fork_gotcha.hpp
@@ -102,6 +106,8 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/library/components/roctracer.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/roctracer_callbacks.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_create_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_mutex_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/user_region.hpp
     ${perfetto_DIR}/sdk/perfetto.h)
 
@@ -119,7 +125,8 @@ if(OMNITRACE_USE_ROCM_SMI)
                    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library/components/rocm_smi.cpp)
 endif()
 
-target_link_libraries(omnitrace-object-library PRIVATE omnitrace-interface-library)
+target_link_libraries(omnitrace-object-library
+                      PRIVATE omnitrace::omnitrace-interface-library)
 
 if(OMNITRACE_DYNINST_API_RT)
     get_filename_component(OMNITRACE_DYNINST_API_RT_DIR "${OMNITRACE_DYNINST_API_RT}"

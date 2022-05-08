@@ -176,7 +176,7 @@ module_function::serialize(ArchiveT& ar, const unsigned)
     }
 
     ar(cereal::make_nvp("address_range", address_range),
-       cereal::make_nvp("instructions", num_instructions),
+       cereal::make_nvp("num_instructions", num_instructions),
        cereal::make_nvp("module", module_name),
        cereal::make_nvp("function", function_name),
        cereal::make_nvp("signature", signature));

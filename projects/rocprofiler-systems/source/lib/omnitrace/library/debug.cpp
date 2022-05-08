@@ -20,44 +20,31 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
-
-#include "library/common.hpp"
-#include "library/defines.hpp"
-#include "library/timemory.hpp"
-
-#include <cstdint>
-#include <future>
+#include "library/debug.hpp"
+#include "library/runtime.hpp"
+#include "library/state.hpp"
 
 namespace omnitrace
 {
-struct pthread_gotcha : tim::component::base<pthread_gotcha, void>
+namespace debug
 {
-    TIMEMORY_DEFAULT_OBJECT(pthread_gotcha)
+lock::lock()
+: m_lk{ tim::type_mutex<decltype(std::cerr)>(), std::defer_lock }
+{
+    if(!m_lk.owns_lock())
+    {
+        push_thread_state(ThreadState::Internal);
+        m_lk.lock();
+    }
+}
 
-    // string id for component
-    static std::string label() { return "pthread_gotcha"; }
-
-    // generate the gotcha wrappers
-    static void configure();
-    static void shutdown();
-
-    // query current value
-    static bool sampling_enabled_on_child_threads();
-
-    // use this to disable sampling in a region (e.g. right before thread creation)
-    static bool push_enable_sampling_on_child_threads(bool _v);
-
-    // use this to restore previous setting
-    static bool pop_enable_sampling_on_child_threads();
-
-    // make sure every newly created thead starts with this value
-    static void set_sampling_on_all_future_threads(bool _v);
-
-    static void start();
-    static void stop();
-
-private:
-    static bool& sampling_on_child_threads();
-};
+lock::~lock()
+{
+    if(m_lk.owns_lock())
+    {
+        m_lk.unlock();
+        pop_thread_state();
+    }
+}
+}  // namespace debug
 }  // namespace omnitrace

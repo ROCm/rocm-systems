@@ -95,10 +95,12 @@ transpose_a(int* in, int* out, int M, int N)
 void
 run(int rank, int tid, hipStream_t stream, int argc, char** argv)
 {
-    size_t       nitr = 500;
-    unsigned int M    = 4960 * 2;
-    unsigned int N    = 4960 * 2;
+    size_t       nitr  = 500;
+    size_t       nsync = 10;
+    unsigned int M     = 4960 * 2;
+    unsigned int N     = 4960 * 2;
     if(argc > 2) nitr = atoll(argv[2]);
+    if(argc > 3) nsync = atoll(argv[3]);
 
     auto_lock_t _lk{ print_lock };
     std::cout << "[" << rank << "][" << tid << "] M: " << M << " N: " << N << std::endl;
@@ -126,10 +128,11 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     dim3 block(32, 32, 1);  // transpose_a
 
     auto t1 = std::chrono::high_resolution_clock::now();
-    for(size_t i = 0; i < nitr; i++)
+    for(size_t i = 0; i < nitr; ++i)
     {
         transpose_a<<<grid, block, 0, stream>>>(in, out, M, N);
         check_hip_error();
+        if(i % nsync == (nsync - 1)) HIP_API_CALL(hipStreamSynchronize(stream));
     }
     auto t2 = std::chrono::high_resolution_clock::now();
     HIP_API_CALL(hipStreamSynchronize(stream));
@@ -179,15 +182,18 @@ do_a2a(int rank)
 int
 main(int argc, char** argv)
 {
-    int rank     = 0;
-    int size     = 1;
-    int nthreads = 2;
-    int nitr     = 5000;
+    int    rank     = 0;
+    int    size     = 1;
+    int    nthreads = 2;
+    int    nitr     = 5000;
+    size_t nsync    = 10;
     if(argc > 1) nthreads = atoi(argv[1]);
     if(argc > 2) nitr = atoi(argv[2]);
+    if(argc > 3) nsync = atoll(argv[3]);
 
     printf("[transpose] Number of threads: %i\n", nthreads);
     printf("[transpose] Number of iterations: %i\n", nitr);
+    printf("[transpose] Syncing every %zu iterations\n", nsync);
 
 #if defined(USE_MPI)
     MPI_Init(&argc, &argv);

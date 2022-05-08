@@ -271,7 +271,7 @@ backtrace::sample(int signum)
     m_ts         = clock_type::now();
     m_thr_cpu_ts = tim::get_clock_thread_now<int64_t, std::nano>();
     m_mem_peak   = tim::get_peak_rss(RUSAGE_THREAD);
-    m_data       = tim::get_unw_backtrace<128, 4, false>();
+    m_data       = tim::get_unw_backtrace<stack_depth, 4, false>();
     auto* itr    = m_data.begin();
     for(; itr != m_data.end(); ++itr, ++m_size)
     {

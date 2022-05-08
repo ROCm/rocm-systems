@@ -439,7 +439,9 @@ main(int argc, char** argv)
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[VIEW OPTIONS]" }, "");
-    parser.add_argument({ "-A", "--available" }, "Only display available components")
+    parser
+        .add_argument({ "-A", "--available" },
+                      "Only display available components/settings/hw-counters")
         .max_count(1)
         .action([](parser_t& p) { available_only = p.get<bool>("available"); });
     parser
@@ -892,8 +894,8 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
         _setting_output.end());
 
     // patch up the categories
-    str_set_t _not_in_category_view{};
-    auto      _settings = tim::settings::shared_instance();
+    auto _not_in_category_view = str_set_t{};
+    auto _settings             = tim::settings::shared_instance();
     for(auto& itr : _setting_output)
     {
         auto _name = itr.find("environ")->second;
@@ -941,6 +943,19 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
                                                  itr.find("categories")->second);
                                          }),
                           _setting_output.end());
+
+    if(available_only)
+    {
+        _setting_output.erase(
+            std::remove_if(_setting_output.begin(), _setting_output.end(),
+                           [&_settings](const auto& itr) {
+                               auto iitr = _settings->find(itr.at("environ"));
+                               if(iitr != _settings->end())
+                                   return (iitr->second->get_enabled() == false);
+                               return true;
+                           }),
+            _setting_output.end());
+    }
 
     if(alphabetical)
     {

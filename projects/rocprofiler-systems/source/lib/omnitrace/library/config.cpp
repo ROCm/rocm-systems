@@ -29,6 +29,7 @@
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/environment.hpp>
+#include <timemory/environment/types.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/settings/types.hpp>
@@ -74,7 +75,7 @@ get_setting_name(std::string _v)
     {                                                                                    \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
             ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, INITIAL_VALUE,            \
-            std::set<std::string>{ "custom", "omnitrace", "omnitrace-library",           \
+            std::set<std::string>{ "custom", "omnitrace", "omnitrace_library",           \
                                    __VA_ARGS__ });                                       \
         if(!_ret.second)                                                                 \
             OMNITRACE_PRINT("Warning! Duplicate setting: %s / %s\n",                     \
@@ -87,7 +88,7 @@ get_setting_name(std::string _v)
     {                                                                                    \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
             ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, INITIAL_VALUE,            \
-            std::set<std::string>{ "custom", "omnitrace", "omnitrace-library",           \
+            std::set<std::string>{ "custom", "omnitrace", "omnitrace_library",           \
                                    __VA_ARGS__ },                                        \
             std::vector<std::string>{ CMD_LINE });                                       \
         if(!_ret.second)                                                                 \
@@ -147,28 +148,23 @@ configure_settings(bool _init)
     if(_omnitrace_debug) tim::set_env("TIMEMORY_DEBUG_SETTINGS", "1", 0);
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_PERFETTO", "Enable perfetto backend",
-                             _default_perfetto_v, "backend", "perfetto",
-                             "instrumentation");
+                             _default_perfetto_v, "backend", "perfetto");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_TIMEMORY", "Enable timemory backend",
                              !_config->get<bool>("OMNITRACE_USE_PERFETTO"), "backend",
-                             "timemory", "instrumentation", "sampling");
+                             "timemory");
 
-#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_ROCTRACER", "Enable ROCM tracing", true,
                              "backend", "roctracer", "rocm");
-#endif
 
-#if defined(OMNITRACE_USE_ROCM_SMI) && OMNITRACE_USE_ROCM_SMI > 0
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_USE_ROCM_SMI",
         "Enable sampling GPU power, temp, utilization, and memory usage", true, "backend",
-        "rocm-smi", "rocm");
+        "rocm_smi", "rocm");
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_ROCM_SMI_DEVICES",
                              "Devices to query when OMNITRACE_USE_ROCM_SMI=ON", "all",
-                             "backend", "rocm-smi", "rocm");
-#endif
+                             "backend", "rocm_smi", "rocm");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_SAMPLING",
                              "Enable statistical sampling of call-stack", false,
@@ -177,12 +173,12 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_THREAD_SAMPLING",
                              "Enable a background thread which samples system metrics "
                              "such as the CPU/GPU freq, power, etc.",
-                             true, "backend", "sampling");
+                             true, "backend", "sampling", "thread_sampling");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_USE_PID",
         "Enable tagging filenames with process identifier (either MPI rank or pid)", true,
-        "io");
+        "io", "filename");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_KOKKOSP",
                              "Enable support for Kokkos Tools", false, "kokkos",
@@ -192,11 +188,9 @@ configure_settings(bool _init)
         bool, "OMNITRACE_KOKKOS_KERNEL_LOGGER", "Enables kernel logging", false,
         "--omnitrace-kokkos-kernel-logger", "kokkos", "debugging");
 
-#if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_OMPT",
                              "Enable support for OpenMP-Tools", false, "openmp", "ompt",
                              "backend");
-#endif
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_CODE_COVERAGE",
                              "Enable support for code coverage", false, "coverage",
@@ -205,25 +199,25 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_INSTRUMENTATION_INTERVAL",
                              "Instrumentation only takes measurements once every N "
                              "function calls (not statistical)",
-                             1, "instrumentation");
+                             1, "instrumentation", "data_sampling");
 
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_SAMPLING_FREQ",
         "Number of software interrupts per second when OMNITTRACE_USE_SAMPLING=ON", 10.0,
-        "sampling");
+        "sampling", "thread_sampling");
 
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_SAMPLING_DELAY",
         "Number of seconds to wait before the first sampling signal is delivered, "
         "increasing this value can fix deadlocks during init",
-        0.5, "sampling");
+        0.5, "sampling", "thread_sampling");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_SAMPLING_CPUS",
         "CPUs to collect frequency information for. Values should be separated by commas "
         "and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies 'all' and "
         "'none' suppresses all CPU frequency sampling",
-        "", "sampling");
+        "", "thread_sampling");
 
     auto _backend = tim::get_env_choice<std::string>(
         "OMNITRACE_BACKEND",
@@ -235,30 +229,36 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_BACKEND",
                              "Specify the perfetto backend to activate. Options are: "
                              "'inprocess', 'system', or 'all'",
-                             _backend, "perfetto", "instrumentation", "sampling");
+                             _backend, "perfetto");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CRITICAL_TRACE",
                              "Enable generation of the critical trace", false, "backend",
-                             "critical-trace", "instrumentation");
+                             "critical_trace");
+
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_LOCKS",
+                             "Enable tracking calls to pthread_mutex_lock, "
+                             "pthread_mutex_unlock, pthread_mutex_trylock",
+                             false, "backend", "parallelism", "gotcha");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_FLAT_SAMPLING",
                              "Ignore hierarchy in all statistical sampling entries",
-                             _config->get_flat_profile(), "sampling", "data_layout");
+                             _config->get_flat_profile(), "timemory", "sampling",
+                             "data_layout");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_TIMELINE_SAMPLING",
         "Create unique entries for every sample when statistical sampling is enabled",
-        _config->get_timeline_profile(), "sampling", "data_layout");
+        _config->get_timeline_profile(), "timemory", "sampling", "data_layout");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_ROCTRACER_FLAT_PROFILE",
         "Ignore hierarchy in all kernels entries with timemory backend",
-        _config->get_flat_profile(), "roctracer", "data_layout", "rocm");
+        _config->get_flat_profile(), "timemory", "roctracer", "data_layout", "rocm");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_ROCTRACER_TIMELINE_PROFILE",
         "Create unique entries for every kernel with timemory backend",
-        _config->get_timeline_profile(), "roctracer", "data_layout", "rocm");
+        _config->get_timeline_profile(), "timemory", "roctracer", "data_layout", "rocm");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_HSA_ACTIVITY",
                              "Enable HSA activity tracing support", false, "roctracer",
@@ -273,12 +273,12 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CRITICAL_TRACE_DEBUG",
                              "Enable debugging for critical trace", _omnitrace_debug,
-                             "debugging", "critical-trace");
+                             "debugging", "critical_trace");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES",
         "Include names in serialization of critical trace (mainly for debugging)",
-        _omnitrace_debug, "debugging", "critical-trace");
+        _omnitrace_debug, "debugging", "critical_trace");
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_SHMEM_SIZE_HINT_KB",
                              "Hint for shared-memory buffer size in perfetto (in KB)",
@@ -288,37 +288,36 @@ configure_settings(bool _init)
                              "Size of perfetto buffer (in KB)", 1024000, "perfetto",
                              "data");
 
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_COMBINE_PERFETTO_TRACES",
+                             "Combine Perfetto traces", true, "perfetto", "data");
+
     OMNITRACE_CONFIG_SETTING(int64_t, "OMNITRACE_CRITICAL_TRACE_COUNT",
                              "Number of critical trace to export (0 == all)", 0, "data",
-                             "critical-trace");
+                             "critical_trace");
 
     OMNITRACE_CONFIG_SETTING(uint64_t, "OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT",
                              "Number of critical trace records to store in thread-local "
                              "memory before submitting to shared buffer",
-                             2000, "data", "critical-trace");
+                             2000, "data", "critical_trace");
 
     OMNITRACE_CONFIG_SETTING(
         uint64_t, "OMNITRACE_CRITICAL_TRACE_NUM_THREADS",
         "Number of threads to use when generating the critical trace",
         std::min<uint64_t>(8, std::thread::hardware_concurrency()), "parallelism",
-        "critical-trace");
+        "critical_trace");
 
     OMNITRACE_CONFIG_SETTING(
         int64_t, "OMNITRACE_CRITICAL_TRACE_PER_ROW",
         "How many critical traces per row in perfetto (0 == all in one row)", 0, "io",
-        "critical-trace");
+        "critical_trace");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_TIMEMORY_COMPONENTS",
         "List of components to collect via timemory (see timemory-avail)", "wall_clock",
-        "timemory", "component", "instrumentation");
+        "timemory", "component");
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_OUTPUT_FILE", "Perfetto filename",
-                             "", "perfetto", "io");
-
-    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_SETTINGS_DESC",
-                             "Provide descriptions when printing settings", false,
-                             "debugging");
+                             "", "perfetto", "io", "filename");
 
     _config->get_flamegraph_output()     = false;
     _config->get_cout_output()           = false;
@@ -334,7 +333,7 @@ configure_settings(bool _init)
     _config->get_max_thread_bookmarks()  = 1;
     _config->get_timing_units()          = "sec";
     _config->get_memory_units()          = "MB";
-    _config->get_papi_events()           = "PAPI_TOT_CYC, PAPI_TOT_INS";
+    _config->get_papi_events()           = "PAPI_TOT_CYC";
 
     // settings native to timemory but critically and/or extensively used by omnitrace
     auto _add_omnitrace_category = [](auto itr) {
@@ -342,7 +341,7 @@ configure_settings(bool _init)
         {
             auto _categories = itr->second->get_categories();
             _categories.emplace("omnitrace");
-            _categories.emplace("omnitrace-library");
+            _categories.emplace("omnitrace_library");
             itr->second->set_categories(_categories);
         }
     };
@@ -396,8 +395,7 @@ configure_settings(bool _init)
         _config->read(itr);
     }
 
-    _config->get_global_components() =
-        _config->get<std::string>("OMNITRACE_TIMEMORY_COMPONENTS");
+    settings::suppress_config() = true;
 
     // always initialize timemory because gotcha wrappers are always used
     auto _cmd     = tim::read_command_line(process::get_id());
@@ -407,9 +405,6 @@ configure_settings(bool _init)
     auto _pos = _exe.find_last_of('/');
     if(_pos < _exe.length() - 1) _exe = _exe.substr(_pos + 1);
     get_exe_name() = _exe;
-
-    scope::get_fields()[scope::flat::value]     = tim::settings::flat_profile();
-    scope::get_fields()[scope::timeline::value] = tim::settings::timeline_profile();
 
     bool _found_sep = false;
     for(const auto& itr : _cmd)
@@ -425,8 +420,13 @@ configure_settings(bool _init)
         tim::timemory_init(_cmd, _parser, "omnitrace-");
     }
 
+    _config->get_global_components() =
+        _config->get<std::string>("OMNITRACE_TIMEMORY_COMPONENTS");
+
+    scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
+    scope::get_fields()[scope::timeline::value] = _config->get_timeline_profile();
+
     settings::suppress_parsing()  = true;
-    settings::suppress_config()   = true;
     settings::use_output_suffix() = _config->get<bool>("OMNITRACE_USE_PID");
 #if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
     if(tim::dmp::is_initialized()) settings::default_process_suffix() = tim::dmp::rank();
@@ -485,6 +485,60 @@ configure_settings(bool _init)
         _old_handler = signal(_dyninst_trampoline_signal,
                               static_cast<signal_handler_t>(_trampoline_handler));
     }
+
+    auto _handle_use_option = [](const std::string& _opt, const std::string& _category) {
+        if(!_config->get<bool>(_opt))
+        {
+            auto _disabled = _config->disable_category(_category);
+            _config->enable(_opt);
+            for(auto&& itr : _disabled)
+                OMNITRACE_BASIC_VERBOSE(3, "[%s=OFF]    disabled option :: '%s'\n",
+                                        _opt.c_str(), itr.c_str());
+            return false;
+        }
+        auto _enabled = _config->enable_category(_category);
+        for(auto&& itr : _enabled)
+            OMNITRACE_BASIC_VERBOSE(3, "[%s=ON]      enabled option :: '%s'\n",
+                                    _opt.c_str(), itr.c_str());
+        return true;
+    };
+
+    _handle_use_option("OMNITRACE_USE_SAMPLING", "sampling");
+    _handle_use_option("OMNITRACE_USE_THREAD_SAMPLING", "thread_sampling");
+    _handle_use_option("OMNITRACE_USE_KOKKOSP", "kokkos");
+    _handle_use_option("OMNITRACE_USE_PERFETTO", "perfetto");
+    _handle_use_option("OMNITRACE_USE_TIMEMORY", "timemory");
+    _handle_use_option("OMNITRACE_CRITICAL_TRACE", "critical_trace");
+    _handle_use_option("OMNITRACE_USE_OMPT", "ompt");
+    _handle_use_option("OMNITRACE_USE_ROCM_SMI", "rocm_smi");
+    _handle_use_option("OMNITRACE_USE_ROCTRACER", "roctracer");
+
+#if !defined(OMNITRACE_USE_ROCTRACER) || OMNITRACE_USE_ROCTRACER == 0
+    _config->disable_category("roctracer");
+#endif
+
+#if !defined(OMNITRACE_USE_ROCM_SMI) || OMNITRACE_USE_ROCM_SMI == 0
+    _config->disable_category("rocm_smi");
+#endif
+
+#if defined(OMNITRACE_USE_OMPT) || OMNITRACE_USE_OMPT == 0
+    _config->disable_category("ompt");
+#endif
+
+    // user bundle components
+    _config->disable_category("throttle");
+    _config->disable("components");
+    _config->disable("global_components");
+    _config->disable("ompt_components");
+    _config->disable("kokkos_components");
+    _config->disable("trace_components");
+    _config->disable("profiler_components");
+    _config->disable("destructor_report");
+    _config->disable("stack_clearing");
+
+#if !defined(TIMEMORY_USE_MPI) || TIMEMORY_USE_MPI == 0
+    _config->disable("OMNITRACE_COMBINE_PERFETTO_TRACES");
+#endif
 }
 
 void
@@ -512,7 +566,8 @@ print_settings(
 
     std::stringstream _os{};
 
-    bool _md = tim::get_env<bool>("OMNITRACE_SETTINGS_DESC_MARKDOWN", false);
+    bool _print_desc = get_debug() || tim::get_env("OMNITRACE_SETTINGS_DESC", false);
+    bool _md         = tim::get_env<bool>("OMNITRACE_SETTINGS_DESC_MARKDOWN", false);
 
     constexpr size_t nfields = 3;
     using str_array_t        = std::array<std::string, nfields>;
@@ -521,6 +576,7 @@ print_settings(
     _widths.fill(0);
     for(const auto& itr : *get_config())
     {
+        if(!itr.second->get_enabled()) continue;
         if(_filter(itr.first, itr.second->get_categories()))
         {
             auto _disp = itr.second->get_display(std::ios::boolalpha);
@@ -548,8 +604,6 @@ print_settings(
         // alphabetical sort
         return lhs.at(0) < rhs.at(0);
     });
-
-    bool _print_desc = get_debug() || get_config()->get<bool>("OMNITRACE_SETTINGS_DESC");
 
     auto tot_width = std::accumulate(_widths.begin(), _widths.end(), 0);
     if(!_print_desc) tot_width -= _widths.back() + 4;
@@ -945,6 +999,17 @@ get_perfetto_buffer_size()
     return static_cast<tim::tsettings<size_t>&>(*_v->second).get();
 }
 
+bool
+get_perfetto_combined_traces()
+{
+#if defined(TIMEMORY_USE_MPI) && TIMEMORY_USE_MPI > 0
+    static auto _v = get_config()->find("OMNITRACE_COMBINE_PERFETTO_TRACES");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+#else
+    return false;
+#endif
+}
+
 uint64_t
 get_critical_trace_update_freq()
 {
@@ -1060,6 +1125,13 @@ get_rocm_smi_devices()
 #else
     return std::string{};
 #endif
+}
+
+bool
+get_trace_thread_locks()
+{
+    static auto _v = get_config()->find("OMNITRACE_TRACE_THREAD_LOCKS");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 bool

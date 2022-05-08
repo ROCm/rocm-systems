@@ -52,8 +52,10 @@ struct backtrace
 , tim::concepts::component
 {
     static constexpr size_t num_hw_counters = TIMEMORY_PAPI_ARRAY_SIZE;
+    static constexpr size_t buffer_width    = 512;
+    static constexpr size_t stack_depth     = 128;
 
-    using data_t            = std::array<char[512], 128>;
+    using data_t            = std::array<char[buffer_width], stack_depth>;
     using clock_type        = std::chrono::steady_clock;
     using time_point_type   = typename clock_type::time_point;
     using value_type        = void;

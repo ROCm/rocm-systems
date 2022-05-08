@@ -46,7 +46,7 @@ namespace omnitrace
 // bundle of components around omnitrace_init and omnitrace_finalize
 using main_bundle_t =
     tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::cpu_clock,
-                           comp::cpu_util, pthread_gotcha_t>;
+                           comp::cpu_util, pthread_gotcha>;
 
 using gotcha_bundle_t = tim::lightweight_tuple<fork_gotcha_t, mpi_gotcha_t>;
 
@@ -89,4 +89,27 @@ get_cpu_cid_entry(uint64_t _cid, int64_t _tid = threading::get_id());
 tim::mutex_t&
 get_cpu_cid_stack_lock(int64_t _tid = threading::get_id());
 
+ThreadState&
+get_thread_state();
+
+/// returns old state
+ThreadState set_thread_state(ThreadState);
+
+ThreadState push_thread_state(ThreadState);
+
+ThreadState
+pop_thread_state();
+
+struct scoped_thread_state
+{
+    scoped_thread_state(ThreadState _v) { push_thread_state(_v); }
+    ~scoped_thread_state() { pop_thread_state(); }
+};
 }  // namespace omnitrace
+
+#define OMNITRACE_SCOPED_THREAD_STATE(STATE)                                             \
+    ::omnitrace::scoped_thread_state OMNITRACE_VARIABLE(                                 \
+        OMNITRACE_VAR_NAME_COMBINE(scoped_thread_state_, __LINE__))                      \
+    {                                                                                    \
+        ::omnitrace::STATE                                                               \
+    }

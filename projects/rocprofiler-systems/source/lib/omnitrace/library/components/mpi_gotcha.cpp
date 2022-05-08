@@ -46,8 +46,7 @@ omnitrace_mpi_set_attr()
         return MPI_SUCCESS;
     };
     static auto _mpi_fini = [](MPI_Comm, int, void*, void*) {
-        OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(),
-                                          "MPI Comm attribute finalize\n");
+        OMNITRACE_DEBUG("MPI Comm attribute finalize\n");
         if(mpip_index != std::numeric_limits<uint64_t>::max())
             comp::deactivate_mpip<tim::component_tuple<omnitrace::component::omnitrace>,
                                   api::omnitrace>(mpip_index);
@@ -83,8 +82,7 @@ mpi_gotcha::configure()
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 {
-    OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug_env(), "%s(int*, char***)\n",
-                                        _data.tool_id.c_str());
+    OMNITRACE_BASIC_DEBUG_F("%s(int*, char***)\n", _data.tool_id.c_str());
 
     if(get_state() < ::omnitrace::State::Init) set_state(::omnitrace::State::PreInit);
 
@@ -98,8 +96,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***)
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, int, int*)
 {
-    OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug_env(), "%s(int*, char***, int, int*)\n",
-                                        _data.tool_id.c_str());
+    OMNITRACE_BASIC_DEBUG_F("%s(int*, char***, int, int*)\n", _data.tool_id.c_str());
 
     if(get_state() < ::omnitrace::State::Init) set_state(::omnitrace::State::PreInit);
 
@@ -113,7 +110,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, int*, char***, in
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
 {
-    OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug_env(), "%s()\n", _data.tool_id.c_str());
+    OMNITRACE_BASIC_DEBUG_F("%s()\n", _data.tool_id.c_str());
 
     if(mpip_index != std::numeric_limits<uint64_t>::max())
         comp::deactivate_mpip<tim::component_tuple<omnitrace::component::omnitrace>,
@@ -130,7 +127,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t, int* _val)
 {
-    OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug_env(), "%s()\n", _data.tool_id.c_str());
+    OMNITRACE_BASIC_DEBUG_F("%s()\n", _data.tool_id.c_str());
 
     omnitrace_push_trace_hidden(_data.tool_id.c_str());
     if(_data.tool_id == "MPI_Comm_rank")
@@ -151,8 +148,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t, int* _val
 void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 {
-    OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug_env(), "%s() returned %i\n",
-                                        _data.tool_id.c_str(), (int) _retval);
+    OMNITRACE_BASIC_DEBUG_F("%s() returned %i\n", _data.tool_id.c_str(), (int) _retval);
 
     if(_retval == tim::mpi::success_v && _data.tool_id.find("MPI_Init") == 0)
     {
@@ -164,8 +160,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         // were excluded via a regex expression)
         if(get_use_mpip())
         {
-            OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug_env() || get_verbose_env() > 0,
-                                                "Activating MPI wrappers...\n");
+            OMNITRACE_BASIC_VERBOSE_F(2, "Activating MPI wrappers...\n");
 
             // use env vars OMNITRACE_MPIP_PERMIT_LIST and OMNITRACE_MPIP_REJECT_LIST
             // to control the gotcha bindings at runtime
@@ -186,13 +181,12 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
                 tim::mpi::set_rank(m_rank);
                 tim::settings::default_process_suffix() = m_rank;
                 get_perfetto_output_filename().clear();
-                OMNITRACE_CONDITIONAL_BASIC_PRINT(
-                    get_debug() || get_verbose() > 0, "[pid=%i] MPI rank: %i (%i)\n",
-                    process::get_id(), tim::mpi::rank(), m_rank);
+                OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI rank: %i (%i)\n",
+                                        process::get_id(), tim::mpi::rank(), m_rank);
             }
             else
             {
-                OMNITRACE_BASIC_PRINT_F("%s() returned %i :: nullptr to rank\n",
+                OMNITRACE_BASIC_VERBOSE(0, "%s() returned %i :: nullptr to rank\n",
                                         _data.tool_id.c_str(), (int) _retval);
             }
         }
@@ -202,19 +196,19 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             {
                 m_size = std::max<int>(*m_size_ptr, m_size);
                 tim::mpi::set_size(m_size);
-                OMNITRACE_CONDITIONAL_BASIC_PRINT(
-                    get_debug() || get_verbose() > 0, "[pid=%i] MPI size: %i (%i)\n",
-                    process::get_id(), tim::mpi::size(), m_size);
+                OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI size: %i (%i)\n",
+                                        process::get_id(), tim::mpi::size(), m_size);
             }
             else
             {
-                OMNITRACE_BASIC_PRINT_F("%s() returned %i :: nullptr to size\n",
+                OMNITRACE_BASIC_VERBOSE(0, "%s() returned %i :: nullptr to size\n",
                                         _data.tool_id.c_str(), (int) _retval);
             }
         }
         else
         {
-            OMNITRACE_BASIC_PRINT_F("%s() returned %i :: unexpected function wrapper\n",
+            OMNITRACE_BASIC_VERBOSE(0,
+                                    "%s() returned %i :: unexpected function wrapper\n",
                                     _data.tool_id.c_str(), (int) _retval);
         }
     }

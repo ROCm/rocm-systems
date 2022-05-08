@@ -777,4 +777,14 @@ function(OMNITRACE_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
     endif()
 endfunction()
 
+function(OMNITRACE_FIND_STATIC_LIBRARY)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_STATIC_LIBRARY_SUFFIX})
+    find_library(${ARGN})
+endfunction()
+
+function(OMNITRACE_FIND_SHARED_LIBRARY)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_SHARED_LIBRARY_SUFFIX})
+    find_library(${ARGN})
+endfunction()
+
 cmake_policy(POP)

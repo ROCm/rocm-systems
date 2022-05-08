@@ -41,6 +41,19 @@ to_string(omnitrace::State _v)
 }
 
 std::string
+to_string(omnitrace::ThreadState _v)
+{
+    switch(_v)
+    {
+        case omnitrace::ThreadState::Enabled: return "Enabled";
+        case omnitrace::ThreadState::Internal: return "Internal";
+        case omnitrace::ThreadState::Disabled: return "Disabled";
+        case omnitrace::ThreadState::Completed: return "Completed";
+    }
+    return {};
+}
+
+std::string
 to_string(omnitrace::Mode _v)
 {
     switch(_v)

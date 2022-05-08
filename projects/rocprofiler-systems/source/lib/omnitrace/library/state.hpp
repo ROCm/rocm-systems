@@ -36,6 +36,15 @@ enum class State : unsigned short
     Finalized
 };
 
+// used for specifying the state of omnitrace
+enum class ThreadState : unsigned short
+{
+    Enabled = 0,
+    Internal,
+    Disabled,
+    Completed,
+};
+
 enum class Mode : unsigned short
 {
     Trace = 0,
@@ -50,6 +59,9 @@ namespace std
 {
 std::string
 to_string(omnitrace::State _v);
+
+std::string
+to_string(omnitrace::ThreadState _v);
 
 std::string
 to_string(omnitrace::Mode _v);

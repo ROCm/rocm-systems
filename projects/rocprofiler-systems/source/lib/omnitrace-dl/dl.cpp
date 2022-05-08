@@ -122,9 +122,9 @@ const char* _omnitrace_dl_dlopen_descr = "RTLD_LAZY | RTLD_LOCAL";
 /// This class contains function pointers for omnitrace's instrumentation functions
 struct OMNITRACE_HIDDEN_API indirect
 {
-    OMNITRACE_INLINE indirect(std::string omnilib, std::string userlib)
-    : m_omnilib{ find_path(std::move(omnilib)) }
-    , m_userlib{ find_path(std::move(userlib)) }
+    OMNITRACE_INLINE indirect(const std::string& omnilib, const std::string& userlib)
+    : m_omnilib{ find_path(omnilib) }
+    , m_userlib{ find_path(userlib) }
     {
         if(_omnitrace_dl_verbose >= 1)
         {
@@ -218,19 +218,20 @@ struct OMNITRACE_HIDDEN_API indirect
         }
     }
 
-    static OMNITRACE_INLINE std::string find_path(std::string&& _path)
+    static OMNITRACE_INLINE std::string find_path(const std::string& _path)
     {
-        auto _paths =
-            delimit(join(":", get_env("OMNITRACE_PATH", ""),
-                         get_env("LD_LIBRARY_PATH", ""), get_env("LIBRARY_PATH", "")),
-                    ":");
+        auto _paths_search =
+            join(":", get_env("OMNITRACE_PATH", ""), get_env("LD_LIBRARY_PATH", ""),
+                 get_env("LIBRARY_PATH", ""));
+
+        auto _paths = delimit(_paths_search, ":");
 
         auto file_exists = [](const std::string& name) {
             struct stat buffer;
             return (stat(name.c_str(), &buffer) == 0);
         };
 
-        for(auto&& itr : _paths)
+        for(const auto& itr : _paths)
         {
             auto _f = join('/', itr, _path);
             if(file_exists(_f)) return _f;
@@ -269,10 +270,10 @@ get_indirect() OMNITRACE_HIDDEN_API;
 indirect&
 get_indirect()
 {
-    static auto _v =
-        indirect{ get_env("OMNITRACE_LIBRARY", "libomnitrace.so"),
-                  get_env("OMNITRACE_USER_LIBRARY", "libomnitrace-user.so") };
-    return _v;
+    static auto  _libomni = get_env("OMNITRACE_LIBRARY", "libomnitrace.so");
+    static auto  _libuser = get_env("OMNITRACE_USER_LIBRARY", "libomnitrace-user.so");
+    static auto* _v       = new indirect{ _libomni, _libuser };
+    return *_v;
 }
 
 auto&
@@ -338,6 +339,10 @@ bool _omnitrace_dl_fini = (std::atexit([]() {
 #define OMNITRACE_DL_INVOKE(...)                                                         \
     ::omnitrace::common::invoke(__FUNCTION__, ::omnitrace::dl::_omnitrace_dl_verbose,    \
                                 (::omnitrace::dl::get_thread_status() = false),          \
+                                __VA_ARGS__)
+
+#define OMNITRACE_DL_IGNORE(...)                                                         \
+    ::omnitrace::common::ignore(__FUNCTION__, ::omnitrace::dl::_omnitrace_dl_verbose,    \
                                 __VA_ARGS__)
 
 #define OMNITRACE_DL_INVOKE_STATUS(STATUS, ...)                                          \
@@ -464,18 +469,30 @@ extern "C"
 
     void omnitrace_set_env(const char* a, const char* b)
     {
+        if(dl::get_inited() && dl::get_active())
+        {
+            OMNITRACE_DL_IGNORE(2, "already initialized and active", a, b);
+            return;
+        }
         setenv(a, b, 0);
         OMNITRACE_DL_INVOKE(get_indirect().omnitrace_set_env_f, a, b);
     }
 
     void omnitrace_set_mpi(bool a, bool b)
     {
+        if(dl::get_inited() && dl::get_active())
+        {
+            OMNITRACE_DL_IGNORE(2, "already initialized and active", a, b);
+            return;
+        }
         OMNITRACE_DL_INVOKE(get_indirect().omnitrace_set_mpi_f, a, b);
     }
 
     void omnitrace_register_source(const char* file, const char* func, size_t line,
                                    size_t address, const char* source)
     {
+        OMNITRACE_DL_LOG(3, "%s(\"%s\", \"%s\", %zu, %zu, \"%s\")\n", __FUNCTION__, file,
+                         func, line, address, source);
         OMNITRACE_DL_INVOKE(get_indirect().omnitrace_register_source_f, file, func, line,
                             address, source);
     }

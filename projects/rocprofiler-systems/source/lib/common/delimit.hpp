@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,51 @@ inline namespace common
 {
 namespace
 {
+template <typename ContainerT, typename... Args>
+inline auto
+emplace_impl(ContainerT& _c, int, Args&&... _args)
+    -> decltype(_c.emplace_back(std::forward<Args>(_args)...))
+{
+    return _c.emplace_back(std::forward<Args>(_args)...);
+}
+
+template <typename ContainerT, typename... Args>
+inline auto
+emplace_impl(ContainerT& _c, long, Args&&... _args)
+    -> decltype(_c.emplace(std::forward<Args>(_args)...))
+{
+    return _c.emplace(std::forward<Args>(_args)...);
+}
+
+template <typename ContainerT, typename... Args>
+inline auto
+emplace(ContainerT& _c, Args&&... _args)
+{
+    return emplace_impl(_c, 0, std::forward<Args>(_args)...);
+}
+
+template <typename ContainerT, typename ArgT>
+inline auto
+reserve_impl(ContainerT& _c, int, ArgT _arg) -> decltype(_c.reserve(_arg), bool())
+{
+    _c.reserve(_arg);
+    return true;
+}
+
+template <typename ContainerT, typename ArgT>
+inline auto
+reserve_impl(ContainerT&, long, ArgT)
+{
+    return false;
+}
+
+template <typename ContainerT, typename ArgT>
+inline auto
+reserve(ContainerT& _c, ArgT _arg)
+{
+    return reserve_impl(_c, 0, _arg);
+}
+
 template <typename ContainerT = std::vector<std::string>>
 inline ContainerT
 delimit(const std::string& line, const char* delimiters = "\"',;: ");
@@ -42,6 +88,18 @@ delimit(const std::string& line, const char* delimiters)
     ContainerT _result{};
     size_t     _beginp = 0;  // position that is the beginning of the new string
     size_t     _delimp = 0;  // position of the delimiter in the string
+    if(reserve(_result, 0))
+    {
+        size_t _nmax = 0;
+        for(char itr : line)
+        {
+            for(size_t j = 0; j < strlen(delimiters); ++j)
+            {
+                if(itr == delimiters[j]) ++_nmax;
+            }
+        }
+        reserve(_result, _nmax);
+    }
     while(_beginp < line.length() && _delimp < line.length())
     {
         // find the first character (starting at _delimp) that is not a delimiter
@@ -56,7 +114,7 @@ delimit(const std::string& line, const char* delimiters)
         // between this position and the next delimiter
         _tmp = line.substr(_beginp, _delimp - _beginp);
         // don't add empty strings
-        if(!_tmp.empty()) _result.emplace(_result.end(), _tmp);
+        if(!_tmp.empty()) emplace(_result, _tmp);
     }
     return _result;
 }

@@ -34,6 +34,18 @@ set(_base_environment
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
     )
 
+set(_lock_environment
+    "OMNITRACE_USE_SAMPLING=OFF"
+    "OMNITRACE_CRITICAL_TRACE=ON"
+    "OMNITRACE_COLLAPSE_THREADS=ON"
+    "OMNITRACE_TRACE_THREAD_LOCKS=ON"
+    "OMNITRACE_COUT_OUTPUT=ON"
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_FLAT_PROFILE=ON"
+    "OMNITRACE_TIMELINE_PROFILE=OFF"
+    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
+
 set(_ompt_environment
     "OMNITRACE_USE_PERFETTO=ON"
     "OMNITRACE_USE_TIMEMORY=ON"
@@ -144,7 +156,7 @@ function(OMNITRACE_ADD_TEST)
             list(APPEND TEST_ENVIRONMENT "OMNITRACE_USE_PID=OFF")
         endif()
 
-        if(NOT SKIP_BASELINE)
+        if(NOT TEST_SKIP_BASELINE)
             add_test(
                 NAME ${TEST_NAME}-baseline
                 COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
@@ -389,7 +401,7 @@ omnitrace_add_test(
     TARGET transpose
     MPI ${TRANSPOSE_USE_MPI}
     NUM_PROCS ${NUM_PROCS}
-    REWRITE_ARGS -e -v 2
+    REWRITE_ARGS -e -v 2 --print-instructions
     RUNTIME_ARGS -e -v 1 --label file line return args
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=ON")
 
@@ -409,6 +421,30 @@ omnitrace_add_test(
         args
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
+
+omnitrace_add_test(
+    SKIP_RUNTIME SKIP_SAMPLING
+    NAME parallel-overhead-locks-timemory
+    TARGET parallel-overhead-locks
+    LABELS "locks"
+    REWRITE_ARGS -e -v 2 --min-instructions=4
+    RUN_ARGS 10 4 1000
+    ENVIRONMENT
+        "${_lock_environment};OMNITRACE_USE_TIMEMORY=ON;OMNITRACE_USE_PERFETTO=OFF"
+    REWRITE_RUN_PASS_REGEX
+        "start_thread (.*) 4 (.*) pthread_mutex_lock (.*) 4000 (.*) pthread_mutex_unlock (.*) 4000"
+    )
+
+omnitrace_add_test(
+    SKIP_BASELINE SKIP_RUNTIME SKIP_SAMPLING
+    NAME parallel-overhead-locks-perfetto
+    TARGET parallel-overhead-locks
+    LABELS "locks"
+    REWRITE_ARGS -e -v 2 --min-instructions=8
+    RUN_ARGS 10 4 1000
+    ENVIRONMENT
+        "${_lock_environment};OMNITRACE_USE_TIMEMORY=OFF;OMNITRACE_USE_PERFETTO=ON"
+    PROPERTIES WILL_FAIL ON)
 
 omnitrace_add_test(
     NAME user-api

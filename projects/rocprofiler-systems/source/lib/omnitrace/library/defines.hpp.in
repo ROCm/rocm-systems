@@ -67,3 +67,10 @@
 #    endif
 #    include <cassert>
 #endif
+
+#define OMNITRACE_STRINGIZE(X)           OMNITRACE_STRINGIZE2(X)
+#define OMNITRACE_STRINGIZE2(X)          #X
+#define OMNITRACE_VAR_NAME_COMBINE(X, Y) X##Y
+#define OMNITRACE_VARIABLE(Y)            OMNITRACE_VAR_NAME_COMBINE(_omni_var_, Y)
+#define OMNITRACE_LINESTR                OMNITRACE_STRINGIZE(__LINE__)
+#define OMNITRACE_ESC(...)               __VA_ARGS__

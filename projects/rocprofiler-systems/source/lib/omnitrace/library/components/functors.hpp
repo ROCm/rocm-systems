@@ -24,10 +24,13 @@
 
 #include "library/components/fwd.hpp"
 #include "library/defines.hpp"
+#include "library/runtime.hpp"
+#include "library/state.hpp"
 #include "library/timemory.hpp"
-#include "timemory/mpl/concepts.hpp"
-#include "timemory/mpl/function_traits.hpp"
-#include "timemory/utility/macros.hpp"
+
+#include <timemory/mpl/concepts.hpp>
+#include <timemory/mpl/function_traits.hpp>
+#include <timemory/utility/macros.hpp>
 
 #include <type_traits>
 #include <utility>
@@ -71,6 +74,7 @@ struct functors : comp::base<functors<ApiT, StartFuncT, StopFuncT>, void>
                                             int> = 0>
     static auto start(Args&&... _args)
     {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         get_functors().first(std::forward<Args>(_args)...);
     }
 
@@ -79,6 +83,7 @@ struct functors : comp::base<functors<ApiT, StartFuncT, StopFuncT>, void>
                                             int> = 0>
     static auto stop(Args&&... _args)
     {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         get_functors().second(std::forward<Args>(_args)...);
     }
 
@@ -87,24 +92,28 @@ struct functors : comp::base<functors<ApiT, StartFuncT, StopFuncT>, void>
     template <typename Tp = this_type, enable_if_t<Tp::begin_supports_cstr, int> = 0>
     void start()
     {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         get_functors().first(m_prefix);
     }
 
     template <typename Tp = this_type, enable_if_t<Tp::end_supports_cstr, int> = 0>
     void stop()
     {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         get_functors().second(m_prefix);
     }
 
     template <typename Tp = this_type, enable_if_t<Tp::begin_supports_void, int> = 0>
     void start()
     {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         get_functors().first();
     }
 
     template <typename Tp = this_type, enable_if_t<Tp::end_supports_void, int> = 0>
     void stop()
     {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         get_functors().second();
     }
 

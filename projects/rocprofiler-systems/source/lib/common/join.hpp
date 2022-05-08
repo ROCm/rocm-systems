@@ -22,8 +22,10 @@
 
 #pragma once
 
+#include <ios>
 #include <sstream>
 #include <string>
+#include <type_traits>
 
 #if !defined(OMNITRACE_FOLD_EXPRESSION)
 #    define OMNITRACE_FOLD_EXPRESSION(...) ((__VA_ARGS__), ...)
@@ -35,12 +37,51 @@ inline namespace common
 {
 namespace
 {
+template <typename Tp>
+struct is_string_impl : std::false_type
+{};
+
+template <>
+struct is_string_impl<std::string> : std::true_type
+{};
+
+template <>
+struct is_string_impl<std::string_view> : std::true_type
+{};
+
+template <>
+struct is_string_impl<const char*> : std::true_type
+{};
+
+template <>
+struct is_string_impl<char*> : std::true_type
+{};
+
+template <typename Tp>
+struct is_string : is_string_impl<std::remove_cv_t<std::decay_t<Tp>>>
+{};
+
+template <typename ArgT>
+auto
+as_string(ArgT&& _v, std::enable_if_t<is_string<ArgT>::value, int> = 0)
+{
+    return std::string{ "\"" } + _v + std::string{ "\"" };
+}
+
+template <typename ArgT>
+auto
+as_string(ArgT&& _v, std::enable_if_t<!is_string<ArgT>::value, long> = 0)
+{
+    return _v;
+}
+
 template <typename DelimT, typename... Args>
 auto
 join(DelimT&& _delim, Args&&... _args)
 {
     std::stringstream _ss{};
-    OMNITRACE_FOLD_EXPRESSION(_ss << _delim << _args);
+    _ss << std::boolalpha;
+    OMNITRACE_FOLD_EXPRESSION(_ss << _delim << as_string(_args));
     auto _ret = _ss.str();
     if constexpr(std::is_same<DelimT, char>::value)
     {

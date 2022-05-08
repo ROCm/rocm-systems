@@ -27,6 +27,7 @@
 #include "library/components/fwd.hpp"
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/pthread_mutex_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/coverage.hpp"
 #include "library/critical_trace.hpp"
@@ -221,7 +222,7 @@ omnitrace_push_trace_hidden(const char* name)
         std::tie(_cid, _parent_cid, _depth) = create_cpu_cid_entry();
         auto _ts                            = comp::wall_clock::record();
         add_critical_trace<Device::CPU, Phase::BEGIN>(
-            threading::get_id(), _cid, 0, _parent_cid, _ts, 0,
+            threading::get_id(), _cid, 0, _parent_cid, _ts, 0, 0,
             critical_trace::add_hash_id(name), _depth);
     }
 }
@@ -263,7 +264,7 @@ omnitrace_pop_trace_hidden(const char* name)
                     auto     _ts                  = comp::wall_clock::record();
                     std::tie(_parent_cid, _depth) = get_cpu_cid_parents()->at(_cid);
                     add_critical_trace<Device::CPU, Phase::END>(
-                        threading::get_id(), _cid, 0, _parent_cid, _ts, _ts,
+                        threading::get_id(), _cid, 0, _parent_cid, _ts, _ts, 0,
                         critical_trace::add_hash_id(name), _depth);
                 }
             }
@@ -436,6 +437,8 @@ omnitrace_init_library_hidden()
     if(get_state() != State::PreInit || get_state() == State::Init || _once) return;
     _once = true;
 
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     OMNITRACE_CONDITIONAL_BASIC_PRINT_F(_debug_init, "State is %s. Setting to %s...\n",
                                         std::to_string(get_state()).c_str(),
                                         std::to_string(State::Init).c_str());
@@ -445,7 +448,7 @@ omnitrace_init_library_hidden()
                      "glibc's backtrace() occurs...\n");
     {
         std::stringstream _ss{};
-        tim::print_backtrace<64>(_ss);
+        tim::print_backtrace<16>(_ss);
         (void) _ss;
     }
 
@@ -471,7 +474,7 @@ omnitrace_init_library_hidden()
     // below will effectively do:
     //      get_cpu_cid_stack(0)->emplace_back(-1);
     // plus query some env variables
-    add_critical_trace<Device::CPU, Phase::NONE>(0, -1, 0, 0, 0, 0, 0, 0);
+    add_critical_trace<Device::CPU, Phase::NONE>(0, -1, 0, 0, 0, 0, 0, 0, 0);
 
     if(gpu::device_count() == 0 && get_state() != State::Active)
     {
@@ -550,6 +553,8 @@ omnitrace_init_tooling_hidden()
     if(get_state() != State::PreInit || get_state() == State::Init || _once) return false;
     _once = true;
 
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     OMNITRACE_CONDITIONAL_THROW(
         get_state() == State::Init,
         "%s called after omnitrace_init_library() was explicitly called",
@@ -571,6 +576,9 @@ omnitrace_init_tooling_hidden()
     OMNITRACE_DEBUG_F("\n");
 
     auto _dtor = scope::destructor{ []() {
+        // if set to finalized, don't continue
+        if(get_state() > State::Active) return;
+        if(config::get_trace_thread_locks()) pthread_mutex_gotcha::validate();
         if(get_use_thread_sampling())
         {
             pthread_gotcha::push_enable_sampling_on_child_threads(false);
@@ -593,6 +601,12 @@ omnitrace_init_tooling_hidden()
     {
         pthread_gotcha::push_enable_sampling_on_child_threads(false);
         sampling::block_signals();
+    }
+
+    if(get_use_critical_trace())
+    {
+        // initialize the thread pool
+        (void) tasking::critical_trace::get_task_group();
     }
 
     if(get_use_timemory())
@@ -892,8 +906,8 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
     });
 
     std::atexit([]() {
-        // if not already finalized then we should finalize
-        if(get_state() != State::Finalized) omnitrace_finalize_hidden();
+        // if active (not already finalized) then we should finalize
+        if(get_state() == State::Active) omnitrace_finalize_hidden();
     });
 
     OMNITRACE_CONDITIONAL_BASIC_PRINT_F(
@@ -939,6 +953,8 @@ omnitrace_finalize_hidden(void)
 {
     // disable thread id recycling during finalization
     threading::recycle_ids() = false;
+
+    set_thread_state(ThreadState::Completed);
 
     // return if not active
     if(get_state() != State::Active)
@@ -1193,25 +1209,33 @@ omnitrace_finalize_hidden(void)
         using char_vec_t = std::vector<char>;
         OMNITRACE_VERBOSE_F(3, "Getting the trace data...\n");
 
-#if defined(TIMEMORY_USE_MPI) && TIMEMORY_USE_MPI > 0
-        using perfetto_mpi_get_t = tim::operation::finalize::mpi_get<char_vec_t, true>;
-
-        char_vec_t              _trace_data{ tracing_session->ReadTraceBlocking() };
-        std::vector<char_vec_t> _rank_data = {};
-        auto _combine = [](char_vec_t& _dst, const char_vec_t& _src) -> char_vec_t& {
-            _dst.reserve(_dst.size() + _src.size());
-            for(auto&& itr : _src)
-                _dst.emplace_back(itr);
-            return _dst;
-        };
-
-        perfetto_mpi_get_t{ _rank_data, _trace_data, _combine };
         auto trace_data = char_vec_t{};
-        for(auto& itr : _rank_data)
-            trace_data =
-                (trace_data.empty()) ? std::move(itr) : _combine(trace_data, itr);
+#if defined(TIMEMORY_USE_MPI) && TIMEMORY_USE_MPI > 0
+        if(get_perfetto_combined_traces())
+        {
+            using perfetto_mpi_get_t =
+                tim::operation::finalize::mpi_get<char_vec_t, true>;
+
+            char_vec_t              _trace_data{ tracing_session->ReadTraceBlocking() };
+            std::vector<char_vec_t> _rank_data = {};
+            auto _combine = [](char_vec_t& _dst, const char_vec_t& _src) -> char_vec_t& {
+                _dst.reserve(_dst.size() + _src.size());
+                for(auto&& itr : _src)
+                    _dst.emplace_back(itr);
+                return _dst;
+            };
+
+            perfetto_mpi_get_t{ _rank_data, _trace_data, _combine };
+            for(auto& itr : _rank_data)
+                trace_data =
+                    (trace_data.empty()) ? std::move(itr) : _combine(trace_data, itr);
+        }
+        else
+        {
+            trace_data = tracing_session->ReadTraceBlocking();
+        }
 #else
-        char_vec_t trace_data{ tracing_session->ReadTraceBlocking() };
+        trace_data = tracing_session->ReadTraceBlocking();
 #endif
 
         if(!trace_data.empty())

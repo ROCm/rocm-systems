@@ -9,7 +9,7 @@ add_executable(
     ${CMAKE_CURRENT_LIST_DIR}/avail.cpp ${CMAKE_CURRENT_LIST_DIR}/avail.hpp
     $<TARGET_OBJECTS:omnitrace::omnitrace-object-library>)
 
-target_include_directories(omnitrace-avail PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
+target_include_directories(omnitrace-avail PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_definitions(omnitrace-avail PRIVATE OMNITRACE_EXTERN_COMPONENTS=0)
 target_link_libraries(omnitrace-avail PRIVATE omnitrace::omnitrace-compile-definitions
                                               omnitrace::omnitrace-interface-library)

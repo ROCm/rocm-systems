@@ -26,6 +26,7 @@
 #include "library/defines.hpp"
 #include "library/perfetto.hpp"
 #include "library/ptl.hpp"
+#include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 
 #include <PTL/ThreadPool.hh>
@@ -109,9 +110,9 @@ get_combined_hash(Arg0&& _zero, Arg1&& _one, Args&&... _args)
 bool
 entry::operator==(const entry& rhs) const
 {
-    return (device == rhs.device && depth == rhs.depth && priority == rhs.priority &&
-            tid == rhs.tid && cpu_cid == rhs.cpu_cid && gpu_cid == rhs.gpu_cid &&
-            hash == rhs.hash);
+    return std::tie(device, depth, priority, tid, cpu_cid, gpu_cid, queue_id, hash) ==
+           std::tie(rhs.device, rhs.depth, rhs.priority, rhs.tid, rhs.cpu_cid,
+                    rhs.gpu_cid, rhs.queue_id, rhs.hash);
 }
 
 bool
@@ -132,6 +133,10 @@ entry::operator<(const entry& rhs) const
     auto _par_eq = (parent_cid == rhs.parent_cid);
     if(!_par_eq) return (parent_cid < rhs.parent_cid);
 
+    // sort by queue ids
+    auto _queue_eq = (queue_id == rhs.queue_id);
+    if(!_queue_eq) return (queue_id < rhs.queue_id);
+
     // sort by priority
     auto _prio_eq = (priority == rhs.priority);
     if(!_prio_eq) return (priority < rhs.priority);
@@ -143,8 +148,8 @@ entry::operator<(const entry& rhs) const
 bool
 entry::operator>(const entry& rhs) const
 {
-    return (!(*this < rhs) && begin_ns != rhs.begin_ns && cpu_cid != rhs.cpu_cid &&
-            gpu_cid != rhs.gpu_cid);
+    return (!(*this < rhs) && std::tie(begin_ns, cpu_cid, gpu_cid) !=
+                                  std::tie(rhs.begin_ns, rhs.cpu_cid, rhs.gpu_cid));
 }
 
 entry&
@@ -171,7 +176,7 @@ size_t
 entry::get_hash() const
 {
     return get_combined_hash(hash, static_cast<short>(device), static_cast<short>(phase),
-                             tid, cpu_cid, gpu_cid, priority);
+                             tid, cpu_cid, gpu_cid, queue_id, priority);
 }
 
 int64_t
@@ -293,6 +298,7 @@ entry::write(std::ostream& _os) const
     _os << " parent: " << static_cast<int64_t>(parent_cid);
     _os << ", tid: " << tid;
     _os << ", depth: " << depth;
+    _os << ", queue: " << queue_id;
     _os << ", priority: " << priority;
     if(phase == Phase::DELTA)
     {
@@ -423,6 +429,7 @@ template <>
 void
 call_chain::generate_perfetto<Device::CPU>(std::set<entry>& _used) const
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     static std::set<std::string> _static_strings{};
     static std::mutex            _static_mutex{};
     for(const auto& itr : *this)
@@ -444,6 +451,7 @@ template <>
 void
 call_chain::generate_perfetto<Device::GPU>(std::set<entry>& _used) const
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     static std::set<std::string> _static_strings{};
     static std::mutex            _static_mutex{};
     for(const auto& itr : *this)
@@ -465,6 +473,7 @@ template <>
 void
 call_chain::generate_perfetto<Device::ANY>(std::set<entry>& _used) const
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     static std::set<std::string> _static_strings{};
     static std::mutex            _static_mutex{};
     for(const auto& itr : *this)
@@ -509,6 +518,7 @@ get(int64_t _tid)
 void
 add_hash_id(const hash_ids& _labels)
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     std::unique_lock<std::mutex> _lk{ tasking::critical_trace::get_mutex() };
     if(!tasking::critical_trace::get_task_group().pool()) return;
     tasking::critical_trace::get_task_group().exec([_labels]() {
@@ -539,6 +549,7 @@ void
 update(int64_t _tid)
 {
     if(!get_use_critical_trace() && !get_use_rocm_smi()) return;
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     std::unique_lock<std::mutex> _lk{ tasking::critical_trace::get_mutex() };
     if(!tasking::critical_trace::get_task_group().pool()) return;
     call_chain _data{};
@@ -550,6 +561,7 @@ void
 compute(int64_t _tid)
 {
     update(_tid);
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     std::unique_lock<std::mutex> _lk{ tasking::critical_trace::get_mutex() };
     if(!tasking::critical_trace::get_task_group().pool()) return;
     tasking::critical_trace::get_task_group().exec(compute_critical_trace);
@@ -723,6 +735,7 @@ combine_critical_path(call_chain& _targ, call_chain _chain)
         _combined.emplace_back(itr);
     std::sort(_combined.begin(), _combined.end());
 
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     std::unique_lock<std::mutex> _lk{ complete_call_mutex };
     for(auto& itr : _combined)
         _targ.emplace_back(itr);
@@ -751,6 +764,8 @@ update_critical_path(call_chain _chain, int64_t)
 void
 compute_critical_trace()
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     static bool                  _computed = false;
     std::unique_lock<std::mutex> _lk{ complete_call_mutex };
 
@@ -825,6 +840,7 @@ get_entries(int64_t _ts, const std::function<bool(const entry&)>& _eval)
         }
         *_targ = _v;
     };
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     std::unique_lock<std::mutex> _lk{ tasking::critical_trace::get_mutex() };
     size_t                       _n = 0;
     std::vector<std::pair<std::string, entry>> _v{};

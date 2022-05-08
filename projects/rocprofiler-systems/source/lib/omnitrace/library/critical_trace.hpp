@@ -65,17 +65,18 @@ struct entry
     entry& operator=(const entry&) = default;
     entry& operator=(entry&&) noexcept = default;
 
-    uint16_t priority   = 0;            // priority value (for sorting)
-    Device   device     = Device::CPU;  // which device it executed on
-    Phase    phase      = Phase::NONE;  // start / stop / unspecified
-    uint16_t depth      = 0;            // call-stack depth
-    int64_t  tid        = 0;            // thread id it was registered on
-    uint64_t cpu_cid    = 0;            // CPU correlation id
-    uint64_t gpu_cid    = 0;            // GPU correlation id
-    uint64_t parent_cid = 0;            // parent CPU correlation id
-    int64_t  begin_ns   = 0;            // timestamp of start
-    int64_t  end_ns     = 0;            // timestamp of end
-    size_t   hash       = 0;            // hash for name
+    uint16_t  priority   = 0;            /// priority value (for sorting)
+    Device    device     = Device::CPU;  /// which device it executed on
+    Phase     phase      = Phase::NONE;  /// start / stop / unspecified
+    uint16_t  depth      = 0;            /// call-stack depth
+    int64_t   tid        = 0;            /// thread id it was registered on
+    uint64_t  cpu_cid    = 0;            /// CPU correlation id
+    uint64_t  gpu_cid    = 0;            /// GPU correlation id
+    uint64_t  parent_cid = 0;            /// parent CPU correlation id
+    int64_t   begin_ns   = 0;            /// timestamp of start
+    int64_t   end_ns     = 0;            /// timestamp of end
+    uintptr_t queue_id   = 0;            /// stream id (GPU) or mutex id
+    size_t    hash       = 0;            /// hash for name
 
     bool operator==(const entry& rhs) const;
     bool operator!=(const entry& rhs) const { return !(*this == rhs); }
@@ -127,7 +128,8 @@ entry::save(Archive& ar, unsigned int) const
        cereal::make_nvp("tid", tid), cereal::make_nvp("cpu_cid", cpu_cid),
        cereal::make_nvp("gpu_cid", gpu_cid), cereal::make_nvp("parent_cid", parent_cid),
        cereal::make_nvp("begin_ns", begin_ns), cereal::make_nvp("end_ns", end_ns),
-       cereal::make_nvp("hash", hash), cereal::make_nvp("name", _name),
+       cereal::make_nvp("queue", queue_id), cereal::make_nvp("hash", hash),
+       cereal::make_nvp("name", _name),
        cereal::make_nvp("demangled_name", tim::demangle(_name)));
 }
 
@@ -144,6 +146,7 @@ entry::load(Archive& ar, unsigned int)
        cereal::make_nvp("gpu_cid", gpu_cid), cereal::make_nvp("parent_cid", parent_cid),
        cereal::make_nvp("begin_ns", begin_ns), cereal::make_nvp("end_ns", end_ns),
        cereal::make_nvp("hash", hash), cereal::make_nvp("name", _name),
+       cereal::make_nvp("queue", queue_id),
        cereal::make_nvp("demangled_name", _demangled_name));
 
     tim::get_hash_ids()->emplace(hash, _name);

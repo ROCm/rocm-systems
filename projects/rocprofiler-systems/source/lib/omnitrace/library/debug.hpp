@@ -27,6 +27,10 @@
 #include <timemory/api.hpp>
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/process.hpp>
+#include <timemory/backends/threading.hpp>
+#include <timemory/mpl/concepts.hpp>
+#include <timemory/utility/backtrace.hpp>
+#include <timemory/utility/locking.hpp>
 #include <timemory/utility/utility.hpp>
 
 #include <array>
@@ -66,6 +70,25 @@ get_critical_trace_debug();
 
 namespace debug
 {
+struct lock
+{
+    lock();
+    ~lock();
+
+private:
+    tim::auto_lock_t m_lk;
+};
+//
+template <typename Arg, typename... Args>
+bool
+is_bracket(Arg&& _arg, Args&&...)
+{
+    if constexpr(::tim::concepts::is_string_type<Arg>::value)
+        return (::std::string_view{ _arg }.empty()) ? false : _arg[0] == '[';
+    else
+        return false;
+}
+//
 namespace
 {
 template <typename T, size_t... Idx>
@@ -78,10 +101,6 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 }  // namespace
 }  // namespace debug
 }  // namespace omnitrace
-
-#define OMNITRACE_VAR_NAME_COMBINE(X, Y) X##Y
-#define OMNITRACE_LINESTR                TIMEMORY_STRINGIZE(__LINE__)
-#define OMNITRACE_VARIABLE(LABEL)        OMNITRACE_VAR_NAME_COMBINE(_omni_var_, LABEL)
 
 #if !defined(OMNITRACE_DEBUG_BUFFER_LEN)
 #    define OMNITRACE_DEBUG_BUFFER_LEN 2048
@@ -129,14 +148,17 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
             .data()
 #endif
 
+//--------------------------------------------------------------------------------------//
+
 #define OMNITRACE_CONDITIONAL_PRINT(COND, ...)                                           \
     if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         fflush(stderr);                                                                  \
-        tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };                  \
-        fprintf(stderr, "[omnitrace][%i][%li] ", OMNITRACE_PROCESS_IDENTIFIER,           \
-                OMNITRACE_THREAD_IDENTIFIER);                                            \
+        ::omnitrace::debug::lock _lk{};                                                  \
+        fprintf(stderr, "[omnitrace][%i][%li]%s", OMNITRACE_PROCESS_IDENTIFIER,          \
+                OMNITRACE_THREAD_IDENTIFIER,                                             \
+                ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(stderr, __VA_ARGS__);                                                    \
         fflush(stderr);                                                                  \
     }
@@ -146,8 +168,9 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         fflush(stderr);                                                                  \
-        tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };                  \
-        fprintf(stderr, "[omnitrace] ");                                                 \
+        ::omnitrace::debug::lock _lk{};                                                  \
+        fprintf(stderr, "[omnitrace]%s",                                                 \
+                ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(stderr, __VA_ARGS__);                                                    \
         fflush(stderr);                                                                  \
     }
@@ -157,9 +180,10 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         fflush(stderr);                                                                  \
-        tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };                  \
-        fprintf(stderr, "[omnitrace][%i][%li][%s] ", OMNITRACE_PROCESS_IDENTIFIER,       \
-                OMNITRACE_THREAD_IDENTIFIER, OMNITRACE_FUNCTION);                        \
+        ::omnitrace::debug::lock _lk{};                                                  \
+        fprintf(stderr, "[omnitrace][%i][%li][%s]%s", OMNITRACE_PROCESS_IDENTIFIER,      \
+                OMNITRACE_THREAD_IDENTIFIER, OMNITRACE_FUNCTION,                         \
+                ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(stderr, __VA_ARGS__);                                                    \
         fflush(stderr);                                                                  \
     }
@@ -169,19 +193,23 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         fflush(stderr);                                                                  \
-        tim::auto_lock_t _lk{ tim::type_mutex<decltype(std::cerr)>() };                  \
-        fprintf(stderr, "[omnitrace][%s] ", OMNITRACE_FUNCTION);                         \
+        ::omnitrace::debug::lock _lk{};                                                  \
+        fprintf(stderr, "[omnitrace][%s]%s", OMNITRACE_FUNCTION,                         \
+                ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(stderr, __VA_ARGS__);                                                    \
         fflush(stderr);                                                                  \
     }
+
+//--------------------------------------------------------------------------------------//
 
 #define OMNITRACE_CONDITIONAL_THROW(COND, ...)                                           \
     if(COND)                                                                             \
     {                                                                                    \
         char _msg_buffer[OMNITRACE_DEBUG_BUFFER_LEN];                                    \
-        snprintf(_msg_buffer, OMNITRACE_DEBUG_BUFFER_LEN, "[omnitrace][%i][%li][%s] ",   \
+        snprintf(_msg_buffer, OMNITRACE_DEBUG_BUFFER_LEN, "[omnitrace][%i][%li][%s]%s",  \
                  OMNITRACE_PROCESS_IDENTIFIER, OMNITRACE_THREAD_IDENTIFIER,              \
-                 OMNITRACE_FUNCTION);                                                    \
+                 OMNITRACE_FUNCTION,                                                     \
+                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                \
         auto len = strlen(_msg_buffer);                                                  \
         snprintf(_msg_buffer + len, OMNITRACE_DEBUG_BUFFER_LEN - len, __VA_ARGS__);      \
         throw std::runtime_error(_msg_buffer);                                           \
@@ -191,8 +219,9 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
     if(COND)                                                                             \
     {                                                                                    \
         char _msg_buffer[OMNITRACE_DEBUG_BUFFER_LEN];                                    \
-        snprintf(_msg_buffer, OMNITRACE_DEBUG_BUFFER_LEN, "[omnitrace][%s] ",            \
-                 OMNITRACE_FUNCTION);                                                    \
+        snprintf(_msg_buffer, OMNITRACE_DEBUG_BUFFER_LEN, "[omnitrace][%s]%s",           \
+                 OMNITRACE_FUNCTION,                                                     \
+                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                \
         auto len = strlen(_msg_buffer);                                                  \
         snprintf(_msg_buffer + len, OMNITRACE_DEBUG_BUFFER_LEN - len, __VA_ARGS__);      \
         throw std::runtime_error(_msg_buffer);                                           \
@@ -206,8 +235,71 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
     OMNITRACE_CONDITIONAL_BASIC_THROW(                                                   \
         ::omnitrace::get_is_continuous_integration() && (COND), __VA_ARGS__)
 
-#define OMNITRACE_STRINGIZE(...) #__VA_ARGS__
-#define OMNITRACE_ESC(...)       __VA_ARGS__
+//--------------------------------------------------------------------------------------//
+
+#define OMNITRACE_CONDITIONAL_FAIL(COND, ...)                                            \
+    if(COND)                                                                             \
+    {                                                                                    \
+        fflush(stderr);                                                                  \
+        fprintf(stderr, "[omnitrace][%i][%li]%s", OMNITRACE_PROCESS_IDENTIFIER,          \
+                OMNITRACE_THREAD_IDENTIFIER,                                             \
+                ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
+        fprintf(stderr, __VA_ARGS__);                                                    \
+        ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
+        ::tim::disable_signal_detection();                                               \
+        ::tim::print_demangled_backtrace<64>();                                          \
+        ::std::exit(EXIT_FAILURE);                                                       \
+    }
+
+#define OMNITRACE_CONDITIONAL_BASIC_FAIL(COND, ...)                                      \
+    if(COND)                                                                             \
+    {                                                                                    \
+        fflush(stderr);                                                                  \
+        fprintf(stderr, "[omnitrace]%s",                                                 \
+                ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
+        fprintf(stderr, __VA_ARGS__);                                                    \
+        ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
+        ::tim::disable_signal_detection();                                               \
+        ::tim::print_demangled_backtrace<64>();                                          \
+        ::std::exit(EXIT_FAILURE);                                                       \
+    }
+
+#define OMNITRACE_CONDITIONAL_FAIL_F(COND, ...)                                          \
+    if(COND)                                                                             \
+    {                                                                                    \
+        fflush(stderr);                                                                  \
+        fprintf(stderr, "[omnitrace][%i][%li][%s]%s", OMNITRACE_PROCESS_IDENTIFIER,      \
+                OMNITRACE_THREAD_IDENTIFIER, OMNITRACE_FUNCTION,                         \
+                ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
+        fprintf(stderr, __VA_ARGS__);                                                    \
+        ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
+        ::tim::disable_signal_detection();                                               \
+        ::tim::print_demangled_backtrace<64>();                                          \
+        ::std::exit(EXIT_FAILURE);                                                       \
+    }
+
+#define OMNITRACE_CONDITIONAL_BASIC_FAIL_F(COND, ...)                                    \
+    if(COND)                                                                             \
+    {                                                                                    \
+        fflush(stderr);                                                                  \
+        fprintf(stderr, "[omnitrace][%s]%s", OMNITRACE_FUNCTION,                         \
+                ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
+        fprintf(stderr, __VA_ARGS__);                                                    \
+        ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
+        ::tim::disable_signal_detection();                                               \
+        ::tim::print_demangled_backtrace<64>();                                          \
+        ::std::exit(EXIT_FAILURE);                                                       \
+    }
+
+#define OMNITRACE_CI_FAIL(COND, ...)                                                     \
+    OMNITRACE_CONDITIONAL_FAIL(::omnitrace::get_is_continuous_integration() && (COND),   \
+                               __VA_ARGS__)
+
+#define OMNITRACE_CI_BASIC_FAIL(COND, ...)                                               \
+    OMNITRACE_CONDITIONAL_BASIC_FAIL(                                                    \
+        ::omnitrace::get_is_continuous_integration() && (COND), __VA_ARGS__)
+
+//--------------------------------------------------------------------------------------//
 
 //--------------------------------------------------------------------------------------//
 //
@@ -286,6 +378,20 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 #define OMNITRACE_THROW(...) OMNITRACE_CONDITIONAL_THROW(true, __VA_ARGS__)
 
 #define OMNITRACE_BASIC_THROW(...) OMNITRACE_CONDITIONAL_BASIC_THROW(true, __VA_ARGS__)
+
+//--------------------------------------------------------------------------------------//
+//
+//  Fail macros
+//
+//--------------------------------------------------------------------------------------//
+
+#define OMNITRACE_FAIL(...) OMNITRACE_CONDITIONAL_FAIL(true, __VA_ARGS__)
+
+#define OMNITRACE_FAIL_F(...) OMNITRACE_CONDITIONAL_FAIL_F(true, __VA_ARGS__)
+
+#define OMNITRACE_BASIC_FAIL(...) OMNITRACE_CONDITIONAL_BASIC_FAIL(true, __VA_ARGS__)
+
+#define OMNITRACE_BASIC_FAIL_F(...) OMNITRACE_CONDITIONAL_BASIC_FAIL_F(true, __VA_ARGS__)
 
 #include <string>
 

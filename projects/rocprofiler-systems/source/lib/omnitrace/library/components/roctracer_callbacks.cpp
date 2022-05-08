@@ -25,11 +25,13 @@
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
 #include "library/debug.hpp"
+#include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 
 #include <timemory/backends/cpu.hpp>
 #include <timemory/backends/threading.hpp>
+#include <timemory/utility/types.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -171,6 +173,8 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
     if(get_state() != State::Active || !trait::runtime_enabled<comp::roctracer>::get())
         return;
 
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     (void) arg;
     const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
     OMNITRACE_CONDITIONAL_PRINT_F(
@@ -279,6 +283,8 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
     if(get_state() != State::Active || !trait::runtime_enabled<comp::roctracer>::get())
         return;
 
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     sampling::block_signals();
 
     static const char* copy_op_name     = "hsa_async_copy";
@@ -359,6 +365,8 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
     if(get_state() != State::Active || !trait::runtime_enabled<comp::roctracer>::get())
         return;
 
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     using Device = critical_trace::Device;
     using Phase  = critical_trace::Phase;
 
@@ -388,12 +396,86 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         op_name, cid, data->correlation_id,
         (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
 
-    int64_t  _ts         = comp::wall_clock::record();
-    auto     _tid        = threading::get_id();
-    uint64_t _cid        = 0;
-    uint64_t _parent_cid = 0;
-    uint16_t _depth      = 0;
-    auto     _corr_id    = data->correlation_id;
+    int64_t   _ts         = comp::wall_clock::record();
+    auto      _tid        = threading::get_id();
+    uint64_t  _cid        = 0;
+    uint64_t  _parent_cid = 0;
+    uint16_t  _depth      = 0;
+    uintptr_t _queue      = 0;
+    auto      _corr_id    = data->correlation_id;
+
+#define OMNITRACE_HIP_API_QUEUE_CASE(API_FUNC, VARIABLE)                                 \
+    case HIP_API_ID_##API_FUNC:                                                          \
+        _queue = reinterpret_cast<uintptr_t>(data->args.API_FUNC.VARIABLE);              \
+        break;
+
+#define OMNITRACE_HIP_API_QUEUE_CASE_ALT(API_FUNC, UNION, VARIABLE)                      \
+    case HIP_API_ID_##API_FUNC:                                                          \
+        _queue = reinterpret_cast<uintptr_t>(data->args.UNION.VARIABLE);                 \
+        break;
+
+    switch(cid)
+    {
+        OMNITRACE_HIP_API_QUEUE_CASE(hipLaunchKernel, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipModuleLaunchKernel, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipHccModuleLaunchKernel, hStream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipLaunchCooperativeKernel, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipExtLaunchKernel, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipExtModuleLaunchKernel, hStream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipExtStreamCreateWithCUMask, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipExtStreamGetCUMask, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamSynchronize, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipConfigureCall, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipDrvMemcpy3DAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipEventRecord, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemPrefetchAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpy2DAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpy2DFromArrayAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpy2DToArrayAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpy3DAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpyAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpyDtoDAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpyDtoHAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpyFromSymbolAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpyHtoDAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpyParam2DAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpyPeerAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpyToSymbolAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpyWithStream, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemset2DAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemset3DAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemsetAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemsetD16Async, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemsetD32Async, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemsetD8Async, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamAddCallback, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamAttachMemAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamDestroy, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamGetFlags, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamGetPriority, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamQuery, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamWaitEvent, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamWaitValue32, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamWaitValue64, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamWriteValue32, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamWriteValue64, stream)
+#if OMNITRACE_HIP_VERSION_MAJOR >= 4 && OMNITRACE_HIP_VERSION_MINOR >= 5
+        OMNITRACE_HIP_API_QUEUE_CASE(hipGraphLaunch, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipGraphicsMapResources, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipGraphicsUnmapResources, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipSignalExternalSemaphoresAsync, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamBeginCapture, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamEndCapture, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipWaitExternalSemaphoresAsync, stream)
+#endif
+#if OMNITRACE_HIP_VERSION_MAJOR >= 5
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamIsCapturing, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamGetCaptureInfo, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamGetCaptureInfo_v2, stream)
+        OMNITRACE_HIP_API_QUEUE_CASE(hipStreamUpdateCaptureDependencies, stream)
+#endif
+        default: break;
+    }
 
     if(data->phase == ACTIVITY_API_PHASE_ENTER)
     {
@@ -401,10 +483,22 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         switch(cid)
         {
             case HIP_API_ID_hipLaunchKernel:
-            case HIP_API_ID_hipLaunchCooperativeKernel:
             {
                 _name = hipKernelNameRefByPtr(data->args.hipLaunchKernel.function_address,
                                               data->args.hipLaunchKernel.stream);
+                break;
+            }
+            case HIP_API_ID_hipLaunchCooperativeKernel:
+            {
+                _name =
+                    hipKernelNameRefByPtr(data->args.hipLaunchCooperativeKernel.f,
+                                          data->args.hipLaunchCooperativeKernel.stream);
+                if(!_name)
+                {
+                    _name =
+                        hipKernelNameRefByPtr(data->args.hipLaunchKernel.function_address,
+                                              data->args.hipLaunchKernel.stream);
+                }
                 break;
             }
             case HIP_API_ID_hipHccModuleLaunchKernel:
@@ -468,7 +562,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         if(get_use_critical_trace() || get_use_rocm_smi())
         {
             add_critical_trace<Device::CPU, Phase::BEGIN>(
-                _tid, _cid, _corr_id, _parent_cid, _ts, 0,
+                _tid, _cid, _corr_id, _parent_cid, _ts, 0, _queue,
                 critical_trace::add_hash_id(op_name), _depth);
         }
 
@@ -517,7 +611,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         if(get_use_critical_trace() || get_use_rocm_smi())
         {
             add_critical_trace<Device::CPU, Phase::END>(
-                _tid, _cid, _corr_id, _parent_cid, _ts, _ts,
+                _tid, _cid, _corr_id, _parent_cid, _ts, _ts, _queue,
                 critical_trace::add_hash_id(op_name), _depth);
         }
     }
@@ -530,6 +624,8 @@ hip_activity_callback(const char* begin, const char* end, void*)
 {
     if(get_state() != State::Active || !trait::runtime_enabled<comp::roctracer>::get())
         return;
+
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
     sampling::block_signals();
 
@@ -650,13 +746,13 @@ hip_activity_callback(const char* begin, const char* end, void*)
             auto     _hash = critical_trace::add_hash_id(_name);
             uint16_t _prio = _laps + 1;  // priority
             add_critical_trace<Device::GPU, Phase::DELTA, false>(
-                _tid, _cid, _corr_id, _cid, _beg_ns, _end_ns, _hash, _depth + 1, _prio);
+                _tid, _cid, _corr_id, _cid, _beg_ns, _end_ns, record->queue_id, _hash,
+                _depth + 1, _prio);
         }
 
         if(_found && _name != nullptr && get_use_timemory())
         {
-            auto _func = [_depth, _tid, _cid, _laps, _beg_ns, _end_ns, _corr_id,
-                          _name]() {
+            auto _func = [_beg_ns, _end_ns, _name]() {
                 roctracer_bundle_t _bundle{ _name, _scope };
                 _bundle.start()
                     .store(std::plus<double>{}, static_cast<double>(_end_ns - _beg_ns))
@@ -724,6 +820,8 @@ extern "C"
 
         if(!config::settings_are_configured() && get_state() < State::Active)
             omnitrace_init_tooling_hidden();
+
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
         static auto _setup = [=]() {
             try

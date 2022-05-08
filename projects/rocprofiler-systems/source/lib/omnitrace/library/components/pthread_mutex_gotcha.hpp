@@ -26,38 +26,36 @@
 #include "library/defines.hpp"
 #include "library/timemory.hpp"
 
-#include <cstdint>
-#include <future>
+#include <array>
+#include <cstddef>
+#include <string>
 
 namespace omnitrace
 {
-struct pthread_gotcha : tim::component::base<pthread_gotcha, void>
+// this is used to wrap pthread_mutex()
+struct pthread_mutex_gotcha : comp::base<pthread_mutex_gotcha, void>
 {
-    TIMEMORY_DEFAULT_OBJECT(pthread_gotcha)
+    static constexpr size_t gotcha_capacity = 3;
+    using hash_array_t                      = std::array<size_t, gotcha_capacity>;
+    using gotcha_data_t                     = comp::gotcha_data;
+
+    TIMEMORY_DEFAULT_OBJECT(pthread_mutex_gotcha)
 
     // string id for component
-    static std::string label() { return "pthread_gotcha"; }
+    static std::string label() { return "pthread_mutex_gotcha"; }
 
     // generate the gotcha wrappers
     static void configure();
     static void shutdown();
+    static void validate();
 
-    // query current value
-    static bool sampling_enabled_on_child_threads();
-
-    // use this to disable sampling in a region (e.g. right before thread creation)
-    static bool push_enable_sampling_on_child_threads(bool _v);
-
-    // use this to restore previous setting
-    static bool pop_enable_sampling_on_child_threads();
-
-    // make sure every newly created thead starts with this value
-    static void set_sampling_on_all_future_threads(bool _v);
-
-    static void start();
-    static void stop();
+    int operator()(const gotcha_data_t&, int (*)(pthread_mutex_t*), pthread_mutex_t*);
 
 private:
-    static bool& sampling_on_child_threads();
+    static bool          is_disabled();
+    static hash_array_t& get_hashes();
 };
+
+using pthread_mutex_gotcha_t = comp::gotcha<pthread_mutex_gotcha::gotcha_capacity,
+                                            quirk::fast, pthread_mutex_gotcha>;
 }  // namespace omnitrace

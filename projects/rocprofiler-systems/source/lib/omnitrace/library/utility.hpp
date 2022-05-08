@@ -22,42 +22,49 @@
 
 #pragma once
 
-#include "library/common.hpp"
-#include "library/defines.hpp"
-#include "library/timemory.hpp"
-
+#include <array>
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
-#include <future>
+#include <vector>
 
 namespace omnitrace
 {
-struct pthread_gotcha : tim::component::base<pthread_gotcha, void>
+namespace utility
 {
-    TIMEMORY_DEFAULT_OBJECT(pthread_gotcha)
+namespace
+{
+/// provides an alternative thread index for when using threading::get_id() is not
+/// desirable
+inline auto
+get_thread_index()
+{
+    static std::atomic<int64_t> _c{ 0 };
+    static thread_local int64_t _v = _c++;
+    return _v;
+}
 
-    // string id for component
-    static std::string label() { return "pthread_gotcha"; }
+/// fills any array with the result of the functor
+template <size_t N, typename FuncT>
+inline auto
+get_filled_array(FuncT&& _func)
+{
+    using Tp = std::decay_t<decltype(_func())>;
+    std::array<Tp, N> _v{};
+    for(auto& itr : _v)
+        itr = std::move(_func());
+    return _v;
+}
 
-    // generate the gotcha wrappers
-    static void configure();
-    static void shutdown();
-
-    // query current value
-    static bool sampling_enabled_on_child_threads();
-
-    // use this to disable sampling in a region (e.g. right before thread creation)
-    static bool push_enable_sampling_on_child_threads(bool _v);
-
-    // use this to restore previous setting
-    static bool pop_enable_sampling_on_child_threads();
-
-    // make sure every newly created thead starts with this value
-    static void set_sampling_on_all_future_threads(bool _v);
-
-    static void start();
-    static void stop();
-
-private:
-    static bool& sampling_on_child_threads();
-};
+/// returns a vector with a preallocated buffer
+template <typename... Tp>
+inline auto
+get_reserved_vector(size_t _n)
+{
+    std::vector<Tp...> _v{};
+    _v.reserve(_n);
+    return _v;
+}
+}  // namespace
+}  // namespace utility
 }  // namespace omnitrace

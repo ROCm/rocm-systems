@@ -63,12 +63,10 @@ endfunction()
 add_library(omnitrace-python-compile-options INTERFACE)
 add_library(omnitrace::omnitrace-python-compile-options ALIAS
             omnitrace-python-compile-options)
-add_cxx_flag_if_avail("-frtti" omnitrace-python-compile-options)
-add_cxx_flag_if_avail("-Wno-unused-value" omnitrace-python-compile-options)
-add_cxx_flag_if_avail("-Wno-range-loop-analysis" omnitrace-python-compile-options)
-add_cxx_flag_if_avail("-ftls-model=global-dynamic" omnitrace-python-compile-options)
-add_cxx_flag_if_avail("-Wno-deprecated-declarations" omnitrace-python-compile-options)
-add_cxx_flag_if_avail("-Wno-unused-but-set-parameter" omnitrace-python-compile-options)
+add_target_cxx_flag_if_avail(
+    omnitrace-python-compile-options "-Wno-unused-value" "-Wno-range-loop-analysis"
+    "-Wno-deprecated-declarations" "-Wno-unused-but-set-parameter"
+    "-ftls-model=global-dynamic")
 
 file(GLOB pyheaders ${CMAKE_CURRENT_LIST_DIR}/libpyomnitrace*.hpp)
 set(pysources ${CMAKE_CURRENT_LIST_DIR}/libpyomnitrace.cpp)

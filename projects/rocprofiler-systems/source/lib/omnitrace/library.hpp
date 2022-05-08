@@ -53,14 +53,16 @@ template <critical_trace::Device DevID, critical_trace::Phase PhaseID,
           bool UpdateStack = true>
 inline void
 add_critical_trace(int64_t _targ_tid, size_t _cpu_cid, size_t _gpu_cid,
-                   size_t _parent_cid, int64_t _ts_beg, int64_t _ts_val, size_t _hash,
-                   uint16_t _depth, uint16_t _prio = 0)
+                   size_t _parent_cid, int64_t _ts_beg, int64_t _ts_val, uintptr_t _queue,
+                   size_t _hash, uint16_t _depth, uint16_t _prio = 0)
 {
     // clang-format off
     // these are used to create unique type mutexes
     struct critical_insert {};
     struct cpu_cid_stack {};
     // clang-format on
+
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
     using tim::type_mutex;
     using auto_lock_t                  = tim::auto_lock_t;
@@ -80,9 +82,9 @@ add_critical_trace(int64_t _targ_tid, size_t _cpu_cid, size_t _gpu_cid,
         if(!_self_lk.owns_lock()) _self_lk.lock();
 
         auto& _critical_trace = critical_trace::get(_self_tid);
-        _critical_trace->emplace_back(
-            critical_trace::entry{ _prio, DevID, PhaseID, _depth, _targ_tid, _cpu_cid,
-                                   _gpu_cid, _parent_cid, _ts_beg, _ts_val, _hash });
+        _critical_trace->emplace_back(critical_trace::entry{
+            _prio, DevID, PhaseID, _depth, _targ_tid, _cpu_cid, _gpu_cid, _parent_cid,
+            _ts_beg, _ts_val, _queue, _hash });
     }
 
     if constexpr(UpdateStack)
@@ -119,6 +121,6 @@ add_critical_trace(int64_t _targ_tid, size_t _cpu_cid, size_t _gpu_cid,
     }
 
     tim::consume_parameters(_targ_tid, _cpu_cid, _gpu_cid, _parent_cid, _ts_beg, _ts_val,
-                            _hash, _depth, _prio);
+                            _queue, _hash, _depth, _prio);
 }
 }  // namespace omnitrace

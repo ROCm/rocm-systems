@@ -21,6 +21,10 @@
 // SOFTWARE.
 
 #include "library/thread_data.hpp"
+#include "library/components/pthread_create_gotcha.hpp"
+#include "library/utility.hpp"
+
+#include <timemory/backends/threading.hpp>
 
 namespace omnitrace
 {
@@ -30,4 +34,15 @@ instrumentation_bundles::instances()
     static auto _v = instance_array_t{};
     return _v;
 }
+
+void
+thread_deleter<void>::operator()() const
+{
+    pthread_create_gotcha::shutdown(threading::get_id());
+    set_thread_state(ThreadState::Completed);
+    if(get_state() != State::Finalized && threading::get_id() == 0)
+        omnitrace_finalize_hidden();
+}
+
+template struct thread_deleter<void>;
 }  // namespace omnitrace

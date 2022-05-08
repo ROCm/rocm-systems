@@ -26,6 +26,7 @@
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 #include "library/thread_data.hpp"
+#include "library/utility.hpp"
 
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/mpi.hpp>
@@ -98,6 +99,8 @@ create_cpu_cid_entry(int64_t _tid)
 {
     using tim::auto_lock_t;
 
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     // unique lock for _tid
     auto&       _mtx = get_cpu_cid_stack_lock(_tid);
     auto_lock_t _lk{ _mtx, std::defer_lock };
@@ -166,4 +169,50 @@ get_gotcha_bundle()
                               "omnitrace", quirk::config<quirk::auto_start>{}));
     return _v;
 }
+
+namespace
+{
+auto&
+get_thread_state_history(int64_t _idx = utility::get_thread_index())
+{
+    static auto _v = utility::get_filled_array<OMNITRACE_MAX_THREADS>(
+        []() { return utility::get_reserved_vector<ThreadState>(32); });
+
+    return _v.at(_idx);
+}
+}  // namespace
+
+ThreadState&
+get_thread_state()
+{
+    static thread_local ThreadState _v{ ThreadState::Enabled };
+    return _v;
+}
+
+ThreadState
+set_thread_state(ThreadState _n)
+{
+    auto _o            = get_thread_state();
+    get_thread_state() = _n;
+    return _o;
+}
+
+ThreadState
+push_thread_state(ThreadState _v)
+{
+    return get_thread_state_history().emplace_back(set_thread_state(_v));
+}
+
+ThreadState
+pop_thread_state()
+{
+    auto& _hist = get_thread_state_history();
+    if(!_hist.empty())
+    {
+        set_thread_state(_hist.back());
+        _hist.pop_back();
+    }
+    return get_thread_state();
+}
+
 }  // namespace omnitrace

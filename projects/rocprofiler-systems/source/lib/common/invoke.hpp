@@ -60,6 +60,21 @@ get_thread_index()
     return _v;
 }
 
+template <typename... Args>
+auto
+ignore(const char* _name, int _verbose, int _value, const char* _reason, Args... _args)
+{
+    if(_verbose >= _value)
+    {
+        fflush(stderr);
+        fprintf(stderr,
+                "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
+                "][%li] %s(%s) was ignored :: %s\n",
+                get_thread_index(), _name, join(", ", _args...).c_str(), _reason);
+        fflush(stderr);
+    }
+}
+
 template <typename FuncT, typename... Args>
 auto
 invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _args)

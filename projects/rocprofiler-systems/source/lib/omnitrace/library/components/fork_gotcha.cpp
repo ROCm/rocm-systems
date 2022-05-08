@@ -23,6 +23,12 @@
 #include "library/components/fork_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
+#include "library/state.hpp"
+
+#include <timemory/backends/process.hpp>
+#include <timemory/backends/threading.hpp>
+
+#include <unistd.h>
 
 namespace omnitrace
 {
@@ -37,6 +43,8 @@ fork_gotcha::configure()
 void
 fork_gotcha::audit(const gotcha_data_t&, audit::incoming)
 {
+    OMNITRACE_VERBOSE(1, "fork() called on PID %i (rank: %i), TID %li\n",
+                      process::get_id(), dmp::rank(), threading::get_id());
     OMNITRACE_CONDITIONAL_BASIC_PRINT(
         get_debug_env(),
         "Warning! Calling fork() within an OpenMPI application using libfabric "
@@ -45,9 +53,13 @@ fork_gotcha::audit(const gotcha_data_t&, audit::incoming)
 }
 
 void
-fork_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, pid_t _pid)
+fork_gotcha::audit(const gotcha_data_t&, audit::outgoing, pid_t _pid)
 {
-    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug_env(), "%s() return PID %i\n",
-                                      _data.tool_id.c_str(), (int) _pid);
+    if(_pid != 0)
+    {
+        OMNITRACE_VERBOSE(1, "fork() called on PID %i created PID %i\n", getppid(), _pid);
+        tim::settings::use_output_suffix()      = true;
+        tim::settings::default_process_suffix() = process::get_id();
+    }
 }
 }  // namespace omnitrace

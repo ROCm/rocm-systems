@@ -26,6 +26,7 @@
 #include "library/common.hpp"
 #include "library/config.hpp"
 #include "library/defines.hpp"
+#include "library/state.hpp"
 #include "library/timemory.hpp"
 
 #include <array>
@@ -40,6 +41,8 @@
 
 namespace omnitrace
 {
+ThreadState set_thread_state(ThreadState);
+
 // bundle of components used in instrumentation
 using instrumentation_bundle_t =
     tim::component_bundle<api::omnitrace, comp::wall_clock*, comp::user_global_bundle*>;
@@ -56,12 +59,20 @@ using unique_ptr_t = std::unique_ptr<Tp, thread_deleter<Tp>>;
 
 static constexpr size_t max_supported_threads = OMNITRACE_MAX_THREADS;
 
+template <>
+struct thread_deleter<void>
+{
+    void operator()() const;
+};
+
+extern template struct thread_deleter<void>;
+
 template <typename Tp>
 struct thread_deleter
 {
     void operator()(Tp* ptr) const
     {
-        if(get_state() != State::Finalized) omnitrace_finalize_hidden();
+        thread_deleter<void>{}();
         delete ptr;
     }
 };

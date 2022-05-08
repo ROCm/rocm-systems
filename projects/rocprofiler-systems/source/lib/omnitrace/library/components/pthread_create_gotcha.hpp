@@ -31,33 +31,41 @@
 
 namespace omnitrace
 {
-struct pthread_gotcha : tim::component::base<pthread_gotcha, void>
+struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
 {
-    TIMEMORY_DEFAULT_OBJECT(pthread_gotcha)
+    struct wrapper
+    {
+        using routine_t = void* (*) (void*);
+        using promise_t = std::promise<void>;
+
+        wrapper(routine_t _routine, void* _arg, bool, int64_t, promise_t*);
+        void* operator()() const;
+
+        static void* wrap(void* _arg);
+
+    private:
+        bool       m_enable_sampling = false;
+        int64_t    m_parent_tid      = 0;
+        routine_t  m_routine         = nullptr;
+        void*      m_arg             = nullptr;
+        promise_t* m_promise         = nullptr;
+    };
+
+    TIMEMORY_DEFAULT_OBJECT(pthread_create_gotcha)
 
     // string id for component
-    static std::string label() { return "pthread_gotcha"; }
+    static std::string label() { return "pthread_create_gotcha"; }
 
     // generate the gotcha wrappers
     static void configure();
     static void shutdown();
+    static void shutdown(int64_t);
 
-    // query current value
-    static bool sampling_enabled_on_child_threads();
-
-    // use this to disable sampling in a region (e.g. right before thread creation)
-    static bool push_enable_sampling_on_child_threads(bool _v);
-
-    // use this to restore previous setting
-    static bool pop_enable_sampling_on_child_threads();
-
-    // make sure every newly created thead starts with this value
-    static void set_sampling_on_all_future_threads(bool _v);
-
-    static void start();
-    static void stop();
-
-private:
-    static bool& sampling_on_child_threads();
+    // pthread_create
+    int operator()(pthread_t* thread, const pthread_attr_t* attr,
+                   void* (*start_routine)(void*), void*     arg) const;
 };
+
+using pthread_create_gotcha_t =
+    tim::component::gotcha<2, std::tuple<>, pthread_create_gotcha>;
 }  // namespace omnitrace

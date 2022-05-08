@@ -199,6 +199,9 @@ get_perfetto_shmem_size_hint();
 size_t
 get_perfetto_buffer_size();
 
+bool
+get_perfetto_combined_traces();
+
 uint64_t
 get_critical_trace_update_freq();
 
@@ -238,6 +241,9 @@ get_rocm_smi_devices();
 
 int64_t
 get_critical_trace_per_row();
+
+bool
+get_trace_thread_locks();
 }  // namespace config
 
 //
