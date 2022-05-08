@@ -628,7 +628,7 @@ $ omnitrace-avail -H -bd
 
 [Omnitrace](https://github.com/AMDResearch/omnitrace) supports 3 configuration file formats: JSON, XML, and plain text.
 Configuration files are specified via the `OMNITRACE_CONFIG_FILE` environment variable
-and by default will look for `${HOME}/omnitrace.cfg` and `${HOME}/omnitrace.json`.
+and by default will look for `${HOME}/.omnitrace.cfg` and `${HOME}/.omnitrace.json`.
 Multiple configuration files can be concatenated via `:`, e.g.:
 
 ```shell
