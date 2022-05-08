@@ -6,8 +6,7 @@
    :maxdepth: 4
 ```
 
-> ***[Omnitrace](https://github.com/AMDResearch/omnitrace) is an AMD research project and should***
-> ***not be treated as an offical part of the ROCm software stack.***
+> ***[Omnitrace](https://github.com/AMDResearch/omnitrace) is an AMD open source research project and is not supported as part of the ROCm software stack.***
 
 [Browse Omnitrace source code on Github](https://github.com/AMDResearch/omnitrace)
 

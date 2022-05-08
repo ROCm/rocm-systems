@@ -220,7 +220,15 @@ set `OMNITRACE_OUTPUT_PREFIX="%argt%-"` and let omnitrace cleanly organize the o
 ## Perfetto Output
 
 Use the `OMNITRACE_OUTPUT_FILE` to specify a specific location. If this is an absolute path, then all `OMNITRACE_OUTPUT_PATH`, etc.
-settings will be ignored.
+settings will be ignored. Visit [ui.perfetto.dev](https://ui.perfetto.dev) and open this file.
+
+![omnitrace-perfetto](images/omnitrace-perfetto.png)
+
+![omnitrace-rocm](images/omnitrace-rocm.png)
+
+![omnitrace-rocm-flow](images/omnitrace-rocm-flow.png)
+
+![omnitrace-user-api](images/omnitrace-user-api.png)
 
 ## Timemory Output
 
