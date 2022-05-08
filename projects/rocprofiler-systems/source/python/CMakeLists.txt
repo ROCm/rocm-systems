@@ -16,6 +16,7 @@ function(OMNITRACE_CONFIGURE_PYTARGET _TARGET _VERSION)
 
     add_library(omnitrace::${_TARGET} ALIAS ${_TARGET})
     target_link_libraries(${_TARGET} PRIVATE libpyomnitrace-interface)
+    add_dependencies(libpyomnitrace ${_TARGET})
 
     set_target_properties(
         ${_TARGET}
@@ -86,7 +87,8 @@ target_link_libraries(
               omnitrace::omnitrace-python
               omnitrace::omnitrace-python-compile-options)
 
-target_compile_definitions(libpyomnitrace-interface INTERFACE OMNITRACE_PYBIND11_SOURCE)
+omnitrace_target_compile_definitions(libpyomnitrace-interface
+                                     INTERFACE OMNITRACE_PYBIND11_SOURCE)
 
 include(PyBind11Tools)
 
@@ -159,6 +161,8 @@ omnitrace_watch_for_change(OMNITRACE_PYTHON_ROOT_DIRS)
 omnitrace_watch_for_change(OMNITRACE_PYTHON_VERSIONS)
 
 omnitrace_check_python_dirs_and_versions(FAIL)
+
+add_custom_target(libpyomnitrace)
 
 file(GLOB_RECURSE PYTHON_FILES ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/*.py)
 foreach(_IN ${PYTHON_FILES})

@@ -24,6 +24,7 @@
 #include "library/api.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
+#include "library/impl/coverage.hpp"
 #include "library/thread_data.hpp"
 
 #include <timemory/backends/threading.hpp>
@@ -53,33 +54,11 @@ using uomap_t = std::unordered_map<Tp...>;
 using coverage_thread_data_type =
     uomap_t<std::string_view, uomap_t<std::string_view, std::map<size_t, size_t>>>;
 //
-template <typename Tp, typename... Args>
-inline std::set<Tp, Args...>
-get_uncovered(const std::set<Tp, Args...>& _covered,
-              const std::set<Tp, Args...>& _possible)
-{
-    std::set<Tp, Args...> _v{};
-    for(auto&& itr : _possible)
-    {
-        if(_covered.count(itr) == 0) _v.emplace(itr);
-    }
-    return _v;
-}
+using coverage_data_vector = std::vector<coverage_data>;
 //
-template <typename Tp, typename... Args>
-inline std::vector<Tp, Args...>
-get_uncovered(const std::vector<Tp, Args...>& _covered,
-              const std::vector<Tp, Args...>& _possible)
-{
-    std::vector<Tp, Args...> _v{};
-    for(auto&& itr : _possible)
-    {
-        if(!std::any_of(_covered.begin(), _covered.end(),
-                        [itr](auto&& _entry) { return _entry == itr; }))
-            _v.emplace_back(itr);
-    }
-    return _v;
-}
+using coverage_data_map =
+    uomap_t<std::string_view,
+            uomap_t<std::string_view, std::map<size_t, coverage_data_vector::iterator>>>;
 //
 using coverage_thread_data =
     omnitrace::thread_data<coverage_thread_data_type, code_coverage>;
@@ -92,9 +71,16 @@ get_code_coverage()
 }
 //
 auto&
+get_post_processed()
+{
+    static auto* _v = new bool{ false };
+    return *_v;
+}
+//
+auto&
 get_coverage_data()
 {
-    static auto _v = std::vector<coverage_data>{};
+    static auto _v = coverage_data_vector{};
     return _v;
 }
 //
@@ -109,109 +95,19 @@ get_coverage_count(int64_t _tid = tim::threading::get_id())
 
 //--------------------------------------------------------------------------------------//
 
-double
-code_coverage::operator()(Category _c) const
-{
-    switch(_c)
-    {
-        case STANDARD: return static_cast<double>(count) / static_cast<double>(size);
-        case ADDRESS:
-            return static_cast<double>(covered.addresses.size()) /
-                   static_cast<double>(possible.addresses.size());
-        case MODULE:
-            return static_cast<double>(covered.modules.size()) /
-                   static_cast<double>(possible.modules.size());
-        case FUNCTION:
-            return static_cast<double>(covered.functions.size()) /
-                   static_cast<double>(possible.functions.size());
-    }
-    return 0.0;
-}
-
-code_coverage::int_set_t
-code_coverage::get_uncovered_addresses() const
-{
-    return get_uncovered(covered.addresses, possible.addresses);
-}
-
-code_coverage::str_set_t
-code_coverage::get_uncovered_modules() const
-{
-    return get_uncovered(covered.modules, possible.modules);
-}
-
-code_coverage::str_set_t
-code_coverage::get_uncovered_functions() const
-{
-    return get_uncovered(covered.functions, possible.functions);
-}
-
-//--------------------------------------------------------------------------------------//
-
-coverage_data&
-coverage_data::operator+=(const coverage_data& rhs)
-{
-    count += rhs.count;
-    return *this;
-}
-
-bool
-coverage_data::operator==(const coverage_data& rhs) const
-{
-    return std::tie(module, function, address) ==
-           std::tie(rhs.module, rhs.function, rhs.address);
-}
-
-bool
-coverage_data::operator==(const data_tuple_t& rhs) const
-{
-    return std::tie(module, function, address) ==
-           std::tie(std::get<0>(rhs), std::get<1>(rhs), std::get<2>(rhs));
-}
-
-bool
-coverage_data::operator!=(const coverage_data& rhs) const
-{
-    return !(*this == rhs);
-}
-
-bool
-coverage_data::operator<(const coverage_data& rhs) const
-{
-    if(count != rhs.count) return count < rhs.count;
-    if(module != rhs.module) return module < rhs.module;
-    if(function != rhs.function) return function < rhs.function;
-    if(address != rhs.address) return address < rhs.address;
-    if(line != rhs.line) return line < rhs.line;
-    return source < rhs.source;
-}
-
-bool
-coverage_data::operator<=(const coverage_data& rhs) const
-{
-    return (*this == rhs || *this < rhs);
-}
-
-bool
-coverage_data::operator>(const coverage_data& rhs) const
-{
-    return (*this != rhs && !(*this < rhs));
-}
-
-bool
-coverage_data::operator>=(const coverage_data& rhs) const
-{
-    return !(*this < rhs);
-}
-
-//--------------------------------------------------------------------------------------//
-
 void
 post_process()
 {
+    using data_tuple_t = coverage_data::data_tuple_t;
+
+    if(get_post_processed()) return;
+    get_post_processed() = true;
+
     if(!config::get_use_code_coverage()) return;
 
-    code_coverage& _coverage = get_code_coverage();
+    auto& _coverage      = get_code_coverage();
+    auto& _coverage_data = get_coverage_data();
+
     if(_coverage.size == 0)
     {
         OMNITRACE_VERBOSE_F(
@@ -220,39 +116,48 @@ post_process()
         return;
     }
 
-    using data_tuple_t   = coverage_data::data_tuple_t;
-    auto& _coverage_data = get_coverage_data();
-
-    auto _find = [&_coverage_data](data_tuple_t&& _v) {
-        for(auto itr = _coverage_data.begin(); itr != _coverage_data.end(); ++itr)
-        {
-            if(*itr == _v) return std::make_pair(itr, true);
-        }
-        return std::make_pair(_coverage_data.end(), false);
-    };
-
     auto _data = coverage_thread_data_type{};
-    for(size_t i = 0; i < coverage_thread_data::size(); ++i)
     {
-        const auto& _thr_data = *get_coverage_count(i);
-        for(const auto& file : _thr_data)
-        {
-            for(const auto& func : file.second)
+        auto _coverage_map = coverage_data_map{};
+        auto _find         = [&_coverage_data, &_coverage_map](data_tuple_t&& _v) {
+            auto& _cache = _coverage_map[std::get<0>(_v)][std::get<1>(_v)];
+            auto  mitr   = _cache.find(std::get<2>(_v));
+            if(mitr != _cache.end()) return std::make_pair(mitr->second, true);
+
+            for(auto itr = _coverage_data.begin(); itr != _coverage_data.end(); ++itr)
             {
-                for(const auto& addr : func.second)
+                if(*itr == _v)
                 {
-                    _data[file.first][func.first][addr.first] += addr.second;
-                    auto&& _v = _find({ file.first, func.first, addr.first });
-                    if(_v.second)
+                    _cache[std::get<2>(_v)] = itr;
+                    return std::make_pair(itr, true);
+                }
+            }
+            return std::make_pair(_coverage_data.end(), false);
+        };
+
+        for(size_t i = 0; i < coverage_thread_data::size(); ++i)
+        {
+            const auto& _thr_data = *get_coverage_count(i);
+            for(const auto& file : _thr_data)
+            {
+                for(const auto& func : file.second)
+                {
+                    for(const auto& addr : func.second)
                     {
-                        _v.first->count += addr.second;
-                    }
-                    else
-                    {
-                        OMNITRACE_VERBOSE_F(
-                            0, "Warning! No matching coverage data for %s :: %s (0x%x)\n",
-                            func.first.data(), file.first.data(),
-                            (unsigned int) addr.first);
+                        _data[file.first][func.first][addr.first] += addr.second;
+                        auto&& _v = _find({ file.first, func.first, addr.first });
+                        if(_v.second)
+                        {
+                            _v.first->count += addr.second;
+                        }
+                        else
+                        {
+                            OMNITRACE_VERBOSE_F(0,
+                                                "Warning! No matching coverage data for "
+                                                "%s :: %s (0x%x)\n",
+                                                func.first.data(), file.first.data(),
+                                                (unsigned int) addr.first);
+                        }
                     }
                 }
             }
@@ -280,13 +185,21 @@ post_process()
               std::greater<coverage_data>{});
 
     {
+        auto _tmp_map     = coverage_data_map{};
         auto _tmp         = std::decay_t<decltype(_coverage_data)>{};
-        auto _find_in_tmp = [&_tmp](const auto& _v) {
+        auto _find_in_tmp = [&_tmp, &_tmp_map](const auto& _v) {
+            auto& _cache = _tmp_map[_v.module][_v.function];
+            auto  mitr   = _cache.find(_v.address);
+            if(mitr != _cache.end()) return std::make_pair(mitr->second, true);
+
             for(auto itr = _tmp.begin(); itr != _tmp.end(); ++itr)
             {
                 if(itr->source == _v.source && itr->address != _v.address &&
                    itr->count == _v.count)
+                {
+                    _cache[_v.address] = itr;
                     return std::make_pair(itr, true);
+                }
             }
             return std::make_pair(_tmp.end(), false);
         };
@@ -350,6 +263,21 @@ post_process()
 
     if(_json_output)
     {
+        std::stringstream oss{};
+        {
+            namespace cereal = tim::cereal;
+            auto ar =
+                tim::policy::output_archive<cereal::PrettyJSONOutputArchive>::get(oss);
+
+            ar->setNextName("omnitrace");
+            ar->startNode();
+            ar->setNextName("coverage");
+            ar->startNode();
+            (*ar)(cereal::make_nvp("summary", _coverage));
+            (*ar)(cereal::make_nvp("details", _coverage_data));
+            ar->finishNode();
+            ar->finishNode();
+        }
         auto _fname = tim::settings::compose_output_filename("coverage", ".json");
         std::ofstream ofs{};
         if(tim::filepath::open(ofs, _fname))
@@ -357,21 +285,7 @@ post_process()
             if(get_verbose() >= 0)
                 fprintf(stderr, "[%s][coverage]|%i> Outputting '%s'...\n",
                         TIMEMORY_PROJECT_NAME, dmp::rank(), _fname.c_str());
-            {
-                namespace cereal = tim::cereal;
-                auto ar =
-                    tim::policy::output_archive<cereal::PrettyJSONOutputArchive>::get(
-                        ofs);
-
-                ar->setNextName("omnitrace");
-                ar->startNode();
-                ar->setNextName("coverage");
-                ar->startNode();
-                (*ar)(cereal::make_nvp("summary", _coverage));
-                (*ar)(cereal::make_nvp("details", _coverage_data));
-                ar->finishNode();
-                ar->finishNode();
-            }
+            ofs << oss.str() << "\n";
         }
         else
         {
@@ -392,9 +306,11 @@ extern "C" void
 omnitrace_register_source_hidden(const char* file, const char* func, size_t line,
                                  size_t address, const char* source)
 {
+    if(coverage::get_post_processed()) return;
+
     using coverage_data = coverage::coverage_data;
 
-    OMNITRACE_BASIC_VERBOSE_F(2, "[0x%x] :: %-20s :: %20s:%zu :: %s\n",
+    OMNITRACE_BASIC_VERBOSE_F(4, "[0x%x] :: %-20s :: %20s:%zu :: %s\n",
                               (unsigned int) address, func, file, line, source);
 
     coverage::get_coverage_data().emplace_back(
@@ -408,7 +324,9 @@ omnitrace_register_source_hidden(const char* file, const char* func, size_t line
 
     // initialize
     for(size_t i = 0; i < coverage::coverage_thread_data::size(); ++i)
-        (*coverage::get_coverage_count(i))[file][func][address] = 0;
+    {
+        (*coverage::get_coverage_count(i))[file][func].emplace(address, 0);
+    }
 }
 
 //--------------------------------------------------------------------------------------//
@@ -416,9 +334,16 @@ omnitrace_register_source_hidden(const char* file, const char* func, size_t line
 extern "C" void
 omnitrace_register_coverage_hidden(const char* file, const char* func, size_t address)
 {
+    if(coverage::get_post_processed()) return;
+    if(omnitrace::get_state() < omnitrace::State::Active &&
+       !omnitrace_init_tooling_hidden())
+        return;
+    else if(omnitrace::get_state() == omnitrace::State::Finalized)
+        return;
+
     OMNITRACE_BASIC_VERBOSE_F(3, "[0x%x] %-20s :: %20s\n", (unsigned int) address, func,
                               file);
-    coverage::get_coverage_count()->at(file).at(func).at(address) += 1;
+    (*coverage::get_coverage_count())[file][func][address] += 1;
 }
 
 //--------------------------------------------------------------------------------------//

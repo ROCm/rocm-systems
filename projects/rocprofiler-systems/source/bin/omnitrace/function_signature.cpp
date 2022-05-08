@@ -90,7 +90,7 @@ function_signature::get(bool _all, bool _save) const
         else if(!m_info_end && !_rc1.empty())
             ss << " [" << _rc1 << "]";
         else
-            errprintf(1, "loop line info is empty!");
+            errprintf(3, "line info for %s is empty!\n", m_name.c_str());
     }
     if((_all || use_file_info) && m_file.length() > 0) ss << " [" << m_file;
     if((_all || use_line_info) && m_row.first > 0) ss << ":" << m_row.first;
@@ -130,7 +130,7 @@ function_signature::get_coverage(bool _basic_block) const
         else if(!m_info_end && !_rc1.empty())
             ss << " [" << _rc1 << "]";
         else
-            errprintf(1, "loop line info is empty!");
+            errprintf(3, "line info for %s is empty!\n", m_name.c_str());
     }
     else
     {

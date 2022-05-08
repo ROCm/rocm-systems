@@ -121,7 +121,36 @@ module_function::should_instrument() const
 bool
 module_function::should_coverage_instrument() const
 {
-    return should_instrument(true);
+    // hard constraints
+    if(!is_instrumentable()) return false;
+    if(!can_instrument_entry()) return false;
+    if(is_module_constrained()) return false;
+    if(is_routine_constrained()) return false;
+
+    // should be before user selection
+    constexpr int absolute_min_instructions = 2;
+    if(num_instructions < absolute_min_instructions)
+    {
+        messages.emplace_back(
+            2, "Skipping", "function",
+            TIMEMORY_JOIN("-", "less-than", absolute_min_instructions, "instructions"));
+        return false;
+    }
+
+    // user selection
+    if(is_user_excluded()) return false;
+
+    if(is_overlapping_constrained()) return false;
+    if(is_entry_trap_constrained()) return false;
+
+    // user selection
+    if(!file_restrict.empty() || !func_restrict.empty()) return !is_user_restricted();
+    if(is_user_included()) return true;
+
+    if(is_address_range_constrained()) return false;
+    if(is_num_instructions_constrained()) return false;
+
+    return true;
 }
 
 bool
@@ -150,7 +179,7 @@ module_function::should_instrument(bool coverage) const
     // should be applied before dynamic-callsite check
     if(is_overlapping_constrained()) return false;
     if(is_entry_trap_constrained()) return false;
-    if(is_exit_trap_constrained()) return false;
+    if(!coverage && is_exit_trap_constrained()) return false;
 
     // needs to be applied before address range and number of instruction constraints
     if(is_dynamic_callsite_forced()) return true;
@@ -737,7 +766,6 @@ module_function::register_coverage(address_space_t* _addr_space,
                                           "no-constraint");
                 }
             }
-            verbprintf(0, "Basic-block code coverage is not available yet\n");
             break;
         }
         case CODECOV_NONE: break;

@@ -22,16 +22,22 @@
 
 #include "libpyomnitrace.hpp"
 #include "dl.hpp"
+#include "library/coverage.hpp"
+#include "library/impl/coverage.hpp"
 
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/environment.hpp>
 #include <timemory/mpl/apply.hpp>
+#include <timemory/mpl/policy.hpp>
+#include <timemory/tpls/cereal/cereal.hpp>
+#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic/macros.hpp>
 
 #include <pybind11/detail/common.h>
+#include <pybind11/operators.h>
 #include <pybind11/pybind11.h>
 #include <pyerrors.h>
 
@@ -51,7 +57,15 @@ namespace pyprofile
 py::module
 generate(py::module& _pymod);
 }
+namespace pycoverage
+{
+py::module
+generate(py::module& _pymod);
+}
 }  // namespace pyomnitrace
+
+template <typename... Tp>
+using uomap_t = std::unordered_map<Tp...>;
 
 PYBIND11_MODULE(libpyomnitrace, omni)
 {
@@ -144,6 +158,8 @@ PYBIND11_MODULE(libpyomnitrace, omni)
 
     py::doc("omnitrace profiler for python");
     pyprofile::generate(omni);
+
+    pycoverage::generate(omni);
 }
 
 //======================================================================================//
@@ -555,6 +571,259 @@ generate(py::module& _pymod)
     return _prof;
 }
 }  // namespace pyprofile
+
+namespace pycoverage
+{
+py::module
+generate(py::module& _pymod)
+{
+    namespace coverage           = omnitrace::coverage;
+    using coverage_data_vector_t = std::vector<coverage::coverage_data>;
+
+    py::module _pycov = _pymod.def_submodule("coverage", "Code coverage");
+
+#define DEFINE_PROPERTY(PYCLASS, CLASS, TYPE, NAME, ...)                                 \
+    PYCLASS.def_property(                                                                \
+        #NAME, [](CLASS* _object) { return _object->NAME; },                             \
+        [](CLASS* _object, TYPE v) { return _object->NAME = v; }, __VA_ARGS__)
+
+    py::class_<coverage::code_coverage> _pycov_summary{ _pymod, "summary",
+                                                        "Code coverage summary" };
+
+    _pycov_summary.def(py::init([]() { return new coverage::code_coverage{}; }),
+                       "Create a default instance");
+
+    _pycov_summary.def(
+        "get_code_coverage",
+        [](coverage::code_coverage* _v) {
+            return _v->get(coverage::code_coverage::STANDARD);
+        },
+        "Get coverage fraction");
+    _pycov_summary.def(
+        "get_module_coverage",
+        [](coverage::code_coverage* _v) {
+            return _v->get(coverage::code_coverage::MODULE);
+        },
+        "Get coverage fraction");
+    _pycov_summary.def(
+        "get_function_coverage",
+        [](coverage::code_coverage* _v) {
+            return _v->get(coverage::code_coverage::FUNCTION);
+        },
+        "Get coverage fraction");
+    _pycov_summary.def("get_uncovered_modules",
+                       &coverage::code_coverage::get_uncovered_modules,
+                       "List of uncovered modules");
+    _pycov_summary.def("get_uncovered_functions",
+                       &coverage::code_coverage::get_uncovered_functions,
+                       "List of uncovered functions");
+
+    DEFINE_PROPERTY(_pycov_summary, coverage::code_coverage, size_t, count,
+                    "Number of times covered");
+    DEFINE_PROPERTY(_pycov_summary, coverage::code_coverage, size_t, size,
+                    "Total number of coverage entries");
+    DEFINE_PROPERTY(_pycov_summary, coverage::code_coverage,
+                    coverage::code_coverage::data, covered, "Covered information");
+    DEFINE_PROPERTY(_pycov_summary, coverage::code_coverage,
+                    coverage::code_coverage::data, possible, "Possible information");
+
+    py::class_<coverage::code_coverage::data> _pycov_summary_data{ _pycov_summary, "data",
+                                                                   "Code coverage data" };
+
+    DEFINE_PROPERTY(_pycov_summary_data, coverage::code_coverage::data, std::set<size_t>,
+                    addresses, "Addresses");
+    DEFINE_PROPERTY(_pycov_summary_data, coverage::code_coverage::data,
+                    std::set<std::string>, modules, "Modules");
+    DEFINE_PROPERTY(_pycov_summary_data, coverage::code_coverage::data,
+                    std::set<std::string>, functions, "Functions");
+
+    py::class_<coverage::coverage_data> _pycov_details{ _pycov, "details",
+                                                        "Code coverage data" };
+
+    _pycov_details.def(py::init([]() { return new coverage::coverage_data{}; }),
+                       "Create a default instance");
+
+    DEFINE_PROPERTY(_pycov_details, coverage::coverage_data, size_t, count,
+                    "Number of times invoked");
+    DEFINE_PROPERTY(_pycov_details, coverage::coverage_data, size_t, address,
+                    "Address of coverage entity (in binary)");
+    DEFINE_PROPERTY(_pycov_details, coverage::coverage_data, size_t, line,
+                    "Line number of coverage entity");
+    DEFINE_PROPERTY(_pycov_details, coverage::coverage_data, std::string, module,
+                    "Name of the containing module");
+    DEFINE_PROPERTY(_pycov_details, coverage::coverage_data, std::string, function,
+                    "Name of the function (basic)");
+    DEFINE_PROPERTY(_pycov_details, coverage::coverage_data, std::string, source,
+                    "Full signature of the function");
+
+    _pycov_details.def(py::self + py::self);
+    _pycov_details.def(py::self += py::self);
+    _pycov_details.def(py::self == py::self);
+    _pycov_details.def(py::self != py::self);
+    _pycov_details.def(py::self < py::self);
+    _pycov_details.def(py::self > py::self);
+    _pycov_details.def(py::self <= py::self);
+    _pycov_details.def(py::self >= py::self);
+
+    auto _load_coverage = [](const std::string& _inp) {
+        coverage::code_coverage* _summary = nullptr;
+        coverage_data_vector_t*  _details = nullptr;
+        std::ifstream            ifs{ _inp };
+        if(ifs)
+        {
+            namespace cereal = tim::cereal;
+            auto ar = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
+
+            try
+            {
+                ar->setNextName("omnitrace");
+                ar->startNode();
+                ar->setNextName("coverage");
+                ar->startNode();
+                _summary = new coverage::code_coverage{};
+                _details = new coverage_data_vector_t{};
+                (*ar)(cereal::make_nvp("summary", *_summary));
+                (*ar)(cereal::make_nvp("details", *_details));
+                ar->finishNode();
+                ar->finishNode();
+            } catch(std::exception&)
+            {}
+        }
+        return std::make_tuple(_summary, _details);
+    };
+
+    auto _save_coverage = [](coverage::code_coverage* _summary,
+                             coverage_data_vector_t* _details, std::string _name) {
+        std::stringstream oss{};
+        {
+            namespace cereal = tim::cereal;
+            auto ar =
+                tim::policy::output_archive<cereal::PrettyJSONOutputArchive>::get(oss);
+
+            ar->setNextName("omnitrace");
+            ar->startNode();
+            ar->setNextName("coverage");
+            ar->startNode();
+            (*ar)(cereal::make_nvp("summary", *_summary));
+            (*ar)(cereal::make_nvp("details", *_details));
+            ar->finishNode();
+            ar->finishNode();
+        }
+        _name = TIMEMORY_JOIN(
+            '.', std::regex_replace(_name, std::regex{ "(.*)(\\.json$)" }, "$1"), "json");
+        std::ofstream ofs{};
+        if(tim::filepath::open(ofs, _name))
+        {
+            fprintf(stderr, "[%s][coverage]> Outputting '%s'...\n", TIMEMORY_PROJECT_NAME,
+                    _name.c_str());
+            ofs << oss.str() << "\n";
+        }
+        else
+        {
+            throw std::runtime_error(
+                TIMEMORY_JOIN("", "Error opening coverage output file: ", _name));
+        }
+    };
+
+    _pycov.def("load", _load_coverage, "Load code coverage data");
+    _pycov.def("save", _save_coverage, "Save code coverage data", py::arg("summary"),
+               py::arg("details"), py::arg("filename") = "coverage.json");
+
+    auto _concat_coverage = [](coverage_data_vector_t* _lhs,
+                               coverage_data_vector_t* _rhs) {
+        std::sort(_rhs->begin(), _rhs->end(), std::greater<coverage::coverage_data>{});
+
+        auto _find = [_lhs](const auto& _v) {
+            for(auto itr = _lhs->begin(); itr != _lhs->end(); ++itr)
+            {
+                if(*itr == _v) return std::make_pair(itr, true);
+            }
+            return std::make_pair(_lhs->end(), false);
+        };
+
+        std::vector<coverage::coverage_data*> _new_entries{};
+        _new_entries.reserve(_rhs->size());
+        for(auto& itr : *_rhs)
+        {
+            auto litr = _find(itr);
+            if(!litr.second)
+                _new_entries.emplace_back(&itr);
+            else
+                *litr.first += itr;
+        }
+
+        _lhs->reserve(_lhs->size() + _new_entries.size());
+        for(auto& itr : _new_entries)
+            _lhs->emplace_back(std::move(*itr));
+        _rhs->clear();
+
+        std::sort(_lhs->begin(), _lhs->end(), std::greater<coverage::coverage_data>{});
+        return _lhs;
+    };
+
+    _pycov.def("concat", _concat_coverage, "Combined code coverage details");
+
+    using coverage_data_map =
+        uomap_t<std::string_view, uomap_t<std::string_view, std::map<size_t, size_t>>>;
+
+    auto _coverage_summary = [](coverage_data_vector_t* _data) {
+        coverage::code_coverage _summary{};
+        coverage_data_map       _mdata{};
+
+        for(auto& itr : *_data)
+            _mdata[itr.module][itr.function][itr.address] += itr.count;
+
+        for(const auto& file : _mdata)
+        {
+            for(const auto& func : file.second)
+            {
+                for(const auto& addr : func.second)
+                {
+                    if(addr.second > 0)
+                    {
+                        _summary.count += 1;
+                        _summary.covered.modules.emplace(file.first);
+                        _summary.covered.functions.emplace(func.first);
+                        _summary.covered.addresses.emplace(addr.first);
+                    }
+                    _summary.size += 1;
+                    _summary.possible.modules.emplace(file.first);
+                    _summary.possible.functions.emplace(func.first);
+                    _summary.possible.addresses.emplace(addr.first);
+                }
+            }
+        }
+
+        return _summary;
+    };
+
+    _pycov.def("get_summary", _coverage_summary, "Generate a code coverage summary");
+
+    auto _get_top = [](coverage_data_vector_t* _data, size_t _n) {
+        auto _ret = *_data;
+        std::sort(_ret.begin(), _ret.end(), std::greater<coverage::coverage_data>{});
+        _ret.resize(std::min<size_t>(_n, _ret.size()));
+        _ret.shrink_to_fit();
+        return _ret;
+    };
+
+    _pycov.def("get_top", _get_top, "Get the top covered functions", py::arg("details"),
+               py::arg("n") = 10);
+
+    auto _get_bottom = [](coverage_data_vector_t* _data, size_t _n) {
+        auto _ret = *_data;
+        std::sort(_ret.begin(), _ret.end(), std::less<coverage::coverage_data>{});
+        _ret.resize(std::min<size_t>(_n, _ret.size()));
+        _ret.shrink_to_fit();
+        return _ret;
+    };
+
+    _pycov.def("get_bottom", _get_bottom, "Get the bottom covered functions",
+               py::arg("details"), py::arg("n") = 10);
+
+    return _pycov;
+}
+}  // namespace pycoverage
 }  // namespace pyomnitrace
 //
 //======================================================================================//

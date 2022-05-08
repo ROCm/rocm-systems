@@ -22,9 +22,9 @@
 
 #pragma once
 
-#include "timemory/mpl/concepts.hpp"
-#include "timemory/tpls/cereal/cereal/cereal.hpp"
+#include <timemory/mpl/concepts.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
+#include <timemory/tpls/cereal/cereal/cereal.hpp>
 
 #include <cstddef>
 #include <set>
@@ -39,8 +39,10 @@ namespace omnitrace
 {
 namespace coverage
 {
+#if !defined(OMNITRACE_PYBIND11_SOURCE) || OMNITRACE_PYBIND11_SOURCE == 0
 void
 post_process();
+#endif
 
 //--------------------------------------------------------------------------------------//
 //
@@ -67,6 +69,9 @@ struct code_coverage
         int_set_t addresses = {};
         str_set_t modules   = {};
         str_set_t functions = {};
+
+        data& operator+=(const data& rhs);
+        data  operator+(const data& rhs) const;
 
         template <typename ArchiveT>
         void serialize(ArchiveT& ar, const unsigned version);
@@ -134,6 +139,7 @@ struct coverage_data
     void serialize(ArchiveT& ar, const unsigned version);
 
     coverage_data& operator+=(const coverage_data& rhs);
+    coverage_data  operator+(const coverage_data& rhs) const;
     bool           operator==(const coverage_data& rhs) const;
     bool           operator==(const data_tuple_t& rhs) const;
     bool           operator!=(const coverage_data& rhs) const;
