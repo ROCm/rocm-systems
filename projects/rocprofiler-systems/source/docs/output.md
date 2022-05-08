@@ -55,7 +55,114 @@ $ omnitrace -- ./foo
 
 ## Metadata
 
-[Omnitrace](https://github.com/AMDResearch/omnitrace) will output a metadata.json file.
+[Omnitrace](https://github.com/AMDResearch/omnitrace) will output a metadata.json file. This metadata file will contain
+information about the settings, environment variables, output files, and info about the system and the run:
+
+```json
+{
+    "omnitrace": {
+        "metadata": {
+            "info": {
+                "HW_L1_CACHE_SIZE": 32768,
+                "HW_L2_CACHE_SIZE": 524288,
+                "SHELL": "/bin/bash",
+                "HW_PHYSICAL_CPU": 12,
+                "CPU_FEATURES": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl nonstop_tsc cpuid extd_apicid aperfmperf pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local clzero irperf xsaveerptr rdpru wbnoinvd arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif v_spec_ctrl umip rdpid overflow_recov succor smca sme sev sev_es",
+                "HW_CONCURRENCY": 24,
+                "LAUNCH_TIME": "02:04",
+                "CPU_MODEL": "AMD Ryzen Threadripper PRO 3945WX 12-Cores",
+                "TIMEMORY_GIT_REVISION": "52e7034fd419ff296506cdef43084f6071dbaba1",
+                "TIMEMORY_VERSION": "3.3.0rc4",
+                "CPU_FREQUENCY": 2400,
+                "TIMEMORY_API": "tim::project::timemory",
+                "PWD": "/home/jrmadsen/devel/c++/AARInternal/hosttrace-dyninst/build-vscode",
+                "HW_L3_CACHE_SIZE": 16777216,
+                "USER": "jrmadsen",
+                "HOME": "/home/jrmadsen",
+                "TIMEMORY_GIT_DESCRIBE": "v3.2.0-263-g52e7034f",
+                "LAUNCH_DATE": "05/08/22",
+                "CPU_VENDOR": "AuthenticAMD"
+            },
+            "output": {
+                "text": [
+                    {
+                        "value": [
+                            "omnitrace-tests-output/parallel-overhead-binary-rewrite/roctracer.txt"
+                        ],
+                        "key": "roctracer"
+                    },
+                    {
+                        "value": [
+                            "omnitrace-tests-output/parallel-overhead-binary-rewrite/wall_clock.txt"
+                        ],
+                        "key": "wall_clock"
+                    }
+                ],
+                "json": [
+                    {
+                        "value": [
+                            "omnitrace-tests-output/parallel-overhead-binary-rewrite/roctracer.json",
+                            "omnitrace-tests-output/parallel-overhead-binary-rewrite/roctracer.tree.json"
+                        ],
+                        "key": "roctracer"
+                    },
+                    {
+                        "value": [
+                            "omnitrace-tests-output/parallel-overhead-binary-rewrite/wall_clock.json",
+                            "omnitrace-tests-output/parallel-overhead-binary-rewrite/wall_clock.tree.json"
+                        ],
+                        "key": "wall_clock"
+                    }
+                ]
+            },
+            "environment": [
+                {
+                    "value": "/home/jrmadsen",
+                    "key": "HOME"
+                },
+                {
+                    "value": "/bin/bash",
+                    "key": "SHELL"
+                },
+                {
+                    "value": "jrmadsen",
+                    "key": "USER"
+                },
+                {
+                    "value": "true",
+                    "key": "... etc. ..."
+                }
+            ],
+            "settings": {
+                "OMNITRACE_JSON_OUTPUT": {
+                    "count": -1,
+                    "environ_updated": false,
+                    "name": "json_output",
+                    "data_type": "bool",
+                    "initial": true,
+                    "enabled": true,
+                    "value": true,
+                    "max_count": 1,
+                    "cmdline": [
+                        "--omnitrace-json-output"
+                    ],
+                    "environ": "OMNITRACE_JSON_OUTPUT",
+                    "config_updated": false,
+                    "categories": [
+                        "io",
+                        "json",
+                        "native"
+                    ],
+                    "description": "Write json output files"
+                },
+                "... etc. ...": {
+                    "etc.": true
+                }
+            }
+        }
+    }
+}
+```
 
 ## Configuring Output
 

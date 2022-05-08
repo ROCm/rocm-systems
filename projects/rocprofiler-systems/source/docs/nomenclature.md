@@ -49,9 +49,3 @@ have different contextual meanings, e.g., omnitrace's meaning of the term "modul
   - Due to language constructs or compiler optimizations, it may be possible for multiple functions to overlap (that is, share part of the same function body) or for a single function to have multiple entry points
   - In practice, it is impossible to determine the difference between multiple overlapping functions and a single function with multiple entry points
   - By default, omnitrace avoids instrumenting overlapping functions
-
-## Additional Notes
-
-The ["Data granularity in profiler types"](https://en.wikipedia.org/wiki/Profiling_(computer_programming)#Data_granularity_in_profiler_types) section of
-the Wikipedia ["Profiling (computer programming)"](https://en.wikipedia.org/wiki/Profiling_(computer_programming)) page may be a useful reference in understanding
-the different profiling modes and their trade-offs.

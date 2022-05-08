@@ -149,9 +149,9 @@ source ${OMNITRACE_ROOT}/share/omnitrace/setup-env.sh
 #### MPI Support within Omnitrace
 
 [Omnitrace](https://github.com/AMDResearch/omnitrace) can have full (`OMNITRACE_USE_MPI=ON`) or partial (`OMNITRACE_USE_MPI_HEADERS=ON`) MPI support.
-The only difference between these two modes is whether or not the results collected via timemory can be aggregated into one output file. The primary
-benefits of partial or full MPI support are the automatic wrapping of MPI functions and the ability to label output with suffixes which correspond to the
-`MPI_COMM_WORLD` rank ID instead of using the system process identifier (i.e. PID).
+The only difference between these two modes is whether or not the results collected via timemory and/or perfetto can be aggregated into a single
+output file during finalization. The primary benefits of partial or full MPI support are the automatic wrapping of MPI functions and the ability
+to label output with suffixes which correspond to the `MPI_COMM_WORLD` rank ID instead of using the system process identifier (i.e. PID).
 In general, it is recommended to use partial MPI support with the OpenMPI headers as this is the most portable configuration.
 If full MPI support is selected, make sure your target application is built against the same MPI distribution as omnitrace,
 i.e. do not build omnitrace with MPICH and use it on a target application built against OpenMPI.

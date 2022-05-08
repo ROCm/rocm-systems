@@ -25,8 +25,11 @@ make html
 
 if [ -d ${SOURCE_DIR}/docs ]; then
     message "Removing stale documentation in ${SOURCE_DIR}/docs/"
-    echo rm -rf ${SOURCE_DIR}/docs/*
+    rm -rf ${SOURCE_DIR}/docs/*
+
+    message "Adding nojekyll to docs/"
+    cp -r ${WORK_DIR}/.nojekyll ${SOURCE_DIR}/docs/.nojekyll
 
     message "Copying source/docs/_build/html/* to docs/"
-    echo cp -r ${WORK_DIR}/_build/html/* ${SOURCE_DIR}/docs/
+    cp -r ${WORK_DIR}/_build/html/* ${SOURCE_DIR}/docs/
 fi
