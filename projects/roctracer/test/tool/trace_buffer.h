@@ -36,7 +36,8 @@
 
 namespace roctracer {
 
-struct TraceBufferBase {
+class TraceBufferBase {
+ public:
   static void FlushAll() {
     std::lock_guard lock(mutex_);
 
@@ -58,9 +59,13 @@ struct TraceBufferBase {
   TraceBufferBase(std::string name, int priority)
       : name_(std::move(name)), priority_(priority), next_(nullptr) {}
 
+  TraceBufferBase(const TraceBufferBase&) = delete;
+  TraceBufferBase& operator=(const TraceBufferBase&) = delete;
+
   virtual void Flush() = 0;
 
-  const std::string& name() const { return name_; }
+  std::string name() && { return std::move(name_); }
+  const std::string& name() const& { return name_; }
 
  private:
   const std::string name_;
