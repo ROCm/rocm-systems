@@ -49,7 +49,6 @@ set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-threadsafe-statics" )
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fmerge-all-constants" )
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fms-extensions" )
 set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fmerge-all-constants" )
-set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC" )
 
 add_link_options("-Bdynamic -z,noexecstck")
 
