@@ -137,7 +137,8 @@ eval_test "tool flushing test" "ROCP_FLUSH_RATE=100000 ./test/MatrixTranspose" M
 #API records filtering
 echo "<trace name=\"HIP\"><parameters api=\"hipFree, hipMalloc, hipMemcpy\"></parameters></trace>" > input.xml
 export ROCP_INPUT=input.xml
-eval_test "tool HIP test input" ./test/MatrixTranspose hip_input_trace
+eval_test "tool HIP test input" ./test/MatrixTranspose MatrixTranspose_hip_input_trace
+unset ROCP_INPUT
 
 # HSA test
 export ROCTRACER_DOMAIN="hsa"
@@ -159,6 +160,7 @@ eval_test "tool HSA test" ./test/hsa/ctrl ctrl_hsa_trace
 echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > input.xml
 export ROCP_INPUT=input.xml
 eval_test "tool HSA test input" ./test/hsa/ctrl ctrl_hsa_input_trace
+unset ROCP_INPUT
 
 export HSA_TOOLS_LIB="$ROCTRACER_LIB_PATH/libroctracer64.so ./test/libhsaco_test.so"
 eval_test "tool HSA codeobj" ./test/MatrixTranspose hsa_co_trace
