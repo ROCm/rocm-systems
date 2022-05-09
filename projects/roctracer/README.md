@@ -112,14 +112,13 @@ To use the rocTX API you need the API header and to link your application with `
 
    ```sh
    cd <your path>/roctracer
-   mkdir build && cd build
-   cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
-   make
+   ./build.sh
    ```
 
 - To build and run test:
 
   ```sh
+  cd <your path>/roctracer/build
   make mytest
   run.sh
   ```
