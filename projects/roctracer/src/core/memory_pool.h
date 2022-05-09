@@ -51,7 +51,7 @@ class MemoryPool {
     // Create a consumer thread and wait for it to be ready to accept work.
     std::promise<void> ready;
     std::future<void> future = ready.get_future();
-    consumer_thread_ = std::thread(ConsumerThreadLoop, this, std::move(ready));
+    consumer_thread_ = std::thread(&MemoryPool::ConsumerThreadLoop, this, std::move(ready));
     future.wait();
   }
 
