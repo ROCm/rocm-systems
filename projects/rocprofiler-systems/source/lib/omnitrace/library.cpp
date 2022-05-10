@@ -649,13 +649,16 @@ omnitrace_init_tooling_hidden()
         auto shmem_size_hint = get_perfetto_shmem_size_hint();
         auto buffer_size     = get_perfetto_buffer_size();
 
+        auto _policy =
+            get_perfetto_fill_policy() == "discard"
+                ? perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD
+                : perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
         auto* buffer_config = cfg.add_buffers();
         buffer_config->set_size_kb(buffer_size);
-        buffer_config->set_fill_policy(
-            perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD);
+        buffer_config->set_fill_policy(_policy);
 
         auto* ds_cfg = cfg.add_data_sources()->mutable_config();
-        ds_cfg->set_name("track_event");
+        ds_cfg->set_name("omnitrace");
         ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
 
         args.shmem_size_hint_kb = shmem_size_hint;
@@ -1260,8 +1263,12 @@ omnitrace_finalize_hidden(void)
             else
             {
                 // Write the trace into a file.
-                if(get_verbose() >= 0) fprintf(stderr, "Done\n");
                 ofs.write(&trace_data[0], trace_data.size());
+                if(get_verbose() >= 0) fprintf(stderr, "Done\n");
+                auto _manager = tim::manager::instance();
+                if(_manager)
+                    _manager->add_file_output("protobuf", "perfetto",
+                                              get_perfetto_output_filename());
             }
             ofs.close();
             if(get_verbose() >= 0) fprintf(stderr, "\n");

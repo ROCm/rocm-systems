@@ -55,7 +55,7 @@ or exectuable which loads the instrumented libraries normally, e.g.:
 ```
 
 If you want to re-define certain settings to new default in a binary rewrite, use the `--env` option. This `omnitrace` option
-will set the environment variable to the given value but will not override it. E.g. the default value of `OMNITRACE_BUFFER_SIZE_KB`
+will set the environment variable to the given value but will not override it. E.g. the default value of `OMNITRACE_PERFETTO_BUFFER_SIZE_KB`
 is 1024000 KB (1 GiB):
 
 ```shell
@@ -64,17 +64,17 @@ omnitrace -o app.inst -- /path/to/app
 ./app.inst
 ```
 
-Passing `--env OMNITRACE_BUFFER_SIZE_KB=5120000` will change the default value in `app.inst` to 5120000 KiB (5 GiB):
+Passing `--env OMNITRACE_PERFETTO_BUFFER_SIZE_KB=5120000` will change the default value in `app.inst` to 5120000 KiB (5 GiB):
 
 ```shell
 # defaults to 5 GiB buffer size
-omnitrace -o app.inst --env OMNITRACE_BUFFER_SIZE_KB=5120000 -- /path/to/app
+omnitrace -o app.inst --env OMNITRACE_PERFETTO_BUFFER_SIZE_KB=5120000 -- /path/to/app
 ./app.inst
 ```
 
 ```shell
 # override default 5 GiB buffer size to 200 MB
-export OMNITRACE_BUFFER_SIZE_KB=200000
+export OMNITRACE_PERFETTO_BUFFER_SIZE_KB=200000
 ./app.inst
 ```
 
@@ -140,13 +140,13 @@ In a separate window run:
 ```shell
 pkill traced
 traced --background
-perfetto --out ./htrace.out --txt -c ${OMNITRACE_ROOT}/share/roctrace.cfg
+perfetto --out ./htrace.out --txt -c ${OMNITRACE_ROOT}/share/omnitrace.cfg
 ```
 
 then in the window running the application, configure the omnitrace instrumentation to use the system backend:
 
 ```shell
-export OMNITRACE_BACKEND=system
+export OMNITRACE_PERFETTO_BACKEND=system
 ```
 
 for the merge use the `htrace.out`:

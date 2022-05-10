@@ -67,14 +67,20 @@ get_omnitrace_env()
     return get_env("OMNITRACE_VERBOSE", (_debug) ? 100 : 0);
 }
 
+inline int
+get_omnitrace_dl_env()
+{
+    return get_env("OMNITRACE_DL_DEBUG", false)
+               ? 100
+               : get_env("OMNITRACE_DL_VERBOSE", get_omnitrace_env());
+}
+
 // environment priority:
 //  - OMNITRACE_DL_DEBUG
 //  - OMNITRACE_DL_VERBOSE
 //  - OMNITRACE_DEBUG
 //  - OMNITRACE_VERBOSE
-int _omnitrace_dl_verbose = get_env("OMNITRACE_DL_DEBUG", false)
-                                ? 100
-                                : get_env("OMNITRACE_DL_VERBOSE", get_omnitrace_env());
+int _omnitrace_dl_verbose = get_omnitrace_dl_env();
 
 // The docs for dlopen suggest that the combination of RTLD_LOCAL + RTLD_DEEPBIND
 // (when available) helps ensure that the symbols in the instrumentation library
@@ -388,6 +394,7 @@ extern "C"
         {
             dl::get_active() = true;
             dl::get_inited() = true;
+            dl::_omnitrace_dl_verbose = dl::get_omnitrace_dl_env();
         }
     }
 

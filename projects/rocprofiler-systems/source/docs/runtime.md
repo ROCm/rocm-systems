@@ -70,8 +70,8 @@ $ omnitrace-avail -S -bd
 |          ENVIRONMENT VARIABLE           |               DESCRIPTION               |
 |-----------------------------------------|-----------------------------------------|
 | OMNITRACE_ADD_SECONDARY                 | Enable/disable components adding sec... |
-| OMNITRACE_BACKEND                       | Specify the perfetto backend to acti... |
-| OMNITRACE_BUFFER_SIZE_KB                | Size of perfetto buffer (in KB)         |
+| OMNITRACE_PERFETTO_BACKEND              | Specify the perfetto backend to acti... |
+| OMNITRACE_PERFETTO_BUFFER_SIZE_KB       | Size of perfetto buffer (in KB)         |
 | OMNITRACE_COLLAPSE_PROCESSES            | Enable/disable combining process-spe... |
 | OMNITRACE_COLLAPSE_THREADS              | Enable/disable combining thread-spec... |
 | OMNITRACE_CONFIG_FILE                   | Configuration file for omnitrace        |
@@ -124,7 +124,7 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_SAMPLING_FREQ                 | Number of software interrupts per se... |
 | OMNITRACE_SCIENTIFIC                    | Set the global numerical reporting t... |
 | OMNITRACE_SETTINGS_DESC                 | Provide descriptions when printing s... |
-| OMNITRACE_SHMEM_SIZE_HINT_KB            | Hint for shared-memory buffer size i... |
+| OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB   | Hint for shared-memory buffer size i... |
 | OMNITRACE_SUPPRESS_CONFIG               | Disable processing of setting config... |
 | OMNITRACE_SUPPRESS_PARSING              | Disable parsing environment             |
 | OMNITRACE_TEXT_OUTPUT                   | Write text output files                 |

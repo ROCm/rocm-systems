@@ -120,10 +120,14 @@ build-and-package-python()
     for i in ${PYTHON_VERSIONS}
     do
         conda activate py3.${i}
-        _PYTHON_ENVS="${_PYTHON_ENVS}$(dirname $(dirname $(which python)));"
+        if [ -z "${_PYTHON_ENVS}" ]; then
+            _PYTHON_ENVS="$(dirname $(dirname $(which python)))"
+        else
+            _PYTHON_ENVS="${_PYTHON_ENVS};$(dirname $(dirname $(which python)))"
+        fi
         conda deactivate
     done
-    build-and-package-base ${DIR}-python $@ -DOMNITRACE_USE_PYTHON=ON -DOMNITRACE_BUILD_PYTHON=ON -DOMNITRACE_PYTHON_ENVS=\"${_PYTHON_ENVS}\"
+    build-and-package-base ${DIR}-python $@ -DOMNITRACE_USE_PYTHON=ON -DOMNITRACE_BUILD_PYTHON=ON -DOMNITRACE_PYTHON_ROOT_DIRS=\"${_PYTHON_ENVS}\"
 }
 
 build-and-package()

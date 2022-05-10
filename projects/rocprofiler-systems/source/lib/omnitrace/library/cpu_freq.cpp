@@ -98,9 +98,8 @@ config()
                     _cpu_mhz_pos.emplace_back(_pos + 1);
                     _ifs >> _s;
                     if(!_ifs.good() || !_ifs) break;
-                    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug() || get_verbose() > 1,
-                                                      "[%zu] %s %s (pos = %zu)\n", i,
-                                                      _st.c_str(), _s.c_str(), _pos + 1);
+                    OMNITRACE_BASIC_VERBOSE(3, "[%zu] %s %s (pos = %zu)\n", i,
+                                            _st.c_str(), _s.c_str(), _pos + 1);
                     break;
                 }
             }
@@ -110,6 +109,12 @@ config()
     _ifs.close();
 
     auto _enabled_val = get_sampling_cpus();
+    for(auto& itr : _enabled_val)
+        itr = tolower(itr);
+    if(_enabled_val == "off")
+        _enabled_val = "none";
+    else if(_enabled_val == "on")
+        _enabled_val = "all";
     if(_enabled_val != "none" && _enabled_val != "all")
     {
         auto _enabled = tim::delimit(_enabled_val, ",; \t");
@@ -145,9 +150,19 @@ config()
             }
         }
     }
+    else if(_enabled_val == "all")
+    {
+        for(size_t i = 0; i < _ncpu; ++i)
+            enabled_cpu_frequencies.emplace(i);
+    }
+    else if(_enabled_val == "none")
+    {
+        enabled_cpu_frequencies.clear();
+    }
     cpu_frequencies.resize(_ncpu);
     cpu_mhz_pos = _cpu_mhz_pos;
-    ifs         = std::make_unique<std::ifstream>("/proc/cpuinfo", std::ifstream::binary);
+    if(!enabled_cpu_frequencies.empty())
+        ifs = std::make_unique<std::ifstream>("/proc/cpuinfo", std::ifstream::binary);
 }
 
 void
@@ -166,11 +181,9 @@ sample()
     };
 
     auto _ts = tim::get_clock_real_now<size_t, std::nano>();
-    for(int64_t i = 0; i < ncpu; ++i)
+    for(const auto& itr : enabled_cpu_frequencies)
     {
-        if(!enabled_cpu_frequencies.empty() && enabled_cpu_frequencies.count(i) == 0)
-            continue;
-        cpu_frequencies.at(i).emplace_back(_ts, _read_cpu_freq(i));
+        cpu_frequencies.at(itr).emplace_back(_ts, _read_cpu_freq(itr));
     }
 }
 

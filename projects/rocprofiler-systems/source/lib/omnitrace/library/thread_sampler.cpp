@@ -93,6 +93,8 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     {
         std::this_thread::sleep_until(_now);
         if(_state->load() != State::Active) continue;
+        if(get_state() == State::Finalized) break;
+        if(get_state() != State::Active) continue;
         get_sampler_is_sampling().store(true);
         for(auto& itr : instances)
             itr->sample();
@@ -100,6 +102,8 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
         while(_now < std::chrono::steady_clock::now())
             _now += _interval;
     }
+    // ensure this is always false
+    get_sampler_is_sampling().store(false);
 
     OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug(),
                                       "Thread sampler polling completed...\n");
@@ -165,30 +169,44 @@ sampler::setup()
 void
 sampler::shutdown()
 {
+    // set the local sampler state to finalized
+    set_state(State::Finalized);
+
+    // shutdown all components
     for(auto& itr : instances)
         itr->shutdown();
 
     auto& _thread = get_thread();
     if(_thread)
     {
-        set_state(State::Finalized);
+        size_t           _nitr     = 0;
+        constexpr size_t _nitr_max = 100;
+        uint64_t         _freq     = (1.0 / get_thread_sampling_freq()) * 1.0e3;
+
+        // wait until the sampler is no longer sampling
+        std::this_thread::sleep_for(msec_t{ _freq });
         while(get_sampler_is_sampling().load())
-        {}
+        {
+            if(_nitr++ > _nitr_max) break;
+        }
+
+        // during CI, throw an error if polling_finished is not valid
+        OMNITRACE_CI_THROW(!polling_finished, "polling_finished is not valid\n");
         if(polling_finished)
         {
-            auto     _fut  = polling_finished->get_future();
-            uint64_t _freq = (1.0 / get_thread_sampling_freq()) * 1.0e3;
+            // wait for the thread to finish
+            auto _fut = polling_finished->get_future();
             _fut.wait_for(msec_t{ 10 * _freq });
             _thread->join();
         }
         else
         {
-            uint64_t _freq = (1.0 / get_thread_sampling_freq()) * 1.0e3;
+            // cancel the thread and detach
             std::this_thread::sleep_for(msec_t{ 10 * _freq });
             pthread_cancel(_thread->native_handle());
             _thread->detach();
         }
-        _thread          = std::unique_ptr<std::thread>{};
+        _thread          = std::unique_ptr<std::thread>{ nullptr };
         polling_finished = std::unique_ptr<promise_t>{};
     }
 

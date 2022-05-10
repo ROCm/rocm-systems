@@ -142,7 +142,7 @@ configure_settings(bool _init)
     auto _default_perfetto_v =
         !tim::get_env<bool>("OMNITRACE_USE_TIMEMORY", false, false);
 
-    auto _system_backend = tim::get_env("OMNITRACE_BACKEND_SYSTEM", false, false);
+    auto _system_backend = tim::get_env("OMNITRACE_PERFETTO_BACKEND_SYSTEM", false, false);
 
     auto _omnitrace_debug = _config->get<bool>("OMNITRACE_DEBUG");
     if(_omnitrace_debug) tim::set_env("TIMEMORY_DEBUG_SETTINGS", "1", 0);
@@ -220,16 +220,19 @@ configure_settings(bool _init)
         "", "thread_sampling");
 
     auto _backend = tim::get_env_choice<std::string>(
-        "OMNITRACE_BACKEND",
+        "OMNITRACE_PERFETTO_BACKEND",
         (_system_backend)
-            ? "system"      // if OMNITRACE_BACKEND_SYSTEM is true, default to system.
+            ? "system"      // if OMNITRACE_PERFETTO_BACKEND_SYSTEM is true, default to system.
             : "inprocess",  // Otherwise, default to inprocess
         { "inprocess", "system", "all" }, false);
 
-    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_BACKEND",
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_PERFETTO_BACKEND",
                              "Specify the perfetto backend to activate. Options are: "
                              "'inprocess', 'system', or 'all'",
                              _backend, "perfetto");
+
+    _config->find("OMNITRACE_PERFETTO_BACKEND")
+        ->second->set_choices({ "inprocess", "system", "all" });
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CRITICAL_TRACE",
                              "Enable generation of the critical trace", false, "backend",
@@ -280,20 +283,32 @@ configure_settings(bool _init)
         "Include names in serialization of critical trace (mainly for debugging)",
         _omnitrace_debug, "debugging", "critical_trace");
 
-    OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_SHMEM_SIZE_HINT_KB",
+    OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB",
                              "Hint for shared-memory buffer size in perfetto (in KB)",
                              40960, "perfetto", "data");
 
-    OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_BUFFER_SIZE_KB",
+    OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_PERFETTO_BUFFER_SIZE_KB",
                              "Size of perfetto buffer (in KB)", 1024000, "perfetto",
                              "data");
 
-    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_COMBINE_PERFETTO_TRACES",
-                             "Combine Perfetto traces", true, "perfetto", "data");
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_PERFETTO_COMBINE_TRACES",
+                             "Combine Perfetto traces. If not explicitly set, it will "
+                             "default to the value of OMNITRACE_COLLAPSE_PROCESSES",
+                             _config->get<bool>("collapse_processes"), "perfetto",
+                             "data");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_PERFETTO_FILL_POLICY",
+        "Behavior when perfetto buffer is full. 'discard' will ignore new entries, "
+        "'ring_buffer' will overwrite old entries",
+        "discard", "perfetto", "data");
+
+    _config->find("OMNITRACE_PERFETTO_FILL_POLICY")
+        ->second->set_choices({ "fill", "discard" });
 
     OMNITRACE_CONFIG_SETTING(int64_t, "OMNITRACE_CRITICAL_TRACE_COUNT",
                              "Number of critical trace to export (0 == all)", 0, "data",
-                             "critical_trace");
+                             "critical_trace", "omnitrace-critical-trace");
 
     OMNITRACE_CONFIG_SETTING(uint64_t, "OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT",
                              "Number of critical trace records to store in thread-local "
@@ -423,6 +438,13 @@ configure_settings(bool _init)
     _config->get_global_components() =
         _config->get<std::string>("OMNITRACE_TIMEMORY_COMPONENTS");
 
+    auto _combine_perfetto_traces = _config->find("OMNITRACE_PERFETTO_COMBINE_TRACES");
+    if(!_combine_perfetto_traces->second->get_environ_updated() &&
+       _combine_perfetto_traces->second->get_config_updated())
+    {
+        _combine_perfetto_traces->second->set(_config->get<bool>("collapse_processes"));
+    }
+
     scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
     scope::get_fields()[scope::timeline::value] = _config->get_timeline_profile();
 
@@ -535,9 +557,17 @@ configure_settings(bool _init)
     _config->disable("profiler_components");
     _config->disable("destructor_report");
     _config->disable("stack_clearing");
+    _config->disable("auto_output");
+    _config->disable("file_output");
+    _config->disable("plot_output");
+    _config->disable("dart_output");
+    _config->disable("flamegraph_output");
+    _config->disable("separator_freq");
+    _config->disable("width");
+    _config->disable("max_width");
 
 #if !defined(TIMEMORY_USE_MPI) || TIMEMORY_USE_MPI == 0
-    _config->disable("OMNITRACE_COMBINE_PERFETTO_TRACES");
+    _config->disable("OMNITRACE_PERFETTO_COMBINE_TRACES");
 #endif
 }
 
@@ -663,47 +693,8 @@ print_settings()
 {
     if(dmp::rank() > 0) return;
 
-    static std::set<tim::string_view_t> _sample_options = {
-        "OMNITRACE_SAMPLING_FREQ",     "OMNITRACE_SAMPLING_DELAY",
-        "OMNITRACE_SAMPLING_CPUS",     "OMNITRACE_FLAT_SAMPLING",
-        "OMNITRACE_TIMELINE_SAMPLING", "OMNITRACE_FLAT_SAMPLING",
-        "OMNITRACE_TIMELINE_SAMPLING",
-    };
-    static std::set<tim::string_view_t> _perfetto_options = {
-        "OMNITRACE_OUTPUT_FILE",
-        "OMNITRACE_BACKEND",
-        "OMNITRACE_SHMEM_SIZE_HINT_KB",
-        "OMNITRACE_BUFFER_SIZE_KB",
-    };
-    static std::set<tim::string_view_t> _timemory_options = {
-        "OMNITRACE_ROCTRACER_FLAT_PROFILE", "OMNITRACE_ROCTRACER_TIMELINE_PROFILE"
-    };
     // generic filter for filtering relevant options
-    auto _is_omnitrace_option = [](const auto& _v, const auto& _c) {
-        if(!get_use_roctracer() && _v.find("OMNITRACE_ROCTRACER_") == 0) return false;
-        if(!get_use_critical_trace() && _v.find("OMNITRACE_CRITICAL_TRACE_") == 0)
-            return false;
-        if(!get_use_perfetto() && _perfetto_options.count(_v) > 0) return false;
-        if(!get_use_timemory() && _timemory_options.count(_v) > 0) return false;
-        if(!get_use_sampling() && !get_use_thread_sampling() &&
-           _sample_options.count(_v) > 0)
-            return false;
-        const auto npos = std::string::npos;
-        if(_v.find("WIDTH") != npos || _v.find("SEPARATOR_FREQ") != npos ||
-           _v.find("AUTO_OUTPUT") != npos || _v.find("DART_OUTPUT") != npos ||
-           _v.find("FILE_OUTPUT") != npos || _v.find("PLOT_OUTPUT") != npos ||
-           _v.find("FLAMEGRAPH_OUTPUT") != npos)
-            return false;
-        if(!_c.empty())
-        {
-            if(_c.find("omnitrace") != _c.end()) return true;
-            if(_c.find("debugging") != _c.end() && _v.find("DEBUG") != npos) return true;
-            if(_c.find("config") != _c.end()) return true;
-            if(_c.find("dart") != _c.end()) return false;
-            if(_c.find("io") != _c.end() && _v.find("_OUTPUT") != npos) return true;
-            if(_c.find("format") != _c.end()) return true;
-            return false;
-        }
+    auto _is_omnitrace_option = [](const auto& _v, const auto&) {
         return (_v.find("OMNITRACE_") == 0);
     };
 
@@ -988,14 +979,14 @@ get_critical_trace_per_row()
 size_t
 get_perfetto_shmem_size_hint()
 {
-    static auto _v = get_config()->find("OMNITRACE_SHMEM_SIZE_HINT_KB");
+    static auto _v = get_config()->find("OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB");
     return static_cast<tim::tsettings<size_t>&>(*_v->second).get();
 }
 
 size_t
 get_perfetto_buffer_size()
 {
-    static auto _v = get_config()->find("OMNITRACE_BUFFER_SIZE_KB");
+    static auto _v = get_config()->find("OMNITRACE_PERFETTO_BUFFER_SIZE_KB");
     return static_cast<tim::tsettings<size_t>&>(*_v->second).get();
 }
 
@@ -1003,11 +994,18 @@ bool
 get_perfetto_combined_traces()
 {
 #if defined(TIMEMORY_USE_MPI) && TIMEMORY_USE_MPI > 0
-    static auto _v = get_config()->find("OMNITRACE_COMBINE_PERFETTO_TRACES");
+    static auto _v = get_config()->find("OMNITRACE_PERFETTO_COMBINE_TRACES");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
     return false;
 #endif
+}
+
+std::string
+get_perfetto_fill_policy()
+{
+    static auto _v = get_config()->find("OMNITRACE_PERFETTO_FILL_POLICY");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
 uint64_t
@@ -1038,7 +1036,7 @@ std::string&
 get_backend()
 {
     // select inprocess, system, or both (i.e. all)
-    static auto _v = get_config()->find("OMNITRACE_BACKEND");
+    static auto _v = get_config()->find("OMNITRACE_PERFETTO_BACKEND");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 

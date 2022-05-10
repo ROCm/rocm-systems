@@ -118,9 +118,10 @@ add_critical_trace(int64_t _targ_tid, size_t _cpu_cid, size_t _gpu_cid,
             if(_gpu_cid == 0 && _cpu_cid % _update_freq == (_update_freq - 1))
                 critical_trace::update(_targ_tid);
         }
+        tim::consume_parameters(_lock);
     }
 
     tim::consume_parameters(_targ_tid, _cpu_cid, _gpu_cid, _parent_cid, _ts_beg, _ts_val,
-                            _queue, _hash, _depth, _prio);
+                            _queue, _hash, _depth, _prio, num_mutexes);
 }
 }  // namespace omnitrace

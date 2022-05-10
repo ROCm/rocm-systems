@@ -49,7 +49,7 @@ void
 configure_settings(bool _init = true);
 
 void
-print_banner(std::ostream& _os = std::cout);
+print_banner(std::ostream& _os = std::cerr);
 
 void
 print_settings(
@@ -201,6 +201,9 @@ get_perfetto_buffer_size();
 
 bool
 get_perfetto_combined_traces();
+
+std::string
+get_perfetto_fill_policy();
 
 uint64_t
 get_critical_trace_update_freq();
