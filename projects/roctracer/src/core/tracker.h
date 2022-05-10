@@ -28,7 +28,6 @@
 
 #include <atomic>
 
-#include "util/hsa_rsrc_factory.h"
 #include "util/exception.h"
 #include "util/logger.h"
 
@@ -114,14 +113,7 @@ class Tracker {
       entry->begin = async_copy_time.start * sysclock_period;
       entry->end = async_copy_time.end * sysclock_period;
     } else {
-      hsa_amd_profiling_dispatch_time_t dispatch_time{};
-      hsa_status_t status =
-          hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
-      if (status != HSA_STATUS_SUCCESS)
-        EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_amd_profiling_get_dispatch_time failed");
-      entry->begin = dispatch_time.start * sysclock_period;
-      entry->end = dispatch_time.end * sysclock_period;
-      entry->dev_index = ::util::HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index;
+      assert(false && "should not reach here");
     }
 
     hsa_signal_t orig = entry->orig;

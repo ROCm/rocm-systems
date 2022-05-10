@@ -48,6 +48,16 @@
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
 
+#define CHECK_STATUS(msg, status)                                                                  \
+  do {                                                                                             \
+    if ((status) != HSA_STATUS_SUCCESS) {                                                          \
+      const char* status_string = nullptr;                                                         \
+      hsa_status_string(status, &status_string);                                                   \
+      ERR_LOGGING(msg << ": " << (status_string ? status_string : "<unknown error>"));             \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (false)
+
 #define HIPAPI_CALL(call)                                                                          \
   do {                                                                                             \
     hipError_t err = call;                                                                         \
