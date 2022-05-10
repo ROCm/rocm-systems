@@ -1129,7 +1129,7 @@ DOT_CLEANUP            = YES
 # The CITE_BIB_FILES tag can be used to specify one or more bib files containing
 # the reference definitions. This must be a list of .bib files. The .bib
 # extension is automatically appended if omitted. This requires the bibtex tool
-# to be installed. See also https://en.wikipedia.org/wiki/BibTeX for more info.
+# to be installed.
 # For LaTeX the style of the bibliography can be controlled using
 # LATEX_BIB_STYLE. To use this feature you need bibtex and perl available in the
 # search path. See also cite for info how to create references.
@@ -1617,10 +1617,9 @@ DOT_CLEANUP            = YES
 
 # The HTML_COLORSTYLE_HUE tag controls the color of the HTML output. Doxygen
 # will adjust the colors in the style sheet and background images according to
-# this color. Hue is specified as an angle on a colorwheel, see
-# https://en.wikipedia.org/wiki/Hue for more information. For instance the value
-# 0 represents red, 60 is yellow, 120 is green, 180 is cyan, 240 is blue, 300
-# purple, and 360 is red again.
+# this color. Hue is specified as an angle on a colorwheel. For instance the
+# value 0 represents red, 60 is yellow, 120 is green, 180 is cyan, 240 is blue,
+# 300 purple, and 360 is red again.
 # Minimum value: 0, maximum value: 359, default value: 220.
 # This tag requires that the tag GENERATE_HTML is set to YES.
 
@@ -2268,8 +2267,7 @@ DOT_CLEANUP            = YES
 # LATEX_SOURCE_CODE      = YES
 
 # The LATEX_BIB_STYLE tag can be used to specify the style to use for the
-# bibliography, e.g. plainnat, or ieeetr. See
-# https://en.wikipedia.org/wiki/BibTeX and cite for more info.
+# bibliography, e.g. plainnat, or ieeetr.
 # The default value is: plain.
 # This tag requires that the tag GENERATE_LATEX is set to YES.
 
