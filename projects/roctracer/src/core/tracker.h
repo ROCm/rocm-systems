@@ -35,8 +35,6 @@
 namespace roctracer {
 class Tracker {
  public:
-  typedef ::util::HsaRsrcFactory::timestamp_t timestamp_t;
-
   enum { ENTRY_INV = 0, ENTRY_INIT = 1, ENTRY_COMPL = 2 };
 
   enum entry_type_t {
@@ -50,10 +48,8 @@ class Tracker {
   struct entry_t {
     std::atomic<uint32_t> valid;
     entry_type_t type;
-    uint64_t dispatch;
-    uint64_t begin;  // kernel begin timestamp, ns
-    uint64_t end;    // kernel end timestamp, ns
-    uint64_t complete;
+    uint64_t begin;  // begin timestamp, ns
+    uint64_t end;    // end timestamp, ns
     hsa_agent_t agent;
     uint32_t dev_index;
     hsa_signal_t orig;
@@ -75,14 +71,12 @@ class Tracker {
   inline static void Enable(entry_type_t type, const hsa_agent_t& agent, const hsa_signal_t& signal,
                             entry_t* entry) {
     hsa_status_t status = HSA_STATUS_ERROR;
-    ::util::HsaRsrcFactory* hsa_rsrc = &(::util::HsaRsrcFactory::Instance());
 
     // Creating a new tracker entry
     entry->type = type;
     entry->agent = agent;
     entry->dev_index = 0;  // hsa_rsrc->GetAgentInfo(agent)->dev_index;
     entry->orig = signal;
-    entry->dispatch = hsa_rsrc->TimestampNs();
     entry->valid.store(ENTRY_INIT, std::memory_order_release);
 
     // Creating a proxy signal
@@ -104,27 +98,32 @@ class Tracker {
  private:
   // Entry completion
   inline static void Complete(hsa_signal_value_t signal_value, entry_t* entry) {
-    // Query begin/end and complete timestamps
-    ::util::HsaRsrcFactory* hsa_rsrc = &(::util::HsaRsrcFactory::Instance());
+    static uint64_t sysclock_period = []() {
+      uint64_t sysclock_hz = 0;
+      hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
+      if (status != HSA_STATUS_SUCCESS)
+        EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_system_get_info failed");
+      return (uint64_t)1000000000 / sysclock_hz;
+    }();
+
     if (entry->type == COPY_ENTRY_TYPE) {
       hsa_amd_profiling_async_copy_time_t async_copy_time{};
       hsa_status_t status = hsa_amd_profiling_get_async_copy_time(entry->signal, &async_copy_time);
       if (status != HSA_STATUS_SUCCESS)
         EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_amd_profiling_get_async_copy_time failed");
-      entry->begin = hsa_rsrc->SysclockToNs(async_copy_time.start);
-      entry->end = hsa_rsrc->SysclockToNs(async_copy_time.end);
+      entry->begin = async_copy_time.start * sysclock_period;
+      entry->end = async_copy_time.end * sysclock_period;
     } else {
       hsa_amd_profiling_dispatch_time_t dispatch_time{};
       hsa_status_t status =
           hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
       if (status != HSA_STATUS_SUCCESS)
         EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_amd_profiling_get_dispatch_time failed");
-      entry->begin = hsa_rsrc->SysclockToNs(dispatch_time.start);
-      entry->end = hsa_rsrc->SysclockToNs(dispatch_time.end);
-      entry->dev_index = (hsa_rsrc->GetAgentInfo(entry->agent))->dev_index;
+      entry->begin = dispatch_time.start * sysclock_period;
+      entry->end = dispatch_time.end * sysclock_period;
+      entry->dev_index = ::util::HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index;
     }
 
-    entry->complete = hsa_rsrc->TimestampNs();
     hsa_signal_t orig = entry->orig;
     hsa_signal_t signal = entry->signal;
 

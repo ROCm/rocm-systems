@@ -37,7 +37,6 @@
 #include <roctracer_roctx.h>
 #include <roctracer_hsa.h>
 #include <roctracer_hip.h>
-#include <ext/hsa_rt_utils.hpp>
 
 #include "src/core/loader.h"
 #include "test/tool/trace_buffer.h"
@@ -97,10 +96,20 @@ inline static void DEBUG_TRACE(const char* fmt, ...) {
 #define DEBUG_TRACE(...)
 #endif
 
-typedef hsa_rt_utils::Timer::timestamp_t timestamp_t;
-hsa_rt_utils::Timer* timer = NULL;
+typedef uint64_t timestamp_t;
 thread_local timestamp_t hsa_begin_timestamp = 0;
 thread_local timestamp_t hip_begin_timestamp = 0;
+
+namespace util {
+
+inline timestamp_t timestamp_ns() {
+  timestamp_t timestamp;
+  ROCTRACER_CALL(roctracer_get_timestamp(&timestamp));
+  return timestamp;
+}
+
+}  // namespace util
+
 bool trace_roctx = false;
 bool trace_hsa_api = false;
 bool trace_hsa_activity = false;
@@ -251,7 +260,7 @@ static inline void roctx_callback_fun(uint32_t domain, uint32_t cid, uint32_t ti
                                       roctx_range_id_t rid, const char* message) {
   roctx_trace_entry_t* entry = roctx_trace_buffer->GetEntry();
   entry->cid = cid;
-  entry->time = timer->timestamp_fn_ns();
+  entry->time = util::timestamp_ns();
   entry->pid = GetPid();
   entry->tid = tid;
   entry->rid = rid;
@@ -314,10 +323,10 @@ void hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
   (void)arg;
   const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    hsa_begin_timestamp = timer->timestamp_fn_ns();
+    hsa_begin_timestamp = util::timestamp_ns();
   } else {
     const timestamp_t end_timestamp =
-        (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp : timer->timestamp_fn_ns();
+        (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp : util::timestamp_ns();
     hsa_api_trace_entry_t* entry = hsa_api_trace_buffer->GetEntry();
     entry->cid = cid;
     entry->begin = hsa_begin_timestamp;
@@ -368,7 +377,7 @@ static inline bool is_hip_kernel_launch_api(const uint32_t& cid) {
 void hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg) {
   (void)arg;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
-  const timestamp_t timestamp = timer->timestamp_fn_ns();
+  const timestamp_t timestamp = util::timestamp_ns();
   hip_api_trace_entry_t* entry = NULL;
 
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
@@ -445,7 +454,7 @@ void mark_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
   (void)arg;
   const char* name = reinterpret_cast<const char*>(callback_data);
 
-  const timestamp_t timestamp = timer->timestamp_fn_ns();
+  const timestamp_t timestamp = util::timestamp_ns();
   hip_api_trace_entry_t* entry = hip_api_trace_buffer->GetEntry();
   entry->cid = 0;
   entry->domain = domain;
@@ -930,8 +939,6 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
                                   const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
 
-  timer = new hsa_rt_utils::Timer(table->core_->hsa_system_get_info_fn);
-
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
 
   // Dumping HSA handles for agents
@@ -959,7 +966,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 
   // App begin timestamp begin_ts_file.txt
   begin_ts_file_handle = open_output_file(output_prefix, "begin_ts_file.txt");
-  const timestamp_t app_start_time = timer->timestamp_fn_ns();
+  const timestamp_t app_start_time = util::timestamp_ns();
   fprintf(begin_ts_file_handle, "%lu\n", app_start_time);
 
   // Enable HSA API callbacks/activity
