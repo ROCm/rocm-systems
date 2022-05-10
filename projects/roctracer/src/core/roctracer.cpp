@@ -939,6 +939,7 @@ static roctracer_status_t roctracer_enable_activity_fun(roctracer_domain_t domai
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
       if (op == HSA_OP_ID_COPY) {
+        roctracer::RocpLoader::Instance();
         roctracer::hsa_support::async_copy_callback_enabled = true;
         roctracer::hsa_support::async_copy_callback_memory_pool =
             reinterpret_cast<roctracer::MemoryPool*>(pool);
@@ -958,6 +959,7 @@ static roctracer_status_t roctracer_enable_activity_fun(roctracer_domain_t domai
     case ACTIVITY_DOMAIN_HSA_API:
       break;
     case ACTIVITY_DOMAIN_HSA_EVT:
+      roctracer::RocpLoader::Instance();
       break;
     case ACTIVITY_DOMAIN_HIP_OPS: {
       if (roctracer::HipLoader::Instance().Enabled() == false) break;
