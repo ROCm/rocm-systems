@@ -123,11 +123,6 @@ foreach ( header ${GEN_HEADERS} )
   install ( FILES ${PROJECT_BINARY_DIR}/inc/${header} DESTINATION include/${DEST_NAME}/${header_subdir} )
 endforeach ()
 
-option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
-if(FILE_REORG_BACKWARD_COMPATIBILITY)
-  include(roctracer-backward-compat.cmake)
-endif()
-
 ## rocTX
 set ( ROCTX_TARGET "roctx64" )
 set ( ROCTX_LIBRARY "lib${ROCTX_TARGET}" )

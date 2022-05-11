@@ -9,7 +9,7 @@
 - **ROC-TX library: Code Annotation Events API**
 
   Includes API for:
-  
+
   - `roctxMark`
   - `roctxRangePush`
   - `roctxRangePop`
@@ -20,7 +20,7 @@
 
 To use the rocTracer API you need the API header and to link your application with `roctracer` .so library:
 
-- `/opt/rocm/roctracer/include/roctracer.h`
+- `/opt/rocm/include/roctracer/roctracer.h`
 
   API header.
 
