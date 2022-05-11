@@ -392,8 +392,8 @@ extern "C"
         OMNITRACE_DL_INVOKE_STATUS(_invoked, get_indirect().omnitrace_init_f, a, b, c);
         if(_invoked)
         {
-            dl::get_active() = true;
-            dl::get_inited() = true;
+            dl::get_active()          = true;
+            dl::get_inited()          = true;
             dl::_omnitrace_dl_verbose = dl::get_omnitrace_dl_env();
         }
     }

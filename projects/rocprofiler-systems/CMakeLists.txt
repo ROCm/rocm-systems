@@ -115,6 +115,8 @@ omnitrace_add_option(
     "Build with hidden visibility (disable for Debug builds)" ON ADVANCED)
 omnitrace_add_option(OMNITRACE_BUILD_CI "Enable internal asserts, etc." OFF ADVANCED
                      NO_FEATURE)
+omnitrace_add_option(OMNITRACE_INSTALL_PERFETTO_TOOLS
+                     "Install perfetto tools (i.e. traced, perfetto, etc.)" OFF)
 omnitrace_add_option(OMNITRACE_STRIP_LIBRARIES "Strip the libraries"
                      ${_STRIP_LIBRARIES_DEFAULT} ADVANCED)
 
@@ -226,7 +228,7 @@ install(
     OPTIONAL)
 
 install(
-    FILES ${PROJECT_SOURCE_DIR}/roctrace.cfg
+    FILES ${PROJECT_SOURCE_DIR}/omnitrace.cfg
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
     OPTIONAL)
 

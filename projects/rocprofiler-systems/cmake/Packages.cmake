@@ -23,6 +23,7 @@ omnitrace_add_interface_library(omnitrace-ptl "Enables PTL support (tasking)")
 omnitrace_add_interface_library(omnitrace-papi "Enable PAPI support")
 omnitrace_add_interface_library(omnitrace-ompt "Enable OMPT support")
 omnitrace_add_interface_library(omnitrace-python "Enables Python support")
+omnitrace_add_interface_library(omnitrace-perfetto "Enables Perfetto support")
 omnitrace_add_interface_library(omnitrace-timemory "Provides timemory libraries")
 omnitrace_add_interface_library(omnitrace-timemory-config
                                 "CMake interface library applied to all timemory targets")
@@ -32,7 +33,7 @@ omnitrace_add_interface_library(omnitrace-compile-definitions "Compile definitio
 set(OMNITRACE_EXTENSION_LIBRARIES
     omnitrace::omnitrace-hip omnitrace::omnitrace-roctracer omnitrace::omnitrace-rocm-smi
     omnitrace::omnitrace-mpi omnitrace::omnitrace-ptl omnitrace::omnitrace-ompt
-    omnitrace::omnitrace-papi)
+    omnitrace::omnitrace-papi omnitrace::omnitrace-perfetto)
 
 target_include_directories(
     omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/source/lib/omnitrace
@@ -50,22 +51,31 @@ string(REPLACE ":" ";" CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH};${CMAKE_PREFIX
 #
 # ----------------------------------------------------------------------------------------#
 
-if(NOT WIN32)
-    set(CMAKE_THREAD_PREFER_PTHREAD ON)
-    set(THREADS_PREFER_PTHREAD_FLAG OFF)
-endif()
+set(CMAKE_THREAD_PREFER_PTHREAD ON)
+set(THREADS_PREFER_PTHREAD_FLAG OFF)
 
 find_library(pthread_LIBRARY NAMES pthread pthreads)
 find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
-find_package(Threads ${omnitrace_FIND_QUIETLY} ${omnitrace_FIND_REQUIREMENT})
 
-if(Threads_FOUND)
-    target_link_libraries(omnitrace-threading INTERFACE ${CMAKE_THREAD_LIBS_INIT})
-endif()
+find_library(pthread_LIBRARY NAMES pthread pthreads)
+find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
 
-if(pthread_LIBRARY AND NOT WIN32)
+if(pthread_LIBRARY)
     target_link_libraries(omnitrace-threading INTERFACE ${pthread_LIBRARY})
+else()
+    find_package(Threads ${omnitrace_FIND_QUIETLY} ${omnitrace_FIND_REQUIREMENT})
+    if(Threads_FOUND)
+        target_link_libraries(omnitrace-threading INTERFACE Threads::Threads)
+    endif()
 endif()
+
+foreach(_LIB dl rt)
+    find_library(${_LIB}_LIBRARY NAMES ${_LIB})
+    find_package_handle_standard_args(${_LIB}-library REQUIRED_VARS ${_LIB}_LIBRARY)
+    if(${_LIB}_LIBRARY)
+        target_link_libraries(omnitrace-threading INTERFACE ${${_LIB}_LIBRARY})
+    endif()
+endforeach()
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -367,6 +377,8 @@ omnitrace_checkout_git_submodule(
     REPO_URL https://android.googlesource.com/platform/external/perfetto
     REPO_BRANCH v17.0
     TEST_FILE sdk/perfetto.cc)
+
+include(Perfetto)
 
 # ----------------------------------------------------------------------------------------#
 #

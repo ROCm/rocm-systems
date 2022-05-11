@@ -142,7 +142,8 @@ configure_settings(bool _init)
     auto _default_perfetto_v =
         !tim::get_env<bool>("OMNITRACE_USE_TIMEMORY", false, false);
 
-    auto _system_backend = tim::get_env("OMNITRACE_PERFETTO_BACKEND_SYSTEM", false, false);
+    auto _system_backend =
+        tim::get_env("OMNITRACE_PERFETTO_BACKEND_SYSTEM", false, false);
 
     auto _omnitrace_debug = _config->get<bool>("OMNITRACE_DEBUG");
     if(_omnitrace_debug) tim::set_env("TIMEMORY_DEBUG_SETTINGS", "1", 0);
@@ -221,9 +222,9 @@ configure_settings(bool _init)
 
     auto _backend = tim::get_env_choice<std::string>(
         "OMNITRACE_PERFETTO_BACKEND",
-        (_system_backend)
-            ? "system"      // if OMNITRACE_PERFETTO_BACKEND_SYSTEM is true, default to system.
-            : "inprocess",  // Otherwise, default to inprocess
+        (_system_backend) ? "system"      // if OMNITRACE_PERFETTO_BACKEND_SYSTEM is true,
+                                          // default to system.
+                          : "inprocess",  // Otherwise, default to inprocess
         { "inprocess", "system", "all" }, false);
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_PERFETTO_BACKEND",

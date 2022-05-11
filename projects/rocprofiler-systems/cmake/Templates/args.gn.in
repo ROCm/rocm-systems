@@ -1,0 +1,29 @@
+# Set build arguments here. See `gn help buildargs`.
+
+cc = "@CMAKE_C_COMPILER@"
+cxx = "@CMAKE_CXX_COMPILER@"
+
+is_debug = false
+is_clang = @PERFETTO_IS_CLANG@
+is_hermetic_clang = false
+
+enable_perfetto_benchmarks = false
+enable_perfetto_integration_tests = false
+enable_perfetto_unittests = false
+enable_perfetto_fuzzers = false
+
+# enable_perfetto_stderr_crash_dump = false
+enable_perfetto_heapprofd = false
+enable_perfetto_tools = false
+enable_perfetto_tools_trace_to_text = false
+enable_perfetto_trace_processor = false
+enable_perfetto_trace_processor_httpd = false
+enable_perfetto_trace_processor_json = false
+enable_perfetto_trace_processor_linenoise = false
+enable_perfetto_trace_processor_percentile = false
+enable_perfetto_trace_processor_sqlite = false
+enable_perfetto_ui = false
+
+extra_cflags = "@OMNITRACE_PERFETTO_C_FLAGS@"
+extra_cxxflags = "@OMNITRACE_PERFETTO_CXX_FLAGS@"
+extra_ldflags = "@OMNITRACE_PERFETTO_LINK_FLAGS@ -Wl,-rpath=\\\$ORIGIN:\\\$ORIGIN/../lib"

@@ -10,8 +10,6 @@ add_library(omnitrace::omnitrace-interface-library ALIAS omnitrace-interface-lib
 target_include_directories(
     omnitrace-interface-library INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}
                                           ${CMAKE_CURRENT_BINARY_DIR})
-target_include_directories(omnitrace-interface-library SYSTEM
-                           INTERFACE ${perfetto_DIR}/sdk)
 
 target_compile_definitions(
     omnitrace-interface-library
@@ -25,6 +23,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:omnitrace::omnitrace-threading>
         $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
         $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-perfetto>
         $<BUILD_INTERFACE:omnitrace::omnitrace-timemory>
         $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
         $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
@@ -73,8 +72,7 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_create_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_mutex_gotcha.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/user_region.cpp
-    ${perfetto_DIR}/sdk/perfetto.cc)
+    ${CMAKE_CURRENT_LIST_DIR}/library/components/user_region.cpp)
 
 set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/library.hpp
@@ -108,8 +106,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_create_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_mutex_gotcha.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/user_region.hpp
-    ${perfetto_DIR}/sdk/perfetto.h)
+    ${CMAKE_CURRENT_LIST_DIR}/library/components/user_region.hpp)
 
 target_sources(omnitrace-object-library PRIVATE ${library_sources} ${library_headers})
 
@@ -142,7 +139,7 @@ endif()
 add_library(omnitrace-library SHARED $<TARGET_OBJECTS:omnitrace-object-library>)
 add_library(omnitrace::omnitrace-library ALIAS omnitrace-library)
 
-target_link_libraries(omnitrace-library PRIVATE omnitrace-interface-library)
+target_link_libraries(omnitrace-library PRIVATE omnitrace::omnitrace-interface-library)
 
 set_target_properties(
     omnitrace-library
