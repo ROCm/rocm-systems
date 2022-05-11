@@ -80,7 +80,7 @@ eval_test() {
     echo "test $test_number: $test_name \"$label\""
     echo "CMD: \"$cmdline\""
     test_runnum=$((test_runnum + 1))
-    eval "$cmdline" >$test_trace 2>&1
+    eval "$cmdline" 1>$test_trace 2>$test_name.err
     is_failed=$?
     if [ $is_failed != 0 ] ; then
       cat $test_trace

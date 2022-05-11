@@ -126,7 +126,7 @@ int main() {
   int gpuCount = 1;
 #if MGPU_TEST
   hipGetDeviceCount(&gpuCount);
-  printf("Number of GPUs: %d\n", gpuCount);
+  fprintf(stderr, "Number of GPUs: %d\n", gpuCount);
 #endif
   iterations *= gpuCount;
 #endif
@@ -141,7 +141,7 @@ int main() {
 
     hipDeviceProp_t devProp;
     HIP_CALL(hipGetDeviceProperties(&devProp, 0));
-    printf("Device %d name: %s\n", devIndex, devProp.name);
+    fprintf(stderr, "Device %d name: %s\n", devIndex, devProp.name);
 #endif
 
     Matrix = (float*)malloc(NUM * sizeof(float));
@@ -206,10 +206,10 @@ int main() {
       }
     }
     if ((HIP_TEST != 0) && (errors != 0)) {
-      printf("FAILED: %d errors\n", errors);
+      fprintf(stderr, "FAILED: %d errors\n", errors);
     } else {
       errors = 0;
-      printf("PASSED!\n");
+      fprintf(stderr, "PASSED!\n");
     }
 
     // free the resources on device side
@@ -325,7 +325,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
     } else if (record->domain == ACTIVITY_DOMAIN_EXT_API) {
       SPRINT(" external_id(%lu)", record->external_id);
     } else {
-      fprintf(stderr, "Bad domain %d\n\n", record->domain);
+      fprintf(stdout, "Bad domain %d\n\n", record->domain);
       abort();
     }
     SPRINT("\n");
@@ -337,7 +337,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
 
 // Init tracing routine
 void init_tracing() {
-  printf("# INIT #############################\n");
+  fprintf(stderr, "# INIT #############################\n");
   // roctracer properties
   roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, NULL);
   // Allocating tracing pool
@@ -361,7 +361,7 @@ void init_tracing() {
 
 // Start tracing routine
 void start_tracing() {
-  printf("# START (%d) #############################\n", iterations);
+  fprintf(stderr, "# START (%d) #############################\n", iterations);
   // Start
   if ((iterations & 1) == 1)
     roctracer_start();
@@ -379,7 +379,7 @@ void stop_tracing() {
   ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
   ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
   ROCTRACER_CALL(roctracer_flush_activity());
-  printf("# STOP  #############################\n");
+  fprintf(stderr, "# STOP  #############################\n");
 }
 #else
 void init_tracing() {}

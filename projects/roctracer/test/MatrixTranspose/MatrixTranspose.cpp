@@ -67,7 +67,7 @@ int main() {
   hipDeviceProp_t devProp;
   hipGetDeviceProperties(&devProp, 0);
 
-  std::cout << "Device name " << devProp.name << std::endl;
+  std::cerr << "Device name " << devProp.name << std::endl;
 
   int i;
   int errors;
@@ -87,7 +87,7 @@ int main() {
 
   uint32_t iterations = 100;
   while (iterations-- > 0) {
-    std::cout << "## Iteration (" << iterations << ") #################" << std::endl;
+    std::cerr << "## Iteration (" << iterations << ") #################" << std::endl;
 
     // Memory transfer from host to device
     hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
@@ -124,9 +124,9 @@ int main() {
       }
     }
     if (errors != 0) {
-      printf("FAILED: %d errors\n", errors);
+      fprintf(stderr, "FAILED: %d errors\n", errors);
     } else {
-      printf("PASSED!\n");
+      fprintf(stderr, "PASSED!\n");
     }
   }
 
