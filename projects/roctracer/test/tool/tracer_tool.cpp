@@ -21,6 +21,9 @@
 #include <cassert>
 #include <sstream>
 #include <string>
+#include <atomic>
+#include <thread>
+#include <chrono>
 
 #include <cxxabi.h> /* names denangle */
 #include <dirent.h>
@@ -31,6 +34,7 @@
 #include <sys/syscall.h> /* SYS_xxx definitions */
 #include <sys/types.h>
 #include <unistd.h> /* usleep */
+
 
 #include <roctracer_ext.h>
 #include "src/util/exception.h"
@@ -218,26 +222,16 @@ void* control_thr_fun(void*) {
 
 // Flushing control thread
 uint32_t control_flush_us = 0;
-pthread_t flush_thread;
-bool flush_thread_started = false;
-std::mutex flush_thread_mutex;
-;
+std::thread* flush_thread = nullptr;
+std::atomic_bool stop_flush_thread = false;
 
-void* flush_thr_fun(void*) {
-  const uint32_t dist_sec = control_flush_us / 1000000;
-  const uint32_t dist_us = control_flush_us % 1000000;
 
-  while (1) {
-    sleep(dist_sec);
-    usleep(dist_us);
-    std::lock_guard<std::mutex> lock(flush_thread_mutex);
-    if (!flush_thread_started)
-      while (1) sleep(1);
+void flush_thr_fun() {
+  while (!stop_flush_thread) {
     ROCTRACER_CALL(roctracer_flush_activity());
     roctracer::TraceBufferBase::FlushAll();
+    std::this_thread::sleep_until(std::chrono::steady_clock::now() + std::chrono::microseconds(control_flush_us));
   }
-
-  return NULL;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -702,14 +696,11 @@ void tool_unload() {
   if (is_loaded == false) return;
   is_loaded = false;
 
-  if (flush_thread_started) {
-    flush_thread_mutex.lock();
-    flush_thread_started = false;
-    flush_thread_mutex.unlock();
-    PTHREAD_CALL(pthread_cancel(flush_thread));
-    void* res;
-    PTHREAD_CALL(pthread_join(flush_thread, &res));
-    if (res != PTHREAD_CANCELED) fatal("flush thread wasn't stopped correctly");
+  if (flush_thread) {
+    stop_flush_thread = true;
+    flush_thread->join();
+    delete flush_thread;
+    flush_thread = nullptr;
   }
 
   if (trace_roctx) {
@@ -898,16 +889,7 @@ void tool_load() {
 
     fprintf(stdout, "ROCTracer: trace control flush rate(%uus)\n", control_flush_us);
     fflush(stdout);
-    pthread_attr_t attr;
-    int err = pthread_attr_init(&attr);
-    if (err) {
-      errno = err;
-      perror("pthread_attr_init");
-      abort();
-    }
-    std::lock_guard<std::mutex> lock(flush_thread_mutex);
-    PTHREAD_CALL(pthread_create(&flush_thread, &attr, flush_thr_fun, NULL));
-    flush_thread_started = true;
+    flush_thread = new std::thread(flush_thr_fun);
   }
 
   ONLOAD_TRACE_END();
