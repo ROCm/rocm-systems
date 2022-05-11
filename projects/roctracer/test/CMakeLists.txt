@@ -84,6 +84,7 @@ if ( DEFINED ROCTRACER_TARGET )
   add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
   target_include_directories ( ${TEST_LIB} PRIVATE ${HSA_TEST_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${ROCM_INC_PATH} ${HIP_INC_DIR} ${HSA_KMT_INC_PATH} ${GEN_INC_DIR} )
   target_link_libraries ( ${TEST_LIB} ${ROCTRACER_TARGET} ${HSA_RUNTIME_LIB} c stdc++ atomic dl pthread rt numa )
+  set_target_properties( ${TEST_LIB} PROPERTIES CXX_VISIBILITY_PRESET hidden )
   install ( TARGETS ${TEST_LIB} LIBRARY DESTINATION lib/${DEST_NAME})
 endif ()
 
