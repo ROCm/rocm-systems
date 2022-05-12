@@ -83,7 +83,10 @@ eval_test() {
     eval "$cmdline" 1>$test_trace 2>$test_name.err
     is_failed=$?
     if [ $is_failed != 0 ] ; then
+      echo "--- stdout ---"
       cat $test_trace
+      echo "--- stderr ---"
+      cat $test_name.err
     fi
     if [ $IS_CI = 1 ] ; then
       is_failed=0;
