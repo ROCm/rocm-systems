@@ -37,6 +37,20 @@ add_compile_options ( -Wall -Werror )
 
 add_link_options("-Bdynamic -z,noexecstck")
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+execute_process(
+  COMMAND ${Python3_EXECUTABLE} -c "import CppHeaderParser"
+  RESULT_VARIABLE CPPHEADERPARSER
+  OUTPUT_QUIET
+)
+
+if(NOT ${CPPHEADERPARSER} EQUAL 0)
+  message(FATAL_ERROR
+    "The \"CppHeaderParser\" Python3 package is not installed. Please install it using the following command: \"pip3 install CppHeaderParser\"."
+  )
+endif()
+
 ## CLANG options
 if ( "$ENV{CXX}" STREQUAL "/usr/bin/clang++" )
   set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ferror-limit=1000000" )
