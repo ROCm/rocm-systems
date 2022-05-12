@@ -20,69 +20,46 @@
 ## IN THE SOFTWARE.
 ################################################################################
 
-cmake_minimum_required ( VERSION 3.5.0 )
+cmake_minimum_required(VERSION 3.16.0)
 
 ## Set module name and project name.
-set ( ROCTRACER_NAME "roctracer" )
-set ( ROCTRACER_TARGET "${ROCTRACER_NAME}64" )
-set ( ROCTRACER_LIBRARY "lib${ROCTRACER_TARGET}" )
-project ( ${ROCTRACER_TARGET} VERSION 4.0.0)
+set(ROCTRACER_NAME "roctracer")
+set(ROCTRACER_TARGET "${ROCTRACER_NAME}")
 
-## Adding default path cmake modules
-list ( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
-## Include common cmake modules
-include ( utils )
-## Set build environment
-include ( env )
+project(ROCTRACER VERSION 4.0.0)
 
-## Setup the package version.
-get_version ( "1.0.0" )
-
-set ( BUILD_VERSION_MAJOR ${VERSION_MAJOR} )
-set ( BUILD_VERSION_MINOR ${VERSION_MINOR} )
-set ( BUILD_VERSION_PATCH ${VERSION_PATCH} )
-
-if ( DEFINED VERSION_BUILD AND NOT ${VERSION_BUILD} STREQUAL "" )
-  message ( "VERSION BUILD DEFINED ${VERSION_BUILD}" )
-  set ( BUILD_VERSION_PATCH "${BUILD_VERSION_PATCH}-${VERSION_BUILD}" )
+## Build is not supported on Windows plaform
+if(WIN32)
+  message(FATAL_ERROR "Windows build is not supported.")
 endif ()
 
-set ( LIB_VERSION_MAJOR ${BUILD_VERSION_MAJOR} )
-set ( LIB_VERSION_MINOR ${BUILD_VERSION_MINOR} )
-if (DEFINED ENV{ROCM_LIBPATCH_VERSION})
-  set (LIB_VERSION_PATCH $ENV{ROCM_LIBPATCH_VERSION} )
-else ()
-  set (LIB_VERSION_PATCH ${BUILD_VERSION_PATCH} )
+## Adding default path cmake modules
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+add_compile_options(-Wall -Werror)
+
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
+find_package(hsa-runtime64 REQUIRED CONFIG PATHS /opt/rocm/)
+find_package(HIP REQUIRED CONFIG PATHS /opt/rocm/)
+
+if(NOT DEFINED LIBRARY_TYPE)
+  set(LIBRARY_TYPE SHARED)
 endif()
-set ( LIB_VERSION_STRING "${LIB_VERSION_MAJOR}.${LIB_VERSION_MINOR}.${LIB_VERSION_PATCH}" )
-message ( "-- LIB-VERSION: ${LIB_VERSION_MAJOR}.${LIB_VERSION_MINOR}.${LIB_VERSION_PATCH}" )
 
-## Set target and root/lib/test directory
-set ( TARGET_NAME "${ROCTRACER_TARGET}" )
-set ( ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" )
-set ( LIB_DIR "${ROOT_DIR}/src" )
-set ( TEST_DIR "${ROOT_DIR}/test" )
-set ( DEST_NAME ${ROCTRACER_NAME} )
-
-## Build library
-include ( ${LIB_DIR}/CMakeLists.txt )
-
-## Set the VERSION and SOVERSION values
-set_property ( TARGET ${TARGET_NAME} PROPERTY VERSION "${LIB_VERSION_STRING}" )
-set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
-
-# If the library is a release, strip the target library
-#if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
-#  add_custom_command ( TARGET ${ROCTRACER_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *.so )
-#endif ()
+## Build libraries
+include(src/CMakeLists.txt)
 
 ## Build tests
-if ( ${LIBRARY_TYPE} STREQUAL SHARED )
-add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
+if(${LIBRARY_TYPE} STREQUAL SHARED)
+add_subdirectory(test ${PROJECT_BINARY_DIR}/test)
 endif()
 
 ## pbulic headers
-set ( PUBLIC_HEADERS
+set(PUBLIC_HEADERS
   roctx.h
   roctracer.h
   roctracer_ext.h
@@ -92,44 +69,23 @@ set ( PUBLIC_HEADERS
   roctracer_roctx.h
   ext/prof_protocol.h
 )
-set ( GEN_HEADERS
+set(GEN_HEADERS
   hip_ostream_ops.h
   hsa_prof_str.h
   hsa_ostream_ops.h
 )
 
-if ( ${LIBRARY_TYPE} STREQUAL SHARED )
+if(${LIBRARY_TYPE} STREQUAL SHARED)
 
 ## Installation and packaging
-if ( DEFINED CPACK_PACKAGING_INSTALL_PREFIX )
-  get_filename_component ( DEST_NAME ${CPACK_PACKAGING_INSTALL_PREFIX} NAME )
-  get_filename_component ( DEST_DIR ${CPACK_PACKAGING_INSTALL_PREFIX} DIRECTORY )
-  set ( CPACK_PACKAGING_INSTALL_PREFIX ${DEST_DIR} )
+if(DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
+  get_filename_component(DEST_NAME ${CPACK_PACKAGING_INSTALL_PREFIX} NAME)
+  get_filename_component(DEST_DIR ${CPACK_PACKAGING_INSTALL_PREFIX} DIRECTORY)
+  set(CPACK_PACKAGING_INSTALL_PREFIX ${DEST_DIR})
 endif ()
-message ( "-----------Dest-name: ${DEST_NAME}" )
-message ( "------Install-prefix: ${CMAKE_INSTALL_PREFIX}" )
-message ( "-----------CPACK-dir: ${CPACK_PACKAGING_INSTALL_PREFIX}" )
-
-## Install information
-install ( TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION lib )
-foreach ( header ${PUBLIC_HEADERS} )
-  get_filename_component ( header_subdir ${header} DIRECTORY )
-  install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/${header} DESTINATION include/${DEST_NAME}/${header_subdir} )
-endforeach ()
-foreach ( header ${GEN_HEADERS} )
-  get_filename_component ( header_subdir ${header} DIRECTORY )
-  install ( FILES ${PROJECT_BINARY_DIR}/inc/${header} DESTINATION include/${DEST_NAME}/${header_subdir} )
-endforeach ()
-
-## rocTX
-set ( ROCTX_TARGET "roctx64" )
-set ( ROCTX_LIBRARY "lib${ROCTX_TARGET}" )
-
-## Set the VERSION and SOVERSION values
-set_property ( TARGET ${ROCTX_TARGET} PROPERTY VERSION "${LIB_VERSION_STRING}" )
-set_property ( TARGET ${ROCTX_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
-
-install ( TARGETS ${ROCTX_TARGET} LIBRARY DESTINATION lib )
+message("-----------Dest-name: ${DEST_NAME}")
+message("------Install-prefix: ${CMAKE_INSTALL_PREFIX}")
+message("-----------CPACK-dir: ${CPACK_PACKAGING_INSTALL_PREFIX}")
 
 option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
 if(FILE_REORG_BACKWARD_COMPATIBILITY)
@@ -137,58 +93,59 @@ if(FILE_REORG_BACKWARD_COMPATIBILITY)
 endif()
 
 ## Packaging directives
-set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR DEB;RPM")
-set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
-set ( CPACK_PACKAGE_NAME "${ROCTRACER_NAME}-dev" )
-set ( CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." )
-set ( CPACK_PACKAGE_VERSION_MAJOR ${BUILD_VERSION_MAJOR} )
-set ( CPACK_PACKAGE_VERSION_MINOR ${BUILD_VERSION_MINOR} )
-set ( CPACK_PACKAGE_VERSION_PATCH ${BUILD_VERSION_PATCH} )
-set ( CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}" )
-if ( DEFINED ENV{ROCM_LIBPATCH_VERSION} )
-  set ( CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}" )
+set(CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR DEB;RPM")
+set(ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
+set(CPACK_PACKAGE_NAME "${ROCTRACER_NAME}-dev")
+set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
+set(CPACK_PACKAGE_VERSION_MAJOR ${ROCTRACER_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${ROCTRACER_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${ROCTRACER_VERSION_PATCH})
+set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+set(CPACK_PACKAGE_CONTACT "ROCm Profiler Support <dl.ROCm-Profiler.support@amd.com>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD ROCTRACER library")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+
+if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
+  set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}")
+  message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")
 endif()
-message ( "-- CPACK_PACKAGE_VERSION: ${CPACK_PACKAGE_VERSION}"  )
-set ( CPACK_PACKAGE_CONTACT "ROCm Profiler Support <dl.ROCm-Profiler.support@amd.com>" )
-set ( CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD ROCTRACER library" )
-set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" )
 
 # Install license file
 install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION share/doc/${CPACK_PACKAGE_NAME})
 
 ## Debian package specific variables
-if ( DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE} )
-  set ( CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE} )
+if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+  set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
 else()
-  set ( CPACK_DEBIAN_PACKAGE_RELEASE "local" )
+  set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
 endif()
-message ( "Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}" )
-set ( CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT" )
+message ("Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}")
+set (CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
 ## RPM package specific variables
-if ( DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE} )
-  set ( CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE} )
+if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
+  set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
 else()
-  set ( CPACK_RPM_PACKAGE_RELEASE "local" )
+  set(CPACK_RPM_PACKAGE_RELEASE "local")
 endif()
-message ( "Using CPACK_RPM_PACKAGE_RELEASE ${CPACK_RPM_PACKAGE_RELEASE}" )
+message("Using CPACK_RPM_PACKAGE_RELEASE ${CPACK_RPM_PACKAGE_RELEASE}")
 
-set( CPACK_RPM_PACKAGE_LICENSE "MIT" )
+set( CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 ## 'dist' breaks manual builds on debian systems due to empty Provides
 execute_process( COMMAND rpm --eval %{?dist}
                  RESULT_VARIABLE PROC_RESULT
                  OUTPUT_VARIABLE EVAL_RESULT
-                 OUTPUT_STRIP_TRAILING_WHITESPACE )
+                 OUTPUT_STRIP_TRAILING_WHITESPACE)
 message("RESULT_VARIABLE ${PROC_RESULT} OUTPUT_VARIABLE: ${EVAL_RESULT}")
 
-if ( PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "" )
-  string ( APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}" )
+if(PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "")
+  string(APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}")
 endif()
-set ( CPACK_RPM_FILE_NAME "RPM-DEFAULT" )
+set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 message("CPACK_RPM_PACKAGE_RELEASE: ${CPACK_RPM_PACKAGE_RELEASE}")
 
-include ( CPack )
+include(CPack)
 
 endif()
 

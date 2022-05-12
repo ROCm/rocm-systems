@@ -20,89 +20,82 @@
 ## IN THE SOFTWARE.
 ################################################################################
 
-cmake_minimum_required ( VERSION 3.5.0 )
+add_custom_target(mytest) # builds all the tests
+add_dependencies(mytest roctracer_tool ctrl)
 
-if ( NOT DEFINED ROOT_DIR )
-  MESSAGE ( FATAL_ERROR "ROOT_DIR is not defined" )
-endif ()
-if ( NOT DEFINED INC_PATH )
-  set ( INC_PATH "${ROOT_DIR}/inc" )
-endif ()
-if ( NOT DEFINED LIB_PATH )
-  set ( LIB_PATH "${PROJECT_BINARY_DIR}" )
-endif ()
-if ( NOT DEFINED TEST_DIR )
-  set ( TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}" )
-  ## Adding default path cmake modules
-  list ( APPEND CMAKE_MODULE_PATH "${ROOT_DIR}/cmake_modules" )
-  ## Include common cmake modules
-  include ( utils )
-  ## Set build environment
-  include ( env )
-endif ()
-
-## Path to HSA test
-set ( HSA_TEST_DIR "${TEST_DIR}/hsa/test" )
-
-## test run script
-set ( RUN_SCRIPT "${TEST_DIR}/run.sh" )
+# Add a 'check' target to run the tests.
+add_custom_target(check COMMAND ${PROJECT_BINARY_DIR}/run.sh DEPENDS mytest)
 
 ## build HIP tests
-set ( GEN_INC_DIR ${PROJECT_BINARY_DIR}/inc )
-set ( INC_PATH "${INC_PATH} ${GEN_INC_DIR}" )
-set ( TEST_ENV ROCM_PATH=${ROCM_ROOT_DIR} HSA_PATH=${ROCM_ROOT_DIR}/hsa INC_PATH=${INC_PATH} LIB_PATH=${LIB_PATH} HIPCC_VERBOSE=3 )
-add_custom_target( mytest
-  COMMAND ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose" -j1
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose/MatrixTranspose ${PROJECT_BINARY_DIR}/test"
-  COMMAND ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose_test" -j1
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_test"
-  COMMAND HIP_API_ACTIVITY_ON=1 ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose_test" -j1
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_hipaact_test"
-  COMMAND MGPU_TEST=1 ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose_test" -j1
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_mgpu"
-  COMMAND C_TEST=1 ${TEST_ENV} make -C "${TEST_DIR}/MatrixTranspose_test" -j1
-  COMMAND sh -xc "cp ${TEST_DIR}/MatrixTranspose_test/MatrixTranspose ${PROJECT_BINARY_DIR}/test/MatrixTranspose_ctest"
-# copy traces
-  COMMAND sh -xc "cp ${TEST_DIR}/golden_traces/*_trace.txt ${PROJECT_BINARY_DIR}/test/"
-  COMMAND sh -xc "cp ${TEST_DIR}/golden_traces/tests_trace_cmp_levels.txt ${PROJECT_BINARY_DIR}/test/"
-)
+set(GEN_INC_DIR ${PROJECT_BINARY_DIR}/inc)
+
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "/opt/rocm/hip/cmake")
+find_package(HIP REQUIRED MODULE)
+
+set_source_files_properties(MatrixTranspose/MatrixTranspose.cpp MatrixTranspose_test/MatrixTranspose.cpp
+  PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+
+hip_add_executable(MatrixTranspose EXCLUDE_FROM_ALL MatrixTranspose/MatrixTranspose.cpp)
+target_include_directories(MatrixTranspose PRIVATE ${PROJECT_SOURCE_DIR}/inc)
+target_link_libraries(MatrixTranspose PRIVATE roctracer roctx)
+add_dependencies(mytest MatrixTranspose)
+
+function(build_matrix_transpose_test OUTPUT_FILE DEFINITIONS)
+  hip_add_executable(${OUTPUT_FILE} EXCLUDE_FROM_ALL MatrixTranspose_test/MatrixTranspose.cpp)
+  target_compile_definitions(${OUTPUT_FILE} PRIVATE ITERATIONS=100 HIP_TEST=1 ${DEFINITIONS})
+  target_include_directories(${OUTPUT_FILE} PRIVATE ${PROJECT_SOURCE_DIR}/inc ${GEN_INC_DIR})
+  target_link_libraries(${OUTPUT_FILE} PRIVATE roctracer roctx)
+  add_dependencies(mytest ${OUTPUT_FILE})
+endfunction(build_matrix_transpose_test)
+
+
+build_matrix_transpose_test(MatrixTranspose_test "")
+build_matrix_transpose_test(MatrixTranspose_hipaact_test HIP_API_ACTIVITY_ON=1)
+build_matrix_transpose_test(MatrixTranspose_mgpu MGPU_TEST=1)
+
+add_custom_command(OUTPUT MatrixTranspose.c
+  COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/MatrixTranspose_test/MatrixTranspose.cpp MatrixTranspose.c)
+
+hip_add_executable(MatrixTranspose_ctest EXCLUDE_FROM_ALL MatrixTranspose.c)
+target_compile_definitions(MatrixTranspose_ctest PRIVATE HIP_TEST=0 __HIP_PLATFORM_HCC__)
+target_include_directories(MatrixTranspose_ctest PRIVATE ${PROJECT_SOURCE_DIR}/inc ${GEN_INC_DIR})
+target_link_libraries(MatrixTranspose_ctest PRIVATE roctracer roctx)
+add_dependencies(mytest MatrixTranspose_ctest)
+
+file(GLOB files "${CMAKE_CURRENT_SOURCE_DIR}/golden_traces/*_trace.txt")
+foreach(file ${files})
+  execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${file} ${PROJECT_BINARY_DIR}/test/)
+endforeach()
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/golden_traces/tests_trace_cmp_levels.txt ${PROJECT_BINARY_DIR}/test/)
 
 ## Build HSA test
-set ( TMP ${TEST_DIR} )
-set ( TEST_DIR ${HSA_TEST_DIR} )
-add_subdirectory ( ${HSA_TEST_DIR} ${PROJECT_BINARY_DIR}/test/hsa )
-set ( TEST_DIR ${TMP} )
+add_subdirectory(hsa/test ${PROJECT_BINARY_DIR}/test/hsa)
 
-## Util sources
-file( GLOB UTIL_SRC "${HSA_TEST_DIR}/util/*.cpp" )
-
-if ( DEFINED ROCTRACER_TARGET )
-  ## Build test library
-  set ( TEST_LIB "roctracer_tool" )
-  set ( TEST_LIB_SRC ${TEST_DIR}/tool/tracer_tool.cpp ${UTIL_SRC} )
-  add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
-  target_include_directories ( ${TEST_LIB} PRIVATE ${HSA_TEST_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${ROCM_INC_PATH} ${HIP_INC_DIR} ${HSA_KMT_INC_PATH} ${GEN_INC_DIR} )
-  target_link_libraries ( ${TEST_LIB} ${ROCTRACER_TARGET} ${HSA_RUNTIME_LIB} c stdc++ atomic dl pthread rt numa )
-  set_target_properties( ${TEST_LIB} PROPERTIES CXX_VISIBILITY_PRESET hidden )
-  install ( TARGETS ${TEST_LIB} LIBRARY DESTINATION lib/${DEST_NAME})
+if(DEFINED ROCTRACER_TARGET)
+  ## Build the tracer_tool library
+  file(GLOB TRACER_TOOL_SOURCES "tool/*.cpp" "${PROJECT_SOURCE_DIR}/src/util/*.cpp")
+  add_library(roctracer_tool SHARED ${TRACER_TOOL_SOURCES})
+  target_compile_definitions(roctracer_tool PRIVATE HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_HCC__)
+  target_include_directories(roctracer_tool PRIVATE hsa/test ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${HIP_INCLUDE_DIRECTORIES} ${GEN_INC_DIR})
+  target_link_libraries(roctracer_tool ${ROCTRACER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl)
+  set_target_properties(roctracer_tool PROPERTIES CXX_VISIBILITY_PRESET hidden)
+  install(TARGETS roctracer_tool LIBRARY DESTINATION lib/${ROCTRACER_NAME})
 endif ()
 
 ## Build hsaco_test.cpp referenc test
-set ( CO_LIB_NAME "hsaco_test" )
-set ( CO_LIB_SRC ${TEST_DIR}/app/hsaco_test.cpp )
-add_library ( ${CO_LIB_NAME} SHARED ${CO_LIB_SRC} )
-target_include_directories ( ${CO_LIB_NAME} PRIVATE ${HSA_RUNTIME_INC_PATH} )
-target_link_libraries ( ${CO_LIB_NAME} ${HSA_RUNTIME_LIB} c stdc++ )
+add_library(hsaco_test SHARED EXCLUDE_FROM_ALL app/hsaco_test.cpp)
+target_compile_definitions(hsaco_test PRIVATE AMD_INTERNAL_BUILD)
+target_link_libraries(hsaco_test hsa-runtime64::hsa-runtime64)
+add_dependencies(mytest hsaco_test)
 
 ## Build codeobj event test
-set ( CO_LIB_NAME "codeobj_test" )
-set ( CO_LIB_SRC ${TEST_DIR}/app/codeobj_test.cpp )
-add_library ( ${CO_LIB_NAME} SHARED ${CO_LIB_SRC} )
-target_include_directories ( ${CO_LIB_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${GEN_INC_DIR} ${HSA_RUNTIME_INC_PATH} ${ROCM_INC_PATH} )
-target_link_libraries ( ${CO_LIB_NAME} ${ROCTRACER_TARGET} c stdc++ )
+add_library(codeobj_test SHARED EXCLUDE_FROM_ALL app/codeobj_test.cpp)
+target_include_directories(codeobj_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${GEN_INC_DIR})
+target_link_libraries(codeobj_test roctracer)
+add_dependencies(mytest codeobj_test)
 
 ## copying run script
-execute_process ( COMMAND sh -xc "cp ${RUN_SCRIPT} ${PROJECT_BINARY_DIR}" )
-execute_process ( COMMAND sh -xc "ln -s run.sh ${PROJECT_BINARY_DIR}/run_ci.sh" )
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/run.sh ${PROJECT_BINARY_DIR})
+execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink run.sh ${PROJECT_BINARY_DIR}/run_ci.sh)
 ## copying tests output check script
-execute_process ( COMMAND sh -xc "cp ${ROOT_DIR}/script/check_trace.py ${PROJECT_BINARY_DIR}/test/." )
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_SOURCE_DIR}/script/check_trace.py ${PROJECT_BINARY_DIR}/test/.)

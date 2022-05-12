@@ -58,7 +58,7 @@ PROJECT_NAME           = "@ROCTRACER_NAME@"
 # could be handy for archiving the generated documentation or if some version
 # control system is used.
 
-PROJECT_NUMBER         = @roctracer64_VERSION_MAJOR@.@roctracer64_VERSION_MINOR@.@roctracer64_VERSION_PATCH@
+PROJECT_NUMBER         = @ROCTRACER_VERSION_MAJOR@.@ROCTRACER_VERSION_MINOR@.@ROCTRACER_VERSION_PATCH@
 
 # Using the PROJECT_BRIEF tag one can provide an optional one line description
 # for a project that appears at the top of each page and should give viewer a

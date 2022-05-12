@@ -114,8 +114,10 @@ int main() {
   float* TransposeMatrix;
   float* cpuTransposeMatrix;
 
+#if HIP_TEST
   float* gpuMatrix;
   float* gpuTransposeMatrix;
+#endif
 
   int i;
   int errors;

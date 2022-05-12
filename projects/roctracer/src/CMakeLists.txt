@@ -20,39 +20,160 @@
 ## IN THE SOFTWARE.
 ################################################################################
 
-# Generating tracing primitives
-set ( GEN_INC_DIR ${PROJECT_BINARY_DIR}/inc )
-set ( GEN_SRC_DIR ${PROJECT_BINARY_DIR}/src )
-execute_process ( COMMAND sh -xc "mkdir -p ${GEN_INC_DIR}" )
-execute_process ( COMMAND sh -xc "mkdir -p ${GEN_SRC_DIR}" )
-execute_process ( COMMAND sh -xc "${CMAKE_C_COMPILER} -E ${HSA_RUNTIME_INC_PATH}/hsa.h > ${GEN_INC_DIR}/hsa_pp.h" )
-execute_process ( COMMAND sh -xc "${CMAKE_C_COMPILER} -E ${HSA_RUNTIME_INC_PATH}/hsa_ext_amd.h > ${GEN_INC_DIR}/hsa_ext_amd_pp.h" )
-execute_process ( COMMAND sh -xc "python3 ${ROOT_DIR}/script/gen_ostream_ops.py -in ${GEN_INC_DIR}/hsa_pp.h,${GEN_INC_DIR}/hsa_ext_amd_pp.h -out ${GEN_INC_DIR}/hsa_ostream_ops.h" )
-execute_process ( COMMAND sh -xc "python3 ${ROOT_DIR}/script/hsaap.py ${PROJECT_BINARY_DIR} ${HSA_RUNTIME_INC_PATH}" )
-execute_process ( COMMAND sh -xc "${CMAKE_C_COMPILER} -E ${HSA_KMT_INC_PATH}/hsakmttypes.h > ${GEN_INC_DIR}/hsakmttypes_pp.h" )
-execute_process ( COMMAND sh -xc "${CMAKE_C_COMPILER} -E ${HIP_PATH}/include/hip/hip_runtime_api.h ${HIP_DEFINES} -I${HIP_PATH}/include -I${ROCM_ROOT_DIR}/hsa/include > ${GEN_INC_DIR}/hip_runtime_api_pp.h" )
-execute_process ( COMMAND sh -xc "python3 ${ROOT_DIR}/script/gen_ostream_ops.py -in ${GEN_INC_DIR}/hip_runtime_api_pp.h -out ${GEN_INC_DIR}/hip_ostream_ops.h" )
-execute_process ( COMMAND sh -xc "mkdir ${GEN_INC_DIR}/rocprofiler" )
-execute_process ( COMMAND sh -xc "ln -s ${ROOT_DIR}/../rocprofiler/inc/rocprofiler.h ${GEN_INC_DIR}/rocprofiler/rocprofiler.h" )
-execute_process ( COMMAND sh -xc "ln -s ${ROOT_DIR}/../rocprofiler/src/core/activity.h ${GEN_INC_DIR}/rocprofiler/activity.h" )
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
-# Build dynamic Library object
-set ( TARGET_LIB ${TARGET_NAME} )
-set ( LIB_SRC
-  ${LIB_DIR}/core/roctracer.cpp
+execute_process(
+  COMMAND ${Python3_EXECUTABLE} -c "import CppHeaderParser"
+  RESULT_VARIABLE CPPHEADERPARSER
+  OUTPUT_QUIET
 )
-add_library ( ${TARGET_LIB} ${LIBRARY_TYPE} ${LIB_SRC} )
-target_compile_definitions ( ${TARGET_LIB} PRIVATE PROF_API_IMPL )
-target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${ROCM_INC_PATH} ${HIP_INC_DIR} ${HSA_KMT_INC_PATH} ${GEN_INC_DIR} )
-target_link_libraries( ${TARGET_LIB} PRIVATE ${HSA_RUNTIME_LIB} c stdc++ )
-set_target_properties( ${TARGET_LIB} PROPERTIES CXX_VISIBILITY_PRESET hidden )
 
-# Build ROCTX tracing library
-set ( ROCTX_LIB "roctx64" )
-set ( ROCTX_LIB_SRC
-  ${LIB_DIR}/roctx/roctx.cpp
+if(NOT ${CPPHEADERPARSER} EQUAL 0)
+  message(FATAL_ERROR
+    "The \"CppHeaderParser\" Python3 package is not installed. Please install it using the following command: \"pip3 install CppHeaderParser\"."
+  )
+endif()
+
+if(${LIBRARY_TYPE} STREQUAL STATIC)
+  add_definitions(-DSTATIC_BUILD=1)
+endif()
+
+option(DEBUG_TRACE "Enable debug tracing")
+if(DEBUG_TRACE)
+    add_definitions(-DDEBUG_TRACE_ON=1)
+endif()
+
+set(GEN_INC_DIR ${PROJECT_BINARY_DIR}/inc)
+
+# FIXME!!! should not depend on another project's internal files
+execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory "${GEN_INC_DIR}/rocprofiler")
+execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink "${PROJECT_SOURCE_DIR}/../rocprofiler/inc/rocprofiler.h" "${GEN_INC_DIR}/rocprofiler/rocprofiler.h")
+execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink "${PROJECT_SOURCE_DIR}/../rocprofiler/src/core/activity.h" "${GEN_INC_DIR}/rocprofiler/activity.h")
+
+get_property(HSA_RUNTIME_INCLUDE_DIRECTORIES TARGET hsa-runtime64::hsa-runtime64 PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+find_file(hsa_h_file hsa.h
+    PATHS ${HSA_RUNTIME_INCLUDE_DIRECTORIES}
+    PATH_SUFFIXES hsa
+    NO_DEFAULT_PATH
+    REQUIRED
 )
-add_library ( ${ROCTX_LIB} SHARED ${ROCTX_LIB_SRC} )
-target_include_directories ( ${ROCTX_LIB} PRIVATE ${LIB_DIR} ${ROOT_DIR} ${ROOT_DIR}/inc ${HSA_RUNTIME_INC_PATH} ${GEN_INC_DIR} )
-target_link_libraries( ${ROCTX_LIB} PRIVATE c stdc++ )
-set_target_properties( ${ROCTX_LIB} PROPERTIES CXX_VISIBILITY_PRESET hidden )
+get_filename_component(HSA_RUNTIME_INC_PATH ${hsa_h_file} DIRECTORY)
+
+add_custom_command(
+    OUTPUT "${GEN_INC_DIR}/hsa_prof_str.h"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${GEN_INC_DIR}"
+    COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/script/hsaap.py"
+        "${PROJECT_BINARY_DIR}" "${HSA_RUNTIME_INC_PATH}"  > /dev/null
+    DEPENDS "${PROJECT_SOURCE_DIR}/script/hsaap.py"
+            "${HSA_RUNTIME_INC_PATH}/hsa.h" "${HSA_RUNTIME_INC_PATH}/hsa_ext_amd.h"
+            "${HSA_RUNTIME_INC_PATH}/hsa_ext_image.h" "${HSA_RUNTIME_INC_PATH}/hsa_api_trace.h"
+    COMMENT "Generating hsa_prof_str.h..."
+)
+
+add_custom_command(
+    OUTPUT "${GEN_INC_DIR}/hsa_ostream_ops.h"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${GEN_INC_DIR}"
+    COMMAND ${CMAKE_C_COMPILER} -E "${HSA_RUNTIME_INC_PATH}/hsa.h" -o "${GEN_INC_DIR}/hsa.h.i"
+    COMMAND ${CMAKE_C_COMPILER} -E "${HSA_RUNTIME_INC_PATH}/hsa_ext_amd.h" -o "${GEN_INC_DIR}/hsa_ext_amd.h.i"
+    BYPRODUCTS "${GEN_INC_DIR}/hsa.h.i" "${GEN_INC_DIR}/hsa_ext_amd.h.i"
+    COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py"
+        -in "${GEN_INC_DIR}/hsa.h.i,${GEN_INC_DIR}/hsa_ext_amd.h.i"
+        -out "${GEN_INC_DIR}/hsa_ostream_ops.h"  > /dev/null
+    DEPENDS "${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py"
+            "${HSA_RUNTIME_INC_PATH}/hsa.h" "${HSA_RUNTIME_INC_PATH}/hsa_ext_amd.h"
+    COMMENT "Generating hsa_ostream_ops.h..."
+)
+
+get_property(HIP_INCLUDE_DIRECTORIES TARGET hip::amdhip64 PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+
+find_file(HIP_RUNTIME_API_H hip_runtime_api.h
+    PATHS ${HIP_INCLUDE_DIRECTORIES}
+    PATH_SUFFIXES hip
+    NO_DEFAULT_PATH
+    REQUIRED
+)
+
+add_custom_command(
+    OUTPUT "${GEN_INC_DIR}/hip_ostream_ops.h"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${GEN_INC_DIR}"
+    COMMAND ${CMAKE_C_COMPILER}
+        "$<$<BOOL:${HIP_INCLUDE_DIRECTORIES}>:-I$<JOIN:${HIP_INCLUDE_DIRECTORIES},$<SEMICOLON>-I>>"
+        -E "${HIP_RUNTIME_API_H}" -D__HIP_PLATFORM_HCC__=1 -D__HIP_ROCclr__=1 -o ${GEN_INC_DIR}/hip_runtime_api.h.i
+    BYPRODUCTS "${GEN_INC_DIR}/hip_runtime_api.h.i"
+    COMMAND ${Python3_EXECUTABLE}
+        "${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py"
+        -in "${GEN_INC_DIR}/hip_runtime_api.h.i"
+        -out "${GEN_INC_DIR}/hip_ostream_ops.h" > /dev/null
+    DEPENDS "${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py" "${HIP_RUNTIME_API_H}"
+    COMMENT "Generating hip_ostream_ops.h..."
+    COMMAND_EXPAND_LISTS
+)
+
+# Build the ROCtracer library
+
+file(GLOB ROCTRACER_SOURCES "src/core/*.cpp" "src/util/*.cpp")
+
+add_library(roctracer ${LIBRARY_TYPE}
+    ${ROCTRACER_SOURCES}
+    "${GEN_INC_DIR}/hsa_ostream_ops.h"
+    "${GEN_INC_DIR}/hsa_prof_str.h"
+    "${GEN_INC_DIR}/hip_ostream_ops.h"
+)
+
+set_target_properties(roctracer PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    OUTPUT_NAME "roctracer64"
+    VERSION ${ROCTRACER_VERSION}
+    SOVERSION ${ROCTRACER_VERSION_MAJOR}
+)
+
+target_compile_definitions(roctracer
+  PUBLIC
+    AMD_INTERNAL_BUILD
+  PRIVATE
+    PROF_API_IMPL
+    HIP_PROF_HIP_API_STRING=1
+    __HIP_PLATFORM_HCC__=1
+)
+
+target_include_directories(roctracer
+  PUBLIC
+    ${HIP_INCLUDE_DIRECTORIES} ${HSA_RUNTIME_INCLUDE_DIRECTORIES}
+  PRIVATE
+    ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_BINARY_DIR}/inc
+)
+target_link_libraries(roctracer PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl)
+
+install(TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION lib)
+foreach(header ${PUBLIC_HEADERS})
+    get_filename_component(header_subdir ${header} DIRECTORY)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/${header} DESTINATION include/${ROCTRACER_NAME}/${header_subdir})
+endforeach()
+
+foreach(header ${GEN_HEADERS})
+    get_filename_component(header_subdir ${header} DIRECTORY)
+    install(FILES ${GEN_INC_DIR}/${header} DESTINATION include/${ROCTRACER_NAME}/${header_subdir})
+endforeach()
+
+# Build the ROCTX library
+
+file(GLOB ROCTX_SOURCES "src/roctx/*.cpp")
+
+add_library(roctx ${LIBRARY_TYPE} ${ROCTX_SOURCES})
+
+set_target_properties(roctx PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    OUTPUT_NAME "roctx64"
+    VERSION ${ROCTRACER_VERSION}
+    SOVERSION ${ROCTRACER_VERSION_MAJOR}
+)
+
+target_include_directories(roctx PRIVATE
+    ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc
+    ${PROJECT_SOURCE_DIR}/src
+)
+
+install(TARGETS roctx LIBRARY DESTINATION lib)
