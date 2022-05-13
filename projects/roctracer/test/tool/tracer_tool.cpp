@@ -191,33 +191,21 @@ static inline const char* cxx_demangle(const char* symbol) {
 uint32_t control_delay_us = 0;
 uint32_t control_len_us = 0;
 uint32_t control_dist_us = 0;
-void* control_thr_fun(void*) {
-  const uint32_t delay_sec = control_delay_us / 1000000;
-  const uint32_t delay_us = control_delay_us % 1000000;
-  const uint32_t len_sec = control_len_us / 1000000;
-  const uint32_t len_us = control_len_us % 1000000;
-  const uint32_t dist_sec = control_dist_us / 1000000;
-  const uint32_t dist_us = control_dist_us % 1000000;
-  bool to_start = true;
-
-  sleep(delay_sec);
-  usleep(delay_us);
-
-  while (1) {
-    if (to_start) {
-      to_start = false;
-      roctracer_start();
-      sleep(len_sec);
-      usleep(len_us);
-    } else {
-      to_start = true;
+std::thread* trace_period_thread = nullptr;
+std::atomic_bool trace_period_stop = false;
+void trace_period_fun() {
+  std::this_thread::sleep_for(std::chrono::microseconds(control_delay_us));
+  do {
+    roctracer_start();
+    if (trace_period_stop) {
       roctracer_stop();
-      sleep(dist_sec);
-      usleep(dist_us);
+      break;
     }
-  }
-
-  return NULL;
+    std::this_thread::sleep_for(std::chrono::microseconds(control_len_us));
+    roctracer_stop();
+    if (trace_period_stop) break;
+    std::this_thread::sleep_for(std::chrono::microseconds(control_dist_us));
+  } while (!trace_period_stop);
 }
 
 // Flushing control thread
@@ -703,6 +691,13 @@ void tool_unload() {
     flush_thread = nullptr;
   }
 
+  if (trace_period_thread) {
+    trace_period_stop = true;
+    trace_period_thread->join();
+    delete trace_period_thread;
+    trace_period_thread = nullptr;
+  }
+
   if (trace_roctx) {
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
   }
@@ -864,15 +859,7 @@ void tool_load() {
       fprintf(stdout, "ROCTracer: trace control: delay(%uus), length(%uus), rate(%uus)\n",
               ctrl_delay, ctrl_len, ctrl_rate);
       fflush(stdout);
-      pthread_t thread;
-      pthread_attr_t attr;
-      int err = pthread_attr_init(&attr);
-      if (err) {
-        errno = err;
-        perror("pthread_attr_init");
-        abort();
-      }
-      err = pthread_create(&thread, &attr, control_thr_fun, NULL);
+      trace_period_thread = new std::thread(trace_period_fun);
     } else {
       fprintf(stdout, "ROCTracer: trace start disabled\n");
       fflush(stdout);
