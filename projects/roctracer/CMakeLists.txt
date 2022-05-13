@@ -90,6 +90,7 @@ set ( PUBLIC_HEADERS
   roctracer.h
   roctracer_ext.h
   roctracer_hip.h
+  roctracer_hcc.h
   roctracer_hsa.h
   roctracer_roctx.h
   ext/prof_protocol.h
