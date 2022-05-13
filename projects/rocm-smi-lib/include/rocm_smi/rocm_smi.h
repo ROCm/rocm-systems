@@ -341,6 +341,7 @@ typedef enum {
   RSMI_CLK_TYPE_DCEF,                 //!< Display Controller Engine clock
   RSMI_CLK_TYPE_SOC,                  //!< SOC clock
   RSMI_CLK_TYPE_MEM,                  //!< Memory clock
+  RSMI_CLK_TYPE_PCIE,                 //!< PCIE clock
 
   // Add new clocks to the end (not in the middle) and update
   // RSMI_CLK_TYPE_LAST
@@ -2268,11 +2269,14 @@ rsmi_status_t rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od);
  *
  *  @param[inout] f a pointer to a caller provided ::rsmi_frequencies_t structure
  *  to which the frequency information will be written. Frequency values are in
- *  Hz.
+ *  Hz. 
  *  If this parameter is nullptr, this function will return
  *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
+ *  If multiple current frequencies are found, a warning is shown. If no
+ *  current frequency is found, it is reflected as -1. If frequencies are not
+ *  read from low to high a warning is shown as well.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not

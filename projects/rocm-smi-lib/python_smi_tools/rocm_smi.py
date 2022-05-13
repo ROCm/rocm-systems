@@ -1472,6 +1472,9 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                 ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_defined], byref(freq))
                 if rsmi_ret_ok(ret, device, clk_defined, True):
                     levl = freq.current
+                    if levl >= freq.num_supported:
+                        printLog(device, '%s current clock frequency not found' % (clk_defined), None)
+                        continue
                     fr = freq.frequency[levl] / 1000000
                     if concise:  # in case function is used for concise output, no need to print.
                         return '{:.0f}Mhz'.format(fr)
@@ -1485,6 +1488,9 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                     ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], byref(freq))
                     if rsmi_ret_ok(ret, device, clk_type, True):
                         levl = freq.current
+                        if levl >= freq.num_supported:
+                            printLog(device, '%s current clock frequency not found' % (clk_type), None)
+                            continue
                         fr = freq.frequency[levl] / 1000000
                         if PRINT_JSON:
                             printLog(device, '%s clock speed:' % (clk_type), '(%sMhz)' % (str(fr)[:-2]))
@@ -1498,6 +1504,9 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                 ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
                 if rsmi_ret_ok(ret, device, 'PCIe', True):
                     current_f = bw.transfer_rate.current
+                    if current_f >= bw.transfer_rate.num_supported:
+                        printLog(device, 'PCIe current clock frequency not found', None )
+                        continue
                     fr = '{:.1f}GT/s x{}'.format(bw.transfer_rate.frequency[current_f] / 1000000000,
                                                  bw.lanes[current_f])
                     printLog(device, 'pcie clock level', '{} ({})'.format(current_f, fr))
