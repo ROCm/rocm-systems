@@ -34,6 +34,7 @@
 #include <mutex>
 #include <stack>
 #include <unordered_map>
+#include <vector>
 
 #include "core/journal.h"
 #include "core/loader.h"
@@ -498,7 +499,7 @@ util::Logger::mutex_t util::Logger::mutex_;
 std::atomic<util::Logger*> util::Logger::instance_{};
 
 // Memory pool routines and primitives
-MemoryPool* memory_pool = nullptr;
+MemoryPool* default_memory_pool = nullptr;
 std::recursive_mutex memory_pool_mutex;
 
 // Stop status routines and primitives
@@ -801,8 +802,8 @@ PUBLIC_API roctracer_status_t roctracer_disable_callback() {
 // Return default pool and set new one if parameter pool is not NULL.
 PUBLIC_API roctracer_pool_t* roctracer_default_pool_expl(roctracer_pool_t* pool) {
   std::lock_guard lock(memory_pool_mutex);
-  roctracer_pool_t* p = reinterpret_cast<roctracer_pool_t*>(memory_pool);
-  if (pool != nullptr) memory_pool = reinterpret_cast<MemoryPool*>(pool);
+  roctracer_pool_t* p = reinterpret_cast<roctracer_pool_t*>(default_memory_pool);
+  if (pool != nullptr) default_memory_pool = reinterpret_cast<MemoryPool*>(pool);
   return p;
 }
 
@@ -811,7 +812,7 @@ PUBLIC_API roctracer_status_t roctracer_open_pool_expl(const roctracer_propertie
                                                        roctracer_pool_t** pool) {
   API_METHOD_PREFIX
   std::lock_guard lock(memory_pool_mutex);
-  if ((pool == nullptr) && (memory_pool != nullptr)) {
+  if ((pool == nullptr) && (default_memory_pool != nullptr)) {
     EXC_RAISING(ROCTRACER_STATUS_ERROR, "default pool already set");
   }
   MemoryPool* p = new MemoryPool(*properties);
@@ -819,25 +820,14 @@ PUBLIC_API roctracer_status_t roctracer_open_pool_expl(const roctracer_propertie
   if (pool != nullptr)
     *pool = p;
   else
-    memory_pool = p;
-  API_METHOD_SUFFIX
-}
-
-// Close memory pool
-PUBLIC_API roctracer_status_t roctracer_close_pool_expl(roctracer_pool_t* pool) {
-  API_METHOD_PREFIX
-  std::lock_guard lock(memory_pool_mutex);
-  roctracer_pool_t* ptr = (pool == nullptr) ? roctracer_default_pool() : pool;
-  MemoryPool* memory_pool = reinterpret_cast<MemoryPool*>(ptr);
-  delete (memory_pool);
-  if (pool == nullptr) memory_pool = nullptr;
+    default_memory_pool = p;
   API_METHOD_SUFFIX
 }
 
 // Enable activity records logging
 static roctracer_status_t roctracer_enable_activity_fun(roctracer_domain_t domain, uint32_t op,
                                                         roctracer_pool_t* pool) {
-  if (pool == nullptr) pool = roctracer_default_pool();
+  assert(pool != nullptr);
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
       if (op == HSA_OP_ID_COPY) {
@@ -897,6 +887,8 @@ static roctracer_status_t roctracer_enable_activity_fun(roctracer_domain_t domai
 
 static void roctracer_enable_activity_impl(roctracer_domain_t domain, uint32_t op,
                                            roctracer_pool_t* pool) {
+  if (pool == nullptr) pool = default_memory_pool;
+  if (pool == nullptr) EXC_RAISING(ROCTRACER_STATUS_ERROR, "no default pool");
   act_journal.Insert(domain, op, {pool});
   roctracer_enable_activity_fun(domain, op, pool);
 }
@@ -1011,12 +1003,35 @@ PUBLIC_API roctracer_status_t roctracer_disable_activity() {
   API_METHOD_SUFFIX
 }
 
+// Close memory pool
+PUBLIC_API roctracer_status_t roctracer_close_pool_expl(roctracer_pool_t* pool) {
+  API_METHOD_PREFIX
+  std::lock_guard lock(memory_pool_mutex);
+  if (pool == nullptr) pool = reinterpret_cast<roctracer_pool_t*>(default_memory_pool);
+  if (pool != nullptr) {
+    MemoryPool* p = reinterpret_cast<MemoryPool*>(pool);
+    if (p == default_memory_pool) default_memory_pool = nullptr;
+
+    // Disable any activities that specify the pool being deleted.
+    std::vector<std::pair<roctracer_domain_t, uint32_t>> ops;
+    act_journal.ForEach(
+        [&ops, pool](roctracer_domain_t domain, uint32_t op, const ActivityJournalData& data) {
+          if (pool == data.pool) ops.emplace_back(domain, op);
+          return true;
+        });
+    for (auto&& [domain, op] : ops) roctracer_disable_activity_impl(domain, op);
+
+    delete (p);
+  }
+  API_METHOD_SUFFIX
+}
+
 // Flush available activity records
 PUBLIC_API roctracer_status_t roctracer_flush_activity_expl(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   if (pool == nullptr) pool = roctracer_default_pool();
-  MemoryPool* memory_pool = reinterpret_cast<MemoryPool*>(pool);
-  if (memory_pool != nullptr) memory_pool->Flush();
+  MemoryPool* default_memory_pool = reinterpret_cast<MemoryPool*>(pool);
+  if (default_memory_pool != nullptr) default_memory_pool->Flush();
   API_METHOD_SUFFIX
 }
 

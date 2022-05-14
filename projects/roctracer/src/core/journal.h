@@ -31,11 +31,14 @@ namespace roctracer {
 
 template <typename Data> class Journal {
  public:
-  /* Insert { domain, op } into the journal. Return false if the insertion failed.  */
+  /* Insert { domain, op } into the journal. Return false if the insertion
+  updated an existing entry.  */
   template <typename T = Data, std::enable_if_t<std::is_constructible_v<Data, T>, int> = 0>
   bool Insert(roctracer_domain_t domain, uint32_t op, T&& data) {
     std::lock_guard lock(mutex_);
-    return map_[domain].emplace(op, std::forward<T>(data)).second;
+    auto result = map_[domain].try_emplace(op, std::forward<T>(data));
+    if (!result.second) result.first->second = std::forward<T>(data);
+    return result.second;
   }
 
   /* Remove { domain, op } from the journal. Return false if the entry did not exist.  */

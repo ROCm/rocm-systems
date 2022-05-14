@@ -60,7 +60,7 @@ extern "C" {
  * that uses this interface is only compatible with the installed library if
  * the major version numbers match and the interface minor version number is
  * less than or equal to the installed library minor version number.
- * 
+ *
  * @{
  */
 
@@ -388,13 +388,21 @@ static inline roctracer_status_t roctracer_next_record(
 /**
  * Memory pool allocator callback.
  *
- * \p ptr is the allocated memory when \p size is greater than 0 and the
- * address of the memory to deallocate when \p size is o.
+ * If \p *ptr is NULL, then allocate memory of \p size bytes and save address
+ * in \p *ptr.
+ * 
+ * If \p *ptr is non-NULL and size is non-0, then reallocate the memory at \p
+ * *ptr with size \p size and save the address in \p *ptr. The memory will have
+ * been allocated by the same callback.
+ * 
+ * If \p *ptr is non-NULL and size is 0, then deallocate the memory at \p *ptr.
+ * The memory will have been allocated by the same callback.
  *
- * \p size is the size of the allocation request in bytes if greater than 0.
- * If 0 requests deallocation.
+ * \p size is the size of the memory allocation or reallocation, or 0 if
+ * deallocating.
  *
- * \p arg Argument provided when the callback is defined.
+ * \p arg Argument provided in the ::roctracer_properties_t passed to the
+ * ::roctracer_open_pool function.
  */
 typedef void (*roctracer_allocator_t)(char** ptr,
                                       size_t size,
@@ -436,7 +444,7 @@ typedef struct {
 
   /**
    * The allocator function to use to allocate and deallocate the buffer. If
-   * NULL then \p malloc and \p free are used.
+   * NULL then \p malloc, \p realloc, and \p free are used.
    */
   roctracer_allocator_t alloc_fun;
 
@@ -464,9 +472,10 @@ typedef void roctracer_pool_t;
 /**
  * Create tracer memory pool.
  *
- * If \p pool is not NULL, returns the created memory pool.
+ * If \p pool is not NULL, returns the created memory pool. Does not change the
+ * default memory pool.
  *
- * If \p pool is NULL sets the default memory pool to the created pool if not
+ * If \p pool is NULL, sets the default memory pool to the created pool if not
  * already defined. Otherwise, return an error.
  *
  * @param[in] properties Tracer memory pool properties.
@@ -506,38 +515,49 @@ static inline roctracer_status_t roctracer_open_pool(
 /**
  * Close tracer memory pool.
  *
- * @param[in] pool Memory pool to close. If NULL, the default memory pool is closed and set to undefined.
+ * All enabled activities that use the pool must have completed writing to the
+ * pool, before deleting the pool. Deleting a pool automatically disables any
+ * activities that specify the pool, and flushes it.
+ *
+ * @param[in] pool Memory pool to close. If NULL, the default memory pool is
+ * closed if defined. The default memory pool is set to undefined if closed.
  *
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
- * successfully.
+ * successfully or pool was NULL and there is no default pool.
  */
 roctracer_status_t roctracer_close_pool_expl(
     roctracer_pool_t* pool);
 
 /**
- * Close default tracer memory pool.
+ * Close default tracer memory pool, if defined, and set to undefined.
+ *
+ * All enabled activities that use the pool must have completed writing to the
+ * pool, before deleting the pool. Deleting a pool automatically disables any
+ * activities that specify the pool, and flushes it.
  *
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
- * successfully.
+ * successfully or there is no default pool.
  */
 static inline roctracer_status_t roctracer_close_pool() { return roctracer_close_pool_expl(NULL); }
 
 /**
  * Query and set the default memory pool.
  *
- * @param[in] pool If not NULL, change the current default pool to \p pool.
+ * @param[in] pool If not NULL, change the current default pool to \p pool. If
+ * NULL, the default pool is not changed.
  *
- * @return Return the current default memory pool before any change.
+ * @return Return the current default memory pool before any change, or NULL if
+ * none is defined.
  */
 // Return current default pool
 // Set new default pool if the argument is not NULL
 roctracer_pool_t* roctracer_default_pool_expl(
-    roctracer_pool_t* pool);  // [in] new default pool if not NULL
+    roctracer_pool_t* pool);
 
 /**
- * Query current default memory pool.
+ * Query the current default memory pool.
  *
- * @return Return the current default memory pool.
+ * @return Return the current default memory pool, or NULL is none is defined.
  */
 static inline roctracer_pool_t* roctracer_default_pool() {
   return roctracer_default_pool_expl(NULL);
@@ -556,6 +576,8 @@ static inline roctracer_pool_t* roctracer_default_pool() {
  *
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
+ *
+ * @retval ROCTRACER_STATUS_ERROR \p pool is NULL and no default pool is defined.
  */
 roctracer_status_t roctracer_enable_op_activity_expl(
     activity_domain_t domain,
@@ -572,6 +594,8 @@ roctracer_status_t roctracer_enable_op_activity_expl(
  *
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
+ *
+ * @retval ROCTRACER_STATUS_ERROR No default pool is defined.
  */
 static inline roctracer_status_t roctracer_enable_op_activity(
     activity_domain_t domain,
@@ -591,6 +615,8 @@ static inline roctracer_status_t roctracer_enable_op_activity(
  *
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
+ *
+ * @retval ROCTRACER_STATUS_ERROR \p pool is NULL and no default pool is defined.
  */
 roctracer_status_t roctracer_enable_domain_activity_expl(
     activity_domain_t domain,  // tracing domain
@@ -604,6 +630,8 @@ roctracer_status_t roctracer_enable_domain_activity_expl(
  *
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
+ *
+ * @retval ROCTRACER_STATUS_ERROR No default pool is defined.
  */
 static inline roctracer_status_t roctracer_enable_domain_activity(
     activity_domain_t domain)
@@ -620,6 +648,8 @@ static inline roctracer_status_t roctracer_enable_domain_activity(
  *
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
+ *
+ * @retval ROCTRACER_STATUS_ERROR \p pool is NULL and no default pool is defined.
  */
 roctracer_status_t roctracer_enable_activity_expl(
     roctracer_pool_t* pool);
@@ -630,6 +660,8 @@ roctracer_status_t roctracer_enable_activity_expl(
  *
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
+ *
+ * @retval ROCTRACER_STATUS_ERROR No default pool is defined.
  */
 static inline roctracer_status_t roctracer_enable_activity() {
   return roctracer_enable_activity_expl(NULL);
@@ -672,6 +704,10 @@ roctracer_status_t roctracer_disable_activity();
 /**
  * Flush available activity records for a memory pool.
  *
+ * If flushing encounters an activity record still being written, flushing
+ * stops. Use a subsequent flush when the record has completed being written to
+ * resume the flush.
+ *
  * @param[in] pool The memory pool to flush. If NULL, flushes the default memory
  * pool.
  *
@@ -683,6 +719,10 @@ roctracer_status_t roctracer_flush_activity_expl(
 
 /**
  * Flush available activity records for the default memory pool.
+ *
+ * If flushing encounters an activity record still being written, flushing
+ * stops. Use a subsequent flush when the record has completed being written to
+ * resume the flush.
  *
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
