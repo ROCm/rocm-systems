@@ -21,7 +21,6 @@
 ################################################################################
 
 cmake_minimum_required ( VERSION 3.5.0 )
-set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
 
 if ( NOT DEFINED ROOT_DIR )
   MESSAGE ( FATAL_ERROR "ROOT_DIR is not defined" )

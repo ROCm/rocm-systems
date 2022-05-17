@@ -22,9 +22,6 @@
 
 cmake_minimum_required ( VERSION 3.5.0 )
 
-## Verbose output.
-set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
-
 ## Set module name and project name.
 set ( ROCTRACER_NAME "roctracer" )
 set ( ROCTRACER_TARGET "${ROCTRACER_NAME}64" )

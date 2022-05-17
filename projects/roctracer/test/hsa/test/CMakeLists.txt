@@ -21,7 +21,6 @@
 ################################################################################
 
 cmake_minimum_required ( VERSION 2.8.12 )
-set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
 
 set ( EXE_NAME "ctrl" )
 
