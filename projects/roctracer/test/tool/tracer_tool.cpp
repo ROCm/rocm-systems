@@ -717,6 +717,16 @@ void tool_unload() {
   close_tracing_pool();
   roctracer::TraceBufferBase::FlushAll();
 
+  roctracer_flush_buf();
+  close_file_handles();
+
+
+  if (hip_api_stats) hip_api_stats->dump();
+  if (hip_kernel_stats) hip_kernel_stats->dump();
+  if (hip_memcpy_stats) hip_memcpy_stats->dump();
+
+  roctracer_unload();
+
   ONLOAD_TRACE_END();
 }
 
@@ -888,6 +898,8 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
                                   const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
 
+  roctracer_load();
+
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
 
   // Dumping HSA handles for agents
@@ -1045,21 +1057,12 @@ extern "C" CONSTRUCTOR_API void constructor() {
       new roctracer::TraceBuffer<hip_act_trace_entry_t>("HIP ACT", 0x200000, hip_act_flush_cb, 1);
   hsa_api_trace_buffer =
       new roctracer::TraceBuffer<hsa_api_trace_entry_t>("HSA API", 0x200000, hsa_api_flush_cb);
-  roctracer_load();
   tool_load();
+  std::atexit(tool_unload);
   ONLOAD_TRACE_END();
 }
+
 extern "C" DESTRUCTOR_API void destructor() {
   ONLOAD_TRACE_BEG();
-  tool_unload();
-  roctracer_flush_buf();
-  close_file_handles();
-
-
-  if (hip_api_stats) hip_api_stats->dump();
-  if (hip_kernel_stats) hip_kernel_stats->dump();
-  if (hip_memcpy_stats) hip_memcpy_stats->dump();
-
-  roctracer_unload();
   ONLOAD_TRACE_END();
 }
