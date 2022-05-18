@@ -134,6 +134,11 @@ set_property ( TARGET ${ROCTX_TARGET} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" 
 
 install ( TARGETS ${ROCTX_TARGET} LIBRARY DESTINATION lib )
 
+option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
+if(FILE_REORG_BACKWARD_COMPATIBILITY)
+  include(roctracer-backward-compat.cmake)
+endif()
+
 ## Packaging directives
 set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR DEB;RPM")
 set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
