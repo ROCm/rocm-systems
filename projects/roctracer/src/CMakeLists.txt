@@ -125,6 +125,7 @@ add_library(roctracer ${LIBRARY_TYPE}
 set_target_properties(roctracer PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     OUTPUT_NAME "roctracer64"
+    LINK_DEPENDS core.exportmap
     VERSION ${ROCTRACER_VERSION}
     SOVERSION ${ROCTRACER_VERSION_MAJOR}
 )
@@ -145,6 +146,10 @@ target_include_directories(roctracer
     ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_BINARY_DIR}/inc
 )
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/core/exportmap.in core.exportmap @ONLY)
+target_link_options(roctracer PRIVATE -Wl,--version-script=core.exportmap -Wl,--no-undefined)
+
 target_link_libraries(roctracer PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl)
 
 install(TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION lib)
@@ -167,6 +172,7 @@ add_library(roctx ${LIBRARY_TYPE} ${ROCTX_SOURCES})
 set_target_properties(roctx PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     OUTPUT_NAME "roctx64"
+    LINK_DEPENDS roctx.exportmap
     VERSION ${ROCTRACER_VERSION}
     SOVERSION ${ROCTRACER_VERSION_MAJOR}
 )
@@ -175,5 +181,8 @@ target_include_directories(roctx PRIVATE
     ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc
     ${PROJECT_SOURCE_DIR}/src
 )
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/roctx/exportmap.in roctx.exportmap @ONLY)
+target_link_options(roctx PRIVATE -Wl,--version-script=roctx.exportmap -Wl,--no-undefined)
 
 install(TARGETS roctx LIBRARY DESTINATION lib)

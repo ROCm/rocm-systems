@@ -26,7 +26,8 @@ cmake_minimum_required(VERSION 3.16.0)
 set(ROCTRACER_NAME "roctracer")
 set(ROCTRACER_TARGET "${ROCTRACER_NAME}")
 
-project(ROCTRACER VERSION 4.0.0)
+string(TOUPPER "${ROCTRACER_NAME}" ROCTRACER_NAME_upper)
+project(${ROCTRACER_NAME_upper} VERSION 4.1.0)
 
 ## Build is not supported on Windows plaform
 if(WIN32)
