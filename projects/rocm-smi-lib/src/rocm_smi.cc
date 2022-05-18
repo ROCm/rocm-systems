@@ -3702,6 +3702,7 @@ rsmi_dev_supported_func_iterator_open(uint32_t dv_ind,
   (*handle)->id_type = FUNC_ITER;
 
   if (dev->supported_funcs()->begin() == dev->supported_funcs()->end()) {
+    delete *handle;
     return RSMI_STATUS_NO_DATA;
   } else {
     SupportedFuncMapIt *supp_func_iter = new SupportedFuncMapIt;
@@ -3754,6 +3755,7 @@ rsmi_dev_supported_variant_iterator_open(
       var_map_container = (*func_iter)->second;
 
       if (var_map_container == nullptr) {
+        delete *var_iter;
         return RSMI_STATUS_NO_DATA;
       }
 
@@ -3771,6 +3773,7 @@ rsmi_dev_supported_variant_iterator_open(
       sub_var_map_container = (*variant_itr)->second;
 
       if (sub_var_map_container == nullptr) {
+        delete *var_iter;
         return RSMI_STATUS_NO_DATA;
       }
 
@@ -3808,8 +3811,8 @@ rsmi_dev_supported_func_iterator_close(rsmi_func_id_iter_handle_t *handle) {
                     reinterpret_cast<VariantMapIt *>((*handle)->func_id_iter);
     delete var_iter;
   }  else if ((*handle)->id_type == SUBVARIANT_ITER) {
-    SubVariant *subvar_iter =
-                      reinterpret_cast<SubVariant *>((*handle)->func_id_iter);
+    SubVariantIt *subvar_iter =
+                      reinterpret_cast<SubVariantIt *>((*handle)->func_id_iter);
     delete subvar_iter;
   } else {
     return RSMI_STATUS_INVALID_ARGS;
@@ -3884,7 +3887,6 @@ rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle) {
 
       if (*func_iter ==
          reinterpret_cast<SupportedFuncMap *>(handle->container_ptr)->end()) {
-        handle->func_id_iter = 0;
         return RSMI_STATUS_NO_DATA;
       }
       break;
@@ -3894,7 +3896,6 @@ rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle) {
       (*var_iter)++;
       if (*var_iter ==
                reinterpret_cast<VariantMap *>(handle->container_ptr)->end()) {
-        handle->func_id_iter = 0;
         return RSMI_STATUS_NO_DATA;
       }
       break;
@@ -3904,7 +3905,6 @@ rsmi_func_iter_next(rsmi_func_id_iter_handle_t handle) {
       (*sub_var_iter)++;
       if (*sub_var_iter ==
                reinterpret_cast<SubVariant *>(handle->container_ptr)->end()) {
-        handle->func_id_iter = 0;
         return RSMI_STATUS_NO_DATA;
       }
       break;
