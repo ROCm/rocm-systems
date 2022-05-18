@@ -164,10 +164,6 @@ else()
 endif()
 message ( "Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}" )
 set ( CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT" )
-## Process the Debian install/remove scripts to update the CPACK variables
-configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY )
-configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in DEBIAN/prerm @ONLY )
-set ( CPACK_DEBIAN_PACKAGE_CONTROL_EXTRA "DEBIAN/postinst;DEBIAN/prerm" )
 
 ## RPM package specific variables
 if ( DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE} )
@@ -191,12 +187,6 @@ if ( PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "" )
 endif()
 set ( CPACK_RPM_FILE_NAME "RPM-DEFAULT" )
 message("CPACK_RPM_PACKAGE_RELEASE: ${CPACK_RPM_PACKAGE_RELEASE}")
-## Process the Rpm install/remove scripts to update the CPACK variables
-configure_file ( "${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY )
-configure_file ( "${CMAKE_CURRENT_SOURCE_DIR}/RPM/postun.in" RPM/postun @ONLY )
-
-set ( CPACK_RPM_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post" )
-set ( CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun" )
 
 include ( CPack )
 
