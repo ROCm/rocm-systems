@@ -807,10 +807,14 @@ PUBLIC_API roctracer_pool_t* roctracer_default_pool_expl(roctracer_pool_t* pool)
   return p;
 }
 
+PUBLIC_API roctracer_pool_t* roctracer_default_pool() {
+  std::lock_guard lock(memory_pool_mutex);
+  return reinterpret_cast<roctracer_pool_t*>(default_memory_pool);
+}
+
 // Open memory pool
-PUBLIC_API roctracer_status_t roctracer_open_pool_expl(const roctracer_properties_t* properties,
-                                                       roctracer_pool_t** pool) {
-  API_METHOD_PREFIX
+static void roctracer_open_pool_impl(const roctracer_properties_t* properties,
+                                     roctracer_pool_t** pool) {
   std::lock_guard lock(memory_pool_mutex);
   if ((pool == nullptr) && (default_memory_pool != nullptr)) {
     EXC_RAISING(ROCTRACER_STATUS_ERROR, "default pool already set");
@@ -821,7 +825,29 @@ PUBLIC_API roctracer_status_t roctracer_open_pool_expl(const roctracer_propertie
     *pool = p;
   else
     default_memory_pool = p;
+}
+
+PUBLIC_API roctracer_status_t roctracer_open_pool_expl(const roctracer_properties_t* properties,
+                                                       roctracer_pool_t** pool) {
+  API_METHOD_PREFIX
+  roctracer_open_pool_impl(properties, pool);
   API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_open_pool(
+    const roctracer_properties_t* properties)
+{
+  API_METHOD_PREFIX
+  roctracer_open_pool_impl(properties, nullptr);
+  API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_next_record(
+    const activity_record_t* record,
+    const activity_record_t** next)
+{
+  *next = record + 1;
+  return ROCTRACER_STATUS_SUCCESS;
 }
 
 // Enable activity records logging
@@ -901,22 +927,49 @@ PUBLIC_API roctracer_status_t roctracer_enable_op_activity_expl(roctracer_domain
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_domain_activity_expl(roctracer_domain_t domain,
-                                                                    roctracer_pool_t* pool) {
+PUBLIC_API roctracer_status_t roctracer_enable_op_activity(activity_domain_t domain, uint32_t op) {
   API_METHOD_PREFIX
-  const uint32_t op_end = get_op_end(domain);
-  for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
-    roctracer_enable_activity_impl(domain, op, pool);
+  roctracer_enable_activity_impl(domain, op, nullptr);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_activity_expl(roctracer_pool_t* pool) {
+static void roctracer_enable_domain_activity_impl(roctracer_domain_t domain,
+                                                  roctracer_pool_t* pool) {
+  const uint32_t op_end = get_op_end(domain);
+  for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
+    roctracer_enable_activity_impl(domain, op, pool);
+}
+
+PUBLIC_API roctracer_status_t roctracer_enable_domain_activity_expl(roctracer_domain_t domain,
+                                                                    roctracer_pool_t* pool) {
   API_METHOD_PREFIX
+  roctracer_enable_domain_activity_impl(domain, pool);
+  API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_enable_domain_activity(activity_domain_t domain) {
+  API_METHOD_PREFIX
+  roctracer_enable_domain_activity_impl(domain, nullptr);
+  API_METHOD_SUFFIX
+}
+
+static void roctracer_enable_activity_impl(roctracer_pool_t* pool) {
   for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
     const uint32_t op_end = get_op_end(domain);
     for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
       roctracer_enable_activity_impl((roctracer_domain_t)domain, op, pool);
   }
+}
+
+PUBLIC_API roctracer_status_t roctracer_enable_activity_expl(roctracer_pool_t* pool) {
+  API_METHOD_PREFIX
+  roctracer_enable_activity_impl(pool);
+  API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_enable_activity() {
+  API_METHOD_PREFIX
+  roctracer_enable_activity_impl(nullptr);
   API_METHOD_SUFFIX
 }
 
@@ -1004,34 +1057,53 @@ PUBLIC_API roctracer_status_t roctracer_disable_activity() {
 }
 
 // Close memory pool
-PUBLIC_API roctracer_status_t roctracer_close_pool_expl(roctracer_pool_t* pool) {
-  API_METHOD_PREFIX
+static void roctracer_close_pool_impl(roctracer_pool_t* pool) {
   std::lock_guard lock(memory_pool_mutex);
   if (pool == nullptr) pool = reinterpret_cast<roctracer_pool_t*>(default_memory_pool);
-  if (pool != nullptr) {
-    MemoryPool* p = reinterpret_cast<MemoryPool*>(pool);
-    if (p == default_memory_pool) default_memory_pool = nullptr;
+  if (pool == nullptr) return;
+  MemoryPool* p = reinterpret_cast<MemoryPool*>(pool);
+  if (p == default_memory_pool) default_memory_pool = nullptr;
 
-    // Disable any activities that specify the pool being deleted.
-    std::vector<std::pair<roctracer_domain_t, uint32_t>> ops;
-    act_journal.ForEach(
-        [&ops, pool](roctracer_domain_t domain, uint32_t op, const ActivityJournalData& data) {
-          if (pool == data.pool) ops.emplace_back(domain, op);
-          return true;
-        });
-    for (auto&& [domain, op] : ops) roctracer_disable_activity_impl(domain, op);
+  // Disable any activities that specify the pool being deleted.
+  std::vector<std::pair<roctracer_domain_t, uint32_t>> ops;
+  act_journal.ForEach(
+      [&ops, pool](roctracer_domain_t domain, uint32_t op, const ActivityJournalData& data) {
+        if (pool == data.pool) ops.emplace_back(domain, op);
+        return true;
+      });
+  for (auto&& [domain, op] : ops) roctracer_disable_activity_impl(domain, op);
 
-    delete (p);
-  }
+  delete (p);
+}
+
+PUBLIC_API roctracer_status_t roctracer_close_pool_expl(roctracer_pool_t* pool) {
+  API_METHOD_PREFIX
+  roctracer_close_pool_impl(pool);
   API_METHOD_SUFFIX
 }
 
-// Flush available activity records
-PUBLIC_API roctracer_status_t roctracer_flush_activity_expl(roctracer_pool_t* pool) {
+PUBLIC_API roctracer_status_t roctracer_close_pool() {
   API_METHOD_PREFIX
+  roctracer_close_pool_impl(NULL);
+  API_METHOD_SUFFIX
+ }
+
+// Flush available activity records
+static void roctracer_flush_activity_impl(roctracer_pool_t* pool) {
   if (pool == nullptr) pool = roctracer_default_pool();
   MemoryPool* default_memory_pool = reinterpret_cast<MemoryPool*>(pool);
   if (default_memory_pool != nullptr) default_memory_pool->Flush();
+}
+
+PUBLIC_API roctracer_status_t roctracer_flush_activity_expl(roctracer_pool_t* pool) {
+  API_METHOD_PREFIX
+  roctracer_flush_activity_impl(pool);
+  API_METHOD_SUFFIX
+}
+
+PUBLIC_API roctracer_status_t roctracer_flush_activity() {
+  API_METHOD_PREFIX
+  roctracer_flush_activity_impl(nullptr);
   API_METHOD_SUFFIX
 }
 

@@ -376,14 +376,9 @@ typedef activity_record_t roctracer_record_t;
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-// Return next record
-static inline roctracer_status_t roctracer_next_record(
-    const activity_record_t* record,  // [in] record ptr
-    const activity_record_t** next)   // [out] next record ptr
-{
-  *next = record + 1;
-  return ROCTRACER_STATUS_SUCCESS;
-}
+roctracer_status_t roctracer_next_record(
+    const activity_record_t* record,
+    const activity_record_t** next);
 
 /**
  * Memory pool allocator callback.
@@ -506,11 +501,7 @@ roctracer_status_t roctracer_open_pool_expl(
  * @retval ROCTRACER_STATUS_ERROR The default pool is already defined. Unable
  * to create the pool.
  */
-static inline roctracer_status_t roctracer_open_pool(
-    const roctracer_properties_t* properties)
-{
-  return roctracer_open_pool_expl(properties, NULL);
-}
+roctracer_status_t roctracer_open_pool(const roctracer_properties_t* properties);
 
 /**
  * Close tracer memory pool.
@@ -538,7 +529,7 @@ roctracer_status_t roctracer_close_pool_expl(
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully or there is no default pool.
  */
-static inline roctracer_status_t roctracer_close_pool() { return roctracer_close_pool_expl(NULL); }
+roctracer_status_t roctracer_close_pool();
 
 /**
  * Query and set the default memory pool.
@@ -559,9 +550,7 @@ roctracer_pool_t* roctracer_default_pool_expl(
  *
  * @return Return the current default memory pool, or NULL is none is defined.
  */
-static inline roctracer_pool_t* roctracer_default_pool() {
-  return roctracer_default_pool_expl(NULL);
-}
+roctracer_pool_t* roctracer_default_pool();
 
 /**
  * Enable activity record logging for a specified operation of a domain
@@ -597,12 +586,9 @@ roctracer_status_t roctracer_enable_op_activity_expl(
  *
  * @retval ROCTRACER_STATUS_ERROR No default pool is defined.
  */
-static inline roctracer_status_t roctracer_enable_op_activity(
+roctracer_status_t roctracer_enable_op_activity(
     activity_domain_t domain,
-    uint32_t op)
-{
-  return roctracer_enable_op_activity_expl(domain, op, NULL);
-}
+    uint32_t op);
 
 /**
  * Enable activity record logging for all operations of a domain providing a
@@ -619,8 +605,8 @@ static inline roctracer_status_t roctracer_enable_op_activity(
  * @retval ROCTRACER_STATUS_ERROR \p pool is NULL and no default pool is defined.
  */
 roctracer_status_t roctracer_enable_domain_activity_expl(
-    activity_domain_t domain,  // tracing domain
-    roctracer_pool_t* pool);   // memory pool, NULL is a default one
+    activity_domain_t domain,
+    roctracer_pool_t* pool);
 
 /**
  * Enable activity record logging for all operations of a domain using the
@@ -633,11 +619,7 @@ roctracer_status_t roctracer_enable_domain_activity_expl(
  *
  * @retval ROCTRACER_STATUS_ERROR No default pool is defined.
  */
-static inline roctracer_status_t roctracer_enable_domain_activity(
-    activity_domain_t domain)
-{
-  return roctracer_enable_domain_activity_expl(domain, NULL);
-}
+roctracer_status_t roctracer_enable_domain_activity(activity_domain_t domain);
 
 /**
  * Enable activity record logging for all operations of all domains providing a
@@ -663,9 +645,7 @@ roctracer_status_t roctracer_enable_activity_expl(
  *
  * @retval ROCTRACER_STATUS_ERROR No default pool is defined.
  */
-static inline roctracer_status_t roctracer_enable_activity() {
-  return roctracer_enable_activity_expl(NULL);
-}
+roctracer_status_t roctracer_enable_activity();
 
 /**
  * Disable activity record logging for a specified operation of a domain.
@@ -727,9 +707,7 @@ roctracer_status_t roctracer_flush_activity_expl(
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-static inline roctracer_status_t roctracer_flush_activity() {
-  return roctracer_flush_activity_expl(NULL);
-}
+roctracer_status_t roctracer_flush_activity();
 
 /** @} */
 
