@@ -32,16 +32,16 @@ set(GEN_INC_DIR ${PROJECT_BINARY_DIR}/inc)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "/opt/rocm/hip/cmake")
 find_package(HIP REQUIRED MODULE)
 
-set_source_files_properties(MatrixTranspose/MatrixTranspose.cpp MatrixTranspose_test/MatrixTranspose.cpp
+set_source_files_properties(hip/MatrixTranspose.cpp app/MatrixTranspose_test.cpp
   PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
-hip_add_executable(MatrixTranspose EXCLUDE_FROM_ALL MatrixTranspose/MatrixTranspose.cpp)
+hip_add_executable(MatrixTranspose EXCLUDE_FROM_ALL hip/MatrixTranspose.cpp)
 target_include_directories(MatrixTranspose PRIVATE ${PROJECT_SOURCE_DIR}/inc)
 target_link_libraries(MatrixTranspose PRIVATE roctracer roctx)
 add_dependencies(mytest MatrixTranspose)
 
 function(build_matrix_transpose_test OUTPUT_FILE DEFINITIONS)
-  hip_add_executable(${OUTPUT_FILE} EXCLUDE_FROM_ALL MatrixTranspose_test/MatrixTranspose.cpp)
+  hip_add_executable(${OUTPUT_FILE} EXCLUDE_FROM_ALL app/MatrixTranspose_test.cpp)
   target_compile_definitions(${OUTPUT_FILE} PRIVATE ITERATIONS=100 HIP_TEST=1 ${DEFINITIONS})
   target_include_directories(${OUTPUT_FILE} PRIVATE ${PROJECT_SOURCE_DIR}/inc ${GEN_INC_DIR})
   target_link_libraries(${OUTPUT_FILE} PRIVATE roctracer roctx)
@@ -54,7 +54,7 @@ build_matrix_transpose_test(MatrixTranspose_hipaact_test HIP_API_ACTIVITY_ON=1)
 build_matrix_transpose_test(MatrixTranspose_mgpu MGPU_TEST=1)
 
 add_custom_command(OUTPUT MatrixTranspose.c
-  COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/MatrixTranspose_test/MatrixTranspose.cpp MatrixTranspose.c)
+  COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/app/MatrixTranspose_test.cpp MatrixTranspose.c)
 
 hip_add_executable(MatrixTranspose_ctest EXCLUDE_FROM_ALL MatrixTranspose.c)
 target_compile_definitions(MatrixTranspose_ctest PRIVATE HIP_TEST=0 __HIP_PLATFORM_HCC__)
@@ -62,26 +62,13 @@ target_include_directories(MatrixTranspose_ctest PRIVATE ${PROJECT_SOURCE_DIR}/i
 target_link_libraries(MatrixTranspose_ctest PRIVATE roctracer roctx)
 add_dependencies(mytest MatrixTranspose_ctest)
 
-file(GLOB files "${CMAKE_CURRENT_SOURCE_DIR}/golden_traces/*_trace.txt")
+file(GLOB files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "golden_traces/tests_trace_cmp_levels.txt" "golden_traces/*_trace.txt")
 foreach(file ${files})
-  execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${file} ${PROJECT_BINARY_DIR}/test/)
+  configure_file(${file} ${PROJECT_BINARY_DIR}/test/${file} COPYONLY)
 endforeach()
-execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/golden_traces/tests_trace_cmp_levels.txt ${PROJECT_BINARY_DIR}/test/)
 
 ## Build HSA test
 add_subdirectory(hsa/test ${PROJECT_BINARY_DIR}/test/hsa)
-
-if(DEFINED ROCTRACER_TARGET)
-  ## Build the tracer_tool library
-  file(GLOB TRACER_TOOL_SOURCES "tool/*.cpp" "${PROJECT_SOURCE_DIR}/src/util/*.cpp")
-  add_library(roctracer_tool SHARED ${TRACER_TOOL_SOURCES})
-  target_compile_definitions(roctracer_tool PRIVATE HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_HCC__)
-  target_include_directories(roctracer_tool PRIVATE hsa/test ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${HIP_INCLUDE_DIRECTORIES} ${GEN_INC_DIR})
-  target_link_libraries(roctracer_tool ${ROCTRACER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl)
-  set_target_properties(roctracer_tool PROPERTIES CXX_VISIBILITY_PRESET hidden LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tool/exportmap)
-  target_link_options(roctracer_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/tool/exportmap -Wl,--no-undefined)
-  install(TARGETS roctracer_tool LIBRARY DESTINATION lib/${ROCTRACER_NAME})
-endif ()
 
 ## Build hsaco_test.cpp referenc test
 add_library(hsaco_test SHARED EXCLUDE_FROM_ALL app/hsaco_test.cpp)
@@ -97,12 +84,12 @@ add_dependencies(mytest codeobj_test)
 
 ## Build the trace_buffer test
 add_executable(trace_buffer EXCLUDE_FROM_ALL directed/trace_buffer.cpp)
-target_include_directories(trace_buffer PRIVATE ${PROJECT_SOURCE_DIR}/test/tool)
+target_include_directories(trace_buffer PRIVATE ${PROJECT_SOURCE_DIR}/src/tracer_tool)
 target_link_libraries(trace_buffer Threads::Threads atomic)
 add_dependencies(mytest trace_buffer)
 
 ## copying run script
-execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/run.sh ${PROJECT_BINARY_DIR})
+configure_file(run.sh ${PROJECT_BINARY_DIR} COPYONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink run.sh ${PROJECT_BINARY_DIR}/run_ci.sh)
 ## copying tests output check script
-execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_SOURCE_DIR}/script/check_trace.py ${PROJECT_BINARY_DIR}/test/.)
+configure_file(${PROJECT_SOURCE_DIR}/script/check_trace.py ${PROJECT_BINARY_DIR}/test/check_trace.py COPYONLY)

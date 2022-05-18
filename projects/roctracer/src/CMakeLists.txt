@@ -113,7 +113,24 @@ add_custom_command(
 
 # Build the ROCtracer library
 
-file(GLOB ROCTRACER_SOURCES "src/core/*.cpp" "src/util/*.cpp")
+file(GLOB ROCTRACER_SOURCES "src/roctracer/*.cpp" "src/util/*.cpp")
+
+set(PUBLIC_HEADERS
+    roctx.h
+    roctracer.h
+    roctracer_ext.h
+    roctracer_hip.h
+    roctracer_hcc.h
+    roctracer_hsa.h
+    roctracer_roctx.h
+    ext/prof_protocol.h
+)
+
+set(GEN_HEADERS
+    hip_ostream_ops.h
+    hsa_prof_str.h
+    hsa_ostream_ops.h
+)
 
 add_library(roctracer ${LIBRARY_TYPE}
     ${ROCTRACER_SOURCES}
@@ -125,7 +142,7 @@ add_library(roctracer ${LIBRARY_TYPE}
 set_target_properties(roctracer PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     OUTPUT_NAME "roctracer64"
-    LINK_DEPENDS core.exportmap
+    LINK_DEPENDS roctracer.exportmap
     VERSION ${ROCTRACER_VERSION}
     SOVERSION ${ROCTRACER_VERSION_MAJOR}
 )
@@ -144,15 +161,15 @@ target_include_directories(roctracer
     ${HIP_INCLUDE_DIRECTORIES} ${HSA_RUNTIME_INCLUDE_DIRECTORIES}
   PRIVATE
     ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${PROJECT_SOURCE_DIR}/src
-    ${PROJECT_BINARY_DIR}/inc
+    ${PROJECT_SOURCE_DIR}/src/roctracer ${PROJECT_BINARY_DIR}/inc
 )
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/core/exportmap.in core.exportmap @ONLY)
-target_link_options(roctracer PRIVATE -Wl,--version-script=core.exportmap -Wl,--no-undefined)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/roctracer/exportmap.in roctracer.exportmap @ONLY)
+target_link_options(roctracer PRIVATE -Wl,--version-script=roctracer.exportmap -Wl,--no-undefined)
 
 target_link_libraries(roctracer PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl)
 
-install(TARGETS ${ROCTRACER_TARGET} LIBRARY DESTINATION lib)
+install(TARGETS roctracer LIBRARY DESTINATION lib)
 foreach(header ${PUBLIC_HEADERS})
     get_filename_component(header_subdir ${header} DIRECTORY)
     install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/inc/${header} DESTINATION include/${ROCTRACER_NAME}/${header_subdir})
@@ -178,7 +195,7 @@ set_target_properties(roctx PROPERTIES
 )
 
 target_include_directories(roctx PRIVATE
-    ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc
+    ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${PROJECT_SOURCE_DIR}/src/roctracer
     ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -186,3 +203,33 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/roctx/exportmap.in roctx.exportma
 target_link_options(roctx PRIVATE -Wl,--version-script=roctx.exportmap -Wl,--no-undefined)
 
 install(TARGETS roctx LIBRARY DESTINATION lib)
+
+## Build the tracer_tool library
+
+if (${LIBRARY_TYPE} STREQUAL SHARED)
+
+file(GLOB TRACER_TOOL_SOURCES "src/tracer_tool/*.cpp" "src/util/*.cpp")
+
+add_library(roctracer_tool SHARED ${TRACER_TOOL_SOURCES})
+
+set_target_properties(roctracer_tool PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/tracer_tool/exportmap
+)
+
+target_compile_definitions(roctracer_tool PRIVATE
+    HIP_PROF_HIP_API_STRING=1
+    __HIP_PLATFORM_HCC__=1
+)
+
+target_include_directories(roctracer_tool PRIVATE
+    ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${PROJECT_SOURCE_DIR}/src/roctracer
+    ${PROJECT_SOURCE_DIR}/src ${HIP_INCLUDE_DIRECTORIES} ${GEN_INC_DIR}
+)
+
+target_link_libraries(roctracer_tool roctracer hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl)
+target_link_options(roctracer_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/tracer_tool/exportmap -Wl,--no-undefined)
+
+install(TARGETS roctracer_tool LIBRARY DESTINATION lib/${ROCTRACER_NAME})
+
+endif()

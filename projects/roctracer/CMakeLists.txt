@@ -22,20 +22,12 @@
 
 cmake_minimum_required(VERSION 3.16.0)
 
-## Set module name and project name.
-set(ROCTRACER_NAME "roctracer")
-set(ROCTRACER_TARGET "${ROCTRACER_NAME}")
-
-string(TOUPPER "${ROCTRACER_NAME}" ROCTRACER_NAME_upper)
-project(${ROCTRACER_NAME_upper} VERSION 4.1.0)
+project(ROCTRACER VERSION 4.1.0)
 
 ## Build is not supported on Windows plaform
 if(WIN32)
   message(FATAL_ERROR "Windows build is not supported.")
 endif ()
-
-## Adding default path cmake modules
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -51,6 +43,9 @@ if(NOT DEFINED LIBRARY_TYPE)
   set(LIBRARY_TYPE SHARED)
 endif()
 
+## Set module name
+string(TOLOWER "${CMAKE_PROJECT_NAME}" ROCTRACER_NAME)
+
 ## Build libraries
 include(src/CMakeLists.txt)
 
@@ -58,23 +53,6 @@ include(src/CMakeLists.txt)
 if(${LIBRARY_TYPE} STREQUAL SHARED)
 add_subdirectory(test ${PROJECT_BINARY_DIR}/test)
 endif()
-
-## pbulic headers
-set(PUBLIC_HEADERS
-  roctx.h
-  roctracer.h
-  roctracer_ext.h
-  roctracer_hip.h
-  roctracer_hcc.h
-  roctracer_hsa.h
-  roctracer_roctx.h
-  ext/prof_protocol.h
-)
-set(GEN_HEADERS
-  hip_ostream_ops.h
-  hsa_prof_str.h
-  hsa_ostream_ops.h
-)
 
 if(${LIBRARY_TYPE} STREQUAL SHARED)
 

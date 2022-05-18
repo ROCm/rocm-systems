@@ -21,7 +21,7 @@
 #ifndef CALLBACK_TABLE_H_
 #define CALLBACK_TABLE_H_
 
-#include <ext/prof_protocol.h>
+#include "ext/prof_protocol.h"
 
 #include <array>
 #include <atomic>

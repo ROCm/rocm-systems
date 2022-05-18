@@ -28,7 +28,7 @@ events_count = {}
 events_order = {}
 events_order_r = {}
 trace2info = {}
-trace2info_filename = 'test/tests_trace_cmp_levels.txt'
+trace2info_filename = 'test/golden_traces/tests_trace_cmp_levels.txt'
 
 # Parses trace comparison config file and stores the info in a dictionary
 def parse_trace_levels(trace_config_filename, check_trace_flag):
@@ -151,8 +151,8 @@ def check_trace_status(tracename, verbose, check_trace_flag):
       print('PASSED!')
       return 0
 
-  trace = 'test/' + tracename + '.txt'
-  rtrace = tracename + '.txt'
+  trace = 'test/golden_traces/' + tracename + '.txt'
+  rtrace = 'test/out/' + tracename + '.out'
   if os.path.basename(tracename) in trace2info.keys():
     (trace_level, no_events_cnt, events2ignore, events2chkcnt, events2chkord, events2ch) = trace2info[os.path.basename(tracename)]
     trace_level = trace_level.rstrip('\n')

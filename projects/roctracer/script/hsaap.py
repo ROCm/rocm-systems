@@ -324,7 +324,7 @@ class API_DescrParser:
 
     self.content += '\n'
     self.content += '#if PROF_API_IMPL\n'
-    self.content += '#include \"core/callback_table.h\"\n';
+    self.content += '#include \"callback_table.h\"\n';
     self.content += 'namespace roctracer {\n'
     self.content += 'namespace hsa_support {\n'
     self.add_section('API callback functions', '', self.gen_callbacks)

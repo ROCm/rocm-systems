@@ -46,7 +46,7 @@ if [ -z "$ROCTRACER_LIB_PATH" ] ; then
   ROCTRACER_LIB_PATH="."
 fi
 if [ -z "$ROCTRACER_TOOL_PATH" ] ; then
-  ROCTRACER_TOOL_PATH="./test"
+  ROCTRACER_TOOL_PATH="."
 fi
 
 # test filter input
@@ -74,19 +74,19 @@ eval_test() {
   label=$1
   cmdline=$2
   test_name=$3
-  test_trace=$test_name.txt
 
   if [ $test_filter = -1  -o $test_filter = $test_number ] ; then
     echo "test $test_number: $test_name \"$label\""
     echo "CMD: \"$cmdline\""
+    mkdir -p test/out
     test_runnum=$((test_runnum + 1))
-    eval "$cmdline" 1>$test_trace 2>$test_name.err
+    eval "$cmdline" 1>test/out/$test_name.out 2>test/out/$test_name.err
     is_failed=$?
     if [ $is_failed != 0 ] ; then
       echo "--- stdout ---"
-      cat $test_trace
+      cat test/out/$test_name.out
       echo "--- stderr ---"
-      cat $test_name.err
+      cat test/out/$test_name.err
     fi
     if [ $IS_CI = 1 ] ; then
       is_failed=0;
@@ -138,8 +138,8 @@ eval_test "tool period test" "ROCP_CTRL_RATE=10:50000:500000 ./test/MatrixTransp
 eval_test "tool flushing test" "ROCP_FLUSH_RATE=100000 ./test/MatrixTranspose" MatrixTranspose_hip_flush_trace
 
 #API records filtering
-echo "<trace name=\"HIP\"><parameters api=\"hipFree, hipMalloc, hipMemcpy\"></parameters></trace>" > input.xml
-export ROCP_INPUT=input.xml
+echo "<trace name=\"HIP\"><parameters api=\"hipFree, hipMalloc, hipMemcpy\"></parameters></trace>" > test/input.xml
+export ROCP_INPUT=test/input.xml
 eval_test "tool HIP test input" ./test/MatrixTranspose MatrixTranspose_hip_input_trace
 unset ROCP_INPUT
 
@@ -160,8 +160,8 @@ export ROCP_THRS=1
 
 eval_test "tool HSA test" ./test/hsa/ctrl ctrl_hsa_trace
 
-echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > input.xml
-export ROCP_INPUT=input.xml
+echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > test/input.xml
+export ROCP_INPUT=test/input.xml
 eval_test "tool HSA test input" ./test/hsa/ctrl ctrl_hsa_input_trace
 unset ROCP_INPUT
 

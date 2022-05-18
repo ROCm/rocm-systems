@@ -18,13 +18,13 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#include "inc/roctx.h"
-#include "inc/roctracer_roctx.h"
+#include "roctx.h"
+#include "roctracer_roctx.h"
+#include "ext/prof_protocol.h"
 
 #include <cassert>
 
-#include "inc/ext/prof_protocol.h"
-#include "core/callback_table.h"
+#include "callback_table.h"
 #include "util/exception.h"
 #include "util/logger.h"
 

@@ -18,11 +18,11 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#include "inc/roctracer.h"
-#include "inc/roctracer_hip.h"
-#include "inc/roctracer_ext.h"
-#include "inc/roctracer_roctx.h"
-#include "inc/roctracer_hsa.h"
+#include "roctracer.h"
+#include "roctracer_hip.h"
+#include "roctracer_ext.h"
+#include "roctracer_roctx.h"
+#include "roctracer_hsa.h"
 
 #include <assert.h>
 #include <dirent.h>
@@ -36,10 +36,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include "core/journal.h"
-#include "core/loader.h"
-#include "core/memory_pool.h"
-#include "core/tracker.h"
+#include "journal.h"
+#include "loader.h"
+#include "memory_pool.h"
+#include "tracker.h"
 #include "util/exception.h"
 #include "util/logger.h"
 

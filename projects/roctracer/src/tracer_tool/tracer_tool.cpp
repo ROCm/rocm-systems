@@ -37,15 +37,15 @@
 
 
 #include <roctracer_ext.h>
-#include "src/util/exception.h"
 #include <roctracer_roctx.h>
 #include <roctracer_hsa.h>
 #include <roctracer_hip.h>
 
-#include "src/core/loader.h"
-#include "test/tool/trace_buffer.h"
-#include "util/evt_stats.h"
+#include "util/exception.h"
 #include "util/xml.h"
+#include "loader.h"
+#include "trace_buffer.h"
+#include "evt_stats.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
 #define CONSTRUCTOR_API __attribute__((constructor))
@@ -218,7 +218,8 @@ void flush_thr_fun() {
   while (!stop_flush_thread) {
     ROCTRACER_CALL(roctracer_flush_activity());
     roctracer::TraceBufferBase::FlushAll();
-    std::this_thread::sleep_until(std::chrono::steady_clock::now() + std::chrono::microseconds(control_flush_us));
+    std::this_thread::sleep_until(std::chrono::steady_clock::now() +
+                                  std::chrono::microseconds(control_flush_us));
   }
 }
 
