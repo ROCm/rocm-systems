@@ -15,3 +15,4 @@ ctrl_hsa_trace --check-event .*
 ctrl_hsa_input_trace --check-event .*
 hsa_co_trace --check-none
 code_obj_trace --check-none
+trace_buffer_trace --check-none

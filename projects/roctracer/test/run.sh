@@ -176,6 +176,8 @@ eval_test "tool tracer codeobj" ./test/MatrixTranspose code_obj_trace
 #valgrind --tool=massif $tbin
 #ms_print massif.out.<N>
 
+eval_test "directed TraceBuffer test" ./test/trace_buffer trace_buffer_trace
+
 echo "$test_number tests total / $test_runnum tests run / $test_status tests failed"
 if [ $test_status != 0 ] ; then
   echo $failed_tests

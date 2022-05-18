@@ -94,6 +94,12 @@ target_include_directories(codeobj_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PR
 target_link_libraries(codeobj_test roctracer)
 add_dependencies(mytest codeobj_test)
 
+## Build the trace_buffer test
+add_executable(trace_buffer EXCLUDE_FROM_ALL directed/trace_buffer.cpp)
+target_include_directories(trace_buffer PRIVATE ${PROJECT_SOURCE_DIR}/test/tool)
+target_link_libraries(trace_buffer Threads::Threads atomic)
+add_dependencies(mytest trace_buffer)
+
 ## copying run script
 execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/run.sh ${PROJECT_BINARY_DIR})
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink run.sh ${PROJECT_BINARY_DIR}/run_ci.sh)
