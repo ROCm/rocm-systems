@@ -2548,13 +2548,25 @@ def showNodesBw(deviceList):
     devices_ind = range(len(deviceList))
     minBW = c_uint32()
     maxBW = c_uint32()
+    hops = c_uint64()
+    linktype = c_uint64()
+    silent = False
+    nonXgmi = False
     gpu_links_type = [[0 for x in devices_ind] for y in devices_ind]
     printLogSpacer(' Bandwidth ')
     for srcdevice in deviceList:
         for destdevice in deviceList:
             if srcdevice != destdevice:
                 ret = rocmsmi.rsmi_minmax_bandwidth_get(srcdevice, destdevice, byref(minBW), byref(maxBW))
-                if rsmi_ret_ok(ret, " {}  to {}".format(srcdevice, destdevice),None ):
+                #verify that link type is xgmi
+                ret2 = rocmsmi.rsmi_topo_get_link_type(srcdevice, destdevice, byref(hops), byref(linktype))
+                if rsmi_ret_ok(ret2," {} to {}".format(srcdevice, destdevice), None, True):
+                    if linktype.value != 2:
+                        nonXgmi = True
+                        silent= True
+                        gpu_links_type[srcdevice][destdevice] = "N/A"
+
+                if rsmi_ret_ok(ret, " {}  to {}".format(srcdevice, destdevice),None,silent):
                     gpu_links_type[srcdevice][destdevice] = "{}-{}".format(minBW.value, maxBW.value)
             else:
                 gpu_links_type[srcdevice][destdevice] = "N/A"
@@ -2573,8 +2585,9 @@ def showNodesBw(deviceList):
             printTableRow('%-12s', gpu_links_type[gpu1][gpu2])
         printEmptyLine()
     printLog(None,"Format: min-max; Units: mps", None)
-    printLog(None,'"0-0" min-max bandwidth indicates devices are not connected dirrectly', None)
-
+    printLog(None,'"0-0" min-max bandwidth indicates devices are not connected directly', None)
+    if nonXgmi:
+        printLog(None,"Non-xGMI links detected and is currently not supported", None)
 
 def checkAmdGpus(deviceList):
     """ Check if there are any AMD GPUs being queried,
