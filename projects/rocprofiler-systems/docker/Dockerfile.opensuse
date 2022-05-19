@@ -38,6 +38,6 @@ RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -
     for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults python=3.${i} pip; done && \
     conda clean -a -y && \
     conda init
-œ
+
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]
