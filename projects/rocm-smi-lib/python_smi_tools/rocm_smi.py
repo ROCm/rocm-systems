@@ -2061,6 +2061,9 @@ def showRange(deviceList, rangeType):
                 printLog(device, 'Valid mclk range: %sMhz - %sMhz' % (
                 int(odvf.curr_mclk_range.lower_bound / 1000000), int(odvf.curr_mclk_range.upper_bound / 1000000)), None)
             if rangeType == 'voltage':
+                if odvf.num_regions == 0:
+                    printErrLog(device, 'Voltage curve regions unsupported.')
+                    continue
                 num_regions = c_uint32(odvf.num_regions)
                 regions = (rsmi_freq_volt_region_t * odvf.num_regions)()
                 ret = rocmsmi.rsmi_dev_od_volt_curve_regions_get(device, byref(num_regions), byref(regions))
