@@ -64,7 +64,7 @@ function(generate_wrapper_header)
     set(include_guard "${include_guard}ROCPROF_WRAPPER_INCLUDE_${INC_GAURD_NAME}_H")
      #set include statement
     get_filename_component(file_name ${header_file} NAME)
-    set(include_statements "${include_statements}#include \"../../include/${ROCPROFILER_NAME}/${file_name}\"\n")
+    set(include_statements "${include_statements}#include \"../../${CMAKE_INSTALL_INCLUDEDIR}/${ROCPROFILER_NAME}/${file_name}\"\n")
     configure_file(${ROCPROF_WRAPPER_DIR}/header.hpp.in ${ROCPROF_WRAPPER_INC_DIR}/${file_name})
     unset(include_guard)
     unset(include_statements)
@@ -76,7 +76,7 @@ function(generate_wrapper_header)
   get_filename_component(INC_GAURD_NAME ${file_name} NAME_WE)
   string(TOUPPER ${INC_GAURD_NAME} INC_GAURD_NAME)
   set(include_guard "${include_guard}ROCPROF_WRAPPER_INCLUDE_${INC_GAURD_NAME}_H")
-  set(include_statements "${include_statements}#include \"../../include/${ROCPROFILER_NAME}/${file_name}\"\n")
+  set(include_statements "${include_statements}#include \"../../${CMAKE_INSTALL_INCLUDEDIR}/${ROCPROFILER_NAME}/${file_name}\"\n")
   configure_file(${ROCPROF_WRAPPER_DIR}/header.hpp.in ${ROCPROF_WRAPPER_INC_DIR}/${file_name})
 endfunction()
 
@@ -88,7 +88,7 @@ function(create_binary_symlink)
   add_custom_target(link_${file_name} ALL
                  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                     COMMAND ${CMAKE_COMMAND} -E create_symlink
-                    ../../bin/${file_name} ${ROCPROF_WRAPPER_BIN_DIR}/${file_name})
+                    ../../${CMAKE_INSTALL_BINDIR}/${file_name} ${ROCPROF_WRAPPER_BIN_DIR}/${file_name})
 
 endfunction()
 
@@ -104,7 +104,7 @@ function(create_library_symlink)
     add_custom_target(link_${file_name} ALL
                   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                   COMMAND ${CMAKE_COMMAND} -E create_symlink
-                  ../../lib/${file_name} ${ROCPROF_WRAPPER_LIB_DIR}/${file_name})
+                  ../../${CMAKE_INSTALL_LIBDIR}/${file_name} ${ROCPROF_WRAPPER_LIB_DIR}/${file_name})
   endforeach()
   #create symlink to rocprofiler/tool/libtool.so
   # With File reorg,tool renamed to rocprof-tool
@@ -114,7 +114,7 @@ function(create_library_symlink)
   add_custom_target(link_${LIB_TOOL} ALL
                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                    COMMAND ${CMAKE_COMMAND} -E create_symlink
-                   ../../lib/${ROCPROFILER_NAME}/${LIB_ROCPROFTOOL} ${ROCPROF_WRAPPER_TOOL_DIR}/${LIB_TOOL})
+                   ../../${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}/${LIB_ROCPROFTOOL} ${ROCPROF_WRAPPER_TOOL_DIR}/${LIB_TOOL})
   #create symlink to test binary
   #since its saved in lib folder , the code for the same is added here
   # With File reorg ,binary name changed from ctrl to rocprof-ctrl
@@ -123,7 +123,7 @@ function(create_library_symlink)
   add_custom_target(link_${TEST_CTRL} ALL
                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                     COMMAND ${CMAKE_COMMAND} -E create_symlink
-                    ../../lib/${ROCPROFILER_NAME}/${TEST_ROCPROFCTRL} ${ROCPROF_WRAPPER_TOOL_DIR}/${TEST_CTRL})
+                    ../../${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}/${TEST_ROCPROFCTRL} ${ROCPROF_WRAPPER_TOOL_DIR}/${TEST_CTRL})
 endfunction()
 
 #Creater a template for header file
