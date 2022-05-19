@@ -431,7 +431,6 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         OMNITRACE_HIP_API_QUEUE_CASE(hipMemPrefetchAsync, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpy2DAsync, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpy2DFromArrayAsync, stream)
-        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpy2DToArrayAsync, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpy3DAsync, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpyAsync, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpyDtoDAsync, stream)
@@ -455,11 +454,14 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         OMNITRACE_HIP_API_QUEUE_CASE(hipStreamGetPriority, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipStreamQuery, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipStreamWaitEvent, stream)
+#if OMNITRACE_HIP_VERSION >= 40300
+        OMNITRACE_HIP_API_QUEUE_CASE(hipMemcpy2DToArrayAsync, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipStreamWaitValue32, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipStreamWaitValue64, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipStreamWriteValue32, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipStreamWriteValue64, stream)
-#if OMNITRACE_HIP_VERSION_MAJOR >= 4 && OMNITRACE_HIP_VERSION_MINOR >= 5
+#endif
+#if OMNITRACE_HIP_VERSION >= 40500
         OMNITRACE_HIP_API_QUEUE_CASE(hipGraphLaunch, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipGraphicsMapResources, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipGraphicsUnmapResources, stream)
@@ -468,7 +470,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         OMNITRACE_HIP_API_QUEUE_CASE(hipStreamEndCapture, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipWaitExternalSemaphoresAsync, stream)
 #endif
-#if OMNITRACE_HIP_VERSION_MAJOR >= 5
+#if OMNITRACE_HIP_VERSION >= 50000
         OMNITRACE_HIP_API_QUEUE_CASE(hipStreamIsCapturing, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipStreamGetCaptureInfo, stream)
         OMNITRACE_HIP_API_QUEUE_CASE(hipStreamGetCaptureInfo_v2, stream)

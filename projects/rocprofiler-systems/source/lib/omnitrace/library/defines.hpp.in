@@ -35,6 +35,10 @@
 #endif
 // clang-format on
 
+#define OMNITRACE_HIP_VERSION                                                            \
+    ((10000 * OMNITRACE_HIP_VERSION_MAJOR) + (100 * OMNITRACE_HIP_VERSION_MINOR) +       \
+     OMNITRACE_HIP_VERSION_PATCH)
+
 #define TIMEMORY_USER_COMPONENT_ENUM                                                     \
     OMNITRACE_COMPONENT_idx, OMNITRACE_USER_REGION_idx, OMNITRACE_ROCTRACER_idx,         \
         OMNITRACE_SAMPLING_WALL_CLOCK_idx, OMNITRACE_SAMPLING_CPU_CLOCK_idx,             \
