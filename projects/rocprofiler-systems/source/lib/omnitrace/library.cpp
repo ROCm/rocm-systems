@@ -41,6 +41,8 @@
 #include "library/thread_sampler.hpp"
 #include "library/timemory.hpp"
 
+#include <timemory/utility/procfs/maps.hpp>
+
 #include <atomic>
 #include <mutex>
 #include <string_view>
@@ -1290,6 +1292,18 @@ omnitrace_finalize_hidden(void)
     {
         coverage::post_process();
     }
+
+    tim::manager::instance()->add_metadata([](auto& ar) {
+        auto _maps = tim::procfs::read_maps(process::get_id());
+        auto _libs = std::set<std::string>{};
+        for(auto& itr : _maps)
+        {
+            auto&& _path = itr.pathname;
+            if(!_path.empty() && _path.at(0) != '[') _libs.emplace(_path);
+        }
+        ar(tim::cereal::make_nvp("memory_maps_files", _libs),
+           tim::cereal::make_nvp("memory_maps", _maps));
+    });
 
     OMNITRACE_VERBOSE_F(1, "Finalizing timemory...\n");
     tim::timemory_finalize();
