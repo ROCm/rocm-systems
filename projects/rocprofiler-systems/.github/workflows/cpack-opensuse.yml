@@ -1,0 +1,124 @@
+name: cpack-opensuse
+
+on:
+  push:
+    branches: [releases/**]
+  pull_request:
+    branches: [releases/**]
+
+env:
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+jobs:
+  cpack:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [15.2, 15.3]
+        rocm-version: [4.5, 5.0, 5.1]
+        extensions: ["--rocm +python", "--core +python"]
+
+    steps:
+      - name: Patch Git
+        timeout-minutes: 5
+        run: |
+          apt-get update
+          apt-get install -y software-properties-common
+          add-apt-repository -y ppa:git-core/ppa
+          apt-get update
+          apt-get upgrade -y
+          apt-get install -y git
+
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Build Base Container
+        timeout-minutes: 20
+        run: |
+          pushd docker
+          ./build-docker.sh --distro opensuse --versions ${{ matrix.os }} --rocm-versions ${{ matrix.rocm-version }}
+          popd
+
+      - name: Build Release
+        timeout-minutes: 20
+        run: |
+          pushd docker
+          ./build-docker-release.sh --distro opensuse --versions ${{ matrix.os }} --rocm-versions ${{ matrix.rocm-version }} -- ${{ matrix.extensions }}
+          popd
+
+      - name: List Files
+        timeout-minutes: 10
+        run: |
+          find . -type f | egrep '\.(sh|deb|rpm)$'
+
+      - name: STGZ Artifacts
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v2
+        with:
+          name: opensuse-stgz-installers
+          path: |
+            build-release/stgz/omnitrace-*.sh
+
+      - name: DEB Artifacts
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v2
+        with:
+          name: opensuse-deb-installers
+          path: |
+            build-release/deb/omnitrace_*.deb
+
+      # before testing remove any artifacts of the build
+      - name: Remove Build and Install
+        timeout-minutes: 10
+        run: |
+          mv build-release/stgz/omnitrace-*.sh ./
+          mv build-release/deb/omnitrace_*.deb ./
+          rm -rf build-release
+          rm -rf /opt/omnitrace
+
+      - name: STGZ Install
+        timeout-minutes: 10
+        run: |
+          set -v
+          mkdir /opt/omnitrace-stgz
+          ./omnitrace-*.sh --prefix=/opt/omnitrace-stgz --skip-license --exclude-dir
+
+      - name: List STGZ Install
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          find /opt/omnitrace-stgz
+
+      - name: Test STGZ Install
+        timeout-minutes: 10
+        run: |
+          set -v
+          export PATH=/opt/omnitrace-stgz/bin:${PATH}
+          export LD_LIBRARY_PATH=/opt/omnitrace-stgz/lib:${LD_LIBRARY_PATH}
+          omnitrace-avail --help
+          omnitrace --help
+          omnitrace-critical-trace --help
+
+      - name: DEB Install
+        timeout-minutes: 10
+        run: |
+          set -v
+          dpkg --contents ./omnitrace_*.deb
+          dpkg -i ./omnitrace_*.deb
+
+      - name: List DEB Install
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          find /opt/omnitrace
+
+      - name: Test DEB Install
+        timeout-minutes: 10
+        run: |
+          set -v
+          export PATH=/opt/omnitrace/bin:${PATH}
+          export LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}
+          omnitrace-avail --help
+          omnitrace --help

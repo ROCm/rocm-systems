@@ -16,7 +16,7 @@ RUN yum update -y && \
     yum groupinstall -y "Development Tools" && \
     yum install -y centos-release-scl && \
     yum install -y epel-release && \
-    yum install -y devtoolset-9 python3-pip openmpi3-devel zlib-devel numactl-devel papi-devel dpkg-devel dpkg-dev wget && \
+    yum install -y devtoolset-9 python3-pip openmpi3-devel zlib-devel numactl-devel papi-devel dpkg-devel dpkg-dev wget curl && \
     python3 -m pip install 'cmake==3.18.4'
 
 ARG AMDGPU_RPM=21.40.2/rhel/7.9/amdgpu-install-21.40.2.40502-1.el7.noarch.rpm
@@ -28,7 +28,7 @@ RUN yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
     yum update -y && \
     yum clean all
 
-ARG PYTHON_VERSIONS="6 7 8 9"
+ARG PYTHON_VERSIONS="6 7 8 9 10"
 
 RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
     bash miniconda.sh -b -p /opt/conda && \

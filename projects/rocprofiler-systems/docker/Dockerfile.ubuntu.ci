@@ -15,7 +15,7 @@ SHELL [ "/bin/bash", "-c" ]
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.186"
 ARG NJOBS="12"
-ARG PYTHON_VERSIONS="6 7 8 9"
+ARG PYTHON_VERSIONS="6 7 8 9 10"
 
 ENV PATH ${HOME}/.local/bin:${PATH}
 ENV LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}
@@ -26,7 +26,7 @@ COPY ./dyninst-source /tmp/dyninst
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
-    apt-get install -y build-essential cmake wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev python3-pip lsb-release zlib1g-dev libpapi-dev libpfm4-dev zip unzip locales bzip2 gzip && \
+    apt-get install -y build-essential cmake wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev python3-pip lsb-release zlib1g-dev libpapi-dev libpfm4-dev zip unzip locales bzip2 gzip curl && \
     python3 -m pip install 'cmake==3.18.4' && \
     apt-get autoclean && \
     locale -a && \

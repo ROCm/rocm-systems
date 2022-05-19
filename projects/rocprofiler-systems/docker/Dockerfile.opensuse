@@ -15,7 +15,7 @@ ENV PATH /usr/local/bin:${PATH}
 RUN zypper update -y && \
     zypper dist-upgrade -y && \
     zypper install -y -t pattern devel_basis && \
-    zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build wget && \
+    zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build wget curl binutils-gold && \
     python3 -m pip install 'cmake==3.18.4'
 
 # ARG AMDGPU_RPM=21.40.2/sle/15/amdgpu-install-21.40.2.40502-1.noarch.rpm
@@ -28,7 +28,7 @@ RUN zypper --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${A
     zypper install -y rocm-hip-sdk roctracer-dev rocm-smi-lib rocprofiler-dev && \
     zypper clean --all
 
-ARG PYTHON_VERSIONS="6 7 8 9"
+ARG PYTHON_VERSIONS="6 7 8 9 10"
 
 RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
     bash miniconda.sh -b -p /opt/conda && \
@@ -38,6 +38,6 @@ RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -
     for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults python=3.${i} pip; done && \
     conda clean -a -y && \
     conda init
-
+œ
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]

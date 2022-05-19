@@ -19,7 +19,7 @@ ARG NJOBS="12"
 RUN zypper update -y && \
     zypper dist-upgrade -y && \
     zypper install -y -t pattern devel_basis && \
-    zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build papi-devel && \
+    zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build papi-devel curl wget && \
     python3 -m pip install 'cmake==3.18.4'
 
 COPY ./dyninst-source /tmp/dyninst
@@ -28,6 +28,19 @@ RUN cd /tmp/dyninst && \
     cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON && \
     cmake --build build --target all --parallel ${NJOBS} && \
     cmake --build build --target install --parallel ${NJOBS} && \
+    cd /tmp && \
+    shopt -s dotglob extglob && \
+    rm -rf *
+
+ARG PYTHON_VERSIONS="6 7 8 9 10"
+
+RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
+    bash miniconda.sh -b -p /opt/conda && \
+    export PATH="/opt/conda/bin:${PATH}" && \
+    conda config --set always_yes yes --set changeps1 no && \
+    conda update -c defaults -n base conda && \
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults python=3.${i} pip numpy; done && \
+    conda clean -a -y && \
     cd /tmp && \
     shopt -s dotglob extglob && \
     rm -rf *

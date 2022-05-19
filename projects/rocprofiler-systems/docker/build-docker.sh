@@ -3,7 +3,7 @@
 : ${ROCM_VERSIONS:="5.0 4.5 4.3"}
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=20.04 18.04}
-: ${PYTHON_VERSIONS:="6 7 8 9"}
+: ${PYTHON_VERSIONS:="6 7 8 9 10"}
 : ${CI:=""}
 
 set -e
@@ -122,16 +122,31 @@ do
                     ;;
             esac
             case "${i}" in
-                5.0*)
-                    ROCM_RPM=latest/sle/15/amdgpu-install-21.50.50000-1.noarch.rpm
+                5.1.2)
+                    ROCM_RPM=22.10.2/sle/15/amdgpu-install-22.10.2.50102-1.noarch.rpm
                     ;;
-                4.5 | 4.5.2)
+                5.1.1)
+                    ROCM_RPM=22.10.1/sle/15/amdgpu-install-22.10.1.50101-1.noarch.rpm
+                    ;;
+                5.1 | 5.1.0)
+                    ROCM_RPM=22.10/sle/15/amdgpu-install-22.10.50100-1.noarch.rpm
+                    ;;
+                5.0.2)
+                    ROCM_RPM=21.50.2/sle/15/amdgpu-install-21.50.2.50002-1.noarch.rpm
+                    ;;
+                5.0.1)
+                    ROCM_RPM=21.50.1/sle/15/amdgpu-install-21.50.1.50001-1.noarch.rpm
+                    ;;
+                5.0 | 5.0.0)
+                    ROCM_RPM=21.50/sle/15/amdgpu-install-21.50.50000-1.noarch.rpm
+                    ;;
+                4.5.2)
                     ROCM_RPM=21.40.2/sle/15/amdgpu-install-21.40.2.40502-1.noarch.rpm
                     ;;
                 4.5.1)
                     ROCM_RPM=21.40.1/sle/15/amdgpu-install-21.40.1.40501-1.noarch.rpm
                     ;;
-                4.5.0)
+                4.5 | 4.5.0)
                     ROCM_RPM=21.40/sle/15/amdgpu-install-21.40.1.40501-1.noarch.rpm
                     ;;
                 *)

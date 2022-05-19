@@ -1,7 +1,7 @@
 name: cancel-builds-on-update
 on:
   workflow_run:
-    workflows: ['formatting', 'ubuntu-bionic', 'ubuntu-focal-external-rocm', 'ubuntu-focal-external', 'ubuntu-focal', 'cpack-bionic', 'cpack-bionic-rocm', 'cpack-focal', cpack-focal-rocm']
+    workflows: ['formatting', 'ubuntu-bionic', 'ubuntu-focal-external-rocm', 'ubuntu-focal-external', 'ubuntu-focal', 'cpack-ubuntu', 'cpack-opensuse']
     types: ['requested']
 
 jobs:

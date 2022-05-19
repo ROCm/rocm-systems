@@ -40,7 +40,7 @@ build-release()
 : ${VERSIONS:=20.04 18.04}
 : ${ROCM_VERSIONS:=5.0 4.5 4.3}
 : ${MPI:=0}
-: ${PYTHON_VERSIONS:=6 7 8 9}
+: ${PYTHON_VERSIONS:="6 7 8 9 10"}
 
 n=0
 while [[ $# -gt 0 ]]
