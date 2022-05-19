@@ -115,7 +115,7 @@ FILE* roctx_file_handle = NULL;
 FILE* hsa_api_file_handle = NULL;
 FILE* hsa_async_copy_file_handle = NULL;
 FILE* hip_api_file_handle = NULL;
-FILE* hcc_activity_file_handle = NULL;
+FILE* hip_activity_file_handle = NULL;
 FILE* pc_sample_file_handle = NULL;
 
 void close_output_file(FILE* file_handle);
@@ -125,7 +125,7 @@ void close_file_handles() {
   if (hsa_api_file_handle) close_output_file(hsa_api_file_handle);
   if (hsa_async_copy_file_handle) close_output_file(hsa_async_copy_file_handle);
   if (hip_api_file_handle) close_output_file(hip_api_file_handle);
-  if (hcc_activity_file_handle) close_output_file(hcc_activity_file_handle);
+  if (hip_activity_file_handle) close_output_file(hip_activity_file_handle);
   if (pc_sample_file_handle) close_output_file(pc_sample_file_handle);
 }
 
@@ -463,10 +463,10 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
 
     switch (record->domain) {
       case ACTIVITY_DOMAIN_HIP_OPS:
-        fprintf(hcc_activity_file_handle, "%lu:%lu %d:%lu %s:%lu:%u\n", record->begin_ns,
+        fprintf(hip_activity_file_handle, "%lu:%lu %d:%lu %s:%lu:%u\n", record->begin_ns,
                 record->end_ns, record->device_id, record->queue_id, name, record->correlation_id,
                 my_pid);
-        fflush(hcc_activity_file_handle);
+        fflush(hip_activity_file_handle);
         break;
       case ACTIVITY_DOMAIN_HSA_OPS:
         if (record->op == HSA_OP_ID_COPY) {
@@ -908,7 +908,7 @@ extern "C" ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_ver
     }
 
     if (trace_hip_activity) {
-      hcc_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
+      hip_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
       CHECK_ROCTRACER(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
     }
   }
