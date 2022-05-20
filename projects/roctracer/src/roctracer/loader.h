@@ -133,7 +133,7 @@ class RocpApi {
 };
 
 // HIP runtime library loader class
-#include "inc/roctracer_hip.h"
+#include "roctracer_hip.h"
 #if STATIC_BUILD
 __attribute__((weak)) hipError_t hipRegisterApiCallback(uint32_t id, void* fun, void* arg) {
   return hipErrorUnknown;
@@ -273,7 +273,7 @@ class HipApi {
 #endif
 
 // rocTX runtime library loader class
-#include "inc/roctracer_roctx.h"
+#include "roctracer_roctx.h"
 class RocTxApi {
  public:
   typedef BaseLoader<RocTxApi> Loader;

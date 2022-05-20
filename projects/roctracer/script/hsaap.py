@@ -23,9 +23,9 @@
 from __future__ import print_function
 import os, sys, re
 
-OUT='inc/hsa_prof_str.h'
+OUT='hsa_prof_str.h'
 API_TABLES_H = 'hsa_api_trace.h'
-API_HEADERS_H = ( 
+API_HEADERS_H = (
   ('CoreApiTable', 'hsa.h'),
   ('AmdExtTable', 'hsa_ext_amd.h'),
   ('ImageExtTable', 'hsa_ext_image.h'),

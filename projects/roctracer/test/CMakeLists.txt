@@ -20,60 +20,49 @@
 ## IN THE SOFTWARE.
 ################################################################################
 
-# Find clang to build the HSA code objects
-find_package(Clang REQUIRED CONFIG
-  PATHS "/opt/rocm/"
-  PATH_SUFFIXES "llvm/lib/cmake/clang"
-)
-
-add_custom_target(mytest) # builds all the tests
-add_dependencies(mytest roctracer_tool)
-
-# Add a 'check' target to run the tests.
-add_custom_target(check COMMAND ${PROJECT_BINARY_DIR}/run.sh DEPENDS mytest)
-
-## build HIP tests
-set(GEN_INC_DIR ${PROJECT_BINARY_DIR}/inc)
-
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "/opt/rocm/hip/cmake")
 find_package(HIP REQUIRED MODULE)
 
-set_source_files_properties(hip/MatrixTranspose.cpp app/MatrixTranspose_test.cpp
-  PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+find_package(Clang REQUIRED CONFIG
+             PATHS "/opt/rocm/"
+             PATH_SUFFIXES "llvm/lib/cmake/clang")
 
+## Add a custom targets to build and run all the tests
+add_custom_target(mytest)
+add_dependencies(mytest roctracer_tool)
+add_custom_target(check COMMAND ${PROJECT_BINARY_DIR}/run.sh DEPENDS mytest)
+
+## Build MatrixTranspose
+set_source_files_properties(hip/MatrixTranspose.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(MatrixTranspose EXCLUDE_FROM_ALL hip/MatrixTranspose.cpp)
 target_include_directories(MatrixTranspose PRIVATE ${PROJECT_SOURCE_DIR}/inc)
 target_link_libraries(MatrixTranspose PRIVATE roctracer roctx)
 add_dependencies(mytest MatrixTranspose)
 
+## Build MatrixTranspose_test, MatrixTranspose_hipaact_test and MatrixTranspose_mgpu
+set_source_files_properties(app/MatrixTranspose_test.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 function(build_matrix_transpose_test OUTPUT_FILE DEFINITIONS)
   hip_add_executable(${OUTPUT_FILE} EXCLUDE_FROM_ALL app/MatrixTranspose_test.cpp)
   target_compile_definitions(${OUTPUT_FILE} PRIVATE ITERATIONS=100 HIP_TEST=1 ${DEFINITIONS})
-  target_include_directories(${OUTPUT_FILE} PRIVATE ${PROJECT_SOURCE_DIR}/inc ${GEN_INC_DIR})
+  target_include_directories(${OUTPUT_FILE} PRIVATE ${PROJECT_SOURCE_DIR}/inc)
   target_link_libraries(${OUTPUT_FILE} PRIVATE roctracer roctx)
   add_dependencies(mytest ${OUTPUT_FILE})
 endfunction(build_matrix_transpose_test)
-
 
 build_matrix_transpose_test(MatrixTranspose_test "")
 build_matrix_transpose_test(MatrixTranspose_hipaact_test HIP_API_ACTIVITY_ON=1)
 build_matrix_transpose_test(MatrixTranspose_mgpu MGPU_TEST=1)
 
+## Build MatrixTranspose MatrixTranspose_ctest
 add_custom_command(OUTPUT MatrixTranspose.c
   COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/app/MatrixTranspose_test.cpp MatrixTranspose.c)
-
 hip_add_executable(MatrixTranspose_ctest EXCLUDE_FROM_ALL MatrixTranspose.c)
 target_compile_definitions(MatrixTranspose_ctest PRIVATE HIP_TEST=0 __HIP_PLATFORM_HCC__)
-target_include_directories(MatrixTranspose_ctest PRIVATE ${PROJECT_SOURCE_DIR}/inc ${GEN_INC_DIR})
+target_include_directories(MatrixTranspose_ctest PRIVATE ${PROJECT_SOURCE_DIR}/inc)
 target_link_libraries(MatrixTranspose_ctest PRIVATE roctracer roctx)
 add_dependencies(mytest MatrixTranspose_ctest)
 
-file(GLOB files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "golden_traces/tests_trace_cmp_levels.txt" "golden_traces/*_trace.txt")
-foreach(file ${files})
-  configure_file(${file} ${PROJECT_BINARY_DIR}/test/${file} COPYONLY)
-endforeach()
-
-## Build hsaco_test.cpp referenc test
+## Build hsaco_test reference test
 add_library(hsaco_test SHARED EXCLUDE_FROM_ALL app/hsaco_test.cpp)
 target_compile_definitions(hsaco_test PRIVATE AMD_INTERNAL_BUILD)
 target_link_libraries(hsaco_test hsa-runtime64::hsa-runtime64)
@@ -81,7 +70,7 @@ add_dependencies(mytest hsaco_test)
 
 ## Build codeobj event test
 add_library(codeobj_test SHARED EXCLUDE_FROM_ALL app/codeobj_test.cpp)
-target_include_directories(codeobj_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${GEN_INC_DIR})
+target_include_directories(codeobj_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc)
 target_link_libraries(codeobj_test roctracer)
 add_dependencies(mytest codeobj_test)
 
@@ -91,8 +80,7 @@ target_include_directories(trace_buffer PRIVATE ${PROJECT_SOURCE_DIR}/src/tracer
 target_link_libraries(trace_buffer Threads::Threads atomic)
 add_dependencies(mytest trace_buffer)
 
-
-## Build the hsa copy test
+## Build the hsa (standalone) copy test
 function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
   separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
     "-O2 -x cl -Xclang -finclude-default-header -cl-denorms-are-zero -cl-std=CL2.0
@@ -117,8 +105,12 @@ target_link_libraries(copy hsa-runtime64::hsa-runtime64 Threads::Threads dl)
 add_dependencies(copy hsaco_targets)
 add_dependencies(mytest copy)
 
-## copying run script
+## Copy the golden traces and test scripts
 configure_file(run.sh ${PROJECT_BINARY_DIR} COPYONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink run.sh ${PROJECT_BINARY_DIR}/run_ci.sh)
-## copying tests output check script
 configure_file(${PROJECT_SOURCE_DIR}/script/check_trace.py ${PROJECT_BINARY_DIR}/test/check_trace.py COPYONLY)
+
+file(GLOB files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "golden_traces/tests_trace_cmp_levels.txt" "golden_traces/*_trace.txt")
+foreach(file ${files})
+  configure_file(${file} ${PROJECT_BINARY_DIR}/test/${file} COPYONLY)
+endforeach()

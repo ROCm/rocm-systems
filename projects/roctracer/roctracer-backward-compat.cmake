@@ -37,7 +37,7 @@ function(set_file_contents input_file)
 ${file_contents}
 #endif")
     get_filename_component(file_name ${input_file} NAME)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
+    configure_file(${PROJECT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
 endfunction()
 
 #use header template file and generate wrapper header files
@@ -54,18 +54,18 @@ function(generate_wrapper_header)
     get_filename_component ( header_subdir ${header_file} DIRECTORY )
     if(header_subdir)
       set(include_statements "#include \"../../../include/${ROCTRACER_NAME}/${header_subdir}/${file_name}\"\n")
-      configure_file(${CMAKE_CURRENT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${header_subdir}/${file_name})
+      configure_file(${PROJECT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${header_subdir}/${file_name})
     else()
       set(include_statements "#include \"../../include/${ROCTRACER_NAME}/${file_name}\"\n")
       if(${file_name} STREQUAL "roctracer.h")
-        set_file_contents(${CMAKE_CURRENT_SOURCE_DIR}/inc/${file_name})
+        set_file_contents(${PROJECT_SOURCE_DIR}/inc/${file_name})
       else()
-        configure_file(${CMAKE_CURRENT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
+        configure_file(${PROJECT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
       endif()
     endif()
   endforeach()
 
-  foreach(header_file ${GEN_HEADERS})
+  foreach(header_file ${GENERATED_HEADERS})
     #set include  guard
     get_filename_component(INC_GAURD_NAME ${header_file} NAME_WE)
     string(TOUPPER ${INC_GAURD_NAME} INC_GAURD_NAME)
@@ -73,7 +73,7 @@ function(generate_wrapper_header)
     #set include statements
     get_filename_component(file_name ${header_file} NAME)
     set(include_statements "#include \"../../include/${ROCTRACER_NAME}/${file_name}\"\n")
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
+    configure_file(${PROJECT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
 
   endforeach()
 

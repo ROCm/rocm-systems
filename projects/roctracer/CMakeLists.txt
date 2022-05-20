@@ -20,14 +20,17 @@
 ## IN THE SOFTWARE.
 ################################################################################
 
-cmake_minimum_required(VERSION 3.16.0)
+cmake_minimum_required(VERSION 3.18.0)
 
 project(ROCTRACER VERSION 4.1.0)
+
+## Set module name
+string(TOLOWER "${CMAKE_PROJECT_NAME}" ROCTRACER_NAME)
 
 ## Build is not supported on Windows plaform
 if(WIN32)
   message(FATAL_ERROR "Windows build is not supported.")
-endif ()
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -43,15 +46,17 @@ if(NOT DEFINED LIBRARY_TYPE)
   set(LIBRARY_TYPE SHARED)
 endif()
 
-## Set module name
-string(TOLOWER "${CMAKE_PROJECT_NAME}" ROCTRACER_NAME)
+## FIXME!!! should not depend on another project's internal files
+execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory inc/rocprofiler)
+execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${PROJECT_SOURCE_DIR}/../rocprofiler/inc/rocprofiler.h inc/rocprofiler/rocprofiler.h)
+execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${PROJECT_SOURCE_DIR}/../rocprofiler/src/core/activity.h inc/rocprofiler/activity.h)
 
 ## Build libraries
-include(src/CMakeLists.txt)
+add_subdirectory(src)
 
 ## Build tests
 if(${LIBRARY_TYPE} STREQUAL SHARED)
-add_subdirectory(test ${PROJECT_BINARY_DIR}/test)
+  add_subdirectory(test)
 endif()
 
 if(${LIBRARY_TYPE} STREQUAL SHARED)
@@ -61,15 +66,10 @@ if(DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
   get_filename_component(DEST_NAME ${CPACK_PACKAGING_INSTALL_PREFIX} NAME)
   get_filename_component(DEST_DIR ${CPACK_PACKAGING_INSTALL_PREFIX} DIRECTORY)
   set(CPACK_PACKAGING_INSTALL_PREFIX ${DEST_DIR})
-endif ()
+endif()
 message("-----------Dest-name: ${DEST_NAME}")
 message("------Install-prefix: ${CMAKE_INSTALL_PREFIX}")
 message("-----------CPACK-dir: ${CPACK_PACKAGING_INSTALL_PREFIX}")
-
-option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
-if(FILE_REORG_BACKWARD_COMPATIBILITY)
-  include(roctracer-backward-compat.cmake)
-endif()
 
 ## Packaging directives
 set(CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR DEB;RPM")
@@ -89,8 +89,8 @@ if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
   message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")
 endif()
 
-# Install license file
-install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION share/doc/${CPACK_PACKAGE_NAME})
+## Install license file
+install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION share/doc/${ROCTRACER_NAME})
 
 ## Debian package specific variables
 if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
@@ -98,8 +98,8 @@ if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
 else()
   set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
 endif()
-message ("Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}")
-set (CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+message("Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}")
+set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
 ## RPM package specific variables
 if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
@@ -112,10 +112,10 @@ message("Using CPACK_RPM_PACKAGE_RELEASE ${CPACK_RPM_PACKAGE_RELEASE}")
 set( CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 ## 'dist' breaks manual builds on debian systems due to empty Provides
-execute_process( COMMAND rpm --eval %{?dist}
-                 RESULT_VARIABLE PROC_RESULT
-                 OUTPUT_VARIABLE EVAL_RESULT
-                 OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND rpm --eval %{?dist}
+                RESULT_VARIABLE PROC_RESULT
+                OUTPUT_VARIABLE EVAL_RESULT
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
 message("RESULT_VARIABLE ${PROC_RESULT} OUTPUT_VARIABLE: ${EVAL_RESULT}")
 
 if(PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "")
@@ -130,11 +130,11 @@ endif()
 
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
-  # set input and output files
+  ## Set input and output files
   set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in)
   set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
 
-  # request to configure the file
+  ## Request to configure the file
   configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
 
   add_custom_command(
@@ -158,5 +158,4 @@ if(DOXYGEN_FOUND)
     "${CMAKE_CURRENT_BINARY_DIR}/doc/html/"
     DESTINATION share/html/roctracer
     OPTIONAL)
-
 endif()
