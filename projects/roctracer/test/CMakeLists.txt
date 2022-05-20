@@ -20,8 +20,14 @@
 ## IN THE SOFTWARE.
 ################################################################################
 
+# Find clang to build the HSA code objects
+find_package(Clang REQUIRED CONFIG
+  PATHS "/opt/rocm/"
+  PATH_SUFFIXES "llvm/lib/cmake/clang"
+)
+
 add_custom_target(mytest) # builds all the tests
-add_dependencies(mytest roctracer_tool ctrl)
+add_dependencies(mytest roctracer_tool)
 
 # Add a 'check' target to run the tests.
 add_custom_target(check COMMAND ${PROJECT_BINARY_DIR}/run.sh DEPENDS mytest)
@@ -67,9 +73,6 @@ foreach(file ${files})
   configure_file(${file} ${PROJECT_BINARY_DIR}/test/${file} COPYONLY)
 endforeach()
 
-## Build HSA test
-add_subdirectory(hsa/test ${PROJECT_BINARY_DIR}/test/hsa)
-
 ## Build hsaco_test.cpp referenc test
 add_library(hsaco_test SHARED EXCLUDE_FROM_ALL app/hsaco_test.cpp)
 target_compile_definitions(hsaco_test PRIVATE AMD_INTERNAL_BUILD)
@@ -87,6 +90,32 @@ add_executable(trace_buffer EXCLUDE_FROM_ALL directed/trace_buffer.cpp)
 target_include_directories(trace_buffer PRIVATE ${PROJECT_SOURCE_DIR}/src/tracer_tool)
 target_link_libraries(trace_buffer Threads::Threads atomic)
 add_dependencies(mytest trace_buffer)
+
+
+## Build the hsa copy test
+function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
+  separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
+    "-O2 -x cl -Xclang -finclude-default-header -cl-denorms-are-zero -cl-std=CL2.0
+    -target amdgcn-amd-amdhsa -mcpu=${TARGET_ID} -o ${OUTPUT_FILE} ${INPUT_FILE}")
+  add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/${OUTPUT_FILE}
+    COMMAND clang ${CLANG_ARG_LIST}
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    DEPENDS ${INPUT_FILE} clang
+    COMMENT "Building ${OUTPUT_FILE}..."
+    VERBATIM)
+  set(HSACO_TARGET_LIST ${HSACO_TARGET_LIST} ${PROJECT_BINARY_DIR}/${OUTPUT_FILE} PARENT_SCOPE)
+endfunction(generate_hsaco)
+
+foreach(target_id ${GPU_TARGETS})
+  ## generate kernel bitcodes
+  generate_hsaco(${target_id} ${CMAKE_CURRENT_SOURCE_DIR}/hsa/copy.cl ${target_id}_copy.hsaco)
+endforeach(target_id)
+add_custom_target(hsaco_targets DEPENDS ${HSACO_TARGET_LIST})
+
+add_executable(copy EXCLUDE_FROM_ALL hsa/copy.cpp)
+target_link_libraries(copy hsa-runtime64::hsa-runtime64 Threads::Threads dl)
+add_dependencies(copy hsaco_targets)
+add_dependencies(mytest copy)
 
 ## copying run script
 configure_file(run.sh ${PROJECT_BINARY_DIR} COPYONLY)

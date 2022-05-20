@@ -114,7 +114,7 @@ eval_test() {
 
 # Tests dry run
 eval_test "MatrixTranspose dry run" ./test/MatrixTranspose MatrixTranspose_dryrun_trace
-eval_test "ctrl dry run" ./test/hsa/ctrl ctrl_dryrun_trace
+eval_test "copy dry run" ./test/copy copy_dryrun_trace
 
 # Standalone test
 # rocTrecer is used explicitely by test
@@ -158,11 +158,11 @@ export ROCP_AGENTS=1
 # each thread creates a queue pre GPU agent
 export ROCP_THRS=1
 
-eval_test "tool HSA test" ./test/hsa/ctrl ctrl_hsa_trace
+eval_test "tool HSA test" ./test/copy copy_hsa_trace
 
 echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > test/input.xml
 export ROCP_INPUT=test/input.xml
-eval_test "tool HSA test input" ./test/hsa/ctrl ctrl_hsa_input_trace
+eval_test "tool HSA test input" ./test/copy copy_hsa_input_trace
 unset ROCP_INPUT
 
 export HSA_TOOLS_LIB="$ROCTRACER_LIB_PATH/libroctracer64.so ./test/libhsaco_test.so"

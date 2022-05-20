@@ -1,6 +1,6 @@
 # dummy
 MatrixTranspose_dryrun_trace --check-none
-ctrl_dryrun_trace --check-none
+copy_dryrun_trace --check-none
 MatrixTranspose_ctest_trace --check-count .*
 MatrixTranspose_test_trace --check-count .*
 MatrixTranspose_hipaact_test_trace --check-count .* --ignore-count hipMemcpy|__hipPushCallConfiguration|hipLaunchKernel|__hipPopCallConfiguration
@@ -11,8 +11,8 @@ MatrixTranspose_hip_period_trace --check-events .* --ignore-event hipMalloc|hipF
 MatrixTranspose_hip_flush_trace --check-order .*
 MatrixTranspose_kfd_trace --check-events .*
 MatrixTranspose_hip_input_trace --check-events .*
-ctrl_hsa_trace --check-event .*
-ctrl_hsa_input_trace --check-event .*
+copy_hsa_trace --check-events .*
+copy_hsa_input_trace --check-events .*
 hsa_co_trace --check-none
 code_obj_trace --check-none
 trace_buffer_trace --check-none
