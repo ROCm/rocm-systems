@@ -134,7 +134,7 @@ export ROCTRACER_DOMAIN="sys:hsa:roctx"
 eval_test "tool SYS/HSA test" ./test/MatrixTranspose MatrixTranspose_sys_hsa_trace
 # Tracing control <delay:length:rate>
 export ROCTRACER_DOMAIN="hip"
-eval_test "tool period test" "ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose" MatrixTranspose_hip_period_trace
+eval_test "tool period test" "ROCP_CTRL_RATE=10:50000:500000 ./test/MatrixTranspose" MatrixTranspose_hip_period_trace
 eval_test "tool flushing test" "ROCP_FLUSH_RATE=100000 ./test/MatrixTranspose" MatrixTranspose_hip_flush_trace
 
 #API records filtering
