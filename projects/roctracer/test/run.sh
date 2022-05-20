@@ -35,12 +35,9 @@ fi
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and other libraries
-export LD_LIBRARY_PATH=$PWD
-if [ $IS_CI = 1 ] ; then
-  export LD_LIBRARY_PATH=/opt/rocm/lib/roctracer
-fi
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PWD
 if [ -n "$ROCTRACER_LIB_PATH" ] ; then
-  export LD_LIBRARY_PATH=$ROCTRACER_LIB_PATH
+  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ROCTRACER_LIB_PATH
 fi
 if [ -z "$ROCTRACER_LIB_PATH" ] ; then
   ROCTRACER_LIB_PATH="."
