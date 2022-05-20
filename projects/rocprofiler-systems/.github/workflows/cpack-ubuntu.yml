@@ -15,9 +15,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [18.04, 20.04]
-        rocm-version: [4.5, 5.0, 5.1]
-        extensions: ["--rocm +python", "--core +python"]
+        os: ["18.04", "20.04"]
+        rocm-version: ["4.5", "5.0", "5.1"]
+        extensions: ["--rocm +python --core +python"]
 
     steps:
       - uses: actions/checkout@v3
@@ -32,7 +32,7 @@ jobs:
           popd
 
       - name: Build Release
-        timeout-minutes: 20
+        timeout-minutes: 120
         run: |
           pushd docker
           ./build-docker-release.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${{ matrix.rocm-version }} -- ${{ matrix.extensions }}
@@ -41,7 +41,7 @@ jobs:
       - name: List Files
         timeout-minutes: 10
         run: |
-          find . -type f | egrep '\.(sh|deb|rpm)$'
+          find build-release -type f | egrep '\.(sh|deb|rpm)$'
 
       - name: STGZ Artifacts
         timeout-minutes: 10
@@ -49,7 +49,7 @@ jobs:
         with:
           name: ubuntu-stgz-installers
           path: |
-            build-release/stgz/omnitrace-*.sh
+            build-release/stgz/*.sh
 
       - name: DEB Artifacts
         timeout-minutes: 10
@@ -57,58 +57,55 @@ jobs:
         with:
           name: ubuntu-deb-installers
           path: |
-            build-release/deb/omnitrace_*.deb
+            build-release/deb/*.deb
 
       # before testing remove any artifacts of the build
-      - name: Remove Build and Install
+      - name: Remove Build
         timeout-minutes: 10
+        continue-on-error: true
         run: |
-          mv build-release/stgz/omnitrace-*.sh ./
-          mv build-release/deb/omnitrace_*.deb ./
+          mv build-release/stgz/*.sh ./
+          mv build-release/deb/*.deb ./
           rm -rf build-release
           rm -rf /opt/omnitrace
 
-      - name: STGZ Install
-        timeout-minutes: 10
+      - name: Test STGZ Install
+        timeout-minutes: 20
+        continue-on-error: true
         run: |
           set -v
           mkdir /opt/omnitrace-stgz
-          ./omnitrace-*.sh --prefix=/opt/omnitrace-stgz --skip-license --exclude-dir
-
-      - name: List STGZ Install
-        timeout-minutes: 10
-        continue-on-error: true
-        run: |
-          find /opt/omnitrace-stgz
-
-      - name: Test STGZ Install
-        timeout-minutes: 10
-        run: |
-          set -v
           export PATH=/opt/omnitrace-stgz/bin:${PATH}
           export LD_LIBRARY_PATH=/opt/omnitrace-stgz/lib:${LD_LIBRARY_PATH}
-          omnitrace-avail --help
-          omnitrace --help
-          omnitrace-critical-trace --help
-
-      - name: DEB Install
-        timeout-minutes: 10
-        run: |
-          set -v
-          dpkg --contents ./omnitrace_*.deb
-          dpkg -i ./omnitrace_*.deb
-
-      - name: List DEB Install
-        timeout-minutes: 10
-        continue-on-error: true
-        run: |
-          find /opt/omnitrace
+          for i in omnitrace-*.sh
+          do
+            echo -e "\n###### Testing ${i}... #####\n"
+            ./${i} --prefix=/opt/omnitrace-stgz --skip-license --exclude-dir
+            omnitrace-avail --help
+            omnitrace --help
+            omnitrace-python --help
+            set +e
+            rm -rf /opt/omnitrace-stgz/*
+            set -e
+          done
 
       - name: Test DEB Install
-        timeout-minutes: 10
+        timeout-minutes: 20
+        continue-on-error: true
         run: |
           set -v
           export PATH=/opt/omnitrace/bin:${PATH}
           export LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}
-          omnitrace-avail --help
-          omnitrace --help
+          for i in omnitrace_*.deb
+          do
+            echo -e "\n###### Testing ${i}... #####\n"
+            dpkg --contents ./${i}
+            sudo dpkg -i ./${i}
+            omnitrace-avail --help
+            omnitrace --help
+            omnitrace-python --help
+            sudo apt-get remove -y omnitrace
+            set +e
+            rm -rf /opt/omnitrace/*
+            set -e
+          done

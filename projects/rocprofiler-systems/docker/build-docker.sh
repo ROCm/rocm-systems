@@ -147,7 +147,7 @@ do
                     ROCM_RPM=21.40.1/sle/15/amdgpu-install-21.40.1.40501-1.noarch.rpm
                     ;;
                 4.5 | 4.5.0)
-                    ROCM_RPM=21.40/sle/15/amdgpu-install-21.40.1.40501-1.noarch.rpm
+                    ROCM_RPM=21.40/sle/15/amdgpu-install-21.40.40500-1.noarch.rpm
                     ;;
                 *)
                     send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${i}"
