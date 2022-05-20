@@ -33,7 +33,7 @@ build-release()
     shift
     shift
     shift
-    verbose-run docker run -it --rm -v ${PWD}:/home/omnitrace --env DISTRO=${OS} --env ROCM_VERSION=${ROCM_VERSION} --env VERSION=${CODE_VERSION} --env PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" ${CONTAINER} /home/omnitrace/scripts/build-release.sh ${@}
+    verbose-run docker run --rm -v ${PWD}:/home/omnitrace --env DISTRO=${OS} --env ROCM_VERSION=${ROCM_VERSION} --env VERSION=${CODE_VERSION} --env PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" ${CONTAINER} /home/omnitrace/scripts/build-release.sh ${@}
 }
 
 : ${DISTRO:=ubuntu}

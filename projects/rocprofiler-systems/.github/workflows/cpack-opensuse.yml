@@ -20,16 +20,6 @@ jobs:
         extensions: ["--rocm +python", "--core +python"]
 
     steps:
-      - name: Patch Git
-        timeout-minutes: 5
-        run: |
-          apt-get update
-          apt-get install -y software-properties-common
-          add-apt-repository -y ppa:git-core/ppa
-          apt-get update
-          apt-get upgrade -y
-          apt-get install -y git
-
       - uses: actions/checkout@v3
         with:
           submodules: recursive

@@ -4,7 +4,7 @@
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=20.04 18.04}
 : ${PYTHON_VERSIONS:="6 7 8 9 10"}
-: ${CI:=""}
+: ${BUILD_CI:=""}
 
 set -e
 
@@ -58,7 +58,7 @@ done
 
 DOCKER_FILE="Dockerfile.${DISTRO}"
 
-if [ -n "${CI}" ]; then DOCKER_FILE="${DOCKER_FILE}.ci"; fi
+if [ -n "${BUILD_CI}" ]; then DOCKER_FILE="${DOCKER_FILE}.ci"; fi
 if [ ! -f ${DOCKER_FILE} ]; then cd docker; fi
 if [ ! -f ${DOCKER_FILE} ]; then send-error "File \"${DOCKER_FILE}\" not found"; fi
 
