@@ -25,14 +25,13 @@
 time_stamp=`date +%y%m%d_%H%M%S`
 BIN_DIR=$(dirname $(realpath ${BASH_SOURCE[0]}))
 ROOT_DIR=$(dirname $BIN_DIR)
-TT_DIR=$ROOT_DIR/roctracer
 RUN_DIR=`pwd`
 TMP_DIR="/tmp"
 DATA_DIR="rpl_data_${time_stamp}_$$"
 
 RPL_PATH=$ROOT_DIR/lib
 TLIB_PATH=$RPL_PATH/rocprofiler
-TTLIB_PATH=$TT_DIR/tool
+TTLIB_PATH=$ROOT_DIR/lib/roctracer
 ROCM_LIB_PATH=$ROOT_DIR/lib
 PROF_BIN_DIR=$ROOT_DIR/libexec/rocprofiler
 
@@ -273,11 +272,11 @@ run() {
 
   if [ "$HSA_TRACE" = 1 ] ; then
     export ROCTRACER_DOMAIN=$API_TRACE":hsa"
-    MY_HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB $ROCM_LIB_PATH/libroctracer64.so $TTLIB_PATH/libtracer_tool.so"
+    MY_HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB $ROCM_LIB_PATH/libroctracer64.so $TTLIB_PATH/libroctracer_tool.so"
   elif [ -n "$API_TRACE" ] ; then
     export ROCTRACER_DOMAIN=$API_TRACE
     OUTPUT_LIST="$ROCP_OUTPUT_DIR/"
-    MY_HSA_TOOLS_LIB="$ROCM_LIB_PATH/libroctracer64.so $TTLIB_PATH/libtracer_tool.so"
+    MY_HSA_TOOLS_LIB="$ROCM_LIB_PATH/libroctracer64.so $TTLIB_PATH/libroctracer_tool.so"
   fi
 
   retval=1
