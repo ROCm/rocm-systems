@@ -27,11 +27,6 @@ BIN_NAME=`basename $0`
 BIN_DIR=`dirname $0`
 cd $BIN_DIR
 
-IS_CI=0
-if [ "$BIN_NAME" = "run_ci.sh" ] ; then
-  IS_CI=1
-fi
-
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and other libraries
@@ -91,16 +86,12 @@ eval_test() {
       echo "--- stderr ---"
       cat test/out/$test_name.err
     fi
-    if [ $IS_CI = 1 ] ; then
-      is_failed=0;
-    else
-      if [ $is_failed = 0 ] ; then
-        python3 ./test/check_trace.py -in $test_name -ck $check_trace_flag
-        is_failed=$?
-        if [ $is_failed != 0 ] ; then
-          echo "Trace checker error:"
-          python3 ./test/check_trace.py -v -in $test_name -ck $check_trace_flag
-        fi
+    if [ $is_failed = 0 ] ; then
+      python3 ./test/check_trace.py -in $test_name -ck $check_trace_flag
+      is_failed=$?
+      if [ $is_failed != 0 ] ; then
+        echo "Trace checker error:"
+        python3 ./test/check_trace.py -v -in $test_name -ck $check_trace_flag
       fi
     fi
     if [ $is_failed = 0 ] ; then
