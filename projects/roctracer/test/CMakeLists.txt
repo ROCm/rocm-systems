@@ -21,6 +21,7 @@
 ################################################################################
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "/opt/rocm/hip/cmake")
+set(CMAKE_HIP_ARCHITECTURES OFF)
 find_package(HIP REQUIRED MODULE)
 
 find_package(Clang REQUIRED CONFIG
