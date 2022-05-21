@@ -123,7 +123,8 @@ add_library(roctracer ${LIBRARY_TYPE} ${ROCTRACER_SOURCES} ${GENERATED_HEADERS})
 set_target_properties(roctracer PROPERTIES
                       CXX_VISIBILITY_PRESET hidden
                       OUTPUT_NAME "roctracer64"
-                      LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/roctracer.exportmap
+                      DEFINE_SYMBOL "ROCTRACER_EXPORTS"
+                      LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/roctracer/exportmap
                       VERSION ${ROCTRACER_VERSION}
                       SOVERSION ${ROCTRACER_VERSION_MAJOR})
 
@@ -139,8 +140,7 @@ target_include_directories(roctracer
     ${CMAKE_CURRENT_SOURCE_DIR}/roctracer ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/inc)
 
-configure_file(roctracer/exportmap.in roctracer.exportmap @ONLY)
-target_link_options(roctracer PRIVATE -Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/roctracer.exportmap -Wl,--no-undefined)
+target_link_options(roctracer PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/roctracer/exportmap -Wl,--no-undefined)
 target_link_libraries(roctracer PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl)
 
 install(TARGETS roctracer LIBRARY DESTINATION lib)
@@ -152,15 +152,15 @@ add_library(roctx ${LIBRARY_TYPE} ${ROCTX_SOURCES})
 set_target_properties(roctx PROPERTIES
                       CXX_VISIBILITY_PRESET hidden
                       OUTPUT_NAME "roctx64"
-                      LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/roctx.exportmap
+                      DEFINE_SYMBOL "ROCTX_EXPORTS"
+                      LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/roctx/exportmap
                       VERSION ${ROCTRACER_VERSION}
                       SOVERSION ${ROCTRACER_VERSION_MAJOR})
 
 target_include_directories(roctx
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/roctracer ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc)
 
-configure_file(roctx/exportmap.in roctx.exportmap @ONLY)
-target_link_options(roctx PRIVATE -Wl,--version-script=roctx.exportmap -Wl,--no-undefined)
+target_link_options(roctx PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/roctx/exportmap -Wl,--no-undefined)
 
 install(TARGETS roctx LIBRARY DESTINATION lib)
 

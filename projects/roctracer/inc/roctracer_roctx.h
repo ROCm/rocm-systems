@@ -18,36 +18,26 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-////////////////////////////////////////////////////////////////////////////////
-//
-// ROC-TX API
-//
-// ROC-TX library, Code Annotation API.
-// The goal of the implementation is to provide functionality for annotating
-// events, code ranges, and resources in applications.
-//
-////////////////////////////////////////////////////////////////////////////////
+#ifndef ROCTRACER_ROCTX_H_
+#define ROCTRACER_ROCTX_H_
 
-#ifndef INC_ROCTRACER_ROCTX_H_
-#define INC_ROCTRACER_ROCTX_H_
 #include <roctx.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif  // __cplusplus
-
-// ROC-TX API ID enumeration
+/**
+ *  ROCTX API ID enumeration
+ */
 enum roctx_api_id_t {
   ROCTX_API_ID_roctxMarkA = 0,
   ROCTX_API_ID_roctxRangePushA = 1,
   ROCTX_API_ID_roctxRangePop = 2,
   ROCTX_API_ID_roctxRangeStartA = 3,
   ROCTX_API_ID_roctxRangeStop = 4,
-
   ROCTX_API_ID_NUMBER,
 };
 
-// ROCTX callbacks data type
+/**
+ *  ROCTX callbacks data type
+ */
 typedef struct roctx_api_data_s {
   union {
     struct {
@@ -74,8 +64,4 @@ typedef struct roctx_api_data_s {
   } args;
 } roctx_api_data_t;
 
-#ifdef __cplusplus
-}  // extern "C" block
-#endif  // __cplusplus
-
-#endif  // INC_ROCTRACER_ROCTX_H_
+#endif /* ROCTRACER_ROCTX_H_ */
