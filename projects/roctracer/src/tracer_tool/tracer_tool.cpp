@@ -852,13 +852,14 @@ void tool_load() {
     uint32_t ctrl_rate = 0;
 
     if (sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate) != 3) {
-      EXC_RAISING(
-          ROCTRACER_STATUS_ERROR,
-          "Invalid ROCP_CTRL_RATE var(" << ctrl_str << "), expected ctrl_delay:ctrl_len:ctrl_rate");
+      fprintf(stderr,
+              "ROCTracer: Invalid ROCP_CTRL_RATE var(%s), expected ctrl_delay:ctrl_len:ctrl_rate",
+              ctrl_str);
+      abort();
     }
     if (ctrl_len > ctrl_rate) {
-      EXC_RAISING(ROCTRACER_STATUS_ERROR,
-                  "Control length value " << ctrl_len << " > rate value " << ctrl_rate);
+      fprintf(stderr, "ROCTracer: Control length value %u > rate value %u", ctrl_len, ctrl_rate);
+      abort();
     }
     control_dist_us = ctrl_rate - ctrl_len;
     control_len_us = ctrl_len;

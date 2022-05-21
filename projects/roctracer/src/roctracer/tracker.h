@@ -81,11 +81,11 @@ class Tracker {
     // Creating a proxy signal
     status = hsa_signal_create(1, 0, NULL, &(entry->signal));
     if (status != HSA_STATUS_SUCCESS)
-      EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_signal_create failed");
+      FATAL_LOGGING("hsa_signal_create failed");
     status =
         hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
     if (status != HSA_STATUS_SUCCESS)
-      EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_amd_signal_async_handler failed");
+      FATAL_LOGGING("hsa_amd_signal_async_handler failed");
   }
 
   // Delete tracker entry
@@ -101,7 +101,7 @@ class Tracker {
       uint64_t sysclock_hz = 0;
       hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
       if (status != HSA_STATUS_SUCCESS)
-        EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_system_get_info failed");
+        FATAL_LOGGING("hsa_system_get_info failed");
       return (uint64_t)1000000000 / sysclock_hz;
     }();
 
@@ -109,7 +109,7 @@ class Tracker {
       hsa_amd_profiling_async_copy_time_t async_copy_time{};
       hsa_status_t status = hsa_amd_profiling_get_async_copy_time(entry->signal, &async_copy_time);
       if (status != HSA_STATUS_SUCCESS)
-        EXC_RAISING(ROCTRACER_STATUS_ERROR, "hsa_amd_profiling_get_async_copy_time failed");
+        FATAL_LOGGING("hsa_amd_profiling_get_async_copy_time failed");
       entry->begin = async_copy_time.start * sysclock_period;
       entry->end = async_copy_time.end * sysclock_period;
     } else {

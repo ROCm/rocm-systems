@@ -39,8 +39,7 @@
 #include <mutex>
 #include <map>
 
-namespace roctracer {
-namespace util {
+namespace roctracer::util {
 
 class Logger {
  public:
@@ -164,8 +163,14 @@ class Logger {
   std::map<uint32_t, std::string> message_;
 };
 
-}  // namespace util
-}  // namespace roctracer
+}  // namespace roctracer::util
+
+#define FATAL_LOGGING(stream)                                                                      \
+  do {                                                                                             \
+    roctracer::util::Logger::Instance()                                                            \
+        << "fatal: " << roctracer::util::Logger::begm << stream << roctracer::util::Logger::endl;  \
+    abort();                                                                                       \
+  } while (0)
 
 #define ERR_LOGGING(stream)                                                                        \
   do {                                                                                             \

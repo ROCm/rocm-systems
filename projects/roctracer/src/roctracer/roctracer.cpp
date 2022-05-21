@@ -47,13 +47,12 @@
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
 
-#define CHECK_STATUS(msg, status)                                                                  \
+#define CHECK_HSA_STATUS(msg, status)                                                              \
   do {                                                                                             \
     if ((status) != HSA_STATUS_SUCCESS) {                                                          \
       const char* status_string = nullptr;                                                         \
       hsa_status_string(status, &status_string);                                                   \
-      ERR_LOGGING(msg << ": " << (status_string ? status_string : "<unknown error>"));             \
-      abort();                                                                                     \
+      FATAL_LOGGING(msg << ": " << (status_string ? status_string : "<unknown error>"));           \
     }                                                                                              \
   } while (false)
 
@@ -61,7 +60,7 @@
   do {                                                                                             \
     hipError_t err = call;                                                                         \
     if (err != hipSuccess) {                                                                       \
-      EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR, "HIP error: " #call " error(" << err << ")");      \
+      FATAL_LOGGING("HIP error: " #call " error(" << err << ")");                                  \
     }                                                                                              \
   } while (false)
 
@@ -155,13 +154,13 @@ uint64_t timestamp_ns() {
 
   hsa_status_t status = hsa_support::hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
   if (status == HSA_STATUS_ERROR_NOT_INITIALIZED) return 0;
-  CHECK_STATUS("hsa_system_get_info()", status);
+  CHECK_HSA_STATUS("hsa_system_get_info()", status);
 
   static uint64_t sysclock_period = []() {
     uint64_t sysclock_hz = 0;
     hsa_status_t status =
         hsa_support::hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
-    CHECK_STATUS("hsa_system_get_info()", status);
+    CHECK_HSA_STATUS("hsa_system_get_info()", status);
     return (uint64_t)1000000000 / sysclock_hz;
   }();
 
@@ -548,7 +547,7 @@ PUBLIC_API const char* roctracer_op_string(uint32_t domain, uint32_t op, uint32_
     case ACTIVITY_DOMAIN_EXT_API:
       return "EXT_API";
     default:
-      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
   API_METHOD_CATCH(nullptr)
 }
@@ -561,7 +560,7 @@ PUBLIC_API roctracer_status_t roctracer_op_code(uint32_t domain, const char* str
     case ACTIVITY_DOMAIN_HSA_API: {
       *op = hsa_support::GetApiCode(str);
       if (*op == HSA_API_ID_NUMBER) {
-        EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER,
+        EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT,
                     "Invalid API name \"" << str << "\", domain ID(" << domain << ")");
       }
       if (kind != nullptr) *kind = 0;
@@ -570,14 +569,14 @@ PUBLIC_API roctracer_status_t roctracer_op_code(uint32_t domain, const char* str
     case ACTIVITY_DOMAIN_HIP_API: {
       *op = hipApiIdByName(str);
       if (*op == HIP_API_ID_NONE) {
-        EXC_RAISING(ROCTRACER_STATUS_BAD_PARAMETER,
+        EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT,
                     "Invalid API name \"" << str << "\", domain ID(" << domain << ")");
       }
       if (kind != nullptr) *kind = 0;
       break;
     }
     default:
-      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "limited domain ID(" << domain << ")");
+      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "limited domain ID(" << domain << ")");
   }
   API_METHOD_SUFFIX
 }
@@ -599,7 +598,7 @@ static inline uint32_t get_op_begin(uint32_t domain) {
     case ACTIVITY_DOMAIN_ROCTX:
       return 0;
     default:
-      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
   return 0;
 }
@@ -621,33 +620,35 @@ static inline uint32_t get_op_end(uint32_t domain) {
     case ACTIVITY_DOMAIN_ROCTX:
       return ROCTX_API_ID_NUMBER;
     default:
-      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
   return 0;
 }
 
 // Enable runtime API callbacks
-static roctracer_status_t roctracer_enable_callback_fun(roctracer_domain_t domain, uint32_t op,
-                                                        roctracer_rtapi_callback_t callback,
-                                                        void* user_data) {
+static void roctracer_enable_callback_fun(roctracer_domain_t domain, uint32_t op,
+                                          roctracer_rtapi_callback_t callback, void* user_data) {
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS:
       break;
     case ACTIVITY_DOMAIN_HSA_API: {
 #if 0
       if (op == HSA_API_ID_DISPATCH) {
-        if (!RocpLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data)) EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::RegisterApiCallback error(" << op << ") failed");
+        if (!RocpLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data))
+          FATAL_LOGGING("HSA::RegisterApiCallback error(" << op << ") failed");
         break;
       }
 #endif
-      if (op >= HSA_API_ID_NUMBER) return ROCTRACER_STATUS_BAD_PARAMETER;
+      if (op >= HSA_API_ID_NUMBER)
+        EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT,
+                    "invalid HSA API operation ID(" << op << ")");
+
       hsa_support::cb_table.Set(op, callback, user_data);
       break;
     }
     case ACTIVITY_DOMAIN_HSA_EVT: {
       if (!RocpLoader::Instance().RegisterEvtCallback(op, (void*)callback, user_data))
-        EXC_RAISING(ROCTRACER_STATUS_HSA_ERR,
-                    "HSA::RegisterEvtCallback error(" << op << ") failed");
+        FATAL_LOGGING("HSA::RegisterEvtCallback error(" << op << ") failed");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_OPS:
@@ -659,29 +660,26 @@ static roctracer_status_t roctracer_enable_callback_fun(roctracer_domain_t domai
       hipError_t hip_err =
           HipLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
       if (hip_err != hipSuccess)
-        EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR,
-                    "HIP::RegisterApiCallback(" << op << ") error(" << hip_err << ")");
+        FATAL_LOGGING("HIP::RegisterApiCallback(" << op << ") error(" << hip_err << ")");
 
       if (HipApiActivityEnableCheck(op) == 0) {
         hip_err = HipLoader::Instance().RegisterActivityCallback(op, (void*)HIP_SyncApiDataCallback,
                                                                  (void*)1);
         if (hip_err != hipSuccess)
-          EXC_RAISING(
-              ROCTRACER_STATUS_HIP_API_ERR,
-              "HIPAPI: HIP::RegisterActivityCallback(" << op << ") error(" << hip_err << ")");
+          FATAL_LOGGING("HIPAPI: HIP::RegisterActivityCallback(" << op << ") error(" << hip_err
+                                                                 << ")");
       }
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
       if (RocTxLoader::Instance().Enabled() &&
           !RocTxLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data))
-        EXC_RAISING(ROCTRACER_STATUS_ROCTX_ERR, "ROCTX::RegisterApiCallback(" << op << ") failed");
+        FATAL_LOGGING("ROCTX::RegisterApiCallback(" << op << ") failed");
       break;
     }
     default:
-      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
-  return ROCTRACER_STATUS_SUCCESS;
 }
 
 static void roctracer_enable_callback_impl(roctracer_domain_t domain, uint32_t op,
@@ -720,16 +718,19 @@ PUBLIC_API roctracer_status_t roctracer_enable_callback(roctracer_rtapi_callback
 }
 
 // Disable runtime API callbacks
-static roctracer_status_t roctracer_disable_callback_fun(roctracer_domain_t domain, uint32_t op) {
+static void roctracer_disable_callback_fun(roctracer_domain_t domain, uint32_t op) {
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS:
       break;
     case ACTIVITY_DOMAIN_HSA_API: {
 #if 0
-      if (op == HSA_API_ID_DISPATCH && !RocpLoader::Instance().RemoveApiCallback(op)) EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::RemoveActivityCallback error(" << op << ") failed");
+      if (op == HSA_API_ID_DISPATCH && !RocpLoader::Instance().RemoveApiCallback(op))
+        FATAL_LOGGING("HSA::RemoveActivityCallback error(" << op << ") failed");
         break;
 #endif
-      if (op >= HSA_API_ID_NUMBER) return ROCTRACER_STATUS_BAD_PARAMETER;
+      if (op >= HSA_API_ID_NUMBER)
+        EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT,
+                    "invalid HSA API operation ID(" << op << ")");
       hsa_support::cb_table.Set(op, nullptr, nullptr);
       break;
     }
@@ -741,32 +742,29 @@ static roctracer_status_t roctracer_disable_callback_fun(roctracer_domain_t doma
 
       const hipError_t hip_err = HipLoader::Instance().RemoveApiCallback(op);
       if (hip_err != hipSuccess)
-        EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR,
-                    "HIP::RemoveApiCallback(" << op << "), error(" << hip_err << ")");
+        FATAL_LOGGING("HIP::RemoveApiCallback(" << op << "), error(" << hip_err << ")");
 
       if (HipApiActivityDisableCheck(op) == 0) {
         const hipError_t hip_err = HipLoader::Instance().RemoveActivityCallback(op);
         if (hip_err != hipSuccess)
-          EXC_RAISING(
-              ROCTRACER_STATUS_HIP_API_ERR,
-              "HIPAPI: HIP::RemoveActivityCallback op(" << op << "), error(" << hip_err << ")");
+          FATAL_LOGGING("HIPAPI: HIP::RemoveActivityCallback op(" << op << "), error(" << hip_err
+                                                                  << ")");
       }
       break;
     }
     case ACTIVITY_DOMAIN_HSA_EVT: {
       if (!RocpLoader::Instance().RemoveEvtCallback(op))
-        EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::RemoveEvtCallback error(" << op << ") failed");
+        FATAL_LOGGING("HSA::RemoveEvtCallback error(" << op << ") failed");
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
       if (RocTxLoader::Instance().Enabled() && !RocTxLoader::Instance().RemoveApiCallback(op))
-        EXC_RAISING(ROCTRACER_STATUS_ROCTX_ERR, "ROCTX::RemoveApiCallback(" << op << ") failed");
+        FATAL_LOGGING("ROCTX::RemoveApiCallback(" << op << ") failed");
       break;
     }
     default:
-      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
-  return ROCTRACER_STATUS_SUCCESS;
 }
 
 static void roctracer_disable_callback_impl(roctracer_domain_t domain, uint32_t op) {
@@ -817,10 +815,10 @@ static void roctracer_open_pool_impl(const roctracer_properties_t* properties,
                                      roctracer_pool_t** pool) {
   std::lock_guard lock(memory_pool_mutex);
   if ((pool == nullptr) && (default_memory_pool != nullptr)) {
-    EXC_RAISING(ROCTRACER_STATUS_ERROR, "default pool already set");
+    EXC_RAISING(ROCTRACER_STATUS_ERROR_DEFAULT_POOL_ALREADY_DEFINED, "default pool already set");
   }
   MemoryPool* p = new MemoryPool(*properties);
-  if (p == nullptr) EXC_RAISING(ROCTRACER_STATUS_ERROR, "MemoryPool() error");
+  if (p == nullptr) EXC_RAISING(ROCTRACER_STATUS_ERROR_MEMORY_ALLOCATION, "MemoryPool() error");
   if (pool != nullptr)
     *pool = p;
   else
@@ -846,13 +844,14 @@ PUBLIC_API roctracer_status_t roctracer_next_record(
     const activity_record_t* record,
     const activity_record_t** next)
 {
+  API_METHOD_PREFIX
   *next = record + 1;
-  return ROCTRACER_STATUS_SUCCESS;
+  API_METHOD_SUFFIX
 }
 
 // Enable activity records logging
-static roctracer_status_t roctracer_enable_activity_fun(roctracer_domain_t domain, uint32_t op,
-                                                        roctracer_pool_t* pool) {
+static void roctracer_enable_activity_fun(roctracer_domain_t domain, uint32_t op,
+                                          roctracer_pool_t* pool) {
   assert(pool != nullptr);
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
@@ -868,7 +867,7 @@ static roctracer_status_t roctracer_enable_activity_fun(roctracer_domain_t domai
                                                       (void*)pool);
         }
         if (!RocpLoader::Instance().EnableActivityCallback(op, true))
-          EXC_RAISING(ROCTRACER_STATUS_HSA_ERR, "HSA::EnableActivityCallback error");
+          FATAL_LOGGING("HSA::EnableActivityCallback error");
       }
       break;
     }
@@ -887,7 +886,7 @@ static roctracer_status_t roctracer_enable_activity_fun(roctracer_domain_t domai
         HipLoader::Instance().InitActivityDone() = true;
       }
       if (!HipLoader::Instance().EnableActivityCallback(op, true))
-        EXC_RAISING(ROCTRACER_STATUS_HIP_OPS_ERR, "HIP::EnableActivityCallback error");
+        FATAL_LOGGING("HIP::EnableActivityCallback error");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
@@ -898,23 +897,22 @@ static roctracer_status_t roctracer_enable_activity_fun(roctracer_domain_t domai
         const hipError_t hip_err = HipLoader::Instance().RegisterActivityCallback(
             op, (void*)HIP_SyncActivityCallback, (void*)pool);
         if (hip_err != hipSuccess)
-          EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR,
-                      "HIP::RegisterActivityCallback(" << op << " error(" << hip_err << ")");
+          FATAL_LOGGING("HIP::RegisterActivityCallback(" << op << " error(" << hip_err << ")");
       }
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX:
       break;
     default:
-      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
-  return ROCTRACER_STATUS_SUCCESS;
 }
 
 static void roctracer_enable_activity_impl(roctracer_domain_t domain, uint32_t op,
                                            roctracer_pool_t* pool) {
   if (pool == nullptr) pool = default_memory_pool;
-  if (pool == nullptr) EXC_RAISING(ROCTRACER_STATUS_ERROR, "no default pool");
+  if (pool == nullptr)
+    EXC_RAISING(ROCTRACER_STATUS_ERROR_DEFAULT_POOL_UNDEFINED, "no default pool");
   act_journal.Insert(domain, op, {pool});
   roctracer_enable_activity_fun(domain, op, pool);
 }
@@ -974,7 +972,7 @@ PUBLIC_API roctracer_status_t roctracer_enable_activity() {
 }
 
 // Disable activity records logging
-static roctracer_status_t roctracer_disable_activity_fun(roctracer_domain_t domain, uint32_t op) {
+static void roctracer_disable_activity_fun(roctracer_domain_t domain, uint32_t op) {
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
       if (op == HSA_OP_ID_COPY) {
@@ -983,8 +981,7 @@ static roctracer_status_t roctracer_disable_activity_fun(roctracer_domain_t doma
       } else {
         if (RocpLoader::GetRef() == nullptr) break;
         if (!RocpLoader::Instance().EnableActivityCallback(op, false))
-          EXC_RAISING(ROCTRACER_STATUS_HSA_ERR,
-                      "HSA::EnableActivityCallback(false) error, op(" << op << ")");
+          FATAL_LOGGING("HSA::EnableActivityCallback(false) error, op(" << op << ")");
       }
       break;
     }
@@ -995,8 +992,7 @@ static roctracer_status_t roctracer_disable_activity_fun(roctracer_domain_t doma
     case ACTIVITY_DOMAIN_HIP_OPS: {
       if (HipLoader::Instance().Enabled() &&
           !HipLoader::Instance().EnableActivityCallback(op, false))
-        EXC_RAISING(ROCTRACER_STATUS_HIP_OPS_ERR,
-                    "HIP::EnableActivityCallback(nullptr) error, op(" << op << ")");
+        FATAL_LOGGING("HIP::EnableActivityCallback(nullptr) error, op(" << op << ")");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
@@ -1006,24 +1002,21 @@ static roctracer_status_t roctracer_disable_activity_fun(roctracer_domain_t doma
       if (HipActActivityDisableCheck(op) == 0) {
         const hipError_t hip_err = HipLoader::Instance().RemoveActivityCallback(op);
         if (hip_err != hipSuccess)
-          EXC_RAISING(ROCTRACER_STATUS_HIP_API_ERR,
-                      "HIP::RemoveActivityCallback op(" << op << "), error(" << hip_err << ")");
+          FATAL_LOGGING("HIP::RemoveActivityCallback op(" << op << "), error(" << hip_err << ")");
       } else {
         const hipError_t hip_err = HipLoader::Instance().RegisterActivityCallback(
             op, (void*)HIP_SyncApiDataCallback, (void*)1);
         if (hip_err != hipSuccess)
-          EXC_RAISING(
-              ROCTRACER_STATUS_HIP_API_ERR,
-              "HIPACT: HIP::RegisterActivityCallback(" << op << ") error(" << hip_err << ")");
+          FATAL_LOGGING("HIPACT: HIP::RegisterActivityCallback(" << op << ") error(" << hip_err
+                                                                 << ")");
       }
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX:
       break;
     default:
-      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
-  return ROCTRACER_STATUS_SUCCESS;
 }
 
 static void roctracer_disable_activity_impl(roctracer_domain_t domain, uint32_t op) {
@@ -1123,16 +1116,11 @@ PUBLIC_API roctracer_status_t
 roctracer_activity_pop_external_correlation_id(activity_correlation_id_t* last_id) {
   API_METHOD_PREFIX
   if (last_id != nullptr) *last_id = 0;
-
-  if (external_id_stack.empty() != true) {
-    if (last_id != nullptr) *last_id = external_id_stack.top();
-    external_id_stack.pop();
-  } else {
-#if 0
-    EXC_RAISING(ROCTRACER_STATUS_ERROR, "not matching external range pop");
-#endif
-    return ROCTRACER_STATUS_ERROR;
-  }
+  if (external_id_stack.empty())
+    EXC_RAISING(ROCTRACER_STATUS_ERROR_MISMATCHED_EXTERNAL_CORRELATION_ID,
+                "not matching external range pop");
+  if (last_id != nullptr) *last_id = external_id_stack.top();
+  external_id_stack.pop();
   API_METHOD_SUFFIX
 }
 
@@ -1231,7 +1219,7 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(roctracer_domain_t domain
       break;
     }
     default:
-      EXC_RAISING(ROCTRACER_STATUS_BAD_DOMAIN, "invalid domain ID(" << domain << ")");
+      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
   API_METHOD_SUFFIX
 }

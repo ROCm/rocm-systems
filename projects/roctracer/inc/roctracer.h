@@ -114,32 +114,65 @@ typedef enum {
   /**
    * A generic error has occurred.
    */
-  ROCTRACER_STATUS_ERROR = 1,
+  ROCTRACER_STATUS_ERROR = -1,
+  /**
+   * The domain ID is invalid.
+   */
+  ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID = -2,
+  /**
+   * An invalid argument was given to the function.
+   */
+  ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT = -3,
+  /**
+   * No default pool is defined.
+   */
+  ROCTRACER_STATUS_ERROR_DEFAULT_POOL_UNDEFINED = -4,
+  /**
+   * The default pool is already defined.
+   */
+  ROCTRACER_STATUS_ERROR_DEFAULT_POOL_ALREADY_DEFINED = -5,
+  /**
+   * Memory allocation error.
+   */
+  ROCTRACER_STATUS_ERROR_MEMORY_ALLOCATION = -6,
+  /**
+   * External correlation ID pop mismatch.
+   */
+  ROCTRACER_STATUS_ERROR_MISMATCHED_EXTERNAL_CORRELATION_ID = -7,
+  /**
+   * Deprecated error code.
+   */
   ROCTRACER_STATUS_UNINIT = 2,
+  /**
+   * Deprecated error code.
+   */
   ROCTRACER_STATUS_BREAK = 3,
   /**
-   * The domain is invalid.
+   * Deprecated error code.
    */
-  ROCTRACER_STATUS_BAD_DOMAIN = 4,
+  ROCTRACER_STATUS_BAD_DOMAIN = ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID,
   /**
-   * A parameter is invalid.
+   * Deprecated error code.
    */
-  ROCTRACER_STATUS_BAD_PARAMETER = 5,
+  ROCTRACER_STATUS_BAD_PARAMETER = ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT,
   /**
-   * An error in a HIP API domain operation.
+   * Deprecated error code.
    */
   ROCTRACER_STATUS_HIP_API_ERR = 6,
   /**
-   * An error in a HIP asynchronous operation domain operation.
+   * Deprecated error code.
    */
   ROCTRACER_STATUS_HIP_OPS_ERR = 7,
+  /**
+   * Deprecated error code.
+   */
   ROCTRACER_STATUS_HCC_OPS_ERR = ROCTRACER_STATUS_HIP_OPS_ERR,
   /**
-   * An error in a HSA domain operation.
+   * Deprecated error code.
    */
   ROCTRACER_STATUS_HSA_ERR = 7,
   /**
-   * An error in a ROCTX domain operation.
+   * Deprecated error code.
    */
   ROCTRACER_STATUS_ROCTX_ERR = 8,
 } roctracer_status_t;
@@ -203,9 +236,11 @@ const char* roctracer_op_string(uint32_t domain,
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.  \p op and \p kind have been updated.
  *
- * @retval ::ROCTRACER_STATUS_BAD_PARAMETER Then \p op is invalid for \p domain.
+ * @retval ::ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT The \p op is invalid for
+ * \p domain.
  *
- * @retval ::ROCTRACER_STATUS_BAD_DOMAIN The domain is invalid or not supported.
+ * @retval ::ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID The domain is invalid or
+ * not supported.
  */
 roctracer_status_t roctracer_op_code(uint32_t domain,
                                      const char* str,
@@ -261,9 +296,10 @@ typedef activity_rtapi_callback_t roctracer_rtapi_callback_t;
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  *
- * @retval ::ROCTRACER_STATUS_BAD_DOMAIN \p domain is invalid.
+ * @retval ::ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID \p domain is invalid.
  *
- * @retval ::ROCTRACER_STATUS_BAD_PARAMETER \p op is invalid.
+ * @retval ::ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT \p op is invalid for \p
+ * domain.
  */
 roctracer_status_t roctracer_enable_op_callback(
     activity_domain_t domain,
@@ -284,7 +320,7 @@ roctracer_status_t roctracer_enable_op_callback(
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  *
- * @retval ::ROCTRACER_STATUS_BAD_DOMAIN \p domain is invalid.
+ * @retval ::ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID \p domain is invalid.
  */
 roctracer_status_t roctracer_enable_domain_callback(
     activity_domain_t domain,
@@ -316,9 +352,10 @@ roctracer_status_t roctracer_enable_callback(
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  *
- * @retval ::ROCTRACER_STATUS_BAD_DOMAIN \p domain is invalid.
+ * @retval ::ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID \p domain is invalid.
  *
- * @retval ::ROCTRACER_STATUS_BAD_PARAMETER \p op is invalid.
+ * @retval ::ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT \p op is invalid for \p
+ * domain.
  */
 roctracer_status_t roctracer_disable_op_callback(activity_domain_t domain,
                                                  uint32_t op);
@@ -331,7 +368,7 @@ roctracer_status_t roctracer_disable_op_callback(activity_domain_t domain,
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  *
- * @retval ::ROCTRACER_STATUS_BAD_DOMAIN \p domain is invalid.
+ * @retval ::ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID \p domain is invalid.
  */
 roctracer_status_t roctracer_disable_domain_callback(activity_domain_t domain);
 
@@ -480,8 +517,11 @@ typedef void roctracer_pool_t;
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  *
- * @retval ROCTRACER_STATUS_ERROR \p pool is NULL and the default pool is
- * already defined. Unable to create the pool.
+ * @retval ROCTRACER_STATUS_ERROR_DEFAULT_POOL_ALREADY_DEFINED \p pool is NULL
+ * and the default pool is already defined. Unable to create the pool.
+ *
+ * @retval ROCTRACER_STATUS_ERROR_MEMORY_ALLOCATION Unable to allocate memory
+ * for the \p pool. Unable to create the pool.
  */
 roctracer_status_t roctracer_open_pool_expl(
     const roctracer_properties_t* properties,
@@ -498,8 +538,11 @@ roctracer_status_t roctracer_open_pool_expl(
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  *
- * @retval ROCTRACER_STATUS_ERROR The default pool is already defined. Unable
- * to create the pool.
+ * @retval ROCTRACER_STATUS_ERROR_DEFAULT_POOL_ALREADY_DEFINED The default pool
+ * is already defined. Unable to create the pool.
+ *
+ * @retval ROCTRACER_STATUS_ERROR_MEMORY_ALLOCATION Unable to allocate memory
+ * for the \p pool. Unable to create the pool.
  */
 roctracer_status_t roctracer_open_pool(const roctracer_properties_t* properties);
 
