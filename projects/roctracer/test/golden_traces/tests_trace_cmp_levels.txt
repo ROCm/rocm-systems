@@ -16,3 +16,4 @@ copy_hsa_input_trace --check-events .*
 hsa_co_trace --check-none
 code_obj_trace --check-none
 trace_buffer_trace --check-none
+roctx_test_trace --check-count .*

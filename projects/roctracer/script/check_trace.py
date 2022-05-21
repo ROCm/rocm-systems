@@ -243,6 +243,7 @@ def gen_events_info(tracefile, trace_level, no_events_cnt, events2ignore, events
   # 1822810364769411:1822810364771941 116477:116477 hsa_agent_get_info(<agent 0x8990e0>, 17, 0x7ffeac015fec) = 0
   # tool_gpu_act_record
   # 3632773658039902:3632773658046462 0:0 hcCommandMarker:273
+  roctx_record = re.compile(r'\d+\s\d+:(\d)+\s(\d):\d+:\".*\"')
 
   with open(tracefile) as f:
     for line in f:
@@ -262,6 +263,10 @@ def gen_events_info(tracefile, trace_level, no_events_cnt, events2ignore, events
       if tool_record_match:
         event = tool_record_match.group(2)
         tid = int(tool_record_match.group(1))
+      roctx_record_match = roctx_record.match(line)
+      if roctx_record_match:
+        event = roctx_record_match.group(2)
+        tid = int(roctx_record_match.group(1))
       if event == '' or event == '(null)': #some traces has these null events
         continue
 

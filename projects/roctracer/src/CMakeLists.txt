@@ -136,9 +136,9 @@ target_include_directories(roctracer
   PUBLIC
     ${HIP_INCLUDE_DIRECTORIES} ${HSA_RUNTIME_INCLUDE_DIRECTORIES}
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/inc>
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/roctracer ${CMAKE_CURRENT_SOURCE_DIR}
-    ${PROJECT_SOURCE_DIR}/inc)
+    ${CMAKE_CURRENT_SOURCE_DIR}/roctracer ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_options(roctracer PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/roctracer/exportmap -Wl,--no-undefined)
 target_link_libraries(roctracer PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl)
@@ -158,7 +158,8 @@ set_target_properties(roctx PROPERTIES
                       SOVERSION ${ROCTRACER_VERSION_MAJOR})
 
 target_include_directories(roctx
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/roctracer ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc)
+  PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/inc>
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/roctracer ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_options(roctx PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/roctx/exportmap -Wl,--no-undefined)
 

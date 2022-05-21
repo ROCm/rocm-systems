@@ -58,12 +58,14 @@ int ROCTX_API roctxRangePop() {
 
 roctx_range_id_t ROCTX_API roctxRangeStartA(const char* message) {
   static std::atomic<roctx_range_id_t> start_stop_range_id(1);
+  auto id = start_stop_range_id++;
 
   roctx_api_data_t api_data{};
   api_data.args.roctxRangeStartA.message = message;
+  api_data.args.roctxRangeStartA.id = id;
   callbacks.Invoke(ROCTX_API_ID_roctxRangeStartA, &api_data);
 
-  return start_stop_range_id++;
+  return id;
 }
 
 void ROCTX_API roctxRangeStop(roctx_range_id_t rangeId) {

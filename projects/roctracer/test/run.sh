@@ -68,6 +68,12 @@ xeval_test() {
 }
 
 eval_test() {
+  bright=$(tput bold)
+  red=$(tput setaf 1)
+  green=$(tput setaf 2)
+  blue=$(tput setaf 4)
+  normal=$(tput sgr0)
+
   label=$1
   cmdline=$2
   test_name=$3
@@ -98,9 +104,9 @@ eval_test() {
       fi
     fi
     if [ $is_failed = 0 ] ; then
-      echo "$test_name: PASSED"
+      echo "${bright}${blue}$test_name: ${green}PASSED${normal}"
     else
-      echo "$test_name: FAILED"
+      echo "${bright}${blue}$test_name: ${red}FAILED${normal}"
       failed_tests="$failed_tests\n  $test_number: $test_name - \"$label\""
       test_status=$(($test_status + 1))
     fi
@@ -123,6 +129,10 @@ eval_test "standalone HIP MGPU test" "./test/MatrixTranspose_mgpu" MatrixTranspo
 # Tool test
 # rocTracer/tool is loaded by HSA runtime
 export HSA_TOOLS_LIB="$ROCTRACER_LIB_PATH/libroctracer64.so $ROCTRACER_TOOL_PATH/libroctracer_tool.so"
+
+# ROCTX test
+export ROCTRACER_DOMAIN="roctx"
+eval_test "roctx test" ./test/roctx_test roctx_test_trace
 
 # SYS test
 export ROCTRACER_DOMAIN="sys:roctx"

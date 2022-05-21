@@ -105,6 +105,12 @@ target_link_libraries(copy hsa-runtime64::hsa-runtime64 Threads::Threads dl)
 add_dependencies(copy hsaco_targets)
 add_dependencies(mytest copy)
 
+## Build the ROCTX test
+set_source_files_properties(app/roctx_test.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(roctx_test EXCLUDE_FROM_ALL app/roctx_test.cpp)
+target_link_libraries(roctx_test Threads::Threads roctx)
+add_dependencies(mytest roctx_test)
+
 ## Copy the golden traces and test scripts
 configure_file(run.sh ${PROJECT_BINARY_DIR} COPYONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink run.sh ${PROJECT_BINARY_DIR}/run_ci.sh)
