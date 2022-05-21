@@ -1,3 +1,9 @@
+ROCTRACER_4.0 {
+global: roctracer_flush_buf;
+        roctracer_load;
+        roctracer_unload;
+};
+
 ROCTRACER_4.1 {
 global: OnLoad;
         OnUnload;
@@ -25,9 +31,7 @@ global: OnLoad;
         roctracer_error_string;
         roctracer_flush_activity;
         roctracer_flush_activity_expl;
-        roctracer_flush_buf;
         roctracer_get_timestamp;
-        roctracer_load;
         roctracer_mark;
         roctracer_next_record;
         roctracer_op_code;
@@ -37,8 +41,7 @@ global: OnLoad;
         roctracer_set_properties;
         roctracer_start;
         roctracer_stop;
-        roctracer_unload;
         roctracer_version_major;
         roctracer_version_minor;
 local:  *;
-};
+} ROCTRACER_4.0;

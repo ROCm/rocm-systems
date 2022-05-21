@@ -718,15 +718,11 @@ void tool_unload() {
   close_tracing_pool();
   roctracer::TraceBufferBase::FlushAll();
 
-  roctracer_flush_buf();
   close_file_handles();
-
 
   if (hip_api_stats) hip_api_stats->dump();
   if (hip_kernel_stats) hip_kernel_stats->dump();
   if (hip_memcpy_stats) hip_memcpy_stats->dump();
-
-  roctracer_unload();
 
   ONLOAD_TRACE_END();
 }
@@ -899,8 +895,6 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
                                   uint64_t failed_tool_count,
                                   const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
-
-  roctracer_load();
 
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
 

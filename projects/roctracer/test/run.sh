@@ -185,6 +185,8 @@ eval_test "tool tracer codeobj" ./test/MatrixTranspose code_obj_trace
 
 eval_test "directed TraceBuffer test" ./test/trace_buffer trace_buffer_trace
 
+eval_test "backward compatibilty tests" ./test/backward_compat_test backward_compat_test_trace
+
 echo "$test_number tests total / $test_runnum tests run / $test_status tests failed"
 if [ $test_status != 0 ] ; then
   echo $failed_tests

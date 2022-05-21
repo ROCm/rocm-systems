@@ -17,3 +17,4 @@ hsa_co_trace --check-none
 code_obj_trace --check-none
 trace_buffer_trace --check-none
 roctx_test_trace --check-count .*
+backward_compat_test_trace --check-none

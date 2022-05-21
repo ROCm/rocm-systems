@@ -111,6 +111,11 @@ hip_add_executable(roctx_test EXCLUDE_FROM_ALL app/roctx_test.cpp)
 target_link_libraries(roctx_test Threads::Threads roctx)
 add_dependencies(mytest roctx_test)
 
+## Build the backward compatibility test
+add_executable(backward_compat_test EXCLUDE_FROM_ALL app/backward_compat_test.cpp)
+target_link_libraries(backward_compat_test roctracer)
+add_dependencies(mytest backward_compat_test)
+
 ## Copy the golden traces and test scripts
 configure_file(run.sh ${PROJECT_BINARY_DIR} COPYONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink run.sh ${PROJECT_BINARY_DIR}/run_ci.sh)

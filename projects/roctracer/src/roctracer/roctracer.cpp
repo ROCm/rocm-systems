@@ -832,18 +832,14 @@ PUBLIC_API roctracer_status_t roctracer_open_pool_expl(const roctracer_propertie
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_open_pool(
-    const roctracer_properties_t* properties)
-{
+PUBLIC_API roctracer_status_t roctracer_open_pool(const roctracer_properties_t* properties) {
   API_METHOD_PREFIX
   roctracer_open_pool_impl(properties, nullptr);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_next_record(
-    const activity_record_t* record,
-    const activity_record_t** next)
-{
+PUBLIC_API roctracer_status_t roctracer_next_record(const activity_record_t* record,
+                                                    const activity_record_t** next) {
   API_METHOD_PREFIX
   *next = record + 1;
   API_METHOD_SUFFIX
@@ -1079,7 +1075,7 @@ PUBLIC_API roctracer_status_t roctracer_close_pool() {
   API_METHOD_PREFIX
   roctracer_close_pool_impl(NULL);
   API_METHOD_SUFFIX
- }
+}
 
 // Flush available activity records
 static void roctracer_flush_activity_impl(roctracer_pool_t* pool) {
@@ -1222,22 +1218,6 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(roctracer_domain_t domain
       EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
   API_METHOD_SUFFIX
-}
-
-PUBLIC_API bool roctracer_load() {
-  ONLOAD_TRACE_BEG();
-  ONLOAD_TRACE_END();
-  return true;
-}
-
-PUBLIC_API void roctracer_unload() {
-  ONLOAD_TRACE_BEG();
-  ONLOAD_TRACE_END();
-}
-
-PUBLIC_API void roctracer_flush_buf() {
-  ONLOAD_TRACE_BEG();
-  ONLOAD_TRACE_END();
 }
 
 CONSTRUCTOR_API void constructor() {

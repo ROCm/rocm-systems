@@ -773,30 +773,6 @@ roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp);
 
 /** @} */
 
-/** \defgroup internal_group Internal Operations
- *
- * \todo Should these operation be part of the API?
- *
- * @{
- */
-
-/**
- * Load ROC Tracer library.
- */
-bool roctracer_load();
-
-/**
- * Unload ROC Tracer library.
- */
-void roctracer_unload();
-
-/**
- * Flush trace buffers.
- */
-void roctracer_flush_buf();
-
-/** @} */
-
 #ifdef __cplusplus
 }  // extern "C" block
 #endif  // __cplusplus
