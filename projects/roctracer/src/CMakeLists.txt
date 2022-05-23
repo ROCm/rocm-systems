@@ -159,7 +159,7 @@ set_target_properties(roctx PROPERTIES
 
 target_include_directories(roctx
   PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/inc>
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/roctracer ${CMAKE_CURRENT_SOURCE_DIR})
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_options(roctx PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/roctx/exportmap -Wl,--no-undefined)
 

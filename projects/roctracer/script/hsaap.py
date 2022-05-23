@@ -273,7 +273,7 @@ class API_DescrParser:
 
     for i in range(0, len(api_headers)):
       (name, header) = api_headers[i]
-      
+
       if i < len(api_headers) - 1:
         api = API_TableParser(hsa_dir + api_table_h, name)
         api_list = api.array
@@ -304,7 +304,7 @@ class API_DescrParser:
     self.ns_calls = ns_calls
 
     self.content += "// automatically generated\n\n" + license + '\n'
-    
+
     self.content += "/////////////////////////////////////////////////////////////////////////////\n"
     self.content += "//\n"
     self.content += "// HSA API tracing primitives\n"
@@ -324,7 +324,7 @@ class API_DescrParser:
 
     self.content += '\n'
     self.content += '#if PROF_API_IMPL\n'
-    self.content += '#include \"callback_table.h\"\n';
+    self.content += '#include \"util/callback_table.h\"\n';
     self.content += 'namespace roctracer {\n'
     self.content += 'namespace hsa_support {\n'
     self.add_section('API callback functions', '', self.gen_callbacks)
@@ -368,7 +368,7 @@ class API_DescrParser:
       self.content += '  HSA_API_ID_DISPATCH = ' + str(n) + ',\n'
       self.content += '  HSA_API_ID_NUMBER = ' + str(n + 1) + ',\n'
       self.content += '};\n'
-    
+
   # generate API args structure
   def gen_arg_struct(self, n, name, call, struct):
     if n == -1:
@@ -395,7 +395,7 @@ class API_DescrParser:
   # generate API callbacks
   def gen_callbacks(self, n, name, call, struct):
     if n == -1:
-      self.content += 'typedef CallbackTable<ACTIVITY_DOMAIN_HSA_API, HSA_API_ID_NUMBER> cb_table_t;\n'
+      self.content += 'typedef util::CallbackTable<ACTIVITY_DOMAIN_HSA_API, HSA_API_ID_NUMBER> cb_table_t;\n'
       self.content += 'extern cb_table_t cb_table;\n'
       self.content += '\n'
     if call != '-':

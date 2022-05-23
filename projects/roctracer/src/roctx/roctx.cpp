@@ -22,11 +22,11 @@
 #include "roctracer_roctx.h"
 #include "ext/prof_protocol.h"
 
-#include "callback_table.h"
+#include "util/callback_table.h"
 
 namespace {
 
-roctracer::CallbackTable<ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_NUMBER> callbacks;
+roctracer::util::CallbackTable<ACTIVITY_DOMAIN_ROCTX, ROCTX_API_ID_NUMBER> callbacks;
 thread_local int nested_range_level(0);
 
 }  // namespace

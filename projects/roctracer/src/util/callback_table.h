@@ -18,8 +18,8 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef CALLBACK_TABLE_H_
-#define CALLBACK_TABLE_H_
+#ifndef UTIL_CALLBACK_TABLE_H_
+#define UTIL_CALLBACK_TABLE_H_
 
 #include "ext/prof_protocol.h"
 
@@ -29,7 +29,7 @@
 #include <mutex>
 #include <utility>
 
-namespace roctracer {
+namespace roctracer::util {
 
 // Generic callbacks table
 template <activity_domain_t Domain, uint32_t N> class CallbackTable {
@@ -65,6 +65,6 @@ template <activity_domain_t Domain, uint32_t N> class CallbackTable {
   mutable std::mutex mutex_;
 };
 
-}  // namespace roctracer
+}  // namespace roctracer::util
 
-#endif  // CALLBACK_TABLE_H_
+#endif  // UTIL_CALLBACK_TABLE_H_
