@@ -372,7 +372,7 @@ void test_func(int kiter, int diter, int agents) {
       CHECK(err);
 
       for (int j = 1; j <= diter; ++j) {
-        Aql packet = {0};
+        Aql packet{};
         packet.header.type = HSA_PACKET_TYPE_KERNEL_DISPATCH;
         packet.header.barrier = 1;
         packet.header.acquire = HSA_FENCE_SCOPE_SYSTEM;

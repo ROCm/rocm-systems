@@ -131,7 +131,7 @@ int main() {
 #endif
 
   int i;
-  int errors;
+  int errors = 0;
 
   init_tracing();
 
@@ -210,22 +210,21 @@ int main() {
     // CPU MatrixTranspose computation
 #if HIP_TEST
     matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);
-#endif
 
     // verify the results
-    errors = 0;
     double eps = 1.0E-6;
     for (i = 0; i < NUM; i++) {
-      if (abs(TransposeMatrix[i] - cpuTransposeMatrix[i]) > eps) {
+      if (abs((double)TransposeMatrix[i] - cpuTransposeMatrix[i]) > eps) {
         errors++;
       }
     }
-    if ((HIP_TEST != 0) && (errors != 0)) {
+    if (errors != 0) {
       fprintf(stderr, "FAILED: %d errors\n", errors);
     } else {
       errors = 0;
       fprintf(stderr, "PASSED!\n");
     }
+#endif
 
     // free the resources on device side
     CHECK_HIP(hipFree(gpuMatrix));
