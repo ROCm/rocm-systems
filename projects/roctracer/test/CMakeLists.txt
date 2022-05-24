@@ -116,6 +116,10 @@ add_executable(backward_compat_test EXCLUDE_FROM_ALL app/backward_compat_test.cp
 target_link_libraries(backward_compat_test roctracer)
 add_dependencies(mytest backward_compat_test)
 
+add_executable(load_unload_reload_test EXCLUDE_FROM_ALL hsa/load_unload_reload.cpp)
+target_link_libraries(load_unload_reload_test hsa-runtime64::hsa-runtime64)
+add_dependencies(mytest load_unload_reload_test)
+
 ## Copy the golden traces and test scripts
 configure_file(run.sh ${PROJECT_BINARY_DIR} COPYONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink run.sh ${PROJECT_BINARY_DIR}/run_ci.sh)

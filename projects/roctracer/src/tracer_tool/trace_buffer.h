@@ -45,7 +45,7 @@ class TraceBufferBase {
       trace_buffer->Flush();
   }
 
-  static void Push(TraceBufferBase* elem) {
+  static void Register(TraceBufferBase* elem) {
     std::lock_guard lock(mutex_);
 
     auto** prev_ptr = &head_;
@@ -56,11 +56,23 @@ class TraceBufferBase {
     *prev_ptr = elem;
   }
 
+  static void Unregister(TraceBufferBase* elem) {
+    std::lock_guard lock(mutex_);
+
+    auto** prev_ptr = &head_;
+    while (*prev_ptr != nullptr && *prev_ptr != elem) prev_ptr = &(*prev_ptr)->next_;
+
+    assert(*prev_ptr != nullptr && "elem is not in the list");
+    *prev_ptr = elem->next_;
+  }
+
   TraceBufferBase(std::string name, int priority)
       : name_(std::move(name)), priority_(priority), next_(nullptr) {}
 
   TraceBufferBase(const TraceBufferBase&) = delete;
   TraceBufferBase& operator=(const TraceBufferBase&) = delete;
+
+  virtual ~TraceBufferBase() { Unregister(this); }
 
   virtual void Flush() = 0;
 
@@ -99,10 +111,10 @@ class TraceBuffer : protected TraceBufferBase {
     AllocateFreeBuffer();
 
     // Add this instance to the link list of all trace buffers in the process.
-    TraceBufferBase::Push(this);
+    Register(this);
   }
 
-  ~TraceBuffer() {
+  ~TraceBuffer() override {
     // Flush the remaining records. After flushing, there should not be any records left in the
     // trace buffer.
     Flush();
