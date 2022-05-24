@@ -32,7 +32,7 @@ jobs:
           popd
 
       - name: Build Release
-        timeout-minutes: 120
+        timeout-minutes: 150
         run: |
           pushd docker
           ./build-docker-release.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${{ matrix.rocm-version }} -- ${{ matrix.extensions }}
@@ -66,27 +66,17 @@ jobs:
         run: |
           mv build-release/stgz/*.sh ./
           mv build-release/deb/*.deb ./
-          rm -rf build-release
-          rm -rf /opt/omnitrace
+          sudo rm -rf build-release
+          sudo rm -rf /opt/omnitrace
 
       - name: Test STGZ Install
         timeout-minutes: 20
         continue-on-error: true
         run: |
           set -v
-          mkdir /opt/omnitrace-stgz
-          export PATH=/opt/omnitrace-stgz/bin:${PATH}
-          export LD_LIBRARY_PATH=/opt/omnitrace-stgz/lib:${LD_LIBRARY_PATH}
           for i in omnitrace-*.sh
           do
-            echo -e "\n###### Testing ${i}... #####\n"
-            ./${i} --prefix=/opt/omnitrace-stgz --skip-license --exclude-dir
-            omnitrace-avail --help
-            omnitrace --help
-            omnitrace-python --help
-            set +e
-            rm -rf /opt/omnitrace-stgz/*
-            set -e
+            ./docker/test-docker-release.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${{ matrix.rocm-version }} -- --stgz ${i}
           done
 
       - name: Test DEB Install
@@ -94,18 +84,7 @@ jobs:
         continue-on-error: true
         run: |
           set -v
-          export PATH=/opt/omnitrace/bin:${PATH}
-          export LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}
           for i in omnitrace_*.deb
           do
-            echo -e "\n###### Testing ${i}... #####\n"
-            dpkg --contents ./${i}
-            sudo dpkg -i ./${i}
-            omnitrace-avail --help
-            omnitrace --help
-            omnitrace-python --help
-            sudo apt-get remove -y omnitrace
-            set +e
-            rm -rf /opt/omnitrace/*
-            set -e
+            ./docker/test-docker-release.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${{ matrix.rocm-version }} -- --deb ${i}
           done
