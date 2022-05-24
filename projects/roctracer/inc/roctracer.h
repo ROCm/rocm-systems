@@ -22,7 +22,7 @@
  *
  * \section introduction Introduction
  *
- * ROC-tracer library, Runtimes Generic Callback/Activity APIs.
+ * ROCtracer library, Runtimes Generic Callback/Activity APIs.
  *
  * The goal of the implementation is to provide a generic independent from
  * specific runtime profiler to trace API and asynchronous activity.
@@ -33,7 +33,7 @@
 
 /**
  * \file
- * ROC tracer API interface.
+ * ROCtracer API interface.
  */
 
 #ifndef ROCTRACER_H_
@@ -499,7 +499,7 @@ typedef void (*roctracer_buffer_callback_t)(const char* begin, const char* end, 
 /**
  * Memory pool properties.
  *
- * Defines the propertis when a tracer memory pool is created.
+ * Defines the properties when a tracer memory pool is created.
  */
 typedef struct {
   /**

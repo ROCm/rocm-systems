@@ -118,7 +118,7 @@ bool trace_pcs = false;
 // The below getter functions have been written intentionally to fix an issue
 // with constructor ordering. Previously when hip_api_vec and hsa_api_vec
 // were left as simple global variables, whenever the tool_load() function
-// was called from "extern "C" CONSTRUCTOR_API void constructor()" of libtracer_tool.so
+// was called from CONSTRUCTOR_API void constructor()" of libroctracer_tool.so
 // the ordering of std::vector constructor becomes undefined. This meant that you could assign
 // hip_api_vec and hsa_api_vec with a value in tool_load() and once the function returns, the
 // std::vector default constructor would execute later, causing the values to be lost.
@@ -343,7 +343,7 @@ void hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     hip_begin_timestamp = timestamp;
   } else {
-    // Post onit of HIP APU args
+    // Post init of HIP APU args
     hipApiArgsInit((hip_api_id_t)cid, const_cast<hip_api_data_t*>(data));
 
     entry = hip_api_trace_buffer->GetEntry();
@@ -968,7 +968,7 @@ extern "C" ROCTRACER_TOOL_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtim
     // Check for optimized stats
     const bool is_stats_opt = (getenv("ROCP_STATS_OPT") != NULL);
 
-    // HIP kernel ma pinstantiation
+    // HIP kernel map instantiation
     if (is_stats_opt) hip_kernel_map = new hip_kernel_map_t;
 
     // Enable tracing

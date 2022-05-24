@@ -97,7 +97,7 @@ template <class T> class BaseLoader : public T {
   void* handle_;
 };
 
-// 'rocprofiler' library loader class
+// ROCprofiler library loader class
 class RocpApi {
  public:
   typedef BaseLoader<RocpApi> Loader;
