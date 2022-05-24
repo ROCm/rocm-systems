@@ -21,8 +21,6 @@
 #ifndef MEMORY_POOL_H_
 #define MEMORY_POOL_H_
 
-#include "util/exception.h"
-
 #include <cassert>
 #include <condition_variable>
 #include <cstdlib>

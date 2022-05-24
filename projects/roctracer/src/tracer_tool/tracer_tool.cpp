@@ -41,7 +41,6 @@
 #include <roctracer_hsa.h>
 #include <roctracer_hip.h>
 
-#include "util/exception.h"
 #include "util/xml.h"
 #include "loader.h"
 #include "trace_buffer.h"
@@ -847,16 +846,10 @@ void tool_load() {
     uint32_t ctrl_len = 0;
     uint32_t ctrl_rate = 0;
 
-    if (sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate) != 3) {
-      fprintf(stderr,
-              "ROCTracer: Invalid ROCP_CTRL_RATE var(%s), expected ctrl_delay:ctrl_len:ctrl_rate",
-              ctrl_str);
-      abort();
-    }
-    if (ctrl_len > ctrl_rate) {
-      fprintf(stderr, "ROCTracer: Control length value %u > rate value %u", ctrl_len, ctrl_rate);
-      abort();
-    }
+    if (sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate) != 3 ||
+        ctrl_len > ctrl_rate)
+      fatal("Invalid ROCP_CTRL_RATE variable (ctrl_delay:ctrl_len:ctrl_rate)");
+
     control_dist_us = ctrl_rate - ctrl_len;
     control_len_us = ctrl_len;
     control_delay_us = ctrl_delay;

@@ -28,7 +28,7 @@
 
 #include <atomic>
 
-#include "util/exception.h"
+#include "exception.h"
 #include "util/logger.h"
 
 namespace roctracer {

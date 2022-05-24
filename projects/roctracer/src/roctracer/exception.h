@@ -18,8 +18,8 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef SRC_UTIL_EXCEPTION_H_
-#define SRC_UTIL_EXCEPTION_H_
+#ifndef EXCEPTION_H_
+#define EXCEPTION_H_
 
 #include <sstream>
 #include <stdexcept>
@@ -29,22 +29,22 @@
   do {                                                                                             \
     std::ostringstream oss;                                                                        \
     oss << __FUNCTION__ << "(), " << stream;                                                       \
-    throw roctracer::util::exception(error, oss.str());                                            \
+    throw roctracer::ApiError(error, oss.str());                                                   \
   } while (false)
 
-namespace roctracer::util {
+namespace roctracer {
 
-template <class Status> class exception : public std::runtime_error {
+class ApiError : public std::runtime_error {
  public:
-  explicit exception(Status status, const std::string& what_arg)
+  explicit ApiError(roctracer_status_t status, const std::string& what_arg)
       : std::runtime_error(what_arg), status_(status) {}
 
-  Status status() const noexcept { return status_; }
+  roctracer_status_t status() const noexcept { return status_; }
 
  private:
-  const Status status_;
+  const roctracer_status_t status_;
 };
 
-}  // namespace roctracer::util
+}  // namespace roctracer
 
-#endif  // SRC_UTIL_EXCEPTION_H_
+#endif  // EXCEPTION_H_

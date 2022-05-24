@@ -40,7 +40,7 @@
 #include "loader.h"
 #include "memory_pool.h"
 #include "tracker.h"
-#include "util/exception.h"
+#include "exception.h"
 #include "util/logger.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
@@ -181,8 +181,7 @@ struct ActivityJournalData {
 static Journal<ActivityJournalData> act_journal;
 
 roctracer_status_t GetExcStatus(const std::exception& e) {
-  const util::exception<roctracer_status_t>* roctracer_exc_ptr =
-      dynamic_cast<const util::exception<roctracer_status_t>*>(&e);
+  const ApiError* roctracer_exc_ptr = dynamic_cast<const ApiError*>(&e);
   return (roctracer_exc_ptr) ? roctracer_exc_ptr->status() : ROCTRACER_STATUS_ERROR;
 }
 
