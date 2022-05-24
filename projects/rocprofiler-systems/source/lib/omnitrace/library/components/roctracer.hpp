@@ -33,6 +33,7 @@
 #include <timemory/macros/os.hpp>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/mpl/types.hpp>
+#include <timemory/utility/transient_function.hpp>
 
 namespace tim
 {
@@ -64,6 +65,10 @@ struct roctracer
 
     void start();
     void stop();
+
+    // this function protects roctracer_flush_activty from being called
+    // when omnitrace exits during a callback
+    [[nodiscard]] static scope::transient_destructor protect_flush_activity();
 };
 
 #if !defined(OMNITRACE_USE_ROCTRACER)

@@ -187,6 +187,18 @@ main(int argc, char** argv)
     int    nthreads = 2;
     int    nitr     = 5000;
     size_t nsync    = 10;
+    for(int i = 1; i < argc; ++i)
+    {
+        auto _arg = std::string{ argv[i] };
+        if(_arg == "?" || _arg == "-h" || _arg == "--help")
+        {
+            fprintf(stderr,
+                    "usage: transpose [NUM_THREADS (%i)] [NUM_ITERATION (%i)] "
+                    "[SYNC_EVERY_N_ITERATIONS (%zu)]\n",
+                    nthreads, nitr, nsync);
+            exit(EXIT_SUCCESS);
+        }
+    }
     if(argc > 1) nthreads = atoi(argv[1]);
     if(argc > 2) nitr = atoi(argv[2]);
     if(argc > 3) nsync = atoll(argv[3]);

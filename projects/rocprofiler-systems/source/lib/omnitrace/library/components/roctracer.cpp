@@ -24,6 +24,7 @@
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/roctracer_callbacks.hpp"
 #include "library/config.hpp"
+#include "library/debug.hpp"
 #include "library/defines.hpp"
 #include "library/redirect.hpp"
 #include "library/sampling.hpp"
@@ -35,6 +36,16 @@ namespace tim
 {
 namespace component
 {
+namespace
+{
+auto&
+roctracer_activity_count()
+{
+    static std::atomic<int64_t> _v{ 0 };
+    return _v;
+}
+}  // namespace
+
 void
 roctracer::preinit()
 {
@@ -157,13 +168,15 @@ roctracer::shutdown()
 
     OMNITRACE_VERBOSE_F(1, "shutting down roctracer...\n");
 
-    OMNITRACE_DEBUG_F("executing hip_exec_activity_callbacks\n");
+    OMNITRACE_VERBOSE_F(2, "executing hip_exec_activity_callbacks(0..%zu)\n",
+                        max_supported_threads);
     // make sure all async operations are executed
     for(size_t i = 0; i < max_supported_threads; ++i)
         hip_exec_activity_callbacks(i);
 
     // callback for hsa
-    OMNITRACE_DEBUG_F("executing roctracer_shutdown_routines...\n");
+    OMNITRACE_VERBOSE_F(2, "executing %zu roctracer_shutdown_routines...\n",
+                        roctracer_shutdown_routines().size());
     for(auto& itr : roctracer_shutdown_routines())
         itr.second();
 
@@ -178,11 +191,35 @@ roctracer::shutdown()
 #endif
 
     // ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
+    OMNITRACE_VERBOSE_F(
+        2, "executing roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API)...\n");
     ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
+
+    OMNITRACE_VERBOSE_F(
+        2, "executing roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS)...\n");
     ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
-    ROCTRACER_CALL(roctracer_flush_activity());
+
+    if(roctracer_activity_count() == 0)
+    {
+        OMNITRACE_VERBOSE_F(2, "executing roctracer_flush_activity()...\n");
+        ROCTRACER_CALL(roctracer_flush_activity());
+    }
+    else
+    {
+        OMNITRACE_CI_FAIL(true,
+                          "roctracer_activity_count() != 0 (== %li). "
+                          "roctracer::shutdown() most likely called during abort",
+                          roctracer_activity_count().load());
+    }
 
     OMNITRACE_VERBOSE_F(1, "roctracer is shutdown\n");
+}
+
+scope::transient_destructor
+roctracer::protect_flush_activity()
+{
+    return scope::transient_destructor([]() { --roctracer_activity_count(); },
+                                       []() { ++roctracer_activity_count(); });
 }
 }  // namespace component
 }  // namespace tim

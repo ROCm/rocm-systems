@@ -24,6 +24,8 @@
 #include "fwd.hpp"
 
 #include <timemory/config.hpp>
+#include <timemory/hash.hpp>
+#include <timemory/manager.hpp>
 #include <timemory/settings.hpp>
 
 #include <algorithm>

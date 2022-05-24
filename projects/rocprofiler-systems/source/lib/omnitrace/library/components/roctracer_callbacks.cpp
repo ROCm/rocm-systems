@@ -285,15 +285,19 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
 
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-    sampling::block_signals();
+    static thread_local std::once_flag _once{};
+    std::call_once(_once, []() {
+        sampling::block_signals();
+        threading::set_thread_name("omni.roctracer");
+    });
+
+    auto&& _protect = comp::roctracer::protect_flush_activity();
+    (void) _protect;
 
     static const char* copy_op_name     = "hsa_async_copy";
     static const char* dispatch_op_name = "hsa_dispatch";
     static const char* barrier_op_name  = "hsa_barrier";
     const char**       _name            = nullptr;
-
-    static thread_local auto _once = (threading::set_thread_name("omni.roctracer"), true);
-    (void) _once;
 
     switch(op)
     {
@@ -629,10 +633,14 @@ hip_activity_callback(const char* begin, const char* end, void*)
 
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-    sampling::block_signals();
+    static thread_local std::once_flag _once{};
+    std::call_once(_once, []() {
+        sampling::block_signals();
+        threading::set_thread_name("omni.roctracer");
+    });
 
-    static thread_local auto _once = (threading::set_thread_name("omni.roctracer"), true);
-    (void) _once;
+    auto&& _protect = comp::roctracer::protect_flush_activity();
+    (void) _protect;
 
     using Device = critical_trace::Device;
     using Phase  = critical_trace::Phase;
