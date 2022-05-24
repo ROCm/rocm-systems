@@ -66,12 +66,23 @@ void SFLUSH() {
 // hip header file
 #include <hip/hip_runtime.h>
 // Macro to call HIP API
-#define HIP_CALL(call)                                                                             \
+#define CALL_HIP(call)                                                                             \
   do {                                                                                             \
     call;                                                                                          \
+  } while (0);
+#define CHECK_HIP(call)                                                                            \
+  do {                                                                                             \
+    hipError_t err = call;                                                                         \
+    if (err != hipSuccess) {                                                                       \
+      fprintf(stderr, "%s\n", hipGetErrorString(err));                                             \
+      abort();                                                                                     \
+    }                                                                                              \
   } while (0)
 #else
-#define HIP_CALL(call)                                                                             \
+#define CALL_HIP(call)                                                                             \
+  do {                                                                                             \
+  } while (0)
+#define CHECK_HIP(call)                                                                            \
   do {                                                                                             \
   } while (0)
 #endif
@@ -142,7 +153,7 @@ int main() {
     hipSetDevice(devIndex);
 
     hipDeviceProp_t devProp;
-    HIP_CALL(hipGetDeviceProperties(&devProp, 0));
+    CHECK_HIP(hipGetDeviceProperties(&devProp, 0));
     fprintf(stderr, "Device %d name: %s\n", devIndex, devProp.name);
 #endif
 
@@ -156,8 +167,8 @@ int main() {
     }
 
     // allocate the memory on the device side
-    HIP_CALL(hipMalloc((void**)&gpuMatrix, NUM * sizeof(float)));
-    HIP_CALL(hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float)));
+    CHECK_HIP(hipMalloc((void**)&gpuMatrix, NUM * sizeof(float)));
+    CHECK_HIP(hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float)));
 
     // correlation reagion32
     roctracer_activity_push_external_correlation_id(31);
@@ -165,7 +176,7 @@ int main() {
     roctracer_activity_push_external_correlation_id(32);
 
     // Memory transfer from host to device
-    HIP_CALL(hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice));
+    CHECK_HIP(hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice));
 
     // correlation reagion33
     roctracer_activity_push_external_correlation_id(33);
@@ -174,7 +185,7 @@ int main() {
     roctxRangePush("hipLaunchKernel");
 
     // Lauching kernel from host
-    HIP_CALL(hipLaunchKernelGGL(matrixTranspose,
+    CALL_HIP(hipLaunchKernelGGL(matrixTranspose,
                                 dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
                                 dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0,
                                 gpuTransposeMatrix, gpuMatrix, WIDTH));
@@ -187,7 +198,7 @@ int main() {
     // Memory transfer from device to host
     roctxRangePush("hipMemcpy");
 
-    HIP_CALL(
+    CHECK_HIP(
         hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost));
 
     roctxRangePop();  // for "hipMemcpy"
@@ -197,7 +208,9 @@ int main() {
     roctracer_activity_pop_external_correlation_id(NULL);
 
     // CPU MatrixTranspose computation
-    HIP_CALL(matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH));
+#if HIP_TEST
+    matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);
+#endif
 
     // verify the results
     errors = 0;
@@ -215,8 +228,8 @@ int main() {
     }
 
     // free the resources on device side
-    HIP_CALL(hipFree(gpuMatrix));
-    HIP_CALL(hipFree(gpuTransposeMatrix));
+    CHECK_HIP(hipFree(gpuMatrix));
+    CHECK_HIP(hipFree(gpuTransposeMatrix));
 
     // correlation reagion end
     roctracer_activity_pop_external_correlation_id(NULL);
@@ -246,7 +259,7 @@ int main() {
 #include <sys/syscall.h> /* For SYS_xxx definitions */
 
 // Macro to check ROC-tracer calls status
-#define ROCTRACER_CALL(call)                                                                       \
+#define CHECK_ROCTRACER(call)                                                                      \
   do {                                                                                             \
     int err = call;                                                                                \
     if (err != 0) {                                                                                \
@@ -333,7 +346,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
     SPRINT("\n");
     SFLUSH();
 
-    ROCTRACER_CALL(roctracer_next_record(record, &record));
+    CHECK_ROCTRACER(roctracer_next_record(record, &record));
   }
 }
 
@@ -347,18 +360,18 @@ void init_tracing() {
   memset(&properties, 0, sizeof(roctracer_properties_t));
   properties.buffer_size = 0x1000;
   properties.buffer_callback_fun = activity_callback;
-  ROCTRACER_CALL(roctracer_open_pool(&properties));
+  CHECK_ROCTRACER(roctracer_open_pool(&properties));
   // Enable HIP API callbacks
-  ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, api_callback, NULL));
+  CHECK_ROCTRACER(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, api_callback, NULL));
   // Enable HIP activity tracing
 #if HIP_API_ACTIVITY_ON
-  ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
+  CHECK_ROCTRACER(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
 #endif
-  ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
+  CHECK_ROCTRACER(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
   // Enable PC sampling
-  ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_RESERVED1));
+  CHECK_ROCTRACER(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_RESERVED1));
   // Enable rocTX
-  ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, api_callback, NULL));
+  CHECK_ROCTRACER(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, api_callback, NULL));
 }
 
 // Start tracing routine
@@ -373,14 +386,14 @@ void start_tracing() {
 
 // Stop tracing routine
 void stop_tracing() {
-  ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
+  CHECK_ROCTRACER(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
 #if HIP_API_ACTIVITY_ON
-  ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
+  CHECK_ROCTRACER(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
 #endif
-  ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
-  ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
-  ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
-  ROCTRACER_CALL(roctracer_flush_activity());
+  CHECK_ROCTRACER(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
+  CHECK_ROCTRACER(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
+  CHECK_ROCTRACER(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
+  CHECK_ROCTRACER(roctracer_flush_activity());
   fprintf(stderr, "# STOP  #############################\n");
 }
 #else

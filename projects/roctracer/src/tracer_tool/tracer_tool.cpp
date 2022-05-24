@@ -27,7 +27,6 @@
 
 #include <cxxabi.h> /* names denangle */
 #include <dirent.h>
-#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -46,23 +45,19 @@
 #include "trace_buffer.h"
 #include "evt_stats.h"
 
-#define PUBLIC_API __attribute__((visibility("default")))
 #define CONSTRUCTOR_API __attribute__((constructor))
 #define DESTRUCTOR_API __attribute__((destructor))
 
-// Linux sys call
-#define PTHREAD_CALL(call)                                                                         \
-  do {                                                                                             \
-    int err = call;                                                                                \
-    if (err != 0) {                                                                                \
-      errno = err;                                                                                 \
-      perror(#call);                                                                               \
-      abort();                                                                                     \
-    }                                                                                              \
-  } while (0)
+#if !defined(ROCTRACER_TOOL_EXPORT)
+#if defined(__GNUC__)
+#define ROCTRACER_TOOL_EXPORT __attribute__((visibility("default")))
+#elif defined(_MSC_VER)
+#define ROCTRACER_TOOL_EXPORT __declspec(dllexport)
+#endif /* defined (_MSC_VER) */
+#endif /* !defined (ROCTRACER_TOOL_EXPORT) */
 
 // Macro to check ROC-tracer calls status
-#define ROCTRACER_CALL(call)                                                                       \
+#define CHECK_ROCTRACER(call)                                                                      \
   do {                                                                                             \
     int err = call;                                                                                \
     if (err != 0) {                                                                                \
@@ -107,7 +102,7 @@ namespace util {
 
 inline timestamp_t timestamp_ns() {
   timestamp_t timestamp;
-  ROCTRACER_CALL(roctracer_get_timestamp(&timestamp));
+  CHECK_ROCTRACER(roctracer_get_timestamp(&timestamp));
   return timestamp;
 }
 
@@ -215,7 +210,7 @@ std::atomic_bool stop_flush_thread = false;
 
 void flush_thr_fun() {
   while (!stop_flush_thread) {
-    ROCTRACER_CALL(roctracer_flush_activity());
+    CHECK_ROCTRACER(roctracer_flush_activity());
     roctracer::TraceBufferBase::FlushAll();
     std::this_thread::sleep_until(std::chrono::steady_clock::now() +
                                   std::chrono::microseconds(control_flush_us));
@@ -566,7 +561,7 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
         }
         break;
     }
-    ROCTRACER_CALL(roctracer_next_record(record, &record));
+    CHECK_ROCTRACER(roctracer_next_record(record, &record));
   }
 }
 
@@ -662,15 +657,15 @@ void open_tracing_pool() {
     roctracer_properties_t properties{};
     properties.buffer_size = 0x80000;
     properties.buffer_callback_fun = pool_activity_callback;
-    ROCTRACER_CALL(roctracer_open_pool(&properties));
+    CHECK_ROCTRACER(roctracer_open_pool(&properties));
   }
 }
 
 // Flush tracing pool
 void close_tracing_pool() {
   if (roctracer_pool_t* pool = roctracer_default_pool(); pool != nullptr) {
-    ROCTRACER_CALL(roctracer_flush_activity_expl(pool));
-    ROCTRACER_CALL(roctracer_close_pool_expl(pool));
+    CHECK_ROCTRACER(roctracer_flush_activity_expl(pool));
+    CHECK_ROCTRACER(roctracer_close_pool_expl(pool));
   }
 }
 
@@ -699,18 +694,18 @@ void tool_unload() {
   }
 
   if (trace_roctx) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
+    CHECK_ROCTRACER(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
   }
   if (trace_hsa_api) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
+    CHECK_ROCTRACER(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
   }
   if (trace_hsa_activity || trace_pcs) {
-    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
+    CHECK_ROCTRACER(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HSA_OPS));
   }
   if (trace_hip_api || trace_hip_activity) {
-    ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
-    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
-    ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
+    CHECK_ROCTRACER(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
+    CHECK_ROCTRACER(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_API));
+    CHECK_ROCTRACER(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
   }
 
   // Flush tracing pool
@@ -836,7 +831,7 @@ void tool_load() {
     // initialize HSA tracing
     fprintf(stdout, "    rocTX-trace()\n");
     fflush(stdout);
-    ROCTRACER_CALL(
+    CHECK_ROCTRACER(
         roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, roctx_api_callback, NULL));
   }
 
@@ -884,9 +879,9 @@ void tool_load() {
 }
 
 // HSA-runtime tool on-load method
-extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
-                                  uint64_t failed_tool_count,
-                                  const char* const* failed_tool_names) {
+extern "C" ROCTRACER_TOOL_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
+                                             uint64_t failed_tool_count,
+                                             const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
 
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
@@ -932,13 +927,13 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
       for (unsigned i = 0; i < hsa_api_vec().size(); ++i) {
         uint32_t cid = HSA_API_ID_NUMBER;
         const char* api = hsa_api_vec()[i].c_str();
-        ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api, &cid, NULL));
-        ROCTRACER_CALL(
+        CHECK_ROCTRACER(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api, &cid, NULL));
+        CHECK_ROCTRACER(
             roctracer_enable_op_callback(ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, NULL));
         printf(" %s", api);
       }
     } else {
-      ROCTRACER_CALL(
+      CHECK_ROCTRACER(
           roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, NULL));
     }
     printf(")\n");
@@ -958,7 +953,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 
     fprintf(stdout, "    HSA-activity-trace()\n");
     fflush(stdout);
-    ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
+    CHECK_ROCTRACER(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
   }
 
   // Enable HIP API callbacks/activity
@@ -983,13 +978,13 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
         for (unsigned i = 0; i < hip_api_vec().size(); ++i) {
           uint32_t cid = HIP_API_ID_NONE;
           const char* api = hip_api_vec()[i].c_str();
-          ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_HIP_API, api, &cid, NULL));
-          ROCTRACER_CALL(
+          CHECK_ROCTRACER(roctracer_op_code(ACTIVITY_DOMAIN_HIP_API, api, &cid, NULL));
+          CHECK_ROCTRACER(
               roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API, cid, hip_api_callback, NULL));
           printf(" %s", api);
         }
       } else {
-        ROCTRACER_CALL(
+        CHECK_ROCTRACER(
             roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
       }
 
@@ -1006,7 +1001,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 
     if (trace_hip_activity) {
       hcc_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
-      ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
+      CHECK_ROCTRACER(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
 
       if (is_stats_opt) {
         FILE* f = NULL;
@@ -1025,7 +1020,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
     fflush(stdout);
     open_tracing_pool();
     pc_sample_file_handle = open_output_file(output_prefix, "pcs_trace.txt");
-    ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_RESERVED1));
+    CHECK_ROCTRACER(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_RESERVED1));
   }
 
   ONLOAD_TRACE_END();
@@ -1033,7 +1028,7 @@ extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 }
 
 // HSA-runtime on-unload method
-extern "C" PUBLIC_API void OnUnload() { ONLOAD_TRACE(""); }
+extern "C" ROCTRACER_TOOL_EXPORT void OnUnload() { ONLOAD_TRACE(""); }
 
 extern "C" CONSTRUCTOR_API void constructor() {
   ONLOAD_TRACE_BEG();

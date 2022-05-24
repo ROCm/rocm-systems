@@ -29,27 +29,79 @@
  *
  * The API provides functionality for registering the runtimes API callbacks and
  * asynchronous activity records pool support.
-*/
+ */
 
 /**
  * \file
  * ROC tracer API interface.
  */
 
-#ifndef INC_ROCTRACER_H_
-#define INC_ROCTRACER_H_
+#ifndef ROCTRACER_H_
+#define ROCTRACER_H_
+
+/* Placeholder for calling convention and import/export macros */
+#if !defined(ROCTRACER_CALL)
+#define ROCTRACER_CALL
+#endif /* !defined (ROCTRACER_CALL) */
+
+#if !defined(ROCTRACER_EXPORT_DECORATOR)
+#if defined(__GNUC__)
+#define ROCTRACER_EXPORT_DECORATOR __attribute__((visibility("default")))
+#elif defined(_MSC_VER)
+#define ROCTRACER_EXPORT_DECORATOR __declspec(dllexport)
+#endif /* defined (_MSC_VER) */
+#endif /* !defined (ROCTRACER_EXPORT_DECORATOR) */
+
+#if !defined(ROCTRACER_IMPORT_DECORATOR)
+#if defined(__GNUC__)
+#define ROCTRACER_IMPORT_DECORATOR
+#elif defined(_MSC_VER)
+#define ROCTRACER_IMPORT_DECORATOR __declspec(dllimport)
+#endif /* defined (_MSC_VER) */
+#endif /* !defined (ROCTRACER_IMPORT_DECORATOR) */
+
+#define ROCTRACER_EXPORT ROCTRACER_EXPORT_DECORATOR ROCTRACER_CALL
+#define ROCTRACER_IMPORT ROCTRACER_IMPORT_DECORATOR ROCTRACER_CALL
+
+#if !defined(ROCTRACER)
+#if defined(ROCTRACER_EXPORTS)
+#define ROCTRACER_API ROCTRACER_EXPORT
+#else /* !defined (ROCTRACER_EXPORTS) */
+#define ROCTRACER_API ROCTRACER_IMPORT
+#endif /* !defined (ROCTRACER_EXPORTS) */
+#endif /* !defined (ROCTRACER) */
 
 #include <stdint.h>
 #include <stddef.h>
-#ifndef __cplusplus
-#include <stdbool.h>
-#endif
 
 #include <ext/prof_protocol.h>
 
 #ifdef __cplusplus
 extern "C" {
-#endif  // __cplusplus
+#endif /* __cplusplus */
+
+/** \defgroup symbol_versions_group Symbol Versions
+ *
+ * The names used for the shared library versioned symbols.
+ *
+ * Every function is annotated with one of the version macros defined in this
+ * section.  Each macro specifies a corresponding symbol version string.  After
+ * dynamically loading the shared library with \p dlopen, the address of each
+ * function can be obtained using \p dlvsym with the name of the function and
+ * its corresponding symbol version string.  An error will be reported by \p
+ * dlvsym if the installed library does not support the version for the
+ * function specified in this version of the interface.
+ *
+ * @{
+ */
+
+/**
+ * The function was introduced in version 4.1 of the interface and has the
+ * symbol version string of ``"ROCTRACER_4.1"``.
+ */
+#define ROCTRACER_VERSION_4_1
+
+/** @} */
 
 /** \defgroup versioning_group Versioning
  *
@@ -74,7 +126,7 @@ extern "C" {
  * The minor version of the interface as a macro so it can be used by the
  * preprocessor.
  */
-#define ROCTRACER_VERSION_MINOR 0
+#define ROCTRACER_VERSION_MINOR 1
 
 /**
  * Query the major version of the installed library.
@@ -83,7 +135,7 @@ extern "C" {
  * check if it is compatible with this interface version.  This function can be
  * used even when the library is not initialized.
  */
-uint32_t roctracer_version_major();
+ROCTRACER_API uint32_t roctracer_version_major() ROCTRACER_VERSION_4_1;
 
 /**
  * Query the minor version of the installed library.
@@ -92,7 +144,7 @@ uint32_t roctracer_version_major();
  * check if it is compatible with this interface version.  This function can be
  * used even when the library is not initialized.
  */
-uint32_t roctracer_version_minor();
+ROCTRACER_API uint32_t roctracer_version_minor() ROCTRACER_VERSION_4_1;
 
 /** @} */
 
@@ -188,7 +240,7 @@ typedef enum {
  * \return Return the error string.  The caller owns the returned string and
  * should use \p free() to deallocate it.
  */
-const char* roctracer_error_string();
+ROCTRACER_API const char* roctracer_error_string() ROCTRACER_VERSION_4_1;
 
 /** @} */
 
@@ -218,9 +270,8 @@ typedef activity_domain_t roctracer_domain_t;
  * the domain or operation are invalid.  The string is owned by the ROC Tracer
  * library.
  */
-const char* roctracer_op_string(uint32_t domain,
-                                uint32_t op,
-                                uint32_t kind);
+ROCTRACER_API const char* roctracer_op_string(uint32_t domain, uint32_t op,
+                                              uint32_t kind) ROCTRACER_VERSION_4_1;
 
 /**
  * Query the operation code given a domain and the name of an operation.
@@ -242,10 +293,8 @@ const char* roctracer_op_string(uint32_t domain,
  * @retval ::ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID The domain is invalid or
  * not supported.
  */
-roctracer_status_t roctracer_op_code(uint32_t domain,
-                                     const char* str,
-                                     uint32_t* op,
-                                     uint32_t* kind);
+ROCTRACER_API roctracer_status_t roctracer_op_code(uint32_t domain, const char* str, uint32_t* op,
+                                                   uint32_t* kind) ROCTRACER_VERSION_4_1;
 
 /**
  * Set the properties of a domain.
@@ -259,8 +308,8 @@ roctracer_status_t roctracer_op_code(uint32_t domain,
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-roctracer_status_t roctracer_set_properties(roctracer_domain_t domain,
-                                            void* properties);
+ROCTRACER_API roctracer_status_t roctracer_set_properties(roctracer_domain_t domain,
+                                                          void* properties) ROCTRACER_VERSION_4_1;
 
 /** @} */
 
@@ -301,11 +350,9 @@ typedef activity_rtapi_callback_t roctracer_rtapi_callback_t;
  * @retval ::ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT \p op is invalid for \p
  * domain.
  */
-roctracer_status_t roctracer_enable_op_callback(
-    activity_domain_t domain,
-    uint32_t op,
-    activity_rtapi_callback_t callback,
-    void* arg);
+ROCTRACER_API roctracer_status_t roctracer_enable_op_callback(activity_domain_t domain, uint32_t op,
+                                                              activity_rtapi_callback_t callback,
+                                                              void* arg) ROCTRACER_VERSION_4_1;
 
 /**
  * Enable runtime API callback for all operations of a domain.
@@ -322,10 +369,8 @@ roctracer_status_t roctracer_enable_op_callback(
  *
  * @retval ::ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID \p domain is invalid.
  */
-roctracer_status_t roctracer_enable_domain_callback(
-    activity_domain_t domain,
-    activity_rtapi_callback_t callback,
-    void* arg);
+ROCTRACER_API roctracer_status_t roctracer_enable_domain_callback(
+    activity_domain_t domain, activity_rtapi_callback_t callback, void* arg) ROCTRACER_VERSION_4_1;
 
 /**
  * Enable runtime API callback for all operations of all domains.
@@ -338,9 +383,8 @@ roctracer_status_t roctracer_enable_domain_callback(
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-roctracer_status_t roctracer_enable_callback(
-    activity_rtapi_callback_t callback,
-    void* arg);
+ROCTRACER_API roctracer_status_t roctracer_enable_callback(activity_rtapi_callback_t callback,
+                                                           void* arg) ROCTRACER_VERSION_4_1;
 
 /**
  * Disable runtime API callback for a specific operation of a domain.
@@ -357,8 +401,8 @@ roctracer_status_t roctracer_enable_callback(
  * @retval ::ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT \p op is invalid for \p
  * domain.
  */
-roctracer_status_t roctracer_disable_op_callback(activity_domain_t domain,
-                                                 uint32_t op);
+ROCTRACER_API roctracer_status_t roctracer_disable_op_callback(activity_domain_t domain,
+                                                               uint32_t op) ROCTRACER_VERSION_4_1;
 
 /**
  * Disable runtime API callback for all operations of a domain.
@@ -370,7 +414,8 @@ roctracer_status_t roctracer_disable_op_callback(activity_domain_t domain,
  *
  * @retval ::ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID \p domain is invalid.
  */
-roctracer_status_t roctracer_disable_domain_callback(activity_domain_t domain);
+ROCTRACER_API roctracer_status_t roctracer_disable_domain_callback(activity_domain_t domain)
+    ROCTRACER_VERSION_4_1;
 
 /**
  * Disable runtime API callback for all operations of all domains.
@@ -378,7 +423,7 @@ roctracer_status_t roctracer_disable_domain_callback(activity_domain_t domain);
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-roctracer_status_t roctracer_disable_callback();
+ROCTRACER_API roctracer_status_t roctracer_disable_callback() ROCTRACER_VERSION_4_1;
 
 /** @} */
 
@@ -413,20 +458,19 @@ typedef activity_record_t roctracer_record_t;
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-roctracer_status_t roctracer_next_record(
-    const activity_record_t* record,
-    const activity_record_t** next);
+ROCTRACER_API roctracer_status_t roctracer_next_record(
+    const activity_record_t* record, const activity_record_t** next) ROCTRACER_VERSION_4_1;
 
 /**
  * Memory pool allocator callback.
  *
  * If \p *ptr is NULL, then allocate memory of \p size bytes and save address
  * in \p *ptr.
- * 
+ *
  * If \p *ptr is non-NULL and size is non-0, then reallocate the memory at \p
  * *ptr with size \p size and save the address in \p *ptr. The memory will have
  * been allocated by the same callback.
- * 
+ *
  * If \p *ptr is non-NULL and size is 0, then deallocate the memory at \p *ptr.
  * The memory will have been allocated by the same callback.
  *
@@ -436,9 +480,7 @@ roctracer_status_t roctracer_next_record(
  * \p arg Argument provided in the ::roctracer_properties_t passed to the
  * ::roctracer_open_pool function.
  */
-typedef void (*roctracer_allocator_t)(char** ptr,
-                                      size_t size,
-                                      void* arg);
+typedef void (*roctracer_allocator_t)(char** ptr, size_t size, void* arg);
 
 /**
  * Memory pool buffer callback.
@@ -452,10 +494,7 @@ typedef void (*roctracer_allocator_t)(char** ptr,
  *
  * \p arg the argument specified when the callback was defined.
  */
-typedef void (*roctracer_buffer_callback_t)(
-    const char* begin,  // [in] available buffered trace records
-    const char* end,    // [in] end of buffered trace records
-    void* arg);         // [in/out] callback arg
+typedef void (*roctracer_buffer_callback_t)(const char* begin, const char* end, void* arg);
 
 /**
  * Memory pool properties.
@@ -463,7 +502,6 @@ typedef void (*roctracer_buffer_callback_t)(
  * Defines the propertis when a tracer memory pool is created.
  */
 typedef struct {
-
   /**
    * ROC Tracer mode.
    */
@@ -523,9 +561,8 @@ typedef void roctracer_pool_t;
  * @retval ROCTRACER_STATUS_ERROR_MEMORY_ALLOCATION Unable to allocate memory
  * for the \p pool. Unable to create the pool.
  */
-roctracer_status_t roctracer_open_pool_expl(
-    const roctracer_properties_t* properties,
-    roctracer_pool_t** pool);
+ROCTRACER_API roctracer_status_t roctracer_open_pool_expl(
+    const roctracer_properties_t* properties, roctracer_pool_t** pool) ROCTRACER_VERSION_4_1;
 
 /**
  * Create tracer memory pool.
@@ -544,7 +581,8 @@ roctracer_status_t roctracer_open_pool_expl(
  * @retval ROCTRACER_STATUS_ERROR_MEMORY_ALLOCATION Unable to allocate memory
  * for the \p pool. Unable to create the pool.
  */
-roctracer_status_t roctracer_open_pool(const roctracer_properties_t* properties);
+ROCTRACER_API roctracer_status_t roctracer_open_pool(const roctracer_properties_t* properties)
+    ROCTRACER_VERSION_4_1;
 
 /**
  * Close tracer memory pool.
@@ -559,8 +597,8 @@ roctracer_status_t roctracer_open_pool(const roctracer_properties_t* properties)
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully or pool was NULL and there is no default pool.
  */
-roctracer_status_t roctracer_close_pool_expl(
-    roctracer_pool_t* pool);
+ROCTRACER_API roctracer_status_t roctracer_close_pool_expl(roctracer_pool_t* pool)
+    ROCTRACER_VERSION_4_1;
 
 /**
  * Close default tracer memory pool, if defined, and set to undefined.
@@ -572,7 +610,7 @@ roctracer_status_t roctracer_close_pool_expl(
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully or there is no default pool.
  */
-roctracer_status_t roctracer_close_pool();
+ROCTRACER_API roctracer_status_t roctracer_close_pool() ROCTRACER_VERSION_4_1;
 
 /**
  * Query and set the default memory pool.
@@ -583,17 +621,15 @@ roctracer_status_t roctracer_close_pool();
  * @return Return the current default memory pool before any change, or NULL if
  * none is defined.
  */
-// Return current default pool
-// Set new default pool if the argument is not NULL
-roctracer_pool_t* roctracer_default_pool_expl(
-    roctracer_pool_t* pool);
+ROCTRACER_API roctracer_pool_t* roctracer_default_pool_expl(roctracer_pool_t* pool)
+    ROCTRACER_VERSION_4_1;
 
 /**
  * Query the current default memory pool.
  *
  * @return Return the current default memory pool, or NULL is none is defined.
  */
-roctracer_pool_t* roctracer_default_pool();
+ROCTRACER_API roctracer_pool_t* roctracer_default_pool() ROCTRACER_VERSION_4_1;
 
 /**
  * Enable activity record logging for a specified operation of a domain
@@ -611,10 +647,8 @@ roctracer_pool_t* roctracer_default_pool();
  *
  * @retval ROCTRACER_STATUS_ERROR \p pool is NULL and no default pool is defined.
  */
-roctracer_status_t roctracer_enable_op_activity_expl(
-    activity_domain_t domain,
-    uint32_t op,
-    roctracer_pool_t* pool);
+ROCTRACER_API roctracer_status_t roctracer_enable_op_activity_expl(
+    activity_domain_t domain, uint32_t op, roctracer_pool_t* pool) ROCTRACER_VERSION_4_1;
 
 /**
  * Enable activity record logging for a specified operation of a domain using
@@ -629,9 +663,8 @@ roctracer_status_t roctracer_enable_op_activity_expl(
  *
  * @retval ROCTRACER_STATUS_ERROR No default pool is defined.
  */
-roctracer_status_t roctracer_enable_op_activity(
-    activity_domain_t domain,
-    uint32_t op);
+ROCTRACER_API roctracer_status_t roctracer_enable_op_activity(activity_domain_t domain,
+                                                              uint32_t op) ROCTRACER_VERSION_4_1;
 
 /**
  * Enable activity record logging for all operations of a domain providing a
@@ -647,9 +680,8 @@ roctracer_status_t roctracer_enable_op_activity(
  *
  * @retval ROCTRACER_STATUS_ERROR \p pool is NULL and no default pool is defined.
  */
-roctracer_status_t roctracer_enable_domain_activity_expl(
-    activity_domain_t domain,
-    roctracer_pool_t* pool);
+ROCTRACER_API roctracer_status_t roctracer_enable_domain_activity_expl(
+    activity_domain_t domain, roctracer_pool_t* pool) ROCTRACER_VERSION_4_1;
 
 /**
  * Enable activity record logging for all operations of a domain using the
@@ -662,7 +694,8 @@ roctracer_status_t roctracer_enable_domain_activity_expl(
  *
  * @retval ROCTRACER_STATUS_ERROR No default pool is defined.
  */
-roctracer_status_t roctracer_enable_domain_activity(activity_domain_t domain);
+ROCTRACER_API roctracer_status_t roctracer_enable_domain_activity(activity_domain_t domain)
+    ROCTRACER_VERSION_4_1;
 
 /**
  * Enable activity record logging for all operations of all domains providing a
@@ -676,8 +709,8 @@ roctracer_status_t roctracer_enable_domain_activity(activity_domain_t domain);
  *
  * @retval ROCTRACER_STATUS_ERROR \p pool is NULL and no default pool is defined.
  */
-roctracer_status_t roctracer_enable_activity_expl(
-    roctracer_pool_t* pool);
+ROCTRACER_API roctracer_status_t roctracer_enable_activity_expl(roctracer_pool_t* pool)
+    ROCTRACER_VERSION_4_1;
 
 /**
  * Enable activity record logging for all operations of all domains using the
@@ -688,7 +721,7 @@ roctracer_status_t roctracer_enable_activity_expl(
  *
  * @retval ROCTRACER_STATUS_ERROR No default pool is defined.
  */
-roctracer_status_t roctracer_enable_activity();
+ROCTRACER_API roctracer_status_t roctracer_enable_activity() ROCTRACER_VERSION_4_1;
 
 /**
  * Disable activity record logging for a specified operation of a domain.
@@ -700,9 +733,8 @@ roctracer_status_t roctracer_enable_activity();
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-//
-roctracer_status_t roctracer_disable_op_activity(activity_domain_t domain,
-                                                 uint32_t op);
+ROCTRACER_API roctracer_status_t roctracer_disable_op_activity(activity_domain_t domain,
+                                                               uint32_t op) ROCTRACER_VERSION_4_1;
 
 /**
  * Disable activity record logging for all operations of a domain.
@@ -712,7 +744,8 @@ roctracer_status_t roctracer_disable_op_activity(activity_domain_t domain,
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-roctracer_status_t roctracer_disable_domain_activity(activity_domain_t domain);
+ROCTRACER_API roctracer_status_t roctracer_disable_domain_activity(activity_domain_t domain)
+    ROCTRACER_VERSION_4_1;
 
 /**
  * Disable activity record logging for all operations of all domains.
@@ -722,7 +755,7 @@ roctracer_status_t roctracer_disable_domain_activity(activity_domain_t domain);
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-roctracer_status_t roctracer_disable_activity();
+ROCTRACER_API roctracer_status_t roctracer_disable_activity() ROCTRACER_VERSION_4_1;
 
 /**
  * Flush available activity records for a memory pool.
@@ -737,8 +770,8 @@ roctracer_status_t roctracer_disable_activity();
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-roctracer_status_t roctracer_flush_activity_expl(
-    roctracer_pool_t* pool);
+ROCTRACER_API roctracer_status_t roctracer_flush_activity_expl(roctracer_pool_t* pool)
+    ROCTRACER_VERSION_4_1;
 
 /**
  * Flush available activity records for the default memory pool.
@@ -750,7 +783,7 @@ roctracer_status_t roctracer_flush_activity_expl(
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-roctracer_status_t roctracer_flush_activity();
+ROCTRACER_API roctracer_status_t roctracer_flush_activity() ROCTRACER_VERSION_4_1;
 
 /** @} */
 
@@ -769,12 +802,12 @@ roctracer_status_t roctracer_flush_activity();
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp);
+ROCTRACER_API roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp) ROCTRACER_VERSION_4_1;
 
 /** @} */
 
 #ifdef __cplusplus
-}  // extern "C" block
-#endif  // __cplusplus
+} /* extern "C" block */
+#endif /* __cplusplus */
 
-#endif  // INC_ROCTRACER_H_
+#endif /* ROCTRACER_H_ */

@@ -27,8 +27,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef INC_ROCTRACER_EXT_H_
-#define INC_ROCTRACER_EXT_H_
+#ifndef ROCTRACER_EXT_H_
+#define ROCTRACER_EXT_H_
 
 #include <roctracer.h>
 
@@ -47,26 +47,27 @@ extern "C" {
 // Application annotation API
 
 // Tracing start API
-void roctracer_start();
+void ROCTRACER_API roctracer_start() ROCTRACER_VERSION_4_1;
 
 // Tracing stop API
-void roctracer_stop();
+void ROCTRACER_API roctracer_stop() ROCTRACER_VERSION_4_1;
 
 ////////////////////////////////////////////////////////////////////////////////
 // External correlation id API
 
 // Notifies that the calling thread is entering an external API region.
 // Push an external correlation id for the calling thread.
-roctracer_status_t roctracer_activity_push_external_correlation_id(activity_correlation_id_t id);
+roctracer_status_t ROCTRACER_API
+roctracer_activity_push_external_correlation_id(activity_correlation_id_t id) ROCTRACER_VERSION_4_1;
 
 // Notifies that the calling thread is leaving an external API region.
 // Pop an external correlation id for the calling thread.
 // 'lastId' returns the last external correlation if not NULL
-roctracer_status_t roctracer_activity_pop_external_correlation_id(
-    activity_correlation_id_t* last_id);
+roctracer_status_t ROCTRACER_API roctracer_activity_pop_external_correlation_id(
+    activity_correlation_id_t* last_id) ROCTRACER_VERSION_4_1;
 
 #ifdef __cplusplus
 }  // extern "C" block
 #endif  // __cplusplus
 
-#endif  // INC_ROCTRACER_EXT_H_
+#endif  // ROCTRACER_EXT_H_

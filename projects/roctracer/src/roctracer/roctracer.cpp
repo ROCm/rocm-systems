@@ -43,10 +43,6 @@
 #include "exception.h"
 #include "util/logger.h"
 
-#define PUBLIC_API __attribute__((visibility("default")))
-#define CONSTRUCTOR_API __attribute__((constructor))
-#define DESTRUCTOR_API __attribute__((destructor))
-
 #define CHECK_HSA_STATUS(msg, status)                                                              \
   do {                                                                                             \
     if ((status) != HSA_STATUS_SUCCESS) {                                                          \
@@ -520,17 +516,17 @@ LOADER_INSTANTIATE();
 //
 
 // Returns library version
-PUBLIC_API uint32_t roctracer_version_major() { return ROCTRACER_VERSION_MAJOR; }
-PUBLIC_API uint32_t roctracer_version_minor() { return ROCTRACER_VERSION_MINOR; }
+ROCTRACER_API uint32_t roctracer_version_major() { return ROCTRACER_VERSION_MAJOR; }
+ROCTRACER_API uint32_t roctracer_version_minor() { return ROCTRACER_VERSION_MINOR; }
 
 // Returns the last error
-PUBLIC_API const char* roctracer_error_string() {
+ROCTRACER_API const char* roctracer_error_string() {
   return strdup(util::Logger::LastMessage().c_str());
 }
 
 // Return Op string by given domain and activity/API codes
 // nullptr returned on the error and the library errno is set
-PUBLIC_API const char* roctracer_op_string(uint32_t domain, uint32_t op, uint32_t kind) {
+ROCTRACER_API const char* roctracer_op_string(uint32_t domain, uint32_t op, uint32_t kind) {
   API_METHOD_PREFIX
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_API:
@@ -552,8 +548,8 @@ PUBLIC_API const char* roctracer_op_string(uint32_t domain, uint32_t op, uint32_
 }
 
 // Return Op code and kind by given string
-PUBLIC_API roctracer_status_t roctracer_op_code(uint32_t domain, const char* str, uint32_t* op,
-                                                uint32_t* kind) {
+ROCTRACER_API roctracer_status_t roctracer_op_code(uint32_t domain, const char* str, uint32_t* op,
+                                                   uint32_t* kind) {
   API_METHOD_PREFIX
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_API: {
@@ -687,17 +683,17 @@ static void roctracer_enable_callback_impl(roctracer_domain_t domain, uint32_t o
   roctracer_enable_callback_fun(domain, op, callback, user_data);
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_op_callback(roctracer_domain_t domain, uint32_t op,
-                                                           roctracer_rtapi_callback_t callback,
-                                                           void* user_data) {
+ROCTRACER_API roctracer_status_t roctracer_enable_op_callback(roctracer_domain_t domain,
+                                                              uint32_t op,
+                                                              roctracer_rtapi_callback_t callback,
+                                                              void* user_data) {
   API_METHOD_PREFIX
   roctracer_enable_callback_impl(domain, op, callback, user_data);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_domain_callback(roctracer_domain_t domain,
-                                                               roctracer_rtapi_callback_t callback,
-                                                               void* user_data) {
+ROCTRACER_API roctracer_status_t roctracer_enable_domain_callback(
+    roctracer_domain_t domain, roctracer_rtapi_callback_t callback, void* user_data) {
   API_METHOD_PREFIX
   const uint32_t op_end = get_op_end(domain);
   for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
@@ -705,8 +701,8 @@ PUBLIC_API roctracer_status_t roctracer_enable_domain_callback(roctracer_domain_
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_callback(roctracer_rtapi_callback_t callback,
-                                                        void* user_data) {
+ROCTRACER_API roctracer_status_t roctracer_enable_callback(roctracer_rtapi_callback_t callback,
+                                                           void* user_data) {
   API_METHOD_PREFIX
   for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
     const uint32_t op_end = get_op_end(domain);
@@ -771,14 +767,14 @@ static void roctracer_disable_callback_impl(roctracer_domain_t domain, uint32_t 
   roctracer_disable_callback_fun(domain, op);
 }
 
-PUBLIC_API roctracer_status_t roctracer_disable_op_callback(roctracer_domain_t domain,
-                                                            uint32_t op) {
+ROCTRACER_API roctracer_status_t roctracer_disable_op_callback(roctracer_domain_t domain,
+                                                               uint32_t op) {
   API_METHOD_PREFIX
   roctracer_disable_callback_impl(domain, op);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_disable_domain_callback(roctracer_domain_t domain) {
+ROCTRACER_API roctracer_status_t roctracer_disable_domain_callback(roctracer_domain_t domain) {
   API_METHOD_PREFIX
   const uint32_t op_end = get_op_end(domain);
   for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
@@ -786,7 +782,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_domain_callback(roctracer_domain
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_disable_callback() {
+ROCTRACER_API roctracer_status_t roctracer_disable_callback() {
   API_METHOD_PREFIX
   for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
     const uint32_t op_end = get_op_end(domain);
@@ -797,14 +793,14 @@ PUBLIC_API roctracer_status_t roctracer_disable_callback() {
 }
 
 // Return default pool and set new one if parameter pool is not NULL.
-PUBLIC_API roctracer_pool_t* roctracer_default_pool_expl(roctracer_pool_t* pool) {
+ROCTRACER_API roctracer_pool_t* roctracer_default_pool_expl(roctracer_pool_t* pool) {
   std::lock_guard lock(memory_pool_mutex);
   roctracer_pool_t* p = reinterpret_cast<roctracer_pool_t*>(default_memory_pool);
   if (pool != nullptr) default_memory_pool = reinterpret_cast<MemoryPool*>(pool);
   return p;
 }
 
-PUBLIC_API roctracer_pool_t* roctracer_default_pool() {
+ROCTRACER_API roctracer_pool_t* roctracer_default_pool() {
   std::lock_guard lock(memory_pool_mutex);
   return reinterpret_cast<roctracer_pool_t*>(default_memory_pool);
 }
@@ -824,21 +820,21 @@ static void roctracer_open_pool_impl(const roctracer_properties_t* properties,
     default_memory_pool = p;
 }
 
-PUBLIC_API roctracer_status_t roctracer_open_pool_expl(const roctracer_properties_t* properties,
-                                                       roctracer_pool_t** pool) {
+ROCTRACER_API roctracer_status_t roctracer_open_pool_expl(const roctracer_properties_t* properties,
+                                                          roctracer_pool_t** pool) {
   API_METHOD_PREFIX
   roctracer_open_pool_impl(properties, pool);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_open_pool(const roctracer_properties_t* properties) {
+ROCTRACER_API roctracer_status_t roctracer_open_pool(const roctracer_properties_t* properties) {
   API_METHOD_PREFIX
   roctracer_open_pool_impl(properties, nullptr);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_next_record(const activity_record_t* record,
-                                                    const activity_record_t** next) {
+ROCTRACER_API roctracer_status_t roctracer_next_record(const activity_record_t* record,
+                                                       const activity_record_t** next) {
   API_METHOD_PREFIX
   *next = record + 1;
   API_METHOD_SUFFIX
@@ -912,15 +908,16 @@ static void roctracer_enable_activity_impl(roctracer_domain_t domain, uint32_t o
   roctracer_enable_activity_fun(domain, op, pool);
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_op_activity_expl(roctracer_domain_t domain,
-                                                                uint32_t op,
-                                                                roctracer_pool_t* pool) {
+ROCTRACER_API roctracer_status_t roctracer_enable_op_activity_expl(roctracer_domain_t domain,
+                                                                   uint32_t op,
+                                                                   roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   roctracer_enable_activity_impl(domain, op, pool);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_op_activity(activity_domain_t domain, uint32_t op) {
+ROCTRACER_API roctracer_status_t roctracer_enable_op_activity(activity_domain_t domain,
+                                                              uint32_t op) {
   API_METHOD_PREFIX
   roctracer_enable_activity_impl(domain, op, nullptr);
   API_METHOD_SUFFIX
@@ -933,14 +930,14 @@ static void roctracer_enable_domain_activity_impl(roctracer_domain_t domain,
     roctracer_enable_activity_impl(domain, op, pool);
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_domain_activity_expl(roctracer_domain_t domain,
-                                                                    roctracer_pool_t* pool) {
+ROCTRACER_API roctracer_status_t roctracer_enable_domain_activity_expl(roctracer_domain_t domain,
+                                                                       roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   roctracer_enable_domain_activity_impl(domain, pool);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_domain_activity(activity_domain_t domain) {
+ROCTRACER_API roctracer_status_t roctracer_enable_domain_activity(activity_domain_t domain) {
   API_METHOD_PREFIX
   roctracer_enable_domain_activity_impl(domain, nullptr);
   API_METHOD_SUFFIX
@@ -954,13 +951,13 @@ static void roctracer_enable_activity_impl(roctracer_pool_t* pool) {
   }
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_activity_expl(roctracer_pool_t* pool) {
+ROCTRACER_API roctracer_status_t roctracer_enable_activity_expl(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   roctracer_enable_activity_impl(pool);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_enable_activity() {
+ROCTRACER_API roctracer_status_t roctracer_enable_activity() {
   API_METHOD_PREFIX
   roctracer_enable_activity_impl(nullptr);
   API_METHOD_SUFFIX
@@ -1019,14 +1016,14 @@ static void roctracer_disable_activity_impl(roctracer_domain_t domain, uint32_t 
   roctracer_disable_activity_fun(domain, op);
 }
 
-PUBLIC_API roctracer_status_t roctracer_disable_op_activity(roctracer_domain_t domain,
-                                                            uint32_t op) {
+ROCTRACER_API roctracer_status_t roctracer_disable_op_activity(roctracer_domain_t domain,
+                                                               uint32_t op) {
   API_METHOD_PREFIX
   roctracer_disable_activity_impl(domain, op);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_disable_domain_activity(roctracer_domain_t domain) {
+ROCTRACER_API roctracer_status_t roctracer_disable_domain_activity(roctracer_domain_t domain) {
   API_METHOD_PREFIX
   const uint32_t op_end = get_op_end(domain);
   for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
@@ -1034,7 +1031,7 @@ PUBLIC_API roctracer_status_t roctracer_disable_domain_activity(roctracer_domain
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_disable_activity() {
+ROCTRACER_API roctracer_status_t roctracer_disable_activity() {
   API_METHOD_PREFIX
   for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
     const uint32_t op_end = get_op_end(domain);
@@ -1064,13 +1061,13 @@ static void roctracer_close_pool_impl(roctracer_pool_t* pool) {
   delete (p);
 }
 
-PUBLIC_API roctracer_status_t roctracer_close_pool_expl(roctracer_pool_t* pool) {
+ROCTRACER_API roctracer_status_t roctracer_close_pool_expl(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   roctracer_close_pool_impl(pool);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_close_pool() {
+ROCTRACER_API roctracer_status_t roctracer_close_pool() {
   API_METHOD_PREFIX
   roctracer_close_pool_impl(NULL);
   API_METHOD_SUFFIX
@@ -1083,13 +1080,13 @@ static void roctracer_flush_activity_impl(roctracer_pool_t* pool) {
   if (default_memory_pool != nullptr) default_memory_pool->Flush();
 }
 
-PUBLIC_API roctracer_status_t roctracer_flush_activity_expl(roctracer_pool_t* pool) {
+ROCTRACER_API roctracer_status_t roctracer_flush_activity_expl(roctracer_pool_t* pool) {
   API_METHOD_PREFIX
   roctracer_flush_activity_impl(pool);
   API_METHOD_SUFFIX
 }
 
-PUBLIC_API roctracer_status_t roctracer_flush_activity() {
+ROCTRACER_API roctracer_status_t roctracer_flush_activity() {
   API_METHOD_PREFIX
   roctracer_flush_activity_impl(nullptr);
   API_METHOD_SUFFIX
@@ -1097,7 +1094,7 @@ PUBLIC_API roctracer_status_t roctracer_flush_activity() {
 
 // Notifies that the calling thread is entering an external API region.
 // Push an external correlation id for the calling thread.
-PUBLIC_API roctracer_status_t
+ROCTRACER_API roctracer_status_t
 roctracer_activity_push_external_correlation_id(activity_correlation_id_t id) {
   API_METHOD_PREFIX
   external_id_stack.push(id);
@@ -1107,7 +1104,7 @@ roctracer_activity_push_external_correlation_id(activity_correlation_id_t id) {
 // Notifies that the calling thread is leaving an external API region.
 // Pop an external correlation id for the calling thread.
 // 'lastId' returns the last external correlation
-PUBLIC_API roctracer_status_t
+ROCTRACER_API roctracer_status_t
 roctracer_activity_pop_external_correlation_id(activity_correlation_id_t* last_id) {
   API_METHOD_PREFIX
   if (last_id != nullptr) *last_id = 0;
@@ -1119,8 +1116,8 @@ roctracer_activity_pop_external_correlation_id(activity_correlation_id_t* last_i
   API_METHOD_SUFFIX
 }
 
-// Mark API
-extern "C" PUBLIC_API void roctracer_mark(const char* str) {
+// Mark API (FIXME: why isn't it in the roctracer_ext.h header?)
+extern "C" ROCTRACER_API void roctracer_mark(const char* str) {
   if (mark_api_callback_ptr) {
     mark_api_callback_ptr(ACTIVITY_DOMAIN_EXT_API, ACTIVITY_EXT_OP_MARK, str, nullptr);
     NextCorrelationId();  // account for user-defined markers when tracking
@@ -1129,7 +1126,7 @@ extern "C" PUBLIC_API void roctracer_mark(const char* str) {
 }
 
 // Start API
-PUBLIC_API void roctracer_start() {
+ROCTRACER_API void roctracer_start() {
   if (set_stopped(0)) {
     if (ext_support::roctracer_start_cb) ext_support::roctracer_start_cb();
     cb_journal.ForEach([](roctracer_domain_t domain, uint32_t op, const CallbackJournalData& data) {
@@ -1145,7 +1142,7 @@ PUBLIC_API void roctracer_start() {
 }
 
 // Stop API
-PUBLIC_API void roctracer_stop() {
+ROCTRACER_API void roctracer_stop() {
   if (set_stopped(1)) {
     // Must disable the activity first as the spawner checks for the activity being NULL
     // to indicate that there is no callback.
@@ -1161,15 +1158,15 @@ PUBLIC_API void roctracer_stop() {
   }
 }
 
-PUBLIC_API roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp) {
+ROCTRACER_API roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp) {
   API_METHOD_PREFIX
   *timestamp = util::timestamp_ns();
   API_METHOD_SUFFIX
 }
 
 // Set properties
-PUBLIC_API roctracer_status_t roctracer_set_properties(roctracer_domain_t domain,
-                                                       void* properties) {
+ROCTRACER_API roctracer_status_t roctracer_set_properties(roctracer_domain_t domain,
+                                                          void* properties) {
   API_METHOD_PREFIX
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
@@ -1219,24 +1216,24 @@ PUBLIC_API roctracer_status_t roctracer_set_properties(roctracer_domain_t domain
   API_METHOD_SUFFIX
 }
 
-CONSTRUCTOR_API void constructor() {
+__attribute__((constructor)) void constructor() {
   ONLOAD_TRACE_BEG();
   util::Logger::Create();
   ONLOAD_TRACE_END();
 }
 
-DESTRUCTOR_API void destructor() {
+__attribute__((destructor)) void destructor() {
   ONLOAD_TRACE_BEG();
   util::Logger::Destroy();
   ONLOAD_TRACE_END();
 }
 
 // HSA-runtime tool on-load method
-extern "C" PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
-                                  uint64_t failed_tool_count,
-                                  const char* const* failed_tool_names) {
+extern "C" ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
+                                        uint64_t failed_tool_count,
+                                        const char* const* failed_tool_names) {
   hsa_support::SaveHsaApi(table);
   return true;
 }
 
-extern "C" PUBLIC_API void OnUnload() {}
+extern "C" ROCTRACER_EXPORT void OnUnload() {}
