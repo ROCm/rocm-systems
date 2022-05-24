@@ -31,16 +31,16 @@ thread_local int nested_range_level(0);
 
 }  // namespace
 
-uint32_t ROCTX_API roctx_version_major() { return ROCTX_VERSION_MAJOR; }
-uint32_t ROCTX_API roctx_version_minor() { return ROCTX_VERSION_MINOR; }
+ROCTX_API uint32_t roctx_version_major() { return ROCTX_VERSION_MAJOR; }
+ROCTX_API uint32_t roctx_version_minor() { return ROCTX_VERSION_MINOR; }
 
-void ROCTX_API roctxMarkA(const char* message) {
+ROCTX_API void roctxMarkA(const char* message) {
   roctx_api_data_t api_data{};
   api_data.args.roctxMarkA.message = message;
   callbacks.Invoke(ROCTX_API_ID_roctxMarkA, &api_data);
 }
 
-int ROCTX_API roctxRangePushA(const char* message) {
+ROCTX_API int roctxRangePushA(const char* message) {
   roctx_api_data_t api_data{};
   api_data.args.roctxRangePushA.message = message;
   callbacks.Invoke(ROCTX_API_ID_roctxRangePushA, &api_data);
@@ -48,7 +48,7 @@ int ROCTX_API roctxRangePushA(const char* message) {
   return nested_range_level++;
 }
 
-int ROCTX_API roctxRangePop() {
+ROCTX_API int roctxRangePop() {
   roctx_api_data_t api_data{};
   callbacks.Invoke(ROCTX_API_ID_roctxRangePop, &api_data);
 
@@ -56,7 +56,7 @@ int ROCTX_API roctxRangePop() {
   return --nested_range_level;
 }
 
-roctx_range_id_t ROCTX_API roctxRangeStartA(const char* message) {
+ROCTX_API roctx_range_id_t roctxRangeStartA(const char* message) {
   static std::atomic<roctx_range_id_t> start_stop_range_id(1);
   auto id = start_stop_range_id++;
 
@@ -68,19 +68,19 @@ roctx_range_id_t ROCTX_API roctxRangeStartA(const char* message) {
   return id;
 }
 
-void ROCTX_API roctxRangeStop(roctx_range_id_t rangeId) {
+ROCTX_API void roctxRangeStop(roctx_range_id_t rangeId) {
   roctx_api_data_t api_data{};
   api_data.args.roctxRangeStop.id = rangeId;
   callbacks.Invoke(ROCTX_API_ID_roctxRangeStop, &api_data);
 }
 
-extern "C" bool ROCTX_EXPORT RegisterApiCallback(uint32_t op, void* callback, void* arg) {
+extern "C" ROCTX_EXPORT bool RegisterApiCallback(uint32_t op, void* callback, void* arg) {
   if (op >= ROCTX_API_ID_NUMBER) return false;
   callbacks.Set(op, reinterpret_cast<activity_rtapi_callback_t>(callback), arg);
   return true;
 }
 
-extern "C" bool ROCTX_EXPORT RemoveApiCallback(uint32_t op) {
+extern "C" ROCTX_EXPORT bool RemoveApiCallback(uint32_t op) {
   if (op >= ROCTX_API_ID_NUMBER) return false;
   callbacks.Set(op, nullptr, nullptr);
   return true;

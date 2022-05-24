@@ -131,7 +131,7 @@ extern "C" {
  *
  * \return Returns the major version number.
  */
-uint32_t ROCTX_API roctx_version_major() ROCTX_VERSION_4_1;
+ROCTX_API uint32_t roctx_version_major() ROCTX_VERSION_4_1;
 
 /**
  * Query the minor version of the installed library.
@@ -141,7 +141,7 @@ uint32_t ROCTX_API roctx_version_major() ROCTX_VERSION_4_1;
  *
  * \return Returns the minor version number.
  */
-uint32_t ROCTX_API roctx_version_minor() ROCTX_VERSION_4_1;
+ROCTX_API uint32_t roctx_version_minor() ROCTX_VERSION_4_1;
 
 /** @} */
 
@@ -157,7 +157,7 @@ uint32_t ROCTX_API roctx_version_minor() ROCTX_VERSION_4_1;
  *
  * \param[in] message The message associated with the event.
  */
-void ROCTX_API roctxMarkA(const char* message) ROCTX_VERSION_4_1;
+ROCTX_API void roctxMarkA(const char* message) ROCTX_VERSION_4_1;
 #define roctxMark(message) roctxMarkA(message)
 
 /** @} */
@@ -179,7 +179,7 @@ void ROCTX_API roctxMarkA(const char* message) ROCTX_VERSION_4_1;
  * \return Returns the level this nested range is started at. Nested range
  * levels are 0 based.
  */
-int ROCTX_API roctxRangePushA(const char* message) ROCTX_VERSION_4_1;
+ROCTX_API int roctxRangePushA(const char* message) ROCTX_VERSION_4_1;
 #define roctxRangePush(message) roctxRangePushA(message)
 
 /**
@@ -192,7 +192,7 @@ int ROCTX_API roctxRangePushA(const char* message) ROCTX_VERSION_4_1;
  * \return Returns the level the stopped nested range was started at, or a
  * negative value if there was no nested range active.
  */
-int ROCTX_API roctxRangePop() ROCTX_VERSION_4_1;
+ROCTX_API int roctxRangePop() ROCTX_VERSION_4_1;
 
 /**
  * ROCTX range ID.
@@ -211,13 +211,13 @@ typedef uint64_t roctx_range_id_t;
  *
  * \return Returns the ID of the new range.
  */
-roctx_range_id_t ROCTX_API roctxRangeStartA(const char* message) ROCTX_VERSION_4_1;
+ROCTX_API roctx_range_id_t roctxRangeStartA(const char* message) ROCTX_VERSION_4_1;
 #define roctxRangeStart(message) roctxRangeStartA(message)
 
 /**
  * Stop a process range.
  */
-void ROCTX_API roctxRangeStop(roctx_range_id_t id) ROCTX_VERSION_4_1;
+ROCTX_API void roctxRangeStop(roctx_range_id_t id) ROCTX_VERSION_4_1;
 
 /** @} */
 
