@@ -141,3 +141,8 @@ file(GLOB files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "golden_traces/tests_trace_
 foreach(file ${files})
   configure_file(${file} ${PROJECT_BINARY_DIR}/test/${file} COPYONLY)
 endforeach()
+
+add_library(hip_stats SHARED EXCLUDE_FROM_ALL hip_stats/hip_stats.cpp)
+target_compile_definitions(hip_stats PRIVATE __HIP_PLATFORM_AMD__)
+target_link_libraries(hip_stats roctracer)
+add_dependencies(mytest hip_stats)

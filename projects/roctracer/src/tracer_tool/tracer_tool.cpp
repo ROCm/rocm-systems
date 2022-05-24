@@ -43,7 +43,6 @@
 #include "util/xml.h"
 #include "loader.h"
 #include "trace_buffer.h"
-#include "evt_stats.h"
 
 // Macro to check ROC-tracer calls status
 #define CHECK_ROCTRACER(call)                                                                      \
@@ -109,12 +108,6 @@ std::vector<std::string> hip_api_vec;
 
 LOADER_INSTANTIATE();
 TRACE_BUFFER_INSTANTIATE();
-
-typedef EvtStatsT<const std::string, uint32_t> EvtStatsA;
-// HIP stats
-EvtStats* hip_api_stats = NULL;
-EvtStatsA* hip_kernel_stats = NULL;
-EvtStatsA* hip_memcpy_stats = NULL;
 
 // Global output file handle
 FILE* begin_ts_file_handle = NULL;
@@ -299,10 +292,6 @@ struct hip_api_trace_entry_t {
   void* ptr;
 };
 
-typedef std::map<uint64_t, const char*> hip_kernel_map_t;
-hip_kernel_map_t* hip_kernel_map = NULL;
-std::mutex hip_kernel_mutex;
-
 static inline bool is_hip_kernel_launch_api(const uint32_t& cid) {
   bool ret = (cid == HIP_API_ID_hipLaunchKernel) || (cid == HIP_API_ID_hipExtLaunchKernel) ||
       (cid == HIP_API_ID_hipLaunchCooperativeKernel) ||
@@ -336,23 +325,14 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
       entry->name, correlation_id, begin_timestamp, end_timestamp);
 
   if (domain == ACTIVITY_DOMAIN_HIP_API) {
-    if (hip_api_stats != NULL) {
-      hip_api_stats->add_event(cid, end_timestamp - begin_timestamp);
-      if (is_hip_kernel_launch_api(cid)) {
-        hip_kernel_mutex.lock();
-        (*hip_kernel_map)[correlation_id] = entry->name;
-        hip_kernel_mutex.unlock();
-      }
-    } else {
-      const char* str = hipApiString((hip_api_id_t)cid, data);
-      rec_ss << " " << str;
-      if (is_hip_kernel_launch_api(cid) && entry->name) {
-        const char* kernel_name = cxx_demangle(entry->name);
-        rec_ss << " kernel=" << kernel_name;
-      }
-      rec_ss << " :" << correlation_id;
-      fprintf(hip_api_file_handle, "%s\n", rec_ss.str().c_str());
+    const char* str = hipApiString((hip_api_id_t)cid, data);
+    rec_ss << " " << str;
+    if (is_hip_kernel_launch_api(cid) && entry->name) {
+      const char* kernel_name = cxx_demangle(entry->name);
+      rec_ss << " kernel=" << kernel_name;
     }
+    rec_ss << " :" << correlation_id;
+    fprintf(hip_api_file_handle, "%s\n", rec_ss.str().c_str());
   } else {
     fprintf(hip_api_file_handle, "%s(name(%s))\n", oss.str().c_str(), entry->name);
   }
@@ -467,36 +447,6 @@ struct hip_act_trace_entry_t {
   uint64_t correlation_id;
 };
 
-// HIP ACT trace buffer flush callback
-void hip_act_flush_cb(hip_act_trace_entry_t* entry) {
-  const uint32_t domain = ACTIVITY_DOMAIN_HIP_OPS;
-  const uint32_t op = 0;
-  const char* name = roctracer_op_string(domain, op, entry->kind);
-  if (name == NULL) {
-    printf("hip_act_flush_cb name is NULL\n");
-    fflush(stdout);
-    abort();
-  }
-
-  if (strncmp("Kernel", name, 6) == 0) {
-    hip_kernel_mutex.lock();
-    if (hip_kernel_stats == NULL) {
-      printf("hip_act_flush_cb hip_kernel_stats is NULL\n");
-      fflush(stdout);
-      abort();
-    }
-    name = (*hip_kernel_map)[entry->correlation_id];
-    hip_kernel_mutex.unlock();
-    const char* kernel_name = cxx_demangle(name);
-    hip_kernel_stats->add_event(kernel_name, entry->dur);
-  } else {
-    hip_memcpy_stats->add_event(name, entry->dur);
-  }
-}
-
-roctracer::TraceBuffer<hip_act_trace_entry_t> hip_act_trace_buffer("HIP ACT", 0x200000,
-                                                                   hip_act_flush_cb, 1);
-
 // Activity tracing callback
 //   hipMalloc id(3) correlation_id(1): begin_ns(1525888652762640464) end_ns(1525888652762877067)
 void pool_activity_callback(const char* begin, const char* end, void* arg) {
@@ -513,18 +463,10 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
 
     switch (record->domain) {
       case ACTIVITY_DOMAIN_HIP_OPS:
-        if (hip_memcpy_stats != NULL) {
-          hip_act_trace_entry_t* entry = hip_act_trace_buffer.GetEntry();
-          entry->kind = record->kind;
-          entry->dur = record->end_ns - record->begin_ns;
-          entry->correlation_id = record->correlation_id;
-          entry->valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
-        } else {
-          fprintf(hcc_activity_file_handle, "%lu:%lu %d:%lu %s:%lu:%u\n", record->begin_ns,
-                  record->end_ns, record->device_id, record->queue_id, name, record->correlation_id,
-                  my_pid);
-          fflush(hcc_activity_file_handle);
-        }
+        fprintf(hcc_activity_file_handle, "%lu:%lu %d:%lu %s:%lu:%u\n", record->begin_ns,
+                record->end_ns, record->device_id, record->queue_id, name, record->correlation_id,
+                my_pid);
+        fflush(hcc_activity_file_handle);
         break;
       case ACTIVITY_DOMAIN_HSA_OPS:
         if (record->op == HSA_OP_ID_COPY) {
@@ -692,10 +634,6 @@ void tool_unload() {
   roctracer::TraceBufferBase::FlushAll();
 
   close_file_handles();
-
-  if (hip_api_stats) hip_api_stats->dump();
-  if (hip_kernel_stats) hip_kernel_stats->dump();
-  if (hip_memcpy_stats) hip_memcpy_stats->dump();
 
   ONLOAD_TRACE_END();
 }
@@ -951,12 +889,6 @@ extern "C" ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_ver
     // Allocating tracing pool
     open_tracing_pool();
 
-    // Check for optimized stats
-    const bool is_stats_opt = (getenv("ROCP_STATS_OPT") != NULL);
-
-    // HIP kernel map instantiation
-    if (is_stats_opt) hip_kernel_map = new hip_kernel_map_t;
-
     // Enable tracing
     if (trace_hip_api) {
       hip_api_file_handle = open_output_file(output_prefix, "hip_api_trace.txt");
@@ -973,30 +905,11 @@ extern "C" ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_ver
         CHECK_ROCTRACER(
             roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
       }
-
-      if (is_stats_opt) {
-        const char* path = NULL;
-        FILE* f = open_output_file(output_prefix, "hip_api_stats.csv", &path);
-        hip_api_stats = new EvtStats(f, path);
-        for (uint32_t id = HIP_API_ID_FIRST; id <= HIP_API_ID_LAST; id += 1) {
-          const char* label = roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, id, 0);
-          hip_api_stats->set_label(id, label);
-        }
-      }
     }
 
     if (trace_hip_activity) {
       hcc_activity_file_handle = open_output_file(output_prefix, "hcc_ops_trace.txt");
       CHECK_ROCTRACER(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
-
-      if (is_stats_opt) {
-        FILE* f = NULL;
-        const char* path = NULL;
-        f = open_output_file(output_prefix, "hip_kernel_stats.csv", &path);
-        hip_kernel_stats = new EvtStatsA(f, path);
-        f = open_output_file(output_prefix, "hip_memcpy_stats.csv", &path);
-        hip_memcpy_stats = new EvtStatsA(f, path);
-      }
     }
   }
 

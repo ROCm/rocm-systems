@@ -85,7 +85,10 @@ typedef struct activity_record_s {
       activity_correlation_id_t external_id; /* external correlation id */
     };
   };
-  size_t bytes; /* data size bytes */
+  union {
+    size_t bytes; /* data size bytes */
+    const char* kernel_name;
+  };
 } activity_record_t;
 
 /* Activity sync callback type */

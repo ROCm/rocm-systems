@@ -408,13 +408,23 @@ void HIP_ActivityIdCallback(activity_correlation_id_t correlation_id) {
   CorrelationIdRegister(correlation_id);
 }
 
-void HIP_AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
+void HIP_AsyncActivityCallback(uint32_t op_id, void* record_ptr, void* arg) {
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
-  roctracer_record_t* record_ptr = reinterpret_cast<roctracer_record_t*>(record);
-  record_ptr->domain = ACTIVITY_DOMAIN_HIP_OPS;
-  record_ptr->correlation_id = CorrelationIdLookup(record_ptr->correlation_id);
-  if (record_ptr->correlation_id == 0) return;
-  pool->Write(*record_ptr);
+  roctracer_record_t record = *reinterpret_cast<roctracer_record_t*>(record_ptr);
+  record.domain = ACTIVITY_DOMAIN_HIP_OPS;
+  record.correlation_id = CorrelationIdLookup(record.correlation_id);
+  if (record.correlation_id == 0) return;
+
+  // If the record is for a kernel dispatch, write the kernel name in the pool's data,
+  // and make the record point to it. Older HIP runtimes do not provide a kernel
+  // name, so record.kernel_name might be null.
+  if (record.op == HIP_OP_ID_DISPATCH && record.kernel_name != nullptr)
+    pool->Write(record, record.kernel_name, strlen(record.kernel_name) + 1,
+                [](auto& record, const void* data) {
+                  record.kernel_name = static_cast<const char*>(data);
+                });
+  else
+    pool->Write(record);
 
   DEBUG_TRACE(
       "HIP_AsyncActivityCallback(\"%s\"): op(%u) kind(%u) record(%p) pool(%p) correlation_id(%d) "
