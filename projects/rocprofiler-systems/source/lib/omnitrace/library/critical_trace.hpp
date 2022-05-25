@@ -40,7 +40,7 @@ namespace omnitrace
 {
 namespace critical_trace
 {
-enum class Device : short
+enum class Device : uint8_t
 {
     NONE = 0,
     CPU,
@@ -48,7 +48,7 @@ enum class Device : short
     ANY,
 };
 
-enum class Phase : short
+enum class Phase : uint8_t
 {
     NONE = 0,
     BEGIN,
@@ -56,7 +56,7 @@ enum class Phase : short
     DELTA,
 };
 
-struct entry
+struct OMNITRACE_ATTRIBUTE(packed) entry
 {
     entry()                 = default;
     ~entry()                = default;
@@ -65,11 +65,13 @@ struct entry
     entry& operator=(const entry&) = default;
     entry& operator=(entry&&) noexcept = default;
 
-    uint16_t  priority   = 0;            /// priority value (for sorting)
     Device    device     = Device::CPU;  /// which device it executed on
     Phase     phase      = Phase::NONE;  /// start / stop / unspecified
-    uint16_t  depth      = 0;            /// call-stack depth
-    int64_t   tid        = 0;            /// thread id it was registered on
+    uint16_t  priority   = 0;            /// priority value (for sorting)
+    uint32_t  depth      = 0;            /// call-stack depth
+    int32_t   devid      = 0;            /// device id
+    int32_t   pid        = 0;            /// process id
+    int32_t   tid        = 0;            /// thread id it was registered on
     uint64_t  cpu_cid    = 0;            /// CPU correlation id
     uint64_t  gpu_cid    = 0;            /// GPU correlation id
     uint64_t  parent_cid = 0;            /// parent CPU correlation id
@@ -96,9 +98,11 @@ struct entry
     int64_t get_overlap(const entry& rhs) const;
     int64_t get_independent(const entry& rhs) const;
 
-    int64_t get_overlap(const entry& rhs, int64_t _tid) const;
-    int64_t get_independent(const entry& rhs, int64_t _tid) const;
-    bool    is_bounded(const entry& rhs, int64_t _tid) const;
+    int64_t get_overlap(const entry& rhs, int32_t _devid, int32_t _pid,
+                        int64_t _tid) const;
+    int64_t get_independent(const entry& rhs, int32_t _devid, int32_t _pid,
+                            int64_t _tid) const;
+    bool is_bounded(const entry& rhs, int32_t _devid, int32_t _pid, int64_t _tid) const;
 
     void write(std::ostream& _os) const;
 
@@ -121,15 +125,33 @@ void
 entry::save(Archive& ar, unsigned int) const
 {
     namespace cereal = tim::cereal;
+
+#define SAVE_PACKED_ENTRY_FIELD(VAR)                                                     \
+    {                                                                                    \
+        auto _val = VAR;                                                                 \
+        ar(cereal::make_nvp(#VAR, _val));                                                \
+    }
+    SAVE_PACKED_ENTRY_FIELD(priority);
+    SAVE_PACKED_ENTRY_FIELD(device);
+    SAVE_PACKED_ENTRY_FIELD(phase);
+    SAVE_PACKED_ENTRY_FIELD(depth);
+    SAVE_PACKED_ENTRY_FIELD(devid);
+    SAVE_PACKED_ENTRY_FIELD(pid);
+    SAVE_PACKED_ENTRY_FIELD(tid);
+    SAVE_PACKED_ENTRY_FIELD(cpu_cid);
+    SAVE_PACKED_ENTRY_FIELD(gpu_cid);
+    SAVE_PACKED_ENTRY_FIELD(parent_cid);
+    SAVE_PACKED_ENTRY_FIELD(begin_ns);
+    SAVE_PACKED_ENTRY_FIELD(end_ns);
+    SAVE_PACKED_ENTRY_FIELD(queue_id);
+    SAVE_PACKED_ENTRY_FIELD(hash);
+#undef SAVE_PACKED_ENTRY_FIELD
+
     std::string _name{};
-    if(hash > 0) _name = tim::get_hash_identifier(hash);
-    ar(cereal::make_nvp("priority", priority), cereal::make_nvp("device", device),
-       cereal::make_nvp("phase", phase), cereal::make_nvp("depth", depth),
-       cereal::make_nvp("tid", tid), cereal::make_nvp("cpu_cid", cpu_cid),
-       cereal::make_nvp("gpu_cid", gpu_cid), cereal::make_nvp("parent_cid", parent_cid),
-       cereal::make_nvp("begin_ns", begin_ns), cereal::make_nvp("end_ns", end_ns),
-       cereal::make_nvp("queue", queue_id), cereal::make_nvp("hash", hash),
-       cereal::make_nvp("name", _name),
+    auto        _hash = hash;
+    if(_hash > 0) _name = tim::get_hash_identifier(_hash);
+
+    ar(cereal::make_nvp("name", _name),
        cereal::make_nvp("demangled_name", tim::demangle(_name)));
 }
 
@@ -138,18 +160,36 @@ void
 entry::load(Archive& ar, unsigned int)
 {
     namespace cereal = tim::cereal;
+
+#define LOAD_PACKED_ENTRY_FIELD(VAR)                                                     \
+    {                                                                                    \
+        auto _val = VAR;                                                                 \
+        ar(cereal::make_nvp(#VAR, _val));                                                \
+        VAR = _val;                                                                      \
+    }
+    LOAD_PACKED_ENTRY_FIELD(priority);
+    LOAD_PACKED_ENTRY_FIELD(device);
+    LOAD_PACKED_ENTRY_FIELD(phase);
+    LOAD_PACKED_ENTRY_FIELD(depth);
+    LOAD_PACKED_ENTRY_FIELD(devid);
+    LOAD_PACKED_ENTRY_FIELD(pid);
+    LOAD_PACKED_ENTRY_FIELD(tid);
+    LOAD_PACKED_ENTRY_FIELD(cpu_cid);
+    LOAD_PACKED_ENTRY_FIELD(gpu_cid);
+    LOAD_PACKED_ENTRY_FIELD(parent_cid);
+    LOAD_PACKED_ENTRY_FIELD(begin_ns);
+    LOAD_PACKED_ENTRY_FIELD(end_ns);
+    LOAD_PACKED_ENTRY_FIELD(queue_id);
+    LOAD_PACKED_ENTRY_FIELD(hash);
+#undef LOAD_PACKED_ENTRY_FIELD
+
     std::string _name{};
     std::string _demangled_name{};
-    ar(cereal::make_nvp("priority", priority), cereal::make_nvp("device", device),
-       cereal::make_nvp("phase", phase), cereal::make_nvp("depth", depth),
-       cereal::make_nvp("tid", tid), cereal::make_nvp("cpu_cid", cpu_cid),
-       cereal::make_nvp("gpu_cid", gpu_cid), cereal::make_nvp("parent_cid", parent_cid),
-       cereal::make_nvp("begin_ns", begin_ns), cereal::make_nvp("end_ns", end_ns),
-       cereal::make_nvp("hash", hash), cereal::make_nvp("name", _name),
-       cereal::make_nvp("queue", queue_id),
+    ar(cereal::make_nvp("name", _name),
        cereal::make_nvp("demangled_name", _demangled_name));
 
-    tim::get_hash_ids()->emplace(hash, _name);
+    auto _hash = hash;
+    tim::get_hash_ids()->emplace(_hash, _name);
 }
 
 struct call_chain : private std::vector<entry>
@@ -174,10 +214,10 @@ struct call_chain : private std::vector<entry>
     using base_type::reserve;
     using base_type::size;
 
-    size_t                          get_hash() const;
-    int64_t                         get_cost(int64_t _tid = -1) const;
-    int64_t                         get_overlap(int64_t _tid = -1) const;
-    int64_t                         get_independent(int64_t _tid = -1) const;
+    size_t  get_hash() const;
+    int64_t get_cost(int64_t _tid = -1) const;
+    int64_t get_overlap(int32_t _devid, int32_t _pid, int64_t _tid = -1) const;
+    int64_t get_independent(int32_t _devid, int32_t _pid, int64_t _tid = -1) const;
     static std::vector<call_chain>& get_top_chains();
 
     bool operator==(const call_chain& rhs) const;

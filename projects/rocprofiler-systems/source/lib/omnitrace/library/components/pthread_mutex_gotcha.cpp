@@ -139,7 +139,7 @@ pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
 
     uint64_t _cid        = 0;
     uint64_t _parent_cid = 0;
-    uint16_t _depth      = 0;
+    uint32_t _depth      = 0;
     int64_t  _ts         = 0;
 
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
@@ -157,7 +157,7 @@ pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
     if(get_use_critical_trace())
     {
         add_critical_trace<Device::CPU, Phase::DELTA>(
-            threading::get_id(), _cid, 0, _parent_cid, _ts, comp::wall_clock::record(),
+            threading::get_id(), _cid, 0, _parent_cid, _ts, comp::wall_clock::record(), 0,
             reinterpret_cast<uintptr_t>(_mutex), get_hashes().at(_data.index), _depth);
     }
 

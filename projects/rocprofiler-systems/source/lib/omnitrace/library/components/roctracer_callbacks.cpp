@@ -36,6 +36,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <tuple>
 
 #include <roctracer_ext.h>
 #include <roctracer_hcc.h>
@@ -48,7 +49,8 @@ TIMEMORY_DEFINE_API(roctracer)
 namespace omnitrace
 {
 namespace api = tim::api;
-
+namespace
+{
 int64_t
 get_clock_skew()
 {
@@ -108,6 +110,13 @@ get_clock_skew()
     return (_use) ? _v : 0;
 }
 
+int&
+get_current_device()
+{
+    static thread_local int _v = 1;
+    return _v;
+}
+
 std::unordered_set<uint64_t>&
 get_roctracer_kernels()
 {
@@ -138,12 +147,29 @@ get_roctracer_tid_data()
     return _v;
 }
 
-using cid_tuple_t = std::tuple<uint64_t, uint64_t, uint16_t>;
-std::unordered_map<uint64_t, cid_tuple_t>&
-get_roctracer_cid_data()
+using cid_tuple_t = std::tuple<uint64_t, uint64_t, uint32_t>;
+struct cid_data : cid_tuple_t
 {
-    static auto _v = std::unordered_map<uint64_t, cid_tuple_t>{};
-    return _v;
+    using cid_tuple_t::cid_tuple_t;
+
+    TIMEMORY_DEFAULT_OBJECT(cid_data)
+
+    auto& cid() { return std::get<0>(*this); }
+    auto& pcid() { return std::get<1>(*this); }
+    auto& depth() { return std::get<2>(*this); }
+
+    auto cid() const { return std::get<0>(*this); }
+    auto pcid() const { return std::get<1>(*this); }
+    auto depth() const { return std::get<2>(*this); }
+};
+
+auto&
+get_roctracer_cid_data(int64_t _tid = threading::get_id())
+{
+    using thread_data_t =
+        thread_data<std::unordered_map<uint64_t, cid_data>, api::roctracer>;
+    static auto& _v = thread_data_t::instances(thread_data_t::construct_on_init{});
+    return *_v.at(_tid);
 }
 
 auto&
@@ -156,8 +182,6 @@ get_hip_activity_callbacks(int64_t _tid = threading::get_id())
 
 using hip_activity_mutex_t = std::decay_t<decltype(get_hip_activity_callbacks())>;
 using key_data_mutex_t     = std::decay_t<decltype(get_roctracer_key_data())>;
-using hip_data_mutex_t     = std::decay_t<decltype(get_roctracer_hip_data())>;
-using cid_data_mutex_t     = std::decay_t<decltype(get_roctracer_cid_data())>;
 
 auto&
 get_hip_activity_mutex(int64_t _tid = threading::get_id())
@@ -165,6 +189,7 @@ get_hip_activity_mutex(int64_t _tid = threading::get_id())
     return tim::type_mutex<hip_activity_mutex_t, api::roctracer, max_supported_threads>(
         _tid);
 }
+}  // namespace
 
 // HSA API callback function
 void
@@ -404,7 +429,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
     auto      _tid        = threading::get_id();
     uint64_t  _cid        = 0;
     uint64_t  _parent_cid = 0;
-    uint16_t  _depth      = 0;
+    uint32_t  _depth      = 0;
     uintptr_t _queue      = 0;
     auto      _corr_id    = data->correlation_id;
 
@@ -483,8 +508,14 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         default: break;
     }
 
+    auto& _device_id = get_current_device();
+
     if(data->phase == ACTIVITY_API_PHASE_ENTER)
     {
+        if(cid == HIP_API_ID_hipSetDevice)
+            get_current_device() =
+                reinterpret_cast<int>(data->args.hipSetDevice.deviceId) + 1;
+
         const char* _name = nullptr;
         switch(cid)
         {
@@ -549,7 +580,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
             TRACE_EVENT_BEGIN(
                 "host", perfetto::StaticString{ op_name }, static_cast<uint64_t>(_ts),
                 perfetto::Flow::ProcessScoped(_cid), "pcid", _parent_cid, "cid", _cid,
-                "tid", _tid, "depth", _depth, "corr_id", _corr_id);
+                "device", _device_id, "tid", _tid, "depth", _depth, "corr_id", _corr_id);
         }
         if(get_use_timemory())
         {
@@ -568,15 +599,12 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         if(get_use_critical_trace() || get_use_rocm_smi())
         {
             add_critical_trace<Device::CPU, Phase::BEGIN>(
-                _tid, _cid, _corr_id, _parent_cid, _ts, 0, _queue,
+                _tid, _cid, _corr_id, _parent_cid, _ts, 0, _device_id, _queue,
                 critical_trace::add_hash_id(op_name), _depth);
         }
 
-        {
-            tim::auto_lock_t _lk{ tim::type_mutex<cid_data_mutex_t>() };
-            get_roctracer_cid_data().emplace(_corr_id,
-                                             cid_tuple_t{ _cid, _parent_cid, _depth });
-        }
+        get_roctracer_cid_data(_tid).emplace(_corr_id,
+                                             cid_data{ _cid, _parent_cid, _depth });
 
         hip_exec_activity_callbacks(_tid);
     }
@@ -584,10 +612,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
     {
         hip_exec_activity_callbacks(_tid);
 
-        {
-            tim::auto_lock_t _lk{ tim::type_mutex<cid_data_mutex_t>() };
-            std::tie(_cid, _parent_cid, _depth) = get_roctracer_cid_data().at(_corr_id);
-        }
+        std::tie(_cid, _parent_cid, _depth) = get_roctracer_cid_data(_tid).at(_corr_id);
 
         if(get_use_perfetto())
         {
@@ -617,7 +642,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         if(get_use_critical_trace() || get_use_rocm_smi())
         {
             add_critical_trace<Device::CPU, Phase::END>(
-                _tid, _cid, _corr_id, _parent_cid, _ts, _ts, _queue,
+                _tid, _cid, _corr_id, _parent_cid, _ts, _ts, _device_id, _queue,
                 critical_trace::add_hash_id(op_name), _depth);
         }
     }
@@ -685,13 +710,14 @@ hip_activity_callback(const char* begin, const char* end, void*)
         }();
 
         auto& _keys = get_roctracer_key_data();
-        auto& _cids = get_roctracer_cid_data();
         auto& _tids = get_roctracer_tid_data();
 
         int16_t     _depth          = 0;                     // depth of kernel launch
         int64_t     _tid            = 0;                     // thread id
         uint64_t    _cid            = 0;                     // correlation id
         uint64_t    _pcid           = 0;                     // parent corr_id
+        int32_t     _devid          = record->device_id;     // device id
+        int64_t     _queid          = record->queue_id;      // queue id
         auto        _laps           = _indexes[_corr_id]++;  // see note #1
         const char* _name           = nullptr;
         bool        _found          = false;
@@ -713,11 +739,17 @@ hip_activity_callback(const char* begin, const char* end, void*)
 
         if(_critical_trace)
         {
-            tim::auto_lock_t _lk{ tim::type_mutex<cid_data_mutex_t>() };
+            auto& _cids = get_roctracer_cid_data(_tid);
             if(_cids.find(_corr_id) != _cids.end())
                 std::tie(_cid, _pcid, _depth) = _cids.at(_corr_id);
             else
+            {
+                OMNITRACE_VERBOSE_F(3,
+                                    "No critical trace entry generated for \"%s\" :: "
+                                    "unknown correlation id...\n",
+                                    _name);
                 _critical_trace = false;
+            }
         }
 
         {
@@ -727,8 +759,7 @@ hip_activity_callback(const char* begin, const char* end, void*)
                 "%4zu :: %-20s :: %-20s :: correlation_id(%6lu) time_ns(%12lu:%12lu) "
                 "delta_ns(%12lu) device_id(%d) stream_id(%lu) proc_id(%u) thr_id(%lu)\n",
                 _n++, op_name, _name, record->correlation_id, _beg_ns, _end_ns,
-                (_end_ns - _beg_ns), record->device_id, record->queue_id,
-                record->process_id, _tid);
+                (_end_ns - _beg_ns), _devid, _queid, record->process_id, _tid);
         }
 
         // execute this on this thread bc of how perfetto visualization works
@@ -741,11 +772,11 @@ hip_activity_callback(const char* begin, const char* end, void*)
                 _kernel_names.emplace(_name, tim::demangle(_name));
 
             assert(_end_ns > _beg_ns);
-            TRACE_EVENT_BEGIN(
-                "device", perfetto::StaticString{ _kernel_names.at(_name).c_str() },
-                _beg_ns, perfetto::Flow::ProcessScoped(_cid), "corr_id",
-                record->correlation_id, "device", record->device_id, "queue",
-                record->queue_id, "op", _op_id_names.at(record->op));
+            TRACE_EVENT_BEGIN("device",
+                              perfetto::StaticString{ _kernel_names.at(_name).c_str() },
+                              _beg_ns, perfetto::Flow::ProcessScoped(_cid), "corr_id",
+                              record->correlation_id, "device", _devid, "queue", _queid,
+                              "op", _op_id_names.at(record->op));
             TRACE_EVENT_END("device", _end_ns);
             // for some reason, this is necessary to make sure very last one ends
             TRACE_EVENT_END("device", _end_ns);
@@ -756,7 +787,7 @@ hip_activity_callback(const char* begin, const char* end, void*)
             auto     _hash = critical_trace::add_hash_id(_name);
             uint16_t _prio = _laps + 1;  // priority
             add_critical_trace<Device::GPU, Phase::DELTA, false>(
-                _tid, _cid, _corr_id, _cid, _beg_ns, _end_ns, record->queue_id, _hash,
+                _tid, _cid, _corr_id, _cid, _beg_ns, _end_ns, _devid, _queid, _hash,
                 _depth + 1, _prio);
         }
 

@@ -110,14 +110,23 @@ get_combined_hash(Arg0&& _zero, Arg1&& _one, Args&&... _args)
 bool
 entry::operator==(const entry& rhs) const
 {
-    return std::tie(device, depth, priority, tid, cpu_cid, gpu_cid, queue_id, hash) ==
-           std::tie(rhs.device, rhs.depth, rhs.priority, rhs.tid, rhs.cpu_cid,
-                    rhs.gpu_cid, rhs.queue_id, rhs.hash);
+    return std::tie(device, depth, priority, devid, pid, tid, cpu_cid, gpu_cid, queue_id,
+                    hash) == std::tie(rhs.device, rhs.depth, rhs.priority, rhs.devid,
+                                      rhs.pid, rhs.tid, rhs.cpu_cid, rhs.gpu_cid,
+                                      rhs.queue_id, rhs.hash);
 }
 
 bool
 entry::operator<(const entry& rhs) const
 {
+    // sort by process ids
+    auto _pid_eq = (pid == rhs.pid);
+    if(!_pid_eq) return (pid < rhs.pid);
+
+    // sort by device ids
+    auto _devid_eq = (devid == rhs.devid);
+    if(!_devid_eq) return (devid < rhs.devid);
+
     // sort by cpu ids
     auto _cpu_eq = (cpu_cid == rhs.cpu_cid);
     if(!_cpu_eq) return (cpu_cid < rhs.cpu_cid);
@@ -176,7 +185,7 @@ size_t
 entry::get_hash() const
 {
     return get_combined_hash(hash, static_cast<short>(device), static_cast<short>(phase),
-                             tid, cpu_cid, gpu_cid, queue_id, priority);
+                             devid, pid, tid, cpu_cid, gpu_cid, queue_id, priority);
 }
 
 int64_t
@@ -226,18 +235,6 @@ entry::get_overlap(const entry& rhs) const
 }
 
 int64_t
-entry::get_overlap(const entry& rhs, int64_t _tid) const
-{
-    if(!is_delta(*this, __FUNCTION__)) return 0;
-    if(!is_delta(rhs, __FUNCTION__)) return 0;
-
-    if(_tid < 0 || (this->tid == _tid && rhs.tid == _tid))  // all threads or same thread
-        return get_overlap(rhs);
-
-    return 0;
-}
-
-int64_t
 entry::get_independent(const entry& rhs) const
 {
     if(begin_ns >= rhs.end_ns || end_ns >= rhs.begin_ns)  // no overlap
@@ -260,12 +257,30 @@ entry::get_independent(const entry& rhs) const
 }
 
 int64_t
-entry::get_independent(const entry& rhs, int64_t _tid) const
+entry::get_overlap(const entry& rhs, int32_t _devid, int32_t _pid, int64_t _tid) const
 {
+    if(_devid != this->devid || _pid != this->pid)  // different device or process id
+        return 0;
+
     if(!is_delta(*this, __FUNCTION__)) return 0;
     if(!is_delta(rhs, __FUNCTION__)) return 0;
 
     if(_tid < 0 || (this->tid == _tid && rhs.tid == _tid))  // all threads or same thread
+        return get_overlap(rhs);
+
+    return 0;
+}
+
+int64_t
+entry::get_independent(const entry& rhs, int32_t _devid, int32_t _pid, int64_t _tid) const
+{
+    if(!is_delta(*this, __FUNCTION__)) return 0;
+    if(!is_delta(rhs, __FUNCTION__)) return 0;
+
+    if(_devid != this->devid || _pid != this->pid)  // different device or process id
+        return get_independent(rhs);
+    else if(_tid < 0 ||
+            (this->tid == _tid && rhs.tid == _tid))  // all threads or same thread
         return get_independent(rhs);
     else if(this->tid == _tid && rhs.tid != _tid)  // rhs is on different thread
         return get_cost();
@@ -280,9 +295,12 @@ entry::is_bounded(const entry& rhs) const
 }
 
 bool
-entry::is_bounded(const entry& rhs, int64_t _tid) const
+entry::is_bounded(const entry& rhs, int32_t _devid, int32_t _pid, int64_t _tid) const
 {
-    if(this->tid == _tid && rhs.tid == _tid)  // all threads or same thread
+    if(_devid != this->devid || _pid != this->pid)  // different device or process id
+        return false;
+
+    if(tid == _tid && rhs.tid == _tid)  // all threads or same thread
         return !(begin_ns < rhs.begin_ns || end_ns > rhs.end_ns);
 
     return false;
@@ -296,6 +314,8 @@ entry::write(std::ostream& _os) const
     else
         _os << "[CPU][" << cpu_cid << "]";
     _os << " parent: " << static_cast<int64_t>(parent_cid);
+    _os << ", device: " << devid;
+    _os << ", pid: " << pid;
     _os << ", tid: " << tid;
     _os << ", depth: " << depth;
     _os << ", queue: " << queue_id;
@@ -376,24 +396,24 @@ call_chain::get_cost(int64_t _tid) const
 }
 
 int64_t
-call_chain::get_overlap(int64_t _tid) const
+call_chain::get_overlap(int32_t _devid, int32_t _pid, int64_t _tid) const
 {
     int64_t _cost = 0;
     auto    itr   = this->begin();
     auto    nitr  = ++this->begin();
     for(; nitr != this->end(); ++nitr, ++itr)
-        _cost += nitr->get_overlap(*itr, _tid);
+        _cost += nitr->get_overlap(*itr, _devid, _pid, _tid);
     return _cost;
 }
 
 int64_t
-call_chain::get_independent(int64_t _tid) const
+call_chain::get_independent(int32_t _devid, int32_t _pid, int64_t _tid) const
 {
     int64_t _cost = 0;
     auto    itr   = this->begin();
     auto    nitr  = ++this->begin();
     for(; nitr != this->end(); ++nitr, ++itr)
-        _cost += itr->get_independent(*nitr, _tid);
+        _cost += itr->get_independent(*nitr, _devid, _pid, _tid);
     return _cost;
 }
 

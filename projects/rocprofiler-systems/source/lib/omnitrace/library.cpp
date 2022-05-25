@@ -220,11 +220,11 @@ omnitrace_push_trace_hidden(const char* name)
     {
         uint64_t _cid                       = 0;
         uint64_t _parent_cid                = 0;
-        uint16_t _depth                     = 0;
+        uint32_t _depth                     = 0;
         std::tie(_cid, _parent_cid, _depth) = create_cpu_cid_entry();
         auto _ts                            = comp::wall_clock::record();
         add_critical_trace<Device::CPU, Phase::BEGIN>(
-            threading::get_id(), _cid, 0, _parent_cid, _ts, 0, 0,
+            threading::get_id(), _cid, 0, _parent_cid, _ts, 0, 0, 0,
             critical_trace::add_hash_id(name), _depth);
     }
 }
@@ -262,11 +262,11 @@ omnitrace_pop_trace_hidden(const char* name)
                 if(get_cpu_cid_parents()->find(_cid) != get_cpu_cid_parents()->end())
                 {
                     uint64_t _parent_cid          = 0;
-                    uint16_t _depth               = 0;
+                    uint32_t _depth               = 0;
                     auto     _ts                  = comp::wall_clock::record();
                     std::tie(_parent_cid, _depth) = get_cpu_cid_parents()->at(_cid);
                     add_critical_trace<Device::CPU, Phase::END>(
-                        threading::get_id(), _cid, 0, _parent_cid, _ts, _ts, 0,
+                        threading::get_id(), _cid, 0, _parent_cid, _ts, _ts, 0, 0,
                         critical_trace::add_hash_id(name), _depth);
                 }
             }
@@ -476,7 +476,7 @@ omnitrace_init_library_hidden()
     // below will effectively do:
     //      get_cpu_cid_stack(0)->emplace_back(-1);
     // plus query some env variables
-    add_critical_trace<Device::CPU, Phase::NONE>(0, -1, 0, 0, 0, 0, 0, 0, 0);
+    add_critical_trace<Device::CPU, Phase::NONE>(0, -1, 0, 0, 0, 0, 0, 0, 0, -1, 0);
 
     if(gpu::device_count() == 0 && get_state() != State::Active)
     {

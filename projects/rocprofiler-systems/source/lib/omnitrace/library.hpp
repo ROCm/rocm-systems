@@ -42,6 +42,7 @@
 #include "library/critical_trace.hpp"
 #include "library/runtime.hpp"
 
+#include <timemory/backends/process.hpp>
 #include <timemory/macros/language.hpp>
 #include <timemory/utility/utility.hpp>
 
@@ -52,9 +53,9 @@ namespace omnitrace
 template <critical_trace::Device DevID, critical_trace::Phase PhaseID,
           bool UpdateStack = true>
 inline void
-add_critical_trace(int64_t _targ_tid, size_t _cpu_cid, size_t _gpu_cid,
-                   size_t _parent_cid, int64_t _ts_beg, int64_t _ts_val, uintptr_t _queue,
-                   size_t _hash, uint16_t _depth, uint16_t _prio = 0)
+add_critical_trace(int32_t _targ_tid, size_t _cpu_cid, size_t _gpu_cid,
+                   size_t _parent_cid, int64_t _ts_beg, int64_t _ts_val, int32_t _devid,
+                   uintptr_t _queue, size_t _hash, uint32_t _depth, uint16_t _prio = 0)
 {
     // clang-format off
     // these are used to create unique type mutexes
@@ -68,8 +69,8 @@ add_critical_trace(int64_t _targ_tid, size_t _cpu_cid, size_t _gpu_cid,
     using auto_lock_t                  = tim::auto_lock_t;
     static constexpr auto num_mutexes  = max_supported_threads;
     static auto           _update_freq = critical_trace::get_update_frequency();
-
-    auto _self_tid = threading::get_id();
+    static auto           _pid         = process::get_id();
+    auto                  _self_tid    = threading::get_id();
 
     if constexpr(PhaseID != critical_trace::Phase::NONE)
     {
@@ -83,8 +84,8 @@ add_critical_trace(int64_t _targ_tid, size_t _cpu_cid, size_t _gpu_cid,
 
         auto& _critical_trace = critical_trace::get(_self_tid);
         _critical_trace->emplace_back(critical_trace::entry{
-            _prio, DevID, PhaseID, _depth, _targ_tid, _cpu_cid, _gpu_cid, _parent_cid,
-            _ts_beg, _ts_val, _queue, _hash });
+            DevID, PhaseID, _prio, _depth, _devid, _pid, _targ_tid, _cpu_cid, _gpu_cid,
+            _parent_cid, _ts_beg, _ts_val, _queue, _hash });
     }
 
     if constexpr(UpdateStack)

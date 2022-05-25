@@ -690,7 +690,7 @@ print_settings(
 }
 
 void
-print_settings()
+print_settings(bool _include_env)
 {
     if(dmp::rank() > 0) return;
 
@@ -699,9 +699,12 @@ print_settings()
         return (_v.find("OMNITRACE_") == 0);
     };
 
-    tim::print_env(std::cerr, [_is_omnitrace_option](const std::string& _v) {
-        return _is_omnitrace_option(_v, std::set<std::string>{});
-    });
+    if(_include_env)
+    {
+        tim::print_env(std::cerr, [_is_omnitrace_option](const std::string& _v) {
+            return _is_omnitrace_option(_v, std::set<std::string>{});
+        });
+    }
 
     print_settings(std::cerr, _is_omnitrace_option);
 

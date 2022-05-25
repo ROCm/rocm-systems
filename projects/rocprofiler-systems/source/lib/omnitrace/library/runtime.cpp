@@ -94,7 +94,7 @@ get_cpu_cid_parents(int64_t _tid)
     return _v.at(_tid);
 }
 
-std::tuple<uint64_t, uint64_t, uint16_t>
+std::tuple<uint64_t, uint64_t, uint32_t>
 create_cpu_cid_entry(int64_t _tid)
 {
     using tim::auto_lock_t;
@@ -114,7 +114,7 @@ create_cpu_cid_entry(int64_t _tid)
 
     auto&&     _cid        = get_cpu_cid()++;
     auto&&     _parent_cid = get_cpu_cid_stack(_p_idx)->back();
-    uint16_t&& _depth = get_cpu_cid_stack(_p_idx)->size() - ((_p_idx == _tid) ? 1 : 0);
+    uint32_t&& _depth = get_cpu_cid_stack(_p_idx)->size() - ((_p_idx == _tid) ? 1 : 0);
 
     get_cpu_cid_parents(_tid)->emplace(_cid, std::make_tuple(_parent_cid, _depth));
     return std::make_tuple(_cid, _parent_cid, _depth);

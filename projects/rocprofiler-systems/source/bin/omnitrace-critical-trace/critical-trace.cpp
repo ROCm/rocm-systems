@@ -23,6 +23,7 @@
 #include "critical-trace.hpp"
 
 #include "library/api.hpp"
+#include "library/config.hpp"
 #include "library/perfetto.hpp"
 
 #include <timemory/hash/types.hpp>
@@ -32,11 +33,23 @@
 namespace config         = omnitrace::config;
 namespace critical_trace = omnitrace::critical_trace;
 
+namespace
+{
+std::unique_ptr<perfetto::TracingSession> tracing_session = {};
+
+void
+init_perfetto();
+
+void
+fini_perfetto();
+}  // namespace
+
 int
 main(int argc, char** argv)
 {
     omnitrace_init_library();
 
+    // config::set_setting_value("OMNITRACE_USE_PERFETTO", true);
     config::set_setting_value("OMNITRACE_CRITICAL_TRACE", true);
     // config::set_setting_value("OMNITRACE_CRITICAL_TRACE_DEBUG", true);
     config::set_setting_value<int64_t>("OMNITRACE_CRITICAL_TRACE_COUNT", 500);
@@ -45,6 +58,36 @@ main(int argc, char** argv)
                                        std::thread::hardware_concurrency());
     config::set_setting_value("OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES", true);
 
+    if(config::get_verbose() >= 0)
+    {
+        config::print_banner();
+        config::print_settings(false);
+    }
+
+    if(config::get_use_perfetto()) init_perfetto();
+
+    for(int i = 1; i < argc; ++i)
+    {
+        critical_trace::complete_call_chain = {};
+        OMNITRACE_BASIC_PRINT_F("Loading call-chain %s...\n", argv[i]);
+        critical_trace::load_call_chain(argv[i], "call_chain",
+                                        critical_trace::complete_call_chain);
+        for(const auto& itr : *tim::get_hash_ids())
+            critical_trace::complete_hash_ids.emplace(itr.second);
+        OMNITRACE_BASIC_PRINT_F("Computing critical trace for %s...\n", argv[i]);
+        critical_trace::compute_critical_trace();
+    }
+
+    if(config::get_use_perfetto()) fini_perfetto();
+
+    return EXIT_SUCCESS;
+}
+
+namespace
+{
+void
+init_perfetto()
+{
     perfetto::TracingInitArgs               args{};
     perfetto::TraceConfig                   cfg{};
     perfetto::protos::gen::TrackEventConfig track_event_cfg{};
@@ -67,22 +110,14 @@ main(int argc, char** argv)
     perfetto::Tracing::Initialize(args);
     perfetto::TrackEvent::Register();
 
-    auto tracing_session = perfetto::Tracing::NewTrace();
+    tracing_session = perfetto::Tracing::NewTrace();
     tracing_session->Setup(cfg);
     tracing_session->StartBlocking();
+}
 
-    for(int i = 1; i < argc; ++i)
-    {
-        critical_trace::complete_call_chain = {};
-        OMNITRACE_BASIC_PRINT_F("Loading call-chain %s...\n", argv[i]);
-        critical_trace::load_call_chain(argv[i], "call_chain",
-                                        critical_trace::complete_call_chain);
-        for(const auto& itr : *tim::get_hash_ids())
-            critical_trace::complete_hash_ids.emplace(itr.second);
-        OMNITRACE_BASIC_PRINT_F("Computing critical trace for %s...\n", argv[i]);
-        critical_trace::compute_critical_trace();
-    }
-
+void
+fini_perfetto()
+{
     // Make sure the last event is closed for this example.
     perfetto::TrackEvent::Flush();
 
@@ -115,7 +150,7 @@ main(int argc, char** argv)
         {
             OMNITRACE_BASIC_PRINT_F("> Error opening '%s'...\n",
                                     config::get_perfetto_output_filename().c_str());
-            return EXIT_FAILURE;
+            std::exit(EXIT_FAILURE);
         }
         else
         {
@@ -126,6 +161,7 @@ main(int argc, char** argv)
         ofs.close();
     }
 }
+}  // namespace
 
 namespace omnitrace
 {
@@ -462,8 +498,9 @@ find_children(PTL::ThreadPool& _tp, call_graph_t& _graph, const call_chain& _cha
     else
     {
         OMNITRACE_CT_DEBUG_F("Setting root (line %i)...\n", __LINE__);
-        auto  _depth = static_cast<uint16_t>(-1);
-        entry _root{ 0, Device::NONE, Phase::NONE, _depth, 0, 0, 0, 0, 0, 0, 0 };
+        uint32_t _depth   = -1;
+        uint64_t _cpu_cid = -1;
+        entry _root{ Device::NONE, Phase::NONE, 0, _depth, 0, 0, 0, _cpu_cid, 0, 0, 0 };
         _graph.set_head(_root);
     }
 
@@ -558,8 +595,8 @@ find_sequences(PTL::ThreadPool& _tp, call_graph_t& _graph,
         auto _nchild = _graph.number_of_children(itr);
         if(_nchild > 0)
         {
-            OMNITRACE_CT_DEBUG("Skipping node #%zu with %u children :: %s\n", _n, _nchild,
-                               JOIN("", *itr).c_str());
+            // OMNITRACE_CT_DEBUG("Skipping node #%zu with %u children :: %s\n", _n,
+            // _nchild, JOIN("", *itr).c_str());
             continue;
         }
         _end_nodes.emplace_back(itr);
