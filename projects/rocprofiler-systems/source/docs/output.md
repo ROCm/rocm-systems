@@ -58,6 +58,18 @@ $ omnitrace -- ./foo
 [Omnitrace](https://github.com/AMDResearch/omnitrace) will output a metadata.json file. This metadata file will contain
 information about the settings, environment variables, output files, and info about the system and the run:
 
+- Hardware cache sizes
+- Physical CPUs
+- Hardware concurrency
+- CPU model, frequency, vendor, and features
+- Launch date and time
+- Memory maps (e.g. shared libraries)
+- Output files
+- Environment Variables
+- Configuration Settings
+
+### Metadata JSON Sample
+
 ```json
 {
     "omnitrace": {
@@ -65,23 +77,80 @@ information about the settings, environment variables, output files, and info ab
             "info": {
                 "HW_L1_CACHE_SIZE": 32768,
                 "HW_L2_CACHE_SIZE": 524288,
-                "SHELL": "/bin/bash",
+                "HW_L3_CACHE_SIZE": 16777216,
                 "HW_PHYSICAL_CPU": 12,
-                "CPU_FEATURES": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl nonstop_tsc cpuid extd_apicid aperfmperf pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local clzero irperf xsaveerptr rdpru wbnoinvd arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif v_spec_ctrl umip rdpid overflow_recov succor smca sme sev sev_es",
                 "HW_CONCURRENCY": 24,
                 "LAUNCH_TIME": "02:04",
-                "CPU_MODEL": "AMD Ryzen Threadripper PRO 3945WX 12-Cores",
+                "LAUNCH_DATE": "05/08/22",
                 "TIMEMORY_GIT_REVISION": "52e7034fd419ff296506cdef43084f6071dbaba1",
                 "TIMEMORY_VERSION": "3.3.0rc4",
-                "CPU_FREQUENCY": 2400,
                 "TIMEMORY_API": "tim::project::timemory",
+                "TIMEMORY_GIT_DESCRIBE": "v3.2.0-263-g52e7034f",
                 "PWD": "/home/jrmadsen/devel/c++/AARInternal/hosttrace-dyninst/build-vscode",
-                "HW_L3_CACHE_SIZE": 16777216,
                 "USER": "jrmadsen",
                 "HOME": "/home/jrmadsen",
-                "TIMEMORY_GIT_DESCRIBE": "v3.2.0-263-g52e7034f",
-                "LAUNCH_DATE": "05/08/22",
-                "CPU_VENDOR": "AuthenticAMD"
+                "SHELL": "/bin/bash",
+                "CPU_MODEL": "AMD Ryzen Threadripper PRO 3945WX 12-Cores",
+                "CPU_FREQUENCY": 2400,
+                "CPU_VENDOR": "AuthenticAMD",
+                "CPU_FEATURES": [
+                    "fpu",
+                    "msr",
+                    "sse",
+                    "sse2",
+                    "constant_tsc",
+                    "ssse3",
+                    "fma",
+                    "sse4_1",
+                    "sse4_2",
+                    "popcnt",
+                    "avx2",
+                    "... etc. ..."
+                ],
+                "memory_maps": [
+                    {
+                        "end_address": "7f4013797000",
+                        "start_address": "7f4012e58000",
+                        "pathname": "/opt/rocm-5.0.0/hip/lib/libamdhip64.so.5.0.50000",
+                        "offset": "34a000",
+                        "device": "103:05",
+                        "inode": 4331165,
+                        "permissions": "rw-p"
+                    },
+                    {
+                        "end_address": "7f4013902000",
+                        "start_address": "7f4013901000",
+                        "pathname": "/usr/lib/x86_64-linux-gnu/libm-2.31.so",
+                        "offset": "14d000",
+                        "device": "103:05",
+                        "inode": 42078854,
+                        "permissions": "rwxp"
+                    },
+                    {
+                        "end_address": "7f4013919000",
+                        "start_address": "7f4013908000",
+                        "pathname": "/usr/lib/x86_64-linux-gnu/libpthread-2.31.so",
+                        "offset": "6000",
+                        "device": "103:05",
+                        "inode": 42078874,
+                        "permissions": "r-xp"
+                    },
+                    {
+                        "...": "etc."
+                    },
+                ],
+                "memory_maps_files": [
+                    "/opt/rocm-5.0.0/hip/lib/libamdhip64.so.5.0.50000",
+                    "/opt/rocm-5.0.0/hsa-amd-aqlprofile/lib/libhsa-amd-aqlprofile64.so.1.0.50000",
+                    "/opt/rocm-5.0.0/lib/libamd_comgr.so.2.4.50000",
+                    "/opt/rocm-5.0.0/lib/libhsa-runtime64.so.1.5.50000",
+                    "/opt/rocm-5.0.0/rocm_smi/lib/librocm_smi64.so.5.0.50000",
+                    "/opt/rocm-5.0.0/roctracer/lib/libroctracer64.so.1.0.50000",
+                    "/usr/lib/x86_64-linux-gnu/ld-2.31.so",
+                    "/usr/lib/x86_64-linux-gnu/libc-2.31.so",
+                    "/usr/lib/x86_64-linux-gnu/libdl-2.31.so",
+                    "... etc. ..."
+                ],
             },
             "output": {
                 "text": [
