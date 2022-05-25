@@ -20,6 +20,11 @@
 ## IN THE SOFTWARE.
 ################################################################################
 
+# Set the HIP language runtime link flags as FindHIP does not set them.
+set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG})
+set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG_SEP ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG_SEP})
+set(CMAKE_EXECUTABLE_RPATH_LINK_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RPATH_LINK_CXX_FLAG})
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "/opt/rocm/hip/cmake")
 set(CMAKE_HIP_ARCHITECTURES OFF)
 find_package(HIP REQUIRED MODULE)
