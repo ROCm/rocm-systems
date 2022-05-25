@@ -660,7 +660,7 @@ omnitrace_init_tooling_hidden()
         buffer_config->set_fill_policy(_policy);
 
         auto* ds_cfg = cfg.add_data_sources()->mutable_config();
-        ds_cfg->set_name("omnitrace");
+        ds_cfg->set_name("track_event");  // this MUST be track_event
         ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
 
         args.shmem_size_hint_kb = shmem_size_hint;
