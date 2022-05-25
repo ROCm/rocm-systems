@@ -53,10 +53,8 @@ TIMEMORY_DECLARE_TYPE_TRAIT(name, typename Tp)
         static constexpr auto value = NAME;                                              \
     };                                                                                   \
     template <>                                                                          \
-    struct name<type_list<__VA_ARGS__>>                                                  \
-    {                                                                                    \
-        static constexpr auto value = NAME;                                              \
-    };                                                                                   \
+    struct name<type_list<__VA_ARGS__>> : name<__VA_ARGS__>                              \
+    {};                                                                                  \
     }                                                                                    \
     }
 

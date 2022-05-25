@@ -36,7 +36,6 @@ namespace thread_sampler
 {
 namespace
 {
-using tim::type_mutex;
 using auto_lock_t                                       = tim::auto_lock_t;
 using promise_t                                         = std::promise<void>;
 std::unique_ptr<promise_t>             polling_finished = {};

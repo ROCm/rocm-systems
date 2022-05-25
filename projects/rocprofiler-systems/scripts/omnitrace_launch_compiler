@@ -55,6 +55,30 @@ CXX_COMPILER=${1}
 # remove the expected C++ compiler from the arguments
 shift
 
+# discards the clang-tidy arguments
+if [ "$(basename ${1})" = "cmake" ] && [ "${2}" = "-E" ] && [ "${3}" = "__run_co_compile" ]; then
+    c=1
+    n=1
+    for i in "${@}"
+    do
+        if [ "${i}" = "--" ]; then
+            break;
+        fi
+        if [ "${c}" -gt 3 ]; then
+            n=$((${n} + 1))
+        fi
+        c=$((${c} + 1))
+    done
+
+    if [[ $# -gt ${c} ]]; then
+        n=$((${n} + 3)) # add three because of the first 3 args
+        for i in $(seq 1 1 ${n})
+        do
+            shift
+        done
+    fi
+fi
+
 if [[ "${CXX_COMPILER}" != "${1}" ]]; then
     debug-message $@
     # the command does not depend on omnitrace so just execute the command w/o re-directing to ${OMNITRACE_COMPILER}

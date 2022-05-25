@@ -1022,7 +1022,7 @@ omnitrace_finalize_hidden(void)
         auto& _aitr = get_timemory_hash_aliases(i);
         if(_hzero && _hitr)
         {
-            for(auto itr : *_hitr)
+            for(const auto& itr : *_hitr)
                 _hzero->emplace(itr.first, itr.second);
         }
         if(_azero && _aitr)
