@@ -415,9 +415,10 @@ module_function::is_routine_constrained() const
         "S)_|::basic_string[a-zA-Z,<>: ]+::_M_create|::__|::_(Alloc|State)|"
         "std::(basic_|)(ifstream|ios|istream|ostream|stream))",
         regex_opts);
-    static std::regex leading("^(_|\\.|frame_dummy|transaction clone|virtual "
-                              "thunk|non-virtual thunk|\\(|targ|kmp_threadprivate_)",
-                              regex_opts);
+    static std::regex leading(
+        "^(_|\\.|frame_dummy|transaction clone|virtual "
+        "thunk|non-virtual thunk|\\(|targ|kmp_threadprivate_|Kokkos::Profiling::)",
+        regex_opts);
     static std::regex trailing(
         "(_|\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$", regex_opts);
     static strset_t whole = []() {

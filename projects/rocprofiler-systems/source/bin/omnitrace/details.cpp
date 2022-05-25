@@ -48,7 +48,8 @@ get_whole_function_names()
         "rocr::core::Signal::WaitAny", "rocr::core::Runtime::AsyncEventsLoop",
         "rocr::core::BusyWaitSignal::WaitAcquire",
         "rocr::core::BusyWaitSignal::WaitRelaxed", "rocr::HSA::hsa_signal_wait_scacquire",
-        "rocr::os::ThreadTrampoline", "event_base_loop"
+        "rocr::os::ThreadTrampoline", "rocr::image::ImageRuntime::CreateImageManager",
+        "rocr::AMD::GpuAgent::GetInfo", "rocr::HSA::hsa_agent_get_info", "event_base_loop"
     };
 #else
     // should hopefully be removed soon
