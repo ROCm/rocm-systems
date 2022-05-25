@@ -124,6 +124,12 @@ jobs:
         for i in omnitrace-ls-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
         omnitrace -e -v 1 -- ls
 
+    - name: Test User API
+      timeout-minutes: 10
+      run: |
+        set -v
+        ./scripts/test-find-package.sh --install-dir /opt/omnitrace
+
     - name: CTest Artifacts
       if: success() || failure()
       uses: actions/upload-artifact@v2

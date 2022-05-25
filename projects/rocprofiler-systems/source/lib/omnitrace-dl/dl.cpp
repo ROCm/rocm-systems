@@ -33,6 +33,7 @@
 #include "common/join.hpp"
 
 #include <cassert>
+#include <gnu/libc-version.h>
 
 //--------------------------------------------------------------------------------------//
 

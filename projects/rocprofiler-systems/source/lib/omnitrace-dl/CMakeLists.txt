@@ -18,15 +18,16 @@ target_sources(omnitrace-dl-library PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/dl.cpp
 target_include_directories(
     omnitrace-dl-library
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../omnitrace-user>)
+           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../omnitrace-user>
+           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(
     omnitrace-dl-library
     PUBLIC
         ${dl_LIBRARY}
         $<BUILD_INTERFACE:omnitrace::common-library>
         $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
-        $<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,$<BUILD_INTERFACE:omnitrace::omnitrace-static-libgcc>,>
-        $<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBSTDCXX}>,$<BUILD_INTERFACE:omnitrace::omnitrace-static-libstdcxx>,>
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,omnitrace::omnitrace-static-libgcc,>>
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBSTDCXX}>,omnitrace::omnitrace-static-libstdcxx,>>
     )
 
 add_target_cxx_flag_if_avail(omnitrace-dl-library "-ftls-model=global-dynamic")
@@ -42,14 +43,10 @@ set_target_properties(
 
 omnitrace_strip_target(omnitrace-dl-library)
 
-install(
-    TARGETS omnitrace-dl-library
-    EXPORT omnitrace-dl-library-targets
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    OPTIONAL)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/dl.hpp
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/omnitrace)
 
 install(
-    EXPORT omnitrace-dl-library-targets
-    FILE omnitrace-dl-library-targets.cmake
-    NAMESPACE omnitrace::
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/omnitrace)
+    TARGETS omnitrace-dl-library
+    EXPORT omnitrace-library-targets
+    DESTINATION ${CMAKE_INSTALL_LIBDIR})

@@ -598,6 +598,9 @@ target_link_libraries(omnitrace-ptl INTERFACE PTL::ptl-object)
 #
 # ----------------------------------------------------------------------------------------#
 
+# override compiler macros
+include(Compilers)
+
 if(OMNITRACE_BUILD_STATIC_LIBSTDCXX)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
         omnitrace_restore_variables(STATIC_LIBSTDCXX_CXX VARIABLES CMAKE_CXX_FLAGS)

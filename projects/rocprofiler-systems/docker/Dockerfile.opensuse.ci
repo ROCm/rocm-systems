@@ -19,7 +19,7 @@ ARG NJOBS="12"
 RUN zypper update -y && \
     zypper dist-upgrade -y && \
     zypper install -y -t pattern devel_basis && \
-    zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build papi-devel curl wget && \
+    zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build papi-devel curl wget binutils-gold && \
     python3 -m pip install 'cmake==3.18.4'
 
 COPY ./dyninst-source /tmp/dyninst

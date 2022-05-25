@@ -91,6 +91,10 @@ omnitrace_add_option(CMAKE_CXX_STANDARD_REQUIRED "Require C++ language standard"
 omnitrace_add_option(CMAKE_CXX_EXTENSIONS "Compiler specific language extensions" OFF)
 omnitrace_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH "Enable rpath to linked libraries"
                      ON)
+set(CMAKE_INSTALL_MESSAGE
+    "LAZY"
+    CACHE STRING "Installation message")
+mark_as_advanced(CMAKE_INSTALL_MESSAGE)
 
 omnitrace_add_option(OMNITRACE_USE_CLANG_TIDY "Enable clang-tidy" OFF)
 omnitrace_add_option(OMNITRACE_USE_MPI "Enable MPI support" OFF)
@@ -269,6 +273,7 @@ endif()
 #
 # ------------------------------------------------------------------------------#
 
+include(ConfigInstall)
 include(ConfigCPack)
 
 # ------------------------------------------------------------------------------#

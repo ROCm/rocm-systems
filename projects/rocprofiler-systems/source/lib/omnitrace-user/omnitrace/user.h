@@ -23,10 +23,27 @@
 #ifndef OMNITRACE_USER_H_
 #define OMNITRACE_USER_H_ 1
 
-#define OMNITRACE_ATTRIBUTE(...)   __attribute__((__VA_ARGS__))
-#define OMNITRACE_VISIBILITY(MODE) OMNITRACE_ATTRIBUTE(visibility(MODE))
-#define OMNITRACE_PUBLIC_API       OMNITRACE_VISIBILITY("default")
-#define OMNITRACE_HIDDEN_API       OMNITRACE_VISIBILITY("hidden")
+#if defined(OMNITRACE_USER_SOURCE) && (OMNITRACE_USER_SOURCE > 0)
+#    if !defined(OMNITRACE_ATTRIBUTE)
+#        define OMNITRACE_ATTRIBUTE(...) __attribute__((__VA_ARGS__))
+#    endif
+#    if !defined(OMNITRACE_VISIBILITY)
+#        define OMNITRACE_VISIBILITY(MODE) OMNITRACE_ATTRIBUTE(visibility(MODE))
+#    endif
+#    if !defined(OMNITRACE_PUBLIC_API)
+#        define OMNITRACE_PUBLIC_API OMNITRACE_VISIBILITY("default")
+#    endif
+#    if !defined(OMNITRACE_HIDDEN_API)
+#        define OMNITRACE_HIDDEN_API OMNITRACE_VISIBILITY("hidden")
+#    endif
+#else
+#    if !defined(OMNITRACE_PUBLIC_API)
+#        define OMNITRACE_PUBLIC_API
+#    endif
+#    if !defined(OMNITRACE_HIDDEN_API)
+#        define OMNITRACE_HIDDEN_API
+#    endif
+#endif
 
 #if defined(__cplusplus)
 extern "C"

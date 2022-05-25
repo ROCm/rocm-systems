@@ -1,6 +1,4 @@
 # include guard
-include_guard(DIRECTORY)
-
 # ########################################################################################
 #
 # Compilers
@@ -31,8 +29,11 @@ if("${LIBNAME}" STREQUAL "")
     string(TOLOWER "${PROJECT_NAME}" LIBNAME)
 endif()
 
-omnitrace_add_interface_library(
-    ${LIBNAME}-compile-options "Adds the standard set of compiler flags used by timemory")
+if(NOT TARGET ${LIBNAME}-compile-options)
+    omnitrace_add_interface_library(
+        ${LIBNAME}-compile-options
+        "Adds the standard set of compiler flags used by timemory")
+endif()
 
 # ----------------------------------------------------------------------------------------#
 # macro converting string to list
@@ -116,10 +117,17 @@ endmacro()
 # add C flag to target
 # ----------------------------------------------------------------------------------------#
 macro(ADD_TARGET_C_FLAG _TARG)
+    get_target_property(_TARG_TYPE ${_TARG} TYPE)
+    if("${_TARG_TYPE}" MATCHES "INTERFACE_LIBRARY")
+        set(_SCOPE INTERFACE)
+    else()
+        set(_SCOPE PRIVATE)
+    endif()
+
     string(REPLACE "-" "_" _MAKE_TARG "${_TARG}")
     list(APPEND OMNITRACE_MAKE_TARGETS ${_MAKE_TARG})
 
-    target_compile_options(${_TARG} INTERFACE $<$<COMPILE_LANGUAGE:C>:${ARGN}>)
+    target_compile_options(${_TARG} ${_SCOPE} $<$<COMPILE_LANGUAGE:C>:${ARGN}>)
     list(APPEND ${_MAKE_TARG}_C_FLAGS ${ARGN})
 endmacro()
 
@@ -211,18 +219,25 @@ endmacro()
 # add CXX flag to target
 # ----------------------------------------------------------------------------------------#
 macro(ADD_TARGET_CXX_FLAG _TARG)
+    get_target_property(_TARG_TYPE ${_TARG} TYPE)
+    if("${_TARG_TYPE}" MATCHES "INTERFACE_LIBRARY")
+        set(_SCOPE INTERFACE)
+    else()
+        set(_SCOPE PRIVATE)
+    endif()
+
     string(REPLACE "-" "_" _MAKE_TARG "${_TARG}")
     list(APPEND OMNITRACE_MAKE_TARGETS ${_MAKE_TARG})
 
-    target_compile_options(${_TARG} INTERFACE $<$<COMPILE_LANGUAGE:CXX>:${ARGN}>)
+    target_compile_options(${_TARG} ${_SCOPE} $<$<COMPILE_LANGUAGE:CXX>:${ARGN}>)
     list(APPEND ${_MAKE_TARG}_CXX_FLAGS ${ARGN})
     get_property(LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)
     if(CMAKE_CUDA_COMPILER_IS_NVIDIA)
-        target_compile_options(${_TARG}
-                               INTERFACE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${ARGN}>)
+        target_compile_options(${_TARG} ${_SCOPE}
+                               $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${ARGN}>)
         list(APPEND ${_MAKE_TARG}_CUDA_FLAGS -Xcompiler=${ARGN})
     elseif(CMAKE_CUDA_COMPILER_IS_CLANG)
-        target_compile_options(${_TARG} INTERFACE $<$<COMPILE_LANGUAGE:CUDA>:${ARGN}>)
+        target_compile_options(${_TARG} ${_SCOPE} $<$<COMPILE_LANGUAGE:CUDA>:${ARGN}>)
         list(APPEND ${_MAKE_TARG}_CUDA_FLAGS ${ARGN})
     endif()
 endmacro()

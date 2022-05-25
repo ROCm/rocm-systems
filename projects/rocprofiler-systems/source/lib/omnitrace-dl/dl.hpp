@@ -20,9 +20,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
+#ifndef OMNITRACE_DL_HPP_
+#define OMNITRACE_DL_HPP_ 1
 
-#include "common/defines.h"
+#if defined(OMNITRACE_DL_SOURCE) && (OMNITRACE_DL_SOURCE > 0)
+#    include "common/defines.h"
+#else
+#    if !defined(OMNITRACE_PUBLIC_API)
+#        define OMNITRACE_PUBLIC_API
+#    endif
+#endif
+
 #include "omnitrace/user.h"
 
 #include <atomic>
@@ -32,7 +40,6 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <functional>
-#include <gnu/libc-version.h>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -88,3 +95,5 @@ extern "C"
 #    endif
 #endif
 }
+
+#endif  // OMNITRACE_DL_HPP_ 1

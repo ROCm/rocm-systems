@@ -13,8 +13,10 @@ target_include_directories(
 
 target_compile_definitions(
     omnitrace-interface-library
-    INTERFACE OMNITRACE_MAX_THREADS=${OMNITRACE_MAX_THREADS}
-              $<IF:$<BOOL:${OMNITRACE_CUSTOM_DATA_SOURCE}>,CUSTOM_DATA_SOURCE,>)
+    INTERFACE
+        OMNITRACE_MAX_THREADS=${OMNITRACE_MAX_THREADS}
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_CUSTOM_DATA_SOURCE}>,CUSTOM_DATA_SOURCE,>>
+    )
 
 target_link_libraries(
     omnitrace-interface-library
@@ -30,9 +32,10 @@ target_link_libraries(
         $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
         $<BUILD_INTERFACE:omnitrace::omnitrace-roctracer>
         $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
-        $<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,$<BUILD_INTERFACE:omnitrace::omnitrace-static-libgcc>,>
-        $<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBSTDCXX}>,$<BUILD_INTERFACE:omnitrace::omnitrace-static-libstdcxx>,>
-        $<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>)
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,omnitrace::omnitrace-static-libgcc,>>
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBSTDCXX}>,omnitrace::omnitrace-static-libstdcxx,>>
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>>
+    )
 
 # ------------------------------------------------------------------------------#
 #
