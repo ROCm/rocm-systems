@@ -24,9 +24,11 @@
 #include <cassert>
 #include <condition_variable>
 #include <cstdlib>
+#include <cstddef>
 #include <cstring>
 #include <future>
 #include <mutex>
+#include <type_traits>
 
 namespace roctracer {
 
@@ -44,7 +46,8 @@ class MemoryPool {
     pool_end_ = pool_begin_ + allocation_size;
     buffer_begin_ = pool_begin_;
     buffer_end_ = buffer_begin_ + properties_.buffer_size;
-    write_ptr_ = buffer_begin_;
+    record_ptr_ = buffer_begin_;
+    data_ptr_ = buffer_end_;
 
     // Create a consumer thread and wait for it to be ready to accept work.
     std::promise<void> ready;
@@ -67,38 +70,65 @@ class MemoryPool {
   MemoryPool(const MemoryPool&) = delete;
   MemoryPool& operator=(const MemoryPool&) = delete;
 
-  template <typename Record> void Write(Record&& record) {
+  template <typename Record, typename Functor = std::function<void(Record& record, const void*)>>
+  void Write(Record&& record, const void* data, size_t data_size, Functor&& store_data = {}) {
+    assert(data != nullptr || data_size == 0);  // If data is null, then data_size must be 0
+
     std::lock_guard producer_lock(producer_mutex_);
-    char* next = write_ptr_ + sizeof(record);
-    if (next > buffer_end_) {
-      NotifyConsumerThread(buffer_begin_, write_ptr_);
 
-      // Switch buffers
-      buffer_begin_ = (buffer_end_ == pool_end_) ? pool_begin_ : buffer_end_;
-      buffer_end_ = buffer_begin_ + properties_.buffer_size;
-      write_ptr_ = buffer_begin_;
+    // The amount of memory reserved in the buffer to store data. If the data cannot fit because it
+    // is larger than the buffer size minus one record, then the data won't be copied into the
+    // buffer.
+    size_t reserve_data_size =
+        data_size <= (properties_.buffer_size - sizeof(Record)) ? data_size : 0;
 
-      next = write_ptr_ + sizeof(record);
-      assert(next <= buffer_end_ && "buffer size is less then the record size");
+    std::byte* next_record = record_ptr_ + sizeof(Record);
+    if (next_record > (data_ptr_ - reserve_data_size)) {
+      NotifyConsumerThread(buffer_begin_, record_ptr_);
+      SwitchBuffers();
+      next_record = record_ptr_ + sizeof(Record);
+      assert(next_record <= buffer_end_ && "buffer size is less then the record size");
+    }
+
+    // Store data in the record. Copy the data first if it fits in the buffer
+    // (reserve_data_size != 0).
+    if (reserve_data_size) {
+      data_ptr_ -= data_size;
+      ::memcpy(data_ptr_, data, data_size);
+      store_data(record, data_ptr_);
+    } else if (data != nullptr) {
+      store_data(record, data);
     }
 
     // Store the record into the buffer, and increment the write pointer.
-    ::memcpy(write_ptr_, &record, sizeof(record));
-    write_ptr_ = next;
+    ::memcpy(record_ptr_, &record, sizeof(Record));
+    record_ptr_ = next_record;
+
+    // If the data does not fit in the buffer, flush the buffer with the record as is. We don't copy
+    // the data so we make sure that the record and its data are processed by waiting until the
+    // flush is complete.
+    if (data != nullptr && reserve_data_size == 0) {
+      NotifyConsumerThread(buffer_begin_, record_ptr_);
+      SwitchBuffers();
+      {
+        std::unique_lock consumer_lock(consumer_mutex_);
+        consumer_cond_.wait(consumer_lock, [this]() { return !consumer_arg_.valid; });
+      }
+    }
+  }
+  template <typename Record> void Write(Record&& record) {
+    using DataPtr = void*;
+    Write(std::forward<Record>(record), DataPtr(nullptr), 0, {});
   }
 
   // Flush the records and block until they are all made visible to the client.
   void Flush() {
     {
       std::lock_guard producer_lock(producer_mutex_);
-      if (write_ptr_ == buffer_begin_) return;
+      if (record_ptr_ == buffer_begin_) return;
 
-      NotifyConsumerThread(buffer_begin_, write_ptr_);
-
-      // Switch buffers
-      buffer_begin_ = (buffer_end_ == pool_end_) ? pool_begin_ : buffer_end_;
-      buffer_end_ = buffer_begin_ + properties_.buffer_size;
-      write_ptr_ = buffer_begin_;
+      NotifyConsumerThread(buffer_begin_, record_ptr_);
+      SwitchBuffers();
     }
     {
       // Wait for the current operation to complete.
@@ -108,6 +138,13 @@ class MemoryPool {
   }
 
  private:
+  void SwitchBuffers() {
+    buffer_begin_ = (buffer_end_ == pool_end_) ? pool_begin_ : buffer_end_;
+    buffer_end_ = buffer_begin_ + properties_.buffer_size;
+    record_ptr_ = buffer_begin_;
+    data_ptr_ = buffer_end_;
+  }
+
   void ConsumerThreadLoop(std::promise<void> ready) {
     std::unique_lock consumer_lock(consumer_mutex_);
 
@@ -120,7 +157,8 @@ class MemoryPool {
       // begin == end == nullptr means the thread needs to exit.
       if (consumer_arg_.begin == nullptr && consumer_arg_.end == nullptr) break;
 
-      properties_.buffer_callback_fun(consumer_arg_.begin, consumer_arg_.end,
+      properties_.buffer_callback_fun(reinterpret_cast<const char*>(consumer_arg_.begin),
+                                      reinterpret_cast<const char*>(consumer_arg_.end),
                                       properties_.buffer_callback_arg);
 
       // Mark this operation as complete (valid=false) and notify all producers that may be
@@ -131,7 +169,7 @@ class MemoryPool {
     }
   }
 
-  void NotifyConsumerThread(const char* data_begin, const char* data_end) {
+  void NotifyConsumerThread(const std::byte* data_begin, const std::byte* data_end) {
     std::unique_lock consumer_lock(consumer_mutex_);
 
     // If consumer_arg_ is still in use (valid=true), then wait for the consumer thread to finish
@@ -148,18 +186,18 @@ class MemoryPool {
     consumer_cond_.notify_all();
   }
 
-  void AllocateMemory(char** ptr, size_t size) const {
+  void AllocateMemory(std::byte** ptr, size_t size) const {
     if (properties_.alloc_fun != nullptr) {
       // Use the custom allocator provided in the properties.
-      properties_.alloc_fun(ptr, size, properties_.alloc_arg);
+      properties_.alloc_fun(reinterpret_cast<char**>(ptr), size, properties_.alloc_arg);
       return;
     }
 
     // No custom allocator was provided so use the default malloc/realloc/free allocator.
     if (*ptr == nullptr) {
-      *ptr = reinterpret_cast<char*>(malloc(size));
+      *ptr = static_cast<std::byte*>(malloc(size));
     } else if (size != 0) {
-      *ptr = reinterpret_cast<char*>(realloc(*ptr, size));
+      *ptr = static_cast<std::byte*>(realloc(*ptr, size));
     } else {
       free(*ptr);
       *ptr = nullptr;
@@ -170,18 +208,19 @@ class MemoryPool {
   const roctracer_properties_t properties_;
 
   // Pool definition
-  char* pool_begin_;  // FIXME: shouldn't these be void*?
-  char* pool_end_;
-  char* buffer_begin_;
-  char* buffer_end_;
-  char* write_ptr_;
+  std::byte* pool_begin_;
+  std::byte* pool_end_;
+  std::byte* buffer_begin_;
+  std::byte* buffer_end_;
+  std::byte* record_ptr_;
+  std::byte* data_ptr_;
   std::mutex producer_mutex_;
 
   // Consumer thread
   std::thread consumer_thread_;
   struct {
-    const char* begin;
-    const char* end;
+    const std::byte* begin;
+    const std::byte* end;
     bool valid = false;
   } consumer_arg_;
 

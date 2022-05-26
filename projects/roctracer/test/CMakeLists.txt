@@ -80,12 +80,6 @@ target_include_directories(codeobj_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PR
 target_link_libraries(codeobj_test roctracer)
 add_dependencies(mytest codeobj_test)
 
-## Build the trace_buffer test
-add_executable(trace_buffer EXCLUDE_FROM_ALL directed/trace_buffer.cpp)
-target_include_directories(trace_buffer PRIVATE ${PROJECT_SOURCE_DIR}/src/tracer_tool)
-target_link_libraries(trace_buffer Threads::Threads atomic)
-add_dependencies(mytest trace_buffer)
-
 ## Build the hsa (standalone) copy test
 function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
   separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
@@ -125,6 +119,18 @@ add_dependencies(mytest backward_compat_test)
 add_executable(load_unload_reload_test EXCLUDE_FROM_ALL hsa/load_unload_reload.cpp)
 target_link_libraries(load_unload_reload_test hsa-runtime64::hsa-runtime64)
 add_dependencies(mytest load_unload_reload_test)
+
+## Build the trace_buffer test
+add_executable(trace_buffer EXCLUDE_FROM_ALL directed/trace_buffer.cpp)
+target_include_directories(trace_buffer PRIVATE ${PROJECT_SOURCE_DIR}/src/tracer_tool)
+target_link_libraries(trace_buffer Threads::Threads atomic)
+add_dependencies(mytest trace_buffer)
+
+## Build the memory_pool test
+add_executable(memory_pool EXCLUDE_FROM_ALL directed/memory_pool.cpp)
+target_include_directories(memory_pool PRIVATE ${PROJECT_SOURCE_DIR}/src/roctracer ${PROJECT_SOURCE_DIR}/inc)
+target_link_libraries(memory_pool Threads::Threads atomic)
+add_dependencies(mytest memory_pool)
 
 ## Copy the golden traces and test scripts
 configure_file(run.sh ${PROJECT_BINARY_DIR} COPYONLY)

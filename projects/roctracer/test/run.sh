@@ -186,7 +186,8 @@ eval_test "tool tracer codeobj" ./test/MatrixTranspose code_obj_trace
 #valgrind --tool=massif $tbin
 #ms_print massif.out.<N>
 
-eval_test "directed TraceBuffer test" ./test/trace_buffer trace_buffer_trace
+eval_test "directed TraceBuffer test" ./test/trace_buffer trace_buffer
+eval_test "directed MemoryPool test" ./test/memory_pool memory_pool
 
 eval_test "backward compatibilty tests" ./test/backward_compat_test backward_compat_test_trace
 
