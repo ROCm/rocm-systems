@@ -1189,6 +1189,10 @@ def setPowerOverDrive(deviceList, value, autoRespond):
     strValue = value
     specWarningConfirmed = False
     for device in deviceList:
+        # Continue to next device in deviceList loop if the device is a secondary die
+        if checkIfSecondaryDie(device):
+            logging.debug("Unavailable for secondary die.")
+            continue
         power_cap_min = c_uint64()
         power_cap_max = c_uint64()
         current_power_cap = c_uint64()
@@ -1214,17 +1218,17 @@ def setPowerOverDrive(deviceList, value, autoRespond):
         if rsmi_ret_ok(ret, device) == False:
             printErrLog(device, 'Unable to parse Power OverDrive range')
             RETCODE = 1
-            return
+            continue
         if int(strValue) > (power_cap_max.value / 1000000):
             printErrLog(device, 'Unable to set Power OverDrive')
             logging.error('GPU[%s]\t\t: Value cannot be greater than: %dW ', device, power_cap_max.value / 1000000)
             RETCODE = 1
-            return
+            continue
         if int(strValue) < (power_cap_min.value / 1000000):
             printErrLog(device, 'Unable to set Power OverDrive')
             logging.error('GPU[%s]\t\t: Value cannot be less than: %dW ', device, power_cap_min.value / 1000000)
             RETCODE = 1
-            return
+            continue
         if new_power_cap.value == current_power_cap.value:
             printErrLog(device,'Max power was already at: {}W'.format(new_power_cap.value / 1000000))
 
@@ -2076,6 +2080,9 @@ def showRange(deviceList, rangeType):
                 printLog(device, 'Valid mclk range: %sMhz - %sMhz' % (
                 int(odvf.curr_mclk_range.lower_bound / 1000000), int(odvf.curr_mclk_range.upper_bound / 1000000)), None)
             if rangeType == 'voltage':
+                if odvf.num_regions == 0:
+                    printErrLog(device, 'Voltage curve regions unsupported.')
+                    continue
                 num_regions = c_uint32(odvf.num_regions)
                 regions = (rsmi_freq_volt_region_t * odvf.num_regions)()
                 ret = rocmsmi.rsmi_dev_od_volt_curve_regions_get(device, byref(num_regions), byref(regions))
@@ -2560,13 +2567,25 @@ def showNodesBw(deviceList):
     devices_ind = range(len(deviceList))
     minBW = c_uint32()
     maxBW = c_uint32()
+    hops = c_uint64()
+    linktype = c_uint64()
+    silent = False
+    nonXgmi = False
     gpu_links_type = [[0 for x in devices_ind] for y in devices_ind]
     printLogSpacer(' Bandwidth ')
     for srcdevice in deviceList:
         for destdevice in deviceList:
             if srcdevice != destdevice:
                 ret = rocmsmi.rsmi_minmax_bandwidth_get(srcdevice, destdevice, byref(minBW), byref(maxBW))
-                if rsmi_ret_ok(ret, " {}  to {}".format(srcdevice, destdevice),None ):
+                #verify that link type is xgmi
+                ret2 = rocmsmi.rsmi_topo_get_link_type(srcdevice, destdevice, byref(hops), byref(linktype))
+                if rsmi_ret_ok(ret2," {} to {}".format(srcdevice, destdevice), None, True):
+                    if linktype.value != 2:
+                        nonXgmi = True
+                        silent= True
+                        gpu_links_type[srcdevice][destdevice] = "N/A"
+
+                if rsmi_ret_ok(ret, " {}  to {}".format(srcdevice, destdevice),None,silent):
                     gpu_links_type[srcdevice][destdevice] = "{}-{}".format(minBW.value, maxBW.value)
             else:
                 gpu_links_type[srcdevice][destdevice] = "N/A"
@@ -2585,8 +2604,9 @@ def showNodesBw(deviceList):
             printTableRow('%-12s', gpu_links_type[gpu1][gpu2])
         printEmptyLine()
     printLog(None,"Format: min-max; Units: mps", None)
-    printLog(None,'"0-0" min-max bandwidth indicates devices are not connected dirrectly', None)
-
+    printLog(None,'"0-0" min-max bandwidth indicates devices are not connected directly', None)
+    if nonXgmi:
+        printLog(None,"Non-xGMI links detected and is currently not supported", None)
 
 def checkAmdGpus(deviceList):
     """ Check if there are any AMD GPUs being queried,
