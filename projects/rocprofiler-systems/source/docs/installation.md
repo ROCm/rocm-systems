@@ -6,25 +6,37 @@
    :maxdepth: 4
 ```
 
-- Ubuntu 18.04 or Ubuntu 20.04
-  - Other OS distributions may be supported but are not tested
-- GCC compiler v7+
-  - Older GCC compilers may be supported but are not tested
-  - Clang compilers are generally supported for [Omnitrace](https://github.com/AMDResearch/omnitrace) but not Dyninst
-- [CMake](https://cmake.org/) v3.15+
-- [DynInst](https://github.com/dyninst/dyninst) for dynamic or static instrumentation
-  - [TBB](https://github.com/oneapi-src/oneTBB) required by Dyninst
-  - [ElfUtils](https://sourceware.org/elfutils/) required by Dyninst
-  - [LibIberty](https://github.com/gcc-mirror/gcc/tree/master/libiberty) required by Dyninst
-  - [Boost](https://www.boost.org/) required by Dyninst
-  - [OpenMP](https://www.openmp.org/) optional by Dyninst
-- [ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html#ubuntu) (optional)
-  - HIP
-  - Roctracer for HIP API and kernel tracing
-  - ROCM-SMI for GPU monitoring
-- [PAPI](https://icl.utk.edu/papi/)
-- [libunwind](https://www.nongnu.org/libunwind/) for call-stack sampling
-- Several optional third-party profiling tools supported by timemory (e.g. TAU, Caliper, CrayPAT, etc.)
+## Operating System
+
+Omnitrace is only supported on Linux.
+
+- Ubuntu 18.04
+- Ubuntu 20.04
+- OpenSUSE 15.2
+- OpenSUSE 15.3
+- Other OS distributions may be supported but are not tested
+
+### Identifying the Operating System
+
+If you are unsure of the operating system and version, the `/etc/os-release` and `/usr/lib/os-release` files contain
+operating system identification data for Linux systems.
+
+```shell
+$ cat /etc/os-release
+NAME="Ubuntu"
+VERSION="20.04.4 LTS (Focal Fossa)"
+ID=ubuntu
+...
+VERSION_ID="20.04"
+...
+```
+
+The relevent fields are `ID` and the `VERSION_ID`.
+
+## Architecture
+
+At present, only amd64 (x86_64) architectures are tested but Dyninst supports several more architectures.
+Thus, omnitrace should support other CPU architectures such as aarch64, ppc64, etc.
 
 ## Installing omnitrace from binary distributions
 
@@ -37,17 +49,14 @@ omnitrace-{VERSION}-{OS_DISTRIB}-{OS_VERSION}[-ROCm-{ROCM_VERSION}[-{EXTRA}]].sh
 E.g.:
 
 ```shell
-omnitrace-0.0.5-Ubuntu-18.04.sh
-omnitrace-0.0.5-Ubuntu-18.04-ROCm-4.3.0.sh
-omnitrace-0.0.5-Ubuntu-18.04-ROCm-4.5.0.sh
+omnitrace-1.0.0-ubuntu-18.04-OMPT-PAPI-Python3.sh
+omnitrace-1.0.0-ubuntu-18.04-ROCm-405000-OMPT-PAPI-Python3.sh
 ...
-omnitrace-0.0.5-Ubuntu-20.04-ROCm-4.5.0-PAPI.sh
-omnitrace-0.0.5-Ubuntu-20.04-ROCm-4.5.0-PAPI-MPICH.sh
-omnitrace-0.0.5-Ubuntu-20.04-ROCm-4.5.0-PAPI-OpenMPI.sh
+omnitrace-1.0.0-ubuntu-20.04-ROCm-50000-OMPT-PAPI-Python3.sh
 ```
 
-The EXTRA fields such as PAPI, MPICH, and OpenMPI are built against the libraries provided by the
-OS package manager, e.g. `apt-get install libpapi-dev` for Ubuntu.
+Any of the EXTRA fields with a cmake build option (e.g. PAPI, see below) or no link requirements (e.g. OMPT) have
+self-contained support for these packages.
 
 ### Download the appropriate binary distribution
 
@@ -64,37 +73,73 @@ mkdir /opt/omnitrace
 ### Run the installer script
 
 ```shell
-./omnitrace-0.0.5-Ubuntu-18.04-ROCm-4.3.0-PAPI-MPICH.sh --prefix=/opt/omnitrace
-```
-
-### Configure the environment
-
-```shell
-source /opt/omnitrace/share/omnitrace/setup-env.sh
-```
-
-### Test the executables
-
-```shell
-omnitrace --help
-omnitrace-avail --help
+./omnitrace-1.0.0-ubuntu-18.04-ROCm-405000-OMPT-PAPI.sh --prefix=/opt/omnitrace --exclude-subdir
 ```
 
 ## Installing Omnitrace from source
 
-### Installing CMake
+### Build Requirements
 
-If using Ubuntu 20.04, `apt-get install cmake` will install cmake v3.16.3. If using Ubuntu 18.04, the cmake version via apt is too old (v3.10.2). In this case,
-follow the instructions [here](https://apt.kitware.com/) to add the CMake apt package repository; or alternatively (if root access is not available),
-specific versions of CMake can be easily installed via the Python pip package manager:
+Omnitrace needs a GCC compiler with full support for C++17 and CMake v3.16 or higher.
+The Clang compiler may be used in lieu of the GCC compiler if Dyninst is already installed.
 
-```shell
-python3 -m pip install 'cmake==3.18.4'
-export PATH=${HOME}/.local/bin
-```
+- GCC compiler v7+
+  - Older GCC compilers may be supported but are not tested
+  - Clang compilers are generally supported for [Omnitrace](https://github.com/AMDResearch/omnitrace) but not Dyninst
+- [CMake](https://cmake.org/) v3.16+
 
-> NOTE: be wary of using `python3 -m pip install cmake`. If pip installs a cmake version with a `.post<N>` suffix, it will be necessary to
-> specify the root path when cmake is invoked.
+> ***If the system installed cmake is too old, installing a new version of cmake can be done through several methods.***
+> ***One of the easiest options is to use PyPi (i.e. python's pip):***
+>
+> ```python
+> pip install --user 'cmake==3.18.4'
+> export PATH=${HOME}/.local/bin:${PATH}`
+> ```
+
+### Required Third-Party Packages
+
+- [DynInst](https://github.com/dyninst/dyninst) for dynamic or static instrumentation
+  - [TBB](https://github.com/oneapi-src/oneTBB) required by Dyninst
+  - [ElfUtils](https://sourceware.org/elfutils/) required by Dyninst
+  - [LibIberty](https://github.com/gcc-mirror/gcc/tree/master/libiberty) required by Dyninst
+  - [Boost](https://www.boost.org/) required by Dyninst
+  - [OpenMP](https://www.openmp.org/) optional by Dyninst
+- [libunwind](https://www.nongnu.org/libunwind/) for call-stack sampling
+
+All of the third-party packages required by [DynInst](https://github.com/dyninst/dyninst) and
+[DynInst](https://github.com/dyninst/dyninst) itself can be built and installed
+during the build of omnitrace itself. In the list below, we list the package, the version,
+which package requires the package (i.e. omnitrace requires Dyninst
+and Dyninst requires TBB), and the CMake option to build the package alongside omnitrace:
+
+| Third-Party Library | Minimum Version | Required By | CMake Option                              |
+|---------------------|-----------------|-------------|-------------------------------------------|
+| Dyninst             | 10.0            | Omnitrace   | `OMNITRACE_BUILD_DYNINST` (default: OFF)  |
+| Libunwind           |                 | Omnitrace   | `OMNITRACE_BUILD_LIBUNWIND` (default: ON) |
+| TBB                 | 2018.6          | Dyninst     | `DYNINST_BUILD_TBB` (default: OFF)        |
+| ElfUtils            | 0.178           | Dyninst     | `DYNINST_BUILD_ELFUTILS` (default: OFF)   |
+| LibIberty           |                 | Dyninst     | `DYNINST_BUILD_LIBIBERTY` (default: OFF)  |
+| Boost               | 1.67.0          | Dyninst     | `DYNINST_BUILD_BOOST` (default: OFF)      |
+| OpenMP              | 4.x             | Dyninst     |                                           |
+
+### Optional Third-Party Packages
+
+- [ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation_new.html)
+  - HIP
+  - Roctracer for HIP API and kernel tracing
+  - ROCM-SMI for GPU monitoring
+- [PAPI](https://icl.utk.edu/papi/)
+- MPI
+  - `OMNITRACE_USE_MPI` will enable full MPI support
+  - `OMNITRACE_USE_MPI_HEADERS` will enable wrapping of the dynamically-linked MPI C function calls
+    - By default, if an OpenMPI MPI distribution cannot be found, omnitrace will use a local copy of the OpenMPI mpi.h
+- Several optional third-party profiling tools supported by timemory (e.g. [Caliper](https://github.com/LLNL/Caliper), [TAU](https://www.cs.uoregon.edu/research/tau/home.php), CrayPAT, etc.)
+
+| Third-Party Library | CMake Enable Option                        | CMake Build Option                   |
+|---------------------|--------------------------------------------|--------------------------------------|
+| PAPI                | `OMNITRACE_USE_PAPI` (default: ON)         | `OMNITRACE_BUILD_PAPI` (default: ON) |
+| MPI                 | `OMNITRACE_USE_MPI` (default: OFF)         |                                      |
+| MPI (header-only)   | `OMNITRACE_USE_MPI_HEADERS` (default: ON)  |                                      |
 
 ### Installing DynInst
 
@@ -119,8 +164,9 @@ where `-DDyninst_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON` is expanded by the she
 git clone https://github.com/spack/spack.git
 source ./spack/share/spack/setup-env.sh
 spack compiler find
-spack external find
-spack install dyninst
+spack external find --all --not-buildable
+spack spec -I --reuse dyninst
+spack install --reuse dyninst
 spack load -r dyninst
 ```
 
@@ -134,16 +180,28 @@ into omnitrace's perfetto support, e.g. `OMNITRACE_USE_PAPI=<VAL>` forces `TIMEM
 is passed along to perfetto and will be displayed when the `.proto` file is visualized in [ui.perfetto.dev](https://ui.perfetto.dev).
 
 ```shell
-OMNITRACE_ROOT=${HOME}/sw/omnitrace
+OMNITRACE_ROOT=/opt/omnitrace
 git clone https://github.com/AMDResearch/omnitrace.git omnitrace-source
-cmake                                           \
-    -B omnitrace-build                          \
-    -DOMNITRACE_USE_MPI_HEADERS=ON              \
-    -DCMAKE_INSTALL_PREFIX=${OMNITRACE_ROOT}    \
+cmake                                       \
+    -B omnitrace-build                      \
+    -D CMAKE_INSTALL_PREFIX=/opt/omnitrace  \
+    -D OMNITRACE_USE_HIP=ON                 \
+    -D OMNITRACE_USE_ROCM_SMI=ON            \
+    -D OMNITRACE_USE_ROCTRACER=ON           \
+    -D OMNITRACE_USE_PYTHON=ON              \
+    -D OMNITRACE_USE_OMPT=ON                \
+    -D OMNITRACE_USE_MPI_HEADERS=ON         \
+    -D OMNITRACE_BUILD_PAPI=ON              \
+    -D OMNITRACE_BUILD_LIBUNWIND=ON         \
+    -D OMNITRACE_BUILD_DYNINST=ON           \
+    -D DYNINST_BUILD_TBB=ON                 \
+    -D DYNINST_BUILD_BOOST=ON               \
+    -D DYNINST_BUILD_ELFUTILS=ON            \
+    -D DYNINST_BUILD_LIBIBERTY=ON           \
     omnitrace-source
 cmake --build omnitrace-build --target all --parallel 8
 cmake --build omnitrace-build --target install
-source ${OMNITRACE_ROOT}/share/omnitrace/setup-env.sh
+source /opt/omnitrace/share/omnitrace/setup-env.sh
 ```
 
 #### MPI Support within Omnitrace
@@ -160,3 +218,31 @@ because the `MPI_COMM_WORLD` in OpenMPI is a pointer to `ompi_communicator_t` (8
 it is an `int` (4 bytes). Building omnitrace with partial MPI support and the MPICH headers and then using
 omnitrace on an application built against OpenMPI will cause a segmentation fault due to the value of the `MPI_COMM_WORLD` being narrowed
 during the function wrapping before being passed along to the underlying MPI function.
+
+## Post-Installation Steps
+
+### Configure the environment
+
+If environment modules are available and preferred:
+
+```shell
+module use /opt/omnitrace/share/modulefiles
+module load omnitrace/1.0.0
+```
+
+Alternatively, once can directly source the `setup-env.sh` script:
+
+```shell
+source /opt/omnitrace/share/omnitrace/setup-env.sh
+```
+
+### Test the executables
+
+Successful execution of these commands indicates that the installation does not have any issues locating the installed libraries:
+
+```shell
+omnitrace --help
+omnitrace-avail --help
+```
+
+> ***NOTE: If ROCm support was enabled, you may have to add the path to the ROCm libraries to `LD_LIBRARY_PATH`, e.g. `export LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}`***

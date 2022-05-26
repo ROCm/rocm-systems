@@ -83,6 +83,7 @@ set(CMAKE_INSTALL_LIBDIR
 set(CMAKE_CXX_STANDARD
     17
     CACHE STRING "CXX language standard")
+
 omnitrace_add_feature(CMAKE_BUILD_TYPE "Build optimization level")
 omnitrace_add_feature(CMAKE_INSTALL_PREFIX "Installation prefix")
 omnitrace_add_feature(CMAKE_CXX_COMPILER "C++ compiler")
@@ -106,10 +107,11 @@ omnitrace_add_option(
     OMNITRACE_USE_ROCM_SMI "Enable rocm-smi support for power/temp/etc. sampling"
     ${OMNITRACE_USE_HIP})
 omnitrace_add_option(OMNITRACE_USE_MPI_HEADERS
-                     "Enable wrapping MPI functions w/o enabling MPI dependency" OFF)
+                     "Enable wrapping MPI functions w/o enabling MPI dependency" ON)
 omnitrace_add_option(OMNITRACE_USE_OMPT "Enable OpenMP tools support" ON)
 omnitrace_add_option(OMNITRACE_USE_PYTHON "Enable Python support" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_LIBUNWIND "Build libunwind from submodule" ON)
 omnitrace_add_option(OMNITRACE_BUILD_EXAMPLES "Enable building the examples" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_TESTING "Enable building the testing suite" OFF)
 omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF
@@ -150,6 +152,15 @@ if(NOT OMNITRACE_USE_HIP)
     set(OMNITRACE_USE_ROCM_SMI
         OFF
         CACHE BOOL "Disabled via OMNITRACE_USE_HIP=OFF" FORCE)
+elseif(
+    OMNITRACE_USE_HIP
+    AND NOT OMNITRACE_USE_ROCTRACER
+    AND NOT OMNITRACE_USE_ROCM_SMI)
+    omnitrace_message(
+        AUTHOR_WARNING
+        "Setting OMNITRACE_USE_HIP=OFF because roctracer and rocm-smi options are disabled"
+        )
+    set(OMNITRACE_USE_HIP OFF)
 endif()
 
 if(OMNITRACE_BUILD_TESTING)

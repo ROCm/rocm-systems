@@ -108,7 +108,7 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
-# rocm-smmi
+# rocm-smi
 #
 # ----------------------------------------------------------------------------------------#
 
@@ -469,13 +469,20 @@ set(TIMEMORY_USE_LIBUNWIND
     ON
     CACHE BOOL "Enable libunwind support in timemory")
 
+if(DEFINED TIMEMORY_BUILD_GOTCHA AND NOT TIMEMORY_BUILD_GOTCHA)
+    omnitrace_message(
+        FATAL_ERROR
+        "Using an external gotcha is not allowed due to known bug that has not been accepted upstream"
+        )
+endif()
+
 # timemory feature build settings
 set(TIMEMORY_BUILD_GOTCHA
     ON
-    CACHE BOOL "Enable building GOTCHA library from submodule")
+    CACHE BOOL "Enable building GOTCHA library from submodule" FORCE)
 set(TIMEMORY_BUILD_LIBUNWIND
-    ON
-    CACHE BOOL "Enable building libunwind library from submodule")
+    ${OMNITRACE_BUILD_LIBUNWIND}
+    CACHE BOOL "Enable building libunwind library from submodule" FORCE)
 set(TIMEMORY_BUILD_EXTRA_OPTIMIZATIONS
     ${OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS}
     CACHE BOOL "Enable building GOTCHA library from submodule" FORCE)
@@ -582,6 +589,7 @@ if(NOT TARGET PTL::ptl-shared)
     set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
     add_subdirectory(external/PTL)
+
     omnitrace_restore_variables(
         BUILD_CONFIG
         VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
