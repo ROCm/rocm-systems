@@ -2,9 +2,10 @@ name: cpack-ubuntu
 
 on:
   push:
-    branches: [releases/**]
-  pull_request:
-    branches: [releases/**]
+    branches:
+      - 'releases/**'
+    tags:
+      - v1.*
 
 env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
