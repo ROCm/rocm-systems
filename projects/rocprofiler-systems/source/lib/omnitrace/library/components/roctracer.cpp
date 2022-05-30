@@ -26,6 +26,7 @@
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
+#include "library/dynamic_library.hpp"
 #include "library/redirect.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -122,9 +123,11 @@ roctracer::setup()
 
     OMNITRACE_VERBOSE_F(1, "setting up roctracer...\n");
 
+    dynamic_library _amdhip64{ "OMNITRACE_ROCTRACER_LIBAMDHIP64", "libamdhip64.so" };
+
 #if OMNITRACE_HIP_VERSION_MAJOR == 4 && OMNITRACE_HIP_VERSION_MINOR < 4
-    auto _kfdwrapper = dynamic_library{ "OMNITRACE_ROCTRACER_LIBKFDWRAPPER",
-                                        OMNITRACE_ROCTRACER_LIBKFDWRAPPER };
+    dynamic_library _kfdwrapper{ "OMNITRACE_ROCTRACER_LIBKFDWRAPPER",
+                                 OMNITRACE_ROCTRACER_LIBKFDWRAPPER };
 #endif
 
     ROCTRACER_CALL(roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, nullptr));

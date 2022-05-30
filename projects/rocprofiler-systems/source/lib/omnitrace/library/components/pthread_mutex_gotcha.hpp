@@ -35,7 +35,7 @@ namespace omnitrace
 // this is used to wrap pthread_mutex()
 struct pthread_mutex_gotcha : comp::base<pthread_mutex_gotcha, void>
 {
-    static constexpr size_t gotcha_capacity = 3;
+    static constexpr size_t gotcha_capacity = 13;
     using hash_array_t                      = std::array<size_t, gotcha_capacity>;
     using gotcha_data_t                     = comp::gotcha_data;
 
@@ -49,11 +49,23 @@ struct pthread_mutex_gotcha : comp::base<pthread_mutex_gotcha, void>
     static void shutdown();
     static void validate();
 
-    int operator()(const gotcha_data_t&, int (*)(pthread_mutex_t*), pthread_mutex_t*);
+    int operator()(const gotcha_data_t&, int (*)(pthread_mutex_t*),
+                   pthread_mutex_t*) const;
+    int operator()(const gotcha_data_t&, int (*)(pthread_spinlock_t*),
+                   pthread_spinlock_t*) const;
+    int operator()(const gotcha_data_t&, int (*)(pthread_rwlock_t*),
+                   pthread_rwlock_t*) const;
+    int operator()(const gotcha_data_t&, int (*)(pthread_barrier_t*),
+                   pthread_barrier_t*) const;
+    int operator()(const gotcha_data_t&, int (*)(pthread_t, void**), pthread_t,
+                   void**) const;
 
 private:
     static bool          is_disabled();
     static hash_array_t& get_hashes();
+
+    template <typename... Args>
+    auto operator()(uintptr_t&&, const gotcha_data_t&, int (*)(Args...), Args...) const;
 };
 
 using pthread_mutex_gotcha_t = comp::gotcha<pthread_mutex_gotcha::gotcha_capacity,

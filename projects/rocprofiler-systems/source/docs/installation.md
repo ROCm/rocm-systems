@@ -91,9 +91,9 @@ The Clang compiler may be used in lieu of the GCC compiler if Dyninst is already
 > ***If the system installed cmake is too old, installing a new version of cmake can be done through several methods.***
 > ***One of the easiest options is to use PyPi (i.e. python's pip):***
 >
-> ```python
+> ```shell
 > pip install --user 'cmake==3.18.4'
-> export PATH=${HOME}/.local/bin:${PATH}`
+> export PATH=${HOME}/.local/bin:${PATH}
 > ```
 
 ### Required Third-Party Packages
@@ -147,14 +147,14 @@ and Dyninst requires TBB), and the CMake option to build the package alongside o
 
 The easiest way to install Dyninst is to configure omnitrace with `OMNITRACE_BUILD_DYNINST=ON`. Depending on the version of Ubuntu, the apt package manager may have current enough
 versions of Dyninst's Boost, TBB, and LibIberty dependencies (i.e. `apt-get install libtbb-dev libiberty-dev libboost-dev`); however, it is possible to request Dyninst to install
-it's dependencies via `Dyninst_BUILD_<DEP>=ON`, e.g.:
+it's dependencies via `DYNINST_BUILD_<DEP>=ON`, e.g.:
 
 ```shell
 git clone https://github.com/AMDResearch/omnitrace.git omnitrace-source
-cmake -B omnitrace-build -DOMNITRACE_BUILD_DYNINST=ON -DDyninst_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON omnitrace-source
+cmake -B omnitrace-build -DOMNITRACE_BUILD_DYNINST=ON -DDYNINST_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON omnitrace-source
 ```
 
-where `-DDyninst_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON` is expanded by the shell to `-DDyninst_BUILD_TBB=ON -DDyninst_BUILD_BOOST=ON ...`
+where `-DDYNINST_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON` is expanded by the shell to `-DDYNINST_BUILD_TBB=ON -DDYNINST_BUILD_BOOST=ON ...`
 
 #### Installing Dyninst via Spack
 
@@ -180,7 +180,6 @@ into omnitrace's perfetto support, e.g. `OMNITRACE_USE_PAPI=<VAL>` forces `TIMEM
 is passed along to perfetto and will be displayed when the `.proto` file is visualized in [ui.perfetto.dev](https://ui.perfetto.dev).
 
 ```shell
-OMNITRACE_ROOT=/opt/omnitrace
 git clone https://github.com/AMDResearch/omnitrace.git omnitrace-source
 cmake                                       \
     -B omnitrace-build                      \
@@ -208,7 +207,10 @@ source /opt/omnitrace/share/omnitrace/setup-env.sh
 
 [Omnitrace](https://github.com/AMDResearch/omnitrace) can have full (`OMNITRACE_USE_MPI=ON`) or partial (`OMNITRACE_USE_MPI_HEADERS=ON`) MPI support.
 The only difference between these two modes is whether or not the results collected via timemory and/or perfetto can be aggregated into a single
-output file during finalization. The primary benefits of partial or full MPI support are the automatic wrapping of MPI functions and the ability
+output file during finalization. When full MPI support is enabled, combining the timemory results always occurs whereas combining the perfetto
+results is configurable via the `OMNITRACE_PERFETTO_COMBINE_TRACES` setting.
+
+The primary benefits of partial or full MPI support are the automatic wrapping of MPI functions and the ability
 to label output with suffixes which correspond to the `MPI_COMM_WORLD` rank ID instead of using the system process identifier (i.e. PID).
 In general, it is recommended to use partial MPI support with the OpenMPI headers as this is the most portable configuration.
 If full MPI support is selected, make sure your target application is built against the same MPI distribution as omnitrace,

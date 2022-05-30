@@ -57,6 +57,7 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/library/cpu_freq.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/critical_trace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/debug.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/dynamic_library.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/kokkosp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/gpu.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/ompt.cpp
@@ -86,6 +87,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/library/cpu_freq.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/critical_trace.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/debug.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/dynamic_library.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/gpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/ompt.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/perfetto.hpp

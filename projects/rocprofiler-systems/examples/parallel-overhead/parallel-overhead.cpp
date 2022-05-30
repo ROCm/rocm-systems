@@ -1,6 +1,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <pthread.h>
 #include <string>
 #include <thread>
 #include <vector>
@@ -63,12 +64,20 @@ main(int argc, char** argv)
     printf("\n[%s] Threads: %zu\n[%s] Iterations: %zu\n[%s] fibonacci(%li)...\n",
            _name.c_str(), nthread, _name.c_str(), nitr, _name.c_str(), nfib);
 
+    pthread_barrier_t _barrier;
+    pthread_barrier_init(&_barrier, nullptr, nthread);
+
+    auto _run = [&_barrier](size_t nitr, long n) {
+        pthread_barrier_wait(&_barrier);
+        run(nitr, n);
+    };
+
     std::vector<std::thread> threads{};
     for(size_t i = 0; i < nthread; ++i)
     {
         size_t _nitr = ((i % 2) == 1) ? (nitr - (0.1 * nitr)) : (nitr + (0.1 * nitr));
         _nitr        = std::max<size_t>(_nitr, 1);
-        threads.emplace_back(&run, _nitr, nfib);
+        threads.emplace_back(_run, _nitr, nfib);
     }
 
 #if !defined(USE_LOCKS)
@@ -78,6 +87,8 @@ main(int argc, char** argv)
 
     for(auto& itr : threads)
         itr.join();
+
+    pthread_barrier_destroy(&_barrier);
 
     printf("[%s] fibonacci(%li) x %lu = %li\n", _name.c_str(), nfib, nthread,
            static_cast<long>(total));

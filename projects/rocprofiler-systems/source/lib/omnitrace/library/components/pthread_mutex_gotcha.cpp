@@ -35,7 +35,9 @@
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <cstdint>
 #include <pthread.h>
+#include <stdexcept>
 
 namespace omnitrace
 {
@@ -51,8 +53,9 @@ pthread_mutex_gotcha::get_hashes()
     // we could see weird results.
     static auto _v = []() {
         const auto&  _data = pthread_mutex_gotcha_t::get_gotcha_data();
-        hash_array_t _init{};
-        for(size_t i = 0; i < gotcha_capacity; ++i)
+        hash_array_t _init = {};
+        size_t       i0    = (config::get_trace_thread_locks()) ? 0 : 3;
+        for(size_t i = i0; i < gotcha_capacity; ++i)
         {
             auto&& _id = _data.at(i).tool_id;
             if(!_id.empty())
@@ -90,12 +93,44 @@ pthread_mutex_gotcha::configure()
             pthread_mutex_gotcha_t::configure(
                 comp::gotcha_config<2, int, pthread_mutex_t*>{ "pthread_mutex_trylock" });
         }
+
+        pthread_mutex_gotcha_t::configure(
+            comp::gotcha_config<3, int, pthread_barrier_t*>{ "pthread_barrier_wait" });
+
+        pthread_mutex_gotcha_t::configure(
+            comp::gotcha_config<4, int, pthread_rwlock_t*>{ "pthread_rwlock_rdlock" });
+
+        pthread_mutex_gotcha_t::configure(
+            comp::gotcha_config<5, int, pthread_rwlock_t*>{ "pthread_rwlock_tryrdlock" });
+
+        pthread_mutex_gotcha_t::configure(
+            comp::gotcha_config<6, int, pthread_rwlock_t*>{ "pthread_rwlock_trywrlock" });
+
+        pthread_mutex_gotcha_t::configure(
+            comp::gotcha_config<7, int, pthread_rwlock_t*>{ "pthread_rwlock_unlock" });
+
+        pthread_mutex_gotcha_t::configure(
+            comp::gotcha_config<8, int, pthread_rwlock_t*>{ "pthread_rwlock_wrlock" });
+
+        pthread_mutex_gotcha_t::configure(
+            comp::gotcha_config<9, int, pthread_spinlock_t*>{ "pthread_spin_lock" });
+
+        pthread_mutex_gotcha_t::configure(
+            comp::gotcha_config<10, int, pthread_spinlock_t*>{ "pthread_spin_trylock" });
+
+        pthread_mutex_gotcha_t::configure(
+            comp::gotcha_config<11, int, pthread_spinlock_t*>{ "pthread_spin_unlock" });
+
+        pthread_mutex_gotcha_t::configure(
+            comp::gotcha_config<12, int, pthread_t, void**>{ "pthread_join" });
     };
 }
 
 void
 pthread_mutex_gotcha::shutdown()
-{}
+{
+    pthread_mutex_gotcha_t::disable();
+}
 
 void
 pthread_mutex_gotcha::validate()
@@ -122,10 +157,10 @@ pthread_mutex_gotcha::validate()
     }
 }
 
-int
-pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
-                                 int (*_callee)(pthread_mutex_t*),
-                                 pthread_mutex_t* _mutex)
+template <typename... Args>
+auto
+pthread_mutex_gotcha::operator()(uintptr_t&& _id, const comp::gotcha_data& _data,
+                                 int (*_callee)(Args...), Args... _args) const
 {
     if(is_disabled())
     {
@@ -134,7 +169,7 @@ pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
             OMNITRACE_PRINT("Warning! nullptr to %s\n", _data.tool_id.c_str());
             return EINVAL;
         }
-        return (*_callee)(_mutex);
+        return (*_callee)(_args...);
     }
 
     uint64_t _cid        = 0;
@@ -144,24 +179,66 @@ pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
 
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-    if(get_use_critical_trace())
+    if(_id < std::numeric_limits<uintptr_t>::max() && get_use_critical_trace())
     {
         std::tie(_cid, _parent_cid, _depth) = create_cpu_cid_entry();
         _ts                                 = comp::wall_clock::record();
     }
 
     omnitrace_push_region(_data.tool_id.c_str());
-    auto _ret = (*_callee)(_mutex);
+    auto _ret = (*_callee)(_args...);
     omnitrace_pop_region(_data.tool_id.c_str());
 
-    if(get_use_critical_trace())
+    if(_id < std::numeric_limits<uintptr_t>::max() && get_use_critical_trace())
     {
         add_critical_trace<Device::CPU, Phase::DELTA>(
             threading::get_id(), _cid, 0, _parent_cid, _ts, comp::wall_clock::record(), 0,
-            reinterpret_cast<uintptr_t>(_mutex), get_hashes().at(_data.index), _depth);
+            _id, get_hashes().at(_data.index), _depth);
     }
 
     return _ret;
+    tim::consume_parameters(_id, _cid, _parent_cid, _depth, _ts);
+}
+
+int
+pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
+                                 int (*_callee)(pthread_mutex_t*),
+                                 pthread_mutex_t* _mutex) const
+{
+    return (*this)(reinterpret_cast<uintptr_t>(_mutex), _data, _callee, _mutex);
+}
+
+int
+pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
+                                 int (*_callee)(pthread_spinlock_t*),
+                                 pthread_spinlock_t* _lock) const
+{
+    return (*this)(reinterpret_cast<uintptr_t>(_lock), _data, _callee, _lock);
+}
+
+int
+pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
+                                 int (*_callee)(pthread_rwlock_t*),
+                                 pthread_rwlock_t* _lock) const
+{
+    return (*this)(reinterpret_cast<uintptr_t>(_lock), _data, _callee, _lock);
+}
+
+int
+pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
+                                 int (*_callee)(pthread_barrier_t*),
+                                 pthread_barrier_t* _barrier) const
+{
+    return (*this)(reinterpret_cast<uintptr_t>(_barrier), _data, _callee, _barrier);
+}
+
+int
+pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
+                                 int (*_callee)(pthread_t, void**), pthread_t _thr,
+                                 void** _tinfo) const
+{
+    return (*this)(static_cast<uintptr_t>(threading::get_id()), _data, _callee, _thr,
+                   _tinfo);
 }
 
 bool

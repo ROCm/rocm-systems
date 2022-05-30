@@ -135,22 +135,29 @@ omnitrace-merge.jl results.json omnitrace-app.inst-output/2021-09-02_01.03_PM/*.
 
 ## Use Perfetto tracing with System Backend
 
-In a separate window run:
+Enable `traced` and `perfetto` in the background:
 
 ```shell
 pkill traced
 traced --background
-perfetto --out ./htrace.out --txt -c ${OMNITRACE_ROOT}/share/omnitrace.cfg
+perfetto --out ./omnitrace-perfetto.proto --txt -c ${OMNITRACE_ROOT}/share/omnitrace.cfg --background
 ```
 
-then in the window running the application, configure the omnitrace instrumentation to use the system backend:
+Configure omnitrace to use the perfetto system backend:
 
 ```shell
 export OMNITRACE_PERFETTO_BACKEND=system
 ```
 
-for the merge use the `htrace.out`:
+And finally, execute your instrumented application. Either the binary rewritten application:
 
 ```shell
-omnitrace-merge.jl results.json htrace.out
+omnitrace -o ./myapp.inst -- ./myapp
+./myapp.inst
+```
+
+Or with runtime instrumentation:
+
+```shell
+omnitrace -- ./myapp
 ```

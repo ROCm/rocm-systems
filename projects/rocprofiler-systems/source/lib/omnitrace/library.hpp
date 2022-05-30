@@ -122,7 +122,7 @@ add_critical_trace(int32_t _targ_tid, size_t _cpu_cid, size_t _gpu_cid,
         tim::consume_parameters(_lock);
     }
 
-    tim::consume_parameters(_targ_tid, _cpu_cid, _gpu_cid, _parent_cid, _ts_beg, _ts_val,
-                            _queue, _hash, _depth, _prio, num_mutexes);
+    tim::consume_parameters(_pid, _targ_tid, _cpu_cid, _gpu_cid, _parent_cid, _ts_beg,
+                            _ts_val, _devid, _queue, _hash, _depth, _prio, num_mutexes);
 }
 }  // namespace omnitrace

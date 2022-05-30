@@ -20,34 +20,45 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
-
+#include "library/dynamic_library.hpp"
+#include "library/debug.hpp"
 #include "library/defines.hpp"
 
-#include <dlfcn.h>
-#include <string>
+#include <timemory/environment.hpp>
 
 namespace omnitrace
 {
-struct dynamic_library
+dynamic_library::dynamic_library(const char* _env, const char* _fname, int _flags,
+                                 bool _store)
+: envname{ _env }
+, filename{ tim::get_env<std::string>(_env, _fname, _store) }
+, flags{ _flags }
 {
-    dynamic_library()                           = delete;
-    dynamic_library(const dynamic_library&)     = delete;
-    dynamic_library(dynamic_library&&) noexcept = default;
-    dynamic_library& operator=(const dynamic_library&) = delete;
-    dynamic_library& operator=(dynamic_library&&) noexcept = default;
+    open();
+}
 
-    dynamic_library(const char* _env, const char* _fname,
-                    int _flags = (RTLD_LAZY | RTLD_GLOBAL), bool _store = false);
+dynamic_library::~dynamic_library() { close(); }
 
-    ~dynamic_library();
+bool
+dynamic_library::open()
+{
+    if(!filename.empty())
+    {
+        handle = dlopen(filename.c_str(), flags);
+        if(!handle)
+        {
+            OMNITRACE_VERBOSE(2, "[dynamic_library][%s][%s] %s\n", envname.c_str(),
+                              filename.c_str(), dlerror());
+        }
+        dlerror();  // Clear any existing error
+    }
+    return (handle != nullptr);
+}
 
-    bool open();
-    int  close() const;
-
-    std::string envname  = {};
-    std::string filename = {};
-    int         flags    = 0;
-    void*       handle   = nullptr;
-};
+int
+dynamic_library::close() const
+{
+    if(handle) return dlclose(handle);
+    return -1;
+}
 }  // namespace omnitrace
