@@ -443,6 +443,7 @@ void hsa_async_copy_handler(const Tracker::entry_t* entry) {
   record.begin_ns = entry->begin;
   record.end_ns = entry->end;
   record.device_id = 0;
+  record.correlation_id = entry->correlation_id;
   entry->pool->Write(record);
 }
 
@@ -456,6 +457,7 @@ hsa_status_t hsa_amd_memory_async_copy_interceptor(void* dst, hsa_agent_t dst_ag
     Tracker::entry_t* entry = new Tracker::entry_t();
     entry->handler = hsa_async_copy_handler;
     entry->pool = hsa_support::async_copy_callback_memory_pool;
+    entry->correlation_id = hsa_correlation_id_tls;
     Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
     status = hsa_amd_memory_async_copy_fn(dst, dst_agent, src, src_agent, size, num_dep_signals,
                                           dep_signals, entry->signal);
@@ -477,6 +479,7 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
     Tracker::entry_t* entry = new Tracker::entry_t();
     entry->handler = hsa_async_copy_handler;
     entry->pool = hsa_support::async_copy_callback_memory_pool;
+    entry->correlation_id = hsa_correlation_id_tls;
     Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
     status = hsa_amd_memory_async_copy_rect_fn(dst, dst_offset, src, src_offset, range, copy_agent,
                                                dir, num_dep_signals, dep_signals, entry->signal);
@@ -1194,6 +1197,7 @@ ROCTRACER_API roctracer_status_t roctracer_set_properties(roctracer_domain_t dom
           hsa_support::hsa_amd_memory_async_copy_interceptor;
       table->amd_ext_->hsa_amd_memory_async_copy_rect_fn =
           hsa_support::hsa_amd_memory_async_copy_rect_interceptor;
+
 
       break;
     }

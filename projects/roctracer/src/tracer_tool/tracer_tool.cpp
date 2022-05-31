@@ -247,7 +247,7 @@ struct hsa_api_trace_entry_t {
 void hsa_api_flush_cb(hsa_api_trace_entry_t* entry) {
   std::ostringstream os;
   os << entry->begin << ":" << entry->end << " " << entry->pid << ":" << entry->tid << " "
-     << hsa_api_data_pair_t(entry->cid, entry->data);
+     << hsa_api_data_pair_t(entry->cid, entry->data) << " :" << entry->data.correlation_id;
   fprintf(hsa_api_file_handle, "%s\n", os.str().c_str());
   fflush(hsa_api_file_handle);
 }
@@ -470,12 +470,10 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
         break;
       case ACTIVITY_DOMAIN_HSA_OPS:
         if (record->op == HSA_OP_ID_COPY) {
-          static uint64_t index = 0;
           fprintf(hsa_async_copy_file_handle, "%lu:%lu async-copy:%lu:%u\n", record->begin_ns,
-                  record->end_ns, index, my_pid);
+                  record->end_ns, record->correlation_id, my_pid);
           fflush(hsa_async_copy_file_handle);
-          index++;
-        } else if (record->op == HSA_OP_ID_RESERVED1) {
+          } else if (record->op == HSA_OP_ID_RESERVED1) {
           fprintf(pc_sample_file_handle, "%u %lu 0x%lx %s\n", record->pc_sample.se,
                   record->pc_sample.cycle, record->pc_sample.pc, name);
           fflush(pc_sample_file_handle);

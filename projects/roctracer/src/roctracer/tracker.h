@@ -47,6 +47,7 @@ class Tracker {
   struct entry_t {
     std::atomic<uint32_t> valid;
     entry_type_t type;
+    uint64_t correlation_id;
     uint64_t begin;  // begin timestamp, ns
     uint64_t end;    // end timestamp, ns
     hsa_agent_t agent;

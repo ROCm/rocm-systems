@@ -318,15 +318,17 @@ class API_DescrParser:
     self.content += '\n'
     self.content += '#ifndef ' + out_macro + '\n'
     self.content += '#define ' + out_macro + '\n'
-
     self.add_section('API ID enumeration', '  ', self.gen_id_enum)
     self.add_section('API arg structure', '    ', self.gen_arg_struct)
 
     self.content += '\n'
     self.content += '#if PROF_API_IMPL\n'
     self.content += '#include \"util/callback_table.h\"\n';
+    self.content += '#include <atomic>\n'
     self.content += 'namespace roctracer {\n'
     self.content += 'namespace hsa_support {\n'
+    self.content += 'std::atomic<uint64_t> hsa_counter_{1};\n'
+    self.content += 'static thread_local uint64_t hsa_correlation_id_tls = 0;\n'
     self.add_section('API callback functions', '', self.gen_callbacks)
     self.add_section('API intercepting code', '', self.gen_intercept)
     self.add_section('API get_name function', '    ', self.gen_get_name)
@@ -413,6 +415,8 @@ class API_DescrParser:
             self.content += '  api_data.args.' + call + '.' + var + '__val = ' + '*(' + var + ');\n'
       self.content += '  auto [ api_callback_fun, api_callback_arg ] = cb_table.Get(' + call_id + ');\n'
       self.content += '  api_data.phase = 0;\n'
+      self.content += '  api_data.correlation_id = hsa_support::hsa_counter_.fetch_add(1, std::memory_order_relaxed);\n'
+      self.content += '  hsa_correlation_id_tls = api_data.correlation_id;\n'
       self.content += '  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_HSA_API, ' + call_id + ', &api_data, api_callback_arg);\n'
       if ret_type != 'void':
         self.content += '  ' + ret_type + ' ret ='
