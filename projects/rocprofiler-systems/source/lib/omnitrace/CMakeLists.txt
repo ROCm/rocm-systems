@@ -32,6 +32,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
         $<BUILD_INTERFACE:omnitrace::omnitrace-roctracer>
         $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_LTO}>,omnitrace::omnitrace-lto,>>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,omnitrace::omnitrace-static-libgcc,>>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBSTDCXX}>,omnitrace::omnitrace-static-libstdcxx,>>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>>

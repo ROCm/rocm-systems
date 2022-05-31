@@ -4,6 +4,8 @@
 #
 # ------------------------------------------------------------------------------#
 
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+
 add_executable(omnitrace-exe ${_EXCLUDE})
 
 target_sources(

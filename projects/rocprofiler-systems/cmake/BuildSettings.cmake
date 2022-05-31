@@ -173,10 +173,6 @@ else()
     target_link_options(omnitrace-lto INTERFACE -flto=thin)
 endif()
 
-if(OMNITRACE_BUILD_LTO)
-    target_link_libraries(omnitrace-compile-options INTERFACE omnitrace::omnitrace-lto)
-endif()
-
 omnitrace_restore_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
 
 # ----------------------------------------------------------------------------------------#

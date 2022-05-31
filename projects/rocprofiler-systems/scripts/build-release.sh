@@ -7,11 +7,21 @@
 : ${NJOBS:=12}
 : ${DISTRO:=""}
 : ${LTO:="OFF"}
+: ${STRIP:="ON"}
+: ${LIBGCC:="ON"}
+: ${LIBSTDCXX:="OFF"}
+: ${MAX_THREADS:=2048}
+: ${PERFETTO_TOOLS:="ON"}
+: ${HIDDEN_VIZ:="ON"}
 : ${PYTHON_VERSIONS:="6 7 8 9 10"}
 : ${GENERATORS:="STGZ DEB RPM"}
 : ${MPI_IMPL:="openmpi"}
 : ${CLEAN:=0}
 : ${FRESH:=0}
+: ${WITH_CORE:=0}
+: ${WITH_MPI:=0}
+: ${WITH_ROCM:=0}
+: ${WITH_ROCM_MPI:=0}
 
 if [ -z "${DISTRO}" ]; then
     if [ -f /etc/os-release ]; then
@@ -21,12 +31,136 @@ if [ -z "${DISTRO}" ]; then
     fi
 fi
 
+tolower()
+{
+    echo "$@" | awk -F '\|~\|' '{print tolower($1)}';
+}
+
+toupper()
+{
+    echo "$@" | awk -F '\|~\|' '{print toupper($1)}';
+}
+
+usage()
+{
+    print_option() { printf "    --%-10s %-24s     %s\n" "${1}" "${2}" "${3}"; }
+    echo "Options:"
+    python_info="(Use '+nopython' to build w/o python, use '+python' to python build with python)"
+    print_option core "[+nopython] [+python]" "Core ${python_info}"
+    print_option mpi "[+nopython] [+python]" "MPI ${python_info}"
+    print_option rocm "[+nopython] [+python]" "ROCm ${python_info}"
+    print_option rocm-mpi "[+nopython] [+python]" "ROCm + MPI ${python_info}"
+    print_option mpi-impl "[openmpi|mpich]" "MPI implementation"
+
+    echo ""
+    print_default_option() { printf "    --%-20s %-14s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
+    print_default_option lto "[on|off]" "Enable LTO" "${LTO}"
+    print_default_option strip "[on|off]" "Strip libraries" "${STRIP}"
+    print_default_option perfetto-tools "[on|off]" "Install perfetto tools" "${PERFETTO_TOOLS}"
+    print_default_option static-libgcc "[on|off]" "Build with static libgcc" "${LIBGCC}"
+    print_default_option static-libstdcxx "[on|off]" "Build with static libstdc++" "${LIBSTDCXX}"
+    print_default_option hidden-visibility "[on|off]" "Build with hidden visibility" "${HIDDEN_VIZ}"
+    print_default_option max-threads "N" "Max number of threads supported" "${MAX_THREADS}"
+    print_default_option parallel "N" "Number of parallel build jobs" "${NJOBS}"
+}
+
+while [[ $# -gt 0 ]]
+do
+    ARG=${1}
+    shift
+    VAL=0
+
+    case "${ARG}" in
+        --clean)
+            CLEAN=1
+            continue
+            ;;
+        --fresh)
+            FRESH=1
+            continue
+            ;;
+    esac
+
+    while [[ $# -gt 0 ]]
+    do
+        if [ "$1" = "+nopython" ]; then
+            VAL=$(( ${VAL} + 1 ))
+            shift
+        elif [ "$1" = "+python" ]; then
+            VAL=$(( ${VAL} + 2 ))
+            shift
+        else
+            break
+        fi
+    done
+
+    case "${ARG}" in
+        ? | -h | --help)
+            usage
+            exit 0
+            ;;
+        --core)
+            WITH_CORE=${VAL}
+            ;;
+        --mpi)
+            WITH_MPI=${VAL}
+            ;;
+        --rocm)
+            WITH_ROCM=${VAL}
+            ;;
+        --rocm-mpi)
+            WITH_ROCM_MPI=${VAL}
+            ;;
+        --mpi-impl)
+            MPI_IMPL=${1}
+            shift
+            ;;
+        --lto)
+            LTO=$(toupper ${1})
+            shift
+            ;;
+        --static-libgcc)
+            LIBGCC=$(toupper ${1})
+            shift
+            ;;
+        --static-libstdcxx)
+            LIBSTDCXX=$(toupper ${1})
+            shift
+            ;;
+        --strip)
+            STRIP=$(toupper ${1})
+            shift
+            ;;
+        --hidden-visibility)
+            HIDDEN_VIZ=$(toupper ${1})
+            shift
+            ;;
+        --perfetto-tools)
+            PERFETTO_TOOLS=$(toupper ${1})
+            shift
+            ;;
+        --max-threads)
+            MAX_THREADS=${1}
+            shift
+            ;;
+        --parallel)
+            NJOBS=${1}
+            shift
+            ;;
+        *)
+            echo -e "Error! Unknown option : ${ARG}"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
 NPROC=$(nproc)
 if [ ${NJOBS} -gt ${NPROC} ]; then NJOBS=${NPROC}; fi
 
 CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF -DCPACK_GENERATOR=STGZ"
-OMNITRACE_GENERAL_ARGS="-DOMNITRACE_CPACK_SYSTEM_NAME=${DISTRO} -DOMNITRACE_ROCM_VERSION=${ROCM_VERSION} -DOMNITRACE_MAX_THREADS=2048 -DOMNITRACE_STRIP_LIBRARIES=OFF -DOMNITRACE_INSTALL_PERFETTO_TOOLS=ON"
-OMNITRACE_BUILD_ARGS="-DOMNITRACE_BUILD_TESTING=OFF -DOMNITRACE_BUILD_EXAMPLES=OFF -DOMNITRACE_BUILD_PAPI=ON -DOMNITRACE_BUILD_LTO=${LTO} -DOMNITRACE_BUILD_HIDDEN_VISIBILITY=OFF"
+OMNITRACE_GENERAL_ARGS="-DOMNITRACE_CPACK_SYSTEM_NAME=${DISTRO} -DOMNITRACE_ROCM_VERSION=${ROCM_VERSION} -DOMNITRACE_MAX_THREADS=${MAX_THREADS} -DOMNITRACE_STRIP_LIBRARIES=${STRIP} -DOMNITRACE_INSTALL_PERFETTO_TOOLS=${PERFETTO_TOOLS}"
+OMNITRACE_BUILD_ARGS="-DOMNITRACE_BUILD_TESTING=OFF -DOMNITRACE_BUILD_EXAMPLES=OFF -DOMNITRACE_BUILD_PAPI=ON -DOMNITRACE_BUILD_LTO=${LTO} -DOMNITRACE_BUILD_HIDDEN_VISIBILITY=${HIDDEN_VIZ} -DOMNITRACE_BUILD_STATIC_LIBGCC=${LIBGCC} -DOMNITRACE_BUILD_STATIC_LIBSTDCXX=${LIBSTDCXX}"
 OMNITRACE_USE_ARGS="-DOMNITRACE_USE_MPI_HEADERS=ON -DOMNITRACE_USE_OMPT=ON -DOMNITRACE_USE_PAPI=ON"
 TIMEMORY_ARGS="-DTIMEMORY_USE_LIBUNWIND=ON -DTIMEMORY_BUILD_LIBUNWIND=ON -DTIMEMORY_BUILD_PORTABLE=ON"
 DYNINST_ARGS="-DOMNITRACE_BUILD_DYNINST=ON -DDYNINST_USE_OpenMP=ON $(echo -DDYNINST_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON)"
@@ -59,11 +193,6 @@ copy-installer()
             verbose-run cp ${i} ${DEST}/
         done
     fi
-}
-
-tolower()
-{
-    echo "$@" | awk -F '\|~\|' '{print tolower($1)}';
 }
 
 build-and-package-base()
@@ -148,86 +277,6 @@ build-and-package()
         echo -e "Skipping build/package for ${1}"
     fi
 }
-
-: ${WITH_CORE:=0}
-: ${WITH_MPI:=0}
-: ${WITH_ROCM:=0}
-: ${WITH_ROCM_MPI:=0}
-
-usage()
-{
-    print_option() { printf "    --%-10s %-24s     %s\n" "${1}" "${2}" "${3}"; }
-    echo "Options:"
-    python_info="(Use '-python' to build w/o python, use '+python' to python build with python)"
-    print_option core "[+nopython] [+python]" "Core ${python_info}"
-    print_option mpi "[+nopython] [+python]" "MPI ${python_info}"
-    print_option rocm "[+nopython] [+python]" "ROCm ${python_info}"
-    print_option rocm-mpi "[+nopython] [+python]" "ROCm + MPI ${python_info}"
-    print_option mpi-impl "[openmpi|mpich]" "MPI implementation"
-}
-
-while [[ $# -gt 0 ]]
-do
-    ARG=${1}
-    shift
-    VAL=0
-
-    case "${ARG}" in
-        --clean)
-            CLEAN=1
-            continue
-            ;;
-        --fresh)
-            FRESH=1
-            continue
-            ;;
-    esac
-
-    while [[ $# -gt 0 ]]
-    do
-        if [ "$1" = "-python" ]; then
-            VAL=$(( ${VAL} + 1 ))
-            shift
-        elif [ "$1" = "+python" ]; then
-            VAL=$(( ${VAL} + 2 ))
-            shift
-        else
-            break
-        fi
-    done
-
-    case "${ARG}" in
-        ? | -h | --help)
-            usage
-            exit 0
-            ;;
-        --core)
-            WITH_CORE=${VAL}
-            ;;
-        --mpi)
-            WITH_MPI=${VAL}
-            ;;
-        --rocm)
-            WITH_ROCM=${VAL}
-            ;;
-        --rocm-mpi)
-            WITH_ROCM_MPI=${VAL}
-            ;;
-        --mpi-impl)
-            MPI_IMPL=${1}
-            shift
-            ;;
-        --clean)
-            CLEAN=1
-            shift
-            ;;
-        *)
-            echo -e "Error! Unknown option : ${ARG}"
-            usage
-            exit 1
-            ;;
-    esac
-done
 
 if [ -d /opt/conda/bin ]; then
     export PATH=${PATH}:/opt/conda/bin

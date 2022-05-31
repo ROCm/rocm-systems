@@ -154,7 +154,7 @@ PYBIND11_MODULE(libpyomnitrace, omni)
             _is_finalized = true;
             omnitrace_finalize();
         },
-        "Initialize omnitrace");
+        "Finalize omnitrace");
 
     py::doc("omnitrace profiler for python");
     pyprofile::generate(omni);

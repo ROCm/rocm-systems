@@ -10,6 +10,13 @@ if(NOT HIPCC_EXECUTABLE)
     return()
 endif()
 
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC
+   AND HIPCC_EXECUTABLE
+   AND NOT COMMAND omnitrace_custom_compilation)
+    message(AUTHOR_WARNING "transpose target could not be built")
+    return()
+endif()
+
 option(TRANSPOSE_USE_MPI "Enable MPI support in transpose exe" ${TIMEMORY_USE_MPI})
 
 if(TRANSPOSE_USE_MPI)
@@ -29,12 +36,11 @@ if(TRANSPOSE_USE_MPI)
     target_link_libraries(transpose PRIVATE MPI::MPI_C)
 endif()
 
-if(NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-    set_target_properties(transpose PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-                                               ${CMAKE_BINARY_DIR})
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+    # defined in MacroUtilities.cmake
+    omnitrace_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transpose)
+endif()
 
-    if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
-        # defined in MacroUtilities.cmake
-        omnitrace_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transpose)
-    endif()
+if(NOT CMAKE_PROJECT_NAME STREQUAL "omnitrace")
+    install(TARGETS transpose DESTINATION bin)
 endif()

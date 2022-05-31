@@ -44,7 +44,6 @@ add_executable(${PROJECT_NAME} ${sources} ${headers})
 target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/includes)
 target_link_libraries(${PROJECT_NAME} PRIVATE Kokkos::kokkos lulesh-mpi)
 
-if(NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-    set_target_properties(${PROJECT_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-                                                     ${CMAKE_BINARY_DIR})
+if(NOT CMAKE_PROJECT_NAME STREQUAL "omnitrace")
+    install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 endif()

@@ -4,6 +4,11 @@
 #
 # ########################################################################################
 
+if(OMNITRACE_BUILD_STATIC_LIBSTDCXX)
+    omnitrace_message(FATAL_ERROR
+                      "static libstdc++ is not compatible with python bindings")
+endif()
+
 # if set, will screw up loading library
 unset(CMAKE_DEBUG_POSTFIX)
 set(CMAKE_CXX_CLANG_TIDY)
@@ -76,14 +81,17 @@ set(pybind_libs pybind11::module)
 add_library(libpyomnitrace-interface INTERFACE)
 target_link_libraries(
     libpyomnitrace-interface
-    INTERFACE pybind11::module
-              timemory::timemory-headers
-              omnitrace::omnitrace-headers
-              omnitrace::omnitrace-compile-options
-              omnitrace::omnitrace-lto
-              omnitrace::omnitrace-dl-library
-              omnitrace::omnitrace-python
-              omnitrace::omnitrace-python-compile-options)
+    INTERFACE
+        pybind11::module
+        timemory::timemory-headers
+        omnitrace::omnitrace-headers
+        omnitrace::omnitrace-compile-options
+        omnitrace::omnitrace-lto
+        omnitrace::omnitrace-dl-library
+        omnitrace::omnitrace-python
+        omnitrace::omnitrace-python-compile-options
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,omnitrace::omnitrace-static-libgcc,>>
+    )
 
 omnitrace_target_compile_definitions(libpyomnitrace-interface
                                      INTERFACE OMNITRACE_PYBIND11_SOURCE)

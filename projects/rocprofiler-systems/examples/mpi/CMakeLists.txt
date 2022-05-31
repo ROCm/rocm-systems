@@ -16,7 +16,6 @@ endif()
 
 target_link_libraries(mpi-example PRIVATE MPI::MPI_CXX)
 
-if(NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-    set_target_properties(mpi-example PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-                                                 ${CMAKE_BINARY_DIR})
+if(NOT CMAKE_PROJECT_NAME STREQUAL "omnitrace")
+    install(TARGETS mpi-example DESTINATION bin)
 endif()

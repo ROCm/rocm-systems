@@ -7,10 +7,9 @@ string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 
 find_package(Threads REQUIRED)
 add_executable(code-coverage code-coverage.cpp)
-target_link_libraries(code-coverage Threads::Threads)
+target_link_libraries(code-coverage PRIVATE Threads::Threads)
 target_compile_options(code-coverage PRIVATE ${_FLAGS})
 
-if(NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-    set_target_properties(code-coverage PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-                                                   ${CMAKE_BINARY_DIR})
+if(NOT CMAKE_PROJECT_NAME STREQUAL "omnitrace")
+    install(TARGETS code-coverage DESTINATION bin)
 endif()

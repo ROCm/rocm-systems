@@ -7,8 +7,6 @@ on:
     branches: [ main, develop ]
 
 env:
-  BUILD_TYPE: RelWithDebInfo
-  ELFUTILS_DOWNLOAD_VERSION: 0.183
   OMNITRACE_VERBOSE: 1
   OMNITRACE_CI: ON
 
@@ -19,7 +17,39 @@ jobs:
       image: jrmadsen/omnitrace-ci:ubuntu-20.04
     strategy:
       matrix:
-        compiler: ['g++-7', 'g++-8', 'g++-9', 'g++-10']
+        compiler: ['g++-7', 'g++-8']
+        lto: ['OFF']
+        strip: ['OFF']
+        python: ['ON']
+        build-type: ['Release']
+        mpi-headers: ['OFF']
+        static-libgcc: ['OFF']
+        static-libstdcxx: ['OFF']
+        include:
+          - compiler: 'g++-9'
+            lto: 'OFF'
+            strip: 'ON'
+            python: 'OFF'
+            build-type: 'Release'
+            mpi-headers: 'ON'
+            static-libgcc: 'ON'
+            static-libstdcxx: 'ON'
+          - compiler: 'g++-10'
+            lto: 'OFF'
+            strip: 'ON'
+            python: 'ON'
+            build-type: 'RelWithDebInfo'
+            mpi-headers: 'ON'
+            static-libgcc: 'ON'
+            static-libstdcxx: 'OFF'
+          - compiler: 'g++-11'
+            lto: 'ON'
+            strip: 'ON'
+            python: 'OFF'
+            build-type: 'Release'
+            mpi-headers: 'ON'
+            static-libgcc: 'ON'
+            static-libstdcxx: 'OFF'
 
     steps:
     - uses: actions/checkout@v2
@@ -28,6 +58,10 @@ jobs:
       timeout-minutes: 5
       run:
         apt-get update &&
+        apt-get install -y software-properties-common &&
+        add-apt-repository -y ppa:ubuntu-toolchain-r/test &&
+        apt-get update &&
+        apt-get upgrade -y &&
         apt-get install -y build-essential m4 autoconf libtool python3-pip libiberty-dev clang libomp-dev ${{ matrix.compiler }} &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install numpy &&
@@ -49,18 +83,24 @@ jobs:
         cmake -B build
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
           -DOMNITRACE_BUILD_TESTING=ON
           -DOMNITRACE_USE_MPI=OFF
           -DOMNITRACE_USE_HIP=OFF
           -DOMNITRACE_USE_OMPT=OFF
-          -DOMNITRACE_USE_PYTHON=ON
+          -DOMNITRACE_USE_PAPI=OFF
+          -DOMNITRACE_USE_PYTHON=${{ matrix.python }}
+          -DOMNITRACE_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
+          -DOMNITRACE_STRIP_LIBRARIES=${{ matrix.strip }}
+          -DOMNITRACE_BUILD_LTO=${{ matrix.lto }}
+          -DOMNITRACE_BUILD_STATIC_LIBGCC=${{ matrix.static-libgcc }}
+          -DOMNITRACE_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9"
 
     - name: Build
-      timeout-minutes: 45
+      timeout-minutes: 60
       run:
         cmake --build build --target all --parallel 2 -- VERBOSE=1
 
