@@ -772,11 +772,13 @@ def setClockRange(deviceList, clkType, minvalue, maxvalue, autoRespond):
     printLogSpacer(' Set Valid %s Range ' % (clkType))
     for device in deviceList:
         ret = rocmsmi.rsmi_dev_clk_range_set(device, int(minvalue), int(maxvalue), rsmi_clk_names_dict[clkType])
-        if rsmi_ret_ok(ret, device):
+        if rsmi_ret_ok(ret, device, silent=True):
             printLog(device, 'Successfully set %s from %s(MHz) to %s(MHz)' % (clkType, minvalue, maxvalue), None)
         else:
             printErrLog(device, 'Unable to set %s from %s(MHz) to %s(MHz)' % (clkType, minvalue, maxvalue))
             RETCODE = 1
+            if ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+                printLog(device, 'Setting %s range is not supported for this device.' % (clkType), None)
 
 
 def setVoltageCurve(deviceList, point, clk, volt, autoRespond):
