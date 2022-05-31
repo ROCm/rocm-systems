@@ -1613,7 +1613,10 @@ def showGpusByPid(pidList):
 
             if rsmi_ret_ok(ret):
                 metricName = 'PID %s is using %s DRM device(s)' % (pid, str(num_devices.value))
-                printListLog(metricName, list(dv_indices))
+                if (num_devices.value):
+                    printListLog(metricName, list(dv_indices))
+                else:
+                    printLog(None, metricName, None)
         else:
             print(None, 'Unable to get list of KFD PIDs. A kernel update may be needed', None)
     printLogSpacer()
