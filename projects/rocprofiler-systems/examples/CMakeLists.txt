@@ -14,6 +14,13 @@ if(CMAKE_PROJECT_NAME STREQUAL "omnitrace")
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+    omnitrace_add_option(OMNITRACE_INSTALL_EXAMPLES "Install omnitrace examples" OFF)
+else()
+    option(OMNITRACE_INSTALL_EXAMPLES "Install omnitrace examples" ON)
+endif()
+
+if(OMNITRACE_INSTALL_EXAMPLES)
+    include(GNUInstallDirs)
 endif()
 
 add_subdirectory(transpose)

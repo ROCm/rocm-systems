@@ -30,4 +30,4 @@ checkout_git_submodule(
 
 set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON)
 
-add_subdirectory(kokkos)
+add_subdirectory(kokkos EXCLUDE_FROM_ALL)

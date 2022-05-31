@@ -2,7 +2,13 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 project(omnitrace-transpose LANGUAGES CXX)
 
-find_program(HIPCC_EXECUTABLE NAMES hipcc)
+find_package(hip QUIET)
+
+find_program(
+    HIPCC_EXECUTABLE
+    NAMES hipcc
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm)
 mark_as_advanced(HIPCC_EXECUTABLE)
 
 if(NOT HIPCC_EXECUTABLE)
@@ -10,9 +16,18 @@ if(NOT HIPCC_EXECUTABLE)
     return()
 endif()
 
-if(NOT CMAKE_CXX_COMPILER_IS_HIPCC
-   AND HIPCC_EXECUTABLE
-   AND NOT COMMAND omnitrace_custom_compilation)
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
+    if(CMAKE_CXX_COMPILER STREQUAL HIPCC_EXECUTABLE OR "${CMAKE_CXX_COMPILER}" MATCHES
+                                                       "hipcc")
+        set(CMAKE_CXX_COMPILER_IS_HIPCC
+            1
+            CACHE BOOL "HIP compiler")
+    endif()
+endif()
+
+if((NOT CMAKE_CXX_COMPILER_IS_HIPCC OR (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+                                        AND NOT hip_FOUND))
+   AND (NOT COMMAND omnitrace_custom_compilation AND NOT HIPCC_EXECUTABLE))
     message(AUTHOR_WARNING "transpose target could not be built")
     return()
 endif()
@@ -25,8 +40,13 @@ endif()
 
 add_executable(transpose transpose.cpp)
 
-if(CMAKE_CXX_COMPILER_IS_CLANG AND TARGET omnitrace::omnitrace-compile-options)
-    target_link_libraries(transpose PRIVATE omnitrace::omnitrace-compile-options)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_link_libraries(
+        transpose
+        PRIVATE
+            $<IF:$<TARGET_EXISTS:omnitrace::omnitrace-compile-options>,omnitrace::omnitrace-compile-options,>
+            $<IF:$<TARGET_EXISTS:hip::host>,hip::host,>
+            $<IF:$<TARGET_EXISTS:hip::device>,hip::device,>)
 else()
     target_compile_options(transpose PRIVATE -W -Wall)
 endif()
@@ -41,6 +61,9 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     omnitrace_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transpose)
 endif()
 
-if(NOT CMAKE_PROJECT_NAME STREQUAL "omnitrace")
-    install(TARGETS transpose DESTINATION bin)
+if(OMNITRACE_INSTALL_EXAMPLES)
+    install(
+        TARGETS transpose
+        DESTINATION bin
+        COMPONENT omnitrace-examples)
 endif()

@@ -10,6 +10,9 @@ add_executable(code-coverage code-coverage.cpp)
 target_link_libraries(code-coverage PRIVATE Threads::Threads)
 target_compile_options(code-coverage PRIVATE ${_FLAGS})
 
-if(NOT CMAKE_PROJECT_NAME STREQUAL "omnitrace")
-    install(TARGETS code-coverage DESTINATION bin)
+if(OMNITRACE_INSTALL_EXAMPLES)
+    install(
+        TARGETS code-coverage
+        DESTINATION bin
+        COMPONENT omnitrace-examples)
 endif()

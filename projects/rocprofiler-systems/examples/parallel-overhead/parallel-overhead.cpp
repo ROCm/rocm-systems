@@ -1,18 +1,23 @@
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <pthread.h>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
 
-#if defined(USE_LOCKS)
+#if !defined(USE_LOCKS)
+#    define USE_LOCKS 0
+#endif
+
+#if USE_LOCKS > 0
 #    include <mutex>
 using auto_lock_t = std::unique_lock<std::mutex>;
 long       total  = 0;
 std::mutex mtx{};
 #else
-#    include <atomic>
 std::atomic<long> total{ 0 };
 #endif
 
@@ -31,17 +36,29 @@ fib(long n)
 void
 run(size_t nitr, long n)
 {
-#if defined(USE_LOCKS)
+    static std::atomic<int> _tids{ 0 };
+    auto                    _tid = ++_tids;
+
+    std::default_random_engine          eng(std::random_device{}() * (100 + _tid));
+    std::uniform_int_distribution<long> distr{ n - 2, n + 2 };
+
+    auto _get_n = [&]() { return distr(eng); };
+
+    printf("[%i] number of iterations: %zu\n", _tid, nitr);
+
+#if USE_LOCKS > 0
     for(size_t i = 0; i < nitr; ++i)
     {
-        auto        _v = fib(n);
+        auto        _v = fib(_get_n());
         auto_lock_t _lk{ mtx };
         total += _v;
     }
 #else
     long local = 0;
     for(size_t i = 0; i < nitr; ++i)
-        local += fib(n);
+    {
+        local += fib(_get_n());
+    }
     total += local;
 #endif
 }
@@ -64,8 +81,11 @@ main(int argc, char** argv)
     printf("\n[%s] Threads: %zu\n[%s] Iterations: %zu\n[%s] fibonacci(%li)...\n",
            _name.c_str(), nthread, _name.c_str(), nitr, _name.c_str(), nfib);
 
+    bool run_on_main_thread = (USE_LOCKS == 0);
+    auto nwait              = nthread + ((run_on_main_thread) ? 1 : 0);
+
     pthread_barrier_t _barrier;
-    pthread_barrier_init(&_barrier, nullptr, nthread);
+    pthread_barrier_init(&_barrier, nullptr, nwait);
 
     auto _run = [&_barrier](size_t nitr, long n) {
         pthread_barrier_wait(&_barrier);
@@ -75,15 +95,13 @@ main(int argc, char** argv)
     std::vector<std::thread> threads{};
     for(size_t i = 0; i < nthread; ++i)
     {
-        size_t _nitr = ((i % 2) == 1) ? (nitr - (0.1 * nitr)) : (nitr + (0.1 * nitr));
-        _nitr        = std::max<size_t>(_nitr, 1);
-        threads.emplace_back(_run, _nitr, nfib);
+        threads.emplace_back(_run, nitr, nfib);
     }
 
-#if !defined(USE_LOCKS)
-    auto _nitr = std::max<size_t>(nitr - 0.25 * nitr, 1);
-    run(_nitr, nfib - 0.1 * nfib);
-#endif
+    if(run_on_main_thread)
+    {
+        _run(nitr, nfib);
+    }
 
     for(auto& itr : threads)
         itr.join();

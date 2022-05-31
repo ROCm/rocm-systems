@@ -16,6 +16,9 @@ endif()
 
 target_link_libraries(mpi-example PRIVATE MPI::MPI_CXX)
 
-if(NOT CMAKE_PROJECT_NAME STREQUAL "omnitrace")
-    install(TARGETS mpi-example DESTINATION bin)
+if(OMNITRACE_INSTALL_EXAMPLES)
+    install(
+        TARGETS mpi-example
+        DESTINATION bin
+        COMPONENT omnitrace-examples)
 endif()

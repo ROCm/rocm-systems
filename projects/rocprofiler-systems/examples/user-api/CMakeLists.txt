@@ -10,6 +10,9 @@ endif()
 add_executable(user-api user-api.cpp)
 target_link_libraries(user-api PRIVATE Threads::Threads omnitrace::omnitrace-user-library)
 
-if(NOT CMAKE_PROJECT_NAME STREQUAL "omnitrace")
-    install(TARGETS user-api DESTINATION bin)
+if(OMNITRACE_INSTALL_EXAMPLES)
+    install(
+        TARGETS user-api
+        DESTINATION bin
+        COMPONENT omnitrace-examples)
 endif()

@@ -36,6 +36,9 @@ else()
     endif()
 endif()
 
-if(NOT CMAKE_PROJECT_NAME STREQUAL "omnitrace")
-    install(TARGETS openmp-cg openmp-lu DESTINATION bin)
+if(OMNITRACE_INSTALL_EXAMPLES)
+    install(
+        TARGETS openmp-cg openmp-lu
+        DESTINATION bin
+        COMPONENT omnitrace-examples)
 endif()
