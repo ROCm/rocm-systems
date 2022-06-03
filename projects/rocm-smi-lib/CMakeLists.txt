@@ -53,6 +53,9 @@ set(ROCM_SMI_PACKAGE rocm-smi-lib)
 project(${AMD_SMI_LIBS_TARGET})
 
 set(COMMON_PROJ_ROOT ${PROJECT_SOURCE_DIR})
+# Set default libdir to be "lib" for ROCm, distros/users can override this
+set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
+include(GNUInstallDirs)
 
 ## Verbose output.
 set(CMAKE_VERBOSE_MAKEFILE on)
@@ -149,19 +152,17 @@ option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compat
 if(FILE_REORG_BACKWARD_COMPATIBILITY)
   include(rocm_smi-backward-compat.cmake)
 endif()
-#TODO: Should use GNUInstallDirs to match distro standards
-#This need fix in subdirectory CMakefile as well
-#include(GNUInstallDirs)
-set(LIB_INSTALL_DIR  "lib")
-set(INCLUDE_INSTALL_DIR  "include")
-set(BIN_INSTALL_DIR  "bin")
+
+set(LIB_INSTALL_DIR  "${CMAKE_INSTALL_LIBDIR}")
+set(INCLUDE_INSTALL_DIR  "${CMAKE_INSTALL_INCLUDEDIR}")
+set(BIN_INSTALL_DIR  "${CMAKE_INSTALL_BINDIR}")
 
 include(CMakePackageConfigHelpers)
 
 configure_package_config_file(
     rocm_smi-config.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/rocm_smi-config.cmake
-    INSTALL_DESTINATION ${LIB_INSTALL_DIR}/cmake/rocm_smi
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/rocm_smi
     PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR
     )
 
@@ -175,7 +176,7 @@ install(
     FILES
     ${CMAKE_CURRENT_BINARY_DIR}/rocm_smi-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/rocm_smi-config-version.cmake
     DESTINATION
-    lib/cmake/${ROCM_SMI}
+    ${CMAKE_INSTALL_LIBDIR}/cmake/${ROCM_SMI}
     COMPONENT dev
     )
 
@@ -190,11 +191,11 @@ export(PACKAGE rocm_smi)
 # Create the rocm_smiConfig.cmake and rocm_smiConfigVersion files
 # ... for the build tree
 install(EXPORT rocm_smiTargets DESTINATION
-  "lib/cmake/${ROCM_SMI}" COMPONENT dev)
+  "${CMAKE_INSTALL_LIBDIR}/cmake/${ROCM_SMI}" COMPONENT dev)
 
 #License file
 set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
-install( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION share/doc/${ROCM_SMI} RENAME LICENSE.txt)
+install( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI} RENAME LICENSE.txt)
 
 ###########################
 # Packaging directives
