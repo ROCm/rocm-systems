@@ -26,6 +26,14 @@
 // roctx header file
 #include <roctx.h>
 
+#define HIP_CALL(call)                                                                             \
+  do {                                                                                             \
+    hipError_t err = call;                                                                         \
+    if (err != hipSuccess) {                                                                       \
+      fprintf(stderr, "%s\n", hipGetErrorString(err));                                             \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
 
 #define WIDTH 1024
 
@@ -65,7 +73,7 @@ int main() {
   float* gpuTransposeMatrix;
 
   hipDeviceProp_t devProp;
-  hipGetDeviceProperties(&devProp, 0);
+  HIP_CALL(hipGetDeviceProperties(&devProp, 0));
 
   std::cerr << "Device name " << devProp.name << std::endl;
 
@@ -82,15 +90,15 @@ int main() {
   }
 
   // allocate the memory on the device side
-  hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
-  hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
+  HIP_CALL(hipMalloc((void**)&gpuMatrix, NUM * sizeof(float)));
+  HIP_CALL(hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float)));
 
   uint32_t iterations = 100;
   while (iterations-- > 0) {
     std::cerr << "## Iteration (" << iterations << ") #################" << std::endl;
 
     // Memory transfer from host to device
-    hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice);
+    HIP_CALL(hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice));
 
     roctracer_mark("before HIP LaunchKernel");
     roctxMark("before hipLaunchKernel");
@@ -106,7 +114,8 @@ int main() {
     // Memory transfer from device to host
     roctxRangePush("hipMemcpy");
 
-    hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
+    HIP_CALL(
+        hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost));
 
     roctxRangePop();  // for "hipMemcpy"
     roctxRangePop();  // for "hipLaunchKernel"
@@ -131,8 +140,8 @@ int main() {
   }
 
   // free the resources on device side
-  hipFree(gpuMatrix);
-  hipFree(gpuTransposeMatrix);
+  HIP_CALL(hipFree(gpuMatrix));
+  HIP_CALL(hipFree(gpuTransposeMatrix));
 
   // free the resources on host side
   free(Matrix);

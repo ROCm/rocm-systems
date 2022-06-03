@@ -22,10 +22,19 @@
 
 #include "roctx.h"
 
+#define HIP_CALL(call)                                                                             \
+  do {                                                                                             \
+    hipError_t err = call;                                                                         \
+    if (err != hipSuccess) {                                                                       \
+      fprintf(stderr, "%s\n", hipGetErrorString(err));                                             \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
+
 __global__ void kernel() {}
 
 int main(int argc, char* argv[]) {
-  hipSetDevice(0);
+  HIP_CALL(hipSetDevice(0));
 
   // Not in a roctx range.
   kernel<<<1, 1>>>();
@@ -59,6 +68,6 @@ int main(int argc, char* argv[]) {
 
   if (roctxRangePop() != 0) return -1;
 
-  hipDeviceSynchronize();
+  HIP_CALL(hipDeviceSynchronize());
   return 0;
 }
