@@ -13,4 +13,5 @@
    output
    user_api
    python
+   youtube
 ```
