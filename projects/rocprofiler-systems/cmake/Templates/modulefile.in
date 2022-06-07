@@ -1,9 +1,9 @@
 #%Module1.0
 
-module-whatis "omnitrace (version @OMNITRACE_VERSION@)"
+module-whatis "@PROJECT_NAME@ (version @PROJECT_VERSION@)"
 
 proc ModulesHelp { } {
-puts stderr "Loads omnitrace v@OMNITRACE_VERSION@"
+puts stderr "Loads @PROJECT_NAME@ v@PROJECT_VERSION@"
 }
 
 set ROOT [file normalize [file dirname [file normalize ${ModulesCurrentModulefile}]]/../../..]
@@ -12,4 +12,4 @@ prepend-path CMAKE_PREFIX_PATH "${ROOT}"
 prepend-path PATH "${ROOT}/bin"
 prepend-path LD_LIBRARY_PATH "${ROOT}/@CMAKE_INSTALL_LIBDIR@"
 prepend-path PYTHONPATH "${ROOT}/@CMAKE_INSTALL_PYTHONDIR@"
-setenv @PROJECT_NAME@_DIR "${ROOT}/share/cmake/omnitrace"
+setenv @PROJECT_NAME@_DIR "${ROOT}/@CMAKE_INSTALL_DATAROOTDIR@/cmake/@PROJECT_NAME@"
