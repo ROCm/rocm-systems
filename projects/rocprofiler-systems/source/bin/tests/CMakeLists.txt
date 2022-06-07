@@ -130,6 +130,16 @@ omnitrace_add_bin_test(
     )
 
 omnitrace_add_bin_test(
+    NAME omnitrace-avail-all-csv
+    TARGET omnitrace-avail
+    ARGS --all --csv --csv-separator "#"
+    LABELS omnitrace-avail
+    TIMEOUT 45
+    PASS_REGEX
+        "COMPONENT#AVAILABLE#VALUE_TYPE#STRING_IDS#FILENAME#DESCRIPTION#CATEGORY#.*ENVIRONMENT VARIABLE#VALUE#DATA TYPE#DESCRIPTION#CATEGORIES#.*HARDWARE COUNTER#AVAILABLE#DESCRIPTION#"
+    )
+
+omnitrace_add_bin_test(
     NAME omnitrace-avail-filter-wall-clock-available
     TARGET omnitrace-avail
     ARGS -r wall_clock -C --available
@@ -159,3 +169,20 @@ omnitrace_add_bin_test(
     PASS_REGEX
         "OMNITRACE_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
     FAIL_REGEX "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE)")
+
+omnitrace_add_bin_test(
+    NAME omnitrace-avail-regex-negation
+    TARGET omnitrace-avail
+    ARGS -R
+         omnitrace
+         ~timemory
+         ~critical_trace
+         -r
+         _P
+         ~PERFETTO
+         --csv
+         --brief
+    LABELS omnitrace-avail
+    TIMEOUT 45
+    PASS_REGEX "ENVIRONMENT VARIABLE,[ \n]+OMNITRACE_USE_PID,[ \n]+"
+    FAIL_REGEX "OMNITRACE_USE_PERFETTO")

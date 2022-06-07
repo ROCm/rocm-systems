@@ -46,7 +46,9 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <ostream>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -125,26 +127,27 @@ enum
 
 namespace
 {
-char              global_delim           = '|';
-bool              markdown               = false;
-bool              alphabetical           = false;
-bool              available_only         = false;
-bool              all_info               = false;
-bool              force_brief            = false;
-bool              debug_msg              = false;
-bool              case_insensitive       = false;
-bool              regex_hl               = false;
-int32_t           max_width              = 0;
-int32_t           num_cols               = 0;
-int32_t           min_width              = 40;
-int32_t           padding                = 4;
-str_vec_t         regex_keys             = {};
-str_vec_t         category_regex_keys    = {};
-str_set_t         category_view          = {};
-constexpr size_t  num_component_options  = 7;
-constexpr size_t  num_settings_options   = 4;
-constexpr size_t  num_hw_counter_options = 4;
-std::stringstream lerr{};
+auto             global_delim           = std::string{ "|" };
+bool             csv                    = false;
+bool             markdown               = false;
+bool             alphabetical           = false;
+bool             available_only         = false;
+bool             all_info               = false;
+bool             force_brief            = false;
+bool             debug_msg              = false;
+bool             case_insensitive       = false;
+bool             regex_hl               = false;
+int32_t          max_width              = 0;
+int32_t          num_cols               = 0;
+int32_t          min_width              = 40;
+int32_t          padding                = 4;
+str_vec_t        regex_keys             = {};
+str_vec_t        category_regex_keys    = {};
+str_set_t        category_view          = {};
+constexpr size_t num_component_options  = 7;
+constexpr size_t num_settings_options   = 4;
+constexpr size_t num_hw_counter_options = 4;
+auto             lerr                   = std::stringstream{};
 
 // explicit setting names to exclude
 std::set<std::string> settings_exclude = {
@@ -182,6 +185,14 @@ dump_log()
         std::cerr << lerr.str() << std::flush;
         lerr = std::stringstream{};
     }
+}
+
+void
+dump_log_abort(int _v)
+{
+    fprintf(stderr, "\n[omnitrace-avail] Exiting with signal %i...\n", _v);
+    debug_msg = true;
+    dump_log();
 }
 
 template <typename IntArrayT, typename BoolArrayT>
@@ -447,15 +458,16 @@ main(int argc, char** argv)
     parser
         .add_argument({ "-r", "--filter" },
                       "Filter the output according to provided regex (egrep + "
-                      "case-sensitive) [e.g. -r \"true\"]")
+                      "case-sensitive) [e.g. -r \"true\"]. Prefix "
+                      "with '~' to suppress matches")
         .min_count(1)
         .dtype("list of strings")
         .action([](parser_t& p) { regex_keys = p.get<str_vec_t>("filter"); });
     parser
         .add_argument({ "-R", "--category-filter" },
                       "Filter the output according to provided regex w.r.t. the "
-                      "categories (egrep + "
-                      "case-sensitive) [e.g. -r \"true\"]")
+                      "categories (egrep + case-sensitive) [e.g. -r \"true\"]. Prefix "
+                      "with '~' to suppress matches")
         .min_count(1)
         .dtype("list of strings")
         .action([](parser_t& p) {
@@ -536,6 +548,17 @@ main(int argc, char** argv)
     parser.add_argument({ "-M", "--markdown" }, "Write data in markdown")
         .max_count(1)
         .action([](parser_t& p) { markdown = p.get<bool>("markdown"); });
+    parser.add_argument({ "--csv" }, "Write data in csv")
+        .max_count(1)
+        .action([](parser_t& p) {
+            csv = p.get<bool>("csv");
+            if(!p.exists("csv-separator")) global_delim = ",";
+        });
+    parser
+        .add_argument({ "--csv-separator" },
+                      "Use the provided string instead of a ',' to separate values")
+        .max_count(1)
+        .action([](parser_t& p) { global_delim = p.get<std::string>("csv-separator"); });
 
     parser.add_positional_argument("REGEX_FILTER").set_default(std::string{});
 
@@ -551,6 +574,12 @@ main(int argc, char** argv)
     {
         std::cerr << err << std::endl;
         parser.print_help();
+        return EXIT_FAILURE;
+    }
+
+    if(parser.exists("markdown") && parser.exists("csv"))
+    {
+        std::cerr << "Error! both '--markdown' and '--csv' options cannot be specified\n";
         return EXIT_FAILURE;
     }
 
@@ -589,8 +618,6 @@ main(int argc, char** argv)
     _parser_set_if_exists(include_settings, "settings");
     _parser_set_if_exists(include_hw_counters, "hw-counters");
 
-    if(options[CATEGORY] && force_brief) options[CATEGORY] = false;
-
     if(category_view.empty()) category_view = _category_options;
 
     if(!include_components && !include_settings && !include_hw_counters)
@@ -613,22 +640,30 @@ main(int argc, char** argv)
         }
     }
 
+    signal(SIGABRT, &dump_log_abort);
+    signal(SIGSEGV, &dump_log_abort);
+    signal(SIGQUIT, &dump_log_abort);
+
     if(!os) os = &std::cout;
 
-    if(include_components) write_component_info(*os, options, use_mark, fields);
-
+    if(include_components)
+    {
+        write_component_info(*os, options, use_mark, fields);
+    }
     dump_log();
 
     if(include_settings)
+    {
         write_settings_info(
             *os, { options[VAL], options[LANG], options[DESC], options[CATEGORY] });
-
+    }
     dump_log();
 
     if(include_hw_counters)
+    {
         write_hw_counter_info(*os, { true, !force_brief && !available_only,
                                      !options[DESC], options[DESC] });
-
+    }
     dump_log();
 
     return 0;
@@ -801,9 +836,9 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
     _widths = compute_max_columns(_widths, _wusing);
 
-    if(!markdown) os << banner(_widths, _wusing, '-');
+    if(!markdown && !csv) os << banner(_widths, _wusing, '-');
 
-    os << global_delim;
+    if(!csv) os << global_delim;
     write_entry(os, "COMPONENT", _widths.at(0), true, false);
     if(_available_column) write_entry(os, "AVAILABLE", _widths.at(1), true, false);
     for(size_t i = 0; i < fields.size(); ++i)
@@ -850,9 +885,6 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     dump_log();
 
     if(!markdown) os << banner(_widths, _wusing, '-');
-
-    os << "\n" << std::flush;
-    // os << banner(total_width) << std::flush;
 }
 
 //======================================================================================//
@@ -1026,7 +1058,7 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
 
     if(!markdown) os << banner(_widths, _wusing, '-');
 
-    os << global_delim;
+    if(!csv) os << global_delim;
     for(size_t i = 0; i < _labels.size(); ++i)
     {
         if(!_wusing.at(i)) continue;
@@ -1047,7 +1079,7 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
 
         if(_selected > 0)
         {
-            os << global_delim;
+            if(!csv) os << global_delim;
             os << hl_selected(ss.str());
             os << "\n";
         }
@@ -1056,9 +1088,6 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
     dump_log();
 
     if(!markdown) os << banner(_widths, _wusing, '-');
-
-    os << "\n" << std::flush;
-    // os << banner(total_width, '-') << std::flush;
 }
 
 //======================================================================================//
@@ -1129,7 +1158,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     _widths = compute_max_columns(_widths, _wusing);
 
     if(!markdown) os << banner(_widths, _wusing, '-');
-    os << global_delim;
+    if(!csv) os << global_delim;
 
     for(size_t i = 0; i < _labels.size(); ++i)
     {
@@ -1210,8 +1239,6 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     dump_log();
 
     if(!markdown) os << banner(_widths, _wusing, '-');
-
-    os << "\n" << std::flush;
 }
 
 //======================================================================================//
@@ -1329,8 +1356,8 @@ get_availability<Type>::get_info()
     string_t ids_str = {};
     {
         auto     itr = ids_set.begin();
-        string_t db  = (markdown) ? "`\"" : "\"";
-        string_t de  = (markdown) ? "\"`" : "\"";
+        string_t db  = (markdown) ? "`\"" : (csv) ? "" : "\"";
+        string_t de  = (markdown) ? "\"`" : (csv) ? "" : "\"";
         if(has_metadata) description += ". " + metadata_t::extra_description();
         description += ".";
         while(itr->empty())
@@ -1340,7 +1367,7 @@ get_availability<Type>::get_info()
         for(; itr != ids_set.end(); ++itr)
         {
             if(!itr->empty())
-                ids_str = TIMEMORY_JOIN("  ", ids_str, TIMEMORY_JOIN("", db, *itr, de));
+                ids_str = TIMEMORY_JOIN(", ", ids_str, TIMEMORY_JOIN("", db, *itr, de));
         }
     }
 
@@ -1476,7 +1503,10 @@ write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool ma
 
     stringstream_t ssentry;
     stringstream_t ss;
-    ssentry << ' ' << std::boolalpha << ((mark && markdown) ? "`" : "") << _entry;
+    if(csv)
+        ssentry << std::boolalpha << _entry;
+    else
+        ssentry << ' ' << std::boolalpha << ((mark && markdown) ? "`" : "") << _entry;
     auto _sentry = remove(ssentry.str(), { "tim::", "component::" });
 
     auto _decr = (mark && markdown) ? 6 : 5;
@@ -1488,7 +1518,7 @@ write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool ma
         _sentry += std::string{ "`" };
     }
 
-    if(center)
+    if(center && !csv)
     {
         size_t _n = 0;
         while(_sentry.length() + 2 < static_cast<size_t>(_w))
@@ -1508,7 +1538,20 @@ write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool ma
     }
     else
     {
-        ss << std::left << std::setw(_w - 1) << _sentry << global_delim;
+        if(csv)
+        {
+            if(_sentry.find(global_delim) == std::string::npos)
+                ss << _sentry << global_delim;
+            else
+            {
+                if(_sentry.find('"') != std::string::npos)
+                    ss << "'" << _sentry << "'" << global_delim;
+                else
+                    ss << "\"" << _sentry << "\"" << global_delim;
+            }
+        }
+        else
+            ss << std::left << std::setw(_w - 1) << _sentry << global_delim;
     }
     os << ss.str();
 }
@@ -1519,6 +1562,8 @@ template <typename IntArrayT, size_t N>
 string_t
 banner(IntArrayT _breaks, std::array<bool, N> _use, char filler, char delim)
 {
+    if(csv) return string_t{};
+
     if(debug_msg)
     {
         std::cerr << "[before]> Breaks: ";
@@ -1583,17 +1628,31 @@ get_regex_constants()
     return _constants;
 }
 
-const std::string&
+const auto&
 get_regex_pattern()
 {
-    static std::string _pattern = []() {
-        std::string _v{};
+    static auto _pattern = []() {
+        std::array<std::string, 2> _v{};
         for(const auto& itr : regex_keys)
         {
-            lerr << "Adding regex key: '" << itr << "'...\n";
-            _v += "|" + itr;
+            if(itr.empty()) continue;
+            std::string _pattern = {};
+            if(itr.at(0) == '~')
+            {
+                _pattern = itr.substr(1);
+                _v.at(1) += "|" + _pattern;
+            }
+            else
+            {
+                _pattern = itr;
+                _v.at(0) += "|" + _pattern;
+            }
+            lerr << "Adding regex key: '" << _pattern << "'...\n";
         }
-        return (_v.empty()) ? _v : _v.substr(1);
+        for(auto& itr : _v)
+            if(!itr.empty()) itr = itr.substr(1);
+
+        return _v;
     }();
     return _pattern;
 }
@@ -1601,35 +1660,61 @@ get_regex_pattern()
 auto
 get_regex()
 {
-    static auto _rc = std::regex(get_regex_pattern(), get_regex_constants());
+    static auto _rc = std::array<std::regex, 2>{
+        std::regex(get_regex_pattern().at(0), get_regex_constants()),
+        std::regex(get_regex_pattern().at(1), get_regex_constants())
+    };
     return _rc;
 }
 
 bool
 regex_match(const std::string& _line)
 {
-    if(get_regex_pattern().empty()) return true;
+    if(get_regex_pattern().at(0).empty() && get_regex_pattern().at(1).empty())
+        return true;
 
     static size_t lerr_width = 0;
     lerr_width               = std::max<size_t>(lerr_width, _line.length());
     std::stringstream _line_ss;
     _line_ss << "'" << _line << "'";
 
-    if(std::regex_match(_line, get_regex()))
+    if(!get_regex_pattern().at(1).empty())
     {
-        lerr << std::left << std::setw(lerr_width) << _line_ss.str()
-             << " matched pattern '" << get_regex_pattern() << "'...\n";
-        return true;
+        if(std::regex_match(_line, get_regex().at(1)))
+        {
+            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
+                 << " matched negating pattern '" << get_regex_pattern().at(1)
+                 << "'...\n";
+            return false;
+        }
+
+        if(std::regex_search(_line, get_regex().at(1)))
+        {
+            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
+                 << " found negating pattern '" << get_regex_pattern().at(1) << "'...\n";
+            return false;
+        }
     }
-    if(std::regex_search(_line, get_regex()))
+
+    if(!get_regex_pattern().at(0).empty())
     {
-        lerr << std::left << std::setw(lerr_width) << _line_ss.str() << " found pattern '"
-             << get_regex_pattern() << "'...\n";
-        return true;
+        if(std::regex_match(_line, get_regex().at(0)))
+        {
+            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
+                 << " matched pattern '" << get_regex_pattern().at(0) << "'...\n";
+            return true;
+        }
+
+        if(std::regex_search(_line, get_regex().at(0)))
+        {
+            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
+                 << " found pattern '" << get_regex_pattern().at(0) << "'...\n";
+            return true;
+        }
     }
 
     lerr << std::left << std::setw(lerr_width) << _line_ss.str() << " missing pattern '"
-         << get_regex_pattern() << "'...\n";
+         << get_regex_pattern().at(0) << "'...\n";
     return false;
 }
 
@@ -1639,22 +1724,36 @@ regex_replace(const std::string& _line)
 #if defined(TIMEMORY_UNIX)
     if(get_regex_pattern().empty()) return _line;
     if(regex_match(_line))
-        return std::regex_replace(_line, get_regex(), "\33[01;04;36;40m$&\33[0m");
+        return std::regex_replace(_line, get_regex().at(0), "\33[01;04;36;40m$&\33[0m");
 #endif
     return _line;
 }
 
-const std::string&
+const auto&
 get_category_regex_pattern()
 {
-    static std::string _pattern = []() {
-        std::string _v{};
+    static auto _pattern = []() {
+        std::array<std::string, 2> _v{};
         for(const auto& itr : category_regex_keys)
         {
-            lerr << "Adding regex key: '" << itr << "'...\n";
-            _v += "|" + itr;
+            if(itr.empty()) continue;
+            std::string _pattern = {};
+            if(itr.at(0) == '~')
+            {
+                _pattern = itr.substr(1);
+                _v.at(1) += "|" + _pattern;
+            }
+            else
+            {
+                _pattern = itr;
+                _v.at(0) += "|" + _pattern;
+            }
+            lerr << "Adding category regex key: '" << _pattern << "'...\n";
         }
-        return (_v.empty()) ? _v : _v.substr(1);
+        for(auto& itr : _v)
+            if(!itr.empty()) itr = itr.substr(1);
+
+        return _v;
     }();
     return _pattern;
 }
@@ -1662,35 +1761,66 @@ get_category_regex_pattern()
 auto
 get_category_regex()
 {
-    static auto _rc = std::regex(get_category_regex_pattern(), get_regex_constants());
+    static auto _rc = std::array<std::regex, 2>{
+        std::regex(get_category_regex_pattern().at(0), get_regex_constants()),
+        std::regex(get_category_regex_pattern().at(1), get_regex_constants())
+    };
     return _rc;
 }
 
 bool
 category_regex_match(const std::string& _line)
 {
-    if(get_regex_pattern().empty()) return true;
+    if(get_category_regex_pattern().at(0).empty() &&
+       get_category_regex_pattern().at(1).empty())
+        return true;
 
     static size_t lerr_width = 0;
     lerr_width               = std::max<size_t>(lerr_width, _line.length());
     std::stringstream _line_ss;
     _line_ss << "'" << _line << "'";
 
-    if(std::regex_match(_line, get_category_regex()))
+    if(!get_category_regex_pattern().at(1).empty())
     {
-        lerr << std::left << std::setw(lerr_width) << _line_ss.str()
-             << " matched pattern '" << get_category_regex_pattern() << "'...\n";
-        return true;
-    }
-    if(std::regex_search(_line, get_category_regex()))
-    {
-        lerr << std::left << std::setw(lerr_width) << _line_ss.str() << " found pattern '"
-             << get_category_regex_pattern() << "'...\n";
-        return true;
+        if(std::regex_match(_line, get_category_regex().at(1)))
+        {
+            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
+                 << " matched negating category pattern '"
+                 << get_category_regex_pattern().at(1) << "'...\n";
+            return false;
+        }
+
+        if(std::regex_search(_line, get_category_regex().at(1)))
+        {
+            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
+                 << " found negating category pattern '"
+                 << get_category_regex_pattern().at(1) << "'...\n";
+            return false;
+        }
     }
 
-    lerr << std::left << std::setw(lerr_width) << _line_ss.str() << " missing pattern '"
-         << get_category_regex_pattern() << "'...\n";
+    if(!get_category_regex_pattern().at(0).empty())
+    {
+        if(std::regex_match(_line, get_category_regex().at(0)))
+        {
+            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
+                 << " matched category pattern '" << get_category_regex_pattern().at(0)
+                 << "'...\n";
+            return true;
+        }
+
+        if(std::regex_search(_line, get_category_regex().at(0)))
+        {
+            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
+                 << " found category pattern '" << get_category_regex_pattern().at(0)
+                 << "'...\n";
+            return true;
+        }
+    }
+
+    lerr << std::left << std::setw(lerr_width) << _line_ss.str()
+         << " missing category pattern '" << get_category_regex_pattern().at(0)
+         << "'...\n";
     return false;
 }
 
