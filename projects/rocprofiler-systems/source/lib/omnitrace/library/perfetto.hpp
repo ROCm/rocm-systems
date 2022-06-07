@@ -66,6 +66,15 @@
 PERFETTO_DEFINE_CATEGORIES(PERFETTO_CATEGORIES);
 #endif
 
+#include "library/debug.hpp"
+
+#include <map>
+#include <memory>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
+
 namespace omnitrace
 {
 #if defined(CUSTOM_DATA_SOURCE)
@@ -76,7 +85,7 @@ public:
     {
         // Use this callback to apply any custom configuration to your data source
         // based on the TraceConfig in SetupArgs.
-        PRINT_HERE("%s", "setup");
+        OMNITRACE_PRINT_F("[CustomDataSource] setup\n");
     }
 
     void OnStart(const StartArgs&) override
@@ -84,13 +93,13 @@ public:
         // This notification can be used to initialize the GPU driver, enable
         // counters, etc. StartArgs will contains the DataSourceDescriptor,
         // which can be extended.
-        PRINT_HERE("%s", "start");
+        OMNITRACE_PRINT_F("[CustomDataSource] start\n");
     }
 
     void OnStop(const StopArgs&) override
     {
         // Undo any initialization done in OnStart.
-        PRINT_HERE("%s", "stop");
+        OMNITRACE_PRINT_F("[CustomDataSource] stop\n");
     }
 
     // Data sources can also have per-instance state.
@@ -104,7 +113,7 @@ template <typename Tp>
 struct perfetto_counter_track
 {
     using track_map_t = std::map<uint32_t, std::vector<perfetto::CounterTrack>>;
-    using name_map_t  = std::map<uint32_t, std::vector<std::string>>;
+    using name_map_t  = std::map<uint32_t, std::vector<std::unique_ptr<std::string>>>;
     using data_t      = std::pair<name_map_t, track_map_t>;
 
     static auto init() { (void) get_data(); }
@@ -123,11 +132,48 @@ struct perfetto_counter_track
         return get_data().second.at(_idx).size();
     }
 
-    static auto emplace(size_t _idx, const std::string& _v, const char* _units)
+    static auto emplace(size_t _idx, const std::string& _v, const char* _units = nullptr,
+                        const char* _category = nullptr, int64_t _mult = 1,
+                        bool _incr = false)
     {
-        get_data().first[_idx].emplace_back(_v);
-        get_data().second[_idx].emplace_back(get_data().first[_idx].back().c_str(),
-                                             _units);
+        std::vector<std::tuple<std::string, const char*, bool>> _missing = {};
+        if(config::get_is_continuous_integration())
+        {
+            for(const auto& itr : get_data().first[_idx])
+            {
+                _missing.emplace_back(std::make_tuple(*itr, itr->c_str(), false));
+            }
+        }
+        auto& _name =
+            get_data().first[_idx].emplace_back(std::make_unique<std::string>(_v));
+        const char* _unit_name = (_units && strlen(_units) > 0) ? _units : nullptr;
+        get_data().second[_idx].emplace_back(perfetto::CounterTrack{ _name->c_str() }
+                                                 .set_unit_name(_unit_name)
+                                                 .set_category(_category)
+                                                 .set_unit_multiplier(_mult)
+                                                 .set_is_incremental(_incr));
+        if(config::get_is_continuous_integration())
+        {
+            for(auto& itr : _missing)
+            {
+                for(const auto& ditr : get_data().first.at(_idx))
+                {
+                    if(*ditr == _v) continue;
+                    const char* citr = std::get<1>(itr);
+                    if(citr == ditr->c_str() && strcmp(citr, ditr->c_str()) == 0)
+                    {
+                        std::get<2>(itr) = true;
+                        break;
+                    }
+                }
+                if(!std::get<2>(itr))
+                {
+                    OMNITRACE_THROW("perfetto_counter_track emplace method for '%s' "
+                                    "invalidated C-string '%s'\n",
+                                    _v.c_str(), std::get<0>(itr).c_str());
+                }
+            }
+        }
     }
 
     static auto& at(size_t _idx, size_t _n) { return get_data().second.at(_idx).at(_n); }
@@ -135,8 +181,8 @@ struct perfetto_counter_track
 private:
     static data_t& get_data()
     {
-        static auto* _v = new data_t{};
-        return *_v;
+        static auto _v = data_t{};
+        return _v;
     }
 };
 }  // namespace omnitrace
