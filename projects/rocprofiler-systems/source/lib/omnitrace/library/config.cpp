@@ -82,6 +82,17 @@ get_setting_name(std::string _v)
                             get_setting_name(ENV_NAME).c_str(), ENV_NAME);               \
     }
 
+// below does not include "omnitrace_library"
+#define OMNITRACE_CONFIG_EXT_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)    \
+    {                                                                                    \
+        auto _ret = _config->insert<TYPE, TYPE>(                                         \
+            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, INITIAL_VALUE,            \
+            std::set<std::string>{ "custom", "omnitrace", __VA_ARGS__ });                \
+        if(!_ret.second)                                                                 \
+            OMNITRACE_PRINT("Warning! Duplicate setting: %s / %s\n",                     \
+                            get_setting_name(ENV_NAME).c_str(), ENV_NAME);               \
+    }
+
 // setting + command line option
 #define OMNITRACE_CONFIG_CL_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE,          \
                                     CMD_LINE, ...)                                       \
@@ -147,6 +158,15 @@ configure_settings(bool _init)
 
     auto _omnitrace_debug = _config->get<bool>("OMNITRACE_DEBUG");
     if(_omnitrace_debug) tim::set_env("TIMEMORY_DEBUG_SETTINGS", "1", 0);
+
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CI",
+                             "Enable some runtime validation checks (typically enabled "
+                             "for continuous integration)",
+                             false, "debugging");
+
+    OMNITRACE_CONFIG_EXT_SETTING(bool, "OMNITRACE_DL_VERBOSE",
+                                 "Verbosity within the omnitrace-dl library", false,
+                                 "debugging", "omnitrace_dl_library");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_PERFETTO", "Enable perfetto backend",
                              _default_perfetto_v, "backend", "perfetto");
@@ -307,9 +327,10 @@ configure_settings(bool _init)
     _config->find("OMNITRACE_PERFETTO_FILL_POLICY")
         ->second->set_choices({ "fill", "discard" });
 
-    OMNITRACE_CONFIG_SETTING(int64_t, "OMNITRACE_CRITICAL_TRACE_COUNT",
-                             "Number of critical trace to export (0 == all)", 0, "data",
-                             "critical_trace", "omnitrace-critical-trace");
+    OMNITRACE_CONFIG_EXT_SETTING(int64_t, "OMNITRACE_CRITICAL_TRACE_COUNT",
+                                 "Number of critical trace to export (0 == all)", 0,
+                                 "data", "critical_trace", "omnitrace-critical-trace",
+                                 "perfetto");
 
     OMNITRACE_CONFIG_SETTING(uint64_t, "OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT",
                              "Number of critical trace records to store in thread-local "
@@ -322,10 +343,10 @@ configure_settings(bool _init)
         std::min<uint64_t>(8, std::thread::hardware_concurrency()), "parallelism",
         "critical_trace");
 
-    OMNITRACE_CONFIG_SETTING(
+    OMNITRACE_CONFIG_EXT_SETTING(
         int64_t, "OMNITRACE_CRITICAL_TRACE_PER_ROW",
         "How many critical traces per row in perfetto (0 == all in one row)", 0, "io",
-        "critical_trace");
+        "critical_trace", "omnitrace-critical-trace", "perfetto");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_TIMEMORY_COMPONENTS",
@@ -567,6 +588,9 @@ configure_settings(bool _init)
     _config->disable("width");
     _config->disable("max_width");
 
+    auto _dl_verbose = _config->find("OMNITRACE_DL_VERBOSE");
+    tim::set_env(std::string{ _dl_verbose->first }, _dl_verbose->second->as_string(), 0);
+
 #if !defined(TIMEMORY_USE_MPI) || TIMEMORY_USE_MPI == 0
     _config->disable("OMNITRACE_PERFETTO_COMBINE_TRACES");
 #endif
@@ -763,7 +787,9 @@ get_debug_env()
 bool
 get_is_continuous_integration()
 {
-    return tim::get_env<bool>("OMNITRACE_CI", false);
+    if(!settings_are_configured()) return tim::get_env<bool>("OMNITRACE_CI", false);
+    static auto _v = get_config()->find("OMNITRACE_CI");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 bool
