@@ -108,6 +108,7 @@ set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 
 project(${RDC})
 
+include(GNUInstallDirs)
 set(RDC_SRC_ROOT "${PROJECT_SOURCE_DIR}")
 
 message("Build Configuration:")
@@ -286,7 +287,7 @@ install(EXPORT rdcTargets DESTINATION
 
 # License file
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
-install( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/share/doc/rdc RENAME LICENSE.txt)
+install( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt)
 
 # Python binding and example
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/python_binding
