@@ -51,11 +51,6 @@ if(NOT DEFINED LIBRARY_TYPE)
   set(LIBRARY_TYPE SHARED)
 endif()
 
-## FIXME!!! should not depend on another project's internal files
-execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory inc/rocprofiler)
-execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${PROJECT_SOURCE_DIR}/../rocprofiler/inc/rocprofiler.h inc/rocprofiler/rocprofiler.h)
-execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink ${PROJECT_SOURCE_DIR}/../rocprofiler/src/core/activity.h inc/rocprofiler/activity.h)
-
 ## Build libraries
 add_subdirectory(src)
 
