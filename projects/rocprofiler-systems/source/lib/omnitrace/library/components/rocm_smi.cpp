@@ -229,9 +229,8 @@ data::post_process(uint32_t _dev_id)
             if(itr.m_dev_id != _dev_id) continue;
             if(!counter_track::exists(_dev_id))
             {
-                auto _devname = TIMEMORY_JOIN("", "[GPU ", _dev_id, "] ");
                 auto addendum = [&](const char* _v) {
-                    return _devname + std::string{ _v };
+                    return JOIN(" ", "GPU", _v, JOIN("", '[', _dev_id, ']'), "(S)");
                 };
                 counter_track::emplace(_dev_id, addendum("Busy"), "%");
                 counter_track::emplace(_dev_id, addendum("Temperature"), "deg C");

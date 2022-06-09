@@ -29,10 +29,14 @@
 #include "library/timemory.hpp"
 
 #include <timemory/components/rusage/backends.hpp>
+#include <timemory/mpl/types.hpp>
+#include <timemory/units.hpp>
 #include <timemory/utility/procfs/cpuinfo.hpp>
+#include <timemory/utility/type_list.hpp>
 
 #include <cstdlib>
 #include <string>
+#include <sys/resource.h>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -43,6 +47,9 @@ namespace omnitrace
 {
 namespace cpu_freq
 {
+template <typename... Tp>
+using type_list = tim::type_list<Tp...>;
+
 namespace
 {
 struct cpu_freq
@@ -51,19 +58,34 @@ struct cpu_page
 {};
 struct cpu_virt
 {};
-using cpu_data_tuple_t = std::tuple<size_t, int64_t, int64_t, std::vector<double>>;
+struct cpu_context_switch
+{};
+struct cpu_page_fault
+{};
+struct cpu_user_mode_time
+{};
+struct cpu_kernel_mode_time
+{};
+using cpu_data_tuple_t = std::tuple<size_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                                    int64_t, std::vector<double>>;
 
 std::set<size_t>             enabled_cpu_freqs = {};
 std::deque<cpu_data_tuple_t> cpu_data          = {};
 int64_t                      ncpu              = threading::affinity::hw_concurrency();
+
+template <typename... Types>
+void init_perfetto_counter_tracks(type_list<Types...>)
+{
+    (perfetto_counter_track<Types>::init(), ...);
+}
 }  // namespace
 
 void
 setup()
 {
-    perfetto_counter_track<cpu_freq>::init();
-    perfetto_counter_track<cpu_page>::init();
-    perfetto_counter_track<cpu_virt>::init();
+    init_perfetto_counter_tracks(
+        type_list<cpu_freq, cpu_page, cpu_virt, cpu_context_switch, cpu_page_fault,
+                  cpu_user_mode_time, cpu_kernel_mode_time>{});
 }
 
 void
@@ -166,13 +188,50 @@ sample()
 
     auto _ts = tim::get_clock_real_now<size_t, std::nano>();
 
+    tim::rusage_cache _rcache{ RUSAGE_SELF };
+    // user and kernel mode times are in microseconds
     cpu_data.emplace_back(_ts, tim::get_page_rss(), tim::get_virt_mem(),
-                          std::move(_freqs));
+                          _rcache.get_num_priority_context_switch() +
+                              _rcache.get_num_voluntary_context_switch(),
+                          _rcache.get_num_major_page_faults() +
+                              _rcache.get_num_minor_page_faults(),
+                          _rcache.get_user_mode_time() * 1000,
+                          _rcache.get_kernel_mode_time() * 1000, std::move(_freqs));
 }
 
 void
 shutdown()
 {}
+
+namespace
+{
+template <typename... Types, size_t N = sizeof...(Types)>
+void
+config_perfetto_counter_tracks(type_list<Types...>, std::array<const char*, N> _labels,
+                               std::array<const char*, N> _units)
+{
+    auto _config = [&](auto _t) {
+        using type          = std::decay_t<decltype(_t)>;
+        using track         = perfetto_counter_track<type>;
+        constexpr auto _idx = tim::index_of<type, type_list<Types...>>::value;
+        if(!track::exists(0))
+        {
+            auto addendum = [&](const char* _v) { return JOIN(" ", "CPU", _v, "(S)"); };
+            track::emplace(0, addendum(_labels.at(_idx)), _units.at(_idx));
+        }
+    };
+
+    (_config(Types{}), ...);
+}
+
+template <typename Tp, typename... Args>
+void
+write_perfetto_counter_track(Args... _args)
+{
+    using track = perfetto_counter_track<Tp>;
+    TRACE_COUNTER("sampling", track::at(0, 0), _args...);
+}
+}  // namespace
 
 void
 post_process()
@@ -183,48 +242,56 @@ post_process()
         using freq_track = perfetto_counter_track<cpu_freq>;
         if(!freq_track::exists(_idx))
         {
-            auto _devname = TIMEMORY_JOIN("", "[CPU ", _idx, "] ");
-            auto addendum = [&](const char* _v) { return _devname + std::string{ _v }; };
-            freq_track::emplace(_idx, addendum("Frequency (S)"), "MHz");
+            auto addendum = [&](const char* _v) {
+                return JOIN(" ", "CPU", _v, JOIN("", '[', _idx, ']'), "(S)");
+            };
+            freq_track::emplace(_idx, addendum("Frequency"), "MHz");
         }
 
         for(auto& itr : cpu_data)
         {
             uint64_t _ts   = std::get<0>(itr);
-            double   _freq = std::get<3>(itr).at(_offset);
+            double   _freq = std::get<7>(itr).at(_offset);
             TRACE_COUNTER("sampling", freq_track::at(_idx, 0), _ts, _freq);
         }
     };
 
-    auto _process_cpu_mem_usage = []() {
-        using page_track = perfetto_counter_track<cpu_page>;
-        using virt_track = perfetto_counter_track<cpu_virt>;
+    auto _process_cpu_rusage = []() {
+        config_perfetto_counter_tracks(
+            type_list<cpu_page, cpu_virt, cpu_context_switch, cpu_page_fault,
+                      cpu_user_mode_time, cpu_kernel_mode_time>{},
+            { "Memory Usage", "Virtual Memory Usage", "Context Switches", "Page Faults",
+              "User CPU Time", "Kernel CPU Time" },
+            { "MB", "MB", "", "", "sec", "sec" });
 
-        if(!page_track::exists(0))
-        {
-            auto _devname = TIMEMORY_JOIN("", "[CPU] ");
-            auto addendum = [&](const char* _v) { return _devname + std::string{ _v }; };
-            page_track::emplace(0, addendum("Memory Usage (S)"), "MB");
-        }
-
-        if(!virt_track::exists(0))
-        {
-            auto _devname = TIMEMORY_JOIN("", "[CPU] ");
-            auto addendum = [&](const char* _v) { return _devname + std::string{ _v }; };
-            virt_track::emplace(0, addendum("Virtual Memory Usage (S)"), "MB");
-        }
-
+        cpu_data_tuple_t* _last = nullptr;
         for(auto& itr : cpu_data)
         {
             uint64_t _ts   = std::get<0>(itr);
             double   _page = std::get<1>(itr);
             double   _virt = std::get<2>(itr);
-            TRACE_COUNTER("sampling", page_track::at(0, 0), _ts, _page / units::megabyte);
-            TRACE_COUNTER("sampling", virt_track::at(0, 0), _ts, _virt / units::megabyte);
+            uint64_t _cntx = std::get<3>(itr);
+            uint64_t _flts = std::get<4>(itr);
+            double   _user = std::get<5>(itr);
+            double   _kern = std::get<6>(itr);
+            if(_last)
+            {
+                _cntx -= std::get<3>(*_last);
+                _flts -= std::get<4>(*_last);
+                _user -= std::get<5>(*_last);
+                _kern -= std::get<6>(*_last);
+            }
+            write_perfetto_counter_track<cpu_page>(_ts, _page / units::megabyte);
+            write_perfetto_counter_track<cpu_virt>(_ts, _virt / units::megabyte);
+            write_perfetto_counter_track<cpu_context_switch>(_ts, _cntx);
+            write_perfetto_counter_track<cpu_page_fault>(_ts, _flts);
+            write_perfetto_counter_track<cpu_user_mode_time>(_ts, _user / units::sec);
+            write_perfetto_counter_track<cpu_kernel_mode_time>(_ts, _kern / units::sec);
+            _last = &itr;
         }
     };
 
-    _process_cpu_mem_usage();
+    _process_cpu_rusage();
     for(auto itr = enabled_cpu_freqs.begin(); itr != enabled_cpu_freqs.end(); ++itr)
     {
         auto _idx    = *itr;

@@ -36,6 +36,8 @@
 #include <timemory/components/papi/extern.hpp>
 #include <timemory/components/papi/papi_array.hpp>
 #include <timemory/components/papi/papi_vector.hpp>
+#include <timemory/components/rusage/components.hpp>
+#include <timemory/components/rusage/types.hpp>
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/components/trip_count/extern.hpp>
 #include <timemory/macros.hpp>
@@ -110,6 +112,9 @@ using papi_vector_instances     = thread_data<hw_counters, api::sampling>;
 
 namespace
 {
+struct perfetto_rusage
+{};
+
 unique_ptr_t<hw_counters>&
 get_papi_vector(int64_t _tid)
 {
@@ -270,9 +275,13 @@ backtrace::sample(int signum)
     m_tid        = threading::get_id();
     m_ts         = clock_type::now();
     m_thr_cpu_ts = tim::get_clock_thread_now<int64_t, std::nano>();
-    m_mem_peak   = tim::get_peak_rss(RUSAGE_THREAD);
-    m_data       = tim::get_unw_backtrace<stack_depth, 4, false>();
-    auto* itr    = m_data.begin();
+    auto _cache  = tim::rusage_cache{ RUSAGE_THREAD };
+    m_mem_peak   = _cache.get_peak_rss();
+    m_ctx_swch   = _cache.get_num_priority_context_switch() +
+                 _cache.get_num_voluntary_context_switch();
+    m_page_flt = _cache.get_num_major_page_faults() + _cache.get_num_minor_page_faults();
+    m_data     = tim::get_unw_backtrace<stack_depth, 4, false>();
+    auto* itr  = m_data.begin();
     for(; itr != m_data.end(); ++itr, ++m_size)
     {
         if(strlen(*itr) == 0) break;
@@ -299,16 +308,7 @@ backtrace::sample(int signum)
         if(tim::trait::runtime_enabled<hw_counters>::get())
         {
             assert(get_papi_vector(m_tid).get() != nullptr);
-            static thread_local auto& _pv         = get_papi_vector(m_tid);
-            auto                      _hw_counter = _pv->record();
-            auto _num_hw_counters = std::min<size_t>(_hw_counter.size(), num_hw_counters);
-            for(size_t i = 0; i < _num_hw_counters; ++i)
-            {
-                auto& _last     = get_last_hwcounters().at(i);
-                auto  itr       = _hw_counter.at(i);
-                m_hw_counter[i] = itr - _last;
-                _last           = itr;
-            }
+            m_hw_counter = get_papi_vector(m_tid)->record();
         }
     }
 }
@@ -477,35 +477,51 @@ backtrace::post_process(int64_t _tid)
                               : std::vector<std::string>{};
 
     auto _process_perfetto_counters = [&](const std::vector<sampling::bundle_t*>& _data) {
-        if(!perfetto_counter_track<comp::peak_rss>::exists(_tid))
+        if(!perfetto_counter_track<perfetto_rusage>::exists(_tid))
         {
-            auto _thrname = TIMEMORY_JOIN("", "[Thread ", _tid, "] ");
-            auto addendum = [&](const std::string& _v) { return _thrname + _v + " (S)"; };
-            perfetto_counter_track<comp::peak_rss>::emplace(
-                _tid, addendum("Peak Memory Usage"), "MB");
+            perfetto_counter_track<perfetto_rusage>::emplace(
+                _tid, JOIN("", "Peak Memory Usage", " [Thread ", _tid, "] (S)"), "MB");
+            perfetto_counter_track<perfetto_rusage>::emplace(
+                _tid, JOIN("", "Context Switches", " [Thread ", _tid, "] (S)"));
+            perfetto_counter_track<perfetto_rusage>::emplace(
+                _tid, JOIN("", "Page Faults", " [Thread ", _tid, "] (S)"));
         }
 
         if(!perfetto_counter_track<hw_counters>::exists(_tid) &&
            tim::trait::runtime_enabled<hw_counters>::get())
         {
-            auto _thrname = TIMEMORY_JOIN("", "[Thread ", _tid, "] ");
-            auto addendum = [&](const std::string& _v) { return _thrname + _v + " (S)"; };
             for(auto& itr : _hw_cnt_labels)
             {
                 perfetto_counter_track<hw_counters>::emplace(
-                    _tid, addendum(tim::papi::get_event_info(itr).short_descr), "");
+                    _tid,
+                    JOIN("", tim::papi::get_event_info(itr).short_descr, " [Thread ",
+                         _tid, "] (S)"),
+                    "");
             }
         }
 
+        uint64_t         _mean_ts = 0;
+        const backtrace* _last_bt = nullptr;
         for(const auto& ditr : _data)
         {
             const auto* _bt = ditr->get<backtrace>();
             if(_bt->m_tid != _tid) continue;
 
             auto _ts = static_cast<uint64_t>(_bt->m_ts.time_since_epoch().count());
+            _last_bt = _bt;
+            _mean_ts += _ts;
 
-            TRACE_COUNTER("sampling", perfetto_counter_track<comp::peak_rss>::at(_tid, 0),
-                          _ts, _bt->m_mem_peak / units::megabyte);
+            TRACE_COUNTER("sampling",
+                          perfetto_counter_track<perfetto_rusage>::at(_tid, 0), _ts,
+                          _bt->m_mem_peak / units::megabyte);
+
+            TRACE_COUNTER("sampling",
+                          perfetto_counter_track<perfetto_rusage>::at(_tid, 1), _ts,
+                          _bt->m_ctx_swch);
+
+            TRACE_COUNTER("sampling",
+                          perfetto_counter_track<perfetto_rusage>::at(_tid, 2), _ts,
+                          _bt->m_page_flt);
 
             if(tim::trait::runtime_enabled<hw_counters>::get())
             {
@@ -517,6 +533,38 @@ backtrace::post_process(int64_t _tid)
                         TRACE_COUNTER("sampling",
                                       perfetto_counter_track<hw_counters>::at(_tid, i),
                                       _ts, _bt->m_hw_counter.at(i));
+                    }
+                }
+            }
+        }
+
+        if(_tid > 0 && _last_bt)
+        {
+            auto _ts = static_cast<uint64_t>(_last_bt->m_ts.time_since_epoch().count()) +
+                       (_mean_ts / _data.size());
+            uint64_t _zero = 0;
+            TRACE_COUNTER("sampling",
+                          perfetto_counter_track<perfetto_rusage>::at(_tid, 0), _ts,
+                          _zero);
+
+            TRACE_COUNTER("sampling",
+                          perfetto_counter_track<perfetto_rusage>::at(_tid, 1), _ts,
+                          _zero);
+
+            TRACE_COUNTER("sampling",
+                          perfetto_counter_track<perfetto_rusage>::at(_tid, 2), _ts,
+                          _zero);
+
+            if(tim::trait::runtime_enabled<hw_counters>::get())
+            {
+                for(size_t i = 0; i < perfetto_counter_track<hw_counters>::size(_tid);
+                    ++i)
+                {
+                    if(i < _last_bt->m_hw_counter.size())
+                    {
+                        TRACE_COUNTER("sampling",
+                                      perfetto_counter_track<hw_counters>::at(_tid, i),
+                                      _ts, _zero);
                     }
                 }
             }
@@ -611,8 +659,7 @@ backtrace::post_process(int64_t _tid)
     if(get_timeline_sampling()) _scope += scope::timeline{};
     if(get_flat_sampling()) _scope += scope::flat{};
 
-    time_point_type _last_wall_ts = _init->get_timestamp();
-    int64_t         _last_cpu_ts  = _init->get_thread_cpu_timestamp();
+    backtrace* _last_bt = _init.get();
     for(auto& ditr : _data)
     {
         using bundle_t = tim::lightweight_tuple<comp::trip_count, sampling_wall_clock,
@@ -620,10 +667,10 @@ backtrace::post_process(int64_t _tid)
 
         auto* _bt = ditr->get<backtrace>();
 
-        if(_bt->m_ts < _last_wall_ts) continue;
+        if(_bt->m_ts < _last_bt->m_ts) continue;
 
-        double _elapsed_wc = (_bt->m_ts - _last_wall_ts).count();
-        double _elapsed_cc = (_bt->m_thr_cpu_ts - _last_cpu_ts);
+        double _elapsed_wc = (_bt->m_ts - _last_bt->m_ts).count();
+        double _elapsed_cc = (_bt->m_thr_cpu_ts - _last_bt->m_thr_cpu_ts);
 
         std::vector<bundle_t> _tc{};
         _tc.reserve(_bt->size());
@@ -670,17 +717,25 @@ backtrace::post_process(int64_t _tid)
             }
             if constexpr(tim::trait::is_available<hw_counters>::value)
             {
+                auto _hw_cnt_vals = _bt->m_hw_counter;
+                if(_last_bt && _bt->m_hw_counter.size() == _last_bt->m_hw_counter.size())
+                {
+                    for(size_t k = 0; k < _bt->m_hw_counter.size(); ++k)
+                    {
+                        if(_last_bt->m_hw_counter[k] > _hw_cnt_vals[k])
+                            _hw_cnt_vals[k] -= _last_bt->m_hw_counter[k];
+                    }
+                }
                 auto* _hw_counter = itr.get<hw_counters>();
                 if(_hw_counter)
                 {
-                    _hw_counter->set_value(_bt->m_hw_counter);
-                    _hw_counter->set_accum(_bt->m_hw_counter);
+                    _hw_counter->set_value(_hw_cnt_vals);
+                    _hw_counter->set_accum(_hw_cnt_vals);
                 }
             }
             itr.pop();
         }
-        _last_wall_ts = _bt->m_ts;
-        _last_cpu_ts  = _bt->m_thr_cpu_ts;
+        _last_bt = _bt;
     }
 
     for(auto&& ditr : _data)
