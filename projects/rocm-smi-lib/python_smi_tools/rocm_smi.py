@@ -462,6 +462,26 @@ def printErrLog(device, err):
             logging.debug(errstr)
 
 
+def printInfoLog(device, metricName, value):
+    """ Print out an info line to the SMI log
+
+    @param device: DRM device identifier
+    @param metricName: Title of the item to print to the log
+    @param value: The item's value to print to the log
+    """
+    global PRINT_JSON
+
+    if not PRINT_JSON:
+        if value is not None:
+            logstr = 'GPU[%s]\t: %s: %s' % (device, metricName, value)
+        else:
+            logstr = 'GPU[%s]\t: %s' % (device, metricName)
+        if device is None:
+            logstr = logstr[13:]
+
+        logging.info(logstr)
+
+
 def printEventList(device, delay, eventList):
     """ Print out notification events for a specified device
 
@@ -1539,7 +1559,11 @@ def showCurrentTemps(deviceList):
     printLogSpacer(' Temperature ')
     for device in deviceList:
         for sensor in temp_type_lst:
-            printLog(device, 'Temperature (Sensor %s) (C)' % (sensor), getTemp(device, sensor))
+            temp = getTemp(device, sensor)
+            if temp != 'N/A':
+                printLog(device, 'Temperature (Sensor %s) (C)' % (sensor), temp)
+            else:
+                printInfoLog(device, 'Temperature (Sensor %s) (C)' % (sensor), temp)
     printLogSpacer()
 
 
@@ -1675,7 +1699,7 @@ def showGpuUse(deviceList):
             for ut_counter in util_counters:
                 printLog(device, utilization_counter_name[ut_counter.type], ut_counter.val)
         else:
-            printLog(device, 'GFX Activity', 'N/A')
+            printInfoLog(device, 'GFX Activity', 'N/A')
 
     printLogSpacer()
 
