@@ -40,6 +40,12 @@ struct function_signature
                        location_t _col = { 0, 0 }, bool _loop = false,
                        bool _info_beg = false, bool _info_end = false);
 
+    function_signature& set_loop_number(uint32_t _n)
+    {
+        m_loop_num = _n;
+        return *this;
+    }
+
     static string_t get(function_signature& sig);
     string_t        get(bool _all = false, bool _save = true) const;
     string_t        get_coverage(bool _is_basic_block) const;
@@ -47,6 +53,7 @@ struct function_signature
     bool             m_loop      = false;
     bool             m_info_beg  = false;
     bool             m_info_end  = false;
+    uint32_t         m_loop_num  = std::numeric_limits<uint32_t>::max();
     location_t       m_row       = { 0, 0 };
     location_t       m_col       = { 0, 0 };
     string_t         m_return    = {};

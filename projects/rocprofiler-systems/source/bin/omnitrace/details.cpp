@@ -529,11 +529,9 @@ are_file_include_exclude_lists_empty()
 //  the instrumented loop and formats it properly.
 //
 function_signature
-get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t* cfGraph,
+get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
                         basic_loop_t* loopToInstrument)
 {
-    if(!cfGraph || !loopToInstrument || !func) return function_signature{ "", "", "" };
-
     std::vector<BPatch_basicBlock*> basic_blocks{};
     loopToInstrument->getLoopBasicBlocksExclusive(basic_blocks);
 
@@ -563,7 +561,7 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t* cfGra
     memset(fname, '\0', FUNCNAMELEN + 1);
     memset(mname, '\0', FUNCNAMELEN + 1);
 
-    module->getName(mname, FUNCNAMELEN);
+    module->getFullName(mname, FUNCNAMELEN);
     func->getName(fname, FUNCNAMELEN);
 
     auto* returnType = func->getReturnType();
@@ -641,7 +639,8 @@ get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t* cfGra
     }
     else
     {
-        return function_signature(typeName, fname, filename, _params);
+        return function_signature(typeName, fname, filename, _params, { 0, 0 }, { 0, 0 },
+                                  true, false, false);
     }
 }
 
@@ -661,7 +660,7 @@ get_func_file_line_info(module_t* module, procedure_t* func)
     memset(fname, '\0', FUNCNAMELEN + 1);
     memset(mname, '\0', FUNCNAMELEN + 1);
 
-    module->getName(mname, FUNCNAMELEN);
+    module->getFullName(mname, FUNCNAMELEN);
     func->getName(fname, FUNCNAMELEN);
 
     address_t base_addr{};
@@ -727,7 +726,7 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
     memset(fname, '\0', FUNCNAMELEN + 1);
     memset(mname, '\0', FUNCNAMELEN + 1);
 
-    module->getName(mname, FUNCNAMELEN);
+    module->getFullName(mname, FUNCNAMELEN);
     func->getName(fname, FUNCNAMELEN);
 
     auto* returnType = func->getReturnType();

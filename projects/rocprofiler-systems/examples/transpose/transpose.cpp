@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <random>
 #include <thread>
 #include <vector>
 
@@ -106,12 +107,15 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     std::cout << "[" << rank << "][" << tid << "] M: " << M << " N: " << N << std::endl;
     _lk.unlock();
 
+    std::default_random_engine _engine{ std::random_device{}() * (rank + 1) * (tid + 1) };
+    std::uniform_int_distribution<int> _dist{ 0, 1000 };
+
     size_t size       = sizeof(int) * M * N;
     int*   inp_matrix = new int[size];
     int*   out_matrix = new int[size];
     for(size_t i = 0; i < M * N; i++)
     {
-        inp_matrix[i] = rand() % 1002;
+        inp_matrix[i] = _dist(_engine);
         out_matrix[i] = 0;
     }
     int* in  = nullptr;

@@ -67,7 +67,7 @@ function_signature::get(bool _all, bool _save) const
     if((_all || use_return_info) && !m_return.empty()) ss << m_return << " ";
     ss << m_name;
     if(_all || use_args_info) ss << m_params;
-    if(m_loop && m_info_beg)
+    if(m_loop)
     {
         auto _row_col_str = [](unsigned long _row, unsigned long _col) {
             std::stringstream _ss{};
@@ -89,8 +89,11 @@ function_signature::get(bool _all, bool _save) const
             ss << " [" << _rc1 << "]";
         else if(!m_info_end && !_rc1.empty())
             ss << " [" << _rc1 << "]";
+        else if(m_loop_num < std::numeric_limits<uint32_t>::max())
+            ss << " [loop#" << m_loop_num << "]";
         else
-            errprintf(3, "line info for %s is empty!\n", m_name.c_str());
+            errprintf(3, "line info for %s is empty! [{%s}] [{%s}]\n", m_name.c_str(),
+                      _rc1.c_str(), _rc2.c_str());
     }
     if((_all || use_file_info) && m_file.length() > 0) ss << " [" << m_file;
     if((_all || use_line_info) && m_row.first > 0) ss << ":" << m_row.first;

@@ -406,9 +406,42 @@ omnitrace_add_test(
     TARGET transpose
     MPI ${TRANSPOSE_USE_MPI}
     NUM_PROCS ${NUM_PROCS}
-    REWRITE_ARGS -e -v 2 --print-instructions
-    RUNTIME_ARGS -e -v 1 --label file line return args
+    REWRITE_ARGS -e -v 2 --print-instructions -E uniform_int_distribution
+    RUNTIME_ARGS
+        -e
+        -v
+        1
+        --label
+        file
+        line
+        return
+        args
+        -E
+        uniform_int_distribution
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=ON")
+
+omnitrace_add_test(
+    SKIP_BASELINE SKIP_SAMPLING SKIP_RUNTIME
+    NAME transpose-loops
+    TARGET transpose
+    LABELS "loops"
+    MPI ${TRANSPOSE_USE_MPI}
+    NUM_PROCS ${NUM_PROCS}
+    REWRITE_ARGS
+        -e
+        -v
+        2
+        --label
+        return
+        args
+        -l
+        -i
+        8
+        -E
+        uniform_int_distribution
+    RUN_ARGS 2 100 50
+    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF"
+    REWRITE_FAIL_REGEX "0 instrumented loops in procedure transpose")
 
 omnitrace_add_test(
     NAME parallel-overhead
@@ -454,6 +487,7 @@ omnitrace_add_test(
 omnitrace_add_test(
     NAME user-api
     TARGET user-api
+    LABELS "loops"
     REWRITE_ARGS -e -v 2 -l --min-instructions=8 -E custom_push_region
     RUNTIME_ARGS
         -e
@@ -469,7 +503,8 @@ omnitrace_add_test(
         return
         args
     RUN_ARGS 10 ${NUM_THREADS} 1000
-    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
+    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF"
+    REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
 
 omnitrace_add_test(
     SKIP_RUNTIME
@@ -553,7 +588,7 @@ omnitrace_add_test(
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
     NUM_PROCS 8
-    LABELS "kokkos"
+    LABELS "kokkos;loops"
     REWRITE_ARGS -e -v 2
     RUNTIME_ARGS
         -e
@@ -575,7 +610,7 @@ omnitrace_add_test(
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
     NUM_PROCS 8
-    LABELS "kokkos"
+    LABELS "kokkos;loops"
     REWRITE_ARGS -e -v 2 -l --dynamic-callsites --traps --allow-overlapping
     RUNTIME_ARGS
         -e
@@ -590,7 +625,8 @@ omnitrace_add_test(
         peak_rss
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
-        "${_timemory_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF")
+        "${_timemory_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF"
+    REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
 
 omnitrace_add_test(
     SKIP_SAMPLING
@@ -601,7 +637,8 @@ omnitrace_add_test(
     RUNTIME_ARGS -e -v 1 --label return args
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
-    ENVIRONMENT "${_ompt_environment};OMNITRACE_USE_SAMPLING=OFF")
+    ENVIRONMENT "${_ompt_environment};OMNITRACE_USE_SAMPLING=OFF"
+    REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
 
 omnitrace_add_test(
     SKIP_RUNTIME
@@ -613,7 +650,8 @@ omnitrace_add_test(
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
     ENVIRONMENT
-        "${_ompt_environment};OMNITRACE_USE_SAMPLING=ON;OMNITRACE_SAMPLING_FREQ=100")
+        "${_ompt_environment};OMNITRACE_USE_SAMPLING=ON;OMNITRACE_SAMPLING_FREQ=100"
+    REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
 
 omnitrace_add_test(
     SKIP_BASELINE SKIP_SAMPLING

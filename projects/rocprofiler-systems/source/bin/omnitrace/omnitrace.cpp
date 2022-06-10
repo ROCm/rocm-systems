@@ -23,6 +23,7 @@
 #include "omnitrace.hpp"
 #include "fwd.hpp"
 
+#include <cstring>
 #include <timemory/config.hpp>
 #include <timemory/hash.hpp>
 #include <timemory/manager.hpp>
@@ -947,7 +948,7 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-    verbprintf(0, "instrumentation target: %s\n", mutname.c_str());
+    verbprintf(1, "instrumentation target: %s\n", mutname.c_str());
 
     // did we load a library?  if not, load the default
     auto generate_libnames = [](auto& _targ, const auto& _base,
@@ -1041,7 +1042,11 @@ main(int argc, char** argv)
 
     if(app_modules && !app_modules->empty())
     {
-        modules = *app_modules;
+        modules.reserve(app_modules->size());
+        for(auto* itr : *app_modules)
+        {
+            if(!itr->isSystemLib()) modules.emplace_back(itr);
+        }
         for(auto* itr : modules)
         {
             auto* procedures = itr->getProcedures();
@@ -1065,7 +1070,11 @@ main(int argc, char** argv)
 
     if(app_functions && !app_functions->empty())
     {
-        functions = *app_functions;
+        functions.reserve(app_functions->size());
+        for(auto* itr : *app_functions)
+        {
+            if(!itr->getModule()->isSystemLib()) functions.emplace_back(itr);
+        }
         for(auto* itr : functions)
         {
             module_t* mod = itr->getModule();
@@ -1083,7 +1092,7 @@ main(int argc, char** argv)
         verbprintf(0, "Warning! No functions in application...\n");
     }
 
-    verbprintf(0, "Module size before loading instrumentation library: %lu\n",
+    verbprintf(1, "Module size before loading instrumentation library: %lu\n",
                (long unsigned) modules.size());
 
     if(debug_print || verbose_level > 2)
@@ -1153,7 +1162,7 @@ main(int argc, char** argv)
         {
             _libname = get_absolute_lib_filepath(_libname);
             _tried_libs += string_t("|") + _libname;
-            verbprintf(0, "loading library: '%s'...\n", _libname.c_str());
+            verbprintf(1, "loading library: '%s'...\n", _libname.c_str());
             result = (addr_space->loadLibrary(_libname.c_str()) != nullptr);
             verbprintf(2, "loadLibrary(%s) result = %s\n", _libname.c_str(),
                        (result) ? "success" : "failure");
@@ -1646,7 +1655,7 @@ main(int argc, char** argv)
     //----------------------------------------------------------------------------------//
     if(app_thread)
     {
-        verbprintf(1, "Beginning insertion set...\n");
+        verbprintf(2, "Beginning insertion set...\n");
         addr_space->beginInsertionSet();
     }
 
@@ -1670,7 +1679,7 @@ main(int argc, char** argv)
     if(instr_mode != "coverage")
     {
         std::map<std::string, std::pair<size_t, size_t>> _pass_info{};
-        const int                                        _pass_verbose_lvl = 1;
+        const int                                        _pass_verbose_lvl = 0;
         for(const auto& itr : instrumented_module_functions)
         {
             auto _count = itr(addr_space, entr_trace, exit_trace);
@@ -1679,24 +1688,22 @@ main(int argc, char** argv)
 
             for(const auto& mitr : itr.messages)
                 _report_info(std::get<0>(mitr), std::get<1>(mitr), std::get<2>(mitr),
-                             std::get<3>(mitr),
-                             std::get<2>(mitr) == "module" ? itr.module_name
-                                                           : itr.function_name);
+                             std::get<3>(mitr), std::get<4>(mitr));
         }
 
         // report the trace instrumented functions
         for(auto& itr : _pass_info)
         {
-            auto _valid = (verbose_level > _pass_verbose_lvl ||
+            auto _valid = (verbose_level >= _pass_verbose_lvl ||
                            (itr.second.first + itr.second.second) > 0);
             if(!_valid) continue;
-            verbprintf(_pass_verbose_lvl, "%4zu instrumented procedures in %s\n",
+            verbprintf(_pass_verbose_lvl, "%4zu instrumented funcs in %s\n",
                        itr.second.first, itr.first.c_str());
             _valid = (loop_level_instr &&
-                      (verbose_level > _pass_verbose_lvl || itr.second.second > 0));
+                      (verbose_level >= _pass_verbose_lvl || itr.second.second > 0));
             if(_valid)
             {
-                verbprintf(_pass_verbose_lvl, "%4zu instrumented loops in procedure %s\n",
+                verbprintf(_pass_verbose_lvl, "%4zu instrumented loops in %s\n",
                            itr.second.second, itr.first.c_str());
             }
         }
@@ -1715,9 +1722,7 @@ main(int argc, char** argv)
 
             for(const auto& mitr : itr.messages)
                 _report_info(std::get<0>(mitr), std::get<1>(mitr), std::get<2>(mitr),
-                             std::get<3>(mitr),
-                             std::get<2>(mitr) == "module" ? itr.module_name
-                                                           : itr.function_name);
+                             std::get<3>(mitr), std::get<4>(mitr));
         }
 
         // report the coverage instrumented functions
@@ -1751,7 +1756,7 @@ main(int argc, char** argv)
 
     if(app_thread)
     {
-        verbprintf(1, "Finalizing insertion set...\n");
+        verbprintf(2, "Finalizing insertion set...\n");
         bool modified = true;
         bool success  = addr_space->finalizeInsertionSet(true, &modified);
         if(!success)
@@ -1939,7 +1944,8 @@ main(int argc, char** argv)
         if(main_func)
         {
             verbprintf(0, "Getting linked libraries for %s...\n", cmdv0.c_str());
-            verbprintf(0, "Consider instrumenting the relevant libraries...\n\n");
+            verbprintf(0, "Consider instrumenting the relevant libraries...\n");
+            verbprintf(0, "\n");
 
             using TIMEMORY_PIPE = tim::popen::TIMEMORY_PIPE;
 
@@ -1953,9 +1959,9 @@ main(int argc, char** argv)
             if(perr != 0) perror("Error in omnitrace_fork");
 
             for(const auto& itr : linked_libraries)
-                printf("\t%s\n", itr.c_str());
+                verbprintf(0, "\t%s\n", itr.c_str());
 
-            printf("\n");
+            verbprintf(0, "\n");
         }
     }
     else
@@ -2080,14 +2086,29 @@ query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cf
     module_t* module = funcToInstr->getModule();
     if(!module) return { 0, 0 };
 
+    if(!cfGraph) cfGraph = funcToInstr->getCFG();
+
     bpvector_t<point_t*>* _points = nullptr;
 
-    if(cfGraph && loopToInstrument)
+    if((cfGraph && loopToInstrument) ||
+       (traceLoc == BPatch_locLoopEntry || traceLoc == BPatch_locLoopExit))
     {
-        if(traceLoc == BPatch_entry)
+        if(!cfGraph) throw std::runtime_error("No control flow graph");
+        if(!loopToInstrument) throw std::runtime_error("No loop to instrument");
+
+        if(traceLoc == BPatch_entry || traceLoc == BPatch_locLoopEntry)
+        {
             _points = cfGraph->findLoopInstPoints(BPatch_locLoopEntry, loopToInstrument);
-        else if(traceLoc == BPatch_exit)
+        }
+        else if(traceLoc == BPatch_exit || traceLoc == BPatch_locLoopExit)
+        {
             _points = cfGraph->findLoopInstPoints(BPatch_locLoopExit, loopToInstrument);
+        }
+        else
+        {
+            throw std::runtime_error("unsupported trace location :: " +
+                                     std::to_string(traceLoc));
+        }
     }
     else
     {
@@ -2145,7 +2166,7 @@ get_absolute_exe_filepath(std::string exe_name, const std::string& env_path)
             if(file_exists(TIMEMORY_JOIN('/', pitr, exe_name)))
             {
                 exe_name = get_realpath(TIMEMORY_JOIN('/', pitr, exe_name));
-                verbprintf(0, "Resolved '%s' to '%s'...\n", _exe_orig.c_str(),
+                verbprintf(1, "Resolved '%s' to '%s'...\n", _exe_orig.c_str(),
                            exe_name.c_str());
                 break;
             }
@@ -2181,7 +2202,7 @@ get_absolute_lib_filepath(std::string lib_name, const std::string& env_path)
             if(file_exists(TIMEMORY_JOIN('/', pitr, lib_name)))
             {
                 lib_name = get_realpath(TIMEMORY_JOIN('/', pitr, lib_name));
-                verbprintf(0, "Resolved '%s' to '%s'...\n", _lib_orig.c_str(),
+                verbprintf(1, "Resolved '%s' to '%s'...\n", _lib_orig.c_str(),
                            lib_name.c_str());
                 break;
             }

@@ -24,6 +24,8 @@
 #include "fwd.hpp"
 #include "omnitrace.hpp"
 
+#include <stdexcept>
+
 module_function::width_t&
 module_function::get_width()
 {
@@ -133,7 +135,8 @@ module_function::should_coverage_instrument() const
     {
         messages.emplace_back(
             2, "Skipping", "function",
-            TIMEMORY_JOIN("-", "less-than", absolute_min_instructions, "instructions"));
+            TIMEMORY_JOIN("-", "less-than", absolute_min_instructions, "instructions"),
+            function_name);
         return false;
     }
 
@@ -169,7 +172,8 @@ module_function::should_instrument(bool coverage) const
     {
         messages.emplace_back(
             2, "Skipping", "function",
-            TIMEMORY_JOIN("-", "less-than", absolute_min_instructions, "instructions"));
+            TIMEMORY_JOIN("-", "less-than", absolute_min_instructions, "instructions"),
+            function_name);
         return false;
     }
 
@@ -199,7 +203,7 @@ module_function::is_instrumentable() const
 {
     if(!function->isInstrumentable())
     {
-        messages.emplace_back(2, "Skipping", "module", "not-instrumentable");
+        messages.emplace_back(2, "Skipping", "module", "not-instrumentable", module_name);
         return false;
     }
 
@@ -225,12 +229,14 @@ module_function::is_user_restricted() const
     {
         if(check_regex_restrictions(module_name, file_restrict))
         {
-            messages.emplace_back(2, "Forcing", "module", "module-restrict-regex");
+            messages.emplace_back(2, "Forcing", "module", "module-restrict-regex",
+                                  module_name);
             return false;
         }
         else
         {
-            messages.emplace_back(3, "Skipping", "module", "module-restrict-regex");
+            messages.emplace_back(3, "Skipping", "module", "module-restrict-regex",
+                                  module_name);
             return true;
         }
     }
@@ -239,17 +245,20 @@ module_function::is_user_restricted() const
     {
         if(check_regex_restrictions(function_name, func_restrict))
         {
-            messages.emplace_back(2, "Forcing", "function", "function-restrict-regex");
+            messages.emplace_back(2, "Forcing", "function", "function-restrict-regex",
+                                  function_name);
             return false;
         }
         else if(check_regex_restrictions(signature.get(), func_restrict))
         {
-            messages.emplace_back(2, "Forcing", "function", "function-restrict-regex");
+            messages.emplace_back(2, "Forcing", "function", "function-restrict-regex",
+                                  signature.get());
             return false;
         }
         else
         {
-            messages.emplace_back(3, "Skipping", "function", "function-restrict-regex");
+            messages.emplace_back(3, "Skipping", "function", "function-restrict-regex",
+                                  function_name);
             return true;
         }
     }
@@ -264,7 +273,8 @@ module_function::is_user_included() const
     {
         if(check_regex_restrictions(module_name, file_include))
         {
-            messages.emplace_back(2, "Forcing", "module", "module-include-regex");
+            messages.emplace_back(2, "Forcing", "module", "module-include-regex",
+                                  module_name);
             return true;
         }
     }
@@ -273,12 +283,14 @@ module_function::is_user_included() const
     {
         if(check_regex_restrictions(function_name, func_include))
         {
-            messages.emplace_back(2, "Forcing", "function", "function-include-regex");
+            messages.emplace_back(2, "Forcing", "function", "function-include-regex",
+                                  function_name);
             return true;
         }
         else if(check_regex_restrictions(signature.get(), func_include))
         {
-            messages.emplace_back(2, "Forcing", "function", "function-include-regex");
+            messages.emplace_back(2, "Forcing", "function", "function-include-regex",
+                                  signature.get());
             return true;
         }
     }
@@ -293,7 +305,8 @@ module_function::is_user_excluded() const
     {
         if(check_regex_restrictions(module_name, file_exclude))
         {
-            messages.emplace_back(2, "Skipping", "module", "module-exclude-regex");
+            messages.emplace_back(2, "Skipping", "module", "module-exclude-regex",
+                                  module_name);
             return true;
         }
     }
@@ -302,12 +315,14 @@ module_function::is_user_excluded() const
     {
         if(check_regex_restrictions(function_name, func_exclude))
         {
-            messages.emplace_back(2, "Skipping", "function", "function-exclude-regex");
+            messages.emplace_back(2, "Skipping", "function", "function-exclude-regex",
+                                  function_name);
             return true;
         }
         else if(check_regex_restrictions(signature.get(), func_exclude))
         {
-            messages.emplace_back(2, "Skipping", "function", "function-exclude-regex");
+            messages.emplace_back(2, "Skipping", "function", "function-exclude-regex",
+                                  signature.get());
             return true;
         }
     }
@@ -327,7 +342,7 @@ module_function::is_module_constrained() const
 {
     auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
     auto _report    = [&](const string_t& _action, const string_t& _reason, int _lvl) {
-        messages.emplace_back(_lvl, _action, "module", _reason);
+        messages.emplace_back(_lvl, _action, "module", _reason, module_name);
         return true;
     };
 
@@ -390,7 +405,7 @@ module_function::is_routine_constrained() const
 {
     auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
     auto _report    = [&](const string_t& _action, const string_t& _reason, int _lvl) {
-        messages.emplace_back(_lvl, _action, "function", _reason);
+        messages.emplace_back(_lvl, _action, "function", _reason, function_name);
         return true;
     };
 
@@ -462,7 +477,7 @@ module_function::is_overlapping_constrained() const
 {
     if(!allow_overlapping && is_overlapping())
     {
-        messages.emplace_back(2, "Skipping", "function", "overlapping");
+        messages.emplace_back(2, "Skipping", "function", "overlapping", function_name);
         return true;
     }
 
@@ -482,7 +497,8 @@ module_function::is_dynamic_callsite_forced() const
 {
     if(instr_dynamic_callsites && contains_dynamic_callsites())
     {
-        messages.emplace_back(2, "Forcing", "function", "dynamic-callsites");
+        messages.emplace_back(2, "Forcing", "function", "dynamic-callsites",
+                              function_name);
         return true;
     }
 
@@ -496,7 +512,8 @@ module_function::is_address_range_constrained() const
 
     if(address_range < min_address_range)
     {
-        messages.emplace_back(2, "Skipping", "function", "min-address-range");
+        messages.emplace_back(2, "Skipping", "function", "min-address-range",
+                              function_name);
         return true;
     }
     return false;
@@ -509,7 +526,8 @@ module_function::is_loop_address_range_constrained() const
 
     if(address_range < min_loop_address_range)
     {
-        messages.emplace_back(2, "Skipping", "function", "min-address-range-loop");
+        messages.emplace_back(2, "Skipping", "function", "min-address-range-loop",
+                              function_name);
         return true;
     }
 
@@ -523,7 +541,8 @@ module_function::is_num_instructions_constrained() const
 
     if(num_instructions < min_instructions)
     {
-        messages.emplace_back(2, "Skipping", "function", "min-instructions");
+        messages.emplace_back(2, "Skipping", "function", "min-instructions",
+                              function_name);
         return true;
     }
 
@@ -537,7 +556,8 @@ module_function::is_loop_num_instructions_constrained() const
 
     if(num_instructions < min_loop_instructions)
     {
-        messages.emplace_back(2, "Skipping", "function", "min-instructions-loop");
+        messages.emplace_back(2, "Skipping", "function", "min-instructions-loop",
+                              function_name);
         return true;
     }
 
@@ -554,7 +574,8 @@ module_function::can_instrument_entry() const
 
     if(_num_points == 0)
     {
-        messages.emplace_back(3, "Skipping", "function", "no-instrumentable-entry-point");
+        messages.emplace_back(3, "Skipping", "function", "no-instrumentable-entry-point",
+                              function_name);
         return false;
     }
 
@@ -571,7 +592,8 @@ module_function::can_instrument_exit() const
 
     if(_num_points == 0)
     {
-        messages.emplace_back(3, "Skipping", "function", "no-instrumentable-exit-point");
+        messages.emplace_back(3, "Skipping", "function", "no-instrumentable-exit-point",
+                              function_name);
         return false;
     }
 
@@ -591,7 +613,7 @@ module_function::is_entry_trap_constrained() const
     if(!instr_traps && (_num_points - _num_traps) == 0)
     {
         messages.emplace_back(3, "Skipping", "function",
-                              "entry-point-trap-instrumentation");
+                              "entry-point-trap-instrumentation", function_name);
         return true;
     }
 
@@ -611,7 +633,7 @@ module_function::is_exit_trap_constrained() const
     if((_num_points - _num_traps) == 0)
     {
         messages.emplace_back(3, "Skipping", "function",
-                              "exit-point-trap-instrumentation");
+                              "exit-point-trap-instrumentation", function_name);
         return true;
     }
 
@@ -633,54 +655,62 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
     if(insert_instr(_addr_space, function, _entr, BPatch_entry) &&
        insert_instr(_addr_space, function, _exit, BPatch_exit))
     {
-        messages.emplace_back(1, "Instrumenting", "function", "no-constraint");
+        messages.emplace_back(1, "Instrumenting", "function", "no-constraint",
+                              function_name);
         ++_count.first;
     }
 
-    for(auto* itr : loop_blocks)
+    for(size_t i = 0; i < loop_blocks.size(); ++i)
     {
         if(!loop_level_instr) continue;
 
-        auto _is_constrained = [this](bool _v, const std::string& _label) {
-            if(!_v)
+        auto* itr             = loop_blocks.at(i);
+        auto  _is_constrained = [this](bool _v, const std::string& _label,
+                                      const std::string& _name) {
+            if(_v)
             {
-                messages.emplace_back(3, "Skipping", "function", _label);
+                messages.emplace_back(3, "Skipping", "function-loop", _label, _name);
                 return true;
             }
             return false;
         };
 
+        auto lname =
+            get_loop_file_line_info(module, function, flow_graph, itr).set_loop_number(i);
+        auto _lname = lname.get();
+
         size_t _points             = 0;
         size_t _ntraps             = 0;
         std::tie(_points, _ntraps) = query_instr(function, BPatch_entry, flow_graph, itr);
 
-        if(_is_constrained(_points == 0, "no-instrumentable-loop-entry-point")) continue;
-        if(_is_constrained(!instr_traps && (_points - _ntraps) == 0,
-                           "loop-entry-point-trap-instrumentation"))
+        if(_is_constrained(_points == 0, "no-instrumentable-loop-entry-point", _lname))
+            continue;
+        if(_is_constrained(!instr_loop_traps && _points == _ntraps,
+                           "loop-entry-point-trap-instrumentation", _lname))
             continue;
 
         std::tie(_points, _ntraps) = query_instr(function, BPatch_exit, flow_graph, itr);
 
-        if(_is_constrained(_points == 0, "no-instrumentable-loop-exit-point")) continue;
-        if(_is_constrained(!instr_traps && (_points - _ntraps) == 0,
-                           "loop-exit-point-trap-instrumentation"))
+        if(_is_constrained(_points == 0, "no-instrumentable-loop-exit-point", _lname))
             continue;
-
-        auto lname  = get_loop_file_line_info(module, function, flow_graph, itr);
-        auto _lname = lname.get();
-
-        messages.emplace_back(1, "Loop Instrumenting", "function", "no-constraint");
-        ++_count.second;
+        if(_is_constrained(!instr_loop_traps && _points == _ntraps,
+                           "loop-exit-point-trap-instrumentation", _lname))
+            continue;
 
         auto _ltrace_entr = omnitrace_call_expr(_lname.c_str());
         auto _ltrace_exit = omnitrace_call_expr(_lname.c_str());
         auto _lentr       = _ltrace_entr.get(_entr_trace);
         auto _lexit       = _ltrace_exit.get(_exit_trace);
 
-        insert_instr(_addr_space, function, _lentr, BPatch_entry, flow_graph, itr,
-                     instr_loop_traps);
-        insert_instr(_addr_space, function, _lexit, BPatch_exit, flow_graph, itr,
-                     instr_loop_traps);
+        if(insert_instr(_addr_space, function, _lentr, BPatch_entry, flow_graph, itr,
+                        instr_loop_traps) &&
+           insert_instr(_addr_space, function, _lexit, BPatch_exit, flow_graph, itr,
+                        instr_loop_traps))
+        {
+            messages.emplace_back(1, "Loop Instrumenting", "function", "no-constraint",
+                                  _lname);
+            ++_count.second;
+        }
     }
 
     return _count;
@@ -702,7 +732,8 @@ module_function::register_source(address_space_t* _addr_space, procedure_t* _ent
 
             if(insert_instr(_addr_space, _entr_points, _entr, BPatch_entry))
             {
-                messages.emplace_back(1, "Code Coverage", "function", "no-constraint");
+                messages.emplace_back(1, "Code Coverage", "function", "no-constraint",
+                                      _name);
             }
             break;
         }
@@ -721,7 +752,7 @@ module_function::register_source(address_space_t* _addr_space, procedure_t* _ent
                 if(insert_instr(_addr_space, _entr_points, _entr, BPatch_entry))
                 {
                     messages.emplace_back(1, "Code Coverage", "basic_block",
-                                          "no-constraint");
+                                          "no-constraint", _name);
                 }
             }
             break;
@@ -745,7 +776,8 @@ module_function::register_coverage(address_space_t* _addr_space,
 
             if(insert_instr(_addr_space, function, _entr, BPatch_entry))
             {
-                messages.emplace_back(1, "Code Coverage", "function", "no-constraint");
+                messages.emplace_back(1, "Code Coverage", "function", "no-constraint",
+                                      signature.get_coverage(false));
                 ++_count.first;
             }
             break;
@@ -764,7 +796,7 @@ module_function::register_coverage(address_space_t* _addr_space,
                 {
                     ++_count.second;
                     messages.emplace_back(1, "Code Coverage", "basic_block",
-                                          "no-constraint");
+                                          "no-constraint", _signature.get_coverage(true));
                 }
             }
             break;

@@ -98,7 +98,7 @@ struct module_function
     basic_loop_vec_t                        loop_blocks      = {};
     std::vector<std::vector<instruction_t>> instructions     = {};
 
-    using str_msg_t     = std::tuple<int, string_t, string_t, string_t>;
+    using str_msg_t     = std::tuple<int, string_t, string_t, string_t, string_t>;
     using str_msg_vec_t = std::vector<str_msg_t>;
 
     mutable str_msg_vec_t messages = {};
@@ -183,6 +183,8 @@ module_function::serialize(ArchiveT& ar, const unsigned)
 
     if constexpr(tim::concepts::is_output_archive<ArchiveT>::value)
     {
+        ar(cereal::make_nvp("num_basic_blocks", basic_blocks.size()),
+           cereal::make_nvp("num_outer_loops", loop_blocks.size()));
         ar.setNextName("heuristics");
         ar.startNode();
         ar(cereal::make_nvp("should_instrument", should_instrument()),
@@ -202,10 +204,12 @@ module_function::serialize(ArchiveT& ar, const unsigned)
            cereal::make_nvp("is_dynamic_callsite_forced", is_dynamic_callsite_forced()),
            cereal::make_nvp("is_address_range_constrained",
                             is_address_range_constrained()),
+           cereal::make_nvp("is_num_instructions_constrained",
+                            is_num_instructions_constrained()),
            cereal::make_nvp("is_loop_address_range_constrained",
                             is_loop_address_range_constrained()),
-           cereal::make_nvp("is_num_instructions_constrained",
-                            is_num_instructions_constrained()));
+           cereal::make_nvp("is_loop_num_instructions_constrained",
+                            is_loop_num_instructions_constrained()));
         ar.finishNode();
         // instructions can inflate JSON size so only output when verbosity is increased
         // above default

@@ -331,6 +331,7 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     bpvector_t<point_t*>* _points = nullptr;
     auto                  _trace  = traceFunc.get();
 
+    if(!cfGraph) funcToInstr->getCFG();
     if(cfGraph && loopToInstrument)
     {
         if(traceLoc == BPatch_entry)
