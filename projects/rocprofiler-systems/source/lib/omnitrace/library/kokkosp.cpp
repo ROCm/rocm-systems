@@ -28,9 +28,11 @@
 #include "library/components/user_region.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
+#include "library/perfetto.hpp"
 #include "library/runtime.hpp"
 
 #include <timemory/api/kokkosp.hpp>
+#include <timemory/hash/types.hpp>
 
 namespace kokkosp = tim::kokkosp;
 
@@ -80,6 +82,19 @@ std::vector<std::string> _initialize_arguments   = {};
 
 extern "C"
 {
+    struct Kokkos_Tools_ToolSettings
+    {
+        bool requires_global_fencing;
+        bool padding[255];
+    };
+
+    void kokkosp_request_tool_settings(const uint32_t,
+                                       Kokkos_Tools_ToolSettings*) OMNITRACE_PUBLIC_API;
+    void kokkosp_dual_view_sync(const char*, const void* const,
+                                bool) OMNITRACE_PUBLIC_API;
+    void kokkosp_dual_view_modify(const char*, const void* const,
+                                  bool) OMNITRACE_PUBLIC_API;
+
     void kokkosp_print_help(char*) {}
 
     void kokkosp_parse_args(int argc, char** argv)
@@ -108,6 +123,12 @@ extern "C"
         tim::manager::add_metadata(key, value);
     }
 
+    void kokkosp_request_tool_settings(const uint32_t             _version,
+                                       Kokkos_Tools_ToolSettings* _settings)
+    {
+        if(_version > 0) _settings->requires_global_fencing = false;
+    }
+
     void kokkosp_init_library(const int loadSeq, const uint64_t interfaceVer,
                               const uint32_t devInfoCount, void* deviceInfo)
     {
@@ -117,7 +138,11 @@ extern "C"
         if(_standalone_initialized || (!omnitrace::config::settings_are_configured() &&
                                        omnitrace::get_state() < omnitrace::State::Active))
         {
-            OMNITRACE_BASIC_VERBOSE_F(0, "Initializing omnitrace...\n");
+            OMNITRACE_BASIC_VERBOSE_F(0,
+                                      "Initializing kokkos omnitrace connector "
+                                      "(standalone, sequence %d, version: %llu)...\n",
+                                      loadSeq, (unsigned long long) interfaceVer);
+            OMNITRACE_BASIC_VERBOSE_F(0, "Initializing omnitrace (standalone)... ");
             auto _mode = tim::get_env<std::string>("OMNITRACE_MODE", "trace");
             auto _arg0 = (_initialize_arguments.empty()) ? std::string{ "unknown" }
                                                          : _initialize_arguments.at(0);
@@ -125,19 +150,23 @@ extern "C"
             _standalone_initialized = true;
             omnitrace_set_mpi_hidden(false, false);
             omnitrace_init_hidden(_mode.c_str(), false, _arg0.c_str());
-            omnitrace_push_trace("kokkos_main");
+            omnitrace_push_trace_hidden("kokkos_main");
         }
-
-        OMNITRACE_VERBOSE_F(0,
-                            "Initializing connector (sequence is %d, version: %llu)...",
-                            loadSeq, (unsigned long long) interfaceVer);
+        else
+        {
+            OMNITRACE_VERBOSE_F(0,
+                                "Initializing kokkos omnitrace connector "
+                                "(sequence %d, version: %llu)... ",
+                                loadSeq, (unsigned long long) interfaceVer);
+        }
 
         setup_kernel_logger();
 
         tim::trait::runtime_enabled<kokkosp::memory_tracker>::set(
             omnitrace::config::get_use_timemory());
 
-        if(omnitrace::get_verbose() >= 0) fprintf(stderr, "Done\n");
+        if(_standalone_initialized && omnitrace::get_verbose() >= 0)
+            fprintf(stderr, "Done\n");
     }
 
     void kokkosp_finalize_library()
@@ -145,13 +174,14 @@ extern "C"
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         if(_standalone_initialized)
         {
-            omnitrace_pop_trace("kokkos_main");
-            OMNITRACE_VERBOSE_F(0, "Finalizing connector (standalone)...\n");
+            omnitrace_pop_trace_hidden("kokkos_main");
+            OMNITRACE_VERBOSE_F(
+                0, "Finalizing kokkos omnitrace connector (standalone)...\n");
             omnitrace_finalize_hidden();
         }
         else
         {
-            OMNITRACE_VERBOSE_F(0, "Finalizing connector... ");
+            OMNITRACE_VERBOSE_F(0, "Finalizing kokkos omnitrace connector... ");
             kokkosp::cleanup();
             if(omnitrace::get_verbose() >= 0) fprintf(stderr, "Done\n");
         }
@@ -253,6 +283,7 @@ extern "C"
 
     void kokkosp_push_profile_region(const char* name)
     {
+        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name);
         kokkosp::get_profiler_stack<omnitrace::component::user_region>().push_back(
@@ -262,6 +293,7 @@ extern "C"
 
     void kokkosp_pop_profile_region()
     {
+        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__);
         if(kokkosp::get_profiler_stack<omnitrace::component::user_region>().empty())
@@ -274,6 +306,7 @@ extern "C"
 
     void kokkosp_create_profile_section(const char* name, uint32_t* secid)
     {
+        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         *secid     = kokkosp::get_unique_id();
         auto pname = TIMEMORY_JOIN(" ", "[kokkos]", name);
@@ -282,6 +315,7 @@ extern "C"
 
     void kokkosp_destroy_profile_section(uint32_t secid)
     {
+        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::destroy_profiler<omnitrace::component::user_region>(secid);
     }
@@ -290,6 +324,7 @@ extern "C"
 
     void kokkosp_start_profile_section(uint32_t secid)
     {
+        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, secid);
         kokkosp::start_profiler<omnitrace::component::user_region>(secid);
@@ -297,6 +332,7 @@ extern "C"
 
     void kokkosp_stop_profile_section(uint32_t secid)
     {
+        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, secid);
         kokkosp::start_profiler<omnitrace::component::user_region>(secid);
@@ -366,6 +402,32 @@ extern "C"
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::profiler_t<omnitrace::component::user_region>{}.mark(name);
+    }
+
+    //----------------------------------------------------------------------------------//
+
+    void kokkosp_dual_view_sync(const char* label, const void* const, bool is_device)
+    {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+        if(omnitrace::config::get_use_perfetto())
+        {
+            auto _name = tim::get_hash_identifier_fast(
+                tim::add_hash_id(TIMEMORY_JOIN(" ", "[kokkos][dual_view_sync]", label)));
+            TRACE_EVENT_INSTANT("user", ::perfetto::StaticString{ _name.data() },
+                                "target", (is_device) ? "device" : "host");
+        }
+    }
+
+    void kokkosp_dual_view_modify(const char* label, const void* const, bool is_device)
+    {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+        if(omnitrace::config::get_use_perfetto())
+        {
+            auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(
+                TIMEMORY_JOIN(" ", "[kokkos][dual_view_modify]", label)));
+            TRACE_EVENT_INSTANT("user", ::perfetto::StaticString{ _name.data() },
+                                "target", (is_device) ? "device" : "host");
+        }
     }
 
     //----------------------------------------------------------------------------------//

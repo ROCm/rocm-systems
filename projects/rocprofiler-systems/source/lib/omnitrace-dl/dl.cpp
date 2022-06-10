@@ -55,6 +55,13 @@
 
 //--------------------------------------------------------------------------------------//
 
+std::ostream&
+operator<<(std::ostream& _os, const SpaceHandle& _handle)
+{
+    _os << _handle.name;
+    return _os;
+}
+
 namespace omnitrace
 {
 inline namespace dl
@@ -206,6 +213,57 @@ struct OMNITRACE_HIDDEN_API indirect
         OMNITRACE_DLSYM(omnitrace_register_coverage_f, m_omnihandle,
                         "omnitrace_register_coverage");
 
+        OMNITRACE_DLSYM(kokkosp_print_help_f, m_omnihandle, "kokkosp_print_help");
+        OMNITRACE_DLSYM(kokkosp_parse_args_f, m_omnihandle, "kokkosp_parse_args");
+        OMNITRACE_DLSYM(kokkosp_declare_metadata_f, m_omnihandle,
+                        "kokkosp_declare_metadata");
+        OMNITRACE_DLSYM(kokkosp_request_tool_settings_f, m_omnihandle,
+                        "kokkosp_request_tool_settings");
+        OMNITRACE_DLSYM(kokkosp_init_library_f, m_omnihandle, "kokkosp_init_library");
+        OMNITRACE_DLSYM(kokkosp_finalize_library_f, m_omnihandle,
+                        "kokkosp_finalize_library");
+        OMNITRACE_DLSYM(kokkosp_begin_parallel_for_f, m_omnihandle,
+                        "kokkosp_begin_parallel_for");
+        OMNITRACE_DLSYM(kokkosp_end_parallel_for_f, m_omnihandle,
+                        "kokkosp_end_parallel_for");
+        OMNITRACE_DLSYM(kokkosp_begin_parallel_reduce_f, m_omnihandle,
+                        "kokkosp_begin_parallel_reduce");
+        OMNITRACE_DLSYM(kokkosp_end_parallel_reduce_f, m_omnihandle,
+                        "kokkosp_end_parallel_reduce");
+        OMNITRACE_DLSYM(kokkosp_begin_parallel_scan_f, m_omnihandle,
+                        "kokkosp_begin_parallel_scan");
+        OMNITRACE_DLSYM(kokkosp_end_parallel_scan_f, m_omnihandle,
+                        "kokkosp_end_parallel_scan");
+        OMNITRACE_DLSYM(kokkosp_begin_fence_f, m_omnihandle, "kokkosp_begin_fence");
+        OMNITRACE_DLSYM(kokkosp_end_fence_f, m_omnihandle, "kokkosp_end_fence");
+        OMNITRACE_DLSYM(kokkosp_push_profile_region_f, m_omnihandle,
+                        "kokkosp_push_profile_region");
+        OMNITRACE_DLSYM(kokkosp_pop_profile_region_f, m_omnihandle,
+                        "kokkosp_pop_profile_region");
+        OMNITRACE_DLSYM(kokkosp_create_profile_section_f, m_omnihandle,
+                        "kokkosp_create_profile_section");
+        OMNITRACE_DLSYM(kokkosp_destroy_profile_section_f, m_omnihandle,
+                        "kokkosp_destroy_profile_section");
+        OMNITRACE_DLSYM(kokkosp_start_profile_section_f, m_omnihandle,
+                        "kokkosp_start_profile_section");
+        OMNITRACE_DLSYM(kokkosp_stop_profile_section_f, m_omnihandle,
+                        "kokkosp_stop_profile_section");
+        OMNITRACE_DLSYM(kokkosp_allocate_data_f, m_omnihandle, "kokkosp_allocate_data");
+        OMNITRACE_DLSYM(kokkosp_deallocate_data_f, m_omnihandle,
+                        "kokkosp_deallocate_data");
+        OMNITRACE_DLSYM(kokkosp_begin_deep_copy_f, m_omnihandle,
+                        "kokkosp_begin_deep_copy");
+        OMNITRACE_DLSYM(kokkosp_end_deep_copy_f, m_omnihandle, "kokkosp_end_deep_copy");
+        OMNITRACE_DLSYM(kokkosp_profile_event_f, m_omnihandle, "kokkosp_profile_event");
+        OMNITRACE_DLSYM(kokkosp_dual_view_sync_f, m_omnihandle, "kokkosp_dual_view_sync");
+        OMNITRACE_DLSYM(kokkosp_dual_view_modify_f, m_omnihandle,
+                        "kokkosp_dual_view_modify");
+
+#if OMNITRACE_USE_ROCTRACER > 0
+        OMNITRACE_DLSYM(hsa_on_load_f, m_omnihandle, "OnLoad");
+        OMNITRACE_DLSYM(hsa_on_unload_f, m_omnihandle, "OnUnload");
+#endif
+
 #if OMNITRACE_USE_OMPT == 0
         _warn_verbose = 5;
 #else
@@ -256,6 +314,7 @@ struct OMNITRACE_HIDDEN_API indirect
     }
 
 public:
+    // omnitrace functions
     void (*omnitrace_init_library_f)(void)                                  = nullptr;
     void (*omnitrace_init_f)(const char*, bool, const char*)                = nullptr;
     void (*omnitrace_finalize_f)(void)                                      = nullptr;
@@ -269,6 +328,48 @@ public:
     int (*omnitrace_push_region_f)(const char*)                             = nullptr;
     int (*omnitrace_pop_region_f)(const char*)                              = nullptr;
     int (*omnitrace_user_configure_f)(int, void*, void*)                    = nullptr;
+
+    // KokkosP functions
+    void (*kokkosp_print_help_f)(char*)                                       = nullptr;
+    void (*kokkosp_parse_args_f)(int, char**)                                 = nullptr;
+    void (*kokkosp_declare_metadata_f)(const char*, const char*)              = nullptr;
+    void (*kokkosp_request_tool_settings_f)(const uint32_t,
+                                            Kokkos_Tools_ToolSettings*)       = nullptr;
+    void (*kokkosp_init_library_f)(const int, const uint64_t, const uint32_t,
+                                   void*)                                     = nullptr;
+    void (*kokkosp_finalize_library_f)()                                      = nullptr;
+    void (*kokkosp_begin_parallel_for_f)(const char*, uint32_t, uint64_t*)    = nullptr;
+    void (*kokkosp_end_parallel_for_f)(uint64_t)                              = nullptr;
+    void (*kokkosp_begin_parallel_reduce_f)(const char*, uint32_t, uint64_t*) = nullptr;
+    void (*kokkosp_end_parallel_reduce_f)(uint64_t)                           = nullptr;
+    void (*kokkosp_begin_parallel_scan_f)(const char*, uint32_t, uint64_t*)   = nullptr;
+    void (*kokkosp_end_parallel_scan_f)(uint64_t)                             = nullptr;
+    void (*kokkosp_begin_fence_f)(const char*, uint32_t, uint64_t*)           = nullptr;
+    void (*kokkosp_end_fence_f)(uint64_t)                                     = nullptr;
+    void (*kokkosp_push_profile_region_f)(const char*)                        = nullptr;
+    void (*kokkosp_pop_profile_region_f)()                                    = nullptr;
+    void (*kokkosp_create_profile_section_f)(const char*, uint32_t*)          = nullptr;
+    void (*kokkosp_destroy_profile_section_f)(uint32_t)                       = nullptr;
+    void (*kokkosp_start_profile_section_f)(uint32_t)                         = nullptr;
+    void (*kokkosp_stop_profile_section_f)(uint32_t)                          = nullptr;
+    void (*kokkosp_allocate_data_f)(const SpaceHandle, const char*, const void* const,
+                                    const uint64_t)                           = nullptr;
+    void (*kokkosp_deallocate_data_f)(const SpaceHandle, const char*, const void* const,
+                                      const uint64_t)                         = nullptr;
+    void (*kokkosp_begin_deep_copy_f)(SpaceHandle, const char*, const void*, SpaceHandle,
+                                      const char*, const void*, uint64_t)     = nullptr;
+    void (*kokkosp_end_deep_copy_f)()                                         = nullptr;
+    void (*kokkosp_profile_event_f)(const char*)                              = nullptr;
+    void (*kokkosp_dual_view_sync_f)(const char*, const void* const, bool)    = nullptr;
+    void (*kokkosp_dual_view_modify_f)(const char*, const void* const, bool)  = nullptr;
+
+    // HSA functions
+#if OMNITRACE_USE_ROCTRACER > 0
+    bool (*hsa_on_load_f)(HsaApiTable*, uint64_t, uint64_t, const char* const*) = nullptr;
+    void (*hsa_on_unload_f)()                                                   = nullptr;
+#endif
+
+    // OpenMP functions
 #if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0
     ompt_start_tool_result_t* (*ompt_start_tool_f)(unsigned int, const char*);
 #endif
@@ -556,6 +657,190 @@ extern "C"
         return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_region_f, name);
     }
 
+    //----------------------------------------------------------------------------------//
+    //
+    //      KokkosP
+    //
+    //----------------------------------------------------------------------------------//
+
+    void kokkosp_print_help(char* argv0)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_print_help_f, argv0);
+    }
+
+    void kokkosp_parse_args(int argc, char** argv)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_parse_args_f, argc, argv);
+    }
+
+    void kokkosp_declare_metadata(const char* key, const char* value)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_declare_metadata_f, key, value);
+    }
+
+    void kokkosp_request_tool_settings(const uint32_t             version,
+                                       Kokkos_Tools_ToolSettings* settings)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_request_tool_settings_f,
+                                   version, settings);
+    }
+
+    void kokkosp_init_library(const int loadSeq, const uint64_t interfaceVer,
+                              const uint32_t devInfoCount, void* deviceInfo)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_init_library_f, loadSeq,
+                                   interfaceVer, devInfoCount, deviceInfo);
+    }
+
+    void kokkosp_finalize_library()
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_finalize_library_f);
+    }
+
+    void kokkosp_begin_parallel_for(const char* name, uint32_t devid, uint64_t* kernid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_begin_parallel_for_f, name,
+                                   devid, kernid);
+    }
+
+    void kokkosp_end_parallel_for(uint64_t kernid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_end_parallel_for_f, kernid);
+    }
+
+    void kokkosp_begin_parallel_reduce(const char* name, uint32_t devid, uint64_t* kernid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_begin_parallel_reduce_f, name,
+                                   devid, kernid);
+    }
+
+    void kokkosp_end_parallel_reduce(uint64_t kernid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_end_parallel_reduce_f, kernid);
+    }
+
+    void kokkosp_begin_parallel_scan(const char* name, uint32_t devid, uint64_t* kernid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_begin_parallel_scan_f, name,
+                                   devid, kernid);
+    }
+
+    void kokkosp_end_parallel_scan(uint64_t kernid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_end_parallel_scan_f, kernid);
+    }
+
+    void kokkosp_begin_fence(const char* name, uint32_t devid, uint64_t* kernid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_begin_fence_f, name, devid,
+                                   kernid);
+    }
+
+    void kokkosp_end_fence(uint64_t kernid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_end_fence_f, kernid);
+    }
+
+    void kokkosp_push_profile_region(const char* name)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_push_profile_region_f, name);
+    }
+
+    void kokkosp_pop_profile_region()
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_pop_profile_region_f);
+    }
+
+    void kokkosp_create_profile_section(const char* name, uint32_t* secid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_create_profile_section_f, name,
+                                   secid);
+    }
+
+    void kokkosp_destroy_profile_section(uint32_t secid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_destroy_profile_section_f,
+                                   secid);
+    }
+
+    void kokkosp_start_profile_section(uint32_t secid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_start_profile_section_f, secid);
+    }
+
+    void kokkosp_stop_profile_section(uint32_t secid)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_stop_profile_section_f, secid);
+    }
+
+    void kokkosp_allocate_data(const SpaceHandle space, const char* label,
+                               const void* const ptr, const uint64_t size)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_allocate_data_f, space, label,
+                                   ptr, size);
+    }
+
+    void kokkosp_deallocate_data(const SpaceHandle space, const char* label,
+                                 const void* const ptr, const uint64_t size)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_deallocate_data_f, space, label,
+                                   ptr, size);
+    }
+
+    void kokkosp_begin_deep_copy(SpaceHandle dst_handle, const char* dst_name,
+                                 const void* dst_ptr, SpaceHandle src_handle,
+                                 const char* src_name, const void* src_ptr, uint64_t size)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_begin_deep_copy_f, dst_handle,
+                                   dst_name, dst_ptr, src_handle, src_name, src_ptr,
+                                   size);
+    }
+
+    void kokkosp_end_deep_copy()
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_end_deep_copy_f);
+    }
+
+    void kokkosp_profile_event(const char* name)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_profile_event_f, name);
+    }
+
+    void kokkosp_dual_view_sync(const char* label, const void* const data, bool is_device)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_dual_view_sync_f, label, data,
+                                   is_device);
+    }
+
+    void kokkosp_dual_view_modify(const char* label, const void* const data,
+                                  bool is_device)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().kokkosp_dual_view_modify_f, label, data,
+                                   is_device);
+    }
+
+    //----------------------------------------------------------------------------------//
+    //
+    //      HSA
+    //
+    //----------------------------------------------------------------------------------//
+
+#if OMNITRACE_USE_ROCTRACER > 0
+    bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
+                const char* const* failed_tool_names)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().hsa_on_load_f, table, runtime_version,
+                                   failed_tool_count, failed_tool_names);
+    }
+
+    void OnUnload() { return OMNITRACE_DL_INVOKE(get_indirect().hsa_on_unload_f); }
+#endif
+
+    //----------------------------------------------------------------------------------//
+    //
+    //      OMPT
+    //
+    //----------------------------------------------------------------------------------//
 #if OMNITRACE_USE_OMPT > 0
     ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,
                                               const char*  runtime_version)
