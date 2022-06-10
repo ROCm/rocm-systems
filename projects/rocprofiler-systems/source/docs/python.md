@@ -49,24 +49,21 @@ python3.8 -m omnitrace --help
 Use `omnitrace-python --help` to view the available options:
 
 ```console
-usage: omnitrace [-h] [-b] [-c FILE] [-s FILE] [--trace-c [BOOL]] [-a [BOOL]] [-l [BOOL]] [-f [BOOL]] [-F [BOOL]] [-I FUNC [FUNC ...]] [-E FUNC [FUNC ...]] [-R FUNC [FUNC ...]] [-MI FILE [FILE ...]] [-ME FILE [FILE ...]] [-MR FILE [FILE ...]] [-v VERBOSITY]
+usage: omnitrace [-h] [-v VERBOSITY] [-b] [-c FILE] [-s FILE] [-F [BOOL]] [--label [{args,file,line} [{args,file,line} ...]]] [-I FUNC [FUNC ...]] [-E FUNC [FUNC ...]] [-R FUNC [FUNC ...]] [-MI FILE [FILE ...]] [-ME FILE [FILE ...]] [-MR FILE [FILE ...]] [--trace-c [BOOL]]
 
 optional arguments:
   -h, --help            show this help message and exit
+  -v VERBOSITY, --verbosity VERBOSITY
+                        Logging verbosity
   -b, --builtin         Put 'profile' in the builtins. Use '@profile' to decorate a single function, or 'with profile:' to profile a single section of code.
   -c FILE, --config FILE
                         Omnitrace configuration file
   -s FILE, --setup FILE
                         Code to execute before the code to profile
-  --trace-c [BOOL]      Enable profiling C functions
-  -a [BOOL], --include-args [BOOL]
-                        Encode the argument values
-  -l [BOOL], --include-line [BOOL]
-                        Encode the function line number
-  -f [BOOL], --include-file [BOOL]
-                        Encode the function filename
   -F [BOOL], --full-filepath [BOOL]
                         Encode the full function filename (instead of basename)
+  --label [{args,file,line} [{args,file,line} ...]]
+                        Encode the function arguments, filename, and/or line number into the profiling function label
   -I FUNC [FUNC ...], --function-include FUNC [FUNC ...]
                         Include any entries with these function names
   -E FUNC [FUNC ...], --function-exclude FUNC [FUNC ...]
@@ -79,8 +76,7 @@ optional arguments:
                         Filter out any entries from these files
   -MR FILE [FILE ...], --module-restrict FILE [FILE ...]
                         Select only entries from these files
-  -v VERBOSITY, --verbosity VERBOSITY
-                        Logging verbosity
+  --trace-c [BOOL]      Enable profiling C functions
 
 usage: python3 -m omnitrace <OMNITRACE_ARGS> -- <SCRIPT> <SCRIPT_ARGS>
 ```

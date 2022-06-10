@@ -808,7 +808,7 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
         FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
-        PROFILE_ARGS -f
+        PROFILE_ARGS "--label" "file"
         RUN_ARGS -v 10 -n 5
         ENVIRONMENT "${_python_environment}")
 
@@ -826,7 +826,7 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
         FILE ${CMAKE_SOURCE_DIR}/examples/python/builtin.py
-        PROFILE_ARGS -b -l -f
+        PROFILE_ARGS "-b" "--label" "file" "line"
         RUN_ARGS -v 10 -n 5
         ENVIRONMENT "${_python_environment}")
 

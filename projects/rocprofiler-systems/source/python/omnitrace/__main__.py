@@ -93,12 +93,27 @@ def parse_args(args=None):
         else:
             raise argparse.ArgumentTypeError("Boolean value expected.")
 
+    _default_label = []
+    if _profiler_config.include_args:
+        _default_label.append("args")
+    if _profiler_config.include_filename:
+        _default_label.append("file")
+    if _profiler_config.include_line:
+        _default_label.append("line")
+
     parser = argparse.ArgumentParser(
         "omnitrace",
         add_help=True,
         epilog="usage: {} -m omnitrace <OMNITRACE_ARGS> -- <SCRIPT> <SCRIPT_ARGS>".format(
             os.path.basename(sys.executable)
         ),
+    )
+    parser.add_argument(
+        "-v",
+        "--verbosity",
+        type=int,
+        default=_profiler_config.verbosity,
+        help="Logging verbosity",
     )
     parser.add_argument(
         "-b",
@@ -125,45 +140,6 @@ def parse_args(args=None):
         help="Code to execute before the code to profile",
     )
     parser.add_argument(
-        "--trace-c",
-        type=str2bool,
-        nargs="?",
-        metavar="BOOL",
-        const=True,
-        default=_profiler_config.trace_c,
-        help="Enable profiling C functions",
-    )
-    parser.add_argument(
-        "-a",
-        "--include-args",
-        type=str2bool,
-        nargs="?",
-        metavar="BOOL",
-        const=True,
-        default=_profiler_config.include_args,
-        help="Encode the argument values",
-    )
-    parser.add_argument(
-        "-l",
-        "--include-line",
-        type=str2bool,
-        nargs="?",
-        metavar="BOOL",
-        const=True,
-        default=_profiler_config.include_line,
-        help="Encode the function line number",
-    )
-    parser.add_argument(
-        "-f",
-        "--include-file",
-        type=str2bool,
-        nargs="?",
-        metavar="BOOL",
-        const=True,
-        default=_profiler_config.include_filename,
-        help="Encode the function filename",
-    )
-    parser.add_argument(
         "-F",
         "--full-filepath",
         type=str2bool,
@@ -172,6 +148,14 @@ def parse_args(args=None):
         const=True,
         default=_profiler_config.full_filepath,
         help="Encode the full function filename (instead of basename)",
+    )
+    parser.add_argument(
+        "--label",
+        type=str,
+        choices=("args", "file", "line"),
+        nargs="*",
+        default=_default_label,
+        help="Encode the function arguments, filename, and/or line number into the profiling function label",
     )
     parser.add_argument(
         "-I",
@@ -228,11 +212,13 @@ def parse_args(args=None):
         help="Select only entries from these files",
     )
     parser.add_argument(
-        "-v",
-        "--verbosity",
-        type=int,
-        default=_profiler_config.verbosity,
-        help="Logging verbosity",
+        "--trace-c",
+        type=str2bool,
+        nargs="?",
+        metavar="BOOL",
+        const=True,
+        default=_profiler_config.trace_c,
+        help="Enable profiling C functions",
     )
 
     return parser.parse_args(args)
@@ -326,9 +312,9 @@ def main():
     from .libpyomnitrace.profiler import config as _profiler_config
 
     _profiler_config.trace_c = opts.trace_c
-    _profiler_config.include_args = opts.include_args
-    _profiler_config.include_line = opts.include_line
-    _profiler_config.include_filename = opts.include_file
+    _profiler_config.include_args = "args" in opts.label
+    _profiler_config.include_line = "line" in opts.label
+    _profiler_config.include_filename = "file" in opts.label
     _profiler_config.full_filepath = opts.full_filepath
     _profiler_config.include_functions = opts.function_include
     _profiler_config.include_modules = opts.module_include
