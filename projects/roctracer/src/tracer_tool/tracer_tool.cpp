@@ -27,8 +27,9 @@
 #include <utility>
 #include <variant>
 
-#include <cxxabi.h> /* names denangle */
+#include <cxxabi.h> /* kernel name demangling */
 #include <dirent.h>
+#include <hsa/hsa_api_trace.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>

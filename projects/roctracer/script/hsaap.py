@@ -318,6 +318,13 @@ class API_DescrParser:
     self.h_content += '#define ' + out_macro + '\n'
 
     self.h_content += self.add_section('API ID enumeration', '  ', self.gen_id_enum)
+
+    self.h_content += '/* Declarations of APIs intended for use only by tools. */\n'
+    self.h_content += 'typedef void (*hsa_amd_queue_intercept_packet_writer)(const void*, uint64_t);\n'
+    self.h_content += 'typedef void (*hsa_amd_queue_intercept_handler)(const void*, uint64_t, uint64_t, void*,\n'
+    self.h_content += '                                                hsa_amd_queue_intercept_packet_writer);\n'
+    self.h_content += 'typedef void (*hsa_amd_runtime_queue_notifier)(const hsa_queue_t*, hsa_agent_t, void*);\n'
+
     self.h_content += self.add_section('API arg structure', '    ', self.gen_arg_struct)
     self.h_content += self.add_section('API output stream', '    ', self.gen_out_stream)
     self.h_content += '#endif /* ' + out_macro + ' */\n'
@@ -486,6 +493,7 @@ class API_DescrParser:
     content = ''
     if n == -1:
       content += '#ifdef __cplusplus\n'
+      content += '#include <hsa_ostream_ops.h>\n'
       content += 'typedef std::pair<uint32_t, hsa_api_data_t> hsa_api_data_pair_t;\n'
       content += 'inline std::ostream& operator<< (std::ostream& out, const hsa_api_data_pair_t& data_pair) {\n'
       content += '  const uint32_t cid = data_pair.first;\n'

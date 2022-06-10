@@ -21,10 +21,12 @@
 #ifndef INC_ROCTRACER_HSA_H_
 #define INC_ROCTRACER_HSA_H_
 
+#include <roctracer.h>
+
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
+#include <hsa_prof_str.h>
 
-#include <roctracer.h>
 #include <rocprofiler/activity.h>
 
 // HSA OP ID enumeration
@@ -36,31 +38,9 @@ enum hsa_op_id_t {
   HSA_OP_ID_NUMBER
 };
 
-#ifdef __cplusplus
-#include <iostream>
-#include <hsa/hsa_api_trace.h>
-
-namespace roctracer {
-namespace hsa_support {
-enum { HSA_OP_ID_async_copy = 0 };
-
-struct ops_properties_t {
+struct hsa_ops_properties_t {
   void* table;
   void* reserved1[3];
 };
 
-};  // namespace hsa_support
-
-typedef hsa_support::ops_properties_t hsa_ops_properties_t;
-};  // namespace roctracer
-
-#include "hsa_ostream_ops.h"
-
-
-#else   // !__cplusplus
-typedef void* hsa_amd_queue_intercept_handler;
-typedef void* hsa_amd_runtime_queue_notifier;
-#endif  //! __cplusplus
-
-#include <hsa_prof_str.h>
 #endif  // INC_ROCTRACER_HSA_H_
