@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/components/fwd.hpp"
+#include "library/components/pthread_create_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/rocm_smi.hpp"
 #include "library/config.hpp"
@@ -222,7 +223,7 @@ backtrace::size() const
     return m_size;
 }
 
-backtrace::time_point_type
+uint64_t
 backtrace::get_timestamp() const
 {
     return m_ts;
@@ -273,7 +274,7 @@ backtrace::sample(int signum)
 
     m_size       = 0;
     m_tid        = threading::get_id();
-    m_ts         = clock_type::now();
+    m_ts         = comp::wall_clock::record();
     m_thr_cpu_ts = tim::get_clock_thread_now<int64_t, std::nano>();
     auto _cache  = tim::rusage_cache{ RUSAGE_THREAD };
     m_mem_peak   = _cache.get_peak_rss();
@@ -432,6 +433,9 @@ backtrace::post_process(int64_t _tid)
         return;
     }
 
+    _init->m_ts = std::max<uint64_t>(
+        _init->m_ts, pthread_create_gotcha::get_execution_time(_tid)->first);
+
     // check whether the call-stack entry should be used. -1 means break, 0 means continue
     auto _use_label = [](const std::string& _lbl, bool _check_internal) -> short {
         // debugging feature
@@ -477,14 +481,15 @@ backtrace::post_process(int64_t _tid)
                               : std::vector<std::string>{};
 
     auto _process_perfetto_counters = [&](const std::vector<sampling::bundle_t*>& _data) {
+        auto _tid_name = JOIN("", '[', _tid, ']');
         if(!perfetto_counter_track<perfetto_rusage>::exists(_tid))
         {
             perfetto_counter_track<perfetto_rusage>::emplace(
-                _tid, JOIN("", "Peak Memory Usage", " [Thread ", _tid, "] (S)"), "MB");
+                _tid, JOIN(' ', "Thread Peak Memory Usage", _tid_name, "(S)"), "MB");
             perfetto_counter_track<perfetto_rusage>::emplace(
-                _tid, JOIN("", "Context Switches", " [Thread ", _tid, "] (S)"));
+                _tid, JOIN(' ', "Thread Context Switches", _tid_name, "(S)"));
             perfetto_counter_track<perfetto_rusage>::emplace(
-                _tid, JOIN("", "Page Faults", " [Thread ", _tid, "] (S)"));
+                _tid, JOIN(' ', "Thread Page Faults", _tid_name, "(S)"));
         }
 
         if(!perfetto_counter_track<hw_counters>::exists(_tid) &&
@@ -493,10 +498,8 @@ backtrace::post_process(int64_t _tid)
             for(auto& itr : _hw_cnt_labels)
             {
                 perfetto_counter_track<hw_counters>::emplace(
-                    _tid,
-                    JOIN("", tim::papi::get_event_info(itr).short_descr, " [Thread ",
-                         _tid, "] (S)"),
-                    "");
+                    _tid, JOIN(' ', "Thread", tim::papi::get_event_info(itr).short_descr,
+                               _tid_name, "(S)"));
             }
         }
 
@@ -507,7 +510,9 @@ backtrace::post_process(int64_t _tid)
             const auto* _bt = ditr->get<backtrace>();
             if(_bt->m_tid != _tid) continue;
 
-            auto _ts = static_cast<uint64_t>(_bt->m_ts.time_since_epoch().count());
+            auto _ts = _bt->m_ts;
+            if(!pthread_create_gotcha::is_valid_execution_time(_tid, _ts)) continue;
+
             _last_bt = _bt;
             _mean_ts += _ts;
 
@@ -540,8 +545,7 @@ backtrace::post_process(int64_t _tid)
 
         if(_tid > 0 && _last_bt)
         {
-            auto _ts = static_cast<uint64_t>(_last_bt->m_ts.time_since_epoch().count()) +
-                       (_mean_ts / _data.size());
+            auto     _ts   = pthread_create_gotcha::get_execution_time(_tid)->second;
             uint64_t _zero = 0;
             TRACE_COUNTER("sampling",
                           perfetto_counter_track<perfetto_rusage>::at(_tid, 0), _ts,
@@ -575,7 +579,7 @@ backtrace::post_process(int64_t _tid)
                                  bool                                    _rename) {
         if(_rename)
             threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid, "(S)").c_str());
-        time_point_type _last_wall_ts = _init->get_timestamp();
+        auto _last_wall_ts = _init->get_timestamp();
 
         for(const auto& ditr : _data)
         {
@@ -594,12 +598,13 @@ backtrace::post_process(int64_t _tid)
                 if(_use == 0) continue;
                 auto sitr = _static_strings.emplace(_name);
                 _last     = *sitr.first;
-                auto _ts  = static_cast<uint64_t>(_bt->m_ts.time_since_epoch().count());
+                auto _ts  = _bt->m_ts;
+                if(!pthread_create_gotcha::is_valid_execution_time(_tid, _ts)) continue;
 
-                TRACE_EVENT_BEGIN(
-                    "sampling", perfetto::StaticString{ sitr.first->c_str() },
-                    static_cast<uint64_t>(_last_wall_ts.time_since_epoch().count()));
-                TRACE_EVENT_END("sampling", _ts);
+                TRACE_EVENT_BEGIN("sampling",
+                                  perfetto::StaticString{ sitr.first->c_str() },
+                                  _last_wall_ts, "begin_ns", _last_wall_ts);
+                TRACE_EVENT_END("sampling", _ts, "end_ns", _ts);
             }
             _last_wall_ts = _bt->m_ts;
         }
@@ -623,6 +628,7 @@ backtrace::post_process(int64_t _tid)
                 continue;
             }
             if(_bt->empty()) continue;
+            if(!pthread_create_gotcha::is_valid_execution_time(_tid, _bt->m_ts)) continue;
             _data.emplace_back(&ritr);
         }
     }
@@ -667,9 +673,10 @@ backtrace::post_process(int64_t _tid)
 
         auto* _bt = ditr->get<backtrace>();
 
+        if(!pthread_create_gotcha::is_valid_execution_time(_tid, _bt->m_ts)) continue;
         if(_bt->m_ts < _last_bt->m_ts) continue;
 
-        double _elapsed_wc = (_bt->m_ts - _last_bt->m_ts).count();
+        double _elapsed_wc = (_bt->m_ts - _last_bt->m_ts);
         double _elapsed_cc = (_bt->m_thr_cpu_ts - _last_bt->m_thr_cpu_ts);
 
         std::vector<bundle_t> _tc{};

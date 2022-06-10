@@ -24,6 +24,7 @@
 
 #include "library/common.hpp"
 #include "library/defines.hpp"
+#include "library/thread_data.hpp"
 #include "library/timemory.hpp"
 
 #include <cstdint>
@@ -64,7 +65,21 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
     // pthread_create
     int operator()(pthread_t* thread, const pthread_attr_t* attr,
                    void* (*start_routine)(void*), void*     arg) const;
+
+    static auto& get_execution_time(int64_t _tid = threading::get_id());
+    static bool  is_valid_execution_time(int64_t _tid, uint64_t _ts);
 };
+
+inline auto&
+pthread_create_gotcha::get_execution_time(int64_t _tid)
+{
+    struct omnitrace_thread_exec_time
+    {};
+    using data_t        = std::pair<uint64_t, uint64_t>;
+    using thread_data_t = thread_data<data_t, omnitrace_thread_exec_time>;
+    static auto& _v     = thread_data_t::instances(thread_data_t::construct_on_init{});
+    return _v.at(_tid);
+}
 
 using pthread_create_gotcha_t =
     tim::component::gotcha<2, std::tuple<>, pthread_create_gotcha>;

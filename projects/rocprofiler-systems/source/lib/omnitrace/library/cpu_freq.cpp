@@ -22,6 +22,7 @@
 
 #include "library/cpu_freq.hpp"
 #include "library/common.hpp"
+#include "library/components/pthread_create_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
@@ -252,8 +253,12 @@ post_process()
         {
             uint64_t _ts   = std::get<0>(itr);
             double   _freq = std::get<7>(itr).at(_offset);
+            if(!pthread_create_gotcha::is_valid_execution_time(0, _ts)) continue;
             TRACE_COUNTER("sampling", freq_track::at(_idx, 0), _ts, _freq);
         }
+
+        auto _end_ts = pthread_create_gotcha::get_execution_time(0)->second;
+        TRACE_COUNTER("sampling", freq_track::at(_idx, 0), _end_ts, 0);
     };
 
     auto _process_cpu_rusage = []() {
@@ -261,34 +266,35 @@ post_process()
             type_list<cpu_page, cpu_virt, cpu_context_switch, cpu_page_fault,
                       cpu_user_mode_time, cpu_kernel_mode_time>{},
             { "Memory Usage", "Virtual Memory Usage", "Context Switches", "Page Faults",
-              "User CPU Time", "Kernel CPU Time" },
+              "User Time", "Kernel Time" },
             { "MB", "MB", "", "", "sec", "sec" });
 
-        cpu_data_tuple_t* _last = nullptr;
         for(auto& itr : cpu_data)
         {
-            uint64_t _ts   = std::get<0>(itr);
+            uint64_t _ts = std::get<0>(itr);
+            if(!pthread_create_gotcha::is_valid_execution_time(0, _ts)) continue;
+
             double   _page = std::get<1>(itr);
             double   _virt = std::get<2>(itr);
             uint64_t _cntx = std::get<3>(itr);
             uint64_t _flts = std::get<4>(itr);
             double   _user = std::get<5>(itr);
             double   _kern = std::get<6>(itr);
-            if(_last)
-            {
-                _cntx -= std::get<3>(*_last);
-                _flts -= std::get<4>(*_last);
-                _user -= std::get<5>(*_last);
-                _kern -= std::get<6>(*_last);
-            }
             write_perfetto_counter_track<cpu_page>(_ts, _page / units::megabyte);
             write_perfetto_counter_track<cpu_virt>(_ts, _virt / units::megabyte);
             write_perfetto_counter_track<cpu_context_switch>(_ts, _cntx);
             write_perfetto_counter_track<cpu_page_fault>(_ts, _flts);
             write_perfetto_counter_track<cpu_user_mode_time>(_ts, _user / units::sec);
             write_perfetto_counter_track<cpu_kernel_mode_time>(_ts, _kern / units::sec);
-            _last = &itr;
         }
+
+        auto _end_ts = pthread_create_gotcha::get_execution_time(0)->second;
+        write_perfetto_counter_track<cpu_page>(_end_ts, 0);
+        write_perfetto_counter_track<cpu_virt>(_end_ts, 0);
+        write_perfetto_counter_track<cpu_context_switch>(_end_ts, 0);
+        write_perfetto_counter_track<cpu_page_fault>(_end_ts, 0);
+        write_perfetto_counter_track<cpu_user_mode_time>(_end_ts, 0);
+        write_perfetto_counter_track<cpu_kernel_mode_time>(_end_ts, 0);
     };
 
     _process_cpu_rusage();

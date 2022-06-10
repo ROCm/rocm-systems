@@ -26,6 +26,7 @@
 #include "library/components/functors.hpp"
 #include "library/components/fwd.hpp"
 #include "library/components/mpi_gotcha.hpp"
+#include "library/components/pthread_create_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/pthread_mutex_gotcha.hpp"
 #include "library/config.hpp"
@@ -752,13 +753,13 @@ omnitrace_init_tooling_hidden()
         using CategoryT = std::decay_t<decltype(_category)>;
         uint64_t _ts    = comp::wall_clock::record();
         TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name),
-                          _ts);
+                          _ts, "begin_ns", _ts);
     };
 
     auto _pop_perfetto = [](auto _category, const char*) {
         using CategoryT = std::decay_t<decltype(_category)>;
         uint64_t _ts    = comp::wall_clock::record();
-        TRACE_EVENT_END(trait::name<CategoryT>::value, _ts);
+        TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, "end_ns", _ts);
     };
 
     if(get_use_perfetto() && get_use_timemory())
@@ -855,6 +856,8 @@ omnitrace_init_tooling_hidden()
 
     if(dmp::rank() == 0 && get_verbose() >= 0) fprintf(stderr, "\n");
 
+    pthread_create_gotcha::get_execution_time()->first = comp::wall_clock::record();
+
     return true;
 }
 
@@ -949,6 +952,8 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
     {
         get_gotcha_bundle()->start();
     }
+
+    pthread_create_gotcha::get_execution_time()->first = comp::wall_clock::record();
 }
 
 //======================================================================================//
@@ -970,6 +975,7 @@ omnitrace_finalize_hidden(void)
     }
 
     OMNITRACE_VERBOSE_F(0, "finalizing...\n");
+    pthread_create_gotcha::get_execution_time()->second = comp::wall_clock::record();
 
     // some functions called during finalization may alter the push/pop count so we need
     // to save them here

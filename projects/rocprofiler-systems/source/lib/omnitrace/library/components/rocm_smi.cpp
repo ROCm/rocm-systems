@@ -33,6 +33,7 @@
 #include "library/components/rocm_smi.hpp"
 #include "library/common.hpp"
 #include "library/components/fwd.hpp"
+#include "library/components/pthread_create_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
@@ -237,11 +238,13 @@ data::post_process(uint32_t _dev_id)
                 counter_track::emplace(_dev_id, addendum("Power"), "watts");
                 counter_track::emplace(_dev_id, addendum("Memory Usage"), "megabytes");
             }
-            uint64_t _ts    = itr.m_ts;
-            double   _busy  = itr.m_busy_perc;
-            double   _temp  = itr.m_temp / 1.0e3;
-            double   _power = itr.m_power / 1.0e6;
-            double   _usage = itr.m_mem_usage / static_cast<double>(units::megabyte);
+            uint64_t _ts = itr.m_ts;
+            if(!pthread_create_gotcha::is_valid_execution_time(0, _ts)) continue;
+
+            double _busy  = itr.m_busy_perc;
+            double _temp  = itr.m_temp / 1.0e3;
+            double _power = itr.m_power / 1.0e6;
+            double _usage = itr.m_mem_usage / static_cast<double>(units::megabyte);
             TRACE_COUNTER("rocm_smi", counter_track::at(_dev_id, 0), _ts, _busy);
             TRACE_COUNTER("rocm_smi", counter_track::at(_dev_id, 1), _ts, _temp);
             TRACE_COUNTER("rocm_smi", counter_track::at(_dev_id, 2), _ts, _power);
@@ -262,6 +265,8 @@ data::post_process(uint32_t _dev_id)
     {
         using entry_t = critical_trace::entry;
         auto _ts      = itr.m_ts;
+        if(!pthread_create_gotcha::is_valid_execution_time(0, _ts)) continue;
+
         auto _entries = critical_trace::get_entries(_ts, [](const entry_t& _e) {
             return _e.device == critical_trace::Device::GPU;
         });

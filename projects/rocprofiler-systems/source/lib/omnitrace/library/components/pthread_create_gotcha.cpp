@@ -29,6 +29,7 @@
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
+#include "timemory/components/timing/wall_clock.hpp"
 
 #include <bits/stdint-intn.h>
 #include <timemory/backends/threading.hpp>
@@ -130,7 +131,11 @@ pthread_create_gotcha::wrapper::operator()() const
             sampling::shutdown();
         }
 
-        pthread_create_gotcha::shutdown(_tid);
+        if(_tid >= 0)
+        {
+            get_execution_time(_tid)->second = comp::wall_clock::record();
+            pthread_create_gotcha::shutdown(_tid);
+        }
         set_thread_state(ThreadState::Completed);
     } };
 
@@ -148,7 +153,8 @@ pthread_create_gotcha::wrapper::operator()() const
                           .first->second;
         }
         if(_bundle) start_bundle(*_bundle);
-        get_cpu_cid_stack(threading::get_id(), m_parent_tid);
+        get_execution_time(_tid)->first = comp::wall_clock::record();
+        get_cpu_cid_stack(_tid, m_parent_tid);
         if(m_enable_sampling)
         {
             // initialize thread-local statics
@@ -298,4 +304,10 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     return _ret;
 }
 
+bool
+pthread_create_gotcha::is_valid_execution_time(int64_t _tid, uint64_t _ts)
+{
+    return (_ts >= get_execution_time(_tid)->first &&
+            _ts <= get_execution_time(_tid)->second);
+}
 }  // namespace omnitrace

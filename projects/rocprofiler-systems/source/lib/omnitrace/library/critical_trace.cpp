@@ -434,14 +434,17 @@ call_chain::generate_perfetto<Device::NONE>(std::set<entry>& _used) const
         if(itr.device == Device::CPU)
         {
             TRACE_EVENT_BEGIN("device-critical-trace", "CPU",
-                              static_cast<uint64_t>(itr.begin_ns));
+                              static_cast<uint64_t>(itr.begin_ns), "begin_ns",
+                              itr.begin_ns);
         }
         else if(itr.device == Device::GPU)
         {
             TRACE_EVENT_BEGIN("device-critical-trace", "GPU",
-                              static_cast<uint64_t>(itr.begin_ns));
+                              static_cast<uint64_t>(itr.begin_ns), "begin_ns",
+                              itr.begin_ns);
         }
-        TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns));
+        TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns),
+                        "end_ns", itr.end_ns);
     }
 }
 
@@ -462,8 +465,10 @@ call_chain::generate_perfetto<Device::CPU>(std::set<entry>& _used) const
         _static_mutex.unlock();
         TRACE_EVENT_BEGIN("host-critical-trace",
                           perfetto::StaticString{ sitr.first->c_str() },
+                          static_cast<uint64_t>(itr.begin_ns), "begin_ns",
                           static_cast<uint64_t>(itr.begin_ns));
-        TRACE_EVENT_END("host-critical-trace", static_cast<uint64_t>(itr.end_ns));
+        TRACE_EVENT_END("host-critical-trace", static_cast<uint64_t>(itr.end_ns),
+                        "end_ns", static_cast<uint64_t>(itr.end_ns));
     }
 }
 
@@ -484,8 +489,10 @@ call_chain::generate_perfetto<Device::GPU>(std::set<entry>& _used) const
         _static_mutex.unlock();
         TRACE_EVENT_BEGIN("device-critical-trace",
                           perfetto::StaticString{ sitr.first->c_str() },
+                          static_cast<uint64_t>(itr.begin_ns), "begin_ns",
                           static_cast<uint64_t>(itr.begin_ns));
-        TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns));
+        TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns),
+                        "end_ns", static_cast<uint64_t>(itr.end_ns));
     }
 }
 
@@ -504,8 +511,10 @@ call_chain::generate_perfetto<Device::ANY>(std::set<entry>& _used) const
         auto sitr = _static_strings.emplace(_name);
         _static_mutex.unlock();
         TRACE_EVENT_BEGIN("critical-trace", perfetto::StaticString{ sitr.first->c_str() },
+                          static_cast<uint64_t>(itr.begin_ns), "begin_ns",
                           static_cast<uint64_t>(itr.begin_ns));
-        TRACE_EVENT_END("critical-trace", static_cast<uint64_t>(itr.end_ns));
+        TRACE_EVENT_END("critical-trace", static_cast<uint64_t>(itr.end_ns), "end_ns",
+                        static_cast<uint64_t>(itr.end_ns));
     }
 }
 

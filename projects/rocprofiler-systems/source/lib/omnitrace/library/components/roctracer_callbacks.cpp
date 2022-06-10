@@ -276,8 +276,10 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                 if(get_use_perfetto())
                 {
                     TRACE_EVENT_BEGIN("device", perfetto::StaticString{ _name },
+                                      static_cast<uint64_t>(begin_timestamp), "begin_ns",
                                       static_cast<uint64_t>(begin_timestamp));
-                    TRACE_EVENT_END("device", static_cast<uint64_t>(end_timestamp));
+                    TRACE_EVENT_END("device", static_cast<uint64_t>(end_timestamp),
+                                    "end_ns", static_cast<uint64_t>(end_timestamp));
                 }
 
                 if(get_use_timemory())
@@ -347,8 +349,10 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
         if(get_use_perfetto())
         {
             TRACE_EVENT_BEGIN("device", perfetto::StaticString{ *_name },
+                              static_cast<uint64_t>(_beg_ns), "begin_ns",
                               static_cast<uint64_t>(_beg_ns));
-            TRACE_EVENT_END("device", static_cast<uint64_t>(_end_ns));
+            TRACE_EVENT_END("device", static_cast<uint64_t>(_end_ns), "end_ns",
+                            static_cast<uint64_t>(_end_ns));
         }
         if(get_use_timemory())
         {
@@ -579,8 +583,9 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         {
             TRACE_EVENT_BEGIN(
                 "host", perfetto::StaticString{ op_name }, static_cast<uint64_t>(_ts),
-                perfetto::Flow::ProcessScoped(_cid), "pcid", _parent_cid, "cid", _cid,
-                "device", _device_id, "tid", _tid, "depth", _depth, "corr_id", _corr_id);
+                perfetto::Flow::ProcessScoped(_cid), "begin_ns",
+                static_cast<uint64_t>(_ts), "pcid", _parent_cid, "cid", _cid, "device",
+                _device_id, "tid", _tid, "depth", _depth, "corr_id", _corr_id);
         }
         if(get_use_timemory())
         {
@@ -616,7 +621,8 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
         if(get_use_perfetto())
         {
-            TRACE_EVENT_END("host", static_cast<uint64_t>(_ts));
+            TRACE_EVENT_END("host", static_cast<uint64_t>(_ts), "end_ns",
+                            static_cast<uint64_t>(_ts));
         }
         if(get_use_timemory())
         {
@@ -774,12 +780,12 @@ hip_activity_callback(const char* begin, const char* end, void*)
             assert(_end_ns > _beg_ns);
             TRACE_EVENT_BEGIN("device",
                               perfetto::StaticString{ _kernel_names.at(_name).c_str() },
-                              _beg_ns, perfetto::Flow::ProcessScoped(_cid), "corr_id",
-                              record->correlation_id, "device", _devid, "queue", _queid,
-                              "op", _op_id_names.at(record->op));
-            TRACE_EVENT_END("device", _end_ns);
+                              _beg_ns, perfetto::Flow::ProcessScoped(_cid), "begin_ns",
+                              _beg_ns, "corr_id", record->correlation_id, "device",
+                              _devid, "queue", _queid, "op", _op_id_names.at(record->op));
+            TRACE_EVENT_END("device", _end_ns, "end_ns", _end_ns);
             // for some reason, this is necessary to make sure very last one ends
-            TRACE_EVENT_END("device", _end_ns);
+            TRACE_EVENT_END("device", _end_ns, "end_ns", _end_ns);
         }
 
         if(_critical_trace)
