@@ -54,13 +54,15 @@ namespace ompt
 namespace
 {
 std::unique_ptr<ompt_bundle_t> f_bundle = {};
-bool _init_toolset_off = (trait::runtime_enabled<ompt_toolset_t>::set(false), true);
+bool _init_toolset_off = (trait::runtime_enabled<ompt_toolset_t>::set(false),
+                          trait::runtime_enabled<ompt_context_t>::set(false), true);
 }  // namespace
 
 void
 setup()
 {
     trait::runtime_enabled<ompt_toolset_t>::set(true);
+    trait::runtime_enabled<ompt_context_t>::set(true);
     comp::user_ompt_bundle::global_init();
     comp::user_ompt_bundle::reset();
     tim::auto_lock_t lk{ tim::type_mutex<ompt_handle_t>() };
@@ -77,6 +79,8 @@ shutdown()
         f_bundle->stop();
         ompt_context_t::cleanup();
         trait::runtime_enabled<ompt_toolset_t>::set(false);
+        trait::runtime_enabled<ompt_context_t>::set(false);
+        comp::user_ompt_bundle::reset();
     }
     f_bundle.reset();
 }

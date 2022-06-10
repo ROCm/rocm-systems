@@ -142,6 +142,15 @@ struct OMNITRACE_HIDDEN_API indirect
         auto _omni_hsa_lib = m_omnilib;
         setenv("HSA_TOOLS_LIB", _omni_hsa_lib.c_str(), 0);
 #endif
+#if OMNITRACE_USE_OMPT > 0
+        if(get_env("OMNITRACE_USE_OMPT", true))
+        {
+            std::string _omni_omp_libs = find_path("libomnitrace-dl.so");
+            const char* _omp_libs      = getenv("OMP_TOOL_LIBRARIES");
+            if(_omp_libs) _omni_omp_libs = common::join(':', _omni_omp_libs, _omp_libs);
+            setenv("OMP_TOOL_LIBRARIES", _omni_omp_libs.c_str(), 1);
+        }
+#endif
         m_omnihandle = open(m_omnilib);
         m_userhandle = open(m_userlib);
         init();
