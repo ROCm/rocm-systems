@@ -68,12 +68,6 @@ target_include_directories(MatrixTranspose_ctest PRIVATE ${PROJECT_SOURCE_DIR}/i
 target_link_libraries(MatrixTranspose_ctest PRIVATE roctracer roctx)
 add_dependencies(mytest MatrixTranspose_ctest)
 
-## Build hsaco_test reference test
-add_library(hsaco_test SHARED app/hsaco_test.cpp)
-target_compile_definitions(hsaco_test PRIVATE AMD_INTERNAL_BUILD)
-target_link_libraries(hsaco_test hsa-runtime64::hsa-runtime64)
-add_dependencies(mytest hsaco_test)
-
 ## Build codeobj event test
 add_library(codeobj_test SHARED app/codeobj_test.cpp)
 target_include_directories(codeobj_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc)

@@ -334,8 +334,7 @@ class API_DescrParser:
     self.cpp_content += '#include <hsa/hsa_api_trace.h>\n'
     self.cpp_content += '#include \"util/callback_table.h\"\n\n'
     self.cpp_content += '#include <atomic>\n'
-    self.cpp_content += 'namespace roctracer {\n'
-    self.cpp_content += 'namespace hsa_support {\n\n'
+    self.cpp_content += 'namespace roctracer::hsa_support::detail {\n'
 
     self.cpp_content += 'static CoreApiTable CoreApi_saved_before_cb;\n'
     self.cpp_content += 'static AmdExtTable AmdExt_saved_before_cb;\n'
@@ -345,7 +344,7 @@ class API_DescrParser:
     self.cpp_content += self.add_section('API intercepting code', '', self.gen_intercept)
     self.cpp_content += self.add_section('API get_name function', '    ', self.gen_get_name)
     self.cpp_content += self.add_section('API get_code function', '  ', self.gen_get_code)
-    self.cpp_content += '\n};};\n'
+    self.cpp_content += '\n};\n'
 
   # add code section
   def add_section(self, title, gap, fun):
@@ -465,7 +464,7 @@ class API_DescrParser:
   def gen_get_name(self, n, name, call, struct):
     content = ''
     if n == -1:
-      content += 'static const char* GetApiName(const uint32_t& id) {\n'
+      content += 'static const char* GetApiName(uint32_t id) {\n'
       content += '  switch (id) {\n'
       return content
     if call != '-':

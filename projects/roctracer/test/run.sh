@@ -169,11 +169,7 @@ unset ROCP_INPUT
 # Check that the tracer tool can be unloaded and then reloaded.
 eval_test "Load/Unload/Reload the tracer tool" ./test/load_unload_reload_test load_unload_reload_trace
 
-export HSA_TOOLS_LIB="./test/libhsaco_test.so"
-eval_test "tool HSA codeobj" ./test/MatrixTranspose hsa_co_trace
-
-export ROCP_TOOL_LIB=./test/libcodeobj_test.so
-export HSA_TOOLS_LIB="librocprofiler64.so"
+export LD_PRELOAD=./test/libcodeobj_test.so
 eval_test "tool tracer codeobj" ./test/MatrixTranspose code_obj_trace
 
 unset LD_PRELOAD

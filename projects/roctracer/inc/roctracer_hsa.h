@@ -27,8 +27,6 @@
 #include <hsa/hsa_ext_amd.h>
 #include <hsa_prof_str.h>
 
-#include <rocprofiler/activity.h>
-
 // HSA OP ID enumeration
 enum hsa_op_id_t {
   HSA_OP_ID_DISPATCH = 0,
@@ -38,9 +36,73 @@ enum hsa_op_id_t {
   HSA_OP_ID_NUMBER
 };
 
-struct hsa_ops_properties_t {
-  void* table;
-  void* reserved1[3];
+// HSA EVT ID enumeration
+enum hsa_evt_id_t {
+  HSA_EVT_ID_ALLOCATE = 0,  // Memory allocate callback
+  HSA_EVT_ID_DEVICE = 1,    // Device assign callback
+  HSA_EVT_ID_MEMCOPY = 2,   // Memcopy callback
+  HSA_EVT_ID_SUBMIT = 3,    // Packet submission callback
+  HSA_EVT_ID_KSYMBOL = 4,   // Loading/unloading of kernel symbol
+  HSA_EVT_ID_CODEOBJ = 5,   // Loading/unloading of device code object
+  HSA_EVT_ID_NUMBER
 };
+
+struct hsa_ops_properties_t {
+  void* reserved1[4];
+};
+
+// HSA EVT data type
+typedef struct {
+  union {
+    struct {
+      const void* ptr;            // allocated area ptr
+      size_t size;                // allocated area size, zero size means 'free' callback
+      hsa_amd_segment_t segment;  // allocated area's memory segment type
+      hsa_amd_memory_pool_global_flag_t global_flag;  // allocated area's memory global flag
+      int is_code;                                    // equal to 1 if code is allocated
+    } allocate;
+
+    struct {
+      hsa_device_type_t type;  // type of assigned device
+      uint32_t id;             // id of assigned device
+      hsa_agent_t agent;       // device HSA agent handle
+      const void* ptr;         // ptr the device is assigned to
+    } device;
+
+    struct {
+      const void* dst;  // memcopy dst ptr
+      const void* src;  // memcopy src ptr
+      size_t size;      // memcopy size bytes
+    } memcopy;
+
+    struct {
+      const void* packet;       // submitted to GPU packet
+      const char* kernel_name;  // kernel name, NULL if not a kernel dispatch packet
+      hsa_queue_t* queue;       // HSA queue the packet was submitted to
+      uint32_t device_type;     // type of device the packet is submitted to
+      uint32_t device_id;       // id of device the packet is submitted to
+    } submit;
+
+    struct {
+      uint64_t object;       // kernel symbol object
+      const char* name;      // kernel symbol name
+      uint32_t name_length;  // kernel symbol name length
+      int unload;            // symbol executable destroy
+    } ksymbol;
+
+    struct {
+      uint32_t storage_type;  // code object storage type
+      int storage_file;       // origin file descriptor
+      uint64_t memory_base;   // origin memory base
+      uint64_t memory_size;   // origin memory size
+      uint64_t load_base;     // code object load base
+      uint64_t load_size;     // code object load size
+      uint64_t load_delta;    // code object load size
+      uint32_t uri_length;    // URI string length (not including the terminating NUL character)
+      const char* uri;        // URI string
+      int unload;             // unload flag
+    } codeobj;
+  };
+} hsa_evt_data_t;
 
 #endif  // INC_ROCTRACER_HSA_H_

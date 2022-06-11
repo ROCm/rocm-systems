@@ -694,7 +694,8 @@ void tool_load() {
 extern "C" {
 
 // The HSA_AMD_TOOL_PRIORITY variable must be a constant value type initialized by the loader
-// itself, not by code during _init. 'extern const' seems do that although that is not a guarantee.
+// itself, not by code during _init. 'extern const' seems to do that although that is not a
+// guarantee.
 ROCTRACER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 1050;
 
 // HSA-runtime tool on-load method

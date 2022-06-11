@@ -24,6 +24,8 @@
 #include <atomic>
 #include <mutex>
 #include <dlfcn.h>
+#include <unistd.h>
+#include <sys/syscall.h>
 
 #define ONLD_TRACE(str)                                                                            \
   if (getenv("ROCP_ONLOAD_TRACE")) do {                                                            \
@@ -36,7 +38,7 @@ namespace roctracer {
 
 // Base runtime loader class
 template <class T> class BaseLoader : public T {
-  static uint32_t GetPid() { return syscall(__NR_getpid); }
+  static uint32_t GetPid() { return ::syscall(__NR_getpid); }
 
  public:
   typedef std::mutex mutex_t;
@@ -132,8 +134,12 @@ class RocpApi {
   }
 };
 
+}  // namespace roctracer
+
 // HIP runtime library loader class
 #include "roctracer_hip.h"
+
+namespace roctracer {
 #if STATIC_BUILD
 __attribute__((weak)) hipError_t hipRegisterApiCallback(uint32_t id, void* fun, void* arg) {
   return hipErrorUnknown;

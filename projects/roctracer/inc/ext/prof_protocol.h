@@ -21,6 +21,7 @@
 #ifndef EXT_PROF_PROTOCOL_H_
 #define EXT_PROF_PROTOCOL_H_
 
+#include <stdint.h>
 #include <stdlib.h>
 
 /* Traced API domains */

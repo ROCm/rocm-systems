@@ -24,6 +24,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <sstream>
 
 #define EXC_RAISING(error, stream)                                                                 \
   do {                                                                                             \

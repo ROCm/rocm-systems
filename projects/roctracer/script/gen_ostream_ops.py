@@ -52,6 +52,7 @@ LICENSE = \
 
 
 header_basic = \
+'namespace detail {\n' + \
 'template <typename T>\n' + \
 '  inline static std::ostream& operator<<(std::ostream& out, const T& v) {\n' + \
 '     using std::operator<<;\n' + \
@@ -111,9 +112,9 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
             indent = ""
             str += "    if (std::string(\"" + cppHeader_struct + "::" + name + "\").find(" + apiname.upper() + "_structs_regex" + ") != std::string::npos)   {\n"
             indent = "    "
-            str += indent + "  roctracer::" + apiname.lower() + "_support::operator<<(out, \"" + name + "=\");\n"
-            str += indent + "  roctracer::" + apiname.lower() + "_support::operator<<(out, v." + name + ");\n"
-            str += indent + "  roctracer::" + apiname.lower() + "_support::operator<<(out, \", \");\n"
+            str += indent + "  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, \"" + name + "=\");\n"
+            str += indent + "  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, v." + name + ");\n"
+            str += indent + "  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, \", \");\n"
             str += "    }\n"
             if "void" not in mtype:
                 global_str += str
@@ -181,7 +182,7 @@ def gen_cppheader(infilepath, outfilepath, rank):
         if len(cppHeader.classes[c]["properties"]["public"]) != 0:
           output_filename_h.write("inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n")
           output_filename_h.write("{\n")
-          output_filename_h.write("  roctracer::" + apiname.lower() + "_support::operator<<(out, '{');\n")
+          output_filename_h.write("  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, '{');\n")
           output_filename_h.write("  " + apiname.upper() + "_depth_max_cnt++;\n")
           output_filename_h.write("  if (" + apiname.upper() + "_depth_max == -1 || " + apiname.upper() + "_depth_max_cnt <= " + apiname.upper() + "_depth_max" + ") {\n" )
           process_struct(output_filename_h, c, cppHeader, "", apiname)
@@ -190,15 +191,15 @@ def gen_cppheader(infilepath, outfilepath, rank):
           output_filename_h.write(global_str)
           output_filename_h.write("  };\n")
           output_filename_h.write("  " + apiname.upper() + "_depth_max_cnt--;\n")
-          output_filename_h.write("  roctracer::" + apiname.lower() + "_support::operator<<(out, '}');\n")
+          output_filename_h.write("  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, '}');\n")
           output_filename_h.write("  return out;\n")
           output_filename_h.write("}\n")
           global_str = ''
-          global_ops += "inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n" + "{\n" + "  roctracer::" + apiname.lower() + "_support::operator<<(out, v);\n" + "  return out;\n" + "}\n\n"
+          global_ops += "inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n" + "{\n" + "  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, v);\n" + "  return out;\n" + "}\n\n"
 
     if rank == 1 or rank == 2:
       footer = '// end ostream ops for '+ apiname + ' \n'
-      footer += '};};\n\n'
+      footer += '};};};\n\n'
       output_filename_h.write(footer)
       output_filename_h.write(global_ops)
       footer = '#endif //__cplusplus\n' + \
