@@ -557,7 +557,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           beg_ns = int(rec_vals[0])
           end_ns = int(rec_vals[1])
           dur_us = int((end_ns - beg_ns) / 1000)
-          from_us = int((beg_ns - START_NS) / 1000) + dur_us
+          from_us = int((beg_ns - START_NS) / 1000) + dur_us/2
           if api_pid == HIP_PID or hsa_copy_deps == 1:
             if not proc_id in dep_dict: dep_dict[proc_id] = {}
             dep_proc = dep_dict[proc_id]
