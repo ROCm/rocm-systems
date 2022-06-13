@@ -23,6 +23,10 @@
 cmake_minimum_required(VERSION 3.18.0)
 
 project(ROCTRACER VERSION 4.1.0)
+# set default ROCM_PATH
+if(NOT DEFINED ROCM_PATH)
+    set(ROCM_PATH "/opt/rocm"  CACHE STRING "Default ROCM installation directory")
+endif()
 
 ## Set module name
 string(TOLOWER "${CMAKE_PROJECT_NAME}" ROCTRACER_NAME)
@@ -37,10 +41,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(-Wall -Werror)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
+
 find_package(Threads REQUIRED)
 
-find_package(hsa-runtime64 REQUIRED CONFIG PATHS /opt/rocm/)
-find_package(HIP REQUIRED CONFIG PATHS /opt/rocm/)
+find_package(hsa-runtime64 REQUIRED CONFIG PATHS ${ROCM_PATH})
+find_package(HIP REQUIRED CONFIG PATHS ${ROCM_PATH})
 
 if(NOT DEFINED LIBRARY_TYPE)
   set(LIBRARY_TYPE SHARED)

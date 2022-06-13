@@ -22,7 +22,7 @@
 # IN THE SOFTWARE.
 ################################################################################
 
-ROCM_PATH="/opt/rocm"
+ROCM_PATH="${ROCM_PATH:=/opt/rocm}"
 
 fatal() {
   echo "$1"
