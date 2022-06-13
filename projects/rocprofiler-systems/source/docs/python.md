@@ -124,26 +124,26 @@ Using `omnitrace-python ./example.py` with `OMNITRACE_USE_TIMEMORY=ON` and `OMNI
 |                      LABEL                        | COUNT  | DEPTH  |   METRIC   |  SUM   |
 |---------------------------------------------------|--------|--------|------------|--------|
 | |0>>> run                                         |      1 |      0 | trip_count |      1 |
-| |0>>> |_fib                                       |  10946 |      1 | trip_count |  10946 |
-| |0>>>   |_fib                                     |   4181 |      2 | trip_count |   4181 |
-| |0>>>     |_fib                                   |   2584 |      3 | trip_count |   2584 |
-| |0>>>       |_fib                                 |   1597 |      4 | trip_count |   1597 |
-| |0>>>         |_fib                               |    987 |      5 | trip_count |    987 |
-| |0>>>           |_fib                             |    610 |      6 | trip_count |    610 |
-| |0>>>             |_fib                           |    377 |      7 | trip_count |    377 |
-| |0>>>               |_fib                         |    233 |      8 | trip_count |    233 |
-| |0>>>                 |_fib                       |    144 |      9 | trip_count |    144 |
-| |0>>>                   |_fib                     |     89 |     10 | trip_count |     89 |
-| |0>>>                     |_fib                   |     55 |     11 | trip_count |     55 |
-| |0>>>                       |_fib                 |     34 |     12 | trip_count |     34 |
-| |0>>>                         |_fib               |     21 |     13 | trip_count |     21 |
-| |0>>>                           |_fib             |     13 |     14 | trip_count |     13 |
-| |0>>>                             |_fib           |      8 |     15 | trip_count |      8 |
-| |0>>>                               |_fib         |      5 |     16 | trip_count |      5 |
-| |0>>>                                 |_fib       |      3 |     17 | trip_count |      3 |
-| |0>>>                                   |_fib     |      2 |     18 | trip_count |      2 |
-| |0>>>                                     |_fib   |      1 |     19 | trip_count |      1 |
-| |0>>>                                       |_fib |      1 |     20 | trip_count |      1 |
+| |0>>> |_fib                                       |      1 |      1 | trip_count |      1 |
+| |0>>>   |_fib                                     |      2 |      2 | trip_count |      2 |
+| |0>>>     |_fib                                   |      4 |      3 | trip_count |      4 |
+| |0>>>       |_fib                                 |      8 |      4 | trip_count |      8 |
+| |0>>>         |_fib                               |     16 |      5 | trip_count |     16 |
+| |0>>>           |_fib                             |     32 |      6 | trip_count |     32 |
+| |0>>>             |_fib                           |     64 |      7 | trip_count |     64 |
+| |0>>>               |_fib                         |    128 |      8 | trip_count |    128 |
+| |0>>>                 |_fib                       |    256 |      9 | trip_count |    256 |
+| |0>>>                   |_fib                     |    512 |     10 | trip_count |    512 |
+| |0>>>                     |_fib                   |   1024 |     11 | trip_count |   1024 |
+| |0>>>                       |_fib                 |   2026 |     12 | trip_count |   2026 |
+| |0>>>                         |_fib               |   3632 |     13 | trip_count |   3632 |
+| |0>>>                           |_fib             |   5020 |     14 | trip_count |   5020 |
+| |0>>>                             |_fib           |   4760 |     15 | trip_count |   4760 |
+| |0>>>                               |_fib         |   2942 |     16 | trip_count |   2942 |
+| |0>>>                                 |_fib       |   1152 |     17 | trip_count |   1152 |
+| |0>>>                                   |_fib     |    274 |     18 | trip_count |    274 |
+| |0>>>                                     |_fib   |     36 |     19 | trip_count |     36 |
+| |0>>>                                       |_fib |      2 |     20 | trip_count |      2 |
 | |0>>> |_inefficient                               |      1 |      1 | trip_count |      1 |
 |-------------------------------------------------------------------------------------------|
 ```
@@ -205,26 +205,26 @@ The results for both of the source-level instrumentation modes are identical to 
 |                      LABEL                        | COUNT  | DEPTH  |   METRIC   |  SUM   |
 |---------------------------------------------------|--------|--------|------------|--------|
 | |0>>> run                                         |      1 |      0 | trip_count |      1 |
-| |0>>> |_fib                                       |  10946 |      1 | trip_count |  10946 |
-| |0>>>   |_fib                                     |   4181 |      2 | trip_count |   4181 |
-| |0>>>     |_fib                                   |   2584 |      3 | trip_count |   2584 |
-| |0>>>       |_fib                                 |   1597 |      4 | trip_count |   1597 |
-| |0>>>         |_fib                               |    987 |      5 | trip_count |    987 |
-| |0>>>           |_fib                             |    610 |      6 | trip_count |    610 |
-| |0>>>             |_fib                           |    377 |      7 | trip_count |    377 |
-| |0>>>               |_fib                         |    233 |      8 | trip_count |    233 |
-| |0>>>                 |_fib                       |    144 |      9 | trip_count |    144 |
-| |0>>>                   |_fib                     |     89 |     10 | trip_count |     89 |
-| |0>>>                     |_fib                   |     55 |     11 | trip_count |     55 |
-| |0>>>                       |_fib                 |     34 |     12 | trip_count |     34 |
-| |0>>>                         |_fib               |     21 |     13 | trip_count |     21 |
-| |0>>>                           |_fib             |     13 |     14 | trip_count |     13 |
-| |0>>>                             |_fib           |      8 |     15 | trip_count |      8 |
-| |0>>>                               |_fib         |      5 |     16 | trip_count |      5 |
-| |0>>>                                 |_fib       |      3 |     17 | trip_count |      3 |
-| |0>>>                                   |_fib     |      2 |     18 | trip_count |      2 |
-| |0>>>                                     |_fib   |      1 |     19 | trip_count |      1 |
-| |0>>>                                       |_fib |      1 |     20 | trip_count |      1 |
+| |0>>> |_fib                                       |      1 |      1 | trip_count |      1 |
+| |0>>>   |_fib                                     |      2 |      2 | trip_count |      2 |
+| |0>>>     |_fib                                   |      4 |      3 | trip_count |      4 |
+| |0>>>       |_fib                                 |      8 |      4 | trip_count |      8 |
+| |0>>>         |_fib                               |     16 |      5 | trip_count |     16 |
+| |0>>>           |_fib                             |     32 |      6 | trip_count |     32 |
+| |0>>>             |_fib                           |     64 |      7 | trip_count |     64 |
+| |0>>>               |_fib                         |    128 |      8 | trip_count |    128 |
+| |0>>>                 |_fib                       |    256 |      9 | trip_count |    256 |
+| |0>>>                   |_fib                     |    512 |     10 | trip_count |    512 |
+| |0>>>                     |_fib                   |   1024 |     11 | trip_count |   1024 |
+| |0>>>                       |_fib                 |   2026 |     12 | trip_count |   2026 |
+| |0>>>                         |_fib               |   3632 |     13 | trip_count |   3632 |
+| |0>>>                           |_fib             |   5020 |     14 | trip_count |   5020 |
+| |0>>>                             |_fib           |   4760 |     15 | trip_count |   4760 |
+| |0>>>                               |_fib         |   2942 |     16 | trip_count |   2942 |
+| |0>>>                                 |_fib       |   1152 |     17 | trip_count |   1152 |
+| |0>>>                                   |_fib     |    274 |     18 | trip_count |    274 |
+| |0>>>                                     |_fib   |     36 |     19 | trip_count |     36 |
+| |0>>>                                       |_fib |      2 |     20 | trip_count |      2 |
 | |0>>> |_inefficient                               |      1 |      1 | trip_count |      1 |
 |-------------------------------------------------------------------------------------------|
 ```

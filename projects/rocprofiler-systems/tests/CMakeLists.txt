@@ -886,12 +886,15 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
 
         omnitrace_add_python_test(
             NAME python-source-check
-            COMMAND ${OMNITRACE_CAT_COMMAND}
+            COMMAND
+                ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
+                -l run fib fib fib fib fib inefficient _sum -c 5 5 10 20 30 10 5 5 -d 0 1
+                2 3 4 5 1 2 -m trip_count -i
             PYTHON_VERSION ${_VERSION}
-            FILE omnitrace-tests-output/python-source/${_VERSION}/trip_count.txt
-            PASS_REGEX
-                "(\\\| \\\|0>>> run           \\\|      5).*(\\\| \\\|0>>> \\\|_fib         \\\|     40).*(\\\| \\\|0>>>         \\\|_fib \\\|      5).*(\\\| \\\|0>>> \\\|_inefficient \\\|      5).*(\\\| \\\|0>>>   \\\|__sum      \\\|      5)"
+            FILE omnitrace-tests-output/python-source/${_VERSION}/trip_count.json
             DEPENDS python-source-${_VERSION}
+            PASS_REGEX
+                "omnitrace-tests-output/python-source/${_VERSION}/trip_count.json validated"
             ENVIRONMENT "${_python_environment}")
     else()
         omnitrace_message(

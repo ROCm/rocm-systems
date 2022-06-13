@@ -48,7 +48,7 @@ jobs:
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:/opt/dyninst/lib:/opt/elfutils/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Configure CMake
-      timeout-minutes: 5
+      timeout-minutes: 10
       run:
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&

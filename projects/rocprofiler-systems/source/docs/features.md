@@ -34,6 +34,7 @@ manage extensions, resources, data, etc.
 
 - Built-in MPI support
 - Kokkos-Tools support
+- OpenMP-Tools (OMPT)
 
 ### GPU Metrics
 
@@ -66,7 +67,6 @@ manage extensions, resources, data, etc.
 
 ### Third-party API support
 
-- OpenMP-Tools (OMPT)
 - TAU
 - LIKWID
 - Caliper
