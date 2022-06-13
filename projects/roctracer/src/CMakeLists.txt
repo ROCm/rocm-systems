@@ -54,12 +54,12 @@ get_filename_component(HSA_RUNTIME_INC_PATH ${HSA_H} DIRECTORY)
 
 ## Generate the HSA wrapper functions header
 add_custom_command(
-  OUTPUT hsa_prof_str.h
+  OUTPUT hsa_prof_str.h hsa_prof_str.inline.h
   COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/script/hsaap.py ${CMAKE_CURRENT_BINARY_DIR} "${HSA_RUNTIME_INC_PATH}"  > /dev/null
   DEPENDS ${PROJECT_SOURCE_DIR}/script/hsaap.py
           "${HSA_RUNTIME_INC_PATH}/hsa.h" "${HSA_RUNTIME_INC_PATH}/hsa_ext_amd.h"
           "${HSA_RUNTIME_INC_PATH}/hsa_ext_image.h" "${HSA_RUNTIME_INC_PATH}/hsa_api_trace.h"
-  COMMENT "Generating hsa_prof_str.h...")
+  COMMENT "Generating hsa_prof_str.h,hsa_prof_str.inline.h...")
 
 ## Generate the HSA pretty printers
 add_custom_command(
@@ -122,7 +122,7 @@ endforeach()
 
 ## Build the ROCtracer library
 file(GLOB ROCTRACER_SOURCES "roctracer/*.cpp" "util/*.cpp")
-add_library(roctracer ${LIBRARY_TYPE} ${ROCTRACER_SOURCES} ${GENERATED_HEADERS})
+add_library(roctracer ${LIBRARY_TYPE} ${ROCTRACER_SOURCES} ${GENERATED_HEADERS} hsa_prof_str.inline.h)
 
 set_target_properties(roctracer PROPERTIES
                       CXX_VISIBILITY_PRESET hidden

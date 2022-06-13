@@ -44,10 +44,6 @@ namespace roctracer {
 namespace hsa_support {
 enum { HSA_OP_ID_async_copy = 0 };
 
-extern CoreApiTable CoreApiTable_saved;
-extern AmdExtTable AmdExtTable_saved;
-extern ImageExtTable ImageExtTable_saved;
-
 struct ops_properties_t {
   void* table;
   void* reserved1[3];

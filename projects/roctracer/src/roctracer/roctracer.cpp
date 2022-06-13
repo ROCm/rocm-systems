@@ -26,6 +26,7 @@
 
 #include <assert.h>
 #include <dirent.h>
+#include <hsa/hsa_api_trace.h>
 #include <string.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -42,6 +43,8 @@
 #include "tracker.h"
 #include "exception.h"
 #include "util/logger.h"
+
+#include "hsa_prof_str.inline.h"
 
 #define CHECK_HSA_STATUS(msg, status)                                                              \
   do {                                                                                             \
@@ -124,17 +127,9 @@ void RestoreHsaApi() {
   table->amd_ext_->hsa_amd_memory_async_copy_rect_fn = hsa_amd_memory_async_copy_rect_fn;
 }
 
-// callbacks table
-cb_table_t cb_table;
 // async copy activity callback
 bool async_copy_callback_enabled = false;
 MemoryPool* async_copy_callback_memory_pool = nullptr;
-// Table of function pointers to HSA Core Runtime
-CoreApiTable CoreApiTable_saved{};
-// Table of function pointers to AMD extensions
-AmdExtTable AmdExtTable_saved{};
-// Table of function pointers to HSA Image Extension
-ImageExtTable ImageExtTable_saved{};
 
 }  // namespace hsa_support
 
