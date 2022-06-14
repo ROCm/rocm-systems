@@ -678,14 +678,14 @@ OMNITRACE_MEMORY_UNITS          = MB
 OMNITRACE_TIMING_UNITS          = sec
 
 # sampling fields
-OMNITRACE_SAMPLING_FREQ         = 10
+OMNITRACE_SAMPLING_FREQ         = 50
 
 # rocm-smi fields
-OMNITRACE_ROCM_SMI_DEVICES      = 0
+OMNITRACE_ROCM_SMI_DEVICES      = $env:HIP_VISIBLE_DEVICES
 
-# misc env variables
-OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX  = OFF
-OMNITRACE_SAMPLING_KEEP_INTERNAL        = OFF
+# misc env variables (see metadata JSON file after run)
+$env:OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX  = OFF
+$env:OMNITRACE_SAMPLING_KEEP_INTERNAL        = OFF
 ```
 
 ### Sample JSON Configuration File
