@@ -2161,6 +2161,10 @@ def showSerialNumber(deviceList):
     for device in deviceList:
         sn = create_string_buffer(256)
         ret = rocmsmi.rsmi_dev_serial_number_get(device, sn, 256)
+        if not str(sn).isalnum():
+            printErrLog(device, "FRU Serial Number contains non-alphanumeric characters. FRU is likely corrupted")
+            continue
+
         if rsmi_ret_ok(ret, device) and sn.value.decode():
             printLog(device, 'Serial Number', sn.value.decode())
         else:
