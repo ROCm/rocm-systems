@@ -100,6 +100,24 @@ set(_python_environment
 
 # -------------------------------------------------------------------------------------- #
 
+set(MPIEXEC_EXECUTABLE_ARGS)
+option(
+    OMNITRACE_CI_MPI_RUN_AS_ROOT
+    "Enabled --allow-run-as-root in MPI tests with OpenMPI. Enable with care! Should only be in docker containers"
+    OFF)
+mark_as_advanced(OMNITRACE_CI_MPI_RUN_AS_ROOT)
+if(OMNITRACE_CI_MPI_RUN_AS_ROOT)
+    execute_process(
+        COMMAND ${MPIEXEC_EXECUTABLE} --allow-run-as-root --help
+        RESULT_VARIABLE _mpiexec_allow_run_as_root
+        OUTPUT_QUIET ERROR_QUIET)
+    if(_mpiexec_allow_run_as_root EQUAL 0)
+        list(APPEND MPIEXEC_EXECUTABLE_ARGS --allow-run-as-root)
+    endif()
+endif()
+
+# -------------------------------------------------------------------------------------- #
+
 function(OMNITRACE_ADD_TEST)
     foreach(_PREFIX RUNTIME REWRITE REWRITE_RUN)
         foreach(_TYPE PASS FAIL SKIP)
@@ -150,12 +168,13 @@ function(OMNITRACE_ADD_TEST)
            AND ${TEST_MPI}
            AND TEST_NUM_PROCS GREATER 0)
             if(NOT TEST_NUM_PROCS GREATER NUM_PROCS_REAL)
-                set(COMMAND_PREFIX ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG}
-                                   ${TEST_NUM_PROCS})
+                set(COMMAND_PREFIX ${MPIEXEC_EXECUTABLE} ${MPIEXEC_EXECUTABLE_ARGS}
+                                   ${MPIEXEC_NUMPROC_FLAG} ${TEST_NUM_PROCS})
                 list(APPEND TEST_LABELS mpi parallel-${TEST_NUM_PROCS})
                 list(APPEND TEST_PROPERTIES PARALLEL_LEVEL ${TEST_NUM_PROCS})
             else()
-                set(COMMAND_PREFIX ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1)
+                set(COMMAND_PREFIX ${MPIEXEC_EXECUTABLE} ${MPIEXEC_EXECUTABLE_ARGS}
+                                   ${MPIEXEC_NUMPROC_FLAG} 1)
             endif()
         else()
             list(APPEND TEST_ENVIRONMENT "OMNITRACE_USE_PID=OFF")
