@@ -124,6 +124,11 @@ function(create_library_symlink)
                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                     COMMAND ${CMAKE_COMMAND} -E create_symlink
                     ../../${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}/${TEST_ROCPROFCTRL} ${ROCPROF_WRAPPER_TOOL_DIR}/${TEST_CTRL})
+  set(METRICS "metrics.xml")
+  add_custom_target(link_metrics ALL
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink
+                    ../../${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}/${METRICS} ${ROCPROF_WRAPPER_LIB_DIR}/${METRICS})
 endfunction()
 
 #Creater a template for header file
