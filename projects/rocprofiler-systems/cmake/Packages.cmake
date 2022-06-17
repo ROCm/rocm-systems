@@ -157,6 +157,8 @@ endif()
 if(OMNITRACE_USE_MPI)
     find_package(MPI ${omnitrace_FIND_QUIETLY} REQUIRED)
     target_link_libraries(omnitrace-mpi INTERFACE MPI::MPI_C MPI::MPI_CXX)
+    omnitrace_target_compile_definitions(omnitrace-mpi INTERFACE TIMEMORY_USE_MPI=1
+                                                                 OMNITRACE_USE_MPI)
 elseif(OMNITRACE_USE_MPI_HEADERS)
     find_package(MPI-Headers ${omnitrace_FIND_QUIETLY} REQUIRED)
     omnitrace_target_compile_definitions(

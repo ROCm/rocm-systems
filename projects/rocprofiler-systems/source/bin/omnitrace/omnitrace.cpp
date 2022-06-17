@@ -45,6 +45,14 @@
 #include <utility>
 #include <vector>
 
+#if !defined(OMNITRACE_USE_MPI)
+#    define OMNITRACE_USE_MPI 0
+#endif
+
+#if !defined(OMNITRACE_USE_MPI_HEADERS)
+#    define OMNITRACE_USE_MPI_HEADERS 0
+#endif
+
 bool     use_return_info         = false;
 bool     use_args_info           = false;
 bool     use_file_info           = false;
@@ -95,6 +103,7 @@ bool                                       is_attached          = false;
 bool                                       use_mpi              = false;
 bool                                       is_static_exe        = false;
 bool                                       simulate             = false;
+bool                                       include_uninstr      = false;
 size_t                                     batch_size           = 50;
 strset_t                                   extra_libs           = {};
 std::vector<std::pair<uint64_t, string_t>> hash_ids             = {};
@@ -509,7 +518,15 @@ main(int argc, char** argv)
                       "Finalization function(s) for supplemental instrumentation "
                       "libraries (see '--load' option)")
         .dtype("string")
-        .action([](parser_t& p) { init_stub_names = p.get<strvec_t>("fini-functions"); });
+        .action([](parser_t& p) { fini_stub_names = p.get<strvec_t>("fini-functions"); });
+    parser
+        .add_argument(
+            { "--all-functions" },
+            "When finding functions, include the functions which are not instrumentable. "
+            "This is purely diagnostic for the available/excluded functions output")
+        .dtype("bool")
+        .max_count(1)
+        .action([](parser_t& p) { include_uninstr = p.get<bool>("all-functions"); });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[SYMBOL SELECTION OPTIONS]" }, "");
@@ -597,12 +614,18 @@ main(int argc, char** argv)
                         "default to using timemory instead of perfetto");
     parser
         .add_argument({ "--mpi" },
-                      "Enable MPI support (requires omnitrace built w/ MPI and GOTCHA "
-                      "support). NOTE: this will automatically be activated if "
-                      "MPI_Init/MPI_Init_thread and MPI_Finalize are found in the symbol "
-                      "table of target")
+                      "Enable MPI support (requires omnitrace built w/ full or partial "
+                      "MPI support). NOTE: this will automatically be activated if "
+                      "MPI_Init, MPI_Init_thread, MPI_Finalize, MPI_Comm_rank, or "
+                      "MPI_Comm_size are found in the symbol table of target")
         .max_count(1)
-        .action([](parser_t& p) { use_mpi = p.get<bool>("mpi"); });
+        .action([](parser_t& p) {
+            use_mpi = p.get<bool>("mpi");
+#if OMNITRACE_USE_MPI == 0 && OMNITRACE_USE_MPI_HEADERS == 0
+            errprintf(0, "omnitrace was not built with full or partial MPI support\n");
+            use_mpi = false;
+#endif
+        });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[GRANULARITY OPTIONS]" }, "");
@@ -1009,7 +1032,7 @@ main(int argc, char** argv)
     verbprintf(1, "Getting the address space image, modules, and procedures...\n");
     image_t*                  app_image     = addr_space->getImage();
     bpvector_t<module_t*>*    app_modules   = app_image->getModules();
-    bpvector_t<procedure_t*>* app_functions = app_image->getProcedures();
+    bpvector_t<procedure_t*>* app_functions = app_image->getProcedures(include_uninstr);
     bpvector_t<module_t*>     modules;
     bpvector_t<procedure_t*>  functions;
 
@@ -1018,7 +1041,7 @@ main(int argc, char** argv)
     //  Generate a log of all the available procedures and modules
     //
     //----------------------------------------------------------------------------------//
-    std::set<std::string> module_names;
+    std::set<std::string> module_names = {};
 
     static auto _insert_module_function = [](fmodset_t& _module_funcs, auto _v) {
         if(!fixed_module_functions.at(&_module_funcs)) _module_funcs.emplace(_v);
@@ -1049,7 +1072,7 @@ main(int argc, char** argv)
         }
         for(auto* itr : modules)
         {
-            auto* procedures = itr->getProcedures();
+            auto* procedures = itr->getProcedures(include_uninstr);
             if(procedures)
             {
                 for(auto* pitr : *procedures)
@@ -1206,12 +1229,23 @@ main(int argc, char** argv)
     auto* main_init       = find_function(app_image, "_init");
     auto* main_fini       = find_function(app_image, "_fini");
     auto* main_func       = find_function(app_image, main_fname.c_str());
-    auto* mpi_init_func   = find_function(app_image, "MPI_Init", { "MPI_Init_thread" });
-    auto* mpi_fini_func   = find_function(app_image, "MPI_Finalize");
     auto* user_start_func = find_function(app_image, "omnitrace_user_start_trace",
                                           { "omnitrace_user_start_thread_trace" });
     auto* user_stop_func  = find_function(app_image, "omnitrace_user_stop_trace",
                                          { "omnitrace_user_stop_thread_trace" });
+#if OMNITRACE_USE_MPI > 0 || OMNITRACE_USE_MPI_HEADERS > 0
+    // if any of the below MPI functions are found, enable MPI support
+    for(const auto* itr : { "MPI_Init", "MPI_Init_thread", "MPI_Finalize",
+                            "MPI_Comm_rank", "MPI_Comm_size" })
+    {
+        if(find_function(app_image, itr) != nullptr)
+        {
+            verbprintf(0, "Found '%s' in '%s'. Enabling MPI support...\n", itr, _cmdv[0]);
+            use_mpi = true;
+            break;
+        }
+    }
+#endif
 
     //----------------------------------------------------------------------------------//
     //
@@ -1242,11 +1276,6 @@ main(int argc, char** argv)
     auto* reg_cov_func = find_function(app_image, "omnitrace_register_coverage");
 
     if(!main_func && main_fname == "main") main_func = find_function(app_image, "_main");
-
-    if(mpi_init_func && mpi_fini_func) use_mpi = true;
-
-    bool use_mpip = false;
-    if(use_mpi) use_mpip = true;
 
     //----------------------------------------------------------------------------------//
     //
@@ -1399,12 +1428,6 @@ main(int argc, char** argv)
         }
     }
 
-    if(use_mpi && !(mpi_func || (mpi_init_func && mpi_fini_func)))
-    {
-        errprintf(-1, "MPI support was requested but omnitrace was not built with MPI "
-                      "and GOTCHA support");
-    }
-
     auto check_for_debug_info = [](bool& _has_debug_info, auto* _func) {
         // This heuristic guesses that debugging info is available if function
         // is not defined in the DEFAULT_MODULE
@@ -1536,9 +1559,8 @@ main(int argc, char** argv)
                       (user_start_func && user_stop_func) ? "OFF" : "ON"));
     env_vars.emplace_back(
         TIMEMORY_JOIN('=', "OMNITRACE_TIMEMORY_COMPONENTS", default_components));
-    env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "OMNITRACE_USE_MPIP",
-                      (binary_rewrite && use_mpi && use_mpip) ? "ON" : "OFF"));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_USE_MPIP",
+                                        (binary_rewrite && use_mpi) ? "ON" : "OFF"));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_USE_CODE_COVERAGE",
                                         (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
     if(use_mpi) env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_USE_PID", "ON"));
@@ -1598,18 +1620,39 @@ main(int argc, char** argv)
     {
         for(const auto& itr : available_module_functions)
         {
-            bool _is_not_main = itr.function != main_func && itr.function != main_init &&
-                                itr.function != main_fini;
             if(itr.should_instrument())
             {
-                if(_is_not_main)
-                    _insert_module_function(instrumented_module_functions, itr);
+                _insert_module_function(instrumented_module_functions, itr);
             }
             else
+            {
                 _insert_module_function(excluded_module_functions, itr);
+            }
             if(coverage_mode != CODECOV_NONE)
             {
-                if(itr.should_coverage_instrument() && _is_not_main)
+                if(itr.should_coverage_instrument())
+                    _insert_module_function(coverage_module_functions, itr);
+            }
+            if(itr.is_overlapping())
+                _insert_module_function(overlapping_module_functions, itr);
+        }
+    }
+    else
+    {
+        // in sampling mode, we instrument either main or init + fini
+        for(auto&& itr : { main_func, main_init, main_fini })
+        {
+            if(itr)
+                _insert_module_function(instrumented_module_functions,
+                                        module_function{ itr->getModule(), itr });
+        }
+
+        for(const auto& itr : available_module_functions)
+        {
+            _insert_module_function(excluded_module_functions, itr);
+            if(coverage_mode != CODECOV_NONE)
+            {
+                if(itr.should_coverage_instrument())
                     _insert_module_function(coverage_module_functions, itr);
             }
             if(itr.is_overlapping())
@@ -1682,6 +1725,9 @@ main(int argc, char** argv)
         const int                                        _pass_verbose_lvl = 0;
         for(const auto& itr : instrumented_module_functions)
         {
+            bool _is_main = itr.function == main_func || itr.function == main_init ||
+                            itr.function == main_fini;
+            if(_is_main) continue;
             auto _count = itr(addr_space, entr_trace, exit_trace);
             _pass_info[itr.module_name].first += _count.first;
             _pass_info[itr.module_name].second += _count.second;
@@ -1711,10 +1757,13 @@ main(int argc, char** argv)
 
     if(coverage_mode != CODECOV_NONE)
     {
-        std::map<std::string, std::pair<size_t, size_t>> _covr_info{};
+        std::map<std::string, std::pair<size_t, size_t>> _covr_info        = {};
         const int                                        _covr_verbose_lvl = 1;
         for(const auto& itr : coverage_module_functions)
         {
+            bool _is_main = itr.function == main_func || itr.function == main_init ||
+                            itr.function == main_fini;
+            if(_is_main) continue;
             itr.register_source(addr_space, reg_src_func, *main_entr_points);
             auto _count = itr.register_coverage(addr_space, reg_cov_func);
             _covr_info[itr.module_name].first += _count.first;
@@ -1810,11 +1859,6 @@ main(int argc, char** argv)
     //  Dump the available instrumented modules/functions (re-dump available)
     //
     //----------------------------------------------------------------------------------//
-
-    for(const auto& itr : available_module_functions)
-    {
-        _insert_module_function(excluded_module_functions, itr);
-    }
 
     dump_info("available-instr", available_module_functions, 0, werror,
               "available_module_functions", print_formats);

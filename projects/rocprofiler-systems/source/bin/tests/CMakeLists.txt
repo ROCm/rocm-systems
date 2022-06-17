@@ -104,8 +104,10 @@ omnitrace_add_bin_test(
          xml
          -v
          1
+         --all-functions
          --
          ls
+    LABELS "simulate"
     TIMEOUT 120)
 
 omnitrace_add_bin_test(
