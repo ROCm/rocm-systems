@@ -72,7 +72,7 @@ function(generate_wrapper_header)
     set(include_guard "${include_guard}COMGR_WRAPPER_INCLUDE_${INC_GAURD_NAME}_H")
     #set #include statement
     get_filename_component(file_name ${header_file} NAME)
-    set(include_statements "${include_statements}#include \"../../../include/${ROCM_SMI}/${file_name}\"\n")
+    set(include_statements "${include_statements}#include \"../../../${CMAKE_INSTALL_INCLUDEDIR}/${ROCM_SMI}/${file_name}\"\n")
     configure_file(${RSMI_WRAPPER_DIR}/header.hpp.in ${RSMI_WRAPPER_INC_DIR}/${file_name})
     unset(include_guard)
     unset(include_statements)
@@ -90,7 +90,7 @@ function(generate_wrapper_header)
     set(include_guard "${include_guard}COMGR_WRAPPER_INCLUDE_${INC_GAURD_NAME}_H")
     #set #include statement
     get_filename_component(file_name ${header_file} NAME)
-    set(include_statements "${include_statements}#include \"../../../include/${OAM_TARGET_NAME}/${file_name}\"\n")
+    set(include_statements "${include_statements}#include \"../../../${CMAKE_INSTALL_INCLUDEDIR}/${OAM_TARGET_NAME}/${file_name}\"\n")
     configure_file(${RSMI_WRAPPER_DIR}/header.hpp.in ${OAM_WRAPPER_INC_DIR}/${file_name})
     unset(include_guard)
     unset(include_statements)
@@ -127,7 +127,7 @@ function(create_library_symlink)
      add_custom_target(link_${file_name} ALL
                   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                   COMMAND ${CMAKE_COMMAND} -E create_symlink
-                  ../../lib/${file_name} ${RSMI_WRAPPER_LIB_DIR}/${file_name})
+                  ../../${CMAKE_INSTALL_LIBDIR}/${file_name} ${RSMI_WRAPPER_LIB_DIR}/${file_name})
   endforeach()
 
   file(MAKE_DIRECTORY ${OAM_WRAPPER_LIB_DIR})
@@ -155,7 +155,7 @@ function(create_library_symlink)
      add_custom_target(link_${file_name} ALL
                   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                   COMMAND ${CMAKE_COMMAND} -E create_symlink
-                  ../../lib/${file_name} ${OAM_WRAPPER_LIB_DIR}/${file_name})
+                  ../../${CMAKE_INSTALL_LIBDIR}/${file_name} ${OAM_WRAPPER_LIB_DIR}/${file_name})
   endforeach()
 
 endfunction()

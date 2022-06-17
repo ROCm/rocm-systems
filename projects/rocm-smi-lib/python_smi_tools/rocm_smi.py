@@ -509,7 +509,6 @@ def printLog(device, metricName, value):
         logstr = 'GPU[%s]\t\t: %s' % (device, metricName)
     if device is None:
         logstr = logstr[13:]
-    logging.debug(logstr)
     # Force thread safe printing
     print(logstr + '\n', end='')
 
@@ -791,11 +790,13 @@ def setClockRange(deviceList, clkType, minvalue, maxvalue, autoRespond):
     printLogSpacer(' Set Valid %s Range ' % (clkType))
     for device in deviceList:
         ret = rocmsmi.rsmi_dev_clk_range_set(device, int(minvalue), int(maxvalue), rsmi_clk_names_dict[clkType])
-        if rsmi_ret_ok(ret, device):
+        if rsmi_ret_ok(ret, device, silent=True):
             printLog(device, 'Successfully set %s from %s(MHz) to %s(MHz)' % (clkType, minvalue, maxvalue), None)
         else:
             printErrLog(device, 'Unable to set %s from %s(MHz) to %s(MHz)' % (clkType, minvalue, maxvalue))
             RETCODE = 1
+            if ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+                printLog(device, 'Setting %s range is not supported for this device.' % (clkType), None)
 
 
 def setVoltageCurve(deviceList, point, clk, volt, autoRespond):
@@ -2043,7 +2044,7 @@ def showProfile(deviceList):
     status = rsmi_power_profile_status_t()
     for device in deviceList:
         ret = rocmsmi.rsmi_dev_power_profile_presets_get(device, 0, byref(status))
-        if rsmi_ret_ok(ret, device, 'profiles'):
+        if rsmi_ret_ok(ret, device, 'profiles', silent=False):
             binaryMaskString = str(format(status.available_profiles, '07b'))[::-1]
             bitMaskPosition = 0
             profileNumber = 0
@@ -2075,7 +2076,7 @@ def showRange(deviceList, rangeType):
     odvf = rsmi_od_volt_freq_data_t()
     for device in deviceList:
         ret = rocmsmi.rsmi_dev_od_volt_info_get(device, byref(odvf))
-        if rsmi_ret_ok(ret, device, 'od volt'):
+        if rsmi_ret_ok(ret, device, 'od volt', silent=False):
             if rangeType == 'sclk':
                 printLog(device, 'Valid sclk range: %sMhz - %sMhz' % (
                 int(odvf.curr_sclk_range.lower_bound / 1000000), int(odvf.curr_sclk_range.upper_bound / 1000000)), None)
@@ -2097,8 +2098,6 @@ def showRange(deviceList, rangeType):
                                  None)
                 else:
                     printLog(device, 'Unable to display %s range' % (rangeType), None)
-        else:
-            printLog(device, 'Unable to display %s range' % (rangeType), None)
     printLogSpacer()
 
 
@@ -2181,6 +2180,10 @@ def showSerialNumber(deviceList):
     for device in deviceList:
         sn = create_string_buffer(256)
         ret = rocmsmi.rsmi_dev_serial_number_get(device, sn, 256)
+        if not str(sn).isalnum():
+            printErrLog(device, "FRU Serial Number contains non-alphanumeric characters. FRU is likely corrupted")
+            continue
+
         if rsmi_ret_ok(ret, device) and sn.value.decode():
             printLog(device, 'Serial Number', sn.value.decode())
         else:
@@ -2311,13 +2314,11 @@ def showVoltageCurve(deviceList):
     odvf = rsmi_od_volt_freq_data_t()
     for device in deviceList:
         ret = rocmsmi.rsmi_dev_od_volt_info_get(device, byref(odvf))
-        if rsmi_ret_ok(ret, device, 'od volt'):
+        if rsmi_ret_ok(ret, device, 'od volt', silent=False):
             for position in range(3):
                 printLog(device, 'Voltage point %d: %sMhz %smV' % (
                 position, int(list(odvf.curve.vc_points)[position].frequency / 1000000),
                 int(list(odvf.curve.vc_points)[position].voltage)), None)
-        else:
-            printLog(device, 'Voltage Curve is not supported', None)
     printLogSpacer()
 
 
@@ -2807,10 +2808,10 @@ def rsmi_ret_ok(my_ret, device=None, metric=None, silent=False):
             returnString += ' %s: ' % (metric)
         returnString += '%s\t' % (err_str.value.decode())
         if not PRINT_JSON:
-            if silent:
-                logging.info('%s', returnString)
-            else:
-                logging.error('%s', returnString)
+            logging.debug('%s', returnString)
+            if not silent:
+                if my_ret in rsmi_status_verbose_err_out:
+                    printLog(device, rsmi_status_verbose_err_out[my_ret], None)
         RETCODE = my_ret
         return False
     return True
