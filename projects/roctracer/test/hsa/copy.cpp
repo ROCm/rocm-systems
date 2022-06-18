@@ -18,9 +18,9 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#include "hsa.h"
-#include "hsa_ext_amd.h"
-#include "hsa_ext_image.h"
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
+#include <hsa/hsa_ext_image.h>
 
 #include <fcntl.h>
 #include <assert.h>

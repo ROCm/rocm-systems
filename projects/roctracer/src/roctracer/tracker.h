@@ -21,10 +21,10 @@
 #ifndef SRC_CORE_TRACKER_H_
 #define SRC_CORE_TRACKER_H_
 
-#include <amd_hsa_signal.h>
 #include <assert.h>
-#include <hsa.h>
-#include <hsa_ext_amd.h>
+#include <hsa/amd_hsa_signal.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
 
@@ -80,12 +80,10 @@ class Tracker {
 
     // Creating a proxy signal
     status = hsa_signal_create(1, 0, NULL, &(entry->signal));
-    if (status != HSA_STATUS_SUCCESS)
-      FATAL_LOGGING("hsa_signal_create failed");
+    if (status != HSA_STATUS_SUCCESS) FATAL_LOGGING("hsa_signal_create failed");
     status =
         hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
-    if (status != HSA_STATUS_SUCCESS)
-      FATAL_LOGGING("hsa_amd_signal_async_handler failed");
+    if (status != HSA_STATUS_SUCCESS) FATAL_LOGGING("hsa_amd_signal_async_handler failed");
   }
 
   // Delete tracker entry
@@ -100,8 +98,7 @@ class Tracker {
     static uint64_t sysclock_period = []() {
       uint64_t sysclock_hz = 0;
       hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
-      if (status != HSA_STATUS_SUCCESS)
-        FATAL_LOGGING("hsa_system_get_info failed");
+      if (status != HSA_STATUS_SUCCESS) FATAL_LOGGING("hsa_system_get_info failed");
       return (uint64_t)1000000000 / sysclock_hz;
     }();
 

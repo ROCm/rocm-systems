@@ -18,9 +18,9 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#include <hsa.h>
-#include <hsa_api_trace.h>
-#include <hsa_ven_amd_loader.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_api_trace.h>
+#include <hsa/hsa_ven_amd_loader.h>
 #include <stdio.h>
 #include <stdlib.h>
 

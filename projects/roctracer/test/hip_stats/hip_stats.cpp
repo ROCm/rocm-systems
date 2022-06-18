@@ -237,7 +237,7 @@ void DumpStatistics() {
 
 }  // namespace
 
-#include <hsa_api_trace.h>
+#include <hsa/hsa_api_trace.h>
 
 extern "C" ROCTRACER_EXPORT bool OnLoad(HsaApiTable* /* table */, uint64_t /* runtime_version */,
                                         uint64_t /* failed_tool_count */,

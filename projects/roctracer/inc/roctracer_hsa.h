@@ -21,8 +21,8 @@
 #ifndef INC_ROCTRACER_HSA_H_
 #define INC_ROCTRACER_HSA_H_
 
-#include <hsa.h>
-#include <hsa_ext_amd.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <roctracer.h>
 #include <rocprofiler/activity.h>
@@ -38,7 +38,7 @@ enum hsa_op_id_t {
 
 #ifdef __cplusplus
 #include <iostream>
-#include <hsa_api_trace.h>
+#include <hsa/hsa_api_trace.h>
 
 namespace roctracer {
 namespace hsa_support {
