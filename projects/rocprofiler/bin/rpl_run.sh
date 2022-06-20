@@ -279,6 +279,16 @@ run() {
     MY_HSA_TOOLS_LIB="$ROCM_LIB_PATH/libroctracer64.so $TTLIB_PATH/libroctracer_tool.so"
   fi
 
+  if [ "$ROCP_STATS_OPT" = 1 ] ; then
+    if [ "$ROCTRACER_DOMAIN" = ":hip" ] ; then
+      MY_HSA_TOOLS_LIB="$ROCM_LIB_PATH/libroctracer64.so $TTLIB_PATH/libhip_stats.so"
+    else
+      error_message="ROCP_STATS_OPT is only available with --hip-trace option"
+      echo $error_message
+      exit 1
+    fi
+  fi
+
   retval=1
   if [ -n "$ROCP_OUTPUT_DIR" ] ; then
     log_file="$ROCP_OUTPUT_DIR/log.txt"
