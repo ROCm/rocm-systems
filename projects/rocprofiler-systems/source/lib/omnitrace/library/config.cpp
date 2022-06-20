@@ -427,6 +427,7 @@ configure_settings(bool _init)
     for(auto&& itr :
         tim::delimit(_config->get<std::string>("OMNITRACE_CONFIG_FILE"), ";:"))
     {
+        if(_config->get_suppress_config()) continue;
         OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose_env() > 0,
                                           "Reading config file %s\n", itr.c_str());
         _config->read(itr);
