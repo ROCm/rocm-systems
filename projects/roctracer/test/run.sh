@@ -111,15 +111,15 @@ eval_test "MatrixTranspose dry run" ./test/MatrixTranspose MatrixTranspose_dryru
 eval_test "copy dry run" ./test/copy copy_dryrun_trace
 
 # Standalone test
-# rocTrecer is used explicitely by test
+# ROCtracer is used explicitely by test
 eval_test "standalone C test" "./test/MatrixTranspose_ctest" MatrixTranspose_ctest_trace
 eval_test "standalone HIP test" "./test/MatrixTranspose_test" MatrixTranspose_test_trace
 eval_test "standalone HIP hipaact test" "./test/MatrixTranspose_hipaact_test" MatrixTranspose_hipaact_test_trace
 eval_test "standalone HIP MGPU test" "./test/MatrixTranspose_mgpu" MatrixTranspose_mgpu_trace
 
 # Tool test
-# rocTracer/tool is loaded by HSA runtime
-export HSA_TOOLS_LIB="$ROCTRACER_LIB_PATH/libroctracer64.so $ROCTRACER_TOOL_PATH/libroctracer_tool.so"
+# ROCtracer/tool is loaded by HSA runtime
+export LD_PRELOAD="$ROCTRACER_TOOL_PATH/libroctracer_tool.so"
 
 # ROCTX test
 export ROCTRACER_DOMAIN="roctx"
@@ -166,11 +166,11 @@ unset ROCP_INPUT
 # Check that the tracer tool can be unloaded and then reloaded.
 eval_test "Load/Unload/Reload the tracer tool" ./test/load_unload_reload_test load_unload_reload_trace
 
-export HSA_TOOLS_LIB="$ROCTRACER_LIB_PATH/libroctracer64.so ./test/libhsaco_test.so"
+export HSA_TOOLS_LIB="./test/libhsaco_test.so"
 eval_test "tool HSA codeobj" ./test/MatrixTranspose hsa_co_trace
 
 export ROCP_TOOL_LIB=./test/libcodeobj_test.so
-export HSA_TOOLS_LIB="$ROCTRACER_LIB_PATH/libroctracer64.so librocprofiler64.so"
+export HSA_TOOLS_LIB="librocprofiler64.so"
 eval_test "tool tracer codeobj" ./test/MatrixTranspose code_obj_trace
 
 #valgrind --leak-check=full $tbin

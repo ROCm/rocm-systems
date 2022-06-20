@@ -795,10 +795,15 @@ void tool_load() {
   ONLOAD_TRACE_END();
 }
 
+extern "C" {
+
+// The HSA_AMD_TOOL_PRIORITY variable must be a constant value type initialized by the loader
+// itself, not by code during _init. 'extern const' seems do that although that is not a guarantee.
+ROCTRACER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 1050;
+
 // HSA-runtime tool on-load method
-extern "C" ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
-                                        uint64_t failed_tool_count,
-                                        const char* const* failed_tool_names) {
+ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
+                             uint64_t failed_tool_count, const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
 
   roctracer::hip_support::HIP_depth_max = 0;
@@ -927,8 +932,10 @@ extern "C" ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_ver
 }
 
 // HSA-runtime on-unload method
-extern "C" ROCTRACER_EXPORT void OnUnload() {
+ROCTRACER_EXPORT void OnUnload() {
   ONLOAD_TRACE_BEG();
   tool_unload();
   ONLOAD_TRACE_END();
 }
+
+}  // extern "C"

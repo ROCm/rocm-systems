@@ -1238,12 +1238,19 @@ __attribute__((destructor)) void destructor() {
   ONLOAD_TRACE_END();
 }
 
+extern "C" {
+
+// The HSA_AMD_TOOL_PRIORITY variable must be a constant value type initialized by the loader
+// itself, not by code during _init. 'extern const' seems do that although that is not a guarantee.
+ROCTRACER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 50;
+
 // HSA-runtime tool on-load method
-extern "C" ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
-                                        uint64_t failed_tool_count,
-                                        const char* const* failed_tool_names) {
+ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
+                             uint64_t failed_tool_count, const char* const* failed_tool_names) {
   hsa_support::SaveHsaApi(table);
   return true;
 }
 
-extern "C" ROCTRACER_EXPORT void OnUnload() {}
+ROCTRACER_EXPORT void OnUnload() {}
+
+}  // extern "C"
