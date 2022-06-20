@@ -44,28 +44,28 @@ namespace omnitrace
 inline namespace config
 {
 bool
-get_debug();
+get_debug() OMNITRACE_HOT;
 
 int
-get_verbose();
+get_verbose() OMNITRACE_HOT;
 
 bool
-get_debug_env();
+get_debug_env() OMNITRACE_HOT;
 
 int
-get_verbose_env();
+get_verbose_env() OMNITRACE_HOT;
 
 bool
-get_is_continuous_integration();
+get_is_continuous_integration() OMNITRACE_HOT;
 
 bool
-get_debug_tid();
+get_debug_tid() OMNITRACE_HOT;
 
 bool
-get_debug_pid();
+get_debug_pid() OMNITRACE_HOT;
 
 bool
-get_critical_trace_debug();
+get_critical_trace_debug() OMNITRACE_HOT;
 }  // namespace config
 
 namespace debug

@@ -43,7 +43,7 @@ namespace omnitrace
 inline namespace config
 {
 bool
-settings_are_configured();
+settings_are_configured() OMNITRACE_HOT;
 
 void
 configure_settings(bool _init = true);
@@ -92,7 +92,7 @@ std::string
 get_config_file();
 
 Mode
-get_mode();
+get_mode() OMNITRACE_HOT;
 
 bool&
 is_attached();
@@ -101,10 +101,10 @@ bool&
 is_binary_rewrite();
 
 bool
-get_is_continuous_integration();
+get_is_continuous_integration() OMNITRACE_HOT;
 
 bool
-get_debug_env();
+get_debug_env() OMNITRACE_HOT;
 
 bool
 get_debug_init();
@@ -113,40 +113,40 @@ bool
 get_debug_finalize();
 
 bool
-get_debug();
+get_debug() OMNITRACE_HOT;
 
 bool
-get_debug_sampling();
+get_debug_sampling() OMNITRACE_HOT;
 
 bool
-get_debug_tid();
+get_debug_tid() OMNITRACE_HOT;
 
 bool
-get_debug_pid();
+get_debug_pid() OMNITRACE_HOT;
 
 int
-get_verbose_env();
+get_verbose_env() OMNITRACE_HOT;
 
 int
-get_verbose();
+get_verbose() OMNITRACE_HOT;
 
 bool&
-get_use_perfetto();
+get_use_perfetto() OMNITRACE_HOT;
 
 bool&
-get_use_timemory();
+get_use_timemory() OMNITRACE_HOT;
 
 bool&
-get_use_roctracer();
+get_use_roctracer() OMNITRACE_HOT;
 
 bool&
-get_use_rocm_smi();
+get_use_rocm_smi() OMNITRACE_HOT;
 
 bool&
-get_use_sampling();
+get_use_sampling() OMNITRACE_HOT;
 
 bool&
-get_use_thread_sampling();
+get_use_thread_sampling() OMNITRACE_HOT;
 
 bool&
 get_use_pid();
@@ -155,7 +155,7 @@ bool&
 get_use_mpip();
 
 bool&
-get_use_critical_trace();
+get_use_critical_trace() OMNITRACE_HOT;
 
 bool
 get_use_kokkosp();
@@ -253,7 +253,7 @@ get_trace_thread_locks();
 //      Runtime configuration data
 //
 State&
-get_state();
+get_state() TIMEMORY_HOT;
 
 /// returns old state
 State set_state(State);

@@ -68,37 +68,37 @@ std::unique_ptr<gotcha_bundle_t>&
 get_gotcha_bundle();
 
 std::atomic<uint64_t>&
-get_cpu_cid();
+get_cpu_cid() TIMEMORY_HOT;
 
 unique_ptr_t<std::vector<uint64_t>>&
-get_cpu_cid_stack(int64_t _tid = threading::get_id(), int64_t _parent = 0);
+get_cpu_cid_stack(int64_t _tid = threading::get_id(), int64_t _parent = 0) TIMEMORY_HOT;
 
 using cpu_cid_data_t       = std::tuple<uint64_t, uint64_t, uint32_t>;
 using cpu_cid_pair_t       = std::tuple<uint64_t, uint32_t>;
 using cpu_cid_parent_map_t = std::unordered_map<uint64_t, cpu_cid_pair_t>;
 
 unique_ptr_t<cpu_cid_parent_map_t>&
-get_cpu_cid_parents(int64_t _tid = threading::get_id());
+get_cpu_cid_parents(int64_t _tid = threading::get_id()) TIMEMORY_HOT;
 
 cpu_cid_data_t
-create_cpu_cid_entry(int64_t _tid = threading::get_id());
+create_cpu_cid_entry(int64_t _tid = threading::get_id()) TIMEMORY_HOT;
 
 cpu_cid_pair_t
-get_cpu_cid_entry(uint64_t _cid, int64_t _tid = threading::get_id());
+get_cpu_cid_entry(uint64_t _cid, int64_t _tid = threading::get_id()) TIMEMORY_HOT;
 
 tim::mutex_t&
-get_cpu_cid_stack_lock(int64_t _tid = threading::get_id());
+get_cpu_cid_stack_lock(int64_t _tid = threading::get_id()) TIMEMORY_HOT;
 
 ThreadState&
-get_thread_state();
+get_thread_state() TIMEMORY_HOT;
 
 /// returns old state
-ThreadState set_thread_state(ThreadState);
+ThreadState set_thread_state(ThreadState) TIMEMORY_HOT;
 
-ThreadState push_thread_state(ThreadState);
+ThreadState push_thread_state(ThreadState) TIMEMORY_HOT;
 
 ThreadState
-pop_thread_state();
+pop_thread_state() TIMEMORY_HOT;
 
 struct scoped_thread_state
 {

@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "library/defines.hpp"
+
 #include <array>
 #include <iostream>
 #include <ostream>
@@ -34,10 +36,10 @@ namespace omnitrace
 inline namespace config
 {
 bool
-get_debug();
+get_debug() OMNITRACE_HOT;
 
 int
-get_verbose();
+get_verbose() OMNITRACE_HOT;
 }  // namespace config
 
 struct redirect
