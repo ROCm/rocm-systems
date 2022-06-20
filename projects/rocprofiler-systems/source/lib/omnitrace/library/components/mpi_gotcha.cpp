@@ -25,6 +25,7 @@
 #include "library/components/omnitrace.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
+#include "library/mproc.hpp"
 
 #include <thread>
 #include <timemory/backends/mpi.hpp>
@@ -170,6 +171,26 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
                 comp::activate_mpip<tim::component_tuple<omnitrace::component::omnitrace>,
                                     api::omnitrace>();
         }
+
+        auto _size = mproc::get_concurrent_processes().size();
+        if(_size > 0)
+        {
+            m_size = _size;
+            tim::mpi::set_size(_size);
+            OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI size: %i (%i)\n", process::get_id(),
+                                    tim::mpi::size(), m_size);
+
+            auto _rank = mproc::get_process_index();
+            if(_rank >= 0)
+            {
+                m_rank = _rank;
+                tim::mpi::set_rank(_rank);
+                tim::settings::default_process_suffix() = _rank;
+                get_perfetto_output_filename().clear();
+                OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI rank: %i (%i)\n",
+                                        process::get_id(), tim::mpi::rank(), m_rank);
+            }
+        }
     }
     else if(_retval == tim::mpi::success_v && _data.tool_id.find("MPI_Comm_") == 0)
     {
@@ -177,12 +198,15 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         {
             if(m_rank_ptr)
             {
-                m_rank = std::max<int>(*m_rank_ptr, m_rank);
-                tim::mpi::set_rank(m_rank);
-                tim::settings::default_process_suffix() = m_rank;
-                get_perfetto_output_filename().clear();
-                OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI rank: %i (%i)\n",
-                                        process::get_id(), tim::mpi::rank(), m_rank);
+                if(mproc::get_concurrent_processes().empty())
+                {
+                    m_rank = std::max<int>(*m_rank_ptr, m_rank);
+                    tim::mpi::set_rank(m_rank);
+                    tim::settings::default_process_suffix() = m_rank;
+                    get_perfetto_output_filename().clear();
+                    OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI rank: %i (%i)\n",
+                                            process::get_id(), tim::mpi::rank(), m_rank);
+                }
             }
             else
             {
@@ -194,10 +218,13 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         {
             if(m_size_ptr)
             {
-                m_size = std::max<int>(*m_size_ptr, m_size);
-                tim::mpi::set_size(m_size);
-                OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI size: %i (%i)\n",
-                                        process::get_id(), tim::mpi::size(), m_size);
+                if(mproc::get_concurrent_processes().empty())
+                {
+                    m_size = std::max<int>(*m_size_ptr, m_size);
+                    tim::mpi::set_size(m_size);
+                    OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI size: %i (%i)\n",
+                                            process::get_id(), tim::mpi::size(), m_size);
+                }
             }
             else
             {

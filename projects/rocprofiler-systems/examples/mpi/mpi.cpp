@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <mpi.h>
+
 #include <cfloat>
 #include <chrono>
 #include <cmath>
@@ -30,14 +32,11 @@ THE SOFTWARE.
 #include <iostream>
 #include <mutex>
 #include <random>
+#include <sstream>
 #include <thread>
 #include <type_traits>
+#include <unistd.h>
 #include <vector>
-
-static std::mutex print_lock{};
-using auto_lock_t = std::unique_lock<std::mutex>;
-
-#include <mpi.h>
 
 std::string _name = {};
 
@@ -105,9 +104,23 @@ main(int argc, char** argv)
 
     printf("[%s] Number of iterations: %i\n", _name.c_str(), nitr);
 
-    MPI_Init(&argc, &argv);
+    int _mpi_thread_provided;
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_SINGLE, &_mpi_thread_provided);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    auto              _ppid = getppid();
+    std::ifstream     _ifs{ "/proc/" + std::to_string(_ppid) + "/task/" +
+                        std::to_string(_ppid) + "/children" };
+    std::stringstream _ss{};
+    while(_ifs)
+    {
+        std::string _s{};
+        _ifs >> _s;
+        _ss << _s << " ";
+    }
+    printf("[%s] RANK = %i, PID = %i, PPID = %i :: %s\n", _name.c_str(), rank, getpid(),
+           getppid(), _ss.str().c_str());
 
     MPI_Barrier(MPI_COMM_WORLD);
     for(int i = 0; i < nitr; ++i)
