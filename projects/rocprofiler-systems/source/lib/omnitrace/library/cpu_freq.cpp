@@ -128,7 +128,7 @@ config()
                     _vv.size() != 2,
                     "Invalid CPU range specification: %s. Required format N-M, e.g. 0-4",
                     _v.c_str());
-                for(size_t i = std::stoull(_vv.at(0)); i < std::stoull(_vv.at(1)); ++i)
+                for(size_t i = std::stoull(_vv.at(0)); i <= std::stoull(_vv.at(1)); ++i)
                     _enabled_freqs.emplace(i);
             }
             else
