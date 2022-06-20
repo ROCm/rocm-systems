@@ -98,6 +98,7 @@ enum DevKFDNodePropTypes {
 enum DevInfoTypes {
   kDevPerfLevel,
   kDevOverDriveLevel,
+  kDevMemOverDriveLevel,
   kDevDevID,
   kDevDevProdName,
   kDevDevProdNum,

@@ -864,6 +864,33 @@ rsmi_dev_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
 }
 
 rsmi_status_t
+rsmi_dev_mem_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
+  TRY
+  std::string val_str;
+  CHK_SUPPORT_NAME_ONLY(od)
+  DEVICE_MUTEX
+
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevMemOverDriveLevel, dv_ind,
+                                                                    &val_str);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  errno = 0;
+  uint64_t val_ul = strtoul(val_str.c_str(), nullptr, 10);
+
+  if (val_ul > 0xFFFFFFFF) {
+    return RSMI_STATUS_UNEXPECTED_SIZE;
+  }
+
+  *od = static_cast<uint32_t>(val_ul);
+  assert(errno == 0);
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
 rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od) {
   if (dv_ind < 0) {
     return RSMI_STATUS_INVALID_ARGS;

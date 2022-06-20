@@ -1825,20 +1825,16 @@ def showOverDrive(deviceList, odtype):
             ret = rocmsmi.rsmi_dev_overdrive_level_get(device, byref(rsmi_od))
             od = rsmi_od.value
             if not rsmi_ret_ok(ret, device):
-                printErrLog(device, 'Unable to retrieve sclk OverDrive level')
+                continue
         elif odtype == 'mclk':
             odStr = 'GPU Memory'
-            filePath = os.path.join('/sys/class/drm', 'card%d' % (device), 'device', 'pp_mclk_od')
-            if filePath:
-                try:
-                    with open(filePath, 'r') as fileContents:
-                        od = fileContents.read().rstrip('\n')
-                except:
-                    printErrLog(device, 'Unable to retrieve mclk OverDrive level')
-                    return None
+            ret = rocmsmi.rsmi_dev_mem_overdrive_level_get(device, byref(rsmi_od))
+            od = rsmi_od.value
+            if not rsmi_ret_ok(ret, device):
+                continue
         else:
             printErrLog(device, 'Unable to retrieve OverDrive')
-            logging.error('Unsupported clock type %s', clktype)
+            logging.error('Unsupported clock type %s', odtype)
             RETCODE = 1
         printLog(device, odStr + ' OverDrive value (%)', od)
     printLogSpacer()
