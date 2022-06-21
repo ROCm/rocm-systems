@@ -27,16 +27,71 @@
 #include "library/debug.hpp"
 #include "library/mproc.hpp"
 
-#include <thread>
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
+#include <timemory/utility/locking.hpp>
+
+#include <cstdint>
+#include <limits>
+#include <thread>
+#include <unistd.h>
 
 namespace omnitrace
 {
 namespace
 {
-uint64_t    mpip_index      = std::numeric_limits<uint64_t>::max();
-std::string mpi_init_string = {};
+struct comm_rank_data
+{
+    int       rank = -1;
+    int       size = -1;
+    uintptr_t comm = mpi_gotcha::null_comm();
+
+    auto updated() const
+    {
+        return comm != mpi_gotcha::null_comm() && rank >= 0 && size > 0;
+    };
+
+    friend bool operator==(const comm_rank_data& _lhs, const comm_rank_data& _rhs)
+    {
+        auto _lupd = _lhs.updated();
+        auto _rupd = _rhs.updated();
+        return std::tie(_lupd, _lhs.rank, _lhs.size, _lhs.comm) ==
+               std::tie(_rupd, _rhs.rank, _rhs.size, _rhs.comm);
+    }
+
+    friend bool operator!=(const comm_rank_data& _lhs, const comm_rank_data& _rhs)
+    {
+        return !(_lhs == _rhs);
+    }
+
+    friend bool operator>(const comm_rank_data& _lhs, const comm_rank_data& _rhs)
+    {
+        OMNITRACE_CI_THROW(!_lhs.updated() && !_rhs.updated(),
+                           "Error! comparing rank data that is not updated");
+
+        if(_lhs.updated() && !_rhs.updated()) return true;
+        if(!_lhs.updated() && _rhs.updated()) return false;
+
+        if(_lhs.size != _rhs.size) return _lhs.size > _rhs.size;
+        if(_lhs.rank != _rhs.rank) return _lhs.rank > _rhs.rank;
+
+        // lesser comm is greater
+        return _lhs.comm < _rhs.comm;
+    }
+
+    friend bool operator<(const comm_rank_data& _lhs, const comm_rank_data& _rhs)
+    {
+        return (_lhs != _rhs && !(_lhs > _rhs));
+    }
+};
+
+uint64_t mpip_index        = std::numeric_limits<uint64_t>::max();
+auto     last_comm_record  = comm_rank_data{};
+auto     mproc_comm_record = comm_rank_data{};
+auto     mpi_comm_records  = std::map<uintptr_t, comm_rank_data>{};
+
+using tim::auto_lock_t;
+using tim::type_mutex;
 
 // this ensures omnitrace_finalize is called before MPI_Finalize
 void
@@ -78,6 +133,50 @@ mpi_gotcha::configure()
         mpi_gotcha_t::template configure<4, int, comm_t, int*>("MPI_Comm_size");
 #endif
     };
+}
+
+void
+mpi_gotcha::stop()
+{
+    OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] Stopping MPI gotcha...\n", process::get_id());
+    update();
+}
+
+void
+mpi_gotcha::update()
+{
+    auto_lock_t _lk{ type_mutex<mpi_gotcha>(), std::defer_lock };
+    if(!_lk.owns_lock()) _lk.lock();
+
+    comm_rank_data _rank_data = mproc_comm_record;
+    for(const auto& itr : mpi_comm_records)
+    {
+        // skip null comms
+        if(itr.first == null_comm()) continue;
+        // if currently have null comm, replace
+        else if(_rank_data.comm == null_comm())
+            _rank_data = itr.second;
+        // if
+        else if(itr.second > _rank_data)
+            _rank_data = itr.second;
+    }
+
+    if(_rank_data.updated() && _rank_data != last_comm_record)
+    {
+        auto _rank = _rank_data.rank;
+        auto _size = _rank_data.size;
+
+        tim::mpi::set_rank(_rank);
+        tim::mpi::set_size(_size);
+        tim::settings::default_process_suffix() = _rank;
+        get_perfetto_output_filename().clear();
+
+        OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI rank: %i (%i)\n", process::get_id(),
+                                tim::mpi::rank(), _rank);
+        OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI size: %i (%i)\n", process::get_id(),
+                                tim::mpi::size(), _size);
+        last_comm_record = _rank_data;
+    }
 }
 
 void
@@ -126,17 +225,19 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
 }
 
 void
-mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t, int* _val)
+mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int* _val)
 {
     OMNITRACE_BASIC_DEBUG_F("%s()\n", _data.tool_id.c_str());
 
     omnitrace_push_trace_hidden(_data.tool_id.c_str());
     if(_data.tool_id == "MPI_Comm_rank")
     {
+        m_comm_val = (uintptr_t) _comm;  // NOLINT
         m_rank_ptr = _val;
     }
     else if(_data.tool_id == "MPI_Comm_size")
     {
+        m_comm_val = (uintptr_t) _comm;  // NOLINT
         m_size_ptr = _val;
     }
     else
@@ -172,71 +273,51 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
                                     api::omnitrace>();
         }
 
-        auto _size = mproc::get_concurrent_processes().size();
-        if(_size > 0)
+        auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
+        if(!mproc_comm_record.updated())
         {
-            m_size = _size;
-            tim::mpi::set_size(_size);
-            OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI size: %i (%i)\n", process::get_id(),
-                                    tim::mpi::size(), m_size);
-
-            auto _rank = mproc::get_process_index();
-            if(_rank >= 0)
+            auto _pid  = getpid();
+            auto _ppid = getppid();
+            auto _size = mproc::get_concurrent_processes(_ppid).size();
+            if(_size > 0)
             {
-                m_rank = _rank;
-                tim::mpi::set_rank(_rank);
-                tim::settings::default_process_suffix() = _rank;
-                get_perfetto_output_filename().clear();
-                OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI rank: %i (%i)\n",
-                                        process::get_id(), tim::mpi::rank(), m_rank);
+                mproc_comm_record.comm = _ppid;
+                mproc_comm_record.size = m_size = _size;
+                auto _rank                      = mproc::get_process_index(_pid, _ppid);
+                if(_rank >= 0) mproc_comm_record.rank = m_rank = _rank;
             }
         }
     }
     else if(_retval == tim::mpi::success_v && _data.tool_id.find("MPI_Comm_") == 0)
     {
-        if(_data.tool_id == "MPI_Comm_rank")
+        auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
+        if(m_comm_val != null_comm())
         {
-            if(m_rank_ptr)
+            auto& _comm_entry = mpi_comm_records[m_comm_val];
+            _comm_entry.comm  = m_comm_val;
+
+            auto _get_rank = [&]() {
+                return (m_rank_ptr) ? std::max<int>(*m_rank_ptr, m_rank) : m_rank;
+            };
+
+            auto _get_size = [&]() {
+                return (m_size_ptr) ? std::max<int>(*m_size_ptr, m_size)
+                                    : std::max<int>(m_size, _get_rank() + 1);
+            };
+
+            if(_data.tool_id == "MPI_Comm_rank" || _data.tool_id == "MPI_Comm_size")
             {
-                if(mproc::get_concurrent_processes().empty())
-                {
-                    m_rank = std::max<int>(*m_rank_ptr, m_rank);
-                    tim::mpi::set_rank(m_rank);
-                    tim::settings::default_process_suffix() = m_rank;
-                    get_perfetto_output_filename().clear();
-                    OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI rank: %i (%i)\n",
-                                            process::get_id(), tim::mpi::rank(), m_rank);
-                }
+                _comm_entry.rank = m_rank = std::max<int>(_comm_entry.rank, _get_rank());
+                _comm_entry.size = m_size = std::max<int>(_comm_entry.size, _get_size());
             }
             else
             {
-                OMNITRACE_BASIC_VERBOSE(0, "%s() returned %i :: nullptr to rank\n",
-                                        _data.tool_id.c_str(), (int) _retval);
+                OMNITRACE_BASIC_VERBOSE(
+                    0, "%s() returned %i :: unexpected function wrapper\n",
+                    _data.tool_id.c_str(), (int) _retval);
             }
-        }
-        else if(_data.tool_id == "MPI_Comm_size")
-        {
-            if(m_size_ptr)
-            {
-                if(mproc::get_concurrent_processes().empty())
-                {
-                    m_size = std::max<int>(*m_size_ptr, m_size);
-                    tim::mpi::set_size(m_size);
-                    OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI size: %i (%i)\n",
-                                            process::get_id(), tim::mpi::size(), m_size);
-                }
-            }
-            else
-            {
-                OMNITRACE_BASIC_VERBOSE(0, "%s() returned %i :: nullptr to size\n",
-                                        _data.tool_id.c_str(), (int) _retval);
-            }
-        }
-        else
-        {
-            OMNITRACE_BASIC_VERBOSE(0,
-                                    "%s() returned %i :: unexpected function wrapper\n",
-                                    _data.tool_id.c_str(), (int) _retval);
+
+            // if(_comm_entry.updated()) update();
         }
     }
     omnitrace_pop_trace_hidden(_data.tool_id.c_str());

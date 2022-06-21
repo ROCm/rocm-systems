@@ -26,6 +26,8 @@
 #include "library/defines.hpp"
 #include "library/timemory.hpp"
 
+#include <cstdint>
+
 namespace omnitrace
 {
 // this is used to wrap MPI_Init and MPI_Init_thread
@@ -60,13 +62,17 @@ struct mpi_gotcha : comp::base<mpi_gotcha, void>
 
     // without these you will get a verbosity level 1 warning
     static void start() {}
-    static void stop() {}
+    static void stop();
+
+    static void      update();
+    static uintptr_t null_comm() { return std::numeric_limits<uintptr_t>::max(); }
 
 private:
-    int* m_rank_ptr = nullptr;
-    int* m_size_ptr = nullptr;
-    int  m_rank     = 0;
-    int  m_size     = 1;
+    int       m_rank     = 0;
+    int       m_size     = 1;
+    int*      m_rank_ptr = nullptr;
+    int*      m_size_ptr = nullptr;
+    uintptr_t m_comm_val = null_comm();
 };
 
 using mpi_gotcha_t = comp::gotcha<5, tim::component_tuple<mpi_gotcha>, api::omnitrace>;
