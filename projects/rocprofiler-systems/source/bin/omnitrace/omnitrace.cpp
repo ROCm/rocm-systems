@@ -1000,20 +1000,20 @@ main(int argc, char** argv)
     // for runtime instrumentation, we need to set this before the process gets created
     if(!binary_rewrite)
     {
+        auto _hsa_val = tim::get_env<int>("HSA_ENABLE_INTERRUPT", 1, false);
         tim::set_env("HSA_ENABLE_INTERRUPT", "0", 0);
-        if(_pid >= 0)
+        if(_pid >= 0 && _hsa_val != 0)
         {
-            verbprintf(-10, "#-------------------------------------------------------"
-                            "-------------------------------------------#\n");
-            verbprintf(-10, "\n");
-            verbprintf(-10, "WARNING! Sampling may result in ioctl() deadlock within "
-                            "the ROCR runtime.\n");
-            verbprintf(-10,
-                       "To avoid this, set HSA_ENABLE_INTERRUPT=0 in the environment "
-                       "before starting your ROCm/HIP application\n");
-            verbprintf(-10, "\n");
-            verbprintf(-10, "#-------------------------------------------------------"
-                            "-------------------------------------------#\n");
+            verbprintf(0, "#-------------------------------------------------------"
+                          "-------------------------------------------#\n");
+            verbprintf(0, "\n");
+            verbprintf(0, "WARNING! Sampling may result in ioctl() deadlock within "
+                          "the ROCR runtime.\n");
+            verbprintf(0, "To avoid this, set HSA_ENABLE_INTERRUPT=0 in the environment "
+                          "before starting your ROCm/HIP application\n");
+            verbprintf(0, "\n");
+            verbprintf(0, "#-------------------------------------------------------"
+                          "-------------------------------------------#\n");
         }
     }
 
@@ -2023,7 +2023,20 @@ main(int argc, char** argv)
                    WIFSIGNALED(status));                                                 \
     }
 
-        if(!app_thread->isTerminated())
+        auto _compute_exit_code = [app_thread, &code]() {
+            if(app_thread->terminationStatus() == ExitedNormally)
+            {
+                if(app_thread->isTerminated()) verbprintf(0, "End of omnitrace\n");
+            }
+            else if(app_thread->terminationStatus() == ExitedViaSignal)
+            {
+                auto sign = app_thread->getExitSignal();
+                fprintf(stderr, "\nApplication exited with signal: %i\n", int(sign));
+            }
+            code = app_thread->getExitCode();
+        };
+
+        if(!app_thread->isTerminated() && !is_attached)
         {
             pid_t cpid   = app_thread->getPid();
             int   status = 0;
@@ -2056,18 +2069,19 @@ main(int argc, char** argv)
                 }
             } while(WIFEXITED(status) == 0 && WIFSIGNALED(status) == 0);
         }
+        else if(!app_thread->isTerminated() && is_attached)
+        {
+            app_thread->continueExecution();
+            while(!app_thread->isTerminated())
+            {
+                while(bpatch->waitForStatusChange())
+                    app_thread->continueExecution();
+            }
+            _compute_exit_code();
+        }
         else
         {
-            if(app_thread->terminationStatus() == ExitedNormally)
-            {
-                if(app_thread->isTerminated()) verbprintf(0, "End of omnitrace\n");
-            }
-            else if(app_thread->terminationStatus() == ExitedViaSignal)
-            {
-                auto sign = app_thread->getExitSignal();
-                fprintf(stderr, "\nApplication exited with signal: %i\n", int(sign));
-            }
-            code = app_thread->getExitCode();
+            _compute_exit_code();
         }
     }
 

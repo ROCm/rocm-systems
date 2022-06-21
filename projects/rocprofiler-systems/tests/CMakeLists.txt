@@ -98,6 +98,22 @@ set(_python_environment
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
     "PYTHONPATH=${PROJECT_BINARY_DIR}/lib/python/site-packages")
 
+set(_attach_environment
+    "OMNITRACE_USE_PERFETTO=ON"
+    "OMNITRACE_USE_TIMEMORY=ON"
+    "OMNITRACE_USE_SAMPLING=OFF"
+    "OMNITRACE_USE_THREAD_SAMPLING=ON"
+    "OMNITRACE_USE_CRITICAL_TRACE=ON"
+    "OMNITRACE_USE_OMPT=ON"
+    "OMNITRACE_USE_KOKKOSP=ON"
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_USE_PID=OFF"
+    "OMP_PROC_BIND=spread"
+    "OMP_PLACES=threads"
+    "OMP_NUM_THREADS=2"
+    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
+
 # -------------------------------------------------------------------------------------- #
 
 set(MPIEXEC_EXECUTABLE_ARGS)
@@ -803,6 +819,52 @@ omnitrace_add_test(
     ENVIRONMENT "${_base_environment}"
     RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
     REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%")
+
+# -------------------------------------------------------------------------------------- #
+#
+# attach tests
+#
+# -------------------------------------------------------------------------------------- #
+
+set(_VALID_PTRACE_SCOPE OFF)
+if(EXISTS "/proc/sys/kernel/yama/ptrace_scope")
+    file(READ "/proc/sys/kernel/yama/ptrace_scope" _PTRACE_SCOPE LIMIT 1)
+    if("${_PTRACE_SCOPE}" EQUAL 0)
+        set(_VALID_PTRACE_SCOPE ON)
+    endif()
+else()
+    omnitrace_message(
+        AUTHOR_WARNING
+        "Disabling attach tests. Run 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope' to enable attaching to process"
+        )
+endif()
+
+if(TARGET parallel-overhead AND _VALID_PTRACE_SCOPE)
+    add_test(
+        NAME parallel-overhead-attach
+        COMMAND
+            ${CMAKE_CURRENT_LIST_DIR}/run-omnitrace-pid.sh $<TARGET_FILE:omnitrace-exe>
+            -ME "\.c$" -e -v 1 --label return args file -l --
+            $<TARGET_FILE:parallel-overhead> 30 8 1000
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+    set(_parallel_overhead_attach_environ
+        "${_attach_environment}" "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
+        "OMNITRACE_OUTPUT_PREFIX=parallel-overhead-attach/")
+
+    set_tests_properties(
+        parallel-overhead-attach
+        PROPERTIES ENVIRONMENT
+                   "${_parallel_overhead_attach_environ}"
+                   TIMEOUT
+                   300
+                   LABELS
+                   "parallel-overhead;attach"
+                   PASS_REGULAR_EXPRESSION
+                   "Outputting.*(perfetto-trace.proto).*Outputting.*(wall_clock.txt)"
+                   FAIL_REGULAR_EXPRESSION
+                   "Dyninst was unable to attach to the specified process")
+endif()
 
 # -------------------------------------------------------------------------------------- #
 #
