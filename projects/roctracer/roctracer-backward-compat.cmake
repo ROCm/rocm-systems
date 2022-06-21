@@ -53,10 +53,10 @@ function(generate_wrapper_header)
     get_filename_component(file_name ${header_file} NAME)
     get_filename_component ( header_subdir ${header_file} DIRECTORY )
     if(header_subdir)
-      set(include_statements "#include \"../../../include/${PROJECT_NAME}/${header_subdir}/${file_name}\"\n")
+      set(include_statements "#include \"../../../${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${header_subdir}/${file_name}\"\n")
       configure_file(${PROJECT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${header_subdir}/${file_name})
     else()
-      set(include_statements "#include \"../../include/${PROJECT_NAME}/${file_name}\"\n")
+      set(include_statements "#include \"../../${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${file_name}\"\n")
       if(${file_name} STREQUAL "roctracer.h")
         set_file_contents(${PROJECT_SOURCE_DIR}/inc/${file_name})
       else()
@@ -72,7 +72,7 @@ function(generate_wrapper_header)
     set(include_guard "ROCTRACER_WRAPPER_INCLUDE_${INC_GAURD_NAME}_H")
     #set include statements
     get_filename_component(file_name ${header_file} NAME)
-    set(include_statements "#include \"../../include/${PROJECT_NAME}/${file_name}\"\n")
+    set(include_statements "#include \"../../${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${file_name}\"\n")
     configure_file(${PROJECT_SOURCE_DIR}/header_template.hpp.in ${ROCT_WRAPPER_INC_DIR}/${file_name})
 
   endforeach()
@@ -94,7 +94,7 @@ function(create_library_symlink)
     add_custom_target(link_${file_name} ALL
                   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                   COMMAND ${CMAKE_COMMAND} -E create_symlink
-                  ../../lib/${file_name} ${ROCT_WRAPPER_LIB_DIR}/${file_name})
+                  ../../${CMAKE_INSTALL_LIBDIR}/${file_name} ${ROCT_WRAPPER_LIB_DIR}/${file_name})
   endforeach()
   #set softlink for roctracer/tool/libtracer_tool.so
   #The libray name is changed to libroctracer_tool.so with file reorg changes

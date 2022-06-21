@@ -105,7 +105,7 @@ set(PUBLIC_HEADERS
 foreach(header ${PUBLIC_HEADERS})
   get_filename_component(header_subdir ${header} DIRECTORY)
   install(FILES ${PROJECT_SOURCE_DIR}/inc/${header}
-          DESTINATION include/${PROJECT_NAME}/${header_subdir}
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${header_subdir}
           COMPONENT runtime)
 endforeach()
 
@@ -116,7 +116,7 @@ set(GENERATED_HEADERS
 
 foreach(header ${GENERATED_HEADERS})
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${header}
-    DESTINATION include/${PROJECT_NAME}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
     COMPONENT runtime)
 endforeach()
 
@@ -148,7 +148,7 @@ target_link_options(roctracer PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURC
 target_link_libraries(roctracer PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl)
 
 install(TARGETS roctracer LIBRARY
-  DESTINATION lib
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}
   COMPONENT runtime)
 
 ## Build the ROCTX library
@@ -170,7 +170,7 @@ target_include_directories(roctx
 target_link_options(roctx PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/roctx/exportmap -Wl,--no-undefined)
 
 install(TARGETS roctx LIBRARY
-  DESTINATION lib
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}
   COMPONENT runtime)
 
 ## Build the tracer_tool library
@@ -194,12 +194,12 @@ target_include_directories(roctracer_tool
 target_link_libraries(roctracer_tool roctracer hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl)
 target_link_options(roctracer_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/tracer_tool/exportmap -Wl,--no-undefined)
 
-install(TARGETS roctracer_tool LIBRARY DESTINATION lib/${PROJECT_NAME} COMPONENT runtime)
+install(TARGETS roctracer_tool LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT runtime)
 
 add_library(hip_stats SHARED hip_stats/hip_stats.cpp)
 target_compile_definitions(hip_stats PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(hip_stats roctracer stdc++fs)
-install(TARGETS hip_stats LIBRARY DESTINATION lib/${PROJECT_NAME} COMPONENT runtime)
+install(TARGETS hip_stats LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT runtime)
 
 endif()
 

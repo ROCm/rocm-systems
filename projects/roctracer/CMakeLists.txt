@@ -24,6 +24,7 @@ cmake_minimum_required(VERSION 3.18.0)
 
 project(roctracer VERSION 4.1.0)
 
+include(GNUInstallDirs)
 # set default ROCM_PATH
 if(NOT DEFINED ROCM_PATH)
     set(ROCM_PATH "/opt/rocm"  CACHE STRING "Default ROCM installation directory")
@@ -89,7 +90,7 @@ endif()
 
 ## Install license file
 install(FILES ${CPACK_RESOURCE_FILE_LICENSE}
-  DESTINATION share/doc/${PROJECT_NAME}
+  DESTINATION ${CMAKE_INSTALL_DOCDIR}
   COMPONENT runtime)
 
 ## Debian package specific variables
@@ -176,14 +177,14 @@ if(DOXYGEN_FOUND)
 
   install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/doc/latex/refman.pdf"
-    DESTINATION share/doc/${PROJECT_NAME}
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
     RENAME "roctracer.pdf"
     OPTIONAL
     COMPONENT runtime)
 
   install(DIRECTORY
     "${CMAKE_CURRENT_BINARY_DIR}/doc/html/"
-    DESTINATION share/html/${PROJECT_NAME}
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/html/${PROJECT_NAME}
     OPTIONAL
     COMPONENT runtime)
 endif()
