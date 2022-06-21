@@ -81,6 +81,28 @@ join(DelimT&& _delim, Args&&... _args)
 {
     std::stringstream _ss{};
     _ss << std::boolalpha;
+    OMNITRACE_FOLD_EXPRESSION(_ss << _delim << _args);
+    auto _ret = _ss.str();
+    if constexpr(std::is_same<DelimT, char>::value)
+    {
+        return (_ret.length() > 1) ? _ret.substr(1) : std::string{};
+    }
+    else
+    {
+        auto&& _len = std::string{ _delim }.length();
+        return (_ret.length() > _len) ? _ret.substr(_len) : std::string{};
+    }
+}
+
+struct QuoteStrings
+{};
+
+template <typename DelimT, typename... Args>
+auto
+join(QuoteStrings&&, DelimT&& _delim, Args&&... _args)
+{
+    std::stringstream _ss{};
+    _ss << std::boolalpha;
     OMNITRACE_FOLD_EXPRESSION(_ss << _delim << as_string(_args));
     auto _ret = _ss.str();
     if constexpr(std::is_same<DelimT, char>::value)

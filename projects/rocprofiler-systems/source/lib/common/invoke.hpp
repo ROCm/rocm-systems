@@ -70,7 +70,8 @@ ignore(const char* _name, int _verbose, int _value, const char* _reason, Args...
         fprintf(stderr,
                 "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
                 "][%li] %s(%s) was ignored :: %s\n",
-                get_thread_index(), _name, join(", ", _args...).c_str(), _reason);
+                get_thread_index(), _name, join(QuoteStrings{}, ", ", _args...).c_str(),
+                _reason);
         fflush(stderr);
     }
 }
@@ -100,7 +101,8 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
                 fprintf(stderr,
                         "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
                         "][%li][%i] %s(%s)\n",
-                        get_thread_index(), _lk, _name, join(", ", _args...).c_str());
+                        get_thread_index(), _lk, _name,
+                        join(QuoteStrings{}, ", ", _args...).c_str());
                 fflush(stderr);
             }
             return std::invoke(std::forward<FuncT>(_func), _args...);
@@ -111,7 +113,8 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
             fprintf(stderr,
                     "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
                     "][%li] %s(%s) was guarded :: value = %i\n",
-                    get_thread_index(), _name, join(", ", _args...).c_str(), _lk);
+                    get_thread_index(), _name,
+                    join(QuoteStrings{}, ", ", _args...).c_str(), _lk);
             fflush(stderr);
         }
     }
@@ -120,7 +123,7 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
         fprintf(stderr,
                 "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
                 "][%li] %s(%s) ignored :: null function pointer\n",
-                get_thread_index(), _name, join(", ", _args...).c_str());
+                get_thread_index(), _name, join(QuoteStrings{}, ", ", _args...).c_str());
     }
 
     using return_type = decltype(std::invoke(std::forward<FuncT>(_func), _args...));

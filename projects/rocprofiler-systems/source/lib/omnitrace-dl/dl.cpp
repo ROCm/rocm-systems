@@ -136,25 +136,39 @@ const char* _omnitrace_dl_dlopen_descr = "RTLD_LAZY | RTLD_LOCAL";
 /// This class contains function pointers for omnitrace's instrumentation functions
 struct OMNITRACE_HIDDEN_API indirect
 {
-    OMNITRACE_INLINE indirect(const std::string& omnilib, const std::string& userlib)
+    OMNITRACE_INLINE indirect(const std::string& omnilib, const std::string& userlib,
+                              const std::string& dllib)
     : m_omnilib{ find_path(omnilib) }
+    , m_dllib{ find_path(dllib) }
     , m_userlib{ find_path(userlib) }
     {
         if(_omnitrace_dl_verbose >= 1)
         {
-            fprintf(stderr, "[omnitrace][dl][pid=%i] libomnitrace.so resolved to '%s'\n",
-                    getpid(), m_omnilib.c_str());
+            fprintf(stderr, "[omnitrace][dl][pid=%i] %s resolved to '%s'\n", getpid(),
+                    ::basename(omnilib.c_str()), m_omnilib.c_str());
+            fprintf(stderr, "[omnitrace][dl][pid=%i] %s resolved to '%s'\n", getpid(),
+                    ::basename(dllib.c_str()), m_dllib.c_str());
+            fprintf(stderr, "[omnitrace][dl][pid=%i] %s resolved to '%s'\n", getpid(),
+                    ::basename(userlib.c_str()), m_userlib.c_str());
         }
+
 #if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
         auto _omni_hsa_lib = m_omnilib;
         setenv("HSA_TOOLS_LIB", _omni_hsa_lib.c_str(), 0);
 #endif
+
 #if OMNITRACE_USE_OMPT > 0
         if(get_env("OMNITRACE_USE_OMPT", true))
         {
-            std::string _omni_omp_libs = find_path("libomnitrace-dl.so");
+            std::string _omni_omp_libs = m_dllib;
             const char* _omp_libs      = getenv("OMP_TOOL_LIBRARIES");
             if(_omp_libs) _omni_omp_libs = common::join(':', _omni_omp_libs, _omp_libs);
+            if(_omnitrace_dl_verbose >= 1)
+            {
+                fprintf(stderr,
+                        "[omnitrace][dl][pid=%i] setting OMP_TOOL_LIBRARIES to '%s'\n",
+                        getpid(), _omni_omp_libs.c_str());
+            }
             setenv("OMP_TOOL_LIBRARIES", _omni_omp_libs.c_str(), 1);
         }
 #endif
@@ -171,9 +185,9 @@ struct OMNITRACE_HIDDEN_API indirect
 
         if(libhandle)
         {
-            if(_omnitrace_dl_verbose >= 1)
+            if(_omnitrace_dl_verbose >= 2)
             {
-                fprintf(stderr, "[omnitrace][dl][pid=%i] dlopen(%s, %s) :: success\n",
+                fprintf(stderr, "[omnitrace][dl][pid=%i] dlopen(\"%s\", %s) :: success\n",
                         getpid(), _lib.c_str(), _omnitrace_dl_dlopen_descr);
             }
         }
@@ -182,7 +196,7 @@ struct OMNITRACE_HIDDEN_API indirect
             if(_omnitrace_dl_verbose >= 0)
             {
                 perror("dlopen");
-                fprintf(stderr, "[omnitrace][dl][pid=%i] dlopen(%s, %s) :: %s\n",
+                fprintf(stderr, "[omnitrace][dl][pid=%i] dlopen(\"%s\", %s) :: %s\n",
                         getpid(), _lib.c_str(), _omnitrace_dl_dlopen_descr, dlerror());
             }
         }
@@ -305,9 +319,16 @@ struct OMNITRACE_HIDDEN_API indirect
             return (stat(name.c_str(), &buffer) == 0);
         };
 
+        int _verbose_lvl = 2;
         for(const auto& itr : _paths)
         {
             auto _f = join('/', itr, _path);
+            if(_omnitrace_dl_verbose >= _verbose_lvl)
+            {
+                fprintf(stderr,
+                        "[omnitrace][dl][pid=%i] searching for '%s' in '%s' ...\n",
+                        getpid(), _path.c_str(), itr.c_str());
+            }
             if(file_exists(_f)) return _f;
         }
         return _path;
@@ -378,6 +399,7 @@ private:
     void*       m_omnihandle = nullptr;
     void*       m_userhandle = nullptr;
     std::string m_omnilib    = {};
+    std::string m_dllib      = {};
     std::string m_userlib    = {};
 };
 
@@ -389,7 +411,8 @@ get_indirect()
 {
     static auto  _libomni = get_env("OMNITRACE_LIBRARY", "libomnitrace.so");
     static auto  _libuser = get_env("OMNITRACE_USER_LIBRARY", "libomnitrace-user.so");
-    static auto* _v       = new indirect{ _libomni, _libuser };
+    static auto  _libdlib = get_env("OMNITRACE_DL_LIBRARY", "libomnitrace-dl.so");
+    static auto* _v       = new indirect{ _libomni, _libuser, _libdlib };
     return *_v;
 }
 
@@ -488,14 +511,16 @@ extern "C"
     {
         if(dl::get_inited() && dl::get_finied())
         {
-            OMNITRACE_DL_LOG(2, "%s(%s) ignored :: already initialized and finalized\n",
-                             __FUNCTION__, ::omnitrace::join(", ", a, b, c).c_str());
+            OMNITRACE_DL_LOG(
+                2, "%s(%s) ignored :: already initialized and finalized\n", __FUNCTION__,
+                ::omnitrace::join(::omnitrace::QuoteStrings{}, ", ", a, b, c).c_str());
             return;
         }
         else if(dl::get_inited() && dl::get_active())
         {
-            OMNITRACE_DL_LOG(2, "%s(%s) ignored :: already initialized and active\n",
-                             __FUNCTION__, ::omnitrace::join(", ", a, b, c).c_str());
+            OMNITRACE_DL_LOG(
+                2, "%s(%s) ignored :: already initialized and active\n", __FUNCTION__,
+                ::omnitrace::join(::omnitrace::QuoteStrings{}, ", ", a, b, c).c_str());
             return;
         }
 
