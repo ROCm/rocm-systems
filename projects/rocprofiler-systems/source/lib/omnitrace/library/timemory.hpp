@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "library/common.hpp"
 #include "library/components/fwd.hpp"
 #include "library/defines.hpp"
 
@@ -52,9 +53,6 @@ namespace dmp       = tim::dmp;        // NOLINT
 namespace process   = tim::process;    // NOLINT
 namespace units     = tim::units;      // NOLINT
 namespace trait     = tim::trait;      // NOLINT
-
-// same sort of functionality as python's " ".join([...])
-#if !defined(JOIN)
-#    define JOIN(...) tim::mpl::apply<std::string>::join(__VA_ARGS__)
-#endif
+namespace api       = tim::api;        // NOLINT
+namespace operation = tim::operation;  // NOLINT
 }  // namespace omnitrace

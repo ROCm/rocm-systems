@@ -23,6 +23,7 @@ target_link_libraries(
     INTERFACE
         $<BUILD_INTERFACE:omnitrace::omnitrace-headers>
         $<BUILD_INTERFACE:omnitrace::omnitrace-threading>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-common-library>
         $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
         $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
         $<BUILD_INTERFACE:omnitrace::omnitrace-perfetto>
