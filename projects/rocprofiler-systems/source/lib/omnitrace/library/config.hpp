@@ -240,7 +240,7 @@ double&
 get_thread_sampling_freq();
 
 std::string
-get_rocm_smi_devices();
+get_sampling_gpus();
 
 int64_t
 get_critical_trace_per_row();

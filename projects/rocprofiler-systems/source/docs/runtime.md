@@ -69,13 +69,13 @@ $ omnitrace-avail -S -bd
 |-----------------------------------------|-----------------------------------------|
 |          ENVIRONMENT VARIABLE           |               DESCRIPTION               |
 |-----------------------------------------|-----------------------------------------|
+| OMNITRACE_CI                            | Enable some runtime validation check... |
 | OMNITRACE_ADD_SECONDARY                 | Enable/disable components adding sec... |
-| OMNITRACE_PERFETTO_BACKEND              | Specify the perfetto backend to acti... |
-| OMNITRACE_PERFETTO_BUFFER_SIZE_KB       | Size of perfetto buffer (in KB)         |
 | OMNITRACE_COLLAPSE_PROCESSES            | Enable/disable combining process-spe... |
 | OMNITRACE_COLLAPSE_THREADS              | Enable/disable combining thread-spec... |
 | OMNITRACE_CONFIG_FILE                   | Configuration file for omnitrace        |
 | OMNITRACE_COUT_OUTPUT                   | Write output to stdout                  |
+| OMNITRACE_CPU_AFFINITY                  | Enable pinning threads to CPUs (Linu... |
 | OMNITRACE_CRITICAL_TRACE                | Enable generation of the critical trace |
 | OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT   | Number of critical trace records to ... |
 | OMNITRACE_CRITICAL_TRACE_COUNT          | Number of critical trace to export (... |
@@ -85,6 +85,7 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_CRITICAL_TRACE_SERIALIZE_N... | Include names in serialization of cr... |
 | OMNITRACE_DEBUG                         | Enable debug output                     |
 | OMNITRACE_DIFF_OUTPUT                   | Generate a difference output vs. a p... |
+| OMNITRACE_DL_VERBOSE                    | Verbosity within the omnitrace-dl li... |
 | OMNITRACE_ENABLED                       | Activation state of timemory            |
 | OMNITRACE_ENABLE_SIGNAL_HANDLER         | Enable signals in timemory_init         |
 | OMNITRACE_FILE_OUTPUT                   | Write output to files                   |
@@ -95,6 +96,7 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_INPUT_PREFIX                  | Explicitly specify the prefix for in... |
 | OMNITRACE_INSTRUMENTATION_INTERVAL      | Instrumentation only takes measureme... |
 | OMNITRACE_JSON_OUTPUT                   | Write json output files                 |
+| OMNITRACE_KOKKOS_KERNEL_LOGGER          | Enables kernel logging                  |
 | OMNITRACE_MAX_DEPTH                     | Set the maximum depth of label hiera... |
 | OMNITRACE_MAX_THREAD_BOOKMARKS          | Maximum number of times a worker thr... |
 | OMNITRACE_MAX_WIDTH                     | Set the maximum width for component ... |
@@ -113,18 +115,23 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_PAPI_OVERFLOW                 | Value at which PAPI hw counters trig... |
 | OMNITRACE_PAPI_QUIET                    | Configure suppression of reporting P... |
 | OMNITRACE_PAPI_THREADING                | Enable multithreading support when u... |
+| OMNITRACE_PERFETTO_BACKEND              | Specify the perfetto backend to acti... |
+| OMNITRACE_PERFETTO_BUFFER_SIZE_KB       | Size of perfetto buffer (in KB)         |
+| OMNITRACE_PERFETTO_COMBINE_TRACES       | Combine Perfetto traces. If not expl... |
+| OMNITRACE_PERFETTO_FILL_POLICY          | Behavior when perfetto buffer is ful... |
+| OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB   | Hint for shared-memory buffer size i... |
 | OMNITRACE_PRECISION                     | Set the global output precision for ... |
-| OMNITRACE_ROCM_SMI_DEVICES              | Devices to query when OMNITRACE_USE_... |
 | OMNITRACE_ROCTRACER_FLAT_PROFILE        | Ignore hierarchy in all kernels entr... |
 | OMNITRACE_ROCTRACER_HSA_ACTIVITY        | Enable HSA activity tracing support     |
 | OMNITRACE_ROCTRACER_HSA_API             | Enable HSA API tracing support          |
 | OMNITRACE_ROCTRACER_HSA_API_TYPES       | HSA API type to collect                 |
 | OMNITRACE_ROCTRACER_TIMELINE_PROFILE    | Create unique entries for every kern... |
-| OMNITRACE_SAMPLING_DELAY                | Number of seconds to delay activatin... |
+| OMNITRACE_SAMPLING_CPUS                 | CPUs to collect frequency informatio... |
+| OMNITRACE_SAMPLING_DELAY                | Number of seconds to wait before the... |
 | OMNITRACE_SAMPLING_FREQ                 | Number of software interrupts per se... |
+| OMNITRACE_SAMPLING_GPUS                 | Devices to query when OMNITRACE_USE_... |
 | OMNITRACE_SCIENTIFIC                    | Set the global numerical reporting t... |
-| OMNITRACE_SETTINGS_DESC                 | Provide descriptions when printing s... |
-| OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB   | Hint for shared-memory buffer size i... |
+| OMNITRACE_STRICT_CONFIG                 | Throw errors for unknown setting nam... |
 | OMNITRACE_SUPPRESS_CONFIG               | Disable processing of setting config... |
 | OMNITRACE_SUPPRESS_PARSING              | Disable parsing environment             |
 | OMNITRACE_TEXT_OUTPUT                   | Write text output files                 |
@@ -137,13 +144,17 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_TIMING_SCIENTIFIC             | Set the numerical reporting format f... |
 | OMNITRACE_TIMING_UNITS                  | Set the units for components with 'u... |
 | OMNITRACE_TIMING_WIDTH                  | Set the output width for components ... |
+| OMNITRACE_TRACE_THREAD_LOCKS            | Enable tracking calls to pthread_mut... |
 | OMNITRACE_TREE_OUTPUT                   | Write hierarchical json output files    |
+| OMNITRACE_USE_CODE_COVERAGE             | Enable support for code coverage        |
 | OMNITRACE_USE_KOKKOSP                   | Enable support for Kokkos Tools         |
+| OMNITRACE_USE_OMPT                      | Enable support for OpenMP-Tools         |
 | OMNITRACE_USE_PERFETTO                  | Enable perfetto backend                 |
 | OMNITRACE_USE_PID                       | Enable tagging filenames with proces... |
 | OMNITRACE_USE_ROCM_SMI                  | Enable sampling GPU power, temp, uti... |
 | OMNITRACE_USE_ROCTRACER                 | Enable ROCM tracing                     |
 | OMNITRACE_USE_SAMPLING                  | Enable statistical sampling of call-... |
+| OMNITRACE_USE_THREAD_SAMPLING           | Enable a background thread which sam... |
 | OMNITRACE_USE_TIMEMORY                  | Enable timemory backend                 |
 | OMNITRACE_VERBOSE                       | Verbosity level                         |
 | OMNITRACE_WIDTH                         | Set the global output width for comp... |
@@ -679,9 +690,9 @@ OMNITRACE_TIMING_UNITS          = sec
 
 # sampling fields
 OMNITRACE_SAMPLING_FREQ         = 50
-
-# rocm-smi fields
-OMNITRACE_ROCM_SMI_DEVICES      = $env:HIP_VISIBLE_DEVICES
+OMNITRACE_SAMPLING_DELAY        = 0.1
+OMNITRACE_SAMPLING_CPUS         = 0-3
+OMNITRACE_SAMPLING_GPUS         = $env:HIP_VISIBLE_DEVICES
 
 # misc env variables (see metadata JSON file after run)
 $env:OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX  = OFF

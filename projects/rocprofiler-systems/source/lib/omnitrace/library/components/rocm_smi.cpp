@@ -52,6 +52,7 @@
 #include <chrono>
 #include <ios>
 #include <sstream>
+#include <string>
 #include <sys/resource.h>
 #include <thread>
 
@@ -307,24 +308,52 @@ setup()
     // assign the data value to determined by rocm-smi
     data::device_count = device_count();
 
-    auto _devices_v = get_rocm_smi_devices();
+    auto _devices_v = get_sampling_gpus();
     for(auto& itr : _devices_v)
         itr = tolower(itr);
+    if(_devices_v == "off")
+        _devices_v = "none";
+    else if(_devices_v == "on")
+        _devices_v = "all";
     bool _all_devices = _devices_v.find("all") != std::string::npos || _devices_v.empty();
     bool _no_devices  = _devices_v.find("none") != std::string::npos;
 
-    std::set<uint32_t> _devices{};
+    std::set<uint32_t> _devices = {};
+    auto               _emplace = [&_devices](auto idx) {
+        if(idx < data::device_count) _devices.emplace(idx);
+    };
+
     if(_all_devices)
     {
         for(uint32_t i = 0; i < data::device_count; ++i)
-            _devices.emplace(i);
+            _emplace(i);
     }
     else if(!_no_devices)
     {
-        for(auto&& itr : tim::delimit(get_rocm_smi_devices()))
+        auto _enabled = tim::delimit(_devices_v, ",; \t");
+        for(auto&& itr : _enabled)
         {
-            uint32_t idx = std::stoul(itr);
-            if(idx < data::device_count) _devices.emplace(idx);
+            if(itr.find_first_not_of("0123456789-") != std::string::npos)
+            {
+                OMNITRACE_THROW("Invalid GPU specification: '%s'. Only numerical values "
+                                "(e.g., 0) or ranges (e.g., 0-7) are permitted.",
+                                itr.c_str());
+            }
+
+            if(itr.find('-') != std::string::npos)
+            {
+                auto _v = tim::delimit(itr, "-");
+                OMNITRACE_CONDITIONAL_THROW(_v.size() != 2,
+                                            "Invalid GPU range specification: '%s'. "
+                                            "Required format N-M, e.g. 0-4",
+                                            itr.c_str());
+                for(auto i = std::stoul(_v.at(0)); i < std::stoul(_v.at(1)); ++i)
+                    _emplace(i);
+            }
+            else
+            {
+                _emplace(std::stoul(itr));
+            }
         }
     }
 

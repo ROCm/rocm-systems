@@ -183,10 +183,6 @@ configure_settings(bool _init)
         "Enable sampling GPU power, temp, utilization, and memory usage", true, "backend",
         "rocm_smi", "rocm");
 
-    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_ROCM_SMI_DEVICES",
-                             "Devices to query when OMNITRACE_USE_ROCM_SMI=ON", "all",
-                             "backend", "rocm_smi", "rocm");
-
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_SAMPLING",
                              "Enable statistical sampling of call-stack", false,
                              "backend", "sampling");
@@ -239,6 +235,13 @@ configure_settings(bool _init)
         "and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies 'all' and "
         "'none' suppresses all CPU frequency sampling",
         "", "thread_sampling");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_SAMPLING_GPUS",
+        "Devices to query when OMNITRACE_USE_ROCM_SMI=ON. Values should be separated by "
+        "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies "
+        "'all' and 'none' suppresses all GPU sampling",
+        "all", "rocm_smi", "rocm", "thread_sampling");
 
     auto _backend = tim::get_env_choice<std::string>(
         "OMNITRACE_PERFETTO_BACKEND",
@@ -1146,10 +1149,10 @@ get_thread_sampling_freq()
 }
 
 std::string
-get_rocm_smi_devices()
+get_sampling_gpus()
 {
 #if defined(OMNITRACE_USE_ROCM_SMI) && OMNITRACE_USE_ROCM_SMI > 0
-    static auto _v = get_config()->find("OMNITRACE_ROCM_SMI_DEVICES");
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_GPUS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 #else
     return std::string{};
