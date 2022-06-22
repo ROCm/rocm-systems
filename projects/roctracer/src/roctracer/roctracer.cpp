@@ -106,28 +106,12 @@ mark_api_callback_t* mark_api_callback_ptr = nullptr;
 namespace roctracer {
 
 namespace hsa_support {
-decltype(hsa_system_get_info)* hsa_system_get_info_fn = hsa_system_get_info;
-decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn = hsa_amd_memory_async_copy;
-decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn =
-    hsa_amd_memory_async_copy_rect;
 
-::HsaApiTable* kHsaApiTable;
-
-void SaveHsaApi(::HsaApiTable* table) {
-  kHsaApiTable = table;
-  hsa_system_get_info_fn = table->core_->hsa_system_get_info_fn;
-  hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
-  hsa_amd_memory_async_copy_rect_fn = table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
-}
-
-void RestoreHsaApi() {
-  ::HsaApiTable* table = kHsaApiTable;
-  table->core_->hsa_system_get_info_fn = hsa_system_get_info_fn;
-  table->amd_ext_->hsa_amd_memory_async_copy_fn = hsa_amd_memory_async_copy_fn;
-  table->amd_ext_->hsa_amd_memory_async_copy_rect_fn = hsa_amd_memory_async_copy_rect_fn;
-}
+static CoreApiTable saved_core_api;
+static AmdExtTable saved_amd_ext_api;
 
 // async copy activity callback
+std::mutex init_mutex;
 bool async_copy_callback_enabled = false;
 MemoryPool* async_copy_callback_memory_pool = nullptr;
 
@@ -143,14 +127,15 @@ namespace util {
 roctracer_timestamp_t timestamp_ns() {
   uint64_t sysclock;
 
-  hsa_status_t status = hsa_support::hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
+  hsa_status_t status =
+      hsa_support::saved_core_api.hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
   if (status == HSA_STATUS_ERROR_NOT_INITIALIZED) return 0;
   CHECK_HSA_STATUS("hsa_system_get_info()", status);
 
   static uint64_t sysclock_period = []() {
     uint64_t sysclock_hz = 0;
-    hsa_status_t status =
-        hsa_support::hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
+    hsa_status_t status = hsa_support::saved_core_api.hsa_system_get_info_fn(
+        HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
     CHECK_HSA_STATUS("hsa_system_get_info()", status);
     return (uint64_t)1000000000 / sysclock_hz;
   }();
@@ -447,20 +432,21 @@ hsa_status_t hsa_amd_memory_async_copy_interceptor(void* dst, hsa_agent_t dst_ag
                                                    size_t size, uint32_t num_dep_signals,
                                                    const hsa_signal_t* dep_signals,
                                                    hsa_signal_t completion_signal) {
-  hsa_status_t status = HSA_STATUS_SUCCESS;
-  if (hsa_support::async_copy_callback_enabled) {
-    Tracker::entry_t* entry = new Tracker::entry_t();
-    entry->handler = hsa_async_copy_handler;
-    entry->pool = hsa_support::async_copy_callback_memory_pool;
-    entry->correlation_id = hsa_correlation_id_tls;
-    Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
-    status = hsa_amd_memory_async_copy_fn(dst, dst_agent, src, src_agent, size, num_dep_signals,
-                                          dep_signals, entry->signal);
-    if (status != HSA_STATUS_SUCCESS) Tracker::Disable(entry);
-  } else {
-    status = hsa_amd_memory_async_copy_fn(dst, dst_agent, src, src_agent, size, num_dep_signals,
-                                          dep_signals, completion_signal);
+  if (!async_copy_callback_enabled) {
+    return saved_amd_ext_api.hsa_amd_memory_async_copy_fn(
+        dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal);
   }
+
+  Tracker::entry_t* entry = new Tracker::entry_t();
+  entry->handler = hsa_async_copy_handler;
+  entry->pool = async_copy_callback_memory_pool;
+  entry->correlation_id = hsa_correlation_id_tls;
+  Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
+
+  hsa_status_t status = saved_amd_ext_api.hsa_amd_memory_async_copy_fn(
+      dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, entry->signal);
+  if (status != HSA_STATUS_SUCCESS) Tracker::Disable(entry);
+
   return status;
 }
 
@@ -469,21 +455,23 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
     const hsa_dim3_t* src_offset, const hsa_dim3_t* range, hsa_agent_t copy_agent,
     hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
     hsa_signal_t completion_signal) {
-  hsa_status_t status = HSA_STATUS_SUCCESS;
-  if (hsa_support::async_copy_callback_enabled) {
-    Tracker::entry_t* entry = new Tracker::entry_t();
-    entry->handler = hsa_async_copy_handler;
-    entry->pool = hsa_support::async_copy_callback_memory_pool;
-    entry->correlation_id = hsa_correlation_id_tls;
-    Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
-    status = hsa_amd_memory_async_copy_rect_fn(dst, dst_offset, src, src_offset, range, copy_agent,
-                                               dir, num_dep_signals, dep_signals, entry->signal);
-    if (status != HSA_STATUS_SUCCESS) Tracker::Disable(entry);
-  } else {
-    status =
-        hsa_amd_memory_async_copy_rect_fn(dst, dst_offset, src, src_offset, range, copy_agent, dir,
-                                          num_dep_signals, dep_signals, completion_signal);
+  if (!async_copy_callback_enabled) {
+    return saved_amd_ext_api.hsa_amd_memory_async_copy_rect_fn(
+        dst, dst_offset, src, src_offset, range, copy_agent, dir, num_dep_signals, dep_signals,
+        completion_signal);
   }
+
+  Tracker::entry_t* entry = new Tracker::entry_t();
+  entry->handler = hsa_async_copy_handler;
+  entry->pool = async_copy_callback_memory_pool;
+  entry->correlation_id = hsa_correlation_id_tls;
+  Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
+
+  hsa_status_t status = saved_amd_ext_api.hsa_amd_memory_async_copy_rect_fn(
+      dst, dst_offset, src, src_offset, range, copy_agent, dir, num_dep_signals, dep_signals,
+      entry->signal);
+  if (status != HSA_STATUS_SUCCESS) Tracker::Disable(entry);
+
   return status;
 }
 
@@ -855,6 +843,13 @@ static void roctracer_enable_activity_fun(roctracer_domain_t domain, uint32_t op
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
       if (op == HSA_OP_ID_COPY) {
+        std::scoped_lock lock(hsa_support::init_mutex);
+
+        if (hsa_support::saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn != nullptr) {
+          [[maybe_unused]] hsa_status_t status =
+              hsa_support::saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(true);
+          assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
+        }
         RocpLoader::Instance();
         hsa_support::async_copy_callback_enabled = true;
         hsa_support::async_copy_callback_memory_pool = reinterpret_cast<MemoryPool*>(pool);
@@ -976,8 +971,17 @@ static void roctracer_disable_activity_fun(roctracer_domain_t domain, uint32_t o
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
       if (op == HSA_OP_ID_COPY) {
+        std::scoped_lock lock(hsa_support::init_mutex);
+
         hsa_support::async_copy_callback_enabled = false;
         hsa_support::async_copy_callback_memory_pool = nullptr;
+
+        if (hsa_support::saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn != nullptr) {
+          [[maybe_unused]] hsa_status_t status =
+              hsa_support::saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(false);
+          assert(status == HSA_STATUS_SUCCESS || status == HSA_STATUS_ERROR_NOT_INITIALIZED ||
+                 !"hsa_amd_profiling_async_copy_enable failed");
+        }
       } else {
         if (RocpLoader::GetRef() == nullptr) break;
         if (!RocpLoader::Instance().EnableActivityCallback(op, false))
@@ -1178,33 +1182,12 @@ ROCTRACER_API roctracer_status_t roctracer_set_properties(roctracer_domain_t dom
   API_METHOD_PREFIX
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS: {
-      // HSA OPS properties
-      hsa_ops_properties_t* ops_properties = reinterpret_cast<hsa_ops_properties_t*>(properties);
-      HsaApiTable* table = reinterpret_cast<HsaApiTable*>(ops_properties->table);
-
-      // HSA async-copy tracing
-      [[maybe_unused]] hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
-      assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
-      hsa_support::hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
-      hsa_support::hsa_amd_memory_async_copy_rect_fn =
-          table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
-      table->amd_ext_->hsa_amd_memory_async_copy_fn =
-          hsa_support::hsa_amd_memory_async_copy_interceptor;
-      table->amd_ext_->hsa_amd_memory_async_copy_rect_fn =
-          hsa_support::hsa_amd_memory_async_copy_rect_interceptor;
-
-
       break;
     }
     case ACTIVITY_DOMAIN_HSA_EVT: {
       break;
     }
     case ACTIVITY_DOMAIN_HSA_API: {
-      // HSA API properties
-      HsaApiTable* table = reinterpret_cast<HsaApiTable*>(properties);
-      hsa_support::intercept_CoreApiTable(table->core_);
-      hsa_support::intercept_AmdExtTable(table->amd_ext_);
-      hsa_support::intercept_ImageExtTable(table->image_ext_);
       break;
     }
     case ACTIVITY_DOMAIN_HIP_OPS:
@@ -1246,10 +1229,38 @@ ROCTRACER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 50;
 // HSA-runtime tool on-load method
 ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
                              uint64_t failed_tool_count, const char* const* failed_tool_names) {
-  hsa_support::SaveHsaApi(table);
+  std::scoped_lock lock(hsa_support::init_mutex);
+
+  // Save the HSA core api and amd_ext api.
+  hsa_support::saved_core_api = *table->core_;
+  hsa_support::saved_amd_ext_api = *table->amd_ext_;
+
+  // Install the HSA_OPS intercept
+  table->amd_ext_->hsa_amd_memory_async_copy_fn =
+      hsa_support::hsa_amd_memory_async_copy_interceptor;
+  table->amd_ext_->hsa_amd_memory_async_copy_rect_fn =
+      hsa_support::hsa_amd_memory_async_copy_rect_interceptor;
+
+  // Install the HSA_API wrappers
+  hsa_support::InstallCoreApiWrappers(table->core_);
+  hsa_support::InstallAmdExtWrappers(table->amd_ext_);
+  hsa_support::InstallImageExtWrappers(table->image_ext_);
+
+  if (hsa_support::async_copy_callback_enabled) {
+    [[maybe_unused]] hsa_status_t status =
+        hsa_support::saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(true);
+    assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
+  }
+
   return true;
 }
 
-ROCTRACER_EXPORT void OnUnload() {}
+ROCTRACER_EXPORT void OnUnload() {
+  if (hsa_support::async_copy_callback_enabled) {
+    [[maybe_unused]] hsa_status_t status =
+        hsa_support::saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(false);
+    assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
+  }
+}
 
 }  // extern "C"

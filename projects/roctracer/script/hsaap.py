@@ -29,10 +29,10 @@ H_OUT='hsa_prof_str.h'
 CPP_OUT='hsa_prof_str.inline.h'
 API_TABLES_H = 'hsa_api_trace.h'
 API_HEADERS_H = (
-  ('CoreApiTable', 'hsa.h'),
-  ('AmdExtTable', 'hsa_ext_amd.h'),
-  ('ImageExtTable', 'hsa_ext_image.h'),
-  ('AmdExtTable', API_TABLES_H),
+  ('CoreApi', 'hsa.h'),
+  ('AmdExt', 'hsa_ext_amd.h'),
+  ('ImageExt', 'hsa_ext_image.h'),
+  ('AmdExt', API_TABLES_H),
 )
 
 LICENSE = \
@@ -106,7 +106,7 @@ class API_TableParser:
 
     self.inp = open(header, 'r')
 
-    self.beg_pattern = re.compile('^\s*struct\s+' + name + '\s*{\s*$')
+    self.beg_pattern = re.compile('^\s*struct\s+' + name + 'Table\s*{\s*$')
     self.end_pattern = re.compile('^\s*};\s*$')
     self.array = []
     self.parse()
@@ -330,9 +330,9 @@ class API_DescrParser:
     self.cpp_content += 'namespace roctracer {\n'
     self.cpp_content += 'namespace hsa_support {\n\n'
 
-    self.cpp_content += 'static CoreApiTable CoreApiTable_saved;\n'
-    self.cpp_content += 'static AmdExtTable AmdExtTable_saved;\n'
-    self.cpp_content += 'static ImageExtTable ImageExtTable_saved;\n\n'
+    self.cpp_content += 'static CoreApiTable CoreApi_saved_before_cb;\n'
+    self.cpp_content += 'static AmdExtTable AmdExt_saved_before_cb;\n'
+    self.cpp_content += 'static ImageExtTable ImageExt_saved_before_cb;\n\n'
 
     self.cpp_content += 'std::atomic<uint64_t> hsa_counter_{1};\n'
     self.cpp_content += 'static thread_local uint64_t hsa_correlation_id_tls = 0;\n'
@@ -428,7 +428,7 @@ class API_DescrParser:
       content += '  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_HSA_API, ' + call_id + ', &api_data, api_callback_arg);\n'
       if ret_type != 'void':
         content += '  ' + ret_type + ' ret ='
-      content += '  ' + name + '_saved.' + call + '_fn(' + ', '.join(struct['alst']) + ');\n'
+      content += '  ' + name + '_saved_before_cb.' + call + '_fn(' + ', '.join(struct['alst']) + ');\n'
       if ret_type != 'void':
         content += '  api_data.' + ret_type + '_retval = ret;\n'
       content += '  api_data.phase = 1;\n'
@@ -444,8 +444,8 @@ class API_DescrParser:
     if n > 0 and call == '-':
       content += '};\n'
     if n == 0 or (call == '-' and name != '-'):
-      content += 'static void intercept_' + name + '(' + name + '* table) {\n'
-      content += '  ' + name + '_saved = *table;\n'
+      content += 'static void Install' + name + 'Wrappers(' + name + 'Table* table) {\n'
+      content += '  ' + name + '_saved_before_cb = *table;\n'
     if call != '-':
       if call != 'hsa_shut_down':
         content += '  table->' + call + '_fn = ' + call + '_callback;\n'

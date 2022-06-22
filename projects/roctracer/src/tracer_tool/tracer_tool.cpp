@@ -931,9 +931,6 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   if (trace_hsa_api) {
     hsa_api_file_handle = open_output_file(output_prefix, "hsa_api_trace.txt");
 
-    // initialize HSA tracing
-    roctracer_set_properties(ACTIVITY_DOMAIN_HSA_API, (void*)table);
-
     fprintf(stdout, "    HSA-trace(");
     fflush(stdout);
     if (hsa_api_vec.size() != 0) {
@@ -955,11 +952,6 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   // Enable HSA GPU activity
   if (trace_hsa_activity) {
     hsa_async_copy_file_handle = open_output_file(output_prefix, "async_copy_trace.txt");
-
-    // initialize HSA tracing
-    roctracer::hsa_ops_properties_t ops_properties{};
-    ops_properties.table = table;
-    roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
 
     // Allocating tracing pool
     open_tracing_pool();
