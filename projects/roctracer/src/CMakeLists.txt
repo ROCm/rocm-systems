@@ -104,7 +104,9 @@ set(PUBLIC_HEADERS
 
 foreach(header ${PUBLIC_HEADERS})
   get_filename_component(header_subdir ${header} DIRECTORY)
-  install(FILES ${PROJECT_SOURCE_DIR}/inc/${header} DESTINATION include/${PROJECT_NAME}/${header_subdir})
+  install(FILES ${PROJECT_SOURCE_DIR}/inc/${header}
+          DESTINATION include/${PROJECT_NAME}/${header_subdir}
+          COMPONENT runtime)
 endforeach()
 
 set(GENERATED_HEADERS
@@ -113,7 +115,9 @@ set(GENERATED_HEADERS
   hsa_ostream_ops.h)
 
 foreach(header ${GENERATED_HEADERS})
-  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${header} DESTINATION include/${PROJECT_NAME})
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${header}
+    DESTINATION include/${PROJECT_NAME}
+    COMPONENT runtime)
 endforeach()
 
 ## Build the ROCtracer library
@@ -143,7 +147,9 @@ target_include_directories(roctracer
 target_link_options(roctracer PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/roctracer/exportmap -Wl,--no-undefined)
 target_link_libraries(roctracer PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl)
 
-install(TARGETS roctracer LIBRARY DESTINATION lib)
+install(TARGETS roctracer LIBRARY
+  DESTINATION lib
+  COMPONENT runtime)
 
 ## Build the ROCTX library
 file(GLOB ROCTX_SOURCES "roctx/*.cpp")
@@ -163,7 +169,9 @@ target_include_directories(roctx
 
 target_link_options(roctx PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/roctx/exportmap -Wl,--no-undefined)
 
-install(TARGETS roctx LIBRARY DESTINATION lib)
+install(TARGETS roctx LIBRARY
+  DESTINATION lib
+  COMPONENT runtime)
 
 ## Build the tracer_tool library
 if (${LIBRARY_TYPE} STREQUAL SHARED)
@@ -186,12 +194,12 @@ target_include_directories(roctracer_tool
 target_link_libraries(roctracer_tool roctracer hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl)
 target_link_options(roctracer_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/tracer_tool/exportmap -Wl,--no-undefined)
 
-install(TARGETS roctracer_tool LIBRARY DESTINATION lib/${PROJECT_NAME})
+install(TARGETS roctracer_tool LIBRARY DESTINATION lib/${PROJECT_NAME} COMPONENT runtime)
 
 add_library(hip_stats SHARED hip_stats/hip_stats.cpp)
 target_compile_definitions(hip_stats PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(hip_stats roctracer stdc++fs)
-install(TARGETS hip_stats LIBRARY DESTINATION lib/${PROJECT_NAME})
+install(TARGETS hip_stats LIBRARY DESTINATION lib/${PROJECT_NAME} COMPONENT runtime)
 
 endif()
 

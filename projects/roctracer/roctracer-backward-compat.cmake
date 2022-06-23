@@ -109,8 +109,8 @@ endfunction()
 
 #Use template header file and generater wrapper header files
 generate_wrapper_header()
-install(DIRECTORY ${ROCT_WRAPPER_INC_DIR} DESTINATION ${PROJECT_NAME})
+install(DIRECTORY ${ROCT_WRAPPER_INC_DIR} DESTINATION ${PROJECT_NAME} COMPONENT runtime)
 create_library_symlink()
-install(DIRECTORY ${ROCT_WRAPPER_LIB_DIR} DESTINATION ${PROJECT_NAME})
+install(DIRECTORY ${ROCT_WRAPPER_LIB_DIR} DESTINATION ${PROJECT_NAME} COMPONENT runtime)
 #install soft link to tool
 #install(DIRECTORY ${ROCT_WRAPPER_TOOL_DIR} DESTINATION ${PROJECT_NAME})
