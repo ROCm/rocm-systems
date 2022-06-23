@@ -376,7 +376,6 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
   range_start_times = {}
   copy_csv = ''
-  copy_index = 0
 
   ptrn_val = re.compile(r'(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$')
   hip_mcopy_ptrn = re.compile(r'hipMemcpy|hipMemset')
@@ -527,8 +526,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           op_found = 1
 
           stream_id = thread_id
-          hsa_patch_data[(copy_index, proc_id)] = thread_id
-          copy_index += 1
+          hsa_patch_data[(corr_id, proc_id)] = thread_id
 
         if op_found:
           roctx_msg = ''
@@ -652,6 +650,7 @@ def fill_copy_db(table_name, db, indir):
           #if not pid in dep_proc: dep_proc[pid] = { 'pid': HSA_PID, 'from': [], 'to': {}, 'id': [] }
           dep_str = dep_proc[sect_id]
           dep_str['to'][corr_id] = to_us
+          dep_str['id'].append(corr_id)
 
   return 1
 #############################################################

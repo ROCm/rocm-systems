@@ -74,9 +74,10 @@ if ! [ -d "${OUTPUT_DIR}" ] ; then
 fi
 
 echo "Processing directories: $INPUT_DIRS"
-for file in begin_ts_file hcc_ops_trace hsa_handles hip_api_trace roctx_trace hsa_api_trace results; do
-  find ${INPUT_DIRS} -type f -regextype sed -regex ".*/[0-9]\{1,\}_${file}\.txt" \
-    -not -path "${OUTPUT_DIR}/*" | xargs cat > "${OUTPUT_DIR}/${file}.txt"
+for file in begin_ts_file hcc_ops_trace hsa_handles hip_api_trace roctx_trace hsa_api_trace results async_copy_trace; do
+  res=$(find ${INPUT_DIRS} -type f -regextype sed -regex ".*/[0-9]\{1,\}_${file}\.txt" \
+	  -not -path "${OUTPUT_DIR}/*")
+  test -n "${res}" && cat ${res} > "${OUTPUT_DIR}/${file}.txt"
 done
 
 if ! [ -d "${BIN_DIR}" ] ; then
