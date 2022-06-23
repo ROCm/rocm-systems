@@ -89,7 +89,7 @@ link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
 ## Set RUNPATH if ROCM_RPATH is defined and passed by the environment
 ## RUNPATH should help to run "rdcd" without the usage of ldconfig
 if (DEFINED ENV{ROCM_RPATH})
- set (GRPC_RUNPATH "\$ORIGIN/../lib:\$ORIGIN/../grpc/lib:\$ORIGIN/../grpc/lib64")
+ set (GRPC_RUNPATH "\$ORIGIN/../lib:\$ORIGIN/../lib64:\$ORIGIN/../lib/rdc:\$ORIGIN/../lib64/rdc;\$ORIGIN/../grpc/lib:\$ORIGIN/../grpc/lib64:\$ORIGIN/../lib/rdc/grpc/lib:\$ORIGIN/../lib/rdc/grpc/lib64")
  set (CMAKE_EXE_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--no-as-needed -Wl,-z,origin")
  set (CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${GRPC_RUNPATH}")
  set (CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
@@ -119,10 +119,10 @@ target_link_libraries(${SERVER_DAEMON_EXE} ${RDCD_EXTRA_LIB} pthread rt grpc grp
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${SERVER_DAEMON_EXE}
         PERMISSIONS OWNER_EXECUTE OWNER_READ OWNER_WRITE GROUP_READ
         GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-        DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/rdc/bin
+        DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}
         COMPONENT ${SERVER_COMPONENT})
 install(FILES ${PROJECT_BINARY_DIR}/${SERVICE_FILE_NAME}
-               DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/rdc/lib
+               DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
                COMPONENT ${SERVER_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

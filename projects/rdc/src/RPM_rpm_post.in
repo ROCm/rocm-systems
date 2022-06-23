@@ -19,7 +19,7 @@ reload_systemd() {
 do_create_rdc_user
 
 #Symlink RDC Service
-ln -s -f -r /@RDC_CLIENT_INSTALL_PREFIX@/rdc/lib/rdc.service @DISTRO_ROOT@/rdc.service
+ln -s -f -r /@RDC_CLIENT_INSTALL_PREFIX@/lib/rdc.service @DISTRO_ROOT@/rdc.service
 
 #Request systemctl to reload file since RDC is adding new file/service
 reload_systemd

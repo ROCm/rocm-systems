@@ -68,7 +68,7 @@ set(COMMON_DIR "${PROJECT_SOURCE_DIR}/common")
 ## Set RUNPATH if ROCM_RPATH is defined and passed by the environment
 ## RUNPATH should help to run "rdcd" without the usage of ldconfig
 if (DEFINED ENV{ROCM_RPATH})
- set (LIB_RUNPATH "\$ORIGIN/../lib:\$ORIGIN/../lib64:\$ORIGIN/../grpc/lib:\$ORIGIN/../grpc/lib64")
+ set (LIB_RUNPATH "\$ORIGIN/../lib:\$ORIGIN/../lib64:\$ORIGIN/../lib/rdc:\$ORIGIN/../lib64/rdc:\$ORIGIN/../grpc/lib:\$ORIGIN/../grpc/lib64:\$ORIGIN/../lib/rdc/grpc/lib:\$ORIGIN/../lib/rdc/grpc/lib64")
  set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--no-as-needed -Wl,-z,origin")
  set (CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${LIB_RUNPATH}")
  set (CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
@@ -321,29 +321,37 @@ endif ()
 target_include_directories(${BOOTSTRAP_LIB}
                            PUBLIC
                            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-                           "$<INSTALL_INTERFACE:${RDC_CLIENT_INSTALL_PREFIX}/rdc/include>"
+                           "$<INSTALL_INTERFACE:${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 ## Add the install directives for the runtime library.
 if(BUILD_STANDALONE)
-    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB} ${DIAGNOSTIC_LIB}
+    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB}
             EXPORT rdcTargets
-            LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
+            LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
+                                            COMPONENT ${CLIENT_COMPONENT})
+    install(TARGETS ${DIAGNOSTIC_LIB}
+            EXPORT rdcTargets
+            LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}
                                             COMPONENT ${CLIENT_COMPONENT})
 else()
-    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${DIAGNOSTIC_LIB}
+    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB}
             EXPORT rdcTargets
-            LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
+            LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}
+                                            COMPONENT ${CLIENT_COMPONENT})
+    install(TARGETS ${DIAGNOSTIC_LIB}
+            EXPORT rdcTargets
+            LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}
                                             COMPONENT ${CLIENT_COMPONENT})
 endif()
 
 install(FILES ${SOURCE_DIR}/include/rdc/rdc.h
-             DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/include/rdc
+             DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/${RDC}
                                          COMPONENT ${CLIENT_COMPONENT})
 
 # Install the kernel files
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/kernels/hsaco
-    DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
+    DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 
 

@@ -43,8 +43,8 @@ endif()
 # Required Defines first:
 
 set(RDC_CLIENT_INSTALL_PREFIX "opt/rocm")
-set(RDC_INC_DIR ${ROCM_DIR}/${RDC_CLIENT_INSTALL_PREFIX}/include)
-set(RDC_LIB_DIR ${ROCM_DIR}/${RDC_CLIENT_INSTALL_PREFIX}/rdc/lib)
+set(RDC_INC_DIR ${ROCM_DIR}/${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR})
+set(RDC_LIB_DIR ${ROCM_DIR}/${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
 
 #
 # Determine RDC Header files are present
@@ -155,7 +155,7 @@ aux_source_directory(${RDCTST_ROOT}/functional functionalSources)
 # to be linked against for building ROC Perf applications
 #
 
-link_directories(${ROCM_DIR}/lib)
+link_directories(${ROCM_DIR}/${CMAKE_INSTALL_LIBDIR})
 #
 # Source files for building rocrtst
 #
@@ -166,7 +166,7 @@ add_executable(${RDCTST} ${rdctstSources} ${functionalSources})
 
 # Header file include path
 target_include_directories(${RDCTST} PRIVATE ${RDC_INC_DIR}
-                                     PRIVATE ${ROCM_DIR}/include
+                                     PRIVATE ${ROCM_DIR}/${CMAKE_INSTALL_INCLUDEDIR}
                                      PRIVATE ${RDCTST_ROOT}/..
                                      PRIVATE ${RDCTST_ROOT}/gtest/include)
 

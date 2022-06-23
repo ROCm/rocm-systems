@@ -10,8 +10,8 @@ librdc = "librdc_bootstrap.so"
 # Search librdc_bootstrap.so paths
 current_folder = os.path.dirname(os.path.realpath(__file__))
 rdc_paths = [ "", # without path
-        current_folder+"/../lib/",   # package installation
-        current_folder+"/../lib64/", # package installation
+        current_folder+"/../../../lib/",   # package installation
+        current_folder+"/../../../lib64/", # package installation
         current_folder+"/../build/rdc_libs/" # build from source code
 ]
 
