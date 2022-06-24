@@ -20,39 +20,39 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
-
-#include "common/join.hpp"
-#include "library/defines.hpp"
-
-#include <timemory/api.hpp>
-#include <timemory/backends/dmp.hpp>
-#include <timemory/backends/process.hpp>
-
-#include <cassert>
-#include <cstdint>
-#include <cstdio>
-#include <fstream>
-#include <memory>
-#include <mutex>
-#include <string>
-#include <sys/types.h>
-#include <thread>
-#include <unistd.h>
-#include <utility>
-#include <vector>
-
-TIMEMORY_DEFINE_NS_API(api, omnitrace)
-TIMEMORY_DEFINE_NS_API(api, sampling)
-TIMEMORY_DEFINE_NS_API(api, rocm_smi)
+#include "library/tracing.hpp"
 
 namespace omnitrace
 {
-namespace api      = tim::api;       // NOLINT
-namespace category = tim::category;  // NOLINT
-}  // namespace omnitrace
+namespace tracing
+{
+std::unique_ptr<perfetto::TracingSession>&
+get_trace_session()
+{
+    static auto _session = std::unique_ptr<perfetto::TracingSession>{};
+    return _session;
+}
 
-// same sort of functionality as python's " ".join([...])
-#if !defined(JOIN)
-#    define JOIN(...) ::omnitrace::common::join(__VA_ARGS__)
-#endif
+std::vector<std::function<void()>>&
+get_finalization_functions()
+{
+    static auto _v = std::vector<std::function<void()>>{};
+    return _v;
+}
+
+tim::hash_map_ptr_t&
+get_timemory_hash_ids(int64_t _tid)
+{
+    static auto _v = std::array<tim::hash_map_ptr_t, omnitrace::max_supported_threads>{};
+    return _v.at(_tid);
+}
+
+tim::hash_alias_ptr_t&
+get_timemory_hash_aliases(int64_t _tid)
+{
+    static auto _v =
+        std::array<tim::hash_alias_ptr_t, omnitrace::max_supported_threads>{};
+    return _v.at(_tid);
+}
+}  // namespace tracing
+}  // namespace omnitrace

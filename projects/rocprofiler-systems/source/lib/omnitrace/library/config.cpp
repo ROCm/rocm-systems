@@ -76,7 +76,7 @@ get_setting_name(std::string _v)
     [&]() {                                                                              \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
             ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, INITIAL_VALUE,            \
-            std::set<std::string>{ "custom", "omnitrace", "omnitrace_library",           \
+            std::set<std::string>{ "custom", "omnitrace", "libomnitrace",                \
                                    __VA_ARGS__ });                                       \
         if(!_ret.second)                                                                 \
             OMNITRACE_PRINT("Warning! Duplicate setting: %s / %s\n",                     \
@@ -84,7 +84,7 @@ get_setting_name(std::string _v)
         return _config->find(ENV_NAME)->second;                                          \
     }()
 
-// below does not include "omnitrace_library"
+// below does not include "libomnitrace"
 #define OMNITRACE_CONFIG_EXT_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)    \
     [&]() {                                                                              \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
@@ -102,8 +102,7 @@ get_setting_name(std::string _v)
     [&]() {                                                                              \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
             ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, INITIAL_VALUE,            \
-            std::set<std::string>{ "custom", "omnitrace", "omnitrace_library",           \
-                                   __VA_ARGS__ },                                        \
+            std::set<std::string>{ "custom", "omnitrace", "libomnitrace", __VA_ARGS__ }, \
             std::vector<std::string>{ CMD_LINE });                                       \
         if(!_ret.second)                                                                 \
             OMNITRACE_PRINT("Warning! Duplicate setting: %s / %s\n",                     \
@@ -176,7 +175,7 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_EXT_SETTING(bool, "OMNITRACE_DL_VERBOSE",
                                  "Verbosity within the omnitrace-dl library", false,
-                                 "debugging", "omnitrace_dl_library");
+                                 "debugging", "libomnitrace-dl");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_PERFETTO", "Enable perfetto backend",
                              _default_perfetto_v, "backend", "perfetto");
@@ -399,7 +398,7 @@ configure_settings(bool _init)
         {
             auto _categories = itr->second->get_categories();
             _categories.emplace("omnitrace");
-            _categories.emplace("omnitrace_library");
+            _categories.emplace("libomnitrace");
             itr->second->set_categories(_categories);
         }
     };

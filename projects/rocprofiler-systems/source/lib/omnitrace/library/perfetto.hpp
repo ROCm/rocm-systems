@@ -37,6 +37,11 @@
             perfetto::Category("rocm_smi").SetDescription("Device-level metrics"),       \
             perfetto::Category("sampling")                                               \
                 .SetDescription("Metrics derived from sampling"),                        \
+            perfetto::Category("thread_sampling")                                        \
+                .SetDescription("Metrics derived from background thread sampling"),      \
+            perfetto::Category("mpi").SetDescription("MPI regions"),                     \
+            perfetto::Category("kokkos").SetDescription("Kokkos regions"),               \
+            perfetto::Category("ompt").SetDescription("OpenMP Tools regions"),           \
             perfetto::Category("critical-trace")                                         \
                 .SetDescription("Combined critical traces"),                             \
             perfetto::Category("host-critical-trace")                                    \
@@ -51,6 +56,11 @@
             perfetto::Category("rocm_smi").SetDescription("Device-level metrics"),       \
             perfetto::Category("sampling")                                               \
                 .SetDescription("Metrics derived from sampling"),                        \
+            perfetto::Category("thread_sampling")                                        \
+                .SetDescription("Metrics derived from background thread sampling"),      \
+            perfetto::Category("mpi").SetDescription("MPI regions"),                     \
+            perfetto::Category("kokkos").SetDescription("Kokkos regions"),               \
+            perfetto::Category("ompt").SetDescription("OpenMP Tools regions"),           \
             perfetto::Category("critical-trace")                                         \
                 .SetDescription("Combined critical traces"),                             \
             perfetto::Category("host-critical-trace")                                    \
@@ -136,30 +146,30 @@ struct perfetto_counter_track
                         const char* _category = nullptr, int64_t _mult = 1,
                         bool _incr = false)
     {
+        auto& _name_data  = get_data().first[_idx];
+        auto& _track_data = get_data().second[_idx];
         std::vector<std::tuple<std::string, const char*, bool>> _missing = {};
         if(config::get_is_continuous_integration())
         {
-            for(const auto& itr : get_data().first[_idx])
+            for(const auto& itr : _name_data)
             {
                 _missing.emplace_back(std::make_tuple(*itr, itr->c_str(), false));
             }
         }
-        auto& _name =
-            get_data().first[_idx].emplace_back(std::make_unique<std::string>(_v));
+        auto&       _name = _name_data.emplace_back(std::make_unique<std::string>(_v));
         const char* _unit_name = (_units && strlen(_units) > 0) ? _units : nullptr;
-        get_data().second[_idx].emplace_back(perfetto::CounterTrack{ _name->c_str() }
-                                                 .set_unit_name(_unit_name)
-                                                 .set_category(_category)
-                                                 .set_unit_multiplier(_mult)
-                                                 .set_is_incremental(_incr));
+        _track_data.emplace_back(perfetto::CounterTrack{ _name->c_str() }
+                                     .set_unit_name(_unit_name)
+                                     .set_category(_category)
+                                     .set_unit_multiplier(_mult)
+                                     .set_is_incremental(_incr));
         if(config::get_is_continuous_integration())
         {
             for(auto& itr : _missing)
             {
-                for(const auto& ditr : get_data().first.at(_idx))
+                const char* citr = std::get<1>(itr);
+                for(const auto& ditr : _name_data)
                 {
-                    if(*ditr == _v) continue;
-                    const char* citr = std::get<1>(itr);
                     if(citr == ditr->c_str() && strcmp(citr, ditr->c_str()) == 0)
                     {
                         std::get<2>(itr) = true;
@@ -168,9 +178,25 @@ struct perfetto_counter_track
                 }
                 if(!std::get<2>(itr))
                 {
-                    OMNITRACE_THROW("perfetto_counter_track emplace method for '%s' "
-                                    "invalidated C-string '%s'\n",
-                                    _v.c_str(), std::get<0>(itr).c_str());
+                    std::set<void*> _prev = {};
+                    std::set<void*> _curr = {};
+                    for(const auto& eitr : _missing)
+                        _prev.emplace(
+                            static_cast<void*>(const_cast<char*>(std::get<1>(eitr))));
+                    for(const auto& eitr : _name_data)
+                        _curr.emplace(
+                            static_cast<void*>(const_cast<char*>(eitr->c_str())));
+                    std::stringstream _pss{};
+                    for(auto&& eitr : _prev)
+                        _pss << " " << std::hex << std::setw(12) << std::left << eitr;
+                    std::stringstream _css{};
+                    for(auto&& eitr : _curr)
+                        _css << " " << std::hex << std::setw(12) << std::left << eitr;
+                    OMNITRACE_THROW("perfetto_counter_track emplace method for '%s' (%p) "
+                                    "invalidated C-string '%s' (%p).\n%8s: %s\n%8s: %s\n",
+                                    _v.c_str(), _name->c_str(), std::get<0>(itr).c_str(),
+                                    std::get<0>(itr).c_str(), "previous",
+                                    _pss.str().c_str(), "current", _css.str().c_str());
                 }
             }
         }

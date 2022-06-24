@@ -60,6 +60,30 @@ TIMEMORY_DECLARE_TYPE_TRAIT(name, typename Tp)
     }                                                                                    \
     }
 
+TIMEMORY_DEFINE_NS_API(category, host)
+TIMEMORY_DEFINE_NS_API(category, device)
+TIMEMORY_DEFINE_NS_API(category, user)
+TIMEMORY_DEFINE_NS_API(category, rocm_smi)
+TIMEMORY_DEFINE_NS_API(category, kokkos)
+TIMEMORY_DEFINE_NS_API(category, mpi)
+TIMEMORY_DEFINE_NS_API(category, ompt)
+TIMEMORY_DEFINE_NS_API(category, critical_trace)
+TIMEMORY_DEFINE_NS_API(category, host_critical_trace)
+TIMEMORY_DEFINE_NS_API(category, device_critical_trace)
+
+TIMEMORY_DEFINE_NAME_TRAIT("host", category::host);
+TIMEMORY_DEFINE_NAME_TRAIT("device", category::device);
+TIMEMORY_DEFINE_NAME_TRAIT("user", category::user);
+TIMEMORY_DEFINE_NAME_TRAIT("rocm_smi", category::rocm_smi);
+TIMEMORY_DEFINE_NAME_TRAIT("sampling", category::sampling);
+TIMEMORY_DEFINE_NAME_TRAIT("thread_sampling", category::thread_sampling);
+TIMEMORY_DEFINE_NAME_TRAIT("kokkos", category::kokkos);
+TIMEMORY_DEFINE_NAME_TRAIT("mpi", category::mpi);
+TIMEMORY_DEFINE_NAME_TRAIT("ompt", category::ompt);
+TIMEMORY_DEFINE_NAME_TRAIT("critical-trace", category::critical_trace);
+TIMEMORY_DEFINE_NAME_TRAIT("host-critical-trace", category::host_critical_trace);
+TIMEMORY_DEFINE_NAME_TRAIT("device-critical-trace", category::device_critical_trace);
+
 namespace omnitrace
 {
 namespace component

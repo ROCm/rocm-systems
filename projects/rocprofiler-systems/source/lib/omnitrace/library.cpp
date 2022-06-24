@@ -41,6 +41,7 @@
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/timemory.hpp"
+#include "library/tracing.hpp"
 
 #include <timemory/utility/procfs/maps.hpp>
 
@@ -49,7 +50,6 @@
 #include <string_view>
 
 using namespace omnitrace;
-using tim::type_list;
 
 //======================================================================================//
 
@@ -64,9 +64,6 @@ struct user_regions
 using omni_functors = omnitrace::component::functors<omni_regions>;
 using user_functors = omnitrace::component::functors<user_regions>;
 
-TIMEMORY_DEFINE_NAME_TRAIT("host", omni_functors)
-TIMEMORY_DEFINE_NAME_TRAIT("user", user_functors)
-
 TIMEMORY_INVOKE_PREINIT(omni_functors)
 TIMEMORY_INVOKE_PREINIT(user_functors)
 
@@ -74,31 +71,6 @@ TIMEMORY_INVOKE_PREINIT(user_functors)
 
 namespace
 {
-using interval_data_instances = thread_data<std::vector<bool>>;
-
-auto&
-get_interval_data(int64_t _tid = threading::get_id())
-{
-    static auto& _v =
-        interval_data_instances::instances(interval_data_instances::construct_on_init{});
-    return _v.at(_tid);
-}
-
-auto&
-get_timemory_hash_ids(int64_t _tid = threading::get_id())
-{
-    static auto _v = std::array<tim::hash_map_ptr_t, omnitrace::max_supported_threads>{};
-    return _v.at(_tid);
-}
-
-auto&
-get_timemory_hash_aliases(int64_t _tid = threading::get_id())
-{
-    static auto _v =
-        std::array<tim::hash_alias_ptr_t, omnitrace::max_supported_threads>{};
-    return _v.at(_tid);
-}
-
 auto
 ensure_finalization(bool _static_init = false)
 {
@@ -124,13 +96,6 @@ ensure_finalization(bool _static_init = false)
     return scope::destructor{ []() { omnitrace_finalize_hidden(); } };
 }
 
-auto&
-get_trace_session()
-{
-    static std::unique_ptr<perfetto::TracingSession> _session{};
-    return _session;
-}
-
 auto
 is_system_backend()
 {
@@ -138,48 +103,8 @@ is_system_backend()
     return (get_backend() != "inprocess");
 }
 
-auto&
-get_instrumentation_bundles(int64_t _tid = threading::get_id())
-{
-    static thread_local auto& _v = instrumentation_bundles::instances().at(_tid);
-    return _v;
-}
-
-auto&
-get_finalization_functions()
-{
-    static auto _v = std::vector<std::function<void()>>{};
-    return _v;
-}
-
 using Device = critical_trace::Device;
 using Phase  = critical_trace::Phase;
-}  // namespace
-
-//======================================================================================//
-///
-///
-///
-//======================================================================================//
-namespace
-{
-auto&
-push_count()
-{
-    static std::atomic<size_t> _v{ 0 };
-    return _v;
-}
-auto&
-pop_count()
-{
-    static std::atomic<size_t> _v{ 0 };
-    return _v;
-}
-
-auto _debug_push = tim::get_env("OMNITRACE_DEBUG_PUSH", false) && !get_debug_env();
-auto _debug_pop  = tim::get_env("OMNITRACE_DEBUG_POP", false) && !get_debug_env();
-auto _debug_user =
-    tim::get_env("OMNITRACE_DEBUG_USER_REGIONS", false) && !get_debug_env();
 }  // namespace
 
 //======================================================================================//
@@ -187,17 +112,19 @@ auto _debug_user =
 extern "C" void
 omnitrace_push_trace_hidden(const char* name)
 {
-    ++push_count();
+    ++tracing::push_count();
 
     // unconditionally return if finalized
     if(get_state() == State::Finalized)
     {
         OMNITRACE_CONDITIONAL_BASIC_PRINT(
-            _debug_push, "omnitrace_push_trace(%s) called during finalization\n", name);
+            tracing::debug_push, "omnitrace_push_trace(%s) called during finalization\n",
+            name);
         return;
     }
 
-    OMNITRACE_CONDITIONAL_BASIC_PRINT(_debug_push, "omnitrace_push_trace(%s)\n", name);
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(tracing::debug_push, "omnitrace_push_trace(%s)\n",
+                                      name);
 
     // the expectation here is that if the state is not active then the call
     // to omnitrace_init_tooling_hidden will activate all the appropriate
@@ -215,7 +142,7 @@ omnitrace_push_trace_hidden(const char* name)
 
     static auto _sample_rate = std::max<size_t>(get_instrumentation_interval(), 1);
     static thread_local size_t _sample_idx = 0;
-    auto&                      _interval   = get_interval_data();
+    auto&                      _interval   = tracing::get_interval_data();
     auto                       _enabled    = (_sample_idx++ % _sample_rate == 0);
 
     _interval->emplace_back(_enabled);
@@ -242,16 +169,17 @@ omnitrace_push_trace_hidden(const char* name)
 extern "C" void
 omnitrace_pop_trace_hidden(const char* name)
 {
-    ++pop_count();
+    ++tracing::pop_count();
 
-    OMNITRACE_CONDITIONAL_BASIC_PRINT(_debug_pop, "omnitrace_pop_trace(%s)\n", name);
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(tracing::debug_pop, "omnitrace_pop_trace(%s)\n",
+                                      name);
 
     // only execute when active
     if(get_state() == State::Active)
     {
         OMNITRACE_DEBUG("omnitrace_pop_trace(%s)\n", name);
 
-        auto& _interval_data = get_interval_data();
+        auto& _interval_data = tracing::get_interval_data();
         if(!_interval_data->empty())
         {
             if(_interval_data->back()) omni_functors::stop(name);
@@ -298,11 +226,13 @@ omnitrace_push_region_hidden(const char* name)
     if(get_state() == State::Finalized)
     {
         OMNITRACE_CONDITIONAL_BASIC_PRINT(
-            _debug_user, "omnitrace_push_region(%s) called during finalization\n", name);
+            tracing::debug_user, "omnitrace_push_region(%s) called during finalization\n",
+            name);
         return;
     }
 
-    OMNITRACE_CONDITIONAL_BASIC_PRINT(_debug_push, "omnitrace_push_region(%s)\n", name);
+    OMNITRACE_CONDITIONAL_BASIC_PRINT(tracing::debug_push, "omnitrace_push_region(%s)\n",
+                                      name);
 
     // the expectation here is that if the state is not active then the call
     // to omnitrace_init_tooling_hidden will activate all the appropriate
@@ -625,153 +555,65 @@ omnitrace_init_tooling_hidden()
         (void) get_perfetto_output_filename();
     }
 
-    auto _exe          = get_exe_name();
-    auto _hash_ids     = tim::get_hash_ids();
-    auto _hash_aliases = tim::get_hash_aliases();
-    auto _thread_init  = [_exe, _hash_ids, _hash_aliases]() {
-        static thread_local auto _thread_setup = [_exe]() {
-            if(threading::get_id() > 0)
-                threading::set_thread_name(
-                    TIMEMORY_JOIN(" ", "Thread", threading::get_id()).c_str());
-            thread_data<omnitrace_thread_bundle_t>::construct(
-                TIMEMORY_JOIN("", _exe, "/thread-", threading::get_id()),
-                quirk::config<quirk::auto_start>{});
-            get_interval_data()->reserve(512);
-            // save the hash maps
-            get_timemory_hash_ids()     = tim::get_hash_ids();
-            get_timemory_hash_aliases() = tim::get_hash_aliases();
-            return true;
-        }();
-        static thread_local auto _dtor = scope::destructor{ []() {
-            if(get_state() != State::Finalized)
-            {
-                if(get_use_sampling()) sampling::shutdown();
-                auto& _thr_bundle = thread_data<omnitrace_thread_bundle_t>::instance();
-                if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
-                   _thr_bundle->get<comp::wall_clock>()->get_is_running())
-                    _thr_bundle->stop();
-            }
-        } };
-        (void) _thread_setup;
-        (void) _dtor;
-    };
-
-    // separate from _thread_init so that it can be called after the first
-    // instrumentation on the thread
-    auto _setup_thread_sampling = []() {
-        static thread_local auto _v = []() {
-            auto _use_sampling = get_use_sampling();
-            if(_use_sampling) sampling::setup();
-            return _use_sampling;
-        }();
-        (void) _v;
-    };
-
-    // functors for starting and stopping timemory omni functors
-    auto _push_timemory = [](const char* name) {
-        auto& _data = get_instrumentation_bundles();
-        // this generates a hash for the raw string array
-        auto  _hash   = tim::add_hash_id(tim::string_view_t{ name });
-        auto* _bundle = _data.allocator.allocate(1);
-        _data.bundles.emplace_back(_bundle);
-        _data.allocator.construct(_bundle, _hash);
-        _bundle->start();
-    };
-
-    auto _pop_timemory = [](const char* name) {
-        auto  _hash = tim::hash::get_hash_id(tim::string_view_t{ name });
-        auto& _data = get_instrumentation_bundles();
-        if(_data.bundles.empty())
-        {
-            OMNITRACE_DEBUG("[%s] skipped %s :: empty bundle stack\n",
-                            "omnitrace_pop_trace", name);
-            return;
-        }
-        for(size_t i = _data.bundles.size(); i > 0; --i)
-        {
-            auto*& _v = _data.bundles.at(i - 1);
-            if(_v->get_hash() == _hash)
-            {
-                _v->stop();
-                _data.allocator.destroy(_v);
-                _data.allocator.deallocate(_v, 1);
-                _data.bundles.erase(_data.bundles.begin() + (i - 1));
-                break;
-            }
-        }
-    };
-
-    // functors for starting and stopping perfetto omni functors
-    auto _push_perfetto = [](auto _category, const char* name) {
-        using CategoryT = std::decay_t<decltype(_category)>;
-        uint64_t _ts    = comp::wall_clock::record();
-        TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name),
-                          _ts, "begin_ns", _ts);
-    };
-
-    auto _pop_perfetto = [](auto _category, const char*) {
-        using CategoryT = std::decay_t<decltype(_category)>;
-        uint64_t _ts    = comp::wall_clock::record();
-        TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, "end_ns", _ts);
-    };
+    auto _exe = get_exe_name();
 
     if(get_use_perfetto() && get_use_timemory())
     {
         omni_functors::configure(
-            [=](const char* name) {
-                _thread_init();
-                _push_perfetto(type_list<omni_functors>{}, name);
-                _push_timemory(name);
-                _setup_thread_sampling();
+            [](const char* name) {
+                tracing::thread_init();
+                tracing::push_perfetto(category::host{}, name);
+                tracing::push_timemory(name);
+                tracing::thread_init_sampling();
             },
-            [=](const char* name) {
-                _pop_timemory(name);
-                _pop_perfetto(type_list<omni_functors>{}, name);
+            [](const char* name) {
+                tracing::pop_timemory(name);
+                tracing::pop_perfetto(category::host{}, name);
             });
         user_functors::configure(
-            [=](const char* name) {
-                _thread_init();
-                _push_perfetto(type_list<user_functors>{}, name);
-                _push_timemory(name);
+            [](const char* name) {
+                tracing::thread_init();
+                tracing::push_perfetto(category::user{}, name);
+                tracing::push_timemory(name);
             },
-            [=](const char* name) {
-                _pop_timemory(name);
-                _pop_perfetto(type_list<user_functors>{}, name);
+            [](const char* name) {
+                tracing::pop_timemory(name);
+                tracing::pop_perfetto(category::user{}, name);
             });
     }
     else if(get_use_perfetto())
     {
         omni_functors::configure(
-            [=](const char* name) {
-                _thread_init();
-                _push_perfetto(type_list<omni_functors>{}, name);
-                _setup_thread_sampling();
+            [](const char* name) {
+                tracing::thread_init();
+                tracing::push_perfetto(category::host{}, name);
+                tracing::thread_init_sampling();
             },
-            [=](const char* name) { _pop_perfetto(type_list<omni_functors>{}, name); });
+            [](const char* name) { tracing::pop_perfetto(category::host{}, name); });
         user_functors::configure(
-            [=](const char* name) {
-                _thread_init();
-                _push_perfetto(type_list<user_functors>{}, name);
-                _setup_thread_sampling();
+            [](const char* name) {
+                tracing::thread_init();
+                tracing::push_perfetto(category::user{}, name);
+                tracing::thread_init_sampling();
             },
-            [=](const char* name) { _pop_perfetto(type_list<user_functors>{}, name); });
+            [](const char* name) { tracing::pop_perfetto(category::user{}, name); });
     }
     else if(get_use_timemory())
     {
         omni_functors::configure(
-            [=](const char* name) {
-                _thread_init();
-                _push_timemory(name);
-                _setup_thread_sampling();
+            [](const char* name) {
+                tracing::thread_init();
+                tracing::push_timemory(name);
+                tracing::thread_init_sampling();
             },
-            [=](const char* name) { _pop_timemory(name); });
+            [](const char* name) { tracing::pop_timemory(name); });
         user_functors::configure(
-            [=](const char* name) {
-                _thread_init();
-                _push_timemory(name);
-                _setup_thread_sampling();
+            [](const char* name) {
+                tracing::thread_init();
+                tracing::push_timemory(name);
+                tracing::thread_init_sampling();
             },
-            [=](const char* name) { _pop_timemory(name); });
+            [](const char* name) { tracing::pop_timemory(name); });
     }
 
     if(get_use_ompt())
@@ -796,7 +638,7 @@ omnitrace_init_tooling_hidden()
             PRINT_HERE("%s", "Trace");
         });
 #endif
-        auto& tracing_session = get_trace_session();
+        auto& tracing_session = tracing::get_trace_session();
         tracing_session       = perfetto::Tracing::NewTrace();
         tracing_session->Setup(cfg);
         tracing_session->StartBlocking();
@@ -842,8 +684,8 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
 
     // always the first
     (void) get_state();
-    (void) push_count();
-    (void) pop_count();
+    (void) tracing::push_count();
+    (void) tracing::pop_count();
 
     OMNITRACE_CONDITIONAL_THROW(
         get_state() >= State::Init &&
@@ -853,7 +695,7 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
         _mode, std::to_string(_is_binary_rewrite).c_str(), _argv0,
         std::to_string(get_state()).c_str());
 
-    get_finalization_functions().emplace_back([_argv0]() {
+    tracing::get_finalization_functions().emplace_back([_argv0]() {
         OMNITRACE_CI_THROW(get_state() != State::Active,
                            "Finalizer function for popping main invoked in non-active "
                            "state :: state = %s\n",
@@ -914,13 +756,13 @@ omnitrace_finalize_hidden(void)
 
     // some functions called during finalization may alter the push/pop count so we need
     // to save them here
-    auto _push_count = push_count().load();
-    auto _pop_count  = pop_count().load();
+    auto _push_count = tracing::push_count().load();
+    auto _pop_count  = tracing::pop_count().load();
 
     // e.g. omnitrace_pop_trace("main");
     if(_push_count > _pop_count)
     {
-        for(auto& itr : get_finalization_functions())
+        for(auto& itr : tracing::get_finalization_functions())
         {
             itr();
             ++_pop_count;
@@ -955,12 +797,12 @@ omnitrace_finalize_hidden(void)
 
     OMNITRACE_DEBUG_F("Copying over all timemory hash information to main thread...\n");
     // copy these over so that all hashes are known
-    auto& _hzero = get_timemory_hash_ids(0);
-    auto& _azero = get_timemory_hash_aliases(0);
+    auto& _hzero = tracing::get_timemory_hash_ids(0);
+    auto& _azero = tracing::get_timemory_hash_aliases(0);
     for(size_t i = 1; i < max_supported_threads; ++i)
     {
-        auto& _hitr = get_timemory_hash_ids(i);
-        auto& _aitr = get_timemory_hash_aliases(i);
+        auto& _hitr = tracing::get_timemory_hash_ids(i);
+        auto& _aitr = tracing::get_timemory_hash_aliases(i);
         if(_hzero && _hitr)
         {
             for(const auto& itr : *_hitr)
@@ -1139,6 +981,11 @@ omnitrace_finalize_hidden(void)
     bool _perfetto_output_error = false;
     if(get_use_perfetto() && !is_system_backend())
     {
+        auto& tracing_session = tracing::get_trace_session();
+
+        OMNITRACE_CI_THROW(tracing_session == nullptr,
+                           "Null pointer to the tracing session");
+
         if(get_verbose() >= 0) fprintf(stderr, "\n");
         if(get_verbose() >= 0 || get_debug())
             fprintf(stderr, "[%s][%s]|%i> Flushing perfetto...\n", TIMEMORY_PROJECT_NAME,
@@ -1146,9 +993,9 @@ omnitrace_finalize_hidden(void)
 
         // Make sure the last event is closed for this example.
         perfetto::TrackEvent::Flush();
+        tracing_session->FlushBlocking();
 
-        auto& tracing_session = get_trace_session();
-        OMNITRACE_VERBOSE_F(3, "Stopping the blocking perfetto trace sessions...\n");
+        OMNITRACE_VERBOSE_F(3, "Stopping the blocking perfetto trace session...\n");
         tracing_session->StopBlocking();
 
         using char_vec_t = std::vector<char>;

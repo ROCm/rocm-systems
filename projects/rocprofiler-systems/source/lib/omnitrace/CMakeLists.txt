@@ -72,6 +72,7 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/library/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/thread_data.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/timemory.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/tracing.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/backtrace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/fork_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/mpi_gotcha.cpp
@@ -102,9 +103,11 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/library/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/thread_data.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/timemory.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/tracing.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/utility.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/fwd.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/backtrace.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/components/category_region.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/fork_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/functors.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/mpi_gotcha.hpp
