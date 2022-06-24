@@ -85,6 +85,7 @@ static const char *kDevVendorIDFName = "vendor";
 static const char *kDevSubSysDevIDFName = "subsystem_device";
 static const char *kDevSubSysVendorIDFName = "subsystem_vendor";
 static const char *kDevOverDriveLevelFName = "pp_sclk_od";
+static const char *kDevMemOverDriveLevelFName = "pp_mclk_od";
 static const char *kDevGPUSClkFName = "pp_dpm_sclk";
 static const char *kDevGPUMClkFName = "pp_dpm_mclk";
 static const char *kDevDCEFClkFName = "pp_dpm_dcefclk";
@@ -225,6 +226,7 @@ static const char *kDevPerfLevelUnknownStr = "unknown";
 static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevPerfLevel, kDevPerfLevelFName},
     {kDevOverDriveLevel, kDevOverDriveLevelFName},
+    {kDevMemOverDriveLevel, kDevMemOverDriveLevelFName},
     {kDevDevProdName, kDevDevProdNameFName},
     {kDevDevProdNum, kDevDevProdNumFName},
     {kDevDevID, kDevDevIDFName},
@@ -388,6 +390,7 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_busy_percent_get",          {{kDevUsageFName}, {}}},
   {"rsmi_dev_memory_reserved_pages_get", {{kDevMemPageBadFName}, {}}},
   {"rsmi_dev_overdrive_level_get",       {{kDevOverDriveLevelFName}, {}}},
+  {"rsmi_dev_mem_overdrive_level_get",   {{kDevMemOverDriveLevelFName}, {}}},
   {"rsmi_dev_power_profile_presets_get", {{kDevPowerProfileModeFName}, {}}},
   {"rsmi_dev_perf_level_set",            {{kDevPerfLevelFName}, {}}},
   {"rsmi_dev_perf_level_set_v1",         {{kDevPerfLevelFName}, {}}},
@@ -794,6 +797,7 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
 
     case kDevUsage:
     case kDevOverDriveLevel:
+    case kDevMemOverDriveLevel:
     case kDevMemTotGTT:
     case kDevMemTotVisVRAM:
     case kDevMemTotVRAM:
@@ -907,6 +911,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevPerfLevel:
     case kDevUsage:
     case kDevOverDriveLevel:
+    case kDevMemOverDriveLevel:
     case kDevDevProdName:
     case kDevDevProdNum:
     case kDevDevID:
