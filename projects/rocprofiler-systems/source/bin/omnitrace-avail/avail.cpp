@@ -165,7 +165,7 @@ std::string settings_rexclude_exact =
     "FREQ|"
     "STACK_CLEARING|TARGET_PID|THROTTLE_(COUNT|VALUE)|(AUTO|FLAMEGRAPH)_OUTPUT|"
     "(ENABLE|DISABLE)_ALL_SIGNALS|ALLOW_SIGNAL_HANDLER|CTEST_NOTES|INSTRUCTION_"
-    "ROOFLINE)$";
+    "ROOFLINE|ADD_SECONDARY)$";
 
 //  leading matches, e.g. OMNITRACE_MPI_[A-Z_]+
 std::string settings_rexclude_begin =

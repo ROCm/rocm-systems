@@ -28,7 +28,6 @@
 #include "library/debug.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
-#include "library/thread_sampler.hpp"
 #include "library/utility.hpp"
 #include "timemory/backends/threading.hpp"
 

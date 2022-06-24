@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/thread_sampler.hpp"
+#include "library/process_sampler.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/rocm_smi.hpp"
 #include "library/config.hpp"
@@ -32,7 +32,7 @@
 
 namespace omnitrace
 {
-namespace thread_sampler
+namespace process_sampler
 {
 namespace
 {
@@ -113,7 +113,7 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 void
 sampler::setup()
 {
-    if(!get_use_thread_sampling())
+    if(!get_use_process_sampling())
     {
         OMNITRACE_DEBUG("Background sampler is disabled...\n");
         return;
@@ -148,7 +148,7 @@ sampler::setup()
 
     polling_finished = std::make_unique<promise_t>();
 
-    auto     _freq      = get_thread_sampling_freq();
+    auto     _freq      = get_process_sampling_freq();
     uint64_t _msec_freq = (1.0 / _freq) * 1.0e3;
 
     promise_t _prom{};
@@ -180,7 +180,7 @@ sampler::shutdown()
     {
         size_t           _nitr     = 0;
         constexpr size_t _nitr_max = 100;
-        uint64_t         _freq     = (1.0 / get_thread_sampling_freq()) * 1.0e3;
+        uint64_t         _freq     = (1.0 / get_process_sampling_freq()) * 1.0e3;
 
         // wait until the sampler is no longer sampling
         std::this_thread::sleep_for(msec_t{ _freq });
@@ -226,5 +226,5 @@ sampler::set_state(state_t _state)
 {
     get_sampler_state().store(_state);
 }
-}  // namespace thread_sampler
+}  // namespace process_sampler
 }  // namespace omnitrace

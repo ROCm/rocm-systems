@@ -49,6 +49,19 @@ void
 configure_settings(bool _init = true);
 
 void
+configure_mode_settings();
+
+void
+configure_signal_handler();
+
+void
+configure_disabled_settings();
+
+void
+handle_deprecated_setting(const std::string& _old, const std::string& _new,
+                          int _verbose = 0);
+
+void
 print_banner(std::ostream& _os = std::cerr);
 
 void
@@ -74,6 +87,19 @@ set_setting_value(const std::string& _name, Tp&& _v)
 }
 
 template <typename Tp>
+bool
+set_default_setting_value(const std::string& _name, Tp&& _v)
+{
+    auto _instance = tim::settings::shared_instance();
+    auto _setting  = _instance->find(_name);
+    if(_setting == _instance->end()) return false;
+    if(!_setting->second) return false;
+    if(_setting->second->get_config_updated() || _setting->second->get_environ_updated())
+        return false;
+    return _setting->second->set(std::forward<Tp>(_v));
+}
+
+template <typename Tp>
 std::pair<bool, Tp>
 get_setting_value(const std::string& _name)
 {
@@ -92,7 +118,7 @@ std::string
 get_config_file();
 
 Mode
-get_mode() OMNITRACE_HOT;
+get_mode();
 
 bool&
 is_attached();
@@ -146,7 +172,7 @@ bool&
 get_use_sampling() OMNITRACE_HOT;
 
 bool&
-get_use_thread_sampling() OMNITRACE_HOT;
+get_use_process_sampling() OMNITRACE_HOT;
 
 bool&
 get_use_pid();
@@ -237,7 +263,7 @@ std::string
 get_sampling_cpus();
 
 double&
-get_thread_sampling_freq();
+get_process_sampling_freq();
 
 std::string
 get_sampling_gpus();

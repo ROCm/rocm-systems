@@ -154,7 +154,7 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_USE_ROCM_SMI                  | Enable sampling GPU power, temp, uti... |
 | OMNITRACE_USE_ROCTRACER                 | Enable ROCM tracing                     |
 | OMNITRACE_USE_SAMPLING                  | Enable statistical sampling of call-... |
-| OMNITRACE_USE_THREAD_SAMPLING           | Enable a background thread which sam... |
+| OMNITRACE_USE_PROCESS_SAMPLING          | Enable a background thread which sam... |
 | OMNITRACE_USE_TIMEMORY                  | Enable timemory backend                 |
 | OMNITRACE_VERBOSE                       | Verbosity level                         |
 | OMNITRACE_WIDTH                         | Set the global output width for comp... |
@@ -669,7 +669,7 @@ $SAMPLE                         = OFF
 OMNITRACE_USE_PERFETTO          = $ENABLE
 OMNITRACE_USE_TIMEMORY          = $ENABLE
 OMNITRACE_USE_SAMPLING          = $SAMPLE
-OMNITRACE_USE_THREAD_SAMPLING   = $SAMPLE
+OMNITRACE_USE_PROCESS_SAMPLING  = $SAMPLE
 OMNITRACE_CRITICAL_TRACE        = OFF
 
 # debug

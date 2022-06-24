@@ -39,7 +39,7 @@
 
 namespace omnitrace
 {
-namespace thread_sampler
+namespace process_sampler
 {
 struct instance
 {
@@ -99,5 +99,5 @@ post_process()
     sampler::post_process();
 }
 //
-}  // namespace thread_sampler
+}  // namespace process_sampler
 }  // namespace omnitrace

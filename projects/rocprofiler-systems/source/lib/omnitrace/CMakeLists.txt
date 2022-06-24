@@ -65,12 +65,12 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/library/mproc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/ompt.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/perfetto.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/process_sampler.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/ptl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/runtime.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/sampling.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/thread_data.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/thread_sampler.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/timemory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/backtrace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/fork_gotcha.cpp
@@ -95,12 +95,12 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/library/mproc.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/ompt.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/perfetto.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/process_sampler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/ptl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/runtime.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/sampling.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/thread_data.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/thread_sampler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/timemory.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/utility.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/fwd.hpp
