@@ -455,7 +455,7 @@ def printErrLog(device, err):
     global PRINT_JSON
     devName = device
     for line in err.split('\n'):
-        errstr = 'GPU[%s] \t\t: %s' % (devName, line)
+        errstr = 'GPU[%s]\t: %s' % (devName, line)
         if not PRINT_JSON:
             logging.error(errstr)
         else:
