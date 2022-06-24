@@ -27,7 +27,7 @@ jobs:
     - name: Install Packages
       timeout-minutes: 5
       run:
-        for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy; done
+        for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Configure Env
       run:

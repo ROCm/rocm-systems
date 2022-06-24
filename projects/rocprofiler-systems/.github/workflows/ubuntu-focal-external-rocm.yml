@@ -37,7 +37,7 @@ jobs:
         apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev ${{ matrix.compiler }} libudev-dev libnuma-dev rocm-dev rocm-utils roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev libpapi-dev libopenmpi-dev curl &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install 'cmake==3.16.3' &&
-        for i in 6 7 8 9; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy; done
+        for i in 6 7 8 9; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Configure Env
       run:

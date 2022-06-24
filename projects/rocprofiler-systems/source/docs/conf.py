@@ -110,26 +110,26 @@ html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
 
 html_theme_options = {
-    'analytics_id': 'G-1HLBBRSTT9',  #  Provided by Google in your dashboard
-    'analytics_anonymize_ip': False,
-    'logo_only': False,
-    'display_version': True,
-    'prev_next_buttons_location': 'bottom',
-    'style_external_links': False,
-    'vcs_pageview_mode': '',
+    "analytics_id": "G-1HLBBRSTT9",  #  Provided by Google in your dashboard
+    "analytics_anonymize_ip": False,
+    "logo_only": False,
+    "display_version": True,
+    "prev_next_buttons_location": "bottom",
+    "style_external_links": False,
+    "vcs_pageview_mode": "",
     # 'style_nav_header_background': 'white',
     # Toc options
-    'collapse_navigation': True,
-    'sticky_navigation': True,
-    'navigation_depth': 4,
-    'includehidden': True,
-    'titles_only': False
+    "collapse_navigation": True,
+    "sticky_navigation": True,
+    "navigation_depth": 4,
+    "includehidden": True,
+    "titles_only": False,
 }
 
 # Breathe Configuration
 breathe_projects = {"omnitrace": "_doxygen/xml"}
 breathe_default_project = "omnitrace"
-breathe_default_members = ('members', )
+breathe_default_members = ("members",)
 breathe_projects_source = {
     "auto": (
         os.path.join(project_root, "source"),

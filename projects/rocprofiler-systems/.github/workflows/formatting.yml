@@ -10,6 +10,27 @@ on:
     branches: [ main, develop ]
 
 jobs:
+  python-formatting:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        python-version: [3.8]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install black
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: black format
+      run: |
+        black --diff --check .
+
   cmake-format:
     runs-on: ubuntu-20.04
 

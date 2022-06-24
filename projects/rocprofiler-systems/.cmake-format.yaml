@@ -84,6 +84,13 @@ parse:
         PASS_REGEX: '*'
         FAIL_REGEX: '*'
         SKIP_REGEX: '*'
+    omnitrace_add_python_validation_test:
+      kwargs:
+        NAME: '*'
+        ARGS: '*'
+        PERFETTO_FILE: '*'
+        TIMEMORY_FILE: '*'
+        TIMEMORY_METRIC: '*'
     rocm_version_message:
       flags:
         - STATUS

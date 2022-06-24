@@ -30,6 +30,7 @@ jobs:
         sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev clang libomp-dev ${{ matrix.compiler }} ${{ matrix.mpi }} &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install numpy &&
+        python3 -m pip install perfetto &&
         python3 -m pip install 'cmake==3.16.3'
 
     - name: Configure Env

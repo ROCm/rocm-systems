@@ -25,7 +25,7 @@ def validate_json(data, labels, counts, depths):
         if _prefix != eitr[0]:
             raise RuntimeError(f"Mismatched prefix: {_prefix} vs. {eitr[0]}")
         if _count != eitr[1]:
-            raise RuntimeError(f"Mismatched depth: {_depth} vs. {eitr[2]}")
+            raise RuntimeError(f"Mismatched count: {_count} vs. {eitr[1]}")
         if _depth != eitr[2]:
             raise RuntimeError(f"Mismatched depth: {_depth} vs. {eitr[2]}")
 

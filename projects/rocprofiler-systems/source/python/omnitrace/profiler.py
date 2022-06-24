@@ -295,11 +295,7 @@ class Profiler:
 
         self.stop()
 
-        if (
-            exec_type is not None
-            and exec_value is not None
-            and exec_tb is not None
-        ):
+        if exec_type is not None and exec_value is not None and exec_tb is not None:
             import traceback
 
             traceback.print_exception(exec_type, exec_value, exec_tb, limit=5)
@@ -390,9 +386,5 @@ class FakeProfiler:
 
         import traceback
 
-        if (
-            exec_type is not None
-            and exec_value is not None
-            and exec_tb is not None
-        ):
+        if exec_type is not None and exec_value is not None and exec_tb is not None:
             traceback.print_exception(exec_type, exec_value, exec_tb, limit=5)

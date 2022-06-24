@@ -58,12 +58,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-n", "--num-iterations", help="Number", type=int, default=3
-    )
-    parser.add_argument(
-        "-v", "--value", help="Starting value", type=int, default=20
-    )
+    parser.add_argument("-n", "--num-iterations", help="Number", type=int, default=3)
+    parser.add_argument("-v", "--value", help="Starting value", type=int, default=20)
     args = parser.parse_args()
 
     _prefix = os.path.basename(__file__)
