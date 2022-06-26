@@ -416,6 +416,12 @@ void HIP_AsyncActivityCallback(uint32_t op_id, void* record_ptr, void* arg) {
 
 namespace hsa_support {
 
+struct AgentInfo {
+  int index;
+  hsa_device_type_t type;
+};
+std::unordered_map<decltype(hsa_agent_t::handle), AgentInfo> agent_info_map;
+
 void hsa_async_copy_handler(const Tracker::entry_t* entry) {
   activity_record_t record{};
   record.domain = ACTIVITY_DOMAIN_HSA_OPS;
@@ -1234,6 +1240,33 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   // Save the HSA core api and amd_ext api.
   hsa_support::saved_core_api = *table->core_;
   hsa_support::saved_amd_ext_api = *table->amd_ext_;
+
+  // Enumerate the agents.
+  if (hsa_support::saved_core_api.hsa_iterate_agents_fn(
+          [](hsa_agent_t agent, void* data) {
+            hsa_support::AgentInfo agent_info;
+            if (hsa_support::saved_core_api.hsa_agent_get_info_fn(
+                    agent, HSA_AGENT_INFO_DEVICE, &agent_info.type) != HSA_STATUS_SUCCESS)
+              FATAL_LOGGING("hsa_agent_get_info failed");
+            switch (agent_info.type) {
+              case HSA_DEVICE_TYPE_CPU:
+                static int cpu_agent_count = 0;
+                agent_info.index = cpu_agent_count++;
+                break;
+              case HSA_DEVICE_TYPE_GPU:
+                static int gpu_agent_count = 0;
+                agent_info.index = gpu_agent_count++;
+                break;
+              default:
+                static int other_agent_count = 0;
+                agent_info.index = other_agent_count++;
+                break;
+            }
+            hsa_support::agent_info_map.emplace(agent.handle, agent_info);
+            return HSA_STATUS_SUCCESS;
+          },
+          nullptr) != HSA_STATUS_SUCCESS)
+    FATAL_LOGGING("hsa_iterate_agents failed");
 
   // Install the HSA_OPS intercept
   table->amd_ext_->hsa_amd_memory_async_copy_fn =
