@@ -31,6 +31,7 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/environment.hpp>
 #include <timemory/environment/types.hpp>
+#include <timemory/manager.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/settings/types.hpp>
@@ -150,6 +151,21 @@ configure_settings(bool _init)
                                     std::to_string(get_state()).c_str());
     }
 
+    tim::manager::add_metadata("OMNITRACE_VERSION", OMNITRACE_VERSION_STRING);
+    tim::manager::add_metadata("OMNITRACE_VERSION_MAJOR", OMNITRACE_VERSION_MAJOR);
+    tim::manager::add_metadata("OMNITRACE_VERSION_MINOR", OMNITRACE_VERSION_MINOR);
+    tim::manager::add_metadata("OMNITRACE_VERSION_PATCH", OMNITRACE_VERSION_PATCH);
+
+#if OMNITRACE_HIP_VERSION > 0
+    tim::manager::add_metadata("OMNITRACE_HIP_VERSION", OMNITRACE_HIP_VERSION_STRING);
+    tim::manager::add_metadata("OMNITRACE_HIP_VERSION_MAJOR",
+                               OMNITRACE_HIP_VERSION_MAJOR);
+    tim::manager::add_metadata("OMNITRACE_HIP_VERSION_MINOR",
+                               OMNITRACE_HIP_VERSION_MINOR);
+    tim::manager::add_metadata("OMNITRACE_HIP_VERSION_PATCH",
+                               OMNITRACE_HIP_VERSION_PATCH);
+#endif
+
     static auto _config = settings::shared_instance();
 
     // if using timemory, default to perfetto being off
@@ -173,8 +189,8 @@ configure_settings(bool _init)
                              "for continuous integration)",
                              false, "debugging");
 
-    OMNITRACE_CONFIG_EXT_SETTING(bool, "OMNITRACE_DL_VERBOSE",
-                                 "Verbosity within the omnitrace-dl library", false,
+    OMNITRACE_CONFIG_EXT_SETTING(int, "OMNITRACE_DL_VERBOSE",
+                                 "Verbosity within the omnitrace-dl library", 0,
                                  "debugging", "libomnitrace-dl");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_PERFETTO", "Enable perfetto backend",
@@ -253,7 +269,7 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_ROCM_SMI_DEVICES",
                              "[DEPRECATED] Renamed to OMNITRACE_SAMPLING_GPUS", "all",
-                             "rocm_smi", "rocm", "process_sampling");
+                             "rocm_smi", "rocm", "process_sampling", "deprecated");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_SAMPLING_GPUS",
@@ -368,8 +384,8 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_TIMEMORY_COMPONENTS",
-        "List of components to collect via timemory (see timemory-avail)", "wall_clock",
-        "timemory", "component");
+        "List of components to collect via timemory (see `omnitrace-avail -C`)",
+        "wall_clock", "timemory", "component");
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_OUTPUT_FILE", "Perfetto filename",
                              "", "perfetto", "io", "filename");
@@ -497,12 +513,16 @@ configure_settings(bool _init)
 
     settings::suppress_parsing()  = true;
     settings::use_output_suffix() = _config->get<bool>("OMNITRACE_USE_PID");
+    if(settings::use_output_suffix())
+        settings::default_process_suffix() = process::get_id();
 #if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
     if(tim::dmp::is_initialized()) settings::default_process_suffix() = tim::dmp::rank();
 #endif
 
     auto _dl_verbose = _config->find("OMNITRACE_DL_VERBOSE");
-    tim::set_env(std::string{ _dl_verbose->first }, _dl_verbose->second->as_string(), 0);
+    if(_dl_verbose->second->get_config_updated())
+        tim::set_env(std::string{ _dl_verbose->first }, _dl_verbose->second->as_string(),
+                     0);
 
 #if !defined(TIMEMORY_USE_MPI) || TIMEMORY_USE_MPI == 0
     _config->disable("OMNITRACE_PERFETTO_COMBINE_TRACES");

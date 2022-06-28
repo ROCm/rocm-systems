@@ -141,6 +141,7 @@ void
 mpi_gotcha::stop()
 {
     OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] Stopping MPI gotcha...\n", process::get_id());
+    if(mpip_index == std::numeric_limits<uint64_t>::max()) return;
     update();
 }
 
@@ -177,7 +178,8 @@ mpi_gotcha::update()
                                 tim::mpi::rank(), _rank);
         OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI size: %i (%i)\n", process::get_id(),
                                 tim::mpi::size(), _size);
-        last_comm_record = _rank_data;
+        last_comm_record      = _rank_data;
+        config::get_use_pid() = true;
     }
 }
 
@@ -323,7 +325,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
                     _data.tool_id.c_str(), (int) _retval);
             }
 
-            // if(_comm_entry.updated()) update();
+            if(_comm_entry.updated()) update();
         }
     }
     omnitrace_pop_trace_hidden(_data.tool_id.c_str());

@@ -345,15 +345,16 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
         return _v;
     }();
 
+    if(get_use_perfetto())
+    {
+        TRACE_EVENT_BEGIN("device", perfetto::StaticString{ *_name },
+                          static_cast<uint64_t>(_beg_ns), "begin_ns",
+                          static_cast<uint64_t>(_beg_ns));
+        TRACE_EVENT_END("device", static_cast<uint64_t>(_end_ns), "end_ns",
+                        static_cast<uint64_t>(_end_ns));
+    }
+
     auto _func = [_beg_ns, _end_ns, _name]() {
-        if(get_use_perfetto())
-        {
-            TRACE_EVENT_BEGIN("device", perfetto::StaticString{ *_name },
-                              static_cast<uint64_t>(_beg_ns), "begin_ns",
-                              static_cast<uint64_t>(_beg_ns));
-            TRACE_EVENT_END("device", static_cast<uint64_t>(_end_ns), "end_ns",
-                            static_cast<uint64_t>(_end_ns));
-        }
         if(get_use_timemory())
         {
             roctracer_hsa_bundle_t _bundle{ *_name, _scope };
