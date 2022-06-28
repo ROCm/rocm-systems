@@ -36,6 +36,10 @@ set_target_properties(
                INSTALL_RPATH_USE_LINK_PATH ON
                INSTALL_RPATH "${OMNITRACE_EXE_INSTALL_RPATH}")
 
+if(OMNITRACE_BUILD_DYNINST)
+    target_compile_definitions(omnitrace-exe PRIVATE OMNITRACE_BUILD_DYNINST=1)
+endif()
+
 omnitrace_strip_target(omnitrace-exe)
 
 if(CMAKE_BUILD_TYPE MATCHES "^(DEBUG|Debug)")

@@ -1,7 +1,6 @@
 # executable RPATH
 set(OMNITRACE_EXE_INSTALL_RPATH
-    "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/omnitrace:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/timemory/libunwind:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib"
-    )
+    "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/omnitrace")
 
 # executables
 add_subdirectory(omnitrace-avail)

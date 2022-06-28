@@ -781,4 +781,57 @@ function(OMNITRACE_FIND_SHARED_LIBRARY)
     find_library(${ARGN})
 endfunction()
 
+function(OMNITRACE_INSTALL_TPL _TPL_TARGET _NEW_NAME _BUILD_TREE_DIR)
+    get_target_property(_TPL_VERSION ${_TPL_TARGET} VERSION)
+    get_target_property(_TPL_SOVERSION ${_TPL_TARGET} SOVERSION)
+    get_target_property(_TPL_NAME ${_TPL_TARGET} OUTPUT_NAME)
+    set(_TPL_PREFIX ${CMAKE_SHARED_LIBRARY_PREFIX})
+    set(_TPL_SUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX})
+
+    foreach(_TAIL ${_TPL_SUFFIX} ${_TPL_SUFFIX}.${_TPL_SOVERSION}
+                  ${_TPL_SUFFIX}.${_TPL_VERSION})
+        set(_INP ${_TPL_PREFIX}${_TPL_NAME}${_TAIL})
+        set(_OUT ${_TPL_PREFIX}${_NEW_NAME}${_TAIL})
+    endforeach()
+
+    # build tree symbolic links
+    add_custom_target(
+        ${_NEW_NAME}-library ALL
+        ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE:${_TPL_TARGET}>
+        ${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_VERSION}
+        COMMAND
+            ${CMAKE_COMMAND} -E create_symlink
+            ${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_VERSION}
+            ${_BUILD_TREE_DIR}/${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_SOVERSION}
+        COMMAND
+            ${CMAKE_COMMAND} -E create_symlink
+            ${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_SOVERSION}
+            ${_BUILD_TREE_DIR}/${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}
+        WORKING_DIRECTORY ${_BUILD_TREE_DIR}
+        DEPENDS ${_TPL_TARGET}
+        COMMENT "Creating ${_NEW_NAME} symbolic links to ${_TPL_TARGET}...")
+
+    install(
+        FILES $<TARGET_FILE:${_TPL_TARGET}>
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RENAME ${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_VERSION})
+
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_BINARY_DIR}/install-tree
+        COMMAND
+            ${CMAKE_COMMAND} -E create_symlink
+            ${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_VERSION}
+            ${PROJECT_BINARY_DIR}/install-tree/${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_SOVERSION}
+        COMMAND
+            ${CMAKE_COMMAND} -E create_symlink
+            ${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_SOVERSION}
+            ${PROJECT_BINARY_DIR}/install-tree/${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX})
+    install(
+        FILES
+            ${PROJECT_BINARY_DIR}/install-tree/${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_SOVERSION}
+            ${PROJECT_BINARY_DIR}/install-tree/${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}
+        DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
+endfunction()
+
 cmake_policy(POP)

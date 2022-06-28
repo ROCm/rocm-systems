@@ -24,6 +24,7 @@
 #include "fwd.hpp"
 
 #include <cstring>
+#include <iterator>
 #include <timemory/config.hpp>
 #include <timemory/hash.hpp>
 #include <timemory/manager.hpp>
@@ -128,12 +129,20 @@ strset_t                                   print_formats        = { "txt", "json
 std::string                                modfunc_dump_dir     = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
+#if defined(DYNINST_API_RT)
+auto _dyn_api_rt_paths = tim::delimit(DYNINST_API_RT, ":");
+#else
+auto _dyn_api_rt_paths = std::vector<std::string>{};
+#endif
+
 std::string
 get_absolute_exe_filepath(std::string exe_name, const std::string& env_path = "PATH");
 
 std::string
-get_absolute_lib_filepath(std::string        lib_name,
-                          const std::string& env_path = "LD_LIBRARY_PATH");
+get_absolute_lib_filepath(std::string              lib_name,
+                          const std::string&       env_path  = "LD_LIBRARY_PATH",
+                          std::vector<std::string> suffixes  = {},
+                          std::vector<std::string> fallbacks = {});
 
 bool
 file_exists(const std::string& name);
@@ -143,6 +152,9 @@ get_realpath(const std::string&);
 
 std::string
 get_cwd();
+
+void
+find_dyn_api_rt();
 }  // namespace
 
 //======================================================================================//
@@ -154,36 +166,8 @@ get_cwd();
 int
 main(int argc, char** argv)
 {
-#if defined(DYNINST_API_RT)
-    auto _dyn_api_rt_paths = tim::delimit(DYNINST_API_RT, ":");
-#else
-    auto _dyn_api_rt_paths = std::vector<std::string>{};
-#endif
-    auto _dyn_api_rt_abs = get_absolute_lib_filepath("libdyninstAPI_RT.so");
-    _dyn_api_rt_paths.insert(_dyn_api_rt_paths.begin(), _dyn_api_rt_abs);
-    for(auto&& itr : _dyn_api_rt_paths)
-    {
-        auto _file_exists = [](const std::string& _fname) {
-            struct stat _buffer;
-            if(stat(_fname.c_str(), &_buffer) == 0)
-                return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
-            return false;
-        };
-        if(_file_exists(itr))
-            tim::set_env<string_t>("DYNINSTAPI_RT_LIB", itr, 0);
-        else if(_file_exists(TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.so")))
-            tim::set_env<string_t>("DYNINSTAPI_RT_LIB",
-                                   TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.so"), 0);
-        else if(_file_exists(TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.a")))
-            tim::set_env<string_t>("DYNINSTAPI_RT_LIB",
-                                   TIMEMORY_JOIN('/', itr, "libdyninstAPI_RT.a"), 0);
-    }
-    verbprintf(0, "DYNINST_API_RT: %s\n",
-               tim::get_env<string_t>("DYNINSTAPI_RT_LIB", "").c_str());
-
     argv0 = argv[0];
 
-    bpatch                              = std::make_shared<patch_t>();
     address_space_t*      addr_space    = nullptr;
     string_t              mutname       = {};
     string_t              outfile       = {};
@@ -200,16 +184,6 @@ main(int argc, char** argv)
         { &excluded_module_functions, false },
         { &overlapping_module_functions, false },
     };
-
-    bpatch->setTypeChecking(true);
-    bpatch->setSaveFPR(true);
-    bpatch->setDelayedParsing(true);
-    bpatch->setDebugParsing(false);
-    bpatch->setInstrStackFrames(false);
-    bpatch->setLivenessAnalysis(false);
-    bpatch->setBaseTrampDeletion(false);
-    bpatch->setTrampRecursive(false);
-    bpatch->setMergeTramp(true);
 
     std::set<std::string> dyninst_defs = { "TypeChecking", "SaveFPR", "DelayedParsing",
                                            "MergeTramp" };
@@ -733,7 +707,15 @@ main(int argc, char** argv)
         .count(1)
         .dtype("int")
         .action([](parser_t& p) { batch_size = p.get<size_t>("batch-size"); });
-
+    parser.add_argument({ "--dyninst-rt" }, "Path(s) to the dyninstAPI_RT library")
+        .dtype("filepath")
+        .min_count(1)
+        .action([](parser_t& _p) {
+            auto _v = _p.get<strvec_t>("dyninst-rt");
+            std::copy(_dyn_api_rt_paths.begin(), _dyn_api_rt_paths.end(),
+                      std::back_inserter(_v));
+            std::swap(_dyn_api_rt_paths, _v);
+        });
     parser
         .add_argument({ "--dyninst-options" },
                       "Advanced dyninst options: BPatch::set<OPTION>(bool), e.g. "
@@ -931,6 +913,8 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
+    find_dyn_api_rt();
+
     int dyninst_verb = 2;
     if(parser.exists("dyninst-options"))
     {
@@ -944,6 +928,17 @@ main(int argc, char** argv)
                    (_ret) ? "on" : "off");
         return _ret;
     };
+
+    bpatch = std::make_shared<patch_t>();
+    bpatch->setTypeChecking(true);
+    bpatch->setSaveFPR(true);
+    bpatch->setDelayedParsing(true);
+    bpatch->setDebugParsing(false);
+    bpatch->setInstrStackFrames(false);
+    bpatch->setLivenessAnalysis(false);
+    bpatch->setBaseTrampDeletion(false);
+    bpatch->setTrampRecursive(false);
+    bpatch->setMergeTramp(true);
 
     bpatch->setTypeChecking(get_dyninst_option("TypeChecking"));
     bpatch->setSaveFPR(get_dyninst_option("SaveFPR"));
@@ -2247,7 +2242,9 @@ get_absolute_exe_filepath(std::string exe_name, const std::string& env_path)
 //======================================================================================//
 //
 std::string
-get_absolute_lib_filepath(std::string lib_name, const std::string& env_path)
+get_absolute_lib_filepath(std::string lib_name, const std::string& env_path,
+                          std::vector<std::string> suffixes,
+                          std::vector<std::string> fallbacks)
 {
     if(!lib_name.empty() && (!file_exists(lib_name) ||
                              std::regex_match(lib_name, std::regex("^[A-Za-z0-9].*"))))
@@ -2255,6 +2252,7 @@ get_absolute_lib_filepath(std::string lib_name, const std::string& env_path)
         auto _lib_orig = lib_name;
         auto _paths    = tim::delimit(
             std::string{ ".:" } + tim::get_env<std::string>(env_path, ""), ":");
+        std::copy(fallbacks.begin(), fallbacks.end(), std::back_inserter(_paths));
         for(auto& pitr : _paths)
         {
             if(file_exists(TIMEMORY_JOIN('/', pitr, lib_name)))
@@ -2263,6 +2261,17 @@ get_absolute_lib_filepath(std::string lib_name, const std::string& env_path)
                 verbprintf(1, "Resolved '%s' to '%s'...\n", _lib_orig.c_str(),
                            lib_name.c_str());
                 break;
+            }
+            for(auto& sitr : suffixes)
+            {
+                if(sitr.empty()) continue;
+                if(file_exists(TIMEMORY_JOIN('/', pitr, sitr, lib_name)))
+                {
+                    lib_name = get_realpath(TIMEMORY_JOIN('/', pitr, sitr, lib_name));
+                    verbprintf(1, "Resolved '%s' to '%s'...\n", _lib_orig.c_str(),
+                               lib_name.c_str());
+                    break;
+                }
             }
         }
 
@@ -2306,5 +2315,94 @@ get_cwd()
 {
     char cwd[PATH_MAX];
     return std::string{ getcwd(cwd, PATH_MAX) };
+}
+
+using tim::dirname;
+
+void
+find_dyn_api_rt()
+{
+    auto _exe_path = dirname(::get_realpath("/proc/self/exe"));
+
+    strvec_t _suffixes  = {};
+    strvec_t _fallbacks = {};
+
+    if(strcmp(::basename(_exe_path.c_str()), "bin") == 0)
+    {
+        _suffixes.emplace_back("omnitrace");
+        _suffixes.emplace_back("../lib");
+        _suffixes.emplace_back("../lib/omnitrace");
+        _fallbacks.emplace_back(_exe_path);
+    }
+    else
+    {
+        _fallbacks.emplace_back(tim::get_env<std::string>("PWD", "."));
+    }
+
+    std::copy(_dyn_api_rt_paths.begin(), _dyn_api_rt_paths.end(),
+              std::back_inserter(_fallbacks));
+
+#if defined(OMNITRACE_BUILD_DYNINST)
+    std::string _dyn_api_rt_base =
+        (binary_rewrite) ? "libomnitrace-rt" : "libdyninstAPI_RT";
+#else
+    std::string _dyn_api_rt_base = "libdyninstAPI_RT";
+#endif
+
+    auto _dyn_api_rt_abs = get_absolute_lib_filepath(
+        _dyn_api_rt_base + ".so", "LD_LIBRARY_PATH", _suffixes, _fallbacks);
+
+    if(_dyn_api_rt_abs != _dyn_api_rt_base + ".so")
+        _dyn_api_rt_paths.insert(_dyn_api_rt_paths.begin(), _dyn_api_rt_abs);
+    else
+    {
+        auto _dyn_api_rt_abs = get_absolute_lib_filepath(
+            _dyn_api_rt_base + ".a", "LIBRARY_PATH", _suffixes, _fallbacks);
+        if(_dyn_api_rt_abs != _dyn_api_rt_base + ".a")
+            _dyn_api_rt_paths.insert(_dyn_api_rt_paths.begin(), _dyn_api_rt_abs);
+    }
+
+    auto _rewriter_paths = tim::get_env<std::string>("DYNINST_REWRITER_PATHS", "");
+    for(auto itr : _dyn_api_rt_paths)
+    {
+        auto _file_exists = [](const std::string& _fname) {
+            struct stat _buffer;
+            if(stat(_fname.c_str(), &_buffer) == 0)
+                return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
+            return false;
+        };
+
+        auto _export = [&_rewriter_paths, &_file_exists](std::string _fname) {
+            int _overwrite =
+                (_file_exists(tim::get_env<string_t>("DYNINSTAPI_RT_LIB", ""))) ? 0 : 1;
+            tim::set_env<string_t>("DYNINSTAPI_RT_LIB", _fname, _overwrite);
+            _fname = tim::get_env<string_t>("DYNINSTAPI_RT_LIB", _fname);
+            tim::set_env<string_t>("DYNINST_REWRITER_PATHS",
+                                   TIMEMORY_JOIN(':', dirname(_fname), _rewriter_paths),
+                                   1);
+        };
+
+        auto _resolved = [&](std::string _fname) {
+            if(_file_exists(_fname))
+            {
+                _export(_fname);
+                return true;
+            }
+            _fname = get_absolute_lib_filepath(_fname, "LD_LIBRARY_PATH", _suffixes,
+                                               _fallbacks);
+            if(_file_exists(_fname))
+            {
+                _export(_fname);
+                return true;
+            }
+            return false;
+        };
+
+        if(_resolved(itr)) break;
+        if(_resolved(TIMEMORY_JOIN('/', itr, _dyn_api_rt_base + ".so"))) break;
+        if(_resolved(TIMEMORY_JOIN('/', itr, _dyn_api_rt_base + ".a"))) break;
+    }
+    auto _v = tim::get_env<string_t>("DYNINSTAPI_RT_LIB", "");
+    verbprintf(0, "DYNINST_API_RT: %s\n", (_v.empty()) ? "<unknown>" : _v.c_str());
 }
 }  // namespace

@@ -1,15 +1,4 @@
-if(DYNINST_BUILD_ELFUTILS AND DYNINST_ELFUTILS_DOWNLOAD_VERSION)
-    omnitrace_add_feature(DYNINST_ELFUTILS_DOWNLOAD_VERSION "ElfUtils download version")
-    foreach(_LIB dw elf)
-        install(
-            PROGRAMS
-                ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib/lib${_LIB}${CMAKE_SHARED_LIBRARY_SUFFIX}
-                ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib/lib${_LIB}${CMAKE_SHARED_LIBRARY_SUFFIX}.1
-                ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib/lib${_LIB}-${DYNINST_ELFUTILS_DOWNLOAD_VERSION}${CMAKE_SHARED_LIBRARY_SUFFIX}
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}/dyninst-tpls/lib
-            OPTIONAL)
-    endforeach()
-endif()
+# configure packaging
 
 function(omnitrace_parse_release)
     if(EXISTS /etc/lsb-release AND NOT IS_DIRECTORY /etc/lsb-release)

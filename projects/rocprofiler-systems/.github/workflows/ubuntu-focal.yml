@@ -7,7 +7,6 @@ on:
     branches: [ main, develop ]
 
 env:
-  BUILD_TYPE: Release
   ELFUTILS_DOWNLOAD_VERSION: 0.186
   OMNITRACE_VERBOSE: 1
   OMNITRACE_CI: ON
@@ -19,6 +18,21 @@ jobs:
       matrix:
         compiler: ['g++']
         mpi: [ '', 'libmpich-dev mpich', 'libopenmpi-dev openmpi-bin libfabric-dev' ]
+        boost: ['OFF']
+        tbb: ['OFF']
+        build-type: ['Release']
+        python: ['ON']
+        ompt: ['ON']
+        papi: ['ON']
+        include:
+        - compiler: 'g++'
+          mpi: ''
+          boost: 'ON'
+          tbb: 'ON'
+          build-type: 'Release'
+          python: 'OFF'
+          ompt: 'OFF'
+          papi: 'OFF'
 
     steps:
     - uses: actions/checkout@v2
@@ -48,16 +62,19 @@ jobs:
         cmake -B ${{ github.workspace }}/build
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
           -DOMNITRACE_BUILD_TESTING=ON
           -DOMNITRACE_BUILD_DYNINST=ON
           -DOMNITRACE_USE_MPI=${USE_MPI}
           -DOMNITRACE_USE_HIP=OFF
-          -DOMNITRACE_USE_PYTHON=ON
-          -DOMNITRACE_USE_OMPT=ON
+          -DOMNITRACE_USE_PYTHON=${{ matrix.python }}
+          -DOMNITRACE_USE_OMPT=${{ matrix.ompt }}
+          -DOMNITRACE_USE_PAPI=${{ matrix.papi }}
           -DDYNINST_BUILD_ELFUTILS=ON
           -DDYNINST_BUILD_LIBIBERTY=ON
+          -DDYNINST_BUILD_TBB=${{ matrix.tbb }}
+          -DDYNINST_BUILD_BOOST=${{ matrix.boost }}
           -DDYNINST_BUILD_SHARED_LIBS=ON
           -DDYNINST_BUILD_STATIC_LIBS=OFF
           -DDYNINST_ELFUTILS_DOWNLOAD_VERSION=${{ env.ELFUTILS_DOWNLOAD_VERSION }}
@@ -67,16 +84,19 @@ jobs:
       run:
         cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
 
-    - name: Install
-      run:
-        cmake --build ${{ github.workspace }}/build --target install --parallel 2
-
     - name: Test
       timeout-minutes: 45
       working-directory: ${{ github.workspace }}/build
       run:
         ctest -V -N -O ${{ github.workspace }}/build/omnitrace-ctest-${{ github.job }}-commands.log &&
         ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-${{ github.job }}.log --stop-on-failure
+
+    - name: Install
+      working-directory: ${{ github.workspace }}/build
+      run: |
+        cpack -G STGZ
+        mkdir -p /opt/omnitrace
+        ./omnitrace-*.sh --prefix=/opt/omnitrace --exclude-subdir --skip-license
 
     - name: Test Install
       timeout-minutes: 10

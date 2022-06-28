@@ -208,13 +208,49 @@ if(OMNITRACE_BUILD_DYNINST)
 
     omnitrace_save_variables(PIC VARIABLES CMAKE_POSITION_INDEPENDENT_CODE)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-    add_subdirectory(external/dyninst)
+    set(DYNINST_TPL_INSTALL_PREFIX
+        "omnitrace"
+        CACHE PATH "Third-party library install-tree install prefix" FORCE)
+    set(DYNINST_TPL_INSTALL_LIB_DIR
+        "omnitrace"
+        CACHE PATH "Third-party library install-tree install library prefix" FORCE)
+    add_subdirectory(external/dyninst EXCLUDE_FROM_ALL)
     omnitrace_restore_variables(PIC VARIABLES CMAKE_POSITION_INDEPENDENT_CODE)
 
     add_library(Dyninst::Dyninst INTERFACE IMPORTED)
-    foreach(_LIB common dyninstAPI parseAPI instructionAPI symtabAPI stackwalk Boost TBB)
+    foreach(_LIB common dyninstAPI parseAPI instructionAPI symtabAPI stackwalk)
         target_link_libraries(Dyninst::Dyninst INTERFACE Dyninst::${_LIB})
     endforeach()
+
+    foreach(
+        _LIB
+        common
+        dynDwarf
+        dynElf
+        dyninstAPI
+        dyninstAPI_RT
+        instructionAPI
+        parseAPI
+        patchAPI
+        pcontrol
+        stackwalk
+        symtabAPI)
+        if(TARGET ${_LIB})
+            install(
+                TARGETS ${_LIB}
+                DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace
+                PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace/include)
+        endif()
+    endforeach()
+
+    omnitrace_install_tpl(dyninstAPI_RT omnitrace-rt "${PROJECT_BINARY_DIR}")
+
+    # for packaging
+    install(
+        DIRECTORY ${DYNINST_TPL_STAGING_PREFIX}/lib/
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace
+        FILES_MATCHING
+        PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*")
 
     target_link_libraries(omnitrace-dyninst INTERFACE Dyninst::Dyninst)
 
@@ -529,7 +565,16 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         CACHE BOOL "" FORCE)
 endif()
 
-add_subdirectory(external/timemory)
+add_subdirectory(external/timemory EXCLUDE_FROM_ALL)
+
+install(TARGETS gotcha DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace)
+if(OMNITRACE_BUILD_LIBUNWIND)
+    install(
+        DIRECTORY ${PROJECT_BINARY_DIR}/external/timemory/external/libunwind/install/lib/
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace
+        FILES_MATCHING
+        PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*")
+endif()
 
 omnitrace_restore_variables(
     BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
@@ -590,7 +635,7 @@ if(NOT TARGET PTL::ptl-shared)
     set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
     set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
-    add_subdirectory(external/PTL)
+    add_subdirectory(external/PTL EXCLUDE_FROM_ALL)
 
     omnitrace_restore_variables(
         BUILD_CONFIG
