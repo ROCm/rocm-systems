@@ -244,7 +244,7 @@ std::string&
 get_backend();
 
 // make this visible so omnitrace-avail can call it
-std::string&
+std::string
 get_perfetto_output_filename();
 
 int64_t

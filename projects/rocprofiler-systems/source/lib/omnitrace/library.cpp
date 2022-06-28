@@ -551,8 +551,6 @@ omnitrace_init_tooling_hidden()
 
         perfetto::Tracing::Initialize(args);
         perfetto::TrackEvent::Register();
-
-        (void) get_perfetto_output_filename();
     }
 
     auto _exe = get_exe_name();

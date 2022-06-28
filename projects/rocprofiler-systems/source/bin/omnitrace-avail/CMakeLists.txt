@@ -4,10 +4,24 @@
 #
 # ------------------------------------------------------------------------------#
 
-add_executable(
+add_executable(omnitrace-avail)
+
+target_sources(
     omnitrace-avail
-    ${CMAKE_CURRENT_LIST_DIR}/avail.cpp ${CMAKE_CURRENT_LIST_DIR}/avail.hpp
-    $<TARGET_OBJECTS:omnitrace::omnitrace-object-library>)
+    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/avail.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/avail.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/common.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/common.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/component_categories.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/defines.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/enumerated_list.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/generate_config.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/generate_config.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/get_availability.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/get_categories.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/info_type.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/info_type.hpp
+            $<TARGET_OBJECTS:omnitrace::omnitrace-object-library>)
 
 target_include_directories(omnitrace-avail PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_compile_definitions(omnitrace-avail PRIVATE OMNITRACE_EXTERN_COMPONENTS=0)

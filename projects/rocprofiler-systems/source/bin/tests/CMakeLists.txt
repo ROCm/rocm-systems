@@ -125,7 +125,7 @@ omnitrace_add_bin_test(
     NAME omnitrace-avail-help
     TARGET omnitrace-avail
     ARGS --help
-    LABELS omnitrace-avail
+    LABELS "omnitrace-avail"
     TIMEOUT 45
     PASS_REGEX
         ".*\\\[omnitrace-avail\\\] Usage:.*\\\[CATEGORIES\\\].*\\\[VIEW OPTIONS\\\].*\\\[COLUMN OPTIONS\\\].*\\\[WIDTH OPTIONS\\\].*\\\[OUTPUT OPTIONS\\\].*"
@@ -135,7 +135,7 @@ omnitrace_add_bin_test(
     NAME omnitrace-avail-all-csv
     TARGET omnitrace-avail
     ARGS --all --csv --csv-separator "#"
-    LABELS omnitrace-avail
+    LABELS "omnitrace-avail"
     TIMEOUT 45
     PASS_REGEX
         "COMPONENT#AVAILABLE#VALUE_TYPE#STRING_IDS#FILENAME#DESCRIPTION#CATEGORY#.*ENVIRONMENT VARIABLE#VALUE#DATA TYPE#DESCRIPTION#CATEGORIES#.*HARDWARE COUNTER#AVAILABLE#DESCRIPTION#"
@@ -145,7 +145,7 @@ omnitrace_add_bin_test(
     NAME omnitrace-avail-filter-wall-clock-available
     TARGET omnitrace-avail
     ARGS -r wall_clock -C --available
-    LABELS omnitrace-avail
+    LABELS "omnitrace-avail"
     TIMEOUT 45
     PASS_REGEX
         "\\\|[-]+\\\|\n\\\|[ ]+COMPONENT[ ]+\\\|\n\\\|[-]+\\\|\n\\\| (wall_clock)[ ]+\\\|\n\\\| (sampling_wall_clock)[ ]+\\\|\n\\\|[-]+\\\|"
@@ -155,7 +155,7 @@ omnitrace_add_bin_test(
     NAME omnitrace-avail-category-filter-omnitrace
     TARGET omnitrace-avail
     ARGS --categories settings::omnitrace --brief
-    LABELS omnitrace-avail
+    LABELS "omnitrace-avail"
     TIMEOUT 45
     PASS_REGEX "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"
     FAIL_REGEX
@@ -166,7 +166,7 @@ omnitrace_add_bin_test(
     NAME omnitrace-avail-category-filter-timemory
     TARGET omnitrace-avail
     ARGS --categories settings::timemory --brief
-    LABELS omnitrace-avail
+    LABELS "omnitrace-avail"
     TIMEOUT 45
     PASS_REGEX
         "OMNITRACE_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
@@ -184,7 +184,32 @@ omnitrace_add_bin_test(
          ~PERFETTO
          --csv
          --brief
-    LABELS omnitrace-avail
+    LABELS "omnitrace-avail"
     TIMEOUT 45
     PASS_REGEX "ENVIRONMENT VARIABLE,[ \n]+OMNITRACE_USE_PID,[ \n]+"
     FAIL_REGEX "OMNITRACE_USE_PERFETTO")
+
+string(REPLACE "+" "\\\+" _AVAIL_CFG_PATH
+               "${PROJECT_BINARY_DIR}/omnitrace-tests-output/omnitrace-avail/omnitrace-")
+omnitrace_add_bin_test(
+    NAME omnitrace-avail-write-config
+    TARGET omnitrace-avail
+    ARGS -G %env{PWD}%/omnitrace-tests-output/omnitrace-avail/omnitrace-test.cfg -F txt
+         json xml --force --all
+    TIMEOUT 45
+    LABELS "omnitrace-avail"
+    PASS_REGEX
+        "Outputting JSON configuration file '${_AVAIL_CFG_PATH}test\\\.json'(.*)Outputting XML configuration file '${_AVAIL_CFG_PATH}test\\\.xml'(.*)Outputting text configuration file '${_AVAIL_CFG_PATH}test\\\.cfg'(.*)"
+    )
+
+omnitrace_add_bin_test(
+    NAME omnitrace-avail-write-config-tweak
+    TARGET omnitrace-avail
+    ARGS -G %env{PWD}%/omnitrace-tests-output/omnitrace-avail/omnitrace-tweak.cfg -F txt
+         json xml --force
+    TIMEOUT 45
+    LABELS "omnitrace-avail"
+    ENVIRONMENT "OMNITRACE_USE_PERFETTO=OFF;OMNITRACE_USE_TIMEMORY=ON"
+    PASS_REGEX
+        "Outputting JSON configuration file '${_AVAIL_CFG_PATH}tweak\\\.json'(.*)Outputting XML configuration file '${_AVAIL_CFG_PATH}tweak\\\.xml'(.*)Outputting text configuration file '${_AVAIL_CFG_PATH}tweak\\\.cfg'(.*)"
+    )

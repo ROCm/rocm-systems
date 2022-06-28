@@ -22,8 +22,7 @@
 
 #pragma once
 
-#define TIMEMORY_DISABLE_BANNER
-#define TIMEMORY_DISABLE_COMPONENT_STORAGE_INIT
+#include "defines.hpp"
 
 #include <timemory/settings/macros.hpp>
 #include <timemory/tpls/cereal/archives.hpp>

@@ -21,14 +21,14 @@
 // SOFTWARE.
 
 #include "avail.hpp"
-#include "library/api.hpp"
-#include "library/components/backtrace.hpp"
-#include "library/components/fork_gotcha.hpp"
-#include "library/components/mpi_gotcha.hpp"
-#include "library/components/omnitrace.hpp"
-#include "library/components/pthread_gotcha.hpp"
-#include "library/components/roctracer.hpp"
-#include "library/components/user_region.hpp"
+#include "common.hpp"
+#include "component_categories.hpp"
+#include "defines.hpp"
+#include "enumerated_list.hpp"
+#include "generate_config.hpp"
+#include "get_availability.hpp"
+#include "info_type.hpp"
+
 #include "library/config.hpp"
 
 #include <timemory/components.hpp>
@@ -38,8 +38,8 @@
 #include <timemory/components/skeletons.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/timemory.hpp>
-#include <timemory/utility/argparse.hpp>
 #include <timemory/utility/types.hpp>
+#include <timemory/utility/utility.hpp>
 
 #include <algorithm>
 #include <array>
@@ -51,6 +51,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -65,142 +66,13 @@
 
 using namespace tim;
 
-template <typename Tp, size_t N>
-using array_t        = std::array<Tp, N>;
-using string_t       = std::string;
-using stringstream_t = std::stringstream;
-using str_vec_t      = std::vector<string_t>;
-using str_set_t      = std::set<string_t>;
-using info_type_base = std::tuple<string_t, bool, str_vec_t>;
-using parser_t       = tim::argparse::argument_parser;
-
-struct info_type : info_type_base
-{
-    TIMEMORY_DEFAULT_OBJECT(info_type)
-
-    template <typename... Args>
-    info_type(Args&&... _args)
-    : info_type_base{ std::forward<Args>(_args)... }
-    {}
-
-    const auto& name() const { return std::get<0>(*this); }
-    auto        is_available() const { return std::get<1>(*this); }
-    const auto& info() const { return std::get<2>(*this); }
-    const auto& data_type() const { return info().at(0); }
-    const auto& enum_type() const { return info().at(1); }
-    const auto& id_type() const { return info().at(2); }
-    const auto& id_strings() const { return info().at(3); }
-    const auto& label() const { return info().at(4); }
-    const auto& description() const { return info().at(5); }
-    const auto& categories() const { return info().at(6); }
-
-    bool valid() const { return !name().empty() && info().size() >= 6; }
-
-    bool operator<(const info_type& rhs) const { return name() < rhs.name(); }
-    bool operator!=(const info_type& rhs) const { return !(*this == rhs); }
-    bool operator==(const info_type& rhs) const
-    {
-        if(info().size() != rhs.info().size()) return false;
-        for(size_t i = 0; i < info().size(); ++i)
-        {
-            if(info().at(i) != rhs.info().at(i)) return false;
-        }
-        return name() == rhs.name() && is_available() == rhs.is_available();
-    }
-};
-
-//--------------------------------------------------------------------------------------//
-
-enum
-{
-    VAL      = 0,
-    ENUM     = 1,
-    LANG     = 2,
-    CID      = 3,
-    FNAME    = 4,
-    DESC     = 5,
-    CATEGORY = 6,
-    TOTAL    = 7
-};
-
 //--------------------------------------------------------------------------------------//
 
 namespace
 {
-auto             global_delim           = std::string{ "|" };
-bool             csv                    = false;
-bool             markdown               = false;
-bool             alphabetical           = false;
-bool             available_only         = false;
-bool             all_info               = false;
-bool             force_brief            = false;
-bool             debug_msg              = false;
-bool             case_insensitive       = false;
-bool             regex_hl               = false;
-int32_t          max_width              = 0;
-int32_t          num_cols               = 0;
-int32_t          min_width              = 40;
-int32_t          padding                = 4;
-str_vec_t        regex_keys             = {};
-str_vec_t        category_regex_keys    = {};
-str_set_t        category_view          = {};
-constexpr size_t num_component_options  = 7;
-constexpr size_t num_settings_options   = 4;
-constexpr size_t num_hw_counter_options = 4;
-auto             lerr                   = std::stringstream{};
-
-// explicit setting names to exclude
-std::set<std::string> settings_exclude = {
-    "OMNITRACE_ENVIRONMENT", "OMNITRACE_COMMAND_LINE", "cereal_class_version", "settings",
-#if !defined(TIMEMORY_USE_CRAYPAT)
-    "OMNITRACE_CRAYPAT"
-#endif
-};
-
-// exclude some timemory settings which are not relevant to omnitrace
-//  exact matches, e.g. OMNITRACE_BANNER
-std::string settings_rexclude_exact =
-    "^OMNITRACE_(BANNER|DESTRUCTOR_REPORT|COMPONENTS|(GLOBAL|MPIP|NCCLP|OMPT|"
-    "PROFILER|TRACE|KOKKOS)_COMPONENTS|PYTHON_EXE|PAPI_ATTACH|PLOT_OUTPUT|SEPARATOR_"
-    "FREQ|"
-    "STACK_CLEARING|TARGET_PID|THROTTLE_(COUNT|VALUE)|(AUTO|FLAMEGRAPH)_OUTPUT|"
-    "(ENABLE|DISABLE)_ALL_SIGNALS|ALLOW_SIGNAL_HANDLER|CTEST_NOTES|INSTRUCTION_"
-    "ROOFLINE|ADD_SECONDARY)$";
-
-//  leading matches, e.g. OMNITRACE_MPI_[A-Z_]+
-std::string settings_rexclude_begin =
-    "^OMNITRACE_(ERT|DART|MPI|UPCXX|ROOFLINE|CUDA|NVTX|CUPTI)_[A-Z_]+$";
-
-bool
-exclude_setting(const std::string&);
-}  // namespace
-
-//--------------------------------------------------------------------------------------//
-
-void
-dump_log()
-{
-    if(debug_msg)
-    {
-        std::cerr << lerr.str() << std::flush;
-        lerr = std::stringstream{};
-    }
-}
-
-void
-dump_log_abort(int _v)
-{
-    fprintf(stderr, "\n[omnitrace-avail] Exiting with signal %i...\n", _v);
-    debug_msg = true;
-    dump_log();
-}
-
 template <typename IntArrayT, typename BoolArrayT>
-static IntArrayT
+IntArrayT
 compute_max_columns(IntArrayT _widths, BoolArrayT _using);
-
-string_t
-remove(string_t inp, const std::set<string_t>& entries);
 
 template <typename Tp>
 void
@@ -209,15 +81,7 @@ write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool ma
 template <typename IntArrayT, size_t N>
 string_t
 banner(IntArrayT _breaks, std::array<bool, N> _use, char filler = '-', char delim = '|');
-
-bool
-is_selected(const std::string& line);
-
-bool
-is_category_selected(const std::string& _line);
-
-std::string
-hl_selected(const std::string& line);
+}  // namespace
 
 template <size_t N = num_component_options>
 void
@@ -233,123 +97,6 @@ template <size_t N = num_hw_counter_options>
 void
 write_hw_counter_info(std::ostream&, const array_t<bool, N>& = {},
                       const array_t<bool, N>& = {}, const array_t<string_t, N>& = {});
-
-template <typename Type = void>
-struct get_availability;
-
-template <typename Type = void>
-struct component_categories;
-
-void
-process_categories(parser_t&, const str_set_t&);
-
-//--------------------------------------------------------------------------------------//
-
-template <typename Type>
-struct get_availability
-{
-    using this_type  = get_availability<Type>;
-    using metadata_t = component::metadata<Type>;
-    using property_t = component::properties<Type>;
-
-    static info_type get_info();
-    auto             operator()() const { return get_info(); }
-};
-
-//--------------------------------------------------------------------------------------//
-
-template <typename... Types>
-struct get_availability<type_list<Types...>>
-{
-    using data_type = std::vector<info_type>;
-
-    static data_type get_info(data_type& _v)
-    {
-        TIMEMORY_FOLD_EXPRESSION(_v.emplace_back(get_availability<Types>::get_info()));
-        return _v;
-    }
-
-    static data_type get_info()
-    {
-        data_type _v{};
-        return get_info(_v);
-    }
-
-    template <typename... Args>
-    decltype(auto) operator()(Args&&... _args)
-    {
-        return get_info(std::forward<Args>(_args)...);
-    }
-};
-
-//--------------------------------------------------------------------------------------//
-
-template <>
-struct get_availability<void>
-{
-    template <typename... Tp, typename... Args>
-    decltype(auto) operator()(tim::type_list<Tp...>, Args&&... _args) const
-    {
-        return get_availability<tim::type_list<Tp...>>{}(std::forward<Args>(_args)...);
-    }
-
-    template <typename Tp, typename... Args>
-    decltype(auto) operator()(Args&&... _args) const
-    {
-        return get_availability<tim::type_list<Tp>>{}(std::forward<Args>(_args)...);
-    }
-};
-
-//--------------------------------------------------------------------------------------//
-
-template <typename Type>
-struct component_categories
-{
-    template <typename... Tp>
-    void operator()(std::set<std::string>& _v, type_list<Tp...>) const
-    {
-        //
-        auto _cleanup = [](std::string _type, const std::string& _pattern) {
-            auto _pos = std::string::npos;
-            while((_pos = _type.find(_pattern)) != std::string::npos)
-                _type.erase(_pos, _pattern.length());
-            return _type;
-        };
-        (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
-
-        TIMEMORY_FOLD_EXPRESSION(_v.emplace(
-            TIMEMORY_JOIN("::", "component", _cleanup(demangle<Tp>(), "tim::"))));
-    }
-
-    void operator()(std::set<std::string>& _v) const
-    {
-        if constexpr(!concepts::is_placeholder<Type>::value)
-            (*this)(_v, trait::component_apis_t<Type>{});
-    }
-};
-
-template <>
-struct component_categories<void>
-{
-    template <size_t... Idx>
-    void operator()(std::set<std::string>& _v, std::index_sequence<Idx...>) const
-    {
-        TIMEMORY_FOLD_EXPRESSION(
-            component_categories<component::enumerator_t<Idx>>{}(_v));
-    }
-
-    void operator()(std::set<std::string>& _v) const
-    {
-        (*this)(_v, std::make_index_sequence<TIMEMORY_COMPONENTS_END>{});
-    }
-
-    auto operator()() const
-    {
-        std::set<std::string> _categories{};
-        (*this)(_categories);
-        return _categories;
-    }
-};
 
 //--------------------------------------------------------------------------------------//
 
@@ -494,6 +241,43 @@ main(int argc, char** argv)
             for(const auto& itr : _category_options)
                 std::cout << "    " << itr << "\n";
         });
+    parser.add_argument({ "--list-keys" }, "List the output keys")
+        .max_count(1)
+        .action([](parser_t& p) {
+            auto _list = p.get<bool>("list-keys");
+            auto _show = p.get<bool>("expand-keys");
+            if(_list)
+            {
+                auto _keys = tim::settings::output_keys(
+                    tim::settings::shared_instance()->get_tag());
+                std::pair<size_t, size_t> _w = { 0, 0 };
+                for(const auto& itr : _keys)
+                {
+                    if(!is_selected(itr.first)) continue;
+                    if(_show && !is_selected(itr.second)) continue;
+                    _w.first  = std::max(_w.first, itr.first.length());
+                    _w.second = std::max(_w.second, itr.second.length());
+                }
+                std::stringstream _msg{};
+                _msg << "Output Keys:\n" << std::left;
+                for(const auto& itr : _keys)
+                {
+                    if(!is_selected(itr.first)) continue;
+                    if(_show && !is_selected(itr.second)) continue;
+                    if(_show)
+                        _msg << "    " << std::setw(_w.first) << itr.first
+                             << "  ::  " << std::setw(_w.second) << itr.second << "\n";
+                    else
+                        _msg << "    " << std::setw(_w.first) << itr.first << "\n";
+                }
+                std::cout << _msg.str();
+            }
+        });
+    parser
+        .add_argument({ "--expand-keys" },
+                      "Expand the output keys to their current values")
+        .max_count(1)
+        .action([](parser_t& p) { expand_keys = p.get<bool>("expand-keys"); });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[COLUMN OPTIONS]" }, "");
@@ -502,14 +286,6 @@ main(int argc, char** argv)
         .action([](parser_t& p) { force_brief = p.get<bool>("brief"); });
     parser.add_argument({ "-d", "--description" }, "Display the component description")
         .max_count(1);
-    parser
-        .add_argument({ "--categories" },
-                      "Display the category information (use --list-categories to see "
-                      "the available categories)")
-        .dtype("string")
-        .action([&_category_options](parser_t& p) {
-            process_categories(p, _category_options);
-        });
     parser.add_argument({ "-s", "--string" }, "Display all acceptable string identifiers")
         .max_count(1);
     parser
@@ -520,31 +296,72 @@ main(int argc, char** argv)
         .add_argument({ "-f", "--filename" },
                       "Display the output filename for the component")
         .max_count(1);
+    parser
+        .add_argument({ "--categories" },
+                      "Display the category information (use --list-categories to see "
+                      "the available categories)")
+        .dtype("string")
+        .action([&_category_options](parser_t& p) {
+            process_categories(p, _category_options);
+        });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[WIDTH OPTIONS]" }, "");
     parser
-        .add_argument({ "-w", "--width" },
+        .add_argument({ "-w", "--column-width" },
                       "if w > 0, truncate any columns greater than this width")
         .count(1)
         .dtype("int")
-        .action([](parser_t& p) { max_width = p.get<int32_t>("width"); });
+        .action([](parser_t& p) { max_width = p.get<int32_t>("column-width"); });
     parser
         .add_argument(
-            { "-c", "--columns" },
-            std::string{ "if c > 0, truncate the total width of all the columns to this "
-                         "value. Set '-w 0 -c 0' to remove all truncation" } +
+            { "-W", "--max-total-width" },
+            std::string{ "if W > 0, truncate the total width of all the columns to this "
+                         "value. Set '-w 0 -W 0' to remove all truncation" } +
                 col_msg)
         .set_default(num_cols)
         .count(1)
         .dtype("int")
-        .action([](parser_t& p) { num_cols = p.get<int32_t>("columns"); });
+        .action([](parser_t& p) { num_cols = p.get<int32_t>("max-total-width"); });
 
+    std::string           _config_file = {};
+    std::set<std::string> _config_fmts = {};
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[OUTPUT OPTIONS]" }, "");
+    parser
+        .add_argument({ "-G", "--generate-config" },
+                      "Dump a configuration to a specified file.")
+        .max_count(1)
+        .dtype("filename")
+        .set_default(std::string{ "omnitrace-config" })
+        .action([&_config_file](parser_t& _p) {
+            auto _out =
+                (_p.exists("output")) ? _p.get<std::string>("output") : std::string{};
+            if(_p.get_count("generate-config") == 0 && !_out.empty())
+                _config_file = _out;
+            else
+            {
+                _config_file = _p.get<std::string>("generate-config");
+                if(get_bool(_config_file, false) && !_out.empty()) _config_file = _out;
+            }
+        });
+    parser.add_argument({ "-F", "--config-format" }, "Configuration file format")
+        .min_count(1)
+        .max_count(3)
+        .set_default(std::set<std::string>{ "txt" })
+        .choices({ "txt", "json", "xml" })
+        .dtype("filename")
+        .action([&_config_fmts](parser_t& _p) {
+            _config_fmts = _p.get<std::set<std::string>>("config-format");
+        });
     parser.add_argument({ "-O", "--output" }, "Write results to file")
         .count(1)
         .dtype("filename");
+    parser.add_argument({ "-t", "--tag" }, "Set the %tag% to a custom value")
+        .count(1)
+        .action([](parser_t& p) {
+            settings::instance()->set_tag(p.get<std::string>("tag"));
+        });
     parser.add_argument({ "-M", "--markdown" }, "Write data in markdown")
         .max_count(1)
         .action([](parser_t& p) { markdown = p.get<bool>("markdown"); });
@@ -559,6 +376,11 @@ main(int argc, char** argv)
                       "Use the provided string instead of a ',' to separate values")
         .max_count(1)
         .action([](parser_t& p) { global_delim = p.get<std::string>("csv-separator"); });
+    parser
+        .add_argument({ "--force" },
+                      "Force the generation of an configuration file even if it exists")
+        .max_count(1)
+        .action([](parser_t& p) { force_config = p.get<bool>("force"); });
 
     parser.add_positional_argument("REGEX_FILTER").set_default(std::string{});
 
@@ -577,13 +399,46 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
+    auto _parser_set_if_exists = [&parser](auto& _var, const std::string& _opt) {
+        using Tp = decay_t<decltype(_var)>;
+        if(parser.exists(_opt)) _var = parser.get<Tp>(_opt);
+    };
+
+    _parser_set_if_exists(options[FNAME], "filename");
+    _parser_set_if_exists(options[DESC], "description");
+    _parser_set_if_exists(options[VAL], "value");
+    _parser_set_if_exists(options[CID], "string");
+    _parser_set_if_exists(options[CATEGORY], "categories");
+    _parser_set_if_exists(file, "output");
+    _parser_set_if_exists(include_components, "components");
+    _parser_set_if_exists(include_settings, "settings");
+    _parser_set_if_exists(include_hw_counters, "hw-counters");
+
+    if(parser.exists("generate-config"))
+    {
+        if(_config_file.empty())
+            throw std::runtime_error("Error! No config output file specified!");
+        if(_config_fmts.empty())
+            throw std::runtime_error("Error! No config output formats specified!");
+        try
+        {
+            generate_config(_config_file, _config_fmts, options);
+        } catch(std::runtime_error& _e)
+        {
+            std::cerr << "[omnitrace-avail] " << _e.what() << std::endl;
+            return EXIT_FAILURE;
+        }
+        return EXIT_SUCCESS;
+    }
+
     if(parser.exists("markdown") && parser.exists("csv"))
     {
         std::cerr << "Error! both '--markdown' and '--csv' options cannot be specified\n";
         return EXIT_FAILURE;
     }
 
-    if(parser.exists("list-categories")) return EXIT_SUCCESS;
+    if(parser.exists("list-categories") || parser.exists("list-keys"))
+        return EXIT_SUCCESS;
 
     std::string _pos_regex{};
     if(parser.get_positional_count() > 0)
@@ -602,21 +457,6 @@ main(int argc, char** argv)
         regex_keys.emplace_back(_pos_regex);
         category_regex_keys.emplace_back(_pos_regex);
     }
-
-    auto _parser_set_if_exists = [&parser](auto& _var, const std::string& _opt) {
-        using Tp = decay_t<decltype(_var)>;
-        if(parser.exists(_opt)) _var = parser.get<Tp>(_opt);
-    };
-
-    _parser_set_if_exists(options[FNAME], "filename");
-    _parser_set_if_exists(options[DESC], "description");
-    _parser_set_if_exists(options[VAL], "value");
-    _parser_set_if_exists(options[CID], "string");
-    _parser_set_if_exists(options[CATEGORY], "categories");
-    _parser_set_if_exists(file, "output");
-    _parser_set_if_exists(include_components, "components");
-    _parser_set_if_exists(include_settings, "settings");
-    _parser_set_if_exists(include_hw_counters, "hw-counters");
 
     if(category_view.empty()) category_view = _category_options;
 
@@ -669,27 +509,6 @@ main(int argc, char** argv)
     return 0;
 }
 
-//--------------------------------------------------------------------------------------//
-
-template <typename T, typename I>
-struct enumerated_list;
-
-template <template <typename...> class TupT, typename... T>
-struct enumerated_list<TupT<T...>, index_sequence<>>
-{
-    using type = type_list<T...>;
-};
-
-template <template <typename...> class TupT, size_t I, typename... T, size_t... Idx>
-struct enumerated_list<TupT<T...>, index_sequence<I, Idx...>>
-{
-    using Tp                         = component::enumerator_t<I>;
-    static constexpr bool is_nothing = concepts::is_placeholder<Tp>::value;
-    using type                       = typename enumerated_list<
-        tim::conditional_t<is_nothing, type_list<T...>, type_list<T..., Tp>>,
-        index_sequence<Idx...>>::type;
-};
-
 //======================================================================================//
 //
 //                                  COMPONENT INFO
@@ -704,11 +523,7 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
     static_assert(N >= num_component_options,
                   "Error! Too few component options + fields");
 
-    using index_seq_t = make_index_sequence<TIMEMORY_COMPONENTS_END>;
-    using enum_list_t = typename enumerated_list<tim::type_list<>, index_seq_t>::type;
-
-    std::vector<info_type> _info{};
-    get_availability<>{}(enum_list_t{}, _info);
+    std::vector<info_type> _info = get_component_info<TIMEMORY_COMPONENTS_END>();
 
     if(available_only)
         _info.erase(std::remove_if(_info.begin(), _info.end(),
@@ -912,14 +727,19 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
     };
     width_bool _mark = { false, false, false, true, true, true, false, false };
 
-    // this settings has delayed initialization. make sure it is generated
-    (void) omnitrace::config::get_perfetto_output_filename();
-
     array_type _setting_output;
+    auto       _settings = tim::settings::shared_instance();
 
     cereal::SettingsTextArchive settings_archive{ _setting_output, settings_exclude };
     settings::serialize_settings(settings_archive);
 
+    if(expand_keys)
+    {
+        for(auto& itr : _setting_output)
+        {
+            itr["value"] = tim::settings::format(itr["value"], _settings->get_tag());
+        }
+    }
     _setting_output.erase(
         std::remove_if(_setting_output.begin(), _setting_output.end(),
                        [](const auto& itr) { return itr.find("environ") == itr.end(); }),
@@ -927,7 +747,6 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
 
     // patch up the categories
     auto _not_in_category_view = str_set_t{};
-    auto _settings             = tim::settings::shared_instance();
     for(auto& itr : _setting_output)
     {
         auto _name = itr.find("environ")->second;
@@ -1242,183 +1061,13 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
 }
 
 //======================================================================================//
+//
+//                                  ANONYMOUS FUNCTIONS
+//
+//======================================================================================//
 
-struct unknown
-{};
-
-template <typename T, typename U = typename T::value_type>
-constexpr bool
-available_value_type_alias(int)
+namespace
 {
-    return true;
-}
-
-template <typename T, typename U = unknown>
-constexpr bool
-available_value_type_alias(long)
-{
-    return false;
-}
-
-template <typename Type, bool>
-struct component_value_type;
-
-template <typename Type>
-struct component_value_type<Type, true>
-{
-    using type = typename Type::value_type;
-};
-
-template <typename Type>
-struct component_value_type<Type, false>
-{
-    using type = unknown;
-};
-
-template <typename Type>
-using component_value_type_t =
-    typename component_value_type<Type, available_value_type_alias<Type>(0)>::type;
-
-//--------------------------------------------------------------------------------------//
-
-template <typename... Tp>
-auto get_categories(type_list<Tp...>)
-{
-    auto _cleanup = [](std::string _type, const std::string& _pattern) {
-        auto _pos = std::string::npos;
-        while((_pos = _type.find(_pattern)) != std::string::npos)
-            _type.erase(_pos, _pattern.length());
-        return _type;
-    };
-    (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
-
-    auto _vec = str_vec_t{ _cleanup(demangle<Tp>(), "tim::")... };
-    std::sort(_vec.begin(), _vec.end(), [](const auto& lhs, const auto& rhs) {
-        // prioritize project category
-        auto lpos = lhs.find("project::");
-        auto rpos = rhs.find("project::");
-        return (lpos == rpos) ? (lhs < rhs) : (lpos < rpos);
-    });
-    std::stringstream _ss{};
-    for(auto&& itr : _vec)
-    {
-        _ss << ", " << itr;
-    }
-    std::string _v = _ss.str();
-    if(!_v.empty()) return _v.substr(2);
-    return _v;
-}
-
-//--------------------------------------------------------------------------------------//
-
-template <typename Type>
-info_type
-get_availability<Type>::get_info()
-{
-    using value_type     = component_value_type_t<Type>;
-    using category_types = typename trait::component_apis<Type>::type;
-
-    auto _cleanup = [](std::string _type, const std::string& _pattern) {
-        auto _pos = std::string::npos;
-        while((_pos = _type.find(_pattern)) != std::string::npos)
-            _type.erase(_pos, _pattern.length());
-        return _type;
-    };
-    auto _replace = [](std::string _type, const std::string& _pattern,
-                       const std::string& _with) {
-        auto _pos = std::string::npos;
-        while((_pos = _type.find(_pattern)) != std::string::npos)
-            _type.replace(_pos, _pattern.length(), _with);
-        return _type;
-    };
-
-    bool has_metadata   = metadata_t::specialized();
-    bool has_properties = property_t::specialized();
-    bool is_available   = trait::is_available<Type>::value;
-    bool file_output    = trait::generates_output<Type>::value;
-    auto name           = component::metadata<Type>::name();
-    auto label          = (file_output)
-                              ? ((has_metadata) ? metadata_t::label() : Type::get_label())
-                              : std::string("");
-    auto description =
-        (has_metadata) ? metadata_t::description() : Type::get_description();
-    auto     data_type = demangle<value_type>();
-    string_t enum_type = property_t::enum_string();
-    string_t id_type   = property_t::id();
-    auto     ids_set   = property_t::ids();
-
-    if(!has_properties)
-    {
-        enum_type = "";
-        id_type   = "";
-        ids_set.clear();
-    }
-    string_t ids_str = {};
-    {
-        auto     itr = ids_set.begin();
-        string_t db  = (markdown) ? "`\"" : (csv) ? "" : "\"";
-        string_t de  = (markdown) ? "\"`" : (csv) ? "" : "\"";
-        if(has_metadata) description += ". " + metadata_t::extra_description();
-        description += ".";
-        while(itr->empty())
-            ++itr;
-        if(itr != ids_set.end())
-            ids_str = TIMEMORY_JOIN("", TIMEMORY_JOIN("", db, *itr++, de));
-        for(; itr != ids_set.end(); ++itr)
-        {
-            if(!itr->empty())
-                ids_str = TIMEMORY_JOIN(", ", ids_str, TIMEMORY_JOIN("", db, *itr, de));
-        }
-    }
-
-    string_t categories = get_categories(category_types{});
-
-#if 0
-    auto _remove_typelist = [](std::string _tmp) {
-        if(_tmp.empty()) return _tmp;
-        auto _key = std::string{ "type_list" };
-        auto _idx = _tmp.find(_key);
-        if(_idx == std::string::npos) return _tmp;
-        _idx = _tmp.find('<', _idx);
-        _tmp = _tmp.substr(_idx + 1);
-        _idx = _tmp.find_last_of('>');
-        _tmp = _tmp.substr(0, _idx);
-        if(_tmp.empty()) return _tmp;
-        // strip trailing whitespaces
-        while((_idx = _tmp.find_last_of(' ')) == _tmp.length() - 1)
-            _tmp = _tmp.substr(0, _idx);
-        return _tmp;
-    };
-    auto     apis      = _remove_typelist(demangle<trait::component_apis_t<Type>>());
-    if(!apis.empty()) description += ". APIs: " + apis;
-#endif
-
-    description = _replace(_replace(description, ". .", "."), "..", ".");
-    data_type   = _replace(_cleanup(data_type, "::__1"), "> >", ">>");
-    return info_type{ name, is_available,
-                      str_vec_t{ data_type, enum_type, id_type, ids_str, label,
-                                 description, categories } };
-}
-
-//--------------------------------------------------------------------------------------//
-
-string_t
-remove(string_t inp, const std::set<string_t>& entries)
-{
-    for(const auto& itr : entries)
-    {
-        auto idx = inp.find(itr);
-        while(idx != string_t::npos)
-        {
-            inp.erase(idx, itr.length());
-            idx = inp.find(itr);
-        }
-    }
-    return inp;
-}
-
-//--------------------------------------------------------------------------------------//
-
 template <typename IntArrayT, typename BoolArrayT>
 IntArrayT
 compute_max_columns(IntArrayT _widths, BoolArrayT _using)
@@ -1611,286 +1260,6 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, char filler, char delim)
     return ss.str();
 }
 
-//--------------------------------------------------------------------------------------//
-
-namespace regex_const = std::regex_constants;
-
-namespace
-{
-const auto&
-get_regex_constants()
-{
-    static auto _constants = []() {
-        auto _v = regex_const::egrep | regex_const::optimize;
-        if(case_insensitive) _v |= regex_const::icase;
-        return _v;
-    }();
-    return _constants;
-}
-
-const auto&
-get_regex_pattern()
-{
-    static auto _pattern = []() {
-        std::array<std::string, 2> _v{};
-        for(const auto& itr : regex_keys)
-        {
-            if(itr.empty()) continue;
-            std::string _pattern = {};
-            if(itr.at(0) == '~')
-            {
-                _pattern = itr.substr(1);
-                _v.at(1) += "|" + _pattern;
-            }
-            else
-            {
-                _pattern = itr;
-                _v.at(0) += "|" + _pattern;
-            }
-            lerr << "Adding regex key: '" << _pattern << "'...\n";
-        }
-        for(auto& itr : _v)
-            if(!itr.empty()) itr = itr.substr(1);
-
-        return _v;
-    }();
-    return _pattern;
-}
-
-auto
-get_regex()
-{
-    static auto _rc = std::array<std::regex, 2>{
-        std::regex(get_regex_pattern().at(0), get_regex_constants()),
-        std::regex(get_regex_pattern().at(1), get_regex_constants())
-    };
-    return _rc;
-}
-
-bool
-regex_match(const std::string& _line)
-{
-    if(get_regex_pattern().at(0).empty() && get_regex_pattern().at(1).empty())
-        return true;
-
-    static size_t lerr_width = 0;
-    lerr_width               = std::max<size_t>(lerr_width, _line.length());
-    std::stringstream _line_ss;
-    _line_ss << "'" << _line << "'";
-
-    if(!get_regex_pattern().at(1).empty())
-    {
-        if(std::regex_match(_line, get_regex().at(1)))
-        {
-            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
-                 << " matched negating pattern '" << get_regex_pattern().at(1)
-                 << "'...\n";
-            return false;
-        }
-
-        if(std::regex_search(_line, get_regex().at(1)))
-        {
-            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
-                 << " found negating pattern '" << get_regex_pattern().at(1) << "'...\n";
-            return false;
-        }
-    }
-
-    if(!get_regex_pattern().at(0).empty())
-    {
-        if(std::regex_match(_line, get_regex().at(0)))
-        {
-            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
-                 << " matched pattern '" << get_regex_pattern().at(0) << "'...\n";
-            return true;
-        }
-
-        if(std::regex_search(_line, get_regex().at(0)))
-        {
-            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
-                 << " found pattern '" << get_regex_pattern().at(0) << "'...\n";
-            return true;
-        }
-    }
-
-    lerr << std::left << std::setw(lerr_width) << _line_ss.str() << " missing pattern '"
-         << get_regex_pattern().at(0) << "'...\n";
-    return false;
-}
-
-std::string
-regex_replace(const std::string& _line)
-{
-#if defined(TIMEMORY_UNIX)
-    if(get_regex_pattern().empty()) return _line;
-    if(regex_match(_line))
-        return std::regex_replace(_line, get_regex().at(0), "\33[01;04;36;40m$&\33[0m");
-#endif
-    return _line;
-}
-
-const auto&
-get_category_regex_pattern()
-{
-    static auto _pattern = []() {
-        std::array<std::string, 2> _v{};
-        for(const auto& itr : category_regex_keys)
-        {
-            if(itr.empty()) continue;
-            std::string _pattern = {};
-            if(itr.at(0) == '~')
-            {
-                _pattern = itr.substr(1);
-                _v.at(1) += "|" + _pattern;
-            }
-            else
-            {
-                _pattern = itr;
-                _v.at(0) += "|" + _pattern;
-            }
-            lerr << "Adding category regex key: '" << _pattern << "'...\n";
-        }
-        for(auto& itr : _v)
-            if(!itr.empty()) itr = itr.substr(1);
-
-        return _v;
-    }();
-    return _pattern;
-}
-
-auto
-get_category_regex()
-{
-    static auto _rc = std::array<std::regex, 2>{
-        std::regex(get_category_regex_pattern().at(0), get_regex_constants()),
-        std::regex(get_category_regex_pattern().at(1), get_regex_constants())
-    };
-    return _rc;
-}
-
-bool
-category_regex_match(const std::string& _line)
-{
-    if(get_category_regex_pattern().at(0).empty() &&
-       get_category_regex_pattern().at(1).empty())
-        return true;
-
-    static size_t lerr_width = 0;
-    lerr_width               = std::max<size_t>(lerr_width, _line.length());
-    std::stringstream _line_ss;
-    _line_ss << "'" << _line << "'";
-
-    if(!get_category_regex_pattern().at(1).empty())
-    {
-        if(std::regex_match(_line, get_category_regex().at(1)))
-        {
-            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
-                 << " matched negating category pattern '"
-                 << get_category_regex_pattern().at(1) << "'...\n";
-            return false;
-        }
-
-        if(std::regex_search(_line, get_category_regex().at(1)))
-        {
-            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
-                 << " found negating category pattern '"
-                 << get_category_regex_pattern().at(1) << "'...\n";
-            return false;
-        }
-    }
-
-    if(!get_category_regex_pattern().at(0).empty())
-    {
-        if(std::regex_match(_line, get_category_regex().at(0)))
-        {
-            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
-                 << " matched category pattern '" << get_category_regex_pattern().at(0)
-                 << "'...\n";
-            return true;
-        }
-
-        if(std::regex_search(_line, get_category_regex().at(0)))
-        {
-            lerr << std::left << std::setw(lerr_width) << _line_ss.str()
-                 << " found category pattern '" << get_category_regex_pattern().at(0)
-                 << "'...\n";
-            return true;
-        }
-    }
-
-    lerr << std::left << std::setw(lerr_width) << _line_ss.str()
-         << " missing category pattern '" << get_category_regex_pattern().at(0)
-         << "'...\n";
-    return false;
-}
-
-bool
-exclude_setting(const std::string& _v)
-{
-    bool _a = settings_exclude.find(_v) != settings_exclude.end();
-    bool _b = std::regex_match(_v, std::regex{ settings_rexclude_exact });
-    bool _c = std::regex_match(_v, std::regex{ settings_rexclude_begin });
-    return (_a || _b || _c);
-}
 }  // namespace
-
-//--------------------------------------------------------------------------------------//
-
-bool
-is_selected(const std::string& _line)
-{
-    return regex_match(_line);
-}
-
-//--------------------------------------------------------------------------------------//
-
-bool
-is_category_selected(const std::string& _line)
-{
-    return category_regex_match(_line);
-}
-
-//--------------------------------------------------------------------------------------//
-
-std::string
-hl_selected(const std::string& _line)
-{
-    return (regex_hl) ? regex_replace(_line) : _line;
-}
-
-//--------------------------------------------------------------------------------------//
-
-void
-process_categories(parser_t& p, const str_set_t& _category_options)
-{
-    category_view = p.get<str_set_t>("categories");
-    std::vector<std::function<void()>> _shorthand_patches{};
-    for(const auto& itr : category_view)
-    {
-        auto _is_shorthand = [&_shorthand_patches, &_category_options,
-                              itr](const std::string& _prefix) {
-            auto _opt = TIMEMORY_JOIN("::", _prefix, itr);
-            if(_category_options.count(_opt) > 0)
-            {
-                _shorthand_patches.emplace_back([itr, _opt]() {
-                    category_view.erase(itr);
-                    category_view.emplace(_opt);
-                });
-                return true;
-            }
-            return false;
-        };
-
-        if(_category_options.count(itr) == 0)
-        {
-            if(!_is_shorthand("component") && !_is_shorthand("settings"))
-                throw std::runtime_error(
-                    itr + " is not a valid category. Use --list-categories to view "
-                          "valid categories");
-        }
-    }
-    for(auto&& itr : _shorthand_patches)
-        itr();
-}
 
 //--------------------------------------------------------------------------------------//

@@ -15,8 +15,26 @@ The full documentation for [omnitrace](https://github.com/AMDResearch/omnitrace)
 
 ### Omnitrace Settings
 
-`omnitrace-avail -Sd` will provide a list of all the possible omnitrace settings, their current value, and a description of the setting
-when running an instrumented binary.
+Generate an omnitrace configuration file using `omnitrace-avail -D omnitrace.cfg`. Optionally, use `omnitrace-avail -D omnitrace.cfg --all` for
+a verbose configuration file with descriptions, categories, etc. Modify the configuration file as desired, e.g. enable
+[perfetto](https://perfetto.dev/), [timemory](https://github.com/NERSC/timemory), sampling, and process-level sampling by default
+and tweak some sampling default values:
+
+```console
+# ...
+OMNITRACE_USE_PERFETTO         = true
+OMNITRACE_USE_TIMEMORY         = true
+OMNITRACE_USE_SAMPLING         = true
+OMNITRACE_USE_PROCESS_SAMPLING = true
+# ...
+OMNITRACE_SAMPLING_FREQ        = 50
+OMNITRACE_SAMPLING_CPUS        = all
+OMNITRACE_SAMPLING_GPUS        = $env:HIP_VISIBLE_DEVICES
+```
+
+Once the configuration file is adjusted to your preferences, either export the path to this file via `OMNITRACE_CONFIG_FILE=/path/to/omnitrace.cfg`
+or place this file in `${HOME}/.omnitrace.cfg` to ensure these values are always read as the default. If you wish to change any of these settings,
+you can override them via environment variables or by specifying an alternative `OMNITRACE_CONFIG_FILE`.
 
 ### Omnitrace Executable
 

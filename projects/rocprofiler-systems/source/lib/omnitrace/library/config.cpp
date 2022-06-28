@@ -342,7 +342,7 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB",
                              "Hint for shared-memory buffer size in perfetto (in KB)",
-                             40960, "perfetto", "data");
+                             4096, "perfetto", "data");
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_PERFETTO_BUFFER_SIZE_KB",
                              "Size of perfetto buffer (in KB)", 1024000, "perfetto",
@@ -387,8 +387,11 @@ configure_settings(bool _init)
         "List of components to collect via timemory (see `omnitrace-avail -C`)",
         "wall_clock", "timemory", "component");
 
-    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_OUTPUT_FILE", "Perfetto filename",
-                             "", "perfetto", "io", "filename");
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_OUTPUT_FILE",
+                             "[DEPRECATED] See OMNITRACE_PERFETTO_FILE", "", "perfetto",
+                             "io", "filename", "deprecated");
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_PERFETTO_FILE", "Perfetto filename",
+                             "perfetto-trace.proto", "perfetto", "io", "filename");
 
     // set the defaults
     _config->get_flamegraph_output()     = false;
@@ -454,22 +457,19 @@ configure_settings(bool _init)
     }
     else
     {
-        _add_omnitrace_category(_config->find("OMNITRACE_PAPI_EVENTS"));
+        auto _papi_events = _config->find("OMNITRACE_PAPI_EVENTS");
+        _add_omnitrace_category(_papi_events);
+        std::vector<std::string> _papi_choices = {};
+        for(auto itr : tim::papi::available_events_info())
+        {
+            if(itr.available()) _papi_choices.emplace_back(itr.symbol());
+        }
+        _papi_events->second->set_choices(_papi_choices);
     }
 #else
+    _config->find("OMNITRACE_PAPI_EVENTS")->second->set_hidden(true);
     _config->get_papi_quiet() = true;
 #endif
-
-    for(auto&& itr :
-        tim::delimit(_config->get<std::string>("OMNITRACE_CONFIG_FILE"), ";:"))
-    {
-        if(_config->get_suppress_config()) continue;
-        OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose_env() > 0,
-                                          "Reading config file %s\n", itr.c_str());
-        _config->read(itr);
-    }
-
-    settings::suppress_config() = true;
 
     // always initialize timemory because gotcha wrappers are always used
     auto _cmd     = tim::read_command_line(process::get_id());
@@ -479,6 +479,7 @@ configure_settings(bool _init)
     auto _pos = _exe.find_last_of('/');
     if(_pos < _exe.length() - 1) _exe = _exe.substr(_pos + 1);
     get_exe_name() = _exe;
+    _config->set_tag(_exe);
 
     bool _found_sep = false;
     for(const auto& itr : _cmd)
@@ -486,6 +487,16 @@ configure_settings(bool _init)
         if(itr == "--") _found_sep = true;
     }
     if(!_found_sep && _cmd.size() > 1) _cmd.insert(_cmd.begin() + 1, "--");
+
+    for(auto&& itr :
+        tim::delimit(_config->get<std::string>("OMNITRACE_CONFIG_FILE"), ";:"))
+    {
+        if(_config->get_suppress_config()) continue;
+        OMNITRACE_BASIC_VERBOSE(1, "Reading config file %s\n", itr.c_str());
+        _config->read(itr);
+    }
+
+    settings::suppress_config() = true;
 
     if(_init)
     {
@@ -507,6 +518,7 @@ configure_settings(bool _init)
     handle_deprecated_setting("OMNITRACE_ROCM_SMI_DEVICES", "OMNITRACE_SAMPLING_GPUS");
     handle_deprecated_setting("OMNITRACE_USE_THREAD_SAMPLING",
                               "OMNITRACE_USE_PROCESS_SAMPLING");
+    handle_deprecated_setting("OMNITRACE_OUTPUT_FILE", "OMNITRACE_PERFETTO_FILE");
 
     scope::get_fields()[scope::flat::value]     = _config->get_flat_profile();
     scope::get_fields()[scope::timeline::value] = _config->get_timeline_profile();
@@ -523,10 +535,6 @@ configure_settings(bool _init)
     if(_dl_verbose->second->get_config_updated())
         tim::set_env(std::string{ _dl_verbose->first }, _dl_verbose->second->as_string(),
                      0);
-
-#if !defined(TIMEMORY_USE_MPI) || TIMEMORY_USE_MPI == 0
-    _config->disable("OMNITRACE_PERFETTO_COMBINE_TRACES");
-#endif
 
     configure_mode_settings();
     configure_signal_handler();
@@ -683,21 +691,34 @@ configure_disabled_settings()
     _handle_use_option("OMNITRACE_USE_KOKKOSP", "kokkos");
     _handle_use_option("OMNITRACE_USE_PERFETTO", "perfetto");
     _handle_use_option("OMNITRACE_USE_TIMEMORY", "timemory");
-    _handle_use_option("OMNITRACE_CRITICAL_TRACE", "critical_trace");
     _handle_use_option("OMNITRACE_USE_OMPT", "ompt");
     _handle_use_option("OMNITRACE_USE_ROCM_SMI", "rocm_smi");
     _handle_use_option("OMNITRACE_USE_ROCTRACER", "roctracer");
+    _handle_use_option("OMNITRACE_CRITICAL_TRACE", "critical_trace");
 
 #if !defined(OMNITRACE_USE_ROCTRACER) || OMNITRACE_USE_ROCTRACER == 0
-    _config->disable_category("roctracer");
+    _config->find("OMNITRACE_USE_ROCTRACER")->second->set_hidden(true);
+    for(const auto& itr : _config->disable_category("roctracer"))
+        _config->find(itr)->second->set_hidden(true);
 #endif
 
 #if !defined(OMNITRACE_USE_ROCM_SMI) || OMNITRACE_USE_ROCM_SMI == 0
-    _config->disable_category("rocm_smi");
+    _config->find("OMNITRACE_USE_ROCM_SMI")->second->set_hidden(true);
+    for(const auto& itr : _config->disable_category("rocm_smi"))
+        _config->find(itr)->second->set_hidden(true);
 #endif
 
 #if defined(OMNITRACE_USE_OMPT) || OMNITRACE_USE_OMPT == 0
-    _config->disable_category("ompt");
+    _config->find("OMNITRACE_USE_OMPT")->second->set_hidden(true);
+    for(const auto& itr : _config->disable_category("ompt"))
+        _config->find(itr)->second->set_hidden(true);
+#endif
+
+#if !defined(TIMEMORY_USE_MPI) || TIMEMORY_USE_MPI == 0
+    _config->disable("OMNITRACE_PERFETTO_COMBINE_TRACES");
+    _config->disable("OMNITRACE_COLLAPSE_PROCESSES");
+    _config->find("OMNITRACE_PERFETTO_COMBINE_TRACES")->second->set_hidden(true);
+    _config->find("OMNITRACE_COLLAPSE_PROCESSES")->second->set_hidden(true);
 #endif
 
     _config->disable_category("throttle");
@@ -722,6 +743,37 @@ configure_disabled_settings()
     _config->disable("dart_output");
     _config->disable("flamegraph_output");
     _config->disable("separator_freq");
+
+    // exclude some timemory settings which are not relevant to omnitrace
+    //  exact matches, e.g. OMNITRACE_BANNER
+    std::string _hidden_exact_re =
+        "^OMNITRACE_(BANNER|DESTRUCTOR_REPORT|COMPONENTS|(GLOBAL|MPIP|NCCLP|OMPT|"
+        "PROFILER|TRACE|KOKKOS)_COMPONENTS|PYTHON_EXE|PAPI_ATTACH|PLOT_OUTPUT|SEPARATOR_"
+        "FREQ|STACK_CLEARING|TARGET_PID|THROTTLE_(COUNT|VALUE)|(AUTO|FLAMEGRAPH)_OUTPUT|"
+        "(ENABLE|DISABLE)_ALL_SIGNALS|ALLOW_SIGNAL_HANDLER|CTEST_NOTES|INSTRUCTION_"
+        "ROOFLINE|ADD_SECONDARY|MAX_THREAD_BOOKMARKS)$";
+
+    //  leading matches, e.g. OMNITRACE_MPI_[A-Z_]+
+    std::string _hidden_begin_re =
+        "^OMNITRACE_(ERT|DART|MPI|UPCXX|ROOFLINE|CUDA|NVTX|CUPTI)_[A-Z_]+$";
+
+    auto _hidden_exact = std::set<std::string>{};
+
+#if !defined(TIMEMORY_USE_CRAYPAT)
+    _hidden_exact.emplace("OMNITRACE_CRAYPAT");
+#endif
+
+    for(const auto& itr : *_config)
+    {
+        auto _v = itr.second->get_env_name();
+        if(_hidden_exact.count(_v) > 0 ||
+           std ::regex_match(_v, std::regex{ _hidden_exact_re }) ||
+           std::regex_match(_v, std::regex{ _hidden_begin_re }))
+        {
+            itr.second->set_enabled(false);
+            itr.second->set_hidden(true);
+        }
+    }
 }
 
 void
@@ -810,6 +862,7 @@ print_settings(
     _widths.fill(0);
     for(const auto& itr : *get_config())
     {
+        if(itr.second->get_hidden()) continue;
         if(!itr.second->get_enabled()) continue;
         if(_filter(itr.first, itr.second->get_categories()))
         {
@@ -1273,36 +1326,31 @@ get_backend()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
-std::string&
+std::string
 get_perfetto_output_filename()
 {
-    static auto  _v        = get_config()->find("OMNITRACE_OUTPUT_FILE");
-    static auto& _t        = static_cast<tim::tsettings<std::string>&>(*_v->second);
-    static auto  _generate = []() {
-        if(tim::dmp::is_initialized())
-            settings::default_process_suffix() = tim::dmp::rank();
-        // default name: perfetto-trace.<pid>.proto or perfetto-trace.<rank>.proto
-        auto _default_fname =
-            settings::compose_output_filename("perfetto-trace", "proto", get_use_pid());
-        auto _pid_patch = std::string{ "/" } + std::to_string(tim::process::get_id()) +
-                          "-perfetto-trace";
-        auto _dpos = _default_fname.find(_pid_patch);
-        if(_dpos != std::string::npos)
-            _default_fname =
-                _default_fname.replace(_dpos, _pid_patch.length(), "/perfetto-trace");
-        // have the default display the full path to the output file
-        return tim::get_env<std::string>(
-            "OMNITRACE_OUTPUT_FILE",
-            JOIN('/', tim::get_env<std::string>("PWD", ".", false), _default_fname),
-            false);
-    };
-    static auto _generated = _generate();
-    if(_t.get().empty() || _t.get() == _generated)
+    static auto _v       = get_config()->find("OMNITRACE_PERFETTO_FILE");
+    auto        _val     = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    auto        _pos_dir = _val.find_last_of('/');
+    auto        _dir     = std::string{};
+    auto        _ext     = std::string{ "proto" };
+    if(_pos_dir != std::string::npos)
     {
-        _t.set(_generate());
-        _generated = _t.get();
+        _dir = _val.substr(0, _pos_dir + 1);
+        _val = _val.substr(_pos_dir + 1);
     }
-    return _t.get();
+    auto _pos_ext = _val.find_last_of('.');
+    if(_pos_ext + 1 < _val.length())
+    {
+        _ext = _val.substr(_pos_ext + 1);
+        _val = _val.substr(0, _pos_ext);
+    }
+    _val = settings::compose_output_filename(_val, _ext, settings::use_output_suffix(),
+                                             settings::default_process_suffix(), false,
+                                             _dir);
+    if(!_val.empty() && _val.at(0) != '/')
+        return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+    return _val;
 }
 
 size_t&
