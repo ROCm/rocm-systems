@@ -15,7 +15,7 @@ The full documentation for [omnitrace](https://github.com/AMDResearch/omnitrace)
 
 ### Omnitrace Settings
 
-Generate an omnitrace configuration file using `omnitrace-avail -D omnitrace.cfg`. Optionally, use `omnitrace-avail -D omnitrace.cfg --all` for
+Generate an omnitrace configuration file using `omnitrace-avail -G omnitrace.cfg`. Optionally, use `omnitrace-avail -G omnitrace.cfg --all` for
 a verbose configuration file with descriptions, categories, etc. Modify the configuration file as desired, e.g. enable
 [perfetto](https://perfetto.dev/), [timemory](https://github.com/NERSC/timemory), sampling, and process-level sampling by default
 and tweak some sampling default values:
