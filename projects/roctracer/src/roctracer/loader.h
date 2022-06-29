@@ -176,7 +176,10 @@ class HipLoaderStatic {
   RegisterActivityCallback_t* RegisterActivityCallback;
   RemoveActivityCallback_t* RemoveActivityCallback;
   KernelNameRef_t* KernelNameRef;
-  KernelNameRefByPtr_t* KernelNameRefByPtr;
+  KernelNameRefByPtr_t* KernelNameRefByPtr_;
+  const char* KernelNameRefByPtr(const void* function, hipStream_t stream = nullptr) const {
+    return KernelNameRefByPtr_(function, stream);
+  }
   GetStreamDeviceId_t* GetStreamDeviceId;
   ApiName_t* ApiName;
 
@@ -206,7 +209,7 @@ class HipLoaderStatic {
     RegisterActivityCallback = hipRegisterActivityCallback;
     RemoveActivityCallback = hipRemoveActivityCallback;
     KernelNameRef = hipKernelNameRef;
-    KernelNameRefByPtr = hipKernelNameRefByPtr;
+    KernelNameRefByPtr_ = hipKernelNameRefByPtr;
     GetStreamDeviceId = hipGetStreamDeviceId;
     ApiName = hipApiName;
 
@@ -238,7 +241,10 @@ class HipApi {
   RegisterActivityCallback_t* RegisterActivityCallback;
   RemoveActivityCallback_t* RemoveActivityCallback;
   KernelNameRef_t* KernelNameRef;
-  KernelNameRefByPtr_t* KernelNameRefByPtr;
+  KernelNameRefByPtr_t* KernelNameRefByPtr_;
+  const char* KernelNameRefByPtr(const void* function, hipStream_t stream = nullptr) const {
+    return KernelNameRefByPtr_(function, stream);
+  }
   GetStreamDeviceId_t* GetStreamDeviceId;
   ApiName_t* ApiName;
 
@@ -256,7 +262,7 @@ class HipApi {
         loader->GetFun<RegisterActivityCallback_t>("hipRegisterActivityCallback");
     RemoveActivityCallback = loader->GetFun<RemoveActivityCallback_t>("hipRemoveActivityCallback");
     KernelNameRef = loader->GetFun<KernelNameRef_t>("hipKernelNameRef");
-    KernelNameRefByPtr = loader->GetFun<KernelNameRefByPtr_t>("hipKernelNameRefByPtr");
+    KernelNameRefByPtr_ = loader->GetFun<KernelNameRefByPtr_t>("hipKernelNameRefByPtr");
     GetStreamDeviceId = loader->GetFun<GetStreamDeviceId_t>("hipGetStreamDeviceId");
     ApiName = loader->GetFun<ApiName_t>("hipApiName");
 

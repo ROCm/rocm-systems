@@ -24,6 +24,8 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <utility>
+#include <variant>
 
 #include <cxxabi.h> /* names denangle */
 #include <dirent.h>
@@ -119,7 +121,7 @@ FILE* pc_sample_file_handle = NULL;
 
 void close_output_file(FILE* file_handle);
 void close_file_handles() {
-  if (begin_ts_file_handle) close_output_file(pc_sample_file_handle);
+  if (begin_ts_file_handle) close_output_file(begin_ts_file_handle);
   if (roctx_file_handle) close_output_file(roctx_file_handle);
   if (hsa_api_file_handle) close_output_file(hsa_api_file_handle);
   if (hsa_async_copy_file_handle) close_output_file(hsa_async_copy_file_handle);
@@ -364,14 +366,88 @@ struct hip_api_trace_entry_t {
   }
 };
 
-static inline bool is_hip_kernel_launch_api(const uint32_t& cid) {
-  bool ret = (cid == HIP_API_ID_hipLaunchKernel) || (cid == HIP_API_ID_hipExtLaunchKernel) ||
-      (cid == HIP_API_ID_hipLaunchCooperativeKernel) ||
-      (cid == HIP_API_ID_hipLaunchCooperativeKernelMultiDevice) ||
-      (cid == HIP_API_ID_hipExtLaunchMultiKernelMultiDevice) ||
-      (cid == HIP_API_ID_hipModuleLaunchKernel) || (cid == HIP_API_ID_hipExtModuleLaunchKernel) ||
-      (cid == HIP_API_ID_hipHccModuleLaunchKernel);
-  return ret;
+static std::string getKernelNameMultiKernelMultiDevice(hipLaunchParams* launchParamsList,
+                                                       int numDevices) {
+  std::stringstream name_str;
+  for (int i = 0; i < numDevices; ++i) {
+    if (launchParamsList[i].func != nullptr) {
+      name_str << roctracer::HipLoader::Instance().KernelNameRefByPtr(launchParamsList[i].func)
+               << ":"
+               << roctracer::HipLoader::Instance().GetStreamDeviceId(launchParamsList[i].stream)
+               << ";";
+    }
+  }
+  return name_str.str();
+}
+
+template <typename... Ts> struct Overloaded : Ts... { using Ts::operator()...; };
+template <class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
+
+
+static std::optional<std::string> getKernelName(uint32_t cid, const hip_api_data_t* data) {
+  std::variant<const void*, hipFunction_t> function;
+  switch (cid) {
+    case HIP_API_ID_hipExtLaunchMultiKernelMultiDevice: {
+      return getKernelNameMultiKernelMultiDevice(
+          data->args.hipExtLaunchMultiKernelMultiDevice.launchParamsList,
+          data->args.hipExtLaunchMultiKernelMultiDevice.numDevices);
+    }
+    case HIP_API_ID_hipLaunchCooperativeKernelMultiDevice: {
+      return getKernelNameMultiKernelMultiDevice(
+          data->args.hipLaunchCooperativeKernelMultiDevice.launchParamsList,
+          data->args.hipLaunchCooperativeKernelMultiDevice.numDevices);
+    }
+    case HIP_API_ID_hipLaunchKernel: {
+      function = data->args.hipLaunchKernel.function_address;
+      break;
+    }
+    case HIP_API_ID_hipExtLaunchKernel: {
+      function = data->args.hipExtLaunchKernel.function_address;
+      break;
+    }
+    case HIP_API_ID_hipLaunchCooperativeKernel: {
+      function = data->args.hipLaunchCooperativeKernel.f;
+      break;
+    }
+    case HIP_API_ID_hipLaunchByPtr: {
+      function = data->args.hipLaunchByPtr.hostFunction;
+      break;
+    }
+    case HIP_API_ID_hipGraphAddKernelNode: {
+      function = data->args.hipGraphAddKernelNode.pNodeParams->func;
+      break;
+    }
+    case HIP_API_ID_hipGraphExecKernelNodeSetParams: {
+      function = data->args.hipGraphExecKernelNodeSetParams.pNodeParams->func;
+      break;
+    }
+    case HIP_API_ID_hipGraphKernelNodeSetParams: {
+      function = data->args.hipGraphKernelNodeSetParams.pNodeParams->func;
+      break;
+    }
+    case HIP_API_ID_hipModuleLaunchKernel: {
+      function = data->args.hipModuleLaunchKernel.f;
+      break;
+    }
+    case HIP_API_ID_hipExtModuleLaunchKernel: {
+      function = data->args.hipExtModuleLaunchKernel.f;
+      break;
+    }
+    case HIP_API_ID_hipHccModuleLaunchKernel: {
+      function = data->args.hipHccModuleLaunchKernel.f;
+      break;
+    }
+    default:
+      return {};
+  }
+  return std::visit(
+      Overloaded{
+          [](const void* func) {
+            return roctracer::HipLoader::Instance().KernelNameRefByPtr(func);
+          },
+          [](hipFunction_t func) { return roctracer::HipLoader::Instance().KernelNameRef(func); },
+      },
+      function);
 }
 
 void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
@@ -399,7 +475,7 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
   if (domain == ACTIVITY_DOMAIN_HIP_API) {
     const char* str = hipApiString((hip_api_id_t)cid, data);
     rec_ss << " " << str;
-    if (is_hip_kernel_launch_api(cid) && entry->name) {
+    if (entry->name) {
       static bool truncate = []() {
         const char* env_var = getenv("ROCP_TRUNCATE_NAMES");
         return env_var && std::atoi(env_var) != 0;
@@ -414,7 +490,6 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
   } else {
     fprintf(hip_api_file_handle, "%s(name(%s))\n", oss.str().c_str(), entry->name);
   }
-
   fflush(hip_api_file_handle);
 }
 
@@ -431,50 +506,10 @@ void hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
   } else {
     // Post init of HIP APU args
     hipApiArgsInit((hip_api_id_t)cid, const_cast<hip_api_data_t*>(data));
-
-    std::string kernel_name;
-
-    if (is_hip_kernel_launch_api(cid)) {
-      switch (cid) {
-        case HIP_API_ID_hipExtLaunchMultiKernelMultiDevice:
-        case HIP_API_ID_hipLaunchCooperativeKernelMultiDevice: {
-          const hipLaunchParams* listKernels =
-              data->args.hipLaunchCooperativeKernelMultiDevice.launchParamsList;
-          for (int i = 0; i < data->args.hipLaunchCooperativeKernelMultiDevice.numDevices; ++i) {
-            std::stringstream ss;
-            const hipLaunchParams& lp = listKernels[i];
-            if (lp.func != nullptr) {
-              ss << roctracer::HipLoader::Instance().KernelNameRefByPtr(lp.func, lp.stream) << ":"
-                 << roctracer::HipLoader::Instance().GetStreamDeviceId(lp.stream) << ";";
-            }
-            kernel_name = ss.str();
-          }
-          break;
-        }
-        case HIP_API_ID_hipLaunchKernel:
-        case HIP_API_ID_hipLaunchCooperativeKernel: {
-          const void* f = data->args.hipLaunchKernel.function_address;
-          hipStream_t stream = data->args.hipLaunchKernel.stream;
-          if (f != nullptr)
-            kernel_name = roctracer::HipLoader::Instance().KernelNameRefByPtr(f, stream);
-          break;
-        }
-        case HIP_API_ID_hipExtLaunchKernel: {
-          const void* f = data->args.hipExtLaunchKernel.function_address;
-          hipStream_t stream = data->args.hipExtLaunchKernel.stream;
-          if (f != nullptr)
-            kernel_name = roctracer::HipLoader::Instance().KernelNameRefByPtr(f, stream);
-          break;
-        }
-        default: {
-          const hipFunction_t f = data->args.hipModuleLaunchKernel.f;
-          if (f != nullptr) kernel_name = roctracer::HipLoader::Instance().KernelNameRef(f);
-        }
-      }
-    }
+    auto kernel_name = getKernelName(cid, data);
     hip_api_trace_entry_t& entry = hip_api_trace_buffer.Emplace(
         static_cast<activity_domain_t>(domain), cid, hip_begin_timestamp, timestamp, GetPid(),
-        GetTid(), *data, kernel_name.c_str(),
+        GetTid(), *data, kernel_name ? kernel_name->c_str() : nullptr,
         cid == HIP_API_ID_hipMalloc ? data->args.hipMalloc.ptr : nullptr);
     entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
   }
@@ -498,8 +533,6 @@ void mark_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
-// HSA API tracing
-
 // Activity tracing callback
 //   hipMalloc id(3) correlation_id(1): begin_ns(1525888652762640464) end_ns(1525888652762877067)
 void pool_activity_callback(const char* begin, const char* end, void* arg) {
