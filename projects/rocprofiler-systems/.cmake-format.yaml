@@ -89,6 +89,7 @@ parse:
         NAME: '*'
         ARGS: '*'
         PERFETTO_FILE: '*'
+        PERFETTO_METRIC: '*'
         TIMEMORY_FILE: '*'
         TIMEMORY_METRIC: '*'
     rocm_version_message:

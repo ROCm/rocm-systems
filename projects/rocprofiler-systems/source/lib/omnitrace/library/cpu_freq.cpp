@@ -80,7 +80,24 @@ void init_perfetto_counter_tracks(type_list<Types...>)
     (perfetto_counter_track<Types>::init(), ...);
 }
 }  // namespace
+}  // namespace cpu_freq
+}  // namespace omnitrace
 
+TIMEMORY_DEFINE_NAME_TRAIT("cpu_freq", omnitrace::cpu_freq::cpu_freq);
+TIMEMORY_DEFINE_NAME_TRAIT("process_page_fault", omnitrace::cpu_freq::cpu_page);
+TIMEMORY_DEFINE_NAME_TRAIT("process_virtual_memory", omnitrace::cpu_freq::cpu_virt);
+TIMEMORY_DEFINE_NAME_TRAIT("process_context_switch",
+                           omnitrace::cpu_freq::cpu_context_switch);
+TIMEMORY_DEFINE_NAME_TRAIT("process_page_fault", omnitrace::cpu_freq::cpu_page_fault);
+TIMEMORY_DEFINE_NAME_TRAIT("process_user_cpu_time",
+                           omnitrace::cpu_freq::cpu_user_mode_time);
+TIMEMORY_DEFINE_NAME_TRAIT("process_kernel_cpu_time",
+                           omnitrace::cpu_freq::cpu_kernel_mode_time);
+
+namespace omnitrace
+{
+namespace cpu_freq
+{
 void
 setup()
 {
@@ -230,7 +247,7 @@ void
 write_perfetto_counter_track(Args... _args)
 {
     using track = perfetto_counter_track<Tp>;
-    TRACE_COUNTER("sampling", track::at(0, 0), _args...);
+    TRACE_COUNTER(trait::name<Tp>::value, track::at(0, 0), _args...);
 }
 }  // namespace
 
@@ -254,11 +271,11 @@ post_process()
             uint64_t _ts   = std::get<0>(itr);
             double   _freq = std::get<7>(itr).at(_offset);
             if(!pthread_create_gotcha::is_valid_execution_time(0, _ts)) continue;
-            TRACE_COUNTER("sampling", freq_track::at(_idx, 0), _ts, _freq);
+            TRACE_COUNTER("cpu_freq", freq_track::at(_idx, 0), _ts, _freq);
         }
 
         auto _end_ts = pthread_create_gotcha::get_execution_time(0)->second;
-        TRACE_COUNTER("sampling", freq_track::at(_idx, 0), _end_ts, 0);
+        TRACE_COUNTER("cpu_freq", freq_track::at(_idx, 0), _end_ts, 0);
     };
 
     auto _process_cpu_rusage = []() {

@@ -246,10 +246,11 @@ data::post_process(uint32_t _dev_id)
             double _temp  = itr.m_temp / 1.0e3;
             double _power = itr.m_power / 1.0e6;
             double _usage = itr.m_mem_usage / static_cast<double>(units::megabyte);
-            TRACE_COUNTER("rocm_smi", counter_track::at(_dev_id, 0), _ts, _busy);
-            TRACE_COUNTER("rocm_smi", counter_track::at(_dev_id, 1), _ts, _temp);
-            TRACE_COUNTER("rocm_smi", counter_track::at(_dev_id, 2), _ts, _power);
-            TRACE_COUNTER("rocm_smi", counter_track::at(_dev_id, 3), _ts, _usage);
+            TRACE_COUNTER("device_busy", counter_track::at(_dev_id, 0), _ts, _busy);
+            TRACE_COUNTER("device_temp", counter_track::at(_dev_id, 1), _ts, _temp);
+            TRACE_COUNTER("device_power", counter_track::at(_dev_id, 2), _ts, _power);
+            TRACE_COUNTER("device_memory_usage", counter_track::at(_dev_id, 3), _ts,
+                          _usage);
         }
     };
 

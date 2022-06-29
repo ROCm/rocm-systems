@@ -516,15 +516,15 @@ backtrace::post_process(int64_t _tid)
             _last_bt = _bt;
             _mean_ts += _ts;
 
-            TRACE_COUNTER("sampling",
+            TRACE_COUNTER("thread_peak_memory",
                           perfetto_counter_track<perfetto_rusage>::at(_tid, 0), _ts,
                           _bt->m_mem_peak / units::megabyte);
 
-            TRACE_COUNTER("sampling",
+            TRACE_COUNTER("thread_context_switch",
                           perfetto_counter_track<perfetto_rusage>::at(_tid, 1), _ts,
                           _bt->m_ctx_swch);
 
-            TRACE_COUNTER("sampling",
+            TRACE_COUNTER("thread_page_fault",
                           perfetto_counter_track<perfetto_rusage>::at(_tid, 2), _ts,
                           _bt->m_page_flt);
 
@@ -535,7 +535,7 @@ backtrace::post_process(int64_t _tid)
                 {
                     if(i < _bt->m_hw_counter.size())
                     {
-                        TRACE_COUNTER("sampling",
+                        TRACE_COUNTER("hardware_counter",
                                       perfetto_counter_track<hw_counters>::at(_tid, i),
                                       _ts, _bt->m_hw_counter.at(i));
                     }
@@ -547,15 +547,15 @@ backtrace::post_process(int64_t _tid)
         {
             auto     _ts   = pthread_create_gotcha::get_execution_time(_tid)->second;
             uint64_t _zero = 0;
-            TRACE_COUNTER("sampling",
+            TRACE_COUNTER("thread_peak_memory",
                           perfetto_counter_track<perfetto_rusage>::at(_tid, 0), _ts,
                           _zero);
 
-            TRACE_COUNTER("sampling",
+            TRACE_COUNTER("thread_context_switch",
                           perfetto_counter_track<perfetto_rusage>::at(_tid, 1), _ts,
                           _zero);
 
-            TRACE_COUNTER("sampling",
+            TRACE_COUNTER("thread_page_fault",
                           perfetto_counter_track<perfetto_rusage>::at(_tid, 2), _ts,
                           _zero);
 
@@ -566,7 +566,7 @@ backtrace::post_process(int64_t _tid)
                 {
                     if(i < _last_bt->m_hw_counter.size())
                     {
-                        TRACE_COUNTER("sampling",
+                        TRACE_COUNTER("hardware_counter",
                                       perfetto_counter_track<hw_counters>::at(_tid, i),
                                       _ts, _zero);
                     }
@@ -601,10 +601,10 @@ backtrace::post_process(int64_t _tid)
                 auto _ts  = _bt->m_ts;
                 if(!pthread_create_gotcha::is_valid_execution_time(_tid, _ts)) continue;
 
-                TRACE_EVENT_BEGIN("sampling",
+                TRACE_EVENT_BEGIN("hardware_counter",
                                   perfetto::StaticString{ sitr.first->c_str() },
                                   _last_wall_ts, "begin_ns", _last_wall_ts);
-                TRACE_EVENT_END("sampling", _ts, "end_ns", _ts);
+                TRACE_EVENT_END("hardware_counter", _ts, "end_ns", _ts);
             }
             _last_wall_ts = _bt->m_ts;
         }

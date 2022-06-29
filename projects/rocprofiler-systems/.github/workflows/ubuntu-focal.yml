@@ -28,15 +28,17 @@ jobs:
         python: ['ON']
         ompt: ['ON']
         papi: ['ON']
+        deps: ['libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev']
         include:
         - compiler: 'g++'
           mpi: ''
           boost: 'ON'
           tbb: 'ON'
           build-type: 'Release'
-          python: 'OFF'
+          python: 'ON'
           ompt: 'OFF'
           papi: 'OFF'
+          deps: ''
 
     steps:
     - uses: actions/checkout@v2
@@ -45,7 +47,7 @@ jobs:
       timeout-minutes: 5
       run:
         sudo apt-get update &&
-        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev clang libomp-dev ${{ matrix.compiler }} ${{ matrix.mpi }} &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.deps }} clang libomp-dev ${{ matrix.compiler }} ${{ matrix.mpi }} &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install numpy &&
         python3 -m pip install perfetto &&
@@ -55,8 +57,7 @@ jobs:
       run:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
-        echo "/opt/omnitrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
-        echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "${HOME}/.local/bin" >> $GITHUB_PATH
 
     - name: Configure CMake
       timeout-minutes: 10
@@ -103,25 +104,39 @@ jobs:
         ./omnitrace-*.sh --prefix=/opt/omnitrace --exclude-subdir --skip-license
 
     - name: Test Install
-      timeout-minutes: 10
+      timeout-minutes: 15
       run: |
         set -v
-        export OMNITRACE_DEBUG=ON
+        source /opt/omnitrace/share/omnitrace/setup-env.sh
+        cat << EOF > ${HOME}/.omnitrace.cfg
+        OMNITRACE_VERBOSE = 2
+        OMNITRACE_USE_TIMEMORY = ON
+        OMNITRACE_USE_PERFETTO = ON
+        OMNITRACE_USE_SAMPLING = ON
+        OMNITRACE_USE_PROCESS_SAMPLING = ON
+        OMNITRACE_OUTPUT_PATH = omnitrace-tests-output
+        OMNITRACE_OUTPUT_PREFIX = %tag%/
+        OMNITRACE_SAMPLING_FREQ = 50
+        OMNITRACE_SAMPLING_DELAY = 0.05
+        EOF
         which omnitrace-avail
         ldd $(which omnitrace-avail)
         omnitrace-avail --help
         omnitrace-avail -a
         which omnitrace-critical-trace
         ldd $(which omnitrace-critical-trace)
+        which omnitrace-python
+        omnitrace-python --help
+        omnitrace-python -b -- ${{ github.workspace }}/examples/python/builtin.py
         which omnitrace
         ldd $(which omnitrace)
         omnitrace --help
         omnitrace -e -v 1 -o ls.inst --simulate -- ls
-        for i in omnitrace-ls.inst-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        for i in omnitrace-tests-output/ls.inst/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
         omnitrace -e -v 1 -o ls.inst -- ls
         ./ls.inst
         omnitrace -e -v 1 --simulate -- ls
-        for i in omnitrace-ls-output/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        for i in omnitrace-tests-output/ls/*; do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
         omnitrace -e -v 1 -- ls
 
     - name: Test User API

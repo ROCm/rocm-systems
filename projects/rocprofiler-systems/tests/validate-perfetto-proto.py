@@ -41,6 +41,9 @@ if __name__ == "__main__":
         "-d", "--depths", nargs="+", type=int, help="Expected depths", default=[]
     )
     parser.add_argument(
+        "-m", "--categories", nargs="+", help="Perfetto categories", default=[]
+    )
+    parser.add_argument(
         "-p", "--print", action="store_true", help="Print the processed perfetto data"
     )
     parser.add_argument("-i", "--input", type=str, help="Input file", required=True)
@@ -55,9 +58,11 @@ if __name__ == "__main__":
     tp = TraceProcessor(trace=(args.input))
     pdata = {}
     # get data from perfetto
-    qr_it = tp.query("SELECT name, depth FROM slice")
+    qr_it = tp.query("SELECT name, depth, category FROM slice")
     # loop over data rows from perfetto
     for row in qr_it:
+        if args.categories and row.category not in args.categories:
+            continue
         if row.name not in pdata:
             pdata[row.name] = {}
         if row.depth not in pdata[row.name]:

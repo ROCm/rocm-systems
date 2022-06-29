@@ -145,7 +145,9 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-    start(_data.tool_id.c_str(), "args", JOIN(", ", _args...));
+    start(_data.tool_id.c_str(), "args",
+          JOIN(", ",
+               JOIN('=', tim::try_demangle<std::remove_reference_t<Args>>(), _args)...));
 }
 
 template <typename CategoryT>

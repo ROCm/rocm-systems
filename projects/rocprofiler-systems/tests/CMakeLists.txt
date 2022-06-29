@@ -1018,8 +1018,9 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
     endif()
 
     function(OMNITRACE_ADD_PYTHON_VALIDATION_TEST)
-        cmake_parse_arguments(TEST "" "NAME;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_FILE"
-                              "ARGS" ${ARGN})
+        cmake_parse_arguments(
+            TEST "" "NAME;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_METRIC;PERFETTO_FILE"
+            "ARGS" ${ARGN})
 
         omnitrace_add_python_test(
             NAME ${TEST_NAME}-validate-timemory
@@ -1037,7 +1038,7 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
             NAME ${TEST_NAME}-validate-perfetto
             COMMAND
                 ${_PYTHON_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
-                ${TEST_ARGS} -p -i
+                -m ${TEST_PERFETTO_METRIC} ${TEST_ARGS} -p -i
             PYTHON_VERSION ${_VERSION}
             FILE omnitrace-tests-output/${TEST_NAME}/${_VERSION}/${TEST_PERFETTO_FILE}
             DEPENDS ${TEST_NAME}-${_VERSION}
@@ -1050,6 +1051,7 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
         NAME python-source
         TIMEMORY_METRIC "trip_count"
         TIMEMORY_FILE "trip_count.json"
+        PERFETTO_METRIC "host;user"
         PERFETTO_FILE "perfetto-trace.proto"
         ARGS -l
              run

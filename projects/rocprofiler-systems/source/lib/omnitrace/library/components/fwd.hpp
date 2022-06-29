@@ -61,8 +61,12 @@ TIMEMORY_DECLARE_TYPE_TRAIT(name, typename Tp)
     }
 
 TIMEMORY_DEFINE_NS_API(category, host)
-TIMEMORY_DEFINE_NS_API(category, device)
 TIMEMORY_DEFINE_NS_API(category, user)
+TIMEMORY_DEFINE_NS_API(category, device)
+TIMEMORY_DEFINE_NS_API(category, device_hip)
+TIMEMORY_DEFINE_NS_API(category, device_hsa)
+TIMEMORY_DEFINE_NS_API(category, rocm_hip)
+TIMEMORY_DEFINE_NS_API(category, rocm_hsa)
 TIMEMORY_DEFINE_NS_API(category, rocm_smi)
 TIMEMORY_DEFINE_NS_API(category, kokkos)
 TIMEMORY_DEFINE_NS_API(category, mpi)
@@ -73,7 +77,11 @@ TIMEMORY_DEFINE_NS_API(category, device_critical_trace)
 
 TIMEMORY_DEFINE_NAME_TRAIT("host", category::host);
 TIMEMORY_DEFINE_NAME_TRAIT("device", category::device);
+TIMEMORY_DEFINE_NAME_TRAIT("device_hip", category::device_hip);
+TIMEMORY_DEFINE_NAME_TRAIT("device_hsa", category::device_hsa);
 TIMEMORY_DEFINE_NAME_TRAIT("user", category::user);
+TIMEMORY_DEFINE_NAME_TRAIT("rocm_hip", category::rocm_hip);
+TIMEMORY_DEFINE_NAME_TRAIT("rocm_hsa", category::rocm_hsa);
 TIMEMORY_DEFINE_NAME_TRAIT("rocm_smi", category::rocm_smi);
 TIMEMORY_DEFINE_NAME_TRAIT("sampling", category::sampling);
 TIMEMORY_DEFINE_NAME_TRAIT("thread_sampling", category::thread_sampling);

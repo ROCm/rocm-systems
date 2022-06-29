@@ -28,6 +28,7 @@
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
+#include "library/tracing.hpp"
 
 #include <timemory/backends/cpu.hpp>
 #include <timemory/backends/threading.hpp>
@@ -38,6 +39,8 @@
 #include <cstdint>
 #include <tuple>
 
+#define HIP_PROF_HIP_API_STRING 1
+
 #include <roctracer_ext.h>
 #include <roctracer_hcc.h>
 #include <roctracer_hip.h>
@@ -45,12 +48,36 @@
 #define AMD_INTERNAL_BUILD 1
 #include <roctracer_hsa.h>
 
+#if __has_include(<hip/amd_detail/hip_prof_str.h>) || (defined(OMNITRACE_USE_HIP) && OMNITRACE_USE_HIP > 0)
+#    include <hip/amd_detail/hip_prof_str.h>
+#    define OMNITRACE_HIP_API_ARGS 1
+#else
+#    define OMNITRACE_HIP_API_ARGS 0
+#endif
+
 TIMEMORY_DEFINE_API(roctracer)
 namespace omnitrace
 {
 namespace api = tim::api;
 namespace
 {
+std::string
+hip_api_string(hip_api_id_t id, const hip_api_data_t* data)
+{
+#if OMNITRACE_HIP_API_ARGS > 0
+    std::string _v = hipApiString(id, data);
+    if(_v.empty()) return _v;
+    auto _pbeg = _v.find('(');
+    if(_pbeg == std::string::npos) return _v;
+    auto _pend = _v.find_last_of(')');
+    if(_pend == std::string::npos || _pbeg >= _pend) return _v;
+    auto _n = (_pend - _pbeg - 1);
+    return _v.substr(_pbeg + 1, _n);
+#else
+    tim::consume_parameters(id, data);
+#endif
+}
+//
 int64_t
 get_clock_skew()
 {
@@ -275,11 +302,12 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
                 if(get_use_perfetto())
                 {
-                    TRACE_EVENT_BEGIN("device", perfetto::StaticString{ _name },
-                                      static_cast<uint64_t>(begin_timestamp), "begin_ns",
-                                      static_cast<uint64_t>(begin_timestamp));
-                    TRACE_EVENT_END("device", static_cast<uint64_t>(end_timestamp),
-                                    "end_ns", static_cast<uint64_t>(end_timestamp));
+                    uint64_t _beg_ts = begin_timestamp;
+                    uint64_t _end_ts = end_timestamp;
+                    tracing::push_perfetto_ts(category::rocm_hsa{}, _name, _beg_ts,
+                                              "begin_ns", _beg_ts);
+                    tracing::pop_perfetto_ts(category::rocm_hsa{}, _name, _end_ts,
+                                             "end_ns", _end_ts);
                 }
 
                 if(get_use_timemory())
@@ -334,6 +362,9 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
         default: break;
     }
 
+    OMNITRACE_CI_FAIL(_name == nullptr, "Error! HSA operation type not handled: %u\n",
+                      op);
+
     if(!_name) return;
 
     auto        _beg_ns = record->begin_ns + get_clock_skew();
@@ -347,11 +378,10 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
 
     if(get_use_perfetto())
     {
-        TRACE_EVENT_BEGIN("device", perfetto::StaticString{ *_name },
-                          static_cast<uint64_t>(_beg_ns), "begin_ns",
-                          static_cast<uint64_t>(_beg_ns));
-        TRACE_EVENT_END("device", static_cast<uint64_t>(_end_ns), "end_ns",
-                        static_cast<uint64_t>(_end_ns));
+        uint64_t _beg = _beg_ns;
+        uint64_t _end = _end_ns;
+        tracing::push_perfetto_ts(category::device_hsa{}, *_name, _beg, "begin_ns", _beg);
+        tracing::pop_perfetto_ts(category::device_hsa{}, *_name, _end, "end_ns", _end);
     }
 
     auto _func = [_beg_ns, _end_ns, _name]() {
@@ -582,11 +612,12 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
         if(get_use_perfetto())
         {
-            TRACE_EVENT_BEGIN(
-                "host", perfetto::StaticString{ op_name }, static_cast<uint64_t>(_ts),
-                perfetto::Flow::ProcessScoped(_cid), "begin_ns",
-                static_cast<uint64_t>(_ts), "pcid", _parent_cid, "cid", _cid, "device",
-                _device_id, "tid", _tid, "depth", _depth, "corr_id", _corr_id);
+            auto _api_id = static_cast<hip_api_id_t>(cid);
+            tracing::push_perfetto_ts(
+                category::rocm_hip{}, op_name, _ts, perfetto::Flow::ProcessScoped(_cid),
+                "begin_ns", static_cast<uint64_t>(_ts), "pcid", _parent_cid, "cid", _cid,
+                "device", _device_id, "tid", _tid, "depth", _depth, "corr_id", _corr_id,
+                "args", hip_api_string(_api_id, data));
         }
         if(get_use_timemory())
         {
@@ -622,8 +653,8 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
         if(get_use_perfetto())
         {
-            TRACE_EVENT_END("host", static_cast<uint64_t>(_ts), "end_ns",
-                            static_cast<uint64_t>(_ts));
+            tracing::pop_perfetto_ts(category::rocm_hip{}, op_name, _ts, "end_ns",
+                                     static_cast<uint64_t>(_ts));
         }
         if(get_use_timemory())
         {
@@ -779,14 +810,16 @@ hip_activity_callback(const char* begin, const char* end, void*)
                 _kernel_names.emplace(_name, tim::demangle(_name));
 
             assert(_end_ns > _beg_ns);
-            TRACE_EVENT_BEGIN("device",
-                              perfetto::StaticString{ _kernel_names.at(_name).c_str() },
-                              _beg_ns, perfetto::Flow::ProcessScoped(_cid), "begin_ns",
-                              _beg_ns, "corr_id", record->correlation_id, "device",
-                              _devid, "queue", _queid, "op", _op_id_names.at(record->op));
-            TRACE_EVENT_END("device", _end_ns, "end_ns", _end_ns);
+            tracing::push_perfetto_ts(
+                category::device_hip{}, _kernel_names.at(_name).c_str(), _beg_ns,
+                perfetto::Flow::ProcessScoped(_cid), "begin_ns", _beg_ns, "corr_id",
+                record->correlation_id, "device", _devid, "queue", _queid, "op",
+                _op_id_names.at(record->op));
+            tracing::pop_perfetto_ts(category::device_hip{}, "", _end_ns, "end_ns",
+                                     _end_ns);
             // for some reason, this is necessary to make sure very last one ends
-            TRACE_EVENT_END("device", _end_ns, "end_ns", _end_ns);
+            tracing::pop_perfetto_ts(category::device_hip{}, "", _end_ns, "end_ns",
+                                     _end_ns);
         }
 
         if(_critical_trace)
