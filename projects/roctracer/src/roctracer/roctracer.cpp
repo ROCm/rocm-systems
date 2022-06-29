@@ -145,7 +145,7 @@ roctracer_stop_cb_t roctracer_stop_cb = nullptr;
 
 namespace util {
 
-uint64_t timestamp_ns() {
+roctracer_timestamp_t timestamp_ns() {
   uint64_t sysclock;
 
   hsa_status_t status = hsa_support::hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
@@ -320,7 +320,7 @@ void* HIP_SyncApiDataCallback(uint32_t op_id, roctracer_record_t* record, const 
 
 void* HIP_SyncActivityCallback(uint32_t op_id, roctracer_record_t* record,
                                const void* callback_data, void* arg) {
-  const uint64_t timestamp_ns = util::timestamp_ns();
+  const roctracer_timestamp_t timestamp_ns = util::timestamp_ns();
   void* ret = nullptr;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
   hip_api_data_t* data_ptr = const_cast<hip_api_data_t*>(data);
@@ -1171,7 +1171,7 @@ ROCTRACER_API void roctracer_stop() {
   }
 }
 
-ROCTRACER_API roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp) {
+ROCTRACER_API roctracer_status_t roctracer_get_timestamp(roctracer_timestamp_t* timestamp) {
   API_METHOD_PREFIX
   *timestamp = util::timestamp_ns();
   API_METHOD_SUFFIX

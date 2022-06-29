@@ -55,6 +55,9 @@ typedef enum { ACTIVITY_API_PHASE_ENTER = 0, ACTIVITY_API_PHASE_EXIT = 1 } activ
 /* Correlation id */
 typedef uint64_t activity_correlation_id_t;
 
+/* Timestamp in nanoseconds */
+typedef uint64_t roctracer_timestamp_t;
+
 /* Activity record type */
 typedef struct activity_record_s {
   uint32_t domain;      /* activity domain id */
@@ -63,8 +66,8 @@ typedef struct activity_record_s {
   union {
     struct {
       activity_correlation_id_t correlation_id; /* activity ID */
-      uint64_t begin_ns;                        /* host begin timestamp */
-      uint64_t end_ns;                          /* host end timestamp */
+      roctracer_timestamp_t begin_ns;                        /* host begin timestamp */
+      roctracer_timestamp_t end_ns;                          /* host end timestamp */
     };
     struct {
       uint32_t se;    /* sampled SE */

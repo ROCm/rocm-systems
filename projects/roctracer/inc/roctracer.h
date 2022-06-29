@@ -802,7 +802,7 @@ ROCTRACER_API roctracer_status_t roctracer_flush_activity() ROCTRACER_VERSION_4_
  * @retval ::ROCTRACER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-ROCTRACER_API roctracer_status_t roctracer_get_timestamp(uint64_t* timestamp) ROCTRACER_VERSION_4_1;
+ROCTRACER_API roctracer_status_t roctracer_get_timestamp(roctracer_timestamp_t* timestamp) ROCTRACER_VERSION_4_1;
 
 /** @} */
 

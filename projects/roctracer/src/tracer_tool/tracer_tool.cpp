@@ -82,14 +82,13 @@ inline static void DEBUG_TRACE(const char* fmt, ...) {
 #define DEBUG_TRACE(...)
 #endif
 
-typedef uint64_t timestamp_t;
-thread_local timestamp_t hsa_begin_timestamp = 0;
-thread_local timestamp_t hip_begin_timestamp = 0;
+thread_local roctracer_timestamp_t hsa_begin_timestamp = 0;
+thread_local roctracer_timestamp_t hip_begin_timestamp = 0;
 
 namespace util {
 
-inline timestamp_t timestamp_ns() {
-  timestamp_t timestamp;
+inline roctracer_timestamp_t timestamp_ns() {
+  roctracer_timestamp_t timestamp;
   CHECK_ROCTRACER(roctracer_get_timestamp(&timestamp));
   return timestamp;
 }
@@ -191,7 +190,7 @@ void flush_thr_fun() {
 struct roctx_trace_entry_t {
   std::atomic<roctracer::TraceEntryState> valid;
   uint32_t cid;
-  timestamp_t time;
+  roctracer_timestamp_t time;
   uint32_t pid;
   uint32_t tid;
   roctx_range_id_t rid;
@@ -237,8 +236,8 @@ void roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data
 struct hsa_api_trace_entry_t {
   std::atomic<uint32_t> valid;
   uint32_t cid;
-  timestamp_t begin;
-  timestamp_t end;
+  roctracer_timestamp_t begin;
+  roctracer_timestamp_t end;
   uint32_t pid;
   uint32_t tid;
   hsa_api_data_t data;
@@ -263,7 +262,7 @@ void hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     hsa_begin_timestamp = util::timestamp_ns();
   } else {
-    const timestamp_t end_timestamp =
+    const roctracer_timestamp_t end_timestamp =
         (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp : util::timestamp_ns();
     hsa_api_trace_entry_t* entry = hsa_api_trace_buffer.GetEntry();
     entry->cid = cid;
@@ -283,8 +282,8 @@ struct hip_api_trace_entry_t {
   std::atomic<uint32_t> valid;
   uint32_t domain;
   uint32_t cid;
-  timestamp_t begin;
-  timestamp_t end;
+  roctracer_timestamp_t begin;
+  roctracer_timestamp_t end;
   uint32_t pid;
   uint32_t tid;
   hip_api_data_t data;
@@ -307,8 +306,8 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
   const uint32_t cid = entry->cid;
   const hip_api_data_t* data = &(entry->data);
   const uint64_t correlation_id = data->correlation_id;
-  const timestamp_t begin_timestamp = entry->begin;
-  const timestamp_t end_timestamp = entry->end;
+  const roctracer_timestamp_t begin_timestamp = entry->begin;
+  const roctracer_timestamp_t end_timestamp = entry->end;
   std::ostringstream rec_ss;
   std::ostringstream oss;
 
@@ -346,7 +345,7 @@ roctracer::TraceBuffer<hip_api_trace_entry_t> hip_api_trace_buffer("HIP API", 0x
 void hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg) {
   (void)arg;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
-  const timestamp_t timestamp = util::timestamp_ns();
+  const roctracer_timestamp_t timestamp = util::timestamp_ns();
   hip_api_trace_entry_t* entry = NULL;
 
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
@@ -423,7 +422,7 @@ void mark_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
   (void)arg;
   const char* name = reinterpret_cast<const char*>(callback_data);
 
-  const timestamp_t timestamp = util::timestamp_ns();
+  const roctracer_timestamp_t timestamp = util::timestamp_ns();
   hip_api_trace_entry_t* entry = hip_api_trace_buffer.GetEntry();
   entry->cid = 0;
   entry->domain = domain;
@@ -443,7 +442,7 @@ void mark_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
 struct hip_act_trace_entry_t {
   std::atomic<uint32_t> valid;
   uint32_t kind;
-  timestamp_t dur;
+  roctracer_timestamp_t dur;
   uint64_t correlation_id;
 };
 
@@ -838,7 +837,7 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 
   // App begin timestamp begin_ts_file.txt
   begin_ts_file_handle = open_output_file(output_prefix, "begin_ts_file.txt");
-  const timestamp_t app_start_time = util::timestamp_ns();
+  const roctracer_timestamp_t app_start_time = util::timestamp_ns();
   fprintf(begin_ts_file_handle, "%lu\n", app_start_time);
 
   // Enable HSA API callbacks/activity

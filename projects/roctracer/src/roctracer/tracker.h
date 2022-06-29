@@ -48,8 +48,8 @@ class Tracker {
     std::atomic<uint32_t> valid;
     entry_type_t type;
     uint64_t correlation_id;
-    uint64_t begin;  // begin timestamp, ns
-    uint64_t end;    // end timestamp, ns
+    roctracer_timestamp_t begin;  // begin timestamp, ns
+    roctracer_timestamp_t end;    // end timestamp, ns
     hsa_agent_t agent;
     uint32_t dev_index;
     hsa_signal_t orig;
@@ -96,7 +96,7 @@ class Tracker {
  private:
   // Entry completion
   inline static void Complete(hsa_signal_value_t signal_value, entry_t* entry) {
-    static uint64_t sysclock_period = []() {
+    static roctracer_timestamp_t sysclock_period = []() {
       uint64_t sysclock_hz = 0;
       hsa_status_t status = hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
       if (status != HSA_STATUS_SUCCESS) FATAL_LOGGING("hsa_system_get_info failed");
