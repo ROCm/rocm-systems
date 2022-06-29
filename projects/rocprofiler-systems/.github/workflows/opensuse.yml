@@ -1,10 +1,14 @@
-name: opensuse
+name: OpenSUSE 15.2, 15.3 (Python)
 
 on:
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   BUILD_TYPE: Release

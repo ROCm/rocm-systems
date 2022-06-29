@@ -1,10 +1,14 @@
-name: ubuntu-bionic
+name: Ubuntu 18.04 (GCC, MPICH, Python)
 
 on:
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   BUILD_TYPE: Release

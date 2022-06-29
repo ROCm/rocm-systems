@@ -5,6 +5,10 @@ on:
     branches: [releases/**]
     tags: []
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
