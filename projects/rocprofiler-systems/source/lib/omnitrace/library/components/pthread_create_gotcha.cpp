@@ -29,10 +29,9 @@
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
-#include "timemory/components/timing/wall_clock.hpp"
 
-#include <bits/stdint-intn.h>
 #include <timemory/backends/threading.hpp>
+#include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/utility/types.hpp>
 
@@ -203,6 +202,7 @@ void
 pthread_create_gotcha::configure()
 {
     pthread_create_gotcha_t::get_initializer() = []() {
+        if(!tim::settings::enabled()) return;
         pthread_create_gotcha_t::template configure<
             0, int, pthread_t*, const pthread_attr_t*, void* (*) (void*), void*>(
             "pthread_create");
@@ -257,6 +257,12 @@ pthread_create_gotcha::shutdown(int64_t _tid)
     }
 }
 
+void
+pthread_create_gotcha::set_data(wrappee_t _v)
+{
+    m_wrappee = _v;
+}
+
 // pthread_create
 int
 pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
@@ -282,8 +288,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     {
         auto* _obj = new wrapper(start_routine, arg, _enable_sampling, _tid, nullptr);
         // create the thread
-        auto _ret =
-            ::pthread_create(thread, attr, &wrapper::wrap, static_cast<void*>(_obj));
+        auto _ret = (*m_wrappee)(thread, attr, &wrapper::wrap, static_cast<void*>(_obj));
         return _ret;
     }
 
@@ -300,7 +305,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto* _wrap    = new wrapper(start_routine, arg, _enable_sampling, _tid, &_promise);
 
     // create the thread
-    auto _ret = ::pthread_create(thread, attr, &wrapper::wrap, static_cast<void*>(_wrap));
+    auto _ret = (*m_wrappee)(thread, attr, &wrapper::wrap, static_cast<void*>(_wrap));
 
     // wait for thread to set promise
     OMNITRACE_DEBUG("waiting for child to signal it is setup...\n");

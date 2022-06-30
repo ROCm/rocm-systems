@@ -61,6 +61,7 @@ bool _init_toolset_off = (trait::runtime_enabled<ompt_toolset_t>::set(false),
 void
 setup()
 {
+    if(!tim::settings::enabled()) return;
     trait::runtime_enabled<ompt_toolset_t>::set(true);
     trait::runtime_enabled<ompt_context_t>::set(true);
     comp::user_ompt_bundle::global_init();

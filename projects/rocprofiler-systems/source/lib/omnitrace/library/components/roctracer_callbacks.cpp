@@ -854,6 +854,13 @@ hip_activity_callback(const char* begin, const char* end, void*)
 }
 
 bool&
+roctracer_is_init()
+{
+    static bool _v = tim::get_env("OMNITRACE_ROCTRACER_IS_INIT", false);
+    return _v;
+}
+
+bool&
 roctracer_is_setup()
 {
     static bool _v = false;
@@ -892,7 +899,9 @@ extern "C"
                 const char* const* failed_tool_names)
     {
         if(!tim::get_env("OMNITRACE_INIT_TOOLING", true)) return true;
+        if(!tim::settings::enabled()) return true;
 
+        roctracer_is_init() = true;
         pthread_gotcha::push_enable_sampling_on_child_threads(false);
         OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug_env() || get_verbose_env() > 0,
                                             "\n");

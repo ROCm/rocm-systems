@@ -34,9 +34,11 @@ namespace omnitrace
 {
 struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
 {
+    using routine_t = void* (*) (void*);
+    using wrappee_t = int (*)(pthread_t*, const pthread_attr_t*, routine_t, void*);
+
     struct wrapper
     {
-        using routine_t = void* (*) (void*);
         using promise_t = std::promise<void>;
 
         wrapper(routine_t _routine, void* _arg, bool, int64_t, promise_t*);
@@ -68,6 +70,11 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
 
     static auto& get_execution_time(int64_t _tid = threading::get_id());
     static bool  is_valid_execution_time(int64_t _tid, uint64_t _ts);
+
+    void set_data(wrappee_t);
+
+private:
+    wrappee_t m_wrappee = &pthread_create;
 };
 
 inline auto&

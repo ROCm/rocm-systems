@@ -604,6 +604,22 @@ configure_mode_settings()
     // recycle all subsequent thread ids
     threading::recycle_ids() =
         tim::get_env<bool>("OMNITRACE_RECYCLE_TIDS", !get_use_sampling());
+
+    if(!get_config()->get_enabled())
+    {
+        _set("OMNITRACE_USE_PERFETTO", false);
+        _set("OMNITRACE_USE_TIMEMORY", false);
+        _set("OMNITRACE_USE_ROCM_SMI", false);
+        _set("OMNITRACE_USE_ROCTRACER", false);
+        _set("OMNITRACE_USE_KOKKOSP", false);
+        _set("OMNITRACE_USE_OMPT", false);
+        _set("OMNITRACE_USE_SAMPLING", false);
+        _set("OMNITRACE_USE_PROCESS_SAMPLING", false);
+        _set("OMNITRACE_USE_CODE_COVERAGE", false);
+        _set("OMNITRACE_CRITICAL_TRACE", false);
+        set_setting_value("OMNITRACE_TIMEMORY_COMPONENTS", std::string{});
+        set_setting_value("OMNITRACE_PAPI_EVENTS", std::string{});
+    }
 }
 
 void
