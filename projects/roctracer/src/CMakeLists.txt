@@ -104,7 +104,7 @@ set(PUBLIC_HEADERS
 
 foreach(header ${PUBLIC_HEADERS})
   get_filename_component(header_subdir ${header} DIRECTORY)
-  install(FILES ${PROJECT_SOURCE_DIR}/inc/${header} DESTINATION include/${ROCTRACER_NAME}/${header_subdir})
+  install(FILES ${PROJECT_SOURCE_DIR}/inc/${header} DESTINATION include/${PROJECT_NAME}/${header_subdir})
 endforeach()
 
 set(GENERATED_HEADERS
@@ -113,7 +113,7 @@ set(GENERATED_HEADERS
   hsa_ostream_ops.h)
 
 foreach(header ${GENERATED_HEADERS})
-  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${header} DESTINATION include/${ROCTRACER_NAME})
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${header} DESTINATION include/${PROJECT_NAME})
 endforeach()
 
 ## Build the ROCtracer library
@@ -125,8 +125,8 @@ set_target_properties(roctracer PROPERTIES
                       OUTPUT_NAME "roctracer64"
                       DEFINE_SYMBOL "ROCTRACER_EXPORTS"
                       LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/roctracer/exportmap
-                      VERSION ${ROCTRACER_VERSION}
-                      SOVERSION ${ROCTRACER_VERSION_MAJOR})
+                      VERSION ${PROJECT_VERSION}
+                      SOVERSION ${PROJECT_VERSION_MAJOR})
 
 target_compile_definitions(roctracer
   PUBLIC AMD_INTERNAL_BUILD
@@ -154,8 +154,8 @@ set_target_properties(roctx PROPERTIES
                       OUTPUT_NAME "roctx64"
                       DEFINE_SYMBOL "ROCTX_EXPORTS"
                       LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/roctx/exportmap
-                      VERSION ${ROCTRACER_VERSION}
-                      SOVERSION ${ROCTRACER_VERSION_MAJOR})
+                      VERSION ${PROJECT_VERSION}
+                      SOVERSION ${PROJECT_VERSION_MAJOR})
 
 target_include_directories(roctx
   PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/inc>
@@ -186,12 +186,13 @@ target_include_directories(roctracer_tool
 target_link_libraries(roctracer_tool roctracer hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl)
 target_link_options(roctracer_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/tracer_tool/exportmap -Wl,--no-undefined)
 
-install(TARGETS roctracer_tool LIBRARY DESTINATION lib/${ROCTRACER_NAME})
+install(TARGETS roctracer_tool LIBRARY DESTINATION lib/${PROJECT_NAME})
 
 add_library(hip_stats SHARED hip_stats/hip_stats.cpp)
 target_compile_definitions(hip_stats PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(hip_stats roctracer stdc++fs)
-install(TARGETS hip_stats LIBRARY DESTINATION lib/${ROCTRACER_NAME})
+install(TARGETS hip_stats LIBRARY DESTINATION lib/${PROJECT_NAME})
+
 endif()
 
 option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)

@@ -22,14 +22,12 @@
 
 cmake_minimum_required(VERSION 3.18.0)
 
-project(ROCTRACER VERSION 4.1.0)
+project(roctracer VERSION 4.1.0)
+
 # set default ROCM_PATH
 if(NOT DEFINED ROCM_PATH)
     set(ROCM_PATH "/opt/rocm"  CACHE STRING "Default ROCM installation directory")
 endif()
-
-## Set module name
-string(TOLOWER "${CMAKE_PROJECT_NAME}" ROCTRACER_NAME)
 
 ## Build is not supported on Windows plaform
 if(WIN32)
@@ -74,11 +72,11 @@ message("-----------CPACK-dir: ${CPACK_PACKAGING_INSTALL_PREFIX}")
 ## Packaging directives
 set(CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR DEB;RPM")
 set(ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
-set(CPACK_PACKAGE_NAME "${ROCTRACER_NAME}-dev")
+set(CPACK_PACKAGE_NAME "${PROJECT_NAME}-dev")
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
-set(CPACK_PACKAGE_VERSION_MAJOR ${ROCTRACER_VERSION_MAJOR})
-set(CPACK_PACKAGE_VERSION_MINOR ${ROCTRACER_VERSION_MINOR})
-set(CPACK_PACKAGE_VERSION_PATCH ${ROCTRACER_VERSION_PATCH})
+set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
 set(CPACK_PACKAGE_CONTACT "ROCm Profiler Support <dl.ROCm-Profiler.support@amd.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD ROCTRACER library")
@@ -90,7 +88,7 @@ if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
 endif()
 
 ## Install license file
-install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION share/doc/${ROCTRACER_NAME})
+install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION share/doc/${PROJECT_NAME})
 
 ## Debian package specific variables
 if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
@@ -157,12 +155,12 @@ if(DOXYGEN_FOUND)
 
   install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/doc/latex/refman.pdf"
-    DESTINATION share/doc/roctracer
+    DESTINATION share/doc/${PROJECT_NAME}
     RENAME "roctracer.pdf"
     OPTIONAL)
 
   install(DIRECTORY
     "${CMAKE_CURRENT_BINARY_DIR}/doc/html/"
-    DESTINATION share/html/roctracer
+    DESTINATION share/html/${PROJECT_NAME}
     OPTIONAL)
 endif()
