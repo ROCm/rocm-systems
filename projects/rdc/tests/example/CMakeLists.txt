@@ -1,15 +1,15 @@
 # Copyright (c) 2019 - present Advanced Micro Devices, Inc. All rights reserved.
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
@@ -17,11 +17,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-
-#
-# Minimum version of cmake required
-#
-cmake_minimum_required(VERSION 3.5.0)
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                       Cmake Example Lib                           ")
@@ -33,11 +28,11 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2 -std=c++11 ")
 # Use this instead of above for 32 bit
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
 
-if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
-else ()
+else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
-endif ()
+endif()
 
 # Required Defines first:
 
@@ -73,8 +68,8 @@ set(TEST_CLIENT_EXE "rdc_test_client")
 add_executable(${TEST_CLIENT_EXE} "${EXAMPLE_SRC_LIST}")
 
 target_include_directories(${TEST_CLIENT_EXE} PRIVATE
-                            "${CMAKE_CURRENT_SOURCE_DIR}/../../client/include"
-                            "${RSMI_INC_DIR}")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../client/include"
+    "${RSMI_INC_DIR}")
 
 target_link_libraries(${TEST_CLIENT_EXE} rdc_client)
 

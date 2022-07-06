@@ -1,0 +1,17 @@
+# EditorConfig standardizes spacing in all editors: https://EditorConfig.org
+# Please get a plugin for your editor to match the formatting
+
+# top-most EditorConfig file
+root = true
+
+# Unix-style newlines with a newline ending every file and no stray whitespaces
+[*]
+end_of_line = lf
+trim_trailing_whitespace = true
+
+# Matches multiple files with brace expansion notation
+# Set default charset
+[*.{c,cc,cpp,h,hh,hpp}]
+charset = utf-8
+indent_style = space
+indent_size = 4

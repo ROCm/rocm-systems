@@ -18,11 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-#
-# Minimum version of cmake required
-#
-cmake_minimum_required(VERSION 3.5.0)
-
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                             Cmake Example                                 ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
@@ -40,25 +35,17 @@ message("--------RSMI Lib Dir: " ${RSMI_LIB_DIR})
 message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
 message("")
 
-set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
-                   CACHE STRING "Location of RDC example library source code.")
-# set(CMAKE_INSTALL_PREFIX "/"
-#                                CACHE STRING "Default installation directory.")
-# set(CPACK_PACKAGING_INSTALL_PREFIX "/"
-#                                      CACHE STRING "Default packaging prefix.")
-#
-
 ## Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2 -std=c++11 -pthread ")
 # Use this instead of above for 32 bit
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
 
-if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
-else ()
+else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
-endif ()
+endif()
 
 set(SRC_DIR "${PROJECT_SOURCE_DIR}/example")
 set(INC_DIR "${PROJECT_SOURCE_DIR}/include")

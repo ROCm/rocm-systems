@@ -21,10 +21,11 @@ THE SOFTWARE.
 */
 #include <assert.h>
 
+#include <gtest/gtest.h>
+
 #include "rocm_smi/rocm_smi.h"
 #include "rdc_tests/test_base.h"
 #include "rdc_tests/test_common.h"
-#include "gtest/gtest.h"
 
 static const int kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";

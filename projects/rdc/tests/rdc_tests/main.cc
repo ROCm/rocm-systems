@@ -28,7 +28,8 @@ THE SOFTWARE.
 #include <iostream>
 #include <fstream>
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
+
 #include "rdc/rdc.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rdc_tests/test_common.h"

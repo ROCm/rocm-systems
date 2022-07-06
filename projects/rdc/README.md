@@ -42,7 +42,7 @@ The following tools are required for gRPC build & installation
 
  Download and build gRPC
 
-    $ git clone -b v1.28.1 https://github.com/grpc/grpc
+    $ git clone -b v1.44.0 https://github.com/grpc/grpc
     $ cd grpc
     $ git submodule update --init
     $ mkdir -p cmake/build
