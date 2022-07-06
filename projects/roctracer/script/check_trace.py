@@ -279,7 +279,8 @@ def gen_events_info(tracefile, trace_level, no_events_cnt, events2ignore, events
         if event in events_count:
           events_count[event] = events_count[event] + 1
         else:
-          events_count[event] = 1
+          if not re.search(re_no_events_cnt,event):
+            events_count[event] = 1
 
       if metric == 'or' and re.search(re_events2chkord,event):
         if tid in events_order.keys():
