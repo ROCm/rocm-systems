@@ -22,7 +22,6 @@
 
 #include "correlation_id.h"
 #include "exception.h"
-#include "loader.h"
 #include "memory_pool.h"
 #include "roctracer.h"
 #include "roctracer_hsa.h"
@@ -355,13 +354,6 @@ hsa_status_t MemoryASyncCopyRectIntercept(const hsa_pitched_ptr_t* dst,
   return status;
 }
 
-void AsyncActivityCallback(uint32_t op_id, void* record, void* arg) {
-  MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
-  roctracer_record_t* record_ptr = reinterpret_cast<roctracer_record_t*>(record);
-  record_ptr->domain = ACTIVITY_DOMAIN_HSA_OPS;
-  pool->Write(*record_ptr);
-}
-
 }  // namespace
 
 roctracer_timestamp_t timestamp_ns() {
@@ -481,11 +473,23 @@ const char* GetEvtName(uint32_t id) {
       return "CODEOBJ";
     case HSA_EVT_ID_NUMBER:
       break;
-  };
+  }
   throw ApiError(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT, "invalid HSA EVT callback id");
 }
 
-const char* GetOpsName(uint32_t id) { return RocpLoader::Instance().GetOpName(id); }
+const char* GetOpsName(uint32_t id) {
+  switch (id) {
+    case HSA_OP_ID_DISPATCH:
+      return "DISPATCH";
+    case HSA_OP_ID_COPY:
+      return "COPY";
+    case HSA_OP_ID_BARRIER:
+      return "BARRIER";
+    case HSA_OP_ID_RESERVED1:
+      return "PCSAMPLE";
+  }
+  throw ApiError(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT, "invalid HSA OPS callback id");
+}
 
 uint32_t GetApiCode(const char* str) { return detail::GetApiCode(str); }
 
@@ -502,15 +506,11 @@ void EnableActivity(roctracer_domain_t domain, uint32_t op, roctracer_pool_t* po
         }
         async_copy_callback_enabled = true;
         async_copy_callback_memory_pool = reinterpret_cast<MemoryPool*>(pool);
+      } else if (op == HSA_OP_ID_RESERVED1) {
+        /* Place holder for PC sampling. */
       } else {
-        const bool init_phase = (RocpLoader::GetRef() == nullptr);
-        if (RocpLoader::GetRef() == nullptr) break;
-        if (init_phase) {
-          RocpLoader::Instance().InitActivityCallback(
-              reinterpret_cast<void*>(AsyncActivityCallback), pool);
-        }
-        if (!RocpLoader::Instance().EnableActivityCallback(op, true))
-          FATAL_LOGGING("HSA::EnableActivityCallback error");
+        EXC_RAISING(ROCTRACER_STATUS_ERROR_NOT_IMPLEMENTED,
+                    "HSA OPS operation ID(" << op << ") is not currently implemented");
       }
       break;
     case ACTIVITY_DOMAIN_HSA_API:
@@ -562,10 +562,11 @@ void DisableActivity(roctracer_domain_t domain, uint32_t op) {
           assert(status == HSA_STATUS_SUCCESS || status == HSA_STATUS_ERROR_NOT_INITIALIZED ||
                  !"hsa_amd_profiling_async_copy_enable failed");
         }
+      } else if (op == HSA_OP_ID_RESERVED1) {
+        /* Place holder for PC sampling. */
       } else {
-        if (RocpLoader::GetRef() != nullptr &&
-            !RocpLoader::Instance().EnableActivityCallback(op, false))
-          FATAL_LOGGING("HSA::EnableActivityCallback(false) error, op(" << op << ")");
+        EXC_RAISING(ROCTRACER_STATUS_ERROR_NOT_IMPLEMENTED,
+                    "HSA OPS operation ID(" << op << ") is not currently implemented");
       }
       break;
     case ACTIVITY_DOMAIN_HSA_API:

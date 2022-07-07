@@ -515,7 +515,6 @@ static void roctracer_enable_activity_fun(roctracer_domain_t domain, uint32_t op
   assert(pool != nullptr);
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS:
-      RocpLoader::Instance();
     case ACTIVITY_DOMAIN_HSA_API:
     case ACTIVITY_DOMAIN_HSA_EVT:
       hsa_support::EnableActivity(domain, op, pool);
@@ -572,8 +571,11 @@ ROCTRACER_API roctracer_status_t roctracer_enable_op_activity(activity_domain_t 
 static void roctracer_enable_domain_activity_impl(roctracer_domain_t domain,
                                                   roctracer_pool_t* pool) {
   const uint32_t op_end = get_op_end(domain);
-  for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
-    roctracer_enable_activity_impl(domain, op, pool);
+  for (uint32_t op = get_op_begin(domain); op < op_end; ++op) try {
+      roctracer_enable_activity_impl(domain, op, pool);
+    } catch (const ApiError& err) {
+      if (err.status() != ROCTRACER_STATUS_ERROR_NOT_IMPLEMENTED) throw;
+    }
 }
 
 ROCTRACER_API roctracer_status_t roctracer_enable_domain_activity_expl(roctracer_domain_t domain,
@@ -637,11 +639,18 @@ ROCTRACER_API roctracer_status_t roctracer_disable_op_activity(roctracer_domain_
   API_METHOD_SUFFIX
 }
 
+static void roctracer_disable_domain_activity_impl(roctracer_domain_t domain) {
+  const uint32_t op_end = get_op_end(domain);
+  for (uint32_t op = get_op_begin(domain); op < op_end; ++op) try {
+      roctracer_disable_activity_impl(domain, op);
+    } catch (const ApiError& err) {
+      if (err.status() != ROCTRACER_STATUS_ERROR_NOT_IMPLEMENTED) throw;
+    }
+}
+
 ROCTRACER_API roctracer_status_t roctracer_disable_domain_activity(roctracer_domain_t domain) {
   API_METHOD_PREFIX
-  const uint32_t op_end = get_op_end(domain);
-  for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
-    roctracer_disable_activity_impl(domain, op);
+  roctracer_disable_domain_activity_impl(domain);
   API_METHOD_SUFFIX
 }
 

@@ -29,6 +29,14 @@
  *
  * The API provides functionality for registering the runtimes API callbacks
  * and asynchronous activity records pool support.
+ *
+ * \section known_limitations Known Limitations and Restrictions
+ *
+ * The ROCtracer API library implementation currently has the following
+ * restrictions.  Future releases aim to address these restrictions.
+ *
+ * 1. The ACTIVITY_DOMAIN_HSA_OPS operations HSA_OP_ID_DISPATCH,
+ *    HSA_OP_ID_BARRIER, and HSA_OP_ID_RESERVED1 are not currently implemented.
  */
 
 /**
@@ -191,6 +199,12 @@ typedef enum {
    * External correlation ID pop mismatch.
    */
   ROCTRACER_STATUS_ERROR_MISMATCHED_EXTERNAL_CORRELATION_ID = -7,
+  /**
+   * The operation is not currently implemented.  This error may be reported by
+   * any function.  Check the \ref known_limitations section to determine the
+   * status of the library implementation of the interface.
+   */
+  ROCTRACER_STATUS_ERROR_NOT_IMPLEMENTED = -8,
   /**
    * Deprecated error code.
    */

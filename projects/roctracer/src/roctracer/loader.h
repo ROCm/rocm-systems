@@ -99,41 +99,6 @@ template <class T> class BaseLoader : public T {
   void* handle_;
 };
 
-// ROCprofiler library loader class
-class RocpApi {
- public:
-  typedef BaseLoader<RocpApi> Loader;
-
-  typedef bool(RegisterCallback_t)(uint32_t op, void* callback, void* arg);
-  typedef bool(OperateCallback_t)(uint32_t op);
-  typedef bool(InitCallback_t)(void* callback, void* arg);
-  typedef bool(EnableCallback_t)(uint32_t op, bool enable);
-  typedef const char*(NameCallback_t)(uint32_t op);
-
-  RegisterCallback_t* RegisterApiCallback;
-  OperateCallback_t* RemoveApiCallback;
-  InitCallback_t* InitActivityCallback;
-  EnableCallback_t* EnableActivityCallback;
-  NameCallback_t* GetOpName;
-
-  RegisterCallback_t* RegisterEvtCallback;
-  OperateCallback_t* RemoveEvtCallback;
-  NameCallback_t* GetEvtName;
-
- protected:
-  void init(Loader* loader) {
-    RegisterApiCallback = loader->GetFun<RegisterCallback_t>("RegisterApiCallback");
-    RemoveApiCallback = loader->GetFun<OperateCallback_t>("RemoveApiCallback");
-    InitActivityCallback = loader->GetFun<InitCallback_t>("InitActivityCallback");
-    EnableActivityCallback = loader->GetFun<EnableCallback_t>("EnableActivityCallback");
-    GetOpName = loader->GetFun<NameCallback_t>("GetOpName");
-
-    RegisterEvtCallback = loader->GetFun<RegisterCallback_t>("RegisterEvtCallback");
-    RemoveEvtCallback = loader->GetFun<OperateCallback_t>("RemoveEvtCallback");
-    GetEvtName = loader->GetFun<NameCallback_t>("GetEvtName");
-  }
-};
-
 }  // namespace roctracer
 
 // HIP runtime library loader class
@@ -308,7 +273,6 @@ class RocTxApi {
   }
 };
 
-typedef BaseLoader<RocpApi> RocpLoader;
 typedef BaseLoader<RocTxApi> RocTxLoader;
 
 #if STATIC_BUILD
@@ -326,8 +290,6 @@ typedef HipLoaderShared HipLoader;
   template <class T> bool roctracer::BaseLoader<T>::to_load_ = false;                              \
   template <class T> bool roctracer::BaseLoader<T>::to_check_open_ = true;                         \
   template <class T> bool roctracer::BaseLoader<T>::to_check_symb_ = true;                         \
-  template <> const char* roctracer::RocpLoader::lib_name_ = "librocprofiler64.so";                \
-  template <> bool roctracer::RocpLoader::to_load_ = true;                                         \
   template <> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so";                     \
   template <> bool roctracer::RocTxLoader::to_load_ = true;
 
