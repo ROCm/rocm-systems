@@ -138,14 +138,57 @@ void fatal(const std::string msg) {
   fflush(stderr);
   abort();
 }
-
+/* The function extracts the kernel name from
+input string. By using the iterators it finds the
+window in the string which contains only the kernel name.
+For example 'Foo<int, float>::foo(a[], int (int))' -> 'foo'*/
+std::string truncate_name(const std::string& name) {
+  auto rit = name.rbegin();
+  auto rend = name.rend();
+  uint32_t counter = 0;
+  char open_token = 0;
+  char close_token = 0;
+  while (rit != rend) {
+    if (counter == 0) {
+      switch (*rit) {
+        case ')':
+          counter = 1;
+          open_token = ')';
+          close_token = '(';
+          break;
+        case '>':
+          counter = 1;
+          open_token = '>';
+          close_token = '<';
+          break;
+        case ']':
+          counter = 1;
+          open_token = ']';
+          close_token = '[';
+          break;
+        case ' ':
+          ++rit;
+          continue;
+      }
+      if (counter == 0) break;
+    } else {
+      if (*rit == open_token) counter++;
+      if (*rit == close_token) counter--;
+    }
+    ++rit;
+  }
+  auto rbeg = rit;
+  while ((rit != rend) && (*rit != ' ') && (*rit != ':')) rit++;
+  return name.substr(rend - rit, rit - rbeg);
+}
 // C++ symbol demangle
-static inline const char* cxx_demangle(const char* symbol) {
-  size_t funcnamesize;
+static inline std::string cxx_demangle(const std::string& symbol) {
   int status;
-  const char* ret =
-      (symbol != NULL) ? abi::__cxa_demangle(symbol, NULL, &funcnamesize, &status) : symbol;
-  return (ret != NULL) ? ret : strdup(symbol);
+  char* demangled = abi::__cxa_demangle(symbol.c_str(), nullptr, nullptr, &status);
+  if (status != 0) return symbol;
+  std::string ret(demangled);
+  free(demangled);
+  return ret;
 }
 
 // Tracing control thread
@@ -327,7 +370,8 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
     const char* str = hipApiString((hip_api_id_t)cid, data);
     rec_ss << " " << str;
     if (is_hip_kernel_launch_api(cid) && entry->name) {
-      const char* kernel_name = cxx_demangle(entry->name);
+      std::string kernel_name(cxx_demangle(entry->name));
+      if (std::atoi(getenv("ROCP_TRUNCATE_NAMES")) != 0) kernel_name = truncate_name(kernel_name);
       rec_ss << " kernel=" << kernel_name;
     }
     rec_ss << " :" << correlation_id;
