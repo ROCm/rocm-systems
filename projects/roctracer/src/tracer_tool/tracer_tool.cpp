@@ -32,7 +32,9 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <stack>
 #include <utility>
+#include <vector>
 #include <variant>
 
 #include <cxxabi.h> /* kernel name demangling */
@@ -72,8 +74,8 @@ void warning(const std::string& msg) { std::cerr << msg << std::endl; }
   abort();
 }
 
-thread_local roctracer_timestamp_t hsa_begin_timestamp = 0;
-thread_local roctracer_timestamp_t hip_begin_timestamp = 0;
+thread_local std::stack<roctracer_timestamp_t, std::vector<roctracer_timestamp_t>>
+    hsa_begin_timestamp, hip_begin_timestamp;
 
 inline roctracer_timestamp_t timestamp_ns() {
   roctracer_timestamp_t timestamp;
@@ -275,13 +277,14 @@ void hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
   (void)arg;
   const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    hsa_begin_timestamp = timestamp_ns();
+    hsa_begin_timestamp.push(timestamp_ns());
   } else {
     const roctracer_timestamp_t end_timestamp =
-        (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp : timestamp_ns();
+        (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp.top() : timestamp_ns();
     hsa_api_trace_entry_t& entry = hsa_api_trace_buffer.Emplace(
-        cid, hsa_begin_timestamp, end_timestamp, GetPid(), GetTid(), *data);
+        cid, hsa_begin_timestamp.top(), end_timestamp, GetPid(), GetTid(), *data);
     entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+    hsa_begin_timestamp.pop();
   }
 }
 
@@ -412,15 +415,16 @@ void hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
   std::optional<std::string> kernel_name;
 
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    hip_begin_timestamp = timestamp;
+    hip_begin_timestamp.push(timestamp);
   } else {
     // Post init of HIP APU args
     hipApiArgsInit((hip_api_id_t)cid, const_cast<hip_api_data_t*>(data));
     kernel_name = getKernelName(cid, data);
     hip_api_trace_entry_t& entry =
-        hip_api_trace_buffer.Emplace(cid, hip_begin_timestamp, timestamp, GetPid(), GetTid(), *data,
-                                     kernel_name ? kernel_name->c_str() : nullptr);
+        hip_api_trace_buffer.Emplace(cid, hip_begin_timestamp.top(), timestamp, GetPid(), GetTid(),
+                                     *data, kernel_name ? kernel_name->c_str() : nullptr);
     entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+    hip_begin_timestamp.pop();
   }
 }
 
