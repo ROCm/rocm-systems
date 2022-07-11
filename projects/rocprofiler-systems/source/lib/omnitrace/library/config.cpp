@@ -76,12 +76,14 @@ get_setting_name(std::string _v)
 #define OMNITRACE_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)        \
     [&]() {                                                                              \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
-            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, INITIAL_VALUE,            \
+            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, TYPE{ INITIAL_VALUE },    \
             std::set<std::string>{ "custom", "omnitrace", "libomnitrace",                \
                                    __VA_ARGS__ });                                       \
         if(!_ret.second)                                                                 \
+        {                                                                                \
             OMNITRACE_PRINT("Warning! Duplicate setting: %s / %s\n",                     \
                             get_setting_name(ENV_NAME).c_str(), ENV_NAME);               \
+        }                                                                                \
         return _config->find(ENV_NAME)->second;                                          \
     }()
 
@@ -89,11 +91,13 @@ get_setting_name(std::string _v)
 #define OMNITRACE_CONFIG_EXT_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)    \
     [&]() {                                                                              \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
-            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, INITIAL_VALUE,            \
+            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, TYPE{ INITIAL_VALUE },    \
             std::set<std::string>{ "custom", "omnitrace", __VA_ARGS__ });                \
         if(!_ret.second)                                                                 \
+        {                                                                                \
             OMNITRACE_PRINT("Warning! Duplicate setting: %s / %s\n",                     \
                             get_setting_name(ENV_NAME).c_str(), ENV_NAME);               \
+        }                                                                                \
         return _config->find(ENV_NAME)->second;                                          \
     }()
 
@@ -102,12 +106,14 @@ get_setting_name(std::string _v)
                                     CMD_LINE, ...)                                       \
     [&]() {                                                                              \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
-            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, INITIAL_VALUE,            \
+            ENV_NAME, get_setting_name(ENV_NAME), DESCRIPTION, TYPE{ INITIAL_VALUE },    \
             std::set<std::string>{ "custom", "omnitrace", "libomnitrace", __VA_ARGS__ }, \
             std::vector<std::string>{ CMD_LINE });                                       \
         if(!_ret.second)                                                                 \
+        {                                                                                \
             OMNITRACE_PRINT("Warning! Duplicate setting: %s / %s\n",                     \
                             get_setting_name(ENV_NAME).c_str(), ENV_NAME);               \
+        }                                                                                \
         return _config->find(ENV_NAME)->second;                                          \
     }()
 }  // namespace
@@ -182,7 +188,7 @@ configure_settings(bool _init)
         std::string, "OMNITRACE_MODE",
         "Data collection mode. Used to set default values for OMNITRACE_USE_* options. "
         "Typically set by omnitrace binary instrumenter.",
-        "trace", "backend");
+        std::string{ "trace" }, "backend");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CI",
                              "Enable some runtime validation checks (typically enabled "
@@ -247,7 +253,7 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_INSTRUMENTATION_INTERVAL",
                              "Instrumentation only takes measurements once every N "
                              "function calls (not statistical)",
-                             1, "instrumentation", "data_sampling");
+                             size_t{ 1 }, "instrumentation", "data_sampling");
 
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_SAMPLING_FREQ",
@@ -265,18 +271,19 @@ configure_settings(bool _init)
         "CPUs to collect frequency information for. Values should be separated by commas "
         "and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies 'all' and "
         "'none' suppresses all CPU frequency sampling",
-        "", "process_sampling");
+        std::string{}, "process_sampling");
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_ROCM_SMI_DEVICES",
-                             "[DEPRECATED] Renamed to OMNITRACE_SAMPLING_GPUS", "all",
-                             "rocm_smi", "rocm", "process_sampling", "deprecated");
+                             "[DEPRECATED] Renamed to OMNITRACE_SAMPLING_GPUS",
+                             std::string{ "all" }, "rocm_smi", "rocm", "process_sampling",
+                             "deprecated");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_SAMPLING_GPUS",
         "Devices to query when OMNITRACE_USE_ROCM_SMI=ON. Values should be separated by "
         "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies "
         "'all' and 'none' suppresses all GPU sampling",
-        "all", "rocm_smi", "rocm", "process_sampling");
+        std::string{ "all" }, "rocm_smi", "rocm", "process_sampling");
 
     auto _backend = tim::get_env_choice<std::string>(
         "OMNITRACE_PERFETTO_BACKEND",
@@ -342,11 +349,11 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB",
                              "Hint for shared-memory buffer size in perfetto (in KB)",
-                             4096, "perfetto", "data");
+                             size_t{ 4096 }, "perfetto", "data");
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_PERFETTO_BUFFER_SIZE_KB",
-                             "Size of perfetto buffer (in KB)", 1024000, "perfetto",
-                             "data");
+                             "Size of perfetto buffer (in KB)", size_t{ 1024000 },
+                             "perfetto", "data");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_PERFETTO_COMBINE_TRACES",
                              "Combine Perfetto traces. If not explicitly set, it will "
@@ -362,14 +369,14 @@ configure_settings(bool _init)
         ->set_choices({ "fill", "discard" });
 
     OMNITRACE_CONFIG_EXT_SETTING(int64_t, "OMNITRACE_CRITICAL_TRACE_COUNT",
-                                 "Number of critical trace to export (0 == all)", 0,
-                                 "data", "critical_trace", "omnitrace-critical-trace",
-                                 "perfetto");
+                                 "Number of critical trace to export (0 == all)",
+                                 int64_t{ 0 }, "data", "critical_trace",
+                                 "omnitrace-critical-trace", "perfetto");
 
     OMNITRACE_CONFIG_SETTING(uint64_t, "OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT",
                              "Number of critical trace records to store in thread-local "
                              "memory before submitting to shared buffer",
-                             2000, "data", "critical_trace");
+                             uint64_t{ 2000 }, "data", "critical_trace");
 
     OMNITRACE_CONFIG_SETTING(
         uint64_t, "OMNITRACE_CRITICAL_TRACE_NUM_THREADS",
@@ -379,8 +386,8 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_EXT_SETTING(
         int64_t, "OMNITRACE_CRITICAL_TRACE_PER_ROW",
-        "How many critical traces per row in perfetto (0 == all in one row)", 0, "io",
-        "critical_trace", "omnitrace-critical-trace", "perfetto");
+        "How many critical traces per row in perfetto (0 == all in one row)",
+        int64_t{ 0 }, "io", "critical_trace", "omnitrace-critical-trace", "perfetto");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_TIMEMORY_COMPONENTS",
@@ -388,10 +395,11 @@ configure_settings(bool _init)
         "wall_clock", "timemory", "component");
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_OUTPUT_FILE",
-                             "[DEPRECATED] See OMNITRACE_PERFETTO_FILE", "", "perfetto",
-                             "io", "filename", "deprecated");
+                             "[DEPRECATED] See OMNITRACE_PERFETTO_FILE", std::string{},
+                             "perfetto", "io", "filename", "deprecated");
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_PERFETTO_FILE", "Perfetto filename",
-                             "perfetto-trace.proto", "perfetto", "io", "filename");
+                             std::string{ "perfetto-trace.proto" }, "perfetto", "io",
+                             "filename");
 
     // set the defaults
     _config->get_flamegraph_output()     = false;

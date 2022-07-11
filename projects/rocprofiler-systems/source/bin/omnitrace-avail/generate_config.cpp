@@ -175,8 +175,7 @@ void pop(type_list<Tp...>)
             type_list<std::string>{}));
 }
 
-void
-update_choices();
+void update_choices(std::shared_ptr<settings>);
 
 void
 generate_config(std::string _config_file, const std::set<std::string>& _config_fmts,
@@ -184,7 +183,12 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 {
     custom_setting_serializer::options = _options;
 
-    _config_file   = settings::format(_config_file, settings::instance()->get_tag());
+    auto _settings = tim::settings::shared_instance();
+    tim::settings::push();
+    _settings->find("suppress_config")->second->reset();
+    _settings->find("suppress_parsing")->second->reset();
+
+    _config_file   = settings::format(_config_file, _settings->get_tag());
     bool _absolute = _config_file.at(0) == '/';
     auto _dirs     = tim::delimit(_config_file, "/\\/");
     _config_file   = _dirs.back();
@@ -211,7 +215,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         }
     }
 
-    update_choices();
+    update_choices(_settings);
 
     using json_t = cereal::PrettyJSONOutputArchive;
     using xml_t  = cereal::XMLOutputArchive;
@@ -221,8 +225,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
     static std::time_t _time{ std::time(nullptr) };
 
-    auto _serialize = [](auto&& _ar) {
-        auto _settings = settings::shared_instance();
+    auto _serialize = [_settings](auto&& _ar) {
         _ar->setNextName(TIMEMORY_PROJECT_NAME);
         _ar->startNode();
         (*_ar)(cereal::make_nvp("version", std::string{ OMNITRACE_VERSION_STRING }));
@@ -290,8 +293,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     if(_config_fmts.count("txt") > 0)
     {
         std::stringstream _ss{};
-        auto              _settings = settings::shared_instance();
-        size_t            _w        = min_width;
+        size_t            _w = min_width;
 
         std::vector<std::shared_ptr<tim::vsettings>> _data{};
         for(const auto& itr : *_settings)
@@ -327,6 +329,16 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                     if(_rhs->get_env_name().find(itr) == 0 &&
                        _lhs->get_env_name().find(itr) != 0)
                         return false;
+                }
+                for(const auto* itr :
+                    { "OMNITRACE_SUPPRESS_PARSING", "OMNITRACE_SUPPRESS_CONFIG" })
+                {
+                    if(_lhs->get_env_name().find(itr) == 0 &&
+                       _rhs->get_env_name().find(itr) != 0)
+                        return false;
+                    if(_rhs->get_env_name().find(itr) == 0 &&
+                       _lhs->get_env_name().find(itr) != 0)
+                        return true;
                 }
                 return _lhs->get_name() < _rhs->get_name();
             });
@@ -398,10 +410,12 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
 
     // restores the original serializer
     pop(type_list<json_t, xml_t>{});
+
+    tim::settings::pop();
 }
 
 void
-update_choices()
+update_choices(std::shared_ptr<settings> _settings)
 {
     std::vector<info_type> _info = get_component_info<TIMEMORY_NATIVE_COMPONENTS_END>();
 
@@ -431,7 +445,6 @@ update_choices()
     if(settings::verbose() >= 2 || settings::debug())
         printf("[omnitrace-avail] # of component choices: %zu\n",
                _component_choices.size());
-    settings::shared_instance()
-        ->find("OMNITRACE_TIMEMORY_COMPONENTS")
+    _settings->find("OMNITRACE_TIMEMORY_COMPONENTS")
         ->second->set_choices(_component_choices);
 }
