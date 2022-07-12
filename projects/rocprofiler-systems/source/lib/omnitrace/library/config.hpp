@@ -273,6 +273,9 @@ get_critical_trace_per_row();
 
 bool
 get_trace_thread_locks();
+
+bool
+get_trace_thread_rwlocks();
 }  // namespace config
 
 //

@@ -43,6 +43,7 @@ struct mpi_gotcha : comp::base<mpi_gotcha, void>
 
     // generate the gotcha wrappers
     static void configure();
+    static void shutdown();
 
     // called right before MPI_Init with that functions arguments
     static void audit(const gotcha_data_t& _data, audit::incoming, int*, char***);
@@ -62,10 +63,11 @@ struct mpi_gotcha : comp::base<mpi_gotcha, void>
 
     // without these you will get a verbosity level 1 warning
     static void start() {}
-    static void stop();
+    static void stop() {}
 
-    static void      update();
+    static bool      update();
     static uintptr_t null_comm() { return std::numeric_limits<uintptr_t>::max(); }
+    static void      disable_comm_intercept();
 
 private:
     int       m_rank     = 0;

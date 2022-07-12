@@ -303,8 +303,13 @@ configure_settings(bool _init)
                              "critical_trace");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_LOCKS",
-                             "Enable tracking calls to pthread_mutex_lock, "
+                             "Enable tracing calls to pthread_mutex_lock, "
                              "pthread_mutex_unlock, pthread_mutex_trylock",
+                             false, "backend", "parallelism", "gotcha");
+
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_RW_LOCKS",
+                             "Enable tracing calls to pthread_rwlock_* functions. May "
+                             "cause deadlocks with ROCm-enabled OpenMPI.",
                              false, "backend", "parallelism", "gotcha");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_FLAT_SAMPLING",
@@ -1434,6 +1439,13 @@ bool
 get_trace_thread_locks()
 {
     static auto _v = get_config()->find("OMNITRACE_TRACE_THREAD_LOCKS");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_trace_thread_rwlocks()
+{
+    static auto _v = get_config()->find("OMNITRACE_TRACE_THREAD_RW_LOCKS");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 

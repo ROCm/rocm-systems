@@ -51,16 +51,27 @@ pthread_mutex_gotcha::get_hashes()
     // fully populated. If that fails to be the case for some reason,
     // we could see weird results.
     static auto _v = []() {
-        const auto&  _data = pthread_mutex_gotcha_t::get_gotcha_data();
-        hash_array_t _init = {};
-        size_t       i0    = (config::get_trace_thread_locks()) ? 0 : 3;
-        for(size_t i = i0; i < gotcha_capacity; ++i)
+        const auto& _data = pthread_mutex_gotcha_t::get_gotcha_data();
+        auto        _init = hash_array_t{};
+        auto        _skip = std::set<size_t>{};
+        if(!config::get_trace_thread_locks())
+        {
+            for(size_t i = 0; i < 3; ++i)
+                _skip.emplace(i);
+        }
+        if(!config::get_trace_thread_rwlocks())
+        {
+            for(size_t i = 3; i < 8; ++i)
+                _skip.emplace(i);
+        }
+        for(size_t i = 0; i < gotcha_capacity; ++i)
         {
             auto&& _id = _data.at(i).tool_id;
             if(!_id.empty())
                 _init.at(i) = critical_trace::add_hash_id(_id.c_str());
             else
             {
+                if(_skip.count(i) > 0) continue;
                 OMNITRACE_VERBOSE(
                     1,
                     "WARNING!!! pthread_mutex_gotcha tool id at index %zu was empty!\n",
@@ -93,23 +104,31 @@ pthread_mutex_gotcha::configure()
                 comp::gotcha_config<2, int, pthread_mutex_t*>{ "pthread_mutex_trylock" });
         }
 
-        pthread_mutex_gotcha_t::configure(
-            comp::gotcha_config<3, int, pthread_barrier_t*>{ "pthread_barrier_wait" });
+        if(config::get_trace_thread_rwlocks())
+        {
+            pthread_mutex_gotcha_t::configure(
+                comp::gotcha_config<3, int, pthread_rwlock_t*>{
+                    "pthread_rwlock_rdlock" });
+
+            pthread_mutex_gotcha_t::configure(
+                comp::gotcha_config<4, int, pthread_rwlock_t*>{
+                    "pthread_rwlock_wrlock" });
+
+            pthread_mutex_gotcha_t::configure(
+                comp::gotcha_config<5, int, pthread_rwlock_t*>{
+                    "pthread_rwlock_tryrdlock" });
+
+            pthread_mutex_gotcha_t::configure(
+                comp::gotcha_config<6, int, pthread_rwlock_t*>{
+                    "pthread_rwlock_trywrlock" });
+
+            pthread_mutex_gotcha_t::configure(
+                comp::gotcha_config<7, int, pthread_rwlock_t*>{
+                    "pthread_rwlock_unlock" });
+        }
 
         pthread_mutex_gotcha_t::configure(
-            comp::gotcha_config<4, int, pthread_rwlock_t*>{ "pthread_rwlock_rdlock" });
-
-        pthread_mutex_gotcha_t::configure(
-            comp::gotcha_config<5, int, pthread_rwlock_t*>{ "pthread_rwlock_tryrdlock" });
-
-        pthread_mutex_gotcha_t::configure(
-            comp::gotcha_config<6, int, pthread_rwlock_t*>{ "pthread_rwlock_trywrlock" });
-
-        pthread_mutex_gotcha_t::configure(
-            comp::gotcha_config<7, int, pthread_rwlock_t*>{ "pthread_rwlock_unlock" });
-
-        pthread_mutex_gotcha_t::configure(
-            comp::gotcha_config<8, int, pthread_rwlock_t*>{ "pthread_rwlock_wrlock" });
+            comp::gotcha_config<8, int, pthread_barrier_t*>{ "pthread_barrier_wait" });
 
         pthread_mutex_gotcha_t::configure(
             comp::gotcha_config<9, int, pthread_spinlock_t*>{ "pthread_spin_lock" });
