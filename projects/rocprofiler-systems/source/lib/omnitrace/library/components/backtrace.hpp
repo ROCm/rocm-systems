@@ -81,14 +81,14 @@ struct backtrace
     static void               post_process(int64_t _tid = threading::get_id());
     static hw_counter_data_t& get_last_hwcounters();
 
-    static void              start();
-    static void              stop();
-    void                     sample(int = -1);
-    bool                     empty() const;
-    size_t                   size() const;
-    std::vector<std::string> get() const;
-    uint64_t                 get_timestamp() const;
-    int64_t                  get_thread_cpu_timestamp() const;
+    static void                   start();
+    static void                   stop();
+    void                          sample(int = -1);
+    bool                          empty() const;
+    size_t                        size() const;
+    std::vector<std::string_view> get() const;
+    uint64_t                      get_timestamp() const;
+    int64_t                       get_thread_cpu_timestamp() const;
 
 private:
     int64_t           m_tid        = 0;

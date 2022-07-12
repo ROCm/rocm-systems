@@ -29,6 +29,7 @@
 #include "library/perfetto.hpp"
 #include "library/ptl.hpp"
 #include "library/sampling.hpp"
+#include "library/tracing.hpp"
 
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
@@ -64,10 +65,16 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 #include <pthread.h>
 #include <signal.h>
+
+namespace tracing
+{
+using namespace ::omnitrace::tracing;
+}
 
 namespace
 {
@@ -145,13 +152,20 @@ backtrace::operator<(const backtrace& rhs) const
     return (m_ts == rhs.m_ts) ? (m_tid < rhs.m_tid) : (m_ts < rhs.m_ts);
 }
 
-std::vector<std::string>
+std::vector<std::string_view>
 backtrace::get() const
 {
-    std::vector<std::string> _v{};
-    _v.reserve(m_size);
-    for(size_t i = 0; i < m_size; ++i)
-        _v.emplace_back(m_data.at(i));
+    std::vector<std::string_view> _v = {};
+    if(m_size == 0) return _v;
+    size_t _size = 0;
+    for(const auto* itr : m_data)
+        _size += (strlen(itr) > 0) ? 1 : 0;
+    _v.reserve(_size);
+    for(const auto* itr : m_data)
+    {
+        if(strlen(itr) > 0) _v.emplace_back(itr);
+    }
+    std::reverse(_v.begin(), _v.end());
     return _v;
 }
 
@@ -281,28 +295,8 @@ backtrace::sample(int signum)
     m_ctx_swch   = _cache.get_num_priority_context_switch() +
                  _cache.get_num_voluntary_context_switch();
     m_page_flt = _cache.get_num_major_page_faults() + _cache.get_num_minor_page_faults();
-    m_data     = tim::get_unw_backtrace<stack_depth, 4, false>();
-    auto* itr  = m_data.begin();
-    for(; itr != m_data.end(); ++itr, ++m_size)
-    {
-        if(strlen(*itr) == 0) break;
-    }
-    std::reverse(m_data.begin(), itr);
-    if(!get_debug_sampling())
-    {
-        bool _ignore = false;
-        for(auto& itr : m_data)
-        {
-            if(strlen(itr) == 0) break;
-            if(strncmp(itr, "funlockfile", 11) == 0) _ignore = true;
-            if(_ignore && strlen(itr) > 0)
-            {
-                OMNITRACE_DEBUG("Discarding sample: '%s'...\n", itr);
-                itr[0] = '\0';
-                --m_size;
-            }
-        }
-    }
+    m_data     = tim::get_unw_backtrace<stack_depth, 2, false>();
+    m_size     = m_data.size();
 
     if constexpr(tim::trait::is_available<hw_counters>::value)
     {
@@ -337,7 +331,7 @@ backtrace::configure(bool _setup, int64_t _tid)
             if(get_papi_vector(_tid)) get_papi_vector(_tid)->start();
         }
 
-        auto _alrm_freq = 1.0 / std::min<double>(get_sampling_freq(), 5.0);
+        auto _alrm_freq = 1.0 / std::min<double>(get_sampling_freq(), 20.0);
         auto _prof_freq = 1.0 / get_sampling_freq();
         auto _delay     = std::max<double>(1.0e-3, get_sampling_delay());
 
@@ -348,8 +342,10 @@ backtrace::configure(bool _setup, int64_t _tid)
         _sampler->set_flags(SA_RESTART);
         _sampler->set_delay(_delay);
         _sampler->set_verbose(std::min<size_t>(_sampler->get_verbose(), 2));
-        _sampler->set_frequency(_prof_freq, { SIGPROF });
-        _sampler->set_frequency(_alrm_freq, { SIGALRM });
+        if(_signal_types->count(SIGALRM) > 0)
+            _sampler->set_frequency(_alrm_freq, { SIGALRM });
+        if(_signal_types->count(SIGPROF) > 0)
+            _sampler->set_frequency(_prof_freq, { SIGPROF });
 
         static_assert(tim::trait::buffer_size<sampling::sampler_t>::value > 0,
                       "Error! Zero buffer size");
@@ -437,42 +433,33 @@ backtrace::post_process(int64_t _tid)
         _init->m_ts, pthread_create_gotcha::get_execution_time(_tid)->first);
 
     // check whether the call-stack entry should be used. -1 means break, 0 means continue
-    auto _use_label = [](const std::string& _lbl, bool _check_internal) -> short {
+    auto _use_label = [](std::string_view _lbl) -> short {
         // debugging feature
         static bool _keep_internal =
             tim::get_env<bool>("OMNITRACE_SAMPLING_KEEP_INTERNAL", get_debug_sampling());
         const auto _npos = std::string::npos;
         if(_keep_internal) return 1;
-        if(_lbl.find("omnitrace_init_tooling") != _npos) return -1;
-        if(_lbl.find("omnitrace_push_trace") != _npos) return -1;
-        if(_lbl.find("omnitrace_pop_trace") != _npos) return -1;
-        if(_lbl.find("amd_comgr_") == 0) return -1;
-        if(_check_internal)
-        {
-            if(std::regex_search(
-                   _lbl, std::regex("(14pthread_gotcha7wrapper|default_error_condition)",
-                                    std::regex_constants::optimize)))
-                return 0;
-            else if(std::regex_search(
-                        _lbl, std::regex("(8sampling9backtrace9configure|"
-                                         "8sampling15unblock_signals|pthread_sigmask)",
-                                         std::regex_constants::optimize)))
-                return 0;
-        }
+        if(_lbl.find("omnitrace::common::") != _npos) return -1;
+        if(_lbl.find("omnitrace_") != _npos) return -1;
+        if(_lbl.find("roctracer_") != _npos) return -1;
+        if(_lbl.find("perfetto::") != _npos) return -1;
+        if(_lbl.find("omnitrace::") != _npos) return 0;
+        if(_lbl.find("tim::") != _npos) return 0;
+        if(_lbl == "funlockfile") return 0;
         return 1;
     };
 
     // in the dyninst binary rewrite runtime, instrumented functions are appended with
     // "_dyninst", i.e. "main" will show up as "main_dyninst" in the backtrace.
-    auto _patch_label = [](std::string _lbl) -> std::string {
+    auto _patch_label = [](std::string_view _lbl) -> std::string {
         // debugging feature
         static bool _keep_suffix = tim::get_env<bool>(
             "OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX", get_debug_sampling());
-        if(_keep_suffix) return _lbl;
+        if(_keep_suffix) return std::string{ _lbl };
         const std::string _dyninst{ "_dyninst" };
         auto              _pos = _lbl.find(_dyninst);
-        if(_pos == std::string::npos) return _lbl;
-        return _lbl.replace(_pos, _dyninst.length(), "");
+        if(_pos == std::string::npos) return std::string{ _lbl };
+        return std::string{ _lbl }.replace(_pos, _dyninst.length(), "");
     };
 
     using common_type_t = typename hw_counters::common_type;
@@ -497,9 +484,12 @@ backtrace::post_process(int64_t _tid)
         {
             for(auto& itr : _hw_cnt_labels)
             {
+                std::string _desc = tim::papi::get_event_info(itr).short_descr;
+                if(_desc.empty()) _desc = itr;
+                OMNITRACE_CI_THROW(_desc.empty(), "Empty description for %s\n",
+                                   itr.c_str());
                 perfetto_counter_track<hw_counters>::emplace(
-                    _tid, JOIN(' ', "Thread", tim::papi::get_event_info(itr).short_descr,
-                               _tid_name, "(S)"));
+                    _tid, JOIN(' ', "Thread", _desc, _tid_name, "(S)"));
             }
         }
 
@@ -579,7 +569,13 @@ backtrace::post_process(int64_t _tid)
                                  bool                                    _rename) {
         if(_rename)
             threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid, "(S)").c_str());
-        auto _last_wall_ts = _init->get_timestamp();
+
+        uint64_t _beg_ns       = pthread_create_gotcha::get_execution_time(_tid)->first;
+        uint64_t _end_ns       = pthread_create_gotcha::get_execution_time(_tid)->second;
+        uint64_t _last_wall_ts = _init->get_timestamp();
+
+        tracing::push_perfetto_ts(category::sampling{}, "samples [omnitrace]", _beg_ns,
+                                  "begin_ns", _beg_ns);
 
         for(const auto& ditr : _data)
         {
@@ -587,27 +583,29 @@ backtrace::post_process(int64_t _tid)
             if(_bt->m_tid != _tid) continue;
 
             static std::set<std::string> _static_strings{};
-            std::string                  _last = {};
             for(const auto& itr : _bt->get())
             {
                 auto _name = tim::demangle(_patch_label(itr));
-                auto _use =
-                    _use_label(_name, !_last.empty() &&
-                                          (_last == "start_thread" || _last == "clone"));
+                auto _use  = _use_label(_name);
                 if(_use == -1) break;
                 if(_use == 0) continue;
-                auto sitr = _static_strings.emplace(_name);
-                _last     = *sitr.first;
-                auto _ts  = _bt->m_ts;
-                if(!pthread_create_gotcha::is_valid_execution_time(_tid, _ts)) continue;
+                auto     sitr = _static_strings.emplace(_name);
+                uint64_t _beg = _last_wall_ts;
+                uint64_t _end = _bt->m_ts;
+                if(_end <= _beg) continue;
+                if(!pthread_create_gotcha::is_valid_execution_time(_tid, _beg)) continue;
+                if(!pthread_create_gotcha::is_valid_execution_time(_tid, _end)) continue;
 
-                TRACE_EVENT_BEGIN("hardware_counter",
-                                  perfetto::StaticString{ sitr.first->c_str() },
-                                  _last_wall_ts, "begin_ns", _last_wall_ts);
-                TRACE_EVENT_END("hardware_counter", _ts, "end_ns", _ts);
+                tracing::push_perfetto_ts(category::sampling{}, sitr.first->c_str(), _beg,
+                                          "begin_ns", _beg);
+                tracing::pop_perfetto_ts(category::sampling{}, sitr.first->c_str(), _end,
+                                         "end_ns", _end);
             }
             _last_wall_ts = _bt->m_ts;
         }
+
+        tracing::pop_perfetto_ts(category::sampling{}, "samples [omnitrace]", _end_ns,
+                                 "end_ns", _end_ns);
     };
 
     auto _raw_data = _sampler->get_allocator().get_data();
@@ -648,14 +646,9 @@ backtrace::post_process(int64_t _tid)
     {
         _process_perfetto_counters(_data);
 
-        if(_tid == 0 && get_mode() == Mode::Sampling)
-            _process_perfetto(_data, false);
-        else
-        {
-            pthread_gotcha::push_enable_sampling_on_child_threads(false);
-            std::thread{ _process_perfetto, _data, true }.join();
-            pthread_gotcha::pop_enable_sampling_on_child_threads();
-        }
+        pthread_gotcha::push_enable_sampling_on_child_threads(false);
+        std::thread{ _process_perfetto, _data, true }.join();
+        pthread_gotcha::pop_enable_sampling_on_child_threads();
     }
 
     if(!get_use_timemory()) return;
@@ -685,10 +678,8 @@ backtrace::post_process(int64_t _tid)
         // generate the instances of the tuple of components and start them
         for(const auto& itr : _bt->get())
         {
-            auto _lbl = _patch_label(itr);
-            auto _use =
-                _use_label(_lbl, !_tc.empty() && (_tc.back().key() == "start_thread" ||
-                                                  _tc.back().key() == "clone"));
+            auto _lbl = tim::demangle(_patch_label(itr));
+            auto _use = _use_label(_lbl);
             if(_use == -1) break;
             if(_use == 0) continue;
             _tc.emplace_back(tim::string_view_t{ _lbl }, _scope);
@@ -758,9 +749,8 @@ backtrace::post_process(int64_t _tid)
         // generate the instances of the tuple of components and start them
         for(const auto& itr : _bt->get())
         {
-            auto _lbl = _patch_label(itr);
-            auto _use =
-                _use_label(_lbl, !_tc.empty() && _tc.back().key() == "start_thread");
+            auto _lbl = tim::demangle(_patch_label(itr));
+            auto _use = _use_label(_lbl);
             if(_use == -1) break;
             if(_use == 0) continue;
             _tc.emplace_back(tim::string_view_t{ _lbl });

@@ -31,6 +31,7 @@
 #define OMNITRACE_PERFETTO_CATEGORIES                                                    \
     perfetto::Category("host").SetDescription("Host-side function tracing"),             \
         perfetto::Category("user").SetDescription("User-defined regions"),               \
+        perfetto::Category("sampling").SetDescription("Host-side function sampling"),    \
         perfetto::Category("device_hip")                                                 \
             .SetDescription("Device-side functions submitted via HSA API"),              \
         perfetto::Category("device_hsa")                                                 \
