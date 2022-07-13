@@ -71,7 +71,7 @@ jobs:
         continue-on-error: true
         run: |
           mv build-release/stgz/*.sh ./
-          mv build-release/deb/*.rpm ./
+          mv build-release/rpm/*.rpm ./
           sudo rm -rf build-release
           sudo rm -rf /opt/omnitrace
 

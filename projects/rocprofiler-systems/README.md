@@ -1,8 +1,7 @@
 # Omnitrace: Application Profiling, Tracing, and Analysis
 
 [![Ubuntu 18.04 with GCC and MPICH](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-bionic.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-bionic.yml)
-[![Ubuntu 20.04 with GCC and ROCm](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal-external.yml)
-[![Ubuntu 20.04 with GCC and MPI](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml)
+[![Ubuntu 20.04 with GCC, ROCm, and MPI](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml)
 [![OpenSUSE 15.x with GCC](https://github.com/AMDResearch/omnitrace/actions/workflows/opensuse.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/opensuse.yml)
 
 > ***[Omnitrace](https://github.com/AMDResearch/omnitrace) is an AMD open source research project and is not supported as part of the ROCm software stack.***

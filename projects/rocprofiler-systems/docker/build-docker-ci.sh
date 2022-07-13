@@ -2,49 +2,102 @@
 
 set -e
 
+: ${USER:=$(whoami)}
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=20.04 18.04}
 : ${NJOBS=$(nproc)}
 : ${ELFUTILS_VERSION:=0.186}
 : ${PUSH:=0}
 
+verbose-run()
+{
+    echo -e "\n### Executing \"${@}\"... ###\n"
+    eval $@
+}
+
+tolower()
+{
+    echo "$@" | awk -F '\|~\|' '{print tolower($1)}';
+}
+
+toupper()
+{
+    echo "$@" | awk -F '\|~\|' '{print toupper($1)}';
+}
+
+usage()
+{
+    print_option() { printf "    --%-20s %-24s     %s\n" "${1}" "${2}" "${3}"; }
+    echo "Options:"
+    print_option "help -h" "" "This message"
+    print_option "push" "" "Push the container to DockerHub when completed"
+
+    echo ""
+    print_default_option() { printf "    --%-20s %-24s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
+    print_default_option distro "[ubuntu|opensuse]" "OS distribution" "${DISTRO}"
+    print_default_option versions "[VERSION] [VERSION...]" "Ubuntu or OpenSUSE release" "${VERSIONS}"
+    print_default_option "jobs -j" "[N]" "parallel build jobs" "${NJOBS}"
+    print_default_option elfutils-version "[0.183..0.186]" "ElfUtils version" "${ELFUTILS_VERSION}"
+    print_default_option user "[USERNAME]" "DockerHub username" "${USER}"
+}
+
 send-error()
 {
+    usage
     echo -e "\nError: ${@}"
     exit 1
 }
 
-verbose-run()
+reset-last()
 {
-    echo -e "\n\n### Executing \"${@}\"... ###\n"
-    eval $@
+    last() { send-error "Unsupported argument :: ${1}"; }
 }
+
+reset-last
 
 n=0
 while [[ $# -gt 0 ]]
 do
     case "${1}" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
         "--distro")
             shift
             DISTRO=${1}
+            last() { DISTRO="${DISTRO} ${1}"; }
             ;;
         "--versions")
             shift
             VERSIONS=${1}
+            last() { VERSIONS="${VERSIONS} ${1}"; }
             ;;
-        "-j")
+        --jobs|-j)
             shift
             NJOBS=${1}
+            reset-last
             ;;
         "--elfutils-version")
             shift
             ELFUTILS_VERSION=${1}
+            reset-last
+            ;;
+        --user|-u)
+            shift
+            USER=${1}
+            reset-last
             ;;
         "--push")
             PUSH=1
+            reset-last
+            ;;
+        --*)
+            reset-last
+            last ${1}
             ;;
         *)
-            send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
+            last ${1}
             ;;
     esac
     n=$((${n} + 1))
@@ -74,7 +127,7 @@ for VERSION in ${VERSIONS}
 do
     verbose-run docker build . \
         -f ${DOCKER_FILE} \
-        --tag jrmadsen/omnitrace-ci:${DISTRO}-${VERSION} \
+        --tag ${USER}/omnitrace-ci:${DISTRO}-${VERSION} \
         --build-arg DISTRO=${DISTRO_IMAGE} \
         --build-arg VERSION=${VERSION} \
         --build-arg NJOBS=${NJOBS} \
@@ -84,7 +137,7 @@ done
 if [ "${PUSH}" -gt 0 ]; then
     for VERSION in ${VERSIONS}
     do
-        verbose-run docker push jrmadsen/omnitrace-ci:${DISTRO}-${VERSION}
+        verbose-run docker push ${USER}/omnitrace-ci:${DISTRO}-${VERSION}
     done
 fi
 

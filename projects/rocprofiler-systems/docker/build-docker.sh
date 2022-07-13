@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+: ${USER:=$(whoami)}
 : ${ROCM_VERSIONS:="5.0 4.5 4.3"}
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=20.04 18.04}
@@ -8,48 +9,90 @@
 
 set -e
 
+tolower()
+{
+    echo "$@" | awk -F '\|~\|' '{print tolower($1)}';
+}
+
+toupper()
+{
+    echo "$@" | awk -F '\|~\|' '{print toupper($1)}';
+}
+
+usage()
+{
+    print_option() { printf "    --%-20s %-24s     %s\n" "${1}" "${2}" "${3}"; }
+    echo "Options:"
+    print_option "help -h" "" "This message"
+
+    echo ""
+    print_default_option() { printf "    --%-20s %-24s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
+    print_default_option distro "[ubuntu|opensuse]" "OS distribution" "${DISTRO}"
+    print_default_option versions "[VERSION] [VERSION...]" "Ubuntu or OpenSUSE release" "${VERSIONS}"
+    print_default_option rocm-versions "[VERSION] [VERSION...]" "ROCm versions" "${ROCM_VERSIONS}"
+    print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
+    print_default_option user "[USERNAME]" "DockerHub username" "${USER}"
+    #print_default_option lto "[on|off]" "Enable LTO" "${LTO}"
+}
+
 send-error()
 {
+    usage
     echo -e "\nError: ${@}"
     exit 1
 }
 
 verbose-run()
 {
-    echo -e "\n\n### Executing \"${@}\"... ###\n"
+    echo -e "\n### Executing \"${@}\"... ###\n"
     eval $@
 }
+
+reset-last()
+{
+    last() { send-error "Unsupported argument :: ${1}"; }
+}
+
+reset-last
 
 n=0
 while [[ $# -gt 0 ]]
 do
     case "${1}" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
         "--distro")
             shift
             DISTRO=${1}
+            last() { DISTRO="${DISTRO} ${1}"; }
             ;;
         "--versions")
             shift
             VERSIONS=${1}
+            last() { VERSIONS="${VERSIONS} ${1}"; }
             ;;
         "--rocm-versions")
             shift
             ROCM_VERSIONS=${1}
+            last() { ROCM_VERSIONS="${ROCM_VERSIONS} ${1}"; }
             ;;
         "--python-versions")
             shift
             PYTHON_VERSIONS=${1}
+            last() { PYTHON_VERSIONS="${PYTHON_VERSIONS} ${1}"; }
+            ;;
+        --user|-u)
+            shift
+            USER=${1}
+            reset-last
+            ;;
+        "--*")
+            send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
             ;;
         *)
-            if [ "${n}" -eq 0 ]; then
-                DISTRO=${1}
-            elif [ "${n}" -eq 1 ]; then
-                VERSIONS=${1}
-            elif [ "${n}" -eq 2 ]; then
-                ROCM_VERSIONS=${1}
-            else
-                send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
-            fi
+            last ${1}
             ;;
     esac
     n=$((${n} + 1))
@@ -79,7 +122,7 @@ do
                 *)
                     ;;
             esac
-            verbose-run docker build . -f ${DOCKER_FILE} --tag jrmadsen/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-run docker build . -f ${DOCKER_FILE} --tag ${USER}/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "centos" ]; then
             case "${VERSION}" in
                 7)
@@ -110,7 +153,7 @@ do
                     send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${i}"
                     ;;
             esac
-            verbose-run docker build . -f ${DOCKER_FILE} --tag jrmadsen/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-run docker build . -f ${DOCKER_FILE} --tag ${USER}/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "opensuse" ]; then
             case "${VERSION}" in
                 15.*)
@@ -153,7 +196,7 @@ do
                     send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${i}"
                 ;;
             esac
-            verbose-run docker build . -f ${DOCKER_FILE} --tag jrmadsen/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-run docker build . -f ${DOCKER_FILE} --tag ${USER}/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         fi
     done
 done
