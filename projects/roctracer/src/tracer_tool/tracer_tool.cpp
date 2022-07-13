@@ -370,8 +370,13 @@ void hip_api_flush_cb(hip_api_trace_entry_t* entry) {
     const char* str = hipApiString((hip_api_id_t)cid, data);
     rec_ss << " " << str;
     if (is_hip_kernel_launch_api(cid) && entry->name) {
+      static bool truncate = []() {
+        const char* env_var = getenv("ROCP_TRUNCATE_NAMES");
+        return env_var && std::atoi(env_var) != 0;
+      }();
+
       std::string kernel_name(cxx_demangle(entry->name));
-      if (std::atoi(getenv("ROCP_TRUNCATE_NAMES")) != 0) kernel_name = truncate_name(kernel_name);
+      if (truncate) kernel_name = truncate_name(kernel_name);
       rec_ss << " kernel=" << kernel_name;
     }
     rec_ss << " :" << correlation_id;
@@ -516,7 +521,7 @@ void pool_activity_callback(const char* begin, const char* end, void* arg) {
           fprintf(hsa_async_copy_file_handle, "%lu:%lu async-copy:%lu:%u\n", record->begin_ns,
                   record->end_ns, record->correlation_id, my_pid);
           fflush(hsa_async_copy_file_handle);
-          } else if (record->op == HSA_OP_ID_RESERVED1) {
+        } else if (record->op == HSA_OP_ID_RESERVED1) {
           fprintf(pc_sample_file_handle, "%u %lu 0x%lx %s\n", record->pc_sample.se,
                   record->pc_sample.cycle, record->pc_sample.pc, name);
           fflush(pc_sample_file_handle);
