@@ -62,13 +62,16 @@ xeval_test() {
   test_number=$test_number
 }
 
-eval_test() {
-  bright=$(tput bold)
-  red=$(tput setaf 1)
-  green=$(tput setaf 2)
-  blue=$(tput setaf 4)
-  normal=$(tput sgr0)
+ncolors=$(tput colors || echo 0)
+if [ -n "$ncolors" ] && [ $ncolors -ge 8 ]; then
+  bright="$(tput bold     || echo)"
+  red="$(tput setaf 1     || echo)"
+  green="$(tput setaf 2   || echo)"
+  blue="$(tput setaf 4    || echo)"
+  normal="$(tput sgr0     || echo)"
+fi
 
+eval_test() {
   label=$1
   cmdline=$2
   test_name=$3
@@ -95,9 +98,9 @@ eval_test() {
       fi
     fi
     if [ $is_failed = 0 ] ; then
-      echo "${bright}${blue}$test_name: ${green}PASSED${normal}"
+      echo "${bright:-}${blue:-}$test_name: ${green:-}PASSED${normal:-}"
     else
-      echo "${bright}${blue}$test_name: ${red}FAILED${normal}"
+      echo "${bright:-}${blue:-}$test_name: ${red:-}FAILED${normal:-}"
       failed_tests="$failed_tests\n  $test_number: $test_name - \"$label\""
       test_status=$(($test_status + 1))
     fi
