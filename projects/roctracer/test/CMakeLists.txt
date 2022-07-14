@@ -83,7 +83,7 @@ add_dependencies(mytest codeobj_test)
 ## Build the hsa (standalone) copy test
 function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
   separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
-    "-O2 -x cl -Xclang -finclude-default-header -cl-denorms-are-zero -cl-std=CL2.0
+    "-O2 -x cl -Xclang -finclude-default-header -cl-denorms-are-zero -cl-std=CL2.0 -Wl,--build-id=sha1
     -target amdgcn-amd-amdhsa -mcpu=${TARGET_ID} -o ${OUTPUT_FILE} ${INPUT_FILE}")
   add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/${OUTPUT_FILE}
     COMMAND clang ${CLANG_ARG_LIST}
