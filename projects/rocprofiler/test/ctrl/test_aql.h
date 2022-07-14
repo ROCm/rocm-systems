@@ -23,8 +23,8 @@ THE SOFTWARE.
 #ifndef TEST_CTRL_TEST_AQL_H_
 #define TEST_CTRL_TEST_AQL_H_
 
-#include <hsa.h>
-#include <hsa_ven_amd_aqlprofile.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ven_amd_aqlprofile.h>
 
 #include "util/hsa_rsrc_factory.h"
 

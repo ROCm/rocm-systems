@@ -25,7 +25,7 @@ THE SOFTWARE.
 
 #include "inc/rocprofiler.h"
 
-#include <hsa.h>
+#include <hsa/hsa.h>
 #include <vector>
 
 #include "core/types.h"

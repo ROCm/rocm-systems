@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #include "inc/rocprofiler.h"
 
-#include <hsa.h>
+#include <hsa/hsa.h>
 #include <string.h>
 
 #include <sstream>

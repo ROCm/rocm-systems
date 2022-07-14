@@ -29,7 +29,7 @@ THE SOFTWARE.
 #include <assert.h>
 #include <cxxabi.h>
 #include <dirent.h>
-#include <hsa.h>
+#include <hsa/hsa.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>

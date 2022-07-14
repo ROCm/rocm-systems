@@ -25,7 +25,7 @@ THE SOFTWARE.
 
 #include <iostream>
 
-#include <hsa_ven_amd_aqlprofile.h>
+#include <hsa/hsa_ven_amd_aqlprofile.h>
 
 namespace rocprofiler {
 typedef hsa_ven_amd_aqlprofile_pfn_t pfn_t;

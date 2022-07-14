@@ -23,7 +23,7 @@ THE SOFTWARE.
 #ifndef _SRC_CORE_INTERCEPT_QUEUE_H
 #define _SRC_CORE_INTERCEPT_QUEUE_H
 
-#include <amd_hsa_kernel_code.h>
+#include <hsa/amd_hsa_kernel_code.h>
 #include <dlfcn.h>
 #include <sys/syscall.h>
 

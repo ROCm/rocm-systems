@@ -23,7 +23,7 @@ THE SOFTWARE.
 #ifndef SRC_CORE_GPU_COMMAND_H_
 #define SRC_CORE_GPU_COMMAND_H_
 
-#include <hsa.h>
+#include <hsa/hsa.h>
 
 #include "core/types.h"
 #include "util/exception.h"

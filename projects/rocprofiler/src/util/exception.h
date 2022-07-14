@@ -23,8 +23,8 @@ THE SOFTWARE.
 #ifndef SRC_UTIL_EXCEPTION_H_
 #define SRC_UTIL_EXCEPTION_H_
 
-#include <hsa.h>
-#include <hsa_ven_amd_aqlprofile.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ven_amd_aqlprofile.h>
 
 #include <exception>
 #include <sstream>

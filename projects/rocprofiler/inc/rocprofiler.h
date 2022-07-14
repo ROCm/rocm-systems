@@ -41,10 +41,10 @@ THE SOFTWARE.
 #ifndef INC_ROCPROFILER_H_
 #define INC_ROCPROFILER_H_
 
-#include <amd_hsa_kernel_code.h>
-#include <hsa.h>
-#include <hsa_ext_amd.h>
-#include <hsa_ven_amd_aqlprofile.h>
+#include <hsa/amd_hsa_kernel_code.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
+#include <hsa/hsa_ven_amd_aqlprofile.h>
 #include <stdint.h>
 
 #define ROCPROFILER_VERSION_MAJOR 8

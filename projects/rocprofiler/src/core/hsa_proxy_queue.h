@@ -23,7 +23,7 @@ THE SOFTWARE.
 #ifndef _SRC_CORE_HSA_PROXY_QUEUE_H
 #define _SRC_CORE_HSA_PROXY_QUEUE_H
 
-#include <hsa.h>
+#include <hsa/hsa.h>
 #include <atomic>
 #include <map>
 #include <mutex>

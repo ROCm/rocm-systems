@@ -23,10 +23,10 @@ THE SOFTWARE.
 #ifndef SRC_CORE_TRACKER_H_
 #define SRC_CORE_TRACKER_H_
 
-#include <amd_hsa_signal.h>
+#include <hsa/amd_hsa_signal.h>
 #include <assert.h>
-#include <hsa.h>
-#include <hsa_ext_amd.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
 #include <list>

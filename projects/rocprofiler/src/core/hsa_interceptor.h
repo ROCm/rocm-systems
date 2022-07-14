@@ -26,9 +26,9 @@ SOFTWARE.
 #define _SRC_CORE_HSA_INTERCEPTOR_H
 
 #include <cxxabi.h>
-#include <hsa.h>
-#include <hsa_ext_amd.h>
-#include <hsa_ven_amd_loader.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
+#include <hsa/hsa_ven_amd_loader.h>
 
 #include <atomic>
 #include <mutex>

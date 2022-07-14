@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #include "gpu_command.h"
 
-#include <hsa.h>
+#include <hsa/hsa.h>
 
 #include <map>
 
