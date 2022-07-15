@@ -153,6 +153,7 @@ def perf_level_string(i):
         5:  'STABLE_PEAK',
         6:  'STABLE_MIN_MCLK',
         7:  'STABLE_MIN_SCLK',
+        8:  'PERF_DETERMINISM',
     }
     return switcher.get(i, 'UNKNOWN')
 
