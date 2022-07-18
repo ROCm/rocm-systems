@@ -45,9 +45,6 @@
 #include <string_view>
 #include <type_traits>
 
-TIMEMORY_STATISTICS_TYPE(component::rocm_data_tracker, component::rocm_feature_value)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(report_units, component::rocm_data_tracker, false_type)
-
 namespace tim
 {
 namespace component
@@ -86,7 +83,7 @@ rocm_event::rocm_event(uint32_t _dev, uint32_t _thr, uint32_t _queue,
     for(uint32_t i = 0; i < _feature_count; ++i)
     {
         const rocprofiler_feature_t* p = &_features[i];
-        feature_names.emplace_back(p->name);
+        feature_names.emplace_back(i);
         switch(p->data.kind)
         {
             // Output metrics results
@@ -121,7 +118,9 @@ rocm_event::as_string() const
     _ss << std::fixed;
     for(size_t i = 0; i < feature_names.size(); ++i)
     {
-        _ss << ", " << feature_names.at(i) << " = ";
+        auto _name = omnitrace::rocprofiler::get_data_labels().at(device_id).at(
+            feature_names.at(i));
+        _ss << ", " << _name << " = ";
         auto _as_string = [&_ss](auto&& itr) { _ss << std::setw(4) << itr; };
         std::visit(_as_string, feature_values.at(i));
     }

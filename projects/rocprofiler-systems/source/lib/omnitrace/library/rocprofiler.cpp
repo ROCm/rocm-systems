@@ -533,7 +533,10 @@ post_process_perfetto()
                     return JOIN(" ", "Device", _v, JOIN("", '[', _dev_id, ']'));
                 };
                 for(auto nitr : itr.feature_names)
-                    counter_track::emplace(_dev_id, addendum(nitr));
+                {
+                    auto _name = get_data_labels().at(itr.device_id).at(nitr);
+                    counter_track::emplace(_dev_id, addendum(_name));
+                }
             }
         }
 
@@ -737,7 +740,9 @@ post_process_timemory()
             {
                 _storage.reserve(_n);
                 for(size_t i = _storage.size(); i < _n; ++i)
-                    _storage.emplace_back(ditr.first, i, itr->feature_names.at(i));
+                    _storage.emplace_back(
+                        ditr.first, i,
+                        get_data_labels().at(ditr.first).at(itr->feature_names.at(i)));
             }
         }
 

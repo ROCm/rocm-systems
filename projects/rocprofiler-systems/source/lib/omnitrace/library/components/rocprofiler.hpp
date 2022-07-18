@@ -82,7 +82,7 @@ struct rocm_event
     rocm_metric_type                entry          = 0;
     rocm_metric_type                exit           = 0;
     std::string                     name           = {};
-    std::vector<std::string_view>   feature_names  = {};
+    std::vector<size_t>             feature_names  = {};
     std::vector<rocm_feature_value> feature_values = {};
 
     rocm_event() = default;
@@ -224,6 +224,8 @@ TIMEMORY_DEFINE_CONCRETE_TRAIT(is_timing_category, component::rocprofiler_data,
 TIMEMORY_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::rocprofiler_data, false_type)
 TIMEMORY_DEFINE_CONCRETE_TRAIT(report_units, component::rocprofiler_data, false_type)
 TIMEMORY_STATISTICS_TYPE(component::rocprofiler_data, component::rocprofiler_value)
+TIMEMORY_STATISTICS_TYPE(component::rocm_data_tracker, component::rocm_feature_value)
+TIMEMORY_DEFINE_CONCRETE_TRAIT(report_units, component::rocm_data_tracker, false_type)
 
 #if !defined(OMNITRACE_EXTERN_COMPONENTS) ||                                             \
     (defined(OMNITRACE_EXTERN_COMPONENTS) && OMNITRACE_EXTERN_COMPONENTS > 0)

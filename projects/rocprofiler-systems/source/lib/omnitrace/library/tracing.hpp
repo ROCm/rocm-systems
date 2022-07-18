@@ -94,7 +94,8 @@ thread_init()
         if(threading::get_id() > 0)
             threading::set_thread_name(JOIN(" ", "Thread", threading::get_id()).c_str());
         thread_data<omnitrace_thread_bundle_t>::construct(
-            JOIN('/', "omnitrace", process::get_id(), "thread", threading::get_id()),
+            JOIN('/', "omnitrace/process", process::get_id(), "thread",
+                 threading::get_id()),
             quirk::config<quirk::auto_start>{});
         get_interval_data()->reserve(512);
         // save the hash maps
