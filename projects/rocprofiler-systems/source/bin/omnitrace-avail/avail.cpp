@@ -30,6 +30,8 @@
 #include "info_type.hpp"
 
 #include "library/config.hpp"
+#include "library/gpu.hpp"
+#include "library/rocprofiler.hpp"
 
 #include <timemory/components.hpp>
 #include <timemory/components/definition.hpp>
@@ -56,6 +58,12 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#if defined(OMNITRACE_USE_HIP) && OMNITRACE_USE_HIP > 0
+#    include <hip/hip_runtime.h>
+#elif !defined(OMNITRACE_USE_HIP)
+#    define OMNITRACE_USE_HIP 0
+#endif
 
 #if defined(TIMEMORY_UNIX)
 #    include <sys/ioctl.h>  // ioctl() and TIOCGWINSZ
@@ -98,6 +106,8 @@ void
 write_hw_counter_info(std::ostream&, const array_t<bool, N>& = {},
                       const array_t<bool, N>& = {}, const array_t<string_t, N>& = {});
 
+int gpu_count = 0;
+
 //--------------------------------------------------------------------------------------//
 
 int
@@ -125,6 +135,8 @@ main(int argc, char** argv)
             }
         }
     }
+    _category_options.emplace("hw_counters::CPU");
+    _category_options.emplace("hw_counters::GPU");
 
     array_t<bool, TOTAL> options    = { false, false, false, false, false, false, false };
     array_t<string_t, TOTAL> fields = {};
@@ -164,6 +176,11 @@ main(int argc, char** argv)
     parser.add_argument({ "--debug" }, "Enable debug messages")
         .max_count(1)
         .action([](parser_t& p) { debug_msg = p.get<bool>("debug"); });
+    parser.add_argument({ "--verbose" }, "Enable informational messages")
+        .max_count(1)
+        .action([](parser_t& p) {
+            verbose_level = (p.get_count("verbose") == 0) ? 1 : p.get<int>("verbose");
+        });
     parser.add_argument({ "-a", "--all" }, "Print all available info")
         .max_count(1)
         .action([&](parser_t& p) {
@@ -297,7 +314,7 @@ main(int argc, char** argv)
                       "Display the output filename for the component")
         .max_count(1);
     parser
-        .add_argument({ "--categories" },
+        .add_argument({ "-c", "--categories" },
                       "Display the category information (use --list-categories to see "
                       "the available categories)")
         .dtype("string")
@@ -398,6 +415,20 @@ main(int argc, char** argv)
         parser.print_help();
         return EXIT_FAILURE;
     }
+
+#if OMNITRACE_USE_HIP > 0
+    // initialize HIP and call rocm_metrics() which add choices to OMNITRACE_ROCM_EVENTS
+    // setting
+    auto _status = hipGetDeviceCount(&gpu_count);
+    if(gpu_count > 0 && _status == hipSuccess)
+    {
+        (void) omnitrace::rocprofiler::rocm_metrics();
+    }
+    else
+    {
+        verbprintf(0, "No HIP devices found. GPU HW counters will not be available\n");
+    }
+#endif
 
     auto _parser_set_if_exists = [&parser](auto& _var, const std::string& _opt) {
         using Tp = decay_t<decltype(_var)>;
@@ -923,10 +954,13 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     static_assert(N >= num_hw_counter_options,
                   "Error! Too few hw counter options + fields");
 
-    using width_type = array_t<int64_t, N>;
-    using width_bool = array_t<bool, N>;
+    using width_type       = array_t<int64_t, N>;
+    using width_bool       = array_t<bool, N>;
+    using hwcounter_info_t = std::vector<tim::hardware_counters::info>;
 
     auto _papi_events = tim::papi::available_events_info();
+    auto _rocm_events =
+        (gpu_count > 0) ? omnitrace::rocprofiler::rocm_metrics() : hwcounter_info_t{};
 
     auto _process_counters = [](auto& _events, int32_t _offset) {
         for(auto& itr : _events)
@@ -939,13 +973,25 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
 
     int32_t _offset = 0;
     _offset += _process_counters(_papi_events, _offset);
+    _offset += _process_counters(_rocm_events, _offset);
 
-    using hwcounter_info_t             = std::vector<tim::hardware_counters::info>;
-    auto                 fields        = std::vector<hwcounter_info_t>{ _papi_events };
-    auto                 subcategories = std::vector<std::string>{ "CPU", "GPU", "" };
-    array_t<string_t, N> _labels       = { "HARDWARE COUNTER", "AVAILABLE", "SUMMARY",
+    auto fields        = std::vector<hwcounter_info_t>{ _papi_events, _rocm_events };
+    auto subcategories = std::vector<std::string>{ "CPU", "GPU", "" };
+    array_t<string_t, N> _labels = { "HARDWARE COUNTER", "AVAILABLE", "SUMMARY",
                                      "DESCRIPTION" };
-    array_t<bool, N>     _center       = { false, true, false, false };
+    array_t<bool, N>     _center = { false, true, false, false };
+
+    for(size_t i = 0; i < subcategories.size(); ++i)
+    {
+        if(i >= fields.size()) break;
+        if(!category_view.empty() && category_view.count(subcategories.at(i)) == 0 &&
+           category_view.count(std::string{ "hw_counters::" } + subcategories.at(i)) == 0)
+            fields.at(i).clear();
+        if(!is_category_selected(subcategories.at(i)) &&
+           !is_category_selected(std::string{ "hw_counters::" } + subcategories.at(i)))
+            fields.at(i).clear();
+        if(fields.at(i).empty()) subcategories.at(i).clear();
+    }
 
     width_type _widths;
     width_bool _wusing;
@@ -986,14 +1032,15 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     os << "\n" << banner(_widths, _wusing, '-');
 
     size_t nitr = 0;
+    size_t nout = 0;
     for(const auto& fitr : fields)
     {
         auto idx = nitr++;
 
         if(idx < subcategories.size())
         {
-            if(!markdown && idx != 0) os << banner(_widths, _wusing, '-');
-            if(subcategories.at(idx).length() > 0)
+            if(!markdown && nout != 0) os << banner(_widths, _wusing, '-');
+            if(!subcategories.at(idx).empty())
             {
                 os << global_delim;
                 if(options[0])
@@ -1008,6 +1055,7 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
                 }
                 os << "\n";
                 if(!markdown) os << banner(_widths, _wusing, '-');
+                ++nout;
             }
         }
         else

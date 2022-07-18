@@ -77,6 +77,9 @@ roctracer_is_init();
 bool&
 roctracer_is_setup();
 
+int64_t
+get_clock_skew();
+
 roctracer_functions_t&
 roctracer_setup_routines();
 

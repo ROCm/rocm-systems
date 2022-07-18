@@ -23,10 +23,7 @@ else()
        AND LIBOMP_LIBRARY
        AND COMMAND omnitrace_custom_compilation)
         target_compile_options(openmp-common PUBLIC -W -Wall -fopenmp=libomp)
-        target_compile_options(openmp-cg PRIVATE -W -Wall -fopenmp=libomp)
-        target_link_libraries(openmp-cg PRIVATE ${LIBOMP_LIBRARY})
-        target_compile_options(openmp-lu PRIVATE -W -Wall -fopenmp=libomp)
-        target_link_libraries(openmp-lu PRIVATE ${LIBOMP_LIBRARY})
+        target_link_libraries(openmp-common PUBLIC ${LIBOMP_LIBRARY})
         omnitrace_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE} TARGET openmp-common)
         omnitrace_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE} TARGET openmp-cg)
         omnitrace_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE} TARGET openmp-lu)
@@ -35,6 +32,9 @@ else()
         target_link_libraries(openmp-common PUBLIC OpenMP::OpenMP_CXX)
     endif()
 endif()
+
+target_link_libraries(openmp-cg PRIVATE openmp-common)
+target_link_libraries(openmp-lu PRIVATE openmp-common)
 
 if(OMNITRACE_INSTALL_EXAMPLES)
     install(

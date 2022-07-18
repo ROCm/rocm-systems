@@ -28,6 +28,8 @@
 #include <timemory/api.hpp>
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/process.hpp>
+#include <timemory/utility/demangle.hpp>
+#include <timemory/utility/filepath.hpp>
 
 #include <cassert>
 #include <cstdint>
@@ -48,8 +50,13 @@ TIMEMORY_DEFINE_NS_API(api, rocm_smi)
 
 namespace omnitrace
 {
-namespace api      = tim::api;       // NOLINT
-namespace category = tim::category;  // NOLINT
+namespace api      = ::tim::api;       // NOLINT
+namespace category = ::tim::category;  // NOLINT
+namespace filepath = ::tim::filepath;  // NOLINT
+
+using ::tim::demangle;      // NOLINT
+using ::tim::get_env;       // NOLINT
+using ::tim::try_demangle;  // NOLINT
 }  // namespace omnitrace
 
 // same sort of functionality as python's " ".join([...])

@@ -29,6 +29,7 @@
 #include "library/components/pthread_create_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/pthread_mutex_gotcha.hpp"
+#include "library/components/rocprofiler.hpp"
 #include "library/config.hpp"
 #include "library/coverage.hpp"
 #include "library/critical_trace.hpp"
@@ -38,6 +39,7 @@
 #include "library/ompt.hpp"
 #include "library/process_sampler.hpp"
 #include "library/ptl.hpp"
+#include "library/rocprofiler.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/timemory.hpp"
@@ -91,6 +93,27 @@ ensure_finalization(bool _static_init = false)
         tim::set_env("HSA_ENABLE_INTERRUPT", "0", 0);
 #if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
         tim::set_env("HSA_TOOLS_LIB", "libomnitrace.so", 0);
+#endif
+#if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
+        auto _default_rocm_path =
+            JOIN("", "/opt/rocm-", OMNITRACE_HIP_VERSION_MAJOR, '.',
+                 OMNITRACE_HIP_VERSION_MINOR, '.', OMNITRACE_HIP_VERSION_PATCH);
+        auto _rocm_path    = tim::get_env("OMNITRACE_ROCM_PATH",
+                                       tim::get_env("ROCM_PATH", _default_rocm_path));
+        auto _rocp_metrics = JOIN('/', _rocm_path, "rocprofiler/lib/metrics.xml");
+        tim::set_env("HSA_TOOLS_LIB", "libomnitrace.so", 0);
+        tim::set_env("ROCP_TOOL_LIB", "libomnitrace.so", 0);
+        tim::set_env("ROCPROFILER_LOG", "1", 0);
+        tim::set_env("ROCP_HSA_INTERCEPT", "1", 0);
+        tim::set_env("ROCP_METRICS", _rocp_metrics, 0);
+        tim::set_env("HSA_TOOLS_REPORT_LOAD_FAILURE", "1", 0);
+        if(getenv("ROCM_PATH"))
+        {
+            tim::set_env("OMNITRACE_ROCPROFILER_LIBRARY",
+                         JOIN('/', tim::get_env<std::string>("ROCM_PATH"),
+                              "rocprofiler/lib/librocprofiler64.so"),
+                         0);
+        }
 #endif
     }
     return scope::destructor{ []() { omnitrace_finalize_hidden(); } };
@@ -872,6 +895,13 @@ omnitrace_finalize_hidden(void)
         tasking::join();
     }
 
+    if(get_use_rocprofiler())
+    {
+        OMNITRACE_VERBOSE_F(1, "Shutting down rocprofiler...\n");
+        rocprofiler::post_process();
+        rocprofiler::rocm_cleanup();
+    }
+
     if(dmp::rank() == 0) fprintf(stderr, "\n");
 
     OMNITRACE_DEBUG_F("Stopping main bundle...\n");
@@ -1108,8 +1138,7 @@ omnitrace_finalize_hidden(void)
                       _push_count, "vs. popped:", _pop_count)
             .c_str());
 
-    OMNITRACE_DEBUG_F("Disabling signal handling...\n");
-    tim::disable_signal_detection();
+    config::finalize();
 
     OMNITRACE_VERBOSE_F(0, "Finalized\n");
 }

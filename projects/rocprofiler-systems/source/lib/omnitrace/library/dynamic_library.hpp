@@ -26,6 +26,7 @@
 
 #include <dlfcn.h>
 #include <string>
+#include <unistd.h>
 
 namespace omnitrace
 {
@@ -44,6 +45,26 @@ struct dynamic_library
 
     bool open();
     int  close() const;
+
+    template <typename RetT, typename... Args>
+    RetT invoke(std::string_view _name, RetT (*&_func)(Args...), Args... _args)
+    {
+        if(!handle) open();
+        if(handle)
+        {
+            *(void**) (&_func) = dlsym(handle, _name.data());
+            if(_func)
+            {
+                return (*_func)(_args...);
+            }
+            else
+            {
+                fprintf(stderr, "[omnitrace][pid=%i]> %s :: %s\n", getpid(), _name.data(),
+                        dlerror());
+            }
+        }
+        return RetT{};
+    }
 
     std::string envname  = {};
     std::string filename = {};

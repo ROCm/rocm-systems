@@ -29,8 +29,8 @@
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/utility.hpp"
-#include "timemory/backends/threading.hpp"
 
+#include <timemory/backends/threading.hpp>
 #include <timemory/utility/signals.hpp>
 #include <timemory/utility/types.hpp>
 

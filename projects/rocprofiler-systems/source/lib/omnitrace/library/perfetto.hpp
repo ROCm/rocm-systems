@@ -173,7 +173,8 @@ struct perfetto_counter_track
                 _missing.emplace_back(std::make_tuple(*itr, itr->c_str(), false));
             }
         }
-        auto&       _name = _name_data.emplace_back(std::make_unique<std::string>(_v));
+        auto        _index = _track_data.size();
+        auto&       _name  = _name_data.emplace_back(std::make_unique<std::string>(_v));
         const char* _unit_name = (_units && strlen(_units) > 0) ? _units : nullptr;
         _track_data.emplace_back(perfetto::CounterTrack{ _name->c_str() }
                                      .set_unit_name(_unit_name)
@@ -217,6 +218,7 @@ struct perfetto_counter_track
                 }
             }
         }
+        return _index;
     }
 
     static auto& at(size_t _idx, size_t _n) { return get_data().second.at(_idx).at(_n); }

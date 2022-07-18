@@ -157,7 +157,8 @@ std::unique_ptr<main_bundle_t>&
 get_main_bundle()
 {
     static auto _v =
-        std::make_unique<main_bundle_t>("omnitrace", quirk::config<quirk::auto_start>{});
+        std::make_unique<main_bundle_t>(JOIN('/', "omnitrace/process", process::get_id()),
+                                        quirk::config<quirk::auto_start>{});
     return _v;
 }
 
@@ -166,7 +167,8 @@ get_gotcha_bundle()
 {
     static auto _v =
         (setup_gotchas(), std::make_unique<gotcha_bundle_t>(
-                              "omnitrace", quirk::config<quirk::auto_start>{}));
+                              JOIN('/', "omnitrace/process", process::get_id()),
+                              quirk::config<quirk::auto_start>{}));
     return _v;
 }
 

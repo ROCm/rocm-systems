@@ -27,10 +27,28 @@ project(
     DESCRIPTION "CPU/GPU Application tracing with static/dynamic binary instrumentation"
     HOMEPAGE_URL "https://github.com/AMDResearch/omnitrace")
 
+find_package(Git)
+
+if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} describe --tags
+        OUTPUT_VARIABLE OMNITRACE_GIT_DESCRIBE
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+        OUTPUT_VARIABLE OMNITRACE_GIT_REVISION
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+else()
+    set(OMNITRACE_GIT_DESCRIBE "v${OMNITRACE_VERSION}")
+    set(OMNITRACE_GIT_REVISION "")
+endif()
+
 message(
     STATUS
-        "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}"
+        "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH} (${FULL_VERSION_STRING})"
     )
+message(STATUS "[${PROJECT_NAME}] git revision: ${OMNITRACE_GIT_REVISION}")
+message(STATUS "[${PROJECT_NAME}] git describe: ${OMNITRACE_GIT_DESCRIBE}")
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${PROJECT_SOURCE_DIR}/cmake/Modules
                       ${PROJECT_SOURCE_DIR}/source/python/cmake ${CMAKE_MODULE_PATH})
 set(BUILD_SHARED_LIBS
@@ -103,6 +121,8 @@ omnitrace_add_option(OMNITRACE_USE_HIP "Enable HIP support" ON)
 omnitrace_add_option(OMNITRACE_USE_PAPI "Enable HW counter support via PAPI" ON)
 omnitrace_add_option(OMNITRACE_USE_ROCTRACER "Enable roctracer support"
                      ${OMNITRACE_USE_HIP})
+omnitrace_add_option(OMNITRACE_USE_ROCPROFILER "Enable rocprofiler support"
+                     ${OMNITRACE_USE_HIP})
 omnitrace_add_option(
     OMNITRACE_USE_ROCM_SMI "Enable rocm-smi support for power/temp/etc. sampling"
     ${OMNITRACE_USE_HIP})
@@ -149,16 +169,20 @@ if(NOT OMNITRACE_USE_HIP)
     set(OMNITRACE_USE_ROCTRACER
         OFF
         CACHE BOOL "Disabled via OMNITRACE_USE_HIP=OFF" FORCE)
+    set(OMNITRACE_USE_ROCPROFILER
+        OFF
+        CACHE BOOL "Disabled via OMNITRACE_USE_HIP=OFF" FORCE)
     set(OMNITRACE_USE_ROCM_SMI
         OFF
         CACHE BOOL "Disabled via OMNITRACE_USE_HIP=OFF" FORCE)
 elseif(
     OMNITRACE_USE_HIP
     AND NOT OMNITRACE_USE_ROCTRACER
+    AND NOT OMNITRACE_USE_ROCPROFILER
     AND NOT OMNITRACE_USE_ROCM_SMI)
     omnitrace_message(
         AUTHOR_WARNING
-        "Setting OMNITRACE_USE_HIP=OFF because roctracer and rocm-smi options are disabled"
+        "Setting OMNITRACE_USE_HIP=OFF because roctracer, rocprofiler, and rocm-smi options are disabled"
         )
     set(OMNITRACE_USE_HIP OFF)
 endif()

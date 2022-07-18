@@ -44,15 +44,17 @@
 
 namespace omnitrace
 {
-namespace audit     = tim::audit;      // NOLINT
-namespace comp      = tim::component;  // NOLINT
-namespace quirk     = tim::quirk;      // NOLINT
-namespace threading = tim::threading;  // NOLINT
-namespace scope     = tim::scope;      // NOLINT
-namespace dmp       = tim::dmp;        // NOLINT
-namespace process   = tim::process;    // NOLINT
-namespace units     = tim::units;      // NOLINT
-namespace trait     = tim::trait;      // NOLINT
-namespace api       = tim::api;        // NOLINT
-namespace operation = tim::operation;  // NOLINT
+namespace audit     = ::tim::audit;      // NOLINT
+namespace comp      = ::tim::component;  // NOLINT
+namespace quirk     = ::tim::quirk;      // NOLINT
+namespace threading = ::tim::threading;  // NOLINT
+namespace scope     = ::tim::scope;      // NOLINT
+namespace dmp       = ::tim::dmp;        // NOLINT
+namespace process   = ::tim::process;    // NOLINT
+namespace units     = ::tim::units;      // NOLINT
+namespace trait     = ::tim::trait;      // NOLINT
+namespace api       = ::tim::api;        // NOLINT
+namespace operation = ::tim::operation;  // NOLINT
+
+using settings = ::tim::settings;  // NOLINT
 }  // namespace omnitrace

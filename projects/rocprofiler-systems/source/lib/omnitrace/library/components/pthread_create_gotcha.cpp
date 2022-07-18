@@ -154,7 +154,8 @@ pthread_create_gotcha::wrapper::operator()() const
         if(!thread_bundle_data_t::instances().at(_tid))
         {
             thread_data<omnitrace_thread_bundle_t>::construct(
-                TIMEMORY_JOIN("", get_exe_name(), "/thread-", threading::get_id()),
+                TIMEMORY_JOIN('/', "omnitrace/process", process::get_id(), "thread",
+                              threading::get_id()),
                 quirk::config<quirk::auto_start>{});
             thread_bundle_data_t::instances().at(_tid)->start();
         }

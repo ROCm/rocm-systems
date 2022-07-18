@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/components/roctracer_callbacks.hpp"
+#include "library/roctracer.hpp"
 #include "library.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
@@ -76,65 +76,6 @@ hip_api_string(hip_api_id_t id, const hip_api_data_t* data)
 #else
     tim::consume_parameters(id, data);
 #endif
-}
-//
-int64_t
-get_clock_skew()
-{
-    static auto _use = tim::get_env("OMNITRACE_USE_ROCTRACER_CLOCK_SKEW", true);
-    static auto _v   = []() {
-        namespace cpu = tim::cpu;
-        // synchronize timestamps
-        // We'll take a CPU timestamp before and after taking a GPU timestmp, then
-        // take the average of those two, hoping that it's roughly at the same time
-        // as the GPU timestamp.
-        static auto _cpu_now = []() {
-            cpu::fence();
-            return comp::wall_clock::record();
-        };
-
-        static auto _gpu_now = []() {
-            cpu::fence();
-            uint64_t _v = 0;
-            ROCTRACER_CALL(roctracer_get_timestamp(&_v));
-            return _v;
-        };
-
-        do
-        {
-            // warm up cache and allow for any static initialization
-            (void) _cpu_now();
-            (void) _gpu_now();
-        } while(false);
-
-        auto _compute = [](volatile uint64_t& _cpu_ts, volatile uint64_t& _gpu_ts) {
-            _cpu_ts = 0;
-            _gpu_ts = 0;
-            _cpu_ts += _cpu_now() / 2;
-            _gpu_ts += _gpu_now() / 1;
-            _cpu_ts += _cpu_now() / 2;
-            return static_cast<int64_t>(_cpu_ts) - static_cast<int64_t>(_gpu_ts);
-        };
-        constexpr int64_t _n       = 10;
-        int64_t           _cpu_ave = 0;
-        int64_t           _gpu_ave = 0;
-        int64_t           _diff    = 0;
-        for(int64_t i = 0; i < _n; ++i)
-        {
-            volatile uint64_t _cpu_ts = 0;
-            volatile uint64_t _gpu_ts = 0;
-            _diff += _compute(_cpu_ts, _gpu_ts);
-            _cpu_ave += _cpu_ts / _n;
-            _gpu_ave += _gpu_ts / _n;
-        }
-        OMNITRACE_BASIC_VERBOSE(2, "CPU timestamp: %li\n", _cpu_ave);
-        OMNITRACE_BASIC_VERBOSE(2, "HIP timestamp: %li\n", _gpu_ave);
-        OMNITRACE_BASIC_VERBOSE(1, "CPU/HIP timestamp skew: %li (used: %s)\n", _diff,
-                                _use ? "yes" : "no");
-        _diff /= _n;
-        return _diff;
-    }();
-    return (_use) ? _v : 0;
 }
 
 int&
@@ -218,6 +159,66 @@ get_hip_activity_mutex(int64_t _tid = threading::get_id())
 }
 }  // namespace
 
+//
+int64_t
+get_clock_skew()
+{
+    static auto _use = tim::get_env("OMNITRACE_USE_ROCTRACER_CLOCK_SKEW", true);
+    static auto _v   = []() {
+        namespace cpu = tim::cpu;
+        // synchronize timestamps
+        // We'll take a CPU timestamp before and after taking a GPU timestmp, then
+        // take the average of those two, hoping that it's roughly at the same time
+        // as the GPU timestamp.
+        static auto _cpu_now = []() {
+            cpu::fence();
+            return comp::wall_clock::record();
+        };
+
+        static auto _gpu_now = []() {
+            cpu::fence();
+            uint64_t _v = 0;
+            ROCTRACER_CALL(roctracer_get_timestamp(&_v));
+            return _v;
+        };
+
+        do
+        {
+            // warm up cache and allow for any static initialization
+            (void) _cpu_now();
+            (void) _gpu_now();
+        } while(false);
+
+        auto _compute = [](volatile uint64_t& _cpu_ts, volatile uint64_t& _gpu_ts) {
+            _cpu_ts = 0;
+            _gpu_ts = 0;
+            _cpu_ts += _cpu_now() / 2;
+            _gpu_ts += _gpu_now() / 1;
+            _cpu_ts += _cpu_now() / 2;
+            return static_cast<int64_t>(_cpu_ts) - static_cast<int64_t>(_gpu_ts);
+        };
+        constexpr int64_t _n       = 10;
+        int64_t           _cpu_ave = 0;
+        int64_t           _gpu_ave = 0;
+        int64_t           _diff    = 0;
+        for(int64_t i = 0; i < _n; ++i)
+        {
+            volatile uint64_t _cpu_ts = 0;
+            volatile uint64_t _gpu_ts = 0;
+            _diff += _compute(_cpu_ts, _gpu_ts);
+            _cpu_ave += _cpu_ts / _n;
+            _gpu_ave += _gpu_ts / _n;
+        }
+        OMNITRACE_BASIC_VERBOSE(2, "CPU timestamp: %li\n", _cpu_ave);
+        OMNITRACE_BASIC_VERBOSE(2, "HIP timestamp: %li\n", _gpu_ave);
+        OMNITRACE_BASIC_VERBOSE(1, "CPU/HIP timestamp skew: %li (used: %s)\n", _diff,
+                                _use ? "yes" : "no");
+        _diff /= _n;
+        return _diff;
+    }();
+    return (_use) ? _v : 0;
+}
+
 // HSA API callback function
 void
 hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg)
@@ -226,6 +227,15 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         return;
 
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
+    static thread_local std::once_flag _once{};
+    std::call_once(_once, []() {
+        if(threading::get_id() != 0)
+        {
+            sampling::block_signals();
+            threading::set_thread_name("roctracer.hsa");
+        }
+    });
 
     (void) arg;
     const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
@@ -343,7 +353,7 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
         sampling::block_signals();
-        threading::set_thread_name("omni.roctracer");
+        threading::set_thread_name("roctracer.hsa");
     });
 
     auto&& _protect = comp::roctracer::protect_flush_activity();
@@ -699,7 +709,7 @@ hip_activity_callback(const char* begin, const char* end, void*)
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
         sampling::block_signals();
-        threading::set_thread_name("omni.roctracer");
+        threading::set_thread_name("roctracer.hip");
     });
 
     auto&& _protect = comp::roctracer::protect_flush_activity();
@@ -883,134 +893,3 @@ roctracer_shutdown_routines()
     return _v;
 }
 }  // namespace omnitrace
-
-#include "library/components/rocm_smi.hpp"
-
-using namespace omnitrace;
-
-// HSA-runtime tool on-load method
-extern "C"
-{
-    bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-                const char* const* failed_tool_names) OMNITRACE_VISIBILITY("default");
-    void OnUnload() OMNITRACE_VISIBILITY("default");
-
-    bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
-                const char* const* failed_tool_names)
-    {
-        if(!tim::get_env("OMNITRACE_INIT_TOOLING", true)) return true;
-        if(!tim::settings::enabled()) return true;
-
-        roctracer_is_init() = true;
-        pthread_gotcha::push_enable_sampling_on_child_threads(false);
-        OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug_env() || get_verbose_env() > 0,
-                                            "\n");
-        tim::consume_parameters(table, runtime_version, failed_tool_count,
-                                failed_tool_names);
-
-        if(!config::settings_are_configured() && get_state() < State::Active)
-            omnitrace_init_tooling_hidden();
-
-        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-
-        static auto _setup = [=]() {
-            try
-            {
-                OMNITRACE_CONDITIONAL_BASIC_PRINT_F(get_debug() || get_verbose() > 1,
-                                                    "setting up HSA...\n");
-
-                // const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
-                const char* output_prefix = nullptr;
-
-                bool trace_hsa_api = get_trace_hsa_api();
-
-                // Enable HSA API callbacks/activity
-                if(trace_hsa_api)
-                {
-                    std::vector<std::string> hsa_api_vec =
-                        tim::delimit(get_trace_hsa_api_types());
-
-                    // initialize HSA tracing
-                    roctracer_set_properties(ACTIVITY_DOMAIN_HSA_API, (void*) table);
-
-                    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug() || get_verbose() > 1,
-                                                      "    HSA-trace(");
-                    if(!hsa_api_vec.empty())
-                    {
-                        for(const auto& itr : hsa_api_vec)
-                        {
-                            uint32_t    cid = HSA_API_ID_NUMBER;
-                            const char* api = itr.c_str();
-                            ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api,
-                                                             &cid, nullptr));
-                            ROCTRACER_CALL(roctracer_enable_op_callback(
-                                ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, nullptr));
-
-                            OMNITRACE_CONDITIONAL_BASIC_PRINT(
-                                get_debug() || get_verbose() > 1, " %s", api);
-                        }
-                    }
-                    else
-                    {
-                        ROCTRACER_CALL(roctracer_enable_domain_callback(
-                            ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, nullptr));
-                    }
-                    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug() || get_verbose() > 1,
-                                                      "\n");
-                }
-
-                bool trace_hsa_activity = get_trace_hsa_activity();
-                // Enable HSA GPU activity
-                if(trace_hsa_activity)
-                {
-                    // initialize HSA tracing
-                    ::roctracer::hsa_ops_properties_t ops_properties{
-                        table,
-                        reinterpret_cast<activity_async_callback_t>(
-                            hsa_activity_callback),
-                        nullptr, output_prefix
-                    };
-                    roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
-
-                    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug() || get_verbose() > 1,
-                                                      "    HSA-activity-trace()\n");
-                    ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS,
-                                                                HSA_OP_ID_COPY));
-                }
-            } catch(std::exception& _e)
-            {
-                OMNITRACE_BASIC_PRINT("Exception was thrown in HSA setup: %s\n",
-                                      _e.what());
-            }
-        };
-
-        static auto _shutdown = []() {
-            OMNITRACE_DEBUG_F("roctracer_disable_domain_callback\n");
-            ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
-
-            OMNITRACE_DEBUG_F("roctracer_disable_op_activity\n");
-            ROCTRACER_CALL(
-                roctracer_disable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
-        };
-
-        (void) get_clock_skew();
-
-        comp::roctracer::add_setup("hsa", _setup);
-        comp::roctracer::add_shutdown("hsa", _shutdown);
-
-        rocm_smi::set_state(State::Active);
-        comp::roctracer::setup();
-
-        pthread_gotcha::pop_enable_sampling_on_child_threads();
-        return true;
-    }
-
-    // HSA-runtime on-unload method
-    void OnUnload()
-    {
-        OMNITRACE_DEBUG_F("\n");
-        rocm_smi::set_state(State::Finalized);
-        comp::roctracer::shutdown();
-        omnitrace_finalize_hidden();
-    }
-}

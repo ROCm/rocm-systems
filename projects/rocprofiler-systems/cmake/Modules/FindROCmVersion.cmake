@@ -196,7 +196,7 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
         if(EXISTS "${ROCmVersion_VERSION_FILE}" AND IS_ABSOLUTE
                                                     "${ROCmVersion_VERSION_FILE}")
             get_filename_component(_VERSION_DIR "${ROCmVersion_VERSION_FILE}" PATH)
-            get_filename_component(_VERSION_DIR "${_VERSION_DIR}/.." ABSOLUTE)
+            get_filename_component(_VERSION_DIR "${_VERSION_DIR}/.." REALPATH)
             set(ROCmVersion_DIR
                 "${_VERSION_DIR}"
                 CACHE PATH "Root path to ROCm's .info/${ROCmVersion_VERSION_FILE}"
@@ -227,8 +227,14 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
     if(ROCmVersion_DIR)
         set(_PATHS ${ROCmVersion_DIR})
     else()
-        set(_PATHS ${ROCmVersion_DIR} ${ROCmVersion_ROOT} ${ROCmVersion_ROOT_DIR}
-                   $ENV{CMAKE_PREFIX_PATH} ${CMAKE_PREFIX_PATH} ${ROCM_PATH} /opt/rocm)
+        set(_PATHS)
+        foreach(_DIR ${ROCmVersion_DIR} ${ROCmVersion_ROOT} ${ROCmVersion_ROOT_DIR}
+                     $ENV{CMAKE_PREFIX_PATH} ${CMAKE_PREFIX_PATH} ${ROCM_PATH} /opt/rocm)
+            if(EXISTS ${_DIR})
+                get_filename_component(_ABS_DIR "${_DIR}" REALPATH)
+                list(APPEND _PATHS ${_ABS_DIR})
+            endif()
+        endforeach()
         rocm_version_message(STATUS "ROCmVersion search paths: ${_PATHS}")
     endif()
 

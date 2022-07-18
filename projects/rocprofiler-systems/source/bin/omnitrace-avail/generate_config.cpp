@@ -230,7 +230,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         _ar->startNode();
         (*_ar)(cereal::make_nvp("version", std::string{ OMNITRACE_VERSION_STRING }));
         (*_ar)(cereal::make_nvp("date", tim::get_local_datetime("%F_%H.%M", &_time)));
-        settings::serialize_settings(*_ar);
+        settings::serialize_settings(*_ar, *_settings);
         _ar->finishNode();
     };
 
@@ -311,6 +311,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
             });
         else
         {
+            _settings->ordering();
             std::sort(_data.begin(), _data.end(), [](auto _lhs, auto _rhs) {
                 auto _lomni = _lhs->get_categories().count("omnitrace") > 0;
                 auto _romni = _rhs->get_categories().count("omnitrace") > 0;
@@ -419,7 +420,7 @@ update_choices(std::shared_ptr<settings> _settings)
 {
     std::vector<info_type> _info = get_component_info<TIMEMORY_NATIVE_COMPONENTS_END>();
 
-    if(settings::verbose() >= 2 || settings::debug())
+    if(_settings->get_verbose() >= 2 || _settings->get_debug())
         printf("[omnitrace-avail] # of component found: %zu\n", _info.size());
 
     _info.erase(std::remove_if(_info.begin(), _info.end(),
@@ -442,7 +443,7 @@ update_choices(std::shared_ptr<settings> _settings)
     _component_choices.reserve(_info.size());
     for(const auto& itr : _info)
         _component_choices.emplace_back(itr.id_type());
-    if(settings::verbose() >= 2 || settings::debug())
+    if(_settings->get_verbose() >= 2 || _settings->get_debug())
         printf("[omnitrace-avail] # of component choices: %zu\n",
                _component_choices.size());
     _settings->find("OMNITRACE_TIMEMORY_COMPONENTS")

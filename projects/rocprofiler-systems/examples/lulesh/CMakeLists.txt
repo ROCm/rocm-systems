@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 project(lulesh LANGUAGES C CXX)
 
+set(CMAKE_BUILD_TYPE "RelWithDebInfo")
+
 list(INSERT CMAKE_MODULE_PATH 0 ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
 option(LULESH_BUILD_KOKKOS "Build Kokkos from submodule" ON)

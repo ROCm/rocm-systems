@@ -5,15 +5,24 @@ include(FindPackageHandleStandardArgs)
 
 # ----------------------------------------------------------------------------------------#
 
-# set(_ROCM_PATHS $ENV{ROCM_HOME} /opt/rocm)
+if(NOT ROCM_PATH AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
+    set(ROCM_PATH "$ENV{ROCM_PATH}")
+endif()
+
+foreach(_DIR ${ROCM_PATH} /opt/rocm /opt/rocm/rocm_smi)
+    if(EXISTS ${_DIR})
+        get_filename_component(_ABS_DIR "${_DIR}" REALPATH)
+        list(APPEND _ROCM_SMI_PATHS ${_ABS_DIR})
+    endif()
+endforeach()
 
 # ----------------------------------------------------------------------------------------#
 
 find_path(
     rocm-smi_ROOT_DIR
     NAMES include/rocm_smi/rocm_smi.h
-    HINTS ${_ROCM_PATHS}
-    PATHS ${_ROCM_PATHS}
+    HINTS ${_ROCM_SMI_PATHS}
+    PATHS ${_ROCM_SMI_PATHS}
     PATH_SUFFIXES rocm_smi)
 
 mark_as_advanced(rocm-smi_ROOT_DIR)
@@ -23,9 +32,9 @@ mark_as_advanced(rocm-smi_ROOT_DIR)
 find_path(
     rocm-smi_INCLUDE_DIR
     NAMES rocm_smi/rocm_smi.h
-    HINTS ${rocm-smi_ROOT_DIR} ${_ROCM_PATHS}
-    PATHS ${rocm-smi_ROOT_DIR} ${_ROCM_PATHS}
-    PATH_SUFFIXES rocm_smi/include rocm_smi)
+    HINTS ${rocm-smi_ROOT_DIR} ${_ROCM_SMI_PATHS}
+    PATHS ${rocm-smi_ROOT_DIR} ${_ROCM_SMI_PATHS}
+    PATH_SUFFIXES include rocm_smi/include)
 
 mark_as_advanced(rocm-smi_INCLUDE_DIR)
 
@@ -34,8 +43,8 @@ mark_as_advanced(rocm-smi_INCLUDE_DIR)
 find_library(
     rocm-smi_LIBRARY
     NAMES rocm_smi64 rocm_smi
-    HINTS ${rocm-smi_ROOT_DIR} ${_ROCM_PATHS}
-    PATHS ${rocm-smi_ROOT_DIR} ${_ROCM_PATHS}
+    HINTS ${rocm-smi_ROOT_DIR} ${_ROCM_SMI_PATHS}
+    PATHS ${rocm-smi_ROOT_DIR} ${_ROCM_SMI_PATHS}
     PATH_SUFFIXES rocm_smi/lib rocm_smi/lib64 lib lib64)
 
 if(rocm-smi_LIBRARY)
@@ -65,6 +74,6 @@ endif()
 
 # ------------------------------------------------------------------------------#
 
-unset(_ROCM_PATHS)
+unset(_ROCM_SMI_PATHS)
 
 # ------------------------------------------------------------------------------#

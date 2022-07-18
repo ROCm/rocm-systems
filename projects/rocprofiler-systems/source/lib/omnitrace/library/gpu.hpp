@@ -28,5 +28,8 @@ namespace gpu
 {
 int
 device_count();
-}
+
+int
+hip_device_count();
+}  // namespace gpu
 }  // namespace omnitrace

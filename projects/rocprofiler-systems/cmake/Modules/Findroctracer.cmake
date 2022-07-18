@@ -5,15 +5,24 @@ include(FindPackageHandleStandardArgs)
 
 # ----------------------------------------------------------------------------------------#
 
-set(_ROCM_PATHS $ENV{ROCM_HOME} /opt/rocm /opt/rocm/roctracer)
+if(NOT ROCM_PATH AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
+    set(ROCM_PATH "$ENV{ROCM_PATH}")
+endif()
+
+foreach(_DIR ${ROCM_PATH} /opt/rocm /opt/rocm/roctracer)
+    if(EXISTS ${_DIR})
+        get_filename_component(_ABS_DIR "${_DIR}" REALPATH)
+        list(APPEND _ROCM_ROCTRACER_PATHS ${_ABS_DIR})
+    endif()
+endforeach()
 
 # ----------------------------------------------------------------------------------------#
 
 find_path(
     roctracer_ROOT_DIR
-    NAMES include/roctracer.h
-    HINTS ${_ROCM_PATHS}
-    PATHS ${_ROCM_PATHS}
+    NAMES include/roctracer/roctracer.h include/roctracer.h
+    HINTS ${_ROCM_ROCTRACER_PATHS}
+    PATHS ${_ROCM_ROCTRACER_PATHS}
     PATH_SUFFIXES roctracer)
 
 mark_as_advanced(roctracer_ROOT_DIR)
@@ -23,17 +32,17 @@ mark_as_advanced(roctracer_ROOT_DIR)
 find_path(
     roctracer_INCLUDE_DIR
     NAMES roctracer.h
-    HINTS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
-    PATHS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
-    PATH_SUFFIXES roctracer/include include)
+    HINTS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
+    PATHS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
+    PATH_SUFFIXES include include/roctracer roctracer/include)
 
 mark_as_advanced(roctracer_INCLUDE_DIR)
 
 find_path(
     roctracer_hsa_INCLUDE_DIR
     NAMES hsa.h
-    HINTS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
-    PATHS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
+    HINTS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
+    PATHS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
     PATH_SUFFIXES include include/hsa)
 
 mark_as_advanced(roctracer_hsa_INCLUDE_DIR)
@@ -43,22 +52,22 @@ mark_as_advanced(roctracer_hsa_INCLUDE_DIR)
 find_library(
     roctracer_LIBRARY
     NAMES roctracer64 roctracer
-    HINTS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
-    PATHS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
+    HINTS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
+    PATHS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
     PATH_SUFFIXES lib lib64)
 
 find_library(
     roctracer_roctx_LIBRARY
     NAMES roctx64 roctx
-    HINTS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
-    PATHS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
+    HINTS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
+    PATHS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
     PATH_SUFFIXES lib lib64)
 
 find_library(
     roctracer_kfdwrapper_LIBRARY
     NAMES kfdwrapper64 kfdwrapper
-    HINTS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
-    PATHS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
+    HINTS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
+    PATHS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
     PATH_SUFFIXES lib lib64)
 
 find_package(hsakmt)
@@ -70,8 +79,8 @@ else()
     find_library(
         roctracer_hsakmt_LIBRARY
         NAMES hsakmt
-        HINTS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
-        PATHS ${roctracer_ROOT_DIR} ${_ROCM_PATHS}
+        HINTS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
+        PATHS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
         PATH_SUFFIXES lib lib64)
 endif()
 
@@ -122,6 +131,6 @@ endif()
 
 # ------------------------------------------------------------------------------#
 
-unset(_ROCM_PATHS)
+unset(_ROCM_ROCTRACER_PATHS)
 
 # ------------------------------------------------------------------------------#

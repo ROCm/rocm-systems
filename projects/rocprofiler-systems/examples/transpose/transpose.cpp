@@ -93,13 +93,18 @@ transpose_a(int* in, int* out, int M, int N)
     out[idx] = tile[threadIdx.x][threadIdx.y];
 }
 
+namespace
+{
+size_t nthreads = 2;
+size_t nitr     = 500;
+size_t nsync    = 10;
+}  // namespace
+
 void
 run(int rank, int tid, hipStream_t stream, int argc, char** argv)
 {
-    size_t       nitr  = 500;
-    size_t       nsync = 10;
-    unsigned int M     = 4960 * 2;
-    unsigned int N     = 4960 * 2;
+    unsigned int M = 4960 * 2;
+    unsigned int N = 4960 * 2;
     if(argc > 2) nitr = atoll(argv[2]);
     if(argc > 3) nsync = atoll(argv[3]);
 
@@ -186,29 +191,26 @@ do_a2a(int rank)
 int
 main(int argc, char** argv)
 {
-    int    rank     = 0;
-    int    size     = 1;
-    int    nthreads = 2;
-    int    nitr     = 5000;
-    size_t nsync    = 10;
+    int rank = 0;
+    int size = 1;
     for(int i = 1; i < argc; ++i)
     {
         auto _arg = std::string{ argv[i] };
         if(_arg == "?" || _arg == "-h" || _arg == "--help")
         {
             fprintf(stderr,
-                    "usage: transpose [NUM_THREADS (%i)] [NUM_ITERATION (%i)] "
+                    "usage: transpose [NUM_THREADS (%zu)] [NUM_ITERATION (%zu)] "
                     "[SYNC_EVERY_N_ITERATIONS (%zu)]\n",
                     nthreads, nitr, nsync);
             exit(EXIT_SUCCESS);
         }
     }
-    if(argc > 1) nthreads = atoi(argv[1]);
-    if(argc > 2) nitr = atoi(argv[2]);
+    if(argc > 1) nthreads = atoll(argv[1]);
+    if(argc > 2) nitr = atoll(argv[2]);
     if(argc > 3) nsync = atoll(argv[3]);
 
-    printf("[transpose] Number of threads: %i\n", nthreads);
-    printf("[transpose] Number of iterations: %i\n", nitr);
+    printf("[transpose] Number of threads: %zu\n", nthreads);
+    printf("[transpose] Number of iterations: %zu\n", nitr);
     printf("[transpose] Syncing every %zu iterations\n", nsync);
 
 #if defined(USE_MPI)
@@ -233,14 +235,14 @@ main(int argc, char** argv)
     {
         std::vector<std::thread> _threads{};
         std::vector<hipStream_t> _streams(nthreads);
-        for(int i = 0; i < nthreads; ++i)
+        for(size_t i = 0; i < nthreads; ++i)
             HIP_API_CALL(hipStreamCreate(&_streams.at(i)));
-        for(int i = 1; i < nthreads; ++i)
+        for(size_t i = 1; i < nthreads; ++i)
             _threads.emplace_back(run, rank, i, _streams.at(i), argc, argv);
         run(rank, 0, _streams.at(0), argc, argv);
         for(auto& itr : _threads)
             itr.join();
-        for(int i = 0; i < nthreads; ++i)
+        for(size_t i = 0; i < nthreads; ++i)
             HIP_API_CALL(hipStreamDestroy(_streams.at(i)));
     }
     HIP_API_CALL(hipDeviceSynchronize());

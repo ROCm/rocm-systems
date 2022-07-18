@@ -20,39 +20,69 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "info_type.hpp"
-#include "enumerated_list.hpp"
-#include "get_availability.hpp"
+#pragma once
 
-#include "library/api.hpp"
-#include "library/components/backtrace.hpp"
-#include "library/components/fork_gotcha.hpp"
-#include "library/components/mpi_gotcha.hpp"
-#include "library/components/omnitrace.hpp"
-#include "library/components/pthread_gotcha.hpp"
 #include "library/components/rocprofiler.hpp"
-#include "library/components/roctracer.hpp"
-#include "library/components/user_region.hpp"
+#include "library/defines.hpp"
+#include "library/timemory.hpp"
 
-#include <timemory/components/definition.hpp>
-#include <timemory/enum.h>
-#include <timemory/utility/macros.hpp>
+#include <timemory/backends/hardware_counters.hpp>
+#include <timemory/macros.hpp>
+#include <timemory/mpl/concepts.hpp>
+#include <timemory/mpl/macros.hpp>
 
+#include <array>
+#include <atomic>
+#include <cstring>
+#include <dlfcn.h>
+#include <iostream>
+#include <list>
+#include <map>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <unistd.h>
 #include <utility>
+#include <variant>
+#include <vector>
 
-template <size_t EndV>
-std::vector<info_type>
-get_component_info()
+namespace omnitrace
 {
-    using index_seq_t = std::make_index_sequence<EndV>;
-    using enum_list_t = typename enumerated_list<tim::type_list<>, index_seq_t>::type;
+namespace rocprofiler
+{
+std::map<uint32_t, std::vector<std::string_view>>
+get_data_labels();
 
-    auto _info = std::vector<info_type>{};
-    return get_availability<>{}(enum_list_t{}, _info);
+void
+rocm_initialize();
+
+void
+rocm_cleanup();
+
+bool&
+is_setup();
+
+void
+post_process();
+
+std::vector<comp::rocm_info_entry>
+rocm_metrics();
+
+#if !defined(OMNITRACE_USE_ROCPROFILER) || OMNITRACE_USE_ROCPROFILER == 0
+inline void
+post_process()
+{}
+
+inline void
+rocm_cleanup()
+{}
+
+inline std::vector<comp::rocm_info_entry>
+rocm_metrics()
+{
+    return std::vector<comp::rocm_info_entry>{};
 }
+#endif
 
-template std::vector<info_type>
-get_component_info<TIMEMORY_NATIVE_COMPONENTS_END>();
-
-template std::vector<info_type>
-get_component_info<TIMEMORY_COMPONENTS_END>();
+}  // namespace rocprofiler
+}  // namespace omnitrace

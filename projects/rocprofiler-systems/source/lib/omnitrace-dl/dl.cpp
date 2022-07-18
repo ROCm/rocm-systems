@@ -157,6 +157,25 @@ struct OMNITRACE_HIDDEN_API indirect
         setenv("HSA_TOOLS_LIB", _omni_hsa_lib.c_str(), 0);
 #endif
 
+#if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
+        auto _rocm_path    = get_env("ROCM_PATH", "/opt/rocm");
+        auto _rocp_metrics = common::join('/', _rocm_path, "rocprofiler/lib/metrics.xml");
+        setenv("HSA_TOOLS_LIB", m_omnilib.c_str(), 0);
+        setenv("ROCP_TOOL_LIB", m_omnilib.c_str(), 0);
+        setenv("ROCPROFILER_LOG", "1", 0);
+        setenv("ROCP_HSA_INTERCEPT", "1", 0);
+        setenv("ROCP_METRICS", _rocp_metrics.c_str(), 0);
+        setenv("HSA_TOOLS_REPORT_LOAD_FAILURE", "1", 0);
+        if(getenv("ROCM_PATH"))
+        {
+            setenv("OMNITRACE_ROCPROFILER_LIBRARY",
+                   common::join('/', getenv("ROCM_PATH"),
+                                "rocprofiler/lib/librocprofiler64.so")
+                       .c_str(),
+                   0);
+        }
+#endif
+
 #if OMNITRACE_USE_OMPT > 0
         if(get_env("OMNITRACE_USE_OMPT", true))
         {

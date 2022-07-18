@@ -39,6 +39,7 @@ TIMEMORY_DEFINE_NS_API(project, omnitrace)
 TIMEMORY_DEFINE_NS_API(category, process_sampling)
 
 TIMEMORY_DECLARE_COMPONENT(roctracer)
+TIMEMORY_DECLARE_COMPONENT(rocprofiler)
 
 /// \struct tim::trait::name
 /// \brief provides a constexpr string in ::value
@@ -129,6 +130,7 @@ using sampling_gpu_temp   = data_tracker<double, backtrace_gpu_temp>;
 using sampling_gpu_power  = data_tracker<double, backtrace_gpu_power>;
 using sampling_gpu_memory = data_tracker<double, backtrace_gpu_memory>;
 using roctracer           = tim::component::roctracer;
+using rocprofiler         = tim::component::rocprofiler;
 
 template <typename ApiT, typename StartFuncT = default_functor_t,
           typename StopFuncT = default_functor_t>
@@ -138,6 +140,10 @@ struct functors;
 
 #if !defined(OMNITRACE_USE_ROCTRACER)
 TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::roctracer, false_type)
+#endif
+
+#if !defined(OMNITRACE_USE_ROCPROFILER)
+TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::rocprofiler, false_type)
 #endif
 
 #if !defined(TIMEMORY_USE_LIBUNWIND)
@@ -169,6 +175,9 @@ TIMEMORY_SET_COMPONENT_API(omnitrace::component::user_region, project::omnitrace
 TIMEMORY_SET_COMPONENT_API(omnitrace::component::roctracer, project::omnitrace,
                            tpls::rocm, device::gpu, os::supports_linux,
                            category::external)
+TIMEMORY_SET_COMPONENT_API(omnitrace::component::rocprofiler, project::omnitrace,
+                           tpls::rocm, device::gpu, os::supports_linux,
+                           category::external, category::hardware_counter)
 TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_wall_clock, project::omnitrace,
                            category::timing, os::supports_unix, category::sampling,
                            category::interrupt_sampling)
@@ -198,6 +207,8 @@ TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::user_region, OMNITRACE_US
                                  "user_region", "omnitrace_user_region")
 TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::roctracer, OMNITRACE_ROCTRACER,
                                  "roctracer", "omnitrace_roctracer")
+TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::rocprofiler, OMNITRACE_ROCPROFILER,
+                                 "rocprofiler", "omnitrace_rocprofiler")
 TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::sampling_wall_clock,
                                  OMNITRACE_SAMPLING_WALL_CLOCK, "sampling_wall_clock", "")
 TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::sampling_cpu_clock,
@@ -226,6 +237,8 @@ TIMEMORY_METADATA_SPECIALIZATION(
     "Used by OMPT")
 TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::roctracer, "roctracer",
                                  "High-precision ROCm API and kernel tracing", "")
+TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::rocprofiler, "rocprofiler",
+                                 "ROCm kernel hardware counters", "")
 TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::sampling_wall_clock,
                                  "sampling_wall_clock", "Wall-clock timing",
                                  "Derived from statistical sampling")

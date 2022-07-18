@@ -58,6 +58,9 @@ void
 configure_disabled_settings();
 
 void
+finalize();
+
+void
 handle_deprecated_setting(const std::string& _old, const std::string& _new,
                           int _verbose = 0);
 
@@ -162,10 +165,13 @@ get_use_perfetto() OMNITRACE_HOT;
 bool&
 get_use_timemory() OMNITRACE_HOT;
 
-bool&
+bool
 get_use_roctracer() OMNITRACE_HOT;
 
-bool&
+bool
+get_use_rocprofiler() OMNITRACE_HOT;
+
+bool
 get_use_rocm_smi() OMNITRACE_HOT;
 
 bool&
@@ -276,6 +282,9 @@ get_trace_thread_locks();
 
 bool
 get_trace_thread_rwlocks();
+
+std::string
+get_rocm_events();
 }  // namespace config
 
 //

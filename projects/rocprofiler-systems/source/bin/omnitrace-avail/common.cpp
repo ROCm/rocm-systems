@@ -38,7 +38,6 @@ bool              alphabetical        = false;
 bool              available_only      = false;
 bool              all_info            = false;
 bool              force_brief         = false;
-bool              debug_msg           = false;
 bool              case_insensitive    = false;
 bool              regex_hl            = false;
 bool              expand_keys         = false;
@@ -50,7 +49,11 @@ int32_t           padding             = 4;
 str_vec_t         regex_keys          = {};
 str_vec_t         category_regex_keys = {};
 str_set_t         category_view       = {};
-std::stringstream lerr                = {};
+std::stringstream lerr{};
+
+bool    debug_msg = tim::get_env<bool>("OMNITRACE_DEBUG_AVAIL", settings::debug());
+int32_t verbose_level =
+    tim::get_env<int32_t>("OMNITRACE_VERBOSE_AVAIL", settings::verbose());
 
 // explicit setting names to exclude
 std::set<std::string> settings_exclude = {
@@ -321,7 +324,8 @@ process_categories(parser_t& p, const str_set_t& _category_options)
 
         if(_category_options.count(itr) == 0)
         {
-            if(!_is_shorthand("component") && !_is_shorthand("settings"))
+            if(!_is_shorthand("component") && !_is_shorthand("settings") &&
+               !_is_shorthand("hw_counters"))
                 throw std::runtime_error(
                     itr + " is not a valid category. Use --list-categories to view "
                           "valid categories");

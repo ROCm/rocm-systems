@@ -16,6 +16,8 @@ omnitrace_add_interface_library(
 omnitrace_add_interface_library(omnitrace-hip "Provides flags and libraries for HIP")
 omnitrace_add_interface_library(omnitrace-roctracer
                                 "Provides flags and libraries for roctracer")
+omnitrace_add_interface_library(omnitrace-rocprofiler
+                                "Provides flags and libraries for rocprofiler")
 omnitrace_add_interface_library(omnitrace-rocm-smi
                                 "Provides flags and libraries for rocm-smi")
 omnitrace_add_interface_library(omnitrace-mpi "Provides MPI or MPI headers")
@@ -31,9 +33,15 @@ omnitrace_add_interface_library(omnitrace-compile-definitions "Compile definitio
 
 # libraries with relevant compile definitions
 set(OMNITRACE_EXTENSION_LIBRARIES
-    omnitrace::omnitrace-hip omnitrace::omnitrace-roctracer omnitrace::omnitrace-rocm-smi
-    omnitrace::omnitrace-mpi omnitrace::omnitrace-ptl omnitrace::omnitrace-ompt
-    omnitrace::omnitrace-papi omnitrace::omnitrace-perfetto)
+    omnitrace::omnitrace-hip
+    omnitrace::omnitrace-roctracer
+    omnitrace::omnitrace-rocprofiler
+    omnitrace::omnitrace-rocm-smi
+    omnitrace::omnitrace-mpi
+    omnitrace::omnitrace-ptl
+    omnitrace::omnitrace-ompt
+    omnitrace::omnitrace-papi
+    omnitrace::omnitrace-perfetto)
 
 target_include_directories(
     omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/source/lib/omnitrace
@@ -44,6 +52,14 @@ target_link_libraries(omnitrace-headers INTERFACE omnitrace::omnitrace-threading
 
 # ensure the env overrides the appending /opt/rocm later
 string(REPLACE ":" ";" CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH};${CMAKE_PREFIX_PATH}")
+
+set(OMNITRACE_DEFAULT_ROCM_PATH
+    /opt/rocm
+    CACHE PATH "Default search path for ROCM")
+if(EXISTS ${OMNITRACE_DEFAULT_ROCM_PATH})
+    get_filename_component(OMNITRACE_DEFAULT_ROCM_PATH "${OMNITRACE_DEFAULT_ROCM_PATH}"
+                           REALPATH)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -84,7 +100,7 @@ endforeach()
 # ----------------------------------------------------------------------------------------#
 
 if(OMNITRACE_USE_HIP)
-    list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+    list(APPEND CMAKE_PREFIX_PATH ${OMNITRACE_DEFAULT_ROCM_PATH})
     find_package(hip ${omnitrace_FIND_QUIETLY} REQUIRED)
     omnitrace_target_compile_definitions(omnitrace-hip INTERFACE OMNITRACE_USE_HIP)
     target_link_libraries(omnitrace-hip INTERFACE hip::host)
@@ -97,7 +113,7 @@ endif()
 # ----------------------------------------------------------------------------------------#
 
 if(OMNITRACE_USE_ROCTRACER)
-    list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+    list(APPEND CMAKE_PREFIX_PATH ${OMNITRACE_DEFAULT_ROCM_PATH})
     find_package(roctracer ${omnitrace_FIND_QUIETLY} REQUIRED)
     omnitrace_target_compile_definitions(omnitrace-roctracer
                                          INTERFACE OMNITRACE_USE_ROCTRACER)
@@ -108,12 +124,26 @@ endif()
 
 # ----------------------------------------------------------------------------------------#
 #
+# rocprofiler
+#
+# ----------------------------------------------------------------------------------------#
+if(OMNITRACE_USE_ROCPROFILER)
+    list(APPEND CMAKE_PREFIX_PATH ${OMNITRACE_DEFAULT_ROCM_PATH})
+    find_package(rocprofiler ${omnitrace_FIND_QUIETLY} REQUIRED)
+    omnitrace_target_compile_definitions(omnitrace-rocprofiler
+                                         INTERFACE OMNITRACE_USE_ROCPROFILER)
+    target_link_libraries(omnitrace-rocprofiler INTERFACE rocprofiler::rocprofiler)
+    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${rocprofiler_LIBRARY_DIRS}")
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
 # rocm-smi
 #
 # ----------------------------------------------------------------------------------------#
 
 if(OMNITRACE_USE_ROCM_SMI)
-    list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+    list(APPEND CMAKE_PREFIX_PATH ${OMNITRACE_DEFAULT_ROCM_PATH})
     find_package(rocm-smi ${omnitrace_FIND_QUIETLY} REQUIRED)
     omnitrace_target_compile_definitions(omnitrace-rocm-smi
                                          INTERFACE OMNITRACE_USE_ROCM_SMI)
@@ -545,7 +575,7 @@ omnitrace_checkout_git_submodule(
     RELATIVE_PATH external/timemory
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://github.com/NERSC/timemory.git
-    REPO_BRANCH gpu-kernel-instrumentation)
+    REPO_BRANCH omnitrace)
 
 omnitrace_save_variables(
     BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS

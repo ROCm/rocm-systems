@@ -22,12 +22,12 @@
 
 #include "library/components/roctracer.hpp"
 #include "library/components/pthread_gotcha.hpp"
-#include "library/components/roctracer_callbacks.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 #include "library/dynamic_library.hpp"
 #include "library/redirect.hpp"
+#include "library/roctracer.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 
