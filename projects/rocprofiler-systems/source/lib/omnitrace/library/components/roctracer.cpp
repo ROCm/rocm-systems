@@ -150,8 +150,11 @@ roctracer::setup()
 
     ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API,
                                                     hip_api_callback, nullptr));
-    // ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX,
-    //                                                hip_api_callback, nullptr));
+    if(get_use_roctx())
+    {
+        ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX,
+                                                        roctx_api_callback, nullptr));
+    }
     // Enable HIP activity tracing
     ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
 

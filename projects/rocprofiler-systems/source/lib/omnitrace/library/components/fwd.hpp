@@ -69,6 +69,7 @@ TIMEMORY_DEFINE_NS_API(category, device_hsa)
 TIMEMORY_DEFINE_NS_API(category, rocm_hip)
 TIMEMORY_DEFINE_NS_API(category, rocm_hsa)
 TIMEMORY_DEFINE_NS_API(category, rocm_smi)
+TIMEMORY_DEFINE_NS_API(category, rocm_roctx)
 TIMEMORY_DEFINE_NS_API(category, kokkos)
 TIMEMORY_DEFINE_NS_API(category, mpi)
 TIMEMORY_DEFINE_NS_API(category, ompt)
@@ -84,6 +85,7 @@ TIMEMORY_DEFINE_NAME_TRAIT("user", category::user);
 TIMEMORY_DEFINE_NAME_TRAIT("rocm_hip", category::rocm_hip);
 TIMEMORY_DEFINE_NAME_TRAIT("rocm_hsa", category::rocm_hsa);
 TIMEMORY_DEFINE_NAME_TRAIT("rocm_smi", category::rocm_smi);
+TIMEMORY_DEFINE_NAME_TRAIT("rocm_roctx", category::rocm_roctx);
 TIMEMORY_DEFINE_NAME_TRAIT("sampling", category::sampling);
 TIMEMORY_DEFINE_NAME_TRAIT("thread_sampling", category::thread_sampling);
 TIMEMORY_DEFINE_NAME_TRAIT("kokkos", category::kokkos);

@@ -174,6 +174,9 @@ get_use_rocprofiler() OMNITRACE_HOT;
 bool
 get_use_rocm_smi() OMNITRACE_HOT;
 
+bool
+get_use_roctx();
+
 bool&
 get_use_sampling() OMNITRACE_HOT;
 

@@ -67,6 +67,9 @@ hip_exec_activity_callbacks(int64_t _tid);
 void
 hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg);
 
+void
+roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg);
+
 // Activity tracing callback
 void
 hip_activity_callback(const char* begin, const char* end, void*);

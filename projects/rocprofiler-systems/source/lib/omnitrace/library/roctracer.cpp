@@ -22,6 +22,7 @@
 
 #include "library/roctracer.hpp"
 #include "library.hpp"
+#include "library/components/fwd.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
 #include "library/debug.hpp"
@@ -44,6 +45,7 @@
 #include <roctracer_ext.h>
 #include <roctracer_hcc.h>
 #include <roctracer_hip.h>
+#include <roctracer_roctx.h>
 
 #define AMD_INTERNAL_BUILD 1
 #include <roctracer_hsa.h>
@@ -430,6 +432,91 @@ hip_exec_activity_callbacks(int64_t _tid)
 namespace
 {
 thread_local std::unordered_map<size_t, size_t> gpu_cids = {};
+}
+
+void
+roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
+                   void* /*arg*/)
+{
+    if(get_state() != State::Active || !trait::runtime_enabled<comp::roctracer>::get())
+        return;
+
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
+    if(domain != ACTIVITY_DOMAIN_ROCTX) return;
+
+    static auto _range_map  = std::unordered_map<roctx_range_id_t, std::string_view>{};
+    static auto _range_lock = std::mutex{};
+    const auto* _data       = reinterpret_cast<const roctx_api_data_t*>(callback_data);
+
+    switch(cid)
+    {
+        case ROCTX_API_ID_roctxRangePushA:
+        {
+            if(get_use_perfetto())
+                tracing::push_perfetto(category::rocm_roctx{}, _data->args.message);
+
+            if(get_use_timemory()) tracing::push_timemory(_data->args.message);
+
+            break;
+        }
+        case ROCTX_API_ID_roctxRangePop:
+        {
+            if(get_use_timemory()) tracing::pop_timemory(_data->args.message);
+            if(get_use_perfetto())
+                tracing::pop_perfetto(category::rocm_roctx{}, _data->args.message);
+            break;
+        }
+        case ROCTX_API_ID_roctxRangeStartA:
+        {
+            {
+                std::unique_lock<std::mutex> _lk{ _range_lock, std::defer_lock };
+                if(!_lk.owns_lock()) _lk.lock();
+                _range_map.emplace(roctx_range_id_t{ _data->args.id },
+                                   std::string_view{ _data->args.message });
+            }
+
+            if(get_use_perfetto())
+                tracing::push_perfetto(category::rocm_roctx{}, _data->args.message);
+
+            if(get_use_timemory()) tracing::push_timemory(_data->args.message);
+            break;
+        }
+        case ROCTX_API_ID_roctxRangeStop:
+        {
+            std::string_view _message = {};
+            {
+                std::unique_lock<std::mutex> _lk{ _range_lock, std::defer_lock };
+                if(!_lk.owns_lock()) _lk.lock();
+                auto itr = _range_map.find(roctx_range_id_t{ _data->args.id });
+                OMNITRACE_CI_THROW(itr == _range_map.end(),
+                                   "Error! could not find range with id %lu\n",
+                                   _data->args.id);
+                if(itr == _range_map.end())
+                {
+                    OMNITRACE_VERBOSE(0, "Warning! could not find range with id %lu\n",
+                                      _data->args.id);
+                    return;
+                }
+                else
+                {
+                    _message = itr->second;
+                }
+            }
+
+            if(!_message.empty())
+            {
+                if(get_use_timemory()) tracing::pop_timemory(_message.data());
+                if(get_use_perfetto())
+                    tracing::pop_perfetto(category::rocm_roctx{}, _message.data());
+            }
+
+            break;
+        }
+        case ROCTX_API_ID_roctxMarkA:
+            // we do nothing with marker events...for now
+        default: break;
+    }
 }
 
 // HIP API callback function

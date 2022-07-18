@@ -38,6 +38,7 @@
             .SetDescription("Device-side functions submitted via HIP API"),              \
         perfetto::Category("rocm_hip").SetDescription("Host-side HIP functions"),        \
         perfetto::Category("rocm_hsa").SetDescription("Host-side HSA functions"),        \
+        perfetto::Category("rocm_roctx").SetDescription("Host-side ROCTX labels"),       \
         perfetto::Category("device_busy")                                                \
             .SetDescription("Busy percentage of a GPU device"),                          \
         perfetto::Category("device_temp")                                                \

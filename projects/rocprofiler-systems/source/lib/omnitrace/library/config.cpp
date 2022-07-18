@@ -228,6 +228,11 @@ configure_settings(bool _init)
         "Enable sampling GPU power, temp, utilization, and memory usage", true, "backend",
         "rocm_smi", "rocm");
 
+    OMNITRACE_CONFIG_SETTING(
+        bool, "OMNITRACE_USE_ROCTX",
+        "Enable ROCtx API. Warning! Out-of-order ranges may corrupt perfetto flamegraph",
+        false, "backend", "roctracer", "rocm", "roctx");
+
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_SAMPLING",
                              "Enable statistical sampling of call-stack", false,
                              "backend", "sampling");
@@ -1192,6 +1197,17 @@ get_use_rocm_smi()
 {
 #if defined(OMNITRACE_USE_ROCM_SMI) && OMNITRACE_USE_ROCM_SMI > 0
     static auto _v = get_config()->find("OMNITRACE_USE_ROCM_SMI");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+#else
+    return false;
+#endif
+}
+
+bool
+get_use_roctx()
+{
+#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
+    static auto _v = get_config()->find("OMNITRACE_USE_ROCTX");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
     return false;
