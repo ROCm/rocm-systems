@@ -542,6 +542,24 @@ omnitrace_init_tooling_hidden()
         buffer_config->set_size_kb(buffer_size);
         buffer_config->set_fill_policy(_policy);
 
+        std::set<std::string> _available_categories = {};
+        std::set<std::string> _disabled_categories  = {};
+        for(auto itr : { OMNITRACE_PERFETTO_CATEGORIES })
+            _available_categories.emplace(itr.name);
+        auto _enabled_categories = config::get_perfetto_categories();
+        for(const auto& itr : _available_categories)
+        {
+            if(!_enabled_categories.empty() && _enabled_categories.count(itr) == 0)
+                _disabled_categories.emplace(itr);
+        }
+
+        for(const auto& itr : _disabled_categories)
+        {
+            OMNITRACE_VERBOSE(1, "Disabling perfetto track event category: %s\n",
+                              itr.c_str());
+            track_event_cfg.add_disabled_categories(itr);
+        }
+
         auto* ds_cfg = cfg.add_data_sources()->mutable_config();
         ds_cfg->set_name("track_event");  // this MUST be track_event
         ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());

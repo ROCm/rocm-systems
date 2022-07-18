@@ -24,6 +24,7 @@
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 #include "library/gpu.hpp"
+#include "library/perfetto.hpp"
 
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/mpi.hpp>
@@ -70,6 +71,16 @@ get_setting_name(std::string _v)
         itr = tolower(itr);
     auto _pos = _v.find(_prefix);
     if(_pos == 0) return _v.substr(_prefix.length());
+    return _v;
+}
+
+template <typename Tp>
+Tp
+get_available_perfetto_categories()
+{
+    auto _v = Tp{};
+    for(auto itr : { OMNITRACE_PERFETTO_CATEGORIES })
+        tim::utility::emplace(_v, itr.name);
     return _v;
 }
 
@@ -398,6 +409,11 @@ configure_settings(bool _init)
         "'ring_buffer' will overwrite old entries",
         "discard", "perfetto", "data")
         ->set_choices({ "fill", "discard" });
+
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_PERFETTO_CATEGORIES",
+                             "Categories to collect within perfetto", "", "perfetto",
+                             "data")
+        ->set_choices(get_available_perfetto_categories<std::vector<std::string>>());
 
     OMNITRACE_CONFIG_EXT_SETTING(int64_t, "OMNITRACE_CRITICAL_TRACE_COUNT",
                                  "Number of critical trace to export (0 == all)",
@@ -1381,6 +1397,20 @@ get_perfetto_fill_policy()
 {
     static auto _v = get_config()->find("OMNITRACE_PERFETTO_FILL_POLICY");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
+std::set<std::string>
+get_perfetto_categories()
+{
+    static auto _v     = get_config()->find("OMNITRACE_PERFETTO_CATEGORIES");
+    static auto _avail = get_available_perfetto_categories<std::set<std::string>>();
+    auto        _ret   = std::set<std::string>{};
+    for(auto itr : tim::delimit(
+            static_cast<tim::tsettings<std::string>&>(*_v->second).get(), " ,;:"))
+    {
+        if(_avail.count(itr) > 0) _ret.emplace(itr);
+    }
+    return _ret;
 }
 
 uint64_t

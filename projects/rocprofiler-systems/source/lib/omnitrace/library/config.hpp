@@ -240,6 +240,9 @@ get_perfetto_combined_traces();
 std::string
 get_perfetto_fill_policy();
 
+std::set<std::string>
+get_perfetto_categories();
+
 uint64_t
 get_critical_trace_update_freq();
 

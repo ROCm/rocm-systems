@@ -61,6 +61,9 @@
         perfetto::Category("process_page_fault")                                         \
             .SetDescription(                                                             \
                 "Memory page faults in process (collected in background thread)"),       \
+        perfetto::Category("process_memory_hwm")                                         \
+            .SetDescription("Memory High-Water Mark i.e. peak memory usage (collected "  \
+                            "in background thread)"),                                    \
         perfetto::Category("process_virtual_memory")                                     \
             .SetDescription("Virtual memory usage in process in MB (collected in "       \
                             "background thread)"),                                       \
