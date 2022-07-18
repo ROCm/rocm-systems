@@ -43,6 +43,7 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
 
     # the list of variables set by module. when one of these changes, we need to unset the
     # cache variables after it
+    set(_ALL_VARIABLES)
     foreach(
         _V
         EPOCH

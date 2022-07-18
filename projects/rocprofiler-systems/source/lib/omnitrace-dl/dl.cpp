@@ -27,10 +27,12 @@
 #define OMNITRACE_COMMON_LIBRARY_NAME "dl"
 
 #include "dl.hpp"
+#include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/invoke.hpp"
 #include "common/join.hpp"
+#include "common/setup.hpp"
 
 #include <cassert>
 #include <gnu/libc-version.h>
@@ -136,61 +138,26 @@ const char* _omnitrace_dl_dlopen_descr = "RTLD_LAZY | RTLD_LOCAL";
 /// This class contains function pointers for omnitrace's instrumentation functions
 struct OMNITRACE_HIDDEN_API indirect
 {
-    OMNITRACE_INLINE indirect(const std::string& omnilib, const std::string& userlib,
-                              const std::string& dllib)
-    : m_omnilib{ find_path(omnilib) }
-    , m_dllib{ find_path(dllib) }
-    , m_userlib{ find_path(userlib) }
+    OMNITRACE_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
+                              const std::string& _dllib)
+    : m_omnilib{ utility::find_path(_omnilib, _omnitrace_dl_verbose) }
+    , m_dllib{ utility::find_path(_dllib, _omnitrace_dl_verbose) }
+    , m_userlib{ utility::find_path(_userlib, _omnitrace_dl_verbose) }
     {
         if(_omnitrace_dl_verbose >= 1)
         {
             fprintf(stderr, "[omnitrace][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(omnilib.c_str()), m_omnilib.c_str());
+                    ::basename(_omnilib.c_str()), m_omnilib.c_str());
             fprintf(stderr, "[omnitrace][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(dllib.c_str()), m_dllib.c_str());
+                    ::basename(_dllib.c_str()), m_dllib.c_str());
             fprintf(stderr, "[omnitrace][dl][pid=%i] %s resolved to '%s'\n", getpid(),
-                    ::basename(userlib.c_str()), m_userlib.c_str());
+                    ::basename(_userlib.c_str()), m_userlib.c_str());
         }
 
-#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
-        auto _omni_hsa_lib = m_omnilib;
-        setenv("HSA_TOOLS_LIB", _omni_hsa_lib.c_str(), 0);
-#endif
+        auto _search_paths =
+            common::join(':', utility::dirname(_omnilib), utility::dirname(_dllib));
+        common::setup_environ(_omnitrace_dl_verbose, _search_paths, _omnilib, _dllib);
 
-#if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
-        auto _rocm_path    = get_env("ROCM_PATH", "/opt/rocm");
-        auto _rocp_metrics = common::join('/', _rocm_path, "rocprofiler/lib/metrics.xml");
-        setenv("HSA_TOOLS_LIB", m_omnilib.c_str(), 0);
-        setenv("ROCP_TOOL_LIB", m_omnilib.c_str(), 0);
-        setenv("ROCPROFILER_LOG", "1", 0);
-        setenv("ROCP_HSA_INTERCEPT", "1", 0);
-        setenv("ROCP_METRICS", _rocp_metrics.c_str(), 0);
-        setenv("HSA_TOOLS_REPORT_LOAD_FAILURE", "1", 0);
-        if(getenv("ROCM_PATH"))
-        {
-            setenv("OMNITRACE_ROCPROFILER_LIBRARY",
-                   common::join('/', getenv("ROCM_PATH"),
-                                "rocprofiler/lib/librocprofiler64.so")
-                       .c_str(),
-                   0);
-        }
-#endif
-
-#if OMNITRACE_USE_OMPT > 0
-        if(get_env("OMNITRACE_USE_OMPT", true))
-        {
-            std::string _omni_omp_libs = m_dllib;
-            const char* _omp_libs      = getenv("OMP_TOOL_LIBRARIES");
-            if(_omp_libs) _omni_omp_libs = common::join(':', _omni_omp_libs, _omp_libs);
-            if(_omnitrace_dl_verbose >= 1)
-            {
-                fprintf(stderr,
-                        "[omnitrace][dl][pid=%i] setting OMP_TOOL_LIBRARIES to '%s'\n",
-                        getpid(), _omni_omp_libs.c_str());
-            }
-            setenv("OMP_TOOL_LIBRARIES", _omni_omp_libs.c_str(), 1);
-        }
-#endif
         m_omnihandle = open(m_omnilib);
         m_userhandle = open(m_userlib);
         init();
@@ -323,34 +290,6 @@ struct OMNITRACE_HIDDEN_API indirect
                 reinterpret_cast<void*>(&omnitrace_user_push_region_dl),
                 reinterpret_cast<void*>(&omnitrace_user_pop_region_dl));
         }
-    }
-
-    static OMNITRACE_INLINE std::string find_path(const std::string& _path)
-    {
-        auto _paths_search =
-            join(":", get_env("OMNITRACE_PATH", ""), get_env("LD_LIBRARY_PATH", ""),
-                 get_env("LIBRARY_PATH", ""));
-
-        auto _paths = delimit(_paths_search, ":");
-
-        auto file_exists = [](const std::string& name) {
-            struct stat buffer;
-            return (stat(name.c_str(), &buffer) == 0);
-        };
-
-        int _verbose_lvl = 2;
-        for(const auto& itr : _paths)
-        {
-            auto _f = join('/', itr, _path);
-            if(_omnitrace_dl_verbose >= _verbose_lvl)
-            {
-                fprintf(stderr,
-                        "[omnitrace][dl][pid=%i] searching for '%s' in '%s' ...\n",
-                        getpid(), _path.c_str(), itr.c_str());
-            }
-            if(file_exists(_f)) return _f;
-        }
-        return _path;
     }
 
 public:

@@ -34,28 +34,34 @@ inline namespace common
 namespace
 {
 inline std::string
-get_env(const char* env_id, const char* _default)
+get_env(std::string_view env_id, std::string_view _default)
 {
-    if(strlen(env_id) == 0) return _default;
-    char* env_var = ::std::getenv(env_id);
+    if(env_id.empty()) return std::string{ _default };
+    char* env_var = ::std::getenv(env_id.data());
     if(env_var) return std::string{ env_var };
-    return _default;
+    return std::string{ _default };
+}
+
+inline std::string
+get_env(std::string_view env_id, const char* _default)
+{
+    return get_env(env_id, std::string_view{ _default });
 }
 
 inline int
-get_env(const char* env_id, int _default)
+get_env(std::string_view env_id, int _default)
 {
-    if(strlen(env_id) == 0) return _default;
-    char* env_var = ::std::getenv(env_id);
+    if(env_id.empty()) return _default;
+    char* env_var = ::std::getenv(env_id.data());
     if(env_var) return std::stoi(env_var);
     return _default;
 }
 
 inline bool
-get_env(const char* env_id, bool _default)
+get_env(std::string_view env_id, bool _default)
 {
-    if(strlen(env_id) == 0) return _default;
-    char* env_var = ::std::getenv(env_id);
+    if(env_id.empty()) return _default;
+    char* env_var = ::std::getenv(env_id.data());
     if(env_var)
     {
         if(std::string_view{ env_var }.find_first_not_of("0123456789") ==
