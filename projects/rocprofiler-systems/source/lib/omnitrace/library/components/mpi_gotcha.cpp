@@ -170,7 +170,6 @@ mpi_gotcha::update()
         tim::mpi::set_rank(_rank);
         tim::mpi::set_size(_size);
         tim::settings::default_process_suffix() = _rank;
-        get_perfetto_output_filename().clear();
 
         OMNITRACE_BASIC_VERBOSE(0, "[pid=%i] MPI rank: %i (%i), MPI size: %i (%i)\n",
                                 process::get_id(), tim::mpi::rank(), _rank,
@@ -338,7 +337,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
                 static thread_local int _num_updates = 0;
                 static int              _disable_after =
                     tim::get_env<int>("OMNITRACE_MPI_MAX_COMM_UPDATES", 4);
-                if(update() && ++_num_updates >= _disable_after) disable_comm_intercept();
+                if(_num_updates++ < _disable_after) update();
             }
         }
     }
