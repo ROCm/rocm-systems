@@ -3281,6 +3281,12 @@ if __name__ == '__main__':
     if args.save:
         save(deviceList, args.save)
 
+    if RETCODE and not PRINT_JSON:
+        logging.debug(' \t\t One or more commands failed.')
+    # Set RETCODE value to 0, unless loglevel is None or 'warning' (default)
+    if args.loglevel is None or getattr(logging, args.loglevel.upper(), logging.WARNING) == logging.WARNING:
+        RETCODE = 0
+
     if PRINT_JSON:
         # Check that we have some actual data to print, instead of the
         # empty list that we initialized above
@@ -3308,8 +3314,6 @@ if __name__ == '__main__':
                 devCsv = formatCsv(deviceList)
                 print(devCsv)
 
-    if RETCODE and not PRINT_JSON:
-        logging.debug(' \t\t One or more commands failed.')
     printLogSpacer(footerString)
 
     rsmi_ret_ok(rocmsmi.rsmi_shut_down())
