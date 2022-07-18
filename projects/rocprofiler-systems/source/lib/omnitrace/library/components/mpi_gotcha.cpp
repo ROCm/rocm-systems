@@ -137,6 +137,12 @@ mpi_gotcha::configure()
     };
 }
 
+void
+mpi_gotcha::shutdown()
+{
+    update();
+}
+
 bool
 mpi_gotcha::update()
 {

@@ -605,18 +605,10 @@ omnitrace_add_test(
         args
         --min-instructions
         0
-    RUNTIME_ARGS
-        -e
-        -v
-        1
-        --label
-        file
-        line
-        return
-        args
-        --min-instructions
-        0
-    ENVIRONMENT "${_base_environment}")
+    ENVIRONMENT "${_base_environment}"
+    REWRITE_RUN_PASS_REGEX
+        "(/[A-Za-z-]+/perfetto-trace-0.proto).*(/[A-Za-z-]+/wall_clock-0.txt')"
+    REWRITE_RUN_FAIL_REGEX "-[0-9][0-9]+.(json|txt|proto)")
 
 omnitrace_add_test(
     NAME lulesh

@@ -846,15 +846,16 @@ omnitrace_finalize_hidden(void)
         sampling::block_signals();
     }
 
-    OMNITRACE_VERBOSE_F(1, "Shutting down miscellaneous gotchas...\n");
     // stop the gotcha bundle
     if(get_gotcha_bundle())
     {
+        OMNITRACE_VERBOSE_F(1, "Shutting down miscellaneous gotchas...\n");
         get_gotcha_bundle()->stop();
         get_gotcha_bundle().reset();
+        mpi_gotcha::shutdown();
     }
 
-    OMNITRACE_VERBOSE_F(1, "Shutting down pthread gotcha...\n");
+    OMNITRACE_VERBOSE_F(1, "Shutting down pthread gotchas...\n");
     pthread_gotcha::shutdown();
 
     if(get_use_process_sampling())
@@ -1024,7 +1025,8 @@ omnitrace_finalize_hidden(void)
                 return _dst;
             };
 
-            perfetto_mpi_get_t{ _rank_data, _trace_data, _combine };
+            perfetto_mpi_get_t{ get_perfetto_combined_traces(), settings::node_count() }(
+                _rank_data, _trace_data, _combine);
             for(auto& itr : _rank_data)
                 trace_data =
                     (trace_data.empty()) ? std::move(itr) : _combine(trace_data, itr);
