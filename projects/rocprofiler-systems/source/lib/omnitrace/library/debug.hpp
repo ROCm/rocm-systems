@@ -340,20 +340,20 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 //--------------------------------------------------------------------------------------//
 #define OMNITRACE_VERBOSE(LEVEL, ...)                                                    \
     OMNITRACE_CONDITIONAL_PRINT(                                                         \
-        ::omnitrace::get_debug() || ::omnitrace::get_verbose() >= LEVEL, __VA_ARGS__)
+        ::omnitrace::get_debug() || (::omnitrace::get_verbose() >= LEVEL), __VA_ARGS__)
 
 #define OMNITRACE_BASIC_VERBOSE(LEVEL, ...)                                              \
     OMNITRACE_CONDITIONAL_BASIC_PRINT(::omnitrace::get_debug_env() ||                    \
-                                          ::omnitrace::get_verbose_env() >= LEVEL,       \
+                                          (::omnitrace::get_verbose_env() >= LEVEL),     \
                                       __VA_ARGS__)
 
 #define OMNITRACE_VERBOSE_F(LEVEL, ...)                                                  \
     OMNITRACE_CONDITIONAL_PRINT_F(                                                       \
-        ::omnitrace::get_debug() || ::omnitrace::get_verbose() >= LEVEL, __VA_ARGS__)
+        ::omnitrace::get_debug() || (::omnitrace::get_verbose() >= LEVEL), __VA_ARGS__)
 
 #define OMNITRACE_BASIC_VERBOSE_F(LEVEL, ...)                                            \
     OMNITRACE_CONDITIONAL_BASIC_PRINT_F(::omnitrace::get_debug_env() ||                  \
-                                            ::omnitrace::get_verbose_env() >= LEVEL,     \
+                                            (::omnitrace::get_verbose_env() >= LEVEL),   \
                                         __VA_ARGS__)
 
 //--------------------------------------------------------------------------------------//

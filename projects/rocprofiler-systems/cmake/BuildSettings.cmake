@@ -199,10 +199,8 @@ endif()
 #
 omnitrace_add_interface_library(omnitrace-develop-options "Adds developer compiler flags")
 if(OMNITRACE_BUILD_DEVELOPER)
-    add_target_flag_if_avail(
-        omnitrace-develop-options
-        # "-Wabi"
-        "-Wdouble-promotion" "-Wshadow" "-Wextra" "-Wpedantic" "-Werror" "/showIncludes")
+    add_target_flag_if_avail(omnitrace-develop-options "-Werror" "-Wdouble-promotion"
+                             "-Wshadow" "-Wextra" "-Wpedantic" "-Werror" "/showIncludes")
 endif()
 
 # ----------------------------------------------------------------------------------------#
