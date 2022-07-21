@@ -55,7 +55,7 @@ namespace omnitrace
 {
 inline namespace common
 {
-namespace utility
+namespace path
 {
 inline std::string
 find_path(const std::string& _path, int _verbose, std::string _search_paths = {})
@@ -109,15 +109,15 @@ dirname(const std::string& _fname)
         return _fname.substr(0, _fname.find_last_of('/'));
     return std::string{};
 }
-}  // namespace utility
+}  // namespace path
 
-void
+inline void
 setup_environ(int _verbose, const std::string& _search_paths = {},
               std::string _omnilib    = "libomnitrace.so",
               std::string _omnilib_dl = "libomnitrace-dl.so")
 {
-    _omnilib    = utility::find_path(_omnilib, _verbose, _search_paths);
-    _omnilib_dl = utility::find_path(_omnilib_dl, _verbose, _search_paths);
+    _omnilib    = common::path::find_path(_omnilib, _verbose, _search_paths);
+    _omnilib_dl = common::path::find_path(_omnilib_dl, _verbose, _search_paths);
 
     // This environment variable forces the ROCR-Runtime to use polling to wait
     // for signals rather than interrupts. We set this variable to avoid issues with
@@ -161,7 +161,8 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
 #if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0
     std::string _omni_omp_libs = _omnilib_dl;
     const char* _omp_libs      = getenv("OMP_TOOL_LIBRARIES");
-    if(_omp_libs && std::string_view{ _omp_libs }.find(_omnilib_dl) == std::string::npos)
+    if(_omp_libs != nullptr &&
+       std::string_view{ _omp_libs }.find(_omnilib_dl) == std::string::npos)
         _omni_omp_libs = common::join(':', _omp_libs, _omnilib_dl);
     OMNITRACE_SETUP_LOG(_verbose >= 1, "setting OMP_TOOL_LIBRARIES to '%s'\n",
                         _omni_omp_libs.c_str());

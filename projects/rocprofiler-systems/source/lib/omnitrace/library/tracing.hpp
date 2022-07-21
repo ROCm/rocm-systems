@@ -29,6 +29,7 @@
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/timemory.hpp"
+#include "library/utility.hpp"
 
 namespace omnitrace
 {
@@ -121,9 +122,15 @@ inline void
 thread_init_sampling()
 {
     static thread_local auto _v = []() {
-        auto _use_sampling = get_use_sampling();
-        if(_use_sampling) sampling::setup();
-        return _use_sampling;
+        auto _idx = utility::get_thread_index();
+        // the main thread will initialize sampling when it initializes the tooling
+        if(_idx > 0)
+        {
+            auto _use_sampling = get_use_sampling();
+            if(_use_sampling) sampling::setup();
+            return _use_sampling;
+        }
+        return false;
     }();
     (void) _v;
 }

@@ -140,9 +140,9 @@ struct OMNITRACE_HIDDEN_API indirect
 {
     OMNITRACE_INLINE indirect(const std::string& _omnilib, const std::string& _userlib,
                               const std::string& _dllib)
-    : m_omnilib{ utility::find_path(_omnilib, _omnitrace_dl_verbose) }
-    , m_dllib{ utility::find_path(_dllib, _omnitrace_dl_verbose) }
-    , m_userlib{ utility::find_path(_userlib, _omnitrace_dl_verbose) }
+    : m_omnilib{ common::path::find_path(_omnilib, _omnitrace_dl_verbose) }
+    , m_dllib{ common::path::find_path(_dllib, _omnitrace_dl_verbose) }
+    , m_userlib{ common::path::find_path(_userlib, _omnitrace_dl_verbose) }
     {
         if(_omnitrace_dl_verbose >= 1)
         {
@@ -154,8 +154,8 @@ struct OMNITRACE_HIDDEN_API indirect
                     ::basename(_userlib.c_str()), m_userlib.c_str());
         }
 
-        auto _search_paths =
-            common::join(':', utility::dirname(_omnilib), utility::dirname(_dllib));
+        auto _search_paths = common::join(':', common::path::dirname(_omnilib),
+                                          common::path::dirname(_dllib));
         common::setup_environ(_omnitrace_dl_verbose, _search_paths, _omnilib, _dllib);
 
         m_omnihandle = open(m_omnilib);

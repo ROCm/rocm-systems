@@ -141,7 +141,8 @@ get_backtrace_init(int64_t _tid)
 unique_ptr_t<bool>&
 get_sampler_running(int64_t _tid)
 {
-    static auto& _v = sampler_running_instances::instances();
+    static auto& _v = sampler_running_instances::instances(
+        sampler_running_instances::construct_on_init{}, false);
     return _v.at(_tid);
 }
 }  // namespace
@@ -286,6 +287,8 @@ backtrace::sample(int signum)
             _timestamp_str(_now).c_str(), _diff, _tot);
     }
 
+    if(!*get_sampler_running(0)) return;
+
     m_size       = 0;
     m_tid        = threading::get_id();
     m_ts         = comp::wall_clock::record();
@@ -323,6 +326,7 @@ backtrace::configure(bool _setup, int64_t _tid)
     {
         (void) get_debug_sampling();  // make sure query in sampler does not allocate
         assert(_tid == threading::get_id());
+
         sampling::block_signals(*_signal_types);
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
@@ -336,7 +340,6 @@ backtrace::configure(bool _setup, int64_t _tid)
         auto _delay     = std::max<double>(1.0e-3, get_sampling_delay());
 
         OMNITRACE_DEBUG("Configuring sampler for thread %lu...\n", _tid);
-        sampler_running_instances::construct(true);
         sampling::sampler_instances::construct("omnitrace", _tid, *_signal_types);
         _sampler->set_signals(*_signal_types);
         _sampler->set_flags(SA_RESTART);
@@ -360,7 +363,7 @@ backtrace::configure(bool _setup, int64_t _tid)
                         _tid, _sampler->get_frequency(units::sec),
                         _sampler->get_rate(units::sec));
 
-        // (void) sampling::sampler_t::get_samplers(_tid);
+        *_running = true;
         backtrace_init_instances::construct();
         get_backtrace_init(_tid)->sample();
         _sampler->configure(false);
@@ -376,8 +379,23 @@ backtrace::configure(bool _setup, int64_t _tid)
             sampling::block_signals(*_signal_types);
         }
 
-        // this propagates to all threads
-        if(_tid == 0) _sampler->ignore(*_signal_types);
+        // remove the timer delivering the signal
+        _sampler->reset(false, *_signal_types);
+
+        if(_tid == 0)
+        {
+            // this propagates to all threads
+            _sampler->ignore(*_signal_types);
+            for(int64_t i = 1; i < OMNITRACE_MAX_THREADS; ++i)
+            {
+                if(sampling::get_sampler(i))
+                {
+                    sampling::get_sampler(i)->reset(false,
+                                                    *sampling::get_signal_types(i));
+                    *get_sampler_running(i) = false;
+                }
+            }
+        }
 
         _sampler->stop();
         _sampler->swap_data();
@@ -389,6 +407,7 @@ backtrace::configure(bool _setup, int64_t _tid)
                 OMNITRACE_DEBUG("HW COUNTER: stopped...\n");
             }
         }
+        OMNITRACE_DEBUG("Sampler destroyed for thread %lu\n", _tid);
     }
 
     return (_signal_types) ? *_signal_types : std::set<int>{};

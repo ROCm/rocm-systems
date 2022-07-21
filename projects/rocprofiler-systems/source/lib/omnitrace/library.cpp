@@ -78,6 +78,8 @@ auto
 ensure_finalization(bool _static_init = false)
 {
     (void) threading::get_id();
+    (void) utility::get_thread_index();
+
     if(!_static_init)
     {
         OMNITRACE_DEBUG_F("\n");
