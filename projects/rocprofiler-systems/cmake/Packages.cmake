@@ -499,8 +499,8 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-target_compile_definitions(omnitrace-timemory-config
-                           INTERFACE TIMEMORY_PAPI_ARRAY_SIZE=16)
+target_compile_definitions(omnitrace-timemory-config INTERFACE TIMEMORY_PAPI_ARRAY_SIZE=16
+                                                               TIMEMORY_USE_ROOFLINE=0)
 
 set(TIMEMORY_EXTERNAL_INTERFACE_LIBRARY
     omnitrace-timemory-config
