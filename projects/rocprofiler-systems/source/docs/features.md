@@ -21,26 +21,35 @@ manage extensions, resources, data, etc.
     - Generate a new executable and/or library with instrumentation built-in
 - Statistical sampling
   - Periodic software interrupts per-thread
-- Background thread sampling
-  - Record process and system-level values while an application executes
+- Process-level sampling
+  - Background thread records process-, system- and device-level metrics while the application executes
 - Critical trace generation
 
 ### Data Analysis
 
-- Critical trace generation (beta)
-- Support for
+- High-level summary profiles with mean/min/max/stddev statistics
+  - Low overhead, memory efficient
+  - Ideal for running at scale
+- Comprehensive traces
+  - Every individual event/measurement
+- Critical trace analysis (alpha)
 
 ### Parallelism API Support
 
-- Built-in MPI support
-- Kokkos-Tools support
+- HIP
+- HSA
+- Pthreads
+- MPI
+- Kokkos-Tools (KokkosP)
 - OpenMP-Tools (OMPT)
 
 ### GPU Metrics
 
+- GPU hardware counters
 - HIP API tracing
-- ROCM HSA API tracing
-- Kernel runtime tracing
+- HIP kernel tracing
+- HSA API tracing
+- HSA operation tracing
 - System-level sampling (via rocm-smi)
   - Memory usage
   - Power usage

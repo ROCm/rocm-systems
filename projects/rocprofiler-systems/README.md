@@ -6,6 +6,80 @@
 
 > ***[Omnitrace](https://github.com/AMDResearch/omnitrace) is an AMD open source research project and is not supported as part of the ROCm software stack.***
 
+## Overview
+
+AMD Research is seeking to improve observability and performance analysis for software running on AMD heterogeneous systems.
+If you are familiar with [rocprof](https://rocmdocs.amd.com/en/latest/ROCm_Tools/ROCm-Tools.html) and/or [uProf](https://developer.amd.com/amd-uprof/),
+you will find many of the capabilities of these tools available via Omnitrace in addition to many new capabilities.
+
+Omnitrace is a comprehensive profiling and tracing tool for parallel applications written in C, C++, Fortran, HIP, OpenCL, and Python which execute on the CPU or CPU+GPU.
+It is capable of gathering the performance information of functions through any combination of binary instrumentation, call-stack sampling, user-defined regions, and Python interpreter hooks.
+Omnitrace supports interactive visualization of comprehensive traces in the web browser in addition to high-level summary profiles with mean/min/max/stddev statistics.
+In addition to runtimes, omnitrace supports the collection of system-level metrics such as the CPU frequency, GPU temperature, and GPU utilization, process-level metrics
+such as the memory usage, page-faults, and context-switches, and thread-level metrics such as memory usage, CPU time, and numerous hardware counters.
+
+### Data Collection Modes
+
+- Dynamic instrumentation
+  - Runtime instrumentation
+    - Instrument executable and shared libraries at runtime
+  - Binary rewriting
+    - Generate a new executable and/or library with instrumentation built-in
+- Statistical sampling
+  - Periodic software interrupts per-thread
+- Process-level sampling
+  - Background thread records process-, system- and device-level metrics while the application executes
+- Critical trace generation
+
+### Data Analysis
+
+- High-level summary profiles with mean/min/max/stddev statistics
+  - Low overhead, memory efficient
+  - Ideal for running at scale
+- Comprehensive traces
+  - Every individual event/measurement
+- Critical trace analysis (alpha)
+
+### Parallelism API Support
+
+- HIP
+- HSA
+- Pthreads
+- MPI
+- Kokkos-Tools (KokkosP)
+- OpenMP-Tools (OMPT)
+
+### GPU Metrics
+
+- GPU hardware counters
+- HIP API tracing
+- HIP kernel tracing
+- HSA API tracing
+- HSA operation tracing
+- System-level sampling (via rocm-smi)
+  - Memory usage
+  - Power usage
+  - Temperature
+  - Utilization
+
+### CPU Metrics
+
+- CPU hardware counters sampling and profiles
+- CPU frequency sampling
+- Various timing metrics
+  - Wall time
+  - CPU time (process and/or thread)
+  - CPU utilization (process and/or thread)
+  - User CPU time
+  - Kernel CPU time
+- Various memory metrics
+  - High-water mark (sampling and profiles)
+  - Memory page allocation
+  - Virtual memory usage
+- Network statistics
+- I/O metrics
+- ... many more
+
 ## Documentation
 
 The full documentation for [omnitrace](https://github.com/AMDResearch/omnitrace) is available at [amdresearch.github.io/omnitrace](https://amdresearch.github.io/omnitrace/).
