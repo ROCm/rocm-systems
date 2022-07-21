@@ -30,6 +30,7 @@
 
 #include <sstream>
 #include <string>
+#include <tuple>
 
 struct module_function
 {
@@ -117,19 +118,18 @@ public:
 
     friend bool operator<(const module_function& lhs, const module_function& rhs)
     {
-        return (lhs.module_name == rhs.module_name)
-                   ? ((lhs.function_name == rhs.function_name)
-                          ? (lhs.signature.get() < rhs.signature.get())
-                          : (lhs.function_name < rhs.function_name))
-                   : (lhs.module_name < rhs.module_name);
+        return std::tie(lhs.module_name, lhs.start_address, lhs.function_name,
+                        lhs.address_range, lhs.num_instructions, lhs.signature) <
+               std::tie(rhs.module_name, rhs.start_address, rhs.function_name,
+                        rhs.address_range, rhs.num_instructions, rhs.signature);
     }
 
     friend bool operator==(const module_function& lhs, const module_function& rhs)
     {
-        return std::tie(lhs.module_name, lhs.function_name, lhs.signature,
-                        lhs.address_range, lhs.num_instructions) ==
-               std::tie(rhs.module_name, rhs.function_name, rhs.signature,
-                        rhs.address_range, rhs.num_instructions);
+        return std::tie(lhs.module_name, lhs.start_address, lhs.function_name,
+                        lhs.address_range, lhs.num_instructions, lhs.signature) ==
+               std::tie(rhs.module_name, rhs.start_address, rhs.function_name,
+                        rhs.address_range, rhs.num_instructions, rhs.signature);
     }
 
     friend std::ostream& operator<<(std::ostream& os, const module_function& rhs)

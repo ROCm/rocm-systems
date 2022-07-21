@@ -26,7 +26,7 @@ set_target_properties(
     omnitrace-user-library
     PROPERTIES OUTPUT_NAME omnitrace-user
                VERSION ${PROJECT_VERSION}
-               SOVERSION ${PROJECT_VERSION_MAJOR}
+               SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
                POSITION_INDEPENDENT_CODE ON
                BUILD_RPATH "\$ORIGIN"
                INSTALL_RPATH "\$ORIGIN")

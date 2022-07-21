@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include <iostream>
 #include <mutex>
 #include <random>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -46,7 +47,7 @@ using auto_lock_t = std::unique_lock<std::mutex>;
             auto_lock_t _lk{ print_lock };                                               \
             fprintf(stderr, "%s:%d :: HIP error : %s\n", __FILE__, __LINE__,             \
                     hipGetErrorString(error_));                                          \
-            exit(EXIT_FAILURE);                                                          \
+            throw std::runtime_error("hip_api_call");                                    \
         }                                                                                \
     }
 
@@ -58,7 +59,7 @@ check_hip_error(void)
     {
         auto_lock_t _lk{ print_lock };
         std::cerr << "Error: " << hipGetErrorString(err) << std::endl;
-        exit(err);
+        throw std::runtime_error("hip_api_call");
     }
 }
 

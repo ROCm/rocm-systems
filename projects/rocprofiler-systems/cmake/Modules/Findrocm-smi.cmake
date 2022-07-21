@@ -9,7 +9,7 @@ if(NOT ROCM_PATH AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
     set(ROCM_PATH "$ENV{ROCM_PATH}")
 endif()
 
-foreach(_DIR ${ROCM_PATH} /opt/rocm /opt/rocm/rocm_smi)
+foreach(_DIR ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm /opt/rocm/rocm_smi)
     if(EXISTS ${_DIR})
         get_filename_component(_ABS_DIR "${_DIR}" REALPATH)
         list(APPEND _ROCM_SMI_PATHS ${_ABS_DIR})

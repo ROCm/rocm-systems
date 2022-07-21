@@ -178,7 +178,7 @@ set_target_properties(
     omnitrace-library
     PROPERTIES OUTPUT_NAME omnitrace
                VERSION ${PROJECT_VERSION}
-               SOVERSION ${PROJECT_VERSION_MAJOR}
+               SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
                INSTALL_RPATH "${OMNITRACE_LIB_INSTALL_RPATH}")
 
 omnitrace_strip_target(omnitrace-library)

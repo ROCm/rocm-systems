@@ -9,7 +9,7 @@ if(NOT ROCM_PATH AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
     set(ROCM_PATH "$ENV{ROCM_PATH}")
 endif()
 
-foreach(_DIR ${ROCM_PATH} /opt/rocm /opt/rocm/roctracer)
+foreach(_DIR ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm /opt/rocm/roctracer)
     if(EXISTS ${_DIR})
         get_filename_component(_ABS_DIR "${_DIR}" REALPATH)
         list(APPEND _ROCM_ROCTRACER_PATHS ${_ABS_DIR})
@@ -70,7 +70,8 @@ find_library(
     PATHS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
     PATH_SUFFIXES lib lib64)
 
-find_package(hsakmt)
+find_package(hsakmt HINTS ${_ROCM_ROCTRACER_PATHS} PATHS ${_ROCM_ROCTRACER_PATHS})
+
 if(hsakmt_FOUND)
     set(roctracer_hsakmt_LIBRARY
         hsakmt::hsakmt

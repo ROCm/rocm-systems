@@ -22,25 +22,26 @@
 
 #include "function_signature.hpp"
 
-function_signature::function_signature(string_t _ret, const string_t& _name,
-                                       string_t _file, location_t _row, location_t _col,
-                                       bool _loop, bool _info_beg, bool _info_end)
+function_signature::function_signature(std::string_view _ret, std::string_view _name,
+                                       std::string_view _file, location_t _row,
+                                       location_t _col, bool _loop, bool _info_beg,
+                                       bool _info_end)
 : m_loop(_loop)
 , m_info_beg(_info_beg)
 , m_info_end(_info_end)
 , m_row(std::move(_row))
 , m_col(std::move(_col))
-, m_return(std::move(_ret))
-, m_name(tim::demangle(_name))
-, m_file(std::move(_file))
+, m_return(_ret)
+, m_name(tim::demangle(_name.data()))
+, m_file(_file)
 {
-    if(m_file.find('/') != string_t::npos)
+    if(m_file.find('/') != std::string_view::npos)
         m_file = m_file.substr(m_file.find_last_of('/') + 1);
 }
 
-function_signature::function_signature(const string_t& _ret, const string_t& _name,
-                                       const string_t&              _file,
-                                       const std::vector<string_t>& _params,
+function_signature::function_signature(std::string_view _ret, std::string_view _name,
+                                       std::string_view                _file,
+                                       const std::vector<std::string>& _params,
                                        location_t _row, location_t _col, bool _loop,
                                        bool _info_beg, bool _info_end)
 : function_signature(_ret, _name, _file, _row, _col, _loop, _info_beg, _info_end)
@@ -52,13 +53,13 @@ function_signature::function_signature(const string_t& _ret, const string_t& _na
     m_params += ")";
 }
 
-string_t
+std::string
 function_signature::get(function_signature& sig)
 {
     return sig.get();
 }
 
-string_t
+std::string
 function_signature::get(bool _all, bool _save) const
 {
     if(!_all && _save && !m_signature.empty()) return m_signature;
@@ -103,7 +104,7 @@ function_signature::get(bool _all, bool _save) const
     return ss.str();
 }
 
-string_t
+std::string
 function_signature::get_coverage(bool _basic_block) const
 {
     std::stringstream ss;

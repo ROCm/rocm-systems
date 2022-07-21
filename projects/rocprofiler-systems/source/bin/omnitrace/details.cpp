@@ -24,6 +24,9 @@
 #include "fwd.hpp"
 #include "omnitrace.hpp"
 
+#include <string>
+#include <vector>
+
 static int expect_error = NO_ERROR;
 static int error_print  = 0;
 
@@ -515,12 +518,118 @@ get_whole_function_names()
 
 //======================================================================================//
 //
+//  Helper functions because the syntax for getting a function or module name is unwieldy
+//
+std::string_view
+get_name(procedure_t* _func)
+{
+    static auto _v = std::unordered_map<procedure_t*, std::string>{};
+
+    auto itr = _v.find(_func);
+    if(itr == _v.end())
+    {
+        _v.emplace(_func, (_func) ? _func->getDemangledName() : std::string{});
+    }
+
+    return _v.at(_func);
+}
+
+std::string_view
+get_name(module_t* _module)
+{
+    static auto _v = std::unordered_map<module_t*, std::string>{};
+
+    auto itr = _v.find(_module);
+    if(itr == _v.end())
+    {
+        char _name[FUNCNAMELEN + 1];
+        memset(_name, '\0', FUNCNAMELEN + 1);
+
+        if(_module)
+        {
+            _module->getFullName(_name, FUNCNAMELEN);
+            _v.emplace(_module, std::string{ _name });
+        }
+        else
+        {
+            _v.emplace(nullptr, std::string{});
+        }
+    }
+
+    return _v.at(_module);
+}
+
+//======================================================================================//
+//
 //  For selective instrumentation (unused)
 //
 bool
 are_file_include_exclude_lists_empty()
 {
     return true;
+}
+
+namespace
+{
+std::string
+get_return_type(procedure_t* func)
+{
+    if(func && func->isInstrumentable() && func->getReturnType())
+        return func->getReturnType()->getName();
+    return std::string{};
+}
+
+auto
+get_parameter_types(procedure_t* func)
+{
+    auto _param_names = std::vector<std::string>{};
+    if(func && func->isInstrumentable())
+    {
+        auto* _params = func->getParams();
+        if(_params)
+        {
+            _param_names.reserve(_params->size());
+            for(auto* itr : *_params)
+            {
+                std::string _name = itr->getType()->getName();
+                if(_name.empty()) _name = itr->getName();
+                _param_names.emplace_back(_name);
+            }
+        }
+    }
+    return _param_names;
+}
+}  // namespace
+
+//======================================================================================//
+//
+//  We create a new name that embeds the file and line information in the name
+//
+function_signature
+get_func_file_line_info(module_t* module, procedure_t* func)
+{
+    using address_t = Dyninst::Address;
+
+    auto _file_name   = get_name(module);
+    auto _func_name   = get_name(func);
+    auto _return_type = get_return_type(func);
+    auto _param_types = get_parameter_types(func);
+    auto _base_addr   = address_t{};
+    auto _last_addr   = address_t{};
+    auto _src_lines   = std::vector<statement_t>{};
+
+    if(func->getAddressRange(_base_addr, _last_addr) &&
+       module->getSourceLines(_base_addr, _src_lines) && !_src_lines.empty())
+    {
+        auto _row = _src_lines.front().lineNumber();
+        return function_signature(_return_type, _func_name, _file_name, _param_types,
+                                  { _row, 0 }, { 0, 0 }, false, true, false);
+    }
+    else
+    {
+        return function_signature(_return_type, _func_name, _file_name, _param_types,
+                                  { 0, 0 }, { 0, 0 }, false, false, false);
+    }
 }
 
 //======================================================================================//
@@ -532,173 +641,84 @@ function_signature
 get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
                         basic_loop_t* loopToInstrument)
 {
-    std::vector<BPatch_basicBlock*> basic_blocks{};
+    auto basic_blocks = std::vector<BPatch_basicBlock*>{};
     loopToInstrument->getLoopBasicBlocksExclusive(basic_blocks);
 
     if(basic_blocks.empty()) return function_signature{ "", "", "" };
 
-    auto           base_addr = basic_blocks.front()->getStartAddress();
-    auto           last_addr = basic_blocks.front()->getEndAddress();
-    basic_block_t* block     = basic_blocks.front();
+    auto* _block     = basic_blocks.front();
+    auto  _base_addr = _block->getStartAddress();
+    auto  _last_addr = _block->getEndAddress();
     for(const auto& itr : basic_blocks)
     {
-        if(itr == block) continue;
-        if(itr->dominates(block))
+        if(itr == _block) continue;
+        if(itr->dominates(_block))
         {
-            base_addr = itr->getStartAddress();
-            last_addr = itr->getEndAddress();
-            block     = itr;
+            _base_addr = itr->getStartAddress();
+            _last_addr = itr->getEndAddress();
+            _block     = itr;
         }
     }
 
-    verbprintf(4, "Loop: size = %lu: base_addr = %lu, last_addr = %lu\n",
-               (unsigned long) (last_addr - base_addr), base_addr, last_addr);
+    auto _file_name   = get_name(module);
+    auto _func_name   = get_name(func);
+    auto _return_type = get_return_type(func);
+    auto _param_types = get_parameter_types(func);
+    auto _lines_beg   = std::vector<statement_t>{};
+    auto _lines_end   = std::vector<statement_t>{};
 
-    char        fname[FUNCNAMELEN + 1];
-    char        mname[FUNCNAMELEN + 1];
-    std::string typeName = {};
-
-    memset(fname, '\0', FUNCNAMELEN + 1);
-    memset(mname, '\0', FUNCNAMELEN + 1);
-
-    module->getFullName(mname, FUNCNAMELEN);
-    func->getName(fname, FUNCNAMELEN);
-
-    auto* returnType = func->getReturnType();
-
-    if(returnType) typeName = returnType->getName();
-
-    auto*                 params = func->getParams();
-    std::vector<string_t> _params;
-    if(params)
-    {
-        for(auto* itr : *params)
-        {
-            string_t _name = itr->getType()->getName();
-            if(_name.empty()) _name = itr->getName();
-            _params.push_back(_name);
-        }
-    }
-
-    bpvector_t<BPatch_statement> lines{};
-    bpvector_t<BPatch_statement> linesEnd{};
-
-    bool info1 = module->getSourceLines(base_addr, lines);
-
-    string_t filename = mname;
-
-    if(info1)
+    if(module->getSourceLines(_base_addr, _lines_beg))
     {
         // filename = lines[0].fileName();
-        int row1 = 0;
-        int col1 = 0;
-        for(auto& itr : lines)
+        int _row1 = 0;
+        int _col1 = 0;
+        for(auto& itr : _lines_beg)
         {
             if(itr.lineNumber() > 0)
             {
-                row1 = itr.lineNumber();
-                col1 = itr.lineOffset();
+                _row1 = itr.lineNumber();
+                _col1 = itr.lineOffset();
                 break;
             }
         }
 
-        if(row1 == 0 && col1 == 0)
-            return function_signature(typeName, fname, filename, _params);
+        if(_row1 == 0 && _col1 == 0)
+            return function_signature(_return_type, _func_name, _file_name, _param_types);
 
-        int row2 = 0;
-        int col2 = 0;
-        for(auto& itr : lines)
+        int _row2 = 0;
+        int _col2 = 0;
+        for(auto& itr : _lines_beg)
         {
-            row2 = std::max(row2, itr.lineNumber());
-            col2 = std::max(col2, itr.lineOffset());
+            _row2 = std::max(_row2, itr.lineNumber());
+            _col2 = std::max(_col2, itr.lineOffset());
         }
 
-        if(col1 < 0) col1 = 0;
+        if(_col1 < 0) _col1 = 0;
 
-        bool info2 = module->getSourceLines(last_addr, linesEnd);
-        verbprintf(4, "size of linesEnd = %lu\n", (unsigned long) linesEnd.size());
-
-        if(info2)
+        if(module->getSourceLines(_last_addr, _lines_end))
         {
-            for(auto& itr : linesEnd)
+            for(auto& itr : _lines_end)
             {
-                row2 = std::max(row2, itr.lineNumber());
-                col2 = std::max(col2, itr.lineOffset());
+                _row2 = std::max(_row2, itr.lineNumber());
+                _col2 = std::max(_col2, itr.lineOffset());
             }
-            if(col2 < 0) col2 = 0;
-            if(row2 < row1) row1 = row2;  // Fix for wrong line numbers
+            if(_col2 < 0) _col2 = 0;
+            if(_row2 < _row1) _row1 = _row2;  // Fix for wrong line numbers
 
-            return function_signature(typeName, fname, filename, _params, { row1, row2 },
-                                      { col1, col2 }, true, info1, info2);
+            return function_signature(_return_type, _func_name, _file_name, _param_types,
+                                      { _row1, _row2 }, { _col1, _col2 }, true, true,
+                                      true);
         }
         else
         {
-            return function_signature(typeName, fname, filename, _params, { row1, 0 },
-                                      { col1, 0 }, true, info1, info2);
+            return function_signature(_return_type, _func_name, _file_name, _param_types,
+                                      { _row1, 0 }, { _col1, 0 }, true, true, false);
         }
     }
     else
     {
-        return function_signature(typeName, fname, filename, _params, { 0, 0 }, { 0, 0 },
-                                  true, false, false);
-    }
-}
-
-//======================================================================================//
-//
-//  We create a new name that embeds the file and line information in the name
-//
-function_signature
-get_func_file_line_info(module_t* module, procedure_t* func)
-{
-    using address_t = Dyninst::Address;
-
-    char     fname[FUNCNAMELEN + 1];
-    char     mname[FUNCNAMELEN + 1];
-    string_t typeName = {};
-
-    memset(fname, '\0', FUNCNAMELEN + 1);
-    memset(mname, '\0', FUNCNAMELEN + 1);
-
-    module->getFullName(mname, FUNCNAMELEN);
-    func->getName(fname, FUNCNAMELEN);
-
-    address_t base_addr{};
-    address_t last_addr{};
-    func->getAddressRange(base_addr, last_addr);
-
-    auto* returnType = func->getReturnType();
-
-    if(returnType) typeName = returnType->getName();
-
-    auto*                 params  = func->getParams();
-    std::vector<string_t> _params = {};
-    if(params)
-    {
-        _params.reserve(params->size());
-        for(auto* itr : *params)
-        {
-            string_t _name = itr->getType()->getName();
-            if(_name.empty()) _name = itr->getName();
-            _params.emplace_back(_name);
-        }
-    }
-
-    bpvector_t<BPatch_statement> lines = {};
-    bool                         info  = module->getSourceLines(base_addr, lines);
-
-    string_t filename = mname;
-
-    if(info && !lines.empty())
-    {
-        auto row = lines.front().lineNumber();
-        return function_signature(typeName, fname, filename, _params, { row, 0 },
-                                  { 0, 0 }, false, info, false);
-    }
-    else
-    {
-        return function_signature(typeName, fname, filename, _params, { 0, 0 }, { 0, 0 },
-                                  false, false, false);
+        return function_signature(_return_type, _func_name, _file_name, _param_types,
+                                  { 0, 0 }, { 0, 0 }, true, false, false);
     }
 }
 
@@ -713,89 +733,69 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
     std::map<basic_block_t*, basic_block_signature> _data{};
     if(!func) return _data;
 
-    auto*                        _cfg = func->getCFG();
-    std::set<BPatch_basicBlock*> _basic_blocks{};
+    auto* _cfg          = func->getCFG();
+    auto  _basic_blocks = std::set<BPatch_basicBlock*>{};
     _cfg->getAllBasicBlocks(_basic_blocks);
 
     if(_basic_blocks.empty()) return _data;
 
-    char        fname[FUNCNAMELEN + 1];
-    char        mname[FUNCNAMELEN + 1];
-    std::string typeName = {};
-
-    memset(fname, '\0', FUNCNAMELEN + 1);
-    memset(mname, '\0', FUNCNAMELEN + 1);
-
-    module->getFullName(mname, FUNCNAMELEN);
-    func->getName(fname, FUNCNAMELEN);
-
-    auto* returnType = func->getReturnType();
-
-    if(returnType) typeName = returnType->getName();
-
-    auto*                 params = func->getParams();
-    std::vector<string_t> _params;
-    if(params)
-    {
-        for(auto* itr : *params)
-        {
-            string_t _name = itr->getType()->getName();
-            if(_name.empty()) _name = itr->getName();
-            _params.push_back(_name);
-        }
-    }
+    auto _file_name   = get_name(module);
+    auto _func_name   = get_name(func);
+    auto _return_type = get_return_type(func);
+    auto _param_types = get_parameter_types(func);
 
     for(auto&& itr : _basic_blocks)
     {
-        auto base_addr = itr->getStartAddress();
-        auto last_addr = itr->getEndAddress();
+        auto _base_addr = itr->getStartAddress();
+        auto _last_addr = itr->getEndAddress();
 
-        verbprintf(4, "BB: size = %lu: base_addr = %lu, last_addr = %lu\n",
-                   (unsigned long) (last_addr - base_addr), base_addr, last_addr);
+        verbprintf(4,
+                   "[%s][%s] basic_block: size = %lu: base_addr = %lu, last_addr = %lu\n",
+                   _file_name.data(), _func_name.data(),
+                   (unsigned long) (_last_addr - _base_addr), _base_addr, _last_addr);
 
-        bpvector_t<BPatch_statement> linesBeg{};
-        bpvector_t<BPatch_statement> linesEnd{};
+        auto _lines_beg = std::vector<statement_t>{};
+        auto _lines_end = std::vector<statement_t>{};
 
-        string_t filename = mname;
-
-        if(module->getSourceLines(base_addr, linesBeg) && !linesBeg.empty())
+        if(module->getSourceLines(_base_addr, _lines_beg) && !_lines_beg.empty())
         {
-            int row1 = linesBeg.front().lineNumber();
-            int col1 = linesBeg.front().lineOffset();
+            int _row1 = _lines_beg.front().lineNumber();
+            int _col1 = _lines_beg.front().lineOffset();
 
-            verbprintf(4, "size of linesEnd = %lu\n", (unsigned long) linesEnd.size());
+            verbprintf(4, "size of _lines_end = %lu\n",
+                       (unsigned long) _lines_end.size());
 
-            if(module->getSourceLines(last_addr, linesEnd) && !linesEnd.empty())
+            if(module->getSourceLines(_last_addr, _lines_end) && !_lines_end.empty())
             {
-                int row2 = linesEnd.back().lineNumber();
-                int col2 = linesEnd.back().lineOffset();
+                int _row2 = _lines_end.back().lineNumber();
+                int _col2 = _lines_end.back().lineOffset();
 
-                if(row2 < row1) std::swap(row1, row2);
-                if(row1 == row2 && col2 < col1) std::swap(col1, col2);
+                if(_row2 < _row1) std::swap(_row1, _row2);
+                if(_row1 == _row2 && _col2 < _col1) std::swap(_col1, _col2);
 
-                _data.emplace(itr,
-                              basic_block_signature{
-                                  base_addr, last_addr,
-                                  function_signature(typeName, fname, filename, _params,
-                                                     { row1, row2 }, { col1, col2 }, true,
-                                                     true, true) });
+                _data.emplace(
+                    itr, basic_block_signature{
+                             _base_addr, _last_addr,
+                             function_signature(_return_type, _func_name, _file_name,
+                                                _param_types, { _row1, _row2 },
+                                                { _col1, _col2 }, true, true, true) });
             }
             else
             {
                 _data.emplace(itr,
                               basic_block_signature{
-                                  base_addr, last_addr,
-                                  function_signature(typeName, fname, filename, _params,
-                                                     { row1, 0 }, { col1, 0 }, true, true,
-                                                     false) });
+                                  _base_addr, _last_addr,
+                                  function_signature(_return_type, _func_name, _file_name,
+                                                     _param_types, { _row1, 0 },
+                                                     { _col1, 0 }, true, true, false) });
             }
         }
         else
         {
-            _data.emplace(itr,
-                          basic_block_signature{
-                              base_addr, last_addr,
-                              function_signature(typeName, fname, filename, _params) });
+            _data.emplace(itr, basic_block_signature{
+                                   _base_addr, _last_addr,
+                                   function_signature(_return_type, _func_name,
+                                                      _file_name, _param_types) });
         }
     }
 
@@ -861,7 +861,7 @@ find_function(image_t* app_image, const std::string& _name, const strset_t& _ext
 {
     if(_name.empty()) return nullptr;
 
-    auto _find = [app_image](const string_t& _f) -> procedure_t* {
+    auto _find = [app_image](const std::string& _f) -> procedure_t* {
         // Extract the vector of functions
         bpvector_t<procedure_t*> _found;
         auto* ret = app_image->findFunction(_f.c_str(), _found, false, true, true);

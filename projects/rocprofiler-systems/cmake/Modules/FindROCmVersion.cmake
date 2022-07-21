@@ -217,10 +217,13 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
     endif()
 
     # convert env to cache if not defined
-    foreach(_PATH ROCmVersion_DIR ROCmVersion_ROOT ROCmVersion_ROOT_DIR ROCM_PATH)
+    foreach(_PATH ROCmVersion_DIR ROCmVersion_ROOT ROCmVersion_ROOT_DIR
+                  OMNITRACE_DEFAULT_ROCM_PATH ROCM_PATH)
         if(NOT DEFINED ${_PATH} AND DEFINED ENV{${_PATH}})
+            set(_VAL "$ENV{${_PATH}}")
+            get_filename_component(_VAL "${_VAL}" REALPATH)
             set(${_PATH}
-                "$ENV{${_PATH}}"
+                "${_VAL}"
                 CACHE PATH "Search path for ROCm version for ROCmVersion")
         endif()
     endforeach()
@@ -229,8 +232,11 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
         set(_PATHS ${ROCmVersion_DIR})
     else()
         set(_PATHS)
-        foreach(_DIR ${ROCmVersion_DIR} ${ROCmVersion_ROOT} ${ROCmVersion_ROOT_DIR}
-                     $ENV{CMAKE_PREFIX_PATH} ${CMAKE_PREFIX_PATH} ${ROCM_PATH} /opt/rocm)
+        foreach(
+            _DIR
+            ${ROCmVersion_DIR} ${ROCmVersion_ROOT} ${ROCmVersion_ROOT_DIR}
+            $ENV{CMAKE_PREFIX_PATH} ${CMAKE_PREFIX_PATH} ${OMNITRACE_DEFAULT_ROCM_PATH}
+            ${ROCM_PATH} /opt/rocm)
             if(EXISTS ${_DIR})
                 get_filename_component(_ABS_DIR "${_DIR}" REALPATH)
                 list(APPEND _PATHS ${_ABS_DIR})

@@ -38,7 +38,7 @@ set_target_properties(
     omnitrace-dl-library
     PROPERTIES OUTPUT_NAME omnitrace-dl
                VERSION ${PROJECT_VERSION}
-               SOVERSION ${PROJECT_VERSION_MAJOR}
+               SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
                BUILD_RPATH "\$ORIGIN"
                INSTALL_RPATH "\$ORIGIN")
 

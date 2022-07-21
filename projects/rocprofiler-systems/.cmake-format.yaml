@@ -51,6 +51,7 @@ parse:
     omnitrace_add_bin_test:
       flags:
       - WILL_FAIL
+      - ADD_INVERSE
       kwargs:
         NAME: '*'
         ARGS: '*'

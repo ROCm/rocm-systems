@@ -118,8 +118,8 @@ jobs:
       timeout-minutes: 45
       run:
         cd build &&
-        ldd ./omnitrace &&
-        ./omnitrace --help &&
+        ldd ./bin/omnitrace &&
+        ./bin/omnitrace --help &&
         ctest -V -N -O omnitrace-ctest-${{ github.job }}-commands.log &&
         ctest -V --output-log omnitrace-ctest-${{ github.job }}.log --stop-on-failure
 
@@ -241,8 +241,8 @@ jobs:
       timeout-minutes: 45
       run:
         cd build &&
-        ldd ./omnitrace &&
-        ./omnitrace --help &&
+        ldd ./bin/omnitrace &&
+        ./bin/omnitrace --help &&
         ctest -V -N -O omnitrace-ctest-${{ github.job }}-commands.log &&
         ctest -V --output-log omnitrace-ctest-${{ github.job }}.log --stop-on-failure
 

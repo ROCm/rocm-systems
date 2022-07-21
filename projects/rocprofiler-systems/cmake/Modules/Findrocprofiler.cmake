@@ -9,7 +9,7 @@ if(NOT ROCM_PATH AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
     set(ROCM_PATH "$ENV{ROCM_PATH}")
 endif()
 
-foreach(_DIR ${ROCM_PATH} /opt/rocm /opt/rocm/rocprofiler)
+foreach(_DIR ${ROCmVersion_DIR} ${ROCM_PATH} /opt/rocm /opt/rocm/rocprofiler)
     if(EXISTS ${_DIR})
         get_filename_component(_ABS_DIR "${_DIR}" REALPATH)
         list(APPEND _ROCM_ROCPROFILER_PATHS ${_ABS_DIR})
@@ -48,7 +48,6 @@ find_path(
 mark_as_advanced(rocprofiler_hsa_INCLUDE_DIR)
 
 # ----------------------------------------------------------------------------------------#
-
 find_library(
     rocprofiler_LIBRARY
     NAMES rocprofiler64 rocprofiler

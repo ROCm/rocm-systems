@@ -2,13 +2,13 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 project(omnitrace-transpose LANGUAGES CXX)
 
-find_package(hip QUIET)
+find_package(hip QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
 
 find_program(
     HIPCC_EXECUTABLE
     NAMES hipcc
-    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-    PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm)
+    HINTS ${ROCmVersion_DIR} ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATHS ${ROCmVersion_DIR} ${ROCM_PATH} ENV ROCM_PATH /opt/rocm NO_CACHE)
 mark_as_advanced(HIPCC_EXECUTABLE)
 
 if(NOT HIPCC_EXECUTABLE)

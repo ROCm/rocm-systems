@@ -57,8 +57,14 @@ set(OMNITRACE_DEFAULT_ROCM_PATH
     /opt/rocm
     CACHE PATH "Default search path for ROCM")
 if(EXISTS ${OMNITRACE_DEFAULT_ROCM_PATH})
-    get_filename_component(OMNITRACE_DEFAULT_ROCM_PATH "${OMNITRACE_DEFAULT_ROCM_PATH}"
+    get_filename_component(_OMNITRACE_DEFAULT_ROCM_PATH "${OMNITRACE_DEFAULT_ROCM_PATH}"
                            REALPATH)
+
+    if(NOT "${_OMNITRACE_DEFAULT_ROCM_PATH}" STREQUAL "${OMNITRACE_DEFAULT_ROCM_PATH}")
+        set(OMNITRACE_DEFAULT_ROCM_PATH
+            "${_OMNITRACE_DEFAULT_ROCM_PATH}"
+            CACHE PATH "Default search path for ROCM" FORCE)
+    endif()
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -95,12 +101,54 @@ endforeach()
 
 # ----------------------------------------------------------------------------------------#
 #
+# hip version
+#
+# ----------------------------------------------------------------------------------------#
+
+if(OMNITRACE_USE_HIP
+   OR OMNITRACE_USE_ROCTRACER
+   OR OMNITRACE_USE_ROCPROFILER
+   OR OMNITRACE_USE_ROCM_SMI)
+    find_package(ROCmVersion)
+
+    if(NOT ROCmVersion_FOUND)
+        find_package(hip ${omnitrace_FIND_QUIETLY} REQUIRED HINTS
+                     ${OMNITRACE_DEFAULT_ROCM_PATH} PATHS ${OMNITRACE_DEFAULT_ROCM_PATH})
+        find_package(ROCmVersion REQUIRED HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
+    endif()
+
+    list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
+
+    set(OMNITRACE_ROCM_VERSION ${ROCmVersion_FULL_VERSION})
+    set(OMNITRACE_HIP_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
+    set(OMNITRACE_HIP_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
+    set(OMNITRACE_HIP_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
+    set(OMNITRACE_HIP_VERSION ${ROCmVersion_TRIPLE_VERSION})
+
+    if(OMNITRACE_HIP_VERSION_MAJOR GREATER_EQUAL 4 AND OMNITRACE_HIP_VERSION_MINOR
+                                                       GREATER 3)
+        set(roctracer_kfdwrapper_LIBRARY)
+    endif()
+
+    if(NOT roctracer_kfdwrapper_LIBRARY)
+        set(roctracer_kfdwrapper_LIBRARY)
+    endif()
+
+    omnitrace_add_feature(OMNITRACE_ROCM_VERSION "ROCm version used by omnitrace")
+else()
+    set(OMNITRACE_HIP_VERSION "0.0.0")
+    set(OMNITRACE_HIP_VERSION_MAJOR 0)
+    set(OMNITRACE_HIP_VERSION_MINOR 0)
+    set(OMNITRACE_HIP_VERSION_PATCH 0)
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
 # HIP
 #
 # ----------------------------------------------------------------------------------------#
 
 if(OMNITRACE_USE_HIP)
-    list(APPEND CMAKE_PREFIX_PATH ${OMNITRACE_DEFAULT_ROCM_PATH})
     find_package(hip ${omnitrace_FIND_QUIETLY} REQUIRED)
     omnitrace_target_compile_definitions(omnitrace-hip INTERFACE OMNITRACE_USE_HIP)
     target_link_libraries(omnitrace-hip INTERFACE hip::host)
@@ -113,7 +161,6 @@ endif()
 # ----------------------------------------------------------------------------------------#
 
 if(OMNITRACE_USE_ROCTRACER)
-    list(APPEND CMAKE_PREFIX_PATH ${OMNITRACE_DEFAULT_ROCM_PATH})
     find_package(roctracer ${omnitrace_FIND_QUIETLY} REQUIRED)
     omnitrace_target_compile_definitions(omnitrace-roctracer
                                          INTERFACE OMNITRACE_USE_ROCTRACER)
@@ -128,7 +175,6 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 if(OMNITRACE_USE_ROCPROFILER)
-    list(APPEND CMAKE_PREFIX_PATH ${OMNITRACE_DEFAULT_ROCM_PATH})
     find_package(rocprofiler ${omnitrace_FIND_QUIETLY} REQUIRED)
     omnitrace_target_compile_definitions(omnitrace-rocprofiler
                                          INTERFACE OMNITRACE_USE_ROCPROFILER)
@@ -143,42 +189,11 @@ endif()
 # ----------------------------------------------------------------------------------------#
 
 if(OMNITRACE_USE_ROCM_SMI)
-    list(APPEND CMAKE_PREFIX_PATH ${OMNITRACE_DEFAULT_ROCM_PATH})
     find_package(rocm-smi ${omnitrace_FIND_QUIETLY} REQUIRED)
     omnitrace_target_compile_definitions(omnitrace-rocm-smi
                                          INTERFACE OMNITRACE_USE_ROCM_SMI)
     target_link_libraries(omnitrace-rocm-smi INTERFACE rocm-smi::rocm-smi)
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${rocm-smi_LIBRARY_DIRS}")
-endif()
-
-# ----------------------------------------------------------------------------------------#
-#
-# hip version
-#
-# ----------------------------------------------------------------------------------------#
-
-if(OMNITRACE_USE_HIP
-   OR OMNITRACE_USE_ROCTRACER
-   OR OMNITRACE_USE_ROCM_SMI)
-    find_package(ROCmVersion REQUIRED)
-    set(OMNITRACE_ROCM_VERSION ${ROCmVersion_FULL_VERSION})
-    set(OMNITRACE_HIP_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
-    set(OMNITRACE_HIP_VERSION_MINOR ${ROCmVersion_MINOR_VERSION})
-    set(OMNITRACE_HIP_VERSION_PATCH ${ROCmVersion_PATCH_VERSION})
-    set(OMNITRACE_HIP_VERSION ${ROCmVersion_TRIPLE_VERSION})
-    if(OMNITRACE_HIP_VERSION_MAJOR GREATER_EQUAL 4 AND OMNITRACE_HIP_VERSION_MINOR
-                                                       GREATER 3)
-        set(roctracer_kfdwrapper_LIBRARY)
-    endif()
-    if(NOT roctracer_kfdwrapper_LIBRARY)
-        set(roctracer_kfdwrapper_LIBRARY)
-    endif()
-    omnitrace_add_feature(OMNITRACE_ROCM_VERSION "ROCm version used by omnitrace")
-else()
-    set(OMNITRACE_HIP_VERSION "0.0.0")
-    set(OMNITRACE_HIP_VERSION_MAJOR 0)
-    set(OMNITRACE_HIP_VERSION_MINOR 0)
-    set(OMNITRACE_HIP_VERSION_PATCH 0)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -276,7 +291,8 @@ if(OMNITRACE_BUILD_DYNINST)
         endif()
     endforeach()
 
-    omnitrace_install_tpl(dyninstAPI_RT omnitrace-rt "${PROJECT_BINARY_DIR}")
+    omnitrace_install_tpl(dyninstAPI_RT omnitrace-rt
+                          "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
 
     # for packaging
     install(

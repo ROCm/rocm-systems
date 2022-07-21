@@ -13,13 +13,13 @@ if(LULESH_BUILD_KOKKOS)
         kokkos_compilation(PROJECT)
     elseif(LULESH_USE_HIP AND NOT "${CMAKE_CXX_COMPILER}" MATCHES "hipcc")
         if(NOT HIPCC_EXECUTABLE)
-            find_package(hip QUIET)
+            find_package(hip QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
 
             find_program(
                 HIPCC_EXECUTABLE
                 NAMES hipcc
-                HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-                PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm)
+                HINTS ${ROCmVersion_DIR} ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+                PATHS ${ROCmVersion_DIR} ${ROCM_PATH} ENV ROCM_PATH /opt/rocm)
             mark_as_advanced(HIPCC_EXECUTABLE)
         endif()
         kokkos_compilation(PROJECT COMPILER ${HIPCC_EXECUTABLE})

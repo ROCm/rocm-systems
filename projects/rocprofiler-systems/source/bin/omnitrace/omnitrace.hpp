@@ -27,6 +27,11 @@
 #include "info.hpp"
 #include "module_function.hpp"
 
+#include <timemory/utility/filepath.hpp>
+
+#include <string>
+#include <sys/stat.h>
+
 //======================================================================================//
 
 inline string_t
@@ -150,6 +155,34 @@ private:
     entry_type m_entries;
     value_type m_data;
 };
+//
+//======================================================================================//
+//
+static inline bool
+omnitrace_get_is_executable(std::string_view _cmd, bool _default_v)
+{
+    bool _is_executable = _default_v;
+
+    if(_cmd.empty())
+    {
+        if(!tim::filepath::exists(std::string{ _cmd }))
+        {
+            verbprintf(
+                0,
+                "Warning! '%s' was not found. Dyninst may fail to open the binary for "
+                "instrumentation...\n",
+                _cmd.data());
+        }
+
+        Dyninst::SymtabAPI::Symtab* _symtab = nullptr;
+        if(Dyninst::SymtabAPI::Symtab::openFile(_symtab, _cmd.data()))
+        {
+            _is_executable = _symtab->isExecutable() && _symtab->isExec();
+            Dyninst::SymtabAPI::Symtab::closeSymtab(_symtab);
+        }
+    }
+    return _is_executable;
+}
 //
 //======================================================================================//
 //
