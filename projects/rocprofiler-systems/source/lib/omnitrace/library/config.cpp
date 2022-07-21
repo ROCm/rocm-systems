@@ -169,10 +169,9 @@ configure_settings(bool _init)
     if(get_state() < State::Init)
     {
         ::tim::print_demangled_backtrace<64>();
-        OMNITRACE_CONDITIONAL_THROW(true,
-                                    "config::configure_settings() called before "
-                                    "omnitrace_init_library. state = %s",
-                                    std::to_string(get_state()).c_str());
+        OMNITRACE_THROW("config::configure_settings() called before "
+                        "omnitrace_init_library. state = %s",
+                        std::to_string(get_state()).c_str());
     }
 
     tim::manager::add_metadata("OMNITRACE_VERSION", OMNITRACE_VERSION_STRING);
@@ -493,22 +492,20 @@ configure_settings(bool _init)
 
     if(_paranoid > 1)
     {
-        OMNITRACE_CONDITIONAL_BASIC_PRINT(
-            get_verbose_env() >= 0,
-            "/proc/sys/kernel/perf_event_paranoid has a value of %i. "
-            "Disabling PAPI (requires a value <= 1)...\n",
-            _paranoid);
-        OMNITRACE_CONDITIONAL_BASIC_PRINT(
-            get_verbose_env() >= 0,
-            "In order to enable PAPI support, run 'echo N | sudo tee "
-            "/proc/sys/kernel/perf_event_paranoid' where N is < 2\n");
+        OMNITRACE_BASIC_VERBOSE(0,
+                                "/proc/sys/kernel/perf_event_paranoid has a value of %i. "
+                                "Disabling PAPI (requires a value <= 1)...\n",
+                                _paranoid);
+        OMNITRACE_BASIC_VERBOSE(0,
+                                "In order to enable PAPI support, run 'echo N | sudo tee "
+                                "/proc/sys/kernel/perf_event_paranoid' where N is < 2\n");
         tim::trait::runtime_enabled<comp::papi_common>::set(false);
         tim::trait::runtime_enabled<comp::papi_array_t>::set(false);
         tim::trait::runtime_enabled<comp::papi_vector>::set(false);
         tim::trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
         tim::trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
         tim::trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
-        _config->get_papi_events() = "";
+        _config->get_papi_events() = std::string{};
     }
     else
     {
@@ -558,6 +555,7 @@ configure_settings(bool _init)
         using argparser_t = tim::argparse::argument_parser;
         argparser_t _parser{ _exe };
         tim::timemory_init(_cmd, _parser, "omnitrace-");
+        _settings_are_configured() = true;
     }
 
     _config->get_global_components() =
@@ -595,9 +593,7 @@ configure_settings(bool _init)
     configure_signal_handler();
     configure_disabled_settings();
 
-    _settings_are_configured() = true;
-
-    OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose_env() > 0, "configuration complete\n");
+    OMNITRACE_VERBOSE(1, "configuration complete\n");
 }
 
 void
@@ -642,10 +638,10 @@ configure_mode_settings()
 
     if(gpu::device_count() == 0)
     {
-        OMNITRACE_VERBOSE_F(
-            1, "No HIP devices were found: disabling roctracer and rocm_smi...\n");
-        _set("OMNITRACE_USE_ROCTRACER", false);
+        OMNITRACE_VERBOSE(1, "No HIP devices were found: disabling roctracer, "
+                             "rocprofiler, and rocm_smi...\n");
         _set("OMNITRACE_USE_ROCPROFILER", false);
+        _set("OMNITRACE_USE_ROCTRACER", false);
         _set("OMNITRACE_USE_ROCM_SMI", false);
     }
 
@@ -726,8 +722,8 @@ configure_signal_handler()
             {
                 auto _info =
                     ::tim::signal_settings::get_info(static_cast<tim::sys_signal>(_v));
-                OMNITRACE_CONDITIONAL_BASIC_PRINT(
-                    get_verbose_env() >= 2 || get_debug_env(),
+                OMNITRACE_VERBOSE(
+                    2,
                     "signal %s (%i) ignored (OMNITRACE_IGNORE_DYNINST_TRAMPOLINE=ON)\n",
                     std::get<0>(_info).c_str(), _v);
                 if(get_verbose_env() > 1 || get_debug_env())
@@ -751,14 +747,14 @@ configure_disabled_settings()
             auto _disabled = _config->disable_category(_category);
             _config->enable(_opt);
             for(auto&& itr : _disabled)
-                OMNITRACE_BASIC_VERBOSE(3, "[%s=OFF]    disabled option :: '%s'\n",
-                                        _opt.c_str(), itr.c_str());
+                OMNITRACE_VERBOSE(3, "[%s=OFF]    disabled option :: '%s'\n",
+                                  _opt.c_str(), itr.c_str());
             return false;
         }
         auto _enabled = _config->enable_category(_category);
         for(auto&& itr : _enabled)
-            OMNITRACE_BASIC_VERBOSE(3, "[%s=ON]      enabled option :: '%s'\n",
-                                    _opt.c_str(), itr.c_str());
+            OMNITRACE_VERBOSE(3, "[%s=ON]      enabled option :: '%s'\n", _opt.c_str(),
+                              itr.c_str());
         return true;
     };
 

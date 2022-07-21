@@ -45,8 +45,7 @@ fork_gotcha::audit(const gotcha_data_t&, audit::incoming)
 {
     OMNITRACE_VERBOSE(1, "fork() called on PID %i (rank: %i), TID %li\n",
                       process::get_id(), dmp::rank(), threading::get_id());
-    OMNITRACE_CONDITIONAL_BASIC_PRINT(
-        get_debug_env(),
+    OMNITRACE_BASIC_DEBUG(
         "Warning! Calling fork() within an OpenMPI application using libfabric "
         "may result is segmentation fault\n");
     TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);

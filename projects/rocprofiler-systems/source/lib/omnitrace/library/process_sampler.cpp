@@ -82,9 +82,8 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     for(auto& itr : instances)
         itr->config();
 
-    OMNITRACE_CONDITIONAL_BASIC_PRINT(
-        get_verbose() > 0 || get_debug(),
-        "Thread sampler polling at an interval of %f seconds...\n",
+    OMNITRACE_VERBOSE(
+        1, "Thread sampler polling at an interval of %f seconds...\n",
         std::chrono::duration_cast<std::chrono::duration<double>>(_interval).count());
 
     auto _now = std::chrono::steady_clock::now();

@@ -235,8 +235,8 @@ pthread_create_gotcha::shutdown()
 
     bundles->clear();
 
-    OMNITRACE_CONDITIONAL_BASIC_PRINT(
-        (get_verbose_env() >= 2 || get_debug_env()) && _ndangling > 0,
+    OMNITRACE_BASIC_VERBOSE(
+        2 && _ndangling > 0,
         "[pthread_create_gotcha::shutdown] cleaned up %lu dangling bundles\n",
         _ndangling);
 }

@@ -143,8 +143,7 @@ setup_gotchas()
     if(_initialized) return;
     _initialized = true;
 
-    OMNITRACE_CONDITIONAL_PRINT_F(
-        get_debug_env(),
+    OMNITRACE_BASIC_DEBUG(
         "Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread\n");
 
     mpi_gotcha::configure();

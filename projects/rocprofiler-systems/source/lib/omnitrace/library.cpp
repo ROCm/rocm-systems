@@ -930,7 +930,7 @@ omnitrace_finalize_hidden(void)
             std::string _msg = JOIN("", *itr);
             auto        _pos = _msg.find(">>>  ");
             if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-            OMNITRACE_CONDITIONAL_PRINT(get_verbose() >= 0, "%s\n", _msg.c_str());
+            OMNITRACE_VERBOSE(0, "%s\n", _msg.c_str());
         }
     }
 

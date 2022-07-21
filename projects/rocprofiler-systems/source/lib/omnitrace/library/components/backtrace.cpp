@@ -432,7 +432,7 @@ backtrace::post_process(int64_t _tid)
     {
         // this should be relatively common
         OMNITRACE_CONDITIONAL_PRINT(
-            get_debug() && get_verbose() > 1,
+            get_debug() && get_verbose() >= 2,
             "Post-processing sampling entries for thread %lu skipped (no sampler)\n",
             _tid);
         return;
@@ -652,9 +652,9 @@ backtrace::post_process(int64_t _tid)
 
     if(_data.empty()) return;
 
-    OMNITRACE_CONDITIONAL_PRINT(
-        get_verbose() >= 0 || get_debug_sampling(),
-        "Post-processing %zu sampling entries for thread %lu...\n", _data.size(), _tid);
+    OMNITRACE_VERBOSE(0 || get_debug_sampling(),
+                      "Post-processing %zu sampling entries for thread %lu...\n",
+                      _data.size(), _tid);
 
     std::sort(_data.begin(), _data.end(),
               [](const sampling::bundle_t* _lhs, const sampling::bundle_t* _rhs) {

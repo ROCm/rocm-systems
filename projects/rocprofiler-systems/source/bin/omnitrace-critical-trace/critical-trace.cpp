@@ -136,13 +136,11 @@ fini_perfetto()
     else
     {
         // Write the trace into a file.
-        OMNITRACE_CONDITIONAL_BASIC_PRINT_F(
-            config::get_verbose() >= 0,
-            "> Outputting '%s' (%.2f KB / %.2f MB / %.2f GB)... ",
-            config::get_perfetto_output_filename().c_str(),
-            static_cast<double>(trace_data.size()) / tim::units::KB,
-            static_cast<double>(trace_data.size()) / tim::units::MB,
-            static_cast<double>(trace_data.size()) / tim::units::GB);
+        OMNITRACE_BASIC_VERBOSE(0, "> Outputting '%s' (%.2f KB / %.2f MB / %.2f GB)... ",
+                                config::get_perfetto_output_filename().c_str(),
+                                static_cast<double>(trace_data.size()) / tim::units::KB,
+                                static_cast<double>(trace_data.size()) / tim::units::MB,
+                                static_cast<double>(trace_data.size()) / tim::units::GB);
 
         std::ofstream ofs{};
         if(!tim::filepath::open(ofs, config::get_perfetto_output_filename(),
@@ -220,9 +218,8 @@ save_call_graph(const std::string& _fname, const std::string& _label,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose() >= 0,
-                                              "[%s] Outputting '%s'...\n", _func.c_str(),
-                                              _fname.c_str());
+            OMNITRACE_BASIC_VERBOSE(0, "[%s] Outputting '%s'...\n", _func.c_str(),
+                                    _fname.c_str());
         }
         ofs << oss.str() << std::endl;
     }
@@ -266,9 +263,8 @@ save_critical_trace(const std::string& _fname, const std::string& _label,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose() >= 0,
-                                              "[%s] Outputting '%s'...\n", _func.c_str(),
-                                              _fname.c_str());
+            OMNITRACE_BASIC_VERBOSE(0, "[%s] Outputting '%s'...\n", _func.c_str(),
+                                    _fname.c_str());
         }
         std::stringstream oss{};
         if(_cchain.size() > 1000)
@@ -306,9 +302,8 @@ save_call_chain_text(const std::string& _fname, const call_chain& _call_chain,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose() >= 0,
-                                              "[%s] Outputting '%s'...\n", _func.c_str(),
-                                              _fname.c_str());
+            OMNITRACE_BASIC_VERBOSE(0, "[%s] Outputting '%s'...\n", _func.c_str(),
+                                    _fname.c_str());
         }
         ofs << _call_chain << "\n";
     }
@@ -352,9 +347,8 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_CONDITIONAL_BASIC_PRINT(get_verbose() >= 0,
-                                              "[%s] Outputting '%s'...\n", _func.c_str(),
-                                              _fname.c_str());
+            OMNITRACE_BASIC_VERBOSE(0, "[%s] Outputting '%s'...\n", _func.c_str(),
+                                    _fname.c_str());
         }
         std::stringstream oss{};
         if(_call_chain.size() > 100000)

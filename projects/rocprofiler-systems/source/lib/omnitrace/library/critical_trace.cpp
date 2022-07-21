@@ -173,10 +173,9 @@ entry::operator+=(const entry& rhs)
     }
     else
     {
-        OMNITRACE_CONDITIONAL_PRINT(
-            get_verbose() > 1,
-            "Warning! Incorrect phase. entry::operator+=(entry) is only valid for "
-            "Phase::BEGIN += Phase::END\n");
+        OMNITRACE_VERBOSE(
+            2, "Warning! Incorrect phase. entry::operator+=(entry) is only valid for "
+               "Phase::BEGIN += Phase::END\n");
     }
     return *this;
 }
@@ -647,8 +646,8 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_CONDITIONAL_PRINT(get_verbose() >= 0, "[%s] Outputting '%s'...\n",
-                                        _func.c_str(), _fname.c_str());
+            OMNITRACE_VERBOSE(0, "[%s] Outputting '%s'...\n", _func.c_str(),
+                              _fname.c_str());
         }
         std::stringstream oss{};
         if(_call_chain.size() > 100000)

@@ -242,7 +242,7 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
     (void) arg;
     const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
     OMNITRACE_CONDITIONAL_PRINT_F(
-        get_debug() && get_verbose() > 1, "<%-30s id(%u)\tcorrelation_id(%lu) %s>\n",
+        get_debug() && get_verbose() >= 2, "<%-30s id(%u)\tcorrelation_id(%lu) %s>\n",
         roctracer_op_string(domain, cid, 0), cid, data->correlation_id,
         (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
 
@@ -553,7 +553,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
     const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
     OMNITRACE_CONDITIONAL_PRINT_F(
-        get_debug() && get_verbose() > 1, "<%-30s id(%u)\tcorrelation_id(%lu) %s>\n",
+        get_debug() && get_verbose() >= 2, "<%-30s id(%u)\tcorrelation_id(%lu) %s>\n",
         op_name, cid, data->correlation_id,
         (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
 
@@ -890,7 +890,7 @@ hip_activity_callback(const char* begin, const char* end, void*)
         {
             static size_t _n = 0;
             OMNITRACE_CONDITIONAL_PRINT_F(
-                get_debug() && get_verbose() > 1,
+                get_debug() && get_verbose() >= 2,
                 "%4zu :: %-20s :: %-20s :: correlation_id(%6lu) time_ns(%12lu:%12lu) "
                 "delta_ns(%12lu) device_id(%d) stream_id(%lu) proc_id(%u) thr_id(%lu)\n",
                 _n++, op_name, _name, record->correlation_id, _beg_ns, _end_ns,

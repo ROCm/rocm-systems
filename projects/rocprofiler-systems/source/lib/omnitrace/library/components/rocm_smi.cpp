@@ -211,8 +211,7 @@ data::shutdown()
 void
 data::post_process(uint32_t _dev_id)
 {
-    OMNITRACE_CONDITIONAL_PRINT(get_debug() || get_verbose() > 0,
-                                "Post-processing rocm-smi data for device %u\n", _dev_id);
+    OMNITRACE_VERBOSE(1, "Post-processing rocm-smi data for device %u\n", _dev_id);
 
     using component::sampling_gpu_busy;
     using component::sampling_gpu_memory;
