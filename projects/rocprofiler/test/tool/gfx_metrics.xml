@@ -14,7 +14,7 @@
   <metric name="SQ_INSTS_GDS" block=SQ event=35 descr="Number of GDS instructions issued. (per-simd, emulated)"></metric>
 
   <metric name="SQ_WAIT_INST_LDS" block=SQ event=61 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
-  <metric name="SQ_ACTIVE_INST_VALU" block=SQ event=69 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
+  <metric name="SQ_ACTIVE_INST_VALU" block=SQ event=69 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_INST_CYCLES_SALU" block=SQ event=86 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
   <metric name="SQ_THREAD_CYCLES_VALU" block=SQ event=89 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
   <metric name="SQ_LDS_BANK_CONFLICT" block=SQ event=97 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
@@ -48,7 +48,7 @@
   <metric name="SQ_INSTS_GDS" block=SQ event=35 descr="Number of GDS instructions issued. (per-simd, emulated)"></metric>
 
   <metric name="SQ_WAIT_INST_LDS" block=SQ event=63 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
-  <metric name="SQ_ACTIVE_INST_VALU" block=SQ event=71 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
+  <metric name="SQ_ACTIVE_INST_VALU" block=SQ event=71 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_INST_CYCLES_SALU" block=SQ event=84 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
   <metric name="SQ_THREAD_CYCLES_VALU" block=SQ event=85 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
   <metric name="SQ_LDS_BANK_CONFLICT" block=SQ event=93 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
@@ -88,7 +88,7 @@
   <metric name="SQ_INSTS_GDS" block=SQ event=36 descr="Number of GDS instructions issued. (per-simd, emulated)"></metric>
 
   <metric name="SQ_WAIT_INST_LDS" block=SQ event=64 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
-  <metric name="SQ_ACTIVE_INST_VALU" block=SQ event=72 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic)"></metric>
+  <metric name="SQ_ACTIVE_INST_VALU" block=SQ event=72 descr="regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, nondeterministic). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_INST_CYCLES_SALU" block=SQ event=85 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
   <metric name="SQ_THREAD_CYCLES_VALU" block=SQ event=86 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
   <metric name="SQ_LDS_BANK_CONFLICT" block=SQ event=94 descr="Number of cycles LDS is stalled by bank conflicts. (emulated)"></metric>
@@ -209,21 +209,21 @@
   <metric name="SQ_INST_LEVEL_SMEM" block=SQ event=68 descr="Number of in-flight SMEM instructions (*2 load/store; *2 atomic; *2 memtime; *4 wb/inv). Set next counter to ACCUM_PREV and divide by INSTS_SMEM for average latency per smem request. Falls slightly short of total request latency because some fetches are divided into two requests that may finish at different times and this counter collects the average latency of the two. (per-simd, level, nondeterministic)"></metric>
   <metric name="SQ_INST_LEVEL_LDS" block=SQ event=69 descr="Number of in-flight LDS instructions. Set next counter to ACCUM_PREV and divide by INSTS_LDS for average latency. Includes FLAT instructions. (per-simd, level, nondeterministic)"></metric>
   <metric name="SQ_VALU_MFMA_BUSY_CYCLES" block=SQ event=72 descr="Number of cycles the MFMA ALU is busy (per-simd, emulated)"></metric>
-  <metric name="SQ_WAVE_CYCLES" block=SQ event=74 descr="Number of wave-cycles spent by waves in the CUs (per-simd, nondeterministic)"></metric>
-  <metric name="SQ_WAIT_ANY" block=SQ event=85 descr="Number of wave-cycles spent waiting for anything (per-simd, nondeterministic)"></metric>
+  <metric name="SQ_WAVE_CYCLES" block=SQ event=74 descr="Number of wave-cycles spent by waves in the CUs (per-simd, nondeterministic). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_WAIT_ANY" block=SQ event=85 descr="Number of wave-cycles spent waiting for anything (per-simd, nondeterministic). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_WAIT_INST_ANY" block=SQ event=88 descr="Number of wave-cycles spent waiting for any instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
-  <metric name="SQ_ACTIVE_INST_ANY" block=SQ event=96 descr="Number of cycles each wave is working on an instruction. (per-simd, emulated)"></metric>
-  <metric name="SQ_ACTIVE_INST_VMEM" block=SQ event=97 descr="Number of cycles the SQ instruction arbiter is working on a VMEM instruction. (per-simd, emulated)"></metric>
-  <metric name="SQ_ACTIVE_INST_LDS" block=SQ event=98 descr="Number of cycles the SQ instruction arbiter is working on a LDS instruction. (per-simd, emulated)"></metric>
-  <metric name="SQ_ACTIVE_INST_VALU" block=SQ event=99 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, emulated)"></metric>
-  <metric name="SQ_ACTIVE_INST_SCA" block=SQ event=100 descr="Number of cycles the SQ instruction arbiter is working on a SALU or SMEM instruction. (per-simd, emulated)"></metric>
-  <metric name="SQ_ACTIVE_INST_EXP_GDS" block=SQ event=101 descr="Number of cycles the SQ instruction arbiter is working on an EXPORT or GDS instruction. (per-simd, emulated)"></metric>
-  <metric name="SQ_ACTIVE_INST_MISC" block=SQ event=102 descr="Number of cycles the SQ instruction aribter is working on a BRANCH or SENDMSG instruction. (per-simd, emulated)"></metric>
-  <metric name="SQ_ACTIVE_INST_FLAT" block=SQ event=103 descr="Number of cycles the SQ instruction arbiter is working on a FLAT instruction. (per-simd, emulated)"></metric>
-  <metric name="SQ_INST_CYCLES_VMEM_WR" block=SQ event=104 descr="Number of cycles needed to send addr and cmd data for VMEM write instructions. (per-simd, emulated)"></metric>
-  <metric name="SQ_INST_CYCLES_VMEM_RD" block=SQ event=105 descr="Number of cycles needed to send addr and cmd data for VMEM read instructions. (per-simd, emulated)"></metric>
+  <metric name="SQ_ACTIVE_INST_ANY" block=SQ event=96 descr="Number of cycles each wave is working on an instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_ACTIVE_INST_VMEM" block=SQ event=97 descr="Number of cycles the SQ instruction arbiter is working on a VMEM instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_ACTIVE_INST_LDS" block=SQ event=98 descr="Number of cycles the SQ instruction arbiter is working on a LDS instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_ACTIVE_INST_VALU" block=SQ event=99 descr="Number of cycles the SQ instruction arbiter is working on a VALU instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_ACTIVE_INST_SCA" block=SQ event=100 descr="Number of cycles the SQ instruction arbiter is working on a SALU or SMEM instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_ACTIVE_INST_EXP_GDS" block=SQ event=101 descr="Number of cycles the SQ instruction arbiter is working on an EXPORT or GDS instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_ACTIVE_INST_MISC" block=SQ event=102 descr="Number of cycles the SQ instruction aribter is working on a BRANCH or SENDMSG instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_ACTIVE_INST_FLAT" block=SQ event=103 descr="Number of cycles the SQ instruction arbiter is working on a FLAT instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_INST_CYCLES_VMEM_WR" block=SQ event=104 descr="Number of cycles needed to send addr and cmd data for VMEM write instructions. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
+  <metric name="SQ_INST_CYCLES_VMEM_RD" block=SQ event=105 descr="Number of cycles needed to send addr and cmd data for VMEM read instructions. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_INST_CYCLES_SMEM" block=SQ event=111 descr="Number of cycles needed to execute scalar memory reads. (per-simd, emulated)"></metric>
-  <metric name="SQ_INST_CYCLES_SALU" block=SQ event=112 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated)"></metric>
+  <metric name="SQ_INST_CYCLES_SALU" block=SQ event=112 descr="Number of cycles needed to execute non-memory read scalar operations. (per-simd, emulated). Units in quad-cycles(4 cycles)"></metric>
   <metric name="SQ_THREAD_CYCLES_VALU" block=SQ event=113 descr="Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)"></metric>
   <metric name="SQ_IFETCH" block=SQ event=115 descr="Number of instruction fetch requests from cache. (per-simd, emulated)"></metric>
   <metric name="SQ_IFETCH_LEVEL" block=SQ event=116 descr="Number of instruction fetch requests from cache. (per-simd, level)"></metric>
