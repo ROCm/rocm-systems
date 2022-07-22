@@ -60,7 +60,7 @@ jobs:
           -DOMNITRACE_CI_MPI_RUN_AS_ROOT=ON
 
     - name: Build
-      timeout-minutes: 45
+      timeout-minutes: 60
       run:
         cmake --build build --target all --parallel 2 -- VERBOSE=1
 

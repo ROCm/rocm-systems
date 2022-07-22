@@ -52,7 +52,7 @@ jobs:
         python3 -m pip install numpy &&
         python3 -m pip install perfetto &&
         python3 -m pip install 'cmake==3.16.3' &&
-        for i in 6 7 8 9; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+        for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Install Kokkos
       timeout-minutes: 5
@@ -86,11 +86,11 @@ jobs:
           -DOMNITRACE_USE_HIP=OFF
           -DOMNITRACE_USE_PYTHON=ON
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
-          -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9"
+          -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
           -DLULESH_BUILD_KOKKOS=OFF
 
     - name: Build
-      timeout-minutes: 45
+      timeout-minutes: 60
       run:
         cmake --build build --target all --parallel 2 -- VERBOSE=1
 

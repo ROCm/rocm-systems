@@ -71,7 +71,7 @@ jobs:
         python3 -m pip install numpy &&
         python3 -m pip install perfetto &&
         python3 -m pip install 'cmake==3.16.3' &&
-        for i in 6 7 8 9; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+        for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Configure Env
       run:
@@ -102,7 +102,7 @@ jobs:
           -DOMNITRACE_BUILD_STATIC_LIBGCC=${{ matrix.static-libgcc }}
           -DOMNITRACE_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
-          -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9"
+          -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
 
     - name: Build
       timeout-minutes: 60
@@ -229,7 +229,7 @@ jobs:
           -DOMNITRACE_INSTALL_PERFETTO_TOOLS=ON
 
     - name: Build
-      timeout-minutes: 45
+      timeout-minutes: 60
       run:
         cmake --build build --target all --parallel 2 -- VERBOSE=1
 
@@ -368,7 +368,7 @@ jobs:
           -DDYNINST_ELFUTILS_DOWNLOAD_VERSION=${{ env.ELFUTILS_DOWNLOAD_VERSION }}
 
     - name: Build
-      timeout-minutes: 45
+      timeout-minutes: 60
       run:
         cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
 
