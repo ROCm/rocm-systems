@@ -51,6 +51,43 @@
 
 namespace omnitrace
 {
+int
+get_realtime_signal()
+{
+    return SIGRTMIN + config::get_sampling_rtoffset();
+}
+
+int
+get_cputime_signal()
+{
+    return SIGPROF;
+}
+
+std::set<int>
+get_sampling_signals(int64_t _tid)
+{
+    auto _sigreal = get_realtime_signal();
+    auto _sigprof = get_cputime_signal();
+
+    // on the main thread, typically use both real-time and cpu-time
+    // on secondary threads, typically use only cpu-time.
+
+    if(_tid < 1)
+    {
+        if(config::get_use_sampling_cputime()) return std::set<int>{ _sigreal, _sigprof };
+        return std::set<int>{ _sigreal };
+    }
+
+    if(config::get_use_sampling_realtime() && config::get_use_sampling_cputime())
+        return std::set<int>{ _sigreal, _sigprof };
+    else if(config::get_use_sampling_realtime())
+        return std::set<int>{ _sigreal };
+    else if(config::get_use_sampling_cputime())
+        return std::set<int>{ _sigprof };
+
+    return std::set<int>{};
+}
+
 std::atomic<uint64_t>&
 get_cpu_cid()
 {

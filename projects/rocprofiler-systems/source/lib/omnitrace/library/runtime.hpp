@@ -34,6 +34,7 @@
 #include "library/timemory.hpp"
 
 #include <memory>
+#include <set>
 #include <timemory/backends/threading.hpp>
 #include <timemory/macros/language.hpp>
 
@@ -66,6 +67,15 @@ get_main_bundle();
 
 std::unique_ptr<gotcha_bundle_t>&
 get_gotcha_bundle();
+
+int
+get_realtime_signal();
+
+int
+get_cputime_signal();
+
+std::set<int>
+get_sampling_signals(int64_t _tid = 0);
 
 std::atomic<uint64_t>&
 get_cpu_cid() TIMEMORY_HOT;

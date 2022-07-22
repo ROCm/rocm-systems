@@ -205,6 +205,18 @@ bool
 get_use_code_coverage();
 
 bool
+get_sampling_keep_internal();
+
+bool
+get_use_sampling_realtime();
+
+bool
+get_use_sampling_cputime();
+
+int
+get_sampling_rtoffset();
+
+bool
 get_timeline_sampling();
 
 bool
@@ -265,7 +277,7 @@ get_critical_trace_count();
 size_t&
 get_instrumentation_interval();
 
-double&
+double
 get_sampling_freq();
 
 double&
@@ -274,7 +286,7 @@ get_sampling_delay();
 std::string
 get_sampling_cpus();
 
-double&
+double
 get_process_sampling_freq();
 
 std::string

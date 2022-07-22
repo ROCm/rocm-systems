@@ -28,6 +28,7 @@
 #include "library/debug.hpp"
 #include "library/perfetto.hpp"
 #include "library/ptl.hpp"
+#include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/tracing.hpp"
 
@@ -67,6 +68,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 #include <pthread.h>
 #include <signal.h>
@@ -117,11 +119,20 @@ using signal_type_instances     = thread_data<std::set<int>, api::sampling>;
 using backtrace_init_instances  = thread_data<backtrace, api::sampling>;
 using sampler_running_instances = thread_data<bool, api::sampling>;
 using papi_vector_instances     = thread_data<hw_counters, api::sampling>;
+using papi_label_instances      = thread_data<std::vector<std::string>, api::sampling>;
 
 namespace
 {
 struct perfetto_rusage
 {};
+
+unique_ptr_t<std::vector<std::string>>&
+get_papi_labels(int64_t _tid)
+{
+    static auto& _v =
+        papi_label_instances::instances(papi_label_instances::construct_on_init{});
+    return _v.at(_tid);
+}
 
 unique_ptr_t<hw_counters>&
 get_papi_vector(int64_t _tid)
@@ -167,6 +178,8 @@ backtrace::get() const
         if(strlen(itr) > 0) _v.emplace_back(itr);
     }
     std::reverse(_v.begin(), _v.end());
+    while(!_v.empty() && _v.back() == "funlockfile")
+        _v.pop_back();
     return _v;
 }
 
@@ -298,7 +311,7 @@ backtrace::sample(int signum)
     m_ctx_swch   = _cache.get_num_priority_context_switch() +
                  _cache.get_num_voluntary_context_switch();
     m_page_flt = _cache.get_num_major_page_faults() + _cache.get_num_minor_page_faults();
-    m_data     = tim::get_unw_backtrace<stack_depth, 2, false>();
+    m_data     = tim::get_unw_backtrace<stack_depth, 3, false>();
     m_size     = m_data.size();
 
     if constexpr(tim::trait::is_available<hw_counters>::value)
@@ -332,23 +345,32 @@ backtrace::configure(bool _setup, int64_t _tid)
         {
             perfetto_counter_track<hw_counters>::init();
             OMNITRACE_DEBUG("HW COUNTER: starting...\n");
-            if(get_papi_vector(_tid)) get_papi_vector(_tid)->start();
+            if(get_papi_vector(_tid))
+            {
+                using common_type_t = typename hw_counters::common_type;
+                get_papi_vector(_tid)->start();
+                *get_papi_labels(_tid) = comp::papi_common::get_events<common_type_t>();
+            }
         }
 
-        auto _alrm_freq = 1.0 / std::min<double>(get_sampling_freq(), 20.0);
-        auto _prof_freq = 1.0 / get_sampling_freq();
+        auto _alrm_freq = std::min<double>(get_sampling_freq(), 20.0);
+        auto _prof_freq = get_sampling_freq();
         auto _delay     = std::max<double>(1.0e-3, get_sampling_delay());
+        auto _verbose   = std::min<int>(get_verbose() - 2, 2);
+        if(get_debug_sampling()) _verbose = 2;
 
         OMNITRACE_DEBUG("Configuring sampler for thread %lu...\n", _tid);
         sampling::sampler_instances::construct("omnitrace", _tid, *_signal_types);
+
         _sampler->set_signals(*_signal_types);
         _sampler->set_flags(SA_RESTART);
-        _sampler->set_delay(_delay);
-        _sampler->set_verbose(std::min<size_t>(_sampler->get_verbose(), 2));
-        if(_signal_types->count(SIGALRM) > 0)
-            _sampler->set_frequency(_alrm_freq, { SIGALRM });
-        if(_signal_types->count(SIGPROF) > 0)
-            _sampler->set_frequency(_prof_freq, { SIGPROF });
+        _sampler->set_delay(_delay, *_signal_types, (_verbose > 1));
+        _sampler->set_verbose(_verbose);
+        if(_signal_types->count(get_realtime_signal()) > 0)
+            _sampler->set_frequency(_alrm_freq, { get_realtime_signal() },
+                                    (_verbose > 1));
+        if(_signal_types->count(get_cputime_signal()) > 0)
+            _sampler->set_frequency(_prof_freq, { get_cputime_signal() }, (_verbose > 1));
 
         static_assert(tim::trait::buffer_size<sampling::sampler_t>::value > 0,
                       "Error! Zero buffer size");
@@ -358,10 +380,15 @@ backtrace::configure(bool _setup, int64_t _tid)
             "dynamic sampler requires a positive buffer size: %zu",
             _sampler->get_buffer_size());
 
-        OMNITRACE_DEBUG("Sampler for thread %lu will be triggered %5.1fx per second "
-                        "(every %5.2e seconds)...\n",
-                        _tid, _sampler->get_frequency(units::sec),
-                        _sampler->get_rate(units::sec));
+        for(auto itr : *_signal_types)
+        {
+            const char* _type = (itr == get_realtime_signal()) ? "wall" : "CPU";
+            OMNITRACE_VERBOSE(1,
+                              "[%i] Sampler for thread %lu will be triggered %.1fx per "
+                              "second of %s-time (every %.3f milliseconds)...\n",
+                              itr, _tid, _sampler->get_frequency(units::sec, itr), _type,
+                              _sampler->get_period(units::msec, itr));
+        }
 
         *_running = true;
         backtrace_init_instances::construct();
@@ -454,26 +481,28 @@ backtrace::post_process(int64_t _tid)
     // check whether the call-stack entry should be used. -1 means break, 0 means continue
     auto _use_label = [](std::string_view _lbl) -> short {
         // debugging feature
-        static bool _keep_internal =
-            tim::get_env<bool>("OMNITRACE_SAMPLING_KEEP_INTERNAL", get_debug_sampling());
-        const auto _npos = std::string::npos;
+        bool       _keep_internal = get_sampling_keep_internal();
+        const auto _npos          = std::string::npos;
         if(_keep_internal) return 1;
-        if(_lbl.find("omnitrace::common::") != _npos) return -1;
-        if(_lbl.find("omnitrace_") != _npos) return -1;
-        if(_lbl.find("roctracer_") != _npos) return -1;
-        if(_lbl.find("perfetto::") != _npos) return -1;
+        if(_lbl.find("omnitrace::common::") != _npos) return 0;
         if(_lbl.find("omnitrace::") != _npos) return 0;
         if(_lbl.find("tim::") != _npos) return 0;
+        if(_lbl.find("DYNINST_") != _npos) return 0;
+        if(_lbl.find("omnitrace_") != _npos) return -1;
+        if(_lbl.find("rocprofiler_") != _npos) return -1;
+        if(_lbl.find("roctracer_") != _npos) return -1;
+        if(_lbl.find("perfetto::") != _npos) return -1;
         if(_lbl == "funlockfile") return 0;
         return 1;
     };
 
+    bool _keep_suffix = tim::get_env<bool>("OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX",
+                                           get_debug_sampling());
+
     // in the dyninst binary rewrite runtime, instrumented functions are appended with
     // "_dyninst", i.e. "main" will show up as "main_dyninst" in the backtrace.
-    auto _patch_label = [](std::string_view _lbl) -> std::string {
+    auto _patch_label = [_keep_suffix](std::string_view _lbl) -> std::string {
         // debugging feature
-        static bool _keep_suffix = tim::get_env<bool>(
-            "OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX", get_debug_sampling());
         if(_keep_suffix) return std::string{ _lbl };
         const std::string _dyninst{ "_dyninst" };
         auto              _pos = _lbl.find(_dyninst);
@@ -481,10 +510,7 @@ backtrace::post_process(int64_t _tid)
         return std::string{ _lbl }.replace(_pos, _dyninst.length(), "");
     };
 
-    using common_type_t = typename hw_counters::common_type;
-    auto _hw_cnt_labels = (get_papi_vector(_tid))
-                              ? comp::papi_common::get_events<common_type_t>()
-                              : std::vector<std::string>{};
+    auto _hw_cnt_labels = *get_papi_labels(_tid);
 
     auto _process_perfetto_counters = [&](const std::vector<sampling::bundle_t*>& _data) {
         auto _tid_name = JOIN("", '[', _tid, ']');

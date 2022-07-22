@@ -252,6 +252,7 @@ omnitrace_add_bin_test(
          -r
          _P
          ~PERFETTO
+         ~PROCESS_SAMPLING
          --csv
          --brief
     LABELS "omnitrace-avail"

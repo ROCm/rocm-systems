@@ -25,6 +25,7 @@
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/ptl.hpp"
+#include "library/runtime.hpp"
 
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
@@ -124,10 +125,7 @@ unique_ptr_t<std::set<int>>&
 get_signal_types(int64_t _tid)
 {
     static auto& _v = signal_type_instances::instances();
-    // on the main thread, use both SIGALRM and SIGPROF.
-    // on secondary threads, only use SIGPROF.
-    signal_type_instances::construct((_tid == 0) ? std::set<int>{ SIGALRM, SIGPROF }
-                                                 : std::set<int>{ SIGPROF });
+    signal_type_instances::construct(omnitrace::get_sampling_signals(_tid));
     return _v.at(_tid);
 }
 

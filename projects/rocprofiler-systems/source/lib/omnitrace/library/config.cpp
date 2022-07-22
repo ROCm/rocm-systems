@@ -25,6 +25,7 @@
 #include "library/defines.hpp"
 #include "library/gpu.hpp"
 #include "library/perfetto.hpp"
+#include "library/runtime.hpp"
 
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/mpi.hpp>
@@ -40,10 +41,12 @@
 #include <timemory/utility/declaration.hpp>
 #include <timemory/utility/signals.hpp>
 
+#include <algorithm>
 #include <array>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <numeric>
 #include <ostream>
 #include <string>
@@ -291,9 +294,15 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_SAMPLING_DELAY",
-        "Number of seconds to wait before the first sampling signal is delivered, "
+        "Time (in seconds) to wait before the first sampling signal is delivered, "
         "increasing this value can fix deadlocks during init",
         0.5, "sampling", "process_sampling");
+
+    OMNITRACE_CONFIG_SETTING(
+        double, "OMNITRACE_PROCESS_SAMPLING_FREQ",
+        "Number of measurements per second when OMNITTRACE_USE_PROCESS_SAMPLING=ON. If "
+        "set to zero, uses OMNITRACE_SAMPLING_FREQ value",
+        0.0, "process_sampling");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_SAMPLING_CPUS",
@@ -340,6 +349,35 @@ configure_settings(bool _init)
                              "Enable tracing calls to pthread_rwlock_* functions. May "
                              "cause deadlocks with ROCm-enabled OpenMPI.",
                              false, "backend", "parallelism", "gotcha");
+
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_SAMPLING_KEEP_INTERNAL",
+                             "If disabled, omnitrace will attempt to filter out internal "
+                             "routines from the sampling call-stacks",
+                             true, "sampling", "data");
+
+    OMNITRACE_CONFIG_SETTING(
+        bool, "OMNITRACE_SAMPLING_REALTIME",
+        "Enable sampling frequency via a wall-clock timer on child threads. This may "
+        "result in typically idle child threads consuming an unnecessary large amount of "
+        "CPU time. The main thread always has this enabled.",
+        false, "sampling");
+
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_SAMPLING_CPUTIME",
+                             "Enable sampling frequency via a timer that measures both "
+                             "CPU time used by the current process, "
+                             "and CPU time expended on behalf of the process by the "
+                             "system. This is recommended.",
+                             true, "timemory", "sampling");
+
+    auto _sigrt_range = SIGRTMAX - SIGRTMIN;
+
+    OMNITRACE_CONFIG_SETTING(
+        int, "OMNITRACE_SAMPLING_REALTIME_OFFSET",
+        std::string{
+            "Modify this value only if the target process is also using SIGRTMIN. E.g. "
+            "the signal used is SIGRTMIN + <THIS_VALUE>. Value must be <= " } +
+            std::to_string(_sigrt_range),
+        0, "sampling");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_FLAT_SAMPLING",
                              "Ignore hierarchy in all statistical sampling entries",
@@ -443,6 +481,7 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_OUTPUT_FILE",
                              "[DEPRECATED] See OMNITRACE_PERFETTO_FILE", std::string{},
                              "perfetto", "io", "filename", "deprecated");
+
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_PERFETTO_FILE", "Perfetto filename",
                              std::string{ "perfetto-trace.proto" }, "perfetto", "io",
                              "filename");
@@ -694,7 +733,7 @@ configure_signal_handler()
         using sys_signal      = tim::sys_signal;
         tim::disable_signal_detection();
         auto _exit_action = [](int nsig) {
-            tim::sampling::block_signals({ SIGPROF, SIGALRM },
+            tim::sampling::block_signals(get_sampling_signals(),
                                          tim::sampling::sigmask_scope::process);
             OMNITRACE_BASIC_PRINT(
                 "Finalizing afer signal %i :: %s\n", nsig,
@@ -1315,6 +1354,34 @@ get_critical_trace_serialize_names()
 }
 
 bool
+get_sampling_keep_internal()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_KEEP_INTERNAL");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_use_sampling_realtime()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_use_sampling_cputime()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUTIME");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+int
+get_sampling_rtoffset()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME_OFFSET");
+    return static_cast<tim::tsettings<int>&>(*_v->second).get();
+}
+
+bool
 get_timeline_sampling()
 {
     static auto _v = get_config()->find("OMNITRACE_TIMELINE_SAMPLING");
@@ -1475,7 +1542,7 @@ get_instrumentation_interval()
     return static_cast<tim::tsettings<size_t>&>(*_v->second).get();
 }
 
-double&
+double
 get_sampling_freq()
 {
     static auto _v = get_config()->find("OMNITRACE_SAMPLING_FREQ");
@@ -1503,11 +1570,14 @@ get_critical_trace_count()
     return static_cast<tim::tsettings<int64_t>&>(*_v->second).get();
 }
 
-double&
+double
 get_process_sampling_freq()
 {
-    static auto _v = std::min<double>(get_sampling_freq(), 1000.0);
-    return _v;
+    static auto _v = get_config()->find("OMNITRACE_PROCESS_SAMPLING_FREQ");
+    auto        _val =
+        std::min<double>(static_cast<tim::tsettings<double>&>(*_v->second).get(), 1000.0);
+    if(_val < 1.0e-9) return get_sampling_freq();
+    return _val;
 }
 
 std::string

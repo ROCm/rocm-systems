@@ -33,7 +33,6 @@
 #include <timemory/components/papi/types.hpp>
 #include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
-#include <timemory/sampling/sampler.hpp>
 #include <timemory/variadic/types.hpp>
 
 #include <array>
