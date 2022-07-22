@@ -72,13 +72,91 @@ omnitrace-avail --components --available --string --brief
 
 ### Exploring Hardware Counters
 
-[Omnitrace](https://github.com/AMDResearch/omnitrace) supports collecting hardware counters via PAPI.
+[Omnitrace](https://github.com/AMDResearch/omnitrace) supports collecting hardware counters via PAPI and ROCm.
+Generally, PAPI is used to collect CPU-based hardware counters and ROCm is used to collect GPU-based hardware
+counters; although it is possible to install PAPI with ROCm support and collect GPU-based hardware counters
+via PAPI but this is not recommended because CPU hardware counters via PAPI cannot be collected simultaneously.
 
 View all possible hardware counters and their descriptions:
 
 ```shell
 omnitrace-avail --hw-counters --description
 ```
+
+Additionally, you can pass `-c CPU` to restrict the hardware counters to the counters available via PAPI and
+`-c GPU` to restrict the hardware counters displayed to the counters available via ROCm.
+
+### Enabling Hardware Counters
+
+Hardware counters via PAPI are configured with the `OMNITRACE_PAPI_EVENTS` configuration variable.
+Hardware counters via ROCm are configured with the `OMNITRACE_ROCM_EVENTS` configuration variable.
+It should be noted that ROCm hardware counters also require the `OMNITRACE_USE_ROCPROFILER` configuration
+variable to be enabled (i.e., `OMNITRACE_USE_ROCPROFILER=ON`).
+
+Example configuration for hardware counters:
+
+```console
+
+```
+
+#### OMNITRACE_PAPI_EVENTS
+
+In order to collect the majority of hardware counters via PAPI, you need to make sure the `/proc/sys/kernel/perf_event_paranoid`
+has a value of less than 2. If you have sudo access, you can use the following command to modify the value:
+
+```shell
+echo 0 | sudo tee /proc/sys/kernel/perf_event_paranoid
+```
+
+However this value will not be retained upon reboot. The following command will preserve this setting between reboots:
+
+```shell
+echo 'kernel.perf_event_paranoid=0' | sudo tee -a /etc/sysctl.conf
+```
+
+PAPI event use something similar to a namespace. All specified hardware counters must be from the same namespace.
+For hardware counters starting with the `PAPI_` prefix, these are high-level aggregates of multiple hardware counters.
+Otherwise, most events use two or three colons (`::` or `:::`) between the component name and the counter name, e.g.,
+`amd64_rapl::RAPL_ENERGY_PKG`, `perf::PERF_COUNT_HW_CPU_CYCLES`, etc.
+
+For example, the following is a valid configuration:
+
+```console
+OMNITRACE_PAPI_EVENTS = perf::INSTRUCTIONS  perf::CACHE-REFERENCES  perf::CACHE-MISSES
+```
+
+However, the following effectively specifies the same set of hardware counters but is an invalid configuration because it mixes
+PAPI components from different namespaces:
+
+```console
+OMNITRACE_PAPI_EVENTS = PAPI_TOT_INS        perf::CACHE-REFERENCES  perf::CACHE-MISSES
+```
+
+#### OMNITRACE_ROCM_EVENTS
+
+Omnitrace reads the ROCm events from the `${ROCM_PATH}/lib/rocprofiler/metrics.xml` file. Use the `ROCP_METRICS` environment
+variable to point omnitrace to a different XML metrics file, e.g., `export ROCP_METRICS=${PWD}/custom_metrics.xml`.
+`omnitrace-avail -H -c GPU` will show event names with a suffix of `:device=N` where `N` is the device number.
+For example, if you have two devices, you will see:
+
+```console
+| Wavefronts:device=0                   | Derived counter: SQ_WAVES             |
+...
+| Wavefronts:device=1                   | Derived counter: SQ_WAVES             |
+```
+
+If you wish to collect the event on all the devices, simply specify the event, e.g. `Wavefronts`, withouth the `:device=` suffix.
+If you wish to collect the event only on specific device(s), use the `:device=` suffix.
+
+For example:
+
+```console
+OMNITRACE_ROCM_EVENTS = GPUBusy     SQ_WAVES:device=0    SQ_INSTS_VALU:device=1
+```
+
+- Records the percentage of time the GPU was busy on all devices
+- Counts the number of waves sent to SQs on device 0
+- Counts the number of VALU instructions issued on device 1
 
 ### omnitrace-avail Examples
 
@@ -756,6 +834,327 @@ $ omnitrace-avail -H -bd
 | net:::cali59d6fabc2aa:tx:colls        | cali59d6fabc2aa transmit colls        |
 | net:::cali59d6fabc2aa:tx:carrier      | cali59d6fabc2aa transmit carrier      |
 | net:::cali59d6fabc2aa:tx:compressed   | cali59d6fabc2aa transmit compressed   |
+|---------------------------------------|---------------------------------------|
+|                  GPU                  |                                       |
+|---------------------------------------|---------------------------------------|
+| TCC_EA1_WRREQ[0]:device=0             | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[1]:device=0             | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[2]:device=0             | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[3]:device=0             | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[4]:device=0             | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[5]:device=0             | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[6]:device=0             | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[7]:device=0             | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[8]:device=0             | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[9]:device=0             | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[10]:device=0            | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[11]:device=0            | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[12]:device=0            | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[13]:device=0            | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[14]:device=0            | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ[15]:device=0            | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ_64B[0]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[1]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[2]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[3]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[4]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[5]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[6]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[7]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[8]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[9]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[10]:device=0        | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[11]:device=0        | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[12]:device=0        | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[13]:device=0        | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[14]:device=0        | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_64B[15]:device=0        | Number of 64-byte transactions goi... |
+| TCC_EA1_WRREQ_STALL[0]:device=0       | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[1]:device=0       | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[2]:device=0       | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[3]:device=0       | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[4]:device=0       | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[5]:device=0       | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[6]:device=0       | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[7]:device=0       | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[8]:device=0       | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[9]:device=0       | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[10]:device=0      | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[11]:device=0      | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[12]:device=0      | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[13]:device=0      | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[14]:device=0      | Number of cycles a write request w... |
+| TCC_EA1_WRREQ_STALL[15]:device=0      | Number of cycles a write request w... |
+| TCC_EA1_RDREQ[0]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[1]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[2]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[3]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[4]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[5]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[6]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[7]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[8]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[9]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[10]:device=0            | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[11]:device=0            | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[12]:device=0            | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[13]:device=0            | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[14]:device=0            | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ[15]:device=0            | Number of TCC/EA read requests (ei... |
+| TCC_EA1_RDREQ_32B[0]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[1]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[2]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[3]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[4]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[5]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[6]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[7]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[8]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[9]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[10]:device=0        | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[11]:device=0        | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[12]:device=0        | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[13]:device=0        | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[14]:device=0        | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_32B[15]:device=0        | Number of 32-byte TCC/EA read requ... |
+| GRBM_COUNT:device=0                   | Tie High - Count Number of Clocks     |
+| GRBM_GUI_ACTIVE:device=0              | The GUI is Active                     |
+| SQ_WAVES:device=0                     | Count number of waves sent to SQs.... |
+| SQ_INSTS_VALU:device=0                | Number of VALU instructions issued... |
+| SQ_INSTS_VMEM_WR:device=0             | Number of VMEM write instructions ... |
+| SQ_INSTS_VMEM_RD:device=0             | Number of VMEM read instructions i... |
+| SQ_INSTS_SALU:device=0                | Number of SALU instructions issued... |
+| SQ_INSTS_SMEM:device=0                | Number of SMEM instructions issued... |
+| SQ_INSTS_FLAT:device=0                | Number of FLAT instructions issued... |
+| SQ_INSTS_FLAT_LDS_ONLY:device=0       | Number of FLAT instructions issued... |
+| SQ_INSTS_LDS:device=0                 | Number of LDS instructions issued ... |
+| SQ_INSTS_GDS:device=0                 | Number of GDS instructions issued.... |
+| SQ_WAIT_INST_LDS:device=0             | Number of wave-cycles spent waitin... |
+| SQ_ACTIVE_INST_VALU:device=0          | regspec 71? Number of cycles the S... |
+| SQ_INST_CYCLES_SALU:device=0          | Number of cycles needed to execute... |
+| SQ_THREAD_CYCLES_VALU:device=0        | Number of thread-cycles used to ex... |
+| SQ_LDS_BANK_CONFLICT:device=0         | Number of cycles LDS is stalled by... |
+| TA_TA_BUSY[0]:device=0                | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[1]:device=0                | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[2]:device=0                | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[3]:device=0                | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[4]:device=0                | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[5]:device=0                | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[6]:device=0                | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[7]:device=0                | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[8]:device=0                | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[9]:device=0                | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[10]:device=0               | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[11]:device=0               | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[12]:device=0               | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[13]:device=0               | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[14]:device=0               | TA block is busy. Perf_Windowing n... |
+| TA_TA_BUSY[15]:device=0               | TA block is busy. Perf_Windowing n... |
+| TA_FLAT_READ_WAVEFRONTS[0]:device=0   | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[1]:device=0   | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[2]:device=0   | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[3]:device=0   | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[4]:device=0   | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[5]:device=0   | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[6]:device=0   | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[7]:device=0   | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[8]:device=0   | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[9]:device=0   | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[10]:device=0  | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[11]:device=0  | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[12]:device=0  | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[13]:device=0  | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[14]:device=0  | Number of flat opcode reads proces... |
+| TA_FLAT_READ_WAVEFRONTS[15]:device=0  | Number of flat opcode reads proces... |
+| TA_FLAT_WRITE_WAVEFRONTS[0]:device=0  | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[1]:device=0  | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[2]:device=0  | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[3]:device=0  | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[4]:device=0  | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[5]:device=0  | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[6]:device=0  | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[7]:device=0  | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[8]:device=0  | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[9]:device=0  | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[10]:device=0 | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[11]:device=0 | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[12]:device=0 | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[13]:device=0 | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[14]:device=0 | Number of flat opcode writes proce... |
+| TA_FLAT_WRITE_WAVEFRONTS[15]:device=0 | Number of flat opcode writes proce... |
+| TCC_HIT[0]:device=0                   | Number of cache hits.                 |
+| TCC_HIT[1]:device=0                   | Number of cache hits.                 |
+| TCC_HIT[2]:device=0                   | Number of cache hits.                 |
+| TCC_HIT[3]:device=0                   | Number of cache hits.                 |
+| TCC_HIT[4]:device=0                   | Number of cache hits.                 |
+| TCC_HIT[5]:device=0                   | Number of cache hits.                 |
+| TCC_HIT[6]:device=0                   | Number of cache hits.                 |
+| TCC_HIT[7]:device=0                   | Number of cache hits.                 |
+| TCC_HIT[8]:device=0                   | Number of cache hits.                 |
+| TCC_HIT[9]:device=0                   | Number of cache hits.                 |
+| TCC_HIT[10]:device=0                  | Number of cache hits.                 |
+| TCC_HIT[11]:device=0                  | Number of cache hits.                 |
+| TCC_HIT[12]:device=0                  | Number of cache hits.                 |
+| TCC_HIT[13]:device=0                  | Number of cache hits.                 |
+| TCC_HIT[14]:device=0                  | Number of cache hits.                 |
+| TCC_HIT[15]:device=0                  | Number of cache hits.                 |
+| TCC_MISS[0]:device=0                  | Number of cache misses. UC reads c... |
+| TCC_MISS[1]:device=0                  | Number of cache misses. UC reads c... |
+| TCC_MISS[2]:device=0                  | Number of cache misses. UC reads c... |
+| TCC_MISS[3]:device=0                  | Number of cache misses. UC reads c... |
+| TCC_MISS[4]:device=0                  | Number of cache misses. UC reads c... |
+| TCC_MISS[5]:device=0                  | Number of cache misses. UC reads c... |
+| TCC_MISS[6]:device=0                  | Number of cache misses. UC reads c... |
+| TCC_MISS[7]:device=0                  | Number of cache misses. UC reads c... |
+| TCC_MISS[8]:device=0                  | Number of cache misses. UC reads c... |
+| TCC_MISS[9]:device=0                  | Number of cache misses. UC reads c... |
+| TCC_MISS[10]:device=0                 | Number of cache misses. UC reads c... |
+| TCC_MISS[11]:device=0                 | Number of cache misses. UC reads c... |
+| TCC_MISS[12]:device=0                 | Number of cache misses. UC reads c... |
+| TCC_MISS[13]:device=0                 | Number of cache misses. UC reads c... |
+| TCC_MISS[14]:device=0                 | Number of cache misses. UC reads c... |
+| TCC_MISS[15]:device=0                 | Number of cache misses. UC reads c... |
+| TCC_EA_WRREQ[0]:device=0              | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[1]:device=0              | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[2]:device=0              | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[3]:device=0              | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[4]:device=0              | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[5]:device=0              | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[6]:device=0              | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[7]:device=0              | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[8]:device=0              | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[9]:device=0              | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[10]:device=0             | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[11]:device=0             | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[12]:device=0             | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[13]:device=0             | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[14]:device=0             | Number of transactions (either 32-... |
+| TCC_EA_WRREQ[15]:device=0             | Number of transactions (either 32-... |
+| TCC_EA_WRREQ_64B[0]:device=0          | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[1]:device=0          | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[2]:device=0          | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[3]:device=0          | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[4]:device=0          | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[5]:device=0          | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[6]:device=0          | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[7]:device=0          | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[8]:device=0          | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[9]:device=0          | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[10]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[11]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[12]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[13]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[14]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_64B[15]:device=0         | Number of 64-byte transactions goi... |
+| TCC_EA_WRREQ_STALL[0]:device=0        | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[1]:device=0        | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[2]:device=0        | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[3]:device=0        | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[4]:device=0        | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[5]:device=0        | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[6]:device=0        | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[7]:device=0        | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[8]:device=0        | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[9]:device=0        | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[10]:device=0       | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[11]:device=0       | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[12]:device=0       | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[13]:device=0       | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[14]:device=0       | Number of cycles a write request w... |
+| TCC_EA_WRREQ_STALL[15]:device=0       | Number of cycles a write request w... |
+| TCC_EA_RDREQ[0]:device=0              | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[1]:device=0              | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[2]:device=0              | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[3]:device=0              | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[4]:device=0              | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[5]:device=0              | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[6]:device=0              | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[7]:device=0              | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[8]:device=0              | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[9]:device=0              | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[10]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[11]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[12]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[13]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[14]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ[15]:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA_RDREQ_32B[0]:device=0          | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[1]:device=0          | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[2]:device=0          | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[3]:device=0          | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[4]:device=0          | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[5]:device=0          | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[6]:device=0          | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[7]:device=0          | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[8]:device=0          | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[9]:device=0          | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[10]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[11]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[12]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[13]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[14]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_32B[15]:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[0]:de... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[1]:de... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[2]:de... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[3]:de... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[4]:de... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[5]:de... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[6]:de... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[7]:de... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[8]:de... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[9]:de... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[10]:d... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[11]:d... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[12]:d... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[13]:d... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[14]:d... | TCP stalls TA data interface. Now ... |
+| TCP_TCP_TA_DATA_STALL_CYCLES[15]:d... | TCP stalls TA data interface. Now ... |
+| TCC_EA1_RDREQ_32B_sum:device=0        | Number of 32-byte TCC/EA read requ... |
+| TCC_EA1_RDREQ_sum:device=0            | Number of TCC/EA read requests (ei... |
+| TCC_EA1_WRREQ_sum:device=0            | Number of transactions (either 32-... |
+| TCC_EA1_WRREQ_64B_sum:device=0        | Number of 64-byte transactions goi... |
+| TCC_WRREQ1_STALL_max:device=0         | Number of cycles a write request w... |
+| RDATA1_SIZE:device=0                  | The total kilobytes fetched from t... |
+| WDATA1_SIZE:device=0                  | The total kilobytes written to the... |
+| FETCH_SIZE:device=0                   | The total kilobytes fetched from t... |
+| WRITE_SIZE:device=0                   | The total kilobytes written to the... |
+| WRITE_REQ_32B:device=0                | The total number of 32-byte effect... |
+| TA_BUSY_avr:device=0                  | TA block is busy. Average over TA ... |
+| TA_BUSY_max:device=0                  | TA block is busy. Max over TA inst... |
+| TA_BUSY_min:device=0                  | TA block is busy. Min over TA inst... |
+| TA_FLAT_READ_WAVEFRONTS_sum:device=0  | Number of flat opcode reads proces... |
+| TA_FLAT_WRITE_WAVEFRONTS_sum:device=0 | Number of flat opcode writes proce... |
+| TCC_HIT_sum:device=0                  | Number of cache hits. Sum over TCC... |
+| TCC_MISS_sum:device=0                 | Number of cache misses. Sum over T... |
+| TCC_EA_RDREQ_32B_sum:device=0         | Number of 32-byte TCC/EA read requ... |
+| TCC_EA_RDREQ_sum:device=0             | Number of TCC/EA read requests (ei... |
+| TCC_EA_WRREQ_sum:device=0             | Number of transactions (either 32-... |
+| TCC_EA_WRREQ_64B_sum:device=0         | Number of 64-byte transactions goi... |
+| TCC_WRREQ_STALL_max:device=0          | Number of cycles a write request w... |
+| GPUBusy:device=0                      | The percentage of time GPU was busy.  |
+| Wavefronts:device=0                   | Total wavefronts.                     |
+| VALUInsts:device=0                    | The average number of vector ALU i... |
+| SALUInsts:device=0                    | The average number of scalar ALU i... |
+| VFetchInsts:device=0                  | The average number of vector fetch... |
+| SFetchInsts:device=0                  | The average number of scalar fetch... |
+| VWriteInsts:device=0                  | The average number of vector write... |
+| FlatVMemInsts:device=0                | The average number of FLAT instruc... |
+| LDSInsts:device=0                     | The average number of LDS read or ... |
+| FlatLDSInsts:device=0                 | The average number of FLAT instruc... |
+| GDSInsts:device=0                     | The average number of GDS read or ... |
+| VALUUtilization:device=0              | The percentage of active vector AL... |
+| VALUBusy:device=0                     | The percentage of GPUTime vector A... |
+| SALUBusy:device=0                     | The percentage of GPUTime scalar A... |
+| FetchSize:device=0                    | The total kilobytes fetched from t... |
+| WriteSize:device=0                    | The total kilobytes written to the... |
+| MemWrites32B:device=0                 | The total number of effective 32B ... |
+| L2CacheHit:device=0                   | The percentage of fetch, write, at... |
+| MemUnitBusy:device=0                  | The percentage of GPUTime the memo... |
+| MemUnitStalled:device=0               | The percentage of GPUTime the memo... |
+| WriteUnitStalled:device=0             | The percentage of GPUTime the Writ... |
+| ALUStalledByLDS:device=0              | The percentage of GPUTime ALU unit... |
+| LDSBankConflict:device=0              | The percentage of GPUTime LDS is s... |
 |---------------------------------------|---------------------------------------|
 ```
 

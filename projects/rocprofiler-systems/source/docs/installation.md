@@ -128,6 +128,7 @@ and Dyninst requires TBB), and the CMake option to build the package alongside o
   - HIP
   - Roctracer for HIP API and kernel tracing
   - ROCM-SMI for GPU monitoring
+  - Rocprofiler for GPU hardware counters
 - [PAPI](https://icl.utk.edu/papi/)
 - MPI
   - `OMNITRACE_USE_MPI` will enable full MPI support
