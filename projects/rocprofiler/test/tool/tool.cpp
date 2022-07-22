@@ -83,9 +83,10 @@ struct kernel_properties_t {
   uint32_t workgroup_size;
   uint32_t lds_size;
   uint32_t scratch_size;
-  uint32_t vgpr_count;
+  uint32_t arch_vgpr_count;
+  uint32_t accum_vgpr_count;
   uint32_t sgpr_count;
-  uint32_t fbarrier_count;
+  uint32_t wave_size;
   hsa_signal_t signal;
   uint64_t object;
 };
@@ -397,7 +398,7 @@ bool dump_context_entry(context_entry_t* entry, bool to_clean = true) {
     const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
     const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(entry->agent);
 
-    fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), pid(%u), tid(%u), grd(%u), wgr(%u), lds(%u), scr(%u), vgpr(%u), sgpr(%u), fbar(%u), sig(0x%lx), obj(0x%lx), kernel-name(\"%s\")",
+    fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), pid(%u), tid(%u), grd(%u), wgr(%u), lds(%u), scr(%u), arch_vgpr(%u), accum_vgpr(%u), sgpr(%u), wave_size(%u), sig(0x%lx), obj(0x%lx), kernel-name(\"%s\")",
       index,
       agent_info->dev_index,
       entry->data.queue_id,
@@ -408,9 +409,10 @@ bool dump_context_entry(context_entry_t* entry, bool to_clean = true) {
       entry->kernel_properties.workgroup_size,
       (entry->kernel_properties.lds_size + (AgentInfo::lds_block_size - 1)) & ~(AgentInfo::lds_block_size - 1),
       entry->kernel_properties.scratch_size,
-      (entry->kernel_properties.vgpr_count + 1) * agent_info->vgpr_block_size,
-      (entry->kernel_properties.sgpr_count + agent_info->sgpr_block_dflt) * agent_info->sgpr_block_size,
-      entry->kernel_properties.fbarrier_count,
+      entry->kernel_properties.arch_vgpr_count,
+      entry->kernel_properties.accum_vgpr_count,
+      entry->kernel_properties.sgpr_count,
+      entry->kernel_properties.wave_size,
       entry->kernel_properties.signal.handle,
       entry->kernel_properties.object,
       nik_name.c_str());
@@ -612,16 +614,84 @@ bool check_filter(const rocprofiler_callback_data_t* callback_data, const callba
   return found;
 }
 
-static const amd_kernel_code_t* GetKernelCode(uint64_t kernel_object) {
-  const amd_kernel_code_t* kernel_code = NULL;
+struct kernel_descriptor_t {
+  uint8_t reserved0[16];
+  int64_t kernel_code_entry_byte_offset;
+  uint8_t reserved1[20];
+  uint32_t compute_pgm_rsrc3;
+  uint32_t compute_pgm_rsrc1;
+  uint32_t compute_pgm_rsrc2;
+  uint16_t kernel_code_properties;
+  uint8_t reserved2[6];
+};
+
+// AMD Compute Program Resource Register Three.
+typedef uint32_t amd_compute_pgm_rsrc_three32_t;
+enum amd_compute_gfx9_pgm_rsrc_three_t {
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET, 0, 5),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_COMPUTE_PGM_RSRC_THREE_TG_SPLIT, 16, 1)
+};
+enum amd_compute_gfx10_gfx11_pgm_rsrc_three_t {
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_COMPUTE_PGM_RSRC_THREE_SHARED_VGPR_COUNT, 0, 4),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_COMPUTE_PGM_RSRC_THREE_INST_PREF_SIZE, 4, 6),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_COMPUTE_PGM_RSRC_THREE_TRAP_ON_START, 10, 1),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_COMPUTE_PGM_RSRC_THREE_TRAP_ON_END, 11, 1),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_COMPUTE_PGM_RSRC_THREE_IMAGE_OP, 31, 1)
+};
+
+// Kernel code properties.
+enum amd_kernel_code_property_t  {
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 0, 1),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR, 1, 1),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR, 2, 1),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 3, 1),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_ID, 4, 1),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT, 5, 1),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE, 6, 1),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_RESERVED0, 7, 3),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 10, 1), // GFX10+
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK, 11, 1),
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_RESERVED1, 12, 4),
+};
+
+static const kernel_descriptor_t* GetKernelCode(uint64_t kernel_object) {
+  const kernel_descriptor_t* kernel_code = NULL;
   hsa_status_t status =
       HsaRsrcFactory::Instance().LoaderApi()->hsa_ven_amd_loader_query_host_address(
           reinterpret_cast<const void*>(kernel_object),
           reinterpret_cast<const void**>(&kernel_code));
   if (HSA_STATUS_SUCCESS != status) {
-    kernel_code = reinterpret_cast<amd_kernel_code_t*>(kernel_object);
+    kernel_code = reinterpret_cast<kernel_descriptor_t*>(kernel_object);
   }
   return kernel_code;
+}
+
+static uint32_t arch_vgpr_count(const AgentInfo &info, const kernel_descriptor_t &kernel_code) {
+  if (strcmp(info.name, "gfx90a") == 0 || strcmp(info.name, "gfx940") == 0)
+    return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc3, AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET) + 1) * 4;
+
+  return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) + 1)
+    * (AMD_HSA_BITS_GET(kernel_code.kernel_code_properties, AMD_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) ? 8 : 4);
+}
+
+static uint32_t accum_vgpr_count(const AgentInfo &info, const kernel_descriptor_t &kernel_code) {
+  if (strcmp(info.name, "gfx908") == 0)
+    return arch_vgpr_count(info, kernel_code);
+  if (strcmp(info.name, "gfx90a") == 0 || strcmp(info.name, "gfx940") == 0)
+    return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
+                             AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) + 1) * 8
+      - arch_vgpr_count(info, kernel_code);
+
+  return 0;
+}
+
+static uint32_t sgpr_count(const AgentInfo &info, const kernel_descriptor_t &kernel_code) {
+  // GFX10 and later always allocate 128 sgprs.
+  if (std::atoi(&info.gfxip[3]) >= 10)
+    return 128;
+
+  return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
+                           AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT) / 2 + 1) * 16;
 }
 
 // Setting kernel properties
@@ -630,7 +700,7 @@ void set_kernel_properties(const rocprofiler_callback_data_t* callback_data,
 {
   const hsa_kernel_dispatch_packet_t* packet = callback_data->packet;
   kernel_properties_t* kernel_properties_ptr = &(entry->kernel_properties);
-  const amd_kernel_code_t* kernel_code = callback_data->kernel_code;
+  const kernel_descriptor_t* kernel_code = (kernel_descriptor_t*)callback_data->kernel_code;
 
   entry->data = *callback_data;
 
@@ -650,9 +720,13 @@ void set_kernel_properties(const rocprofiler_callback_data_t* callback_data,
   kernel_properties_ptr->workgroup_size = (uint32_t)workgroup_size;
   kernel_properties_ptr->lds_size = packet->group_segment_size;
   kernel_properties_ptr->scratch_size = packet->private_segment_size;
-  kernel_properties_ptr->vgpr_count = AMD_HSA_BITS_GET(kernel_code->compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT);
-  kernel_properties_ptr->sgpr_count = AMD_HSA_BITS_GET(kernel_code->compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT);
-  kernel_properties_ptr->fbarrier_count = kernel_code->workgroup_fbarrier_count;
+  const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(callback_data->agent);
+  assert (agent_info != nullptr);
+  kernel_properties_ptr->arch_vgpr_count = arch_vgpr_count(*agent_info, *kernel_code);
+  kernel_properties_ptr->accum_vgpr_count = accum_vgpr_count(*agent_info, *kernel_code);
+  kernel_properties_ptr->sgpr_count = sgpr_count(*agent_info, *kernel_code);
+  kernel_properties_ptr->wave_size = AMD_HSA_BITS_GET(kernel_code->kernel_code_properties,
+                                                      AMD_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) ? 32 : 64;
   kernel_properties_ptr->signal = callback_data->completion_signal;
   kernel_properties_ptr->object = callback_data->packet->kernel_object;
 }

@@ -165,10 +165,6 @@ struct AgentInfo {
   // Number of Shader Arrays Per Shader Engines in Gpu
   uint32_t shader_arrays_per_se;
 
-  // SGPR/VGPR/LDS block sizes
-  uint32_t sgpr_block_dflt;
-  uint32_t sgpr_block_size;
-  uint32_t vgpr_block_size;
   static const uint32_t lds_block_size = 128 * 4;
 };
 
@@ -461,7 +457,7 @@ class HsaRsrcFactory {
       reinterpret_cast<std::atomic<uint64_t>*>(&(it->second.refs_count));
     atomic_ptr->fetch_sub(1, std::memory_order_relaxed);
   }
-  
+
   static inline void SetKernelNameRef(const uint64_t& addr, const char* name, const int& free) {
     if (symbols_map_ == NULL) {
       std::lock_guard<mutex_t> lck(mutex_);
