@@ -26,6 +26,7 @@
 #include "library/config.hpp"
 #include "library/cpu_freq.hpp"
 #include "library/debug.hpp"
+#include "library/runtime.hpp"
 
 #include <memory>
 #include <vector>
@@ -73,7 +74,8 @@ get_sampler_is_sampling()
 void
 sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 {
-    set_thread_state(ThreadState::Internal);
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     threading::set_thread_name("omni.sampler");
 
     // notify thread started

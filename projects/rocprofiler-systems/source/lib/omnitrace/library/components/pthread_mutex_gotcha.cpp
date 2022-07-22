@@ -22,6 +22,7 @@
 
 #include "library/components/pthread_mutex_gotcha.hpp"
 #include "library.hpp"
+#include "library/components/category_region.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
@@ -180,6 +181,8 @@ auto
 pthread_mutex_gotcha::operator()(uintptr_t&& _id, const comp::gotcha_data& _data,
                                  int (*_callee)(Args...), Args... _args) const
 {
+    using bundle_t = omnitrace::component::category_region<category::pthread>;
+
     if(is_disabled())
     {
         if(!_callee)
@@ -203,9 +206,9 @@ pthread_mutex_gotcha::operator()(uintptr_t&& _id, const comp::gotcha_data& _data
         _ts                                 = comp::wall_clock::record();
     }
 
-    omnitrace_push_region(_data.tool_id.c_str());
+    bundle_t::audit(_data, audit::incoming{}, _args...);
     auto _ret = (*_callee)(_args...);
-    omnitrace_pop_region(_data.tool_id.c_str());
+    bundle_t::audit(_data, audit::outgoing{}, _ret);
 
     if(_id < std::numeric_limits<uintptr_t>::max() && get_use_critical_trace())
     {

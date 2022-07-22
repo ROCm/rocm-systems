@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/components/pthread_create_gotcha.hpp"
+#include "library/components/category_region.hpp"
 #include "library/components/omnitrace.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/roctracer.hpp"
@@ -53,6 +54,8 @@ namespace mpl = tim::mpl;
 using bundle_t  = tim::lightweight_tuple<comp::wall_clock, comp::roctracer_data>;
 using wall_pw_t = mpl::piecewise_select<comp::wall_clock>;  // only wall-clock
 using main_pw_t = mpl::piecewise_ignore<comp::wall_clock>;  // exclude wall-clock
+using category_region_t =
+    tim::lightweight_tuple<omnitrace::component::category_region<category::pthread>>;
 
 namespace
 {
@@ -67,29 +70,63 @@ auto  bundles_dtor  = scope::destructor{ []() {
     bundles_mutex   = nullptr;
 } };
 
+template <typename... Args>
 inline void
-start_bundle(bundle_t& _bundle)
+start_bundle(bundle_t& _bundle, Args&&... _args)
 {
-    if(!get_use_timemory()) return;
+    if(!get_use_timemory() && !get_use_perfetto()) return;
     OMNITRACE_BASIC_VERBOSE_F(3, "starting bundle '%s'...\n", _bundle.key().c_str());
-    _bundle.push();
-    _bundle.start();
+    if constexpr(sizeof...(Args) > 0)
+    {
+        const char* _name = nullptr;
+        if(tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
+        {
+            category_region_t{}.audit(quirk::config<quirk::perfetto>{},
+                                      std::string_view{ _name }, _args...);
+        }
+    }
+    else
+    {
+        tim::consume_parameters(_args...);
+    }
+    if(get_use_timemory())
+    {
+        _bundle.push();
+        _bundle.start();
+    }
 }
 
+template <typename... Args>
 inline void
-stop_bundle(bundle_t& _bundle, int64_t _tid)
+stop_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
 {
-    if(!get_use_timemory()) return;
+    if(!get_use_timemory() && !get_use_perfetto()) return;
     OMNITRACE_BASIC_VERBOSE_F(3, "stopping bundle '%s' in thread %li...\n",
                               _bundle.key().c_str(), _tid);
-    _bundle.stop(wall_pw_t{});  // stop wall-clock so we can get the value
-    // update roctracer_data
-    _bundle.store(std::plus<double>{},
-                  _bundle.get<comp::wall_clock>()->get() * units::sec);
-    // stop all other components including roctracer_data after update
-    _bundle.stop(main_pw_t{});
-    // exclude popping wall-clock
-    _bundle.pop(_tid);
+    if(get_use_timemory())
+    {
+        _bundle.stop(wall_pw_t{});  // stop wall-clock so we can get the value
+        // update roctracer_data
+        _bundle.store(std::plus<double>{},
+                      _bundle.get<comp::wall_clock>()->get() * units::sec);
+        // stop all other components including roctracer_data after update
+        _bundle.stop(main_pw_t{});
+        // exclude popping wall-clock
+        _bundle.pop(_tid);
+    }
+    if constexpr(sizeof...(Args) > 0)
+    {
+        const char* _name = nullptr;
+        if(tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
+        {
+            category_region_t{}.audit(quirk::config<quirk::perfetto>{},
+                                      std::string_view{ _name }, _args...);
+        }
+    }
+    else
+    {
+        tim::consume_parameters(_args...);
+    }
 }
 }  // namespace
 
@@ -117,14 +154,15 @@ pthread_create_gotcha::wrapper::operator()() const
         return m_routine(m_arg);
     }
 
-    set_thread_state(ThreadState::Internal);
+    push_thread_state(omnitrace::ThreadState::Internal);
 
     int64_t _tid         = -1;
+    void*   _ret         = nullptr;
     auto    _is_sampling = false;
     auto    _bundle      = std::shared_ptr<bundle_t>{};
     auto    _signals     = std::set<int>{};
     auto    _coverage    = (get_mode() == omnitrace::Mode::Coverage);
-    auto    _dtor        = scope::destructor{ [&]() {
+    auto    _dtor        = [&]() {
         set_thread_state(ThreadState::Internal);
         if(_is_sampling)
         {
@@ -134,15 +172,18 @@ pthread_create_gotcha::wrapper::operator()() const
 
         if(_tid >= 0)
         {
+            auto _active = (get_state() == omnitrace::State::Active &&
+                            bundles != nullptr && bundles_mutex != nullptr);
+            if(!_active) return;
             get_execution_time(_tid)->second = comp::wall_clock::record();
             auto& _thr_bundle                = thread_bundle_data_t::instance();
             if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
                _thr_bundle->get<comp::wall_clock>()->get_is_running())
                 _thr_bundle->stop();
+            if(_bundle) stop_bundle(*_bundle, _tid);
             pthread_create_gotcha::shutdown(_tid);
         }
-        set_thread_state(ThreadState::Completed);
-    } };
+    };
 
     auto _active = (get_state() == omnitrace::State::Active && bundles != nullptr &&
                     bundles_mutex != nullptr);
@@ -180,11 +221,25 @@ pthread_create_gotcha::wrapper::operator()() const
         }
     }
 
+    // notify the wrapper that all internal work is completed
     if(m_promise) m_promise->set_value();
 
-    set_thread_state(ThreadState::Enabled);
+    // Internal -> Enabled
+    pop_thread_state();
+
+    push_thread_state(omnitrace::ThreadState::Enabled);
+
     // execute the original function
-    return m_routine(m_arg);
+    _ret = m_routine(m_arg);
+
+    pop_thread_state();
+
+    // execute the destructor actions
+    _dtor();
+
+    set_thread_state(omnitrace::ThreadState::Completed);
+
+    return _ret;
 }
 
 void*
@@ -269,6 +324,7 @@ int
 pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
                                   void* (*start_routine)(void*), void*     arg) const
 {
+    auto _initial_thread_state = get_thread_state();
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     bundle_t _bundle{ "pthread_create" };
     auto     _enable_sampling = pthread_gotcha::sampling_enabled_on_child_threads();
@@ -288,8 +344,14 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     if(!get_use_sampling() || !_enable_sampling)
     {
         auto* _obj = new wrapper(start_routine, arg, _enable_sampling, _tid, nullptr);
+        if(_active && !_coverage && _enable_sampling &&
+           _initial_thread_state == ThreadState::Enabled)
+            start_bundle(_bundle, audit::incoming{}, thread, attr, start_routine, arg);
         // create the thread
         auto _ret = (*m_wrappee)(thread, attr, &wrapper::wrap, static_cast<void*>(_obj));
+        if(_active && !_coverage && _enable_sampling &&
+           _initial_thread_state == ThreadState::Enabled)
+            stop_bundle(_bundle, _tid, audit::outgoing{}, _ret);
         return _ret;
     }
 
@@ -298,7 +360,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto _blocked_signals = get_sampling_signals();
     tim::sampling::block_signals(_blocked_signals, tim::sampling::sigmask_scope::process);
 
-    start_bundle(_bundle);
+    start_bundle(_bundle, audit::incoming{}, thread, attr, start_routine, arg);
 
     // promise set by thread when signal handler is configured
     auto  _promise = std::promise<void>{};
@@ -312,7 +374,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     OMNITRACE_DEBUG("waiting for child to signal it is setup...\n");
     _fut.wait();
 
-    stop_bundle(_bundle, threading::get_id());
+    stop_bundle(_bundle, threading::get_id(), audit::outgoing{}, _ret);
 
     // unblock the signals in the entire process
     OMNITRACE_DEBUG("unblocking signals...\n");
