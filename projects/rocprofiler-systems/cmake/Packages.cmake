@@ -287,17 +287,19 @@ if(OMNITRACE_BUILD_DYNINST)
             install(
                 TARGETS ${_LIB}
                 DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace
+                COMPONENT dyninst
                 PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace/include)
         endif()
     endforeach()
 
     omnitrace_install_tpl(dyninstAPI_RT omnitrace-rt
-                          "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
+                          "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}" core)
 
     # for packaging
     install(
         DIRECTORY ${DYNINST_TPL_STAGING_PREFIX}/lib/
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace
+        COMPONENT dyninst
         FILES_MATCHING
         PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*")
 
@@ -616,11 +618,15 @@ endif()
 
 add_subdirectory(external/timemory EXCLUDE_FROM_ALL)
 
-install(TARGETS gotcha DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace)
+install(
+    TARGETS gotcha
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace
+    COMPONENT gotcha)
 if(OMNITRACE_BUILD_LIBUNWIND)
     install(
         DIRECTORY ${PROJECT_BINARY_DIR}/external/timemory/external/libunwind/install/lib/
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace
+        COMPONENT libunwind
         FILES_MATCHING
         PATTERN "*${CMAKE_SHARED_LIBRARY_SUFFIX}*")
 endif()

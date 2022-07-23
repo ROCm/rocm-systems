@@ -26,4 +26,4 @@ enable_perfetto_ui = false
 
 extra_cflags = "@OMNITRACE_PERFETTO_C_FLAGS@"
 extra_cxxflags = "@OMNITRACE_PERFETTO_CXX_FLAGS@"
-extra_ldflags = "@OMNITRACE_PERFETTO_LINK_FLAGS@ -Wl,-rpath=\\\$ORIGIN:\\\$ORIGIN/../lib"
+extra_ldflags = "@OMNITRACE_PERFETTO_LINK_FLAGS@ -Wl,-rpath=\\\$ORIGIN:\\\$ORIGIN/../lib:\\\$ORIGIN/../lib/omnitrace"

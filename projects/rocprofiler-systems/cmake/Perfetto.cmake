@@ -137,19 +137,29 @@ if(OMNITRACE_INSTALL_PERFETTO_TOOLS)
     add_custom_target(
         omnitrace-perfetto-clean
         COMMAND ${OMNITRACE_NINJA_EXECUTABLE} -t clean
+        COMMAND ${CMAKE_COMMAND} -E rm -rf
+                ${PROJECT_BINARY_DIR}/external/perfetto/src/omnitrace-perfetto-build-stamp
         WORKING_DIRECTORY ${OMNITRACE_PERFETTO_BINARY_DIR}
         COMMENT "Cleaning Perfetto...")
 
     install(
         DIRECTORY ${OMNITRACE_PERFETTO_INSTALL_DIR}/
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace
+        COMPONENT perfetto
         FILES_MATCHING
         PATTERN "*libperfetto.so*")
 
     foreach(_FILE perfetto traced tracebox traced_probes traced_perf trigger_perfetto)
+        if("${_FILE}" STREQUAL "perfetto")
+            string(REPLACE "_" "-" _INSTALL_FILE "omnitrace-${_FILE}")
+        else()
+            string(REPLACE "_" "-" _INSTALL_FILE "omnitrace-perfetto-${_FILE}")
+        endif()
         install(
             PROGRAMS ${OMNITRACE_PERFETTO_INSTALL_DIR}/${_FILE}
             DESTINATION ${CMAKE_INSTALL_BINDIR}
+            COMPONENT perfetto
+            RENAME ${_INSTALL_FILE}
             OPTIONAL)
     endforeach()
 endif()

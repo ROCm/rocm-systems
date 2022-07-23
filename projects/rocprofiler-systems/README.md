@@ -193,38 +193,17 @@ Visit [ui.perfetto.dev](https://ui.perfetto.dev) in your browser and open up the
 
 ![omnitrace-user-api](source/docs/images/omnitrace-user-api.png)
 
-## Merging the traces from rocprof and omnitrace
+## Using Perfetto tracing with System Backend
 
-This section requires installing [Julia](https://julialang.org/).
-
-### Installing Julia
-
-Julia is available via Linux package managers or may be available via a module. Debian-based distributions such as Ubuntu can run (as a super-user):
-
-```shell
-apt-get install julia
-```
-
-Once Julia is installed, install the necessary packages (this operation only needs to be performed once):
-
-```shell
-julia -e 'using Pkg; for name in ["JSON", "DataFrames", "Dates", "CSV", "Chain", "PrettyTables"]; Pkg.add(name); end'
-```
-
-> ***Using `rocprof` externally for tracing is deprecated. The current version has built-in support for***
-> ***recording the GPU activity and HIP API calls. If you want to use an external rocprof, either***
-> ***configure CMake with `-DOMNITRACE_USE_ROCTRACER=OFF` or explicitly set `OMNITRACE_ROCTRACER_ENABLED=OFF` in the***
-> ***environment.***
-
-Use the `omnitrace-merge.jl` Julia script to merge rocprof and perfetto traces.
-
-```shell
-export OMNITRACE_USE_ROCTRACER=OFF
-rocprof --hip-trace --roctx-trace --stats ./app.inst
-omnitrace-merge.jl results.json omnitrace-app.inst-output/2021-09-02_01.03_PM/*.proto
-```
-
-## Use Perfetto tracing with System Backend
+Perfetto tracing with the system backend supports multiple processes writing to the same
+output file. Thus, it is a useful technique if Omnitrace is built with partial MPI support
+because all the perfetto output will be coalesced into a single file. The
+installation docs for perfetto can be found [here](https://perfetto.dev/docs/contributing/build-instructions).
+If you are building omnitrace from source, you can configure CMake with `OMNITRACE_INSTALL_PERFETTO_TOOLS=ON`
+and the `perfetto` and `traced` applications will be installed as part of the build process. However,
+it should be noted that to prevent this option from accidentally overwriting an existing perfetto install,
+all the perfetto executables installed by omnitrace are prefixed with `omnitrace-perfetto-`, except for the `perfetto`
+executable, which is just renamed `omnitrace-perfetto`.
 
 Enable `traced` and `perfetto` in the background:
 
@@ -233,6 +212,9 @@ pkill traced
 traced --background
 perfetto --out ./omnitrace-perfetto.proto --txt -c ${OMNITRACE_ROOT}/share/omnitrace.cfg --background
 ```
+
+> ***NOTE: if the perfetto tools were installed by omnitrace, replace `traced` with `omnitrace-perfetto-traced` and***
+> ***`perfetto` with `omnitrace-perfetto`.***
 
 Configure omnitrace to use the perfetto system backend:
 

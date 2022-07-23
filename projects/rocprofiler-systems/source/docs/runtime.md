@@ -132,6 +132,11 @@ PAPI components from different namespaces:
 OMNITRACE_PAPI_EVENTS = PAPI_TOT_INS        perf::CACHE-REFERENCES  perf::CACHE-MISSES
 ```
 
+> ***If omnitrace was configured with `OMNITRACE_BUILD_PAPI=ON` (the default), the standard PAPI command line tools such as***
+> ***`papi_avail`, `papi_event_chooser`, etc. will not be able to provide information about the PAPI library used by omnitrace***
+> ***(omnitrace statically links to libpapi). However, all of these tools are installed with the prefix `omnitrace-` and all***
+> ***underscores are replaced with hypens, e.g. `papi_avail` -> `omnitrace-papi-avail`.***
+
 #### OMNITRACE_ROCM_EVENTS
 
 Omnitrace reads the ROCm events from the `${ROCM_PATH}/lib/rocprofiler/metrics.xml` file. Use the `ROCP_METRICS` environment

@@ -1,0 +1,201 @@
+name: cpack
+
+on:
+  push:
+    branches: [main, releases/**]
+    tags: []
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["18.04", "20.04"]
+        rocm-version: ["0.0", "4.5", "5.0", "5.1", "5.2"]
+        default-rocm: ["5.0"]
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Configure ROCm Version
+        if: ${{ matrix.rocm-version == 0 }}
+        run: |
+          echo "CI_ROCM_VERSION=${{ matrix.default-rocm }}" >> $GITHUB_ENV
+          echo "CI_SCRIPT_ARGS=--core +python" >> $GITHUB_ENV
+
+      - name: Configure ROCm Version
+        if: ${{ matrix.rocm-version > 0 }}
+        run: |
+          echo "CI_ROCM_VERSION=${{ matrix.rocm-version }}" >> $GITHUB_ENV
+          echo "CI_SCRIPT_ARGS=--rocm +python" >> $GITHUB_ENV
+
+      - name: Build Base Container
+        timeout-minutes: 20
+        run: |
+          pushd docker
+          ./build-docker.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION}
+          popd
+
+      - name: Build Release
+        timeout-minutes: 150
+        run: |
+          pushd docker
+          ./build-docker-release.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- ${CI_SCRIPT_ARGS}
+          popd
+
+      - name: List Files
+        timeout-minutes: 10
+        run: |
+          find build-release -type f | egrep '\.(sh|deb|rpm)$'
+
+      - name: STGZ Artifacts
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v2
+        with:
+          name: ubuntu-stgz-installers
+          path: |
+            build-release/stgz/*.sh
+
+      - name: DEB Artifacts
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v2
+        with:
+          name: ubuntu-deb-installers
+          path: |
+            build-release/deb/*.deb
+
+      # before testing remove any artifacts of the build
+      - name: Remove Build
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          mv build-release/stgz/*.sh ./
+          mv build-release/deb/*.deb ./
+          sudo rm -rf build-release
+          sudo rm -rf /opt/omnitrace
+
+      - name: Test STGZ Install
+        timeout-minutes: 20
+        continue-on-error: true
+        run: |
+          set -v
+          for i in omnitrace-*.sh
+          do
+            ./docker/test-docker-release.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- --stgz ${i}
+          done
+
+      - name: Test DEB Install
+        timeout-minutes: 20
+        continue-on-error: true
+        run: |
+          set -v
+          for i in omnitrace_*.deb
+          do
+            ./docker/test-docker-release.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- --deb ${i}
+          done
+
+  opensuse:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["15.2", "15.3"]
+        rocm-version: ["0.0", "4.5", "5.0", "5.1", "5.2"]
+        default-rocm: ["5.0"]
+        exclude:
+          - os: "15.2"
+            rocm-version: "5.1"
+          - os: "15.2"
+            rocm-version: "5.2"
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Configure ROCm Version
+        if: ${{ matrix.rocm-version == 0 }}
+        run: |
+          echo "CI_ROCM_VERSION=${{ matrix.default-rocm }}" >> $GITHUB_ENV
+          echo "CI_SCRIPT_ARGS=--core +python" >> $GITHUB_ENV
+
+      - name: Configure ROCm Version
+        if: ${{ matrix.rocm-version > 0 }}
+        run: |
+          echo "CI_ROCM_VERSION=${{ matrix.rocm-version }}" >> $GITHUB_ENV
+          echo "CI_SCRIPT_ARGS=--rocm +python" >> $GITHUB_ENV
+
+      - name: Build Base Container
+        timeout-minutes: 20
+        run: |
+          pushd docker
+          ./build-docker.sh --distro opensuse --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION}
+          popd
+
+      - name: Build Release
+        timeout-minutes: 150
+        run: |
+          pushd docker
+          ./build-docker-release.sh --distro opensuse --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- ${CI_SCRIPT_ARGS}
+          popd
+
+      - name: List Files
+        timeout-minutes: 10
+        run: |
+          find build-release -type f | egrep '\.(sh|deb|rpm)$'
+
+      - name: STGZ Artifacts
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v2
+        with:
+          name: opensuse-stgz-installers
+          path: |
+            build-release/stgz/*.sh
+
+      - name: RPM Artifacts
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v2
+        with:
+          name: opensuse-rpm-installers
+          path: |
+            build-release/rpm/*.rpm
+
+      # before testing remove any artifacts of the build
+      - name: Remove Build
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          mv build-release/stgz/*.sh ./
+          mv build-release/rpm/*.rpm ./
+          sudo rm -rf build-release
+          sudo rm -rf /opt/omnitrace
+
+      - name: Test STGZ Install
+        timeout-minutes: 20
+        continue-on-error: true
+        run: |
+          set -v
+          for i in omnitrace-*.sh
+          do
+            ./docker/test-docker-release.sh --distro opensuse --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- --stgz ${i}
+          done
+
+      - name: Test RPM Install
+        timeout-minutes: 20
+        continue-on-error: true
+        run: |
+          set -v
+          for i in omnitrace-*.rpm
+          do
+            ./docker/test-docker-release.sh --distro opensuse --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- --rpm ${i}
+          done

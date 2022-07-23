@@ -121,6 +121,6 @@ do
     TAG=${DISTRO}-${VERSION}
     for ROCM_VERSION in ${ROCM_VERSIONS}
     do
-        test-release ${USER}/omnitrace-${TAG}-rocm-${ROCM_VERSION} ${SCRIPT_ARGS}
+        test-release ${USER}/omnitrace:release-base-${TAG}-rocm-${ROCM_VERSION} ${SCRIPT_ARGS}
     done
 done

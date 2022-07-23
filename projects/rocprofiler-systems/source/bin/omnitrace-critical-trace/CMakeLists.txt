@@ -25,5 +25,5 @@ set_target_properties(
 
 install(
     TARGETS omnitrace-critical-trace
-    DESTINATION bin
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
     OPTIONAL)

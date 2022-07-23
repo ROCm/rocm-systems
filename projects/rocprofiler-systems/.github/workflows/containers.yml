@@ -1,0 +1,144 @@
+name: ci-containers
+
+# nightly build
+on:
+  schedule:
+    - cron: 0 3 * * *
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+jobs:
+  omnitrace-ci:
+    runs-on: ubuntu-20.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: "ubuntu"
+            version: "18.04"
+          - distro: "ubuntu"
+            version: "20.04"
+          - distro: "opensuse"
+            version: "15.2"
+          - distro: "opensuse"
+            version: "15.3"
+          - distro: "opensuse"
+            version: "15.4"
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build CI Container
+        if: ${{ matrix.rocm-version == 0 }}
+        timeout-minutes: 45
+        run: |
+          pushd docker
+          ./build-docker-ci.sh --distro ${{ matrix.distro }} --versions ${{ matrix.version }} --user ${{ secrets.DOCKERHUB_USERNAME }} --push --jobs 2 --elfutils-version 0.186
+          popd
+
+  omnitrace-release-ubuntu:
+    runs-on: ubuntu-20.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["18.04", "20.04"]
+        rocm-version: ["0.0", "4.5", "5.0", "5.1", "5.2"]
+        default-rocm: ["5.0"]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Base Container
+        if: ${{ matrix.rocm-version == 0 }}
+        timeout-minutes: 45
+        run: |
+          pushd docker
+          ./build-docker.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${{ matrix.default-rocm }} --user ${{ secrets.DOCKERHUB_USERNAME }} --push
+          popd
+
+      - name: Build Base Container
+        if: ${{ matrix.rocm-version > 0 }}
+        timeout-minutes: 45
+        run: |
+          pushd docker
+          ./build-docker.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${{ matrix.rocm-version }} --user ${{ secrets.DOCKERHUB_USERNAME }} --push
+          popd
+
+  omnitrace-release-opensuse:
+    runs-on: ubuntu-20.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["15.2", "15.3"]
+        rocm-version: ["0.0", "4.5", "5.0", "5.1", "5.2"]
+        default-rocm: ["5.0"]
+        exclude:
+          - os: "15.2"
+            rocm-version: "5.1"
+          - os: "15.2"
+            rocm-version: "5.2"
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Base Container
+        if: ${{ matrix.rocm-version == 0 }}
+        timeout-minutes: 45
+        run: |
+          pushd docker
+          ./build-docker.sh --distro opensuse --versions ${{ matrix.os }} --rocm-versions ${{ matrix.default-rocm }} --user ${{ secrets.DOCKERHUB_USERNAME }} --push
+          popd
+
+      - name: Build Base Container
+        if: ${{ matrix.rocm-version > 0 }}
+        timeout-minutes: 45
+        run: |
+          pushd docker
+          ./build-docker.sh --distro opensuse --versions ${{ matrix.os }} --rocm-versions ${{ matrix.rocm-version }} --user ${{ secrets.DOCKERHUB_USERNAME }} --push
+          popd

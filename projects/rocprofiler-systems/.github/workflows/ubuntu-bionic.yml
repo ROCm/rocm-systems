@@ -21,7 +21,7 @@ jobs:
   ubuntu-bionic:
     runs-on: ubuntu-18.04
     container:
-      image: jrmadsen/omnitrace-ci:ubuntu-18.04
+      image: jrmadsen/omnitrace:ci-base-ubuntu-18.04
     strategy:
       matrix:
         compiler: ['g++-7', 'g++-8']

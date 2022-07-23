@@ -309,6 +309,7 @@ macro(OMNITRACE_ADD_INTERFACE_LIBRARY _TARGET)
     install(
         TARGETS ${_TARGET}
         DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        COMPONENT core
         EXPORT ${PROJECT_NAME}-library-depends
         OPTIONAL)
     if(NOT "${ARGN}" STREQUAL "")
@@ -736,6 +737,7 @@ function(OMNITRACE_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
             install(
                 PROGRAMS ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION}
                 DESTINATION ${CMAKE_INSTALL_BINDIR}
+                COMPONENT python
                 OPTIONAL)
         endif()
 
@@ -766,6 +768,7 @@ function(OMNITRACE_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
             install(
                 PROGRAMS ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}
                 DESTINATION ${CMAKE_INSTALL_BINDIR}
+                COMPONENT python
                 OPTIONAL)
         endif()
     endif()
@@ -814,7 +817,7 @@ function(OMNITRACE_BUILDTREE_TPL _TPL_TARGET _NEW_NAME _BUILD_TREE_DIR)
         COMMENT "Creating ${_NEW_NAME} from ${_TPL_TARGET}...")
 endfunction()
 
-function(OMNITRACE_INSTALL_TPL _TPL_TARGET _NEW_NAME _BUILD_TREE_DIR)
+function(OMNITRACE_INSTALL_TPL _TPL_TARGET _NEW_NAME _BUILD_TREE_DIR _COMPONENT)
     get_target_property(_TPL_VERSION ${_TPL_TARGET} VERSION)
     get_target_property(_TPL_SOVERSION ${_TPL_TARGET} SOVERSION)
     get_target_property(_TPL_NAME ${_TPL_TARGET} OUTPUT_NAME)
@@ -833,13 +836,15 @@ function(OMNITRACE_INSTALL_TPL _TPL_TARGET _NEW_NAME _BUILD_TREE_DIR)
     install(
         FILES $<TARGET_FILE:${_TPL_TARGET}>
         DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        COMPONENT ${_COMPONENT}
         RENAME ${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_VERSION})
 
     install(
         FILES
             ${_BUILD_TREE_DIR}/${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_SOVERSION}
             ${_BUILD_TREE_DIR}/${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}
-        DESTINATION ${CMAKE_INSTALL_LIBDIR})
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        COMPONENT ${_COMPONENT})
 
 endfunction()
 

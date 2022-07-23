@@ -19,7 +19,7 @@ jobs:
   opensuse:
     runs-on: ubuntu-20.04
     container:
-      image: jrmadsen/omnitrace-ci:opensuse-${{ matrix.os-release }}
+      image: jrmadsen/omnitrace:ci-base-opensuse-${{ matrix.os-release }}
     strategy:
       matrix:
         compiler: ['g++']

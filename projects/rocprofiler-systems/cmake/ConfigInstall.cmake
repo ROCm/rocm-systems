@@ -3,6 +3,8 @@ include_guard(GLOBAL)
 
 include(CMakePackageConfigHelpers)
 
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME config)
+
 install(
     EXPORT omnitrace-library-targets
     FILE omnitrace-library-targets.cmake

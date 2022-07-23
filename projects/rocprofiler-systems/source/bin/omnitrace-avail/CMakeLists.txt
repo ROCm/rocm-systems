@@ -35,5 +35,5 @@ set_target_properties(
 
 install(
     TARGETS omnitrace-avail
-    DESTINATION bin
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
     OPTIONAL)

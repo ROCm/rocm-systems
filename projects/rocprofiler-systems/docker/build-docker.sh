@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 
 : ${USER:=$(whoami)}
-: ${ROCM_VERSIONS:="5.0 4.5 4.3"}
+: ${ROCM_VERSIONS:="5.0"}
 : ${DISTRO:=ubuntu}
-: ${VERSIONS:=20.04 18.04}
+: ${VERSIONS:=20.04}
 : ${PYTHON_VERSIONS:="6 7 8 9 10"}
 : ${BUILD_CI:=""}
+: ${PUSH:=0}
 
 set -e
 
@@ -88,6 +89,9 @@ do
             USER=${1}
             reset-last
             ;;
+        --push)
+            PUSH=1
+            ;;
         "--*")
             send-error "Unsupported argument at position $((${n} + 1)) :: ${1}"
             ;;
@@ -109,6 +113,17 @@ for VERSION in ${VERSIONS}
 do
     for i in ${ROCM_VERSIONS}
     do
+        CONTAINER=${USER}/omnitrace:release-base-${DISTRO}-${VERSION}-rocm-${i}
+        ROCM_MAJOR=$(echo ${i} | sed 's/\./ /g' | awk '{print $1}')
+        ROCM_MINOR=$(echo ${i} | sed 's/\./ /g' | awk '{print $2}')
+        ROCM_PATCH=$(echo ${i} | sed 's/\./ /g' | awk '{print $3}')
+        if [ -n "${ROCM_PATCH}" ]; then
+            ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100)+(${ROCM_PATCH}) ))
+            ROCM_SEP="."
+        else
+            ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+            ROCM_SEP=""
+        fi
         if [ "${DISTRO}" = "ubuntu" ]; then
             ROCM_REPO_DIST="ubuntu"
             ROCM_REPO_VERSION=${i}
@@ -122,7 +137,7 @@ do
                 *)
                     ;;
             esac
-            verbose-run docker build . -f ${DOCKER_FILE} --tag ${USER}/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-run docker build . -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "centos" ]; then
             case "${VERSION}" in
                 7)
@@ -153,7 +168,7 @@ do
                     send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${i}"
                     ;;
             esac
-            verbose-run docker build . -f ${DOCKER_FILE} --tag ${USER}/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-run docker build . -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "opensuse" ]; then
             case "${VERSION}" in
                 15.*)
@@ -165,38 +180,29 @@ do
                     ;;
             esac
             case "${i}" in
-                5.1.2)
-                    ROCM_RPM=22.10.2/sle/15/amdgpu-install-22.10.2.50102-1.noarch.rpm
-                    ;;
-                5.1.1)
-                    ROCM_RPM=22.10.1/sle/15/amdgpu-install-22.10.1.50101-1.noarch.rpm
+                5.2 | 5.2.*)
+                    ROCM_RPM=22.20${ROCM_SEP}${ROCM_PATCH}/sle/${VERSION}/amdgpu-install-22.20.${ROCM_VERSN}-1.noarch.rpm
                     ;;
                 5.1 | 5.1.0)
                     ROCM_RPM=22.10/sle/15/amdgpu-install-22.10.50100-1.noarch.rpm
                     ;;
-                5.0.2)
-                    ROCM_RPM=21.50.2/sle/15/amdgpu-install-21.50.2.50002-1.noarch.rpm
+                5.1.*)
+                    ROCM_RPM=22.10${ROCM_SEP}${ROCM_PATCH}/sle/15/amdgpu-install-22.10${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1.noarch.rpm
                     ;;
-                5.0.1)
-                    ROCM_RPM=21.50.1/sle/15/amdgpu-install-21.50.1.50001-1.noarch.rpm
+                5.0 | 5.0.*)
+                    ROCM_RPM=21.50${ROCM_SEP}${ROCM_PATCH}/sle/15/amdgpu-install-21.50${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1.noarch.rpm
                     ;;
-                5.0 | 5.0.0)
-                    ROCM_RPM=21.50/sle/15/amdgpu-install-21.50.50000-1.noarch.rpm
-                    ;;
-                4.5.2)
-                    ROCM_RPM=21.40.2/sle/15/amdgpu-install-21.40.2.40502-1.noarch.rpm
-                    ;;
-                4.5.1)
-                    ROCM_RPM=21.40.1/sle/15/amdgpu-install-21.40.1.40501-1.noarch.rpm
-                    ;;
-                4.5 | 4.5.0)
-                    ROCM_RPM=21.40/sle/15/amdgpu-install-21.40.40500-1.noarch.rpm
+                4.5 | 4.5.*)
+                    ROCM_RPM=21.40${ROCM_SEP}${ROCM_PATCH}/sle/15/amdgpu-install-21.40${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1.noarch.rpm
                     ;;
                 *)
                     send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${i}"
                 ;;
             esac
-            verbose-run docker build . -f ${DOCKER_FILE} --tag ${USER}/omnitrace-${DISTRO}-${VERSION}-rocm-${i} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-run docker build . -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+        fi
+        if [ "${PUSH}" -ne 0 ]; then
+            docker push ${CONTAINER}
         fi
     done
 done

@@ -18,7 +18,7 @@ jobs:
   ubuntu-focal-external:
     runs-on: ubuntu-20.04
     container:
-      image: jrmadsen/omnitrace-ci:ubuntu-20.04
+      image: jrmadsen/omnitrace:ci-base-ubuntu-20.04
     strategy:
       matrix:
         compiler: ['g++-7', 'g++-8']
@@ -42,7 +42,7 @@ jobs:
             lto: 'OFF'
             strip: 'ON'
             python: 'ON'
-            build-type: 'RelWithDebInfo'
+            build-type: 'Release'
             mpi-headers: 'ON'
             static-libgcc: 'ON'
             static-libstdcxx: 'OFF'
@@ -171,7 +171,7 @@ jobs:
   ubuntu-focal-external-rocm:
     runs-on: ubuntu-20.04
     container:
-      image: jrmadsen/omnitrace-ci:ubuntu-20.04
+      image: jrmadsen/omnitrace:ci-base-ubuntu-20.04
     strategy:
       matrix:
         compiler: ['g++']
@@ -250,7 +250,7 @@ jobs:
       timeout-minutes: 10
       run: |
         set -v
-        traced --background
+        omnitrace-perfetto-traced --background
         export OMNITRACE_DEBUG=ON
         export OMNITRACE_PERFETTO_BACKEND=system
         which omnitrace-avail
@@ -265,10 +265,11 @@ jobs:
         omnitrace -e -v 1 -o ls.inst --simulate -- ls
         omnitrace -e -v 1 --simulate -- ls
         omnitrace -e -v 1 -o ls.inst -- ls
-        perfetto --out ls-perfetto-trace.proto --txt -c omnitrace.cfg
+        omnitrace-perfetto --out ls-perfetto-trace.proto --txt -c omnitrace.cfg
         ./ls.inst
         omnitrace -e -v 1 -- ls
         du -m ls-perfetto-trace.proto
+        /opt/conda/envs/py3.8/bin/python ./tests/validate-perfetto-proto.py -p -i ./ls-perfetto-trace.proto
 
     - name: Test User API
       timeout-minutes: 10
