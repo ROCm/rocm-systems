@@ -22,6 +22,7 @@
 
 #include "library/components/mpi_gotcha.hpp"
 #include "library/api.hpp"
+#include "library/common.hpp"
 #include "library/components/category_region.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
@@ -34,10 +35,15 @@
 #include <cstdint>
 #include <limits>
 #include <thread>
+#include <type_traits>
 #include <unistd.h>
 
 namespace omnitrace
 {
+using mpi_tooltag_t = api::omnitrace;
+using mpi_toolset_t =
+    tim::component_tuple<omnitrace::component::category_region<category::mpi>>;
+
 namespace
 {
 struct comm_rank_data
@@ -104,10 +110,7 @@ omnitrace_mpi_set_attr()
     static auto _mpi_fini = [](MPI_Comm, int, void*, void*) {
         OMNITRACE_DEBUG("MPI Comm attribute finalize\n");
         if(mpip_index != std::numeric_limits<uint64_t>::max())
-            comp::deactivate_mpip<
-                tim::component_tuple<
-                    omnitrace::component::category_region<category::mpi>>,
-                api::omnitrace>(mpip_index);
+            comp::deactivate_mpip<mpi_toolset_t, mpi_tooltag_t>(mpip_index);
         omnitrace_finalize_hidden();
         return MPI_SUCCESS;
     };
@@ -224,9 +227,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
     OMNITRACE_BASIC_DEBUG_F("%s()\n", _data.tool_id.c_str());
 
     if(mpip_index != std::numeric_limits<uint64_t>::max())
-        comp::deactivate_mpip<
-            tim::component_tuple<omnitrace::component::category_region<category::mpi>>,
-            api::omnitrace>(mpip_index);
+        comp::deactivate_mpip<mpi_toolset_t, mpi_tooltag_t>(mpip_index);
 
 #if !defined(TIMEMORY_USE_MPI) && defined(TIMEMORY_USE_MPI_HEADERS)
     tim::mpi::is_initialized_callback() = []() { return false; };
@@ -278,14 +279,16 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 
             // use env vars OMNITRACE_MPIP_PERMIT_LIST and OMNITRACE_MPIP_REJECT_LIST
             // to control the gotcha bindings at runtime
-            comp::configure_mpip<
-                tim::component_tuple<
-                    omnitrace::component::category_region<category::mpi>>,
-                api::omnitrace>();
-            mpip_index = comp::activate_mpip<
-                tim::component_tuple<
-                    omnitrace::component::category_region<category::mpi>>,
-                api::omnitrace>();
+            auto _accept = std::set<std::string>{};
+            auto _reject = std::set<std::string>{};
+
+#if defined(OMNITRACE_USE_MPI_HEADERS) && !defined(OMNITRACE_USE_MPI)
+            _reject.emplace("MPI_Comm_rank");
+            _reject.emplace("MPI_Comm_size");
+#endif
+
+            comp::configure_mpip<mpi_toolset_t, mpi_tooltag_t>(_accept, _reject);
+            mpip_index = comp::activate_mpip<mpi_toolset_t, mpi_tooltag_t>();
         }
 
         auto_lock_t _lk{ type_mutex<mpi_gotcha>() };
