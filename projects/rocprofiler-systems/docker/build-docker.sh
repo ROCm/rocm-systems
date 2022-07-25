@@ -128,9 +128,6 @@ do
             ROCM_REPO_DIST="ubuntu"
             ROCM_REPO_VERSION=${i}
             case "${i}" in
-                5.1*)
-                    ROCM_REPO_VERSION="debian"
-                    ;;
                 4.1* | 4.0*)
                     ROCM_REPO_DIST="xenial"
                     ;;
