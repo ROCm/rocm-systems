@@ -23,6 +23,7 @@
 : ${WITH_MPI:=0}
 : ${WITH_ROCM:=0}
 : ${WITH_ROCM_MPI:=0}
+: ${IS_DOCKER:=0}
 
 if [ -z "${DISTRO}" ]; then
     if [ -f /etc/os-release ]; then
@@ -207,6 +208,10 @@ build-and-package-base()
     if [ "${CLEAN}" -gt 0 ]; then
         verbose-run cmake --build ${BUILD_DIR}/${DIR} --target clean
     fi
+    pushd ${BUILD_DIR}/${DIR}
+    verbose-run cat CPackConfig.cmake
+    verbose-run cat cmake_install.cmake
+    popd
     verbose-run cmake --build ${BUILD_DIR}/${DIR} --target all --parallel ${NJOBS}
     verbose-run cmake --build ${BUILD_DIR}/${DIR} --target install --parallel ${NJOBS}
     pushd ${BUILD_DIR}/${DIR}
@@ -283,6 +288,8 @@ if [ -d /opt/conda/bin ]; then
     export PATH=${PATH}:/opt/conda/bin
     source activate
 fi
+
+if [ "${IS_DOCKER}" -ne 0 ]; then git config --global --add safe.directory ${PWD}; fi
 
 build-and-package ${WITH_CORE} ${DISTRO}-core -DOMNITRACE_USE_HIP=OFF
 build-and-package ${WITH_MPI} ${DISTRO}-${MPI_IMPL} -DOMNITRACE_USE_HIP=ON

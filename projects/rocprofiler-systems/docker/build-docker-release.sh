@@ -68,7 +68,7 @@ build-release()
     shift
     local DOCKER_ARGS=""
     tty -s && DOCKER_ARGS="-it" || DOCKER_ARGS=""
-    verbose-run docker run ${DOCKER_ARGS} --rm -v ${PWD}:/home/omnitrace --stop-signal "SIGINT" --env DISTRO=${OS} --env ROCM_VERSION=${ROCM_VERSION} --env VERSION=${CODE_VERSION} --env PYTHON_VERSIONS="${PYTHON_VERSIONS}" ${CONTAINER} /home/omnitrace/scripts/build-release.sh ${@}
+    verbose-run docker run ${DOCKER_ARGS} --rm -v ${PWD}:/home/omnitrace --stop-signal "SIGINT" --env DISTRO=${OS} --env ROCM_VERSION=${ROCM_VERSION} --env VERSION=${CODE_VERSION} --env PYTHON_VERSIONS="${PYTHON_VERSIONS}" --env IS_DOCKER=1 ${CONTAINER} /home/omnitrace/scripts/build-release.sh ${@}
 }
 
 reset-last()

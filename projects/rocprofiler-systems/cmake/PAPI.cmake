@@ -200,46 +200,26 @@ externalproject_add(
     PREFIX ${PROJECT_BINARY_DIR}/external/papi
     SOURCE_DIR ${OMNITRACE_PAPI_SOURCE_DIR}/src
     BUILD_IN_SOURCE 1
-    CONFIGURE_COMMAND
+    PATCH_COMMAND
         ${CMAKE_COMMAND} -E env CC=${PAPI_C_COMPILER}
         CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation LIBS=-lrt LDFLAGS=-lrt
         ${OMNITRACE_PAPI_EXTRA_ENV} <SOURCE_DIR>/configure
         --prefix=${OMNITRACE_PAPI_INSTALL_DIR} --with-static-lib=yes --with-shared-lib=no
         --with-perf-events --with-tests=no --with-components=${_OMNITRACE_PAPI_COMPONENTS}
-    BUILD_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -g
-                  ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install
+    CONFIGURE_COMMAND
+        ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation
+        ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install
+    BUILD_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation
+                  ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils
     INSTALL_COMMAND "")
-
-file(
-    WRITE ${PROJECT_BINARY_DIR}/external/papi/build-utils.cmake
-    "
-cmake_minimum_required(VERSION ${CMAKE_VERSION} FATAL_ERROR)
-
-execute_process(
-    COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\\\ -O3\\\ -g ${OMNITRACE_PAPI_EXTRA_ENV}
-            ${MAKE_EXECUTABLE} utils install-utils
-    WORKING_DIRECTORY ${OMNITRACE_PAPI_SOURCE_DIR}/src
-    RESULT_VARIABLE _RET
-    OUTPUT_VARIABLE _OUT
-    ERROR_VARIABLE _ERR)
-
-if(NOT \${_RET} EQUAL 0)
-    message(\"\${_OUT}\")
-    message(FATAL_ERROR \"\${_ERR}\")
-endif()
-")
-
-add_custom_command(
-    TARGET omnitrace-papi-build
-    POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -P ${PROJECT_BINARY_DIR}/external/papi/build-utils.cmake)
 
 # target for re-executing the installation
 add_custom_target(
     omnitrace-papi-install
-    COMMAND
-        ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation
-        ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static utils install install-utils
+    COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation
+            ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install
+    COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation
+            ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils
     WORKING_DIRECTORY ${OMNITRACE_PAPI_SOURCE_DIR}/src
     COMMENT "Installing PAPI...")
 
@@ -278,8 +258,6 @@ target_include_directories(omnitrace-papi SYSTEM INTERFACE ${PAPI_INCLUDE_DIR})
 target_link_libraries(omnitrace-papi INTERFACE ${PAPI_LIBRARY} ${PAPI_pfm_LIBRARY})
 omnitrace_target_compile_definitions(omnitrace-papi INTERFACE OMNITRACE_USE_PAPI
                                                               TIMEMORY_USE_PAPI=1)
-
-include(GNUInstallDirs)
 
 install(
     DIRECTORY ${OMNITRACE_PAPI_INSTALL_DIR}/lib/
