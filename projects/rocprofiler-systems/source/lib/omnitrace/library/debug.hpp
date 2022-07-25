@@ -246,7 +246,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 
 //--------------------------------------------------------------------------------------//
 
-#define OMNITRACE_CONDITIONAL_FAIL(COND, ...)                                            \
+#define OMNITRACE_CONDITIONAL_FAILURE(COND, METHOD, ...)                                 \
     if(COND)                                                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
@@ -257,10 +257,10 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
         ::tim::disable_signal_detection();                                               \
         ::tim::print_demangled_backtrace<64>();                                          \
-        ::std::exit(EXIT_FAILURE);                                                       \
+        METHOD;                                                                          \
     }
 
-#define OMNITRACE_CONDITIONAL_BASIC_FAIL(COND, ...)                                      \
+#define OMNITRACE_CONDITIONAL_BASIC_FAILURE(COND, METHOD, ...)                           \
     if(COND)                                                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
@@ -270,10 +270,10 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
         ::tim::disable_signal_detection();                                               \
         ::tim::print_demangled_backtrace<64>();                                          \
-        ::std::exit(EXIT_FAILURE);                                                       \
+        METHOD;                                                                          \
     }
 
-#define OMNITRACE_CONDITIONAL_FAIL_F(COND, ...)                                          \
+#define OMNITRACE_CONDITIONAL_FAILURE_F(COND, METHOD, ...)                               \
     if(COND)                                                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
@@ -284,10 +284,10 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
         ::tim::disable_signal_detection();                                               \
         ::tim::print_demangled_backtrace<64>();                                          \
-        ::std::exit(EXIT_FAILURE);                                                       \
+        METHOD;                                                                          \
     }
 
-#define OMNITRACE_CONDITIONAL_BASIC_FAIL_F(COND, ...)                                    \
+#define OMNITRACE_CONDITIONAL_BASIC_FAILURE_F(COND, METHOD, ...)                         \
     if(COND)                                                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
@@ -297,24 +297,69 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
         ::tim::disable_signal_detection();                                               \
         ::tim::print_demangled_backtrace<64>();                                          \
-        ::std::exit(EXIT_FAILURE);                                                       \
+        METHOD;                                                                          \
     }
 
-#define OMNITRACE_CI_FAIL(COND, ...)                                                     \
-    OMNITRACE_CONDITIONAL_FAIL(::omnitrace::get_is_continuous_integration() && (COND),   \
-                               __VA_ARGS__)
+#define OMNITRACE_CI_FAILURE(COND, METHOD, ...)                                          \
+    OMNITRACE_CONDITIONAL_FAILURE(                                                       \
+        ::omnitrace::get_is_continuous_integration() && (COND), METHOD, __VA_ARGS__)
 
-#define OMNITRACE_CI_BASIC_FAIL(COND, ...)                                               \
-    OMNITRACE_CONDITIONAL_BASIC_FAIL(                                                    \
-        ::omnitrace::get_is_continuous_integration() && (COND), __VA_ARGS__)
+#define OMNITRACE_CI_BASIC_FAILURE(COND, METHOD, ...)                                    \
+    OMNITRACE_CONDITIONAL_BASIC_FAILURE(                                                 \
+        ::omnitrace::get_is_continuous_integration() && (COND), METHOD, __VA_ARGS__)
 
 //--------------------------------------------------------------------------------------//
+
+#define OMNITRACE_CONDITIONAL_FAIL(COND, ...)                                            \
+    OMNITRACE_CONDITIONAL_FAILURE(COND, OMNITRACE_ESC(::std::exit(EXIT_FAILURE)),        \
+                                  __VA_ARGS__)
+
+#define OMNITRACE_CONDITIONAL_BASIC_FAIL(COND, ...)                                      \
+    OMNITRACE_CONDITIONAL_BASIC_FAILURE(COND, OMNITRACE_ESC(::std::exit(EXIT_FAILURE)),  \
+                                        __VA_ARGS__)
+
+#define OMNITRACE_CONDITIONAL_FAIL_F(COND, ...)                                          \
+    OMNITRACE_CONDITIONAL_FAILURE_F(COND, OMNITRACE_ESC(::std::exit(EXIT_FAILURE)),      \
+                                    __VA_ARGS__)
+
+#define OMNITRACE_CONDITIONAL_BASIC_FAIL_F(COND, ...)                                    \
+    OMNITRACE_CONDITIONAL_BASIC_FAILURE_F(                                               \
+        COND, OMNITRACE_ESC(::std::exit(EXIT_FAILURE)), __VA_ARGS__)
+
+#define OMNITRACE_CI_FAIL(COND, ...)                                                     \
+    OMNITRACE_CI_FAILURE(COND, OMNITRACE_ESC(::std::exit(EXIT_FAILURE)), __VA_ARGS__)
+
+#define OMNITRACE_CI_BASIC_FAIL(COND, ...)                                               \
+    OMNITRACE_CI_BASIC_FAILURE(COND, OMNITRACE_ESC(::std::exit(EXIT_FAILURE)),           \
+                               __VA_ARGS__)
+
+//--------------------------------------------------------------------------------------//
+
+#define OMNITRACE_CONDITIONAL_ABORT(COND, ...)                                           \
+    OMNITRACE_CONDITIONAL_FAILURE(COND, OMNITRACE_ESC(::std::abort()), __VA_ARGS__)
+
+#define OMNITRACE_CONDITIONAL_BASIC_ABORT(COND, ...)                                     \
+    OMNITRACE_CONDITIONAL_BASIC_FAILURE(COND, OMNITRACE_ESC(::std::abort()), __VA_ARGS__)
+
+#define OMNITRACE_CONDITIONAL_ABORT_F(COND, ...)                                         \
+    OMNITRACE_CONDITIONAL_FAILURE_F(COND, OMNITRACE_ESC(::std::abort()), __VA_ARGS__)
+
+#define OMNITRACE_CONDITIONAL_BASIC_ABORT_F(COND, ...)                                   \
+    OMNITRACE_CONDITIONAL_BASIC_FAILURE_F(COND, OMNITRACE_ESC(::std::abort()),           \
+                                          __VA_ARGS__)
+
+#define OMNITRACE_CI_ABORT(COND, ...)                                                    \
+    OMNITRACE_CI_FAILURE(COND, OMNITRACE_ESC(::std::abort()), __VA_ARGS__)
+
+#define OMNITRACE_CI_BASIC_ABORT(COND, ...)                                              \
+    OMNITRACE_CI_BASIC_FAILURE(COND, OMNITRACE_ESC(::std::abort()), __VA_ARGS__)
 
 //--------------------------------------------------------------------------------------//
 //
 //  Debug macros
 //
 //--------------------------------------------------------------------------------------//
+
 #define OMNITRACE_DEBUG(...)                                                             \
     OMNITRACE_CONDITIONAL_PRINT(::omnitrace::get_debug(), __VA_ARGS__)
 
@@ -338,6 +383,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 //  Verbose macros
 //
 //--------------------------------------------------------------------------------------//
+
 #define OMNITRACE_VERBOSE(LEVEL, ...)                                                    \
     OMNITRACE_CONDITIONAL_PRINT(                                                         \
         ::omnitrace::get_debug() || (::omnitrace::get_verbose() >= LEVEL), __VA_ARGS__)
@@ -401,6 +447,21 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 #define OMNITRACE_BASIC_FAIL(...) OMNITRACE_CONDITIONAL_BASIC_FAIL(true, __VA_ARGS__)
 
 #define OMNITRACE_BASIC_FAIL_F(...) OMNITRACE_CONDITIONAL_BASIC_FAIL_F(true, __VA_ARGS__)
+
+//--------------------------------------------------------------------------------------//
+//
+//  Abort macros
+//
+//--------------------------------------------------------------------------------------//
+
+#define OMNITRACE_ABORT(...) OMNITRACE_CONDITIONAL_ABORT(true, __VA_ARGS__)
+
+#define OMNITRACE_ABORT_F(...) OMNITRACE_CONDITIONAL_ABORT_F(true, __VA_ARGS__)
+
+#define OMNITRACE_BASIC_ABORT(...) OMNITRACE_CONDITIONAL_BASIC_ABORT(true, __VA_ARGS__)
+
+#define OMNITRACE_BASIC_ABORT_F(...)                                                     \
+    OMNITRACE_CONDITIONAL_BASIC_ABORT_F(true, __VA_ARGS__)
 
 #include <string>
 

@@ -688,11 +688,22 @@ configure_mode_settings()
 
     if(get_use_kokkosp())
     {
-        auto _force               = 0;
         auto _current_kokkosp_lib = tim::get_env<std::string>("KOKKOS_PROFILE_LIBRARY");
-        if(std::regex_search(_current_kokkosp_lib, std::regex{ "libtimemory\\." }))
-            _force = 1;
-        tim::set_env("KOKKOS_PROFILE_LIBRARY", "libomnitrace.so", _force);
+        if(_current_kokkosp_lib.find("libomnitrace-dl.so") == std::string::npos &&
+           _current_kokkosp_lib.find("libomnitrace.so") == std::string::npos)
+        {
+            auto        _force   = 0;
+            std::string _message = {};
+            if(std::regex_search(_current_kokkosp_lib, std::regex{ "libtimemory\\." }))
+            {
+                _force = 1;
+                _message =
+                    JOIN("", " (forced. Previous value: '", _current_kokkosp_lib, "')");
+            }
+            OMNITRACE_VERBOSE_F(1, "Setting KOKKOS_PROFILE_LIBRARY=%s%s\n",
+                                "libomnitrace.so", _message.c_str());
+            tim::set_env("KOKKOS_PROFILE_LIBRARY", "libomnitrace.so", _force);
+        }
     }
 
     // recycle all subsequent thread ids

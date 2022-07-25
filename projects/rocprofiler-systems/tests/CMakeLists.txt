@@ -23,17 +23,15 @@ if(OMNITRACE_BUILD_DYNINST)
         )
 endif()
 
-set(_base_environment
-    "OMNITRACE_USE_PERFETTO=ON"
-    "OMNITRACE_USE_TIMEMORY=ON"
-    "OMNITRACE_USE_SAMPLING=ON"
-    "OMNITRACE_USE_PROCESS_SAMPLING=ON"
-    "OMNITRACE_TIME_OUTPUT=OFF"
-    "OMP_PROC_BIND=spread"
-    "OMP_PLACES=threads"
-    "OMP_NUM_THREADS=2"
+set(_test_library_path
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
     )
+set(_test_openmp_env "OMP_PROC_BIND=spread" "OMP_PLACES=threads" "OMP_NUM_THREADS=2")
+
+set(_base_environment
+    "OMNITRACE_USE_PERFETTO=ON" "OMNITRACE_USE_TIMEMORY=ON" "OMNITRACE_USE_SAMPLING=ON"
+    "OMNITRACE_USE_PROCESS_SAMPLING=ON" "OMNITRACE_TIME_OUTPUT=OFF" "${_test_openmp_env}"
+    "${_test_library_path}")
 
 set(_flat_environment
     "OMNITRACE_USE_PERFETTO=ON"
@@ -61,44 +59,22 @@ set(_lock_environment
     "OMNITRACE_TIME_OUTPUT=OFF"
     "OMNITRACE_FLAT_PROFILE=ON"
     "OMNITRACE_TIMELINE_PROFILE=OFF"
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
-    )
+    "${_test_library_path}")
 
 set(_ompt_environment
-    "OMNITRACE_USE_PERFETTO=ON"
-    "OMNITRACE_USE_TIMEMORY=ON"
-    "OMNITRACE_TIME_OUTPUT=OFF"
-    "OMNITRACE_USE_OMPT=ON"
-    "OMNITRACE_CRITICAL_TRACE=OFF"
-    "OMP_PROC_BIND=spread"
-    "OMP_PLACES=threads"
-    "OMP_NUM_THREADS=2"
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
-    )
+    "OMNITRACE_USE_PERFETTO=ON" "OMNITRACE_USE_TIMEMORY=ON" "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_USE_OMPT=ON" "OMNITRACE_CRITICAL_TRACE=OFF" "${_test_openmp_env}"
+    "${_test_library_path}")
 
 set(_perfetto_environment
-    "OMNITRACE_USE_PERFETTO=ON"
-    "OMNITRACE_USE_TIMEMORY=OFF"
-    "OMNITRACE_USE_SAMPLING=ON"
-    "OMNITRACE_USE_PROCESS_SAMPLING=ON"
-    "OMNITRACE_TIME_OUTPUT=OFF"
-    "OMP_PROC_BIND=spread"
-    "OMP_PLACES=threads"
-    "OMP_NUM_THREADS=2"
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
-    )
+    "OMNITRACE_USE_PERFETTO=ON" "OMNITRACE_USE_TIMEMORY=OFF" "OMNITRACE_USE_SAMPLING=ON"
+    "OMNITRACE_USE_PROCESS_SAMPLING=ON" "OMNITRACE_TIME_OUTPUT=OFF" "${_test_openmp_env}"
+    "${_test_library_path}")
 
 set(_timemory_environment
-    "OMNITRACE_USE_PERFETTO=OFF"
-    "OMNITRACE_USE_TIMEMORY=ON"
-    "OMNITRACE_USE_SAMPLING=ON"
-    "OMNITRACE_USE_PROCESS_SAMPLING=ON"
-    "OMNITRACE_TIME_OUTPUT=OFF"
-    "OMP_PROC_BIND=spread"
-    "OMP_PLACES=threads"
-    "OMP_NUM_THREADS=2"
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
-    )
+    "OMNITRACE_USE_PERFETTO=OFF" "OMNITRACE_USE_TIMEMORY=ON" "OMNITRACE_USE_SAMPLING=ON"
+    "OMNITRACE_USE_PROCESS_SAMPLING=ON" "OMNITRACE_TIME_OUTPUT=OFF" "${_test_openmp_env}"
+    "${_test_library_path}")
 
 set(_test_environment ${_base_environment} "OMNITRACE_CRITICAL_TRACE=OFF")
 
@@ -111,7 +87,7 @@ set(_python_environment
     "OMNITRACE_TREE_OUTPUT=OFF"
     "OMNITRACE_USE_PID=OFF"
     "OMNITRACE_TIMEMORY_COMPONENTS=trip_count"
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
+    "${_test_library_path}"
     "PYTHONPATH=${PROJECT_BINARY_DIR}/lib/python/site-packages")
 
 set(_attach_environment
@@ -124,11 +100,8 @@ set(_attach_environment
     "OMNITRACE_USE_KOKKOSP=ON"
     "OMNITRACE_TIME_OUTPUT=OFF"
     "OMNITRACE_USE_PID=OFF"
-    "OMP_PROC_BIND=spread"
-    "OMP_PLACES=threads"
-    "OMP_NUM_THREADS=2"
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
-    )
+    "${_test_openmp_env}"
+    "${_test_library_path}")
 
 # -------------------------------------------------------------------------------------- #
 
@@ -690,9 +663,34 @@ omnitrace_add_test(
         args
         -ME
         [==[lib(gomp|m-)]==]
+    LABELS "kokkos;kokkos-profile-library"
+    RUN_ARGS -i 10 -s 20 -p
+    ENVIRONMENT
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace-dl.so"
+    )
+
+omnitrace_add_test(
+    SKIP_RUNTIME SKIP_REWRITE
+    NAME lulesh-baseline-kokkosp-libomnitrace
+    TARGET lulesh
+    MPI ${LULESH_USE_MPI}
+    NUM_PROCS 8
+    LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
         "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace.so"
+    )
+
+omnitrace_add_test(
+    SKIP_RUNTIME SKIP_REWRITE
+    NAME lulesh-baseline-kokkosp-libomnitrace-dl
+    TARGET lulesh
+    MPI ${LULESH_USE_MPI}
+    NUM_PROCS 8
+    LABELS "kokkos;kokkos-profile-library"
+    RUN_ARGS -i 10 -s 20 -p
+    ENVIRONMENT
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace-dl.so"
     )
 
 omnitrace_add_test(

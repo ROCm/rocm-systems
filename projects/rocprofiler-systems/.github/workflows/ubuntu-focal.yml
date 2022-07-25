@@ -103,6 +103,7 @@ jobs:
           -DOMNITRACE_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
+          -DOMNITRACE_MAX_THREADS=32
 
     - name: Build
       timeout-minutes: 60
@@ -212,8 +213,8 @@ jobs:
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         cmake -B build
-          -DCMAKE_C_COMPILER=${CC}
-          -DCMAKE_CXX_COMPILER=${CXX}
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
           -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
           -DOMNITRACE_BUILD_TESTING=OFF
@@ -223,7 +224,7 @@ jobs:
           -DOMNITRACE_USE_MPI=OFF
           -DOMNITRACE_USE_MPI_HEADERS=ON
           -DOMNITRACE_USE_HIP=ON
-          -DOMNITRACE_MAX_THREADS=64
+          -DOMNITRACE_MAX_THREADS=32
           -DOMNITRACE_USE_SANITIZER=OFF
           -DOMNITRACE_USE_PAPI=OFF
           -DOMNITRACE_INSTALL_PERFETTO_TOOLS=ON
@@ -367,6 +368,7 @@ jobs:
           -DDYNINST_BUILD_SHARED_LIBS=ON
           -DDYNINST_BUILD_STATIC_LIBS=OFF
           -DDYNINST_ELFUTILS_DOWNLOAD_VERSION=${{ env.ELFUTILS_DOWNLOAD_VERSION }}
+          -DOMNITRACE_MAX_THREADS=32
 
     - name: Build
       timeout-minutes: 60

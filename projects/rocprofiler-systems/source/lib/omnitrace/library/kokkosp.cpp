@@ -20,19 +20,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/defines.hpp"
-
 #define TIMEMORY_KOKKOSP_POSTFIX OMNITRACE_PUBLIC_API
 
 #include "library/api.hpp"
 #include "library/components/user_region.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
+#include "library/defines.hpp"
 #include "library/perfetto.hpp"
 #include "library/runtime.hpp"
 
 #include <timemory/api/kokkosp.hpp>
+#include <timemory/backends/process.hpp>
 #include <timemory/hash/types.hpp>
+#include <timemory/utility/procfs/maps.hpp>
+
+#include <cstdlib>
+#include <sstream>
+#include <string>
 
 namespace kokkosp = tim::kokkosp;
 
@@ -138,6 +143,36 @@ extern "C"
         if(_standalone_initialized || (!omnitrace::config::settings_are_configured() &&
                                        omnitrace::get_state() < omnitrace::State::Active))
         {
+            auto _kokkos_profile_lib =
+                tim::get_env<std::string>("KOKKOS_PROFILE_LIBRARY");
+            if(_kokkos_profile_lib.find("libomnitrace.so") != std::string::npos)
+            {
+                auto _maps = tim::procfs::read_maps(tim::process::get_id());
+                auto _libs = std::set<std::string>{};
+                for(auto& itr : _maps)
+                {
+                    auto&& _path = itr.pathname;
+                    if(!_path.empty() && _path.at(0) != '[') _libs.emplace(_path);
+                }
+                for(const auto& itr : _libs)
+                {
+                    if(itr.find("libomnitrace-dl.so") != std::string::npos)
+                    {
+                        std::stringstream _libs_str{};
+                        for(const auto& litr : _libs)
+                            _libs_str << "    " << litr << "\n";
+                        OMNITRACE_ABORT(
+                            "%s was invoked with libomnitrace.so as the "
+                            "KOKKOS_PROFILE_LIBRARY.\n"
+                            "However, libomnitrace-dl.so has already been loaded by the "
+                            "process.\nTo avoid duplicate collections culminating is an "
+                            "error, please set KOKKOS_PROFILE_LIBRARY=%s.\nLoaded "
+                            "libraries:\n%s",
+                            __FUNCTION__, itr.c_str(), _libs_str.str().c_str());
+                    }
+                }
+            }
+
             OMNITRACE_BASIC_VERBOSE_F(0,
                                       "Initializing kokkos omnitrace connector "
                                       "(standalone, sequence %d, version: %llu)...\n",

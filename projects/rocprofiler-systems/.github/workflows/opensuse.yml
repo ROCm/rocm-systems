@@ -58,6 +58,7 @@ jobs:
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
           -DOMNITRACE_CI_MPI_RUN_AS_ROOT=ON
+          -DOMNITRACE_MAX_THREADS=32
 
     - name: Build
       timeout-minutes: 60
