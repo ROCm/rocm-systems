@@ -22,47 +22,38 @@
 
 #pragma once
 
+#include "library/common.hpp"
 #include "library/defines.hpp"
+#include "library/timemory.hpp"
+
+#include <timemory/components/base.hpp>
+#include <timemory/components/gotcha/backends.hpp>
+
+#include <cstdint>
+#include <cstdlib>
 
 namespace omnitrace
 {
-// used for specifying the state of omnitrace
-enum class State : unsigned short
+struct exit_gotcha : tim::component::base<exit_gotcha, void>
 {
-    PreInit = 0,
-    Init,
-    Active,
-    Disabled,
-    Finalized
+    using gotcha_data  = tim::component::gotcha_data;
+    using exit_func_t  = void (*)(int);
+    using abort_func_t = void (*)();
+
+    TIMEMORY_DEFAULT_OBJECT(exit_gotcha)
+
+    // string id for component
+    static std::string label() { return "exit_gotcha"; }
+
+    // generate the gotcha wrappers
+    static void configure();
+    static void shutdown();
+
+    // exit
+    void operator()(const gotcha_data&, exit_func_t, int) const;
+    // abort
+    void operator()(const gotcha_data&, abort_func_t) const;
 };
 
-// used for specifying the state of omnitrace
-enum class ThreadState : unsigned short
-{
-    Enabled = 0,
-    Internal,
-    Disabled,
-    Completed,
-};
-
-enum class Mode : unsigned short
-{
-    Trace = 0,
-    Sampling,
-    Coverage
-};
+using exit_gotcha_t = tim::component::gotcha<3, std::tuple<>, exit_gotcha>;
 }  // namespace omnitrace
-
-#include <string>
-
-namespace std
-{
-std::string
-to_string(omnitrace::State _v);
-
-std::string
-to_string(omnitrace::ThreadState _v);
-
-std::string
-to_string(omnitrace::Mode _v);
-}  // namespace std

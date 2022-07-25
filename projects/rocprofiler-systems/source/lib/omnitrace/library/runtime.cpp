@@ -184,6 +184,7 @@ setup_gotchas()
         "Configuring gotcha wrapper around fork, MPI_Init, and MPI_Init_thread\n");
 
     mpi_gotcha::configure();
+    exit_gotcha::configure();
     fork_gotcha::configure();
     pthread_gotcha::configure();
 }

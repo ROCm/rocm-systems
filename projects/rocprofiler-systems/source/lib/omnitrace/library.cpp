@@ -23,6 +23,7 @@
 #include "library.hpp"
 #include "common/setup.hpp"
 #include "library/api.hpp"
+#include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/functors.hpp"
 #include "library/components/fwd.hpp"
@@ -49,6 +50,7 @@
 #include <timemory/utility/procfs/maps.hpp>
 
 #include <atomic>
+#include <cstdio>
 #include <mutex>
 #include <string_view>
 
@@ -335,8 +337,7 @@ omnitrace_set_mpi_hidden(bool use, bool attached)
     _set_mpi_called       = true;
     config::is_attached() = attached;
 
-    if(use && !attached &&
-       (get_state() == State::PreInit || get_state() == State::DelayedInit))
+    if(use && !attached && get_state() == State::PreInit)
     {
         tim::set_env("OMNITRACE_USE_PID", "ON", 1);
     }
@@ -842,14 +843,15 @@ omnitrace_finalize_hidden(void)
     }
 
     OMNITRACE_DEBUG_F("Stopping and destroying instrumentation bundles...\n");
-    for(auto& itr : instrumentation_bundles::instances())
+    for(size_t i = 0; i < max_supported_threads; ++i)
     {
+        auto& itr = instrumentation_bundles::instances().at(i);
         while(!itr.bundles.empty())
         {
             OMNITRACE_VERBOSE_F(1,
-                                "Warning! instrumentation bundle on thread %li with "
-                                "label '%s' was not stopped.\n",
-                                itr.bundles.back()->tid(),
+                                "Warning! instrumentation bundle on thread %zu (TID=%li) "
+                                "with label '%s' was not stopped.\n",
+                                i, itr.bundles.back()->tid(),
                                 itr.bundles.back()->key().c_str());
             itr.bundles.back()->stop();
             itr.bundles.back()->pop();
@@ -931,20 +933,6 @@ omnitrace_finalize_hidden(void)
             auto        _pos = _msg.find(">>>  ");
             if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
             OMNITRACE_VERBOSE(0, "%s\n", _msg.c_str());
-        }
-    }
-
-    // ensure that all the MT instances are flushed
-    OMNITRACE_VERBOSE_F(3, "Stopping and destroying instrumentation bundles...\n");
-    for(auto& itr : instrumentation_bundles::instances())
-    {
-        while(!itr.bundles.empty())
-        {
-            itr.bundles.back()->stop();
-            itr.bundles.back()->pop();
-            itr.allocator.destroy(itr.bundles.back());
-            itr.allocator.deallocate(itr.bundles.back(), 1);
-            itr.bundles.pop_back();
         }
     }
 

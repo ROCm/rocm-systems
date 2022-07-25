@@ -31,10 +31,10 @@ to_string(omnitrace::State _v)
 {
     switch(_v)
     {
-        case omnitrace::State::DelayedInit: return "DelayedInit";
         case omnitrace::State::PreInit: return "PreInit";
         case omnitrace::State::Init: return "Init";
         case omnitrace::State::Active: return "Active";
+        case omnitrace::State::Disabled: return "Disabled";
         case omnitrace::State::Finalized: return "Finalized";
     }
     return {};

@@ -217,8 +217,8 @@ pthread_mutex_gotcha::operator()(uintptr_t&& _id, const comp::gotcha_data& _data
             _id, get_hashes().at(_data.index), _depth);
     }
 
-    return _ret;
     tim::consume_parameters(_id, _cid, _parent_cid, _depth, _ts);
+    return _ret;
 }
 
 int

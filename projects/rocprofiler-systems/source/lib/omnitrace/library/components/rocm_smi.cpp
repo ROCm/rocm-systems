@@ -40,6 +40,7 @@
 #include "library/debug.hpp"
 #include "library/gpu.hpp"
 #include "library/perfetto.hpp"
+#include "library/state.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
@@ -52,11 +53,13 @@
 #include <chrono>
 #include <ios>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <sys/resource.h>
 #include <thread>
 
-#define OMNITRACE_ROCM_SMI_CALL(ERROR_CODE) ::omnitrace::rocm_smi::check_error(ERROR_CODE)
+#define OMNITRACE_ROCM_SMI_CALL(ERROR_CODE)                                              \
+    ::omnitrace::rocm_smi::check_error(ERROR_CODE, __FILE__, __LINE__)
 
 namespace omnitrace
 {
@@ -77,15 +80,17 @@ is_initialized()
 }
 
 void
-check_error(rsmi_status_t ec)
+check_error(rsmi_status_t _code, const char* _file, int _line)
 {
-    if(ec == RSMI_STATUS_SUCCESS) return;
+    if(_code == RSMI_STATUS_SUCCESS) return;
     const char* _msg = nullptr;
-    auto        _err = rsmi_status_string(ec, &_msg);
+    auto        _err = rsmi_status_string(_code, &_msg);
     if(_err != RSMI_STATUS_SUCCESS)
-        OMNITRACE_THROW(
-            "rsmi_status_string(%i, ...) failed. No error message available\n", (int) ec);
-    OMNITRACE_THROW("%s", _msg);
+        OMNITRACE_THROW("rsmi_status_string failed. No error message available. "
+                        "Error code %i originated at %s:%i\n",
+                        static_cast<int>(_code), _file, _line);
+    OMNITRACE_THROW("[%s:%i] Error code %i :: %s", _file, _line, static_cast<int>(_code),
+                    _msg);
 }
 
 std::atomic<State>&
@@ -110,15 +115,33 @@ data::sample(uint32_t _dev_id)
     auto _ts = tim::get_clock_real_now<size_t, std::nano>();
     assert(_ts < std::numeric_limits<int64_t>::max());
 
-    if(get_state() != State::Active) return;
+    auto _state = get_state().load();
+
+    if(_state != State::Active) return;
 
     m_dev_id = _dev_id;
     m_ts     = _ts;
 
-    rsmi_dev_busy_percent_get(_dev_id, &m_busy_perc);
-    rsmi_dev_temp_metric_get(_dev_id, RSMI_TEMP_TYPE_EDGE, RSMI_TEMP_CURRENT, &m_temp);
-    rsmi_dev_power_ave_get(_dev_id, 0, &m_power);
-    rsmi_dev_memory_usage_get(_dev_id, RSMI_MEM_TYPE_VRAM, &m_mem_usage);
+#define OMNITRACE_RSMI_GET(FUNCTION, ...)                                                \
+    try                                                                                  \
+    {                                                                                    \
+        OMNITRACE_ROCM_SMI_CALL(FUNCTION(__VA_ARGS__));                                  \
+    } catch(std::runtime_error & _e)                                                     \
+    {                                                                                    \
+        OMNITRACE_VERBOSE_F(                                                             \
+            0, "[%s] Exception: %s. Disabling future samples from rocm-smi...\n",        \
+            #FUNCTION, _e.what());                                                       \
+        get_state().store(State::Disabled);                                              \
+    }
+
+    OMNITRACE_RSMI_GET(rsmi_dev_busy_percent_get, _dev_id, &m_busy_perc);
+    OMNITRACE_RSMI_GET(rsmi_dev_temp_metric_get, _dev_id, RSMI_TEMP_TYPE_EDGE,
+                       RSMI_TEMP_CURRENT, &m_temp);
+    OMNITRACE_RSMI_GET(rsmi_dev_power_ave_get, _dev_id, 0, &m_power);
+    OMNITRACE_RSMI_GET(rsmi_dev_memory_usage_get, _dev_id, RSMI_MEM_TYPE_VRAM,
+                       &m_mem_usage);
+
+#undef OMNITRACE_RSMI_GET
 }
 
 void
@@ -359,16 +382,24 @@ setup()
 
     data::device_list = _devices;
 
-    for(auto itr : _devices)
+    try
     {
-        uint16_t dev_id = 0;
-        OMNITRACE_ROCM_SMI_CALL(rsmi_dev_id_get(itr, &dev_id));
-        // dev_id holds the device ID of device i, upon a successful call
+        for(auto itr : _devices)
+        {
+            uint16_t dev_id = 0;
+            OMNITRACE_ROCM_SMI_CALL(rsmi_dev_id_get(itr, &dev_id));
+            // dev_id holds the device ID of device i, upon a successful call
+        }
+
+        is_initialized() = true;
+
+        data::setup();
+    } catch(std::runtime_error& _e)
+    {
+        OMNITRACE_VERBOSE(0, "Exception thrown when initializing rocm-smi: %s\n",
+                          _e.what());
+        data::device_list = {};
     }
-
-    is_initialized() = true;
-
-    data::setup();
 
     pthread_gotcha::pop_enable_sampling_on_child_threads();
 }
@@ -380,9 +411,16 @@ shutdown()
 
     if(!is_initialized()) return;
 
-    if(data::shutdown())
+    try
     {
-        OMNITRACE_ROCM_SMI_CALL(rsmi_shut_down());
+        if(data::shutdown())
+        {
+            OMNITRACE_ROCM_SMI_CALL(rsmi_shut_down());
+        }
+    } catch(std::runtime_error& _e)
+    {
+        OMNITRACE_VERBOSE(0, "Exception thrown when shutting down rocm-smi: %s\n",
+                          _e.what());
     }
 
     is_initialized() = false;
@@ -408,7 +446,8 @@ device_count()
         OMNITRACE_ROCM_SMI_CALL(rsmi_num_monitor_devices(&_num_devices));
     } catch(const std::exception& _e)
     {
-        OMNITRACE_BASIC_PRINT("Exception: %s\n", _e.what());
+        OMNITRACE_BASIC_PRINT("Exception thrown getting the rocm-smi devices: %s\n",
+                              _e.what());
     }
     return _num_devices;
 }

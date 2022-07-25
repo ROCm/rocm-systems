@@ -435,8 +435,8 @@ module_function::is_routine_constrained() const
         "std::(basic_|)(ifstream|ios|istream|ostream|stream))",
         regex_opts);
     static std::regex leading(
-        "^(_|\\.|frame_dummy|transaction clone|virtual "
-        "thunk|non-virtual thunk|\\(|targ|kmp_threadprivate_|Kokkos::Profiling::)",
+        "^(_|\\.|frame_dummy|transaction clone|virtual thunk|non-virtual thunk|"
+        "\\(|targ|kmp_threadprivate_|Kokkos::Profiling::|dlopen|dlsym)",
         regex_opts);
     static std::regex trailing(
         "(_|\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$", regex_opts);

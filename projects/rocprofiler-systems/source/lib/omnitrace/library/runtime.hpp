@@ -24,6 +24,7 @@
 
 #include "library/api.hpp"
 #include "library/common.hpp"
+#include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
@@ -33,11 +34,11 @@
 #include "library/thread_data.hpp"
 #include "library/timemory.hpp"
 
-#include <memory>
-#include <set>
 #include <timemory/backends/threading.hpp>
 #include <timemory/macros/language.hpp>
 
+#include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -49,7 +50,8 @@ using main_bundle_t =
     tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::cpu_clock,
                            comp::cpu_util, pthread_gotcha>;
 
-using gotcha_bundle_t = tim::lightweight_tuple<fork_gotcha_t, mpi_gotcha_t>;
+using gotcha_bundle_t =
+    tim::lightweight_tuple<exit_gotcha_t, fork_gotcha_t, mpi_gotcha_t>;
 
 // bundle of components around each thread
 #if defined(TIMEMORY_RUSAGE_THREAD) && TIMEMORY_RUSAGE_THREAD > 0

@@ -350,10 +350,13 @@ configure_settings(bool _init)
                              "cause deadlocks with ROCm-enabled OpenMPI.",
                              false, "backend", "parallelism", "gotcha");
 
-    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_SAMPLING_KEEP_INTERNAL",
-                             "If disabled, omnitrace will attempt to filter out internal "
-                             "routines from the sampling call-stacks",
-                             true, "sampling", "data");
+    OMNITRACE_CONFIG_SETTING(
+        bool, "OMNITRACE_SAMPLING_KEEP_INTERNAL",
+        "Configure whether the statistical samples should include call-stack entries "
+        "from internal routines in omnitrace. E.g. when ON, the call-stack will show "
+        "functions like omnitrace_push_trace. If disabled, omnitrace will attempt to "
+        "filter out internal routines from the sampling call-stacks",
+        true, "sampling", "data");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_SAMPLING_REALTIME",
@@ -1164,14 +1167,16 @@ is_binary_rewrite()
 bool
 get_debug_env()
 {
-    return (settings_are_configured()) ? get_debug()
-                                       : tim::get_env<bool>("OMNITRACE_DEBUG", false);
+    return (settings_are_configured())
+               ? get_debug()
+               : tim::get_env<bool>("OMNITRACE_DEBUG", false, false);
 }
 
 bool
 get_is_continuous_integration()
 {
-    if(!settings_are_configured()) return tim::get_env<bool>("OMNITRACE_CI", false);
+    if(!settings_are_configured())
+        return tim::get_env<bool>("OMNITRACE_CI", false, false);
     static auto _v = get_config()->find("OMNITRACE_CI");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
@@ -1208,7 +1213,7 @@ int
 get_verbose_env()
 {
     return (settings_are_configured()) ? get_verbose()
-                                       : tim::get_env<int>("OMNITRACE_VERBOSE", 0);
+                                       : tim::get_env<int>("OMNITRACE_VERBOSE", 0, false);
 }
 
 int

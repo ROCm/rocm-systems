@@ -46,7 +46,7 @@ get_whole_function_names()
         "sigandset", "sigdelset", "sigemptyset", "sigfillset", "sighold", "sigisemptyset",
         "sigismember", "sigorset", "sigrelse", "sigvec", "strtok", "strstr", "sbrk",
         "strxfrm", "atexit", "ompt_start_tool", "nanosleep", "cfree", "tolower",
-        "toupper", "fileno", "fileno_unlocked",
+        "toupper", "fileno", "fileno_unlocked", "exit", "quick_exit", "abort",
         // below are functions which never terminate
         "rocr::core::Signal::WaitAny", "rocr::core::Runtime::AsyncEventsLoop",
         "rocr::core::BusyWaitSignal::WaitAcquire",
