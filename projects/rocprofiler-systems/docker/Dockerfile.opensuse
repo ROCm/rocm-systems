@@ -25,7 +25,7 @@ RUN zypper --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${A
     zypper addrepo https://download.opensuse.org/repositories/devel:languages:perl/SLE_15/devel:languages:perl.repo && \
     zypper --non-interactive --gpg-auto-import-keys refresh && \
     amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms -y && \
-    zypper install -y rocm-hip-sdk roctracer-dev rocm-smi-lib rocprofiler-dev && \
+    zypper install -y rocm-hip-sdk rocm-smi-lib roctracer-dev rocprofiler-dev rccl-dev && \
     zypper clean --all
 
 ARG PYTHON_VERSIONS="6 7 8 9 10"

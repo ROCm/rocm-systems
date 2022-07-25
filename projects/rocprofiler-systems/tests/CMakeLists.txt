@@ -12,6 +12,11 @@ if(NOT DEFINED NUM_PROCS)
     set(NUM_PROCS 2)
 endif()
 
+math(EXPR NUM_SAMPLING_PROCS "${NUM_PROCS_REAL}-1")
+if(NUM_SAMPLING_PROCS GREATER 3)
+    set(NUM_SAMPLING_PROCS 3)
+endif()
+
 math(EXPR NUM_THREADS "${NUM_PROCS_REAL} + (${NUM_PROCS_REAL} / 2)")
 if(NUM_THREADS GREATER 12)
     set(NUM_THREADS 12)
@@ -30,8 +35,8 @@ set(_test_openmp_env "OMP_PROC_BIND=spread" "OMP_PLACES=threads" "OMP_NUM_THREAD
 
 set(_base_environment
     "OMNITRACE_USE_PERFETTO=ON" "OMNITRACE_USE_TIMEMORY=ON" "OMNITRACE_USE_SAMPLING=ON"
-    "OMNITRACE_USE_PROCESS_SAMPLING=ON" "OMNITRACE_TIME_OUTPUT=OFF" "${_test_openmp_env}"
-    "${_test_library_path}")
+    "OMNITRACE_USE_PROCESS_SAMPLING=ON" "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_FILE_OUTPUT=ON" "${_test_openmp_env}" "${_test_library_path}")
 
 set(_flat_environment
     "OMNITRACE_USE_PERFETTO=ON"
@@ -43,11 +48,8 @@ set(_flat_environment
     "OMNITRACE_COLLAPSE_PROCESSES=ON"
     "OMNITRACE_COLLAPSE_THREADS=ON"
     "OMNITRACE_TIMEMORY_COMPONENTS=wall_clock,trip_count"
-    "OMP_PROC_BIND=spread"
-    "OMP_PLACES=threads"
-    "OMP_NUM_THREADS=2"
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
-    )
+    "${_test_openmp_env}"
+    "${_test_library_path}")
 
 set(_lock_environment
     "OMNITRACE_USE_SAMPLING=OFF"
@@ -62,18 +64,34 @@ set(_lock_environment
     "${_test_library_path}")
 
 set(_ompt_environment
-    "OMNITRACE_USE_PERFETTO=ON" "OMNITRACE_USE_TIMEMORY=ON" "OMNITRACE_TIME_OUTPUT=OFF"
-    "OMNITRACE_USE_OMPT=ON" "OMNITRACE_CRITICAL_TRACE=OFF" "${_test_openmp_env}"
+    "OMNITRACE_USE_PERFETTO=ON"
+    "OMNITRACE_USE_TIMEMORY=ON"
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_USE_OMPT=ON"
+    "OMNITRACE_CRITICAL_TRACE=OFF"
+    "OMNITRACE_TIMEMORY_COMPONENTS=wall_clock,trip_count,peak_rss"
+    "${_test_openmp_env}"
     "${_test_library_path}")
 
 set(_perfetto_environment
-    "OMNITRACE_USE_PERFETTO=ON" "OMNITRACE_USE_TIMEMORY=OFF" "OMNITRACE_USE_SAMPLING=ON"
-    "OMNITRACE_USE_PROCESS_SAMPLING=ON" "OMNITRACE_TIME_OUTPUT=OFF" "${_test_openmp_env}"
+    "OMNITRACE_USE_PERFETTO=ON"
+    "OMNITRACE_USE_TIMEMORY=OFF"
+    "OMNITRACE_USE_SAMPLING=ON"
+    "OMNITRACE_USE_PROCESS_SAMPLING=ON"
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_PERFETTO_BACKEND=inprocess"
+    "OMNITRACE_PERFETTO_FILL_POLICY=ring_buffer"
+    "${_test_openmp_env}"
     "${_test_library_path}")
 
 set(_timemory_environment
-    "OMNITRACE_USE_PERFETTO=OFF" "OMNITRACE_USE_TIMEMORY=ON" "OMNITRACE_USE_SAMPLING=ON"
-    "OMNITRACE_USE_PROCESS_SAMPLING=ON" "OMNITRACE_TIME_OUTPUT=OFF" "${_test_openmp_env}"
+    "OMNITRACE_USE_PERFETTO=OFF"
+    "OMNITRACE_USE_TIMEMORY=ON"
+    "OMNITRACE_USE_SAMPLING=ON"
+    "OMNITRACE_USE_PROCESS_SAMPLING=ON"
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_TIMEMORY_COMPONENTS=wall_clock,trip_count,peak_rss"
+    "${_test_openmp_env}"
     "${_test_library_path}")
 
 set(_test_environment ${_base_environment} "OMNITRACE_CRITICAL_TRACE=OFF")
@@ -86,7 +104,7 @@ set(_python_environment
     "OMNITRACE_TIME_OUTPUT=OFF"
     "OMNITRACE_TREE_OUTPUT=OFF"
     "OMNITRACE_USE_PID=OFF"
-    "OMNITRACE_TIMEMORY_COMPONENTS=trip_count"
+    "OMNITRACE_TIMEMORY_COMPONENTS=wall_clock,trip_count"
     "${_test_library_path}"
     "PYTHONPATH=${PROJECT_BINARY_DIR}/lib/python/site-packages")
 
@@ -98,6 +116,18 @@ set(_attach_environment
     "OMNITRACE_USE_CRITICAL_TRACE=ON"
     "OMNITRACE_USE_OMPT=ON"
     "OMNITRACE_USE_KOKKOSP=ON"
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_USE_PID=OFF"
+    "OMNITRACE_TIMEMORY_COMPONENTS=wall_clock,trip_count"
+    "${_test_openmp_env}"
+    "${_test_library_path}")
+
+set(_rccl_environment
+    "OMNITRACE_USE_PERFETTO=ON"
+    "OMNITRACE_USE_TIMEMORY=ON"
+    "OMNITRACE_USE_SAMPLING=OFF"
+    "OMNITRACE_USE_PROCESS_SAMPLING=ON"
+    "OMNITRACE_USE_RCCLP=ON"
     "OMNITRACE_TIME_OUTPUT=OFF"
     "OMNITRACE_USE_PID=OFF"
     "${_test_openmp_env}"
@@ -123,6 +153,83 @@ endif()
 
 # -------------------------------------------------------------------------------------- #
 
+set(_VALID_GPU OFF)
+if(OMNITRACE_USE_HIP)
+    set(_VALID_GPU ON)
+    find_program(
+        OMNITRACE_ROCM_SMI_EXE
+        NAMES rocm-smi
+        HINTS ${ROCmVersion_DIR}
+        PATHS ${ROCmVersion_DIR}
+        PATH_SUFFIXES bin)
+    if(OMNITRACE_ROCM_SMI_EXE)
+        execute_process(
+            COMMAND ${OMNITRACE_ROCM_SMI_EXE}
+            OUTPUT_VARIABLE _RSMI_OUT
+            ERROR_VARIABLE _RSMI_ERR
+            RESULT_VARIABLE _RSMI_RET)
+        if(_RSMI_RET EQUAL 0)
+            if("${_RSMI_OUTPUT}" MATCHES "ERROR" OR "${_RSMI_ERR}" MATCHES "ERROR")
+                set(_VALID_GPU OFF)
+            endif()
+        else()
+            set(_VALID_GPU OFF)
+        endif()
+    endif()
+    if(NOT _VALID_GPU)
+        omnitrace_message(AUTHOR_WARNING
+                          "rocm-smi did not successfully run. Disabling GPU tests...")
+    endif()
+endif()
+
+set(LULESH_USE_GPU ${LULESH_USE_HIP})
+if(LULESH_USE_CUDA)
+    set(LULESH_USE_GPU ON)
+endif()
+
+# -------------------------------------------------------------------------------------- #
+
+function(OMNITRACE_WRITE_TEST_CONFIG _FILE _ENV)
+    set(_ENV_ONLY "OMNITRACE_(USE_MPIP|DEBUG_SETTINGS)=")
+    set(_FILE_CONTENTS)
+    set(_ENV_CONTENTS)
+
+    foreach(_VAL ${${_ENV}})
+        if("${_VAL}" MATCHES "^OMNITRACE_" AND NOT "${_VAL}" MATCHES "${_ENV_ONLY}")
+            set(_FILE_CONTENTS "${_FILE_CONTENTS}${_VAL}\n")
+        else()
+            list(APPEND _ENV_CONTENTS "${_VAL}")
+        endif()
+    endforeach()
+
+    set(_CONFIG_FILE ${PROJECT_BINARY_DIR}/omnitrace-tests-config/${_FILE})
+    file(
+        WRITE ${_CONFIG_FILE}
+        "# auto-generated by cmake
+
+# default values
+OMNITRACE_CI                     = ON
+OMNITRACE_VERBOSE                = 1
+OMNITRACE_DL_VERBOSE             = 1
+OMNITRACE_SAMPLING_FREQ          = 50
+OMNITRACE_SAMPLING_DELAY         = 0.05
+OMNITRACE_SAMPLING_CPUS          = 0-${NUM_SAMPLING_PROCS}
+OMNITRACE_SAMPLING_GPUS          = $env:HIP_VISIBLE_DEVICES
+OMNITRACE_ROCTRACER_HSA_API      = ON
+OMNITRACE_ROCTRACER_HSA_ACTIVITY = ON
+
+# test-specific values
+${_FILE_CONTENTS}
+")
+    list(APPEND _ENV_CONTENTS "OMNITRACE_CONFIG_FILE=${_CONFIG_FILE}")
+    list(APPEND _ENV_CONTENTS "OMNITRACE_DEBUG_SETTINGS=1")
+    set(${_ENV}
+        "${_ENV_CONTENTS}"
+        PARENT_SCOPE)
+endfunction()
+
+# -------------------------------------------------------------------------------------- #
+
 function(OMNITRACE_ADD_TEST)
     foreach(_PREFIX RUNTIME REWRITE REWRITE_RUN)
         foreach(_TYPE PASS FAIL SKIP)
@@ -135,9 +242,16 @@ function(OMNITRACE_ADD_TEST)
     cmake_parse_arguments(
         TEST
         "SKIP_BASELINE;SKIP_REWRITE;SKIP_RUNTIME;SKIP_SAMPLING" # options
-        "NAME;TARGET;MPI;NUM_PROCS;REWRITE_TIMEOUT;RUNTIME_TIMEOUT" # single value args
+        "NAME;TARGET;MPI;GPU;NUM_PROCS;REWRITE_TIMEOUT;RUNTIME_TIMEOUT" # single value
+                                                                        # args
         "${_KWARGS}" # multiple value args
         ${ARGN})
+
+    if(TEST_GPU AND NOT _VALID_GPU)
+        omnitrace_message(STATUS
+                          "${TEST_NAME} requires a GPU and no valid GPUs were found")
+        return()
+    endif()
 
     if("${TEST_MPI}" STREQUAL "")
         set(TEST_MPI OFF)
@@ -189,7 +303,7 @@ function(OMNITRACE_ADD_TEST)
             add_test(
                 NAME ${TEST_NAME}-baseline
                 COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
         if(NOT TEST_SKIP_REWRITE)
@@ -199,7 +313,7 @@ function(OMNITRACE_ADD_TEST)
                     $<TARGET_FILE:omnitrace-exe> -o
                     $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
                     ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
-                WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
 
             if(NOT TEST_SKIP_SAMPLING)
                 add_test(
@@ -208,7 +322,7 @@ function(OMNITRACE_ADD_TEST)
                         $<TARGET_FILE:omnitrace-exe> -o
                         $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp -M sampling
                         ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
-                    WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+                    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
             endif()
 
             add_test(
@@ -216,7 +330,7 @@ function(OMNITRACE_ADD_TEST)
                 COMMAND
                     ${COMMAND_PREFIX} $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
                     ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
 
             if(NOT TEST_SKIP_SAMPLING)
                 add_test(
@@ -225,7 +339,7 @@ function(OMNITRACE_ADD_TEST)
                         ${COMMAND_PREFIX}
                         $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp
                         ${TEST_RUN_ARGS}
-                    WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+                    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
             endif()
         endif()
 
@@ -234,14 +348,14 @@ function(OMNITRACE_ADD_TEST)
                 NAME ${TEST_NAME}-runtime-instrument
                 COMMAND $<TARGET_FILE:omnitrace-exe> ${TEST_RUNTIME_ARGS} --
                         $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
 
             if(NOT TEST_SKIP_SAMPLING)
                 add_test(
                     NAME ${TEST_NAME}-runtime-instrument-sampling
                     COMMAND $<TARGET_FILE:omnitrace-exe> -M sampling ${TEST_RUNTIME_ARGS}
                             -- $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                    WORKING_DIRECTORY $<TARGET_FILE_DIR:${TEST_TARGET}>)
+                    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
             endif()
         endif()
 
@@ -303,6 +417,7 @@ function(OMNITRACE_ADD_TEST)
             endforeach()
 
             if(TEST ${TEST_NAME}-${_TEST})
+                omnitrace_write_test_config(${TEST_NAME}-${_TEST}.cfg _environ)
                 set_tests_properties(
                     ${TEST_NAME}-${_TEST}
                     PROPERTIES ENVIRONMENT
@@ -431,6 +546,7 @@ endfunction()
 # general config file tests
 #
 # -------------------------------------------------------------------------------------- #
+
 file(
     WRITE ${CMAKE_CURRENT_BINARY_DIR}/invalid.cfg
     "
@@ -476,6 +592,7 @@ omnitrace_add_test(
     NAME transpose
     TARGET transpose
     MPI ${TRANSPOSE_USE_MPI}
+    GPU ON
     NUM_PROCS ${NUM_PROCS}
     REWRITE_ARGS -e -v 2 --print-instructions -E uniform_int_distribution
     RUNTIME_ARGS
@@ -497,6 +614,7 @@ omnitrace_add_test(
     TARGET transpose
     LABELS "loops"
     MPI ${TRANSPOSE_USE_MPI}
+    GPU ON
     NUM_PROCS ${NUM_PROCS}
     REWRITE_ARGS
         -e
@@ -577,78 +695,82 @@ omnitrace_add_test(
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
 
-omnitrace_add_test(
-    SKIP_RUNTIME
-    NAME "mpi"
-    TARGET mpi-example
-    MPI ON
-    NUM_PROCS 4
-    REWRITE_ARGS
-        -e
-        -v
-        2
-        --label
-        file
-        line
-        return
-        args
-        --min-instructions
-        0
-    ENVIRONMENT "${_base_environment};GOTCHA_DEBUG=1"
-    REWRITE_RUN_PASS_REGEX
-        "(/[A-Za-z-]+/perfetto-trace-0.proto).*(/[A-Za-z-]+/wall_clock-0.txt')"
-    REWRITE_RUN_FAIL_REGEX "-[0-9][0-9]+.(json|txt|proto)")
+if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
+    omnitrace_add_test(
+        SKIP_RUNTIME
+        NAME "mpi"
+        TARGET mpi-example
+        MPI ON
+        NUM_PROCS 4
+        REWRITE_ARGS
+            -e
+            -v
+            2
+            --label
+            file
+            line
+            return
+            args
+            --min-instructions
+            0
+        ENVIRONMENT "${_base_environment};GOTCHA_DEBUG=1"
+        REWRITE_RUN_PASS_REGEX
+            "(/[A-Za-z-]+/perfetto-trace-0.proto).*(/[A-Za-z-]+/wall_clock-0.txt')"
+        REWRITE_RUN_FAIL_REGEX "-[0-9][0-9]+.(json|txt|proto)")
 
-omnitrace_add_test(
-    SKIP_RUNTIME SKIP_SAMPLING
-    NAME "mpi-flat-mpip"
-    TARGET mpi-example
-    MPI ON
-    NUM_PROCS 4
-    LABELS "mpip"
-    REWRITE_ARGS
-        -e
-        -v
-        2
-        --label
-        file
-        line
-        return
-        args
-        --min-instructions
-        0
-    ENVIRONMENT "${_flat_environment};OMNITRACE_USE_SAMPLING=OFF;OMNITRACE_USE_MPIP=ON"
-    REWRITE_RUN_PASS_REGEX
-        ">>> main(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall(.*\n.*)>>> pthread_join"
-    )
+    omnitrace_add_test(
+        SKIP_RUNTIME SKIP_SAMPLING
+        NAME "mpi-flat-mpip"
+        TARGET mpi-example
+        MPI ON
+        NUM_PROCS 4
+        LABELS "mpip"
+        REWRITE_ARGS
+            -e
+            -v
+            2
+            --label
+            file
+            line
+            return
+            args
+            --min-instructions
+            0
+        ENVIRONMENT
+            "${_flat_environment};OMNITRACE_USE_SAMPLING=OFF;OMNITRACE_STRICT_CONFIG=OFF;OMNITRACE_USE_MPIP=ON"
+        REWRITE_RUN_PASS_REGEX
+            ">>> main(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall(.*\n.*)>>> pthread_join"
+        )
 
-omnitrace_add_test(
-    SKIP_RUNTIME SKIP_SAMPLING
-    NAME "mpi-flat"
-    TARGET mpi-example
-    MPI ON
-    NUM_PROCS 4
-    LABELS "mpip"
-    REWRITE_ARGS
-        -e
-        -v
-        2
-        --label
-        file
-        line
-        return
-        args
-        --min-instructions
-        0
-    ENVIRONMENT "${_flat_environment};OMNITRACE_USE_SAMPLING=OFF"
-    REWRITE_RUN_PASS_REGEX
-        ">>> main(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall(.*\n.*)>>> pthread_join"
-    )
+    omnitrace_add_test(
+        SKIP_RUNTIME SKIP_SAMPLING
+        NAME "mpi-flat"
+        TARGET mpi-example
+        MPI ON
+        NUM_PROCS 4
+        LABELS "mpip"
+        REWRITE_ARGS
+            -e
+            -v
+            2
+            --label
+            file
+            line
+            return
+            args
+            --min-instructions
+            0
+        ENVIRONMENT "${_flat_environment};OMNITRACE_USE_SAMPLING=OFF"
+        REWRITE_RUN_PASS_REGEX
+            ">>> main(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall(.*\n.*)>>> pthread_join"
+        )
+endif()
 
 omnitrace_add_test(
     NAME lulesh
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
+    GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
     LABELS "kokkos"
     REWRITE_ARGS -e -v 2 --label file line return args
@@ -674,6 +796,7 @@ omnitrace_add_test(
     NAME lulesh-baseline-kokkosp-libomnitrace
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
+    GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
     LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 10 -s 20 -p
@@ -686,6 +809,7 @@ omnitrace_add_test(
     NAME lulesh-baseline-kokkosp-libomnitrace-dl
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
+    GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
     LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 10 -s 20 -p
@@ -698,6 +822,7 @@ omnitrace_add_test(
     NAME lulesh-kokkosp
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
+    GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
     LABELS "kokkos"
     REWRITE_ARGS -e -v 2
@@ -721,6 +846,7 @@ omnitrace_add_test(
     NAME lulesh-perfetto
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
+    GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
     LABELS "kokkos;loops"
     REWRITE_ARGS -e -v 2
@@ -743,6 +869,7 @@ omnitrace_add_test(
     NAME lulesh-timemory
     TARGET lulesh
     MPI ${LULESH_USE_MPI}
+    GPU ${LULESH_USE_GPU}
     NUM_PROCS 8
     LABELS "kokkos;loops"
     REWRITE_ARGS -e -v 2 -l --dynamic-callsites --traps --allow-overlapping
@@ -964,6 +1091,64 @@ if(TARGET parallel-overhead AND _VALID_PTRACE_SCOPE)
                    FAIL_REGULAR_EXPRESSION
                    "Dyninst was unable to attach to the specified process")
 endif()
+
+# -------------------------------------------------------------------------------------- #
+#
+# rccl tests
+#
+# -------------------------------------------------------------------------------------- #
+
+foreach(_TARGET ${RCCL_TEST_TARGETS})
+    string(REPLACE "rccl-tests::" "" _NAME "${_TARGET}")
+    string(REPLACE "_" "-" _NAME "${_NAME}")
+    omnitrace_add_test(
+        SKIP_SAMPLING
+        NAME rccl-test-${_NAME}
+        TARGET ${_TARGET}
+        LABELS "rccl-tests;rcclp"
+        MPI ON
+        GPU ON
+        NUM_PROCS 1
+        REWRITE_ARGS
+            -e
+            -v
+            2
+            -i
+            8
+            --label
+            file
+            line
+            return
+            args
+        RUNTIME_ARGS
+            -e
+            -v
+            1
+            -i
+            8
+            --label
+            file
+            line
+            return
+            args
+        RUN_ARGS -t
+                 1
+                 -g
+                 1
+                 -i
+                 10
+                 -w
+                 2
+                 -m
+                 2
+                 -p
+                 -c
+                 1
+                 -z
+                 -s
+                 1
+        ENVIRONMENT "${_rccl_environment}")
+endforeach()
 
 # -------------------------------------------------------------------------------------- #
 #

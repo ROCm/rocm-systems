@@ -429,6 +429,7 @@ module_function::is_routine_constrained() const
 
     static std::regex exclude(
         "(omnitrace|tim::|N3tim|MPI_Init|MPI_Finalize|dyninst|tm_clones)", regex_opts);
+    static std::regex exclude_printf("(|v|f)printf$", regex_opts);
     static std::regex exclude_cxx(
         "(std::_Sp_counted_base|std::(use|has)_facet|std::locale|::sentry|^std::_|::_(M|"
         "S)_|::basic_string[a-zA-Z,<>: ]+::_M_create|::__|::_(Alloc|State)|"
@@ -454,6 +455,11 @@ module_function::is_routine_constrained() const
        std::regex_search(function_name, exclude_cxx))
     {
         return _report("Excluding", "critical", 3);
+    }
+
+    if(std::regex_search(function_name, exclude_printf))
+    {
+        return _report("Excluding", "critical-printf", 3);
     }
 
     if(whole.count(function_name) > 0)

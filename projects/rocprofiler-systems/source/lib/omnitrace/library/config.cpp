@@ -24,6 +24,7 @@
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 #include "library/gpu.hpp"
+#include "library/mproc.hpp"
 #include "library/perfetto.hpp"
 #include "library/runtime.hpp"
 
@@ -46,9 +47,11 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <limits>
 #include <numeric>
 #include <ostream>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 
@@ -269,6 +272,11 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_KOKKOSP",
                              "Enable support for Kokkos Tools", false, "kokkos",
                              "backend");
+
+    OMNITRACE_CONFIG_SETTING(
+        bool, "OMNITRACE_USE_RCCLP",
+        "Enable support for ROCm Communication Collectives Library (RCCL) Performance",
+        false, "rocm", "rccl", "backend");
 
     OMNITRACE_CONFIG_CL_SETTING(
         bool, "OMNITRACE_KOKKOS_KERNEL_LOGGER", "Enables kernel logging", false,
@@ -582,12 +590,30 @@ configure_settings(bool _init)
     }
     if(!_found_sep && _cmd.size() > 1) _cmd.insert(_cmd.begin() + 1, "--");
 
+    auto _pid       = getpid();
+    auto _ppid      = getppid();
+    auto _proc      = mproc::get_concurrent_processes(_ppid);
+    bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
+
     for(auto&& itr :
         tim::delimit(_config->get<std::string>("OMNITRACE_CONFIG_FILE"), ";:"))
     {
         if(_config->get_suppress_config()) continue;
         OMNITRACE_BASIC_VERBOSE(1, "Reading config file %s\n", itr.c_str());
         _config->read(itr);
+        if(_config->get<bool>("OMNITRACE_CI") && _main_proc)
+        {
+            std::ifstream     _in{ itr };
+            std::stringstream _iss{};
+            while(_in)
+            {
+                std::string _s{};
+                getline(_in, _s);
+                _iss << _s << "\n";
+            }
+            OMNITRACE_BASIC_PRINT("config file '%s':\n%s\n", itr.c_str(),
+                                  _iss.str().c_str());
+        }
     }
 
     settings::suppress_config() = true;
@@ -666,6 +692,7 @@ configure_mode_settings()
         _set("OMNITRACE_USE_ROCTRACER", false);
         _set("OMNITRACE_USE_ROCPROFILER", false);
         _set("OMNITRACE_USE_KOKKOSP", false);
+        _set("OMNITRACE_USE_RCCLP", false);
         _set("OMNITRACE_USE_OMPT", false);
         _set("OMNITRACE_USE_SAMPLING", false);
         _set("OMNITRACE_USE_PROCESS_SAMPLING", false);
@@ -721,6 +748,7 @@ configure_mode_settings()
         _set("OMNITRACE_USE_ROCTRACER", false);
         _set("OMNITRACE_USE_ROCPROFILER", false);
         _set("OMNITRACE_USE_KOKKOSP", false);
+        _set("OMNITRACE_USE_RCCLP", false);
         _set("OMNITRACE_USE_OMPT", false);
         _set("OMNITRACE_USE_SAMPLING", false);
         _set("OMNITRACE_USE_PROCESS_SAMPLING", false);
@@ -817,6 +845,7 @@ configure_disabled_settings()
     _handle_use_option("OMNITRACE_USE_PERFETTO", "perfetto");
     _handle_use_option("OMNITRACE_USE_TIMEMORY", "timemory");
     _handle_use_option("OMNITRACE_USE_OMPT", "ompt");
+    _handle_use_option("OMNITRACE_USE_RCCLP", "rcclp");
     _handle_use_option("OMNITRACE_USE_ROCM_SMI", "rocm_smi");
     _handle_use_option("OMNITRACE_USE_ROCTRACER", "roctracer");
     _handle_use_option("OMNITRACE_USE_ROCPROFILER", "rocprofiler");
@@ -1352,6 +1381,13 @@ bool
 get_use_code_coverage()
 {
     static auto _v = get_config()->find("OMNITRACE_USE_CODE_COVERAGE");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_use_rcclp()
+{
+    static auto _v = get_config()->find("OMNITRACE_USE_RCCLP");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 

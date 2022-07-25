@@ -121,5 +121,6 @@ jobs:
       with:
         name: data-${{ github.job }}-files
         path: |
+          build/omnitrace-tests-config/*.cfg
           build/omnitrace-tests-output/**/*.txt
           build/omnitrace-tests-output/**/*-instr*.json

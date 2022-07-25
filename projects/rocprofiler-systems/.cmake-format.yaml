@@ -28,6 +28,7 @@ parse:
         NAME: '*'
         TARGET: '*'
         MPI: '*'
+        GPU: '*'
         NUM_PROCS: '*'
         REWRITE_TIMEOUT: '*'
         RUNTIME_TIMEOUT: '*'

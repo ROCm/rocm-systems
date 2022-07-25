@@ -83,6 +83,8 @@
         perfetto::Category("kokkos").SetDescription("Kokkos regions"),                   \
         perfetto::Category("mpi").SetDescription("MPI regions"),                         \
         perfetto::Category("ompt").SetDescription("OpenMP Tools regions"),               \
+        perfetto::Category("rccl").SetDescription(                                       \
+            "ROCm Communication Collectives Library (RCCL) regions"),                    \
         perfetto::Category("critical-trace").SetDescription("Combined critical traces"), \
         perfetto::Category("host-critical-trace")                                        \
             .SetDescription("Host-side critical traces"),                                \

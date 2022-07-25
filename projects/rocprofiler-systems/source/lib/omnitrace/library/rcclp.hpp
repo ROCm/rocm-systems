@@ -1,6 +1,8 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2020, The Regents of the University of California,
+// through Lawrence Berkeley National Laboratory (subject to receipt of any
+// required approvals from the U.S. Dept. of Energy).  All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,45 +24,34 @@
 
 #pragma once
 
-#include "common/join.hpp"
 #include "library/defines.hpp"
-
-#include <timemory/api.hpp>
-#include <timemory/backends/dmp.hpp>
-#include <timemory/backends/process.hpp>
-#include <timemory/utility/demangle.hpp>
-#include <timemory/utility/filepath.hpp>
-
-#include <cassert>
-#include <cstdint>
-#include <cstdio>
-#include <fstream>
-#include <memory>
-#include <mutex>
-#include <string>
-#include <sys/types.h>
-#include <thread>
-#include <unistd.h>
-#include <utility>
-#include <vector>
-
-TIMEMORY_DEFINE_NS_API(api, omnitrace)
-TIMEMORY_DEFINE_NS_API(api, sampling)
-TIMEMORY_DEFINE_NS_API(api, rocm_smi)
-TIMEMORY_DEFINE_NS_API(api, rccl)
 
 namespace omnitrace
 {
-namespace api      = ::tim::api;       // NOLINT
-namespace category = ::tim::category;  // NOLINT
-namespace filepath = ::tim::filepath;  // NOLINT
+namespace rcclp
+{
+void
+configure();
 
-using ::tim::demangle;      // NOLINT
-using ::tim::get_env;       // NOLINT
-using ::tim::try_demangle;  // NOLINT
-}  // namespace omnitrace
+void
+setup();
 
-// same sort of functionality as python's " ".join([...])
-#if !defined(JOIN)
-#    define JOIN(...) ::omnitrace::common::join(__VA_ARGS__)
+void
+shutdown();
+
+#if !defined(OMNITRACE_USE_RCCL) ||                                                      \
+    (defined(OMNITRACE_USE_RCCL) && OMNITRACE_USE_RCCL == 0)
+inline void
+configure()
+{}
+
+inline void
+setup()
+{}
+
+inline void
+shutdown()
+{}
 #endif
+}  // namespace rcclp
+}  // namespace omnitrace

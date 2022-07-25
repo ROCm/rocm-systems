@@ -20,6 +20,8 @@ omnitrace_add_interface_library(omnitrace-rocprofiler
                                 "Provides flags and libraries for rocprofiler")
 omnitrace_add_interface_library(omnitrace-rocm-smi
                                 "Provides flags and libraries for rocm-smi")
+omnitrace_add_interface_library(
+    omnitrace-rccl "Provides flags for ROCm Communication Collectives Library (RCCL)")
 omnitrace_add_interface_library(omnitrace-mpi "Provides MPI or MPI headers")
 omnitrace_add_interface_library(omnitrace-ptl "Enables PTL support (tasking)")
 omnitrace_add_interface_library(omnitrace-papi "Enable PAPI support")
@@ -37,6 +39,7 @@ set(OMNITRACE_EXTENSION_LIBRARIES
     omnitrace::omnitrace-roctracer
     omnitrace::omnitrace-rocprofiler
     omnitrace::omnitrace-rocm-smi
+    omnitrace::omnitrace-rccl
     omnitrace::omnitrace-mpi
     omnitrace::omnitrace-ptl
     omnitrace::omnitrace-ompt
@@ -194,6 +197,17 @@ if(OMNITRACE_USE_ROCM_SMI)
                                          INTERFACE OMNITRACE_USE_ROCM_SMI)
     target_link_libraries(omnitrace-rocm-smi INTERFACE rocm-smi::rocm-smi)
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${rocm-smi_LIBRARY_DIRS}")
+endif()
+
+# ----------------------------------------------------------------------------------------#
+#
+# RCCL
+#
+# ----------------------------------------------------------------------------------------#
+if(OMNITRACE_USE_RCCL)
+    find_package(RCCL-Headers ${omnitrace_FIND_QUIETLY} REQUIRED)
+    target_link_libraries(omnitrace-rccl INTERFACE roc::rccl-headers)
+    omnitrace_target_compile_definitions(omnitrace-rccl INTERFACE OMNITRACE_USE_RCCL)
 endif()
 
 # ----------------------------------------------------------------------------------------#

@@ -217,6 +217,9 @@ int
 get_sampling_rtoffset();
 
 bool
+get_use_rcclp();
+
+bool
 get_timeline_sampling();
 
 bool

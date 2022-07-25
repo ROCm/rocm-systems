@@ -41,6 +41,7 @@
 #include "library/ompt.hpp"
 #include "library/process_sampler.hpp"
 #include "library/ptl.hpp"
+#include "library/rcclp.hpp"
 #include "library/rocprofiler.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -647,6 +648,12 @@ omnitrace_init_tooling_hidden()
         ompt::setup();
     }
 
+    if(get_use_rcclp())
+    {
+        OMNITRACE_VERBOSE_F(1, "Setting up RCCLP...\n");
+        rcclp::setup();
+    }
+
     if(get_use_perfetto() && !is_system_backend())
     {
 #if defined(CUSTOM_DATA_SOURCE)
@@ -838,6 +845,12 @@ omnitrace_finalize_hidden(void)
             for(auto itr : *_aitr)
                 _azero->emplace(itr.first, itr.second);
         }
+    }
+
+    if(get_use_rcclp())
+    {
+        OMNITRACE_VERBOSE_F(1, "Shutting down RCCLP...\n");
+        rcclp::shutdown();
     }
 
     if(get_use_ompt())

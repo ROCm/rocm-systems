@@ -24,7 +24,7 @@ ARG AMDGPU_RPM=21.40.2/rhel/7.9/amdgpu-install-21.40.2.40502-1.el7.noarch.rpm
 
 RUN yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
     amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms --skip-broken -y && \
-    yum install -y rocm-hip-sdk roctracer-dev rocm-smi-lib rocprofiler-dev && \
+    yum install -y rocm-hip-sdk rocm-smi-lib roctracer-dev rocprofiler-dev rccl-dev && \
     yum update -y && \
     yum clean all
 

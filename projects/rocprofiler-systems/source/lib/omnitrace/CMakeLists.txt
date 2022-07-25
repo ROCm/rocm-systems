@@ -34,6 +34,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:omnitrace::omnitrace-roctracer>
         $<BUILD_INTERFACE:omnitrace::omnitrace-rocprofiler>
         $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-rccl>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_LTO}>,omnitrace::omnitrace-lto,>>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,omnitrace::omnitrace-static-libgcc,>>
         $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBSTDCXX}>,omnitrace::omnitrace-static-libstdcxx,>>
@@ -100,6 +101,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/library/perfetto.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/process_sampler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/ptl.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/rcclp.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/rocm.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/rocprofiler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/roctracer.hpp
@@ -118,6 +120,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/library/components/functors.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/mpi_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/omnitrace.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/library/components/rcclp.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/rocm_smi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/rocprofiler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library/components/roctracer.hpp
@@ -141,6 +144,13 @@ if(OMNITRACE_USE_ROCTRACER)
         omnitrace-object-library
         PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library/components/roctracer.cpp
                 ${CMAKE_CURRENT_LIST_DIR}/library/roctracer.cpp)
+endif()
+
+if(OMNITRACE_USE_RCCL)
+    target_sources(
+        omnitrace-object-library
+        PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library/components/rcclp.cpp
+                ${CMAKE_CURRENT_LIST_DIR}/library/rcclp.cpp)
 endif()
 
 if(OMNITRACE_USE_ROCPROFILER)

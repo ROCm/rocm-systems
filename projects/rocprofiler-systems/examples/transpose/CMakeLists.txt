@@ -40,13 +40,16 @@ endif()
 
 add_executable(transpose transpose.cpp)
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+   AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
+   AND NOT HIPCC_EXECUTABLE)
     target_link_libraries(
         transpose
-        PRIVATE
-            $<IF:$<TARGET_EXISTS:omnitrace::omnitrace-compile-options>,omnitrace::omnitrace-compile-options,>
-            $<IF:$<TARGET_EXISTS:hip::host>,hip::host,>
-            $<IF:$<TARGET_EXISTS:hip::device>,hip::device,>)
+        PRIVATE $<TARGET_NAME_IF_EXISTS:omnitrace::omnitrace-compile-options>
+                $<TARGET_NAME_IF_EXISTS:hip::host> $<TARGET_NAME_IF_EXISTS:hip::device>)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_link_libraries(
+        transpose PRIVATE $<TARGET_NAME_IF_EXISTS:omnitrace::omnitrace-compile-options>)
 else()
     target_compile_options(transpose PRIVATE -W -Wall)
 endif()

@@ -52,7 +52,13 @@ get_whole_function_names()
         "rocr::core::BusyWaitSignal::WaitAcquire",
         "rocr::core::BusyWaitSignal::WaitRelaxed", "rocr::HSA::hsa_signal_wait_scacquire",
         "rocr::os::ThreadTrampoline", "rocr::image::ImageRuntime::CreateImageManager",
-        "rocr::AMD::GpuAgent::GetInfo", "rocr::HSA::hsa_agent_get_info", "event_base_loop"
+        "rocr::AMD::GpuAgent::GetInfo", "rocr::HSA::hsa_agent_get_info",
+        "event_base_loop", "bootstrapRoot", "bootstrapNetAccept", "ncclCommInitRank",
+        "ncclCommInitAll", "ncclCommDestroy", "ncclCommCount", "ncclCommCuDevice",
+        "ncclCommUserRank", "ncclReduce", "ncclBcast", "ncclBroadcast", "ncclAllReduce",
+        "ncclReduceScatter", "ncclAllGather", "ncclGroupStart", "ncclGroupEnd",
+        "ncclSend", "ncclRecv", "ncclGather", "ncclScatter", "ncclAllToAll",
+        "ncclAllToAllv"
     };
 #else
     // should hopefully be removed soon

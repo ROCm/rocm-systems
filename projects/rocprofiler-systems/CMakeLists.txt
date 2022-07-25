@@ -126,6 +126,7 @@ omnitrace_add_option(OMNITRACE_USE_ROCPROFILER "Enable rocprofiler support"
 omnitrace_add_option(
     OMNITRACE_USE_ROCM_SMI "Enable rocm-smi support for power/temp/etc. sampling"
     ${OMNITRACE_USE_HIP})
+omnitrace_add_option(OMNITRACE_USE_RCCL "Enable RCCL support" ${OMNITRACE_USE_HIP})
 omnitrace_add_option(OMNITRACE_USE_MPI_HEADERS
                      "Enable wrapping MPI functions w/o enabling MPI dependency" ON)
 omnitrace_add_option(OMNITRACE_USE_OMPT "Enable OpenMP tools support" ON)
@@ -175,14 +176,18 @@ if(NOT OMNITRACE_USE_HIP)
     set(OMNITRACE_USE_ROCM_SMI
         OFF
         CACHE BOOL "Disabled via OMNITRACE_USE_HIP=OFF" FORCE)
+    set(OMNITRACE_USE_RCCL
+        OFF
+        CACHE BOOL "Disabled via OMNITRACE_USE_HIP=OFF" FORCE)
 elseif(
     OMNITRACE_USE_HIP
     AND NOT OMNITRACE_USE_ROCTRACER
     AND NOT OMNITRACE_USE_ROCPROFILER
-    AND NOT OMNITRACE_USE_ROCM_SMI)
+    AND NOT OMNITRACE_USE_ROCM_SMI
+    AND NOT OMNITRACE_USE_RCCL)
     omnitrace_message(
         AUTHOR_WARNING
-        "Setting OMNITRACE_USE_HIP=OFF because roctracer, rocprofiler, and rocm-smi options are disabled"
+        "Setting OMNITRACE_USE_HIP=OFF because roctracer, rocprofiler, rccl, and rocm-smi options are disabled"
         )
     set(OMNITRACE_USE_HIP OFF)
 endif()
