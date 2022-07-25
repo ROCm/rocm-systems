@@ -208,7 +208,7 @@ build-and-package-base()
         verbose-run cmake --build ${BUILD_DIR}/${DIR} --target clean
     fi
     verbose-run cmake --build ${BUILD_DIR}/${DIR} --target all --parallel ${NJOBS}
-    verbose-run cmake --build ${BUILD_DIR}/${DIR} --target all --parallel ${NJOBS}
+    verbose-run cmake --build ${BUILD_DIR}/${DIR} --target install --parallel ${NJOBS}
     pushd ${BUILD_DIR}/${DIR}
     verbose-run rm -f *.sh *.deb *.rpm
     popd

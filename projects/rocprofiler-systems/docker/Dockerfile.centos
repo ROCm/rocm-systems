@@ -17,7 +17,7 @@ RUN yum update -y && \
     yum install -y centos-release-scl && \
     yum install -y epel-release && \
     yum install -y devtoolset-9 python3-pip openmpi3-devel zlib-devel numactl-devel papi-devel dpkg-devel dpkg-dev wget curl && \
-    python3 -m pip install 'cmake==3.18.4'
+    python3 -m pip install 'cmake==3.21.4'
 
 ARG AMDGPU_RPM=21.40.2/rhel/7.9/amdgpu-install-21.40.2.40502-1.el7.noarch.rpm
 # ARG AMDGPU_RPM=latest/rhel/7.9/amdgpu-install-21.50.50000-1.el7.noarch.rpm

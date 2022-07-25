@@ -183,6 +183,17 @@ if(NOT MAKE_EXECUTABLE)
         )
 endif()
 
+set(_PAPI_C_COMPILER ${CMAKE_C_COMPILER})
+if(CMAKE_C_COMPILER_IS_CLANG)
+    find_program(OMNITRACE_GNU_C_COMPILER NAMES gcc)
+    if(OMNITRACE_GNU_C_COMPILER)
+        set(_PAPI_C_COMPILER ${OMNITRACE_GNU_C_COMPILER})
+    endif()
+endif()
+set(PAPI_C_COMPILER
+    ${_PAPI_C_COMPILER}
+    CACHE FILEPATH "C compiler used to compile PAPI")
+
 include(ExternalProject)
 externalproject_add(
     omnitrace-papi-build
@@ -190,7 +201,7 @@ externalproject_add(
     SOURCE_DIR ${OMNITRACE_PAPI_SOURCE_DIR}/src
     BUILD_IN_SOURCE 1
     CONFIGURE_COMMAND
-        ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER}
+        ${CMAKE_COMMAND} -E env CC=${PAPI_C_COMPILER}
         CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation LIBS=-lrt LDFLAGS=-lrt
         ${OMNITRACE_PAPI_EXTRA_ENV} <SOURCE_DIR>/configure
         --prefix=${OMNITRACE_PAPI_INSTALL_DIR} --with-static-lib=yes --with-shared-lib=no
@@ -268,6 +279,8 @@ target_link_libraries(omnitrace-papi INTERFACE ${PAPI_LIBRARY} ${PAPI_pfm_LIBRAR
 omnitrace_target_compile_definitions(omnitrace-papi INTERFACE OMNITRACE_USE_PAPI
                                                               TIMEMORY_USE_PAPI=1)
 
+include(GNUInstallDirs)
+
 install(
     DIRECTORY ${OMNITRACE_PAPI_INSTALL_DIR}/lib/
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace
@@ -296,7 +309,7 @@ foreach(
     install(
         PROGRAMS ${OMNITRACE_PAPI_INSTALL_DIR}/bin/${_UTIL_EXE}
         DESTINATION ${CMAKE_INSTALL_BINDIR}
-        COMPONENT papi
         RENAME ${_UTIL_EXE_INSTALL_NAME}
+        COMPONENT papi
         OPTIONAL)
 endforeach()

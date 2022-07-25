@@ -16,7 +16,7 @@ RUN zypper update -y && \
     zypper dist-upgrade -y && \
     zypper install -y -t pattern devel_basis && \
     zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build wget curl binutils-gold && \
-    python3 -m pip install 'cmake==3.18.4'
+    python3 -m pip install 'cmake==3.21.4'
 
 # ARG AMDGPU_RPM=21.40.2/sle/15/amdgpu-install-21.40.2.40502-1.noarch.rpm
 ARG AMDGPU_RPM=latest/sle/15/amdgpu-install-21.50.50000-1.noarch.rpm
