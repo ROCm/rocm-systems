@@ -22,8 +22,10 @@
 
 #pragma once
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -53,7 +55,20 @@ get_env(std::string_view env_id, int _default)
 {
     if(env_id.empty()) return _default;
     char* env_var = ::std::getenv(env_id.data());
-    if(env_var) return std::stoi(env_var);
+    if(env_var)
+    {
+        try
+        {
+            return std::stoi(env_var);
+        } catch(std::exception& _e)
+        {
+            fprintf(stderr,
+                    "[omnitrace][get_env] Exception thrown converting getenv(\"%s\") = "
+                    "%s to integer :: %s. Using default value of %i\n",
+                    env_id.data(), env_var, _e.what(), _default);
+        }
+        return _default;
+    }
     return _default;
 }
 

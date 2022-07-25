@@ -40,6 +40,7 @@
 #include <timemory/runtime.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/storage.hpp>
+#include <timemory/utility/signals.hpp>
 #include <timemory/variadic.hpp>
 
 namespace omnitrace

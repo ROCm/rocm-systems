@@ -282,11 +282,15 @@ omnitrace_pop_region_hidden(const char* name)
 ///
 //======================================================================================//
 
+namespace
+{
+struct set_env_s  // NOLINT
+{};
+}  // namespace
+
 extern "C" void
 omnitrace_set_env_hidden(const char* env_name, const char* env_val)
 {
-    struct set_env_s  // NOLINT
-    {};
     tim::auto_lock_t _lk{ tim::type_mutex<set_env_s>() };
 
     static auto _set_envs = std::set<std::string_view>{};

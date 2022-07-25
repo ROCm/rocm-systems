@@ -36,6 +36,7 @@
 #include <timemory/utility/procfs/cpuinfo.hpp>
 #include <timemory/utility/type_list.hpp>
 
+#include <cstddef>
 #include <cstdlib>
 #include <string>
 #include <sys/resource.h>
@@ -176,8 +177,6 @@ config()
         {
             OMNITRACE_VERBOSE(
                 0, "[cpu_freq::config] Warning! Removing invalid cpu %zu...\n", itr);
-            OMNITRACE_CI_FAIL(true, "[cpu_freq::config] CPU frequencies are disabled "
-                                    ":: unable to open /proc/cpuinfo");
         }
     }
 
@@ -249,12 +248,25 @@ config_perfetto_counter_tracks(type_list<Types...>, std::array<const char*, N> _
     (_config(Types{}), ...);
 }
 
+struct index
+{
+    size_t value = 0;
+};
+
 template <typename Tp, typename... Args>
 void
 write_perfetto_counter_track(Args... _args)
 {
     using track = perfetto_counter_track<Tp>;
     TRACE_COUNTER(trait::name<Tp>::value, track::at(0, 0), _args...);
+}
+
+template <typename Tp, typename... Args>
+void
+write_perfetto_counter_track(index&& _idx, Args... _args)
+{
+    using track = perfetto_counter_track<Tp>;
+    TRACE_COUNTER(trait::name<Tp>::value, track::at(_idx.value, 0), _args...);
 }
 }  // namespace
 
@@ -278,11 +290,11 @@ post_process()
             uint64_t _ts   = std::get<0>(itr);
             double   _freq = std::get<8>(itr).at(_offset);
             if(!pthread_create_gotcha::is_valid_execution_time(0, _ts)) continue;
-            TRACE_COUNTER("cpu_freq", freq_track::at(_idx, 0), _ts, _freq);
+            write_perfetto_counter_track<cpu_freq>(index{ _idx }, _ts, _freq);
         }
 
         auto _end_ts = pthread_create_gotcha::get_execution_time(0)->second;
-        TRACE_COUNTER("cpu_freq", freq_track::at(_idx, 0), _end_ts, 0);
+        write_perfetto_counter_track<cpu_freq>(index{ _idx }, _end_ts, 0);
     };
 
     auto _process_cpu_rusage = []() {
