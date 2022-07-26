@@ -62,8 +62,8 @@ int main() {
   for (auto&& thread : threads) {
     thread = std::thread([&trace_buffer]() {
       for (std::size_t j = 0; j < num_iterations; ++j) {
-        auto* entry = trace_buffer.GetEntry();
-        entry->valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+        auto& entry = trace_buffer.Emplace();
+        entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
       }
     });
   }

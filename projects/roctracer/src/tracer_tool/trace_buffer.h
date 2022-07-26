@@ -145,6 +145,44 @@ class TraceBuffer : protected TraceBufferBase {
     }
   }
 
+  // Flush all entries between read_pointer and write_pointer. read_pointer and write_pointer are
+  // monotonically increasing indices, with read_pointer % size always indexing inside the first
+  // buffer in the list. Stop flushing if an incomplete entry is found, it will be flushed with
+  // the next invocation after changing its state to 'complete'.
+  void Flush() override {
+    std::lock_guard lock(write_mutex_);
+    auto write_index = write_index_.load(std::memory_order_relaxed);
+
+    for (auto it = buffer_list_.begin(); it != buffer_list_.end();) {
+      auto end_of_buffer = read_index_ - read_index_ % size_ + size_;
+
+      while (read_index_ < std::min(write_index.index, end_of_buffer)) {
+        Entry* entry = &(*it)[read_index_ % size_];
+
+        // The entry is not yet complete, stop flushing here.
+        if (entry->valid.load(std::memory_order_acquire) != TRACE_ENTRY_COMPLETE) return;
+
+        flush_callback_(entry);
+        entry->~Entry();
+
+        ++read_index_;
+      }
+
+      // The buffer is still in use or the read pointer did not reach the end of the buffer.
+      if (*it == write_index.buffer || read_index_ != end_of_buffer) return;
+
+      // All entries in the current buffer are now processed. Destroy the buffer and move onto the
+      // next buffer in the list.
+      allocator_.deallocate(*it, size_);
+      it = buffer_list_.erase(it);
+    }
+  }
+
+  template <typename... Args> Entry& Emplace(Args... args) {
+    return *new (GetEntry()) Entry(std::forward<Args>(args)...);
+  }
+
+ private:
   Entry* GetEntry() {
     auto current = write_index_.load(std::memory_order_relaxed);
 
@@ -194,38 +232,6 @@ class TraceBuffer : protected TraceBufferBase {
     }
   }
 
-  // Flush all entries between read_pointer and write_pointer. read_pointer and write_pointer are
-  // monotonically increasing indices, with read_pointer % size always indexing inside the first
-  // buffer in the list. Stop flushing if an incomplete entry is found, it will be flushed with
-  // the next invocation after changing its state to 'complete'.
-  void Flush() override {
-    std::lock_guard lock(write_mutex_);
-    auto write_index = write_index_.load(std::memory_order_relaxed);
-
-    for (auto it = buffer_list_.begin(); it != buffer_list_.end();) {
-      auto end_of_buffer = read_index_ - read_index_ % size_ + size_;
-
-      while (read_index_ < std::min(write_index.index, end_of_buffer)) {
-        Entry* entry = &(*it)[read_index_ % size_];
-
-        // The entry is not yet complete, stop flushing here.
-        if (entry->valid.load(std::memory_order_acquire) != TRACE_ENTRY_COMPLETE) return;
-
-        flush_callback_(entry);
-        ++read_index_;
-      }
-
-      // The buffer is still in use or the read pointer did not reach the end of the buffer.
-      if (*it == write_index.buffer || read_index_ != end_of_buffer) return;
-
-      // All entries in the current buffer are now processed. Destroy the buffer and move onto the
-      // next buffer in the list.
-      allocator_.deallocate(*it, size_);
-      it = buffer_list_.erase(it);
-    }
-  }
-
- private:
   void AllocateFreeBuffer() {
     assert(free_buffer_ == nullptr);
 

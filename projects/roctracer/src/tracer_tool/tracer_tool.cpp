@@ -238,6 +238,19 @@ struct roctx_trace_entry_t {
   uint32_t tid;
   roctx_range_id_t rid;
   const char* message;
+
+  roctx_trace_entry_t(uint32_t cid_, roctracer_timestamp_t time_, uint32_t pid_, uint32_t tid_,
+                      roctx_range_id_t rid_, const char* message_)
+      : valid(roctracer::TRACE_ENTRY_INIT),
+        cid(cid_),
+        time(time_),
+        pid(pid_),
+        tid(tid_),
+        rid(rid_),
+        message(message_ != nullptr ? strdup(message_) : nullptr) {}
+  ~roctx_trace_entry_t() {
+    if (message != nullptr) free(const_cast<char*>(message));
+  }
 };
 
 // rocTX buffer flush function
@@ -261,16 +274,9 @@ void roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data
                         void* /* user_arg */) {
   const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
 
-  roctx_trace_entry_t* entry = roctx_trace_buffer.GetEntry();
-  entry->cid = cid;
-  entry->time = util::timestamp_ns();
-  entry->pid = GetPid();
-  entry->tid = GetTid();
-  entry->rid = data->args.id;
-  entry->message = (data->args.message != NULL)
-      ? strdup(data->args.message) /* FIXME: Who frees the message? */
-      : NULL;
-  entry->valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+  roctx_trace_entry_t& entry = roctx_trace_buffer.Emplace(
+      cid, util::timestamp_ns(), GetPid(), GetTid(), data->args.id, data->args.message);
+  entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -284,6 +290,17 @@ struct hsa_api_trace_entry_t {
   uint32_t pid;
   uint32_t tid;
   hsa_api_data_t data;
+
+  hsa_api_trace_entry_t(uint32_t cid_, roctracer_timestamp_t begin_, roctracer_timestamp_t end_,
+                        uint32_t pid_, uint32_t tid_, const hsa_api_data_t& data_)
+      : valid(roctracer::TRACE_ENTRY_INIT),
+        cid(cid_),
+        begin(begin_),
+        end(end_),
+        pid(pid_),
+        tid(tid_),
+        data(data_) {}
+  ~hsa_api_trace_entry_t() {}
 };
 
 void hsa_api_flush_cb(hsa_api_trace_entry_t* entry) {
@@ -307,14 +324,9 @@ void hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
   } else {
     const roctracer_timestamp_t end_timestamp =
         (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp : util::timestamp_ns();
-    hsa_api_trace_entry_t* entry = hsa_api_trace_buffer.GetEntry();
-    entry->cid = cid;
-    entry->begin = hsa_begin_timestamp;
-    entry->end = end_timestamp;
-    entry->pid = GetPid();
-    entry->tid = GetTid();
-    entry->data = *data;
-    entry->valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+    hsa_api_trace_entry_t& entry = hsa_api_trace_buffer.Emplace(
+        cid, hsa_begin_timestamp, end_timestamp, GetPid(), GetTid(), *data);
+    entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
   }
 }
 
@@ -323,7 +335,7 @@ void hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
 
 struct hip_api_trace_entry_t {
   std::atomic<uint32_t> valid;
-  uint32_t domain;
+  activity_domain_t domain;
   uint32_t cid;
   roctracer_timestamp_t begin;
   roctracer_timestamp_t end;
@@ -332,6 +344,24 @@ struct hip_api_trace_entry_t {
   hip_api_data_t data;
   const char* name;
   void* ptr;
+
+  hip_api_trace_entry_t(activity_domain_t domain_, uint32_t cid_, roctracer_timestamp_t begin_,
+                        roctracer_timestamp_t end_, uint32_t pid_, uint32_t tid_,
+                        const hip_api_data_t& data_, const char* name_, void* ptr_)
+      : valid(roctracer::TRACE_ENTRY_INIT),
+        domain(domain_),
+        cid(cid_),
+        begin(begin_),
+        end(end_),
+        pid(pid_),
+        tid(tid_),
+        data(data_),
+        name(name_ != nullptr ? strdup(name_) : nullptr),
+        ptr(ptr_) {}
+
+  ~hip_api_trace_entry_t() {
+    if (name != nullptr) free(const_cast<char*>(name));
+  }
 };
 
 static inline bool is_hip_kernel_launch_api(const uint32_t& cid) {
@@ -395,7 +425,6 @@ void hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
   (void)arg;
   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
   const roctracer_timestamp_t timestamp = util::timestamp_ns();
-  hip_api_trace_entry_t* entry = NULL;
 
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     hip_begin_timestamp = timestamp;
@@ -403,68 +432,58 @@ void hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
     // Post init of HIP APU args
     hipApiArgsInit((hip_api_id_t)cid, const_cast<hip_api_data_t*>(data));
 
-    entry = hip_api_trace_buffer.GetEntry();
-    entry->cid = cid;
-    entry->domain = domain;
-    entry->begin = hip_begin_timestamp;
-    entry->end = timestamp;
-    entry->pid = GetPid();
-    entry->tid = GetTid();
-    entry->data = *data;
-    entry->name = NULL;
-    entry->ptr = NULL;
+    std::string kernel_name;
 
-    if (cid == HIP_API_ID_hipMalloc) {
-      entry->ptr = *(data->args.hipMalloc.ptr);
-    } else if (is_hip_kernel_launch_api(cid)) {
+    if (is_hip_kernel_launch_api(cid)) {
       switch (cid) {
         case HIP_API_ID_hipExtLaunchMultiKernelMultiDevice:
         case HIP_API_ID_hipLaunchCooperativeKernelMultiDevice: {
           const hipLaunchParams* listKernels =
               data->args.hipLaunchCooperativeKernelMultiDevice.launchParamsList;
-          std::string name_str = "";
           for (int i = 0; i < data->args.hipLaunchCooperativeKernelMultiDevice.numDevices; ++i) {
+            std::stringstream ss;
             const hipLaunchParams& lp = listKernels[i];
-            if (lp.func != NULL) {
-              const char* kernel_name =
-                  roctracer::HipLoader::Instance().KernelNameRefByPtr(lp.func, lp.stream);
-              const int device_id = roctracer::HipLoader::Instance().GetStreamDeviceId(lp.stream);
-              name_str += std::string(kernel_name) + ":" + std::to_string(device_id) + ";";
+            if (lp.func != nullptr) {
+              ss << roctracer::HipLoader::Instance().KernelNameRefByPtr(lp.func, lp.stream) << ":"
+                 << roctracer::HipLoader::Instance().GetStreamDeviceId(lp.stream) << ";";
             }
+            kernel_name = ss.str();
           }
-          entry->name = strdup(name_str.c_str());
           break;
         }
         case HIP_API_ID_hipLaunchKernel:
         case HIP_API_ID_hipLaunchCooperativeKernel: {
           const void* f = data->args.hipLaunchKernel.function_address;
           hipStream_t stream = data->args.hipLaunchKernel.stream;
-          if (f != NULL)
-            entry->name = strdup(roctracer::HipLoader::Instance().KernelNameRefByPtr(f, stream));
+          if (f != nullptr)
+            kernel_name = roctracer::HipLoader::Instance().KernelNameRefByPtr(f, stream);
           break;
         }
         case HIP_API_ID_hipExtLaunchKernel: {
           const void* f = data->args.hipExtLaunchKernel.function_address;
           hipStream_t stream = data->args.hipExtLaunchKernel.stream;
-          if (f != NULL)
-            entry->name = strdup(roctracer::HipLoader::Instance().KernelNameRefByPtr(f, stream));
+          if (f != nullptr)
+            kernel_name = roctracer::HipLoader::Instance().KernelNameRefByPtr(f, stream);
           break;
         }
         default: {
           const hipFunction_t f = data->args.hipModuleLaunchKernel.f;
-          if (f != NULL) entry->name = strdup(roctracer::HipLoader::Instance().KernelNameRef(f));
+          if (f != nullptr) kernel_name = roctracer::HipLoader::Instance().KernelNameRef(f);
         }
       }
     }
-
-    entry->valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+    hip_api_trace_entry_t& entry = hip_api_trace_buffer.Emplace(
+        static_cast<activity_domain_t>(domain), cid, hip_begin_timestamp, timestamp, GetPid(),
+        GetTid(), *data, kernel_name.c_str(),
+        cid == HIP_API_ID_hipMalloc ? data->args.hipMalloc.ptr : nullptr);
+    entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
   }
 
   DEBUG_TRACE(
       "hip_api_callback(\"%s\") phase(%d): cid(%u) data(%p) entry(%p) name(\"%s\") "
       "correlation_id(%lu) timestamp(%lu)\n",
       roctracer_op_string(domain, cid, 0), data->phase, cid, data, entry,
-      (entry) ? entry->name : NULL, data->correlation_id, timestamp);
+      (entry.name != nullptr) ? entry.name : "", data->correlation_id, timestamp);
 }
 
 void mark_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg) {
@@ -472,28 +491,14 @@ void mark_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
   const char* name = reinterpret_cast<const char*>(callback_data);
 
   const roctracer_timestamp_t timestamp = util::timestamp_ns();
-  hip_api_trace_entry_t* entry = hip_api_trace_buffer.GetEntry();
-  entry->cid = 0;
-  entry->domain = domain;
-  entry->begin = timestamp;
-  entry->end = timestamp + 1;
-  entry->pid = GetPid();
-  entry->tid = GetTid();
-  entry->data = {};
-  entry->name = strdup(name);
-  entry->ptr = NULL;
-  entry->valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+  hip_api_trace_entry_t& entry = hip_api_trace_buffer.Emplace(
+      static_cast<activity_domain_t>(domain), cid, timestamp, timestamp + 1, GetPid(), GetTid(),
+      hip_api_data_t{}, name, nullptr);
+  entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 // HSA API tracing
-
-struct hip_act_trace_entry_t {
-  std::atomic<uint32_t> valid;
-  uint32_t kind;
-  roctracer_timestamp_t dur;
-  uint64_t correlation_id;
-};
 
 // Activity tracing callback
 //   hipMalloc id(3) correlation_id(1): begin_ns(1525888652762640464) end_ns(1525888652762877067)
