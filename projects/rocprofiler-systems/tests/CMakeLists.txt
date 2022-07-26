@@ -1201,7 +1201,7 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
         FILE ${CMAKE_SOURCE_DIR}/examples/python/source.py
-        RUN_ARGS -v 5 -n 5
+        RUN_ARGS -v 5 -n 5 -s 3
         ENVIRONMENT "${_python_environment}")
 
     # ---------------------------------------------------------------------------------- #
@@ -1285,39 +1285,45 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
             ENVIRONMENT "${_python_environment}")
     endfunction()
 
+    set(python_source_labels
+        main_loop
+        run
+        fib
+        fib
+        fib
+        fib
+        fib
+        inefficient
+        _sum)
+    set(python_source_count
+        5
+        3
+        3
+        6
+        12
+        18
+        6
+        3
+        3)
+    set(python_source_depth
+        0
+        1
+        2
+        3
+        4
+        5
+        6
+        2
+        3)
+
     omnitrace_add_python_validation_test(
         NAME python-source
         TIMEMORY_METRIC "trip_count"
         TIMEMORY_FILE "trip_count.json"
         PERFETTO_METRIC "host;user"
         PERFETTO_FILE "perfetto-trace.proto"
-        ARGS -l
-             run
-             fib
-             fib
-             fib
-             fib
-             fib
-             inefficient
-             _sum
-             -c
-             5
-             5
-             10
-             20
-             30
-             10
-             5
-             5
-             -d
-             0
-             1
-             2
-             3
-             4
-             5
-             1
-             2)
+        ARGS -l ${python_source_labels} -c ${python_source_count} -d
+             ${python_source_depth})
 
     math(EXPR _INDEX "${_INDEX} + 1")
 endforeach()

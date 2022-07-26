@@ -88,6 +88,7 @@ target_link_libraries(
         omnitrace::omnitrace-compile-options
         omnitrace::omnitrace-lto
         omnitrace::omnitrace-dl-library
+        omnitrace::omnitrace-user-library
         omnitrace::omnitrace-python
         omnitrace::omnitrace-python-compile-options
         $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,omnitrace::omnitrace-static-libgcc,>>

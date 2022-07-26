@@ -36,6 +36,7 @@ This submodule imports the timemory Python function profiler
 
 try:
     from .libpyomnitrace import coverage
+    from . import user
     from .profiler import Profiler, FakeProfiler
     from .libpyomnitrace.profiler import (
         profiler_function,
@@ -67,6 +68,7 @@ try:
         "profile",
         "noprofile",
         "coverage",
+        "user",
     ]
 
     import atexit

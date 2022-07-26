@@ -24,6 +24,7 @@
 #include "dl.hpp"
 #include "library/coverage.hpp"
 #include "library/impl/coverage.hpp"
+#include "omnitrace/user.h"
 
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
@@ -58,6 +59,11 @@ py::module
 generate(py::module& _pymod);
 }
 namespace pycoverage
+{
+py::module
+generate(py::module& _pymod);
+}
+namespace pyuser
 {
 py::module
 generate(py::module& _pymod);
@@ -158,8 +164,8 @@ PYBIND11_MODULE(libpyomnitrace, omni)
 
     py::doc("omnitrace profiler for python");
     pyprofile::generate(omni);
-
     pycoverage::generate(omni);
+    pyuser::generate(omni);
 }
 
 //======================================================================================//
@@ -824,6 +830,33 @@ generate(py::module& _pymod)
     return _pycov;
 }
 }  // namespace pycoverage
+
+namespace pyuser
+{
+py::module
+generate(py::module& _pymod)
+{
+    py::module _pyuser = _pymod.def_submodule("user", "User instrumentation");
+
+    _pyuser.def("start_trace", &omnitrace_user_start_trace,
+                "Enable tracing on this thread and all subsequently created threads");
+    _pyuser.def("stop_trace", &omnitrace_user_stop_trace,
+                "Disable tracing on this thread and all subsequently created threads");
+    _pyuser.def(
+        "start_thread_trace", &omnitrace_user_start_thread_trace,
+        "Enable tracing on this thread. Does not apply to subsequently created threads");
+    _pyuser.def(
+        "stop_thread_trace", &omnitrace_user_stop_thread_trace,
+        "Enable tracing on this thread. Does not apply to subsequently created threads");
+    _pyuser.def("push_region", &omnitrace_user_push_region,
+                "Start a user-defined region");
+    _pyuser.def("pop_region", &omnitrace_user_pop_region, "Start a user-defined region");
+    _pyuser.def("error_string", &omnitrace_user_error_string,
+                "Return a descriptor for the provided error code");
+
+    return _pyuser;
+}
+}  // namespace pyuser
 }  // namespace pyomnitrace
 //
 //======================================================================================//

@@ -2,7 +2,9 @@
 
 import os
 import sys
+import time
 import omnitrace
+from omnitrace.user import region as omni_user_region
 
 _prefix = ""
 
@@ -60,10 +62,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--num-iterations", help="Number", type=int, default=3)
     parser.add_argument("-v", "--value", help="Starting value", type=int, default=20)
+    parser.add_argument(
+        "-s",
+        "--stop-profile",
+        help="Stop tracing after given iterations",
+        type=int,
+        default=0,
+    )
     args = parser.parse_args()
 
     _prefix = os.path.basename(__file__)
     print(f"[{_prefix}] Executing {args.num_iterations} iterations...\n")
     for i in range(args.num_iterations):
-        ans = run(args.value)
-        print(f"[{_prefix}] [{i}] result of run({args.value}) = {ans}\n")
+        with omni_user_region(f"main_loop"):
+            if args.stop_profile > 0 and i == args.stop_profile:
+                omnitrace.user.stop_trace()
+            ans = run(args.value)
+            print(f"[{_prefix}] [{i}] result of run({args.value}) = {ans}\n")
