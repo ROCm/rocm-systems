@@ -28,6 +28,7 @@
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
 #include "library/debug.hpp"
+#include "library/gpu.hpp"
 #include "library/rocprofiler.hpp"
 #include "library/rocprofiler/hsa_rsrc_factory.hpp"
 #include "library/roctracer.hpp"
@@ -103,13 +104,20 @@ extern "C"
         rocm::lock_t _lk{ rocm::rocm_mutex, std::defer_lock };
         if(!_lk.owns_lock()) _lk.lock();
 
-        if(rocm::is_loaded) return;
+        if(rocm::is_loaded)
+        {
+            OMNITRACE_BASIC_VERBOSE_F(1, "rocprofiler is already loaded\n");
+            return;
+        }
         rocm::is_loaded = true;
 
         _lk.unlock();
 
         // Enable timestamping
-        settings->timestamp_on = 1u;
+        settings->timestamp_on     = 1;
+        settings->intercept_mode   = 1;
+        settings->hsa_intercepting = 1;
+        settings->k_concurrent     = 1;
 
         // Initialize profiling
         omnitrace::rocprofiler::rocm_initialize();
@@ -127,7 +135,7 @@ extern "C"
 
         roctracer_is_init() = true;
         pthread_gotcha::push_enable_sampling_on_child_threads(false);
-        OMNITRACE_BASIC_VERBOSE_F(1, "\n");
+        OMNITRACE_BASIC_VERBOSE_F(1, "Loading ROCm tooling...\n");
 
         tim::consume_parameters(table, runtime_version, failed_tool_count,
                                 failed_tool_names);
@@ -156,7 +164,6 @@ extern "C"
                     // initialize HSA tracing
                     roctracer_set_properties(ACTIVITY_DOMAIN_HSA_API, (void*) table);
 
-                    OMNITRACE_VERBOSE(1, "    HSA-trace(");
                     if(!hsa_api_vec.empty())
                     {
                         for(const auto& itr : hsa_api_vec)
@@ -168,15 +175,15 @@ extern "C"
                             ROCTRACER_CALL(roctracer_enable_op_callback(
                                 ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, nullptr));
 
-                            OMNITRACE_VERBOSE(1, " %s", api);
+                            OMNITRACE_VERBOSE(1, "    HSA-trace(%s)", api);
                         }
                     }
                     else
                     {
+                        OMNITRACE_VERBOSE(1, "    HSA-trace()\n");
                         ROCTRACER_CALL(roctracer_enable_domain_callback(
                             ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, nullptr));
                     }
-                    OMNITRACE_VERBOSE(1, " )\n");
                 }
 
                 bool trace_hsa_activity = get_trace_hsa_activity();
@@ -212,17 +219,21 @@ extern "C"
                 roctracer_disable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
         };
 
+        OMNITRACE_VERBOSE_F(1, "Computing the roctracer clock skew...\n");
         (void) omnitrace::get_clock_skew();
 
         comp::roctracer::add_setup("hsa", _setup);
         comp::roctracer::add_shutdown("hsa", _shutdown);
 
+        OMNITRACE_VERBOSE_F(1, "Setting rocm_smi state to active...\n");
         rocm_smi::set_state(State::Active);
+
+        OMNITRACE_VERBOSE_F(1, "Requesting roctracer to setup...\n");
         comp::roctracer::setup();
 
 #if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
         bool _force_rocprofiler_init =
-            tim::get_env("OMNITRACE_FORCE_ROCPROFILE_INIT", false, false);
+            tim::get_env("OMNITRACE_FORCE_ROCPROFILER_INIT", false, false);
 #else
         bool _force_rocprofiler_init = false;
 #endif
@@ -233,8 +244,17 @@ extern "C"
         if(_force_rocprofiler_init || (get_use_rocprofiler() && !_is_empty))
         {
             auto _rocprof =
-                dynamic_library{ "OMNITRACE_ROCPROFILER_LIBRARY", "librocprofiler64.so",
-                                 (RTLD_LAZY | RTLD_GLOBAL), true };
+                dynamic_library{ "OMNITRACE_ROCPROFILER_LIBRARY",
+                                 find_library_path("librocprofiler64.so",
+                                                   { "OMNITRACE_ROCM_PATH", "ROCM_PATH" },
+                                                   { OMNITRACE_DEFAULT_ROCM_PATH },
+                                                   { "lib", "lib64", "rocprofiler/lib",
+                                                     "rocprofiler/lib64" }),
+                                 (RTLD_LAZY | RTLD_GLOBAL), false };
+
+            OMNITRACE_VERBOSE_F(1, "Loading rocprofiler library (%s=%s)...\n",
+                                _rocprof.envname.c_str(), _rocprof.filename.c_str());
+            _rocprof.open();
 
             on_load_t _rocprof_load = nullptr;
             _success = _rocprof.invoke("OnLoad", _rocprof_load, table, runtime_version,

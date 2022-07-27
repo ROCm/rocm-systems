@@ -13,6 +13,22 @@ env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
 jobs:
+  release:
+    if: github.repository == 'AMDResearch/omnitrace'
+    runs-on: ubuntu-20.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Generate Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          draft: True
+          generate_release_notes: True
+
   ubuntu:
     runs-on: ubuntu-20.04
     strategy:
@@ -77,7 +93,6 @@ jobs:
       # before testing remove any artifacts of the build
       - name: Remove Build
         timeout-minutes: 10
-        continue-on-error: true
         run: |
           mv build-release/stgz/*.sh ./
           mv build-release/deb/*.deb ./
@@ -86,7 +101,6 @@ jobs:
 
       - name: Test STGZ Install
         timeout-minutes: 20
-        continue-on-error: true
         run: |
           set -v
           for i in omnitrace-*.sh
@@ -96,13 +110,20 @@ jobs:
 
       - name: Test DEB Install
         timeout-minutes: 20
-        continue-on-error: true
         run: |
           set -v
           for i in omnitrace_*.deb
           do
             ./docker/test-docker-release.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- --deb ${i}
           done
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'AMDResearch/omnitrace'
+        with:
+          files: |
+            build-release/stgz/*.sh
+            build-release/deb/*.deb
 
   opensuse:
     runs-on: ubuntu-20.04
@@ -173,7 +194,6 @@ jobs:
       # before testing remove any artifacts of the build
       - name: Remove Build
         timeout-minutes: 10
-        continue-on-error: true
         run: |
           mv build-release/stgz/*.sh ./
           mv build-release/rpm/*.rpm ./
@@ -182,7 +202,6 @@ jobs:
 
       - name: Test STGZ Install
         timeout-minutes: 20
-        continue-on-error: true
         run: |
           set -v
           for i in omnitrace-*.sh
@@ -192,10 +211,17 @@ jobs:
 
       - name: Test RPM Install
         timeout-minutes: 20
-        continue-on-error: true
         run: |
           set -v
           for i in omnitrace-*.rpm
           do
             ./docker/test-docker-release.sh --distro opensuse --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- --rpm ${i}
           done
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'AMDResearch/omnitrace'
+        with:
+          files: |
+            build-release/stgz/*.sh
+            build-release/rpm/*.rpm

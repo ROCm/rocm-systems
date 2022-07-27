@@ -21,20 +21,90 @@
 // SOFTWARE.
 
 #include "library/dynamic_library.hpp"
+#include "common/defines.h"
+#include "library/common.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 
 #include <timemory/environment.hpp>
+#include <timemory/utility/delimit.hpp>
+#include <timemory/utility/filepath.hpp>
+
+#include <string>
+#include <utility>
 
 namespace omnitrace
 {
-dynamic_library::dynamic_library(const char* _env, const char* _fname, int _flags,
-                                 bool _store)
-: envname{ _env }
-, filename{ tim::get_env<std::string>(_env, _fname, _store) }
+std::string
+find_library_path(const std::string& _name, const std::vector<std::string>& _env_vars,
+                  const std::vector<std::string>& _hints,
+                  const std::vector<std::string>& _path_suffixes)
+{
+    if(_name.find('/') == 0) return _name;
+
+    auto _paths = std::vector<std::string>{};
+    for(const std::string& itr : _env_vars)
+    {
+        auto _env_val = get_env(itr, std::string{});
+        for(auto vitr : tim::delimit(_env_val, ":"))
+            if(!vitr.empty()) _paths.emplace_back(vitr);
+    }
+
+    for(const std::string& itr : _hints)
+    {
+        if(!itr.empty()) _paths.emplace_back(itr);
+    }
+
+    for(auto& itr : _paths)
+    {
+        auto _v = JOIN('/', itr, _name);
+        if(filepath::exists(_v)) return _v;
+        for(const auto& litr : _path_suffixes)
+        {
+            _v = JOIN('/', itr, litr, _name);
+            if(filepath::exists(_v)) return _v;
+        }
+    }
+
+    return _name;
+}
+
+dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flags,
+                                 bool _open, bool _query_env, bool _store)
+: envname{ std::move(_env) }
+, filename{ std::move(_fname) }
 , flags{ _flags }
 {
-    open();
+    if(_query_env)
+    {
+        auto _env_val = get_env(envname, std::string{}, _store);
+        // if the environment variable is set to an absolute path that exists,
+        // override with value
+        if(!_env_val.empty())
+        {
+            if(_env_val.find('/') == 0 && filepath::exists(_env_val))
+            {
+                filename = _env_val;
+            }
+            else if(_env_val.find('/') == 0)
+            {
+                OMNITRACE_VERBOSE_F(1,
+                                    "Ignoring environment variable %s=\"%s\" because the "
+                                    "filepath does not exist. Using \"%s\" instead...\n",
+                                    envname.c_str(), _env_val.c_str(), filename.c_str())
+            }
+            else if(_env_val.find('/') != 0 && filename.find('/') == 0)
+            {
+                OMNITRACE_VERBOSE_F(
+                    1,
+                    "Ignoring environment variable %s=\"%s\" because the "
+                    "filepath is relative. Using absolute path \"%s\" instead...\n",
+                    envname.c_str(), _env_val.c_str(), filename.c_str())
+            }
+        }
+    }
+
+    if(_open) open();
 }
 
 dynamic_library::~dynamic_library() { close(); }
@@ -47,8 +117,8 @@ dynamic_library::open()
         handle = dlopen(filename.c_str(), flags);
         if(!handle)
         {
-            OMNITRACE_VERBOSE(2, "[dynamic_library][%s][%s] %s\n", envname.c_str(),
-                              filename.c_str(), dlerror());
+            OMNITRACE_VERBOSE(2, "[dynamic_library] Error opening %s=\"%s\" :: %s.\n",
+                              envname.c_str(), filename.c_str(), dlerror());
         }
         dlerror();  // Clear any existing error
     }
@@ -60,5 +130,11 @@ dynamic_library::close() const
 {
     if(handle) return dlclose(handle);
     return -1;
+}
+
+bool
+dynamic_library::is_open() const
+{
+    return (handle != nullptr);
 }
 }  // namespace omnitrace

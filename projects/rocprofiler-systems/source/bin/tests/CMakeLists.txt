@@ -202,6 +202,13 @@ omnitrace_add_bin_test(
     )
 
 omnitrace_add_bin_test(
+    NAME omnitrace-avail-all
+    TARGET omnitrace-avail
+    ARGS --all
+    LABELS "omnitrace-avail"
+    TIMEOUT 45)
+
+omnitrace_add_bin_test(
     NAME omnitrace-avail-all-csv
     TARGET omnitrace-avail
     ARGS --all --csv --csv-separator "#"

@@ -14,6 +14,8 @@ env:
 
 jobs:
   omnitrace-ci:
+    if: github.repository == 'AMDResearch/omnitrace'
+
     runs-on: ubuntu-20.04
 
     strategy:
@@ -57,6 +59,8 @@ jobs:
           popd
 
   omnitrace-release-ubuntu:
+    if: github.repository == 'AMDResearch/omnitrace'
+
     runs-on: ubuntu-20.04
 
     strategy:
@@ -98,6 +102,8 @@ jobs:
           popd
 
   omnitrace-release-opensuse:
+    if: github.repository == 'AMDResearch/omnitrace'
+    
     runs-on: ubuntu-20.04
 
     strategy:

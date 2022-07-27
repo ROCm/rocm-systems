@@ -132,6 +132,11 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
 #endif
 
 #if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
+#    if OMNITRACE_HIP_VERSION >= 50200
+#        define ROCPROFILER_METRICS_DIR "lib/rocprofiler"
+#    else
+#        define ROCPROFILER_METRICS_DIR "rocprofiler/lib"
+#    endif
     setenv("HSA_TOOLS_LIB", _omnilib.c_str(), 0);
     setenv("ROCP_TOOL_LIB", _omnilib.c_str(), 0);
     setenv("ROCPROFILER_LOG", "1", 0);
@@ -142,7 +147,8 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
         if(getenv(itr))
         {
             setenv("ROCP_METRICS",
-                   common::join('/', getenv(itr), "rocprofiler/lib/metrics.xml").c_str(),
+                   common::join('/', getenv(itr), ROCPROFILER_METRICS_DIR, "metrics.xml")
+                       .c_str(),
                    0);
             setenv("OMNITRACE_ROCPROFILER_LIBRARY",
                    common::join('/', getenv(itr), "rocprofiler/lib/librocprofiler64.so")
@@ -153,7 +159,8 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
     }
     // default path
     setenv("ROCP_METRICS",
-           common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, "rocprofiler/lib/metrics.xml")
+           common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, ROCPROFILER_METRICS_DIR,
+                        "metrics.xml")
                .c_str(),
            0);
 #endif

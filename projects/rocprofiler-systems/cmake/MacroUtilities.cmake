@@ -124,7 +124,8 @@ function(OMNITRACE_STRIP_TARGET _TARGET)
                 --keep-symbol="omnitrace_pop_region" --keep-symbol="omnitrace_set_env"
                 --keep-symbol="omnitrace_set_mpi" --keep-symbol="omnitrace_user_*"
                 --keep-symbol="ompt_start_tool" --keep-symbol="kokkosp_*"
-                --keep-symbol="OnLoad" --keep-symbol="OnUnload" ${ARGN}
+                --keep-symbol="OnLoad" --keep-symbol="OnUnload"
+                --keep-symbol="OnLoadToolProp" --keep-symbol="OnUnloadTool" ${ARGN}
                 $<TARGET_FILE:${_TARGET}>
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             COMMENT "Stripping ${_TARGET}...")

@@ -24,14 +24,6 @@
 
 #include "common/defines.h"
 
-// clang-format off
-#if defined(OMNITRACE_USE_ROCTRACER)
-#    define OMNITRACE_ROCTRACER_LIBKFDWRAPPER "@roctracer_kfdwrapper_LIBRARY@"
-#else
-#    define OMNITRACE_ROCTRACER_LIBKFDWRAPPER "/opt/rocm/roctracer/lib/libkfdwrapper64.so"
-#endif
-// clang-format on
-
 #define TIMEMORY_USER_COMPONENT_ENUM                                                     \
     OMNITRACE_COMPONENT_idx, OMNITRACE_USER_REGION_idx, OMNITRACE_ROCTRACER_idx,         \
         OMNITRACE_ROCPROFILER_idx, OMNITRACE_SAMPLING_WALL_CLOCK_idx,                    \
