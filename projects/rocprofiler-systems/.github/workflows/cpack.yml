@@ -108,6 +108,14 @@ jobs:
             ./docker/test-docker-release.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- --stgz ${i}
           done
 
+      - name: Upload STGZ Release Assets
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'AMDResearch/omnitrace'
+        with:
+          fail_on_unmatched_files: True
+          files: |
+            omnitrace-*.sh
+
       - name: Test DEB Install
         timeout-minutes: 20
         run: |
@@ -117,13 +125,13 @@ jobs:
             ./docker/test-docker-release.sh --distro ubuntu --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- --deb ${i}
           done
 
-      - name: Upload Release Assets
+      - name: Upload DEB Release Assets
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/') && github.repository == 'AMDResearch/omnitrace'
         with:
+          fail_on_unmatched_files: True
           files: |
-            build-release/stgz/*.sh
-            build-release/deb/*.deb
+            omnitrace_*.deb
 
   opensuse:
     runs-on: ubuntu-20.04
@@ -209,6 +217,14 @@ jobs:
             ./docker/test-docker-release.sh --distro opensuse --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- --stgz ${i}
           done
 
+      - name: Upload STGZ Release Assets
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'AMDResearch/omnitrace'
+        with:
+          fail_on_unmatched_files: True
+          files: |
+            omnitrace-*.sh
+
       - name: Test RPM Install
         timeout-minutes: 20
         run: |
@@ -218,10 +234,10 @@ jobs:
             ./docker/test-docker-release.sh --distro opensuse --versions ${{ matrix.os }} --rocm-versions ${CI_ROCM_VERSION} -- --rpm ${i}
           done
 
-      - name: Upload Release Assets
+      - name: Upload RPM Release Assets
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/') && github.repository == 'AMDResearch/omnitrace'
         with:
+          fail_on_unmatched_files: True
           files: |
-            build-release/stgz/*.sh
-            build-release/rpm/*.rpm
+            omnitrace-*.rpm
