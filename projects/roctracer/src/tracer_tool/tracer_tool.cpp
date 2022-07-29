@@ -891,7 +891,6 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
                              uint64_t failed_tool_count, const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
 
-  roctracer::hip_support::HIP_depth_max = 0;
   tool_load();
 
   // OnUnload may not be called if the ROC runtime is not shutdown by the client
