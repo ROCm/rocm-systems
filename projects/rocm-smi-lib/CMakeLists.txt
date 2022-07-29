@@ -52,10 +52,8 @@ set(ROCM_SMI_PACKAGE rocm-smi-lib)
 
 project(${AMD_SMI_LIBS_TARGET})
 
-set(COMMON_PROJ_ROOT ${PROJECT_SOURCE_DIR})
-# Set default libdir to be "lib" for ROCm, distros/users can override this
-set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 include(GNUInstallDirs)
+set(COMMON_PROJ_ROOT ${PROJECT_SOURCE_DIR})
 
 ## Verbose output.
 set(CMAKE_VERBOSE_MAKEFILE on)
