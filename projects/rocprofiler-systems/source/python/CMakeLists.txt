@@ -35,7 +35,6 @@ function(OMNITRACE_CONFIGURE_PYTARGET _TARGET _VERSION)
                    ${PROJECT_BINARY_DIR}/lib/python/site-packages/omnitrace
                    PDB_OUTPUT_DIRECTORY
                    ${PROJECT_BINARY_DIR}/lib/python/site-packages/omnitrace
-                   INSTALL_RPATH_USE_LINK_PATH ON
                    ${EXTRA_PROPERTIES})
 
     set(_PYLIB ${CMAKE_INSTALL_PYTHONDIR}/omnitrace)
@@ -50,12 +49,8 @@ function(OMNITRACE_CONFIGURE_PYTARGET _TARGET _VERSION)
              "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
     endif()
 
-    set_target_properties(
-        ${_TARGET}
-        PROPERTIES
-            INSTALL_RPATH
-            "\$ORIGIN:\$ORIGIN/${LIB_RELPATH}:\$ORIGIN/../../../..:${CMAKE_INSTALL_RPATH}"
-        )
+    set_target_properties(${_TARGET} PROPERTIES INSTALL_RPATH
+                                                "\$ORIGIN:\$ORIGIN/${LIB_RELPATH}")
 
     install(
         TARGETS ${_TARGET}

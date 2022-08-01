@@ -19,8 +19,7 @@ target_link_libraries(
             omnitrace::omnitrace-timemory)
 set_target_properties(
     omnitrace-critical-trace
-    PROPERTIES BUILD_RPATH "\$ORIGIN:${PROJECT_BINARY_DIR}:${CMAKE_BINARY_DIR}"
-               INSTALL_RPATH_USE_LINK_PATH ON
+    PROPERTIES BUILD_RPATH "\$ORIGIN:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
                INSTALL_RPATH "${OMNITRACE_EXE_INSTALL_RPATH}")
 
 install(

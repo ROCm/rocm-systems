@@ -319,27 +319,6 @@ macro(OMNITRACE_ADD_INTERFACE_LIBRARY _TARGET)
     endif()
 endmacro()
 
-function(OMNITRACE_ADD_RPATH)
-    set(_DIRS)
-    foreach(_ARG ${ARGN})
-        if(EXISTS "${_ARG}" AND IS_DIRECTORY "${_ARG}")
-            list(APPEND _DIRS "${_ARG}")
-        endif()
-        get_filename_component(_DIR "${_ARG}" DIRECTORY)
-        if(EXISTS "${_DIR}" AND IS_DIRECTORY "${_DIR}")
-            list(APPEND _DIRS "${_DIR}")
-        endif()
-    endforeach()
-    if(_DIRS)
-        list(REMOVE_DUPLICATES _DIRS)
-        string(REPLACE ";" ":" _RPATH "${_DIRS}")
-        # message(STATUS "\n\tRPATH additions: ${_RPATH}\n")
-        set(CMAKE_INSTALL_RPATH
-            "${CMAKE_INSTALL_RPATH}:${_RPATH}"
-            PARENT_SCOPE)
-    endif()
-endfunction()
-
 # -----------------------------------------------------------------------
 # function add_feature(<NAME> <DOCSTRING>) Add a project feature, whose activation is
 # specified by the existence of the variable <NAME>, to the list of enabled/disabled

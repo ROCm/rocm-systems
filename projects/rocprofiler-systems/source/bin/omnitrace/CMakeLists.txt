@@ -32,8 +32,7 @@ target_link_libraries(
 set_target_properties(
     omnitrace-exe
     PROPERTIES OUTPUT_NAME omnitrace
-               BUILD_RPATH "\$ORIGIN:${PROJECT_BINARY_DIR}:${CMAKE_BINARY_DIR}"
-               INSTALL_RPATH_USE_LINK_PATH ON
+               BUILD_RPATH "\$ORIGIN:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
                INSTALL_RPATH "${OMNITRACE_EXE_INSTALL_RPATH}")
 
 if(OMNITRACE_BUILD_DYNINST)

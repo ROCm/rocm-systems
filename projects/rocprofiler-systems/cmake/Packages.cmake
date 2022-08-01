@@ -169,7 +169,6 @@ if(OMNITRACE_USE_ROCTRACER)
                                          INTERFACE OMNITRACE_USE_ROCTRACER)
     target_link_libraries(omnitrace-roctracer INTERFACE roctracer::roctracer
                                                         omnitrace::omnitrace-hip)
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${roctracer_LIBRARY_DIRS}")
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -182,7 +181,6 @@ if(OMNITRACE_USE_ROCPROFILER)
     omnitrace_target_compile_definitions(omnitrace-rocprofiler
                                          INTERFACE OMNITRACE_USE_ROCPROFILER)
     target_link_libraries(omnitrace-rocprofiler INTERFACE rocprofiler::rocprofiler)
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${rocprofiler_LIBRARY_DIRS}")
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -196,7 +194,6 @@ if(OMNITRACE_USE_ROCM_SMI)
     omnitrace_target_compile_definitions(omnitrace-rocm-smi
                                          INTERFACE OMNITRACE_USE_ROCM_SMI)
     target_link_libraries(omnitrace-rocm-smi INTERFACE rocm-smi::rocm-smi)
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${rocm-smi_LIBRARY_DIRS}")
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -348,7 +345,6 @@ else()
                 omnitrace-dyninst INTERFACE DYNINST_API_RT="${OMNITRACE_DYNINST_API_RT}")
         endif()
 
-        omnitrace_add_rpath(${Dyninst_LIBRARIES})
         target_link_libraries(omnitrace-dyninst INTERFACE Dyninst::Dyninst)
     else() # updated Dyninst CMake system was not found
         set(_BOOST_COMPONENTS atomic system thread date_time)
@@ -399,15 +395,6 @@ else()
                 omnitrace-dyninst INTERFACE DYNINST_API_RT="${OMNITRACE_DYNINST_API_RT}")
         endif()
 
-        if(Boost_DIR)
-            get_filename_component(Boost_RPATH_DIR "${Boost_DIR}" DIRECTORY)
-            get_filename_component(Boost_RPATH_DIR "${Boost_RPATH_DIR}" DIRECTORY)
-            if(EXISTS "${Boost_RPATH_DIR}" AND IS_DIRECTORY "${Boost_RPATH_DIR}")
-                set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${Boost_RPATH_DIR}")
-            endif()
-        endif()
-
-        omnitrace_add_rpath(${DYNINST_LIBRARIES} ${Boost_LIBRARIES})
         target_link_libraries(omnitrace-dyninst INTERFACE ${DYNINST_LIBRARIES}
                                                           ${Boost_LIBRARIES})
         foreach(
