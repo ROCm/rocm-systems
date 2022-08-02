@@ -48,6 +48,7 @@ find_path(
 mark_as_advanced(rocprofiler_hsa_INCLUDE_DIR)
 
 # ----------------------------------------------------------------------------------------#
+
 find_library(
     rocprofiler_LIBRARY
     NAMES rocprofiler64 rocprofiler
@@ -70,13 +71,15 @@ if(rocprofiler_LIBRARY)
 endif()
 
 mark_as_advanced(rocprofiler_LIBRARY rocprofiler_hsa-runtime_LIBRARY)
+unset(_ROCM_ROCPROFILER_PATHS)
 
 # ----------------------------------------------------------------------------------------#
+
 find_package_handle_standard_args(
     rocprofiler DEFAULT_MSG rocprofiler_ROOT_DIR rocprofiler_INCLUDE_DIR
     rocprofiler_hsa_INCLUDE_DIR rocprofiler_LIBRARY rocprofiler_hsa-runtime_LIBRARY)
 
-# ------------------------------------------------------------------------------#
+# ----------------------------------------------------------------------------------------#
 
 if(rocprofiler_FOUND)
     add_library(rocprofiler::rocprofiler INTERFACE IMPORTED)
@@ -92,8 +95,3 @@ if(rocprofiler_FOUND)
 
     target_link_libraries(rocprofiler::rocprofiler INTERFACE ${rocprofiler_LIBRARIES})
 endif()
-# ------------------------------------------------------------------------------#
-
-unset(_ROCM_ROCPROFILER_PATHS)
-
-# ------------------------------------------------------------------------------#

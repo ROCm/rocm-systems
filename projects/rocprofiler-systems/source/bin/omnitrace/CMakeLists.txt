@@ -33,7 +33,8 @@ set_target_properties(
     omnitrace-exe
     PROPERTIES OUTPUT_NAME omnitrace
                BUILD_RPATH "\$ORIGIN:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
-               INSTALL_RPATH "${OMNITRACE_EXE_INSTALL_RPATH}")
+               INSTALL_RPATH "${OMNITRACE_EXE_INSTALL_RPATH}"
+               INSTALL_RPATH_USE_LINK_PATH ON)
 
 if(OMNITRACE_BUILD_DYNINST)
     target_compile_definitions(omnitrace-exe PRIVATE OMNITRACE_BUILD_DYNINST=1)

@@ -221,8 +221,8 @@ jobs:
       run: |
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
-        echo "CMAKE_PREFIX_PATH=/opt/dyninst:/opt/elfutils:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=/opt/dyninst/lib:/opt/elfutils/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "CMAKE_PREFIX_PATH=/opt/dyninst:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:/usr/local/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
         cat << EOF > test-install.cfg
         OMNITRACE_USE_TIMEMORY          = ON
         OMNITRACE_USE_PERFETTO          = ON
@@ -268,6 +268,7 @@ jobs:
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
           -DOMNITRACE_CI_MPI_RUN_AS_ROOT=${{ matrix.mpi_headers }}
+          -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF
 
     - name: Build
       timeout-minutes: 60
