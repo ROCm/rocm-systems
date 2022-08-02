@@ -25,11 +25,11 @@
 #include "memory_pool.h"
 #include "roctracer.h"
 #include "roctracer_hsa.h"
-#include "tracker.h"
 #include "util/callback_table.h"
 #include "util/logger.h"
 
 #include <hsa/hsa.h>
+#include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa_ven_amd_loader.h>
 #include <unordered_map>
 #include <optional>
@@ -57,6 +57,127 @@ struct AgentInfo {
   hsa_device_type_t type;
 };
 std::unordered_map<decltype(hsa_agent_t::handle), AgentInfo> agent_info_map;
+
+class Tracker {
+ public:
+  enum { ENTRY_INV = 0, ENTRY_INIT = 1, ENTRY_COMPL = 2 };
+
+  enum entry_type_t {
+    DFLT_ENTRY_TYPE = 0,
+    API_ENTRY_TYPE = 1,
+    COPY_ENTRY_TYPE = 2,
+    KERNEL_ENTRY_TYPE = 3,
+    NUM_ENTRY_TYPE = 4
+  };
+
+  struct entry_t {
+    std::atomic<uint32_t> valid;
+    entry_type_t type;
+    uint64_t correlation_id;
+    roctracer_timestamp_t begin;  // begin timestamp, ns
+    roctracer_timestamp_t end;    // end timestamp, ns
+    hsa_agent_t agent;
+    uint32_t dev_index;
+    hsa_signal_t orig;
+    hsa_signal_t signal;
+    void (*handler)(const entry_t*);
+    MemoryPool* pool;
+    union {
+      struct {
+      } copy;
+      struct {
+        const char* name;
+        hsa_agent_t agent;
+        uint32_t tid;
+      } kernel;
+    };
+  };
+
+  // Add tracker entry
+  inline static void Enable(entry_type_t type, const hsa_agent_t& agent, const hsa_signal_t& signal,
+                            entry_t* entry) {
+    hsa_status_t status = HSA_STATUS_ERROR;
+
+    // Creating a new tracker entry
+    entry->type = type;
+    entry->agent = agent;
+    entry->dev_index = 0;  // hsa_rsrc->GetAgentInfo(agent)->dev_index;
+    entry->orig = signal;
+    entry->valid.store(ENTRY_INIT, std::memory_order_release);
+
+    // Creating a proxy signal
+    status = saved_core_api.hsa_signal_create_fn(1, 0, NULL, &(entry->signal));
+    if (status != HSA_STATUS_SUCCESS) FATAL_LOGGING("hsa_signal_create failed");
+    status = saved_amd_ext_api.hsa_amd_signal_async_handler_fn(
+        entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
+    if (status != HSA_STATUS_SUCCESS) FATAL_LOGGING("hsa_amd_signal_async_handler failed");
+  }
+
+  // Delete tracker entry
+  inline static void Disable(entry_t* entry) {
+    saved_core_api.hsa_signal_destroy_fn(entry->signal);
+    entry->valid.store(ENTRY_INV, std::memory_order_release);
+  }
+
+ private:
+  // Entry completion
+  inline static void Complete(hsa_signal_value_t signal_value, entry_t* entry) {
+    static roctracer_timestamp_t sysclock_period = []() {
+      uint64_t sysclock_hz = 0;
+      hsa_status_t status =
+          saved_core_api.hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
+      if (status != HSA_STATUS_SUCCESS) FATAL_LOGGING("hsa_system_get_info failed");
+      return (uint64_t)1000000000 / sysclock_hz;
+    }();
+
+    if (entry->type == COPY_ENTRY_TYPE) {
+      hsa_amd_profiling_async_copy_time_t async_copy_time{};
+      hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_get_async_copy_time_fn(
+          entry->signal, &async_copy_time);
+      if (status != HSA_STATUS_SUCCESS)
+        FATAL_LOGGING("hsa_amd_profiling_get_async_copy_time failed");
+      entry->begin = async_copy_time.start * sysclock_period;
+      entry->end = async_copy_time.end * sysclock_period;
+    } else {
+      assert(false && "should not reach here");
+    }
+
+    hsa_signal_t orig = entry->orig;
+    hsa_signal_t signal = entry->signal;
+
+    // Releasing completed entry
+    entry->valid.store(ENTRY_COMPL, std::memory_order_release);
+
+    assert(entry->handler != nullptr);
+    entry->handler(entry);
+
+    // Original intercepted signal completion
+    if (orig.handle) {
+      amd_signal_t* orig_signal_ptr = reinterpret_cast<amd_signal_t*>(orig.handle);
+      amd_signal_t* prof_signal_ptr = reinterpret_cast<amd_signal_t*>(signal.handle);
+      orig_signal_ptr->start_ts = prof_signal_ptr->start_ts;
+      orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
+
+      [[maybe_unused]] const hsa_signal_value_t new_value =
+          saved_core_api.hsa_signal_load_relaxed_fn(orig) - 1;
+      assert(signal_value == new_value && "Tracker::Complete bad signal value");
+      saved_core_api.hsa_signal_store_screlease_fn(orig, signal_value);
+    }
+    saved_core_api.hsa_signal_destroy_fn(signal);
+    delete entry;
+  }
+
+  // Handler for packet completion
+  static bool Handler(hsa_signal_value_t signal_value, void* arg) {
+    // Acquire entry
+    entry_t* entry = reinterpret_cast<entry_t*>(arg);
+    while (entry->valid.load(std::memory_order_acquire) != ENTRY_INIT) sched_yield();
+
+    // Complete entry
+    Tracker::Complete(signal_value, entry);
+    return false;
+  }
+};
 
 hsa_status_t HSA_API MemoryAllocateIntercept(hsa_region_t region, size_t size, void** ptr) {
   hsa_status_t status = saved_core_api.hsa_memory_allocate_fn(region, size, ptr);

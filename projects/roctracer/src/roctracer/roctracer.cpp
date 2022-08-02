@@ -42,7 +42,6 @@
 #include "loader.h"
 #include "hsa_support.h"
 #include "memory_pool.h"
-#include "tracker.h"
 #include "exception.h"
 #include "util/logger.h"
 
