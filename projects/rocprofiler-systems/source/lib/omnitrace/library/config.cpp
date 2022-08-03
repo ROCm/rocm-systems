@@ -213,16 +213,16 @@ configure_settings(bool _init)
         std::string, "OMNITRACE_MODE",
         "Data collection mode. Used to set default values for OMNITRACE_USE_* options. "
         "Typically set by omnitrace binary instrumenter.",
-        std::string{ "trace" }, "backend");
+        std::string{ "trace" }, "backend", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CI",
                              "Enable some runtime validation checks (typically enabled "
                              "for continuous integration)",
-                             false, "debugging");
+                             false, "debugging", "advanced");
 
     OMNITRACE_CONFIG_EXT_SETTING(int, "OMNITRACE_DL_VERBOSE",
                                  "Verbosity within the omnitrace-dl library", 0,
-                                 "debugging", "libomnitrace-dl");
+                                 "debugging", "libomnitrace-dl", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_PERFETTO", "Enable perfetto backend",
                              _default_perfetto_v, "backend", "perfetto");
@@ -256,7 +256,7 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_THREAD_SAMPLING",
                              "[DEPRECATED] Renamed to OMNITRACE_USE_PROCESS_SAMPLING",
                              true, "backend", "sampling", "process_sampling",
-                             "deprecated");
+                             "deprecated", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_USE_PROCESS_SAMPLING",
@@ -280,7 +280,7 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_CL_SETTING(
         bool, "OMNITRACE_KOKKOS_KERNEL_LOGGER", "Enables kernel logging", false,
-        "--omnitrace-kokkos-kernel-logger", "kokkos", "debugging");
+        "--omnitrace-kokkos-kernel-logger", "kokkos", "debugging", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_OMPT",
                              "Enable support for OpenMP-Tools", false, "openmp", "ompt",
@@ -288,12 +288,12 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_CODE_COVERAGE",
                              "Enable support for code coverage", false, "coverage",
-                             "backend");
+                             "backend", "advanced");
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_INSTRUMENTATION_INTERVAL",
                              "Instrumentation only takes measurements once every N "
                              "function calls (not statistical)",
-                             size_t{ 1 }, "instrumentation", "data_sampling");
+                             size_t{ 1 }, "instrumentation", "data_sampling", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_SAMPLING_FREQ",
@@ -322,7 +322,7 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_ROCM_SMI_DEVICES",
                              "[DEPRECATED] Renamed to OMNITRACE_SAMPLING_GPUS",
                              std::string{ "all" }, "rocm_smi", "rocm", "process_sampling",
-                             "deprecated");
+                             "deprecated", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_SAMPLING_GPUS",
@@ -351,12 +351,12 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_LOCKS",
                              "Enable tracing calls to pthread_mutex_lock, "
                              "pthread_mutex_unlock, pthread_mutex_trylock",
-                             false, "backend", "parallelism", "gotcha");
+                             false, "backend", "parallelism", "gotcha", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_RW_LOCKS",
                              "Enable tracing calls to pthread_rwlock_* functions. May "
                              "cause deadlocks with ROCm-enabled OpenMPI.",
-                             false, "backend", "parallelism", "gotcha");
+                             false, "backend", "parallelism", "gotcha", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_SAMPLING_KEEP_INTERNAL",
@@ -364,21 +364,21 @@ configure_settings(bool _init)
         "from internal routines in omnitrace. E.g. when ON, the call-stack will show "
         "functions like omnitrace_push_trace. If disabled, omnitrace will attempt to "
         "filter out internal routines from the sampling call-stacks",
-        true, "sampling", "data");
+        true, "sampling", "data", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_SAMPLING_REALTIME",
         "Enable sampling frequency via a wall-clock timer on child threads. This may "
         "result in typically idle child threads consuming an unnecessary large amount of "
         "CPU time. The main thread always has this enabled.",
-        false, "sampling");
+        false, "sampling", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_SAMPLING_CPUTIME",
                              "Enable sampling frequency via a timer that measures both "
                              "CPU time used by the current process, "
                              "and CPU time expended on behalf of the process by the "
                              "system. This is recommended.",
-                             true, "timemory", "sampling");
+                             true, "timemory", "sampling", "advanced");
 
     auto _sigrt_range = SIGRTMAX - SIGRTMIN;
 
@@ -388,38 +388,42 @@ configure_settings(bool _init)
             "Modify this value only if the target process is also using SIGRTMIN. E.g. "
             "the signal used is SIGRTMIN + <THIS_VALUE>. Value must be <= " } +
             std::to_string(_sigrt_range),
-        0, "sampling");
+        0, "sampling", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_FLAT_SAMPLING",
                              "Ignore hierarchy in all statistical sampling entries",
                              _config->get_flat_profile(), "timemory", "sampling",
-                             "data_layout");
+                             "data_layout", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_TIMELINE_SAMPLING",
         "Create unique entries for every sample when statistical sampling is enabled",
-        _config->get_timeline_profile(), "timemory", "sampling", "data_layout");
+        _config->get_timeline_profile(), "timemory", "sampling", "data_layout",
+        "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_ROCTRACER_FLAT_PROFILE",
         "Ignore hierarchy in all kernels entries with timemory backend",
-        _config->get_flat_profile(), "timemory", "roctracer", "data_layout", "rocm");
+        _config->get_flat_profile(), "timemory", "roctracer", "data_layout", "rocm",
+        "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_ROCTRACER_TIMELINE_PROFILE",
         "Create unique entries for every kernel with timemory backend",
-        _config->get_timeline_profile(), "timemory", "roctracer", "data_layout", "rocm");
+        _config->get_timeline_profile(), "timemory", "roctracer", "data_layout", "rocm",
+        "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_HSA_ACTIVITY",
-                             "Enable HSA activity tracing support", false, "roctracer",
-                             "rocm");
+                             "Enable HSA activity tracing support", true, "roctracer",
+                             "rocm", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_HSA_API",
-                             "Enable HSA API tracing support", false, "roctracer",
-                             "rocm");
+                             "Enable HSA API tracing support", true, "roctracer", "rocm",
+                             "advanced");
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_ROCTRACER_HSA_API_TYPES",
-                             "HSA API type to collect", "", "roctracer", "rocm");
+                             "HSA API type to collect", "", "roctracer", "rocm",
+                             "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_ROCM_EVENTS",
@@ -430,26 +434,26 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CRITICAL_TRACE_DEBUG",
                              "Enable debugging for critical trace", _omnitrace_debug,
-                             "debugging", "critical_trace");
+                             "debugging", "critical_trace", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES",
         "Include names in serialization of critical trace (mainly for debugging)",
-        _omnitrace_debug, "debugging", "critical_trace");
+        _omnitrace_debug, "debugging", "critical_trace", "advanced");
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB",
                              "Hint for shared-memory buffer size in perfetto (in KB)",
-                             size_t{ 4096 }, "perfetto", "data");
+                             size_t{ 4096 }, "perfetto", "data", "advanced");
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_PERFETTO_BUFFER_SIZE_KB",
                              "Size of perfetto buffer (in KB)", size_t{ 1024000 },
-                             "perfetto", "data");
+                             "perfetto", "data", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_PERFETTO_COMBINE_TRACES",
                              "Combine Perfetto traces. If not explicitly set, it will "
                              "default to the value of OMNITRACE_COLLAPSE_PROCESSES",
-                             _config->get<bool>("collapse_processes"), "perfetto",
-                             "data");
+                             _config->get<bool>("collapse_processes"), "perfetto", "data",
+                             "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_PERFETTO_FILL_POLICY",
@@ -460,29 +464,30 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_PERFETTO_CATEGORIES",
                              "Categories to collect within perfetto", "", "perfetto",
-                             "data")
+                             "data", "advanced")
         ->set_choices(get_available_perfetto_categories<std::vector<std::string>>());
 
     OMNITRACE_CONFIG_EXT_SETTING(int64_t, "OMNITRACE_CRITICAL_TRACE_COUNT",
                                  "Number of critical trace to export (0 == all)",
                                  int64_t{ 0 }, "data", "critical_trace",
-                                 "omnitrace-critical-trace", "perfetto");
+                                 "omnitrace-critical-trace", "perfetto", "advanced");
 
     OMNITRACE_CONFIG_SETTING(uint64_t, "OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT",
                              "Number of critical trace records to store in thread-local "
                              "memory before submitting to shared buffer",
-                             uint64_t{ 2000 }, "data", "critical_trace");
+                             uint64_t{ 2000 }, "data", "critical_trace", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         uint64_t, "OMNITRACE_CRITICAL_TRACE_NUM_THREADS",
         "Number of threads to use when generating the critical trace",
         std::min<uint64_t>(8, std::thread::hardware_concurrency()), "parallelism",
-        "critical_trace");
+        "critical_trace", "advanced");
 
     OMNITRACE_CONFIG_EXT_SETTING(
         int64_t, "OMNITRACE_CRITICAL_TRACE_PER_ROW",
         "How many critical traces per row in perfetto (0 == all in one row)",
-        int64_t{ 0 }, "io", "critical_trace", "omnitrace-critical-trace", "perfetto");
+        int64_t{ 0 }, "io", "critical_trace", "omnitrace-critical-trace", "perfetto",
+        "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_TIMEMORY_COMPONENTS",
@@ -491,11 +496,11 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_OUTPUT_FILE",
                              "[DEPRECATED] See OMNITRACE_PERFETTO_FILE", std::string{},
-                             "perfetto", "io", "filename", "deprecated");
+                             "perfetto", "io", "filename", "deprecated", "advanced");
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_PERFETTO_FILE", "Perfetto filename",
                              std::string{ "perfetto-trace.proto" }, "perfetto", "io",
-                             "filename");
+                             "filename", "advanced");
 
     // set the defaults
     _config->get_flamegraph_output()     = false;
@@ -532,6 +537,63 @@ configure_settings(bool _init)
     _add_omnitrace_category(_config->find("OMNITRACE_TIME_OUTPUT"));
     _add_omnitrace_category(_config->find("OMNITRACE_OUTPUT_PREFIX"));
     _add_omnitrace_category(_config->find("OMNITRACE_OUTPUT_PATH"));
+
+    auto _add_advanced_category = [](const std::string& _name) {
+        auto itr = _config->find(_name);
+        if(itr != _config->end())
+        {
+            auto _categories = itr->second->get_categories();
+            _categories.emplace("advanced");
+            itr->second->set_categories(_categories);
+        }
+        else
+        {
+            if(_config->get<bool>("OMNITRACE_CI"))
+            {
+                OMNITRACE_THROW("Error! Setting '%s' not found!", _name.c_str());
+            }
+        }
+    };
+
+    _add_advanced_category("OMNITRACE_CPU_AFFINITY");
+    _add_advanced_category("OMNITRACE_COUT_OUTPUT");
+    _add_advanced_category("OMNITRACE_FILE_OUTPUT");
+    _add_advanced_category("OMNITRACE_JSON_OUTPUT");
+    _add_advanced_category("OMNITRACE_TREE_OUTPUT");
+    _add_advanced_category("OMNITRACE_TEXT_OUTPUT");
+    _add_advanced_category("OMNITRACE_DIFF_OUTPUT");
+    _add_advanced_category("OMNITRACE_DEBUG");
+    _add_advanced_category("OMNITRACE_ENABLE_SIGNAL_HANDLER");
+    _add_advanced_category("OMNITRACE_FLAT_PROFILE");
+    _add_advanced_category("OMNITRACE_INPUT_EXTENSIONS");
+    _add_advanced_category("OMNITRACE_INPUT_PATH");
+    _add_advanced_category("OMNITRACE_INPUT_PREFIX");
+    _add_advanced_category("OMNITRACE_MAX_DEPTH");
+    _add_advanced_category("OMNITRACE_MAX_WIDTH");
+    _add_advanced_category("OMNITRACE_MEMORY_PRECISION");
+    _add_advanced_category("OMNITRACE_MEMORY_SCIENTIFIC");
+    _add_advanced_category("OMNITRACE_MEMORY_UNITS");
+    _add_advanced_category("OMNITRACE_MEMORY_WIDTH");
+    _add_advanced_category("OMNITRACE_NETWORK_INTERFACE");
+    _add_advanced_category("OMNITRACE_NODE_COUNT");
+    _add_advanced_category("OMNITRACE_PAPI_FAIL_ON_ERROR");
+    _add_advanced_category("OMNITRACE_PAPI_OVERFLOW");
+    _add_advanced_category("OMNITRACE_PAPI_MULTIPLEXING");
+    _add_advanced_category("OMNITRACE_PAPI_QUIET");
+    _add_advanced_category("OMNITRACE_PAPI_THREADING");
+    _add_advanced_category("OMNITRACE_PRECISION");
+    _add_advanced_category("OMNITRACE_SCIENTIFIC");
+    _add_advanced_category("OMNITRACE_STRICT_CONFIG");
+    _add_advanced_category("OMNITRACE_TIMELINE_PROFILE");
+    _add_advanced_category("OMNITRACE_SCIENTIFIC");
+    _add_advanced_category("OMNITRACE_TIME_FORMAT");
+    _add_advanced_category("OMNITRACE_TIMING_PRECISION");
+    _add_advanced_category("OMNITRACE_TIMING_SCIENTIFIC");
+    _add_advanced_category("OMNITRACE_TIMING_UNITS");
+    _add_advanced_category("OMNITRACE_TIMING_WIDTH");
+    _add_advanced_category("OMNITRACE_WIDTH");
+    _add_advanced_category("OMNITRACE_COLLAPSE_THREADS");
+    _add_advanced_category("OMNITRACE_COLLAPSE_PROCESSES");
 
 #if defined(TIMEMORY_USE_PAPI)
     int _paranoid = 2;
@@ -611,8 +673,11 @@ configure_settings(bool _init)
                 getline(_in, _s);
                 _iss << _s << "\n";
             }
-            OMNITRACE_BASIC_PRINT("config file '%s':\n%s\n", itr.c_str(),
-                                  _iss.str().c_str());
+            if(!_iss.str().empty())
+            {
+                OMNITRACE_BASIC_PRINT("config file '%s':\n%s\n", itr.c_str(),
+                                      _iss.str().c_str());
+            }
         }
     }
 

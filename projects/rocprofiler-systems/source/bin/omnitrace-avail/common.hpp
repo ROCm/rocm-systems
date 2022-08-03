@@ -95,6 +95,7 @@ extern bool              case_insensitive;
 extern bool              regex_hl;
 extern bool              expand_keys;
 extern bool              force_config;
+extern bool              print_advanced;
 extern int32_t           max_width;
 extern int32_t           num_cols;
 extern int32_t           min_width;

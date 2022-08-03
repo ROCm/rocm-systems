@@ -44,7 +44,7 @@ get_concurrent_processes(int _ppid)
         std::ifstream _ifs{ _inp };
         if(!_ifs)
         {
-            OMNITRACE_VERBOSE_F(0, "Warning! File '%s' cannot be read\n", _inp.c_str());
+            OMNITRACE_VERBOSE_F(2, "Warning! File '%s' cannot be read\n", _inp.c_str());
             return _children;
         }
 

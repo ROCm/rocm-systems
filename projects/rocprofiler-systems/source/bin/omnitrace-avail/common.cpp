@@ -42,6 +42,7 @@ bool              case_insensitive    = false;
 bool              regex_hl            = false;
 bool              expand_keys         = false;
 bool              force_config        = false;
+bool              print_advanced      = false;
 int32_t           max_width           = 0;
 int32_t           num_cols            = 0;
 int32_t           min_width           = 40;

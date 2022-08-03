@@ -181,6 +181,11 @@ main(int argc, char** argv)
         .action([](parser_t& p) {
             verbose_level = (p.get_count("verbose") == 0) ? 1 : p.get<int>("verbose");
         });
+    parser
+        .add_argument({ "--advanced" },
+                      "Print advanced settings not relevant to most use cases")
+        .max_count(1)
+        .action([](parser_t& p) { print_advanced = p.get<bool>("advanced"); });
     parser.add_argument({ "-a", "--all" }, "Print all available info")
         .max_count(1)
         .action([&](parser_t& p) {
@@ -489,6 +494,10 @@ main(int argc, char** argv)
         category_regex_keys.emplace_back(_pos_regex);
     }
 
+    if(category_view.count("advanced") > 0 ||
+       category_view.count("settings::advanced") > 0)
+        print_advanced = true;
+
     if(category_view.empty()) category_view = _category_options;
 
     if(!include_components && !include_settings && !include_hw_counters)
@@ -786,14 +795,14 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
         {
             str_set_t _categories{};
             for(const auto& citr : sitr->second->get_categories())
-            {
                 _categories.emplace(TIMEMORY_JOIN("::", "settings", citr));
-            }
             bool _found = false;
             for(const auto& citr : _categories)
             {
                 if(category_view.count(citr) > 0) _found = true;
             }
+            if(!print_advanced && _categories.count("settings::advanced") > 0)
+                _not_in_category_view.emplace(_name);
             if(!_found)
             {
                 _not_in_category_view.emplace(_name);

@@ -242,7 +242,7 @@ omnitrace_add_bin_test(
 omnitrace_add_bin_test(
     NAME omnitrace-avail-category-filter-timemory
     TARGET omnitrace-avail
-    ARGS --categories settings::timemory --brief
+    ARGS --categories settings::timemory --brief --advanced
     LABELS "omnitrace-avail"
     TIMEOUT 45
     PASS_REGEX
@@ -262,6 +262,7 @@ omnitrace_add_bin_test(
          ~PROCESS_SAMPLING
          --csv
          --brief
+         --advanced
     LABELS "omnitrace-avail"
     TIMEOUT 45
     PASS_REGEX "ENVIRONMENT VARIABLE,[ \n]+OMNITRACE_USE_PID,[ \n]+"
