@@ -133,6 +133,12 @@ target_include_directories(memory_pool PRIVATE ${PROJECT_SOURCE_DIR}/src/roctrac
 target_link_libraries(memory_pool Threads::Threads atomic)
 add_dependencies(mytest memory_pool)
 
+## Build the activity_and_callback test
+set_source_files_properties(directed/activity_and_callback.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(activity_and_callback directed/activity_and_callback.cpp)
+target_link_libraries(activity_and_callback roctracer)
+add_dependencies(mytest activity_and_callback)
+
 ## Copy the golden traces and test scripts
 configure_file(run.sh ${PROJECT_BINARY_DIR} COPYONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink run.sh ${PROJECT_BINARY_DIR}/run_ci.sh)

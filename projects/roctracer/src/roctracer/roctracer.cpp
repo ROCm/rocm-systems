@@ -91,7 +91,14 @@
 #define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
 #define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
 
-static inline uint32_t GetPid() { return syscall(__NR_getpid); }
+static inline uint32_t GetPid() {
+  static auto pid = syscall(__NR_getpid);
+  return pid;
+}
+static inline uint32_t GetTid() {
+  static thread_local auto tid = syscall(__NR_gettid);
+  return tid;
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Internal library methods
@@ -159,47 +166,14 @@ static auto NextCorrelationId() {
   return counter.fetch_add(1, std::memory_order_relaxed);
 }
 
-// Records storage
-struct RecordDataPair {
-  roctracer_record_t record;
-  union {
-    hip_api_data_t data;
-  };
-  RecordDataPair() {}
-};
-static thread_local std::stack<RecordDataPair> record_data_pair_stack;
-
 // Correlation id storage
 static thread_local activity_correlation_id_t correlation_id_tls = 0;
-static std::map<activity_correlation_id_t, activity_correlation_id_t> correlation_id_map{};
-std::mutex correlation_id_mutex;
 
 static thread_local std::stack<activity_correlation_id_t> external_id_stack;
 
-static inline void CorrelationIdRegister(activity_correlation_id_t correlation_id) {
-  std::lock_guard lock(correlation_id_mutex);
-  [[maybe_unused]] const auto ret = correlation_id_map.insert({correlation_id, correlation_id_tls});
-  assert(ret.second && "HIP activity id is not unique");
-
-  DEBUG_TRACE("CorrelationIdRegister id(%lu) id_tls(%lu)\n", correlation_id, correlation_id_tls);
-}
-
-static inline activity_correlation_id_t CorrelationIdLookup(
-    activity_correlation_id_t correlation_id) {
-  std::lock_guard lock(correlation_id_mutex);
-  auto it = correlation_id_map.find(correlation_id);
-  assert(it != correlation_id_map.end() && "HIP activity id lookup failed");
-  const activity_correlation_id_t ret_val = it->second;
-  correlation_id_map.erase(it);
-
-  DEBUG_TRACE("CorrelationIdLookup id(%lu) ret(%lu)\n", correlation_id, ret_val);
-
-  return ret_val;
-}
-
 std::mutex hip_activity_mutex;
 
-enum { API_CB_MASK = 0x1, ACT_CB_MASK = 0x2 };
+enum { API_CB_MASK = 0x1, API_ACT_MASK = 0x2 };
 
 class HIPActivityCallbackTracker {
  public:
@@ -212,181 +186,82 @@ class HIPActivityCallbackTracker {
 
 static HIPActivityCallbackTracker hip_act_cb_tracker;
 
-inline uint32_t HipApiActivityEnableCheck(uint32_t op) {
+inline uint32_t HipApiCallbackEnableCheck(uint32_t op) {
   const uint32_t mask = hip_act_cb_tracker.enable_check(op, API_CB_MASK);
-  const uint32_t ret = (mask & ACT_CB_MASK);
+  const uint32_t ret = (mask & API_ACT_MASK);
   return ret;
 }
 
-inline uint32_t HipApiActivityDisableCheck(uint32_t op) {
+inline uint32_t HipApiCallbackDisableCheck(uint32_t op) {
   const uint32_t mask = hip_act_cb_tracker.disable_check(op, API_CB_MASK);
-  const uint32_t ret = (mask & ACT_CB_MASK);
+  const uint32_t ret = (mask & API_ACT_MASK);
   return ret;
 }
 
-inline uint32_t HipActActivityEnableCheck(uint32_t op) {
-  hip_act_cb_tracker.enable_check(op, ACT_CB_MASK);
+inline uint32_t HipApiActivityEnableCheck(uint32_t op) {
+  hip_act_cb_tracker.enable_check(op, API_ACT_MASK);
   return 0;
 }
 
-inline uint32_t HipActActivityDisableCheck(uint32_t op) {
-  const uint32_t mask = hip_act_cb_tracker.disable_check(op, ACT_CB_MASK);
+inline uint32_t HipApiActivityDisableCheck(uint32_t op) {
+  const uint32_t mask = hip_act_cb_tracker.disable_check(op, API_ACT_MASK);
   const uint32_t ret = (mask & API_CB_MASK);
   return ret;
 }
 
-void* HIP_SyncApiDataCallback(uint32_t op_id, roctracer_record_t* record, const void* callback_data,
-                              void* arg) {
-  void* ret = nullptr;
-  const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
-  hip_api_data_t* data_ptr = const_cast<hip_api_data_t*>(data);
-  MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
+void HIP_ApiCallback(uint32_t op_id, roctracer_record_t* record, void* callback_data, void* arg) {
+  hip_api_data_t* data = static_cast<hip_api_data_t*>(callback_data);
+  MemoryPool* pool = static_cast<MemoryPool*>(arg);
 
-  int phase = ACTIVITY_API_PHASE_ENTER;
-  if (record != nullptr) {
-    assert(data != nullptr && "ActivityCallback: data is NULL");
-    phase = data->phase;
-  } else if (pool != nullptr) {
-    phase = ACTIVITY_API_PHASE_EXIT;
-  }
+  if (data->phase == ACTIVITY_API_PHASE_ENTER) {
+    // Generate a new correlation ID.
+    uint64_t correlation_id = NextCorrelationId();
+    data->correlation_id = correlation_id;
 
-  if (phase == ACTIVITY_API_PHASE_ENTER) {
-    // Allocating a record if nullptr passed
-    if (record == nullptr) {
-      assert(data == nullptr && "ActivityCallback enter: record is NULL");
-      data = &record_data_pair_stack.emplace().data;
-      data_ptr = const_cast<hip_api_data_t*>(data);
-      data_ptr->phase = phase;
-      data_ptr->correlation_id = 0;
-    }
-
-    // Correlation ID generating
-    uint64_t correlation_id = data->correlation_id;
-    if (correlation_id == 0) {
-      correlation_id = NextCorrelationId();
-      data_ptr->correlation_id = correlation_id;
-    }
-
-    // Passing correlation ID
+    // Record the correlation ID in a TLS variable so that it can be passed
+    // to an asynchronous activity started before the API function returns.
     correlation_id_tls = correlation_id;
 
-    ret = data_ptr;
+    if (pool != nullptr) {
+      // Filing record info
+      record->domain = ACTIVITY_DOMAIN_HIP_API;
+      record->kind = 0;
+      record->op = op_id;
+      record->process_id = GetPid();
+      record->thread_id = GetTid();
+      record->begin_ns = util::timestamp_ns();
+      record->correlation_id = correlation_id;
+    }
   } else {
-    // popping the record entry
-    assert(!record_data_pair_stack.empty() &&
-           "HIP_SyncApiDataCallback exit: record stack is empty");
-    record_data_pair_stack.pop();
+    if (pool != nullptr) {
+      if (!external_id_stack.empty()) {
+        roctracer_record_t ext_record{};
+        ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
+        ext_record.op = ACTIVITY_EXT_OP_EXTERN_ID;
+        ext_record.correlation_id = record->correlation_id;
+        ext_record.external_id = external_id_stack.top();
+        pool->Write(ext_record);
+      }
 
-    // Clearing correlation ID
+      // Write record to the buffer
+      record->end_ns = util::timestamp_ns();
+      pool->Write(*record);
+    }
+    // Clear correlation ID
     correlation_id_tls = 0;
   }
 
   DEBUG_TRACE(
-      "HIP_SyncApiDataCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) "
-      "correlation_id(%lu) time_ns(%lu)\n",
-      roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0), phase, op_id, record, data, pool,
-      (int)(record_data_pair_stack.size()), (data_ptr) ? data_ptr->correlation_id : 0,
-      util::timestamp_ns());
-
-  return ret;
-}
-
-void* HIP_SyncActivityCallback(uint32_t op_id, roctracer_record_t* record,
-                               const void* callback_data, void* arg) {
-  const roctracer_timestamp_t timestamp_ns = util::timestamp_ns();
-  void* ret = nullptr;
-  const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>(callback_data);
-  hip_api_data_t* data_ptr = const_cast<hip_api_data_t*>(data);
-  MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
-
-  int phase = ACTIVITY_API_PHASE_ENTER;
-  if (record != nullptr) {
-    assert(data != nullptr && "ActivityCallback: data is NULL");
-    phase = data->phase;
-  } else if (pool != nullptr) {
-    phase = ACTIVITY_API_PHASE_EXIT;
-  }
-
-  if (phase == ACTIVITY_API_PHASE_ENTER) {
-    // Allocating a record if nullptr passed
-    if (record == nullptr) {
-      assert(data == nullptr && "ActivityCallback enter: record is NULL");
-      auto& top = record_data_pair_stack.emplace();
-      record = &(top.record);
-      data = &(top.data);
-      data_ptr = const_cast<hip_api_data_t*>(data);
-      data_ptr->phase = phase;
-      data_ptr->correlation_id = 0;
-    }
-
-    // Filing record info
-    record->domain = ACTIVITY_DOMAIN_HIP_API;
-    record->op = op_id;
-    record->begin_ns = timestamp_ns;
-
-    // Correlation ID generating
-    uint64_t correlation_id = data->correlation_id;
-    if (correlation_id == 0) {
-      correlation_id = NextCorrelationId();
-      data_ptr->correlation_id = correlation_id;
-    }
-    record->correlation_id = correlation_id;
-
-    // Passing correlation ID
-    correlation_id_tls = correlation_id;
-
-    ret = data_ptr;
-  } else {
-    assert(pool != nullptr && "ActivityCallback exit: pool is NULL");
-    assert(!record_data_pair_stack.empty() && "ActivityCallback exit: record stack is empty");
-
-    // Getting record of stacked
-    if (record == nullptr) record = &record_data_pair_stack.top().record;
-
-    // Filing record info
-    record->end_ns = timestamp_ns;
-    record->process_id = syscall(__NR_getpid);
-    record->thread_id = syscall(__NR_gettid);
-
-    if (!external_id_stack.empty()) {
-      roctracer_record_t ext_record{};
-      ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
-      ext_record.op = ACTIVITY_EXT_OP_EXTERN_ID;
-      ext_record.correlation_id = record->correlation_id;
-      ext_record.external_id = external_id_stack.top();
-      pool->Write(ext_record);
-    }
-
-    // Writing record to the buffer
-    pool->Write(*record);
-
-    // popping the record entry
-    record_data_pair_stack.pop();
-
-    // Clearing correlation ID
-    correlation_id_tls = 0;
-  }
-
-  DEBUG_TRACE(
-      "HIP_SyncActivityCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) depth(%d) "
+      "HIP_ApiCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) "
       "correlation_id(%lu) beg_ns(%lu) end_ns(%lu)\n",
-      roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0), phase, op_id, record, data, pool,
-      (int)(record_data_pair_stack.size()), (data_ptr) ? data_ptr->correlation_id : 0,
-      timestamp_ns);
-
-  return ret;
-}
-
-void HIP_ActivityIdCallback(activity_correlation_id_t correlation_id) {
-  CorrelationIdRegister(correlation_id);
+      roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0), data->phase, op_id, record, data,
+      pool, data->correlation_id, timestamp_ns);
 }
 
 void HIP_AsyncActivityCallback(uint32_t op_id, void* record_ptr, void* arg) {
   MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
-  roctracer_record_t record = *reinterpret_cast<roctracer_record_t*>(record_ptr);
+  roctracer_record_t& record = *reinterpret_cast<roctracer_record_t*>(record_ptr);
   record.domain = ACTIVITY_DOMAIN_HIP_OPS;
-  record.correlation_id = CorrelationIdLookup(record.correlation_id);
-  if (record.correlation_id == 0) return;
 
   // If the record is for a kernel dispatch, write the kernel name in the pool's data,
   // and make the record point to it. Older HIP runtimes do not provide a kernel
@@ -652,9 +527,9 @@ static void roctracer_enable_callback_fun(roctracer_domain_t domain, uint32_t op
       if (hip_err != hipSuccess)
         FATAL_LOGGING("HIP::RegisterApiCallback(" << op << ") error(" << hip_err << ")");
 
-      if (HipApiActivityEnableCheck(op) == 0) {
-        hip_err = HipLoader::Instance().RegisterActivityCallback(op, (void*)HIP_SyncApiDataCallback,
-                                                                 (void*)1);
+      if (HipApiCallbackEnableCheck(op) == 0) {
+        hip_err =
+            HipLoader::Instance().RegisterActivityCallback(op, (void*)HIP_ApiCallback, nullptr);
         if (hip_err != hipSuccess)
           FATAL_LOGGING("HIPAPI: HIP::RegisterActivityCallback(" << op << ") error(" << hip_err
                                                                  << ")");
@@ -723,7 +598,7 @@ static void roctracer_disable_callback_fun(roctracer_domain_t domain, uint32_t o
       if (hip_err != hipSuccess)
         FATAL_LOGGING("HIP::RemoveApiCallback(" << op << "), error(" << hip_err << ")");
 
-      if (HipApiActivityDisableCheck(op) == 0) {
+      if (HipApiCallbackDisableCheck(op) == 0) {
         const hipError_t hip_err = HipLoader::Instance().RemoveActivityCallback(op);
         if (hip_err != hipSuccess)
           FATAL_LOGGING("HIPAPI: HIP::RemoveActivityCallback op(" << op << "), error(" << hip_err
@@ -853,8 +728,7 @@ static void roctracer_enable_activity_fun(roctracer_domain_t domain, uint32_t op
       std::lock_guard lock(hip_activity_mutex);
 
       if (!HipLoader::Instance().InitActivityDone()) {
-        HipLoader::Instance().InitActivityCallback((void*)HIP_ActivityIdCallback,
-                                                   (void*)HIP_AsyncActivityCallback, (void*)pool);
+        HipLoader::Instance().InitActivityCallback((void*)HIP_AsyncActivityCallback, pool);
         HipLoader::Instance().InitActivityDone() = true;
       }
       if (!HipLoader::Instance().EnableActivityCallback(op, true))
@@ -865,9 +739,9 @@ static void roctracer_enable_activity_fun(roctracer_domain_t domain, uint32_t op
       if (!HipLoader::Instance().Enabled()) break;
       std::lock_guard lock(hip_activity_mutex);
 
-      if (HipActActivityEnableCheck(op) == 0) {
-        const hipError_t hip_err = HipLoader::Instance().RegisterActivityCallback(
-            op, (void*)HIP_SyncActivityCallback, (void*)pool);
+      if (HipApiActivityEnableCheck(op) == 0) {
+        const hipError_t hip_err =
+            HipLoader::Instance().RegisterActivityCallback(op, (void*)HIP_ApiCallback, pool);
         if (hip_err != hipSuccess)
           FATAL_LOGGING("HIP::RegisterActivityCallback(" << op << " error(" << hip_err << ")");
       }
@@ -961,13 +835,13 @@ static void roctracer_disable_activity_fun(roctracer_domain_t domain, uint32_t o
       if (!HipLoader::Instance().Enabled()) break;
       std::lock_guard lock(hip_activity_mutex);
 
-      if (HipActActivityDisableCheck(op) == 0) {
+      if (HipApiActivityDisableCheck(op) == 0) {
         const hipError_t hip_err = HipLoader::Instance().RemoveActivityCallback(op);
         if (hip_err != hipSuccess)
           FATAL_LOGGING("HIP::RemoveActivityCallback op(" << op << "), error(" << hip_err << ")");
       } else {
-        const hipError_t hip_err = HipLoader::Instance().RegisterActivityCallback(
-            op, (void*)HIP_SyncApiDataCallback, (void*)1);
+        const hipError_t hip_err =
+            HipLoader::Instance().RegisterActivityCallback(op, (void*)HIP_ApiCallback, nullptr);
         if (hip_err != hipSuccess)
           FATAL_LOGGING("HIPACT: HIP::RegisterActivityCallback(" << op << ") error(" << hip_err
                                                                  << ")");

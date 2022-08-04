@@ -176,14 +176,16 @@ export ROCP_TOOL_LIB=./test/libcodeobj_test.so
 export HSA_TOOLS_LIB="librocprofiler64.so"
 eval_test "tool tracer codeobj" ./test/MatrixTranspose code_obj_trace
 
+unset LD_PRELOAD
 #valgrind --leak-check=full $tbin
 #valgrind --tool=massif $tbin
 #ms_print massif.out.<N>
 
 eval_test "directed TraceBuffer test" ./test/trace_buffer trace_buffer
 eval_test "directed MemoryPool test" ./test/memory_pool memory_pool
+eval_test "enable/disable callbacks and activities test" ./test/activity_and_callback activity_and_callback_trace
 
-eval_test "backward compatibilty tests" ./test/backward_compat_test backward_compat_test_trace
+eval_test "backward compatibility tests" ./test/backward_compat_test backward_compat_test_trace
 
 echo "$test_number tests total / $test_runnum tests run / $test_status tests failed"
 if [ $test_status != 0 ] ; then
