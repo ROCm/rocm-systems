@@ -99,13 +99,19 @@ if (DEFINED ENV{ROCM_RPATH})
    set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
    set(CMAKE_SKIP_RPATH TRUE)
 
- # Run path can only include direct refer library, here is the indirect libs
+ # Run path can only include direct refer library, include the indirect libs
  # required by gRPC
-   set (RDCD_EXTRA_LIB absl_str_format_internal absl_strings absl_throw_delegate
-        absl_bad_optional_access absl_strings absl_throw_delegate absl_int128
-        absl_strings_internal absl_raw_logging_internal address_sorting
-        gpr upb ssl crypto )
-
+ # Get all absl library and re2
+ file(GLOB grpc_libs "${GRPC_ROOT}/lib*/lib*.so")
+ foreach(src_file ${grpc_libs})
+    get_filename_component(lib_name "${src_file}" NAME_WLE)
+    STRING(REGEX REPLACE "^lib" "" lib_name ${lib_name})  # strip out lib
+    if(lib_name MATCHES "absl.*" OR lib_name STREQUAL "re2")
+      set(RDCD_EXTRA_LIB ${RDCD_EXTRA_LIB} ${lib_name})
+    endif()
+ endforeach()
+ # Set other library
+ set(RDCD_EXTRA_LIB ${RDCD_EXTRA_LIB} address_sorting gpr upb ssl crypto)
 endif()
 
 target_link_libraries(${RDCI_EXE} ${RDCD_EXTRA_LIB} pthread dl rdc_bootstrap)
