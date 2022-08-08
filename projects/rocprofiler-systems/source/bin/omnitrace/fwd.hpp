@@ -249,15 +249,6 @@ consume_parameters(T&&...)
 
 //======================================================================================//
 
-extern "C"
-{
-    bool are_file_include_exclude_lists_empty();
-    bool module_constraint(const char* fname);
-    bool routine_constraint(const char* fname);
-}
-
-//======================================================================================//
-
 strset_t
 get_whole_function_names();
 

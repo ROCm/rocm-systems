@@ -350,7 +350,7 @@ module_function::is_module_constrained() const
         return true;
     };
 
-    if(module_constraint(function_name.c_str())) return true;
+    if(module->isSystemLib()) return _report("Excluding", "system library", 3);
 
     // always instrument these modules
     if(module_name == "DEFAULT_MODULE" || module_name == "LIBRARY_MODULE")
@@ -413,8 +413,6 @@ module_function::is_routine_constrained() const
         return true;
     };
 
-    if(routine_constraint(function_name.c_str())) return true;
-
     auto npos = std::string::npos;
     if(function_name.find("omnitrace") != npos)
     {
@@ -428,7 +426,7 @@ module_function::is_routine_constrained() const
     }
 
     static std::regex exclude(
-        "(omnitrace|tim::|N3tim|MPI_Init|MPI_Finalize|dyninst|tm_clones)", regex_opts);
+        "(omnitrace|tim::|MPI_Init|MPI_Finalize|dyninst|DYNINST|tm_clones)", regex_opts);
     static std::regex exclude_printf("(|v|f)printf$", regex_opts);
     static std::regex exclude_cxx(
         "(std::_Sp_counted_base|std::(use|has)_facet|std::locale|::sentry|^std::_|::_(M|"

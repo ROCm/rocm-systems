@@ -457,7 +457,8 @@ main(int argc, char** argv)
     parser
         .add_argument(
             { "-L", "--library" },
-            "Libraries with instrumentation routines (default: \"libomnitrace\")")
+            TIMEMORY_JOIN("", "Libraries with instrumentation routines (default: \"",
+                          inputlib.front(), "\")"))
         .action([&inputlib](parser_t& p) { inputlib = p.get<strvec_t>("library"); });
     parser
         .add_argument({ "-m", "--main-function" },
@@ -1184,7 +1185,7 @@ main(int argc, char** argv)
     {
         for(auto* itr : *app_functions)
         {
-            if(itr->getModule() && !itr->getModule()->isSystemLib())
+            if(itr->getModule())
             {
                 functions.emplace(itr);
                 modules.emplace(itr->getModule());
@@ -1214,9 +1215,8 @@ main(int argc, char** argv)
     if(parse_all_modules && app_modules && !app_modules->empty())
     {
         for(auto* itr : *app_modules)
-        {
-            if(!itr->isSystemLib()) modules.emplace(itr);
-        }
+            modules.emplace(itr);
+
         verbprintf(2,
                    "Adding the procedures from %zu modules found in the app image...\n",
                    modules.size());
@@ -2267,24 +2267,6 @@ query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cf
     }
 
     return { _n, _t };
-}
-
-//======================================================================================//
-// Constraints for instrumentation. Returns true for those modules that
-// shouldn't be instrumented.
-bool
-module_constraint(const char*)
-{
-    return false;
-}
-
-//======================================================================================//
-// Constraint for routines. The constraint returns true for those routines that
-// should not be instrumented.
-bool
-routine_constraint(const char*)
-{
-    return false;
 }
 
 namespace
