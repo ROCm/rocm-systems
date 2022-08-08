@@ -356,12 +356,12 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_RW_LOCKS",
                              "Enable tracing calls to pthread_rwlock_* functions. May "
                              "cause deadlocks with ROCm-enabled OpenMPI.",
-                             false, "backend", "parallelism", "gotcha", "advanced");
+                             true, "backend", "parallelism", "gotcha", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_SPIN_LOCKS",
                              "Enable tracing calls to pthread_spin_* functions. May "
                              "cause deadlocks with MPI distributions.",
-                             false, "backend", "parallelism", "gotcha", "advanced");
+                             true, "backend", "parallelism", "gotcha", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_SAMPLING_KEEP_INTERNAL",
