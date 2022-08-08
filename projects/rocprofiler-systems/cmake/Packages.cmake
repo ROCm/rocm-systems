@@ -736,18 +736,114 @@ omnitrace_add_feature(CMAKE_CXX_FLAGS "C++ compiler flags")
 #
 # ----------------------------------------------------------------------------------------#
 
-set(OMNITRACE_INSTALL_PYTHONDIR
-    "${CMAKE_INSTALL_LIBDIR}/python/site-packages"
-    CACHE STRING "Installation prefix for python")
-set(CMAKE_INSTALL_PYTHONDIR ${OMNITRACE_INSTALL_PYTHONDIR})
-
 if(OMNITRACE_USE_PYTHON)
     if(OMNITRACE_USE_PYTHON AND NOT OMNITRACE_BUILD_PYTHON)
         find_package(pybind11 REQUIRED)
     endif()
 
     include(ConfigPython)
+    include(PyBind11Tools)
+
+    omnitrace_watch_for_change(OMNITRACE_PYTHON_ROOT_DIRS _PYTHON_DIRS_CHANGED)
+
+    if(_PYTHON_DIRS_CHANGED)
+        unset(OMNITRACE_PYTHON_VERSION CACHE)
+        unset(OMNITRACE_PYTHON_VERSIONS CACHE)
+        unset(OMNITRACE_INSTALL_PYTHONDIR CACHE)
+    else()
+        foreach(_VAR PREFIX ENVS)
+            omnitrace_watch_for_change(OMNITRACE_PYTHON_${_VAR} _CHANGED)
+
+            if(_CHANGED)
+                unset(OMNITRACE_PYTHON_ROOT_DIRS CACHE)
+                unset(OMNITRACE_PYTHON_VERSIONS CACHE)
+                unset(OMNITRACE_INSTALL_PYTHONDIR CACHE)
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    if(OMNITRACE_PYTHON_PREFIX AND OMNITRACE_PYTHON_ENVS)
+        omnitrace_directory(
+            FAIL
+            PREFIX ${OMNITRACE_PYTHON_PREFIX}
+            PATHS ${OMNITRACE_PYTHON_ENVS}
+            OUTPUT_VARIABLE _PYTHON_ROOT_DIRS)
+        set(OMNITRACE_PYTHON_ROOT_DIRS
+            "${_PYTHON_ROOT_DIRS}"
+            CACHE INTERNAL "Root directories for python")
+    endif()
+
+    if(NOT OMNITRACE_PYTHON_VERSIONS AND OMNITRACE_PYTHON_VERSION)
+        set(OMNITRACE_PYTHON_VERSIONS "${OMNITRACE_PYTHON_VERSION}")
+
+        if(NOT OMNITRACE_PYTHON_ROOT_DIRS)
+            omnitrace_find_python(_PY VERSION ${OMNITRACE_PYTHON_VERSION})
+            set(OMNITRACE_PYTHON_ROOT_DIRS
+                "${_PY_ROOT_DIR}"
+                CACHE INTERNAL "" FORCE)
+        endif()
+
+        unset(OMNITRACE_PYTHON_VERSION CACHE)
+        unset(OMNITRACE_INSTALL_PYTHONDIR CACHE)
+    elseif(
+        NOT OMNITRACE_PYTHON_VERSIONS
+        AND NOT OMNITRACE_PYTHON_VERSION
+        AND OMNITRACE_PYTHON_ROOT_DIRS)
+        set(_PY_VERSIONS)
+
+        foreach(_DIR ${OMNITRACE_PYTHON_ROOT_DIRS})
+            omnitrace_find_python(_PY ROOT_DIR ${_DIR})
+
+            if(NOT _PY_FOUND)
+                continue()
+            endif()
+
+            if(NOT "${_PY_VERSION}" IN_LIST _PY_VERSIONS)
+                list(APPEND _PY_VERSIONS "${_PY_VERSION}")
+            endif()
+        endforeach()
+
+        set(OMNITRACE_PYTHON_VERSIONS
+            "${_PY_VERSIONS}"
+            CACHE INTERNAL "" FORCE)
+    elseif(
+        NOT OMNITRACE_PYTHON_VERSIONS
+        AND NOT OMNITRACE_PYTHON_VERSION
+        AND NOT OMNITRACE_PYTHON_ROOT_DIRS)
+        omnitrace_find_python(_PY REQUIRED)
+        set(OMNITRACE_PYTHON_ROOT_DIRS
+            "${_PY_ROOT_DIR}"
+            CACHE INTERNAL "" FORCE)
+        set(OMNITRACE_PYTHON_VERSIONS
+            "${_PY_VERSION}"
+            CACHE INTERNAL "" FORCE)
+    endif()
+
+    omnitrace_watch_for_change(OMNITRACE_PYTHON_ROOT_DIRS)
+    omnitrace_watch_for_change(OMNITRACE_PYTHON_VERSIONS)
+
+    omnitrace_check_python_dirs_and_versions(FAIL)
+
+    list(LENGTH OMNITRACE_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
+
+    if(_NUM_PYTHON_VERSIONS GREATER 1)
+        set(OMNITRACE_INSTALL_PYTHONDIR
+            "${CMAKE_INSTALL_LIBDIR}/python/site-packages"
+            CACHE STRING "Installation prefix for python")
+    else()
+        set(OMNITRACE_INSTALL_PYTHONDIR
+            "${CMAKE_INSTALL_LIBDIR}/python${OMNITRACE_PYTHON_VERSIONS}/site-packages"
+            CACHE STRING "Installation prefix for python")
+    endif()
+else()
+    set(OMNITRACE_INSTALL_PYTHONDIR
+        "${CMAKE_INSTALL_LIBDIR}/python/site-packages"
+        CACHE STRING "Installation prefix for python")
 endif()
+
+omnitrace_watch_for_change(OMNITRACE_INSTALL_PYTHONDIR)
+set(CMAKE_INSTALL_PYTHONDIR ${OMNITRACE_INSTALL_PYTHONDIR})
 
 # ----------------------------------------------------------------------------------------#
 #

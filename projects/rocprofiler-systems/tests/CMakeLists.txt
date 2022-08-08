@@ -106,7 +106,7 @@ set(_python_environment
     "OMNITRACE_USE_PID=OFF"
     "OMNITRACE_TIMEMORY_COMPONENTS=wall_clock,trip_count"
     "${_test_library_path}"
-    "PYTHONPATH=${PROJECT_BINARY_DIR}/lib/python/site-packages")
+    "PYTHONPATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}")
 
 set(_attach_environment
     "OMNITRACE_USE_PERFETTO=ON"

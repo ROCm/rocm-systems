@@ -260,32 +260,31 @@ add_subdirectory(source)
 #
 # ------------------------------------------------------------------------------#
 
-configure_file(${PROJECT_SOURCE_DIR}/cmake/Templates/setup-env.sh.in
-               ${PROJECT_BINARY_DIR}/install-tree/setup-env.sh @ONLY)
+configure_file(
+    ${PROJECT_SOURCE_DIR}/omnitrace.cfg
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/omnitrace.cfg
+    COPYONLY)
+
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/Templates/setup-env.sh.in
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/setup-env.sh @ONLY)
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/modulefile.in
-    ${PROJECT_BINARY_DIR}/install-tree/modulefiles/${PROJECT_NAME}/${OMNITRACE_VERSION}
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNITRACE_VERSION}
     @ONLY)
 
 install(
-    FILES ${PROJECT_SOURCE_DIR}/omnitrace.cfg
+    FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/setup-env.sh
+          ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/omnitrace.cfg
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
-    COMPONENT setup
-    OPTIONAL)
-
-install(
-    FILES ${PROJECT_BINARY_DIR}/install-tree/setup-env.sh
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
-    COMPONENT setup
-    OPTIONAL)
+    COMPONENT setup)
 
 install(
     FILES
-        ${PROJECT_BINARY_DIR}/install-tree/modulefiles/${PROJECT_NAME}/${OMNITRACE_VERSION}
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNITRACE_VERSION}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}
-    COMPONENT setup
-    OPTIONAL)
+    COMPONENT setup)
 
 # ------------------------------------------------------------------------------#
 #

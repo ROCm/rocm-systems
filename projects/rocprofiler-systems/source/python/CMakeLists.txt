@@ -28,13 +28,13 @@ function(OMNITRACE_CONFIGURE_PYTARGET _TARGET _VERSION)
         PROPERTIES PREFIX ""
                    OUTPUT_NAME libpyomnitrace
                    LIBRARY_OUTPUT_DIRECTORY
-                   ${PROJECT_BINARY_DIR}/lib/python/site-packages/omnitrace
+                   ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/omnitrace
                    ARCHIVE_OUTPUT_DIRECTORY
-                   ${PROJECT_BINARY_DIR}/lib/python/site-packages/omnitrace
+                   ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/omnitrace
                    RUNTIME_OUTPUT_DIRECTORY
-                   ${PROJECT_BINARY_DIR}/lib/python/site-packages/omnitrace
+                   ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/omnitrace
                    PDB_OUTPUT_DIRECTORY
-                   ${PROJECT_BINARY_DIR}/lib/python/site-packages/omnitrace
+                   ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/omnitrace
                    ${EXTRA_PROPERTIES})
 
     set(_PYLIB ${CMAKE_INSTALL_PYTHONDIR}/omnitrace)
@@ -43,7 +43,7 @@ function(OMNITRACE_CONFIGURE_PYTARGET _TARGET _VERSION)
     endif()
 
     if(SKBUILD)
-        set(LIB_RELPATH ../../../..)
+        set(LIB_RELPATH ../../..)
     else()
         file(RELATIVE_PATH LIB_RELPATH "${_PYLIB}"
              "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
@@ -92,84 +92,12 @@ target_link_libraries(
 omnitrace_target_compile_definitions(libpyomnitrace-interface
                                      INTERFACE OMNITRACE_PYBIND11_SOURCE)
 
-include(PyBind11Tools)
-
-omnitrace_watch_for_change(OMNITRACE_PYTHON_ROOT_DIRS _PYTHON_DIRS_CHANGED)
-if(_PYTHON_DIRS_CHANGED)
-    unset(OMNITRACE_PYTHON_VERSION CACHE)
-    unset(OMNITRACE_PYTHON_VERSIONS CACHE)
-else()
-    foreach(_VAR PREFIX ENVS)
-        omnitrace_watch_for_change(OMNITRACE_PYTHON_${_VAR} _CHANGED)
-        if(_CHANGED)
-            unset(OMNITRACE_PYTHON_ROOT_DIRS CACHE)
-            unset(OMNITRACE_PYTHON_VERSIONS CACHE)
-            break()
-        endif()
-    endforeach()
-endif()
-
-if(OMNITRACE_PYTHON_PREFIX AND OMNITRACE_PYTHON_ENVS)
-    omnitrace_directory(
-        FAIL
-        PREFIX ${OMNITRACE_PYTHON_PREFIX}
-        PATHS ${OMNITRACE_PYTHON_ENVS}
-        OUTPUT_VARIABLE _PYTHON_ROOT_DIRS)
-    set(OMNITRACE_PYTHON_ROOT_DIRS
-        "${_PYTHON_ROOT_DIRS}"
-        CACHE INTERNAL "Root directories for python")
-endif()
-
-if(NOT OMNITRACE_PYTHON_VERSIONS AND OMNITRACE_PYTHON_VERSION)
-    set(OMNITRACE_PYTHON_VERSIONS "${OMNITRACE_PYTHON_VERSION}")
-    if(NOT OMNITRACE_PYTHON_ROOT_DIRS)
-        omnitrace_find_python(_PY VERSION ${OMNITRACE_PYTHON_VERSION})
-        set(OMNITRACE_PYTHON_ROOT_DIRS
-            "${_PY_ROOT_DIR}"
-            CACHE INTERNAL "" FORCE)
-    endif()
-    unset(OMNITRACE_PYTHON_VERSION CACHE)
-elseif(
-    NOT OMNITRACE_PYTHON_VERSIONS
-    AND NOT OMNITRACE_PYTHON_VERSION
-    AND OMNITRACE_PYTHON_ROOT_DIRS)
-    set(_PY_VERSIONS)
-    foreach(_DIR ${OMNITRACE_PYTHON_ROOT_DIRS})
-        omnitrace_find_python(_PY ROOT_DIR ${_DIR})
-        if(NOT _PY_FOUND)
-            continue()
-        endif()
-        if(NOT "${_PY_VERSION}" IN_LIST _PY_VERSIONS)
-            list(APPEND _PY_VERSIONS "${_PY_VERSION}")
-        endif()
-    endforeach()
-    set(OMNITRACE_PYTHON_VERSIONS
-        "${_PY_VERSIONS}"
-        CACHE INTERNAL "" FORCE)
-elseif(
-    NOT OMNITRACE_PYTHON_VERSIONS
-    AND NOT OMNITRACE_PYTHON_VERSION
-    AND NOT OMNITRACE_PYTHON_ROOT_DIRS)
-    omnitrace_find_python(_PY REQUIRED)
-    set(OMNITRACE_PYTHON_ROOT_DIRS
-        "${_PY_ROOT_DIR}"
-        CACHE INTERNAL "" FORCE)
-    set(OMNITRACE_PYTHON_VERSIONS
-        "${_PY_VERSION}"
-        CACHE INTERNAL "" FORCE)
-endif()
-
-omnitrace_watch_for_change(OMNITRACE_PYTHON_ROOT_DIRS)
-omnitrace_watch_for_change(OMNITRACE_PYTHON_VERSIONS)
-
-omnitrace_check_python_dirs_and_versions(FAIL)
-
 add_custom_target(libpyomnitrace)
 
 file(GLOB_RECURSE PYTHON_FILES ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/*.py)
 foreach(_IN ${PYTHON_FILES})
     string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/omnitrace"
-                   "${PROJECT_BINARY_DIR}/lib/python/site-packages/omnitrace" _OUT
+                   "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/omnitrace" _OUT
                    "${_IN}")
     configure_file(${_IN} ${_OUT} @ONLY)
     install(
@@ -200,8 +128,8 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
 endforeach()
 
 configure_file(${CMAKE_CURRENT_LIST_DIR}/setup.py.in
-               ${PROJECT_BINARY_DIR}/lib/python/site-packages/setup.py @ONLY)
+               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/setup.py @ONLY)
 configure_file(${CMAKE_CURRENT_LIST_DIR}/setup.cfg.in
-               ${PROJECT_BINARY_DIR}/lib/python/site-packages/setup.cfg @ONLY)
+               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/setup.cfg @ONLY)
 configure_file(${CMAKE_CURRENT_LIST_DIR}/pyproject.toml
-               ${PROJECT_BINARY_DIR}/lib/python/site-packages/pyproject.toml COPYONLY)
+               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/pyproject.toml COPYONLY)
