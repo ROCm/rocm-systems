@@ -71,10 +71,28 @@ namespace omnitrace
 {
 namespace rocm
 {
-std::mutex rocm_mutex = {};
-bool       is_loaded  = false;
+std::mutex rocm_mutex    = {};
+bool       is_loaded     = false;
+bool       on_load_trace = (get_env<int>("ROCP_ONLOAD_TRACE", 0) > 0);
 }  // namespace rocm
 }  // namespace omnitrace
+
+std::ostream&
+operator<<(std::ostream& _os, const rocprofiler_settings_t& _v)
+{
+#define ROCPROF_SETTING_FIELD_STR(NAME) JOIN('=', #NAME, _v.NAME)
+
+    _os << JOIN(
+        ", ", ROCPROF_SETTING_FIELD_STR(intercept_mode),
+        ROCPROF_SETTING_FIELD_STR(code_obj_tracking),
+        ROCPROF_SETTING_FIELD_STR(memcopy_tracking),
+        ROCPROF_SETTING_FIELD_STR(trace_size), ROCPROF_SETTING_FIELD_STR(trace_local),
+        ROCPROF_SETTING_FIELD_STR(timeout), ROCPROF_SETTING_FIELD_STR(timestamp_on),
+        ROCPROF_SETTING_FIELD_STR(hsa_intercepting),
+        ROCPROF_SETTING_FIELD_STR(k_concurrent), ROCPROF_SETTING_FIELD_STR(opt_mode),
+        ROCPROF_SETTING_FIELD_STR(obj_dumping));
+    return _os;
+}
 
 // HSA-runtime tool on-load method
 extern "C"
@@ -82,12 +100,17 @@ extern "C"
 #if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
     void OnUnloadTool()
     {
-        OMNITRACE_BASIC_VERBOSE(2, "Inside %s\n", __FUNCTION__);
+        OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Unloading...\n");
 
         rocm::lock_t _lk{ rocm::rocm_mutex, std::defer_lock };
         if(!_lk.owns_lock()) _lk.lock();
 
-        if(!rocm::is_loaded) return;
+        if(!rocm::is_loaded)
+        {
+            OMNITRACE_BASIC_VERBOSE_F(1 || rocm::on_load_trace,
+                                      "rocprofiler is not loaded\n");
+            return;
+        }
         rocm::is_loaded = false;
 
         _lk.unlock();
@@ -99,14 +122,15 @@ extern "C"
 
     void OnLoadToolProp(rocprofiler_settings_t* settings)
     {
-        OMNITRACE_BASIC_VERBOSE(2, "Inside %s\n", __FUNCTION__);
+        OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Loading...\n");
 
         rocm::lock_t _lk{ rocm::rocm_mutex, std::defer_lock };
         if(!_lk.owns_lock()) _lk.lock();
 
         if(rocm::is_loaded)
         {
-            OMNITRACE_BASIC_VERBOSE_F(1, "rocprofiler is already loaded\n");
+            OMNITRACE_BASIC_VERBOSE_F(1 || rocm::on_load_trace,
+                                      "rocprofiler is already loaded\n");
             return;
         }
         rocm::is_loaded = true;
@@ -118,6 +142,16 @@ extern "C"
         settings->intercept_mode   = 1;
         settings->hsa_intercepting = 1;
         settings->k_concurrent     = 1;
+        settings->obj_dumping      = 0;
+        // settings->code_obj_tracking = 0;
+        // settings->memcopy_tracking  = 0;
+        // settings->trace_local       = 1;
+        // settings->opt_mode          = 1;
+        // settings->trace_size        = 0;
+        // settings->timeout           = 0;
+
+        OMNITRACE_BASIC_VERBOSE_F(1 || rocm::on_load_trace, "rocprofiler settings: %s\n",
+                                  JOIN("", *settings).c_str());
 
         // Initialize profiling
         omnitrace::rocprofiler::rocm_initialize();
@@ -128,14 +162,14 @@ extern "C"
     bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                 const char* const* failed_tool_names)
     {
-        OMNITRACE_BASIC_VERBOSE(2, "Inside %s\n", __FUNCTION__);
+        OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Loading...\n");
 
         if(!tim::get_env("OMNITRACE_INIT_TOOLING", true)) return true;
         if(!tim::settings::enabled()) return true;
 
         roctracer_is_init() = true;
         pthread_gotcha::push_enable_sampling_on_child_threads(false);
-        OMNITRACE_BASIC_VERBOSE_F(1, "Loading ROCm tooling...\n");
+        OMNITRACE_BASIC_VERBOSE_F(1 || rocm::on_load_trace, "Loading ROCm tooling...\n");
 
         tim::consume_parameters(table, runtime_version, failed_tool_count,
                                 failed_tool_names);
@@ -148,7 +182,8 @@ extern "C"
         static auto _setup = [=]() {
             try
             {
-                OMNITRACE_VERBOSE(1, "[OnLoad] setting up HSA...\n");
+                OMNITRACE_VERBOSE(1 || rocm::on_load_trace,
+                                  "[OnLoad] setting up HSA...\n");
 
                 // const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
                 const char* output_prefix = nullptr;
@@ -175,12 +210,13 @@ extern "C"
                             ROCTRACER_CALL(roctracer_enable_op_callback(
                                 ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, nullptr));
 
-                            OMNITRACE_VERBOSE(1, "    HSA-trace(%s)", api);
+                            OMNITRACE_VERBOSE(1 || rocm::on_load_trace,
+                                              "    HSA-trace(%s)", api);
                         }
                     }
                     else
                     {
-                        OMNITRACE_VERBOSE(1, "    HSA-trace()\n");
+                        OMNITRACE_VERBOSE(1 || rocm::on_load_trace, "    HSA-trace()\n");
                         ROCTRACER_CALL(roctracer_enable_domain_callback(
                             ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, nullptr));
                     }
@@ -199,7 +235,8 @@ extern "C"
                     };
                     roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
 
-                    OMNITRACE_VERBOSE(1, "    HSA-activity-trace()\n");
+                    OMNITRACE_VERBOSE(1 || rocm::on_load_trace,
+                                      "    HSA-activity-trace()\n");
                     ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS,
                                                                 HSA_OP_ID_COPY));
                 }
@@ -219,16 +256,19 @@ extern "C"
                 roctracer_disable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
         };
 
-        OMNITRACE_VERBOSE_F(1, "Computing the roctracer clock skew...\n");
+        OMNITRACE_VERBOSE_F(1 || rocm::on_load_trace,
+                            "Computing the roctracer clock skew...\n");
         (void) omnitrace::get_clock_skew();
 
         comp::roctracer::add_setup("hsa", _setup);
         comp::roctracer::add_shutdown("hsa", _shutdown);
 
-        OMNITRACE_VERBOSE_F(1, "Setting rocm_smi state to active...\n");
+        OMNITRACE_VERBOSE_F(1 || rocm::on_load_trace,
+                            "Setting rocm_smi state to active...\n");
         rocm_smi::set_state(State::Active);
 
-        OMNITRACE_VERBOSE_F(1, "Requesting roctracer to setup...\n");
+        OMNITRACE_VERBOSE_F(1 || rocm::on_load_trace,
+                            "Requesting roctracer to setup...\n");
         comp::roctracer::setup();
 
 #if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
@@ -252,7 +292,8 @@ extern "C"
                                                      "rocprofiler/lib64" }),
                                  (RTLD_LAZY | RTLD_GLOBAL), false };
 
-            OMNITRACE_VERBOSE_F(1, "Loading rocprofiler library (%s=%s)...\n",
+            OMNITRACE_VERBOSE_F(1 || rocm::on_load_trace,
+                                "Loading rocprofiler library (%s=%s)...\n",
                                 _rocprof.envname.c_str(), _rocprof.filename.c_str());
             _rocprof.open();
 
@@ -269,16 +310,20 @@ extern "C"
                                _rocprof.filename.c_str());
         }
         pthread_gotcha::pop_enable_sampling_on_child_threads();
+
+        OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Loading... %s\n",
+                                  (_success) ? "Done" : "Failed");
         return _success;
     }
 
     // HSA-runtime on-unload method
     void OnUnload()
     {
-        OMNITRACE_BASIC_VERBOSE(2, "Inside %s\n", __FUNCTION__);
+        OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Unloading...\n");
         rocm_smi::set_state(State::Finalized);
         comp::roctracer::shutdown();
         comp::rocprofiler::shutdown();
         omnitrace_finalize_hidden();
+        OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Unloading... Done\n");
     }
 }
