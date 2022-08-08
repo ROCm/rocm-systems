@@ -82,7 +82,7 @@ ignore_setting(const Tp& _v)
        category_view.count("settings::deprecated") == 0 &&
        _v->get_categories().count("deprecated") > 0)
         return true;
-    if(category_view.count("advanced") == 0 &&
+    if(!print_advanced && category_view.count("advanced") == 0 &&
        category_view.count("settings::advanced") == 0 &&
        _v->get_categories().count("advanced") > 0)
         return true;
@@ -209,15 +209,26 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
     }
     _output_dir += "/";
 
+    auto        _fmts    = std::set<std::string>{};
     std::string _txt_ext = ".cfg";
     for(std::string itr : { ".cfg", ".txt", ".json", ".xml" })
     {
+        if(_config_file.length() <= itr.length()) continue;
         auto _pos = _config_file.rfind(itr);
         if(_pos == _config_file.length() - itr.length())
         {
             if(itr == ".cfg" || itr == ".txt") _txt_ext = itr;
+            _fmts.emplace(itr.substr(1));
             _config_file = _config_file.substr(0, _pos);
         }
+    }
+
+    if(_fmts.empty() && _config_fmts.size() == 1)
+        _fmts = _config_fmts;
+    else if(!_fmts.empty())
+    {
+        for(auto& itr : _config_fmts)
+            _fmts.emplace(itr);
     }
 
     update_choices(_settings);
@@ -239,8 +250,10 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         _ar->finishNode();
     };
 
-    auto _open = [](std::ofstream& _ofs, const std::string& _fname,
-                    const std::string& _type) -> std::ofstream& {
+    auto _nout = 0;
+    auto _open = [&_nout](std::ofstream& _ofs, const std::string& _fname,
+                          const std::string& _type) -> std::ofstream& {
+        ++_nout;
         if(file_exists(_fname))
         {
             if(force_config)
@@ -273,7 +286,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         return _ofs;
     };
 
-    if(_config_fmts.count("json") > 0)
+    if(_fmts.count("json") > 0)
     {
         std::stringstream _ss{};
         output_archive<cereal::PrettyJSONOutputArchive>::indent_length() = 4;
@@ -284,7 +297,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         _open(ofs, _fname, "JSON") << _ss.str() << "\n";
     }
 
-    if(_config_fmts.count("xml") > 0)
+    if(_fmts.count("xml") > 0)
     {
         std::stringstream _ss{};
         output_archive<cereal::XMLOutputArchive>::indent() = true;
@@ -295,7 +308,7 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         _open(ofs, _fname, "XML") << _ss.str() << "\n";
     }
 
-    if(_config_fmts.count("txt") > 0)
+    if(_fmts.count("txt") > 0 || _fmts.count("cfg") > 0 || _nout == 0)
     {
         std::stringstream _ss{};
         size_t            _w = min_width;
