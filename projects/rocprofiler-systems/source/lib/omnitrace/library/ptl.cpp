@@ -29,6 +29,7 @@
 
 #include <PTL/ThreadPool.hh>
 
+#include <timemory/backends/threading.hpp>
 #include <timemory/utility/declaration.hpp>
 
 namespace omnitrace
@@ -44,6 +45,7 @@ auto _thread_pool_cfg = []() {
     _v.use_tbb      = false;
     _v.verbose      = -1;
     _v.initializer  = []() {
+        threading::offset_this_id(true);
         set_thread_state(ThreadState::Internal);
         sampling::block_signals();
         threading::set_thread_name(

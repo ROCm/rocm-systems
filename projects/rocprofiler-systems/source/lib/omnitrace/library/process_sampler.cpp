@@ -74,9 +74,10 @@ get_sampler_is_sampling()
 void
 sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
 {
-    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-
+    threading::offset_this_id(true);
     threading::set_thread_name("omni.sampler");
+
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
     // notify thread started
     if(_ready) _ready->set_value();

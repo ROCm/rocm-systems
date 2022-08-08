@@ -232,10 +232,12 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
+        threading::offset_this_id(true);
         if(threading::get_id() != 0)
         {
             sampling::block_signals();
             threading::set_thread_name("roctracer.hsa");
+            sampling::shutdown();
         }
     });
 
@@ -354,8 +356,13 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
 
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
-        sampling::block_signals();
-        threading::set_thread_name("roctracer.hsa");
+        threading::offset_this_id(true);
+        if(threading::get_id() != 0)
+        {
+            sampling::block_signals();
+            threading::set_thread_name("roctracer.hsa");
+            sampling::shutdown();
+        }
     });
 
     auto&& _protect = comp::roctracer::protect_flush_activity();
@@ -795,8 +802,13 @@ hip_activity_callback(const char* begin, const char* end, void*)
 
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
-        sampling::block_signals();
-        threading::set_thread_name("roctracer.hip");
+        threading::offset_this_id(true);
+        if(threading::get_id() != 0)
+        {
+            sampling::block_signals();
+            threading::set_thread_name("roctracer.hip");
+            sampling::shutdown();
+        }
     });
 
     auto&& _protect = comp::roctracer::protect_flush_activity();

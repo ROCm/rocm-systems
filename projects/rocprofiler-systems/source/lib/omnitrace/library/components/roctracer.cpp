@@ -122,6 +122,7 @@ roctracer::setup()
     roctracer_is_setup() = true;
 
     OMNITRACE_VERBOSE_F(1, "setting up roctracer...\n");
+    pthread_gotcha::push_enable_sampling_on_child_threads(false);
 
     dynamic_library _amdhip64{ "OMNITRACE_ROCTRACER_LIBAMDHIP64",
                                find_library_path("libamdhip64.so",
@@ -168,6 +169,8 @@ roctracer::setup()
     // callback for HSA
     for(auto& itr : roctracer_setup_routines())
         itr.second();
+
+    pthread_gotcha::pop_enable_sampling_on_child_threads();
 
     OMNITRACE_VERBOSE_F(1, "roctracer is setup\n");
 }
