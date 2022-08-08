@@ -425,7 +425,6 @@ backtrace::configure(bool _setup, int64_t _tid)
         }
 
         _sampler->stop();
-        _sampler->swap_data();
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
             if(_tid == threading::get_id())
@@ -653,27 +652,29 @@ backtrace::post_process(int64_t _tid)
                                  "end_ns", _end_ns);
     };
 
-    auto _raw_data = _sampler->get_allocator().get_data();
+    _sampler->stop();
+    auto _raw_data = _sampler->get_data();
+    OMNITRACE_CI_THROW(
+        _sampler->get_sample_count() != _raw_data.size(),
+        "Error! sampler recorded %zu samples but %zu samples were returned\n",
+        _sampler->get_sample_count(), _raw_data.size());
     // single sample that is useless (backtrace to unblocking signals)
     if(_raw_data.size() == 1 && _raw_data.front().size() <= 1) _raw_data.clear();
 
     std::vector<sampling::bundle_t*> _data{};
-    for(auto& ditr : _raw_data)
+    for(auto& itr : _raw_data)
     {
-        _data.reserve(_data.size() + ditr.size());
-        for(auto& ritr : ditr)
+        _data.reserve(_data.size() + itr.size());
+        auto* _bt = itr.get<backtrace>();
+        if(!_bt)
         {
-            auto* _bt = ritr.get<backtrace>();
-            if(!_bt)
-            {
-                OMNITRACE_PRINT(
-                    "Warning! Nullptr to backtrace instance for thread %lu...\n", _tid);
-                continue;
-            }
-            if(_bt->empty()) continue;
-            if(!pthread_create_gotcha::is_valid_execution_time(_tid, _bt->m_ts)) continue;
-            _data.emplace_back(&ritr);
+            OMNITRACE_PRINT("Warning! Nullptr to backtrace instance for thread %lu...\n",
+                            _tid);
+            continue;
         }
+        if(_bt->empty()) continue;
+        if(!pthread_create_gotcha::is_valid_execution_time(_tid, _bt->m_ts)) continue;
+        _data.emplace_back(&itr);
     }
 
     if(_data.empty()) return;

@@ -79,16 +79,22 @@ template <typename DelimT, typename... Args>
 auto
 join(DelimT&& _delim, Args&&... _args)
 {
+    using delim_type = std::remove_cv_t<std::remove_reference_t<DelimT>>;
+
     std::stringstream _ss{};
     _ss << std::boolalpha;
-    OMNITRACE_FOLD_EXPRESSION(_ss << _delim << _args);
-    auto _ret = _ss.str();
-    if constexpr(std::is_same<DelimT, char>::value)
+
+    if constexpr(std::is_same<delim_type, char>::value)
     {
+        const char _delim_c[2] = { _delim, '\0' };
+        OMNITRACE_FOLD_EXPRESSION(_ss << _delim_c << _args);
+        auto _ret = _ss.str();
         return (_ret.length() > 1) ? _ret.substr(1) : std::string{};
     }
     else
     {
+        OMNITRACE_FOLD_EXPRESSION(_ss << _delim << _args);
+        auto   _ret = _ss.str();
         auto&& _len = std::string{ _delim }.length();
         return (_ret.length() > _len) ? _ret.substr(_len) : std::string{};
     }
@@ -101,16 +107,22 @@ template <typename DelimT, typename... Args>
 auto
 join(QuoteStrings&&, DelimT&& _delim, Args&&... _args)
 {
+    using delim_type = std::remove_cv_t<std::remove_reference_t<DelimT>>;
+
     std::stringstream _ss{};
     _ss << std::boolalpha;
-    OMNITRACE_FOLD_EXPRESSION(_ss << _delim << as_string(_args));
-    auto _ret = _ss.str();
-    if constexpr(std::is_same<DelimT, char>::value)
+
+    if constexpr(std::is_same<delim_type, char>::value)
     {
+        const char _delim_c[2] = { _delim, '\0' };
+        OMNITRACE_FOLD_EXPRESSION(_ss << _delim_c << as_string(_args));
+        auto _ret = _ss.str();
         return (_ret.length() > 1) ? _ret.substr(1) : std::string{};
     }
     else
     {
+        OMNITRACE_FOLD_EXPRESSION(_ss << _delim << as_string(_args));
+        auto   _ret = _ss.str();
         auto&& _len = std::string{ _delim }.length();
         return (_ret.length() > _len) ? _ret.substr(_len) : std::string{};
     }
