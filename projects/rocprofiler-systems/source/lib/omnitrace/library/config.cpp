@@ -358,6 +358,11 @@ configure_settings(bool _init)
                              "cause deadlocks with ROCm-enabled OpenMPI.",
                              false, "backend", "parallelism", "gotcha", "advanced");
 
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_SPIN_LOCKS",
+                             "Enable tracing calls to pthread_spin_* functions. May "
+                             "cause deadlocks with MPI distributions.",
+                             false, "backend", "parallelism", "gotcha", "advanced");
+
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_SAMPLING_KEEP_INTERNAL",
         "Configure whether the statistical samples should include call-stack entries "
@@ -1726,6 +1731,13 @@ bool
 get_trace_thread_rwlocks()
 {
     static auto _v = get_config()->find("OMNITRACE_TRACE_THREAD_RW_LOCKS");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_trace_thread_spin_locks()
+{
+    static auto _v = get_config()->find("OMNITRACE_TRACE_THREAD_SPIN_LOCKS");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 

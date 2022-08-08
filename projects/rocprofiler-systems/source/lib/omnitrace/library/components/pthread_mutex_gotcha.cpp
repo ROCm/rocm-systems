@@ -65,6 +65,11 @@ pthread_mutex_gotcha::get_hashes()
             for(size_t i = 3; i < 8; ++i)
                 _skip.emplace(i);
         }
+        if(!config::get_trace_thread_spin_locks())
+        {
+            for(size_t i = 9; i < 12; ++i)
+                _skip.emplace(i);
+        }
         for(size_t i = 0; i < gotcha_capacity; ++i)
         {
             auto&& _id = _data.at(i).tool_id;
@@ -131,14 +136,19 @@ pthread_mutex_gotcha::configure()
         pthread_mutex_gotcha_t::configure(
             comp::gotcha_config<8, int, pthread_barrier_t*>{ "pthread_barrier_wait" });
 
-        pthread_mutex_gotcha_t::configure(
-            comp::gotcha_config<9, int, pthread_spinlock_t*>{ "pthread_spin_lock" });
+        if(config::get_trace_thread_spin_locks())
+        {
+            pthread_mutex_gotcha_t::configure(
+                comp::gotcha_config<9, int, pthread_spinlock_t*>{ "pthread_spin_lock" });
 
-        pthread_mutex_gotcha_t::configure(
-            comp::gotcha_config<10, int, pthread_spinlock_t*>{ "pthread_spin_trylock" });
+            pthread_mutex_gotcha_t::configure(
+                comp::gotcha_config<10, int, pthread_spinlock_t*>{
+                    "pthread_spin_trylock" });
 
-        pthread_mutex_gotcha_t::configure(
-            comp::gotcha_config<11, int, pthread_spinlock_t*>{ "pthread_spin_unlock" });
+            pthread_mutex_gotcha_t::configure(
+                comp::gotcha_config<11, int, pthread_spinlock_t*>{
+                    "pthread_spin_unlock" });
+        }
 
         pthread_mutex_gotcha_t::configure(
             comp::gotcha_config<12, int, pthread_t, void**>{ "pthread_join" });
