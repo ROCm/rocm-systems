@@ -52,11 +52,11 @@ get_timemory_hash_aliases(int64_t _tid = threading::get_id());
 namespace
 {
 bool debug_push =  // NOLINT
-    tim::get_env("OMNITRACE_DEBUG_PUSH", false) && !get_debug_env();
+    tim::get_env("OMNITRACE_DEBUG_PUSH", false) || get_debug_env();
 bool debug_pop =  // NOLINT
-    tim::get_env("OMNITRACE_DEBUG_POP", false) && !get_debug_env();
+    tim::get_env("OMNITRACE_DEBUG_POP", false) || get_debug_env();
 bool debug_user =  // NOLINT
-    tim::get_env("OMNITRACE_DEBUG_USER_REGIONS", false) && !get_debug_env();
+    tim::get_env("OMNITRACE_DEBUG_USER_REGIONS", false) || get_debug_env();
 }  // namespace
 
 inline auto&

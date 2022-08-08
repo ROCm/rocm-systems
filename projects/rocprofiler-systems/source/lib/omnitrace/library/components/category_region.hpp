@@ -101,9 +101,6 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
         return;
     }
 
-    OMNITRACE_CONDITIONAL_BASIC_PRINT(tracing::debug_push, "omnitrace_push_region(%s)\n",
-                                      name.data());
-
     // the expectation here is that if the state is not active then the call
     // to omnitrace_init_tooling_hidden will activate all the appropriate
     // tooling one time and as it exits set it to active and return true.
@@ -111,12 +108,15 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
     {
         static auto _debug = get_debug_env() || get_debug_init();
         OMNITRACE_CONDITIONAL_BASIC_PRINT(
-            _debug, "omnitrace_push_region(%s) ignored :: not active. state = %s\n",
-            name.data(), std::to_string(get_state()).c_str());
+            _debug, "[%s] omnitrace_push_region(%s) ignored :: not active. state = %s\n",
+            category_name, name.data(), std::to_string(get_state()).c_str());
         return;
     }
 
-    OMNITRACE_DEBUG("[%s] omnitrace_push_region(%s)\n", category_name, name.data());
+    OMNITRACE_CONDITIONAL_PRINT(tracing::debug_push,
+                                "[%s][PID=%i][state=%s] omnitrace_push_region(%s)\n",
+                                category_name, process::get_id(),
+                                std::to_string(get_state()).c_str(), name.data());
 
     auto _use_timemory = get_use_timemory();
     auto _use_perfetto = get_use_perfetto();
@@ -163,11 +163,14 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
         (sizeof...(OptsT) == 0 ||
          tim::is_one_of<quirk::perfetto, tim::type_list<OptsT...>>::value);
 
+    OMNITRACE_CONDITIONAL_PRINT(tracing::debug_pop,
+                                "[%s][PID=%i][state=%s] omnitrace_pop_region(%s)\n",
+                                category_name, process::get_id(),
+                                std::to_string(get_state()).c_str(), name.data());
+
     // only execute when active
     if(get_state() == State::Active)
     {
-        OMNITRACE_CONDITIONAL_PRINT(tracing::debug_pop || get_debug(),
-                                    "omnitrace_pop_region(%s)\n", name.data());
         if(get_use_timemory())
         {
             if constexpr(_ct_use_timemory)
@@ -188,8 +191,8 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     {
         static auto _debug = get_debug_env();
         OMNITRACE_CONDITIONAL_BASIC_PRINT(
-            _debug, "omnitrace_pop_region(%s) ignored :: state = %s\n", name.data(),
-            std::to_string(get_state()).c_str());
+            _debug, "[%s] omnitrace_pop_region(%s) ignored :: state = %s\n",
+            category_name, name.data(), std::to_string(get_state()).c_str());
     }
 }
 
