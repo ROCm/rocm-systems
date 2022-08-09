@@ -112,13 +112,13 @@ LOADER_INSTANTIATE();
 TRACE_BUFFER_INSTANTIATE();
 
 // Global output file handle
-FILE* begin_ts_file_handle = NULL;
-FILE* roctx_file_handle = NULL;
-FILE* hsa_api_file_handle = NULL;
-FILE* hsa_async_copy_file_handle = NULL;
-FILE* hip_api_file_handle = NULL;
-FILE* hip_activity_file_handle = NULL;
-FILE* pc_sample_file_handle = NULL;
+FILE* begin_ts_file_handle = nullptr;
+FILE* roctx_file_handle = nullptr;
+FILE* hsa_api_file_handle = nullptr;
+FILE* hsa_async_copy_file_handle = nullptr;
+FILE* hip_api_file_handle = nullptr;
+FILE* hip_activity_file_handle = nullptr;
+FILE* pc_sample_file_handle = nullptr;
 
 void close_output_file(FILE* file_handle);
 void close_file_handles() {
@@ -261,7 +261,7 @@ void roctx_flush_cb(roctx_trace_entry_t* entry) {
   std::ostringstream os;
   os << entry->time << " " << entry->pid << ":" << entry->tid << " " << entry->cid << ":"
      << entry->rid;
-  if (entry->message != NULL)
+  if (entry->message != nullptr)
     os << ":\"" << entry->message << "\"";
   else
     os << ":\"\"";
@@ -599,13 +599,13 @@ std::string normalize_token(const std::string& token, bool not_empty, const std:
 }
 
 int get_xml_array(const xml::Xml::level_t* node, const std::string& field, const std::string& delim,
-                  std::vector<std::string>* vec, const char* label = NULL) {
+                  std::vector<std::string>* vec, const char* label = nullptr) {
   int parse_iter = 0;
   const auto& opts = node->opts;
   auto it = opts.find(field);
   if (it != opts.end()) {
     const std::string array_string = it->second;
-    if (label != NULL) printf("%s%s = %s\n", label, field.c_str(), array_string.c_str());
+    if (label != nullptr) printf("%s%s = %s\n", label, field.c_str(), array_string.c_str());
     size_t pos1 = 0;
     const size_t string_len = array_string.length();
     while (pos1 < string_len) {
@@ -629,29 +629,29 @@ int get_xml_array(const xml::Xml::level_t* node, const std::string& field, const
 }
 
 // Open output file
-FILE* open_output_file(const char* prefix, const char* name, const char** path = NULL) {
-  FILE* file_handle = NULL;
-  if (path != NULL) *path = NULL;
+FILE* open_output_file(const char* prefix, const char* name, const char** path = nullptr) {
+  FILE* file_handle = nullptr;
+  if (path != nullptr) *path = nullptr;
 
-  if (prefix != NULL) {
+  if (prefix != nullptr) {
     std::ostringstream oss;
     oss << prefix << "/" << GetPid() << "_" << name;
     file_handle = fopen(oss.str().c_str(), "w");
-    if (file_handle == NULL) {
+    if (file_handle == nullptr) {
       std::ostringstream errmsg;
       errmsg << "ROCTracer: fopen error, file '" << oss.str().c_str() << "'";
       perror(errmsg.str().c_str());
       abort();
     }
 
-    if (path != NULL) *path = strdup(oss.str().c_str());
+    if (path != nullptr) *path = strdup(oss.str().c_str());
   } else
     file_handle = stdout;
   return file_handle;
 }
 
 void close_output_file(FILE* file_handle) {
-  if (file_handle != NULL) {
+  if (file_handle != nullptr) {
     fflush(file_handle);
     if (file_handle != stdout) fclose(file_handle);
   }
@@ -659,7 +659,7 @@ void close_output_file(FILE* file_handle) {
 
 // Allocating tracing pool
 void open_tracing_pool() {
-  if (roctracer_default_pool() == NULL) {
+  if (roctracer_default_pool() == nullptr) {
     roctracer_properties_t properties{};
     properties.buffer_size = 0x80000;
     properties.buffer_callback_fun = pool_activity_callback;
@@ -732,9 +732,9 @@ void tool_load() {
 
   // Output file
   const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
-  if (output_prefix != NULL) {
+  if (output_prefix != nullptr) {
     DIR* dir = opendir(output_prefix);
-    if (dir == NULL) {
+    if (dir == nullptr) {
       std::ostringstream errmsg;
       errmsg << "ROCTracer: Cannot open output directory '" << output_prefix << "'";
       perror(errmsg.str().c_str());
@@ -744,7 +744,7 @@ void tool_load() {
 
   // API traces switches
   const char* trace_domain = getenv("ROCTRACER_DOMAIN");
-  if (trace_domain != NULL) {
+  if (trace_domain != nullptr) {
     // ROCTX domain
     if (std::string(trace_domain).find("roctx") != std::string::npos) {
       trace_roctx = true;
@@ -776,9 +776,9 @@ void tool_load() {
 
   // XML input
   const char* xml_name = getenv("ROCP_INPUT");
-  if (xml_name != NULL) {
+  if (xml_name != nullptr) {
     xml::Xml* xml = xml::Xml::Create(xml_name);
-    if (xml == NULL) {
+    if (xml == nullptr) {
       fprintf(stderr, "ROCTracer: Input file not found '%s'\n", xml_name);
       abort();
     }
@@ -834,11 +834,11 @@ void tool_load() {
     fprintf(stdout, "    rocTX-trace()\n");
     fflush(stdout);
     CHECK_ROCTRACER(
-        roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, roctx_api_callback, NULL));
+        roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, roctx_api_callback, nullptr));
   }
 
   const char* ctrl_str = getenv("ROCP_CTRL_RATE");
-  if (ctrl_str != NULL) {
+  if (ctrl_str != nullptr) {
     uint32_t ctrl_delay = 0;
     uint32_t ctrl_len = 0;
     uint32_t ctrl_rate = 0;
@@ -865,7 +865,7 @@ void tool_load() {
   }
 
   const char* flush_str = getenv("ROCP_FLUSH_RATE");
-  if (flush_str != NULL) {
+  if (flush_str != nullptr) {
     sscanf(flush_str, "%d", &control_flush_us);
     if (control_flush_us == 0) {
       fprintf(stderr, "ROCTracer: control flush rate bad value\n");
@@ -937,14 +937,14 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
       for (unsigned i = 0; i < hsa_api_vec.size(); ++i) {
         uint32_t cid = HSA_API_ID_NUMBER;
         const char* api = hsa_api_vec[i].c_str();
-        CHECK_ROCTRACER(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api, &cid, NULL));
+        CHECK_ROCTRACER(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api, &cid, nullptr));
         CHECK_ROCTRACER(
-            roctracer_enable_op_callback(ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, NULL));
+            roctracer_enable_op_callback(ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, nullptr));
         printf(" %s", api);
       }
     } else {
       CHECK_ROCTRACER(
-          roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, NULL));
+          roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, nullptr));
     }
     printf(")\n");
   }
@@ -977,14 +977,14 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
         for (unsigned i = 0; i < hip_api_vec.size(); ++i) {
           uint32_t cid = HIP_API_ID_NONE;
           const char* api = hip_api_vec[i].c_str();
-          CHECK_ROCTRACER(roctracer_op_code(ACTIVITY_DOMAIN_HIP_API, api, &cid, NULL));
+          CHECK_ROCTRACER(roctracer_op_code(ACTIVITY_DOMAIN_HIP_API, api, &cid, nullptr));
           CHECK_ROCTRACER(
-              roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API, cid, hip_api_callback, NULL));
+              roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API, cid, hip_api_callback, nullptr));
           printf(" %s", api);
         }
       } else {
         CHECK_ROCTRACER(
-            roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, NULL));
+            roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, nullptr));
       }
     }
 
