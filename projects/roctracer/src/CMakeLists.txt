@@ -100,6 +100,7 @@ set(PUBLIC_HEADERS
   roctracer_hcc.h
   roctracer_hsa.h
   roctracer_roctx.h
+  roctracer_plugin.h
   ext/prof_protocol.h)
 
 foreach(header ${PUBLIC_HEADERS})
@@ -191,7 +192,7 @@ target_include_directories(roctracer_tool
     ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/roctracer
     ${CMAKE_CURRENT_SOURCE_DIR})
 
-target_link_libraries(roctracer_tool roctracer hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl)
+target_link_libraries(roctracer_tool roctracer hsa-runtime64::hsa-runtime64 stdc++fs Threads::Threads atomic dl)
 target_link_options(roctracer_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/tracer_tool/exportmap -Wl,--no-undefined)
 
 install(TARGETS roctracer_tool LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT runtime)

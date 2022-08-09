@@ -66,8 +66,8 @@ typedef struct activity_record_s {
   union {
     struct {
       activity_correlation_id_t correlation_id; /* activity ID */
-      roctracer_timestamp_t begin_ns;                        /* host begin timestamp */
-      roctracer_timestamp_t end_ns;                          /* host end timestamp */
+      roctracer_timestamp_t begin_ns;           /* host begin timestamp */
+      roctracer_timestamp_t end_ns;             /* host end timestamp */
     };
     struct {
       uint32_t se;    /* sampled SE */
@@ -89,8 +89,9 @@ typedef struct activity_record_s {
     };
   };
   union {
-    size_t bytes; /* data size bytes */
-    const char* kernel_name;
+    size_t bytes;            /* data size bytes */
+    const char* kernel_name; /* kernel name */
+    const char* mark_message;
   };
 } activity_record_t;
 

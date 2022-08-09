@@ -58,6 +58,9 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
   add_subdirectory(test)
 endif()
 
+## Build Plugins
+add_subdirectory(plugin)
+
 if(${LIBRARY_TYPE} STREQUAL SHARED)
 
 ## Installation and packaging
@@ -169,7 +172,7 @@ if(DOXYGEN_FOUND)
     COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
     COMMAND make -C ${CMAKE_CURRENT_BINARY_DIR}/doc/latex pdf
     MAIN_DEPENDENCY ${DOXYGEN_OUT} ${DOXYGEN_IN}
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer.h
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer.h ${CMAKE_CURRENT_SOURCE_DIR}/inc/roctracer_plugin.h
     COMMENT "Generating documentation")
 
   add_custom_target(doc DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/doc/html/index.html
