@@ -548,6 +548,8 @@ std::string search_hsaco_full_path(const char* hsaco_file_name,
   path_to_search.push_back(std::string("./")+hsaco_file_name);
   path_to_search.push_back(app_dir+"/"+hsaco_file_name);
   path_to_search.push_back(lib_dir+"/"+hsaco_file_name);
+  path_to_search.push_back(lib_dir+"/rdc/hsaco/"+ agent_name
+                               + "/" + hsaco_file_name);
   path_to_search.push_back(lib_dir+"/hsaco/"+ agent_name
                             + "/" + hsaco_file_name);
   // for dev structure

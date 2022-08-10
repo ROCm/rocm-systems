@@ -38,6 +38,8 @@ option(BUILD_RASLIB "Build targets for raslib" OFF)
 # When cmake -DBUILD_ROCRTEST=off, it will not build the librdc_rocr.so
 # which requires the Rocm run time.
 option(BUILD_ROCRTEST "Build targets for librdc_rocr.so" ON)
+#File reorganization enable/disable
+option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
 
 if( NOT EXISTS "${CMAKE_SOURCE_DIR}/raslib/.git" AND BUILD_RASLIB)
     message( FATAL_ERROR "The git submodule raslib is not available. Please run
@@ -211,24 +213,24 @@ set(CLIENT_COMPONENT "client")
 if(BUILD_STANDALONE)
   install(DIRECTORY ${GRPC_ROOT}/lib
                 USE_SOURCE_PERMISSIONS
-                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc
+                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
                 COMPONENT ${SERVER_COMPONENT})
   # In SLES, The libprotobuf is created under lib64 folder, install it as well
   if(EXISTS ${GRPC_ROOT}/lib64)
       install(DIRECTORY ${GRPC_ROOT}/lib64/
                 USE_SOURCE_PERMISSIONS
-                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc/lib
+                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc/lib
                 COMPONENT ${SERVER_COMPONENT})
-  endif() 
+  endif()
 # Also include dev setup for people do not want to build grpc
   install(DIRECTORY ${GRPC_ROOT}/bin
                 USE_SOURCE_PERMISSIONS
-                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc
+                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
                 COMPONENT ${SERVER_COMPONENT})
 
   install(DIRECTORY ${GRPC_ROOT}/include
                 USE_SOURCE_PERMISSIONS
-                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/grpc
+                DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
                 COMPONENT ${SERVER_COMPONENT})
 
   add_subdirectory("server")
@@ -266,8 +268,8 @@ set(CONF_LIBS "librdc_bootstrap.so")
 configure_file(rdc-config.cmake.in
   "${PROJECT_BINARY_DIR}/rdc-config.cmake" @ONLY)
 # ... for the install tree
-set(CONF_INCLUDE_DIRS "${CMAKE_INSTALL_PREFIX}${RDC_CLIENT_INSTALL_PREFIX}/rdc/include")
-set(CONF_LIB_DIR  "${CMAKE_INSTALL_PREFIX}${RDC_CLIENT_INSTALL_PREFIX}/rdc/lib")
+set(CONF_INCLUDE_DIRS "${CMAKE_INSTALL_PREFIX}${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}")
+set(CONF_LIB_DIR  "${CMAKE_INSTALL_PREFIX}${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 set(CONF_LIBS "librdc_bootstrap.so")
 
 configure_file(rdc-config.cmake.in
@@ -279,10 +281,10 @@ configure_file(rdc-config-version.cmake.in
 install(FILES
   "${PROJECT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/rdc-config.cmake"
   "${PROJECT_BINARY_DIR}/rdc-config-version.cmake"
-  DESTINATION "${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib/cmake" COMPONENT dev)
+  DESTINATION "${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}" COMPONENT dev)
 # Install the export set for use with the install-tree
 install(EXPORT rdcTargets DESTINATION
-  "${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib/cmake" COMPONENT dev)
+  "${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}" COMPONENT dev)
 
 
 # License file
@@ -291,21 +293,21 @@ install( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${RDC_CLIENT_INSTALL_P
 
 # Python binding and example
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/python_binding
-             DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}
+             DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
                                          COMPONENT ${CLIENT_COMPONENT})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/example
-                 DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}
+                 DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/${RDC}
                                          COMPONENT ${CLIENT_COMPONENT})
 
 # Prebuild packages to install
 install(FILES  ${PROJECT_SOURCE_DIR}/ras_prebuild/librdc_ras.so
-    DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
+    DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/config
-     DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
+     DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/${RDC}
      COMPONENT ${CLIENT_COMPONENT})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/sp3
-     DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${RDC}/lib
+     DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}
      COMPONENT ${CLIENT_COMPONENT})
 
 
@@ -337,7 +339,10 @@ configure_file(
 configure_file(
   "${PROJECT_SOURCE_DIR}/src/RPM_postun.in"
   "${PROJECT_SOURCE_DIR}/RPM/rpm_postun" FILE_PERMISSIONS ${INST_SCR_PERM})
-
+#backward compatibility for file reorganization
+if(FILE_REORG_BACKWARD_COMPATIBILITY)
+  include(rdc-backward-compat.cmake)
+endif()
 if ( DEFINED ENV{ROCM_LIBPATCH_VERSION} )
   set ( CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}" )
   message ( "Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}" )
