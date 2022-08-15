@@ -23,9 +23,13 @@
 #
 cmake_minimum_required(VERSION 3.15)
 
+set(RDC "rdc")
+project(${RDC})
+include(GNUInstallDirs)
+
 # ROCM_DIR should be passed in via command line; these will be used
 # in sub-projects
-set(RSMI_INC_DIR ${ROCM_DIR}/rocm_smi/include)
+set(RSMI_INC_DIR ${ROCM_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
 
 # When cmake -DBUILD_STANDALONE=off, it will not build rdcd and rdci
 # which requires the gRPC
@@ -55,8 +59,7 @@ if (BUILD_RASLIB AND NOT DEFINED HSA_DIR)
     )
 endif()
 
-
-set(RSMI_LIB_DIR ${ROCM_DIR}/rocm_smi/lib)
+set(RSMI_LIB_DIR ${ROCM_DIR}/${CMAKE_INSTALL_LIBDIR})
 
 if (NOT DEFINED GRPC_ROOT)
     set(GRPC_ROOT "/usr")
@@ -84,7 +87,6 @@ endif()
 ## Include common cmake modules
 include(utils)
 
-set(RDC "rdc")
 
 ################# Determine the library version #########################
 ## Setup the package version based on git tags.
@@ -108,9 +110,7 @@ set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
                               CACHE STRING "Location of RDC source code.")
 set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 
-project(${RDC})
 
-include(GNUInstallDirs)
 set(RDC_SRC_ROOT "${PROJECT_SOURCE_DIR}")
 
 message("Build Configuration:")
