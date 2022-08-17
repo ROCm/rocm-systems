@@ -187,6 +187,13 @@ strset_t default_exclude_functions = { "^<.*>$" };
 strset_t default_exclude_filenames = { "(encoder|decoder|threading).py$", "^<.*>$" };
 }  // namespace
 //
+auto&
+get_paused()
+{
+    static thread_local int64_t _v = 0;
+    return _v;
+}
+//
 struct config
 {
     bool                    is_running         = false;
@@ -251,6 +258,8 @@ get_depth(PyFrameObject* frame)
 void
 profiler_function(py::object pframe, const char* swhat, py::object arg)
 {
+    if(get_paused() > 0) return;
+
     static thread_local auto& _config  = get_config();
     static thread_local auto  _disable = false;
 
@@ -504,9 +513,24 @@ generate(py::module& _pymod)
         get_config().records.clear();
     };
 
+    auto _sys        = py::module::import("sys");
+    auto _setprofile = _sys.attr("setprofile");
+
     _prof.def("profiler_function", &profiler_function, "Profiling function");
     _prof.def("profiler_init", _init, "Initialize the profiler");
     _prof.def("profiler_finalize", _fini, "Finalize the profiler");
+    _prof.def(
+        "profiler_pause",
+        [_setprofile]() {
+            if(++get_paused() == 1) _setprofile(nullptr);
+        },
+        "Pause the profiler");
+    _prof.def(
+        "profiler_resume",
+        [_setprofile]() {
+            if(--get_paused() == 0) _setprofile(py::cpp_function{ profiler_function });
+        },
+        "Resume the profiler");
 
     py::class_<config> _pyconfig(_prof, "config", "Profiler configuration");
 

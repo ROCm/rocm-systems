@@ -46,8 +46,17 @@ from .libpyomnitrace.profiler import (
 from .libpyomnitrace.profiler import config as _profiler_config
 from .libpyomnitrace.profiler import profiler_init as _profiler_init
 from .libpyomnitrace.profiler import profiler_finalize as _profiler_fini
+from .libpyomnitrace.profiler import profiler_pause as _profiler_pause
+from .libpyomnitrace.profiler import profiler_resume as _profiler_resume
 
-__all__ = ["profile", "config", "Profiler", "FakeProfiler", "Config"]
+__all__ = [
+    "profile",
+    "noprofile",
+    "config",
+    "Profiler",
+    "FakeProfiler",
+    "Config",
+]
 
 
 config = _profiler_config
@@ -227,7 +236,7 @@ profile = Profiler
 
 
 class FakeProfiler:
-    """Provides dummy decorators and context-manager for the omnitrace profiler"""
+    """Provides decorators and context-manager for disabling the omnitrace profiler"""
 
     @staticmethod
     def condition(functor):
@@ -238,7 +247,6 @@ class FakeProfiler:
         return False
 
     def __init__(self, *args, **kwargs):
-        """ """
         pass
 
     def __call__(self, func):
@@ -246,18 +254,25 @@ class FakeProfiler:
 
         @wraps(func)
         def function_wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+            _profiler_pause()
+            ret = func(*args, **kwargs)
+            _profiler_resume()
+            return ret
 
         return function_wrapper
 
     def __enter__(self, *args, **kwargs):
         """Context manager begin"""
-        pass
+        _profiler_pause()
 
     def __exit__(self, exec_type, exec_value, exec_tb):
         """Context manager end"""
 
+        _profiler_resume()
         import traceback
 
         if exec_type is not None and exec_value is not None and exec_tb is not None:
             traceback.print_exception(exec_type, exec_value, exec_tb, limit=5)
+
+
+noprofile = FakeProfiler

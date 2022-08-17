@@ -1230,6 +1230,15 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
         ENVIRONMENT "${_python_environment}")
 
     omnitrace_add_python_test(
+        NAME python-builtin-noprofile
+        PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
+        PYTHON_VERSION ${_VERSION}
+        FILE ${CMAKE_SOURCE_DIR}/examples/python/noprofile.py
+        PROFILE_ARGS "-b" "--label" "file"
+        RUN_ARGS -v 15 -n 5
+        ENVIRONMENT "${_python_environment}")
+
+    omnitrace_add_python_test(
         STANDALONE
         NAME python-source
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
@@ -1281,6 +1290,16 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
             FILE omnitrace-tests-output/python-builtin/${_VERSION}/trip_count.txt
             PASS_REGEX "\\\[inefficient\\\]\\\[builtin.py:14\\\]"
             DEPENDS python-builtin-${_VERSION}
+            ENVIRONMENT "${_python_environment}")
+
+        omnitrace_add_python_test(
+            NAME python-builtin-noprofile-check
+            COMMAND ${OMNITRACE_CAT_COMMAND}
+            PYTHON_VERSION ${_VERSION}
+            FILE omnitrace-tests-output/python-builtin-noprofile/${_VERSION}/trip_count.txt
+            PASS_REGEX ".(run)..(noprofile.py)."
+            FAIL_REGEX ".(fib|inefficient)..(noprofile.py)."
+            DEPENDS python-builtin-noprofile-${_VERSION}
             ENVIRONMENT "${_python_environment}")
     else()
         omnitrace_message(

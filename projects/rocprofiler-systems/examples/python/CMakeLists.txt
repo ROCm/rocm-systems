@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 project(omnitrace-python)
 
-set(PYTHON_FILES builtin.py external.py source.py)
+set(PYTHON_FILES builtin.py external.py source.py noprofile.py)
 
 if(OMNITRACE_INSTALL_EXAMPLES)
     find_package(Python3 COMPONENTS Interpreter)
