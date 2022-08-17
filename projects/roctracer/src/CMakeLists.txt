@@ -121,8 +121,28 @@ foreach(header ${GENERATED_HEADERS})
     COMPONENT runtime)
 endforeach()
 
+## Build the util library
+file(GLOB UTIL_SOURCES "util/*.cpp")
+add_library(util STATIC ${UTIL_SOURCES})
+
+set_target_properties(util PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+target_include_directories(util
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/util)
+
+check_include_file(backtrace.h BACKTRACE_H)
+if(BACKTRACE_H)
+  target_compile_definitions(util PRIVATE HAVE_BACKTRACE_H)
+  find_library(BACKTRACE_LIB "backtrace" ${CMAKE_C_IMPLICIT_LINK_DIRECTORIES})
+endif()
+
+if(BACKTRACE_LIB)
+  target_compile_definitions(util PRIVATE ENABLE_BACKTRACE)
+  target_link_libraries(util PRIVATE ${BACKTRACE_LIB})
+endif()
+
 ## Build the ROCtracer library
-file(GLOB ROCTRACER_SOURCES "roctracer/*.cpp" "util/*.cpp")
+file(GLOB ROCTRACER_SOURCES "roctracer/*.cpp")
 add_library(roctracer ${LIBRARY_TYPE} ${ROCTRACER_SOURCES} ${GENERATED_HEADERS} hsa_prof_str.inline.h)
 
 set_target_properties(roctracer PROPERTIES
@@ -146,7 +166,7 @@ target_include_directories(roctracer
     ${CMAKE_CURRENT_SOURCE_DIR}/roctracer ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_options(roctracer PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/roctracer/exportmap -Wl,--no-undefined)
-target_link_libraries(roctracer PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl)
+target_link_libraries(roctracer PRIVATE util hsa-runtime64::hsa-runtime64 Threads::Threads dl)
 
 install(TARGETS roctracer LIBRARY
   DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -177,7 +197,7 @@ install(TARGETS roctx LIBRARY
 ## Build the tracer_tool library
 if (${LIBRARY_TYPE} STREQUAL SHARED)
 
-file(GLOB TRACER_TOOL_SOURCES "tracer_tool/*.cpp" "util/*.cpp")
+file(GLOB TRACER_TOOL_SOURCES "tracer_tool/*.cpp")
 add_library(roctracer_tool SHARED ${TRACER_TOOL_SOURCES})
 
 set_target_properties(roctracer_tool PROPERTIES
@@ -192,7 +212,7 @@ target_include_directories(roctracer_tool
     ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/roctracer
     ${CMAKE_CURRENT_SOURCE_DIR})
 
-target_link_libraries(roctracer_tool roctracer hsa-runtime64::hsa-runtime64 stdc++fs Threads::Threads atomic dl)
+target_link_libraries(roctracer_tool util roctracer hsa-runtime64::hsa-runtime64 stdc++fs Threads::Threads atomic dl)
 target_link_options(roctracer_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/tracer_tool/exportmap -Wl,--no-undefined)
 
 install(TARGETS roctracer_tool LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT runtime)
