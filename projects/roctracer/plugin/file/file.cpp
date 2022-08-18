@@ -238,7 +238,7 @@ class file_plugin_t {
 
     roctracer_timestamp_t app_begin_timestamp;
     CHECK_ROCTRACER(roctracer_get_timestamp(&app_begin_timestamp));
-    begin_ts << app_begin_timestamp << std::endl;
+    begin_ts << std::dec << app_begin_timestamp << std::endl;
     if (begin_ts.fail()) {
       warning("Cannot write to '%s'\n", begin_ts.path().c_str());
       return;
