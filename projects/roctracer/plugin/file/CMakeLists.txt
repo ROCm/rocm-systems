@@ -35,7 +35,7 @@ target_include_directories(file_plugin PRIVATE ${PROJECT_SOURCE_DIR}/inc)
 
 target_link_options(file_plugin PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap -Wl,--no-undefined)
 
-target_link_libraries(file_plugin PRIVATE roctracer hsa-runtime64::hsa-runtime64 stdc++fs)
+target_link_libraries(file_plugin PRIVATE util roctracer hsa-runtime64::hsa-runtime64 stdc++fs)
 
 install(TARGETS file_plugin LIBRARY
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}

@@ -38,29 +38,13 @@
 #include <vector>
 
 #include "correlation_id.h"
+#include "debug.h"
 #include "journal.h"
 #include "loader.h"
 #include "hsa_support.h"
 #include "memory_pool.h"
 #include "exception.h"
-#include "util/logger.h"
-
-#define CHECK_HSA_STATUS(msg, status)                                                              \
-  do {                                                                                             \
-    if ((status) != HSA_STATUS_SUCCESS) {                                                          \
-      const char* status_string = nullptr;                                                         \
-      hsa_status_string(status, &status_string);                                                   \
-      FATAL_LOGGING(msg << ": " << (status_string ? status_string : "<unknown error>"));           \
-    }                                                                                              \
-  } while (false)
-
-#define HIPAPI_CALL(call)                                                                          \
-  do {                                                                                             \
-    hipError_t err = call;                                                                         \
-    if (err != hipSuccess) {                                                                       \
-      FATAL_LOGGING("HIP error: " #call " error(" << err << ")");                                  \
-    }                                                                                              \
-  } while (false)
+#include "logger.h"
 
 #define API_METHOD_PREFIX                                                                          \
   roctracer_status_t err = ROCTRACER_STATUS_SUCCESS;                                               \
@@ -80,15 +64,6 @@
   }                                                                                                \
   (void)err;                                                                                       \
   return X;
-
-#define ONLOAD_TRACE(str)                                                                          \
-  if (getenv("ROCP_ONLOAD_TRACE")) do {                                                            \
-      std::cout << "PID(" << GetPid() << "): TRACER_LIB::" << __FUNCTION__ << " " << str           \
-                << std::endl                                                                       \
-                << std::flush;                                                                     \
-    } while (false);
-#define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
-#define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
 
 static inline uint32_t GetPid() {
   static auto pid = syscall(__NR_getpid);
@@ -178,12 +153,6 @@ void HIP_ApiCallback(uint32_t op_id, roctracer_record_t* record, void* callback_
     }
     CorrelationIdPop();
   }
-
-  DEBUG_TRACE(
-      "HIP_ApiCallback(\"%s\") phase(%d): op(%u) record(%p) data(%p) pool(%p) "
-      "correlation_id(%lu) beg_ns(%lu) end_ns(%lu)\n",
-      roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, op_id, 0), data->phase, op_id, record, data,
-      pool, data->correlation_id, timestamp_ns);
 }
 
 void HIP_AsyncActivityCallback(uint32_t op_id, void* record_ptr, void* arg) {
@@ -201,13 +170,6 @@ void HIP_AsyncActivityCallback(uint32_t op_id, void* record_ptr, void* arg) {
                 });
   else
     pool->Write(record);
-
-  DEBUG_TRACE(
-      "HIP_AsyncActivityCallback(\"%s\"): op(%u) kind(%u) record(%p) pool(%p) correlation_id(%d) "
-      "beg_ns(%lu) end_ns(%lu)\n",
-      roctracer_op_string(ACTIVITY_DOMAIN_HIP_OPS, record_ptr->op, record_ptr->kind),
-      record_ptr->op, record_ptr->kind, record, pool, record_ptr->correlation_id,
-      record_ptr->begin_ns, record_ptr->end_ns);
 }
 
 // Logger routines and primitives
@@ -361,20 +323,20 @@ static void roctracer_enable_callback_fun(roctracer_domain_t domain, uint32_t op
       if (hipError_t err =
               HipLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
           err != hipSuccess)
-        FATAL_LOGGING("HIP::RegisterApiCallback(" << op << ") error(" << err << ")");
+        fatal("HIP::RegisterApiCallback(%d) failed (err=%d)", op, err);
 
       if ((hip_act_cb_tracker.enable_check(op, API_CB_MASK) & API_ACT_MASK) == 0) {
         if (hipError_t err =
                 HipLoader::Instance().RegisterActivityCallback(op, (void*)HIP_ApiCallback, nullptr);
             err != hipSuccess)
-          FATAL_LOGGING("HIPAPI: HIP::RegisterActivityCallback(" << op << ") error(" << err << ")");
+          fatal("HIP::RegisterActivityCallback(%d) failed (err=%d)", op, err);
       }
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
       if (RocTxLoader::Instance().Enabled() &&
           !RocTxLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data))
-        FATAL_LOGGING("ROCTX::RegisterApiCallback(" << op << ") failed");
+        fatal("ROCTX::RegisterApiCallback(%d) failed", op);
       break;
     }
     default:
@@ -421,18 +383,17 @@ static void roctracer_disable_callback_fun(roctracer_domain_t domain, uint32_t o
       std::lock_guard lock(hip_activity_mutex);
 
       if (hipError_t err = HipLoader::Instance().RemoveApiCallback(op); err != hipSuccess)
-        FATAL_LOGGING("HIP::RemoveApiCallback(" << op << "), error(" << err << ")");
+        fatal("HIP::RemoveApiCallback(%d) failed (err=%d)", op, err);
 
       if ((hip_act_cb_tracker.disable_check(op, API_CB_MASK) & API_ACT_MASK) == 0) {
         if (hipError_t err = HipLoader::Instance().RemoveActivityCallback(op); err != hipSuccess)
-          FATAL_LOGGING("HIPAPI: HIP::RemoveActivityCallback op(" << op << "), error(" << err
-                                                                  << ")");
+          fatal("HIP::RemoveActivityCallback(%d) failed (err=%d)", op, err);
       }
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX: {
       if (RocTxLoader::Instance().Enabled() && !RocTxLoader::Instance().RemoveApiCallback(op))
-        FATAL_LOGGING("ROCTX::RemoveApiCallback(" << op << ") failed");
+        fatal("ROCTX::RemoveApiCallback(%d) failed", op);
       break;
     }
     default:
@@ -522,7 +483,7 @@ static void roctracer_enable_activity_fun(roctracer_domain_t domain, uint32_t op
       if (HipLoader::Instance().Enabled() &&
           HipLoader::Instance().RegisterAsyncActivityCallback(op, (void*)HIP_AsyncActivityCallback,
                                                               pool) != hipSuccess)
-        FATAL_LOGGING("HIP::EnableActivityCallback error");
+        fatal("HIP::EnableActivityCallback error");
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
@@ -533,7 +494,7 @@ static void roctracer_enable_activity_fun(roctracer_domain_t domain, uint32_t op
       if (hipError_t err =
               HipLoader::Instance().RegisterActivityCallback(op, (void*)HIP_ApiCallback, pool);
           err != hipSuccess)
-        FATAL_LOGGING("HIP::RegisterActivityCallback(" << op << " error(" << err << ")");
+        fatal("HIP::RegisterActivityCallback(%d) (err=%d)", op, err);
       break;
     }
     case ACTIVITY_DOMAIN_ROCTX:
@@ -601,7 +562,7 @@ static void roctracer_disable_activity_fun(roctracer_domain_t domain, uint32_t o
     case ACTIVITY_DOMAIN_HIP_OPS: {
       if (HipLoader::Instance().Enabled() &&
           HipLoader::Instance().RemoveAsyncActivityCallback(op) != hipSuccess)
-        FATAL_LOGGING("HIP::EnableActivityCallback(nullptr) error, op(" << op << ")");
+        fatal("HIP::EnableActivityCallback(%d)", op);
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
@@ -610,12 +571,12 @@ static void roctracer_disable_activity_fun(roctracer_domain_t domain, uint32_t o
 
       if ((hip_act_cb_tracker.disable_check(op, API_ACT_MASK) & API_CB_MASK) == 0) {
         if (hipError_t err = HipLoader::Instance().RemoveActivityCallback(op); err != hipSuccess)
-          FATAL_LOGGING("HIP::RemoveActivityCallback op(" << op << "), error(" << err << ")");
+          fatal("HIP::RemoveActivityCallback(%d) failed (err=%d)", op, err);
       } else {
         if (hipError_t err =
                 HipLoader::Instance().RegisterActivityCallback(op, (void*)HIP_ApiCallback, nullptr);
             err != hipSuccess)
-          FATAL_LOGGING("HIPACT: HIP::RegisterActivityCallback(" << op << ") error(" << err << ")");
+          fatal("HIP::RegisterActivityCallback(%d) failed (err=%d)", op, err);
       }
       break;
     }
@@ -794,17 +755,8 @@ ROCTRACER_API roctracer_status_t roctracer_set_properties(roctracer_domain_t dom
   API_METHOD_SUFFIX
 }
 
-__attribute__((constructor)) void constructor() {
-  ONLOAD_TRACE_BEG();
-  util::Logger::Create();
-  ONLOAD_TRACE_END();
-}
-
-__attribute__((destructor)) void destructor() {
-  ONLOAD_TRACE_BEG();
-  util::Logger::Destroy();
-  ONLOAD_TRACE_END();
-}
+__attribute__((constructor)) void constructor() { util::Logger::Create(); }
+__attribute__((destructor)) void destructor() { util::Logger::Destroy(); }
 
 extern "C" {
 

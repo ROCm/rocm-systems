@@ -43,7 +43,7 @@ struct BackTraceInfo {
 
 void errorCallback(void* data, const char* message, int errnum) {
   BackTraceInfo* info = static_cast<BackTraceInfo*>(data);
-  info->sstream << "Error: " << message << '(' << errnum << ')';
+  info->sstream << "ROCtracer error: " << message << '(' << errnum << ')';
   info->error = 1;
 }
 
@@ -90,8 +90,16 @@ namespace roctracer {
 void warning(const char* format, ...) {
   va_list va;
   va_start(va, format);
-  std::cerr << "Warning: " << string_vprintf(format, va) << std::endl;
+  std::cerr << "ROCtracer warning: " << string_vprintf(format, va) << std::endl;
   va_end(va);
+}
+
+void error(const char* format, ...) {
+  va_list va;
+  va_start(va, format);
+  std::cerr << "ROCtracer error: " << string_vprintf(format, va) << std::endl;
+  va_end(va);
+  exit(EXIT_FAILURE);
 }
 
 void fatal [[noreturn]] (const char* format, ...) {
@@ -110,7 +118,7 @@ void fatal [[noreturn]] (const char* format, ...) {
   message += info.sstream.str();
 #endif /* defined (ENABLE_BACKTRACE) */
 
-  std::cerr << "Error: " << message << std::endl;
+  std::cerr << "ROCtracer fatal error: " << message << std::endl;
   abort();
 }
 

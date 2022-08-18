@@ -28,6 +28,12 @@ extern void warning(const char* format, ...)
 #endif  // defined (__GNUC__)
     ;
 
+extern void error [[noreturn]] (const char* format, ...)
+#if defined(__GNUC__)
+__attribute__((format(printf, 1, 2)))
+#endif  // defined (__GNUC__)
+;
+
 extern void fatal [[noreturn]] (const char* format, ...)
 #if defined(__GNUC__)
 __attribute__((format(printf, 1, 2)))
@@ -35,3 +41,7 @@ __attribute__((format(printf, 1, 2)))
 ;
 
 }  // namespace roctracer
+
+using roctracer::error;
+using roctracer::fatal;
+using roctracer::warning;

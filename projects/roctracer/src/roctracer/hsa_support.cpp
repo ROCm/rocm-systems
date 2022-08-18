@@ -21,12 +21,12 @@
 #include "hsa_support.h"
 
 #include "correlation_id.h"
+#include "debug.h"
 #include "exception.h"
 #include "memory_pool.h"
 #include "roctracer.h"
 #include "roctracer_hsa.h"
-#include "util/callback_table.h"
-#include "util/logger.h"
+#include "callback_table.h"
 
 #include <hsa/hsa.h>
 #include <hsa/amd_hsa_signal.h>
@@ -107,10 +107,10 @@ class Tracker {
 
     // Creating a proxy signal
     status = saved_core_api.hsa_signal_create_fn(1, 0, NULL, &(entry->signal));
-    if (status != HSA_STATUS_SUCCESS) FATAL_LOGGING("hsa_signal_create failed");
+    if (status != HSA_STATUS_SUCCESS) fatal("hsa_signal_create failed");
     status = saved_amd_ext_api.hsa_amd_signal_async_handler_fn(
         entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
-    if (status != HSA_STATUS_SUCCESS) FATAL_LOGGING("hsa_amd_signal_async_handler failed");
+    if (status != HSA_STATUS_SUCCESS) fatal("hsa_amd_signal_async_handler failed");
   }
 
   // Delete tracker entry
@@ -126,7 +126,7 @@ class Tracker {
       uint64_t sysclock_hz = 0;
       hsa_status_t status =
           saved_core_api.hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
-      if (status != HSA_STATUS_SUCCESS) FATAL_LOGGING("hsa_system_get_info failed");
+      if (status != HSA_STATUS_SUCCESS) fatal("hsa_system_get_info failed");
       return (uint64_t)1000000000 / sysclock_hz;
     }();
 
@@ -134,8 +134,7 @@ class Tracker {
       hsa_amd_profiling_async_copy_time_t async_copy_time{};
       hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_get_async_copy_time_fn(
           entry->signal, &async_copy_time);
-      if (status != HSA_STATUS_SUCCESS)
-        FATAL_LOGGING("hsa_amd_profiling_get_async_copy_time failed");
+      if (status != HSA_STATUS_SUCCESS) fatal("hsa_amd_profiling_get_async_copy_time failed");
       entry->begin = async_copy_time.start * sysclock_period;
       entry->end = async_copy_time.end * sysclock_period;
     } else {
@@ -191,7 +190,7 @@ hsa_status_t HSA_API MemoryAllocateIntercept(hsa_region_t region, size_t size, v
                                               &data.allocate.segment) != HSA_STATUS_SUCCESS ||
         saved_core_api.hsa_region_get_info_fn(region, HSA_REGION_INFO_GLOBAL_FLAGS,
                                               &data.allocate.global_flag) != HSA_STATUS_SUCCESS)
-      FATAL_LOGGING("hsa_region_get_info failed");
+      fatal("hsa_region_get_info failed");
 
     callback_fun(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_ALLOCATE, &data, callback_arg);
   }
@@ -209,7 +208,7 @@ hsa_status_t MemoryAssignAgentIntercept(void* ptr, hsa_agent_t agent,
     data.device.ptr = ptr;
     if (saved_core_api.hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_DEVICE, &data.device.type) !=
         HSA_STATUS_SUCCESS)
-      FATAL_LOGGING("hsa_agent_get_info failed");
+      fatal("hsa_agent_get_info failed");
 
     callback_fun(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_DEVICE, &data, callback_arg);
   }
@@ -248,7 +247,7 @@ hsa_status_t MemoryPoolAllocateIntercept(hsa_amd_memory_pool_t pool, size_t size
         saved_amd_ext_api.hsa_amd_memory_pool_get_info_fn(
             pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &data.allocate.global_flag) !=
             HSA_STATUS_SUCCESS)
-      FATAL_LOGGING("hsa_region_get_info failed");
+      fatal("hsa_region_get_info failed");
 
     callback_fun(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_ALLOCATE, &data, callback_arg);
 
@@ -269,7 +268,7 @@ hsa_status_t MemoryPoolAllocateIntercept(hsa_amd_memory_pool_t pool, size_t size
         return HSA_STATUS_SUCCESS;
 
       auto it = agent_info_map.find(agent.handle);
-      if (it == agent_info_map.end()) FATAL_LOGGING("agent was not found in the agent_info map");
+      if (it == agent_info_map.end()) fatal("agent was not found in the agent_info map");
 
       hsa_evt_data_t data{};
       data.device.type = it->second.type;
@@ -308,7 +307,7 @@ hsa_status_t AgentsAllowAccessIntercept(uint32_t num_agents, const hsa_agent_t* 
     while (num_agents--) {
       hsa_agent_t agent = *agents++;
       auto it = agent_info_map.find(agent.handle);
-      if (it == agent_info_map.end()) FATAL_LOGGING("agent was not found in the agent_info map");
+      if (it == agent_info_map.end()) fatal("agent was not found in the agent_info map");
 
       hsa_evt_data_t data{};
       data.device.type = it->second.type;
@@ -336,14 +335,14 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
   if (hsa_loader_api.hsa_ven_amd_loader_loaded_code_object_get_info(
           loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_TYPE,
           &data.codeobj.storage_type) != HSA_STATUS_SUCCESS)
-    FATAL_LOGGING("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+    fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
   if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_FILE) {
     if (hsa_loader_api.hsa_ven_amd_loader_loaded_code_object_get_info(
             loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_FILE,
             &data.codeobj.storage_file) != HSA_STATUS_SUCCESS ||
         data.codeobj.storage_file == -1)
-      FATAL_LOGGING("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+      fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
     data.codeobj.memory_base = data.codeobj.memory_size = 0;
   } else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY) {
     if (hsa_loader_api.hsa_ven_amd_loader_loaded_code_object_get_info(
@@ -354,12 +353,12 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
             loaded_code_object,
             HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE,
             &data.codeobj.memory_size) != HSA_STATUS_SUCCESS)
-      FATAL_LOGGING("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+      fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
     data.codeobj.storage_file = -1;
   } else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE) {
     return HSA_STATUS_SUCCESS;  // FIXME: do we really not care about these code objects?
   } else {
-    FATAL_LOGGING("Unknown code object storage type: " << data.codeobj.storage_type);
+    fatal("unknown code object storage type: %d", data.codeobj.storage_type);
   }
 
   if (hsa_loader_api.hsa_ven_amd_loader_loaded_code_object_get_info(
@@ -371,18 +370,18 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
       hsa_loader_api.hsa_ven_amd_loader_loaded_code_object_get_info(
           loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA,
           &data.codeobj.load_delta) != HSA_STATUS_SUCCESS)
-    FATAL_LOGGING("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+    fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
   if (hsa_loader_api.hsa_ven_amd_loader_loaded_code_object_get_info(
           loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI_LENGTH,
           &data.codeobj.uri_length) != HSA_STATUS_SUCCESS)
-    FATAL_LOGGING("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+    fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
   std::string uri_str(data.codeobj.uri_length, '\0');
   if (hsa_loader_api.hsa_ven_amd_loader_loaded_code_object_get_info(
           loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI, uri_str.data()) !=
       HSA_STATUS_SUCCESS)
-    FATAL_LOGGING("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+    fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
   data.codeobj.uri = uri_str.c_str();
   data.codeobj.unload = code_object_callback_arg->unload ? 1 : 0;
@@ -480,22 +479,21 @@ hsa_status_t MemoryASyncCopyRectIntercept(const hsa_pitched_ptr_t* dst,
 roctracer_timestamp_t timestamp_ns() {
   uint64_t sysclock;
 
-  if (saved_core_api.hsa_system_get_info_fn == nullptr)
-    FATAL_LOGGING("HSA intercept is not active");
+  assert(saved_core_api.hsa_system_get_info_fn != nullptr && "HSA intercept is not active");
 
   if (hsa_status_t status =
           saved_core_api.hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
       status == HSA_STATUS_ERROR_NOT_INITIALIZED)
     return 0;
   else if (status != HSA_STATUS_SUCCESS)
-    FATAL_LOGGING("hsa_system_get_info failed");
+    fatal("hsa_system_get_info failed");
 
   static uint64_t sysclock_period = []() {
     uint64_t sysclock_hz = 0;
     if (hsa_status_t status = saved_core_api.hsa_system_get_info_fn(
             HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
         status != HSA_STATUS_SUCCESS)
-      FATAL_LOGGING("hsa_system_get_info failed");
+      fatal("hsa_system_get_info failed");
 
     return (uint64_t)1000000000 / sysclock_hz;
   }();
@@ -516,7 +514,7 @@ void Initialize(HsaApiTable* table) {
             hsa_support::AgentInfo agent_info;
             if (hsa_support::saved_core_api.hsa_agent_get_info_fn(
                     agent, HSA_AGENT_INFO_DEVICE, &agent_info.type) != HSA_STATUS_SUCCESS)
-              FATAL_LOGGING("hsa_agent_get_info failed");
+              fatal("hsa_agent_get_info failed");
             switch (agent_info.type) {
               case HSA_DEVICE_TYPE_CPU:
                 static int cpu_agent_count = 0;
@@ -535,12 +533,12 @@ void Initialize(HsaApiTable* table) {
             return HSA_STATUS_SUCCESS;
           },
           nullptr) != HSA_STATUS_SUCCESS)
-    FATAL_LOGGING("hsa_iterate_agents failed");
+    fatal("hsa_iterate_agents failed");
 
   // Install the code object intercept.
   hsa_status_t status = table->core_->hsa_system_get_major_extension_table_fn(
       HSA_EXTENSION_AMD_LOADER, 1, sizeof(hsa_ven_amd_loader_1_01_pfn_t), &hsa_loader_api);
-  if (status != HSA_STATUS_SUCCESS) FATAL_LOGGING("hsa_system_get_major_extension_table failed");
+  if (status != HSA_STATUS_SUCCESS) fatal("hsa_system_get_major_extension_table failed");
 
   // Install the HSA_OPS intercept
   table->amd_ext_->hsa_amd_memory_async_copy_fn = MemoryASyncCopyIntercept;

@@ -48,9 +48,10 @@
 #include <sys/types.h>
 #include <unistd.h> /* usleep */
 
-#include "util/xml.h"
+#include "debug.h"
 #include "loader.h"
 #include "trace_buffer.h"
+#include "xml.h"
 
 namespace fs = std::experimental::filesystem;
 
@@ -58,21 +59,14 @@ namespace fs = std::experimental::filesystem;
 #define CHECK_ROCTRACER(call)                                                                      \
   do {                                                                                             \
     if ((call) != ROCTRACER_STATUS_SUCCESS) {                                                      \
-      fatal(std::string(roctracer_error_string()));                                                \
+      fatal(#call " failed: %s", roctracer_error_string());                                        \
     }                                                                                              \
-  } while (0)
+  } while (false)
 
 LOADER_INSTANTIATE();
 TRACE_BUFFER_INSTANTIATE();
 
 namespace {
-
-void warning(const std::string& msg) { std::cerr << msg << std::endl; }
-
-[[noreturn]] void fatal(const std::string& msg) {
-  std::cerr << msg << std::endl;
-  abort();
-}
 
 thread_local std::stack<roctracer_timestamp_t, std::vector<roctracer_timestamp_t>>
     hsa_begin_timestamp, hip_begin_timestamp;
@@ -143,7 +137,7 @@ class roctracer_plugin_t {
   roctracer_plugin_t(const std::string& plugin_path) {
     plugin_handle_ = dlopen(plugin_path.c_str(), RTLD_LAZY);
     if (plugin_handle_ == nullptr) {
-      warning(std::string("Warning: dlopen for ") + plugin_path + " failed: " + dlerror());
+      warning("dlopen(\"%s\") failed: %s", plugin_path.c_str(), dlerror());
       return;
     }
 
@@ -449,7 +443,7 @@ std::string normalize_token(const std::string& token, bool not_empty, const std:
   }
   if (((first_pos != std::string::npos) && (norm_len == 0)) ||
       ((first_pos == std::string::npos) && not_empty)) {
-    fatal("normalize_token error: " + error_str);
+    error("normalize_token error: %s", error_str.c_str());
   }
   return (norm_len != 0) ? token.substr(first_pos, norm_len) : std::string("");
 }
@@ -460,19 +454,19 @@ int get_xml_array(const xml::Xml::level_t* node, const std::string& field, const
   const auto& opts = node->opts;
   auto it = opts.find(field);
   if (it != opts.end()) {
-    const std::string array_string = it->second;
-    if (label != nullptr) printf("%s%s = %s\n", label, field.c_str(), array_string.c_str());
+    const std::string& array_string = it->second;
+    if (label != nullptr) std::cout << label << field << " = " << array_string << std::endl;
     size_t pos1 = 0;
-    const size_t string_len = array_string.length();
+    size_t string_len = array_string.length();
     while (pos1 < string_len) {
       // set pos2 such that it also handles case of multiple delimiter options.
       // For example-  "hipLaunchKernel, hipExtModuleLaunchKernel, hipMemsetAsync"
       // in this example delimiters are ' ' and also ','
-      const size_t pos2 = array_string.find_first_of(delim, pos1);
-      const bool found = (pos2 != std::string::npos);
-      const size_t token_len = (pos2 != std::string::npos) ? pos2 - pos1 : string_len - pos1;
-      const std::string token = array_string.substr(pos1, token_len);
-      const std::string norm_str = normalize_token(token, found, "get_xml_array");
+      size_t pos2 = array_string.find_first_of(delim, pos1);
+      bool found = (pos2 != std::string::npos);
+      size_t token_len = (pos2 != std::string::npos) ? pos2 - pos1 : string_len - pos1;
+      std::string token = array_string.substr(pos1, token_len);
+      std::string norm_str = normalize_token(token, found, "get_xml_array");
       if (norm_str.length() != 0) vec->push_back(norm_str);
       if (!found) break;
       // update pos2 such that it represents the first non-delimiter character
@@ -590,28 +584,24 @@ void tool_load() {
     }
   }
 
-  printf("ROCTracer (pid=%d): ", (int)GetPid());
-  fflush(stdout);
+  std::cout << "ROCtracer (" << std::dec << GetPid() << "):";
 
   // XML input
   const char* xml_name = getenv("ROCP_INPUT");
   if (xml_name != nullptr) {
     xml::Xml* xml = xml::Xml::Create(xml_name);
-    if (xml == nullptr) {
-      fprintf(stderr, "ROCTracer: Input file not found '%s'\n", xml_name);
-      abort();
-    }
+    if (xml == nullptr) error("input file not found '%s'", xml_name);
 
     bool found = false;
     for (const auto* entry : xml->GetNodes("top.trace")) {
       auto it = entry->opts.find("name");
-      if (it == entry->opts.end()) fatal("ROCTracer: trace name is missing");
+      if (it == entry->opts.end()) error("trace name is missing");
       const std::string& name = it->second;
 
       std::vector<std::string> api_vec;
       for (const auto* node : entry->nodes) {
         if (node->tag != "parameters")
-          fatal("ROCTracer: trace node is not supported '" + name + ":%" + node->tag + "'");
+          error("trace node is not supported '%s:%%%s'", name.c_str(), node->tag.c_str());
         get_xml_array(node, "api", ", ",
                       &api_vec);  // delimiter options given as both spaces and commas (' ' and ',')
         break;
@@ -638,9 +628,9 @@ void tool_load() {
       }
     }
 
-    if (found) printf("input from \"%s\"", xml_name);
+    if (found) std::cout << " input from \"" << xml_name << "\"";
   }
-  printf("\n");
+  std::cout << std::endl;
 
   // Disable HIP activity if HSA activity was set
   if (trace_hsa_activity == true) trace_hip_activity = false;
@@ -648,8 +638,7 @@ void tool_load() {
   // Enable rpcTX callbacks
   if (trace_roctx) {
     // initialize HSA tracing
-    fprintf(stdout, "    rocTX-trace()\n");
-    fflush(stdout);
+    std::cout << "    rocTX-trace()" << std::endl;
     CHECK_ROCTRACER(
         roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, roctx_api_callback, nullptr));
   }
@@ -662,7 +651,7 @@ void tool_load() {
 
     if (sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate) != 3 ||
         ctrl_len > ctrl_rate)
-      fatal("Invalid ROCP_CTRL_RATE variable (ctrl_delay:ctrl_len:ctrl_rate)");
+      error("invalid ROCP_CTRL_RATE variable (ctrl_delay:ctrl_len:ctrl_rate)");
 
     control_dist_us = ctrl_rate - ctrl_len;
     control_len_us = ctrl_len;
@@ -671,26 +660,20 @@ void tool_load() {
     roctracer_stop();
 
     if (ctrl_delay != UINT32_MAX) {
-      fprintf(stdout, "ROCTracer: trace control: delay(%uus), length(%uus), rate(%uus)\n",
-              ctrl_delay, ctrl_len, ctrl_rate);
-      fflush(stdout);
+      std::cout << "ROCtracer: trace control: delay(" << ctrl_delay << "us), length(" << ctrl_len
+                << "us), rate(" << ctrl_rate << "us)" << std::endl;
       trace_period_thread = new std::thread(trace_period_fun);
     } else {
-      fprintf(stdout, "ROCTracer: trace start disabled\n");
-      fflush(stdout);
+      std::cout << "ROCtracer: trace start disabled" << std::endl;
     }
   }
 
   const char* flush_str = getenv("ROCP_FLUSH_RATE");
   if (flush_str != nullptr) {
     sscanf(flush_str, "%d", &control_flush_us);
-    if (control_flush_us == 0) {
-      fprintf(stderr, "ROCTracer: control flush rate bad value\n");
-      abort();
-    }
+    if (control_flush_us == 0) error("invalid control flush rate value '%s'", flush_str);
 
-    fprintf(stdout, "ROCTracer: trace control flush rate(%uus)\n", control_flush_us);
-    fflush(stdout);
+    std::cout << "ROCtracer: trace control flush rate(" << control_flush_us << "us)" << std::endl;
     flush_thread = new std::thread(flush_thr_fun);
   }
 }
@@ -707,7 +690,7 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
                              uint64_t failed_tool_count, const char* const* failed_tool_names) {
   if (roctracer_version_major() != ROCTRACER_VERSION_MAJOR ||
       roctracer_version_minor() < ROCTRACER_VERSION_MINOR) {
-    warning("The ROCtracer API version is not compatible with this tool");
+    warning("the ROCtracer API version is not compatible with this tool");
     return true;
   }
 
@@ -719,8 +702,7 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 
   // Enable HSA API callbacks/activity
   if (trace_hsa_api) {
-    fprintf(stdout, "    HSA-trace(");
-    fflush(stdout);
+    std::cout << "    HSA-trace(";
     if (hsa_api_vec.size() != 0) {
       for (unsigned i = 0; i < hsa_api_vec.size(); ++i) {
         uint32_t cid = HSA_API_ID_NUMBER;
@@ -728,13 +710,13 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
         CHECK_ROCTRACER(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api, &cid, nullptr));
         CHECK_ROCTRACER(
             roctracer_enable_op_callback(ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, nullptr));
-        printf(" %s", api);
+        std::cout << " " << api;
       }
     } else {
       CHECK_ROCTRACER(
           roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, nullptr));
     }
-    printf(")\n");
+    std::cout << std::endl;
   }
 
   // Enable HSA GPU activity
@@ -742,15 +724,13 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
     // Allocating tracing pool
     open_tracing_pool();
 
-    fprintf(stdout, "    HSA-activity-trace()\n");
-    fflush(stdout);
+    std::cout << "    HSA-activity-trace()" << std::endl;
     CHECK_ROCTRACER(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
   }
 
   // Enable HIP API callbacks/activity
   if (trace_hip_api || trace_hip_activity) {
-    fprintf(stdout, "    HIP-trace()\n");
-    fflush(stdout);
+    std::cout << "    HIP-trace()" << std::endl;
     // Allocating tracing pool
     open_tracing_pool();
 
@@ -763,7 +743,7 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
           CHECK_ROCTRACER(roctracer_op_code(ACTIVITY_DOMAIN_HIP_API, api, &cid, nullptr));
           CHECK_ROCTRACER(roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API, cid,
                                                        hip_api_callback, nullptr));
-          printf(" %s", api);
+          std::cout << " " << api;
         }
       } else {
         CHECK_ROCTRACER(
@@ -778,8 +758,7 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 
   // Enable PC sampling
   if (trace_pcs) {
-    fprintf(stdout, "    PCS-trace()\n");
-    fflush(stdout);
+    std::cout << "    PCS-trace()" << std::endl;
     open_tracing_pool();
     CHECK_ROCTRACER(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_RESERVED1));
   }

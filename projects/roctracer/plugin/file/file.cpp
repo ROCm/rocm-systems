@@ -18,6 +18,8 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
+#include "debug.h"
+
 #include <roctracer_ext.h>
 #include <roctracer_hip.h>
 #include <roctracer_hsa.h>
@@ -45,39 +47,12 @@
 // Macro to check ROCtracer calls status
 #define CHECK_ROCTRACER(call)                                                                      \
   do {                                                                                             \
-    if ((call) != 0) fatal("%s\n", roctracer_error_string());                                      \
+    if ((call) != 0) fatal("%s", roctracer_error_string());                                        \
   } while (false)
 
 namespace fs = std::experimental::filesystem;
 
 namespace {
-
-void warning(const char* format, ...)
-#if defined(__GNUC__)
-    __attribute__((format(printf, 1, 2)))
-#endif /* defined (__GNUC__) */
-    ;
-
-void fatal [[noreturn]] (const char* format, ...)
-#if defined(__GNUC__)
-__attribute__((format(printf, 1, 2)))
-#endif /* defined (__GNUC__) */
-;
-
-void warning(const char* format, ...) {
-  va_list va;
-  va_start(va, format);
-  vfprintf(stderr, format, va);
-  va_end(va);
-}
-
-void fatal(const char* format, ...) {
-  va_list va;
-  va_start(va, format);
-  vfprintf(stderr, format, va);
-  va_end(va);
-  abort();
-}
 
 uint32_t GetPid() {
   static uint32_t pid = syscall(__NR_getpid);
@@ -171,7 +146,7 @@ class file_plugin_t {
 
       fs::path output_prefix(output_dir);
       if (!fs::is_directory(fs::status(output_prefix))) {
-        if (!stream_.fail()) warning("Cannot open output directory '%s'\n", output_dir);
+        if (!stream_.fail()) warning("Cannot open output directory '%s'", output_dir);
         stream_.setstate(std::ios_base::failbit);
         return;
       }
@@ -232,7 +207,7 @@ class file_plugin_t {
         &hsa_handles);
     assert(status == HSA_STATUS_SUCCESS && "failed to iterate HSA agents");
     if (hsa_handles.fail()) {
-      warning("Cannot write to '%s'\n", hsa_handles.name().c_str());
+      warning("Cannot write to '%s'", hsa_handles.name().c_str());
       return;
     }
 
@@ -243,7 +218,7 @@ class file_plugin_t {
     CHECK_ROCTRACER(roctracer_get_timestamp(&app_begin_timestamp));
     begin_ts << std::dec << app_begin_timestamp << std::endl;
     if (begin_ts.fail()) {
-      warning("Cannot write to '%s'\n", begin_ts.name().c_str());
+      warning("Cannot write to '%s'", begin_ts.name().c_str());
       return;
     }
 
