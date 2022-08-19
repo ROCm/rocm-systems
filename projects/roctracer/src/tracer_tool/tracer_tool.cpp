@@ -222,11 +222,11 @@ struct roctx_trace_entry_t {
   }
 };
 
-roctracer::TraceBuffer<roctx_trace_entry_t> roctx_trace_buffer("rocTX API", 0x200000,
-                                                               [](roctx_trace_entry_t* entry) {
-                                                                 plugin->write_callback_record(
-                                                                     &entry->record, &entry->data);
-                                                               });
+roctracer::TraceBuffer<roctx_trace_entry_t> roctx_trace_buffer(
+    "rocTX API", 0x200000, [](roctx_trace_entry_t* entry) {
+      assert(plugin && "plugin is not initialized");
+      plugin->write_callback_record(&entry->record, &entry->data);
+    });
 
 // rocTX callback function
 void roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
@@ -265,6 +265,7 @@ struct hsa_api_trace_entry_t {
 
 roctracer::TraceBuffer<hsa_api_trace_entry_t> hsa_api_trace_buffer(
     "HSA API", 0x200000, [](hsa_api_trace_entry_t* entry) {
+      assert(plugin && "plugin is not initialized");
       plugin->write_callback_record(&entry->record, &entry->data);
     });
 
@@ -400,6 +401,7 @@ static std::optional<std::string> getKernelName(uint32_t cid, const hip_api_data
 
 roctracer::TraceBuffer<hip_api_trace_entry_t> hip_api_trace_buffer(
     "HIP API", 0x200000, [](hip_api_trace_entry_t* entry) {
+      assert(plugin && "plugin is not initialized");
       plugin->write_callback_record(&entry->record, &entry->data);
     });
 
@@ -495,6 +497,7 @@ void open_tracing_pool() {
     roctracer_properties_t properties{};
     properties.buffer_size = 0x80000;
     properties.buffer_callback_fun = [](const char* begin, const char* end, void* /* arg */) {
+      assert(plugin && "plugin is not initialized");
       plugin->write_activity_records(reinterpret_cast<const roctracer_record_t*>(begin),
                                      reinterpret_cast<const roctracer_record_t*>(end));
     };
@@ -550,8 +553,6 @@ void tool_unload() {
   // Flush tracing pool
   close_tracing_pool();
   roctracer::TraceBufferBase::FlushAll();
-
-  plugin.reset();
 }
 
 // tool load method

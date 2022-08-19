@@ -322,7 +322,7 @@ class file_plugin_t {
           output_file = get_output_file(ACTIVITY_DOMAIN_HSA_OPS, begin->op);
           if (begin->op == HSA_OP_ID_COPY) {
             *output_file << std::dec << begin->begin_ns << ":" << begin->end_ns
-                         << " async-copy:" << begin->correlation_id << " " << GetPid() << std::endl;
+                         << " async-copy:" << begin->correlation_id << ":" << GetPid() << std::endl;
             break;
           } else if (begin->op == HSA_OP_ID_RESERVED1) {
             *output_file << std::dec << begin->pc_sample.se << " " << begin->pc_sample.cycle << " "
