@@ -341,9 +341,6 @@ class API_DescrParser:
     self.cpp_content += 'static AmdExtTable AmdExt_saved_before_cb;\n'
     self.cpp_content += 'static ImageExtTable ImageExt_saved_before_cb;\n\n'
 
-    self.cpp_content += 'std::atomic<uint64_t> hsa_counter_{1};\n'
-    self.cpp_content += 'static thread_local uint64_t hsa_correlation_id_tls = 0;\n'
-
     self.cpp_content += self.add_section('API callback functions', '', self.gen_callbacks)
     self.cpp_content += self.add_section('API intercepting code', '', self.gen_intercept)
     self.cpp_content += self.add_section('API get_name function', '    ', self.gen_get_name)
@@ -429,17 +426,21 @@ class API_DescrParser:
           if call == 'hsa_amd_memory_async_copy_rect' and var == 'range':
             content += '  api_data.args.' + call + '.' + var + '__val = ' + '*(' + var + ');\n'
       content += '  auto [ api_callback_fun, api_callback_arg ] = cb_table.Get(' + call_id + ');\n'
-      content += '  api_data.phase = 0;\n'
-      content += '  api_data.correlation_id = hsa_support::hsa_counter_.fetch_add(1, std::memory_order_relaxed);\n'
-      content += '  hsa_correlation_id_tls = api_data.correlation_id;\n'
-      content += '  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_HSA_API, ' + call_id + ', &api_data, api_callback_arg);\n'
+      content += '  if (api_callback_fun) {\n'
+      content += '    api_data.phase = ACTIVITY_API_PHASE_ENTER;\n'
+      content += '    api_data.correlation_id = CorrelationIdPush();\n'
+      content += '    api_callback_fun(ACTIVITY_DOMAIN_HSA_API, ' + call_id + ', &api_data, api_callback_arg);\n'
+      content += '  }\n'
       if ret_type != 'void':
         content += '  ' + ret_type + ' ret ='
       content += '  ' + name + '_saved_before_cb.' + call + '_fn(' + ', '.join(struct['alst']) + ');\n'
+      content += '  if (api_callback_fun) {\n'
       if ret_type != 'void':
-        content += '  api_data.' + ret_type + '_retval = ret;\n'
-      content += '  api_data.phase = 1;\n'
-      content += '  if (api_callback_fun) api_callback_fun(ACTIVITY_DOMAIN_HSA_API, ' + call_id + ', &api_data, api_callback_arg);\n'
+        content += '    api_data.' + ret_type + '_retval = ret;\n'
+      content += '    api_data.phase = ACTIVITY_API_PHASE_EXIT;\n'
+      content += '    api_callback_fun(ACTIVITY_DOMAIN_HSA_API, ' + call_id + ', &api_data, api_callback_arg);\n'
+      content += '    CorrelationIdPop();\n'
+      content += '  }\n'
       if ret_type != 'void':
         content += '  return ret;\n'
       content += '}\n'

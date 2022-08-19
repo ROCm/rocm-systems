@@ -37,6 +37,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "correlation_id.h"
 #include "journal.h"
 #include "loader.h"
 #include "memory_pool.h"
@@ -161,16 +162,6 @@ roctracer_status_t GetExcStatus(const std::exception& e) {
   return (roctracer_exc_ptr) ? roctracer_exc_ptr->status() : ROCTRACER_STATUS_ERROR;
 }
 
-static auto NextCorrelationId() {
-  static std::atomic<uint64_t> counter{1};
-  return counter.fetch_add(1, std::memory_order_relaxed);
-}
-
-// Correlation id storage
-static thread_local activity_correlation_id_t correlation_id_tls = 0;
-
-static thread_local std::stack<activity_correlation_id_t> external_id_stack;
-
 std::mutex hip_activity_mutex;
 
 enum { API_CB_MASK = 0x1, API_ACT_MASK = 0x2 };
@@ -192,12 +183,8 @@ void HIP_ApiCallback(uint32_t op_id, roctracer_record_t* record, void* callback_
 
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
     // Generate a new correlation ID.
-    uint64_t correlation_id = NextCorrelationId();
+    uint64_t correlation_id = CorrelationIdPush();
     data->correlation_id = correlation_id;
-
-    // Record the correlation ID in a TLS variable so that it can be passed
-    // to an asynchronous activity started before the API function returns.
-    correlation_id_tls = correlation_id;
 
     if (pool != nullptr) {
       // Filing record info
@@ -211,21 +198,22 @@ void HIP_ApiCallback(uint32_t op_id, roctracer_record_t* record, void* callback_
     }
   } else {
     if (pool != nullptr) {
-      if (!external_id_stack.empty()) {
+      record->end_ns = util::timestamp_ns();
+
+      if (auto external_id = ExternalCorrelationId()) {
         roctracer_record_t ext_record{};
         ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
         ext_record.op = ACTIVITY_EXT_OP_EXTERN_ID;
         ext_record.correlation_id = record->correlation_id;
-        ext_record.external_id = external_id_stack.top();
-        pool->Write(ext_record);
+        ext_record.external_id = *external_id;
+        // Write the external correlation id record directly followed by the activity record.
+        pool->Write(std::array<roctracer_record_t, 2>{ext_record, *record});
+      } else {
+        // Write record to the buffer.
+        pool->Write(*record);
       }
-
-      // Write record to the buffer
-      record->end_ns = util::timestamp_ns();
-      pool->Write(*record);
     }
-    // Clear correlation ID
-    correlation_id_tls = 0;
+    CorrelationIdPop();
   }
 
   DEBUG_TRACE(
@@ -291,7 +279,7 @@ hsa_status_t hsa_amd_memory_async_copy_interceptor(void* dst, hsa_agent_t dst_ag
   Tracker::entry_t* entry = new Tracker::entry_t();
   entry->handler = hsa_async_copy_handler;
   entry->pool = async_copy_callback_memory_pool;
-  entry->correlation_id = hsa_correlation_id_tls;
+  entry->correlation_id = CorrelationId();
   Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
 
   hsa_status_t status = saved_amd_ext_api.hsa_amd_memory_async_copy_fn(
@@ -315,7 +303,7 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
   Tracker::entry_t* entry = new Tracker::entry_t();
   entry->handler = hsa_async_copy_handler;
   entry->pool = async_copy_callback_memory_pool;
-  entry->correlation_id = hsa_correlation_id_tls;
+  entry->correlation_id = CorrelationId();
   Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
 
   hsa_status_t status = saved_amd_ext_api.hsa_amd_memory_async_copy_rect_fn(
@@ -897,22 +885,24 @@ ROCTRACER_API roctracer_status_t roctracer_flush_activity() {
 ROCTRACER_API roctracer_status_t
 roctracer_activity_push_external_correlation_id(activity_correlation_id_t id) {
   API_METHOD_PREFIX
-  external_id_stack.push(id);
+  ExternalCorrelationIdPush(id);
   API_METHOD_SUFFIX
 }
 
 // Notifies that the calling thread is leaving an external API region.
-// Pop an external correlation id for the calling thread.
-// 'lastId' returns the last external correlation
+// Pop an external correlation id for the calling thread, and return it in 'last_id' if not null.
 ROCTRACER_API roctracer_status_t
 roctracer_activity_pop_external_correlation_id(activity_correlation_id_t* last_id) {
   API_METHOD_PREFIX
-  if (last_id != nullptr) *last_id = 0;
-  if (external_id_stack.empty())
+
+  auto external_id = ExternalCorrelationIdPop();
+  if (!external_id) {
+    if (last_id != nullptr) *last_id = 0;
     EXC_RAISING(ROCTRACER_STATUS_ERROR_MISMATCHED_EXTERNAL_CORRELATION_ID,
-                "not matching external range pop");
-  if (last_id != nullptr) *last_id = external_id_stack.top();
-  external_id_stack.pop();
+                "unbalanced external correlation id pop");
+  }
+
+  if (last_id != nullptr) *last_id = *external_id;
   API_METHOD_SUFFIX
 }
 

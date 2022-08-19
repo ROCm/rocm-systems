@@ -38,7 +38,10 @@ class MemoryPool {
     // Pool definition: The memory pool is split in 2 buffers of equal size. When first initialized,
     // the write pointer points to the first element of the first buffer. When a buffer is full,  or
     // when Flush() is called, the write pointer moves to the other buffer.
-    const size_t allocation_size = 2 * properties_.buffer_size;
+    // Each buffer should be large enough to hold at least 2 activity records, as record pairs may
+    // be written when external correlation ids are used.
+    const size_t allocation_size =
+        2 * std::max(2 * sizeof(roctracer_record_t), properties_.buffer_size);
     pool_begin_ = nullptr;
     AllocateMemory(&pool_begin_, allocation_size);
     assert(pool_begin_ != nullptr && "pool allocator failed");
