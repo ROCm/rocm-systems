@@ -2003,18 +2003,28 @@ def showProductName(deviceList):
         ret = rocmsmi.rsmi_dev_vendor_name_get(device, vendor, 256)
         # Only continue if GPU vendor is AMD
         if rsmi_ret_ok(ret, device) and isAmdDevice(device):
-            device_vendor = vendor.value.decode()
+            try:
+                device_vendor = vendor.value.decode()
+            except UnicodeDecodeError:
+                printErrLog(device, "Unable to read device vendor")
+                device_vendor = "N/A"
             # Retrieve the device series
             ret = rocmsmi.rsmi_dev_name_get(device, series, 256)
-            if rsmi_ret_ok(ret, device) and series.value.decode():
-                device_series = series.value.decode()
-                printLog(device, 'Card series', '\t\t' + device_series)
+            if rsmi_ret_ok(ret, device):
+                try:
+                    device_series = series.value.decode()
+                    printLog(device, 'Card series', '\t\t' + device_series)
+                except UnicodeDecodeError:
+                    printErrLog(device, "Unable to read card series")
             # Retrieve the device model
             ret = rocmsmi.rsmi_dev_subsystem_name_get(device, model, 256)
-            if rsmi_ret_ok(ret, device) and model.value.decode():
-                device_model = model.value.decode()
-                # padHexValue is used for applications that expect 4-digit card models
-                printLog(device, 'Card model', '\t\t' + padHexValue(device_model, 4))
+            if rsmi_ret_ok(ret, device):
+                try:
+                    device_model = model.value.decode()
+                    # padHexValue is used for applications that expect 4-digit card models
+                    printLog(device, 'Card model', '\t\t' + padHexValue(device_model, 4))
+                except UnicodeDecodeError:
+                    printErrLog(device, "Unable to read device model")
             printLog(device, 'Card vendor', '\t\t' + device_vendor)
             # TODO: Retrieve the SKU using 'rsmi_dev_sku_get' from the LIB
             # ret = rocmsmi.rsmi_dev_sku_get(device, sku, 256)
@@ -2181,7 +2191,9 @@ def showSerialNumber(deviceList):
     for device in deviceList:
         sn = create_string_buffer(256)
         ret = rocmsmi.rsmi_dev_serial_number_get(device, sn, 256)
-        if not str(sn).isalnum():
+        try:
+            sn.value.decode()
+        except UnicodeDecodeError:
             printErrLog(device, "FRU Serial Number contains non-alphanumeric characters. FRU is likely corrupted")
             continue
 
