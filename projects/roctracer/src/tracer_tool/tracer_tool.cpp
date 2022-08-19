@@ -295,11 +295,11 @@ struct hip_api_trace_entry_t {
     hip_api_data_t data;
   };
 
-  hip_api_trace_entry_t(activity_domain_t domain, uint32_t cid, roctracer_timestamp_t begin,
-                        roctracer_timestamp_t end, uint32_t pid, uint32_t tid,
-                        const hip_api_data_t& hip_api_data, const char* name)
+  hip_api_trace_entry_t(uint32_t cid, roctracer_timestamp_t begin, roctracer_timestamp_t end,
+                        uint32_t pid, uint32_t tid, const hip_api_data_t& hip_api_data,
+                        const char* name)
       : valid(roctracer::TRACE_ENTRY_INIT) {
-    record.domain = domain;
+    record.domain = ACTIVITY_DOMAIN_HIP_API;
     record.op = cid;
     record.kind = 0;
     record.begin_ns = begin;
@@ -417,22 +417,11 @@ void hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
     // Post init of HIP APU args
     hipApiArgsInit((hip_api_id_t)cid, const_cast<hip_api_data_t*>(data));
     kernel_name = getKernelName(cid, data);
-    hip_api_trace_entry_t& entry = hip_api_trace_buffer.Emplace(
-        static_cast<activity_domain_t>(domain), cid, hip_begin_timestamp, timestamp, GetPid(),
-        GetTid(), *data, kernel_name ? kernel_name->c_str() : nullptr);
+    hip_api_trace_entry_t& entry =
+        hip_api_trace_buffer.Emplace(cid, hip_begin_timestamp, timestamp, GetPid(), GetTid(), *data,
+                                     kernel_name ? kernel_name->c_str() : nullptr);
     entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
   }
-}
-
-void mark_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg) {
-  (void)arg;
-  const char* name = reinterpret_cast<const char*>(callback_data);
-
-  const roctracer_timestamp_t timestamp = timestamp_ns();
-  hip_api_trace_entry_t& entry =
-      hip_api_trace_buffer.Emplace(static_cast<activity_domain_t>(domain), cid, timestamp,
-                                   timestamp + 1, GetPid(), GetTid(), hip_api_data_t{}, name);
-  entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -757,8 +746,6 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   if (trace_hip_api || trace_hip_activity) {
     fprintf(stdout, "    HIP-trace()\n");
     fflush(stdout);
-    // roctracer properties
-    roctracer_set_properties(ACTIVITY_DOMAIN_HIP_API, (void*)mark_api_callback);
     // Allocating tracing pool
     open_tracing_pool();
 

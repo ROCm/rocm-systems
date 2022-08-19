@@ -94,13 +94,6 @@
 static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-// Mark callback
-//
-typedef void(mark_api_callback_t)(uint32_t domain, uint32_t cid, const void* callback_data,
-                                  void* arg);
-mark_api_callback_t* mark_api_callback_ptr = nullptr;
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
 // Internal library methods
 //
 namespace roctracer {
@@ -1134,15 +1127,6 @@ roctracer_activity_pop_external_correlation_id(activity_correlation_id_t* last_i
   API_METHOD_SUFFIX
 }
 
-// Mark API (FIXME: why isn't it in the roctracer_ext.h header?)
-extern "C" ROCTRACER_API void roctracer_mark(const char* str) {
-  if (mark_api_callback_ptr) {
-    mark_api_callback_ptr(ACTIVITY_DOMAIN_EXT_API, ACTIVITY_EXT_OP_MARK, str, nullptr);
-    NextCorrelationId();  // account for user-defined markers when tracking
-                          // correlation id
-  }
-}
-
 // Start API
 ROCTRACER_API void roctracer_start() {
   if (set_stopped(0)) {
@@ -1187,18 +1171,11 @@ ROCTRACER_API roctracer_status_t roctracer_set_properties(roctracer_domain_t dom
                                                           void* properties) {
   API_METHOD_PREFIX
   switch (domain) {
-    case ACTIVITY_DOMAIN_HSA_OPS: {
-      break;
-    }
-    case ACTIVITY_DOMAIN_HSA_EVT: {
-      break;
-    }
-    case ACTIVITY_DOMAIN_HSA_API: {
-      break;
-    }
+    case ACTIVITY_DOMAIN_HSA_OPS:
+    case ACTIVITY_DOMAIN_HSA_EVT:
+    case ACTIVITY_DOMAIN_HSA_API:
     case ACTIVITY_DOMAIN_HIP_OPS:
     case ACTIVITY_DOMAIN_HIP_API: {
-      mark_api_callback_ptr = reinterpret_cast<mark_api_callback_t*>(properties);
       break;
     }
     case ACTIVITY_DOMAIN_EXT_API: {

@@ -44,9 +44,6 @@
 #define THREADS_PER_BLOCK_Y 4
 #define THREADS_PER_BLOCK_Z 1
 
-// Mark API
-extern "C" void roctracer_mark(const char* str);
-
 // Device (Kernel) function, it must be void
 __global__ void matrixTranspose(float* out, float* in, const int width) {
   int x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
@@ -100,7 +97,6 @@ int main() {
     // Memory transfer from host to device
     HIP_CALL(hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice));
 
-    roctracer_mark("before HIP LaunchKernel");
     roctxMark("before hipLaunchKernel");
     int rangeId = roctxRangeStart("hipLaunchKernel range");
     roctxRangePush("hipLaunchKernel");
@@ -108,7 +104,6 @@ int main() {
     hipLaunchKernelGGL(
         matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
         dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix, gpuMatrix, WIDTH);
-    roctracer_mark("after HIP LaunchKernel");
     roctxMark("after hipLaunchKernel");
 
     // Memory transfer from device to host

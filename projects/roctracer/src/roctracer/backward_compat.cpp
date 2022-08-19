@@ -20,9 +20,8 @@
 
 #include "roctracer.h"
 
-#define PUBLIC_API __attribute__((visibility("default")))
-
 // Deprecated functions:
-extern "C" PUBLIC_API int roctracer_load() { return 1; }
-extern "C" PUBLIC_API void roctracer_unload() {}
-extern "C" PUBLIC_API void roctracer_flush_buf() {}
+extern "C" ROCTRACER_API int roctracer_load() { return 1; }
+extern "C" ROCTRACER_API void roctracer_unload() {}
+extern "C" ROCTRACER_API void roctracer_flush_buf() {}
+extern "C" ROCTRACER_API void roctracer_mark(const char*) {}
