@@ -143,43 +143,48 @@ class file_plugin_t {
   class output_file_t {
    public:
     output_file_t(std::string name) : name_(std::move(name)) {}
-    ~output_file_t() { close(); }
 
-    std::string path() const {
-      std::stringstream ss;
-      ss << GetPid() << "_" << name_;
-      return output_prefix_ / ss.str();
-    }
+    std::string name() const { return name_; }
 
-    template <typename T> output_file_t& operator<<(T&& value) {
+    template <typename T> std::ostream& operator<<(T&& value) {
       if (!is_open()) open();
-      stream() << std::forward<T>(value);
-      return *this;
+      return stream_ << std::forward<T>(value);
     }
 
-    output_file_t& operator<<(std::ostream& (*func)(std::ostream&)) {
+    std::ostream& operator<<(std::ostream& (*func)(std::ostream&)) {
       if (!is_open()) open();
-      stream() << func;
-      return *this;
+      return stream_ << func;
     }
-
-    bool is_open() const { return output_prefix_.empty() || stream_.is_open(); }
-    bool fail() const { return stream().fail(); }
 
     void open() {
-      if (output_prefix_.empty()) return;
-      stream_.open(path());
+      // If the stream is already in the failed state, there's no need to try to open the file.
+      if (fail()) return;
+
+      const char* output_dir = getenv("ROCP_OUTPUT_DIR");
+
+      if (output_dir == nullptr) {
+        stream_.copyfmt(std::cout);
+        stream_.clear(std::cout.rdstate());
+        stream_.basic_ios<char>::rdbuf(std::cout.rdbuf());
+        return;
+      }
+
+      fs::path output_prefix(output_dir);
+      if (!fs::is_directory(fs::status(output_prefix))) {
+        if (!stream_.fail()) warning("Cannot open output directory '%s'\n", output_dir);
+        stream_.setstate(std::ios_base::failbit);
+        return;
+      }
+
+      std::stringstream ss;
+      ss << GetPid() << "_" << name_;
+      stream_.open(output_prefix / ss.str());
     }
-    void close() {
-      if (stream_.is_open()) stream_.close();
-    }
+
+    bool is_open() const { return stream_.is_open(); }
+    bool fail() const { return stream_.fail(); }
 
    private:
-    std::ostream& stream() { return output_prefix_.empty() ? std::cout : stream_; }
-    const std::ostream& stream() const {
-      return output_prefix_.empty() ? const_cast<const std::ostream&>(std::cout) : stream_;
-    }
-
     const std::string name_;
     std::ofstream stream_;
   };
@@ -191,7 +196,6 @@ class file_plugin_t {
       case ACTIVITY_DOMAIN_HSA_API:
         return &hsa_api_file_;
       case ACTIVITY_DOMAIN_HIP_API:
-      case ACTIVITY_DOMAIN_EXT_API:
         return &hip_api_file_;
       case ACTIVITY_DOMAIN_HIP_OPS:
         return &hip_activity_file_;
@@ -211,7 +215,6 @@ class file_plugin_t {
  public:
   file_plugin_t() {
     // Dumping HSA handles for agents
-
     output_file_t hsa_handles("hsa_handles.txt");
 
     [[maybe_unused]] hsa_status_t status = hsa_iterate_agents(
@@ -229,7 +232,7 @@ class file_plugin_t {
         &hsa_handles);
     assert(status == HSA_STATUS_SUCCESS && "failed to iterate HSA agents");
     if (hsa_handles.fail()) {
-      warning("Cannot write to '%s'\n", hsa_handles.path().c_str());
+      warning("Cannot write to '%s'\n", hsa_handles.name().c_str());
       return;
     }
 
@@ -240,10 +243,11 @@ class file_plugin_t {
     CHECK_ROCTRACER(roctracer_get_timestamp(&app_begin_timestamp));
     begin_ts << std::dec << app_begin_timestamp << std::endl;
     if (begin_ts.fail()) {
-      warning("Cannot write to '%s'\n", begin_ts.path().c_str());
+      warning("Cannot write to '%s'\n", begin_ts.name().c_str());
       return;
     }
-    is_valid_ = true;
+
+    valid_ = true;
   }
 
   int write_callback_record(const roctracer_record_t* record, const void* callback_data) {
@@ -288,14 +292,6 @@ class file_plugin_t {
                      << hipApiString((hip_api_id_t)record->op, data) << kernel_name << " :"
                      << data->correlation_id << std::endl;
         break;
-      }
-      case ACTIVITY_DOMAIN_EXT_API: {
-        output_file = get_output_file(ACTIVITY_DOMAIN_EXT_API);
-        *output_file << std::dec << record->begin_ns << ":" << record->end_ns << " "
-                     << record->process_id << ":" << record->thread_id << " MARK"
-                     << "(name(" << record->mark_message << "))" << std::endl;
-        break;
-        [[fallthrough]];
       }
       default:
         warning("write_callback_record: ignored record for domain %d", record->domain);
@@ -342,56 +338,51 @@ class file_plugin_t {
     return 0;
   }
 
-  bool is_valid() const { return is_valid_; }
+  bool is_valid() const { return valid_; }
 
  private:
-  bool is_valid_{false};
+  bool valid_{false};
 
   output_file_t roctx_file_{"roctx_trace.txt"}, hsa_api_file_{"hsa_api_trace.txt"},
       hip_api_file_{"hip_api_trace.txt"}, hip_activity_file_{"hcc_ops_trace.txt"},
       hsa_async_copy_file_{"async_copy_trace.txt"}, pc_sample_file_{"pcs_trace.txt"};
-
-  static fs::path output_prefix_;
 };
 
-fs::path file_plugin_t::output_prefix_ = []() {
-  const char* output_dir = getenv("ROCP_OUTPUT_DIR");
-  if (output_dir == nullptr) return "";
-
-  if (!fs::is_directory(fs::status(output_dir)))
-    fatal("Cannot open output directory specified by ROCP_OUTPUT_DIR!\n");
-  return output_dir;
-}();
+file_plugin_t* file_plugin = nullptr;
 
 }  // namespace
 
-std::unique_ptr<file_plugin_t> file_plugin;
-
-int roctracer_plugin_initialize(uint32_t roctracer_major_version,
-                                uint32_t roctracer_minor_version) {
+ROCTRACER_EXPORT int roctracer_plugin_initialize(uint32_t roctracer_major_version,
+                                                 uint32_t roctracer_minor_version) {
   if (roctracer_major_version != ROCTRACER_VERSION_MAJOR ||
       roctracer_minor_version < ROCTRACER_VERSION_MINOR)
     return -1;
 
-  if (file_plugin) return -1;
-  file_plugin = std::make_unique<file_plugin_t>();
-  if (!file_plugin->is_valid()) {
-    file_plugin.reset();
-    return -1;
-  }
-  return 0;
+  if (file_plugin != nullptr) return -1;
+
+  file_plugin = new file_plugin_t();
+  if (file_plugin->is_valid()) return 0;
+
+  // The plugin failed to initialied, destroy it and return an error.
+  delete file_plugin;
+  file_plugin = nullptr;
+  return -1;
 }
 
-void roctracer_plugin_finalize() { file_plugin.reset(); }
+ROCTRACER_EXPORT void roctracer_plugin_finalize() {
+  if (!file_plugin) return;
+  delete file_plugin;
+  file_plugin = nullptr;
+}
 
-int roctracer_plugin_write_callback_record(const roctracer_record_t* record,
-                                           const void* callback_data) {
+ROCTRACER_EXPORT int roctracer_plugin_write_callback_record(const roctracer_record_t* record,
+                                                            const void* callback_data) {
   if (!file_plugin || !file_plugin->is_valid()) return -1;
   return file_plugin->write_callback_record(record, callback_data);
 }
 
-int roctracer_plugin_write_activity_records(const roctracer_record_t* begin,
-                                            const roctracer_record_t* end) {
+ROCTRACER_EXPORT int roctracer_plugin_write_activity_records(const roctracer_record_t* begin,
+                                                             const roctracer_record_t* end) {
   if (!file_plugin || !file_plugin->is_valid()) return -1;
   return file_plugin->write_activity_records(begin, end);
 }
