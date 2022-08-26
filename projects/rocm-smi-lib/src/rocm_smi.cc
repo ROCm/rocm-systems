@@ -3490,7 +3490,7 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
         assert(false);  // Unexpected IO Link type read
         status = RSMI_STATUS_NOT_SUPPORTED;
       }
-    } else {
+    } else if (kfd_node->numa_node_type() == amd::smi::IOLINK_TYPE_PCIEXPRESS) {
       *weight = kfd_node->numa_node_weight();  // from src GPU to it's CPU node
       uint64_t numa_weight_dst = 0;
       status = topo_get_numa_node_weight(dv_ind_dst, &numa_weight_dst);
@@ -3522,6 +3522,8 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
         assert(false);  // Error to read numa node weight
         status = RSMI_STATUS_INIT_ERROR;
       }
+    } else {
+      status = RSMI_STATUS_NOT_SUPPORTED;
     }
   } else {
     status = RSMI_STATUS_INVALID_ARGS;
@@ -3597,7 +3599,7 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   if (ret == 0) {
     amd::smi::IO_LINK_TYPE io_link_type;
     ret = kfd_node->get_io_link_type(node_ind_dst, &io_link_type);
-    if (!ret) {
+    if (ret == 0) {
       if (io_link_type == amd::smi::IOLINK_TYPE_XGMI) {
         *type = RSMI_IOLINK_TYPE_XGMI;
         *hops = 1;
@@ -3606,7 +3608,7 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
         assert(false);  // Unexpected IO Link type read
         status = RSMI_STATUS_NOT_SUPPORTED;
       }
-    } else {
+    } else if (kfd_node->numa_node_type() == amd::smi::IOLINK_TYPE_PCIEXPRESS) {
       uint32_t numa_number_dst;
       status = topo_get_numa_node_number(dv_ind_dst, &numa_number_dst);
       if (status == RSMI_STATUS_SUCCESS) {
@@ -3622,21 +3624,14 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
           else
             *hops = 4;  // More than one CPU hops, hard coded as 4
         }
-
-        amd::smi::IO_LINK_TYPE numa_node_type = kfd_node->numa_node_type();
-        if (numa_node_type == amd::smi::IOLINK_TYPE_PCIEXPRESS) {
-          *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
-          status = RSMI_STATUS_SUCCESS;
-        } else if (numa_node_type == amd::smi::IOLINK_TYPE_XGMI) {
-          *type = RSMI_IOLINK_TYPE_XGMI;
-          status = RSMI_STATUS_SUCCESS;
-        } else {
-          status = RSMI_STATUS_INIT_ERROR;
-        }
+        *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
+        status = RSMI_STATUS_SUCCESS;
       } else {
         assert(false);  // Error to get numa node number
         status = RSMI_STATUS_INIT_ERROR;
       }
+    } else {
+      status = RSMI_STATUS_NOT_SUPPORTED;
     }
   } else {
     status = RSMI_STATUS_INVALID_ARGS;
