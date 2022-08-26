@@ -19,7 +19,7 @@ env:
 
 jobs:
   ubuntu-bionic:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     container:
       image: jrmadsen/omnitrace:ci-base-ubuntu-18.04
     strategy:
@@ -29,7 +29,7 @@ jobs:
 
     steps:
     - name: Patch Git
-      timeout-minutes: 5
+      timeout-minutes: 10
       run: |
         apt-get update
         apt-get install -y software-properties-common
@@ -43,7 +43,7 @@ jobs:
         submodules: recursive
 
     - name: Install Packages
-      timeout-minutes: 5
+      timeout-minutes: 10
       run:
         apt-get update &&
         apt-get upgrade -y &&
@@ -55,7 +55,7 @@ jobs:
         for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Install Kokkos
-      timeout-minutes: 5
+      timeout-minutes: 10
       run:
         cd examples/lulesh/external/kokkos &&
         cmake -B build -DKokkos_ENABLE_OPENMP=ON -DKokkos_ENABLE_SERIAL=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_CXX_STANDARD=17 . &&
@@ -153,3 +153,11 @@ jobs:
           build/omnitrace-tests-config/*.cfg
           build/omnitrace-tests-output/**/*.txt
           build/omnitrace-tests-output/**/*-instr*.json
+
+    - name: Kill Perfetto
+      if: success() || failure()
+      continue-on-error: True
+      run: |
+        set +e
+        RUNNING_PROCS=$(pgrep trace_processor_shell)
+        if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi

@@ -59,7 +59,7 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Packages
-      timeout-minutes: 5
+      timeout-minutes: 10
       run:
         apt-get update &&
         apt-get install -y software-properties-common &&
@@ -111,7 +111,7 @@ jobs:
         cmake --build build --target all --parallel 2 -- VERBOSE=1
 
     - name: Install
-      timeout-minutes: 5
+      timeout-minutes: 10
       run:
         cmake --build build --target install --parallel 2
 
@@ -170,6 +170,14 @@ jobs:
           build/omnitrace-tests-output/**/*.txt
           build/omnitrace-tests-output/**/*-instr*.json
 
+    - name: Kill Perfetto
+      if: success() || failure()
+      continue-on-error: True
+      run: |
+        set +e
+        RUNNING_PROCS=$(pgrep trace_processor_shell)
+        if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
+
   ubuntu-focal-external-rocm:
     runs-on: ubuntu-20.04
     container:
@@ -199,7 +207,7 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Packages
-      timeout-minutes: 5
+      timeout-minutes: 10
       run:
         apt-get update &&
         apt-get install -y software-properties-common wget gnupg2 &&
@@ -213,7 +221,7 @@ jobs:
 
     - name: Install RCCL
       if: ${{ matrix.rocm_version != '4.3' }}
-      timeout-minutes: 5
+      timeout-minutes: 10
       run:
         apt-get install -y rccl-dev
 
@@ -371,6 +379,14 @@ jobs:
           build/omnitrace-tests-output/**/*.txt
           build/omnitrace-tests-output/**/*-instr*.json
 
+    - name: Kill Perfetto
+      if: success() || failure()
+      continue-on-error: True
+      run: |
+        set +e
+        RUNNING_PROCS=$(pgrep trace_processor_shell)
+        if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
+
   ubuntu-focal:
     runs-on: ubuntu-20.04
     strategy:
@@ -404,7 +420,7 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install Packages
-      timeout-minutes: 5
+      timeout-minutes: 10
       run:
         sudo apt-get update &&
         sudo apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.deps }} clang libomp-dev ${{ matrix.compiler }} ${{ matrix.mpi }} &&
@@ -523,3 +539,11 @@ jobs:
           ${{ github.workspace }}/build/omnitrace-tests-config/*.cfg
           ${{ github.workspace }}/build/omnitrace-tests-output/**/*.txt
           ${{ github.workspace }}/build/omnitrace-tests-output/**/*-instr*.json
+
+    - name: Kill Perfetto
+      if: success() || failure()
+      continue-on-error: True
+      run: |
+        set +e
+        RUNNING_PROCS=$(pgrep trace_processor_shell)
+        if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi

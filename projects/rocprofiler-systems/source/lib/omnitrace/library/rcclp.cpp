@@ -51,10 +51,7 @@ namespace rcclp
 {
 void
 configure()
-{
-    comp::rccl_data_tracker_t::label()       = "rccl_comm_data";
-    comp::rccl_data_tracker_t::description() = "Tracks RCCL communication data";
-}
+{}
 
 void
 setup()
@@ -67,11 +64,17 @@ setup()
     if(!librccl_handle) fprintf(stderr, "%s\n", dlerror());
     dlerror();  // Clear any existing error
 
-    auto _data = tim::get_env("OMNITRACE_RCCLP_COMM_DATA", true);
-    if(_data)
-        comp::rccl_toolset_t::get_initializer() = [](comp::rccl_toolset_t& cb) {
-            cb.initialize<comp::rccl_comm_data>();
-        };
+    auto _use_data = tim::get_env("OMNITRACE_RCCLP_COMM_DATA", get_use_timemory());
+    if(!get_use_timemory())
+    {
+        trait::runtime_enabled<comp::comm_data>::set(false);
+        trait::runtime_enabled<comp::comm_data_tracker_t>::set(false);
+    }
+    else
+    {
+        trait::runtime_enabled<comp::comm_data>::set(_use_data);
+        trait::runtime_enabled<comp::comm_data_tracker_t>::set(_use_data);
+    }
 
     comp::configure_rcclp();
     global_id = comp::activate_rcclp();

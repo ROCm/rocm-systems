@@ -85,6 +85,9 @@
         perfetto::Category("ompt").SetDescription("OpenMP Tools regions"),               \
         perfetto::Category("rccl").SetDescription(                                       \
             "ROCm Communication Collectives Library (RCCL) regions"),                    \
+        perfetto::Category("comm_data")                                                  \
+            .SetDescription(                                                             \
+                "MPI/RCCL counters for tracking amount of data sent or received"),       \
         perfetto::Category("critical-trace").SetDescription("Combined critical traces"), \
         perfetto::Category("host-critical-trace")                                        \
             .SetDescription("Host-side critical traces"),                                \

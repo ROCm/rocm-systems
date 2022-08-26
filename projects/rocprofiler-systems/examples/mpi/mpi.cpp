@@ -44,15 +44,21 @@ namespace
 auto _name = std::string{};
 }  // namespace
 
-template <typename Tp, size_t N>
-void
-all2all(int _rank, MPI_Comm _comm)
+template <typename Tp>
+auto
+get_values_str(const Tp& _data)
 {
-    if(_comm == MPI_COMM_NULL) return;
-    static_assert(N > 0, "Error! N must be greater than zero!");
+    std::stringstream _ss{};
+    for(auto&& itr : _data)
+        _ss << ", " << std::setw(6) << std::setprecision(2) << std::fixed << itr;
+    return _ss.str().substr(1);
+};
 
-    auto _mt   = std::mt19937_64{ size_t(_rank + 100) };
-    auto _dist = []() {
+template <typename Tp, size_t N>
+auto
+get_dist(std::mt19937_64& _mt)
+{
+    static auto _dist = []() {
         if constexpr(std::is_integral<Tp>::value)
         {
             return std::uniform_int_distribution<Tp>(1, N * N);
@@ -62,23 +68,13 @@ all2all(int _rank, MPI_Comm _comm)
             return std::uniform_real_distribution<Tp>(1.0, N * N);
         }
     }();
+    return _dist(_mt);
+}
 
-    auto _get_values_str = [](const auto& _data) {
-        std::stringstream _ss{};
-        for(auto&& itr : _data)
-            _ss << ", " << std::setw(6) << std::setprecision(2) << std::fixed << itr;
-        return _ss.str().substr(1);
-    };
-
-    std::array<Tp, N> values_sent = {};
-    std::array<Tp, N> values_recv = {};
-    for(size_t i = 0; i < N; ++i)
-        values_sent[i] = _dist(_mt);
-
-    if(_rank == 0)
-        printf("[%s][%i] values sent (# = %zu) :: %s.\n", _name.c_str(), _rank,
-               values_sent.size(), _get_values_str(values_sent).c_str());
-
+template <typename Tp>
+auto
+get_dtype()
+{
     auto _dtype = MPI_INT;  // NOLINT
     if(std::is_same<Tp, long>::value)
         _dtype = MPI_LONG;
@@ -86,12 +82,71 @@ all2all(int _rank, MPI_Comm _comm)
         _dtype = MPI_FLOAT;
     else if(std::is_same<Tp, double>::value)
         _dtype = MPI_DOUBLE;
+    return _dtype;
+}
+
+template <typename Tp, size_t N>
+void
+all2all(int _rank, MPI_Comm _comm)
+{
+    if(_comm == MPI_COMM_NULL) return;
+    static_assert(N > 0, "Error! N must be greater than zero!");
+
+    auto _dtype      = get_dtype<Tp>();
+    auto _mt         = std::mt19937_64{ size_t(_rank + 100) };
+    auto values_sent = std::array<Tp, N>{};
+    auto values_recv = std::array<Tp, N>{};
+    for(size_t i = 0; i < N; ++i)
+        values_sent[i] = get_dist<Tp, N>(_mt);
+
+    if(_rank == 0)
+        printf("[%s][%s][%i] values sent (# = %zu) :: %s.\n", _name.c_str(), __FUNCTION__,
+               _rank, values_sent.size(), get_values_str(values_sent).c_str());
 
     MPI_Alltoall(&values_sent[_rank], 1, _dtype, &values_recv[_rank], 1, _dtype, _comm);
 
     if(_rank == 0)
-        printf("[%s][%i] values recv (# = %zu) :: %s.\n", _name.c_str(), _rank,
-               values_sent.size(), _get_values_str(values_recv).c_str());
+        printf("[%s][%s][%i] values recv (# = %zu) :: %s.\n", _name.c_str(), __FUNCTION__,
+               _rank, values_sent.size(), get_values_str(values_recv).c_str());
+}
+
+template <typename Tp, size_t N>
+void
+send_recv(int _rank, MPI_Comm _comm)
+{
+    if(_comm == MPI_COMM_NULL) return;
+    static_assert(N > 0, "Error! N must be greater than zero!");
+    int _size = 0;
+    MPI_Comm_size(_comm, &_size);
+
+    auto _dtype      = get_dtype<Tp>();
+    auto _mt         = std::mt19937_64{ size_t(_rank + 100) };
+    auto values_sent = std::array<Tp, N>{};
+    auto values_recv = std::array<Tp, N>{};
+    for(size_t i = 0; i < N; ++i)
+        values_sent[i] = get_dist<Tp, N>(_mt);
+
+    if(_rank == 0)
+        printf("[%s][%s][%i] values sent (# = %zu) :: %s.\n", _name.c_str(), __FUNCTION__,
+               _rank, values_sent.size(), get_values_str(values_sent).c_str());
+
+    for(int i = 0; i < _size; ++i)
+    {
+        if(i != _rank) MPI_Send(&values_sent[_rank], 1, _dtype, i, N, _comm);
+    }
+
+    for(int i = 0; i < _size; ++i)
+    {
+        if(i != _rank)
+        {
+            MPI_Status _status;
+            MPI_Recv(&values_recv[i], 1, _dtype, i, N, _comm, &_status);
+        }
+    }
+
+    if(_rank == 0)
+        printf("[%s][%s][%i] values recv (# = %zu) :: %s.\n", _name.c_str(), __FUNCTION__,
+               _rank, values_sent.size(), get_values_str(values_recv).c_str());
 }
 
 void
@@ -109,9 +164,13 @@ run(MPI_Comm _comm, int nitr)
     MPI_Barrier(_comm);
     for(int i = 0; i < nitr; ++i)
     {
+        send_recv<int, 3>(_rank, _comm);
+        send_recv<long, 4>(_rank, _comm);
+        send_recv<float, 5>(_rank, _comm);
+        send_recv<double, 6>(_rank, _comm);
+        MPI_Barrier(_comm);
         all2all<int, 3>(_rank, _comm);
         all2all<long, 4>(_rank, _comm);
-        MPI_Barrier(_comm);
         all2all<float, 5>(_rank, _comm);
         all2all<double, 6>(_rank, _comm);
     }
@@ -259,6 +318,7 @@ run_main(int argc, char** argv)
 int
 main(int argc, char** argv)
 {
+    std::this_thread::sleep_for(std::chrono::seconds{ 2 });
     int _mpi_thread_provided;
     MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &_mpi_thread_provided);
 

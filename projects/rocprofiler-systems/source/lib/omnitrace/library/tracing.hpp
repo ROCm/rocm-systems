@@ -31,6 +31,8 @@
 #include "library/timemory.hpp"
 #include "library/utility.hpp"
 
+#include <timemory/components/timing/backends.hpp>
+
 namespace omnitrace
 {
 namespace tracing
@@ -48,6 +50,13 @@ get_timemory_hash_ids(int64_t _tid = threading::get_id());
 
 tim::hash_alias_ptr_t&
 get_timemory_hash_aliases(int64_t _tid = threading::get_id());
+
+template <typename Tp = uint64_t>
+OMNITRACE_INLINE auto
+now()
+{
+    return ::tim::get_clock_real_now<Tp, std::nano>();
+}
 
 namespace
 {
