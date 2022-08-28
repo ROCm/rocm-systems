@@ -35,6 +35,12 @@ This submodule imports the timemory Python function profiler
 """
 
 try:
+    import os
+
+    os.environ["OMNITRACE_PATH"] = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../..")
+    )
+
     from .libpyomnitrace import coverage
     from . import user
     from .profiler import Profiler, FakeProfiler

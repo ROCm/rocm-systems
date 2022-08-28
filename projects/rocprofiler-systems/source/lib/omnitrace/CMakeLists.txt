@@ -35,11 +35,10 @@ target_link_libraries(
         $<BUILD_INTERFACE:omnitrace::omnitrace-rocprofiler>
         $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
         $<BUILD_INTERFACE:omnitrace::omnitrace-rccl>
-        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_LTO}>,omnitrace::omnitrace-lto,>>
-        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,omnitrace::omnitrace-static-libgcc,>>
-        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBSTDCXX}>,omnitrace::omnitrace-static-libstdcxx,>>
-        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>>
-    )
+        $<BUILD_INTERFACE:omnitrace::omnitrace-static-libgcc-optional>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-static-libstdcxx-optional>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-sanitizer>
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_LTO}>,omnitrace::omnitrace-lto,>>)
 
 # ------------------------------------------------------------------------------#
 #

@@ -93,7 +93,7 @@ class Region:
             _count = Region._counter
             self._active = False
             if _count != self._count:
-                raise LogicError(
+                raise RuntimeError(
                     f"{self._label} was not popped in the order it was pushed. Current stack number: {_count}, expected stack number: {self._count}"
                 )
             _libuser.pop_region(self._label)

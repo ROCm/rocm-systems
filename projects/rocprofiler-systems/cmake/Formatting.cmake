@@ -41,8 +41,21 @@ find_program(OMNITRACE_CLANG_FORMAT_EXE NAMES clang-format-11 clang-format-mp-11
                                               clang-format)
 
 find_program(OMNITRACE_CMAKE_FORMAT_EXE NAMES cmake-format)
+find_program(OMNITRACE_BLACK_FORMAT_EXE NAMES black)
 
-if(OMNITRACE_CLANG_FORMAT_EXE)
+add_custom_target(format-omnitrace)
+if(NOT TARGET format)
+    add_custom_target(format)
+endif()
+foreach(_TYPE source python cmake)
+    if(NOT TARGET format-${_TYPE})
+        add_custom_target(format-${_TYPE})
+    endif()
+endforeach()
+
+if(OMNITRACE_CLANG_FORMAT_EXE
+   OR OMNITRACE_BLACK_FORMAT_EXE
+   OR OMNITRACE_CMAKE_FORMAT_EXE)
     file(GLOB_RECURSE sources ${PROJECT_SOURCE_DIR}/source/*.cpp)
     file(GLOB_RECURSE headers ${PROJECT_SOURCE_DIR}/source/*.hpp
          ${PROJECT_SOURCE_DIR}/source/*.hpp.in ${PROJECT_SOURCE_DIR}/source/*.h
@@ -63,16 +76,25 @@ if(OMNITRACE_CLANG_FORMAT_EXE)
         list(REMOVE_ITEM examples ${external})
         list(REMOVE_ITEM cmake_files ${external})
     endif()
-    add_custom_target(
-        format-omnitrace-source
-        ${OMNITRACE_CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}
-        COMMENT "[omnitrace] Running C++ formatter ${OMNITRACE_CLANG_FORMAT_EXE}...")
-    add_custom_target(format-omnitrace)
-    add_dependencies(format-omnitrace format-omnitrace-source)
-    if(NOT TARGET format)
-        add_custom_target(format)
+
+    if(OMNITRACE_CLANG_FORMAT_EXE)
+        add_custom_target(
+            format-omnitrace-source
+            ${OMNITRACE_CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}
+            COMMENT "[omnitrace] Running C++ formatter ${OMNITRACE_CLANG_FORMAT_EXE}...")
     endif()
-    add_dependencies(format format-omnitrace)
+
+    if(OMNITRACE_BLACK_FORMAT_EXE)
+        add_custom_target(
+            format-omnitrace-python
+            ${OMNITRACE_BLACK_FORMAT_EXE} ${PROJECT_SOURCE_DIR}
+            COMMENT
+                "[omnitrace] Running Python formatter ${OMNITRACE_BLACK_FORMAT_EXE}...")
+        if(NOT TARGET format-python)
+            add_custom_target(format-python)
+        endif()
+    endif()
+
     if(OMNITRACE_CMAKE_FORMAT_EXE)
         add_custom_target(
             format-omnitrace-cmake
@@ -82,10 +104,20 @@ if(OMNITRACE_CLANG_FORMAT_EXE)
         if(NOT TARGET format-cmake)
             add_custom_target(format-cmake)
         endif()
-        add_dependencies(format-cmake format-omnitrace-cmake)
     endif()
+
+    foreach(_TYPE source python cmake)
+        if(TARGET format-omnitrace-${_TYPE})
+            add_dependencies(format-omnitrace format-omnitrace-${_TYPE})
+            add_dependencies(format-${_TYPE} format-omnitrace-${_TYPE})
+        endif()
+    endforeach()
+
+    foreach(_TYPE source python)
+        if(TARGET format-omnitrace-${_TYPE})
+            add_dependencies(format format-omnitrace-${_TYPE})
+        endif()
+    endforeach()
 else()
-    message(
-        AUTHOR_WARNING
-            "clang-format could not be found. format build target not available.")
+    message(STATUS "clang-format could not be found. format build target not available.")
 endif()

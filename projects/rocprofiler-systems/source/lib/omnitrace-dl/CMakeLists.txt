@@ -23,13 +23,8 @@ target_include_directories(
            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(
     omnitrace-dl-library
-    PUBLIC
-        ${dl_LIBRARY}
-        $<BUILD_INTERFACE:omnitrace::common-library>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
-        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBGCC}>,omnitrace::omnitrace-static-libgcc,>>
-        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_STATIC_LIBSTDCXX}>,omnitrace::omnitrace-static-libstdcxx,>>
-    )
+    PUBLIC $<BUILD_INTERFACE:${dl_LIBRARY}> $<BUILD_INTERFACE:omnitrace::common-library>
+           $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>)
 
 add_target_cxx_flag_if_avail(omnitrace-dl-library "-ftls-model=global-dynamic")
 add_target_cxx_flag_if_avail(omnitrace-dl-library "-g")

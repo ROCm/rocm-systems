@@ -6,7 +6,7 @@
 
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 
-add_executable(omnitrace-exe ${_EXCLUDE})
+add_executable(omnitrace-exe)
 
 target_sources(
     omnitrace-exe
@@ -22,12 +22,9 @@ target_sources(
 
 target_link_libraries(
     omnitrace-exe
-    PRIVATE omnitrace::omnitrace-headers
-            omnitrace::omnitrace-dyninst
-            omnitrace::omnitrace-compile-options
-            omnitrace::omnitrace-compile-definitions
-            timemory::timemory-headers
-            $<IF:$<BOOL:${OMNITRACE_USE_SANITIZER}>,omnitrace::omnitrace-sanitizer,>)
+    PRIVATE omnitrace::omnitrace-headers omnitrace::omnitrace-dyninst
+            omnitrace::omnitrace-compile-options omnitrace::omnitrace-compile-definitions
+            omnitrace::omnitrace-sanitizer timemory::timemory-headers)
 
 set_target_properties(
     omnitrace-exe

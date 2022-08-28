@@ -505,6 +505,11 @@ endif()
 target_compile_definitions(omnitrace-timemory-config INTERFACE TIMEMORY_PAPI_ARRAY_SIZE=16
                                                                TIMEMORY_USE_ROOFLINE=0)
 
+if(OMNITRACE_BUILD_STACK_PROTECTOR)
+    add_target_flag_if_avail(omnitrace-timemory-config "-fstack-protector-strong"
+                             "-Wstack-protector")
+endif()
+
 set(TIMEMORY_EXTERNAL_INTERFACE_LIBRARY
     omnitrace-timemory-config
     CACHE STRING "timemory configuration interface library")

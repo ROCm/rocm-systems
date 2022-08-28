@@ -25,10 +25,15 @@ omnitrace_add_option(OMNITRACE_BUILD_STATIC_LIBGCC
                      "Build with -static-libgcc if possible" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_STATIC_LIBSTDCXX
                      "Build with -static-libstdc++ if possible" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_STACK_PROTECTOR "Build with -fstack-protector" ON)
 
 omnitrace_add_interface_library(omnitrace-static-libgcc
                                 "Link to static version of libgcc")
 omnitrace_add_interface_library(omnitrace-static-libstdcxx
+                                "Link to static version of libstdc++")
+omnitrace_add_interface_library(omnitrace-static-libgcc-optional
+                                "Link to static version of libgcc")
+omnitrace_add_interface_library(omnitrace-static-libstdcxx-optional
                                 "Link to static version of libstdc++")
 
 target_compile_definitions(omnitrace-compile-options INTERFACE $<$<CONFIG:DEBUG>:DEBUG>)
@@ -195,6 +200,18 @@ if(OMNITRACE_USE_COMPILE_TIMING)
 endif()
 
 # ----------------------------------------------------------------------------------------#
+# fstack-protector
+#
+omnitrace_add_interface_library(omnitrace-stack-protector
+                                "Adds stack-protector compiler flags")
+add_target_flag_if_avail(omnitrace-stack-protector "-fstack-protector-strong"
+                         "-Wstack-protector")
+
+if(OMNITRACE_BUILD_STACK_PROTECTOR)
+    target_link_libraries(omnitrace-compile-options INTERFACE omnitrace-stack-protector)
+endif()
+
+# ----------------------------------------------------------------------------------------#
 # developer build flags
 #
 omnitrace_add_interface_library(omnitrace-develop-options "Adds developer compiler flags")
@@ -281,13 +298,6 @@ else()
     set(OMNITRACE_USE_SANITIZER OFF)
 endif()
 
-if(MSVC)
-    # VTune is much more helpful when debug information is included in the generated
-    # release code.
-    add_flag_if_avail("/Zi")
-    add_flag_if_avail("/DEBUG")
-endif()
-
 # ----------------------------------------------------------------------------------------#
 # static lib flags
 #
@@ -307,6 +317,16 @@ target_compile_options(
 target_link_options(
     omnitrace-static-libstdcxx INTERFACE
     $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU,Clang>:-static-libstdc++>>)
+
+if(OMNITRACE_BUILD_STATIC_LIBGCC)
+    target_link_libraries(omnitrace-static-libgcc-optional
+                          INTERFACE omnitrace-static-libgcc)
+endif()
+
+if(OMNITRACE_BUILD_STATIC_LIBSTDCXX)
+    target_link_libraries(omnitrace-static-libstdcxx-optional
+                          INTERFACE omnitrace-static-libstdcxx)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 # user customization

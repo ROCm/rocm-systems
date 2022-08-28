@@ -77,6 +77,9 @@ PYBIND11_MODULE(libpyomnitrace, omni)
 {
     using namespace pyomnitrace;
 
+    py::doc("Omnitrace Python bindings for profiling, user API, and code coverage "
+            "post-processing");
+
     static bool _is_initialized = false;
     static bool _is_finalized   = false;
     static auto _get_use_mpi    = []() {
@@ -162,10 +165,25 @@ PYBIND11_MODULE(libpyomnitrace, omni)
         },
         "Finalize omnitrace");
 
-    py::doc("omnitrace profiler for python");
     pyprofile::generate(omni);
     pycoverage::generate(omni);
     pyuser::generate(omni);
+
+    auto _python_path = tim::get_env("OMNITRACE_PATH", std::string{}, false);
+    auto _libpath     = std::string{ "libomnitrace-dl.so" };
+    if(!_python_path.empty()) _libpath = TIMEMORY_JOIN("/", _python_path, _libpath);
+    // permit env override if default path fails/is wrong
+    _libpath = tim::get_env("OMNITRACE_DL_LIBRARY", _libpath);
+    // this is necessary when building with -static-libstdc++
+    // without it, loading libomnitrace.so within libomnitrace-dl.so segfaults
+    if(!dlopen(_libpath.c_str(), RTLD_NOW | RTLD_GLOBAL))
+    {
+        auto _msg =
+            TIMEMORY_JOIN("", "dlopen(\"", _libpath, "\", RTLD_NOW | RTLD_GLOBAL)");
+        perror(_msg.c_str());
+        fprintf(stderr, "[omnitrace][dl][pid=%i] %s :: %s\n", getpid(), _msg.c_str(),
+                dlerror());
+    }
 }
 
 //======================================================================================//
