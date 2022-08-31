@@ -54,7 +54,6 @@ struct pthread_mutex_gotcha : comp::base<pthread_mutex_gotcha, void>
     // generate the gotcha wrappers
     static void configure();
     static void shutdown();
-    static void validate();
 
     int operator()(int (*)(pthread_mutex_t*), pthread_mutex_t*) const;
     int operator()(int (*)(pthread_spinlock_t*), pthread_spinlock_t*) const;

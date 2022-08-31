@@ -220,18 +220,6 @@ bool
 get_use_rcclp();
 
 bool
-get_timeline_sampling();
-
-bool
-get_flat_sampling();
-
-bool
-get_roctracer_timeline_profile();
-
-bool
-get_roctracer_flat_profile();
-
-bool
 get_trace_hsa_api();
 
 bool

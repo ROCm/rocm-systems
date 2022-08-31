@@ -183,8 +183,8 @@ omnitrace_set_env_hidden(const char* env_name, const char* env_val)
 
 namespace
 {
-bool                  _set_mpi_called        = false;
-std::function<void()> _start_gotcha_callback = []() {};
+bool                  _set_mpi_called   = false;
+std::function<void()> _preinit_callback = []() {};
 }  // namespace
 
 extern "C" void
@@ -223,7 +223,7 @@ omnitrace_set_mpi_hidden(bool use, bool attached)
         std::to_string(use).c_str(), std::to_string(attached).c_str(),
         std::to_string(get_state()).c_str());
 
-    _start_gotcha_callback();
+    _preinit_callback();
 }
 
 //======================================================================================//
@@ -355,6 +355,9 @@ omnitrace_init_tooling_hidden()
     } };
 
     OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+
+    // start these gotchas once settings have been initialized
+    get_init_bundle()->start();
 
     if(get_use_sampling()) sampling::block_signals();
 
@@ -554,11 +557,11 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
 
     if(!_set_mpi_called)
     {
-        _start_gotcha_callback = []() { get_gotcha_bundle()->start(); };
+        _preinit_callback = []() { get_preinit_bundle()->start(); };
     }
     else
     {
-        get_gotcha_bundle()->start();
+        get_preinit_bundle()->start();
     }
 }
 
@@ -615,7 +618,7 @@ omnitrace_finalize_hidden(void)
         if(_debug_init) config::set_setting_value("OMNITRACE_DEBUG", _debug_value);
     } };
 
-    auto& _thread_bundle = thread_data<omnitrace_thread_bundle_t>::instance();
+    auto& _thread_bundle = thread_data<thread_bundle_t>::instance();
     if(_thread_bundle) _thread_bundle->stop();
 
     if(dmp::rank() == 0 && get_verbose() >= 0) fprintf(stderr, "\n");
@@ -644,7 +647,7 @@ omnitrace_finalize_hidden(void)
         }
     }
 
-    // stop the main bundle which shuts down the pthread gotchas
+    // stop the main bundle which has stats for run
     if(get_main_bundle())
     {
         OMNITRACE_DEBUG_F("Stopping main bundle...\n");
@@ -690,12 +693,18 @@ omnitrace_finalize_hidden(void)
         }
     }
 
+    // stop the main gotcha which shuts down the pthread gotchas
+    if(get_init_bundle())
+    {
+        OMNITRACE_DEBUG_F("Stopping main gotcha...\n");
+        get_init_bundle()->stop();
+    }
+
     // stop the gotcha bundle
-    if(get_gotcha_bundle())
+    if(get_preinit_bundle())
     {
         OMNITRACE_VERBOSE_F(1, "Shutting down miscellaneous gotchas...\n");
-        get_gotcha_bundle()->stop();
-        get_gotcha_bundle().reset();
+        get_preinit_bundle()->stop();
         component::mpi_gotcha::shutdown();
     }
 
@@ -746,7 +755,7 @@ omnitrace_finalize_hidden(void)
     // if they are still running (e.g. thread-pool still alive), the
     // thread-specific data will be wrong if try to stop them from
     // the main thread.
-    for(auto& itr : thread_data<omnitrace_thread_bundle_t>::instances())
+    for(auto& itr : thread_data<thread_bundle_t>::instances())
     {
         if(itr && itr->get<comp::wall_clock>() &&
            !itr->get<comp::wall_clock>()->get_is_running())

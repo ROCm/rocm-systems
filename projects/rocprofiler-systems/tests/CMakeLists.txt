@@ -52,14 +52,16 @@ set(_flat_environment
     "${_test_library_path}")
 
 set(_lock_environment
-    "OMNITRACE_USE_SAMPLING=OFF"
+    "OMNITRACE_USE_SAMPLING=ON"
     "OMNITRACE_USE_PROCESS_SAMPLING=OFF"
+    "OMNITRACE_SAMPLING_FREQ=250"
     "OMNITRACE_CRITICAL_TRACE=ON"
     "OMNITRACE_COLLAPSE_THREADS=ON"
     "OMNITRACE_TRACE_THREAD_LOCKS=ON"
+    "OMNITRACE_TRACE_THREAD_SPIN_LOCKS=ON"
+    "OMNITRACE_TRACE_THREAD_RW_LOCKS=ON"
     "OMNITRACE_COUT_OUTPUT=ON"
     "OMNITRACE_TIME_OUTPUT=OFF"
-    "OMNITRACE_FLAT_PROFILE=ON"
     "OMNITRACE_TIMELINE_PROFILE=OFF"
     "${_test_library_path}")
 
@@ -241,7 +243,7 @@ function(OMNITRACE_ADD_TEST)
 
     cmake_parse_arguments(
         TEST
-        "SKIP_BASELINE;SKIP_REWRITE;SKIP_RUNTIME;SKIP_SAMPLING" # options
+        "SKIP_BASELINE;SKIP_REWRITE;SKIP_RUNTIME;SKIP_SAMPLING;FORCE_SAMPLING" # options
         "NAME;TARGET;MPI;GPU;NUM_PROCS;REWRITE_TIMEOUT;RUNTIME_TIMEOUT" # single value
                                                                         # args
         "${_KWARGS}" # multiple value args
@@ -315,32 +317,29 @@ function(OMNITRACE_ADD_TEST)
                     ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
 
-            if(NOT TEST_SKIP_SAMPLING)
-                add_test(
-                    NAME ${TEST_NAME}-binary-rewrite-sampling
-                    COMMAND
-                        $<TARGET_FILE:omnitrace-exe> -o
-                        $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp -M sampling
-                        ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
-                    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-            endif()
-
             add_test(
                 NAME ${TEST_NAME}-binary-rewrite-run
                 COMMAND
                     ${COMMAND_PREFIX} $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
                     ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+        endif()
 
-            if(NOT TEST_SKIP_SAMPLING)
-                add_test(
-                    NAME ${TEST_NAME}-binary-rewrite-run-sampling
-                    COMMAND
-                        ${COMMAND_PREFIX}
-                        $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp
-                        ${TEST_RUN_ARGS}
-                    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-            endif()
+        if(TEST_FORCE_SAMPLING OR (NOT TEST_SKIP_REWRITE AND NOT TEST_SKIP_SAMPLING))
+            add_test(
+                NAME ${TEST_NAME}-binary-rewrite-sampling
+                COMMAND
+                    $<TARGET_FILE:omnitrace-exe> -o
+                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp -M sampling
+                    ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+            add_test(
+                NAME ${TEST_NAME}-binary-rewrite-sampling-run
+                COMMAND
+                    ${COMMAND_PREFIX} $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp
+                    ${TEST_RUN_ARGS}
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
         if(NOT TEST_SKIP_RUNTIME)
@@ -349,14 +348,14 @@ function(OMNITRACE_ADD_TEST)
                 COMMAND $<TARGET_FILE:omnitrace-exe> ${TEST_RUNTIME_ARGS} --
                         $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+        endif()
 
-            if(NOT TEST_SKIP_SAMPLING)
-                add_test(
-                    NAME ${TEST_NAME}-runtime-instrument-sampling
-                    COMMAND $<TARGET_FILE:omnitrace-exe> -M sampling ${TEST_RUNTIME_ARGS}
-                            -- $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-            endif()
+        if(TEST_FORCE_SAMPLING OR (NOT TEST_SKIP_RUNTIME AND NOT TEST_SKIP_SAMPLING))
+            add_test(
+                NAME ${TEST_NAME}-runtime-instrument-sampling
+                COMMAND $<TARGET_FILE:omnitrace-exe> -M sampling ${TEST_RUNTIME_ARGS} --
+                        $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
         if(TEST ${TEST_NAME}-binary-rewrite-run)
@@ -364,15 +363,15 @@ function(OMNITRACE_ADD_TEST)
                                  PROPERTIES DEPENDS ${TEST_NAME}-binary-rewrite)
         endif()
 
-        if(TEST ${TEST_NAME}-binary-rewrite-run-sampling)
-            set_tests_properties(${TEST_NAME}-binary-rewrite-run-sampling
+        if(TEST ${TEST_NAME}-binary-rewrite-sampling-run)
+            set_tests_properties(${TEST_NAME}-binary-rewrite-sampling-run
                                  PROPERTIES DEPENDS ${TEST_NAME}-binary-rewrite-sampling)
         endif()
 
         foreach(
             _TEST
             baseline binary-rewrite binary-rewrite-run binary-rewrite-sampling
-            binary-rewrite-run-sampling runtime-instrument runtime-instrument-sampling)
+            binary-rewrite-sampling-run runtime-instrument runtime-instrument-sampling)
             string(REGEX REPLACE "-run(-|/)" "\\1" _prefix "${TEST_NAME}-${_TEST}/")
             set(_environ "${TEST_ENVIRONMENT}")
             set(_labels "${_TEST}")
@@ -686,6 +685,21 @@ omnitrace_add_test(
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
 
 omnitrace_add_test(
+    NAME parallel-overhead-locks
+    TARGET parallel-overhead-locks
+    LABELS "locks"
+    REWRITE_ARGS -e -i 256
+    RUNTIME_ARGS -e -i 256
+    RUN_ARGS 30 4 1000
+    ENVIRONMENT
+        "${_lock_environment};OMNITRACE_USE_TIMEMORY=ON;OMNITRACE_USE_PERFETTO=ON;OMNITRACE_COLLAPSE_THREADS=OFF;OMNITRACE_SAMPLING_REALTIME=ON;OMNITRACE_SAMPLING_REALTIME_FREQ=10;OMNITRACE_SAMPLING_REALTIME_TIDS=0"
+    REWRITE_RUN_PASS_REGEX
+        "wall_clock .*\\|_pthread_create .* 4 .*\\|_pthread_mutex_lock .* 1000 .*\\|_pthread_mutex_unlock .* 1000 .*\\|_pthread_mutex_lock .* 1000 .*\\|_pthread_mutex_unlock .* 1000 .*\\|_pthread_mutex_lock .* 1000 .*\\|_pthread_mutex_unlock .* 1000 .*\\|_pthread_mutex_lock .* 1000 .*\\|_pthread_mutex_unlock .* 1000"
+    RUNTIME_PASS_REGEX
+        "wall_clock .*\\|_pthread_create .* 4 .*\\|_pthread_mutex_lock .* 1000 .*\\|_pthread_mutex_unlock .* 1000 .*\\|_pthread_mutex_lock .* 1000 .*\\|_pthread_mutex_unlock .* 1000 .*\\|_pthread_mutex_lock .* 1000 .*\\|_pthread_mutex_unlock .* 1000 .*\\|_pthread_mutex_lock .* 1000 .*\\|_pthread_mutex_unlock .* 1000"
+    )
+
+omnitrace_add_test(
     SKIP_RUNTIME SKIP_SAMPLING
     NAME parallel-overhead-locks-timemory
     TARGET parallel-overhead-locks
@@ -693,7 +707,7 @@ omnitrace_add_test(
     REWRITE_ARGS -e -v 2 --min-instructions=4
     RUN_ARGS 10 4 1000
     ENVIRONMENT
-        "${_lock_environment};OMNITRACE_USE_TIMEMORY=ON;OMNITRACE_USE_PERFETTO=OFF"
+        "${_lock_environment};OMNITRACE_FLAT_PROFILE=ON;OMNITRACE_USE_TIMEMORY=ON;OMNITRACE_USE_PERFETTO=OFF"
     REWRITE_RUN_PASS_REGEX
         "start_thread (.*) 4 (.*) pthread_mutex_lock (.*) 4000 (.*) pthread_mutex_unlock (.*) 4000"
     )
@@ -706,8 +720,8 @@ omnitrace_add_test(
     REWRITE_ARGS -e -v 2 --min-instructions=8
     RUN_ARGS 10 4 1000
     ENVIRONMENT
-        "${_lock_environment};OMNITRACE_USE_TIMEMORY=OFF;OMNITRACE_USE_PERFETTO=ON"
-    PROPERTIES WILL_FAIL ON)
+        "${_lock_environment};OMNITRACE_FLAT_PROFILE=ON;OMNITRACE_USE_TIMEMORY=OFF;OMNITRACE_USE_PERFETTO=ON"
+    )
 
 omnitrace_add_test(
     NAME user-api

@@ -574,6 +574,7 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
 
     auto _process_perfetto = [_tid,
                               _init](const std::vector<sampling::bundle_t*>& _data) {
+        thread_info::init(true);
         OMNITRACE_VERBOSE(3 || get_debug_sampling(),
                           "[%li] Post-processing backtraces for perfetto...\n", _tid);
 
@@ -643,10 +644,7 @@ void
 post_process_timemory(int64_t _tid, const bundle_t* _init,
                       const std::vector<bundle_t*>& _data)
 {
-    std::map<int64_t, std::map<int64_t, int64_t>> _depth_sum = {};
-    auto                                          _scope     = tim::scope::config{};
-    if(get_timeline_sampling()) _scope += scope::timeline{};
-    if(get_flat_sampling()) _scope += scope::flat{};
+    auto _depth_sum = std::map<int64_t, std::map<int64_t, int64_t>>{};
 
     OMNITRACE_VERBOSE(3 || get_debug_sampling(),
                       "[%li] Post-processing data for timemory...\n", _tid);
@@ -674,7 +672,7 @@ post_process_timemory(int64_t _tid, const bundle_t* _init,
         // generate the instances of the tuple of components and start them
         for(const auto& itr : backtrace::filter_and_patch(_bt_data->get()))
         {
-            _tc.emplace_back(tim::string_view_t{ itr }, _scope);
+            _tc.emplace_back(tim::string_view_t{ itr });
             _tc.back().push(_bt_time->get_tid());
             _tc.back().start();
         }

@@ -216,11 +216,19 @@ get_main_bundle()
     return _v;
 }
 
-std::unique_ptr<gotcha_bundle_t>&
-get_gotcha_bundle()
+std::unique_ptr<init_bundle_t>&
+get_init_bundle()
+{
+    static auto _v = std::make_unique<init_bundle_t>(
+        JOIN('/', "omnitrace/process", process::get_id()));
+    return _v;
+}
+
+std::unique_ptr<preinit_bundle_t>&
+get_preinit_bundle()
 {
     static auto _v =
-        (setup_gotchas(), std::make_unique<gotcha_bundle_t>(
+        (setup_gotchas(), std::make_unique<preinit_bundle_t>(
                               JOIN('/', "omnitrace/process", process::get_id()),
                               quirk::config<quirk::auto_start>{}));
     return _v;

@@ -196,7 +196,6 @@ OMNITRACE_CRITICAL_TRACE_PER_ROW                   = 0
 OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES           = false
 OMNITRACE_DEBUG                                    = false
 OMNITRACE_DL_VERBOSE                               = 0
-OMNITRACE_FLAT_SAMPLING                            = false
 OMNITRACE_INSTRUMENTATION_INTERVAL                 = 1
 OMNITRACE_KOKKOS_KERNEL_LOGGER                     = false
 OMNITRACE_PAPI_EVENTS                              = PAPI_TOT_CYC
@@ -206,17 +205,14 @@ OMNITRACE_PERFETTO_COMBINE_TRACES                  = true
 OMNITRACE_PERFETTO_FILE                            = perfetto-trace.proto
 OMNITRACE_PERFETTO_FILL_POLICY                     = discard
 OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB              = 4096
-OMNITRACE_ROCTRACER_FLAT_PROFILE                   = false
 OMNITRACE_ROCTRACER_HSA_ACTIVITY                   = false
 OMNITRACE_ROCTRACER_HSA_API                        = false
 OMNITRACE_ROCTRACER_HSA_API_TYPES                  =
-OMNITRACE_ROCTRACER_TIMELINE_PROFILE               = false
 OMNITRACE_SAMPLING_CPUS                            =
 OMNITRACE_SAMPLING_DELAY                           = 0.5
 OMNITRACE_SAMPLING_FREQ                            = 10
 OMNITRACE_SAMPLING_GPUS                            = all
 OMNITRACE_TIME_OUTPUT                              = true
-OMNITRACE_TIMELINE_SAMPLING                        = false
 OMNITRACE_TIMEMORY_COMPONENTS                      = wall_clock
 OMNITRACE_TRACE_THREAD_LOCKS                       = false
 OMNITRACE_VERBOSE                                  = 0
@@ -297,7 +293,6 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_ENABLE_SIGNAL_HANDLER         | Enable signals in timemory_init         |
 | OMNITRACE_FILE_OUTPUT                   | Write output to files                   |
 | OMNITRACE_FLAT_PROFILE                  | Set the label hierarchy mode to defa... |
-| OMNITRACE_FLAT_SAMPLING                 | Ignore hierarchy in all statistical ... |
 | OMNITRACE_INPUT_EXTENSIONS              | File extensions used when searching ... |
 | OMNITRACE_INPUT_PATH                    | Explicitly specify the input folder ... |
 | OMNITRACE_INPUT_PREFIX                  | Explicitly specify the prefix for in... |
@@ -328,11 +323,9 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_PERFETTO_FILL_POLICY          | Behavior when perfetto buffer is ful... |
 | OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB   | Hint for shared-memory buffer size i... |
 | OMNITRACE_PRECISION                     | Set the global output precision for ... |
-| OMNITRACE_ROCTRACER_FLAT_PROFILE        | Ignore hierarchy in all kernels entr... |
 | OMNITRACE_ROCTRACER_HSA_ACTIVITY        | Enable HSA activity tracing support     |
 | OMNITRACE_ROCTRACER_HSA_API             | Enable HSA API tracing support          |
 | OMNITRACE_ROCTRACER_HSA_API_TYPES       | HSA API type to collect                 |
-| OMNITRACE_ROCTRACER_TIMELINE_PROFILE    | Create unique entries for every kern... |
 | OMNITRACE_SAMPLING_CPUS                 | CPUs to collect frequency informatio... |
 | OMNITRACE_SAMPLING_DELAY                | Number of seconds to wait before the... |
 | OMNITRACE_SAMPLING_FREQ                 | Number of software interrupts per se... |
@@ -343,7 +336,6 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_SUPPRESS_PARSING              | Disable parsing environment             |
 | OMNITRACE_TEXT_OUTPUT                   | Write text output files                 |
 | OMNITRACE_TIMELINE_PROFILE              | Set the label hierarchy mode to defa... |
-| OMNITRACE_TIMELINE_SAMPLING             | Create unique entries for every samp... |
 | OMNITRACE_TIMEMORY_COMPONENTS           | List of components to collect via ti... |
 | OMNITRACE_TIME_FORMAT                   | Customize the folder generation when... |
 | OMNITRACE_TIME_OUTPUT                   | Output data to subfolder w/ a timest... |

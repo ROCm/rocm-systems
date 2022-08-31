@@ -97,7 +97,7 @@ thread_info::init(bool _offset)
 const std::optional<thread_info>&
 thread_info::get()
 {
-    return get(utility::get_thread_index(), LookupTID);
+    return thread_info_data_t::instances().at(utility::get_thread_index());
 }
 
 const std::optional<thread_info>&

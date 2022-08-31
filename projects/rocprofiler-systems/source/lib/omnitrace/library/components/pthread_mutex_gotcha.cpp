@@ -27,6 +27,7 @@
 #include "library/debug.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
+#include "library/thread_info.hpp"
 #include "library/utility.hpp"
 
 #include <timemory/backends/threading.hpp>
@@ -98,8 +99,6 @@ pthread_mutex_gotcha::configure()
     pthread_mutex_gotcha_t::get_initializer() = []() {
         if(config::get_trace_thread_locks())
         {
-            validate();
-
             pthread_mutex_gotcha_t::configure(
                 comp::gotcha_config<0, int, pthread_mutex_t*>{ "pthread_mutex_lock" });
 
@@ -159,31 +158,6 @@ void
 pthread_mutex_gotcha::shutdown()
 {
     pthread_mutex_gotcha_t::disable();
-}
-
-void
-pthread_mutex_gotcha::validate()
-{
-    if(config::get_trace_thread_locks() && config::get_use_perfetto())
-    {
-        OMNITRACE_PRINT_F("\n");
-        OMNITRACE_PRINT_F("\n");
-        OMNITRACE_PRINT_F("\n");
-        OMNITRACE_PRINT_F(
-            "The overhead of all the mutex locking internally by perfetto is\n")
-        OMNITRACE_PRINT_F(
-            "so significant that all timing data is rendered meaningless.\n");
-        OMNITRACE_PRINT_F(
-            "However, mutex locking is effectively non-existant in timemory.\n");
-        OMNITRACE_PRINT_F("If you want to trace the mutex locking:\n")
-        OMNITRACE_PRINT_F("   OMNITRACE_USE_TIMEMORY=ON\n");
-        OMNITRACE_PRINT_F("   OMNITRACE_USE_PERFETTO=OFF\n");
-        OMNITRACE_PRINT_F("\n");
-        OMNITRACE_PRINT_F("\n");
-        OMNITRACE_PRINT_F("\n");
-        OMNITRACE_FAIL_F("OMNITRACE_USE_PERFETTO and OMNITRACE_TRACE_THREAD_LOCKS cannot "
-                         "both be enabled.\n");
-    }
 }
 
 pthread_mutex_gotcha::pthread_mutex_gotcha(const gotcha_data_t& _data)
@@ -290,9 +264,9 @@ pthread_mutex_gotcha::operator()(int (*_callee)(pthread_t, void**), pthread_t _t
 bool
 pthread_mutex_gotcha::is_disabled()
 {
-    return (get_state() != ::omnitrace::State::Active ||
-            get_thread_state() != ThreadState::Enabled ||
-            (get_use_sampling() && !sampling_enabled_on_child_threads()));
+    static thread_local const auto& _info = thread_info::get();
+    return (!_info || _info->is_offset || get_state() != ::omnitrace::State::Active ||
+            get_thread_state() != ThreadState::Enabled);
 }
 }  // namespace component
 }  // namespace omnitrace

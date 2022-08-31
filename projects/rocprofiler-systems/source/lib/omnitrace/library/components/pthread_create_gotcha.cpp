@@ -144,7 +144,7 @@ pthread_create_gotcha::wrapper::wrapper(routine_t _routine, void* _arg,
 void*
 pthread_create_gotcha::wrapper::operator()() const
 {
-    using thread_bundle_data_t = thread_data<omnitrace_thread_bundle_t>;
+    using thread_bundle_data_t = thread_data<thread_bundle_t>;
 
     if(is_shutdown && *is_shutdown)
     {
@@ -195,7 +195,7 @@ pthread_create_gotcha::wrapper::operator()() const
         threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid).c_str());
         if(!thread_bundle_data_t::instances().at(_tid))
         {
-            thread_data<omnitrace_thread_bundle_t>::construct(
+            thread_data<thread_bundle_t>::construct(
                 TIMEMORY_JOIN('/', "omnitrace/process", process::get_id(), "thread",
                               _tid),
                 quirk::config<quirk::auto_start>{});

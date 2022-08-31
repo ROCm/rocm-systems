@@ -491,29 +491,6 @@ configure_settings(bool _init)
             std::to_string(_sigrt_range),
         0, "sampling", "advanced");
 
-    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_FLAT_SAMPLING",
-                             "Ignore hierarchy in all statistical sampling entries",
-                             _config->get_flat_profile(), "timemory", "sampling",
-                             "data_layout", "advanced");
-
-    OMNITRACE_CONFIG_SETTING(
-        bool, "OMNITRACE_TIMELINE_SAMPLING",
-        "Create unique entries for every sample when statistical sampling is enabled",
-        _config->get_timeline_profile(), "timemory", "sampling", "data_layout",
-        "advanced");
-
-    OMNITRACE_CONFIG_SETTING(
-        bool, "OMNITRACE_ROCTRACER_FLAT_PROFILE",
-        "Ignore hierarchy in all kernels entries with timemory backend",
-        _config->get_flat_profile(), "timemory", "roctracer", "data_layout", "rocm",
-        "advanced");
-
-    OMNITRACE_CONFIG_SETTING(
-        bool, "OMNITRACE_ROCTRACER_TIMELINE_PROFILE",
-        "Create unique entries for every kernel with timemory backend",
-        _config->get_timeline_profile(), "timemory", "roctracer", "data_layout", "rocm",
-        "advanced");
-
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_HSA_ACTIVITY",
                              "Enable HSA activity tracing support", true, "roctracer",
                              "rocm", "advanced");
@@ -1613,34 +1590,6 @@ get_sampling_rtoffset()
 {
     static auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME_OFFSET");
     return static_cast<tim::tsettings<int>&>(*_v->second).get();
-}
-
-bool
-get_timeline_sampling()
-{
-    static auto _v = get_config()->find("OMNITRACE_TIMELINE_SAMPLING");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-bool
-get_flat_sampling()
-{
-    static auto _v = get_config()->find("OMNITRACE_FLAT_SAMPLING");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-bool
-get_roctracer_timeline_profile()
-{
-    static auto _v = get_config()->find("OMNITRACE_ROCTRACER_TIMELINE_PROFILE");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-bool
-get_roctracer_flat_profile()
-{
-    static auto _v = get_config()->find("OMNITRACE_ROCTRACER_FLAT_PROFILE");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 bool

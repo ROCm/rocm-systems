@@ -238,12 +238,6 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
 
     static thread_local int64_t begin_timestamp = 0;
-    static auto                 _scope          = []() {
-        auto _v = scope::config{};
-        if(get_roctracer_timeline_profile()) _v += scope::timeline{};
-        if(get_roctracer_flat_profile()) _v += scope::flat{};
-        return _v;
-    }();
 
     switch(cid)
     {
@@ -320,7 +314,7 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                     if(tasking::roctracer::get_task_group().pool())
                         tasking::roctracer::get_task_group().exec(
                             [_name, _beg_ns, _end_ns]() {
-                                roctracer_hsa_bundle_t _bundle{ _name, _scope };
+                                roctracer_hsa_bundle_t _bundle{ _name };
                                 _bundle.start()
                                     .store(std::plus<double>{},
                                            static_cast<double>(_end_ns - _beg_ns))
@@ -374,14 +368,8 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
 
     if(!_name) return;
 
-    auto        _beg_ns = record->begin_ns + get_clock_skew();
-    auto        _end_ns = record->end_ns + get_clock_skew();
-    static auto _scope  = []() {
-        auto _v = scope::config{};
-        if(get_roctracer_timeline_profile()) _v += scope::timeline{};
-        if(get_roctracer_flat_profile()) _v += scope::flat{};
-        return _v;
-    }();
+    auto _beg_ns = record->begin_ns + get_clock_skew();
+    auto _end_ns = record->end_ns + get_clock_skew();
 
     if(get_use_perfetto())
     {
@@ -394,7 +382,7 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
     auto _func = [_beg_ns, _end_ns, _name]() {
         if(get_use_timemory())
         {
-            roctracer_hsa_bundle_t _bundle{ *_name, _scope };
+            roctracer_hsa_bundle_t _bundle{ *_name };
             _bundle.start()
                 .store(std::plus<double>{}, static_cast<double>(_end_ns - _beg_ns))
                 .stop();
@@ -836,16 +824,10 @@ hip_activity_callback(const char* begin, const char* end, void*)
 
         const char* op_name =
             roctracer_op_string(record->domain, record->op, record->kind);
-        auto        _ns_skew = get_clock_skew();
-        uint64_t    _beg_ns  = record->begin_ns + _ns_skew;
-        uint64_t    _end_ns  = record->end_ns + _ns_skew;
-        auto        _corr_id = record->correlation_id;
-        static auto _scope   = []() {
-            auto _v = scope::config{};
-            if(get_roctracer_timeline_profile()) _v += scope::timeline{};
-            if(get_roctracer_flat_profile()) _v += scope::flat{};
-            return _v;
-        }();
+        auto     _ns_skew = get_clock_skew();
+        uint64_t _beg_ns  = record->begin_ns + _ns_skew;
+        uint64_t _end_ns  = record->end_ns + _ns_skew;
+        auto     _corr_id = record->correlation_id;
 
         auto& _keys = get_roctracer_key_data();
         auto& _tids = get_roctracer_tid_data();
@@ -936,7 +918,7 @@ hip_activity_callback(const char* begin, const char* end, void*)
         if(_found && _name != nullptr && get_use_timemory())
         {
             auto _func = [_beg_ns, _end_ns, _name]() {
-                roctracer_bundle_t _bundle{ _name, _scope };
+                roctracer_bundle_t _bundle{ _name };
                 _bundle.start()
                     .store(std::plus<double>{}, static_cast<double>(_end_ns - _beg_ns))
                     .stop()

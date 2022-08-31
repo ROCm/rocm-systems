@@ -45,30 +45,35 @@
 
 namespace omnitrace
 {
+// started during preinit phase
+using preinit_bundle_t =
+    tim::lightweight_tuple<exit_gotcha_t, fork_gotcha_t, mpi_gotcha_t>;
+
+// started during init phase
+using init_bundle_t = tim::lightweight_tuple<pthread_gotcha>;
+
 // bundle of components around omnitrace_init and omnitrace_finalize
 using main_bundle_t =
     tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss,
-                           comp::cpu_clock, comp::cpu_util, pthread_gotcha>;
-
-using gotcha_bundle_t =
-    tim::lightweight_tuple<exit_gotcha_t, fork_gotcha_t, mpi_gotcha_t>;
+                           comp::cpu_clock, comp::cpu_util>;
 
 // bundle of components around each thread
 #if defined(TIMEMORY_RUSAGE_THREAD) && TIMEMORY_RUSAGE_THREAD > 0
-using omnitrace_thread_bundle_t =
-    tim::lightweight_tuple<comp::wall_clock, comp::thread_cpu_clock,
-                           comp::thread_cpu_util, comp::peak_rss>;
+using thread_bundle_t = tim::lightweight_tuple<comp::wall_clock, comp::thread_cpu_clock,
+                                               comp::thread_cpu_util, comp::peak_rss>;
 #else
-using omnitrace_thread_bundle_t =
-    tim::lightweight_tuple<comp::wall_clock, comp::thread_cpu_clock,
-                           comp::thread_cpu_util>;
+using thread_bundle_t = tim::lightweight_tuple<comp::wall_clock, comp::thread_cpu_clock,
+                                               comp::thread_cpu_util>;
 #endif
 
 std::unique_ptr<main_bundle_t>&
 get_main_bundle();
 
-std::unique_ptr<gotcha_bundle_t>&
-get_gotcha_bundle();
+std::unique_ptr<init_bundle_t>&
+get_init_bundle();
+
+std::unique_ptr<preinit_bundle_t>&
+get_preinit_bundle();
 
 int
 get_realtime_signal();

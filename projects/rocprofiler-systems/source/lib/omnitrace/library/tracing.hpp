@@ -108,7 +108,7 @@ thread_init()
         if(get_state() != State::Finalized)
         {
             if(get_use_sampling()) sampling::shutdown();
-            auto& _thr_bundle = thread_data<omnitrace_thread_bundle_t>::instance();
+            auto& _thr_bundle = thread_data<thread_bundle_t>::instance();
             if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
                _thr_bundle->get<comp::wall_clock>()->get_is_running())
                 _thr_bundle->stop();
@@ -117,10 +117,10 @@ thread_init()
     static thread_local auto _thread_setup = []() {
         if(threading::get_id() > 0)
             threading::set_thread_name(JOIN(" ", "Thread", threading::get_id()).c_str());
-        thread_data<omnitrace_thread_bundle_t>::construct(
-            JOIN('/', "omnitrace/process", process::get_id(), "thread",
-                 threading::get_id()),
-            quirk::config<quirk::auto_start>{});
+        thread_data<thread_bundle_t>::construct(JOIN('/', "omnitrace/process",
+                                                     process::get_id(), "thread",
+                                                     threading::get_id()),
+                                                quirk::config<quirk::auto_start>{});
         get_interval_data()->reserve(512);
         // save the hash maps
         get_timemory_hash_ids()     = tim::get_hash_ids();
