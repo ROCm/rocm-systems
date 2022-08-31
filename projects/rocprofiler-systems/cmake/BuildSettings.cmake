@@ -82,6 +82,10 @@ add_flag_if_avail(
     "-W" "-Wall" "-Wno-unknown-pragmas" "-Wno-unused-function" "-Wno-ignored-attributes"
     "-Wno-attributes" "-Wno-missing-field-initializers")
 
+if(OMNITRACE_BUILD_DEBUG)
+    add_flag_if_avail("-g" "-gdwarf-3" "-fno-omit-frame-pointer")
+endif()
+
 if(WIN32)
     # suggested by MSVC for spectre mitigation in rapidjson implementation
     add_cxx_flag_if_avail("/Qspectre")

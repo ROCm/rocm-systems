@@ -25,7 +25,6 @@
 #include "library/components/roctracer.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
-#include "library/dynamic_library.hpp"
 #include "library/perfetto.hpp"
 #include "library/ptl.hpp"
 
@@ -48,9 +47,9 @@
 namespace omnitrace
 {
 using roctracer_bundle_t =
-    tim::component_bundle<api::omnitrace, comp::roctracer_data, comp::wall_clock>;
+    tim::component_bundle<project::omnitrace, comp::roctracer_data, comp::wall_clock>;
 using roctracer_hsa_bundle_t =
-    tim::component_bundle<api::omnitrace, comp::roctracer_data>;
+    tim::component_bundle<project::omnitrace, comp::roctracer_data>;
 using roctracer_functions_t = std::vector<std::pair<std::string, std::function<void()>>>;
 
 // HSA API callback function

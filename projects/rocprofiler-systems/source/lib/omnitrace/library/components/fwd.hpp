@@ -22,11 +22,13 @@
 
 #pragma once
 
+#include "library/categories.hpp"
 #include "library/common.hpp"
 #include "library/defines.hpp"
 
 #include <timemory/api.hpp>
 #include <timemory/api/macros.hpp>
+#include <timemory/components/base/types.hpp>
 #include <timemory/components/data_tracker/types.hpp>
 #include <timemory/components/macros.hpp>
 #include <timemory/components/user_bundle/types.hpp>
@@ -37,78 +39,24 @@
 
 #include <type_traits>
 
-TIMEMORY_DEFINE_NS_API(project, omnitrace)
-TIMEMORY_DEFINE_NS_API(category, process_sampling)
+OMNITRACE_DECLARE_COMPONENT(roctracer)
+OMNITRACE_DECLARE_COMPONENT(rocprofiler)
+OMNITRACE_DECLARE_COMPONENT(rcclp_handle)
+OMNITRACE_DECLARE_COMPONENT(comm_data)
 
-TIMEMORY_DECLARE_COMPONENT(roctracer)
-TIMEMORY_DECLARE_COMPONENT(rocprofiler)
-TIMEMORY_DECLARE_COMPONENT(rcclp_handle)
-TIMEMORY_COMPONENT_ALIAS(rccl_api_t, api::rccl)
-TIMEMORY_COMPONENT_ALIAS(comm_data_tracker_t, data_tracker<float, api::omnitrace>)
-TIMEMORY_DECLARE_COMPONENT(comm_data)
-
-/// \struct tim::trait::name
-/// \brief provides a constexpr string in ::value
-TIMEMORY_DECLARE_TYPE_TRAIT(name, typename Tp)
-
-#define TIMEMORY_DEFINE_NAME_TRAIT(NAME, ...)                                            \
-    namespace tim                                                                        \
-    {                                                                                    \
-    namespace trait                                                                      \
-    {                                                                                    \
-    template <>                                                                          \
-    struct name<__VA_ARGS__>                                                             \
-    {                                                                                    \
-        static constexpr auto value = NAME;                                              \
-    };                                                                                   \
-    template <>                                                                          \
-    struct name<type_list<__VA_ARGS__>> : name<__VA_ARGS__>                              \
-    {};                                                                                  \
-    }                                                                                    \
-    }
-
-TIMEMORY_DEFINE_NS_API(category, host)
-TIMEMORY_DEFINE_NS_API(category, user)
-TIMEMORY_DEFINE_NS_API(category, device)
-TIMEMORY_DEFINE_NS_API(category, device_hip)
-TIMEMORY_DEFINE_NS_API(category, device_hsa)
-TIMEMORY_DEFINE_NS_API(category, rocm_hip)
-TIMEMORY_DEFINE_NS_API(category, rocm_hsa)
-TIMEMORY_DEFINE_NS_API(category, rocm_smi)
-TIMEMORY_DEFINE_NS_API(category, rocm_roctx)
-TIMEMORY_DEFINE_NS_API(category, pthread)
-TIMEMORY_DEFINE_NS_API(category, kokkos)
-TIMEMORY_DEFINE_NS_API(category, mpi)
-TIMEMORY_DEFINE_NS_API(category, ompt)
-TIMEMORY_DEFINE_NS_API(category, rccl)
-TIMEMORY_DEFINE_NS_API(category, critical_trace)
-TIMEMORY_DEFINE_NS_API(category, host_critical_trace)
-TIMEMORY_DEFINE_NS_API(category, device_critical_trace)
-
-TIMEMORY_DEFINE_NAME_TRAIT("host", category::host);
-TIMEMORY_DEFINE_NAME_TRAIT("device", category::device);
-TIMEMORY_DEFINE_NAME_TRAIT("device_hip", category::device_hip);
-TIMEMORY_DEFINE_NAME_TRAIT("device_hsa", category::device_hsa);
-TIMEMORY_DEFINE_NAME_TRAIT("user", category::user);
-TIMEMORY_DEFINE_NAME_TRAIT("rocm_hip", category::rocm_hip);
-TIMEMORY_DEFINE_NAME_TRAIT("rocm_hsa", category::rocm_hsa);
-TIMEMORY_DEFINE_NAME_TRAIT("rocm_smi", category::rocm_smi);
-TIMEMORY_DEFINE_NAME_TRAIT("rocm_roctx", category::rocm_roctx);
-TIMEMORY_DEFINE_NAME_TRAIT("sampling", category::sampling);
-TIMEMORY_DEFINE_NAME_TRAIT("thread_sampling", category::thread_sampling);
-TIMEMORY_DEFINE_NAME_TRAIT("pthread", category::pthread);
-TIMEMORY_DEFINE_NAME_TRAIT("kokkos", category::kokkos);
-TIMEMORY_DEFINE_NAME_TRAIT("mpi", category::mpi);
-TIMEMORY_DEFINE_NAME_TRAIT("ompt", category::ompt);
-TIMEMORY_DEFINE_NAME_TRAIT("rccl", category::rccl);
-TIMEMORY_DEFINE_NAME_TRAIT("critical-trace", category::critical_trace);
-TIMEMORY_DEFINE_NAME_TRAIT("host-critical-trace", category::host_critical_trace);
-TIMEMORY_DEFINE_NAME_TRAIT("device-critical-trace", category::device_critical_trace);
+OMNITRACE_COMPONENT_ALIAS(comm_data_tracker_t,
+                          ::tim::component::data_tracker<float, project::omnitrace>)
 
 namespace omnitrace
 {
+namespace policy = ::tim::policy;     // NOLINT
+namespace comp   = ::tim::component;  // NOLINT
+
 namespace component
 {
+template <typename Tp, typename ValueT>
+using base = ::tim::component::base<Tp, ValueT>;
+
 template <typename... Tp>
 using data_tracker = tim::component::data_tracker<Tp...>;
 
@@ -117,9 +65,9 @@ using functor_t = std::function<void(Tp...)>;
 
 using default_functor_t = functor_t<const char*>;
 
-struct omnitrace;
-struct user_region;
 struct backtrace;
+struct backtrace_metrics;
+struct backtrace_timestamp;
 struct backtrace_wall_clock
 {};
 struct backtrace_cpu_clock
@@ -141,8 +89,6 @@ using sampling_gpu_busy   = data_tracker<double, backtrace_gpu_busy>;
 using sampling_gpu_temp   = data_tracker<double, backtrace_gpu_temp>;
 using sampling_gpu_power  = data_tracker<double, backtrace_gpu_power>;
 using sampling_gpu_memory = data_tracker<double, backtrace_gpu_memory>;
-using roctracer           = tim::component::roctracer;
-using rocprofiler         = tim::component::rocprofiler;
 
 template <typename ApiT, typename StartFuncT = default_functor_t,
           typename StopFuncT = default_functor_t>
@@ -151,49 +97,40 @@ struct functors;
 }  // namespace omnitrace
 
 #if !defined(OMNITRACE_USE_ROCTRACER)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::roctracer, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::roctracer, false_type)
 #endif
 
 #if !defined(OMNITRACE_USE_ROCPROFILER)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::rocprofiler, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::rocprofiler, false_type)
 #endif
 
 #if !defined(OMNITRACE_USE_RCCL)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, api::rccl, false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::rcclp_handle, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, category::rocm_rccl, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::rcclp_handle, false_type)
 #endif
 
 #if !defined(OMNITRACE_USE_RCCL) && !defined(OMNITRACE_USE_MPI)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::comm_data_tracker_t, false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::comm_data, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::comm_data_tracker_t, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::comm_data, false_type)
 #endif
 
 #if !defined(TIMEMORY_USE_LIBUNWIND)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, omnitrace::api::sampling, false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, omnitrace::component::backtrace, false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, omnitrace::component::sampling_wall_clock,
-                               false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, omnitrace::component::sampling_cpu_clock,
-                               false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, omnitrace::component::sampling_percent,
-                               false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, category::sampling, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace_metrics, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace_timestamp, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_wall_clock, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_cpu_clock, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_percent, false_type)
 #endif
 
 #if !defined(TIMEMORY_USE_LIBUNWIND) || !defined(OMNITRACE_USE_ROCM_SMI)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, omnitrace::component::sampling_gpu_busy,
-                               false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, omnitrace::component::sampling_gpu_temp,
-                               false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, omnitrace::component::sampling_gpu_power,
-                               false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, omnitrace::component::sampling_gpu_memory,
-                               false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_busy, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_temp, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_power, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_memory, false_type)
 #endif
 
-TIMEMORY_SET_COMPONENT_API(omnitrace::component::omnitrace, project::omnitrace,
-                           category::dynamic_instrumentation, os::supports_linux)
-TIMEMORY_SET_COMPONENT_API(omnitrace::component::user_region, project::omnitrace,
-                           os::supports_linux)
 TIMEMORY_SET_COMPONENT_API(omnitrace::component::roctracer, project::omnitrace,
                            tpls::rocm, device::gpu, os::supports_linux,
                            category::external)
@@ -223,10 +160,6 @@ TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_gpu_temp, project::omn
                            category::temperature, category::sampling,
                            category::process_sampling)
 
-TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::omnitrace, OMNITRACE_COMPONENT,
-                                 "omnitrace", "omnitrace_component")
-TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::user_region, OMNITRACE_USER_REGION,
-                                 "user_region", "omnitrace_user_region")
 TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::roctracer, OMNITRACE_ROCTRACER,
                                  "roctracer", "omnitrace_roctracer")
 TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::rocprofiler, OMNITRACE_ROCPROFILER,
@@ -248,15 +181,6 @@ TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::sampling_gpu_power,
 TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::sampling_gpu_temp,
                                  OMNITRACE_SAMPLING_GPU_TEMP, "sampling_gpu_temp", "")
 
-TIMEMORY_METADATA_SPECIALIZATION(
-    omnitrace::component::omnitrace, "omnitrace",
-    "Invokes instrumentation functions 'omnitrace_push_trace' and 'omnitrace_pop_trace'",
-    "Used by gotcha wrappers")
-TIMEMORY_METADATA_SPECIALIZATION(
-    omnitrace::component::user_region, "user_region",
-    "Invokes instrumentation functions 'omnitrace_user_push_region' and "
-    "'omnitrace_user_pop_region'",
-    "Used by OMPT")
 TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::roctracer, "roctracer",
                                  "High-precision ROCm API and kernel tracing", "")
 TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::rocprofiler, "rocprofiler",
@@ -292,44 +216,55 @@ TIMEMORY_STATISTICS_TYPE(omnitrace::component::sampling_gpu_busy, double)
 TIMEMORY_STATISTICS_TYPE(omnitrace::component::sampling_gpu_temp, double)
 TIMEMORY_STATISTICS_TYPE(omnitrace::component::sampling_gpu_power, double)
 TIMEMORY_STATISTICS_TYPE(omnitrace::component::sampling_gpu_memory, double)
-TIMEMORY_STATISTICS_TYPE(component::comm_data_tracker_t, float)
+TIMEMORY_STATISTICS_TYPE(omnitrace::component::comm_data_tracker_t, float)
 
 // enable timing units
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_timing_category,
-                               omnitrace::component::sampling_wall_clock, true_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_timing_category,
-                               omnitrace::component::sampling_cpu_clock, true_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_timing_category, omnitrace::component::sampling_percent,
-                               true_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(uses_timing_units,
-                               omnitrace::component::sampling_wall_clock, true_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(uses_timing_units,
-                               omnitrace::component::sampling_cpu_clock, true_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_timing_category, component::sampling_wall_clock,
+                                true_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_timing_category, component::sampling_cpu_clock,
+                                true_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_timing_category, component::sampling_percent,
+                                true_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::sampling_wall_clock,
+                                true_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::sampling_cpu_clock,
+                                true_type)
 
 // enable percent units
-TIMEMORY_DEFINE_CONCRETE_TRAIT(uses_percent_units,
-                               omnitrace::component::sampling_gpu_busy, true_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_percent_units, component::sampling_gpu_busy,
+                                true_type)
 
 // enable memory units
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_memory_category,
-                               omnitrace::component::sampling_gpu_memory, true_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(uses_memory_units,
-                               omnitrace::component::sampling_gpu_memory, true_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_memory_category, component::sampling_gpu_memory,
+                                true_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_memory_units, component::sampling_gpu_memory,
+                                true_type)
 
 // reporting categories (sum)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(report_sum, omnitrace::component::sampling_gpu_busy,
-                               false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(report_sum, omnitrace::component::sampling_gpu_temp,
-                               false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(report_sum, omnitrace::component::sampling_gpu_power,
-                               false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(report_sum, omnitrace::component::sampling_gpu_memory,
-                               false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_busy, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_temp, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_power, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_memory, false_type)
 
 // reporting categories (mean)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(report_mean, omnitrace::component::sampling_percent,
-                               false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(report_mean, component::sampling_percent, false_type)
 
 // reporting categories (stats)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(report_statistics, omnitrace::component::sampling_percent,
-                               false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(report_statistics, component::sampling_percent,
+                                false_type)
+
+#define OMNITRACE_DECLARE_EXTERN_COMPONENT(NAME, HAS_DATA, ...)                          \
+    TIMEMORY_DECLARE_EXTERN_TEMPLATE(                                                    \
+        struct tim::component::base<TIMEMORY_ESC(omnitrace::component::NAME),            \
+                                    __VA_ARGS__>)                                        \
+    TIMEMORY_DECLARE_EXTERN_OPERATIONS(TIMEMORY_ESC(omnitrace::component::NAME),         \
+                                       HAS_DATA)                                         \
+    TIMEMORY_DECLARE_EXTERN_STORAGE(TIMEMORY_ESC(omnitrace::component::NAME))
+
+#define OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(NAME, HAS_DATA, ...)                      \
+    TIMEMORY_INSTANTIATE_EXTERN_TEMPLATE(                                                \
+        struct tim::component::base<TIMEMORY_ESC(omnitrace::component::NAME),            \
+                                    __VA_ARGS__>)                                        \
+    TIMEMORY_INSTANTIATE_EXTERN_OPERATIONS(TIMEMORY_ESC(omnitrace::component::NAME),     \
+                                           HAS_DATA)                                     \
+    TIMEMORY_INSTANTIATE_EXTERN_STORAGE(TIMEMORY_ESC(omnitrace::component::NAME))

@@ -154,19 +154,19 @@ inline void set_state(State) {}
 #        include <timemory/components/data_tracker/components.hpp>
 #        include <timemory/operations.hpp>
 
-TIMEMORY_DECLARE_EXTERN_COMPONENT(
+OMNITRACE_DECLARE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, omnitrace::component::backtrace_gpu_busy>), true,
     double)
 
-TIMEMORY_DECLARE_EXTERN_COMPONENT(
+OMNITRACE_DECLARE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, omnitrace::component::backtrace_gpu_temp>), true,
     double)
 
-TIMEMORY_DECLARE_EXTERN_COMPONENT(
+OMNITRACE_DECLARE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, omnitrace::component::backtrace_gpu_power>), true,
     double)
 
-TIMEMORY_DECLARE_EXTERN_COMPONENT(
+OMNITRACE_DECLARE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, omnitrace::component::backtrace_gpu_memory>), true,
     double)
 

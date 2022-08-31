@@ -49,18 +49,20 @@
 #    define OMNITRACE_NUM_RCCLP_WRAPPERS 25
 #endif
 
-TIMEMORY_COMPONENT_ALIAS(
+OMNITRACE_COMPONENT_ALIAS(
     rccl_toolset_t,
-    component_bundle<rccl_api_t, omnitrace::component::category_region<category::rccl>,
-                     comm_data>)
-TIMEMORY_COMPONENT_ALIAS(rcclp_gotcha_t,
-                         gotcha<OMNITRACE_NUM_RCCLP_WRAPPERS, rccl_toolset_t, rccl_api_t>)
+    ::tim::component_bundle<category::rocm_rccl,
+                            omnitrace::component::category_region<category::rocm_rccl>,
+                            comm_data>)
+OMNITRACE_COMPONENT_ALIAS(rcclp_gotcha_t,
+                          ::tim::component::gotcha<OMNITRACE_NUM_RCCLP_WRAPPERS,
+                                                   rccl_toolset_t, category::rocm_rccl>)
 
 #if !defined(OMNITRACE_USE_RCCL)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::rcclp_gotcha_t, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::rcclp_gotcha_t, false_type)
 #endif
 
-namespace tim
+namespace omnitrace
 {
 namespace component
 {
@@ -106,4 +108,4 @@ private:
     static std::atomic<int64_t>& get_tool_count();
 };
 }  // namespace component
-}  // namespace tim
+}  // namespace omnitrace

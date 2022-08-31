@@ -26,7 +26,9 @@ get_filename_component(COMMON_BINARY_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}" D
 target_include_directories(
     omnitrace-common-library
     INTERFACE $<BUILD_INTERFACE:${COMMON_SOURCE_INCLUDE_DIR}>
-    INTERFACE $<BUILD_INTERFACE:${COMMON_BINARY_INCLUDE_DIR}>)
+              $<BUILD_INTERFACE:${COMMON_BINARY_INCLUDE_DIR}>
+              $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/timemory/source>
+              $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/timemory/source>)
 
 target_compile_definitions(omnitrace-common-library
                            INTERFACE $<BUILD_INTERFACE:OMNITRACE_INTERNAL_BUILD=1>)

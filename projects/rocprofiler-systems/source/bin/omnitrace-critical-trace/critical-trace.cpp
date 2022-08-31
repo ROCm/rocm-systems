@@ -22,7 +22,7 @@
 
 #include "critical-trace.hpp"
 
-#include "library/api.hpp"
+#include "api.hpp"
 #include "library/config.hpp"
 #include "library/perfetto.hpp"
 
@@ -54,7 +54,7 @@ main(int argc, char** argv)
     // config::set_setting_value("OMNITRACE_CRITICAL_TRACE_DEBUG", true);
     config::set_setting_value<int64_t>("OMNITRACE_CRITICAL_TRACE_COUNT", 500);
     config::set_setting_value<int64_t>("OMNITRACE_CRITICAL_TRACE_PER_ROW", 100);
-    config::set_setting_value<int64_t>("OMNITRACE_CRITICAL_TRACE_NUM_THREADS",
+    config::set_setting_value<int64_t>("OMNITRACE_THREAD_POOL_SIZE",
                                        std::thread::hardware_concurrency());
     config::set_setting_value("OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES", true);
 
@@ -856,8 +856,7 @@ compute_critical_trace()
 
     try
     {
-        PTL::ThreadPool _tp{ get_critical_trace_num_threads(), []() { copy_hash_ids(); },
-                             []() {} };
+        PTL::ThreadPool _tp{ get_thread_pool_size(), []() { copy_hash_ids(); }, []() {} };
         _tp.set_verbose(-1);
         PTL::TaskGroup<void> _tg{ &_tp };
 

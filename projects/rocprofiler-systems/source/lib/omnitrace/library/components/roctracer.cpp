@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/components/roctracer.hpp"
+#include "library/common.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
@@ -31,9 +32,7 @@
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 
-using namespace omnitrace;
-
-namespace tim
+namespace omnitrace
 {
 namespace component
 {
@@ -243,7 +242,7 @@ roctracer::protect_flush_activity()
                                        []() { ++roctracer_activity_count(); });
 }
 }  // namespace component
-}  // namespace tim
+}  // namespace omnitrace
 
-TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(roctracer, false, void)
-TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(roctracer_data, true, double)
+OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(roctracer, false, void)
+OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(roctracer_data, true, double)

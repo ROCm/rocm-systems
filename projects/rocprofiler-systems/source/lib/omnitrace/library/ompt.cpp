@@ -26,8 +26,8 @@
 
 #if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0
 
+#    include "library/components/category_region.hpp"
 #    include "library/components/fwd.hpp"
-#    include "library/components/user_region.hpp"
 
 #    include <timemory/components/ompt.hpp>
 #    include <timemory/components/ompt/extern.hpp>
@@ -67,7 +67,7 @@ setup()
     comp::user_ompt_bundle::global_init();
     comp::user_ompt_bundle::reset();
     tim::auto_lock_t lk{ tim::type_mutex<ompt_handle_t>() };
-    comp::user_ompt_bundle::configure<omnitrace::component::user_region>();
+    comp::user_ompt_bundle::configure<component::local_category_region<category::ompt>>();
     f_bundle = std::make_unique<ompt_bundle_t>("omnitrace/ompt",
                                                quirk::config<quirk::auto_start>{});
 }

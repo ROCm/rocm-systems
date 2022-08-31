@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/api.hpp"
+#include "api.hpp"
 #include "library/debug.hpp"
 
 #include <exception>

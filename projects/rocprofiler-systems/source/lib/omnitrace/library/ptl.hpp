@@ -23,6 +23,7 @@
 #pragma once
 
 #include "library/defines.hpp"
+#include "library/utility.hpp"
 
 #include <PTL/PTL.hh>
 
@@ -41,6 +42,8 @@ join();
 void
 shutdown();
 
+size_t initialize_threadpool(size_t);
+
 //--------------------------------------------------------------------------------------//
 //
 //      roctracer
@@ -49,17 +52,8 @@ shutdown();
 
 namespace roctracer
 {
-std::mutex&
-get_mutex();
-
-PTL::ThreadPool&
-get_thread_pool();
-
 PTL::TaskGroup<void>&
-get_task_group();
-
-bool
-get_thread_pool_is_active();
+get_task_group(int64_t _tid = utility::get_thread_index());
 }  // namespace roctracer
 
 //--------------------------------------------------------------------------------------//
@@ -70,17 +64,8 @@ get_thread_pool_is_active();
 
 namespace critical_trace
 {
-std::mutex&
-get_mutex();
-
-PTL::ThreadPool&
-get_thread_pool();
-
 PTL::TaskGroup<void>&
-get_task_group();
-
-bool
-get_thread_pool_is_active();
+get_task_group(int64_t _tid = utility::get_thread_index());
 }  // namespace critical_trace
 }  // namespace tasking
 }  // namespace omnitrace

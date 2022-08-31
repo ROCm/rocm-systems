@@ -24,26 +24,30 @@
 
 #include "library/common.hpp"
 #include "library/components/backtrace.hpp"
+#include "library/components/backtrace_metrics.hpp"
+#include "library/components/backtrace_timestamp.hpp"
 #include "library/components/fwd.hpp"
 #include "library/defines.hpp"
 #include "library/thread_data.hpp"
 #include "library/timemory.hpp"
 
 #include <timemory/macros/language.hpp>
-#include <timemory/sampling/sampler.hpp>
 #include <timemory/variadic/types.hpp>
 
 #include <cstdint>
 #include <memory>
 #include <set>
+#include <type_traits>
 
 namespace omnitrace
 {
 namespace sampling
 {
-using component::backtrace;
+using component::backtrace;             // NOLINT
 using component::backtrace_cpu_clock;   // NOLINT
 using component::backtrace_fraction;    // NOLINT
+using component::backtrace_metrics;     // NOLINT
+using component::backtrace_timestamp;   // NOLINT
 using component::backtrace_wall_clock;  // NOLINT
 using component::sampling_cpu_clock;
 using component::sampling_gpu_busy;
@@ -66,21 +70,8 @@ void block_signals(std::set<int> = {});
 
 void unblock_signals(std::set<int> = {});
 
-using bundle_t          = tim::lightweight_tuple<backtrace>;
-using sampler_t         = tim::sampling::sampler<bundle_t, tim::sampling::dynamic>;
-using sampler_instances = thread_data<sampler_t, api::sampling>;
-
-unique_ptr_t<sampler_t>&
-get_sampler(int64_t _tid = threading::get_id());
+void
+post_process();
 
 }  // namespace sampling
 }  // namespace omnitrace
-
-TIMEMORY_DEFINE_CONCRETE_TRAIT(prevent_reentry, omnitrace::sampling::sampler_t,
-                               std::true_type)
-
-TIMEMORY_DEFINE_CONCRETE_TRAIT(check_signals, omnitrace::sampling::sampler_t,
-                               std::true_type)
-
-TIMEMORY_DEFINE_CONCRETE_TRAIT(buffer_size, omnitrace::sampling::sampler_t,
-                               TIMEMORY_ESC(std::integral_constant<size_t, 256>))

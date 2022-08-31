@@ -158,8 +158,8 @@ run(MPI_Comm _comm, int nitr)
     MPI_Comm_rank(_comm, &_rank);
     MPI_Comm_size(_comm, &_size);
 
-    printf("[%s][%i] running %i iterations on %i ranks...\n", _name.c_str(), _rank, nitr,
-           _size);
+    printf("[%s][%i][%s] running %i iterations on %i ranks... \n", _name.c_str(), _rank,
+           __FUNCTION__, nitr, _size);
 
     MPI_Barrier(_comm);
     for(int i = 0; i < nitr; ++i)
@@ -175,6 +175,9 @@ run(MPI_Comm _comm, int nitr)
         all2all<double, 6>(_rank, _comm);
     }
     MPI_Barrier(_comm);
+
+    printf("[%s][%i][%s] running %i iterations on %i ranks... Done\n", _name.c_str(),
+           _rank, __FUNCTION__, nitr, _size);
 }
 
 void
@@ -234,8 +237,6 @@ run_main(int argc, char** argv)
     run(MPI_COMM_WORLD, nitr);
 
     print_info(MPI_COMM_WORLD, true, "MPI_COMM_WORLD");
-
-    printf("[%s]\n", _name.c_str());
 
     if(size > 1)
     {
@@ -313,6 +314,8 @@ run_main(int argc, char** argv)
 
         print_info(dup, false);
     }
+
+    printf("[%s][%i of %i] %s... Done", _name.c_str(), rank, size, __FUNCTION__);
 }
 
 int
@@ -325,13 +328,12 @@ main(int argc, char** argv)
     auto _prom = std::promise<void>{};
     auto _fut  = _prom.get_future();
 
-    std::thread _thr{ [&]() {
+    std::thread{ [&]() {
+        _prom.set_value_at_thread_exit();
         run_main(argc, argv);
-        _prom.set_value();
-    } };
+    } }.join();
 
     _fut.wait();
-    _thr.join();
 
     MPI_Finalize();
     return EXIT_SUCCESS;

@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "library/common.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
@@ -57,6 +58,9 @@ now()
 {
     return ::tim::get_clock_real_now<Tp, std::nano>();
 }
+
+void
+record_thread_start_time();
 
 namespace
 {
@@ -100,6 +104,16 @@ pop_count()
 inline void
 thread_init()
 {
+    static thread_local auto _dtor = scope::destructor{ []() {
+        if(get_state() != State::Finalized)
+        {
+            if(get_use_sampling()) sampling::shutdown();
+            auto& _thr_bundle = thread_data<omnitrace_thread_bundle_t>::instance();
+            if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
+               _thr_bundle->get<comp::wall_clock>()->get_is_running())
+                _thr_bundle->stop();
+        }
+    } };
     static thread_local auto _thread_setup = []() {
         if(threading::get_id() > 0)
             threading::set_thread_name(JOIN(" ", "Thread", threading::get_id()).c_str());
@@ -111,18 +125,9 @@ thread_init()
         // save the hash maps
         get_timemory_hash_ids()     = tim::get_hash_ids();
         get_timemory_hash_aliases() = tim::get_hash_aliases();
+        record_thread_start_time();
         return true;
     }();
-    static thread_local auto _dtor = scope::destructor{ []() {
-        if(get_state() != State::Finalized)
-        {
-            if(get_use_sampling()) sampling::shutdown();
-            auto& _thr_bundle = thread_data<omnitrace_thread_bundle_t>::instance();
-            if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
-               _thr_bundle->get<comp::wall_clock>()->get_is_running())
-                _thr_bundle->stop();
-        }
-    } };
     (void) _thread_setup;
     (void) _dtor;
 }
@@ -144,41 +149,47 @@ thread_init_sampling()
     (void) _v;
 }
 
-template <typename... Args>
+template <typename CategoryT, typename... Args>
 inline void
-push_timemory(const char* name, Args&&... args)
+push_timemory(CategoryT, const char* name, Args&&... args)
 {
-    auto& _data = tracing::get_instrumentation_bundles();
-    // this generates a hash for the raw string array
-    auto  _hash   = tim::add_hash_id(tim::string_view_t{ name });
-    auto* _bundle = _data.allocator.allocate(1);
-    _data.bundles.emplace_back(_bundle);
-    _data.allocator.construct(_bundle, _hash);
-    _bundle->start(std::forward<Args>(args)...);
+    if(trait::runtime_enabled<CategoryT>::get())
+    {
+        auto& _data = tracing::get_instrumentation_bundles();
+        // this generates a hash for the raw string array
+        auto  _hash   = tim::add_hash_id(tim::string_view_t{ name });
+        auto* _bundle = _data.allocator.allocate(1);
+        _data.bundles.emplace_back(_bundle);
+        _data.allocator.construct(_bundle, _hash);
+        _bundle->start(std::forward<Args>(args)...);
+    }
 }
 
-template <typename... Args>
+template <typename CategoryT, typename... Args>
 inline void
-pop_timemory(const char* name, Args&&... args)
+pop_timemory(CategoryT, const char* name, Args&&... args)
 {
-    auto  _hash = tim::hash::get_hash_id(tim::string_view_t{ name });
-    auto& _data = tracing::get_instrumentation_bundles();
-    if(_data.bundles.empty())
+    if(trait::runtime_enabled<CategoryT>::get())
     {
-        OMNITRACE_DEBUG("[%s] skipped %s :: empty bundle stack\n", "omnitrace_pop_trace",
-                        name);
-        return;
-    }
-    for(size_t i = _data.bundles.size(); i > 0; --i)
-    {
-        auto*& _v = _data.bundles.at(i - 1);
-        if(_v->get_hash() == _hash)
+        auto  _hash = tim::hash::get_hash_id(tim::string_view_t{ name });
+        auto& _data = tracing::get_instrumentation_bundles();
+        if(_data.bundles.empty())
         {
-            _v->stop(std::forward<Args>(args)...);
-            _data.allocator.destroy(_v);
-            _data.allocator.deallocate(_v, 1);
-            _data.bundles.erase(_data.bundles.begin() + (i - 1));
-            break;
+            OMNITRACE_DEBUG("[%s] skipped %s :: empty bundle stack\n",
+                            "omnitrace_pop_trace", name);
+            return;
+        }
+        for(size_t i = _data.bundles.size(); i > 0; --i)
+        {
+            auto*& _v = _data.bundles.at(i - 1);
+            if(_v->get_hash() == _hash)
+            {
+                _v->stop(std::forward<Args>(args)...);
+                _data.allocator.destroy(_v);
+                _data.allocator.deallocate(_v, 1);
+                _data.bundles.erase(_data.bundles.begin() + (i - 1));
+                break;
+            }
         }
     }
 }

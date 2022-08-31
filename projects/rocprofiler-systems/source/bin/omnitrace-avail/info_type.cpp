@@ -24,15 +24,13 @@
 #include "enumerated_list.hpp"
 #include "get_availability.hpp"
 
-#include "library/api.hpp"
+#include "api.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
-#include "library/components/omnitrace.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/rocprofiler.hpp"
 #include "library/components/roctracer.hpp"
-#include "library/components/user_region.hpp"
 
 #include <timemory/components/definition.hpp>
 #include <timemory/enum.h>

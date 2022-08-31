@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "library/components/pthread_gotcha.hpp"
-#include "library/components/omnitrace.hpp"
 #include "library/components/pthread_create_gotcha.hpp"
 #include "library/components/pthread_mutex_gotcha.hpp"
 #include "library/components/roctracer.hpp"
@@ -33,7 +32,7 @@
 #include "library/utility.hpp"
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/sampling/allocator.hpp>
+#include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <pthread.h>
@@ -41,11 +40,34 @@
 #include <array>
 #include <vector>
 
+namespace tim
+{
+namespace operation
+{
+template <>
+struct stop<omnitrace::component::pthread_create_gotcha_t>
+{
+    using type = omnitrace::component::pthread_create_gotcha_t;
+
+    TIMEMORY_DEFAULT_OBJECT(stop)
+
+    template <typename... Args>
+    explicit stop(type&, Args&&...)
+    {}
+
+    template <typename... Args>
+    void operator()(type&, Args&&...)
+    {}
+};
+}  // namespace operation
+}  // namespace tim
+
 namespace omnitrace
 {
 namespace
 {
-using bundle_t = tim::lightweight_tuple<pthread_create_gotcha_t, pthread_mutex_gotcha_t>;
+using bundle_t = tim::lightweight_tuple<component::pthread_create_gotcha_t,
+                                        component::pthread_mutex_gotcha_t>;
 
 auto&
 get_sampling_on_child_threads_history(int64_t _idx = utility::get_thread_index())
@@ -62,6 +84,8 @@ get_bundle()
     if(!_v) _v = std::make_unique<bundle_t>("pthread_gotcha");
     return _v;
 }
+
+bool is_configured = false;
 }  // namespace
 
 //--------------------------------------------------------------------------------------//
@@ -69,15 +93,23 @@ get_bundle()
 void
 pthread_gotcha::configure()
 {
-    pthread_create_gotcha::configure();
-    pthread_mutex_gotcha::configure();
+    if(!is_configured)
+    {
+        ::omnitrace::component::pthread_create_gotcha::configure();
+        ::omnitrace::component::pthread_mutex_gotcha::configure();
+        is_configured = true;
+    }
 }
 
 void
 pthread_gotcha::shutdown()
 {
-    pthread_create_gotcha::shutdown();
-    pthread_mutex_gotcha::shutdown();
+    if(is_configured)
+    {
+        ::omnitrace::component::pthread_mutex_gotcha::shutdown();
+        // ::omnitrace::component::pthread_create_gotcha::shutdown();
+        is_configured = false;
+    }
 }
 
 bool
@@ -89,10 +121,10 @@ pthread_gotcha::sampling_enabled_on_child_threads()
 bool
 pthread_gotcha::push_enable_sampling_on_child_threads(bool _v)
 {
-    auto& _hist = get_sampling_on_child_threads_history();
-    bool  _last = sampling_on_child_threads();
-    _hist.emplace_back(_last);
+    bool _last                  = sampling_on_child_threads();
     sampling_on_child_threads() = _v;
+    auto& _hist                 = get_sampling_on_child_threads_history();
+    _hist.emplace_back(_last);
     return _last;
 }
 
@@ -128,6 +160,7 @@ pthread_gotcha::sampling_on_child_threads()
 void
 pthread_gotcha::start()
 {
+    configure();
     get_bundle()->start();
 }
 
@@ -135,6 +168,5 @@ void
 pthread_gotcha::stop()
 {
     get_bundle()->stop();
-    get_bundle().reset();
 }
 }  // namespace omnitrace

@@ -22,8 +22,6 @@
 
 #include "library/components/rocprofiler.hpp"
 #include "library/common.hpp"
-#include "library/components/pthread_create_gotcha.hpp"
-#include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
@@ -45,7 +43,7 @@
 #include <string_view>
 #include <type_traits>
 
-namespace tim
+namespace omnitrace
 {
 namespace component
 {
@@ -59,10 +57,10 @@ rocprofiler_activity_count()
 }
 }  // namespace
 
-omnitrace::unique_ptr_t<rocm_data_t>&
+unique_ptr_t<rocm_data_t>&
 rocm_data(int64_t _tid)
 {
-    using thread_data_t = omnitrace::thread_data<rocm_data_t, rocm_event>;
+    using thread_data_t = thread_data<rocm_data_t, rocm_event>;
     static auto& _v     = thread_data_t::instances(thread_data_t::construct_on_init{});
     return _v.at(_tid);
 }
@@ -179,153 +177,6 @@ rocprofiler::shutdown()
 {
     omnitrace::rocprofiler::post_process();
     omnitrace::rocprofiler::rocm_cleanup();
-    /*
-    using storage_type = typename rocprofiler_data::storage_type;
-    using bundle_t     = rocprofiler_data;
-    using tag_t        = api::omnitrace;
-
-    auto    _data   = omnitrace::rocprofiler::get_data();
-    auto    _labels = omnitrace::rocprofiler::get_data_labels();
-    auto    _info   = omnitrace::rocprofiler::rocm_metrics();
-    int64_t _idx    = 0;
-    auto    _scope  = tim::scope::get_default();
-
-    auto _get_metric_desc = [_info](std::string_view _v) {
-        for(auto itr : _info)
-        {
-            if(itr.symbol().find(_v) == 0 || itr.short_description().find(_v) == 0)
-                return std::make_pair(itr.short_description(), itr.long_description());
-        }
-        return std::make_pair(std::string{}, std::string{});
-    };
-
-    auto _debug       = settings::debug();
-    settings::debug() = true;
-
-    struct hw_counters
-    {};
-
-    using rocm_counter = omnitrace::rocprofiler::rocm_counter;
-
-    struct perfetto_rocm_event
-    {
-        rocm_counter      entry = {};
-        rocm_counter      exit  = {};
-        rocprofiler_value value = {};
-
-        bool operator<(const perfetto_rocm_event& _v) const
-        {
-            return (entry.at(0) == _v.entry.at(0)) ? exit.at(0) < _v.exit.at(0)
-                                                   : entry.at(0) < _v.entry.at(0);
-        }
-    };
-
-    // contains the necessary info for export to perfetto
-    auto _perfetto_raw_data =
-        std::map<int64_t, std::map<int64_t, std::vector<perfetto_rocm_event>>>{};
-    // contains the time-stamp regions for the counter tracks
-    auto _perfetto_time_regions =
-        std::map<int64_t, std::map<int64_t, std::set<uint64_t>>>{};
-
-    // create a layout compatible for exporting to perfetto
-    for(const auto& itr : _labels)
-    {
-        auto _dev_id   = itr.first;
-        auto _dev_name = JOIN("", '[', _dev_id, ']');
-
-        for(size_t i = 0; i < itr.second.size(); ++i)
-        {
-            auto _metric_name = itr.second.at(i);
-            auto _idx         = perfetto_counter_track<hw_counters>::emplace(
-                _dev_id, JOIN(' ', "Device", _metric_name, _dev_name));
-            auto& _raw = _perfetto_raw_data[_dev_id][_idx];
-            auto& _reg = _perfetto_time_regions[_dev_id][_idx];
-            for(const auto& ditr : _data)
-            {
-                _raw.emplace_back(
-                    perfetto_rocm_event{ ditr.entry, ditr.exit, ditr.data.at(i) });
-            }
-            std::sort(_raw.begin(), _raw.end());
-            for(auto ritr : _raw)
-            {
-                if(pthread_create_gotcha::is_valid_execution_time(0, ritr.entry.at(0)))
-                    _reg.emplace(ritr.entry.at(0));
-                if(pthread_create_gotcha::is_valid_execution_time(0, ritr.exit.at(0)))
-                    _reg.emplace(ritr.exit.at(0));
-            }
-        }
-    }
-
-    for(auto& ditr : _perfetto_time_regions)
-        for(auto& citr : ditr.second)
-        {
-            for(auto _ts = citr.second.begin(); _ts != citr.second.end(); ++_ts)
-            {
-                rocprofiler_value _v    = {};
-                auto              _curr = _ts;
-                auto              _next = std::next(_ts);
-                if(_next == citr.second.end()) continue;
-                auto _min_ts = *_curr;
-                auto _max_ts = (_next == citr.second.end()) ? *_curr : *_next;
-                for(auto itr : _perfetto_raw_data[ditr.first][citr.first])
-                {
-                    if(itr.entry[0] >= _min_ts && itr.exit[0] <= _max_ts)
-                    {
-                        using namespace tim::stl;
-                        _v += itr.value;
-                    }
-                }
-
-                auto _write_counter = [&](auto _v) {
-                    if(_min_ts == _max_ts)
-                    {
-                        using value_type = std::remove_reference_t<
-                            std::remove_cv_t<decay_t<decltype(_v)>>>;
-                        _v = static_cast<value_type>(0);
-                    }
-
-                    TRACE_COUNTER(
-                        "hardware_counter",
-                        perfetto_counter_track<hw_counters>::at(ditr.first, citr.first),
-                        _min_ts, _v);
-                };
-                std::visit(_write_counter, _v);
-            }
-        }
-
-    for(const auto& itr : _labels)
-    {
-        for(size_t i = 0; i < itr.second.size(); ++i)
-        {
-            auto _metric_name         = itr.second.at(i);
-            auto _metric_desc         = _get_metric_desc(_metric_name).second;
-            rocprofiler_data::label() = _metric_name;
-            if(!_metric_desc.empty())
-                rocprofiler_data::description() = JOIN(" - ", "rocprof", _metric_desc);
-            auto _dev_id = itr.first;
-            auto _label  = JOIN('-', "rocprofiler", _metric_name, "device", _dev_id);
-            storage_type          _storage{ standalone_storage{}, ++_idx, _label };
-            std::vector<bundle_t> _bundles = {};
-            _bundles.reserve(_data.size());
-            for(const auto& ditr : _data)
-            {
-                auto _hash = add_hash_id(ditr.name);
-                auto _v    = ditr.data.at(i);
-                auto _obj  = std::tie(_bundles.emplace_back(bundle_t{}));
-                invoke::reset<tag_t>(_obj);
-                invoke::push<tag_t>(_obj, _scope, _hash, &_storage, _dev_id);
-                invoke::start<tag_t>(_obj);
-                invoke::store<tag_t>(_obj, _v);
-                invoke::stop<tag_t>(_obj);
-                invoke::pop<tag_t>(_obj, &_storage, _dev_id);
-            }
-
-            _storage.write(_label);
-        }
-    }
-    settings::debug() = _debug;
-    */
-
     OMNITRACE_VERBOSE_F(1, "rocprofiler is shutdown\n");
 }
 
@@ -336,8 +187,8 @@ rocprofiler::protect_flush_activity()
                                        []() { ++rocprofiler_activity_count(); });
 }
 }  // namespace component
-}  // namespace tim
+}  // namespace omnitrace
 
-TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(rocprofiler, false, void)
-TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(rocprofiler_data, true,
-                                      tim::component::rocprofiler_value)
+OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(rocprofiler, false, void)
+OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(rocprofiler_data, true,
+                                       tim::component::rocprofiler_value)

@@ -22,22 +22,22 @@
 
 #pragma once
 
-#include "library/api.hpp"
+#include "api.hpp"
 #include "library/common.hpp"
+#include "library/concepts.hpp"
 #include "library/config.hpp"
 #include "library/defines.hpp"
 #include "library/state.hpp"
 #include "library/timemory.hpp"
 
+#include <timemory/utility/types.hpp>
+
 #include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <type_traits>
-
-#if !defined(OMNITRACE_MAX_THREADS)
-#    define OMNITRACE_MAX_THREADS 1024
-#endif
 
 namespace omnitrace
 {
@@ -45,7 +45,8 @@ ThreadState set_thread_state(ThreadState);
 
 // bundle of components used in instrumentation
 using instrumentation_bundle_t =
-    tim::component_bundle<api::omnitrace, comp::wall_clock*, comp::user_global_bundle*>;
+    tim::component_bundle<project::omnitrace, comp::wall_clock*,
+                          comp::user_global_bundle*>;
 
 // allocator for instrumentation_bundle_t
 using bundle_allocator_t = tim::data::ring_buffer_allocator<instrumentation_bundle_t>;
@@ -77,18 +78,56 @@ struct thread_deleter
     }
 };
 
+template <typename Tp>
+struct generate
+{
+    using type = Tp;
+
+    template <typename... Args>
+    auto operator()(Args&&... _args) const
+    {
+        if constexpr(concepts::is_unique_pointer<Tp>::value)
+        {
+            using value_type = typename type::element_type;
+            return type{ new value_type{ invoke(std::forward<Args>(_args), 0)... } };
+        }
+        else
+        {
+            return type{ invoke(std::forward<Args>(_args), 0)... };
+        }
+    }
+
+private:
+    template <typename Up>
+    static auto invoke(Up&& _v, int,
+                       std::enable_if_t<std::is_invocable<Up>::value, int> = 0)
+        -> decltype(std::forward<Up>(_v)())
+    {
+        return std::forward<Up>(_v)();
+    }
+
+    template <typename Up>
+    static auto&& invoke(Up&& _v, long)
+    {
+        return std::forward<Up>(_v);
+    }
+};
+
+using construct_on_init = std::true_type;
+
 template <typename Tp, typename Tag = void, size_t MaxThreads = max_supported_threads>
 struct thread_data
 {
-    using instance_array_t  = std::array<unique_ptr_t<Tp>, MaxThreads>;
+    using value_type        = unique_ptr_t<Tp>;
+    using instance_array_t  = std::array<value_type, MaxThreads>;
     using construct_on_init = std::true_type;
 
     template <typename... Args>
     static void              construct(Args&&...);
-    static unique_ptr_t<Tp>& instance();
+    static value_type&       instance();
     static instance_array_t& instances();
     template <typename... Args>
-    static unique_ptr_t<Tp>& instance(construct_on_init, Args&&...);
+    static value_type& instance(construct_on_init, Args&&...);
     template <typename... Args>
     static instance_array_t& instances(construct_on_init, Args&&...);
 
@@ -108,9 +147,9 @@ thread_data<Tp, Tag, MaxThreads>::construct(Args&&... _args)
 {
     // construct outside of lambda to prevent data-race
     static auto&             _instances = instances();
-    static thread_local bool _v         = [&_args...]() {
+    static thread_local bool _v         = [&]() {
         _instances.at(threading::get_id()) =
-            unique_ptr_t<Tp>{ new Tp(std::forward<Args>(_args)...) };
+            generate<value_type>{}(std::forward<Args>(_args)...);
         return true;
     }();
     (void) _v;
@@ -148,7 +187,180 @@ thread_data<Tp, Tag, MaxThreads>::instances(construct_on_init, Args&&... _args)
     static auto& _v = [&]() -> instance_array_t& {
         auto& _internal = instances();
         for(size_t i = 0; i < MaxThreads; ++i)
-            _internal.at(i) = unique_ptr_t<Tp>{ new Tp(std::forward<Args>(_args)...) };
+            _internal.at(i) = generate<value_type>{}(std::forward<Args>(_args)...);
+        return _internal;
+    }();
+    return _v;
+}
+
+//--------------------------------------------------------------------------------------//
+//
+//          thread_data with std::optional
+//
+//--------------------------------------------------------------------------------------//
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+struct thread_data<std::optional<Tp>, Tag, MaxThreads>
+{
+    using value_type        = std::optional<Tp>;
+    using instance_array_t  = std::array<value_type, MaxThreads>;
+    using construct_on_init = std::true_type;
+
+    template <typename... Args>
+    static void              construct(Args&&...);
+    static value_type&       instance();
+    static instance_array_t& instances();
+    template <typename... Args>
+    static value_type& instance(construct_on_init, Args&&...);
+    template <typename... Args>
+    static instance_array_t& instances(construct_on_init, Args&&...);
+
+    static constexpr size_t size() { return MaxThreads; }
+
+    decltype(auto) begin() { return instances().begin(); }
+    decltype(auto) end() { return instances().end(); }
+
+    decltype(auto) begin() const { return instances().begin(); }
+    decltype(auto) end() const { return instances().end(); }
+};
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+template <typename... Args>
+void
+thread_data<std::optional<Tp>, Tag, MaxThreads>::construct(Args&&... _args)
+{
+    // construct outside of lambda to prevent data-race
+    static auto&             _instances = instances();
+    static thread_local bool _v         = [&]() {
+        _instances.at(threading::get_id()) =
+            generate<value_type>{}(std::forward<Args>(_args)...);
+        return true;
+    }();
+    (void) _v;
+}
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+std::optional<Tp>&
+thread_data<std::optional<Tp>, Tag, MaxThreads>::instance()
+{
+    return instances().at(threading::get_id());
+}
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+typename thread_data<std::optional<Tp>, Tag, MaxThreads>::instance_array_t&
+thread_data<std::optional<Tp>, Tag, MaxThreads>::instances()
+{
+    static auto _v = instance_array_t{};
+    return _v;
+}
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+template <typename... Args>
+std::optional<Tp>&
+thread_data<std::optional<Tp>, Tag, MaxThreads>::instance(construct_on_init,
+                                                          Args&&... _args)
+{
+    construct(std::forward<Args>(_args)...);
+    return instances().at(threading::get_id());
+}
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+template <typename... Args>
+typename thread_data<std::optional<Tp>, Tag, MaxThreads>::instance_array_t&
+thread_data<std::optional<Tp>, Tag, MaxThreads>::instances(construct_on_init,
+                                                           Args&&... _args)
+{
+    static auto& _v = [&]() -> instance_array_t& {
+        auto& _internal = instances();
+        for(size_t i = 0; i < MaxThreads; ++i)
+            _internal.at(i) = generate<value_type>{}(std::forward<Args>(_args)...);
+        return _internal;
+    }();
+    return _v;
+}
+
+//--------------------------------------------------------------------------------------//
+//
+//          thread_data with raw data (no pointer)
+//
+//--------------------------------------------------------------------------------------//
+
+using tim::identity;
+using tim::identity_t;
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+struct thread_data<identity<Tp>, Tag, MaxThreads>
+{
+    using value_type        = Tp;
+    using instance_array_t  = std::array<value_type, MaxThreads>;
+    using construct_on_init = std::true_type;
+
+    template <typename... Args>
+    static void              construct(Args&&...);
+    static value_type&       instance();
+    static instance_array_t& instances();
+    template <typename... Args>
+    static value_type& instance(construct_on_init, Args&&...);
+    template <typename... Args>
+    static instance_array_t& instances(construct_on_init, Args&&...);
+
+    static constexpr size_t size() { return MaxThreads; }
+
+    decltype(auto) begin() { return instances().begin(); }
+    decltype(auto) end() { return instances().end(); }
+
+    decltype(auto) begin() const { return instances().begin(); }
+    decltype(auto) end() const { return instances().end(); }
+};
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+template <typename... Args>
+void
+thread_data<identity<Tp>, Tag, MaxThreads>::construct(Args&&... _args)
+{
+    // construct outside of lambda to prevent data-race
+    static auto&             _instances = instances();
+    static thread_local bool _v         = [&]() {
+        _instances.at(threading::get_id()) =
+            generate<value_type>{}(std::forward<Args>(_args)...);
+        return true;
+    }();
+    (void) _v;
+}
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+Tp&
+thread_data<identity<Tp>, Tag, MaxThreads>::instance()
+{
+    return instances().at(threading::get_id());
+}
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+typename thread_data<identity<Tp>, Tag, MaxThreads>::instance_array_t&
+thread_data<identity<Tp>, Tag, MaxThreads>::instances()
+{
+    static auto _v = instance_array_t{};
+    return _v;
+}
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+template <typename... Args>
+Tp&
+thread_data<identity<Tp>, Tag, MaxThreads>::instance(construct_on_init, Args&&... _args)
+{
+    construct(std::forward<Args>(_args)...);
+    return instances().at(threading::get_id());
+}
+
+template <typename Tp, typename Tag, size_t MaxThreads>
+template <typename... Args>
+typename thread_data<identity<Tp>, Tag, MaxThreads>::instance_array_t&
+thread_data<identity<Tp>, Tag, MaxThreads>::instances(construct_on_init, Args&&... _args)
+{
+    static auto& _v = [&]() -> instance_array_t& {
+        auto& _internal = instances();
+        for(size_t i = 0; i < MaxThreads; ++i)
+            _internal.at(i) = generate<value_type>{}(std::forward<Args>(_args)...);
         return _internal;
     }();
     return _v;

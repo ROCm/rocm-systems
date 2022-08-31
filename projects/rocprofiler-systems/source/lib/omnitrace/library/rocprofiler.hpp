@@ -65,7 +65,7 @@ is_setup();
 void
 post_process();
 
-std::vector<comp::rocm_info_entry>
+std::vector<component::rocm_info_entry>
 rocm_metrics();
 
 #if !defined(OMNITRACE_USE_ROCPROFILER) || OMNITRACE_USE_ROCPROFILER == 0
@@ -77,10 +77,10 @@ inline void
 rocm_cleanup()
 {}
 
-inline std::vector<comp::rocm_info_entry>
+inline std::vector<component::rocm_info_entry>
 rocm_metrics()
 {
-    return std::vector<comp::rocm_info_entry>{};
+    return std::vector<component::rocm_info_entry>{};
 }
 #endif
 

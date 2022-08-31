@@ -30,6 +30,7 @@
 #include "library/timemory.hpp"
 
 #include <timemory/api/macros.hpp>
+#include <timemory/components/gotcha/backends.hpp>
 #include <timemory/components/macros.hpp>
 #include <timemory/operations/types/set.hpp>
 #include <timemory/utility/types.hpp>
@@ -55,11 +56,14 @@
 #include <string>
 #include <utility>
 
-namespace tim
+OMNITRACE_COMPONENT_ALIAS(comm_data_tracker_t,
+                          ::tim::component::data_tracker<float, project::omnitrace>)
+
+namespace omnitrace
 {
 namespace component
 {
-using comm_data_tracker_t = data_tracker<float, api::omnitrace>;
+using gotcha_data = ::tim::component::gotcha_data;
 
 struct comm_data : base<comm_data, void>
 {
@@ -231,7 +235,7 @@ private:
     }
 };
 }  // namespace component
-}  // namespace tim
+}  // namespace omnitrace
 
 #if !defined(OMNITRACE_EXTERN_COMPONENTS) ||                                             \
     (defined(OMNITRACE_EXTERN_COMPONENTS) && OMNITRACE_EXTERN_COMPONENTS > 0)
@@ -240,8 +244,8 @@ private:
 #    include <timemory/components/data_tracker/components.hpp>
 #    include <timemory/operations.hpp>
 
-TIMEMORY_DECLARE_EXTERN_COMPONENT(TIMEMORY_ESC(data_tracker<float, tim::api::omnitrace>),
-                                  true, float)
+OMNITRACE_DECLARE_EXTERN_COMPONENT(
+    TIMEMORY_ESC(data_tracker<float, tim::project::omnitrace>), true, float)
 
-TIMEMORY_DECLARE_EXTERN_COMPONENT(comm_data, false, void)
+OMNITRACE_DECLARE_EXTERN_COMPONENT(comm_data, false, void)
 #endif

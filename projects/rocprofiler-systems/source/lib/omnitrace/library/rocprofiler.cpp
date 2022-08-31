@@ -174,10 +174,11 @@ rocm_dump_context_entry(context_entry_t* entry, rocprofiler_feature_t* features,
         rocm_check_status(rocprofiler_get_metrics(group.context));
     }
 
-    auto _evt = comp::rocm_event{ _dev_id,       _thread_id,  _queue_id,     _kernel_name,
-                                  record->begin, record->end, feature_count, features };
+    auto _evt =
+        component::rocm_event{ _dev_id,       _thread_id,  _queue_id,     _kernel_name,
+                               record->begin, record->end, feature_count, features };
 
-    comp::rocm_data()->emplace_back(_evt);
+    component::rocm_data()->emplace_back(_evt);
 }
 
 // Profiling completion handler
@@ -232,7 +233,6 @@ rocm_dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* a
 unsigned
 metrics_input(unsigned _device, rocprofiler_feature_t** ret)
 {
-    // OMNITRACE_THROW("%s\n", __FUNCTION__);
     // Profiling feature objects
     auto                     _events = tim::delimit(config::get_rocm_events(), ", ;\t\n");
     std::vector<std::string> _features    = {};
@@ -275,8 +275,8 @@ metrics_input(unsigned _device, rocprofiler_feature_t** ret)
 
 struct info_data
 {
-    const AgentInfo*                    agent = nullptr;
-    std::vector<comp::rocm_info_entry>* data  = nullptr;
+    const AgentInfo*                         agent = nullptr;
+    std::vector<component::rocm_info_entry>* data  = nullptr;
 };
 
 hsa_status_t
@@ -304,7 +304,7 @@ info_data_callback(const rocprofiler_info_data_t info, void* arg)
             {
                 auto _sym        = JOIN("", info.metric.name, _device_qualifier_sym);
                 auto _short_desc = JOIN("", "Derived counter: ", info.metric.expr);
-                _data->emplace_back(comp::rocm_info_entry(
+                _data->emplace_back(component::rocm_info_entry(
                     true, tim::hardware_counters::api::rocm, _data->size(), 0, _sym,
                     _pysym, _short_desc, _long_desc, _units,
                     qualifier_vec_t{ _device_qualifier }));
@@ -316,7 +316,7 @@ info_data_callback(const rocprofiler_info_data_t info, void* arg)
                     auto _sym = JOIN("", info.metric.name, _device_qualifier_sym);
                     auto _short_desc =
                         JOIN("", info.metric.name, " on device ", _agent->dev_index);
-                    _data->emplace_back(comp::rocm_info_entry(
+                    _data->emplace_back(component::rocm_info_entry(
                         true, tim::hardware_counters::api::rocm, _data->size(), 0, _sym,
                         _pysym, _short_desc, _long_desc, _units,
                         qualifier_vec_t{ _device_qualifier }));
@@ -334,7 +334,7 @@ info_data_callback(const rocprofiler_info_data_t info, void* arg)
                                          _device_qualifier_sym);
                         auto _short_desc = JOIN("", info.metric.name, " instance ", i,
                                                 " on device ", _agent->dev_index);
-                        _data->emplace_back(comp::rocm_info_entry(
+                        _data->emplace_back(component::rocm_info_entry(
                             true, tim::hardware_counters::api::rocm, _data->size(), 0,
                             _sym, _pysym, _short_desc, _long_desc, _units,
                             qualifier_vec_t{ _device_qualifier, _instance_qualifier }));
@@ -348,10 +348,10 @@ info_data_callback(const rocprofiler_info_data_t info, void* arg)
     return HSA_STATUS_SUCCESS;
 }
 
-std::vector<comp::rocm_info_entry>
+std::vector<component::rocm_info_entry>
 rocm_metrics()
 {
-    std::vector<comp::rocm_info_entry> _data = {};
+    std::vector<component::rocm_info_entry> _data = {};
     try
     {
         (void) HsaRsrcFactory::Instance();
@@ -475,11 +475,11 @@ rocm_cleanup()
 
 namespace
 {
-using rocm_event         = comp::rocm_event;
-using rocm_data_t        = comp::rocm_data_t;
-using rocm_metric_type   = comp::rocm_metric_type;
-using rocm_feature_value = comp::rocm_feature_value;
-using rocm_data_tracker  = comp::rocm_data_tracker;
+using rocm_event         = component::rocm_event;
+using rocm_data_t        = component::rocm_data_t;
+using rocm_metric_type   = component::rocm_metric_type;
+using rocm_feature_value = component::rocm_feature_value;
+using rocm_data_tracker  = component::rocm_data_tracker;
 
 void
 post_process_perfetto()
@@ -496,7 +496,7 @@ post_process_perfetto()
 
     for(size_t i = 0; i < OMNITRACE_MAX_THREADS; ++i)
     {
-        auto& _v = comp::rocm_data(i);
+        auto& _v = component::rocm_data(i);
         if(_v)
         {
             _data.reserve(_data.size() + _v->size());
@@ -605,7 +605,7 @@ post_process_timemory()
 
     for(size_t i = 0; i < OMNITRACE_MAX_THREADS; ++i)
     {
-        auto& _v = comp::rocm_data(i);
+        auto& _v = component::rocm_data(i);
         if(_v)
         {
             _data.reserve(_data.size() + _v->size());

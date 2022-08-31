@@ -547,7 +547,6 @@ void
 add_hash_id(const hash_ids& _labels)
 {
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-    std::unique_lock<std::mutex> _lk{ tasking::critical_trace::get_mutex() };
     if(!tasking::critical_trace::get_task_group().pool()) return;
     tasking::critical_trace::get_task_group().exec([_labels]() {
         static std::mutex _mtx{};
@@ -578,7 +577,6 @@ update(int64_t _tid)
 {
     if(!get_use_critical_trace() && !get_use_rocm_smi()) return;
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-    std::unique_lock<std::mutex> _lk{ tasking::critical_trace::get_mutex() };
     if(!tasking::critical_trace::get_task_group().pool()) return;
     call_chain _data{};
     std::swap(_data, *critical_trace::get(_tid));
@@ -590,7 +588,6 @@ compute(int64_t _tid)
 {
     update(_tid);
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-    std::unique_lock<std::mutex> _lk{ tasking::critical_trace::get_mutex() };
     if(!tasking::critical_trace::get_task_group().pool()) return;
     tasking::critical_trace::get_task_group().exec(compute_critical_trace);
 }
@@ -808,13 +805,13 @@ compute_critical_trace()
     using perfstats_t =
         tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss>;
 
-    perfstats_t _ct_perf{ JOIN("", "[", __FUNCTION__, "]") };
+    perfstats_t _ct_perf{};
     _ct_perf.start();
 
     try
     {
-        OMNITRACE_CT_DEBUG("[%s] initial call chain: %zu entries\n", __FUNCTION__,
-                           complete_call_chain.size());
+        OMNITRACE_VERBOSE_F(1, "[%s] initial call chain: %zu entries\n", __FUNCTION__,
+                            complete_call_chain.size());
 
         perfstats_t _perf{ get_perf_name(__FUNCTION__) };
         _perf.start();
@@ -822,7 +819,7 @@ compute_critical_trace()
         std::sort(complete_call_chain.begin(), complete_call_chain.end());
 
         _perf.stop().rekey("Sorting critical trace");
-        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
+        OMNITRACE_VERBOSE_F(1, "%s\n", JOIN("", _perf).c_str());
 
         _perf.reset().start();
         save_call_chain_json(
@@ -830,20 +827,16 @@ compute_critical_trace()
             complete_call_chain, true, __FUNCTION__);
 
         _perf.stop().rekey("Save call-chain");
-        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
+        OMNITRACE_VERBOSE_F(1, "%s\n", JOIN("", _perf).c_str());
 
     } catch(std::exception& e)
     {
-        OMNITRACE_PRINT("Thread exited '%s' with exception: %s\n", __FUNCTION__,
-                        e.what());
+        OMNITRACE_PRINT_F("Thread exited '%s' with exception: %s\n", __FUNCTION__,
+                          e.what());
         TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(true, 32);
     }
 
-    _ct_perf.stop();
-    auto _ct_msg = JOIN("", _ct_perf);
-    auto _ct_pos = _ct_msg.find(">>>  ");
-    if(_ct_pos != std::string::npos) _ct_msg = _ct_msg.substr(_ct_pos + 5);
-    OMNITRACE_PRINT("%s\n", _ct_msg.c_str());
+    OMNITRACE_PRINT_F("%s\n", _ct_perf.stop().as_string<false, false>().c_str());
 }
 }  // namespace
 
@@ -869,8 +862,7 @@ get_entries(int64_t _ts, const std::function<bool(const entry&)>& _eval)
         *_targ = _v;
     };
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-    std::unique_lock<std::mutex> _lk{ tasking::critical_trace::get_mutex() };
-    size_t                       _n = 0;
+    size_t                                     _n = 0;
     std::vector<std::pair<std::string, entry>> _v{};
     if(!tasking::critical_trace::get_task_group().pool()) return _v;
     tasking::critical_trace::get_task_group().exec(_func, &_v, &_n);

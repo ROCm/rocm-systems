@@ -4,6 +4,10 @@
 #
 # ------------------------------------------------------------------------------#
 
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.20)
+    cmake_policy(SET CMP0115 NEW)
+endif()
+
 add_library(omnitrace-interface-library INTERFACE)
 add_library(omnitrace::omnitrace-interface-library ALIAS omnitrace-interface-library)
 
@@ -49,124 +53,12 @@ target_link_libraries(
 add_library(omnitrace-object-library OBJECT)
 add_library(omnitrace::omnitrace-object-library ALIAS omnitrace-object-library)
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/library/defines.hpp.in
-               ${CMAKE_CURRENT_BINARY_DIR}/library/defines.hpp @ONLY)
+target_sources(
+    omnitrace-object-library
+    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library.cpp ${CMAKE_CURRENT_LIST_DIR}/api.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/api.hpp)
 
-set(library_sources
-    ${CMAKE_CURRENT_LIST_DIR}/library.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/api.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/config.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/coverage.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/cpu_freq.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/critical_trace.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/debug.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/dynamic_library.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/kokkosp.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/gpu.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/mproc.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/ompt.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/perfetto.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/process_sampler.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/ptl.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/runtime.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/sampling.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/state.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/thread_data.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/timemory.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/tracing.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/backtrace.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/comm_data.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/exit_gotcha.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/fork_gotcha.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/mpi_gotcha.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/omnitrace.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_gotcha.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_create_gotcha.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_mutex_gotcha.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/user_region.cpp)
-
-set(library_headers
-    ${CMAKE_CURRENT_LIST_DIR}/library.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/api.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/config.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/common.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/coverage.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/cpu_freq.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/critical_trace.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/debug.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/dynamic_library.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/gpu.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/mproc.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/ompt.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/perfetto.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/process_sampler.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/ptl.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/rcclp.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/rocm.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/rocprofiler.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/roctracer.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/runtime.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/sampling.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/state.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/thread_data.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/timemory.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/tracing.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/utility.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/fwd.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/backtrace.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/category_region.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/comm_data.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/exit_gotcha.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/fork_gotcha.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/functors.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/mpi_gotcha.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/omnitrace.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/rcclp.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/rocm_smi.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/rocprofiler.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/roctracer.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_gotcha.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_create_gotcha.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/pthread_mutex_gotcha.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/library/components/user_region.hpp)
-
-target_sources(omnitrace-object-library PRIVATE ${library_sources} ${library_headers})
-
-if(OMNITRACE_USE_ROCTRACER OR OMNITRACE_USE_ROCPROFILER)
-    target_sources(
-        omnitrace-object-library
-        PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library/rocprofiler.cpp
-                ${CMAKE_CURRENT_LIST_DIR}/library/rocm.cpp
-                ${CMAKE_CURRENT_LIST_DIR}/library/components/rocprofiler.cpp)
-endif()
-
-if(OMNITRACE_USE_ROCTRACER)
-    target_sources(
-        omnitrace-object-library
-        PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library/components/roctracer.cpp
-                ${CMAKE_CURRENT_LIST_DIR}/library/roctracer.cpp)
-endif()
-
-if(OMNITRACE_USE_RCCL)
-    target_sources(
-        omnitrace-object-library
-        PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library/components/rcclp.cpp
-                ${CMAKE_CURRENT_LIST_DIR}/library/rcclp.cpp)
-endif()
-
-if(OMNITRACE_USE_ROCPROFILER)
-    target_sources(
-        omnitrace-object-library
-        PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library/rocprofiler.cpp
-                ${CMAKE_CURRENT_LIST_DIR}/library/rocprofiler.hpp
-                ${CMAKE_CURRENT_LIST_DIR}/library/rocprofiler/hsa_rsrc_factory.hpp
-                ${CMAKE_CURRENT_LIST_DIR}/library/rocprofiler/hsa_rsrc_factory.cpp)
-endif()
-
-if(OMNITRACE_USE_ROCM_SMI)
-    target_sources(omnitrace-object-library
-                   PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library/components/rocm_smi.cpp)
-endif()
+add_subdirectory(library)
 
 target_link_libraries(omnitrace-object-library
                       PRIVATE omnitrace::omnitrace-interface-library)

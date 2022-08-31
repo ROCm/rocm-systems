@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "library/coverage.hpp"
-#include "library/api.hpp"
+#include "api.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/impl/coverage.hpp"
@@ -238,8 +238,8 @@ post_process()
         if(tim::filepath::open(ofs, _fname))
         {
             if(get_verbose() >= 0)
-                fprintf(stderr, "[%s][coverage]|%i> Outputting '%s'...\n",
-                        TIMEMORY_PROJECT_NAME, dmp::rank(), _fname.c_str());
+                operation::file_output_message<code_coverage>{}(
+                    _fname, std::string{ "coverage" });
             for(auto& itr : _coverage_data)
             {
                 // if(get_debug() && get_verbose() >= 2)
@@ -283,8 +283,8 @@ post_process()
         if(tim::filepath::open(ofs, _fname))
         {
             if(get_verbose() >= 0)
-                fprintf(stderr, "[%s][coverage]|%i> Outputting '%s'...\n",
-                        TIMEMORY_PROJECT_NAME, dmp::rank(), _fname.c_str());
+                operation::file_output_message<code_coverage>{}(
+                    _fname, std::string{ "coverage" });
             ofs << oss.str() << "\n";
         }
         else

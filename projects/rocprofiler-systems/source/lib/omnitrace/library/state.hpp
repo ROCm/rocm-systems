@@ -32,8 +32,8 @@ enum class State : unsigned short
     PreInit = 0,
     Init,
     Active,
+    Finalized,
     Disabled,
-    Finalized
 };
 
 // used for specifying the state of omnitrace
@@ -41,8 +41,8 @@ enum class ThreadState : unsigned short
 {
     Enabled = 0,
     Internal,
-    Disabled,
     Completed,
+    Disabled,
 };
 
 enum class Mode : unsigned short

@@ -22,11 +22,12 @@
 
 #include "library/process_sampler.hpp"
 #include "library/components/pthread_gotcha.hpp"
-#include "library/components/rocm_smi.hpp"
 #include "library/config.hpp"
 #include "library/cpu_freq.hpp"
 #include "library/debug.hpp"
+#include "library/rocm_smi.hpp"
 #include "library/runtime.hpp"
+#include "library/sampling.hpp"
 
 #include <memory>
 #include <vector>
@@ -37,7 +38,6 @@ namespace process_sampler
 {
 namespace
 {
-using auto_lock_t                                       = tim::auto_lock_t;
 using promise_t                                         = std::promise<void>;
 std::unique_ptr<promise_t>             polling_finished = {};
 std::vector<std::unique_ptr<instance>> instances        = {};
@@ -126,8 +126,6 @@ sampler::setup()
     // shutdown if already running
     shutdown();
 
-    pthread_gotcha::push_enable_sampling_on_child_threads(false);
-
     if(get_use_rocm_smi())
     {
         auto& _rocm_smi         = instances.emplace_back(std::make_unique<instance>());
@@ -158,12 +156,12 @@ sampler::setup()
     polling_finished = std::make_unique<promise_t>();
 
     set_state(State::PreInit);
+    pthread_gotcha::push_enable_sampling_on_child_threads(false);
     get_thread() = std::make_unique<std::thread>(&poll<msec_t>, &get_sampler_state(),
                                                  msec_t{ _msec_freq }, &_prom);
-
     _fut.wait();
-
     pthread_gotcha::pop_enable_sampling_on_child_threads();
+
     set_state(State::Active);
 }
 

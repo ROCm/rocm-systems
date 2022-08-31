@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "library/common.hpp"
 #include "library/components/fwd.hpp"
 #include "library/defines.hpp"
 
@@ -35,12 +36,13 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/transient_function.hpp>
 
-namespace tim
+OMNITRACE_COMPONENT_ALIAS(roctracer_data,
+                          ::tim::component::data_tracker<double, roctracer>)
+
+namespace omnitrace
 {
 namespace component
 {
-using roctracer_data = data_tracker<double, roctracer>;
-
 struct roctracer
 : base<roctracer, void>
 , private policy::instance_tracker<roctracer, false>
@@ -87,23 +89,25 @@ roctracer::is_setup()
 }
 #endif
 }  // namespace component
-}  // namespace tim
+}  // namespace omnitrace
 
 #if !defined(OMNITRACE_USE_ROCTRACER)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::roctracer_data, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::roctracer_data, false_type)
 #endif
 
-TIMEMORY_SET_COMPONENT_API(component::roctracer_data, project::timemory, category::timing,
-                           os::supports_unix)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_timing_category, component::roctracer_data, true_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::roctracer_data, true_type)
+TIMEMORY_SET_COMPONENT_API(omnitrace::component::roctracer_data, project::timemory,
+                           category::timing, os::supports_unix)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_timing_category, component::roctracer_data, true_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::roctracer_data, true_type)
 
-#if !defined(OMNITRACE_EXTERN_COMPONENTS) ||                                             \
-    (defined(OMNITRACE_EXTERN_COMPONENTS) && OMNITRACE_EXTERN_COMPONENTS > 0)
+#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
+#    if !defined(OMNITRACE_EXTERN_COMPONENTS) ||                                         \
+        (defined(OMNITRACE_EXTERN_COMPONENTS) && OMNITRACE_EXTERN_COMPONENTS > 0)
 
-#    include <timemory/operations.hpp>
+#        include <timemory/operations.hpp>
 
-TIMEMORY_DECLARE_EXTERN_COMPONENT(roctracer, false, void)
-TIMEMORY_DECLARE_EXTERN_COMPONENT(roctracer_data, true, double)
+OMNITRACE_DECLARE_EXTERN_COMPONENT(roctracer, false, void)
+OMNITRACE_DECLARE_EXTERN_COMPONENT(roctracer_data, true, double)
 
+#    endif
 #endif

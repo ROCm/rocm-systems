@@ -22,12 +22,14 @@
 
 #include "library/cpu_freq.hpp"
 #include "library/common.hpp"
+#include "library/components/cpu_freq.hpp"
 #include "library/components/fwd.hpp"
-#include "library/components/pthread_create_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 #include "library/perfetto.hpp"
+#include "library/thread_data.hpp"
+#include "library/thread_info.hpp"
 #include "library/timemory.hpp"
 
 #include <timemory/components/rusage/backends.hpp>
@@ -44,39 +46,21 @@
 #include <utility>
 #include <vector>
 
-namespace cpuinfo = tim::procfs::cpuinfo;
-
 namespace omnitrace
 {
 namespace cpu_freq
 {
+using namespace ::tim::cpu_freq;
+using cpu_freq_component = component::cpu_freq;
+
 template <typename... Tp>
 using type_list = tim::type_list<Tp...>;
 
 namespace
 {
-struct cpu_freq  // cpu frequency
-{};
-struct cpu_page  // amount of memory allocated in pages
-{};
-struct cpu_virt  // virtual memory usage
-{};
-struct cpu_peak  // memory high-water mark
-{};
-struct cpu_context_switch
-{};
-struct cpu_page_fault
-{};
-struct cpu_user_mode_time  // cpu time spent in userspace
-{};
-struct cpu_kernel_mode_time  // cpu time spent in kernelspace
-{};
 using cpu_data_tuple_t = std::tuple<size_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                                    int64_t, int64_t, std::vector<double>>;
-
-std::set<size_t>             enabled_cpu_freqs = {};
-std::deque<cpu_data_tuple_t> cpu_data          = {};
-int64_t                      ncpu              = threading::affinity::hw_concurrency();
+                                    int64_t, int64_t, cpu_freq_component>;
+std::deque<cpu_data_tuple_t> cpu_data = {};
 
 template <typename... Types>
 void init_perfetto_counter_tracks(type_list<Types...>)
@@ -87,18 +71,6 @@ void init_perfetto_counter_tracks(type_list<Types...>)
 }  // namespace cpu_freq
 }  // namespace omnitrace
 
-TIMEMORY_DEFINE_NAME_TRAIT("cpu_freq", omnitrace::cpu_freq::cpu_freq);
-TIMEMORY_DEFINE_NAME_TRAIT("process_page_fault", omnitrace::cpu_freq::cpu_page);
-TIMEMORY_DEFINE_NAME_TRAIT("process_virtual_memory", omnitrace::cpu_freq::cpu_virt);
-TIMEMORY_DEFINE_NAME_TRAIT("process_memory_hwm", omnitrace::cpu_freq::cpu_peak);
-TIMEMORY_DEFINE_NAME_TRAIT("process_context_switch",
-                           omnitrace::cpu_freq::cpu_context_switch);
-TIMEMORY_DEFINE_NAME_TRAIT("process_page_fault", omnitrace::cpu_freq::cpu_page_fault);
-TIMEMORY_DEFINE_NAME_TRAIT("process_user_cpu_time",
-                           omnitrace::cpu_freq::cpu_user_mode_time);
-TIMEMORY_DEFINE_NAME_TRAIT("process_kernel_cpu_time",
-                           omnitrace::cpu_freq::cpu_kernel_mode_time);
-
 namespace omnitrace
 {
 namespace cpu_freq
@@ -107,109 +79,24 @@ void
 setup()
 {
     init_perfetto_counter_tracks(
-        type_list<cpu_freq, cpu_page, cpu_virt, cpu_peak, cpu_context_switch,
+        type_list<cpu_freq_component, cpu_page, cpu_virt, cpu_peak, cpu_context_switch,
                   cpu_page_fault, cpu_user_mode_time, cpu_kernel_mode_time>{});
 }
 
 void
 config()
 {
-    auto _ncpu          = cpuinfo::freq::size();
-    auto _enabled_freqs = std::set<size_t>{};
-
-    auto _enabled_val = get_sampling_cpus();
-    for(auto& itr : _enabled_val)
-        itr = tolower(itr);
-    if(_enabled_val == "off")
-        _enabled_val = "none";
-    else if(_enabled_val == "on")
-        _enabled_val = "all";
-    if(_enabled_val != "none" && _enabled_val != "all")
-    {
-        auto _enabled = tim::delimit(_enabled_val, ",; \t");
-        if(_enabled.empty())
-        {
-            for(size_t i = 0; i < _ncpu; ++i)
-                _enabled_freqs.emplace(i);
-        }
-        for(auto&& _v : _enabled)
-        {
-            if(_v.find_first_not_of("0123456789-") != std::string::npos)
-            {
-                OMNITRACE_VERBOSE_F(
-                    0,
-                    "Invalid CPU specification. Only numerical values (e.g., 0) or "
-                    "ranges (e.g., 0-7) are permitted. Ignoring %s...",
-                    _v.c_str());
-                continue;
-            }
-            if(_v.find('-') != std::string::npos)
-            {
-                auto _vv = tim::delimit(_v, "-");
-                OMNITRACE_CONDITIONAL_THROW(
-                    _vv.size() != 2,
-                    "Invalid CPU range specification: %s. Required format N-M, e.g. 0-4",
-                    _v.c_str());
-                for(size_t i = std::stoull(_vv.at(0)); i <= std::stoull(_vv.at(1)); ++i)
-                    _enabled_freqs.emplace(i);
-            }
-            else
-            {
-                _enabled_freqs.emplace(std::stoull(_v));
-            }
-        }
-    }
-    else if(_enabled_val == "all")
-    {
-        for(size_t i = 0; i < _ncpu; ++i)
-            _enabled_freqs.emplace(i);
-    }
-    else if(_enabled_val == "none")
-    {
-        _enabled_freqs.clear();
-    }
-
-    for(auto itr : _enabled_freqs)
-    {
-        if(itr < cpuinfo::freq::size())
-            _enabled_freqs.emplace(itr);
-        else
-        {
-            OMNITRACE_VERBOSE(
-                0, "[cpu_freq::config] Warning! Removing invalid cpu %zu...\n", itr);
-        }
-    }
-
-    if(!cpuinfo::freq{})
-    {
-        OMNITRACE_VERBOSE(0, "[cpu_freq::config] Warning! CPU frequencies are disabled "
-                             ":: unable to open /proc/cpuinfo");
-        _enabled_freqs.clear();
-    }
-
-    OMNITRACE_CI_FAIL(!cpuinfo::freq{}, "[cpu_freq::config] CPU frequencies are disabled "
-                                        ":: unable to open /proc/cpuinfo");
-
-    enabled_cpu_freqs = _enabled_freqs;
+    cpu_freq_component::configure();
 }
 
 void
 sample()
 {
-    std::vector<double> _freqs{};
-    if(!enabled_cpu_freqs.empty())
-    {
-        _freqs.reserve(enabled_cpu_freqs.size());
-        auto&& _freq = cpuinfo::freq{};
-        for(const auto& itr : enabled_cpu_freqs)
-        {
-            _freqs.emplace_back(_freq(itr));
-        }
-    }
-
     auto _ts = tim::get_clock_real_now<size_t, std::nano>();
 
-    tim::rusage_cache _rcache{ RUSAGE_SELF };
+    auto _rcache = tim::rusage_cache{ RUSAGE_SELF };
+    auto _freqs  = cpu_freq_component{}.sample();
+
     // user and kernel mode times are in microseconds
     cpu_data.emplace_back(
         _ts, tim::get_page_rss(), tim::get_virt_mem(), _rcache.get_peak_rss(),
@@ -276,7 +163,12 @@ post_process()
     OMNITRACE_PRINT("Post-processing %zu cpu frequency and memory usage entries...\n",
                     cpu_data.size());
     auto _process_frequencies = [](size_t _idx, size_t _offset) {
-        using freq_track = perfetto_counter_track<cpu_freq>;
+        using freq_track = perfetto_counter_track<cpu_freq_component>;
+
+        const auto& _thread_info = thread_info::get(0, LookupTID);
+        OMNITRACE_CI_THROW(!_thread_info, "Missing thread info for thread 0");
+        if(!_thread_info) return;
+
         if(!freq_track::exists(_idx))
         {
             auto addendum = [&](const char* _v) {
@@ -289,12 +181,12 @@ post_process()
         {
             uint64_t _ts   = std::get<0>(itr);
             double   _freq = std::get<8>(itr).at(_offset);
-            if(!pthread_create_gotcha::is_valid_execution_time(0, _ts)) continue;
-            write_perfetto_counter_track<cpu_freq>(index{ _idx }, _ts, _freq);
+            if(!_thread_info->is_valid_time(_ts)) continue;
+            write_perfetto_counter_track<cpu_freq_component>(index{ _idx }, _ts, _freq);
         }
 
-        auto _end_ts = pthread_create_gotcha::get_execution_time(0)->second;
-        write_perfetto_counter_track<cpu_freq>(index{ _idx }, _end_ts, 0);
+        auto _end_ts = _thread_info->get_stop();
+        write_perfetto_counter_track<cpu_freq_component>(index{ _idx }, _end_ts, 0);
     };
 
     auto _process_cpu_rusage = []() {
@@ -305,10 +197,14 @@ post_process()
               "Page Faults", "User Time", "Kernel Time" },
             { "MB", "MB", "MB", "", "", "sec", "sec" });
 
+        const auto& _thread_info = thread_info::get(0, LookupTID);
+        OMNITRACE_CI_THROW(!_thread_info, "Missing thread info for thread 0");
+        if(!_thread_info) return;
+
         for(auto& itr : cpu_data)
         {
             uint64_t _ts = std::get<0>(itr);
-            if(!pthread_create_gotcha::is_valid_execution_time(0, _ts)) continue;
+            if(!_thread_info->is_valid_time(_ts)) continue;
 
             double   _page = std::get<1>(itr);
             double   _virt = std::get<2>(itr);
@@ -326,7 +222,7 @@ post_process()
             write_perfetto_counter_track<cpu_kernel_mode_time>(_ts, _kern / units::sec);
         }
 
-        auto _end_ts = pthread_create_gotcha::get_execution_time(0)->second;
+        auto _end_ts = _thread_info->get_stop();
         write_perfetto_counter_track<cpu_page>(_end_ts, 0.0);
         write_perfetto_counter_track<cpu_virt>(_end_ts, 0.0);
         write_perfetto_counter_track<cpu_peak>(_end_ts, 0.0);
@@ -337,13 +233,14 @@ post_process()
     };
 
     _process_cpu_rusage();
+
+    auto& enabled_cpu_freqs = cpu_freq_component::get_enabled_cpus();
     for(auto itr = enabled_cpu_freqs.begin(); itr != enabled_cpu_freqs.end(); ++itr)
     {
         auto _idx    = *itr;
         auto _offset = std::distance(enabled_cpu_freqs.begin(), itr);
         _process_frequencies(_idx, _offset);
     }
-
     enabled_cpu_freqs.clear();
 }
 }  // namespace cpu_freq

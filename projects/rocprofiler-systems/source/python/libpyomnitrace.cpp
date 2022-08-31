@@ -31,6 +31,7 @@
 #include <timemory/environment.hpp>
 #include <timemory/mpl/apply.hpp>
 #include <timemory/mpl/policy.hpp>
+#include <timemory/operations/types/file_output_message.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/macros.hpp>
@@ -762,8 +763,8 @@ generate(py::module& _pymod)
         std::ofstream ofs{};
         if(tim::filepath::open(ofs, _name))
         {
-            fprintf(stderr, "[%s][coverage]> Outputting '%s'...\n", TIMEMORY_PROJECT_NAME,
-                    _name.c_str());
+            tim::operation::file_output_message<omnitrace::coverage::code_coverage>{}(
+                _name, std::string{ "coverage" });
             ofs << oss.str() << "\n";
         }
         else

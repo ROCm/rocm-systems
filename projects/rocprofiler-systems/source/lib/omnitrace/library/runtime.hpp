@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "library/api.hpp"
+#include "api.hpp"
 #include "library/common.hpp"
 #include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
@@ -47,8 +47,8 @@ namespace omnitrace
 {
 // bundle of components around omnitrace_init and omnitrace_finalize
 using main_bundle_t =
-    tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::cpu_clock,
-                           comp::cpu_util, pthread_gotcha>;
+    tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss,
+                           comp::cpu_clock, comp::cpu_util, pthread_gotcha>;
 
 using gotcha_bundle_t =
     tim::lightweight_tuple<exit_gotcha_t, fork_gotcha_t, mpi_gotcha_t>;

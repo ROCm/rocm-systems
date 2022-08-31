@@ -30,10 +30,9 @@
 #    undef NDEBUG
 #endif
 
-#include "library/components/rocm_smi.hpp"
+#include "library/rocm_smi.hpp"
 #include "library/common.hpp"
 #include "library/components/fwd.hpp"
-#include "library/components/pthread_create_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
@@ -41,6 +40,7 @@
 #include "library/gpu.hpp"
 #include "library/perfetto.hpp"
 #include "library/state.hpp"
+#include "library/thread_info.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
@@ -65,10 +65,8 @@ namespace omnitrace
 {
 namespace rocm_smi
 {
-using tim::type_mutex;
-using auto_lock_t       = tim::auto_lock_t;
 using bundle_t          = std::deque<data>;
-using sampler_instances = thread_data<bundle_t, api::rocm_smi>;
+using sampler_instances = thread_data<bundle_t, category::rocm_smi>;
 
 namespace
 {
@@ -243,8 +241,12 @@ data::post_process(uint32_t _dev_id)
 
     if(device_count < _dev_id) return;
 
-    auto& _rocm_smi_v = sampler_instances::instances().at(_dev_id);
-    auto  _rocm_smi   = (_rocm_smi_v) ? *_rocm_smi_v : std::deque<rocm_smi::data>{};
+    auto&       _rocm_smi_v = sampler_instances::instances().at(_dev_id);
+    auto        _rocm_smi   = (_rocm_smi_v) ? *_rocm_smi_v : std::deque<rocm_smi::data>{};
+    const auto& _thread_info = thread_info::get(0, LookupTID);
+
+    OMNITRACE_CI_THROW(!_thread_info, "Missing thread info for thread 0");
+    if(!_thread_info) return;
 
     auto _process_perfetto = [&]() {
         for(auto& itr : _rocm_smi)
@@ -262,7 +264,7 @@ data::post_process(uint32_t _dev_id)
                 counter_track::emplace(_dev_id, addendum("Memory Usage"), "megabytes");
             }
             uint64_t _ts = itr.m_ts;
-            if(!pthread_create_gotcha::is_valid_execution_time(0, _ts)) continue;
+            if(!_thread_info->is_valid_time(_ts)) continue;
 
             double _busy  = itr.m_busy_perc;
             double _temp  = itr.m_temp / 1.0e3;
@@ -289,7 +291,7 @@ data::post_process(uint32_t _dev_id)
     {
         using entry_t = critical_trace::entry;
         auto _ts      = itr.m_ts;
-        if(!pthread_create_gotcha::is_valid_execution_time(0, _ts)) continue;
+        if(!_thread_info->is_valid_time(_ts)) continue;
 
         auto _entries = critical_trace::get_entries(_ts, [](const entry_t& _e) {
             return _e.device == critical_trace::Device::GPU;
@@ -322,7 +324,7 @@ data::post_process(uint32_t _dev_id)
 void
 setup()
 {
-    auto_lock_t _lk{ type_mutex<api::rocm_smi>() };
+    auto_lock_t _lk{ type_mutex<category::rocm_smi>() };
 
     if(is_initialized() || !get_use_rocm_smi()) return;
 
@@ -407,7 +409,7 @@ setup()
 void
 shutdown()
 {
-    auto_lock_t _lk{ type_mutex<api::rocm_smi>() };
+    auto_lock_t _lk{ type_mutex<category::rocm_smi>() };
 
     if(!is_initialized()) return;
 
@@ -454,18 +456,18 @@ device_count()
 }  // namespace rocm_smi
 }  // namespace omnitrace
 
-TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(
+OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, omnitrace::component::backtrace_gpu_busy>), true,
     double)
 
-TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(
+OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, omnitrace::component::backtrace_gpu_temp>), true,
     double)
 
-TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(
+OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, omnitrace::component::backtrace_gpu_power>), true,
     double)
 
-TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(
+OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(
     TIMEMORY_ESC(data_tracker<double, omnitrace::component::backtrace_gpu_memory>), true,
     double)

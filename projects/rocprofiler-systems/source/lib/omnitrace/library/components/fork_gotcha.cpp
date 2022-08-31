@@ -32,6 +32,8 @@
 
 namespace omnitrace
 {
+namespace component
+{
 void
 fork_gotcha::configure()
 {
@@ -57,8 +59,9 @@ fork_gotcha::audit(const gotcha_data_t&, audit::outgoing, pid_t _pid)
     if(_pid != 0)
     {
         OMNITRACE_VERBOSE(1, "fork() called on PID %i created PID %i\n", getppid(), _pid);
-        tim::settings::use_output_suffix()      = true;
-        tim::settings::default_process_suffix() = process::get_id();
+        settings::use_output_suffix()      = true;
+        settings::default_process_suffix() = process::get_id();
     }
 }
+}  // namespace component
 }  // namespace omnitrace

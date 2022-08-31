@@ -23,13 +23,19 @@
 #pragma once
 
 #include "common/join.hpp"
+#include "library/categories.hpp"
+#include "library/concepts.hpp"
 #include "library/defines.hpp"
 
 #include <timemory/api.hpp>
-#include <timemory/backends/dmp.hpp>
+#include <timemory/api/macros.hpp>
 #include <timemory/backends/process.hpp>
+#include <timemory/backends/threading.hpp>
+#include <timemory/environment/types.hpp>
+#include <timemory/mpl/types.hpp>
 #include <timemory/utility/demangle.hpp>
 #include <timemory/utility/filepath.hpp>
+#include <timemory/utility/locking.hpp>
 
 #include <cassert>
 #include <cstdint>
@@ -44,20 +50,75 @@
 #include <utility>
 #include <vector>
 
-TIMEMORY_DEFINE_NS_API(api, omnitrace)
-TIMEMORY_DEFINE_NS_API(api, sampling)
-TIMEMORY_DEFINE_NS_API(api, rocm_smi)
-TIMEMORY_DEFINE_NS_API(api, rccl)
+#define OMNITRACE_DECLARE_COMPONENT(NAME)                                                \
+    namespace omnitrace                                                                  \
+    {                                                                                    \
+    namespace component                                                                  \
+    {                                                                                    \
+    struct NAME;                                                                         \
+    }                                                                                    \
+    }                                                                                    \
+    namespace tim                                                                        \
+    {                                                                                    \
+    namespace trait                                                                      \
+    {                                                                                    \
+    template <>                                                                          \
+    struct is_component<omnitrace::component::NAME> : true_type                          \
+    {};                                                                                  \
+    }                                                                                    \
+    }                                                                                    \
+    namespace tim                                                                        \
+    {                                                                                    \
+    namespace component                                                                  \
+    {                                                                                    \
+    using ::omnitrace::component::NAME;                                                  \
+    }                                                                                    \
+    }
+
+#define OMNITRACE_COMPONENT_ALIAS(NAME, ...)                                             \
+    namespace omnitrace                                                                  \
+    {                                                                                    \
+    namespace component                                                                  \
+    {                                                                                    \
+    using NAME = __VA_ARGS__;                                                            \
+    }                                                                                    \
+    }                                                                                    \
+    namespace tim                                                                        \
+    {                                                                                    \
+    namespace component                                                                  \
+    {                                                                                    \
+    using ::omnitrace::component::NAME;                                                  \
+    }                                                                                    \
+    }
+
+#define OMNITRACE_DEFINE_CONCRETE_TRAIT(TRAIT, TYPE, VALUE)                              \
+    namespace tim                                                                        \
+    {                                                                                    \
+    namespace trait                                                                      \
+    {                                                                                    \
+    template <>                                                                          \
+    struct TRAIT<::omnitrace::TYPE> : VALUE                                              \
+    {};                                                                                  \
+    }                                                                                    \
+    }
 
 namespace omnitrace
 {
-namespace api      = ::tim::api;       // NOLINT
-namespace category = ::tim::category;  // NOLINT
-namespace filepath = ::tim::filepath;  // NOLINT
+namespace api       = ::tim::api;        // NOLINT
+namespace category  = ::tim::category;   // NOLINT
+namespace filepath  = ::tim::filepath;   // NOLINT
+namespace project   = ::tim::project;    // NOLINT
+namespace process   = ::tim::process;    // NOLINT
+namespace threading = ::tim::threading;  // NOLINT
+namespace scope     = ::tim::scope;      // NOLINT
+namespace policy    = ::tim::policy;     // NOLINT
+namespace trait     = ::tim::trait;      // NOLINT
 
+using ::tim::auto_lock_t;   // NOLINT
 using ::tim::demangle;      // NOLINT
 using ::tim::get_env;       // NOLINT
 using ::tim::try_demangle;  // NOLINT
+using ::tim::type_mutex;    // NOLINT
 }  // namespace omnitrace
 
 // same sort of functionality as python's " ".join([...])

@@ -2,12 +2,24 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 project(omnitrace-examples LANGUAGES C CXX)
 
+if("${CMAKE_BUILD_TYPE}" STREQUAL "")
+    set(CMAKE_BUILD_TYPE
+        "RelWithDebInfo"
+        CACHE STRING "Build type" FORCE)
+endif()
+
+string(TOUPPER "${CMAKE_BUILD_TYPE}" BUILD_TYPE)
+
 set(CMAKE_VISIBILITY_INLINES_HIDDEN OFF)
 set(CMAKE_CXX_VISIBILITY_PRESET "default")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_CLANG_TIDY)
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME examples)
+
+if(OMNITRACE_BUILD_DEBUG)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -gdwarf-3 -fno-omit-frame-pointer")
+endif()
 
 option(BUILD_SHARED_LIBS "Build dynamic libraries" ON)
 

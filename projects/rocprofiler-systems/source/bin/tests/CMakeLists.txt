@@ -174,10 +174,10 @@ omnitrace_add_bin_test(
 omnitrace_add_bin_test(
     NAME omnitrace-exe-simulate-ls-check
     DEPENDS omnitrace-exe-simulate-ls
-    COMMAND ls omnitrace-tests-output/omnitrace-exe-simulate-ls
+    COMMAND ls omnitrace-tests-output/omnitrace-exe-simulate-ls/instrumentation
     TIMEOUT 60
     PASS_REGEX
-        ".*available-instr.json.*available-instr.txt.*available-instr.xml.*excluded-instr.json.*excluded-instr.txt.*excluded-instr.xml.*instrumented-instr.json.*instrumented-instr.txt.*instrumented-instr.xml.*overlapping-instr.json.*overlapping-instr.txt.*overlapping-instr.xml.*"
+        ".*available.json.*available.txt.*available.xml.*excluded.json.*excluded.txt.*excluded.xml.*instrumented.json.*instrumented.txt.*instrumented.xml.*overlapping.json.*overlapping.txt.*overlapping.xml.*"
     )
 
 omnitrace_add_bin_test(
@@ -265,7 +265,8 @@ omnitrace_add_bin_test(
          --advanced
     LABELS "omnitrace-avail"
     TIMEOUT 45
-    PASS_REGEX "ENVIRONMENT VARIABLE,[ \n]+OMNITRACE_USE_PID,[ \n]+"
+    PASS_REGEX
+        "ENVIRONMENT VARIABLE,[ \n]+OMNITRACE_THREAD_POOL_SIZE,[ \n]+OMNITRACE_USE_PID,[ \n]+"
     FAIL_REGEX "OMNITRACE_USE_PERFETTO")
 
 string(REPLACE "+" "\\\+" _AVAIL_CFG_PATH

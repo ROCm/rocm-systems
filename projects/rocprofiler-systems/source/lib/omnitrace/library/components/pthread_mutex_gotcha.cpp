@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "library/components/pthread_mutex_gotcha.hpp"
-#include "library.hpp"
 #include "library/components/category_region.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
@@ -40,6 +39,8 @@
 #include <stdexcept>
 
 namespace omnitrace
+{
+namespace component
 {
 using Device = critical_trace::Device;
 using Phase  = critical_trace::Phase;
@@ -98,7 +99,7 @@ pthread_mutex_gotcha::configure()
     pthread_mutex_gotcha_t::get_initializer() = []() {
         if(config::get_trace_thread_locks())
         {
-            pthread_mutex_gotcha::validate();
+            validate();
 
             pthread_mutex_gotcha_t::configure(
                 comp::gotcha_config<0, int, pthread_mutex_t*>{ "pthread_mutex_lock" });
@@ -186,22 +187,38 @@ pthread_mutex_gotcha::validate()
     }
 }
 
+pthread_mutex_gotcha::pthread_mutex_gotcha(const gotcha_data_t& _data)
+: m_data{ &_data }
+{}
+
 template <typename... Args>
 auto
-pthread_mutex_gotcha::operator()(uintptr_t&& _id, const comp::gotcha_data& _data,
-                                 int (*_callee)(Args...), Args... _args) const
+pthread_mutex_gotcha::operator()(uintptr_t&& _id, int (*_callee)(Args...),
+                                 Args... _args) const
 {
-    using bundle_t = omnitrace::component::category_region<category::pthread>;
+    using bundle_t = category_region<category::pthread>;
 
     if(is_disabled())
     {
         if(!_callee)
         {
-            OMNITRACE_PRINT("Warning! nullptr to %s\n", _data.tool_id.c_str());
+            if(m_data)
+            {
+                OMNITRACE_PRINT("Warning! nullptr to %s\n", m_data->tool_id.c_str());
+            }
             return EINVAL;
         }
         return (*_callee)(_args...);
     }
+
+    struct local_dtor
+    {
+        explicit local_dtor(bool& _v)
+        : _protect{ _v }
+        {}
+        ~local_dtor() { _protect = false; }
+        bool& _protect;
+    } _dtor{ m_protect = true };
 
     uint64_t _cid        = 0;
     uint64_t _parent_cid = 0;
@@ -216,15 +233,15 @@ pthread_mutex_gotcha::operator()(uintptr_t&& _id, const comp::gotcha_data& _data
         _ts                                 = comp::wall_clock::record();
     }
 
-    bundle_t::audit(_data, audit::incoming{}, _args...);
+    bundle_t::audit(std::string_view{ m_data->tool_id }, audit::incoming{}, _args...);
     auto _ret = (*_callee)(_args...);
-    bundle_t::audit(_data, audit::outgoing{}, _ret);
+    bundle_t::audit(std::string_view{ m_data->tool_id }, audit::outgoing{}, _ret);
 
     if(_id < std::numeric_limits<uintptr_t>::max() && get_use_critical_trace())
     {
         add_critical_trace<Device::CPU, Phase::DELTA>(
             threading::get_id(), _cid, 0, _parent_cid, _ts, comp::wall_clock::record(), 0,
-            _id, get_hashes().at(_data.index), _depth);
+            _id, get_hashes().at(m_data->index), _depth);
     }
 
     tim::consume_parameters(_id, _cid, _parent_cid, _depth, _ts);
@@ -232,51 +249,69 @@ pthread_mutex_gotcha::operator()(uintptr_t&& _id, const comp::gotcha_data& _data
 }
 
 int
-pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
-                                 int (*_callee)(pthread_mutex_t*),
+pthread_mutex_gotcha::operator()(int (*_callee)(pthread_mutex_t*),
                                  pthread_mutex_t* _mutex) const
 {
-    return (*this)(reinterpret_cast<uintptr_t>(_mutex), _data, _callee, _mutex);
+    if(m_protect) return (*_callee)(_mutex);
+    return (*this)(reinterpret_cast<uintptr_t>(_mutex), _callee, _mutex);
 }
 
 int
-pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
-                                 int (*_callee)(pthread_spinlock_t*),
+pthread_mutex_gotcha::operator()(int (*_callee)(pthread_spinlock_t*),
                                  pthread_spinlock_t* _lock) const
 {
-    return (*this)(reinterpret_cast<uintptr_t>(_lock), _data, _callee, _lock);
+    if(m_protect) return (*_callee)(_lock);
+    return (*this)(reinterpret_cast<uintptr_t>(_lock), _callee, _lock);
 }
 
 int
-pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
-                                 int (*_callee)(pthread_rwlock_t*),
+pthread_mutex_gotcha::operator()(int (*_callee)(pthread_rwlock_t*),
                                  pthread_rwlock_t* _lock) const
 {
-    return (*this)(reinterpret_cast<uintptr_t>(_lock), _data, _callee, _lock);
+    if(m_protect) return (*_callee)(_lock);
+    return (*this)(reinterpret_cast<uintptr_t>(_lock), _callee, _lock);
 }
 
 int
-pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
-                                 int (*_callee)(pthread_barrier_t*),
+pthread_mutex_gotcha::operator()(int (*_callee)(pthread_barrier_t*),
                                  pthread_barrier_t* _barrier) const
 {
-    return (*this)(reinterpret_cast<uintptr_t>(_barrier), _data, _callee, _barrier);
+    if(m_protect) return (*_callee)(_barrier);
+    return (*this)(reinterpret_cast<uintptr_t>(_barrier), _callee, _barrier);
 }
 
 int
-pthread_mutex_gotcha::operator()(const gotcha_data_t& _data,
-                                 int (*_callee)(pthread_t, void**), pthread_t _thr,
+pthread_mutex_gotcha::operator()(int (*_callee)(pthread_t, void**), pthread_t _thr,
                                  void** _tinfo) const
 {
-    return (*this)(static_cast<uintptr_t>(threading::get_id()), _data, _callee, _thr,
-                   _tinfo);
+    if(m_protect) return (*_callee)(_thr, _tinfo);
+    return (*this)(static_cast<uintptr_t>(threading::get_id()), _callee, _thr, _tinfo);
 }
 
 bool
 pthread_mutex_gotcha::is_disabled()
 {
-    return (omnitrace::get_state() != omnitrace::State::Active ||
-            omnitrace::get_thread_state() != omnitrace::ThreadState::Enabled ||
+    return (get_state() != ::omnitrace::State::Active ||
+            get_thread_state() != ThreadState::Enabled ||
             (get_use_sampling() && !pthread_gotcha::sampling_enabled_on_child_threads()));
 }
+}  // namespace component
 }  // namespace omnitrace
+
+namespace tim
+{
+namespace policy
+{
+template <size_t N>
+pthread_mutex_gotcha&
+static_data<pthread_mutex_gotcha, pthread_mutex_gotcha_t>::operator()(
+    std::integral_constant<size_t, N>, const component::gotcha_data& _data) const
+{
+    using thread_data_t =
+        omnitrace::thread_data<pthread_mutex_gotcha, std::integral_constant<size_t, N>>;
+    static thread_local auto& _v =
+        thread_data_t::instance(omnitrace::construct_on_init{}, _data);
+    return *_v;
+}
+}  // namespace policy
+}  // namespace tim

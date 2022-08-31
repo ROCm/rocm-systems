@@ -29,8 +29,6 @@
 #include "library/timemory.hpp"
 
 #include <timemory/components/base.hpp>
-#include <timemory/components/papi/papi_array.hpp>
-#include <timemory/components/papi/types.hpp>
 #include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/variadic/types.hpp>
@@ -50,74 +48,37 @@ struct backtrace
 : tim::component::empty_base
 , tim::concepts::component
 {
-    static constexpr size_t num_hw_counters = TIMEMORY_PAPI_ARRAY_SIZE;
-    static constexpr size_t buffer_width    = 512;
-    static constexpr size_t stack_depth     = 128;
+    static constexpr size_t stack_depth = OMNITRACE_MAX_UNWIND_DEPTH;
 
-    using data_t            = std::array<char[buffer_width], stack_depth>;
+    using data_t            = tim::unwind::stack<stack_depth>;
     using clock_type        = std::chrono::steady_clock;
     using value_type        = void;
-    using hw_counters       = tim::component::papi_array<num_hw_counters>;
-    using hw_counter_data_t = typename hw_counters::value_type;
     using system_clock      = std::chrono::system_clock;
     using system_time_point = typename system_clock::time_point;
 
-    static void        preinit();
     static std::string label();
     static std::string description();
 
-    backtrace()                 = default;
-    ~backtrace()                = default;
-    backtrace(backtrace&&)      = default;
-    backtrace(const backtrace&) = default;
+    backtrace()                     = default;
+    ~backtrace()                    = default;
+    backtrace(const backtrace&)     = default;
+    backtrace(backtrace&&) noexcept = default;
 
     backtrace& operator=(const backtrace&) = default;
-    backtrace& operator=(backtrace&&) = default;
+    backtrace& operator=(backtrace&&) noexcept = default;
 
-    bool operator<(const backtrace& rhs) const;
+    static std::vector<std::string> filter_and_patch(const std::vector<std::string>&);
 
-    static std::set<int>      configure(bool, int64_t _tid = threading::get_id());
-    static void               post_process(int64_t _tid = threading::get_id());
-    static hw_counter_data_t& get_last_hwcounters();
+    static void start();
+    static void stop();
 
-    static void                   start();
-    static void                   stop();
-    void                          sample(int = -1);
-    bool                          empty() const;
-    size_t                        size() const;
-    std::vector<std::string_view> get() const;
-    uint64_t                      get_timestamp() const;
-    int64_t                       get_thread_cpu_timestamp() const;
+    void                     sample(int = -1);
+    bool                     empty() const;
+    size_t                   size() const;
+    std::vector<std::string> get() const;
 
 private:
-    int64_t           m_tid        = 0;
-    int64_t           m_thr_cpu_ts = 0;
-    int64_t           m_mem_peak   = 0;
-    int64_t           m_ctx_swch   = 0;
-    int64_t           m_page_flt   = 0;
-    uint64_t          m_ts         = {};
-    size_t            m_size       = 0;
-    data_t            m_data       = {};
-    hw_counter_data_t m_hw_counter = {};
+    data_t m_data = {};
 };
 }  // namespace component
 }  // namespace omnitrace
-
-#if !defined(OMNITRACE_EXTERN_COMPONENTS) ||                                             \
-    (defined(OMNITRACE_EXTERN_COMPONENTS) && OMNITRACE_EXTERN_COMPONENTS > 0)
-
-#    include <timemory/operations.hpp>
-
-TIMEMORY_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, omnitrace::component::backtrace_wall_clock>), true,
-    double)
-
-TIMEMORY_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, omnitrace::component::backtrace_cpu_clock>), true,
-    double)
-
-TIMEMORY_DECLARE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<double, omnitrace::component::backtrace_fraction>), true,
-    double)
-
-#endif

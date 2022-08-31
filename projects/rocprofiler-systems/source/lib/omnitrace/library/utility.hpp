@@ -32,8 +32,6 @@ namespace omnitrace
 {
 namespace utility
 {
-namespace
-{
 /// provides an alternative thread index for when using threading::get_id() is not
 /// desirable
 inline auto
@@ -65,6 +63,5 @@ get_reserved_vector(size_t _n)
     _v.reserve(_n);
     return _v;
 }
-}  // namespace
 }  // namespace utility
 }  // namespace omnitrace

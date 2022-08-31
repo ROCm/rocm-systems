@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "library/dynamic_library.hpp"
-#include "common/defines.h"
 #include "library/common.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"

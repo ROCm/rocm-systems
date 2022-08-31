@@ -231,7 +231,7 @@ endfunction()
 # -------------------------------------------------------------------------------------- #
 
 function(OMNITRACE_ADD_TEST)
-    foreach(_PREFIX RUNTIME REWRITE REWRITE_RUN)
+    foreach(_PREFIX RUNTIME REWRITE REWRITE_RUN BASELINE)
         foreach(_TYPE PASS FAIL SKIP)
             list(APPEND _REGEX_OPTS "${_PREFIX}_${_TYPE}_REGEX")
         endforeach()
@@ -404,6 +404,8 @@ function(OMNITRACE_ADD_TEST)
                 set(_REGEX_VAR RUNTIME)
             elseif("${_TEST}" MATCHES "binary-rewrite")
                 set(_REGEX_VAR REWRITE)
+            elseif("${_TEST}" MATCHES "baseline")
+                set(_REGEX_VAR BASELINE)
             else()
                 set(_REGEX_VAR)
             endif()
@@ -747,7 +749,7 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
             args
             --min-instructions
             0
-        ENVIRONMENT "${_base_environment};GOTCHA_DEBUG=1"
+        ENVIRONMENT "${_base_environment}"
         REWRITE_RUN_PASS_REGEX
             "(/[A-Za-z-]+/perfetto-trace-0.proto).*(/[A-Za-z-]+/wall_clock-0.txt')"
         REWRITE_RUN_FAIL_REGEX "-[0-9][0-9]+.(json|txt|proto)")
@@ -773,7 +775,7 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
         ENVIRONMENT
             "${_flat_environment};OMNITRACE_USE_SAMPLING=OFF;OMNITRACE_STRICT_CONFIG=OFF;OMNITRACE_USE_MPIP=ON"
         REWRITE_RUN_PASS_REGEX
-            ">>> main(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall(.*\n.*)>>> pthread_join"
+            ">>> main(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> pthread_create(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall"
         )
 
     omnitrace_add_test(
@@ -796,7 +798,7 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
             0
         ENVIRONMENT "${_flat_environment};OMNITRACE_USE_SAMPLING=OFF"
         REWRITE_RUN_PASS_REGEX
-            ">>> main(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall(.*\n.*)>>> pthread_join"
+            ">>> main(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> pthread_create(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall"
         )
 endif()
 
@@ -822,8 +824,9 @@ omnitrace_add_test(
     LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
-        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace-dl.so"
-    )
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;OMNITRACE_COUT_OUTPUT=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace-dl.so"
+    REWRITE_RUN_PASS_REGEX "\\|_\\[kokkos\\]"
+    RUNTIME_PASS_REGEX "\\|_\\[kokkos\\]")
 
 omnitrace_add_test(
     SKIP_RUNTIME SKIP_REWRITE
@@ -835,8 +838,9 @@ omnitrace_add_test(
     LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
-        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace.so"
-    )
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;OMNITRACE_COUT_OUTPUT=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace.so"
+        BASELINE_PASS_REGEX
+        "\\|_\\[kokkos\\]")
 
 omnitrace_add_test(
     SKIP_RUNTIME SKIP_REWRITE
@@ -848,8 +852,9 @@ omnitrace_add_test(
     LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
-        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace-dl.so"
-    )
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;OMNITRACE_COUT_OUTPUT=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace-dl.so"
+        BASELINE_PASS_REGEX
+        "\\|_\\[kokkos\\]")
 
 omnitrace_add_test(
     SKIP_BASELINE
@@ -923,6 +928,12 @@ omnitrace_add_test(
         "${_timemory_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
 
+if(OMNITRACE_OPENMP_USING_LIBOMP_LIBRARY AND OMNITRACE_USE_OMPT)
+    set(_OMPT_PASS_REGEX "\\|_ompt_")
+else()
+    set(_OMPT_PASS_REGEX "")
+endif()
+
 omnitrace_add_test(
     SKIP_SAMPLING
     NAME openmp-cg
@@ -932,7 +943,9 @@ omnitrace_add_test(
     RUNTIME_ARGS -e -v 1 --label return args
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
-    ENVIRONMENT "${_ompt_environment};OMNITRACE_USE_SAMPLING=OFF"
+    ENVIRONMENT "${_ompt_environment};OMNITRACE_USE_SAMPLING=OFF;OMNITRACE_COUT_OUTPUT=ON"
+    REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
+    RUNTIME_PASS_REGEX "${_OMPT_PASS_REGEX}"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
 
 omnitrace_add_test(
@@ -945,7 +958,8 @@ omnitrace_add_test(
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
     ENVIRONMENT
-        "${_ompt_environment};OMNITRACE_USE_SAMPLING=ON;OMNITRACE_SAMPLING_FREQ=100"
+        "${_ompt_environment};OMNITRACE_USE_SAMPLING=ON;OMNITRACE_SAMPLING_FREQ=100;OMNITRACE_COUT_OUTPUT=ON"
+    REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
 
 omnitrace_add_test(
@@ -1104,7 +1118,7 @@ if(TARGET parallel-overhead AND _VALID_PTRACE_SCOPE)
         NAME parallel-overhead-attach
         COMMAND
             ${CMAKE_CURRENT_LIST_DIR}/run-omnitrace-pid.sh $<TARGET_FILE:omnitrace-exe>
-            -ME "\.c$" -e -v 1 --label return args file -l --
+            -ME "\.c$" -E fib -e -v 1 --label return args file -l --
             $<TARGET_FILE:parallel-overhead> 30 8 1000
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
 
@@ -1192,6 +1206,10 @@ endforeach()
 
 set(_INDEX 0)
 foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
+    if(NOT OMNITRACE_USE_PYTHON)
+        continue()
+    endif()
+
     list(GET OMNITRACE_PYTHON_ROOT_DIRS ${_INDEX} _PYTHON_ROOT_DIR)
 
     omnitrace_find_python(

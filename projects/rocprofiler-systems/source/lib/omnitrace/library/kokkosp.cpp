@@ -22,8 +22,9 @@
 
 #define TIMEMORY_KOKKOSP_POSTFIX OMNITRACE_PUBLIC_API
 
-#include "library/api.hpp"
-#include "library/components/user_region.hpp"
+#include "api.hpp"
+#include "library/components/category_region.hpp"
+#include "library/components/fwd.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
@@ -39,7 +40,11 @@
 #include <sstream>
 #include <string>
 
-namespace kokkosp = tim::kokkosp;
+namespace kokkosp  = ::tim::kokkosp;
+namespace category = ::tim::category;
+namespace comp     = ::omnitrace::component;
+
+using kokkosp_region = comp::local_category_region<category::kokkos>;
 
 //--------------------------------------------------------------------------------------//
 
@@ -140,6 +145,10 @@ extern "C"
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         tim::consume_parameters(devInfoCount, deviceInfo);
 
+        OMNITRACE_BASIC_VERBOSE_F(
+            0, "Initializing omnitrace kokkos connector (sequence %d, version: %llu)... ",
+            loadSeq, (unsigned long long) interfaceVer);
+
         if(_standalone_initialized || (!omnitrace::config::settings_are_configured() &&
                                        omnitrace::get_state() < omnitrace::State::Active))
         {
@@ -173,10 +182,6 @@ extern "C"
                 }
             }
 
-            OMNITRACE_BASIC_VERBOSE_F(0,
-                                      "Initializing kokkos omnitrace connector "
-                                      "(standalone, sequence %d, version: %llu)...\n",
-                                      loadSeq, (unsigned long long) interfaceVer);
             OMNITRACE_BASIC_VERBOSE_F(0, "Initializing omnitrace (standalone)... ");
             auto _mode = tim::get_env<std::string>("OMNITRACE_MODE", "trace");
             auto _arg0 = (_initialize_arguments.empty()) ? std::string{ "unknown" }
@@ -187,21 +192,17 @@ extern "C"
             omnitrace_init_hidden(_mode.c_str(), false, _arg0.c_str());
             omnitrace_push_trace_hidden("kokkos_main");
         }
-        else
-        {
-            OMNITRACE_VERBOSE_F(0,
-                                "Initializing kokkos omnitrace connector "
-                                "(sequence %d, version: %llu)... ",
-                                loadSeq, (unsigned long long) interfaceVer);
-        }
 
         setup_kernel_logger();
 
         tim::trait::runtime_enabled<kokkosp::memory_tracker>::set(
             omnitrace::config::get_use_timemory());
 
-        if(_standalone_initialized && omnitrace::get_verbose() >= 0)
-            fprintf(stderr, "Done\n");
+        if(omnitrace::get_verbose() >= 0)
+        {
+            fprintf(stderr, "%sDone\n%s", tim::log::color::info(),
+                    tim::log::color::end());
+        }
     }
 
     void kokkosp_finalize_library()
@@ -233,16 +234,16 @@ extern "C"
                 : TIMEMORY_JOIN(" ", TIMEMORY_JOIN("", "[kokkos][dev", devid, ']'), name);
         *kernid = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
-        kokkosp::create_profiler<omnitrace::component::user_region>(pname, *kernid);
-        kokkosp::start_profiler<omnitrace::component::user_region>(*kernid);
+        kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
+        kokkosp::start_profiler<kokkosp_region>(*kernid);
     }
 
     void kokkosp_end_parallel_for(uint64_t kernid)
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
-        kokkosp::stop_profiler<omnitrace::component::user_region>(kernid);
-        kokkosp::destroy_profiler<omnitrace::component::user_region>(kernid);
+        kokkosp::stop_profiler<kokkosp_region>(kernid);
+        kokkosp::destroy_profiler<kokkosp_region>(kernid);
     }
 
     //----------------------------------------------------------------------------------//
@@ -256,16 +257,16 @@ extern "C"
                 : TIMEMORY_JOIN(" ", TIMEMORY_JOIN("", "[kokkos][dev", devid, ']'), name);
         *kernid = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
-        kokkosp::create_profiler<omnitrace::component::user_region>(pname, *kernid);
-        kokkosp::start_profiler<omnitrace::component::user_region>(*kernid);
+        kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
+        kokkosp::start_profiler<kokkosp_region>(*kernid);
     }
 
     void kokkosp_end_parallel_reduce(uint64_t kernid)
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
-        kokkosp::stop_profiler<omnitrace::component::user_region>(kernid);
-        kokkosp::destroy_profiler<omnitrace::component::user_region>(kernid);
+        kokkosp::stop_profiler<kokkosp_region>(kernid);
+        kokkosp::destroy_profiler<kokkosp_region>(kernid);
     }
 
     //----------------------------------------------------------------------------------//
@@ -279,16 +280,16 @@ extern "C"
                 : TIMEMORY_JOIN(" ", TIMEMORY_JOIN("", "[kokkos][dev", devid, ']'), name);
         *kernid = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
-        kokkosp::create_profiler<omnitrace::component::user_region>(pname, *kernid);
-        kokkosp::start_profiler<omnitrace::component::user_region>(*kernid);
+        kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
+        kokkosp::start_profiler<kokkosp_region>(*kernid);
     }
 
     void kokkosp_end_parallel_scan(uint64_t kernid)
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
-        kokkosp::stop_profiler<omnitrace::component::user_region>(kernid);
-        kokkosp::destroy_profiler<omnitrace::component::user_region>(kernid);
+        kokkosp::stop_profiler<kokkosp_region>(kernid);
+        kokkosp::destroy_profiler<kokkosp_region>(kernid);
     }
 
     //----------------------------------------------------------------------------------//
@@ -302,16 +303,16 @@ extern "C"
                 : TIMEMORY_JOIN(" ", TIMEMORY_JOIN("", "[kokkos][dev", devid, ']'), name);
         *kernid = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
-        kokkosp::create_profiler<omnitrace::component::user_region>(pname, *kernid);
-        kokkosp::start_profiler<omnitrace::component::user_region>(*kernid);
+        kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
+        kokkosp::start_profiler<kokkosp_region>(*kernid);
     }
 
     void kokkosp_end_fence(uint64_t kernid)
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
-        kokkosp::stop_profiler<omnitrace::component::user_region>(kernid);
-        kokkosp::destroy_profiler<omnitrace::component::user_region>(kernid);
+        kokkosp::stop_profiler<kokkosp_region>(kernid);
+        kokkosp::destroy_profiler<kokkosp_region>(kernid);
     }
 
     //----------------------------------------------------------------------------------//
@@ -321,9 +322,9 @@ extern "C"
         if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name);
-        kokkosp::get_profiler_stack<omnitrace::component::user_region>().push_back(
-            kokkosp::profiler_t<omnitrace::component::user_region>(name));
-        kokkosp::get_profiler_stack<omnitrace::component::user_region>().back().start();
+        kokkosp::get_profiler_stack<kokkosp_region>().push_back(
+            kokkosp::profiler_t<kokkosp_region>(name));
+        kokkosp::get_profiler_stack<kokkosp_region>().back().start();
     }
 
     void kokkosp_pop_profile_region()
@@ -331,10 +332,9 @@ extern "C"
         if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__);
-        if(kokkosp::get_profiler_stack<omnitrace::component::user_region>().empty())
-            return;
-        kokkosp::get_profiler_stack<omnitrace::component::user_region>().back().stop();
-        kokkosp::get_profiler_stack<omnitrace::component::user_region>().pop_back();
+        if(kokkosp::get_profiler_stack<kokkosp_region>().empty()) return;
+        kokkosp::get_profiler_stack<kokkosp_region>().back().stop();
+        kokkosp::get_profiler_stack<kokkosp_region>().pop_back();
     }
 
     //----------------------------------------------------------------------------------//
@@ -345,14 +345,14 @@ extern "C"
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         *secid     = kokkosp::get_unique_id();
         auto pname = TIMEMORY_JOIN(" ", "[kokkos]", name);
-        kokkosp::create_profiler<omnitrace::component::user_region>(pname, *secid);
+        kokkosp::create_profiler<kokkosp_region>(pname, *secid);
     }
 
     void kokkosp_destroy_profile_section(uint32_t secid)
     {
         if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-        kokkosp::destroy_profiler<omnitrace::component::user_region>(secid);
+        kokkosp::destroy_profiler<kokkosp_region>(secid);
     }
 
     //----------------------------------------------------------------------------------//
@@ -362,7 +362,7 @@ extern "C"
         if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, secid);
-        kokkosp::start_profiler<omnitrace::component::user_region>(secid);
+        kokkosp::start_profiler<kokkosp_region>(secid);
     }
 
     void kokkosp_stop_profile_section(uint32_t secid)
@@ -370,7 +370,7 @@ extern "C"
         if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, secid);
-        kokkosp::start_profiler<omnitrace::component::user_region>(secid);
+        kokkosp::start_profiler<kokkosp_region>(secid);
     }
 
     //----------------------------------------------------------------------------------//
@@ -412,7 +412,7 @@ extern "C"
                                   TIMEMORY_JOIN('=', dst_handle.name, dst_name),
                                   TIMEMORY_JOIN('=', src_handle.name, src_name));
 
-        auto& _data = kokkosp::get_profiler_stack<omnitrace::component::user_region>();
+        auto& _data = kokkosp::get_profiler_stack<kokkosp_region>();
         _data.emplace_back(name);
         _data.back().audit(dst_handle, dst_name, dst_ptr, src_handle, src_name, src_ptr,
                            size);
@@ -424,7 +424,7 @@ extern "C"
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__);
-        auto& _data = kokkosp::get_profiler_stack<omnitrace::component::user_region>();
+        auto& _data = kokkosp::get_profiler_stack<kokkosp_region>();
         if(_data.empty()) return;
         _data.back().store(std::minus<int64_t>{}, 0);
         _data.back().stop();
@@ -436,7 +436,7 @@ extern "C"
     void kokkosp_profile_event(const char* name)
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-        kokkosp::profiler_t<omnitrace::component::user_region>{}.mark(name);
+        kokkosp::profiler_t<kokkosp_region>{}.mark(name);
     }
 
     //----------------------------------------------------------------------------------//

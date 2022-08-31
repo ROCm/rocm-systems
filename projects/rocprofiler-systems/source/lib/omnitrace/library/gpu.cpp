@@ -23,7 +23,7 @@
 #include "library/gpu.hpp"
 
 #if defined(OMNITRACE_USE_ROCM_SMI) && OMNITRACE_USE_ROCM_SMI > 0
-#    include "library/components/rocm_smi.hpp"
+#    include "library/rocm_smi.hpp"
 #elif !defined(OMNITRACE_USE_ROCM_SMI)
 #    define OMNITRACE_USE_ROCM_SMI 0
 #endif

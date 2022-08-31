@@ -42,12 +42,35 @@
 #    endif
 #endif
 
+#if !defined(OMNITRACE_SETUP_LOG_START)
+#    if defined(OMNITRACE_COMMON_LIBRARY_LOG_START)
+#        define OMNITRACE_SETUP_LOG_START OMNITRACE_COMMON_LIBRARY_LOG_START
+#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
+#        define OMNITRACE_SETUP_LOG_START                                                \
+            fprintf(stderr, "%s", ::tim::log::color::info());
+#    else
+#        define OMNITRACE_SETUP_LOG_START
+#    endif
+#endif
+
+#if !defined(OMNITRACE_SETUP_LOG_END)
+#    if defined(OMNITRACE_COMMON_LIBRARY_LOG_END)
+#        define OMNITRACE_SETUP_LOG_END OMNITRACE_COMMON_LIBRARY_LOG_END
+#    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
+#        define OMNITRACE_SETUP_LOG_END fprintf(stderr, "%s", ::tim::log::color::end());
+#    else
+#        define OMNITRACE_SETUP_LOG_END
+#    endif
+#endif
+
 #define OMNITRACE_SETUP_LOG(CONDITION, ...)                                              \
     if(CONDITION)                                                                        \
     {                                                                                    \
         fflush(stderr);                                                                  \
+        OMNITRACE_SETUP_LOG_START                                                        \
         fprintf(stderr, "[omnitrace]" OMNITRACE_SETUP_LOG_NAME "[%i] ", getpid());       \
         fprintf(stderr, __VA_ARGS__);                                                    \
+        OMNITRACE_SETUP_LOG_END                                                          \
         fflush(stderr);                                                                  \
     }
 

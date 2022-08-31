@@ -67,17 +67,17 @@ setup()
     auto _use_data = tim::get_env("OMNITRACE_RCCLP_COMM_DATA", get_use_timemory());
     if(!get_use_timemory())
     {
-        trait::runtime_enabled<comp::comm_data>::set(false);
-        trait::runtime_enabled<comp::comm_data_tracker_t>::set(false);
+        trait::runtime_enabled<component::comm_data>::set(false);
+        trait::runtime_enabled<component::comm_data_tracker_t>::set(false);
     }
     else
     {
-        trait::runtime_enabled<comp::comm_data>::set(_use_data);
-        trait::runtime_enabled<comp::comm_data_tracker_t>::set(_use_data);
+        trait::runtime_enabled<component::comm_data>::set(_use_data);
+        trait::runtime_enabled<component::comm_data_tracker_t>::set(_use_data);
     }
 
-    comp::configure_rcclp();
-    global_id = comp::activate_rcclp();
+    component::configure_rcclp();
+    global_id = component::activate_rcclp();
     if(librccl_handle) dlclose(librccl_handle);
 }
 
@@ -85,7 +85,7 @@ void
 shutdown()
 {
     if(global_id < std::numeric_limits<uint64_t>::max())
-        comp::deactivate_rcclp(global_id);
+        component::deactivate_rcclp(global_id);
 }
 }  // namespace rcclp
 }  // namespace omnitrace

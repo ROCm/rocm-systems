@@ -214,6 +214,16 @@ omnitrace_add_feature(
     OMNITRACE_MAX_THREADS
     "Maximum number of total threads supported in the host application (default: max of 128 or 16 * nproc)"
     )
+set(OMNITRACE_MAX_UNWIND_DEPTH
+    "64"
+    CACHE
+        STRING
+        "Maximum call-stack depth to search during call-stack unwinding. Decreasing this value will result in sampling consuming less memory"
+    )
+omnitrace_add_feature(
+    OMNITRACE_MAX_UNWIND_DEPTH
+    "Maximum call-stack depth to search during call-stack unwinding. Decreasing this value will result in sampling consuming less memory"
+    )
 
 # default visibility settings
 set(CMAKE_C_VISIBILITY_PRESET

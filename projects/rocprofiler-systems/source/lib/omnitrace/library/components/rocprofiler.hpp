@@ -47,19 +47,7 @@
 #include <variant>
 #include <vector>
 
-#if !defined(OMNITRACE_MAX_COUNTERS)
-#    define OMNITRACE_MAX_COUNTERS 25
-#endif
-
-#if !defined(OMNITRACE_ROCM_LOOK_AHEAD)
-#    define OMNITRACE_ROCM_LOOK_AHEAD 128
-#endif
-
-#if !defined(OMNITRACE_MAX_ROCM_QUEUES)
-#    define OMNITRACE_MAX_ROCM_QUEUES OMNITRACE_MAX_THREADS
-#endif
-
-namespace tim
+namespace omnitrace
 {
 namespace component
 {
@@ -159,7 +147,21 @@ rocprofiler::is_setup()
 }
 #endif
 }  // namespace component
+}  // namespace omnitrace
 
+namespace tim
+{
+namespace component
+{
+using ::omnitrace::component::rocm_data_tracker;
+using ::omnitrace::component::rocm_feature_value;
+using ::omnitrace::component::rocprofiler_data;
+using ::omnitrace::component::rocprofiler_value;
+}  // namespace component
+}  // namespace tim
+
+namespace tim
+{
 namespace operation
 {
 template <>
@@ -214,25 +216,26 @@ struct get_storage<component::rocm_data_tracker>
 }  // namespace tim
 
 #if !defined(OMNITRACE_USE_ROCTRACER)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_available, component::rocprofiler_data, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::rocprofiler_data, false_type)
 #endif
 
 TIMEMORY_SET_COMPONENT_API(component::rocprofiler_data, project::timemory,
                            category::timing, os::supports_unix)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(is_timing_category, component::rocprofiler_data,
-                               false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::rocprofiler_data, false_type)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(report_units, component::rocprofiler_data, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(is_timing_category, component::rocprofiler_data,
+                                false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::rocprofiler_data,
+                                false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(report_units, component::rocprofiler_data, false_type)
 TIMEMORY_STATISTICS_TYPE(component::rocprofiler_data, component::rocprofiler_value)
 TIMEMORY_STATISTICS_TYPE(component::rocm_data_tracker, component::rocm_feature_value)
-TIMEMORY_DEFINE_CONCRETE_TRAIT(report_units, component::rocm_data_tracker, false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(report_units, component::rocm_data_tracker, false_type)
 
 #if !defined(OMNITRACE_EXTERN_COMPONENTS) ||                                             \
     (defined(OMNITRACE_EXTERN_COMPONENTS) && OMNITRACE_EXTERN_COMPONENTS > 0)
 
 #    include <timemory/operations.hpp>
 
-TIMEMORY_DECLARE_EXTERN_COMPONENT(rocprofiler, false, void)
-TIMEMORY_DECLARE_EXTERN_COMPONENT(rocprofiler_data, true, double)
+OMNITRACE_DECLARE_EXTERN_COMPONENT(rocprofiler, false, void)
+OMNITRACE_DECLARE_EXTERN_COMPONENT(rocprofiler_data, true, double)
 
 #endif

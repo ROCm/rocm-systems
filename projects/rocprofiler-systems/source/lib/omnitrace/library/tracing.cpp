@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/tracing.hpp"
+#include "library/thread_info.hpp"
 
 namespace omnitrace
 {
@@ -53,6 +54,14 @@ get_timemory_hash_aliases(int64_t _tid)
     static auto _v =
         std::array<tim::hash_alias_ptr_t, omnitrace::max_supported_threads>{};
     return _v.at(_tid);
+}
+
+void
+record_thread_start_time()
+{
+    static thread_local std::once_flag _once{};
+    std::call_once(_once,
+                   []() { thread_info::set_start(comp::wall_clock::record(), true); });
 }
 }  // namespace tracing
 }  // namespace omnitrace

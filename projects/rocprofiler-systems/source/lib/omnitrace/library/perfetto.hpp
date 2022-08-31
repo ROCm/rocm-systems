@@ -22,81 +22,10 @@
 
 #pragma once
 
-#include "library/defines.hpp"
-
-#if defined(OMNITRACE_PERFETTO_CATEGORIES)
-#    error "OMNITRACE_PERFETTO_CATEGORIES is already defined. Please include \"" __FILE__ "\" before including any timemory files"
-#endif
-
-#define OMNITRACE_PERFETTO_CATEGORIES                                                    \
-    perfetto::Category("host").SetDescription("Host-side function tracing"),             \
-        perfetto::Category("user").SetDescription("User-defined regions"),               \
-        perfetto::Category("sampling").SetDescription("Host-side function sampling"),    \
-        perfetto::Category("device_hip")                                                 \
-            .SetDescription("Device-side functions submitted via HSA API"),              \
-        perfetto::Category("device_hsa")                                                 \
-            .SetDescription("Device-side functions submitted via HIP API"),              \
-        perfetto::Category("rocm_hip").SetDescription("Host-side HIP functions"),        \
-        perfetto::Category("rocm_hsa").SetDescription("Host-side HSA functions"),        \
-        perfetto::Category("rocm_roctx").SetDescription("Host-side ROCTX labels"),       \
-        perfetto::Category("device_busy")                                                \
-            .SetDescription("Busy percentage of a GPU device"),                          \
-        perfetto::Category("device_temp")                                                \
-            .SetDescription("Temperature of GPU device in degC"),                        \
-        perfetto::Category("device_power")                                               \
-            .SetDescription("Power consumption of GPU device in watts"),                 \
-        perfetto::Category("device_memory_usage")                                        \
-            .SetDescription("Memory usage of GPU device in MB"),                         \
-        perfetto::Category("thread_peak_memory")                                         \
-            .SetDescription(                                                             \
-                "Peak memory usage on thread in MB (derived from sampling)"),            \
-        perfetto::Category("thread_context_switch")                                      \
-            .SetDescription("Context switches on thread (derived from sampling)"),       \
-        perfetto::Category("thread_page_fault")                                          \
-            .SetDescription("Memory page faults on thread (derived from sampling)"),     \
-        perfetto::Category("hardware_counter")                                           \
-            .SetDescription("Hardware counter value on thread (derived from sampling)"), \
-        perfetto::Category("cpu_freq")                                                   \
-            .SetDescription("CPU frequency in MHz (collected in background thread)"),    \
-        perfetto::Category("process_page_fault")                                         \
-            .SetDescription(                                                             \
-                "Memory page faults in process (collected in background thread)"),       \
-        perfetto::Category("process_memory_hwm")                                         \
-            .SetDescription("Memory High-Water Mark i.e. peak memory usage (collected "  \
-                            "in background thread)"),                                    \
-        perfetto::Category("process_virtual_memory")                                     \
-            .SetDescription("Virtual memory usage in process in MB (collected in "       \
-                            "background thread)"),                                       \
-        perfetto::Category("process_context_switch")                                     \
-            .SetDescription(                                                             \
-                "Context switches in process (collected in background thread)"),         \
-        perfetto::Category("process_page_fault")                                         \
-            .SetDescription(                                                             \
-                "Memory page faults in process (collected in background thread)"),       \
-        perfetto::Category("process_user_cpu_time")                                      \
-            .SetDescription("CPU time of functions executing in user-space in process "  \
-                            "in seconds (collected in background thread)"),              \
-        perfetto::Category("process_kernel_cpu_time")                                    \
-            .SetDescription("CPU time of functions executing in kernel-space in "        \
-                            "process in seconds (collected in background thread)"),      \
-        perfetto::Category("pthread").SetDescription("Pthread functions"),               \
-        perfetto::Category("kokkos").SetDescription("Kokkos regions"),                   \
-        perfetto::Category("mpi").SetDescription("MPI regions"),                         \
-        perfetto::Category("ompt").SetDescription("OpenMP Tools regions"),               \
-        perfetto::Category("rccl").SetDescription(                                       \
-            "ROCm Communication Collectives Library (RCCL) regions"),                    \
-        perfetto::Category("comm_data")                                                  \
-            .SetDescription(                                                             \
-                "MPI/RCCL counters for tracking amount of data sent or received"),       \
-        perfetto::Category("critical-trace").SetDescription("Combined critical traces"), \
-        perfetto::Category("host-critical-trace")                                        \
-            .SetDescription("Host-side critical traces"),                                \
-        perfetto::Category("device-critical-trace")                                      \
-            .SetDescription("Device-side critical traces"),                              \
-        perfetto::Category("timemory").SetDescription("Events from the timemory API")
+#include "library/categories.hpp"
+#include "library/common.hpp"
 
 #if defined(TIMEMORY_USE_PERFETTO)
-#    define TIMEMORY_PERFETTO_CATEGORIES OMNITRACE_PERFETTO_CATEGORIES
 #    include <timemory/components/perfetto/backends.hpp>
 #else
 #    include <perfetto.h>

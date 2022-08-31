@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "library/api.hpp"
+#include "api.hpp"
 #include "library/common.hpp"
 #include "library/defines.hpp"
 #include "library/state.hpp"
@@ -262,7 +262,7 @@ uint64_t
 get_critical_trace_update_freq();
 
 uint64_t
-get_critical_trace_num_threads();
+get_thread_pool_size();
 
 std::string
 get_trace_hsa_api_types();
@@ -283,8 +283,20 @@ get_instrumentation_interval();
 double
 get_sampling_freq();
 
-double&
+double
+get_sampling_cpu_freq();
+
+double
+get_sampling_real_freq();
+
+double
 get_sampling_delay();
+
+double
+get_sampling_cpu_delay();
+
+double
+get_sampling_real_delay();
 
 std::string
 get_sampling_cpus();

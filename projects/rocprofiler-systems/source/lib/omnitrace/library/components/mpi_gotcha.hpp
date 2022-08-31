@@ -30,6 +30,8 @@
 
 namespace omnitrace
 {
+namespace component
+{
 // this is used to wrap MPI_Init and MPI_Init_thread
 struct mpi_gotcha : comp::base<mpi_gotcha, void>
 {
@@ -76,6 +78,8 @@ private:
     int*      m_size_ptr = nullptr;
     uintptr_t m_comm_val = null_comm();
 };
+}  // namespace component
 
-using mpi_gotcha_t = comp::gotcha<5, tim::component_tuple<mpi_gotcha>, api::omnitrace>;
+using mpi_gotcha_t =
+    comp::gotcha<5, tim::component_tuple<component::mpi_gotcha>, project::omnitrace>;
 }  // namespace omnitrace

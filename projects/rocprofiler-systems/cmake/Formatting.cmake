@@ -87,7 +87,7 @@ if(OMNITRACE_CLANG_FORMAT_EXE
     if(OMNITRACE_BLACK_FORMAT_EXE)
         add_custom_target(
             format-omnitrace-python
-            ${OMNITRACE_BLACK_FORMAT_EXE} ${PROJECT_SOURCE_DIR}
+            ${OMNITRACE_BLACK_FORMAT_EXE} -q ${PROJECT_SOURCE_DIR}
             COMMENT
                 "[omnitrace] Running Python formatter ${OMNITRACE_BLACK_FORMAT_EXE}...")
         if(NOT TARGET format-python)

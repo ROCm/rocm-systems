@@ -31,7 +31,7 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/locking.hpp>
 
-namespace tim
+namespace omnitrace
 {
 namespace component
 {
@@ -415,9 +415,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
 }
 #endif
 }  // namespace component
-}  // namespace tim
+}  // namespace omnitrace
 
-TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(
-    TIMEMORY_ESC(data_tracker<float, tim::api::omnitrace>), true, float)
+OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(
+    TIMEMORY_ESC(data_tracker<float, tim::project::omnitrace>), true, float)
 
-TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(comm_data, false, void)
+OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(comm_data, false, void)

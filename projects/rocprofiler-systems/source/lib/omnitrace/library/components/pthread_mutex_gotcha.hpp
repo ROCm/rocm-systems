@@ -26,11 +26,16 @@
 #include "library/defines.hpp"
 #include "library/timemory.hpp"
 
+#include <timemory/components/gotcha/backends.hpp>
+#include <timemory/mpl/macros.hpp>
+
 #include <array>
 #include <cstddef>
 #include <string>
 
 namespace omnitrace
+{
+namespace component
 {
 // this is used to wrap pthread_mutex()
 struct pthread_mutex_gotcha : comp::base<pthread_mutex_gotcha, void>
@@ -41,6 +46,8 @@ struct pthread_mutex_gotcha : comp::base<pthread_mutex_gotcha, void>
 
     TIMEMORY_DEFAULT_OBJECT(pthread_mutex_gotcha)
 
+    explicit pthread_mutex_gotcha(const gotcha_data_t&);
+
     // string id for component
     static std::string label() { return "pthread_mutex_gotcha"; }
 
@@ -49,25 +56,44 @@ struct pthread_mutex_gotcha : comp::base<pthread_mutex_gotcha, void>
     static void shutdown();
     static void validate();
 
-    int operator()(const gotcha_data_t&, int (*)(pthread_mutex_t*),
-                   pthread_mutex_t*) const;
-    int operator()(const gotcha_data_t&, int (*)(pthread_spinlock_t*),
-                   pthread_spinlock_t*) const;
-    int operator()(const gotcha_data_t&, int (*)(pthread_rwlock_t*),
-                   pthread_rwlock_t*) const;
-    int operator()(const gotcha_data_t&, int (*)(pthread_barrier_t*),
-                   pthread_barrier_t*) const;
-    int operator()(const gotcha_data_t&, int (*)(pthread_t, void**), pthread_t,
-                   void**) const;
+    int operator()(int (*)(pthread_mutex_t*), pthread_mutex_t*) const;
+    int operator()(int (*)(pthread_spinlock_t*), pthread_spinlock_t*) const;
+    int operator()(int (*)(pthread_rwlock_t*), pthread_rwlock_t*) const;
+    int operator()(int (*)(pthread_barrier_t*), pthread_barrier_t*) const;
+    int operator()(int (*)(pthread_t, void**), pthread_t, void**) const;
 
 private:
     static bool          is_disabled();
     static hash_array_t& get_hashes();
 
     template <typename... Args>
-    auto operator()(uintptr_t&&, const gotcha_data_t&, int (*)(Args...), Args...) const;
+    auto operator()(uintptr_t&&, int (*)(Args...), Args...) const;
+
+    mutable bool         m_protect = false;
+    const gotcha_data_t* m_data    = nullptr;
 };
 
 using pthread_mutex_gotcha_t = comp::gotcha<pthread_mutex_gotcha::gotcha_capacity,
-                                            quirk::fast, pthread_mutex_gotcha>;
+                                            std::tuple<>, pthread_mutex_gotcha>;
+}  // namespace component
 }  // namespace omnitrace
+
+OMNITRACE_DEFINE_CONCRETE_TRAIT(fast_gotcha, component::pthread_mutex_gotcha_t, true_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(static_data, component::pthread_mutex_gotcha_t, true_type)
+
+namespace tim
+{
+namespace policy
+{
+using pthread_mutex_gotcha   = ::omnitrace::component::pthread_mutex_gotcha;
+using pthread_mutex_gotcha_t = ::omnitrace::component::pthread_mutex_gotcha_t;
+
+template <>
+struct static_data<pthread_mutex_gotcha, pthread_mutex_gotcha_t> : std::true_type
+{
+    template <size_t N>
+    pthread_mutex_gotcha& operator()(std::integral_constant<size_t, N>,
+                                     const component::gotcha_data& _data) const;
+};
+}  // namespace policy
+}  // namespace tim

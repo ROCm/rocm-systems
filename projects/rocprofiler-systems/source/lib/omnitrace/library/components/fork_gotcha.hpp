@@ -28,6 +28,8 @@
 
 namespace omnitrace
 {
+namespace component
+{
 // this is used to wrap fork()
 struct fork_gotcha : comp::base<fork_gotcha, void>
 {
@@ -51,6 +53,8 @@ struct fork_gotcha : comp::base<fork_gotcha, void>
     static inline void start() {}
     static inline void stop() {}
 };
+}  // namespace component
 
-using fork_gotcha_t = comp::gotcha<4, tim::component_tuple<fork_gotcha>, api::omnitrace>;
+using fork_gotcha_t =
+    comp::gotcha<4, tim::component_tuple<component::fork_gotcha>, project::omnitrace>;
 }  // namespace omnitrace

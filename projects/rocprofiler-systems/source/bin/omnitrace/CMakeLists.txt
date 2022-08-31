@@ -22,9 +22,13 @@ target_sources(
 
 target_link_libraries(
     omnitrace-exe
-    PRIVATE omnitrace::omnitrace-headers omnitrace::omnitrace-dyninst
-            omnitrace::omnitrace-compile-options omnitrace::omnitrace-compile-definitions
-            omnitrace::omnitrace-sanitizer timemory::timemory-headers)
+    PRIVATE omnitrace::omnitrace-headers
+            omnitrace::omnitrace-dyninst
+            omnitrace::omnitrace-compile-options
+            omnitrace::omnitrace-compile-definitions
+            omnitrace::omnitrace-sanitizer
+            timemory::timemory-headers
+            timemory::timemory-extensions)
 
 set_target_properties(
     omnitrace-exe

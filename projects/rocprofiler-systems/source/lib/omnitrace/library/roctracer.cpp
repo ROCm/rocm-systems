@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "library/roctracer.hpp"
-#include "library.hpp"
 #include "library/components/fwd.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
@@ -98,7 +97,7 @@ auto&
 get_roctracer_hip_data(int64_t _tid = threading::get_id())
 {
     using data_t        = std::unordered_map<uint64_t, roctracer_bundle_t>;
-    using thread_data_t = thread_data<data_t, api::roctracer>;
+    using thread_data_t = thread_data<data_t, category::roctracer>;
     static auto& _v     = thread_data_t::instances(thread_data_t::construct_on_init{});
     return _v.at(_tid);
 }
@@ -137,7 +136,7 @@ auto&
 get_roctracer_cid_data(int64_t _tid = threading::get_id())
 {
     using thread_data_t =
-        thread_data<std::unordered_map<uint64_t, cid_data>, api::roctracer>;
+        thread_data<std::unordered_map<uint64_t, cid_data>, category::roctracer>;
     static auto& _v = thread_data_t::instances(thread_data_t::construct_on_init{});
     return *_v.at(_tid);
 }
@@ -145,8 +144,9 @@ get_roctracer_cid_data(int64_t _tid = threading::get_id())
 auto&
 get_hip_activity_callbacks(int64_t _tid = threading::get_id())
 {
-    using thread_data_t = thread_data<std::vector<std::function<void()>>, api::roctracer>;
-    static auto& _v     = thread_data_t::instances(thread_data_t::construct_on_init{});
+    using thread_data_t =
+        thread_data<std::vector<std::function<void()>>, category::roctracer>;
+    static auto& _v = thread_data_t::instances(thread_data_t::construct_on_init{});
     return _v.at(_tid);
 }
 
@@ -156,8 +156,8 @@ using key_data_mutex_t     = std::decay_t<decltype(get_roctracer_key_data())>;
 auto&
 get_hip_activity_mutex(int64_t _tid = threading::get_id())
 {
-    return tim::type_mutex<hip_activity_mutex_t, api::roctracer, max_supported_threads>(
-        _tid);
+    return tim::type_mutex<hip_activity_mutex_t, category::roctracer,
+                           max_supported_threads>(_tid);
 }
 }  // namespace
 
@@ -229,17 +229,6 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         return;
 
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-
-    static thread_local std::once_flag _once{};
-    std::call_once(_once, []() {
-        threading::offset_this_id(true);
-        if(threading::get_id() != 0)
-        {
-            sampling::block_signals();
-            threading::set_thread_name("roctracer.hsa");
-            sampling::shutdown();
-        }
-    });
 
     (void) arg;
     const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
@@ -326,9 +315,8 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
                 if(get_use_timemory())
                 {
-                    std::unique_lock<std::mutex> _lk{ tasking::roctracer::get_mutex() };
-                    auto                         _beg_ns = begin_timestamp;
-                    auto                         _end_ns = end_timestamp;
+                    auto _beg_ns = begin_timestamp;
+                    auto _end_ns = end_timestamp;
                     if(tasking::roctracer::get_task_group().pool())
                         tasking::roctracer::get_task_group().exec(
                             [_name, _beg_ns, _end_ns]() {
@@ -413,7 +401,6 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
         }
     };
 
-    std::unique_lock<std::mutex> _lk{ tasking::roctracer::get_mutex() };
     if(tasking::roctracer::get_task_group().pool())
         tasking::roctracer::get_task_group().exec(_func);
 
@@ -463,13 +450,15 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
             if(get_use_perfetto())
                 tracing::push_perfetto(category::rocm_roctx{}, _data->args.message);
 
-            if(get_use_timemory()) tracing::push_timemory(_data->args.message);
+            if(get_use_timemory())
+                tracing::push_timemory(category::rocm_roctx{}, _data->args.message);
 
             break;
         }
         case ROCTX_API_ID_roctxRangePop:
         {
-            if(get_use_timemory()) tracing::pop_timemory(_data->args.message);
+            if(get_use_timemory())
+                tracing::pop_timemory(category::rocm_roctx{}, _data->args.message);
             if(get_use_perfetto())
                 tracing::pop_perfetto(category::rocm_roctx{}, _data->args.message);
             break;
@@ -486,7 +475,8 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
             if(get_use_perfetto())
                 tracing::push_perfetto(category::rocm_roctx{}, _data->args.message);
 
-            if(get_use_timemory()) tracing::push_timemory(_data->args.message);
+            if(get_use_timemory())
+                tracing::push_timemory(category::rocm_roctx{}, _data->args.message);
             break;
         }
         case ROCTX_API_ID_roctxRangeStop:
@@ -513,7 +503,8 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
 
             if(!_message.empty())
             {
-                if(get_use_timemory()) tracing::pop_timemory(_message.data());
+                if(get_use_timemory())
+                    tracing::pop_timemory(category::rocm_roctx{}, _message.data());
                 if(get_use_perfetto())
                     tracing::pop_perfetto(category::rocm_roctx{}, _message.data());
             }
@@ -845,9 +836,9 @@ hip_activity_callback(const char* begin, const char* end, void*)
 
         const char* op_name =
             roctracer_op_string(record->domain, record->op, record->kind);
-
-        uint64_t    _beg_ns  = record->begin_ns + get_clock_skew();
-        uint64_t    _end_ns  = record->end_ns + get_clock_skew();
+        auto        _ns_skew = get_clock_skew();
+        uint64_t    _beg_ns  = record->begin_ns + _ns_skew;
+        uint64_t    _end_ns  = record->end_ns + _ns_skew;
         auto        _corr_id = record->correlation_id;
         static auto _scope   = []() {
             auto _v = scope::config{};
@@ -902,11 +893,13 @@ hip_activity_callback(const char* begin, const char* end, void*)
         {
             static size_t _n = 0;
             OMNITRACE_CONDITIONAL_PRINT_F(
-                get_debug() && get_verbose() >= 2,
-                "%4zu :: %-20s :: %-20s :: correlation_id(%6lu) time_ns(%12lu:%12lu) "
-                "delta_ns(%12lu) device_id(%d) stream_id(%lu) proc_id(%u) thr_id(%lu)\n",
+                (get_debug() && get_verbose() >= 2) || _end_ns <= _beg_ns,
+                "%4zu :: %-20s :: %-20s :: cid=%lu, time_ns=(%12lu:%12lu) "
+                "delta=%li, device_id=%d, stream_id=%lu, pid=%u, tid=%lu\n",
                 _n++, op_name, _name, record->correlation_id, _beg_ns, _end_ns,
-                (_end_ns - _beg_ns), _devid, _queid, record->process_id, _tid);
+                (static_cast<int64_t>(_end_ns) - static_cast<int64_t>(_beg_ns)), _devid,
+                _queid, record->process_id, _tid);
+            if(_end_ns <= _beg_ns) continue;
         }
 
         // execute this on this thread bc of how perfetto visualization works
@@ -918,7 +911,7 @@ hip_activity_callback(const char* begin, const char* end, void*)
             if(_kernel_names.find(_name) == _kernel_names.end())
                 _kernel_names.emplace(_name, tim::demangle(_name));
 
-            assert(_end_ns > _beg_ns);
+            assert(_end_ns >= _beg_ns);
             tracing::push_perfetto_ts(
                 category::device_hip{}, _kernel_names.at(_name).c_str(), _beg_ns,
                 perfetto::Flow::ProcessScoped(_cid), "begin_ns", _beg_ns, "corr_id",

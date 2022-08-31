@@ -29,8 +29,6 @@
 #include "library/timemory.hpp"
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/components/timing/wall_clock.hpp>
-#include <timemory/sampling/allocator.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <cstddef>
@@ -38,13 +36,15 @@
 
 namespace omnitrace
 {
+namespace component
+{
 void
 exit_gotcha::configure()
 {
     exit_gotcha_t::get_initializer() = []() {
-        exit_gotcha_t::template configure<0, void>("abort");
-        exit_gotcha_t::template configure<1, void, int>("exit");
-        exit_gotcha_t::template configure<2, void, int>("quick_exit");
+        exit_gotcha_t::configure<0, void>("abort");
+        exit_gotcha_t::configure<1, void, int>("exit");
+        exit_gotcha_t::configure<2, void, int>("quick_exit");
     };
 }
 
@@ -54,10 +54,29 @@ template <typename FuncT, typename... Args>
 void
 invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _args)
 {
-    OMNITRACE_VERBOSE(0, "%s called %s(%s)...\n", get_exe_name().c_str(),
-                      _data.tool_id.c_str(), JOIN(", ", _args...).c_str());
+    if(config::settings_are_configured())
+    {
+        OMNITRACE_VERBOSE(0, "%s called %s(%s)...\n", get_exe_name().c_str(),
+                          _data.tool_id.c_str(), JOIN(", ", _args...).c_str());
+    }
+    else
+    {
+        OMNITRACE_BASIC_VERBOSE(0, "%s called %s(%s)...\n", get_exe_name().c_str(),
+                                _data.tool_id.c_str(), JOIN(", ", _args...).c_str());
+    }
 
-    if(get_state() != omnitrace::State::Finalized) omnitrace_finalize_hidden();
+    if(get_state() != State::Finalized) omnitrace_finalize_hidden();
+
+    if(config::settings_are_configured())
+    {
+        OMNITRACE_VERBOSE(0, "%s called %s(%s)...\n", get_exe_name().c_str(),
+                          _data.tool_id.c_str(), JOIN(", ", _args...).c_str());
+    }
+    else
+    {
+        OMNITRACE_BASIC_VERBOSE(0, "%s called %s(%s)...\n", get_exe_name().c_str(),
+                                _data.tool_id.c_str(), JOIN(", ", _args...).c_str());
+    }
 
     (*_func)(_args...);
 }
@@ -77,4 +96,5 @@ exit_gotcha::operator()(const gotcha_data& _data, abort_func_t _func) const
 {
     invoke_exit_gotcha(_data, _func);
 }
+}  // namespace component
 }  // namespace omnitrace

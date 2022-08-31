@@ -34,6 +34,8 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/environment.hpp>
 #include <timemory/environment/types.hpp>
+#include <timemory/log/color.hpp>
+#include <timemory/log/logger.hpp>
 #include <timemory/manager.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
@@ -174,7 +176,7 @@ configure_settings(bool _init)
 
     if(get_state() < State::Init)
     {
-        ::tim::print_demangled_backtrace<64>();
+        timemory_print_demangled_backtrace<64>();
         OMNITRACE_THROW("config::configure_settings() called before "
                         "omnitrace_init_library. state = %s",
                         std::to_string(get_state()).c_str());
@@ -219,6 +221,9 @@ configure_settings(bool _init)
                              "Enable some runtime validation checks (typically enabled "
                              "for continuous integration)",
                              false, "debugging", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_COLORIZED_LOG", "Enable colorized logging",
+                             true, "debugging", "advanced");
 
     OMNITRACE_CONFIG_EXT_SETTING(int, "OMNITRACE_DL_VERBOSE",
                                  "Verbosity within the omnitrace-dl library", 0,
@@ -300,11 +305,34 @@ configure_settings(bool _init)
         "Number of software interrupts per second when OMNITTRACE_USE_SAMPLING=ON", 10.0,
         "sampling", "process_sampling");
 
+    OMNITRACE_CONFIG_SETTING(double, "OMNITRACE_SAMPLING_CPUTIME_FREQ",
+                             "Number of software interrupts per second of CPU-time. "
+                             "Defaults to OMNITRACE_SAMPLING_FREQ when <= 0.0",
+                             -1.0, "sampling", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(
+        double, "OMNITRACE_SAMPLING_REALTIME_FREQ",
+        "Number of software interrupts per second of real (wall) time. "
+        "Defaults to OMNITRACE_SAMPLING_FREQ when <= 0.0",
+        -1.0, "sampling", "advanced");
+
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_SAMPLING_DELAY",
         "Time (in seconds) to wait before the first sampling signal is delivered, "
         "increasing this value can fix deadlocks during init",
         0.5, "sampling", "process_sampling");
+
+    OMNITRACE_CONFIG_SETTING(double, "OMNITRACE_SAMPLING_CPUTIME_DELAY",
+                             "Time (in seconds) to wait before the first CPU-time "
+                             "sampling signal is delivered. "
+                             "Defaults to OMNITRACE_SAMPLING_DELAY when <= 0.0",
+                             -1.0, "sampling", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(
+        double, "OMNITRACE_SAMPLING_REALTIME_DELAY",
+        "Time (in seconds) to wait before the first real (wall) time sampling signal is "
+        "delivered. Defaults to OMNITRACE_SAMPLING_DELAY when <= 0.0",
+        -1.0, "sampling", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_PROCESS_SAMPLING_FREQ",
@@ -383,7 +411,7 @@ configure_settings(bool _init)
                              "CPU time used by the current process, "
                              "and CPU time expended on behalf of the process by the "
                              "system. This is recommended.",
-                             true, "timemory", "sampling", "advanced");
+                             true, "sampling", "advanced");
 
     auto _sigrt_range = SIGRTMAX - SIGRTMIN;
 
@@ -472,6 +500,13 @@ configure_settings(bool _init)
                              "data", "advanced")
         ->set_choices(get_available_perfetto_categories<std::vector<std::string>>());
 
+    OMNITRACE_CONFIG_SETTING(
+        uint64_t, "OMNITRACE_THREAD_POOL_SIZE",
+        "Max number of threads for processing background tasks",
+        std::max<uint64_t>(std::min<uint64_t>(4, std::thread::hardware_concurrency() / 2),
+                           1),
+        "parallelism", "advanced");
+
     OMNITRACE_CONFIG_EXT_SETTING(int64_t, "OMNITRACE_CRITICAL_TRACE_COUNT",
                                  "Number of critical trace to export (0 == all)",
                                  int64_t{ 0 }, "data", "critical_trace",
@@ -481,12 +516,6 @@ configure_settings(bool _init)
                              "Number of critical trace records to store in thread-local "
                              "memory before submitting to shared buffer",
                              uint64_t{ 2000 }, "data", "critical_trace", "advanced");
-
-    OMNITRACE_CONFIG_SETTING(
-        uint64_t, "OMNITRACE_CRITICAL_TRACE_NUM_THREADS",
-        "Number of threads to use when generating the critical trace",
-        std::min<uint64_t>(8, std::thread::hardware_concurrency()), "parallelism",
-        "critical_trace", "advanced");
 
     OMNITRACE_CONFIG_EXT_SETTING(
         int64_t, "OMNITRACE_CRITICAL_TRACE_PER_ROW",
@@ -688,6 +717,9 @@ configure_settings(bool _init)
 
     settings::suppress_config() = true;
 
+    if(!get_env("OMNITRACE_COLORIZED_LOG", _config->get<bool>("OMNITRACE_COLORIZED_LOG")))
+        tim::log::colorized() = false;
+
     if(_init)
     {
         using argparser_t = tim::argparse::argument_parser;
@@ -758,6 +790,7 @@ configure_mode_settings()
         set_default_setting_value("OMNITRACE_USE_CODE_COVERAGE", true);
         _set("OMNITRACE_USE_PERFETTO", false);
         _set("OMNITRACE_USE_TIMEMORY", false);
+        //_set("OMNITRACE_USE_CAUSAL", false);
         _set("OMNITRACE_USE_ROCM_SMI", false);
         _set("OMNITRACE_USE_ROCTRACER", false);
         _set("OMNITRACE_USE_ROCPROFILER", false);
@@ -814,6 +847,7 @@ configure_mode_settings()
     {
         _set("OMNITRACE_USE_PERFETTO", false);
         _set("OMNITRACE_USE_TIMEMORY", false);
+        //_set("OMNITRACE_USE_CAUSAL", false);
         _set("OMNITRACE_USE_ROCM_SMI", false);
         _set("OMNITRACE_USE_ROCTRACER", false);
         _set("OMNITRACE_USE_ROCPROFILER", false);
@@ -878,7 +912,7 @@ configure_signal_handler()
                     "signal %s (%i) ignored (OMNITRACE_IGNORE_DYNINST_TRAMPOLINE=ON)\n",
                     std::get<0>(_info).c_str(), _v);
                 if(get_verbose_env() > 1 || get_debug_env())
-                    ::tim::print_demangled_backtrace<64>();
+                    timemory_print_demangled_backtrace<64>();
                 if(_old_handler) _old_handler(_v);
             }
         };
@@ -1071,7 +1105,8 @@ print_banner(std::ostream& _os)
      \______/  |__|  |__| |__| \__| |__|     |__|     | _| `._____/__/     \__\ \______||_______|
 
     )banner";
-    _os << _banner << std::endl;
+    tim::log::stream(_os, tim::log::color::info()) << _banner;
+    _os << std::endl;
 }
 
 void
@@ -1139,7 +1174,6 @@ print_settings(
     _spacer << "#" << std::setw(tot_width + _spacer_extra) << ""
             << "#";
     _os << _spacer.str() << "\n";
-    // _os << "# api::omnitrace settings:" << std::setw(tot_width - 8) << "#" << "\n";
     for(const auto& itr : _data)
     {
         _os << ((_md) ? "| " : "# ");
@@ -1174,9 +1208,11 @@ print_settings(
         }
         _os << ((_md) ? "\n" : "  #\n");
     }
+
     _os << _spacer.str() << "\n";
 
-    _ros << _os.str() << std::flush;
+    tim::log::stream(_ros, tim::log::color::info()) << _os.str();
+    _ros << std::flush;
 }
 
 void
@@ -1191,9 +1227,13 @@ print_settings(bool _include_env)
 
     if(_include_env)
     {
+        std::cerr << tim::log::info;
         tim::print_env(std::cerr, [_is_omnitrace_option](const std::string& _v) {
-            return _is_omnitrace_option(_v, std::set<std::string>{});
+            auto _is_omni_opt = _is_omnitrace_option(_v, std::set<std::string>{});
+            if(settings::verbose() >= 2 || settings::debug()) return _is_omni_opt;
+            return (_is_omni_opt && _v.find("OMNITRACE_SIGNAL_") != 0);
         });
+        std::cerr << tim::log::flush;
     }
 
     print_settings(std::cerr, _is_omnitrace_option);
@@ -1607,10 +1647,9 @@ get_critical_trace_update_freq()
 }
 
 uint64_t
-get_critical_trace_num_threads()
+get_thread_pool_size()
 {
-    static uint64_t _v =
-        get_config()->get<uint64_t>("OMNITRACE_CRITICAL_TRACE_NUM_THREADS");
+    static uint64_t _v = get_config()->get<uint64_t>("OMNITRACE_THREAD_POOL_SIZE");
     return _v;
 }
 
@@ -1671,11 +1710,47 @@ get_sampling_freq()
     return static_cast<tim::tsettings<double>&>(*_v->second).get();
 }
 
-double&
+double
+get_sampling_cpu_freq()
+{
+    static auto _v   = get_config()->find("OMNITRACE_SAMPLING_CPUTIME_FREQ");
+    auto&       _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
+    if(_val <= 0.0) _val = get_sampling_freq();
+    return _val;
+}
+
+double
+get_sampling_real_freq()
+{
+    static auto _v   = get_config()->find("OMNITRACE_SAMPLING_REALTIME_FREQ");
+    auto&       _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
+    if(_val <= 0.0) _val = get_sampling_freq();
+    return _val;
+}
+
+double
 get_sampling_delay()
 {
     static auto _v = get_config()->find("OMNITRACE_SAMPLING_DELAY");
     return static_cast<tim::tsettings<double>&>(*_v->second).get();
+}
+
+double
+get_sampling_cpu_delay()
+{
+    static auto _v   = get_config()->find("OMNITRACE_SAMPLING_CPUTIME_DELAY");
+    auto&       _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
+    if(_val <= 0.0) _val = get_sampling_delay();
+    return _val;
+}
+
+double
+get_sampling_real_delay()
+{
+    static auto _v   = get_config()->find("OMNITRACE_SAMPLING_REALTIME_DELAY");
+    auto&       _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
+    if(_val <= 0.0) _val = get_sampling_delay();
+    return _val;
 }
 
 std::string

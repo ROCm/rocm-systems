@@ -191,7 +191,7 @@ OMNITRACE_CRITICAL_TRACE                           = false
 OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT              = 2000
 OMNITRACE_CRITICAL_TRACE_COUNT                     = 0
 OMNITRACE_CRITICAL_TRACE_DEBUG                     = false
-OMNITRACE_CRITICAL_TRACE_NUM_THREADS               = 8
+OMNITRACE_THREAD_POOL_SIZE                         = 8
 OMNITRACE_CRITICAL_TRACE_PER_ROW                   = 0
 OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES           = false
 OMNITRACE_DEBUG                                    = false
@@ -287,7 +287,7 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT   | Number of critical trace records to ... |
 | OMNITRACE_CRITICAL_TRACE_COUNT          | Number of critical trace to export (... |
 | OMNITRACE_CRITICAL_TRACE_DEBUG          | Enable debugging for critical trace     |
-| OMNITRACE_CRITICAL_TRACE_NUM_THREADS    | Number of threads to use when genera... |
+| OMNITRACE_THREAD_POOL_SIZE              | Number of threads to use when genera... |
 | OMNITRACE_CRITICAL_TRACE_PER_ROW        | How many critical traces per row in ... |
 | OMNITRACE_CRITICAL_TRACE_SERIALIZE_N... | Include names in serialization of cr... |
 | OMNITRACE_DEBUG                         | Enable debug output                     |
@@ -1200,21 +1200,20 @@ OMNITRACE_USE_PERFETTO          = $ENABLE
 OMNITRACE_USE_TIMEMORY          = $ENABLE
 OMNITRACE_USE_SAMPLING          = $SAMPLE
 OMNITRACE_USE_PROCESS_SAMPLING  = $SAMPLE
-OMNITRACE_CRITICAL_TRACE        = OFF
 
 # debug
 OMNITRACE_DEBUG                 = OFF
 OMNITRACE_VERBOSE               = 1
 
 # output fields
-OMNITRACE_OUTPUT_PATH           = omnitrace-example-output
+OMNITRACE_OUTPUT_PATH           = omnitrace-output
 OMNITRACE_OUTPUT_PREFIX         = %tag%/
 OMNITRACE_TIME_OUTPUT           = OFF
 OMNITRACE_USE_PID               = OFF
 
 # timemory fields
 OMNITRACE_PAPI_EVENTS           = PAPI_TOT_INS PAPI_FP_INS
-OMNITRACE_TIMEMORY_COMPONENTS   = wall_clock trip_count
+OMNITRACE_TIMEMORY_COMPONENTS   = wall_clock peak_rss trip_count
 OMNITRACE_MEMORY_UNITS          = MB
 OMNITRACE_TIMING_UNITS          = sec
 
@@ -1226,7 +1225,6 @@ OMNITRACE_SAMPLING_GPUS         = $env:HIP_VISIBLE_DEVICES
 
 # misc env variables (see metadata JSON file after run)
 $env:OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX  = OFF
-$env:OMNITRACE_SAMPLING_KEEP_INTERNAL        = OFF
 ```
 
 ### Sample JSON Configuration File

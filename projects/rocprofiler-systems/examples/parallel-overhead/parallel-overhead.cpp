@@ -14,11 +14,13 @@
 
 #if USE_LOCKS > 0
 #    include <mutex>
-using auto_lock_t = std::unique_lock<std::mutex>;
-long       total  = 0;
+using auto_lock_t     = std::unique_lock<std::mutex>;
+long       total      = 0;
+long       lock_count = 0;
 std::mutex mtx{};
 #else
 std::atomic<long> total{ 0 };
+long              lock_count = 0;
 #endif
 
 long
@@ -52,6 +54,7 @@ run(size_t nitr, long n)
         auto        _v = fib(_get_n());
         auto_lock_t _lk{ mtx };
         total += _v;
+        ++lock_count;
     }
 #else
     long local = 0;
@@ -110,6 +113,7 @@ main(int argc, char** argv)
 
     printf("[%s] fibonacci(%li) x %lu = %li\n", _name.c_str(), nfib, nthread,
            static_cast<long>(total));
+    printf("[%s] number of mutex locks = %li\n", _name.c_str(), lock_count);
 
     return 0;
 }

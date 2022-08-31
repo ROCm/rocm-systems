@@ -14,6 +14,9 @@ add_executable(openmp-lu ${CMAKE_CURRENT_SOURCE_DIR}/LU/lu.cpp
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     find_package(OpenMP REQUIRED)
     target_link_libraries(openmp-common PUBLIC OpenMP::OpenMP_CXX)
+    set(OMNITRACE_OPENMP_USING_LIBOMP_LIBRARY
+        ON
+        CACHE INTERNAL "Used by omnitrace testing" FORCE)
 else()
     find_program(CLANGXX_EXECUTABLE NAMES clang++)
     find_library(
@@ -27,9 +30,15 @@ else()
         omnitrace_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE} TARGET openmp-common)
         omnitrace_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE} TARGET openmp-cg)
         omnitrace_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE} TARGET openmp-lu)
+        set(OMNITRACE_OPENMP_USING_LIBOMP_LIBRARY
+            ON
+            CACHE INTERNAL "Used by omnitrace testing" FORCE)
     else()
         find_package(OpenMP REQUIRED)
         target_link_libraries(openmp-common PUBLIC OpenMP::OpenMP_CXX)
+        set(OMNITRACE_OPENMP_USING_LIBOMP_LIBRARY
+            OFF
+            CACHE INTERNAL "Used by omnitrace testing" FORCE)
     endif()
 endif()
 

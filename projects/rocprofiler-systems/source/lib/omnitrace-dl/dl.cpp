@@ -26,13 +26,19 @@
 
 #define OMNITRACE_COMMON_LIBRARY_NAME "dl"
 
-#include "dl.hpp"
+#include <timemory/log/color.hpp>
+
+#define OMNITRACE_COMMON_LIBRARY_LOG_START                                               \
+    fprintf(stderr, "%s", ::tim::log::color::info());
+#define OMNITRACE_COMMON_LIBRARY_LOG_END fprintf(stderr, "%s", ::tim::log::color::end());
+
 #include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/invoke.hpp"
 #include "common/join.hpp"
 #include "common/setup.hpp"
+#include "dl.hpp"
 
 #include <cassert>
 #include <gnu/libc-version.h>
@@ -45,13 +51,17 @@
         *(void**) (&VARNAME) = dlsym(HANDLE, FUNCNAME);                                  \
         if(VARNAME == nullptr && _omnitrace_dl_verbose >= _warn_verbose)                 \
         {                                                                                \
+            OMNITRACE_COMMON_LIBRARY_LOG_START                                           \
             fprintf(stderr, "[omnitrace][dl][pid=%i]> %s :: %s\n", getpid(), FUNCNAME,   \
                     dlerror());                                                          \
+            OMNITRACE_COMMON_LIBRARY_LOG_END                                             \
         }                                                                                \
         else if(_omnitrace_dl_verbose > _info_verbose)                                   \
         {                                                                                \
+            OMNITRACE_COMMON_LIBRARY_LOG_START                                           \
             fprintf(stderr, "[omnitrace][dl][pid=%i]> %s :: success\n", getpid(),        \
                     FUNCNAME);                                                           \
+            OMNITRACE_COMMON_LIBRARY_LOG_END                                             \
         }                                                                                \
     }
 
@@ -146,12 +156,14 @@ struct OMNITRACE_HIDDEN_API indirect
     {
         if(_omnitrace_dl_verbose >= 1)
         {
+            OMNITRACE_COMMON_LIBRARY_LOG_START
             fprintf(stderr, "[omnitrace][dl][pid=%i] %s resolved to '%s'\n", getpid(),
                     ::basename(_omnilib.c_str()), m_omnilib.c_str());
             fprintf(stderr, "[omnitrace][dl][pid=%i] %s resolved to '%s'\n", getpid(),
                     ::basename(_dllib.c_str()), m_dllib.c_str());
             fprintf(stderr, "[omnitrace][dl][pid=%i] %s resolved to '%s'\n", getpid(),
                     ::basename(_userlib.c_str()), m_userlib.c_str());
+            OMNITRACE_COMMON_LIBRARY_LOG_END
         }
 
         auto _search_paths = common::join(':', common::path::dirname(_omnilib),
@@ -173,8 +185,10 @@ struct OMNITRACE_HIDDEN_API indirect
         {
             if(_omnitrace_dl_verbose >= 2)
             {
+                OMNITRACE_COMMON_LIBRARY_LOG_START
                 fprintf(stderr, "[omnitrace][dl][pid=%i] dlopen(\"%s\", %s) :: success\n",
                         getpid(), _lib.c_str(), _omnitrace_dl_dlopen_descr);
+                OMNITRACE_COMMON_LIBRARY_LOG_END
             }
         }
         else
@@ -182,8 +196,10 @@ struct OMNITRACE_HIDDEN_API indirect
             if(_omnitrace_dl_verbose >= 0)
             {
                 perror("dlopen");
+                OMNITRACE_COMMON_LIBRARY_LOG_START
                 fprintf(stderr, "[omnitrace][dl][pid=%i] dlopen(\"%s\", %s) :: %s\n",
                         getpid(), _lib.c_str(), _omnitrace_dl_dlopen_descr, dlerror());
+                OMNITRACE_COMMON_LIBRARY_LOG_END
             }
         }
 
@@ -451,7 +467,9 @@ bool _omnitrace_dl_fini = (std::atexit([]() {
     if(::omnitrace::dl::_omnitrace_dl_verbose >= LEVEL)                                  \
     {                                                                                    \
         fflush(stderr);                                                                  \
+        OMNITRACE_COMMON_LIBRARY_LOG_START                                               \
         fprintf(stderr, "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME "] " __VA_ARGS__);  \
+        OMNITRACE_COMMON_LIBRARY_LOG_END                                                 \
         fflush(stderr);                                                                  \
     }
 

@@ -20,31 +20,49 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/components/omnitrace.hpp"
-#include "library/api.hpp"
+#pragma once
+
+#include "library/defines.hpp"
+
+#include <timemory/mpl/concepts.hpp>
+
+#include <memory>
+#include <optional>
 
 namespace omnitrace
 {
-namespace component
-{
-void
-omnitrace::start()
-{
-    if(m_prefix) omnitrace_push_trace_hidden(m_prefix);
-}
+namespace concepts = ::tim::concepts;  // NOLINT
 
-void
-omnitrace::stop()
-{
-    if(m_prefix) omnitrace_pop_trace_hidden(m_prefix);
-}
+template <typename Tp>
+struct thread_deleter;
 
-void
-omnitrace::set_prefix(const char* _prefix)
-{
-    m_prefix = _prefix;
-}
-}  // namespace component
+// unique ptr type for omnitrace
+template <typename Tp>
+using unique_ptr_t = std::unique_ptr<Tp, thread_deleter<Tp>>;
 }  // namespace omnitrace
 
-TIMEMORY_INITIALIZE_STORAGE(omnitrace::component::omnitrace)
+namespace tim
+{
+namespace concepts
+{
+template <typename Tp>
+struct is_unique_pointer : std::false_type
+{};
+
+template <typename Tp>
+struct is_unique_pointer<::omnitrace::unique_ptr_t<Tp>> : std::true_type
+{};
+
+template <typename Tp>
+struct is_unique_pointer<std::unique_ptr<Tp>> : std::true_type
+{};
+
+template <typename Tp>
+struct is_optional : std::false_type
+{};
+
+template <typename Tp>
+struct is_optional<std::optional<Tp>> : std::true_type
+{};
+}  // namespace concepts
+}  // namespace tim

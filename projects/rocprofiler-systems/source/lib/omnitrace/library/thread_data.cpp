@@ -22,9 +22,11 @@
 
 #include "library/thread_data.hpp"
 #include "library/components/pthread_create_gotcha.hpp"
+#include "library/thread_info.hpp"
 #include "library/utility.hpp"
 
 #include <timemory/backends/threading.hpp>
+#include <timemory/components/timing/backends.hpp>
 
 namespace omnitrace
 {
@@ -38,7 +40,7 @@ instrumentation_bundles::instances()
 void
 thread_deleter<void>::operator()() const
 {
-    pthread_create_gotcha::shutdown(threading::get_id());
+    component::pthread_create_gotcha::shutdown(threading::get_id());
     set_thread_state(ThreadState::Completed);
     if(get_state() != State::Finalized && threading::get_id() == 0)
         omnitrace_finalize_hidden();

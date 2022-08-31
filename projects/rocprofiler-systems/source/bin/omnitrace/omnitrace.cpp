@@ -195,7 +195,7 @@ main(int argc, char** argv)
     };
 
     std::set<std::string> dyninst_defs = { "TypeChecking", "SaveFPR", "DelayedParsing",
-                                           "MergeTramp" };
+                                           "DebugParsing", "MergeTramp" };
 
     int _argc = argc;
     int _cmdc = 0;
@@ -302,7 +302,7 @@ main(int argc, char** argv)
         .add_argument({ "--simulate" },
                       "Exit after outputting diagnostic "
                       "{available,instrumented,excluded,overlapping} module "
-                      "function lists, e.g. available-instr.txt")
+                      "function lists, e.g. available.txt")
         .max_count(1)
         .dtype("bool")
         .action([](parser_t& p) { simulate = p.get<bool>("simulate"); });
@@ -310,7 +310,7 @@ main(int argc, char** argv)
         .add_argument({ "--print-format" },
                       "Output format for diagnostic "
                       "{available,instrumented,excluded,overlapping} module "
-                      "function lists, e.g. {print-dir}/available-instr.txt")
+                      "function lists, e.g. {print-dir}/available.txt")
         .min_count(1)
         .max_count(3)
         .dtype("string")
@@ -320,7 +320,7 @@ main(int argc, char** argv)
         .add_argument({ "--print-dir" },
                       "Output directory for diagnostic "
                       "{available,instrumented,excluded,overlapping} module "
-                      "function lists, e.g. {print-dir}/available-instr.txt")
+                      "function lists, e.g. {print-dir}/available.txt")
         .count(1)
         .dtype("string")
         .action([](parser_t& p) {
@@ -1040,7 +1040,7 @@ main(int argc, char** argv)
     bpatch->setTypeChecking(true);
     bpatch->setSaveFPR(true);
     bpatch->setDelayedParsing(true);
-    bpatch->setDebugParsing(false);
+    bpatch->setDebugParsing(true);
     bpatch->setInstrStackFrames(false);
     bpatch->setLivenessAnalysis(false);
     bpatch->setBaseTrampDeletion(false);
@@ -1276,9 +1276,9 @@ main(int argc, char** argv)
         std::cout << '\n' << std::endl;
     }
 
-    dump_info("available-instr", available_module_functions, 1, werror, "available-instr",
+    dump_info("available", available_module_functions, 1, werror, "available",
               print_formats);
-    dump_info("overlapping-instr", overlapping_module_functions, 1, werror,
+    dump_info("overlapping", overlapping_module_functions, 1, werror,
               "overlapping_module_functions", print_formats);
 
     //----------------------------------------------------------------------------------//
@@ -1943,16 +1943,16 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    dump_info("available-instr", available_module_functions, 0, werror,
+    dump_info("available", available_module_functions, 0, werror,
               "available_module_functions", print_formats);
-    dump_info("instrumented-instr", instrumented_module_functions, 0, werror,
+    dump_info("instrumented", instrumented_module_functions, 0, werror,
               "instrumented_module_functions", print_formats);
-    dump_info("excluded-instr", excluded_module_functions, 0, werror,
+    dump_info("excluded", excluded_module_functions, 0, werror,
               "excluded_module_functions", print_formats);
     if(coverage_mode != CODECOV_NONE)
-        dump_info("coverage-instr", coverage_module_functions, 0, werror,
+        dump_info("coverage", coverage_module_functions, 0, werror,
                   "coverage_module_functions", print_formats);
-    dump_info("overlapping-instr", overlapping_module_functions, 0, werror,
+    dump_info("overlapping", overlapping_module_functions, 0, werror,
               "overlapping_module_functions", print_formats);
 
     auto _dump_info = [](const std::string& _label, const string_t& _mode,

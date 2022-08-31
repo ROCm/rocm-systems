@@ -35,6 +35,14 @@
 #    error OMNITRACE_COMMON_LIBRARY_NAME must be defined
 #endif
 
+#if !defined(OMNITRACE_COMMON_LIBRARY_LOG_START)
+#    define OMNITRACE_COMMON_LIBRARY_LOG_START
+#endif
+
+#if !defined(OMNITRACE_COMMON_LIBRARY_LOG_END)
+#    define OMNITRACE_COMMON_LIBRARY_LOG_END
+#endif
+
 namespace omnitrace
 {
 inline namespace common
@@ -98,11 +106,13 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
             if(_verbose >= 3)
             {
                 fflush(stderr);
+                OMNITRACE_COMMON_LIBRARY_LOG_START
                 fprintf(stderr,
                         "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
                         "][%li][%i] %s(%s)\n",
                         get_thread_index(), _lk, _name,
                         join(QuoteStrings{}, ", ", _args...).c_str());
+                OMNITRACE_COMMON_LIBRARY_LOG_END
                 fflush(stderr);
             }
             return std::invoke(std::forward<FuncT>(_func), _args...);
@@ -110,20 +120,24 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
         else if(_verbose >= 2)
         {
             fflush(stderr);
+            OMNITRACE_COMMON_LIBRARY_LOG_START
             fprintf(stderr,
                     "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
                     "][%li] %s(%s) was guarded :: value = %i\n",
                     get_thread_index(), _name,
                     join(QuoteStrings{}, ", ", _args...).c_str(), _lk);
+            OMNITRACE_COMMON_LIBRARY_LOG_END
             fflush(stderr);
         }
     }
     else if(_verbose >= 0)
     {
+        OMNITRACE_COMMON_LIBRARY_LOG_START
         fprintf(stderr,
                 "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
                 "][%li] %s(%s) ignored :: null function pointer\n",
                 get_thread_index(), _name, join(QuoteStrings{}, ", ", _args...).c_str());
+        OMNITRACE_COMMON_LIBRARY_LOG_END
     }
 
     using return_type = decltype(std::invoke(std::forward<FuncT>(_func), _args...));

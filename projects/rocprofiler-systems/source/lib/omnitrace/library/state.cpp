@@ -47,8 +47,8 @@ to_string(omnitrace::ThreadState _v)
     {
         case omnitrace::ThreadState::Enabled: return "Enabled";
         case omnitrace::ThreadState::Internal: return "Internal";
-        case omnitrace::ThreadState::Disabled: return "Disabled";
         case omnitrace::ThreadState::Completed: return "Completed";
+        case omnitrace::ThreadState::Disabled: return "Disabled";
     }
     return {};
 }

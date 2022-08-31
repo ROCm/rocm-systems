@@ -20,33 +20,55 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/components/user_region.hpp"
-#include "library/api.hpp"
+#pragma once
+
+#include "library/common.hpp"
 #include "library/components/fwd.hpp"
+#include "library/defines.hpp"
+#include "library/timemory.hpp"
+
+#include <timemory/components/base.hpp>
+#include <timemory/macros/language.hpp>
+#include <timemory/mpl/concepts.hpp>
+
+#include <chrono>
+#include <cstdint>
 
 namespace omnitrace
 {
 namespace component
 {
-void
-user_region::start()
+struct backtrace_timestamp
+: tim::component::empty_base
+, tim::concepts::component
 {
-    if(m_prefix) omnitrace_push_region_hidden(m_prefix);
-}
+    using value_type = void;
 
-void
-user_region::stop()
-{
-    if(m_prefix) omnitrace_pop_region_hidden(m_prefix);
-}
+    static std::string label() { return "backtrace_timestamp"; }
+    static std::string description() { return "Timestamp for backtrace"; }
 
-void
-user_region::set_prefix(const char* _prefix)
-{
-    m_prefix = _prefix;
-}
+    backtrace_timestamp()                               = default;
+    ~backtrace_timestamp()                              = default;
+    backtrace_timestamp(const backtrace_timestamp&)     = default;
+    backtrace_timestamp(backtrace_timestamp&&) noexcept = default;
+
+    backtrace_timestamp& operator=(const backtrace_timestamp&) = default;
+    backtrace_timestamp& operator=(backtrace_timestamp&&) noexcept = default;
+
+    bool operator<(const backtrace_timestamp& rhs) const;
+
+    static void start() {}
+    static void stop() {}
+
+    void sample(int = -1);
+
+    auto get_tid() const { return m_tid; }
+    auto get_timestamp() const { return m_real; }
+    bool is_valid() const;
+
+private:
+    int64_t  m_tid  = 0;
+    uint64_t m_real = 0;
+};
 }  // namespace component
 }  // namespace omnitrace
-
-TIMEMORY_INITIALIZE_STORAGE(omnitrace::component::user_region)
-TIMEMORY_INSTANTIATE_EXTERN_COMPONENT(omnitrace_user_region, false, void)

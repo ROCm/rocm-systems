@@ -524,125 +524,299 @@ component explicitly sets type-traits which specify that the data is only releva
 |-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 ```
 
-### Timemory Flat JSON Output
+### Timemory JSON Output
 
-> ***Hint: the generation of flat JSON output is configurable via `OMNITRACE_JSON_OUTPUT`***
+> ***Hint: the generation of flat JSON output is configurable via `OMNITRACE_JSON_OUTPUT`.***
+> ***The generation of hierarchical JSON data is configurable via `OMNITRACE_TREE_OUTPUT`.***
 
-Timemory provides two JSON output formats. The flat JSON output files are similar to the text files: the hierarchical information
-is represented by the indentation of the `"prefix"` field and the `"depth"` field. All the data entries are in a single JSON array,
-e.g. the `["timemory"]["wall_clock"]["ranks"][0]["graph"][<N>]["prefix"]` entry in the below:
+Timemory represents the data within the JSON output in two forms: a flat structure and a hierarchical structure.
+The flat JSON data represents the data similar to the text files: the hierarchical information
+is represented by the indentation of the `"prefix"` field and the `"depth"` field.
+The hierarchical JSON contains additional information with respect to inclusive and exclusive value, however,
+it's structure requires processing through recursion. This section of the JSON supports analysis
+by [hatchet](https://github.com/hatchet/hatchet).
+All the data entries for the flat structure are in a single JSON array.
+This format is easier than the hierarchical format to write a simple Python script for post-processing.
+
+#### Timemory JSON Output Sample
+
+In the JSON below, the flat data starts at `["timemory"]["wall_clock"]["ranks"]`
+and the hierarchical data starts at `["timemory"]["wall_clock"]["graph"]`.
+E.g., accessing the name (prefix) of the nth entry in the flat data layout is:
+`["timemory"]["wall_clock"]["ranks"][0]["graph"][<N>]["prefix"]`. When full MPI
+support is enable, the per-rank data in flat layout will be represented
+in as an entry in the "ranks" array; in the hierarchical data structure,
+the per-rank data is represented as entry in the "mpi" array (but "graph"
+is used in lieu of "mpi" when full MPI support is enabled).
+In the hierarchical layout, all data for the process is all a child of a (dummy)
+root node (which has the name `unknown-hash=0`).
 
 ```json
 {
     "timemory": {
         "wall_clock": {
-            "description": "Real-clock timer (i.e. wall-clock timer)",
-            "thread_count": 12,
-            "process_count": 1,
             "properties": {
                 "cereal_class_version": 0,
+                "value": 78,
                 "enum": "WALL_CLOCK",
                 "id": "wall_clock",
-                "value": 78,
                 "ids": [
                     "real_clock",
                     "virtual_clock",
                     "wall_clock"
                 ]
             },
-            "mpi_size": 0,
-            "num_ranks": 1,
-            "concurrency": 12,
-            "upcxx_size": 1,
-            "unit_value": 1000000000,
-            "thread_scope_only": false,
             "type": "wall_clock",
+            "description": "Real-clock timer (i.e. wall-clock timer)",
+            "unit_value": 1000000000,
             "unit_repr": "sec",
+            "thread_scope_only": false,
+            "thread_count": 2,
+            "mpi_size": 1,
+            "upcxx_size": 1,
+            "process_count": 1,
+            "num_ranks": 1,
+            "concurrency": 2,
             "ranks": [
                 {
-                    "graph_size": 173,
                     "rank": 0,
+                    "graph_size": 112,
                     "graph": [
                         {
+                            "hash": 17481650134347108265,
+                            "prefix": "|0>>> main",
                             "depth": 0,
-                            "stats": {
-                                "count": 1,
-                                "min": 13.360264917,
-                                "sqr": 178.49667865242102,
-                                "sum": 13.360264917,
-                                "stddev": 0.0,
-                                "max": 13.360264917,
-                                "cereal_class_version": 0,
-                                "mean": 13.360264917
-                            },
-                            "prefix": "|00>>> main",
-                            "rolling_hash": 17481650134347108265,
                             "entry": {
-                                "repr_display": 13.360264917,
-                                "value": 13360264917,
-                                "repr_data": 13.360264917,
                                 "cereal_class_version": 0,
-                                "accum": 13360264917,
-                                "laps": 1
+                                "laps": 1,
+                                "value": 894743517,
+                                "accum": 894743517,
+                                "repr_data": 0.894743517,
+                                "repr_display": 0.894743517
                             },
-                            "hash": 17481650134347108265
+                            "stats": {
+                                "cereal_class_version": 0,
+                                "sum": 0.894743517,
+                                "count": 1,
+                                "min": 0.894743517,
+                                "max": 0.894743517,
+                                "sqr": 0.8005659612135293,
+                                "mean": 0.894743517,
+                                "stddev": 0.0
+                            },
+                            "rolling_hash": 17481650134347108265
                         },
                         {
+                            "hash": 3455444288293231339,
+                            "prefix": "|0>>> |_read_input",
                             "depth": 1,
-                            "stats": {
-                                "count": 1,
-                                "min": 10.924160502,
-                                "max": 10.924160502,
-                                "sum": 10.924160502,
-                                "stddev": 0.0,
-                                "sqr": 119.33728267345688,
-                                "mean": 10.924160502
-                            },
-                            "prefix": "|00>>> |_ompt_thread_initial",
-                            "rolling_hash": 5142782188440775656,
                             "entry": {
-                                "repr_display": 10.924160502,
                                 "laps": 1,
-                                "accum": 10924160502,
-                                "repr_data": 10.924160502,
-                                "value": 10924160502
+                                "value": 9808,
+                                "accum": 9808,
+                                "repr_data": 9.808e-06,
+                                "repr_display": 9.808e-06
                             },
-                            "hash": 6107876127803219007
+                            "stats": {
+                                "sum": 9.808e-06,
+                                "count": 1,
+                                "min": 9.808e-06,
+                                "max": 9.808e-06,
+                                "sqr": 9.6196864e-11,
+                                "mean": 9.808e-06,
+                                "stddev": 0.0
+                            },
+                            "rolling_hash": 2490350348930787988
                         },
                         {
-                            "depth": 2,
-                            "stats": {
-                                "count": 1,
-                                "min": 10.923050237,
-                                "max": 10.923050237,
-                                "sum": 10.923050237,
-                                "stddev": 0.0,
-                                "sqr": 119.31302648002575,
-                                "mean": 10.923050237
-                            },
-                            "prefix": "|00>>>   |_ompt_implicit_task",
-                            "rolling_hash": 2098840206724841601,
+                            "hash": 8456966793631718807,
+                            "prefix": "|0>>> |_setcoeff",
+                            "depth": 1,
                             "entry": {
-                                "repr_display": 10.923050237,
                                 "laps": 1,
-                                "accum": 10923050237,
-                                "repr_data": 10.923050237,
-                                "value": 10923050237
+                                "value": 922,
+                                "accum": 922,
+                                "repr_data": 9.22e-07,
+                                "repr_display": 9.22e-07
                             },
-                            "hash": 15402802091993617561
+                            "stats": {
+                                "sum": 9.22e-07,
+                                "count": 1,
+                                "min": 9.22e-07,
+                                "max": 9.22e-07,
+                                "sqr": 8.50084e-13,
+                                "mean": 9.22e-07,
+                                "stddev": 0.0
+                            },
+                            "rolling_hash": 7491872854269275456
                         },
+                        {
+                            "hash": 6107876127803219007,
+                            "prefix": "|0>>> |_ompt_thread_initial",
+                            "depth": 1,
+                            "entry": {
+                                "laps": 1,
+                                "value": 896506392,
+                                "accum": 896506392,
+                                "repr_data": 0.896506392,
+                                "repr_display": 0.896506392
+                            },
+                            "stats": {
+                                "sum": 0.896506392,
+                                "count": 1,
+                                "min": 0.896506392,
+                                "max": 0.896506392,
+                                "sqr": 0.8037237108968578,
+                                "mean": 0.896506392,
+                                "stddev": 0.0
+                            },
+                            "rolling_hash": 5142782188440775656
+                        },
+                        {
+                            "hash": 15402802091993617561,
+                            "prefix": "|0>>>   |_ompt_implicit_task",
+                            "depth": 2,
+                            "entry": {
+                                "laps": 1,
+                                "value": 896479111,
+                                "accum": 896479111,
+                                "repr_data": 0.896479111,
+                                "repr_display": 0.896479111
+                            },
+                            "stats": {
+                                "sum": 0.896479111,
+                                "count": 1,
+                                "min": 0.896479111,
+                                "max": 0.896479111,
+                                "sqr": 0.8036747964593504,
+                                "mean": 0.896479111,
+                                "stddev": 0.0
+                            },
+                            "rolling_hash": 2098840206724841601                        },
                         {
                             "..." : "... etc. ..."
                         }
                     ]
                 }
+            ],
+            "graph": [
+                [
+                    {
+                        "cereal_class_version": 0,
+                        "node": {
+                            "hash": 0,
+                            "prefix": "unknown-hash=0",
+                            "tid": [
+                                0
+                            ],
+                            "pid": [
+                                2539175
+                            ],
+                            "depth": 0,
+                            "is_dummy": false,
+                            "inclusive": {
+                                "entry": {
+                                    "laps": 0,
+                                    "value": 0,
+                                    "accum": 0,
+                                    "repr_data": 0.0,
+                                    "repr_display": 0.0
+                                },
+                                "stats": {
+                                    "sum": 0.0,
+                                    "count": 0,
+                                    "min": 0.0,
+                                    "max": 0.0,
+                                    "sqr": 0.0,
+                                    "mean": 0.0,
+                                    "stddev": 0.0
+                                }
+                            },
+                            "exclusive": {
+                                "entry": {
+                                    "laps": 0,
+                                    "value": -894743517,
+                                    "accum": -894743517,
+                                    "repr_data": -0.894743517,
+                                    "repr_display": -0.894743517
+                                },
+                                "stats": {
+                                    "sum": 0.0,
+                                    "count": 0,
+                                    "min": 0.0,
+                                    "max": 0.0,
+                                    "sqr": 0.0,
+                                    "mean": 0.0,
+                                    "stddev": 0.0
+                                }
+                            }
+                        },
+                        "children": [
+                            {
+                                "node": {
+                                    "hash": 17481650134347108265,
+                                    "prefix": "main",
+                                    "tid": [
+                                        0
+                                    ],
+                                    "pid": [
+                                        2539175
+                                    ],
+                                    "depth": 1,
+                                    "is_dummy": false,
+                                    "inclusive": {
+                                        "entry": {
+                                            "laps": 1,
+                                            "value": 894743517,
+                                            "accum": 894743517,
+                                            "repr_data": 0.894743517,
+                                            "repr_display": 0.894743517
+                                        },
+                                        "stats": {
+                                            "sum": 0.894743517,
+                                            "count": 1,
+                                            "min": 0.894743517,
+                                            "max": 0.894743517,
+                                            "sqr": 0.8005659612135293,
+                                            "mean": 0.894743517,
+                                            "stddev": 0.0
+                                        }
+                                    },
+                                    "exclusive": {
+                                        "entry": {
+                                            "laps": 1,
+                                            "value": -1773605,
+                                            "accum": -1773605,
+                                            "repr_data": -0.001773605,
+                                            "repr_display": -0.001773605
+                                        },
+                                        "stats": {
+                                            "sum": -0.001773605,
+                                            "count": 1,
+                                            "min": 9.22e-07,
+                                            "max": 0.896506392,
+                                            "sqr": -0.0031577497803754,
+                                            "mean": -0.001773605,
+                                            "stddev": 0.0
+                                        }
+                                    }
+                                },
+                                "children": [
+                                    {
+                                        "..." : "... etc. ..."
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
             ]
         }
     }
 }
 ```
 
-This format is easier than the hierarchical format to write a simple Python script for post-processing, e.g.:
+#### Timemory JSON Output Python Post-Processing Example
 
 ```python
 #!/usr/bin/env python3
@@ -708,11 +882,3 @@ This script applied to the corresponding JSON output from [Text Output Example](
 [openmp-cg.inst-wall_clock.json] Found metric: wall_clock
 [openmp-cg.inst-wall_clock.json] Maximum value: 'conj_grad' at depth 6 was called 76x :: 10.641 sec (mean = 1.400e-01 sec)
 ```
-
-### Timemory Hierarchical JSON Output
-
-> ***Hint: the generation of hierarchical JSON output is configurable via `OMNITRACE_TREE_OUTPUT`***
-
-The hierarchical JSON output (extension: `.tree.json`) contains the very similar data to the flat JSON output, however,
-it's structure requires processing through recursion. The main use of these files are their analysis support
-by [hatchet](https://github.com/hatchet/hatchet).

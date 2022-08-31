@@ -33,7 +33,7 @@ operator<<(std::ostream& _os, const ncclUniqueId& _v)
     return _os;
 }
 
-namespace tim
+namespace omnitrace
 {
 namespace component
 {
@@ -59,7 +59,7 @@ activate_rcclp()
 
         std::stringstream ss;
         ss << "timemory-rcclp-" << demangle<rccl_toolset_t>() << "-"
-           << demangle<api::rccl>();
+           << demangle<category::rocm_rccl>();
         tim::manager::instance()->add_cleanup(ss.str(), cleanup_functor);
         return 1;
     }
@@ -75,7 +75,7 @@ deactivate_rcclp(uint64_t id)
     {
         std::stringstream ss;
         ss << "timemory-rcclp-" << demangle<rccl_toolset_t>() << "-"
-           << demangle<api::rccl>();
+           << demangle<category::rocm_rccl>();
         tim::manager::instance()->cleanup(ss.str());
         return 0;
     }
@@ -90,7 +90,7 @@ configure_rcclp(const std::set<std::string>& permit, const std::set<std::string>
     static constexpr size_t rcclp_wrapper_count = OMNITRACE_NUM_RCCLP_WRAPPERS;
 
     using rcclp_gotcha_t =
-        tim::component::gotcha<rcclp_wrapper_count, rccl_toolset_t, api::rccl>;
+        tim::component::gotcha<rcclp_wrapper_count, rccl_toolset_t, category::rocm_rccl>;
 
     static bool is_initialized = false;
     if(!is_initialized)
@@ -197,4 +197,4 @@ rcclp_handle::get_tool_count()
     return get_persistent_data().m_count;
 }
 }  // namespace component
-}  // namespace tim
+}  // namespace omnitrace

@@ -20,37 +20,35 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
+#include "library/components/backtrace_timestamp.hpp"
+#include "library/thread_info.hpp"
 
-#include "library/defines.hpp"
-#include "library/timemory.hpp"
+#include <timemory/components/timing/backends.hpp>
 
 namespace omnitrace
 {
 namespace component
 {
-// timemory component which calls omnitrace functions
-// (used in gotcha wrappers)
-struct user_region : comp::base<user_region, void>
+bool
+backtrace_timestamp::operator<(const backtrace_timestamp& rhs) const
 {
-    static std::string label() { return "user_region"; }
-    void               start();
-    void               stop();
-    void               set_prefix(const char*);
+    return std::tie(m_tid, m_real) < std::tie(rhs.m_tid, rhs.m_real);
+}
 
-private:
-    const char* m_prefix = nullptr;
-};
+bool
+backtrace_timestamp::is_valid() const
+{
+    const auto& _info = thread_info::get(m_tid, InternalTID);
+    return (_info) ? _info->is_valid_time(m_real) : false;
+}
+
+void
+backtrace_timestamp::sample(int)
+{
+    m_tid  = tim::threading::get_id();
+    m_real = tim::get_clock_real_now<uint64_t, std::nano>();
+}
 }  // namespace component
 }  // namespace omnitrace
 
-TIMEMORY_COMPONENT_ALIAS(omnitrace_user_region, omnitrace::component::user_region)
-
-#if !defined(OMNITRACE_EXTERN_COMPONENTS) ||                                             \
-    (defined(OMNITRACE_EXTERN_COMPONENTS) && OMNITRACE_EXTERN_COMPONENTS > 0)
-
-#    include <timemory/operations.hpp>
-
-TIMEMORY_DECLARE_EXTERN_COMPONENT(omnitrace_user_region, false, void)
-
-#endif
+TIMEMORY_INITIALIZE_STORAGE(omnitrace::component::backtrace_timestamp)
