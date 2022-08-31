@@ -67,7 +67,7 @@ int main() {
   roctracer_properties_t properties{};
   properties.buffer_callback_fun = buffer_callback;
   properties.buffer_callback_arg = nullptr;
-  properties.buffer_size = 1024;
+  properties.buffer_size = 1024 * 1024;
 
   roctracer_pool_t* pool_1;
   CHECK(roctracer_open_pool_expl(&properties, &pool_1));
@@ -76,6 +76,7 @@ int main() {
   roctracer_pool_t* pool_2;
   CHECK(roctracer_open_pool_expl(&properties, &pool_2));
   CHECK(roctracer_enable_op_activity_expl(ACTIVITY_DOMAIN_HIP_OPS, HIP_OP_ID_COPY, pool_2));
+  CHECK(roctracer_enable_op_activity_expl(ACTIVITY_DOMAIN_HIP_API, HIP_API_ID_hipMemcpy, pool_2));
 
   int host_array[256] = {0};
   int* device_memory;

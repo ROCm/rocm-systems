@@ -139,6 +139,12 @@ hip_add_executable(activity_and_callback directed/activity_and_callback.cpp)
 target_link_libraries(activity_and_callback roctracer)
 add_dependencies(mytest activity_and_callback)
 
+## Build the multi_pool_activities test
+set_source_files_properties(directed/multi_pool_activities.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(multi_pool_activities directed/multi_pool_activities.cpp)
+target_link_libraries(multi_pool_activities roctracer)
+add_dependencies(mytest multi_pool_activities)
+
 ## Copy the golden traces and test scripts
 configure_file(run.sh ${PROJECT_BINARY_DIR} COPYONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink run.sh ${PROJECT_BINARY_DIR}/run_ci.sh)

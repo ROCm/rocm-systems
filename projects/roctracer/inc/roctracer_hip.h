@@ -50,10 +50,6 @@ extern "C" {
 // Traced calls ID enumeration
 typedef enum hip_api_id_t roctracer_hip_api_cid_t;
 
-typedef void(hipInitAsyncActivityCallback_t)(void* op_callback, void* arg);
-typedef bool(hipEnableAsyncActivityCallback_t)(unsigned op, bool enable);
-typedef const char*(hipGetOpName_t)(unsigned op);
-
 #ifdef __cplusplus
 }  // extern "C" block
 #endif  // __cplusplus

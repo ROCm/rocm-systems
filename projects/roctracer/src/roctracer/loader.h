@@ -151,9 +151,13 @@ __attribute__((weak)) const char* hipKernelNameRefByPtr(const void* hostFunction
 __attribute__((weak)) int hipGetStreamDeviceId(hipStream_t stream) { return 0; }
 __attribute__((weak)) const char* hipApiName(uint32_t id) { return NULL; }
 
-__attribute__((weak)) void hipInitActivityCallback(void* id_callback, void* op_callback,
-                                                   void* arg) {}
-__attribute__((weak)) bool hipEnableActivityCallback(unsigned op, bool enable) { return false; }
+__attribute__((weak)) hipError_t hipRegisterAsyncActivityCallback_t(uint32_t op, void* fun,
+                                                                    void* arg) {
+  return hipErrorUnknown;
+}
+__attribute__((weak)) hipError_t hipRemoveAsyncActivityCallback_t(uint32_t op) {
+  return hipErrorUnknown;
+}
 __attribute__((weak)) const char* hipGetCmdName(unsigned op) { return NULL; }
 
 class HipLoaderStatic {
@@ -183,8 +187,12 @@ class HipLoaderStatic {
   GetStreamDeviceId_t* GetStreamDeviceId;
   ApiName_t* ApiName;
 
-  hipInitAsyncActivityCallback_t* InitActivityCallback;
-  hipEnableAsyncActivityCallback_t* EnableActivityCallback;
+  typedef hipError_t(hipRegisterAsyncActivityCallback_t)(uint32_t op, void* fun, void* arg);
+  typedef hipError_t(hipRemoveAsyncActivityCallback_t)(uint32_t op);
+  typedef const char*(hipGetOpName_t)(unsigned op);
+
+  hipRegisterAsyncActivityCallback_t* RegisterActivityCallback;
+  hipRemoveAsyncActivityCallback_t* RemoveActivityCallback;
   hipGetOpName_t* GetOpName;
 
   static inline loader_t& Instance() {
@@ -200,7 +208,6 @@ class HipLoaderStatic {
   }
 
   bool Enabled() const { return true; }
-  bool& InitActivityDone() { return init_activity_done_; }
 
  private:
   HipLoaderStatic() {
@@ -213,14 +220,13 @@ class HipLoaderStatic {
     GetStreamDeviceId = hipGetStreamDeviceId;
     ApiName = hipApiName;
 
-    InitActivityCallback = hipInitActivityCallback;
-    EnableActivityCallback = hipEnableActivityCallback;
+    RegisterAsyncActivityCallback = hipRegisterAsyncActivityCallback;
+    RemoveAsyncActivityCallback = hipRemoveAsyncActivityCallback;
     GetOpName = hipGetCmdName;
   }
 
   static mutex_t mutex_;
   static instance_t instance_;
-  bool init_activity_done_ = false;
 };
 #else
 class HipApi {
@@ -248,11 +254,13 @@ class HipApi {
   GetStreamDeviceId_t* GetStreamDeviceId;
   ApiName_t* ApiName;
 
-  hipInitAsyncActivityCallback_t* InitActivityCallback;
-  hipEnableAsyncActivityCallback_t* EnableActivityCallback;
-  hipGetOpName_t* GetOpName;
+  typedef hipError_t(hipRegisterAsyncActivityCallback_t)(uint32_t op, void* fun, void* arg);
+  typedef hipError_t(hipRemoveAsyncActivityCallback_t)(uint32_t op);
+  typedef const char*(hipGetOpName_t)(unsigned op);
 
-  bool& InitActivityDone() { return init_activity_done_; }
+  hipRegisterAsyncActivityCallback_t* RegisterAsyncActivityCallback;
+  hipRemoveAsyncActivityCallback_t* RemoveAsyncActivityCallback;
+  hipGetOpName_t* GetOpName;
 
  protected:
   void init(Loader* loader) {
@@ -266,15 +274,12 @@ class HipApi {
     GetStreamDeviceId = loader->GetFun<GetStreamDeviceId_t>("hipGetStreamDeviceId");
     ApiName = loader->GetFun<ApiName_t>("hipApiName");
 
-    InitActivityCallback =
-        loader->GetFun<hipInitAsyncActivityCallback_t>("hipInitActivityCallback");
-    EnableActivityCallback =
-        loader->GetFun<hipEnableAsyncActivityCallback_t>("hipEnableActivityCallback");
+    RegisterAsyncActivityCallback =
+        loader->GetFun<hipRegisterAsyncActivityCallback_t>("hipRegisterAsyncActivityCallback");
+    RemoveAsyncActivityCallback =
+        loader->GetFun<hipRemoveAsyncActivityCallback_t>("hipRemoveAsyncActivityCallback");
     GetOpName = loader->GetFun<hipGetOpName_t>("hipGetCmdName");
   }
-
- private:
-  bool init_activity_done_ = false;
 };
 #endif
 

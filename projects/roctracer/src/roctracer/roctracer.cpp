@@ -698,14 +698,9 @@ static void roctracer_enable_activity_fun(roctracer_domain_t domain, uint32_t op
       RocpLoader::Instance();
       break;
     case ACTIVITY_DOMAIN_HIP_OPS: {
-      if (!HipLoader::Instance().Enabled()) break;
-      std::lock_guard lock(hip_activity_mutex);
-
-      if (!HipLoader::Instance().InitActivityDone()) {
-        HipLoader::Instance().InitActivityCallback((void*)HIP_AsyncActivityCallback, pool);
-        HipLoader::Instance().InitActivityDone() = true;
-      }
-      if (!HipLoader::Instance().EnableActivityCallback(op, true))
+      if (HipLoader::Instance().Enabled() &&
+          HipLoader::Instance().RegisterAsyncActivityCallback(op, (void*)HIP_AsyncActivityCallback,
+                                                              pool) != hipSuccess)
         FATAL_LOGGING("HIP::EnableActivityCallback error");
       break;
     }
@@ -800,7 +795,7 @@ static void roctracer_disable_activity_fun(roctracer_domain_t domain, uint32_t o
       break;
     case ACTIVITY_DOMAIN_HIP_OPS: {
       if (HipLoader::Instance().Enabled() &&
-          !HipLoader::Instance().EnableActivityCallback(op, false))
+          HipLoader::Instance().RemoveAsyncActivityCallback(op) != hipSuccess)
         FATAL_LOGGING("HIP::EnableActivityCallback(nullptr) error, op(" << op << ")");
       break;
     }
