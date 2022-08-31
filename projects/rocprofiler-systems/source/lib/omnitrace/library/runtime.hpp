@@ -117,11 +117,39 @@ struct scoped_thread_state
     scoped_thread_state(ThreadState _v) { push_thread_state(_v); }
     ~scoped_thread_state() { pop_thread_state(); }
 };
+
+// query current value
+bool
+sampling_enabled_on_child_threads();
+
+// use this to disable sampling in a region (e.g. right before thread creation)
+bool
+push_enable_sampling_on_child_threads(bool _v);
+
+// use this to restore previous setting
+bool
+pop_enable_sampling_on_child_threads();
+
+// make sure every newly created thead starts with this value
+void
+set_sampling_on_all_future_threads(bool _v);
+
+struct scoped_child_sampling
+{
+    scoped_child_sampling(bool _v) { push_enable_sampling_on_child_threads(_v); }
+    ~scoped_child_sampling() { pop_enable_sampling_on_child_threads(); }
+};
 }  // namespace omnitrace
 
 #define OMNITRACE_SCOPED_THREAD_STATE(STATE)                                             \
-    ::omnitrace::scoped_thread_state OMNITRACE_VARIABLE(                                 \
-        OMNITRACE_VAR_NAME_COMBINE(scoped_thread_state_, __LINE__))                      \
+    ::omnitrace::scoped_thread_state OMNITRACE_VARIABLE(_scoped_thread_state_, __LINE__) \
     {                                                                                    \
         ::omnitrace::STATE                                                               \
+    }
+
+#define OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(VALUE)                                \
+    ::omnitrace::scoped_child_sampling OMNITRACE_VARIABLE(_scoped_child_sampling_,       \
+                                                          __LINE__)                      \
+    {                                                                                    \
+        VALUE                                                                            \
     }

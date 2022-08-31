@@ -22,7 +22,6 @@
 
 #include "library/components/pthread_create_gotcha.hpp"
 #include "library/components/category_region.hpp"
-#include "library/components/pthread_gotcha.hpp"
 #include "library/components/roctracer.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
@@ -213,9 +212,8 @@ pthread_create_gotcha::wrapper::operator()() const
         if(m_enable_sampling)
         {
             _is_sampling = true;
-            pthread_gotcha::push_enable_sampling_on_child_threads(false);
+            OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
             _signals = sampling::setup();
-            pthread_gotcha::pop_enable_sampling_on_child_threads();
             sampling::unblock_signals();
         }
     }
@@ -336,7 +334,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto        _active       = (get_state() == ::omnitrace::State::Active && !_disabled);
     auto        _coverage     = (get_mode() == Mode::Coverage);
     auto        _use_sampling = get_use_sampling();
-    auto        _sample_child = pthread_gotcha::sampling_enabled_on_child_threads();
+    auto        _sample_child = sampling_enabled_on_child_threads();
     auto        _tid          = utility::get_thread_index();
     auto        _use_bundle   = (_active && !_coverage);
     const auto& _info = thread_info::init(!_active || !_sample_child || _disabled);

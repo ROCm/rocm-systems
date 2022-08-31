@@ -92,6 +92,42 @@ get_available_perfetto_categories()
     return _v;
 }
 
+template <typename Tp = int64_t>
+std::set<Tp>
+parse_numeric_range(std::string _input_string, const std::string& _label)
+{
+    for(auto& itr : _input_string)
+        itr = tolower(itr);
+    auto _result = std::set<Tp>{};
+    for(const auto& _v : tim::delimit(_input_string, ",; \t"))
+    {
+        if(_v.find_first_not_of("0123456789-") != std::string::npos)
+        {
+            OMNITRACE_VERBOSE_F(
+                0,
+                "Invalid %s specification. Only numerical values (e.g., 0) or "
+                "ranges (e.g., 0-7) are permitted. Ignoring %s...",
+                _label.c_str(), _v.c_str());
+            continue;
+        }
+        if(_v.find('-') != std::string::npos)
+        {
+            auto _vv = tim::delimit(_v, "-");
+            OMNITRACE_CONDITIONAL_THROW(
+                _vv.size() != 2,
+                "Invalid %s range specification: %s. Required format N-M, e.g. 0-4",
+                _label.c_str(), _v.c_str());
+            for(int64_t i = std::stol(_vv.at(0)); i <= std::stol(_vv.at(1)); ++i)
+                _result.emplace(i);
+        }
+        else
+        {
+            _result.emplace(std::stol(_v));
+        }
+    }
+    return _result;
+}
+
 #define OMNITRACE_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)        \
     [&]() {                                                                              \
         auto _ret = _config->insert<TYPE, TYPE>(                                         \
@@ -334,11 +370,20 @@ configure_settings(bool _init)
         "delivered. Defaults to OMNITRACE_SAMPLING_DELAY when <= 0.0",
         -1.0, "sampling", "advanced");
 
+    OMNITRACE_CONFIG_SETTING(double, "OMNITRACE_SAMPLING_DURATION",
+                             "If > 0.0, time (in seconds) to sample before stopping", 0.0,
+                             "sampling", "process_sampling");
+
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_PROCESS_SAMPLING_FREQ",
         "Number of measurements per second when OMNITTRACE_USE_PROCESS_SAMPLING=ON. If "
         "set to zero, uses OMNITRACE_SAMPLING_FREQ value",
         0.0, "process_sampling");
+
+    OMNITRACE_CONFIG_SETTING(double, "OMNITRACE_PROCESS_SAMPLING_DURATION",
+                             "If > 0.0, time (in seconds) to sample before stopping. If "
+                             "less than zero, uses OMNITRACE_SAMPLING_DURATION",
+                             -1.0, "sampling", "process_sampling");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_SAMPLING_CPUS",
@@ -358,6 +403,29 @@ configure_settings(bool _init)
         "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies "
         "'all' and 'none' suppresses all GPU sampling",
         std::string{ "all" }, "rocm_smi", "rocm", "process_sampling");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_SAMPLING_TIDS",
+        "Limit call-stack sampling to specific thread IDs, starting at zero for the main "
+        "thread. Be aware that some libraries, such as ROCm may create additional "
+        "threads which increment the TID count. However, no threads started by omnitrace "
+        "will increment the TID count. Values should be separated by commas and can be "
+        "explicit or ranges, e.g. 0,1,5-8. An empty value implies all TIDs.",
+        std::string{}, "sampling", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_SAMPLING_CPUTIME_TIDS",
+        "Same as OMNITRACE_SAMPLING_TIDS but applies specifically to samplers whose "
+        "timers are based on the CPU-time. This is useful when both "
+        "OMNITRACE_SAMPLING_CPUTIME=ON and OMNITRACE_SAMPLING_REALTIME=ON",
+        std::string{}, "sampling", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_SAMPLING_REALTIME_TIDS",
+        "Same as OMNITRACE_SAMPLING_TIDS but applies specifically to samplers whose "
+        "timers are based on the real (wall) time. This is useful when both "
+        "OMNITRACE_SAMPLING_CPUTIME=ON and OMNITRACE_SAMPLING_REALTIME=ON",
+        std::string{}, "sampling", "advanced");
 
     auto _backend = tim::get_env_choice<std::string>(
         "OMNITRACE_PERFETTO_BACKEND",
@@ -480,7 +548,7 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_PERFETTO_BUFFER_SIZE_KB",
                              "Size of perfetto buffer (in KB)", size_t{ 1024000 },
-                             "perfetto", "data", "advanced");
+                             "perfetto", "data");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_PERFETTO_COMBINE_TRACES",
                              "Combine Perfetto traces. If not explicitly set, it will "
@@ -695,9 +763,13 @@ configure_settings(bool _init)
         tim::delimit(_config->get<std::string>("OMNITRACE_CONFIG_FILE"), ";:"))
     {
         if(_config->get_suppress_config()) continue;
+
         OMNITRACE_BASIC_VERBOSE(1, "Reading config file %s\n", itr.c_str());
         _config->read(itr);
-        if(_config->get<bool>("OMNITRACE_CI") && _main_proc)
+
+        if(_main_proc &&
+           ((_config->get<bool>("OMNITRACE_CI") && settings::verbose() >= 0) ||
+            settings::verbose() >= 1 || settings::debug()))
         {
             std::ifstream     _in{ itr };
             std::stringstream _iss{};
@@ -709,7 +781,7 @@ configure_settings(bool _init)
             }
             if(!_iss.str().empty())
             {
-                OMNITRACE_BASIC_PRINT("config file '%s':\n%s\n", itr.c_str(),
+                OMNITRACE_BASIC_PRINT("config file '%s':\n%s", itr.c_str(),
                                       _iss.str().c_str());
             }
         }
@@ -1753,11 +1825,42 @@ get_sampling_real_delay()
     return _val;
 }
 
+double
+get_sampling_duration()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_DURATION");
+    return static_cast<tim::tsettings<double>&>(*_v->second).get();
+}
+
 std::string
 get_sampling_cpus()
 {
     static auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
+std::set<int64_t>
+get_sampling_tids()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_TIDS");
+    return parse_numeric_range<>(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs");
+}
+
+std::set<int64_t>
+get_sampling_cpu_tids()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUTIME_TIDS");
+    return parse_numeric_range<>(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs");
+}
+
+std::set<int64_t>
+get_sampling_real_tids()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME_TIDS");
+    return parse_numeric_range<>(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs");
 }
 
 int64_t
@@ -1775,6 +1878,13 @@ get_process_sampling_freq()
         std::min<double>(static_cast<tim::tsettings<double>&>(*_v->second).get(), 1000.0);
     if(_val < 1.0e-9) return get_sampling_freq();
     return _val;
+}
+
+double
+get_process_sampling_duration()
+{
+    static auto _v = get_config()->find("OMNITRACE_PROCESS_SAMPLING_DURATION");
+    return static_cast<tim::tsettings<double>&>(*_v->second).get();
 }
 
 std::string

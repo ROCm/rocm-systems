@@ -314,8 +314,7 @@ if(OMNITRACE_BUILD_DYNINST)
                 TARGETS ${_LIB}
                 DESTINATION ${CMAKE_INSTALL_LIBDIR}/omnitrace
                 COMPONENT dyninst
-                PUBLIC_HEADER DESTINATION ${PROJECT_BINARY_DIR}/.discard/omnitrace/include
-                )
+                PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/omnitrace/dyninst)
         endif()
     endforeach()
 

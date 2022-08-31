@@ -33,12 +33,12 @@
 #include "library/rocm_smi.hpp"
 #include "library/common.hpp"
 #include "library/components/fwd.hpp"
-#include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
 #include "library/debug.hpp"
 #include "library/gpu.hpp"
 #include "library/perfetto.hpp"
+#include "library/runtime.hpp"
 #include "library/state.hpp"
 #include "library/thread_info.hpp"
 
@@ -328,7 +328,7 @@ setup()
 
     if(is_initialized() || !get_use_rocm_smi()) return;
 
-    pthread_gotcha::push_enable_sampling_on_child_threads(false);
+    OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     // assign the data value to determined by rocm-smi
     data::device_count = device_count();
@@ -402,8 +402,6 @@ setup()
                           _e.what());
         data::device_list = {};
     }
-
-    pthread_gotcha::pop_enable_sampling_on_child_threads();
 }
 
 void

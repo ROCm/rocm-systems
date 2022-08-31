@@ -167,7 +167,7 @@ extern "C"
         if(!tim::settings::enabled()) return true;
 
         roctracer_is_init() = true;
-        pthread_gotcha::push_enable_sampling_on_child_threads(false);
+        OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
         OMNITRACE_BASIC_VERBOSE_F(1 || rocm::on_load_trace, "Loading ROCm tooling...\n");
 
         tim::consume_parameters(table, runtime_version, failed_tool_count,
@@ -308,7 +308,6 @@ extern "C"
                                "failed! OMNITRACE_ROCPROFILER_LIBRARY=%s\n",
                                _rocprof.filename.c_str());
         }
-        pthread_gotcha::pop_enable_sampling_on_child_threads();
 
         OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Loading... %s\n",
                                   (_success) ? "Done" : "Failed");

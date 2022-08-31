@@ -22,7 +22,6 @@
 
 #include "library/components/pthread_mutex_gotcha.hpp"
 #include "library/components/category_region.hpp"
-#include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
 #include "library/debug.hpp"
@@ -293,7 +292,7 @@ pthread_mutex_gotcha::is_disabled()
 {
     return (get_state() != ::omnitrace::State::Active ||
             get_thread_state() != ThreadState::Enabled ||
-            (get_use_sampling() && !pthread_gotcha::sampling_enabled_on_child_threads()));
+            (get_use_sampling() && !sampling_enabled_on_child_threads()));
 }
 }  // namespace component
 }  // namespace omnitrace

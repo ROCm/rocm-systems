@@ -42,22 +42,7 @@ struct pthread_gotcha : tim::component::base<pthread_gotcha, void>
     static void configure();
     static void shutdown();
 
-    // query current value
-    static bool sampling_enabled_on_child_threads();
-
-    // use this to disable sampling in a region (e.g. right before thread creation)
-    static bool push_enable_sampling_on_child_threads(bool _v);
-
-    // use this to restore previous setting
-    static bool pop_enable_sampling_on_child_threads();
-
-    // make sure every newly created thead starts with this value
-    static void set_sampling_on_all_future_threads(bool _v);
-
     static void start();
     static void stop();
-
-private:
-    static bool& sampling_on_child_threads();
 };
 }  // namespace omnitrace

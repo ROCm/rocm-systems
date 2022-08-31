@@ -52,6 +52,26 @@
 
 namespace omnitrace
 {
+namespace
+{
+auto&
+get_sampling_on_child_threads_history(int64_t _idx = utility::get_thread_index())
+{
+    static auto _v = utility::get_filled_array<OMNITRACE_MAX_THREADS>(
+        []() { return utility::get_reserved_vector<bool>(32); });
+    return _v.at(_idx);
+}
+
+bool&
+sampling_on_child_threads()
+{
+    static thread_local bool _v = get_sampling_on_child_threads_history().empty()
+                                      ? false
+                                      : get_sampling_on_child_threads_history().back();
+    return _v;
+}
+}  // namespace
+
 int
 get_realtime_signal()
 {
@@ -253,5 +273,41 @@ pop_thread_state()
         _hist.pop_back();
     }
     return get_thread_state();
+}
+
+bool
+sampling_enabled_on_child_threads()
+{
+    return sampling_on_child_threads();
+}
+
+bool
+push_enable_sampling_on_child_threads(bool _v)
+{
+    bool _last                  = sampling_on_child_threads();
+    sampling_on_child_threads() = _v;
+    auto& _hist                 = get_sampling_on_child_threads_history();
+    _hist.emplace_back(_last);
+    return _last;
+}
+
+bool
+pop_enable_sampling_on_child_threads()
+{
+    auto& _hist = get_sampling_on_child_threads_history();
+    if(!_hist.empty())
+    {
+        bool _restored = _hist.back();
+        _hist.pop_back();
+        sampling_on_child_threads() = _restored;
+    }
+    return sampling_on_child_threads();
+}
+
+void
+set_sampling_on_all_future_threads(bool _v)
+{
+    for(size_t i = 0; i < max_supported_threads; ++i)
+        get_sampling_on_child_threads_history(i).emplace_back(_v);
 }
 }  // namespace omnitrace

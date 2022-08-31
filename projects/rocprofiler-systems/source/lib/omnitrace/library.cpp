@@ -337,27 +337,26 @@ omnitrace_init_tooling_hidden()
         if(get_state() > State::Active) return;
         if(get_use_process_sampling())
         {
-            pthread_gotcha::push_enable_sampling_on_child_threads(false);
+            OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
             process_sampler::setup();
-            pthread_gotcha::pop_enable_sampling_on_child_threads();
         }
         if(get_use_sampling())
         {
-            pthread_gotcha::push_enable_sampling_on_child_threads(false);
+            OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
             sampling::setup();
-            pthread_gotcha::pop_enable_sampling_on_child_threads();
-            pthread_gotcha::push_enable_sampling_on_child_threads(get_use_sampling());
+        }
+        if(get_use_sampling())
+        {
+            push_enable_sampling_on_child_threads(get_use_sampling());
             sampling::unblock_signals();
         }
         get_main_bundle()->start();
         set_state(State::Active);  // set to active as very last operation
     } };
 
-    if(get_use_sampling())
-    {
-        pthread_gotcha::push_enable_sampling_on_child_threads(false);
-        sampling::block_signals();
-    }
+    OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+
+    if(get_use_sampling()) sampling::block_signals();
 
     if(get_use_critical_trace())
     {
@@ -426,8 +425,8 @@ omnitrace_init_tooling_hidden()
 
         for(const auto& itr : _disabled_categories)
         {
-            OMNITRACE_VERBOSE(1, "Disabling perfetto track event category: %s\n",
-                              itr.c_str());
+            OMNITRACE_VERBOSE_F(1, "Disabling perfetto track event category: %s\n",
+                                itr.c_str());
             track_event_cfg.add_disabled_categories(itr);
         }
 
@@ -581,6 +580,8 @@ omnitrace_finalize_hidden(void)
         return;
     }
 
+    if(get_verbose() >= 0 || get_debug()) fprintf(stderr, "\n");
+
     OMNITRACE_VERBOSE_F(0, "finalizing...\n");
     thread_info::set_stop(comp::wall_clock::record());
 
@@ -604,8 +605,8 @@ omnitrace_finalize_hidden(void)
 
     set_state(State::Finalized);
 
-    pthread_gotcha::push_enable_sampling_on_child_threads(false);
-    pthread_gotcha::set_sampling_on_all_future_threads(false);
+    push_enable_sampling_on_child_threads(false);
+    set_sampling_on_all_future_threads(false);
 
     auto _debug_init  = get_debug_finalize();
     auto _debug_value = get_debug();
@@ -613,8 +614,6 @@ omnitrace_finalize_hidden(void)
     scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
         if(_debug_init) config::set_setting_value("OMNITRACE_DEBUG", _debug_value);
     } };
-
-    OMNITRACE_DEBUG_F("\n");
 
     auto& _thread_bundle = thread_data<omnitrace_thread_bundle_t>::instance();
     if(_thread_bundle) _thread_bundle->stop();
@@ -713,7 +712,7 @@ omnitrace_finalize_hidden(void)
         comp::roctracer::shutdown();
 
         // join extra thread(s) used by roctracer
-        OMNITRACE_VERBOSE_F(1, "Waiting on roctracer tasks...\n");
+        OMNITRACE_VERBOSE_F(2, "Waiting on roctracer tasks...\n");
         tasking::join();
     }
 
@@ -734,10 +733,11 @@ omnitrace_finalize_hidden(void)
     // report the high-level metrics for the process
     if(get_main_bundle())
     {
+        if(get_verbose() >= 0 || get_debug()) fprintf(stderr, "\n");
         std::string _msg = JOIN("", *get_main_bundle());
         auto        _pos = _msg.find(">>>  ");
         if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-        OMNITRACE_PRINT("%s\n", _msg.c_str());
+        OMNITRACE_VERBOSE_F(0, "%s\n", _msg.c_str());
         OMNITRACE_DEBUG_F("Resetting main bundle...\n");
         get_main_bundle()->reset();
     }
@@ -754,9 +754,11 @@ omnitrace_finalize_hidden(void)
             std::string _msg = JOIN("", *itr);
             auto        _pos = _msg.find(">>>  ");
             if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-            OMNITRACE_VERBOSE(0, "%s\n", _msg.c_str());
+            OMNITRACE_VERBOSE_F(0, "%s\n", _msg.c_str());
         }
     }
+
+    if(get_verbose() >= 0 || get_debug()) fprintf(stderr, "\n");
 
     // ensure that all the MT instances are flushed
     if(get_use_sampling())
@@ -813,6 +815,16 @@ omnitrace_finalize_hidden(void)
         tasking::join();
     }
 
+    // shutdown tasking before timemory is finalized, especially the roctracer thread-pool
+    OMNITRACE_VERBOSE_F(1, "Shutting down thread-pools...\n");
+    tasking::shutdown();
+
+    if(get_use_code_coverage())
+    {
+        OMNITRACE_VERBOSE_F(1, "Post-processing the code coverage...\n");
+        coverage::post_process();
+    }
+
     bool _perfetto_output_error = false;
     if(get_use_perfetto() && !is_system_backend())
     {
@@ -821,11 +833,7 @@ omnitrace_finalize_hidden(void)
         OMNITRACE_CI_THROW(tracing_session == nullptr,
                            "Null pointer to the tracing session");
 
-        if(get_verbose() >= 0) fprintf(stderr, "\n");
-        if(get_verbose() >= 0 || get_debug())
-            fprintf(stderr, "%s[%s][%s]|%i> Flushing perfetto...%s\n",
-                    tim::log::color::info(), TIMEMORY_PROJECT_NAME, OMNITRACE_FUNCTION,
-                    dmp::rank(), tim::log::color::end());
+        OMNITRACE_VERBOSE_F(0, "Finalizing perfetto...\n");
 
         // Make sure the last event is closed for this example.
         perfetto::TrackEvent::Flush();
@@ -903,16 +911,6 @@ omnitrace_finalize_hidden(void)
                                 "trace data is empty. File '%s' will not be written...\n",
                                 get_perfetto_output_filename().c_str());
         }
-    }
-
-    // shutdown tasking before timemory is finalized, especially the roctracer thread-pool
-    OMNITRACE_VERBOSE_F(1, "Shutting down thread-pools...\n");
-    tasking::shutdown();
-
-    OMNITRACE_VERBOSE_F(1, "Shutting down thread-pools...\n");
-    if(get_use_code_coverage())
-    {
-        coverage::post_process();
     }
 
     tim::manager::instance()->add_metadata([](auto& ar) {

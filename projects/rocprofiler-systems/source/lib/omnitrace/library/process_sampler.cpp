@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "library/process_sampler.hpp"
-#include "library/components/pthread_gotcha.hpp"
 #include "library/config.hpp"
 #include "library/cpu_freq.hpp"
 #include "library/debug.hpp"
@@ -86,10 +85,16 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
         itr->config();
 
     OMNITRACE_VERBOSE(
-        1, "Thread sampler polling at an interval of %f seconds...\n",
+        1, "Background process sampling polling at an interval of %f seconds...\n",
         std::chrono::duration_cast<std::chrono::duration<double>>(_interval).count());
 
+    auto _duration = config::get_process_sampling_duration();
+    if(_duration < 0.0) _duration = config::get_sampling_duration();
+    bool _has_duration = (_duration > 0.0);
+
     auto _now = std::chrono::steady_clock::now();
+    auto _end =
+        _now + std::chrono::nanoseconds{ static_cast<uint64_t>(_duration * units::sec) };
     while(_state && _state->load() != State::Finalized && get_state() != State::Finalized)
     {
         std::this_thread::sleep_until(_now);
@@ -100,11 +105,22 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
         for(auto& itr : instances)
             itr->sample();
         get_sampler_is_sampling().store(false);
+        if(_has_duration && _now >= _end) break;
         while(_now < std::chrono::steady_clock::now())
             _now += _interval;
     }
+
     // ensure this is always false
     get_sampler_is_sampling().store(false);
+
+    if(_has_duration && _now >= _end && get_state() != State::Finalized)
+    {
+        OMNITRACE_VERBOSE(
+            1,
+            "Background process sampling duration of %f seconds has elapsed. "
+            "Shutting down process sampling...\n",
+            _duration);
+    }
 
     OMNITRACE_CONDITIONAL_BASIC_PRINT(get_debug(),
                                       "Thread sampler polling completed...\n");
@@ -155,12 +171,12 @@ sampler::setup()
     auto      _fut   = _prom.get_future();
     polling_finished = std::make_unique<promise_t>();
 
+    OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+
     set_state(State::PreInit);
-    pthread_gotcha::push_enable_sampling_on_child_threads(false);
     get_thread() = std::make_unique<std::thread>(&poll<msec_t>, &get_sampler_state(),
                                                  msec_t{ _msec_freq }, &_prom);
     _fut.wait();
-    pthread_gotcha::pop_enable_sampling_on_child_threads();
 
     set_state(State::Active);
 }

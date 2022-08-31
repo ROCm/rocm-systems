@@ -160,8 +160,9 @@ write_perfetto_counter_track(index&& _idx, Args... _args)
 void
 post_process()
 {
-    OMNITRACE_PRINT("Post-processing %zu cpu frequency and memory usage entries...\n",
-                    cpu_data.size());
+    OMNITRACE_VERBOSE(1,
+                      "Post-processing %zu cpu frequency and memory usage entries...\n",
+                      cpu_data.size());
     auto _process_frequencies = [](size_t _idx, size_t _offset) {
         using freq_track = perfetto_counter_track<cpu_freq_component>;
 
