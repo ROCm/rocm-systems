@@ -1334,7 +1334,7 @@ def showAllConcise(deviceList):
         print('ERROR: Cannot print JSON/CSV output for concise output')
         sys.exit(1)
     printLogSpacer(' Concise Info ')
-    header = ['GPU', 'Temp', 'AvgPwr', 'SCLK', 'MCLK', 'Fan', 'Perf', 'PwrCap', 'VRAM%', 'GPU%']
+    header = ['GPU', 'Temp (DieEdge)', 'AvgPwr', 'SCLK', 'MCLK', 'Fan', 'Perf', 'PwrCap', 'VRAM%', 'GPU%']
     head_widths = [len(head) + 2 for head in header]
     values = {}
     for device in deviceList:
