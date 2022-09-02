@@ -34,17 +34,18 @@
 #include <atomic>
 #include <mutex>
 #include <stack>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
 #include "correlation_id.h"
 #include "debug.h"
-#include "journal.h"
-#include "loader.h"
-#include "hsa_support.h"
-#include "memory_pool.h"
 #include "exception.h"
+#include "hsa_support.h"
+#include "loader.h"
 #include "logger.h"
+#include "memory_pool.h"
+#include "registration_table.h"
 
 #define API_METHOD_PREFIX                                                                          \
   roctracer_status_t err = ROCTRACER_STATUS_SUCCESS;                                               \
@@ -74,125 +75,37 @@ static inline uint32_t GetTid() {
   return tid;
 }
 
+using namespace roctracer;
+
+namespace {
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Internal library methods
 //
-namespace roctracer {
 
-namespace ext_support {
 roctracer_start_cb_t roctracer_start_cb = nullptr;
 roctracer_stop_cb_t roctracer_stop_cb = nullptr;
-}  // namespace ext_support
-
-struct CallbackJournalData {
-  roctracer_rtapi_callback_t callback;
-  void* user_data;
-};
-static Journal<CallbackJournalData> cb_journal;
-
-struct ActivityJournalData {
-  roctracer_pool_t* pool;
-};
-static Journal<ActivityJournalData> act_journal;
 
 roctracer_status_t GetExcStatus(const std::exception& e) {
   const ApiError* roctracer_exc_ptr = dynamic_cast<const ApiError*>(&e);
   return (roctracer_exc_ptr) ? roctracer_exc_ptr->status() : ROCTRACER_STATUS_ERROR;
 }
 
-std::mutex hip_activity_mutex;
+std::mutex registration_mutex;
 
-enum { API_CB_MASK = 0x1, API_ACT_MASK = 0x2 };
+// Memory pool routines and primitives
+std::recursive_mutex memory_pool_mutex;
+MemoryPool* default_memory_pool = nullptr;
 
-class HIPActivityCallbackTracker {
- public:
-  uint32_t enable_check(uint32_t op, uint32_t mask) { return data_[op] |= mask; }
-  uint32_t disable_check(uint32_t op, uint32_t mask) { return data_[op] &= ~mask; }
+}  // namespace
 
- private:
-  std::unordered_map<uint32_t, uint32_t> data_;
-};
-
-static HIPActivityCallbackTracker hip_act_cb_tracker;
-
-void HIP_ApiCallback(uint32_t op_id, roctracer_record_t* record, void* callback_data, void* arg) {
-  hip_api_data_t* data = static_cast<hip_api_data_t*>(callback_data);
-  MemoryPool* pool = static_cast<MemoryPool*>(arg);
-
-  if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    // Generate a new correlation ID.
-    uint64_t correlation_id = CorrelationIdPush();
-    data->correlation_id = correlation_id;
-
-    if (pool != nullptr) {
-      // Filing record info
-      record->domain = ACTIVITY_DOMAIN_HIP_API;
-      record->kind = 0;
-      record->op = op_id;
-      record->process_id = GetPid();
-      record->thread_id = GetTid();
-      record->begin_ns = hsa_support::timestamp_ns();
-      record->correlation_id = correlation_id;
-    }
-  } else {
-    if (pool != nullptr) {
-      record->end_ns = hsa_support::timestamp_ns();
-
-      if (auto external_id = ExternalCorrelationId()) {
-        roctracer_record_t ext_record{};
-        ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
-        ext_record.op = ACTIVITY_EXT_OP_EXTERN_ID;
-        ext_record.correlation_id = record->correlation_id;
-        ext_record.external_id = *external_id;
-        // Write the external correlation id record directly followed by the activity record.
-        pool->Write(std::array<roctracer_record_t, 2>{ext_record, *record});
-      } else {
-        // Write record to the buffer.
-        pool->Write(*record);
-      }
-    }
-    CorrelationIdPop();
-  }
-}
-
-void HIP_AsyncActivityCallback(uint32_t op_id, void* record_ptr, void* arg) {
-  MemoryPool* pool = reinterpret_cast<MemoryPool*>(arg);
-  roctracer_record_t& record = *reinterpret_cast<roctracer_record_t*>(record_ptr);
-  record.domain = ACTIVITY_DOMAIN_HIP_OPS;
-
-  // If the record is for a kernel dispatch, write the kernel name in the pool's data,
-  // and make the record point to it. Older HIP runtimes do not provide a kernel
-  // name, so record.kernel_name might be null.
-  if (record.op == HIP_OP_ID_DISPATCH && record.kernel_name != nullptr)
-    pool->Write(record, record.kernel_name, strlen(record.kernel_name) + 1,
-                [](auto& record, const void* data) {
-                  record.kernel_name = static_cast<const char*>(data);
-                });
-  else
-    pool->Write(record);
-}
+namespace roctracer {
 
 // Logger routines and primitives
 util::Logger::mutex_t util::Logger::mutex_;
 std::atomic<util::Logger*> util::Logger::instance_{};
 
-// Memory pool routines and primitives
-MemoryPool* default_memory_pool = nullptr;
-std::recursive_mutex memory_pool_mutex;
-
-// Stop status routines and primitives
-unsigned stop_status_value = 0;
-std::mutex stop_status_mutex;
-unsigned set_stopped(unsigned val) {
-  std::lock_guard lock(stop_status_mutex);
-  const unsigned ret = (stop_status_value ^ val);
-  stop_status_value = val;
-  return ret;
-}
-
 }  // namespace roctracer
-
-using namespace roctracer;
 
 LOADER_INSTANTIATE();
 
@@ -227,7 +140,7 @@ ROCTRACER_API const char* roctracer_op_string(uint32_t domain, uint32_t op, uint
     case ACTIVITY_DOMAIN_EXT_API:
       return "EXT_API";
     default:
-      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
+      throw roctracer::ApiError(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID");
   }
   API_METHOD_CATCH(nullptr)
 }
@@ -261,93 +174,348 @@ ROCTRACER_API roctracer_status_t roctracer_op_code(uint32_t domain, const char* 
   API_METHOD_SUFFIX
 }
 
-static inline uint32_t get_op_begin(uint32_t domain) {
+namespace {
+
+template <activity_domain_t> struct DomainTraits;
+
+template <> struct DomainTraits<ACTIVITY_DOMAIN_HIP_API> {
+  using ApiData = hip_api_data_t;
+  using OperationId = hip_api_id_t;
+  static constexpr size_t kOpIdBegin = HIP_API_ID_FIRST;
+  static constexpr size_t kOpIdEnd = HIP_API_ID_LAST + 1;
+};
+
+template <> struct DomainTraits<ACTIVITY_DOMAIN_HSA_API> {
+  using ApiData = hsa_api_data_t;
+  using OperationId = hsa_api_id_t;
+  static constexpr size_t kOpIdBegin = 0;
+  static constexpr size_t kOpIdEnd = HSA_API_ID_NUMBER;
+};
+
+template <> struct DomainTraits<ACTIVITY_DOMAIN_ROCTX> {
+  using ApiData = roctx_api_data_t;
+  using OperationId = roctx_api_id_t;
+  static constexpr size_t kOpIdBegin = 0;
+  static constexpr size_t kOpIdEnd = ROCTX_API_ID_NUMBER;
+};
+
+template <> struct DomainTraits<ACTIVITY_DOMAIN_HIP_OPS> {
+  using OperationId = hip_op_id_t;
+  static constexpr size_t kOpIdBegin = 0;
+  static constexpr size_t kOpIdEnd = HIP_OP_ID_NUMBER;
+};
+
+template <> struct DomainTraits<ACTIVITY_DOMAIN_HSA_OPS> {
+  using OperationId = hsa_op_id_t;
+  static constexpr size_t kOpIdBegin = 0;
+  static constexpr size_t kOpIdEnd = HSA_OP_ID_NUMBER;
+};
+
+template <> struct DomainTraits<ACTIVITY_DOMAIN_HSA_EVT> {
+  using ApiData = hsa_evt_data_t;
+  using OperationId = hsa_evt_id_t;
+  static constexpr size_t kOpIdBegin = 0;
+  static constexpr size_t kOpIdEnd = HSA_EVT_ID_NUMBER;
+};
+
+constexpr uint32_t get_op_begin(activity_domain_t domain) {
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS:
-      return 0;
+      return DomainTraits<ACTIVITY_DOMAIN_HSA_OPS>::kOpIdBegin;
     case ACTIVITY_DOMAIN_HSA_API:
-      return 0;
+      return DomainTraits<ACTIVITY_DOMAIN_HSA_API>::kOpIdBegin;
     case ACTIVITY_DOMAIN_HSA_EVT:
-      return 0;
+      return DomainTraits<ACTIVITY_DOMAIN_HSA_EVT>::kOpIdBegin;
     case ACTIVITY_DOMAIN_HIP_OPS:
-      return 0;
+      return DomainTraits<ACTIVITY_DOMAIN_HIP_OPS>::kOpIdBegin;
     case ACTIVITY_DOMAIN_HIP_API:
-      return HIP_API_ID_FIRST;
+      return DomainTraits<ACTIVITY_DOMAIN_HIP_API>::kOpIdBegin;
+    case ACTIVITY_DOMAIN_ROCTX:
+      return DomainTraits<ACTIVITY_DOMAIN_ROCTX>::kOpIdBegin;
     case ACTIVITY_DOMAIN_EXT_API:
       return 0;
-    case ACTIVITY_DOMAIN_ROCTX:
-      return 0;
     default:
-      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
+      throw roctracer::ApiError(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID");
   }
-  return 0;
 }
 
-static inline uint32_t get_op_end(uint32_t domain) {
+constexpr uint32_t get_op_end(activity_domain_t domain) {
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_OPS:
-      return HSA_OP_ID_NUMBER;
+      return DomainTraits<ACTIVITY_DOMAIN_HSA_OPS>::kOpIdEnd;
     case ACTIVITY_DOMAIN_HSA_API:
-      return HSA_API_ID_NUMBER;
+      return DomainTraits<ACTIVITY_DOMAIN_HSA_API>::kOpIdEnd;
     case ACTIVITY_DOMAIN_HSA_EVT:
-      return HSA_EVT_ID_NUMBER;
+      return DomainTraits<ACTIVITY_DOMAIN_HSA_EVT>::kOpIdEnd;
     case ACTIVITY_DOMAIN_HIP_OPS:
-      return HIP_OP_ID_NUMBER;
+      return DomainTraits<ACTIVITY_DOMAIN_HIP_OPS>::kOpIdEnd;
     case ACTIVITY_DOMAIN_HIP_API:
-      return HIP_API_ID_LAST + 1;
-    case ACTIVITY_DOMAIN_EXT_API:
-      return 0;
+      return DomainTraits<ACTIVITY_DOMAIN_HIP_API>::kOpIdEnd;
     case ACTIVITY_DOMAIN_ROCTX:
-      return ROCTX_API_ID_NUMBER;
+      return DomainTraits<ACTIVITY_DOMAIN_ROCTX>::kOpIdEnd;
+    case ACTIVITY_DOMAIN_EXT_API:
+      return get_op_begin(ACTIVITY_DOMAIN_EXT_API);
     default:
-      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
+      throw roctracer::ApiError(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID");
   }
-  return 0;
 }
 
-// Enable runtime API callbacks
-static void roctracer_enable_callback_fun(roctracer_domain_t domain, uint32_t op,
-                                          roctracer_rtapi_callback_t callback, void* user_data) {
+std::atomic<bool> stopped_status{false};
+
+struct IsStopped {
+  bool operator()() const { return stopped_status.load(std::memory_order_relaxed); }
+};
+
+struct NeverStopped {
+  constexpr bool operator()() { return false; }
+};
+
+using UserCallback = std::pair<activity_rtapi_callback_t, void*>;
+
+template <activity_domain_t domain, typename IsStopped>
+using CallbackRegistrationTable =
+    util::RegistrationTable<UserCallback, DomainTraits<domain>::kOpIdEnd, IsStopped>;
+
+template <activity_domain_t domain, typename IsStopped>
+using ActivityRegistrationTable =
+    util::RegistrationTable<MemoryPool*, DomainTraits<domain>::kOpIdEnd, IsStopped>;
+
+template <activity_domain_t domain> struct ApiTracer {
+  using ApiData = typename DomainTraits<domain>::ApiData;
+  using OperationId = typename DomainTraits<domain>::OperationId;
+
+  struct TraceData {
+    ApiData api_data;                // API specific data (for example, function arguments).
+    uint64_t phase_enter_timestamp;  // timestamp when phase_enter was executed.
+    uint64_t phase_data;             // data that can be shared between phase_enter and phase_exit.
+
+    void (*phase_enter)(OperationId operation_id, TraceData* data);
+    void (*phase_exit)(OperationId operation_id, TraceData* data);
+  };
+
+  static void Exit(OperationId operation_id, TraceData* trace_data) {
+    if (auto pool = activity_table.Get(operation_id)) {
+      assert(trace_data != nullptr);
+      activity_record_t record{};
+
+      record.domain = domain;
+      record.op = operation_id;
+      record.correlation_id = trace_data->api_data.correlation_id;
+      record.begin_ns = trace_data->phase_enter_timestamp;
+      record.end_ns = hsa_support::timestamp_ns();
+      record.process_id = GetPid();
+      record.thread_id = GetTid();
+
+      if (auto external_id = ExternalCorrelationId()) {
+        roctracer_record_t ext_record{};
+        ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
+        ext_record.op = ACTIVITY_EXT_OP_EXTERN_ID;
+        ext_record.correlation_id = record.correlation_id;
+        ext_record.external_id = *external_id;
+        // Write the external correlation id record directly followed by the activity record.
+        (*pool)->Write(std::array<roctracer_record_t, 2>{ext_record, record});
+      } else {
+        // Write record to the buffer.
+        (*pool)->Write(record);
+      }
+    }
+    CorrelationIdPop();
+  }
+
+  static void Exit_UserCallback(OperationId operation_id, TraceData* trace_data) {
+    if (auto user_callback = callback_table.Get(operation_id)) {
+      assert(trace_data != nullptr);
+      trace_data->api_data.phase = ACTIVITY_API_PHASE_EXIT;
+      user_callback->first(domain, operation_id, &trace_data->api_data, user_callback->second);
+    }
+    Exit(operation_id, trace_data);
+  }
+
+  static void Enter_UserCallback(OperationId operation_id, TraceData* trace_data) {
+    if (auto user_callback = callback_table.Get(operation_id)) {
+      assert(trace_data != nullptr);
+      trace_data->api_data.phase = ACTIVITY_API_PHASE_ENTER;
+      user_callback->first(domain, operation_id, &trace_data->api_data, user_callback->second);
+      trace_data->phase_exit = Exit_UserCallback;
+    } else {
+      trace_data->phase_exit = Exit;
+    }
+  }
+
+  static int Enter(OperationId operation_id, TraceData* trace_data) {
+    bool callback_enabled = callback_table.Get(operation_id).has_value(),
+         activity_enabled = activity_table.Get(operation_id).has_value();
+    if (!callback_enabled && !activity_enabled) return -1;
+
+    if (trace_data != nullptr) {
+      // Generate a new correlation ID.
+      trace_data->api_data.correlation_id = CorrelationIdPush();
+
+      if (activity_enabled) {
+        trace_data->phase_enter_timestamp = hsa_support::timestamp_ns();
+        trace_data->phase_enter = nullptr;
+        trace_data->phase_exit = Exit;
+      }
+      if (callback_enabled) {
+        trace_data->phase_enter = Enter_UserCallback;
+        trace_data->phase_exit = [](OperationId, TraceData*) { fatal("should not reach here"); };
+      }
+    }
+    return 0;
+  }
+
+  static CallbackRegistrationTable<domain, IsStopped> callback_table;
+  static ActivityRegistrationTable<domain, IsStopped> activity_table;
+};
+
+template <activity_domain_t domain>
+CallbackRegistrationTable<domain, IsStopped> ApiTracer<domain>::callback_table;
+
+template <activity_domain_t domain>
+ActivityRegistrationTable<domain, IsStopped> ApiTracer<domain>::activity_table;
+
+using HIP_ApiTracer = ApiTracer<ACTIVITY_DOMAIN_HIP_API>;
+using HSA_ApiTracer = ApiTracer<ACTIVITY_DOMAIN_HSA_API>;
+
+CallbackRegistrationTable<ACTIVITY_DOMAIN_ROCTX, NeverStopped> roctx_api_callback_table;
+ActivityRegistrationTable<ACTIVITY_DOMAIN_HIP_OPS, IsStopped> hip_ops_activity_table;
+ActivityRegistrationTable<ACTIVITY_DOMAIN_HSA_OPS, IsStopped> hsa_ops_activity_table;
+CallbackRegistrationTable<ACTIVITY_DOMAIN_HSA_EVT, IsStopped> hsa_evt_callback_table;
+
+int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) {
   switch (domain) {
-    case ACTIVITY_DOMAIN_HSA_OPS:
     case ACTIVITY_DOMAIN_HSA_API:
-    case ACTIVITY_DOMAIN_HSA_EVT:
-      hsa_support::EnableCallback(domain, op, callback, user_data);
-      break;
+      return HSA_ApiTracer::Enter(static_cast<HSA_ApiTracer::OperationId>(operation_id),
+                                  static_cast<HSA_ApiTracer::TraceData*>(data));
+
+    case ACTIVITY_DOMAIN_HIP_API:
+      return HIP_ApiTracer::Enter(static_cast<HIP_ApiTracer::OperationId>(operation_id),
+                                  static_cast<HIP_ApiTracer::TraceData*>(data));
+
     case ACTIVITY_DOMAIN_HIP_OPS:
-      break;
-    case ACTIVITY_DOMAIN_HIP_API: {
-      if (!HipLoader::Instance().Enabled()) break;
-      std::lock_guard lock(hip_activity_mutex);
-
-      if (hipError_t err =
-              HipLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data);
-          err != hipSuccess)
-        fatal("HIP::RegisterApiCallback(%d) failed (err=%d)", op, err);
-
-      if ((hip_act_cb_tracker.enable_check(op, API_CB_MASK) & API_ACT_MASK) == 0) {
-        if (hipError_t err =
-                HipLoader::Instance().RegisterActivityCallback(op, (void*)HIP_ApiCallback, nullptr);
-            err != hipSuccess)
-          fatal("HIP::RegisterActivityCallback(%d) failed (err=%d)", op, err);
+      if (auto pool = hip_ops_activity_table.Get(operation_id)) {
+        if (auto record = static_cast<activity_record_t*>(data)) {
+          // If the record is for a kernel dispatch, write the kernel name in the pool's data,
+          // and make the record point to it. Older HIP runtimes do not provide a kernel
+          // name, so record.kernel_name might be null.
+          if (operation_id == HIP_OP_ID_DISPATCH && record->kernel_name != nullptr)
+            (*pool)->Write(*record, record->kernel_name, strlen(record->kernel_name) + 1,
+                           [](auto& record, const void* data) {
+                             record.kernel_name = static_cast<const char*>(data);
+                           });
+          else
+            (*pool)->Write(*record);
+        }
+        return 0;
       }
       break;
-    }
-    case ACTIVITY_DOMAIN_ROCTX: {
-      if (RocTxLoader::Instance().Enabled() &&
-          !RocTxLoader::Instance().RegisterApiCallback(op, (void*)callback, user_data))
-        fatal("ROCTX::RegisterApiCallback(%d) failed", op);
+
+    case ACTIVITY_DOMAIN_ROCTX:
+      if (auto user_callback = roctx_api_callback_table.Get(operation_id)) {
+        if (auto api_data = static_cast<DomainTraits<ACTIVITY_DOMAIN_ROCTX>::ApiData*>(data))
+          user_callback->first(ACTIVITY_DOMAIN_ROCTX, operation_id, api_data,
+                               user_callback->second);
+        return 0;
+      }
       break;
-    }
+
+    case ACTIVITY_DOMAIN_HSA_OPS:
+      if (auto pool = hsa_ops_activity_table.Get(operation_id)) {
+        if (auto record = static_cast<activity_record_t*>(data)) (*pool)->Write(*record);
+        return 0;
+      }
+      break;
+
+    case ACTIVITY_DOMAIN_HSA_EVT:
+      if (auto user_callback = hsa_evt_callback_table.Get(operation_id)) {
+        if (auto api_data = static_cast<DomainTraits<ACTIVITY_DOMAIN_HSA_EVT>::ApiData*>(data))
+          user_callback->first(ACTIVITY_DOMAIN_HSA_EVT, operation_id, api_data,
+                               user_callback->second);
+        return 0;
+      }
+      break;
+
+    default:
+      break;
+  }
+  return -1;
+}
+
+template <typename... Tables> struct RegistrationTableGroup {
+ private:
+  bool AllEmpty() const {
+    return std::apply([](auto&&... tables) { return (tables.IsEmpty() && ...); }, tables_);
+  }
+
+ public:
+  template <typename Functor1, typename Functor2>
+  RegistrationTableGroup(Functor1&& engage_tracer, Functor2&& disengage_tracer, Tables&... tables)
+      : engage_tracer_(std::forward<Functor1>(engage_tracer)),
+        disengage_tracer_(std::forward<Functor2>(disengage_tracer)),
+        tables_(tables...) {}
+
+  template <typename T, typename... Args>
+  void Register(T& table, uint32_t operation_id, Args... args) const {
+    if (AllEmpty()) engage_tracer_();
+    table.Register(operation_id, std::forward<Args>(args)...);
+  }
+
+  template <typename T> void Unregister(T& table, uint32_t operation_id) const {
+    table.Unregister(operation_id);
+    if (AllEmpty()) disengage_tracer_();
+  }
+
+ private:
+  const std::function<void()> engage_tracer_, disengage_tracer_;
+  const std::tuple<const Tables&...> tables_;
+};
+
+RegistrationTableGroup HSA_registration_group(
+    []() { hsa_support::RegisterTracerCallback(TracerCallback); },
+    []() { hsa_support::RegisterTracerCallback(nullptr); }, HSA_ApiTracer::callback_table,
+    HSA_ApiTracer::activity_table, hsa_ops_activity_table, hsa_evt_callback_table);
+
+RegistrationTableGroup HIP_registration_group(
+    []() { HipLoader::Instance().RegisterTracerCallback(TracerCallback); },
+    []() { HipLoader::Instance().RegisterTracerCallback(nullptr); }, HIP_ApiTracer::callback_table,
+    HIP_ApiTracer::activity_table, hip_ops_activity_table);
+
+RegistrationTableGroup ROCTX_registration_group(
+    []() { RocTxLoader::Instance().RegisterTracerCallback(TracerCallback); },
+    []() { RocTxLoader::Instance().RegisterTracerCallback(nullptr); }, roctx_api_callback_table);
+
+}  // namespace
+
+// Enable runtime API callbacks
+static void roctracer_enable_callback_impl(roctracer_domain_t domain, uint32_t operation_id,
+                                           roctracer_rtapi_callback_t callback, void* user_data) {
+  std::lock_guard lock(registration_mutex);
+
+  switch (domain) {
+    case ACTIVITY_DOMAIN_HSA_EVT:
+      HSA_registration_group.Register(hsa_evt_callback_table, operation_id, callback, user_data);
+      break;
+    case ACTIVITY_DOMAIN_HSA_API:
+      HSA_registration_group.Register(HSA_ApiTracer::callback_table, operation_id, callback,
+                                      user_data);
+      break;
+    case ACTIVITY_DOMAIN_HSA_OPS:
+      break;
+    case ACTIVITY_DOMAIN_HIP_API:
+      if (HipLoader::Instance().Enabled())
+        HIP_registration_group.Register(HIP_ApiTracer::callback_table, operation_id, callback,
+                                        user_data);
+      break;
+    case ACTIVITY_DOMAIN_HIP_OPS:
+      break;
+    case ACTIVITY_DOMAIN_ROCTX:
+      if (RocTxLoader::Instance().Enabled())
+        ROCTX_registration_group.Register(roctx_api_callback_table, operation_id, callback,
+                                          user_data);
+      break;
     default:
       EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
-}
-
-static void roctracer_enable_callback_impl(roctracer_domain_t domain, uint32_t op,
-                                           roctracer_rtapi_callback_t callback, void* user_data) {
-  cb_journal.Insert(domain, op, {callback, user_data});
-  roctracer_enable_callback_fun(domain, op, callback, user_data);
 }
 
 ROCTRACER_API roctracer_status_t roctracer_enable_op_callback(roctracer_domain_t domain,
@@ -369,41 +537,31 @@ ROCTRACER_API roctracer_status_t roctracer_enable_domain_callback(
 }
 
 // Disable runtime API callbacks
-static void roctracer_disable_callback_fun(roctracer_domain_t domain, uint32_t op) {
+static void roctracer_disable_callback_impl(roctracer_domain_t domain, uint32_t operation_id) {
+  std::lock_guard lock(registration_mutex);
+
   switch (domain) {
-    case ACTIVITY_DOMAIN_HSA_OPS:
-    case ACTIVITY_DOMAIN_HSA_API:
     case ACTIVITY_DOMAIN_HSA_EVT:
-      hsa_support::DisableCallback(domain, op);
+      HSA_registration_group.Unregister(hsa_evt_callback_table, operation_id);
+      break;
+    case ACTIVITY_DOMAIN_HSA_API:
+      HSA_registration_group.Unregister(HSA_ApiTracer::callback_table, operation_id);
+      break;
+    case ACTIVITY_DOMAIN_HSA_OPS:
+      break;
+    case ACTIVITY_DOMAIN_HIP_API:
+      if (HipLoader::Instance().Enabled())
+        HIP_registration_group.Unregister(HIP_ApiTracer::callback_table, operation_id);
       break;
     case ACTIVITY_DOMAIN_HIP_OPS:
       break;
-    case ACTIVITY_DOMAIN_HIP_API: {
-      if (!HipLoader::Instance().Enabled()) break;
-      std::lock_guard lock(hip_activity_mutex);
-
-      if (hipError_t err = HipLoader::Instance().RemoveApiCallback(op); err != hipSuccess)
-        fatal("HIP::RemoveApiCallback(%d) failed (err=%d)", op, err);
-
-      if ((hip_act_cb_tracker.disable_check(op, API_CB_MASK) & API_ACT_MASK) == 0) {
-        if (hipError_t err = HipLoader::Instance().RemoveActivityCallback(op); err != hipSuccess)
-          fatal("HIP::RemoveActivityCallback(%d) failed (err=%d)", op, err);
-      }
+    case ACTIVITY_DOMAIN_ROCTX:
+      if (RocTxLoader::Instance().Enabled())
+        ROCTX_registration_group.Unregister(roctx_api_callback_table, operation_id);
       break;
-    }
-    case ACTIVITY_DOMAIN_ROCTX: {
-      if (RocTxLoader::Instance().Enabled() && !RocTxLoader::Instance().RemoveApiCallback(op))
-        fatal("ROCTX::RemoveApiCallback(%d) failed", op);
-      break;
-    }
     default:
       EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
-}
-
-static void roctracer_disable_callback_impl(roctracer_domain_t domain, uint32_t op) {
-  cb_journal.Remove(domain, op);
-  roctracer_disable_callback_fun(domain, op);
 }
 
 ROCTRACER_API roctracer_status_t roctracer_disable_op_callback(roctracer_domain_t domain,
@@ -470,47 +628,37 @@ ROCTRACER_API roctracer_status_t roctracer_next_record(const activity_record_t* 
 }
 
 // Enable activity records logging
-static void roctracer_enable_activity_fun(roctracer_domain_t domain, uint32_t op,
-                                          roctracer_pool_t* pool) {
-  assert(pool != nullptr);
-  switch (domain) {
-    case ACTIVITY_DOMAIN_HSA_OPS:
-    case ACTIVITY_DOMAIN_HSA_API:
-    case ACTIVITY_DOMAIN_HSA_EVT:
-      hsa_support::EnableActivity(domain, op, pool);
-      break;
-    case ACTIVITY_DOMAIN_HIP_OPS: {
-      if (HipLoader::Instance().Enabled() &&
-          HipLoader::Instance().RegisterAsyncActivityCallback(op, (void*)HIP_AsyncActivityCallback,
-                                                              pool) != hipSuccess)
-        fatal("HIP::EnableActivityCallback error");
-      break;
-    }
-    case ACTIVITY_DOMAIN_HIP_API: {
-      if (!HipLoader::Instance().Enabled()) break;
-      std::lock_guard lock(hip_activity_mutex);
+static void roctracer_enable_activity_impl(roctracer_domain_t domain, uint32_t op,
+                                           roctracer_pool_t* pool) {
+  std::lock_guard lock(registration_mutex);
 
-      hip_act_cb_tracker.enable_check(op, API_ACT_MASK);
-      if (hipError_t err =
-              HipLoader::Instance().RegisterActivityCallback(op, (void*)HIP_ApiCallback, pool);
-          err != hipSuccess)
-        fatal("HIP::RegisterActivityCallback(%d) (err=%d)", op, err);
+  MemoryPool* memory_pool = reinterpret_cast<MemoryPool*>(pool);
+  if (memory_pool == nullptr) memory_pool = default_memory_pool;
+  if (memory_pool == nullptr)
+    EXC_RAISING(ROCTRACER_STATUS_ERROR_DEFAULT_POOL_UNDEFINED, "no default pool");
+
+  switch (domain) {
+    case ACTIVITY_DOMAIN_HSA_EVT:
       break;
-    }
+    case ACTIVITY_DOMAIN_HSA_API:
+      HSA_registration_group.Register(HSA_ApiTracer::activity_table, op, memory_pool);
+      break;
+    case ACTIVITY_DOMAIN_HSA_OPS:
+      HSA_registration_group.Register(hsa_ops_activity_table, op, memory_pool);
+      break;
+    case ACTIVITY_DOMAIN_HIP_API:
+      if (HipLoader::Instance().Enabled())
+        HIP_registration_group.Register(HIP_ApiTracer::activity_table, op, memory_pool);
+      break;
+    case ACTIVITY_DOMAIN_HIP_OPS:
+      if (HipLoader::Instance().Enabled())
+        HIP_registration_group.Register(hip_ops_activity_table, op, memory_pool);
+      break;
     case ACTIVITY_DOMAIN_ROCTX:
       break;
     default:
       EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
-}
-
-static void roctracer_enable_activity_impl(roctracer_domain_t domain, uint32_t op,
-                                           roctracer_pool_t* pool) {
-  if (pool == nullptr) pool = default_memory_pool;
-  if (pool == nullptr)
-    EXC_RAISING(ROCTRACER_STATUS_ERROR_DEFAULT_POOL_UNDEFINED, "no default pool");
-  act_journal.Insert(domain, op, {pool});
-  roctracer_enable_activity_fun(domain, op, pool);
 }
 
 ROCTRACER_API roctracer_status_t roctracer_enable_op_activity_expl(roctracer_domain_t domain,
@@ -552,44 +700,31 @@ ROCTRACER_API roctracer_status_t roctracer_enable_domain_activity(activity_domai
 }
 
 // Disable activity records logging
-static void roctracer_disable_activity_fun(roctracer_domain_t domain, uint32_t op) {
-  switch (domain) {
-    case ACTIVITY_DOMAIN_HSA_OPS:
-    case ACTIVITY_DOMAIN_HSA_API:
-    case ACTIVITY_DOMAIN_HSA_EVT:
-      hsa_support::DisableActivity(domain, op);
-      break;
-    case ACTIVITY_DOMAIN_HIP_OPS: {
-      if (HipLoader::Instance().Enabled() &&
-          HipLoader::Instance().RemoveAsyncActivityCallback(op) != hipSuccess)
-        fatal("HIP::EnableActivityCallback(%d)", op);
-      break;
-    }
-    case ACTIVITY_DOMAIN_HIP_API: {
-      if (!HipLoader::Instance().Enabled()) break;
-      std::lock_guard lock(hip_activity_mutex);
+static void roctracer_disable_activity_impl(roctracer_domain_t domain, uint32_t op) {
+  std::lock_guard lock(registration_mutex);
 
-      if ((hip_act_cb_tracker.disable_check(op, API_ACT_MASK) & API_CB_MASK) == 0) {
-        if (hipError_t err = HipLoader::Instance().RemoveActivityCallback(op); err != hipSuccess)
-          fatal("HIP::RemoveActivityCallback(%d) failed (err=%d)", op, err);
-      } else {
-        if (hipError_t err =
-                HipLoader::Instance().RegisterActivityCallback(op, (void*)HIP_ApiCallback, nullptr);
-            err != hipSuccess)
-          fatal("HIP::RegisterActivityCallback(%d) failed (err=%d)", op, err);
-      }
+  switch (domain) {
+    case ACTIVITY_DOMAIN_HSA_EVT:
       break;
-    }
+    case ACTIVITY_DOMAIN_HSA_API:
+      HSA_registration_group.Unregister(HSA_ApiTracer::activity_table, op);
+      break;
+    case ACTIVITY_DOMAIN_HSA_OPS:
+      HSA_registration_group.Unregister(hsa_ops_activity_table, op);
+      break;
+    case ACTIVITY_DOMAIN_HIP_API:
+      if (HipLoader::Instance().Enabled())
+        HIP_registration_group.Unregister(HIP_ApiTracer::activity_table, op);
+      break;
+    case ACTIVITY_DOMAIN_HIP_OPS:
+      if (HipLoader::Instance().Enabled())
+        HIP_registration_group.Unregister(hip_ops_activity_table, op);
+      break;
     case ACTIVITY_DOMAIN_ROCTX:
       break;
     default:
       EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
   }
-}
-
-static void roctracer_disable_activity_impl(roctracer_domain_t domain, uint32_t op) {
-  act_journal.Remove(domain, op);
-  roctracer_disable_activity_fun(domain, op);
 }
 
 ROCTRACER_API roctracer_status_t roctracer_disable_op_activity(roctracer_domain_t domain,
@@ -622,6 +757,7 @@ static void roctracer_close_pool_impl(roctracer_pool_t* pool) {
   MemoryPool* p = reinterpret_cast<MemoryPool*>(pool);
   if (p == default_memory_pool) default_memory_pool = nullptr;
 
+#if 0
   // Disable any activities that specify the pool being deleted.
   std::vector<std::pair<roctracer_domain_t, uint32_t>> ops;
   act_journal.ForEach(
@@ -630,6 +766,7 @@ static void roctracer_close_pool_impl(roctracer_pool_t* pool) {
         return true;
       });
   for (auto&& [domain, op] : ops) roctracer_disable_activity_impl(domain, op);
+#endif
 
   delete (p);
 }
@@ -693,35 +830,14 @@ roctracer_activity_pop_external_correlation_id(activity_correlation_id_t* last_i
 
 // Start API
 ROCTRACER_API void roctracer_start() {
-  if (set_stopped(0)) {
-    if (ext_support::roctracer_start_cb) ext_support::roctracer_start_cb();
-    cb_journal.ForEach([](roctracer_domain_t domain, uint32_t op, const CallbackJournalData& data) {
-      roctracer_enable_callback_fun(domain, op, data.callback, data.user_data);
-      return true;
-    });
-    act_journal.ForEach(
-        [](roctracer_domain_t domain, uint32_t op, const ActivityJournalData& data) {
-          roctracer_enable_activity_fun(domain, op, data.pool);
-          return true;
-        });
-  }
+  if (stopped_status.exchange(false, std::memory_order_relaxed) && roctracer_start_cb)
+    roctracer_start_cb();
 }
 
 // Stop API
 ROCTRACER_API void roctracer_stop() {
-  if (set_stopped(1)) {
-    // Must disable the activity first as the spawner checks for the activity being NULL
-    // to indicate that there is no callback.
-    act_journal.ForEach([](roctracer_domain_t domain, uint32_t op, const ActivityJournalData&) {
-      roctracer_disable_activity_fun(domain, op);
-      return true;
-    });
-    cb_journal.ForEach([](roctracer_domain_t domain, uint32_t op, const CallbackJournalData&) {
-      roctracer_disable_callback_fun(domain, op);
-      return true;
-    });
-    if (ext_support::roctracer_stop_cb) ext_support::roctracer_stop_cb();
-  }
+  if (!stopped_status.exchange(true, std::memory_order_relaxed) && roctracer_stop_cb)
+    roctracer_stop_cb();
 }
 
 ROCTRACER_API roctracer_status_t roctracer_get_timestamp(roctracer_timestamp_t* timestamp) {
@@ -745,8 +861,8 @@ ROCTRACER_API roctracer_status_t roctracer_set_properties(roctracer_domain_t dom
     case ACTIVITY_DOMAIN_EXT_API: {
       roctracer_ext_properties_t* ops_properties =
           reinterpret_cast<roctracer_ext_properties_t*>(properties);
-      ext_support::roctracer_start_cb = ops_properties->start_cb;
-      ext_support::roctracer_stop_cb = ops_properties->stop_cb;
+      roctracer_start_cb = ops_properties->start_cb;
+      roctracer_stop_cb = ops_properties->stop_cb;
       break;
     }
     default:

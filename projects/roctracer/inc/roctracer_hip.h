@@ -41,7 +41,12 @@ inline static std::ostream& operator<<(std::ostream& out, const char& v) {
 
 #include <roctracer.h>
 
-enum { HIP_OP_ID_DISPATCH = 0, HIP_OP_ID_COPY = 1, HIP_OP_ID_BARRIER = 2, HIP_OP_ID_NUMBER = 3 };
+typedef enum {
+  HIP_OP_ID_DISPATCH = 0,
+  HIP_OP_ID_COPY = 1,
+  HIP_OP_ID_BARRIER = 2,
+  HIP_OP_ID_NUMBER = 3
+} hip_op_id_t;
 
 #ifdef __cplusplus
 extern "C" {

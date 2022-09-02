@@ -122,13 +122,6 @@ __attribute__((weak)) const char* hipKernelNameRefByPtr(const void* hostFunction
 __attribute__((weak)) int hipGetStreamDeviceId(hipStream_t stream) { return 0; }
 __attribute__((weak)) const char* hipApiName(uint32_t id) { return NULL; }
 
-__attribute__((weak)) hipError_t hipRegisterAsyncActivityCallback_t(uint32_t op, void* fun,
-                                                                    void* arg) {
-  return hipErrorUnknown;
-}
-__attribute__((weak)) hipError_t hipRemoveAsyncActivityCallback_t(uint32_t op) {
-  return hipErrorUnknown;
-}
 __attribute__((weak)) const char* hipGetCmdName(unsigned op) { return NULL; }
 
 class HipLoaderStatic {
@@ -158,12 +151,8 @@ class HipLoaderStatic {
   GetStreamDeviceId_t* GetStreamDeviceId;
   ApiName_t* ApiName;
 
-  typedef hipError_t(hipRegisterAsyncActivityCallback_t)(uint32_t op, void* fun, void* arg);
-  typedef hipError_t(hipRemoveAsyncActivityCallback_t)(uint32_t op);
   typedef const char*(hipGetOpName_t)(unsigned op);
 
-  hipRegisterAsyncActivityCallback_t* RegisterActivityCallback;
-  hipRemoveAsyncActivityCallback_t* RemoveActivityCallback;
   hipGetOpName_t* GetOpName;
 
   static inline loader_t& Instance() {
@@ -191,8 +180,6 @@ class HipLoaderStatic {
     GetStreamDeviceId = hipGetStreamDeviceId;
     ApiName = hipApiName;
 
-    RegisterAsyncActivityCallback = hipRegisterAsyncActivityCallback;
-    RemoveAsyncActivityCallback = hipRemoveAsyncActivityCallback;
     GetOpName = hipGetCmdName;
   }
 
@@ -204,53 +191,36 @@ class HipApi {
  public:
   typedef BaseLoader<HipApi> Loader;
 
-  typedef decltype(hipRegisterApiCallback) RegisterApiCallback_t;
-  typedef decltype(hipRemoveApiCallback) RemoveApiCallback_t;
-  typedef decltype(hipRegisterActivityCallback) RegisterActivityCallback_t;
-  typedef decltype(hipRemoveActivityCallback) RemoveActivityCallback_t;
-  typedef decltype(hipKernelNameRef) KernelNameRef_t;
-  typedef decltype(hipKernelNameRefByPtr) KernelNameRefByPtr_t;
-  typedef decltype(hipGetStreamDeviceId) GetStreamDeviceId_t;
-  typedef decltype(hipApiName) ApiName_t;
+  typedef int(hipGetStreamDeviceId_t)(hipStream_t stream);
+  typedef const char*(hipKernelNameRef_t)(const hipFunction_t function);
+  typedef const char*(hipKernelNameRefByPtr_t)(const void* host_function, hipStream_t stream);
+  typedef const char*(hipApiName_t)(uint32_t id);
+  typedef const char*(hipGetCmdName_t)(uint32_t op);
+  typedef void(hipRegisterTracerCallback_t)(int (*function)(activity_domain_t domain,
+                                                            uint32_t operation_id, void* data));
 
-  RegisterApiCallback_t* RegisterApiCallback;
-  RemoveApiCallback_t* RemoveApiCallback;
-  RegisterActivityCallback_t* RegisterActivityCallback;
-  RemoveActivityCallback_t* RemoveActivityCallback;
-  KernelNameRef_t* KernelNameRef;
-  KernelNameRefByPtr_t* KernelNameRefByPtr_;
+  hipKernelNameRef_t* KernelNameRef;
   const char* KernelNameRefByPtr(const void* function, hipStream_t stream = nullptr) const {
     return KernelNameRefByPtr_(function, stream);
   }
-  GetStreamDeviceId_t* GetStreamDeviceId;
-  ApiName_t* ApiName;
-
-  typedef hipError_t(hipRegisterAsyncActivityCallback_t)(uint32_t op, void* fun, void* arg);
-  typedef hipError_t(hipRemoveAsyncActivityCallback_t)(uint32_t op);
-  typedef const char*(hipGetOpName_t)(unsigned op);
-
-  hipRegisterAsyncActivityCallback_t* RegisterAsyncActivityCallback;
-  hipRemoveAsyncActivityCallback_t* RemoveAsyncActivityCallback;
-  hipGetOpName_t* GetOpName;
+  hipGetStreamDeviceId_t* GetStreamDeviceId;
+  hipGetCmdName_t* GetOpName;
+  hipApiName_t* ApiName;
+  hipRegisterTracerCallback_t* RegisterTracerCallback;
 
  protected:
   void init(Loader* loader) {
-    RegisterApiCallback = loader->GetFun<RegisterApiCallback_t>("hipRegisterApiCallback");
-    RemoveApiCallback = loader->GetFun<RemoveApiCallback_t>("hipRemoveApiCallback");
-    RegisterActivityCallback =
-        loader->GetFun<RegisterActivityCallback_t>("hipRegisterActivityCallback");
-    RemoveActivityCallback = loader->GetFun<RemoveActivityCallback_t>("hipRemoveActivityCallback");
-    KernelNameRef = loader->GetFun<KernelNameRef_t>("hipKernelNameRef");
-    KernelNameRefByPtr_ = loader->GetFun<KernelNameRefByPtr_t>("hipKernelNameRefByPtr");
-    GetStreamDeviceId = loader->GetFun<GetStreamDeviceId_t>("hipGetStreamDeviceId");
-    ApiName = loader->GetFun<ApiName_t>("hipApiName");
-
-    RegisterAsyncActivityCallback =
-        loader->GetFun<hipRegisterAsyncActivityCallback_t>("hipRegisterAsyncActivityCallback");
-    RemoveAsyncActivityCallback =
-        loader->GetFun<hipRemoveAsyncActivityCallback_t>("hipRemoveAsyncActivityCallback");
-    GetOpName = loader->GetFun<hipGetOpName_t>("hipGetCmdName");
+    GetStreamDeviceId = loader->GetFun<hipGetStreamDeviceId_t>("hipGetStreamDeviceId");
+    KernelNameRef = loader->GetFun<hipKernelNameRef_t>("hipKernelNameRef");
+    KernelNameRefByPtr_ = loader->GetFun<hipKernelNameRefByPtr_t>("hipKernelNameRefByPtr");
+    GetOpName = loader->GetFun<hipGetCmdName_t>("hipGetCmdName");
+    ApiName = loader->GetFun<hipApiName_t>("hipApiName");
+    RegisterTracerCallback =
+        loader->GetFun<hipRegisterTracerCallback_t>("hipRegisterTracerCallback");
   }
+
+ private:
+  hipKernelNameRefByPtr_t* KernelNameRefByPtr_;
 };
 #endif
 
@@ -260,16 +230,14 @@ class RocTxApi {
  public:
   typedef BaseLoader<RocTxApi> Loader;
 
-  typedef bool(RegisterApiCallback_t)(uint32_t op, void* callback, void* arg);
-  typedef bool(RemoveApiCallback_t)(uint32_t op);
-
-  RegisterApiCallback_t* RegisterApiCallback;
-  RemoveApiCallback_t* RemoveApiCallback;
+  typedef void(roctxRegisterTracerCallback_t)(int (*function)(activity_domain_t domain,
+                                                              uint32_t operation_id, void* data));
+  roctxRegisterTracerCallback_t* RegisterTracerCallback;
 
  protected:
   void init(Loader* loader) {
-    RegisterApiCallback = loader->GetFun<RegisterApiCallback_t>("RegisterApiCallback");
-    RemoveApiCallback = loader->GetFun<RemoveApiCallback_t>("RemoveApiCallback");
+    RegisterTracerCallback =
+        loader->GetFun<roctxRegisterTracerCallback_t>("roctxRegisterTracerCallback");
   }
 };
 
@@ -278,8 +246,7 @@ typedef BaseLoader<RocTxApi> RocTxLoader;
 #if STATIC_BUILD
 typedef HipLoaderStatic HipLoader;
 #else
-typedef BaseLoader<HipApi> HipLoaderShared;
-typedef HipLoaderShared HipLoader;
+using HipLoader = BaseLoader<HipApi>;
 #endif
 
 }  // namespace roctracer
@@ -299,7 +266,7 @@ typedef HipLoaderShared HipLoader;
   roctracer::HipLoaderStatic::instance_t roctracer::HipLoaderStatic::instance_{};
 #else
 #define LOADER_INSTANTIATE_HIP()                                                                   \
-  template <> const char* roctracer::HipLoaderShared::lib_name_ = "libamdhip64.so";
+  template <> const char* roctracer::HipLoader::lib_name_ = "libamdhip64.so";
 #endif
 
 #define LOADER_INSTANTIATE()                                                                       \

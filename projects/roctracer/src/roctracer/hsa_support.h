@@ -28,6 +28,15 @@
 
 namespace roctracer::hsa_support {
 
+struct hsa_trace_data_t {
+  hsa_api_data_t api_data;
+  uint64_t phase_enter_timestamp;
+  uint64_t phase_data;
+
+  void (*phase_enter)(hsa_api_id_t operation_id, hsa_trace_data_t* data);
+  void (*phase_exit)(hsa_api_id_t operation_id, hsa_trace_data_t* data);
+};
+
 void Initialize(HsaApiTable* table);
 void Finalize();
 
@@ -36,13 +45,8 @@ const char* GetEvtName(uint32_t id);
 const char* GetOpsName(uint32_t id);
 uint32_t GetApiCode(const char* str);
 
-void EnableActivity(roctracer_domain_t domain, uint32_t op, roctracer_pool_t* pool);
-void EnableCallback(roctracer_domain_t domain, uint32_t cid, roctracer_rtapi_callback_t callback,
-                    void* user_data);
-
-void DisableCallback(roctracer_domain_t domain, uint32_t cid);
-void DisableActivity(roctracer_domain_t domain, uint32_t op);
-
+void RegisterTracerCallback(int (*function)(activity_domain_t domain, uint32_t operation_id,
+                                            void* data));
 uint64_t timestamp_ns();
 
 }  // namespace roctracer::hsa_support
