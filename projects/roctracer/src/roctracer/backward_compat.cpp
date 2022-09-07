@@ -25,3 +25,45 @@ extern "C" ROCTRACER_API int roctracer_load() { return 1; }
 extern "C" ROCTRACER_API void roctracer_unload() {}
 extern "C" ROCTRACER_API void roctracer_flush_buf() {}
 extern "C" ROCTRACER_API void roctracer_mark(const char*) {}
+
+ROCTRACER_API roctracer_status_t roctracer_enable_callback(roctracer_rtapi_callback_t callback,
+                                                           void* user_data) {
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain)
+    if (auto status =
+            roctracer_enable_domain_callback((roctracer_domain_t)domain, callback, user_data);
+        status != ROCTRACER_STATUS_SUCCESS)
+      return status;
+  return ROCTRACER_STATUS_SUCCESS;
+}
+
+ROCTRACER_API roctracer_status_t roctracer_disable_callback() {
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain)
+    if (auto status = roctracer_disable_domain_callback((roctracer_domain_t)domain);
+        status != ROCTRACER_STATUS_SUCCESS)
+      return status;
+  return ROCTRACER_STATUS_SUCCESS;
+}
+
+ROCTRACER_API roctracer_status_t roctracer_enable_activity_expl(roctracer_pool_t* pool) {
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain)
+    if (auto status = roctracer_enable_domain_activity_expl((roctracer_domain_t)domain, pool);
+        status != ROCTRACER_STATUS_SUCCESS)
+      return status;
+  return ROCTRACER_STATUS_SUCCESS;
+}
+
+ROCTRACER_API roctracer_status_t roctracer_enable_activity() {
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain)
+    if (auto status = roctracer_enable_domain_activity((roctracer_domain_t)domain);
+        status != ROCTRACER_STATUS_SUCCESS)
+      return status;
+  return ROCTRACER_STATUS_SUCCESS;
+}
+
+ROCTRACER_API roctracer_status_t roctracer_disable_activity() {
+  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain)
+    if (auto status = roctracer_disable_domain_activity((roctracer_domain_t)domain);
+        status != ROCTRACER_STATUS_SUCCESS)
+      return status;
+  return ROCTRACER_STATUS_SUCCESS;
+}

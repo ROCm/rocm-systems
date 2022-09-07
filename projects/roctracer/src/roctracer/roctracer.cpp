@@ -696,17 +696,6 @@ ROCTRACER_API roctracer_status_t roctracer_enable_domain_callback(
   API_METHOD_SUFFIX
 }
 
-ROCTRACER_API roctracer_status_t roctracer_enable_callback(roctracer_rtapi_callback_t callback,
-                                                           void* user_data) {
-  API_METHOD_PREFIX
-  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
-    const uint32_t op_end = get_op_end(domain);
-    for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
-      roctracer_enable_callback_impl((roctracer_domain_t)domain, op, callback, user_data);
-  }
-  API_METHOD_SUFFIX
-}
-
 // Disable runtime API callbacks
 static void roctracer_disable_callback_fun(roctracer_domain_t domain, uint32_t op) {
   switch (domain) {
@@ -774,16 +763,6 @@ ROCTRACER_API roctracer_status_t roctracer_disable_domain_callback(roctracer_dom
   const uint32_t op_end = get_op_end(domain);
   for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
     roctracer_disable_callback_impl(domain, op);
-  API_METHOD_SUFFIX
-}
-
-ROCTRACER_API roctracer_status_t roctracer_disable_callback() {
-  API_METHOD_PREFIX
-  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
-    const uint32_t op_end = get_op_end(domain);
-    for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
-      roctracer_disable_callback_impl((roctracer_domain_t)domain, op);
-  }
   API_METHOD_SUFFIX
 }
 
@@ -945,26 +924,6 @@ ROCTRACER_API roctracer_status_t roctracer_enable_domain_activity(activity_domai
   API_METHOD_SUFFIX
 }
 
-static void roctracer_enable_activity_impl(roctracer_pool_t* pool) {
-  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
-    const uint32_t op_end = get_op_end(domain);
-    for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
-      roctracer_enable_activity_impl((roctracer_domain_t)domain, op, pool);
-  }
-}
-
-ROCTRACER_API roctracer_status_t roctracer_enable_activity_expl(roctracer_pool_t* pool) {
-  API_METHOD_PREFIX
-  roctracer_enable_activity_impl(pool);
-  API_METHOD_SUFFIX
-}
-
-ROCTRACER_API roctracer_status_t roctracer_enable_activity() {
-  API_METHOD_PREFIX
-  roctracer_enable_activity_impl(nullptr);
-  API_METHOD_SUFFIX
-}
-
 // Disable activity records logging
 static void roctracer_disable_activity_fun(roctracer_domain_t domain, uint32_t op) {
   switch (domain) {
@@ -1039,16 +998,6 @@ ROCTRACER_API roctracer_status_t roctracer_disable_domain_activity(roctracer_dom
   const uint32_t op_end = get_op_end(domain);
   for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
     roctracer_disable_activity_impl(domain, op);
-  API_METHOD_SUFFIX
-}
-
-ROCTRACER_API roctracer_status_t roctracer_disable_activity() {
-  API_METHOD_PREFIX
-  for (uint32_t domain = 0; domain < ACTIVITY_DOMAIN_NUMBER; ++domain) {
-    const uint32_t op_end = get_op_end(domain);
-    for (uint32_t op = get_op_begin(domain); op < op_end; ++op)
-      roctracer_disable_activity_impl((roctracer_domain_t)domain, op);
-  }
   API_METHOD_SUFFIX
 }
 
