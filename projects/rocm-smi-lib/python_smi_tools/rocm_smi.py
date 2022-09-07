@@ -2289,6 +2289,101 @@ def showEvents(deviceList, eventTypes):
             break
 
 
+def printTempGraph(deviceList, delay):
+    # deviceList must be in ascending order
+    deviceList.sort()
+    devices = 0
+    # Print an empty line for each device
+    for device in deviceList:
+        devices = devices + 1
+    for i in range(devices):
+        printEmptyLine()
+    originalTerminalWidth = os.get_terminal_size()[0]
+    while 1:  # Exit condition from user keyboard input of 'q' or 'ctrl + c'
+        printString = ''
+        for device in deviceList:
+            temp = getTemp(device, 'edge')
+            percentage = temp
+            if percentage >= 100:
+                percentage = 100
+            if percentage < 0:
+                percentage = 0
+            # Get available space based on terminal width
+            terminalWidth = os.get_terminal_size()[0]
+            availableSpace = 0
+            if terminalWidth >= 20:
+                availableSpace = terminalWidth - 20
+            # Get color based on percentage, with a non-linear scaling
+            color = getGraphColor(3.16*(percentage**1.5)**(1/2))
+            # Get graph length based on percentage and available space
+            padding = (percentage / float(100)) * availableSpace
+            if padding > availableSpace:
+                padding = availableSpace
+            paddingSpace = color[-1]
+            for i in range(int(padding)):
+                paddingSpace += paddingSpace[-1]
+            remainder = 0
+            if availableSpace >= padding:
+                remainder = availableSpace + 1 - padding
+            remainderSpace = ' ' * int(remainder)
+            # TODO: Allow terminal size to be decreased
+            if terminalWidth < originalTerminalWidth:
+                print('Terminal size cannot be decreased.\n\r')
+                return
+            # Two spare Spaces
+            tempString = (str(int(temp)) + '°C').ljust(5)
+            printString += '\033[2;30;47mGPU[%d] Temp %s|%s%s\x1b[0m%s\r\n' % (device, tempString, color, paddingSpace[1:], remainderSpace)
+            originalTerminalWidth = terminalWidth
+            time.sleep((delay / 1000))
+        if terminalWidth >= 20:
+            for i in range(devices):
+                printString = '\033[A' + printString
+            print(printString, end = '\r')
+
+
+def getGraphColor(percentage):
+    # Text / Background color mixing (Tested on PuTTY)
+    colors = ['\033[2;35;45m','\033[2;34;45m','\033[2;35;44m','\033[2;34;44m',
+              '\033[2;36;44m','\033[2;34;46m','\033[2;36;46m','\033[2;32;46m',
+              '\033[2;36;42m','\033[2;32;42m','\033[2;33;42m','\033[2;32;43m',
+              '\033[2;33;43m','\033[2;31;43m','\033[2;33;41m','\033[2;31;41m']
+    characters = [' ', '░', '░', '▒', '▒', '░']
+    # Ensure percentage is in range and rounded
+    if percentage > 99:
+        percentage = 99
+    if percentage < 0:
+        percentage = 0
+    percentage = round(percentage, 0)
+    # There are a total of 16 distinct colors, with 2 special ascii characters per
+    # color, for a total of 16*2=32 distinct colors for a gradient.
+    # Therefore every 100/32=3.125 percent the color gradient will change
+    stepSize = (100/len(colors))/2
+    characterIndex = int((percentage % (len(characters) * stepSize)) / stepSize)
+    colorIndex = int(percentage / (stepSize * 2))
+    returnStr = colors[colorIndex] + characters[characterIndex]
+    return returnStr
+
+
+def showTempGraph(deviceList):
+    printLogSpacer(' Temperature Graph ')
+    # Start a thread for constantly printing
+    try:
+        # Create a thread (call print function, devices, delay in ms)
+        _thread.start_new_thread(printTempGraph, (deviceList, 150))
+    except Exception as e:
+        printErrLog(device, 'Unable to start new thread. %s' % (e))
+    # Catch user input for program termination
+    while 1:  # Exit condition from user keyboard input of 'q' or 'ctrl + c'
+        getch = _Getch()
+        user_input = getch()
+        # Catch user input for q or Ctrl + c
+        if user_input == 'q' or user_input == '\x03':
+            break
+    # Reset color to default before exit
+    print('\033[A\x1b[0m\r')
+    printLogSpacer()
+
+
 def showVersion(deviceList, component):
     """ Display the software version for the specified component
 
@@ -2923,6 +3018,7 @@ if __name__ == '__main__':
     groupDisplayTop.add_argument('-v', '--showvbios', help='Show VBIOS version', action='store_true')
     groupDisplayTop.add_argument('-e', '--showevents', help='Show event list', metavar='EVENT', type=str, nargs='*')
     groupDisplayTop.add_argument('--showdriverversion', help='Show kernel driver version', action='store_true')
+    groupDisplayTop.add_argument('--showtempgraph', help='Show Temperature Graph', action='store_true')
     groupDisplayTop.add_argument('--showfwinfo', help='Show FW information', metavar='BLOCK', type=str, nargs='*')
     groupDisplayTop.add_argument('--showmclkrange', help='Show mclk range', action='store_true')
     groupDisplayTop.add_argument('--showmemvendor', help='Show GPU memory vendor', action='store_true')
@@ -3148,6 +3244,8 @@ if __name__ == '__main__':
         showAllConciseHw(deviceList)
     if args.showdriverversion:
         showVersion(deviceList, rsmi_sw_component_t.RSMI_SW_COMP_DRIVER)
+    if args.showtempgraph:
+        showTempGraph(deviceList)
     if args.showid:
         showId(deviceList)
     if args.showuniqueid:
