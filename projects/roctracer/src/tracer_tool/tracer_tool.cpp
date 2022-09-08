@@ -63,7 +63,6 @@ namespace fs = std::experimental::filesystem;
     }                                                                                              \
   } while (false)
 
-LOADER_INSTANTIATE();
 TRACE_BUFFER_INSTANTIATE();
 
 namespace {

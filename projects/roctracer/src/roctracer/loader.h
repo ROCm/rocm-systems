@@ -18,242 +18,175 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef SRC_CORE_LOADER_H_
-#define SRC_CORE_LOADER_H_
+#ifndef ROCTRACER_LOADER_H_
+#define ROCTRACER_LOADER_H_
 
-#include <atomic>
-#include <mutex>
+#include "debug.h"
+
+#include <hip/hip_runtime_api.h>
+
 #include <dlfcn.h>
+#include <experimental/filesystem>
+#include <link.h>
 #include <unistd.h>
-#include <sys/syscall.h>
 
-#define ONLD_TRACE(str)                                                                            \
-  if (getenv("ROCP_ONLOAD_TRACE")) do {                                                            \
-      std::cout << "PID(" << GetPid() << "): TRACER_LOADER::" << __FUNCTION__ << " " << str        \
-                << std::endl                                                                       \
-                << std::flush;                                                                     \
-    } while (0);
+namespace fs = std::experimental::filesystem;
 
 namespace roctracer {
 
-// Base runtime loader class
-template <class T> class BaseLoader : public T {
-  static uint32_t GetPid() { return ::syscall(__NR_getpid); }
+// Base loader class
+template <typename Loader> class BaseLoader {
+ protected:
+  BaseLoader(const char* pattern) {
+    // Iterate through the process' loaded shared objects and try to dlopen the first entry with a
+    // file name starting with the given 'pattern'. This allows the loader to acquire a handle
+    // to the target library iff it is already loaded. The handle is used to query symbols
+    // exported by that library.
 
- public:
-  typedef std::mutex mutex_t;
-  typedef BaseLoader<T> loader_t;
-
-  bool Enabled() const { return (handle_ != NULL); }
-
-  template <class fun_t> fun_t* GetFun(const char* fun_name) {
-    if (handle_ == NULL) return NULL;
-
-    fun_t* f = (fun_t*)dlsym(handle_, fun_name);
-    if ((to_check_symb_ == true) && (f == NULL)) {
-      fprintf(stderr, "roctracer: symbol lookup '%s' failed: \"%s\"\n", fun_name, dlerror());
-      abort();
-    }
-    return f;
-  }
-
-  static inline loader_t& Instance() {
-    loader_t* obj = instance_.load(std::memory_order_acquire);
-    if (obj == NULL) {
-      std::lock_guard<mutex_t> lck(mutex_);
-      if (instance_.load(std::memory_order_relaxed) == NULL) {
-        obj = new loader_t();
-        instance_.store(obj, std::memory_order_release);
-      }
-    }
-    return *instance_;
-  }
-
-  static loader_t* GetRef() { return instance_; }
-  static void SetLibName(const char* name) { lib_name_ = name; }
-
- private:
-  BaseLoader() {
-    const int flags = (to_load_ == true) ? RTLD_LAZY : RTLD_LAZY | RTLD_NOLOAD;
-    handle_ = dlopen(lib_name_, flags);
-    ONLD_TRACE("(" << lib_name_ << " = " << handle_ << ")");
-    if ((to_check_open_ == true) && (handle_ == NULL)) {
-      fprintf(stderr, "roctracer: Loading '%s' failed, %s\n", lib_name_, dlerror());
-      abort();
-    }
-
-    T::init(this);
+    auto callback = [this, pattern](dl_phdr_info* info) {
+      if (handle_ == nullptr &&
+          fs::path(info->dlpi_name).filename().string().rfind(pattern, 0) == 0)
+        handle_ = ::dlopen(info->dlpi_name, RTLD_LAZY);
+    };
+    dl_iterate_phdr(
+        [](dl_phdr_info* info, size_t size, void* data) {
+          (*reinterpret_cast<decltype(callback)*>(data))(info);
+          return 0;
+        },
+        &callback);
   }
 
   ~BaseLoader() {
-    if (handle_ != NULL) dlclose(handle_);
+    if (handle_ != nullptr) ::dlclose(handle_);
   }
 
-  static bool to_load_;
-  static bool to_check_open_;
-  static bool to_check_symb_;
+  BaseLoader(const BaseLoader&) = delete;
+  BaseLoader& operator=(const BaseLoader&) = delete;
 
-  static mutex_t mutex_;
-  static const char* lib_name_;
-  static std::atomic<loader_t*> instance_;
+ public:
+  bool IsEnabled() const { return handle_ != nullptr; }
+
+  template <typename FunctionPtr> FunctionPtr GetFun(const char* symbol) const {
+    assert(IsEnabled());
+
+    auto function_ptr = reinterpret_cast<FunctionPtr>(::dlsym(handle_, symbol));
+    if (function_ptr == nullptr) fatal("symbol lookup '%s' failed: %s", symbol, ::dlerror());
+    return function_ptr;
+  }
+
+  static inline Loader& Instance() {
+    static Loader instance;
+    return instance;
+  }
+
+ private:
   void* handle_;
 };
 
 }  // namespace roctracer
 
 // HIP runtime library loader class
-#include "roctracer_hip.h"
-
 namespace roctracer {
 #if STATIC_BUILD
-__attribute__((weak)) const char* hipKernelNameRef(const hipFunction_t f) { return NULL; }
+__attribute__((weak)) const char* hipKernelNameRef(const hipFunction_t f) { return nullptr; }
 __attribute__((weak)) const char* hipKernelNameRefByPtr(const void* hostFunction,
                                                         hipStream_t stream) {
-  return NULL;
+  return nullptr;
 }
 __attribute__((weak)) int hipGetStreamDeviceId(hipStream_t stream) { return 0; }
-__attribute__((weak)) const char* hipGetCmdName(unsigned op) { return NULL; }
-__attribute__((weak)) const char* hipApiName(uint32_t id) { return NULL; }
+__attribute__((weak)) const char* hipGetCmdName(unsigned op) { return nullptr; }
+__attribute__((weak)) const char* hipApiName(uint32_t id) { return nullptr; }
 __attribute__((weak)) void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
                                                                      uint32_t operation_id,
                                                                      void* data)) {}
 
-class HipLoaderStatic {
- public:
-  typedef std::mutex mutex_t;
-  typedef HipLoaderStatic loader_t;
-  typedef std::atomic<loader_t*> instance_t;
-
-  typedef const char*(KernelNameRef_t)(const hipFunction_t f);
-  typedef const char*(KernelNameRefByPtr_t)(const void* hostFunction, hipStream_t stream);
-  typedef int(GetStreamDeviceId_t)(hipStream_t stream);
-  typedef const char*(GetCmdName_t)(unsigned op);
-  typedef const char*(ApiName_t)(uint32_t id);
-  typedef void(RegisterTracerCallback_t)(int (*function)(activity_domain_t domain,
-                                                         uint32_t operation_id, void* data));
-
-  KernelNameRef_t* KernelNameRef;
-  const char* KernelNameRefByPtr(const void* function, hipStream_t stream = nullptr) const {
-    return KernelNameRefByPtr_(function, stream);
-  }
-  GetStreamDeviceId_t* GetStreamDeviceId;
-  GetCmdName_t* GetOpName;
-  ApiName_t* ApiName;
-  RegisterTracerCallback_t* RegisterTracerCallback;
-
-  static inline loader_t& Instance() {
-    loader_t* obj = instance_.load(std::memory_order_acquire);
-    if (obj == NULL) {
-      std::lock_guard<mutex_t> lck(mutex_);
-      if (instance_.load(std::memory_order_relaxed) == NULL) {
-        obj = new loader_t();
-        instance_.store(obj, std::memory_order_release);
-      }
-    }
-    return *instance_;
-  }
-
-  bool Enabled() const { return true; }
-
+class HipLoader {
  private:
-  HipLoaderStatic() {
-    KernelNameRef = hipKernelNameRef;
-    KernelNameRefByPtr_ = hipKernelNameRefByPtr;
-    GetStreamDeviceId = hipGetStreamDeviceId;
-    GetOpName = hipGetCmdName;
-    ApiName = hipApiName;
-    RegisterTracerCallback = hipRegisterTracerCallback;
+  HipLoader() {}
+
+ public:
+  bool IsEnabled() const { return true; }
+
+  int GetStreamDeviceId(hipStream_t stream) const { return hipGetStreamDeviceId(stream); }
+
+  const char* KernelNameRef(const hipFunction_t f) const { return hipKernelNameRef(f); }
+
+  const char* KernelNameRefByPtr(const void* host_function, hipStream_t stream = nullptr) const {
+    return hipKernelNameRefByPtr(host_function, stream);
   }
 
-  static mutex_t mutex_;
-  static instance_t instance_;
-  KernelNameRefByPtr_t* KernelNameRefByPtr_;
+  const char* GetOpName(unsigned op) const { return hipGetCmdName(op); }
+
+  const char* ApiName(uint32_t id) const { return hipApiName(id); }
+
+  void RegisterTracerCallback(int (*callback)(activity_domain_t domain, uint32_t operation_id,
+                                              void* data)) const {
+    return hipRegisterTracerCallback(callback);
+  }
+
+  static inline HipLoader& Instance() {
+    static HipLoader instance;
+    return instance;
+  }
 };
 #else
-class HipApi {
- public:
-  typedef BaseLoader<HipApi> Loader;
-
-  typedef int(hipGetStreamDeviceId_t)(hipStream_t stream);
-  typedef const char*(hipKernelNameRef_t)(const hipFunction_t function);
-  typedef const char*(hipKernelNameRefByPtr_t)(const void* host_function, hipStream_t stream);
-  typedef const char*(hipApiName_t)(uint32_t id);
-  typedef const char*(hipGetCmdName_t)(uint32_t op);
-  typedef void(hipRegisterTracerCallback_t)(int (*function)(activity_domain_t domain,
-                                                            uint32_t operation_id, void* data));
-
-  hipKernelNameRef_t* KernelNameRef;
-  const char* KernelNameRefByPtr(const void* function, hipStream_t stream = nullptr) const {
-    return KernelNameRefByPtr_(function, stream);
-  }
-  hipGetStreamDeviceId_t* GetStreamDeviceId;
-  hipGetCmdName_t* GetOpName;
-  hipApiName_t* ApiName;
-  hipRegisterTracerCallback_t* RegisterTracerCallback;
-
- protected:
-  void init(Loader* loader) {
-    GetStreamDeviceId = loader->GetFun<hipGetStreamDeviceId_t>("hipGetStreamDeviceId");
-    KernelNameRef = loader->GetFun<hipKernelNameRef_t>("hipKernelNameRef");
-    KernelNameRefByPtr_ = loader->GetFun<hipKernelNameRefByPtr_t>("hipKernelNameRefByPtr");
-    GetOpName = loader->GetFun<hipGetCmdName_t>("hipGetCmdName");
-    ApiName = loader->GetFun<hipApiName_t>("hipApiName");
-    RegisterTracerCallback =
-        loader->GetFun<hipRegisterTracerCallback_t>("hipRegisterTracerCallback");
-  }
-
+class HipLoader : public BaseLoader<HipLoader> {
  private:
-  hipKernelNameRefByPtr_t* KernelNameRefByPtr_;
+  friend HipLoader& BaseLoader::Instance();
+  HipLoader() : BaseLoader("libamdhip64.so") {}
+
+ public:
+  int GetStreamDeviceId(hipStream_t stream) const {
+    static auto function = GetFun<int (*)(hipStream_t stream)>("hipGetStreamDeviceId");
+    return function(stream);
+  }
+
+  const char* KernelNameRef(const hipFunction_t f) const {
+    static auto function = GetFun<const char* (*)(const hipFunction_t f)>("KernelNameRef");
+    return function(f);
+  }
+
+  const char* KernelNameRefByPtr(const void* host_function, hipStream_t stream = nullptr) const {
+    static auto function = GetFun<const char* (*)(const void* hostFunction, hipStream_t stream)>(
+        "hipKernelNameRefByPtr");
+    return function(host_function, stream);
+  }
+
+  const char* GetOpName(unsigned op) const {
+    static auto function = GetFun<const char* (*)(unsigned op)>("hipGetCmdName");
+    return function(op);
+  }
+
+  const char* ApiName(uint32_t id) const {
+    static auto function = GetFun<const char* (*)(uint32_t id)>("hipApiName");
+    return function(id);
+  }
+
+  void RegisterTracerCallback(int (*callback)(activity_domain_t domain, uint32_t operation_id,
+                                              void* data)) const {
+    static auto function = GetFun<void (*)(int (*callback)(
+        activity_domain_t domain, uint32_t operation_id, void* data))>("hipRegisterTracerCallback");
+    return function(callback);
+  }
 };
 #endif
 
-// rocTX runtime library loader class
-#include "roctracer_roctx.h"
-class RocTxApi {
+// ROCTX library loader class
+class RocTxLoader : public BaseLoader<RocTxLoader> {
+ private:
+  friend RocTxLoader& BaseLoader::Instance();
+  RocTxLoader() : BaseLoader("libroctx64.so") {}
+
  public:
-  typedef BaseLoader<RocTxApi> Loader;
-
-  typedef void(roctxRegisterTracerCallback_t)(int (*function)(activity_domain_t domain,
-                                                              uint32_t operation_id, void* data));
-  roctxRegisterTracerCallback_t* RegisterTracerCallback;
-
- protected:
-  void init(Loader* loader) {
-    RegisterTracerCallback =
-        loader->GetFun<roctxRegisterTracerCallback_t>("roctxRegisterTracerCallback");
+  void RegisterTracerCallback(int (*callback)(activity_domain_t domain, uint32_t operation_id,
+                                              void* data)) const {
+    static auto function =
+        GetFun<void (*)(int (*callback)(activity_domain_t domain, uint32_t operation_id,
+                                        void* data))>("roctxRegisterTracerCallback");
+    return function(callback);
   }
 };
-
-typedef BaseLoader<RocTxApi> RocTxLoader;
-
-#if STATIC_BUILD
-typedef HipLoaderStatic HipLoader;
-#else
-using HipLoader = BaseLoader<HipApi>;
-#endif
 
 }  // namespace roctracer
 
-#define LOADER_INSTANTIATE_2()                                                                     \
-  template <class T> typename roctracer::BaseLoader<T>::mutex_t roctracer::BaseLoader<T>::mutex_;  \
-  template <class T> std::atomic<roctracer::BaseLoader<T>*> roctracer::BaseLoader<T>::instance_{}; \
-  template <class T> bool roctracer::BaseLoader<T>::to_load_ = false;                              \
-  template <class T> bool roctracer::BaseLoader<T>::to_check_open_ = true;                         \
-  template <class T> bool roctracer::BaseLoader<T>::to_check_symb_ = true;                         \
-  template <> const char* roctracer::RocTxLoader::lib_name_ = "libroctx64.so";                     \
-  template <> bool roctracer::RocTxLoader::to_load_ = true;
-
-#if STATIC_BUILD
-#define LOADER_INSTANTIATE_HIP()                                                                   \
-  roctracer::HipLoaderStatic::mutex_t roctracer::HipLoaderStatic::mutex_;                          \
-  roctracer::HipLoaderStatic::instance_t roctracer::HipLoaderStatic::instance_{};
-#else
-#define LOADER_INSTANTIATE_HIP()                                                                   \
-  template <> const char* roctracer::HipLoader::lib_name_ = "libamdhip64.so";
-#endif
-
-#define LOADER_INSTANTIATE()                                                                       \
-  LOADER_INSTANTIATE_2();                                                                          \
-  LOADER_INSTANTIATE_HIP();
-
-#endif  // SRC_CORE_LOADER_H_
+#endif  // ROCTRACER_LOADER_H_

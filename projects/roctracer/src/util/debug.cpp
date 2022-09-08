@@ -63,8 +63,8 @@ int fullCallback(void* data, uintptr_t pc, const char* filename, int lineno, con
   BackTraceInfo* info = static_cast<BackTraceInfo*>(data);
 
   info->sstream << std::endl
-                << "    #" << std::dec << info->depth++ << ' ' << std::showbase << std::hex
-                << std::setfill('0') << std::setw(sizeof(pc) * 2) << pc;
+                << "    #" << std::dec << info->depth++ << ' ' << "0x" << std::noshowbase
+                << std::hex << std::setfill('0') << std::setw(sizeof(pc) * 2) << pc;
   if (function == nullptr)
     backtrace_syminfo(info->state, pc, syminfoCallback, errorCallback, data);
   else {

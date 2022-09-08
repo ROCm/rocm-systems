@@ -166,7 +166,7 @@ target_include_directories(roctracer
     ${CMAKE_CURRENT_SOURCE_DIR}/roctracer ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_options(roctracer PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/roctracer/exportmap -Wl,--no-undefined)
-target_link_libraries(roctracer PRIVATE util hsa-runtime64::hsa-runtime64 Threads::Threads dl)
+target_link_libraries(roctracer PRIVATE util hsa-runtime64::hsa-runtime64 stdc++fs Threads::Threads dl)
 
 install(TARGETS roctracer LIBRARY
   DESTINATION ${CMAKE_INSTALL_LIBDIR}

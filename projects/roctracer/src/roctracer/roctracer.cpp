@@ -107,8 +107,6 @@ std::atomic<util::Logger*> util::Logger::instance_{};
 
 }  // namespace roctracer
 
-LOADER_INSTANTIATE();
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Public library methods
 //
@@ -502,14 +500,14 @@ static void roctracer_enable_callback_impl(roctracer_domain_t domain, uint32_t o
     case ACTIVITY_DOMAIN_HSA_OPS:
       break;
     case ACTIVITY_DOMAIN_HIP_API:
-      if (HipLoader::Instance().Enabled())
+      if (HipLoader::Instance().IsEnabled())
         HIP_registration_group.Register(HIP_ApiTracer::callback_table, operation_id, callback,
                                         user_data);
       break;
     case ACTIVITY_DOMAIN_HIP_OPS:
       break;
     case ACTIVITY_DOMAIN_ROCTX:
-      if (RocTxLoader::Instance().Enabled())
+      if (RocTxLoader::Instance().IsEnabled())
         ROCTX_registration_group.Register(roctx_api_callback_table, operation_id, callback,
                                           user_data);
       break;
@@ -550,13 +548,13 @@ static void roctracer_disable_callback_impl(roctracer_domain_t domain, uint32_t 
     case ACTIVITY_DOMAIN_HSA_OPS:
       break;
     case ACTIVITY_DOMAIN_HIP_API:
-      if (HipLoader::Instance().Enabled())
+      if (HipLoader::Instance().IsEnabled())
         HIP_registration_group.Unregister(HIP_ApiTracer::callback_table, operation_id);
       break;
     case ACTIVITY_DOMAIN_HIP_OPS:
       break;
     case ACTIVITY_DOMAIN_ROCTX:
-      if (RocTxLoader::Instance().Enabled())
+      if (RocTxLoader::Instance().IsEnabled())
         ROCTX_registration_group.Unregister(roctx_api_callback_table, operation_id);
       break;
     default:
@@ -647,11 +645,11 @@ static void roctracer_enable_activity_impl(roctracer_domain_t domain, uint32_t o
       HSA_registration_group.Register(hsa_ops_activity_table, op, memory_pool);
       break;
     case ACTIVITY_DOMAIN_HIP_API:
-      if (HipLoader::Instance().Enabled())
+      if (HipLoader::Instance().IsEnabled())
         HIP_registration_group.Register(HIP_ApiTracer::activity_table, op, memory_pool);
       break;
     case ACTIVITY_DOMAIN_HIP_OPS:
-      if (HipLoader::Instance().Enabled())
+      if (HipLoader::Instance().IsEnabled())
         HIP_registration_group.Register(hip_ops_activity_table, op, memory_pool);
       break;
     case ACTIVITY_DOMAIN_ROCTX:
@@ -713,11 +711,11 @@ static void roctracer_disable_activity_impl(roctracer_domain_t domain, uint32_t 
       HSA_registration_group.Unregister(hsa_ops_activity_table, op);
       break;
     case ACTIVITY_DOMAIN_HIP_API:
-      if (HipLoader::Instance().Enabled())
+      if (HipLoader::Instance().IsEnabled())
         HIP_registration_group.Unregister(HIP_ApiTracer::activity_table, op);
       break;
     case ACTIVITY_DOMAIN_HIP_OPS:
-      if (HipLoader::Instance().Enabled())
+      if (HipLoader::Instance().IsEnabled())
         HIP_registration_group.Unregister(hip_ops_activity_table, op);
       break;
     case ACTIVITY_DOMAIN_ROCTX:
