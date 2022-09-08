@@ -106,23 +106,17 @@ template <class T> class BaseLoader : public T {
 
 namespace roctracer {
 #if STATIC_BUILD
-__attribute__((weak)) hipError_t hipRegisterApiCallback(uint32_t id, void* fun, void* arg) {
-  return hipErrorUnknown;
-}
-__attribute__((weak)) hipError_t hipRemoveApiCallback(uint32_t id) { return hipErrorUnknown; }
-__attribute__((weak)) hipError_t hipRegisterActivityCallback(uint32_t id, void* fun, void* arg) {
-  return hipErrorUnknown;
-}
-__attribute__((weak)) hipError_t hipRemoveActivityCallback(uint32_t id) { return hipErrorUnknown; }
 __attribute__((weak)) const char* hipKernelNameRef(const hipFunction_t f) { return NULL; }
 __attribute__((weak)) const char* hipKernelNameRefByPtr(const void* hostFunction,
                                                         hipStream_t stream) {
   return NULL;
 }
 __attribute__((weak)) int hipGetStreamDeviceId(hipStream_t stream) { return 0; }
-__attribute__((weak)) const char* hipApiName(uint32_t id) { return NULL; }
-
 __attribute__((weak)) const char* hipGetCmdName(unsigned op) { return NULL; }
+__attribute__((weak)) const char* hipApiName(uint32_t id) { return NULL; }
+__attribute__((weak)) void hipRegisterTracerCallback(int (*function)(activity_domain_t domain,
+                                                                     uint32_t operation_id,
+                                                                     void* data)) {}
 
 class HipLoaderStatic {
  public:
@@ -130,30 +124,22 @@ class HipLoaderStatic {
   typedef HipLoaderStatic loader_t;
   typedef std::atomic<loader_t*> instance_t;
 
-  typedef hipError_t(RegisterApiCallback_t)(uint32_t id, void* fun, void* arg);
-  typedef hipError_t(RemoveApiCallback_t)(uint32_t id);
-  typedef hipError_t(RegisterActivityCallback_t)(uint32_t id, void* fun, void* arg);
-  typedef hipError_t(RemoveActivityCallback_t)(uint32_t id);
   typedef const char*(KernelNameRef_t)(const hipFunction_t f);
   typedef const char*(KernelNameRefByPtr_t)(const void* hostFunction, hipStream_t stream);
   typedef int(GetStreamDeviceId_t)(hipStream_t stream);
+  typedef const char*(GetCmdName_t)(unsigned op);
   typedef const char*(ApiName_t)(uint32_t id);
+  typedef void(RegisterTracerCallback_t)(int (*function)(activity_domain_t domain,
+                                                         uint32_t operation_id, void* data));
 
-  RegisterApiCallback_t* RegisterApiCallback;
-  RemoveApiCallback_t* RemoveApiCallback;
-  RegisterActivityCallback_t* RegisterActivityCallback;
-  RemoveActivityCallback_t* RemoveActivityCallback;
   KernelNameRef_t* KernelNameRef;
-  KernelNameRefByPtr_t* KernelNameRefByPtr_;
   const char* KernelNameRefByPtr(const void* function, hipStream_t stream = nullptr) const {
     return KernelNameRefByPtr_(function, stream);
   }
   GetStreamDeviceId_t* GetStreamDeviceId;
+  GetCmdName_t* GetOpName;
   ApiName_t* ApiName;
-
-  typedef const char*(hipGetOpName_t)(unsigned op);
-
-  hipGetOpName_t* GetOpName;
+  RegisterTracerCallback_t* RegisterTracerCallback;
 
   static inline loader_t& Instance() {
     loader_t* obj = instance_.load(std::memory_order_acquire);
@@ -171,20 +157,17 @@ class HipLoaderStatic {
 
  private:
   HipLoaderStatic() {
-    RegisterApiCallback = hipRegisterApiCallback;
-    RemoveApiCallback = hipRemoveApiCallback;
-    RegisterActivityCallback = hipRegisterActivityCallback;
-    RemoveActivityCallback = hipRemoveActivityCallback;
     KernelNameRef = hipKernelNameRef;
     KernelNameRefByPtr_ = hipKernelNameRefByPtr;
     GetStreamDeviceId = hipGetStreamDeviceId;
-    ApiName = hipApiName;
-
     GetOpName = hipGetCmdName;
+    ApiName = hipApiName;
+    RegisterTracerCallback = hipRegisterTracerCallback;
   }
 
   static mutex_t mutex_;
   static instance_t instance_;
+  KernelNameRefByPtr_t* KernelNameRefByPtr_;
 };
 #else
 class HipApi {
