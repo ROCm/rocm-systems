@@ -20,6 +20,8 @@
 ## IN THE SOFTWARE.
 ################################################################################
 
+get_property(HSA_RUNTIME_INCLUDE_DIRECTORIES TARGET hsa-runtime64::hsa-runtime64 PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+
 # Set the HIP language runtime link flags as FindHIP does not set them.
 set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG})
 set(CMAKE_EXECUTABLE_RUNTIME_HIP_FLAG_SEP ${CMAKE_SHARED_LIBRARY_RUNTIME_CXX_FLAG_SEP})
@@ -138,6 +140,12 @@ set_source_files_properties(directed/multi_pool_activities.cpp PROPERTIES HIP_SO
 hip_add_executable(multi_pool_activities directed/multi_pool_activities.cpp)
 target_link_libraries(multi_pool_activities roctracer)
 add_dependencies(mytest multi_pool_activities)
+
+## Build the dlopen test
+add_executable(dlopen directed/dlopen.cpp)
+target_include_directories(dlopen PRIVATE ${PROJECT_SOURCE_DIR}/inc ${HSA_RUNTIME_INCLUDE_DIRECTORIES})
+target_link_libraries(dlopen dl)
+add_dependencies(mytest dlopen)
 
 ## Copy the golden traces and test scripts
 configure_file(run.sh ${PROJECT_BINARY_DIR} COPYONLY)

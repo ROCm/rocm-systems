@@ -490,21 +490,24 @@ hsa_status_t MemoryASyncCopyRectIntercept(const hsa_pitched_ptr_t* dst,
 }  // namespace
 
 roctracer_timestamp_t timestamp_ns() {
+  // If the HSA intercept is installed, then use the "original" 'hsa_system_get_info' function to
+  // avoid reporting calls for internal use of the HSA API by the tracer.
+  auto hsa_system_get_info_fn = saved_core_api.hsa_system_get_info_fn;
+
+  // If the HSA intercept is not installed, use the default 'hsa_system_get_info'.
+  if (hsa_system_get_info_fn == nullptr) hsa_system_get_info_fn = hsa_system_get_info;
+
   uint64_t sysclock;
-
-  assert(saved_core_api.hsa_system_get_info_fn != nullptr && "HSA intercept is not active");
-
-  if (hsa_status_t status =
-          saved_core_api.hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
+  if (hsa_status_t status = hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP, &sysclock);
       status == HSA_STATUS_ERROR_NOT_INITIALIZED)
     return 0;
   else if (status != HSA_STATUS_SUCCESS)
     fatal("hsa_system_get_info failed");
 
-  static uint64_t sysclock_period = []() {
+  static uint64_t sysclock_period = [&]() {
     uint64_t sysclock_hz = 0;
-    if (hsa_status_t status = saved_core_api.hsa_system_get_info_fn(
-            HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
+    if (hsa_status_t status =
+            hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
         status != HSA_STATUS_SUCCESS)
       fatal("hsa_system_get_info failed");
 
@@ -575,6 +578,10 @@ void Finalize() {
   if (hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(false);
       status != HSA_STATUS_SUCCESS)
     assert(!"hsa_amd_profiling_async_copy_enable failed");
+
+  memset(&saved_core_api, '\0', sizeof(saved_core_api));
+  memset(&saved_amd_ext_api, '\0', sizeof(saved_amd_ext_api));
+  memset(&hsa_loader_api, '\0', sizeof(hsa_loader_api));
 }
 
 const char* GetApiName(uint32_t id) { return detail::GetApiName(id); }

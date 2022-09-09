@@ -181,6 +181,7 @@ eval_test "directed TraceBuffer test" ./test/trace_buffer trace_buffer
 eval_test "directed MemoryPool test" ./test/memory_pool memory_pool
 eval_test "enable/disable callbacks and activities test" ./test/activity_and_callback activity_and_callback_trace
 eval_test "use multiple memory pools in HIP activities test" ./test/multi_pool_activities multi_pool_activities_trace
+eval_test "Dynamically load the tracer library test" ./test/dlopen dlopen
 
 eval_test "backward compatibility tests" ./test/backward_compat_test backward_compat_test_trace
 

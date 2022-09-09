@@ -21,3 +21,4 @@ activity_and_callback_trace --check-order .*
 multi_pool_activities_trace --check-order .*
 roctx_test_trace --check-count .*
 backward_compat_test_trace --check-none
+dlopen --check-none
