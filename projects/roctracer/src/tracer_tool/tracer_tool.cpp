@@ -701,21 +701,27 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 
   // Enable HSA API callbacks/activity
   if (trace_hsa_api) {
-    std::cout << "    HSA-trace(";
+    std::ostringstream out;
+    out << "    HSA-trace(";
     if (hsa_api_vec.size() != 0) {
+      out << "-*";
       for (unsigned i = 0; i < hsa_api_vec.size(); ++i) {
         uint32_t cid = HSA_API_ID_NUMBER;
         const char* api = hsa_api_vec[i].c_str();
-        CHECK_ROCTRACER(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api, &cid, nullptr));
-        CHECK_ROCTRACER(
-            roctracer_enable_op_callback(ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, nullptr));
-        std::cout << " " << api;
+        if (roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api, &cid, nullptr) ==
+                ROCTRACER_STATUS_SUCCESS &&
+            roctracer_enable_op_callback(ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, nullptr) ==
+                ROCTRACER_STATUS_SUCCESS)
+          out << ' ' << api;
+        else
+          warning("Unable to enable HSA_API tracing for invalid operation %s", api);
       }
     } else {
       CHECK_ROCTRACER(
           roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, nullptr));
+      out << "*";
     }
-    std::cout << std::endl;
+    std::cout << out.str() << ')' << std::endl;
   }
 
   // Enable HSA GPU activity
@@ -729,30 +735,37 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 
   // Enable HIP API callbacks/activity
   if (trace_hip_api || trace_hip_activity) {
-    std::cout << "    HIP-trace()" << std::endl;
+    std::ostringstream out;
+    out << "    HIP-trace(";
     // Allocating tracing pool
     open_tracing_pool();
 
     // Enable tracing
     if (trace_hip_api) {
       if (hip_api_vec.size() != 0) {
+        out << "-*";
         for (unsigned i = 0; i < hip_api_vec.size(); ++i) {
           uint32_t cid = HIP_API_ID_NONE;
           const char* api = hip_api_vec[i].c_str();
-          CHECK_ROCTRACER(roctracer_op_code(ACTIVITY_DOMAIN_HIP_API, api, &cid, nullptr));
-          CHECK_ROCTRACER(roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API, cid,
-                                                       hip_api_callback, nullptr));
-          std::cout << " " << api;
+          if (roctracer_op_code(ACTIVITY_DOMAIN_HIP_API, api, &cid, nullptr) ==
+                  ROCTRACER_STATUS_SUCCESS &&
+              roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API, cid, hip_api_callback,
+                                           nullptr) == ROCTRACER_STATUS_SUCCESS)
+            out << ' ' << api;
+          else
+            warning("Unable to enable HIP_API tracing for invalid operation %s", api);
         }
       } else {
         CHECK_ROCTRACER(
             roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, hip_api_callback, nullptr));
+        out << "*";
       }
     }
 
     if (trace_hip_activity) {
       CHECK_ROCTRACER(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
     }
+    std::cout << out.str() << ')' << std::endl;
   }
 
   // Enable PC sampling

@@ -283,6 +283,12 @@ class file_plugin_t {
 
       switch (begin->domain) {
         case ACTIVITY_DOMAIN_HIP_OPS: {
+          // The post-processing script cannot handle HIP ops without a correlation ID. The
+          // correlation ID is needed to connect the record to a HIP stream and originating thread.
+          // The script could be modified to handle ops without correlation IDs, but for backward
+          // compatibilty, we are simply dropping the records here.
+          if (begin->correlation_id == 0) break;
+
           output_file = get_output_file(ACTIVITY_DOMAIN_HIP_OPS);
           *output_file << std::dec << begin->begin_ns << ":" << begin->end_ns << " "
                        << begin->device_id << ":" << begin->queue_id << " " << name << ":"
