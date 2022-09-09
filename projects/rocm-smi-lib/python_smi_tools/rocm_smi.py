@@ -2444,6 +2444,8 @@ def showWeightTopology(deviceList):
                 gpu_links_weight[srcdevice][destdevice] = weight
             else:
                 printErrLog(srcdevice, 'Cannot read Link Weight: Not supported on this machine')
+                gpu_links_weight[srcdevice][destdevice] = None
+
 
     if PRINT_JSON:
         formatMatrixToJSON(deviceList, gpu_links_weight, "(Topology) Weight between DRM devices {} and {}")
@@ -2460,6 +2462,8 @@ def showWeightTopology(deviceList):
         for gpu2 in deviceList:
             if (gpu1 == gpu2):
                 printTableRow('%-12s', '0')
+            elif (gpu_links_weight[gpu1][gpu2] == None):
+                printTableRow('%-12s', 'N/A')
             else:
                 printTableRow('%-12s', gpu_links_weight[gpu1][gpu2].value)
         printEmptyLine()
@@ -2487,6 +2491,7 @@ def showHopsTopology(deviceList):
                 gpu_links_hops[srcdevice][destdevice] = hops
             else:
                 printErrLog(srcdevice, 'Cannot read Link Hops: Not supported on this machine')
+                gpu_links_hops[srcdevice][destdevice] = None
 
     if PRINT_JSON:
         formatMatrixToJSON(deviceList, gpu_links_hops, "(Topology) Hops between DRM devices {} and {}")
@@ -2503,6 +2508,8 @@ def showHopsTopology(deviceList):
         for gpu2 in deviceList:
             if (gpu1 == gpu2):
                 printTableRow('%-12s', '0')
+            elif (gpu_links_hops[gpu1][gpu2] == None):
+                printTableRow('%-12s', 'N/A')
             else:
                 printTableRow('%-12s', gpu_links_hops[gpu1][gpu2].value)
         printEmptyLine()
@@ -2535,6 +2542,8 @@ def showTypeTopology(deviceList):
                     gpu_links_type[srcdevice][destdevice] = "XXXX"
             else:
                 printErrLog(srcdevice, 'Cannot read Link Type: Not supported on this machine')
+                gpu_links_type[srcdevice][destdevice] = "XXXX"
+
     if PRINT_JSON:
         formatMatrixToJSON(deviceList, gpu_links_type, "(Topology) Link type between DRM devices {} and {}")
         return
