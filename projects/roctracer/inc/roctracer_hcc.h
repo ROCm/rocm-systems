@@ -18,6 +18,7 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#pragma message("This file has been deprecated and marked for removal. Please use roctracer_hip.h instead.")
+#pragma message(                                                              \
+    "This file has been deprecated and marked for removal. Please use roctracer_hip.h instead.")
 
-#include <roctracer_hip.h>
+#include "roctracer_hip.h"

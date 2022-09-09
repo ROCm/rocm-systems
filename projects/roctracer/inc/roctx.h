@@ -211,7 +211,8 @@ typedef uint64_t roctx_range_id_t;
  *
  * \return Returns the ID of the new range.
  */
-ROCTX_API roctx_range_id_t roctxRangeStartA(const char* message) ROCTX_VERSION_4_1;
+ROCTX_API roctx_range_id_t roctxRangeStartA(const char* message)
+    ROCTX_VERSION_4_1;
 #define roctxRangeStart(message) roctxRangeStartA(message)
 
 /**

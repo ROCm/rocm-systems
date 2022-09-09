@@ -18,14 +18,15 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef INC_ROCTRACER_HSA_H_
-#define INC_ROCTRACER_HSA_H_
+#ifndef ROCTRACER_HSA_H_
+#define ROCTRACER_HSA_H_
 
-#include <roctracer.h>
+#include "roctracer.h"
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
-#include <hsa_prof_str.h>
+#include "hsa_ostream_ops.h"
+#include "hsa_prof_str.h"
 
 // HSA OP ID enumeration
 enum hsa_op_id_t {
@@ -55,11 +56,12 @@ struct hsa_ops_properties_t {
 typedef struct {
   union {
     struct {
-      const void* ptr;            // allocated area ptr
-      size_t size;                // allocated area size, zero size means 'free' callback
+      const void* ptr;  // allocated area ptr
+      size_t size;      // allocated area size, zero size means 'free' callback
       hsa_amd_segment_t segment;  // allocated area's memory segment type
-      hsa_amd_memory_pool_global_flag_t global_flag;  // allocated area's memory global flag
-      int is_code;                                    // equal to 1 if code is allocated
+      hsa_amd_memory_pool_global_flag_t
+          global_flag;  // allocated area's memory global flag
+      int is_code;      // equal to 1 if code is allocated
     } allocate;
 
     struct {
@@ -76,11 +78,12 @@ typedef struct {
     } memcopy;
 
     struct {
-      const void* packet;       // submitted to GPU packet
-      const char* kernel_name;  // kernel name, NULL if not a kernel dispatch packet
-      hsa_queue_t* queue;       // HSA queue the packet was submitted to
-      uint32_t device_type;     // type of device the packet is submitted to
-      uint32_t device_id;       // id of device the packet is submitted to
+      const void* packet;  // submitted to GPU packet
+      const char*
+          kernel_name;     // kernel name, NULL if not a kernel dispatch packet
+      hsa_queue_t* queue;  // HSA queue the packet was submitted to
+      uint32_t device_type;  // type of device the packet is submitted to
+      uint32_t device_id;    // id of device the packet is submitted to
     } submit;
 
     struct {
@@ -98,11 +101,12 @@ typedef struct {
       uint64_t load_base;     // code object load base
       uint64_t load_size;     // code object load size
       uint64_t load_delta;    // code object load size
-      uint32_t uri_length;    // URI string length (not including the terminating NUL character)
-      const char* uri;        // URI string
-      int unload;             // unload flag
+      uint32_t uri_length;  // URI string length (not including the terminating
+                            // NUL character)
+      const char* uri;      // URI string
+      int unload;           // unload flag
     } codeobj;
   };
 } hsa_evt_data_t;
 
-#endif  // INC_ROCTRACER_HSA_H_
+#endif  // ROCTRACER_HSA_H_

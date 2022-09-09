@@ -30,7 +30,13 @@
 #ifndef ROCTRACER_EXT_H_
 #define ROCTRACER_EXT_H_
 
-#include <roctracer.h>
+#include "roctracer.h"
+
+/* Extension API opcodes */
+typedef enum {
+  ACTIVITY_EXT_OP_MARK = 0,
+  ACTIVITY_EXT_OP_EXTERN_ID = 1
+} activity_ext_op_t;
 
 typedef void (*roctracer_start_cb_t)();
 typedef void (*roctracer_stop_cb_t)();
@@ -58,12 +64,14 @@ void ROCTRACER_API roctracer_stop() ROCTRACER_VERSION_4_1;
 // Notifies that the calling thread is entering an external API region.
 // Push an external correlation id for the calling thread.
 roctracer_status_t ROCTRACER_API
-roctracer_activity_push_external_correlation_id(activity_correlation_id_t id) ROCTRACER_VERSION_4_1;
+roctracer_activity_push_external_correlation_id(activity_correlation_id_t id)
+    ROCTRACER_VERSION_4_1;
 
 // Notifies that the calling thread is leaving an external API region.
 // Pop an external correlation id for the calling thread.
 // 'lastId' returns the last external correlation if not NULL
-roctracer_status_t ROCTRACER_API roctracer_activity_pop_external_correlation_id(
+roctracer_status_t ROCTRACER_API
+roctracer_activity_pop_external_correlation_id(
     activity_correlation_id_t* last_id) ROCTRACER_VERSION_4_1;
 
 #ifdef __cplusplus

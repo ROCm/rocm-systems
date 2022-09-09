@@ -1,3 +1,4 @@
 ---
+BasedOnStyle: InheritParentConfig
 ColumnLimit:     79
 ...

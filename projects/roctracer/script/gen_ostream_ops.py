@@ -58,7 +58,15 @@ header_basic = \
 '     using std::operator<<;\n' + \
 '     static bool recursion = false;\n' + \
 '     if (recursion == false) { recursion = true; out << v; recursion = false; }\n' + \
-'     return out; }\n'
+'     return out;\n  }\n' + \
+'\n' + \
+'  inline static std::ostream &operator<<(std::ostream &out, const unsigned char &v) {\n' + \
+'    out << (unsigned int)v;\n' + \
+'    return out;\n  }\n' + \
+'\n' + \
+'  inline static std::ostream &operator<<(std::ostream &out, const char &v) {\n' + \
+'    out << (unsigned char)v;\n' + \
+'    return out;\n  }\n'
 
 structs_analyzed = {}
 global_ops = ''
@@ -153,11 +161,12 @@ def gen_cppheader(infilepath, outfilepath, rank):
       header_s = \
         '#ifndef INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
         '#define INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
+        '\n' + \
+        '#include "roctracer.h"\n' + \
+        '\n' + \
         '#ifdef __cplusplus\n' + \
         '#include <iostream>\n' + \
-        '\n' + \
-        '#include "roctracer.h"\n'
-      header_s += '#include <string>\n'
+        '#include <string>\n'
 
       output_filename_h.write(header_s)
       output_filename_h.write('\n')

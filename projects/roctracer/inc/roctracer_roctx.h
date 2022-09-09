@@ -21,7 +21,7 @@
 #ifndef ROCTRACER_ROCTX_H_
 #define ROCTRACER_ROCTX_H_
 
-#include <roctx.h>
+#include "roctx.h"
 
 /**
  *  ROCTX API ID enumeration

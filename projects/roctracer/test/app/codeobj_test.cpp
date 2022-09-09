@@ -22,8 +22,8 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "inc/roctracer.h"
-#include "inc/roctracer_hsa.h"
+#include "roctracer.h"
+#include "roctracer_hsa.h"
 
 namespace {
 // Check returned HSA API status

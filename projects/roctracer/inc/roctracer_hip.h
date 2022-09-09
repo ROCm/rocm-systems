@@ -18,28 +18,14 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef INC_ROCTRACER_HIP_H_
-#define INC_ROCTRACER_HIP_H_
+#ifndef ROCTRACER_HIP_H_
+#define ROCTRACER_HIP_H_
 
-#ifdef __cplusplus
-#include <iostream>
-
-inline static std::ostream& operator<<(std::ostream& out, const unsigned char& v) {
-  out << (unsigned int)v;
-  return out;
-}
-
-inline static std::ostream& operator<<(std::ostream& out, const char& v) {
-  out << (unsigned char)v;
-  return out;
-}
-#endif  // __cplusplus
+#include "roctracer.h"
 
 #include <hip/hip_runtime.h>
-#include <hip_ostream_ops.h>
+#include "hip_ostream_ops.h"
 #include <hip/amd_detail/hip_prof_str.h>
-
-#include <roctracer.h>
 
 typedef enum {
   HIP_OP_ID_DISPATCH = 0,
@@ -48,15 +34,4 @@ typedef enum {
   HIP_OP_ID_NUMBER = 3
 } hip_op_id_t;
 
-#ifdef __cplusplus
-extern "C" {
-#endif  // __cplusplus
-
-// Traced calls ID enumeration
-typedef enum hip_api_id_t roctracer_hip_api_cid_t;
-
-#ifdef __cplusplus
-}  // extern "C" block
-#endif  // __cplusplus
-
-#endif  // INC_ROCTRACER_HIP_H_
+#endif  // ROCTRACER_HIP_H_
