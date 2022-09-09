@@ -20,11 +20,13 @@
 
 #include "roctracer.h"
 
+extern "C" {
+
 // Deprecated functions:
-extern "C" ROCTRACER_API int roctracer_load() { return 1; }
-extern "C" ROCTRACER_API void roctracer_unload() {}
-extern "C" ROCTRACER_API void roctracer_flush_buf() {}
-extern "C" ROCTRACER_API void roctracer_mark(const char*) {}
+ROCTRACER_API int roctracer_load() { return 1; }
+ROCTRACER_API void roctracer_unload() {}
+ROCTRACER_API void roctracer_flush_buf() {}
+ROCTRACER_API void roctracer_mark(const char*) {}
 
 ROCTRACER_API roctracer_status_t roctracer_enable_callback(roctracer_rtapi_callback_t callback,
                                                            void* user_data) {
@@ -67,3 +69,5 @@ ROCTRACER_API roctracer_status_t roctracer_disable_activity() {
       return status;
   return ROCTRACER_STATUS_SUCCESS;
 }
+
+}  // extern "C"
