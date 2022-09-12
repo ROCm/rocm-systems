@@ -265,7 +265,7 @@ backtrace_metrics::fini_perfetto(int64_t _tid)
         {
             if(i < _hw_cnt_labels.size())
             {
-                TRACE_COUNTER("hardware_counter",
+                TRACE_COUNTER("thread_hardware_counter",
                               perfetto_counter_track<hw_counters>::at(_tid, i), _ts, 0.0);
             }
         }
@@ -291,7 +291,7 @@ backtrace_metrics::post_process_perfetto(int64_t _tid, uint64_t _ts) const
         {
             if(i < m_hw_counter.size())
             {
-                TRACE_COUNTER("hardware_counter",
+                TRACE_COUNTER("thread_hardware_counter",
                               perfetto_counter_track<hw_counters>::at(_tid, i), _ts,
                               m_hw_counter.at(i));
             }

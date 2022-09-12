@@ -109,5 +109,3 @@ private:
 };
 }  // namespace component
 }  // namespace omnitrace
-
-OMNITRACE_DEFINE_NAME_TRAIT("cpu_freq", omnitrace::component::cpu_freq);

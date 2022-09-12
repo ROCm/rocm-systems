@@ -8,6 +8,7 @@ set(component_sources
     ${CMAKE_CURRENT_LIST_DIR}/exit_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/fork_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi_gotcha.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/numa_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pthread_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pthread_create_gotcha.cpp
     ${CMAKE_CURRENT_LIST_DIR}/pthread_mutex_gotcha.cpp)
@@ -24,6 +25,7 @@ set(component_headers
     ${CMAKE_CURRENT_LIST_DIR}/exit_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/fork_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi_gotcha.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/numa_gotcha.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rcclp.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/roctracer.hpp

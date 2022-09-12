@@ -583,8 +583,8 @@ post_process_perfetto()
             for(size_t i = 0; i < _values.size(); ++i)
             {
                 auto _trace_counter = [_dev_id, i, _ts](auto&& _v) {
-                    TRACE_COUNTER("hardware_counter", counter_track::at(_dev_id, i), _ts,
-                                  _v);
+                    TRACE_COUNTER("kernel_hardware_counter",
+                                  counter_track::at(_dev_id, i), _ts, _v);
                 };
                 std::visit(_trace_counter, _values.at(i));
             }

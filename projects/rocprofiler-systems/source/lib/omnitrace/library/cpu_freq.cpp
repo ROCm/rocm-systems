@@ -50,16 +50,13 @@ namespace omnitrace
 {
 namespace cpu_freq
 {
-using namespace ::tim::cpu_freq;
-using cpu_freq_component = component::cpu_freq;
-
 template <typename... Tp>
 using type_list = tim::type_list<Tp...>;
 
 namespace
 {
 using cpu_data_tuple_t = std::tuple<size_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                                    int64_t, int64_t, cpu_freq_component>;
+                                    int64_t, int64_t, component::cpu_freq>;
 std::deque<cpu_data_tuple_t> cpu_data = {};
 
 template <typename... Types>
@@ -79,14 +76,16 @@ void
 setup()
 {
     init_perfetto_counter_tracks(
-        type_list<cpu_freq_component, cpu_page, cpu_virt, cpu_peak, cpu_context_switch,
-                  cpu_page_fault, cpu_user_mode_time, cpu_kernel_mode_time>{});
+        type_list<category::cpu_freq, category::process_page, category::process_virt,
+                  category::process_peak, category::process_context_switch,
+                  category::process_page_fault, category::process_user_mode_time,
+                  category::process_kernel_mode_time>{});
 }
 
 void
 config()
 {
-    cpu_freq_component::configure();
+    component::cpu_freq::configure();
 }
 
 void
@@ -95,7 +94,7 @@ sample()
     auto _ts = tim::get_clock_real_now<size_t, std::nano>();
 
     auto _rcache = tim::rusage_cache{ RUSAGE_SELF };
-    auto _freqs  = cpu_freq_component{}.sample();
+    auto _freqs  = component::cpu_freq{}.sample();
 
     // user and kernel mode times are in microseconds
     cpu_data.emplace_back(
@@ -164,7 +163,7 @@ post_process()
                       "Post-processing %zu cpu frequency and memory usage entries...\n",
                       cpu_data.size());
     auto _process_frequencies = [](size_t _idx, size_t _offset) {
-        using freq_track = perfetto_counter_track<cpu_freq_component>;
+        using freq_track = perfetto_counter_track<category::cpu_freq>;
 
         const auto& _thread_info = thread_info::get(0, LookupTID);
         OMNITRACE_CI_THROW(!_thread_info, "Missing thread info for thread 0");
@@ -183,17 +182,19 @@ post_process()
             uint64_t _ts   = std::get<0>(itr);
             double   _freq = std::get<8>(itr).at(_offset);
             if(!_thread_info->is_valid_time(_ts)) continue;
-            write_perfetto_counter_track<cpu_freq_component>(index{ _idx }, _ts, _freq);
+            write_perfetto_counter_track<category::cpu_freq>(index{ _idx }, _ts, _freq);
         }
 
         auto _end_ts = _thread_info->get_stop();
-        write_perfetto_counter_track<cpu_freq_component>(index{ _idx }, _end_ts, 0);
+        write_perfetto_counter_track<category::cpu_freq>(index{ _idx }, _end_ts, 0);
     };
 
     auto _process_cpu_rusage = []() {
         config_perfetto_counter_tracks(
-            type_list<cpu_page, cpu_virt, cpu_peak, cpu_context_switch, cpu_page_fault,
-                      cpu_user_mode_time, cpu_kernel_mode_time>{},
+            type_list<category::process_page, category::process_virt,
+                      category::process_peak, category::process_context_switch,
+                      category::process_page_fault, category::process_user_mode_time,
+                      category::process_kernel_mode_time>{},
             { "Memory Usage", "Virtual Memory Usage", "Peak Memory", "Context Switches",
               "Page Faults", "User Time", "Kernel Time" },
             { "MB", "MB", "MB", "", "", "sec", "sec" });
@@ -214,28 +215,33 @@ post_process()
             uint64_t _flts = std::get<5>(itr);
             double   _user = std::get<6>(itr);
             double   _kern = std::get<7>(itr);
-            write_perfetto_counter_track<cpu_page>(_ts, _page / units::megabyte);
-            write_perfetto_counter_track<cpu_virt>(_ts, _virt / units::megabyte);
-            write_perfetto_counter_track<cpu_peak>(_ts, _peak / units::megabyte);
-            write_perfetto_counter_track<cpu_context_switch>(_ts, _cntx);
-            write_perfetto_counter_track<cpu_page_fault>(_ts, _flts);
-            write_perfetto_counter_track<cpu_user_mode_time>(_ts, _user / units::sec);
-            write_perfetto_counter_track<cpu_kernel_mode_time>(_ts, _kern / units::sec);
+            write_perfetto_counter_track<category::process_page>(_ts,
+                                                                 _page / units::megabyte);
+            write_perfetto_counter_track<category::process_virt>(_ts,
+                                                                 _virt / units::megabyte);
+            write_perfetto_counter_track<category::process_peak>(_ts,
+                                                                 _peak / units::megabyte);
+            write_perfetto_counter_track<category::process_context_switch>(_ts, _cntx);
+            write_perfetto_counter_track<category::process_page_fault>(_ts, _flts);
+            write_perfetto_counter_track<category::process_user_mode_time>(
+                _ts, _user / units::sec);
+            write_perfetto_counter_track<category::process_kernel_mode_time>(
+                _ts, _kern / units::sec);
         }
 
         auto _end_ts = _thread_info->get_stop();
-        write_perfetto_counter_track<cpu_page>(_end_ts, 0.0);
-        write_perfetto_counter_track<cpu_virt>(_end_ts, 0.0);
-        write_perfetto_counter_track<cpu_peak>(_end_ts, 0.0);
-        write_perfetto_counter_track<cpu_context_switch>(_end_ts, 0);
-        write_perfetto_counter_track<cpu_page_fault>(_end_ts, 0);
-        write_perfetto_counter_track<cpu_user_mode_time>(_end_ts, 0.0);
-        write_perfetto_counter_track<cpu_kernel_mode_time>(_end_ts, 0.0);
+        write_perfetto_counter_track<category::process_page>(_end_ts, 0.0);
+        write_perfetto_counter_track<category::process_virt>(_end_ts, 0.0);
+        write_perfetto_counter_track<category::process_peak>(_end_ts, 0.0);
+        write_perfetto_counter_track<category::process_context_switch>(_end_ts, 0);
+        write_perfetto_counter_track<category::process_page_fault>(_end_ts, 0);
+        write_perfetto_counter_track<category::process_user_mode_time>(_end_ts, 0.0);
+        write_perfetto_counter_track<category::process_kernel_mode_time>(_end_ts, 0.0);
     };
 
     _process_cpu_rusage();
 
-    auto& enabled_cpu_freqs = cpu_freq_component::get_enabled_cpus();
+    auto& enabled_cpu_freqs = component::cpu_freq::get_enabled_cpus();
     for(auto itr = enabled_cpu_freqs.begin(); itr != enabled_cpu_freqs.end(); ++itr)
     {
         auto _idx    = *itr;

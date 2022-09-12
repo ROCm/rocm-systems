@@ -45,7 +45,10 @@ get_whole_function_names()
         "sigandset", "sigdelset", "sigemptyset", "sigfillset", "sighold", "sigisemptyset",
         "sigismember", "sigorset", "sigrelse", "sigvec", "strtok", "strstr", "sbrk",
         "strxfrm", "atexit", "ompt_start_tool", "nanosleep", "cfree", "tolower",
-        "toupper", "fileno", "fileno_unlocked", "exit", "quick_exit", "abort",
+        "toupper", "fileno", "fileno_unlocked", "exit", "quick_exit", "abort", "mbind",
+        "migrate_pages", "move_pages", "numa_migrate_pages", "numa_move_pages",
+        "numa_alloc", "numa_alloc_local", "numa_alloc_interleaved", "numa_alloc_onnode",
+        "numa_realloc", "numa_free",
         // below are functions which never terminate
         "rocr::core::Signal::WaitAny", "rocr::core::Runtime::AsyncEventsLoop",
         "rocr::core::BusyWaitSignal::WaitAcquire",

@@ -248,7 +248,6 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
-    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     start<OptsT...>(
         _data.tool_id.c_str(), "args",
         JOIN(", ",
@@ -261,7 +260,6 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
                                   Args&&... _args)
 {
-    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     stop<OptsT...>(_data.tool_id.c_str(), "return", JOIN(", ", _args...));
 }
 
@@ -271,7 +269,6 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
                                   Args&&... _args)
 {
-    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     start<OptsT...>(
         _name.data(), "args",
         JOIN(", ",
@@ -284,7 +281,6 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
                                   Args&&... _args)
 {
-    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     stop<OptsT...>(_name.data(), "return", JOIN(", ", _args...));
 }
 
