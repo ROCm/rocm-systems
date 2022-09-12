@@ -99,14 +99,6 @@ MemoryPool* default_memory_pool = nullptr;
 
 }  // namespace
 
-namespace roctracer {
-
-// Logger routines and primitives
-util::Logger::mutex_t util::Logger::mutex_;
-std::atomic<util::Logger*> util::Logger::instance_{};
-
-}  // namespace roctracer
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Public library methods
 //
@@ -117,7 +109,7 @@ ROCTRACER_API uint32_t roctracer_version_minor() { return ROCTRACER_VERSION_MINO
 
 // Returns the last error
 ROCTRACER_API const char* roctracer_error_string() {
-  return strdup(util::Logger::LastMessage().c_str());
+  return strdup(util::Logger::Instance().LastMessage().c_str());
 }
 
 // Return Op string by given domain and activity/API codes
@@ -880,9 +872,6 @@ ROCTRACER_API roctracer_status_t roctracer_set_properties(roctracer_domain_t dom
   }
   API_METHOD_SUFFIX
 }
-
-__attribute__((constructor)) void constructor() { util::Logger::Create(); }
-__attribute__((destructor)) void destructor() { util::Logger::Destroy(); }
 
 extern "C" {
 

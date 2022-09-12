@@ -43,11 +43,9 @@ namespace roctracer::util {
 
 class Logger {
  public:
-  typedef std::recursive_mutex mutex_t;
-
-  template <typename T> Logger& operator<<(const T& m) {
+  template <typename T> Logger& operator<<(T&& m) {
     std::ostringstream oss;
-    oss << m;
+    oss << std::forward<T>(m);
     if (!streaming_)
       Log(oss.str());
     else
@@ -56,7 +54,7 @@ class Logger {
     return *this;
   }
 
-  typedef void (*manip_t)();
+  using manip_t = void (*)();
   Logger& operator<<(manip_t f) {
     f();
     return *this;
@@ -65,59 +63,35 @@ class Logger {
   static void begm() { Instance().ResetStreaming(true); }
   static void endl() { Instance().ResetStreaming(false); }
 
-  static const std::string& LastMessage() {
-    Logger& logger = Instance();
-    std::lock_guard<mutex_t> lck(mutex_);
-    return logger.message_[GetTid()];
-  }
-
-  static Logger* Create() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    Logger* obj = instance_.load(std::memory_order_relaxed);
-    if (obj == NULL) {
-      obj = new Logger();
-      if (obj == NULL) {
-        std::cerr << "ROCTracer: log object creation failed" << std::endl << std::flush;
-        abort();
-      }
-      instance_.store(obj, std::memory_order_release);
-    }
-    return obj;
-  }
-
-  static void Destroy() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ != NULL) delete instance_.load();
-    instance_ = NULL;
+  const std::string& LastMessage() {
+    std::lock_guard lock(mutex_);
+    return message_[GetTid()];
   }
 
   static Logger& Instance() {
-    Logger* obj = instance_.load(std::memory_order_acquire);
-    if (obj == NULL) obj = Create();
-    return *obj;
+    static Logger instance;
+    return instance;
   }
 
   static uint32_t GetPid() { return syscall(__NR_getpid); }
   static uint32_t GetTid() { return syscall(__NR_gettid); }
 
  private:
-  Logger() : file_(NULL), dirty_(false), streaming_(false), messaging_(false) {
-    const char* path = getenv("ROCTRACER_LOG");
-    if (path != NULL) {
-      file_ = fopen("/tmp/roctracer_log.txt", "a");
-    }
+  Logger() : file_(nullptr), dirty_(false), streaming_(false), messaging_(false) {
+    const char* var = getenv("ROCTRACER_LOG");
+    if (var != nullptr) file_ = fopen("/tmp/roctracer_log.txt", "a");
     ResetStreaming(false);
   }
 
   ~Logger() {
-    if (file_ != NULL) {
+    if (file_ != nullptr) {
       if (dirty_) Put("\n");
       fclose(file_);
     }
   }
 
   void ResetStreaming(const bool messaging) {
-    std::lock_guard<mutex_t> lck(mutex_);
+    std::lock_guard lock(mutex_);
     if (messaging) {
       message_[GetTid()] = "";
     } else if (streaming_) {
@@ -129,11 +103,11 @@ class Logger {
   }
 
   void Put(const std::string& m) {
-    std::lock_guard<mutex_t> lck(mutex_);
+    std::lock_guard lock(mutex_);
     if (messaging_) {
       message_[GetTid()] += m;
     }
-    if (file_ != NULL) {
+    if (file_ != nullptr) {
       dirty_ = true;
       flock(fileno(file_), LOCK_EX);
       fprintf(file_, "%s", m.c_str());
@@ -143,7 +117,7 @@ class Logger {
   }
 
   void Log(const std::string& m) {
-    const time_t rawtime = time(NULL);
+    const time_t rawtime = time(nullptr);
     tm tm_info;
     localtime_r(&rawtime, &tm_info);
     char tm_str[26];
@@ -158,8 +132,7 @@ class Logger {
   bool streaming_;
   bool messaging_;
 
-  static mutex_t mutex_;
-  static std::atomic<Logger*> instance_;
+  std::recursive_mutex mutex_;
   std::map<uint32_t, std::string> message_;
 };
 
@@ -170,51 +143,25 @@ class Logger {
     roctracer::util::Logger::Instance()                                                            \
         << "fatal: " << roctracer::util::Logger::begm << stream << roctracer::util::Logger::endl;  \
     abort();                                                                                       \
-  } while (0)
+  } while (false)
 
 #define ERR_LOGGING(stream)                                                                        \
   do {                                                                                             \
     roctracer::util::Logger::Instance()                                                            \
         << "error: " << roctracer::util::Logger::begm << stream << roctracer::util::Logger::endl;  \
-  } while (0)
+  } while (false)
 
 #define INFO_LOGGING(stream)                                                                       \
   do {                                                                                             \
     roctracer::util::Logger::Instance()                                                            \
         << "info: " << roctracer::util::Logger::begm << stream << roctracer::util::Logger::endl;   \
-  } while (0)
+  } while (false)
 
 #define WARN_LOGGING(stream)                                                                       \
   do {                                                                                             \
     std::cerr << "ROCProfiler: " << stream << std::endl;                                           \
     roctracer::util::Logger::Instance() << "warning: " << roctracer::util::Logger::begm << stream  \
                                         << roctracer::util::Logger::endl;                          \
-  } while (0)
-
-#ifdef DEBUG
-#define DBG_LOGGING(stream)                                                                        \
-  do {                                                                                             \
-    roctracer::util::Logger::Instance()                                                            \
-        << roctracer::util::Logger::begm << "debug: \"" << stream << "\""                          \
-        << " in " << __FUNCTION__ << " at " << __FILE__ << " line " << __LINE__                    \
-        << roctracer::util::Logger::endl;                                                          \
-  } while (0)
-#endif
-
-#if DEBUG_TRACE_ON
-inline static void DEBUG_TRACE(const char* fmt, ...) {
-  constexpr int size = 256;
-  char buf[size];
-
-  va_list valist;
-  va_start(valist, fmt);
-  vsnprintf(buf, size, fmt, valist);
-  printf("%u:%u %s", roctracer::util::Logger::GetPid(), roctracer::util::Logger::GetTid(), buf);
-  fflush(stdout);
-  va_end(valist);
-}
-#else
-#define DEBUG_TRACE(...)
-#endif
+  } while (false)
 
 #endif  // SRC_UTIL_LOGGER_H_
