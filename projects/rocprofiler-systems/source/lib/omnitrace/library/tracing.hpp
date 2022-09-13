@@ -23,6 +23,7 @@
 #pragma once
 
 #include "library/common.hpp"
+#include "library/concepts.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
@@ -33,6 +34,8 @@
 #include "library/utility.hpp"
 
 #include <timemory/components/timing/backends.hpp>
+
+#include <type_traits>
 
 namespace omnitrace
 {
@@ -194,13 +197,74 @@ pop_timemory(CategoryT, const char* name, Args&&... args)
     }
 }
 
+template <typename Np, typename Tp>
+auto
+add_perfetto_annotation(perfetto::EventContext& ctx, Np&& _name, Tp&& _val)
+{
+    using named_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Np>>>;
+    using value_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Tp>>>;
+
+    static_assert(concepts::is_string_type<named_type>::value,
+                  "Error! name is not a string type");
+
+    auto _get_dbg = [&]() {
+        auto* _dbg = ctx.event()->add_debug_annotations();
+        _dbg->set_name(std::string_view{ std::forward<Np>(_name) }.data());
+        return _dbg;
+    };
+
+    if constexpr(std::is_same<value_type, std::string_view>::value)
+    {
+        _get_dbg()->set_string_value(_val.data());
+    }
+    else if constexpr(concepts::is_string_type<value_type>::value)
+    {
+        _get_dbg()->set_string_value(std::forward<Tp>(_val));
+    }
+    else if constexpr(std::is_same<value_type, bool>::value)
+    {
+        _get_dbg()->set_bool_value(std::forward<Tp>(_val));
+    }
+    else if constexpr(std::is_enum<value_type>::value)
+    {
+        _get_dbg()->set_int_value(static_cast<int64_t>(std::forward<Tp>(_val)));
+    }
+    else if constexpr(std::is_floating_point<value_type>::value)
+    {
+        _get_dbg()->set_double_value(std::forward<Tp>(_val));
+    }
+    else if constexpr(std::is_integral<value_type>::value)
+    {
+        if constexpr(std::is_unsigned<value_type>::value)
+        {
+            _get_dbg()->set_uint_value(std::forward<Tp>(_val));
+        }
+        else
+        {
+            _get_dbg()->set_int_value(std::forward<Tp>(_val));
+        }
+    }
+    else if constexpr(std::is_pointer<value_type>::value)
+    {
+        _get_dbg()->set_pointer_value(reinterpret_cast<uint64_t>(std::forward<Tp>(_val)));
+    }
+    else if constexpr(concepts::can_stringify<value_type>::value)
+    {
+        _get_dbg()->set_string_value(JOIN("", std::forward<Tp>(_val)));
+    }
+    else
+    {
+        static_assert(std::is_empty<value_type>::value, "Error! unsupported data type");
+    }
+}
+
 template <typename CategoryT, typename... Args>
 inline void
 push_perfetto(CategoryT, const char* name, Args&&... args)
 {
     uint64_t _ts = comp::wall_clock::record();
     TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name), _ts,
-                      std::forward<Args>(args)..., "begin_ns", _ts);
+                      "begin_ns", _ts, std::forward<Args>(args)...);
 }
 
 template <typename CategoryT, typename... Args>
@@ -208,8 +272,8 @@ inline void
 pop_perfetto(CategoryT, const char*, Args&&... args)
 {
     uint64_t _ts = comp::wall_clock::record();
-    TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, std::forward<Args>(args)...,
-                    "end_ns", _ts);
+    TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, "end_ns", _ts,
+                    std::forward<Args>(args)...);
 }
 
 template <typename CategoryT, typename... Args>

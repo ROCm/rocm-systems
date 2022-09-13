@@ -248,10 +248,10 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(
-        _data.tool_id.c_str(), "args",
-        JOIN(", ",
-             JOIN('=', tim::try_demangle<std::remove_reference_t<Args>>(), _args)...));
+    start<OptsT...>(_data.tool_id.c_str(), [&](perfetto::EventContext ctx) {
+        OMNITRACE_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
+            ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args));
+    });
 }
 
 template <typename CategoryT>
@@ -269,10 +269,10 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(
-        _name.data(), "args",
-        JOIN(", ",
-             JOIN('=', tim::try_demangle<std::remove_reference_t<Args>>(), _args)...));
+    start<OptsT...>(_name.data(), [&](perfetto::EventContext ctx) {
+        OMNITRACE_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
+            ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args));
+    });
 }
 
 template <typename CategoryT>

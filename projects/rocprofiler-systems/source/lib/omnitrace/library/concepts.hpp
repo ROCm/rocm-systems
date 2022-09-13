@@ -64,5 +64,22 @@ struct is_optional : std::false_type
 template <typename Tp>
 struct is_optional<std::optional<Tp>> : std::true_type
 {};
+
+template <typename Tp>
+struct can_stringify
+{
+private:
+    static constexpr auto sfinae(int)
+        -> decltype(std::declval<std::ostream&>() << std::declval<Tp>(), bool())
+    {
+        return true;
+    }
+
+    static constexpr auto sfinae(long) { return false; }
+
+public:
+    static constexpr bool value = sfinae(0);
+    constexpr auto        operator()() const { return sfinae(0); }
+};
 }  // namespace concepts
 }  // namespace tim
