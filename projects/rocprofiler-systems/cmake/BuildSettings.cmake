@@ -83,7 +83,7 @@ add_flag_if_avail(
     "-Wno-attributes" "-Wno-missing-field-initializers")
 
 if(OMNITRACE_BUILD_DEBUG)
-    add_flag_if_avail("-g" "-gdwarf-3" "-fno-omit-frame-pointer")
+    add_flag_if_avail("-g3" "-gdwarf-3" "-fno-omit-frame-pointer")
 endif()
 
 if(WIN32)

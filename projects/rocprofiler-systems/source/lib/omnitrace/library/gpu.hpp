@@ -31,5 +31,8 @@ device_count();
 
 int
 hip_device_count();
+
+void
+add_hip_device_metadata();
 }  // namespace gpu
 }  // namespace omnitrace

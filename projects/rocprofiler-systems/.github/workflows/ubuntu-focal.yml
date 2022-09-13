@@ -214,7 +214,7 @@ jobs:
         wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - &&
         echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm_version }}/ ubuntu main" | tee /etc/apt/sources.list.d/rocm.list &&
         apt-get update &&
-        apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev ${{ matrix.compiler }} libudev-dev libnuma1 rocm-dev rocm-utils rocm-smi-lib roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev libpapi-dev curl libopenmpi-dev openmpi-bin libfabric-dev &&
+        apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev ${{ matrix.compiler }} libudev1 libnuma1 rocm-dev rocm-utils rocm-smi-lib roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev libpapi-dev curl libopenmpi-dev openmpi-bin libfabric-dev &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install 'cmake==3.21.4' &&
         for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
@@ -423,11 +423,18 @@ jobs:
       timeout-minutes: 10
       run:
         sudo apt-get update &&
-        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.deps }} clang libomp-dev ${{ matrix.compiler }} ${{ matrix.mpi }} &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules ${{ matrix.deps }} ${{ matrix.compiler }} ${{ matrix.mpi }} &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install numpy &&
         python3 -m pip install perfetto &&
         python3 -m pip install 'cmake==3.16.3'
+
+    - name: Test Environment Modules
+      timeout-minutes: 15
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module avail
 
     - name: Configure Env
       run:
@@ -461,6 +468,21 @@ jobs:
           -DDYNINST_ELFUTILS_DOWNLOAD_VERSION=${{ env.ELFUTILS_DOWNLOAD_VERSION }}
           -DOMNITRACE_MAX_THREADS=32
 
+    - name: Test Build-Tree Env
+      timeout-minutes: 60
+      run:
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use ${{ github.workspace }}/build/share/modulefiles
+        module avail
+        module load omnitrace
+        module list
+        env
+        module unload omnitrace
+        module list
+        env
+        source ${{ github.workspace }}/build/share/omnitrace/setup-env.sh
+        env
+
     - name: Build
       timeout-minutes: 60
       run:
@@ -480,41 +502,21 @@ jobs:
         mkdir -p /opt/omnitrace
         ./omnitrace-*.sh --prefix=/opt/omnitrace --exclude-subdir --skip-license
 
-    - name: Test Install
+    - name: Test Install with setup-env.sh
       timeout-minutes: 15
       run: |
         set -v
         source /opt/omnitrace/share/omnitrace/setup-env.sh
-        cat << EOF > ${HOME}/.omnitrace.cfg
-        OMNITRACE_VERBOSE = 2
-        OMNITRACE_USE_TIMEMORY = ON
-        OMNITRACE_USE_PERFETTO = ON
-        OMNITRACE_USE_SAMPLING = ON
-        OMNITRACE_USE_PROCESS_SAMPLING = ON
-        OMNITRACE_OUTPUT_PATH = omnitrace-tests-output
-        OMNITRACE_OUTPUT_PREFIX = %tag%/
-        OMNITRACE_SAMPLING_FREQ = 50
-        OMNITRACE_SAMPLING_DELAY = 0.05
-        EOF
-        which omnitrace-avail
-        ldd $(which omnitrace-avail)
-        omnitrace-avail --help
-        omnitrace-avail -a
-        which omnitrace-critical-trace
-        ldd $(which omnitrace-critical-trace)
-        which omnitrace-python
-        omnitrace-python --help
-        omnitrace-python -b -- ${{ github.workspace }}/examples/python/builtin.py
-        which omnitrace
-        ldd $(which omnitrace)
-        omnitrace --help
-        omnitrace -e -v 1 -o ls.inst --simulate -- ls
-        for i in $(find omnitrace-tests-output/ls.inst -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
-        omnitrace -e -v 1 -o ls.inst -- ls
-        ./ls.inst
-        omnitrace -e -v 1 --simulate -- ls
-        for i in $(find omnitrace-tests-output/ls -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
-        omnitrace -e -v 1 -- ls
+        ${{ github.workspace }}/scripts/test-install.sh --test-omnitrace{,-avail,-python,-rewrite,-runtime,-critical-trace}=1
+
+    - name: Test Install with Modulefile
+      timeout-minutes: 15
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use /opt/omnitrace/share/modulefiles
+        module load omnitrace
+        ${{ github.workspace }}/scripts/test-install.sh --test-omnitrace{,-avail,-python,-rewrite,-runtime,-critical-trace}=1
 
     - name: Test User API
       timeout-minutes: 10

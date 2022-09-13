@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #include "library/rocprofiler/hsa_rsrc_factory.hpp"
 #include "library/debug.hpp"
+#include "library/defines.hpp"
 
 #include <timemory/manager.hpp>
 
@@ -778,73 +779,36 @@ HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* brig_pa
 bool
 HsaRsrcFactory::PrintGpuAgents(const std::string&)
 {
-    std::cout << std::flush;
-    // std::clog << header << " :" << std::endl;
-
-    char key[1024], value[1024];
-
-    const AgentInfo* agent_info;
-    int              size = uint32_t(gpu_list_.size());
-    for(int idx = 0; idx < size; idx++)
+    std::vector<AgentInfo> _agents = {};
+    for(const auto* itr : gpu_list_)
     {
-        agent_info = gpu_list_[idx];
-
-        /*  std::clog << "> agent[" << idx << "] :" << std::endl;
-            std::clog << ">> Name : " << agent_info->name << std::endl;
-            std::clog << ">> APU : " << agent_info->is_apu << std::endl;
-            std::clog << ">> HSAIL profile : " << agent_info->profile << std::endl;
-            std::clog << ">> Max Wave Size : " << agent_info->max_wave_size << std::endl;
-            std::clog << ">> Max Queue Size : " << agent_info->max_queue_size <<
-           std::endl; std::clog << ">> CU number : " << agent_info->cu_num << std::endl;
-            std::clog << ">> Waves per CU : " << agent_info->waves_per_cu << std::endl;
-            std::clog << ">> SIMDs per CU : " << agent_info->simds_per_cu << std::endl;
-            std::clog << ">> SE number : " << agent_info->se_num << std::endl;
-            std::clog << ">> Shader Arrays per SE : " << agent_info->shader_arrays_per_se
-           << std::endl;
-        */
-
-#define OMNITRACE_METADATA(...) tim::manager::add_metadata(__VA_ARGS__)
-
-        sprintf(key, "ROCM_AGENT_%d_NAME", idx);
-        sprintf(value, "%s", agent_info->name);
-        OMNITRACE_METADATA(key, value);
-
-        sprintf(key, "ROCM_AGENT_%d_IS_APU", idx);
-        sprintf(value, "%d", static_cast<int>(agent_info->is_apu));
-        OMNITRACE_METADATA(key, value);
-
-        sprintf(key, "ROCM_AGENT_%d_HSA_PROFILE", idx);
-        sprintf(value, "%d", agent_info->profile);
-        OMNITRACE_METADATA(key, value);
-
-        sprintf(key, "ROCM_AGENT_%d_MAX_WAVE_SIZE", idx);
-        sprintf(value, "%d", agent_info->max_wave_size);
-        OMNITRACE_METADATA(key, value);
-
-        sprintf(key, "ROCM_AGENT_%d_MAX_QUEUE_SIZE", idx);
-        sprintf(value, "%d", agent_info->max_queue_size);
-        OMNITRACE_METADATA(key, value);
-
-        sprintf(key, "ROCM_AGENT_%d_CU_NUMBER", idx);
-        sprintf(value, "%d", agent_info->cu_num);
-        OMNITRACE_METADATA(key, value);
-
-        sprintf(key, "ROCM_AGENT_%d_WAVES_PER_CU", idx);
-        sprintf(value, "%d", agent_info->waves_per_cu);
-        OMNITRACE_METADATA(key, value);
-
-        sprintf(key, "ROCM_AGENT_%d_SIMDs_PER_CU", idx);
-        sprintf(value, "%d", agent_info->simds_per_cu);
-        OMNITRACE_METADATA(key, value);
-
-        sprintf(key, "ROCM_AGENT_%d_SE_NUMBER", idx);
-        sprintf(value, "%d", agent_info->se_num);
-        OMNITRACE_METADATA(key, value);
-
-        sprintf(key, "ROCM_AGENT_%d_SHADER_ARRAYS_PER_SE", idx);
-        sprintf(value, "%d", agent_info->shader_arrays_per_se);
-        OMNITRACE_METADATA(key, value);
+        if(itr) _agents.emplace_back(*itr);
     }
+
+    OMNITRACE_METADATA([_agents](auto& ar) {
+        namespace cereal = ::tim::cereal;
+
+        ar.setNextName("rocm_agents");
+        ar.startNode();
+        ar.makeArray();
+        for(auto itr : _agents)
+        {
+            ar.startNode();
+            ar(cereal::make_nvp("name", std::string{ itr.name }),
+               cereal::make_nvp("is_apu", itr.is_apu),
+               cereal::make_nvp("hsa_profile", itr.profile),
+               cereal::make_nvp("max_wave_size", itr.max_wave_size),
+               cereal::make_nvp("max_queue_size", itr.max_queue_size),
+               cereal::make_nvp("cu_number", itr.cu_num),
+               cereal::make_nvp("waves_per_cu", itr.waves_per_cu),
+               cereal::make_nvp("simds_per_cu", itr.simds_per_cu),
+               cereal::make_nvp("se_num", itr.se_num),
+               cereal::make_nvp("shader_arrays_per_se", itr.shader_arrays_per_se));
+            ar.finishNode();
+        }
+        ar.finishNode();
+    });
+
     return true;
 }
 

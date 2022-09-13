@@ -1790,7 +1790,6 @@ main(int argc, char** argv)
     }
 
     verbprintf(2, "Beginning instrumentation loop...\n");
-    verbprintf(1, "\n");
     auto _report_info = [](int _lvl, const string_t& _action, const string_t& _type,
                            const string_t& _reason, const string_t& _name,
                            const std::string& _extra = {}) {

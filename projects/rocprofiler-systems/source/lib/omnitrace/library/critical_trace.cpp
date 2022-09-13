@@ -33,6 +33,7 @@
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/hash/types.hpp>
+#include <timemory/operations/types/file_output_message.hpp>
 #include <timemory/tpls/cereal/cereal/archives/json.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
 #include <timemory/utility/macros.hpp>
@@ -643,8 +644,9 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
         if(_msg)
         {
             if(_func.empty()) _func = __FUNCTION__;
-            OMNITRACE_VERBOSE(0, "[%s] Outputting '%s'...\n", _func.c_str(),
-                              _fname.c_str());
+            if(get_verbose() >= 0)
+                operation::file_output_message<critical_trace::call_chain>{}(
+                    _fname, std::string{ _func });
         }
         std::stringstream oss{};
         if(_call_chain.size() > 100000)

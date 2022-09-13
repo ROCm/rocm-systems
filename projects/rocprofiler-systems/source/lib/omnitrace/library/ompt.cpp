@@ -88,8 +88,33 @@ shutdown()
 }  // namespace ompt
 }  // namespace omnitrace
 
-// include the ompt_start_tool definition
-#    include <timemory/components/ompt/start_tool.hpp>
+extern "C" ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version)
+{
+    TIMEMORY_PRINTF(stderr, "OpenMP version: %u, runtime version: %s\n", omp_version,
+                    runtime_version);
+
+    OMNITRACE_METADATA("OMP_VERSION", omp_version);
+    OMNITRACE_METADATA("OMP_RUNTIME_VERSION", runtime_version);
+
+    static auto ompt_initialize = [](ompt_function_lookup_t lookup,
+                                     int                    initial_device_num,
+                                     ompt_data_t*           tool_data) -> int {
+        TIMEMORY_PRINTF(stderr, "OpenMP-tools configuring for initial device %i\n\n",
+                        initial_device_num);
+        tim::ompt::configure<TIMEMORY_OMPT_API_TAG>(lookup, initial_device_num,
+                                                    tool_data);
+        return 1;  // success
+    };
+
+    static auto ompt_finalize = [](ompt_data_t* tool_data) {
+        TIMEMORY_PRINTF(stderr, "OpenMP-tools finalized\n\n");
+        tim::consume_parameters(tool_data);
+    };
+
+    static auto data = ompt_start_tool_result_t{ ompt_initialize, ompt_finalize, { 0 } };
+    return (ompt_start_tool_result_t*) &data;
+}
 
 #else
 namespace omnitrace

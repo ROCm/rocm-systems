@@ -62,6 +62,7 @@ ignore_setting(const Tp& _v)
 {
     if(_v->get_hidden()) return true;
     if(exclude_setting(_v->get_env_name())) return true;
+    if(_v->get_config_updated() || _v->get_environ_updated()) return false;
     if(!is_selected(_v->get_env_name()) && !is_selected(_v->get_name())) return true;
     if(available_only && !_v->get_enabled()) return true;
     if(!category_view.empty())

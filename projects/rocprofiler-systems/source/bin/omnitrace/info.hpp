@@ -25,6 +25,7 @@
 #include "fwd.hpp"
 #include "module_function.hpp"
 
+#include <timemory/log/color.hpp>
 #include <timemory/mpl/policy.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/settings/types.hpp>
@@ -81,9 +82,10 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
             _handle_error();
         else
         {
+            verbprintf_bare(_level, "%s", ::tim::log::color::source());
             verbprintf(_level, "Outputting '%s'... ", _oname.c_str());
             dump_info(ofs, _data);
-            verbprintf_bare(_level, "Done\n");
+            verbprintf_bare(_level, "Done\n%s", ::tim::log::color::end());
         }
         ofs.close();
     }
@@ -109,9 +111,10 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
             _handle_error();
         else
         {
+            verbprintf_bare(_level, "%s", ::tim::log::color::source());
             verbprintf(_level, "Outputting '%s'... ", _oname.c_str());
             ofs << oss.str() << std::endl;
-            verbprintf_bare(_level, "Done\n");
+            verbprintf_bare(_level, "Done\n%s", ::tim::log::color::end());
         }
         ofs.close();
     }
@@ -136,9 +139,10 @@ dump_info(const string_t& _label, string_t _oname, const string_t& _ext,
             _handle_error();
         else
         {
+            verbprintf_bare(_level, "%s", ::tim::log::color::source());
             verbprintf(_level, "Outputting '%s'... ", _oname.c_str());
             ofs << oss.str() << std::endl;
-            verbprintf_bare(_level, "Done\n");
+            verbprintf_bare(_level, "Done\n%s", ::tim::log::color::end());
         }
         ofs.close();
     }

@@ -70,12 +70,47 @@ find_library(
     PATHS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
     PATH_SUFFIXES lib lib64)
 
+# try not to directly use the hsakmt::hsakmt target because it hardcodes the
+# INTERFACE_LINK_LIBRARIES used when it was built
 find_package(hsakmt HINTS ${_ROCM_ROCTRACER_PATHS} PATHS ${_ROCM_ROCTRACER_PATHS})
 
 if(hsakmt_FOUND)
-    set(roctracer_hsakmt_LIBRARY
-        hsakmt::hsakmt
-        CACHE STRING "Imported hsakmt target")
+    add_library(roctracer::hsakmt INTERFACE IMPORTED)
+    get_target_property(hsakmt_INCLUDE_DIR hsakmt::hsakmt INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(roctracer::hsakmt INTERFACE ${hsakmt_INCLUDE_DIR})
+    set(hsakmt_FOUND_LIBS ON)
+    foreach(_LIB drm drm_amdgpu rt c numa udev)
+        set(_LIB_NAMES ${_LIB})
+        foreach(_EXT 2 1)
+            list(
+                APPEND
+                _LIB_NAMES
+                ${CMAKE_SHARED_LIBRARY_PREFIX}${_LIB}${CMAKE_SHARED_LIBRARY_SUFFIX}.${_EXT}
+                )
+        endforeach()
+        find_library(
+            hsakmt_${_LIB}_LIBRARY
+            NAMES ${_LIB_NAMES}
+            HINTS ${_ROCM_ROCTRACER_PATHS}
+            PATHS ${_ROCM_ROCTRACER_PATHS}
+            PATH_SUFFIXES ${CMAKE_INSTALL_LIBDIR} lib lib64)
+        if(NOT hsakmt_${_LIB}_LIBRARY)
+            set(hsakmt_FOUND_LIBS OFF)
+        else()
+            target_link_libraries(roctracer::hsakmt INTERFACE ${hsakmt_${_LIB}_LIBRARY})
+        endif()
+    endforeach()
+    if(hsakmt_FOUND_LIBS)
+        find_package(Threads REQUIRED)
+        target_link_libraries(roctracer::hsakmt INTERFACE Threads::Threads)
+        set(roctracer_hsakmt_LIBRARY
+            roctracer::hsakmt
+            CACHE STRING "Generated hsakmt target for roctracer")
+    else()
+        set(roctracer_hsakmt_LIBRARY
+            hsakmt::hsakmt
+            CACHE STRING "Imported hsakmt target")
+    endif()
 else()
     find_library(
         roctracer_hsakmt_LIBRARY

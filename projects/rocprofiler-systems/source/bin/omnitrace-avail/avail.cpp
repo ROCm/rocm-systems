@@ -802,7 +802,11 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
                 if(category_view.count(citr) > 0) _found = true;
             }
             if(!print_advanced && _categories.count("settings::advanced") > 0)
-                _not_in_category_view.emplace(_name);
+            {
+                if(!sitr->second->get_config_updated() &&
+                   !sitr->second->get_environ_updated())
+                    _not_in_category_view.emplace(_name);
+            }
             if(!_found)
             {
                 _not_in_category_view.emplace(_name);

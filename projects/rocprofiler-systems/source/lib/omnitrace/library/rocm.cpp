@@ -308,6 +308,12 @@ extern "C"
                                "failed! OMNITRACE_ROCPROFILER_LIBRARY=%s\n",
                                _rocprof.filename.c_str());
         }
+        else
+        {
+            HsaRsrcFactory::Instance().PrintGpuAgents("ROCm");
+        }
+
+        gpu::add_hip_device_metadata();
 
         OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Loading... %s\n",
                                   (_success) ? "Done" : "Failed");

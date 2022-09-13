@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 BASEDIR=$(dirname ${BASH_SOURCE[0]})
-BASEDIR=$(cd ${BASEDIR}/../.. && pwd)
+command -v realpath &> /dev/null && BASEDIR=$(realpath ${BASEDIR}/../..) || BASEDIR=$(cd ${BASEDIR}/../.. && pwd)
 
 if [ ! -d "${BASEDIR}" ]; then
     echo "${BASEDIR} does not exist"
