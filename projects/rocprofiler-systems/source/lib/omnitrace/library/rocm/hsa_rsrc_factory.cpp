@@ -20,17 +20,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 *******************************************************************************/
 
-#include "library/rocprofiler/hsa_rsrc_factory.hpp"
+#include "library/rocm/hsa_rsrc_factory.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 
 #include <timemory/manager.hpp>
-
-#include <rocprofiler.h>
-
-#define PUBLIC_API      __attribute__((visibility("default")))
-#define CONSTRUCTOR_API __attribute__((constructor))
-#define DESTRUCTOR_API  __attribute__((destructor))
 
 #include <atomic>
 #include <cassert>

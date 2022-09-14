@@ -131,7 +131,7 @@ struct rocprofiler
     [[nodiscard]] static scope::transient_destructor protect_flush_activity();
 };
 
-#if !defined(OMNITRACE_USE_ROCTRACER)
+#if !defined(OMNITRACE_USE_ROCPROFILER)
 inline void
 rocprofiler::setup()
 {}
@@ -215,7 +215,7 @@ struct get_storage<component::rocm_data_tracker>
 }  // namespace operation
 }  // namespace tim
 
-#if !defined(OMNITRACE_USE_ROCTRACER)
+#if !defined(OMNITRACE_USE_ROCPROFILER)
 OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::rocprofiler_data, false_type)
 #endif
 

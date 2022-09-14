@@ -58,9 +58,7 @@ target_sources(omnitrace-object-library PRIVATE ${library_sources} ${library_hea
                                                 ${CMAKE_CURRENT_BINARY_DIR}/defines.hpp)
 
 if(OMNITRACE_USE_ROCTRACER OR OMNITRACE_USE_ROCPROFILER)
-    target_sources(
-        omnitrace-object-library PRIVATE ${CMAKE_CURRENT_LIST_DIR}/rocprofiler.cpp
-                                         ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp)
+    target_sources(omnitrace-object-library PRIVATE ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp)
 endif()
 
 if(OMNITRACE_USE_ROCTRACER)
@@ -84,4 +82,4 @@ if(OMNITRACE_USE_ROCM_SMI)
 endif()
 
 add_subdirectory(components)
-add_subdirectory(rocprofiler)
+add_subdirectory(rocm)

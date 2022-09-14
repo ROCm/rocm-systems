@@ -35,7 +35,7 @@ set(component_headers
 
 target_sources(omnitrace-object-library PRIVATE ${component_sources} ${component_headers})
 
-if(OMNITRACE_USE_ROCTRACER OR OMNITRACE_USE_ROCPROFILER)
+if(OMNITRACE_USE_ROCPROFILER)
     target_sources(omnitrace-object-library
                    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/rocprofiler.cpp)
 endif()

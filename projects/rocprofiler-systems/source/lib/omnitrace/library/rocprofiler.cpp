@@ -27,7 +27,7 @@
 #include "library/gpu.hpp"
 #include "library/perfetto.hpp"
 #include "library/rocm.hpp"
-#include "library/rocprofiler/hsa_rsrc_factory.hpp"
+#include "library/rocm/hsa_rsrc_factory.hpp"
 
 #include <timemory/backends/hardware_counters.hpp>
 #include <timemory/manager.hpp>
@@ -144,8 +144,6 @@ void
 rocm_dump_context_entry(context_entry_t* entry, rocprofiler_feature_t* features,
                         unsigned feature_count)
 {
-    // static rocm_metric_type last_timestamp = get_last_timestamp_ns();
-
     volatile std::atomic<bool>* valid =
         reinterpret_cast<std::atomic<bool>*>(&entry->valid);
     while(valid->load() == false)
@@ -191,8 +189,8 @@ rocm_context_handler(const rocprofiler_pool_entry_t* entry, void* arg)
     context_entry_t* ctx_entry   = reinterpret_cast<context_entry_t*>(entry->payload);
     handler_arg_t*   handler_arg = reinterpret_cast<handler_arg_t*>(arg);
 
-    rocm::lock_t _lk{ rocm::rocm_mutex, std::defer_lock };
-    if(!_lk.owns_lock()) _lk.lock();
+    // rocm::lock_t _lk{ rocm::rocm_mutex, std::defer_lock };
+    // if(!_lk.owns_lock()) _lk.lock();
 
     rocm_dump_context_entry(ctx_entry, handler_arg->features, handler_arg->feature_count);
 

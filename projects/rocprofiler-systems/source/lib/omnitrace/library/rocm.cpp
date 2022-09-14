@@ -27,9 +27,9 @@
 #include "library/debug.hpp"
 #include "library/dynamic_library.hpp"
 #include "library/gpu.hpp"
+#include "library/rocm/hsa_rsrc_factory.hpp"
 #include "library/rocm_smi.hpp"
 #include "library/rocprofiler.hpp"
-#include "library/rocprofiler/hsa_rsrc_factory.hpp"
 #include "library/roctracer.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
@@ -62,7 +62,9 @@
 #    define OMNITRACE_HIP_API_ARGS 0
 #endif
 
-#include <rocprofiler.h>
+#if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
+#    include <rocprofiler.h>
+#endif
 
 using namespace omnitrace;
 
@@ -162,12 +164,12 @@ extern "C"
                 const char* const* failed_tool_names)
     {
         OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Loading...\n");
+        OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
         if(!tim::get_env("OMNITRACE_INIT_TOOLING", true)) return true;
         if(!tim::settings::enabled()) return true;
 
         roctracer_is_init() = true;
-        OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
         OMNITRACE_BASIC_VERBOSE_F(1 || rocm::on_load_trace, "Loading ROCm tooling...\n");
 
         tim::consume_parameters(table, runtime_version, failed_tool_count,

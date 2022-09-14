@@ -70,6 +70,13 @@ find_library(
     PATHS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
     PATH_SUFFIXES lib lib64)
 
+find_library(
+    roctracer_hsa-runtime_LIBRARY
+    NAMES hsa-runtime64 hsa-runtime
+    HINTS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
+    PATHS ${roctracer_ROOT_DIR} ${_ROCM_ROCTRACER_PATHS}
+    PATH_SUFFIXES lib lib64)
+
 # try not to directly use the hsakmt::hsakmt target because it hardcodes the
 # INTERFACE_LINK_LIBRARIES used when it was built
 find_package(hsakmt HINTS ${_ROCM_ROCTRACER_PATHS} PATHS ${_ROCM_ROCTRACER_PATHS})
@@ -124,7 +131,8 @@ if(roctracer_LIBRARY)
     get_filename_component(roctracer_LIBRARY_DIR "${roctracer_LIBRARY}" PATH CACHE)
 endif()
 
-mark_as_advanced(roctracer_LIBRARY roctracer_roctx_LIBRARY roctracer_hsakmt_LIBRARY)
+mark_as_advanced(roctracer_LIBRARY roctracer_roctx_LIBRARY roctracer_hsakmt_LIBRARY
+                 roctracer_hsa-runtime_LIBRARY)
 
 # ----------------------------------------------------------------------------------------#
 
@@ -161,6 +169,12 @@ if(roctracer_FOUND)
         list(APPEND roctracer_LIBRARIES ${roctracer_hsakmt_LIBRARY})
         target_link_libraries(roctracer::roctracer INTERFACE ${roctracer_hsakmt_LIBRARY})
         target_link_libraries(roctracer::roctx INTERFACE ${roctracer_hsakmt_LIBRARY})
+    endif()
+
+    if(roctracer_hsa-runtime_LIBRARY)
+        list(APPEND roctracer_LIBRARIES ${roctracer_hsa-runtime_LIBRARY})
+        target_link_libraries(roctracer::roctracer
+                              INTERFACE ${roctracer_hsa-runtime_LIBRARY})
     endif()
 
 endif()
