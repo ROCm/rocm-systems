@@ -74,10 +74,10 @@ numa_gotcha::configure()
                                  int>("numa_move_pages");
         numa_gotcha_t::configure<5, void*, size_t>("numa_alloc");
         numa_gotcha_t::configure<6, void*, size_t>("numa_alloc_local");
-        numa_gotcha_t::configure<6, void*, size_t>("numa_alloc_interleaved");
-        numa_gotcha_t::configure<7, void*, size_t, int>("numa_alloc_onnode");
-        numa_gotcha_t::configure<8, void*, void*, size_t, size_t>("numa_realloc");
-        numa_gotcha_t::configure<9, void, void*, size_t>("numa_free");
+        numa_gotcha_t::configure<7, void*, size_t>("numa_alloc_interleaved");
+        numa_gotcha_t::configure<8, void*, size_t, int>("numa_alloc_onnode");
+        numa_gotcha_t::configure<9, void*, void*, size_t, size_t>("numa_realloc");
+        numa_gotcha_t::configure<10, void, void*, size_t>("numa_free");
     };
 }
 

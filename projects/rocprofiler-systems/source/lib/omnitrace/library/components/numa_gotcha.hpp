@@ -38,7 +38,7 @@ namespace component
 {
 struct numa_gotcha : tim::component::base<numa_gotcha, void>
 {
-    static constexpr size_t gotcha_capacity = 10;
+    static constexpr size_t gotcha_capacity = 11;
 
     using gotcha_data  = tim::component::gotcha_data;
     using exit_func_t  = void (*)(int);
