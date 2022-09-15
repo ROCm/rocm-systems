@@ -489,6 +489,9 @@ static void roctracer_enable_callback_impl(roctracer_domain_t domain, uint32_t o
                                            roctracer_rtapi_callback_t callback, void* user_data) {
   std::lock_guard lock(registration_mutex);
 
+  if (operation_id >= get_op_end(domain) || callback == nullptr)
+    throw ApiError(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT, "invalid argument");
+
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_EVT:
       HSA_registration_group.Register(hsa_evt_callback_table, operation_id, callback, user_data);
@@ -537,6 +540,9 @@ ROCTRACER_API roctracer_status_t roctracer_enable_domain_callback(
 // Disable runtime API callbacks
 static void roctracer_disable_callback_impl(roctracer_domain_t domain, uint32_t operation_id) {
   std::lock_guard lock(registration_mutex);
+
+  if (operation_id >= get_op_end(domain))
+    throw ApiError(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT, "invalid argument");
 
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_EVT:
@@ -635,6 +641,9 @@ static void roctracer_enable_activity_impl(roctracer_domain_t domain, uint32_t o
   if (memory_pool == nullptr)
     EXC_RAISING(ROCTRACER_STATUS_ERROR_DEFAULT_POOL_UNDEFINED, "no default pool");
 
+  if (op >= get_op_end(domain))
+    throw ApiError(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT, "invalid argument");
+
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_EVT:
       break;
@@ -700,6 +709,9 @@ ROCTRACER_API roctracer_status_t roctracer_enable_domain_activity(activity_domai
 // Disable activity records logging
 static void roctracer_disable_activity_impl(roctracer_domain_t domain, uint32_t op) {
   std::lock_guard lock(registration_mutex);
+
+  if (op >= get_op_end(domain))
+    throw ApiError(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT, "invalid argument");
 
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_EVT:

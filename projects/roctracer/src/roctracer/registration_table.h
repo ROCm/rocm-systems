@@ -32,6 +32,19 @@
 
 namespace roctracer::util {
 
+#if __GNUC__ == 11 || __GNUCC__ == 12
+// Starting with gcc-11 (verified with gcc-12 as well), an array out-of-bounds subscript error is
+// reported for accessing the registration table element at the operation ID index. Validating the
+// index in the function calling Register/Unregister does not quiet the warning/error in release
+// builds, so, for gcc-11 and gcc-12, we disable that warning just for this class.
+#define IGNORE_GCC_ARRAY_BOUNDS_ERROR 1
+#endif  // __GNUC__ == 11 || __GNUCC__ == 12
+
+#if IGNORE_GCC_ARRAY_BOUNDS_ERROR
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif  // IGNORE_GCC_ARRAY_BOUNDS_ERROR
+
 namespace detail {
 struct False {
   constexpr bool operator()() { return false; }
@@ -78,6 +91,9 @@ template <typename T, uint32_t N, typename IsStopped = detail::False> class Regi
   } table_[N]{};
 };
 
+#if IGNORE_GCC_ARRAY_BOUNDS_ERROR
+#pragma GCC diagnostic pop
+#endif  // IGNORE_GCC_ARRAY_BOUNDS_ERROR
 
 }  // namespace roctracer::util
 
