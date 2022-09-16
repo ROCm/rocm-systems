@@ -129,6 +129,12 @@ function(create_library_symlink)
                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                     COMMAND ${CMAKE_COMMAND} -E create_symlink
                     ../../${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}/${METRICS} ${ROCPROF_WRAPPER_LIB_DIR}/${METRICS})
+
+  set(GFX_METRICS "gfx_metrics.xml")
+  add_custom_target(link_gfx_metrics ALL
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                    COMMAND ${CMAKE_COMMAND} -E create_symlink
+                    ../../${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}/${GFX_METRICS} ${ROCPROF_WRAPPER_LIB_DIR}/${GFX_METRICS})
 endfunction()
 
 #Creater a template for header file
