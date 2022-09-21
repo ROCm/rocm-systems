@@ -69,9 +69,9 @@ ensure_finalization(bool _static_init = false)
 {
     const auto& _info = thread_info::init();
     auto        _tid  = _info->index_data;
-    OMNITRACE_CI_THROW(_tid->internal_value != threading::get_id(),
+    OMNITRACE_CI_THROW(_tid->sequent_value != threading::get_id(),
                        "Error! internal tid != %li :: %li", threading::get_id(),
-                       _tid->internal_value);
+                       _tid->sequent_value);
     OMNITRACE_CI_THROW(_tid->system_value != threading::get_sys_tid(),
                        "Error! system tid != %li :: %li", threading::get_sys_tid(),
                        _tid->system_value);
@@ -670,7 +670,7 @@ omnitrace_finalize_hidden(void)
     for(size_t i = 0; i < max_supported_threads; ++i)
     {
         auto&       itr   = instrumentation_bundles::instances().at(i);
-        const auto& _info = thread_info::get(i, InternalTID);
+        const auto& _info = thread_info::get(i, SequentTID);
         while(!itr.bundles.empty())
         {
             int _lvl = 1;

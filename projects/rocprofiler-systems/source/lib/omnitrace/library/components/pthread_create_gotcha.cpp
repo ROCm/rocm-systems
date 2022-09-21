@@ -161,7 +161,7 @@ pthread_create_gotcha::wrapper::operator()() const
     auto    _bundle      = std::shared_ptr<bundle_t>{};
     auto    _signals     = std::set<int>{};
     auto    _coverage    = (get_mode() == Mode::Coverage);
-    // const auto& _parent_info = thread_info::get(m_parent_tid, LookupTID);
+    // const auto& _parent_info = thread_info::get(m_parent_tid, InternalTID);
     auto _dtor = [&]() {
         set_thread_state(ThreadState::Internal);
         if(_is_sampling)
@@ -191,7 +191,7 @@ pthread_create_gotcha::wrapper::operator()() const
     if(_active && !_coverage)
     {
         const auto& _tid_index = thread_info::init();
-        _tid                   = _tid_index->index_data->internal_value;
+        _tid                   = _tid_index->index_data->sequent_value;
         threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid).c_str());
         if(!thread_bundle_data_t::instances().at(_tid))
         {

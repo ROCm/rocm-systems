@@ -22,13 +22,18 @@
 
 #include "omnitrace.hpp"
 #include "fwd.hpp"
+#include "log.hpp"
 
+#include <timemory/backends/process.hpp>
 #include <timemory/config.hpp>
 #include <timemory/hash.hpp>
+#include <timemory/log/macros.hpp>
 #include <timemory/manager.hpp>
+#include <timemory/sampling/signals.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/utility/console.hpp>
 #include <timemory/utility/demangle.hpp>
+#include <timemory/utility/signals.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -78,6 +83,7 @@ bool     instr_print             = false;
 bool     simulate                = false;
 bool     include_uninstr         = false;
 int      verbose_level           = tim::get_env<int>("OMNITRACE_VERBOSE_INSTRUMENT", 0);
+int      num_log_entries         = tim::get_env<int>("OMNITRACE_LOG_COUNT", 20);
 string_t main_fname              = "main";
 string_t argv0                   = {};
 string_t cmdv0                   = {};
@@ -103,6 +109,8 @@ regexvec_t       file_exclude                  = {};
 regexvec_t       file_restrict                 = {};
 regexvec_t       func_restrict                 = {};
 CodeCoverageMode coverage_mode                 = CODECOV_NONE;
+
+std::unique_ptr<std::ofstream> log_ofs = {};
 
 namespace
 {
@@ -166,6 +174,8 @@ void
 find_dyn_api_rt();
 }  // namespace
 
+namespace process = tim::process;
+
 //======================================================================================//
 //
 // entry point
@@ -175,11 +185,54 @@ find_dyn_api_rt();
 int
 main(int argc, char** argv)
 {
+    {
+        using signal_settings = tim::signal_settings;
+        using sys_signal      = tim::sys_signal;
+
+        // default signals to catch
+        for(const auto& itr :
+            { sys_signal::Interrupt, sys_signal::FPE, sys_signal::Stop, sys_signal::Quit,
+              sys_signal::Illegal, sys_signal::Abort, sys_signal::Bus,
+              sys_signal::SegFault, sys_signal::FileSize, sys_signal::CPUtime })
+            signal_settings::enable(itr);
+
+        auto _exit_action = [](int nsig) {
+            TIMEMORY_PRINTF_FATAL(
+                stderr, "omnitrace exited with signal %i :: %s\n", nsig,
+                signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
+
+            print_log_entries(std::cerr, num_log_entries);
+
+            std::cerr << "\n[omnitrace][exe] Potentially important log entries\n\n";
+
+            print_log_entries(std::cerr, -1, [](const auto& _v) { return _v.forced(); });
+
+            TIMEMORY_PRINTF_FATAL(stderr, "\n");
+            TIMEMORY_PRINTF_FATAL(
+                stderr,
+                "These were the last %i log entries from omnitrace. You can control the "
+                "number of log entries via the '--log <N>' option or OMNITRACE_LOG_COUNT "
+                "env variable.\n");
+
+            if(log_ofs) log_ofs->close();
+            log_ofs.reset();
+
+            kill(process::get_id(), nsig);
+        };
+
+        signal_settings::set_exit_action(_exit_action);
+        signal_settings::check_environment();
+        tim::enable_signal_detection(signal_settings::get_enabled());
+    }
+
     argv0 = argv[0];
+
+    OMNITRACE_ADD_LOG_ENTRY(argv[0]);
 
     address_space_t*      addr_space    = nullptr;
     string_t              mutname       = {};
     string_t              outfile       = {};
+    string_t              logfile       = {};
     std::vector<string_t> inputlib      = { "libomnitrace-dl" };
     std::vector<string_t> libname       = {};
     std::vector<string_t> sharedlibname = {};
@@ -297,6 +350,21 @@ main(int argc, char** argv)
         .action([](parser_t& p) {
             debug_print = p.get<bool>("debug");
             if(debug_print && !p.exists("verbose")) verbose_level = 256;
+        });
+    parser
+        .add_argument({ "--log" }, "Number of log entries to display after an error. Any "
+                                   "value < 0 will emit the entire log")
+        .count(1)
+        .action([](parser_t& p) { num_log_entries = p.get<int>("log"); });
+    parser
+        .add_argument({ "--log-file" },
+                      "Write the log out the specified file during the run")
+        .count(1)
+        .action([&logfile](parser_t& p) {
+            auto _oname       = p.get<std::string>("log-file");
+            auto _cfg         = tim::settings::compose_filename_config{};
+            _cfg.subdirectory = "instrumentation";
+            logfile = tim::settings::compose_output_filename(_oname, "log", _cfg);
         });
     parser
         .add_argument({ "--simulate" },
@@ -971,6 +1039,17 @@ main(int argc, char** argv)
         tim::timemory_init(_cmdc, _cmdv, "omnitrace-");
     }
 
+    if(!logfile.empty())
+    {
+        log_ofs = std::make_unique<std::ofstream>();
+        verbprintf_bare(0, "%s", ::tim::log::color::source());
+        verbprintf(0, "Opening '%s' for log output... ", logfile.c_str());
+        if(!tim::filepath::open(*log_ofs, logfile))
+            throw std::runtime_error(JOIN(" ", "Error opening log output file", logfile));
+        verbprintf_bare(0, "Done\n%s", ::tim::log::color::end());
+        print_log_entries(*log_ofs, -1, {}, "", false);
+    }
+
     //----------------------------------------------------------------------------------//
     //
     //                              REGEX OPTIONS
@@ -980,6 +1059,9 @@ main(int argc, char** argv)
     {
         //  Helper function for adding regex expressions
         auto add_regex = [](auto& regex_array, const string_t& regex_expr) {
+            OMNITRACE_ADD_DETAILED_LOG_ENTRY("", "Adding regular expression \"",
+                                             regex_expr, "\" to regex_array@",
+                                             &regex_array);
             if(!regex_expr.empty())
                 regex_array.emplace_back(std::regex(regex_expr, regex_opts));
         };
@@ -1099,26 +1181,6 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    // for runtime instrumentation, we need to set this before the process gets created
-    if(!binary_rewrite)
-    {
-        auto _hsa_val = tim::get_env<int>("HSA_ENABLE_INTERRUPT", 1, false);
-        tim::set_env("HSA_ENABLE_INTERRUPT", "0", 0);
-        if(_pid >= 0 && _hsa_val != 0)
-        {
-            verbprintf(0, "#-------------------------------------------------------"
-                          "-------------------------------------------#\n");
-            verbprintf(0, "\n");
-            verbprintf(0, "WARNING! Sampling may result in ioctl() deadlock within "
-                          "the ROCR runtime.\n");
-            verbprintf(0, "To avoid this, set HSA_ENABLE_INTERRUPT=0 in the environment "
-                          "before starting your ROCm/HIP application\n");
-            verbprintf(0, "\n");
-            verbprintf(0, "#-------------------------------------------------------"
-                          "-------------------------------------------#\n");
-        }
-    }
-
     addr_space =
         omnitrace_get_address_space(bpatch, _cmdc, _cmdv, binary_rewrite, _pid, mutname);
 
@@ -1166,10 +1228,14 @@ main(int argc, char** argv)
     };
 
     auto _add_overlapping = [](module_t* mitr, procedure_t* pitr) {
+        OMNITRACE_ADD_LOG_ENTRY("Checking if procedure", get_name(pitr), "in module",
+                                get_name(mitr), "is overlapping");
         if(!pitr->isInstrumentable()) return;
         std::vector<procedure_t*> _overlapping{};
         if(pitr->findOverlapping(_overlapping))
         {
+            OMNITRACE_ADD_LOG_ENTRY("Adding overlapping procedure", get_name(pitr),
+                                    "and module", get_name(mitr));
             _insert_module_function(overlapping_module_functions,
                                     module_function{ mitr, pitr });
             for(auto* oitr : _overlapping)
@@ -1289,12 +1355,16 @@ main(int argc, char** argv)
 
     is_static_exe = addr_space->isStaticExecutable();
 
+    OMNITRACE_ADD_LOG_ENTRY("address space is", (is_static_exe) ? "" : "not",
+                            "a static executable");
     if(binary_rewrite)
         app_binary = static_cast<BPatch_binaryEdit*>(addr_space);
     else
         app_thread = static_cast<BPatch_process*>(addr_space);
 
     is_attached = (_pid >= 0 && app_thread != nullptr);
+
+    OMNITRACE_ADD_LOG_ENTRY("address space is attached:", is_attached);
 
     if(!app_binary && !app_thread)
     {
@@ -1314,21 +1384,26 @@ main(int argc, char** argv)
         string_t _tried_libs;
         for(auto _libname : _libnames)
         {
+            OMNITRACE_ADD_LOG_ENTRY("Getting the absolute lib filepath to", _libname);
             _libname = get_absolute_lib_filepath(_libname);
             _tried_libs += string_t("|") + _libname;
             verbprintf(1, "loading library: '%s'...\n", _libname.c_str());
             result = (addr_space->loadLibrary(_libname.c_str()) != nullptr);
             verbprintf(2, "loadLibrary(%s) result = %s\n", _libname.c_str(),
                        (result) ? "success" : "failure");
-            if(result) break;
+            if(result)
+            {
+                OMNITRACE_ADD_LOG_ENTRY("Using library:", _libname);
+                break;
+            }
         }
         if(!result)
         {
-            fprintf(stderr,
-                    "Error: 'loadLibrary(%s)' failed.\nPlease ensure that the "
-                    "library directory is in LD_LIBRARY_PATH environment variable "
-                    "or absolute path is provided\n",
-                    _tried_libs.substr(1).c_str());
+            errprintf(-127,
+                      "Error: 'loadLibrary(%s)' failed.\nPlease ensure that the "
+                      "library directory is in LD_LIBRARY_PATH environment variable "
+                      "or absolute path is provided\n",
+                      _tried_libs.substr(1).c_str());
             exit(EXIT_FAILURE);
         }
     };
@@ -1347,6 +1422,7 @@ main(int argc, char** argv)
         };
         for(auto& lname : lnames)
             lname = _get_library_ext(lname);
+        OMNITRACE_ADD_LOG_ENTRY("Using library:", lnames);
         return lnames;
     };
 
@@ -1623,10 +1699,6 @@ main(int argc, char** argv)
     for(auto&& itr : env_config_variables)
         env_vars.emplace_back(itr);
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MODE", instr_mode));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "HSA_ENABLE_INTERRUPT", "0"));
-#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "HSA_TOOLS_LIB", _libname));
-#endif
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_INIT", "OFF"));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_FINALIZE", "OFF"));
     env_vars.emplace_back(
@@ -1756,26 +1828,43 @@ main(int argc, char** argv)
         if(main_entr_points)
         {
             verbprintf(1, "Adding main entry snippets...\n");
-            addr_space->insertSnippet(_init_sequence, *main_entr_points,
-                                      BPatch_callBefore, BPatch_firstSnippet);
+            addr_space->insertSnippet(_init_sequence, *main_entr_points);
+            // insert_instr(addr_space, *main_entr_points, _init_sequence, BPatch_entry);
         }
         else
         {
             for(auto* itr : _objs)
-                itr->insertInitCallback(_init_sequence);
+            {
+                try
+                {
+                    itr->insertInitCallback(_init_sequence);
+                } catch(std::runtime_error& _e)
+                {
+                    errprintf(0, "Dyninst error inserting init callback: %s\n",
+                              _e.what());
+                }
+            }
         }
     }
 
     if(main_exit_points)
     {
         verbprintf(1, "Adding main exit snippets...\n");
-        addr_space->insertSnippet(_fini_sequence, *main_exit_points, BPatch_callAfter,
-                                  BPatch_firstSnippet);
+        // insert_instr(addr_space, *main_exit_points, _fini_sequence, BPatch_exit);
+        addr_space->insertSnippet(_fini_sequence, *main_exit_points);
     }
     else
     {
         for(auto* itr : _objs)
-            itr->insertFiniCallback(_fini_sequence);
+        {
+            try
+            {
+                itr->insertFiniCallback(_fini_sequence);
+            } catch(std::runtime_error& _e)
+            {
+                errprintf(0, "Dyninst error inserting fini callback: %s\n", _e.what());
+            }
+        }
     }
 
     //----------------------------------------------------------------------------------//
@@ -2173,6 +2262,12 @@ main(int argc, char** argv)
 
     verbprintf(0, "End of omnitrace\n");
     verbprintf(1, "Exit code: %i\n", code);
+
+    if(log_ofs)
+    {
+        verbprintf(2, "Closing log file...\n");
+        log_ofs->close();
+    }
     return code;
 }
 

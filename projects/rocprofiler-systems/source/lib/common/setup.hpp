@@ -142,14 +142,6 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
     _omnilib    = common::path::find_path(_omnilib, _verbose, _search_paths);
     _omnilib_dl = common::path::find_path(_omnilib_dl, _verbose, _search_paths);
 
-    // This environment variable forces the ROCR-Runtime to use polling to wait
-    // for signals rather than interrupts. We set this variable to avoid issues with
-    // rocm/roctracer hanging when interrupted by the sampler
-    //
-    // see:
-    // https://github.com/ROCm-Developer-Tools/roctracer/issues/22#issuecomment-572814465
-    setenv("HSA_ENABLE_INTERRUPT", "0", 0);
-
 #if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
     setenv("HSA_TOOLS_LIB", _omnilib.c_str(), 0);
 #endif

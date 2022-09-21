@@ -21,7 +21,9 @@
 // SOFTWARE.
 
 #include "module_function.hpp"
+#include "InstructionCategories.h"
 #include "fwd.hpp"
+#include "log.hpp"
 #include "omnitrace.hpp"
 
 #include <stdexcept>
@@ -58,6 +60,8 @@ module_function::module_function(module_t* mod, procedure_t* proc)
 , module_name{ get_name(module) }
 , function_name{ get_name(function) }
 {
+    OMNITRACE_ADD_LOG_ENTRY("Adding function", function_name, "from module", module_name);
+
     if(!function->isInstrumentable())
     {
         verbprintf(1,
@@ -75,6 +79,10 @@ module_function::module_function(module_t* mod, procedure_t* proc)
 
     signature = get_func_file_line_info(module, function);
 
+    // make sure all exist
+    for(int i = 0; i <= instruction_category_t::c_NoCategory; ++i)
+        instruction_types[static_cast<instruction_category_t>(i)] = 0;
+
     if(function->isInstrumentable())
     {
         // this information is potentially not available and
@@ -88,13 +96,39 @@ module_function::module_function(module_t* mod, procedure_t* proc)
         }
 
         instructions.reserve(basic_blocks.size());
+        size_t _n = 0;
         for(const auto& itr : basic_blocks)
         {
-            std::vector<instruction_t> _instructions{};
-            itr->getInstructions(_instructions);
-            num_instructions += _instructions.size();
-            if(debug_print || verbose_level > 3 || instr_print)
-                instructions.emplace_back(std::move(_instructions));
+            std::vector<std::pair<instruction_t, address_t>> _instructions{};
+            try
+            {
+                if(itr->getInstructions(_instructions))
+                {
+                    auto _num_instr = _instructions.size();
+                    num_instructions += _num_instr;
+                    for(auto&& iitr : _instructions)
+                    {
+                        instruction_types[iitr.first.getCategory()] += 1;
+                    }
+                    // num_instructions += _instructions.size();
+                    if(debug_print || verbose_level > 3 || instr_print)
+                        instructions.emplace_back(std::move(_instructions));
+                }
+                else
+                {
+                    // on average, the number of instructions is address range / 4
+                    auto _num_instr = (itr->getEndAddress() - itr->getStartAddress()) / 4;
+                    verbprintf(2,
+                               "No instructions found for basic block %zu in %s. "
+                               "Approximating with %lu...\n",
+                               _n, function_name.c_str(), _num_instr);
+                    num_instructions += _num_instr;
+                }
+            } catch(std::runtime_error& _e)
+            {
+                errprintf(1, "Dyninst error: %s\n", _e.what());
+            }
+            ++_n;
         }
     }
 }

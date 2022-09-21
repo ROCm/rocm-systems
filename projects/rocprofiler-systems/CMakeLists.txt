@@ -270,6 +270,14 @@ add_subdirectory(source)
 #
 # ------------------------------------------------------------------------------#
 
+if(NOT OMNITRACE_USE_ROCTRACER AND NOT OMNITRACE_USE_ROCPROFILER)
+    set(OMNITRACE_HSA_ENV "# ")
+endif()
+
+if(NOT OMNITRACE_USE_ROCPROFILER)
+    set(OMNITRACE_ROCP_ENV "# ")
+endif()
+
 configure_file(
     ${PROJECT_SOURCE_DIR}/omnitrace.cfg
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/omnitrace.cfg

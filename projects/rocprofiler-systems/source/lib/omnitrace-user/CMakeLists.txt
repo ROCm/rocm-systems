@@ -14,8 +14,10 @@ add_library(omnitrace-user-library SHARED)
 add_library(omnitrace::omnitrace-user-library ALIAS omnitrace-user-library)
 
 target_sources(
-    omnitrace-user-library PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/user.cpp
-                                   ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/user.h)
+    omnitrace-user-library
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/user.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/user.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/types.h)
 target_include_directories(
     omnitrace-user-library PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
                                   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
@@ -34,6 +36,7 @@ set_target_properties(
 omnitrace_strip_target(omnitrace-user-library)
 
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/user.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/types.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/omnitrace)
 
 install(

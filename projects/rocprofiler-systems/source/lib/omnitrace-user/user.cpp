@@ -25,6 +25,7 @@
 #endif
 
 #include "omnitrace/user.h"
+#include "omnitrace/types.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -149,6 +150,7 @@ extern "C"
         {
             case OMNITRACE_USER_SUCCESS: return "Success";
             case OMNITRACE_USER_ERROR_NO_BINDING: return "Function pointer not assigned";
+            case OMNITRACE_USER_ERROR_BAD_VALUE: return "Invalid value was provided";
             case OMNITRACE_USER_ERROR_INVALID_CATEGORY:
                 return "Invalid user binding category";
             case OMNITRACE_USER_ERROR_INTERNAL:

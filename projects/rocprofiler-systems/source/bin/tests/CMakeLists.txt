@@ -33,7 +33,7 @@ function(OMNITRACE_ADD_BIN_TEST)
     endif()
 
     # common
-    list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON"
+    list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON" "OMNITRACE_CONFIG_FILE="
          "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output")
     # copy for inverse
     set(TEST_ENVIRONMENT_INV "${TEST_ENVIRONMENT}")
@@ -178,7 +178,7 @@ omnitrace_add_bin_test(
     TIMEOUT 60
     PASS_REGEX
         ".*available.json.*available.txt.*available.xml.*excluded.json.*excluded.txt.*excluded.xml.*instrumented.json.*instrumented.txt.*instrumented.xml.*overlapping.json.*overlapping.txt.*overlapping.xml.*"
-    )
+    FAIL_REGEX "No such file or directory|not found")
 
 omnitrace_add_bin_test(
     ADD_INVERSE
@@ -190,6 +190,23 @@ omnitrace_add_bin_test(
     PASS_REGEX
         "\\\[omnitrace\\\]\\\[exe\\\] Runtime instrumentation is not possible!(.*)\n(.*)\\\[omnitrace\\\]\\\[exe\\\] Switching to binary rewrite mode and assuming '--simulate --all-functions'"
     )
+
+omnitrace_add_bin_test(
+    NAME omnitrace-exe-write-log
+    TARGET omnitrace-exe
+    ARGS --print-instrumented functions -v 1 --log-file user.log -- ls
+    LABELS "log"
+    TIMEOUT 120
+    PASS_REGEX "Opening .*/instrumentation/user.log")
+
+omnitrace_add_bin_test(
+    NAME omnitrace-exe-write-log-check
+    DEPENDS omnitrace-exe-write-log
+    COMMAND ls omnitrace-tests-output/omnitrace-exe-write-log/instrumentation/user.log
+    LABELS "log"
+    TIMEOUT 60
+    PASS_REGEX "user.log"
+    FAIL_REGEX "No such file or directory|not found")
 
 omnitrace_add_bin_test(
     NAME omnitrace-avail-help

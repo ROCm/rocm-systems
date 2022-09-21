@@ -203,7 +203,7 @@ backtrace::sample(int)
     // 4a. funlockfile       [common but not explicitly in call-stack]
     // 4b. __resume_rt       [common but not explicitly in call-stack]
     // 4c. killpg            [common but not explicitly in call-stack]
-    m_data = get_unw_backtrace_raw<stack_depth, ignore_depth, with_signal_frame>();
+    m_data = get_unw_stack<stack_depth, ignore_depth, with_signal_frame>();
 }
 }  // namespace component
 }  // namespace omnitrace

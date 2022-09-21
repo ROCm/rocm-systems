@@ -118,20 +118,21 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 #    define OMNITRACE_DEBUG_BUFFER_LEN 1024
 #endif
 
-#if !defined(OMNITRACE_PROCESS_IDENTIFIER)
+#if !defined(OMNITRACE_DEBUG_PROCESS_IDENTIFIER)
 #    if defined(TIMEMORY_USE_MPI)
-#        define OMNITRACE_PROCESS_IDENTIFIER static_cast<int>(::tim::dmp::rank())
+#        define OMNITRACE_DEBUG_PROCESS_IDENTIFIER static_cast<int>(::tim::dmp::rank())
 #    elif defined(TIMEMORY_USE_MPI_HEADERS)
-#        define OMNITRACE_PROCESS_IDENTIFIER                                             \
+#        define OMNITRACE_DEBUG_PROCESS_IDENTIFIER                                       \
             (::tim::dmp::is_initialized()) ? static_cast<int>(::tim::dmp::rank())        \
                                            : static_cast<int>(::tim::process::get_id())
 #    else
-#        define OMNITRACE_PROCESS_IDENTIFIER static_cast<int>(::tim::process::get_id())
+#        define OMNITRACE_DEBUG_PROCESS_IDENTIFIER                                       \
+            static_cast<int>(::tim::process::get_id())
 #    endif
 #endif
 
-#if !defined(OMNITRACE_THREAD_IDENTIFIER)
-#    define OMNITRACE_THREAD_IDENTIFIER ::tim::threading::get_id()
+#if !defined(OMNITRACE_DEBUG_THREAD_IDENTIFIER)
+#    define OMNITRACE_DEBUG_THREAD_IDENTIFIER ::tim::threading::get_id()
 #endif
 
 #if defined(__clang__) || (__GNUC__ < 9)
@@ -174,8 +175,8 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _lk{};                                                  \
         OMNITRACE_FPRINTF_STDERR_COLOR(info);                                            \
-        fprintf(stderr, "[omnitrace][%i][%li]%s", OMNITRACE_PROCESS_IDENTIFIER,          \
-                OMNITRACE_THREAD_IDENTIFIER,                                             \
+        fprintf(stderr, "[omnitrace][%i][%li]%s", OMNITRACE_DEBUG_PROCESS_IDENTIFIER,    \
+                OMNITRACE_DEBUG_THREAD_IDENTIFIER,                                       \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(stderr, __VA_ARGS__);                                                    \
         ::omnitrace::debug::flush();                                                     \
@@ -201,8 +202,9 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _lk{};                                                  \
         OMNITRACE_FPRINTF_STDERR_COLOR(info);                                            \
-        fprintf(stderr, "[omnitrace][%i][%li][%s]%s", OMNITRACE_PROCESS_IDENTIFIER,      \
-                OMNITRACE_THREAD_IDENTIFIER, OMNITRACE_FUNCTION,                         \
+        fprintf(stderr, "[omnitrace][%i][%li][%s]%s",                                    \
+                OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_DEBUG_THREAD_IDENTIFIER,   \
+                OMNITRACE_FUNCTION,                                                      \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(stderr, __VA_ARGS__);                                                    \
         ::omnitrace::debug::flush();                                                     \
@@ -228,7 +230,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
     {                                                                                    \
         char _msg_buffer[OMNITRACE_DEBUG_BUFFER_LEN];                                    \
         snprintf(_msg_buffer, OMNITRACE_DEBUG_BUFFER_LEN, "[omnitrace][%i][%li][%s]%s",  \
-                 OMNITRACE_PROCESS_IDENTIFIER, OMNITRACE_THREAD_IDENTIFIER,              \
+                 OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_DEBUG_THREAD_IDENTIFIER,  \
                  OMNITRACE_FUNCTION,                                                     \
                  ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                \
         auto len = strlen(_msg_buffer);                                                  \
@@ -265,8 +267,8 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         OMNITRACE_FPRINTF_STDERR_COLOR(fatal);                                           \
-        fprintf(stderr, "[omnitrace][%i][%li]%s", OMNITRACE_PROCESS_IDENTIFIER,          \
-                OMNITRACE_THREAD_IDENTIFIER,                                             \
+        fprintf(stderr, "[omnitrace][%i][%li]%s", OMNITRACE_DEBUG_PROCESS_IDENTIFIER,    \
+                OMNITRACE_DEBUG_THREAD_IDENTIFIER,                                       \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(stderr, __VA_ARGS__);                                                    \
         ::omnitrace::debug::flush();                                                     \
@@ -296,8 +298,9 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         OMNITRACE_FPRINTF_STDERR_COLOR(fatal);                                           \
-        fprintf(stderr, "[omnitrace][%i][%li][%s]%s", OMNITRACE_PROCESS_IDENTIFIER,      \
-                OMNITRACE_THREAD_IDENTIFIER, OMNITRACE_FUNCTION,                         \
+        fprintf(stderr, "[omnitrace][%i][%li][%s]%s",                                    \
+                OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_DEBUG_THREAD_IDENTIFIER,   \
+                OMNITRACE_FUNCTION,                                                      \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(stderr, __VA_ARGS__);                                                    \
         ::omnitrace::debug::flush();                                                     \

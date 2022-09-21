@@ -283,7 +283,7 @@ static_data<pthread_mutex_gotcha, pthread_mutex_gotcha_t>::operator()(
     using thread_data_t =
         omnitrace::thread_data<pthread_mutex_gotcha, std::integral_constant<size_t, N>>;
     static thread_local auto& _v =
-        thread_data_t::instance(omnitrace::construct_on_init{}, _data);
+        thread_data_t::instance(omnitrace::construct_on_thread{}, _data);
     return *_v;
 }
 }  // namespace policy

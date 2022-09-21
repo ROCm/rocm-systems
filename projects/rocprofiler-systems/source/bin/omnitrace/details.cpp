@@ -22,6 +22,7 @@
 
 #include "function_signature.hpp"
 #include "fwd.hpp"
+#include "log.hpp"
 #include "omnitrace.hpp"
 
 #include <string>
@@ -148,6 +149,8 @@ get_func_file_line_info(module_t* module, procedure_t* func)
 {
     using address_t = Dyninst::Address;
 
+    OMNITRACE_ADD_LOG_ENTRY("Getting function line info for", get_name(func));
+
     auto _file_name   = get_name(module);
     auto _func_name   = get_name(func);
     auto _return_type = get_return_type(func);
@@ -179,6 +182,8 @@ function_signature
 get_loop_file_line_info(module_t* module, procedure_t* func, flow_graph_t*,
                         basic_loop_t* loopToInstrument)
 {
+    OMNITRACE_ADD_LOG_ENTRY("Getting loop line info for", get_name(func));
+
     auto basic_blocks = std::vector<BPatch_basicBlock*>{};
     loopToInstrument->getLoopBasicBlocksExclusive(basic_blocks);
 
@@ -271,6 +276,8 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
     std::map<basic_block_t*, basic_block_signature> _data{};
     if(!func) return _data;
 
+    OMNITRACE_ADD_LOG_ENTRY("Getting basic block line info for", get_name(func));
+
     auto* _cfg          = func->getCFG();
     auto  _basic_blocks = std::set<BPatch_basicBlock*>{};
     _cfg->getAllBasicBlocks(_basic_blocks);
@@ -347,6 +354,8 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
 std::vector<statement_t>
 get_source_code(module_t* module, procedure_t* func)
 {
+    OMNITRACE_ADD_LOG_ENTRY("Getting source code for", get_name(func));
+
     std::vector<statement_t> _lines{};
     if(!module || !func) return _lines;
     auto*                        _cfg = func->getCFG();
@@ -368,26 +377,6 @@ get_source_code(module_t* module, procedure_t* func)
         }
     }
     return _lines;
-}
-
-//======================================================================================//
-//
-//  Error callback routine.
-//
-void
-errorFunc(error_level_t level, int num, const char** params)
-{
-    char line[256];
-
-    const char* msg = bpatch->getEnglishErrorString(num);
-    bpatch->formatErrorString(line, sizeof(line), msg, params);
-
-    if(num != expect_error)
-    {
-        printf("Error #%d (level %d): %s\n", num, level, line);
-        // We consider some errors fatal.
-        if(num == 101) exit(-1);
-    }
 }
 
 //======================================================================================//
@@ -429,9 +418,28 @@ find_function(image_t* app_image, const std::string& _name, const strset_t& _ext
 
 //======================================================================================//
 //
+//  Error callback routine.
+//
+void
+errorFunc(error_level_t level, int num, const char** params)
+{
+    error_func_real(level, num, params);
+}
+
+//======================================================================================//
+//
 void
 error_func_real(error_level_t level, int num, const char* const* params)
 {
+    char line[4096];
+
+    const char* msg = bpatch->getEnglishErrorString(num);
+    bpatch->formatErrorString(line, sizeof(line), msg, params);
+
+    OMNITRACE_ADD_LOG_ENTRY("Dyninst error function called with level", level,
+                            ":: ID# =", num, "::", line)
+        .force(level < BPatchInfo);
+
     if(num == 0)
     {
         // conditional reporting of warnings and informational messages
@@ -439,34 +447,95 @@ error_func_real(error_level_t level, int num, const char* const* params)
         {
             if(level == BPatchInfo)
             {
-                if(error_print > 1) printf("%s\n", params[0]);
+                errprintf(2, "%s :: %i :: %s\n%s", std::to_string(level).c_str(), num,
+                          line, tim::log::color::end());
             }
             else
-                printf("%s", params[0]);
+            {
+                verbprintf(0, "%s :: %i :: %s\n%s", std::to_string(level).c_str(), num,
+                           line, tim::log::color::end());
+            }
         }
     }
     else
     {
         // reporting of actual errors
-        char        line[256];
-        const char* msg = bpatch->getEnglishErrorString(num);
-        bpatch->formatErrorString(line, sizeof(line), msg, params);
         if(num != expect_error)
         {
-            printf("Error #%d (level %d): %s\n", num, level, line);
+            verbprintf(-1, "%s :: %i :: %s\n%s", std::to_string(level).c_str(), num, line,
+                       tim::log::color::end());
             // We consider some errors fatal.
-            if(num == 101) exit(-1);
+            if(num == 101) throw std::runtime_error(msg);
         }
     }
 }
 
 //======================================================================================//
 //
-//  We've a null error function when we don't want to display an error
+//  Just log it
 //
 void
 error_func_fake(error_level_t level, int num, const char* const* params)
 {
-    consume_parameters(level, num, params);
-    // It does nothing.
+    char line[4096];
+
+    const char* msg = bpatch->getEnglishErrorString(num);
+    bpatch->formatErrorString(line, sizeof(line), msg, params);
+
+    // just log it
+    OMNITRACE_ADD_LOG_ENTRY("Dyninst error function called with level", level,
+                            ":: ID# =", num, "::", line)
+        .force(level < BPatchInfo);
 }
+
+namespace std
+{
+std::string
+to_string(instruction_category_t _category)
+{
+    using namespace Dyninst::InstructionAPI;
+    switch(_category)
+    {
+        case c_CallInsn: return "function_call";
+        case c_ReturnInsn: return "return";
+        case c_BranchInsn: return "branch";
+        case c_CompareInsn: return "compare";
+        case c_PrefetchInsn: return "prefetch";
+        case c_SysEnterInsn: return "sys_enter";
+        case c_SyscallInsn: return "sys_call";
+        case c_VectorInsn: return "vector";
+        case c_GPUKernelExitInsn: return "gpu_kernel_exit";
+        case c_NoCategory: return "no_category";
+    }
+    return std::string{ "unknown_category_id_" } +
+           std::to_string(static_cast<int>(_category));
+}
+
+std::string
+to_string(error_level_t _level)
+{
+    switch(_level)
+    {
+        case BPatchFatal:
+        {
+            return JOIN("", tim::log::color::fatal(), "FatalError");
+        }
+        case BPatchSerious:
+        {
+            return JOIN("", tim::log::color::fatal(), "SeriousError");
+        }
+        case BPatchWarning:
+        {
+            return JOIN("", tim::log::color::warning(), "Warning");
+        }
+        case BPatchInfo:
+        {
+            return JOIN("", tim::log::color::info(), "Info");
+        }
+        default: break;
+    }
+
+    return JOIN("", tim::log::color::warning(), "UnknownErrorLevel",
+                static_cast<int>(_level));
+}
+}  // namespace std

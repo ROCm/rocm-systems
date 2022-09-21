@@ -34,11 +34,26 @@
 
 namespace omnitrace
 {
+//  InternalTID: zero-based, process-local thread-ID from atomic increment
+//               from user-created threads and omnitrace-created threads.
+//               This value may vary based on threads created by different
+//               backends, e.g., roctracer will create threads
+//
+//  SystemTID:   system thread-ID. Should be same value as what is seen
+//               in debugger, etc.
+//
+//  SequentTID:  zero-based, process-local thread-ID based on the sequence of
+//               user-created threads which are created in-between the
+//               initialization and finalization of omnitrace.
+//               In theory, omnitrace will never increment this value
+//               because of a thread explicitly by omnitrace or
+//               by other of the dependent libraries. Most commonly
+//               used for indexing into omnitrace's thread-local data.
 enum ThreadIdType : int
 {
-    LookupTID   = 0,
-    SystemTID   = 1,
-    InternalTID = 2,
+    InternalTID = 0,
+    SystemTID   = 1,  // system thread id
+    SequentTID  = 2,
 };
 
 struct thread_index_data
@@ -46,9 +61,9 @@ struct thread_index_data
     // the lookup value is always incremented for each thread
     // the system value is the tid provided by the operating system
     // the internal value is the value which the user expects
-    int64_t lookup_value   = utility::get_thread_index();
+    int64_t internal_value = utility::get_thread_index();
     int64_t system_value   = tim::threading::get_sys_tid();
-    int64_t internal_value = tim::threading::get_id();
+    int64_t sequent_value  = tim::threading::get_id();
 };
 
 struct thread_info

@@ -165,7 +165,7 @@ post_process()
     auto _process_frequencies = [](size_t _idx, size_t _offset) {
         using freq_track = perfetto_counter_track<category::cpu_freq>;
 
-        const auto& _thread_info = thread_info::get(0, LookupTID);
+        const auto& _thread_info = thread_info::get(0, InternalTID);
         OMNITRACE_CI_THROW(!_thread_info, "Missing thread info for thread 0");
         if(!_thread_info) return;
 
@@ -199,7 +199,7 @@ post_process()
               "Page Faults", "User Time", "Kernel Time" },
             { "MB", "MB", "MB", "", "", "sec", "sec" });
 
-        const auto& _thread_info = thread_info::get(0, LookupTID);
+        const auto& _thread_info = thread_info::get(0, InternalTID);
         OMNITRACE_CI_THROW(!_thread_info, "Missing thread info for thread 0");
         if(!_thread_info) return;
 

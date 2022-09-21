@@ -243,7 +243,7 @@ void
 backtrace_metrics::fini_perfetto(int64_t _tid)
 {
     auto        _hw_cnt_labels = *get_papi_labels(_tid);
-    const auto& _thread_info   = thread_info::get(_tid, InternalTID);
+    const auto& _thread_info   = thread_info::get(_tid, SequentTID);
 
     OMNITRACE_CI_THROW(!_thread_info, "Error! missing thread info for tid=%li\n", _tid);
     if(!_thread_info) return;

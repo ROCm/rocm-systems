@@ -58,13 +58,13 @@ init_index_data(bool _offset = false)
         {
             OMNITRACE_BASIC_VERBOSE_F(
                 2, "Thread %li on PID %i (rank: %i) assigned omnitrace TID %li\n",
-                itr->system_value, process::get_id(), dmp::rank(), itr->internal_value);
+                itr->system_value, process::get_id(), dmp::rank(), itr->sequent_value);
         }
         else
         {
             OMNITRACE_VERBOSE_F(
                 2, "Thread %li on PID %i (rank: %i) assigned omnitrace TID %li\n",
-                itr->system_value, process::get_id(), dmp::rank(), itr->internal_value);
+                itr->system_value, process::get_id(), dmp::rank(), itr->sequent_value);
         }
     }
     return itr;
@@ -103,7 +103,7 @@ thread_info::get()
 const std::optional<thread_info>&
 thread_info::get(int64_t _tid, ThreadIdType _type)
 {
-    if(_type == ThreadIdType::LookupTID)
+    if(_type == ThreadIdType::InternalTID)
         return thread_info_data_t::instances().at(_tid);
     else if(_type == ThreadIdType::SystemTID)
     {
@@ -113,12 +113,12 @@ thread_info::get(int64_t _tid, ThreadIdType _type)
             if(itr && itr->index_data->system_value == _tid) return itr;
         }
     }
-    else if(_type == ThreadIdType::InternalTID)
+    else if(_type == ThreadIdType::SequentTID)
     {
         const auto& _v = thread_info_data_t::instances();
         for(const auto& itr : _v)
         {
-            if(itr && itr->index_data->internal_value == _tid) return itr;
+            if(itr && itr->index_data->sequent_value == _tid) return itr;
         }
     }
 
@@ -149,7 +149,7 @@ thread_info::set_stop(uint64_t _ts)
         {
             for(auto& itr : thread_info_data_t::instances())
             {
-                if(itr && itr->index_data && itr->index_data->lookup_value > _tid)
+                if(itr && itr->index_data && itr->index_data->internal_value > _tid)
                 {
                     if(itr->lifetime.second > _v->lifetime.second)
                         itr->lifetime.second = _v->lifetime.second;
@@ -203,8 +203,8 @@ thread_info::as_string() const
     std::stringstream _ss{};
     _ss << std::boolalpha << "is_offset=" << is_offset;
     if(index_data)
-        _ss << ", index_data=(" << index_data->lookup_value << ", "
-            << index_data->system_value << ", " << index_data->internal_value << ")";
+        _ss << ", index_data=(" << index_data->internal_value << ", "
+            << index_data->system_value << ", " << index_data->sequent_value << ")";
     _ss << ", lifetime=(" << lifetime.first << ":" << lifetime.second << ")";
     return _ss.str();
 }

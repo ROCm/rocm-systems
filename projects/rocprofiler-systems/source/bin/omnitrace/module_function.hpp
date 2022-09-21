@@ -34,8 +34,11 @@
 
 struct module_function
 {
-    using width_t   = std::array<size_t, 4>;
-    using address_t = Dyninst::Address;
+    using width_t           = std::array<size_t, 4>;
+    using address_t         = Dyninst::Address;
+    using instr_addr_pair_t = std::pair<instruction_t, address_t>;
+    using str_msg_t         = std::tuple<int, string_t, string_t, string_t, string_t>;
+    using str_msg_vec_t     = std::vector<str_msg_t>;
 
     static constexpr size_t absolute_max_width = 80;
     static width_t&         get_width();
@@ -86,21 +89,19 @@ struct module_function
     bool is_address_range_constrained() const;     // checks address range constraint
     bool is_num_instructions_constrained() const;  // check # instructions constraint
 
-    size_t                                  start_address    = 0;
-    uint64_t                                address_range    = 0;
-    uint64_t                                num_instructions = 0;
-    module_t*                               module           = nullptr;
-    procedure_t*                            function         = nullptr;
-    flow_graph_t*                           flow_graph       = nullptr;
-    string_t                                module_name      = {};
-    string_t                                function_name    = {};
-    function_signature                      signature        = {};
-    basic_block_set_t                       basic_blocks     = {};
-    basic_loop_vec_t                        loop_blocks      = {};
-    std::vector<std::vector<instruction_t>> instructions     = {};
-
-    using str_msg_t     = std::tuple<int, string_t, string_t, string_t, string_t>;
-    using str_msg_vec_t = std::vector<str_msg_t>;
+    size_t                                      start_address     = 0;
+    uint64_t                                    address_range     = 0;
+    uint64_t                                    num_instructions  = 0;
+    module_t*                                   module            = nullptr;
+    procedure_t*                                function          = nullptr;
+    flow_graph_t*                               flow_graph        = nullptr;
+    string_t                                    module_name       = {};
+    string_t                                    function_name     = {};
+    function_signature                          signature         = {};
+    basic_block_set_t                           basic_blocks      = {};
+    basic_loop_vec_t                            loop_blocks       = {};
+    std::map<instruction_category_t, int64_t>   instruction_types = {};
+    std::vector<std::vector<instr_addr_pair_t>> instructions      = {};
 
     mutable str_msg_vec_t messages = {};
 
@@ -211,21 +212,30 @@ module_function::serialize(ArchiveT& ar, const unsigned)
            cereal::make_nvp("is_loop_num_instructions_constrained",
                             is_loop_num_instructions_constrained()));
         ar.finishNode();
+        ar.setNextName("instruction_breakdown");
+        ar.startNode();
+        for(auto itr : instruction_types)
+            ar(cereal::make_nvp(std::to_string(itr.first).c_str(), itr.second));
+        ar.finishNode();
         // instructions can inflate JSON size so only output when verbosity is increased
         // above default
         if(debug_print || verbose_level > 3 || instr_print)
         {
-            std::vector<std::vector<std::string>> _instructions{};
-            _instructions.reserve(instructions.size());
+            ar.setNextName("instructions");
+            ar.startNode();
+            ar.makeArray();
             for(auto&& itr : instructions)
             {
-                std::vector<std::string> _subinstr{};
-                _subinstr.reserve(itr.size());
+                ar.startNode();
                 for(auto&& iitr : itr)
-                    _subinstr.emplace_back(iitr.format());
-                _instructions.emplace_back(std::move(_subinstr));
+                {
+                    std::stringstream _addr{};
+                    _addr << "0x" << std::hex << iitr.second;
+                    ar(cereal::make_nvp(_addr.str().c_str(), iitr.first.format()));
+                }
+                ar.finishNode();
             }
-            ar(cereal::make_nvp("instructions", _instructions));
+            ar.finishNode();
         }
     }
 }

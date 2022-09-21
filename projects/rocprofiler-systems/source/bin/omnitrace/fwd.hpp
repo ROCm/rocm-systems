@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "log.hpp"
+
 #include <timemory/backends/process.hpp>
 #include <timemory/environment.hpp>
 #include <timemory/mpl/apply.hpp>
@@ -48,6 +50,7 @@
 #include <BPatch_snippet.h>
 #include <BPatch_statement.h>
 #include <Instruction.h>
+#include <InstructionCategories.h>
 #include <Symtab.h>
 #include <SymtabReader.h>
 #include <dyntypes.h>
@@ -88,48 +91,49 @@ struct module_function;
 template <typename Tp>
 using bpvector_t = BPatch_Vector<Tp>;
 
-using string_t              = std::string;
-using string_view_t         = std::string_view;
-using stringstream_t        = std::stringstream;
-using strvec_t              = std::vector<string_t>;
-using strset_t              = std::set<string_t>;
-using regexvec_t            = std::vector<std::regex>;
-using fmodset_t             = std::set<module_function>;
-using fixed_modset_t        = std::map<fmodset_t*, bool>;
-using exec_callback_t       = BPatchExecCallback;
-using exit_callback_t       = BPatchExitCallback;
-using fork_callback_t       = BPatchForkCallback;
-using patch_t               = BPatch;
-using process_t             = BPatch_process;
-using thread_t              = BPatch_thread;
-using binary_edit_t         = BPatch_binaryEdit;
-using image_t               = BPatch_image;
-using module_t              = BPatch_module;
-using procedure_t           = BPatch_function;
-using snippet_t             = BPatch_snippet;
-using call_expr_t           = BPatch_funcCallExpr;
-using address_space_t       = BPatch_addressSpace;
-using flow_graph_t          = BPatch_flowGraph;
-using statement_t           = BPatch_statement;
-using basic_block_t         = BPatch_basicBlock;
-using basic_loop_t          = BPatch_basicBlockLoop;
-using procedure_loc_t       = BPatch_procedureLocation;
-using point_t               = BPatch_point;
-using object_t              = BPatch_object;
-using local_var_t           = BPatch_localVar;
-using sequence_t            = BPatch_sequence;
-using const_expr_t          = BPatch_constExpr;
-using error_level_t         = BPatchErrorLevel;
-using snippet_handle_t      = BPatchSnippetHandle;
-using patch_pointer_t       = std::shared_ptr<patch_t>;
-using snippet_pointer_t     = std::shared_ptr<snippet_t>;
-using call_expr_pointer_t   = std::shared_ptr<call_expr_t>;
-using snippet_vec_t         = bpvector_t<snippet_t*>;
-using procedure_vec_t       = bpvector_t<procedure_t*>;
-using basic_block_set_t     = std::set<basic_block_t*>;
-using basic_loop_vec_t      = bpvector_t<basic_loop_t*>;
-using snippet_pointer_vec_t = std::vector<snippet_pointer_t>;
-using instruction_t         = Dyninst::InstructionAPI::Instruction;
+using string_t               = std::string;
+using string_view_t          = std::string_view;
+using stringstream_t         = std::stringstream;
+using strvec_t               = std::vector<string_t>;
+using strset_t               = std::set<string_t>;
+using regexvec_t             = std::vector<std::regex>;
+using fmodset_t              = std::set<module_function>;
+using fixed_modset_t         = std::map<fmodset_t*, bool>;
+using exec_callback_t        = BPatchExecCallback;
+using exit_callback_t        = BPatchExitCallback;
+using fork_callback_t        = BPatchForkCallback;
+using patch_t                = BPatch;
+using process_t              = BPatch_process;
+using thread_t               = BPatch_thread;
+using binary_edit_t          = BPatch_binaryEdit;
+using image_t                = BPatch_image;
+using module_t               = BPatch_module;
+using procedure_t            = BPatch_function;
+using snippet_t              = BPatch_snippet;
+using call_expr_t            = BPatch_funcCallExpr;
+using address_space_t        = BPatch_addressSpace;
+using flow_graph_t           = BPatch_flowGraph;
+using statement_t            = BPatch_statement;
+using basic_block_t          = BPatch_basicBlock;
+using basic_loop_t           = BPatch_basicBlockLoop;
+using procedure_loc_t        = BPatch_procedureLocation;
+using point_t                = BPatch_point;
+using object_t               = BPatch_object;
+using local_var_t            = BPatch_localVar;
+using sequence_t             = BPatch_sequence;
+using const_expr_t           = BPatch_constExpr;
+using error_level_t          = BPatchErrorLevel;
+using snippet_handle_t       = BPatchSnippetHandle;
+using patch_pointer_t        = std::shared_ptr<patch_t>;
+using snippet_pointer_t      = std::shared_ptr<snippet_t>;
+using call_expr_pointer_t    = std::shared_ptr<call_expr_t>;
+using snippet_vec_t          = bpvector_t<snippet_t*>;
+using procedure_vec_t        = bpvector_t<procedure_t*>;
+using basic_block_set_t      = std::set<basic_block_t*>;
+using basic_loop_vec_t       = bpvector_t<basic_loop_t*>;
+using snippet_pointer_vec_t  = std::vector<snippet_pointer_t>;
+using instruction_t          = Dyninst::InstructionAPI::Instruction;
+using instruction_category_t = Dyninst::InstructionAPI::InsnCategory;
 
 void
 omnitrace_prefork_callback(thread_t* parent, thread_t* child);
@@ -172,6 +176,7 @@ extern bool werror;
 extern bool debug_print;
 extern bool instr_print;
 extern int  verbose_level;
+extern int  num_log_entries;
 //
 //  instrumentation settings
 //
@@ -204,12 +209,18 @@ extern regexvec_t       file_exclude;
 extern regexvec_t       file_restrict;
 extern regexvec_t       func_restrict;
 extern CodeCoverageMode coverage_mode;
+
+// logging
+extern std::unique_ptr<std::ofstream> log_ofs;
 //
 //======================================================================================//
 
 // control debug printf statements
 #define errprintf(LEVEL, ...)                                                            \
     {                                                                                    \
+        char _logmsgbuff[FUNCNAMELEN];                                                   \
+        snprintf(_logmsgbuff, FUNCNAMELEN, __VA_ARGS__);                                 \
+        OMNITRACE_ADD_LOG_ENTRY(_logmsgbuff);                                            \
         if(werror || LEVEL < 0)                                                          \
         {                                                                                \
             if(debug_print || verbose_level >= LEVEL)                                    \
@@ -229,6 +240,9 @@ extern CodeCoverageMode coverage_mode;
 // control verbose printf statements
 #define verbprintf(LEVEL, ...)                                                           \
     {                                                                                    \
+        char _logmsgbuff[FUNCNAMELEN];                                                   \
+        snprintf(_logmsgbuff, FUNCNAMELEN, __VA_ARGS__);                                 \
+        OMNITRACE_ADD_LOG_ENTRY(_logmsgbuff);                                            \
         if(debug_print || verbose_level >= LEVEL)                                        \
             fprintf(stdout, "[omnitrace][exe] " __VA_ARGS__);                            \
         fflush(stdout);                                                                  \
@@ -236,6 +250,9 @@ extern CodeCoverageMode coverage_mode;
 
 #define verbprintf_bare(LEVEL, ...)                                                      \
     {                                                                                    \
+        char _logmsgbuff[FUNCNAMELEN];                                                   \
+        snprintf(_logmsgbuff, FUNCNAMELEN, __VA_ARGS__);                                 \
+        OMNITRACE_ADD_LOG_ENTRY(_logmsgbuff);                                            \
         if(debug_print || verbose_level >= LEVEL) fprintf(stdout, __VA_ARGS__);          \
         fflush(stdout);                                                                  \
     }
@@ -289,9 +306,6 @@ bool
 insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
              basic_block_t* basicBlock, bool allow_traps = instr_traps);
 
-void
-errorFunc(error_level_t level, int num, const char** params);
-
 procedure_t*
 find_function(image_t* appImage, const string_t& functionName, const strset_t& = {});
 
@@ -306,3 +320,9 @@ get_name(procedure_t* _module);
 
 std::string_view
 get_name(module_t* _module);
+
+namespace std
+{
+std::string to_string(instruction_category_t);
+std::string to_string(error_level_t);
+}  // namespace std

@@ -24,82 +24,21 @@
 #define OMNITRACE_USER_H_ 1
 
 #if defined(OMNITRACE_USER_SOURCE) && (OMNITRACE_USER_SOURCE > 0)
-#    if !defined(OMNITRACE_ATTRIBUTE)
-#        define OMNITRACE_ATTRIBUTE(...) __attribute__((__VA_ARGS__))
-#    endif
-#    if !defined(OMNITRACE_VISIBILITY)
-#        define OMNITRACE_VISIBILITY(MODE) OMNITRACE_ATTRIBUTE(visibility(MODE))
-#    endif
 #    if !defined(OMNITRACE_PUBLIC_API)
-#        define OMNITRACE_PUBLIC_API OMNITRACE_VISIBILITY("default")
-#    endif
-#    if !defined(OMNITRACE_HIDDEN_API)
-#        define OMNITRACE_HIDDEN_API OMNITRACE_VISIBILITY("hidden")
+#        define OMNITRACE_PUBLIC_API __attribute__((visibility("default")))
 #    endif
 #else
 #    if !defined(OMNITRACE_PUBLIC_API)
 #        define OMNITRACE_PUBLIC_API
 #    endif
-#    if !defined(OMNITRACE_HIDDEN_API)
-#        define OMNITRACE_HIDDEN_API
-#    endif
 #endif
+
+#include "omnitrace/types.h"
 
 #if defined(__cplusplus)
 extern "C"
 {
 #endif
-
-    /// @enum OMNITRACE_USER_ERROR
-    /// @brief Identifier for errors
-    ///
-    enum OMNITRACE_USER_ERROR
-    {
-        OMNITRACE_USER_SUCCESS = 0,                 ///< No error
-        OMNITRACE_USER_ERROR_NO_BINDING,            ///< Function pointer was not assigned
-        OMNITRACE_USER_ERROR_BAD_FUNCTION_POINTER,  ///< Provided function pointer was
-                                                    ///< invalid
-        OMNITRACE_USER_ERROR_INVALID_CATEGORY,      ///< Invalid user binding category
-        OMNITRACE_USER_ERROR_INTERNAL,  ///< Internal error occurred within libomnitrace
-        OMNITRACE_USER_ERROR_LAST
-    };
-
-    /// @enum OMNITRACE_USER_BINDINGS
-    /// @brief Identifier for function pointer categories
-    /// @code{.cpp}
-    /// int (*omnitrace_push_region_f)(const char*) = nullptr;
-    ///
-    /// int custom_push_region(const char* name)
-    /// {
-    ///     // custom push region prints message before calling internal callback
-    ///     printf("Pushing region %s\n", name);
-    ///     return (*omnitrace_push_region_f)(name);
-    /// }
-    ///
-    /// int main(int argc, char** argv)
-    /// {
-    ///     // get the internal callback to start a user-defined region
-    ///     omnitrace_user_get_callbacks(OMNITRACE_USER_REGION,
-    ///                                  (void**) &omnitrace_push_region_f,
-    ///                                  nullptr);
-    ///     // assign the custom callback to start a user-defined region
-    ///     if(omnitrace_push_region_f)
-    ///         omnitrace_user_configure(OMNITRACE_USER_REGION,
-    ///                                  (void*) &custom_push_region,
-    ///                                  nullptr);
-    ///     // ...
-    /// }
-    ///
-    /// @endcode
-    enum OMNITRACE_USER_BINDINGS
-    {
-        OMNITRACE_USER_START_STOP =
-            0,  ///< Function pointers which control global start/stop
-        OMNITRACE_USER_START_STOP_THREAD,  ///< Function pointers which control per-thread
-                                           ///< start/stop
-        OMNITRACE_USER_REGION,  ///< Function pointers which generate user-defined regions
-        OMNITRACE_USER_BINDINGS_LAST
-    };
 
     /// @fn int omnitrace_user_start_trace(void)
     /// @return @ref OMNITRACE_USER_ERROR value

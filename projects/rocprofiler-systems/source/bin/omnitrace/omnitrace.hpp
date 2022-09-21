@@ -25,6 +25,7 @@
 #include "function_signature.hpp"
 #include "fwd.hpp"
 #include "info.hpp"
+#include "log.hpp"
 #include "module_function.hpp"
 
 #include <timemory/utility/filepath.hpp>
@@ -199,8 +200,7 @@ omnitrace_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         if(!_name.empty()) mutatee = _bpatch->openBinary(_name.c_str(), false);
         if(!mutatee)
         {
-            fprintf(stderr, "[omnitrace][exe] Failed to open binary '%s'\n",
-                    _name.c_str());
+            verbprintf(-1, "Failed to open binary '%s'\n", _name.c_str());
             throw std::runtime_error("Failed to open binary");
         }
         verbprintf_bare(1, "Done\n");
@@ -213,27 +213,28 @@ omnitrace_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         mutatee      = _bpatch->processAttach(_cmdv0, _pid);
         if(!mutatee)
         {
-            fprintf(stderr, "[omnitrace][exe] Failed to connect to process %i\n",
-                    (int) _pid);
+            verbprintf(-1, "Failed to connect to process %i\n", (int) _pid);
             throw std::runtime_error("Failed to attach to process");
         }
         verbprintf_bare(1, "Done\n");
     }
     else
     {
-        verbprintf(1, "Creating process '%s'... ", _cmdv[0]);
+        std::stringstream ss;
+        for(int i = 0; i < _cmdc; ++i)
+        {
+            if(!_cmdv || !_cmdv[i]) continue;
+            ss << " " << _cmdv[i];
+        }
+        auto _cmd_msg = ss.str();
+        if(_cmd_msg.length() > 1) _cmd_msg = _cmd_msg.substr(1);
+
+        verbprintf(1, "Creating process '%s'... ", _cmd_msg.c_str());
         fflush(stderr);
         mutatee = _bpatch->processCreate(_cmdv[0], (const char**) _cmdv, nullptr);
         if(!mutatee)
         {
-            std::stringstream ss;
-            for(int i = 0; i < _cmdc; ++i)
-            {
-                if(!_cmdv[i]) continue;
-                ss << _cmdv[i] << " ";
-            }
-            fprintf(stderr, "[omnitrace][exe] Failed to create process: '%s'\n",
-                    ss.str().c_str());
+            verbprintf(-1, "Failed to create process: '%s'\n", _cmd_msg.c_str());
             throw std::runtime_error("Failed to create process");
         }
         verbprintf_bare(1, "Done\n");
@@ -248,6 +249,8 @@ TIMEMORY_NOINLINE inline void
 omnitrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
 {
     if(!thread) return;
+
+    OMNITRACE_ADD_LOG_ENTRY("Executing the thread callback");
 
     BPatch_process* app = thread->getProcess();
 
@@ -290,6 +293,8 @@ omnitrace_thread_exit(thread_t* thread, BPatch_exitType exit_type)
 TIMEMORY_NOINLINE inline void
 omnitrace_fork_callback(thread_t* parent, thread_t* child)
 {
+    OMNITRACE_ADD_LOG_ENTRY("Executing the fork callback");
+
     if(child)
     {
         auto* app = child->getProcess();
@@ -320,9 +325,19 @@ omnitrace_fork_callback(thread_t* parent, thread_t* child)
 template <typename Tp>
 bool
 insert_instr(address_space_t* mutatee, const bpvector_t<point_t*>& _points, Tp traceFunc,
-             procedure_loc_t traceLoc, bool allow_traps)
+             procedure_loc_t, bool allow_traps)
 {
     if(!traceFunc || _points.empty()) return false;
+
+    auto _names = [&_points]() {
+        std::set<std::string> _v{};
+        for(const auto& itr : _points)
+            if(itr && itr->getFunction()) _v.emplace(get_name(itr->getFunction()));
+        return _v;
+    }();
+
+    OMNITRACE_ADD_LOG_ENTRY("Inserting", _points.size(),
+                            "instrumentation points into function(s)", _names);
 
     auto _trace = traceFunc.get();
     auto _traps = std::set<point_t*>{};
@@ -334,17 +349,19 @@ insert_instr(address_space_t* mutatee, const bpvector_t<point_t*>& _points, Tp t
         }
     }
 
+    OMNITRACE_ADD_LOG_ENTRY("Found", _traps.size(),
+                            "instrumentation points using traps in function(s)", _names);
+
     size_t _n = 0;
     for(const auto& itr : _points)
     {
-        if(!itr || _traps.count(itr) > 0)
-            continue;
-        else if(traceLoc == BPatch_entry)
-            mutatee->insertSnippet(*_trace, *itr, BPatch_callBefore, BPatch_firstSnippet);
-        else
-            mutatee->insertSnippet(*_trace, *itr);
+        if(!itr || _traps.count(itr) > 0) continue;
+        mutatee->insertSnippet(*_trace, *itr);
         ++_n;
     }
+
+    OMNITRACE_ADD_LOG_ENTRY("Inserted", _n, "instrumentation points in function(s)",
+                            _names);
 
     return (_n > 0);
 }
@@ -364,6 +381,9 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     bpvector_t<point_t*>* _points = nullptr;
     auto                  _trace  = traceFunc.get();
 
+    OMNITRACE_ADD_LOG_ENTRY("Searching for loop instrumentation points in function",
+                            get_name(funcToInstr));
+
     if(!cfGraph) funcToInstr->getCFG();
     if(cfGraph && loopToInstrument)
     {
@@ -380,6 +400,10 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
     if(_points == nullptr) return false;
     if(_points->empty()) return false;
 
+    OMNITRACE_ADD_LOG_ENTRY("Inserting max of", _points->size(),
+                            "loop instrumentation points in function",
+                            get_name(funcToInstr));
+
     std::set<point_t*> _traps{};
     if(!allow_traps)
     {
@@ -389,17 +413,20 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
         }
     }
 
+    OMNITRACE_ADD_LOG_ENTRY("Found", _traps.size(),
+                            "loop instrumentation points using traps in function",
+                            get_name(funcToInstr));
+
     size_t _n = 0;
     for(auto& itr : *_points)
     {
-        if(!itr || _traps.count(itr) > 0)
-            continue;
-        else if(traceLoc == BPatch_entry)
-            mutatee->insertSnippet(*_trace, *itr, BPatch_callBefore, BPatch_firstSnippet);
-        else
-            mutatee->insertSnippet(*_trace, *itr);
+        if(!itr || _traps.count(itr) > 0) continue;
+        mutatee->insertSnippet(*_trace, *itr);
         ++_n;
     }
+
+    OMNITRACE_ADD_LOG_ENTRY("Inserted", _n, "loop instrumentation points in function",
+                            get_name(funcToInstr));
 
     return (_n > 0);
 }
@@ -412,8 +439,14 @@ bool
 insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
              basic_block_t* basicBlock, bool allow_traps)
 {
+    if(!basicBlock) return false;
+
     point_t* _point = nullptr;
     auto     _trace = traceFunc.get();
+
+    OMNITRACE_ADD_LOG_ENTRY(
+        "Searching for basic-block entry and exit instrumentation points ::",
+        *basicBlock);
 
     basic_block_t* _bb = basicBlock;
     switch(traceLoc)
@@ -426,15 +459,23 @@ insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
             return false;
     }
 
-    if(_point == nullptr) return false;
+    if(_point == nullptr)
+    {
+        OMNITRACE_ADD_LOG_ENTRY("No instrumentation points were found in basic-block ",
+                                *basicBlock);
+        return false;
+    }
 
-    if(!allow_traps && _point->usesTrap_NP()) return false;
+    if(!allow_traps && _point->usesTrap_NP())
+    {
+        OMNITRACE_ADD_LOG_ENTRY("Basic-block", *basicBlock,
+                                "uses traps and traps are disallowed");
+        return false;
+    }
 
     switch(traceLoc)
     {
         case BPatch_entry:
-            return (mutatee->insertSnippet(*_trace, *_point, BPatch_callBefore,
-                                           BPatch_firstSnippet) != nullptr);
         case BPatch_exit: return (mutatee->insertSnippet(*_trace, *_point) != nullptr);
         default:
         {

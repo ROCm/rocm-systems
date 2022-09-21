@@ -238,7 +238,7 @@ start_duration_thread()
 std::set<int>
 configure(bool _setup, int64_t _tid = threading::get_id())
 {
-    const auto& _info         = thread_info::get(_tid, InternalTID);
+    const auto& _info         = thread_info::get(_tid, SequentTID);
     auto&       _sampler      = sampling::get_sampler(_tid);
     auto&       _running      = get_sampler_running(_tid);
     bool        _is_running   = (!_running) ? false : *_running;
@@ -270,7 +270,7 @@ configure(bool _setup, int64_t _tid = threading::get_id())
         // thus we should not start a sampler for it
         if(_tid > 0 && _info && _info->is_offset) return std::set<int>{};
         // if the thread state is disabled or completed, return
-        if(_info && _info->index_data->internal_value == _tid &&
+        if(_info && _info->index_data->sequent_value == _tid &&
            get_thread_state() == ThreadState::Disabled)
             return std::set<int>{};
 
@@ -287,7 +287,8 @@ configure(bool _setup, int64_t _tid = threading::get_id())
         if(get_debug_sampling()) _verbose = 2;
 
         OMNITRACE_DEBUG("Configuring sampler for thread %lu...\n", _tid);
-        sampling::sampler_instances::construct("omnitrace", _tid, _verbose);
+        sampling::sampler_instances::construct(construct_on_thread{ _tid }, "omnitrace",
+                                               _tid, _verbose);
 
         _sampler->set_flags(SA_RESTART);
         _sampler->set_verbose(_verbose);
@@ -399,7 +400,8 @@ unique_ptr_t<std::set<int>>&
 get_signal_types(int64_t _tid)
 {
     static auto& _v = signal_type_instances::instances();
-    signal_type_instances::construct(omnitrace::get_sampling_signals(_tid));
+    signal_type_instances::construct(construct_on_thread{ _tid },
+                                     omnitrace::get_sampling_signals(_tid));
     return _v.at(_tid);
 }
 
@@ -486,7 +488,7 @@ post_process()
             continue;
         }
 
-        const auto& _thread_info = thread_info::get(i, InternalTID);
+        const auto& _thread_info = thread_info::get(i, SequentTID);
 
         OMNITRACE_VERBOSE(3 || get_debug_sampling(),
                           "Getting sampler data for thread %lu...\n", i);
@@ -578,7 +580,7 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
         OMNITRACE_VERBOSE(3 || get_debug_sampling(),
                           "[%li] Post-processing backtraces for perfetto...\n", _tid);
 
-        const auto& _thread_info = thread_info::get(_tid, InternalTID);
+        const auto& _thread_info = thread_info::get(_tid, SequentTID);
         OMNITRACE_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", _tid);
 
         if(!_thread_info) return;

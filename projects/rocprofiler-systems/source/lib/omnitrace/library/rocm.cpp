@@ -142,7 +142,7 @@ extern "C"
         settings->timestamp_on     = 1;
         settings->intercept_mode   = 1;
         settings->hsa_intercepting = 1;
-        settings->k_concurrent     = 1;
+        settings->k_concurrent     = 0;
         settings->obj_dumping      = 0;
         // settings->code_obj_tracking = 0;
         // settings->memcopy_tracking  = 0;
