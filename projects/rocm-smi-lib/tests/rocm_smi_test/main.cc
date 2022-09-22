@@ -78,6 +78,7 @@
 #include "functional/xgmi_read_write.h"
 #include "functional/mem_page_info_read.h"
 #include "functional/api_support_read.h"
+#include "functional/measure_api_execution_time.h"
 #include "functional/mutual_exclusion.h"
 #include "functional/evt_notif_read_write.h"
 #include "functional/init_shutdown_refcount.h"
@@ -254,6 +255,10 @@ TEST(rsmitstReadOnly, TestMemPageInfoRead) {
 }
 TEST(rsmitstReadOnly, TestAPISupportRead) {
   TestAPISupportRead tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, TestMeasureApiExecutionTime) {
+  TestMeasureApiExecutionTime tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadOnly, TestMutualExclusion) {
