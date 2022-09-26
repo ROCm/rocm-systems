@@ -536,7 +536,7 @@ HsaRsrcFactory::GetCpuAgentInfo(uint32_t idx, const AgentInfo** agent_info)
 //
 // @return bool true if successful, false otherwise
 //
-bool
+bool  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 HsaRsrcFactory::CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts,
                             hsa_queue_t** queue)
 {
@@ -550,7 +550,7 @@ HsaRsrcFactory::CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts,
 // @param value Initial value of signal object
 // @param signal Output parameter updated with handle of signal object
 // @return bool true if successful, false otherwise
-bool
+bool  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 HsaRsrcFactory::CreateSignal(uint32_t value, hsa_signal_t* signal)
 {
     hsa_status_t status;
@@ -563,7 +563,7 @@ HsaRsrcFactory::CreateSignal(uint32_t value, hsa_signal_t* signal)
 // @param agent_info Agent from whose memory region to allocate
 // @param size Size of memory in terms of bytes
 // @return uint8_t* Pointer to buffer, null if allocation fails.
-uint8_t*
+uint8_t*  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t size)
 {
     hsa_status_t status = HSA_STATUS_ERROR;
@@ -647,7 +647,7 @@ HsaRsrcFactory::AllocateCmdMemory(const AgentInfo* agent_info, size_t size)
 void
 HsaRsrcFactory::SignalWait(const hsa_signal_t& signal) const
 {
-    while(1)
+    while(true)
     {
         const hsa_signal_value_t signal_value = hsa_api_.hsa_signal_wait_scacquire(
             signal, HSA_SIGNAL_CONDITION_LT, 1, timeout_, HSA_WAIT_STATE_BLOCKED);
@@ -714,7 +714,7 @@ HsaRsrcFactory::FreeMemory(void* ptr)
 // @param code_desc Handle of finalized Code Descriptor that could
 // be used to submit for execution
 // @return bool true if successful, false otherwise
-bool
+bool  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* brig_path,
                                 const char* kernel_name, hsa_executable_t* executable,
                                 hsa_executable_symbol_t* code_desc)

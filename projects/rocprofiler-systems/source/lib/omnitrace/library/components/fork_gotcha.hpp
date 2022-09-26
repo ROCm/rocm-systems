@@ -33,6 +33,8 @@ namespace component
 // this is used to wrap fork()
 struct fork_gotcha : comp::base<fork_gotcha, void>
 {
+    static constexpr size_t gotcha_capacity = 1;
+
     using gotcha_data_t = comp::gotcha_data;
 
     TIMEMORY_DEFAULT_OBJECT(fork_gotcha)
@@ -56,5 +58,6 @@ struct fork_gotcha : comp::base<fork_gotcha, void>
 }  // namespace component
 
 using fork_gotcha_t =
-    comp::gotcha<4, tim::component_tuple<component::fork_gotcha>, project::omnitrace>;
+    comp::gotcha<component::fork_gotcha::gotcha_capacity,
+                 tim::component_tuple<component::fork_gotcha>, project::omnitrace>;
 }  // namespace omnitrace

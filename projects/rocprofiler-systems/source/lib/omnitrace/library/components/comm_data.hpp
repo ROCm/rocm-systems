@@ -216,19 +216,19 @@ private:
         return _t;
     }
 
-    static auto&& add(const gotcha_data& _data, data_type value)
+    static auto add(const gotcha_data& _data, data_type value)
     {
         tracker_t _t{ std::string_view{ _data.tool_id.c_str() } };
         return add(_t, value);
     }
 
-    static auto&& add(std::string&& _name, data_type value)
+    static auto add(std::string&& _name, data_type value)
     {
         tracker_t _t{ _name };
         return add(_t, value);
     }
 
-    static auto&& add(std::string_view _name, data_type value)
+    static auto add(std::string_view _name, data_type value)
     {
         tracker_t _t{ _name };
         return add(_t, value);

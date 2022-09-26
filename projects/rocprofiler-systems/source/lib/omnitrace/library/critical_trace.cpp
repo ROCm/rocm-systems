@@ -62,6 +62,7 @@ using call_graph_preorder_itr_t = typename call_graph_t::pre_order_iterator;
 hash_ids   complete_hash_ids{};
 call_chain complete_call_chain{};
 std::mutex complete_call_mutex{};
+std::mutex tasking_mutex{};
 
 void
 update_critical_path(call_chain _chain, int64_t _tid);
@@ -549,6 +550,7 @@ add_hash_id(const hash_ids& _labels)
 {
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     if(!tasking::critical_trace::get_task_group().pool()) return;
+    std::unique_lock<std::mutex> _lk{ tasking_mutex };
     tasking::critical_trace::get_task_group().exec([_labels]() {
         static std::mutex _mtx{};
         _mtx.lock();
@@ -579,7 +581,8 @@ update(int64_t _tid)
     if(!get_use_critical_trace() && !get_use_rocm_smi()) return;
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     if(!tasking::critical_trace::get_task_group().pool()) return;
-    call_chain _data{};
+    std::unique_lock<std::mutex> _lk{ tasking_mutex };
+    call_chain                   _data{};
     std::swap(_data, *critical_trace::get(_tid));
     tasking::critical_trace::get_task_group().exec(update_critical_path, _data, _tid);
 }
@@ -590,6 +593,7 @@ compute(int64_t _tid)
     update(_tid);
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     if(!tasking::critical_trace::get_task_group().pool()) return;
+    std::unique_lock<std::mutex> _lk{ tasking_mutex };
     tasking::critical_trace::get_task_group().exec(compute_critical_trace);
 }
 
@@ -867,6 +871,7 @@ get_entries(int64_t _ts, const std::function<bool(const entry&)>& _eval)
     size_t                                     _n = 0;
     std::vector<std::pair<std::string, entry>> _v{};
     if(!tasking::critical_trace::get_task_group().pool()) return _v;
+    std::unique_lock<std::mutex> _lk{ tasking_mutex };
     tasking::critical_trace::get_task_group().exec(_func, &_v, &_n);
     tasking::critical_trace::get_task_group().join();
     OMNITRACE_DEBUG("critical_trace::%s :: found %zu out of %zu entries at %li...\n",

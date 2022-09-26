@@ -163,6 +163,9 @@ extern "C"
     bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                 const char* const* failed_tool_names)
     {
+        tim::consume_parameters(table, runtime_version, failed_tool_count,
+                                failed_tool_names);
+
         OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Loading...\n");
         OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
@@ -171,9 +174,6 @@ extern "C"
 
         roctracer_is_init() = true;
         OMNITRACE_BASIC_VERBOSE_F(1 || rocm::on_load_trace, "Loading ROCm tooling...\n");
-
-        tim::consume_parameters(table, runtime_version, failed_tool_count,
-                                failed_tool_names);
 
         if(!config::settings_are_configured() && get_state() < State::Active)
             omnitrace_init_tooling_hidden();
@@ -326,9 +326,6 @@ extern "C"
     void OnUnload()
     {
         OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Unloading...\n");
-        rocm_smi::set_state(State::Finalized);
-        comp::roctracer::shutdown();
-        comp::rocprofiler::shutdown();
         omnitrace_finalize_hidden();
         OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Unloading... Done\n");
     }

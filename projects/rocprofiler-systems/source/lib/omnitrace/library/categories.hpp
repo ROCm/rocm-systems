@@ -156,7 +156,7 @@ using name = perfetto_category<Tp...>;
         OMNITRACE_PERFETTO_CATEGORY(category::thread_hardware_counter),                  \
         OMNITRACE_PERFETTO_CATEGORY(category::kernel_hardware_counter),                  \
         OMNITRACE_PERFETTO_CATEGORY(category::numa),                                     \
-        perfetto::Category("timemory").SetDescription("Events from the timemory API")
+        ::perfetto::Category("timemory").SetDescription("Events from the timemory API")
 
 #if defined(TIMEMORY_USE_PERFETTO)
 #    define TIMEMORY_PERFETTO_CATEGORIES OMNITRACE_PERFETTO_CATEGORIES

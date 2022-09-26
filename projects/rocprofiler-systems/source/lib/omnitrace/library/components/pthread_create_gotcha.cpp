@@ -40,6 +40,7 @@
 
 #include <ostream>
 #include <pthread.h>
+#include <utility>
 
 namespace omnitrace
 {
@@ -132,13 +133,14 @@ stop_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
 //--------------------------------------------------------------------------------------//
 
 pthread_create_gotcha::wrapper::wrapper(routine_t _routine, void* _arg,
-                                        bool _enable_sampling, int64_t _parent,
-                                        promise_t* _p)
+                                        bool _enable_sampling, bool _offset,
+                                        int64_t _parent, promise_t _p)
 : m_enable_sampling{ _enable_sampling }
+, m_offset{ _offset }
 , m_parent_tid{ _parent }
 , m_routine{ _routine }
 , m_arg{ _arg }
-, m_promise{ _p }
+, m_promise{ std::move(_p) }
 {}
 
 void*
@@ -188,10 +190,10 @@ pthread_create_gotcha::wrapper::operator()() const
     auto _active = (get_state() == ::omnitrace::State::Active && bundles != nullptr &&
                     bundles_mutex != nullptr);
 
-    if(_active && !_coverage)
+    const auto& _info = thread_info::init(m_offset);
+    if(_active && !_coverage && !m_offset)
     {
-        const auto& _tid_index = thread_info::init();
-        _tid                   = _tid_index->index_data->sequent_value;
+        _tid = _info->index_data->sequent_value;
         threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid).c_str());
         if(!thread_bundle_data_t::instances().at(_tid))
         {
@@ -216,10 +218,6 @@ pthread_create_gotcha::wrapper::operator()() const
             _signals = sampling::setup();
             sampling::unblock_signals();
         }
-    }
-    else
-    {
-        thread_info::init(true);
     }
 
     // notify the wrapper that all internal work is completed
@@ -292,7 +290,8 @@ pthread_create_gotcha::shutdown()
     bundles->clear();
 
     OMNITRACE_BASIC_VERBOSE(
-        2 && _ndangling > 0,
+        1,
+        // 2 && _ndangling > 0,
         "[pthread_create_gotcha::shutdown] cleaned up %lu dangling bundles\n",
         _ndangling);
 }
@@ -300,6 +299,8 @@ pthread_create_gotcha::shutdown()
 void
 pthread_create_gotcha::shutdown(int64_t _tid)
 {
+    if(_tid == 0) shutdown();
+
     if(is_shutdown && *is_shutdown) return;
 
     if(!bundles_mutex || !bundles) return;
@@ -323,23 +324,51 @@ pthread_create_gotcha::set_data(wrappee_t _v)
 // pthread_create
 int
 pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
-                                  void* (*start_routine)(void*), void*     arg) const
+                                  void* (*func)(void*), void*              arg) const
 {
-    auto _disabled = (get_thread_state() == ThreadState::Disabled);
-    auto _enabled  = (get_thread_state() == ThreadState::Enabled);
-    auto _bundle   = std::optional<bundle_t>{};
+    auto        _tid          = utility::get_thread_index();
+    auto        _thr_state    = get_thread_state();
+    auto        _glob_state   = get_state();
+    auto        _mode         = get_mode();
+    auto        _disabled     = (_thr_state == ThreadState::Disabled);
+    auto        _enabled      = (_thr_state == ThreadState::Enabled);
+    auto        _bundle       = std::optional<bundle_t>{};
+    auto        _sample_child = sampling_enabled_on_child_threads();
+    auto        _active       = (_glob_state == ::omnitrace::State::Active && !_disabled);
+    const auto& _info = thread_info::init(!_active || !_sample_child || _disabled);
 
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-    auto        _active       = (get_state() == ::omnitrace::State::Active && !_disabled);
-    auto        _coverage     = (get_mode() == Mode::Coverage);
-    auto        _use_sampling = get_use_sampling();
-    auto        _sample_child = sampling_enabled_on_child_threads();
-    auto        _tid          = utility::get_thread_index();
-    auto        _use_bundle   = (_active && !_coverage);
-    const auto& _info = thread_info::init(!_active || !_sample_child || _disabled);
-    auto        _enable_sampling =
-        (!_disabled && _enabled && _sample_child && _use_sampling && !_info->is_offset);
+    auto _coverage     = (_mode == Mode::Coverage);
+    auto _use_sampling = get_use_sampling();
+    auto _offset       = (!_enabled || !_active || _info->is_offset);
+    auto _use_bundle   = (_active && !_coverage && !_offset);
+    auto _enable_sampling =
+        (_use_sampling && _sample_child && _active && !_coverage && !_offset);
+
+    static bool debug_threading_get_id =
+        get_env<bool>(TIMEMORY_SETTINGS_PREFIX "DEBUG_THREADING_GET_ID", false);
+
+    auto _verbose = (debug_threading_get_id) ? 0 : 3;
+    OMNITRACE_VERBOSE(
+        _verbose,
+        "Creating new thread :: global_state=%s, thread_state=%s, mode=%s, active=%s, "
+        "coverage=%s, use_sampling=%s, sample_children=%s, tid=%li, use_bundle=%s, "
+        "enable_sampling=%s, thread_info=(%s)...\n",
+        std::to_string(_glob_state).c_str(), std::to_string(_thr_state).c_str(),
+        std::to_string(_mode).c_str(), std::to_string(_active).c_str(),
+        std::to_string(_coverage).c_str(), std::to_string(_use_sampling).c_str(),
+        std::to_string(_sample_child).c_str(), _tid, std::to_string(_use_bundle).c_str(),
+        std::to_string(_enable_sampling).c_str(), JOIN("", *_info).c_str());
+
+    if(debug_threading_get_id)
+    {
+        timemory_print_demangled_backtrace<8>(std::cerr, std::string{},
+                                              std::string{ "threading::get_id() [id=" } +
+                                                  std::to_string(_tid) +
+                                                  std::string{ "]" },
+                                              std::string{ " " }, false);
+    }
 
     if(_active && !_disabled && !_info->is_offset)
     {
@@ -348,13 +377,16 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     }
 
     // ensure that cpu cid stack exists on the parent thread if active
-    if(_active && !_coverage) get_cpu_cid_stack();
+    if(_active && !_coverage)
+    {
+        OMNITRACE_DEBUG("blocking signals...\n");
+        get_cpu_cid_stack();
+    }
 
     set_thread_state(ThreadState::Disabled);
     auto  _blocked = get_sampling_signals();
-    auto  _promise = std::promise<void>{};
-    auto  _fut     = _promise.get_future();
-    auto* _wrap    = new wrapper(start_routine, arg, _enable_sampling, _tid, &_promise);
+    auto  _promise = (_active) ? std::make_shared<std::promise<void>>() : promise_t{};
+    auto* _wrap    = new wrapper(func, arg, _enable_sampling, _offset, _tid, _promise);
     set_thread_state(ThreadState::Internal);
 
     // block the signals in entire process
@@ -367,15 +399,18 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     if(_use_bundle)
     {
         _bundle = bundle_t{ "pthread_create" };
-        start_bundle(*_bundle, audit::incoming{}, thread, attr, start_routine, arg);
+        start_bundle(*_bundle, audit::incoming{}, thread, attr, func, arg);
     }
 
     // create the thread
     auto _ret = (*m_wrappee)(thread, attr, &wrapper::wrap, static_cast<void*>(_wrap));
 
     // wait for thread to set promise
-    OMNITRACE_DEBUG("waiting for child to signal it is setup...\n");
-    _fut.wait();
+    if(_promise)
+    {
+        OMNITRACE_DEBUG("waiting for child to signal it is setup...\n");
+        _promise->get_future().wait_for(std::chrono::milliseconds{ 500 });
+    }
 
     if(_use_bundle) stop_bundle(*_bundle, threading::get_id(), audit::outgoing{}, _ret);
 

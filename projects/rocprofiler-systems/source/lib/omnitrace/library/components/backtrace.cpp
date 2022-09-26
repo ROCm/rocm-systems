@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "library/common.hpp"
 #include "library/components/ensure_storage.hpp"
 #include "library/components/fwd.hpp"
 #include "library/config.hpp"
@@ -72,40 +73,25 @@ namespace omnitrace
 {
 namespace component
 {
-std::vector<std::string>
+std::vector<backtrace::entry_type>
 backtrace::get() const
 {
-    std::vector<std::string> _v = {};
+    std::vector<entry_type> _v = {};
     if(size() == 0) return _v;
-    _v.reserve(m_data.size());
-    for(const auto& itr : m_data.call_stack)
+
     {
-        if(!itr) continue;
-
-#if defined(OMNITRACE_CI) && OMNITRACE_CI > 0
-        std::string _name = {};
-        _name.reserve(1024);
-        const char* _addr = _name.data();
-        _name             = itr->get_name(m_data.context, _name);
-
-        OMNITRACE_CONDITIONAL_PRINT(
-            _name.data() != _addr,
-            "[backtrace::get()] processing unw_get_proc_name_from_ip for '%s' "
-            "caused a reallocation. Before=%p, After=%p\n",
-            _name.c_str(), _addr, _name.data());
-#else
-        auto _name = itr->get_name(m_data.context);
-#endif
-
-        if(!_name.empty()) _v.emplace_back(_name);
+        static auto _cache = cache_type{};
+        auto_lock_t _lk{ type_mutex<backtrace>() };
+        _v = m_data.get(&_cache, true);
     }
+
     // put the bottom of the call-stack on top
     std::reverse(_v.begin(), _v.end());
     //
     auto _known_excludes =
         std::set<std::string>{ "funlockfile", "killpg", "__restore_rt" };
     // remove some known functions which are by-products of interrupts
-    while(!_v.empty() && _known_excludes.find(_v.back()) != _known_excludes.end())
+    while(!_v.empty() && _known_excludes.find(_v.back().name) != _known_excludes.end())
         _v.pop_back();
 
     return _v;
@@ -124,7 +110,7 @@ backtrace::description()
 }
 
 std::vector<std::string>
-backtrace::filter_and_patch(const std::vector<std::string>& _data)
+backtrace::filter_and_patch(const std::vector<entry_type>& _data)
 {
     // check whether the call-stack entry should be used. -1 means break, 0 means continue
     auto _use_label = [](std::string_view _lbl) -> short {
@@ -160,7 +146,7 @@ backtrace::filter_and_patch(const std::vector<std::string>& _data)
     auto _ret = std::vector<std::string>{};
     for(const auto& itr : _data)
     {
-        auto _name = tim::demangle(_patch_label(itr));
+        auto _name = tim::demangle(_patch_label(itr.name));
         auto _use  = _use_label(_name);
         if(_use == -1) break;
         if(_use == 0) continue;

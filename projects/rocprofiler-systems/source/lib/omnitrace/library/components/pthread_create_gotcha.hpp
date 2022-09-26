@@ -36,24 +36,26 @@ namespace component
 {
 struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
 {
+    static constexpr size_t gotcha_capacity = 1;
+
     using routine_t = void* (*) (void*);
     using wrappee_t = int (*)(pthread_t*, const pthread_attr_t*, routine_t, void*);
+    using promise_t = std::shared_ptr<std::promise<void>>;
 
     struct wrapper
     {
-        using promise_t = std::promise<void>;
-
-        wrapper(routine_t _routine, void* _arg, bool, int64_t, promise_t*);
+        wrapper(routine_t _routine, void* _arg, bool, bool, int64_t, promise_t);
         void* operator()() const;
 
         static void* wrap(void* _arg);
 
     private:
-        bool       m_enable_sampling = false;
-        int64_t    m_parent_tid      = 0;
-        routine_t  m_routine         = nullptr;
-        void*      m_arg             = nullptr;
-        promise_t* m_promise         = nullptr;
+        bool      m_enable_sampling = false;
+        bool      m_offset          = false;
+        int64_t   m_parent_tid      = 0;
+        routine_t m_routine         = nullptr;
+        void*     m_arg             = nullptr;
+        promise_t m_promise         = {};
     };
 
     TIMEMORY_DEFAULT_OBJECT(pthread_create_gotcha)
@@ -77,6 +79,7 @@ private:
 };
 
 using pthread_create_gotcha_t =
-    tim::component::gotcha<2, std::tuple<>, pthread_create_gotcha>;
+    tim::component::gotcha<pthread_create_gotcha::gotcha_capacity, std::tuple<>,
+                           pthread_create_gotcha>;
 }  // namespace component
 }  // namespace omnitrace

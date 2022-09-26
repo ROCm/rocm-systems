@@ -34,6 +34,9 @@ extern "C"
     /// handles configuration logic
     void omnitrace_init_library(void) OMNITRACE_PUBLIC_API;
 
+    /// handles configuration logic
+    void omnitrace_init_tooling(void) OMNITRACE_PUBLIC_API;
+
     /// starts gotcha wrappers
     void omnitrace_init(const char*, bool, const char*) OMNITRACE_PUBLIC_API;
 

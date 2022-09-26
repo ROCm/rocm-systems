@@ -182,29 +182,8 @@ get_availability<Type>::get_info()
     }
 
     string_t categories = get_categories(category_types{});
-
-#if 0
-    auto _remove_typelist = [](std::string _tmp) {
-        if(_tmp.empty()) return _tmp;
-        auto _key = std::string{ "type_list" };
-        auto _idx = _tmp.find(_key);
-        if(_idx == std::string::npos) return _tmp;
-        _idx = _tmp.find('<', _idx);
-        _tmp = _tmp.substr(_idx + 1);
-        _idx = _tmp.find_last_of('>');
-        _tmp = _tmp.substr(0, _idx);
-        if(_tmp.empty()) return _tmp;
-        // strip trailing whitespaces
-        while((_idx = _tmp.find_last_of(' ')) == _tmp.length() - 1)
-            _tmp = _tmp.substr(0, _idx);
-        return _tmp;
-    };
-    auto     apis      = _remove_typelist(demangle<trait::component_apis_t<Type>>());
-    if(!apis.empty()) description += ". APIs: " + apis;
-#endif
-
-    description = _replace(_replace(description, ". .", "."), "..", ".");
-    data_type   = _replace(_cleanup(data_type, "::__1"), "> >", ">>");
+    description         = _replace(_replace(description, ". .", "."), "..", ".");
+    data_type           = _replace(_cleanup(data_type, "::__1"), "> >", ">>");
     return info_type{ name, is_available,
                       str_vec_t{ data_type, enum_type, id_type, ids_str, label,
                                  description, categories } };

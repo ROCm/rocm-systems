@@ -48,8 +48,10 @@
 #include "library/tracing.hpp"
 
 #include <timemory/hash/types.hpp>
+#include <timemory/manager/manager.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
 #include <timemory/sampling/signals.hpp>
+#include <timemory/settings/types.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
@@ -59,6 +61,21 @@
 #include <string_view>
 
 using namespace omnitrace;
+
+//======================================================================================//
+
+namespace omnitrace
+{
+namespace perfetto
+{
+// declare this here bc it has a tendency to cause namespace ambiguities
+void
+setup();
+
+void
+start();
+}  // namespace perfetto
+}  // namespace omnitrace
 
 //======================================================================================//
 
@@ -77,6 +94,9 @@ ensure_finalization(bool _static_init = false)
                        _tid->system_value);
 
     if(!get_env("OMNITRACE_COLORIZED_LOG", true)) tim::log::colorized() = false;
+
+    (void) tim::manager::instance();
+    (void) tim::settings::shared_instance();
 
     if(!_static_init)
     {
@@ -167,12 +187,14 @@ omnitrace_set_env_hidden(const char* env_name, const char* env_val)
 
     tim::set_env(env_name, env_val, 0);
 
-    OMNITRACE_CONDITIONAL_THROW(
-        _success && get_state() >= State::Init &&
-            (config::get_is_continuous_integration() || get_debug_init()),
-        "omnitrace_set_env(\"%s\", \"%s\") called after omnitrace was initialized. state "
-        "= %s",
-        env_name, env_val, std::to_string(get_state()).c_str());
+    if(_success && get_state() >= State::Init)
+    {
+        OMNITRACE_WARNING_F(
+            0,
+            "omnitrace_set_env(\"%s\", \"%s\") called after omnitrace was initialized. "
+            "state = %s. This environment variable will have no effect\n",
+            env_name, env_val, std::to_string(get_state()).c_str());
+    }
 }
 
 //======================================================================================//
@@ -184,7 +206,15 @@ omnitrace_set_env_hidden(const char* env_name, const char* env_val)
 namespace
 {
 bool                  _set_mpi_called   = false;
-std::function<void()> _preinit_callback = []() {};
+std::function<void()> _preinit_callback = []() { get_preinit_bundle()->start(); };
+
+void
+omnitrace_preinit_hidden()
+{
+    // run once and discard
+    _preinit_callback();
+    _preinit_callback = []() {};
+}
 }  // namespace
 
 extern "C" void
@@ -215,15 +245,18 @@ omnitrace_set_mpi_hidden(bool use, bool attached)
         trait::runtime_enabled<mpi_gotcha_t>::set(false);
     }
 
-    OMNITRACE_CONDITIONAL_THROW(
-        get_state() >= State::Init &&
-            (config::get_is_continuous_integration() || get_debug_init()),
-        "omnitrace_set_mpi(use=%s, attached=%s) called after omnitrace was initialized. "
-        "state = %s",
-        std::to_string(use).c_str(), std::to_string(attached).c_str(),
-        std::to_string(get_state()).c_str());
+    if(get_state() >= State::Init)
+    {
+        OMNITRACE_WARNING_F(
+            0,
+            "omnitrace_set_mpi(use=%s, attached=%s) called after omnitrace was "
+            "initialized. state = %s. MPI support may not be properly initialized. Use "
+            "OMNITRACE_USE_MPIP=ON and OMNITRACE_USE_PID=ON to ensure full support\n",
+            std::to_string(use).c_str(), std::to_string(attached).c_str(),
+            std::to_string(get_state()).c_str());
+    }
 
-    _preinit_callback();
+    omnitrace_preinit_hidden();
 }
 
 //======================================================================================//
@@ -351,21 +384,29 @@ omnitrace_init_tooling_hidden()
             sampling::unblock_signals();
         }
         get_main_bundle()->start();
+        OMNITRACE_DEBUG_F("State: %s -> State::Active\n",
+                          std::to_string(get_state()).c_str());
         set_state(State::Active);  // set to active as very last operation
     } };
 
     OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+
+    // perfetto initialization
+    if(get_use_perfetto())
+    {
+        OMNITRACE_VERBOSE_F(1, "Setting up Perfetto...\n");
+        omnitrace::perfetto::setup();
+    }
+
+    // ideally these have already been started
+    omnitrace_preinit_hidden();
 
     // start these gotchas once settings have been initialized
     get_init_bundle()->start();
 
     if(get_use_sampling()) sampling::block_signals();
 
-    if(get_use_critical_trace())
-    {
-        // initialize the thread pool
-        (void) tasking::critical_trace::get_task_group();
-    }
+    tasking::setup();
 
     if(get_use_timemory())
     {
@@ -396,56 +437,6 @@ omnitrace_init_tooling_hidden()
         }
     }
 
-    perfetto::TracingInitArgs               args{};
-    perfetto::TraceConfig                   cfg{};
-    perfetto::protos::gen::TrackEventConfig track_event_cfg{};
-
-    // perfetto initialization
-    if(get_use_perfetto())
-    {
-        // environment settings
-        auto shmem_size_hint = get_perfetto_shmem_size_hint();
-        auto buffer_size     = get_perfetto_buffer_size();
-
-        auto _policy =
-            get_perfetto_fill_policy() == "discard"
-                ? perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD
-                : perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
-        auto* buffer_config = cfg.add_buffers();
-        buffer_config->set_size_kb(buffer_size);
-        buffer_config->set_fill_policy(_policy);
-
-        std::set<std::string> _available_categories = {};
-        std::set<std::string> _disabled_categories  = {};
-        for(auto itr : { OMNITRACE_PERFETTO_CATEGORIES })
-            _available_categories.emplace(itr.name);
-        auto _enabled_categories = config::get_perfetto_categories();
-        for(const auto& itr : _available_categories)
-        {
-            if(!_enabled_categories.empty() && _enabled_categories.count(itr) == 0)
-                _disabled_categories.emplace(itr);
-        }
-
-        for(const auto& itr : _disabled_categories)
-        {
-            OMNITRACE_VERBOSE_F(1, "Disabling perfetto track event category: %s\n",
-                                itr.c_str());
-            track_event_cfg.add_disabled_categories(itr);
-        }
-
-        auto* ds_cfg = cfg.add_data_sources()->mutable_config();
-        ds_cfg->set_name("track_event");  // this MUST be track_event
-        ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
-
-        args.shmem_size_hint_kb = shmem_size_hint;
-
-        if(get_backend() != "inprocess") args.backends |= perfetto::kSystemBackend;
-        if(get_backend() != "system") args.backends |= perfetto::kInProcessBackend;
-
-        perfetto::Tracing::Initialize(args);
-        perfetto::TrackEvent::Register();
-    }
-
     if(get_use_ompt())
     {
         OMNITRACE_VERBOSE_F(1, "Setting up OMPT...\n");
@@ -460,24 +451,7 @@ omnitrace_init_tooling_hidden()
 
     if(get_use_perfetto() && !is_system_backend())
     {
-#if defined(CUSTOM_DATA_SOURCE)
-        // Add the following:
-        perfetto::DataSourceDescriptor dsd{};
-        dsd.set_name("com.example.custom_data_source");
-        CustomDataSource::Register(dsd);
-        auto* ds_cfg = cfg.add_data_sources()->mutable_config();
-        ds_cfg->set_name("com.example.custom_data_source");
-        CustomDataSource::Trace([](CustomDataSource::TraceContext ctx) {
-            auto packet = ctx.NewTracePacket();
-            packet->set_timestamp(perfetto::TrackEvent::GetTraceTimeNs());
-            packet->set_for_testing()->set_str("Hello world!");
-            PRINT_HERE("%s", "Trace");
-        });
-#endif
-        auto& tracing_session = tracing::get_trace_session();
-        tracing_session       = perfetto::Tracing::NewTrace();
-        tracing_session->Setup(cfg);
-        tracing_session->StartBlocking();
+        omnitrace::perfetto::start();
     }
 
     // if static objects are destroyed in the inverse order of when they are
@@ -521,13 +495,20 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
     (void) tracing::push_count();
     (void) tracing::pop_count();
 
-    OMNITRACE_CONDITIONAL_THROW(
-        get_state() >= State::Init &&
-            (config::get_is_continuous_integration() || get_debug_init()),
-        "omnitrace_init(mode=%s, is_binary_rewrite=%s, argv0=%s) called after omnitrace "
-        "was initialized. state = %s",
-        _mode, std::to_string(_is_binary_rewrite).c_str(), _argv0,
-        std::to_string(get_state()).c_str());
+    if(get_state() >= State::Init)
+    {
+        if(std::string_view{ _mode } != "trace" && std::string_view{ _mode } != "Trace")
+        {
+            OMNITRACE_WARNING_F(
+                0,
+                "omnitrace_init(mode=%s, is_binary_rewrite=%s, argv0=%s) "
+                "called after omnitrace was initialized. state = %s. Mode-based settings "
+                "(via -M <MODE> passed to omnitrace exe) may not be properly "
+                "configured.\n",
+                _mode, std::to_string(_is_binary_rewrite).c_str(), _argv0,
+                std::to_string(get_state()).c_str());
+        }
+    }
 
     tracing::get_finalization_functions().emplace_back([_argv0]() {
         OMNITRACE_CI_THROW(get_state() != State::Active,
@@ -555,13 +536,9 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
     tim::set_env("OMNITRACE_MODE", _mode, 0);
     config::is_binary_rewrite() = _is_binary_rewrite;
 
-    if(!_set_mpi_called)
+    if(_set_mpi_called)
     {
-        _preinit_callback = []() { get_preinit_bundle()->start(); };
-    }
-    else
-    {
-        get_preinit_bundle()->start();
+        omnitrace_preinit_hidden();
     }
 }
 
@@ -586,6 +563,9 @@ omnitrace_finalize_hidden(void)
     if(get_verbose() >= 0 || get_debug()) fprintf(stderr, "\n");
 
     OMNITRACE_VERBOSE_F(0, "finalizing...\n");
+
+    sampling::block_samples();
+
     thread_info::set_stop(comp::wall_clock::record());
 
     tim::sampling::block_signals(get_sampling_signals(),
@@ -779,10 +759,6 @@ omnitrace_finalize_hidden(void)
     if(get_use_critical_trace() || (get_use_rocm_smi() && get_use_roctracer()))
     {
         OMNITRACE_VERBOSE_F(1, "Generating the critical trace...\n");
-        // (potentially) increase the thread-pool size since application
-        // shouldn't be using threads during finalization
-        tasking::initialize_threadpool(std::min<uint64_t>(
-            { std::thread::hardware_concurrency(), get_thread_pool_size(), 8 }));
 
         for(size_t i = 0; i < max_supported_threads; ++i)
         {
@@ -790,7 +766,10 @@ omnitrace_finalize_hidden(void)
                 thread_data<critical_trace::hash_ids, critical_trace::id>;
 
             if(critical_trace_hash_data::instances().at(i))
+            {
+                OMNITRACE_DEBUG_F("Copying the hash id data for thread %zu...\n", i);
                 critical_trace::add_hash_id(*critical_trace_hash_data::instances().at(i));
+            }
         }
 
         for(size_t i = 0; i < max_supported_threads; ++i)
@@ -798,7 +777,11 @@ omnitrace_finalize_hidden(void)
             using critical_trace_chain_data = thread_data<critical_trace::call_chain>;
 
             if(critical_trace_chain_data::instances().at(i))
+            {
+                OMNITRACE_DEBUG_F(
+                    "Updating the critical trace call-chains for thread %zu...\n", i);
                 critical_trace::update(i);  // launch update task
+            }
         }
 
         OMNITRACE_VERBOSE_F(1, "Waiting on critical trace updates...\n");
@@ -813,9 +796,6 @@ omnitrace_finalize_hidden(void)
 
     if(get_use_critical_trace())
     {
-        // make sure outstanding hash tasks completed before compute
-        tasking::join();
-
         // launch compute task
         OMNITRACE_VERBOSE_F(1, "launching critical trace compute task...\n");
         critical_trace::compute();
@@ -837,7 +817,7 @@ omnitrace_finalize_hidden(void)
     bool _perfetto_output_error = false;
     if(get_use_perfetto() && !is_system_backend())
     {
-        auto& tracing_session = tracing::get_trace_session();
+        auto& tracing_session = tracing::get_perfetto_session();
 
         OMNITRACE_CI_THROW(tracing_session == nullptr,
                            "Null pointer to the tracing session");
@@ -845,7 +825,7 @@ omnitrace_finalize_hidden(void)
         OMNITRACE_VERBOSE_F(0, "Finalizing perfetto...\n");
 
         // Make sure the last event is closed for this example.
-        perfetto::TrackEvent::Flush();
+        ::perfetto::TrackEvent::Flush();
         tracing_session->FlushBlocking();
 
         OMNITRACE_VERBOSE_F(3, "Stopping the blocking perfetto trace session...\n");
@@ -934,8 +914,17 @@ omnitrace_finalize_hidden(void)
            tim::cereal::make_nvp("memory_maps", _maps));
     });
 
+    auto _manager = tim::manager::instance();
+    if(_manager) _manager->set_write_metadata(-1);
+
     OMNITRACE_VERBOSE_F(1, "Finalizing timemory...\n");
     tim::timemory_finalize();
+
+    if(_manager)
+    {
+        _manager->write_metadata(settings::get_global_output_prefix(), "omnitrace",
+                                 settings::default_process_suffix());
+    }
 
     if(_perfetto_output_error)
     {
@@ -965,4 +954,6 @@ namespace
 // this might call finalization before perfetto ends the tracing session
 // but static variable in omnitrace_init_tooling_hidden is more likely
 auto _ensure_finalization = ensure_finalization(true);
+auto _manager             = tim::manager::instance();
+auto _settings            = tim::settings::shared_instance();
 }  // namespace

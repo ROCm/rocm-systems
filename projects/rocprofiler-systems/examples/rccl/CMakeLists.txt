@@ -20,7 +20,7 @@ if(hip_FOUND AND rccl_FOUND)
 
     # After the following call, the CMake targets defined by googletest and Catch2 will be
     # available to the rest of the build
-    fetchcontent_makeavailable(rccl-tests)
+    fetchcontent_populate(rccl-tests)
 
     get_filename_component(rccl_ROOT_DIR "${rccl_INCLUDE_DIR}" DIRECTORY)
 

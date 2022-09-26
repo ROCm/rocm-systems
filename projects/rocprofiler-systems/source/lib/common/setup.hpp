@@ -166,7 +166,8 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
                        .c_str(),
                    0);
             setenv("OMNITRACE_ROCPROFILER_LIBRARY",
-                   common::join('/', getenv(itr), "rocprofiler/lib/librocprofiler64.so")
+                   common::join('/', getenv(itr), ROCPROFILER_METRICS_DIR,
+                                "librocprofiler64.so")
                        .c_str(),
                    0);
             break;

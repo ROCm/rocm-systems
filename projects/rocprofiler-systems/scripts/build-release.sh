@@ -8,7 +8,7 @@
 : ${NJOBS:=12}
 : ${DISTRO:=""}
 : ${LTO:="OFF"}
-: ${STRIP:="ON"}
+: ${STRIP:="OFF"}
 : ${LIBGCC:="ON"}
 : ${LIBSTDCXX:="ON"}
 : ${MAX_THREADS:=2048}

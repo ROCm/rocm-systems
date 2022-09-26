@@ -47,9 +47,9 @@ get_index_data(int64_t _tid)
 }
 
 auto
-init_index_data(bool _offset = false)
+init_index_data(int64_t _tid, bool _offset = false)
 {
-    auto& itr = get_index_data(utility::get_thread_index());
+    auto& itr = get_index_data(_tid);
     if(!itr)
     {
         threading::offset_this_id(_offset);
@@ -76,20 +76,20 @@ const auto unknown_thread = std::optional<thread_info>{};
 const std::optional<thread_info>&
 thread_info::init(bool _offset)
 {
-    auto& _instances = thread_info_data_t::instances();
-    auto  _tid       = utility::get_thread_index();
-    auto  _init      = [&] {
+    static thread_local bool _once      = false;
+    auto&                    _instances = thread_info_data_t::instances();
+    auto                     _tid       = utility::get_thread_index();
+
+    if(!_once && (_once = true))
+    {
         threading::offset_this_id(_offset);
-        std::optional<thread_info>& _info = _instances.at(_tid);
-        _info                             = thread_info{};
-        _info->is_offset                  = threading::offset_this_id();
-        _info->index_data                 = init_index_data(_info->is_offset);
+        auto& _info           = _instances.at(_tid);
+        _info                 = thread_info{};
+        _info->is_offset      = threading::offset_this_id();
+        _info->index_data     = init_index_data(_tid, _info->is_offset);
         _info->lifetime.first = tim::get_clock_real_now<uint64_t, std::nano>();
         if(_info->is_offset) set_thread_state(ThreadState::Disabled);
-    };
-
-    static thread_local std::once_flag _once{};
-    std::call_once(_once, _init);
+    }
 
     return _instances.at(_tid);
 }

@@ -66,12 +66,17 @@ setup();
 std::set<int>
 shutdown();
 
+void
+block_samples();
+
+void
+unblock_samples();
+
 void block_signals(std::set<int> = {});
 
 void unblock_signals(std::set<int> = {});
 
 void
 post_process();
-
 }  // namespace sampling
 }  // namespace omnitrace

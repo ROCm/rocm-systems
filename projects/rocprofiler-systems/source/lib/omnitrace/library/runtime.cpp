@@ -26,6 +26,7 @@
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 #include "library/thread_data.hpp"
+#include "library/thread_info.hpp"
 #include "library/utility.hpp"
 
 #include <timemory/backends/dmp.hpp>
@@ -65,9 +66,18 @@ get_sampling_on_child_threads_history(int64_t _idx = utility::get_thread_index()
 bool&
 sampling_on_child_threads()
 {
-    static thread_local bool _v = get_sampling_on_child_threads_history().empty()
-                                      ? false
-                                      : get_sampling_on_child_threads_history().back();
+    static const auto& _thr_info = thread_info::get();
+    // if the thread is offset, disable by default
+    // if the global state is not active or the thread state is not enabled, disable by
+    // default if there is no history, disable by default (first thread) otherwise,
+    // inherit the last state
+    static thread_local bool _v =
+        (_thr_info) ? !_thr_info->is_offset
+        : (get_state() != State::Active || get_thread_state() != ThreadState::Enabled)
+            ? false
+            : (get_sampling_on_child_threads_history().empty()
+                   ? false
+                   : get_sampling_on_child_threads_history().back());
     return _v;
 }
 }  // namespace

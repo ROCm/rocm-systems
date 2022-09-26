@@ -162,6 +162,12 @@ backtrace_metrics::sample(int)
         {
             assert(get_papi_vector(_tid).get() != nullptr);
             m_hw_counter = get_papi_vector(_tid)->record();
+            // const auto& _cfg = get_papi_vector(_tid)->get_config();
+            // std::cerr << "Config: ";
+            // for(size_t i = 0; i < _cfg->size; ++i)
+            //    std::cerr << "[" << _cfg->labels.at(i) << "|" << _cfg->event_names.at(i)
+            //              << "|" << _cfg->event_codes.at(i) << "]";
+            // std::cerr << "\n";
         }
     }
 }
@@ -188,7 +194,8 @@ backtrace_metrics::configure(bool _setup, int64_t _tid)
             {
                 using common_type_t = typename hw_counters::common_type;
                 get_papi_vector(_tid)->start();
-                *get_papi_labels(_tid) = comp::papi_common::get_events<common_type_t>();
+                *get_papi_labels(_tid) =
+                    comp::papi_common<common_type_t>::get_config()->labels;
             }
         }
     }

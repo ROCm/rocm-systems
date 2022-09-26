@@ -235,7 +235,7 @@ configure_settings(bool _init)
                                OMNITRACE_HIP_VERSION_PATCH);
 #endif
 
-    static auto _config = settings::shared_instance();
+    auto _config = settings::shared_instance();
 
     // if using timemory, default to perfetto being off
     auto _default_perfetto_v =
@@ -338,7 +338,7 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_SAMPLING_FREQ",
-        "Number of software interrupts per second when OMNITTRACE_USE_SAMPLING=ON", 10.0,
+        "Number of software interrupts per second when OMNITTRACE_USE_SAMPLING=ON", 300.0,
         "sampling", "process_sampling");
 
     OMNITRACE_CONFIG_SETTING(double, "OMNITRACE_SAMPLING_CPUTIME_FREQ",
@@ -452,12 +452,12 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_RW_LOCKS",
                              "Enable tracing calls to pthread_rwlock_* functions. May "
                              "cause deadlocks with ROCm-enabled OpenMPI.",
-                             true, "backend", "parallelism", "gotcha", "advanced");
+                             false, "backend", "parallelism", "gotcha", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_SPIN_LOCKS",
                              "Enable tracing calls to pthread_spin_* functions. May "
                              "cause deadlocks with MPI distributions.",
-                             true, "backend", "parallelism", "gotcha", "advanced");
+                             false, "backend", "parallelism", "gotcha", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_SAMPLING_KEEP_INTERNAL",
@@ -600,7 +600,7 @@ configure_settings(bool _init)
     _config->get_papi_events()           = "PAPI_TOT_CYC";
 
     // settings native to timemory but critically and/or extensively used by omnitrace
-    auto _add_omnitrace_category = [](auto itr) {
+    auto _add_omnitrace_category = [&_config](auto itr) {
         if(itr != _config->end())
         {
             auto _categories = itr->second->get_categories();
@@ -617,7 +617,7 @@ configure_settings(bool _init)
     _add_omnitrace_category(_config->find("OMNITRACE_OUTPUT_PREFIX"));
     _add_omnitrace_category(_config->find("OMNITRACE_OUTPUT_PATH"));
 
-    auto _add_advanced_category = [](const std::string& _name) {
+    auto _add_advanced_category = [&_config](const std::string& _name) {
         auto itr = _config->find(_name);
         if(itr != _config->end())
         {
@@ -690,7 +690,7 @@ configure_settings(bool _init)
         OMNITRACE_BASIC_VERBOSE(0,
                                 "In order to enable PAPI support, run 'echo N | sudo tee "
                                 "/proc/sys/kernel/perf_event_paranoid' where N is < 2\n");
-        tim::trait::runtime_enabled<comp::papi_common>::set(false);
+        tim::trait::runtime_enabled<comp::papi_common<void>>::set(false);
         tim::trait::runtime_enabled<comp::papi_array_t>::set(false);
         tim::trait::runtime_enabled<comp::papi_vector>::set(false);
         tim::trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
@@ -1500,7 +1500,7 @@ get_use_pid()
 bool&
 get_use_mpip()
 {
-    static bool _v = tim::get_env("OMNITRACE_USE_MPIP", false, false);
+    static bool _v = tim::get_env("OMNITRACE_USE_MPIP", true, false);
     return _v;
 }
 

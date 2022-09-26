@@ -24,10 +24,37 @@
 #include "library/runtime.hpp"
 #include "library/state.hpp"
 
+#include <timemory/log/color.hpp>
+#include <timemory/utility/filepath.hpp>
+
 namespace omnitrace
 {
 namespace debug
 {
+namespace
+{
+struct source_location_history
+{
+    std::array<source_location, 10> data = {};
+    size_t                          size = 0;
+};
+
+auto&
+get_source_location_history()
+{
+    static thread_local auto _v = source_location_history{};
+    return _v;
+}
+}  // namespace
+
+void
+set_source_location(source_location&& _v)
+{
+    auto& _hist                             = get_source_location_history();
+    auto  _idx                              = _hist.size++;
+    _hist.data.at(_idx % _hist.data.size()) = _v;
+}
+
 lock::lock()
 : m_lk{ tim::type_mutex<decltype(std::cerr)>(), std::defer_lock }
 {
@@ -45,6 +72,17 @@ lock::~lock()
         m_lk.unlock();
         pop_thread_state();
     }
+}
+
+FILE*
+get_file()
+{
+    static FILE* _v = []() {
+        auto&& _fname         = tim::get_env<std::string>("OMNITRACE_LOG_FILE", "");
+        tim::log::colorized() = _fname.empty();
+        return (_fname.empty()) ? stderr : tim::filepath::fopen(_fname, "w");
+    }();
+    return _v;
 }
 }  // namespace debug
 }  // namespace omnitrace

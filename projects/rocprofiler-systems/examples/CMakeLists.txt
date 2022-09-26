@@ -18,7 +18,7 @@ set(CMAKE_CXX_CLANG_TIDY)
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME examples)
 
 if(OMNITRACE_BUILD_DEBUG)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -gdwarf-3 -fno-omit-frame-pointer")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g  -fno-omit-frame-pointer")
 endif()
 
 option(BUILD_SHARED_LIBS "Build dynamic libraries" ON)

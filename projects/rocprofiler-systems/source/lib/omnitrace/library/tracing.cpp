@@ -27,11 +27,18 @@ namespace omnitrace
 {
 namespace tracing
 {
-std::unique_ptr<perfetto::TracingSession>&
-get_trace_session()
+perfetto::TraceConfig&
+get_perfetto_config()
 {
-    static auto _session = std::unique_ptr<perfetto::TracingSession>{};
-    return _session;
+    static auto _v = ::perfetto::TraceConfig{};
+    return _v;
+}
+
+std::unique_ptr<perfetto::TracingSession>&
+get_perfetto_session()
+{
+    static auto _v = std::unique_ptr<perfetto::TracingSession>{};
+    return _v;
 }
 
 std::vector<std::function<void()>>&

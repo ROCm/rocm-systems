@@ -138,6 +138,16 @@ auto reject_bindings = strset_t{};
 void
 mpi_gotcha::configure()
 {
+    // don't emit warnings for missing MPI functions unless debug or verbosity >= 3
+    if(get_verbose_env() < 3 && !get_debug_env())
+    {
+        for(size_t i = 0; i < mpi_gotcha_t::capacity(); ++i)
+        {
+            auto* itr = mpi_gotcha_t::at(i);
+            if(itr) itr->verbose = -1;
+        }
+    }
+
     mpi_gotcha_t::get_initializer() = []() {
         mpi_gotcha_t::template configure<0, int, int*, char***>("MPI_Init");
         mpi_gotcha_t::template configure<1, int, int*, char***, int, int*>(
@@ -279,6 +289,8 @@ void
 mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
 {
     OMNITRACE_BASIC_DEBUG_F("%s() returned %i\n", _data.tool_id.c_str(), (int) _retval);
+
+    if(!settings::use_output_suffix()) settings::use_output_suffix() = true;
 
     if(_retval == tim::mpi::success_v && _data.tool_id.find("MPI_Init") == 0)
     {

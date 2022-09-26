@@ -123,7 +123,10 @@ get_thread_pool_state()
 
 void
 setup()
-{}
+{
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+    (void) get_thread_pool();
+}
 
 void
 join()

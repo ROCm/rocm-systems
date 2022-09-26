@@ -31,6 +31,7 @@
 #include <timemory/components/base.hpp>
 #include <timemory/macros/language.hpp>
 #include <timemory/mpl/concepts.hpp>
+#include <timemory/utility/unwind.hpp>
 #include <timemory/variadic/types.hpp>
 
 #include <array>
@@ -51,6 +52,8 @@ struct backtrace
     static constexpr size_t stack_depth = OMNITRACE_MAX_UNWIND_DEPTH;
 
     using data_t            = tim::unwind::stack<stack_depth>;
+    using cache_type        = typename data_t::cache_type;
+    using entry_type        = tim::unwind::processed_entry;
     using clock_type        = std::chrono::steady_clock;
     using value_type        = void;
     using system_clock      = std::chrono::system_clock;
@@ -67,15 +70,15 @@ struct backtrace
     backtrace& operator=(const backtrace&) = default;
     backtrace& operator=(backtrace&&) noexcept = default;
 
-    static std::vector<std::string> filter_and_patch(const std::vector<std::string>&);
+    static std::vector<std::string> filter_and_patch(const std::vector<entry_type>&);
 
     static void start();
     static void stop();
 
-    void                     sample(int = -1);
-    bool                     empty() const;
-    size_t                   size() const;
-    std::vector<std::string> get() const;
+    void                    sample(int = -1);
+    bool                    empty() const;
+    size_t                  size() const;
+    std::vector<entry_type> get() const;
 
 private:
     data_t m_data = {};

@@ -83,7 +83,7 @@ add_flag_if_avail(
     "-Wno-attributes" "-Wno-missing-field-initializers")
 
 if(OMNITRACE_BUILD_DEBUG)
-    add_flag_if_avail("-g3" "-gdwarf-3" "-fno-omit-frame-pointer")
+    add_flag_if_avail("-g3" "-fno-omit-frame-pointer")
 endif()
 
 if(WIN32)
@@ -103,7 +103,7 @@ omnitrace_add_interface_library(
     "Attempts to set best flags for more expressive profiling information in debug or optimized binaries"
     )
 
-add_target_flag_if_avail(omnitrace-compile-debuginfo "-g" "-fno-omit-frame-pointer"
+add_target_flag_if_avail(omnitrace-compile-debuginfo "-g3" "-fno-omit-frame-pointer"
                          "-fno-optimize-sibling-calls")
 
 if(CMAKE_CUDA_COMPILER_IS_NVIDIA)

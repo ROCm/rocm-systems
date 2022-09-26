@@ -170,7 +170,7 @@ load_info(const string_t& _label, const string_t& _iname, fmodset_t& _data, int 
 
     auto        _pos = _iname.find_last_of('.');
     std::string _ext = {};
-    if(_pos != std::string::npos) _ext = _iname.substr(_pos + 1, _iname.length());
+    if(_pos != std::string::npos) _ext = _iname.substr(_pos + 1);
 
     auto _handle_error = [&]() {
         std::stringstream _msg{};

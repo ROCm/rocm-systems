@@ -169,6 +169,10 @@ roctracer::setup()
     for(auto& itr : roctracer_setup_routines())
         itr.second();
 
+    // make sure all async callbacks are allocated
+    for(size_t i = 0; i < max_supported_threads; ++i)
+        hip_exec_activity_callbacks(i);
+
     OMNITRACE_VERBOSE_F(1, "roctracer is setup\n");
 }
 

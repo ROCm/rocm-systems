@@ -526,8 +526,7 @@ if(OMNITRACE_BUILD_STACK_PROTECTOR)
 endif()
 
 if(OMNITRACE_BUILD_DEBUG)
-    add_target_flag_if_avail(omnitrace-timemory-config "-fno-omit-frame-pointer" "-g"
-                             "-gdwarf-3")
+    add_target_flag_if_avail(omnitrace-timemory-config "-fno-omit-frame-pointer" "-g3")
 endif()
 
 set(TIMEMORY_EXTERNAL_INTERFACE_LIBRARY

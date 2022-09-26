@@ -43,8 +43,11 @@ namespace tracing
 {
 using interval_data_instances = thread_data<std::vector<bool>>;
 
+perfetto::TraceConfig&
+get_perfetto_config();
+
 std::unique_ptr<perfetto::TracingSession>&
-get_trace_session();
+get_perfetto_session();
 
 std::vector<std::function<void()>>&
 get_finalization_functions();

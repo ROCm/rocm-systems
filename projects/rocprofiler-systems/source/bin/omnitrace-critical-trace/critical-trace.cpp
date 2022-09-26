@@ -227,7 +227,7 @@ save_call_graph(const std::string& _fname, const std::string& _label,
     _perf.stop();
     if(_msg)
     {
-        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).substr(4).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
     }
 }
 
@@ -281,7 +281,7 @@ save_critical_trace(const std::string& _fname, const std::string& _label,
     _perf.stop();
     if(_msg)
     {
-        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).substr(4).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
     }
 }
 
@@ -311,7 +311,7 @@ save_call_chain_text(const std::string& _fname, const call_chain& _call_chain,
     _perf.stop();
     if(_msg)
     {
-        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).substr(4).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
     }
 }
 
@@ -365,7 +365,7 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
     _perf.stop();
     if(_msg)
     {
-        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).substr(4).c_str());
+        OMNITRACE_CT_DEBUG("%s\n", JOIN("", _perf).c_str());
     }
 }
 
@@ -847,7 +847,9 @@ compute_critical_trace()
 
     auto _report_perf = [](auto& _perf, const char* _func, const std::string& _label) {
         _perf.stop().rekey(_label);
-        OMNITRACE_BASIC_PRINT("[%s] %s\n", _func, JOIN("", _perf).substr(5).c_str());
+        auto _str = JOIN("", _perf);
+        if(_str.length() > 5) _str = _str.substr(5);
+        OMNITRACE_BASIC_PRINT("[%s] %s\n", _func, _str.c_str());
         OMNITRACE_BASIC_PRINT("\n");
         _perf.reset().start();
     };

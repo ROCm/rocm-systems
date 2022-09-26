@@ -100,14 +100,16 @@ all2all(int _rank, MPI_Comm _comm)
         values_sent[i] = get_dist<Tp, N>(_mt);
 
     if(_rank == 0)
-        printf("[%s][%s][%i] values sent (# = %zu) :: %s.\n", _name.c_str(), __FUNCTION__,
-               _rank, values_sent.size(), get_values_str(values_sent).c_str());
+        printf("[%s][%s][%2i] values sent (# = %zu) :: %s.\n", _name.c_str(),
+               __FUNCTION__, _rank, values_sent.size(),
+               get_values_str(values_sent).c_str());
 
     MPI_Alltoall(&values_sent[_rank], 1, _dtype, &values_recv[_rank], 1, _dtype, _comm);
 
     if(_rank == 0)
-        printf("[%s][%s][%i] values recv (# = %zu) :: %s.\n", _name.c_str(), __FUNCTION__,
-               _rank, values_sent.size(), get_values_str(values_recv).c_str());
+        printf("[%s][%s][%2i] values recv (# = %zu) :: %s.\n", _name.c_str(),
+               __FUNCTION__, _rank, values_sent.size(),
+               get_values_str(values_recv).c_str());
 }
 
 template <typename Tp, size_t N>
@@ -126,9 +128,10 @@ send_recv(int _rank, MPI_Comm _comm)
     for(size_t i = 0; i < N; ++i)
         values_sent[i] = get_dist<Tp, N>(_mt);
 
-    if(_rank == 0)
-        printf("[%s][%s][%i] values sent (# = %zu) :: %s.\n", _name.c_str(), __FUNCTION__,
-               _rank, values_sent.size(), get_values_str(values_sent).c_str());
+    if(_rank == 0 || _rank == _size - 1)
+        printf("[%s][%s][%2i] values sent (# = %zu) :: %s.\n", _name.c_str(),
+               __FUNCTION__, _rank, values_sent.size(),
+               get_values_str(values_sent).c_str());
 
     for(int i = 0; i < _size; ++i)
     {
@@ -144,9 +147,10 @@ send_recv(int _rank, MPI_Comm _comm)
         }
     }
 
-    if(_rank == 0)
-        printf("[%s][%s][%i] values recv (# = %zu) :: %s.\n", _name.c_str(), __FUNCTION__,
-               _rank, values_sent.size(), get_values_str(values_recv).c_str());
+    if(_rank == 0 || _rank == _size - 1)
+        printf("[%s][%s][%2i] values recv (# = %zu) :: %s.\n", _name.c_str(),
+               __FUNCTION__, _rank, values_sent.size(),
+               get_values_str(values_recv).c_str());
 }
 
 void
@@ -158,8 +162,8 @@ run(MPI_Comm _comm, int nitr)
     MPI_Comm_rank(_comm, &_rank);
     MPI_Comm_size(_comm, &_size);
 
-    printf("[%s][%i][%s] running %i iterations on %i ranks... \n", _name.c_str(), _rank,
-           __FUNCTION__, nitr, _size);
+    printf("[%s][%s][%2i] running %i iterations on %i ranks... \n", _name.c_str(),
+           __FUNCTION__, _rank, nitr, _size);
 
     MPI_Barrier(_comm);
     for(int i = 0; i < nitr; ++i)
@@ -176,8 +180,8 @@ run(MPI_Comm _comm, int nitr)
     }
     MPI_Barrier(_comm);
 
-    printf("[%s][%i][%s] running %i iterations on %i ranks... Done\n", _name.c_str(),
-           _rank, __FUNCTION__, nitr, _size);
+    printf("[%s][%s][%2i] running %i iterations on %i ranks... Done\n", _name.c_str(),
+           __FUNCTION__, _rank, nitr, _size);
 }
 
 void
@@ -223,7 +227,7 @@ run_main(int argc, char** argv)
     int size = 1;
     int nitr = 1;
 
-    if(argc > 1) nitr = atoi(argv[2]);
+    if(argc > 1) nitr = atoi(argv[1]);
 
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
@@ -233,7 +237,7 @@ run_main(int argc, char** argv)
 
     printf("[%s] Number of iterations: %i\n", _name.c_str(), nitr);
 
-    printf("[%s][%i] running with MPI_COMM_WORLD...\n", _name.c_str(), getpid());
+    printf("[%s][%2i] running with MPI_COMM_WORLD...\n", _name.c_str(), getpid());
     run(MPI_COMM_WORLD, nitr);
 
     print_info(MPI_COMM_WORLD, true, "MPI_COMM_WORLD");
@@ -241,16 +245,16 @@ run_main(int argc, char** argv)
     if(size > 1)
     {
         MPI_Comm dup;
-        printf("[%s][%i] Duplicating MPI_COMM_WORLD...\n", _name.c_str(), getpid());
+        printf("[%s][%2i] Duplicating MPI_COMM_WORLD...\n", _name.c_str(), getpid());
         MPI_Comm_dup(MPI_COMM_WORLD, &dup);
 
-        printf("[%s][%i] running with duplicated comm of MPI_COMM_WORLD...\n",
+        printf("[%s][%2i] running with duplicated comm of MPI_COMM_WORLD...\n",
                _name.c_str(), getpid());
         run(dup, nitr);
 
         MPI_Comm_rank(dup, &rank);
         if(rank == 0) printf("[%s]\n", _name.c_str());
-        printf("[%s][%i] RANK = %i on duplicated MPI_COMM_WORLD...\n", _name.c_str(),
+        printf("[%s][%2i] RANK = %i on duplicated MPI_COMM_WORLD...\n", _name.c_str(),
                getpid(), rank);
 
         if(size > 3)
@@ -259,8 +263,9 @@ run_main(int argc, char** argv)
             for(int i = 0; i < size; ++i)
             {
                 auto _idx = i % 3;
-                printf("[%s][%i] Splitting duplicated MPI_COMM_WORLD %i (rank = %i)...\n",
-                       _name.c_str(), getpid(), _idx, rank);
+                printf(
+                    "[%s][%2i] Splitting duplicated MPI_COMM_WORLD %i (rank = %i)...\n",
+                    _name.c_str(), getpid(), _idx, rank);
                 MPI_Comm* comm = &comms.at(_idx);
                 MPI_Comm_split(dup, _idx, rank, comm);
             }
@@ -273,7 +278,7 @@ run_main(int argc, char** argv)
                 auto _idx  = i % 3;
                 int  _rank = 0;
                 MPI_Comm_rank(comms.at(_idx), &_rank);
-                printf("[%s][%i] Running on split communicator %i (rank = %i)...\n",
+                printf("[%s][%2i] Running on split communicator %i (rank = %i)...\n",
                        _name.c_str(), getpid(), _idx, _rank);
                 run(comms.at(_idx), nitr);
             }
@@ -315,15 +320,19 @@ run_main(int argc, char** argv)
         print_info(dup, false);
     }
 
-    printf("[%s][%i of %i] %s... Done", _name.c_str(), rank, size, __FUNCTION__);
+    printf("[%s][%i of %i] %s... Done\n", _name.c_str(), rank, size, __FUNCTION__);
 }
 
 int
 main(int argc, char** argv)
 {
     std::this_thread::sleep_for(std::chrono::seconds{ 2 });
-    int _mpi_thread_provided;
-    MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &_mpi_thread_provided);
+    int _mpi_thread_requested = MPI_THREAD_SERIALIZED;
+    int _mpi_thread_provided  = 0;
+    MPI_Init_thread(&argc, &argv, _mpi_thread_requested, &_mpi_thread_provided);
+
+    if(_mpi_thread_provided != _mpi_thread_requested)
+        throw std::runtime_error("Error! requested thread mode != provided thread mode");
 
     auto _prom = std::promise<void>{};
     auto _fut  = _prom.get_future();

@@ -212,7 +212,8 @@ main(int argc, char** argv)
                 stderr,
                 "These were the last %i log entries from omnitrace. You can control the "
                 "number of log entries via the '--log <N>' option or OMNITRACE_LOG_COUNT "
-                "env variable.\n");
+                "env variable.\n",
+                num_log_entries);
 
             if(log_ofs) log_ofs->close();
             log_ofs.reset();

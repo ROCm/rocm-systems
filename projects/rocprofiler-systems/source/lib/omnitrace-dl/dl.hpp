@@ -57,6 +57,10 @@
 #    define OMNITRACE_USE_ROCTRACER 0
 #endif
 
+#if !defined(OMNITRACE_USE_ROCPROFILER)
+#    define OMNITRACE_USE_ROCPROFILER 0
+#endif
+
 //--------------------------------------------------------------------------------------//
 //
 //      omnitrace symbols
@@ -66,6 +70,7 @@
 extern "C"
 {
     void omnitrace_init_library(void) OMNITRACE_PUBLIC_API;
+    void omnitrace_init_tooling(void) OMNITRACE_PUBLIC_API;
     void omnitrace_init(const char*, bool, const char*) OMNITRACE_PUBLIC_API;
     void omnitrace_finalize(void) OMNITRACE_PUBLIC_API;
     void omnitrace_set_env(const char* env_name,
@@ -155,6 +160,13 @@ extern "C"
     bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                 const char* const* failed_tool_names) OMNITRACE_PUBLIC_API;
     void OnUnload() OMNITRACE_PUBLIC_API;
+#    endif
+
+#    if OMNITRACE_USE_ROCPROFILER > 0
+    // ROCP
+    struct rocprofiler_settings;
+    void OnLoadToolProp(rocprofiler_settings* settings) OMNITRACE_PUBLIC_API;
+    void OnUnloadTool() OMNITRACE_PUBLIC_API;
 #    endif
 #endif
 }

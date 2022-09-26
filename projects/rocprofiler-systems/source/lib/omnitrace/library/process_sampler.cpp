@@ -106,8 +106,7 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
             itr->sample();
         get_sampler_is_sampling().store(false);
         if(_has_duration && _now >= _end) break;
-        while(_now < std::chrono::steady_clock::now())
-            _now += _interval;
+        _now = std::chrono::steady_clock::now() + _interval;
     }
 
     // ensure this is always false
@@ -167,16 +166,13 @@ sampler::setup()
     auto     _freq      = get_process_sampling_freq();
     uint64_t _msec_freq = (1.0 / _freq) * 1.0e3;
 
-    promise_t _prom{};
-    auto      _fut   = _prom.get_future();
     polling_finished = std::make_unique<promise_t>();
 
     OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     set_state(State::PreInit);
     get_thread() = std::make_unique<std::thread>(&poll<msec_t>, &get_sampler_state(),
-                                                 msec_t{ _msec_freq }, &_prom);
-    _fut.wait();
+                                                 msec_t{ _msec_freq }, nullptr);
 
     set_state(State::Active);
 }

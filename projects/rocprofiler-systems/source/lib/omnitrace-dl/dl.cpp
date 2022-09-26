@@ -95,6 +95,14 @@ get_omnitrace_dl_env()
                : get_env("OMNITRACE_DL_VERBOSE", get_omnitrace_env());
 }
 
+inline bool
+get_omnitrace_preload()
+{
+    auto&& _preload      = get_env("OMNITRACE_PRELOAD", false);
+    auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
+    return (_preload || _preload_libs.find("libomnitrace-dl.so") != std::string::npos);
+}
+
 // environment priority:
 //  - OMNITRACE_DL_DEBUG
 //  - OMNITRACE_DL_VERBOSE
@@ -216,6 +224,7 @@ struct OMNITRACE_HIDDEN_API indirect
         int _info_verbose = 2;
         // Initialize all pointers
         OMNITRACE_DLSYM(omnitrace_init_library_f, m_omnihandle, "omnitrace_init_library");
+        OMNITRACE_DLSYM(omnitrace_init_tooling_f, m_omnihandle, "omnitrace_init_tooling");
         OMNITRACE_DLSYM(omnitrace_init_f, m_omnihandle, "omnitrace_init");
         OMNITRACE_DLSYM(omnitrace_finalize_f, m_omnihandle, "omnitrace_finalize");
         OMNITRACE_DLSYM(omnitrace_set_env_f, m_omnihandle, "omnitrace_set_env");
@@ -280,6 +289,11 @@ struct OMNITRACE_HIDDEN_API indirect
         OMNITRACE_DLSYM(hsa_on_unload_f, m_omnihandle, "OnUnload");
 #endif
 
+#if OMNITRACE_USE_ROCPROFILER > 0
+        OMNITRACE_DLSYM(rocp_on_load_tool_prop_f, m_omnihandle, "OnLoadToolProp");
+        OMNITRACE_DLSYM(rocp_on_unload_tool_f, m_omnihandle, "OnUnloadTool");
+#endif
+
 #if OMNITRACE_USE_OMPT == 0
         _warn_verbose = 5;
 #else
@@ -311,6 +325,7 @@ struct OMNITRACE_HIDDEN_API indirect
 public:
     // omnitrace functions
     void (*omnitrace_init_library_f)(void)                                  = nullptr;
+    void (*omnitrace_init_tooling_f)(void)                                  = nullptr;
     void (*omnitrace_init_f)(const char*, bool, const char*)                = nullptr;
     void (*omnitrace_finalize_f)(void)                                      = nullptr;
     void (*omnitrace_set_env_f)(const char*, const char*)                   = nullptr;
@@ -364,10 +379,20 @@ public:
     void (*hsa_on_unload_f)()                                                   = nullptr;
 #endif
 
+    // ROCP functions
+#if OMNITRACE_USE_ROCPROFILER > 0
+    void (*rocp_on_load_tool_prop_f)(rocprofiler_settings* settings) = nullptr;
+    void (*rocp_on_unload_tool_f)()                                  = nullptr;
+#endif
+
     // OpenMP functions
 #if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0
     ompt_start_tool_result_t* (*ompt_start_tool_f)(unsigned int, const char*);
 #endif
+
+    auto get_omni_library() const { return m_omnilib; }
+    auto get_user_library() const { return m_userlib; }
+    auto get_dl_library() const { return m_dllib; }
 
 private:
     void*       m_omnihandle = nullptr;
@@ -481,6 +506,11 @@ extern "C"
     void omnitrace_init_library(void)
     {
         OMNITRACE_DL_INVOKE(get_indirect().omnitrace_init_library_f);
+    }
+
+    void omnitrace_init_tooling(void)
+    {
+        OMNITRACE_DL_INVOKE(get_indirect().omnitrace_init_tooling_f);
     }
 
     void omnitrace_init(const char* a, bool b, const char* c)
@@ -839,6 +869,24 @@ extern "C"
 
     //----------------------------------------------------------------------------------//
     //
+    //      ROCP
+    //
+    //----------------------------------------------------------------------------------//
+
+#if OMNITRACE_USE_ROCTRACER > 0
+    void OnLoadToolProp(rocprofiler_settings* settings)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().rocp_on_load_tool_prop_f, settings);
+    }
+
+    void OnUnloadTool()
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().rocp_on_unload_tool_f);
+    }
+#endif
+
+    //----------------------------------------------------------------------------------//
+    //
     //      OMPT
     //
     //----------------------------------------------------------------------------------//
@@ -852,3 +900,40 @@ extern "C"
     }
 #endif
 }
+
+namespace omnitrace
+{
+inline namespace dl
+{
+namespace
+{
+bool
+omnitrace_preload() OMNITRACE_HIDDEN_API;
+
+bool
+omnitrace_preload()
+{
+    auto _preloaded = get_omnitrace_preload();
+    auto _enabled   = get_env("OMNITRACE_ENABLED", true);
+
+    static bool _once = false;
+    if(_once) return _preloaded;
+    _once = true;
+
+    if(_preloaded && _enabled)
+    {
+        OMNITRACE_DL_LOG(0, "[%s] invoking %s(%s)\n", __FUNCTION__, "omnitrace_init",
+                         ::omnitrace::join(::omnitrace::QuoteStrings{}, ", ", "sampling",
+                                           false, "main")
+                             .c_str());
+        omnitrace_init("sampling", false, "omnitrace");
+        omnitrace_init_tooling();
+    }
+
+    return _preloaded;
+}
+
+bool _handle_preload = omnitrace::dl::omnitrace_preload();
+}  // namespace
+}  // namespace dl
+}  // namespace omnitrace

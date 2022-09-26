@@ -136,7 +136,8 @@ get_signal_names(Tp&& _v)
         _sig_names += std::get<0>(tim::signal_settings::get_info(
                           static_cast<tim::sys_signal>(itr))) +
                       " ";
-    return _sig_names.substr(0, _sig_names.length() - 1);
+    return (_sig_names.empty()) ? _sig_names
+                                : _sig_names.substr(0, _sig_names.length() - 1);
 }
 
 unique_ptr_t<sampler_t>&
@@ -416,6 +417,18 @@ std::set<int>
 shutdown()
 {
     return configure(false);
+}
+
+void
+block_samples()
+{
+    trait::runtime_enabled<sampler_t>::set(false);
+}
+
+void
+unblock_samples()
+{
+    trait::runtime_enabled<sampler_t>::set(true);
 }
 
 void

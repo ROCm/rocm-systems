@@ -73,6 +73,12 @@ omnitrace_init_library(void)
 }
 
 extern "C" void
+omnitrace_init_tooling(void)
+{
+    omnitrace_init_tooling_hidden();
+}
+
+extern "C" void
 omnitrace_init(const char* _mode, bool _rewrite, const char* _arg0)
 {
     omnitrace_init_hidden(_mode, _rewrite, _arg0);

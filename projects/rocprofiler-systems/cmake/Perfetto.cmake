@@ -178,7 +178,7 @@ target_sources(
 target_link_libraries(
     omnitrace-perfetto-library
     PRIVATE omnitrace::omnitrace-threading omnitrace::omnitrace-static-libgcc
-            omnitrace::omnitrace-static-libstdcxx)
+            omnitrace::omnitrace-static-libstdcxx omnitrace::omnitrace-compile-options)
 set_target_properties(
     omnitrace-perfetto-library
     PROPERTIES OUTPUT_NAME perfetto

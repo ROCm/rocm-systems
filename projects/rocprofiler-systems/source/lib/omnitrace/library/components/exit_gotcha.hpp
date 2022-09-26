@@ -38,6 +38,8 @@ namespace component
 {
 struct exit_gotcha : tim::component::base<exit_gotcha, void>
 {
+    static constexpr size_t gotcha_capacity = 3;
+
     using gotcha_data  = tim::component::gotcha_data;
     using exit_func_t  = void (*)(int);
     using abort_func_t = void (*)();
@@ -61,5 +63,6 @@ struct exit_gotcha : tim::component::base<exit_gotcha, void>
 };
 }  // namespace component
 
-using exit_gotcha_t = tim::component::gotcha<3, std::tuple<>, component::exit_gotcha>;
+using exit_gotcha_t = tim::component::gotcha<component::exit_gotcha::gotcha_capacity,
+                                             std::tuple<>, component::exit_gotcha>;
 }  // namespace omnitrace
