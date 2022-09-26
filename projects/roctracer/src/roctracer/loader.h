@@ -142,7 +142,7 @@ class HipLoader : public BaseLoader<HipLoader> {
   }
 
   const char* KernelNameRef(const hipFunction_t f) const {
-    static auto function = GetFun<const char* (*)(const hipFunction_t f)>("KernelNameRef");
+    static auto function = GetFun<const char* (*)(const hipFunction_t f)>("hipKernelNameRef");
     return function(f);
   }
 
