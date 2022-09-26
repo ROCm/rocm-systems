@@ -39,7 +39,7 @@ template <typename T> class Stack : std::stack<T, std::vector<T>> {
 
   template <class... Args> auto& emplace(Args&&... args) {
     return is_valid() ? parent_type::emplace(std::forward<Args>(args)...)
-                      : *new (&dummy_element_) T(std::forward<Args>(args)...);
+                      : dummy_element_ = T(std::forward<Args>(args)...);
   }
   void push(const T& v) {
     if (is_valid()) parent_type::push(v);

@@ -67,8 +67,42 @@ TRACE_BUFFER_INSTANTIATE();
 
 namespace {
 
-thread_local std::stack<roctracer_timestamp_t, std::vector<roctracer_timestamp_t>>
-    hsa_begin_timestamp, hip_begin_timestamp;
+// A stack that can be used for TLS variables. TLS destructors are invoked before global destructors
+// which is a problem if operations invoked by global destructors use TLS variables. If the TLS
+// stack is destructed, it still has well defined behavior by always returning a dummy element.
+template <typename T> class Stack : std::stack<T, std::vector<T>> {
+  using parent_type = typename std::stack<T, std::vector<T>>;
+
+ public:
+  Stack() { valid_.store(true, std::memory_order_relaxed); }
+  ~Stack() { valid_.store(false, std::memory_order_relaxed); }
+
+  template <class... Args> auto& emplace(Args&&... args) {
+    return is_valid() ? parent_type::emplace(std::forward<Args>(args)...)
+                      : dummy_element_ = T(std::forward<Args>(args)...);
+  }
+  void push(const T& v) {
+    if (is_valid()) parent_type::push(v);
+  }
+  void push(T&& v) {
+    if (is_valid()) parent_type::push(std::move(v));
+  }
+  void pop() {
+    if (is_valid()) parent_type::pop();
+  }
+  const auto& top() const { return is_valid() ? parent_type::top() : dummy_element_; }
+  auto& top() { return is_valid() ? parent_type::top() : (dummy_element_ = {}); }
+
+  bool is_valid() const { return valid_.load(std::memory_order_relaxed); }
+  size_t size() const { return is_valid() ? parent_type::size() : 0; }
+  bool empty() const { return size() == 0; }
+
+ private:
+  std::atomic<bool> valid_{false};
+  T dummy_element_;  // Dummy element used when the stack is not valid.
+};
+
+thread_local Stack<roctracer_timestamp_t> begin_timestamp_stack;
 
 inline roctracer_timestamp_t timestamp_ns() {
   roctracer_timestamp_t timestamp;
@@ -270,14 +304,14 @@ void hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
   (void)arg;
   const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    hsa_begin_timestamp.push(timestamp_ns());
+    begin_timestamp_stack.push(timestamp_ns());
   } else {
     const roctracer_timestamp_t end_timestamp =
-        (cid == HSA_API_ID_hsa_shut_down) ? hsa_begin_timestamp.top() : timestamp_ns();
+        (cid == HSA_API_ID_hsa_shut_down) ? begin_timestamp_stack.top() : timestamp_ns();
     hsa_api_trace_entry_t& entry = hsa_api_trace_buffer.Emplace(
-        cid, hsa_begin_timestamp.top(), end_timestamp, GetPid(), GetTid(), *data);
+        cid, begin_timestamp_stack.top(), end_timestamp, GetPid(), GetTid(), *data);
     entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
-    hsa_begin_timestamp.pop();
+    begin_timestamp_stack.pop();
   }
 }
 
@@ -408,16 +442,16 @@ void hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, 
   std::optional<std::string> kernel_name;
 
   if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-    hip_begin_timestamp.push(timestamp);
+    begin_timestamp_stack.push(timestamp);
   } else {
     // Post init of HIP APU args
     hipApiArgsInit((hip_api_id_t)cid, const_cast<hip_api_data_t*>(data));
     kernel_name = getKernelName(cid, data);
     hip_api_trace_entry_t& entry =
-        hip_api_trace_buffer.Emplace(cid, hip_begin_timestamp.top(), timestamp, GetPid(), GetTid(),
-                                     *data, kernel_name ? kernel_name->c_str() : nullptr);
+        hip_api_trace_buffer.Emplace(cid, begin_timestamp_stack.top(), timestamp, GetPid(),
+                                     GetTid(), *data, kernel_name ? kernel_name->c_str() : nullptr);
     entry.valid.store(roctracer::TRACE_ENTRY_COMPLETE, std::memory_order_release);
-    hip_begin_timestamp.pop();
+    begin_timestamp_stack.pop();
   }
 }
 
