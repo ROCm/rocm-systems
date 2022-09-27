@@ -117,10 +117,27 @@ if(OMNITRACE_USE_HIP
     if(NOT ROCmVersion_FOUND)
         find_package(hip ${omnitrace_FIND_QUIETLY} REQUIRED HINTS
                      ${OMNITRACE_DEFAULT_ROCM_PATH} PATHS ${OMNITRACE_DEFAULT_ROCM_PATH})
-        find_package(ROCmVersion REQUIRED HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
+        if(SPACK_BUILD)
+            find_package(ROCmVersion HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
+        else()
+            find_package(ROCmVersion REQUIRED HINTS ${ROCM_PATH} PATHS ${ROCM_PATH})
+        endif()
     endif()
 
-    list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
+    if(NOT ROCmVersion_FOUND)
+        rocm_version_compute("${hip_VERSION}" _local)
+
+        foreach(_V ${ROCmVersion_VARIABLES})
+            set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
+            set(_LOCAL_VAR _local_${_V}_VERSION)
+            set(ROCmVersion_${_V}_VERSION
+                "${${_LOCAL_VAR}}"
+                CACHE STRING "ROCm ${_V} version")
+            rocm_version_watch_for_change(${_CACHE_VAR})
+        endforeach()
+    else()
+        list(APPEND CMAKE_PREFIX_PATH ${ROCmVersion_DIR})
+    endif()
 
     set(OMNITRACE_ROCM_VERSION ${ROCmVersion_FULL_VERSION})
     set(OMNITRACE_HIP_VERSION_MAJOR ${ROCmVersion_MAJOR_VERSION})
@@ -884,6 +901,10 @@ set(CMAKE_INSTALL_PYTHONDIR ${OMNITRACE_INSTALL_PYTHONDIR})
 # Compile definitions
 #
 # ----------------------------------------------------------------------------------------#
+
+if("${CMAKE_BUILD_TYPE}" MATCHES "Release" AND NOT OMNITRACE_BUILD_DEBUG)
+    add_target_flag_if_avail(omnitrace-compile-options "-g1")
+endif()
 
 foreach(_LIB ${OMNITRACE_EXTENSION_LIBRARIES})
     get_target_property(_COMPILE_DEFS ${_LIB} INTERFACE_COMPILE_DEFINITIONS)

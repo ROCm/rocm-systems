@@ -32,161 +32,169 @@ These variables are relevant for the find procedure::
   ROCmVersion_DIR               - Root location for <ROCM_PATH>
 #]=======================================================================]
 
+set(ROCmVersion_VARIABLES
+    EPOCH
+    MAJOR
+    MINOR
+    PATCH
+    TWEAK
+    REVISION
+    TRIPLE
+    NUMERIC
+    CANONICAL
+    FULL)
+
+function(ROCM_VERSION_MESSAGE _TYPE)
+    if(ROCmVersion_DEBUG)
+        message(${_TYPE} "[ROCmVersion] ${ARGN}")
+    endif()
+endfunction()
+
+# read a .info/version* file and propagate the variables to the calling scope
+function(ROCM_VERSION_COMPUTE FULL_VERSION_STRING _VAR_PREFIX)
+
+    # remove any line endings
+    string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
+
+    # store the full version so it can be set later
+    set(FULL_VERSION "${FULL_VERSION_STRING}")
+
+    # get number and remove from full version string
+    string(REGEX REPLACE "([0-9]+)\:(.*)" "\\1" EPOCH_VERSION "${FULL_VERSION_STRING}")
+    string(REGEX REPLACE "([0-9]+)\:(.*)" "\\2" FULL_VERSION_STRING
+                         "${FULL_VERSION_STRING}")
+
+    if(EPOCH_VERSION STREQUAL FULL_VERSION)
+        set(EPOCH_VERSION)
+    endif()
+
+    # get number and remove from full version string
+    string(REGEX REPLACE "([0-9]+)(.*)" "\\1" MAJOR_VERSION "${FULL_VERSION_STRING}")
+    string(REGEX REPLACE "([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
+                         "${FULL_VERSION_STRING}")
+
+    # get number and remove from full version string
+    string(REGEX REPLACE "\.([0-9]+)(.*)" "\\1" MINOR_VERSION "${FULL_VERSION_STRING}")
+    string(REGEX REPLACE "\.([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
+                         "${FULL_VERSION_STRING}")
+
+    # get number and remove from full version string
+    string(REGEX REPLACE "\.([0-9]+)(.*)" "\\1" PATCH_VERSION "${FULL_VERSION_STRING}")
+    string(REGEX REPLACE "\.([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
+                         "${FULL_VERSION_STRING}")
+
+    if(NOT PATCH_VERSION LESS 100)
+        set(PATCH_VERSION 0)
+    endif()
+
+    # get number and remove from full version string
+    string(REGEX REPLACE "\.([0-9]+)(.*)" "\\1" TWEAK_VERSION "${FULL_VERSION_STRING}")
+    string(REGEX REPLACE "\.([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
+                         "${FULL_VERSION_STRING}")
+
+    # get number
+    string(REGEX REPLACE "-([0-9A-Za-z+~]+)" "\\1" REVISION_VERSION
+                         "${FULL_VERSION_STRING}")
+
+    set(CANONICAL_VERSION)
+    set(_MAJOR_SEP ":")
+    set(_MINOR_SEP ".")
+    set(_PATCH_SEP ".")
+    set(_TWEAK_SEP ".")
+    set(_REVISION_SEP "-")
+
+    foreach(_V EPOCH MAJOR MINOR PATCH TWEAK REVISION)
+        if(${_V}_VERSION)
+            set(CANONICAL_VERSION "${CANONICAL_VERSION}${_${_V}_SEP}${${_V}_VERSION}")
+        else()
+            set(CANONICAL_VERSION "${CANONICAL_VERSION}${_${_V}_SEP}0")
+        endif()
+    endforeach()
+
+    set(_MAJOR_SEP "")
+
+    foreach(_V MAJOR MINOR PATCH)
+        if(${_V}_VERSION)
+            set(TRIPLE_VERSION "${TRIPLE_VERSION}${_${_V}_SEP}${${_V}_VERSION}")
+        else()
+            set(TRIPLE_VERSION "${TRIPLE_VERSION}${_${_V}_SEP}0")
+        endif()
+    endforeach()
+
+    math(
+        EXPR
+        NUMERIC_VERSION
+        "(10000 * (${MAJOR_VERSION}+0)) + (100 * (${MINOR_VERSION}+0)) + (${PATCH_VERSION}+0)"
+        )
+
+    # propagate to parent scopes
+    foreach(_V ${ROCmVersion_VARIABLES})
+        set(${_VAR_PREFIX}_${_V}_VERSION
+            ${${_V}_VERSION}
+            PARENT_SCOPE)
+    endforeach()
+endfunction()
+
+# this macro watches for changes in the variables and unsets the remaining cache varaible
+# when they change
+function(ROCM_VERSION_WATCH_FOR_CHANGE _var)
+    set(_rocm_version_watch_var_name ROCmVersion_WATCH_VALUE_${_var})
+
+    if(DEFINED ${_rocm_version_watch_var_name})
+        if("${${_var}}" STREQUAL "${${_rocm_version_watch_var_name}}")
+            if(NOT "${${_var}}" STREQUAL "")
+                rocm_version_message(STATUS "${_var} :: ${${_var}}")
+            endif()
+
+            list(REMOVE_ITEM _REMAIN_VARIABLES ${_var})
+            set(_REMAIN_VARIABLES
+                "${_REMAIN_VARIABLES}"
+                PARENT_SCOPE)
+            return()
+        else()
+            rocm_version_message(
+                STATUS
+                "${_var} changed :: ${${_rocm_version_watch_var_name}} --> ${${_var}}")
+
+            foreach(_V ${_REMAIN_VARIABLES})
+                rocm_version_message(
+                    STATUS "${_var} changed :: Unsetting cache variable ${_V}...")
+                unset(${_V} CACHE)
+            endforeach()
+        endif()
+    else()
+        if(NOT "${${_var}}" STREQUAL "")
+            rocm_version_message(STATUS "${_var} :: ${${_var}}")
+        endif()
+    endif()
+
+    # store the value for the next run
+    set(${_rocm_version_watch_var_name}
+        "${${_var}}"
+        CACHE INTERNAL "Last value of ${_var}" FORCE)
+endfunction()
+
 # scope this to a function to avoid leaking local variables
 function(ROCM_VERSION_PARSE_VERSION_FILES)
-
-    function(ROCM_VERSION_MESSAGE _TYPE)
-        if(ROCmVersion_DEBUG)
-            message(${_TYPE} "[ROCmVersion] ${ARGN}")
-        endif()
-    endfunction()
 
     # the list of variables set by module. when one of these changes, we need to unset the
     # cache variables after it
     set(_ALL_VARIABLES)
-    foreach(
-        _V
-        EPOCH
-        MAJOR
-        MINOR
-        PATCH
-        TWEAK
-        REVISION
-        TRIPLE
-        NUMERIC
-        FULL
-        CANONICAL)
+
+    foreach(_V ${ROCmVersion_VARIABLES})
         list(APPEND _ALL_VARIABLES ROCmVersion_${_V}_VERSION)
     endforeach()
     set(_REMAIN_VARIABLES ${_ALL_VARIABLES})
 
-    # this macro watches for changes in the variables and unsets the remaining cache
-    # varaible when they change
-    function(ROCM_VERSION_WATCH_FOR_CHANGE _var)
-        set(_rocm_version_watch_var_name ROCmVersion_WATCH_VALUE_${_var})
-        if(DEFINED ${_rocm_version_watch_var_name})
-            if("${${_var}}" STREQUAL "${${_rocm_version_watch_var_name}}")
-                if(NOT "${${_var}}" STREQUAL "")
-                    rocm_version_message(STATUS "${_var} :: ${${_var}}")
-                endif()
-                list(REMOVE_ITEM _REMAIN_VARIABLES ${_var})
-                set(_REMAIN_VARIABLES
-                    "${_REMAIN_VARIABLES}"
-                    PARENT_SCOPE)
-                return()
-            else()
-                rocm_version_message(
-                    STATUS
-                    "${_var} changed :: ${${_rocm_version_watch_var_name}} --> ${${_var}}"
-                    )
-                foreach(_V ${_REMAIN_VARIABLES})
-                    rocm_version_message(
-                        STATUS "${_var} changed :: Unsetting cache variable ${_V}...")
-                    unset(${_V} CACHE)
-                endforeach()
-            endif()
-        else()
-            if(NOT "${${_var}}" STREQUAL "")
-                rocm_version_message(STATUS "${_var} :: ${${_var}}")
-            endif()
-        endif()
-
-        # store the value for the next run
-        set(${_rocm_version_watch_var_name}
-            "${${_var}}"
-            CACHE INTERNAL "Last value of ${_var}" FORCE)
-    endfunction()
-
     # read a .info/version* file and propagate the variables to the calling scope
     function(ROCM_VERSION_READ_FILE _FILE _VAR_PREFIX)
         file(READ "${_FILE}" FULL_VERSION_STRING LIMIT_COUNT 1)
-
-        # remove any line endings
-        string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
-
-        # store the full version so it can be set later
-        set(FULL_VERSION "${FULL_VERSION_STRING}")
-
-        # get number and remove from full version string
-        string(REGEX REPLACE "([0-9]+)\:(.*)" "\\1" EPOCH_VERSION
-                             "${FULL_VERSION_STRING}")
-        string(REGEX REPLACE "([0-9]+)\:(.*)" "\\2" FULL_VERSION_STRING
-                             "${FULL_VERSION_STRING}")
-
-        if(EPOCH_VERSION STREQUAL FULL_VERSION)
-            set(EPOCH_VERSION)
-        endif()
-
-        # get number and remove from full version string
-        string(REGEX REPLACE "([0-9]+)(.*)" "\\1" MAJOR_VERSION "${FULL_VERSION_STRING}")
-        string(REGEX REPLACE "([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
-                             "${FULL_VERSION_STRING}")
-
-        # get number and remove from full version string
-        string(REGEX REPLACE "\.([0-9]+)(.*)" "\\1" MINOR_VERSION
-                             "${FULL_VERSION_STRING}")
-        string(REGEX REPLACE "\.([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
-                             "${FULL_VERSION_STRING}")
-
-        # get number and remove from full version string
-        string(REGEX REPLACE "\.([0-9]+)(.*)" "\\1" PATCH_VERSION
-                             "${FULL_VERSION_STRING}")
-        string(REGEX REPLACE "\.([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
-                             "${FULL_VERSION_STRING}")
-
-        # get number and remove from full version string
-        string(REGEX REPLACE "\.([0-9]+)(.*)" "\\1" TWEAK_VERSION
-                             "${FULL_VERSION_STRING}")
-        string(REGEX REPLACE "\.([0-9]+)(.*)" "\\2" FULL_VERSION_STRING
-                             "${FULL_VERSION_STRING}")
-
-        # get number
-        string(REGEX REPLACE "-([0-9A-Za-z+~]+)" "\\1" REVISION_VERSION
-                             "${FULL_VERSION_STRING}")
-
-        set(CANONICAL_VERSION)
-        set(_MAJOR_SEP ":")
-        set(_MINOR_SEP ".")
-        set(_PATCH_SEP ".")
-        set(_TWEAK_SEP ".")
-        set(_REVISION_SEP "-")
-        foreach(_V EPOCH MAJOR MINOR PATCH TWEAK REVISION)
-            if(${_V}_VERSION)
-                set(CANONICAL_VERSION "${CANONICAL_VERSION}${_${_V}_SEP}${${_V}_VERSION}")
-            else()
-                set(CANONICAL_VERSION "${CANONICAL_VERSION}${_${_V}_SEP}0")
-            endif()
-        endforeach()
-        set(_MAJOR_SEP "")
-        foreach(_V MAJOR MINOR PATCH)
-            if(${_V}_VERSION)
-                set(TRIPLE_VERSION "${TRIPLE_VERSION}${_${_V}_SEP}${${_V}_VERSION}")
-            else()
-                set(TRIPLE_VERSION "${TRIPLE_VERSION}${_${_V}_SEP}0")
-            endif()
-        endforeach()
-
-        math(
-            EXPR
-            NUMERIC_VERSION
-            "(10000 * (${MAJOR_VERSION}+0)) + (100 * (${MINOR_VERSION}+0)) + (${PATCH_VERSION}+0)"
-            )
+        rocm_version_compute("${FULL_VERSION_STRING}" "${_VAR_PREFIX}")
 
         # propagate to parent scopes
-        foreach(
-            _V
-            EPOCH
-            MAJOR
-            MINOR
-            PATCH
-            TWEAK
-            REVISION
-            TRIPLE
-            NUMERIC
-            CANONICAL
-            FULL)
+        foreach(_V ${ROCmVersion_VARIABLES})
             set(${_VAR_PREFIX}_${_V}_VERSION
-                ${${_V}_VERSION}
+                ${${_VAR_PREFIX}_${_V}_VERSION}
                 PARENT_SCOPE)
         endforeach()
     endfunction()
@@ -269,18 +277,8 @@ function(ROCM_VERSION_PARSE_VERSION_FILES)
         string(REPLACE "." "_" _B "${_B}")
         string(REPLACE "-" "_" _B "${_B}")
         rocm_version_read_file(${_F} ${_B})
-        foreach(
-            _V
-            EPOCH
-            MAJOR
-            MINOR
-            PATCH
-            TWEAK
-            REVISION
-            TRIPLE
-            NUMERIC
-            FULL
-            CANONICAL)
+
+        foreach(_V ${ROCmVersion_VARIABLES})
             set(_CACHE_VAR ROCmVersion_${_V}_VERSION)
             set(_LOCAL_VAR ${_B}_${_V}_VERSION)
             set(ROCmVersion_${_V}_VERSION
