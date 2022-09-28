@@ -683,7 +683,7 @@ find(
         if(std::forward<FuncT>(_func)(_v, itr)) return &itr;
     }
     return nullptr;
-};
+}
 
 template <typename FuncT = bool (*)(const entry&, const entry&)>
 inline entry*

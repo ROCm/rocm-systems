@@ -393,22 +393,22 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                     }
                     _line << " " << _str;
                 };
-                for(auto& itr : _desc)
-                    _write(itr);
+                for(auto& iitr : _desc)
+                    _write(iitr);
                 _ss << _line.str() << "\n#\n";
             }
             if(_options[CATEGORY] || all_info)
             {
                 _ss << "# categories:\n";
-                for(const auto& itr : itr->get_categories())
-                    _ss << "#    " << itr << "\n";
+                for(const auto& iitr : itr->get_categories())
+                    _ss << "#    " << iitr << "\n";
                 _ss << "#\n";
             }
             if((_options[VAL] || all_info) && !itr->get_choices().empty())
             {
                 _ss << "# choices:\n";
-                for(const auto& itr : itr->get_choices())
-                    _ss << "#    " << itr << "\n";
+                for(const auto& iitr : itr->get_choices())
+                    _ss << "#    " << iitr << "\n";
                 _ss << "#\n";
             }
             if(_has_info) _ss << "\n";

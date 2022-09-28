@@ -87,11 +87,6 @@ deactivate_rcclp(uint64_t id)
 void
 configure_rcclp(const std::set<std::string>& permit, const std::set<std::string>& reject)
 {
-    static constexpr size_t rcclp_wrapper_count = OMNITRACE_NUM_RCCLP_WRAPPERS;
-
-    using rcclp_gotcha_t =
-        tim::component::gotcha<rcclp_wrapper_count, rccl_toolset_t, category::rocm_rccl>;
-
     static bool is_initialized = false;
     if(!is_initialized)
     {

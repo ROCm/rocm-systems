@@ -708,10 +708,10 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
 
         auto* itr             = loop_blocks.at(i);
         auto  _is_constrained = [this](bool _v, const std::string& _label,
-                                      const std::string& _name) {
+                                      const std::string& _mname) {
             if(_v)
             {
-                messages.emplace_back(3, "Skipping", "function-loop", _label, _name);
+                messages.emplace_back(3, "Skipping", "function-loop", _label, _mname);
                 return true;
             }
             return false;

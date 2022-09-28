@@ -187,7 +187,7 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
     if(_omp_libs != nullptr &&
        std::string_view{ _omp_libs }.find(_omnilib_dl) == std::string::npos)
         _omni_omp_libs = common::join(':', _omp_libs, _omnilib_dl);
-    OMNITRACE_SETUP_LOG(_verbose >= 1, "setting OMP_TOOL_LIBRARIES to '%s'\n",
+    OMNITRACE_SETUP_LOG(_verbose >= 2, "setting OMP_TOOL_LIBRARIES to '%s'\n",
                         _omni_omp_libs.c_str());
     setenv("OMP_TOOL_LIBRARIES", _omni_omp_libs.c_str(), 1);
 #endif

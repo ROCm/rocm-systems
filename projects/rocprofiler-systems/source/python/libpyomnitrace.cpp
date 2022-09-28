@@ -356,28 +356,28 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     };
 
     // get the final label
-    auto _get_label = [&](auto& _func, auto& _filename, auto& _fullpath) {
+    auto _get_label = [&](auto& _funcname, auto& _filename, auto& _fullpath) {
         auto _bracket = _config.include_filename;
-        if(_bracket) _func.insert(0, "[");
+        if(_bracket) _funcname.insert(0, "[");
         // append the arguments
-        if(_config.include_args) _func.append(_get_args());
-        if(_bracket) _func.append("]");
+        if(_config.include_args) _funcname.append(_get_args());
+        if(_bracket) _funcname.append("]");
         // append the filename
         if(_config.include_filename)
         {
             if(_config.full_filepath)
-                _func.append(TIMEMORY_JOIN("", '[', std::move(_fullpath)));
+                _funcname.append(TIMEMORY_JOIN("", '[', std::move(_fullpath)));
             else
-                _func.append(TIMEMORY_JOIN("", '[', std::move(_filename)));
+                _funcname.append(TIMEMORY_JOIN("", '[', std::move(_filename)));
         }
         // append the line number
         if(_config.include_line && _config.include_filename)
-            _func.append(TIMEMORY_JOIN("", ':', frame->f_lineno, ']'));
+            _funcname.append(TIMEMORY_JOIN("", ':', frame->f_lineno, ']'));
         else if(_config.include_line)
-            _func.append(TIMEMORY_JOIN("", ':', frame->f_lineno));
+            _funcname.append(TIMEMORY_JOIN("", ':', frame->f_lineno));
         else if(_config.include_filename)
-            _func += "]";
-        return _func;
+            _funcname += "]";
+        return _funcname;
     };
 
     auto _find_matching = [](const strset_t& _expr, const std::string& _name) {
@@ -783,9 +783,9 @@ generate(py::module& _pymod)
         std::sort(_rhs->begin(), _rhs->end(), std::greater<coverage::coverage_data>{});
 
         auto _find = [_lhs](const auto& _v) {
-            for(auto itr = _lhs->begin(); itr != _lhs->end(); ++itr)
+            for(auto iitr = _lhs->begin(); iitr != _lhs->end(); ++iitr)
             {
-                if(*itr == _v) return std::make_pair(itr, true);
+                if(*iitr == _v) return std::make_pair(iitr, true);
             }
             return std::make_pair(_lhs->end(), false);
         };

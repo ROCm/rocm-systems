@@ -588,7 +588,7 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
     }
 
     auto _process_perfetto = [_tid,
-                              _init](const std::vector<sampling::bundle_t*>& _data) {
+                              _init](const std::vector<sampling::bundle_t*>& _data_v) {
         thread_info::init(true);
         OMNITRACE_VERBOSE(3 || get_debug_sampling(),
                           "[%li] Post-processing backtraces for perfetto...\n", _tid);
@@ -608,7 +608,7 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
 
         auto _as_hex = [](auto _v) { return JOIN("", "0x", std::hex, _v); };
 
-        for(const auto& itr : _data)
+        for(const auto& itr : _data_v)
         {
             const auto* _bt_ts = itr->get<backtrace_timestamp>();
             const auto* _bt_cs = itr->get<backtrace>();
@@ -617,9 +617,9 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
             if(_bt_ts->get_tid() != _tid) continue;
 
             static std::set<std::string> _static_strings{};
-            for(const auto& itr : backtrace::filter_and_patch(_bt_cs->get()))
+            for(const auto& iitr : backtrace::filter_and_patch(_bt_cs->get()))
             {
-                const auto* _name = _static_strings.emplace(itr.name).first->c_str();
+                const auto* _name = _static_strings.emplace(iitr.name).first->c_str();
                 uint64_t    _beg  = _last_ts;
                 uint64_t    _end  = _bt_ts->get_timestamp();
                 if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
@@ -627,14 +627,15 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
                 tracing::push_perfetto_ts(
                     category::sampling{}, _name, _beg, [&](perfetto::EventContext ctx) {
                         tracing::add_perfetto_annotation(ctx, "begin_ns", _beg);
-                        tracing::add_perfetto_annotation(ctx, "file", itr.location);
-                        tracing::add_perfetto_annotation(ctx, "pc", _as_hex(itr.address));
+                        tracing::add_perfetto_annotation(ctx, "file", iitr.location);
+                        tracing::add_perfetto_annotation(ctx, "pc",
+                                                         _as_hex(iitr.address));
                         tracing::add_perfetto_annotation(ctx, "line_address",
-                                                         _as_hex(itr.line_address));
-                        if(itr.lineinfo)
+                                                         _as_hex(iitr.line_address));
+                        if(iitr.lineinfo)
                         {
                             size_t _n = 0;
-                            for(const auto& litr : itr.lineinfo.lines)
+                            for(const auto& litr : iitr.lineinfo.lines)
                             {
                                 auto _label = JOIN('-', "lineinfo", _n++);
                                 tracing::add_perfetto_annotation(
@@ -706,9 +707,9 @@ post_process_timemory(int64_t _tid, const bundle_t* _init,
         _tc.reserve(_bt_data->size());
 
         // generate the instances of the tuple of components and start them
-        for(const auto& itr : backtrace::filter_and_patch(_bt_data->get()))
+        for(const auto& iitr : backtrace::filter_and_patch(_bt_data->get()))
         {
-            _tc.emplace_back(tim::string_view_t{ itr.name });
+            _tc.emplace_back(tim::string_view_t{ iitr.name });
             _tc.back().push(_bt_time->get_tid());
             _tc.back().start();
         }
@@ -716,13 +717,13 @@ post_process_timemory(int64_t _tid, const bundle_t* _init,
         // stop the instances and update the values as needed
         for(size_t i = 0; i < _tc.size(); ++i)
         {
-            auto&  itr    = _tc.at(_tc.size() - i - 1);
+            auto&  iitr   = _tc.at(_tc.size() - i - 1);
             size_t _depth = 0;
             _depth_sum[_bt_time->get_tid()][_depth] += 1;
-            itr.stop();
+            iitr.stop();
             if constexpr(tim::trait::is_available<sampling_wall_clock>::value)
             {
-                auto* _sc = itr.get<sampling_wall_clock>();
+                auto* _sc = iitr.get<sampling_wall_clock>();
                 if(_sc)
                 {
                     auto _value = _elapsed_wc / sampling_wall_clock::get_unit();
@@ -732,7 +733,7 @@ post_process_timemory(int64_t _tid, const bundle_t* _init,
             }
             if constexpr(tim::trait::is_available<sampling_cpu_clock>::value)
             {
-                auto* _cc = itr.get<sampling_cpu_clock>();
+                auto* _cc = iitr.get<sampling_cpu_clock>();
                 if(_cc)
                 {
                     _cc->set_value(_elapsed_cc / sampling_cpu_clock::get_unit());
@@ -753,14 +754,14 @@ post_process_timemory(int64_t _tid, const bundle_t* _init,
                                 _last->get<backtrace_metrics>()->get_hw_counters()[k];
                     }
                 }
-                auto* _hw_counter = itr.get<hw_counters>();
+                auto* _hw_counter = iitr.get<hw_counters>();
                 if(_hw_counter)
                 {
                     _hw_counter->set_value(_hw_cnt_vals);
                     _hw_counter->set_accum(_hw_cnt_vals);
                 }
             }
-            itr.pop();
+            iitr.pop();
         }
         _last = itr;
     }
@@ -780,9 +781,9 @@ post_process_timemory(int64_t _tid, const bundle_t* _init,
         _tc.reserve(_bt_data->size());
 
         // generate the instances of the tuple of components and start them
-        for(const auto& itr : backtrace::filter_and_patch(_bt_data->get()))
+        for(const auto& iitr : backtrace::filter_and_patch(_bt_data->get()))
         {
-            _tc.emplace_back(tim::string_view_t{ itr.name });
+            _tc.emplace_back(tim::string_view_t{ iitr.name });
             _tc.back().push(_bt_time->get_tid());
             _tc.back().start();
         }
@@ -790,12 +791,12 @@ post_process_timemory(int64_t _tid, const bundle_t* _init,
         // stop the instances and update the values as needed
         for(size_t i = 0; i < _tc.size(); ++i)
         {
-            auto&  itr    = _tc.at(_tc.size() - i - 1);
+            auto&  iitr   = _tc.at(_tc.size() - i - 1);
             size_t _depth = 0;
             double _value = (1.0 / _depth_sum[_bt_time->get_tid()][_depth]) * 100.0;
-            itr.store(std::plus<double>{}, _value);
-            itr.stop();
-            itr.pop();
+            iitr.store(std::plus<double>{}, _value);
+            iitr.stop();
+            iitr.pop();
         }
     }
 }

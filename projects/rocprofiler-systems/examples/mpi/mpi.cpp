@@ -52,7 +52,7 @@ get_values_str(const Tp& _data)
     for(auto&& itr : _data)
         _ss << ", " << std::setw(6) << std::setprecision(2) << std::fixed << itr;
     return _ss.str().substr(1);
-};
+}
 
 template <typename Tp, size_t N>
 auto
@@ -289,8 +289,8 @@ run_main(int argc, char** argv)
 
             int       n        = 0;
             const int ranks[7] = { 1, 2, 3, 5, 7, 11, 13 };
-            for(int rank : ranks)
-                if(rank < size) ++n;
+            for(int r : ranks)
+                if(r < size) ++n;
 
             // Construct a group containing all of the prime ranks in world_group
             MPI_Group prime_group;

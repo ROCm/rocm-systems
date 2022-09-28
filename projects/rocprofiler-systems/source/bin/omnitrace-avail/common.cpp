@@ -87,18 +87,18 @@ get_regex_pattern()
         for(const auto& itr : regex_keys)
         {
             if(itr.empty()) continue;
-            std::string _pattern = {};
+            std::string _local_pattern = {};
             if(itr.at(0) == '~')
             {
-                _pattern = itr.substr(1);
-                _v.at(1) += "|" + _pattern;
+                _local_pattern = itr.substr(1);
+                _v.at(1) += "|" + _local_pattern;
             }
             else
             {
-                _pattern = itr;
-                _v.at(0) += "|" + _pattern;
+                _local_pattern = itr;
+                _v.at(0) += "|" + _local_pattern;
             }
-            lerr << "Adding regex key: '" << _pattern << "'...\n";
+            lerr << "Adding regex key: '" << _local_pattern << "'...\n";
         }
         for(auto& itr : _v)
             if(!itr.empty()) itr = itr.substr(1);
@@ -188,18 +188,18 @@ get_category_regex_pattern()
         for(const auto& itr : category_regex_keys)
         {
             if(itr.empty()) continue;
-            std::string _pattern = {};
+            std::string _local_pattern = {};
             if(itr.at(0) == '~')
             {
-                _pattern = itr.substr(1);
-                _v.at(1) += "|" + _pattern;
+                _local_pattern = itr.substr(1);
+                _v.at(1) += "|" + _local_pattern;
             }
             else
             {
-                _pattern = itr;
-                _v.at(0) += "|" + _pattern;
+                _local_pattern = itr;
+                _v.at(0) += "|" + _local_pattern;
             }
-            lerr << "Adding category regex key: '" << _pattern << "'...\n";
+            lerr << "Adding category regex key: '" << _local_pattern << "'...\n";
         }
         for(auto& itr : _v)
             if(!itr.empty()) itr = itr.substr(1);

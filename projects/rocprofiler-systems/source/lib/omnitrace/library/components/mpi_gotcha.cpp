@@ -281,7 +281,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming, comm_t _comm, int
     else
     {
         OMNITRACE_BASIC_PRINT_F("%s(<comm>, %p) :: unexpected function wrapper\n",
-                                _data.tool_id.c_str(), _val);
+                                _data.tool_id.c_str(), static_cast<void*>(_val));
     }
 }
 

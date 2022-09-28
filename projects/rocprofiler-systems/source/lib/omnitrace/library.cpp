@@ -85,35 +85,38 @@ auto
 ensure_finalization(bool _static_init = false)
 {
     const auto& _info = thread_info::init();
-    auto        _tid  = _info->index_data;
-    OMNITRACE_CI_THROW(_tid->sequent_value != threading::get_id(),
-                       "Error! internal tid != %li :: %li", threading::get_id(),
-                       _tid->sequent_value);
-    OMNITRACE_CI_THROW(_tid->system_value != threading::get_sys_tid(),
-                       "Error! system tid != %li :: %li", threading::get_sys_tid(),
-                       _tid->system_value);
+    const auto& _tid  = _info->index_data;
+    if(_tid)
+    {
+        OMNITRACE_CI_THROW(_tid->sequent_value != threading::get_id(),
+                           "Error! internal tid != %li :: %li", threading::get_id(),
+                           _tid->sequent_value);
+        OMNITRACE_CI_THROW(_tid->system_value != threading::get_sys_tid(),
+                           "Error! system tid != %li :: %li", threading::get_sys_tid(),
+                           _tid->system_value);
+    }
 
     if(!get_env("OMNITRACE_COLORIZED_LOG", true)) tim::log::colorized() = false;
 
     (void) tim::manager::instance();
     (void) tim::settings::shared_instance();
 
-    if(!_static_init)
+    if(_static_init)
     {
-        OMNITRACE_DEBUG_F("\n");
+        OMNITRACE_BASIC_DEBUG_F("\n");
+        auto _verbose =
+            get_verbose_env() + ((get_debug_env() || get_debug_init()) ? 16 : 0);
+        auto _search_paths = JOIN(':', tim::get_env<std::string>("OMNITRACE_PATH", ""),
+                                  tim::get_env<std::string>("PWD"), ".",
+                                  tim::get_env<std::string>("LD_LIBRARY_PATH", ""),
+                                  tim::get_env<std::string>("LIBRARY_PATH", ""),
+                                  tim::get_env<std::string>("PATH", ""));
+        common::setup_environ(_verbose, _search_paths);
     }
     else
     {
-        OMNITRACE_BASIC_DEBUG_F("\n");
+        OMNITRACE_DEBUG_F("\n");
     }
-
-    auto _verbose = get_verbose_env() + ((get_debug_env() || get_debug_init()) ? 16 : 0);
-    auto _search_paths = JOIN(':', tim::get_env<std::string>("OMNITRACE_PATH", ""),
-                              tim::get_env<std::string>("PWD"), ".",
-                              tim::get_env<std::string>("LD_LIBRARY_PATH", ""),
-                              tim::get_env<std::string>("LIBRARY_PATH", ""),
-                              tim::get_env<std::string>("PATH", ""));
-    common::setup_environ(_verbose, _search_paths);
 
     return scope::destructor{ []() { omnitrace_finalize_hidden(); } };
 }

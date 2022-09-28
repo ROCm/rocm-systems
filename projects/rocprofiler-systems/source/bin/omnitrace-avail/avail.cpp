@@ -975,13 +975,10 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     auto _rocm_events =
         (gpu_count > 0) ? omnitrace::rocprofiler::rocm_metrics() : hwcounter_info_t{};
 
-    auto _process_counters = [](auto& _events, int32_t _offset) {
-        for(auto& itr : _events)
-        {
-            itr.offset() += _offset;
-            itr.python_symbol() = "timemory.hardware_counters." + itr.python_symbol();
-        }
-        return static_cast<int32_t>(_events.size());
+    auto _process_counters = [](auto& _events_v, int32_t _offset_v) {
+        for(auto& iitr : _events_v)
+            iitr.offset() += _offset_v;
+        return static_cast<int32_t>(_events_v.size());
     };
 
     int32_t _offset = 0;

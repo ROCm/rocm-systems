@@ -780,7 +780,7 @@ find(
         if(std::forward<FuncT>(_func)(_v, itr)) return &itr;
     }
     return nullptr;
-};
+}
 
 template <typename FuncT = bool (*)(const entry&, const entry&)>
 inline entry*
@@ -845,13 +845,13 @@ compute_critical_trace()
     perfstats_t _ct_perf{};
     _ct_perf.start();
 
-    auto _report_perf = [](auto& _perf, const char* _func, const std::string& _label) {
-        _perf.stop().rekey(_label);
-        auto _str = JOIN("", _perf);
+    auto _report_perf = [](auto& _perf_v, const char* _func, const std::string& _label) {
+        _perf_v.stop().rekey(_label);
+        auto _str = JOIN("", _perf_v);
         if(_str.length() > 5) _str = _str.substr(5);
         OMNITRACE_BASIC_PRINT("[%s] %s\n", _func, _str.c_str());
         OMNITRACE_BASIC_PRINT("\n");
-        _perf.reset().start();
+        _perf_v.reset().start();
     };
 
     OMNITRACE_BASIC_PRINT("\n");

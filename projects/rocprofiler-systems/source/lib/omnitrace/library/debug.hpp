@@ -196,7 +196,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
-        ::omnitrace::debug::lock _lk{};                                                  \
+        ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(info);                                            \
         fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i][%li]%s",                \
                 OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_DEBUG_THREAD_IDENTIFIER,   \
@@ -210,7 +210,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
-        ::omnitrace::debug::lock _lk{};                                                  \
+        ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(info);                                            \
         fprintf(::omnitrace::debug::get_file(), "[omnitrace]%s",                         \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
@@ -223,7 +223,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
-        ::omnitrace::debug::lock _lk{};                                                  \
+        ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(info);                                            \
         fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i][%li][%s]%s",            \
                 OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_DEBUG_THREAD_IDENTIFIER,   \
@@ -238,7 +238,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
-        ::omnitrace::debug::lock _lk{};                                                  \
+        ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(info);                                            \
         fprintf(::omnitrace::debug::get_file(), "[omnitrace][%s]%s", OMNITRACE_FUNCTION, \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
@@ -253,7 +253,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
-        ::omnitrace::debug::lock _lk{};                                                  \
+        ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(warning);                                         \
         fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i][%li]%s",                \
                 OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_DEBUG_THREAD_IDENTIFIER,   \
@@ -267,7 +267,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
-        ::omnitrace::debug::lock _lk{};                                                  \
+        ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(warning);                                         \
         fprintf(::omnitrace::debug::get_file(), "[omnitrace]%s",                         \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
@@ -280,7 +280,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
-        ::omnitrace::debug::lock _lk{};                                                  \
+        ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(warning);                                         \
         fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i][%li][%s]%s",            \
                 OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_DEBUG_THREAD_IDENTIFIER,   \
@@ -295,7 +295,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
        ::omnitrace::config::get_debug_pid())                                             \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
-        ::omnitrace::debug::lock _lk{};                                                  \
+        ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(warning);                                         \
         fprintf(::omnitrace::debug::get_file(), "[omnitrace][%s]%s", OMNITRACE_FUNCTION, \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \

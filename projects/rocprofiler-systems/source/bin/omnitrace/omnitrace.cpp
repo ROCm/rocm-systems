@@ -854,26 +854,26 @@ main(int argc, char** argv)
         for(auto&& itr : _configs)
         {
             auto _settings = tim::settings::push<omnitrace_env_config_s>();
-            for(auto&& itr : *_settings)
+            for(auto&& iitr : *_settings)
             {
-                itr.second->set_config_updated(false);
-                itr.second->set_environ_updated(false);
+                iitr.second->set_config_updated(false);
+                iitr.second->set_environ_updated(false);
             }
             _settings->read(itr);
-            for(auto&& itr : *_settings)
+            for(auto&& iitr : *_settings)
             {
-                if(itr.second && itr.second->get_config_updated())
+                if(iitr.second && iitr.second->get_config_updated())
                 {
                     env_config_variables.emplace_back(TIMEMORY_JOIN(
-                        '=', itr.second->get_env_name(), itr.second->as_string()));
+                        '=', iitr.second->get_env_name(), iitr.second->as_string()));
                     verbprintf(1, "Exporting known config value :: %s\n",
                                env_config_variables.back().c_str());
                 }
             }
-            for(auto&& itr : _settings->get_unknown_configs())
+            for(auto&& iitr : _settings->get_unknown_configs())
             {
                 env_config_variables.emplace_back(
-                    TIMEMORY_JOIN('=', itr.first, itr.second));
+                    TIMEMORY_JOIN('=', iitr.first, iitr.second));
                 verbprintf(1, "Exporting unknown config value :: %s\n",
                            env_config_variables.back().c_str());
             }
@@ -2508,7 +2508,7 @@ find_dyn_api_rt()
         _dyn_api_rt_paths.insert(_dyn_api_rt_paths.begin(), _dyn_api_rt_abs);
     else
     {
-        auto _dyn_api_rt_abs = get_absolute_lib_filepath(
+        _dyn_api_rt_abs = get_absolute_lib_filepath(
             _dyn_api_rt_base + ".a", "LIBRARY_PATH", _suffixes, _fallbacks);
         if(_dyn_api_rt_abs != _dyn_api_rt_base + ".a")
             _dyn_api_rt_paths.insert(_dyn_api_rt_paths.begin(), _dyn_api_rt_abs);

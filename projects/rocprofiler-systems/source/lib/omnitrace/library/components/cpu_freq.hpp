@@ -88,6 +88,7 @@ public:
             operation::serialization<cpu_freq>{}(*this, _ar, _version);
         else
             _ar(tim::cereal::make_nvp("value", value));
+        (void) _version;
     }
 
     this_type& operator+=(const this_type& _rhs)

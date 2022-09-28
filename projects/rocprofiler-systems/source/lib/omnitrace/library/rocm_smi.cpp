@@ -284,8 +284,8 @@ data::post_process(uint32_t _dev_id)
 
 #if !defined(TIMEMORY_USE_MPI)
     // timemory + MPI here causes hangs for some reason. it is unclear why
-    using bundle_t = tim::lightweight_tuple<sampling_gpu_busy, sampling_gpu_temp,
-                                            sampling_gpu_power, sampling_gpu_memory>;
+    using samp_bundle_t = tim::lightweight_tuple<sampling_gpu_busy, sampling_gpu_temp,
+                                                 sampling_gpu_power, sampling_gpu_memory>;
 
     for(auto& itr : _rocm_smi)
     {
@@ -297,7 +297,7 @@ data::post_process(uint32_t _dev_id)
             return _e.device == critical_trace::Device::GPU;
         });
 
-        std::vector<bundle_t> _tc{};
+        std::vector<samp_bundle_t> _tc{};
         _tc.reserve(_entries.size());
         for(auto& eitr : _entries)
         {

@@ -192,13 +192,13 @@ post_process()
             auto  mitr   = _cache.find(_v.address);
             if(mitr != _cache.end()) return std::make_pair(mitr->second, true);
 
-            for(auto itr = _tmp.begin(); itr != _tmp.end(); ++itr)
+            for(auto titr = _tmp.begin(); titr != _tmp.end(); ++titr)
             {
-                if(itr->source == _v.source && itr->address != _v.address &&
-                   itr->count == _v.count)
+                if(titr->source == _v.source && titr->address != _v.address &&
+                   titr->count == _v.count)
                 {
-                    _cache[_v.address] = itr;
-                    return std::make_pair(itr, true);
+                    _cache[_v.address] = titr;
+                    return std::make_pair(titr, true);
                 }
             }
             return std::make_pair(_tmp.end(), false);

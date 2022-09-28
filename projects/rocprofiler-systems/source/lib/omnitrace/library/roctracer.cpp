@@ -179,9 +179,9 @@ get_clock_skew()
 
         static auto _gpu_now = []() {
             cpu::fence();
-            uint64_t _v = 0;
-            ROCTRACER_CALL(roctracer_get_timestamp(&_v));
-            return _v;
+            uint64_t _ts = 0;
+            ROCTRACER_CALL(roctracer_get_timestamp(&_ts));
+            return _ts;
         };
 
         do
@@ -741,8 +741,8 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         }
         if(get_use_timemory())
         {
-            auto _stop = [&_corr_id](int64_t _tid) {
-                auto& _data = get_roctracer_hip_data(_tid);
+            auto _stop = [&_corr_id](int64_t _tid_v) {
+                auto& _data = get_roctracer_hip_data(_tid_v);
                 auto  itr   = _data->find(_corr_id);
                 if(itr != get_roctracer_hip_data()->end())
                 {
