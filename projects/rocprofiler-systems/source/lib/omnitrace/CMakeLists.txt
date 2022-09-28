@@ -32,6 +32,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
         $<BUILD_INTERFACE:omnitrace::omnitrace-perfetto>
         $<BUILD_INTERFACE:omnitrace::omnitrace-timemory>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-bfd>
         $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
         $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
         $<BUILD_INTERFACE:omnitrace::omnitrace-hip>

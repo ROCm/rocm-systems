@@ -23,6 +23,7 @@ omnitrace_add_interface_library(omnitrace-rocm-smi
 omnitrace_add_interface_library(
     omnitrace-rccl "Provides flags for ROCm Communication Collectives Library (RCCL)")
 omnitrace_add_interface_library(omnitrace-mpi "Provides MPI or MPI headers")
+omnitrace_add_interface_library(omnitrace-bfd "Provides Binary File Descriptor (BFD)")
 omnitrace_add_interface_library(omnitrace-ptl "Enables PTL support (tasking)")
 omnitrace_add_interface_library(omnitrace-papi "Enable PAPI support")
 omnitrace_add_interface_library(omnitrace-ompt "Enable OMPT support")
@@ -40,6 +41,7 @@ set(OMNITRACE_EXTENSION_LIBRARIES
     omnitrace::omnitrace-rocprofiler
     omnitrace::omnitrace-rocm-smi
     omnitrace::omnitrace-rccl
+    omnitrace::omnitrace-bfd
     omnitrace::omnitrace-mpi
     omnitrace::omnitrace-ptl
     omnitrace::omnitrace-ompt
@@ -596,6 +598,9 @@ set(TIMEMORY_USE_OMPT
 set(TIMEMORY_USE_PAPI
     ${OMNITRACE_USE_PAPI}
     CACHE BOOL "Enable PAPI support in timemory" FORCE)
+set(TIMEMORY_USE_BFD
+    ${OMNITRACE_USE_BFD}
+    CACHE BOOL "Enable BFD support in timemory" FORCE)
 set(TIMEMORY_USE_LIBUNWIND
     ON
     CACHE BOOL "Enable libunwind support in timemory")
@@ -706,6 +711,12 @@ target_link_libraries(
     INTERFACE $<BUILD_INTERFACE:timemory::timemory-headers>
               $<BUILD_INTERFACE:timemory::timemory-gotcha>
               $<BUILD_INTERFACE:timemory::timemory-cxx-static>)
+
+target_link_libraries(omnitrace-bfd INTERFACE $<BUILD_INTERFACE:timemory::timemory-bfd>)
+
+if(OMNITRACE_USE_BFD)
+    omnitrace_target_compile_definitions(omnitrace-bfd INTERFACE OMNITRACE_USE_BFD)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #

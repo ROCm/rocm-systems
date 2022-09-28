@@ -606,6 +606,8 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
         tracing::push_perfetto_ts(category::sampling{}, "samples [omnitrace]", _beg_ns,
                                   "begin_ns", _beg_ns);
 
+        auto _as_hex = [](auto _v) { return JOIN("", "0x", std::hex, _v); };
+
         for(const auto& itr : _data)
         {
             const auto* _bt_ts = itr->get<backtrace_timestamp>();
@@ -617,13 +619,32 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
             static std::set<std::string> _static_strings{};
             for(const auto& itr : backtrace::filter_and_patch(_bt_cs->get()))
             {
-                const auto* _name = _static_strings.emplace(itr).first->c_str();
+                const auto* _name = _static_strings.emplace(itr.name).first->c_str();
                 uint64_t    _beg  = _last_ts;
                 uint64_t    _end  = _bt_ts->get_timestamp();
                 if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
 
-                tracing::push_perfetto_ts(category::sampling{}, _name, _beg, "begin_ns",
-                                          _beg);
+                tracing::push_perfetto_ts(
+                    category::sampling{}, _name, _beg, [&](perfetto::EventContext ctx) {
+                        tracing::add_perfetto_annotation(ctx, "begin_ns", _beg);
+                        tracing::add_perfetto_annotation(ctx, "file", itr.location);
+                        tracing::add_perfetto_annotation(ctx, "pc", _as_hex(itr.address));
+                        tracing::add_perfetto_annotation(ctx, "line_address",
+                                                         _as_hex(itr.line_address));
+                        if(itr.lineinfo)
+                        {
+                            size_t _n = 0;
+                            for(const auto& litr : itr.lineinfo.lines)
+                            {
+                                auto _label = JOIN('-', "lineinfo", _n++);
+                                tracing::add_perfetto_annotation(
+                                    ctx, _label.c_str(),
+                                    JOIN('@', demangle(litr.name),
+                                         JOIN(':', litr.location, litr.line)));
+                            }
+                        }
+                    });
+
                 tracing::pop_perfetto_ts(category::sampling{}, _name, _end, "end_ns",
                                          _end);
             }
@@ -687,7 +708,7 @@ post_process_timemory(int64_t _tid, const bundle_t* _init,
         // generate the instances of the tuple of components and start them
         for(const auto& itr : backtrace::filter_and_patch(_bt_data->get()))
         {
-            _tc.emplace_back(tim::string_view_t{ itr });
+            _tc.emplace_back(tim::string_view_t{ itr.name });
             _tc.back().push(_bt_time->get_tid());
             _tc.back().start();
         }
@@ -761,7 +782,7 @@ post_process_timemory(int64_t _tid, const bundle_t* _init,
         // generate the instances of the tuple of components and start them
         for(const auto& itr : backtrace::filter_and_patch(_bt_data->get()))
         {
-            _tc.emplace_back(tim::string_view_t{ itr });
+            _tc.emplace_back(tim::string_view_t{ itr.name });
             _tc.back().push(_bt_time->get_tid());
             _tc.back().start();
         }

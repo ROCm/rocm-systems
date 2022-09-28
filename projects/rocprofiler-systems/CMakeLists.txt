@@ -116,6 +116,8 @@ set(CMAKE_INSTALL_MESSAGE
 mark_as_advanced(CMAKE_INSTALL_MESSAGE)
 
 omnitrace_add_option(OMNITRACE_USE_CLANG_TIDY "Enable clang-tidy" OFF)
+omnitrace_add_option(OMNITRACE_USE_BFD
+                     "Enable BFD support (map call-stack samples to LOC)" ON)
 omnitrace_add_option(OMNITRACE_USE_MPI "Enable MPI support" OFF)
 omnitrace_add_option(OMNITRACE_USE_HIP "Enable HIP support" ON)
 omnitrace_add_option(OMNITRACE_USE_PAPI "Enable HW counter support via PAPI" ON)
@@ -133,8 +135,11 @@ omnitrace_add_option(OMNITRACE_USE_OMPT "Enable OpenMP tools support" ON)
 omnitrace_add_option(OMNITRACE_USE_PYTHON "Enable Python support" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_LIBUNWIND "Build libunwind from submodule" ON)
-omnitrace_add_option(OMNITRACE_BUILD_EXAMPLES "Enable building the examples" OFF)
-omnitrace_add_option(OMNITRACE_BUILD_TESTING "Enable building the testing suite" OFF)
+omnitrace_add_option(OMNITRACE_BUILD_EXAMPLES "Enable building the examples" OFF ADVANCED)
+omnitrace_add_option(OMNITRACE_BUILD_TESTING "Enable building the testing suite" OFF
+                     ADVANCED)
+omnitrace_add_option(OMNITRACE_BUILD_DEBUG "Enable building with extensive debug symbols"
+                     OFF ADVANCED)
 omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF
                      ADVANCED)
 omnitrace_add_option(

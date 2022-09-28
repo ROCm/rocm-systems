@@ -70,7 +70,7 @@ struct backtrace
     backtrace& operator=(const backtrace&) = default;
     backtrace& operator=(backtrace&&) noexcept = default;
 
-    static std::vector<std::string> filter_and_patch(const std::vector<entry_type>&);
+    static std::vector<entry_type> filter_and_patch(const std::vector<entry_type>&);
 
     static void start();
     static void stop();

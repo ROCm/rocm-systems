@@ -109,7 +109,7 @@ backtrace::description()
     return "Records backtrace data";
 }
 
-std::vector<std::string>
+std::vector<backtrace::entry_type>
 backtrace::filter_and_patch(const std::vector<entry_type>& _data)
 {
     // check whether the call-stack entry should be used. -1 means break, 0 means continue
@@ -143,14 +143,16 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
         return std::string{ _lbl }.replace(_pos, _dyninst.length(), "");
     };
 
-    auto _ret = std::vector<std::string>{};
+    auto _ret = std::vector<entry_type>{};
     for(const auto& itr : _data)
     {
         auto _name = tim::demangle(_patch_label(itr.name));
         auto _use  = _use_label(_name);
         if(_use == -1) break;
         if(_use == 0) continue;
-        _ret.emplace_back(_name);
+        auto _v = itr;
+        _v.name = _name;
+        _ret.emplace_back(_v);
     }
 
     return _ret;
