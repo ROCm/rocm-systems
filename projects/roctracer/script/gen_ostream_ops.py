@@ -191,7 +191,7 @@ def gen_cppheader(infilepath, outfilepath, rank):
         if len(cppHeader.classes[c]["properties"]["public"]) != 0:
           output_filename_h.write("inline static std::ostream& operator<<(std::ostream& out, const " + c + "& v)\n")
           output_filename_h.write("{\n")
-          output_filename_h.write("  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, '{');\n")
+          output_filename_h.write("  std::operator<<(out, '{');\n")
           output_filename_h.write("  " + apiname.upper() + "_depth_max_cnt++;\n")
           output_filename_h.write("  if (" + apiname.upper() + "_depth_max == -1 || " + apiname.upper() + "_depth_max_cnt <= " + apiname.upper() + "_depth_max" + ") {\n" )
           process_struct(output_filename_h, c, cppHeader, "", apiname)
@@ -200,7 +200,7 @@ def gen_cppheader(infilepath, outfilepath, rank):
           output_filename_h.write(global_str)
           output_filename_h.write("  };\n")
           output_filename_h.write("  " + apiname.upper() + "_depth_max_cnt--;\n")
-          output_filename_h.write("  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, '}');\n")
+          output_filename_h.write("  std::operator<<(out, '}');\n")
           output_filename_h.write("  return out;\n")
           output_filename_h.write("}\n")
           global_str = ''

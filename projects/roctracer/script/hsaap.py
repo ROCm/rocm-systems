@@ -441,8 +441,7 @@ class API_DescrParser:
       content += '\n'
 
       if ret_type != 'void':
-        # FIXME: we should capture the return value and store it in the api_data
-        content += '  ' + ret_type + ' ret ='
+        content +=  '  trace_data.api_data.' + ret_type + '_retval = '
       content += '  ' + name + '_saved_before_cb.' + call + '_fn(' + ', '.join(struct['alst']) + ');\n'
 
       content += '\n'
@@ -450,8 +449,7 @@ class API_DescrParser:
       content += '    trace_data.phase_exit(' + call_id + ', &trace_data);\n'
 
       if ret_type != 'void':
-        content += '\n'
-        content += '  return ret;\n'
+        content += '  return trace_data.api_data.' + ret_type + '_retval;\n'
       content += '}\n'
 
     return content
