@@ -47,6 +47,7 @@ set(_flat_environment
     "OMNITRACE_TIMELINE_PROFILE=OFF"
     "OMNITRACE_COLLAPSE_PROCESSES=ON"
     "OMNITRACE_COLLAPSE_THREADS=ON"
+    "OMNITRACE_SAMPLING_FREQ=50"
     "OMNITRACE_TIMEMORY_COMPONENTS=wall_clock,trip_count"
     "${_test_openmp_env}"
     "${_test_library_path}")
@@ -54,7 +55,7 @@ set(_flat_environment
 set(_lock_environment
     "OMNITRACE_USE_SAMPLING=ON"
     "OMNITRACE_USE_PROCESS_SAMPLING=OFF"
-    "OMNITRACE_SAMPLING_FREQ=250"
+    "OMNITRACE_SAMPLING_FREQ=750"
     "OMNITRACE_CRITICAL_TRACE=ON"
     "OMNITRACE_COLLAPSE_THREADS=ON"
     "OMNITRACE_TRACE_THREAD_LOCKS=ON"
@@ -233,7 +234,7 @@ endfunction()
 # -------------------------------------------------------------------------------------- #
 
 function(OMNITRACE_ADD_TEST)
-    foreach(_PREFIX RUNTIME REWRITE REWRITE_RUN BASELINE)
+    foreach(_PREFIX PRELOAD RUNTIME REWRITE REWRITE_RUN BASELINE)
         foreach(_TYPE PASS FAIL SKIP)
             list(APPEND _REGEX_OPTS "${_PREFIX}_${_TYPE}_REGEX")
         endforeach()
@@ -243,10 +244,9 @@ function(OMNITRACE_ADD_TEST)
 
     cmake_parse_arguments(
         TEST
-        "SKIP_BASELINE;SKIP_REWRITE;SKIP_RUNTIME;SKIP_SAMPLING;FORCE_SAMPLING" # options
-        "NAME;TARGET;MPI;GPU;NUM_PROCS;REWRITE_TIMEOUT;RUNTIME_TIMEOUT" # single value
-                                                                        # args
-        "${_KWARGS}" # multiple value args
+        "SKIP_BASELINE;SKIP_PRELOAD;SKIP_REWRITE;SKIP_RUNTIME;SKIP_SAMPLING;FORCE_SAMPLING"
+        "NAME;TARGET;MPI;GPU;NUM_PROCS;REWRITE_TIMEOUT;RUNTIME_TIMEOUT;PRELOAD"
+        "${_KWARGS}"
         ${ARGN})
 
     if(TEST_GPU AND NOT _VALID_GPU)
@@ -278,6 +278,10 @@ function(OMNITRACE_ADD_TEST)
         set(TEST_RUNTIME_TIMEOUT 300)
     endif()
 
+    if(NOT TEST_PRELOAD_TIMEOUT)
+        set(TEST_PRELOAD_TIMEOUT 120)
+    endif()
+
     if(NOT DEFINED TEST_ENVIRONMENT OR "${TEST_ENVIRONMENT}" STREQUAL "")
         set(TEST_ENVIRONMENT "${_test_environment}")
     endif()
@@ -305,6 +309,14 @@ function(OMNITRACE_ADD_TEST)
             add_test(
                 NAME ${TEST_NAME}-baseline
                 COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+        endif()
+
+        if(NOT TEST_SKIP_PRELOAD)
+            add_test(
+                NAME ${TEST_NAME}-preload
+                COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:omnitrace-sample> --
+                        $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
@@ -370,27 +382,29 @@ function(OMNITRACE_ADD_TEST)
 
         foreach(
             _TEST
-            baseline binary-rewrite binary-rewrite-run binary-rewrite-sampling
+            baseline preload binary-rewrite binary-rewrite-run binary-rewrite-sampling
             binary-rewrite-sampling-run runtime-instrument runtime-instrument-sampling)
             string(REGEX REPLACE "-run(-|/)" "\\1" _prefix "${TEST_NAME}-${_TEST}/")
-            set(_environ "${TEST_ENVIRONMENT}")
-            set(_labels "${_TEST}")
-            set(_timeout ${TEST_REWRITE_TIMEOUT})
-            list(APPEND _environ "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
-                 "OMNITRACE_OUTPUT_PREFIX=${_prefix}")
+            set(_labels "${TEST_LABELS}" "${_TEST}")
             string(REPLACE "-run" "" _labels "${_TEST}")
             string(REPLACE "-sampling" ";sampling" _labels "${_labels}")
             if(TEST_TARGET)
                 list(APPEND _labels "${TEST_TARGET}")
             endif()
-            if("${_TEST}" MATCHES "runtime-instrument")
+
+            set(_environ
+                "${TEST_ENVIRONMENT}" "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
+                "OMNITRACE_OUTPUT_PREFIX=${_prefix}")
+
+            set(_timeout ${TEST_REWRITE_TIMEOUT})
+            if("${_TEST}" MATCHES "preload")
+                set(_timeout ${TEST_PRELOAD_TIMEOUT})
+            elseif("${_TEST}" MATCHES "runtime-instrument")
                 set(_timeout ${TEST_RUNTIME_TIMEOUT})
             endif()
-            if("${_TEST}" MATCHES "binary-rewrite-run")
-                list(APPEND _labels "binary-rewrite-run")
-            endif()
+
             set(_props)
-            if("${_TEST}" MATCHES "run|baseline")
+            if("${_TEST}" MATCHES "run|preload|baseline")
                 set(_props ${TEST_PROPERTIES})
                 if(NOT "RUN_SERIAL" IN_LIST _props)
                     list(APPEND _props RUN_SERIAL ON)
@@ -405,6 +419,8 @@ function(OMNITRACE_ADD_TEST)
                 set(_REGEX_VAR REWRITE)
             elseif("${_TEST}" MATCHES "baseline")
                 set(_REGEX_VAR BASELINE)
+            elseif("${_TEST}" MATCHES "preload")
+                set(_REGEX_VAR PRELOAD)
             else()
                 set(_REGEX_VAR)
             endif()
@@ -426,7 +442,7 @@ function(OMNITRACE_ADD_TEST)
                                TIMEOUT
                                ${_timeout}
                                LABELS
-                               "${_labels};${TEST_LABELS}"
+                               "${_labels}"
                                PASS_REGULAR_EXPRESSION
                                "${${_PASS_REGEX}}"
                                FAIL_REGULAR_EXPRESSION
@@ -647,7 +663,7 @@ omnitrace_add_test(
     NUM_PROCS ${NUM_PROCS}
     REWRITE_ARGS -e -v 2 -E uniform_int_distribution
     ENVIRONMENT
-        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_COUT_OUTPUT=ON;OMNITRACE_ROCM_EVENTS=${OMNITRACE_ROCM_EVENTS_TEST}"
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_ROCM_EVENTS=${OMNITRACE_ROCM_EVENTS_TEST}"
     REWRITE_RUN_PASS_REGEX
         "rocprof-device-0-GRBM_COUNT.txt(.*)rocprof-device-0-GPUBusy.txt(.*)rocprof-device-0-SQ_WAVES.txt(.*)rocprof-device-0-SQ_INSTS_VALU.txt(.*)rocprof-device-0-VALUInsts.txt(.*)rocprof-device-0-TCC_HIT_sum.txt(.*)rocprof-device-0-TA_TA_BUSY_0.txt(.*)rocprof-device-0-TA_TA_BUSY_11.txt"
     )
@@ -662,7 +678,7 @@ omnitrace_add_test(
     NUM_PROCS ${NUM_PROCS}
     REWRITE_ARGS -e -v 2 -E uniform_int_distribution
     ENVIRONMENT
-        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_COUT_OUTPUT=ON;OMNITRACE_USE_ROCTRACER=OFF;OMNITRACE_ROCM_EVENTS=${OMNITRACE_ROCM_EVENTS_TEST}"
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_ROCTRACER=OFF;OMNITRACE_ROCM_EVENTS=${OMNITRACE_ROCM_EVENTS_TEST}"
     REWRITE_RUN_PASS_REGEX
         "rocprof-device-0-GRBM_COUNT.txt(.*)rocprof-device-0-GPUBusy.txt(.*)rocprof-device-0-SQ_WAVES.txt(.*)rocprof-device-0-SQ_INSTS_VALU.txt(.*)rocprof-device-0-VALUInsts.txt(.*)rocprof-device-0-TCC_HIT_sum.txt(.*)rocprof-device-0-TA_TA_BUSY_0.txt(.*)rocprof-device-0-TA_TA_BUSY_11.txt"
     REWRITE_RUN_FAIL_REGEX "roctracer.txt")
@@ -782,7 +798,6 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
             --label
             file
             line
-            return
             args
             --min-instructions
             0
@@ -806,7 +821,6 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
             --label
             file
             line
-            return
             args
             --min-instructions
             0
@@ -836,9 +850,9 @@ omnitrace_add_test(
         -ME
         [==[lib(gomp|m-)]==]
     LABELS "kokkos;kokkos-profile-library"
-    RUN_ARGS -i 10 -s 20 -p
+    RUN_ARGS -i 25 -s 20 -p
     ENVIRONMENT
-        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;OMNITRACE_COUT_OUTPUT=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace-dl.so"
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;OMNITRACE_COUT_OUTPUT=ON;OMNITRACE_SAMPLING_FREQ=50;KOKKOS_PROFILE_LIBRARY=libomnitrace-dl.so"
     REWRITE_RUN_PASS_REGEX "\\|_\\[kokkos\\]"
     RUNTIME_PASS_REGEX "\\|_\\[kokkos\\]")
 
@@ -852,9 +866,8 @@ omnitrace_add_test(
     LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
-        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;OMNITRACE_COUT_OUTPUT=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace.so"
-        BASELINE_PASS_REGEX
-        "\\|_\\[kokkos\\]")
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;OMNITRACE_COUT_OUTPUT=ON;OMNITRACE_SAMPLING_FREQ=50;KOKKOS_PROFILE_LIBRARY=libomnitrace.so"
+    BASELINE_PASS_REGEX "\\|_\\[kokkos\\]")
 
 omnitrace_add_test(
     SKIP_RUNTIME SKIP_REWRITE
@@ -866,9 +879,8 @@ omnitrace_add_test(
     LABELS "kokkos;kokkos-profile-library"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
-        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;OMNITRACE_COUT_OUTPUT=ON;KOKKOS_PROFILE_LIBRARY=libomnitrace-dl.so"
-        BASELINE_PASS_REGEX
-        "\\|_\\[kokkos\\]")
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=ON;OMNITRACE_COUT_OUTPUT=ON;OMNITRACE_SAMPLING_FREQ=50;KOKKOS_PROFILE_LIBRARY=libomnitrace-dl.so"
+    BASELINE_PASS_REGEX "\\|_\\[kokkos\\]")
 
 omnitrace_add_test(
     SKIP_BASELINE
@@ -972,9 +984,45 @@ omnitrace_add_test(
     REWRITE_TIMEOUT 180
     RUNTIME_TIMEOUT 360
     ENVIRONMENT
-        "${_ompt_environment};OMNITRACE_USE_SAMPLING=ON;OMNITRACE_SAMPLING_FREQ=100;OMNITRACE_COUT_OUTPUT=ON"
+        "${_ompt_environment};OMNITRACE_USE_SAMPLING=ON;OMNITRACE_SAMPLING_FREQ=50;OMNITRACE_COUT_OUTPUT=ON"
     REWRITE_RUN_PASS_REGEX "${_OMPT_PASS_REGEX}"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
+
+set(_ompt_preload_environ
+    "${_ompt_environment}"
+    "OMNITRACE_USE_OMPT=OFF"
+    "OMNITRACE_USE_SAMPLING=ON"
+    "OMNITRACE_USE_PROCESS_SAMPLING=OFF"
+    "OMNITRACE_SAMPLING_FREQ=100"
+    "OMNITRACE_SAMPLING_DELAY=0.1"
+    "OMNITRACE_SAMPLING_DURATION=0.25"
+    "OMNITRACE_SAMPLING_CPUTIME=ON"
+    "OMNITRACE_SAMPLING_REALTIME=ON"
+    "OMNITRACE_SAMPLING_CPUTIME_FREQ=1000"
+    "OMNITRACE_SAMPLING_REALTIME_FREQ=500")
+
+set(_ompt_preload_samp_regex
+    "Sampler for thread 0 will be triggered 1000.0x per second of CPU-time(.*)Sampler for thread 0 will be triggered 500.0x per second of wall-time(.*)Sampling will be disabled after 0.250000 seconds(.*)Sampling duration of 0.250000 seconds has elapsed. Shutting down sampling"
+    )
+set(_ompt_preload_file_regex
+    "sampling-duration-preload/sampling_percent.(json|txt)(.*)sampling-duration-preload/sampling_cpu_clock.(json|txt)(.*)sampling-duration-preload/sampling_wall_clock.(json|txt)"
+    )
+
+omnitrace_add_test(
+    SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE SKIP_SAMPLING
+    NAME openmp-cg-sampling-duration
+    TARGET openmp-cg
+    LABELS "openmp;sampling-duration"
+    ENVIRONMENT "${_ompt_preload_environ}"
+    PRELOAD_PASS_REGEX "${_ompt_preload_samp_regex}(.*)${_ompt_preload_file_regex}")
+
+omnitrace_add_test(
+    SKIP_BASELINE SKIP_RUNTIME SKIP_REWRITE SKIP_SAMPLING
+    NAME openmp-lu-sampling-duration
+    TARGET openmp-lu
+    LABELS "openmp;sampling-duration"
+    ENVIRONMENT "${_ompt_preload_environ}"
+    PRELOAD_PASS_REGEX "${_ompt_preload_samp_regex}(.*)${_ompt_preload_file_regex}")
 
 omnitrace_add_test(
     SKIP_BASELINE SKIP_SAMPLING

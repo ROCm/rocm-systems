@@ -53,17 +53,20 @@ init_index_data(int64_t _tid, bool _offset = false)
     if(!itr)
     {
         threading::offset_this_id(_offset);
-        itr = thread_index_data{};
+        itr       = thread_index_data{};
+        int _verb = 2;
+        // if thread created using finalization, bump up the minimum verbosity level
+        if(get_state() == State::Finalized && _offset) _verb += 2;
         if(!config::settings_are_configured())
         {
             OMNITRACE_BASIC_VERBOSE_F(
-                2, "Thread %li on PID %i (rank: %i) assigned omnitrace TID %li\n",
+                _verb, "Thread %li on PID %i (rank: %i) assigned omnitrace TID %li\n",
                 itr->system_value, process::get_id(), dmp::rank(), itr->sequent_value);
         }
         else
         {
             OMNITRACE_VERBOSE_F(
-                2, "Thread %li on PID %i (rank: %i) assigned omnitrace TID %li\n",
+                _verb, "Thread %li on PID %i (rank: %i) assigned omnitrace TID %li\n",
                 itr->system_value, process::get_id(), dmp::rank(), itr->sequent_value);
         }
     }
@@ -149,9 +152,11 @@ thread_info::set_stop(uint64_t _ts)
         {
             for(auto& itr : thread_info_data_t::instances())
             {
-                if(itr && itr->index_data && itr->index_data->internal_value > _tid)
+                if(itr && itr->index_data && itr->index_data->internal_value != _tid)
                 {
                     if(itr->lifetime.second > _v->lifetime.second)
+                        itr->lifetime.second = _v->lifetime.second;
+                    else if(itr->lifetime.second == 0)
                         itr->lifetime.second = _v->lifetime.second;
                 }
             }

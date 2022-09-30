@@ -12,8 +12,9 @@ include(Compilers)
 include(FindPackageHandleStandardArgs)
 include(MacroUtilities)
 
-omnitrace_add_option(OMNITRACE_BUILD_DEVELOPER
-                     "Extra build flags for development like -Werror" OFF)
+omnitrace_add_option(
+    OMNITRACE_BUILD_DEVELOPER "Extra build flags for development like -Werror"
+    ${OMNITRACE_BUILD_CI})
 omnitrace_add_option(OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS "Extra optimization flags" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_LTO "Build with link-time optimization" OFF)
 omnitrace_add_option(OMNITRACE_USE_COMPILE_TIMING

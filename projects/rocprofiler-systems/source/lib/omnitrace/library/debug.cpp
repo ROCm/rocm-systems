@@ -78,8 +78,8 @@ FILE*
 get_file()
 {
     static FILE* _v = []() {
-        auto&& _fname         = tim::get_env<std::string>("OMNITRACE_LOG_FILE", "");
-        tim::log::colorized() = _fname.empty();
+        auto&& _fname = tim::get_env<std::string>("OMNITRACE_LOG_FILE", "");
+        if(!_fname.empty()) tim::log::colorized() = false;
         return (_fname.empty()) ? stderr : tim::filepath::fopen(_fname, "w");
     }();
     return _v;

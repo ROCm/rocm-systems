@@ -90,8 +90,46 @@ if(DEFINED CMAKE_INSTALL_LIBDIR AND NOT DEFINED CMAKE_DEFAULT_INSTALL_LIBDIR)
         CACHE STRING "Object code libraries" FORCE)
 endif()
 
+if(NOT "$ENV{OMNITRACE_CI}" STREQUAL "")
+    set(CI_BUILD $ENV{OMNITRACE_CI})
+else()
+    set(CI_BUILD OFF)
+endif()
+
 include(GNUInstallDirs) # install directories
 include(MacroUtilities) # various functions and macros
+
+if(CI_BUILD)
+    omnitrace_add_option(OMNITRACE_BUILD_CI "Enable internal asserts, etc." ON ADVANCED
+                         NO_FEATURE)
+    omnitrace_add_option(OMNITRACE_BUILD_TESTING "Enable building the testing suite" ON
+                         ADVANCED)
+    omnitrace_add_option(OMNITRACE_BUILD_DEBUG
+                         "Enable building with extensive debug symbols" OFF ADVANCED)
+    omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF
+                         ADVANCED)
+    omnitrace_add_option(
+        OMNITRACE_BUILD_HIDDEN_VISIBILITY
+        "Build with hidden visibility (disable for Debug builds)" OFF ADVANCED)
+    omnitrace_add_option(OMNITRACE_STRIP_LIBRARIES "Strip the libraries" OFF ADVANCED)
+else()
+    omnitrace_add_option(OMNITRACE_BUILD_CI "Enable internal asserts, etc." OFF ADVANCED
+                         NO_FEATURE)
+    omnitrace_add_option(OMNITRACE_BUILD_EXAMPLES "Enable building the examples" OFF
+                         ADVANCED)
+    omnitrace_add_option(OMNITRACE_BUILD_TESTING "Enable building the testing suite" OFF
+                         ADVANCED)
+    omnitrace_add_option(OMNITRACE_BUILD_DEBUG
+                         "Enable building with extensive debug symbols" OFF ADVANCED)
+    omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF
+                         ADVANCED)
+    omnitrace_add_option(
+        OMNITRACE_BUILD_HIDDEN_VISIBILITY
+        "Build with hidden visibility (disable for Debug builds)" ON ADVANCED)
+    omnitrace_add_option(OMNITRACE_STRIP_LIBRARIES "Strip the libraries"
+                         ${_STRIP_LIBRARIES_DEFAULT} ADVANCED)
+endif()
+
 include(Compilers) # compiler identification
 include(BuildSettings) # compiler flags
 
@@ -135,22 +173,8 @@ omnitrace_add_option(OMNITRACE_USE_OMPT "Enable OpenMP tools support" ON)
 omnitrace_add_option(OMNITRACE_USE_PYTHON "Enable Python support" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_DYNINST "Build dyninst from submodule" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_LIBUNWIND "Build libunwind from submodule" ON)
-omnitrace_add_option(OMNITRACE_BUILD_EXAMPLES "Enable building the examples" OFF ADVANCED)
-omnitrace_add_option(OMNITRACE_BUILD_TESTING "Enable building the testing suite" OFF
-                     ADVANCED)
-omnitrace_add_option(OMNITRACE_BUILD_DEBUG "Enable building with extensive debug symbols"
-                     OFF ADVANCED)
-omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF
-                     ADVANCED)
-omnitrace_add_option(
-    OMNITRACE_BUILD_HIDDEN_VISIBILITY
-    "Build with hidden visibility (disable for Debug builds)" ON ADVANCED)
-omnitrace_add_option(OMNITRACE_BUILD_CI "Enable internal asserts, etc." OFF ADVANCED
-                     NO_FEATURE)
 omnitrace_add_option(OMNITRACE_INSTALL_PERFETTO_TOOLS
                      "Install perfetto tools (i.e. traced, perfetto, etc.)" OFF)
-omnitrace_add_option(OMNITRACE_STRIP_LIBRARIES "Strip the libraries"
-                     ${_STRIP_LIBRARIES_DEFAULT} ADVANCED)
 
 if(OMNITRACE_USE_PAPI)
     omnitrace_add_option(OMNITRACE_BUILD_PAPI "Build PAPI from submodule" ON)
@@ -159,16 +183,6 @@ endif()
 if(OMNITRACE_USE_PYTHON)
     omnitrace_add_option(OMNITRACE_BUILD_PYTHON
                          "Build python bindings with internal pybind11" ON)
-endif()
-
-if(NOT "$ENV{OMNITRACE_CI}" STREQUAL "")
-    message(
-        AUTHOR_WARNING
-            "OMNITRACE_CI environment variable ($ENV{OMNITRACE_CI}) is overridding the OMNITRACE_BUILD_CI cache value"
-        )
-    set(OMNITRACE_BUILD_CI
-        "$ENV{OMNITRACE_CI}"
-        CACHE BOOL "Enable internal asserts, etc" FORCE)
 endif()
 
 if(NOT OMNITRACE_USE_HIP)

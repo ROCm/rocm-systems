@@ -87,6 +87,9 @@ extern "C"
                                      size_t address) OMNITRACE_PUBLIC_API;
 
 #if defined(OMNITRACE_DL_SOURCE) && (OMNITRACE_DL_SOURCE > 0)
+    void omnitrace_preinit_library(void) OMNITRACE_HIDDEN_API;
+    int  omnitrace_preload_library(void) OMNITRACE_HIDDEN_API;
+
     int omnitrace_user_start_trace_dl(void) OMNITRACE_HIDDEN_API;
     int omnitrace_user_stop_trace_dl(void) OMNITRACE_HIDDEN_API;
 
@@ -164,8 +167,7 @@ extern "C"
 
 #    if OMNITRACE_USE_ROCPROFILER > 0
     // ROCP
-    struct rocprofiler_settings;
-    void OnLoadToolProp(rocprofiler_settings* settings) OMNITRACE_PUBLIC_API;
+    void OnLoadToolProp(void* settings) OMNITRACE_PUBLIC_API;
     void OnUnloadTool() OMNITRACE_PUBLIC_API;
 #    endif
 #endif

@@ -78,7 +78,7 @@ jobs:
         timeout-minutes: 10
         uses: actions/upload-artifact@v2
         with:
-          name: ubuntu-stgz-installers
+          name: ubuntu-${{ matrix.os }}-rocm-${{ matrix.rocm-version }}-stgz-installers
           path: |
             build-release/stgz/*.sh
 
@@ -86,7 +86,7 @@ jobs:
         timeout-minutes: 10
         uses: actions/upload-artifact@v2
         with:
-          name: ubuntu-deb-installers
+          name: ubuntu-${{ matrix.os }}-rocm-${{ matrix.rocm-version }}-deb-installers
           path: |
             build-release/deb/*.deb
 
@@ -187,7 +187,7 @@ jobs:
         timeout-minutes: 10
         uses: actions/upload-artifact@v2
         with:
-          name: opensuse-stgz-installers
+          name: opensuse-${{ matrix.os }}-rocm-${{ matrix.rocm-version }}-stgz-installers
           path: |
             build-release/stgz/*.sh
 
@@ -195,7 +195,7 @@ jobs:
         timeout-minutes: 10
         uses: actions/upload-artifact@v2
         with:
-          name: opensuse-rpm-installers
+          name: opensuse-${{ matrix.os }}-rocm-${{ matrix.rocm-version }}-rpm-installers
           path: |
             build-release/rpm/*.rpm
 

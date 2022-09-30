@@ -98,9 +98,9 @@ get_omnitrace_dl_env()
 inline bool
 get_omnitrace_preload()
 {
-    auto&& _preload      = get_env("OMNITRACE_PRELOAD", false);
+    auto&& _preload      = get_env("OMNITRACE_PRELOAD", true);
     auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
-    return (_preload || _preload_libs.find("libomnitrace-dl.so") != std::string::npos);
+    return (_preload && _preload_libs.find("libomnitrace-dl.so") != std::string::npos);
 }
 
 // environment priority:
@@ -381,8 +381,8 @@ public:
 
     // ROCP functions
 #if OMNITRACE_USE_ROCPROFILER > 0
-    void (*rocp_on_load_tool_prop_f)(rocprofiler_settings* settings) = nullptr;
-    void (*rocp_on_unload_tool_f)()                                  = nullptr;
+    void (*rocp_on_load_tool_prop_f)(void* settings) = nullptr;
+    void (*rocp_on_unload_tool_f)()                  = nullptr;
 #endif
 
     // OpenMP functions
@@ -408,6 +408,8 @@ get_indirect() OMNITRACE_HIDDEN_API;
 indirect&
 get_indirect()
 {
+    omnitrace_preinit_library();
+
     static auto  _libomni = get_env("OMNITRACE_LIBRARY", "libomnitrace.so");
     static auto  _libuser = get_env("OMNITRACE_USER_LIBRARY", "libomnitrace-user.so");
     static auto  _libdlib = get_env("OMNITRACE_DL_LIBRARY", "libomnitrace-dl.so");
@@ -503,6 +505,17 @@ namespace dl = omnitrace::dl;
 
 extern "C"
 {
+    void omnitrace_preinit_library(void)
+    {
+        if(!omnitrace::common::get_env("OMNITRACE_COLORIZED_LOG", tim::log::colorized()))
+            tim::log::colorized() = false;
+    }
+
+    int omnitrace_preload_library(void)
+    {
+        return (::omnitrace::dl::get_omnitrace_preload()) ? 1 : 0;
+    }
+
     void omnitrace_init_library(void)
     {
         OMNITRACE_DL_INVOKE(get_indirect().omnitrace_init_library_f);
@@ -873,9 +886,15 @@ extern "C"
     //
     //----------------------------------------------------------------------------------//
 
-#if OMNITRACE_USE_ROCTRACER > 0
-    void OnLoadToolProp(rocprofiler_settings* settings)
+#if OMNITRACE_USE_ROCPROFILER > 0
+    void OnLoadToolProp(void* settings)
     {
+        OMNITRACE_DL_LOG(-16,
+                         "invoking %s(rocprofiler_settings_t*) within omnitrace-dl.so "
+                         "will cause a silent failure for rocprofiler. ROCP_TOOL_LIB "
+                         "should be set to libomnitrace.so\n",
+                         __FUNCTION__);
+        abort();
         return OMNITRACE_DL_INVOKE(get_indirect().rocp_on_load_tool_prop_f, settings);
     }
 
@@ -913,16 +932,16 @@ omnitrace_preload() OMNITRACE_HIDDEN_API;
 bool
 omnitrace_preload()
 {
-    auto _preloaded = get_omnitrace_preload();
-    auto _enabled   = get_env("OMNITRACE_ENABLED", true);
+    auto _preload = get_omnitrace_preload() && get_env("OMNITRACE_ENABLED", true);
 
     static bool _once = false;
-    if(_once) return _preloaded;
+    if(_once) return _preload;
     _once = true;
 
-    if(_preloaded && _enabled)
+    if(_preload)
     {
-        OMNITRACE_DL_LOG(0, "[%s] invoking %s(%s)\n", __FUNCTION__, "omnitrace_init",
+        omnitrace_preinit_library();
+        OMNITRACE_DL_LOG(1, "[%s] invoking %s(%s)\n", __FUNCTION__, "omnitrace_init",
                          ::omnitrace::join(::omnitrace::QuoteStrings{}, ", ", "sampling",
                                            false, "main")
                              .c_str());
@@ -930,7 +949,7 @@ omnitrace_preload()
         omnitrace_init_tooling();
     }
 
-    return _preloaded;
+    return _preload;
 }
 
 bool _handle_preload = omnitrace::dl::omnitrace_preload();

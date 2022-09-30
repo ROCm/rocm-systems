@@ -298,6 +298,9 @@ get_sampling_cpu_tids();
 std::set<int64_t>
 get_sampling_real_tids();
 
+bool
+get_sampling_include_inlines();
+
 double
 get_process_sampling_freq();
 

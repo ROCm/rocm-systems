@@ -20,6 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "api.hpp"
+#include "library/common.hpp"
+#include "library/config.hpp"
+#include "library/debug.hpp"
 #include "library/defines.hpp"
 
 #include <timemory/defines.h>
@@ -97,19 +101,37 @@ ompt_start_tool(unsigned int omp_version, const char* runtime_version)
     OMNITRACE_METADATA("OMP_VERSION", omp_version);
     OMNITRACE_METADATA("OMP_RUNTIME_VERSION", runtime_version);
 
+    if(!omnitrace::settings_are_configured())
+    {
+        OMNITRACE_BASIC_WARNING(
+            0,
+            "[%s] invoked before omnitrace was initialized. In instrumentation mode, "
+            "settings exported to the environment have not been propagated yet...\n",
+            __FUNCTION__);
+        omnitrace::configure_settings();
+    }
+
+    static bool _use_ompt       = omnitrace::config::get_use_ompt();
     static auto ompt_initialize = [](ompt_function_lookup_t lookup,
                                      int                    initial_device_num,
                                      ompt_data_t*           tool_data) -> int {
-        TIMEMORY_PRINTF(stderr, "OpenMP-tools configuring for initial device %i\n\n",
-                        initial_device_num);
-        tim::ompt::configure<TIMEMORY_OMPT_API_TAG>(lookup, initial_device_num,
-                                                    tool_data);
+        _use_ompt = omnitrace::config::get_use_ompt();
+        if(_use_ompt)
+        {
+            TIMEMORY_PRINTF(stderr, "OpenMP-tools configuring for initial device %i\n\n",
+                            initial_device_num);
+            tim::ompt::configure<TIMEMORY_OMPT_API_TAG>(lookup, initial_device_num,
+                                                        tool_data);
+        }
         return 1;  // success
     };
 
     static auto ompt_finalize = [](ompt_data_t* tool_data) {
-        TIMEMORY_PRINTF(stderr, "OpenMP-tools finalized\n\n");
-        tim::consume_parameters(tool_data);
+        if(_use_ompt)
+        {
+            TIMEMORY_PRINTF(stderr, "OpenMP-tools finalized\n\n");
+            tim::consume_parameters(tool_data);
+        }
     };
 
     static auto data = ompt_start_tool_result_t{ ompt_initialize, ompt_finalize, { 0 } };

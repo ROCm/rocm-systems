@@ -53,7 +53,7 @@ namespace component
 {
 using rocm_metric_type   = unsigned long long;
 using rocm_info_entry    = ::tim::hardware_counters::info;
-using rocm_feature_value = std::variant<uint32_t, uint64_t, double>;
+using rocm_feature_value = std::variant<uint32_t, float, uint64_t, double>;
 
 struct rocm_counter
 {

@@ -29,6 +29,9 @@
 #include <string.h>
 #include <stdbool.h>
 
+extern int
+omnitrace_preload_library(void);
+
 extern void
 omnitrace_finalize(void);
 
@@ -84,6 +87,8 @@ __libc_start_main(int (*_main)(int, char**, char**), int _argc, char** _argv,
                   int (*_init)(int, char**, char**), void (*_fini)(void),
                   void (*_rtld_fini)(void), void* _stack_end)
 {
+    int _preload = omnitrace_preload_library();
+
     // prevent re-entry
     static int _reentry = 0;
     if(_reentry > 0) return -1;
@@ -98,14 +103,23 @@ __libc_start_main(int (*_main)(int, char**, char**), int _argc, char** _argv,
     // Find the real __libc_start_main()
     omnitrace_libc_start_main user_main = dlsym(RTLD_NEXT, "__libc_start_main");
 
+    // disable future LD_PRELOADs
+    setenv("OMNITRACE_PRELOAD", "0", 1);
+
     if(user_main && user_main != _this_func)
     {
-        //if(strcmp(_argv[0], "mpirun") == 0)
-        //    return user_main(_main, _argc, _argv, _init, _fini, _rtld_fini,
-        //                     _stack_end);
-        //else
+        if(_preload == 0)
+        {
+            // call original main
+            return user_main(main_real, _argc, _argv, _init, _fini, _rtld_fini,
+                             _stack_end);
+        }
+        else
+        {
             // call omnitrace main function wrapper
-            return user_main(omnitrace_main, _argc, _argv, _init, _fini, _rtld_fini, _stack_end);
+            return user_main(omnitrace_main, _argc, _argv, _init, _fini, _rtld_fini,
+                             _stack_end);
+        }
     }
     else
     {

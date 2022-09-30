@@ -61,6 +61,16 @@ get_numa_gotcha()
 void
 numa_gotcha::configure()
 {
+    // don't emit warnings for missing MPI functions unless debug or verbosity >= 3
+    if(get_verbose_env() < 3 && !get_debug_env())
+    {
+        for(size_t i = 0; i < numa_gotcha_t::capacity(); ++i)
+        {
+            auto* itr = numa_gotcha_t::at(i);
+            if(itr) itr->verbose = -1;
+        }
+    }
+
     numa_gotcha_t::get_initializer() = []() {
         numa_gotcha_t::configure<0, long, void*, unsigned long, int, const unsigned long*,
                                  unsigned long, unsigned>("mbind");

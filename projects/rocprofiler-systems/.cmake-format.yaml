@@ -21,6 +21,7 @@ parse:
     omnitrace_add_test:
       flags:
         - SKIP_BASELINE
+        - SKIP_PRELOAD
         - SKIP_REWRITE
         - SKIP_RUNTIME
         - SKIP_SAMPLING
@@ -32,16 +33,21 @@ parse:
         NUM_PROCS: '*'
         REWRITE_TIMEOUT: '*'
         RUNTIME_TIMEOUT: '*'
+        PRELOAD_TIMEOUT: '*'
         REWRITE_ARGS: '*'
         RUNTIME_ARGS: '*'
         RUN_ARGS: '*'
         ENVIRONMENT: '*'
         LABELS: '*'
         PROPERTIES: '*'
+        PRELOAD_PASS_REGEX: '*'
+        PRELOAD_FAIL_REGEX: '*'
         RUNTIME_PASS_REGEX: '*'
         RUNTIME_FAIL_REGEX: '*'
         REWRITE_PASS_REGEX: '*'
         REWRITE_FAIL_REGEX: '*'
+        BASELINE_PASS_REGEX: '*'
+        BASELINE_FAIL_REGEX: '*'
         REWRITE_RUN_PASS_REGEX: '*'
         REWRITE_RUN_FAIL_REGEX: '*'
     omnitrace_target_compile_definitions:

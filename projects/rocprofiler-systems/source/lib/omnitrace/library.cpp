@@ -20,6 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// clang-format off
+#include <timemory/log/color.hpp>
+// clang-format on
+
 #include "api.hpp"
 #include "common/setup.hpp"
 #include "library/components/category_region.hpp"
@@ -331,6 +335,8 @@ omnitrace_init_library_hidden()
 extern "C" bool
 omnitrace_init_tooling_hidden()
 {
+    if(!get_env("OMNITRACE_COLORIZED_LOG", true, false)) tim::log::colorized() = false;
+
     if(!tim::get_env("OMNITRACE_INIT_TOOLING", true))
     {
         omnitrace_init_library_hidden();
@@ -604,8 +610,14 @@ omnitrace_finalize_hidden(void)
     auto& _thread_bundle = thread_data<thread_bundle_t>::instance();
     if(_thread_bundle) _thread_bundle->stop();
 
-    if(dmp::rank() == 0 && get_verbose() >= 0) fprintf(stderr, "\n");
-    if(get_verbose() > 0 || get_debug()) config::print_settings();
+    if(get_verbose() >= 1 || get_debug())
+    {
+        if(dmp::rank() == 0)
+        {
+            fprintf(stderr, "\n");
+            config::print_settings();
+        }
+    }
 
     OMNITRACE_VERBOSE_F(1, "omnitrace_push_trace :: called %zux\n", _push_count);
     OMNITRACE_VERBOSE_F(1, "omnitrace_pop_trace  :: called %zux\n", _pop_count);

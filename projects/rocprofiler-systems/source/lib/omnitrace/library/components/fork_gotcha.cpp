@@ -45,6 +45,7 @@ fork_gotcha::configure()
 void
 fork_gotcha::audit(const gotcha_data_t&, audit::incoming)
 {
+    tim::set_env("OMNITRACE_PRELOAD", "0", 1);
     OMNITRACE_VERBOSE(1, "fork() called on PID %i (rank: %i), TID %li\n",
                       process::get_id(), dmp::rank(), threading::get_id());
     OMNITRACE_BASIC_DEBUG(

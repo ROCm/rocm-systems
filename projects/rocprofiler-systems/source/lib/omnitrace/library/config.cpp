@@ -210,7 +210,7 @@ configure_settings(bool _init)
     if(_once) return;
     _once = true;
 
-    if(get_state() < State::Init)
+    if(get_is_continuous_integration() && get_state() < State::Init)
     {
         timemory_print_demangled_backtrace<64>();
         OMNITRACE_THROW("config::configure_settings() called before "
@@ -466,6 +466,10 @@ configure_settings(bool _init)
         "functions like omnitrace_push_trace. If disabled, omnitrace will attempt to "
         "filter out internal routines from the sampling call-stacks",
         true, "sampling", "data", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_SAMPLING_INCLUDE_INLINES",
+                             "Create entries for inlined functions when available", false,
+                             "sampling", "data", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_SAMPLING_REALTIME",
@@ -812,7 +816,7 @@ configure_settings(bool _init)
     configure_signal_handler();
     configure_disabled_settings();
 
-    OMNITRACE_VERBOSE(1, "configuration complete\n");
+    OMNITRACE_VERBOSE(2, "configuration complete\n");
 }
 
 void
@@ -827,8 +831,10 @@ configure_mode_settings()
         }
         else
         {
+            bool _changed = get_setting_value<bool>(_name).second != _v;
             OMNITRACE_VERBOSE(
-                1, "[configure_mode_settings] Overriding %s to %s in %s mode...\n",
+                1 && _changed,
+                "[configure_mode_settings] Overriding %s to %s in %s mode...\n",
                 _name.c_str(), JOIN("", std::boolalpha, _v).c_str(),
                 std::to_string(get_mode()).c_str());
         }
@@ -1812,6 +1818,13 @@ get_sampling_real_tids()
         static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs");
 }
 
+bool
+get_sampling_include_inlines()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_INCLUDE_INLINES");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
 int64_t
 get_critical_trace_count()
 {
@@ -1825,7 +1838,7 @@ get_process_sampling_freq()
     static auto _v = get_config()->find("OMNITRACE_PROCESS_SAMPLING_FREQ");
     auto        _val =
         std::min<double>(static_cast<tim::tsettings<double>&>(*_v->second).get(), 1000.0);
-    if(_val < 1.0e-9) return get_sampling_freq();
+    if(_val < 1.0e-9) return std::min<double>(get_sampling_freq(), 100.0);
     return _val;
 }
 

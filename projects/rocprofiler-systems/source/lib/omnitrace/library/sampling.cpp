@@ -103,6 +103,9 @@ namespace sampling
 {
 namespace
 {
+std::set<int>
+configure(bool _setup, int64_t _tid = threading::get_id());
+
 template <typename... Args>
 void
 thread_sigmask(Args... _args)
@@ -164,9 +167,30 @@ get_sampler_running(int64_t _tid)
 }
 
 auto&
+get_duration_disabled()
+{
+    static auto _v = std::atomic<bool>{ false };
+    return _v;
+}
+
+auto&
+get_is_duration_thread()
+{
+    static thread_local auto _v = false;
+    return _v;
+}
+
+auto&
 get_duration_cv()
 {
     static auto _v = std::condition_variable{};
+    return _v;
+}
+
+auto&
+get_duration_mutex()
+{
+    static auto _v = std::mutex{};
     return _v;
 }
 
@@ -175,6 +199,28 @@ get_duration_thread()
 {
     static auto _v = std::unique_ptr<std::thread>{};
     return _v;
+}
+
+auto
+notify_duration_thread()
+{
+    if(get_duration_thread() && !get_is_duration_thread())
+    {
+        std::unique_lock<std::mutex> _lk{ get_duration_mutex(), std::defer_lock };
+        if(!_lk.owns_lock()) _lk.lock();
+        get_duration_cv().notify_all();
+    }
+}
+
+void
+stop_duration_thread()
+{
+    if(get_duration_thread() && !get_is_duration_thread())
+    {
+        notify_duration_thread();
+        get_duration_thread()->join();
+        get_duration_thread().reset();
+    }
 }
 
 void
@@ -195,12 +241,14 @@ start_duration_thread()
                                config::get_sampling_duration() * units::sec) };
         auto _func = [_end]() {
             thread_info::init(true);
-            std::mutex _mutex{};
-            bool       _wait = true;
+            threading::set_thread_name("omni.samp.dur");
+            get_is_duration_thread() = true;
+            bool _wait               = true;
             while(_wait)
             {
                 _wait = false;
-                std::unique_lock<std::mutex> _lk{ _mutex };
+                std::unique_lock<std::mutex> _lk{ get_duration_mutex(), std::defer_lock };
+                if(!_lk.owns_lock()) _lk.lock();
                 get_duration_cv().wait_until(_lk, _end);
                 auto _premature = (std::chrono::steady_clock::now() < _end);
                 auto _finalized = (get_state() == State::Finalized);
@@ -218,11 +266,12 @@ start_duration_thread()
                 }
                 else
                 {
+                    get_duration_disabled().store(true);
                     OMNITRACE_VERBOSE(1,
                                       "Sampling duration of %f seconds has elapsed. "
                                       "Shutting down sampling...\n",
                                       config::get_sampling_duration());
-                    shutdown();
+                    configure(false, 0);
                 }
             }
         };
@@ -237,7 +286,7 @@ start_duration_thread()
 }
 
 std::set<int>
-configure(bool _setup, int64_t _tid = threading::get_id())
+configure(bool _setup, int64_t _tid)
 {
     const auto& _info         = thread_info::get(_tid, SequentTID);
     auto&       _sampler      = sampling::get_sampler(_tid);
@@ -266,6 +315,8 @@ configure(bool _setup, int64_t _tid = threading::get_id())
 
     if(_setup && !_sampler && !_is_running && !_signal_types->empty())
     {
+        if(get_duration_disabled()) return std::set<int>{};
+
         // if this thread has an offset ID, that means it was created internally
         // and is probably here bc it called a function which was instrumented.
         // thus we should not start a sampler for it
@@ -356,7 +407,8 @@ configure(bool _setup, int64_t _tid = threading::get_id())
             sampling::block_signals(*_signal_types);
         }
 
-        get_duration_cv().notify_one();
+        notify_duration_thread();
+
         if(_tid == 0)
         {
             // this propagates to all threads
@@ -371,11 +423,7 @@ configure(bool _setup, int64_t _tid = threading::get_id())
                 }
             }
 
-            if(get_duration_thread())
-            {
-                get_duration_thread()->join();
-                get_duration_thread().reset();
-            }
+            stop_duration_thread();
         }
 
         _sampler->stop();
@@ -416,7 +464,9 @@ setup()
 std::set<int>
 shutdown()
 {
-    return configure(false);
+    auto _v = configure(false);
+    if(utility::get_thread_index() == 0) stop_duration_thread();
+    return _v;
 }
 
 void
@@ -534,10 +584,10 @@ post_process()
 
         if(_data.empty())
         {
-            OMNITRACE_VERBOSE(
-                3 || get_debug_sampling(),
-                "Sampler data for thread %lu has %zu valid entries... (skipped)\n", i,
-                _raw_data.size());
+            OMNITRACE_VERBOSE(2 || get_debug_sampling(),
+                              "Sampler data for thread %lu has zero valid entries out of "
+                              "%zu... (skipped)\n",
+                              i, _raw_data.size());
             continue;
         }
 
@@ -619,35 +669,64 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
             static std::set<std::string> _static_strings{};
             for(const auto& iitr : backtrace::filter_and_patch(_bt_cs->get()))
             {
-                const auto* _name = _static_strings.emplace(iitr.name).first->c_str();
-                uint64_t    _beg  = _last_ts;
-                uint64_t    _end  = _bt_ts->get_timestamp();
+                uint64_t _beg = _last_ts;
+                uint64_t _end = _bt_ts->get_timestamp();
                 if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
 
-                tracing::push_perfetto_ts(
-                    category::sampling{}, _name, _beg, [&](perfetto::EventContext ctx) {
-                        tracing::add_perfetto_annotation(ctx, "begin_ns", _beg);
-                        tracing::add_perfetto_annotation(ctx, "file", iitr.location);
-                        tracing::add_perfetto_annotation(ctx, "pc",
-                                                         _as_hex(iitr.address));
-                        tracing::add_perfetto_annotation(ctx, "line_address",
-                                                         _as_hex(iitr.line_address));
-                        if(iitr.lineinfo)
-                        {
-                            size_t _n = 0;
-                            for(const auto& litr : iitr.lineinfo.lines)
-                            {
-                                auto _label = JOIN('-', "lineinfo", _n++);
-                                tracing::add_perfetto_annotation(
-                                    ctx, _label.c_str(),
-                                    JOIN('@', demangle(litr.name),
-                                         JOIN(':', litr.location, litr.line)));
-                            }
-                        }
-                    });
+                if(get_sampling_include_inlines() && iitr.lineinfo)
+                {
+                    auto _lines = iitr.lineinfo.lines;
+                    std::reverse(_lines.begin(), _lines.end());
+                    size_t _n = 0;
+                    for(const auto& litr : _lines)
+                    {
+                        const auto* _name =
+                            _static_strings.emplace(demangle(litr.name)).first->c_str();
+                        auto _info = JOIN(':', litr.location, litr.line);
+                        tracing::push_perfetto_ts(
+                            category::sampling{}, _name, _beg,
+                            [&](perfetto::EventContext ctx) {
+                                tracing::add_perfetto_annotation(ctx, "begin_ns", _beg);
+                                tracing::add_perfetto_annotation(ctx, "lineinfo", _info);
+                                tracing::add_perfetto_annotation(ctx, "inlined",
+                                                                 (_n++ > 0));
+                            });
+                        tracing::pop_perfetto_ts(category::sampling{}, _name, _end,
+                                                 "end_ns", _end);
+                    }
+                }
+                else
+                {
+                    const auto* _name = _static_strings.emplace(iitr.name).first->c_str();
+                    tracing::push_perfetto_ts(
+                        category::sampling{}, _name, _beg,
+                        [&](perfetto::EventContext ctx) {
+                            tracing::add_perfetto_annotation(ctx, "begin_ns", _beg);
+                            tracing::add_perfetto_annotation(ctx, "file", iitr.location);
+                            tracing::add_perfetto_annotation(ctx, "pc",
+                                                             _as_hex(iitr.address));
+                            tracing::add_perfetto_annotation(ctx, "line_address",
+                                                             _as_hex(iitr.line_address));
 
-                tracing::pop_perfetto_ts(category::sampling{}, _name, _end, "end_ns",
-                                         _end);
+                            if(iitr.lineinfo)
+                            {
+                                auto _lines = iitr.lineinfo.lines;
+                                std::reverse(_lines.begin(), _lines.end());
+                                size_t _n = 0;
+                                for(const auto& litr : _lines)
+                                {
+                                    auto _label = JOIN('-', "lineinfo", _n++);
+                                    tracing::add_perfetto_annotation(
+                                        ctx, _label.c_str(),
+                                        JOIN('@', demangle(litr.name),
+                                             JOIN(':', litr.location, litr.line)));
+                                }
+                            }
+                        });
+
+                    tracing::pop_perfetto_ts(category::sampling{}, _name, _end, "end_ns",
+                                             _end);
+                }
             }
             _last_ts = _bt_ts->get_timestamp();
         }

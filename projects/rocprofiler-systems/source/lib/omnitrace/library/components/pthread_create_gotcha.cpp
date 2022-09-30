@@ -289,11 +289,18 @@ pthread_create_gotcha::shutdown()
 
     bundles->clear();
 
-    OMNITRACE_BASIC_VERBOSE(
-        1,
-        // 2 && _ndangling > 0,
-        "[pthread_create_gotcha::shutdown] cleaned up %lu dangling bundles\n",
-        _ndangling);
+    if(config::settings_are_configured())
+    {
+        OMNITRACE_VERBOSE(2 && _ndangling > 0,
+                          "[pthread_create_gotcha] cleaned up %lu dangling bundles\n",
+                          _ndangling);
+    }
+    else
+    {
+        OMNITRACE_BASIC_VERBOSE(
+            2 && _ndangling > 0,
+            "[pthread_create_gotcha] cleaned up %lu dangling bundles\n", _ndangling);
+    }
 }
 
 void

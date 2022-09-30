@@ -572,8 +572,15 @@ post_process_perfetto()
                 {
                     for(size_t i = 0; i < _n; ++i)
                     {
+#ifdef __GNUC__
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wdouble-promotion"
+#endif
                         auto _plus = [](auto& _lhs, auto&& _rhs) { _lhs += _rhs; };
                         std::visit(_plus, _values.at(i), vitr->feature_values.at(i));
+#ifdef __GNUC__
+#    pragma GCC diagnostic pop
+#endif
                     }
                 }
             }

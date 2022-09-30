@@ -94,8 +94,7 @@ rocm_event::rocm_event(uint32_t _dev, uint32_t _thr, uint32_t _queue,
                 feature_values.emplace_back(rocm_feature_value{ p->data.result_int32 });
                 break;
             case ROCPROFILER_DATA_KIND_FLOAT:
-                feature_values.emplace_back(
-                    rocm_feature_value{ static_cast<double>(p->data.result_float) });
+                feature_values.emplace_back(rocm_feature_value{ p->data.result_float });
                 break;
             case ROCPROFILER_DATA_KIND_DOUBLE:
                 feature_values.emplace_back(rocm_feature_value{ p->data.result_double });
