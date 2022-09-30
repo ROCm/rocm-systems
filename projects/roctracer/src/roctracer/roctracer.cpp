@@ -325,6 +325,7 @@ template <activity_domain_t domain> struct ApiTracer {
     if (auto user_callback = callback_table.Get(operation_id)) {
       assert(trace_data != nullptr);
       trace_data->api_data.phase = ACTIVITY_API_PHASE_ENTER;
+      trace_data->api_data.phase_data = &trace_data->phase_data;
       user_callback->first(domain, operation_id, &trace_data->api_data, user_callback->second);
       trace_data->phase_exit = Exit_UserCallback;
     } else {

@@ -401,6 +401,7 @@ class API_DescrParser:
       content +=   '    } ' + call + ';\n'
     else:
       content += '  } args;\n'
+      content += '  uint64_t *phase_data;\n'
       content += '};\n'
     return content
 
