@@ -64,6 +64,22 @@
 #    define OMNITRACE_USE_MPI_HEADERS 0
 #endif
 
+namespace
+{
+auto
+get_default_min_instructions()
+{
+    // default to 1024
+    return tim::get_env<size_t>("OMNITRACE_DEFAULT_MIN_INSTRUCTIONS", (1 << 10), false);
+}
+auto
+get_default_min_address_range()
+{
+    // default to 4096
+    return 4 * get_default_min_instructions();
+}
+}  // namespace
+
 bool     use_return_info         = false;
 bool     use_args_info           = false;
 bool     use_file_info           = false;
@@ -73,10 +89,10 @@ bool     loop_level_instr        = false;
 bool     instr_dynamic_callsites = false;
 bool     instr_traps             = false;
 bool     instr_loop_traps        = false;
-size_t   min_address_range       = (1 << 8);  // 256
-size_t   min_loop_address_range  = (1 << 8);  // 256
-size_t   min_instructions        = (1 << 6);  // 64
-size_t   min_loop_instructions   = (1 << 6);  // 64
+size_t   min_address_range       = get_default_min_address_range();  // 4096
+size_t   min_loop_address_range  = get_default_min_address_range();  // 4096
+size_t   min_instructions        = get_default_min_instructions();   // 1024
+size_t   min_loop_instructions   = get_default_min_instructions();   // 1024
 bool     werror                  = false;
 bool     debug_print             = false;
 bool     instr_print             = false;

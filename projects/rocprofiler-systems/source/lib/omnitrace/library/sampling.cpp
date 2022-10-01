@@ -53,6 +53,7 @@
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/storage.hpp>
+#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
@@ -411,13 +412,28 @@ configure(bool _setup, int64_t _tid)
 
         if(_tid == 0)
         {
+            block_samples();
+
             // this propagates to all threads
             _sampler->ignore(*_signal_types);
+
+            // wait for the samples to finish
+            auto _freq =
+                std::max<double>(get_sampling_cpu_freq(), get_sampling_real_freq());
+            auto _period = (1.0 / _freq) * units::sec;
+            _period      = std::max<double>(_period, 1.0e9);  // max of 1 second
+            std::this_thread::sleep_for(
+                std::chrono::nanoseconds{ static_cast<int64_t>(_period) });
+
+            for(int64_t i = 1; i < OMNITRACE_MAX_THREADS; ++i)
+            {
+                if(sampling::get_sampler(i)) sampling::get_sampler(i)->stop();
+            }
+
             for(int64_t i = 1; i < OMNITRACE_MAX_THREADS; ++i)
             {
                 if(sampling::get_sampler(i))
                 {
-                    sampling::get_sampler(i)->stop();
                     sampling::get_sampler(i)->reset();
                     *get_sampler_running(i) = false;
                 }

@@ -85,6 +85,9 @@ start();
 
 namespace
 {
+auto _timemory_manager  = tim::manager::instance();
+auto _timemory_settings = tim::settings::shared_instance();
+
 auto
 ensure_finalization(bool _static_init = false)
 {
@@ -104,6 +107,14 @@ ensure_finalization(bool _static_init = false)
 
     (void) tim::manager::instance();
     (void) tim::settings::shared_instance();
+
+    if(!tim::get_shared_ptr_pair_callback())
+    {
+        tim::get_shared_ptr_pair_callback() =
+            new tim::shared_ptr_pair_callback_t{ [](int64_t _n) {
+                if(_n == 0) omnitrace_finalize_hidden();
+            } };
+    }
 
     if(_static_init)
     {
@@ -468,8 +479,6 @@ omnitrace_init_tooling_hidden()
     // ends the tracing session
     static auto _ensure_finalization = ensure_finalization();
 
-    if(dmp::rank() == 0 && get_verbose() >= 0) fprintf(stderr, "\n");
-
     return true;
 }
 
@@ -569,8 +578,7 @@ omnitrace_finalize_hidden(void)
         return;
     }
 
-    if(get_verbose() >= 0 || get_debug()) fprintf(stderr, "\n");
-
+    OMNITRACE_VERBOSE_F(0, "\n");
     OMNITRACE_VERBOSE_F(0, "finalizing...\n");
 
     sampling::block_samples();
@@ -614,8 +622,8 @@ omnitrace_finalize_hidden(void)
     {
         if(dmp::rank() == 0)
         {
-            fprintf(stderr, "\n");
-            config::print_settings();
+            OMNITRACE_PRINT_F("\n");
+            config::print_settings(get_env<bool>("OMNITRACE_PRINT_ENV", get_debug()));
         }
     }
 
@@ -737,7 +745,7 @@ omnitrace_finalize_hidden(void)
     // report the high-level metrics for the process
     if(get_main_bundle())
     {
-        if(get_verbose() >= 0 || get_debug()) fprintf(stderr, "\n");
+        OMNITRACE_VERBOSE_F(0, "\n");
         std::string _msg = JOIN("", *get_main_bundle());
         auto        _pos = _msg.find(">>>  ");
         if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
@@ -762,7 +770,7 @@ omnitrace_finalize_hidden(void)
         }
     }
 
-    if(get_verbose() >= 0 || get_debug()) fprintf(stderr, "\n");
+    OMNITRACE_VERBOSE_F(0, "\n");
 
     // ensure that all the MT instances are flushed
     if(get_use_sampling())
@@ -902,10 +910,9 @@ omnitrace_finalize_hidden(void)
                 // Write the trace into a file.
                 ofs.write(&trace_data[0], trace_data.size());
                 if(get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
-                auto _manager = tim::manager::instance();
-                if(_manager)
-                    _manager->add_file_output("protobuf", "perfetto",
-                                              get_perfetto_output_filename());
+                if(_timemory_manager)
+                    _timemory_manager->add_file_output("protobuf", "perfetto",
+                                                       get_perfetto_output_filename());
             }
             ofs.close();
         }
@@ -917,28 +924,28 @@ omnitrace_finalize_hidden(void)
         }
     }
 
-    tim::manager::instance()->add_metadata([](auto& ar) {
-        auto _maps = tim::procfs::read_maps(process::get_id());
-        auto _libs = std::set<std::string>{};
-        for(auto& itr : _maps)
-        {
-            auto&& _path = itr.pathname;
-            if(!_path.empty() && _path.at(0) != '[') _libs.emplace(_path);
-        }
-        ar(tim::cereal::make_nvp("memory_maps_files", _libs),
-           tim::cereal::make_nvp("memory_maps", _maps));
-    });
-
-    auto _manager = tim::manager::instance();
-    if(_manager) _manager->set_write_metadata(-1);
-
-    OMNITRACE_VERBOSE_F(1, "Finalizing timemory...\n");
-    tim::timemory_finalize();
-
-    if(_manager)
+    if(_timemory_manager && _timemory_manager != nullptr)
     {
-        _manager->write_metadata(settings::get_global_output_prefix(), "omnitrace",
-                                 settings::default_process_suffix());
+        _timemory_manager->add_metadata([](auto& ar) {
+            auto _maps = tim::procfs::read_maps(process::get_id());
+            auto _libs = std::set<std::string>{};
+            for(auto& itr : _maps)
+            {
+                auto&& _path = itr.pathname;
+                if(!_path.empty() && _path.at(0) != '[') _libs.emplace(_path);
+            }
+            ar(tim::cereal::make_nvp("memory_maps_files", _libs),
+               tim::cereal::make_nvp("memory_maps", _maps));
+        });
+
+        _timemory_manager->set_write_metadata(-1);
+
+        OMNITRACE_VERBOSE_F(1, "Finalizing timemory...\n");
+        tim::timemory_finalize(_timemory_manager.get());
+
+        _timemory_manager->write_metadata(settings::get_global_output_prefix(),
+                                          "omnitrace",
+                                          settings::default_process_suffix());
     }
 
     if(_perfetto_output_error)

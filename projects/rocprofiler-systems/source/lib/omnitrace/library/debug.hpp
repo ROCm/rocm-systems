@@ -531,6 +531,11 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
                                            (::omnitrace::get_verbose_env() >= LEVEL),    \
                                        __VA_ARGS__)
 
+#define OMNITRACE_WARNING_IF(COND, ...) OMNITRACE_CONDITIONAL_WARN((COND), __VA_ARGS__)
+
+#define OMNITRACE_WARNING_IF_F(COND, ...)                                                \
+    OMNITRACE_CONDITIONAL_WARN_F((COND), __VA_ARGS__)
+
 //--------------------------------------------------------------------------------------//
 //
 //  Basic print macros (basic means it will not provide PID/RANK or TID) and will not

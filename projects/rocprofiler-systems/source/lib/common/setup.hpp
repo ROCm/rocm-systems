@@ -132,6 +132,15 @@ dirname(const std::string& _fname)
         return _fname.substr(0, _fname.find_last_of('/'));
     return std::string{};
 }
+
+inline bool
+exists(const std::string& _fname)
+{
+    struct stat _buffer;
+    if(stat(_fname.c_str(), &_buffer) == 0)
+        return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
+    return false;
+}
 }  // namespace path
 
 inline void
@@ -157,28 +166,55 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
     setenv("ROCPROFILER_LOG", "1", 0);
     setenv("ROCP_HSA_INTERCEPT", "1", 0);
     setenv("HSA_TOOLS_REPORT_LOAD_FAILURE", "1", 0);
+
+    auto _possible_rocp_metrics = std::vector<std::string>{};
+    auto _possible_rocprof_libs = std::vector<std::string>{};
     for(const auto* itr : { "OMNITRACE_ROCM_PATH", "ROCM_PATH" })
     {
         if(getenv(itr))
         {
-            setenv("ROCP_METRICS",
-                   common::join('/', getenv(itr), ROCPROFILER_METRICS_DIR, "metrics.xml")
-                       .c_str(),
-                   0);
-            setenv("OMNITRACE_ROCPROFILER_LIBRARY",
-                   common::join('/', getenv(itr), ROCPROFILER_METRICS_DIR,
-                                "librocprofiler64.so")
-                       .c_str(),
-                   0);
-            break;
+            _possible_rocp_metrics.emplace_back(
+                common::join('/', getenv(itr), "lib/rocprofiler", "metrics.xml"));
+            _possible_rocprof_libs.emplace_back(
+                common::join('/', getenv(itr), "lib/rocprofiler", "librocprofiler64.so"));
+            _possible_rocp_metrics.emplace_back(
+                common::join('/', getenv(itr), "rocprofiler/lib", "metrics.xml"));
+            _possible_rocprof_libs.emplace_back(
+                common::join('/', getenv(itr), "rocprofiler/lib", "librocprofiler64.so"));
         }
     }
+
     // default path
+    _possible_rocp_metrics.emplace_back(
+        common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, "lib/rocprofiler", "metrics.xml"));
+    _possible_rocp_metrics.emplace_back(
+        common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, "rocprofiler/lib", "metrics.xml"));
+
+    for(const auto& itr : _possible_rocprof_libs)
+    {
+        if(path::exists(itr))
+        {
+            setenv("OMNITRACE_ROCPROFILER_LIBRARY", itr.c_str(), 0);
+            _possible_rocp_metrics.emplace(
+                _possible_rocp_metrics.begin(),
+                common::join('/', path::dirname(itr),
+                             "../../lib/rocprofiler/metrics.xml"));
+            _possible_rocp_metrics.emplace(
+                _possible_rocp_metrics.begin(),
+                common::join('/', path::dirname(itr), "metrics.xml"));
+        }
+    }
+
+    for(const auto& itr : _possible_rocp_metrics)
+        if(path::exists(itr)) setenv("ROCP_METRICS", itr.c_str(), 0);
+
+    // default if none of above succeeded
     setenv("ROCP_METRICS",
            common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, ROCPROFILER_METRICS_DIR,
                         "metrics.xml")
                .c_str(),
            0);
+
 #endif
 
 #if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0

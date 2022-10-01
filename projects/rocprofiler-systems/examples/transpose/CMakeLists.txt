@@ -54,6 +54,10 @@ else()
     target_compile_options(transpose PRIVATE -W -Wall)
 endif()
 
+if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
+    target_compile_options(transpose PRIVATE -g1)
+endif()
+
 if(TRANSPOSE_USE_MPI)
     target_compile_definitions(transpose PRIVATE USE_MPI)
     target_link_libraries(transpose PRIVATE MPI::MPI_C)

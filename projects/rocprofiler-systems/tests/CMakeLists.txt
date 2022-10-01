@@ -193,7 +193,9 @@ endif()
 # -------------------------------------------------------------------------------------- #
 
 function(OMNITRACE_WRITE_TEST_CONFIG _FILE _ENV)
-    set(_ENV_ONLY "OMNITRACE_(USE_MPIP|DEBUG_SETTINGS|FORCE_ROCPROFILER_INIT)=")
+    set(_ENV_ONLY
+        "OMNITRACE_(USE_MPIP|DEBUG_SETTINGS|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS)="
+        )
     set(_FILE_CONTENTS)
     set(_ENV_CONTENTS)
 
@@ -393,7 +395,8 @@ function(OMNITRACE_ADD_TEST)
             endif()
 
             set(_environ
-                "${TEST_ENVIRONMENT}" "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
+                "OMNITRACE_DEFAULT_MIN_INSTRUCTIONS=64" "${TEST_ENVIRONMENT}"
+                "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
                 "OMNITRACE_OUTPUT_PREFIX=${_prefix}")
 
             set(_timeout ${TEST_REWRITE_TIMEOUT})

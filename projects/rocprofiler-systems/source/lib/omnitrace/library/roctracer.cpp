@@ -872,24 +872,25 @@ hip_activity_callback(const char* begin, const char* end, void*)
             }
         }
 
+        static auto _op_id_names =
+            std::array<const char*, 3>{ "DISPATCH", "COPY", "BARRIER" };
+
         {
             static size_t _n = 0;
-            OMNITRACE_CONDITIONAL_PRINT_F(
-                (get_debug() && get_verbose() >= 2) || _end_ns <= _beg_ns,
-                "%4zu :: %-20s :: %-20s :: cid=%lu, time_ns=(%12lu:%12lu) "
-                "delta=%li, device_id=%d, stream_id=%lu, pid=%u, tid=%lu\n",
+            OMNITRACE_WARNING_IF_F(
+                _end_ns <= _beg_ns,
+                "%4zu :: Discarding kernel roctracer activity record which ended before "
+                "it started :: %-20s :: %-20s :: cid=%lu, time_ns=(%12lu:%12lu) "
+                "delta=%li, device=%d, queue=%lu, pid=%u, tid=%lu, op=%s\n",
                 _n++, op_name, _name, record->correlation_id, _beg_ns, _end_ns,
                 (static_cast<int64_t>(_end_ns) - static_cast<int64_t>(_beg_ns)), _devid,
-                _queid, record->process_id, _tid);
+                _queid, record->process_id, _tid, _op_id_names.at(record->op));
             if(_end_ns <= _beg_ns) continue;
         }
 
         // execute this on this thread bc of how perfetto visualization works
         if(get_use_perfetto())
         {
-            static auto _op_id_names =
-                std::array<const char*, 3>{ "DISPATCH", "COPY", "BARRIER" };
-
             if(_kernel_names.find(_name) == _kernel_names.end())
                 _kernel_names.emplace(_name, tim::demangle(_name));
 
@@ -897,8 +898,8 @@ hip_activity_callback(const char* begin, const char* end, void*)
             tracing::push_perfetto_ts(
                 category::device_hip{}, _kernel_names.at(_name).c_str(), _beg_ns,
                 perfetto::Flow::ProcessScoped(_cid), "begin_ns", _beg_ns, "corr_id",
-                record->correlation_id, "device", _devid, "queue", _queid, "op",
-                _op_id_names.at(record->op));
+                record->correlation_id, "device", _devid, "queue", _queid, "pid",
+                record->process_id, "tid", _tid, "op", _op_id_names.at(record->op));
             tracing::pop_perfetto_ts(category::device_hip{}, "", _end_ns, "end_ns",
                                      _end_ns);
             // for some reason, this is necessary to make sure very last one ends
