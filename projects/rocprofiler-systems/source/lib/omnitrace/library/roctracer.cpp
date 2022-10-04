@@ -42,9 +42,12 @@
 #define HIP_PROF_HIP_API_STRING 1
 
 #include <roctracer_ext.h>
-#include <roctracer_hcc.h>
 #include <roctracer_hip.h>
 #include <roctracer_roctx.h>
+
+#if OMNITRACE_HIP_VERSION < 50300
+#    include <roctracer_hcc.h>
+#endif
 
 #define AMD_INTERNAL_BUILD 1
 #include <roctracer_hsa.h>
@@ -59,7 +62,6 @@
 TIMEMORY_DEFINE_API(roctracer)
 namespace omnitrace
 {
-namespace api = tim::api;
 namespace
 {
 std::string
@@ -180,7 +182,7 @@ get_clock_skew()
         static auto _gpu_now = []() {
             cpu::fence();
             uint64_t _ts = 0;
-            ROCTRACER_CALL(roctracer_get_timestamp(&_ts));
+            OMNITRACE_ROCTRACER_CALL(roctracer_get_timestamp(&_ts));
             return _ts;
         };
 
@@ -400,7 +402,7 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
 void
 hip_exec_activity_callbacks(int64_t _tid)
 {
-    // ROCTRACER_CALL(roctracer_flush_activity());
+    // OMNITRACE_ROCTRACER_CALL(roctracer_flush_activity());
     tim::auto_lock_t _lk{ get_hip_activity_mutex(_tid) };
     auto&            _async_ops = get_hip_activity_callbacks(_tid);
     if(!_async_ops) return;
@@ -804,7 +806,7 @@ hip_activity_callback(const char* begin, const char* end, void*)
         reinterpret_cast<const roctracer_record_t*>(end);
 
     auto&& _advance_record = [&record]() {
-        ROCTRACER_CALL(roctracer_next_record(record, &record));
+        OMNITRACE_ROCTRACER_CALL(roctracer_next_record(record, &record));
     };
 
     while(record < end_record)

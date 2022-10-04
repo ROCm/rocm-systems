@@ -353,7 +353,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
-        ::tim::disable_signal_detection();                                               \
+        ::tim::signals::disable_signal_detection();                                      \
         timemory_print_demangled_backtrace<64>();                                        \
         METHOD;                                                                          \
     }
@@ -368,7 +368,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
-        ::tim::disable_signal_detection();                                               \
+        ::tim::signals::disable_signal_detection();                                      \
         timemory_print_demangled_backtrace<64>();                                        \
         METHOD;                                                                          \
     }
@@ -385,7 +385,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
-        ::tim::disable_signal_detection();                                               \
+        ::tim::signals::disable_signal_detection();                                      \
         timemory_print_demangled_backtrace<64>();                                        \
         METHOD;                                                                          \
     }
@@ -400,7 +400,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
-        ::tim::disable_signal_detection();                                               \
+        ::tim::signals::disable_signal_detection();                                      \
         timemory_print_demangled_backtrace<64>();                                        \
         METHOD;                                                                          \
     }

@@ -49,8 +49,11 @@
 #define HIP_PROF_HIP_API_STRING 1
 
 #include <roctracer_ext.h>
-#include <roctracer_hcc.h>
 #include <roctracer_hip.h>
+
+#if OMNITRACE_HIP_VERSION < 50300
+#    include <roctracer_hcc.h>
+#endif
 
 #define AMD_INTERNAL_BUILD 1
 #include <roctracer_hsa.h>
@@ -186,9 +189,6 @@ extern "C"
                 OMNITRACE_VERBOSE(1 || rocm::on_load_trace,
                                   "[OnLoad] setting up HSA...\n");
 
-                // const char* output_prefix = getenv("ROCP_OUTPUT_DIR");
-                const char* output_prefix = nullptr;
-
                 bool trace_hsa_api = get_trace_hsa_api();
 
                 // Enable HSA API callbacks/activity
@@ -206,9 +206,9 @@ extern "C"
                         {
                             uint32_t    cid = HSA_API_ID_NUMBER;
                             const char* api = itr.c_str();
-                            ROCTRACER_CALL(roctracer_op_code(ACTIVITY_DOMAIN_HSA_API, api,
-                                                             &cid, nullptr));
-                            ROCTRACER_CALL(roctracer_enable_op_callback(
+                            OMNITRACE_ROCTRACER_CALL(roctracer_op_code(
+                                ACTIVITY_DOMAIN_HSA_API, api, &cid, nullptr));
+                            OMNITRACE_ROCTRACER_CALL(roctracer_enable_op_callback(
                                 ACTIVITY_DOMAIN_HSA_API, cid, hsa_api_callback, nullptr));
 
                             OMNITRACE_VERBOSE(1 || rocm::on_load_trace,
@@ -218,7 +218,7 @@ extern "C"
                     else
                     {
                         OMNITRACE_VERBOSE(1 || rocm::on_load_trace, "    HSA-trace()\n");
-                        ROCTRACER_CALL(roctracer_enable_domain_callback(
+                        OMNITRACE_ROCTRACER_CALL(roctracer_enable_domain_callback(
                             ACTIVITY_DOMAIN_HSA_API, hsa_api_callback, nullptr));
                     }
                 }
@@ -227,19 +227,30 @@ extern "C"
                 // Enable HSA GPU activity
                 if(trace_hsa_activity)
                 {
+#if OMNITRACE_HIP_VERSION < 50300
+                    using namespace roctracer;
                     // initialize HSA tracing
-                    ::roctracer::hsa_ops_properties_t ops_properties{
+                    const char*          output_prefix = nullptr;
+                    hsa_ops_properties_t ops_properties{
                         table,
                         reinterpret_cast<activity_async_callback_t>(
                             hsa_activity_callback),
                         nullptr, output_prefix
                     };
+#else
+                    hsa_ops_properties_t ops_properties;
+                    ops_properties.table = table;
+                    ops_properties.reserved1[0] =
+                        reinterpret_cast<void*>(&hsa_activity_callback);
+                    ops_properties.reserved1[1] = nullptr;
+                    ops_properties.reserved1[2] = nullptr;
+#endif
                     roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
 
                     OMNITRACE_VERBOSE(1 || rocm::on_load_trace,
                                       "    HSA-activity-trace()\n");
-                    ROCTRACER_CALL(roctracer_enable_op_activity(ACTIVITY_DOMAIN_HSA_OPS,
-                                                                HSA_OP_ID_COPY));
+                    OMNITRACE_ROCTRACER_CALL(roctracer_enable_op_activity(
+                        ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
                 }
             } catch(std::exception& _e)
             {
@@ -250,16 +261,19 @@ extern "C"
 
         static auto _shutdown = []() {
             OMNITRACE_DEBUG_F("roctracer_disable_domain_callback\n");
-            ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
+            OMNITRACE_ROCTRACER_CALL(
+                roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HSA_API));
 
             OMNITRACE_DEBUG_F("roctracer_disable_op_activity\n");
-            ROCTRACER_CALL(
+            OMNITRACE_ROCTRACER_CALL(
                 roctracer_disable_op_activity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY));
         };
 
+#if OMNITRACE_HIP_VERSION < 50300
         OMNITRACE_VERBOSE_F(1 || rocm::on_load_trace,
                             "Computing the roctracer clock skew...\n");
         (void) omnitrace::get_clock_skew();
+#endif
 
         comp::roctracer::add_setup("hsa", _setup);
         comp::roctracer::add_shutdown("hsa", _shutdown);

@@ -34,7 +34,7 @@
 #include <memory>
 
 // Macro to check ROC-tracer calls status
-#define ROCTRACER_CALL(call)                                                             \
+#define OMNITRACE_ROCTRACER_CALL(call)                                                   \
     {                                                                                    \
         OMNITRACE_DEBUG_F(#call);                                                        \
         int err = call;                                                                  \

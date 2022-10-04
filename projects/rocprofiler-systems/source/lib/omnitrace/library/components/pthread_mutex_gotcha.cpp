@@ -171,7 +171,7 @@ pthread_mutex_gotcha::operator()(uintptr_t&& _id, int (*_callee)(Args...),
 {
     using bundle_t = category_region<category::pthread>;
 
-    if(is_disabled())
+    if(is_disabled() || m_protect)
     {
         if(!_callee)
         {
@@ -225,7 +225,7 @@ int
 pthread_mutex_gotcha::operator()(int (*_callee)(pthread_mutex_t*),
                                  pthread_mutex_t* _mutex) const
 {
-    if(m_protect) return (*_callee)(_mutex);
+    if(get_state() != ::omnitrace::State::Active || m_protect) return (*_callee)(_mutex);
     return (*this)(reinterpret_cast<uintptr_t>(_mutex), _callee, _mutex);
 }
 
@@ -233,7 +233,7 @@ int
 pthread_mutex_gotcha::operator()(int (*_callee)(pthread_spinlock_t*),
                                  pthread_spinlock_t* _lock) const
 {
-    if(m_protect) return (*_callee)(_lock);
+    if(get_state() != ::omnitrace::State::Active || m_protect) return (*_callee)(_lock);
     return (*this)(reinterpret_cast<uintptr_t>(_lock), _callee, _lock);
 }
 
@@ -241,7 +241,7 @@ int
 pthread_mutex_gotcha::operator()(int (*_callee)(pthread_rwlock_t*),
                                  pthread_rwlock_t* _lock) const
 {
-    if(m_protect) return (*_callee)(_lock);
+    if(get_state() != ::omnitrace::State::Active || m_protect) return (*_callee)(_lock);
     return (*this)(reinterpret_cast<uintptr_t>(_lock), _callee, _lock);
 }
 
@@ -249,7 +249,8 @@ int
 pthread_mutex_gotcha::operator()(int (*_callee)(pthread_barrier_t*),
                                  pthread_barrier_t* _barrier) const
 {
-    if(m_protect) return (*_callee)(_barrier);
+    if(get_state() != ::omnitrace::State::Active || m_protect)
+        return (*_callee)(_barrier);
     return (*this)(reinterpret_cast<uintptr_t>(_barrier), _callee, _barrier);
 }
 
@@ -257,7 +258,8 @@ int
 pthread_mutex_gotcha::operator()(int (*_callee)(pthread_t, void**), pthread_t _thr,
                                  void** _tinfo) const
 {
-    if(m_protect) return (*_callee)(_thr, _tinfo);
+    if(get_state() != ::omnitrace::State::Active || m_protect)
+        return (*_callee)(_thr, _tinfo);
     return (*this)(static_cast<uintptr_t>(threading::get_id()), _callee, _thr, _tinfo);
 }
 

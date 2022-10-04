@@ -29,8 +29,8 @@
 #include <timemory/hash.hpp>
 #include <timemory/log/macros.hpp>
 #include <timemory/manager.hpp>
-#include <timemory/sampling/signals.hpp>
 #include <timemory/settings.hpp>
+#include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/console.hpp>
 #include <timemory/utility/demangle.hpp>
 #include <timemory/utility/signals.hpp>
@@ -202,8 +202,8 @@ int
 main(int argc, char** argv)
 {
     {
-        using signal_settings = tim::signal_settings;
-        using sys_signal      = tim::sys_signal;
+        using signal_settings = tim::signals::signal_settings;
+        using sys_signal      = tim::signals::sys_signal;
 
         // default signals to catch
         for(const auto& itr :
@@ -239,7 +239,7 @@ main(int argc, char** argv)
 
         signal_settings::set_exit_action(_exit_action);
         signal_settings::check_environment();
-        tim::enable_signal_detection(signal_settings::get_enabled());
+        tim::signals::enable_signal_detection(signal_settings::get_enabled());
     }
 
     argv0 = argv[0];

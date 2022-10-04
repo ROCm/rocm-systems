@@ -400,7 +400,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     if(_enable_sampling && !_blocked.empty())
     {
         OMNITRACE_DEBUG("blocking signals...\n");
-        tim::sampling::block_signals(_blocked, tim::sampling::sigmask_scope::process);
+        tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
     }
 
     if(_use_bundle)
@@ -425,7 +425,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     if(_enable_sampling && !_blocked.empty())
     {
         OMNITRACE_DEBUG("unblocking signals...\n");
-        tim::sampling::unblock_signals(_blocked, tim::sampling::sigmask_scope::process);
+        tim::signals::unblock_signals(_blocked, tim::signals::sigmask_scope::process);
     }
 
     OMNITRACE_DEBUG("returning success...\n");

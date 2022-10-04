@@ -189,7 +189,7 @@ void
 finalize()
 {
     OMNITRACE_DEBUG("[omnitrace_finalize] Disabling signal handling...\n");
-    tim::disable_signal_detection();
+    tim::signals::disable_signal_detection();
     _settings_are_configured() = false;
 }
 
@@ -930,12 +930,12 @@ configure_signal_handler()
 
     if(_config->get_enable_signal_handler())
     {
-        using signal_settings = tim::signal_settings;
-        using sys_signal      = tim::sys_signal;
-        tim::disable_signal_detection();
+        using signal_settings = tim::signals::signal_settings;
+        using sys_signal      = tim::signals::sys_signal;
+        tim::signals::disable_signal_detection();
         auto _exit_action = [](int nsig) {
-            tim::sampling::block_signals(get_sampling_signals(),
-                                         tim::sampling::sigmask_scope::process);
+            tim::signals::block_signals(get_sampling_signals(),
+                                        tim::signals::sigmask_scope::process);
             OMNITRACE_BASIC_PRINT(
                 "Finalizing afer signal %i :: %s\n", nsig,
                 signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
@@ -950,29 +950,27 @@ configure_signal_handler()
         if(_ignore_dyninst_trampoline)
             signal_settings::disable(static_cast<sys_signal>(_dyninst_trampoline_signal));
         auto enabled_signals = signal_settings::get_enabled();
-        tim::enable_signal_detection(enabled_signals);
+        tim::signals::enable_signal_detection(enabled_signals);
     }
 
     if(_ignore_dyninst_trampoline)
     {
-        using signal_handler_t                      = void (*)(int);
-        static signal_handler_t _old_handler        = nullptr;
-        static auto             _trampoline_handler = [](int _v) {
-            if(_v == _dyninst_trampoline_signal)
+        using signal_handler_t          = void (*)(int);
+        static auto _trampoline_handler = [](int _v) {
+            if(get_verbose_env() >= 2)
             {
-                auto _info =
-                    ::tim::signal_settings::get_info(static_cast<tim::sys_signal>(_v));
-                OMNITRACE_VERBOSE(
-                    2,
-                    "signal %s (%i) ignored (OMNITRACE_IGNORE_DYNINST_TRAMPOLINE=ON)\n",
-                    std::get<0>(_info).c_str(), _v);
-                if(get_verbose_env() > 1 || get_debug_env())
-                    timemory_print_demangled_backtrace<64>();
-                if(_old_handler) _old_handler(_v);
+                ::omnitrace::debug::flush();
+                ::omnitrace::debug::lock _debug_lk{};
+                OMNITRACE_FPRINTF_STDERR_COLOR(warning);
+                fprintf(::omnitrace::debug::get_file(),
+                        "signal %i ignored (OMNITRACE_IGNORE_DYNINST_TRAMPOLINE=ON)\n",
+                        _v);
+                ::omnitrace::debug::flush();
+                timemory_print_demangled_backtrace<64>();
             }
         };
-        _old_handler = signal(_dyninst_trampoline_signal,
-                              static_cast<signal_handler_t>(_trampoline_handler));
+        ::signal(_dyninst_trampoline_signal,
+                 static_cast<signal_handler_t>(_trampoline_handler));
     }
 }
 

@@ -126,13 +126,7 @@ ompt_start_tool(unsigned int omp_version, const char* runtime_version)
         return 1;  // success
     };
 
-    static auto ompt_finalize = [](ompt_data_t* tool_data) {
-        if(_use_ompt)
-        {
-            TIMEMORY_PRINTF(stderr, "OpenMP-tools finalized\n\n");
-            tim::consume_parameters(tool_data);
-        }
-    };
+    static auto ompt_finalize = [](ompt_data_t*) {};
 
     static auto data = ompt_start_tool_result_t{ ompt_initialize, ompt_finalize, { 0 } };
     return (ompt_start_tool_result_t*) &data;

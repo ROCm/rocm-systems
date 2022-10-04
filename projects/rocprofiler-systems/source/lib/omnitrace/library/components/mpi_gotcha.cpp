@@ -32,7 +32,7 @@
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/mpl/types.hpp>
-#include <timemory/sampling/signals.hpp>
+#include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/locking.hpp>
 
 #include <cstdint>
@@ -114,7 +114,7 @@ omnitrace_mpi_set_attr()
         OMNITRACE_DEBUG("MPI Comm attribute finalize\n");
         auto _blocked = get_sampling_signals();
         if(!_blocked.empty())
-            tim::sampling::block_signals(_blocked, tim::sampling::sigmask_scope::process);
+            tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
         if(mpip_index != std::numeric_limits<uint64_t>::max())
             comp::deactivate_mpip<mpip_bundle_t, project::omnitrace>(mpip_index);
         omnitrace_finalize_hidden();
@@ -249,7 +249,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
 
     auto _blocked = get_sampling_signals();
     if(!_blocked.empty())
-        tim::sampling::block_signals(_blocked, tim::sampling::sigmask_scope::process);
+        tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
 
     if(mpip_index != std::numeric_limits<uint64_t>::max())
         comp::deactivate_mpip<mpip_bundle_t, project::omnitrace>(mpip_index);

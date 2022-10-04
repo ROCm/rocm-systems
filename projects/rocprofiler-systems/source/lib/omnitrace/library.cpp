@@ -54,7 +54,7 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/manager/manager.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
-#include <timemory/sampling/signals.hpp>
+#include <timemory/signals/signal_mask.hpp>
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/procfs/maps.hpp>
@@ -585,8 +585,8 @@ omnitrace_finalize_hidden(void)
 
     thread_info::set_stop(comp::wall_clock::record());
 
-    tim::sampling::block_signals(get_sampling_signals(),
-                                 tim::sampling::sigmask_scope::process);
+    tim::signals::block_signals(get_sampling_signals(),
+                                tim::signals::sigmask_scope::process);
 
     // some functions called during finalization may alter the push/pop count so we need
     // to save them here

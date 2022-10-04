@@ -137,8 +137,8 @@ get_signal_names(Tp&& _v)
 {
     std::string _sig_names{};
     for(auto&& itr : _v)
-        _sig_names += std::get<0>(tim::signal_settings::get_info(
-                          static_cast<tim::sys_signal>(itr))) +
+        _sig_names += std::get<0>(tim::signals::signal_settings::get_info(
+                          static_cast<tim::signals::sys_signal>(itr))) +
                       " ";
     return (_sig_names.empty()) ? _sig_names
                                 : _sig_names.substr(0, _sig_names.length() - 1);
