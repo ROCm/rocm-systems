@@ -18,6 +18,65 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+# WARN: This is a standalone CMake project! Do not include as a subdirectory!
+
+# This project is meant to demo RDC library
+# See README.md for more information
+
+#
+# Minimum version of cmake required
+#
+cmake_minimum_required(VERSION 3.15)
+
+option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" ON)
+option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and autocompleters" ON)
+
+# Compiler flags
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2 -std=c++11 -pthread")
+
+if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
+else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
+endif()
+
+set(CMAKE_CXX_STANDARD 11 CACHE STRING "The C++ standard to use")
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(CMAKE_COMPILER_IS_GNUCC AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5.4.0)
+    message("Compiler version is " ${CMAKE_CXX_COMPILER_VERSION})
+    message(FATAL_ERROR "Require at least gcc-5.4.0")
+endif()
+
+project(RDC_example)
+
+# provides cmake_print_variables(VAR)
+include(CMakePrintHelpers)
+
+# required variables
+if(DEFINED ENV{ROCM_PATH})
+    set(ROCM_DIR "$ENV{ROCM_PATH}" CACHE STRING "ROCm directory.")
+else()
+    set(ROCM_DIR "/opt/rocm" CACHE STRING "ROCm directory.")
+endif()
+
+# add package search paths
+set(CMAKE_PREFIX_PATH
+    ${CMAKE_PREFIX_PATH}
+    ${ROCM_DIR}
+    )
+set(CMAKE_LIBRARY_PATH
+    ${CMAKE_LIBRARY_PATH}
+    ${ROCM_DIR}/lib
+    ${ROCM_DIR}/lib64
+    )
+
+# RDC provides librdc_bootstrap
+find_package(rdc
+    CONFIG REQUIRED)
+
+
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                             Cmake Example                                 ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
@@ -27,62 +86,26 @@ message("Build Configuration:")
 message("-----------BuildType: " ${CMAKE_BUILD_TYPE})
 message("------------Compiler: " ${CMAKE_CXX_COMPILER})
 message("-------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
-message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
-message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
-message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
-message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-message("--------RSMI Lib Dir: " ${RSMI_LIB_DIR})
-message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
+message("------------ROCM_DIR: " ${ROCM_DIR})
 message("")
 
-## Compiler flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2 -std=c++11 -pthread ")
-# Use this instead of above for 32 bit
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
-
-if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
-else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
-endif()
-
-set(SRC_DIR "${PROJECT_SOURCE_DIR}/example")
-set(INC_DIR "${PROJECT_SOURCE_DIR}/include")
-set(LIB_BOOSTRAP_DIR "${PROJECT_BINARY_DIR}/rdc_libs")
-
-include_directories(${INC_DIR})
-
-set(JOBSTATS_EXAMPLE_SRC_LIST "${SRC_DIR}/job_stats_example.cc")
-message("JOBSTATS_EXAMPLE_SRC_LIST=${JOBSTATS_EXAMPLE_SRC_LIST}")
+set(JOBSTATS_EXAMPLE_SRC_LIST "job_stats_example.cc")
+cmake_print_variables(JOBSTATS_EXAMPLE_SRC_LIST)
 set(JOBSTATS_EXAMPLE_EXE "jobstats")
-
-link_directories(${LIB_BOOSTRAP_DIR})
-
 add_executable(${JOBSTATS_EXAMPLE_EXE} "${JOBSTATS_EXAMPLE_SRC_LIST}")
-
 target_link_libraries(${JOBSTATS_EXAMPLE_EXE} pthread dl rdc_bootstrap)
 
-set(FIELDVALUE_EXAMPLE_SRC_LIST "${SRC_DIR}/field_value_example.cc")
-message("FIELDVALUE_EXAMPLE_SRC_LIST=${FIELDVALUE_EXAMPLE_SRC_LIST}")
+set(FIELDVALUE_EXAMPLE_SRC_LIST "field_value_example.cc")
+cmake_print_variables(FIELDVALUE_EXAMPLE_SRC_LIST)
 set(FIELDVALUE_EXAMPLE_EXE "fieldvalue")
-
-link_directories(${LIB_BOOSTRAP_DIR})
-
 add_executable(${FIELDVALUE_EXAMPLE_EXE} "${FIELDVALUE_EXAMPLE_SRC_LIST}")
-
 target_link_libraries(${FIELDVALUE_EXAMPLE_EXE} pthread dl rdc_bootstrap)
 
-set(DIAGNOSTIC_EXAMPLE_SRC_LIST "${SRC_DIR}/diagnostic_example.cc")
-message("DIAGNOSTIC_EXAMPLE_SRC_LIST=${DIAGNOSTIC_EXAMPLE_SRC_LIST}")
+set(DIAGNOSTIC_EXAMPLE_SRC_LIST "diagnostic_example.cc")
+cmake_print_variables(DIAGNOSTIC_EXAMPLE_SRC_LIST)
 set(DIAGNOSTIC_EXAMPLE_EXE "diagnostic")
-
-link_directories(${LIB_BOOSTRAP_DIR})
-
 add_executable(${DIAGNOSTIC_EXAMPLE_EXE} "${DIAGNOSTIC_EXAMPLE_SRC_LIST}")
-
 target_link_libraries(${DIAGNOSTIC_EXAMPLE_EXE} pthread dl rdc_bootstrap)
-
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Example                          ")

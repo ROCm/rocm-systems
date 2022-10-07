@@ -34,7 +34,6 @@ message("----------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("----------RSMI Lib Dir: " ${RSMI_LIB_DIR})
 message("----------RSMI Inc Dir: " ${RSMI_INC_DIR})
 message("---------GRPC Root Dir: " ${GRPC_ROOT})
-message("---Server Install Path: " ${RDC_ROOT_PATH})
 message("")
 
 ## Compiler flags
@@ -99,10 +98,10 @@ target_link_libraries(${SERVER_DAEMON_EXE} pthread rt gRPC::grpc++
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${SERVER_DAEMON_EXE}
     PERMISSIONS OWNER_EXECUTE OWNER_READ OWNER_WRITE GROUP_READ
     GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-    DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT ${SERVER_COMPONENT})
 install(FILES ${PROJECT_BINARY_DIR}/${SERVICE_FILE_NAME}
-    DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
     COMPONENT ${SERVER_COMPONENT})
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

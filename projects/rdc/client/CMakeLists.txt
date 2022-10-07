@@ -49,7 +49,6 @@ message("----------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("----------RSMI Lib Dir: " ${RSMI_LIB_DIR})
 message("----------RSMI Inc Dir: " ${RSMI_INC_DIR})
 message("---------GRPC Root Dir: " ${GRPC_ROOT})
-message("-Client Install Prefix: " ${RDC_INSTALL_PREFIX})
 message("")
 
 ## Include common cmake modules
@@ -116,10 +115,10 @@ endif()
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${CLIENT_LIB}
-    LIBRARY DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/authentication
-    DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 
 # Generate Doxygen documentation for client api manual
@@ -147,10 +146,10 @@ if(DOXYGEN_FOUND AND LATEX_FOUND)
 
     add_dependencies(${CLIENT_LIB} docs)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
-        DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_DOCDIR}
+        DESTINATION ${CMAKE_INSTALL_DOCDIR}
         COMPONENT ${CLIENT_COMPONENT} RENAME ${RDC_MANUAL_NAME}.pdf)
     install(FILES ${PROJECT_SOURCE_DIR}/README.md
-        DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_DOCDIR}
+        DESTINATION ${CMAKE_INSTALL_DOCDIR}
         COMPONENT ${CLIENT_COMPONENT})
 else()
     message("Doxygen or Latex is not found. Will not generate documents.")
